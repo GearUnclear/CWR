@@ -40,9 +40,12 @@ const char* RemasterFragmentPiece(FragmentPiece piece);
 
 // The pieces kept in files of their own (read them through RemasterFragmentPiece).
 // The LitConstants block and the terrain and clouds piece are named here too:
-// the post air pass pastes them, and the reflections' trace pastes the block,
-// the sky piece and the puddles piece (kPostShaders).
+// the post air and fog passes paste them, and the reflections' trace pastes the
+// block, the sky piece and the puddles piece (kPostShaders).
 extern const char kLitConstantsBlockGLSL[];
+// The photoreal camera's frame encoding (camFold, camDecode; photoLight), which
+// the post passes that read or write the frame's colour paste.
+extern const char kCameraCodecGLSL[];
 extern const char kRemasterTerrainCloudsGLSL[];
 extern const char kRemasterSkyGLSL[];
 extern const char kRemasterPuddlesGLSL[];
@@ -80,6 +83,27 @@ extern const char kPostSsrCompositeMainGLSL[];
 // through PostShaderSource).
 extern const char kPostCombatMaskGLSL[];
 extern const char kPostCombatMaskBlurGLSL[];
+// The surfaces lane's horizon occlusion (EngineGL33_PostSurfaceShaders.cpp;
+// read it through PostShaderSource).
+extern const char kPostGtaoInputsGLSL[];
+extern const char kPostGtaoMainGLSL[];
+extern const char kPostGtaoAccumGLSL[];
+// The volumetric fog (the Air stage, EngineGL33_PostFogShaders.cpp; read them
+// through PostShaderSource).
+extern const char kPostFogInjectHeadGLSL[];
+extern const char kPostFogSharedInputsGLSL[];
+extern const char kPostFogSkyInputsGLSL[];
+extern const char kPostFogMediumGLSL[];
+extern const char kPostFogInjectMainGLSL[];
+extern const char kPostFogIntegrateGLSL[];
+extern const char kPostFogNearHeadGLSL[];
+extern const char kPostFogNearMainGLSL[];
+extern const char kPostFogRingGLSL[];
+extern const char kPostFogRingMainGLSL[];
+extern const char kPostFogApplyGLSL[];
+extern const char kPostFogApplyMainGLSL[];
+extern const char kPostFogGlowGLSL[];
+extern const char kPostFogGlowMainGLSL[];
 
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout below. Every shader that reads the rig pastes this string instead of
@@ -126,6 +150,24 @@ enum class PostShader : int
     // the world, from the previous frame's linear depth (EngineGL33_PostCombat.cpp).
     CombatMask,     // the trace toward each shadowed combat light, half resolution
     CombatMaskBlur, // its depth-aware blur, one axis per pass
+    // The horizon-based ambient occlusion of the surfaces lane (the Ao stage
+    // with the switch on; EngineGL33_PostSurfaceShaders.cpp).
+    Gtao,
+    GtaoAccum, // its occlusion accumulated over TAA frames, reprojected by depth
+    // The photoreal camera's meter (photoLight): the resolved frame's log
+    // luminance in kMeterWidth x kMeterHeight texels, read back by the CPU
+    // (EngineGL33_Camera.cpp); run inside the Composite stage.
+    Meter,
+    // The volumetric fog (the Air stage, EngineGL33_PostFog.cpp): the froxel
+    // volume's lighting, eight slices per draw; its front-to-back integration;
+    // the half-resolution near field (the sun's beams, the lamps' light in the
+    // air); and the full-resolution apply by each pixel's depth.
+    FogInject,
+    FogIntegrate,
+    FogNear,
+    FogApply,
+    FogRing, // the horizon ring: the sky's colour above the land in every azimuth
+    FogGlow, // the night glow: the frame's light blurred, laid into the fog at night
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -156,9 +198,10 @@ constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI
 // The sea animation frame the water program cross-fades into (the sea,
 // EngineGL33_Sea.cpp); a white stand-in outside the sea's draws.
 constexpr int kSeaNextFrameUnit = 11;
-// The canopy heightfield (B9, EngineGL33_Canopy.cpp): sampled only by the
-// pass that builds the sun-visibility map, never by a world program; holds a
-// stand-in until the first canopy is uploaded.
+// The canopy heightfield (B9, EngineGL33_Canopy.cpp): sampled by the pass
+// that builds the sun-visibility map and, for the sky it hides (the look lane
+// "surface"), by the world programs; holds a stand-in until the first canopy
+// is uploaded.
 constexpr int kCanopyUnit = 10;
 // The canopy's sun-visibility map (B9): a world-space map around the camera
 // the world programs read beyond the shadow maps; a stand-in (all lit) until
@@ -172,6 +215,14 @@ constexpr int kCombatMaskUnit = 14;
 // kLightDataUnit is free: the light list keeps its lights in a uniform block
 // (kLightListBinding), which the fragments of a tile read faster.
 constexpr int kLightDataUnit = 12;
+// The volumetric fog's floor map (the lowest ground nearby, look-fog) takes the
+// free light-data unit: only the fog's injection pass samples it, and binds it
+// itself (no world program declares it).
+constexpr int kFogFloorUnit = kLightDataUnit;
+// The volumetric fog's horizon ring (EngineGL33_PostFog.cpp), read by its
+// injection in the post pass on the light list's tile unit, which the world
+// binds again at each frame's lighting upload (BindLightingTextures).
+constexpr int kFogRingUnit = kLightTileUnit;
 
 namespace detail
 {
@@ -244,6 +295,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)
     {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
     {"combatMask", kCombatMaskUnit},         // the combat shadow mask (combat light)
+    {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surface lane)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -329,14 +381,38 @@ enum : int
     // off), yz the sun-visibility map's origin (m), w 1 / its extent (1/m).
     Canopy = 76,
     Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
-    // Aerial haze (B8, Graphics/Remaster/AirMedium.hpp): x the classic fog
+    // Aerial haze (B8, Graphics/Remaster/AirMedium.hpp) or the volumetric fog
+    // (look-fog, Graphics/Remaster/VolumetricFog.hpp): x the classic fog
     // factor's scale minus 1 (0 = the classic fog: the zero the block starts
     // with leaves every fragment as before), yzw free.
     Haze = 78,
-    Count = 79,
+    // Surfaces and ambient light (the look lane "surface", SurfaceLight.hpp):
+    // x on (the switch and its gate), y specular strength, z canopy occlusion
+    // strength, w the spherical-harmonics sky light's weight.
+    Surface = 79,
+    // The canopy heightfield on unit 10 as the world programs read it: x its
+    // height base (m), y its height range (m), z 1 / its extent (1/m), w 1 when
+    // a canopy is uploaded.
+    SurfaceCanopy = 80,
+    Surface2 = 81,  // surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
+    SurfaceSh = 82, // kSkyShCoeffs vec4: the sky light's irradiance coefficients (rgb), the sun frame
+    Surface3 = 88,  // surfaces: x cavity strength
+    // The photoreal camera (look lane "light", photoLight; Graphics/Remaster/
+    // PhotoCamera.hpp): x 1 = the world's passes write scene light for the
+    // camera (camEncode), y the additive pre-lit draws' code scale, z the
+    // clear sky's scale (LightRig::skyScale), w the frame's pre-exposure.
+    Camera = 89,
+    // The camera's look of the world (photoLight; zero while it is off): x the
+    // weather's veil (0 clear .. 1 a grey sky over broken cloud), y a street
+    // lamp's classic ambient kept (kCameraLampAmbient), z a street lamp's
+    // intensity gain (kCameraLampGain), w how far a low sun turns the upper
+    // sky toward the zenith's blue.
+    CameraLook = 90,
+    Count = 91,
 };
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
+constexpr int SurfaceShCount = 6;
 static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
 static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
 static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
@@ -352,7 +428,13 @@ static_assert(Water0 == Weather + 1 && Water1 == Water0 + 1, "LitConst water slo
 static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
 static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
 static_assert(Haze == Detail + 1, "LitConst haze slot follows the terrain detail");
-static_assert(Count == Haze + 1, "LitConst size out of sync");
+static_assert(Surface == Haze + 1, "the surface slots follow the haze");
+static_assert(SurfaceCanopy == Surface + 1 && Surface2 == SurfaceCanopy + 1 && SurfaceSh == Surface2 + 1,
+              "LitConst surface slots out of order");
+static_assert(Surface3 == SurfaceSh + SurfaceShCount, "LitConst surface slots out of order");
+static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots");
+static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
+static_assert(Count == CameraLook + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to the features still to land (INTEGRATION-PLAN.md
@@ -365,7 +447,8 @@ static_assert(Count == Haze + 1, "LitConst size out of sync");
 // and B1 the sun shadow slots 59 and 60; B10 the clouds slots 68 and 69 (Sky,
 // SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
 // 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 is the
-// padding member litPlanned; B8 landed the haze at 78.
+// padding member litPlanned; B8 landed the haze at 78, the surface lane's slots follow it
+// (79 to 88) and the photoreal camera (look lane "light") takes 89 and 90.
 namespace LitConstPlanned
 {
 // 58: the wet weather's material class landed (LitConst::MatClass, B7).
@@ -382,9 +465,10 @@ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
 constexpr int End = 79; // one past the last planned slot
 static_assert(CombatShadow == LitConst::Planned && LitConst::PlannedCount == 1,
               "the planned slot between the night and the weather is the planned padding");
-static_assert(End == LitConst::Count, "every planned slot above the padding has landed");
+static_assert(End == LitConst::Haze + 1, "every planned slot above the padding has landed");
 // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
-static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+static_assert(End * 16 <= 16384 && LitConst::Count * 16 <= 16384,
+              "LitConstants stays within the GL minimum uniform block size");
 } // namespace LitConstPlanned
 
 } // namespace Poseidon::gl33lighting

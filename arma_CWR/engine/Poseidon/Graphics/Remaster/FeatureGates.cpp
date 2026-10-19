@@ -259,6 +259,40 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
                 return Off("sky density map building");
             return On("cloud cover");
 
+        case Feature::Surfaces:
+            // The sky light, canopy occlusion and specular are terms of every
+            // lit fragment; the horizon occlusion is the post pass's ao stage,
+            // which itself holds off where the world depth is gone (a vehicle
+            // interior) or an optics overlay covers the frame. Once the sky has
+            // gone dark (the sky table's night fade) only lamps leave it
+            // something to ground: without them it holds off.
+            if (in.sunElevationDeg < kGateSkyTableMinSunDeg && !LampsLit(in))
+                return Off("night without lamps");
+            return On("every lit surface");
+        case Feature::PhotoLight:
+            // The camera is a post stage (the composite): no post pass, no
+            // camera, and the world keeps its own tonemap. The debug views show
+            // raw buffers, which the camera would grade.
+            if (!t.postEffects)
+                return Off("post effects off");
+            if (t.debugView != 0)
+                return Off("debug view");
+            return On("world drawn");
+        case Feature::VolFog:
+            // The fog is applied in the post pass (the Air stage) with the
+            // world depth: no post pass or no depth (a vehicle interior), and
+            // the forward fog keeps its classic edge. Otherwise it always
+            // runs: it replaces the distance fog. A gunner's optic overlay
+            // keeps it (the apply leaves the overlay's black mask alone), so
+            // raising a sight in mist does not clear the air.
+            if (!t.postEffects)
+                return Off("post effects off");
+            if (!in.worldDrawn)
+                return Off("no world pass");
+            if (in.interior)
+                return Off("vehicle interior");
+            return On("world drawn (replaces the distance fog)");
+
         case Feature::Sharpen:
             // One sharpen pass: TAA's own when it runs, this one otherwise.
             if (FeatureOn(t.features, Feature::Taa) && WorldVisible(in, why))
@@ -310,6 +344,11 @@ FeatureGates ComputeFeatureGates(const GateInputs& in, const LightingTuning& tun
         else
             out = Condition(f, in, tuning);
     }
+    // The volumetric fog supersedes B8's air pass on the same stage: while it
+    // runs, the beams, the haze and the valley mist are its own.
+    if (g.gate[static_cast<int>(Feature::VolFog)].on)
+        for (Feature f : {Feature::AirBeams, Feature::AirHaze, Feature::ValleyMist})
+            g.gate[static_cast<int>(f)] = Off("volFog runs in its place", FeatureScale(f));
     return g;
 }
 
@@ -347,6 +386,21 @@ std::string FeatureStateString(const LightingTuning& tuning, const FeatureGates&
         out += Slug(gt.reason);
         if (!info.landed)
             out += ":inert";
+    }
+    const CameraReadout& c = gates.camera;
+    if (c.valid)
+    {
+        char cam[320];
+        std::snprintf(cam, sizeof(cam),
+                      " | cam ev=%.2f target=%.2f pre=%.2f mean=%.2f high=%.2f wb=%.2f sky=%.3f sun=%.3f skyup=%.3f "
+                      "reads=%u cpu=%.3f/%.3f skip=%u",
+                      static_cast<double>(c.exposureLog2), static_cast<double>(c.targetLog2),
+                      static_cast<double>(c.preExposureLog2), static_cast<double>(c.meterMean),
+                      static_cast<double>(c.meterHighlight), static_cast<double>(c.whiteBalance),
+                      static_cast<double>(c.skyScale), static_cast<double>(c.sunLum), static_cast<double>(c.skyUpLum),
+                      c.readbacks, static_cast<double>(c.cpuCollectMs), static_cast<double>(c.cpuQueueMs),
+                      c.skippedMeters);
+        out += cam;
     }
     return out;
 }

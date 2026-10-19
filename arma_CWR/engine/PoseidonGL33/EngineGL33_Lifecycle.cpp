@@ -189,6 +189,10 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     _worldSceneEnded = false;
     _worldDepthCleared = false;
     _worldOverlayDrawn = false;
+    // The surfaces lane: a world pass that never reached EndWorldScene must not
+    // leave the frame target drawing two buffers.
+    EndSurfaceTarget();
+    _surfFrameWritten = false;
     UpdateRemasterPrograms();
     // No TAA jitter or LOD bias until this frame's world pass asks for them
     // (EndWorldScene takes them off too; a frame that never reached it must

@@ -59,6 +59,10 @@ TEST_CASE("Spec-bit boundary: typed spec reads in the backend match the whitelis
         // decision, upstream of the descriptor. SelectTerrainDetailLayer reads
         // the same stage to tell the land from the sea (terrain detail, B11).
         {"EngineGL33_State.cpp", {"Backend::DetailTexture", "Backend::SpecularTexture", "Backend::GrassTexture"}},
+        // The photoreal camera dims a light's flare (an IsLight decal drawn
+        // without the depth test, Scene::DrawFlare) in DrawDecal, before the
+        // decal's quad is queued (look lane "light").
+        {"EngineGL33_DrawShared.cpp", {"Backend::IsLight", "Backend::NoZBuf"}},
     };
 
     const std::regex tokenRe("\\b(Routing|Material|Backend)::([A-Za-z]+)\\b");

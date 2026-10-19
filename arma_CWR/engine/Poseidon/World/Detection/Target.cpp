@@ -12,6 +12,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
+#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -632,6 +633,17 @@ float EntityAI::CalcVisibility(EntityAI* ai, float dist2, float* audibility, boo
             vis = 0;
         }
         vis = 1 - GLOB_SCENE->TacticalFog8(dist2) * (1.0f / 255);
+        // The volumetric fog's valley mist and humid ground air (volFog), which
+        // the classic tactical fog does not hold: the AI sees through the air
+        // the player sees (1 while the fog is off).
+        if (Poseidon::remaster::FogSightActive())
+        {
+            const Vector3 eye = CameraPosition();
+            const Vector3 aim = ai->AimingPosition();
+            const float from[3] = {eye.X(), eye.Y(), eye.Z()};
+            const float to[3] = {aim.X(), aim.Y(), aim.Z()};
+            vis *= Poseidon::remaster::FogSightTransmittance(from, to);
+        }
     }
     else
     {

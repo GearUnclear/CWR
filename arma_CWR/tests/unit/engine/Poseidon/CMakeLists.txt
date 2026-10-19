@@ -176,11 +176,14 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_sea_waves.cpp
     Graphics/test_sky_density.cpp
     Graphics/test_canopy.cpp
+    Graphics/test_volumetric_fog.cpp
     Graphics/test_air_medium.cpp
     Graphics/test_night_lights.cpp
     Graphics/test_screen_reflections.cpp
     Graphics/test_wet_weather.cpp
     Graphics/test_combat_lights.cpp
+    Graphics/test_surface_light.cpp
+    Graphics/test_photo_camera.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp

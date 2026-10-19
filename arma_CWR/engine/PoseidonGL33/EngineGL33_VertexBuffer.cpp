@@ -363,7 +363,12 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
     if (clearZ)
     {
         if (_worldPassOpen)
+        {
             _worldDepthCleared = true; // the post pass has no world depth this frame
+            // A vehicle interior follows: no sky above it to take light from
+            // or reflect (the surfaces lane).
+            SurfaceEnterInterior();
+        }
         mask |= GL_DEPTH_BUFFER_BIT;
         if (_hasStencilBuffer)
         {
@@ -435,6 +440,8 @@ void EngineGL33::DestroySSAATarget()
         glDeleteRenderbuffers(1, &_ssaaDepthRb);
     if (_ssaaResolveRb)
         glDeleteRenderbuffers(1, &_ssaaResolveRb);
+    // The surfaces lane's target was attachment 1 of the frame target.
+    DestroySurfaceTarget();
     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
     _ssaaW = _ssaaH = 0;
 }

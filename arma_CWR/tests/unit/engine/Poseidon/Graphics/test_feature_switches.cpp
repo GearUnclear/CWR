@@ -64,7 +64,18 @@ GateInputs Night()
     return in;
 }
 
-const Gate& G(const GateInputs& in, Feature f, const LightingTuning& t = LightingTuning{})
+// The shipped tuning with the volumetric fog off: the gate rows below are each
+// feature's own condition, and the fog (on by default) supersedes B8's air
+// pass (airBeams, airHaze, valleyMist), whose gates it turns off while it runs
+// (test_volumetric_fog.cpp checks that hand-over).
+LightingTuning NoVolFog()
+{
+    LightingTuning t{};
+    t.features.volFog = 0.0f;
+    return t;
+}
+
+const Gate& G(const GateInputs& in, Feature f, const LightingTuning& t = NoVolFog())
 {
     static FeatureGates last;
     last = ComputeFeatureGates(in, t);
@@ -113,7 +124,10 @@ TEST_CASE("Feature switches: each switch reads and writes its own FeatureSet mem
     CHECK(set.drawGrouping == 2.0f);
     CHECK(set.taa == 4.0f);
     CHECK(set.combatLights == 14.0f);
-    CHECK(set.sharpen == static_cast<float>(kFeatureCount + 1));
+    CHECK(set.sharpen == static_cast<float>(static_cast<int>(Feature::Sharpen) + 2));
+    CHECK(set.surfaces == static_cast<float>(static_cast<int>(Feature::Surfaces) + 2));
+    CHECK(set.photoLight == static_cast<float>(static_cast<int>(Feature::PhotoLight) + 2));
+    CHECK(set.volFog == static_cast<float>(kFeatureCount + 1));
 }
 
 TEST_CASE("Feature switches: the table holds every knob once, with a usable range", "[remaster][FeatureSwitches]")
@@ -316,8 +330,10 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
     // texsharp's two (B11), the sun shadows' three (B1, below), the sea's three
     // (B5), the beams' contrast (B8, below), the night's lamp and headlight
     // strengths (B3, test_night_lights.cpp), the reflections' two (B6), the
-    // wet weather's two (B7, test_wet_weather.cpp) and combat light's four (B4,
-    // test_combat_lights.cpp).
+    // wet weather's two (B7, test_wet_weather.cpp), combat light's four (B4,
+    // test_combat_lights.cpp), the surfaces lane's, the photoreal camera's
+    // (look lane "light", test_photo_camera.cpp) and the volumetric fog's five
+    // (look-fog).
     int children = 0;
     int taaChildren = 0;
     for (int i = 0; i < LightingKeyCount(); ++i)
@@ -329,7 +345,8 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         const std::string_view parent(k.parent);
         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
                parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" || parent == "airBeams" ||
-               parent == "nightLights" || parent == "ssr" || parent == "wetWeather" || parent == "combatLights"));
+               parent == "nightLights" || parent == "ssr" || parent == "wetWeather" || parent == "combatLights" ||
+               parent == "surfaces" || parent == "photoLight" || parent == "volFog"));
         REQUIRE(FindFeature(k.parent) != nullptr);
         CHECK(FindFeature(k.parent)->landed);
         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
@@ -337,7 +354,9 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         ++children;
     }
     CHECK(taaChildren == 3);
-    CHECK(children == 25);
+    constexpr int kPhotoLightKnobs = 18; // test_photo_camera.cpp
+    constexpr int kVolFogKnobs = 5;
+    CHECK(children == 36 + kPhotoLightKnobs + kVolFogKnobs);
 }
 
 TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
@@ -453,8 +472,9 @@ TEST_CASE("Feature switches: the air pass has landed, with the beams' contrast",
     CHECK(GetKeyValue(Apply("remastered,debug=8"), *FindLightingKey("debug")) == 8.0f);
 
     // triFeatureState: the haze runs at noon and is not inert; the beams and
-    // the mist wait for a low sun, mist or headlights.
-    const LightingTuning t = Apply("remastered");
+    // the mist wait for a low sun, mist or headlights (the volumetric fog,
+    // which runs in their place, off).
+    const LightingTuning t = Apply("remastered,volFog=0");
     const std::string s = FeatureStateString(t, ComputeFeatureGates(Noon(), t));
     INFO(s);
     CHECK(s.find(" airHaze=1:on@0.5:beyond-150-m ") != std::string::npos);
@@ -720,13 +740,14 @@ TEST_CASE("Feature gates: one sharpen pass, TAA's or the luma one", "[remaster][
 TEST_CASE("Feature gates: gates=0 forces every enabled feature on; switches and classic still win",
           "[remaster][FeatureGates]")
 {
-    const LightingTuning forced = Apply("remastered,gates=0,ssr=0");
+    // (The volumetric fog off: it takes B8's air pass's place even forced.)
+    const LightingTuning forced = Apply("remastered,gates=0,ssr=0,volFog=0");
     const FeatureGates g = ComputeFeatureGates(Noon(), forced);
     for (int i = 0; i < kFeatureCount; ++i)
     {
         const auto f = static_cast<Feature>(i);
         INFO(GetFeatureInfo(f).key);
-        CHECK(g[f].on == (f != Feature::Ssr));
+        CHECK(g[f].on == (f != Feature::Ssr && f != Feature::VolFog));
     }
     CHECK(g[Feature::AirBeams].scale == 0.5f);
 
@@ -747,9 +768,9 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     GateInputs in = Noon();
     in.sunElevationDeg = 12.0f;
     in.sunViewAngleDeg = 20.0f;
-    FeatureGates g = ComputeFeatureGates(in, Apply("remastered,stars=0"));
+    FeatureGates g = ComputeFeatureGates(in, Apply("remastered,stars=0,volFog=0"));
     g.frame = 42;
-    const std::string s = FeatureStateString(Apply("remastered,stars=0"), g);
+    const std::string s = FeatureStateString(Apply("remastered,stars=0,volFog=0"), g);
     INFO(s);
     CHECK(s.find(';') == std::string::npos);
     CHECK(s.rfind("mode=remastered gates=1 computed=1 frame=42 sun=12.0", 0) == 0);
@@ -815,8 +836,13 @@ TEST_CASE("Feature switches: every feature switch has landed: the frame-cost swi
         const bool air = info.id == Feature::AirBeams || info.id == Feature::AirHaze || info.id == Feature::ValleyMist;
         const bool canopy = info.id == Feature::CanopyShadows;
         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
+        const bool surface = info.id == Feature::Surfaces;
+        // The look lane "light" (photoLight, step L1): the camera's meter and
+        // curve are in the composite's section.
+        const bool look = info.id == Feature::PhotoLight;
+        const bool fog = info.id == Feature::VolFog;
         CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || night ||
-                              combat || sea || ssr || wet || air || canopy || clouds));
+                              combat || sea || ssr || wet || air || canopy || clouds || surface || look || fog));
         if (info.landed)
         {
             CHECK(std::string_view(info.step) == (perf         ? "A4"
@@ -833,6 +859,9 @@ TEST_CASE("Feature switches: every feature switch has landed: the frame-cost swi
                                                   : air        ? "B8"
                                                   : canopy     ? "B9"
                                                   : clouds     ? "B10"
+                                                  : surface    ? "look"
+                                                  : look       ? "L1"
+                                                  : fog        ? "look-fog"
                                                                : "B11"));
             CHECK(sections.count(info.gpuSection) == 1);
         }
@@ -866,8 +895,11 @@ TEST_CASE("Feature switches: every feature switch has landed: the frame-cost swi
     // Combat light holds off with no combat light near, its shadows by day.
     CHECK(s.find(" combatLights=1:off:") != std::string::npos);
     CHECK(s.find(" combatShadows=1:off") != std::string::npos);
-    CHECK(s.find("landed=26/26") != std::string::npos);
+    CHECK(s.find("landed=29/29") != std::string::npos);
     CHECK(std::string_view(GetFeatureInfo(Feature::Ssr).gpuSection) == "ssr");
+    // The volumetric fog runs on any drawn world: it replaces the distance fog,
+    // and B8's air pass, which it supersedes, holds off.
+    CHECK(s.find(" volFog=1:on:world-drawn-(replaces-the-distance-fog)") != std::string::npos);
     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
     CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");

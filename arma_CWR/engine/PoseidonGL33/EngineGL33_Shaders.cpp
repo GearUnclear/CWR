@@ -1986,6 +1986,7 @@ void EngineGL33::DeinitPixelShaders()
                         glDeleteProgram(_shaderProgramRemaster[v][s][m][i]);
                         _shaderProgramRemaster[v][s][m][i] = 0;
                     }
+    ResetSurfaceClassPrograms();
     _lightingProgramsBuilt = false;
     _lightingActive = false;
     _remasterPrograms = false;
@@ -2039,6 +2040,12 @@ void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, Pix
     _pixelShaderSel = ps;
     _pixelShaderModeSel = mode;
     _pixelShaderSpecularSel = spec;
+    // The surfaces lane: only the remastered lit programs declare the surface
+    // target's output (fragSurf); any other leaves attachment 1 alone.
+    _surfProgram = _remasterPrograms && (ps == PSNormal || ps == PSDetail || ps == PSGrass || ps == PSWater) &&
+                   _shaderProgramRemaster[vs][spec][mode][ps] != 0;
+    _surfBoundProgram = _surfProgram ? _shaderProgramRemaster[vs][spec][mode][ps] : 0;
+    UpdateSurfaceMask();
 }
 
 void EngineGL33::EnableNightEye(float night)

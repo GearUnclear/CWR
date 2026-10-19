@@ -60,6 +60,9 @@ enum class Feature : std::uint8_t
     SkyCloudShadows,
     TerrainDetail,
     Sharpen,
+    Surfaces,
+    PhotoLight,
+    VolFog,
     Count
 };
 

@@ -125,24 +125,43 @@ void main() {
 }
 )";
 
+// The photoreal camera's decoding (photoLight; Graphics/Remaster/PhotoCamera.hpp
+// CameraDecode): with it on, the world's passes stored pre-exposed light on
+// the camera's encoding (the lit shaders' camFold); camDecode unfolds it, hue
+// kept. Every post pass that reads the frame's colour pastes
+// gl33lighting::kCameraCodecGLSL.
+
 // Bloom downsample: four bilinear taps (a 4x4 box). The first level linearises
 // the display-space image and keeps only what is close to white, with a soft
 // knee: the sky as a whole and sunlit walls stay out (no haze halo along the
-// skyline), the sun, its halo, glints and sharp highlights bloom.
-static const char s_psPostBloomDownGLSL[] = R"(#version 330 core
+// skyline), the sun, its halo, glints and sharp highlights bloom. Under the
+// photoreal camera (camParams.x) the first level unfolds the stored scene light
+// and takes it at the camera's exposure (camParams.y), so the threshold is the
+// light past the curve's shoulder.
+static const char s_psPostBloomDownHead[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D srcTex;
 uniform vec2 srcTexel;
 uniform vec4 bloomParams; // x threshold (linear), y knee, z 1 = first level
+uniform vec4 camParams;   // x 1 = the photoreal camera, y its exposure (linear)
 out vec4 fragColor;
+)";
+
+static const char s_psPostBloomDownMain[] = R"(
+vec3 bloomTap(vec2 uv) {
+    vec3 c = texture(srcTex, uv).rgb;
+    // The camera's bloom: light past the shoulder, capped so the sun's disk
+    // spreads a glare, not a flood.
+    return (bloomParams.z > 0.5 && camParams.x > 0.5) ? min(camDecode(c) * camParams.y, vec3(8.0)) : c;
+}
 void main() {
-    vec3 c = texture(srcTex, vUV + srcTexel * vec2(-1.0, -1.0)).rgb;
-    c += texture(srcTex, vUV + srcTexel * vec2(1.0, -1.0)).rgb;
-    c += texture(srcTex, vUV + srcTexel * vec2(-1.0, 1.0)).rgb;
-    c += texture(srcTex, vUV + srcTexel * vec2(1.0, 1.0)).rgb;
+    vec3 c = bloomTap(vUV + srcTexel * vec2(-1.0, -1.0));
+    c += bloomTap(vUV + srcTexel * vec2(1.0, -1.0));
+    c += bloomTap(vUV + srcTexel * vec2(-1.0, 1.0));
+    c += bloomTap(vUV + srcTexel * vec2(1.0, 1.0));
     c *= 0.25;
     if (bloomParams.z > 0.5) {
-        c = pow(max(c, vec3(0.0)), vec3(2.2));
+        if (camParams.x < 0.5) c = pow(max(c, vec3(0.0)), vec3(2.2));
         float peak = max(c.r, max(c.g, c.b));
         float knee = bloomParams.y;
         float soft = clamp(peak - bloomParams.x + knee, 0.0, 2.0 * knee);
@@ -172,13 +191,17 @@ void main() {
 // Sun shafts: march from each pixel toward the sun's screen position and gather
 // the sky that is visible (depth at the far plane) along the way. Geometry in
 // front of the sun - tree crowns, roofs, ridges - cuts the beams.
-static const char s_psPostShaftsGLSL[] = R"(#version 330 core
+static const char s_psPostShaftsHead[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D depthTex;
 uniform sampler2D colorTex;
 uniform vec4 sunScreen; // xy sun position (uv), z on-screen weight, w aspect (width/height)
 uniform float noiseShift; // TAA: this frame's shift of the march start (0 = the fixed pattern)
+uniform vec4 camParams;   // x 1 = the photoreal camera: the frame holds scene light (camDecode)
 out vec4 fragColor;
+)";
+
+static const char s_psPostShaftsMain[] = R"(
 void main() {
     if (sunScreen.z <= 0.0) { fragColor = vec4(0.0); return; }
     const int kSteps = 40;
@@ -192,7 +215,10 @@ void main() {
         uv += stepUV;
         vec2 c = clamp(uv, vec2(0.001), vec2(0.999));
         float sky = texture(depthTex, c).r >= 0.999999 ? 1.0 : 0.0;
-        vec3 s = pow(texture(colorTex, c).rgb, vec3(2.2));
+        vec3 t = texture(colorTex, c).rgb;
+        // Under the camera the sky near the sun is far brighter than white:
+        // the shafts gather it capped, so they stay rays, not a white flood.
+        vec3 s = camParams.x > 0.5 ? min(camDecode(t), vec3(1.5)) : pow(t, vec3(2.2));
         sum += s * sky * decay;
         decay *= 0.965;
     }
@@ -202,7 +228,7 @@ void main() {
 }
 )";
 
-static const char s_psPostCompositeGLSL[] = R"(#version 330 core
+static const char s_psPostCompositeHead[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D colorTex;
 uniform sampler2D aoTex;
@@ -221,7 +247,108 @@ uniform vec4 scatterParams; // x light count (0 = none), y scattering per metre 
 uniform vec4 scatterPos[8]; // xyz view space (m), w core radius r0
 uniform vec4 scatterRgb[8]; // rgb linear radiance at the core, w window end (m)
 uniform vec4 scatterMed[8]; // x radius of the lit smoke and dust around the light (m)
+// Surfaces and ambient light (the look lane "surface", SurfaceLight.hpp): the
+// surface target the world shaders wrote (unit 6: r the share the occlusion
+// may darken, g the square root of the albedo's luminance, b the sun's share)
+// replaces the frame alpha's share, the half-resolution horizon occlusion is
+// upsampled by depth and corrected for multiple bounces.
+uniform sampler2D surfTex;
+uniform vec4 surfParams; // x 1 = the surface target holds the shares, y occlusion power, z contact shadows, w multi-bounce
+uniform vec4 aoSize;     // xy the occlusion's size, zw 1 / size
+uniform vec4 sunView;    // xyz toward the sun in view space, w this frame's turn of the march (TAA)
+uniform vec4 surfParams2; // x the occlusion power's multiple on static architecture (the target's alpha code 1)
+// The photoreal camera (photoLight; Graphics/Remaster/PhotoCamera.hpp):
+uniform vec4 camParams;  // x 1 = on, y exposure (linear), z curve (0 hue-keeping, 1 per channel, 2 ACES,
+                         // 3 Neutral), w vignette
+uniform vec4 camCurve;   // the filmic curve y = x^a / (x^(a d) b + c): a, d, b, c
+uniform vec4 camColor0;  // rows of the white balance times the scene saturation
+uniform vec4 camColor1;
+uniform vec4 camColor2;
+uniform vec4 camGlow;    // x bloom gain, y shaft gain, z aspect (w / h), w the rods' warmth fade width
+uniform vec4 camNight;   // x the night's rod shift, y its luminance, z the curve's white (scene light), w stops past
+                         // it to white
+uniform vec4 camRod;     // rgb the rods' cool grey, w the warmth from which warm light keeps its colour
+uniform vec4 camShade;   // rgb the shade's cool balance at a low sun (unit luminance), w its strength
+uniform vec4 camDark;    // x the dark tones' saturation (relative), y z the scene light it fades out over, w 1 = a
+                         // vehicle interior (pre-lit: the camera's interior grade)
 out vec4 fragColor;
+)";
+
+static const char s_psPostCompositeMain[] = R"(
+float compositeViewZ(vec2 uv) {
+    float d = textureLod(depthTex, uv, 0.0).r;
+    if (d >= 0.999999) return 1e6;
+    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
+}
+
+// The half-resolution occlusion at this full-resolution pixel: its four
+// nearest texels (clamped to the target), bilinear weights times how well each
+// texel's depth matches the pixel's (within about 1% of the depth), so a near
+// edge does not bleed its occlusion onto the far side: a crown's onto the
+// grass behind it.
+float upsampleOcclusion(vec2 uv, float z) {
+    vec2 f = uv * aoSize.xy - 0.5;
+    vec2 i0 = floor(f);
+    vec2 fr = f - i0;
+    float sum = 0.0;
+    float wsum = 0.0;
+    float nearest = 1.0;
+    float best = 1e9;
+    for (int k = 0; k < 4; ++k) {
+        vec2 o = vec2(float(k & 1), float(k >> 1));
+        vec2 ti = clamp(i0 + o, vec2(0.0), aoSize.xy - 1.0);
+        vec2 s = textureLod(aoTex, (ti + 0.5) * aoSize.zw, 0.0).rg;
+        float wb = mix(1.0 - fr.x, fr.x, o.x) * mix(1.0 - fr.y, fr.y, o.y);
+        float dz = abs(s.g - z);
+        float wd = exp(-dz / (0.008 * z + 0.04));
+        sum += s.r * wb * wd;
+        wsum += wb * wd;
+        if (dz < best) { best = dz; nearest = s.r; }
+    }
+    return wsum > 1e-4 ? sum / wsum : nearest;
+}
+
+// Contact shadows: a short march toward the sun through the depth buffer
+// finds the small casters the shadow map is too coarse for (a boot on the
+// ground, a wheel on its hub, a sandbag's lip). 1 = lit. The march is a few
+// centimetres to a metre long with the distance, and a sample counts as a
+// caster only within a thickness behind it, so a surface far behind the ray
+// does not shadow it.
+float contactShadow(vec2 uv, float z) {
+    if (z > 50.0) return 1.0;
+    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+    vec3 p = vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
+    float len = clamp(0.03 * z, 0.12, 1.2);
+    float thick = 0.25 + 0.02 * z;
+    float noise = fract(fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) + sunView.w);
+    const int kSteps = 8;
+    float shadow = 0.0;
+    for (int i = 0; i < kSteps; ++i) {
+        float t = (float(i) + noise) / float(kSteps);
+        vec3 q = p + sunView.xyz * (len * t);
+        if (q.z <= 0.05) break;
+        vec2 qn = vec2(q.x / (q.z * projInfo.z), q.y / (q.z * projInfo.w));
+        vec2 quv = worldRect.xy + (qn * 0.5 + 0.5) * worldRect.zw;
+        vec2 qr = (quv - worldRect.xy) / worldRect.zw;
+        if (qr.x <= 0.0 || qr.y <= 0.0 || qr.x >= 1.0 || qr.y >= 1.0) break; // off the 3D view: open
+        float zs = compositeViewZ(quv);
+        float dz = q.z - zs;
+        float bias = 0.015 + 0.0015 * q.z;
+        if (dz > bias && dz < thick) {
+            shadow = max(shadow, 1.0 - t * t);
+        }
+    }
+    return 1.0 - shadow * (1.0 - smoothstep(30.0, 50.0, z));
+}
+
+// Jimenez et al. 2016: the light that bounces between the occluders before it
+// arrives brightens the occlusion of a light surface.
+float occlusionMultiBounce(float v, float albedo) {
+    float a = 2.0404 * albedo - 0.3324;
+    float b = -4.7951 * albedo + 0.6417;
+    float c = 2.7552 * albedo + 0.6903;
+    return max(v, ((v * a + b) * v + c) * v);
+}
 
 // Single scattering of the combat lights, integrated in closed form along the
 // pixel's view ray through a ball of lit air around each light (its smoke and
@@ -273,20 +400,154 @@ float shaftInscatter() {
     return 1.0 - exp(-max(dist, 0.0) * depthMap.z);
 }
 
+// The camera's tone curve (camParams.z): the filmic curve on the peak channel
+// with the channel ratios kept until the output nears white (hue-keeping), the
+// same curve per channel, the ACES fit (Narkowicz) or Khronos PBR Neutral.
+float camCurveY(float x) {
+    x = max(x, 0.0);
+    return clamp(pow(x, camCurve.x) / (pow(x, camCurve.x * camCurve.y) * camCurve.z + camCurve.w), 0.0, 1.0);
+}
+vec3 camTone(vec3 x) {
+    int kind = int(camParams.z + 0.5);
+    if (kind == 1) return vec3(camCurveY(x.r), camCurveY(x.g), camCurveY(x.b));
+    if (kind == 2) {
+        x *= 0.6;
+        return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+    }
+    if (kind == 3) {
+        float lo = min(x.r, min(x.g, x.b));
+        x -= lo < 0.08 ? lo - 6.25 * lo * lo : 0.04;
+        float pk = max(x.r, max(x.g, x.b));
+        if (pk < 0.76) return x;
+        float newPeak = 1.0 - 0.0576 / (pk - 0.52);
+        x *= newPeak / pk;
+        return mix(x, vec3(newPeak), 1.0 - 1.0 / (0.15 * (pk - newPeak) + 1.0));
+    }
+    float peak = max(x.r, max(x.g, x.b));
+    if (peak <= 0.0) return vec3(0.0);
+    float y = camCurveY(peak);
+    vec3 ratio = x / peak;
+    // To white late: near the curve's top (kCrosstalk) and with the light
+    // past its white (kWhiteExcessStops stops past it is white). Saturated
+    // light less (kChromaKeep): a flame rolls off in hue to a yellow-orange
+    // core, a white sun still clips.
+    float excess = clamp(log2(max(peak / camNight.z, 1.0)) / camNight.w, 0.0, 1.0);
+    float chroma = 1.0 - min(ratio.r, min(ratio.g, ratio.b));
+    float whiten = max(pow(y, 8.0), excess) * (1.0 - 0.8 * chroma * chroma); // kCrosstalk, kChromaKeep
+    return mix(ratio, vec3(1.0), whiten) * y;
+}
+
 void main() {
     vec4 c = texture(colorTex, vUV);
     float ao = texture(aoTex, vUV).r;
-    if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
-    // Take the occluded part of the sky light out of the radiance. c.a is one
-    // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+    // c.a is one minus the pixel's sky light share (1 for pre-lit and coverage
+    // pixels); the camera's cool shade reads it in both paths.
     float share = 1.0 - clamp(c.a, 0.0, 1.0);
-    float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+    float keep;
+    if (surfParams.x > 0.5) {
+        // The surface target's share, the occlusion upsampled by depth, its
+        // strength as a power and the multi-bounce correction by the albedo.
+        vec4 s = textureLod(surfTex, vUV, 0.0);
+        float zc = compositeViewZ(vUV);
+        ao = upsampleOcclusion(vUV, zc);
+        // The target's alpha: 0.5 the occlusion as set, 1 static architecture
+        // (eaves, door openings, the foot of a wall take it stronger).
+        float power = surfParams.y * mix(1.0, surfParams2.x, smoothstep(0.5, 1.0, s.a));
+        ao = pow(clamp(ao, 0.0, 1.0), power);
+        if (surfParams.w > 0.5) ao = occlusionMultiBounce(ao, s.g * s.g);
+        // A floor: light bounces into a pit or under a hull from the lit
+        // ground around it, so the occluded sky light keeps about a third
+        // (without it the underbody of a Jeep at a low sun went to 0).
+        ao = max(ao, 0.35);
+        // The sun's share loses what a contact shadow hides.
+        float contact = (surfParams.z > 0.0 && s.b > 0.02) ? contactShadow(vUV, zc) : 1.0;
+        contact = mix(1.0, contact, clamp(surfParams.z, 0.0, 1.0));
+        if (debugView.x > 0.5) { fragColor = vec4(vec3(ao * contact), 1.0); return; }
+        keep = max(1.0 - clamp(s.r, 0.0, 1.0) * (1.0 - ao) - clamp(s.b, 0.0, 1.0) * (1.0 - contact), 0.0);
+    } else {
+        if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
+        // Take the occluded part of the sky light out of the radiance.
+        keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+    }
+    vec3 shaft = texture(shaftTex, vUV).rgb;
+    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
+    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+    if (camParams.x > 0.5) {
+        // The camera's dither: white noise from a hash of the pixel and this
+        // frame's turn (sunView.w), triangular, half an LSB: no fixed pattern
+        // (the gradient-noise lattice drew a fine diagonal hatch in the sky
+        // once the curve stretched it), and the TAA averages it out.
+        uvec2 hp = uvec2(gl_FragCoord.xy) + uvec2(uint(fract(sunView.w * 7.31) * 4096.0), 0u);
+        uint h = hp.x * 1973u + hp.y * 9277u + uint(fract(sunView.w) * 65536.0) * 26699u;
+        h = (h ^ (h >> 15)) * 0x2c1b3c6du;
+        h = (h ^ (h >> 12)) * 0x297a2d39u;
+        h ^= h >> 15;
+        n = float(h & 0xffffu) / 65535.0;
+        m = float(h >> 16) / 65535.0;
+        // The camera: the stored scene light, its occlusion, the glare of
+        // light past the shoulder and the shafts, at the metered exposure;
+        // white balance and saturation; the curve; the lens's vignette; a
+        // dither everywhere (the curve moves every value).
+        vec3 x = camDecode(c.rgb) * keep * camParams.y;
+        x += texture(bloomTex, vUV).rgb * camGlow.x;
+        x += shaft * shaftColor.rgb * (camGlow.y * camParams.y);
+        // Combat light scattered in the air (B4), as light at the exposure.
+        x += combatScatter();
+        x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
+        // At a low sun the camera, on daylight balance, sees the shade lit by
+        // the blue sky: what the sky lights more than the sun (the world's
+        // sky light share, `share`) leans cool (camShade), what the sun
+        // lights keeps its amber (a pine crown stays green-dark, warm only at
+        // its sunlit tips; pre-lit draws and the sky are left alone).
+        if (camShade.w > 0.0) x = mix(x, x * camShade.rgb, camShade.w * smoothstep(0.2, 0.6, share));
+        // Dark tones carry less colour than the mid tones (camDark): the
+        // hue-keeping curve keeps a dark olive's full linear ratios, which
+        // read as a candied mustard in a pine crown's shade.
+        if (camDark.x < 1.0) {
+            float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+            float s = mix(camDark.x, 1.0, smoothstep(camDark.y, camDark.z, l));
+            x = max(mix(vec3(l), x, s), vec3(0.0));
+        }
+        // The night's rods: dim light toward a cool grey of its brightness;
+        // lamp and fire pools, far brighter, keep their colour, and so does
+        // warm light however dim (warmth (r - b) / peak from camRod.w over
+        // the width camGlow.w): the fire's smoke is warm through, not orange
+        // particles among grey ones.
+        if (camNight.x > 0.0) {
+            float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+            float pk = max(x.r, max(x.g, x.b));
+            float warm = pk > 0.0 ? (x.r - x.b) / pk : 0.0;
+            float rod = camNight.x * (1.0 - smoothstep(0.25 * camNight.y, camNight.y, l)) *
+                        (1.0 - smoothstep(camRod.w, camRod.w + camGlow.w, warm));
+            vec3 tint = camRod.rgb / dot(camRod.rgb, vec3(0.2126, 0.7152, 0.0722));
+            x = mix(x, l * tint, rod);
+        }
+        // The lens's vignette, on the light before the curve: the corners
+        // darken, light far past white (the sun) still clips.
+        vec2 q = (vUV - 0.5) * vec2(camGlow.z, 1.0);
+        // A vehicle interior (camDark.w): its pre-lit crew compartment is the
+        // original's flat vertex light, which the meter and the occlusion
+        // barely move. The camera grades it as it would a dim interior: half
+        // a stop down, a deeper toe and a stronger vignette.
+        float vig = camParams.w;
+        if (camDark.w > 0.5) {
+            x *= 0.7;
+            float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+            x *= mix(0.72, 1.0, smoothstep(0.02, 0.3, l));
+            vig = min(camParams.w * 2.2, 0.5);
+        }
+        x *= 1.0 - vig * smoothstep(0.1, 1.1, dot(q, q) * 2.2);
+        vec3 y = camTone(x);
+        vec3 col = pow(clamp(y, 0.0, 1.0), vec3(1.0 / 2.2));
+        col += 0.5 * (n + m - 1.0) / 255.0;
+        fragColor = vec4(col, 1.0);
+        return;
+    }
     vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
     // glow's own energy rolled off. Identity where there is no glow, never
     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
-    vec3 shaft = texture(shaftTex, vUV).rgb;
-    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
     vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft * shaftColor.rgb * compParams.z;
     glow += combatScatter();
     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
@@ -294,11 +555,52 @@ void main() {
     // Dither only what the composite changed: elsewhere the frame passes
     // through exactly (the 2.2 round trip is exact on 8-bit values).
     if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5)) {
-        float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-        float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
         col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
     }
     fragColor = vec4(col, 1.0);
+}
+)";
+
+// The photoreal camera's meter (photoLight; PhotoCamera.hpp Meter): the
+// resolved frame into kMeterWidth x kMeterHeight texels, each the weighted
+// mean log2 luminance of the scene light (camDecode) over a 4 x 4 grid of
+// bilinear taps across its block, its weight (centre weighted, sky taps
+// counting meterParams.x), the block's brightest tap and its brightest sky
+// tap (-32 when it shows no sky). A block
+// that is black through (an optic's mask, pillarbox bars) weighs nothing, so
+// the camera meters the scene inside it. Read back by the CPU, which builds
+// the histogram.
+static const char s_psPostMeterHead[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D colorTex;
+uniform sampler2D depthTex;
+uniform vec4 meterParams; // x the sky's weight, y 1 / the frame's pre-exposure, zw meter size
+out vec4 fragColor;
+)";
+
+static const char s_psPostMeterMain[] = R"(
+void main() {
+    vec2 cell = floor(gl_FragCoord.xy);
+    float sum = 0.0, wsum = 0.0, hi = -32.0, lo = 32.0, skyHi = -32.0;
+    for (int j = 0; j < 4; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            vec2 uv = (cell + (vec2(float(i), float(j)) + 0.5) / 4.0) / meterParams.zw;
+            vec3 t = textureLod(colorTex, uv, 0.0).rgb;
+            vec3 lin = camDecode(t) * meterParams.y;
+            float l = log2(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-5));
+            bool sky = textureLod(depthTex, uv, 0.0).r >= 0.999999;
+            float w = sky ? meterParams.x : 1.0;
+            sum += l * w;
+            wsum += w;
+            hi = max(hi, l);
+            lo = min(lo, l);
+            if (sky) skyHi = max(skyHi, l);
+        }
+    }
+    vec2 q = (gl_FragCoord.xy / meterParams.zw - 0.5) * vec2(1.0, 0.8);
+    float centre = 0.3 + 0.7 * exp(-dot(q, q) / (2.0 * 0.3 * 0.3));
+    if (hi < -15.0) centre = 0.0; // black through (log2 of the 1e-5 floor is -16.6)
+    fragColor = vec4(sum / max(wsum, 1e-6), wsum / 16.0 * centre, hi, skyHi);
 }
 )";
 
@@ -600,16 +902,16 @@ void main() {
 struct PostShaderDef
 {
     const char* name; // override file stem
-    const char* pieces[7];
+    const char* pieces[8];
 };
 const PostShaderDef kPostShaders[] = {
     {"vsPost", {s_vsPostGLSL}},
     {"psPostAo", {s_psPostAoInputs, s_glslPostCommon, s_psPostAoMain}},
     {"psPostAoBlur", {s_psPostAoBlurGLSL}},
-    {"psPostBloomDown", {s_psPostBloomDownGLSL}},
+    {"psPostBloomDown", {s_psPostBloomDownHead, Poseidon::gl33lighting::kCameraCodecGLSL, s_psPostBloomDownMain}},
     {"psPostBloomUp", {s_psPostBloomUpGLSL}},
-    {"psPostShafts", {s_psPostShaftsGLSL}},
-    {"psPostComposite", {s_psPostCompositeGLSL}},
+    {"psPostShafts", {s_psPostShaftsHead, Poseidon::gl33lighting::kCameraCodecGLSL, s_psPostShaftsMain}},
+    {"psPostComposite", {s_psPostCompositeHead, Poseidon::gl33lighting::kCameraCodecGLSL, s_psPostCompositeMain}},
     {"psPostLinearDepth", {s_psPostLinearDepthInputs, s_glslPostCommon, s_psPostLinearDepthMain}},
     {"psPostDebugDepth", {s_psPostDebugDepthGLSL}},
     {"psPostTaa", {s_psPostTaaInputs, s_psPostTaaMain}},
@@ -629,8 +931,8 @@ const PostShaderDef kPostShaders[] = {
     {"psPostAirMean", {Poseidon::gl33lighting::kPostAirMeanGLSL}},
     {"psPostAirApply",
      {Poseidon::gl33lighting::kPostAirApplyInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
-      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostAirCommonGLSL,
-      Poseidon::gl33lighting::kPostAirApplyMainGLSL}},
+      Poseidon::gl33lighting::kCameraCodecGLSL, Poseidon::gl33lighting::kRemasterSkyGLSL,
+      Poseidon::gl33lighting::kPostAirCommonGLSL, Poseidon::gl33lighting::kPostAirApplyMainGLSL}},
     // The screen-space reflections (EngineGL33_PostSsrShaders.cpp). The trace
     // pastes the LitConstants block, the sky piece and the puddles piece of the
     // fragment prelude (the wet weather's puddles, the same as the forward pass's).
@@ -638,14 +940,37 @@ const PostShaderDef kPostShaders[] = {
     {"psPostSsrShare", {Poseidon::gl33lighting::kPostSsrShareGLSL}},
     {"psPostSsrTrace",
      {Poseidon::gl33lighting::kPostSsrTraceInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
-      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kRemasterPuddlesGLSL,
-      Poseidon::gl33lighting::kPostSsrTraceMainGLSL}},
+      Poseidon::gl33lighting::kCameraCodecGLSL, Poseidon::gl33lighting::kRemasterSkyGLSL,
+      Poseidon::gl33lighting::kRemasterPuddlesGLSL, Poseidon::gl33lighting::kPostSsrTraceMainGLSL}},
     {"psPostSsrBlur", {Poseidon::gl33lighting::kPostSsrBlurGLSL}},
     {"psPostSsrComposite",
-     {Poseidon::gl33lighting::kPostSsrCompositeInputsGLSL, s_glslPostCommon,
+     {Poseidon::gl33lighting::kPostSsrCompositeInputsGLSL, s_glslPostCommon, Poseidon::gl33lighting::kCameraCodecGLSL,
       Poseidon::gl33lighting::kPostSsrCompositeMainGLSL}},
     {"psCombatMask", {Poseidon::gl33lighting::kPostCombatMaskGLSL}},
     {"psCombatMaskBlur", {Poseidon::gl33lighting::kPostCombatMaskBlurGLSL}},
+    {"psPostGtao",
+     {Poseidon::gl33lighting::kPostGtaoInputsGLSL, s_glslPostCommon, Poseidon::gl33lighting::kPostGtaoMainGLSL}},
+    {"psPostGtaoAccum", {Poseidon::gl33lighting::kPostGtaoAccumGLSL}},
+    {"psPostMeter", {s_psPostMeterHead, Poseidon::gl33lighting::kCameraCodecGLSL, s_psPostMeterMain}},
+    {"psFogInject",
+     {Poseidon::gl33lighting::kPostFogInjectHeadGLSL, Poseidon::gl33lighting::kPostFogSharedInputsGLSL,
+      Poseidon::gl33lighting::kLitConstantsBlockGLSL, Poseidon::gl33lighting::kRemasterTerrainCloudsGLSL,
+      Poseidon::gl33lighting::kPostFogSkyInputsGLSL, Poseidon::gl33lighting::kRemasterSkyGLSL,
+      Poseidon::gl33lighting::kPostFogMediumGLSL, Poseidon::gl33lighting::kPostFogInjectMainGLSL}},
+    {"psFogIntegrate", {Poseidon::gl33lighting::kPostFogIntegrateGLSL}},
+    {"psFogNear",
+     {Poseidon::gl33lighting::kPostFogNearHeadGLSL, Poseidon::gl33lighting::kPostFogSharedInputsGLSL,
+      Poseidon::gl33lighting::kLitConstantsBlockGLSL, Poseidon::gl33lighting::kRemasterTerrainCloudsGLSL,
+      Poseidon::gl33lighting::kPostFogMediumGLSL, Poseidon::gl33lighting::kPostFogNearMainGLSL}},
+    {"psFogApply",
+     {Poseidon::gl33lighting::kPostFogApplyGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
+      Poseidon::gl33lighting::kCameraCodecGLSL, Poseidon::gl33lighting::kPostFogApplyMainGLSL}},
+    {"psFogRing",
+     {Poseidon::gl33lighting::kPostFogRingGLSL, Poseidon::gl33lighting::kCameraCodecGLSL,
+      Poseidon::gl33lighting::kPostFogRingMainGLSL}},
+    {"psFogGlow",
+     {Poseidon::gl33lighting::kPostFogGlowGLSL, Poseidon::gl33lighting::kCameraCodecGLSL,
+      Poseidon::gl33lighting::kPostFogGlowMainGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

@@ -424,6 +424,21 @@ void EngineGL33::UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, fl
     SetLitSlot(LitConst::Canopy, c.canopy[0], c.canopy[1], c.canopy[2], c.canopy[3]);
 }
 
+void EngineGL33::SurfaceCanopyConstants(float out[4]) const
+{
+    out[0] = out[1] = out[2] = out[3] = 0.0f;
+    const rm::CanopyField* f = s_canopy.field.get();
+    if (!f || !f->Valid() || !s_canopy.fieldTex || s_canopy.uploadWhole)
+        return;
+    const float extent = static_cast<float>(f->size) * f->texel;
+    if (!(extent > 0.0f))
+        return;
+    out[0] = f->heightBase;
+    out[1] = f->heightRange;
+    out[2] = 1.0f / extent;
+    out[3] = 1.0f;
+}
+
 void EngineGL33::BindCanopy()
 {
     BindUnit(kCanopyVisUnit, s_canopy.built.valid && s_canopy.sunTex ? s_canopy.sunTex : s_canopy.sunStandIn);

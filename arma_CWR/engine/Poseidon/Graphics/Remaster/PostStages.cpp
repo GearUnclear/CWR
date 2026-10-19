@@ -21,7 +21,9 @@ constexpr PostStageInfo kStages[] = {
     {PostStage::Ao, "ao", "A3", true, false, Mark::AoEnd, Section::Ao},
     // The reflections march the half-resolution linear depth.
     {PostStage::Ssr, "ssr", "B6", true, true, Mark::SsrEnd, Section::Ssr},
-    // B8: the air pass marches at half resolution, on the linear depth.
+    // B8: the air pass marches at half resolution, on the linear depth; the
+    // look lane's volumetric fog (EngineGL33_PostFog.cpp) runs on the same
+    // stage in its place.
     {PostStage::Air, "air", "B8", true, true, Mark::AirEnd, Section::Air},
     {PostStage::Bloom, "bloom", "A3", true, false, Mark::BloomEnd, Section::Bloom},
     {PostStage::Shafts, "shafts", "A3", true, false, Mark::ShaftsEnd, Section::Shafts},
@@ -83,7 +85,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     // The stages that can ask for the pass ask by their knob, switch or debug
     // view, whatever this frame's conditions then decide for them.
     const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
-                       in.temporal || in.lumaSharpen || in.air || in.ssrTags || in.combatMask;
+                       in.temporal || in.lumaSharpen || in.air || in.ssrTags || in.combatMask || in.camera || in.fog;
     if (!asked)
         return plan;
 
@@ -99,8 +101,8 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
         if ((in.ssr && in.glow) || debugSsr)
             plan.runs |= Bit(PostStage::Ssr);
     }
-    // Occlusion needs the world depth.
-    plan.aoStrength = in.worldDepth ? in.ambientOcclusion : 0.0f;
+    // Occlusion needs the world depth, or the surfaces lane's interior.
+    plan.aoStrength = (in.worldDepth || in.surfaceInterior) ? in.ambientOcclusion : 0.0f;
     if (plan.aoStrength > 0.0f)
         plan.runs |= Bit(PostStage::Ao);
     // A screen overlay in the world pass turns the glow off.
@@ -108,13 +110,22 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     if (plan.bloomStrength > 0.0f)
         plan.runs |= Bit(PostStage::Bloom);
     // The air pass needs the world depth, and over a screen overlay its haze
-    // would grey the overlay's black surround.
-    const bool air = in.air && in.worldDepth && in.glow;
+    // would grey the overlay's black surround. The volumetric fog has the same
+    // needs and takes the stage in its place.
+    // The volumetric fog also runs under a screen overlay (a rifle's iron
+    // sight, a gunner's optic): its apply leaves the overlay's black mask as
+    // drawn, and switching the mist off whenever the player aimed made it pop
+    // away and let him see through it (look director round 2).
+    plan.fog = in.fog && in.worldDepth;
+    const bool air = ((in.air && in.glow) || in.fog) && in.worldDepth;
     if (air)
         plan.runs |= Bit(PostStage::Air);
     // The shafts are depth tested glow toward a sun on screen; the air pass's
-    // beams replace them.
-    if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight && !(air && in.airBeams))
+    // beams and the fog's own sun light in the air replace them, and so does
+    // the photoreal camera (its composite adds none: their radial march drew
+    // a fan of streaks round a low sun).
+    if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight &&
+        !(air && (in.airBeams || plan.fog)) && !in.camera)
         plan.runs |= Bit(PostStage::Shafts);
     plan.runs |= Bit(PostStage::Composite);
     // The resolve reprojects with the world depth (a vehicle interior cleared
@@ -129,6 +140,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
         plan.runs |= Bit(PostStage::DebugView);
 
     plan.runs &= LandedMask();
+    plan.fog = plan.fog && plan.Runs(PostStage::Air);
     for (const PostStageInfo& s : kStages)
         if (s.readsLinearDepth && plan.Runs(s.id))
             plan.runs |= Bit(PostStage::LinearDepth);

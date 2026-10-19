@@ -380,6 +380,15 @@ void Scene::DrawRain()
         saturate(yDensity, 0.1f, 1);
         // draw all levels
         density *= 0.2f;
+        // Under the photoreal camera (photoLight) the overlay's streaks are
+        // stretched by the exposure and the curve: at full strength they
+        // smeared the whole sky with vertical lines (look director round 2).
+        if (GEngine && GEngine->LightingRemasterActive())
+        {
+            const remaster::LightingTuning tuning = GEngine->GetLightingTuning();
+            if (tuning.features.photoLight > 0.5f)
+                density *= 0.45f;
+        }
         DrawRainLevel(density, yDensity, xOffset, yOffset, 8);
         DrawRainLevel(density, yDensity, xOffset, yOffset, 2);
     }

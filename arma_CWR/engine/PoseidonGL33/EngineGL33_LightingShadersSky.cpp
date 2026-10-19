@@ -109,6 +109,10 @@ vec3 skyRadiance(vec3 d, out vec4 mean) {
 vec3 skyClear(vec3 d, vec3 baseDisp, vec3 glowDisp, vec3 capDisp) {
     vec4 mean;
     vec3 a = skyRadiance(d, mean);
+    // Under the photoreal camera the table's own radiance at the rig's scale
+    // (litCamera.z, LightRig::skyScale): the physical zenith-to-horizon and
+    // sky-to-ground ratios, the table's hue.
+    if (litCamera.x > 0.5) return a * litCamera.z;
     vec3 classicLin = toLinear(min(baseDisp + glowDisp * mean.a, capDisp));
     float rowLum = max(dot(mean.rgb, kLuma), 1e-8);
     vec3 relit = classicLin * (dot(a, kLuma) / rowLum);
@@ -116,10 +120,86 @@ vec3 skyClear(vec3 d, vec3 baseDisp, vec3 glowDisp, vec3 capDisp) {
     return mix(relit, phys, litAtmoDome.w);
 }
 
+// Under the photoreal camera the sky's light, at the frame's pre-exposure
+// (litCamera.w), rolls off softly from kCamSkyKnee toward kCamSkyCap (the
+// curve's input; the cap shows at about 0.85 of white), hue kept
+// (PhotoCamera.hpp kSkyRolloffKnee, kSkyRolloffCap): only the sun's disc
+// clips, and the glow round a low sun is a smooth golden gradient instead of
+// a ragged white plateau where the sky's clouds and the aureole crossed white.
+const float kCamSkyKnee = 1.2; // kSkyRolloffKnee
+const float kCamSkyCap = 2.4;  // kSkyRolloffCap
+vec3 camSkyRolloff(vec3 lin) {
+    if (litCamera.x < 0.5) return lin;
+    float m = max(lin.r, max(lin.g, lin.b)) * max(litCamera.w, 1e-6);
+    if (m <= kCamSkyKnee) return lin;
+    float r = kCamSkyCap - kCamSkyKnee;
+    return lin * ((kCamSkyKnee + r * (1.0 - exp(-(m - kCamSkyKnee) / r))) / m);
+}
+
+// The camera's look of the clear sky (litCameraLook; identity while the camera
+// is off) along the unit direction d, on its linear light:
+//   - by day the haze's bright band: within about 6 degrees of the horizon the
+//     sky goes paler and brighter than the zenith, as a real clear sky does
+//     (the table's thin haze left a desert horizon nearly as saturated as its
+//     zenith);
+//   - a low sun (litCameraLook.w) turns the upper sky toward the zenith's
+//     blue (the table's own zenith hue), which the haze otherwise greyed at
+//     sunset, and at twilight the band along the horizon is brighter and
+//     warmer toward the sun's bearing, dimmer away from it;
+//   - the weather's veil (litCameraLook.x): a pale grey layer over the blue,
+//     the broken cloud of an overcast day rather than a clear one.
+vec3 camSkyLook(vec3 a, vec3 d) {
+    if (litCamera.x < 0.5) return a;
+    float e = max(d.y, 0.0);
+    float lum = dot(a, kLuma);
+    float sunEl = skySunElevation();
+    float day = smoothstep(8.0, 25.0, sunEl);
+    float band = exp(-e / 0.16) * day;
+    a = mix(a, vec3(lum), 0.6 * band) * (1.0 + 0.45 * band);
+    float low = litCameraLook.w;
+    if (low > 0.0) {
+        vec4 mz;
+        vec3 zen = skyRadiance(vec3(0.0, 1.0, 0.0), mz);
+        vec3 zc = zen / max(dot(zen, kLuma), 1e-8);
+        float l = dot(a, kLuma);
+        // Away from the sun's glow (none within about 10 degrees of it, all
+        // from 30, so the golden aureole stays golden).
+        float away = 1.0 - smoothstep(0.86, 0.985, dot(d, skySunDir()));
+        // Over the lowest 30 degrees, so the warm horizon band fades into the
+        // blue above it without an upper edge (a 3 to 27 degree ramp read as
+        // a painted stripe at the blue hour).
+        a = mix(a, zc * l, low * away * smoothstep(0.0, 0.5, e));
+        // The twilight belt: with the sun from 5 degrees up to 10 under the
+        // horizon, within about 5 degrees of the horizon.
+        vec2 sh = skySunDir().xz, dh = d.xz;
+        float cAz = (dot(sh, sh) > 1e-8 && dot(dh, dh) > 1e-8) ? dot(normalize(dh), normalize(sh)) : 0.0;
+        float tw = smoothstep(-10.0, -6.0, sunEl) * (1.0 - smoothstep(0.0, 5.0, sunEl));
+        // Falling off over about 10 degrees (it read as a stripe at 5).
+        float belt = exp(-e / 0.18) * tw;
+        float az = pow(max(cAz, 0.0), 6.0);
+        a *= 1.0 + belt * (1.1 * az - 0.45);
+        // The afterglow spreads upward: the warm horizon light of this
+        // azimuth carried up over about 12 degrees, so the table's thin
+        // orange band grades into the lilac instead of ending in an edge.
+        if (tw > 0.0 && e > 0.0) {
+            vec4 mh;
+            vec3 hc = skyRadiance(normalize(vec3(d.x, 0.012, d.z)), mh);
+            a += hc * (0.4 * tw * exp(-e / 0.2) * smoothstep(0.0, 0.04, e) * (0.5 + 0.5 * az));
+        }
+        a = mix(a, a * vec3(1.15, 0.95, 0.8), belt * az * 0.5);
+    }
+    a = max(a, vec3(0.0));
+    float veil = litCameraLook.x;
+    if (veil > 0.0) a = mix(a, vec3(dot(a, kLuma) * 1.35) * vec3(0.97, 1.0, 1.04), 0.75 * veil);
+    return a;
+}
+
 // Linear sky radiance to the display, with the sky's own saturation
 // (litAtmoGlow.w; the dome and the fog colour only).
 vec3 skyDisplay(vec3 lin) {
-    vec3 disp = toDisplay(tonemapNeutral(lin));
+    // Under the photoreal camera the sky is scene light too (the camera's
+    // curve rolls off the glow around the sun).
+    vec3 disp = litCamera.x > 0.5 ? toDisplay(max(lin, vec3(0.0))) : toDisplay(tonemapNeutral(lin));
     return max(mix(vec3(dot(disp, kLuma)), disp, litAtmoGlow.w), vec3(0.0));
 }
 
@@ -132,7 +212,7 @@ vec3 atmoFogColor(vec3 rel, vec3 classicFog) {
     vec3 h = vec3(d.x, clamp(d.y, 0.0, 0.25) * 0.5 + 0.015, d.z);
     h *= inversesqrt(max(dot(h, h), 1e-12));
     vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
-    vec3 disp = skyDisplay(skyClear(h, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)));
+    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(h, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), h)));
     disp = mix(disp, classicFog, litAtmo.y);
     return mix(classicFog, disp, litAtmo.z);
 }
@@ -285,7 +365,34 @@ vec4 litCloudTermsSheet(float alpha) {
 // the sun, and with lit clouds on (litSky.x) their relief and lining on top.
 // `classic` is the original dome colour, which the night fade (litAtmo.x)
 // returns to.
+// Under the photoreal camera the painted clouds' texel is a cubic B-spline of
+// the texture: the bilinear filter's kinks gave their edges stair steps,
+// hidden in the original's pale wash, plain against the camera's deep blue.
+vec4 camCloudTexel(vec4 t0) {
+    if (litCamera.x < 0.5) return t0;
+    // A cubic B-spline over the texel grid (four bilinear taps): smooth to
+    // the second derivative, where the bilinear filter's kinks at every texel
+    // edge turned the cloud mask's threshold into stair steps when the dome
+    // magnifies the texture.
+    vec2 size = vec2(textureSize(tex0, 0));
+    vec2 p = vUV0 * size - 0.5;
+    vec2 f = fract(p);
+    vec2 base = p - f;
+    vec2 f2 = f * f, f3 = f2 * f;
+    vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+    vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    vec2 w3 = f3 / 6.0;
+    vec2 g0 = w0 + w1, g1 = w2 + w3;
+    vec2 h0 = (base - 0.5 + w1 / g0) / size;
+    vec2 h1 = (base + 1.5 + w3 / g1) / size;
+    vec4 a = texture(tex0, vec2(h0.x, h0.y)) * g0.x + texture(tex0, vec2(h1.x, h0.y)) * g1.x;
+    vec4 b = texture(tex0, vec2(h0.x, h1.y)) * g0.x + texture(tex0, vec2(h1.x, h1.y)) * g1.x;
+    return a * g0.y + b * g1.y;
+}
+
 vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+    t0 = camCloudTexel(t0);
     vec3 d = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
     float lumT = dot(t0.rgb, kLuma);
     float bg = lumT;
@@ -315,7 +422,9 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
     float rowGlow = texture(skyLut, vec2(2.5 / 3.0, skyRowV(asin(clamp(d.y, -1.0, 1.0))))).a;
     vec3 rowLight = toLinear(min(litAtmoDome.rgb + litAtmoGlow.rgb * rowGlow, vec3(1.0)));
     float rowLum = max(dot(rowLight, kLuma), 1e-5);
-    float gain = rowLum / max(dot(toLinear(litAtmoDome.rgb), kLuma), 1e-5);
+    // (Under the photoreal camera the clouds' light is the rig's, litAtmoCloudSun,
+    // with no row brightness of the original.)
+    float gain = litCamera.x > 0.5 ? 1.0 : rowLum / max(dot(toLinear(litAtmoDome.rgb), kLuma), 1e-5);
     vec3 light = (litAtmoCloudSun.rgb * dirTerm + litAtmoCloudSun.w * skyTint) * gain;
     vec3 texLin = toLinear(t0.rgb);
     // A cloud's own colour: the texel taken out of the clear sky behind it by
@@ -338,10 +447,21 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
         a = litCloudLight(a, lc);
         cloudLin = litCloudLight(cloudLin, lc);
     }
+    // The camera's look of the clear sky; under the weather's veil the clouds
+    // go a softer, greyer white too (less contrast against the paled sky).
+    if (litCamera.x > 0.5) {
+        a = camSkyLook(a, d);
+        float cl = dot(cloudLin, kLuma);
+        cloudLin = mix(cloudLin, vec3(cl * 0.92), 0.5 * litCameraLook.x);
+    }
     // Cover over clear sky in display space, where the mask measured it: a
     // faint cloud keeps about the texture's own contrast (mixed in linear light
     // the texture's faint blotches read 40 % stronger than in the original).
-    vec3 disp = mix(skyDisplay(a), skyDisplay(cloudLin), cloud);
+    vec3 disp = mix(skyDisplay(camSkyRolloff(a)), skyDisplay(camSkyRolloff(cloudLin)), cloud);
+    // Under the photoreal camera the night the table fades into is the
+    // original dome's brightness in a night blue (its dusk red under the
+    // physical twilight turned the blue hour's zenith mauve).
+    if (litCamera.x > 0.5) classic = toDisplay(dot(toLinear(classic), kLuma) * vec3(0.62, 0.86, 1.6));
     return mix(classic, disp, litAtmo.x);
 }
 
@@ -355,7 +475,7 @@ vec3 skyReflection(vec3 r) {
     vec3 classic = fogColorToward(r);
     if (litAtmo.x <= 0.0) return classic;
     vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
-    vec3 disp = skyDisplay(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)));
+    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), r)));
     disp = mix(disp, classic, litAtmo.y);
     return mix(classic, disp, litAtmo.x);
 }

@@ -407,8 +407,10 @@ TEST_CASE("Air medium: the shaders use the medium's constants and closed forms",
           std::string::npos);
     // The beams only add light (screen add); the contrast never takes the
     // scattering below (1 - high-pass) of itself.
-    CHECK(apply.find("lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));") != std::string::npos);
-    CHECK(apply.find("shaft = max(shaft - airBeams.y * local, floorAt) + boost * max(shaft - local, vec2(0.0));") !=
+    // (Under the photoreal camera the frame can hold light above 1: none is
+    // added there.)
+    CHECK(apply.find("lin += max(1.0 - lin, vec3(0.0)) * (1.0 - exp(-max(glow, vec3(0.0))));") != std::string::npos);
+    CHECK(apply.find("shaft = max(shaft - airBeams.y * local, floorAt) + boost2 * max(shaft - local, vec2(0.0));") !=
           std::string::npos);
     // The apply keeps the frame's alpha (the composite's occlusion reads it).
     CHECK(apply.find("fragColor = vec4(col, c.a);") != std::string::npos);
@@ -452,7 +454,8 @@ TEST_CASE("Air medium: the beams' contrast works on the share of the scattering 
     CHECK(apply.find("vec2 shaft = vec2(clamp(air.r / max(air.a, 1e-7), 0.0, 1.0), air.g);") != std::string::npos);
     CHECK(apply.find("vec2 local = vec2(clamp(mean.x / max(mean.z, 1e-7), 0.0, 1.0), mean.y);") != std::string::npos);
     CHECK(apply.find("shaft = mix(min(shaft, local), shaft, conf);") != std::string::npos);
-    CHECK(apply.find("glow = airSunColor.rgb * (shaft.x * air.a) + airSpotTint.rgb * shaft.y;") != std::string::npos);
+    CHECK(apply.find("glow = airSunColor.rgb * (shaft.x * air.a * camBeams) + airSpotTint.rgb * shaft.y;") !=
+          std::string::npos);
     // The march hands it both scatterings and the view depth in the second
     // target; the blur and the mean match depths from there, and the mean
     // averages both scatterings.
@@ -522,13 +525,19 @@ TEST_CASE("Air pass: off leaves every draw and the post pass as they were", "[re
 
     // The bloom and the composite read the frame with the air applied only
     // when the Air stage ran; otherwise the frame the stages before it left
-    // (the resolved frame, or the reflections' output), as before. The air
-    // pass applies over that frame.
+    // (the resolved frame, or the reflections' output), as before
+    // (PostSceneTex, which picks the volumetric fog's output when the fog ran
+    // the stage instead). The air pass applies over that frame.
     const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
     REQUIRE_FALSE(post.empty());
-    CHECK(CountOf(post, "f.plan.Runs(rm::PostStage::Air) ? p.airOutTex : f.frameColor") == 1);
-    CHECK(CountOf(post, "BindTex(0, plan.Runs(rm::PostStage::Air) ? p.airOutTex : f.frameColor);") == 1);
+    CHECK(CountOf(post, "first ? PostSceneTex(f) : p.bloomTex[i - 1]") == 1);
+    CHECK(CountOf(post, "BindTex(0, PostSceneTex(f));") == 1);
     CHECK(CountOf(air, "BindTex(0, f.frameColor);") == 1);
+    const std::string scene =
+        FunctionBody(ReadTextFile(Gl33Dir() / "EngineGL33_PostFog.cpp"), "unsigned int EngineGL33::PostSceneTex");
+    REQUIRE_FALSE(scene.empty());
+    CHECK(scene.find("if (!f.plan.Runs(rm::PostStage::Air))\n        return f.frameColor;") != std::string::npos);
+    CHECK(scene.find("if (!f.plan.fog)\n        return _post.airOutTex;") != std::string::npos);
     CHECK(CountOf(post, "in.air = airFrame && (_airParts.haze || _airParts.valleyMist || _airParts.beams);") == 1);
     // With every air switch off the plan is the plan of before.
     PostFrameInputs in;

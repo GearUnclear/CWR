@@ -382,6 +382,11 @@ uniform vec4 airBeams;        // x 1 = beams, y high-pass share, z contrast gain
 uniform vec4 airSunColor;     // rgb the sun's radiance times the exposure (linear)
 uniform vec4 airSpotTint;     // rgb the headlights' mean chroma (linear, unit luminance)
 uniform vec4 airFog;          // x the classic fog's start as the world drew it (m), y 1 / (end - start), z 1 = on
+// Under the photoreal camera (litCamera.x): x the haze density's gain (camAerial:
+// aerial perspective), y the near haze's light cap (the horizon sky's light in
+// the sun's side azimuth times this, under 500 m), z the sky beams' share by the
+// sun, w the distance (m) from which surfaces take the beams in full.
+uniform vec4 airCamera;
 uniform sampler2D tex0;       // the dome shading's names (unused here)
 uniform sampler2D skyDensity;
 vec3 vWorldRel = vec3(0.0);
@@ -469,7 +474,13 @@ void main() {
         conf = 1.0 - smoothstep(0.5, 2.0, best);
     }
 
-    vec3 lin = toLinear(c.rgb);
+    // Under the photoreal camera (litCamera.x) the frame holds pre-exposed
+    // light on the camera's encoding: the air works in that light (its sky
+    // and sun, scene light, take the frame's pre-exposure litCamera.w) and
+    // stores the result the same way.
+    bool cam = litCamera.x > 0.5;
+    float pre = cam ? litCamera.w : 1.0;
+    vec3 lin = cam ? camDecode(c.rgb) : toLinear(c.rgb);
     vec3 added = vec3(0.0);
 
     // Haze and valley mist beyond the near distance, in closed form. The air
@@ -484,7 +495,7 @@ void main() {
         float len = dist - t0;
         float yA = litCamPos.y + dir.y * t0;
         float yB = litCamPos.y + rel.y;
-        vec3 tauAir = airMedium.x * vec3(0.85, 1.0, 1.2) *
+        vec3 tauAir = airMedium.x * (cam ? airCamera.x : 1.0) * vec3(0.85, 1.0, 1.2) *
                       airExpLength(max(yA, kAirSeaFloor), max(yB, kAirSeaFloor), len, kAirHazeScaleHeight);
         // The mist shows from the near distance and in full from airMedium.w
         // on: no cool lift over the mid field.
@@ -496,11 +507,25 @@ void main() {
         // The air, like the fog it replaces, stays on the sun (B3): under the
         // moon key litSunDir and litSun carry the moon, the sky's sun is set.
         float sunOn = smoothstep(-0.035, 0.0175, skySunDir().y) * litSunDir.w;
-        vec3 skyLim = toLinear(airSkyLimit(rel));
+        vec3 skyLim = toLinear(airSkyLimit(rel)) * pre;
+        if (cam) {
+            // The sky toward a low sun is its aureole, the light of the whole
+            // hazy path to the horizon: a cypress a few hundred metres out
+            // sees only its own short stretch of that air, so near surfaces
+            // fade toward the horizon sky of the sun's side azimuth (capped at
+            // airCamera.y of it), far ridges toward the full glow.
+            vec3 s = skySunDir();
+            vec3 side = vec3(-s.z, 0.0, s.x);
+            side = dot(side, side) > 1e-6 ? normalize(side) * 1000.0 : vec3(1000.0, 0.0, 0.0);
+            float refLum = dot(toLinear(airSkyLimit(side)) * pre, kLuma);
+            float cap = refLum * mix(airCamera.y, 8.0, smoothstep(500.0, 4000.0, dist));
+            float limLum = dot(skyLim, kLuma);
+            if (limLum > cap) skyLim *= cap / limLum;
+        }
         float skyLum = dot(skyLim, kLuma);
         vec3 zen = litZenith.rgb / max(dot(litZenith.rgb, kLuma), 1e-4);
         vec3 airAmb = mix(zen * (skyLum * kAirHazeShadowAmbient), skyLim, mix(1.0, vis, sunOn));
-        vec3 sunL = skySunRadiance() * (litZenith.w * sunOn);
+        vec3 sunL = skySunRadiance() * (litZenith.w * sunOn * pre);
         float cs = dot(dir, skySunDir());
         vec3 mistAmb = mix(vec3(skyLum), skyLim, 0.6) * mix(0.62, 0.85, vis);
         vec3 mistSun = sunL * ((0.10 + 0.07 * airHG(cs, 0.5)) * vis);
@@ -534,17 +559,33 @@ void main() {
         // and give it no boost, so crowns against the glow get no bright rim.
         shaft = mix(min(shaft, local), shaft, conf);
         float boost = (airBeams.z - 1.0) * conf;
+        // Under the camera a surface takes the beams by its distance (the air
+        // in front of a near cypress is a short stretch: the upsample and the
+        // contrast boost washed backlit crowns to white and lit a block by a
+        // bush), and the sky by the sun keeps airCamera.z of them (their
+        // radial streaks round a low sun).
+        float camBeams = 1.0;
+        if (cam) {
+            if (sky) {
+                vec3 d = rel / max(dist, 1e-3);
+                camBeams = mix(1.0, airCamera.z, smoothstep(0.85, 0.995, dot(d, skySunDir())));
+            } else {
+                camBeams = smoothstep(60.0, airCamera.w, dist);
+            }
+        }
+        vec2 boost2 = vec2(boost * camBeams, boost); // the sun's beams, the headlights'
         vec2 floorAt = (1.0 - airBeams.y) * shaft;
-        shaft = max(shaft - airBeams.y * local, floorAt) + boost * max(shaft - local, vec2(0.0));
-        glow = airSunColor.rgb * (shaft.x * air.a) + airSpotTint.rgb * shaft.y;
-        lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
+        shaft = max(shaft - airBeams.y * local, floorAt) + boost2 * max(shaft - local, vec2(0.0));
+        glow = airSunColor.rgb * (shaft.x * air.a * camBeams) + airSpotTint.rgb * shaft.y;
+        if (cam) glow *= pre;
+        lin += max(1.0 - lin, vec3(0.0)) * (1.0 - exp(-max(glow, vec3(0.0))));
     }
     if (airHalf.w > 0.5) {
         // The scattering alone over black (debug view 8, kDebugViewAir).
         fragColor = vec4(toDisplay(min(added + (1.0 - exp(-max(glow, vec3(0.0)))), vec3(1.0))), 1.0);
         return;
     }
-    vec3 col = toDisplay(clamp(lin, 0.0, 1.0));
+    vec3 col = cam ? camFold(lin) : toDisplay(clamp(lin, 0.0, 1.0));
     // Dither only what this pass changed; elsewhere the frame passes through
     // exactly (the 2.2 round trip is exact on 8-bit values).
     if (airBeams.w > 0.5 && max(max(added.r, added.g), max(added.b, max(glow.r, max(glow.g, glow.b)))) > 1e-5) {

@@ -9,6 +9,7 @@
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/Graphics/Remaster/SkyDensity.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
@@ -1097,8 +1098,10 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     // two passes, the luma sharpen, the canopy's sun-visibility pass, the air
     // pass's march, blur, mean and apply, the reflections' tag readout,
     // shares, trace, rough blur and composite, and the combat shadow mask and
-    // its blur
-    CHECK(post == 26);
+    // its blur, the surfaces lane's horizon occlusion and its accumulation
+    // over frames, the photoreal camera's meter, and the volumetric fog's
+    // injection, integration, near field, apply, horizon ring and night glow
+    CHECK(post == 35);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1125,6 +1128,40 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
                 ++strings;
             }
     CHECK(strings >= 32); // today 3 VS, 10 prelude pieces and 4 mains; 15 post strings
+}
+
+TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[Graphics][Shaders][remaster]")
+{
+    // The lit prelude stores with the same text the post passes decode with.
+    const std::string codec = gl::kCameraCodecGLSL;
+    CHECK(Piece(gl::FragmentPiece::Inputs).find(codec) != std::string::npos);
+    for (gl::PostShader s :
+         {gl::PostShader::Composite, gl::PostShader::BloomDown, gl::PostShader::Shafts, gl::PostShader::Meter,
+          gl::PostShader::AirApply, gl::PostShader::SsrTrace, gl::PostShader::SsrComposite})
+    {
+        CAPTURE(gl::PostShaderName(s));
+        CHECK(std::string(gl::PostShaderSource(s)).find(codec) != std::string::npos);
+    }
+    // Its constants are PhotoCamera.hpp's.
+    auto constant = [&](const std::string& src, const char* name)
+    {
+        const std::regex re(std::string("const float ") + name + R"(\s*=\s*([0-9.]+);)");
+        std::smatch m;
+        REQUIRE(std::regex_search(src, m, re));
+        return std::stof(m[1].str());
+    };
+    CHECK(constant(codec, "kCamKnee") == Catch::Approx(kEncodeKnee));
+    CHECK(constant(codec, "kCamMax") == Catch::Approx(kDecodeMax));
+    CHECK(constant(codec, "kCamPower") == Catch::Approx(kEncodePower));
+    CHECK(constant(codec, "kCamKneeCode") == Catch::Approx(std::pow(kEncodeKnee, 1.0f / 2.2f)).epsilon(1e-5));
+    CHECK(constant(codec, "kCamFoldSpan") ==
+          Catch::Approx(1.0f - std::pow(kEncodeKnee / kDecodeMax, kEncodePower)).epsilon(1e-5));
+    const std::string inputs = Piece(gl::FragmentPiece::Inputs);
+    CHECK(constant(inputs, "kCamSunRadius") == Catch::Approx(kSunDiscRadiusDeg * 3.14159265f / 180.0f).epsilon(1e-4));
+    CHECK(constant(inputs, "kCamSunLevel") == Catch::Approx(kSunDiscLevel));
+    const std::string skyPiece = Piece(gl::FragmentPiece::Sky);
+    CHECK(constant(skyPiece, "kCamSkyKnee") == Catch::Approx(kSkyRolloffKnee));
+    CHECK(constant(skyPiece, "kCamSkyCap") == Catch::Approx(kSkyRolloffCap));
 }
 
 TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")
@@ -1461,6 +1498,13 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litCanopy", LC::Canopy, 1},
         {"litDetail", LC::Detail, 1},
         {"litHaze", LC::Haze, 1},
+        {"litSurface", LC::Surface, 1},
+        {"litSurfCanopy", LC::SurfaceCanopy, 1},
+        {"litSurface2", LC::Surface2, 1},
+        {"litSkySh", LC::SurfaceSh, LC::SurfaceShCount},
+        {"litSurface3", LC::Surface3, 1},
+        {"litCamera", LC::Camera, 1},
+        {"litCameraLook", LC::CameraLook, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1547,10 +1591,16 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::Canopy) == 76);
     CHECK(static_cast<int>(LC::Canopy) == static_cast<int>(LC::Water1) + 1);
     CHECK(static_cast<int>(LC::Detail) == 77);
-    // B8 landed the haze at 78, the last planned slot.
+    // B8 landed the haze at 78, the last planned slot; the surfaces lane's
+    // slots follow it (79 to 88).
     CHECK(static_cast<int>(LC::Haze) == 78);
     CHECK(static_cast<int>(LC::Haze) == static_cast<int>(LC::Detail) + 1);
-    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Count));
+    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Haze) + 1);
+    CHECK(static_cast<int>(LC::Surface) == 79);
+    CHECK(static_cast<int>(LC::Surface3) == 88);
+    // The photoreal camera (look lane "light") follows the surface slots.
+    CHECK(static_cast<int>(LC::Camera) == 89);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::CameraLook) + 1);
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;
@@ -1613,8 +1663,11 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
     // feature's "off" is the frame before it.
     const std::string screen = gl::RemasterVertexSource(0); // VSScreen
     // B10 widened the gate by the clouds' slots (litSky, zero while they are
-    // off: see the clouds' own off case).
-    const size_t gate = screen.find("if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0) {");
+    // off: see the clouds' own off case), the photoreal camera by its own
+    // (litCamera.x, zero while it is off), which only gives the sun disk its
+    // view ray (vLitMode stays 0).
+    const size_t gate = screen.find(
+        "if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0 || litCamera.x > 0.5) {");
     REQUIRE(gate != std::string::npos);
     // vLitMode is 0 before the gate, 2 (dome), -2 (lit sky clouds) or -1
     // (pre-lit world) inside it.

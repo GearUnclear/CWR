@@ -71,7 +71,7 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
     // Remastered lighting: opaque draws write their ambient share into the
     // frame alpha and blended draws keep it (see EngineGL33_PostFX.cpp).
     const bool keepAlpha = _lightingActive;
-    SetLitOpaque(mode == BlendMode::Opaque);
+    SetLitOpaque(mode == BlendMode::Opaque, mode == BlendMode::Additive);
     // Each Poseidon::render::blend helper sets enable + func atomically; partial
     // state ("blend enabled but func not set") is unrepresentable.
     switch (mode)
@@ -98,6 +98,9 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
                 Poseidon::render::blend::Shadow();
             break;
     }
+    // The surfaces lane: opaque and alpha-blended lit draws write the surface
+    // target (blended by their own alpha), additive glows and shadow quads not.
+    UpdateSurfaceMask();
 }
 
 void EngineGL33::ApplyDepthMode(DepthMode mode)

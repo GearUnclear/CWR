@@ -1,0 +1,9 @@
+# look-light motion captures on Abel: gen_look_motion.py (pan across a low sun, shade to sky).
+# Generated, do not edit. A photo and timing generator, not a regression test:
+# run it with run-captures.ps1.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_abel.Abel"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 3600
+assert_timeout = 240
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "1920", "--height", "1080"]

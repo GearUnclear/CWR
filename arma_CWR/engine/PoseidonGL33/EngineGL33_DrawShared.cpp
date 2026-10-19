@@ -1,5 +1,7 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <Poseidon/Graphics/Remaster/NightLights.hpp>
+#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
+#include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 
@@ -15,6 +17,24 @@ inline int FracAlpha(float a)
 void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
                            const MipInfo& mip, int specFlags)
 {
+    // A light's flare (Scene::DrawFlare: an IsLight decal drawn without the
+    // depth test, the sun's and the lamps'; fire and explosion sprites are
+    // depth tested and keep their light) under the photoreal camera
+    // (photoLight): by day none (the sun's disc and the camera's glare carry
+    // the sun; its rays were the starburst round a low sun and, added over the
+    // bright sky, ran the frame's codes into the top of the encoding), at
+    // night a lamp's halo (PhotoCamera.hpp kCameraFlareNight).
+    constexpr int kFlareBits =
+        static_cast<int>(Poseidon::render::Backend::IsLight) | static_cast<int>(Poseidon::render::Backend::NoZBuf);
+    if ((specFlags & kFlareBits) == kFlareBits && _camera.frameOn && _camera.frame == GetFrameCounter())
+    {
+        const float night =
+            _camera.nightEffect < 0.0f ? 0.0f : (_camera.nightEffect > 1.0f ? 1.0f : _camera.nightEffect);
+        const float share = Poseidon::remaster::kCameraFlareNight * night;
+        if (share <= 0.0f)
+            return;
+        color.SetA8(toInt(static_cast<float>(color.A8()) * share));
+    }
     float vx = screen.X();
     float vy = screen.Y();
     float z = screen.Z();
@@ -237,6 +257,10 @@ void EngineGL33::DrawPoints(int beg, int end)
 
         const TLVertex& v = _mesh->GetVertex(i);
         PackedColor color = v.color;
+        // The volumetric fog's wet air over the eye hides the stars
+        // (EngineGL33_PostFog.cpp, FogStarKeep).
+        if (_fog.on && _fog.starKeep < 0.999f)
+            color = PackedColorRGB(color, static_cast<int>(color.A8() * _fog.starKeep));
         if (color.A8() < 8)
         {
             continue; // do not draw stars that are not visible

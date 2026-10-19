@@ -1125,9 +1125,26 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo)
     if (e[0] + e[1] + e[2] <= 1e-5f)
         return color;
     const float gain = set.Tuning().smoke;
-    return Color(lighting::CombatParticleChannel(color.R(), e[0], gain),
-                 lighting::CombatParticleChannel(color.G(), e[1], gain),
-                 lighting::CombatParticleChannel(color.B(), e[2], gain), color.A());
+    // The light's hue on the particle's own colour (CombatTuning::smokeTint).
+    Color base = color;
+    const float tint = set.Tuning().smokeTint;
+    if (tint > 0.0f)
+    {
+        const float peak = std::max(e[0], std::max(e[1], e[2]));
+        const float lum = 0.2126f * e[0] + 0.7152f * e[1] + 0.0722f * e[2];
+        const float w = tint * (1.0f - std::exp(-lum * 0.6f));
+        float c[3] = {color.R(), color.G(), color.B()};
+        for (int i = 0; i < 3; ++i)
+        {
+            const float hue = std::pow(std::max(e[i] / peak, 0.0f), 1.6f);
+            const float lin = std::pow(std::max(c[i], 0.0f), 2.2f) * (1.0f + (hue - 1.0f) * w);
+            c[i] = std::pow(lin, 1.0f / 2.2f);
+        }
+        base = Color(c[0], c[1], c[2], color.A());
+    }
+    return Color(lighting::CombatParticleChannel(base.R(), e[0], gain),
+                 lighting::CombatParticleChannel(base.G(), e[1], gain),
+                 lighting::CombatParticleChannel(base.B(), e[2], gain), color.A());
 }
 } // namespace
 

@@ -121,6 +121,12 @@ vec3 tonemapNeutral(vec3 c) {
 )";
 
 const char kPostSsrTraceMainGLSL[] = R"(
+// Under the photoreal camera (litCamera.x) the frame holds pre-exposed light
+// on the camera's encoding: the trace reads it decoded, and takes the sky
+// (scene light) at the frame's pre-exposure, so its reflection is in the
+// frame's own light.
+vec3 frameLin(vec3 c) { return litCamera.x > 0.5 ? camDecode(c) : toLinear(c); }
+vec3 skyLin(vec3 disp) { return toLinear(disp) * (litCamera.x > 0.5 ? litCamera.w : 1.0); }
 // ---- The march (ScreenReflections.hpp; SsrMarchRow mirrors it) ----
 const int kSsrSteps = 48;
 const float kSsrStride = 1.5;
@@ -380,15 +386,15 @@ vec3 streakSample(vec2 uv, float pxV, float pxH) {
     float lod = clamp(log2(max(max(pxH, stepPx), 1.0)), 0.0, maxLod);
     vec2 lo = worldRect.xy;
     vec2 hi = worldRect.xy + worldRect.zw;
-    vec3 acc = toLinear(textureLod(mipTex, uv, lod).rgb);
+    vec3 acc = frameLin(textureLod(mipTex, uv, lod).rgb);
     float wsum = 1.0;
     for (int k = 1; k <= kSsrStreakTaps; ++k) {
         if (float(k) > n) break;
         float x = float(k) / n;
         float w = exp(-2.0 * x * x);
         vec2 o = vec2(0.0, float(k) * stepPx / screen.y);
-        acc += (toLinear(textureLod(mipTex, clamp(uv + o, lo, hi), lod).rgb) +
-                toLinear(textureLod(mipTex, clamp(uv - o, lo, hi), lod).rgb)) * w;
+        acc += (frameLin(textureLod(mipTex, clamp(uv + o, lo, hi), lod).rgb) +
+                frameLin(textureLod(mipTex, clamp(uv - o, lo, hi), lod).rgb)) * w;
         wsum += 2.0 * w;
     }
     return acc / wsum;
@@ -417,7 +423,7 @@ float coverOpacity(vec4 cover, vec2 afterS, int kind, float travel) {
 // table's sky (or the fog colour toward the sun without it).
 vec3 skyEstimate(vec3 dirW, float lod) {
     vec3 up = normalize(vec3(dirW.x, max(dirW.y, 0.01), dirW.z));
-    vec3 s = toLinear(skyReflection(up));
+    vec3 s = skyLin(skyReflection(up));
     vec3 dV = w2v * dirW;
     if (dV.z > 0.02) {
         vec2 ui = uvOfView(dV);
@@ -427,7 +433,7 @@ vec3 skyEstimate(vec3 dirW, float lod) {
             vec2 uk = vec2(uc.x, mix(uc.y, top, float(k) / float(kSsrSkySearch)));
             if (sceneZ(halfOfUv(uk)) >= kSsrSkyDepth) {
                 float pull = length((ui - uk) / worldRect.zw);
-                s = mix(s, toLinear(textureLod(mipTex, uk, lod).rgb), exp(-1.5 * pull));
+                s = mix(s, frameLin(textureLod(mipTex, uk, lod).rgb), exp(-1.5 * pull));
                 break;
             }
         }
@@ -548,7 +554,7 @@ void main() {
             R = waterImage(hitS, travel, relW, rP, z, sigma, vW.y, pixAngle, conf, pxH);
         } else if (kind == 3) {
             // Under a hull: the water there sees the hull's unlit underside.
-            R = toLinear(textureLod(mipTex, uvOfHalf(hitS), 1.0).rgb) * kSsrUnderside;
+            R = frameLin(textureLod(mipTex, uvOfHalf(hitS), 1.0).rgb) * kSsrUnderside;
             conf = 1.0 - smoothstep(0.5 * kSsrBehindNear, kSsrBehindNear, travel);
         }
         // A covered panel the ray met first (a boat's canvas or glass) lies
@@ -570,8 +576,8 @@ void main() {
         float Ff = 0.02 + 0.98 * pow(1.0 - clamp(vW.y, 0.0, 1.0), 5.0);
         float skyMean = litWater0.z * mix(kSeaFarSkyFloor, 1.0, 1.0 - smoothstep(kSeaFarSkyStart, kSeaFarSkyEnd, dist));
         vec3 rS = normalize(vec3(rP.x, max(rP.y, 0.01), rP.z));
-        vec3 S = toLinear(mix(skyReflection(rS), fogColor.rgb, litWater0.w)) * mix(1.0, 0.82, smoothstep(0.15, 0.9, rS.y));
-        float seaLum = dot(toLinear(textureLod(mipTex, uvC, kSsrSeaBlurLod).rgb), kLuma);
+        vec3 S = skyLin(mix(skyReflection(rS), fogColor.rgb, litWater0.w)) * mix(1.0, 0.82, smoothstep(0.15, 0.9, rS.y));
+        float seaLum = dot(frameLin(textureLod(mipTex, uvC, kSsrSeaBlurLod).rgb), kLuma);
         float share = clamp(skyMean * Ff * dot(S, kLuma) / max(seaLum, 1e-4), 0.0, 1.0);
         // Shallow water shows its floor, not a mirror.
         float depthFade = 1.0;
@@ -644,7 +650,7 @@ void main() {
             // Under a vehicle, behind a kerb: the hidden, unlit side of what the
             // ray went behind (taking the ground's own colour drew pale boxes),
             // fading out where that information ends.
-            R = toLinear(textureLod(mipTex, uvOfHalf(hitS), 1.0).rgb) * kSsrUnderside;
+            R = frameLin(textureLod(mipTex, uvOfHalf(hitS), 1.0).rgb) * kSsrUnderside;
             conf = 1.0 - smoothstep(0.5 * kSsrBehindNear, kSsrBehindNear, travel);
             pxH = 0.7 * cone * travel / (max(sceneZ(hitS), 0.1) * pixAngle);
         }
@@ -744,6 +750,7 @@ void main() {
 const char kPostSsrCompositeInputsGLSL[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D colorTex;    // unit 0: the resolved frame (display; alpha the sky light share)
+uniform vec4 ssrCamera;        // x 1 = the photoreal camera: the frame holds pre-exposed light (camDecode, camFold)
 uniform sampler2D tagTex;      // unit 2: the stencil tags (R8: value / 255)
 uniform sampler2D traceTex;    // unit 3: half res: rgb add (linear), a = m + 4 surface
 uniform sampler2D linDepthTex; // unit 4: half-resolution view depth (m)
@@ -812,8 +819,11 @@ void main() {
         return;
     }
     // Water: a multiplier per channel; the ground: a multiply and an add.
-    vec3 lin = surface == 2 ? toLinearC(c.rgb) * add : toLinearC(c.rgb) * m + add;
-    fragColor = vec4(toDisplayC(max(lin, vec3(0.0))), c.a);
+    // Under the photoreal camera in the frame's own (pre-exposed) light.
+    bool cam = ssrCamera.x > 0.5;
+    vec3 base = cam ? camDecode(c.rgb) : toLinearC(c.rgb);
+    vec3 lin = surface == 2 ? base * add : base * m + add;
+    fragColor = vec4(cam ? camFold(lin) : toDisplayC(max(lin, vec3(0.0))), c.a);
 }
 )";
 

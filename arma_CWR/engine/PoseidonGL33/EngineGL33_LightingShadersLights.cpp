@@ -196,6 +196,11 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
     float I = spot ? peak * lowBeamPattern(-L, frameLights[at + 3].xyz) : peak;
     if (I <= 0.0) return;
     I *= (1.0 - smoothstep(0.5 * end2, end2, d2)) * smoothstep(kNightNearStart, kNightNearEnd, d);
+    // Under the photoreal camera a street lamp lays a stronger pool
+    // (litCameraLook.z; the night's exposure sits far under the day's), and
+    // its head shades what is within a few metres of the bulb (its own pole,
+    // which the stronger lamp lit white from top to bottom).
+    if (litCamera.x > 0.5 && !spot) I *= litCameraLook.z * smoothstep(1.5, 4.5, d);
     float E = I / (d2 + kNightSoftening);
     // A lamp's authored colour; a headlight white at its colour's luminance
     // (FrameLights.hpp PhysicalColour: the rosy beam turned khaki verges tan).
@@ -215,7 +220,10 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
         nl *= max((0.72 + 0.33 * s / t) / 0.72, 0.0);
     }
     g_physicalLocal += kd * col * nl;
-    if (!spot) g_physicalLocal += ka * toLinear(frameLights[at + 2].rgb) * (0.3 * min(E, 0.3));
+    // (Under the photoreal camera the lamp keeps litCameraLook.y of this glow:
+    // it lit a lamp's pole evenly along its whole height.)
+    if (!spot) g_physicalLocal += ka * toLinear(frameLights[at + 2].rgb) * (0.3 * min(E, 0.3)) *
+                                  (litCamera.x > 0.5 ? litCameraLook.y : 1.0);
     float power = litMatSpecular.w;
     if (power > 0.0 && nl > 0.0) {
         vec3 h = normalize(L + g_lightView);

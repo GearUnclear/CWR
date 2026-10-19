@@ -447,6 +447,9 @@ void EngineGL33::PostSsr(PostFrame& f)
     BindTex(3, s.mipTex);
     BindTex(4, _terrainHeightTex ? _terrainHeightTex : _dummyHeightTex);
     BindTex(5, p.depthTex);
+    // (The raw binds above left the bind cache's active unit stale: without
+    // this the sky table could land on unit 5, the depth's; look director.)
+    GL33Bind::Invalidate();
     BindSkyTable();
     Set4(tr, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
     Set4(tr, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
@@ -503,6 +506,7 @@ void EngineGL33::PostSsr(PostFrame& f)
          static_cast<float>(f.hh));
     Set4(co, "debugView", debug == rm::kDebugViewSsrTags ? 1.0f : 0.0f,
          debug == rm::kDebugViewSsrReflection ? 1.0f : 0.0f, 0.0f, 0.0f);
+    Set4(co, "ssrCamera", f.camera ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     DrawTo(s.outFbo, f.w, f.h);
     f.frameColor = s.outTex;
 }

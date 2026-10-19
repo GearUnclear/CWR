@@ -49,6 +49,9 @@ constexpr float kSkyNight = 0.0009f; // display parity with the classic night am
 constexpr float kMoonFull = 0.02f;
 constexpr float kMoonSky = 0.25f;
 constexpr float kGroundAlbedo = 0.2f;
+// The photoreal rig's ground: CWA's ground textures are pale (sand, dry
+// grass, gravel), and the light they bounce is what shows a hull's shaded side.
+constexpr float kPhysicalGroundAlbedo = 0.4f;
 constexpr float kExtinction = 0.05f; // optical depth per air mass beyond the zenith
 constexpr float kCloudTransmit = 0.2f;
 // The clearest weather the engine has is not cloud-free: setOvercast 0 sits
@@ -68,7 +71,117 @@ float SkyDayFraction(float sinSun)
     const float day = std::pow(std::min(std::max(sinSun / 0.866f, 0.0f), 1.15f), 0.6f);
     return std::max(day, 0.12f * Smoothstep(-0.10f, 0.03f, sinSun));
 }
+
+// The photoreal rig (FeatureSet::photoLight): sun and sky from the sky
+// table's atmosphere (LightRigInputs::physical) in their physical ratio and
+// colours. `rig` holds the cloud fields already; `overcastDim` and
+// `fieldMean` are the sun's uniform and cloud-field dimming, `aboveHorizon`
+// the sun's fade at the horizon. No exposure meter: the camera meters the
+// frame (PhotoCamera.hpp).
+LightRig ComputePhysicalRig(const LightRigInputs& in, const LightingTuning& tuning, LightRig rig, float overcastDim,
+                            float fieldMean, float aboveHorizon)
+{
+    const PhysicalSky& p = in.physical;
+    const float sinSun = std::max(-1.0f, std::min(1.0f, in.towardSun[1]));
+    const float skyThrough = Clamp01(in.skyThrough);
+    const float cover = 1.0f - skyThrough;
+    const float scale = (1.0f / kBrightness) / std::max(p.referenceIrradiance, 1e-6f);
+
+    // --- sun: the transmittance of the air toward it, less what the
+    // weather's veil (CameraWeatherVeil) diffuses ---------------------------
+    const float veil = CameraWeatherVeil(in.skyThrough);
+    const float sunGain = scale * overcastDim * aboveHorizon * tuning.sun * (1.0f - kVeilSunLoss * veil);
+    rig.sun = p.sun * sunGain;
+    // A summer day's aerosol on the sun's own path, beyond the table's air
+    // (whose haze is kept thin so the sky does not go white): extinction at
+    // kSunAerosolTau (550 nm) with the Angstrom exponent 1.3, per air mass
+    // past the zenith's, so a sun under 20 degrees turns golden on the ground
+    // it lights while a high sun stays white.
+    {
+        const float am = std::min(AirMass(std::max(p.sunElevationDeg, 0.0f)) - 1.0f, kSunAerosolMaxAirMass);
+        const float tau = kSunAerosolTau * am;
+        rig.sun = rig.sun * Rgb(std::exp(-tau * 0.80f), std::exp(-tau), std::exp(-tau * 1.30f));
+    }
+    // --- sky: the clear sky dims under cloud, and the deck sends down part of
+    // the sunlight it takes out as a grey, even light (a uniform dome lights a
+    // wall with half of what it gives the ground); the veil's share with it.
+    const float clearSunUp = Luminance(p.sun) * scale * aboveHorizon * std::max(sinSun, 0.0f);
+    const float lost = clearSunUp * (1.0f - (skyThrough * 0.8f + 0.2f)) +
+                       clearSunUp * (skyThrough * 0.8f + 0.2f) * kVeilSunLoss * veil;
+    const float clearShare = 1.0f - 0.5f * cover;
+    const Rgb grey = NormaliseLuminance(Rgb(0.96f, 1.0f, 1.05f)) * (kOvercastDiffuse * lost);
+    const float skyK = scale * clearShare * tuning.sky;
+    // The twilight's fill (DuskFillScale): a pale plain under a dusk sky is
+    // darker than the sky at its horizon.
+    const float duskFill = DuskFillScale(p.sunElevationDeg);
+    Rgb up = (PhysicalSkyFill(p.skyUp, p.sun) * skyK + grey * tuning.sky) * duskFill;
+    Rgb sunward = (PhysicalSkyFill(p.skySunward, p.sun) * skyK + grey * (0.5f * tuning.sky)) * duskFill;
+    Rgb anti = (PhysicalSkyFill(p.skyAntiSun, p.sun) * skyK + grey * (0.5f * tuning.sky)) * duskFill;
+    // Night: the classic night ambient as the floor (a moonless night keeps
+    // the classic level), the moon as the key light with its sky as fill.
+    const float upLum = Luminance(up);
+    const float floorLum = kSkyNight * kPhysicalNightFill * tuning.sky;
+    if (upLum < floorLum)
+    {
+        const Rgb nightZenith = NormaliseLuminance(Rgb(0.60f, 0.69f, 0.88f)) * floorLum;
+        const float t = upLum / floorLum;
+        up = Mix(nightZenith, up, t);
+        sunward = Mix(nightZenith * 0.55f, sunward, t);
+        anti = Mix(nightZenith * 0.55f, anti, t);
+    }
+    const float sinMoon = std::max(in.towardMoon[1], 0.0f);
+    const float moonUp = Smoothstep(0.0f, 0.2f, sinMoon);
+    const float night = Clamp01(in.nightEffect);
+    const float moonPower =
+        kMoonFull * Clamp01(in.moonPhaseLight) * moonUp * night * (skyThrough * 0.8f + 0.2f) * tuning.moonlight;
+    const Rgb moonChroma = NormaliseLuminance(Rgb(0.82f, 0.90f, 1.00f));
+    rig.moon = moonChroma * moonPower;
+    const float moonSky = kMoonSky * moonPower * tuning.sky;
+    rig.skyZenith = up + moonChroma * moonSky;
+
+    // --- ground bounce: the open ground lit by sun, sky and moon, in the
+    // colour of that light (the shader tints it by the ground below).
+    const Rgb sunOnGround = rig.sun * (std::max(sinSun, 0.0f) * fieldMean);
+    const Rgb groundLight = sunOnGround + up + rig.moon * sinMoon + moonChroma * moonSky;
+    rig.skyGround = groundLight * (kPhysicalGroundAlbedo * tuning.bounce);
+    const Rgb moonHorizon = moonChroma * (0.55f * moonSky);
+    rig.skyHorizonSun = sunward + rig.skyGround * 0.5f + moonHorizon;
+    rig.skyHorizon = anti + rig.skyGround * 0.5f + moonHorizon;
+    rig.exposure = tuning.exposure;
+    rig.physical = true;
+    rig.illuminant = sunOnGround + up;
+
+    // --- the clear sky: the table's radiance at the rig's scale, so the dome,
+    // the fog colour and the sky the sea reflects stand in their physical
+    // ratio to the sunlit ground (a deep zenith, a pale bright horizon).
+    rig.skyScale = PhysicalRadianceToDisplay(scale) * tuning.camSky;
+    return rig;
+}
 } // namespace
+
+Rgb PhysicalSkyFill(const Rgb& c, const Rgb& sun)
+{
+    (void)sun;
+    const float l = Luminance(c);
+    return Mix(c, Rgb(l, l, l), kPhysicalSkyWhiten) * kPhysicalSkyGain;
+}
+
+float CameraWeatherVeil(float skyThrough)
+{
+    return Smoothstep(kVeilClearFrom, kVeilFullAt, skyThrough);
+}
+
+float DuskFillScale(float sunElevationDeg)
+{
+    const float w = Smoothstep(kDuskFillFromDeg, kDuskFillFullDeg, sunElevationDeg) *
+                    (1.0f - Smoothstep(kDuskFillFullDeg - 4.0f, kDuskFillNightDeg, sunElevationDeg));
+    return 1.0f - kDuskFillCut * w;
+}
+
+float PhysicalRadianceToDisplay(float scale)
+{
+    return kBrightness * kPi * scale;
+}
 
 float Luminance(const Rgb& c)
 {
@@ -262,8 +375,24 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     const float fieldMean = 1.0f - fieldCover * (1.0f - rig.cloudTransmit);
     const float overcastDim = std::min(1.0f, (skyThrough * 0.8f + 0.2f) / fieldMean);
 
-    const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);
+    if (in.physical.valid && tuning.features.photoLight > 0.0f)
+    {
+        // The photoreal rig keeps no classic mean sun: the sky's own clouds
+        // cast their full shadow (kPhysicalCloudTransmit) over the share they cover,
+        // and the gaps between them get the full sun, so broken cloud reads as
+        // sunlit patches and cloud shadows (the camera meters the result).
+        float physicalDim = overcastDim;
+        float physicalMean = fieldMean;
+        if (clouds && in.skyShadowCoverage >= 0.0f)
+        {
+            rig.cloudTransmit = 1.0f - (1.0f - kPhysicalCloudTransmit) * std::min(1.0f, tuning.cloudShadows);
+            physicalMean = 1.0f - fieldCover * (1.0f - rig.cloudTransmit);
+            physicalDim = 1.0f;
+        }
+        return ComputePhysicalRig(in, tuning, rig, physicalDim, physicalMean, aboveHorizon);
+    }
+    const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
     const float clearSun = kSunNoon * extinction * aboveHorizon;
     const float sunPower = clearSun * overcastDim * tuning.sun;
     const Rgb sunChroma = lowSunRig ? LowSunChroma(elevation, in.classicSunDiffuse, tuning.warmth)

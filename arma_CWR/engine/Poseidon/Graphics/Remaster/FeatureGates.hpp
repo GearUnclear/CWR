@@ -103,10 +103,38 @@ struct Gate
     const char* reason = "not computed";
 };
 
+// The photoreal camera's state (photoLight, PhotoCamera.hpp) for the capture
+// logs: the exposure in use and the one it adapts toward (log2), the last
+// meter's mean and highlight (log2 scene luminance), the white balance's
+// strength, the clear sky's gain, the rig's sun and sky luminance on an
+// up-facing surface, and how many meter readbacks arrived.
+struct CameraReadout
+{
+    bool valid = false;
+    float exposureLog2 = 0.0f;
+    float targetLog2 = 0.0f;
+    float meterMean = 0.0f;
+    float meterHighlight = 0.0f;
+    float whiteBalance = 0.0f;
+    float skyScale = 0.0f;
+    float preExposureLog2 = 0.0f;
+    float sunLum = 0.0f;
+    float skyUpLum = 0.0f;
+    std::uint32_t readbacks = 0;
+    // The camera's own CPU time on the render thread (ms, smoothed): taking a
+    // finished readback with the meter's histogram and guards, and queuing
+    // this frame's meter; and the meters not queued because the ring's slot
+    // was still in flight (the CPU never waits on the GPU).
+    float cpuCollectMs = 0.0f;
+    float cpuQueueMs = 0.0f;
+    std::uint32_t skippedMeters = 0;
+};
+
 struct FeatureGates
 {
     Gate gate[kFeatureCount];
     GateInputs inputs;
+    CameraReadout camera; // filled by the backend when it hands the gates out
     bool computed = false;
     std::uint32_t frame = 0; // backend frame counter when computed
     const Gate& operator[](Feature f) const { return gate[static_cast<int>(f)]; }
@@ -120,7 +148,8 @@ float GateWetness(const GateInputs& in);
 
 // triFeatureState: the switches and their gates as one line, for capture logs.
 //   "mode=remastered gates=1 computed=1 frame=<n> sun=<deg> night=<0..1> sky=<0..1> rain=<0..1> wet=<0..1>
-//    fog=<0..1> lights=<n> landed=<n>/<26> | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ..."
+//    fog=<0..1> lights=<n> landed=<n>/<n> | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...
+//    [| cam ev=.. target=.. mean=.. high=.. wb=.. sky=.. sun=.. skyup=.. reads=..]"
 // Fields are separated by spaces, never ';' (the UDCAP log lines split on it);
 // reasons have their spaces replaced by '-'. ":inert" marks a switch that
 // nothing reads yet (FeatureInfo::landed false), so its on and off look the

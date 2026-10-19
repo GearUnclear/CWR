@@ -41,12 +41,15 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/AirMedium.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
+#include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <Poseidon/Graphics/Remaster/Wetness.hpp>
+#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 
 #include <memory>
 
@@ -707,6 +710,7 @@ class EngineGL33 : public Engine
     bool GetFeatureGates(Poseidon::remaster::FeatureGates& out) const override
     {
         out = _featureGates;
+        out.camera = CameraReadoutNow();
         return true;
     }
     bool LocalLightsFromTiles() const override { return _lightTilesActive; }
@@ -717,7 +721,14 @@ class EngineGL33 : public Engine
     void MarkWorldOverlay() override
     {
         if (_worldPassOpen)
+        {
+            // The world as it was before the first overlay of the frame: the
+            // fog applies to it, and the overlay's darkening is laid back
+            // over the fogged world (EngineGL33_PostFog.cpp).
+            if (!_worldOverlayDrawn)
+                SnapshotWorldBeforeOverlay();
             _worldOverlayDrawn = true;
+        }
     }
     std::string ShaderOverrideDirectory() const override { return ShaderOverrideDir(); }
     void SetGpuTimingEnabled(bool enabled) override;
@@ -789,8 +800,12 @@ class EngineGL33 : public Engine
     // Opaque draw in flight: the remastered shaders store one minus the sky
     // light share in alpha (EngineGL33_PostFX.cpp). Mirrors LitConstants.flags.x.
     bool _litOpaque = false;
+    bool _litAdditive = false;
     // The rig's sun colour this frame (sun-shaft tint) and its exposure.
     Color _lightRigSun = Color(1, 1, 1, 1);
+    // The rig's sky light on an up-facing surface (the photoreal camera's sky
+    // clouds read it).
+    Color _lightRigSky = Color(0, 0, 0, 1);
     float _lightRigExposure = 1.0f;
     // The air pass (B8, EngineGL33_PostAir.cpp): this frame's medium and which
     // of its parts run (their switches and gates), set with the gates at the
@@ -836,7 +851,7 @@ class EngineGL33 : public Engine
     // The draw's own light list into the per-draw light slots; while the tiled
     // list lights the pass, only the draw's night factor (litLightCount.z).
     void UploadLitLights(const LightList& lights, float nightEffect);
-    void SetLitOpaque(bool opaque);
+    void SetLitOpaque(bool opaque, bool additive = false);
     // The terrain detail (B11) runs on the land only: the land and the sea are
     // both drawn by PSDetail, the land with the DetailTexture bit, the sea with
     // SpecularTexture. Sets litDetail.w for the draw ApplyPassState prepares.
@@ -1005,6 +1020,56 @@ class EngineGL33 : public Engine
     bool BuildCanopySunGpu(const Vector3& toSun, float originX, float originZ, float texel);
     void UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, float skyThrough);
     void BindCanopy();
+    // The canopy heightfield as the world programs read it for the sky it
+    // hides (the surfaces lane): height base, range, 1 / extent, 1 when there
+    // is an uploaded canopy (else all zero).
+    void SurfaceCanopyConstants(float out[4]) const;
+
+    // Surfaces and ambient light (the look lane "surface",
+    // Graphics/Remaster/SurfaceLight.hpp; EngineGL33_Surface.cpp).
+    //   - The surface target: a second multisampled colour attachment of the
+    //     frame target (RGBA8), drawn only while a remastered world pass runs
+    //     with the switch on: the share of each pixel's light the horizon
+    //     occlusion may darken, the albedo and the sun's share. Draw buffers 0
+    //     and 1 from the world's first pass to EndWorldScene; the write mask of
+    //     attachment 1 follows the bound program (the remastered lit programs
+    //     write it) and the blend mode (opaque and alpha-blended draws).
+    //   - The sky light's spherical harmonics, projected on a worker thread from
+    //     the atmosphere tables whenever the sky table is rebuilt.
+    //   - The per-draw surface class (the lit programs' uniform surfClass)
+    //     from the section's texture and the drawn object's kind.
+    unsigned int _surfRb = 0;       // the surface target's renderbuffer (attachment 1 of _ssaaFbo)
+    int _surfRbSamples = 0;         // its sample count
+    bool _surfTargetOn = false;     // draw buffers 0 and 1 are on (this world pass)
+    bool _surfMaskOn = true;        // attachment 1's colour mask
+    bool _surfProgram = false;      // the bound program writes fragSurf
+    bool _surfFrameWritten = false; // this frame's world wrote the target (EndWorldScene reads it)
+    bool SurfaceWanted() const;     // the switch and its gate, this frame, in the world's passes
+    void BeginSurfaceTarget();
+    void EndSurfaceTarget();
+    void DestroySurfaceTarget();
+    void UpdateSurfaceMask(bool force = false);
+    void UploadLitSurface(const Poseidon::remaster::LightRig& rig, float skyThrough);
+    // Sets surfClass on the bound lit program when it changed.
+    void ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);
+    // The occlusion accumulated over frames (EngineGL33_PostFX.cpp): which
+    // target holds the last one and for which frame and size; _surfAoOut is
+    // this frame's result for the composite (0: the blurred aoTex[0]).
+    struct SurfAoHistory
+    {
+        bool exists = false;
+        std::uint32_t frame = 0;
+        int w = 0, h = 0;
+        int idx = 0;
+    } _surfAoHist;
+    unsigned int _surfAoOut = 0;
+    void ResetSurfaceClassPrograms();   // the lit programs were deleted (their uniform cache goes)
+    unsigned int _surfBoundProgram = 0; // the bound program when it writes fragSurf, else 0
+    void SurfaceEnterInterior();        // a depth clear inside the world pass: a vehicle interior draws next
+    // The sky light (EngineGL33_SkyTable.cpp): starts a projection when the
+    // sky table was rebuilt or the haze changed, collects a finished one.
+    void PollSkyLightSH();
+    const Poseidon::remaster::SkyLightSH& SkyLightSHNow() const;
     // One LitConstants slot (flushed with the next FlushLitConstants), and the
     // sky mode (litSkyFwd.w, flushed at once).
     void SetLitSlot(int slot, float x, float y, float z, float w);
@@ -1046,6 +1111,16 @@ class EngineGL33 : public Engine
         unsigned int airMarchFbo = 0, airFbo[2] = {}, airMeanFbo = 0, airOutFbo = 0;
         unsigned int progAirMarch = 0, progAirBlur = 0, progAirMean = 0, progAirApply = 0;
         bool airUnavailable = false; // its programs failed: the air pass never runs, the rest does
+        // The surfaces lane: the surface target resolved (RGBA8, full res) and
+        // the horizon occlusion's program (writes aoTex like progAo).
+        unsigned int surfTex = 0, surfFbo = 0;
+        unsigned int progGtao = 0;
+        // Its occlusion accumulated over TAA frames (RG16F half res, ping-pong).
+        unsigned int gtaoHistTex[2] = {}, gtaoHistFbo[2] = {};
+        unsigned int progGtaoAccum = 0;
+        // The photoreal camera's meter (EngineGL33_Camera.cpp): kMeterWidth x
+        // kMeterHeight RGBA16F, read back through _camera's ring.
+        unsigned int meterTex = 0, meterFbo = 0, progMeter = 0;
         bool programsTried = false;
         bool unavailable = false;
     } _post;
@@ -1081,6 +1156,88 @@ class EngineGL33 : public Engine
     // samplers, each only when it changes.
     void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
     void BeginTranslucentObjects() override;
+    // The photoreal camera (look lane "light", feature switch photoLight;
+    // EngineGL33_Camera.cpp, Graphics/Remaster/PhotoCamera.hpp): the physical
+    // rig's inputs, the metered and adapted exposure, the white balance, and
+    // the meter pass with its readback (a ring of pixel-pack buffers read a few
+    // frames later; the CPU never waits on the GPU).
+    struct CameraState
+    {
+        // Four slots: the driver runs up to three frames ahead; a slot whose
+        // fence has not passed is never reused (that frame's meter is skipped).
+        static constexpr int kRing = 4;
+        // This frame's world passes write scene light (decided with the gates,
+        // read by the post pass).
+        bool frameOn = false;
+        std::uint32_t frame = 0;
+        // Exposure (log2 of the gain before the curve): in use and adapting
+        // toward the target of the last meter.
+        float exposureLog2 = 0.0f;
+        float targetLog2 = 0.0f;
+        bool adapted = false;
+        bool snap = true; // take the next meter at once (a cut, a mode change)
+        double lastStep = -1.0;
+        float lastCam[3] = {};
+        float lastDir[3] = {};
+        bool haveCam = false;
+        Poseidon::remaster::MeterResult meter;
+        float nightEffect = 0.0f;
+        float duskEffect = 0.0f; // CameraDusk: the dusk's exposure share (look director)
+        float duskKeep = 0.0f;   // CameraDuskKeep: the dusk's dark keep share (look director round 2)
+        float golden = 0.0f;     // CameraGolden: the golden hour's warmth (look director round 2)
+        float timeEv = 0.0f;     // CameraTimeOfDayEv: the golden hour's and the high sun's EV (look director round 2)
+        // Colour: white balance times the scene saturation.
+        Poseidon::remaster::Mat3 color;
+        float shadeCool = 0.0f; // the cool shade of a low sun (composite camShade.w)
+        float whiteBalance = 0.0f;
+        float skyScale = 0.0f;
+        float sunLum = 0.0f, skyUpLum = 0.0f;
+        // Pre-exposure: the exposure (log2) the world's passes of this frame
+        // stored their light at (litCamera.w), set once per frame from the
+        // exposure in use when the frame began; the composite applies the
+        // rest (exposureLog2 - preExposureLog2).
+        float preExposureLog2 = 0.0f;
+        std::uint32_t preExposureFrame = 0xffffffffu;
+        // The physical sky, recomputed when the sun moved, and the reference.
+        Poseidon::remaster::PhysicalSky physical;
+        float physicalHaze = -1.0f;
+        float referenceIrradiance = 0.0f;
+        Poseidon::remaster::Rgb referenceIlluminant;
+        float referenceHaze = -1.0f;
+        // GL: the readback ring of the meter pass (its target and program
+        // are post targets: _post.meterTex, _post.progMeter), each slot with
+        // the frame it metered.
+        unsigned int pbo[kRing] = {};
+        void* fence[kRing] = {};
+        std::uint32_t pboFrame[kRing] = {};
+        // Each slot's sun on screen (uv, v up), the frame's aspect and the
+        // sun-ring guard's weight (0: no low sun in front of the camera).
+        float pboSun[kRing][4] = {};
+        bool pboSunFront[kRing] = {};
+        int next = 0;
+        std::uint32_t snapFrame = 0; // a snap takes a meter from this frame on
+        bool wasOn = false;
+        std::vector<std::uint16_t> halfTexels; // readback scratch (the meter target's own half floats)
+        std::vector<float> logs, weights, peaks, skyPeaks;
+        std::uint32_t readbacks = 0;
+        // The camera's CPU time on the render thread (ms, smoothed) and the
+        // meters skipped because their slot was still in flight.
+        float cpuCollectMs = 0.0f, cpuQueueMs = 0.0f;
+        std::uint32_t skippedMeters = 0;
+    } _camera;
+    // The camera can run this frame (switch, post effects, no debug view, no
+    // night vision, a frame target with a post pass, not a portrait).
+    bool CameraWanted() const;
+    // The physical sky for the sun at this elevation from the sky table's
+    // atmosphere tables (EngineGL33_SkyTable.cpp); false while they build.
+    bool PhysicalSkyFor(float sunElevationRad, Poseidon::remaster::PhysicalSky& out);
+    // After the gates: this frame's camera decision, colour matrix and the
+    // Camera slot of LitConstants.
+    void UpdateCameraFrame(const Poseidon::remaster::LightRig& rig, bool atmosphereOn);
+    // At the post pass: collect finished meter readbacks and adapt.
+    void CameraAdapt();
+    void DestroyCamera();
+    Poseidon::remaster::CameraReadout CameraReadoutNow() const;
     void DestroyPostTargets();
     void DestroyPostPrograms();
     bool EnsurePostResources(int w, int h);
@@ -1100,6 +1257,7 @@ class EngineGL33 : public Engine
         float depthScale = 1.0f, depthBias = 0.0f; // ndcZ = depth * scale + bias
         // The sun on screen, for the shafts.
         float sunU = 0.5f, sunV = 0.5f, shaftWeight = 0.0f;
+        bool sunInFront = false; // the sun is in front of the camera and above the horizon (sunU, sunV valid)
         Color shaftTint = Color(1, 1, 1, 1);
         // TAA: this frame's shift of the AO and shaft sample patterns (0 when
         // the resolve does not run: the fixed patterns of before).
@@ -1107,6 +1265,12 @@ class EngineGL33 : public Engine
         // This frame's world was lit by combat lights: the composite scatters
         // them in the air (B4).
         bool combatScatter = false;
+        // The surfaces lane: this frame's world wrote the surface target, so
+        // the resolve copies it, the Ao stage runs the horizon occlusion and
+        // the composite reads its shares.
+        bool surfaces = false;
+        // ... in a vehicle interior (its own depth, no world behind it).
+        bool surfaceInterior = false;
         // Which stages run this frame and the strengths the composite uses.
         Poseidon::remaster::PostStagePlan plan;
         // The frame's colour the air pass, the glow stages and the composite
@@ -1114,6 +1278,10 @@ class EngineGL33 : public Engine
         // once the Ssr stage has run. When the air pass runs, the bloom and the
         // composite read its output (_post.airOutTex) instead.
         unsigned int frameColor = 0;
+        // The photoreal camera runs this frame: the frame holds scene light
+        // (camEncode) and the composite is the camera; its exposure (linear).
+        bool camera = false;
+        float exposure = 1.0f;
     };
     void PostFrameGeometry(PostFrame& f) const;
     void PostFrameSun(PostFrame& f) const;
@@ -1127,6 +1295,7 @@ class EngineGL33 : public Engine
     void PostResolve(const PostFrame& f);
     void PostLinearDepth(const PostFrame& f);
     void PostAo(const PostFrame& f);
+    void PostSurfaceAccumulate(const PostFrame& f); // the surfaces lane's occlusion over TAA frames
     void PostAir(const PostFrame& f); // EngineGL33_PostAir.cpp
     void PostBloom(const PostFrame& f);
     void PostShafts(const PostFrame& f);
@@ -1194,6 +1363,86 @@ class EngineGL33 : public Engine
     // previews in dialogs and under night vision), inside the world pass and
     // not into a portrait.
     bool SsrTagging() const;
+    // The photoreal camera's meter pass on the resolved frame, its readback
+    // queued (EngineGL33_Camera.cpp); run inside the Composite stage.
+    void PostCameraMeter(const PostFrame& f);
+    // The volumetric fog (the Air stage, EngineGL33_PostFog.cpp; feature switch
+    // volFog, Graphics/Remaster/VolumetricFog.hpp): a froxel volume lit and
+    // integrated every frame and applied to every pixel by its depth, into
+    // fog.outTex, which the bloom and the composite then read in place of the
+    // resolved frame.
+    void PostFog(const PostFrame& f);
+    // The frame's medium and the forward fog's edge (LitConst::Haze), once per
+    // frame from UploadLitFrameConstants, with the gates.
+    void UpdateFogMedium();
+    bool EnsureFogResources(int w, int h, const Poseidon::remaster::FogGrid& grid);
+    void DestroyFogResources();
+    void UpdateFogFloor();
+    // The colour the stages after the Air stage read: the fogged frame when
+    // the fog ran this frame, else the resolved frame.
+    unsigned int PostSceneTex(const PostFrame& f) const;
+    // A screen overlay is about to be drawn into the world pass (a rifle's
+    // iron sight, a gunner's optic): the frame so far, resolved, for the fog.
+    void SnapshotWorldBeforeOverlay();
+    struct FogState
+    {
+        // The volumes: the injection (ping-pong, last frame's is the history)
+        // and the integration, RGBA16F, cells x cells x slices; one FBO per
+        // eight slices of each (eight colour attachments, one slice each).
+        Poseidon::remaster::FogGrid grid;
+        unsigned int injectTex[2] = {}, integTex = 0;
+        std::vector<unsigned int> injectFbo[2], integFbo;
+        int current = 0;
+        // The fogged frame (RGBA16F, full resolution).
+        unsigned int outTex = 0, outFbo = 0;
+        int outW = 0, outH = 0;
+        // The world before this frame's screen overlay (RGBA8, resolved;
+        // SnapshotWorldBeforeOverlay) and the frame it holds.
+        unsigned int snapTex = 0, snapFbo = 0;
+        int snapW = 0, snapH = 0;
+        std::uint32_t snapFrame = 0xffffffffu;
+        // The near field (RGBA16F, half resolution: the sun's beams and the
+        // lamps' light in the air, linear).
+        unsigned int nearTex = 0, nearFbo = 0;
+        int nearW = 0, nearH = 0;
+        // The horizon ring (RGBA16F, kFogRingBins x 1, ping-pong): the sky's
+        // colour above the land in every azimuth, measured from the frame.
+        unsigned int ringTex[2] = {}, ringFbo[2] = {};
+        int ringCur = 0;
+        // The night glow (RGBA16F): two targets at a quarter of the frame and
+        // two at a sixteenth (psFogGlow's ping-pong).
+        unsigned int glowTex[4] = {}, glowFbo[4] = {};
+        int glowW[2] = {}, glowH[2] = {};
+        // The fog floor and the mist layer (RG32F, the terrain map's grid), the
+        // map they were built from, and the CPU copy AI sight reads.
+        unsigned int floorTex = 0;
+        const Poseidon::remaster::TerrainHorizonMap* floorFor = nullptr;
+        float floorCell = 0.0f;
+        int floorSize = 0;
+        std::shared_ptr<const Poseidon::remaster::FogSightMap> sightMap;
+        unsigned int progInject = 0, progIntegrate = 0, progNear = 0, progApply = 0, progRing = 0, progGlow = 0;
+        // The map's aridity (FogAridity, with the fog floor) and the share of
+        // the stars the wet air over the eye leaves (DrawPoints).
+        float aridity = 0.0f;
+        float starKeep = 1.0f;
+        bool programsTried = false;
+        bool unavailable = false;
+        // The frame's medium (UpdateFogMedium) and whether the fog applies.
+        Poseidon::remaster::FogMedium medium;
+        std::uint32_t mediumFrame = 0;
+        bool on = false;
+        // The last applied frame (PostSceneTex) and its camera and volume, for
+        // the next frame's reprojection.
+        std::uint32_t appliedFrame = 0xffffffffu;
+        bool historyValid = false;
+        float prevRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // world to view, rows
+        float prevPos[3] = {0, 0, 0};
+        float prevP11 = 1.0f, prevP22 = 1.0f, prevFar = 1.0f, prevK = 1.0f;
+        std::uint32_t sequence = 0;
+        // The mist banks' drift (m) and the time it was last advanced.
+        float drift[2] = {0.0f, 0.0f};
+        float driftTime = -1.0f;
+    } _fog;
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }

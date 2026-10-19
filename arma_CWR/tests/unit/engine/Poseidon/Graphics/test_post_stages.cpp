@@ -364,7 +364,8 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
     // The registry offers the view (the overlay's combo, triSetLighting debug=5),
     // the light tiles after it (debug=6), B2's albedo view (debug=7), the air
     // pass's in-scatter (debug=8, B8) and the reflections' two last (debug=9
-    // and 10, B6), and the combat shadow mask after them (debug=11, B4).
+    // and 10, B6), and the combat shadow mask after them (debug=11, B4), then the surfaces lane's three
+    // forward views (12 to 14).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
     CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
@@ -373,7 +374,8 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
     CHECK(kDebugViewSsrTags == kDebugViewAir + 1);
     CHECK(kDebugViewSsrReflection == kDebugViewSsrTags + 1);
     CHECK(Poseidon::lighting::kDebugViewCombatMask == kDebugViewSsrReflection + 1);
-    CHECK(debug->maxValue == static_cast<float>(Poseidon::lighting::kDebugViewCombatMask));
+    CHECK(kDebugViewSkyLight == Poseidon::lighting::kDebugViewCombatMask + 1);
+    CHECK(debug->maxValue == static_cast<float>(kDebugViewSurfaceSpecular));
 }
 
 TEST_CASE("Post stages: the reflections read the tags out whenever they were written, and trace when gated on",

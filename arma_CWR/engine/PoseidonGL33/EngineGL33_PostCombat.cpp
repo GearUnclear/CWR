@@ -243,6 +243,57 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
         }
         f.start = s.core;
         f.range = s.range;
+        // Under the photoreal camera (look director round 2) the dusk and
+        // night exposure lifts every combat light several stops over the
+        // classic frame's: a rifleman's flash left a flat yellow-white
+        // ellipse on the ground under every man, and a shell lit a white
+        // band across the plain. A muzzle flash lights a metre or two round
+        // the muzzle, dim, and is gone; a burst's light ends within 40 m;
+        // fires and the fireball after the flash take a deeper orange (the
+        // fire's light read olive on grass).
+        if (_camera.frameOn)
+        {
+            float gain = 1.0f;
+            float warmG = 1.0f, warmB = 1.0f;
+            switch (r.kind)
+            {
+                case fl::CombatLightKind::Muzzle:
+                    gain = 0.05f;
+                    f.range = std::min(f.range, 2.5f);
+                    warmG = 0.86f;
+                    warmB = 0.62f;
+                    break;
+                case fl::CombatLightKind::Tracer:
+                    gain = 0.5f;
+                    break;
+                case fl::CombatLightKind::Explosion:
+                case fl::CombatLightKind::Cannon:
+                    // (Seen from eye height the lit ground round a burst 60 m
+                    // out is a thin strip along the horizon.)
+                    gain = 0.3f;
+                    f.range = std::min(f.range, 20.0f);
+                    warmG = 0.8f;
+                    warmB = 0.56f;
+                    break;
+                case fl::CombatLightKind::Fire:
+                    // (A burning wreck's fire at its roof lit the plain behind
+                    // it out to 120 m: a strip along the horizon at dusk.)
+                    f.range = std::min(f.range, 20.0f);
+                    warmG = 0.74f;
+                    warmB = 0.48f;
+                    break;
+                default:
+                    break;
+            }
+            // The warmth at the same luminance.
+            const float lum0 = 0.2126f * f.diffuse[0] + 0.7152f * f.diffuse[1] + 0.0722f * f.diffuse[2];
+            f.diffuse[1] *= warmG;
+            f.diffuse[2] *= warmB;
+            const float lum1 = 0.2126f * f.diffuse[0] + 0.7152f * f.diffuse[1] + 0.0722f * f.diffuse[2];
+            const float k = lum1 > 1e-9f ? gain * lum0 / lum1 : gain;
+            for (float& v : f.diffuse)
+                v *= k;
+        }
         const float d2 = f.pos[0] * f.pos[0] + f.pos[1] * f.pos[1] + f.pos[2] * f.pos[2];
         // The flash the camera itself is in (the exposure response).
         if (fl::CombatLightOpensExposure(r.kind))

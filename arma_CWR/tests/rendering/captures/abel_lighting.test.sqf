@@ -387,16 +387,33 @@ triScreenshot "tank_gunner_interior__remastered"
 "tank_gunner_interior__remastered" call capRecord
 call { capView = "tank_gunner_optics"; capSimT = time; (vehicle player) switchCamera "GUNNER" }
 triSimFrames 60
+// The same HUD state in both modes (look director round 2): the action menu
+// and the target box time out a few seconds after the gunner takes his seat,
+// and the ammo line's colour follows the gun's reload; each mode puts the
+// player back in the seat and waits the same frames before its shot.
 "classic" call capMode
 triSimFrames 90
 [] call capReadTimers
+call { player setPos [7290, 10885, 0] }
+triSimFrames 5
+call { player moveInGunner capTank }
+triSimFrames 400
+call { (vehicle player) switchCamera "GUNNER" }
+triSimFrames 60
 [] call capPin
 triSimFrames 3
 triScreenshot "tank_gunner_optics__classic"
 "tank_gunner_optics__classic" call capRecord
+triSimFrames 3
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
+call { player setPos [7290, 10885, 0] }
+triSimFrames 5
+call { player moveInGunner capTank }
+triSimFrames 400
+call { (vehicle player) switchCamera "GUNNER" }
+triSimFrames 60
 [] call capPin
 triSimFrames 3
 triScreenshot "tank_gunner_optics__remastered"

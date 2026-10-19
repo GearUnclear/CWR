@@ -764,13 +764,15 @@ TEST_CASE("Combat lights: the switches have landed with their sub-knobs and thei
         const LightingKey* k = FindLightingKey(key);
         REQUIRE(k != nullptr);
         CHECK(std::string(k->parent) == "combatLights");
-        CHECK(KeyDefault(*k) == 1.0f);
+        // The look director lowered the burst flash under the photoreal
+        // camera (a shell at dusk lit the plain white to the horizon).
+        CHECK(KeyDefault(*k) == (std::string(key) == "combatFlash" ? 0.6f : 1.0f));
     }
     // The last debug view, after the reflections' two (B6).
     CHECK(kDebugViewCombatMask == kDebugViewSsrReflection + 1);
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
-    CHECK(debug->maxValue == static_cast<float>(kDebugViewCombatMask));
+    CHECK(debug->maxValue >= static_cast<float>(kDebugViewCombatMask)); // the surfaces lane's views follow
     // The lit shaders draw it from its own number (rm::ShaderDebugView leaves
     // it to the backend, as it does the light tiles).
     CHECK(ShaderDebugView(kDebugViewCombatMask) == 0.0f);

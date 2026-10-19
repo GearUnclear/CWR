@@ -32,6 +32,7 @@
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -83,13 +84,27 @@ struct SkyTableState
     bool open = false;
     int mode = 0;                // Poseidon::RemasterSky of the draws; 0 = the world's
     bool forcedPrograms = false; // the pass opened the remastered programs
+
+    // The sky light's spherical harmonics (the surfaces lane, SurfaceLight.hpp),
+    // projected from the CPU atmosphere tables on a worker thread whenever the
+    // sun moved kSkyLightRebuildRad or the haze changed.
+    std::future<rm::SkyLightSH> shPending;
+    bool shBuilding = false;
+    rm::SkyLightSH sh;
 };
+
+// The sun moves this far (radians, about 0.1 degree) before the sky light is
+// projected again: the light changes far more slowly than the sky's own look.
+constexpr float kSkyLightRebuildRad = 0.0017f;
 
 SkyTableState s_sky;
 
 float HazeOf(const rm::LightingTuning& t)
 {
-    return std::max(0.05f, t.atmoHaze);
+    // Under the photoreal camera's switch the air holds a real summer haze
+    // (camHaze times the knob); the switch off keeps the reference air.
+    const float camera = rm::FeatureOn(t.features, rm::Feature::PhotoLight) ? std::max(t.camHaze, 0.0f) : 1.0f;
+    return std::max(0.05f, t.atmoHaze * camera);
 }
 
 float SunElevationRad(LightSun* sun)
@@ -298,6 +313,66 @@ bool EngineGL33::PollSkyTables()
     return false;
 }
 
+void EngineGL33::PollSkyLightSH()
+{
+    if (s_sky.shBuilding && s_sky.shPending.valid() &&
+        s_sky.shPending.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+    {
+        s_sky.sh = s_sky.shPending.get();
+        s_sky.shBuilding = false;
+    }
+    // Off by default (surfSkyLight 0): nothing to project.
+    if (s_sky.shBuilding || !GScene || !_featureGates.computed || !_featureGates[rm::Feature::Surfaces].on ||
+        _lighting.surfSkyLight <= 0.0f)
+        return;
+    LightSun* sun = GScene->MainLight();
+    if (!sun || !PollSkyTables())
+        return;
+    const float elev = SunElevationRad(sun);
+    const bool stale = !s_sky.sh.valid || s_sky.sh.haze != s_sky.tables.haze ||
+                       std::fabs(s_sky.sh.sunElevationRad - elev) > kSkyLightRebuildRad;
+    if (!stale)
+        return;
+    s_sky.shBuilding = true;
+    s_sky.shPending =
+        std::async(std::launch::async, [tables = s_sky.tables, elev] { return rm::ProjectSkyLight(tables, elev); });
+}
+
+const rm::SkyLightSH& EngineGL33::SkyLightSHNow() const
+{
+    return s_sky.sh;
+}
+
+bool EngineGL33::PhysicalSkyFor(float sunElevationRad, rm::PhysicalSky& out)
+{
+    // The photoreal rig (photoLight): the clear sky's light from the same
+    // atmosphere tables, integrated on the CPU when the sun has moved
+    // kPhysicalSkyRebuildDeg (about a millisecond), and the reference once per
+    // haze.
+    if (!PollSkyTables())
+        return false;
+    CameraState& c = _camera;
+    const float haze = s_sky.tables.haze;
+    if (c.referenceHaze != haze)
+    {
+        const rm::PhysicalSky ref = rm::ComputePhysicalSky(s_sky.tables, rm::kPhysicalReferenceSunDeg / kDeg);
+        c.referenceIlluminant = rm::PhysicalIlluminant(ref);
+        c.referenceIrradiance = rm::Luminance(c.referenceIlluminant);
+        c.referenceHaze = haze;
+    }
+    const float deg = sunElevationRad * kDeg;
+    if (!c.physical.valid || c.physicalHaze != haze ||
+        std::fabs(c.physical.sunElevationDeg - deg) >= rm::kPhysicalSkyRebuildDeg)
+    {
+        c.physical = rm::ComputePhysicalSky(s_sky.tables, sunElevationRad);
+        c.physicalHaze = haze;
+    }
+    out = c.physical;
+    out.referenceIrradiance = c.referenceIrradiance;
+    out.referenceIlluminant = c.referenceIlluminant;
+    return out.valid && out.referenceIrradiance > 0.0f;
+}
+
 bool EngineGL33::RemasterSkyPending() const
 {
     return s_sky.building || SkyDensityPending();
@@ -425,14 +500,18 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
         return;
     const bool wantAtmosphere = rm::FeatureOn(_lighting.features, rm::Feature::Atmosphere);
     const bool wantClouds = SkyCloudsWanted();
-    // The sun disk is the clouds' alone (it dims behind a dome cloud).
+    // The photoreal camera (photoLight) takes the sky as scene light too: the
+    // dome and the sun disk draw through the remastered programs for it.
+    const bool wantCamera = CameraWanted();
+    // The sun disk is the clouds' (it dims behind a dome cloud) and the
+    // camera's (it is light far brighter than its sprite).
     const bool sunDisk = mode == Poseidon::RemasterSky::Sun;
-    if (sunDisk ? !wantClouds : !wantAtmosphere && !wantClouds)
+    if (sunDisk ? !wantClouds && !wantCamera : !wantAtmosphere && !wantClouds && !wantCamera)
         return;
     // Until the worker has the atmosphere tables the sky table stays off (the
     // gate reads "atmosphere tables building").
     const bool tables = !sunDisk && wantAtmosphere && PollSkyTables();
-    if (!tables && !wantClouds)
+    if (!tables && !wantClouds && !wantCamera)
         return;
     // Draws queued so far keep their programs.
     FlushQueues();
@@ -464,7 +543,8 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
             clouds = _featureGates[rm::Feature::SkyCloudShadows].on;
             break;
     }
-    if (!(sunDisk ? clouds : atmosphere || clouds))
+    const bool camera = _camera.frameOn && _camera.frame == GetFrameCounter();
+    if (!(sunDisk ? clouds || camera : atmosphere || clouds || camera))
     {
         if (s_sky.forcedPrograms)
         {
@@ -576,17 +656,39 @@ void EngineGL33::UploadLitSky(const Vector3& toSun, float skyThrough)
     Color dome = sun->SkyColor() * _accomodateEye;
     dome.SaturateMinMax();
     const Color glow = sun->SunSkyColor() * _accomodateEye;
-    SetLitSlot(LC::AtmoDome, dome.R(), dome.G(), dome.B(), std::max(0.0f, std::min(1.0f, _lighting.atmoHue)));
+    // Under the photoreal camera the clear sky takes the camera's hue knob
+    // (the physical hue by default).
+    const bool photoCamera = _camera.frameOn && _camera.frame == GetFrameCounter();
+    const float hue = photoCamera ? _lighting.camSkyHue : _lighting.atmoHue;
+    SetLitSlot(LC::AtmoDome, dome.R(), dome.G(), dome.B(), std::max(0.0f, std::min(1.0f, hue)));
     SetLitSlot(LC::AtmoGlow, glow.R(), glow.G(), glow.B(), _lighting.atmoSat);
     // The clouds' light: the classic dome light's luminance, split into the
     // sun seen from the cloud deck and the sky above (whose colour the shader
     // takes from the table).
     const float lumC = rm::Luminance(rm::ToLinear(rm::Rgb(dome.R(), dome.G(), dome.B())));
     const float sunShare = rm::SkyCloudSunShare(sunElevRad * kDeg);
-    const rm::Rgb deckSun =
-        UnitLuminance(rm::AtmosphereTransmittance(s_sky.tables, rm::atmo::kGroundRadius + rm::kSkyCloudDeckHeight,
-                                                  std::sin(sunElevRad))) *
-        (lumC * sunShare);
+    const rm::Rgb deckChroma = UnitLuminance(rm::AtmosphereTransmittance(
+        s_sky.tables, rm::atmo::kGroundRadius + rm::kSkyCloudDeckHeight, std::sin(sunElevRad)));
+    if (photoCamera && _camera.skyScale > 0.0f)
+    {
+        // Under the photoreal camera the clouds take the physical light, so
+        // they stand in their physical ratio to the table's sky around them:
+        // the sun as the deck sees it, through the air above the deck (at
+        // dawn and dusk far brighter and less red than at the ground, so the
+        // clouds glow while the land is in twilight), at kCloudSunLight of a
+        // surface facing it; the sky above as on an up-facing surface; both at
+        // the brightness a white surface shows (1.6 x the irradiance at the
+        // rig's scale, LightRig::skyScale = 1.6 pi scale camSky).
+        constexpr float kWhite = 1.6f, kCloudSunLight = 1.3f, kPi = 3.14159265f;
+        const float scale = _camera.skyScale / (kWhite * kPi * std::max(_lighting.camSky, 1e-3f));
+        const rm::Rgb deckT = rm::AtmosphereTransmittance(
+            s_sky.tables, rm::atmo::kGroundRadius + rm::kSkyCloudDeckHeight, std::sin(sunElevRad));
+        const float skyLum = rm::Luminance(rm::Rgb(_lightRigSky.R(), _lightRigSky.G(), _lightRigSky.B()));
+        const rm::Rgb deckSun = deckT * (kWhite * kCloudSunLight * scale);
+        SetLitSlot(LC::AtmoCloudSun, deckSun.r, deckSun.g, deckSun.b, kWhite * skyLum);
+        return;
+    }
+    const rm::Rgb deckSun = deckChroma * (lumC * sunShare);
     SetLitSlot(LC::AtmoCloudSun, deckSun.r, deckSun.g, deckSun.b, lumC * (1.0f - sunShare));
 }
 

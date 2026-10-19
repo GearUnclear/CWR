@@ -52,6 +52,41 @@
 #include <iterator>
 #include <string>
 
+// The photoreal camera's frame encoding (Graphics/Remaster/PhotoCamera.hpp
+// CameraEncode / CameraDecode; photoLight): pre-exposed linear light as it is
+// up to the knee (display gamma), the peak channel's code above it on the
+// fold cK + (1 - cK) (1 - (knee / m)^p) / span, hue kept. The lit prelude's
+// inputs piece holds the same text (a test checks it); every post pass that
+// reads or writes the frame's colour pastes kCameraCodecGLSL.
+namespace Poseidon::gl33lighting
+{
+const char kCameraCodecGLSL[] = R"(
+const float kCamKnee = 0.6;          // kEncodeKnee
+const float kCamMax = 16.0;          // kDecodeMax
+const float kCamPower = 0.7;         // kEncodePower
+const float kCamKneeCode = 0.792793; // kEncodeKnee^(1/2.2)
+const float kCamFoldSpan = 0.899580; // 1 - (kEncodeKnee / kDecodeMax)^kEncodePower
+vec3 camFold(vec3 lin) {
+    lin = max(lin, vec3(0.0));
+    float m = max(lin.r, max(lin.g, lin.b));
+    if (m > kCamKnee) {
+        float code = kCamKneeCode + (1.0 - kCamKneeCode) * (1.0 - pow(kCamKnee / min(m, kCamMax), kCamPower)) / kCamFoldSpan;
+        lin *= pow(code, 2.2) / m;
+    }
+    return pow(lin, vec3(1.0 / 2.2));
+}
+vec3 camDecode(vec3 disp) {
+    disp = max(disp, vec3(0.0));
+    vec3 c = pow(disp, vec3(2.2));
+    float code = max(disp.r, max(disp.g, disp.b));
+    if (code <= kCamKneeCode) return c;
+    float u = min((code - kCamKneeCode) / (1.0 - kCamKneeCode), 1.0);
+    float q = max(1.0 - u * kCamFoldSpan, 1e-6);
+    return c * (min(kCamKnee / pow(q, 1.0 / kCamPower), kCamMax) / pow(code, 2.2));
+}
+)";
+} // namespace Poseidon::gl33lighting
+
 namespace
 {
 
@@ -128,8 +163,10 @@ void main() {
     // clouds lit (vLitMode 2); the sky clouds (sky mode 2) are lit (-2) and,
     // like every other pre-lit draw of the world (the far horizon polygon,
     // particles), fade into the table's horizon colour with their fog (-1).
-    // The sun disk (sky mode 3) keeps its colour and its classic fog.
-    if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0) {
+    // The sun disk (sky mode 3) keeps its colour and its classic fog; under the
+    // photoreal camera it gets the view ray too (its disc is drawn from the
+    // sun's direction).
+    if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0 || litCamera.x > 0.5) {
         vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);
         vec3 rel = (litSkyFwd.xyz + ndc.x * litSkyRight.xyz + ndc.y * litSkyUp.xyz) * w;
         if (dome && (litAtmo.x > 0.0 || litSky.x > 0.0 || litSky.z != 0.0)) {
@@ -141,6 +178,8 @@ void main() {
         } else if (litAtmo.z > 0.0 && litSkyFwd.w < 2.5) {
             vWorldRel = rel;
             vLitMode = -1.0;
+        } else if (litCamera.x > 0.5 && litSkyFwd.w > 2.5 && litSkyFwd.w < 3.5) {
+            vWorldRel = rel;
         }
     }
 }
@@ -369,7 +408,14 @@ layout(std140) uniform LitConstants {
     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
-    vec4 litHaze;         // 78: aerial haze (B8): x classic fog factor scale minus 1 (0 = the classic fog)
+    vec4 litHaze;         // 78: aerial haze (B8) or volumetric fog: x classic fog factor scale minus 1 (0 = the classic fog)
+    vec4 litSurface;      // 79: surfaces: x on, y specular strength, z canopy occlusion, w SH sky light weight
+    vec4 litSurfCanopy;   // 80: the canopy heightfield: x height base (m), y height range (m), z 1 / extent, w valid
+    vec4 litSurface2;     // 81: surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
+    vec4 litSkySh[6];     // 82-87: the sky light's irradiance coefficients (rgb), sun frame (SurfaceLight.hpp)
+    vec4 litSurface3;     // 88: surfaces: x cavity strength, y 1 = a vehicle interior (pre-lit fragments' share)
+    vec4 litCamera;       // 89: photo camera: x 1 = write scene light (camEncode), y additive pre-lit scale, z sky scale, w pre-exposure
+    vec4 litCameraLook;   // 90: photo camera's look: x weather veil, y lamp ambient kept, z lamp gain, w low-sun sky blue
 };
 )";
 
@@ -391,6 +437,11 @@ uniform sampler2DArray shadowDepth;        // unit 6: the cascade array again, r
 uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
 uniform sampler2D skyDensity;              // unit 9: cloud density of the weather sky (SkyDensity.hpp)
 uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
+uniform sampler2D canopyHeight;            // unit 10: the canopy heightfield, r top, g density (Canopy.hpp)
+// The surfaces lane's per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
+// sets it on the bound program): x SurfaceClass, y DrawKind, z 1 = a blending
+// texture (glass, a canvas window, a sign).
+uniform vec4 surfClass;
 
 in vec4 vColor;
 in vec4 vSpecColor;
@@ -402,7 +453,26 @@ in vec3 vNormalW;
 in vec4 vCrown;
 flat in float vLitMode;
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+// The surface target (the look lane "surface", SurfaceLight.hpp): r the share
+// of the pixel's light the post pass's horizon occlusion may darken (sky,
+// bounce and sky reflection, after the fog), g the square root of the albedo's
+// luminance (the multi-bounce correction), b the direct sun's share (the
+// contact shadows), a the occlusion's strength code (g_surfAoCode; pre-lit
+// draws, smoke, put their alpha there and mix their nothing in by it). Written only while the world pass binds the target and the draw may
+// write it (EngineGL33::UpdateSurfaceMask); ignored otherwise.
+layout(location = 1) out vec4 fragSurf;
+float g_surfShare = 0.0;
+float g_surfSun = 0.0;
+float g_surfAlbedo = 0.0;
+// The occlusion's strength code in the target's alpha for opaque lit
+// fragments: 0.5 the occlusion as set (surfAo), 1 static architecture
+// (kSurfaceStaticAoBoost times it). A blending texture (glass, a window) is a
+// cover: it writes no share at all, opaquely where it is not empty, so the
+// post pass never darkens what is seen through it.
+float g_surfAoCode = 0.5;
+bool g_surfCover = false;
+const float kSurfInteriorShare = 0.9;
 
 const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
 
@@ -419,6 +489,57 @@ vec3 tonemapNeutral(vec3 c) {
     c *= newPeak / peak;
     float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
     return mix(c, vec3(newPeak), g);
+}
+
+// The photoreal camera (photoLight, litCamera.x; Graphics/Remaster/
+// PhotoCamera.hpp): the world's passes then write scene light, not a
+// tonemapped colour, and the post composite is the camera (metered exposure,
+// white balance, filmic curve). The light is stored at the frame's
+// pre-exposure (litCamera.w) on the camera's encoding (camFold), so the
+// composite can unfold it (camDecode).
+
+const float kCamKnee = 0.6;          // kEncodeKnee
+const float kCamMax = 16.0;          // kDecodeMax
+const float kCamPower = 0.7;         // kEncodePower
+const float kCamKneeCode = 0.792793; // kEncodeKnee^(1/2.2)
+const float kCamFoldSpan = 0.899580; // 1 - (kEncodeKnee / kDecodeMax)^kEncodePower
+vec3 camFold(vec3 lin) {
+    lin = max(lin, vec3(0.0));
+    float m = max(lin.r, max(lin.g, lin.b));
+    if (m > kCamKnee) {
+        float code = kCamKneeCode + (1.0 - kCamKneeCode) * (1.0 - pow(kCamKnee / min(m, kCamMax), kCamPower)) / kCamFoldSpan;
+        lin *= pow(code, 2.2) / m;
+    }
+    return pow(lin, vec3(1.0 / 2.2));
+}
+vec3 camDecode(vec3 disp) {
+    disp = max(disp, vec3(0.0));
+    vec3 c = pow(disp, vec3(2.2));
+    float code = max(disp.r, max(disp.g, disp.b));
+    if (code <= kCamKneeCode) return c;
+    float u = min((code - kCamKneeCode) / (1.0 - kCamKneeCode), 1.0);
+    float q = max(1.0 - u * kCamFoldSpan, 1e-6);
+    return c * (min(kCamKnee / pow(q, 1.0 / kCamPower), kCamMax) / pow(code, 2.2));
+}
+// Scene light (lit surfaces, the dome) to the stored value.
+vec3 camEncode(vec3 lin) { return camFold(lin * litCamera.w); }
+// Additive pre-lit draws (litFlags.x -1: fire, flashes, flares) scale their
+// codes by litCamera.y (the camAdditive knob), so a stack of them stays out
+// of the fold's top.
+// The sun disk under the camera (PhotoCamera.hpp kSunDiscRadiusDeg,
+// kSunDiscLevel): its angular radius (radians) and the light of its core,
+// pre-exposed (past the curve's white at any exposure).
+const float kCamSunRadius = 0.007854; // kSunDiscRadiusDeg
+const float kCamSunLevel = 12.0;      // kSunDiscLevel
+
+// A lit fragment's radiance on the display: the shipped tonemap with the
+// display saturation (litFlags.w), or under the camera the scene light itself
+// (finishFragment encodes it after the fog).
+vec3 litDisplay(vec3 radiance) {
+    if (litCamera.x > 0.5) return toDisplay(max(radiance, vec3(0.0)));
+    vec3 display = toDisplay(tonemapNeutral(radiance));
+    float grey = dot(display, kLuma);
+    return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
 }
 )";
 
@@ -574,7 +695,8 @@ namespace Poseidon::gl33lighting
 
 // Terrain and clouds: the sun's visibility past the hills and under the broken
 // cloud field, the valley sky visibility and the ground-bounce tint. The post
-// air pass pastes it too (cloudSunVisibility).
+// air and fog passes paste it too (cloudSunVisibility; the fog also the dome's
+// cloud cover and the canopy shadows).
 const char kRemasterTerrainCloudsGLSL[] = R"(
 // Colour of the light the ground below bounces (luminance 1; white when there
 // is no map). Set by terrainSunVisibility, read by skyIrradiance.
@@ -819,8 +941,40 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         sunTerm = clamp((dot(nLight, l) + 0.35) / 1.35, 0.0, 1.0);
         sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;
     }
+    // Surfaces and ambient light (litSurface.x): relief from the texture (the
+    // sun term moves around its geometric value by at most
+    // kSurfReliefSunLimit of it, faces turned from the sun stay unlit), the
+    // sky light from the sky table's spherical harmonics and the sky the
+    // canopy hides.
+    bool surf = litSurface.x > 0.5;
+    bool relief = surf && !foliage && dot(g_surfBumpN, g_surfBumpN) > 0.5;
+    if (relief)
+        sunTerm = nl + clamp(dot(g_surfBumpDelta, l), -kSurfReliefSunLimit * nl, kSurfReliefSunLimit * nl);
     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
-    vec3 ambient = ka * skyIrradiance(nLight) * (skyVisibility * crownSky * sunOn);
+    float canopyVis = surf ? canopySkyVisibility(posAbs, nLight, foliage) : 1.0;
+    vec3 skyIrr = surf ? surfaceSkyIrradiance(relief ? g_surfBumpN : nLight, foliage) : skyIrradiance(nLight);
+    float groundShare = surf ? g_surfGroundShare : 0.0;
+    // The shade (litSurface2.w): a clear day sky fills the shaded side of a
+    // hull, a wall or a soldier with a fraction of the original's flat
+    // ambient; the ground's warm bounce (its share of that light) stays, so
+    // a hull's lower side and a wheel arch keep the sand's colour; leaves keep
+    // theirs (their crowns are lit as a canopy).
+    float shade = (surf && !foliage) ? litSurface2.w : 1.0;
+    vec3 ambient = ka * skyIrr * (skyVisibility * crownSky * sunOn * canopyVis * mix(shade, 1.0, groundShare));
+    if (surf && !foliage) {
+        // Cavities: a pit of the texture loses sun and sky, a bump catches a
+        // little more sun (never more sky: a lifted bump went blue-grey).
+        // The sky a pit loses is held to 30%: deeper, a shadowed patch of
+        // ground went to black stains.
+        float pit = clamp(1.0 + kSurfCavityGain * g_surfCavity, 0.5, 1.25);
+        direct *= pit;
+        ambient *= clamp(pit, 0.7, 1.0);
+        // A blending texture covers what is behind it (surfClass.z).
+        g_surfCover = !terrain && surfClass.z > 0.5;
+        int cls = int(surfClass.x + 0.5);
+        g_surfAoCode = (!terrain && (int(surfClass.y + 0.5) == 3 || cls == 7 || cls == 8 || cls == 9 || cls == 13))
+                           ? 1.0 : 0.5;
+    }
     vec3 moon = kd * litMoon.rgb * (max(dot(nLight, litMoonDir.xyz), 0.0) * sunOn);
     // Classic adds local lights in display space before texturing and clamps
     // the sum at 1; taking that sum to linear keeps the authored size and
@@ -861,10 +1015,57 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         wetSurface(albedo, n, v, posAbs, skyVisibility, sunVisibility * sunOn, foliage, a, wetKeep, wetLit, wetEnv,
                    wetMirror);
     float exposure = litZenith.w;
-    vec3 radiance = (a * (direct + ambient + moon + local + emissive + combat) * wetKeep +
-                     glossy(n, v, sunVisibility) * sunOn + g_physicalSpec * litGround.w + combatGloss + wetLit) *
-                        exposure +
-                    wetEnv;
+    vec3 radiance;
+    if (surf) {
+        // Every surface reflects: the diffuse keeps what the reflection does
+        // not take. Foliage reflects about its crown's normal.
+        SurfaceSpec sp = surfaceSpecular(foliage ? nLight : (relief ? g_surfBumpN : n), v, a,
+                                         foliage ? sunShadow : sunVisibility, terrain,
+                                         foliage, skyVisibility * canopyVis * crownSky * shade);
+        // Combat light (B4) shades as the local lights; its highlight adds.
+        vec3 diffuseLight = a * (sp.diffuse * (direct + ambient + moon + local + combat) + emissive) * wetKeep;
+        vec3 specSun = sp.sun * sunOn;
+        vec3 specSky = sp.sky * sunOn;
+        radiance = (diffuseLight + specSun + specSky + g_physicalSpec * litGround.w + combatGloss + wetLit) * exposure +
+                   wetEnv;
+        float sum = max(dot(radiance, kLuma), 1e-5);
+        // The ground's bounce counts at 0.3: the ground around a receiver is
+        // that light's source more than its occluder. The local lights count
+        // in full: lamps, fires and headlights cast no shadows, so the
+        // occlusion is the only thing that grounds a lamp-lit street at night
+        // (the foot of a wall, the ground under a bush or a hull). Leaves give
+        // the occlusion kSurfLeafShare of their share: the search reads the
+        // crown's scattered cards as deep pockets, and a crown seen against
+        // the sky is lit through its gaps.
+        // A puddle's mirror (wetMirror) is the reflections' pass's, not the
+        // occlusion's.
+        g_surfShare = clamp(dot((a * (ambient * (sp.diffuse * (1.0 - 0.7 * groundShare)) + sp.diffuse * local) *
+                                     wetKeep +
+                                 specSky) * exposure,
+                                kLuma) / sum,
+                            0.0, 1.0) *
+                      (foliage ? kSurfLeafShare : 1.0) * (1.0 - wetMirror);
+        // The sun's share for the contact shadows; none on leaves (their sun
+        // is the shadow map's and the crown's, and a march through the cards
+        // in front of a sunlit crown took its warm light).
+        g_surfSun =
+            foliage ? 0.0 : clamp(dot((a * direct * sp.diffuse * wetKeep + specSun) * exposure, kLuma) / sum, 0.0, 1.0);
+        g_surfAlbedo = sqrt(clamp(dot(a, kLuma), 0.0, 1.0));
+        // The lane's debug views (debug=12..14): the sky light a white surface
+        // takes, the canopy's sky visibility, the specular alone.
+        if (litSurface2.y > 0.5) {
+            ambientShare = 0.0;
+            if (litSurface2.y < 1.5)
+                return toDisplay(tonemapNeutral(ka * skyIrr * (skyVisibility * canopyVis) * exposure));
+            if (litSurface2.y < 2.5) return vec3(canopyVis);
+            return toDisplay(tonemapNeutral((specSun + specSky) * exposure));
+        }
+    } else {
+        radiance = (a * (direct + ambient + moon + local + emissive + combat) * wetKeep +
+                         glossy(n, v, sunVisibility) * sunOn + g_physicalSpec * litGround.w + combatGloss + wetLit) *
+                            exposure +
+                        wetEnv;
+    }
     float total = dot(radiance, kLuma);
     ambientShare = clamp(dot(a * ambient * wetKeep * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0) * (1.0 - wetMirror);
     g_combatShare = clamp(dot((a * combat + combatGloss) * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
@@ -884,9 +1085,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         float vis = combatShadowVis(1);
         return g_combatMaskInside ? vec3(vis) : vec3(1.0, 0.0, 0.0);
     }
-    vec3 display = toDisplay(tonemapNeutral(radiance));
-    float grey = dot(display, kLuma);
-    display = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+    vec3 display = litDisplay(radiance);
     // Debug view 6: the lights per tile of the tiled light list.
     return litFlags.z > 5.5 ? lightTileView(display) : display;
 }
@@ -894,8 +1093,36 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
 
 // Finish: alpha, the night eye and fog, the tail every main ends with.
 static const char s_psRemasterFinish[] = R"(
+// The sun disk under the photoreal camera (sky mode 3; PhotoCamera.hpp
+// kSunDiscRadiusDeg, kSunDiscLevel): a disc of kCamSunRadius around the
+// sun's direction, anti-aliased over its rim, at kCamSunLevel in the colour of
+// the sunlight through the air; its glow is the sky table's aureole and the
+// camera's bloom. Display coded, alpha its coverage (the sprite blends by
+// alpha, so outside the disc the sky stays as the dome drew it).
+vec4 camSunDisc() {
+    if (dot(vWorldRel, vWorldRel) <= 0.0 || skySunElevation() < -1.0) return vec4(0.0);
+    vec3 d = normalize(vWorldRel);
+    vec3 s = skySunDir();
+    float ang = atan(length(cross(d, s)), dot(d, s));
+    float aa = max(fwidth(ang), 1e-5);
+    float disc = 1.0 - smoothstep(kCamSunRadius - aa, kCamSunRadius + aa, ang);
+    vec3 sun = skySunRadiance();
+    float pk = max(sun.r, max(sun.g, sun.b));
+    vec3 chroma = pk > 1e-6 ? sun / pk : vec3(1.0);
+    return vec4(toDisplay(chroma * kCamSunLevel), disc);
+}
+
 // Classic night-eye desaturation, fog and alpha handling, shared tail.
 void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+    // Under the photoreal camera the sun's quads (sky mode 3) draw its disc
+    // in place of the sprite's painted halo and star, whichever main drew
+    // them, dimmed behind a dome cloud as the sprite is.
+    bool camSun = litCamera.x > 0.5 && litSkyFwd.w > 2.5 && litSkyFwd.w < 3.5 && vLitMode < 0.5 && vLitMode > -0.5;
+    if (camSun) {
+        r0 = camSunDisc();
+        if (litSky.y > 0.5) r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
+        nightEye = false;
+    }
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage cutouts write coverage, and alpha-to-one makes the
         // covered samples 1, which the post pass reads as "no sky light to
@@ -938,11 +1165,51 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
         fogC = atmoFogColor(vWorldRel, fogC);
     }
-    // With the aerial haze on (litHaze.x above 0) the classic fog keeps only
-    // the view-distance edge: its start moves out (AirMedium.hpp FogEdgeScale)
-    // and the post pass's haze takes over the distance before it.
+    // Under the photoreal camera lit surfaces and the dome (vLitMode 1, 2) are
+    // scene light, stored at the frame's pre-exposure; pre-lit draws carry the
+    // original's display colour (and the sun disk its own level) and are
+    // stored as they are, so their fog colour (scene light) takes the
+    // pre-exposure first.
+    bool camScene = vLitMode > 0.5;
+    if (litCamera.x > 0.5 && !camScene) fogC *= pow(max(litCamera.w, 0.0), 1.0 / 2.2);
+    // With the aerial haze or the volumetric fog on (litHaze.x above 0) the
+    // classic fog keeps only the view-distance edge: its start moves out
+    // (AirMedium.hpp and VolumetricFog.hpp FogEdgeScale) and the post pass
+    // takes over the distance before it.
     r0.rgb = mix(fogC, r0.rgb, min(vFogTC * (1.0 + litHaze.x), 1.0));
+    if (litCamera.x > 0.5) {
+        vec3 lin = toLinear(r0.rgb);
+        r0.rgb = camScene ? camEncode(lin) : camFold(lin);
+        if (litFlags.x < -0.5 && !camSun) r0.rgb *= litCamera.y;
+        // The dome's smooth gradients (a sunset's glow) are stored in eight
+        // bits and stretched by the camera's curve: half an LSB of white
+        // noise breaks the steps into grain the TAA averages (look director
+        // round 2: concentric arcs under a low sun).
+        if (vLitMode > 1.5 && vLitMode < 2.5) {
+            uvec2 hp = uvec2(gl_FragCoord.xy);
+            uint h = hp.x * 1973u + hp.y * 9277u + 26699u;
+            h = (h ^ (h >> 15)) * 0x2c1b3c6du;
+            h = (h ^ (h >> 12)) * 0x297a2d39u;
+            h ^= h >> 15;
+            r0.rgb += (float(h & 0xffffu) / 65535.0 - float(h >> 16) / 65535.0) * (0.5 / 255.0);
+        }
+    }
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+    // The surface target: lit fragments hand the post pass what it may
+    // darken, the fog's share excluded; pre-lit ones (sky, particles) nothing,
+    // with their alpha, so smoke over a surface lowers that surface's share.
+    float fogKeep = clamp(min(vFogTC * (1.0 + litHaze.x), 1.0), 0.0, 1.0);
+    bool litFrag = vLitMode > 0.5 && vLitMode < 1.5;
+    // A vehicle interior is drawn pre-lit: its fragments hand the occlusion
+    // kSurfInteriorShare of their light (SurfaceLight.hpp kSurfaceInteriorShare).
+    bool interiorPre = litSurface3.y > 0.5 && vLitMode > -1.5 && vLitMode < 0.5 && r0.a > 0.5;
+    if (g_surfCover)
+        fragSurf = vec4(0.0, g_surfAlbedo, 0.0, r0.a > 0.02 ? 1.0 : 0.0);
+    else if (interiorPre)
+        fragSurf = vec4(kSurfInteriorShare, sqrt(clamp(dot(toLinear(r0.rgb), kLuma), 0.0, 1.0)), 0.0, 0.5);
+    else
+        fragSurf = litFrag ? vec4(g_surfShare * fogKeep, g_surfAlbedo, g_surfSun * fogKeep, g_surfAoCode)
+                           : vec4(0.0, 0.0, 0.0, r0.a);
 }
 )";
 
@@ -962,7 +1229,29 @@ void main() {
         else if (litSky.x > 0.0) rgb = litCloudsOverClassic(rgb, litCloudTermsDome(vUV0));
         r0 = vec4(rgb, classic.a);
     } else if (vLitMode > 0.5) {
-        r0.rgb = shadeRemastered(t0.rgb * constColor.rgb, false, ambientShare);
+        vec3 albedo = t0.rgb * constColor.rgb;
+        // Relief and cavities (the surfaces lane): the texture's luminance as
+        // a height, by the draw's surface class, fading out by 60 m; leaves,
+        // glass and rubber take none.
+        float reliefK = surfaceClassRelief(surfClass.x) * litSurface2.x;
+        float cavityK = surfaceClassCavity(surfClass.x) * litSurface3.x;
+        if (litSurface.x > 0.5 && (reliefK > 0.0 || cavityK > 0.0) && dot(litMatForced.rgb, kLuma) <= 1e-4) {
+            vec2 d0x = dFdx(vUV0);
+            vec2 d0y = dFdy(vUV0);
+            vec3 sx = dFdx(vWorldRel);
+            vec3 sy = dFdy(vWorldRel);
+            float fadeR = 1.0 - smoothstep(25.0, 60.0, length(vWorldRel));
+            if (fadeR > 0.0 && dot(vNormalW, vNormalW) > 0.25) {
+                vec2 dB = surfaceReliefDelta(tex0, vUV0, d0x, d0y, false) *
+                          (dot(constColor.rgb, vec3(0.3333)) * reliefK * fadeR);
+                if (reliefK > 0.0)
+                    g_surfBumpN = surfaceBumpNormal(vNormalW * inversesqrt(dot(vNormalW, vNormalW)), sx, sy, dB);
+                if (cavityK > 0.0)
+                    g_surfCavity = surfaceCavity(tex0, vUV0, d0x, d0y, false) *
+                                   (dot(constColor.rgb, vec3(0.3333)) * cavityK * fadeR);
+            }
+        }
+        r0.rgb = shadeRemastered(albedo, false, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
         r0 = vColor * t0;
@@ -1115,6 +1404,47 @@ void main() {
         // The land takes the rain (puddles, the grass share from its albedo);
         // the sea on this program does not.
         g_wetDraw = litDetail.w > 0.5 ? 1 : 3;
+        // Relief (the surfaces lane): the detail texture's grain as a height
+        // (its alpha, times the square's luminance, as the albedo takes it),
+        // read from the texture around the fragment, fading out by 80 m.
+        if (litSurface.x > 0.5 && (litSurface2.x > 0.0 || litSurface3.x > 0.0) && litDetail.w > 0.5) {
+            vec2 r1x = dFdx(vUV1);
+            vec2 r1y = dFdy(vUV1);
+            vec3 sx = dFdx(vWorldRel);
+            vec3 sy = dFdy(vWorldRel);
+            float fadeR = 1.0 - smoothstep(30.0, 80.0, length(vWorldRel));
+            if (fadeR > 0.0) {
+                float base = dot(t0.rgb * constColor.rgb, kLuma) * 2.0;
+                vec2 dB = surfaceReliefDelta(tex1, vUV1, r1x, r1y, true) *
+                          (base * kSurfReliefHeight * litSurface2.x * fadeR);
+                if (litSurface2.x > 0.0)
+                    g_surfBumpN =
+                        surfaceBumpNormal(vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12)), sx, sy, dB);
+                // The grain's pits below its local mean lose sun and sky
+                // (stones and ruts keep a micro-shadow under a high sun).
+                g_surfCavity = surfaceCavity(tex1, vUV1, r1x, r1y, true) * (base * litSurface3.x * fadeR);
+            }
+            // ... and the square's own texture at a metre's scale (its texel
+            // against the mean of about 11 texels around it: up close the
+            // texture is magnified and a footprint-relative mean would be the
+            // texel itself, so the mips are at least 0.5 and 3.5, and the
+            // pixel's own footprint beyond that, or the far texels alias and
+            // shimmer under the TAA jitter): ruts, tracks and stony patches,
+            // fading out from 60 to 200 m.
+            float fadeB = 1.0 - smoothstep(60.0, 200.0, length(vWorldRel));
+            if (litSurface3.x > 0.0 && fadeB > 0.0) {
+                vec2 ts0 = vec2(textureSize(tex0, 0));
+                vec2 b0x = dFdx(vUV0) * ts0;
+                vec2 b0y = dFdy(vUV0) * ts0;
+                float lodB = max(0.5 * log2(max(max(dot(b0x, b0x), dot(b0y, b0y)), 1e-8)), 0.0);
+                float bm = dot(textureLod(tex0, vUV0, max(lodB + 3.0, 3.5)).rgb, kLuma);
+                float bf = dot(textureLod(tex0, vUV0, max(lodB, 0.5)).rgb, kLuma);
+                // Held to a few percent of light: deeper, the texture's
+                // metre-wide dark patches (colour, not pits) read as wet stains
+                // at noon (look director).
+                g_surfCavity += clamp((bf - bm) * (kSurfBaseCavity * litSurface3.x * fadeB), -0.035, 0.03);
+            }
+        }
         r0.rgb = shadeRemastered(albedo, true, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
@@ -1336,9 +1666,10 @@ void main() {
         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
                    (sunVis * sunOn * litHorizon.w);
         vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
-        vec3 display = toDisplay(tonemapNeutral(radiance));
-        float grey = dot(display, kLuma);
-        r0.rgb = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+        // The surface target: the body's sky light, as the stock share has it.
+        g_surfShare = ambientShare * (1.0 - wSky);
+        g_surfAlbedo = sqrt(clamp(dot(toLinear(albedo), kLuma), 0.0, 1.0));
+        r0.rgb = litDisplay(radiance);
         r0.a = vColor.a * t0.a * constColor.a;
     } else if (lit) {
         // The debug views (sun visibility, sky visibility, normals) show the

@@ -45,6 +45,7 @@
 #include <PoseidonGL33/EngineGL33_PostPass.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Graphics/Remaster/AirMedium.hpp>
+#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -335,6 +336,9 @@ void EngineGL33::PostAir(const PostFrame& f)
     BindTex(3, march ? p.airMistTex : p.blackTex);
     BindTex(4, beams ? p.airMeanTex : p.blackTex);
     BindTex(5, p.depthTex);
+    // (The raw binds above left the bind cache's active unit stale: without
+    // this the sky table could land on unit 5, the depth's.)
+    GL33Bind::Invalidate();
     BindSkyTable(); // unit 8: the table the world read, or its stand-in
     Set4(prog, "fogColor", _fogColor.R(), _fogColor.G(), _fogColor.B(), 1.0f);
     Set4(prog, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
@@ -350,6 +354,9 @@ void EngineGL33::PostAir(const PostFrame& f)
          0.0f);
     const float fogRange = m.fogEnd - m.fogStart;
     Set4(prog, "airFog", m.fogStart, fogRange > 0.0f ? 1.0f / fogRange : 0.0f, fogRange > 0.0f ? 1.0f : 0.0f, 0.0f);
+    // The photoreal camera's air (read only while litCamera.x is on).
+    Set4(prog, "airCamera", _lighting.camAerial, rm::kCameraNearHazeCap, rm::kCameraSkyBeamsBySun,
+         rm::kCameraBeamFullDistance);
     if (tintLum > 1e-6f)
         Set4(prog, "airSpotTint", tint[0] / tintLum, tint[1] / tintLum, tint[2] / tintLum, 0.0f);
     else

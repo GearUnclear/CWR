@@ -307,7 +307,9 @@ dirty-range flush (A4) stays small:
 | 76 | `Canopy` | hfrt | frame |
 | 77 | `Detail` | texsharp | frame |
 | 78 | `Haze` | haze (analytic fallback for blended surfaces) | frame |
-| 79 | `Count` | | |
+| 79 | `Camera` | photoreal camera, look lane "light" (on, additive scale, sky scale, pre-exposure) | frame |
+| 80 | `CameraLook` | photoreal camera's look (weather veil, lamp ambient kept, lamp gain, low-sun sky blue) | frame |
+| 81 | `Count` | | |
 
 79 vec4 is 1,264 bytes, far below the GL minimum uniform block size. Combat's reprojection rows
 (prototype slots 59-64) are not needed once its shadow becomes a mask pass (B4).
@@ -447,6 +449,23 @@ camera's three reprojection rows) ride in four `vec4` appended to A6's `FrameLig
 `Zenith.w` as the rig's exposure already did. B4 adds no `LitConst` slot: `litPlanned` (72) stays
 padding and `Count` stays 79.
 
+
+As built in the look lane "light" (`photoLight`) and merged by the look director onto fec1075 with the
+look lane "surface" (which holds 79 to 88: `Surface`, `SurfaceCanopy`, `Surface2`, `SurfaceSh[6]`,
+`Surface3`): `Camera` at 89 and `CameraLook` at 90, `Count` 91 (static_assert). `Camera`: x 1 while
+the camera runs (the world's passes then store pre-exposed scene light on the camera's encoding,
+`kCameraCodecGLSL`), y the additive pre-lit scale, z the sky table's radiance scale, w the frame's
+pre-exposure. Any pass that reads or writes the frame's colour while `litCamera.x` is 1 must
+`camDecode` what it reads and `camFold` what it writes (the air apply and the fog apply do); SSR
+(B6), combat scatter (B4) and wet materials (B7) included.
+
+As built in the look lane "light" (`photoLight`, on 06c7e4d): `Camera` at 79, after the last
+planned slot (`Count` 80; `LitConstPlanned::End` is still 79 and now equals `LitConst::Camera`,
+static_assert). x 1 while the camera runs (the world's passes then store pre-exposed scene light
+on the camera's encoding, `kCameraCodecGLSL`), y the additive pre-lit scale, z the sky table's
+radiance scale, w the frame's pre-exposure; critic round 2 added `CameraLook` at 80 (`Count` 81). Any pass that reads or writes the frame's colour
+while `litCamera.x` is 1 must `camDecode` what it reads and `camFold` what it writes (the air
+apply does); SSR (B6), combat scatter (B4) and wet materials (B7) included.
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,

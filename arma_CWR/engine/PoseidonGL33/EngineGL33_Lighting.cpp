@@ -13,6 +13,7 @@
 
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
@@ -449,6 +450,7 @@ void EngineGL33::DeinitLightingResources()
     DeinitSkyClouds();
     DeinitCanopy();
     DeinitCombatResources();
+    DestroyFogResources();
     _post.unavailable = false;
     if (_shadowCompareSampler)
     {
@@ -474,6 +476,9 @@ void EngineGL33::SetLightingTuning(const rm::LightingTuning& tuning)
 {
     const bool wasActive = _lightingActive;
     _lighting = tuning;
+    // A lighting change: the camera's exposure snaps to the next meter.
+    _camera.snap = true;
+    _camera.snapFrame = GetFrameCounter();
     _lightingActive = tuning.remastered && _lightingProgramsBuilt;
     if (wasActive != _lightingActive && _glContext)
     {
@@ -481,6 +486,7 @@ void EngineGL33::SetLightingTuning(const rm::LightingTuning& tuning)
         // next pass re-uploads the rig.
         FlushQueues();
         _litOpaque = false;
+        _litAdditive = false;
         UpdateRemasterPrograms();
         LOG_INFO(Graphics, "GL33: lighting {}", _lightingActive ? "remastered" : "classic");
     }
@@ -608,12 +614,14 @@ unsigned int EngineGL33::SelectProgram(int vs, int spec, int mode, int ps) const
     return _shaderProgram[vs][spec][mode][ps];
 }
 
-void EngineGL33::SetLitOpaque(bool opaque)
+void EngineGL33::SetLitOpaque(bool opaque, bool additive)
 {
-    if (!_lightingActive || opaque == _litOpaque)
+    if (!_lightingActive || (opaque == _litOpaque && additive == _litAdditive))
         return;
     _litOpaque = opaque;
-    s_lit[LitConst::Flags * 4 + 0] = opaque ? 1.0f : 0.0f;
+    _litAdditive = additive;
+    // 1 opaque, -1 additive (the photoreal camera scales those), 0 blended.
+    s_lit[LitConst::Flags * 4 + 0] = opaque ? 1.0f : (additive ? -1.0f : 0.0f);
     // Blend modes switch per draw group: upload just the flags slot.
     UploadLitSlots(LitConst::Flags, 1);
 }
@@ -678,6 +686,16 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
         ct.flash = _lighting.combatFlash;
         ct.fire = _lighting.combatFire;
         ct.smoke = _lighting.combatSmoke;
+        // Under the photoreal camera at night (look director round 2) a fire
+        // lights its own smoke three times as strongly: the classic fire's
+        // light, which lit the column yellow, lights nothing now, and the
+        // column read as white steam over the flame.
+        if (_camera.frameOn)
+        {
+            const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
+            ct.smoke *= 1.0f + 2.0f * camNight;
+            ct.smokeTint = 0.85f * camNight;
+        }
         ct.scatter = _lighting.combatScatter;
         fl::CombatLightSet& combat = fl::GCombatLights();
         combat.Evaluate(ct, in.nightEffect);
@@ -751,6 +769,15 @@ void EngineGL33::UploadLitFrameConstants()
     in.skyThrough = land ? land->SkyThrough() : 1.0f;
     in.nightEffect = sun->NightEffect();
     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
+    // The photoreal camera (photoLight): while it can run, the rig is the
+    // physical one, from the sky table's atmosphere (EngineGL33_Camera.cpp).
+    if (CameraWanted())
+    {
+        rm::PhysicalSky physical;
+        const float y = toSun.Y() < -1.0f ? -1.0f : (toSun.Y() > 1.0f ? 1.0f : toSun.Y());
+        if (PhysicalSkyFor(std::asin(y), physical))
+            in.physical = physical;
+    }
     rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
     UpdateFeatureGates(&rig);
     // Sky-matched cloud shadows lie over the sky's own covered share of the
@@ -762,6 +789,7 @@ void EngineGL33::UploadLitFrameConstants()
         rig = rm::ComputeLightRig(in, _lighting);
     }
     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+    _lightRigSky = Color(rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, 1.0f);
     // The key light (B3): the sun, or at night with the moon key the moon,
     // which then also leaves the shadowless moon term. The scene renders the
     // shadow map from the key (RemasterMoonKey).
@@ -771,6 +799,30 @@ void EngineGL33::UploadLitFrameConstants()
     // (ApplyPassState); the post pass reads them out.
     if (SsrTagging())
         _ssrTagFrame = GetFrameCounter();
+    // The photoreal camera: whether this frame's world passes write scene
+    // light, the white balance, the clear sky's scale (only where the dome is
+    // the sky table's) and the frame's pre-exposure.
+    UpdateCameraFrame(rig, _featureGates[rm::Feature::Atmosphere].on && SkyTablesReady());
+    // At night the lamps, fires and headlights take camLocal (the light knob
+    // localLights rides in litGround.w) and the flame's codes a little more.
+    float localGain = 1.0f;
+    if (_camera.frameOn)
+    {
+        const float night = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
+        localGain = 1.0f + (_lighting.camLocal - 1.0f) * night;
+        const float additive = _lighting.camAdditive * (1.0f + (rm::kCameraAdditiveNight - 1.0f) * night);
+        SetSlot(LitConst::Camera, 1.0f, additive, _camera.skyScale, std::exp2(_camera.preExposureLog2));
+        // Under 14 degrees only (look director round 2: at the golden hour's
+        // 12 degrees the deeper blue made the sky a mid-afternoon's).
+        const float lowSun = 1.0f - rm::SmoothStep(3.0f, 14.0f, rig.sunElevationDeg);
+        SetSlot(LitConst::CameraLook, rm::CameraWeatherVeil(in.skyThrough), rm::kCameraLampAmbient, rm::kCameraLampGain,
+                rm::kCameraLowSunSkyBlue * lowSun * (1.0f - night));
+    }
+    else
+    {
+        SetSlot(LitConst::Camera, 0.0f, 0.0f, 0.0f, 1.0f);
+        SetSlot(LitConst::CameraLook, 0.0f, 1.0f, 0.0f, 0.0f);
+    }
 
     // The tiled light list: built once per frame while its gate is on, and
     // then read by every draw of the world's passes instead of the draw's own
@@ -846,7 +898,7 @@ void EngineGL33::UploadLitFrameConstants()
         SetSlot(LitConst::FogSun, tex[0] * glow.R(), tex[1] * glow.G(), tex[2] * glow.B(), on ? 1.0f : 0.0f);
         SetSlot(LitConst::FogCap, tex[0], tex[1], tex[2], 0.0f);
     }
-    SetSlot(LitConst::Ground, rig.skyGround.r, rig.skyGround.g, rig.skyGround.b, _lighting.localLights);
+    SetSlot(LitConst::Ground, rig.skyGround.r, rig.skyGround.g, rig.skyGround.b, _lighting.localLights * localGain);
     SetSlot(LitConst::MoonDir, toMoon.X(), toMoon.Y(), toMoon.Z(), 0.0f);
     SetSlot(LitConst::Moon, rig.moon.r, rig.moon.g, rig.moon.b, 0.0f);
     const Vector3 cam = camera ? camera->Position() : VZero;
@@ -915,7 +967,8 @@ void EngineGL33::UploadLitFrameConstants()
     const int dv = _lighting.debugView;
     const float debug = dv == fl::kDebugViewLightTiles || dv == fl::kDebugViewCombatMask ? static_cast<float>(dv)
                                                                                          : rm::ShaderDebugView(dv);
-    SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+    SetSlot(LitConst::Flags, _litOpaque ? 1.0f : (_litAdditive ? -1.0f : 0.0f), _worldEffectsOn ? 1.0f : 0.0f, debug,
+            _lighting.saturation);
     // The sky table: the camera basis, the dome and fog blends, the clouds' light.
     UploadLitSky(toSun, in.skyThrough);
     // The sky's own clouds: lit clouds, the dome's turn, the sky-matched shadows.
@@ -933,6 +986,10 @@ void EngineGL33::UploadLitFrameConstants()
     // (litHaze.x) while the haze replaces the fog before it.
     _lightRigExposure = rig.exposure;
     UpdateAirMedium();
+    // The volumetric fog (look-fog): the frame's medium; while the fog volume
+    // is applied it sets the classic fog's edge in place of B8's haze (whose
+    // gates are off then).
+    UpdateFogMedium();
     // The night (B3): the physical lamps and low beams, while their gate is on
     // and the tiled list lighting the pass; zero otherwise, which leaves the
     // classic model for every light. w: the moon key's share.
@@ -943,6 +1000,10 @@ void EngineGL33::UploadLitFrameConstants()
     // Wet weather (B7): the frame's wetness and its flags; zero while the gate
     // is off, which leaves every fragment as before.
     UploadLitWeather();
+    // Surfaces and ambient light (the surfaces lane): the sky light's
+    // spherical harmonics, the canopy's sky occlusion and the specular; zero
+    // while the switch or its gate is off.
+    UploadLitSurface(rig, in.skyThrough);
     FlushLitConstants();
     BindLightingTextures();
 }

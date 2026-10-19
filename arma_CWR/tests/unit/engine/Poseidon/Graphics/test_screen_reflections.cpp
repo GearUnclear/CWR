@@ -779,7 +779,8 @@ TEST_CASE("Reflection shaders: the march, the constants and the sea's sky are th
     }
     // A ray that slipped behind a surface sees that surface' hidden side, on
     // water and on the ground alike (the ground's own colour drew pale boxes).
-    CHECK(CountOf(trace, "R = toLinear(textureLod(mipTex, uvOfHalf(hitS), 1.0).rgb) * kSsrUnderside;") == 2);
+    // (frameLin: the frame decoded under the photoreal camera, toLinear without it.)
+    CHECK(CountOf(trace, "R = frameLin(textureLod(mipTex, uvOfHalf(hitS), 1.0).rgb) * kSsrUnderside;") == 2);
     CHECK(CountOf(trace, "R = toLinear(c0)") == 0);
     CHECK(CountOf(trace, "conf = 1.0 - smoothstep(0.5 * kSsrBehindNear, kSsrBehindNear, travel);") == 2);
     // The ground's ray tests its own plane (the depth normal it starts on);
@@ -839,8 +840,8 @@ TEST_CASE("Reflection shaders: the march, the constants and the sea's sky are th
     CHECK(trace.find("float x = min(share * max(ssrParams.x, 0.0), kSsrWaterSwapMax);") != std::string::npos);
     CHECK(trace.find("vec3 ratio = clamp(R / max(S, vec3(1e-4)), 0.0, kSsrWaterRatioMax);") != std::string::npos);
     CHECK(trace.find("add = vec3(1.0 - fade * x) + fade * x * ratio;") != std::string::npos);
-    CHECK(composite.find("vec3 lin = surface == 2 ? toLinearC(c.rgb) * add : toLinearC(c.rgb) * m + add;") !=
-          std::string::npos);
+    CHECK(composite.find("vec3 base = cam ? camDecode(c.rgb) : toLinearC(c.rgb);") != std::string::npos);
+    CHECK(composite.find("vec3 lin = surface == 2 ? base * add : base * m + add;") != std::string::npos);
     // Only a surface hit (or the dark under a hull) changes the sea; sky and
     // frame exits leave the sea program's own sky.
     CHECK(trace.find("if (kind == 1) {") != std::string::npos);
@@ -874,7 +875,8 @@ TEST_CASE("Reflection shaders: the march, the constants and the sea's sky are th
     // by depth, and keeps the frame's alpha (the sky light share AO reads).
     CHECK(composite.find("if (ts != surface) continue;") != std::string::npos);
     CHECK(composite.find("w /= 1.0 + dz * dz;") != std::string::npos);
-    CHECK(composite.find("fragColor = vec4(toDisplayC(max(lin, vec3(0.0))), c.a);") != std::string::npos);
+    CHECK(composite.find("fragColor = vec4(cam ? camFold(lin) : toDisplayC(max(lin, vec3(0.0))), c.a);") !=
+          std::string::npos);
     CHECK(composite.find("int surface = (tg & 0x20) != 0 ? 0 : (tg >> 6) & 3;") != std::string::npos);
 
     // The rough blur: the trace writes each texel's spread as SsrBlurSpread
@@ -981,10 +983,10 @@ TEST_CASE("Reflection backend: the tags ride on the depth state, off is the stat
     CHECK(CountOf(ssr.substr(blurDraw, compositeDraw - blurDraw), "BindTex(3, s.blurTex);") == 1);
     CHECK(CountOf(ssr, "BindTex(3, s.traceTex);") == 0);
     CHECK(CountOf(post, "f.frameColor = _post.colorTex;") == 1);
-    // The air pass (B8) applies over that frame, the bloom and the composite
-    // read the air pass's output when it ran and that frame otherwise, and the
-    // shafts read that frame.
-    CHECK(CountOf(post, "? p.airOutTex : f.frameColor") == 2);
+    // The air pass (B8) or the volumetric fog applies over that frame, the
+    // bloom and the composite read the Air stage's output when it ran and that
+    // frame otherwise (PostSceneTex), and the shafts read that frame.
+    CHECK(CountOf(post, "PostSceneTex(f)") == 2);
     CHECK(CountOf(post, "BindTex(2, f.frameColor);") == 1);
     CHECK(CountOf(ReadTextFile(Gl33Dir() / "EngineGL33_PostAir.cpp"), "BindTex(0, f.frameColor);") == 1);
     CHECK(CountOf(post, "in.ssrTags = _ssrTagFrame == GetFrameCounter()") == 1);

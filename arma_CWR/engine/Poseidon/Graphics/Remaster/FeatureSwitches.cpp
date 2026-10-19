@@ -91,6 +91,23 @@ constexpr FeatureInfo kFeatures[] = {
      &FS::terrainDetail, "ground"},
     {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
      "sharpen"},
+    // Look lane "surface": the horizon occlusion is the post pass's ao stage;
+    // the sky light, canopy occlusion and specular are terms of the world
+    // pass's shading.
+    {Feature::Surfaces, "surfaces", "Surfaces and ambient light", "surface", "Light and shadow", "look", true,
+     &FS::surfaces, "ao"},
+    // Look lane "light" (PhotoCamera.hpp): the physical rig is constants once a
+    // frame (plus the sky integral when the sun has moved), the camera is the
+    // meter pass and a few terms of the composite.
+    {Feature::PhotoLight, "photoLight", "Photoreal light and camera", "look-light", "Light and shadow", "L1", true,
+     &FS::photoLight, "composite"},
+    // The look lane's volumetric fog (VolumetricFog.hpp): a froxel volume of
+    // haze, weather fog and valley mist lit by the sun, the sky and the local
+    // lights, applied in the post pass's Air stage in place of the flat
+    // distance fog (which keeps only the view-distance edge). It supersedes
+    // B8's air pass (airBeams, airHaze, valleyMist) on the same stage.
+    {Feature::VolFog, "volFog", "Volumetric fog and atmosphere", "fog", "Sky and air", "look-fog", true, &FS::volFog,
+     "air"},
 };
 static_assert(sizeof(kFeatures) / sizeof(kFeatures[0]) == kFeatureCount, "one FeatureInfo per Feature");
 
@@ -181,8 +198,9 @@ struct KeyTable
             MakeChoice("debug", "View", "Diagnostics",
                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
                        "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0Air scattering\0"
-                       "Reflection tags\0Reflections only\0Combat shadow mask\0",
-                       &LT::debugView, 0, Poseidon::lighting::kDebugViewCombatMask),
+                       "Reflection tags\0Reflections only\0Combat shadow mask\0"
+                       "Sky light (surfaces)\0Canopy sky visibility (surfaces)\0Specular (surfaces)\0",
+                       &LT::debugView, 0, kDebugViewSurfaceSpecular),
             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
                        &LT::gates),
         };
@@ -221,6 +239,18 @@ struct KeyTable
                         "the mean share of sky the sea reflects; the waves' share stays", &LT::seaSky, 0.0f, 2.0f),
             MakeSubKnob(Feature::SeaWaves, "seaSheen", "Sea sheen",
                         "the broad sheen toward the sun, in the original hue", &LT::seaSheen, 0.0f, 3.0f),
+            MakeSubKnob(Feature::VolFog, "fogDensity", "Fog density",
+                        "every part of the air: haze, weather fog and mist; 1 = shipped", &LT::fogDensity, 0.0f, 4.0f),
+            MakeSubKnob(Feature::VolFog, "fogQuality", "Fog quality",
+                        "froxel grid: 0 = 16 px cells, 48 slices; 1 = 12 px, 64; 2 = 8 px, 96", &LT::fogQuality, 0.0f,
+                        2.0f),
+            MakeSubKnob(Feature::VolFog, "fogMist", "Valley mist",
+                        "the morning, evening and weather mist pooled on low ground", &LT::fogMist, 0.0f, 4.0f),
+            MakeSubKnob(Feature::VolFog, "fogSun", "Sun in the air",
+                        "the sun's light scattered by the air: beams and the glow toward the sun", &LT::fogSun, 0.0f,
+                        4.0f),
+            MakeSubKnob(Feature::VolFog, "fogLights", "Lights in the fog",
+                        "lamps, headlights and fires glowing in the air", &LT::fogLights, 0.0f, 4.0f),
             MakeSubKnob(Feature::AirBeams, "volGain", "Beam contrast",
                         "-1 = from the weather (4 in clear air, 2.5 in mist); 1 = no boost of the shafts", &LT::volGain,
                         -1.0f, 6.0f),
@@ -248,6 +278,73 @@ struct KeyTable
                         &LT::combatSmoke, 0.0f, 3.0f),
             MakeSubKnob(Feature::CombatLights, "combatScatter", "Lit air", "combat light scattered in the air",
                         &LT::combatScatter, 0.0f, 3.0f),
+            MakeSubKnob(Feature::Surfaces, "surfAo", "Horizon occlusion",
+                        "contact darkening of the sky light; 0 = the stock occlusion", &LT::surfAo, 0.0f, 4.0f),
+            MakeSubKnob(Feature::Surfaces, "surfAoRadius", "Occlusion radius",
+                        "metres the horizon search reaches around each pixel", &LT::surfAoRadius, 0.5f, 6.0f),
+            MakeSubKnob(Feature::Surfaces, "surfCanopyAo", "Canopy occlusion",
+                        "sky light lost under tree crowns, forests and building blocks", &LT::surfCanopyAo, 0.0f, 1.5f),
+            MakeSubKnob(Feature::Surfaces, "surfSkyLight", "Directional sky light",
+                        "share of the sky light from the sky table; 0 = the rig's hemisphere (default)",
+                        &LT::surfSkyLight, 0.0f, 1.0f),
+            MakeSubKnob(Feature::Surfaces, "surfSkyTint", "Sky light colour",
+                        "0 = the rig's own colour toward each face, 1 = the physical sky's", &LT::surfSkyTint, 0.0f,
+                        1.0f),
+            MakeSubKnob(Feature::Surfaces, "surfSkyLevel", "Sky light level",
+                        "0 = the rig's shade fill, 1 = the sky the air gives against the sun (deeper shade)",
+                        &LT::surfSkyLevel, 0.0f, 1.0f),
+            MakeSubKnob(Feature::Surfaces, "surfSpec", "Surface specular",
+                        "Fresnel reflection of sun and sky on every surface", &LT::surfSpec, 0.0f, 2.0f),
+            MakeSubKnob(Feature::Surfaces, "surfContact", "Contact shadows",
+                        "screen-space sun shadows of small details", &LT::surfContact, 0.0f, 1.0f),
+            MakeSubKnob(Feature::Surfaces, "surfRelief", "Surface relief",
+                        "relief the textures give the land and objects at a low sun; 0 = flat", &LT::surfRelief, 0.0f,
+                        4.0f),
+            MakeSubKnob(Feature::Surfaces, "surfShade", "Shade depth",
+                        "share of the sky fill shaded surfaces keep under a clear day sky; 1 = the original's",
+                        &LT::surfShade, 0.2f, 1.0f),
+            MakeSubKnob(Feature::Surfaces, "surfCavity", "Surface cavities",
+                        "sun and sky the texture's pits lose (stones, ruts, mortar); 0 = none", &LT::surfCavity, 0.0f,
+                        3.0f),
+            MakeSubKnob(Feature::PhotoLight, "camEv", "Exposure compensation", "EV on top of the metered exposure",
+                        &LT::camEv, -3.0f, 3.0f),
+            MakeSubKnob(Feature::PhotoLight, "camAdapt", "Eye adaptation time",
+                        "seconds; opening up to the dark takes 1.5 x as long", &LT::camAdapt, 0.0f, 5.0f),
+            MakeSubKnob(Feature::PhotoLight, "camCurve", "Tone curve",
+                        "0 filmic hue-keeping, 1 filmic per channel, 2 ACES fit, 3 Khronos Neutral", &LT::camCurve,
+                        0.0f, 3.0f),
+            MakeSubKnob(Feature::PhotoLight, "camContrast", "Curve contrast", "the toe: higher = deeper shadows",
+                        &LT::camContrast, 0.8f, 2.0f),
+            MakeSubKnob(Feature::PhotoLight, "camShoulder", "Curve shoulder", "lower = a longer highlight roll-off",
+                        &LT::camShoulder, 0.8f, 1.0f),
+            MakeSubKnob(Feature::PhotoLight, "camWhite", "Curve white", "scene light reaching white, in middle greys",
+                        &LT::camWhite, 4.0f, 64.0f),
+            MakeSubKnob(Feature::PhotoLight, "camSat", "Scene saturation", "1 = as lit", &LT::camSat, 0.5f, 1.6f),
+            MakeSubKnob(Feature::PhotoLight, "camWb", "White balance",
+                        "how far the camera adapts to the light's colour", &LT::camWb, 0.0f, 1.0f),
+            MakeSubKnob(Feature::PhotoLight, "camSky", "Clear sky brightness",
+                        "the sky table's sky against its physical brightness (1); the dome, fog and the sea's sky",
+                        &LT::camSky, 0.2f, 3.0f),
+            MakeSubKnob(Feature::PhotoLight, "camSkyHue", "Clear sky hue",
+                        "under the camera, in place of atmoHue: 0 the original's, 1 physical", &LT::camSkyHue, 0.0f,
+                        1.0f),
+            MakeSubKnob(Feature::PhotoLight, "camNight", "Night exposure", "EV at full night", &LT::camNight, -5.0f,
+                        1.0f),
+            MakeSubKnob(Feature::PhotoLight, "camVignette", "Vignette", "corner darkening of the lens",
+                        &LT::camVignette, 0.0f, 0.6f),
+            MakeSubKnob(Feature::PhotoLight, "camBloom", "Highlight bloom", "glare around light brighter than white",
+                        &LT::camBloom, 0.0f, 3.0f),
+            MakeSubKnob(Feature::PhotoLight, "camHaze", "Air haze",
+                        "the sky table's haze under the camera, times atmoHaze (rebuilds the atmosphere tables)",
+                        &LT::camHaze, 1.0f, 40.0f),
+            MakeSubKnob(Feature::PhotoLight, "camScotopic", "Night rod shift",
+                        "dim night light toward a cool grey; 0 = none", &LT::camScotopic, 0.0f, 1.5f),
+            MakeSubKnob(Feature::PhotoLight, "camAdditive", "Additive particle scale",
+                        "fire, flashes and flares; 1 = as drawn", &LT::camAdditive, 0.3f, 2.0f),
+            MakeSubKnob(Feature::PhotoLight, "camAerial", "Aerial perspective",
+                        "the air pass's haze density under the camera; 1 = B8's", &LT::camAerial, 0.0f, 10.0f),
+            MakeSubKnob(Feature::PhotoLight, "camLocal", "Night local lights",
+                        "lamps, fires and headlights at full night; 1 = as lit", &LT::camLocal, 0.5f, 6.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

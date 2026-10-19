@@ -113,6 +113,10 @@ float SkyViewColumnAzimuth(int col);
 // 0..kSkyViewSize-1) for a sun at this elevation (radians), as the GPU pass
 // computes it.
 Rgb SkyViewTexel(const AtmosphereTables& t, int region, int col, int row, float sunElevationRad);
+// The full sky radiance (Rayleigh, multiple scattering and Mie with its phase)
+// along any direction, marched as a sky-view texel is: the sky light's
+// spherical harmonics (SurfaceLight.hpp) integrate it on the CPU.
+Rgb SkyRadianceToward(const AtmosphereTables& t, float elevationRad, float azimuthFromSunRad, float sunElevationRad);
 
 struct SkyViewTable
 {

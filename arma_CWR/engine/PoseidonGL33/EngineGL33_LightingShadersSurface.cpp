@@ -26,6 +26,10 @@
 //     streaks near the eye, undersides little; the hills' sky visibility shelters
 //     the ground. Puddles (wetPuddle, shared with the reflections' trace) are
 //     dark smooth water with rain rings while it rains.
+//
+// The look lane "surface" (Graphics/Remaster/SurfaceLight.hpp): the sky light
+// from the sky table's spherical harmonics, the sky hidden by the canopy, the
+// texture's relief and cavities, and a Fresnel specular on every surface.
 
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
@@ -250,6 +254,203 @@ vec2 wetEnvBRDF(float rough, float nv) {
     return vec2(-1.04, 1.04) * a004 + r.zw;
 }
 
+// ---- Surfaces and ambient light (litSurface.x; SurfaceLight.hpp) -------------
+const float kSurfPi = 3.14159265;
+// The share of a leaf's occludable light the post pass's horizon occlusion may
+// darken (shadeRemastered): at most kSurfLeafShare of it goes, whatever the
+// search finds among a crown's cards.
+const float kSurfLeafShare = 0.4;
+
+// The clear sky's irradiance onto n from the sky table's spherical harmonics:
+// n turned into the sun frame (x toward the sun's azimuth, y up, z across;
+// the sky is mirror-symmetric in z, so its sign does not matter). The frame
+// is the sky's own sun (litSkySun): under the moon key (B3) litSunDir is the
+// moon, but the table was projected for the sun.
+vec3 skyLightSH(vec3 n) {
+    vec2 s = litSkySun.xz;
+    float sl = length(s);
+    s = sl > 1e-4 ? s / sl : vec2(1.0, 0.0);
+    float x = dot(n.xz, s);
+    float y = n.y;
+    float z2 = max(1.0 - x * x - y * y, 0.0);
+    vec3 e = litSkySh[0].rgb * 0.282095 + litSkySh[1].rgb * (0.488603 * y) + litSkySh[2].rgb * (0.488603 * x) +
+             litSkySh[3].rgb * (0.315392 * (3.0 * y * y - 1.0)) + litSkySh[4].rgb * (1.092548 * x * y) +
+             litSkySh[5].rgb * (0.546274 * (x * x - z2));
+    return max(e, vec3(0.0));
+}
+
+// The sky light onto n: the rig's hemisphere, or (by litSurface.w) the sky
+// table's sky above and the ground's own bounce below (the rig's ground
+// irradiance in the ground's colour, over the share of the lower hemisphere n
+// faces). The table gives the sky's brightness toward n; its colour is the
+// rig's own sky toward n (its hemisphere less its ground bounce) with
+// litSurface2.z of the table's mixed in, so a hull's shaded side keeps the
+// rig's horizon colour instead of the zenith's blue. Leaves keep the rig's
+// hemisphere: their crowns are lit as a canopy (crownCanopy) against the rig's
+// sky.
+// g_surfGroundShare: the share of that light the ground below bounces (the
+// rig's hemisphere: its ground and half its horizon's bounce), which the
+// horizon occlusion darkens less (the ground the search finds around a
+// receiver is that light's source, not an occluder of it).
+float g_surfGroundShare = 0.0;
+vec3 surfaceSkyIrradiance(vec3 n, bool leaves) {
+    vec3 rig = skyIrradiance(n);
+    float t = clamp(n.y, -1.0, 1.0);
+    vec3 rigGround = litGround.rgb * g_groundTint * (t >= 0.0 ? 0.5 * (1.0 - t) : 0.5 + 0.5 * (-t));
+    vec3 ground = litGround.rgb * g_groundTint * clamp(0.5 - 0.5 * n.y, 0.0, 1.0);
+    vec3 e = rig;
+    float w = leaves ? 0.0 : litSurface.w;
+    if (w > 0.0) {
+        vec3 rigSky = max(rig - rigGround, vec3(0.0));
+        vec3 sh = skyLightSH(n);
+        vec3 sky = mix(rigSky * (dot(sh, kLuma) / max(dot(rigSky, kLuma), 1e-6)), sh, litSurface2.z);
+        e = mix(rig, sky + ground, w);
+        rigGround = mix(rigGround, ground, w);
+    }
+    g_surfGroundShare = clamp(dot(rigGround, kLuma) / max(dot(e, kLuma), 1e-6), 0.0, 1.0);
+    return e;
+}
+
+// Sky visibility under the canopy heightfield (Canopy.hpp: tree crowns,
+// forest blocks, buildings; r the top's height, g the cover's density), at
+// two scales: the texel above the receiver (6 m) and the neighbourhood
+// (25 m). A receiver well below the top loses the sky its cover hides; one
+// near the top of its own crown keeps it. The lookup moves out along the
+// receiver's horizontal facing, so a wall or the outer leaves of a crown read
+// the cover in front of them, not the footprint of their own building or
+// tree. Leaves lose at most kSurfCanopyLeafMax (the core of their own crown
+// is the crown canopy's, crownSky). 1 off.
+const float kSurfCanopyLeafMax = 0.35;
+float canopySkyVisibility(vec3 posAbs, vec3 n, bool foliage) {
+    if (litSurface.z <= 0.0 || litSurfCanopy.w < 0.5) return 1.0;
+    vec2 uv = (posAbs.xz + n.xz * 4.0) * litSurfCanopy.z;
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0;
+    float occ = 0.0;
+    const vec2 kLods = vec2(0.0, 2.0);
+    // The coarser level keeps the tallest cover over a wider area (a town's
+    // roofs over its open square): it counts less.
+    const vec2 kWeight = vec2(0.85, 0.6);
+    for (int i = 0; i < 2; ++i) {
+        vec2 c = textureLod(canopyHeight, uv, kLods[i]).rg;
+        float top = litSurfCanopy.x + c.r * litSurfCanopy.y;
+        float below = top - posAbs.y;
+        // Under its own crown a leaf sees less of the cover above it.
+        float depth = smoothstep(foliage ? 2.0 : 0.3, foliage ? 9.0 : 3.5, below);
+        occ = max(occ, c.g * depth * kWeight[i]);
+    }
+    return 1.0 - clamp(occ * litSurface.z, 0.0, foliage ? kSurfCanopyLeafMax : 0.92);
+}
+
+// Relief from the texture (Mikkelsen 2010 surface gradients, no tangents): a
+// main sets g_surfBumpN before shadeRemastered, which then lights the relief's
+// normal with the geometric one's energy: the sun term moves around its
+// geometric value by the unnormalised gradient's share (g_surfBumpDelta, zero
+// on average, so the relief adds contrast and takes no light from the land
+// under a high sun) and by at most kSurfReliefSunLimit of it (a grazing sun
+// never digs black pockets). Zero = no relief. `sx`, `sy` are the screen
+// derivatives of vWorldRel, `dB` the height change toward the next pixel in x
+// and y (metres).
+vec3 g_surfBumpN = vec3(0.0);
+vec3 g_surfBumpDelta = vec3(0.0);
+const float kSurfReliefHeight = 0.04;   // the land's metres of relief per unit of albedo luminance
+const float kSurfReliefSunLimit = 0.35; // the relief moves the sun term by at most this share of N.L
+vec3 surfaceBumpNormal(vec3 n, vec3 sx, vec3 sy, vec2 dB) {
+    vec3 r1 = cross(sy, n);
+    vec3 r2 = cross(n, sx);
+    float det = dot(sx, r1);
+    vec3 grad = sign(det) * (dB.x * r1 + dB.y * r2);
+    vec3 nb = abs(det) * n - grad;
+    float len2 = dot(nb, nb);
+    g_surfBumpDelta = abs(det) > 1e-20 ? -grad / abs(det) : vec3(0.0);
+    return len2 > 1e-20 ? nb * inversesqrt(len2) : n;
+}
+
+// The height change toward the next pixel in x and y, read from the texture
+// itself: the fragment and the points one pixel's footprint away (`dx`, `dy`,
+// the uv derivatives), all three through the same widened footprint (a mip
+// coarser than the pixel's: finer, the relief's grain shimmered under the TAA
+// jitter), so the result is a smooth function of the position. The screen derivatives of the shaded albedo it replaces
+// stepped in 2x2 quads and moved with the TAA jitter. `alphaH` reads the
+// height from alpha (the terrain's detail texture), else from luminance.
+vec2 surfaceReliefDelta(sampler2D tex, vec2 uv, vec2 dx, vec2 dy, bool alphaH) {
+    vec2 gx = dx * 2.0;
+    vec2 gy = dy * 2.0;
+    vec4 c0 = textureGrad(tex, uv, gx, gy);
+    vec4 cx = textureGrad(tex, uv + dx, gx, gy);
+    vec4 cy = textureGrad(tex, uv + dy, gx, gy);
+    if (alphaH) return vec2(cx.a - c0.a, cy.a - c0.a);
+    return vec2(dot(cx.rgb - c0.rgb, kLuma), dot(cy.rgb - c0.rgb, kLuma));
+}
+
+// Roughness, F0 and metalness of the per-draw surface class (surfClass.x,
+// SurfaceLight.hpp SurfaceClass).
+vec3 surfaceClassParams(float cls) {
+    int i = int(cls + 0.5);
+    if (i == 1) return vec3(0.5, 0.02, 0.0);    // paint (matt military)
+    if (i == 2) return vec3(0.32, 0.04, 0.85);  // metal
+    if (i == 3) return vec3(0.05, 0.04, 0.0);   // glass
+    if (i == 4) return vec3(0.62, 0.035, 0.0);  // rubber
+    if (i == 5) return vec3(0.88, 0.03, 0.0);   // fabric
+    if (i == 6) return vec3(0.5, 0.028, 0.0);   // skin
+    if (i == 7) return vec3(0.72, 0.04, 0.0);   // road
+    if (i == 8) return vec3(0.82, 0.035, 0.0);  // masonry
+    if (i == 9) return vec3(0.75, 0.035, 0.0);  // wood
+    if (i == 10) return vec3(0.5, 0.035, 0.0);  // leather
+    if (i == 11) return vec3(0.38, 0.04, 0.5);  // weapon
+    if (i == 12) return vec3(0.06, 0.04, 0.0);  // lens
+    if (i == 13) return vec3(0.68, 0.04, 0.0);  // roof
+    return vec3(0.8, 0.035, 0.0);               // default
+}
+
+// Metres of relief per unit of albedo luminance for the per-draw surface class
+// (masonry, roads and wood carry the most; glass and lenses none).
+float surfaceClassRelief(float cls) {
+    int i = int(cls + 0.5);
+    if (i == 1 || i == 2 || i == 10) return 0.006; // paint, metal, leather
+    if (i == 3 || i == 12) return 0.0;             // glass, lens
+    if (i == 4) return 0.0;                        // rubber (a tread keeps its own grooves)
+    if (i == 5) return 0.012;                      // fabric
+    if (i == 6 || i == 11) return 0.003;           // skin, weapon
+    if (i == 7 || i == 13) return 0.03;            // road, roof
+    if (i == 8) return 0.035;                      // masonry
+    if (i == 9) return 0.025;                      // wood
+    return 0.02;
+}
+
+// How much of a texture's pits the cavity term darkens per surface class:
+// stone, roads, roofs and wood carry the most; paint, metal, glass, rubber,
+// skin and cloth none (their dark texels are colour, not pits).
+float surfaceClassCavity(float cls) {
+    int i = int(cls + 0.5);
+    if (i == 7 || i == 8 || i == 13) return 1.0; // road, masonry, roof
+    if (i == 9) return 0.8;                      // wood
+    if (i == 0) return 0.5;                      // default
+    return 0.0;
+}
+
+// The cavity term (the surfaces lane, litSurface3.x): the texture's height
+// (2.5 pixels' footprint) below the mean of its neighbourhood (10 pixels'),
+// from alpha (the terrain's detail texture) or luminance.
+float g_surfCavity = 0.0;
+const float kSurfCavityGain = 3.0;
+const float kSurfBaseCavity = 0.8; // the land's square texture at a metre's scale, against the detail grain's 1
+float surfaceCavity(sampler2D tex, vec2 uv, vec2 dx, vec2 dy, bool alphaH) {
+    // A band of the texture's height: at 2.5 pixels' footprint (finer grain
+    // shimmers under the TAA jitter once the cavity deepens it) against 10.
+    vec4 c = textureGrad(tex, uv, dx * 2.5, dy * 2.5);
+    vec4 m = textureGrad(tex, uv, dx * 10.0, dy * 10.0);
+    return alphaH ? c.a - m.a : dot(c.rgb - m.rgb, kLuma);
+}
+
+// Karis' analytic split-sum environment BRDF: F0 * x + y.
+vec2 surfaceEnvBrdf(float rough, float nv) {
+    const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+    const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+    vec4 r = rough * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
+    return vec2(-1.04, 1.04) * a004 + r.zw;
+}
+
 // The local lights' streaks in the water film at this fragment (linear light,
 // before the exposure): the lights of the tiled list (the physical lamps and
 // low beams at their physical intensity, the other kinds at their classic
@@ -435,6 +636,108 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
         env = sky * (F * mix(0.3, 1.0, skyVisibility) * litSunDir.w);
         keep = 1.0 - F;
     }
+}
+
+// What surfaceSpecular hands shadeRemastered.
+struct SurfaceSpec {
+    vec3 sun;      // the sun's highlight (rig units, before exposure)
+    vec3 sky;      // the sky's reflection (rig units, before exposure)
+    float diffuse; // what the diffuse keeps of the light (the energy the reflection took)
+};
+
+// GGX sun highlight and split-sum sky reflection for every surface but
+// leaves. `a` is the linear albedo, `skyVis` the sky the receiver sees
+// (valleys, canopy).
+SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool terrain, bool foliage, float skyVis) {
+    SurfaceSpec o;
+    o.sun = vec3(0.0);
+    o.sky = vec3(0.0);
+    o.diffuse = 1.0;
+    // Leaves reflect nothing here: a leaf card's plane mirrored the sky as a
+    // pale sheet across the crown and took the green out of it, and the
+    // crown's own wrap and canopy terms already carry how a crown looks.
+    if (litSurface.y <= 0.0 || foliage) return o;
+    vec3 p = terrain ? vec3(0.9, 0.03, 0.0) : surfaceClassParams(surfClass.x);
+    // An authored glossy material keeps its own lobe width.
+    if (litMatSpecular.w > 0.0 && !terrain) p.x = min(p.x, sqrt(2.0 / (litMatSpecular.w + 2.0)));
+    float rough = clamp(p.x, 0.03, 1.0);
+    float metal = p.z;
+    // Darker texels (grime, seams, cavities) read rougher; not paint, whose
+    // olive is dark all over and whose lobe would then spread into an even
+    // grey sheen across the hull instead of a highlight where the sun's half
+    // vector meets it.
+    float lum = dot(a, kLuma);
+    bool paint = !terrain && int(surfClass.x + 0.5) == 1;
+    if (!paint) rough = clamp(rough + 0.15 * (1.0 - smoothstep(0.02, 0.2, lum)) * (1.0 - metal), 0.03, 1.0);
+    vec3 f0 = mix(vec3(p.y), clamp(a * 2.2, 0.0, 1.0), metal);
+    float nv = clamp(dot(n, v), 1e-4, 1.0);
+    vec2 ab = surfaceEnvBrdf(rough, nv);
+    vec3 fEnv = f0 * ab.x + ab.y;
+    // The sun: GGX, Schlick-GGX visibility, Schlick Fresnel; times pi into
+    // the rig's units (the rig's diffuse is albedo * irradiance).
+    vec3 l = litSunDir.xyz;
+    float nl = dot(n, l);
+    if (nl > 0.0) {
+        vec3 h = normalize(l + v);
+        float nh = max(dot(n, h), 0.0);
+        float vh = max(dot(v, h), 0.0);
+        float al = rough * rough;
+        float a2 = al * al;
+        float dd = nh * nh * (a2 - 1.0) + 1.0;
+        float D = a2 / (kSurfPi * dd * dd);
+        float k = al * 0.5;
+        float vis = 0.25 / ((nl * (1.0 - k) + k) * (nv * (1.0 - k) + k));
+        vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+        // Rough natural surfaces (soil, grass, cloth, plaster, brick) shadow
+        // their own microfacets: GGX's broad lobe on them reads as an even
+        // grey sheen that takes the warmth out of a sunlit facade and lifts
+        // its dark windows (the materials track found the grazing glare), so
+        // it keeps 0.15 of itself from roughness 0.9 down from 0.55.
+        float roughCut = mix(1.0, 0.15, smoothstep(0.55, 0.9, rough) * (1.0 - metal));
+        o.sun = litSun.rgb * (D * vis * nl * kSurfPi * sunVisibility * roughCut) * F;
+    }
+    // The sky: a smooth surface mirrors the sky as the player sees it, a rough
+    // one the sky light around its reflected direction (the irradiance there);
+    // both lose what the receiver's sky visibility hides.
+    vec3 r = reflect(-v, n);
+    vec3 rd = normalize(mix(r, n, rough * rough));
+    vec3 rough_l = surfaceSkyIrradiance(rd, false) * 1.6;
+    vec3 pref = rough_l;
+    // The sky as seen only where the lobe is narrow (glass, lenses, metal,
+    // wet film): the table lookup is the costly part, and most surfaces skip it.
+    float smoothW = 1.0 - smoothstep(0.08, 0.45, rough);
+    if (smoothW > 0.0) {
+        vec3 smooth_l = toLinear(skyReflection(normalize(vec3(r.x, max(r.y, 0.02), r.z)))) / max(litZenith.w, 1e-3);
+        smooth_l = mix(smooth_l, rough_l, 1.0 - smoothstep(-0.15, 0.0, r.y));
+        pref = mix(rough_l, smooth_l, smoothW);
+    }
+    // A rough dielectric's lobe takes in the dim ground and its own surface's
+    // relief as much as the sky, and the sky fill already carries its
+    // diffuse-looking part: none of the sky reflection from roughness 0.5 on
+    // (matt paint, rubber, cloth, soil, plaster) seen face on, so they keep
+    // their colour instead of a grey-blue veil (a dark window or a shaded
+    // facade lifted toward the sky's colour). Grazing views catch some at an
+    // edge (a hull's silhouette, a wall seen along its face), up to 0.3 (paint
+    // 0.2); the land none (the haze carries the far ground's sheen). The
+    // reflection loses what the receiver's occlusion hides: skyVis here, the
+    // post pass's horizon occlusion through the share it is part of.
+    float matt = smoothstep(0.25, 0.5, rough) * (1.0 - metal);
+    float roughSky = mix(1.0, 0.0, matt);
+    int cls = terrain ? 0 : int(surfClass.x + 0.5);
+    float edgeSky = terrain ? roughSky : mix(1.0, paint ? 0.2 : 0.3, matt);
+    roughSky = mix(roughSky, edgeSky, pow(1.0 - nv, 5.0));
+    // Rubber reflects no sky (a tyre's tread keeps its grooves); a blending
+    // texture that is not glass (a canvas window, a net, a sign) none either:
+    // its sheen made a see-through panel a flat pale card.
+    bool blendTex = !terrain && surfClass.z > 0.5;
+    if (cls == 4 || (blendTex && cls != 3 && cls != 12)) roughSky = 0.0;
+    o.sky = pref * fEnv * (skyVis * roughSky);
+    // The diffuse gives up only the energy the reflection actually shows.
+    o.diffuse = (1.0 - dot(fEnv, kLuma) * roughSky) * (1.0 - metal);
+    float s = litSurface.y * litHorizon.w;
+    o.sun *= s;
+    o.sky *= s;
+    return o;
 }
 )";
 

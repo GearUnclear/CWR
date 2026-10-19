@@ -59,6 +59,12 @@ struct CombatTuning
     float fire = 1.0f;    // fires and wreck embers
     float smoke = 1.0f;   // combat light on smoke and dust particles
     float scatter = 1.0f; // combat light scattered in the air (post pass)
+    // Under the photoreal camera at night (look director round 2): how far a
+    // fire's light tints the smoke it lights (the particle's own colour times
+    // the light's hue, up to this share where the light is strong), so the
+    // column over a camp fire reads fire-lit orange, as the classic fire's
+    // decal light made it, not white steam. 0 = additive light only.
+    float smokeTint = 0.0f;
 };
 
 // One light at one age: E(d) = intensity * window(d) / (1 + d^2 / core^2), a

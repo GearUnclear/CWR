@@ -28,7 +28,7 @@ enum class PostStage : std::uint8_t
     TagReadout,    // SSR stencil tags (B6, only with ssr gated on)
     Ao,            // ambient occlusion and its blur
     Ssr,           // screen-space reflections (B6; before bloom, so reflected highlights bloom)
-    Air,           // sun beams, headlight cones and haze (B8; replaces Shafts when on)
+    Air,           // the volumetric fog and atmosphere (look-fog, superseding B8's air pass; replaces Shafts when on)
     Bloom,         // bloom chain
     Shafts,        // the legacy sun shafts
     CombatScatter, // combat light scattered in smoke and dust (B4)
@@ -112,6 +112,22 @@ struct PostFrameInputs
     // half-resolution linear depth, so LinearDepth runs (it is not a stage of
     // its own: the mask pass runs at the start of the next world).
     bool combatMask = false;
+    // The surfaces lane (SurfaceLight.hpp) wrote a vehicle interior's shares
+    // into its surface target: the interior's own depth (its own near plane)
+    // is what the occlusion reads there, so the Ao stage runs without the
+    // world depth (the corners and the breech of a crew compartment darken).
+    bool surfaceInterior = false;
+    // The photoreal camera (photoLight, PhotoCamera.hpp): the world was drawn
+    // as scene light this frame, and the composite is the camera that turns
+    // it into the picture, so it asks for the pass by itself.
+    bool camera = false;
+    // The volumetric fog (FeatureSet::volFog and its frame gate, look-fog):
+    // the Air stage applies the fog volume to every pixel by its world depth
+    // in place of B8's air pass (whose gates are off while it runs) and
+    // replaces the legacy shafts (its sun light in the air is the beams). It
+    // needs the world depth and no screen overlay; held off, the frame keeps
+    // the forward fog's classic edge (VolumetricFog.hpp).
+    bool fog = false;
 };
 
 // A frame's stages: which run and the strengths the composite uses.
@@ -122,6 +138,8 @@ struct PostStagePlan
     // frame holds the stage off (no world depth, a screen overlay).
     float aoStrength = 0.0f;
     float bloomStrength = 0.0f;
+    // The Air stage runs the volumetric fog (look-fog), not B8's air pass.
+    bool fog = false;
     bool Runs(PostStage s) const { return ((runs >> static_cast<int>(s)) & 1u) != 0; }
     // No stage asked for the pass: the frame stays as drawn.
     bool Empty() const { return runs == 0; }

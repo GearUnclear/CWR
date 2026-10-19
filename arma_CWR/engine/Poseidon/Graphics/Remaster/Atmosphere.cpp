@@ -307,18 +307,43 @@ float SkyViewColumnAzimuth(int col)
     return kPi * u * u;
 }
 
+namespace
+{
+// The sky-view march along `dir` (the sun frame of SunDirection): Rayleigh
+// single scattering with its phase plus multiple scattering into lr, Mie single
+// scattering without its phase into lm.
+void MarchSkyView(const AtmosphereTables& t, V3 dir, float sunElevationRad, float lr[3], float lm[3]);
+} // namespace
+
 Rgb SkyViewTexel(const AtmosphereTables& t, int region, int col, int row, float sunElevationRad)
+{
+    const V3 dir = SkyViewDirection(SkyViewRowElevation(row), SkyViewColumnAzimuth(col));
+    float lr[3] = {0, 0, 0}, lm[3] = {0, 0, 0};
+    MarchSkyView(t, dir, sunElevationRad, lr, lm);
+    return region == 0 ? Rgb(lr[0], lr[1], lr[2]) : Rgb(lm[0], lm[1], lm[2]);
+}
+
+Rgb SkyRadianceToward(const AtmosphereTables& t, float elevationRad, float azimuthFromSunRad, float sunElevationRad)
+{
+    const V3 dir = SkyViewDirection(elevationRad, azimuthFromSunRad);
+    float lr[3] = {0, 0, 0}, lm[3] = {0, 0, 0};
+    MarchSkyView(t, dir, sunElevationRad, lr, lm);
+    const float phase = AtmosphereMiePhase(Dot(dir, SunDirection(sunElevationRad)));
+    return Rgb(lr[0] + lm[0] * phase, lr[1] + lm[1] * phase, lr[2] + lm[2] * phase);
+}
+
+namespace
+{
+void MarchSkyView(const AtmosphereTables& t, V3 dir, float sunElevationRad, float lr[3], float lm[3])
 {
     const float r0 = kRg + std::max(kSkyViewerHeight, 1.0f);
     const V3 origin = {0.0f, r0, 0.0f};
     const V3 sun = SunDirection(sunElevationRad);
-    const V3 dir = SkyViewDirection(SkyViewRowElevation(row), SkyViewColumnAzimuth(col));
     const float mu = dir.y;
     const bool ground = HitsGround(r0, mu);
     const float tMax = ground ? DistanceToBottom(r0, mu) : DistanceToTop(r0, mu);
     const float phaseR = AtmosphereRayleighPhase(Dot(dir, sun));
     float tr[3] = {1, 1, 1};
-    float lr[3] = {0, 0, 0}, lm[3] = {0, 0, 0};
     float tPrev = 0.0f;
     for (int k = 0; k < kSkyViewSteps; ++k)
     {
@@ -348,8 +373,8 @@ Rgb SkyViewTexel(const AtmosphereTables& t, int region, int col, int row, float 
             tr[c] *= stepT;
         }
     }
-    return region == 0 ? Rgb(lr[0], lr[1], lr[2]) : Rgb(lm[0], lm[1], lm[2]);
 }
+} // namespace
 
 bool SkyViewTable::Valid() const
 {

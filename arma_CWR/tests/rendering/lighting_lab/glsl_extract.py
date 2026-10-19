@@ -202,7 +202,8 @@ _FAMILIES = ("EngineGL33_LightingShaders", "EngineGL33_Post")
 # Families whose tables also name pieces of another family: the post air pass
 # pastes the remastered prelude's LitConstants block, terrain and clouds piece
 # and sky piece (kPostShaders rows psPostAirMarch, psPostAirApply), the
-# reflections' trace its LitConstants block and sky piece (psPostSsrTrace).
+# reflections' trace its LitConstants block and sky piece (psPostSsrTrace), the
+# volumetric fog the same three (psFogInject, psFogApply).
 _FAMILY_ALSO = {"EngineGL33_Post": ("EngineGL33_LightingShaders",)}
 _FRAGMENT_TABLE = re.compile(r"\bkFragmentPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
 _SCREEN_VS_TABLE = re.compile(r"\bkScreenVertexPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
