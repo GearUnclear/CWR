@@ -310,13 +310,14 @@ std::string FeatureStateString(const LightingTuning& tuning, const FeatureGates&
     for (int i = 0; i < kFeatureCount; ++i)
         landed += GetFeatureInfo(static_cast<Feature>(i)).landed ? 1 : 0;
     char head[384];
-    std::snprintf(head, sizeof(head),
-                  "mode=%s gates=%d computed=%d frame=%u sun=%.1f night=%.2f sky=%.2f rain=%.2f fog=%.2f lights=%d "
-                  "landed=%d/%d |",
-                  tuning.remastered ? "remastered" : "classic", tuning.gates ? 1 : 0, gates.computed ? 1 : 0,
-                  gates.frame, static_cast<double>(in.sunElevationDeg), static_cast<double>(in.nightEffect),
-                  static_cast<double>(in.skyThrough), static_cast<double>(in.rainDensity), static_cast<double>(in.fog),
-                  in.localLights, landed, kFeatureCount);
+    std::snprintf(
+        head, sizeof(head),
+        "mode=%s gates=%d computed=%d frame=%u sun=%.1f night=%.2f sky=%.2f rain=%.2f wet=%.2f fog=%.2f lights=%d "
+        "landed=%d/%d |",
+        tuning.remastered ? "remastered" : "classic", tuning.gates ? 1 : 0, gates.computed ? 1 : 0, gates.frame,
+        static_cast<double>(in.sunElevationDeg), static_cast<double>(in.nightEffect),
+        static_cast<double>(in.skyThrough), static_cast<double>(in.rainDensity), static_cast<double>(GateWetness(in)),
+        static_cast<double>(in.fog), in.localLights, landed, kFeatureCount);
     std::string out = head;
     for (int i = 0; i < kFeatureCount; ++i)
     {

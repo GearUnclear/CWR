@@ -419,8 +419,14 @@ void EngineGL33::PostSsr(PostFrame& f)
     float farZ = std::fabs(1.0f - proj._33) > 1e-6f ? proj._43 / (1.0f - proj._33) : 5000.0f;
     if (!(farZ > 1.0f && farZ < 1e6f))
         farZ = 5000.0f;
-    // The ground's wetness: the knob when it forces one, else the rain.
-    float wet = _lighting.ssrWet >= 0.0f ? _lighting.ssrWet : (land ? land->GetRainDensity() : 0.0f);
+    // The ground's wetness: the knob when it forces one, else the weather's
+    // (the wet weather's state while its gate is on, else the rain). With the
+    // wet weather on, the forward pass darkens the wet ground and its puddles
+    // (wetPuddle, which the trace shares) set where the mirrors are.
+    const bool wetWeather =
+        _featureGates.computed && _featureGates.frame == GetFrameCounter() && _featureGates[rm::Feature::WetWeather].on;
+    const float weatherWet = wetWeather ? _wetFrame.surface : (land ? land->GetRainDensity() : 0.0f);
+    float wet = _lighting.ssrWet >= 0.0f ? _lighting.ssrWet : weatherWet;
     wet = std::clamp(wet, 0.0f, 1.0f);
     // The sea's reflection replaces the sea program's sky term, so it runs
     // only while that program draws the sea.
@@ -461,6 +467,7 @@ void EngineGL33::PostSsr(PostFrame& f)
     Set4(tr, "ssrParams", _lighting.ssrWater, wet, Glob.time.toFloat(), static_cast<float>(s.mipLevels));
     Set4(tr, "ssrFrame", f.noiseShift, debug == rm::kDebugViewSsrReflection ? 1.0f : 0.0f, farZ,
          seaProgram ? 1.0f : 0.0f);
+    Set4(tr, "ssrWetMode", wetWeather ? 1.0f : 0.0f, wetWeather ? _wetFrame.puddles : 0.0f, 0.0f, 0.0f);
     DrawTo(s.traceFbo, f.hw, f.hh);
 
     // 3. The rough blur: the trace gathered sideways over each texel's spread.

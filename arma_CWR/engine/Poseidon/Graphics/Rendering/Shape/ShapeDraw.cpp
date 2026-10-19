@@ -90,6 +90,20 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
     {
         if (BeginFaces() < EndFaces() && NSections() > 0)
         {
+            // The object kind every section's descriptor carries (the
+            // remastered materials); the previous one is back after the shape.
+            struct KindScope
+            {
+                Engine* engine;
+                render::DrawObjectKind previous;
+                KindScope(Engine* e, render::DrawObjectKind kind) : engine(e), previous(e->GetDrawObjectKind())
+                {
+                    e->SetDrawObjectKind(kind);
+                }
+                ~KindScope() { engine->SetDrawObjectKind(previous); }
+                KindScope(const KindScope&) = delete;
+                KindScope& operator=(const KindScope&) = delete;
+            } kindScope(engine, matSource ? matSource->GetDrawObjectKind() : render::DrawObjectKind::Unknown);
             GEngine->PrepareMeshTL(lights, transform, render::SplitLegacy(spec));
             if (spec & (OnSurface | IsOnSurface))
             {

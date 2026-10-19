@@ -86,6 +86,7 @@ uniform vec4 fogParam;   // x fog start (m), y 1 / fog range: the world's (Begin
 uniform vec4 fogColor;   // the world's fog colour (display), as PSConstants.fogColor
 uniform vec4 ssrParams;  // x ssrWater, y ground wetness 0..1, z sea clock (s), w mip levels of mipTex
 uniform vec4 ssrFrame;   // x march start turn (per frame under TAA), y 1 = the reflections alone (debug view), z far plane (m), w 1 = the sea program draws the sea
+uniform vec4 ssrWetMode; // x 1 = the wet weather shades the wet ground (no darkening here; its puddles), y its puddle level
 layout(location = 0) out vec4 fragColor;
 layout(location = 1) out float fragSpread; // the rough blur's spread (half-resolution texels)
 
@@ -491,8 +492,11 @@ void main() {
         if (r > rank) { rank = r; surface = s; pick = q; }
     }
     float wet = clamp(ssrParams.y, 0.0, 1.0);
+    // The wet weather (wetWeather) shades the wet ground itself: its puddles
+    // can outlast the wet surfaces.
+    bool wetWeather = ssrWetMode.x > 0.5;
     bool water = surface == 2 && ssrFrame.w > 0.5;
-    bool ground = (surface == 1 || surface == 3) && wet > 0.0;
+    bool ground = (surface == 1 || surface == 3) && (wet > 0.0 || (wetWeather && ssrWetMode.y > 0.0));
     // The ray starts on that pixel of the surface, at its full-resolution depth.
     float z = fullZ(pick);
     bool reflOnly = ssrFrame.y > 0.5;
@@ -599,6 +603,15 @@ void main() {
         float grass = road ? 0.0 : smoothstep(0.01, 0.05, c0.g - max(c0.r, c0.b) + 0.01);
         float th = road ? kSsrPuddleRoad : kSsrPuddleGround;
         float puddle = wet * flatness * smoothstep(th, th + 0.035, pn + 0.08 * (wet - 1.0)) * (1.0 - grass) * near;
+        if (wetWeather) {
+            // The wet weather's puddles (wetPuddle, the forward pass's own),
+            // and a grass test that holds under warm lamps, which turn lit
+            // grass from green to amber: green near red and well above blue.
+            float gr = c0.g / max(c0.r, 1e-3);
+            float gb = c0.g / max(c0.b, 1e-3);
+            grass = road ? 0.0 : max(grass, smoothstep(0.84, 0.92, gr) * smoothstep(1.1, 1.3, gb));
+            puddle = wetPuddle(posW, footT, road ? 1.0 : 0.0, grass, ssrWetMode.y).x;
+        }
         vec3 nW = normalize(mix(nD, vec3(0.0, 1.0, 0.0), mix(0.6, 1.0, puddle)));
         // Rain rings on the puddles.
         float rip = 0.03 * puddle * (vnoise(posW.xz * 4.0 + ssrParams.z * 1.3) - 0.5);
@@ -658,8 +671,9 @@ void main() {
         float F = fresnelRough(dot(nW, vW), 0.02, rough);
         float specW = F * weight;
         // Wet ground darkens (water fills the pores); a puddle is a dark mirror.
+        // With the wet weather on the forward pass has darkened both already.
         float darken = mix(1.0, road ? kSsrWetRoadDark : mix(kSsrWetGroundDark, kSsrWetGrassDark, grass), wet);
-        float base = darken * mix(1.0, kSsrPuddleDark, puddle);
+        float base = wetWeather ? 1.0 : darken * mix(1.0, kSsrPuddleDark, puddle);
         m = 1.0 - fogT + fogT * base * (1.0 - specW * use);
         add = fogT * specW * Rmix;
         refl = use > 0.0 ? Rmix / use : vec3(0.0);

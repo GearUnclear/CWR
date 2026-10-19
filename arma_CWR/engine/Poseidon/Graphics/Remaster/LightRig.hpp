@@ -168,10 +168,16 @@ struct LightingTuning
     // sub-knobs: the share of the sea's light a reflection on water takes, as a
     // multiple of the pass's estimate of the sky's share (its mean weight; 1.5
     // also covers the share the sea program's waves add), and the ground's
-    // wetness (-1 = the weather: the rain density until a wetness state exists;
-    // 0..1 forces it).
+    // wetness (-1 = the weather: with wetWeather on the world's wetness state,
+    // Wetness.hpp, off the rain density; 0..1 forces it).
     float ssrWater = 1.5f;
     float ssrWet = -1.0f;
+    // Wet weather (features.wetWeather, Wetness.hpp) sub-knobs: the wetness
+    // (-1 = the world's state, which the rain wets and the sun and wind dry;
+    // 0..1 forces surfaces and puddles alike, "after the rain" in clear
+    // weather) and the puddles' amount (a multiple of the state's puddles).
+    float wetness = -1.0f;
+    float puddles = 1.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.

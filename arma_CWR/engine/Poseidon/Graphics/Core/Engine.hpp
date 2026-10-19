@@ -312,7 +312,8 @@ class Engine : public IGraphicsEngine
     float _avgBrightness; // average screen brightness
     bool _nightVision;
     bool _multitexturing;
-    render::PassKindHint _passKindHint = render::PassKindHint::None; // explicit cockpit pass routing
+    render::PassKindHint _passKindHint = render::PassKindHint::None;          // explicit cockpit pass routing
+    render::DrawObjectKind _drawObjectKind = render::DrawObjectKind::Unknown; // the shape draw's object
     int _showFps;
     AspectSettings _aspectSettings;
 
@@ -465,6 +466,13 @@ class Engine : public IGraphicsEngine
     render::PassKindHint GetPassKindHint() const { return _passKindHint; }
     void SetPassKindHint(render::PassKindHint hint) { _passKindHint = hint; }
     void ClearPassKindHint() { _passKindHint = render::PassKindHint::None; }
+
+    // The kind of object whose shape is being drawn (Shape::Draw sets it
+    // around a shape's sections and puts the previous one back), copied into
+    // each draw's descriptor for the remastered materials. Unknown outside a
+    // shape draw.
+    render::DrawObjectKind GetDrawObjectKind() const { return _drawObjectKind; }
+    void SetDrawObjectKind(render::DrawObjectKind kind) { _drawObjectKind = kind; }
 
     // Typed form — callers split a legacy int via `render::SplitLegacy` at the
     // boundary; backends read whichever category they care about.

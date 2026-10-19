@@ -42,8 +42,10 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
+#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+#include <Poseidon/Graphics/Remaster/Wetness.hpp>
 
 #include <memory>
 
@@ -873,6 +875,23 @@ class EngineGL33 : public Engine
     // x, the nightLights gate with the tiled list): particles take them too
     // (ParticleNightLight). Decided with _lightTilesActive, cleared with it.
     bool _nightLightsActive = false;
+    // Wet weather (B7, Graphics/Remaster/Wetness.hpp, SurfaceMaterials.hpp):
+    // this frame's wetness (the world's state or the knob), set with the gates;
+    // _wetShading while the wetWeather gate is on in the world's passes, which
+    // then hand each draw its surface class (LitConst::MatClass xy).
+    Poseidon::remaster::WetnessFrame _wetFrame;
+    bool _wetShading = false;
+    // The surface rules: the stock table and the config's CfgSurfaceMaterials,
+    // built at the first wet frame. Each texture classifies itself once per
+    // object kind against the table of its generation (TextureGL33).
+    Poseidon::remaster::SurfaceTable _surfaceTable;
+    int _surfaceTableGen = 0; // 0 = not built
+    void EnsureSurfaceTable();
+    // The Weather slot and the frame flags of the MatClass slot, from the gates.
+    void UploadLitWeather();
+    // The surface class of the draw ApplyPassState prepares (its texture and
+    // object kind) into LitConst::MatClass xy, uploaded only when it changes.
+    void SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);
     void InitLightTiles();
     void DeinitLightTiles();
     // Builds, bins and uploads the list (once per frame).

@@ -515,6 +515,9 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 		int spec, int material, int from, int to
 	) const override;
 	bool GetAnimated(const Shape &src) const override;
+    // From the entity type's simulation and class (cached on the type);
+    // Static for an object without one (map houses, walls)
+    render::DrawObjectKind GetDrawObjectKind() const override;
 
 	// Get/Set object shape
 	__forceinline LODShapeWithShadow *GetShape() const {return _shape;}

@@ -29,8 +29,9 @@ enum class FragmentPiece : int
     Shadows,       // shadowMapVisibility
     TerrainClouds, // terrainSunVisibility, cloudSunVisibility, the dome mapping and the sky-matched shadows
     Sky,           // skyIrradiance, fogColorToward, the sky table, lit clouds (EngineGL33_LightingShadersSky.cpp)
+    Puddles,       // wetPuddle, where standing water collects (EngineGL33_LightingShadersSurface.cpp)
     Lights,        // localLights (EngineGL33_LightingShadersLights.cpp)
-    Surface,       // glossy (EngineGL33_LightingShadersSurface.cpp)
+    Surface,       // glossy, the wet weather's response (EngineGL33_LightingShadersSurface.cpp)
     Shade,         // shadeRemastered
     Finish,        // finishFragment
     Count,
@@ -39,11 +40,12 @@ const char* RemasterFragmentPiece(FragmentPiece piece);
 
 // The pieces kept in files of their own (read them through RemasterFragmentPiece).
 // The LitConstants block and the terrain and clouds piece are named here too:
-// the post air pass pastes them, and the reflections' trace pastes the block
-// and the sky piece (kPostShaders).
+// the post air pass pastes them, and the reflections' trace pastes the block,
+// the sky piece and the puddles piece (kPostShaders).
 extern const char kLitConstantsBlockGLSL[];
 extern const char kRemasterTerrainCloudsGLSL[];
 extern const char kRemasterSkyGLSL[];
+extern const char kRemasterPuddlesGLSL[];
 extern const char kRemasterLightsGLSL[];
 extern const char kRemasterSurfaceGLSL[];
 // The sky table's passes (EngineGL33_PostSkyTableShaders.cpp; read them through
@@ -268,9 +270,11 @@ enum : int
     LightColor = 34, // MaxLights vec4
     LightAmb = 42,   // MaxLights vec4
     LightDir = 50,   // MaxLights vec4
-    // 58: allocated to the materials' per-draw class (LitConstPlanned
-    // MatClass); one padding member in the block until it lands.
-    Reserved = 58,
+    // Wet weather (B7, Graphics/Remaster/SurfaceMaterials.hpp): per draw x the
+    // surface class, y the object kind (SetLitSurface, only while the wet
+    // gate is on); per frame z 1 while the lamp streaks run, w 1 while the
+    // reflections' pass reflects the wet ground (UploadLitWeather).
+    MatClass = 58,
     // Sun shadows (B1, Graphics/Remaster/SunShadows.hpp): x per-frame turn of
     // the soft shadows' taps, y 1 in a TAA frame, z taps per frame there,
     // w tan(sun angular radius) (0 = the stock filter).
@@ -298,9 +302,13 @@ enum : int
     // intensity per metre of start distance, z low-beam hot-spot intensity,
     // w the moon key's share (0: the sun is the key).
     Night = 71,
-    // 72-73: allocated to features still to land (LitConstPlanned
-    // CombatShadow and Weather); one padding member in the block until they do.
+    // 72: allocated to the combat shadow mask (LitConstPlanned CombatShadow);
+    // one padding member in the block until it lands.
     Planned = 72,
+    // Wet weather (B7, Graphics/Remaster/Wetness.hpp): x surface wetness, y
+    // rain density, z puddle level, w time (s, wrapped); zero while the
+    // wetWeather gate is off, which leaves every fragment as before.
+    Weather = 73,
     // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
     Water1 =
@@ -316,20 +324,19 @@ enum : int
     Count = 79,
 };
 constexpr int MaxLights = 8;
-constexpr int ReservedCount = 1;
-constexpr int PlannedCount = Water0 - Planned;
+constexpr int PlannedCount = Weather - Planned;
 static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
 static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
 static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
 static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
-static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
-static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
+static_assert(MatClass == LightDir + MaxLights, "LitConst material class follows the lights");
+static_assert(Taa == MatClass + 1 && Pcss == Taa + 1, "LitConst sun shadow slots follow the material class");
 static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
 static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slots follow the sky table's");
 static_assert(SkySun == SkyShadow + 1 && Night == SkySun + 1, "LitConst night slots follow the clouds slots");
 static_assert(Planned == Night + 1, "the planned padding follows the night slots");
-static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
-              "LitConst water slots follow the planned padding");
+static_assert(Weather == Planned + PlannedCount, "the weather follows the planned padding");
+static_assert(Water0 == Weather + 1 && Water1 == Water0 + 1, "LitConst water slots follow the weather");
 static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
 static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
 static_assert(Haze == Detail + 1, "LitConst haze slot follows the terrain detail");
@@ -341,30 +348,28 @@ static_assert(Count == Haze + 1, "LitConst size out of sync");
 // first, next to the per-draw material and light slots. A step that lands a
 // feature moves its rows into LitConst, declares them in LitConstantsBlock()
 // (a slot below it that has not landed yet becomes a padding member there) and
-// raises LitConst::Count, which the upload and the shaders follow. A7 landed
-// the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
-// padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
+// raises LitConst::Count, which the upload and the shaders follow. B7 landed
+// the material class at 58 and the weather at 73; A7 the sky slots 61 to 67
+// and B1 the sun shadow slots 59 and 60; B10 the clouds slots 68 and 69 (Sky,
 // SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
-// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 and 73
-// are the padding member litPlanned; B8 landed the haze at 78.
+// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 is the
+// padding member litPlanned; B8 landed the haze at 78.
 namespace LitConstPlanned
 {
-constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+// 58: the wet weather's material class landed (LitConst::MatClass, B7).
 // 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
 // 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
 // 70, 71: the night landed (LitConst::SkySun, LitConst::Night, B3); 70 was
 // free (the light list, A6, rides in litLightCount.yz, LitConst::LightCount).
 constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
-constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+// 73: the wet weather landed (LitConst::Weather, B7).
 // 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
 // 76: hfrt's canopy landed (LitConst::Canopy, B9); 77: texsharp's terrain
 // detail landed (LitConst::Detail, B11); 78: the haze landed (LitConst::Haze,
 // B8).
 constexpr int End = 79; // one past the last planned slot
-static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
-              "the planned slot below the sun shadows is the reserved padding");
-static_assert(CombatShadow == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
-              "the planned slots between the night and the water are the planned padding");
+static_assert(CombatShadow == LitConst::Planned && LitConst::PlannedCount == 1,
+              "the planned slot between the night and the weather is the planned padding");
 static_assert(End == LitConst::Count, "every planned slot above the padding has landed");
 // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
 static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");

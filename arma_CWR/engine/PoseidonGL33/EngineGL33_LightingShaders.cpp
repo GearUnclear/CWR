@@ -349,7 +349,7 @@ layout(std140) uniform LitConstants {
     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
     vec4 litLightDir[8];  // 50-57: xyz beam direction
-    vec4 litReserved;     // 58: planned per-draw material class (padding until it lands)
+    vec4 litMatClass;     // 58: wet weather: x surface class, y object kind (per draw), z lamp streaks on, w post reflects the wet ground
     vec4 litTaa;          // 59: x soft-shadow tap turn, y 1 = TAA frame, z taps per frame, w tan(sun radius)
     vec4 litPcss;         // 60: x search reach (m), y min filter (texels), z soft strength, w leaf lift (texels)
     vec4 litSkyRight;     // 61: xyz camera right * tan(fov x / 2), w Mie asymmetry g
@@ -363,7 +363,8 @@ layout(std140) uniform LitConstants {
     vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
     vec4 litSkySun;       // 70: xyz toward the sun, w its elevation (degrees): the sun the sky reads (skySunDir)
     vec4 litNight;        // 71: x physical lamps and low beams on, y lamp per start metre, z low-beam peak, w moon key share
-    vec4 litPlanned[2];   // 72-73: allocated to features still to land (combat, materials)
+    vec4 litPlanned;      // 72: allocated to the combat shadow mask (padding until it lands)
+    vec4 litWeather;      // 73: wet weather: x surface wetness, y rain density, z puddle level, w time (s)
     vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
@@ -839,11 +840,21 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         vec3 p = pow(a, vec3(1.3));
         a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
     }
+    // Wet weather (wetWeather): the rain darkens what soaks it up, lays a film
+    // on what does not (its sky, sun and lamp reflections), and fills puddles.
+    // litWeather is zero while the gate is off: nothing changes then.
+    float wetKeep = 1.0;
+    vec3 wetLit = vec3(0.0);
+    vec3 wetEnv = vec3(0.0);
+    float wetMirror = 0.0;
+    if (litWeather.x > 0.0 || litWeather.z > 0.0)
+        wetSurface(albedo, n, v, posAbs, skyVisibility, sunVisibility * sunOn, foliage, a, wetKeep, wetLit, wetEnv,
+                   wetMirror);
     float exposure = litZenith.w;
-    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn +
-                     g_physicalSpec * litGround.w) * exposure;
+    vec3 radiance = (a * (direct + ambient + moon + local + emissive) * wetKeep + glossy(n, v, sunVisibility) * sunOn +
+                     g_physicalSpec * litGround.w + wetLit) * exposure + wetEnv;
     float total = dot(radiance, kLuma);
-    ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+    ambientShare = clamp(dot(a * ambient * wetKeep * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0) * (1.0 - wetMirror);
     if (foliage) ambientShare *= 0.5;
 
     if (litFlags.z > 0.5 && litFlags.z < 4.5) {
@@ -1080,6 +1091,9 @@ void main() {
             }
         }
         vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
+        // The land takes the rain (puddles, the grass share from its albedo);
+        // the sea on this program does not.
+        g_wetDraw = litDetail.w > 0.5 ? 1 : 3;
         r0.rgb = shadeRemastered(albedo, true, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
@@ -1101,6 +1115,7 @@ void main() {
     float ambientShare = 0.0;
     r0.a = clamp((psC5.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
     if (vLitMode > 0.5 && vLitMode < 1.5) {
+        g_wetDraw = 2; // grass clutter: wet blades, no puddles
         r0.rgb = shadeRemastered(clamp(t0.rgb * t1.rgb * 2.0, 0.0, 1.0), true, ambientShare);
     } else {
         r0.rgb = clamp(vColor.rgb * t0.rgb * t1.rgb * 2.0, 0.0, 1.0);
@@ -1308,6 +1323,7 @@ void main() {
         // The debug views (sun visibility, sky visibility, normals) show the
         // sea as the detail program does.
         vec4 t0 = texture(tex0, vUV0);
+        g_wetDraw = 3; // the sea is never wet
         r0.rgb = shadeRemastered(t0.rgb * constColor.rgb * (t1.a * 2.0), true, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
@@ -1337,6 +1353,7 @@ const char* const kFragmentPieces[] = {
     s_psRemasterShadows,        // Shadows
     kRemasterTerrainCloudsGLSL, // TerrainClouds
     kRemasterSkyGLSL,           // Sky
+    kRemasterPuddlesGLSL,       // Puddles
     kRemasterLightsGLSL,        // Lights
     kRemasterSurfaceGLSL,       // Surface
     s_psRemasterShade,          // Shade

@@ -252,8 +252,11 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
     ctx.passKindHint = GetPassKindHint();
     ctx.remasteredSea = SeaRouted();
+    ctx.objectKind = GetDrawObjectKind();
 
     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
+    // The wet weather's surface class of this draw (B7; nothing while dry).
+    SetLitSurface(tex, d);
     // The screen-space reflections' surface tag of this draw (its stencil
     // reference and masks; the state of before while the world writes no
     // tags). The land and the sea's unrouted faces share the detail family:

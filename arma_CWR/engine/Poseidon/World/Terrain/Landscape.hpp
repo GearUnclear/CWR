@@ -5,6 +5,7 @@
 #include <Poseidon/AI/Path/AITypes.hpp>
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/Graphics/Remaster/Wetness.hpp>
 
 namespace Poseidon { class TaskPool; }
 namespace Poseidon
@@ -301,6 +302,11 @@ class Weather
 	float _skyThrough;
 
 	float _rainDensity,_rainDensityWanted,_rainDensitySpeed;
+    // How wet the world is (the remastered wet weather, Wetness.hpp): stepped
+    // with the weather in MoveClouds; a rain change made at once (SetRain over
+    // under a second) snaps it to what that rain settles at on the next step.
+    Poseidon::remaster::WetnessState _wetness;
+    bool _wetnessSnap = true;
 
 	Poseidon::Foundation::Time _thunderBoltTime;
 	Vector3 _windSpeed;
@@ -323,6 +329,8 @@ class Weather
 
 	void SetFog( Landscape *land, float fog );
 	float GetFog() const {return _fogSet;}
+
+    const Poseidon::remaster::WetnessState& GetWetness() const { return _wetness; }
 
 	Texture *SkyTexture() const {return _sky;}
 };
@@ -791,6 +799,8 @@ class Landscape: public SerializeClass
 
 	// control weather	
 	float GetRainDensity() const {return _weather._rainDensity;}
+    // The world's wetness (surfaces and puddles), for the remastered wet weather
+    const Poseidon::remaster::WetnessState& GetWetness() const { return _weather.GetWetness(); }
 	float GetOvercast() const {return _weather.GetOvercast();}
 	void SetOvercast( float overcast ) {_weather.SetOvercast(this,overcast);}
 	void SetFog( float fog ) {_weather.SetFog(this,fog);}

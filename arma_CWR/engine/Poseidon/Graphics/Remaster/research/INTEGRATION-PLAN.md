@@ -164,6 +164,12 @@ more is used as given. `airHaze` and `valleyMist` have no sub-knob. The `debug` 
 8, the air pass's in-scatter alone (`kDebugViewAir`; 6 on the lane, which sat before A6's light tiles
 and B2's albedo took 6 and 7).
 
+As built in B7: `wetness` (-1, the world's wetness state; 0..1 forces surfaces and puddles alike, so
+`wetness=1` under a clear sky is "after the rain") and `puddles` (1, a multiple of the state's
+puddles) are `wetWeather`'s sub-knobs (group `materials`); `lampStreaks` has none. `ssrWet` keeps its
+meaning, but its -1 now reads the wetness state while `wetWeather` is on (the rain density while it is
+off, as before). `triFeatureState` gained `wet=` after `rain=` (the wetness the gates read).
+
 ### 3.2 Frame gates and the GPU budget (RTX 3060, 1080p, 60 fps)
 
 The owner's budget only holds if heavy features run only when they can show. New pure module
@@ -241,6 +247,11 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
   While the gate is off the readout runs every 8th frame only. The ground counts only while it is
   wet (`ssrWet` when it forces a value, else the wetness stand-in), so a dry town or field gates
   SSR off ("water below 1% of the screen, dry"); the scale stays 0.5.
+- As built in B7: the wetness input is the world's state (`Graphics/Remaster/Wetness.hpp`, stepped
+  by the landscape's weather) or the `wetness` knob, the larger of its surfaces and its puddles,
+  while the `wetWeather` switch is on; with the switch off it stays the rain stand-in, so the
+  reflections' gate and ground are as before. The wet gates keep A1's conditions (wetness above
+  0.02; the streaks also a lamp lit at night).
 
 As built in B8: "morning" for the valley mist is an eastern sun between -4 and 10 deg
 (`kGateMorningMaxSunDeg` 10, was 38), and the mist's density is full from 1 to 6 deg and gone by
@@ -416,6 +427,18 @@ On the merged tree (B3 onto B8): `Haze` is at 78 and `Count` 79 as B8 built it, 
 take 70 and 71, the padding `litPlanned[2]` covers 72 and 73, and `LitConstPlanned` keeps
 `CombatShadow` and `Weather` (static_asserts: `CombatShadow` is `Planned`, `End` equals
 `LitConst::Count`).
+
+As built in B7 (a parallel lane on c36ee4b): `MatClass` landed at 58 and `Weather` at 73, as planned.
+`litReserved` became `litMatClass` (`LitConst::MatClass`; `Reserved` and `ReservedCount` are gone) and
+B3's `litPlanned[2]` became `vec4 litPlanned` for 72 (`LitConst::Planned`, `PlannedCount` 1; the
+combat shadow mask, `LitConstPlanned::CombatShadow`, static_assert) followed by `litWeather`;
+`Count` stays 79. `litMatClass` is not the class, kind, blend and hash the table names: xy are per draw
+(the surface class, and the object kind plus 8 on an on-surface draw), uploaded by `SetLitSurface` from
+`ApplyPassState` only when they change and only while the wet gate is on; zw are per frame (the lamp
+streaks on, the reflections' pass reflecting the wet ground), set by `UploadLitWeather` and kept by the
+per-draw updates. `litWeather` is x the surface wetness, y the rain density, z the puddle level, w the
+sim clock wrapped at 4096 s; all zero while the gate is off, which every wet term of the shaders tests
+first. B4 landing 72 replaces `litPlanned`.
 
 ### 3.4 Texture units
 
@@ -594,6 +617,14 @@ names over both families, and `glsl_extract.py` loads the lighting family with t
 `vUV0`, `tex0`, `g_groundTint`; never called there) and its own copies of the colour helpers
 (`kLuma`, `toLinear`, `toDisplay`, `tonemapNeutral`): the inputs piece declares the world's varyings
 and cannot be pasted into a post pass.
+
+As built in B7: the prelude has eleven pieces. `FragmentPiece::Puddles` (`kRemasterPuddlesGLSL`, in
+`EngineGL33_LightingShadersSurface.cpp`) sits between the sky and the lights: the puddle field
+(`wetPuddle`), a pure function of the world position over the LitConstants block and the height map,
+which the reflections' trace pastes too (its `kPostShaders` row: inputs, block, sky, puddles, main), so
+the forward pass's puddles (their darkening, their water film) and the trace's mirrors are the same
+puddles. The wet response itself (`wetSurface`, the lamp streaks) is in the surface piece; it calls the
+lights piece's tile list and physical-light helpers, so it cannot be pasted into a post pass.
 
 ### 3.6 Post pipeline stages
 
@@ -2034,6 +2065,81 @@ evidence in `tmp/integration/B6/` of the graphics-remaster worktree, gitignored;
   `Wetness` integrator (wets in rain, dries, puddles lag); layout (`MatClass`, `Weather`);
   glslang.
 - **Effort**: 6 days.
+
+**Result (2026-10-18, uncommitted change on c36ee4b in the scratch copy `gr-B7`, a parallel lane;
+evidence in `tmp/integration/B7/` of the graphics-remaster worktree, gitignored; light gate).**
+
+- Built: `Graphics/Remaster/Wetness.{hpp,cpp}` (pure: the world's surfaces and puddles, wetting in rain
+  with a 90 s time constant at full rain, drying with 1200 s over a drying factor of sun, clear sky and
+  wind, puddles with 600 s and 3600 s; a `SetRain` change of at least 0.01 made over under a second
+  snaps the state to what that rain settles at, on the first step that moves the clock); `Weather`
+  keeps it and steps it in `MoveClouds`;
+  `Graphics/Remaster/SurfaceMaterials.{hpp,cpp}` (pure: 14 classes, the stock rules, `CfgSurfaceMaterials`
+  merged over them, each object kind's default class, the porosity table, the object kind from a
+  config's simulation and class); `render::DrawObjectKind` on the descriptor (`BuildContext::objectKind`
+  from `Engine::GetDrawObjectKind`, set by `Shape::Draw` from `IAnimator::GetDrawObjectKind`, cached on
+  the `EntityType`; not part of the descriptor's equality, as no GL state follows from it);
+  `TextureGL33::SurfaceClassFor` (each texture classified once per kind and table generation); the slots
+  of 3.3; the puddles piece (3.5) and the wet response in the surface piece (`wetSurface`,
+  `wetLampStreaks`); the mains say what they shade (`g_wetDraw`: object, land, grass clutter, sea).
+- Corrections to the bullets above: the stock tokens are a table of rules in `SurfaceMaterials.cpp`
+  (data, not code paths; a stock install has no UD config file the engine could rely on), and mods add
+  or replace rules with `CfgSurfaceMaterials` (`surface`, `any[]`, `none[]`, `kinds[]`). Terrain is not
+  classified by texture name: the island textures name four corner materials by island-specific codes
+  (`abel\p4p4ttp4.pac`) that no table describes, so the land tells grass from bare ground per pixel from
+  its albedo (the prototype's v7 test, which the forward pass can make: it has the albedo, unlike B6's
+  post pass). B6 already drew the wet ground and the puddles' mirrors; with `wetWeather` on the forward
+  pass darkens the ground (0.35 of the ground's porosity, grass 0.92 of its albedo, B6's 0.8 for soil
+  and roads), lays the puddles' darkening (B6's 0.55) and film, and the trace takes its puddles from the
+  same `wetPuddle` and darkens nothing; off, the trace is B6's own, bit for bit. The puddle field is B6's
+  value noise plus the height map's hollows (the field rises 0.1 per metre of hollow, falls at most 0.03 on
+  a crest) and its level, read with smoothed interpolation so neither the hollows nor the flatness
+  crease along the terrain's cells (the depth normal B6 used is flat per triangle); grass holds puddles
+  only in its deepest hollows (threshold 0.74). Puddles are not the prototype's 9-cell rain-ring field
+  of the post pass: the rings are in the forward film's normal (within 40 m, while it rains). Glass
+  reflects the sky only when wet (its film): dry glass needs a dry-weather switch, a follow-up. The
+  matte darkening of paint and rubber (0.35 as a porosity) is new: the film over matte paint takes away
+  its pale surface scatter, so wet paint reads darker and deeper instead of greyer (the critic's blue or
+  grey paint). Object films reflect the sky at half weight, at least 0.3 rough, capped at 0.12, tinted
+  halfway to the fog colour and not at all toward the ground. The lamp streaks loop over A6's tiles
+  (B3's physical lamps and headlights at their physical intensity, the classic kinds at their classic
+  value) or the draw's own lights, GGX at the film's 0.12 (puddles 0.05, grass blades 0.4 at 0.1 of the
+  film), a 0.15 m bulb, the lobe's peak capped at 80; the film's and the puddle's lobes are blended,
+  not one lobe at a blended roughness (that drew a bright ring at every puddle's edge). The sun's
+  glint is blended the same way under its own cap of 3 (under the lamps' 80, a low sun's lobe on the
+  0.3 rough film, which peaks at well over a hundred times the sun, clipped a white column from the
+  horizon to the eye, the review's block). On bare ground the glint is 0.5 rough on half the film's
+  share (grit stands through the film), and the pixel's footprint widens its alpha by 0.25 per metre
+  (the critic's far white dashes). Run-down streaks
+  on vertical faces read the cloud noise at 0.2 per metre along the face and 0.03 per metre up, 0.75 to
+  1 of the wetness, fading out from 12 to 20 m. Dropped as the bullets say: `vbfix`, the dry satin rim,
+  the albedo bump, the research knobs and logs.
+- Off equals before (5 views, 1080p, scale 1.0, 4x MSAA; `gate5-off-vs-before.md` against
+  `gate5-base-repeat.md`): every band within the base build's own off/on repeat or of its size (rain and
+  fire are not repeatable: the hero's ground 228,907 pixels over 2 levels against the repeat's 198,655;
+  the wet street's ground 18,716 against 7,835, 411 over 8 levels against 131; after-rain ground 17,874
+  against 14,865; dry noon 12,715 against 93,508).
+- On (`gate6-on-vs-off.md`): at night in rain every lamp and the fire draw warm streaks across the wet
+  square and road, puddles hold dark water with rain rings and B6's mirrored houses, the ground's mean
+  rises (51 to 62 levels), 0.10% of the ground above 200 levels (no white sheet). After the rain at a low
+  sun the wet gravel shows a soft warm sheen toward the sun (the column's core 115 to 143 levels, its
+  gravel texture kept; 1.39 % of the ground band over 200 levels and 0.15 % over 240, against 12.0 %
+  and 9.0 % before the review's cap; B6's mirror of the Jeep stays in the puddle), the tent darkens and
+  deepens (58, 65, 48 to 48, 53, 37, saturation 0.26 to 0.30), the Jeep's side keeps its olive
+  (saturation 0.12 to 0.14), the M113 shows no stripes. By day in rain cloth and walls darken a little
+  (a soldier's torso 63 to 58, plaster 79 to 76, brick 61 to 57). Dry noon: the gate holds the wet path
+  off (`wetWeather=1:off:dry`), the frame is the same.
+- Cost (one reading, other lanes' games running): GPU frame minimum on minus off +0.57 ms at the wet
+  night town, the wet street and after the rain, +0.14 in rain on the fields, -0.05 at dry noon (gated);
+  a second run with more foreign load spread -2.4 to +2.5 ms. Unmeasured on a quiet GPU.
+- Gate: build 0 new warnings; clang-format clean on every touched file (the tab-style `Vertex.hpp`,
+  `Vehicle.hpp`, `Object.hpp`, `Landscape.hpp` and `EngineGL33_Queue.cpp` on the added lines; the
+  checker still names the untouched tab-indented line after each addition); unit gate tags plus the
+  landed lanes' and `[wet]` 642/642 (15 new cases), the full suite with the 6 known localisation
+  failures only; six mutations (the shader's porosity table, the snap, the descriptor's kind, the
+  trace darkening wet ground again, drying without the sun, the sun glint under the lamps' cap) each
+  turn their case red; smoke_abel 1/1
+  (KHR_debug ids 131154, 131169 and 131218 only).
 
 ### B8. air pass (volumetric beams and headlight cones + haze and valley mist)
 

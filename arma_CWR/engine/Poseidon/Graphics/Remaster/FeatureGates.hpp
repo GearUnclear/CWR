@@ -118,7 +118,7 @@ FeatureGates ComputeFeatureGates(const GateInputs& in, const LightingTuning& tun
 float GateWetness(const GateInputs& in);
 
 // triFeatureState: the switches and their gates as one line, for capture logs.
-//   "mode=remastered gates=1 computed=1 frame=<n> sun=<deg> night=<0..1> sky=<0..1> rain=<0..1>
+//   "mode=remastered gates=1 computed=1 frame=<n> sun=<deg> night=<0..1> sky=<0..1> rain=<0..1> wet=<0..1>
 //    fog=<0..1> lights=<n> landed=<n>/<26> | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ..."
 // Fields are separated by spaces, never ';' (the UDCAP log lines split on it);
 // reasons have their spaces replaced by '-'. ":inert" marks a switch that

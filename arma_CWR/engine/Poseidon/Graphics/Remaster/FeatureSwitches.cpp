@@ -61,10 +61,12 @@ constexpr FeatureInfo kFeatures[] = {
     {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", true, &FS::seaWaves, "ground"},
     // B6 (ssr): the tag readout and the reflections, two post stages.
     {Feature::Ssr, "ssr", "Screen-space reflections", "ssr", "Water and shine", "B6", true, &FS::ssr, "ssr"},
-    {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", false,
-     &FS::wetWeather, ""},
-    {Feature::LampStreaks, "lampStreaks", "Lamp streaks on wet ground", "materials", "Water and shine", "B7", false,
-     &FS::lampStreaks, ""},
+    // B7 (materials): the wet surfaces, the puddles' darkening and the lamp
+    // streaks shade in the world pass; the puddles' reflections are B6's stage.
+    {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", true,
+     &FS::wetWeather, "world"},
+    {Feature::LampStreaks, "lampStreaks", "Lamp streaks on wet ground", "materials", "Water and shine", "B7", true,
+     &FS::lampStreaks, "world"},
     // B8 (volumetric and haze): one post stage, the air pass, for all three.
     {Feature::AirBeams, "airBeams", "Sun beams and headlight cones", "volumetric", "Sky and air", "B8", true,
      &FS::airBeams, "air"},
@@ -225,8 +227,14 @@ struct KeyTable
             MakeSubKnob(Feature::Ssr, "ssrWater", "Water reflection",
                         "the share of the sea's light a reflection takes, times the sky's estimated share",
                         &LT::ssrWater, 0.0f, 2.0f),
-            MakeSubKnob(Feature::Ssr, "ssrWet", "Ground wetness", "-1 = the weather (rain); 0..1 forces it",
+            MakeSubKnob(Feature::Ssr, "ssrWet", "Ground wetness",
+                        "-1 = the weather (the wetness state, the rain with wetWeather off); 0..1 forces it",
                         &LT::ssrWet, -1.0f, 1.0f),
+            MakeSubKnob(Feature::WetWeather, "wetness", "Wetness",
+                        "-1 = the weather (rain wets, sun and wind dry); 0..1 forces it, also after the rain",
+                        &LT::wetness, -1.0f, 1.0f),
+            MakeSubKnob(Feature::WetWeather, "puddles", "Puddles", "the puddles' amount; 0 = none, 1 = the weather's",
+                        &LT::puddles, 0.0f, 2.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

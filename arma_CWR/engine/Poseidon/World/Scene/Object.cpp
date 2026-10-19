@@ -33,6 +33,8 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
+#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
+#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
 #if !_ENABLE_CHEATS
 #define STARS 0
@@ -1733,6 +1735,19 @@ void Object::DoLight(TLVertexTable& dst, const Shape& src, const Matrix4& worldT
 bool Object::GetAnimated(const Shape& src) const
 {
     return _isDestroyed && _destroyPhase > 0 && GetDestructType() != DestructTree;
+}
+
+render::DrawObjectKind Object::GetDrawObjectKind() const
+{
+    const EntityType* type = GetVehicleType();
+    if (!type)
+        return render::DrawObjectKind::Static;
+    if (type->_drawObjectKind < 0)
+    {
+        type->_drawObjectKind = static_cast<signed char>(remaster::DrawObjectKindFromNames(
+            static_cast<const char*>(type->_simName), static_cast<const char*>(type->_className)));
+    }
+    return static_cast<render::DrawObjectKind>(type->_drawObjectKind);
 }
 
 #if SUPPORT_RANDOM_SHAPES

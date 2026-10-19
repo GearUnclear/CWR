@@ -589,12 +589,14 @@ const PostShaderDef kPostShaders[] = {
       Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostAirCommonGLSL,
       Poseidon::gl33lighting::kPostAirApplyMainGLSL}},
     // The screen-space reflections (EngineGL33_PostSsrShaders.cpp). The trace
-    // pastes the LitConstants block and the sky piece of the fragment prelude.
+    // pastes the LitConstants block, the sky piece and the puddles piece of the
+    // fragment prelude (the wet weather's puddles, the same as the forward pass's).
     {"psPostSsrTag", {Poseidon::gl33lighting::kPostSsrTagGLSL}},
     {"psPostSsrShare", {Poseidon::gl33lighting::kPostSsrShareGLSL}},
     {"psPostSsrTrace",
      {Poseidon::gl33lighting::kPostSsrTraceInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
-      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostSsrTraceMainGLSL}},
+      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kRemasterPuddlesGLSL,
+      Poseidon::gl33lighting::kPostSsrTraceMainGLSL}},
     {"psPostSsrBlur", {Poseidon::gl33lighting::kPostSsrBlurGLSL}},
     {"psPostSsrComposite",
      {Poseidon::gl33lighting::kPostSsrCompositeInputsGLSL, s_glslPostCommon,

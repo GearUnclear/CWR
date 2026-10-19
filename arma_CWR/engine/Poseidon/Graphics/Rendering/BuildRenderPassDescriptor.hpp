@@ -43,6 +43,11 @@ struct BuildContext
     // Classic and the switch off leave it false, so the sea stays on the
     // detail program (PSDetail) exactly as before.
     bool remasteredSea = false;
+
+    // The kind of object the draw belongs to (Engine::GetDrawObjectKind, set
+    // by Shape::Draw around a shape's sections), copied to the descriptor for
+    // the remastered materials. It changes no GL state.
+    DrawObjectKind objectKind = DrawObjectKind::Unknown;
 };
 
 // Pure, header-implemented to keep the seam visible.  Inline so callers
@@ -211,6 +216,7 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
         d.pass = PassKind::SurfaceOverlay;
     }
 
+    d.objectKind = ctx.objectKind;
     return d;
 }
 

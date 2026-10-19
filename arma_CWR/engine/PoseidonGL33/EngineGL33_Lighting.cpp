@@ -14,6 +14,7 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
+#include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
@@ -21,6 +22,7 @@
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -628,6 +630,11 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
     in.skyThrough = land ? land->SkyThrough() : 1.0f;
     in.cloudCover = rig ? rig->cloudCover : 0.0f;
     in.rainDensity = land ? land->GetRainDensity() : 0.0f;
+    // The world's wetness (B7): the wet weather's state, or its knob, while its
+    // switch is on; off, the rain stands in, as before the step.
+    _wetFrame = rm::FrameWetness(land ? land->GetWetness() : rm::WetnessState{}, _lighting.wetness, _lighting.puddles);
+    if (rm::FeatureOn(_lighting.features, rm::Feature::WetWeather))
+        in.wetness = rm::FrameWetnessGate(_wetFrame);
     in.fog = land ? land->GetFog() : 0.0f;
     in.worldDrawn = true; // only the world's passes get here
     in.interior = _prevWorldDepthCleared;
@@ -669,6 +676,7 @@ void EngineGL33::UploadLitFrameConstants()
         // model.
         _lightTilesActive = false;
         _nightLightsActive = false;
+        _wetShading = false;
         return;
     }
     if (_terrainMapDirty)
@@ -873,8 +881,101 @@ void EngineGL33::UploadLitFrameConstants()
         rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
     SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
     _nightLightsActive = night.night[0] > 0.5f;
+    // Wet weather (B7): the frame's wetness and its flags; zero while the gate
+    // is off, which leaves every fragment as before.
+    UploadLitWeather();
     FlushLitConstants();
     BindLightingTextures();
+}
+
+void EngineGL33::EnsureSurfaceTable()
+{
+    if (_surfaceTableGen != 0)
+        return;
+    // The stock rules, then the config's CfgSurfaceMaterials (a mod's classes
+    // go first; one named like a stock rule replaces it):
+    //   class CfgSurfaceMaterials { class MyGlass { surface = "glass";
+    //       any[] = {"_glass"}; none[] = {}; kinds[] = {"vehicle"}; }; };
+    _surfaceTable = rm::DefaultSurfaceTable();
+    std::vector<rm::SurfaceRule> rules;
+    auto strings = [](const ParamEntry& cls, const char* name)
+    {
+        std::vector<std::string> out;
+        const ParamEntry* arr = cls.FindEntry(name);
+        if (arr && arr->IsArray())
+        {
+            for (int i = 0; i < arr->GetSize(); i++)
+                out.emplace_back(static_cast<const char*>(static_cast<RStringB>((*arr)[i])));
+        }
+        return out;
+    };
+    if (const ParamEntry* cfg = Pars.FindEntry("CfgSurfaceMaterials"))
+    {
+        for (int i = 0; i < cfg->GetEntryCount(); i++)
+        {
+            const ParamEntry& cls = cfg->GetEntry(i);
+            if (!cls.IsClass())
+                continue;
+            const ParamEntry* surface = cls.FindEntry("surface");
+            const std::string name = static_cast<const char*>(cls.GetName());
+            const std::string surfaceName =
+                surface && surface->IsTextValue() ? static_cast<const char*>(static_cast<RStringB>(*surface)) : "";
+            rm::SurfaceRule rule;
+            std::string why;
+            if (rm::MakeSurfaceRule(name, surfaceName, strings(cls, "any"), strings(cls, "none"), strings(cls, "kinds"),
+                                    rule, &why))
+                rules.push_back(rule);
+            else
+                LOG_WARN(Graphics, "CfgSurfaceMaterials >> {}: {}; ignored", name, why);
+        }
+    }
+    rm::MergeSurfaceRules(_surfaceTable, rules);
+    _surfaceTableGen = 1;
+    LOG_INFO(Graphics, "GL33 wet weather: {} surface rules, {} from CfgSurfaceMaterials", _surfaceTable.rules.size(),
+             rules.size());
+}
+
+void EngineGL33::UploadLitWeather()
+{
+    const bool gatesNow = _featureGates.computed && _featureGates.frame == GetFrameCounter();
+    _wetShading = gatesNow && _featureGates[rm::Feature::WetWeather].on;
+    Landscape* land = GScene ? GScene->GetLandscape() : nullptr;
+    if (_wetShading)
+    {
+        EnsureSurfaceTable();
+        const float rain = land ? land->GetRainDensity() : 0.0f;
+        SetSlot(LitConst::Weather, _wetFrame.surface, rain, _wetFrame.puddles, std::fmod(Glob.time.toFloat(), 4096.0f));
+    }
+    else
+    {
+        SetSlot(LitConst::Weather, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    // The frame's flags in the per-draw slot (SetLitSurface keeps them): the
+    // lamp streaks, and whether the reflections' pass reflects the wet ground
+    // (then the forward pass leaves the ground's sky reflection to it).
+    float* m = s_lit + LitConst::MatClass * 4;
+    m[2] = _wetShading && _featureGates[rm::Feature::LampStreaks].on ? 1.0f : 0.0f;
+    m[3] = _wetShading && _featureGates[rm::Feature::Ssr].on ? 1.0f : 0.0f;
+}
+
+void EngineGL33::SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d)
+{
+    // Per draw, but only while the wet weather shades the pass; the class
+    // changes between a shape's sections and objects, and only a change
+    // uploads the slot.
+    if (!_lightingActive || !_wetShading)
+        return;
+    const bool onSurface = d.surface == Poseidon::render::SurfaceMode::OnSurface;
+    const rm::SurfaceClass cls = tex ? tex->SurfaceClassFor(_surfaceTable, _surfaceTableGen, d.objectKind, onSurface)
+                                     : rm::KindDefaultClass(d.objectKind, onSurface);
+    float* m = s_lit + LitConst::MatClass * 4;
+    const float x = static_cast<float>(cls);
+    const float y = static_cast<float>(d.objectKind) + (onSurface ? 8.0f : 0.0f);
+    if (m[0] == x && m[1] == y)
+        return;
+    m[0] = x;
+    m[1] = y;
+    UploadLitSlots(LitConst::MatClass, 1);
 }
 
 bool EngineGL33::RemasterMoonKey() const

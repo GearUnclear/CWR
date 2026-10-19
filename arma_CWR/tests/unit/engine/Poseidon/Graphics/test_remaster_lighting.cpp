@@ -1158,12 +1158,14 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
         {P::Sky, "vec3 atmoFogColor("},
         {P::Sky, "vec3 shadeSkyDome("},
         {P::Sky, "vec3 skyReflection("},
+        {P::Puddles, "vec2 wetPuddle("},
         {P::Lights, "uniform FrameLights {"},
         {P::Lights, "vec3 localLight("},
         {P::Lights, "vec3 localLightsTiled("},
         {P::Lights, "vec3 localLights("},
         {P::Lights, "vec3 lightTileView("},
         {P::Surface, "vec3 glossy("},
+        {P::Surface, "void wetSurface("},
         {P::Shade, "vec3 shadeRemastered("},
         {P::Finish, "void finishFragment("},
     };
@@ -1436,7 +1438,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litLightColor", LC::LightColor, LC::MaxLights},
         {"litLightAmb", LC::LightAmb, LC::MaxLights},
         {"litLightDir", LC::LightDir, LC::MaxLights},
-        {"litReserved", LC::Reserved, LC::ReservedCount},
+        {"litMatClass", LC::MatClass, 1},
         {"litTaa", LC::Taa, 1},
         {"litPcss", LC::Pcss, 1},
         {"litSkyRight", LC::SkyRight, 1},
@@ -1451,6 +1453,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litSkySun", LC::SkySun, 1},
         {"litNight", LC::Night, 1},
         {"litPlanned", LC::Planned, LC::PlannedCount},
+        {"litWeather", LC::Weather, 1},
         {"litWater0", LC::Water0, 1},
         {"litWater1", LC::Water1, 1},
         {"litCanopy", LC::Canopy, 1},
@@ -1515,14 +1518,13 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
             CHECK(CountOf(program, shared) == 1);
     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
 
-    // The planned slots: the one below the sun shadows is the reserved padding,
-    // the two between the night and the water are the planned padding, the
-    // rest continue the declared ones (B1 landed the sun shadow slots 59 and
-    // 60, A7 the sky slots 61 to 67 of plan section 3.3, B10 the clouds slots
-    // 68 and 69, B3 the night slots 70 and 71, B5 the water slots 74 and 75,
-    // B9 the canopy at 76).
-    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
-    CHECK(LC::ReservedCount == 1);
+    // The planned slots: the one between the night and the weather is the
+    // planned padding, the rest continue the declared ones (B7 landed the
+    // material class at 58 and the weather at 73, B1 the sun shadow slots 59
+    // and 60, A7 the sky slots 61 to 67 of plan section 3.3, B10 the clouds
+    // slots 68 and 69, B3 the night slots 70 and 71, B5 the water slots 74 and
+    // 75, B9 the canopy at 76).
+    CHECK(static_cast<int>(LC::MatClass) == 58);
     CHECK(static_cast<int>(LC::Taa) == 59);
     CHECK(static_cast<int>(LC::Pcss) == 60);
     CHECK(static_cast<int>(LC::SkyRight) == 61);
@@ -1534,9 +1536,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::SkySun) == 70);
     CHECK(static_cast<int>(LC::Night) == 71);
     CHECK(static_cast<int>(LC::Planned) == 72);
-    CHECK(LC::PlannedCount == 2);
+    CHECK(LC::PlannedCount == 1);
     CHECK(gl::LitConstPlanned::CombatShadow == static_cast<int>(LC::Planned));
-    CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Planned) + LC::PlannedCount - 1);
+    CHECK(static_cast<int>(LC::Weather) == 73);
     CHECK(static_cast<int>(LC::Water0) == 74);
     CHECK(static_cast<int>(LC::Water1) == 75);
     // B9 landed the canopy at 76 and B11 the terrain detail at 77.
