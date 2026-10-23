@@ -686,6 +686,9 @@ void EngineGL33::PostFog(const PostFrame& f)
         prevRow[r][2] = row[2];
         prevRow[r][3] = row[0] * dx + row[1] * dy + row[2] * dz;
     }
+    // The frame's jitter in a cell: psFogInject turns it per cell (and per
+    // slice in depth, fogCellNoise), so the history's residual of it does not
+    // swing whole regions of the volume together.
     const std::uint32_t seq = _fog.sequence++;
     const float jz = Fract(0.6180339887 * static_cast<double>(seq));
     const float jx = Fract(0.7548776662 * static_cast<double>(seq)) - 0.5f;

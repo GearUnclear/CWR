@@ -197,6 +197,15 @@ The owner found the integrated features (A0 to A7, B1 to B11 on `graphics-remast
 
 "Uslu dur! trailer, part 1: graphics": 14 scenes from the Uslu dur world (resistance, occupiers, checkpoints, convoys, the occupied town), each shot twice at 60 fps from one camera path, on a vanilla upstream build and on the O1 build, and composited full size behind a moving divider that sweeps the whole frame; calm dissolves and wipes, Oswald and Roboto text with the HUD green as the only accent, a typed opening line, and a calm female narration (local Breeze TTS, every line checked by transcription). 2:13.4, 1080p60, -16 LUFS. Tooling 111e563; the files are in `graphics-remaster/tmp/video/v2/final/` (not in git). The NPC head flicker in early takes was the AI look-around fast-forwarded by the capture's real time per frame; the fix is capture-only (an exact 1/60 s step and a held gaze).
 
+## F1. The dawn haze flicker (2026-10-23)
+
+The owner saw the haze flicker in the trailer's dawn shot ("Moving out at dawn", clip valley_mist). A swarm of six Opus agents and a lead measured it on a shared board (`graphics-remaster/tmp/video/mist/`, not in git; metric `tools/bandmetric.py`, the temporal second difference of 15 px blocks over the valley band):
+
+- **Cause.** The froxel fog sampled every cell of the volume at the same sub-cell offset each frame (one golden-ratio jitter for the frame) and kept 0.88 of the last frame. The history's leftover of that jitter then had the same sign over whole regions, so the far haze and the valley mist thickened and thinned together as one sheet. Switching features off one at a time, only removing the fog medium removed it; about 80% of it came from the depth jitter and the rest from the screen jitter.
+- **Game, not capture.** An in-memory recorder in a scratch build showed it in play at a steady 60 fps (3x vanilla). The trailer's stepped capture, with 7 to 10 renders per shot, made it about twice as strong. Warm-up renders per shot made it 13 to 21% worse, so a capture-only fix was ruled out.
+- **Fix.** psFogInject turns the frame's jitter per cell with an interleaved-gradient offset of the cell, and in depth also per slice, so neighbouring cells' residuals are independent and average out. The sequence, the history share and the uniforms are unchanged. New test `[remaster][fog][Shaders]`.
+- **Result.** Valley band on the reshot clip: 0.567 to 0.103, 25076 spikes to 2 (vanilla 0.112). In play at 60 fps: 0.308 to 0.112. The look is unchanged apart from a hair more mist. Fog cells with no history (after a camera cut) may show cell-size speckle for a few frames; not seen in the clips.
+
 ## P1. Pending
 
 - A clean timing run on an idle machine at 1080p, ideally on an RTX 3060.

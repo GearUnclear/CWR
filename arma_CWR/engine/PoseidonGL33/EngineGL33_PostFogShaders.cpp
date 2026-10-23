@@ -21,7 +21,9 @@
 //     cloud field (the shadows of ridges in the haze), and the mist and fog
 //     above a cell take light out of its sun. Each frame samples a jittered
 //     point of each cell and blends it with the last frame's volume
-//     reprojected to that point, so the history averages the jitter;
+//     reprojected to that point, so the history averages the jitter (the
+//     frame's jitter turned per cell, and per slice in depth, so neighbouring
+//     cells' history residuals are independent, fogCellNoise);
 //   - psFogIntegrate: front to back along each column, the light scattered
 //     toward the eye and the transmittance from the eye to the far face of
 //     each cell (energy-conserving per slice);
@@ -367,10 +369,22 @@ vec4 fogCell(vec3 rel) {
     return vec4(inscatter, sMie + sAir) * 1000.0;
 }
 
+// The jitter of a cell: the frame's offset (one golden-ratio sequence for the
+// frame, fogFrame.xy and fogDepth.w) turned by an interleaved-gradient offset
+// of the cell, and in depth also by the slice. With the frame's offset alone
+// every cell sat at the same point of its cell, so the history's residual of
+// the jitter (it keeps 0.88 of the last frame) had the same sign over whole
+// regions each frame, and the far haze and the valley mist pumped as one
+// sheet, in play and in the captures (the dawn valley's flicker, 2026-10-23).
+// Turned per cell, the residuals are independent and average out in the
+// apply's lookup and the TAA.
+float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+float g_cellJitter = 0.0; // this column's depth offset (main sets it)
+
 // The cell of slice s on this column: this frame's jittered point, blended with
 // the last frame's volume at the same point.
 vec4 fogSlice(float s, vec3 dirZ) {
-    float z = fogSliceDepth((s + fogDepth.w) / fogGrid.z);
+    float z = fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z);
     vec3 rel = dirZ * z;
     vec4 cur = fogCell(rel);
     if (fogFrame.z < 1.0) {
@@ -388,7 +402,10 @@ vec4 fogSlice(float s, vec3 dirZ) {
 }
 
 void main() {
-    vec2 ndc = (gl_FragCoord.xy + fogFrame.xy) / fogGrid.xy * 2.0 - 1.0;
+    g_cellJitter = fogCellNoise(gl_FragCoord.xy);
+    vec2 cellJ = fract(fogFrame.xy + 0.5 + vec2(fogCellNoise(gl_FragCoord.xy + vec2(17.0, 59.0)),
+                                                fogCellNoise(gl_FragCoord.xy + vec2(83.0, 29.0)))) - 0.5;
+    vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;
     vec3 dirZ = viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0); // per metre of view depth
     vec3 d = normalize(dirZ);
     // The air's light along this column: the colour the forward fog fades
