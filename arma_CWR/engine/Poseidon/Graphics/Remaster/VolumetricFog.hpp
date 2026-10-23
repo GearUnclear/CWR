@@ -68,6 +68,21 @@ struct FogGrid
 // The injection and the integration each write this many slices per draw
 // (eight colour attachments, the GL 3.3 minimum).
 constexpr int kFogSlicesPerDraw = 8;
+// The injection samples each cell at two fixed points and never moves them:
+// depth strata at a quarter and three quarters of the slice (each weighted by
+// the metres of its half of the slice), on the two diagonal quarter points of
+// the cell's footprint (in cells from its centre). The history keeps 0.88 of
+// the last frame, read at the cell's centre through a fixed tetrahedral blur
+// of kFogHistoryBlur cells and slices per axis (the mean of the blur the old
+// read at a jittered point gave the stored volume: the mist's softness in the
+// approved look). Nothing in the sampling changes from frame to frame, so the
+// history only smooths the light's own changes and has no residual to pump
+// (one offset for the whole frame, the dawn valley's flicker) or to slide
+// through the fog (an offset pattern per cell plus the frame's step, the wind
+// of the first fix). The shader's constants mirror these.
+constexpr float kFogTapZ[2] = {0.25f, 0.75f};
+constexpr float kFogTapXY[2][2] = {{-0.25f, -0.25f}, {0.25f, 0.25f}};
+constexpr float kFogHistoryBlur = 0.25f;
 // The grid for a viewport of w x h pixels at a quality (0 coarse, 1 shipped,
 // 2 fine; the fogQuality knob, rounded and clamped): cells of 16, 12 or 8
 // pixels, 48, 64 or 96 slices.

@@ -257,11 +257,6 @@ float ToLinear(float display)
     return std::pow(std::max(display, 0.0f), 2.2f);
 }
 
-float Fract(double x)
-{
-    return static_cast<float>(x - std::floor(x));
-}
-
 // A sample of one of the sight map's grids at world x, z (the nearest cell,
 // clamped to the edge), 0 without a map.
 float SampleMap(const rm::FogSightMap* map, std::vector<float> rm::FogSightMap::* grid, float x, float z)
@@ -686,13 +681,12 @@ void EngineGL33::PostFog(const PostFrame& f)
         prevRow[r][2] = row[2];
         prevRow[r][3] = row[0] * dx + row[1] * dy + row[2] * dz;
     }
-    // The frame's jitter in a cell: psFogInject turns it per cell (and per
-    // slice in depth, fogCellNoise), so the history's residual of it does not
-    // swing whole regions of the volume together.
+    // The frame's count steps the near field's march (fogNearGrid.w). The
+    // cells take no jitter: psFogInject samples two fixed points of each
+    // (VolumetricFog.hpp kFogTapZ, kFogTapXY), so the history has no residual
+    // of a moving sample to pump (one offset for the frame) or to slide
+    // through the fog (an offset per cell plus the frame's step).
     const std::uint32_t seq = _fog.sequence++;
-    const float jz = Fract(0.6180339887 * static_cast<double>(seq));
-    const float jx = Fract(0.7548776662 * static_cast<double>(seq)) - 0.5f;
-    const float jy = Fract(0.5698402910 * static_cast<double>(seq)) - 0.5f;
 
     // The night air's light: the night sky's share of the classic fog colour.
     const float nightW = Smooth(0.1f, 0.8f, m.night);
@@ -825,8 +819,8 @@ void EngineGL33::PostFog(const PostFrame& f)
     glBindTexture(GL_TEXTURE_3D, _fog.injectTex[prev]);
     bindShared();
     setShared(inject);
-    Set4(inject, "fogDepth", zFar, k, invEk, jz);
-    Set4(inject, "fogFrame", jx, jy, history ? kFogHistoryShare : 1.0f, Glob.time.toFloat());
+    Set4(inject, "fogDepth", zFar, k, invEk, 0.0f);
+    Set4(inject, "fogFrame", 0.0f, 0.0f, history ? kFogHistoryShare : 1.0f, Glob.time.toFloat());
     Set4(inject, "prevRow0", prevRow[0][0], prevRow[0][1], prevRow[0][2], prevRow[0][3]);
     Set4(inject, "prevRow1", prevRow[1][0], prevRow[1][1], prevRow[1][2], prevRow[1][3]);
     Set4(inject, "prevRow2", prevRow[2][0], prevRow[2][1], prevRow[2][2], prevRow[2][3]);

@@ -7,7 +7,9 @@
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -732,63 +734,247 @@ TEST_CASE("Volumetric fog: the shaders read the slices and the medium the way Vo
           1);
 }
 
-TEST_CASE("Volumetric fog: the injection's jitter is turned per cell, so its history leaves no frame-wide pump",
+namespace
+{
+
+// A mirror of the injection and its history, to see what a way of sampling
+// the cells leaves in the volume over time. A grid of cells looks at a smooth
+// medium: a field over the cells' footprint plus a depth term whose gradient
+// differs from cell to cell, as at the mist's top where the far slices are
+// hundreds of metres deep. Each frame a cell takes the weighted mean of the
+// medium at its taps (offsets in cells, and in slices from the slice's
+// centre) and keeps 0.88 of its last frame's value (kFogHistoryShare 0.12,
+// read at the cell's centre and reprojected for the camera's pan, which
+// slides the medium across the grid). The residual is a cell's value less the
+// medium at its centre, so the change the camera explains is taken out.
+//   pump   the swing over frames of a 5 x 5 block's mean residual (about 60
+//          px at 1080p, what the apply's lookup and the eye average): a
+//          residual of one sign over whole regions pumps the far haze;
+//   travel the correlation between one frame's change of the residual and
+//          the last frame's change, at the best cell lag other than zero
+//          (less any at lag zero): a pattern that slides through the fog
+//          reads as wind, however small its block mean;
+//   still  the largest change of a cell's residual from one frame to the
+//          next: with the camera held, nothing should move at all.
+struct FogTap
+{
+    double x = 0.0, y = 0.0, z = 0.0, w = 1.0;
+};
+
+struct FogSamplingResidual
+{
+    double pump = 0.0;
+    double travel = 0.0;
+    double still = 0.0;
+};
+
+// tapsOf(cellX, cellY, frame, taps) fills the cell's taps for that frame.
+template <class TapsOf>
+FogSamplingResidual MeasureFogSampling(TapsOf tapsOf, double panCellsPerFrame)
+{
+    constexpr int kN = 40, kFrames = 240, kWarm = 80, kLag = 2, kEdge = 4;
+    constexpr double kShare = 0.12, kTwoPi = 6.283185307179586;
+    auto medium = [](double x, double y, double z)
+    {
+        const double g = 1.0 + 0.5 * std::sin(0.21 * x) * std::cos(0.17 * y);
+        return std::sin(kTwoPi * (0.083 * x + 0.047 * y)) + 0.6 * std::cos(kTwoPi * (0.031 * x - 0.058 * y)) +
+               g * (0.9 * z + 0.4 * z * z);
+    };
+    auto idx = [](int x, int y) { return static_cast<std::size_t>(y) * kN + static_cast<std::size_t>(x); };
+    std::vector<double> hist(kN * kN, 0.0), next(kN * kN, 0.0), res(kN * kN, 0.0), prevRes(kN * kN, 0.0),
+        change(kN * kN, 0.0), prevChange(kN * kN, 0.0);
+    std::vector<double> lagSum((2 * kLag + 1) * (2 * kLag + 1), 0.0), blocks;
+    std::vector<FogTap> taps;
+    int lagFrames = 0;
+    FogSamplingResidual out;
+    for (int frame = 0; frame < kFrames; ++frame)
+    {
+        const double pan = panCellsPerFrame * frame;
+        for (int y = 0; y < kN; ++y)
+            for (int x = 0; x < kN; ++x)
+            {
+                taps.clear();
+                tapsOf(x, y, frame, taps);
+                double v = 0.0;
+                for (const FogTap& t : taps)
+                    v += t.w * medium(x + pan + t.x, y + t.y, t.z);
+                double h = v;
+                if (frame > 0)
+                {
+                    // Last frame's cell under this cell's centre: the pan moved
+                    // the medium by panCellsPerFrame cells (linear, clamped).
+                    const double px = std::min(x + panCellsPerFrame, kN - 1.0);
+                    const int x0 = static_cast<int>(std::floor(px));
+                    const int x1 = std::min(x0 + 1, kN - 1);
+                    const double f = px - x0;
+                    const double hp = hist[idx(x0, y)] * (1.0 - f) + hist[idx(x1, y)] * f;
+                    h = hp + kShare * (v - hp);
+                }
+                next[idx(x, y)] = h;
+                res[idx(x, y)] = h - medium(x + pan, y, 0.0);
+            }
+        hist.swap(next);
+        if (frame > 0)
+        {
+            for (std::size_t i = 0; i < res.size(); ++i)
+                change[i] = res[i] - prevRes[i];
+            if (frame >= kWarm)
+            {
+                for (int y = kEdge; y < kN - kEdge; ++y)
+                    for (int x = kEdge; x < kN - kEdge; ++x)
+                        out.still = std::max(out.still, std::fabs(change[idx(x, y)]));
+                if (frame > kWarm)
+                {
+                    ++lagFrames;
+                    for (int dy = -kLag; dy <= kLag; ++dy)
+                        for (int dx = -kLag; dx <= kLag; ++dx)
+                        {
+                            double sa = 0.0, sb = 0.0, saa = 0.0, sbb = 0.0, sab = 0.0;
+                            int n = 0;
+                            for (int y = kEdge; y < kN - kEdge; ++y)
+                                for (int x = kEdge; x < kN - kEdge; ++x)
+                                {
+                                    const double a = change[idx(x, y)], b = prevChange[idx(x + dx, y + dy)];
+                                    sa += a;
+                                    sb += b;
+                                    saa += a * a;
+                                    sbb += b * b;
+                                    sab += a * b;
+                                    ++n;
+                                }
+                            const double va = saa - sa * sa / n, vb = sbb - sb * sb / n;
+                            const double rho =
+                                (va < 1e-20 || vb < 1e-20) ? 0.0 : (sab - sa * sb / n) / std::sqrt(va * vb);
+                            lagSum[static_cast<std::size_t>((dy + kLag) * (2 * kLag + 1) + dx + kLag)] += rho;
+                        }
+                }
+            }
+            prevChange.swap(change);
+        }
+        prevRes = res;
+        if (frame >= kWarm)
+        {
+            double block = 0.0;
+            for (int y = 18; y < 23; ++y)
+                for (int x = 18; x < 23; ++x)
+                    block += res[idx(x, y)] / 25.0;
+            blocks.push_back(block);
+        }
+    }
+    double mean = 0.0;
+    for (double b : blocks)
+        mean += b / static_cast<double>(blocks.size());
+    double var = 0.0;
+    for (double b : blocks)
+        var += (b - mean) * (b - mean) / static_cast<double>(blocks.size());
+    out.pump = std::sqrt(var);
+    const double atZero = std::max(lagSum[static_cast<std::size_t>(kLag * (2 * kLag + 1) + kLag)] / lagFrames, 0.0);
+    double best = 0.0;
+    for (int dy = -kLag; dy <= kLag; ++dy)
+        for (int dx = -kLag; dx <= kLag; ++dx)
+            if (dx != 0 || dy != 0)
+                best = std::max(best,
+                                lagSum[static_cast<std::size_t>((dy + kLag) * (2 * kLag + 1) + dx + kLag)] / lagFrames);
+    out.travel = std::max(best - atZero, 0.0);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("Volumetric fog: the injection samples fixed points of each cell, so its history can neither pump nor travel",
           "[remaster][fog][Shaders]")
 {
-    // The dawn valley's flicker (2026-10-23): with one jitter for every cell
-    // the history's residual of the jitter had the same sign over whole
-    // regions each frame, and the far haze and the valley mist pumped as one
-    // sheet. The injection turns the frame's offset per cell (and per slice in
-    // depth) by an interleaved-gradient offset.
+    // The dawn valley (2026-10-23), twice. One jittered point per cell at the
+    // frame's golden-ratio offset: the history's residual of the jitter had
+    // the same sign over whole regions, and the far haze and the valley mist
+    // pumped as one sheet. Then that offset turned per cell by an
+    // interleaved-gradient pattern (d91a08e0): the pump went, but the pattern
+    // is a ramp over the cells, so with the frame's step the next frame's
+    // field was this frame's read one cell over, and the residual slid
+    // through the fog about a cell per frame: wind. Now each cell's two taps
+    // are fixed (VolumetricFog.hpp kFogTapZ, kFogTapXY) and the history is
+    // read at the cell's centre through a fixed blur (kFogHistoryBlur).
     const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
     REQUIRE_FALSE(inject.empty());
-    CHECK(CountOf(inject, "float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, "
-                          "0.00583715)))); }") == 1);
-    CHECK(CountOf(inject, "fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z)") == 1);
-    CHECK(CountOf(inject, "g_cellJitter = fogCellNoise(gl_FragCoord.xy);") == 1);
-    CHECK(CountOf(inject, "vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;") == 1);
-    // No cell takes the frame's offset alone any more.
-    CHECK(CountOf(inject, "(s + fogDepth.w)") == 0);
-    CHECK(CountOf(inject, "gl_FragCoord.xy + fogFrame.xy") == 0);
+    CHECK(CountOf(inject, "const float kFogTapZ[2] = float[2](0.25, 0.75);") == 1);
+    CHECK(kFogTapZ[0] == 0.25f);
+    CHECK(kFogTapZ[1] == 0.75f);
+    CHECK(CountOf(inject, "const vec2 kFogTapXY[2] = vec2[2](vec2(-0.25, -0.25), vec2(0.25, 0.25));") == 1);
+    CHECK(kFogTapXY[0][0] == -0.25f);
+    CHECK(kFogTapXY[0][1] == -0.25f);
+    CHECK(kFogTapXY[1][0] == 0.25f);
+    CHECK(kFogTapXY[1][1] == 0.25f);
+    CHECK(CountOf(inject, "const float kFogHistoryBlur = 0.25;") == 1);
+    CHECK(kFogHistoryBlur == 0.25f);
+    // Each tap weighted by the metres of its half of the slice, on the column
+    // through its own point of the cell.
+    CHECK(CountOf(inject, "float w = fogSliceDepth((s + kFogTapZ[i] + 0.25) / fogGrid.z) - "
+                          "fogSliceDepth((s + kFogTapZ[i] - 0.25) / fogGrid.z);") == 1);
+    CHECK(CountOf(inject, "acc += w * fogCell(g_tapDir[i] * fogSliceDepth((s + kFogTapZ[i]) / fogGrid.z));") == 1);
+    CHECK(CountOf(inject, "vec2 ndcI = (gl_FragCoord.xy + kFogTapXY[i]) / fogGrid.xy * 2.0 - 1.0;") == 1);
+    CHECK(CountOf(inject, "vec2 ndc = gl_FragCoord.xy / fogGrid.xy * 2.0 - 1.0;") == 1);
+    // The history at the cell's centre (read at the sample point it was a
+    // leaky sum of the offsets, not their average), through the fixed blur.
+    CHECK(CountOf(inject, "vec3 rel = dirZ * fogSliceDepth((s + 0.5) / fogGrid.z);") == 1);
+    CHECK(CountOf(inject, "vec3 tq = vec3(puv, pt), te = vec3(kFogHistoryBlur) / fogGrid.xyz;") == 1);
+    CHECK(CountOf(inject, "cur = mix(hist, cur, fogFrame.z);") == 1);
+    // Nothing in the injection moves with the frame: no jitter is read and no
+    // per-cell pattern is left.
+    CHECK(CountOf(inject, "fogDepth.w") == 0);
+    CHECK(CountOf(inject, "fogFrame.xy") == 0);
+    CHECK(CountOf(inject, "fogCellNoise") == 0);
+    CHECK(CountOf(inject, "g_cellJitter") == 0);
 
-    // The mirror: the frame's depth offset is the stage's golden-ratio
-    // sequence (EngineGL33_PostFog.cpp, jz), each cell keeps 0.88 of its last
-    // frame (kFogHistoryShare 0.12), and a block of 5 x 5 cells (about 60 px
-    // at 1080p) averages its cells' residuals, as the eye and the apply's
-    // lookup do.
+    // The mirror, at the dawn valley's slow pan (0.9 px a frame, 0.075 of a
+    // 12 px cell) and with the camera held.
     auto fract = [](double x) { return x - std::floor(x); };
-    auto cellNoise = [&](double x, double y) { return fract(52.9829189 * fract(x * 0.06711056 + y * 0.00583715)); };
-    constexpr double kShare = 0.12;
-    double frameWide = 0.0;
-    double cell[25] = {};
-    double sumW = 0.0, sumW2 = 0.0, sumC = 0.0, sumC2 = 0.0;
-    int n = 0;
-    for (int frame = 0; frame < 2000; ++frame)
+    auto gradient = [&](double x, double y) { return fract(52.9829189 * fract(x * 0.06711056 + y * 0.00583715)); };
+    auto frameWide = [&](int, int, int frame, std::vector<FogTap>& taps)
     {
-        const double jz = fract(0.6180339887 * frame);
-        frameWide += kShare * ((jz - 0.5) - frameWide);
-        double block = 0.0;
-        for (int i = 0; i < 25; ++i)
-        {
-            const double offset = fract(jz + cellNoise(40.5 + i % 5, 20.5 + i / 5)) - 0.5;
-            cell[i] += kShare * (offset - cell[i]);
-            block += cell[i] / 25.0;
-        }
-        if (frame < 100)
-            continue;
-        ++n;
-        sumW += frameWide;
-        sumW2 += frameWide * frameWide;
-        sumC += block;
-        sumC2 += block * block;
-    }
-    const double sdFrameWide = std::sqrt(sumW2 / n - (sumW / n) * (sumW / n));
-    const double sdPerCell = std::sqrt(sumC2 / n - (sumC / n) * (sumC / n));
-    // The frame's offset alone: the block's residual swings by about 3% of a
-    // slice each frame (the far slices are hundreds of metres deep). Turned
-    // per cell: under a quarter of that (about a sixth).
-    CHECK(sdFrameWide > 0.025);
-    CHECK(sdPerCell < 0.25 * sdFrameWide);
+        taps.push_back({fract(0.7548776662 * frame) - 0.5, fract(0.5698402910 * frame) - 0.5,
+                        fract(0.6180339887 * frame) - 0.5, 1.0});
+    };
+    auto perCell = [&](int x, int y, int frame, std::vector<FogTap>& taps)
+    {
+        const double px = x + 0.5, py = y + 0.5, slice = 40.0;
+        taps.push_back({fract(fract(0.7548776662 * frame) + gradient(px + 17.0, py + 59.0)) - 0.5,
+                        fract(fract(0.5698402910 * frame) + gradient(px + 83.0, py + 29.0)) - 0.5,
+                        fract(0.6180339887 * frame + gradient(px, py) + 0.618034 * slice) - 0.5, 1.0});
+    };
+    auto fixedTaps = [&](int, int, int, std::vector<FogTap>& taps)
+    {
+        for (int i = 0; i < 2; ++i)
+            taps.push_back({kFogTapXY[i][0], kFogTapXY[i][1], kFogTapZ[i] - 0.5, 0.5});
+    };
+    constexpr double kPan = 0.075, kPumpBar = 0.01, kTravelBar = 0.2;
+
+    // The first failure: one offset for the whole frame pumps (the block's
+    // mean swings by about 4% of the medium's slice-deep change), and does
+    // not travel.
+    const FogSamplingResidual wideHeld = MeasureFogSampling(frameWide, 0.0);
+    CAPTURE(wideHeld.pump, wideHeld.travel, wideHeld.still);
+    CHECK(wideHeld.pump > 2.0 * kPumpBar);
+    CHECK(wideHeld.travel < kTravelBar);
+    // The second: the per-cell gradient pattern no longer pumps, but its
+    // residual is the last frame's read about one cell over, held or panning.
+    const FogSamplingResidual cellHeld = MeasureFogSampling(perCell, 0.0);
+    const FogSamplingResidual cellPan = MeasureFogSampling(perCell, kPan);
+    CAPTURE(cellHeld.pump, cellHeld.travel, cellPan.travel);
+    CHECK(cellHeld.pump < kPumpBar);
+    CHECK(cellHeld.travel > 2.0 * kTravelBar);
+    CHECK(cellPan.travel > 2.0 * kTravelBar);
+    // Both move something with the camera held.
+    CHECK(wideHeld.still > 0.05);
+    CHECK(cellHeld.still > 0.05);
+    // The fixed taps: with the camera held the volume is exactly still; under
+    // the pan everything that changes moves with the camera.
+    const FogSamplingResidual fixedHeld = MeasureFogSampling(fixedTaps, 0.0);
+    const FogSamplingResidual fixedPan = MeasureFogSampling(fixedTaps, kPan);
+    CAPTURE(fixedHeld.pump, fixedHeld.travel, fixedHeld.still, fixedPan.travel);
+    CHECK(fixedHeld.still == 0.0);
+    CHECK(fixedHeld.pump < 1e-12);
+    CHECK(fixedHeld.travel < kTravelBar);
+    CHECK(fixedPan.travel < 0.05);
 }
 
 TEST_CASE("Volumetric fog: round 3 medium rules (clear near air, dust, hilltops, night fog, stars)", "[remaster][fog]")

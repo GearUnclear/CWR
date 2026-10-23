@@ -19,11 +19,12 @@
 //     share of it that is scattered sunlight goes dark where the cell is in
 //     the shade of the shadow cascades, the canopy, the terrain horizon or the
 //     cloud field (the shadows of ridges in the haze), and the mist and fog
-//     above a cell take light out of its sun. Each frame samples a jittered
-//     point of each cell and blends it with the last frame's volume
-//     reprojected to that point, so the history averages the jitter (the
-//     frame's jitter turned per cell, and per slice in depth, so neighbouring
-//     cells' history residuals are independent, fogCellNoise);
+//     above a cell take light out of its sun. Each frame samples two fixed
+//     points of each cell (a quadrature over the cell's depth span, never
+//     jittered) and blends them with the last frame's volume reprojected to
+//     the cell's centre, so the history only smooths the light's own changes
+//     (nothing in the sampling moves between frames: no pump, no wind;
+//     kFogTapZ);
 //   - psFogIntegrate: front to back along each column, the light scattered
 //     toward the eye and the transmittance from the eye to the far face of
 //     each cell (energy-conserving per slice);
@@ -54,8 +55,8 @@ const char kPostFogInjectHeadGLSL[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler3D fogHistory; // unit 0: the last frame's injection (rgb in-scatter, a extinction; per km)
 uniform vec4 fogGrid;      // xy cells, z slices, w the first slice of this draw
-uniform vec4 fogDepth;     // x far (m), y k, z 1 / (exp(k) - 1), w this frame's depth jitter in a slice (0..1)
-uniform vec4 fogFrame;     // xy this frame's jitter in a cell (cells), z this frame's share (1 = no history), w time (s)
+uniform vec4 fogDepth;     // x far (m), y k, z 1 / (exp(k) - 1), w 0 (unused: the taps are fixed)
+uniform vec4 fogFrame;     // xy 0 (unused: the taps are fixed), z this frame's share (1 = no history), w time (s)
 uniform vec4 prevRow0;     // camera-relative world to the previous frame's view space, by rows
 uniform vec4 prevRow1;
 uniform vec4 prevRow2;
@@ -369,43 +370,72 @@ vec4 fogCell(vec3 rel) {
     return vec4(inscatter, sMie + sAir) * 1000.0;
 }
 
-// The jitter of a cell: the frame's offset (one golden-ratio sequence for the
-// frame, fogFrame.xy and fogDepth.w) turned by an interleaved-gradient offset
-// of the cell, and in depth also by the slice. With the frame's offset alone
-// every cell sat at the same point of its cell, so the history's residual of
-// the jitter (it keeps 0.88 of the last frame) had the same sign over whole
-// regions each frame, and the far haze and the valley mist pumped as one
-// sheet, in play and in the captures (the dawn valley's flicker, 2026-10-23).
-// Turned per cell, the residuals are independent and average out in the
-// apply's lookup and the TAA.
-float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
-float g_cellJitter = 0.0; // this column's depth offset (main sets it)
+// A cell's value is the mean of its medium and light over the cell's own depth
+// span from two FIXED points: depth strata at a quarter and three quarters of
+// the slice, each weighted by the metres of its half of the slice, on the two
+// diagonal quarter points of the cell's footprint (VolumetricFog.hpp
+// kFogTapZ, kFogTapXY). No sample moves between frames, so the history (it
+// keeps 0.88 of the last frame) only smooths the light's own changes (the
+// ring, the shadows, the camera's motion) and can neither pump nor travel.
+// (The dawn valley, 2026-10-23, twice: one jittered point per cell at the
+// frame's golden-ratio offset left the history a residual of the same sign
+// over whole regions, and the far haze and the valley mist pumped as one
+// sheet; that offset turned per cell by an interleaved-gradient pattern is a
+// ramp over the cells, so with the frame's step the next frame's field was
+// this frame's read one cell over, the residual slid through the fog about a
+// cell per frame and the mist read as wind.)
+const float kFogTapZ[2] = float[2](0.25, 0.75);
+const vec2 kFogTapXY[2] = vec2[2](vec2(-0.25, -0.25), vec2(0.25, 0.25));
+const float kFogHistoryBlur = 0.25;
+vec3 g_tapDir[2]; // the columns through the two taps, per metre of view depth (main sets them)
 
-// The cell of slice s on this column: this frame's jittered point, blended with
-// the last frame's volume at the same point.
+// The cell of slice s on this column: its two taps' mean, blended with the last
+// frame's volume at the cell's centre.
 vec4 fogSlice(float s, vec3 dirZ) {
-    float z = fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z);
-    vec3 rel = dirZ * z;
-    vec4 cur = fogCell(rel);
+    vec4 acc = vec4(0.0);
+    float wsum = 0.0;
+    for (int i = 0; i < 2; ++i) {
+        float w = fogSliceDepth((s + kFogTapZ[i] + 0.25) / fogGrid.z) - fogSliceDepth((s + kFogTapZ[i] - 0.25) / fogGrid.z);
+        acc += w * fogCell(g_tapDir[i] * fogSliceDepth((s + kFogTapZ[i]) / fogGrid.z));
+        wsum += w;
+    }
+    vec4 cur = acc / max(wsum, 1e-6);
     if (fogFrame.z < 1.0) {
+        // The history at the point the stored value stands for, the cell's
+        // centre. (Read at a jittered sample point it is a leaky sum of the
+        // offsets, eight times the swing of their average.)
+        vec3 rel = dirZ * fogSliceDepth((s + 0.5) / fogGrid.z);
         vec3 pv = vec3(dot(prevRow0.xyz, rel) + prevRow0.w, dot(prevRow1.xyz, rel) + prevRow1.w,
                        dot(prevRow2.xyz, rel) + prevRow2.w);
         if (pv.z > 0.05) {
             vec2 puv = pv.xy * prevProj.xy / pv.z * 0.5 + 0.5;
             float pt = prevProj.w < 1e-3 ? pv.z / prevProj.z
                                          : log(1.0 + pv.z * (exp(prevProj.w) - 1.0) / prevProj.z) / prevProj.w;
-            if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0)
-                cur = mix(texture(fogHistory, vec3(puv, pt)), cur, fogFrame.z);
+            if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0) {
+                // Through a fixed tetrahedral blur of a quarter cell and slice
+                // per axis ([1 6 1] / 8): the mean of the blur the old read at
+                // the jittered point gave the stored volume, which is the
+                // mist's softness in the approved look.
+                vec3 tq = vec3(puv, pt), te = vec3(kFogHistoryBlur) / fogGrid.xyz;
+                vec4 hist = 0.25 * (texture(fogHistory, tq + te * vec3(1.0, 1.0, 1.0)) +
+                                    texture(fogHistory, tq + te * vec3(1.0, -1.0, -1.0)) +
+                                    texture(fogHistory, tq + te * vec3(-1.0, 1.0, -1.0)) +
+                                    texture(fogHistory, tq + te * vec3(-1.0, -1.0, 1.0)));
+                cur = mix(hist, cur, fogFrame.z);
+            }
         }
     }
     return cur;
 }
 
 void main() {
-    g_cellJitter = fogCellNoise(gl_FragCoord.xy);
-    vec2 cellJ = fract(fogFrame.xy + 0.5 + vec2(fogCellNoise(gl_FragCoord.xy + vec2(17.0, 59.0)),
-                                                fogCellNoise(gl_FragCoord.xy + vec2(83.0, 29.0)))) - 0.5;
-    vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;
+    for (int i = 0; i < 2; ++i) {
+        vec2 ndcI = (gl_FragCoord.xy + kFogTapXY[i]) / fogGrid.xy * 2.0 - 1.0;
+        g_tapDir[i] = viewToWorld * vec3(ndcI.x * projInfo.z, ndcI.y * projInfo.w, 1.0);
+    }
+    // The column's own light (the ring, the sun's share, the lobe) is the
+    // cell centre's.
+    vec2 ndc = gl_FragCoord.xy / fogGrid.xy * 2.0 - 1.0;
     vec3 dirZ = viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0); // per metre of view depth
     vec3 d = normalize(dirZ);
     // The air's light along this column: the colour the forward fog fades
