@@ -28,6 +28,9 @@
 .EXAMPLE
     powershell -NoProfile -File run_v2_lane.ps1 -Side vanilla
 .EXAMPLE
+    powershell -NoProfile -File run_v2_lane.ps1 -Side vanilla -Clips opening -Expect 1056
+    (a clip written longer with gen_video_v2.py --clip opening --frames 1056; collect_frames.py gets --expect 1056)
+.EXAMPLE
     powershell -NoProfile -File run_v2_lane.ps1 -Side ud -GameDir D:\Arma_CWA_worktrees\graphics-remaster\arma_CWR\dist\graphics-remaster-rwdi -DataJunction RemasterUD-video-final
 #>
 [CmdletBinding()]
@@ -41,6 +44,7 @@ param(
     [string]$Python = 'python',
     [string]$UserDirSeed = '',
     [string]$LaneTag = '',
+    [int]$Expect = 0,
     [switch]$KeepRaw
 )
 $ErrorActionPreference = 'Continue'
@@ -86,6 +90,8 @@ foreach ($clip in $Clips) {
     if ($Side -eq 'pv') { continue }
     $collectArgs = @((Join-Path $here 'collect_frames.py'), $out, '--side', $Side, '--clip', $clip)
     if ($KeepRaw) { $collectArgs += '--keep-raw' }
+    # -Expect N: a clip reshot longer than its table length (gen_video_v2.py --frames N, owner_vo.py fit)
+    if ($Expect -gt 0) { $collectArgs += @('--expect', "$Expect") }
     $res = & $Python @collectArgs 2>&1 | Out-String
     Note "collect $clip exit=$LASTEXITCODE $($res.Trim())"
 }

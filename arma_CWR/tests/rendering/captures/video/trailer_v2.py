@@ -1,7 +1,7 @@
 """Uslu dur! trailer, part 1 (graphics): compose the montage from the two sides.
 
-    python trailer_v2.py [--layout split|sbs] [--out <dir>] [--plan-only] [--stills] [--seconds a-b]
-                         [--only clip,clip] [--style-stills]
+    python trailer_v2.py [--layout split|sbs|short] [--out <dir>] [--plan-only] [--stills] [--seconds a-b]
+                         [--only clip,clip] [--style-stills] [--timing <json>]
 
 The owner (2026-10-19): "video should wipe and transition between the scenes
 and show a split screen be creative but dont cram two 16:9 videos in one 16:9
@@ -31,6 +31,13 @@ and last frames differ clearly (mean absolute difference, logged).
 
 --layout sbs writes the secondary file: the two full frames side by side
 (3840x1080, labels in the top corners), the same timeline and transitions.
+
+--layout short writes the YouTube Shorts version (1080x1920, 60 fps), the same timeline and
+transitions on the whole canvas: the two sides stacked, each the full 16:9 frame scaled to 1080x608
+(vanilla on top, Uslu dur! below, labels in each frame's top-left corner), a black band between them
+for the captions (short_captions.py burns them in), the scene titles and the typed line in the black
+above the vanilla frame, the cards centred on the canvas. timeline.json then also records that
+geometry ("short") for the captions.
 
 Inputs: tmp/video/v2/{vanilla,ud}/<clip>/<clip>__<side>.mkv (collect_frames.py).
 Writes into <out> (default tmp/video/v2/out-<layout>/):
@@ -82,6 +89,15 @@ CLOSING_S = 10.5
 INTRO = ("USLU DUR!", "TRAILER  \u00b7  PART 1: GRAPHICS")
 OUTRO = ("USLU DUR!", "PART 2: GAMEPLAY  \u00b7  COMING SOON")
 MIN_PAIR_DIFF = 4.0        # mean absolute difference (0..255) a vanilla/ud pair must exceed
+# --layout short (YouTube Shorts). The app lays its controls over roughly the top 150 px and the bottom
+# 350 px of the canvas, so the pictures sit between them: vanilla 236..844, the caption band 844..992,
+# Uslu dur! 992..1600, black elsewhere (the scene titles use the black above the vanilla frame).
+SW, SH = 1080, 1920
+SFW, SFH = 1080, 608                        # one side: the full 16:9 frame, scaled
+SY_V, SY_U = 236, 992                       # top edges of the vanilla and the Uslu dur! frames
+S_X = 54                                    # left edge of the titles and the corner labels (5% of the width)
+S_LAB_Y = 26                                # the corner labels' top, inside each frame
+S_TITLE_GAP = 22                            # the title block's lowest ink sits this far above the vanilla frame
 
 # Divider keys per scene: (seconds into the scene, position, angle). Position is
 # where the line crosses the middle of the frame as a fraction of the width
@@ -133,6 +149,69 @@ TRANSITIONS = {
     "checkpoint": ("dip", 1.4), "town_patrol": ("fade", 1.0), "rain_town": ("dip", 1.4),
     "supply_run": ("fade", 1.2), "firefight": ("dip", 1.8),
 }
+# --timing <json> (optional; without it nothing below changes the plan): a per-scene timing
+# override so a re-render follows the owner's narration ("the picture follows the voice",
+# owner_vo.py fit writes the file) without editing CLIPS or the tables above:
+#   "frames":      {clip: n}      the clip's length in 60 fps frames; a longer clip must be reshot
+#                                 with that many frames on both sides (gen_video_v2.py --frames n,
+#                                 the same camera path, slower); half the extra time lengthens the
+#                                 divider's pause, half the fully Uslu dur! end
+#   "transitions": {clip: [kind, seconds]}   the transition that takes that scene away
+#   "intro_extra": s              the intro card holds s seconds longer over the opening (the
+#                                 typed field report and the opening's sweep move by s too; give the
+#                                 opening s * 60 more frames)
+#   "closing_s":   s              the closing card's length
+FRAMES_OVERRIDE = {}
+
+
+def apply_timing(spec):
+    """Apply a --timing override to this module's tables (in place)."""
+    global INTRO_UNTIL, TYPE_START, CLOSING_S
+    known = {c["clip"]: c for c in G.CLIPS}
+    unknown = set(spec) - {"frames", "transitions", "intro_extra", "closing_s", "note"}
+    if unknown:
+        raise SystemExit(f"--timing: unknown keys {sorted(unknown)}")
+    e = float(spec.get("intro_extra", 0.0))
+    if e:
+        INTRO_UNTIL += e
+        TYPE_START += e
+        CHOREO["opening"] = [(t + e if t > 0 else t, p, ang) for t, p, ang in CHOREO["opening"]]
+    for clip, n in spec.get("frames", {}).items():
+        if clip not in known:
+            raise SystemExit(f"--timing: no clip {clip!r}")
+        n = int(n)
+        base = G.clip_frames(known[clip])
+        if n < base:
+            raise SystemExit(f"--timing: {clip} may only get longer ({n} < {base} frames)")
+        FRAMES_OVERRIDE[clip] = n
+        extra = (n - base) / FPS - (e if clip == "opening" else 0.0)
+        if extra > 0:
+            keys = CHOREO[clip]
+            CHOREO[clip] = keys[:-2] + [(t + extra / 2, p, ang) for t, p, ang in keys[-2:]]
+    for clip, (kind, secs) in spec.get("transitions", {}).items():
+        if clip not in TRANSITIONS:
+            raise SystemExit(f"--timing: no transition after {clip!r}")
+        TRANSITIONS[clip] = (kind, float(secs))
+    if "closing_s" in spec:
+        CLOSING_S = float(spec["closing_s"])
+
+
+def plan_with(spec, only=None, closing=True):
+    """plan() under a timing override, leaving this module's tables as they were."""
+    global INTRO_UNTIL, TYPE_START, CLOSING_S
+    saved = (dict(FRAMES_OVERRIDE), dict(TRANSITIONS), {k: list(v) for k, v in CHOREO.items()},
+             INTRO_UNTIL, TYPE_START, CLOSING_S)
+    try:
+        apply_timing(spec or {})
+        return plan(only, closing)
+    finally:
+        FRAMES_OVERRIDE.clear()
+        FRAMES_OVERRIDE.update(saved[0])
+        TRANSITIONS.clear()
+        TRANSITIONS.update(saved[1])
+        CHOREO.clear()
+        CHOREO.update(saved[2])
+        INTRO_UNTIL, TYPE_START, CLOSING_S = saved[3], saved[4], saved[5]
 
 
 def smooth(x):
@@ -157,7 +236,8 @@ def plan(only=None, closing=True):
     for c in G.CLIPS:
         if only and c["clip"] not in only:
             continue
-        segs.append(dict(kind="clip", clip=c["clip"], title=c["title"], frames=G.clip_frames(c)))
+        segs.append(dict(kind="clip", clip=c["clip"], title=c["title"],
+                         frames=FRAMES_OVERRIDE.get(c["clip"], G.clip_frames(c))))
     if closing:
         segs.append(dict(kind="closing", clip="", title="", frames=int(round(CLOSING_S * FPS))))
     start = 0
@@ -260,8 +340,10 @@ def paste(frame, rgba, x, y, alpha=1.0):
 class Typo:
     """Every text element, rendered once."""
 
-    def __init__(self, width):
+    def __init__(self, width, height=H, short=False):
         self.width = width
+        self.height = height
+        self.short = short
         lab = dict(shadow=(0.35, 6, 1))
         self.lab_v = text_layer([("text", "VANILLA", "title", 22, 4, INK, 0)], **lab)
         self.lab_u = text_layer([("text", "USLU DUR!", "title", 22, 4, INK, 0)], **lab)
@@ -274,6 +356,29 @@ class Typo:
         self.cards = {}
         self.titles = {}
         self.bottom = np.linspace(0, 1, 360, dtype=np.float32)[:, None, None] ** 1.6   # bottom gradient
+        if short:
+            # the vertical canvas: the corner labels a little larger (they read on a phone), the same tick
+            self.slab_v = text_layer([("text", "VANILLA", "title", 26, 4, INK, 0)], **lab)
+            lu, (px, py), (tw, th) = text_layer([("text", "USLU DUR!", "title", 26, 4, INK, 0)], **lab)
+            lu = lu.copy()
+            lu[py + 5:py + th - 5, px - 11:px - 8, :3] = np.array(HUD_GREEN, np.float32) / 255.0
+            lu[py + 5:py + th - 5, px - 11:px - 8, 3] = 1.0
+            self.slab_u = (lu, (px, py), (tw, th))
+            self.stitles = {}
+            self.inks = {}
+
+    @staticmethod
+    def ink_rows(layer):
+        """First and last+1 row of a layer's text (opaque) pixels, its shadow left out."""
+        rows = np.nonzero((layer[..., 3] > 0.9).any(axis=1))[0]
+        return int(rows[0]), int(rows[-1]) + 1
+
+    def card_ink(self, lines):
+        """The card's text rows on the short canvas (top, bottom), the card centred on its ink."""
+        layer, (px, py), (tw, th) = self.card(lines)
+        y0, y1 = self.ink_rows(layer)
+        top = int(round(SH / 2 - (y0 + y1) / 2))
+        return top + y0, top + y1
 
     def card(self, lines):
         if lines not in self.cards:
@@ -294,10 +399,68 @@ class Typo:
 
     def put_card(self, frame, lines, alpha):
         layer, (px, py), (tw, th) = self.card(lines)
+        if self.short:   # centred on the whole vertical canvas by its ink
+            y0, _ = self.ink_rows(layer)
+            return paste(frame, layer, (self.width - tw) / 2 - px, self.card_ink(lines)[0] - y0, alpha)
         return paste(frame, layer, (self.width - tw) / 2 - px, (H - th) / 2 - py - 10, alpha)
+
+    def short_title(self, c):
+        if c["clip"] not in self.stitles:
+            self.stitles[c["clip"]] = text_layer([("text", c["title"].upper(), "title", 46, 4, INK, 10),
+                                                  ("rule", 64, 2, HUD_GREEN, 12),
+                                                  ("text", when_of(c), "body", 26, 2, SOFT, 0)],
+                                                 shadow=(0.75, 14, 3))
+        return self.stitles[c["clip"]]
+
+    def ink_bottom(self, key, layer):
+        if key not in self.inks:
+            self.inks[key] = self.ink_rows(layer)[1]
+        return self.inks[key]
+
+    def put_title_short(self, frame, c, t, t0):
+        """The scene title in the black above the vanilla frame, left-aligned; the same fade and slide as
+        the lower-third, no gradient (it sits on black, the footage is left as it is)."""
+        a_in, a_out = smooth((t - t0) / 1.0), smooth((t - t0 - 3.8) / 1.0)
+        alpha = a_in * (1 - a_out)
+        if alpha <= 0.001:
+            return frame
+        layer, (px, py), (tw, th) = self.short_title(c)
+        dx = -14 * (1 - a_in) - 6 * a_out
+        y = SY_V - S_TITLE_GAP - self.ink_bottom(("title", c["clip"]), layer)
+        return paste(frame, layer, S_X - px + dx, y, alpha)
+
+    def put_typed_short(self, frame, c, t):
+        """The opening's typed field report (put_typed) in the black above the vanilla frame."""
+        world, hhmm = when_of(c).split(", ")[:2]
+        lines = [(f"{world.upper()}  {hhmm}", "mono" if TYPE_KIND == "mono" else "body", 26, 3, SOFT),
+                 (c["title"].split(", ")[-1].upper(), TYPE_KIND, 44 if TYPE_KIND == "mono" else 46,
+                  2 if TYPE_KIND == "mono" else 4, INK)]
+        total = sum(len(x[0]) for x in lines)
+        t_done = TYPE_START + total / TYPE_CPS
+        if t < TYPE_START:
+            return frame
+        n = min(total, int((t - TYPE_START) * TYPE_CPS) + 1)
+        blink = t - t_done
+        cursor = n < total or (0 <= blink < 0.25) or (0.5 <= blink < 0.75)
+        alpha = smooth((t - TYPE_START) / 0.15) * (1 - smooth((t - t_done - 2.6) / 1.0))
+        if alpha <= 0.001:
+            return frame
+        layer, (px, py), (tw, th) = self.typed_layer(lines, n, cursor)
+        full = self.typed_layer(lines, total, False)[0]
+        y = SY_V - S_TITLE_GAP - self.ink_bottom(("typed", c["clip"]), full)
+        return paste(frame, layer, S_X - px, y, alpha)
+
+    def put_short_labels(self, frame, alpha):
+        """VANILLA and USLU DUR! in the top-left corner of their frames."""
+        lv, (pvx, pvy), _ = self.slab_v
+        lu, (pux, puy), _ = self.slab_u
+        frame = paste(frame, lv, S_X - pvx, SY_V + S_LAB_Y - pvy, alpha)
+        return paste(frame, lu, S_X - pux, SY_U + S_LAB_Y - puy, alpha)
 
     def put_title(self, frame, c, t, t0):
         """The lower-third: fades and slides in at t0, out 3.6 s later; a gentle dark gradient under it."""
+        if self.short:
+            return self.put_title_short(frame, c, t, t0)
         a_in, a_out = smooth((t - t0) / 1.0), smooth((t - t0 - 3.8) / 1.0)
         alpha = a_in * (1 - a_out)
         if alpha <= 0.001:
@@ -345,6 +508,8 @@ class Typo:
 
     def put_typed(self, frame, c, t):
         """The opening's lower-third typed on letter by letter like a field report."""
+        if self.short:
+            return self.put_typed_short(frame, c, t)
         world, hhmm = when_of(c).split(", ")[:2]
         lines = [(f"{world.upper()}  {hhmm}", "mono" if TYPE_KIND == "mono" else "body", 26, 3, SOFT),
                  (c["title"].split(", ")[-1].upper(), TYPE_KIND, 44 if TYPE_KIND == "mono" else 46,
@@ -409,9 +574,12 @@ class Composer:
     def __init__(self, layout):
         self.layout = layout
         self.w = W if layout == "split" else 2 * W
+        self.h = H
+        if layout == "short":
+            self.w, self.h = SW, SH
         self.X = np.arange(self.w, dtype=np.float32)[None, :]
-        self.Y = np.arange(H, dtype=np.float32)[:, None]
-        self.typo = Typo(self.w)
+        self.Y = np.arange(self.h, dtype=np.float32)[:, None]
+        self.typo = Typo(self.w, self.h, short=layout == "short")
 
     def split(self, a, b, p, ang, label_alpha=1.0):
         """a, b: uint8 frames (H, W, 3); one frame, the divider at p (fraction), angle ang."""
@@ -452,6 +620,13 @@ class Composer:
         out = paste(out, lv, SAFE_X - pvx, SAFE_Y - pvy, label_alpha)
         return paste(out, lu, self.w - SAFE_X - wu - pux, SAFE_Y - puy, label_alpha)
 
+    def short(self, a, b, label_alpha=1.0):
+        """a, b: uint8 frames already scaled to SFW x SFH; vanilla on top, Uslu dur! below, black elsewhere."""
+        out = np.zeros((SH, SW, 3), np.uint8)
+        out[SY_V:SY_V + SFH] = a
+        out[SY_U:SY_U + SFH] = b
+        return self.typo.put_short_labels(out, label_alpha)
+
     def transition(self, kind, q, prev, nxt):
         """Blend the outgoing and the incoming frame, q in 0..1."""
         prev = prev.astype(np.float32)
@@ -479,7 +654,7 @@ class Composer:
             edge = -soft + s * (self.w + 2 * soft)
             d = edge - self.X + 0 * self.Y
         else:                        # wipe_up: bottom -> top, the new scene rises from below
-            edge = H + soft - s * (H + 2 * soft)
+            edge = self.h + soft - s * (self.h + 2 * soft)
             d = self.Y - edge + 0 * self.X
         wgt = np.clip(d / soft + 0.5, 0.0, 1.0)
         wgt = (wgt * wgt * (3 - 2 * wgt))[..., None]
@@ -522,6 +697,18 @@ def check_pair(clip):
     return rec
 
 
+class ScaledReader(M.Reader):
+    """M.Reader that has ffmpeg scale every frame to size (Lanczos, in the source's own RGB planes; a
+    resize only, no colour change) for the short layout."""
+
+    def __init__(self, ff, video: Path, size):
+        self.size = size
+        self.n = size[0] * size[1] * 3
+        self.p = subprocess.Popen([ff, "-loglevel", "error", "-i", str(video), "-vf",
+                                   f"scale={size[0]}:{size[1]}:flags=lanczos+accurate_rnd", "-f", "rawvideo",
+                                   "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+
+
 class ClipSeg:
     def __init__(self, seg, comp, ff):
         self.seg, self.comp = seg, comp
@@ -530,7 +717,12 @@ class ClipSeg:
         va, ua = M.source("vanilla", seg["clip"], V2), M.source("ud", seg["clip"], V2)
         if not va or va[1] != self.n or not ua or ua[1] != self.n:
             raise SystemExit(f"{seg['clip']}: both sides must hold {self.n} frames (collect_frames.py)")
-        self.ra, self.rb = M.Reader(ff, va[0], va[2]), M.Reader(ff, ua[0], ua[2])
+        if comp.layout == "short":
+            if tuple(va[2]) != (W, H) or tuple(ua[2]) != (W, H):
+                raise SystemExit(f"{seg['clip']}: the short layout expects {W}x{H} sides")
+            self.ra, self.rb = ScaledReader(ff, va[0], (SFW, SFH)), ScaledReader(ff, ua[0], (SFW, SFH))
+        else:
+            self.ra, self.rb = M.Reader(ff, va[0], va[2]), M.Reader(ff, ua[0], ua[2])
         self.choreo = Choreo(CHOREO[seg["clip"]], W)
         self.k = 0
 
@@ -552,6 +744,8 @@ class ClipSeg:
         if self.comp.layout == "split":
             p, ang = self.choreo.at(t)
             out = self.comp.split(a, b, p, ang, label_alpha)
+        elif self.comp.layout == "short":
+            out = self.comp.short(a, b, label_alpha)
         else:
             out = self.comp.sbs(a, b, label_alpha)
         if opening:
@@ -581,6 +775,10 @@ class ClosingSeg:
         im = Image.open(still).convert("RGB")
         if comp.layout == "sbs":
             im = im.resize((comp.w, int(comp.w * im.size[1] / im.size[0])))
+        elif comp.layout == "short":   # a 9:16 cut from the middle of the frame fills the vertical canvas
+            cw = int(round(im.height * SW / SH))
+            x0 = (im.width - cw) // 2
+            im = im.crop((x0, 0, x0 + cw, im.height)).resize((SW, SH), Image.BICUBIC)
         small = im.resize((im.width // 6, im.height // 6), Image.BILINEAR).filter(ImageFilter.GaussianBlur(3))
         self.bg = small.resize(im.size, Image.BICUBIC)
         self.n = seg["frames"]
@@ -589,9 +787,9 @@ class ClosingSeg:
         t = self.k / FPS
         z = 1.0 + 0.05 * smooth(self.k / max(1, self.n - 1))
         bw, bh = self.bg.size
-        cw, ch = int(self.comp.w / z), int(H / z)
+        cw, ch = int(self.comp.w / z), int(self.comp.h / z)
         x0, y0 = (bw - cw) // 2, (bh - ch) // 2
-        im = self.bg.crop((x0, y0, x0 + cw, y0 + ch)).resize((self.comp.w, H), Image.BILINEAR)
+        im = self.bg.crop((x0, y0, x0 + cw, y0 + ch)).resize((self.comp.w, self.comp.h), Image.BILINEAR)
         out = np.asarray(im, np.float32) * 0.42
         out = self.comp.typo.put_card(out, OUTRO, smooth((t - 0.8) / 1.8))
         self.k += 1
@@ -611,13 +809,19 @@ def encoder(ff, dst, size, crf):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--layout", choices=("split", "sbs"), default="split")
+    ap.add_argument("--layout", choices=("split", "sbs", "short"), default="split")
     ap.add_argument("--out", default="")
     ap.add_argument("--plan-only", action="store_true")
     ap.add_argument("--stills", action="store_true")
     ap.add_argument("--seconds", default="", help="render only a-b seconds (a test of the look)")
     ap.add_argument("--only", default="", help="a test montage of these clips (comma list), no closing card")
+    ap.add_argument("--timing", default="", help="an optional per-scene timing override (JSON; see apply_timing); "
+                                                 "without it the plan is the tables above")
     a = ap.parse_args(argv)
+    spec = None
+    if a.timing:
+        spec = json.loads(Path(a.timing).read_text(encoding="utf-8"))
+        apply_timing(spec)
     out = Path(a.out) if a.out else V2 / f"out-{a.layout}"
     out.mkdir(parents=True, exist_ok=True)
     only = [x for x in a.only.split(",") if x]
@@ -630,6 +834,20 @@ def main(argv):
                     segments=[dict(kind=s["kind"], clip=s["clip"], title=s["title"], start=round(s["start"] / FPS, 3),
                                    end=round((s["start"] + s["frames"]) / FPS, 3), frames=s["frames"],
                                    transition_in=s.get("in"), transition_out=s.get("out")) for s in segs])
+    if spec is not None:
+        timeline["timing"] = dict(file=str(Path(a.timing).resolve()), spec=spec)
+    if a.layout == "short":
+        # the geometry the captions follow (short_captions.py): the band between the frames, and the
+        # cards, whose captions sit under them while they are up
+        closing = [s for s in segs if s["kind"] == "closing"]
+        cards = dict(intro=dict(fade_in=[0.3, 1.7], fade_out=[round(INTRO_UNTIL - 1.4, 3), round(INTRO_UNTIL - 0.1, 3)],
+                                ink=list(Typo(SW, SH, short=True).card_ink(INTRO))))
+        if closing:
+            c0 = closing[0]["start"] / FPS
+            cards["outro"] = dict(fade_in=[round(c0 + 0.8, 3), round(c0 + 2.6, 3)],
+                                  ink=list(Typo(SW, SH, short=True).card_ink(OUTRO)))
+        timeline["short"] = dict(size=[SW, SH], vanilla=[SY_V, SY_V + SFH], ud=[SY_U, SY_U + SFH],
+                                 band=[SY_V + SFH, SY_U], cards=cards)
     (out / "timeline.json").write_text(json.dumps(timeline, indent=1), encoding="utf-8")
     print(f"plan: {len(segs)} segments, {total} frames, {total / FPS:.2f} s -> {out / 'timeline.json'}")
     if a.plan_only:
@@ -643,7 +861,8 @@ def main(argv):
     ff = make_video.ffmpeg_exe()
     comp = Composer(a.layout)
     dst = out / ("uslu_dur_v2.mp4" if not a.seconds else f"test_{a.seconds}.mp4")
-    enc = encoder(ff, dst, (comp.w, H), 17 if a.layout == "split" else 18)
+    # the short montage is burnt with captions afterwards (a second encode), so it is kept a little finer
+    enc = encoder(ff, dst, (comp.w, comp.h), {"split": 17, "sbs": 18, "short": 16}[a.layout])
     stills_at = {}
     if a.stills:
         for s in segs:
