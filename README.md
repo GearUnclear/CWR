@@ -159,3 +159,7 @@ Also checked and found to hold nothing to archive: the worktrees under `D:/Arma_
 - Two copies of the repo source tree under the scratchpad `ll/applycheck` and `ll/applycheck06` (empty git repos holding a copied `arma_CWR/` used to test patch application; the source is in git history and the patches are archived elsewhere).
 - Files of other extensions (glsl shader dumps, sqm missions, cfg, tmpl and similar) unless they sit inside a patch.
 
+
+## Addendum: lanes/look-surface/external-E-look-surface/
+
+Text from `E:/look-lanes/look-surface`, the look-surface lane's external work folder (notes, round patches, tool and timing scripts, capture summaries), collected just before that folder was deleted. Build and dist output, images and logs were left out.

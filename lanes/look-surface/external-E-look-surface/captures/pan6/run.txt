@@ -1,0 +1,1 @@
+﻿cmd: D:\Arma_CWA\arma_CWR\target\debug\tri.exe test --retries 1 -j1 --timeout 120 --game-dir dist/look-surface-rwdi --data-dir D:\Arma_CWA_worktrees\look-surface\arma_CWR\packages\RemasterUD-look-surface --output-dir E:\look-lanes\look-surface\captures\pan6\tri tests/rendering/captures/look_surface_pan_abel.test.sqf

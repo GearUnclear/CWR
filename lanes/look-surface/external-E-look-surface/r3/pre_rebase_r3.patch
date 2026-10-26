@@ -1,0 +1,3290 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.cpp
+index 77371dc..04950ca 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.cpp
+@@ -307,18 +307,43 @@ float SkyViewColumnAzimuth(int col)
+     return kPi * u * u;
+ }
+ 
++namespace
++{
++// The sky-view march along `dir` (the sun frame of SunDirection): Rayleigh
++// single scattering with its phase plus multiple scattering into lr, Mie single
++// scattering without its phase into lm.
++void MarchSkyView(const AtmosphereTables& t, V3 dir, float sunElevationRad, float lr[3], float lm[3]);
++} // namespace
++
+ Rgb SkyViewTexel(const AtmosphereTables& t, int region, int col, int row, float sunElevationRad)
++{
++    const V3 dir = SkyViewDirection(SkyViewRowElevation(row), SkyViewColumnAzimuth(col));
++    float lr[3] = {0, 0, 0}, lm[3] = {0, 0, 0};
++    MarchSkyView(t, dir, sunElevationRad, lr, lm);
++    return region == 0 ? Rgb(lr[0], lr[1], lr[2]) : Rgb(lm[0], lm[1], lm[2]);
++}
++
++Rgb SkyRadianceToward(const AtmosphereTables& t, float elevationRad, float azimuthFromSunRad, float sunElevationRad)
++{
++    const V3 dir = SkyViewDirection(elevationRad, azimuthFromSunRad);
++    float lr[3] = {0, 0, 0}, lm[3] = {0, 0, 0};
++    MarchSkyView(t, dir, sunElevationRad, lr, lm);
++    const float phase = AtmosphereMiePhase(Dot(dir, SunDirection(sunElevationRad)));
++    return Rgb(lr[0] + lm[0] * phase, lr[1] + lm[1] * phase, lr[2] + lm[2] * phase);
++}
++
++namespace
++{
++void MarchSkyView(const AtmosphereTables& t, V3 dir, float sunElevationRad, float lr[3], float lm[3])
+ {
+     const float r0 = kRg + std::max(kSkyViewerHeight, 1.0f);
+     const V3 origin = {0.0f, r0, 0.0f};
+     const V3 sun = SunDirection(sunElevationRad);
+-    const V3 dir = SkyViewDirection(SkyViewRowElevation(row), SkyViewColumnAzimuth(col));
+     const float mu = dir.y;
+     const bool ground = HitsGround(r0, mu);
+     const float tMax = ground ? DistanceToBottom(r0, mu) : DistanceToTop(r0, mu);
+     const float phaseR = AtmosphereRayleighPhase(Dot(dir, sun));
+     float tr[3] = {1, 1, 1};
+-    float lr[3] = {0, 0, 0}, lm[3] = {0, 0, 0};
+     float tPrev = 0.0f;
+     for (int k = 0; k < kSkyViewSteps; ++k)
+     {
+@@ -348,8 +373,8 @@ Rgb SkyViewTexel(const AtmosphereTables& t, int region, int col, int row, float
+             tr[c] *= stepT;
+         }
+     }
+-    return region == 0 ? Rgb(lr[0], lr[1], lr[2]) : Rgb(lm[0], lm[1], lm[2]);
+ }
++} // namespace
+ 
+ bool SkyViewTable::Valid() const
+ {
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.hpp
+index 667577e..27babd4 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.hpp
+@@ -113,6 +113,10 @@ float SkyViewColumnAzimuth(int col);
+ // 0..kSkyViewSize-1) for a sun at this elevation (radians), as the GPU pass
+ // computes it.
+ Rgb SkyViewTexel(const AtmosphereTables& t, int region, int col, int row, float sunElevationRad);
++// The full sky radiance (Rayleigh, multiple scattering and Mie with its phase)
++// along any direction, marched as a sky-view texel is: the sky light's
++// spherical harmonics (SurfaceLight.hpp) integrate it on the CPU.
++Rgb SkyRadianceToward(const AtmosphereTables& t, float elevationRad, float azimuthFromSunRad, float sunElevationRad);
+ 
+ struct SkyViewTable
+ {
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index 9417ebe..2f7a019 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -249,6 +249,17 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
+                 return Off("sky density map building");
+             return On("cloud cover");
+ 
++        case Feature::Surfaces:
++            // The sky light, canopy occlusion and specular are terms of every
++            // lit fragment; the horizon occlusion is the post pass's ao stage,
++            // which itself holds off where the world depth is gone (a vehicle
++            // interior) or an optics overlay covers the frame. Once the sky has
++            // gone dark (the sky table's night fade) only lamps leave it
++            // something to ground: without them it holds off.
++            if (in.sunElevationDeg < kGateSkyTableMinSunDeg && !LampsLit(in))
++                return Off("night without lamps");
++            return On("every lit surface");
++
+         case Feature::Sharpen:
+             // One sharpen pass: TAA's own when it runs, this one otherwise.
+             if (FeatureOn(t.features, Feature::Taa) && WorldVisible(in, why))
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index fa3ee47..3e566b0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -85,6 +85,11 @@ constexpr FeatureInfo kFeatures[] = {
+      &FS::terrainDetail, "ground"},
+     {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
+      "sharpen"},
++    // Look lane "surface": the horizon occlusion is the post pass's ao stage;
++    // the sky light, canopy occlusion and specular are terms of the world
++    // pass's shading.
++    {Feature::Surfaces, "surfaces", "Surfaces and ambient light", "surface", "Light and shadow", "look", true,
++     &FS::surfaces, "ao"},
+ };
+ static_assert(sizeof(kFeatures) / sizeof(kFeatures[0]) == kFeatureCount, "one FeatureInfo per Feature");
+ 
+@@ -175,8 +180,9 @@ struct KeyTable
+             MakeChoice("debug", "View", "Diagnostics",
+                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
+                        "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0Air scattering\0"
+-                       "Reflection tags\0Reflections only\0",
+-                       &LT::debugView, 0, kDebugViewSsrReflection),
++                       "Reflection tags\0Reflections only\0"
++                       "Sky light (surfaces)\0Canopy sky visibility (surfaces)\0Specular (surfaces)\0",
++                       &LT::debugView, 0, kDebugViewSurfaceSpecular),
+             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
+                        &LT::gates),
+         };
+@@ -227,6 +233,34 @@ struct KeyTable
+                         &LT::ssrWater, 0.0f, 2.0f),
+             MakeSubKnob(Feature::Ssr, "ssrWet", "Ground wetness", "-1 = the weather (rain); 0..1 forces it",
+                         &LT::ssrWet, -1.0f, 1.0f),
++            MakeSubKnob(Feature::Surfaces, "surfAo", "Horizon occlusion",
++                        "contact darkening of the sky light; 0 = the stock occlusion", &LT::surfAo, 0.0f, 4.0f),
++            MakeSubKnob(Feature::Surfaces, "surfAoRadius", "Occlusion radius",
++                        "metres the horizon search reaches around each pixel", &LT::surfAoRadius, 0.5f, 6.0f),
++            MakeSubKnob(Feature::Surfaces, "surfCanopyAo", "Canopy occlusion",
++                        "sky light lost under tree crowns, forests and building blocks", &LT::surfCanopyAo, 0.0f, 1.5f),
++            MakeSubKnob(Feature::Surfaces, "surfSkyLight", "Directional sky light",
++                        "share of the sky light from the sky table; 0 = the rig's hemisphere (default)",
++                        &LT::surfSkyLight, 0.0f, 1.0f),
++            MakeSubKnob(Feature::Surfaces, "surfSkyTint", "Sky light colour",
++                        "0 = the rig's own colour toward each face, 1 = the physical sky's", &LT::surfSkyTint, 0.0f,
++                        1.0f),
++            MakeSubKnob(Feature::Surfaces, "surfSkyLevel", "Sky light level",
++                        "0 = the rig's shade fill, 1 = the sky the air gives against the sun (deeper shade)",
++                        &LT::surfSkyLevel, 0.0f, 1.0f),
++            MakeSubKnob(Feature::Surfaces, "surfSpec", "Surface specular",
++                        "Fresnel reflection of sun and sky on every surface", &LT::surfSpec, 0.0f, 2.0f),
++            MakeSubKnob(Feature::Surfaces, "surfContact", "Contact shadows",
++                        "screen-space sun shadows of small details", &LT::surfContact, 0.0f, 1.0f),
++            MakeSubKnob(Feature::Surfaces, "surfRelief", "Surface relief",
++                        "relief the textures give the land and objects at a low sun; 0 = flat", &LT::surfRelief, 0.0f,
++                        4.0f),
++            MakeSubKnob(Feature::Surfaces, "surfShade", "Shade depth",
++                        "share of the sky fill shaded surfaces keep under a clear day sky; 1 = the original's",
++                        &LT::surfShade, 0.2f, 1.0f),
++            MakeSubKnob(Feature::Surfaces, "surfCavity", "Surface cavities",
++                        "sun and sky the texture's pits lose (stones, ruts, mortar); 0 = none", &LT::surfCavity, 0.0f,
++                        3.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+index e26412e..54a7091 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+@@ -60,6 +60,7 @@ enum class Feature : std::uint8_t
+     SkyCloudShadows,
+     TerrainDetail,
+     Sharpen,
++    Surfaces,
+     Count
+ };
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 2e65ab3..2ae96f3 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -94,6 +94,11 @@ struct FeatureSet
+     float skyCloudShadows = 1.0f; // B10 cloud shadows that match the sky
+     float terrainDetail = 1.0f;   // B11 grass and rock grain on terrain
+     float sharpen = 1.0f;         // B11 luma sharpening when TAA is off
++    // Look lane "surface" (SurfaceLight.hpp): horizon-based ambient occlusion
++    // with a multi-bounce correction, sky occlusion under the canopy, the sky
++    // light from the sky table as low-order spherical harmonics, and a Fresnel
++    // specular on every surface.
++    float surfaces = 1.0f;
+ };
+ 
+ // Art-direction knobs, live-tunable from the dev overlay Lighting tab. The
+@@ -172,6 +177,40 @@ struct LightingTuning
+     // 0..1 forces it).
+     float ssrWater = 1.5f;
+     float ssrWet = -1.0f;
++    // Surfaces and ambient light (FeatureSet::surfaces, SurfaceLight.hpp)
++    // sub-knobs: the horizon ambient occlusion's strength and world radius
++    // (metres), the sky occlusion under the canopy (forests, tree crowns,
++    // building blocks), the share of the sky light taken from the sky table's
++    // spherical harmonics (0 = the rig's hemisphere, the default: the table's
++    // shape added no direction the rig's sun-side horizon does not already
++    // give, and its brighter vertical sky turned olive hulls blue-grey), how
++    // much of the physical
++    // sky's colour that light keeps (0 = the rig's zenith colour), how bright
++    // it is (0 = the rig's sky on flat ground, the default: the rig's fill is
++    // calibrated, and a darker one dimmed the sunlit land at noon; 1 = the
++    // table's sky against the rig's sun, about half the rig's fill under a
++    // clear noon sky), the
++    // strength of the specular every surface gets, the sun's screen-space
++    // contact shadows, and the relief the albedo gives the land and the
++    // objects (a multiplier of each surface's relief height); the shade: the
++    // share of the rig's sky fill a non-leaf surface keeps under a clear day
++    // sky (the rig's fill is the original's flat ambient; a clear-sky photo's
++    // shaded side sits at a quarter to a third of the sunlit one), faded back
++    // to 1 at a low sun, at night and under overcast; and the cavity: how much
++    // the texture's own pits (its height below the local mean) lose of the sun
++    // and the sky (stones, ruts and mortar keep their micro-shadow under a
++    // high sun, where the relief's slope does nothing).
++    float surfAo = 3.0f;
++    float surfAoRadius = 4.0f;
++    float surfCanopyAo = 1.5f;
++    float surfSkyLight = 0.0f;
++    float surfSkyTint = 0.25f;
++    float surfSkyLevel = 0.0f;
++    float surfSpec = 1.0f;
++    float surfContact = 1.0f;
++    float surfRelief = 1.5f;
++    float surfShade = 0.45f;
++    float surfCavity = 2.0f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+@@ -186,7 +225,8 @@ struct LightingTuning
+     // it divides a lit shot into the light on each surface), 8 the air pass's
+     // in-scatter alone (PostStages.hpp kDebugViewAir), 9 the reflections'
+     // surface tags and 10 the reflections alone (ScreenReflections.hpp
+-    // kDebugViewSsrTags, kDebugViewSsrReflection).
++    // kDebugViewSsrTags, kDebugViewSsrReflection), 11 to 13 the surfaces
++    // lane's sky light, canopy sky visibility and specular.
+     int debugView = 0;
+ };
+ 
+@@ -233,6 +273,14 @@ struct LightRig
+ // the same number).
+ constexpr int kDebugViewAlbedo = 7;
+ constexpr float kShaderDebugAlbedo = 4.0f;
++// The surfaces lane's views (SurfaceLight.hpp), drawn by the lit shaders
++// through litSurface2.y (1, 2, 3): the sky light on each surface (11), the
++// sky the canopy leaves it (12) and its specular alone (13), all with the
++// post pass's occlusion off. After the reflections' views (9 and 10,
++// ScreenReflections.hpp).
++constexpr int kDebugViewSkyLight = 11;
++constexpr int kDebugViewCanopySky = 12;
++constexpr int kDebugViewSurfaceSpecular = 13;
+ // litFlags.z for a debug view: 1 to 3 and the albedo view are drawn by the lit
+ // shaders, every other view (4 and 5 by the post pass) leaves them as they are.
+ // The light tiles' view (6, FrameLights.hpp) is 0 here: the backend passes it
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+index a12a043..98c8bca 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+@@ -99,8 +99,8 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+         if ((in.ssr && in.glow) || debugSsr)
+             plan.runs |= Bit(PostStage::Ssr);
+     }
+-    // Occlusion needs the world depth.
+-    plan.aoStrength = in.worldDepth ? in.ambientOcclusion : 0.0f;
++    // Occlusion needs the world depth, or the surfaces lane's interior.
++    plan.aoStrength = (in.worldDepth || in.surfaceInterior) ? in.ambientOcclusion : 0.0f;
+     if (plan.aoStrength > 0.0f)
+         plan.runs |= Bit(PostStage::Ao);
+     // A screen overlay in the world pass turns the glow off.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+index 7fe3aeb..75ab435 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+@@ -107,6 +107,11 @@ struct PostFrameInputs
+     // switch's frame gate is on (water or wet ground on screen).
+     bool ssrTags = false;
+     bool ssr = false;
++    // The surfaces lane (SurfaceLight.hpp) wrote a vehicle interior's shares
++    // into its surface target: the interior's own depth (its own near plane)
++    // is what the occlusion reads there, so the Ao stage runs without the
++    // world depth (the corners and the breech of a crew compartment darken).
++    bool surfaceInterior = false;
+ };
+ 
+ // A frame's stages: which run and the strengths the composite uses.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index 87829d6..91bb526 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -195,6 +195,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map and the canopy in step with the landscape (async build, hand-over on the render thread); gathers the canopy's footprints from the landscape objects and takes a destroyed object's out (`TerrainCanopyObjectDestroyed`, from `Object::SetDestroyed`). |
+ | `Graphics/Remaster/Canopy.{hpp,cpp}` | The long tree shadows: the canopy raster and its mip rules, the removal of a destroyed object, the C++ mirrors of the GPU trace (`CanopySunAt`) and of the world's read (`CanopyReceiverVisibility`), the sun-visibility map's placement and rebuild rule, the strength over the gate's edges, the frame constants. Pure. |
+ | `PoseidonGL33/EngineGL33_Canopy.cpp`, `EngineGL33_PostCanopyShaders.cpp` | The canopy on the GPU: its upload (whole, or the rectangles a removal changed), the fullscreen pass that builds the sun-visibility map (its GLSL in a GL-free file, a row of `kPostShaders`), the `Canopy` slot of `LitConstants`, the stand-ins on units 10 and 15, and `triCanopyCheck`. |
++| `Graphics/Remaster/SurfaceLight.{hpp,cpp}` | Surfaces and ambient light (switch `surfaces`, the look lane "surface"): the clear sky of the atmosphere tables projected onto spherical harmonics in the sun's frame, the frame constants (matched to the rig's zenith brightness, faded to the rig's hemisphere under overcast and at night; the table's sky light is off by default, `surfSkyLight` 0), the shade (the share of the sky fill a non-leaf surface keeps under a clear day sky, `surfShade`), the cavity strength, the horizon occlusion's constants (its accumulation over TAA frames, the interior and static-architecture radii), and the per-draw surface classes (texture names and object kinds). Pure. |
++| `PoseidonGL33/EngineGL33_Surface.cpp`, `EngineGL33_PostSurfaceShaders.cpp` | The lane in the backend: the surface target (a second multisampled colour attachment the remastered lit programs write during the world pass: the share of each pixel's light the occlusion may darken, the albedo, the sun's share; its write mask follows the program and the blend mode), the `Surface*` slots (79 to 88), the per-draw surface class in a plain uniform of the lit programs (`surfClass`, cached on the texture; slot 58 stays the materials step's), the interior switch at a depth clear (pre-lit crew compartments hand the occlusion a share), the horizon-based occlusion (GTAO, half resolution) the Ao stage runs with the switch on, and its accumulation over TAA frames (`psPostGtaoAccum`, reprojected by depth). The sky light's spherical harmonics are projected on a worker in `EngineGL33_SkyTable.cpp`. |
+ | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
+ | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-6, 8 to 11, 13 and 15 in use, 12 and 14 allocated) and the sampler table the programs are bound from, program-set selection. |
+ | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.cpp
+new file mode 100644
+index 0000000..a775f8c
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.cpp
+@@ -0,0 +1,302 @@
++#include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
++
++#include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
++
++#include <algorithm>
++#include <cctype>
++#include <cmath>
++#include <cstring>
++
++namespace Poseidon::remaster
++{
++
++int GDrawSurfaceKind = 0;
++
++namespace
++{
++constexpr float kPi = 3.14159265358979323846f;
++
++float Clamp01(float v)
++{
++    return std::min(1.0f, std::max(0.0f, v));
++}
++
++float Smoothstep(float e0, float e1, float x)
++{
++    const float t = Clamp01((x - e0) / (e1 - e0));
++    return t * t * (3.0f - 2.0f * t);
++}
++
++// The clamped cosine's convolution per band (Ramamoorthi and Hanrahan 2001).
++constexpr float kBandA[kSkyShCoeffs] = {kPi, 2.0f * kPi / 3.0f, 2.0f * kPi / 3.0f, kPi / 4.0f, kPi / 4.0f, kPi / 4.0f};
++
++bool Has(const std::string& s, const char* tok)
++{
++    return s.find(tok) != std::string::npos;
++}
++
++template <size_t N>
++bool HasAny(const std::string& s, const char* const (&toks)[N])
++{
++    for (const char* t : toks)
++    {
++        if (s.find(t) != std::string::npos)
++            return true;
++    }
++    return false;
++}
++} // namespace
++
++float SkyShBasis(int i, float x, float y, float z)
++{
++    switch (i)
++    {
++        case 0:
++            return 0.282095f;
++        case 1:
++            return 0.488603f * y;
++        case 2:
++            return 0.488603f * x;
++        case 3:
++            return 0.315392f * (3.0f * y * y - 1.0f);
++        case 4:
++            return 1.092548f * x * y;
++        case 5:
++            return 0.546274f * (x * x - z * z);
++        default:
++            return 0.0f;
++    }
++}
++
++SkyLightSH ProjectSkyRadiance(const std::function<Rgb(float, float)>& radiance, int elevationSteps, int azimuthSteps)
++{
++    SkyLightSH out;
++    const int ne = std::max(elevationSteps, 1);
++    const int na = std::max(azimuthSteps, 1);
++    // d(omega) = d(sin e) d(phi); phi over [0, pi], doubled for the mirror half.
++    const float cell = (1.0f / static_cast<float>(ne)) * (kPi / static_cast<float>(na)) * 2.0f;
++    for (int i = 0; i < ne; ++i)
++    {
++        const float s = (static_cast<float>(i) + 0.5f) / static_cast<float>(ne);
++        const float e = std::asin(s);
++        const float c = std::cos(e);
++        for (int j = 0; j < na; ++j)
++        {
++            const float phi = (static_cast<float>(j) + 0.5f) / static_cast<float>(na) * kPi;
++            const Rgb l = radiance(e, phi);
++            const float x = c * std::cos(phi), y = s, z = c * std::sin(phi);
++            for (int k = 0; k < kSkyShCoeffs; ++k)
++                out.c[k] = out.c[k] + l * (SkyShBasis(k, x, y, z) * cell);
++        }
++    }
++    for (int k = 0; k < kSkyShCoeffs; ++k)
++        out.c[k] = out.c[k] * kBandA[k];
++    out.valid = true;
++    return out;
++}
++
++SkyLightSH ProjectSkyLight(const AtmosphereTables& t, float sunElevationRad, int elevationSteps, int azimuthSteps)
++{
++    SkyLightSH sh =
++        ProjectSkyRadiance([&t, sunElevationRad](float e, float phi)
++                           { return SkyRadianceToward(t, e, phi, sunElevationRad); }, elevationSteps, azimuthSteps);
++    sh.sunElevationRad = sunElevationRad;
++    sh.haze = t.haze;
++    sh.valid = t.Valid();
++    // The direct sun the same air lets through, at the table's eye height.
++    sh.sunTransmittance =
++        AtmosphereTransmittance(t, atmo::kGroundRadius + std::max(kSkyViewerHeight, 1.0f), std::sin(sunElevationRad));
++    return sh;
++}
++
++Rgb EvalSkyLight(const SkyLightSH& sh, float x, float y, float z)
++{
++    Rgb e;
++    for (int k = 0; k < kSkyShCoeffs; ++k)
++        e = e + sh.c[k] * SkyShBasis(k, x, y, z);
++    return e;
++}
++
++float SurfaceDebugView(int debugView)
++{
++    if (debugView >= kDebugViewSkyLight && debugView <= kDebugViewSurfaceSpecular)
++        return static_cast<float>(debugView - kDebugViewSkyLight + 1);
++    return 0.0f;
++}
++
++float SurfaceShadeFactor(float knob, float sunElevationDeg, float skyThrough)
++{
++    const float k = std::min(std::max(knob, 0.0f), 1.0f);
++    const float w = Smoothstep(3.0f, 18.0f, sunElevationDeg) * Smoothstep(0.35f, 0.85f, skyThrough);
++    return 1.0f + (k - 1.0f) * w;
++}
++
++float SkyLightWeight(float knob, float sunElevationDeg, float skyThrough)
++{
++    // Clear to broken skies keep the table's shape; a deck flattens it, where
++    // the rig's hemisphere (its overcast fill) takes over.
++    return Clamp01(knob) * SkyDayFade(sunElevationDeg) * Smoothstep(0.35f, 0.8f, skyThrough);
++}
++
++SurfaceFrameConstants ComputeSurfaceFrameConstants(const LightingTuning& tuning, const FeatureGates& gates,
++                                                   const LightRig& rig, const SkyLightSH& sh, float skyThrough)
++{
++    SurfaceFrameConstants c;
++    const bool on = gates.computed && gates[Feature::Surfaces].on;
++    if (!on)
++        return c;
++    c.surface[0] = 1.0f;
++    c.surface[1] = std::max(tuning.surfSpec, 0.0f);
++    c.surface[2] = std::max(tuning.surfCanopyAo, 0.0f);
++    c.surface2[0] = std::max(tuning.surfRelief, 0.0f);
++    c.surface2[1] = SurfaceDebugView(tuning.debugView);
++    c.surface2[3] = SurfaceShadeFactor(tuning.surfShade, rig.sunElevationDeg, skyThrough);
++    c.surface3[0] = std::max(tuning.surfCavity, 0.0f);
++    if (!sh.valid)
++        return c;
++    // The table gives the shape across directions and (by surfSkyTint, in the
++    // shader) the colour; the brightness on an up-facing surface is the rig's sky, or (by
++    // surfSkyLevel) the table's own sky against the rig's sun: the sky's
++    // irradiance over the direct sun's on flat ground, as the same air gives
++    // both, times the rig's sun. A clear noon sky lights the shade about half as
++    // brightly as the rig's calibrated fill does. Near the horizon the table's
++    // sun and the rig's part ways, so the rig's level returns below 10 degrees.
++    const Rgb up = EvalSkyLight(sh, 0.0f, 1.0f, 0.0f);
++    const float upLum = Luminance(up);
++    const float rigLum = Luminance(rig.skyZenith);
++    if (!(upLum > 1e-9f) || !(rigLum > 0.0f))
++        return c;
++    float target = rigLum;
++    const float sunT = Luminance(sh.sunTransmittance);
++    const float level = Clamp01(tuning.surfSkyLevel) * Smoothstep(4.0f, 10.0f, rig.sunElevationDeg);
++    if (level > 0.0f && sunT > 1e-4f)
++    {
++        const float phys = std::min(std::max(upLum * Luminance(rig.sun) / sunT, 0.35f * rigLum), 1.5f * rigLum);
++        target = rigLum + (phys - rigLum) * level;
++    }
++    // The coefficients keep the physical sky's colour; the shader takes the
++    // rig's own colour toward each normal at the brightness they give, and
++    // mixes in surfSkyTint of theirs (surface2.z), so the shaded side of a
++    // hull keeps the rig's horizon colour instead of the zenith's blue.
++    const float scale = target / upLum;
++    c.surface2[2] = Clamp01(tuning.surfSkyTint);
++    c.surface[3] = SkyLightWeight(tuning.surfSkyLight, rig.sunElevationDeg, skyThrough);
++    for (int k = 0; k < kSkyShCoeffs; ++k)
++    {
++        const Rgb v = sh.c[k] * scale;
++        c.sh[k][0] = v.r;
++        c.sh[k][1] = v.g;
++        c.sh[k][2] = v.b;
++        c.sh[k][3] = 0.0f;
++    }
++    return c;
++}
++
++SurfaceClass ClassifySurface(const std::string& n, DrawKind kind, bool blend)
++{
++    static const char* const glass[] = {"sklo",       "skla",   "glass",  "window",   "windscreen",
++                                        "windshield", "armwin", "canopy", "cifernik", "budik"};
++    static const char* const lens[] = {"reflekt", "svetl", "blink", "lamp", "light"};
++    static const char* const rubber[] = {"pneu", "guma", "tyre", "tire", "wheel", "kolo", "pasy", "track"};
++    static const char* const metal[] = {"hlaven",  "hlavn",  "delo",  "kulomet", "lauf",  "barrel", "kanon", "trub",
++                                        "roura",   "_rez",   "rez_",  "_kov",    "kov_",  "kovn",   "chrom", "vyfuk",
++                                        "exhaust", "antena", "plech", "zink",    "zelez", "metal",  "steel", "pipe"};
++    static const char* const fabric[] = {"plachta", "sedl",   "sedad",    "taska",  "igelit", "lano",
++                                         "_sit",    "net",    "tarp",     "canvas", "seat",   "bench",
++                                         "cloth",   "camnet", "maskovac", "stan_",  "stan.",  "tent"};
++    static const char* const skin[] = {"xicht", "hlava", "head", "face", "hand", "ruce"};
++    static const char* const road[] = {"silnic", "asfalt", "cesta", "road", "dlazb", "chodnik", "runway", "draha"};
++    static const char* const wood[] = {"drev", "prkn", "plank", "wood", "bark", "kmen", "dreva", "bedna", "crate"};
++    static const char* const weapon[] = {"ak47", "ak74", "m16",    "m21",  "m60", "rpg", "law",    "carl",  "g36",
++                                         "fal",  "uzi",  "pistol", "m249", "pk",  "mag", "weapon", "zbran", "scope"};
++    const bool okno = Has(n, "okno") && !Has(n, "ram") && !Has(n, "_in") && !Has(n, "bez");
++    if (HasAny(n, glass) || okno)
++        return SurfaceClass::Glass;
++    switch (kind)
++    {
++        case DrawKind::FabricObject:
++            return SurfaceClass::Fabric;
++        case DrawKind::LandVehicle:
++        case DrawKind::Aircraft:
++        case DrawKind::Ship:
++            // Blended vehicle textures are mostly cutout details (wheel rims,
++            // tools, handles), not glass: glass comes from the name only.
++            if (Has(n, "skl"))
++                return SurfaceClass::Glass;
++            if (HasAny(n, lens))
++                return SurfaceClass::Lens;
++            if (HasAny(n, rubber))
++                return SurfaceClass::Rubber;
++            // Gun barrels and cannons on military vehicles are painted steel.
++            if (Has(n, "hlaven") || Has(n, "hlavn") || Has(n, "delo") || Has(n, "kanon") || Has(n, "barrel") ||
++                Has(n, "lauf"))
++                return SurfaceClass::Paint;
++            if (HasAny(n, metal) && !Has(n, "plech"))
++                return SurfaceClass::Metal;
++            if (HasAny(n, fabric))
++                return SurfaceClass::Fabric;
++            return SurfaceClass::Paint;
++        case DrawKind::Man:
++            if (HasAny(n, skin) || (Has(n, "ruka") && !Has(n, "rukav")))
++                return SurfaceClass::Skin;
++            if (Has(n, "bota") || Has(n, "boot"))
++                return SurfaceClass::Leather;
++            if (HasAny(n, weapon))
++                return SurfaceClass::Weapon;
++            return SurfaceClass::Fabric;
++        case DrawKind::Weapon:
++            return SurfaceClass::Weapon;
++        default:
++            if (HasAny(n, road))
++                return SurfaceClass::Road;
++            if (Has(n, "strech") || Has(n, "roof"))
++                return Has(n, "plech") ? SurfaceClass::Metal : SurfaceClass::Roof;
++            if (HasAny(n, metal))
++                return SurfaceClass::Metal;
++            if (HasAny(n, wood))
++                return SurfaceClass::Wood;
++            if (HasAny(n, fabric))
++                return SurfaceClass::Fabric;
++            if (HasAny(n, lens) && blend)
++                return SurfaceClass::Lens;
++            return kind == DrawKind::Static ? SurfaceClass::Masonry : SurfaceClass::Default;
++    }
++}
++
++DrawKind DrawKindOf(const char* sim, const char* cls)
++{
++    if (cls)
++    {
++        std::string lc = cls;
++        for (char& ch : lc)
++            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
++        if (Has(lc, "camp") || Has(lc, "tent") || Has(lc, "camnet"))
++            return DrawKind::FabricObject;
++    }
++    if (!sim || !*sim)
++        return DrawKind::Static;
++    auto is = [sim](const char* s)
++    {
++        const char* a = sim;
++        const char* b = s;
++        for (; *a && *b; ++a, ++b)
++        {
++            if (std::tolower(static_cast<unsigned char>(*a)) != std::tolower(static_cast<unsigned char>(*b)))
++                return false;
++        }
++        return *a == '\0' && *b == '\0';
++    };
++    if (is("car") || is("tank") || is("motorcycle"))
++        return DrawKind::LandVehicle;
++    if (is("soldier") || is("invisible"))
++        return DrawKind::Man;
++    if (is("helicopter") || is("airplane") || is("parachute"))
++        return DrawKind::Aircraft;
++    if (is("ship"))
++        return DrawKind::Ship;
++    if (std::strncmp(sim, "proxy", 5) == 0 || is("weapon"))
++        return DrawKind::Weapon;
++    return DrawKind::Static;
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.hpp
+new file mode 100644
+index 0000000..7e9793d
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.hpp
+@@ -0,0 +1,216 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++
++#include <cstdint>
++#include <functional>
++#include <string>
++
++// Surfaces and ambient light (feature switch `surfaces`, the look lane
++// "surface"). Pure, no GL, no engine state.
++//
++// What the player sees: surfaces sit in the world as they do in photographs.
++//   - Contact darkening: a horizon-based ambient occlusion (GTAO) at half
++//     resolution in the post pass, with Jimenez's multi-bounce correction from
++//     each pixel's albedo, applied to the sky and bounce light only (never the
++//     direct sun). Tyres, tracks, boots, doorways, the foot of a wall and the
++//     ground under a hull darken as they do in reality. The world shaders write
++//     what the pass may darken into a second colour target of the frame
++//     (SurfaceTarget below): unlike the frame alpha the stock occlusion reads,
++//     it also covers alpha-tested and blended draws (vehicles, soldiers, tree
++//     crowns), which the stock pass never darkened.
++//   - Large-scale occlusion: the sky a receiver loses under the canopy
++//     heightfield (Canopy.hpp: tree crowns, forest blocks, buildings), read at
++//     three scales in the world shaders, so the inside of a wood and the
++//     ground under a tree are as dark as they are, at any distance.
++//   - Directional sky light: the clear sky of the sky table (Atmosphere.hpp)
++//     projected onto spherical harmonics up to band 2 and convolved with the
++//     clamped cosine (Ramamoorthi and Hanrahan 2001), in the sun's frame, so a
++//     face toward the bright horizon under a low sun takes more light than one
++//     toward the blue zenith opposite it; the ground below bounces its own
++//     tinted light up. Matched to the rig's zenith brightness, so exposure is
++//     unchanged, and blended toward the rig's hemisphere under overcast and at
++//     night.
++//   - Specular on every surface: GGX sun highlights and a split-sum sky
++//     reflection with Fresnel, roughness and F0 per surface class
++//     (ClassifySurface: paint, metal, glass, rubber, cloth, skin, road, masonry,
++//     wood, leather, weapon, lens, roof; terrain and foliage in the shader), so
++//     edges catch the light and a painted hull reads as painted metal.
++
++namespace Poseidon::remaster
++{
++
++struct AtmosphereTables;
++
++// ---- The sky light as spherical harmonics --------------------------------------
++//
++// The sun frame of the sky table: x toward the sun's azimuth, y up, z across.
++// The clear sky is mirror-symmetric in z, so of the nine band 0..2 terms only
++// the six even in z are not zero. Basis (real, orthonormal):
++//   0: 0.282095                1: 0.488603 y        2: 0.488603 x
++//   3: 0.315392 (3 y^2 - 1)    4: 1.092548 x y      5: 0.546274 (x^2 - z^2)
++// The stored coefficients are of the irradiance (already convolved with the
++// clamped cosine: pi, 2 pi / 3 and pi / 4 per band).
++constexpr int kSkyShCoeffs = 6;
++float SkyShBasis(int i, float x, float y, float z);
++
++struct SkyLightSH
++{
++    Rgb c[kSkyShCoeffs];
++    // The direct sun's transmittance through the same air (ProjectSkyLight):
++    // the sky's irradiance against the sun's on flat ground is the physical
++    // sky level (LightingTuning::surfSkyLevel).
++    Rgb sunTransmittance = Rgb(1.0f, 1.0f, 1.0f);
++    float sunElevationRad = 0.0f;
++    float haze = -1.0f;
++    bool valid = false;
++};
++
++// Projects the radiance of the upper hemisphere (`radiance(elevation, azimuth
++// from the sun)`, radians; the lower hemisphere is zero) onto the irradiance
++// coefficients. Midpoint rule, uniform in sin(elevation) and azimuth over
++// [0, pi] (the mirror half doubles it).
++SkyLightSH ProjectSkyRadiance(const std::function<Rgb(float, float)>& radiance, int elevationSteps, int azimuthSteps);
++// The clear sky of the sky table for a sun at this elevation (radians).
++SkyLightSH ProjectSkyLight(const AtmosphereTables& t, float sunElevationRad, int elevationSteps = 12,
++                           int azimuthSteps = 16);
++// Irradiance onto a unit normal (x, y, z in the sun frame), not clamped.
++Rgb EvalSkyLight(const SkyLightSH& sh, float x, float y, float z);
++
++// ---- The frame constants -------------------------------------------------------
++
++// LitConstants slots Surface .. SurfaceSh5 (EngineGL33_Lighting.hpp).
++struct SurfaceFrameConstants
++{
++    // x 1 while the switch and its gate are on (0 = the world shaders as
++    // before), y the specular strength, z the canopy occlusion strength, w the
++    // weight of the spherical-harmonics sky light against the rig's hemisphere.
++    float surface[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    // rgb: the sky light's coefficients in the rig's units, the physical
++    // sky's colour.
++    float sh[kSkyShCoeffs][4] = {};
++    // x the relief strength (surfRelief; 0 while off), y the lane's debug view
++    // the lit shaders draw (1 sky light, 2 canopy sky visibility, 3 specular,
++    // 0 none; LightRig.hpp kDebugViewSkyLight..), z the share of the physical
++    // sky's colour in the sky light (surfSkyTint; the rest is the rig's own
++    // colour toward the normal), w the share of the sky fill a non-leaf
++    // surface keeps (SurfaceShadeFactor; 1 = the rig's fill).
++    float surface2[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++    // x the cavity strength (surfCavity; 0 while off): how much of the sun
++    // and the sky a texture's pits lose; y 1 while a vehicle interior is
++    // drawn (EngineGL33::SurfaceEnterInterior; 0 here), zw unused.
++    float surface3[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++};
++
++// litSurface2.y for a debug view (LightingTuning::debugView): 1 to 3 for the
++// surfaces lane's views 9 to 11, 0 otherwise.
++float SurfaceDebugView(int debugView);
++
++// `rig` is the frame's light rig, `sh` the clear sky of the sky table (or not
++// valid yet), `skyThrough` 1 clear .. 0 overcast.
++SurfaceFrameConstants ComputeSurfaceFrameConstants(const LightingTuning& tuning, const FeatureGates& gates,
++                                                   const LightRig& rig, const SkyLightSH& sh, float skyThrough);
++
++// The share of the rig's sky fill a non-leaf surface keeps (surfShade): the
++// knob under a clear sky with the sun above 18 degrees, back to 1 as the sun
++// sinks to 3 degrees (a low sun's fill is a larger share of its light, and the
++// night keeps the original's moonlit fill) and as the sky clouds over (an
++// overcast sky is the only light, and it lights the shade).
++float SurfaceShadeFactor(float knob, float sunElevationDeg, float skyThrough);
++
++// The sky light's weight against the rig's hemisphere: the knob, faded out
++// with the sky table at night and under overcast (the table is a clear sky).
++float SkyLightWeight(float knob, float sunElevationDeg, float skyThrough);
++
++// ---- The horizon occlusion in the post pass ------------------------------------
++
++// Constants of psPostGtao, in metres and shares.
++constexpr float kGtaoFadeStart = 150.0f;      // the occlusion fades out from here ...
++constexpr float kGtaoFadeEnd = 300.0f;        // ... to here (metres of view depth)
++constexpr float kGtaoMaxScreenRadius = 0.25f; // the search's reach at most this share of the frame height
++constexpr int kGtaoSlices = 3;                // slice directions per pixel (turned per pixel and per TAA frame)
++constexpr int kGtaoSteps = 8;                 // samples per side of a slice
++// Near pixels whose search spans more than this many half-resolution pixels
++// take one slice fewer: their samples are far apart and cost the most, and
++// the TAA turn covers the other directions over the frames.
++constexpr float kGtaoOneSliceRadiusPx = 60.0f;
++// The weight of an occluder below the receiver (the ground around a hull's
++// side or a wall's foot): the ground bounces the light it hides.
++constexpr float kGtaoBelowWeight = 0.3f;
++// Under TAA the occlusion is accumulated over frames (psPostGtaoAccum: the
++// last frames' occlusion reprojected by depth, this frame's mixed in at this
++// weight), and two slices a pixel suffice; without it every pixel takes
++// kGtaoSlices.
++constexpr int kGtaoTemporalSlices = 2;
++constexpr float kGtaoHistoryWeight = 0.85f;
++// A vehicle interior (the world's depth cleared, the crew compartment drawn
++// with its own near plane): the occlusion searches this far (metres), so the
++// corners, the gun's breech and the hatch rims darken.
++constexpr float kGtaoInteriorRadius = 0.6f;
++// Static architecture (houses, walls, roofs: the Static draw kind, masonry,
++// roofs, wood and roads) takes the occlusion at this multiple of surfAo: its
++// eaves, door openings and the foot of a wall are large, flat, light surfaces
++// that a vehicle's power leaves pale. Written per pixel in the surface
++// target's alpha (kSurfaceAoStaticCode).
++constexpr float kSurfaceStaticAoBoost = 1.8f;
++// ... and searches this multiple of surfAoRadius (the GTAO pass reads the code
++// from the resolved target): a house's eaves and the wall-ground seam are
++// metres across.
++constexpr float kGtaoStaticRadiusScale = 2.0f;
++// The share of a pre-lit interior fragment's light the occlusion may darken
++// (the classic vertex light of a crew compartment is mostly fill).
++constexpr float kSurfaceInteriorShare = 0.9f;
++// ---- Surface classes -----------------------------------------------------------
++
++// What kind of object a draw belongs to (set by Shape::Draw from the object's
++// simulation type; the per-draw surface class reads it).
++enum class DrawKind : std::uint8_t
++{
++    Unknown = 0,
++    LandVehicle = 1,
++    Man = 2,
++    Static = 3,
++    Aircraft = 4,
++    Ship = 5,
++    Weapon = 6,
++    FabricObject = 7, // tents and camouflage nets (by class name)
++};
++
++// The surface classes of the GLSL table (surfaceClassParams in the surface
++// piece of the remastered prelude).
++enum class SurfaceClass : std::uint8_t
++{
++    Default = 0,
++    Paint = 1,
++    Metal = 2,
++    Glass = 3,
++    Rubber = 4,
++    Fabric = 5,
++    Skin = 6,
++    Road = 7,
++    Masonry = 8,
++    Wood = 9,
++    Leather = 10,
++    Weapon = 11,
++    Lens = 12,
++    Roof = 13,
++    Count
++};
++
++// A draw's surface class from its texture's path (lower case: the stock data
++// names textures in Czech, sklo glass, kolo wheel, plech sheet metal, ...;
++// mods mostly in English), the object kind and whether the texture blends.
++// After the materials research track (classification_log_r6.txt: 653
++// textures checked).
++SurfaceClass ClassifySurface(const std::string& lowerName, DrawKind kind, bool blendTexture);
++
++// The draw kind of a simulation type name ("car", "tank", "soldier", ...) and
++// the config class name (tents and nets).
++DrawKind DrawKindOf(const char* simName, const char* className);
++
++// The draw kind the next draws belong to (Shape::Draw sets it around a
++// shape's sections; the GL backend reads it with the section's texture).
++extern int GDrawSurfaceKind;
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+index ea77abd..2f9aea3 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+@@ -24,10 +24,14 @@
+ #include <Poseidon/Core/Data3D.h>
+ 
+ #include <Poseidon/World/MapTypes.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
++#include <Poseidon/World/Scene/Object.hpp>
++#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+ #include <stdio.h>
+ #include <cmath>
+ #include <memory>
+ #include <string>
++#include <unordered_map>
+ #include <Poseidon/Foundation/Containers/Array.hpp>
+ #include <Poseidon/Foundation/Containers/StaticArray.hpp>
+ #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+@@ -75,6 +79,33 @@ bool Shape::HasBlendSections() const
+ 
+ SectionClassFilter GSectionFilter = SectionClassFilter::All;
+ 
++namespace
++{
++// The surfaces lane's draw kind of a shape (remaster::DrawKind): what kind of
++// object draws it, from the drawing object's simulation type, once per shape
++// (a shape belongs to one object type; the casts run on the first draw only).
++int SurfaceDrawKind(const Shape* shape, IAnimator* matSource)
++{
++    static std::unordered_map<const Shape*, int> s_kinds;
++    const auto it = s_kinds.find(shape);
++    if (it != s_kinds.end())
++        return it->second;
++    int kind = static_cast<int>(remaster::DrawKind::Unknown);
++    if (const Object* obj = dynamic_cast<const Object*>(matSource))
++    {
++        kind = static_cast<int>(remaster::DrawKind::Static);
++        if (const Entity* ent = dynamic_cast<const Entity*>(obj))
++        {
++            if (const EntityType* type = ent->GetNonAIType())
++                kind = static_cast<int>(remaster::DrawKindOf(static_cast<const char*>(type->_simName),
++                                                             static_cast<const char*>(type->_className)));
++        }
++    }
++    s_kinds.emplace(shape, kind);
++    return kind;
++}
++} // namespace
++
+ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags clip, int spec,
+                  const Matrix4& transform, const Matrix4& invTransform)
+ {
+@@ -90,6 +121,10 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags
+     {
+         if (BeginFaces() < EndFaces() && NSections() > 0)
+         {
++            // The surfaces lane: the kind of object these sections belong to,
++            // for the per-draw surface class the GL backend derives with each
++            // section's texture.
++            remaster::GDrawSurfaceKind = SurfaceDrawKind(this, matSource);
+             GEngine->PrepareMeshTL(lights, transform, render::SplitLegacy(spec));
+             if (spec & (OnSurface | IsOnSurface))
+             {
+@@ -178,6 +213,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags
+             }
+ 
+             engine->EndMeshTL(*this);
++            remaster::GDrawSurfaceKind = static_cast<int>(remaster::DrawKind::Unknown);
+         }
+     }
+     else
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index b741a8f..b0ef62d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -42,6 +42,7 @@ enum PixelShaderSpecular
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+ #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+ #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
+ #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ 
+@@ -921,6 +922,55 @@ class EngineGL33 : public Engine
+     bool BuildCanopySunGpu(const Vector3& toSun, float originX, float originZ, float texel);
+     void UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, float skyThrough);
+     void BindCanopy();
++    // The canopy heightfield as the world programs read it for the sky it
++    // hides (the surfaces lane): height base, range, 1 / extent, 1 when there
++    // is an uploaded canopy (else all zero).
++    void SurfaceCanopyConstants(float out[4]) const;
++
++    // Surfaces and ambient light (the look lane "surface",
++    // Graphics/Remaster/SurfaceLight.hpp; EngineGL33_Surface.cpp).
++    //   - The surface target: a second multisampled colour attachment of the
++    //     frame target (RGBA8), drawn only while a remastered world pass runs
++    //     with the switch on: the share of each pixel's light the horizon
++    //     occlusion may darken, the albedo and the sun's share. Draw buffers 0
++    //     and 1 from the world's first pass to EndWorldScene; the write mask of
++    //     attachment 1 follows the bound program (the remastered lit programs
++    //     write it) and the blend mode (opaque and alpha-blended draws).
++    //   - The sky light's spherical harmonics, projected on a worker thread from
++    //     the atmosphere tables whenever the sky table is rebuilt.
++    //   - The per-draw surface class (the lit programs' uniform surfClass)
++    //     from the section's texture and the drawn object's kind.
++    unsigned int _surfRb = 0;       // the surface target's renderbuffer (attachment 1 of _ssaaFbo)
++    int _surfRbSamples = 0;         // its sample count
++    bool _surfTargetOn = false;     // draw buffers 0 and 1 are on (this world pass)
++    bool _surfMaskOn = true;        // attachment 1's colour mask
++    bool _surfProgram = false;      // the bound program writes fragSurf
++    bool _surfFrameWritten = false; // this frame's world wrote the target (EndWorldScene reads it)
++    bool SurfaceWanted() const;     // the switch and its gate, this frame, in the world's passes
++    void BeginSurfaceTarget();
++    void EndSurfaceTarget();
++    void DestroySurfaceTarget();
++    void UpdateSurfaceMask(bool force = false);
++    void UploadLitSurface(const Poseidon::remaster::LightRig& rig, float skyThrough);
++    void ApplySurfaceClass(TextureGL33* tex); // sets surfClass on the bound lit program when it changed
++    // The occlusion accumulated over frames (EngineGL33_PostFX.cpp): which
++    // target holds the last one and for which frame and size; _surfAoOut is
++    // this frame's result for the composite (0: the blurred aoTex[0]).
++    struct SurfAoHistory
++    {
++        bool exists = false;
++        std::uint32_t frame = 0;
++        int w = 0, h = 0;
++        int idx = 0;
++    } _surfAoHist;
++    unsigned int _surfAoOut = 0;
++    void ResetSurfaceClassPrograms();   // the lit programs were deleted (their uniform cache goes)
++    unsigned int _surfBoundProgram = 0; // the bound program when it writes fragSurf, else 0
++    void SurfaceEnterInterior();        // a depth clear inside the world pass: a vehicle interior draws next
++    // The sky light (EngineGL33_SkyTable.cpp): starts a projection when the
++    // sky table was rebuilt or the haze changed, collects a finished one.
++    void PollSkyLightSH();
++    const Poseidon::remaster::SkyLightSH& SkyLightSHNow() const;
+     // One LitConstants slot (flushed with the next FlushLitConstants), and the
+     // sky mode (litSkyFwd.w, flushed at once).
+     void SetLitSlot(int slot, float x, float y, float z, float w);
+@@ -962,6 +1012,13 @@ class EngineGL33 : public Engine
+         unsigned int airMarchFbo = 0, airFbo[2] = {}, airMeanFbo = 0, airOutFbo = 0;
+         unsigned int progAirMarch = 0, progAirBlur = 0, progAirMean = 0, progAirApply = 0;
+         bool airUnavailable = false; // its programs failed: the air pass never runs, the rest does
++        // The surfaces lane: the surface target resolved (RGBA8, full res) and
++        // the horizon occlusion's program (writes aoTex like progAo).
++        unsigned int surfTex = 0, surfFbo = 0;
++        unsigned int progGtao = 0;
++        // Its occlusion accumulated over TAA frames (RG16F half res, ping-pong).
++        unsigned int gtaoHistTex[2] = {}, gtaoHistFbo[2] = {};
++        unsigned int progGtaoAccum = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+@@ -1020,6 +1077,12 @@ class EngineGL33 : public Engine
+         // TAA: this frame's shift of the AO and shaft sample patterns (0 when
+         // the resolve does not run: the fixed patterns of before).
+         float noiseShift = 0.0f;
++        // The surfaces lane: this frame's world wrote the surface target, so
++        // the resolve copies it, the Ao stage runs the horizon occlusion and
++        // the composite reads its shares.
++        bool surfaces = false;
++        // ... in a vehicle interior (its own depth, no world behind it).
++        bool surfaceInterior = false;
+         // Which stages run this frame and the strengths the composite uses.
+         Poseidon::remaster::PostStagePlan plan;
+         // The frame's colour the air pass, the glow stages and the composite
+@@ -1040,6 +1103,7 @@ class EngineGL33 : public Engine
+     void PostResolve(const PostFrame& f);
+     void PostLinearDepth(const PostFrame& f);
+     void PostAo(const PostFrame& f);
++    void PostSurfaceAccumulate(const PostFrame& f); // the surfaces lane's occlusion over TAA frames
+     void PostAir(const PostFrame& f); // EngineGL33_PostAir.cpp
+     void PostBloom(const PostFrame& f);
+     void PostShafts(const PostFrame& f);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Canopy.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Canopy.cpp
+index 903c3c9..400d9f7 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Canopy.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Canopy.cpp
+@@ -424,6 +424,21 @@ void EngineGL33::UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, fl
+     SetLitSlot(LitConst::Canopy, c.canopy[0], c.canopy[1], c.canopy[2], c.canopy[3]);
+ }
+ 
++void EngineGL33::SurfaceCanopyConstants(float out[4]) const
++{
++    out[0] = out[1] = out[2] = out[3] = 0.0f;
++    const rm::CanopyField* f = s_canopy.field.get();
++    if (!f || !f->Valid() || !s_canopy.fieldTex || s_canopy.uploadWhole)
++        return;
++    const float extent = static_cast<float>(f->size) * f->texel;
++    if (!(extent > 0.0f))
++        return;
++    out[0] = f->heightBase;
++    out[1] = f->heightRange;
++    out[2] = 1.0f / extent;
++    out[3] = 1.0f;
++}
++
+ void EngineGL33::BindCanopy()
+ {
+     BindUnit(kCanopyVisUnit, s_canopy.built.valid && s_canopy.sunTex ? s_canopy.sunTex : s_canopy.sunStandIn);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
+index 79c59a4..c6b51de 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
+@@ -189,6 +189,10 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
+     _worldSceneEnded = false;
+     _worldDepthCleared = false;
+     _worldOverlayDrawn = false;
++    // The surfaces lane: a world pass that never reached EndWorldScene must not
++    // leave the frame target drawing two buffers.
++    EndSurfaceTarget();
++    _surfFrameWritten = false;
+     UpdateRemasterPrograms();
+     // No TAA jitter or LOD bias until this frame's world pass asks for them
+     // (EndWorldScene takes them off too; a frame that never reached it must
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 211ba21..c96248f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -873,6 +873,10 @@ void EngineGL33::UploadLitFrameConstants()
+         rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
+     SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
+     _nightLightsActive = night.night[0] > 0.5f;
++    // Surfaces and ambient light (the surfaces lane): the sky light's
++    // spherical harmonics, the canopy's sky occlusion and the specular; zero
++    // while the switch or its gate is off.
++    UploadLitSurface(rig, in.skyThrough);
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 5fe90f5..fccf90e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -74,6 +74,11 @@ extern const char kPostSsrTraceMainGLSL[];
+ extern const char kPostSsrBlurGLSL[];
+ extern const char kPostSsrCompositeInputsGLSL[];
+ extern const char kPostSsrCompositeMainGLSL[];
++// The surfaces lane's horizon occlusion (EngineGL33_PostSurfaceShaders.cpp;
++// read it through PostShaderSource).
++extern const char kPostGtaoInputsGLSL[];
++extern const char kPostGtaoMainGLSL[];
++extern const char kPostGtaoAccumGLSL[];
+ 
+ // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
+ // layout below. Every shader that reads the rig pastes this string instead of
+@@ -116,6 +121,10 @@ enum class PostShader : int
+     SsrTrace,     // the half-resolution trace: the reflection as a multiply and an add, and its spread
+     SsrBlur,      // the trace gathered sideways over its spread (rough reflections have no hard outline)
+     SsrComposite, // the reflections laid on the full-resolution frame
++    // The horizon-based ambient occlusion of the surfaces lane (the Ao stage
++    // with the switch on; EngineGL33_PostSurfaceShaders.cpp).
++    Gtao,
++    GtaoAccum, // its occlusion accumulated over TAA frames, reprojected by depth
+     Count,
+ };
+ // The override file stem (vsPost, psPostAo, ...) and the assembled source.
+@@ -146,9 +155,10 @@ constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI
+ // The sea animation frame the water program cross-fades into (the sea,
+ // EngineGL33_Sea.cpp); a white stand-in outside the sea's draws.
+ constexpr int kSeaNextFrameUnit = 11;
+-// The canopy heightfield (B9, EngineGL33_Canopy.cpp): sampled only by the
+-// pass that builds the sun-visibility map, never by a world program; holds a
+-// stand-in until the first canopy is uploaded.
++// The canopy heightfield (B9, EngineGL33_Canopy.cpp): sampled by the pass
++// that builds the sun-visibility map and, for the sky it hides (the look lane
++// "surface"), by the world programs; holds a stand-in until the first canopy
++// is uploaded.
+ constexpr int kCanopyUnit = 10;
+ // The canopy's sun-visibility map (B9): a world-space map around the camera
+ // the world programs read beyond the shadow maps; a stand-in (all lit) until
+@@ -230,6 +240,7 @@ constexpr LitSampler kLitSamplers[] = {
+     {"seaNext", kSeaNextFrameUnit},          // next sea animation frame (the water program only)
+     {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)
+     {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
++    {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surface lane)
+ };
+ 
+ // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
+@@ -269,7 +280,9 @@ enum : int
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+     // 58: allocated to the materials' per-draw class (LitConstPlanned
+-    // MatClass); one padding member in the block until it lands.
++    // MatClass); one padding member in the block until it lands. The look
++    // lane "surface" carries its per-draw surface class in a plain uniform of
++    // the lit programs instead (surfClass, EngineGL33_Surface.cpp).
+     Reserved = 58,
+     // Sun shadows (B1, Graphics/Remaster/SunShadows.hpp): x per-frame turn of
+     // the soft shadows' taps, y 1 in a TAA frame, z taps per frame there,
+@@ -313,11 +326,23 @@ enum : int
+     // factor's scale minus 1 (0 = the classic fog: the zero the block starts
+     // with leaves every fragment as before), yzw free.
+     Haze = 78,
+-    Count = 79,
++    // Surfaces and ambient light (the look lane "surface", SurfaceLight.hpp):
++    // x on (the switch and its gate), y specular strength, z canopy occlusion
++    // strength, w the spherical-harmonics sky light's weight.
++    Surface = 79,
++    // The canopy heightfield on unit 10 as the world programs read it: x its
++    // height base (m), y its height range (m), z 1 / its extent (1/m), w 1 when
++    // a canopy is uploaded.
++    SurfaceCanopy = 80,
++    Surface2 = 81,  // surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
++    SurfaceSh = 82, // kSkyShCoeffs vec4: the sky light's irradiance coefficients (rgb), the sun frame
++    Surface3 = 88,  // surfaces: x cavity strength
++    Count = 89,
+ };
+ constexpr int MaxLights = 8;
+ constexpr int ReservedCount = 1;
+ constexpr int PlannedCount = Water0 - Planned;
++constexpr int SurfaceShCount = 6;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+@@ -333,7 +358,11 @@ static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
+ static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
+ static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
+ static_assert(Haze == Detail + 1, "LitConst haze slot follows the terrain detail");
+-static_assert(Count == Haze + 1, "LitConst size out of sync");
++static_assert(Surface == Haze + 1, "the surface slots follow the haze");
++static_assert(SurfaceCanopy == Surface + 1 && Surface2 == SurfaceCanopy + 1 && SurfaceSh == Surface2 + 1,
++              "LitConst surface slots out of order");
++static_assert(Surface3 == SurfaceSh + SurfaceShCount, "LitConst surface slots out of order");
++static_assert(Count == Surface3 + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ // The slots allocated to the features still to land (INTEGRATION-PLAN.md
+@@ -343,10 +372,11 @@ static_assert(Count == Haze + 1, "LitConst size out of sync");
+ // (a slot below it that has not landed yet becomes a padding member there) and
+ // raises LitConst::Count, which the upload and the shaders follow. A7 landed
+ // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+-// padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
+-// SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
+-// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 and 73
+-// are the padding member litPlanned; B8 landed the haze at 78.
++// padding member litReserved; B10 landed
++// the clouds slots 68 and 69 (Sky, SkyShadow), B3 the night slots 70 and 71
++// (SkySun, Night), B5 the water slots 74 and 75, B9 the canopy at 76 and B11
++// the terrain detail at 77, so 72 and 73 are the padding member litPlanned; B8
++// landed the haze at 78 and the surface lane's slots follow it (79 to 88).
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+@@ -365,9 +395,10 @@ static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+               "the planned slot below the sun shadows is the reserved padding");
+ static_assert(CombatShadow == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+               "the planned slots between the night and the water are the planned padding");
+-static_assert(End == LitConst::Count, "every planned slot above the padding has landed");
++static_assert(End == LitConst::Haze + 1, "every planned slot above the padding has landed");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+-static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
++static_assert(End * 16 <= 16384 && LitConst::Count * 16 <= 16384,
++              "LitConstants stays within the GL minimum uniform block size");
+ } // namespace LitConstPlanned
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 4665bf4..657fe3b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -369,6 +369,11 @@ layout(std140) uniform LitConstants {
+     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
+     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
+     vec4 litHaze;         // 78: aerial haze (B8): x classic fog factor scale minus 1 (0 = the classic fog)
++    vec4 litSurface;      // 79: surfaces: x on, y specular strength, z canopy occlusion, w SH sky light weight
++    vec4 litSurfCanopy;   // 80: the canopy heightfield: x height base (m), y height range (m), z 1 / extent, w valid
++    vec4 litSurface2;     // 81: surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
++    vec4 litSkySh[6];     // 82-87: the sky light's irradiance coefficients (rgb), sun frame (SurfaceLight.hpp)
++    vec4 litSurface3;     // 88: surfaces: x cavity strength, y 1 = a vehicle interior (pre-lit fragments' share)
+ };
+ )";
+ 
+@@ -390,6 +395,11 @@ uniform sampler2DArray shadowDepth;        // unit 6: the cascade array again, r
+ uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
+ uniform sampler2D skyDensity;              // unit 9: cloud density of the weather sky (SkyDensity.hpp)
+ uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
++uniform sampler2D canopyHeight;            // unit 10: the canopy heightfield, r top, g density (Canopy.hpp)
++// The surfaces lane's per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
++// sets it on the bound program): x SurfaceClass, y DrawKind, z 1 = a blending
++// texture (glass, a canvas window, a sign).
++uniform vec4 surfClass;
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -401,7 +411,26 @@ in vec3 vNormalW;
+ in vec4 vCrown;
+ flat in float vLitMode;
+ 
+-out vec4 fragColor;
++layout(location = 0) out vec4 fragColor;
++// The surface target (the look lane "surface", SurfaceLight.hpp): r the share
++// of the pixel's light the post pass's horizon occlusion may darken (sky,
++// bounce and sky reflection, after the fog), g the square root of the albedo's
++// luminance (the multi-bounce correction), b the direct sun's share (the
++// contact shadows), a the occlusion's strength code (g_surfAoCode; pre-lit
++// draws, smoke, put their alpha there and mix their nothing in by it). Written only while the world pass binds the target and the draw may
++// write it (EngineGL33::UpdateSurfaceMask); ignored otherwise.
++layout(location = 1) out vec4 fragSurf;
++float g_surfShare = 0.0;
++float g_surfSun = 0.0;
++float g_surfAlbedo = 0.0;
++// The occlusion's strength code in the target's alpha for opaque lit
++// fragments: 0.5 the occlusion as set (surfAo), 1 static architecture
++// (kSurfaceStaticAoBoost times it). A blending texture (glass, a window) is a
++// cover: it writes no share at all, opaquely where it is not empty, so the
++// post pass never darkens what is seen through it.
++float g_surfAoCode = 0.5;
++bool g_surfCover = false;
++const float kSurfInteriorShare = 0.9;
+ 
+ const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+ 
+@@ -814,8 +843,40 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         sunTerm = clamp((dot(nLight, l) + 0.35) / 1.35, 0.0, 1.0);
+         sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;
+     }
++    // Surfaces and ambient light (litSurface.x): relief from the texture (the
++    // sun term moves around its geometric value by at most
++    // kSurfReliefSunLimit of it, faces turned from the sun stay unlit), the
++    // sky light from the sky table's spherical harmonics and the sky the
++    // canopy hides.
++    bool surf = litSurface.x > 0.5;
++    bool relief = surf && !foliage && dot(g_surfBumpN, g_surfBumpN) > 0.5;
++    if (relief)
++        sunTerm = nl + clamp(dot(g_surfBumpDelta, l), -kSurfReliefSunLimit * nl, kSurfReliefSunLimit * nl);
+     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
+-    vec3 ambient = ka * skyIrradiance(nLight) * (skyVisibility * crownSky * sunOn);
++    float canopyVis = surf ? canopySkyVisibility(posAbs, nLight, foliage) : 1.0;
++    vec3 skyIrr = surf ? surfaceSkyIrradiance(relief ? g_surfBumpN : nLight, foliage) : skyIrradiance(nLight);
++    float groundShare = surf ? g_surfGroundShare : 0.0;
++    // The shade (litSurface2.w): a clear day sky fills the shaded side of a
++    // hull, a wall or a soldier with a fraction of the original's flat
++    // ambient; the ground's warm bounce (its share of that light) stays, so
++    // a hull's lower side and a wheel arch keep the sand's colour; leaves keep
++    // theirs (their crowns are lit as a canopy).
++    float shade = (surf && !foliage) ? litSurface2.w : 1.0;
++    vec3 ambient = ka * skyIrr * (skyVisibility * crownSky * sunOn * canopyVis * mix(shade, 1.0, groundShare));
++    if (surf && !foliage) {
++        // Cavities: a pit of the texture loses sun and sky, a bump catches a
++        // little more sun (never more sky: a lifted bump went blue-grey).
++        // The sky a pit loses is held to 30%: deeper, a shadowed patch of
++        // ground went to black stains.
++        float pit = clamp(1.0 + kSurfCavityGain * g_surfCavity, 0.5, 1.25);
++        direct *= pit;
++        ambient *= clamp(pit, 0.7, 1.0);
++        // A blending texture covers what is behind it (surfClass.z).
++        g_surfCover = !terrain && surfClass.z > 0.5;
++        int cls = int(surfClass.x + 0.5);
++        g_surfAoCode = (!terrain && (int(surfClass.y + 0.5) == 3 || cls == 7 || cls == 8 || cls == 9 || cls == 13))
++                           ? 1.0 : 0.5;
++    }
+     vec3 moon = kd * litMoon.rgb * (max(dot(nLight, litMoonDir.xyz), 0.0) * sunOn);
+     // Classic adds local lights in display space before texturing and clamps
+     // the sum at 1; taking that sum to linear keeps the authored size and
+@@ -840,8 +901,49 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
+     }
+     float exposure = litZenith.w;
+-    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn +
+-                     g_physicalSpec * litGround.w) * exposure;
++    vec3 radiance;
++    if (surf) {
++        // Every surface reflects: the diffuse keeps what the reflection does
++        // not take. Foliage reflects about its crown's normal.
++        SurfaceSpec sp = surfaceSpecular(foliage ? nLight : (relief ? g_surfBumpN : n), v, a,
++                                         foliage ? sunShadow : sunVisibility, terrain,
++                                         foliage, skyVisibility * canopyVis * crownSky * shade);
++        vec3 diffuseLight = a * (sp.diffuse * (direct + ambient + moon + local) + emissive);
++        vec3 specSun = sp.sun * sunOn;
++        vec3 specSky = sp.sky * sunOn;
++        radiance = (diffuseLight + specSun + specSky + g_physicalSpec * litGround.w) * exposure;
++        float sum = max(dot(radiance, kLuma), 1e-5);
++        // The ground's bounce counts at 0.3: the ground around a receiver is
++        // that light's source more than its occluder. The local lights count
++        // in full: lamps, fires and headlights cast no shadows, so the
++        // occlusion is the only thing that grounds a lamp-lit street at night
++        // (the foot of a wall, the ground under a bush or a hull). Leaves give
++        // the occlusion kSurfLeafShare of their share: the search reads the
++        // crown's scattered cards as deep pockets, and a crown seen against
++        // the sky is lit through its gaps.
++        g_surfShare = clamp(dot((a * (ambient * (sp.diffuse * (1.0 - 0.7 * groundShare)) + sp.diffuse * local) +
++                                 specSky) * exposure,
++                                kLuma) / sum,
++                            0.0, 1.0) *
++                      (foliage ? kSurfLeafShare : 1.0);
++        // The sun's share for the contact shadows; none on leaves (their sun
++        // is the shadow map's and the crown's, and a march through the cards
++        // in front of a sunlit crown took its warm light).
++        g_surfSun = foliage ? 0.0 : clamp(dot((a * direct * sp.diffuse + specSun) * exposure, kLuma) / sum, 0.0, 1.0);
++        g_surfAlbedo = sqrt(clamp(dot(a, kLuma), 0.0, 1.0));
++        // The lane's debug views (debug=11..13): the sky light a white surface
++        // takes, the canopy's sky visibility, the specular alone.
++        if (litSurface2.y > 0.5) {
++            ambientShare = 0.0;
++            if (litSurface2.y < 1.5)
++                return toDisplay(tonemapNeutral(ka * skyIrr * (skyVisibility * canopyVis) * exposure));
++            if (litSurface2.y < 2.5) return vec3(canopyVis);
++            return toDisplay(tonemapNeutral((specSun + specSky) * exposure));
++        }
++    } else {
++        radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn +
++                    g_physicalSpec * litGround.w) * exposure;
++    }
+     float total = dot(radiance, kLuma);
+     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+     if (foliage) ambientShare *= 0.5;
+@@ -911,6 +1013,21 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     // and the post pass's haze takes over the distance before it.
+     r0.rgb = mix(fogC, r0.rgb, min(vFogTC * (1.0 + litHaze.x), 1.0));
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
++    // The surface target: lit fragments hand the post pass what it may
++    // darken, the fog's share excluded; pre-lit ones (sky, particles) nothing,
++    // with their alpha, so smoke over a surface lowers that surface's share.
++    float fogKeep = clamp(min(vFogTC * (1.0 + litHaze.x), 1.0), 0.0, 1.0);
++    bool litFrag = vLitMode > 0.5 && vLitMode < 1.5;
++    // A vehicle interior is drawn pre-lit: its fragments hand the occlusion
++    // kSurfInteriorShare of their light (SurfaceLight.hpp kSurfaceInteriorShare).
++    bool interiorPre = litSurface3.y > 0.5 && vLitMode > -1.5 && vLitMode < 0.5 && r0.a > 0.5;
++    if (g_surfCover)
++        fragSurf = vec4(0.0, g_surfAlbedo, 0.0, r0.a > 0.02 ? 1.0 : 0.0);
++    else if (interiorPre)
++        fragSurf = vec4(kSurfInteriorShare, sqrt(clamp(dot(toLinear(r0.rgb), kLuma), 0.0, 1.0)), 0.0, 0.5);
++    else
++        fragSurf = litFrag ? vec4(g_surfShare * fogKeep, g_surfAlbedo, g_surfSun * fogKeep, g_surfAoCode)
++                           : vec4(0.0, 0.0, 0.0, r0.a);
+ }
+ )";
+ 
+@@ -930,7 +1047,29 @@ void main() {
+         else if (litSky.x > 0.0) rgb = litCloudsOverClassic(rgb, litCloudTermsDome(vUV0));
+         r0 = vec4(rgb, classic.a);
+     } else if (vLitMode > 0.5) {
+-        r0.rgb = shadeRemastered(t0.rgb * constColor.rgb, false, ambientShare);
++        vec3 albedo = t0.rgb * constColor.rgb;
++        // Relief and cavities (the surfaces lane): the texture's luminance as
++        // a height, by the draw's surface class, fading out by 60 m; leaves,
++        // glass and rubber take none.
++        float reliefK = surfaceClassRelief(surfClass.x) * litSurface2.x;
++        float cavityK = surfaceClassCavity(surfClass.x) * litSurface3.x;
++        if (litSurface.x > 0.5 && (reliefK > 0.0 || cavityK > 0.0) && dot(litMatForced.rgb, kLuma) <= 1e-4) {
++            vec2 d0x = dFdx(vUV0);
++            vec2 d0y = dFdy(vUV0);
++            vec3 sx = dFdx(vWorldRel);
++            vec3 sy = dFdy(vWorldRel);
++            float fadeR = 1.0 - smoothstep(25.0, 60.0, length(vWorldRel));
++            if (fadeR > 0.0 && dot(vNormalW, vNormalW) > 0.25) {
++                vec2 dB = surfaceReliefDelta(tex0, vUV0, d0x, d0y, false) *
++                          (dot(constColor.rgb, vec3(0.3333)) * reliefK * fadeR);
++                if (reliefK > 0.0)
++                    g_surfBumpN = surfaceBumpNormal(vNormalW * inversesqrt(dot(vNormalW, vNormalW)), sx, sy, dB);
++                if (cavityK > 0.0)
++                    g_surfCavity = surfaceCavity(tex0, vUV0, d0x, d0y, false) *
++                                   (dot(constColor.rgb, vec3(0.3333)) * cavityK * fadeR);
++            }
++        }
++        r0.rgb = shadeRemastered(albedo, false, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+         r0 = vColor * t0;
+@@ -1080,6 +1219,38 @@ void main() {
+             }
+         }
+         vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
++        // Relief (the surfaces lane): the detail texture's grain as a height
++        // (its alpha, times the square's luminance, as the albedo takes it),
++        // read from the texture around the fragment, fading out by 80 m.
++        if (litSurface.x > 0.5 && (litSurface2.x > 0.0 || litSurface3.x > 0.0) && litDetail.w > 0.5) {
++            vec2 r1x = dFdx(vUV1);
++            vec2 r1y = dFdy(vUV1);
++            vec3 sx = dFdx(vWorldRel);
++            vec3 sy = dFdy(vWorldRel);
++            float fadeR = 1.0 - smoothstep(30.0, 80.0, length(vWorldRel));
++            if (fadeR > 0.0) {
++                float base = dot(t0.rgb * constColor.rgb, kLuma) * 2.0;
++                vec2 dB = surfaceReliefDelta(tex1, vUV1, r1x, r1y, true) *
++                          (base * kSurfReliefHeight * litSurface2.x * fadeR);
++                if (litSurface2.x > 0.0)
++                    g_surfBumpN =
++                        surfaceBumpNormal(vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12)), sx, sy, dB);
++                // The grain's pits below its local mean lose sun and sky
++                // (stones and ruts keep a micro-shadow under a high sun).
++                g_surfCavity = surfaceCavity(tex1, vUV1, r1x, r1y, true) * (base * litSurface3.x * fadeR);
++            }
++            // ... and the square's own texture at a metre's scale (its texel
++            // against the mean of about 11 texels around it, fixed mips: up
++            // close the texture is magnified and a footprint-relative mean
++            // would be the texel itself): ruts, tracks and stony patches,
++            // fading out from 60 to 200 m.
++            float fadeB = 1.0 - smoothstep(60.0, 200.0, length(vWorldRel));
++            if (litSurface3.x > 0.0 && fadeB > 0.0) {
++                float bm = dot(textureLod(tex0, vUV0, 3.5).rgb, kLuma);
++                float bf = dot(textureLod(tex0, vUV0, 0.5).rgb, kLuma);
++                g_surfCavity += (bf - bm) * (kSurfBaseCavity * litSurface3.x * fadeB);
++            }
++        }
+         r0.rgb = shadeRemastered(albedo, true, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+@@ -1300,6 +1471,9 @@ void main() {
+         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
+                    (sunVis * sunOn * litHorizon.w);
+         vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
++        // The surface target: the body's sky light, as the stock share has it.
++        g_surfShare = ambientShare * (1.0 - wSky);
++        g_surfAlbedo = sqrt(clamp(dot(toLinear(albedo), kLuma), 0.0, 1.0));
+         vec3 display = toDisplay(tonemapNeutral(radiance));
+         float grey = dot(display, kLuma);
+         r0.rgb = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+index 816c554..cd3173e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+@@ -1,7 +1,10 @@
+ // Remastered lighting shaders: the surface piece of the fragment
+ // prelude (FragmentPiece::Surface, joined by RemasterFragmentCommon() in
+ // EngineGL33_LightingShaders.cpp): the sun highlight and sky reflection of
+-// glossy materials. Material and wet-surface responses belong here.
++// glossy materials, and the look lane "surface" (Graphics/Remaster/
++// SurfaceLight.hpp): the sky light from the sky table's spherical harmonics,
++// the sky hidden by the canopy, and a Fresnel specular on every surface.
++// Material and wet-surface responses belong here.
+ 
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+@@ -30,6 +33,307 @@ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
+     vec3 skySpec = skyIrradiance(r) * (gloss * (0.04 + 0.96 * fv) * 0.6);
+     return (sunSpec + skySpec) * litHorizon.w;
+ }
++
++// ---- Surfaces and ambient light (litSurface.x; SurfaceLight.hpp) -------------
++const float kSurfPi = 3.14159265;
++// The share of a leaf's occludable light the post pass's horizon occlusion may
++// darken (shadeRemastered): at most kSurfLeafShare of it goes, whatever the
++// search finds among a crown's cards.
++const float kSurfLeafShare = 0.4;
++
++// The clear sky's irradiance onto n from the sky table's spherical harmonics:
++// n turned into the sun frame (x toward the sun's azimuth, y up, z across;
++// the sky is mirror-symmetric in z, so its sign does not matter). The frame
++// is the sky's own sun (litSkySun): under the moon key (B3) litSunDir is the
++// moon, but the table was projected for the sun.
++vec3 skyLightSH(vec3 n) {
++    vec2 s = litSkySun.xz;
++    float sl = length(s);
++    s = sl > 1e-4 ? s / sl : vec2(1.0, 0.0);
++    float x = dot(n.xz, s);
++    float y = n.y;
++    float z2 = max(1.0 - x * x - y * y, 0.0);
++    vec3 e = litSkySh[0].rgb * 0.282095 + litSkySh[1].rgb * (0.488603 * y) + litSkySh[2].rgb * (0.488603 * x) +
++             litSkySh[3].rgb * (0.315392 * (3.0 * y * y - 1.0)) + litSkySh[4].rgb * (1.092548 * x * y) +
++             litSkySh[5].rgb * (0.546274 * (x * x - z2));
++    return max(e, vec3(0.0));
++}
++
++// The sky light onto n: the rig's hemisphere, or (by litSurface.w) the sky
++// table's sky above and the ground's own bounce below (the rig's ground
++// irradiance in the ground's colour, over the share of the lower hemisphere n
++// faces). The table gives the sky's brightness toward n; its colour is the
++// rig's own sky toward n (its hemisphere less its ground bounce) with
++// litSurface2.z of the table's mixed in, so a hull's shaded side keeps the
++// rig's horizon colour instead of the zenith's blue. Leaves keep the rig's
++// hemisphere: their crowns are lit as a canopy (crownCanopy) against the rig's
++// sky.
++// g_surfGroundShare: the share of that light the ground below bounces (the
++// rig's hemisphere: its ground and half its horizon's bounce), which the
++// horizon occlusion darkens less (the ground the search finds around a
++// receiver is that light's source, not an occluder of it).
++float g_surfGroundShare = 0.0;
++vec3 surfaceSkyIrradiance(vec3 n, bool leaves) {
++    vec3 rig = skyIrradiance(n);
++    float t = clamp(n.y, -1.0, 1.0);
++    vec3 rigGround = litGround.rgb * g_groundTint * (t >= 0.0 ? 0.5 * (1.0 - t) : 0.5 + 0.5 * (-t));
++    vec3 ground = litGround.rgb * g_groundTint * clamp(0.5 - 0.5 * n.y, 0.0, 1.0);
++    vec3 e = rig;
++    float w = leaves ? 0.0 : litSurface.w;
++    if (w > 0.0) {
++        vec3 rigSky = max(rig - rigGround, vec3(0.0));
++        vec3 sh = skyLightSH(n);
++        vec3 sky = mix(rigSky * (dot(sh, kLuma) / max(dot(rigSky, kLuma), 1e-6)), sh, litSurface2.z);
++        e = mix(rig, sky + ground, w);
++        rigGround = mix(rigGround, ground, w);
++    }
++    g_surfGroundShare = clamp(dot(rigGround, kLuma) / max(dot(e, kLuma), 1e-6), 0.0, 1.0);
++    return e;
++}
++
++// Sky visibility under the canopy heightfield (Canopy.hpp: tree crowns,
++// forest blocks, buildings; r the top's height, g the cover's density), at
++// two scales: the texel above the receiver (6 m) and the neighbourhood
++// (25 m). A receiver well below the top loses the sky its cover hides; one
++// near the top of its own crown keeps it. The lookup moves out along the
++// receiver's horizontal facing, so a wall or the outer leaves of a crown read
++// the cover in front of them, not the footprint of their own building or
++// tree. Leaves lose at most kSurfCanopyLeafMax (the core of their own crown
++// is the crown canopy's, crownSky). 1 off.
++const float kSurfCanopyLeafMax = 0.35;
++float canopySkyVisibility(vec3 posAbs, vec3 n, bool foliage) {
++    if (litSurface.z <= 0.0 || litSurfCanopy.w < 0.5) return 1.0;
++    vec2 uv = (posAbs.xz + n.xz * 4.0) * litSurfCanopy.z;
++    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 1.0;
++    float occ = 0.0;
++    const vec2 kLods = vec2(0.0, 2.0);
++    // The coarser level keeps the tallest cover over a wider area (a town's
++    // roofs over its open square): it counts less.
++    const vec2 kWeight = vec2(0.85, 0.6);
++    for (int i = 0; i < 2; ++i) {
++        vec2 c = textureLod(canopyHeight, uv, kLods[i]).rg;
++        float top = litSurfCanopy.x + c.r * litSurfCanopy.y;
++        float below = top - posAbs.y;
++        // Under its own crown a leaf sees less of the cover above it.
++        float depth = smoothstep(foliage ? 2.0 : 0.3, foliage ? 9.0 : 3.5, below);
++        occ = max(occ, c.g * depth * kWeight[i]);
++    }
++    return 1.0 - clamp(occ * litSurface.z, 0.0, foliage ? kSurfCanopyLeafMax : 0.92);
++}
++
++// Relief from the texture (Mikkelsen 2010 surface gradients, no tangents): a
++// main sets g_surfBumpN before shadeRemastered, which then lights the relief's
++// normal with the geometric one's energy: the sun term moves around its
++// geometric value by the unnormalised gradient's share (g_surfBumpDelta, zero
++// on average, so the relief adds contrast and takes no light from the land
++// under a high sun) and by at most kSurfReliefSunLimit of it (a grazing sun
++// never digs black pockets). Zero = no relief. `sx`, `sy` are the screen
++// derivatives of vWorldRel, `dB` the height change toward the next pixel in x
++// and y (metres).
++vec3 g_surfBumpN = vec3(0.0);
++vec3 g_surfBumpDelta = vec3(0.0);
++float g_surfH0 = 0.0; // the height surfaceReliefDelta read at the fragment (surfaceCavity)
++const float kSurfReliefHeight = 0.04;   // the land's metres of relief per unit of albedo luminance
++const float kSurfReliefSunLimit = 0.35; // the relief moves the sun term by at most this share of N.L
++vec3 surfaceBumpNormal(vec3 n, vec3 sx, vec3 sy, vec2 dB) {
++    vec3 r1 = cross(sy, n);
++    vec3 r2 = cross(n, sx);
++    float det = dot(sx, r1);
++    vec3 grad = sign(det) * (dB.x * r1 + dB.y * r2);
++    vec3 nb = abs(det) * n - grad;
++    float len2 = dot(nb, nb);
++    g_surfBumpDelta = abs(det) > 1e-20 ? -grad / abs(det) : vec3(0.0);
++    return len2 > 1e-20 ? nb * inversesqrt(len2) : n;
++}
++
++// The height change toward the next pixel in x and y, read from the texture
++// itself: the fragment and the points one pixel's footprint away (`dx`, `dy`,
++// the uv derivatives), all three through the same widened footprint (a third
++// of a mip coarser than the pixel's), so the result is a smooth function of
++// the position. The screen derivatives of the shaded albedo it replaces
++// stepped in 2x2 quads and moved with the TAA jitter. `alphaH` reads the
++// height from alpha (the terrain's detail texture), else from luminance.
++vec2 surfaceReliefDelta(sampler2D tex, vec2 uv, vec2 dx, vec2 dy, bool alphaH) {
++    vec2 gx = dx * 1.25;
++    vec2 gy = dy * 1.25;
++    vec4 c0 = textureGrad(tex, uv, gx, gy);
++    vec4 cx = textureGrad(tex, uv + dx, gx, gy);
++    vec4 cy = textureGrad(tex, uv + dy, gx, gy);
++    g_surfH0 = alphaH ? c0.a : dot(c0.rgb, kLuma);
++    if (alphaH) return vec2(cx.a - c0.a, cy.a - c0.a);
++    return vec2(dot(cx.rgb - c0.rgb, kLuma), dot(cy.rgb - c0.rgb, kLuma));
++}
++
++// Roughness, F0 and metalness of the per-draw surface class (surfClass.x,
++// SurfaceLight.hpp SurfaceClass).
++vec3 surfaceClassParams(float cls) {
++    int i = int(cls + 0.5);
++    if (i == 1) return vec3(0.5, 0.02, 0.0);    // paint (matt military)
++    if (i == 2) return vec3(0.32, 0.04, 0.85);  // metal
++    if (i == 3) return vec3(0.05, 0.04, 0.0);   // glass
++    if (i == 4) return vec3(0.62, 0.035, 0.0);  // rubber
++    if (i == 5) return vec3(0.88, 0.03, 0.0);   // fabric
++    if (i == 6) return vec3(0.5, 0.028, 0.0);   // skin
++    if (i == 7) return vec3(0.72, 0.04, 0.0);   // road
++    if (i == 8) return vec3(0.82, 0.035, 0.0);  // masonry
++    if (i == 9) return vec3(0.75, 0.035, 0.0);  // wood
++    if (i == 10) return vec3(0.5, 0.035, 0.0);  // leather
++    if (i == 11) return vec3(0.38, 0.04, 0.5);  // weapon
++    if (i == 12) return vec3(0.06, 0.04, 0.0);  // lens
++    if (i == 13) return vec3(0.68, 0.04, 0.0);  // roof
++    return vec3(0.8, 0.035, 0.0);               // default
++}
++
++// Metres of relief per unit of albedo luminance for the per-draw surface class
++// (masonry, roads and wood carry the most; glass and lenses none).
++float surfaceClassRelief(float cls) {
++    int i = int(cls + 0.5);
++    if (i == 1 || i == 2 || i == 10) return 0.006; // paint, metal, leather
++    if (i == 3 || i == 12) return 0.0;             // glass, lens
++    if (i == 4) return 0.0;                        // rubber (a tread keeps its own grooves)
++    if (i == 5) return 0.012;                      // fabric
++    if (i == 6 || i == 11) return 0.003;           // skin, weapon
++    if (i == 7 || i == 13) return 0.03;            // road, roof
++    if (i == 8) return 0.035;                      // masonry
++    if (i == 9) return 0.025;                      // wood
++    return 0.02;
++}
++
++// How much of a texture's pits the cavity term darkens per surface class:
++// stone, roads, roofs and wood carry the most; paint, metal, glass, rubber,
++// skin and cloth none (their dark texels are colour, not pits).
++float surfaceClassCavity(float cls) {
++    int i = int(cls + 0.5);
++    if (i == 7 || i == 8 || i == 13) return 1.0; // road, masonry, roof
++    if (i == 9) return 0.8;                      // wood
++    if (i == 0) return 0.5;                      // default
++    return 0.0;
++}
++
++// The cavity term (the surfaces lane, litSurface3.x): the texture's height at
++// the fragment below the mean of its neighbourhood (the same footprint 6
++// times wider, about two and a half mips coarser), from alpha (the terrain's
++// detail texture) or luminance. Uses the fragment's read of
++// surfaceReliefDelta (g_surfH0), so call it after that.
++float g_surfCavity = 0.0;
++const float kSurfCavityGain = 3.0;
++const float kSurfBaseCavity = 1.5; // the land's square texture at a metre's scale, against the detail grain's 1
++float surfaceCavity(sampler2D tex, vec2 uv, vec2 dx, vec2 dy, bool alphaH) {
++    vec4 m = textureGrad(tex, uv, dx * 6.0, dy * 6.0);
++    float hm = alphaH ? m.a : dot(m.rgb, kLuma);
++    return g_surfH0 - hm;
++}
++
++// Karis' analytic split-sum environment BRDF: F0 * x + y.
++vec2 surfaceEnvBrdf(float rough, float nv) {
++    const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
++    const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
++    vec4 r = rough * c0 + c1;
++    float a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
++    return vec2(-1.04, 1.04) * a004 + r.zw;
++}
++
++// What surfaceSpecular hands shadeRemastered.
++struct SurfaceSpec {
++    vec3 sun;      // the sun's highlight (rig units, before exposure)
++    vec3 sky;      // the sky's reflection (rig units, before exposure)
++    float diffuse; // what the diffuse keeps of the light (the energy the reflection took)
++};
++
++// GGX sun highlight and split-sum sky reflection for every surface but
++// leaves. `a` is the linear albedo, `skyVis` the sky the receiver sees
++// (valleys, canopy).
++SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool terrain, bool foliage, float skyVis) {
++    SurfaceSpec o;
++    o.sun = vec3(0.0);
++    o.sky = vec3(0.0);
++    o.diffuse = 1.0;
++    // Leaves reflect nothing here: a leaf card's plane mirrored the sky as a
++    // pale sheet across the crown and took the green out of it, and the
++    // crown's own wrap and canopy terms already carry how a crown looks.
++    if (litSurface.y <= 0.0 || foliage) return o;
++    vec3 p = terrain ? vec3(0.9, 0.03, 0.0) : surfaceClassParams(surfClass.x);
++    // An authored glossy material keeps its own lobe width.
++    if (litMatSpecular.w > 0.0 && !terrain) p.x = min(p.x, sqrt(2.0 / (litMatSpecular.w + 2.0)));
++    float rough = clamp(p.x, 0.03, 1.0);
++    float metal = p.z;
++    // Darker texels (grime, seams, cavities) read rougher; not paint, whose
++    // olive is dark all over and whose lobe would then spread into an even
++    // grey sheen across the hull instead of a highlight where the sun's half
++    // vector meets it.
++    float lum = dot(a, kLuma);
++    bool paint = !terrain && int(surfClass.x + 0.5) == 1;
++    if (!paint) rough = clamp(rough + 0.15 * (1.0 - smoothstep(0.02, 0.2, lum)) * (1.0 - metal), 0.03, 1.0);
++    vec3 f0 = mix(vec3(p.y), clamp(a * 2.2, 0.0, 1.0), metal);
++    float nv = clamp(dot(n, v), 1e-4, 1.0);
++    vec2 ab = surfaceEnvBrdf(rough, nv);
++    vec3 fEnv = f0 * ab.x + ab.y;
++    // The sun: GGX, Schlick-GGX visibility, Schlick Fresnel; times pi into
++    // the rig's units (the rig's diffuse is albedo * irradiance).
++    vec3 l = litSunDir.xyz;
++    float nl = dot(n, l);
++    if (nl > 0.0) {
++        vec3 h = normalize(l + v);
++        float nh = max(dot(n, h), 0.0);
++        float vh = max(dot(v, h), 0.0);
++        float al = rough * rough;
++        float a2 = al * al;
++        float dd = nh * nh * (a2 - 1.0) + 1.0;
++        float D = a2 / (kSurfPi * dd * dd);
++        float k = al * 0.5;
++        float vis = 0.25 / ((nl * (1.0 - k) + k) * (nv * (1.0 - k) + k));
++        vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
++        // Rough natural surfaces (soil, grass, cloth, plaster, brick) shadow
++        // their own microfacets: GGX's broad lobe on them reads as an even
++        // grey sheen that takes the warmth out of a sunlit facade and lifts
++        // its dark windows (the materials track found the grazing glare), so
++        // it keeps 0.15 of itself from roughness 0.9 down from 0.55.
++        float roughCut = mix(1.0, 0.15, smoothstep(0.55, 0.9, rough) * (1.0 - metal));
++        o.sun = litSun.rgb * (D * vis * nl * kSurfPi * sunVisibility * roughCut) * F;
++    }
++    // The sky: a smooth surface mirrors the sky as the player sees it, a rough
++    // one the sky light around its reflected direction (the irradiance there);
++    // both lose what the receiver's sky visibility hides.
++    vec3 r = reflect(-v, n);
++    vec3 rd = normalize(mix(r, n, rough * rough));
++    vec3 rough_l = surfaceSkyIrradiance(rd, false) * 1.6;
++    vec3 pref = rough_l;
++    // The sky as seen only where the lobe is narrow (glass, lenses, metal,
++    // wet film): the table lookup is the costly part, and most surfaces skip it.
++    float smoothW = 1.0 - smoothstep(0.08, 0.45, rough);
++    if (smoothW > 0.0) {
++        vec3 smooth_l = toLinear(skyReflection(normalize(vec3(r.x, max(r.y, 0.02), r.z)))) / max(litZenith.w, 1e-3);
++        smooth_l = mix(smooth_l, rough_l, 1.0 - smoothstep(-0.15, 0.0, r.y));
++        pref = mix(rough_l, smooth_l, smoothW);
++    }
++    // A rough dielectric's lobe takes in the dim ground and its own surface's
++    // relief as much as the sky, and the sky fill already carries its
++    // diffuse-looking part: none of the sky reflection from roughness 0.5 on
++    // (matt paint, rubber, cloth, soil, plaster) seen face on, so they keep
++    // their colour instead of a grey-blue veil (a dark window or a shaded
++    // facade lifted toward the sky's colour). Grazing views catch some at an
++    // edge (a hull's silhouette, a wall seen along its face), up to 0.3 (paint
++    // 0.2); the land none (the haze carries the far ground's sheen). The
++    // reflection loses what the receiver's occlusion hides: skyVis here, the
++    // post pass's horizon occlusion through the share it is part of.
++    float matt = smoothstep(0.25, 0.5, rough) * (1.0 - metal);
++    float roughSky = mix(1.0, 0.0, matt);
++    int cls = terrain ? 0 : int(surfClass.x + 0.5);
++    float edgeSky = terrain ? roughSky : mix(1.0, paint ? 0.2 : 0.3, matt);
++    roughSky = mix(roughSky, edgeSky, pow(1.0 - nv, 5.0));
++    // Rubber reflects no sky (a tyre's tread keeps its grooves); a blending
++    // texture that is not glass (a canvas window, a net, a sign) none either:
++    // its sheen made a see-through panel a flat pale card.
++    bool blendTex = !terrain && surfClass.z > 0.5;
++    if (cls == 4 || (blendTex && cls != 3 && cls != 12)) roughSky = 0.0;
++    o.sky = pref * fEnv * (skyVis * roughSky);
++    // The diffuse gives up only the energy the reflection actually shows.
++    o.diffuse = (1.0 - dot(fEnv, kLuma) * roughSky) * (1.0 - metal);
++    float s = litSurface.y * litHorizon.w;
++    o.sun *= s;
++    o.sky *= s;
++    return o;
++}
+ )";
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index 9bf1dd6..b019e71 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -189,6 +189,13 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.airFbo[1]);
+     delFbo(p.airMeanFbo);
+     delFbo(p.airOutFbo);
++    delFbo(p.surfFbo);
++    delTex(p.surfTex);
++    for (int i = 0; i < 2; ++i)
++    {
++        delFbo(p.gtaoHistFbo[i]);
++        delTex(p.gtaoHistTex[i]);
++    }
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -217,9 +224,10 @@ void EngineGL33::DestroyPostTargets()
+ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+-    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
+-                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen,
+-                               &p.progLumaSharpen, &p.progAirMarch, &p.progAirBlur, &p.progAirMean, &p.progAirApply})
++    for (unsigned int* prog :
++         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
++          &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen, &p.progAirMarch,
++          &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progGtao, &p.progGtaoAccum})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -265,6 +273,10 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progAirBlur = link(PostShader::AirBlur);
+         p.progAirMean = link(PostShader::AirMean);
+         p.progAirApply = link(PostShader::AirApply);
++        // The surfaces lane's horizon occlusion; without it the Ao stage keeps
++        // the stock occlusion.
++        p.progGtao = link(PostShader::Gtao);
++        p.progGtaoAccum = link(PostShader::GtaoAccum);
+         if (vs)
+             glDeleteShader(vs);
+         // The march and the apply read the rig (LitConstants, binding 3).
+@@ -286,6 +298,10 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
+             p.unavailable = true;
+         }
++        if (!p.progGtao)
++            LOG_ERROR(Graphics, "GL33 post: the horizon occlusion failed to build; the stock occlusion stands in");
++        if (!p.progGtaoAccum)
++            LOG_ERROR(Graphics, "GL33 post: the occlusion accumulation failed to build; each frame's stands alone");
+     }
+     if (p.unavailable)
+         return false;
+@@ -317,6 +333,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.airMistTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
+     p.airMeanTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, false);
+     p.airOutTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, true);
++    // The surfaces lane's target, resolved (read texel by texel).
++    p.surfTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
++    // Its occlusion accumulated over frames (ping-pong, half res: r the
++    // occlusion, g the view depth it was found at).
++    p.gtaoHistTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
++    p.gtaoHistTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
++    _surfAoHist = SurfAoHistory{};
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -372,6 +395,9 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.airMeanFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.airMeanTex);
+     check();
+     p.airOutFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.airOutTex);
++    p.surfFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.surfTex);
++    p.gtaoHistFbo[0] = MakeFbo(GL_COLOR_ATTACHMENT0, p.gtaoHistTex[0]);
++    p.gtaoHistFbo[1] = MakeFbo(GL_COLOR_ATTACHMENT0, p.gtaoHistTex[1]);
+     check();
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -450,6 +476,11 @@ void EngineGL33::EndWorldScene()
+     // timestamp, so the world section holds all of them).
+     if (_remasterPrograms || (_gpuTiming && worldDrawn))
+         FlushAndFreeAllQueues(_queueNo);
++    // The surfaces lane: the world's draws are in; the HUD and the post pass
++    // draw buffer 0 only.
++    EndSurfaceTarget();
++    const bool surfWritten = _surfFrameWritten;
++    _surfFrameWritten = false;
+     if (worldDrawn)
+         GpuMark(Poseidon::gpu::Mark::WorldEnd);
+     _worldPassOpen = false;
+@@ -485,6 +516,9 @@ void EngineGL33::EndWorldScene()
+     PostFrameGeometry(f);
+     rm::PostFrameInputs in;
+     in.ambientOcclusion = _lighting.ambientOcclusion;
++    // The surfaces lane's debug views show the forward terms alone.
++    if (rm::SurfaceDebugView(_lighting.debugView) > 0.0f)
++        in.ambientOcclusion = 0.0f;
+     in.bloom = _lighting.bloom;
+     in.sunShafts = _lighting.sunShafts;
+     in.debugView = _lighting.debugView;
+@@ -513,9 +547,17 @@ void EngineGL33::EndWorldScene()
+     in.ssrTags =
+         in.ssrTags && (in.ssr || GetFrameCounter() % static_cast<std::uint32_t>(rm::kSsrShareProbeFrames) == 0 ||
+                        in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
++    // The surfaces lane: a vehicle interior drawn with the surface target on
++    // gets its own occlusion (its depth is all the frame has).
++    const bool surfReady = surfWritten && _surfRb && _post.progGtao;
++    in.surfaceInterior = surfReady && !in.worldDepth;
+     f.plan = rm::PlanPostStages(in);
+     if (f.plan.Empty())
+         return; // nothing to add: leave the frame as drawn
++    // The surfaces lane: the shares the world wrote replace the frame alpha's,
++    // and the Ao stage runs the horizon occlusion (when it runs at all).
++    f.surfaces = surfReady;
++    f.surfaceInterior = in.surfaceInterior;
+     // Under TAA the AO and shaft patterns turn every frame (golden-ratio
+     // steps) and the history averages them; without it they stay fixed.
+     if (f.plan.Runs(rm::PostStage::Temporal))
+@@ -601,6 +643,15 @@ void EngineGL33::PostResolve(const PostFrame& f)
+     glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.depthFbo);
+     glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
++    if (f.surfaces)
++    {
++        // The surfaces lane's target (attachment 1): its samples averaged, as
++        // the colour's.
++        glReadBuffer(GL_COLOR_ATTACHMENT1);
++        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.surfFbo);
++        glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        glReadBuffer(GL_COLOR_ATTACHMENT0);
++    }
+ }
+ 
+ void EngineGL33::BeginPostFullscreen()
+@@ -636,16 +687,60 @@ void EngineGL33::PostAo(const PostFrame& f)
+     // Ambient occlusion at half resolution, then the depth-aware blur across
+     // and down.
+     const PostTargets& p = _post;
+-    glUseProgram(p.progAo);
+-    SetInt(p.progAo, "depthTex", 0);
+-    Set4(p.progAo, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
+-    Set4(p.progAo, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
+-    Set4(p.progAo, "aoParams", kAoRadius, 1.0f, kAoFadeStart, kAoFadeEnd);
+-    Set4(p.progAo, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
+-    Set4(p.progAo, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+-    SetFloat(p.progAo, "noiseShift", f.noiseShift);
+-    BindTex(0, p.depthTex);
+-    DrawTo(p.aoFbo[0], f.hw, f.hh);
++    if (f.surfaces)
++    {
++        // The surfaces lane: the horizon-based occlusion (psPostGtao,
++        // SurfaceLight.hpp), into the same target as the stock one.
++        const GLuint prog = p.progGtao;
++        glUseProgram(prog);
++        SetInt(prog, "depthTex", 0);
++        Set4(prog, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++        Set4(prog, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
++        // A vehicle interior: a crew compartment's reach, not the world's.
++        const float radius = f.surfaceInterior ? rm::kGtaoInteriorRadius : std::max(_lighting.surfAoRadius, 0.1f);
++        Set4(prog, "aoParams", radius, f.surfaceInterior ? 1.0f : rm::kGtaoStaticRadiusScale, rm::kGtaoFadeStart,
++             rm::kGtaoFadeEnd);
++        SetInt(prog, "surfTex", 1);
++        BindTex(1, p.surfTex);
++        Set4(prog, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
++        Set4(prog, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++        Set4(prog, "gtaoParams", rm::kGtaoMaxScreenRadius, 6.0f, rm::kGtaoOneSliceRadiusPx, f.noiseShift);
++        // Under TAA the frames are accumulated (PostSurfaceAccumulate): fewer
++        // slices a frame.
++        const bool accumulate = f.plan.Runs(rm::PostStage::Temporal) && p.progGtaoAccum;
++        Set4(prog, "gtaoSlices", static_cast<float>(accumulate ? rm::kGtaoTemporalSlices : rm::kGtaoSlices), 0.0f, 0.0f,
++             0.0f);
++        // World up in view space: an occluder below the receiver is the
++        // ground, which bounces the light it hides (kGtaoBelowWeight).
++        float up[3] = {0.0f, 1.0f, 0.0f};
++        if (GScene && GScene->GetCamera())
++        {
++            const Vector3 u = GScene->GetCamera()->InverseScaled().Rotate(Vector3(0.0f, 1.0f, 0.0f));
++            const float len = u.Size();
++            if (len > 1e-6f)
++            {
++                up[0] = u.X() / len;
++                up[1] = u.Y() / len;
++                up[2] = u.Z() / len;
++            }
++        }
++        Set4(prog, "upView", up[0], up[1], up[2], rm::kGtaoBelowWeight);
++        BindTex(0, p.depthTex);
++        DrawTo(p.aoFbo[0], f.hw, f.hh);
++    }
++    else
++    {
++        glUseProgram(p.progAo);
++        SetInt(p.progAo, "depthTex", 0);
++        Set4(p.progAo, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++        Set4(p.progAo, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
++        Set4(p.progAo, "aoParams", kAoRadius, 1.0f, kAoFadeStart, kAoFadeEnd);
++        Set4(p.progAo, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
++        Set4(p.progAo, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++        SetFloat(p.progAo, "noiseShift", f.noiseShift);
++        BindTex(0, p.depthTex);
++        DrawTo(p.aoFbo[0], f.hw, f.hh);
++    }
+     glUseProgram(p.progAoBlur);
+     SetInt(p.progAoBlur, "aoTex", 0);
+     BindTex(0, p.aoTex[0]);
+@@ -654,6 +749,49 @@ void EngineGL33::PostAo(const PostFrame& f)
+     BindTex(0, p.aoTex[1]);
+     Set2(p.progAoBlur, "stepUV", 0.0f, 1.0f / f.hh);
+     DrawTo(p.aoFbo[0], f.hw, f.hh);
++    _surfAoOut = 0;
++    if (f.surfaces)
++        PostSurfaceAccumulate(f);
++}
++
++void EngineGL33::PostSurfaceAccumulate(const PostFrame& f)
++{
++    // The surfaces lane's occlusion over frames: this frame's (blurred) laid
++    // over the last frames' as reprojected by its depth (the TAA resolve's
++    // camera mapping), kGtaoHistoryWeight of the history kept where it held
++    // the same surface. Under TAA only (the pattern turns only there); a frame
++    // without it, a cut or a resize starts the history again.
++    const PostTargets& p = _post;
++    if (!p.progGtaoAccum || !f.plan.Runs(rm::PostStage::Temporal))
++    {
++        _surfAoHist.exists = false;
++        return;
++    }
++    const std::uint32_t frame = GetFrameCounter();
++    const rm::TaaReprojection reproj = rm::BuildTaaReprojection(_taa.prevCamera, _taa.camera);
++    const bool usable = _surfAoHist.exists && _surfAoHist.frame + 1 == frame && _surfAoHist.w == f.hw &&
++                        _surfAoHist.h == f.hh && reproj.valid;
++    const int dst = 1 - _surfAoHist.idx;
++    const GLuint prog = p.progGtaoAccum;
++    glUseProgram(prog);
++    SetInt(prog, "curTex", 0);
++    SetInt(prog, "histTex", 1);
++    BindTex(0, p.aoTex[0]);
++    BindTex(1, p.gtaoHistTex[_surfAoHist.idx]);
++    Set4(prog, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++    Set4(prog, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++    const char* rows[3] = {"reproj0", "reproj1", "reproj2"};
++    for (int r = 0; r < 3; ++r)
++        Set4(prog, rows[r], reproj.rows[r][0], reproj.rows[r][1], reproj.rows[r][2], reproj.rows[r][3]);
++    Set4(prog, "prevProj", reproj.prevP11, reproj.prevP22, 0.0f, 0.0f);
++    Set4(prog, "accum", usable ? rm::kGtaoHistoryWeight : 0.0f, 0.0f, 0.0f, 0.0f);
++    DrawTo(p.gtaoHistFbo[dst], f.hw, f.hh);
++    _surfAoHist.idx = dst;
++    _surfAoHist.exists = true;
++    _surfAoHist.frame = frame;
++    _surfAoHist.w = f.hw;
++    _surfAoHist.h = f.hh;
++    _surfAoOut = p.gtaoHistTex[dst];
+ }
+ 
+ void EngineGL33::PostBloom(const PostFrame& f)
+@@ -714,7 +852,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     SetInt(p.progComposite, "bloomTex", 3);
+     SetInt(p.progComposite, "shaftTex", 4);
+     BindTex(0, plan.Runs(rm::PostStage::Air) ? p.airOutTex : f.frameColor);
+-    BindTex(2, plan.Runs(rm::PostStage::Ao) ? p.aoTex[0] : p.whiteTex);
++    BindTex(2, plan.Runs(rm::PostStage::Ao) ? (_surfAoOut ? _surfAoOut : p.aoTex[0]) : p.whiteTex);
+     BindTex(3, plan.Runs(rm::PostStage::Bloom) ? p.bloomTex[0] : p.blackTex);
+     BindTex(4, plan.Runs(rm::PostStage::Shafts) ? p.shaftTex : p.blackTex);
+     Set4(p.progComposite, "compParams", plan.aoStrength, plan.bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
+@@ -730,7 +868,48 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
+     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    // The surfaces lane: the resolved surface target on unit 6's 2D target
++    // (the world programs read unit 6's array target, which stays bound; the
++    // unit's sampler object is nearest, clamped, which is what this read
++    // wants), the occlusion's power and the multi-bounce correction.
++    const bool surf = f.surfaces && plan.Runs(rm::PostStage::Ao);
++    // The contact shadows march toward the sun in view space; none with the
++    // sun under the horizon.
++    float sunView[3] = {0.0f, 0.0f, 1.0f};
++    bool sunUp = false;
++    if (surf && GScene && GScene->GetCamera() && GScene->MainLight())
++    {
++        const Vector3 toSun = -GScene->MainLight()->SunDirection();
++        Vector3 v = GScene->GetCamera()->InverseScaled().Rotate(toSun);
++        const float len = v.Size();
++        if (toSun.Y() > 0.02f && len > 1e-6f)
++        {
++            sunView[0] = v.X() / len;
++            sunView[1] = v.Y() / len;
++            sunView[2] = v.Z() / len;
++            sunUp = true;
++        }
++    }
++    SetInt(p.progComposite, "surfTex", 6);
++    Set4(p.progComposite, "surfParams", surf ? 1.0f : 0.0f, std::max(_lighting.surfAo, 0.0f),
++         sunUp && !f.surfaceInterior ? std::max(_lighting.surfContact, 0.0f) : 0.0f, 1.0f);
++    Set4(p.progComposite, "surfParams2", rm::kSurfaceStaticAoBoost, 0.0f, 0.0f, 0.0f);
++    Set4(p.progComposite, "sunView", sunView[0], sunView[1], sunView[2], f.noiseShift);
++    Set4(p.progComposite, "aoSize", static_cast<float>(f.hw), static_cast<float>(f.hh), 1.0f / f.hw, 1.0f / f.hh);
++    if (surf)
++    {
++        glActiveTexture(GL_TEXTURE6);
++        glBindTexture(GL_TEXTURE_2D, p.surfTex);
++        glActiveTexture(GL_TEXTURE0);
++    }
+     DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
++    if (surf)
++    {
++        glActiveTexture(GL_TEXTURE6);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        glActiveTexture(GL_TEXTURE0);
++        GL33Bind::Invalidate();
++    }
+ }
+ 
+ void EngineGL33::PostDebugView(const PostFrame& f)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 23c15f7..74cd48c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -215,8 +215,93 @@ uniform vec4 projInfo;   // as psPostAo
+ uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
+ uniform vec4 worldRect;  // as psPostAo
+ uniform vec4 debugView;  // x: 1 = show occlusion
++// Surfaces and ambient light (the look lane "surface", SurfaceLight.hpp): the
++// surface target the world shaders wrote (unit 6: r the share the occlusion
++// may darken, g the square root of the albedo's luminance, b the sun's share)
++// replaces the frame alpha's share, the half-resolution horizon occlusion is
++// upsampled by depth and corrected for multiple bounces.
++uniform sampler2D surfTex;
++uniform vec4 surfParams; // x 1 = the surface target holds the shares, y occlusion power, z contact shadows, w multi-bounce
++uniform vec4 aoSize;     // xy the occlusion's size, zw 1 / size
++uniform vec4 sunView;    // xyz toward the sun in view space, w this frame's turn of the march (TAA)
++uniform vec4 surfParams2; // x the occlusion power's multiple on static architecture (the target's alpha code 1)
+ out vec4 fragColor;
+ 
++float compositeViewZ(vec2 uv) {
++    float d = textureLod(depthTex, uv, 0.0).r;
++    if (d >= 0.999999) return 1e6;
++    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++}
++
++// The half-resolution occlusion at this full-resolution pixel: its four
++// nearest texels (clamped to the target), bilinear weights times how well each
++// texel's depth matches the pixel's (within about 1% of the depth), so a near
++// edge does not bleed its occlusion onto the far side: a crown's onto the
++// grass behind it.
++float upsampleOcclusion(vec2 uv, float z) {
++    vec2 f = uv * aoSize.xy - 0.5;
++    vec2 i0 = floor(f);
++    vec2 fr = f - i0;
++    float sum = 0.0;
++    float wsum = 0.0;
++    float nearest = 1.0;
++    float best = 1e9;
++    for (int k = 0; k < 4; ++k) {
++        vec2 o = vec2(float(k & 1), float(k >> 1));
++        vec2 ti = clamp(i0 + o, vec2(0.0), aoSize.xy - 1.0);
++        vec2 s = textureLod(aoTex, (ti + 0.5) * aoSize.zw, 0.0).rg;
++        float wb = mix(1.0 - fr.x, fr.x, o.x) * mix(1.0 - fr.y, fr.y, o.y);
++        float dz = abs(s.g - z);
++        float wd = exp(-dz / (0.008 * z + 0.04));
++        sum += s.r * wb * wd;
++        wsum += wb * wd;
++        if (dz < best) { best = dz; nearest = s.r; }
++    }
++    return wsum > 1e-4 ? sum / wsum : nearest;
++}
++
++// Contact shadows: a short march toward the sun through the depth buffer
++// finds the small casters the shadow map is too coarse for (a boot on the
++// ground, a wheel on its hub, a sandbag's lip). 1 = lit. The march is a few
++// centimetres to a metre long with the distance, and a sample counts as a
++// caster only within a thickness behind it, so a surface far behind the ray
++// does not shadow it.
++float contactShadow(vec2 uv, float z) {
++    if (z > 50.0) return 1.0;
++    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    vec3 p = vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++    float len = clamp(0.03 * z, 0.12, 1.2);
++    float thick = 0.25 + 0.02 * z;
++    float noise = fract(fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) + sunView.w);
++    const int kSteps = 8;
++    float shadow = 0.0;
++    for (int i = 0; i < kSteps; ++i) {
++        float t = (float(i) + noise) / float(kSteps);
++        vec3 q = p + sunView.xyz * (len * t);
++        if (q.z <= 0.05) break;
++        vec2 qn = vec2(q.x / (q.z * projInfo.z), q.y / (q.z * projInfo.w));
++        vec2 quv = worldRect.xy + (qn * 0.5 + 0.5) * worldRect.zw;
++        vec2 qr = (quv - worldRect.xy) / worldRect.zw;
++        if (qr.x <= 0.0 || qr.y <= 0.0 || qr.x >= 1.0 || qr.y >= 1.0) break; // off the 3D view: open
++        float zs = compositeViewZ(quv);
++        float dz = q.z - zs;
++        float bias = 0.015 + 0.0015 * q.z;
++        if (dz > bias && dz < thick) {
++            shadow = max(shadow, 1.0 - t * t);
++        }
++    }
++    return 1.0 - shadow * (1.0 - smoothstep(30.0, 50.0, z));
++}
++
++// Jimenez et al. 2016: the light that bounces between the occluders before it
++// arrives brightens the occlusion of a light surface.
++float occlusionMultiBounce(float v, float albedo) {
++    float a = 2.0404 * albedo - 0.3324;
++    float b = -4.7951 * albedo + 0.6417;
++    float c = 2.7552 * albedo + 0.6903;
++    return max(v, ((v * a + b) * v + c) * v);
++}
++
+ // The shaft pass gathers the sky toward the sun, which is the light the air
+ // scatters toward the eye along an endless ray. A surface ends the ray: only
+ // the air in front of it scatters, 1 - exp(-distance / length) of the sky's
+@@ -234,11 +319,31 @@ float shaftInscatter() {
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
+-    if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
+-    // Take the occluded part of the sky light out of the radiance. c.a is one
+-    // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+-    float share = 1.0 - clamp(c.a, 0.0, 1.0);
+-    float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
++    float keep;
++    if (surfParams.x > 0.5) {
++        // The surface target's share, the occlusion upsampled by depth, its
++        // strength as a power and the multi-bounce correction by the albedo.
++        vec4 s = textureLod(surfTex, vUV, 0.0);
++        float zc = compositeViewZ(vUV);
++        ao = upsampleOcclusion(vUV, zc);
++        // The target's alpha: 0.5 the occlusion as set, 1 static architecture
++        // (eaves, door openings, the foot of a wall take it stronger).
++        float power = surfParams.y * mix(1.0, surfParams2.x, smoothstep(0.5, 1.0, s.a));
++        ao = pow(clamp(ao, 0.0, 1.0), power);
++        if (surfParams.w > 0.5) ao = occlusionMultiBounce(ao, s.g * s.g);
++        // The sun's share loses what a contact shadow hides.
++        float contact = (surfParams.z > 0.0 && s.b > 0.02) ? contactShadow(vUV, zc) : 1.0;
++        contact = mix(1.0, contact, clamp(surfParams.z, 0.0, 1.0));
++        if (debugView.x > 0.5) { fragColor = vec4(vec3(ao * contact), 1.0); return; }
++        keep = max(1.0 - clamp(s.r, 0.0, 1.0) * (1.0 - ao) - clamp(s.b, 0.0, 1.0) * (1.0 - contact), 0.0);
++    } else {
++        if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
++        // Take the occluded part of the sky light out of the radiance. c.a is
++        // one minus the pixel's sky light share (1 for pre-lit and coverage
++        // pixels).
++        float share = 1.0 - clamp(c.a, 0.0, 1.0);
++        keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
++    }
+     vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+@@ -599,6 +704,9 @@ const PostShaderDef kPostShaders[] = {
+     {"psPostSsrComposite",
+      {Poseidon::gl33lighting::kPostSsrCompositeInputsGLSL, s_glslPostCommon,
+       Poseidon::gl33lighting::kPostSsrCompositeMainGLSL}},
++    {"psPostGtao",
++     {Poseidon::gl33lighting::kPostGtaoInputsGLSL, s_glslPostCommon, Poseidon::gl33lighting::kPostGtaoMainGLSL}},
++    {"psPostGtaoAccum", {Poseidon::gl33lighting::kPostGtaoAccumGLSL}},
+ };
+ constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
+ static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSurfaceShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSurfaceShaders.cpp
+new file mode 100644
+index 0000000..3b2b43c
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSurfaceShaders.cpp
+@@ -0,0 +1,216 @@
++// Remastered lighting, the look lane "surface" (Graphics/Remaster/
++// SurfaceLight.hpp): the post pass's horizon-based ambient occlusion. GLSL
++// only, no GL code (the unit tests compile it through PostShaderSource); the
++// pass runs in EngineGL33_PostFX.cpp (PostAo).
++
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++namespace Poseidon::gl33lighting
++{
++
++// Ground-truth-based ambient occlusion (Jimenez et al. 2016, as XeGTAO lays it
++// out) at half resolution. Per pixel kGtaoSlices slices through the view
++// vector, turned per pixel (interleaved gradient noise) and per TAA frame
++// (gtaoParams.w); in each slice kGtaoSteps samples per side, quadratically
++// spaced out to the world radius (capped on screen), find the highest horizon,
++// and the slice's visibility is the cosine-weighted integral of the open arc
++// around the projected normal. A sample counts as an occluder by three
++// weights: distance (it fades out over the last 60% of the radius, so far
++// geometry does not occlude), thickness (one in front of the receiver by more
++// than a thin object's depth, a crown or trunk before a wall or the grass
++// behind it, is a separate object the sky reaches behind, and fades out), and
++// height (one below the receiver is the ground: it bounces the light it
++// hides, so it counts at upView.w). Samples are clamped to the 3D viewport:
++// past its edge the edge's own depth stands in (counting them as open left a
++// lighter rim along the frame's border, as far depth did a brighter one).
++// Under TAA every pixel takes gtaoSlices.x slices (two; the accumulation
++// over frames, psPostGtaoAccum, covers the rest); without it kSlices, near
++// pixels whose search spans more than gtaoParams.z half-resolution pixels
++// one fewer (their samples are far apart and cost the most). Output r =
++// visibility (1 = open), g = view depth in metres (the bilateral blur and the
++// upsample read it). Inputs, then the shared depth reconstruction
++// (s_glslPostCommon), then this.
++const char kPostGtaoInputsGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D depthTex;
++uniform vec4 projInfo;   // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
++uniform vec4 depthMap;   // ndcZ = depth * x + y
++uniform vec4 aoParams;   // x radius (m), y its multiple on static architecture, z fade start (m), w fade end (m)
++uniform sampler2D surfTex; // the resolved surface target: a 1 = static architecture (SurfaceLight.hpp)
++uniform vec4 screen;     // xy full-res size, zw 1/size
++uniform vec4 worldRect;  // xy origin, zw size of the 3D viewport in uv
++uniform vec4 gtaoParams; // x max screen radius (share of the height), y min radius (pixels), z one-slice radius (half-res px), w frame turn
++uniform vec4 upView;     // xyz world up in view space, w the weight of an occluder below the receiver
++uniform vec4 gtaoSlices; // x slices a pixel this frame (kGtaoTemporalSlices under TAA, else kGtaoSlices)
++out vec4 fragColor;
++)";
++
++const char kPostGtaoMainGLSL[] = R"(
++const float kPi = 3.14159265;
++const int kSlices = 3;
++const int kSteps = 8;
++
++float gtaoNoise(vec2 p) {
++    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
++}
++
++// Every depth read is snapped to a full-resolution texel centre and its
++// position rebuilt there: a position at the exact uv with the depth of the
++// nearest texel sits off the surface on a grazing plane (the ground ahead), so
++// open flat ground read as about 8% occluded.
++vec2 snapUV(vec2 uv) {
++    return (floor(uv * screen.xy) + 0.5) * screen.zw;
++}
++
++vec3 sampleView(vec2 uv) {
++    vec2 s = snapUV(uv);
++    return viewPos(s, viewZ(s));
++}
++
++void main() {
++    vec2 uvC = snapUV(vUV);
++    float d0 = texture(depthTex, uvC).r;
++    if (d0 >= 0.999999) { fragColor = vec4(1.0, 1e6, 0.0, 1.0); return; } // sky
++    float z = viewZ(uvC);
++    if (z > aoParams.w) { fragColor = vec4(1.0, z, 0.0, 1.0); return; }
++    vec3 p = viewPos(uvC, z);
++
++    // Normal from depth: on each axis the neighbour with the smaller step, so
++    // silhouettes do not bend it.
++    vec2 tx = vec2(screen.z, 0.0);
++    vec2 ty = vec2(0.0, screen.w);
++    vec3 pr = sampleView(uvC + tx);
++    vec3 pl = sampleView(uvC - tx);
++    vec3 pu = sampleView(uvC + ty);
++    vec3 pd = sampleView(uvC - ty);
++    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
++    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
++    vec3 n = normalize(cross(dx, dy));
++    vec3 v = normalize(-p);
++    if (dot(n, v) < 0.0) n = -n; // face the camera
++
++    // The search radius in uv: the world radius at this depth, capped on
++    // screen (near pixels would otherwise sample the whole frame), and at least
++    // a few pixels (far pixels keep a contact term).
++    // Static architecture (the surface target's alpha code 1) searches
++    // farther: eaves, door openings and the wall-ground seam are metres across.
++    float radius = aoParams.x * mix(1.0, aoParams.y, smoothstep(0.5, 1.0, texture(surfTex, uvC).a));
++    vec2 uvPerM = vec2(0.5 / projInfo.z, 0.5 / projInfo.w) * worldRect.zw / z;
++    vec2 rUV = radius * uvPerM;
++    float cap = gtaoParams.x * worldRect.w;
++    float fit = min(1.0, cap / max(rUV.y, 1e-6));
++    rUV *= fit;
++    float worldR = radius * fit; // the radius the capped search covers
++    float minPx = gtaoParams.y * screen.w;
++    if (rUV.y < minPx) { rUV *= minPx / max(rUV.y, 1e-9); }
++    float falloffRange = 0.6 * worldR;
++    float falloffMul = -1.0 / max(falloffRange, 1e-4);
++    float falloffAdd = (worldR - falloffRange) / max(falloffRange, 1e-4) + 1.0;
++    // Thickness: an occluder this far in front of the receiver (view depth)
++    // starts to fade, and is gone at the second.
++    float thick0 = 0.2 * worldR;
++    float thick1 = 0.7 * worldR;
++    int base = clamp(int(gtaoSlices.x + 0.5), 1, kSlices);
++    int slices = (base == kSlices && rUV.y * screen.y * 0.5 > gtaoParams.z) ? kSlices - 1 : base;
++
++    vec2 uvLo = worldRect.xy + screen.zw * 0.5;
++    vec2 uvHi = worldRect.xy + worldRect.zw - screen.zw * 0.5;
++    float noiseA = fract(gtaoNoise(gl_FragCoord.xy) + gtaoParams.w);
++    float noiseB = fract(gtaoNoise(gl_FragCoord.yx + vec2(17.0, 5.0)) + gtaoParams.w * 1.618);
++    float visibility = 0.0;
++    float openSum = 0.0;
++    for (int s = 0; s < kSlices; ++s) {
++        if (s >= slices) break;
++        float phi = (float(s) + noiseA) * (kPi / float(slices));
++        vec2 dir = vec2(cos(phi), sin(phi));
++        vec3 dir3 = vec3(dir, 0.0);
++        vec3 ortho = dir3 - dot(dir3, v) * v;
++        vec3 axis = normalize(cross(ortho, v));
++        vec3 projN = n - axis * dot(n, axis);
++        float projNLen = length(projN);
++        float sgnN = sign(dot(ortho, projN));
++        float cosN = clamp(dot(projN, v) / max(projNLen, 1e-5), 0.0, 1.0);
++        float nAng = sgnN * acos(cosN);
++        float low0 = cos(nAng + 0.5 * kPi);
++        float low1 = cos(nAng - 0.5 * kPi);
++        float h0c = low0;
++        float h1c = low1;
++        for (int k = 0; k < kSteps; ++k) {
++            float t = (float(k) + noiseB) / float(kSteps);
++            t = t * t;
++            vec2 o = dir * rUV * t + dir * screen.zw * 1.5; // skip the pixel itself
++            vec2 uv0 = clamp(uvC + o, uvLo, uvHi);
++            vec2 uv1 = clamp(uvC - o, uvLo, uvHi);
++            vec3 s0 = sampleView(uv0) - p;
++            vec3 s1 = sampleView(uv1) - p;
++            float l0 = max(length(s0), 1e-5);
++            float l1 = max(length(s1), 1e-5);
++            float c0 = dot(s0, v) / l0;
++            float c1 = dot(s1, v) / l1;
++            float w0 = clamp(l0 * falloffMul + falloffAdd, 0.0, 1.0) * (1.0 - smoothstep(thick0, thick1, -s0.z)) *
++                       mix(upView.w, 1.0, smoothstep(-0.25, 0.05, dot(s0, upView.xyz) / l0));
++            float w1 = clamp(l1 * falloffMul + falloffAdd, 0.0, 1.0) * (1.0 - smoothstep(thick0, thick1, -s1.z)) *
++                       mix(upView.w, 1.0, smoothstep(-0.25, 0.05, dot(s1, upView.xyz) / l1));
++            c0 = mix(low0, c0, w0);
++            c1 = mix(low1, c1, w1);
++            h0c = max(h0c, c0);
++            h1c = max(h1c, c1);
++        }
++        projNLen = mix(projNLen, 1.0, 0.05);
++        float h0 = -acos(clamp(h1c, -1.0, 1.0));
++        float h1 = acos(clamp(h0c, -1.0, 1.0));
++        h0 = nAng + clamp(h0 - nAng, -0.5 * kPi, 0.5 * kPi);
++        h1 = nAng + clamp(h1 - nAng, -0.5 * kPi, 0.5 * kPi);
++        float sinN = sin(nAng);
++        float arc0 = (cosN + 2.0 * h0 * sinN - cos(2.0 * h0 - nAng)) * 0.25;
++        float arc1 = (cosN + 2.0 * h1 * sinN - cos(2.0 * h1 - nAng)) * 0.25;
++        visibility += projNLen * (arc0 + arc1);
++        // The same slice with nothing in it: the cosine-weighted integral is
++        // 1 only on average over every slice direction, and one or two slices
++        // clamped to 1 read open ground seen at a grazing angle as about 10%
++        // occluded. Their ratio is 1 wherever nothing occludes.
++        openSum += projNLen * (cosN + nAng * sinN);
++    }
++    visibility = clamp(visibility / max(openSum, 1e-4), 0.0, 1.0);
++    visibility = mix(visibility, 1.0, smoothstep(aoParams.z, aoParams.w, z));
++    fragColor = vec4(visibility, z, 0.0, 1.0);
++}
++)";
++
++// The occlusion accumulated over TAA frames: each half-resolution texel's
++// position (its view depth, g) taken into the last frame by the TAA resolve's
++// camera mapping, the history read there kept at accum.x where it held the
++// same surface (its depth within 3% plus 10 cm), this frame's blurred
++// occlusion mixed in at the rest. A static camera's turning slice pattern
++// then settles instead of moving frame to frame. Output as the input: r the
++// occlusion, g the view depth.
++const char kPostGtaoAccumGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D curTex;  // this frame's blurred occlusion (r) and view depth (g)
++uniform sampler2D histTex; // the last frames' (r) and the depth it was found at (g)
++uniform vec4 projInfo;     // x = _33, y = _43, z = 1/_11, w = 1/_22
++uniform vec4 worldRect;    // xy origin, zw size of the 3D viewport in uv
++uniform vec4 reproj0;      // previous view position = (dot(row.xyz, p) + row.w) per row
++uniform vec4 reproj1;
++uniform vec4 reproj2;
++uniform vec4 prevProj;     // xy _11 and _22 of the previous frame
++uniform vec4 accum;        // x the history's weight (0 = none: this frame alone)
++out vec4 fragColor;
++void main() {
++    vec2 c = texture(curTex, vUV).rg;
++    fragColor = vec4(c, 0.0, 1.0);
++    if (accum.x <= 0.0 || c.g > 1e5) return;
++    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    vec3 p = vec3(ndc.x * c.g * projInfo.z, ndc.y * c.g * projInfo.w, c.g);
++    vec3 pp = vec3(dot(reproj0.xyz, p) + reproj0.w, dot(reproj1.xyz, p) + reproj1.w, dot(reproj2.xyz, p) + reproj2.w);
++    if (pp.z <= 0.05) return;
++    vec2 prevNdc = pp.xy * prevProj.xy / pp.z;
++    vec2 huv = worldRect.xy + (prevNdc * 0.5 + 0.5) * worldRect.zw;
++    if (any(lessThan(huv, worldRect.xy)) || any(greaterThan(huv, worldRect.xy + worldRect.zw))) return;
++    vec2 h = texture(histTex, huv).rg;
++    if (abs(h.g - pp.z) > 0.03 * pp.z + 0.1) return;
++    fragColor = vec4(mix(c.r, h.r, accum.x), c.g, 0.0, 1.0);
++}
++)";
++
++} // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 44e7cae..c8efdb2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -282,6 +282,13 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
+     // between land and sea.
+     if (d.shader == Poseidon::render::ShaderFamily::Detail)
+         SelectTerrainDetailLayer(spec);
++    // The surfaces lane: the section's surface class (its texture, the drawn
++    // object's kind) for the specular every lit surface gets, on the program
++    // ApplyPipeline bound. Only the object program reads it, and not for
++    // leaves (a forced diffuse): the land, grass, sea and crowns skip it.
++    if (vertexInput == PipelineVertexInput::Mesh && d.shader == Poseidon::render::ShaderFamily::Normal &&
++        _materialSet.forcedDiffuse.R() + _materialSet.forcedDiffuse.G() + _materialSet.forcedDiffuse.B() <= 0.0f)
++        ApplySurfaceClass(tex);
+ }
+ 
+ void EngineGL33::QueuePrepareTriangle(const MipInfo& absMip, int specFlags)
+@@ -382,6 +389,10 @@ void EngineGL33::BeginPass(PassId passId)
+         // The TAA jitter and texture LOD bias of this pass (the frame gates are
+         // known now); zero for any pass that is not a TAA frame's world pass.
+         ApplyTaaJitter();
++        // The surface target (the surfaces lane): bound from the world's first
++        // pass to EndWorldScene. SetColorMask above reset its write mask.
++        BeginSurfaceTarget();
++        UpdateSurfaceMask(true);
+     }
+ 
+     // Crop the 3D scene to the AspectSettings world rect (pillarbox /
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index ef09547..4a45bbc 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1986,6 +1986,7 @@ void EngineGL33::DeinitPixelShaders()
+                         glDeleteProgram(_shaderProgramRemaster[v][s][m][i]);
+                         _shaderProgramRemaster[v][s][m][i] = 0;
+                     }
++    ResetSurfaceClassPrograms();
+     _lightingProgramsBuilt = false;
+     _lightingActive = false;
+     _remasterPrograms = false;
+@@ -2039,6 +2040,12 @@ void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, Pix
+     _pixelShaderSel = ps;
+     _pixelShaderModeSel = mode;
+     _pixelShaderSpecularSel = spec;
++    // The surfaces lane: only the remastered lit programs declare the surface
++    // target's output (fragSurf); any other leaves attachment 1 alone.
++    _surfProgram = _remasterPrograms && (ps == PSNormal || ps == PSDetail || ps == PSGrass || ps == PSWater) &&
++                   _shaderProgramRemaster[vs][spec][mode][ps] != 0;
++    _surfBoundProgram = _surfProgram ? _shaderProgramRemaster[vs][spec][mode][ps] : 0;
++    UpdateSurfaceMask();
+ }
+ 
+ void EngineGL33::EnableNightEye(float night)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
+index 1997ed2..96624e8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
+@@ -83,8 +83,19 @@ struct SkyTableState
+     bool open = false;
+     int mode = 0;                // Poseidon::RemasterSky of the draws; 0 = the world's
+     bool forcedPrograms = false; // the pass opened the remastered programs
++
++    // The sky light's spherical harmonics (the surfaces lane, SurfaceLight.hpp),
++    // projected from the CPU atmosphere tables on a worker thread whenever the
++    // sun moved kSkyLightRebuildRad or the haze changed.
++    std::future<rm::SkyLightSH> shPending;
++    bool shBuilding = false;
++    rm::SkyLightSH sh;
+ };
+ 
++// The sun moves this far (radians, about 0.1 degree) before the sky light is
++// projected again: the light changes far more slowly than the sky's own look.
++constexpr float kSkyLightRebuildRad = 0.0017f;
++
+ SkyTableState s_sky;
+ 
+ float HazeOf(const rm::LightingTuning& t)
+@@ -298,6 +309,36 @@ bool EngineGL33::PollSkyTables()
+     return false;
+ }
+ 
++void EngineGL33::PollSkyLightSH()
++{
++    if (s_sky.shBuilding && s_sky.shPending.valid() &&
++        s_sky.shPending.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
++    {
++        s_sky.sh = s_sky.shPending.get();
++        s_sky.shBuilding = false;
++    }
++    // Off by default (surfSkyLight 0): nothing to project.
++    if (s_sky.shBuilding || !GScene || !_featureGates.computed || !_featureGates[rm::Feature::Surfaces].on ||
++        _lighting.surfSkyLight <= 0.0f)
++        return;
++    LightSun* sun = GScene->MainLight();
++    if (!sun || !PollSkyTables())
++        return;
++    const float elev = SunElevationRad(sun);
++    const bool stale = !s_sky.sh.valid || s_sky.sh.haze != s_sky.tables.haze ||
++                       std::fabs(s_sky.sh.sunElevationRad - elev) > kSkyLightRebuildRad;
++    if (!stale)
++        return;
++    s_sky.shBuilding = true;
++    s_sky.shPending =
++        std::async(std::launch::async, [tables = s_sky.tables, elev] { return rm::ProjectSkyLight(tables, elev); });
++}
++
++const rm::SkyLightSH& EngineGL33::SkyLightSHNow() const
++{
++    return s_sky.sh;
++}
++
+ bool EngineGL33::RemasterSkyPending() const
+ {
+     return s_sky.building || SkyDensityPending();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+index 7f92a7f..4965db8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+@@ -98,6 +98,9 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
+                 Poseidon::render::blend::Shadow();
+             break;
+     }
++    // The surfaces lane: opaque and alpha-blended lit draws write the surface
++    // target (blended by their own alpha), additive glows and shadow quads not.
++    UpdateSurfaceMask();
+ }
+ 
+ void EngineGL33::ApplyDepthMode(DepthMode mode)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Surface.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Surface.cpp
+new file mode 100644
+index 0000000..e2d15e4
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Surface.cpp
+@@ -0,0 +1,224 @@
++// Surfaces and ambient light (feature switch `surfaces`, the look lane
++// "surface"; Graphics/Remaster/SurfaceLight.hpp).
++//
++// Three parts here:
++//   - the surface target: a second multisampled RGBA8 colour attachment of the
++//     frame target that the remastered lit programs write during the world
++//     pass (fragSurf: the share of each pixel's light the horizon occlusion may
++//     darken, the albedo, the sun's share). Draw buffers 0 and 1 are on from
++//     the world's first pass to EndWorldScene; attachment 1's colour mask
++//     follows the bound program (only the remastered lit programs declare the
++//     output; any other program would leave undefined values) and the blend
++//     mode (opaque and alpha-blended draws write it, additive glows and shadow
++//     quads do not). The post pass resolves it next to the colour;
++//   - the frame constants (Surface, SurfaceCanopy, Surface2 and the sky
++//     light's coefficients SurfaceSh);
++//   - the per-draw surface class (the lit programs' uniform surfClass) from
++//     the section's texture and the kind of object drawn (GDrawSurfaceKind,
++//     set by Shape::Draw), classified once per texture and kept on it.
++// Off (the switch, classic lighting, night vision, a portrait or a 3D preview
++// after the world), the target is never bound, the slots are zero and the
++// world programs and the post pass draw the frame of before.
++
++#include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <PoseidonGL33/TextureGL33.hpp>
++#include <Poseidon/Core/Global.hpp>
++
++#include <algorithm>
++#include <cctype>
++#include <string>
++#include <vector>
++
++using namespace Poseidon::gl33lighting;
++namespace rm = Poseidon::remaster;
++
++namespace
++{
++// The per-draw surface class rides in a plain uniform of the lit programs
++// (surfClass), not in the LitConstants block: a block update per draw cost
++// about 0.6 ms of CPU a frame, and slot 58 is the materials step's. Per
++// program (indexed by its GL name): the uniform's location (-2 not looked up
++// yet, -1 not read by that program) and the value it holds.
++struct SurfClassProgram
++{
++    int loc = -2;
++    float v[3] = {-1.0f, -1.0f, -1.0f};
++};
++std::vector<SurfClassProgram> s_surfClassPrograms;
++} // namespace
++
++bool EngineGL33::SurfaceWanted() const
++{
++    return _lightingActive && _remasterPrograms && _worldEffectsOn && !_worldSceneEnded && !_portraitTargetSize &&
++           _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
++           _featureGates[rm::Feature::Surfaces].on && _lighting.postEffects && _lighting.ambientOcclusion > 0.0f &&
++           _lighting.surfAo > 0.0f && SSAAActive();
++}
++
++void EngineGL33::DestroySurfaceTarget()
++{
++    if (_surfRb)
++        glDeleteRenderbuffers(1, &_surfRb);
++    _surfRb = 0;
++    _surfRbSamples = 0;
++    _surfTargetOn = false;
++    _surfMaskOn = true;
++    _surfFrameWritten = false;
++}
++
++void EngineGL33::BeginSurfaceTarget()
++{
++    if (_surfTargetOn || !SurfaceWanted())
++        return;
++    GLint drawFbo = 0;
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
++    if (static_cast<unsigned int>(drawFbo) != _ssaaFbo)
++        return;
++    if (!_surfRb)
++    {
++        // Made on first use and attached for the target's life: the frame
++        // target's draw buffers keep only attachment 0 outside the world pass,
++        // so nothing else ever writes it.
++        glGenRenderbuffers(1, &_surfRb);
++        glBindRenderbuffer(GL_RENDERBUFFER, _surfRb);
++        const GLsizei samples = _msaaSamples > 1 ? _msaaSamples : 0;
++        glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, _ssaaW, _ssaaH);
++        glBindRenderbuffer(GL_RENDERBUFFER, 0);
++        glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, _surfRb);
++        if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
++        {
++            LOG_WARN(Graphics, "GL33: surface target {}x{} ({} samples) incomplete; horizon occlusion off", _ssaaW,
++                     _ssaaH, static_cast<int>(samples));
++            glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, 0);
++            glDeleteRenderbuffers(1, &_surfRb);
++            _surfRb = 0;
++            return;
++        }
++        _surfRbSamples = static_cast<int>(samples);
++        LOG_INFO(Graphics, "GL33: surface target {}x{} ({} samples)", _ssaaW, _ssaaH, static_cast<int>(samples));
++    }
++    const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
++    glDrawBuffers(2, bufs);
++    // Nothing drawn yet reads as sky: no share to darken.
++    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
++    if (scissor)
++        glDisable(GL_SCISSOR_TEST);
++    glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    glClearBufferfv(GL_COLOR, 1, zero);
++    if (scissor)
++        glEnable(GL_SCISSOR_TEST);
++    _surfTargetOn = true;
++    _surfFrameWritten = true;
++    UpdateSurfaceMask(true);
++}
++
++void EngineGL33::EndSurfaceTarget()
++{
++    if (!_surfTargetOn)
++        return;
++    GLint drawFbo = 0;
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, _ssaaFbo);
++    const GLenum buf0 = GL_COLOR_ATTACHMENT0;
++    glDrawBuffers(1, &buf0);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(drawFbo));
++    glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    _surfMaskOn = true;
++    _surfTargetOn = false;
++}
++
++void EngineGL33::UpdateSurfaceMask(bool force)
++{
++    if (!_surfTargetOn)
++        return;
++    const bool want =
++        _surfProgram && (_currentBlendMode == BlendMode::Opaque || _currentBlendMode == BlendMode::AlphaBlend);
++    if (!force && want == _surfMaskOn)
++        return;
++    _surfMaskOn = want;
++    const GLboolean m = want ? GL_TRUE : GL_FALSE;
++    glColorMaski(1, m, m, m, m);
++}
++
++void EngineGL33::UploadLitSurface(const rm::LightRig& rig, float skyThrough)
++{
++    PollSkyLightSH();
++    const rm::SurfaceFrameConstants c =
++        rm::ComputeSurfaceFrameConstants(_lighting, _featureGates, rig, SkyLightSHNow(), skyThrough);
++    SetLitSlot(LitConst::Surface, c.surface[0], c.surface[1], c.surface[2], c.surface[3]);
++    float canopy[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    if (c.surface[0] > 0.0f && c.surface[2] > 0.0f)
++        SurfaceCanopyConstants(canopy);
++    SetLitSlot(LitConst::SurfaceCanopy, canopy[0], canopy[1], canopy[2], canopy[3]);
++    SetLitSlot(LitConst::Surface2, c.surface2[0], c.surface2[1], c.surface2[2], c.surface2[3]);
++    SetLitSlot(LitConst::Surface3, c.surface3[0], c.surface3[1], c.surface3[2], c.surface3[3]);
++    for (int i = 0; i < LitConst::SurfaceShCount; ++i)
++        SetLitSlot(LitConst::SurfaceSh + i, c.sh[i][0], c.sh[i][1], c.sh[i][2], c.sh[i][3]);
++}
++
++void EngineGL33::SurfaceEnterInterior()
++{
++    // The interior a vehicle draws after clearing the world's depth sees no
++    // sky: the rig's hemisphere (its calibrated fill) instead of the sky
++    // table's, no canopy, a quarter of the specular. The next frame's
++    // constants put the outdoor values back (surface3.y 0).
++    if (!_lightingActive || !_remasterPrograms || !_featureGates[rm::Feature::Surfaces].on)
++        return;
++    SetLitSlot(LitConst::Surface, 1.0f, 0.25f * std::max(_lighting.surfSpec, 0.0f), 0.0f, 0.0f);
++    UploadLitSlots(LitConst::Surface, 1);
++    // The crew compartment is drawn pre-lit (the classic vertex light): its
++    // fragments hand the occlusion kSurfaceInteriorShare of their light
++    // (litSurface3.y), so its corners, the breech and the hatch rims darken.
++    SetLitSlot(LitConst::Surface3, std::max(_lighting.surfCavity, 0.0f), 1.0f, 0.0f, 0.0f);
++    UploadLitSlots(LitConst::Surface3, 1);
++}
++
++void EngineGL33::ResetSurfaceClassPrograms()
++{
++    s_surfClassPrograms.clear();
++    _surfBoundProgram = 0;
++}
++
++void EngineGL33::ApplySurfaceClass(TextureGL33* tex)
++{
++    if (!_surfBoundProgram || !_lightingActive || !_remasterPrograms || !_featureGates[rm::Feature::Surfaces].on)
++        return;
++    const int kind = rm::GDrawSurfaceKind;
++    float v[3] = {0.0f, static_cast<float>(kind), 0.0f};
++    if (tex)
++    {
++        // Classified once per texture and draw kind, kept on the texture (its
++        // name storage pointer tells a reused texture object apart).
++        const char* raw = tex->GetName();
++        if (tex->_surfClassName != raw)
++        {
++            for (signed char& c : tex->_surfClass)
++                c = -1;
++            tex->_surfClassName = raw;
++        }
++        const int k = kind >= 0 && kind < TextureGL33::kSurfClassKinds ? kind : 0;
++        const bool blend = tex->GetAlphaClass() == Poseidon::AlphaStats::Blend;
++        if (tex->_surfClass[k] < 0)
++        {
++            std::string lower = raw ? raw : "";
++            for (char& ch : lower)
++                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
++            tex->_surfClass[k] =
++                static_cast<signed char>(rm::ClassifySurface(lower, static_cast<rm::DrawKind>(kind), blend));
++        }
++        v[0] = static_cast<float>(tex->_surfClass[k]);
++        v[2] = blend ? 1.0f : 0.0f;
++    }
++    if (_surfBoundProgram >= s_surfClassPrograms.size())
++        s_surfClassPrograms.resize(_surfBoundProgram + 64);
++    SurfClassProgram& sp = s_surfClassPrograms[_surfBoundProgram];
++    if (sp.loc == -2)
++        sp.loc = glGetUniformLocation(_surfBoundProgram, "surfClass");
++    if (sp.loc < 0 || (v[0] == sp.v[0] && v[1] == sp.v[1] && v[2] == sp.v[2]))
++        return;
++    for (int i = 0; i < 3; ++i)
++        sp.v[i] = v[i];
++    glUniform4f(sp.loc, v[0], v[1], v[2], 0.0f);
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+index aea4bb3..0e0a611 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+@@ -363,7 +363,12 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
+     if (clearZ)
+     {
+         if (_worldPassOpen)
++        {
+             _worldDepthCleared = true; // the post pass has no world depth this frame
++            // A vehicle interior follows: no sky above it to take light from
++            // or reflect (the surfaces lane).
++            SurfaceEnterInterior();
++        }
+         mask |= GL_DEPTH_BUFFER_BIT;
+         if (_hasStencilBuffer)
+         {
+@@ -435,6 +440,8 @@ void EngineGL33::DestroySSAATarget()
+         glDeleteRenderbuffers(1, &_ssaaDepthRb);
+     if (_ssaaResolveRb)
+         glDeleteRenderbuffers(1, &_ssaaResolveRb);
++    // The surfaces lane's target was attachment 1 of the frame target.
++    DestroySurfaceTarget();
+     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
+     _ssaaW = _ssaaH = 0;
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+index b8d222c..be53726 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+@@ -93,6 +93,11 @@ class TextureGL33 : public Texture
+     SurfaceInfoGL33 _smallSurface; // small GPU texture
+ 
+     signed char _alphaClass = -1; // cached GetAlphaClass() verdict (-1 = not computed)
++    // The surfaces lane's surface class per draw kind (EngineGL33::ApplySurfaceClass;
++    // -1 = not classified yet) and the name it was classified under.
++    static constexpr int kSurfClassKinds = 8;
++    signed char _surfClass[kSurfClassKinds] = {-1, -1, -1, -1, -1, -1, -1, -1};
++    const char* _surfClassName = nullptr;
+ 
+     signed char _largestUsed;
+     signed char _smallLoaded;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 1ae10d9..31437cc 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -179,6 +179,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_air_medium.cpp
+     Graphics/test_night_lights.cpp
+     Graphics/test_screen_reflections.cpp
++    Graphics/test_surface_light.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 068774a..b221a7f 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -113,7 +113,8 @@ TEST_CASE("Feature switches: each switch reads and writes its own FeatureSet mem
+     CHECK(set.drawGrouping == 2.0f);
+     CHECK(set.taa == 4.0f);
+     CHECK(set.combatLights == 14.0f);
+-    CHECK(set.sharpen == static_cast<float>(kFeatureCount + 1));
++    CHECK(set.sharpen == static_cast<float>(kFeatureCount));
++    CHECK(set.surfaces == static_cast<float>(kFeatureCount + 1));
+ }
+ 
+ TEST_CASE("Feature switches: the table holds every knob once, with a usable range", "[remaster][FeatureSwitches]")
+@@ -327,7 +328,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         const std::string_view parent(k.parent);
+         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
+                parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" || parent == "airBeams" ||
+-               parent == "nightLights" || parent == "ssr"));
++               parent == "nightLights" || parent == "ssr" || parent == "surfaces"));
+         REQUIRE(FindFeature(k.parent) != nullptr);
+         CHECK(FindFeature(k.parent)->landed);
+         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
+@@ -335,7 +336,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         ++children;
+     }
+     CHECK(taaChildren == 3);
+-    CHECK(children == 19);
++    CHECK(children == 30);
+ }
+ 
+ TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
+@@ -809,8 +810,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+         const bool air = info.id == Feature::AirBeams || info.id == Feature::AirHaze || info.id == Feature::ValleyMist;
+         const bool canopy = info.id == Feature::CanopyShadows;
+         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
++        const bool surface = info.id == Feature::Surfaces;
+         CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || night || sea ||
+-                              ssr || air || canopy || clouds));
++                              ssr || air || canopy || clouds || surface));
+         if (info.landed)
+         {
+             CHECK(std::string_view(info.step) == (perf         ? "A4"
+@@ -825,6 +827,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+                                                   : air        ? "B8"
+                                                   : canopy     ? "B9"
+                                                   : clouds     ? "B10"
++                                                  : surface    ? "look"
+                                                                : "B11"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+@@ -855,7 +858,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     CHECK(s.find(" moonShadows=1:off:day ") != std::string::npos);
+     CHECK(s.find(" stars=1:off:day ") != std::string::npos);
+     CHECK(s.find(" ssr=1:on@0.5:screen-share-not-measured ") != std::string::npos);
+-    CHECK(s.find("landed=22/26") != std::string::npos);
++    CHECK(s.find("landed=23/27") != std::string::npos);
+     CHECK(std::string_view(GetFeatureInfo(Feature::Ssr).gpuSection) == "ssr");
+     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
+     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+index 375b7fb..292acf2 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+@@ -363,7 +363,7 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
+     // The registry offers the view (the overlay's combo, triSetLighting debug=5),
+     // the light tiles after it (debug=6), B2's albedo view (debug=7), the air
+     // pass's in-scatter (debug=8, B8) and the reflections' two last (debug=9
+-    // and 10, B6).
++    // and 10, B6), then the surfaces lane's three forward views (11 to 13).
+     const LightingKey* debug = FindLightingKey("debug");
+     REQUIRE(debug != nullptr);
+     CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
+@@ -371,7 +371,8 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
+     CHECK(kDebugViewAir == kDebugViewAlbedo + 1);
+     CHECK(kDebugViewSsrTags == kDebugViewAir + 1);
+     CHECK(kDebugViewSsrReflection == kDebugViewSsrTags + 1);
+-    CHECK(debug->maxValue == static_cast<float>(kDebugViewSsrReflection));
++    CHECK(kDebugViewSkyLight == kDebugViewSsrReflection + 1);
++    CHECK(debug->maxValue == static_cast<float>(kDebugViewSurfaceSpecular));
+ }
+ 
+ TEST_CASE("Post stages: the reflections read the tags out whenever they were written, and trace when gated on",
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 894b60e..34749ef 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1096,8 +1096,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+     // and its debug view, the TAA resolve and its sharpen, the sky table's
+     // two passes, the luma sharpen, the canopy's sun-visibility pass, the air
+     // pass's march, blur, mean and apply, and the reflections' tag readout,
+-    // shares, trace, rough blur and composite
+-    CHECK(post == 24);
++    // shares, trace, rough blur and composite, and the surfaces lane's horizon
++    // occlusion and its accumulation over frames
++    CHECK(post == 26);
+ }
+ 
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+@@ -1456,6 +1457,11 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litCanopy", LC::Canopy, 1},
+         {"litDetail", LC::Detail, 1},
+         {"litHaze", LC::Haze, 1},
++        {"litSurface", LC::Surface, 1},
++        {"litSurfCanopy", LC::SurfaceCanopy, 1},
++        {"litSurface2", LC::Surface2, 1},
++        {"litSkySh", LC::SurfaceSh, LC::SurfaceShCount},
++        {"litSurface3", LC::Surface3, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+     auto checkBlock = [](const std::string& block)
+@@ -1520,7 +1526,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     // rest continue the declared ones (B1 landed the sun shadow slots 59 and
+     // 60, A7 the sky slots 61 to 67 of plan section 3.3, B10 the clouds slots
+     // 68 and 69, B3 the night slots 70 and 71, B5 the water slots 74 and 75,
+-    // B9 the canopy at 76).
++    // B9 the canopy at 76). The surfaces lane carries its per-draw class in a
++    // plain uniform, so 58 stays the materials' padding.
+     CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
+     CHECK(LC::ReservedCount == 1);
+     CHECK(static_cast<int>(LC::Taa) == 59);
+@@ -1543,10 +1550,14 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     CHECK(static_cast<int>(LC::Canopy) == 76);
+     CHECK(static_cast<int>(LC::Canopy) == static_cast<int>(LC::Water1) + 1);
+     CHECK(static_cast<int>(LC::Detail) == 77);
+-    // B8 landed the haze at 78, the last planned slot.
++    // B8 landed the haze at 78, the last planned slot; the surfaces lane's
++    // slots follow it (79 to 88).
+     CHECK(static_cast<int>(LC::Haze) == 78);
+     CHECK(static_cast<int>(LC::Haze) == static_cast<int>(LC::Detail) + 1);
+-    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Count));
++    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Haze) + 1);
++    CHECK(static_cast<int>(LC::Surface) == 79);
++    CHECK(static_cast<int>(LC::Surface3) == 88);
++    CHECK(static_cast<int>(LC::Count) == 89);
+ 
+     // The decoded horizon range in the shader is the encoder's.
+     std::ostringstream range;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_screen_reflections.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_screen_reflections.cpp
+index 9cac45d..e681ee6 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_screen_reflections.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_screen_reflections.cpp
+@@ -680,10 +680,10 @@ TEST_CASE("Reflection switch: landed with its two sub-knobs and its post stages"
+         CHECK(KeyDefault(*k) == s.def);
+     }
+     // The diagnostic views are in the overlay's list, after B2's albedo (7)
+-    // and B8's air (8) views.
++    // and B8's air (8) views; the surfaces lane's three follow them.
+     const LightingKey* debug = FindLightingKey("debug");
+     REQUIRE(debug != nullptr);
+-    CHECK(debug->maxValue == static_cast<float>(kDebugViewSsrReflection));
++    CHECK(debug->maxValue > static_cast<float>(kDebugViewSsrReflection));
+     CHECK(kDebugViewSsrTags == 9);
+     CHECK(kDebugViewSsrReflection == 10);
+ }
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_surface_light.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_surface_light.cpp
+new file mode 100644
+index 0000000..f13ad74
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_surface_light.cpp
+@@ -0,0 +1,274 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/PostStages.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <string>
++
++// Surfaces and ambient light (the look lane "surface",
++// Graphics/Remaster/SurfaceLight.hpp): the sky light's spherical harmonics on
++// skies whose irradiance is known in closed form, the frame constants against
++// the rig, the surface classes of known textures, and the contracts that tie
++// the shaders to the C++.
++
++using namespace Poseidon::remaster;
++namespace gl = Poseidon::gl33lighting;
++using Catch::Approx;
++
++namespace
++{
++constexpr float kPi = 3.14159265358979f;
++
++// A uniform sky of radiance 1 over the upper hemisphere.
++Rgb UniformSky(float, float)
++{
++    return Rgb(1.0f, 1.0f, 1.0f);
++}
++
++// A sky brighter toward the sun's azimuth (x) and the horizon.
++Rgb LopsidedSky(float elevation, float azimuth)
++{
++    const float toward = 0.5f + 0.5f * std::cos(azimuth);
++    const float horizon = 1.0f - 0.5f * std::sin(elevation);
++    return Rgb(0.6f, 0.8f, 1.2f) * (0.5f + toward) * horizon;
++}
++
++FeatureGates GatesWith(bool surfacesOn)
++{
++    GateInputs in;
++    in.sunElevationDeg = 30.0f;
++    LightingTuning t;
++    t.features.surfaces = surfacesOn ? 1.0f : 0.0f;
++    return ComputeFeatureGates(in, t);
++}
++} // namespace
++
++TEST_CASE("Sky light SH: a uniform sky gives the hemisphere's irradiance", "[SurfaceLight]")
++{
++    const SkyLightSH sh = ProjectSkyRadiance(UniformSky, 24, 32);
++    REQUIRE(sh.valid);
++    // Up-facing: pi; a vertical surface: pi / 2; down-facing: nothing. Band
++    // 2 keeps the hemisphere step within a few percent.
++    CHECK(EvalSkyLight(sh, 0.0f, 1.0f, 0.0f).g == Approx(kPi).epsilon(0.05));
++    CHECK(EvalSkyLight(sh, 1.0f, 0.0f, 0.0f).g == Approx(kPi * 0.5f).epsilon(0.05));
++    CHECK(EvalSkyLight(sh, 0.0f, 0.0f, 1.0f).g == Approx(kPi * 0.5f).epsilon(0.05));
++    CHECK(std::fabs(EvalSkyLight(sh, 0.0f, -1.0f, 0.0f).g) < 0.15f * kPi);
++}
++
++TEST_CASE("Sky light SH: a lopsided sky lights the sun side more and stays mirror-symmetric", "[SurfaceLight]")
++{
++    const SkyLightSH sh = ProjectSkyRadiance(LopsidedSky, 24, 32);
++    const Rgb toward = EvalSkyLight(sh, 1.0f, 0.0f, 0.0f);
++    const Rgb away = EvalSkyLight(sh, -1.0f, 0.0f, 0.0f);
++    CHECK(Luminance(toward) > 1.5f * Luminance(away));
++    // The basis holds only terms even in z: +z and -z are the same.
++    const float s = std::sqrt(0.5f);
++    CHECK(Luminance(EvalSkyLight(sh, s, 0.0f, s)) == Approx(Luminance(EvalSkyLight(sh, s, 0.0f, -s))));
++    // The sky's own colour survives.
++    CHECK(toward.b > toward.r);
++}
++
++TEST_CASE("Sky light SH: the clear sky of the atmosphere tables is blue and brighter toward a low sun",
++          "[SurfaceLight][Atmosphere]")
++{
++    const AtmosphereTables t = BuildAtmosphereTables(1.0f);
++    REQUIRE(t.Valid());
++    const SkyLightSH sh = ProjectSkyLight(t, 10.0f * kPi / 180.0f, 8, 12);
++    REQUIRE(sh.valid);
++    const Rgb up = EvalSkyLight(sh, 0.0f, 1.0f, 0.0f);
++    CHECK(up.b > up.r);
++    CHECK(Luminance(EvalSkyLight(sh, 1.0f, 0.0f, 0.0f)) > Luminance(EvalSkyLight(sh, -1.0f, 0.0f, 0.0f)));
++}
++
++TEST_CASE("Surface frame constants: zero while off, the rig's zenith brightness while on", "[SurfaceLight]")
++{
++    const SkyLightSH sh = ProjectSkyRadiance(LopsidedSky, 16, 16);
++    LightRig rig;
++    rig.skyZenith = Rgb(0.10f, 0.12f, 0.16f);
++    rig.sunElevationDeg = 30.0f;
++    LightingTuning t;
++
++    const SurfaceFrameConstants off = ComputeSurfaceFrameConstants(t, GatesWith(false), rig, sh, 1.0f);
++    CHECK(off.surface[0] == 0.0f);
++    CHECK(off.surface[3] == 0.0f);
++
++    // The table's sky light is off by default (the rig's hemisphere); at 1:
++    t.surfSkyLight = 1.0f;
++    t.surfSkyTint = 1.0f;
++    t.surfSkyLevel = 0.0f;
++    const SurfaceFrameConstants on = ComputeSurfaceFrameConstants(t, GatesWith(true), rig, sh, 1.0f);
++    CHECK(on.surface[0] == 1.0f);
++    CHECK(on.surface[1] == Approx(t.surfSpec));
++    CHECK(on.surface[3] == Approx(1.0f));
++    SkyLightSH scaled;
++    for (int k = 0; k < kSkyShCoeffs; ++k)
++        scaled.c[k] = Rgb(on.sh[k][0], on.sh[k][1], on.sh[k][2]);
++    CHECK(Luminance(EvalSkyLight(scaled, 0.0f, 1.0f, 0.0f)) == Approx(Luminance(rig.skyZenith)).epsilon(1e-3));
++
++    // The coefficients keep the table's colour; the tint (the share of it the
++    // shader mixes into the rig's own colour) rides in surface2.z.
++    CHECK(on.surface2[2] == Approx(1.0f));
++    t.surfSkyTint = 0.0f;
++    const SurfaceFrameConstants grey = ComputeSurfaceFrameConstants(t, GatesWith(true), rig, sh, 1.0f);
++    CHECK(grey.surface2[2] == 0.0f);
++    CHECK(grey.sh[0][2] / grey.sh[0][0] == Approx(sh.c[0].b / sh.c[0].r).epsilon(1e-3));
++
++    // The physical level: the table's sky against the rig's sun, through the
++    // air's transmittance (bounded to 0.35..1.5 of the rig's fill).
++    SkyLightSH withSun = sh;
++    withSun.sunTransmittance = Rgb(0.8f, 0.8f, 0.8f);
++    rig.sun = Rgb(0.5f, 0.5f, 0.5f);
++    t.surfSkyLevel = 1.0f;
++    const SurfaceFrameConstants phys = ComputeSurfaceFrameConstants(t, GatesWith(true), rig, withSun, 1.0f);
++    SkyLightSH physScaled;
++    for (int k = 0; k < kSkyShCoeffs; ++k)
++        physScaled.c[k] = Rgb(phys.sh[k][0], phys.sh[k][1], phys.sh[k][2]);
++    const float upPhys = Luminance(EvalSkyLight(sh, 0.0f, 1.0f, 0.0f)) * 0.5f / 0.8f;
++    const float want = std::min(std::max(upPhys, 0.35f * Luminance(rig.skyZenith)), 1.5f * Luminance(rig.skyZenith));
++    CHECK(Luminance(EvalSkyLight(physScaled, 0.0f, 1.0f, 0.0f)) == Approx(want).epsilon(1e-3));
++    t.surfSkyLevel = 0.0f;
++
++    // Overcast and night fall back to the rig's hemisphere.
++    CHECK(ComputeSurfaceFrameConstants(t, GatesWith(true), rig, sh, 0.1f).surface[3] == 0.0f);
++    CHECK(SkyLightWeight(1.0f, -12.0f, 1.0f) == 0.0f);
++}
++
++TEST_CASE("Surface classes of known textures and object kinds", "[SurfaceLight]")
++{
++    CHECK(ClassifySurface("data\\jeep_sklo.paa", DrawKind::LandVehicle, true) == SurfaceClass::Glass);
++    CHECK(ClassifySurface("data\\m113_kolo.paa", DrawKind::LandVehicle, false) == SurfaceClass::Rubber);
++    CHECK(ClassifySurface("data\\m113_bok.paa", DrawKind::LandVehicle, false) == SurfaceClass::Paint);
++    CHECK(ClassifySurface("data\\xicht_a.paa", DrawKind::Man, false) == SurfaceClass::Skin);
++    CHECK(ClassifySurface("data\\vojak_kalhoty.paa", DrawKind::Man, false) == SurfaceClass::Fabric);
++    CHECK(ClassifySurface("data\\silnice_02.paa", DrawKind::Static, false) == SurfaceClass::Road);
++    CHECK(ClassifySurface("data\\zed_cihla.paa", DrawKind::Static, false) == SurfaceClass::Masonry);
++    CHECK(ClassifySurface("data\\camo.paa", DrawKind::FabricObject, false) == SurfaceClass::Fabric);
++    CHECK(DrawKindOf("car", "Jeep") == DrawKind::LandVehicle);
++    CHECK(DrawKindOf("Tank", "M113") == DrawKind::LandVehicle);
++    CHECK(DrawKindOf("soldier", "SoldierWB") == DrawKind::Man);
++    CHECK(DrawKindOf("thing", "CampEast") == DrawKind::FabricObject);
++    CHECK(DrawKindOf(nullptr, nullptr) == DrawKind::Static);
++}
++
++TEST_CASE("Surfaces: the switch is registered with its knobs and lands", "[SurfaceLight][FeatureSwitches]")
++{
++    const FeatureInfo* f = FindFeature("surfaces");
++    REQUIRE(f != nullptr);
++    CHECK(f->landed);
++    for (const char* key : {"surfAo", "surfAoRadius", "surfCanopyAo", "surfSkyLight", "surfSkyTint", "surfSpec",
++                            "surfContact", "surfRelief", "surfSkyLevel", "surfShade", "surfCavity"})
++    {
++        CAPTURE(key);
++        const LightingKey* k = FindLightingKey(key);
++        REQUIRE(k != nullptr);
++        CHECK(std::string(k->parent) == "surfaces");
++    }
++    // The lane's debug views reach the shaders as 1 to 3.
++    CHECK(SurfaceDebugView(kDebugViewSkyLight) == 1.0f);
++    CHECK(SurfaceDebugView(kDebugViewSurfaceSpecular) == 3.0f);
++    CHECK(SurfaceDebugView(kDebugViewAlbedo) == 0.0f);
++    // Baseline turns it off with every other switch.
++    CHECK(TuningForMode(LightingMode::Baseline).features.surfaces == 0.0f);
++}
++
++TEST_CASE("Surfaces: the shaders read the slots and the class table the C++ writes", "[SurfaceLight][Shaders]")
++{
++    const std::string common = gl::RemasterFragmentCommon();
++    CHECK(common.find("layout(location = 1) out vec4 fragSurf;") != std::string::npos);
++    CHECK(common.find("uniform sampler2D canopyHeight;") != std::string::npos);
++    CHECK(common.find("vec4 litSkySh[6];") != std::string::npos);
++    CHECK(gl::LitConst::SurfaceShCount == kSkyShCoeffs);
++    // Every class has a row in the GLSL table (the default row is the fallback).
++    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
++    for (int i = 1; i < static_cast<int>(SurfaceClass::Count); ++i)
++    {
++        CAPTURE(i);
++        CHECK(surface.find("if (i == " + std::to_string(i) + ") return vec3(") != std::string::npos);
++    }
++    // The post pass's horizon occlusion is one of the assembled post shaders.
++    const char* gtao = gl::PostShaderSource(gl::PostShader::Gtao);
++    REQUIRE(gtao != nullptr);
++    CHECK(std::string(gtao).find("float viewZ(vec2 uv)") != std::string::npos);
++    CHECK(std::string(gtao).find("const int kSlices = " + std::to_string(kGtaoSlices) + ";") != std::string::npos);
++    CHECK(std::string(gtao).find("const int kSteps = " + std::to_string(kGtaoSteps) + ";") != std::string::npos);
++    CHECK(std::string(gl::PostShaderName(gl::PostShader::Gtao)) == "psPostGtao");
++}
++
++TEST_CASE("Surfaces: the gate holds off once the sky is dark and no lamp is lit", "[SurfaceLight][FeatureGates]")
++{
++    const LightingTuning t = TuningForMode(LightingMode::Remastered);
++    GateInputs day;
++    CHECK(ComputeFeatureGates(day, t)[Feature::Surfaces].on);
++    GateInputs night;
++    night.sunElevationDeg = -20.0f;
++    night.nightEffect = 1.0f;
++    CHECK_FALSE(ComputeFeatureGates(night, t)[Feature::Surfaces].on);
++    // Lamps give the occlusion something to ground.
++    night.localLights = 3;
++    CHECK(ComputeFeatureGates(night, t)[Feature::Surfaces].on);
++    // Dusk keeps it: the sky still lights the shade.
++    GateInputs dusk;
++    dusk.sunElevationDeg = -4.0f;
++    dusk.nightEffect = 0.5f;
++    CHECK(ComputeFeatureGates(dusk, t)[Feature::Surfaces].on);
++}
++
++TEST_CASE("Surfaces: the shade keeps the knob's share of the fill only under a clear day sky",
++          "[SurfaceLight][remaster]")
++{
++    // A clear sky with the sun high: the knob.
++    CHECK(SurfaceShadeFactor(0.45f, 60.0f, 1.0f) == Catch::Approx(0.45f));
++    // Night, twilight and a low sun keep the original's fill.
++    CHECK(SurfaceShadeFactor(0.45f, -10.0f, 1.0f) == Catch::Approx(1.0f));
++    CHECK(SurfaceShadeFactor(0.45f, 3.0f, 1.0f) == Catch::Approx(1.0f));
++    const float low = SurfaceShadeFactor(0.45f, 10.0f, 1.0f);
++    CHECK(low > 0.45f);
++    CHECK(low < 1.0f);
++    // An overcast sky lights the shade: the original's fill.
++    CHECK(SurfaceShadeFactor(0.45f, 60.0f, 0.2f) == Catch::Approx(1.0f));
++    // The knob is clamped to a share.
++    CHECK(SurfaceShadeFactor(-1.0f, 60.0f, 1.0f) == Catch::Approx(0.0f));
++    CHECK(SurfaceShadeFactor(3.0f, 60.0f, 1.0f) == Catch::Approx(1.0f));
++
++    // The frame constants carry it (surface2.w) and the cavity (surface3.x),
++    // and the off state leaves the fill as it was.
++    LightingTuning t = TuningForMode(LightingMode::Remastered);
++    GateInputs day;
++    const FeatureGates gates = ComputeFeatureGates(day, t);
++    LightRig rig;
++    rig.sunElevationDeg = 60.0f;
++    const SurfaceFrameConstants on = ComputeSurfaceFrameConstants(t, gates, rig, SkyLightSH{}, 1.0f);
++    CHECK(on.surface2[3] == Catch::Approx(t.surfShade));
++    CHECK(on.surface3[0] == Catch::Approx(t.surfCavity));
++    t.features.surfaces = 0.0f;
++    const SurfaceFrameConstants off =
++        ComputeSurfaceFrameConstants(t, ComputeFeatureGates(day, t), rig, SkyLightSH{}, 1.0f);
++    CHECK(off.surface2[3] == 1.0f);
++    CHECK(off.surface3[0] == 0.0f);
++}
++
++TEST_CASE("Surfaces: a vehicle interior gets the occlusion of its own depth", "[SurfaceLight][PostStages]")
++{
++    PostFrameInputs in;
++    in.ambientOcclusion = 1.0f;
++    in.worldDepth = false;
++    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Ao));
++    in.surfaceInterior = true;
++    const PostStagePlan plan = PlanPostStages(in);
++    CHECK(plan.Runs(PostStage::Ao));
++    CHECK(plan.aoStrength == 1.0f);
++    // No TAA, air or shafts there.
++    in.temporal = true;
++    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Temporal));
++    // The accumulation's weight and slices.
++    CHECK(kGtaoTemporalSlices < kGtaoSlices);
++    CHECK(kGtaoHistoryWeight > 0.5f);
++    CHECK(kGtaoHistoryWeight < 1.0f);
++}
