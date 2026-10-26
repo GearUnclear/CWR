@@ -30,6 +30,15 @@ class CfgGuerrillaZones
     defaultOccupier = "IDF";
     defaultResistance = "Hizballah";
 
+    // No runtime AIRFIELD / SEAPORT seed (issue #76): the theatre has none by
+    // design (#35, airpower is off-map).  The world's only ILS entry is Ramat
+    // David Airbase [8628, 2524], about 7 km south of the theatre, and the
+    // Tyre quay wall (o\hous\nabrezi) is not a harbour.
+    seedBases = 0;
+    // No generated occupier bases either (OCCUPIER-FORCES.md 5.7), by design:
+    // the theatre's posts are authored (#76), like seedBases above.
+    generateBases = 0;
+
     // The side mission.sqm welds the player's unit to (side="EAST",
     // LoBo_HizballahRifle4). The campaign's RESISTANCE side is pinned to
     // this: the engine counts resistance presence via the resistance side's

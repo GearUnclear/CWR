@@ -12,6 +12,7 @@ mod config;
 mod console;
 mod protocol;
 mod scenarios;
+mod slots;
 
 use anyhow::Context;
 use clap::{builder::styling, Parser, Subcommand};
@@ -29,6 +30,12 @@ struct Cli {
     /// Per-test TOML `timeout = N` overrides this for that test.
     #[arg(long, default_value = "30", global = true)]
     timeout: u64,
+
+    /// Machine-wide cap on simultaneous game instances, shared by every tri
+    /// process (env `TRI_GLOBAL_SLOTS`, default 4, 0 = unlimited). Stacks on
+    /// top of the per-invocation `-j` cap. See `tri slots`.
+    #[arg(long, global = true, value_name = "N")]
+    global_slots: Option<u32>,
 
     #[command(subcommand)]
     command: Commands,
@@ -181,6 +188,9 @@ enum Commands {
         #[arg(long, default_value = "9100")]
         port: u16,
     },
+
+    /// Show the machine-wide game-slot limit and which tri processes hold slots
+    Slots,
 }
 
 // Resolves when the process is asked to terminate (Ctrl-C anywhere; SIGTERM on
@@ -229,6 +239,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     config::init(config::TridentConfig::new(cli.timeout));
+    let global_limit = slots::resolve_global_slots(
+        cli.global_slots,
+        std::env::var(slots::ENV_GLOBAL_SLOTS).ok().as_deref(),
+    )?;
+    slots::init(slots::GlobalSlots::from_env(global_limit));
 
     match cli.command {
         Commands::Describe { address } => {
@@ -360,6 +375,11 @@ async fn main() -> anyhow::Result<()> {
             port,
             attach,
         } => {
+            let _global = if attach.is_none() {
+                Some(slots::acquire(1, "console", data_dir.as_deref()).await?)
+            } else {
+                None
+            };
             console::run(&game_dir, data_dir.as_deref(), port, attach.as_deref()).await?;
         }
         Commands::Exec {
@@ -379,6 +399,8 @@ async fn main() -> anyhow::Result<()> {
 
             let config = config::get().client_config();
             let timeout = config::get().timeout;
+
+            let _global = slots::acquire(1, "exec", data_dir.as_deref()).await?;
 
             // Boot game with ephemeral config
             let tmp_dir = tempfile::tempdir()?;
@@ -409,6 +431,7 @@ async fn main() -> anyhow::Result<()> {
             let _ = game.client().exec("triEndTest").await;
             let _ = game.wait_exit(timeout).await;
         }
+        Commands::Slots => slots::print_status(slots::settings()),
     }
 
     Ok(())

@@ -15,6 +15,8 @@ hybrid (native core + event-driven scripts); the old all-SQS spine sections
 are kept there marked SUPERSEDED.
 Modding contracts: [`FACTION-PACKS.md`](FACTION-PACKS.md) (ship a roster) and
 [`ISLAND-PACKS.md`](ISLAND-PACKS.md) (ship an island).
+Optional town hiring proposal: [`REALISTIC-RECRUITING.md`](REALISTIC-RECRUITING.md)
+(design only; includes the Astra critique loop and implementation gates).
 
 **Core requirement (delivered as data, Phase 1.5):** factions and islands are
 **swappable at new-game**. Island facts (zones, positions, tuning, the civilian
@@ -269,15 +271,21 @@ cmake --build build/win-x64-clang-rwdi      # build the engine + game + tools
 
 Compiled apps stage into `dist/win-x64-clang-rwdi/`.
 
-### Acquire the (free) Demo game data
-Game data is **not** in this repo. Get the free **Steam CWA Demo, app id
-`4819000`**, and point Trident at it (recommended gitignored layout
-`packages/Demo`). On this machine two packages already exist: the full 1.99
-install `D:\Arma_CWA\ARMA Cold War Assault [Classic]` (the default
-`OFPR_DATA_DIR`) and the official remaster Demo at
-`D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]`; pass the latter per run with
-`tri test --data-dir "…Demo [Remaster]"`. The Demo package is a content subset —
-see the Tests section for why the Demo-world Guerrilla tests don't run on it yet.
+### Game data
+Game data is **not** in this repo. UD targets the full official Remaster
+(Steam app 65790), used through a setup-prepared *shadow* copy, never the Steam
+folder itself: `tools/runtime/new-remaster-shadow.ps1` builds one from the
+Steam `Remastered` install, then `setup-guerrilla.ps1` prepares it (see
+[`FRESH-INSTALL.md`](FRESH-INSTALL.md)). The launch and install scripts find
+it through `Get-UDDefaultDataDir` in `tools/runtime/UDDataDir.psm1`:
+`$env:UD_DATA_DIR`, else the target of `packages\RemasterUD`, else
+`tmp\remaster-shadow-67` (the one on this machine) or `tmp\remaster-shadow`.
+The Classic 1.99 install `D:\Arma_CWA\ARMA Cold War Assault [Classic]` is
+legacy: it is only the last fallback, with a warning. The official remaster
+Demo at `D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]` is not a gameplay
+target; it stays for the stock-menu and multiplayer test pins and as a
+reference binary (see the Tests section for why the Demo-world Guerrilla tests
+don't run on it).
 
 ---
 
@@ -309,7 +317,7 @@ without the core boots into a mission with no managers, and without the
 library the cyclers offer only what that island declares itself):
 
 ```powershell
-guerrilla-mode\install-missions.ps1                 # default D:\Arma_CWA\ARMA Cold War Assault [Classic]
+guerrilla-mode\install-missions.ps1                 # default: the Remaster shadow (Get-UDDefaultDataDir)
 guerrilla-mode\install-missions.ps1 -GameDir <dir>  # any other install
 ```
 
@@ -414,6 +422,9 @@ logistics, soldier/AI behavior and campaign persistence. Select **HUMAN TESTS**
 before running staged demos; see the guide for prerequisites, separate test
 sessions, the explicit enemy-road fixture and the new-game content matrix.
 Its automated runner tests verify the suite plumbing, not human acceptance.
+The planned Malden test lab for the Gate-Zero blockers is in
+[`GATE-ZERO-TEST-MISSION-PLAN.md`](GATE-ZERO-TEST-MISSION-PLAN.md) (plan only;
+the mission is not built yet).
 
 The native systems carry unit coverage over their pure cores
 (`ZoneRegistry::EvaluateTick`, `AlertMachine::EvaluateAlert`,

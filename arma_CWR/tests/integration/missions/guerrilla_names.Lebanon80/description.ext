@@ -21,6 +21,8 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Base seeding (#76) pinned off: this mission authors every zone it wants.
+    seedBases = 0;
     // Side resolution when the new-game UI selections (gmSelOccupier /
     // gmSelResistance) are unset - i.e. any direct launch of this mission.
     // Values are CfgGuerrillaFactions class names from the MERGED faction

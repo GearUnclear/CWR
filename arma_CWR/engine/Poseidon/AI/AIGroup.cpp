@@ -1576,7 +1576,10 @@ void AIGroup::SendCommand(Command& cmd, PackedBoolArray list, bool channelCenter
                 {
                     AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
                     RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
-                    AI_ERROR(msgCmd->GetFrom() == this);
+                    if (!RadioCommandIsFrom(msgCmd, this, channelCenter))
+                    {
+                        continue; // another group's command on the shared center channel
+                    }
                     if (msgCmd->GetCmdMessage() == Command::GetIn && msgCmd->IsTo(unit))
                     {
                         msgCmd->DeleteTo(unit);

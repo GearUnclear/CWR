@@ -1,0 +1,7 @@
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "save-load", "slow_air"]
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+timeout = 900
+assert_timeout = 600
+extra_args = ["--dev"]

@@ -921,6 +921,12 @@ protected:
 	const char *PrepareSentence(SentenceParams &params) override;
 };
 
+// whether a command message found on a radio channel was sent by group:
+// on the side's shared center channel another group's message (or one
+// whose sender group is gone) is skipped; on a group's own channel every
+// command is the group's own (an AI_ERROR check otherwise).  AIGroupImpl.cpp
+bool RadioCommandIsFrom(RadioMessageCommand *msg, AIGroup *group, bool channelCenter);
+
 class RadioMessageText : public RadioMessage
 {
 protected:

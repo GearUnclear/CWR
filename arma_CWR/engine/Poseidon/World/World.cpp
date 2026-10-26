@@ -61,10 +61,13 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierAir.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -1711,6 +1714,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla Mode zone tick - no-op unless the mission config
         // defines CfgGuerrillaZones; throttles itself to tickInterval.
         Guerrilla::ZoneRegistry::Instance().Simulate(deltaT);
+        // Generated-base props - inactive without generated bases;
+        // re-creates a deleted prop at BaseProps::TickInterval.  Before the
+        // garrison cache so an old save's first layout precedes its spawns.
+        Guerrilla::BaseProps::Instance().Simulate(deltaT);
         // Guerrilla garrison distance-cache - inactive with the registry;
         // throttles itself to cacheInterval.
         Guerrilla::GarrisonCache::Instance().Simulate(deltaT);
@@ -1741,9 +1748,16 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // registry; checks the win rule at CampaignEnd::TickInterval, then
         // runs the end clock and asks for END1 once.
         Guerrilla::CampaignEnd::Instance().Simulate(deltaT);
+        // Guerrilla occupier forces pool (OCCUPIER-FORCES.md phase 2) -
+        // inert unless occupierForces = 1; sizes the pool on the first
+        // active frame, then ticks at forcesDirectorInterval.
+        Guerrilla::OccupierForces::Instance().Simulate(deltaT);
         // Guerrilla occupier counter-attacks (issue #79) - idle until a town
         // flips; steps its records at CounterAttack::TickInterval.
         Guerrilla::CounterAttack::Instance().Simulate(deltaT);
+        // Guerrilla occupier air (OCCUPIER-FORCES.md phase 6, the air spike) -
+        // idle until an insertion or sortie exists; steps at OccupierAir::TickInterval.
+        Guerrilla::OccupierAir::Instance().Simulate(deltaT);
         perf.Mark(Dev::FrameProfiler::PhaseGuerrilla);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }

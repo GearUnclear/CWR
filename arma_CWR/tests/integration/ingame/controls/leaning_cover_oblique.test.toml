@@ -3,4 +3,4 @@ binary = "PoseidonGame"
 mission = "tests/integration/missions/lean_cover.Abel"
 timeout = 120
 assert_timeout = 15
-extra_args = ["--dev", "--mods-dir", "..", "--mod", "arma_CWR/tests/fixtures/mods-lean/@udlean"]
+extra_args = ["--dev", "--mods-dir", ".", "--mod", "${repo_root}/tests/fixtures/mods-lean/@udlean"]

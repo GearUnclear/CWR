@@ -380,8 +380,17 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Game tests
     Game/test_game_state_ext.cpp
     Game/Guerrilla/test_zone_registry.cpp
+    Game/Guerrilla/test_base_generate.cpp
+    Game/Guerrilla/test_base_props.cpp
     Game/Guerrilla/test_campaign_end.cpp
     Game/Guerrilla/test_counter_attack.cpp
+    Game/Guerrilla/test_town_capture_batch.cpp
+    Game/Guerrilla/test_town_presence_order.cpp
+    Game/Guerrilla/test_occupier_forces.cpp
+    Game/Guerrilla/test_occupier_forces_band.cpp
+    Game/Guerrilla/test_occupier_forces_reserve.cpp
+    Game/Guerrilla/test_force_packages.cpp
+    Game/Guerrilla/test_occupier_air.cpp
     Game/Guerrilla/test_garrison_cache.cpp
     Game/Guerrilla/test_alert_machine.cpp
     Game/Guerrilla/test_assailants.cpp
@@ -405,6 +414,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_legend_names.cpp
     Game/Guerrilla/test_legend_placement.cpp
     Game/Guerrilla/test_island_scaffold.cpp
+    Game/Guerrilla/test_island_scaffold_bases.cpp
     Game/Guerrilla/test_faction_history.cpp
     Game/Guerrilla/test_descriptor_lint.cpp
     Game/Guerrilla/test_roster_probe.cpp
@@ -506,6 +516,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_displayUI.cpp
     UI/test_audio_page.cpp
     UI/test_flat_menu_page.cpp
+    UI/test_controls_page_resource.cpp
     UI/test_game_page.cpp
     UI/test_font_renderer.cpp
     UI/test_gamepad_page.cpp

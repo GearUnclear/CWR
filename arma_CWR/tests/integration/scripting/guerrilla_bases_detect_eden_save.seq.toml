@@ -1,0 +1,9 @@
+# Seeded occupation-network bases across a save (issue #76): Guerrilla.Eden
+# seeds its AIRFIELD and SEAPORT at boot, the game is saved, and a fresh
+# process loads the save and finds the same seeded zones (name, type,
+# position, owner, garrisonMax, the seeded flag) with nothing seeded twice
+# (shared user dir across the ordered phases 01_seed_save and 02_reload).
+# Full Remaster lane: data_dir "packages/RemasterUD" is a gitignored junction
+# to a setup-prepared shadow of the Steam Remastered folder (see
+# guerrilla-mode/FRESH-INSTALL.md).
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "bases", "save-load", "headless"]

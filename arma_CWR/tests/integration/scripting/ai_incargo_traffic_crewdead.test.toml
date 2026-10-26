@@ -1,0 +1,12 @@
+# Round 3 B (issue #78 family): a natively seated cargo rider must carry the
+# AI InCargo state, or AIUnit::DoGetOut's cargo branch logs
+# "check failed: _state == InCargo", which strict mode makes fatal (exit 3).
+# Unpinned: run it with --data-dir on a setup-prepared Remaster shadow.
+tags = ["scripting", "ai", "guerrilla", "vehicles", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Traffic tick 5 s; force-spawn is immediate, the crewDead despawn lands on
+# the first tick after the driver dies.
+timeout = 240
+assert_timeout = 90
+extra_args = ["--dev"]
