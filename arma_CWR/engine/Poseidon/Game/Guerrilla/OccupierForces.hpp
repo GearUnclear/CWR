@@ -34,6 +34,11 @@
 // G is the K towns' summed garrisonMax.
 // poolStart = max(forcesPoolMin, R + forcesPoolPerTown * K).  An empty
 // roster switches the service off for the session (one INFO line).
+// GENERATED BASES (5.7, the owner's conservation rule of 2026-10-16): a
+// generated occupier base (CampaignEnd::IsGeneratedOccupier) joins the
+// roster and R, and its garrisonMax (Rgen, saved) comes out of poolStart:
+// poolStart = max(0, max(forcesPoolMin, (R - Rgen) + perTown * K) - Rgen).
+// Waves stay a share of poolStart + Rgen (Abel: poolStart 48, waves 30).
 //
 // REFILL (5.2, D8, D15).  Each director tick (forcesDirectorInterval) the
 // pool accrues (poolStart + R + G) / forcesPoolRefillHours per hour, scaled
@@ -73,12 +78,40 @@
 // own overshoot, the units the ledger rows still hold and the refund
 // itself; wave strength lost in the field takes its headroom with it.
 //
+// THE LEDGER OF 2026-10-16 (OccupierForcesLedger.cpp; decisions 5, 6, 9).
+// While a landed wave is on (SurgeOpen) the excess over the ceiling is a
+// SURGE above garrisonMax at the bases nearest the wave's cluster that
+// decays back over surgeDecayHours (rejoining the pool up to the ceiling,
+// the rest stood down), before any bank or drop.  With forcesBankHulls 0 a
+// hull refund over the ceiling (RefundHull) is a STORED SPARE HULL at its
+// base, back in the pool when it has room; only bodies bank.
+//
 // BANDS (5.6).  Shares of poolStart with hysteresis: STRONG enter > 66 %,
 // leave < 60 %; THIN enter < 33 %, leave > 40 %; SPENT enter at 0, leave
-// > 10 %; STRETCHED between.  The band is re-stepped on every pool change.
+// > 10 %; STRETCHED between.  Since 2026-10-16 the band is stepped on
+// BandStrength(), min(pool + CommittedAir(), max(poolStart, pool) -
+// LossDebt()): an airframe out is committed, not spent, and the losses of
+// the last lossWindowHours the refill has not repaid count against it.
+// The band is re-stepped on every pool, ledger-row or loss change.
 // D2 keeps drawing in SPENT; the pool then sits near 0 while garrisons are
 // short and the band leaves SPENT once, when the pool passes 10 %.
 // CanOperate() is false in SPENT and in THIN below forcesPoolFloor.
+//
+// THE RESERVE FLOOR (6.3, owner decision 2026-10-17, video 7 op 4: one
+// APC and T72 column took a pool of 32 to 4).  A director-bought ground
+// operation (a director or push-out retake of a town or base, every rung of
+// the repel ladder, the massing fallback, an alarm answer to a TOWN) may
+// not take the pool below forcesPoolFloor x poolStart by its own debit
+// (KeepsReserve).  Its plan is chosen on ReserveBudget(), the most the pool
+// can pay at max(pool, poolStart) with the floor kept, so the plan does not
+// shrink with the pool.  A plan that does not fit WAITS (TryLaunch
+// LOReserve): never a smaller package below what the plan required, but
+// the plan's own cheapest package that still meets the lethality and the
+// rung (PlanFor on ReserveRoom()) may go in its place.  No token, cooldown
+// or re-arm is spent on a wait; one INFO line per target and plan
+// (NoteReserveWait).  Exempt: HQ assaults, wave operations (CAOWave),
+// strikes (PlanStrike's band rules), alarm answers to bases, the test
+// levers.  forcesPoolFloor 0 turns the rule off.
 //
 // CONTROL (7.1).  C = forcesControlMilWeight * M + (1 - weight) * T: M the
 // share of the roster's garrisonMax the occupier still owns, T the share of
@@ -174,15 +207,17 @@
 //   forcesHqAssaultMin bodies on HqPos; its cooldown is kept under the name
 //   HqCooldownName.
 //   URGENCY.  Latched by a YELLOW / RED alert edge on a held town (since its
-//   flip) or heat >= forcesUrgentHeat; released when heat < UrgentExitHeat.
+//   flip) or heat >= forcesUrgentHeat; released when heat < the tuning's
+//   urgentExit (UrgentExitHeat 35 at Normal, 0.7 x the forcesAggression entry).
 //   TOKENS.  0..forcesTokensMax, full at the wake, one per
 //   forcesTokenInterval[band] ({600, 1050, 1800, 0} s since 2026-10-15).
 //   Each director tick with a token, a candidate, CanOperate() and fewer
 //   than OpsMax() BORN operations (forcesOpsMax, max(forcesOpsMax,
-//   forcesOpsMaxStrong) while STRONG) launches ONE operation on the hottest
-//   candidate (the next one when the hottest cannot be served).  A repelled operation puts its target on
+//   forcesOpsMaxStrong) while STRONG) launches ONE operation on the first
+//   candidate (Candidates' order; the next one when the first cannot be
+//   served).  A repelled operation puts its target on a JitteredRest of
 //   forcesTownCooldown with +15 heat unless a RED edge already paid it; a
-//   cancelled-unseen one gets the cooldown.
+//   cancelled-unseen one gets the rest.
 //   RE-ARM (6.3, 2026-10-16, video 4).  A rest that ends on a zone the
 //   resistance still holds while the sighting table still reports fighters
 //   there (a soldiers' report or an informant tip, D9) re-arms the zone:
@@ -193,6 +228,32 @@
 //   saved ("Rearm").  Without it the +15 of a repel decayed inside the
 //   rest, tips kept the town from ever being quiet, and a defended held
 //   town fell out of reach.
+//   THE REPEL LADDER (6.3, 2026-10-16, video 5: seven identical columns on
+//   Le Port, five identical APCs on Arudy).  Per zone the director remembers
+//   the repels of its own operations (retakes and base retakes, any origin;
+//   never the HQ) with the last package and source; saved ("Repels"),
+//   forgotten when the zone changes hands.  One repel with fighters
+//   reported: the next plan needs L_req x escalateLethality (1.5) and at
+//   least escalateInfantry (2) x the fighters as infantry (one group at
+//   most).  approachRepels (2): a different approach, another source base
+//   that can staff it, else an insertion (from a ground answer) or a ground
+//   answer (from an insertion); and an escalation strike may go with it if
+//   the pool stays STRETCHED (EscalationStrikeDue).  containRepels (3): the
+//   zone is CONTAINED (saved): no candidate, no push-out, no re-arm, and the
+//   nearest occupier base on its landmass is surged by the bodies the next
+//   operation would have needed (a pool-funded deposit, above garrisonMax
+//   if need be).  Containment lifts when the zone's reports decay, when a
+//   wave fires, or when control changes band (crosses a forcesWaveThresholds
+//   entry, either way).  One INFO line per rung.
+//   MASSING.  A director candidate whose escalated plan is under strength
+//   (the escalated infantry above every base's spare, the second rung
+//   blocked, or no package meeting the escalated L_req) holds the token and logs "massing for X"
+//   each tick; the hold ends when a base can staff it, when a further token
+//   arrives (then the strongest package goes), or after forcesMassingMax (3)
+//   ticks (the strongest package goes: PlanFor best).
+//   JITTER.  Every rest is JitteredRest: townCooldown +- restJitter (20 %),
+//   hashed on the zone and the operation id; the re-arm, which comes at the
+//   rest's end, carries it.
 //   PUSH-OUT (6.4).  STRONG, a token and no heat candidate: the held town
 //   or base nearest an occupier base with no sighting for
 //   forcesPushoutQuiet, with the cheapest package; since 2026-10-16 the
@@ -200,7 +261,8 @@
 //   PACKAGES (6.5).  ForcePackages: the cheapest lethal package, the fastest
 //   within forcesUrgentCostShare when urgent; the arrival rule (forcesSlowEta,
 //   forcesSlowCostShare, forcesAirEta) for the director's own operations,
-//   push-outs and non-THIN alarm answers, never wave strikes.  A base retake
+//   push-outs, non-THIN alarm answers and, since 2026-10-16 (video 5: a
+//   41-minute walk on the HQ), wave strikes from the hub.  A base retake
 //   or an HQ assault no single base can source takes the spare cap
 //   (forcesSpareCap, forcesSpareCapFloor: SpareCappedMin, 7.2).
 //   The pool pays hull + crew (Spend before LaunchFunded, Refund when it is
@@ -233,7 +295,8 @@
 // (ForcePackages::HullPrice(.., true)); the infantry is still paid by the
 // source base.  STRIKES (7.3, D17): a jet or attack helicopter, bought ONLY
 // while STRONG, either on an URGENT held town with knownFighters >=
-// StrikeMinFighters that is not inside its strike window, or as the opener
+// the tuning's strikeMinFighters (StrikeMinFighters 3 at Normal,
+// forcesAggression) that is not inside its strike window, or as the opener
 // of a director base retake or HQ assault with a defender reported
 // (OPENERS above).  It is bought right after the
 // ground operation on that target launches (a town strike alone when no
@@ -252,7 +315,8 @@
 // ALARM ANSWERS (8.2, D4).  A zone the resistance does not hold that sits
 // RED is an alarm.  At the sighting cadence the director answers ONE alarm
 // at a time with a CAKAlarm order (origin CAOAlarm): minimum
-// ForcePackages::AlarmMinBodies, always urgent (THIN: the cheapest package
+// the tuning's alarmMin (forcesMinimums; ForcePackages::AlarmMinBodies at
+// Normal), always urgent (THIN: the cheapest package
 // only), lethality against the zone's sightings, sources every occupier base
 // but the alarm zone, ground packages and the transport helicopter.
 // alarmPos is the zone's latest reported position (VZero = the centre).
@@ -274,6 +338,7 @@
 
 #include <Poseidon/Game/Guerrilla/CounterAttackOrders.hpp>
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForcesLevers.hpp>
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -321,7 +386,12 @@ struct OccupierForcesTuning
     // forcesOn, ZoneRegistry's baseRetake fallback) uses this one default.
     static constexpr float KeyDefault = 1.0f;
 
-    bool enabled = false;           // occupierForces (0/1); false until a CfgGuerrillaZones is read
+    bool enabled = false; // occupierForces (0/1); false until a CfgGuerrillaZones is read
+    // the eight author levers (OccupierForcesLevers.hpp, 16): LoadFromParams
+    // derives the fields marked "lever" below from them, then reads every
+    // old key as an expert override.  The defaults below are Normal's
+    // derivation, field by field.  strength is read here (PoolStartOf)
+    OccupierForcesLevers levers;
     int poolMin = 24;               // forcesPoolMin, 0..200
     int poolPerTown = 2;            // forcesPoolPerTown, 0..8
     float refillHours = 4.0f;       // forcesPoolRefillHours, 0.5..48 (gmForcesTune: 0.01..48)
@@ -340,14 +410,17 @@ struct OccupierForcesTuning
     int nWaveThresholds = 2;
     float waveWarLevel = 1.0f; // forcesWaveWarLevel, 0..3: occupier war level per landed wave
     // the director (6, phase 3)
-    int wakeTowns = 2;            // forcesWakeTowns, 2..99: distinct towns to wake
-    int opsMax = 2;               // forcesOpsMax, 0..6: born operations in flight
+    int wakeTowns = 2; // forcesWakeTowns, 2..99: distinct towns to wake
+    int opsMax = 2;    // forcesOpsMax, 0..6: born operations in flight
     // forcesOpsMaxStrong, 0..6: the born-operation cap while STRONG is
     // max(forcesOpsMax, this); 0 (or 2) gives the old cap of forcesOpsMax
     // in every band
     int opsMaxStrong = 3;
-    float heatFull = 40.0f;       // forcesHeatFull, 1..100: candidate heat
-    float urgentHeat = 50.0f;     // forcesUrgentHeat, 1..100: urgency entry
+    float heatFull = 40.0f;   // forcesHeatFull, 1..100: candidate heat
+    float urgentHeat = 50.0f; // forcesUrgentHeat, 1..100: urgency entry
+    // the urgency exit (lever forcesAggression: 0.7 x the lever's urgentHeat;
+    // OccupierForces::UrgentExitHeat at Normal; no config key)
+    float urgentExit = 35.0f;
     float townCooldown = 1800.0f; // forcesTownCooldown, s: after a repel or a cancel
     // forcesRearmHeat, 0..100 (2026-10-16, video 4): when a rest ends on a
     // zone the resistance still holds and the sighting table still reports
@@ -358,6 +431,12 @@ struct OccupierForcesTuning
     float rearmHeat = 40.0f;
     float pushoutQuiet = 1800.0f; // forcesPushoutQuiet, s: no sighting this long = quiet
     int retakeMin = 4;            // forcesRetakeMin, 1..12: minimum retake bodies
+    // the alarm answer's minimum (lever forcesMinimums; ForcePackages::AlarmMinBodies
+    // at Normal; no config key)
+    int alarmMin = 4;
+    // reported fighters a town strike needs (lever forcesAggression:
+    // round(3 / a); OccupierForces::StrikeMinFighters at Normal; no config key)
+    int strikeMinFighters = 3;
     float lethalityMargin = 1.2f; // forcesLethalityMargin, 1..3
     float urgentCostShare = 1.5f; // forcesUrgentCostShare, 1..3
     float intelDecay = 1800.0f;   // forcesIntelDecay, s: sightings expire
@@ -366,37 +445,60 @@ struct OccupierForcesTuning
     // instead, never below spareCapFloor (and never above the minimum).
     // forcesSpareCap 0 restores the one-source rule (min(max(forcesRetakeMin,
     // garrisonMax), 12) from one base, else refused)
-    bool spareCap = true;          // forcesSpareCap (0/1)
-    int spareCapFloor = 6;         // forcesSpareCapFloor, 1..12
+    bool spareCap = true;  // forcesSpareCap (0/1)
+    int spareCapFloor = 6; // forcesSpareCapFloor, 1..12
     // the arrival rule (6.5, 2026-10-15): when the cheapest lethal package
     // needs more than slowEta s, any faster package within slowCostShare x
     // its price may go; when it needs more than airEta s, a helicopter
     // insertion may go whatever its price.  0 = off (the old choice)
-    float slowEta = 900.0f;        // forcesSlowEta, 0..86400 s
-    float slowCostShare = 3.0f;    // forcesSlowCostShare, 1..5
-    float airEta = 1500.0f;        // forcesAirEta, 0..86400 s
+    float slowEta = 900.0f;     // forcesSlowEta, 0..86400 s
+    float slowCostShare = 3.0f; // forcesSlowCostShare, 1..5
+    float airEta = 1500.0f;     // forcesAirEta, 0..86400 s
     // the road quote (6.5, 2026-10-16): a ground leg whose road route is not
     // known (none, a detour the service does not march, or not planned this
     // tick) is quoted as the straight distance x roadFactor
-    float roadFactor = 1.5f;       // forcesRoadFactor, 1..5
+    float roadFactor = 1.5f; // forcesRoadFactor, 1..5
     // phase 4: the HQ assault and the waves (7.1, 16)
-    int hqAssaultMin = 6;          // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
-    int waveDwell = 2;             // forcesControlDwell, 1..10: consecutive due ticks before a wave fires
-    bool waveFinal = true;         // forcesWaveFinal (0/1): the final stand when one roster base is left
-    float waveShare = 0.5f;        // forcesWaveShare, 0..2: wave size, share of poolStart
-    int waveMin = 12;              // forcesWaveMin, 0..200
-    int waveMax = 48;              // forcesWaveMax, 0..400
-    float waveLead = 600.0f;       // forcesWaveLead, 0..7200 s inbound
-    float waveLeadFinal = 120.0f;  // forcesWaveLeadFinal, 0..7200 s inbound for the final stand
-    float waveRetakeShare = 0.5f;  // forcesWaveRetakeShare, 0..1: strikes' share of the wave
-    int waveOps = 4;               // forcesWaveOps, 0..8: strike targets (and reinforce columns)
-    float waveCluster = 2000.0f;   // forcesWaveCluster, 100..20000 m
-    int waveSurge = 12;            // forcesWaveSurge, 0..48: final-stand surge above strength
-    RString waveHub;               // forcesWaveHub: the template's hub by zone name ("" = the rule)
+    int hqAssaultMin = 6;         // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
+    int waveDwell = 2;            // forcesControlDwell, 1..10: consecutive due ticks before a wave fires
+    bool waveFinal = true;        // forcesWaveFinal (0/1): the final stand when one roster base is left
+    float waveShare = 0.5f;       // forcesWaveShare, 0..2: wave size, share of poolStart
+    int waveMin = 12;             // forcesWaveMin, 0..200
+    int waveMax = 48;             // forcesWaveMax, 0..400
+    float waveLead = 600.0f;      // forcesWaveLead, 0..7200 s inbound
+    float waveLeadFinal = 120.0f; // forcesWaveLeadFinal, 0..7200 s inbound for the final stand
+    float waveRetakeShare = 0.5f; // forcesWaveRetakeShare, 0..1: strikes' share of the wave
+    int waveOps = 4;              // forcesWaveOps, 0..8: strike targets (and reinforce columns)
+    float waveCluster = 2000.0f;  // forcesWaveCluster, 100..20000 m
+    int waveSurge = 12;           // forcesWaveSurge, 0..48: final-stand surge above strength
+    RString waveHub;              // forcesWaveHub: the template's hub by zone name ("" = the rule)
     // forcesLog (0/1, default 0; gmForcesTune "log"): the director log toggle
     // (DirectorLog.hpp).  On, the per-action lines of this service,
     // CounterAttack and OccupierAir log at INFO; off (and not --dev), DEBUG.
     bool log = false;
+    // the repel ladder, massing, the value weights and the rest jitter (6.3,
+    // 2026-10-16, video 5).  Constants, NOT config keys: each has a
+    // gmForcesTune lever of the same name (tests, tuning).  The lever
+    // consolidation (16) kept every one of them constant.
+    float escalateLethality = 1.5f; // "escalateLethality", 1..3: L_req x this after one repel
+    float escalateInfantry = 2.0f;  // "escalateInfantry", 0..4: infantry >= this x the fighters reported
+    int approachRepels = 2;         // "approachRepels", 0..9: from this repel a different approach (0 = never)
+    int containRepels = 3;          // "containRepels", 0..9: this repel contains the zone (0 = never)
+    int massingMax = 3;             // forcesMassingMax ("massingMax", 0..20): director ticks a hold lasts
+    float restJitter = 0.2f;        // "restJitter", 0..0.5: the rest's hashed share, +- (0 = clockwork)
+    float adjacentTown = 1000.0f;   // "adjacentTown", 0..5000 m: a town this near an occupier base weighs 2
+    // the ledger and the band (5.5, 5.6, 7.1; 2026-10-16, decisions 5, 6, 9).
+    // forcesBankHulls (0/1, default 0; gmForcesTune "bankHulls"): 0 = a hull
+    // refund over the ceiling comes back as a STORED SPARE HULL (THE CEILING
+    // above) and only bodies bank as garrison; 1 = hull units bank as bodies
+    // (the df9457e rule)
+    bool bankHulls = false;
+    // constants with a gmForcesTune lever of the same name, no config key:
+    // the wave surge's decay back to garrisonMax (h), a base's surge cap above
+    // its garrisonMax (share of garrisonMax), the band's loss window (h)
+    float surgeDecayHours = 1.0f; // "surgeDecayHours", 0.001..24
+    float surgeShare = 0.5f;      // "surgeShare", 0..2
+    float lossWindowHours = 1.0f; // "lossWindowHours", 0.01..24
 };
 
 // One resistance unit an occupier group reports (the 6.1 scan)
@@ -465,6 +567,18 @@ struct DirectorAction
     // the choice used (minUsed); they differ when the cap lowered it
     int minAsked = 0;
     int minUsed = 0;
+    // the repel ladder (6.3, 2026-10-16): the target's repel count when the
+    // ladder shaped the plan (0 = not), the infantry the plan needed, the
+    // largest single-base spare on offer, the approach the second rung
+    // took ("" = none) or, blocked, why no different approach could go
+    int escalation = 0;
+    int needBodies = 0;
+    int bestSpare = 0;
+    bool approachBlocked = false;
+    RString approach;
+    // the reserve floor (6.3, 2026-10-17): the plan that would have crossed
+    // the floor, when its own cheaper qualifying package went instead
+    RString reserveNote;
 };
 
 // The first-tick roster and town census (5.1)
@@ -475,6 +589,7 @@ struct OccupierForcesSizing
     AutoArray<RString> excluded; // CITY zones not counted in K
     AutoArray<RString> labels;   // excluded seeded towns the settlement probe rejected
     int R = 0;                   // the roster's summed garrisonMax
+    int Rgen = 0;                // ... of which generated bases (5.7)
     int G = 0;                   // the K towns' summed garrisonMax
     int poolStart = 0;
     int K() const { return towns.Size(); }
@@ -542,16 +657,33 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static constexpr unsigned int StrikePackages = (1u << FPAttackHeli) | (1u << FPJet);
     // PlanStrike's why when keepStrong refused every payable airframe (7.3)
     static constexpr const char* StrikeKeepsStrongWhy = "a strike would take the pool below STRONG";
+    // ... and when the escalation strike (the second repel, 7.3) would leave STRETCHED
+    static constexpr const char* StrikeKeepsStretchedWhy = "a strike would take the pool below STRETCHED";
+    // the rest jitter's roll salt (6.3, 2026-10-16), and the candidate value
+    // weights (bases, towns within adjacentTown of an occupier base, far
+    // towns, the HQ): ranks, the tiebreak within the same urgency and heat
+    static constexpr int RestJitterSalt = 13;
+    static constexpr int ValueBase = 3;
+    static constexpr int ValueAdjacentTown = 2;
+    static constexpr int ValueFarTown = 1;
+    static constexpr int ValueHq = 2;
+    // the ledger (5.5, 2026-10-16): spare hulls one base stores, loss rows
+    // kept for the band's window (older ones merge), and the gap (s) within
+    // which two losses share a row
+    static constexpr int StoredHullsPerBase = 2;
+    static constexpr int MaxLossRows = 64;
+    static constexpr float LossMergeSeconds = 60.0f;
 
     // lifecycle ---------------------------------------------------------------
     void Clear();
     void InitMission(); // Clear + read the CfgGuerrillaZones keys
+    // the levers derive the tuning, then the old keys override (OccupierForcesLevers.cpp)
     void LoadFromParams(const ParamEntry* zonesCfg);
     const OccupierForcesTuning& Tuning() const { return _tuning; }
     OccupierForcesTuning& TuningMutable() { return _tuning; }
 
     // pure rules (unit-tested) ------------------------------------------------
-    // max(forcesPoolMin, R + forcesPoolPerTown * K)
+    // max(forcesPoolMin, round(forcesStrength x (R + forcesPoolPerTown * K)))
     static int PoolStartOf(const OccupierForcesTuning& t, int R, int K);
     // 0.75 + 0.5 * meanStanding / 100 (standing clamped to 0..100)
     static float StandingFactor(float meanStanding);
@@ -568,6 +700,18 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the born-operation cap in a band: max(forcesOpsMax,
     // forcesOpsMaxStrong) while STRONG, forcesOpsMax otherwise
     static int OpsMaxFor(const OccupierForcesTuning& t, int band);
+    // the rest of a zone after a repel or an unborn cancel (6.3): townCooldown
+    // x (1 + restJitter x (2u - 1)), u = Roll01(MakeSeed(zone, salt, 0, 0),
+    // RestJitterSalt); salt is the operation id, so each rest differs and a
+    // replay gives the same rests
+    static float JitteredRest(const OccupierForcesTuning& t, const char* zone, int salt);
+    // the ordinal of a repel count in the ladder's lines ("first", "second",
+    // "third", then "further")
+    static const char* RepelOrdinal(int count)
+    {
+        static const char* words[4] = {"", "first", "second", "third"};
+        return count >= 1 && count <= 3 ? words[count] : "further";
+    }
     // the spare cap (7.2): the minimum a base retake or an HQ assault asks
     // (minBodies), lowered to the largest single-base spare when no base can
     // spare it, never below min(floor, minBodies)
@@ -652,6 +796,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // one director tick: the refill, control and the band.  No-op while not
     // Active().
     void Tick(const ZoneRegistry& registry, float elapsed);
+    // the same with the registry the ledger may write (the wave surge's
+    // decay takes bodies out of a base's reserve): the engine path and the
+    // unit tests with a mutable registry
+    void Tick(ZoneRegistry& registry, float elapsed);
     // control over the stored roster and towns
     float ComputeControl(const ZoneRegistry& registry) const;
 
@@ -684,6 +832,19 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // movement.
     void HoldBand() { _bandHold++; }
     void ReleaseBand();
+    // THE FRAME'S ONE BAND STEP (5.6, round 5, video 6).  A booking spread
+    // over services is one transaction: ZoneRegistry's revert deposit and
+    // CounterAttack's adoption refund, CounterAttack's repel (the repel
+    // ladder's surge deposit) and its home-coming refunds, the director tick's
+    // refill credit and its launch debit.  Simulate calls this first every
+    // frame: it closes the frame hold opened by the previous call (one step,
+    // one line, on the strength everything since left) and opens the next,
+    // so every gate this frame (the director's whole tick, the alarm
+    // answers, a deposit's SPENT test) reads one band.  Without Simulate (a
+    // bare ledger, the unit tests) no frame hold is open and each seam steps
+    // at once, as before.
+    void StepBandFrame();
+    bool FrameHoldOpen() const { return _frameHold; }
     class BandHold
     {
     public:
@@ -731,6 +892,45 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // refunded units the ceiling banked as garrison this session (5.5;
     // diagnostics, not saved: the bodies are saved on the zone rows)
     int Banked() const { return _banked; }
+    // a hull's refund (CAOpHullRefund, 5.5, decision 9): as Refund, but with
+    // forcesBankHulls 0 the units over the ceiling come back as a stored
+    // spare hull (StoreHull), never as bodies.  package and what name it
+    // ("APC", "escort of TRUCK"); home: the base it returns to (-1 unknown);
+    // near: where it is.  Returns the units the pool took
+    int RefundHull(ZoneRegistry& registry, int units, int package, const char* what, int home,
+                   const Vector3* near = nullptr);
+    // stored spare hulls (saved): pool units in hull form at an occupier
+    // base, back in the pool as soon as the pool has room under the ceiling
+    // (each Tick, before the refill); lost with their base
+    int StoredHullRows() const { return _storedHulls.Size(); }
+    RString StoredHullZone(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].zone : RString(); }
+    RString StoredHullWhat(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].what : RString(); }
+    int StoredHullPackage(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].package : FPFoot; }
+    int StoredHullUnits(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].units : 0; }
+    int StoredHullTotal() const;
+    // a zone that can store a spare hull: an occupier-held military base,
+    // not a minor post (CampaignEnd::IsMinorPostType), with fewer than
+    // StoredHullsPerBase hulls stored
+    bool CanStoreHull(const ZoneRegistry& registry, int zone) const;
+    // THE WAVE SURGE (7.1, decision 5): while a landed wave is on
+    // (SurgeOpen), what the ceiling keeps out of the pool is a surge at the
+    // bases nearest the wave's cluster, above garrisonMax (up to surgeShare
+    // x garrisonMax over it), that decays back to garrisonMax over
+    // surgeDecayHours: the decayed bodies rejoin the pool up to the ceiling,
+    // the rest stand down (StoodDown(), saved, a term of 5.5 beside dropped)
+    bool SurgeOpen() const;
+    int SurgeRows() const { return _surge.Size(); }
+    RString SurgeRowZone(int i) const { return i >= 0 && i < _surge.Size() ? _surge[i].zone : RString(); }
+    int SurgeRowBodies(int i) const { return i >= 0 && i < _surge.Size() ? _surge[i].bodies : 0; }
+    int SurgeTotal() const;
+    int StoodDown() const { return _stoodDown; }
+    float SurgeWindowLeft() const { return _surgeWindow; }
+    // the wave's cluster centre the surge gathers around (VZero: none known)
+    Vector3 SurgeAnchor() const { return _surgeAnchor; }
+    void SetSurgeAnchor(Vector3Par pos) { _surgeAnchor = pos; }
+    // the room a surge may take at zone: an occupier-held military zone's
+    // garrisonMax x (1 + surgeShare) - live - reserve - pending, floored, >= 0
+    int SurgeRoom(const ZoneRegistry& registry, int zone, int live) const;
     // S5 (3.3): a pending deposit whose zone changed owner is refunded to
     // this service's pool (GarrisonCache::SetPendingRefundHook).  The hook
     // credits the pool and claims the bodies only while Active(); otherwise
@@ -747,13 +947,71 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int Pool() const { return _pool; }
     int PoolStart() const { return _poolStart; }
     int RosterStrength() const { return _R; }
+    int GeneratedStrength() const { return _Rgen; }
     int TownCount() const { return _towns.Size(); }
     int TownGarrisons() const { return _G; }
     int Band() const { return _band; }
     // the band on the pool as it stands: Band(), or inside a BandHold the
     // band the pending movement would step to (not yet logged or stored)
-    int BandNow() const { return _bandHold > 0 ? StepBand(_band, _pool, _poolStart) : _band; }
-    bool CanOperate() const { return CanOperateIn(_band, _pool, _poolStart, _tuning.poolFloor); }
+    int BandNow() const { return _bandHold > 0 ? StepBand(_band, BandStrength(), _poolStart) : _band; }
+    // the director strike's band test (7.3): the band the POOL steps to from
+    // BandNow() after a further debit of `price`, the airframe not counted as
+    // committed.  PlanStrike's keep-STRONG / keep-STRETCHED rule reads it and
+    // the escalation strike's line names it
+    int PoolBandAfter(int price) const { return StepBand(BandNow(), _pool - price, _poolStart); }
+    bool CanOperate() const { return CanOperateIn(_band, BandStrength(), _poolStart, _tuning.poolFloor); }
+    // THE RESERVE FLOOR (6.3, 2026-10-17).  The largest price in 0..pool
+    // that leaves (pool - price) / poolStart at or above floor (compared as
+    // shares, like CanOperateIn); 0 when even that is under the floor (a
+    // launch the pool pays nothing for never debits it below)
+    static int ReserveRoomOf(int pool, int poolStart, float floor);
+    // the rule applies to an operation of kind and origin (baseTarget: the
+    // target is a military zone, which exempts an alarm answer)
+    static bool ReserveBindsKind(int kind, int origin, bool baseTarget, float floor);
+    bool ReserveBinds(const ZoneRegistry& registry, const DirectorAction& a) const;
+    int ReserveRoom() const { return ReserveRoomOf(_pool, _poolStart, _tuning.poolFloor); }
+    // what a floored plan is chosen on: ReserveRoomOf(max(pool, poolStart))
+    int ReserveBudget() const
+    {
+        return ReserveRoomOf(_pool > _poolStart ? _pool : _poolStart, _poolStart, _tuning.poolFloor);
+    }
+    bool KeepsReserve(int price) const { return price <= 0 || price <= ReserveRoom(); }
+    float ReserveFloorUnits() const { return _tuning.poolFloor * (float)_poolStart; }
+    // one waiting target (transient, re-logged after a load): the plan that
+    // waits, its line, and whether it is the massing fallback (best)
+    struct ReserveWaitRow
+    {
+        RString zone;
+        RString plan; // the package words, e.g. "APC (6, BMP) with T72"
+        RString what; // the operation words, e.g. "escalation retake"
+        RString line; // the INFO line as written
+        int package = FPFoot;
+        int price = 0;
+        int pool = 0; // the pool when the line was written
+        bool best = false;
+    };
+    int ReserveWaitRows() const { return _reserveWaits.Size(); }
+    const ReserveWaitRow* ReserveWait(int i) const
+    {
+        return i >= 0 && i < _reserveWaits.Size() ? &_reserveWaits[i] : nullptr;
+    }
+    int FindReserveWait(const char* zone) const;
+    // THE BAND'S INPUT (5.6, 2026-10-16): the strength the band is stepped
+    // on, BandStrengthOf(pool, poolStart, CommittedAir(), LossDebt())
+    int BandStrength() const { return BandStrengthOf(_pool, _poolStart, CommittedAir(), LossDebt()); }
+    // min(pool + committed, max(poolStart, pool) - debt), never below 0:
+    // airframes out count as strength (decision 6), unrepaid losses of the
+    // window do not (feel item 10); a wave's overshoot is strength on top
+    static int BandStrengthOf(int pool, int poolStart, int committed, int debt);
+    // the pool units the ledger rows of airframes still hold (a transport
+    // helicopter, an attack helicopter or a jet, from the launch debit to the
+    // airframe's home or loss event): committed, not spent
+    int CommittedAir() const;
+    // the loss window (lossWindowHours): units booked lost (NoteLoss) in it,
+    // the part the refill repaid since, and the rest (the debt)
+    int LossesInWindow() const;
+    int RepaidInWindow() const;
+    int LossDebt() const { return LossesInWindow() - RepaidInWindow(); }
     // the born-operation cap now (OpsMaxFor the current band); CounterAttack::
     // OpsCap reads it while the service is active
     int OpsMax() const { return OpsMaxFor(_tuning, _band); }
@@ -826,16 +1084,41 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static bool IsHeldTown(const ZoneRegistry& registry, const ZoneRecord& z);
     // the candidate roll u of a held zone's current flip (6.3)
     static float CandidateRoll(const ZoneRecord& z);
-    // the held towns that are heat candidates now, hottest first
+    // the held towns, bases and the HQ that are heat candidates now: urgent
+    // first, then by whole heat points, then by value (CandidateValue: a tie
+    // of the same urgency and heat goes to bases, then towns by an occupier
+    // base, then far towns), then by heat; the final push first of all.  A
+    // contained zone (the repel ladder) is never a candidate.
     void Candidates(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher,
                     AutoArray<int>& out);
+    // the value weight of a candidate (6.3, 2026-10-16): ValueBase for a base,
+    // ValueAdjacentTown for a town within adjacentTown of an occupier-held
+    // base, ValueFarTown for another town, ValueHq for HqCandidate
+    int CandidateValue(const ZoneRegistry& registry, int target) const;
     // the push-out target (6.4), -1 none (STRONG is the caller's check)
     int PushoutTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher);
     // the package and source for an operation on target (no side effects).
     // target HqCandidate plans the HQ assault.  fixedSource >= 0 offers only
     // that base, with fixedSpare bodies to spare (a wave strike's staging).
+    // The repel ladder shapes a director or push-out plan on a zone it
+    // remembers (6.3): one repel with fighters reported raises L_req by
+    // escalateLethality and the minimum to escalateInfantry x the fighters
+    // (at most one group); approachRepels needs a different approach (another
+    // source base that can staff it, else an insertion; blocked: go false).
+    // best (the massing fallback): the minimum lowered to the largest
+    // single-base spare (never below the kind's own minimum), and the
+    // approach rule takes any different approach that can go at all (else
+    // the plain choice), so the strongest package one base can bring goes.
+    // poolCap >= 0: the pool the chooser may spend (the reserve floor's
+    // second look, ReserveRoom()); -1: ReserveBudget() for a plan the
+    // reserve floor binds (ReserveBindsKind), else the pool.
     DirectorAction PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target, int origin,
-                           int fixedSource = -1, int fixedSpare = 0) const;
+                           int fixedSource = -1, int fixedSpare = 0, bool best = false, int poolCap = -1) const;
+    // why a director plan holds its token and masses (6.3, 2026-10-16), ""
+    // when it may go.  Only a plan the repel ladder shaped (escalation >= 1):
+    // the escalated infantry above every base's spare, the second rung
+    // blocked, or no package meeting the escalated L_req
+    static RString MassingReason(const DirectorAction& a);
     // one director step: tokens, urgency, cooldowns, intel decay, standing,
     // the waves, then at most one launch.  No-op unless Active().
     void Direct(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, float elapsed);
@@ -872,8 +1155,15 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // (the director's own strikes, 7.3): an airframe is payable only when
     // the pool after its price still steps to STRONG from BandNow(), so a
     // strike never takes the band below STRONG; the test lever passes false
+    // stretchedOk (the escalation strike, with keepStrong): the pool after the
+    // price may step to STRETCHED, never below (StrikeKeepsStretchedWhy)
     DirectorAction PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target, bool urgent,
-                              bool keepStrong = false) const;
+                              bool keepStrong = false, bool stretchedOk = false) const;
+    // the escalation strike (7.3, 2026-10-16): a held town or base repelled
+    // approachRepels times, with StrikeMinFighters (a base: the opener's
+    // StrikeOpenerMinFighters) reported, outside its strike window, a strike
+    // airframe offered, the band STRONG or STRETCHED
+    bool EscalationStrikeDue(const ZoneRegistry& registry, const DirectorView& view, int target) const;
     // the centroid of a zone's reported positions, VZero without a row
     Vector3 ReportedCentroid(const ZoneRegistry& registry, int zone) const;
     // the latest reported position in a zone, VZero without a row
@@ -881,9 +1171,14 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the alarm to answer now (8.2): a zone the resistance does not hold,
     // RED, not on cooldown, no record on it; the most reported fighters
     // first, then the zone order; -1 none
-    int AlarmTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher) const;
-    // the alarm answer's package and source (no side effects)
-    DirectorAction PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone) const;
+    // skip (optional): zones passed over this step (a town alarm waiting on
+    // the reserve floor), so the next alarm may be answered
+    int AlarmTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher,
+                    const AutoArray<int>* skip = nullptr) const;
+    // the alarm answer's package and source (no side effects); poolCap as
+    // PlanFor's (an answer to a town is floored, one to a base is not)
+    DirectorAction PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone,
+                             int poolCap = -1) const;
     // an alarm answer of the director's is still in flight (its record
     // lives); rows whose record is gone are closed here
     bool AlarmInFlight(const ZoneRegistry& registry, const DirectorLauncher& launcher);
@@ -950,6 +1245,31 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     float CooldownLeft(int i) const { return i >= 0 && i < _cooldowns.Size() ? _cooldowns[i].seconds : 0.0f; }
     // test lever (gmForcesForce "cooldown"): rest a zone for seconds
     void ForceCooldown(const char* zone, float seconds) { SetCooldown(zone, seconds); }
+    // the repel ladder (6.3, 2026-10-16; saved "Repels"): per zone the repels
+    // of the director's operations since it last changed hands, the last
+    // repelled package and source, and the containment flag
+    int Repels(const char* zone) const
+    {
+        const int r = FindRepel(zone);
+        return r >= 0 ? _repels[r].count : 0;
+    }
+    bool Contained(const char* zone) const
+    {
+        const int r = FindRepel(zone);
+        return r >= 0 && _repels[r].contained;
+    }
+    int RepelRows() const { return _repels.Size(); }
+    RString RepelZone(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].zone : RString(); }
+    int RepelCount(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].count : 0; }
+    int RepelPackage(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].package : FPFoot; }
+    RString RepelSource(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].source : RString(); }
+    bool RepelContained(int i) const { return i >= 0 && i < _repels.Size() && _repels[i].contained; }
+    // test lever (gmForcesForce "repels"): the zone remembers count repels
+    // (0 forgets it); package and source unknown; containment as the ladder
+    void ForceRepels(const char* zone, int count);
+    // massing (6.3, transient): the held target ("" none) and the ticks held
+    RString MassingTarget() const { return _massTarget; }
+    int MassingTicks() const { return _massTicks; }
     int OpRows() const { return _ops.Size(); }
     // the ledger row of a director operation, -1 none
     int FindOp(int opId) const;
@@ -1040,18 +1360,118 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         // since the crew ledger); false = a row from an older save, which
         // kept its crew for good: reconciled once on load
         bool crewLedger = true;
+        // the occupier AIRFIELD an airframe flew from (-1 off-map or ground):
+        // where its hull is stored over the ceiling (RefundHull)
+        int airOrigin = -1;
+        // transient, never saved: a top-up's (REINFORCE, alarm answer)
+        // return, booked by CAOpReturned just before its CAOpSettled in the
+        // same CounterAttack step, so the settle line can say where the
+        // bodies that did not join went (6.6, video 6)
+        int returnHome = -1; // bodies back at returnZone; -1 = no return seen
+        int returnZone = -1;
+        int returnPool = 0; // bodies sent to the pool: pooled + banked + dropped
+        int returnPooled = 0;
+        int returnBanked = 0;
+        int returnDropped = 0;
         LSError Serialize(ParamArchive& ar);
+    };
+    // the repel ladder of one zone (6.3, 2026-10-16)
+    struct RepelRow
+    {
+        RString zone;
+        int count = 0;          // repels since the zone last changed hands
+        int package = FPFoot;   // the last repelled package
+        RString source;         // the base its infantry came from ("" unknown)
+        bool contained = false; // the director stops spending on it
+        LSError Serialize(ParamArchive& ar);
+    };
+    // a stored spare hull (5.5, decision 9)
+    struct StoredHullRow
+    {
+        RString zone;
+        int package = FPFoot;
+        RString what;
+        int units = 0;
+        LSError Serialize(ParamArchive& ar);
+    };
+    // one base's wave surge (7.1, decision 5): the bodies above garrisonMax
+    // it still holds, the bodies at its last credit (the decay leaves at
+    // peak / surgeDecayHours per hour) and the fraction due
+    struct SurgeRow
+    {
+        RString zone;
+        int bodies = 0;
+        int peak = 0;
+        float accum = 0;
+        LSError Serialize(ParamArchive& ar);
+    };
+    // losses booked within the band's window (5.6): when, how many, and how
+    // many the refill has repaid since
+    struct LossRow
+    {
+        float stamp = 0;
+        int units = 0;
+        int repaid = 0;
+        LSError Serialize(ParamArchive& ar);
+    };
+    // TryLaunch's outcome: launched, holding the token (massing), or not
+    enum LaunchOutcome
+    {
+        LOFailed,
+        LOLaunched,
+        LOMassing,
+        LOReserve // the plan waits for the reserve floor (no token, no rest)
     };
 
     void LoadFromConfig();
+    int FindRepel(const char* zone) const;
+    // THE RESERVE FLOOR (6.3): `a` is a plan the floor binds that does not
+    // keep the reserve, `capped` the same plan re-made on ReserveRoom() (an
+    // empty action when `a` itself is short of lethality).  True when capped
+    // still meets the plan (go, not short of lethality, keeps the reserve):
+    // it replaces `a`, with reserveNote set.  False: the plan waits, its INFO
+    // line written once per target and plan.  best: the massing fallback
+    bool AcceptReservePlan(const ZoneRegistry& registry, DirectorAction& a, const DirectorAction& capped, bool best);
+    // the wait's line and row (logged when the plan or the reason changed)
+    void NoteReserveWait(const ZoneRegistry& registry, const DirectorAction& a, bool best);
+    void ClearReserveWait(const char* zone);
+    // a director operation on zone was repelled: the ladder's next rung, its
+    // INFO line, and at containRepels the containment and its surge
+    void NoteRepel(ZoneRegistry& registry, int zone, int package, int source);
+    // containment lifts (6.3): a zone whose reports decayed, or every zone
+    // (a wave fires, control changes band); why names it in the INFO line
+    void StepContainment(const ZoneRegistry& registry);
+    void LiftContainment(const char* why);
     // the two Refund forms: registry null drops the excess
     int RefundInto(ZoneRegistry* registry, int units, const char* why, int sourceZone, const Vector3* near);
     // the excess over the ceiling into the bases with room (THE CEILING):
     // returns the units banked, the rest is the caller's to drop
     int BankExcess(ZoneRegistry& registry, int units, const char* why, int sourceZone, const Vector3* near);
+    // the ceiling's credit (shared by RefundInto and RefundHull): the wave
+    // headroom shrinks to what can still come back, then min(units, room)
+    // enters the pool; returns it
+    int CreditUnderCeiling(int units);
+    // the excess over the ceiling into the wave surge (SurgeOpen): returns
+    // the units surged, the rest is the caller's
+    int SurgeExcess(ZoneRegistry& registry, int units, const char* why, int sourceZone, const Vector3* near);
+    // a hull's excess into a stored spare hull: returns the units stored
+    int StoreHull(const ZoneRegistry& registry, int units, int package, const char* what, int home,
+                  const Vector3* near);
+    // the ledger's own step (each Tick, before the refill): the loss window
+    // ages, stored hulls rejoin the pool or are lost with their base, and,
+    // with a writable registry, the wave surge decays
+    void StepLedger(const ZoneRegistry& registry, ZoneRegistry* writable, float elapsed);
+    void TickCore(const ZoneRegistry& registry, ZoneRegistry* writable, float elapsed);
+    // the refill repays the window's losses, oldest first
+    void RepayLosses(int units);
     // re-step the band after a pool change; logs a change.  Deferred while a
-    // BandHold is open
+    // BandHold (the frame hold included) is open
     void UpdateBand();
+    // a movement that is a whole transaction by itself and that the gates
+    // after it in the same frame must see (a wave landing: its allocation
+    // spends the landed bodies; a forced pool): stepped now through the
+    // frame hold, still deferred inside an explicit BandHold
+    void SettleBand();
     void Refill(float elapsed);
     // an INFO line at most every LogQuiet seconds (others counted)
     bool LogAllowed();
@@ -1065,8 +1485,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // at forcesRearmHeat; the others are released
     void StepRearm(ZoneRegistry& registry, const DirectorView& view, const AutoArray<RString>& ended);
     void DecaySightings();
-    bool TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target,
-                   int origin);
+    // LOMassing only for a director candidate (CAODirector): the token stays
+    int TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target, int origin);
     // launch a planned action: the pool pays hull and crew (and, staged, the
     // infantry: a deposit into the source's reserve the launch debits), the
     // ledger row, LaunchFunded, the INFO line.  spendToken: a director token
@@ -1089,6 +1509,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     void ReconcileLegacyOpRows();
     // a lever row's event (BookLeverOp): refunds, losses and the finish only
     void NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev);
+    // a top-up's settle line (REINFORCE or alarm answer; 6.6, video 6): what
+    // it reinforced and where every body went, never "retaken" (the zone
+    // was never lost)
+    void NoteTopUpSettled(const ZoneRegistry& registry, OpRow& row, const CounterAttackOpEvent& ev, const char* target);
     // engine path: the catalogue, the view, the scan
     void BuildEngineCatalogue(const ZoneRegistry& registry);
     void FillEngineView(const ZoneRegistry& registry, DirectorView& view) const;
@@ -1115,6 +1539,7 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int _pool = 0;
     int _poolStart = 0;
     int _R = 0;
+    int _Rgen = 0; // the generated garrisons in _R (5.7, saved)
     int _G = 0;
     AutoArray<NameRow> _roster;
     AutoArray<NameRow> _towns;
@@ -1125,6 +1550,17 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     AutoArray<NameRow> _redPaid;        // held zones whose RED edge already paid a repel's heat
     AutoArray<ZoneClockRow> _cooldowns; // seconds left
     AutoArray<NameRow> _rearm;          // re-armed after a rest (6.3, saved)
+    AutoArray<RepelRow> _repels;        // the repel ladder (6.3, saved)
+    // massing (6.3, transient): the held target, the ticks it has held, the
+    // tokens when the hold began (a further token ends it)
+    RString _massTarget;
+    int _massTicks = 0;
+    int _massTokens = 0;
+    // the reserve floor's waiting targets (6.3, transient)
+    AutoArray<ReserveWaitRow> _reserveWaits;
+    // transient: the control band (WavesCrossed) of the last Tick, -1 none;
+    // a change lifts every containment
+    int _controlBand = -1;
     AutoArray<SightingRow> _sightings;
     AutoArray<OpRow> _ops;
     float _clock = 0; // seconds of active director time (sighting stamps)
@@ -1139,6 +1575,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // to close (transient, never saved)
     int _bandHold = 0;
     bool _bandDirty = false;
+    // the frame hold (StepBandFrame): one of the _bandHold count while open
+    bool _frameHold = false;
     float _control = 1.0f;
     int _wavesFired = 0;
     bool _finalFired = false;
@@ -1153,6 +1591,15 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // registry Refund banks into (BindRegistry; null = BankRegistry's rule)
     int _banked = 0;
     ZoneRegistry* _bankRegistry = nullptr;
+    // the hull flag's spare hulls, the wave surge (rows, the bodies stood
+    // down, the window it stays open, its anchor) and the loss window; all
+    // saved (2026-10-16)
+    AutoArray<StoredHullRow> _storedHulls;
+    AutoArray<SurgeRow> _surge;
+    int _stoodDown = 0;
+    float _surgeWindow = 0;
+    Vector3 _surgeAnchor = VZero;
+    AutoArray<LossRow> _losses;
     // transient: how the last Refund split (the pool, banked and where,
     // dropped), so the HQ assault's settled line can say it (6.6)
     struct RefundTally

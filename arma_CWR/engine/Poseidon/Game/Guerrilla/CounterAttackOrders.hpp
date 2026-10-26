@@ -141,7 +141,8 @@ enum CounterAttackOpEventType
     CAOpResourced,       // the birth chain moved the operation to the next base back (source = the new base)
     CAOpCancelledUnseen, // nothing could be born: cancelled while abstract (bodies returned, hull price to refund)
     CAOpArrived,         // at the town edge (abstract or live)
-    CAOpRepelled,        // the force lost: bodies = survivors going home, units = bodies lost
+    CAOpRepelled,        // the force lost: bodies = survivors going home, units = bodies lost; reason = why
+                         // (CounterAttackEndReason: defeated, broken off, withdrew)
     CAOpSettled,         // the target reverted / fell: bodies became its garrison
     CAOpReturned,        // survivors wrote back to a base (bodies) or had no base (units to the pool)
     CAOpHullRefund,      // a hull deleted at home intact: units = its price
@@ -160,6 +161,34 @@ enum CounterAttackOpEventType
     NCounterAttackOpEventTypes
 };
 
+// why an operation was repelled (CounterAttackOpEvent::reason; appended for
+// the break-off, decision 4 and the feel assessment's item 7).  Every
+// CAOpRepelled carries one; every other event carries CAERNone.
+enum CounterAttackEndReason
+{
+    CAERNone,      // not a repel
+    CAERDefeated,  // the force was wiped out, or lost the legacy abstract fight
+    CAERBrokenOff, // its living infantry fell below a third of the strength born while the target was still held
+    CAERWithdrew,  // it gave up: counterAttackLiveTimeout at the town, or the HQ it was sent at moved
+    NCounterAttackEndReasons
+};
+
+// the reason's name for INFO lines and the script surface
+inline const char* CounterAttackEndReasonName(int reason)
+{
+    switch (reason)
+    {
+        case CAERDefeated:
+            return "defeated";
+        case CAERBrokenOff:
+            return "broken off";
+        case CAERWithdrew:
+            return "withdrew";
+        default:
+            return "";
+    }
+}
+
 struct CounterAttackOpEvent
 {
     int opId = 0;
@@ -175,6 +204,9 @@ struct CounterAttackOpEvent
     // CAOpLanded, CAOpStruck, CAOpAlarmAnswered); -1 / VZero otherwise
     int zone = -1;
     Vector3 pos = VZero;
+    // appended for the break-off: CounterAttackEndReason of a CAOpRepelled
+    // (a broken-off or withdrawn force counts as a repel), CAERNone otherwise
+    int reason = CAERNone;
 };
 
 // The director's ear.  CounterAttack calls it from its own tick; the listener

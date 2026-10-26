@@ -20,6 +20,7 @@
 
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // ASRed (the alarm answers, phase 6)
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // IsGeneratedOccupier (5.7 conservation)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // the director log toggle (forcesLog)
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
@@ -977,6 +978,318 @@ struct CoreLines
 };
 } // namespace
 
+// ---------------------------------------------------------------------------
+// the eight author levers (OccupierForcesLevers.hpp, 16)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// every field of the director's tuning, compared exactly (Normal must be
+// today's behaviour bit for bit)
+void CheckSameTuning(const OccupierForcesTuning& a, const OccupierForcesTuning& b)
+{
+    CHECK(a.enabled == b.enabled);
+    CHECK(a.poolMin == b.poolMin);
+    CHECK(a.poolPerTown == b.poolPerTown);
+    CHECK(a.refillHours == b.refillHours);
+    CHECK(a.poolFloor == b.poolFloor);
+    CHECK(a.directorInterval == b.directorInterval);
+    CHECK(a.tokensMax == b.tokensMax);
+    for (int k = 0; k < NOccupierBands; k++)
+    {
+        CHECK(a.tokenInterval[k] == b.tokenInterval[k]);
+    }
+    CHECK(a.controlMilWeight == b.controlMilWeight);
+    CHECK(a.nWaveThresholds == b.nWaveThresholds);
+    for (int k = 0; k < OccupierForcesTuning::MaxWaveThresholds; k++)
+    {
+        CHECK(a.waveThresholds[k] == b.waveThresholds[k]);
+    }
+    CHECK(a.waveWarLevel == b.waveWarLevel);
+    CHECK(a.wakeTowns == b.wakeTowns);
+    CHECK(a.opsMax == b.opsMax);
+    CHECK(a.opsMaxStrong == b.opsMaxStrong);
+    CHECK(a.heatFull == b.heatFull);
+    CHECK(a.urgentHeat == b.urgentHeat);
+    CHECK(a.urgentExit == b.urgentExit);
+    CHECK(a.townCooldown == b.townCooldown);
+    CHECK(a.rearmHeat == b.rearmHeat);
+    CHECK(a.pushoutQuiet == b.pushoutQuiet);
+    CHECK(a.retakeMin == b.retakeMin);
+    CHECK(a.alarmMin == b.alarmMin);
+    CHECK(a.strikeMinFighters == b.strikeMinFighters);
+    CHECK(a.lethalityMargin == b.lethalityMargin);
+    CHECK(a.urgentCostShare == b.urgentCostShare);
+    CHECK(a.intelDecay == b.intelDecay);
+    CHECK(a.spareCap == b.spareCap);
+    CHECK(a.spareCapFloor == b.spareCapFloor);
+    CHECK(a.slowEta == b.slowEta);
+    CHECK(a.slowCostShare == b.slowCostShare);
+    CHECK(a.airEta == b.airEta);
+    CHECK(a.roadFactor == b.roadFactor);
+    CHECK(a.hqAssaultMin == b.hqAssaultMin);
+    CHECK(a.waveDwell == b.waveDwell);
+    CHECK(a.waveFinal == b.waveFinal);
+    CHECK(a.waveShare == b.waveShare);
+    CHECK(a.waveMin == b.waveMin);
+    CHECK(a.waveMax == b.waveMax);
+    CHECK(a.waveLead == b.waveLead);
+    CHECK(a.waveLeadFinal == b.waveLeadFinal);
+    CHECK(a.waveRetakeShare == b.waveRetakeShare);
+    CHECK(a.waveOps == b.waveOps);
+    CHECK(a.waveCluster == b.waveCluster);
+    CHECK(a.waveSurge == b.waveSurge);
+    CHECK(Str(a.waveHub) == Str(b.waveHub));
+    CHECK(a.log == b.log);
+    CHECK(a.escalateLethality == b.escalateLethality);
+    CHECK(a.escalateInfantry == b.escalateInfantry);
+    CHECK(a.approachRepels == b.approachRepels);
+    CHECK(a.containRepels == b.containRepels);
+    CHECK(a.massingMax == b.massingMax);
+    CHECK(a.restJitter == b.restJitter);
+    CHECK(a.adjacentTown == b.adjacentTown);
+    CHECK(a.bankHulls == b.bankHulls);
+    CHECK(a.surgeDecayHours == b.surgeDecayHours);
+    CHECK(a.surgeShare == b.surgeShare);
+    CHECK(a.lossWindowHours == b.lossWindowHours);
+}
+} // namespace
+
+TEST_CASE("OccupierForces - levers: Normal derives today's defaults, field by field",
+          "[game][guerrilla][occupierforces]")
+{
+    const OccupierForcesTuning today;
+    // the default levers are Normal's presets
+    const OccupierForcesLevers normal = OccupierForcesLevers::Preset(ForcesNormal);
+    CHECK(today.levers.difficulty == ForcesNormal);
+    CHECK(today.levers.cadence == normal.cadence);
+    CHECK(today.levers.strength == normal.strength);
+    CHECK(today.levers.recovery == normal.recovery);
+    CHECK(today.levers.reach == normal.reach);
+    CHECK(today.levers.aggression == normal.aggression);
+    CHECK(today.levers.waves == normal.waves);
+    CHECK(today.levers.minimums == normal.minimums);
+    CHECK(today.levers.concurrency == normal.concurrency);
+    // the new fields' defaults are the constants they replaced
+    CHECK(today.urgentExit == OccupierForces::UrgentExitHeat);
+    CHECK(today.strikeMinFighters == OccupierForces::StrikeMinFighters);
+    CHECK(today.alarmMin == ForcePackages::AlarmMinBodies);
+
+    // Derive at Normal changes nothing
+    OccupierForcesTuning derived;
+    normal.Derive(derived);
+    CheckSameTuning(derived, today);
+    // nor does the reader with no lever authored, nor forcesDifficulty = 1
+    for (const char* keys : {"occupierForces = 1;", "occupierForces = 1; forcesDifficulty = 1;"})
+    {
+        Fixture f;
+        f.Load(ConfigWith(keys));
+        OccupierForcesTuning expect;
+        expect.enabled = true;
+        CheckSameTuning(f.of.Tuning(), expect);
+        CHECK(f.registry.Tuning().heatCapSpike == 40.0f);
+    }
+    // CounterAttack's three derived fields
+    CounterAttackTuning ca;
+    normal.Derive(ca);
+    const CounterAttackTuning caToday;
+    CHECK(ca.maxLive == caToday.maxLive);
+    CHECK(ca.forcesLiveHullsMax == caToday.forcesLiveHullsMax);
+    CHECK(ca.firstTownChance == caToday.firstTownChance);
+    // poolStart at strength 1: R + 2K exactly (the Abel-like theatre: 60)
+    CHECK(OccupierForces::PoolStartOf(derived, 32, 14) == 60);
+}
+
+TEST_CASE("OccupierForces - levers: each preset derives the documented fields", "[game][guerrilla][occupierforces]")
+{
+    // Easy, Normal, Hard, Brutal (OCCUPIER-FORCES.md 16)
+    const float strongInterval[4] = {1200, 600, 420, 300};
+    const float stretchedInterval[4] = {2100, 1050, 735, 525};
+    const float thinInterval[4] = {3600, 1800, 1260, 900};
+    const float refill[4] = {8, 4, 3, 2};
+    const float airEta[4] = {3000, 1500, 1200, 900};
+    const float slowEta[4] = {1800, 900, 720, 540};
+    const float heatFull[4] = {40.0f / 0.75f, 40, 32, 40.0f / 1.5f};
+    const float urgentHeat[4] = {50.0f / 0.75f, 50, 40, 50.0f / 1.5f};
+    const float margin[4] = {0.9f, 1.2f, 1.5f, 1.8f};
+    const int strikeMin[4] = {4, 3, 2, 2};
+    const float firstTown[4] = {0.3f, 0.4f, 0.5f, 0.6f};
+    const float waveT0[4] = {0.70f, 0.75f, 0.80f, 0.85f};
+    const float waveT1[4] = {0.45f, 0.50f, 0.60f, 0.65f};
+    const float waveShare[4] = {0.35f, 0.5f, 0.6f, 0.75f};
+    const float waveLead[4] = {900, 600, 450, 300};
+    const float waveRetake[4] = {0.4f, 0.5f, 0.6f, 0.7f};
+    const float waveWar[4] = {0.75f, 1.0f, 1.25f, 1.5f};
+    const int retakeMin[4] = {3, 4, 6, 8};
+    const int hqMin[4] = {5, 6, 8, 10};
+    const int opsStrong[4] = {2, 3, 4, 5};
+    const int poolStart[4] = {45, 60, 75, 90}; // R 32, K 14: s x 60
+    for (int d = 0; d < NForcesPresets; d++)
+    {
+        INFO("preset " << d);
+        const OccupierForcesLevers l = OccupierForcesLevers::Preset(d);
+        OccupierForcesTuning t;
+        l.Derive(t);
+        CHECK(t.levers.difficulty == d);
+        // cadence
+        CHECK(t.tokenInterval[OFBandStrong] == Approx(strongInterval[d]));
+        CHECK(t.tokenInterval[OFBandStretched] == Approx(stretchedInterval[d]));
+        CHECK(t.tokenInterval[OFBandThin] == Approx(thinInterval[d]));
+        CHECK(t.tokenInterval[OFBandSpent] == 0.0f);
+        CHECK(t.townCooldown == Approx(thinInterval[d]));
+        // strength (at activation) and recovery
+        CHECK(OccupierForces::PoolStartOf(t, 32, 14) == poolStart[d]);
+        CHECK(t.refillHours == Approx(refill[d]));
+        // reach
+        CHECK(t.airEta == Approx(airEta[d]));
+        CHECK(t.slowEta == Approx(slowEta[d]));
+        // aggression
+        CHECK(t.heatFull == Approx(heatFull[d]));
+        CHECK(t.rearmHeat == Approx(heatFull[d]));
+        CHECK(t.urgentHeat == Approx(urgentHeat[d]));
+        CHECK(t.urgentExit == Approx(urgentHeat[d] * 0.7f));
+        CHECK(t.lethalityMargin == Approx(margin[d]));
+        CHECK(t.strikeMinFighters == strikeMin[d]);
+        CHECK(l.HeatCapSpike() == Approx(heatFull[d]));
+        // waves: two thresholds and the final stand at every level (D7)
+        CHECK(t.nWaveThresholds == 2);
+        CHECK(t.waveThresholds[0] == Approx(waveT0[d]));
+        CHECK(t.waveThresholds[1] == Approx(waveT1[d]));
+        CHECK(t.waveFinal);
+        CHECK(t.waveShare == Approx(waveShare[d]));
+        CHECK(t.waveLead == Approx(waveLead[d]));
+        CHECK(t.waveRetakeShare == Approx(waveRetake[d]));
+        CHECK(t.waveWarLevel == Approx(waveWar[d]));
+        // minimums
+        CHECK(t.retakeMin == retakeMin[d]);
+        CHECK(t.alarmMin == retakeMin[d]);
+        CHECK(t.hqAssaultMin == hqMin[d]);
+        CHECK(t.spareCapFloor == hqMin[d]);
+        CHECK(t.spareCap);
+        // concurrency
+        CHECK(t.opsMaxStrong == opsStrong[d]);
+        CHECK(t.opsMax == opsStrong[d] - 1);
+        CounterAttackTuning ca;
+        l.Derive(ca);
+        CHECK(ca.maxLive == opsStrong[d] - 1);
+        CHECK(ca.forcesLiveHullsMax == 2 * opsStrong[d]);
+        CHECK(ca.firstTownChance == Approx(firstTown[d]));
+        // the constants stay put at every preset
+        const OccupierForcesTuning today;
+        CHECK(t.tokensMax == today.tokensMax);
+        CHECK(t.directorInterval == today.directorInterval);
+        CHECK(t.wakeTowns == today.wakeTowns);
+        CHECK(t.intelDecay == today.intelDecay);
+        CHECK(t.pushoutQuiet == today.pushoutQuiet);
+        CHECK(t.urgentCostShare == today.urgentCostShare);
+        CHECK(t.slowCostShare == today.slowCostShare);
+        CHECK(t.roadFactor == today.roadFactor);
+        CHECK(t.waveMin == today.waveMin);
+        CHECK(t.waveMax == today.waveMax);
+        CHECK(t.waveSurge == today.waveSurge);
+    }
+}
+
+TEST_CASE("OccupierForces - levers: forcesDifficulty, a lever key over its preset, range repair, gmForcesTune names",
+          "[game][guerrilla][occupierforces]")
+{
+    {
+        // Hard through the difficulty key, everywhere the levers reach
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesDifficulty = 2;"));
+        const OccupierForcesTuning& t = f.of.Tuning();
+        CHECK(t.levers.difficulty == ForcesHard);
+        CHECK(t.tokenInterval[OFBandStrong] == Approx(420.0f));
+        CHECK(t.heatFull == Approx(32.0f));
+        CHECK(t.opsMaxStrong == 4);
+        CHECK(f.registry.Tuning().heatCapSpike == Approx(32.0f));
+    }
+    {
+        // Brutal with its cadence authored back to 900 s; the rest stay Brutal
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesDifficulty = 3; forcesCadence = 900;"));
+        const OccupierForcesTuning& t = f.of.Tuning();
+        CHECK(t.levers.cadence == Approx(900.0f));
+        CHECK(t.tokenInterval[OFBandStrong] == Approx(900.0f));
+        CHECK(t.townCooldown == Approx(2700.0f));
+        CHECK(t.levers.aggression == Approx(1.5f));
+        CHECK(t.retakeMin == 8);
+    }
+    {
+        // every lever key is repaired into its range (and logged)
+        CoreLines log;
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesDifficulty = 9; forcesCadence = 5; forcesStrength = 10; "
+                          "forcesRecovery = 0; forcesReach = -1; forcesAggression = 0; forcesWaves = 7; "
+                          "forcesMinimums = 20; forcesConcurrency = 1;"));
+        const OccupierForcesLevers& l = f.of.Tuning().levers;
+        CHECK(l.difficulty == ForcesBrutal);
+        CHECK(l.cadence == Approx(60.0f));
+        CHECK(l.strength == Approx(4.0f));
+        CHECK(l.recovery == Approx(0.5f));
+        CHECK(l.reach == Approx(0.0f));
+        CHECK(l.aggression == Approx(0.25f));
+        CHECK(l.waves == 3);
+        CHECK(l.minimums == 10);
+        CHECK(l.concurrency == 2);
+        CHECK(f.of.Tuning().hqAssaultMin == 12);
+        CHECK(f.of.Tuning().heatFull == Approx(100.0f)); // 40 / 0.25 clamped
+        // OccupierForces logs the repairs; ZoneRegistry and CounterAttack read quietly
+        CHECK(log.With({"forcesCadence = 5 repaired"}).size() == 1);
+    }
+    // the gmForcesTune lever names
+    OccupierForcesLevers l;
+    CHECK(l.Set("cadence", 300));
+    CHECK(l.cadence == Approx(300.0f));
+    CHECK(l.Set("Concurrency", 99));
+    CHECK(l.concurrency == 6);
+    CHECK(l.Set("difficulty", 0));
+    CHECK(l.cadence == Approx(1200.0f));
+    CHECK(l.minimums == 3);
+    CHECK_FALSE(l.Set("heatFull", 10)); // a field, not a lever
+    OccupierForcesTuning t;
+    t.heatFull = 77; // an earlier field lever is overwritten by the lever
+    l.Derive(t);
+    CHECK(t.heatFull == Approx(40.0f / 0.75f));
+}
+
+TEST_CASE("OccupierForces - levers: an old key overrides its lever-derived field and warns once",
+          "[game][guerrilla][occupierforces]")
+{
+    CoreLines log;
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1; forcesAggression = 1.5; forcesHeatFull = 20; forcesTokenInterval[] = {700}; "
+                      "forcesDirectorInterval = 30; heatCapSpike = 55;"));
+    const OccupierForcesTuning& t = f.of.Tuning();
+    // the override wins over its lever ...
+    CHECK(t.heatFull == Approx(20.0f));
+    CHECK(t.tokenInterval[OFBandStrong] == Approx(700.0f));
+    CHECK(t.directorInterval == Approx(30.0f)); // a constant's override
+    CHECK(f.registry.Tuning().heatCapSpike == Approx(55.0f));
+    // ... and only on its own field: the lever still derives the rest
+    CHECK(t.urgentHeat == Approx(50.0f / 1.5f));
+    CHECK(t.rearmHeat == Approx(40.0f / 1.5f));
+    CHECK(t.tokenInterval[OFBandStretched] == Approx(1050.0f)); // the short array keeps the cadence's
+    // one WARN per authored old key, naming its lever; none for the rest
+    CHECK(log.With({"forcesHeatFull is an expert override of the forcesAggression lever"}).size() == 1);
+    CHECK(log.With({"forcesTokenInterval is an expert override of the forcesCadence lever"}).size() == 1);
+    CHECK(log.With({"forcesDirectorInterval is an expert override of a constant"}).size() == 1);
+    CHECK(log.With({"heatCapSpike is an expert override of the forcesAggression lever"}).size() == 1);
+    CHECK(log.With({"forcesUrgentHeat is an expert override"}).empty());
+    CHECK(log.With({"forcesAggression is an expert override"}).empty()); // a lever is not an override
+    // an authored old key reads exactly as before
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1; forcesOpsMax = 1; forcesOpsMaxStrong = 2; forcesSlowEta = 0; "
+                      "forcesAirEta = 0; forcesRearmHeat = 0; forcesRetakeMin = 2;"));
+    CHECK(g.of.Tuning().opsMax == 1);
+    CHECK(g.of.Tuning().opsMaxStrong == 2);
+    CHECK(g.of.Tuning().slowEta == 0.0f);
+    CHECK(g.of.Tuning().airEta == 0.0f);
+    CHECK(g.of.Tuning().rearmHeat == 0.0f);
+    CHECK(g.of.Tuning().retakeMin == 2);
+    CHECK(g.of.Tuning().hqAssaultMin == 6); // the lever's, not the override's
+}
+
 TEST_CASE("OccupierForces - the ceiling: a refund over poolStart is dropped once, booked, and the ledger holds",
           "[game][guerrilla][occupierforces]")
 {
@@ -1044,6 +1357,9 @@ TEST_CASE("OccupierForces - the ceiling keeps a landed wave's headroom; lost wav
     f.Load(AbelLikeConfig(), false);
     REQUIRE(f.of.Activate(f.registry));
     const int P = f.of.PoolStart();
+    // the headroom alone: no wave surge to take the excess (surgeShare 0),
+    // so what the ceiling keeps out is banked or dropped as outside a wave
+    f.of.TuningMutable().surgeShare = 0;
     // a wave lifts the pool above poolStart (7.1) and the ceiling with it
     f.of.LandWave(12);
     CHECK(f.of.Pool() == P + 12);
@@ -1104,6 +1420,7 @@ TEST_CASE("OccupierForces - the ceiling survives save/load", "[game][guerrilla][
     f.Load(config, false);
     REQUIRE(f.of.Activate(f.registry));
     const int P = f.of.PoolStart();
+    f.of.TuningMutable().surgeShare = 0; // the headroom alone (no wave surge)
     f.of.LandWave(6);
     REQUIRE(f.of.Spend(6, "op"));
     f.of.Tick(f.registry, 1.0f); // the pool sits at poolStart: no refill, no headroom used
@@ -1681,6 +1998,10 @@ TEST_CASE("OccupierForces - director knobs default to the knob table", "[game][g
     CHECK(t.intelDecay == Approx(1800.0f));
     CHECK(OccupierForces::UrgentExitHeat == Approx(35.0f));
     CHECK(OccupierForces::OfferedPackages == ForcePackages::DefaultPackages);
+    // the lever round's fields (16): the constants they replaced
+    CHECK(t.urgentExit == Approx(35.0f));
+    CHECK(t.strikeMinFighters == 3);
+    CHECK(t.alarmMin == 4);
 
     Fixture f;
     f.Load(ConfigWith("occupierForces = 1; forcesWakeTowns = 1; forcesOpsMax = 9; forcesHeatFull = 30; "
@@ -2098,6 +2419,9 @@ TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel a
     f.Load(ConfigWith("occupierForces = 1;"));
     REQUIRE(f.of.Activate(f.registry));
     f.of.SetCatalogue(TruckCatalogue());
+    // this case pins the plain rest (forcesTownCooldown); the jitter and the
+    // repel ladder have their own cases
+    f.of.TuningMutable().restJitter = 0;
     FakeLauncher launcher;
     FlipTown(f, "Town", 1);
     REQUIRE(FlipTown(f, "Other", 2));
@@ -2183,7 +2507,9 @@ TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel a
     CHECK_FALSE(f.of.RedPaid("Other")); // consumed
 
     // a cancelled unborn director op: the units CounterAttack still owes
-    // (the full hull and crew price here) back, and the rest
+    // (the full hull and crew price here) back, and the rest.  Town's repel
+    // above is forgotten here: the ladder would escalate this plan
+    f.of.ForceRepels("Town", 0);
     launcher.Resolve(town);
     f.Z("Town").heat = 60;
     f.Z("Other").heat = 0;
@@ -2322,6 +2648,7 @@ TEST_CASE("OccupierForces - an unborn cancel refunds only what CounterAttack sti
 {
     Fixture f;
     const DirectorView view = MotorizedSetup(f);
+    f.of.TuningMutable().restJitter = 0; // the plain rest (the jitter has its own case)
     FakeLauncher launcher;
     const int pool0 = f.of.Pool();
     f.of.Direct(f.registry, view, launcher, 60.0f);
@@ -3150,6 +3477,11 @@ TEST_CASE("OccupierForces - a landed wave: hub top-up, strikes on the cluster, r
     CHECK(strike.target == f.registry.FindZoneIndex("Base3"));
     CHECK(strike.source == f.registry.FindZoneIndex("Base0"));
     CHECK(strike.bodies == 8); // max(4, garrisonMax 8), within the 15 the strikes may take
+    // the arrival rule covers wave strikes since 2026-10-16 (video 5): the
+    // 3 km walk from the hub (2000 s, over forcesSlowEta) rides a truck, its
+    // hull and driver paid by the pool
+    CHECK(strike.package == FPTruck);
+    CHECK(strike.priceUnits == 4);
     const CounterAttackOrder& column = launcher.orders[1];
     CHECK(column.kind == CAKReinforce);
     CHECK(column.origin == CAOWave);
@@ -3170,10 +3502,11 @@ TEST_CASE("OccupierForces - a landed wave: hub top-up, strikes on the cluster, r
     {
         CHECK(f.of.Tokens() == tokens);
     }
-    // the pool: + 30, - 3 (top-up), - 8, - 5 (staging); 14 stay, less what a
-    // director operation of the same tick paid for its hull (the arrival
-    // rule sends a truck to a far town since 2026-10-15)
-    CHECK(f.of.Pool() == pool + 14 - directorPaid);
+    // the pool: + 30, - 3 (top-up), - 8, - 5 (staging); 14 stay, less the
+    // strike's truck and what a director operation of the same tick paid
+    // for its hull (the arrival rule sends a truck to a far town since
+    // 2026-10-15)
+    CHECK(f.of.Pool() == pool + 14 - strike.priceUnits - directorPaid);
 }
 
 TEST_CASE("OccupierForces - the occupier war level: territory plus landed waves; equal with the key off",
@@ -3733,8 +4066,8 @@ TEST_CASE("OccupierForces - a helicopter insertion competes as a package; airOri
     DirectorView view = ViewOf(f.registry);
     view.spare[f.registry.FindZoneIndex("Post")] = 0; // the infantry comes from FarBase (about 11 km)
     // urgent, nothing reported: L_req 0, minimum 4.  Foot 4 (4 units), truck
-    // 4 + 1 + 3 = 8, helicopter 4 + 2 + 10 = 16: a cost share of 4 lets the
-    // fastest (the helicopter) win
+    // 4 + 1 + 3 = 8, helicopter 4 + 2 + 10 = 16.  Since phase 1 C (d90a942)
+    // urgency never buys air on its own, even with a cost share of 4
     f.of.TuningMutable().urgentCostShare = 4.0f;
     FakeLauncher latch; // a refused tick latches the urgency (heat 60)
     latch.refuse = true;
@@ -3743,6 +4076,12 @@ TEST_CASE("OccupierForces - a helicopter insertion competes as a package; airOri
     DirectorAction a = f.of.PlanFor(f.registry, view, town, CAODirector);
     REQUIRE(a.go);
     CHECK(a.urgent);
+    CHECK(a.choice.quote.package != FPTransportHeli);
+    // a fighter reported, 11 km out of walking reach: the insertion competes
+    // and goes (L_req 3.6: four inserted bodies bring 5)
+    Report(f, "Town", 1, f.Z("Town").pos);
+    a = f.of.PlanFor(f.registry, view, town, CAODirector);
+    REQUIRE(a.go);
     CHECK(a.choice.quote.package == FPTransportHeli);
     CHECK(a.choice.quote.poolPrice == 12);
     CHECK(a.airOrigin == f.registry.FindZoneIndex("FarBase"));
@@ -4549,7 +4888,7 @@ TEST_CASE("OccupierForces - the spare cap: a 12-man base retake no base can sour
     CHECK(o.source == f.registry.FindZoneIndex("Harbour"));
 }
 
-TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a truck at 1.7 km, a helicopter at 4.6 km",
+TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a truck at 1.7 and 4.6 km, air on a report",
           "[game][guerrilla][occupierforces][air]")
 {
     Fixture f;
@@ -4564,6 +4903,7 @@ TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a t
     // straight line (factor 1) to keep its distances
     CHECK(f.of.Tuning().roadFactor == Approx(1.5f));
     f.of.TuningMutable().roadFactor = 1.0f;
+    ForcePackages::SetRoadFactor(1.0f); // the theatre's one factor (phase 1 C): the quote reads it
     FakeLauncher launcher;
     FlipTown(f, "Houdan", 1);
     REQUIRE(FlipTown(f, "Trinite", 2));
@@ -4596,15 +4936,17 @@ TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a t
     CHECK(t.choice.quote.price == 8);
     CHECK(t.choice.etaRule == PackageChoice::EtaSlow);
 
-    // Goisse, 4.6 km: foot needs about 3067 s (a 51-minute walk, 65 by road);
-    // past forcesAirEta the insertion goes whatever its price
+    // Goisse, 4.6 km: foot needs about 3067 s (a 51-minute walk, 65 by road).
+    // Since phase 1 C (d90a942, video 5: every insertion flew to an empty
+    // target) an empty town a truck reaches well under forcesAirEta gets the
+    // truck (about 345 s), the cheapest package that meets forcesSlowEta
     const DirectorAction g = f.of.PlanFor(f.registry, view, goisse, CAODirector);
     REQUIRE(g.go);
     CHECK(g.choice.cheapestSeconds == Approx(4600.0f / 1.5f).margin(1.0f));
-    CHECK(g.choice.quote.package == FPTransportHeli);
-    CHECK(g.choice.etaRule == PackageChoice::EtaAir);
-    CHECK(g.airOrigin == f.registry.FindZoneIndex("Airfield"));
-    CHECK(g.choice.quote.poolPrice == 12); // the Mi17 10 + its crew 2
+    CHECK(g.choice.quote.package == FPTruck);
+    CHECK(g.choice.etaRule == PackageChoice::EtaSlow);
+    CHECK(g.choice.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(g.choice.quote.poolPrice == 4); // the Ural 3 + its driver 1
 
     // the old choice is reachable: both rules off, everything walks
     f.of.TuningMutable().slowEta = 0;
@@ -4616,10 +4958,20 @@ TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a t
     const DirectorAction gt = f.of.PlanFor(f.registry, view, goisse, CAODirector);
     CHECK(gt.choice.quote.package == FPTruck);
     CHECK(gt.choice.etaRule == PackageChoice::EtaSlow);
-    // a push-out takes the arrival rule too since 2026-10-16 (6.4, video 4:
-    // a push-out walked 55 minutes from the Airfield): Goisse gets the
-    // insertion, while Houdan's foot quote, under forcesSlowEta, stays foot
+    // a fighter reported in Goisse, out of walking reach: the insertion goes
+    // (phase 1 C's "air: fighters reported"), from the Airfield
     f.of.TuningMutable().airEta = 1500;
+    Report(f, "Goisse", 1, f.Z("Goisse").pos);
+    const DirectorAction ga = f.of.PlanFor(f.registry, view, goisse, CAODirector);
+    REQUIRE(ga.go);
+    CHECK(ga.choice.quote.package == FPTransportHeli);
+    CHECK(ga.choice.etaRule == PackageChoice::EtaAir);
+    CHECK(ga.airOrigin == f.registry.FindZoneIndex("Airfield"));
+    CHECK(ga.choice.quote.poolPrice == 12); // the Mi17 10 + its crew 2
+    // a push-out takes the arrival rule too since 2026-10-16 (6.4, video 4:
+    // a push-out walked 55 minutes from the Airfield): the reported Goisse
+    // gets the insertion, while Houdan's foot quote, under forcesSlowEta,
+    // stays foot
     const DirectorAction gp = f.of.PlanFor(f.registry, view, goisse, CAOPushout);
     CHECK(gp.choice.quote.package == FPTransportHeli);
     CHECK(gp.choice.etaRule == PackageChoice::EtaAir);
@@ -4645,6 +4997,7 @@ TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a t
     CHECK(launcher.orders[1].airOrigin == f.registry.FindZoneIndex("Airfield"));
     CHECK(launcher.orders[1].priceUnits == 12);
     CHECK(f.of.Pool() == pool0 - 4 - 12);
+    ForcePackages::SetRoadFactor(ForcePackages::DefaultRoadFactor); // no state for the next case
 }
 
 // ===========================================================================
@@ -5090,4 +5443,1202 @@ TEST_CASE("OccupierForces - a column's launch line names its escort", "[game][gu
     REQUIRE(launcher.orders.size() >= 1);
     REQUIRE(std::string((const char*)launcher.orders[0].escortClass) == "T72");
     CHECK(log.With({"Motorized squad (4, Ural) with T72 from Post to Town"}).size() == 1);
+}
+
+// ===========================================================================
+// The repel ladder, massing, value-weighted candidates, the rest jitter and
+// the wave strikes' arrival rule (OCCUPIER-FORCES.md 6.3, 6.5, 7.1, 7.3;
+// 2026-10-16, video 5: seven identical columns on Le Port, five identical
+// APCs on Arudy, a 41-minute walk on the HQ)
+// ===========================================================================
+
+namespace
+{
+
+// video 5's Malden (tmp/of-director-video-5): the Harbour 0.5 km from Le
+// Port, Arudy 2.2 km from the Outpost, the Airfield 6.7 km north of Le Port;
+// eight far towns the occupier administers keep control above 0.75 (no
+// wave), and forcesPoolMin gives Guerrilla.Abel's poolStart 60
+std::string Video5Config()
+{
+    std::string cfg = "class CfgGuerrillaZones\n{\n    occupierForces = 1;\n    forcesPoolMin = 60;\n"
+                      "    class Zones\n    {\n";
+    cfg += "        class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"RESISTANCE\"; position[]={7515.0, 5790.0, 0.0}; "
+           "};\n";
+    cfg += "        class Outpost { name=\"Outpost\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=6; "
+           "position[]={7600.0, 6300.0, 0.0}; };\n";
+    cfg += "        class Harbour { name=\"Le Port Harbour\"; type=\"SEAPORT\"; owner=\"OCCUPIER\"; garrison=8; "
+           "position[]={8410.0, 3690.0, 0.0}; };\n";
+    cfg += "        class Airfield { name=\"Airfield\"; type=\"AIRFIELD\"; owner=\"OCCUPIER\"; garrison=12; "
+           "position[]={8030.0, 9905.0, 0.0}; };\n";
+    cfg += "        class Village { name=\"Village\"; type=\"CITY\"; owner=\"NEUTRAL\"; support=20; "
+           "position[]={7117.0, 6069.0, 0.0}; };\n";
+    cfg += "        class LePort { name=\"Le Port\"; type=\"CITY\"; owner=\"NEUTRAL\"; support=20; "
+           "position[]={8242.0, 3205.0, 0.0}; };\n";
+    cfg += "        class Arudy { name=\"Arudy\"; type=\"CITY\"; owner=\"NEUTRAL\"; support=20; "
+           "position[]={5600.0, 7200.0, 0.0}; };\n";
+    for (int i = 0; i < 8; i++)
+    {
+        cfg += "        class F" + std::to_string(i) + " { name=\"F" + std::to_string(i) +
+               "\"; type=\"CITY\"; owner=\"NEUTRAL\"; support=20; position[]={" + std::to_string(1000 + 400 * i) +
+               ".0, 1000.0, 0.0}; };\n";
+    }
+    cfg += "    };\n};\n";
+    return cfg;
+}
+
+// the EAST ladder of Guerrilla.Abel: Ural, BMP, T72, Mi17, Su25
+ForcePackageCatalogue EastLadder()
+{
+    ForcePackageCatalogue cat = UralMi17();
+    cat.hulls[FPApc].className = "BMP";
+    cat.hulls[FPApc].maxSpeedKmh = 65;
+    cat.hulls[FPApc].cargo = 8;
+    cat.hulls[FPApc].crew = 3;
+    cat.hulls[FPTank].className = "T72";
+    cat.hulls[FPTank].maxSpeedKmh = 60;
+    cat.hulls[FPTank].cargo = 0;
+    cat.hulls[FPTank].crew = 3;
+    cat.hulls[FPJet].className = "Su25";
+    cat.hulls[FPJet].maxSpeedKmh = 1000;
+    cat.hulls[FPJet].cargo = 0;
+    cat.hulls[FPJet].crew = 1;
+    return cat;
+}
+
+// awake with two tokens; Le Port, Arudy and the Village held (heat 40 each),
+// the Village resting for good; 4 fighters reported in Le Port, 3 in Arudy
+void Video5Setup(Fixture& f)
+{
+    f.Load(Video5Config(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    REQUIRE(f.of.PoolStart() == 60);
+    f.of.SetCatalogue(EastLadder());
+    FlipTown(f, "Village", 1);
+    REQUIRE(FlipTown(f, "Le Port", 2));
+    FlipTown(f, "Arudy", 3);
+    f.of.ForceCooldown("Village", 1.0e7f);
+    f.of.IngestTip(f.registry, f.registry.FindZoneIndex("Le Port"), 4, f.Z("Le Port").pos);
+    f.of.IngestTip(f.registry, f.registry.FindZoneIndex("Arudy"), 3, f.Z("Arudy").pos);
+    REQUIRE(f.of.Band() == OFBandStrong);
+}
+
+// CounterAttack's report of a repelled operation: lost bodies, none home,
+// then its hulls home intact (the video's "the T72 drives home")
+void RepelOrder(Fixture& f, FakeLauncher& l, const CounterAttackOrder& o)
+{
+    CounterAttackOpEvent ev;
+    ev.opId = o.opId;
+    ev.type = CAOpRepelled;
+    ev.kind = o.kind;
+    ev.origin = o.origin;
+    ev.target = o.target;
+    ev.source = o.source;
+    ev.units = o.bodies;
+    f.of.NoteOpEvent(f.registry, ev);
+    if (o.priceUnits > 0)
+    {
+        ev.type = CAOpHullRefund;
+        ev.units = o.priceUnits;
+        f.of.NoteOpEvent(f.registry, ev);
+    }
+    l.Resolve(o.target);
+}
+
+// the ground orders on a zone
+std::vector<CounterAttackOrder> GroundOn(const FakeLauncher& l, int zone)
+{
+    std::vector<CounterAttackOrder> out;
+    for (const CounterAttackOrder& o : l.orders)
+    {
+        if (o.target == zone && o.kind != CAKStrike)
+        {
+            out.push_back(o);
+        }
+    }
+    return out;
+}
+
+// runs a rest out with nothing launching (every slot full)
+void RestOut(Fixture& f, float seconds)
+{
+    FakeLauncher idle;
+    idle.born = 99;
+    f.of.Direct(f.registry, ViewOf(f.registry), idle, seconds);
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - the repel ladder: escalate after one repel, change approach after two, contain after three",
+          "[game][guerrilla][occupierforces]")
+{
+    CoreLines log;
+    Fixture f;
+    Video5Setup(f);
+    const int lePort = f.registry.FindZoneIndex("Le Port");
+    const int harbour = f.registry.FindZoneIndex("Le Port Harbour");
+    const int airfield = f.registry.FindZoneIndex("Airfield");
+    f.of.ForceCooldown("Arudy", 1.0e7f); // Le Port alone here
+    // a repel's +15 on the re-armed 40 would make Le Port urgent (55), and the
+    // plain strike rule (7.3) would then buy the jet: urgency is kept out so
+    // the escalation strike alone decides
+    f.of.TuningMutable().urgentHeat = 100;
+    FakeLauncher launcher;
+
+    // op 1: the plain plan, L_req 1.2 x 3 x 4 = 14.4, four bodies at least
+    const DirectorAction a0 = f.of.PlanFor(f.registry, ViewOf(f.registry), lePort, CAODirector);
+    REQUIRE(a0.go);
+    CHECK(a0.escalation == 0);
+    CHECK(a0.choice.lReq == Approx(14.4f));
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    REQUIRE(GroundOn(launcher, lePort).size() == 1);
+    const CounterAttackOrder op1 = GroundOn(launcher, lePort)[0];
+    CHECK(op1.source == harbour);
+    RepelOrder(f, launcher, op1);
+    CHECK(f.of.Repels("Le Port") == 1);
+    CHECK(log.With({"Le Port: first repel", "next attack needs lethality x1.5 and at least 8 infantry"}).size() == 1);
+
+    // op 2: L_req x 1.5 = 21.6 and twice the 4 fighters reported as infantry;
+    // the Harbour spares 6, so the Airfield (9) staffs it
+    RestOut(f, 2400.0f);
+    REQUIRE(f.of.Cooldown("Le Port") <= 0);
+    const DirectorAction a1 = f.of.PlanFor(f.registry, ViewOf(f.registry), lePort, CAODirector);
+    REQUIRE(a1.go);
+    CHECK(a1.escalation == 1);
+    CHECK(a1.needBodies == 8);
+    CHECK(a1.choice.lReq == Approx(21.6f));
+    CHECK(a1.choice.quote.bodies >= 8);
+    CHECK(a1.choice.quote.source == airfield);
+    for (int tick = 0; tick < 6 && GroundOn(launcher, lePort).size() < 2; tick++)
+    {
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f); // massing may hold a few ticks
+    }
+    REQUIRE(GroundOn(launcher, lePort).size() == 2);
+    const CounterAttackOrder op2 = GroundOn(launcher, lePort)[1];
+    CHECK(op2.bodies >= 8);
+    CHECK(op2.source == airfield);
+    CHECK(log.With({"the repel ladder on Le Port (1 repel(s))", "at least 8 infantry"}).size() == 1);
+    RepelOrder(f, launcher, op2);
+    CHECK(f.of.Repels("Le Port") == 2);
+    CHECK(log.With({"Le Port: second repel", "next attack from a different source or by air"}).size() == 1);
+
+    // op 3: a different approach (not op 2's package from the Airfield), and
+    // an escalation strike while the pool stays STRETCHED (a richer pool:
+    // the ground answer and the 23-unit jet would leave 60 THIN)
+    RestOut(f, 2400.0f);
+    REQUIRE_FALSE(f.of.Urgent("Le Port"));
+    const DirectorAction a2 = f.of.PlanFor(f.registry, ViewOf(f.registry), lePort, CAODirector, -1, 0, true);
+    REQUIRE(a2.go);
+    CHECK(a2.escalation == 2);
+    CHECK(a2.approach.GetLength() > 0);
+    CHECK_FALSE((a2.choice.quote.source == airfield && a2.choice.quote.package == op2.package));
+    f.of.SetPool(90);
+    for (int tick = 0; tick < 6 && GroundOn(launcher, lePort).size() < 3; tick++)
+    {
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f); // massing may hold a few ticks
+    }
+    REQUIRE(GroundOn(launcher, lePort).size() == 3);
+    const CounterAttackOrder op3 = GroundOn(launcher, lePort)[2];
+    CHECK_FALSE((op3.source == op2.source && op3.package == op2.package));
+    CHECK(log.With({"the repel ladder on Le Port (2 repel(s))", "a different approach"}).size() == 1);
+    const CounterAttackOrder* strike = FirstKind(launcher, CAKStrike);
+    REQUIRE(strike != nullptr);
+    CHECK(strike->target == lePort);
+    std::string strikeLines;
+    for (const std::string& l : log.With({"strike"}))
+    {
+        strikeLines += l + " | ";
+    }
+    INFO(strikeLines);
+    CHECK(log.With({"escalation strike: Le Port repelled 2 time(s)"}).size() == 1);
+    CHECK((f.of.Band() == OFBandStrong || f.of.Band() == OFBandStretched));
+
+    // repel 3: contained; the Harbour (nearest) surged by the 8 the next
+    // operation would have needed, paid by the pool
+    const float harbourBefore = f.Z("Le Port Harbour").garrison + (float)f.Z("Le Port Harbour").pending;
+    const int poolBefore = f.of.Pool();
+    RepelOrder(f, launcher, op3);
+    CHECK(f.of.Repels("Le Port") == 3);
+    CHECK(f.of.Contained("Le Port"));
+    REQUIRE(log.With({"Le Port: third repel", "contained", "Le Port Harbour surged by 8"}).size() == 1);
+    CHECK(f.Z("Le Port Harbour").garrison + (float)f.Z("Le Port Harbour").pending == Approx(harbourBefore + 8.0f));
+    CHECK(f.of.Pool() == poolBefore + op3.priceUnits - 8);
+
+    // contained: no candidate, no push-out, no launch while it is reported
+    RestOut(f, 2400.0f);
+    AutoArray<int> c;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    CHECK_FALSE(HasCandidate(c, lePort));
+    CHECK(f.of.PushoutTarget(f.registry, ViewOf(f.registry), launcher) != lePort);
+    const size_t before = GroundOn(launcher, lePort).size();
+    for (int tick = 0; tick < 10; tick++)
+    {
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    }
+    CHECK(GroundOn(launcher, lePort).size() == before);
+    CHECK_FALSE(f.of.Rearmed("Le Port"));
+
+    // the reports decay: the containment lifts (the memory stays)
+    f.of.Tick(f.registry, f.of.Tuning().intelDecay + 60.0f);
+    RestOut(f, 60.0f);
+    CHECK_FALSE(f.of.Contained("Le Port"));
+    CHECK(f.of.Repels("Le Port") == 3);
+    CHECK(log.With({"Le Port: containment lifted: its reports decayed"}).size() == 1);
+
+    // the zone changes hands: the ladder resets
+    f.Z("Le Port").owner = f.registry.OccupierSide();
+    RestOut(f, 60.0f);
+    CHECK(f.of.Repels("Le Port") == 0);
+    CHECK(f.of.RepelRows() == 0);
+    CHECK(log.With({"Le Port changed hands: the repel ladder resets (3 repel(s))"}).size() == 1);
+}
+
+TEST_CASE("OccupierForces - video 5 replayed: Le Port and Arudy escalate, change approach, then are contained",
+          "[game][guerrilla][occupierforces]")
+{
+    // tmp/of-director-video-5/trace.json: the director sent Le Port the same
+    // Ural + T72 from the Harbour seven times (repelled 300 s after each
+    // launch) and Arudy the same BMP from the Outpost five times (460 s),
+    // every rest exactly 1800 s.  The same sequence of repels now climbs the
+    // ladder, and both towns end contained
+    CoreLines log;
+    Fixture f;
+    Video5Setup(f);
+    const int lePort = f.registry.FindZoneIndex("Le Port");
+    const int arudy = f.registry.FindZoneIndex("Arudy");
+    FakeLauncher launcher;
+    struct Pending
+    {
+        CounterAttackOrder order;
+        float at;
+    };
+    std::vector<Pending> pending;
+    std::vector<float> lePortAt;
+    std::vector<float> arudyAt;
+    for (float t = 0; t <= 4.0f * 3600.0f; t += 60.0f)
+    {
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            if (stricmp(f.registry.GetZone(i)->owner, f.registry.ResistanceSide()) == 0)
+            {
+                f.registry.HeatDecay(i, 1.5f); // gmHeatDecayHeld
+            }
+        }
+        if (fmodf(t, 240.0f) < 1.0f)
+        {
+            // locals keep talking (7.3): the three and four fighters stay reported
+            f.of.IngestTip(f.registry, lePort, 4, f.Z("Le Port").pos);
+            f.of.IngestTip(f.registry, arudy, 3, f.Z("Arudy").pos);
+        }
+        for (size_t k = 0; k < pending.size();)
+        {
+            if (t >= pending[k].at)
+            {
+                if (pending[k].order.kind == CAKStrike)
+                {
+                    CounterAttackOpEvent ev;
+                    ev.opId = pending[k].order.opId;
+                    ev.type = CAOpHullRefund;
+                    ev.kind = CAKStrike;
+                    ev.target = pending[k].order.target;
+                    ev.units = pending[k].order.priceUnits;
+                    f.of.NoteOpEvent(f.registry, ev); // the ground record stays until its repel
+                }
+                else
+                {
+                    RepelOrder(f, launcher, pending[k].order);
+                }
+                pending.erase(pending.begin() + (long)k);
+                continue;
+            }
+            k++;
+        }
+        const size_t n = launcher.orders.size();
+        f.of.Tick(f.registry, 60.0f);
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        for (size_t k = n; k < launcher.orders.size(); k++)
+        {
+            const CounterAttackOrder& o = launcher.orders[k];
+            if (o.kind == CAKStrike)
+            {
+                pending.push_back({o, t + 120.0f});
+                continue;
+            }
+            REQUIRE((o.target == lePort || o.target == arudy));
+            (o.target == lePort ? lePortAt : arudyAt).push_back(t);
+            pending.push_back({o, t + (o.target == lePort ? 300.0f : 460.0f)});
+        }
+    }
+    for (const int zone : {lePort, arudy})
+    {
+        const char* name = zone == lePort ? "Le Port" : "Arudy";
+        const int fighters = zone == lePort ? 4 : 3;
+        const std::vector<CounterAttackOrder> ops = GroundOn(launcher, zone);
+        INFO(name);
+        // three attacks, then nothing: contained for the rest of the run
+        REQUIRE(ops.size() == 3);
+        CHECK(f.of.Repels(name) == 3);
+        CHECK(f.of.Contained(name));
+        // escalate: the second brings twice the fighters as infantry, or
+        // the director massed for it first
+        CHECK((ops[1].bodies >= 2 * fighters || !log.With({"massing for ", name}).empty()));
+        // change approach: the third is not the second again
+        CHECK_FALSE((ops[2].source == ops[1].source && ops[2].package == ops[1].package));
+        const std::string first = std::string(name) + ": first repel";
+        const std::string second = std::string(name) + ": second repel";
+        const std::string third = std::string(name) + ": third repel";
+        CHECK(log.With({first.c_str()}).size() == 1);
+        CHECK(log.With({second.c_str()}).size() == 1);
+        CHECK(log.With({third.c_str(), "contained"}).size() == 1);
+    }
+    // the rests carry the jitter: no two answers 1800 s + a token apart to
+    // the second (video 5: Le Port 241, 2643, 4565, 6487, 8409, ...)
+    REQUIRE(lePortAt.size() == 3);
+    REQUIRE(arudyAt.size() == 3);
+    CHECK(lePortAt[2] - lePortAt[1] != Approx(lePortAt[1] - lePortAt[0]).margin(30.0f));
+    // the strongest town first: Le Port, by its Harbour, won the tie at 40
+    CHECK(lePortAt[0] == Approx(0.0f));
+}
+
+TEST_CASE("OccupierForces - massing: an escalated need above every base's spare holds the token",
+          "[game][guerrilla][occupierforces]")
+{
+    auto setup = [](Fixture& f)
+    {
+        Video5Setup(f);
+        f.of.ForceCooldown("Arudy", 1.0e7f);
+        f.of.ForceRepels("Le Port", 1); // the ladder: 8 infantry for 4 fighters
+        f.Z("Airfield").garrison = 8;   // spares 5; the Harbour 6, the Outpost 5
+    };
+    const int massingMax = OccupierForcesTuning().massingMax;
+    REQUIRE(massingMax == 3);
+    SECTION("held forcesMassingMax ticks, then the strongest package goes")
+    {
+        CoreLines log;
+        Fixture f;
+        setup(f);
+        const int lePort = f.registry.FindZoneIndex("Le Port");
+        FakeLauncher launcher;
+        const int tokens = f.of.Tokens();
+        for (int tick = 1; tick <= massingMax; tick++)
+        {
+            f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+            CHECK(launcher.orders.empty());
+            CHECK(Str(f.of.MassingTarget()) == "Le Port");
+            CHECK(f.of.MassingTicks() == tick);
+            CHECK(f.of.Tokens() == tokens); // kept, not consumed
+        }
+        CHECK(log.With({"massing for Le Port: need 8 infantry, best source spares 6"}).size() == (size_t)massingMax);
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        REQUIRE(GroundOn(launcher, lePort).size() == 1);
+        CHECK(GroundOn(launcher, lePort)[0].bodies == 6);
+        CHECK(GroundOn(launcher, lePort)[0].source == f.registry.FindZoneIndex("Le Port Harbour"));
+        CHECK(log.With({"massing for Le Port ends", "forcesMassingMax ticks held"}).size() == 1);
+        CHECK(Str(f.of.MassingTarget()).empty());
+    }
+    SECTION("a base that can staff it ends the hold")
+    {
+        CoreLines log;
+        Fixture f;
+        setup(f);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        REQUIRE(launcher.orders.empty());
+        f.Z("Airfield").garrison = 12; // regrown: spares 9
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        REQUIRE(launcher.orders.size() >= 1);
+        CHECK(launcher.orders[0].bodies >= 8);
+        CHECK(launcher.orders[0].source == f.registry.FindZoneIndex("Airfield"));
+        CHECK(log.With({"massing for Le Port ends: Airfield can staff it"}).size() == 1);
+    }
+    SECTION("a further token ends the hold: the largest package goes")
+    {
+        CoreLines log;
+        Fixture f;
+        setup(f);
+        f.of.TuningMutable().tokensMax = 1; // the purse trims to one
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        REQUIRE(launcher.orders.empty());
+        REQUIRE(f.of.Tokens() == 1);
+        f.of.TuningMutable().tokensMax = 2;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 600.0f);
+        REQUIRE(launcher.orders.size() >= 1);
+        CHECK(launcher.orders[0].bodies == 6);
+        CHECK(log.With({"massing for Le Port ends", "a further token"}).size() == 1);
+    }
+    SECTION("never on a first attempt; massingMax 0 never holds")
+    {
+        Fixture f;
+        setup(f);
+        f.of.ForceRepels("Le Port", 0);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        CHECK(launcher.orders.size() >= 1);
+        Fixture g;
+        setup(g);
+        g.of.TuningMutable().massingMax = 0;
+        FakeLauncher l2;
+        g.of.Direct(g.registry, ViewOf(g.registry), l2, 60.0f);
+        REQUIRE(l2.orders.size() >= 1);
+        CHECK(l2.orders[0].bodies == 6);
+    }
+}
+
+TEST_CASE("OccupierForces - candidates by value within the same urgency and heat: bases, towns by a base, far towns",
+          "[game][guerrilla][occupierforces]")
+{
+    CoreLines log;
+    Fixture f;
+    Video5Setup(f);
+    const int lePort = f.registry.FindZoneIndex("Le Port");
+    const int arudy = f.registry.FindZoneIndex("Arudy");
+    const int outpost = f.registry.FindZoneIndex("Outpost");
+    CHECK(f.of.CandidateValue(f.registry, lePort) == OccupierForces::ValueAdjacentTown); // 0.5 km from the Harbour
+    CHECK(f.of.CandidateValue(f.registry, arudy) == OccupierForces::ValueFarTown);       // 2.2 km from the Outpost
+    CHECK(f.of.CandidateValue(f.registry, outpost) == OccupierForces::ValueBase);
+    CHECK(f.of.CandidateValue(f.registry, OccupierForces::HqCandidate) == OccupierForces::ValueHq);
+    FakeLauncher launcher;
+    AutoArray<int> c;
+    // video 5: both re-armed at 40; the town by the Harbour first
+    f.Z("Le Port").heat = 40;
+    f.Z("Arudy").heat = 40.6f;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    REQUIRE(c.Size() == 2);
+    CHECK(c[0] == lePort);
+    CHECK(c[1] == arudy);
+    // a whole point hotter wins over value
+    f.Z("Arudy").heat = 41.2f;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    CHECK(c[0] == arudy);
+    // urgency first: an alert edge on Le Port
+    f.Z("Arudy").heat = 60;
+    AutoArray<int> states;
+    states.Resize(f.registry.NZones());
+    for (int i = 0; i < states.Size(); i++)
+    {
+        states[i] = 0;
+    }
+    f.of.NoteAlertStates(f.registry, states);
+    states[lePort] = 1;
+    f.of.NoteAlertStates(f.registry, states);
+    REQUIRE(f.of.Urgent("Le Port"));
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    CHECK(c[0] == lePort);
+    // a held base at the same heat goes before both towns (STRONG)
+    states[lePort] = 0;
+    f.of.NoteAlertStates(f.registry, states);
+    f.Z("Le Port").heat = 30; // below the urgency exit: released next step
+    f.Z("Arudy").heat = 40;
+    RestOut(f, 0.0f);
+    REQUIRE_FALSE(f.of.Urgent("Le Port"));
+    REQUIRE_FALSE(f.of.Urgent("Arudy"));
+    f.Z("Le Port").heat = 40;
+    f.Z("Arudy").heat = 40;
+    f.GiveToResistance("Outpost");
+    f.Z("Outpost").heat = 40;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    REQUIRE(c.Size() == 3);
+    CHECK(c[0] == outpost);
+    // the launch names the candidate's weight
+    FakeLauncher l2;
+    f.of.Direct(f.registry, ViewOf(f.registry), l2, 60.0f);
+    REQUIRE(l2.orders.size() >= 1);
+    CHECK(log.With({"candidate Outpost, 1 of 3: a base (weight 3), heat 40"}).size() == 1);
+}
+
+TEST_CASE("OccupierForces - the rest carries a hashed jitter of +-20 %; 0 is the old clockwork",
+          "[game][guerrilla][occupierforces]")
+{
+    OccupierForcesTuning t;
+    CHECK(t.restJitter == Approx(0.2f));
+    float lo = 1.0e9f;
+    float hi = 0;
+    for (int op = 1; op <= 200; op++)
+    {
+        const float r = OccupierForces::JitteredRest(t, "Le Port", op);
+        CHECK(r >= 1440.0f - 0.01f);
+        CHECK(r <= 2160.0f + 0.01f);
+        CHECK(r == OccupierForces::JitteredRest(t, "Le Port", op)); // deterministic
+        lo = r < lo ? r : lo;
+        hi = r > hi ? r : hi;
+    }
+    CHECK(hi - lo > 500.0f); // it spreads
+    CHECK(OccupierForces::JitteredRest(t, "Le Port", 1) != OccupierForces::JitteredRest(t, "Arudy", 1));
+    t.restJitter = 0;
+    CHECK(OccupierForces::JitteredRest(t, "Le Port", 7) == Approx(1800.0f));
+    // a repel rests the town for its jittered rest, named in the line
+    CoreLines log;
+    Fixture f;
+    Video5Setup(f);
+    f.of.ForceCooldown("Arudy", 1.0e7f);
+    FakeLauncher launcher;
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    REQUIRE(launcher.orders.size() >= 1);
+    const CounterAttackOrder o = launcher.orders[0];
+    RepelOrder(f, launcher, o);
+    const float rest = OccupierForces::JitteredRest(f.of.Tuning(), "Le Port", o.opId);
+    CHECK(f.of.Cooldown("Le Port") == Approx(rest));
+    char words[64];
+    snprintf(words, sizeof(words), "Le Port rests %.0f s", (double)rest);
+    CHECK(log.With({words}).size() == 1);
+}
+
+TEST_CASE("OccupierForces - a wave strike takes the arrival rule: the HQ assault from the hub is not a walk",
+          "[game][guerrilla][occupierforces][air]")
+{
+    // video 5, op 7: "Wave 1 strike: HQ assault (foot 6) from Le Port
+    // Harbour on Camp (..., road 2450 s)": a 41-minute walk from the harbour
+    // that had just landed the wave
+    for (const bool rule : {true, false})
+    {
+        Fixture f;
+        Video5Setup(f);
+        if (!rule)
+        {
+            f.of.TuningMutable().slowEta = 0; // the arrival rule off: the old plain choice
+            f.of.TuningMutable().airEta = 0;
+        }
+        f.of.TuningMutable().waveLead = 0;
+        f.of.TuningMutable().tokensMax = 0; // the wave alone
+        DirectorView v = ViewOf(f.registry);
+        v.hqEstablished = true;
+        v.hqZone = f.registry.FindZoneIndex("Camp");
+        v.hqPos = f.Z("Camp").pos;
+        FakeLauncher launcher;
+        f.of.RequestWave(f.registry, v, 1);
+        f.of.Direct(f.registry, v, launcher, 60.0f);
+        REQUIRE(f.of.WavesLanded() == 1);
+        const CounterAttackOrder* hq = FirstKind(launcher, CAKHqAssault);
+        REQUIRE(hq != nullptr);
+        CHECK(hq->origin == CAOWave);
+        CHECK(hq->source == f.registry.FindZoneIndex("Airfield")); // the hub
+        // the Airfield is 4.1 km from the Camp: about 4150 s on foot
+        if (rule)
+        {
+            CHECK(hq->package != FPFoot);
+        }
+        else
+        {
+            CHECK(hq->package == FPFoot);
+        }
+    }
+}
+
+TEST_CASE("OccupierForces - containment lifts on a wave and on a control band; the ladder survives save/load",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::string config = Video5Config();
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    CoreLines log;
+    Fixture f;
+    Video5Setup(f);
+    f.of.ForceRepels("Le Port", 3);
+    f.of.ForceRepels("Arudy", 2);
+    REQUIRE(f.of.Contained("Le Port"));
+    REQUIRE_FALSE(f.of.Contained("Arudy"));
+    // saved with the block
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-repels.bin";
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.RepelRows() == 2);
+    CHECK(loaded.Repels("Le Port") == 3);
+    CHECK(loaded.Contained("Le Port"));
+    CHECK(loaded.Repels("Arudy") == 2);
+    CHECK_FALSE(loaded.Contained("Arudy"));
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+
+    // a wave fires: the parent nation sends more, contained zones are weighed again
+    DirectorView v = ViewOf(f.registry);
+    f.of.RequestWave(f.registry, v, 1);
+    CHECK_FALSE(f.of.Contained("Le Port"));
+    CHECK(f.of.Repels("Le Port") == 3);
+    CHECK(log.With({"Le Port: containment lifted: a wave fired"}).size() == 1);
+
+    // control crosses a wave threshold: lifted too
+    Fixture g;
+    Video5Setup(g);
+    g.of.Tick(g.registry, 60.0f); // the control band is known (0.89: above 0.75)
+    g.of.ForceRepels("Arudy", 3);
+    REQUIRE(g.of.Contained("Arudy"));
+    g.of.Tick(g.registry, 60.0f);
+    REQUIRE(g.of.Contained("Arudy"));
+    g.GiveToResistance("Airfield"); // M 14 / 26: control about 0.61
+    g.of.Tick(g.registry, 60.0f);
+    CHECK(g.of.Control() < 0.75f);
+    CHECK_FALSE(g.of.Contained("Arudy"));
+    CHECK(log.With({"Arudy: containment lifted: control", "crossed a wave threshold"}).size() == 1);
+}
+
+TEST_CASE("OccupierForces - the escalation strike keeps STRETCHED, never THIN",
+          "[game][guerrilla][occupierforces][air]")
+{
+    Fixture f;
+    Video5Setup(f);
+    const int lePort = f.registry.FindZoneIndex("Le Port");
+    const DirectorView v = ViewOf(f.registry);
+    // not before the second repel
+    CHECK_FALSE(f.of.EscalationStrikeDue(f.registry, v, lePort));
+    f.of.ForceRepels("Le Port", 2);
+    CHECK(f.of.EscalationStrikeDue(f.registry, v, lePort));
+    // STRETCHED (35 of 60): the 23-unit jet would leave 12, THIN: refused
+    // with its own words
+    f.of.SetPool(35);
+    REQUIRE(f.of.Band() == OFBandStretched);
+    CHECK(f.of.EscalationStrikeDue(f.registry, v, lePort)); // STRETCHED may still strike
+    const DirectorAction thin = f.of.PlanStrike(f.registry, v, lePort, true, true, true);
+    CHECK_FALSE(thin.go);
+    CHECK(Str(thin.choice.why) == OccupierForces::StrikeKeepsStretchedWhy);
+    f.of.SetPool(45); // 45 - 23 = 22: STRETCHED
+    const DirectorAction ok = f.of.PlanStrike(f.registry, v, lePort, true, true, true);
+    REQUIRE(ok.go);
+    CHECK(ok.choice.quote.package == FPJet);
+    // the plain rule (keepStrong only) refuses the same strike
+    CHECK_FALSE(f.of.PlanStrike(f.registry, v, lePort, true, true).go);
+    // THIN: no escalation strike at all
+    f.of.SetPool(15);
+    REQUIRE(f.of.Band() == OFBandThin);
+    CHECK_FALSE(f.of.EscalationStrikeDue(f.registry, v, lePort));
+    // fewer than StrikeMinFighters (3) reported: none
+    Fixture g;
+    Video5Setup(g);
+    const int arudy = g.registry.FindZoneIndex("Arudy");
+    g.of.ForceRepels("Arudy", 2);
+    CHECK(g.of.EscalationStrikeDue(g.registry, ViewOf(g.registry), arudy)); // 3 reported
+    g.of.Tick(g.registry, g.of.Tuning().intelDecay + 60.0f);
+    RestOut(g, 60.0f); // the reports decay
+    g.of.IngestTip(g.registry, arudy, 2, g.Z("Arudy").pos);
+    REQUIRE(g.of.KnownFighters(g.registry, arudy) == 2);
+    CHECK_FALSE(g.of.EscalationStrikeDue(g.registry, ViewOf(g.registry), arudy));
+}
+
+TEST_CASE("OccupierForces - generated bases: in the roster and R, their garrisons out of poolStart, waves unchanged",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    // OCCUPIER-FORCES.md 5.7, the owner's conservation rule (2026-10-16):
+    // presence, not strength.  The Abel-sized theatre with one of its four
+    // bases generated: authored R 24, Rgen 8, K 14
+    const std::string config = AbelLikeConfig();
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    f.Z("Base3").generated = true;
+    REQUIRE(CampaignEnd::IsGeneratedOccupier(f.Z("Base3"), f.registry));
+    REQUIRE_FALSE(CampaignEnd::IsAuthoredOccupier(f.Z("Base3"), f.registry));
+    OccupierForcesSizing s;
+    OccupierForces::Size(f.registry, f.of.Tuning(), s);
+    CHECK(s.R == 32);
+    CHECK(s.Rgen == 8);
+    CHECK(s.roster.Size() == 4);
+    // max(24, 24 + 2 x 14) - 8 = 44
+    CHECK(s.poolStart == 44);
+    REQUIRE(f.of.Activate(f.registry));
+    CHECK(f.of.PoolStart() == 44);
+    CHECK(f.of.RosterStrength() == 32);
+    CHECK(f.of.GeneratedStrength() == 8);
+    CHECK(f.of.RosterCount() == 4);
+    // the refill is unchanged: (44 + 32 + 56) / 4 = 33 an hour, as
+    // (52 + 24 + 56) / 4 without the generated base
+    CHECK(OccupierForces::RefillPerHour(f.of.PoolStart(), f.of.RosterStrength(), f.of.TownGarrisons(),
+                                        f.of.Tuning().refillHours, 50.0f) == Approx(33.0f));
+    // a wave stays a share of poolStart + Rgen: 0.5 x 52 = 26
+    f.of.RequestWave(f.registry, ViewOf(f.registry), 1);
+    CHECK(f.of.WaveBodies() == 26);
+    // Rgen is saved with the block
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-rgen.bin";
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.GeneratedStrength() == 8);
+    CHECK(loaded.PoolStart() == 44);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+}
+
+// ---------------------------------------------------------------------------
+// the ledger of 2026-10-16 (decisions 5, 6, 9; the feel assessment's item 10):
+// the wave surge, committed airframes, the loss window, the hull flag
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// stored reserve plus pending over every zone (the 5.5 reserves + pending)
+int HeldOf(Fixture& f)
+{
+    int n = 0;
+    for (int i = 0; i < f.registry.NZones(); i++)
+    {
+        const ZoneRecord* z = f.registry.GetZone(i);
+        n += (int)floorf(z->garrison > 0 ? z->garrison : 0) + z->pending;
+    }
+    return n;
+}
+void FlushAll(Fixture& f)
+{
+    for (int i = 0; i < f.registry.NZones(); i++)
+    {
+        GarrisonCache::FlushPending(f.registry, i, true, 99999.0f, 99999.0f, nullptr);
+    }
+}
+CounterAttackOpEvent LedgerEvent(int opId, int type, int units, int source = -1)
+{
+    CounterAttackOpEvent ev;
+    ev.opId = opId;
+    ev.type = type;
+    ev.kind = CAKRetake;
+    ev.origin = CAODirector;
+    ev.units = units;
+    ev.bodies = type == CAOpCrewSettled ? units : 0;
+    ev.source = source;
+    return ev;
+}
+} // namespace
+
+TEST_CASE("OccupierForces - the wave surge: the excess over the ceiling thickens the bases near the wave's cluster, "
+          "then decays with nothing dropped",
+          "[game][guerrilla][occupierforces]")
+{
+    // video 5 (tmp/of-director-video-5): after a wave every base sat at
+    // garrisonMax and the survivors who came home over the ceiling were
+    // dropped (9 dropped, 1 banked).  Decision 5: while the wave is on, the
+    // excess is a surge above garrisonMax at the bases nearest the wave's
+    // cluster, which decays back to garrisonMax over surgeDecayHours: the
+    // bodies rejoin the pool up to the ceiling and the rest stand down
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    REQUIRE(P == 60);
+    REQUIRE(HeldOf(f) == R + G); // every base and town at its garrisonMax
+    int op = 0;
+    auto check = [&]()
+    {
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool(), HeldOf(f), 0, op, P, R, G, f.of.RefillTotal(),
+                                                f.of.WavesTotal(),
+                                                f.of.Lost() + f.of.Dropped() + f.of.StoodDown()));
+    };
+    CHECK_FALSE(f.of.SurgeOpen());
+    f.of.LandWave(10);
+    REQUIRE(f.of.Pool() == P + 10);
+    CHECK(f.of.SurgeOpen());
+    CHECK(f.of.SurgeWindowLeft() == Approx(OccupierForces::WaveWindow));
+    // the wave's cluster is around Base3 (AllocateWave anchors it there)
+    f.of.SetSurgeAnchor(f.Z("Base3").pos);
+    check();
+    // a wave strike of 20 goes out; the refill tops the pool up to poolStart
+    // meanwhile, so the 20 who come home meet a ceiling with room for 10
+    REQUIRE(f.of.Spend(20, "wave strike"));
+    op += 20;
+    f.of.Tick(f.registry, 1000.0f);
+    REQUIRE(f.of.Pool() == P);
+    REQUIRE(f.of.SurgeOpen());
+    check();
+    CoreLines log;
+    CHECK(f.of.Refund(20, "wave survivors home") == 10);
+    op -= 20;
+    CHECK(f.of.Pool() == P + 10);
+    CHECK(f.of.PoolCeiling() == P + 10);
+    // 0 dropped, nothing banked: 10 surge above garrisonMax, nearest the
+    // cluster first, each base up to +50 % (4 over its 8)
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.of.Banked() == 0);
+    CHECK(f.of.SurgeTotal() == 10);
+    CHECK(f.Z("Base3").pending == 4);
+    CHECK(f.Z("Base2").pending == 4);
+    CHECK(f.Z("Base1").pending == 2);
+    CHECK(f.Z("Base0").pending == 0);
+    CHECK(log.With({"surge: 4 unit(s) over poolStart at Base3", "above its garrisonMax"}).size() == 1);
+    CHECK(log.With({"over poolStart dropped"}).empty());
+    check();
+    // the surge joins the reserves once the player is away: bases visibly
+    // thicker after the wave
+    FlushAll(f);
+    CHECK(f.Z("Base3").garrison == Approx(12.0f));
+    check();
+    // it decays back over about an hour; the pool sits at its ceiling, so
+    // every decayed body stands down
+    for (int k = 0; k < 70; k++)
+    {
+        f.of.Tick(f.registry, 60.0f);
+        check();
+        CHECK(f.of.Pool() <= f.of.PoolCeiling());
+    }
+    CHECK(f.of.SurgeTotal() == 0);
+    CHECK(f.of.SurgeRows() == 0);
+    CHECK(f.of.StoodDown() == 10);
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.Z("Base3").garrison == Approx(8.0f));
+    CHECK(f.Z("Base2").garrison == Approx(8.0f));
+    CHECK(f.Z("Base1").garrison == Approx(8.0f));
+    CHECK(!log.With({"surge:", "unit(s) stood down at Base3"}).empty());
+    check();
+    // the wave is over (the window closed): an excess banks or drops again
+    CHECK_FALSE(f.of.SurgeOpen());
+    CHECK(f.of.Refund(3, "surplus") == 0);
+    CHECK(f.of.SurgeTotal() == 0);
+    CHECK(f.of.Dropped() == 3);
+}
+
+TEST_CASE("OccupierForces - the wave surge rejoins the pool up to the ceiling, the rest stands down; a lost base "
+          "ends it",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    f.of.TuningMutable().surgeDecayHours = 0.5f;
+    f.of.LandWave(8);
+    f.of.SetSurgeAnchor(f.Z("Base0").pos);
+    // the pool at its ceiling: an 8-unit refund is all excess
+    CHECK(f.of.Refund(8, "wave survivors home") == 0);
+    CHECK(f.Z("Base0").pending == 4);
+    CHECK(f.Z("Base1").pending == 4);
+    FlushAll(f);
+    // 5 of the pool's wave strength are spent and lost: the decay brings 5
+    // back to the ceiling first, the other 3 stand down
+    REQUIRE(f.of.Spend(5, "column"));
+    f.of.NoteLoss(5, "column lost");
+    REQUIRE(f.of.PoolCeiling() == P + 8); // the pool's own overshoot keeps the headroom
+    for (int k = 0; k < 40; k++)
+    {
+        f.of.Tick(f.registry, 60.0f);
+        CHECK(f.of.Pool() <= f.of.PoolCeiling());
+    }
+    CHECK(f.of.SurgeTotal() == 0);
+    CHECK(f.of.Pool() == P + 8);
+    CHECK(f.of.StoodDown() == 3);
+    CHECK(f.of.Dropped() == 0);
+    // a surge at a base the occupier loses ends with it (the bodies follow
+    // the zone's own flip rules)
+    f.of.LandWave(4);
+    f.of.SetSurgeAnchor(f.Z("Base3").pos);
+    f.of.SetPool(f.of.PoolCeiling());
+    CHECK(f.of.Refund(4, "survivors") == 0);
+    REQUIRE(f.of.SurgeRows() == 1);
+    CHECK(Str(f.of.SurgeRowZone(0)) == "Base3");
+    f.GiveToResistance("Base3");
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.SurgeRows() == 0);
+}
+
+TEST_CASE("OccupierForces - a sortie does not demote the band; a shot-down airframe does",
+          "[game][guerrilla][occupierforces]")
+{
+    // video 5: two Mi17s took the band from STRONG to STRETCHED for 100 s
+    // while they were out.  Decision 6: an airframe out is committed, not
+    // spent: the band is stepped on the pool plus the airframes the ledger
+    // rows still hold, and only a hull lost moves it
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    f.of.SetPool(40); // 66.7 %: STRONG, 4 units above its exit
+    REQUIRE(f.of.Band() == OFBandStrong);
+    // the old arithmetic: an 18-unit insertion on 40 would read STRETCHED
+    CHECK(OccupierForces::StepBand(OFBandStrong, 40 - 18, P) == OFBandStretched);
+    CoreLines log;
+    {
+        // the launch: the debit and the ledger row are one movement
+        OccupierForces::BandHold hold(f.of);
+        REQUIRE(f.of.Spend(18, "Mi17 and crew"));
+        REQUIRE(f.of.BookLeverOp(101, "T0", CAKRetake, FPTransportHeli, 18));
+    }
+    CHECK(f.of.Pool() == 22);
+    CHECK(f.of.CommittedAir() == 18);
+    CHECK(f.of.BandStrength() == 40);
+    CHECK(f.of.Band() == OFBandStrong);
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpAirborne, 0));
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpLanded, 0));
+    f.of.Tick(f.registry, 100.0f); // the refill tops the pool up a little
+    CHECK(f.of.Band() == OFBandStrong);
+    // home: the crew settle as bodies, the hull is refunded
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpCrewSettled, 2));
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpHullRefund, 16, f.registry.FindZoneIndex("Base0")));
+    CHECK(f.of.CommittedAir() == 0);
+    CHECK(f.of.Band() == OFBandStrong);
+    CHECK(log.With({"band STRONG -> STRETCHED"}).empty());
+    // a second sortie is shot down: the hull is a real loss and demotes
+    f.of.SetPool(40);
+    {
+        OccupierForces::BandHold hold(f.of);
+        REQUIRE(f.of.Spend(18, "Mi17 and crew"));
+        REQUIRE(f.of.BookLeverOp(102, "T1", CAKRetake, FPTransportHeli, 18));
+    }
+    CHECK(f.of.Band() == OFBandStrong);
+    f.of.NoteOpEvent(f.registry, LedgerEvent(102, CAOpHullLost, 16));
+    CHECK(f.of.CommittedAir() == 2); // the crew, still to settle
+    CHECK(f.of.LossDebt() == 16);
+    CHECK(f.of.BandStrength() == 24);
+    CHECK(f.of.Band() == OFBandStretched);
+    CHECK(log.With({"band STRONG -> STRETCHED", "pool 22 of 60"}).size() == 1);
+    // a ground hull out is not committed: a column still demotes as before
+    CHECK(OccupierForces::BandStrengthOf(22, P, 0, 0) == 22);
+}
+
+TEST_CASE("OccupierForces - the band reads losses: 37 killed in an hour on a Malden-sized pool drop it to "
+          "STRETCHED while the pool says STRONG",
+          "[game][guerrilla][occupierforces]")
+{
+    // the feel assessment, item 10 (the levers audit: "refill beats the
+    // bands", STRONG 99 % of video 5).  The Abel-like fixture is Malden's
+    // arithmetic: R 32, K 14, G 56, poolStart 60, refill 37 an hour.  The
+    // band is stepped on min(pool, poolStart - lost + repaid) over the last
+    // lossWindowHours: 37 killed in an hour while D2 regrowth repays 12 of
+    // them (two bases at 1 body per 600 s) leaves strength 35 of 60
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    REQUIRE(P == 60);
+    REQUIRE(f.of.Tuning().lossWindowHours == Approx(1.0f));
+    CHECK(OccupierForces::RefillPerHour(P, f.of.RosterStrength(), f.of.TownGarrisons(), 4.0f, 50.0f) ==
+          Approx(37.0f));
+    CoreLines log;
+    int killed = 0;
+    int bandAt = -1; // the kill that first left STRONG
+    f.of.NoteLoss(1, "garrison");
+    killed++;
+    for (int step = 0; step < 36; step++)
+    {
+        if (step % 6 == 0)
+        {
+            CHECK(f.of.Draw(2) == 2); // D2 regrowth at two bases
+        }
+        f.of.Tick(f.registry, 100.0f);
+        f.of.NoteLoss(1, "garrison");
+        killed++;
+        if (bandAt < 0 && f.of.Band() != OFBandStrong)
+        {
+            bandAt = killed;
+        }
+    }
+    CHECK(killed == 37);
+    CHECK(f.of.LossesInWindow() == 37);
+    CHECK(f.of.RepaidInWindow() == 12);
+    CHECK(f.of.BandStrength() == 35);
+    CHECK(f.of.Band() == OFBandStretched);
+    // the pool number alone still says STRONG
+    CHECK(f.of.Pool() >= 58);
+    CHECK(OccupierForces::InitialBand(f.of.Pool(), P) == OFBandStrong);
+    CHECK(bandAt == 37); // 25 unrepaid is the first strength under 60 %
+    CHECK(log.With({"band STRONG -> STRETCHED", "lost"}).size() == 1);
+    // the losses age out of the window: the band recovers
+    f.of.Tick(f.registry, 3700.0f);
+    CHECK(f.of.LossesInWindow() == 0);
+    CHECK(f.of.BandStrength() == f.of.Pool());
+    CHECK(f.of.Band() == OFBandStrong);
+    // the pure rule
+    CHECK(OccupierForces::BandStrengthOf(60, 60, 0, 25) == 35);
+    CHECK(OccupierForces::BandStrengthOf(40, 60, 18, 0) == 58);
+    CHECK(OccupierForces::BandStrengthOf(70, 60, 0, 25) == 45); // a wave's overshoot is strength on top
+    CHECK(OccupierForces::BandStrengthOf(10, 60, 0, 80) == 0);
+}
+
+TEST_CASE("OccupierForces - the hull flag: a hull home over the ceiling is a stored spare, not a garrison",
+          "[game][guerrilla][occupierforces]")
+{
+    // video 5's "22 banked": an APC came home to a full pool and became 22
+    // bodies of garrison.  Decision 9, forcesBankHulls 0 (the default): only
+    // bodies bank; a hull over the ceiling is a stored spare hull at its base
+    // (or the nearest base with a garage), back in the pool when it has room
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    CHECK_FALSE(f.of.Tuning().bankHulls);
+    const int b1 = f.registry.FindZoneIndex("Base1");
+    f.Z("Base2").garrison = 0; // room to bank bodies, which a hull must not take
+    REQUIRE(f.of.Spend(22, "APC and crew"));
+    REQUIRE(f.of.BookLeverOp(201, "T0", CAKRetake, FPApc, 22));
+    f.of.Tick(f.registry, 3600.0f); // the refill tops the pool back up
+    REQUIRE(f.of.Pool() == P);
+    CoreLines log;
+    f.of.NoteOpEvent(f.registry, LedgerEvent(201, CAOpCrewSettled, 2));
+    f.of.NoteOpEvent(f.registry, LedgerEvent(201, CAOpHullRefund, 20, b1));
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Banked() == 0);
+    CHECK(f.of.Dropped() == 0);
+    CHECK(PendingOf(f) == 0);
+    REQUIRE(f.of.StoredHullRows() == 1);
+    CHECK(Str(f.of.StoredHullZone(0)) == "Base1");
+    CHECK(f.of.StoredHullPackage(0) == FPApc);
+    CHECK(f.of.StoredHullUnits(0) == 20);
+    CHECK(f.of.StoredHullTotal() == 20);
+    CHECK(log.With({"ledger: APC over poolStart stored as a spare hull at Base1", "20 unit(s)"}).size() == 1);
+    // the pool spends 8: the stored APC fills it back first (before the refill)
+    REQUIRE(f.of.Spend(8, "truck"));
+    const int refill0 = f.of.RefillTotal();
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.RefillTotal() == refill0);
+    CHECK(f.of.StoredHullUnits(0) == 12);
+    CHECK(log.With({"the spare APC stored at Base1 rejoins the pool", "8 unit(s)"}).size() == 1);
+    // a base full of spares (StoredHullsPerBase): the next goes to the
+    // nearest base with a garage
+    REQUIRE(f.of.CanStoreHull(f.registry, b1));
+    CHECK(f.of.RefundHull(f.registry, 5, FPTruck, "TRUCK", b1) == 0);
+    CHECK_FALSE(f.of.CanStoreHull(f.registry, b1));
+    CHECK(f.of.RefundHull(f.registry, 4, FPTruck, "TRUCK", b1) == 0);
+    REQUIRE(f.of.StoredHullRows() == 3);
+    const std::string third = Str(f.of.StoredHullZone(2));
+    CHECK((third == "Base0" || third == "Base2"));
+    // the base is lost: its spares are lost with it, a real loss
+    const int lost0 = f.of.Lost();
+    f.GiveToResistance("Base1");
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.Lost() == lost0 + 12 + 5);
+    CHECK(f.of.StoredHullRows() == 1);
+    // no base can store one: dropped, with the line
+    for (int i = 0; i < 4; i++)
+    {
+        f.GiveToResistance(("Base" + std::to_string(i)).c_str());
+    }
+    f.of.Tick(f.registry, 60.0f); // the last spare is lost with its base too
+    CHECK(f.of.StoredHullRows() == 0);
+    f.of.SetPool(P);
+    const int dropped0 = f.of.Dropped();
+    CHECK(f.of.RefundHull(f.registry, 6, FPTank, "TANK", -1) == 0);
+    CHECK(f.of.Dropped() == dropped0 + 6);
+    CHECK(log.With({"6 hull unit(s) over poolStart dropped", "TANK"}).size() == 1);
+}
+
+TEST_CASE("OccupierForces - the hull flag keeps the ledger conserved: stored hulls are pool units in hull form",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    int op = 0;
+    auto check = [&]()
+    {
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool() + f.of.StoredHullTotal(), HeldOf(f), 0, op, P, R, G,
+                                                f.of.RefillTotal(), f.of.WavesTotal(),
+                                                f.of.Lost() + f.of.Dropped() + f.of.StoodDown()));
+    };
+    check();
+    REQUIRE(f.of.Spend(22, "APC and crew"));
+    REQUIRE(f.of.BookLeverOp(211, "T0", CAKRetake, FPApc, 22));
+    op += 22;
+    f.of.Tick(f.registry, 3600.0f);
+    check();
+    // the crew are lost in the fight, the hull comes home over the ceiling
+    f.of.NoteLoss(2, "crew");
+    f.of.NoteOpEvent(f.registry, LedgerEvent(211, CAOpCrewSettled, 2));
+    op -= 2;
+    check();
+    f.of.NoteOpEvent(f.registry, LedgerEvent(211, CAOpHullRefund, 20, f.registry.FindZoneIndex("Base1")));
+    op -= 20;
+    CHECK(f.of.StoredHullTotal() == 20);
+    check();
+    REQUIRE(f.of.Spend(15, "column"));
+    op += 15;
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.StoredHullTotal() == 5);
+    check();
+}
+
+TEST_CASE("OccupierForces - forcesBankHulls 1 keeps the df9457e rule: a hull banks as bodies",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("forcesBankHulls = 1;", AbelLikeConfig().c_str()), false);
+    REQUIRE(f.of.Activate(f.registry));
+    CHECK(f.of.Tuning().bankHulls);
+    const int P = f.of.PoolStart();
+    f.Z("Base2").garrison = 0;
+    REQUIRE(f.of.Spend(22, "APC and crew"));
+    REQUIRE(f.of.BookLeverOp(301, "T0", CAKRetake, FPApc, 22));
+    f.of.Tick(f.registry, 3600.0f);
+    REQUIRE(f.of.Pool() == P);
+    f.of.NoteOpEvent(f.registry, LedgerEvent(301, CAOpHullRefund, 20, f.registry.FindZoneIndex("Base2")));
+    CHECK(f.of.StoredHullRows() == 0);
+    CHECK(f.of.Banked() == 8); // Base2's room; the rest dropped (every base full)
+    CHECK(f.Z("Base2").pending == 8);
+    CHECK(f.of.Dropped() == 12);
+}
+
+TEST_CASE("OccupierForces - the surge, the stored hulls and the loss window survive save/load",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-ledger-2026-10-16.bin";
+    const std::string config = AbelLikeConfig();
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config, false);
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.LandWave(6);
+    f.of.SetSurgeAnchor(f.Z("Base3").pos);
+    REQUIRE(f.of.Refund(6, "wave survivors") == 0);
+    REQUIRE(f.of.SurgeTotal() == 6);
+    REQUIRE(f.of.RefundHull(f.registry, 9, FPTruck, "TRUCK", f.registry.FindZoneIndex("Base0")) == 0);
+    f.of.NoteLoss(7, "repelled");
+    REQUIRE(f.of.Spend(4, "op"));
+    REQUIRE(f.of.BookLeverOp(401, "T0", CAKStrike, FPJet, 4));
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.SurgeTotal() == 6);
+    CHECK(loaded.SurgeRows() == f.of.SurgeRows());
+    CHECK(loaded.SurgeOpen());
+    CHECK(loaded.SurgeAnchor().X() == Approx(f.Z("Base3").pos.X()));
+    REQUIRE(loaded.StoredHullRows() == 1);
+    CHECK(Str(loaded.StoredHullZone(0)) == "Base0");
+    CHECK(loaded.StoredHullUnits(0) == 9);
+    CHECK(loaded.LossesInWindow() == 7);
+    CHECK(loaded.CommittedAir() == 4);
+    CHECK(loaded.BandStrength() == f.of.BandStrength());
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
 }

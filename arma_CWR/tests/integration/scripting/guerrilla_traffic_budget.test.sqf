@@ -8,19 +8,23 @@
 //        pass (civChance 1, patrolChance 0.3, room under the caps): two
 //        ambient spawns land, so the road is live;
 //    t2  resistance bodies parked in the far hills (GM_fnSpawnSquad, the
-//        branch-comparison lever) bring the census to exactly 130 in one
-//        frame, and the kind caps get room again; for 120 s of game time the
-//        census never exceeds 130, the traffic pass keeps deciding to spawn
-//        and the gate skips it (gmTrafficDiag slot 17), and the budget WARN
-//        logs at most once a minute (slot 20);
-//    t3  the parked bodies are deleted: traffic resumes (a new ambient spawn,
-//        nothing latched).
+//        branch-comparison lever, squads of at most 10) bring the live-body
+//        census (gmSimDiag) to exactly 130 in one frame, and the kind caps
+//        get room again (maxCiv 16, maxPatrols 4); for 120 s of game time
+//        the census never exceeds 130, the traffic pass keeps deciding to
+//        spawn and the gate skips it at least 30 times (gmTrafficDiag slot
+//        17), at least once on the body count (slot 18), and the budget
+//        WARN logs once to three times, at most once a minute (slot 20);
+//    t3  maxCiv 24 and the parked bodies are deleted: the census drops
+//        under 130 and traffic resumes (a new ambient spawn, nothing
+//        latched).
 //  Forced spawns (gmTrafficForceSpawn) are not budget-gated; none are used.
-//  The companion roster and the QRF director are parked.  Two script
-//  spawners are not held to the budget yet (round 3 A report), so the test
-//  parks them to isolate the traffic gate: civilians.sqs stays at its
-//  current group count (GM_CIV_MAX_GROUPS 0) and the organic shakedown, two
-//  occupier soldiers, never starts (GM_SHK_RANGE 0).
+//  The companion roster and the QRF director are parked.  The two script
+//  spawners that share the budget are parked too, so only the traffic gate
+//  competes for the room: since 797173a civilians.sqs and since 64d447a the
+//  organic shakedown ask gmSimAdmit before they spawn, and either could take
+//  the room t3 frees before traffic does, so civilians.sqs stays at its current group count (GM_CIV_MAX_GROUPS 0)
+//  and the shakedown pair never starts (GM_SHK_RANGE 0).
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }

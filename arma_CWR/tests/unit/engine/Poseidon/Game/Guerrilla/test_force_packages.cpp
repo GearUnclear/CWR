@@ -1317,7 +1317,7 @@ TEST_CASE("ForcePackages - the arrival rule is off by default in the pure choose
     CHECK(c.etaRule == PackageChoice::EtaNone);
 }
 
-TEST_CASE("ForcePackages - the arrival rule on Malden: foot under 900 s, a truck to 1500 s, then an insertion",
+TEST_CASE("ForcePackages - the arrival rule on Malden: foot under 900 s, a truck past it, an empty town never flies",
           "[game][guerrilla][occupierforces][packages][air]")
 {
     const ForcePackageCatalogue cat = EastWithMi17();
@@ -1328,6 +1328,7 @@ TEST_CASE("ForcePackages - the arrival rule on Malden: foot under 900 s, a truck
     REQUIRE(houdan.ok);
     CHECK(houdan.quote.package == FPFoot);
     CHECK(houdan.etaRule == PackageChoice::EtaNone);
+    CHECK(houdan.reason == PackageChoice::ReasonGroundCheapest);
     // Dourdan, 1.0 km: foot about 667 s, still under 900
     CHECK(ForcePackages::Choose(req, cat, OneSource(1, 1000.0f, 5)).quote.package == FPFoot);
     // La Trinite, 1.7 km: foot about 1133 s; the truck within 3 x
@@ -1339,61 +1340,78 @@ TEST_CASE("ForcePackages - the arrival rule on Malden: foot under 900 s, a truck
     CHECK(trinite.quote.price == 8);
     CHECK(trinite.quote.seconds == Approx(1700.0f / (0.6f * 80.0f / 3.6f)).margin(1.0f));
     CHECK(trinite.etaRule == PackageChoice::EtaSlow);
-    // Chapoi, 2.6 km: foot about 1733 s, past 1500: the insertion goes
+    CHECK(trinite.reason == PackageChoice::ReasonGroundCheapest);
+    // Chapoi, 2.6 km: foot about 1733 s, past 1500, but the truck is there
+    // in about 195 s and nobody is reported: the truck (2026-10-16 phase 1
+    // C; it was an insertion)
     const PackageChoice chapoi = ForcePackages::Choose(req, cat, OneSource(1, 2600.0f, 6));
     REQUIRE(chapoi.ok);
-    CHECK(chapoi.quote.package == FPTransportHeli);
-    CHECK(chapoi.etaRule == PackageChoice::EtaAir);
-    // Goisse, 4.6 km (66 min on foot by road): the insertion, about 86 s
+    CHECK(chapoi.quote.package == FPTruck);
+    CHECK(chapoi.etaRule == PackageChoice::EtaSlow);
+    CHECK(chapoi.reason == PackageChoice::ReasonGroundCheapest);
+    // Goisse, 4.6 km (66 min on foot by road): still the truck, about 345 s
     const PackageChoice goisse = ForcePackages::Choose(req, cat, OneSource(1, 4600.0f, 5));
     REQUIRE(goisse.ok);
-    CHECK(goisse.quote.package == FPTransportHeli);
-    CHECK(goisse.quote.price == 16);
-    CHECK(goisse.quote.seconds == Approx(4600.0f / (0.8f * 240.0f / 3.6f)).margin(1.0f));
-    CHECK(goisse.etaRule == PackageChoice::EtaAir);
-    // off-map (no occupier airfield): 4 + 2 + 15 = 21, still the insertion
-    PackageRequest offMap = req;
-    offMap.airOffMap = true;
-    const PackageChoice far = ForcePackages::Choose(offMap, cat, OneSource(1, 4600.0f, 5));
-    CHECK(far.quote.package == FPTransportHeli);
-    CHECK(far.quote.price == 21);
-    // no helicopter in the catalogue: the truck carries the far town
+    CHECK(goisse.quote.package == FPTruck);
+    CHECK(goisse.quote.price == 8);
+    CHECK(goisse.quote.seconds == Approx(4600.0f / (0.6f * 80.0f / 3.6f)).margin(1.0f));
+    CHECK(goisse.etaRule == PackageChoice::EtaSlow);
+    CHECK(goisse.walkSeconds == Approx(4600.0f / 1.5f).margin(1.0f));
+    CHECK(goisse.groundSeconds == Approx(goisse.quote.seconds));
+    // no helicopter in the catalogue: the same truck
     ForcePackageCatalogue ground = cat;
     ground.hulls[FPTransportHeli] = ForceHull();
     const PackageChoice truck = ForcePackages::Choose(req, ground, OneSource(1, 4600.0f, 5));
     CHECK(truck.quote.package == FPTruck);
     CHECK(truck.etaRule == PackageChoice::EtaSlow);
+    // past forcesAirEta even by truck (22 km, about 1650 s): the insertion
+    // goes, at the off-map price too (4 + 2 + 15 = 21)
+    const PackageChoice ferry = ForcePackages::Choose(req, cat, OneSource(1, 22000.0f, 5));
+    CHECK(ferry.quote.package == FPTransportHeli);
+    CHECK(ferry.etaRule == PackageChoice::EtaAir);
+    CHECK(ferry.reason == PackageChoice::ReasonAirEta);
+    PackageRequest offMap = req;
+    offMap.airOffMap = true;
+    const PackageChoice far = ForcePackages::Choose(offMap, cat, OneSource(1, 22000.0f, 5));
+    CHECK(far.quote.package == FPTransportHeli);
+    CHECK(far.quote.price == 21);
     // the pool cannot pay the Mi17 (12 units for hull and crew): the truck
     PackageRequest poor = req;
     poor.pool = 8;
-    CHECK(ForcePackages::Choose(poor, cat, OneSource(1, 4600.0f, 5)).quote.package == FPTruck);
+    const PackageChoice slow = ForcePackages::Choose(poor, cat, OneSource(1, 22000.0f, 5));
+    CHECK(slow.quote.package == FPTruck);
+    CHECK(slow.reason == PackageChoice::ReasonGroundSlow);
 }
 
 TEST_CASE("ForcePackages - the arrival rule keeps L_req, the URGENT share and the slow share apart",
           "[game][guerrilla][occupierforces][packages]")
 {
     const ForcePackageCatalogue cat = EastWithMi17();
-    // urgent and slow: the wider share wins (3 x), the rule is named
+    // urgent and slow: the truck is the only package meeting slowEta
     PackageRequest req = MaldenRequest();
     req.urgent = true;
     const PackageChoice u = ForcePackages::Choose(req, cat, OneSource(1, 1700.0f, 5));
     CHECK(u.quote.package == FPTruck);
     CHECK(u.etaRule == PackageChoice::EtaSlow);
+    CHECK(u.reason == PackageChoice::ReasonGroundCheapest);
     // urgent with the old 2 x truck-to-foot ratio under 900 s: the URGENT
     // share (1.5 x) still keeps it on foot, no arrival rule
     const PackageChoice near = ForcePackages::Choose(req, cat, OneSource(1, 800.0f, 5));
     CHECK(near.quote.package == FPFoot);
     CHECK(near.etaRule == PackageChoice::EtaNone);
-    // the slow share bound: at 1.5 x nothing but foot fits under 1500 s
+    // the slow share bound (the upper bound, ForcePackages::SlowCostShare 3):
+    // at 1.5 x nothing within it meets slowEta, the fastest within it (foot)
+    // goes
     PackageRequest tight = MaldenRequest();
     tight.slowCostShare = 1.5f;
-    CHECK(ForcePackages::Choose(tight, cat, OneSource(1, 1700.0f, 5)).quote.package == FPFoot);
+    const PackageChoice t = ForcePackages::Choose(tight, cat, OneSource(1, 1700.0f, 5));
+    CHECK(t.quote.package == FPFoot);
+    CHECK(t.reason == PackageChoice::ReasonGroundSlow);
+    CHECK(PackageRequest().slowCostShare == Approx(ForcePackages::SlowCostShare));
     // L_req still binds: three fighters (L_req 10.8).  Foot needs 11 bodies
     // (11 units, about 1133 s), the truck 9 (13 units, lethality 11.25), the
-    // Mi17 9 (21 units, about 32 s).  Foot is the cheapest lethal package
-    // and slow, so every lethal package within 3 x 11 = 33 may go: with
-    // more bodies the airframe's fixed price weighs less, and the Mi17 is
-    // the fastest
+    // Mi17 9 (21 units, about 32 s).  Foot is the cheapest lethal package,
+    // the walk is past slowEta and fighters are reported: the insertion
     PackageRequest loud = MaldenRequest();
     loud.fighters = 3;
     const PackageChoice l = ForcePackages::Choose(loud, cat, OneSource(1, 1700.0f, 12));
@@ -1403,7 +1421,8 @@ TEST_CASE("ForcePackages - the arrival rule keeps L_req, the URGENT share and th
     CHECK(l.quote.bodies == 9);
     CHECK(l.quote.price == 21);
     CHECK(l.quote.lethal);
-    CHECK(l.etaRule == PackageChoice::EtaSlow);
+    CHECK(l.etaRule == PackageChoice::EtaAir);
+    CHECK(l.reason == PackageChoice::ReasonAirFighters);
 }
 
 TEST_CASE("ForcePackages - a refusal names the shortfall against the largest single-base spare",
@@ -1465,8 +1484,9 @@ TEST_CASE("ForcePackages - the road quote on Malden: Arudy is a truck by the str
     CHECK(line.etaRule == PackageChoice::EtaSlow);
     CHECK(line.quote.eta == FEQLine);
     CHECK(Str(ForcePackages::EtaNote(line.quote)) == "line 167 s");
-    // the road route (2691 m): foot about 1794 s, past forcesAirEta: the
-    // insertion goes; the truck would need about 202 s by road
+    // the road route (2691 m): foot about 1794 s, past forcesAirEta, but
+    // the truck needs about 202 s by road and nobody is reported: the truck
+    // (2026-10-16 phase 1 C; it was the insertion)
     const PackageChoice road = ForcePackages::Choose(req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
     REQUIRE(road.ok);
     CHECK(road.cheapestPackage == FPFoot);
@@ -1474,12 +1494,20 @@ TEST_CASE("ForcePackages - the road quote on Malden: Arudy is a truck by the str
     REQUIRE(road.cheapestIndex >= 0);
     CHECK(road.quotes[road.cheapestIndex].eta == FEQRoad);
     CHECK(Str(ForcePackages::EtaNote(road.quotes[road.cheapestIndex])) == "road 1794 s");
-    CHECK(road.quote.package == FPTransportHeli);
-    CHECK(road.etaRule == PackageChoice::EtaAir);
-    // the helicopter flies the straight line whatever the road
-    CHECK(road.quote.eta == FEQLine);
-    CHECK(road.quote.travel == Approx(2224.0f));
-    CHECK(road.quote.seconds == Approx(2224.0f / Mi17Speed).margin(0.5f));
+    CHECK(road.quote.package == FPTruck);
+    CHECK(road.etaRule == PackageChoice::EtaSlow);
+    CHECK(road.quote.eta == FEQRoad);
+    // with three fighters reported the walk is still past slowEta: the
+    // insertion, and the helicopter flies the straight line whatever the road
+    PackageRequest loud = req;
+    loud.fighters = 3;
+    const PackageChoice air = ForcePackages::Choose(loud, cat, RoadSource(1, 2224.0f, 2691.0f, 12));
+    REQUIRE(air.ok);
+    CHECK(air.quote.package == FPTransportHeli);
+    CHECK(air.reason == PackageChoice::ReasonAirFighters);
+    CHECK(air.quote.eta == FEQLine);
+    CHECK(air.quote.travel == Approx(2224.0f));
+    CHECK(air.quote.seconds == Approx(2224.0f / Mi17Speed).margin(0.5f));
     const PackageQuote truck = ForcePackages::Quote(FPTruck, req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
     CHECK(truck.eta == FEQRoad);
     CHECK(truck.travel == Approx(2691.0f));
@@ -1504,9 +1532,11 @@ TEST_CASE("ForcePackages - no road route known: the straight line x forcesRoadFa
     CHECK(foot.travel == Approx(3336.0f));
     CHECK(foot.seconds == Approx(2224.0f).margin(0.5f));
     CHECK(Str(ForcePackages::EtaNote(foot)) == "line x1.5 2224 s");
+    // the truck covers 3336 m in about 250 s: ground, no air case
     const PackageChoice c = ForcePackages::Choose(req, cat, OneSource(1, 2224.0f, 5));
-    CHECK(c.quote.package == FPTransportHeli);
-    CHECK(c.etaRule == PackageChoice::EtaAir);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    CHECK(c.quote.eta == FEQLineFactor);
     // a known road wins over the factor
     const PackageQuote road = ForcePackages::Quote(FPFoot, req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
     CHECK(road.eta == FEQRoad);
@@ -1597,6 +1627,309 @@ TEST_CASE("ForcePackages - the INFO line's arrival words are kept for gmForcesEt
     CHECK(Str(ForcePackages::EtaNoteAt(0).text) == "line 3 s");
     CHECK(Str(ForcePackages::EtaNoteAt(ForcePackages::EtaNoteRing - 1).text) == "line 18 s");
     ForcePackages::ClearEtaNotes();
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-16 (phase 1 C, after video 5: all five insertions flew to empty
+// targets): ground first, the CHEAPEST package that meets slowEta, and air
+// only across water, past forcesAirEta by the fastest ground package, or on
+// a defended target out of walking reach.  Malden figures (Guerrilla.Abel):
+// Goisse [3593, 8528] is 4585 m straight from the Outpost [7600, 6300] (by
+// road about 5940 m, 66 minutes on foot) and 4646 m from the Airfield
+// [8030, 9905]; the Southeast Compound [9715, 3940] stands on an island of
+// its own, 1328 m from Le Port Harbour [8410, 3690]; La Trinite is 1707 m
+// from the Outpost (1708 m by road).  Spares as in videos 4 and 5: the
+// Outpost 5, the Harbour 6, the Airfield 9.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Goisse's sources: the Outpost by road, the Airfield by the straight line
+// (no road known: x forcesRoadFactor)
+AutoArray<PackageSource> GoisseSources()
+{
+    AutoArray<PackageSource> s = RoadSource(2, 4585.0f, 5940.0f, 5);
+    PackageSource airfield;
+    airfield.zone = 5;
+    airfield.distance = 4646.0f;
+    airfield.spare = 9;
+    s.Add(airfield);
+    return s;
+}
+
+PackageRequest DirectorRequest()
+{
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 1.5f;
+    return req;
+}
+
+// EAST with a fast wheeled APC (BTR-like: 100 km/h, crew 2, 8 seats) beside
+// the Ural and the Mi17: a package that is faster than the truck and within
+// 3 x the foot price, so the old "fastest within the share" and the new
+// "cheapest meeting slowEta" disagree
+ForcePackageCatalogue EastWithFastApc()
+{
+    ForcePackageCatalogue cat = EastWithMi17();
+    cat.hulls[FPApc].className = "BTR60";
+    cat.hulls[FPApc].maxSpeedKmh = 100;
+    cat.hulls[FPApc].cargo = 8;
+    cat.hulls[FPApc].crew = 2;
+    return cat;
+}
+
+} // namespace
+
+TEST_CASE("ForcePackages - an empty far target gets a truck, not a helicopter",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = DirectorRequest();
+    // empty Goisse: the walk is 66 minutes, but the Ural is there in about
+    // 446 s by road, under forcesAirEta, and nobody is reported
+    const PackageChoice c = ForcePackages::Choose(req, cat, GoisseSources());
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.source == 2);
+    CHECK(c.quote.eta == FEQRoad);
+    CHECK(c.quote.seconds == Approx(5940.0f / UralSpeed).margin(1.0f));
+    CHECK(c.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    CHECK(c.cheapestPackage == FPFoot);
+    CHECK(c.walkSeconds == Approx(5940.0f / 1.5f).margin(1.0f));
+    CHECK(c.groundSeconds == Approx(c.quote.seconds));
+    // the insertion was quoted, valid and faster, and did not go
+    const PackageQuote* heli = QuoteOf(c, FPTransportHeli);
+    REQUIRE(heli != nullptr);
+    CHECK(heli->source >= 0);
+    CHECK(heli->lethal);
+    CHECK(heli->seconds < c.quote.seconds);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "ground: cheapest under slowEta");
+    // the video 5 legs (foot 3183 to 5157 s by road, a truck 9 to 14 x
+    // faster): every empty target is a truck now
+    for (float road : {4775.0f, 4986.0f, 6318.0f, 7736.0f})
+    {
+        const PackageChoice v = ForcePackages::Choose(req, cat, RoadSource(1, road / 1.3f, road, 6));
+        REQUIRE(v.ok);
+        CHECK(v.quote.package == FPTruck);
+        CHECK_FALSE(PackageChoice::IsAirReason(v.reason));
+    }
+}
+
+TEST_CASE("ForcePackages - a defended far target gets the helicopter, a defended near one ground",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = DirectorRequest();
+    req.fighters = 3; // L_req 10.8: an insertion needs 9 bodies (11.25)
+    // Goisse with three fighters reported: out of walking reach, so the
+    // insertion goes.  Its infantry is the Airfield's 9 (lethal), not the
+    // nearer Outpost's 5 (6.25, short): the source covers what L_req needs
+    const PackageChoice c = ForcePackages::Choose(req, cat, GoisseSources());
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.source == 5);
+    CHECK(c.quote.bodies == 9);
+    CHECK(c.quote.price == 9 + 2 + 10);
+    CHECK(c.quote.lethal);
+    CHECK(c.reason == PackageChoice::ReasonAirFighters);
+    CHECK(c.etaRule == PackageChoice::EtaAir);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "air: fighters reported");
+    // the line's "the cheapest": the cheapest lethal ground package, the
+    // Airfield's 9 by truck (13 units, line x1.5 about 523 s): ground could
+    // be there under forcesAirEta, the fighters decide
+    CHECK(c.cheapestPackage == FPTruck);
+    CHECK(c.cheapestSeconds == Approx(4646.0f * 1.5f / UralSpeed).margin(1.0f));
+    CHECK(c.cheapestSeconds < req.airEta);
+    // the walk is the Outpost's 5 by road (the foot quote, lethal or not)
+    CHECK(c.walkSeconds == Approx(5940.0f / 1.5f).margin(1.0f));
+    // without the Airfield nothing is lethal: the most lethal affordable
+    // package from the Outpost goes and says so (the plain fallback)
+    const PackageChoice outpost = ForcePackages::Choose(req, cat, RoadSource(2, 4585.0f, 5940.0f, 5));
+    REQUIRE(outpost.ok);
+    CHECK(outpost.shortOfLethality);
+    // the pool cannot pay the airframe (12 units): the truck, ground
+    PackageRequest poor = req;
+    poor.pool = 4;
+    const PackageChoice p = ForcePackages::Choose(poor, cat, GoisseSources());
+    REQUIRE(p.ok);
+    CHECK(p.quote.package == FPTruck);
+    CHECK(p.reason == PackageChoice::ReasonGroundCheapest);
+    // Houdan (535 m from the Outpost) with three reported and 12 to spare:
+    // a walk of about 373 s by road, inside slowEta: eleven on foot, no air
+    const PackageChoice houdan = ForcePackages::Choose(req, cat, RoadSource(2, 535.0f, 560.0f, 12));
+    REQUIRE(houdan.ok);
+    CHECK(houdan.quote.package == FPFoot);
+    CHECK(houdan.quote.bodies == 11);
+    CHECK(houdan.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(houdan.etaRule == PackageChoice::EtaNone);
+    // fewer than AirFightersMin reported is empty ground
+    PackageRequest quiet = req;
+    quiet.fighters = 0;
+    CHECK(ForcePackages::Choose(quiet, cat, GoisseSources()).quote.package == FPTruck);
+}
+
+TEST_CASE("ForcePackages - a cross-water target gets the helicopter",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = DirectorRequest();
+    // the Southeast Compound retaken from the mainland: every base stands
+    // on another landmass, no ground package can come, the insertion goes
+    // though nobody is reported
+    AutoArray<PackageSource> mainland = OneSource(4, 1328.0f, 6); // Le Port Harbour
+    mainland[0].airOnly = true;
+    PackageSource outpost;
+    outpost.zone = 2;
+    outpost.distance = 3306.0f;
+    outpost.spare = 5;
+    outpost.airOnly = true;
+    mainland.Add(outpost);
+    const PackageChoice c = ForcePackages::Choose(req, cat, mainland);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.source == 4);
+    CHECK(c.reason == PackageChoice::ReasonAirWater);
+    CHECK(c.etaRule == PackageChoice::EtaAir);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "air: across water");
+    CHECK(c.walkSeconds == Approx(-1.0f));
+    // a mainland town only the Compound can pay for (its reserve flies)
+    AutoArray<PackageSource> island = OneSource(3, 1700.0f, 6);
+    island[0].airOnly = true;
+    const PackageChoice i = ForcePackages::Choose(req, cat, island);
+    REQUIRE(i.ok);
+    CHECK(i.quote.package == FPTransportHeli);
+    CHECK(i.reason == PackageChoice::ReasonAirWater);
+    // the same town with a mainland base able to walk it: ground again
+    PackageSource harbour;
+    harbour.zone = 4;
+    harbour.distance = 600.0f;
+    harbour.road = 640.0f;
+    harbour.spare = 6;
+    island.Add(harbour);
+    const PackageChoice g = ForcePackages::Choose(req, cat, island);
+    REQUIRE(g.ok);
+    CHECK(g.quote.package == FPFoot);
+    CHECK(g.quote.source == 4);
+}
+
+TEST_CASE("ForcePackages - a 900 to 1500 s leg takes the cheapest package that meets slowEta",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = EastWithFastApc();
+    PackageRequest req = DirectorRequest();
+    req.minBodies = 6;
+    // La Trinite, 1708 m by road from the Outpost: foot 6 (about 1139 s,
+    // past 900); the Ural 6 + 1 + 3 = 10 units, about 128 s; the APC
+    // 6 + 2 + 8 = 16 units (within 3 x 6 = 18), about 102 s.  The old rule
+    // took the fastest within the share (the APC); the cheapest that meets
+    // slowEta is the truck
+    const AutoArray<PackageSource> src = RoadSource(2, 1707.0f, 1708.0f, 12);
+    const PackageChoice c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.cheapestPackage == FPFoot);
+    CHECK(c.cheapestSeconds == Approx(1708.0f / 1.5f).margin(1.0f));
+    const PackageQuote* apc = QuoteOf(c, FPApc);
+    REQUIRE(apc != nullptr);
+    CHECK(apc->price == 16);
+    CHECK(apc->seconds < c.quote.seconds);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.price == 10);
+    CHECK_FALSE(c.quote.HasEscort());
+    CHECK(c.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    // the share is an upper bound only: at 1.5 x (9 units) nothing within it
+    // meets slowEta, and the fastest within it (foot) goes
+    PackageRequest tight = req;
+    tight.slowCostShare = 1.5f;
+    const PackageChoice t = ForcePackages::Choose(tight, cat, src);
+    CHECK(t.quote.package == FPFoot);
+    CHECK(t.reason == PackageChoice::ReasonGroundSlow);
+    CHECK(Str(ForcePackages::ReasonWords(t.reason)) == "ground: slow but no air case");
+}
+
+TEST_CASE("ForcePackages - URGENT: the fastest within its share under slowEta, the fastest meeting it past",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = EastWithFastApc();
+    PackageRequest req = DirectorRequest();
+    req.minBodies = 6;
+    req.urgent = true;
+    // past slowEta (La Trinite): the FASTEST package meeting it within the
+    // bound, the APC, overrides the cheapest meeting it (the truck)
+    const PackageChoice c = ForcePackages::Choose(req, cat, RoadSource(2, 1707.0f, 1708.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPApc);
+    CHECK(c.quote.price == 16);
+    CHECK(c.reason == PackageChoice::ReasonUrgentSlow);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "urgent: fastest under slowEta");
+    // under slowEta (Dourdan, 1000 m: foot about 667 s): the share at 1.5 x
+    // 6 = 9 holds nothing faster, foot goes
+    const AutoArray<PackageSource> near = RoadSource(2, 950.0f, 1000.0f, 12);
+    const PackageChoice f = ForcePackages::Choose(req, cat, near);
+    CHECK(f.quote.package == FPFoot);
+    CHECK(f.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(f.etaRule == PackageChoice::EtaNone);
+    // a share of 2 (12 units): the next faster package, the truck
+    PackageRequest wide = req;
+    wide.urgentCostShare = 2.0f;
+    const PackageChoice w = ForcePackages::Choose(wide, cat, near);
+    CHECK(w.quote.package == FPTruck);
+    CHECK(w.reason == PackageChoice::ReasonUrgentShare);
+    CHECK(Str(ForcePackages::ReasonWords(w.reason)) == "urgent: fastest within forcesUrgentCostShare");
+    // urgency never buys air on its own: an empty Goisse goes by road
+    PackageRequest goisse = DirectorRequest();
+    goisse.urgent = true;
+    const PackageChoice g = ForcePackages::Choose(goisse, EastWithMi17(), GoisseSources());
+    REQUIRE(g.ok);
+    CHECK(g.quote.package == FPTruck);
+    CHECK_FALSE(PackageChoice::IsAirReason(g.reason));
+}
+
+TEST_CASE("ForcePackages - the reason words and the one road factor",
+          "[game][guerrilla][occupierforces][packages][roadroute]")
+{
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonNone)) == "");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonGroundCheapest)) == "ground: cheapest under slowEta");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonGroundSlow)) == "ground: slow but no air case");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonUrgentShare)) ==
+          "urgent: fastest within forcesUrgentCostShare");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonUrgentSlow)) == "urgent: fastest under slowEta");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonAirWater)) == "air: across water");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonAirEta)) == "air: past forcesAirEta");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonAirFighters)) == "air: fighters reported");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::NReasons)) == "");
+    for (int r = 0; r < PackageChoice::NReasons; r++)
+    {
+        CHECK(PackageChoice::IsAirReason(r) == (Str(ForcePackages::ReasonWords(r)).rfind("air: ", 0) == 0));
+    }
+    // the plain choice names no reason
+    const PackageChoice off = ForcePackages::Choose(PackageRequest(), EastWithMi17(), OneSource(1, 4600.0f, 5));
+    CHECK(off.reason == PackageChoice::ReasonNone);
+
+    // the one road factor: forcesRoadFactor's default until the director sets it
+    CHECK(ForcePackages::RoadFactor() == Approx(ForcePackages::DefaultRoadFactor));
+    CHECK(ForcePackages::DefaultRoadFactor == Approx(1.5f));
+    ForcePackages::SetRoadFactor(1.3f);
+    CHECK(ForcePackages::RoadFactor() == Approx(1.3f));
+    ForcePackages::SetRoadFactor(0.5f);
+    CHECK(ForcePackages::RoadFactor() == Approx(ForcePackages::MinRoadFactor));
+    ForcePackages::SetRoadFactor(9.0f);
+    CHECK(ForcePackages::RoadFactor() == Approx(ForcePackages::MaxRoadFactor));
+    ForcePackages::SetRoadFactor(ForcePackages::DefaultRoadFactor);
+    // the ground leg the quote prices and the march walks: a known road as
+    // it is, else the straight line x the factor (never below the line)
+    CHECK(ForcePackages::GroundLeg(2224.0f, 2691.0f, 1.5f) == Approx(2691.0f));
+    CHECK(ForcePackages::GroundLeg(2224.0f, -1.0f, 1.5f) == Approx(3336.0f));
+    CHECK(ForcePackages::GroundLeg(2224.0f, -1.0f, 0.5f) == Approx(2224.0f));
+    CHECK(ForcePackages::GroundLeg(-5.0f, -1.0f, 1.5f) == Approx(0.0f));
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = ForcePackages::RoadFactor();
+    const PackageQuote foot = ForcePackages::Quote(FPFoot, req, EastWithMi17(), OneSource(1, 2224.0f, 5));
+    CHECK(foot.eta == FEQLineFactor);
+    CHECK(foot.travel == Approx(ForcePackages::GroundLeg(2224.0f, -1.0f, ForcePackages::RoadFactor())));
 }
 
 // ---------------------------------------------------------------------------

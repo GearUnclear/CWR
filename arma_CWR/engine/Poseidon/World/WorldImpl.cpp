@@ -19,6 +19,7 @@
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -2121,6 +2122,19 @@ LSError World::Serialize(ParamArchive& ar, int message)
     if (ar.IsSaving() ? Guerrilla::TownFlags::Instance().IsActive() : ar.IsSubclass("GuerrillaFlags"))
     {
         PARAM_CHECK(ar.Serialize("GuerrillaFlags", Guerrilla::TownFlags::Instance(), 14))
+    }
+
+    // Generated-base props (OCCUPIER-FORCES.md 5.7 step 2): the planned
+    // layout rows and their prop refs.  Same missing-subclass tolerance; the
+    // props themselves ride the world's building serializer, so a load
+    // re-binds them and never creates a second set.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::BaseProps::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::BaseProps::Instance().IsActive() : ar.IsSubclass("GuerrillaBaseProps"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaBaseProps", Guerrilla::BaseProps::Instance(), 14))
     }
 
     // Guerrilla ambient road traffic: live rows (hull/group refs + zone

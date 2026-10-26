@@ -237,6 +237,7 @@ class CfgGuerrillaZones
     seedCitySupport = 20;
     // seedCities: see section 6
     // seedBases, playRegion[]: see section 10
+    // generateBases, generateBasesSeed: see section 11
     class Zones { /* ... */ };
 };
 ```
@@ -261,6 +262,13 @@ class CfgGuerrillaZones
   undercover, headquarters and `traffic*` keys) is optional and documented in
   `Guerrilla.Abel/description.ext`, which lists every stock default in a comment
   rather than restating them as keys.
+- **The occupier director** is tuned through `forcesDifficulty` and eight
+  levers (`forcesCadence`, `forcesStrength`, `forcesRecovery`, `forcesReach`,
+  `forcesAggression`, `forcesWaves`, `forcesMinimums`, `forcesConcurrency`;
+  OCCUPIER-FORCES.md section 16). Leave them out to get Normal. The older
+  `forces*` keys, `counterAttackFirstTownChance`, `counterAttackMaxLive` and
+  `heatCapSpike` (which follows `forcesAggression`) still read, but only as
+  expert overrides that log a WARN; an island pack should not need them.
 
 ## 5. The four things to edit after scaffolding
 
@@ -450,8 +458,9 @@ without a hand survey. The same detector runs in two places:
 
 - **At mission load** (`ZoneRegistry`, gated by `seedBases`): it reads the
   loaded landscape and adds every AIRFIELD and SEAPORT candidate with status
-  `seed` as an occupier zone. **OUTPOSTs are never seeded at runtime**: the
-  garrison ladder is the author's.
+  `seed` as an occupier zone. OUTPOSTs are never seeded by this pass; with
+  `generateBases = 1` they are the preferred sites of the generated bases
+  (section 11), which reverses the #76 rule.
 - **Offline** (`guerrilla scaffold` and `guerrilla lint --bases`): it reads the
   `.wrp` and prints every candidate, OUTPOSTs included, with its evidence.
 
@@ -494,7 +503,7 @@ Each candidate gets exactly one status, in this order:
 | `covered` | within 300 m (or the candidate's own footprint radius, whichever is larger) of an authored AIRFIELD, SEAPORT or OUTPOST, or within 150 m (`zoneArea`) of any other authored zone. `coveredBy` names that zone | no |
 | `low-confidence` | below 0.5 | no |
 | `seed` | an AIRFIELD or SEAPORT that passed everything | yes, when `seedBases` is on |
-| `offline` | an OUTPOST that passed everything | never: the tool reports it, the author decides |
+| `offline` | an OUTPOST that passed everything | not by `seedBases`; with `generateBases = 1` it is a preferred site of the generated bases (section 11) when it passes their rules |
 
 ### Naming
 
@@ -625,6 +634,89 @@ advisory: it never fails the run (an unreadable world exits 2).
 - one model family: none. Detection is not configurable per template; if a
   model is misread, fix the vocabulary in `BaseDetect.cpp` and say so in the
   commit.
+
+## 11. Generated bases: `generateBases` (OCCUPIER-FORCES.md 5.7)
+
+A template whose authored and seeded bases leave towns out of reach can let the
+engine add occupier OUTPOST zones at new game. The contract:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `generateBases` | 0 (absent = 0) | 1: a NEW game adds OUTPOST zones by the density rule below, after the CITY seed. 0: nothing is generated. |
+| `generateBasesSeed` | absent (one random draw) | A non-zero integer pins the placement seed (tests, reproducible campaigns). |
+
+**The density rule** (owner decisions of 2026-10-16). K is the CITY zones.
+Every town gets a ground base on its own landmass within 2.5 km; every landmass
+with towns gets at least three ground bases; the occupier's military zones end
+between ceil(K / 3) and ceil(K / 2), never more than 10, and generation only
+adds until the coverage, the three sources and the floor hold. A generated base
+stands 1.6 km from every occupier base, the Camp, the HQ (the START TOWN pick)
+and the player's start, 300 m from any zone and 500 m from any town, inside the
+theatre (`playRegion[]`, else the default base box) and 200 m from the map
+edge, with its centre 60 to 250 m from a road that joins the island network and
+never on a road. A third of them (rounded up) sit on a track 400 m or more from
+the trunk road, and each town's two nearest sources should be 60 degrees apart
+(a scoring term). Its 150 m footprint (3 x 3 geography cells) is dry, flat
+(slope under 0.10), forest-free and object-free, 2 m above the sea at the
+centre. The detected OUTPOST candidates (section 10, status `offline`) are the
+preferred sites and keep their names; they skip the terrain-cell tests. Among
+the sites serving a need, one with no map object within 60 m wins (a solid
+costs nearly a town, a tree a little: never an extra base), and where no
+150 m square fits, a minor post (CHECKPOINT, else COASTAL within 400 m of deep
+water) whose centre 50 m cell passes the terrain rules takes the need
+(`generateBasesMinor = 0` turns that off).
+
+**What it adds.** OUTPOST zones owned by the occupier (garrison and reserve 6;
+a CHECKPOINT or COASTAL minor post 5), named "<nearest town> <noun>" (else
+"Hill <elevation> <noun>": Outpost, Checkpoint, Coastal Post), marker
+`gmZoneGen_<n>`, revealed by proximity like authored zones, flagged `seeded` in
+`gmZone`. `gmGeneratedBases` lists them: `[name, type, [easting, northing,
+height], garrisonMax, countsForWin, detected, track, heading]`. They count in
+the win roster (minor kinds CHECKPOINT, COASTAL, HELIPAD and RADAR never do)
+and add nothing to the occupier pool's R (the conservation stand-in).
+
+**Stored, not re-derived.** The rows ride the save (`GeneratedBases`, version
+1). A loaded campaign gets exactly its stored bases, whatever the key, the
+seed or a later build's scorer say; a save from before the feature generates
+nothing. Changing the template's key changes new games only.
+
+**Diagnostics.** The mission log carries one INFO line per generated base, a
+summary (K, the floor and ceiling, the towns beyond 2.5 km before and after,
+the track share, the seed), the site refusal counts, and for every town still
+open after generation the refusals of the cells in its reach and its near
+misses, the cells one rule short of a site ("<town> near misses (one rule
+short of a site): slope 231 (nearest [x, z], d m)"); `gmBaseGenNotes` returns
+these notes and `gmBaseSiteObjects [x, z, r]` the map objects the scorer counts.
+
+**The layouts (steps 2 and 3).** Each generated base on empty ground is
+built at new game from the config class `CfgGuerrillaBaseLayouts` (the shipped
+copy lives in `guerrilla-mode/config/guerrilla-hq.hpp`; a mod may override a
+layout class or add one, merged last like any config). The contract:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `type` | required | The zone type the layout serves: one layout per kind (`"OUTPOST"`, `"CHECKPOINT"`, `"COASTAL"`, `"HELIPAD"`; the shipped classes are Outpost, Checkpoint, Coastal and Helipad). |
+| `items[]` | required | Rows `{class, dx, dz, dir}` or `{class, dx, dz, dir, jitter}`: base-local metres, +dz towards the base's road (the stored heading), +dx to the right when facing it; `dir` in degrees relative to the heading (0 faces the road); `jitter` 1 = a seeded turn of up to `jitterDeg`. `class` may list alternates `"A|B"`: the first the loaded package can spawn wins; an alternate `"$key"` is the occupier faction descriptor's value of that key (`basePropTower`, `basePropHut`: the faction style), skipped when the descriptor has none. |
+| `yard` | 25 | Metres at the centre kept prop-free (births, the hold posture, capture presence); a row whose footprint reaches into it is refused. |
+| `roadMargin` | 6 | Metres between a prop's footprint and any road link. |
+| `jitterDeg` | 5 | The largest seeded turn of a jitter row (tents, sandbags; keep towers, wire and buildings on the grid). |
+| `lane` | 4 | Metres a prop keeps from any solid map object (a wall, a fence, a gate, a building); trees only need to clear the footprint. |
+| `minProps` | 8 | Fewer placed props log a WARN; never fatal. |
+
+A refused spot (road, water, a landscape object, another prop) tries its
+left-right mirror, then both pushed 4 and 8 m outward, then the row is dropped
+with an INFO line; an unresolvable class skips the row with a WARN. Keep rows
+within 52 m of the centre so a row pushed 8 m still stands inside 60 m (the LZ
+exclusion radius and the tests' bound), and author static classes only
+(barrels and pallets are physics `Thing`s; `ReammoBox*` crates come
+prefilled). A detected outpost gets no layout (its map props already read as
+a base). The props are saved as world objects and re-bound on load, a deleted
+one is re-created once, and the planned rows (`gmBaseProps`) never move after
+new game.
+
+**Templates.** Abel and Eden opt in; Sinai stays off until its
+`playRegion[]` (#75) is drawn (inside the default box every town already has a
+base in reach); Lebanon80 is off by design, like its `seedBases = 0`.
 
 ## Pitfalls
 

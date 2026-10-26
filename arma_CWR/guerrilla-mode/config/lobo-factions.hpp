@@ -121,6 +121,11 @@ class CfgGuerrillaFactions
         // town flagpole texture (native TownFlags): without this key the
         // engine's side-WEST default is the US flag - wrong faction here
         flag = "\flags\israel.jpg";
+        // generated occupier bases (OCCUPIER-FORCES.md 5.7, step 3): the
+        // "$basePropTower" / "$basePropHut" layout rows in the LoBo brown
+        // style (Baracken.pbo); a package without them falls back to stock
+        basePropTower = "Brown_Turm";
+        basePropHut = "Brown_Wachhaus";
 
         // Legend registry: regional first/last name pool (issue #57). The
         // nickname tone bank is picked by campaign allegiance, not here.
@@ -286,6 +291,9 @@ class CfgGuerrillaFactions
 
         // town flagpole texture: side-EAST default would be the USSR flag
         flag = "\flags\egypt.jpg";
+        // generated-base layout props in the LoBo brown style (as IDF)
+        basePropTower = "Brown_Turm";
+        basePropHut = "Brown_Wachhaus";
 
         // Legend registry: regional first/last name pool (issue #57). The
         // nickname tone bank is picked by campaign allegiance, not here.
@@ -360,6 +368,9 @@ class CfgGuerrillaFactions
         lootSniperMag = "JAM_E762_10mag";
 
         flag = "\flags\syria.jpg";
+        // generated-base layout props in the LoBo brown style (as IDF)
+        basePropTower = "Brown_Turm";
+        basePropHut = "Brown_Wachhaus";
 
         // Legend registry: regional first/last name pool (issue #57). The
         // nickname tone bank is picked by campaign allegiance, not here.

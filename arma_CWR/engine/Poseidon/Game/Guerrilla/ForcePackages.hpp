@@ -41,24 +41,57 @@
 // infantry is sized to meet L_req (never below the minimum), capped at one
 // group (or the hull's cargo) and at the source's spare; the source is the
 // nearest occupier base by travel time at the package's speed whose spare
-// reaches the minimum.  The cheapest package meeting both the minimum and
+// reaches it (SOURCING below).  The cheapest package meeting both the minimum and
 // L_req is chosen; an URGENT target takes the fastest package costing at
 // most forcesUrgentCostShare x that cheapest one.  If no package meets
 // L_req, the most lethal affordable package goes (the INFO line says so).
-// The arrival rule (2026-10-15, PackageRequest::slowEta / slowCostShare /
-// airEta, off unless set): when the cheapest lethal package's seconds
-// exceed slowEta, the fastest package within slowCostShare x its price
-// goes; past airEta a transport helicopter insertion is eligible at any
-// price.  With no source able to spare the minimum, why names the
-// shortfall against the largest single-base spare.
+// THE ARRIVAL RULE (2026-10-15; reworked 2026-10-16, phase 1 C, after
+// video 5 where all five insertions flew to empty targets).  Off unless
+// PackageRequest::slowEta or airEta is set (the pure chooser keeps the
+// plain choice above).  The threshold T is slowEta (airEta
+// when slowEta is 0).
+//   Air.  A transport helicopter insertion goes only when one of these holds
+//   (PackageChoice::reason, ForcePackages::ReasonWords):
+//     "air: across water"       no ground package can reach the target: every
+//                               base that could pay stands on another landmass
+//                               (PackageSource::airOnly);
+//     "air: past forcesAirEta"  even the fastest lethal ground package needs
+//                               more than airEta (or no ground package is
+//                               lethal);
+//     "air: fighters reported"  knownFighters(target) >= AirFightersMin and
+//                               the target is out of walking reach (the foot
+//                               quote needs more than T).
+//   It goes at any price the pool pays.  An empty target that ground can
+//   reach under airEta never gets air.
+//   Ground.  Otherwise the cheapest lethal ground package C goes when it
+//   meets T ("ground: cheapest under slowEta"); a slow C is replaced by the
+//   CHEAPEST lethal ground package that meets T, at most SlowCostShare
+//   (PackageRequest::slowCostShare, 3) x C's price: the share is only an
+//   upper bound now, it never decides between packages that meet T.  When
+//   nothing within the bound meets T, the fastest within it goes ("ground:
+//   slow but no air case").
+//   URGENT.  Under T, the fastest ground package within forcesUrgentCostShare
+//   x C ("urgent: fastest within forcesUrgentCostShare"); past T, the
+//   FASTEST package that meets T within the bound instead of the cheapest
+//   ("urgent: fastest under slowEta").  Urgency never buys air on its own.
+// With no source able to spare the minimum, why names the shortfall
+// against the largest single-base spare.
+// SOURCING.  A package's infantry comes from the base with the shortest
+// leg whose spare covers the bodies it needs to meet L_req (and the
+// minimum); when none does, from the nearest whose spare covers the
+// minimum (the quote is then short of L_req).
 // THE ROAD QUOTE (2026-10-16, round 3 D).  A ground package's seconds are
 // the leg the counter-attack service marches over the package's speed: the
 // road route's length (PackageSource::road, RoadQuoteCache in RoadRoute.hpp)
 // when one is known, else the straight distance x PackageRequest::roadFactor
 // (forcesRoadFactor, 1.5 on the director; 1 in the pure chooser).  Air flies
-// the straight distance.  The source of a package is the base with the
-// shortest leg for it.  PackageQuote::eta names the quote (EtaNote: "road
-// 1794 s", "line x1.5 2733 s", "line 42 s").
+// the straight distance.  ForcePackages::RoadFactor() is the one road factor
+// of the theatre (the director sets it from forcesRoadFactor and passes the
+// same number in every request), so the counter-attack march with no road
+// route (ForcePackages::GroundLeg) walks the leg the quote priced.  The
+// source of a package is the base with the shortest leg for it (SOURCING
+// above).  PackageQuote::eta names the quote (EtaNote: "road 1794 s", "line
+// x1.5 2733 s", "line 42 s").
 // Infantry is paid by the source base (its spare); the hull and its crew are
 // paid by the pool (poolPrice).
 //
@@ -221,13 +254,15 @@ struct PackageRequest
     // airfield): its hull is quoted at the off-map price (x1.5, D3).  False =
     // the airfield price (the director may re-price itself).
     bool airOffMap = false;
-    // the arrival rule (2026-10-15; 0 = off, the default of the pure
-    // chooser: the director sets them from forcesSlowEta /
-    // forcesSlowCostShare / forcesAirEta).  When the cheapest lethal
-    // package's arrival (seconds) exceeds slowEta, any faster package costing
-    // at most slowCostShare x the cheapest may go; when it exceeds airEta, a
-    // transport helicopter insertion may go whatever its price.  The fastest
-    // eligible package is chosen, as for URGENT.
+    // the arrival rule (2026-10-15, reworked 2026-10-16 phase 1 C; 0 = off,
+    // the default of the pure chooser: the director sets them from
+    // forcesSlowEta / forcesAirEta).  See THE ARRIVAL RULE above: ground
+    // first (the cheapest lethal ground package meeting slowEta), an
+    // insertion only across water, past airEta by the fastest ground
+    // package, or on a target out of walking reach with fighters reported.
+    // slowCostShare is no longer a choice lever: it is only the upper bound
+    // on what a package meeting slowEta may cost against the cheapest lethal
+    // one (ForcePackages::SlowCostShare, 3; tests may tighten it).
     float slowEta = 0;
     float slowCostShare = 3.0f;
     float airEta = 0;
@@ -248,11 +283,24 @@ enum ForceEdgeRole
 
 struct PackageChoice
 {
-    // which arrival rule changed the pick (etaRule): none, the slow share,
-    // or the insertion past airEta
+    // which arrival rule changed the pick (etaRule): none, a ground package
+    // in place of a slow cheapest one, or an insertion (any air reason)
     static constexpr int EtaNone = 0;
     static constexpr int EtaSlow = 1;
     static constexpr int EtaAir = 2;
+    // why the pick went (reason; ForcePackages::ReasonWords gives the INFO
+    // line's words).  ReasonNone: the arrival rule is off, or nothing met
+    // L_req (the most lethal affordable fallback)
+    static constexpr int ReasonNone = 0;
+    static constexpr int ReasonGroundCheapest = 1; // "ground: cheapest under slowEta"
+    static constexpr int ReasonGroundSlow = 2;     // "ground: slow but no air case"
+    static constexpr int ReasonUrgentShare = 3;    // "urgent: fastest within forcesUrgentCostShare"
+    static constexpr int ReasonUrgentSlow = 4;     // "urgent: fastest under slowEta"
+    static constexpr int ReasonAirWater = 5;       // "air: across water"
+    static constexpr int ReasonAirEta = 6;         // "air: past forcesAirEta"
+    static constexpr int ReasonAirFighters = 7;    // "air: fighters reported"
+    static constexpr int NReasons = 8;
+    static bool IsAirReason(int r) { return r >= ReasonAirWater && r <= ReasonAirFighters; }
     bool ok = false;
     bool shortOfLethality = false; // no package met L_req: the most lethal affordable one went
     float lReq = 0;
@@ -264,6 +312,12 @@ struct PackageChoice
     float cheapestSeconds = 0;
     int cheapestIndex = -1; // into quotes[]: the cheapest lethal quote (its eta, EtaNote)
     int etaRule = EtaNone;
+    int reason = ReasonNone;
+    // the arrival rule's yardsticks (0 when it is off): the walk (the foot
+    // quote's seconds; -1 = no foot quote reaches) and the fastest lethal
+    // ground package's seconds (-1 = none)
+    float walkSeconds = 0;
+    float groundSeconds = 0;
     // when no base can spare the minimum: the largest spare a source offers
     int largestSpare = 0;
     int nQuotes = 0;
@@ -309,6 +363,16 @@ class ForcePackages
     // the 40-group budget and forcesLiveHullsMax (6.5)
     static constexpr int GroupBudget = 40;
     static constexpr int LiveHullsMax = 6;
+    // the arrival rule (6.5, 2026-10-16 phase 1 C): the upper bound on a
+    // package meeting slowEta against the cheapest lethal one (a constant
+    // since forcesSlowCostShare stopped deciding picks: it never did, video
+    // 4 and 5), and the reported fighters that make a target "defended"
+    static constexpr float SlowCostShare = 3.0f;
+    static constexpr int AirFightersMin = 1;
+    // the road factor (6.5): forcesRoadFactor's default
+    static constexpr float DefaultRoadFactor = 1.5f;
+    static constexpr float MinRoadFactor = 1.0f;
+    static constexpr float MaxRoadFactor = 5.0f;
 
     // the descriptor override key of a package ("" for foot)
     static const char* OverrideKey(int package);
@@ -394,6 +458,19 @@ class ForcePackages
     {
         return package == FPTransportHeli || package == FPAttackHeli || package == FPJet;
     }
+    // THE ROAD FACTOR (6.5, 2026-10-16 phase 1 C): one number for the quote
+    // and the march.  RoadFactor() is the theatre's forcesRoadFactor: the
+    // director sets it (SetRoadFactor, clamped 1..5) when it reads its
+    // tuning and passes the same number as PackageRequest::roadFactor, and
+    // the counter-attack march reads it for a leg with no road route, so a
+    // force walks the leg it was priced on.  DefaultRoadFactor until set.
+    static float RoadFactor();
+    static void SetRoadFactor(float factor);
+    // the ground leg (m): the road route's length when known (> 0), else the
+    // straight distance x factor; what TravelOf quotes and the march walks
+    static float GroundLeg(float straightDistance, float roadLength, float factor);
+    // the INFO line's words for PackageChoice::reason ("" for ReasonNone)
+    static const char* ReasonWords(int reason);
     // the words of an INFO line for a quote's arrival: "road 1794 s",
     // "line x1.5 2733 s", "line 42 s"
     static RString EtaNote(const PackageQuote& q);

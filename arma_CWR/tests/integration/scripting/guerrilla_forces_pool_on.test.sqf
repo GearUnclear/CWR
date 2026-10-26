@@ -22,7 +22,10 @@ ofRow = gmOccupierForces
 ofStart = ofRow select 1
 ofK = ofRow select 7
 triAssertGe [ofK, 1]
-triAssertGe [ofStart, 32 + 2 * ofK]
+// generated bases (811c5c3, d5fa57b): their garrisons come out of poolStart
+ofRgen = 0
+{ofGI = gmZoneIndex (_x select 0); if (ofGI >= 0) then {ofRgen = ofRgen + ((gmZoneSim ofGI) select 7)}} forEach gmGeneratedBases
+triAssertGe [ofStart, 32 + 2 * ofK - ofRgen]
 triAssertEq [(ofRow select 0), ofStart]
 triAssertEq [(ofRow select 2), "STRONG"]
 triAssertEq [(ofRow select 3), 0]

@@ -75,6 +75,7 @@
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -673,6 +674,10 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     Guerrilla::GarrisonCache::Instance().InitMission();
     // Town flagpoles follow the registry too (no config of their own).
     Guerrilla::TownFlags::Instance().InitMission();
+    // Generated-base props (OCCUPIER-FORCES.md 5.7 step 2): a new game's
+    // outpost layouts are created here, behind the loading screen and
+    // before any garrison spawns; a load re-binds the saved ones instead.
+    Guerrilla::BaseProps::Instance().InitMission();
     // Ambient road traffic follows the registry: Clear + read its own
     // optional CfgGuerrillaZones traffic* keys.
     Guerrilla::Traffic::Instance().InitMission();

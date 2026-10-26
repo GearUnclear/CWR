@@ -271,14 +271,22 @@ cmake --build build/win-x64-clang-rwdi      # build the engine + game + tools
 
 Compiled apps stage into `dist/x64-win-rwdi/`.
 
-### Prepare full Remaster game data
-
-Game data is **not** in this repo. Follow [the fresh-install guide](FRESH-INSTALL.md)
-to create and prepare a separate shadow of the full official Remaster (Steam app
-65790). Set `OFPR_DATA_DIR=packages/RemasterUD` after linking that path to the
-shadow, or point it at the shadow directly. Existing `.trident.env` files are
-not rewritten; replace a Classic path explicitly. The Demo is retained only for
-its own engine test lanes, not as a Guerrilla gameplay target.
+### Game data
+Game data is **not** in this repo. UD targets the full official Remaster
+(Steam app 65790), used through a setup-prepared *shadow* copy, never the Steam
+folder itself: `tools/runtime/new-remaster-shadow.ps1` builds one from the
+Steam `Remastered` install, then `setup-guerrilla.ps1` prepares it (see
+[`FRESH-INSTALL.md`](FRESH-INSTALL.md)). The launch and install scripts find
+it through `Get-UDDefaultDataDir` in `tools/runtime/UDDataDir.psm1`:
+`$env:UD_DATA_DIR`, else the target of `packages\RemasterUD`, else
+`tmp\remaster-shadow-67` (the one on this machine) or `tmp\remaster-shadow`.
+The Classic 1.99 install `D:\Arma_CWA\ARMA Cold War Assault [Classic]` is
+unsupported: setup and the launchers refuse it, and existing `.trident.env`
+files are not rewritten, so replace a Classic path explicitly. The official remaster
+Demo at `D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]` is not a gameplay
+target; it stays for the stock-menu and multiplayer test pins and as a
+reference binary (see the Tests section for why the Demo-world Guerrilla tests
+don't run on it).
 
 ---
 
@@ -310,7 +318,7 @@ without the core boots into a mission with no managers, and without the
 library the cyclers offer only what that island declares itself):
 
 ```powershell
-guerrilla-mode\install-missions.ps1                 # default prepared full Remaster shadow
+guerrilla-mode\install-missions.ps1                 # default: the prepared Remaster shadow (Get-UDDefaultDataDir)
 guerrilla-mode\install-missions.ps1 -GameDir <dir>  # another prepared full Remaster shadow
 ```
 

@@ -30,9 +30,11 @@ triSimUntil { time > orT0 + 6 }
 {deleteVehicle _x} forEach ((units group player) - [player])
 player allowDammage false
 
-// the pool sampler: the largest pool - poolStart seen so far
+// the pool sampler: the largest pool - ceiling seen so far (poolStart, or the
+// staged 60 once o1 sets it)
+orCeil = 0
 orOver = -999
-orSample = {orF = gmOccupierForces; if (((orF select 0) - (orF select 1)) > orOver) then {orOver = (orF select 0) - (orF select 1)}}
+orSample = {orF = gmOccupierForces; orRef = orF select 1; if (orCeil > orRef) then {orRef = orCeil}; if (((orF select 0) - orRef) > orOver) then {orOver = (orF select 0) - orRef}}
 
 // ---- o1: a real camera; the pool STRONG; the levers -------------------------
 orP = gmTrafficPercept (getPos player)
@@ -47,6 +49,11 @@ triAssertEq [(format ["%1", gmCounterAttackTune ["firstTownChance", 0]]), "true"
 triAssertEq [(format ["%1", gmCounterAttackTune ["speed", 100]]), "true"]
 triAssertEq [(format ["%1", gmForcesTune ["slowEta", 0]]), "true"]
 triAssertEq [(format ["%1", gmForcesTune ["airEta", 0]]), "true"]
+// since the generated bases (d5fa57b) Abel's poolStart is 48, and the keep-STRONG
+// rule (3c9947b, 1ae2dc9) cannot afford a ground buy plus an opener on it; the
+// opener this test pins is staged on a pool of 60 (SetPool raises the ceiling)
+triAssertEq [(format ["%1", gmForcesForce ["pool", 60]]), "true"]
+orCeil = 60
 orRes = gmResistanceSide call GM_fnSideFromString
 orOcc = gmOccupierSide call GM_fnSideFromString
 call orSample
@@ -74,6 +81,11 @@ orObs setCombatMode "BLUE"
 {_x allowDammage false} forEach (units orObs)
 doStop (units orObs)
 {orObs reveal _x} forEach (units orHold)
+// the observers face the hold squad and watch it: reveal makes the three known
+// but never seen, and the group reports a contact (posReported, which the
+// sighting scan reads) only after one of its men sees it inside his eye cone;
+// a stopped unit spawns facing north, away from a squad to its south-west
+{_x setDir (((orOPos select 0) - ((getPos _x) select 0)) atan2 ((orOPos select 1) - ((getPos _x) select 1))); _x doWatch orOPos} forEach (units orObs)
 player setPos [7922, 8500, 0]
 triSimUntil { call orSample; not ((gmZoneSim orO) select 0) }
 triAssertEq [((gmZone orO) select 2), gmResistanceSide]

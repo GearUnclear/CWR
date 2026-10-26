@@ -71,11 +71,17 @@ class CfgGuerrillaZones
     // The occupier forces layer (OCCUPIER-FORCES.md, phase 3): the theatre
     // pool and the director that answers flips from the second distinct town
     // on, at real speeds.  On by default since phase 7; kept here as the
-    // explicit opt-in.
+    // explicit opt-in.  The director is tuned through eight levers, all left
+    // at Normal here (OCCUPIER-FORCES.md 16): forcesDifficulty=1 (0 Easy,
+    // 2 Hard, 3 Brutal) picks the preset of forcesCadence=600;
+    // forcesStrength=1; forcesRecovery=4; forcesReach=1500;
+    // forcesAggression=1; forcesWaves=1; forcesMinimums=4;
+    // forcesConcurrency=3.  Any older forces* key is an expert override
+    // that logs a WARN.
     occupierForces = 1;
     // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
-    // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;
+    // heatCapSpike=40 (40 / forcesAggression); defaultIncome=25; cacheInterval=5; groupSize=12;
     // alertInterval=5; alert*Knows/Heat defaults).  Direct-launch faction
     // fallbacks are stated explicitly (single-mission browser launches skip
     // the new-game UI, so nothing is published there):
@@ -106,6 +112,12 @@ class CfgGuerrillaZones
     // The resistance cycler therefore picks a ROSTER, not a side.
     playerSide = "GUER";
     seedCities = 1;       // auto-seed CITY zones from Abel's named towns
+    // Generated occupier bases (OCCUPIER-FORCES.md 5.7): at new game the
+    // engine adds OUTPOST zones where the density rule finds a town more than
+    // 2.5 km from a ground base, stored in the save and never re-derived.
+    // Malden's west and south-west (Vigny, La Pessagne, Goisse, Cancon, La
+    // Riviere, Chapoi, Sainte Marie) are 2.6 to 4.7 km from the four hubs.
+    generateBases = 1;
     seedCitySupport = 20; // their starting support (markers "gmZoneCity_<n>")
 
     class Zones

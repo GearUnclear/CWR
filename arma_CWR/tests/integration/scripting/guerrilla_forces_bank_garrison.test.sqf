@@ -53,6 +53,9 @@ triAssertEq [(format ["%1", gmForcesTune ["directorInterval", 1]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["firstTownChance", 0]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["speed", 100]]), "true"]
 triAssertEq [(format ["%1", gmForcesForce ["refillHours", 0.01]]), "true"]
+// forcesBankHulls 1: the df9457e rule this test pins, the airframe's hull
+// banks as bodies (decision 9's default 0 stores it: guerrilla_forces_bank_hulls)
+triAssertEq [(format ["%1", gmForcesTune ["bankHulls", 1]]), "true"]
 triAssertEq [((gmOccupierForces) select 4), "DORMANT"]
 bgStart = (gmOccupierForces) select 1
 triAssertGe [bgStart, 20]

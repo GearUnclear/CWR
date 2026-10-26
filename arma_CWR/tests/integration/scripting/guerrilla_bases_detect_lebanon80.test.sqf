@@ -16,6 +16,8 @@
 //    l2  the authored zones are untouched: the two OUTPOSTs (R = 6 + 8 = 14),
 //        poolStart = max(24, R + 2K), and no zone carries the seeded flag
 //        (seedCities = 0 here).
+//    l3  no generated bases either (generateBases = 0 by design,
+//        OCCUPIER-FORCES.md 5.7).
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
@@ -42,5 +44,8 @@ triAssertEq [lbR, 14]
 lbExp = lbR + 2 * ((gmOccupierForces) select 7)
 if (lbExp < 24) then {lbExp = 24}
 triAssertEq [((gmOccupierForces) select 1), lbExp]
+
+// ---- l3: no generated bases --------------------------------------------------
+triAssertEq [(count gmGeneratedBases), 0]
 
 triEndTest

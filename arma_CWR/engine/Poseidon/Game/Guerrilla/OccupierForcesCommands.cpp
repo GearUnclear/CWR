@@ -39,6 +39,37 @@
 //                                  2026-10-16: [30] the re-armed zones
 //                                  (6.3: rested with fighters reported,
 //                                  heat held at forcesRearmHeat).
+//   gmOccupierRepels            -> the repel ladder (OCCUPIER-FORCES.md 6.3,
+//                                  2026-10-16): one row per zone the
+//                                  director remembers, [zone, repels,
+//                                  lastPackage, lastSource, contained];
+//                                  lastPackage "FOOT" / "TRUCK" / ...,
+//                                  lastSource the base name ("" unknown).
+//   gmOccupierLedger            -> the ledger and the band's input
+//                                  (OCCUPIER-FORCES.md 5.5, 5.6, 7.1,
+//                                  2026-10-16): [bandStrength, committedAir,
+//                                  lossesInWindow, repaidInWindow, banked,
+//                                  dropped, stoodDown, [[zone, bodies]...]
+//                                  the wave surge, [[zone, package, what,
+//                                  units]...] the stored spare hulls,
+//                                  surgeOpen, poolCeiling, bankHulls].
+//                                  bandStrength is what the band is stepped
+//                                  on: min(pool + committedAir, max(poolStart,
+//                                  pool) - (lossesInWindow - repaidInWindow)).
+//   gmOccupierMassing           -> [target, ticks, forcesMassingMax]: the
+//                                  candidate the director is massing for
+//                                  ("" none; "@HQ" the HQ) and the director
+//                                  ticks it has held its token.
+//   gmOccupierReserve           -> [floorUnits, room, budget, [[zone, what,
+//                                  plan, package, price, pool, best, line]
+//                                  ...]]: the reserve floor (6.3,
+//                                  2026-10-17): forcesPoolFloor x poolStart,
+//                                  the most a floored launch may cost now
+//                                  (the pool kept at the floor), what a
+//                                  floored plan is chosen on (the same at
+//                                  max(pool, poolStart)), and the targets
+//                                  whose plan waits for it (the pool when
+//                                  its line was written, the line itself).
 //   gmLegacyQrf                 -> true while qrf.sqs fields its script QRF
 //                                  (D20): the key off, the service sized
 //                                  off, or a legacy save (a block older than
@@ -117,8 +148,35 @@
 //                                  (0..8), "waveCluster" (100..20000 m),
 //                                  "waveSurge" (0..48); "log" (0/1, the
 //                                  forcesLog director log toggle,
-//                                  DirectorLog.hpp).  Returns true when
-//                                  the key is known.
+//                                  DirectorLog.hpp); the repel ladder
+//                                  (6.3, 2026-10-16; constants, no config
+//                                  key): "escalateLethality" (1..3),
+//                                  "escalateInfantry" (0..4),
+//                                  "approachRepels" / "containRepels"
+//                                  (0..9, 0 = never), "massingMax"
+//                                  (0..20 ticks), "restJitter" (0..0.5),
+//                                  "adjacentTown" (0..5000 m); the ledger
+//                                  (5.5, 5.6, 7.1, 2026-10-16): "bankHulls"
+//                                  (0/1, the forcesBankHulls key),
+//                                  "surgeDecayHours" (0.001..24 h),
+//                                  "surgeShare" (0..2), "lossWindowHours"
+//                                  (0.01..24 h; constants, no config key);
+//                                  the lever round (16): "urgentExit"
+//                                  (0..100), "strikeMinFighters" (0..12),
+//                                  "alarmMin" (1..12), and the eight
+//                                  levers "cadence" (60..7200 s),
+//                                  "strength" (0.25..4, at activation
+//                                  only), "recovery" (0.5..48 h), "reach"
+//                                  (0..86400 s), "aggression" (0.25..4),
+//                                  "waves" (0..3), "minimums" (1..10),
+//                                  "concurrency" (2..6), plus "difficulty"
+//                                  (0..3, every lever at that preset): a
+//                                  lever re-derives every field it folds
+//                                  (CounterAttack's maxLive,
+//                                  forcesLiveHullsMax and firstTownChance
+//                                  included), overwriting earlier field
+//                                  values.  Returns true when the key is
+//                                  known.
 //   gmForcesForce [what, value] test lever; what:
 //                                  "pool"        sets the pool (>= 0) and
 //                                                re-steps the band (no-op
@@ -151,7 +209,16 @@
 //                                                answers the zone as an
 //                                                alarm now (RED or not);
 //                                  "legacySave"  ["legacySave", 0/1] sets
-//                                                the flag (gmLegacyQrf).
+//                                                the flag (gmLegacyQrf);
+//                                  "loss"        ["loss", n] books n units
+//                                  lost now (the band's loss window, 5.6;
+//                                  the pool does not move);
+//                                  "repels"      ["repels", zoneIndex, n]
+//                                                makes the director remember
+//                                                n repels on the zone (0
+//                                                forgets; containRepels or
+//                                                more contains it, no surge;
+//                                                false for an unknown zone).
 //                                  Returns true when what is known.
 
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
@@ -267,9 +334,149 @@ static GameValue GmOccupierForces(const GameState* state)
     return value;
 }
 
+namespace Poseidon::Guerrilla
+{
+// the "repels" lever's body (gmForcesForce, OccupierForces.hpp ForceRepels):
+// kept with the command surface it serves
+void OccupierForces::ForceRepels(const char* zone, int count)
+{
+    if (!zone || !*zone)
+    {
+        return;
+    }
+    int r = FindRepel(zone);
+    if (count <= 0)
+    {
+        if (r >= 0)
+        {
+            _repels.Delete(r);
+        }
+        return;
+    }
+    if (r < 0)
+    {
+        RepelRow row;
+        row.zone = zone;
+        _repels.Add(row);
+        r = _repels.Size() - 1;
+    }
+    _repels[r].count = count;
+    _repels[r].contained = _tuning.containRepels > 0 && count >= _tuning.containRepels;
+    GM_DIRECTOR_INFO(Core, "OccupierForces: {} forced to remember {} repel(s){}", zone, count,
+                     _repels[r].contained ? ", contained" : "");
+}
+} // namespace Poseidon::Guerrilla
+
+static GameValue GmOccupierRepels(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& rows = value;
+    for (int i = 0; i < of.RepelRows(); i++)
+    {
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(5);
+        row[0] = GameStringType(of.RepelZone(i));
+        row[1] = (float)of.RepelCount(i);
+        row[2] = GameStringType(ForcePackages::PackageName(of.RepelPackage(i)));
+        row[3] = GameStringType(of.RepelSource(i));
+        row[4] = GameValue(of.RepelContained(i));
+        rows.Add(rowValue);
+    }
+    return value;
+}
+
+static GameValue GmOccupierMassing(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& row = value;
+    row.Resize(3);
+    row[0] = GameStringType(of.MassingTarget());
+    row[1] = (float)of.MassingTicks();
+    row[2] = (float)of.Tuning().massingMax;
+    return value;
+}
+
+static GameValue GmOccupierReserve(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    out.Resize(4);
+    out[0] = of.ReserveFloorUnits();
+    out[1] = (float)of.ReserveRoom();
+    out[2] = (float)of.ReserveBudget();
+    GameValue rowsValue = state->CreateGameValue(GameArray);
+    GameArrayType& rows = rowsValue;
+    for (int i = 0; i < of.ReserveWaitRows(); i++)
+    {
+        const OccupierForces::ReserveWaitRow* w = of.ReserveWait(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(8);
+        row[0] = GameStringType(w->zone);
+        row[1] = GameStringType(w->what);
+        row[2] = GameStringType(w->plan);
+        row[3] = GameStringType(ForcePackages::PackageName(w->package));
+        row[4] = (float)w->price;
+        row[5] = (float)w->pool;
+        row[6] = GameValue(w->best);
+        row[7] = GameStringType(w->line);
+        rows.Add(rowValue);
+    }
+    out[3] = rowsValue;
+    return value;
+}
+
 static GameValue GmLegacyQrf(const GameState* /*state*/)
 {
     return GameValue(OccupierForces::Instance().LegacyQrf());
+}
+
+static GameValue GmOccupierLedger(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& row = value;
+    row.Add(GameValue((float)of.BandStrength()));
+    row.Add(GameValue((float)of.CommittedAir()));
+    row.Add(GameValue((float)of.LossesInWindow()));
+    row.Add(GameValue((float)of.RepaidInWindow()));
+    row.Add(GameValue((float)of.Banked()));
+    row.Add(GameValue((float)of.Dropped()));
+    row.Add(GameValue((float)of.StoodDown()));
+    GameValue surgeValue = state->CreateGameValue(GameArray);
+    GameArrayType& surge = surgeValue;
+    for (int i = 0; i < of.SurgeRows(); i++)
+    {
+        GameValue pairValue = state->CreateGameValue(GameArray);
+        GameArrayType& pair = pairValue;
+        pair.Resize(2);
+        pair[0] = GameStringType(of.SurgeRowZone(i));
+        pair[1] = (float)of.SurgeRowBodies(i);
+        surge.Add(pairValue);
+    }
+    row.Add(surgeValue);
+    GameValue hullsValue = state->CreateGameValue(GameArray);
+    GameArrayType& hulls = hullsValue;
+    for (int i = 0; i < of.StoredHullRows(); i++)
+    {
+        GameValue hValue = state->CreateGameValue(GameArray);
+        GameArrayType& h = hValue;
+        h.Resize(4);
+        h[0] = GameStringType(of.StoredHullZone(i));
+        h[1] = GameStringType(ForcePackages::PackageName(of.StoredHullPackage(i)));
+        h[2] = GameStringType(of.StoredHullWhat(i));
+        h[3] = (float)of.StoredHullUnits(i);
+        hulls.Add(hValue);
+    }
+    row.Add(hullsValue);
+    row.Add(GameValue(of.SurgeOpen()));
+    row.Add(GameValue((float)of.PoolCeiling()));
+    row.Add(GameValue(of.Tuning().bankHulls));
+    return value;
 }
 
 static GameValue GmWarLevelOccupier(const GameState* /*state*/)
@@ -462,6 +669,7 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "roadFactor") == 0)
     {
         t.roadFactor = ClampF(v, 1, 5);
+        ForcePackages::SetRoadFactor(t.roadFactor);
     }
     else if (stricmp(key, "rearmHeat") == 0)
     {
@@ -522,6 +730,72 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "log") == 0)
     {
         t.log = v != 0;
+    }
+    else if (stricmp(key, "escalateLethality") == 0)
+    {
+        t.escalateLethality = ClampF(v, 1, 3);
+    }
+    else if (stricmp(key, "escalateInfantry") == 0)
+    {
+        t.escalateInfantry = ClampF(v, 0, 4);
+    }
+    else if (stricmp(key, "approachRepels") == 0)
+    {
+        t.approachRepels = (int)ClampF(v, 0, 9);
+    }
+    else if (stricmp(key, "containRepels") == 0)
+    {
+        t.containRepels = (int)ClampF(v, 0, 9);
+    }
+    else if (stricmp(key, "massingMax") == 0)
+    {
+        t.massingMax = (int)ClampF(v, 0, 20);
+    }
+    else if (stricmp(key, "restJitter") == 0)
+    {
+        t.restJitter = ClampF(v, 0, 0.5f);
+    }
+    else if (stricmp(key, "adjacentTown") == 0)
+    {
+        t.adjacentTown = ClampF(v, 0, 5000);
+    }
+    else if (stricmp(key, "bankHulls") == 0)
+    {
+        t.bankHulls = v != 0;
+    }
+    else if (stricmp(key, "surgeDecayHours") == 0)
+    {
+        t.surgeDecayHours = ClampF(v, 0.001f, 24.0f);
+    }
+    else if (stricmp(key, "surgeShare") == 0)
+    {
+        t.surgeShare = ClampF(v, 0, 2);
+    }
+    else if (stricmp(key, "lossWindowHours") == 0)
+    {
+        t.lossWindowHours = ClampF(v, 0.01f, 24.0f);
+    }
+    else if (stricmp(key, "urgentExit") == 0)
+    {
+        t.urgentExit = ClampF(v, 0, 100);
+    }
+    else if (stricmp(key, "strikeMinFighters") == 0)
+    {
+        t.strikeMinFighters = (int)ClampF(v, 0, 12);
+    }
+    else if (stricmp(key, "alarmMin") == 0)
+    {
+        t.alarmMin = (int)ClampF(v, 1, 12);
+    }
+    else if (t.levers.Set(key, v))
+    {
+        // one of the eight levers or "difficulty": re-derive every field it
+        // folds (overwriting earlier field levers), CounterAttack's too.
+        // strength sizes the pool at activation only; heatCapSpike is read
+        // at mission load only
+        const OccupierForcesLevers levers = t.levers;
+        levers.Derive(t);
+        levers.Derive(CounterAttack::Instance().TuningMutable());
     }
     else
     {
@@ -589,6 +863,27 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
         of.SetLegacySave(v != 0);
         GM_DIRECTOR_INFO(Core, "OccupierForces: legacySave forced {}", v != 0 ? "on" : "off");
     }
+    else if (stricmp(what, "loss") == 0)
+    {
+        // ["loss", n]: n units booked lost now (the band's loss window)
+        if (!of.Active() || v < 1)
+        {
+            return GameValue(false);
+        }
+        of.NoteLoss((int)(v + 0.5f), "forced loss");
+        GM_DIRECTOR_INFO(Core, "OccupierForces: {} unit(s) forced lost, band strength {}", (int)(v + 0.5f),
+                         of.BandStrength());
+    }
+    else if (stricmp(what, "repels") == 0)
+    {
+        // ["repels", zoneIndex, n]: the repel ladder remembers n repels
+        const ZoneRecord* z = ZoneRegistry::Instance().GetZone((int)v);
+        if (!z)
+        {
+            return GameValue(false);
+        }
+        of.ForceRepels(z->name, args.Size() >= 3 ? (int)(ArgValue(args[2]) + 0.5f) : 0);
+    }
     else
     {
         return GameValue(false);
@@ -603,6 +898,10 @@ INIT_MODULE(GuerrillaOccupierForces, 3)
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierIntel", GmOccupierIntel));
     GGameState.NewNularOp(GameNular(GameScalar, "gmWarLevelOccupier", GmWarLevelOccupier));
     GGameState.NewNularOp(GameNular(GameBool, "gmLegacyQrf", GmLegacyQrf));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierRepels", GmOccupierRepels));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierMassing", GmOccupierMassing));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierReserve", GmOccupierReserve));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierLedger", GmOccupierLedger));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesTune", GmForcesTune, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesForce", GmForcesForce, GameArray));
 }

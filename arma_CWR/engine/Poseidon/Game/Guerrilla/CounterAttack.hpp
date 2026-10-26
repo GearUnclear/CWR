@@ -29,7 +29,7 @@
 // TWO PATHS.  A source whose garrison is live (inside the bubble) marches its
 // own soldiers out: they leave the post's cache groups and walk on the town
 // by road (LIVE at once).  A stored reserve is debited and TRAVELS abstractly
-// for distance * counterAttackRoadFactor / counterAttackSpeed seconds along
+// for distance * forcesRoadFactor / counterAttackSpeed seconds along
 // its road route from the base to the town (RouteOf: the engine's road net,
 // a straight line when there is none or it winds too far, RoadIsReasonable).
 //
@@ -84,9 +84,27 @@
 // reverts under it = it becomes the town's garrison (GarrisonCache adopts the
 // group, and its bodies come off the revert refill, SubtractAdopted); still
 // there after
-// counterAttackLiveTimeout and out of the player's sight = it withdraws and
-// its survivors return to the source (the timeout counts from the town edge;
-// the road march gets its own allowance first, see MarchAllowance).
+// counterAttackLiveTimeout = it withdraws (the timeout counts from the town
+// edge; the road march gets its own allowance first, see MarchAllowance).
+//
+// BREAK-OFF (decision 4, the feel assessment's item 7; occupierForces on or a
+// funded record).  A live RETAKE, BASE or HQ_ASSAULT whose living infantry
+// falls below a third of the strength it was born with (BreaksOff:
+// alive x BreakOffDivisor < bornStrength) while the target is still the
+// resistance's withdraws at once; the lone survivor of a squad is the same
+// rule.  A withdrawal (break-off, live timeout, the HQ moved) settles the
+// record NOW: one CAOpRepelled with its reason (CAERBrokenOff /
+// CAERWithdrew; the director counts it as a repel), the losses booked, and
+// the survivors walk back toward their source as a withdrawing Leftover
+// (re-sent home at every check, removed only away from the player and
+// unseen, then home as bodies through CrewHome, the dead among them lost).
+// The hulls never leave before the infantry: infantry still seated rides
+// home in its carrier (the HomeHull carries it as cargo, deleted cargo
+// first); infantry on foot is waited for, each hull holding where it stands
+// (an armed one still supporting) until no living survivor is within
+// ClearRadius of the target or WithdrawHullWait (120 s) has passed, then it
+// drives home.  A top-up squad whose town was lost (M5) keeps the same
+// bound on its hulls.
 //
 // DETERMINISM.  Every roll (dispatch, delay, odds) is a hash of a seed fixed
 // at the flip (town name, flip stamp, towns held) and a salt, so a save and
@@ -111,7 +129,7 @@
 //   same key OccupierForces reads):
 //   * real speeds (3.2): abstract travel at the record's abstractSpeed, or
 //     FootSpeed for a legacy record, over the real road length (straight
-//     distance x counterAttackRoadFactor when no road route is known); the
+//     distance x forcesRoadFactor when no road route is known); the
 //     gmCounterAttackTune "speed" lever, once set at run time, wins over
 //     both (a TEST lever that keeps the tri windows short);
 //   * resolution (6.5): an arrival at a town with resistance defenders goes
@@ -185,7 +203,8 @@ struct CounterAttackTuning
     float delayMax = 300.0f;         // counterAttackDelayMax
     float sourceKeep = 0.25f;        // counterAttackSourceKeep: share of garrisonMax a base keeps home
     float speed = 4.0f;              // counterAttackSpeed: abstract travel speed (m/s)
-    float roadFactor = 1.3f;         // counterAttackRoadFactor: road distance / straight distance
+    // (counterAttackRoadFactor is retired: every leg with no road route uses
+    // the quote's forcesRoadFactor, QuoteRoadFactor)
     float defenderWeight = 3.0f;     // counterAttackDefenderWeight: one fighter in his town = this many attackers
     float repelLoss = 0.5f;          // counterAttackRepelLoss: share of a repelled force that does not come home
     float liveTimeout = 1200.0f;     // counterAttackLiveTimeout: s before an unresolved live squad withdraws
@@ -585,6 +604,13 @@ class CounterAttack : public SerializeClass
     // before counterAttackLiveTimeout starts counting
     static constexpr float MarchSpeed = 1.0f;
     static constexpr float MarchSlack = 120.0f;
+    // the break-off (decision 4, item 7): a live operation whose living
+    // infantry x BreakOffDivisor is below its born strength withdraws (below
+    // a third)
+    static constexpr int BreakOffDivisor = 3;
+    // a withdrawing force's hulls wait at most this long (s) for the infantry
+    // on foot to clear the target's edge (ClearRadius), then drive home
+    static constexpr float WithdrawHullWait = 120.0f;
     // real speeds (OCCUPIER-FORCES.md 3.2; constants, occupierForces on
     // only): men on foot 1.5 m/s, a ground hull 0.6 x and an aircraft 0.8 x
     // its config maxSpeed (km/h, converted to m/s)
@@ -661,6 +687,12 @@ class CounterAttack : public SerializeClass
         // serialized (absent: false): a live top-up squad whose town was
         // lost walks home and leaves the world only unseen (M5)
         bool withdrawing = false;
+        // the break-off (serialized; absent: 0, set from strength at the
+        // next live step): the infantry bodies the operation was first born
+        // with, and the seconds a withdrawing top-up squad (M5) has been
+        // walking home (its hulls wait at most WithdrawHullWait for it)
+        int bornStrength = 0;
+        float withdrawClock = 0;
         // phase 6A (serialized; absent in older saves: no air, no strike, no
         // alarm).  CounterAttackOrders.hpp documents each field.
         int airOrigin = -1;       // an occupier-held AIRFIELD zone index, -1 = off-map
@@ -684,6 +716,10 @@ class CounterAttack : public SerializeClass
         float alarmQuiet = 0;     // CAKAlarm, live at the alarm: s below RED with no contact
         float revealClock = 0;    // CAKStrike, live: s to the next limited reveal
         // transient (rebuilt after a load) ---------------------------------
+        // CounterAttackEndReason of the withdrawal that ends the record this
+        // step (Withdraw); SendHullHome reads it: the hulls wait for the
+        // infantry, or carry it home
+        int withdrawReason = CAERNone;
         bool edgeHold = false;    // Travel: the last birth attempt was BirthHold (at the town edge)
         bool escortWait = false;  // Live, mounted: the carrier waits for its escort to close up
         float retry = 0;          // Travel / Holding: seconds to the next live attempt
@@ -693,6 +729,9 @@ class CounterAttack : public SerializeClass
         bool suspended = false;   // Holding: the town is in the bubble, the force does nothing
         float unseenFor = 0;      // Live, LegRoad: seconds every body has been out of perception
         float stopping = -1;      // Live, mounted at the edge: seconds the hull has been braking (-1 not yet)
+        float stallMark = -1;     // Live, mounted: the distance to the town at the last progress mark (-1 none)
+        float stallFor = 0;       // Live, mounted: seconds since the hull last closed StallProgress
+        int stallVerdict = 0;     // Live, mounted: the StallVerdict being acted on (StallNone)
         int spawnReason = CASpawnNone;
         Vector3 spawnPos = VZero; // where the live squad was instantiated
         bool routeIsRoad = false; // route came from the road net (no roadFactor on its length)
@@ -744,8 +783,24 @@ class CounterAttack : public SerializeClass
         float retry = 0;
         LLink<Entity> hull;      // an abandoned intact hull (null: none, or a wreck)
         LLink<AIGroup> group;    // the crew or squad group (null: none)
+        // a withdrawing force's survivors (break-off, live timeout): where
+        // they walk, re-sent at every check while one lives; VZero =
+        // stragglers left where they stand.  Serialized (absent: VZero)
+        Vector3 home = VZero;
         LSError Serialize(ParamArchive& ar);
     };
+
+    // why a withdrawing force's hull left (HomeHull::released)
+    enum HullRelease
+    {
+        HRNone,       // it never waited (a normal end, or its infantry rides in it)
+        HRWaiting,    // still holding for the infantry
+        HRCleared,    // no living survivor within the radius any more
+        HRWaitOver,   // WithdrawHullWait passed
+        HRNoInfantry, // the survivors' group is gone (removed, or nobody alive)
+        NHullReleases
+    };
+    static const char* HullReleaseName(int released);
 
     // an intact hull driving home after its operation ended: deleted where
     // nobody sees it (HullUnseen), then CAOpHullRefund, its crew home as
@@ -762,8 +817,45 @@ class CounterAttack : public SerializeClass
         float retry = 0;
         LLink<Entity> hull;
         LLink<AIGroup> crewGroup;
+        // a withdrawal (serialized; absent: no wait, no cargo).  wait > 0:
+        // the hull holds where it stands (an armed one still supporting)
+        // while living members of waitGroup stand within waitRadius of
+        // waitAt, for at most wait more seconds; then it drives home.
+        // waited counts the seconds held; released is a HullRelease.
+        float wait = 0;
+        float waited = 0;
+        float waitRadius = 0;
+        Vector3 waitAt = VZero;
+        LLink<AIGroup> waitGroup;
+        int released = HRNone;
+        // the infantry still seated in the carrier rides home with it:
+        // deleted first, its living home as bodies, its dead lost
+        LLink<AIGroup> cargo;
+        int cargoLiving = 0;
         LSError Serialize(ParamArchive& ar);
     };
+    // a withdrawing force's infantry has cleared the target's edge beyond
+    // this radius (m): the larger of the 250 m dismount bound and the town
+    // edge (zoneArea + TownEdgeMargin), so it is past where its hulls stand
+    float ClearRadius(const ZoneRegistry& registry) const;
+
+    // the last operations that ended (terminal events), newest last, for
+    // the script surface (gmCounterAttackEnds; transient, EndsKept at most)
+    struct EndNote
+    {
+        int opId = 0;
+        RString target;
+        int type = CAOpAborted; // CounterAttackOpEventType
+        int reason = CAERNone;  // CounterAttackEndReason
+        int bodies = 0;
+        int units = 0;
+        int born = 0; // the infantry strength born (0: never live)
+        RString note;
+        RString line; // a withdrawal's "Broken off at X: N lost, M going home" line
+    };
+    static constexpr int EndsKept = 16;
+    int EndCount() const { return _ends.Size(); }
+    const EndNote* GetEnd(int i) const { return i >= 0 && i < _ends.Size() ? &_ends[i] : nullptr; }
 
     // lifecycle ---------------------------------------------------------------
     void Clear();
@@ -787,15 +879,23 @@ class CounterAttack : public SerializeClass
     // probability the town holds: D*w / (A + D*w); 0 with no defenders, 1
     // with no attackers
     static float HoldOdds(const CounterAttackTuning& t, int defenders, int attackers);
-    // straightDistance * counterAttackRoadFactor / counterAttackSpeed, at
+    // straightDistance * QuoteRoadFactor() / counterAttackSpeed, at
     // least MinTravel: the whole road leg from the base to the town
     static float TravelTime(const CounterAttackTuning& t, float straightDistance);
     // the record's abstract leg (3.2).  The speed lever (t.speedLever) or a
     // legacy record with the key off: TravelTime.  Otherwise at
     // r.abstractSpeed (FootSpeed when 0): roadLength / speed when the route
     // is a real road route (roadLength > 0), else straightDistance x
-    // roadFactor / speed; at least MinTravel.
-    static float TravelTimeFor(const CounterAttackTuning& t, const Record& r, float straightDistance, float roadLength);
+    // lineFactor / speed; at least MinTravel.  lineFactor is the quote's
+    // road factor (QuoteRoadFactor), so the march and the quote agree.
+    static float TravelTimeFor(const CounterAttackTuning& t, const Record& r, float straightDistance, float roadLength,
+                               float lineFactor);
+    // the one road factor of a ground leg with no road route known:
+    // ForcePackages::RoadFactor(), the theatre's forcesRoadFactor the
+    // director sets and quotes with (PackageRequest::roadFactor), at least 1
+    static float QuoteRoadFactor();
+    // the break-off rule: alive > 0 and alive x BreakOffDivisor < born
+    static bool BreaksOff(int bornStrength, int alive);
     // HoldOdds with the attackers' lethality (6.5, item 12): D*w / (A_lethal + D*w)
     static float HoldOddsLethal(const CounterAttackTuning& t, int defenders, float attackLethal);
     // route geometry (2D lengths) ---------------------------------------------
@@ -968,6 +1068,29 @@ class CounterAttack : public SerializeClass
     // slow below this, or StopMax seconds
     static constexpr float DismountSpeed = 1.5f;
     static constexpr float StopMax = 15.0f;
+    // the stall rule (6.5, video 6): a mounted force that has not closed
+    // StallProgress metres on its town for StallNearTime seconds within
+    // DismountReach past the 250 m mark (born or stalled near the target),
+    // or for StallTime seconds anywhere on its route, dismounts where it
+    // stands (CounterAttackMarch.cpp).  StallNearTime covers the first
+    // ResendInterval a hull waits for its first leg after a birth.
+    static constexpr float StallProgress = 20.0f;
+    static constexpr float DismountReach = 100.0f;
+    static constexpr float StallNearTime = 45.0f;
+    static constexpr float StallTime = 90.0f;
+    enum StallKind
+    {
+        StallNone,
+        StallAtMark,  // near the mark: dismount and assault from there
+        StallOnRoute  // farther out: dismount and march on on foot
+    };
+    // one progress measure: mark is the distance at the last progress mark
+    // (-1: none yet), stalledFor the seconds since; a step StallProgress
+    // closer than the mark moves it and clears the seconds.  Returns them.
+    static float StallStep(float& mark, float& stalledFor, float toDest, float elapsed);
+    // the StallKind for a hull toDest metres from its town after stalledFor
+    // seconds without progress (birthMin: counterAttackBirthMinToTarget)
+    static int StallVerdict(float toDest, float birthMin, float stalledFor);
     // a column's escort is born this far behind the carrier on its road (m);
     // the carrier waits while the escort is more than EscortSpread behind
     // and drives on once it is within EscortRejoin
@@ -1035,7 +1158,10 @@ class CounterAttack : public SerializeClass
   private:
     void LoadFromConfig();
     // one event to the listener (queued while a listener call is running)
-    void Emit(const ZoneRegistry& registry, const Record& r, int type, int bodies, int units, const char* note);
+    // (terminal events are kept in _ends too; reason: a CAOpRepelled's
+    // CounterAttackEndReason)
+    void Emit(const ZoneRegistry& registry, const Record& r, int type, int bodies, int units, const char* note,
+              int reason = CAERNone);
     // crew leave the operation's price (home as bodies, refunded, lost, or
     // handed to the Leftover list): CAOpCrewSettled, so the ledger row lets
     // go of them without crediting the pool (5.5).  Nothing for crew <= 0 or
@@ -1073,7 +1199,7 @@ class CounterAttack : public SerializeClass
     static int ReturnBodies(ZoneRegistry& registry, const CounterAttackView& view, int zone, int bodies);
     // what a lost hull or a dead group leaves: tracked until an unseen
     // deletion (M3, L7)
-    void AddLeftover(const RString& source, Entity* hull, AIGroup* group, int living);
+    void AddLeftover(const RString& source, Entity* hull, AIGroup* group, int living, Vector3Par home = VZero);
     void StepLeftovers(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops);
     // the key-on arrival at a town with defenders: born at the edge (a hull
     // package with its carrier, escort and crews, as on a route birth), or
@@ -1081,6 +1207,13 @@ class CounterAttack : public SerializeClass
     // Returns the GoLive outcome (BirthDone when born)
     int ArriveLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
                    AutoArray<ZoneEventRecord>& fired);
+    // a live force withdraws (break-off, live timeout, the HQ moved; reason
+    // a CounterAttackEndReason, rule the why for the INFO line): the losses
+    // booked, the survivors walking home as a Leftover (or seated in their
+    // carrier), the terminal CAOpRepelled; the hulls wait for the infantry
+    // (SendHullHome through FinishHull).  Always true: the record ends
+    bool Withdraw(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
+                  int alive, Vector3Par leader, int reason, const char* rule, AutoArray<ZoneEventRecord>& fired);
     // 5.4: the town reverted under a travelling record
     bool RevertedUnder(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r);
     // nearest occupier military zone with bodies to spare; -1 when none
@@ -1225,6 +1358,8 @@ class CounterAttack : public SerializeClass
     AutoArray<AirHome> _airHomes; // phase 6A: airframes flying home after an insertion
     float _mapSize = 0;           // phase 6A: the last map size a view reported (the off-map edge)
     AutoArray<Leftover> _leftovers;
+    AutoArray<EndNote> _ends; // transient: the last EndsKept terminal events
+    RString _endLine;         // transient: the line the next terminal event carries (Withdraw)
     float _accum = 0;
     int _townsTaken = 0;
 };

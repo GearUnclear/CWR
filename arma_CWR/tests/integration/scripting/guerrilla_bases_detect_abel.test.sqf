@@ -18,7 +18,9 @@
 //        segment, and the Le Port quay, COVERED by "Le Port Harbour" and
 //        within 300 m of the pier; nothing has status "seed".
 //    b4  the roster R is the authored 6 + 6 + 8 + 12 = 32 and poolStart is
-//        max(24, R + 2K).
+//        max(24, R + 2K) less the generated OUTPOSTs' garrisons
+//        (generateBases = 1, OCCUPIER-FORCES.md 5.7 conservation,
+//        guerrilla_bases_generate_abel has their rules).
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
@@ -33,12 +35,19 @@ bdFnNear = {bdNT = _this select 0; bdNP = [_this select 1, _this select 2, 0]; b
 // zones of any type within r of [x, z]: [x, z, r] call bdFnWithin
 bdFnWithin = {bdWP = [_this select 0, _this select 1, 0]; bdWN = 0; bdWI = 0; while {bdWI < gmZoneCount} do {bdWZ = gmZone bdWI; if (([(bdWZ select 8) select 0, (bdWZ select 8) select 1, 0] distance bdWP) <= (_this select 2)) then {bdWN = bdWN + 1}; bdWI = bdWI + 1}; bdWN}
 // R: the occupier roster's summed garrisonMax (OCCUPIER-FORCES.md 5.1: every
-// military zone the occupier owns at boot; gmZoneSim slot 7 is garrisonMax)
-bdFnR = {bdRS = 0; bdRI = 0; while {bdRI < gmZoneCount} do {bdRZ = gmZone bdRI; if (((bdRZ select 1) in ["AIRFIELD", "SEAPORT", "OUTPOST"]) and ((bdRZ select 2) == gmOccupierSide)) then {bdRS = bdRS + ((gmZoneSim bdRI) select 7)}; bdRI = bdRI + 1}; bdRS}
+// military zone the occupier owns at boot; gmZoneSim slot 7 is garrisonMax).
+// Generated bases (5.7, gmGeneratedBases) are counted apart (bdFnRgen): their
+// garrisons come out of poolStart (the owner's conservation rule).
+bdGenNames = []
+{bdGenNames = bdGenNames + [_x select 0]} forEach gmGeneratedBases
+bdFnR = {bdRS = 0; bdRI = 0; while {bdRI < gmZoneCount} do {bdRZ = gmZone bdRI; if (((bdRZ select 1) in ["AIRFIELD", "SEAPORT", "OUTPOST"]) and ((bdRZ select 2) == gmOccupierSide) and (not ((bdRZ select 0) in bdGenNames))) then {bdRS = bdRS + ((gmZoneSim bdRI) select 7)}; bdRI = bdRI + 1}; bdRS}
 // garrisonMax summed over the gmSeededBases rows' zones
 bdFnSeededR = {bdQS = 0; {bdQI = gmZoneIndex (_x select 0); if (bdQI >= 0) then {bdQS = bdQS + ((gmZoneSim bdQI) select 7)}} forEach gmSeededBases; bdQS}
-// the poolStart the roster implies: max(forcesPoolMin 24, R + forcesPoolPerTown 2 * K)
-bdFnPool = {bdPE = (call bdFnR) + 2 * ((gmOccupierForces) select 7); if (bdPE < 24) then {bdPE = 24}; bdPE}
+// the generated garrisons (5.7: Rgen, subtracted from poolStart)
+bdFnRgen = {bdGS = 0; {bdGI = gmZoneIndex (_x select 0); if (bdGI >= 0) then {bdGS = bdGS + ((gmZoneSim bdGI) select 7)}} forEach gmGeneratedBases; bdGS}
+// the poolStart the roster implies: max(forcesPoolMin 24, R + forcesPoolPerTown
+// 2 * K) less the generated garrisons (OCCUPIER-FORCES.md 5.7 conservation)
+bdFnPool = {bdPE = (call bdFnR) + 2 * ((gmOccupierForces) select 7); if (bdPE < 24) then {bdPE = 24}; bdPE = bdPE - (call bdFnRgen); if (bdPE < 0) then {bdPE = 0}; bdPE}
 
 triSimUntil { ((gmOccupierForces) select 2) != "OFF" }
 
@@ -87,5 +96,6 @@ triAssertEq [(bdRowSea select 6), "Le Port Harbour"]
 // ---- b4: the roster --------------------------------------------------------
 triAssertEq [(call bdFnR), 32]
 triAssertEq [((gmOccupierForces) select 1), (call bdFnPool)]
+triAssertEq [(count gmGeneratedBases), 2]
 
 triEndTest

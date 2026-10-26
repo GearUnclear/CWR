@@ -67,6 +67,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -1713,6 +1714,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla Mode zone tick - no-op unless the mission config
         // defines CfgGuerrillaZones; throttles itself to tickInterval.
         Guerrilla::ZoneRegistry::Instance().Simulate(deltaT);
+        // Generated-base props - inactive without generated bases;
+        // re-creates a deleted prop at BaseProps::TickInterval.  Before the
+        // garrison cache so an old save's first layout precedes its spawns.
+        Guerrilla::BaseProps::Instance().Simulate(deltaT);
         // Guerrilla garrison distance-cache - inactive with the registry;
         // throttles itself to cacheInterval.
         Guerrilla::GarrisonCache::Instance().Simulate(deltaT);

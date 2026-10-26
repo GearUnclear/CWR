@@ -124,7 +124,8 @@ struct AirLzFacts
     bool inMap = true;     // inside the terrain grid
     float landY = 0;       // surface height above sea level at the point
     float gradient = 0;    // max rise over run across the clear radius
-    int objects = 0;       // objects (trees, buildings, walls) within the clear radius
+    int objects = 0;       // objects (trees, buildings, walls) within the clear radius; the engine probe
+                           // adds one for a point within BaseProps::LzClear of a generated base's props
     // the probe may move the candidate (the engine snaps it to the centre of
     // its terrain cell, the unit the engine's own landing test rates); the
     // pick then re-checks the ring with the moved point

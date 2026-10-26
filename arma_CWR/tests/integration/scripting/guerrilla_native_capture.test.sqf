@@ -21,10 +21,29 @@
 //  is 0), then gmGarrisonForceDespawn writes the honest survivor count (0)
 //  back and stands the cache down. The staged contest soldier runs combat
 //  mode BLUE and the player is damage-shielded for the window, so the only
-//  observable is the meter freeze.
+//  observable is the meter freeze. The player must be the ONLY resistance
+//  unit in the zone: the boot companion (companions.sqs) spawns armed in the
+//  player's group, counts as a second attacker and shoots the BLUE soldier a
+//  few seconds after he appears; when that kill landed inside the contest
+//  window the meter resumed and the freeze assert went red (about 1 run in 5).
+//  So the companion is retired first, and the census is asserted below.
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
+
+// -- staging isolation (the guerrilla_native_undercover idiom): retire the
+//    companion roster before its first spawn tick and sweep any body that beat
+//    us to it, twice, bracketing the check-to-spawn race inside the companion
+//    tick. Park the QRF loop too (it re-reads GM_QRF_TICK every pass; every
+//    zone is GREEN this early): a QRF group reaching the zone would freeze the
+//    meter on the way to the flip. ---------------------------------------------
+GM_COMP_ALIVE = [false]
+GM_QRF_TICK = 999999
+{deleteVehicle _x} forEach ((units group player) - [player])
+gcT0 = time
+triSimUntil { time > gcT0 + 6 }
+{deleteVehicle _x} forEach ((units group player) - [player])
+
 gcOut = gmZoneIndex "Outpost"
 triAssertGe [gcOut, 0]
 
@@ -61,6 +80,9 @@ gmZoneSet [gcOut, "garrison", 0]
 //    does NOT flip the moment it reads empty ----------------------------------
 triSimUntil { ((gmZone gcOut) select 9) > 0 }
 triAssertEq [((gmZone gcOut) select 2), gmOccupierSide]
+// the premise: the player alone secures it (the resistance census, gmZoneSim
+// slot 1, is 1), so nothing on his side can shoot the contest soldier
+triAssertEq [((gmZoneSim gcOut) select 1), 1]
 
 // -- CONTEST: one live occupier inside zoneArea freezes the meter. Spawned
 //    into the occupier center via the shipped lib helper; BLUE = never fires,

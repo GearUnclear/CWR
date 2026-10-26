@@ -14,6 +14,7 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 #include <Poseidon/Game/Guerrilla/BaseDetect.hpp> // the AIRFIELD / SEAPORT seed (issue #76)
+#include <Poseidon/Game/Guerrilla/BaseGenerate.hpp> // generated occupier bases (OCCUPIER-FORCES.md 5.7)
 
 #include <vector>
 
@@ -131,6 +132,13 @@ struct ZoneTuning
     // (authored zones keep precedence).  Detection itself runs whenever a
     // landscape is loaded (gmDetectedBases); this key gates the seeding.
     bool seedBases = false;
+    // Generated occupier bases (OCCUPIER-FORCES.md 5.7, BaseGenerate.hpp):
+    // config key generateBases (0/1, absent = 0; templates opt in).  On, a
+    // NEW game adds OUTPOST zones by the density rule after the CITY seed,
+    // once, and stores them in the save; a reload re-injects the stored
+    // rows whatever the key says now.  generateBasesSeed pins the seed
+    // (absent or 0 = one GRandGen draw).
+    bool generateBases = false;
     // playRegion[] = {minX, minZ, maxX, maxZ} (easting / northing): the part
     // of the map the campaign is played on.  An AUTHORED region bounds
     // everything: a Names town outside it is not seeded as a CITY nor offered
@@ -203,6 +211,15 @@ struct ZoneRecord
     // settlement probe (OCCUPIER-FORCES.md 5.1).  Every reader of this flag
     // that means "a seeded town" must also test type == CITY.
     bool seeded = false;
+    // a generated base (OCCUPIER-FORCES.md 5.7): stored in the GeneratedBases
+    // save block, not rebuilt from config; also seeded.  CampaignEnd::
+    // IsAuthoredOccupier answers false for it, so the occupier pool gives it
+    // no share of R (the conservation stand-in until OccupierForces sizes it)
+    bool generated = false;
+    // the win roster takes this zone (CampaignEnd::CountsForWin); false for
+    // the minor kinds (CHECKPOINT, COASTAL, HELIPAD), the owner's 2026-10-16
+    // rule.  Static, from the generated row; authored zones keep true.
+    bool countsForWin = true;
 
     // dynamic, serialized (matched by zone name on load)
     RString owner;           // concrete side: resistance / occupier / "NEUTRAL" / ...
@@ -694,6 +711,24 @@ class ZoneRegistry : public SerializeClass
     // pass) hands LoadFromParams instead of the LandscapeBaseProbe.  Null
     // restores the landscape.  Not owned; Clear resets it.
     void SetBaseProbeOverride(const BaseWorldProbe* probe) { _baseProbeOverride = probe; }
+    // Test seam of the generated bases (OCCUPIER-FORCES.md 5.7): the
+    // BaseSiteProbe the generation reads instead of the landscape.  Not
+    // owned; Clear resets it.
+    void SetSiteProbeOverride(const BaseSiteProbe* probe) { _siteProbeOverride = probe; }
+
+    // generated bases (OCCUPIER-FORCES.md 5.7) ------------------------------
+    // the campaign's generated zones, in generation order (gmGeneratedBases):
+    // the new game's picks or the rows a save stored
+    int NGeneratedBases() const { return _generated.Size(); }
+    const GeneratedBaseRow* GeneratedBaseAt(int i) const
+    {
+        return i >= 0 && i < _generated.Size() ? &_generated[i] : nullptr;
+    }
+    // the detector's OUTPOST candidates (all statuses), the generation's
+    // preferred sites; transient, config-rebuilt
+    const std::vector<BaseCandidate>& DetectedOutposts() const { return _detectedOutposts; }
+    // The generateBases key: 0 or absent = off, anything else = on.
+    static bool ReadGenerateBases(const ParamEntry* zonesCfg);
 
     // the AIRFIELD / SEAPORT detector's last run (issue #76) ----------------
     // every AIRFIELD and SEAPORT candidate, all statuses, in detector order;
@@ -1032,6 +1067,13 @@ class ZoneRegistry : public SerializeClass
     // AIRFIELD / SEAPORT candidate, and add the SEED ones as occupier zones
     // when seedBases is on.  Runs after LoadZones, before SeedCityZones.
     void SeedBaseZones(const ParamEntry* namesCfg, const BaseWorldProbe& probe);
+    // OCCUPIER-FORCES.md 5.7 (defined in BaseGenerate.cpp): after
+    // SeedCityZones, add the generated OUTPOST zones.  A new game generates
+    // (generateBases on) and keeps the rows; a load or a second call in the
+    // same session re-injects the kept rows, never re-deriving them.
+    void GenerateBaseZones(const ParamEntry& zonesCfg, const SettlementProbe* settlement);
+    // _generated -> zone rows (names already present and the MaxZones cap skip)
+    void InjectGeneratedZones();
     // side match first, then faction class name (both case-insensitive)
     const FactionRecord* FindFaction(const char* sideOrClass) const;
     // class name only - the key FindFaction reaches last and FindFactionForSide
@@ -1076,6 +1118,19 @@ class ZoneRegistry : public SerializeClass
     std::vector<int> _seededBases; // indices into _detectedBases, seeding order
     bool _baseDetectionRan = false;
     const BaseWorldProbe* _baseProbeOverride = nullptr; // test seam, not owned
+    // the detector's OUTPOST candidates (generated bases prefer them)
+    std::vector<BaseCandidate> _detectedOutposts;
+    // generated bases (OCCUPIER-FORCES.md 5.7): the campaign's rows, decided
+    // once per campaign (a new game generates, a load restores) and kept
+    // across every LoadFromParams until Clear; _genOldSave marks a load of a
+    // save written before the feature (logged once)
+    AutoArray<GeneratedBaseRow> _generated;
+    bool _genDecided = false;
+    bool _genOldSave = false;
+    const BaseSiteProbe* _siteProbeOverride = nullptr; // test seam, not owned
+    // deserialized GeneratedBases rows and version, parked between the passes
+    AutoArray<GeneratedBaseRow> _pendingGenerated;
+    int _pendingGenVersion = 0;
     // campaign faction sides; defaults match the Phase-1 Demo campaign
     RString _occupierSide = RString("EAST");
     RString _resistanceSide = RString("GUER");

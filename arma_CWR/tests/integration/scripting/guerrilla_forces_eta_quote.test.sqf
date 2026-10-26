@@ -10,16 +10,20 @@
 //        tick 1 s, one distinct town wakes the director, the first-town roll
 //        0; the pool is forced to 0 while the Village rises remotely, the
 //        Village rests on a long cooldown and the pool is restored;
-//    a2  Arudy: 1350 to 2250 m straight from the Outpost, its nearest ground
-//        base (on foot 900 to 1500 s by the straight line: the old quote
-//        sent a TRUCK), more than 850 m from the player;
+//    a2  Arudy: 1350 to 2250 m straight from its nearest authored ground
+//        base, the Outpost (on foot 900 to 1500 s by the straight line: the
+//        old quote sent a TRUCK), more than 850 m from the player; since
+//        811c5c3 the generated Vigny Outpost is nearer (about 1305 s on
+//        foot by road), still past forcesSlowEta 900;
 //    a3  Arudy is handed to the resistance, hot: the director quotes the
-//        Outpost's road (about 2990 m to the centre, on foot about 1994 s, past forcesAirEta
-//        1500) and the operation is a TRANSPORT_HELI insertion;
+//        Outpost's road (about 2990 m to the centre, on foot about 1994 s,
+//        past forcesAirEta 1500) and the operation is a TRUCK (2026-10-16,
+//        phase 1 C: the Ural is there in about 225 s by road and nobody is
+//        reported, so no air);
 //    a4  the INFO line named the road quote: gmForcesEtaNotes holds the
 //        cheapest package's words, FOOT from the operation's source, kind
-//        ROAD ("road N s"), N past 1500 s and above the straight-line
-//        seconds; the insertion itself flies the straight line ("line N s");
+//        ROAD ("road N s"), N past forcesSlowEta 900 s and above the straight-line
+//        seconds; the truck's own words are a ROAD quote too, faster;
 //    a5  the director's plan is cached: the pair answers from the cache
 //        (gmRoadQuote counts no new plan), the same length the note quoted.
 // ============================================================================
@@ -83,7 +87,7 @@ triAssertGt [(eqAPos distance (getPos player)), 850]
 triAssertEq [((gmZone eqA) select 1), "CITY"]
 triSimUntil { not (gmGarrisonSpawned eqA) }
 
-// ---- a3: Arudy gets a helicopter insertion -----------------------------------
+// ---- a3: Arudy gets a truck --------------------------------------------------
 gmZoneSet [eqA, "garrison", 0]
 gmZoneSet [eqA, "owner", gmResistanceSide]
 gmZoneSet [eqA, "heatRaise", 100]
@@ -91,23 +95,24 @@ eqOp = []
 triSimUntil { eqOp = []; {if ((_x select 5) == "Arudy") then {eqOp = _x}} forEach gmOccupierOps; (count eqOp) > 0 }
 triAssertEq [(eqOp select 1), "RETAKE"]
 triAssertEq [(eqOp select 2), "DIRECTOR"]
-triAssertEq [(eqOp select 3), "TRANSPORT_HELI"]
+triAssertEq [(eqOp select 3), "TRUCK"]
 eqSrc = gmZoneIndex (eqOp select 4)
 triAssertGe [eqSrc, 0]
 eqSrcPos = (gmZone eqSrc) select 8
 
 // ---- a4: the INFO line named the road quote ----------------------------------
 eqFoot = []
-eqHeli = []
-{if (((_x select 1) == "FOOT") and ((_x select 2) == eqSrc)) then {eqFoot = _x}; if (((_x select 1) == "TRANSPORT_HELI") and ((_x select 2) == eqSrc)) then {eqHeli = _x}} forEach gmForcesEtaNotes
+eqTruck = []
+{if (((_x select 1) == "FOOT") and ((_x select 2) == eqSrc)) then {eqFoot = _x}; if (((_x select 1) == "TRUCK") and ((_x select 2) == eqSrc)) then {eqTruck = _x}} forEach gmForcesEtaNotes
 triAssertEq [(count eqFoot), 5]
 triAssertEq [(eqFoot select 4), "ROAD"]
-triAssertGt [(eqFoot select 3), 1500]
+triAssertGt [(eqFoot select 3), 900]
 triAssertGt [(eqFoot select 3), ((eqSrcPos distance eqAPos) / 1.5)]
 triAssertIncludes [(eqFoot select 0), "road "]
-triAssertEq [(count eqHeli), 5]
-triAssertEq [(eqHeli select 4), "LINE"]
-triAssertIncludes [(eqHeli select 0), "line "]
+triAssertEq [(count eqTruck), 5]
+triAssertEq [(eqTruck select 4), "ROAD"]
+triAssertIncludes [(eqTruck select 0), "road "]
+triAssertLt [(eqTruck select 3), (eqFoot select 3)]
 
 // ---- a5: the director's plan answers from the cache ---------------------------
 // a pair far from any road: its lookup reads the counters (no route)

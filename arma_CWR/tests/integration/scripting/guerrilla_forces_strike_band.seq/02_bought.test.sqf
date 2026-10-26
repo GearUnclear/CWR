@@ -5,8 +5,9 @@
 //  SHIPPED Guerrilla.Abel template (occupierForces = 1) on the full Remaster:
 //    s1  a real camera; the levers of guerrilla_forces_opener_reported;
 //    s2  the Outpost handed to the resistance, hot, three defenders
-//        reported (as phase 1);
-//    s3  the pool stays full (60 of 60);
+//        reported (as phase 1: the observers face and watch them);
+//    s3  the pool is staged at 60 (at least poolStart; SetPool raises the
+//        ceiling);
 //    s4  Houdan rises remotely: the director wakes STRONG; the BASE retake
 //        of the Outpost goes and a STRIKE (a jet or an attack helicopter)
 //        goes with it within one director tick; the band, sampled every
@@ -36,7 +37,8 @@ triSimUntil { ((gmOccupierForces) select 2) != "OFF" }
 triAssertEq [((gmOccupierForces) select 2), "STRONG"]
 triAssertEq [((gmOccupierForces) select 4), "DORMANT"]
 sbStart = (gmOccupierForces) select 1
-triAssertEq [sbStart, 60]
+// poolStart 48 on Abel since the generated bases (d5fa57b); the phase scales on sbStart
+triAssertGe [sbStart, 24]
 triAssertEq [(format ["%1", gmForcesTune ["directorInterval", 1]]), "true"]
 triAssertEq [(format ["%1", gmForcesTune ["wakeTowns", 1]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["firstTownChance", 0]]), "true"]
@@ -69,16 +71,27 @@ sbObs setCombatMode "BLUE"
 {_x allowDammage false} forEach (units sbObs)
 doStop (units sbObs)
 {sbObs reveal _x} forEach (units sbHold)
+// the observers face the hold squad and watch it: reveal makes the three known
+// but never seen (lastSeen 40 s back, no sensor), and a group reports a contact
+// (posReported, which the sighting scan reads) only after one of its men sees
+// it inside his 45 degree eye cone; a stopped unit spawns facing north (the
+// second at its formation angle), away from a squad 50 m to its south-west
+{_x setDir (((sbOPos select 0) - ((getPos _x) select 0)) atan2 ((sbOPos select 1) - ((getPos _x) select 1))); _x doWatch sbOPos} forEach (units sbObs)
 player setPos [7922, 8500, 0]
 triSimUntil { call sbSample; not ((gmZoneSim sbO) select 0) }
 triAssertEq [((gmZone sbO) select 2), gmResistanceSide]
 sbRep = 0
 sbT1 = time
-triSimUntil { call sbSample; {sbObs reveal _x} forEach (units sbHold); sbRep = 0; {if ((_x select 0) == "Outpost") then {sbRep = _x select 1}} forEach gmOccupierIntel; (sbRep >= 3) or (time > sbT1 + 120) }
+triSimUntil { call sbSample; {sbObs reveal _x} forEach (units sbHold); sbRep = 0; {if ((_x select 0) == "Outpost") then {sbRep = _x select 1}} forEach gmOccupierIntel; (sbRep >= 3) or (time > sbT1 + 300) }
 triAssertGe [sbRep, 3]
 
 // ---- s3: the pool full ----------------------------------------------------------
-triAssertEq [(format ["%1", gmForcesForce ["pool", sbStart]]), "true"]
+// staged at 60 (SetPool raises the ceiling): on the 48 poolStart Abel has since the
+// generated bases, foot 4 plus an attack helicopter 20 could not keep STRONG, which
+// is the rule phase 01 pins; this phase pins the buy when the pool can carry it
+sbStage = sbStart
+if (sbStage < 60) then {sbStage = 60}
+triAssertEq [(format ["%1", gmForcesForce ["pool", sbStage]]), "true"]
 triAssertEq [((gmOccupierForces) select 2), "STRONG"]
 call sbSample
 

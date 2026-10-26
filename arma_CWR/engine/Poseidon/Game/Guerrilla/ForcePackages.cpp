@@ -494,6 +494,58 @@ float ForcePackages::RequiredLethality(const PackageRequest& req)
 // the road quote (6.5, 2026-10-16)
 // ---------------------------------------------------------------------------
 
+namespace
+{
+float& TheatreRoadFactor()
+{
+    static float factor = ForcePackages::DefaultRoadFactor;
+    return factor;
+}
+} // namespace
+
+float ForcePackages::RoadFactor()
+{
+    return TheatreRoadFactor();
+}
+
+void ForcePackages::SetRoadFactor(float factor)
+{
+    TheatreRoadFactor() = factor < MinRoadFactor ? MinRoadFactor : (factor > MaxRoadFactor ? MaxRoadFactor : factor);
+}
+
+float ForcePackages::GroundLeg(float straightDistance, float roadLength, float factor)
+{
+    if (roadLength > 0)
+    {
+        return roadLength; // a real road route already is the road: no factor on top
+    }
+    const float straight = straightDistance > 0 ? straightDistance : 0;
+    return straight * (factor > MinRoadFactor ? factor : MinRoadFactor);
+}
+
+const char* ForcePackages::ReasonWords(int reason)
+{
+    switch (reason)
+    {
+        case PackageChoice::ReasonGroundCheapest:
+            return "ground: cheapest under slowEta";
+        case PackageChoice::ReasonGroundSlow:
+            return "ground: slow but no air case";
+        case PackageChoice::ReasonUrgentShare:
+            return "urgent: fastest within forcesUrgentCostShare";
+        case PackageChoice::ReasonUrgentSlow:
+            return "urgent: fastest under slowEta";
+        case PackageChoice::ReasonAirWater:
+            return "air: across water";
+        case PackageChoice::ReasonAirEta:
+            return "air: past forcesAirEta";
+        case PackageChoice::ReasonAirFighters:
+            return "air: fighters reported";
+        default:
+            return "";
+    }
+}
+
 float ForcePackages::TravelOf(int package, const PackageSource& s, const PackageRequest& req, int* eta, float* factor)
 {
     const float straight = s.distance > 0 ? s.distance : 0;
@@ -511,7 +563,7 @@ float ForcePackages::TravelOf(int package, const PackageSource& s, const Package
         {
             kind = FEQLineFactor;
             f = req.roadFactor;
-            travel = straight * f;
+            travel = GroundLeg(straight, -1.0f, f);
         }
     }
     if (eta)
@@ -640,21 +692,33 @@ PackageQuote ForcePackages::Quote(int package, int escort, const PackageRequest&
     const int cap = SeatCap(package, cat);
     // the nearest base by travel time at this package's speed (so by its
     // leg: the road route for a ground package, the straight line for air)
-    // whose spare reaches the minimum
+    // whose spare covers the bodies the package needs to meet L_req (2026-10-16
+    // phase 1 C: a defended target takes the Airfield's 9 rather than the
+    // nearer Outpost's 5); when none does, the nearest whose spare reaches
+    // the minimum (the quote is then short of L_req)
+    const int full = MinInt(need, cap);
     int best = -1;
     float bestTravel = 0;
-    for (int i = 0; i < sources.Size(); i++)
+    for (int pass = 0; pass < 2 && best < 0; pass++)
     {
-        const PackageSource& s = sources[i];
-        if (s.zone < 0 || s.SpareFor(package) < req.minBodies || !s.Serves(package))
+        const int bar = pass == 0 ? MaxInt(full, req.minBodies) : req.minBodies;
+        if (pass == 1 && bar >= MaxInt(full, req.minBodies))
         {
-            continue; // an air-only base (another landmass) sources only a helicopter insertion
+            break; // the same bar as the first pass: nothing more to find
         }
-        const float travel = TravelOf(package, s, req);
-        if (best < 0 || travel < bestTravel || (travel == bestTravel && s.zone < sources[best].zone))
+        for (int i = 0; i < sources.Size(); i++)
         {
-            best = i;
-            bestTravel = travel;
+            const PackageSource& s = sources[i];
+            if (s.zone < 0 || s.SpareFor(package) < bar || !s.Serves(package))
+            {
+                continue; // an air-only base (another landmass) sources only a helicopter insertion
+            }
+            const float travel = TravelOf(package, s, req);
+            if (best < 0 || travel < bestTravel || (travel == bestTravel && s.zone < sources[best].zone))
+            {
+                best = i;
+                bestTravel = travel;
+            }
         }
     }
     q.crew = CrewOf(package, cat);
@@ -732,33 +796,24 @@ PackageChoice ForcePackages::Choose(const PackageRequest& req, const ForcePackag
             cheapest = i;
         }
     }
-    if (cheapest >= 0)
+    const bool rule = req.slowEta > 0 || req.airEta > 0;
+    if (cheapest >= 0 && !rule)
     {
+        // the plain choice (the arrival rule off: the pure chooser, wave
+        // strikes): the cheapest lethal package; URGENT takes the fastest
+        // within forcesUrgentCostShare x its price
         int pick = cheapest;
         const PackageQuote& cq = c.quotes[cheapest];
         c.cheapestPackage = cq.package;
         c.cheapestSeconds = cq.seconds;
         c.cheapestIndex = cheapest;
-        // the arrival rule (2026-10-15): a slow cheapest package widens the
-        // share; past airEta a helicopter insertion is eligible at any price
-        const bool slow = req.slowEta > 0 && cq.seconds > req.slowEta;
-        const bool airDue = req.airEta > 0 && cq.package != FPTransportHeli && cq.seconds > req.airEta;
-        const float urgentShare = req.urgent ? req.urgentCostShare : 1.0f;
-        const float slowShare = slow && req.slowCostShare > urgentShare ? req.slowCostShare : urgentShare;
-        if (req.urgent || slow || airDue)
+        if (req.urgent)
         {
-            // the fastest package costing at most share x the cheapest
-            const float ceiling = slowShare * (float)cq.price + 1e-4f;
+            const float ceiling = req.urgentCostShare * (float)cq.price + 1e-4f;
             for (int i = 0; i < c.nQuotes; i++)
             {
                 const PackageQuote& q = c.quotes[i];
-                if (!valid(q) || !q.lethal)
-                {
-                    continue;
-                }
-                const bool inShare = (float)q.price <= ceiling;
-                const bool insertion = airDue && q.package == FPTransportHeli;
-                if (!inShare && !insertion)
+                if (!valid(q) || !q.lethal || (float)q.price > ceiling)
                 {
                     continue;
                 }
@@ -769,21 +824,184 @@ PackageChoice ForcePackages::Choose(const PackageRequest& req, const ForcePackag
                 }
             }
         }
-        if (pick != cheapest)
-        {
-            // which rule let the pick in: the URGENT share alone explains a
-            // price within it; otherwise the slow share or the insertion
-            const float urgentCeiling = urgentShare * (float)cq.price + 1e-4f;
-            const PackageQuote& pq = c.quotes[pick];
-            if ((float)pq.price > urgentCeiling || (!req.urgent && pq.price > cq.price))
-            {
-                const float slowCeiling = slowShare * (float)cq.price + 1e-4f;
-                c.etaRule = slow && (float)pq.price <= slowCeiling ? PackageChoice::EtaSlow : PackageChoice::EtaAir;
-            }
-        }
         c.ok = true;
         c.quote = c.quotes[pick];
         return c;
+    }
+    if (cheapest >= 0)
+    {
+        // THE ARRIVAL RULE (6.5; reworked 2026-10-16, phase 1 C).  T: the
+        // threshold a ground arrival must meet (slowEta, else airEta)
+        const float threshold = req.slowEta > 0 ? req.slowEta : req.airEta;
+        const float bound = req.slowCostShare > 1.0f ? req.slowCostShare : 1.0f;
+        // the yardsticks: the cheapest lethal ground package, the fastest
+        // lethal ground package, the walk (the foot quote), any ground quote
+        // at all, and the cheapest lethal insertion
+        int ground = -1;
+        int fastest = -1;
+        int heli = -1;
+        int walk = -1;
+        bool anyGround = false;
+        for (int i = 0; i < c.nQuotes; i++)
+        {
+            const PackageQuote& q = c.quotes[i];
+            if (q.package == FPFoot && !q.HasEscort() && q.source >= 0 && q.bodies >= req.minBodies)
+            {
+                walk = i; // lethal or not: how long the infantry would walk
+            }
+            if (!valid(q))
+            {
+                continue;
+            }
+            if (IsAirPackage(q.package))
+            {
+                if (q.package == FPTransportHeli && q.lethal && (heli < 0 || q.price < c.quotes[heli].price))
+                {
+                    heli = i;
+                }
+                continue;
+            }
+            anyGround = true;
+            if (!q.lethal)
+            {
+                continue;
+            }
+            if (ground < 0 || q.price < c.quotes[ground].price ||
+                (q.price == c.quotes[ground].price && q.seconds < c.quotes[ground].seconds))
+            {
+                ground = i;
+            }
+            if (fastest < 0 || q.seconds < c.quotes[fastest].seconds ||
+                (q.seconds == c.quotes[fastest].seconds && q.price < c.quotes[fastest].price))
+            {
+                fastest = i;
+            }
+        }
+        // the line's "the cheapest": the cheapest lethal ground package, or
+        // the cheapest lethal package of all when no ground one is lethal
+        const int shown = ground >= 0 ? ground : cheapest;
+        c.cheapestPackage = c.quotes[shown].package;
+        c.cheapestSeconds = c.quotes[shown].seconds;
+        c.cheapestIndex = shown;
+        c.walkSeconds = walk >= 0 ? c.quotes[walk].seconds : -1.0f;
+        c.groundSeconds = fastest >= 0 ? c.quotes[fastest].seconds : -1.0f;
+        // the air cases: across water (no ground package can reach, the
+        // insertion's infantry stands on another landmass), past airEta by
+        // the fastest lethal ground package (or none is lethal), or fighters
+        // reported on a target out of walking reach
+        bool heliAcross = false;
+        if (heli >= 0)
+        {
+            for (int i = 0; i < sources.Size(); i++)
+            {
+                if (sources[i].zone == c.quotes[heli].source)
+                {
+                    heliAcross = sources[i].airOnly;
+                    break;
+                }
+            }
+        }
+        const bool across = heli >= 0 && !anyGround && heliAcross;
+        const bool pastAir = req.airEta > 0 && (fastest < 0 || c.quotes[fastest].seconds > req.airEta);
+        const bool farWalk = walk < 0 || c.quotes[walk].seconds > threshold;
+        const bool defended = req.fighters + 1e-4f >= (float)AirFightersMin;
+        const bool fighters = defended && (farWalk || ground < 0);
+        if (heli >= 0 && (across || pastAir || fighters))
+        {
+            c.reason = across ? PackageChoice::ReasonAirWater
+                              : (pastAir ? PackageChoice::ReasonAirEta : PackageChoice::ReasonAirFighters);
+            c.etaRule = PackageChoice::EtaAir;
+            c.ok = true;
+            c.quote = c.quotes[heli];
+            return c;
+        }
+        if (ground >= 0)
+        {
+            const PackageQuote& cq = c.quotes[ground];
+            int pick = ground;
+            if (cq.seconds <= threshold)
+            {
+                // the cheapest meets T: it goes; URGENT, the fastest ground
+                // package within forcesUrgentCostShare x its price
+                c.reason = PackageChoice::ReasonGroundCheapest;
+                if (req.urgent)
+                {
+                    const float ceiling = req.urgentCostShare * (float)cq.price + 1e-4f;
+                    for (int i = 0; i < c.nQuotes; i++)
+                    {
+                        const PackageQuote& q = c.quotes[i];
+                        if (!valid(q) || !q.lethal || IsAirPackage(q.package) || (float)q.price > ceiling)
+                        {
+                            continue;
+                        }
+                        if (q.seconds < c.quotes[pick].seconds ||
+                            (q.seconds == c.quotes[pick].seconds && q.price < c.quotes[pick].price))
+                        {
+                            pick = i;
+                        }
+                    }
+                    if (pick != ground)
+                    {
+                        c.reason = PackageChoice::ReasonUrgentShare;
+                    }
+                }
+            }
+            else
+            {
+                // slow: the CHEAPEST lethal ground package that meets T, at
+                // most bound x the cheapest (URGENT: the FASTEST meeting T);
+                // none: the fastest within the bound
+                const float ceiling = bound * (float)cq.price + 1e-4f;
+                int meet = -1;
+                int meetFast = -1;
+                int inBoundFast = -1;
+                for (int i = 0; i < c.nQuotes; i++)
+                {
+                    const PackageQuote& q = c.quotes[i];
+                    if (!valid(q) || !q.lethal || IsAirPackage(q.package) || (float)q.price > ceiling)
+                    {
+                        continue;
+                    }
+                    if (inBoundFast < 0 || q.seconds < c.quotes[inBoundFast].seconds ||
+                        (q.seconds == c.quotes[inBoundFast].seconds && q.price < c.quotes[inBoundFast].price))
+                    {
+                        inBoundFast = i;
+                    }
+                    if (q.seconds > threshold)
+                    {
+                        continue;
+                    }
+                    if (meet < 0 || q.price < c.quotes[meet].price ||
+                        (q.price == c.quotes[meet].price && q.seconds < c.quotes[meet].seconds))
+                    {
+                        meet = i;
+                    }
+                    if (meetFast < 0 || q.seconds < c.quotes[meetFast].seconds ||
+                        (q.seconds == c.quotes[meetFast].seconds && q.price < c.quotes[meetFast].price))
+                    {
+                        meetFast = i;
+                    }
+                }
+                if (meet >= 0)
+                {
+                    pick = req.urgent ? meetFast : meet;
+                    c.reason = pick != meet ? PackageChoice::ReasonUrgentSlow : PackageChoice::ReasonGroundCheapest;
+                }
+                else
+                {
+                    pick = inBoundFast >= 0 ? inBoundFast : ground;
+                    c.reason = PackageChoice::ReasonGroundSlow;
+                }
+                if (pick != ground)
+                {
+                    c.etaRule = PackageChoice::EtaSlow;
+                }
+            }
+            c.ok = true;
+            c.quote = c.quotes[pick];
+            return c;
+        }
+        // no lethal ground package and no air case: the fallback below
     }
     // nothing meets L_req: the most lethal affordable package goes
     int lethal = -1;

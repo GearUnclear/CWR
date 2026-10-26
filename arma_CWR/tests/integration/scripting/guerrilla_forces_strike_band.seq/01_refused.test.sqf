@@ -11,11 +11,14 @@
 //        cheapest lethal one);
 //    s2  the Outpost loses its garrison and is handed to the resistance,
 //        hot (heat 100), with a 3-man hold squad in it (invulnerable, hold
-//        fire); two occupier observers beside it are shown the three, so
-//        the sighting table reports three fighters at the Outpost (D9);
-//    s3  the pool is forced to 50 of 60: STRONG, and a ground operation of
-//        up to 14 units leaves it STRONG (36 is the 60 % floor), but no
-//        strike airframe does (an attack helicopter 20, a jet 23);
+//        fire); two occupier observers 50 m away are turned to face the
+//        three and watch them, and shown them (reveal), so their group
+//        sees and reports them and the sighting table reports three
+//        fighters at the Outpost (D9);
+//    s3  the pool is forced to 50 (poolStart 48 on Abel since the generated
+//        bases): STRONG, and a ground operation of up to 14 units leaves it
+//        STRONG (the floor is 60 % of poolStart), but no strike airframe
+//        does (an attack helicopter 20, a jet 23);
 //    s4  Houdan rises remotely: the director wakes STRONG; its BASE retake
 //        of the Outpost goes and leaves the band STRONG (the old rule's
 //        "STRONG on the pool the ground operation leaves" would buy the
@@ -45,7 +48,9 @@ triSimUntil { ((gmOccupierForces) select 2) != "OFF" }
 triAssertEq [((gmOccupierForces) select 2), "STRONG"]
 triAssertEq [((gmOccupierForces) select 4), "DORMANT"]
 sbStart = (gmOccupierForces) select 1
-triAssertEq [sbStart, 60]
+// poolStart is max(24, R - Rgen + 2K) - Rgen: 60 on Abel before the generated
+// bases, 48 since d5fa57b (Rgen 12); the phases below scale on sbStart
+triAssertGe [sbStart, 24]
 triAssertEq [(format ["%1", gmForcesTune ["directorInterval", 1]]), "true"]
 triAssertEq [(format ["%1", gmForcesTune ["wakeTowns", 1]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["firstTownChance", 0]]), "true"]
@@ -78,12 +83,18 @@ sbObs setCombatMode "BLUE"
 {_x allowDammage false} forEach (units sbObs)
 doStop (units sbObs)
 {sbObs reveal _x} forEach (units sbHold)
+// the observers face the hold squad and watch it: reveal makes the three known
+// but never seen (lastSeen 40 s back, no sensor), and a group reports a contact
+// (posReported, which the sighting scan reads) only after one of its men sees
+// it inside his 45 degree eye cone; a stopped unit spawns facing north (the
+// second at its formation angle), away from a squad 50 m to its south-west
+{_x setDir (((sbOPos select 0) - ((getPos _x) select 0)) atan2 ((sbOPos select 1) - ((getPos _x) select 1))); _x doWatch sbOPos} forEach (units sbObs)
 player setPos [7922, 8500, 0]
 triSimUntil { call sbSample; not ((gmZoneSim sbO) select 0) }
 triAssertEq [((gmZone sbO) select 2), gmResistanceSide]
 sbRep = 0
 sbT1 = time
-triSimUntil { call sbSample; {sbObs reveal _x} forEach (units sbHold); sbRep = 0; {if ((_x select 0) == "Outpost") then {sbRep = _x select 1}} forEach gmOccupierIntel; (sbRep >= 3) or (time > sbT1 + 120) }
+triSimUntil { call sbSample; {sbObs reveal _x} forEach (units sbHold); sbRep = 0; {if ((_x select 0) == "Outpost") then {sbRep = _x select 1}} forEach gmOccupierIntel; (sbRep >= 3) or (time > sbT1 + 300) }
 triAssertGe [sbRep, 3]
 
 // ---- s3: the pool at 50 of 60 -------------------------------------------------

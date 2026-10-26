@@ -1,0 +1,25 @@
+#!/bin/sh
+# Block game data, LoBo data and secrets from entering a commit.
+# Runs .githooks/check_no_game_data.py --staged. The checker and its allowlist
+# are found next to this hook (core.hooksPath), not in the current worktree.
+HOOK_DIR=$(cd "$(dirname "$0")" && pwd)
+CHECKER="$HOOK_DIR/check_no_game_data.py"
+
+PY=""
+if python3 -c "import sys" >/dev/null 2>&1; then
+  PY="python3"
+elif python -c "import sys" >/dev/null 2>&1; then
+  PY="python"
+elif py -3 -c "import sys" >/dev/null 2>&1; then
+  PY="py -3"
+fi
+if [ -z "$PY" ]; then
+  echo "pre-commit: no working Python 3 (tried python3, python, py -3)." >&2
+  echo "pre-commit: the game data guard cannot run, so the commit is refused." >&2
+  exit 1
+fi
+if [ ! -f "$CHECKER" ]; then
+  echo "pre-commit: $CHECKER is missing; refusing the commit." >&2
+  exit 1
+fi
+exec $PY "$CHECKER" --staged
