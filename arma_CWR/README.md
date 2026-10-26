@@ -18,9 +18,9 @@ The engine and game executables, licensed under GPL-3.0-or-later with additional
 **Game data (separate)**
 
 Base-game models, textures, sounds, missions, and voices are supplied separately.
-The small Options text resources in `thirdparty/classic-ui` are an explicit
-APL-SA exception, with their own notice; `thirdparty/guerrilla-fonts` is OFL.
-Neither is covered by the engine's GPL grant.
+UD's own Options strings (`guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv`)
+are GPL like the rest of the source. `thirdparty/guerrilla-fonts` is OFL and is
+not covered by the engine's GPL grant.
 
 In short: the code is free software, the name is not, and the game data comes separately. This license covers the source code only and grants no rights to the trademarks.
 

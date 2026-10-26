@@ -91,15 +91,15 @@ a file Bohemia ships is appended `#include` lines.** Concretely:
   `bin/guerrilla-factions.hpp`, `bin/guerrilla-hq.hpp`,
   `fonts/UD_FONT_CREDITS.md`, any UD font Bohemia does not ship, `gmcore/`,
   the `Missions/Guerrilla.*` and reference templates, and
-  `bin/STRINGTABLE_UD.utf8.csv` with its `bin/UD_OPTIONS_APL-SA_NOTICE.txt`.
-  The stringtable shard holds only the UD Options keys none of Bohemia's
-  shards define (Arma 3 controls preset, gamepad steering, lean, temporary
-  zoom). The engine loads `STRINGTABLE_*` shards in name order and a later
-  shard wins a duplicate key, so shipping our whole Options shard would
-  overwrite Bohemia's newer text. Setup prints the missing keys, and retires
-  the shard when Bohemia's shards cover them all.
-- Not installed: the Classic shims (`remaster.cpp`, `resource-extra.cpp`,
-  Options headers, `STRINGTABLE_OPTIONS.utf8.csv`).
+  `bin/STRINGTABLE_UD.utf8.csv`. That shard is built from UD's own GPL
+  `guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv` and holds
+  only the keys none of Bohemia's shards define (Arma 3 controls preset,
+  gamepad steering, lean, temporary zoom, the Guerrilla campaign prompts).
+  The engine loads `STRINGTABLE_*` shards in name order and a later shard
+  wins a duplicate key, so a key Bohemia later ships drops out of our shard
+  instead of overwriting their text. Setup prints the missing keys, and
+  retires the shard when Bohemia's shards cover them all.
+- Not installed: the Classic shims (`remaster.cpp`, `resource-extra.cpp`).
 
 Before writing, setup snapshots every package file outside LoBo and its own
 output, and fails the run if anything other than those appended lines changed.
@@ -250,7 +250,7 @@ policy contradictions (C), not a new binary/runtime defect (D).
 | --- | --- | --- | --- | --- |
 | Default data selection | Full Remaster layout; previously returned Classic when shadows were missing and accepted any existing env directory | Remove Classic fallback; validate override and candidates (C) | Production-helper cases in `tests/runtime/test-data-dir.ps1` | Windows junction target resolution and actual prepared shadow |
 | Explicit setup / launch / mission install | Same layout guard before build, logs, install or launch; explicit paths previously bypassed default checks | Shared guard in setup, play, run-game, run-game-with-mods and install-missions (C) | Synthetic explicit-path rejection with intercepted process launch | Actual `PoseidonGame` startup; CLI/mod argument handling |
-| Runtime payload | Preserve Bohemia resources; manifest already distinguishes install, keep-existing, string-gap, skip | Remove Classic install branch; retain skipped historical sources (B/C), licensed gap strings and font policies (A) | `test-setup.ps1`: hashes, backup/include append, rerun, restore and tamper checks | Menu, Options, fonts, localization and audio on full package |
+| Runtime payload | Preserve Bohemia resources; manifest already distinguishes install, keep-existing, string-gap, skip | Remove Classic install branch; retain skipped historical sources (B/C), UD's own gap strings and font policies (A) | `test-setup.ps1`: hashes, backup/include append, rerun, restore and tamper checks | Menu, Options, fonts, localization and audio on full package |
 | Build configuration | CMake describes Remastered; platform presets choose compiler/OS, not a Classic runtime | No preset/ABI changes (A); `3.05` vs `1.0.0` is not a defect | Source inspection of CMake, presets and version header | Record official build ID and verify built executable against that package (E) |
 | Trident defaults / CI | `OFPR_*` variables are runner identifiers; explicit `data_dir` pins override defaults | Example now uses RemasterUD; retain Demo-specific engine pins and `full_cwa`/`lobo` tag names (A/C) | Installer tests run without proprietary data; test default inspected | Execute full_cwa/lobo and remaster_ud on shadow; old `packages/Remaster` CTest registration remains issue #91 (E) |
 | Addons / packaging | `AddonSystem::CheckVersion` treats `requiredVersion` as a minimum; LoBo fixture's `1.30` is not a runtime selector | Keep minimum and `requiredAddons` identifiers (A) | Source inspection of `Asset/Addon/AddonSystem.cpp` and `@lobofixup/bin/config.cpp` | Load actual repaired LoBo dependencies and report missing assets (E) |
@@ -277,10 +277,11 @@ Before calling this runtime-compatible, on a machine with the full package:
 
 ## Licenses and fonts
 
-UD's compatibility configuration and menu keep the source license. The APL-SA
-text resources in `thirdparty/classic-ui` and OFL fonts in
-`thirdparty/guerrilla-fonts` have separate notices and are excluded from the
-engine's GPL grant. No base game or LoBo PBOs are in Git.
+UD's compatibility configuration, menu and Options strings
+(`guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv`) keep the
+source license. The OFL fonts in `thirdparty/guerrilla-fonts` have their own
+notice and are excluded from the engine's GPL grant. No base game or LoBo PBOs
+are in Git.
 
 The old Classic test bed used renamed Microsoft fonts. Fresh installs instead
 use Roboto, Caveat, Unuaranga Kuriero, Vollkorn and Oswald from the Remaster,

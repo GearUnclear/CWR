@@ -123,7 +123,6 @@ foreach ($item in Get-ChildItem -LiteralPath $LoBoDir -Recurse -Force) {
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'guerrilla-mode/runtime/manifest.json') -Raw | ConvertFrom-Json
 $plan = @()
 $stringSource = $null
-$noticeEntry = $null
 foreach ($entry in $manifest.files) {
     $source = Join-Path $PSScriptRoot $entry.source
     Require-File $source
@@ -139,7 +138,7 @@ foreach ($entry in $manifest.files) {
     }
     if ($policy -eq 'skip') { continue }
     if ($policy -eq 'string-gap') {
-        if ($entry.destination -like '*.csv') { $stringSource = $source } else { $noticeEntry = $entry }
+        $stringSource = $source
         continue
     }
     $target = Resolve-Relative $GameDir $entry.destination
@@ -147,6 +146,7 @@ foreach ($entry in $manifest.files) {
     if (Test-Path -LiteralPath $target -PathType Container) { throw "Expected a file: $target" }
     $plan += [pscustomobject]@{ Source=$source; Target=$target; Hash=$entry.sha256; Policy=$policy }
 }
+if ($null -eq $stringSource) { throw 'Manifest has no string-gap entry (the UD Options strings).' }
 foreach ($relative in @('bin/config-extra.cpp','bin/guerrilla-factions.hpp','bin/guerrilla-hq.hpp','gmcore','Missions')) {
     $path = Resolve-Relative $GameDir $relative
     Assert-PlainPath $path
@@ -157,12 +157,17 @@ foreach ($relative in @('bin/config-extra.cpp','bin/guerrilla-factions.hpp','bin
 
 # Remaster: the UD stringtable shard carries only keys Bohemia's shards lack. The
 # engine loads every STRINGTABLE_*.csv sibling in name order and a later shard
-# wins a duplicate key, so shipping our whole Options shard would overwrite
-# Bohemia's newer Options text with the Demo-era copy.
+# wins a duplicate key, so a key Bohemia later ships drops out of our shard
+# instead of overwriting their text. The source is UD's own GPL
+# STRINGTABLE_UD_OPTIONS.utf8.csv (guerrilla-mode/runtime/common/bin).
 $udStrings = $null
 $udStringsText = $null
 $udStrings = Resolve-Child $bin 'STRINGTABLE_UD.utf8.csv'
 Assert-PlainPath $udStrings
+# Installs before 2026-10-26 put an APL-SA notice beside the shard. Nothing
+# Bohemia-owned is installed any more, so a leftover copy is retired below.
+$staleNotice = Resolve-Child $bin 'UD_OPTIONS_APL-SA_NOTICE.txt'
+Assert-PlainPath $staleNotice
 $theirKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($csv in Get-ChildItem -LiteralPath $bin -File -Force) {
     if ($csv.Name -notmatch '^stringtable.*\.csv$' -or $csv.Name -ieq 'STRINGTABLE_UD.utf8.csv') { continue }
@@ -219,7 +224,7 @@ foreach ($template in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'guerr
     $skipRoots += Resolve-Child $missionsDir $template.Name
 }
 $udBinFiles = @($plan | Where-Object Policy -EQ 'install' | ForEach-Object Target) +
-    @($udStrings, (Resolve-Relative $GameDir $noticeEntry.destination),
+    @($udStrings, $staleNotice,
       (Resolve-Child $bin 'guerrilla-factions.hpp'), (Resolve-Child $bin 'guerrilla-hq.hpp'))
 $skipRoots += $udBinFiles
 $skipRoots = @($skipRoots | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\','/') })
@@ -261,18 +266,16 @@ if ($null -ne $udStringsText) {
         [IO.File]::WriteAllText($udStrings, $udStringsText, [Text.UTF8Encoding]::new($false))
         Write-Output "Installed: $udStrings"
     }
-    $notice = Resolve-Relative $GameDir $noticeEntry.destination
-    Assert-PlainPath $notice
-    if (-not (Test-Path -LiteralPath $notice) -or (Get-FileSha $notice) -ine $noticeEntry.sha256) {
-        Save-Existing $notice $GameDir
-        [IO.File]::Copy((Join-Path $PSScriptRoot $noticeEntry.source), $notice, $true)
-        Write-Output "Installed: $notice"
-    }
 } elseif (Test-Path -LiteralPath $udStrings) {
     # Bohemia now covers every key; retire our shard so it cannot shadow theirs.
     Save-Existing $udStrings $GameDir
     [IO.File]::Delete($udStrings)
     Write-Output "Removed (now covered by Bohemia's shards): $udStrings"
+}
+if (Test-Path -LiteralPath $staleNotice) {
+    Save-Existing $staleNotice $GameDir
+    [IO.File]::Delete($staleNotice)
+    Write-Output "Removed (no longer installed): $staleNotice"
 }
 # The one edit to a Bohemia file: append the UD includes, each once. The
 # menu (RscDisplayMainUD) and the Options additions (RscOptionsPageControlsUD,

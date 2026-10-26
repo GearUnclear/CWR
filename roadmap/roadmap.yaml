@@ -2305,7 +2305,7 @@ items:
   - id: retire-classic-ui
     title: "Retire arma_CWR/thirdparty/classic-ui and the guard's temporary allowlist group"
     phase: housekeeping
-    status: planned
+    status: done
     priority: 3
     depends_on: [game-data-guard]
     gh_issues: []
@@ -2319,3 +2319,4 @@ items:
       .githooks/game-data-allowlist.txt. No history rewrite.
     log:
       - "2026-10-26: planned with game-data-guard, which allowlists the classic-ui files only as a temporary exact-path group."
+      - "2026-10-26: landed on remaster-only-runtime (PR #213). classic-ui deleted; the 14 UD-only Options keys (every key absent from the seven Steam Remastered BIN shards) moved to guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv under GPL; setup no longer installs the APL-SA notice and retires a leftover one with a backup; the guard's temporary group is gone and the new CSV is an exact-path entry."

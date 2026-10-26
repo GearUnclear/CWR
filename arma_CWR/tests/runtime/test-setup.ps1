@@ -102,7 +102,7 @@ try {
     # Exact fixture target only.
     Remove-Item -LiteralPath (Join-Path $lobo 'Bin/config.cpp')
     & $setup -GameDir $game -LoBoDir $lobo -Tools $doctor
-    foreach ($rel in @('gmcore/init.sqs','Missions/Guerrilla.Abel/mission.sqm','Missions/Guerrilla.Sinai/mission.sqm','fonts/OFL.txt','BIN/UD_OPTIONS_APL-SA_NOTICE.txt')) {
+    foreach ($rel in @('gmcore/init.sqs','Missions/Guerrilla.Abel/mission.sqm','Missions/Guerrilla.Sinai/mission.sqm','fonts/OFL.txt')) {
         Assert (Test-Path -LiteralPath (Join-Path $game $rel)) "Missing installed output: $rel"
     }
     Assert (-not (Test-Path -LiteralPath (Join-Path $game 'gmcore/portraits'))) 'Developer portrait directory installed'
@@ -153,7 +153,7 @@ try {
     Put (Join-Path $steam 'BIN/config-extra.cpp') $bohemiaConfig
     Put (Join-Path $steam 'BIN/STRINGTABLE.CSV') "LANGUAGE,English`nSTR_LEGACY_ONLY,legacy`n"
     # Bohemia's shard covers every UD Options key except the two lean actions, with its own text.
-    $ourStrings = [IO.File]::ReadAllLines((Join-Path $repo 'thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv'))
+    $ourStrings = [IO.File]::ReadAllLines((Join-Path $repo 'guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv'))
     $gapKeys = @('STR_USRACT_LEAN_LEFT', 'STR_USRACT_LEAN_RIGHT')
     $theirRows = @($ourStrings | Select-Object -Skip 1 | ForEach-Object { $_.Split(',')[0] } |
         Where-Object { $_ -notin $gapKeys } | ForEach-Object { "$_,Bohemia text" })
@@ -213,13 +213,19 @@ try {
     Assert ($gapRows[0] -eq $ourStrings[0].Trim([char]0xFEFF)) 'Gap shard header wrong'
     Assert ((@($gapRows | Select-Object -Skip 1 | ForEach-Object { $_.Split(',')[0] }) -join ',') -eq ($gapKeys -join ',')) "Gap shard keys wrong: $($gapRows -join ' | ')"
     Assert ($gapRows[1] -eq ($ourStrings | Where-Object { $_.StartsWith('STR_USRACT_LEAN_LEFT,') })) 'Gap shard text is not ours'
-    Assert (Test-Path -LiteralPath (Join-Path $steam 'BIN/UD_OPTIONS_APL-SA_NOTICE.txt')) 'Notice missing beside the gap shard'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $steam 'BIN/UD_OPTIONS_APL-SA_NOTICE.txt'))) 'APL-SA notice installed beside the gap shard'
     $remasterBackup = @(Get-ChildItem -LiteralPath (Join-Path $steam '.ud-backups') -Recurse -File | Where-Object Name -EQ 'resource-extra.cpp')
     Assert ($remasterBackup.Count -eq 1 -and [IO.File]::ReadAllText($remasterBackup[0].FullName) -eq $bohemiaResource) 'Pristine resource-extra backup missing'
     # Rerun: nothing appended twice, nothing rewritten, no new backups.
     $afterFirst = Get-TreeState $steam
     & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
     Assert ((Get-TreeState $steam) -eq $afterFirst) 'Remaster rerun was not idempotent'
+    # An install from before 2026-10-26 left an APL-SA notice beside the shard: backed up, then removed.
+    $staleNotice = Join-Path $steam 'BIN/UD_OPTIONS_APL-SA_NOTICE.txt'
+    Put $staleNotice 'old notice'
+    & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
+    Assert (-not (Test-Path -LiteralPath $staleNotice)) 'Stale APL-SA notice survived'
+    Assert (@(Get-ChildItem -LiteralPath (Join-Path $steam '.ud-backups') -Recurse -File | Where-Object Name -EQ 'UD_OPTIONS_APL-SA_NOTICE.txt').Count -eq 1) 'Stale notice was not backed up'
     # Steam update/verify restores Bohemia's pristine file: the includes come back once.
     [IO.File]::WriteAllText((Join-Path $steam 'BIN/resource-extra.cpp'), $bohemiaResource)
     & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
