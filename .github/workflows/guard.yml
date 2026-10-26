@@ -1,0 +1,18 @@
+# Game data and secrets guard. Fails any push or PR whose tree carries Bohemia
+# or @LoBo game data (pbo, paa, p3d, wrp, sounds, config dumps, stringtables),
+# a file over 5 MB, a Git LFS pointer or a secret. Same checker as the local
+# pre-commit and pre-push hooks; allowlist in .githooks/game-data-allowlist.txt.
+# Kept apart from ci.yml on purpose: no branch or path filter may skip it.
+name: guard
+
+on: [push, pull_request]
+
+jobs:
+  game-data:
+    name: No game data or secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check every file in the tree
+        run: python3 .githooks/check_no_game_data.py --tree HEAD
