@@ -1,0 +1,146 @@
+﻿graphics: the sea gets wave relief and a broken, glittering sun path
+
+What the player sees: the sea is no longer a smooth sheet under a blurred
+sheen. Rows of waves run to the horizon, the low sun lays a narrow path of
+glints across them instead of a soft copper column, crests catch the sky
+and troughs show the water, and the waves move with the sea texture's own
+animation without popping every 0.14 s. At noon the sea keeps the
+original's green-grey instead of turning blue-grey: over the water of
+sea_noon the hue is 126.1 against the original's 133.7 degrees (the base
+was 209.8) and the mean 150.1 against 143.8 (the base 126.2); at mid-sun
+(16:30, sun ahead) 72.2 against 76.4 degrees and 164.3 against 169.7.
+Wave detail (sd of a 9x9 high-pass over the water) rises from 2.0 to 20.7
+at the sunset hero, 3.8 to 8.2 at noon and 2.7 to 9.2 at mid-sun. The
+beach, the sky and Classic are unchanged.
+
+How it works: the sea is the landscape's own faces, which carry the
+specular layer alone and drew through the detail shader like the terrain;
+the face spec has no free bit for an IsWater-style flag (RenderFlags.hpp
+asserts that its three categories cover all 32), so the route is a draw
+scope. Landscape::DrawWater opens Engine::BeginSea around its sea draws
+and EndSea after them. With the switch on and gated on in the remastered
+world pass, the backend (EngineGL33_Sea.cpp) sets
+BuildContext::remasteredSea, BuildRenderPassDescriptor routes an opaque 3D
+face with the specular layer alone to ShaderFamily::Water (detail texgen,
+specular_dx on unit 1), and s_psWaterRemasterMain draws it with the
+research's variant C: the sea texture's brightness is the wave height, the
+texture, a swell copy at 0.27x frequency rotated 37 degrees and the
+specular_dx ripples give the normal (the texture-to-world mapping solved
+per pixel from screen derivatives, the step matched to the filter's
+footprint, faded from 400 m to 3 km), the lit texture sits under the sky
+reflected by Fresnel on that normal with a low mean share and the waves'
+share at full weight, and the sun lays a broad lobe and a sparkle that
+widens with the footprint. The sky is the A7 table's in the reflected
+direction while the sky table is on (skyReflection in the sky piece), else
+the classic fog colour with its sun glow, the sky the player then sees.
+The original's noon green-yellow is its per-vertex sheen in the yellow
+classic sun colour, so the material's broad lobe keeps that hue
+(SeaSheenLight: the rig sun's luminance, the original sun's display
+chroma) and, between 15 and 50 degrees of sun, grows from 0.35 to 2.4 and
+moves to the flat normal (on the wave normal it split into yellow facets
+and blue troughs); the mean sky share halves there and the reflected sky
+takes 0.6 of the fog colour; the far sea's mean sky share fades to half
+between 1 and 3 km. The animation: AnimateTexture switches frames at
+floor(phase * 7); SeaAnimationBlend spreads the frames evenly over the
+phase instead, binds the bound frame's neighbour on unit 11 (with unit 0's
+sampler object) and mixes it in, continuously in the phase, dividing out
+the relief a mix loses (consecutive frames' gradients correlate 0.65 to
+0.82; 0.75 in the shader). Graphics/Remaster/SeaWaves holds the math, pure.
+
+Switch and gates: seaWaves (landed, step B5), gated per sea fragment: on by
+day and night in the remastered world pass, off in Classic, night vision,
+portraits and 3D previews. Sub-knobs seaRelief, seaSky and seaSheen
+(multipliers, 1). LitConstants slots 74 (Water0: relief, the next frame's
+share, mean sky weight, sky tint) and 75 (Water1: sheen light, the sheen's
+flat-normal share) land inside B11's padding, which splits into
+litPlanned[6] (68 to 73) and litPlanned2 (76) around them (Count stays
+78); unit 11 (kSeaNextFrameUnit, kLitSamplers row seaNext) holds a white
+stand-in outside the sea's draws. Off (seaWaves=0, Classic) never opens the scope:
+the sea draws through the detail program as before.
+
+From the prototype: kept the wave normal and its three layers, the Fresnel
+sky with a low mean and full wave-driven share, the broad and tight lobes,
+the 400 m to 3 km fade, the anisotropy guard and the Toksvig-style
+sparkle. Rewritten: the sea detection by material specular (isSea()) is an
+explicit route; the sky from the A7 table; the local-light clamp is F9's
+1.0 through the shared lights piece; the sheen in the original sun's hue
+and flat at a high sun; the cross-fade; the constants in two slots and
+three sub-knobs; the shader ends in finishFragment like the detail program.
+Dropped: variants A and B, the old water main's constant bump normal (the
+detail texture read as one), the waterBump texture nothing sampled
+(misc\waveBumpMap.paa is not in the Remaster data) with
+GetWaterBumpMap(); the README's Water row is rewritten.
+
+Cost (RTX 4060 Ti, 1080p, scale 1.0, 4x MSAA, one game, 3 interleaved
+rounds, at P0, one foreign game holding a slot; a single reading): the
+ground section (sky, terrain, water) on minus off +0.56 ms median at the
+sunset hero, +1.00 at noon and +1.10 at mid-sun, frames that are mostly
+sea; the frame +0.18, +1.00 and +0.54. The plan's estimate was 0.2 ms.
+
+Tests: new test_sea_waves.cpp (the cross-fade is the even spread and
+continuous in the phase, a bound frame off the pair, the relief gain, the
+constants by sun height, the sheen's hue and luminance, the switch and its
+sub-knobs), a descriptor case (the sea routes to the water family only in
+the scope; terrain, grass, blended, surface and pre-transformed faces keep
+theirs) and two shader and routing cases in test_remaster_lighting.cpp
+(the variant C model on the shared pieces, the scope opens only behind the
+switch and its gate, the landscape opens and closes it around its sea
+draws); the layout, unit, sky table and landed-switch cases updated. Unit
+gate tags plus [SeaWaves],[build-descriptor],[FeatureSwitches],
+[FeatureGates],[atmosphere],[PostStages],[TemporalAA]: 541/541. Twelve
+mutations turn their cases red: a hard frame switch, a relief gain without
+the correlation, no high-sun ramp, the sheen hue from the linear colour, a
+descriptor that never routes the sea, no sea flag in ApplyPassState, no
+seaNext unit row, a block member renamed, the shader without the relief
+gain, the switch not landed, a scope that ignores the gate, a scope never
+closed.
+
+In game (tmp/integration/B5 of the graphics-remaster worktree, gitignored):
+the base build's lane run 20261018-073656-before and the final
+20261018-075851final-new (the features_ab water hero, sea_noon, the
+mid-sun shore and a night view, each off, on and Classic, and 24 frames
+off and on with the sea clock at 1/30 s per frame); the sweeps that set the
+sheen in r2 to r5; timing b5-r5-timing; smoke_abel 1/1 with KHR_debug ids
+131154, 131169 and 131218 only. Off equals before: 1,994 / 1,040 / 7,654 /
+1,324 pixels over 2 levels against the base build's off shot (hero, noon,
+shore, night), within its own boot repeat of 1,208 / 10,470 / 10,916;
+Classic within 6 pixels. Motion: off changes 1.07 to 1.16 levels at each
+frame switch against a median of 0.74 (max/median 1.56); on has no spike
+there (max/median 1.20).
+
+Merged onto 706b9a3 (B11, B1 and A6 landed after the lane's base
+5d7e7ae) by a three-way apply; nine files conflicted and keep both
+sides: the sea's sub-knob rows and LightingTuning fields after
+texsharp's and the sun shadows'; unit 11 and its seaNext row beside
+B1's unit 6, A7's unit 8 and A6's unit 13; the water slots inside B11's
+padding (litPlanned[6], litWater0, litWater1, litPlanned2, litDetail;
+the static_asserts and the layout test follow); the seaWaves registry
+row among the landed ones (landed=10/26, fourteen sub-knobs, each under
+a landed switch in its track's group); the fragment-piece list with
+skyReflection before the lights piece; the test list; the plan's 3.3
+and 3.4 notes; the roadmap. One fix past the conflicts: the water
+main's shadowMapVisibility call takes B1's fourth argument, the leaf
+lift (0: the sea is no leaf), which the glslang case caught. With the
+switch on the sea's faces leave PSDetail, so B11's land-or-sea flag
+(litDetail.w) changes only with the switch off. Merged: build clean, no
+new warnings, clang-format clean on the touched files
+(EngineGL33_Queue.cpp and EngineGL33_State.cpp by clang-format-diff on
+the changed lines); the gate tags of plan section 8 item 3 plus the
+landed lanes' tags, [SeaWaves] and [build-descriptor]: 573/573;
+smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only, no shader
+error; tmp/integration/B5 land-smoke).
+
+Known risks: the hero view's eye 3 m above sea level puts the sea from 2 m
+out in frame, which the research never shot, and there the relief reads
+as large smooth swells; the noon near band is beige-grey (159, 160, 150)
+where the original's is yellow-green-grey (154, 159, 146), and the hue of
+so grey a sea swings 30 to 40 degrees for 0.2 of seaSheen; the 7-frame
+ping-pong animation now moves the normals (about 10 times off's
+frame-to-frame change in the water) and has no travelling waves; at night
+on is 5 levels darker than off with twice the detail, and there is no moon
+glint; the cost is about five times the plan's estimate; Eden, Sinai with
+@LoBo, rain, overcast and the shoreline are unverified; a model face that
+carries IsWater (none known) now draws with this model.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+

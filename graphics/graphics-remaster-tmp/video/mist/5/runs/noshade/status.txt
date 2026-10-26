@@ -1,0 +1,2 @@
+﻿run exit=0 frames=150 minutes=6.7 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\5\runs\noshade
+done 01:59:10

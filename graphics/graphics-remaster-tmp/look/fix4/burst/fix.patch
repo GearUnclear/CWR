@@ -1,0 +1,492 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index 70f8ed23..c468aecc 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -402,9 +402,15 @@ Rgb ApplyToneCurveHueKeeping(const ToneCurve& curve, const Rgb& in)
+     // To white late: near the top of the curve, and with the light past the
+     // curve's white (kWhiteExcessStops stops past it is white).
+     const float excess = Clamp01(std::log2(std::max(peak / curve.white, 1.0f)) / kWhiteExcessStops);
+-    const float toWhite = std::max(std::pow(y, kCrosstalk), excess);
+     const Rgb ratio = c * (1.0f / peak);
+-    return Mix(ratio, Rgb(1.0f, 1.0f, 1.0f), toWhite) * y;
++    // Saturated light less (kChromaKeep, the composite's since round 2), and
++    // each channel by its share of the peak (kHueRoll).
++    const float chroma = 1.0f - std::min(ratio.r, std::min(ratio.g, ratio.b));
++    const float toWhite =
++        std::max(std::max(std::pow(y, kCrosstalk), excess) * (1.0f - kChromaKeep * chroma * chroma), 1e-6f);
++    auto roll = [&](float share)
++    { return share + (1.0f - share) * std::pow(toWhite, 1.0f + kHueRoll * (1.0f - share)); };
++    return Rgb(roll(ratio.r), roll(ratio.g), roll(ratio.b)) * y;
+ }
+ 
+ // ---- Colour -------------------------------------------------------------------
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+index b64d7bb4..e53ae13d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -253,6 +253,13 @@ constexpr float kWhiteExcessStops = 2.5f;
+ // flame rolls off in hue to a yellow-orange core and the noon sun still clips
+ // white.
+ constexpr float kChromaKeep = 0.8f;
++// Each channel goes to white by the whitening to the power 1 + kHueRoll * (1 -
++// its share of the peak) (look fix "burst"): the channels the light holds
++// less of follow later, as film's dyes do, so a flame's core and the stones in
++// its light roll off to yellow-orange and orange instead of cream (one mix for
++// all three turned (1, 0.55, 0.16) into (1, 0.68, 0.38)); a white light is
++// unchanged.
++constexpr float kHueRoll = 3.0f;
+ struct ToneCurve
+ {
+     float a = 1.0f, d = 1.0f, b = 0.0f, c = 1.0f;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+index 739e3df0..9b262bd6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+@@ -104,6 +104,14 @@ class Cloudlet: public Smoke
+ 	public:
+ 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
+ 
++	// Its temperature (K) and its table's hottest (the last entry's maxT; 0
++	// without a table): a fireball's puff glows (CombatLights FireballPuff).
++	float Temperature() const {return _t;}
++	float HottestTemperature() const
++	{
++		return _cloudletTTable && _cloudletTTable->Size()>0 ? _cloudletTTable->Get(_cloudletTTable->Size()-1).maxT : 0.0f;
++	}
++
+ 	void SetGrowUp( float growUp, float size )
+ 	{
+ 		_size=size;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+index 2363fae0..aa1e7325 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+@@ -348,6 +348,40 @@ void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float
+         out[i] = kFlameRgb[i] * e;
+ }
+ 
++void BlackBodyRgb(float temperatureK, float out[3])
++{
++    const float t = Clamp(temperatureK, 1000.0f, 3000.0f);
++    out[0] = 1.0f;
++    out[1] = std::max(0.155f + (t - 1500.0f) * 0.000207f, 0.05f);
++    out[2] = 0.15f * std::pow(Clamp((t - 1900.0f) / 1100.0f, 0.0f, 1.0f), 1.5f);
++}
++
++bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emit[3])
++{
++    if (!(hottestK >= kFireballTableK && hottestK <= kFireballTableMaxK))
++        return false;
++    const float t = std::max(temperatureK, 0.0f);
++    const float fade = Clamp((t - kFireballGlowFromK) / (kFireballGlowFullK - kFireballGlowFromK), 0.0f, 1.0f);
++    const float glow = kFireballEmission *
++                       std::exp(kFireballWienK * (1.0f / kFireballRefK - 1.0f / std::max(t, 1.0f))) * fade * fade *
++                       (3.0f - 2.0f * fade);
++    float body[3];
++    BlackBodyRgb(t, body);
++    for (int i = 0; i < 3; ++i)
++    {
++        albedo[i] = kFireballSoot[i];
++        // A soft per-channel saturation: the hottest core goes white-yellow.
++        emit[i] = kFireballEmitCap * (1.0f - std::exp(-body[i] * glow / kFireballEmitCap));
++    }
++    return true;
++}
++
++float CombatTwilight(float sunElevationDeg)
++{
++    const float above = std::max(sunElevationDeg - kTwilightNightDeg, 0.0f);
++    return std::max(std::pow(10.0f, -above / kTwilightDecadeDeg), kTwilightFloor);
++}
++
+ void KeepHueUnderOne(float rgb[3])
+ {
+     const float peak = std::max(rgb[0], std::max(rgb[1], rgb[2]));
+@@ -364,7 +398,7 @@ float CombatSmokeReach(float core, float albedo)
+ 
+ float CombatSmokeTransmittance(CombatLightKind kind, const CombatLightSample& s, float d, float albedo)
+ {
+-    if (kind != CombatLightKind::Fire)
++    if (kind != CombatLightKind::Fire && kind != CombatLightKind::Explosion)
+         return 1.0f;
+     const float inside = std::max(d - s.core, 0.0f);
+     return std::exp(-inside / CombatSmokeReach(s.core, albedo));
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+index ed7a4155..649332b6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+@@ -79,8 +79,28 @@ struct CombatTuning
+     // 0.15 s at its peak lit the plain round a shell burst into a band along
+     // the horizon in every frame of it; the flash now falls from its birth.
+     float flashHold = kExplosionFlashHold;
++    // The steady lights' share on surfaces and in the air against the
++    // twilight (CombatTwilight): 1, and under the photoreal camera less while
++    // the sky still lights the ground. Their flames and smoke keep it all.
++    float twilight = 1.0f;
+ };
+ 
++// A steady light (a fire, a flare, a motor) against the twilight under the
++// photoreal camera (look fix "burst"): the share of its night power that
++// reads against the sky's light on the ground at a sun `sunElevationDeg`.
++// The camera meters a dusk plain about as dark as a night field and exposes
++// it a few stops brighter than a night, so a wreck's fire at the day scale
++// still lit the plain behind it into a warm line along the horizon 1.7
++// degrees after sunset. The real twilight's light on the ground falls about
++// tenfold per kTwilightDecadeDeg of sun from the horizon to the night; the
++// share is 1 from kTwilightNightDeg under (the night as before) and falls
++// tenfold per kTwilightDecadeDeg above it, to kTwilightFloor (by day the
++// day scale alone).
++constexpr float kTwilightNightDeg = -6.0f;
++constexpr float kTwilightDecadeDeg = 2.5f;
++constexpr float kTwilightFloor = 0.1f;
++float CombatTwilight(float sunElevationDeg);
++
+ // One light at one age: E(d) = intensity * window(d) / (1 + d^2 / core^2), a
+ // ball of radius `core` rather than a point, and the window a smooth end at
+ // `range` (where E falls to about kCombatRangeFloor).
+@@ -178,6 +198,42 @@ void KeepHueUnderOne(float rgb[3]);
+ // core radii); zero for every other kind and outside it.
+ void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float d, float out[3]);
+ 
++// A shell burst's fireball (look fix "burst"): the puffs of an explosion
++// (CfgCloudlets Explosion, a gun's fire) carry a temperature in kelvin that
++// cools from 2500 K. Classic lit them past white with the explosion's own
++// light; under the combat lights they were lit smoke of their table's colour
++// (lemon at 1900 K, mustard at 1600 K) at the scene's light, so a dusk burst
++// read as a flat mustard cloud with no hot core and then a salmon smear. A
++// puff whose table tops out (`hottestK`) between kFireballTableK and
++// kFireballTableMaxK is a fireball's, in kelvin (a camp fire's smoke and a smoke
++// shell's top out at 1000, grey and orange; a gun's fire runs its own scale to
++// 4200, orange at 2800 and grey smoke under 2300, and keeps its look): it
++// glows as a hot body at its temperature, the colour of a black body (red-
++// orange to yellow-white) at kFireballEmission times exp(kFireballWienK (1 /
++// kFireballRefK - 1 / T)), Wien's law at 580 nm (its visible light climbs
++// about twelvefold from 1800 K to 2200 K, so only the hottest puffs of a cloud
++// glow white and the rest dim to orange and red inside their soot; a power of
++// 8 on the table's colour lit the whole cloud one yellow at 0.17 s), faded in
++// from kFireballGlowFromK to kFireballGlowFullK. Each channel saturates softly
++// at kFireballEmitCap (linear, the puff's colour and its glow), as film does,
++// so the hottest core goes white-yellow. What it scatters is soot
++// (kFireballSoot, display): it cools from a white-hot core through orange to
++// dark grey-brown smoke. Returns false (outputs untouched) for any other puff.
++constexpr float kFireballTableK = 1500.0f;
++constexpr float kFireballTableMaxK = 3000.0f;
++constexpr float kFireballGlowFromK = 900.0f;
++constexpr float kFireballGlowFullK = 1300.0f;
++constexpr float kFireballRefK = 2200.0f;
++constexpr float kFireballWienK = 24800.0f; // c2 / 580 nm
++constexpr float kFireballEmission = 8.0f;
++constexpr float kFireballEmitCap = 2.0f;
++constexpr float kFireballSoot[3] = {0.24f, 0.21f, 0.18f};
++// The linear colour of a black body at `temperatureK` (1000 to 3000 K, red
++// channel 1): a fit to the sRGB black-body table (1500 K (1, 0.155, 0), 2000 K
++// (1, 0.255, 0.002), 2500 K (1, 0.36, 0.06), 3000 K (1, 0.47, 0.15)).
++void BlackBodyRgb(float temperatureK, float out[3]);
++bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emit[3]);
++
+ // A fire burns inside the foot of its own smoke, and the light reaching a
+ // particle of that smoke has crossed the smoke below it. Soot drinks what it
+ // does not scatter: under a burning wreck's black column only the base glows
+@@ -191,9 +247,11 @@ constexpr float kSootReachCores = 1.5f;
+ constexpr float kPaleReachCores = 14.0f;
+ float CombatSmokeReach(float core, float albedo);
+ // The share of a light's irradiance that reaches a smoke or dust particle `d`
+-// metres from it: for a fire 1 within its core, then exp(-(d - core) /
+-// reach); a flash, a tracer, a flare or a motor lights the smoke around it
+-// from the air, 1.
++// metres from it: for a fire or a shell burst 1 within its core, then
++// exp(-(d - core) / reach) (look fix "burst": a burst's light lit every puff of
++// its own cloud alike, one flat colour; it now lights the cloud's base and
++// near side); a muzzle or cannon flash, a tracer, a flare or a motor lights
++// the smoke around it from the air, 1.
+ float CombatSmokeTransmittance(CombatLightKind kind, const CombatLightSample& s, float d, float albedo);
+ 
+ // The steady lights that have a classic light behind them: fires, flares and
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index c39213e2..d71c0050 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -11,6 +11,7 @@
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ #include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
++#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+ #include <Random/randomGen.hpp>
+ #include <Poseidon/Core/Global.hpp>
+@@ -1211,8 +1212,31 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+         Color colorI;
+         // The light a puff inside a fire's flames emits (linear; CombatLitParticle).
+         float flameEmit[3] = {0.0f, 0.0f, 0.0f};
++        // A fireball's puff: its glow (linear) and its soot colour.
++        float fireballEmit[3] = {0.0f, 0.0f, 0.0f};
++        Color fireballOwn;
++        bool fireball = false;
++        // A fireball's puff (look fix "burst", FireballPuff) glows as a hot
++        // body and scatters as soot. Its shape is self-lit (MSShining): its
++        // table's colour times the eye's adaptation, which the photoreal
++        // camera holds at 1, so a dusk burst showed its table's lemon and
++        // mustard at a lit wall's level. Under the combat lights it takes the
++        // scene's light on its soot and adds its glow.
++        if (GEngine->CombatLightsActive() &&
++            render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
++        {
++            if (const Cloudlet* puff = dynamic_cast<const Cloudlet*>(this))
++            {
++                float soot[3];
++                if (lighting::FireballPuff(puff->Temperature(), puff->HottestTemperature(), soot, fireballEmit))
++                {
++                    fireballOwn = Color(soot[0], soot[1], soot[2], ((ColorVal)GetConstantColor()).A());
++                    fireball = true;
++                }
++            }
++        }
+         int mat = (hints & ClipUserMask) / ClipUserStep;
+-        if (mat != MSShining)
++        if (mat != MSShining || fireball)
+         {
+             TLMaterial mat;
+             mat.ambient = HWhite;
+@@ -1267,10 +1291,12 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+                 float albedo = 1.0f;
+                 if (render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
+                 {
+-                    const Color own = (ColorVal)GetConstantColor();
++                    const Color own = fireball ? fireballOwn : (ColorVal)GetConstantColor();
+                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
+                 }
+                 colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);
++                for (int i = 0; i < 3; ++i)
++                    flameEmit[i] += fireballEmit[i];
+             }
+             colorI.SetA(1);
+         }
+@@ -1281,14 +1307,14 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+         const render::LegacySpec specT = render::SplitLegacy(special);
+         if (render::Has(specT.routing, render::Routing::IsColored))
+         {
+-            colorI = colorI * (ColorVal)GetConstantColor();
++            colorI = colorI * (fireball ? fireballOwn : (ColorVal)GetConstantColor());
+         }
+         // A puff in a strong combat light (the foot of a camp fire's column)
+         // passes 1: brought under it by its peak, it keeps the light's hue
+         // instead of clipping to white in the 8-bit vertex colour, and the
+         // light past 1 goes to the backend as the decal's glow (SetDecalGlow),
+         // so the column's foot glows brighter than the smoke above it.
+-        if (mat != MSShining && GEngine->CombatLightsActive())
++        if ((mat != MSShining || fireball) && GEngine->CombatLightsActive())
+         {
+             // The flame's own light (not its colour's: it glows, it does not
+             // scatter) joins in linear light.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 5f2277a8..6f84ab9d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -743,6 +743,9 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
+             const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
+             ct.smokeTint = 0.85f * camNight;
+             ct.flashHold = fl::kExplosionFlashHold * _combat.night;
++            // Look fix "burst": a steady light's share on surfaces against
++            // the twilight's light on the ground (CombatTwilight).
++            ct.twilight = fl::CombatTwilight(in.sunElevationDeg);
+         }
+         ct.scatter = _lighting.combatScatter;
+         fl::CombatLightSet& combat = fl::GCombatLights();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+index fb984fca..7e29d1e8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+@@ -129,6 +129,10 @@ void DeleteTex(unsigned int& t)
+ // in (look fix "fire": the stones round a camp fire went past white to a
+ // cream slab).
+ constexpr float kFireSurfaceBody = 1.3f;
++// A shell burst's light on surfaces ends this many of its ball's radii out
++// (look fix "burst": 20 m lit the plain behind a burst into a band along the
++// horizon); a heavy shell's 2.6 m ball lights the ground within about 8 m.
++constexpr float kBurstSurfaceReachCores = 3.0f;
+ 
+ // How thick the lit smoke and dust around a light is (m): muzzle gas, the
+ // dust and smoke of a blast, the hot air round a fire's flames. A fire's own
+@@ -277,7 +281,12 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
+                     // (Seen from eye height the lit ground round a burst 60 m
+                     // out is a thin strip along the horizon.)
+                     gain = 0.3f;
+-                    f.range = std::min(f.range, 20.0f);
++                    // Look fix "burst": a young burst still lit the plain 20 m
++                    // round into a ruler-straight band along the horizon,
++                    // brighter than its own fireball. Its light ends within
++                    // kBurstSurfaceReachCores of its ball, under the cloud.
++                    f.range = std::min(
++                        f.range, r.kind == fl::CombatLightKind::Explosion ? kBurstSurfaceReachCores * f.start : 20.0f);
+                     warmG = 0.8f;
+                     warmB = 0.56f;
+                     break;
+@@ -303,6 +312,11 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
+                 default:
+                     break;
+             }
++            // Look fix "burst": a steady light reads against the twilight
++            // (CombatTwilight): the burning wreck's fire drew a warm line
++            // along the dusk horizon behind it.
++            if (fl::CombatLightIsSteady(r.kind))
++                gain *= std::min(std::max(set.Tuning().twilight, 0.0f), 1.0f);
+             // The warmth at the same luminance.
+             const float lum0 = 0.2126f * f.diffuse[0] + 0.7152f * f.diffuse[1] + 0.0722f * f.diffuse[2];
+             f.diffuse[1] *= warmG;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index e9efea95..d7f4ea6f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -437,7 +437,10 @@ vec3 camTone(vec3 x) {
+     float excess = clamp(log2(max(peak / camNight.z, 1.0)) / camNight.w, 0.0, 1.0);
+     float chroma = 1.0 - min(ratio.r, min(ratio.g, ratio.b));
+     float whiten = max(pow(y, 8.0), excess) * (1.0 - 0.8 * chroma * chroma); // kCrosstalk, kChromaKeep
+-    return mix(ratio, vec3(1.0), whiten) * y;
++    // A channel the light holds less of goes to white later (kHueRoll, look
++    // fix "burst"): a bright orange rolls off to yellow-orange, not cream.
++    vec3 w = pow(vec3(max(whiten, 1e-6)), 1.0 + 3.0 * (1.0 - ratio)); // kHueRoll
++    return mix(ratio, vec3(1.0), w) * y;
+ }
+ 
+ void main() {
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+index 2567f670..dd920052 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+@@ -522,15 +522,99 @@ TEST_CASE("Combat lights: a burning wreck's black smoke glows at its base and it
+     CHECK(CombatSmokeTransmittance(CombatLightKind::Fire, embers, 3.0f, soot) <
+           CombatSmokeTransmittance(CombatLightKind::Fire, embers, 2.0f, soot));
+     CHECK(CombatSmokeReach(embers.core, pale) > 4.0f * CombatSmokeReach(embers.core, soot));
+-    // A flash, a flare, a tracer or a motor lights the smoke from the air.
+-    for (CombatLightKind k : {CombatLightKind::Explosion, CombatLightKind::Muzzle, CombatLightKind::Cannon,
+-                              CombatLightKind::Flare, CombatLightKind::Tracer, CombatLightKind::Motor})
++    // A shell burst's light crosses its own cloud too (look fix "burst"): the
++    // base round its ball is lit, the far side of its cloud less.
++    const CombatLightSample burst = At(CombatLightKind::Explosion, 0.3f);
++    CHECK(CombatSmokeTransmittance(CombatLightKind::Explosion, burst, burst.core * 0.5f, soot) == 1.0f);
++    CHECK(CombatSmokeTransmittance(CombatLightKind::Explosion, burst, burst.core + 6.0f, 0.2f) < 0.5f);
++    // A muzzle or cannon flash, a flare, a tracer or a motor lights the smoke
++    // from the air.
++    for (CombatLightKind k : {CombatLightKind::Muzzle, CombatLightKind::Cannon, CombatLightKind::Flare,
++                              CombatLightKind::Tracer, CombatLightKind::Motor})
+     {
+         INFO(CombatLightKindName(k));
+         CHECK(CombatSmokeTransmittance(k, At(k, 0.0f), 8.0f, soot) == 1.0f);
+     }
+ }
+ 
++TEST_CASE("Combat lights: a fireball's puff glows from white-hot to orange and cools to dark soot",
++          "[remaster][CombatLights]")
++{
++    // CfgCloudlets Explosion: born at 2500 K, its table tops at 2200 K.
++    float albedo[3], hot[3], warm[3], cool[3], cold[3];
++    REQUIRE(FireballPuff(2500.0f, 2200.0f, albedo, hot));
++    REQUIRE(FireballPuff(2000.0f, 2200.0f, albedo, warm));
++    REQUIRE(FireballPuff(1600.0f, 2200.0f, albedo, cool));
++    REQUIRE(FireballPuff(850.0f, 2200.0f, albedo, cold));
++    // White-hot past the puff's white (its glow carries above 1): red and
++    // green near the cap, blue well up, always brighter than the ground a
++    // burst lights at dusk.
++    CHECK(hot[0] > 1.9f);
++    CHECK(hot[1] > 1.5f);
++    CHECK(hot[2] > 0.5f);
++    // 2000 K: orange, red leading.
++    CHECK(warm[0] > 0.4f);
++    CHECK(warm[1] < 0.5f * warm[0]);
++    CHECK(warm[2] < 0.05f * warm[0]);
++    // 1600 K: a dim red glow, far under the core.
++    CHECK(cool[0] < 0.1f * hot[0]);
++    CHECK(cool[1] < 0.3f * cool[0]);
++    CHECK(cool[2] < 0.1f * cool[0]);
++    // The black body: red-orange at 1500 K, yellower and bluer hotter.
++    float b15[3], b25[3];
++    BlackBodyRgb(1500.0f, b15);
++    BlackBodyRgb(2500.0f, b25);
++    CHECK(b15[1] == Catch::Approx(0.155f).margin(0.01));
++    CHECK(b25[1] == Catch::Approx(0.36f).margin(0.02));
++    CHECK(b25[2] == Catch::Approx(0.06f).margin(0.01));
++    // Under the glow's start nothing: smoke.
++    CHECK(cold[0] == 0.0f);
++    CHECK(cold[1] == 0.0f);
++    // What it scatters is dark grey-brown soot, never its table's colour.
++    CHECK(albedo[0] < 0.3f);
++    CHECK(albedo[0] >= albedo[1]);
++    CHECK(albedo[1] >= albedo[2]);
++    // Monotone in temperature.
++    float prev = 0.0f;
++    for (float t = 800.0f; t <= 2600.0f; t += 50.0f)
++    {
++        float a[3], e[3];
++        FireballPuff(t, 2200.0f, a, e);
++        CHECK(e[0] >= prev);
++        CHECK(e[0] <= kFireballEmitCap);
++        prev = e[0];
++    }
++    // Crater smoke (its table tops at 500) and a camp fire's or a smoke
++    // shell's smoke (1000: orange at its foot, then grey) are no fireball.
++    float a[3] = {9.0f, 9.0f, 9.0f}, e[3] = {9.0f, 9.0f, 9.0f};
++    CHECK_FALSE(FireballPuff(500.0f, 500.0f, a, e));
++    CHECK_FALSE(FireballPuff(1000.0f, 1000.0f, a, e));
++    // A gun's fire (WeaponFireGun, its table to 4200 on its own scale).
++    CHECK_FALSE(FireballPuff(4500.0f, 4200.0f, a, e));
++    CHECK(a[0] == 9.0f);
++    CHECK(e[0] == 9.0f);
++}
++
++TEST_CASE("Combat lights: a steady light reads against the twilight under the camera", "[remaster][CombatLights]")
++{
++    // The night as before.
++    CHECK(CombatTwilight(-6.0f) == 1.0f);
++    CHECK(CombatTwilight(-20.0f) == 1.0f);
++    // Tenfold per 2.5 degrees of sun above it.
++    CHECK(CombatTwilight(-3.5f) == Catch::Approx(0.1f).epsilon(1e-3));
++    CHECK(CombatTwilight(-4.75f) == Catch::Approx(std::sqrt(0.1f)).epsilon(1e-3));
++    // The firefights' dusk (sun 1.7 degrees under) and the day: the floor.
++    CHECK(CombatTwilight(-1.7f) == Catch::Approx(kTwilightFloor));
++    CHECK(CombatTwilight(40.0f) == Catch::Approx(kTwilightFloor));
++    float prev = 2.0f;
++    for (float e = -15.0f; e <= 10.0f; e += 0.25f)
++    {
++        const float s = CombatTwilight(e);
++        CHECK(s <= prev);
++        prev = s;
++    }
++}
++
+ TEST_CASE("Combat lights: the frame's list never cuts a fire, a flare or a motor for bursts and tracers",
+           "[remaster][CombatLights]")
+ {
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 9c640e09..2c37a29e 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -297,13 +297,28 @@ TEST_CASE("PhotoCamera: the filmic curve passes middle grey, reaches white and k
+     const Rgb orange(0.18f, 0.09f, 0.03f);
+     const Rgb mid = ApplyToneCurveHueKeeping(c, orange);
+     CHECK(mid.g / mid.r == Catch::Approx(0.5f).margin(0.03));
++    // Far past white a white light is white; a saturated orange rolls off to a
++    // yellow-orange, its blue following last (kChromaKeep, kHueRoll; look fix
++    // "burst": one mix for all three channels turned a flame's core cream).
++    const Rgb white(0.18f, 0.18f, 0.17f);
++    const Rgb whiteHot = ApplyToneCurveHueKeeping(c, white * 40.0f);
++    CHECK(whiteHot.b == Catch::Approx(1.0f).margin(0.01));
+     const Rgb hot = ApplyToneCurveHueKeeping(c, orange * 40.0f);
+-    CHECK(hot.b == Catch::Approx(1.0f).margin(0.01));
++    CHECK(hot.r == Catch::Approx(1.0f).margin(0.01));
++    CHECK(hot.g / hot.r > 0.5f);
++    CHECK(hot.b < 0.5f * hot.g);
+     // A flame bright but under the curve's white keeps most of its hue (the
+     // old y^4 path to white turned it white).
+     const Rgb flame = ApplyToneCurveHueKeeping(c, orange * 8.0f);
+     CHECK(flame.b < 0.5f * flame.r);
+     CHECK(flame.g < 0.8f * flame.r);
++    // A flame's core a stop past white: yellow-orange, the blue moving least
++    // (the single mix gave blue at half the red).
++    const Rgb flameCore(1.0f, 0.55f, 0.16f);
++    const Rgb core = ApplyToneCurveHueKeeping(c, flameCore * (kMiddleGrey * 32.0f));
++    CHECK(core.g / core.r < 0.75f);
++    CHECK(core.b / core.r < 0.4f);
++    CHECK(core.b < 0.5f * core.g);
+ }
+ 
+ TEST_CASE("PhotoCamera: the white balance makes its target white and keeps white's luminance",

@@ -1,0 +1,10 @@
+# Scratch scenario for the seventh director video (not a regression test).
+# Boots the stock Guerrilla.Abel template on the Remaster shadow passed with
+# --data-dir and writes UD* lines to the game log for the video renderer.
+# Not headless: births need a real camera.  tri's default strict mode.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+tags = ["scratch", "occupierforces"]
+timeout = 14400
+assert_timeout = 900
+extra_args = ["--dev"]

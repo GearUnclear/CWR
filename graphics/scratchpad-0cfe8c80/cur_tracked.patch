@@ -1,0 +1,802 @@
+﻿diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..354988b 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,10 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"combatLights", &remaster::LightingTuning::combatLights},
++        {"combatSmoke", &remaster::LightingTuning::combatSmoke},
++        {"combatScatter", &remaster::LightingTuning::combatScatter},
++        {"combatWreck", &remaster::LightingTuning::combatWreck},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..c5cb960 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,12 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // Research prototype (combat lights, CombatLights.hpp): 0 = classic
++    // weapon/explosion/fire lights, > 0 = HDR combat lights with this gain.
++    float combatLights = 0.0f;
++    float combatSmoke = 1.0f;   // combat light on smoke particles
++    float combatScatter = 1.0f; // in-scatter of combat light in the air (post)
++    float combatWreck = 1.0f;   // embers glowing under a burning wreck's smoke
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+index 26fa96c..df2670f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+@@ -1,6 +1,7 @@
+ 
+ #include <Poseidon/Core/Config/EngineConfig.hpp>
+ #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/World.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+@@ -324,7 +325,32 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
+         }
+     }
+ 
+-    if (_fire.Active() && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
++    if (CombatLights::Enabled())
++    {
++        // Research prototype: the fuel explosion is one combat flash; while the
++        // wreck smokes, embers glow under the smoke and light it from inside.
++        _light.Free();
++        if (_fire.Active() && !_combatBurst)
++        {
++            _combatBurst = true;
++            CombatLights::Spawn(CombatLightKind::Explosion, Position() + VUp * 0.8f, _fire.GetSize());
++        }
++        const float wreck = CombatLights::WreckGain();
++        const float glow = canDelete ? 0.0f : _inOutDensity * _density * wreck;
++        if (glow > 0.01f && prec <= SimulateInvisibleNear)
++        {
++            if (!_combatFire)
++                _combatFire = CombatLights::CreateOwned(CombatLightKind::Fire, 0.0f).GetRef();
++            auto* fire = static_cast<LightCombat*>(_combatFire.GetRef());
++            fire->SetStrength(0.9f * glow * _size);
++            fire->SetPosition(Position() + VUp * 0.6f);
++        }
++        else
++        {
++            _combatFire.Free();
++        }
++    }
++    else if (_fire.Active() && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+     {
+         if (!_light)
+         {
+@@ -332,6 +358,10 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
+             GLOB_SCENE->AddLight(_light);
+         }
+     }
++    if (_combatFire && !CombatLights::Enabled())
++    {
++        _combatFire.Free();
++    }
+     if (_light)
+     {
+         _lightTime += deltaT * 1.0;
+@@ -1189,13 +1219,24 @@ void WeaponLightSource::Init()
+     _timeToLight = -1;
+ }
+ 
+-void WeaponLightSource::Start(float time, float intensity, bool mGun)
++void WeaponLightSource::Start(float time, float intensity, bool mGun, float ammoHit)
+ {
+     float lightTime = time * 3;
+     _timeToLight = lightTime;
+     _invTotalTimeToLight = 1 / lightTime;
+     _lightIntensity = intensity;
+     _lightMGun = mGun;
++    if (CombatLights::Enabled())
++    {
++        // Research prototype: the flash scales with the round. Without the ammo
++        // the classic intensities tell the source apart (soldier 0.004, vehicle
++        // machine gun 0.4, main gun 1).
++        _combatPending = true;
++        if (mGun)
++            _combatStrength = ammoHit > 0 ? ammoHit / 10.0f : (intensity > 0.1f ? 1.8f : 1.0f);
++        else
++            _combatStrength = ammoHit > 0 ? std::sqrt(ammoHit / 150.0f) : 1.5f;
++    }
+ }
+ 
+ bool WeaponLightSource::Active() const
+@@ -1212,8 +1253,19 @@ void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
+     else
+     {
+         _timeToLight -= deltaT;
++        if (CombatLights::Enabled())
++        {
++            // Research prototype: one HDR flash light per shot, fire and forget.
++            _light.Free();
++            if (_combatPending)
++            {
++                CombatLights::Spawn(_lightMGun ? CombatLightKind::Muzzle : CombatLightKind::Cannon, pos,
++                                    _combatStrength);
++                _combatPending = false;
++            }
++        }
+         // simulate light
+-        if (ENGINE_CONFIG.lights & LIGHT_EXPLO)
++        else if (ENGINE_CONFIG.lights & LIGHT_EXPLO)
+         {
+             if (!_light)
+             {
+@@ -1284,9 +1336,9 @@ void WeaponFireSource::Simulate(Vector3Par pos, Vector3Par speed, float density,
+     base::Simulate(pos, speed, density, deltaT);
+ }
+ 
+-void WeaponFireSource::Start(float time, float intensity, bool lightMGun)
++void WeaponFireSource::Start(float time, float intensity, bool lightMGun, float ammoHit)
+ {
+-    base2::Start(time, intensity, lightMGun);
++    base2::Start(time, intensity, lightMGun, ammoHit);
+     base::Start(time);
+ }
+ 
+@@ -1869,7 +1921,20 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
+         }
+     }
+ 
+-    if ((_fire.Active() || _minLightTime > 0) && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
++    if (CombatLights::Enabled())
++    {
++        // Research prototype: one combat flash per explosion, fire and forget.
++        _light.Free();
++        if (!_combatSpawned && prec <= SimulateInvisibleNear)
++        {
++            _combatSpawned = true;
++            // The fireball's centre, not the impact point: several metres up for
++            // a shell, so the light reaches the ground at a usable angle.
++            CombatLights::Spawn(CombatLightKind::Explosion, Position() + VUp * (1.0f + 2.5f * _exSize), _exSize);
++        }
++    }
++    else if ((_fire.Active() || _minLightTime > 0) && prec <= SimulateInvisibleNear &&
++             (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+     {
+         if (!_light)
+         {
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+index 4b8d171..4b22c5f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+@@ -357,6 +357,10 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
+ 	float _lightTime;
+ 	OLink<EntityAI> _owner;
+ 	WeaponCloudsSource _fire,_darkFire;
++	// Research prototype (combat lights): fuel-explosion flash spawned, and the
++	// embers glowing under the smoke while the wreck burns.
++	bool _combatBurst = false;
++	Ref<LightPoint> _combatFire;
+ 	float _minExplosionFactor,_maxExplosionFactor;
+ 	Poseidon::Foundation::Time _explosionTime;
+ 	bool _exploded;
+@@ -420,6 +424,7 @@ class Explosion: public Vehicle
+ 	Ref<LightPoint> _light;
+ 	float _minLightTime;
+ 	OLink<Vehicle> _owner; // who owned the shot
++	bool _combatSpawned = false; // research prototype: combat flash spawned
+ 
+ 	public:
+ 	Explosion
+@@ -565,13 +570,17 @@ protected:
+ 	float _lightIntensity;
+ 	bool _lightMGun;
+ 	Ref<LightPoint> _light;
++	// Research prototype (combat lights): a flash to spawn at the next Simulate.
++	bool _combatPending = false;
++	float _combatStrength = 1.0f;
+ 
+ private:
+ 	void Init();
+ 
+ public:
+ 	WeaponLightSource();
+-	void Start(float time, float intensity, bool mGun);
++	// ammoHit > 0: the fired ammo's hit value (scales a combat muzzle flash).
++	void Start(float time, float intensity, bool mGun, float ammoHit = -1.0f);
+ 	bool Active() const;
+ 	void Simulate(Vector3Par pos, float deltaT);
+ 	virtual LSError Serialize(ParamArchive &ar);
+@@ -588,7 +597,7 @@ private:
+ public:
+ 	WeaponFireSource( float interval=0.05 ); // fire shape
+ 	WeaponFireSource( LODShapeWithShadow *shape, float interval );
+-	void Start( float time, float intensity, bool mGun );
++	void Start( float time, float intensity, bool mGun, float ammoHit = -1.0f );
+ 	bool Active() const;
+ 	void Simulate
+ 	(
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp
+index 772f271..97b90c5 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp
+@@ -28,12 +28,17 @@ struct LightDescription // D3D-like light description
+ 	float startAtten; // distance with intensity 1, falloff starts here
+ 	// for spotlight only: inner and outer cone angles
+ 	float theta,phi; // see corresponding D3DLIGHT8 members
++	// Research prototype (combat lights): > 0 marks an HDR light for the
++	// remastered shaders: diffuse is linear radiance at the core, startAtten is
++	// the core radius r0 and hdrRange the window end (m).
++	float hdrRange = 0.0f;
+ };
+ 
+ class Light: public RefCountWithLinks, virtual public Poseidon::Frame
+ {
+ protected:
+ 	bool _on;
++	bool _visualOnly = false;
+ 
+ 	public:
+ 	virtual float FlareIntensity( Vector3Par camPos, Vector3Par camDir ) const {return 0;}
+@@ -45,6 +50,12 @@ protected:
+ 	virtual Color GetObjectColor() const = 0;
+ 	virtual void ToDraw( ClipFlags clipFlags=ClipAll, bool dimmed=false )= 0;
+ 	virtual bool Visible( const Object *obj ) const;
++	// Research prototype: a remastered combat light (CombatLights.hpp).
++	virtual bool IsCombat() const {return false;}
++	// Research prototype: the light still draws its glow sprite (ToDraw) but
++	// lights nothing; a combat light replaces its illumination.
++	bool IsVisualOnly() const {return _visualOnly;}
++	void SetVisualOnly(bool v) {_visualOnly = v;}
+ 
+ 	virtual void GetDescription(LightDescription &desc) const = 0;
+ 
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp b/arma_CWR/engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
+index a8fb2b1..f06d69a 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
+@@ -1037,7 +1037,7 @@ void Soldier::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
+         {
+             _mGunFireWeapon = slot._weapon;
+             _mGunClouds.Start(0.1f);
+-            _mGunFire.Start(0.05f, 0.004f, true);
++            _mGunFire.Start(0.05f, 0.004f, true, mode->_ammo->hit);
+             _mGunFireFrames = 1;
+             _mGunFireTime = Glob.uiTime;
+             int newPhase;
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/TankWithAI.cpp b/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/TankWithAI.cpp
+index 9e13396..2ab1f68 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/TankWithAI.cpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/TankWithAI.cpp
+@@ -150,7 +150,7 @@ void Tank::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* tar
+             case AmmoShotShell:
+             {
+                 _gunClouds.Start(1.5f);
+-                _gunFire.Start(0.1f, 1, false);
++                _gunFire.Start(0.1f, 1, false, mode->_ammo->hit);
+                 const float time = 1;
+                 _fireDustTimeLeft = time;
+                 _invFireDustTimeTotal = 1 / time;
+@@ -165,7 +165,7 @@ void Tank::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* tar
+                 else
+                 {
+                     _mGunClouds.Start(0.1f);
+-                    _mGunFire.Start(0.1f, 0.4f, true);
++                    _mGunFire.Start(0.1f, 0.4f, true, mode->_ammo->hit);
+                     _mGunFireFrames = 1;
+                     _mGunFireTime = Glob.uiTime;
+                     int newPhase;
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+index 2ce7e96..9e07928 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+@@ -6,6 +6,8 @@
+ #include <Random/randomGen.hpp>
+ #include <Poseidon/World/World.hpp>
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
++#include <algorithm>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/AI/VehicleAI.hpp>
+@@ -804,6 +806,18 @@ void ShotBullet::Simulate(float deltaT, SimulationImportance prec)
+ {
+     base::Simulate(deltaT, prec);
+     SetEnd(Position());
++    // Research prototype: a visible tracer carries a small light along its path.
++    const int a8 = GetConstantColor().A8();
++    if (CombatLights::Enabled() && a8 >= 4 && !_delete)
++    {
++        if (!_tracerLight)
++            _tracerLight = CombatLights::CreateOwned(CombatLightKind::Tracer, std::min(a8 / 255.0f * 4.0f, 1.5f)).GetRef();
++        _tracerLight->SetPosition(Position());
++    }
++    else
++    {
++        _tracerLight.Free();
++    }
+ }
+ 
+ void ShotBullet::Sound(bool inside, float deltaT)
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.hpp b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.hpp
+index b7286d8..f0270fb 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.hpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.hpp
+@@ -143,6 +143,7 @@ class ShotBullet: public ShotShell
+ 	typedef ShotShell base;
+ 
+ 	Vector3 _beg,_end; // world space line
++	Ref<LightPoint> _tracerLight; // research prototype: combat tracer light
+ 
+ 	public:
+ 	ShotBullet( EntityAI *parent, const AmmoType *type );
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp b/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
+index 6a18d3e..a19ea07 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
+@@ -1,4 +1,5 @@
+ #include <Poseidon/World/Scene/Fireplace.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Random/randomGen.hpp>
+ #include <Poseidon/AI/AI.hpp>
+@@ -45,6 +46,23 @@ void Fireplace::Simulate(float deltaT, SimulationImportance prec)
+             _light->SetDiffuse(_lightColor * fade);
+             position = _light->Transform().Position();
+         }
++        if (CombatLights::Enabled())
++        {
++            // Research prototype: the classic per-frame random flicker becomes a
++            // smooth HDR fire light (CombatLightKind::Fire). The classic light
++            // stays on for its flame glow sprite but lights nothing.
++            if (_light)
++                _light->SetVisualOnly(true);
++            if (!_combatFire)
++                _combatFire = CombatLights::CreateOwned(CombatLightKind::Fire, 1.0f).GetRef();
++            _combatFire->SetPosition(position + VUp * 0.35f);
++        }
++        else
++        {
++            _combatFire.Free();
++            if (_light)
++                _light->SetVisualOnly(false);
++        }
+         _smoke.Simulate(position, Speed(), deltaT, prec);
+         if (_sound)
+         {
+@@ -54,6 +72,7 @@ void Fireplace::Simulate(float deltaT, SimulationImportance prec)
+     }
+     else
+     {
++        _combatFire.Free();
+         if (_light)
+         {
+             _light->Switch(false);
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Fireplace.hpp b/arma_CWR/engine/Poseidon/World/Scene/Fireplace.hpp
+index 1ab139f..1303d6c 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Fireplace.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Fireplace.hpp
+@@ -14,6 +14,7 @@ class Fireplace: public VehicleWithAI
+ protected:
+ 	Ref<LightPointOnVehicle> _light;
+ 	Color _lightColor;
++	Ref<LightPoint> _combatFire; // research prototype: HDR flickering fire light
+ 	SmokeSource _smoke;
+ 	Ref<SoundObject> _sound;
+ 	bool _burning;
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index eb6c965..f5792d2 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -11,6 +11,9 @@
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
++#include <algorithm>
++#include <cmath>
+ #include <Random/randomGen.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+@@ -1101,12 +1104,37 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+ 
+                     for (int index = 0; index < lights.Size(); index++)
+                     {
+-                        colorI += lights[index]->Apply(VZero, VForward);
++                        if (!lights[index]->IsVisualOnly())
++                            colorI += lights[index]->Apply(VZero, VForward);
+                     }
+                 }
+             }
+             ColorVal accom = GEngine->GetAccomodateEye();
+             colorI = colorI * accom;
++            // Research prototype (combat lights): flashes, explosions and fires
++            // light the smoke around them. Irradiance is linear; the particle
++            // colour is display space, so add what a white surface lit by it
++            // shows (material brightness 1.6, as the remastered shaders).
++            const float smokeGain = CombatLights::Enabled() ? CombatLights::SmokeGain() : 0.0f;
++            if (smokeGain > 0.0f)
++            {
++                const LightList& lights = GScene->ActiveLights();
++                Color e(0, 0, 0, 0);
++                for (int index = 0; index < lights.Size(); index++)
++                {
++                    if (lights[index]->IsCombat())
++                        e += static_cast<const LightCombat*>(lights[index].GetRef())->IrradianceAt(pos.Position());
++                }
++                // Add in linear light: no light leaves the classic colour as it was.
++                const float k = 1.6f * smokeGain;
++                auto add = [k](float c, float el)
++                {
++                    const float lin = std::pow(std::max(c, 0.0f), 2.2f) + std::min(el * k, 32.0f);
++                    return std::pow(lin, 1.0f / 2.2f);
++                };
++                if (e.R() + e.G() + e.B() > 1e-5f)
++                    colorI = Color(add(colorI.R(), e.R()), add(colorI.G(), e.G()), add(colorI.B(), e.B()), colorI.A());
++            }
+             colorI.SetA(1);
+         }
+         else
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+index 59a312e..5d2c630 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+@@ -25,6 +25,7 @@ using Poseidon::Foundation::IsOutOfMemory;
+ using Poseidon::Foundation::MStorage;
+ using Poseidon::Foundation::Time;
+ #include <Poseidon/World/Scene/Scene.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+ #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+ #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
+ #include <Poseidon/Graphics/Core/Engine.hpp>
+@@ -333,12 +334,18 @@ static int CmpALight(const ActiveLightPointer* l0, const ActiveLightPointer* l1)
+ 
+ const LightList& Scene::SelectLights(Vector3Par pos, float radius, LightList& work)
+ {
++    // Research prototype (combat lights): by day only the combat lights count.
++    const bool day = MainLight()->NightEffect() < 0.01;
+     // select only the nearest lights to make lighting faster
+     int i;
+     for (i = 0; i < _aLights.Size(); i++)
+     {
+         // select only light which can add something to object lighting
+         Light* light = _aLights[i];
++        if ((day && !light->IsCombat()) || light->IsVisualOnly())
++        {
++            continue;
++        }
+         float dist2 = light->SquareDistance(pos);
+         if (Square(radius) > dist2 * Square(0.1))
+         {
+@@ -385,7 +392,7 @@ const LightList& Scene::SelectLights(Matrix4Par objPos, const Object* object, in
+         return _aLights;
+     }
+ 
+-    if (!sunDisabled && MainLight()->NightEffect() < 0.01)
++    if (!sunDisabled && MainLight()->NightEffect() < 0.01 && !_combatLightsLive)
+     {
+         return work;
+     }
+@@ -446,6 +453,9 @@ void Scene::SetActiveLights(const LightList& lights)
+ void Scene::SelectActiveLights(Object* dimmed)
+ {
+     _aLights.Resize(0);
++    // Research prototype: advance the combat lights (flash envelopes, flicker).
++    CombatLights::Tick();
++    _combatLightsLive = CombatLights::AnyActive();
+ 
+     // enumerate all light objects for drawing
+     Vector3Val camPos = GetCamera()->Position();
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
+index 12e4338..e3d4140 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
+@@ -181,6 +181,7 @@ class Scene
+     LightSun* _mainLight;
+ 
+     FindArray<Link<Light>> _lights;
++    bool _combatLightsLive = false; // research prototype: a combat light is lit
+     LightList _aLights;
+ 
+     Ref<Object> _collisionStar;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..ba300f7 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -746,6 +746,7 @@ class EngineGL33 : public Engine
+     bool _litOpaque = false;
+     // The rig's sun colour this frame (sun-shaft tint).
+     Color _lightRigSun = Color(1, 1, 1, 1);
++    float _lightRigExposure = 1.0f; // research prototype: combat in-scatter
+     // World position of the camera when the shadow depth pass ran: the map is
+     // sampled one frame later, from wherever the camera is then.
+     float _shadowCamPos[3] = {};
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..b804a71 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -330,6 +330,7 @@ void EngineGL33::UploadLitFrameConstants()
+     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
+     const rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
+     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
++    _lightRigExposure = rig.exposure;
+ 
+     SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
+     SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
+@@ -454,27 +455,32 @@ void EngineGL33::UploadLitLights(const LightList& lights, float nightEffect)
+     // camera-relative like vWorldRel.
+     const float* camPos = _frameState.cameraPos;
+     int n = 0;
+-    if (nightEffect > 0.0f)
+     {
+         for (int i = 0; i < lights.Size() && n < LitConst::MaxLights; i++)
+         {
+             Light* light = lights[i];
+-            if (!light)
++            if (!light || light->IsVisualOnly())
+                 continue;
+             LightDescription desc;
+             light->GetDescription(desc);
+             const bool isSpot = desc.type == LTSpotLight;
+             if (desc.type != LTPoint && !isSpot)
+                 continue;
++            // Research prototype (combat lights): an HDR light (hdrRange > 0)
++            // carries linear radiance and is lit by day too; it is flagged by
++            // the range in LightAmb.w. Classic local lights stay night-only.
++            const bool hdr = desc.hdrRange > 0.0f;
++            if (!hdr && nightEffect <= 0.0f)
++                continue;
+             SetSlot(LitConst::LightPos + n, desc.pos.X() - camPos[0], desc.pos.Y() - camPos[1],
+                     desc.pos.Z() - camPos[2], desc.startAtten);
+             Vector3 beam = desc.dir;
+             beam.Normalize();
+             SetSlot(LitConst::LightDir + n, beam.X(), beam.Y(), beam.Z(), 0.0f);
+-            const Color dif = desc.diffuse * nightEffect;
+-            const Color am = desc.ambient * nightEffect;
++            const Color dif = hdr ? desc.diffuse : desc.diffuse * nightEffect;
++            const Color am = hdr ? Color(HBlack) : desc.ambient * nightEffect;
+             SetSlot(LitConst::LightColor + n, dif.R(), dif.G(), dif.B(), isSpot ? 1.0f : 0.0f);
+-            SetSlot(LitConst::LightAmb + n, am.R(), am.G(), am.B(), 0.0f);
++            SetSlot(LitConst::LightAmb + n, am.R(), am.G(), am.B(), hdr ? desc.hdrRange : 0.0f);
+             n++;
+         }
+     }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e..ca57d69 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -463,6 +463,7 @@ vec3 localLights(vec3 n, vec3 kd, vec3 ka) {
+     int count = int(litLightCount.x);
+     for (int i = 0; i < 8; ++i) {
+         if (i >= count) break;
++        if (litLightAmb[i].w > 0.0) continue; // combat light (combatLights below)
+         vec3 toLight = litLightPos[i].xyz - vWorldRel;
+         float d2 = dot(toLight, toLight);
+         float start2 = litLightPos[i].w * litLightPos[i].w;
+@@ -484,6 +485,51 @@ vec3 localLights(vec3 n, vec3 kd, vec3 ka) {
+     return sum;
+ }
+ 
++// Research prototype (combat lights): HDR point lights from muzzle flashes,
++// explosions, fires and tracers, flagged by a range in litLightAmb.w. Linear
++// radiance at the core, falloff I / (1 + d^2 / r0^2) with a smooth window at
++// the range, so a flash keeps lighting what it can reach instead of ending at
++// a hard pool edge. Inside the core the light wraps around the surface (a
++// flash at the muzzle lights the shooter's arm and face, not only what faces
++// it). Glossy materials (vehicle paint, glass) get the flash as a highlight.
++vec3 g_combatSpec = vec3(0.0);
++vec3 combatLights(vec3 n, vec3 nLight, bool foliage, vec3 v) {
++    vec3 sum = vec3(0.0);
++    g_combatSpec = vec3(0.0);
++    int count = int(litLightCount.x);
++    float power = litMatSpecular.w;
++    for (int i = 0; i < 8; ++i) {
++        if (i >= count) break;
++        float range = litLightAmb[i].w;
++        if (range <= 0.0) continue;
++        vec3 toLight = litLightPos[i].xyz - vWorldRel;
++        float d2 = dot(toLight, toLight);
++        float r2 = range * range;
++        if (d2 >= r2) continue;
++        float core2 = max(litLightPos[i].w * litLightPos[i].w, 1e-4);
++        float x = d2 / r2;
++        float win = 1.0 - x * x;
++        win *= win;
++        float e = win / (1.0 + d2 / core2);
++        float invD = inversesqrt(max(d2, 1e-6));
++        vec3 l = toLight * invD;
++        // The source is a ball of radius r0, not a point: it still reaches a
++        // surface it sits low over (a fireball over flat ground), and from
++        // inside it the light wraps around (sine of the half angle as wrap).
++        float sa = min(litLightPos[i].w * invD, 1.0);
++        float nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0)
++                           : clamp((dot(n, l) + sa) / (1.0 + sa), 0.0, 1.0);
++        sum += litLightColor[i].rgb * (e * nl);
++        if (power > 0.0) {
++            vec3 h = normalize(l + v);
++            float p = max(power, 1.0);
++            g_combatSpec += litLightColor[i].rgb *
++                            (e * pow(max(dot(n, h), 0.0), p) * ((p + 8.0) / 28.0) * smoothstep(0.0, 0.15, nl));
++        }
++    }
++    return sum;
++}
++
+ // Sun highlight and sky reflection for glossy materials (specular power > 0).
+ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
+     float power = litMatSpecular.w;
+@@ -508,6 +554,10 @@ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
+ 
+ // Sun visibility of the last shaded fragment (water reuses it for its glint).
+ float g_sunVisibility = 1.0;
++// Research prototype (combat lights): share of the fragment's radiance that
++// comes from combat light. The classic night-eye desaturation is a model of
++// dim moonlit vision; a surface lit by a flash or a fire keeps its colour.
++float g_combatShare = 0.0;
+ 
+ // Lights a fragment of a VSTransform draw. `albedo` is the display-space surface
+ // colour (texture, tint and detail already applied); `terrain` marks surfaces
+@@ -564,12 +614,16 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     // pools (a linear sum would make them about twice as wide).
+     vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.5)));
+     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
++    vec3 combat = kd * combatLights(n, nLight, foliage, v);
+ 
+     vec3 a = toLinear(albedo);
+     float exposure = litZenith.w;
+-    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn) * exposure;
++    vec3 radiance = (a * (direct + ambient + moon + local + emissive + combat) + glossy(n, v, sunVisibility) * sunOn +
++                     litMatSpecular.rgb * g_combatSpec * litHorizon.w) * exposure;
+     float total = dot(radiance, kLuma);
+     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
++    g_combatShare = clamp(dot(a * combat * exposure + litMatSpecular.rgb * g_combatSpec * litHorizon.w * exposure, kLuma) /
++                          max(total, 1e-5), 0.0, 1.0);
+     if (foliage) ambientShare *= 0.5;
+ 
+     if (litFlags.z > 0.5) {
+@@ -604,6 +658,7 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     if (nightEye) {
+         float luminance = clamp(dot(r0.rgb, rgbEyeCoef.rgb), 0.0, 1.0);
+         float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
++        nightBlend = max(nightBlend, sqrt(g_combatShare));
+         r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
+     }
+     r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..59d3816 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -30,6 +30,7 @@
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+ 
+ #include <algorithm>
+ #include <cmath>
+@@ -215,8 +216,53 @@ uniform sampler2D shaftTex;
+ uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+ uniform vec4 shaftColor; // rgb sun tint
+ uniform vec4 debugView;  // x: 1 = show occlusion
++// Research prototype (combat lights): single scattering of the combat lights in
++// the air, integrated analytically along each pixel's view ray up to the depth
++// buffer, so the glow around a flash stops at whatever stands in front of it.
++uniform sampler2D depthTex;
++uniform vec4 projInfo;      // x = _33, y = _43, z = 1/_11, w = 1/_22
++uniform vec4 depthMap;      // ndcZ = depth * x + y
++uniform vec4 worldRect;     // xy origin, zw size of the 3D viewport in uv
++uniform vec4 scatterParams; // x light count, y sigma * exposure (1/m), z sky distance (m)
++uniform vec4 scatterPos[8]; // xyz view space (m), w core radius r0
++uniform vec4 scatterRgb[8]; // rgb linear radiance at the core, w range (m)
++uniform vec4 scatterMed[8]; // x radius of the lit medium around the light (m)
+ out vec4 fragColor;
+ 
++vec3 combatScatter() {
++    int count = int(scatterParams.x);
++    if (count <= 0) return vec3(0.0);
++    float dz = texture(depthTex, vUV).r;
++    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    vec3 dir = vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0);
++    float invLen = inversesqrt(dot(dir, dir));
++    dir *= invLen;
++    float T = scatterParams.z;
++    if (dz < 0.999999) T = (projInfo.y / ((dz * depthMap.x + depthMap.y) - projInfo.x)) / invLen;
++    vec3 sum = vec3(0.0);
++    for (int i = 0; i < 8; ++i) {
++        if (i >= count) break;
++        vec3 L = scatterPos[i].xyz;
++        float r0 = scatterPos[i].w;
++        float range = scatterRgb[i].w;
++        float b = dot(L, dir);
++        float h2 = max(dot(L, L) - b * b, 0.0);
++        // Only the smoke and dust around the light glows: integrate through a
++        // ball of that radius, faded toward its rim.
++        float rm = min(scatterMed[i].x, range);
++        float rm2 = rm * rm;
++        if (h2 >= rm2) continue;
++        float chord = sqrt(rm2 - h2);
++        float H = sqrt(h2 + r0 * r0);
++        float t0 = max(b - chord, 0.0);
++        float t1 = min(T, b + chord);
++        if (t1 <= t0) continue;
++        float rim = 1.0 - h2 / rm2;
++        sum += scatterRgb[i].rgb * (r0 * r0 * (atan((t1 - b) / H) - atan((t0 - b) / H)) / H * rim * rim);
++    }
++    return sum * scatterParams.y;
++}
++
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
+@@ -230,6 +276,7 @@ void main() {
+     // glow's own energy rolled off. Identity where there is no glow, never
+     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+     vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + texture(shaftTex, vUV).rgb * shaftColor.rgb * compParams.z;
++    glow += combatScatter();
+     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
+     vec3 col = pow(lin, vec3(1.0 / 2.2));
+     // Dither only what the composite changed: elsewhere the frame passes
+@@ -673,6 +720,47 @@ void EngineGL33::EndWorldScene()
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    {
++        // Research prototype (combat lights): in-scatter of the strongest combat
++        // lights. Effective scattering 0.004 / m (smoky battlefield air, phase
++        // function folded in) times the combatScatter knob.
++        Poseidon::CombatLights::ScatterLight sl[8];
++        int ns = 0;
++        Camera* cam = GScene ? GScene->GetCamera() : nullptr;
++        const float gain = Poseidon::CombatLights::Enabled() ? Poseidon::CombatLights::ScatterGain() : 0.0f;
++        if (worldDepth && cam && gain > 0.0f)
++            ns = Poseidon::CombatLights::Gather(sl, 8, cam->Position());
++        u1i(p.progComposite, "depthTex", 5);
++        bindTex(5, p.depthTex);
++        u4f(p.progComposite, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(p.progComposite, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        u4f(p.progComposite, "worldRect", rectX, rectY, rectW, rectH);
++        float posv[32] = {}, rgbv[32] = {}, medv[32] = {};
++        const Matrix4 view = cam ? cam->GetInvTransform() : Matrix4(MIdentity);
++        for (int i = 0; i < ns; ++i)
++        {
++            const Vector3 v = view.FastTransform(Vector3(sl[i].pos[0], sl[i].pos[1], sl[i].pos[2]));
++            posv[i * 4 + 0] = v.X();
++            posv[i * 4 + 1] = v.Y();
++            posv[i * 4 + 2] = v.Z();
++            posv[i * 4 + 3] = sl[i].core;
++            rgbv[i * 4 + 0] = sl[i].rgb[0];
++            rgbv[i * 4 + 1] = sl[i].rgb[1];
++            rgbv[i * 4 + 2] = sl[i].rgb[2];
++            rgbv[i * 4 + 3] = sl[i].range;
++            medv[i * 4 + 0] = sl[i].medium;
++        }
++        u4f(p.progComposite, "scatterParams", static_cast<float>(ns), 0.004f * gain * _lightRigExposure, 300.0f, 0.0f);
++        const GLint lm = glGetUniformLocation(p.progComposite, "scatterMed");
++        if (lm >= 0)
++            glUniform4fv(lm, 8, medv);
++        const GLint lp = glGetUniformLocation(p.progComposite, "scatterPos");
++        if (lp >= 0)
++            glUniform4fv(lp, 8, posv);
++        const GLint lr = glGetUniformLocation(p.progComposite, "scatterRgb");
++        if (lr >= 0)
++            glUniform4fv(lr, 8, rgbv);
++    }
+     drawTo(_ssaaFbo, w, h);
+     GpuMark(Poseidon::gpu::Mark::CompositeEnd);
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..adf811d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1261,6 +1261,8 @@ void EngineGL33::UploadVSLights(const LightList& lights, const TLMaterial& mat,
+             bool isSpot = desc.type == LTSpotLight;
+             if (desc.type != LTPoint && !isSpot)
+                 continue; // point + spot lights; directional (sun) handled separately
++            if (desc.hdrRange > 0.0f)
++                continue; // research prototype: remastered-only combat light
+ 
+             float* p = s_vsShadow + (VSConst::SlotLightPos + n) * 4;
+             p[0] = desc.pos.X() - camPos[0];

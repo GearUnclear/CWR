@@ -1,0 +1,139 @@
+Randomness seeded to: 244062843
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PoseidonTests.exe is a Catch2 v3.5.2 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+WRP: WrpReader loads large OPRW with objects
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Asset\Formats\test_wrp.cpp(37)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Asset\Formats\test_wrp.cpp(47): SKIPPED:
+explicitly with message:
+  Game world abel.wrp not available
+
+-------------------------------------------------------------------------------
+STRINGTABLE_MAP.utf8.csv ships both legend keys with English fallbacks
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_map_legend_localized.cpp(78)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_map_legend_localized.cpp(89): FAILED:
+  REQUIRE_FALSE( src.empty() )
+with expansion:
+  !true
+with message:
+  csvPath.string() := "D:/Arma_CWA_worktrees/look-fix-seam/arma_CWR\packages\
+  Remaster\BIN\STRINGTABLE_MAP.utf8.csv"
+
+-------------------------------------------------------------------------------
+STRINGTABLE_EQUIPMENT.utf8.csv ships M16 keys for all 8 languages
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(107)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(113): FAILED:
+  REQUIRE_FALSE( src.empty() )
+with expansion:
+  !true
+with message:
+  csvPath.string() := "D:/Arma_CWA_worktrees/look-fix-seam/arma_CWR\packages\
+  Remaster\BIN\STRINGTABLE_EQUIPMENT.utf8.csv"
+
+-------------------------------------------------------------------------------
+equipment.utf8.html lives loose and references STR_EQ_M16 tokens
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(161)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(167): FAILED:
+  REQUIRE_FALSE( src.empty() )
+with expansion:
+  !true
+with message:
+  htmlPath.string() := "D:/Arma_CWA_worktrees/look-fix-seam/arma_CWR\packages\
+  Remaster\dtaExt\equip\equipment.utf8.html"
+
+-------------------------------------------------------------------------------
+equipment.utf8.html line endings are clean CRLF (no doubled CR)
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(177)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(190): FAILED:
+  REQUIRE( f.is_open() )
+with expansion:
+  false
+
+-------------------------------------------------------------------------------
+equipment.utf8.html preserves every EQ_ anchor and weapon image
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(205)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\Map\test_equipment_localization.cpp(214): FAILED:
+  REQUIRE_FALSE( src.empty() )
+with expansion:
+  !true
+
+-------------------------------------------------------------------------------
+MP version rejection message follows Czech language selection
+  Game
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\test_mp_version_message_localization.cpp(60)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\test_mp_version_message_localization.cpp(25): FAILED:
+  REQUIRE( versionMessageId >= 0 )
+with expansion:
+  -1 >= 0
+
+-------------------------------------------------------------------------------
+MP version rejection message follows Czech language selection
+  Demo
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\test_mp_version_message_localization.cpp(64)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\UI\test_mp_version_message_localization.cpp(25): FAILED:
+  REQUIRE( versionMessageId >= 0 )
+with expansion:
+  -1 >= 0
+
+-------------------------------------------------------------------------------
+PBO+Inspect: InspectModel on all P3D in AddOns PBOs
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Tools\test_pbo_inspect_scan.cpp(78)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Tools\test_pbo_inspect_scan.cpp(83): SKIPPED:
+explicitly with message:
+  Game AddOns not available
+
+-------------------------------------------------------------------------------
+PBO+Inspect: InspectFont on all FXY in DTA PBOs
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Tools\test_pbo_inspect_scan.cpp(152)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Tools\test_pbo_inspect_scan.cpp(157): SKIPPED:
+explicitly with message:
+  Game DTA not available
+
+-------------------------------------------------------------------------------
+PBO+Inspect: InspectModel on DTA Data3D P3D files
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Tools\test_pbo_inspect_scan.cpp(232)
+...............................................................................
+
+D:\Arma_CWA_worktrees\look-fix-seam\arma_CWR\tests\unit\engine\Poseidon\Tools\test_pbo_inspect_scan.cpp(237): SKIPPED:
+explicitly with message:
+  Game DTA not available
+
+================================================================================
+test cases:    3383 |    3373 passed | 6 failed | 4 skipped
+assertions: 4073569 | 4073562 passed | 7 failed
+
+exit=7

@@ -1,0 +1,53 @@
+## track
+materials
+## files_verified
+true
+## artefacts_seen
+All 16 BEST/FAIL images, prototype.patch, override_v1..v9, timings.md, NOTES.md, classification_log_r6.txt and every work/ image the claim cites exist. Run folders r1, r1diag and r3..r9 have tri/*/game_stdout.log; r2 is empty, as the notes say. make_best.py builds each BEST strip from the run it names, and the GPU ms printed on BEST_town_night_rain (3.16 / 4.34 / 6.84) match the UDCAP shot lines in r9. Images opened: BEST_town_night_rain, BEST_town_night_wet, BEST_crop_town_night_wet, BEST_lowsun_fp_wet, BEST_abel_rain, BEST_crop_abel_rain_puddles, BEST_lowsun_fp, BEST_crop_lowsun_ground, BEST_crop_noon_jeep, BEST_crop_lowsun_m113, BEST_crop_sinai_hmmwv, BEST_noon_fields, BEST_overcast_heavy_rain, BEST_sinai_lowsun_fp, FAIL_v8_night_white_sheets and work/r7/lowsun_jeep_crop. I also made my own 1.6x to 2.5x zooms of the abel_rain puddles, the town_night_rain wet square, the lowsun wet M113 and the Eden bush.
+## prototype_actually_loaded
+Yes. In r7, r8 and r9, game_stdout.log shows the override dir set to override_v7/v8/v9, every psRemasterCommon, Main and psPostSsr file loaded at the expected byte sizes, a full recompile, "shader cache saved (144 entries)", and no compile or link errors. The game ran from D:\Arma_CWA_worktrees\gfx-materials (dist/gfx-materials-rwdi, data RemasterUD-materials). MATRESEARCH lines show the classifier working (for example mutt_sklog glass is class 3, xicht face class 6) and confirm the vbfix bug in the log: "draw sim car ... tlAble 1 buffer 0" until vbfix logs "vertex buffer for a late-loaded shape", after which the car draws with "buffer 1". Pixel diffs: the noise floor between repeat shots is 0.15 to 0.28 mean abs diff on dry static views and about 4.5 on night and rain views (particles, fire). Prototype vs Remastered: town_night wet 17.3 and town_night_rain 13.5 (well above noise). lowsun_fp wet 12.4, dry 4.1. sinai dry 2.8. noon_fields dry 1.16 (real but tiny, 1.9% of pixels over 8). tank optics about 1.3 (noise level).
+## missing_or_false_claims
+[
+ "The vbfix variant cites work/r7/lowsun_jeep_crop.png and BEST_crop_lowsun_m113.png as hulls going from 'flat and slightly ghostly' to 'solid and shadowed'. In both crops the Remastered and +vbfix panels are indistinguishable. Box means: lowsun jeep 74.4/72.0/70.8 vs 74.7/72.1/70.4, M113 99.9/93.2/87.8 vs 99.8/93.2/87.5. The whole-frame lowsun_fp vbfix diff is 0.25 against a 0.15 noise floor. vbfix is visible only on the sunlit noon jeep (70.8 to 49.7), which the logs and pixels do confirm.",
+ "'Puddles reflect the M113 and the soldier' (abel_rain / lowsun wet): the puddles show a dark mass consistent with the M113 hull, but no soldier reflection is visible at 2.5x zoom. At Abel the SSR puddles read more as dark wet stains than as mirrors.",
+ "'Wet hull streaks look slightly corrugated' understates it. In BEST_crop_lowsun_m113 and BEST_lowsun_fp_wet, strong regular vertical striping covers the whole M113 side, and the olive hull turns grey.",
+ "'Wet paint picks up grey sky' understates it. The noon jeep side box goes from R>B dry (49.7, 49.9, 46.5) to blue above red wet (60.4, 62.8, 64.4), which is a blue cast.",
+ "Not reported: a pure-black sliver artefact at the base of the flower bush in the v7 Eden rain frame (runs/r7/overcast_heavy_rain__materials.png), absent in Remastered.",
+ "Not reported: puddle outlines are hard-edged and often straight-sided triangles that follow the terrain grid (the large puddle in town_night wet and rain). SSR puddle edges are pixel-stepped, with isolated dark fragments (abel_rain).",
+ "Not reported: thin white specular dashes on the distant wet ground behind the M113 at low sun (lowsun_fp wet). These are likely to shimmer in motion, which still frames cannot show.",
+ "'Dry night looks essentially like current Remastered': r9 town_night dry materials vs Remastered is 8.4 mean abs diff against a 4.7 repeat-shot floor, with mean RGB about +5. The change is small but real."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+4
+## taste_violations
+[
+ "Blue cast on wet paint: the noon jeep side box turns blue-leaning when wet (B 64.4 > R 60.4), the rejected blue-haze direction.",
+ "Wet low-sun hulls go colder than Classic: M113 saturation drops from 0.121 to 0.076, and R-B shrinks from about 12 to 7 (Classic 11.8). An evening wet hull reads more neutral and grey than Classic.",
+ "vbfix makes the noon jeep side about 30% darker than Classic and current Remastered (70.8 to 49.7). This is correct behaviour for the per-pixel rig, but the owner may read it as an 'only darker' or crushed hull until the rig is retuned.",
+ "Wet M113 run-down streaks add a strong vertical corrugation that changes how the hull model reads. It is runtime-derived, but it comes close to inventing surface detail the art does not have.",
+ "The glossy water film and puddles sit on the grass-textured town square, so the lawn looks like wet asphalt. The vegetation gate passes this ground."
+]
+## cost_ok
+true
+## score_0_to_10
+6
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\materials\BEST_town_night_rain.png
+## one_line
+Wet weather (lamp streaks across a rainy square, SSR puddles, low-sun wet glare) is a clear, player-visible step toward the RTX vision, and vbfix is a real, log-proven bug. Dry material reconstruction is almost invisible, and the wet path has blue-cast, corrugation and hard-edged puddle artefacts.
+## critique
+Provenance is solid. Every cited file exists. The logs show the v7, v8 and v9 overrides loading and compiling cleanly on the gfx-materials build. MATRESEARCH lines prove both the classifier and the vbfix bug: createVehicle props draw with buffer 0, meaning CPU-lit Classic colour inside a Remastered frame, until vbfix gives them a vertex buffer. That finding alone is worth landing. It probably affects every scripted vehicle in Guerrilla Mode, and it invalidates hull judgements other tracks made on the baseline. One overstatement: the low-sun crops cited for 'ghostly to solid' show no visible vbfix change (box deltas under 0.5). The effect is real only on sunlit faces, as in the noon jeep (70.8 to 49.7).
+
+Look. The wet night (BEST_town_night_rain, BEST_crop_town_night_wet) is the one result a player would call a different game. Each lamp and the fire throw a separate glossy streak toward the camera, the road shines, and puddles mirror the houses. It reads as wet in a way Classic and current Remastered (a dry lawn under rain) never do. BEST_lowsun_fp_wet's glare sheet toward a low sun is also a strong, believable wet-tarmac look.
+
+The weaknesses are real, though. Puddles have hard, often triangular outlines that follow the terrain grid, and the SSR edges are pixel-stepped with stray dark fragments. At Abel the SSR puddles read as dark stains rather than mirrors. The water film sits on a grass-textured square. The v7 Eden frame has a black sliver under a bush. The wet M113 gets heavy vertical corrugation and loses its olive. Wet paint shifts blue at noon (B > R) and colder than Classic at low sun, which breaks two owner taste rules. Distant wet ground shows thin white specular dashes that will likely shimmer in motion, and no motion test was done. The night itself is so over-exposed (mean RGB about 120) that it reads as dusk. That belongs to another track, but it means the night result has not been judged in a real night.
+
+Dry materials are close to nothing at full frame: noon_fields differs on 1.9% of pixels, and tank optics is unchanged. What remains is a grainy albedo-emboss on near ground (a modest gain up close, likely to sparkle in motion) and HMMWV windows that turn milky-grey rather than show a convincing sky reflection. There is no bounce light, colour bleeding or sky occlusion, so the RTX-vision movement is limited to the 'water and shine' and 'night' slices, about 4/10.
+
+Cost is fine for an RTX 3060 at 1080p. The pooled paired median is +0.37 ms (IQR -0.27 to +1.75), and SSR adds +0.15 to +0.41 ms in rain, measured honestly on a noisy shared GPU. Scaling 1.38 MP to 2.07 MP still leaves it well inside the budget.
+
+Worth building: yes for vbfix (a must) and for the wetness, SSR and local-light-specular system. It needs soft or noise-broken puddle borders not tied to the terrain triangles, temporally resolved SSR, a per-texture terrain class table instead of colour ratios, a check that wet paint never goes bluer or colder than dry, softer hull streaks, and a motion capture to check shimmer. The dry PBR classifier is low value on its own; keep it only as infrastructure for wetness.

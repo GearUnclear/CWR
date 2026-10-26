@@ -1,0 +1,1 @@
+[{"text": "    // two passes, the luma sharpen, the canopy's sun-visibility pass, the air\n    // pass's march, blur, mean and apply, and the reflections' tag readout,\n    // shares, trace, rough blur and composite\n"}, "ours"]

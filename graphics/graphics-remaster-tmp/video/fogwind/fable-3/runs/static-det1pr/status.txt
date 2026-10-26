@@ -1,0 +1,3 @@
+﻿start 05:10:57 test=tests/rendering/captures/video/look_probe_fog1_static.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\fable-3\shaders\det1pr junction=RemasterUD-fog-F3 game=D:\Arma_CWA_worktrees\graphics-remaster\arma_CWR\dist\graphics-remaster-rwdi
+run exit=0 frames=135 minutes=2.2
+done 05:13:41

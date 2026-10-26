@@ -1,0 +1,2 @@
+frames 1890
+{"part1_before_band": {"rms": 0.57, "spikes": 89490}, "part2_after_band": {"rms": 0.433, "spikes": 46430}, "part1_right_half_before": {"rms": 0.621, "spikes": 61954}, "part2_right_half_after": {"rms": 0.42, "spikes": 24113}, "part3_top_before": {"rms": 0.775, "spikes": 187827}, "part3_bottom_after": {"rms": 0.229, "spikes": 26806}}

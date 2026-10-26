@@ -1,0 +1,91 @@
+## track
+atmosphere
+## files_verified
+true
+## missing_or_false_claims
+[
+ "Water reflects the atmosphere: not visible in the captures. In coastline_sunset the sea differs from Remastered by under 3 levels (far-left sea 92/78/77 vs 93/79/77, glint 194/141/118 vs 198/143/118). The sea stays mauve-brown under a new gold and blue sky, so the horizon line does not match.",
+ "Clouds come from the original texture: mostly true, but at noon the cloud mask erases most of the cirrus streaks Remastered shows. Sky high-pass detail drops from 1.05 to 0.86 (about 18 percent), and noon_fields__atmoPS reads as a near-flat gradient with a few wisps.",
+ "Aerial perspective on all world draws: it does run, but it makes almost no visible difference to terrain. The bottom 40 percent of the frame differs from Remastered by 0.00 to 1.15 levels in every view, and the far hills at noon are unchanged. In practice this is a sky and horizon-band feature.",
+ "No darkening, by construction: roughly true, but at sunrise the upper frame's luma drops about 9 percent against Remastered (about 146 to 133), and the hue moves from warm pink to neutral lavender.",
+ "No other false claims. Every cited image, the patch, NOTES.md, glsl_final, run1 to run5, the tests and the offline panoramas exist. The scratch worktree D:\\Arma_CWA_worktrees\\gfx-atmosphere is detached at 3c53141 with exactly the 10 changed files the patch lists. The run5 log shows the gfx-atmosphere-rwdi build loading, all 144 shader programs compiling with no errors, every atmo knob returning OK, and 'ATMO lut ... built in 119.5 ms' then 8 to 12 ms on each rebuild. Timing medians match the claims."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+4
+## taste_violations
+[
+ "Olive/khaki horizon band away from the sun in coastline_sunset: on the left the blue-to-gold gradient passes through a muddy yellow-green, measured 134/135/117 with green at or above red over several rows. The saturation 1.3 boost makes it worse.",
+ "Cooler frame at low sun with the physical hue (atmoPS): the sunrise_ridge upper frame goes from warm pink 173/139/133 to lavender-grey 136/132/140, and forest_edge_golden goes from lavender to blue. firefight_dusk swaps Classic's salmon for violet-grey. Hulls are untouched, but the frame reads cooler than Classic, which is against the 'warm evenings' rule. atmoM (hue 0.5) mostly avoids this.",
+ "Noon sky at saturation 1.3 comes close to a sky colour grade: blue rises from 213 to 250 and the result is a flat clip-art cyan with less cloud texture. That is borderline under 'no colour grading'.",
+ "Far ridges take a slightly bluer aerial tint at sunrise. This is mild and not a frame-wide wash."
+]
+## cost_ok
+true
+## score_0_to_10
+6
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\atmosphere\BEST_lowsun_fp.png
+## one_line
+This is a real, working physically based sky that clearly improves low-sun and twilight skies (aureole, golden horizon, orange civil-twilight band) at near-zero GPU cost. It is sky-only: ground, hulls and water do not change. It also has an olive horizon band, loses some noon cirrus and cools the frame with the physical hue, so ship it with hue 0.5 and saturation of at most 1.15.
+## critique
+**Verification.** Everything the explorer cites exists:
+- the run folders, the BEST, ALT4, VARIANTS, REJECTED and OFFLINE panels, prototype.patch and the GLSL dumps;
+- the detached scratch worktree, with the same 10 modified files as the patch.
+
+The run5 game_stdout.log confirms the prototype build ran on the RemasterUD-atmosphere data junction:
+- the shaders compiled cleanly;
+- all knobs returned OK;
+- the sky-view table logged a 119.5 ms first build and 8 to 12 ms rebuilds.
+
+My own PIL diffs show the change is real. The top 40 percent of the frame moves 12 to 23 levels against Remastered on every daylight view. The bottom 40 percent moves 0.00 to 1.15 levels, and town_night is identical (0.01 mean). The offline panoramas look like a textbook Bruneton/Hillaire sky, so the model itself is right.
+
+**Look.** This is the first track result where the sky looks like a modern renderer's:
+- **lowsun_fp:** a proper Mie aureole and a graded blue sky with sunlit cirrus.
+- **firefight_dusk:** a convincing orange civil-twilight band under a violet sky, replacing Classic's uniform salmon.
+- **coastline_sunset:** a golden horizon glow replaces the flat pink horizon polygon.
+
+A player would notice these at dawn and dusk. They would not notice much at noon or under overcast.
+
+**Problems I found myself:**
+- **Olive band:** away from the sun in coastline_sunset, the blue-to-gold transition is muddy olive (about 134/135/117).
+- **Noon clouds:** at noon the cloud mask removes most of the texture's cirrus, so the sky becomes a flatter, over-saturated cyan.
+- **Water:** the claimed water reflection is not visible. The sea is unchanged and its mauve horizon now clashes with the gold sky.
+- **Aerial perspective:** the fog colour change barely reaches the terrain.
+
+**Against the RTX-on vision.** This delivers one pillar, a physically based sky, well at low sun. It contributes nothing yet to:
+- light transport into the scene (atmoLight was rightly rejected for blue ground);
+- reflections;
+- volumetrics;
+- the crushed hulls and grey low-sun ground the owner complained about.
+
+The scene below the horizon looks exactly like current Remastered. Hence an RTX vision score around 4.
+
+**Taste.** The physical hue cools the frame at sunrise, golden hour and dusk compared with Classic's pinks. The half-classic hue variant (ALT4) keeps the warm mood and looks safer.
+
+**Cost.** GPU cost is negligible by construction (a few LUT taps per fragment), and the noisy alternation data does not contradict that. The CPU table rebuild (8 to 12 ms every few seconds) must move to a GPU pass, but that is routine.
+
+**Verdict.** Worth building properly as the sky and air foundation. The sky-view table is also the right input for later sky-light, fog and water work, but only after these fixes:
+- remove the olive transition;
+- keep the noon cirrus;
+- make the water actually reflect it;
+- default to hue 0.5 and saturation of 1.15 or less.
+
+On its own it is not a "different game" moment, because the lit world under the new sky is unchanged.
+## artefacts_seen
+- Olive/khaki horizon band on the anti-sun side in coastline_sunset atmoPS (rows about 220 to 275, x 0 to 300).
+- Noon cirrus largely erased by the cloud mask (noon_fields atmoPS against Remastered).
+- A sea-sky mismatch at the coastline horizon: gold sky over an unchanged mauve sea.
+- No NaN, noise, banding, halos or swimming in the stills. The twilight gradients in firefight_dusk are clean at 8 bits.
+- Temporal behaviour could not be judged: these are stills, and the 8 to 12 ms table rebuild every 0.02 degrees of sun movement would be a periodic hitch in play.
+## prototype_actually_loaded
+Yes. run5/tri/atmo_run5_abel/game_stdout.log shows the run from D:\Arma_CWA_worktrees\gfx-atmosphere\arma_CWR\packages\RemasterUD-atmosphere:
+- 'GL33: shader cache miss/invalid, compiling all programs', then 'shader cache saved (144 entries)' with no compile errors;
+- ATMO skymesh vertex dumps;
+- UDCAP mode lines with knobs=[atmosphere=1, atmoFog=1, atmoHue=1, atmoSat=1.3] and res=[OK, OK, OK, OK];
+- 'ATMO lut sunElev 5.13 deg ... built in 119.5 ms', with later rebuilds at 7.9 to 11.6 ms.
+
+The pixel diffs confirm the AFTER images differ from BEFORE: sky regions change by 12 to 23 levels on average, and town_night is unchanged as claimed.

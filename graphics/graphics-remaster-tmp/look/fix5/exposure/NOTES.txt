@@ -1,0 +1,130 @@
+Round 5 EXPOSURE fixer: views with the sun in or near the frame went dark in round 4
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-fire (base tree 12117cf9 = fec1075 + fix5/base.patch).
+Build build/look-fix-fire-rwdi, game dist/look-fix-fire-rwdi, junction RemasterUD-r5-exposure.
+Nothing committed, no branch. Patch: fix.patch (8 files, +201 / -5), made with
+git diff --cached --binary <base tree>; it applies with git apply --cached --check on a fresh index
+of the base tree. The capture tests look_r5exp* and look_r5expp1* are scratch, not in the patch.
+
+Status: fixed. woods_pine2_evening is back to round 3's look (frame mean 35 -> 51, round 3 54);
+sinai_lowsun_fp, lowsun_fp, dawn_valley and coastline_sunset are at round 3's exposure; pine_rays
+and sunrise_ridge are 0.1 to 0.2 EV under round 3 (see open items). The sun still burns white and
+the shafts still read. Night, noon and overcast exposure did not move.
+
+IMAGES (each row: vanilla | landed | before (director/final 1080) | after (shots_1), 480 px a
+panel, labelled with ev, frame mean and lower-half mean; then a 2x crop of the problem)
+- a_woods_pine2_evening.png: the soldier and jeep, 2x crop. Before they sink into the shade; after
+  they read as in round 3.
+- b_lowsun_fp_sinai_lowsun_fp.png: both low-sun views, 2x crop of the ground in front.
+- c_pine_rays_dawn_sunrise_coast.png: pine_rays (2x crop of the shafts on the crowns),
+  dawn_valley, sunrise_ridge, coastline_sunset.
+- d_checks_night_noon_overcast.png: town_night, noon_fields, overcast_heavy (no change).
+Shots: shots_1/ (the fix, sim times as director/final). Probes: shots_p0/ (base build with the
+readout), shots_p1/ (cap probe). All four sheets opened and checked by eye.
+
+CAUSE
+The meter read the sun's burn. Round 4 raised the sky's roll-off cap toward the sun from
+kSkyRolloffCap 2.4 to kSkySunCap 10 (camSkyRolloff(lin, d)) so the glow round the sun burns white.
+The meter pass (psPostMeter) reads the frame's stored light, so every sky tap within a few degrees
+of the sun now read up to several times brighter (the cap is still 3.0 at 4 degrees, 2.7 at 6).
+Three guards in TargetExposureLog2 read the sky's bright taps: the highlight percentile
+(kHighlightLimit 1.3), the sky's bright end (SkyTopPeak, kSkyTopLimit 2.2) and the sky by a low sun
+(SunRingPeak, kSunRingLimit 2.0). They pull the exposure until those taps sit under their limits,
+so with the burn in their taps they closed the whole frame down. The guards were tuned on the
+plain cap (PhotoCamera.hpp says so: "the guards' limits on the sky sit under the cap"). It also
+explains why woods_pine2_evening fell even with the sun just outside the frame: the ring and the
+sky's bright end look at the glow at the frame's corner.
+
+PROBE 0 (shots_p0): I added the guards' readings to the camera readout (skytop, ring, ringw and
+free = the exposure the meter's mean alone asks for) and replayed TargetExposureLog2 step by step.
+Base build, woods_pine2_evening: free 3.38 -> after the highlight guard 2.44 -> after the sky-top
+guard 1.44 -> after the ring guard 0.24 (logged ev 0.27, frame mean 35.3: the round 4 shot exactly).
+The mean was unchanged (-7.73); the guards took 3.1 EV off. Same pattern in the other views:
+lowsun_fp free 1.21 -> ev -0.72, sinai_lowsun_fp 2.01 -> -0.27, dawn_valley 0.81 -> -0.42,
+pine_rays 2.32 -> 0.67. noon_fields, town_night, overcast_heavy: no guard engaged.
+
+PROBE 1 (shots_p1, shader override ov_cap24/psRemasterCommon.glsl: kCamSkySunCap 10 -> 2.4, the
+round 3 cap; the render changes too, so only a probe). ev with the cap at 2.4, then also with
+fogSun 0.4 (the beam gain back at round 3's 14):
+  woods_pine2_evening  1.43 / 1.68    lowsun_fp        -0.15 / -0.02
+  sunrise_ridge        2.24 / 2.40    coastline_sunset  0.33 / 0.41
+  dawn_valley          0.03 / 0.28    pine_rays         0.69 / 0.84
+  sinai_lowsun_fp      0.57 / 0.63
+So the near-sun cap is the main cause in every view, and the brighter shafts (kFogBeamGain 14 ->
+35) add a further 0.1 to 0.25 EV. (p1 ran with its own sim-time order; compare within p1 only.)
+
+THE CHANGE (fix at the meter, the render keeps its burn)
+The meter reads the sky at its plain roll-off. In the meter pass every sky tap (depth at the far
+plane) goes through meterSkyLight before its luminance: its peak is taken back through the
+roll-off toward the sun along that tap's own view ray (k - r ln(1 - (o - k) / r), r the cap toward
+the sun minus the knee) and rolled off again with the plain cap. Far from the sun and under the
+knee it is the identity; light at or past the cap toward the sun (the disc at kSunDiscLevel 12,
+the air's glow over it) reads as the plain cap. So the mean, the blocks' brightest taps and their
+brightest sky taps see the sky round the sun exactly as round 3's meter did, while the frame keeps
+the white disc and the burnt glow.
+- EngineGL33_PostShaders.cpp: s_psPostMeterHead gets the uniforms meterSky (knee, cap, sun cap,
+  glow radius), meterSun (unit view-space direction to the sun, w on), meterProj (1/_11, 1/_22),
+  meterRect (the 3D viewport); s_psPostMeterMain gets meterSkyLight and calls it on sky taps.
+- EngineGL33_Camera.cpp PostCameraMeter: sets those uniforms from PhotoCamera.hpp's own constants
+  (no copy of the numbers in GLSL) and the sun from the camera (InverseScaled, as PostFrameSun).
+- PhotoCamera.hpp/.cpp: SkyMeterLight(storedPeak, cosToSun), the C++ mirror for the tests.
+- FeatureGates.hpp/.cpp and CameraReadoutNow: the readout now ends with
+  "skytop= ring= ringw= free=" (appended after skip=, earlier fields unchanged), so a capture log
+  shows which guard holds a frame down. Kept: it is how the cause was found and costs nothing.
+- Not touched: the guards and their limits, the meter's cuts and weights, the roll-off, the sun
+  cap, the disc, kFogBeamGain, the fog, the AI link.
+
+CONSTANTS (name: old -> new)
+- None changed. New: SkyMeterLight (function), GLSL uniforms meterSky, meterSun, meterProj,
+  meterRect. kSkyRolloffKnee 1.2, kSkyRolloffCap 2.4, kSkySunCap 10, kSkySunGlowRad 0.021,
+  kHighlightLimit 1.3, kSkyTopLimit 2.2, kSunRingLimit 2.0 all unchanged.
+
+RESULTS (1920x1080, the director's views and sim times; ev, then frame mean / lower-half mean)
+  view                 round 3          round 4 (before)   after
+  woods_pine2_evening  1.82  54 / 52    0.27  35 / 33      1.61  51 / 49
+  sinai_lowsun_fp      0.53  85 / 53    -0.29 71 / 42      0.55  85 / 54
+  lowsun_fp            -0.02 96 / 64    -0.71 85 / 54      -0.12 97 / 64
+  dawn_valley          0.03  114 / 81   -0.29 107 / 75     0.04  114 / 81
+  coastline_sunset     0.29  116 / 88   0.22  114 / 86     0.30  116 / 88
+  pine_rays            1.25  83 / 47    0.63  80 / 39      1.08  87 / 45
+  sunrise_ridge        2.42  106 / 51   2.17  101 / 47     2.30  103 / 49
+Checks (round 4 -> after): town_night ev -2.00 -> -2.03, mean 44 -> 44; noon_fields -0.01 -> -0.01,
+133 -> 133; overcast_heavy 1.22 -> 1.22, 140 -> 140. The guard replay shows no guard acts on them.
+Woods guard replay after: free 3.39 -> highlight 2.70 -> sky top 2.06 -> ring 1.72 (ev 1.61).
+The sun: peak (255,255,253) at the same pixel in lowsun_fp, sinai_lowsun_fp, coastline_sunset,
+dawn_valley before and after; clipped share unchanged (0.011 to 0.019%); sunrise_ridge's sun now
+clips (255,255,255, was 253,251,246). pine_rays shafts read on the crowns (2x crop), a little
+brighter than before. No banding, seam or halo added (the meter is not drawn).
+
+TESTS
+- New test_photo_camera.cpp "PhotoCamera: look fix exposure: the meter reads the sky round the sun
+  at the plain roll-off": SkyMeterLight(SkyRolloffToward(m, c), c) equals SkyRolloff(m) within
+  0.02 EV at 0.3 to 90 degrees from the sun, never past the plain cap; identity under the knee and
+  away from the sun; the disc reads as the plain cap; and a closed-loop test (draw, meter, ring
+  guard, 200 steps) where reading the dome's own light settles at least 0.3 EV under the plain
+  roll-off (the cause) and reading through SkyMeterLight settles on it within 0.05 EV.
+- New test_remaster_lighting.cpp "The camera's meter reads the sky round the sun at the plain
+  roll-off (look fix exposure)": the meter shader defines meterSkyLight, calls it on sky taps
+  before the luminance, and declares the four uniforms.
+- PoseidonTests.exe with the round 4 gate tags ([remaster],[FeatureSwitches],[FeatureGates],
+  [PostStages],[fog],[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],
+  [StateCacheAudit],[PhotoCamera],[TerrainHorizon],[StateOwnership],[atmosphere]), run from D:\ on
+  my build: all pass, 331 cases, 958,427 assertions (glslang compiles every program, the meter
+  included). Full suite not run.
+- clang-format: clean on all 8 files (2 lines of my new test case reformatted after the unit run,
+  whitespace only).
+
+AI SIGHT AND FOG LINK
+Intact. VolumetricFog.cpp, Target.cpp and WorldSetup.cpp are not in the patch; SimulateFogSight and
+ComputeFogMedium are untouched. The change is in the camera's meter only.
+
+OPEN ITEMS
+- pine_rays (1.08 against 1.25), sunrise_ridge (2.30 against 2.42), woods (1.61 against 1.82) and
+  lowsun_fp (-0.12 against -0.02) stay 0.1 to 0.2 EV under round 3. Probe 1 puts that on the
+  brighter shafts (kFogBeamGain 35): their light near the sun is real air in front of the crowns and
+  the sky, and the ring and highlight guards read it. The frame means still match round 3
+  (pine_rays is brighter overall, 87 against 83). If the owner wants round 3 parity there, the next
+  step is to let the ring guard read the sky taps only (it is named for the sky by the sun but reads
+  every tap), checked on coastline_sunset's glitter. Not done here.
+- The 960x640 cuts (abel_lighting / sinai_lobo_lighting) were not reshot; the same meter runs there.
+- Only my own games ran; run-captures stopped them, and stop-owned-games on my junction found none.

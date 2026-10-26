@@ -1,0 +1,25 @@
+{
+ "src": "pc_rt.raw",
+ "w": 1920,
+ "h": 1080,
+ "frames": 300,
+ "mode": "0",
+ "half": "0",
+ "wall_ms": 38675.5,
+ "fps": 7.73,
+ "dwall_ms": {
+  "min": 64.25,
+  "med": 136.34,
+  "max": 167.24
+ },
+ "dpan_ms": {
+  "min": 64.0,
+  "med": 137.0,
+  "max": 167.0
+ },
+ "zero_sim_frames": 0,
+ "shots": 0,
+ "pan_first": -0.363,
+ "pan_last": 38.332,
+ "mkv": "pc_rt.mkv"
+}

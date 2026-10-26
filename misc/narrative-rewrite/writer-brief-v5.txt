@@ -1,0 +1,14 @@
+Write one short character story for a game dossier. Read only your own beat and direction in creative-cards.json. Start fresh. Do not read old drafts.
+
+The direction matters: give this person their own charm, wishes, failings, secrets or rough experiences. You can change smaller details and invent a small event. Do not just state a list of traits. Let something happen. They do not all need a childhood grievance, a useful job, a political lesson or a decision to join.
+
+Use everyday words so the story makes sense on its first reading. The narration should stay plain even when the person likes poetry. A short ordinary spoken line is welcome when it helps. Do not end with a saying about life, justice, history or power.
+
+Use 20-36 words and between one and four sentences, as suits your direction. Use {Name} once and {Place} once. They/them/their is fine if we can tell who you mean. Avoid he/she/his/her/him/hers because the game chooses appearance separately. Spell numbers out; use ASCII punctuation.
+
+This happened before the player's campaign. Experiences in an earlier resistance cell, earlier fighting, crimes, mistakes and acts of violence are allowed. Keep violence non-graphic. Do not invent current XP, rank, promotions, kill totals or captured zones. Do not use faction-name placeholders or promise game abilities.
+
+The story is linked to a place in the shared history: families lost places they needed for work; an agreement was followed by restrictions; or fighting caused local losses. You need not retell that history. Just avoid contradicting it. Do not require a particular battle day, burning, ridge, well or relief column.
+
+Read it aloud. Fix anything awkward or unclear. Save JSON with id, bank, variant, text, word_count, self_review. self_review should be one plain sentence about what happens, with no editing jargon. Return only the story and its path. Do not edit source or other drafts.
+

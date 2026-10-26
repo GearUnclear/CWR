@@ -1,0 +1,1510 @@
+[
+  {
+    "view": "sunrise_ridge",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 18.1,
+    "gpu_frame_min": 17.04,
+    "gpu_world_median": 17.95,
+    "gpu_world_min": 16.89,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 26.15,
+    "cpu_frame_min": 26.12,
+    "draws_median": 13076,
+    "objects_median": 8897,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sunrise_ridge",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 17.41,
+    "gpu_frame_min": 17.34,
+    "gpu_world_median": 16.26,
+    "gpu_world_min": 16.25,
+    "gpu_shadow_median": 0.09,
+    "gpu_shadow_min": 0.08,
+    "gpu_post_median": 1.01,
+    "gpu_post_min": 0.94,
+    "gpu_ao_median": 0.58,
+    "gpu_ao_min": 0.56,
+    "gpu_bloom_median": 0.06,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": 0.27,
+    "gpu_shafts_min": 0.27,
+    "gpu_composite_median": 0.07,
+    "gpu_composite_min": 0.05,
+    "cpu_frame_median": 26.57,
+    "cpu_frame_min": 26.41,
+    "draws_median": 12910,
+    "objects_median": 8897,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "forest_edge_golden",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.54,
+    "gpu_frame_min": 5.17,
+    "gpu_world_median": 5.35,
+    "gpu_world_min": 4.91,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 8.69,
+    "cpu_frame_min": 8.65,
+    "draws_median": 2501,
+    "objects_median": 1459,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1980.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "forest_edge_golden",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.18,
+    "gpu_frame_min": 5.58,
+    "gpu_world_median": 5.4,
+    "gpu_world_min": 4.84,
+    "gpu_shadow_median": 0.31,
+    "gpu_shadow_min": 0.27,
+    "gpu_post_median": 0.58,
+    "gpu_post_min": 0.55,
+    "gpu_ao_median": 0.42,
+    "gpu_ao_min": 0.41,
+    "gpu_bloom_median": 0.11,
+    "gpu_bloom_min": 0.08,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.06,
+    "gpu_composite_min": 0.05,
+    "cpu_frame_median": 8.71,
+    "cpu_frame_min": 8.38,
+    "draws_median": 2141,
+    "objects_median": 1459,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1680.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "town_night",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.56,
+    "gpu_frame_min": 6.48,
+    "gpu_world_median": 6.32,
+    "gpu_world_min": 6.24,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 8.36,
+    "cpu_frame_min": 8.15,
+    "draws_median": 1241,
+    "objects_median": 1070,
+    "settle": "OK:242,OK:205,OK:158",
+    "gpu_mhz_median": 1545.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "town_night",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.53,
+    "gpu_frame_min": 5.42,
+    "gpu_world_median": 5.64,
+    "gpu_world_min": 4.6,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": 0.63,
+    "gpu_post_min": 0.62,
+    "gpu_ao_median": 0.52,
+    "gpu_ao_min": 0.5,
+    "gpu_bloom_median": 0.08,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.05,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 8.15,
+    "cpu_frame_min": 7.33,
+    "draws_median": 1228,
+    "objects_median": 1051,
+    "settle": "OK:36,OK:44,OK:30",
+    "gpu_mhz_median": 1860.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "coastline_sunset",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 2.14,
+    "gpu_frame_min": 2.12,
+    "gpu_world_median": 1.83,
+    "gpu_world_min": 1.81,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 3.6,
+    "cpu_frame_min": 3.58,
+    "draws_median": 178,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 705.0,
+    "pstates": [
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "coastline_sunset",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 3.81,
+    "gpu_frame_min": 1.88,
+    "gpu_world_median": 1.6,
+    "gpu_world_min": 0.71,
+    "gpu_shadow_median": 0.0,
+    "gpu_shadow_min": 0.0,
+    "gpu_post_median": 1.95,
+    "gpu_post_min": 1.03,
+    "gpu_ao_median": 0.62,
+    "gpu_ao_min": 0.45,
+    "gpu_bloom_median": 0.21,
+    "gpu_bloom_min": 0.08,
+    "gpu_shafts_median": 0.9,
+    "gpu_shafts_min": 0.4,
+    "gpu_composite_median": 0.23,
+    "gpu_composite_min": 0.11,
+    "cpu_frame_median": 4.1,
+    "cpu_frame_min": 3.47,
+    "draws_median": 178,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 480.0,
+    "pstates": [
+      "P3",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "woods_pine2_evening",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.13,
+    "gpu_frame_min": 5.52,
+    "gpu_world_median": 5.98,
+    "gpu_world_min": 5.38,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 9.17,
+    "cpu_frame_min": 8.75,
+    "draws_median": 3248,
+    "objects_median": 1811,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2302.5,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "woods_pine2_evening",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.47,
+    "gpu_frame_min": 6.45,
+    "gpu_world_median": 5.21,
+    "gpu_world_min": 5.18,
+    "gpu_shadow_median": 0.35,
+    "gpu_shadow_min": 0.35,
+    "gpu_post_median": 1.14,
+    "gpu_post_min": 1.1,
+    "gpu_ao_median": 0.5,
+    "gpu_ao_min": 0.46,
+    "gpu_bloom_median": 0.07,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": 0.5,
+    "gpu_shafts_min": 0.49,
+    "gpu_composite_median": 0.08,
+    "gpu_composite_min": 0.07,
+    "cpu_frame_median": 9.25,
+    "cpu_frame_min": 9.01,
+    "draws_median": 2840,
+    "objects_median": 1811,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1830.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "lowsun_fp",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 4.83,
+    "gpu_frame_min": 4.29,
+    "gpu_world_median": 4.63,
+    "gpu_world_min": 4.08,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 7.89,
+    "cpu_frame_min": 7.55,
+    "draws_median": 2092,
+    "objects_median": 1316,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1980.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "lowsun_fp",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.59,
+    "gpu_frame_min": 4.6,
+    "gpu_world_median": 4.34,
+    "gpu_world_min": 3.53,
+    "gpu_shadow_median": 0.09,
+    "gpu_shadow_min": 0.08,
+    "gpu_post_median": 1.08,
+    "gpu_post_min": 0.92,
+    "gpu_ao_median": 0.44,
+    "gpu_ao_min": 0.38,
+    "gpu_bloom_median": 0.08,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": 0.47,
+    "gpu_shafts_min": 0.4,
+    "gpu_composite_median": 0.09,
+    "gpu_composite_min": 0.07,
+    "cpu_frame_median": 8.3,
+    "cpu_frame_min": 7.46,
+    "draws_median": 1891,
+    "objects_median": 1316,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1500.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "road_flat_drive_moonless",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.22,
+    "gpu_frame_min": 4.88,
+    "gpu_world_median": 4.98,
+    "gpu_world_min": 4.62,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 8.13,
+    "cpu_frame_min": 7.75,
+    "draws_median": 1805,
+    "objects_median": 914,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1635.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "road_flat_drive_moonless",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.27,
+    "gpu_frame_min": 4.52,
+    "gpu_world_median": 4.46,
+    "gpu_world_min": 3.84,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": 0.59,
+    "gpu_post_min": 0.52,
+    "gpu_ao_median": 0.46,
+    "gpu_ao_min": 0.41,
+    "gpu_bloom_median": 0.08,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.05,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 7.69,
+    "cpu_frame_min": 6.94,
+    "draws_median": 1806,
+    "objects_median": 914,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1950.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "ffh",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.44,
+    "gpu_frame_min": 5.29,
+    "gpu_world_median": 5.24,
+    "gpu_world_min": 5.12,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 7.79,
+    "cpu_frame_min": 7.7,
+    "draws_median": 813,
+    "objects_median": 699,
+    "settle": "UNSETTLED:300,UNSETTLED:300,UNSETTLED:300",
+    "gpu_mhz_median": 1665.0,
+    "pstates": [
+      "P0",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "ffh",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.06,
+    "gpu_frame_min": 5.66,
+    "gpu_world_median": 5.22,
+    "gpu_world_min": 4.81,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": 0.69,
+    "gpu_post_min": 0.66,
+    "gpu_ao_median": 0.56,
+    "gpu_ao_min": 0.52,
+    "gpu_bloom_median": 0.08,
+    "gpu_bloom_min": 0.08,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.06,
+    "gpu_composite_min": 0.05,
+    "cpu_frame_median": 7.73,
+    "cpu_frame_min": 7.68,
+    "draws_median": 796,
+    "objects_median": 679,
+    "settle": "UNSETTLED:300,UNSETTLED:300,UNSETTLED:300",
+    "gpu_mhz_median": 1905.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "bay_offshore",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.05,
+    "gpu_frame_min": 5.78,
+    "gpu_world_median": 5.93,
+    "gpu_world_min": 5.66,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 10.82,
+    "cpu_frame_min": 10.21,
+    "draws_median": 4560,
+    "objects_median": 2961,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2640.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "bay_offshore",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 7.73,
+    "gpu_frame_min": 7.72,
+    "gpu_world_median": 7.11,
+    "gpu_world_min": 7.1,
+    "gpu_shadow_median": 0.03,
+    "gpu_shadow_min": 0.03,
+    "gpu_post_median": 0.49,
+    "gpu_post_min": 0.49,
+    "gpu_ao_median": 0.4,
+    "gpu_ao_min": 0.39,
+    "gpu_bloom_median": 0.06,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.04,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 12.44,
+    "cpu_frame_min": 11.99,
+    "draws_median": 4557,
+    "objects_median": 2961,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2775.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "town_night_rain",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.01,
+    "gpu_frame_min": 4.23,
+    "gpu_world_median": 4.72,
+    "gpu_world_min": 4.0,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 6.88,
+    "cpu_frame_min": 6.59,
+    "draws_median": 824,
+    "objects_median": 557,
+    "settle": "OK:93,OK:34,OK:56",
+    "gpu_mhz_median": 1275.0,
+    "pstates": [
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "town_night_rain",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.23,
+    "gpu_frame_min": 5.13,
+    "gpu_world_median": 4.32,
+    "gpu_world_min": 4.1,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": 0.79,
+    "gpu_post_min": 0.7,
+    "gpu_ao_median": 0.61,
+    "gpu_ao_min": 0.56,
+    "gpu_bloom_median": 0.11,
+    "gpu_bloom_min": 0.09,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.07,
+    "gpu_composite_min": 0.06,
+    "cpu_frame_median": 7.1,
+    "cpu_frame_min": 6.22,
+    "draws_median": 809,
+    "objects_median": 539,
+    "settle": "OK:243,OK:122,OK:79",
+    "gpu_mhz_median": 1575.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "pinewood_morn",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.03,
+    "gpu_frame_min": 5.3,
+    "gpu_world_median": 5.81,
+    "gpu_world_min": 5.1,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 9.31,
+    "cpu_frame_min": 8.73,
+    "draws_median": 3162,
+    "objects_median": 1678,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2085.0,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "pinewood_morn",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.84,
+    "gpu_frame_min": 5.46,
+    "gpu_world_median": 4.67,
+    "gpu_world_min": 4.34,
+    "gpu_shadow_median": 0.57,
+    "gpu_shadow_min": 0.56,
+    "gpu_post_median": 0.95,
+    "gpu_post_min": 0.92,
+    "gpu_ao_median": 0.43,
+    "gpu_ao_min": 0.43,
+    "gpu_bloom_median": 0.08,
+    "gpu_bloom_min": 0.08,
+    "gpu_shafts_median": 0.35,
+    "gpu_shafts_min": 0.34,
+    "gpu_composite_median": 0.08,
+    "gpu_composite_min": 0.08,
+    "cpu_frame_median": 8.58,
+    "cpu_frame_min": 8.38,
+    "draws_median": 2844,
+    "objects_median": 1678,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1852.5,
+    "pstates": [
+      "P0",
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "valley_0515",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 20.3,
+    "gpu_frame_min": 19.92,
+    "gpu_world_median": 20.17,
+    "gpu_world_min": 19.78,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 25.49,
+    "cpu_frame_min": 25.16,
+    "draws_median": 11551,
+    "objects_median": 7966,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "valley_0515",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 23.3,
+    "gpu_frame_min": 22.47,
+    "gpu_world_median": 21.99,
+    "gpu_world_min": 21.25,
+    "gpu_shadow_median": 0.04,
+    "gpu_shadow_min": 0.04,
+    "gpu_post_median": 1.16,
+    "gpu_post_min": 1.1,
+    "gpu_ao_median": 0.72,
+    "gpu_ao_min": 0.66,
+    "gpu_bloom_median": 0.07,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": 0.31,
+    "gpu_shafts_min": 0.31,
+    "gpu_composite_median": 0.06,
+    "gpu_composite_min": 0.06,
+    "cpu_frame_median": 31.02,
+    "cpu_frame_min": 30.3,
+    "draws_median": 11404,
+    "objects_median": 7966,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "hill_1730",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 2.44,
+    "gpu_frame_min": 1.55,
+    "gpu_world_median": 2.18,
+    "gpu_world_min": 1.44,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 3.53,
+    "cpu_frame_min": 3.45,
+    "draws_median": 1770,
+    "objects_median": 934,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 780.0,
+    "pstates": [
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "hill_1730",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 1.99,
+    "gpu_frame_min": 1.58,
+    "gpu_world_median": 1.49,
+    "gpu_world_min": 1.13,
+    "gpu_shadow_median": 0.05,
+    "gpu_shadow_min": 0.04,
+    "gpu_post_median": 0.38,
+    "gpu_post_min": 0.34,
+    "gpu_ao_median": 0.22,
+    "gpu_ao_min": 0.22,
+    "gpu_bloom_median": 0.1,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.06,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 3.51,
+    "cpu_frame_min": 3.4,
+    "draws_median": 1663,
+    "objects_median": 934,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1815.0,
+    "pstates": [
+      "P0",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "coast_oc_up",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 3.58,
+    "gpu_frame_min": 0.73,
+    "gpu_world_median": 2.33,
+    "gpu_world_min": 0.57,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 4.32,
+    "cpu_frame_min": 2.57,
+    "draws_median": 186,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1215.0,
+    "pstates": [
+      "P0",
+      "P3",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "coast_oc_up",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 3.87,
+    "gpu_frame_min": 1.73,
+    "gpu_world_median": 1.64,
+    "gpu_world_min": 0.61,
+    "gpu_shadow_median": 0.0,
+    "gpu_shadow_min": 0.0,
+    "gpu_post_median": 1.9,
+    "gpu_post_min": 0.93,
+    "gpu_ao_median": 0.47,
+    "gpu_ao_min": 0.36,
+    "gpu_bloom_median": 0.19,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": 0.69,
+    "gpu_shafts_min": 0.42,
+    "gpu_composite_median": 0.38,
+    "gpu_composite_min": 0.07,
+    "cpu_frame_median": 3.61,
+    "cpu_frame_min": 2.92,
+    "draws_median": 186,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 990.0,
+    "pstates": [
+      "P0",
+      "P3",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sea_noon",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 3.79,
+    "gpu_frame_min": 3.09,
+    "gpu_world_median": 3.15,
+    "gpu_world_min": 2.82,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 5.29,
+    "cpu_frame_min": 4.18,
+    "draws_median": 180,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 570.0,
+    "pstates": [
+      "P3",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sea_noon",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 4.56,
+    "gpu_frame_min": 1.2,
+    "gpu_world_median": 3.01,
+    "gpu_world_min": 0.59,
+    "gpu_shadow_median": 0.0,
+    "gpu_shadow_min": 0.0,
+    "gpu_post_median": 1.31,
+    "gpu_post_min": 0.5,
+    "gpu_ao_median": 0.8,
+    "gpu_ao_min": 0.4,
+    "gpu_bloom_median": 0.3,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.2,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 5.41,
+    "cpu_frame_min": 2.6,
+    "draws_median": 180,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 765.0,
+    "pstates": [
+      "P0",
+      "P3",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "noon_fields",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 8.42,
+    "gpu_frame_min": 8.4,
+    "gpu_world_median": 8.27,
+    "gpu_world_min": 8.26,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 13.72,
+    "cpu_frame_min": 13.62,
+    "draws_median": 6768,
+    "objects_median": 4508,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2580.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "noon_fields",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 9.79,
+    "gpu_frame_min": 9.06,
+    "gpu_world_median": 9.16,
+    "gpu_world_min": 8.46,
+    "gpu_shadow_median": 0.08,
+    "gpu_shadow_min": 0.08,
+    "gpu_post_median": 0.49,
+    "gpu_post_min": 0.45,
+    "gpu_ao_median": 0.38,
+    "gpu_ao_min": 0.35,
+    "gpu_bloom_median": 0.07,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.04,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 14.79,
+    "cpu_frame_min": 14.03,
+    "draws_median": 6399,
+    "objects_median": 4508,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2490.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "overcast_broken",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 10.89,
+    "gpu_frame_min": 10.42,
+    "gpu_world_median": 10.75,
+    "gpu_world_min": 10.28,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 17.49,
+    "cpu_frame_min": 16.97,
+    "draws_median": 8243,
+    "objects_median": 5692,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "overcast_broken",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 11.85,
+    "gpu_frame_min": 11.77,
+    "gpu_world_median": 11.1,
+    "gpu_world_min": 11.0,
+    "gpu_shadow_median": 0.18,
+    "gpu_shadow_min": 0.18,
+    "gpu_post_median": 0.65,
+    "gpu_post_min": 0.63,
+    "gpu_ao_median": 0.55,
+    "gpu_ao_min": 0.52,
+    "gpu_bloom_median": 0.06,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.04,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 18.51,
+    "cpu_frame_min": 18.06,
+    "draws_median": 8066,
+    "objects_median": 5692,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "broken_high",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 17.27,
+    "gpu_frame_min": 16.86,
+    "gpu_world_median": 17.17,
+    "gpu_world_min": 16.75,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 22.94,
+    "cpu_frame_min": 22.63,
+    "draws_median": 10787,
+    "objects_median": 7549,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "broken_high",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 24.31,
+    "gpu_frame_min": 24.12,
+    "gpu_world_median": 23.42,
+    "gpu_world_min": 23.34,
+    "gpu_shadow_median": 0.03,
+    "gpu_shadow_min": 0.03,
+    "gpu_post_median": 0.79,
+    "gpu_post_min": 0.69,
+    "gpu_ao_median": 0.68,
+    "gpu_ao_min": 0.58,
+    "gpu_bloom_median": 0.07,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.04,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 27.35,
+    "cpu_frame_min": 27.27,
+    "draws_median": 10784,
+    "objects_median": 7549,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sinai_lowsun_fp",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 4.52,
+    "gpu_frame_min": 4.33,
+    "gpu_world_median": 4.13,
+    "gpu_world_min": 3.84,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 9.85,
+    "cpu_frame_min": 8.07,
+    "draws_median": 789,
+    "objects_median": 371,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 540.0,
+    "pstates": [
+      "P3",
+      "P8"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sinai_lowsun_fp",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.06,
+    "gpu_frame_min": 4.24,
+    "gpu_world_median": 3.75,
+    "gpu_world_min": 2.88,
+    "gpu_shadow_median": 0.12,
+    "gpu_shadow_min": 0.12,
+    "gpu_post_median": 1.21,
+    "gpu_post_min": 1.14,
+    "gpu_ao_median": 0.59,
+    "gpu_ao_min": 0.58,
+    "gpu_bloom_median": 0.07,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": 0.4,
+    "gpu_shafts_min": 0.4,
+    "gpu_composite_median": 0.15,
+    "gpu_composite_min": 0.08,
+    "cpu_frame_median": 7.46,
+    "cpu_frame_min": 7.29,
+    "draws_median": 764,
+    "objects_median": 371,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 817.5,
+    "pstates": [
+      "P0",
+      "P3",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sinai_desert_noon",
+    "mode": "classic",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 8.81,
+    "gpu_frame_min": 7.97,
+    "gpu_world_median": 8.43,
+    "gpu_world_min": 7.73,
+    "gpu_shadow_median": null,
+    "gpu_shadow_min": null,
+    "gpu_post_median": null,
+    "gpu_post_min": null,
+    "gpu_ao_median": null,
+    "gpu_ao_min": null,
+    "gpu_bloom_median": null,
+    "gpu_bloom_min": null,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": null,
+    "gpu_composite_min": null,
+    "cpu_frame_median": 13.07,
+    "cpu_frame_min": 12.58,
+    "draws_median": 2689,
+    "objects_median": 1363,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1260.0,
+    "pstates": [
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sinai_desert_noon",
+    "mode": "remastered",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 9.7,
+    "gpu_frame_min": 9.31,
+    "gpu_world_median": 8.36,
+    "gpu_world_min": 8.04,
+    "gpu_shadow_median": 0.07,
+    "gpu_shadow_min": 0.07,
+    "gpu_post_median": 1.08,
+    "gpu_post_min": 1.0,
+    "gpu_ao_median": 0.88,
+    "gpu_ao_min": 0.81,
+    "gpu_bloom_median": 0.12,
+    "gpu_bloom_min": 0.12,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.07,
+    "gpu_composite_min": 0.07,
+    "cpu_frame_median": 14.42,
+    "cpu_frame_min": 13.76,
+    "draws_median": 2672,
+    "objects_median": 1363,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1245.0,
+    "pstates": [
+      "P3",
+      "P5"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  }
+]

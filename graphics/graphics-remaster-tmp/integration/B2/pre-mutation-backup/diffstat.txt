@@ -1,0 +1,9 @@
+﻿ .../Poseidon/Graphics/Remaster/FeatureSwitches.cpp |  14 +-
+ .../engine/Poseidon/Graphics/Remaster/LightRig.cpp |  74 ++++-
+ .../engine/Poseidon/Graphics/Remaster/LightRig.hpp |  48 +++-
+ .../engine/PoseidonGL33/EngineGL33_Lighting.cpp    |   8 +-
+ .../PoseidonGL33/EngineGL33_LightingShaders.cpp    |  46 ++-
+ .../Poseidon/Graphics/test_feature_switches.cpp    |  19 +-
+ .../engine/Poseidon/Graphics/test_post_stages.cpp  |   9 +-
+ .../Poseidon/Graphics/test_remaster_lighting.cpp   | 307 +++++++++++++++++++++
+ 8 files changed, 495 insertions(+), 30 deletions(-)

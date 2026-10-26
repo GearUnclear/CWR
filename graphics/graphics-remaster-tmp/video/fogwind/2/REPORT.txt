@@ -1,0 +1,165 @@
+AGENT 2 REPORT: temporally decorrelated per-cell jitter (fogwind swarm, "wind in the dawn fog")
+=================================================================================================
+2026-10-23, agent 2 of 8. Folder: graphics-remaster/tmp/video/fogwind/2/
+No worktree, no build, no commit, no edit outside this folder. Junctions made: video-work/arma_CWR/packages/
+RemasterUD-fog-2 and RemasterUD-fog-2b (both -> D:/Arma_CWA/tmp/remaster-shadow-67; -2b unused).
+
+VERDICT
+-------
+Candidate Act25 (shaders/Act25/psFogInject.glsl, a live psFogInject override; 0 shader compile errors in
+every run) meets the bar on the stepped valley probes, static and moving, and in agent 1's real-time 60 fps
+recordings (no wind, no flicker; in-place boil ~1/5 of d91's, ~1.3x the multi-tap floor; look restored):
+  - one jittered tap per cell as before, but the per-cell offset is a WHITE integer hash of the cell
+    (and of (cell, slice) in depth) added to the frame's golden/plastic offsets. A white hash has no
+    translation symmetry, so no pattern can travel (the wind came from IGN being a plane wave on the
+    cell lattice: agent 1's analysis).
+  - the history is read at the UNJITTERED cell / slice centre (agent 6's finding: the read at the
+    jittered point made the stored offset a leaky sum of the jitter, gain 8.3; it was the amplifier of
+    the original pump and of d91's blotches).
+  - the history read goes through a FIXED tetrahedral 4-tap blur (+-0.25 cell / slice per axis, per-axis
+    kernel [0.125, 0.75, 0.125]). That is exactly the mean of the blur the shipped jittered read applied
+    at random every frame (agent 7's numbers), so the shipped look (mist density in the valley, haze over
+    the far hills) comes back, without any noise. Every other centre-read candidate (t4w, S2, c8, q4, my
+    Ac) is 1.3 to 2.5 code values clearer in the valley than the shipped look; Act25 is within +0.3..+0.8.
+No medium change, no C++ change, no uniform change: AI sight (ComputeFogMedium / VolumetricFog.cpp) is
+untouched and still matches what is drawn, because only how the renderer samples and filters the volume
+changes.
+
+The approach as briefed (temporal decorrelation alone) is NOT enough:
+  A  = white per-cell rotation of the golden sequence, history read as shipped: no travel, but the same
+       boil amplitude as d91 (valley mid 0.508, 10x the floor). Fails (c).
+  B  = hash(cell, slice, frame), white in time: no travel, boils ~1.8x MORE than A (the EMA of white
+       noise keeps 0.25 sigma, mostly near 1 Hz). Fails (c). Ruled out.
+  D  = blue-ish phases: no gain over the white hash once the history is read at the centre.
+What fixes it is the white per-cell rotation PLUS the centre read; the fixed blur then restores the look.
+
+NUMBERS (agent 1's kit fogwind/1/kit/fogmotion.py on mkv, frames 15-119; bandmetric on the PNGs)
+------------------------------------------------------------------------------------------------
+Probes: look_probe_mist3_static (camera held at the frame 328 pose, clock k=270..389, 120 shots) and
+look_probe_mist3_moving (the clip's real pan), trailer build look-director-rwdi, stepped head recipe.
+References: original (frame-wide jitter) = mist/3/runs/*-base, d91 per-cell = mist/3/runs/*-percell,
+frozen jitter floor = mist/3/runs/static-frozen, vanilla = v2/vanilla/valley_mist frames 285-390 (agent 1).
+
+FLICKER       bandmetric (PNG)   lowd2 valley   band(kit, mkv)
+  static      original 0.468 / d91 0.056 / A 0.060 (7 spikes) / B 0.114 (189 spikes) / Ac 0.028 / Dc 0.029 /
+              Act25 0.028 (0 spikes); frozen 0.024.  lowd2 valley: original 1.618, d91 0.136, A 0.166,
+              Ac 0.037, Act25 0.033, frozen 0.025.
+  moving      original 0.517 / d91 0.063 / Ac 0.042 / Act25 0.039 (0 spikes).  lowd2 valley: original
+              1.621, d91 0.117, Ac 0.066, Act25 0.070, vanilla 0.057.  band(mkv): d91 0.086, Ac 0.076,
+              Act25 0.077, vanilla 0.102.
+
+MOTION        WIND bay/valley/farhill/haze (code values of travelling pattern), max rho_off (bar < 0.08)
+  static      d91 0.055/0.167/0.107/0.056, 0.40 at [-13,0] px/frame (the wind)
+              A   0.007/0.023/0.008/0.003, 0.045        B 0.014/0.074/0.024/0.012, 0.080
+              Ac  0.002/0.005/0.001/0.001, 0.039        Act25 0.003/0.002/0.001/0.001, 0.033
+              frozen 0.002/0.001/0.001/0.001
+  moving      d91 0.047/0.123/0.078/0.035, 0.29 at [-13,0]
+              Ac  0.007/0.005/0.003/0.004, 0.036        Act25 0.005/0.004/0.002/0.003, 0.031
+              vanilla 0.017/0.007/0.002/0.007, 0.048
+  my own k-omega travel coherence (tools/xtk.py, static, 6-48 px band, 1 = one plane wave travelling):
+              valley d91 0.119 at vel (-0.49, -0.08) px/frame energy-weighted; A 0.009, B 0.016, Ac 0.007,
+              Dc 0.008, base 0.021, frozen 0.003.
+
+GRAIN / BOIL  (static; mid = cell-scale change per frame, boil/slow = in-place cell-scale change, raw and
+              6-frame smoothed, kit --static)
+  valley mid: d91 0.494, A 0.508, B 0.924, Ac 0.117, Dc 0.117, Act25 0.073, frozen 0.050
+  valley boil / slow: d91 0.416 / 0.173, Ac 0.125 / 0.080, Act25 0.073 / 0.049, frozen 0.079 / 0.067
+  my xtk valley std6 / std24 / slow9: d91 0.47/0.30/0.13, A 0.45/0.30/0.165, B 0.81/0.58/0.305,
+              Ac 0.142/0.076/0.071, Dc 0.139/0.075/0.069, frozen 0.10/0.059/0.080
+  moving valley mid: d91 0.463, Ac 0.160, Act25 0.132.
+
+LOOK (time means of the probes, region mean RGB, tools/lookdiff.py; differences against the original
+      frame-wide build = the shipped/approved look)
+  static   valley: d91 +2.4/+2.7/+2.8, Ac -1.5/-2.1/-2.5, Act25 +0.54/+0.67/+0.76
+           farhill: d91 +1.5..1.9, Ac -0.5..-0.9, Act25 +0.4..0.7; bay, haze, sky, sun area within 0.4
+           whole frame |d| mean / p99: d91 0.50 / 4.02, Ac 0.37 / 3.17, Act25 0.26 / 1.55
+  moving   valley: d91 +2.1/+2.4/+2.4, Ac -1.6/-2.1/-2.4, Act25 +0.32/+0.48/+0.54
+           whole frame |d| mean / p99: d91 0.41 / 3.42, Ac 0.30 / 3.05, Act25 0.16 / 1.11
+
+LOOKED AT BY EYE (all in this folder)
+  xt_static_cmp1.png        static x-t slices (frame minus time mean x20): original = horizontal stripes
+                            (sheet pump), d91 = slanted streaks (travel = the wind), A = mottle with no
+                            slant, frozen = flat.
+  strip_static1.png / strip_static2.png   3 consecutive static residual frames x12, 2x crop of the
+                            valley and bay: d91 and A = 15-30 px blotches changing every frame; Ac about as
+                            flat as frozen. strip_static2_raw.png: the frames themselves look alike.
+  xt_moving/xt_resid_zoom.png, xt_moving2/xt_resid_zoom.png   kit x-t RESID x16 under the pan:
+                            original stripes, d91 hatching, Ac and Act25 flat except the pan's object edges
+                            and a short dash every ~27 frames at the far shore that every variant shows
+                            (agent 3/6: same frames 25/51/79/108 in q4, S2, d91; a pan-phase pulse at a
+                            strong edge, below vanilla's own change there).
+  xt_moving/resid_f50.png, xt_moving2/resid_f40.png   2x camera-compensated frame differences: original
+                            whole-sheet flips, d91 cell blotches, Ac / Act25 flat (encode salt and edges).
+  xt_moving2/crop_f60.png, crop2x.mp4   the plain 2x crops in motion: Act25 looks like the original, d91 a
+                            hair mistier.
+  curtains_check.png / curtains_check2.png   mean frames, high-pass x10: Ac shows faint static vertical
+                            cell-column streaks in the low sky by the sun (the volume without the shipped
+                            blur is a sharper box filter); Act25 does not.
+  look_static_diffs.png, look_static2_diffs.png   mean-frame difference maps x16 (d91, Ac, Act25 vs original).
+
+COST
+----
+Ac: the same 8 history fetches per fragment as d91 plus ~30 integer hash operations: negligible.
+Act25: 4 history fetches per slice instead of 1 (32 instead of 8 per fragment, 921k cells at 1080p).
+Not measurable on the contended machine (air section 2.9-3.4 ms for all variants with 4 games running;
+static-A ran alone at 0.74 ms air). Agent 3 measured 4 MEDIUM taps (the expensive part) at +0.1..+0.4 ms;
+3 extra history fetches per slice are far cheaper than medium taps. Should be timed on an idle GPU before
+landing.
+
+REAL TIME 60 fps (agent 1's mist-1 recorder, one render per 1/60 s tick; fogwind/1/out/rt_Act25.txt, rt_Ac.txt)
+-------------------------------------------------------------------------------------------------------------
+  camera HELD (rtst, 190 frames), valley boil / slow, farhill boil / slow, max rho_off, WIND:
+    d91   0.422/0.321  0.252/0.199  0.52 (the wind)
+    Ac    0.131/0.119  0.078/0.070  0.021  WIND <= 0.002   (white-rotated golden sequence keeps slow parts per cell)
+    Act25 0.080/0.065  0.056/0.045  0.021  WIND <= 0.002   valley mean 128.1 (Ac 125.4: look restored)
+    q4 / S2 / t4w (multi-tap or 2x2 antithetic, no look blur) 0.061-0.065 / 0.048-0.054, farhill ~0.047/0.038
+  PAN (rt60, 150 frames): Act25 WIND <= 0.003, rho_off <= 0.025, bay lowd2 0.064 (q4 0.066, Ac 0.067, d91 0.063,
+    the original pump 0.696).
+  So in play Act25 has no wind and no flicker, and its in-place boil is ~1/5 of d91's and about 1.3x the
+  multi-tap floor class (0.080 vs 0.061 valley, 0.02 code values at the 6 px scale). If that last 1.3x
+  matters, the same structure with 2 stratified taps (agent 3's t2wb) or 2 fixed taps (agent 4's q2b), both
+  with this tetrahedral history read, are the next step up; they are in agent 1's real-time queue.
+
+OTHER SCENES
+------------
+  pine_shafts, my moving probe look_probe_fog2_pine_moving (k 240-359, base / d91 / Act25) and agent 3's
+  held pine camera: not discriminating. The change there is foliage, soldiers and the near-field beams;
+  d91's wind does not even show there (kit numbers d91 = Act25 within noise; shot-for-shot inter-clip
+  differences base-d91 and Act25-d91 in the open air box are the same 0.63 floor).
+
+RISKS / NOT VERIFIED BY ME
+--------------------------
+- The full 570-frame trailer clip was not reshot on Act25 (the lead's job); only the 120-shot probes.
+- Under fast pans the reprojected history is still resampled (as before); the fixed blur adds to it the same
+  way the shipped random blur did.
+- The 4 taps near the volume's edges clamp like the single tap did.
+- The override file carries three unused globals from my generator (g_frameKey, g_dSeq, g_dSign): drop them
+  when landing.
+- Landing needs the unit test [remaster][fog][Shaders] updated: it pins d91's fogCellNoise strings and
+  checks a mirror of the IGN residual; it would need the hash, the centre read and the tetra read instead.
+
+THE CHANGE (relative to d91a08e0's psFogInject; full diff in Act25_vs_d91.diff)
+-------------------------------------------------------------------------------
+  - fogIgn / g_cellJ -> fogHashU (lowbias32) and fogHash3(uvec3) (white, 24-bit), g_cell = uvec2(gl_FragCoord.xy).
+  - depth: z = fogSliceDepth((s + fract(fogDepth.w + fogHash3(uvec3(g_cell, uint(s) + 7u)))) / fogGrid.z)
+  - xy:    cj = fract(fogFrame.xy + 0.5 + vec2(fogHash3(uvec3(g_cell, 1001u)), fogHash3(uvec3(g_cell, 2003u)))) - 0.5
+  - history reprojected from relC = g_dirC * fogSliceDepth((s + 0.5) / fogGrid.z), g_dirC = the
+    unjittered cell-centre direction (ndc from gl_FragCoord.xy).
+  - history value = 0.25 * (4 trilinear taps at (puv, pt) + (0.25 / fogGrid.xyz) * (+-1, +-1, +-1) on a
+    tetrahedron: (1,1,1), (1,-1,-1), (-1,1,-1), (-1,-1,1)).
+  Frame sequences (jx, jy, jz), the history share 0.12 and every uniform stay as they are.
+
+FILES
+-----
+  shaders/A, B, C (built, not run), D, Ac, Bc (built, not run), Dc, Act25 /psFogInject.glsl
+  tools/mkvariants.py   generator (from mist/3/shaders/percell, d91's assembled shader)
+  tools/run2.ps1        runs one mist3 probe with one override, mkv + bandmetric, deletes PNGs
+  tools/xtk.py          static residual stats, k-omega travel coherence, x-t / y-t slices
+  tools/strip.py        consecutive residual frames at 2x;  tools/lookdiff.py  mean-frame look diff
+  tools/pulse.py        per-frame camera-compensated change in a box (periodic pulses)
+  tools/aircost.py      air-section GPU time from the game logs
+  tools/pairdiff.py     shot-for-shot inter-clip difference of two runs of one probe
+  tools/gen_probe_fog2.py  agent 3's probe generator under my name (made look_probe_fog2_pine_moving)
+  runs/fog2-pine_moving-<base|d91|Act25>/  the pine moving runs (only the Act25 mkv kept, to save disk)
+  runs/<static|moving>-<variant>/   mkv of the 120 shots, band.json, keep/ PNGs, tri logs
+  Act25_vs_d91.diff, xtk_static*.json

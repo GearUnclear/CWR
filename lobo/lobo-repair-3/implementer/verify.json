@@ -1,0 +1,25 @@
+{
+ "batch": "20261012T034354Z-0532e837",
+ "state": "applied",
+ "repair_version": "2026-10-11.3",
+ "rule_sha256": "81bf8fe8cfccada323a7d872e06385e1088414f271851acbb9d9632be80745c4",
+ "compatibility": "ud",
+ "archives": 41,
+ "members": 91,
+ "stuffpbo": {
+  "file": "bwm_boot3.pbo",
+  "bytes": 634853,
+  "trailer_same": true,
+  "header_same": true
+ },
+ "untouched_members_checked": 8013,
+ "unchanged_other_archives": 83,
+ "read_only_preserved": [
+  "JOF_Objects1.pbo",
+  "MAP_OilAddon_script.pbo",
+  "RKSL-Hangers.pbo",
+  "TMYK_Bridges.pbo"
+ ],
+ "added": 7,
+ "problems": []
+}

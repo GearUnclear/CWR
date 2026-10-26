@@ -1,0 +1,7 @@
+box: D2 new / orig | lattice share new / orig | time-std (after 9-frame high-pass) new / orig
+  shafts_left  D2 7.046 / 7.052 | lattice 0.027 / 0.028 | hp-std 3.528 / 3.531
+  shaft_right  D2 8.026 / 8.027 | lattice 0.133 / 0.133 | hp-std 3.584 / 3.577
+  skyglow      D2 3.343 / 3.380 | lattice 0.036 / 0.036 | hp-std 3.580 / 3.582
+  air_far      D2 2.211 / 2.202 | lattice 0.014 / 0.014 | hp-std 2.972 / 2.971
+  ground       D2 3.192 / 3.193 | lattice 0.007 / 0.007 | hp-std 2.518 / 2.518
+sheet (2560, 1920)

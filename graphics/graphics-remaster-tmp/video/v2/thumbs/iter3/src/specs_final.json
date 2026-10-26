@@ -1,0 +1,328 @@
+{
+ "3a": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "xm": 560,
+  "ang": -6,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "size": 40,
+    "cap_bot": 139,
+    "before_line": 24
+   },
+   {
+    "kind": "brand",
+    "size": 112,
+    "cap_top": 46,
+    "after_line": 34,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3a"
+ },
+ "3b": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "crop": [
+   255,
+   76,
+   1600
+  ],
+  "xm": 500,
+  "ang": -6,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "size": 40,
+    "cap_bot": 137,
+    "before_line": 24
+   },
+   {
+    "kind": "brand",
+    "size": 110,
+    "cap_top": 46,
+    "after_line": 34,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3b"
+ },
+ "3c": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "crop": [
+   390,
+   130,
+   1280
+  ],
+  "xm": 430,
+  "ang": 0,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "size": 40,
+    "cap_bot": 133,
+    "before_line": 26
+   },
+   {
+    "kind": "brand",
+    "size": 112,
+    "cap_top": 40,
+    "after_line": 38,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3c"
+ },
+ "3d": {
+  "clip": "bay_reflections",
+  "n": 15,
+  "xm": 520,
+  "ang": 14,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "size": 40,
+    "cap_bot": 131,
+    "before_line": 26
+   },
+   {
+    "kind": "brand",
+    "size": 100,
+    "cap_top": 48,
+    "right": 1140,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3d"
+ },
+ "3e": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "xm": 600,
+  "ang": 0,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "size": 38,
+    "cap_bot": 205,
+    "left": 44
+   },
+   {
+    "kind": "brand",
+    "size": 120,
+    "cap_top": 42,
+    "center_line": 0,
+    "rule": [
+     96,
+     6,
+     16
+    ],
+    "rule_align": "center"
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3e",
+  "line_top": 180
+ },
+ "3f": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "crop": [
+   255,
+   76,
+   1600
+  ],
+  "xm": 500,
+  "ang": -6,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "text": "ARMA: COLD WAR ASSAULT",
+    "size": 30,
+    "track": 3,
+    "cap_bot": 134,
+    "before_line": 24
+   },
+   {
+    "kind": "brand",
+    "size": 108,
+    "cap_top": 44,
+    "after_line": 34,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3f"
+ },
+ "3g": {
+  "clip": "bay_reflections",
+  "n": 300,
+  "xm": 640,
+  "ang": -6,
+  "texts": [
+   {
+    "kind": "brand",
+    "size": 100,
+    "cap_top": 34,
+    "right": 1130,
+    "rule": [
+     96,
+     6,
+     14
+    ],
+    "rule_align": "right"
+   },
+   {
+    "kind": "text",
+    "text": "PART 1: GRAPHICS",
+    "body": true,
+    "size": 26,
+    "track": 4,
+    "cap_top": 152,
+    "right": 1130
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3g"
+ },
+ "3h": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "xm": 427,
+  "ang": 0,
+  "texts": [
+   {
+    "kind": "brand",
+    "size": 134,
+    "cap_top": 30,
+    "after_line": 40,
+    "rule": [
+     120,
+     7,
+     18
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3h"
+ },
+ "3i": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "pair": [
+   879.1,
+   160,
+   581.8
+  ],
+  "xm": 640,
+  "ang": 0,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "size": 36,
+    "cap_bot": 103,
+    "before_line": 30
+   },
+   {
+    "kind": "brand",
+    "size": 88,
+    "cap_top": 30,
+    "after_line": 30,
+    "rule": [
+     84,
+     5,
+     14
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3i"
+ },
+ "3j": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "crop": [
+   588.2,
+   160,
+   1163.6
+  ],
+  "xm": 640,
+  "ang": 0,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "size": 36,
+    "cap_bot": 103,
+    "before_line": 30
+   },
+   {
+    "kind": "brand",
+    "size": 88,
+    "cap_top": 30,
+    "after_line": 30,
+    "rule": [
+     84,
+     5,
+     14
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3j"
+ },
+ "3k": {
+  "clip": "bay_reflections",
+  "n": 540,
+  "pair": [
+   879.1,
+   160,
+   581.8
+  ],
+  "xm": 640,
+  "ang": 0,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "text": "BEFORE",
+    "size": 28,
+    "cap_top": 26,
+    "before_line": 30
+   },
+   {
+    "kind": "vanilla",
+    "text": "AFTER",
+    "size": 28,
+    "cap_top": 26,
+    "after_line": 30
+   },
+   {
+    "kind": "brand",
+    "size": 74,
+    "cap_top": 62,
+    "after_line": 30,
+    "rule": [
+     72,
+     5,
+     12
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/iter3/3k"
+ }
+}

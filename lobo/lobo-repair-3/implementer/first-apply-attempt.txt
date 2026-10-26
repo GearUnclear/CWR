@@ -1,0 +1,3 @@
+First apply attempt (rule_sha256 9868339d...) aborted: [WinError 5] Access is denied replacing D:/Arma_CWA/@LoBo/addons/JOF_Objects1.pbo (Windows read-only attribute).
+Transaction rolled back; batch 20261012T034210Z-8eb814a2 manifest state rolled-back, no conflicts/errors; all 124 archives byte-identical to addons-before.json (addons-after-rollback.json).
+Fix: repair_lobo.replace_file keeps the read-only attribute; second apply = batch 20261012T034354Z-0532e837.

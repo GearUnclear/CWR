@@ -1,0 +1,25 @@
+{
+ "src": "all_st.raw",
+ "w": 1920,
+ "h": 1080,
+ "frames": 150,
+ "mode": "1",
+ "half": "0",
+ "wall_ms": 136767.1,
+ "fps": 1.09,
+ "dwall_ms": {
+  "min": 579.25,
+  "med": 939.62,
+  "max": 1184.59
+ },
+ "dpan_ms": {
+  "min": 16.66,
+  "med": 16.67,
+  "max": 16.67
+ },
+ "zero_sim_frames": 0,
+ "shots": 150,
+ "pan_first": -0.4833,
+ "pan_last": 2.0,
+ "mkv": "all_st.mkv"
+}

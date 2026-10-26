@@ -1,0 +1,214 @@
+Boom 1 (approach 1 of 6): detonation physics
+=============================================
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-1 (fec1075 + LOOK/boom/base.patch, base tree
+43c4ff8f). Build build/look-puddle-1-rwdi, game dist/look-puddle-1-rwdi, junction RemasterUD-boom-1.
+Nothing committed, no branch. Patch: fix.patch (my delta over the base tree, the look_probe*
+capture tests excluded). AI sight and fog link untouched (Target.cpp, VolumetricFog.cpp,
+SimulateFogSight are not in the diff).
+
+Look first
+----------
+- final/ALL_strips.png: the six clips' key frames (-100 to +4000 ms), final build.
+- final/zoom_<time>_<clip>.png: frame by frame (1/30 s) round each burst, cropped; for fuel the
+  first 12 frames then every 8th.
+- final/<time>_<clip>.mp4 and _strip.png: the deliverable clips.
+- Before: LOOK/boom/before/clips/ (round 5). r1clips/ is my first build (kept for the record).
+
+Approach
+--------
+Derive every blast from its charge instead of the classic size. Classic sizes every blast as
+hit x 0.003 clamped to 0.25 .. 1 (Shots.cpp), and every fireball is the same CfgCloudlets
+Explosion source started for size x 0.05 s. `hit` is the round's direct (penetration) damage, so
+the 120 mm HEAT round (hit 700) got the biggest possible blast and the hand grenade the same
+blast as a 75 kg shell would at 0.25. Now one pure model (CombatLights.hpp/.cpp, "Detonation")
+gives each blast its charge, fireball radius, flash time, afterburn, gas temperature over time,
+light, and dust column, and the effect code (Smokes.cpp Explosion, Crater, SmokeSourceVehicle)
+takes them from it.
+
+What each munition spawns today (probe evidence, run1/run2/run3 udcap.log and the code)
+------------------------------------------------------------------------------------------
+CfgAmmo (Remaster CONFIG.BIN, debinarized): Shell120 hit 200, indirectHit 150, range 8;
+GrenadeHand hit 20, indirectHit 18, range 7; Heat120 hit 700, indirectHit 300, range 1;
+FuelExplosion hit 100, indirectHit 80, range 8 (scaled per vehicle). Spawned classes in the clips
+(udcap.log): Shell120, GrenadeHand, Heat120, a Jeep (setDammage 1).
+- HE, grenade, HEAT (shotShell hitting the ground): one Explosion entity (CfgCloudlets
+  Explosion puffs, 2500 K table, cooling 4000 K/s), one combat light burst (kind Explosion,
+  strength = size) and one classic LightPoint; Landscape::ExplosionDammage adds a Crater with
+  CraterSmoke1/2/3 (puffs live about 3.6 s) and a few thrown "ground effect" chunks. Classic
+  sizes: HE 0.6, grenade 0.25 (0.06 clamped up), HEAT 1.0 (2.1 clamped down): HEAT was the
+  biggest blast of the three.
+- Fuel (Jeep): SmokeSourceVehicle::SimulateExplosion 0.2 to 1.5 s after death. The Jeep's
+  explosives are fuel 50 l x 0.1 = 5, times 0.5 .. 0.75, so hit is about 3: under the hit > 50
+  gate, so Classic made no fuel fireball at all for a car (the round 5 "fuel" clip shows only
+  the wreck); only trucks with cargo or ammunition got one, and then a 0.25 .. 1.25 s burst of
+  the same white-hot shell puffs and 0.3 s black puffs.
+- Cloudlets new from a source are drawn with alpha 0 in the frame they are born and fade in over
+  0.01 s, so a fireball puff was first seen one or two frames after its birth, already cooled:
+  part of why every burst read as a blink.
+
+The model (every formula and constant)
+--------------------------------------
+Charge (TNT kg):  E = indirectHit x indirectHitRange (the engine's own crater energy,
+                  Collisions.cpp);  W = clamp(E / kChargeEnergyPerKg, 0.02, 500),
+                  kChargeEnergyPerKg = 480 (calibrated: Shell120 150 x 8 = 1200 -> 2.5 kg).
+Shaped charge:    hit > E (the jet takes the energy): HEAT 700 > 300.
+Scale:            s = W^(1/3) (Hopkinson-Cranz blast scaling).
+Fireball radius:  R = kFireballRadiusPerS (1.6 m) x s, x kShapedRadiusShare 0.75 if shaped.
+Flash:            e-folding time tf = kFlashTimePerS (0.03 s) x s, x kShapedFlashShare 0.75.
+Afterburn:        tb = kAfterburnTimePerS (0.12 s) x s (TNT / Comp B, oxygen balance -74 / -43 %),
+                  x kShapedAfterburnShare 0.33 if shaped (Octol, about -24 %).
+Gas temperature:  T(t) = kSootK + (kAfterburnK - kSootK) h(t) + (kDetonationPeakK - kAfterburnK)
+                  exp(-t / tf), h = 1 while t <= tb, then exp(-(t - tb) / kGlowFallTime);
+                  kDetonationPeakK 3200 K, kAfterburnK 2000 K, kSootK 900 K, kGlowFallTime 0.08 s.
+Puffs:            born at T(age) (Explosion::Simulate sets the source's birth temperature each
+                  step), cooling at -(Tborn - 1100) / max(tf + tb, kMinGlowSpan 0.1 s) K/s (x the
+                  engine's 0.7 .. 1.3 per puff), so a puff glows through the burn and the shortest
+                  flash still fills the frame it is born in (a 1/30 s shutter holds it); colour and
+                  glow from round 4's FireballPuff (black body, Wien at 580 nm, cap 2).
+                  Count 10 + 10 s, half in the flash, half through the afterburn; size 1.1 R
+                  (x 0.5 .. 1.5), within 0.5 R of a centre 0.5 R over the burst point, outward
+                  3 m/s per m; no grow-up, no fade-in, drawn in their birth frame
+                  (WeaponCloudsSource::SetShowAtBirth); live tf + tb + 0.1 s, fade 0.4 + 0.3 s.
+Light:            EvaluateDetonationLight: i1 = kDetonationFlashI1 (350) x W^(2/3) (the radiating
+                  area) x exp(24800 (1/peakK - 1/T(t))) (Wien against the peak), colour
+                  BlackBodyRgb(T(t)), ball kDetonationCoreShare (0.5) x R, centre 0.6 R up; over
+                  when T < 1150 K after the burn. At the peak the HE shell gives 645 (round 5:
+                  643, so the flash level is unchanged), a frame later 0.13 of it, two frames
+                  later 0.035.
+Column:           height H = kColumnHeightPerS (6 m) x s (x 0.7 shaped); life
+                  L = kColumnLifePerS (12 s) x s. Crater::SetDetonation: CraterSmoke1 (the column)
+                  puff base 0.15 H (puffs 0.6 .. 0.9 H), emitted 0.12 L, tapering 0.15 L, every
+                  0.1 s, rising at 0.5 H m/s, decelerating 0.35 x that per s to a 0.15 m/s floor,
+                  each puff lives 0.45 L and fades 0.45 L, colour earth and soot (0.30, 0.27, 0.22)
+                  x 0.8 .. 1 (its temperature held at the table's 0.5 grey); CraterSmoke2 a low dust
+                  skirt (0.44, 0.40, 0.32), 0.2 H, rising 0.15 x; CraterSmoke3 a thin high haze.
+                  All drift with half the wind (SmokeSource). Thrown earth: CraterDustBig puffs
+                  0.1 H launched at min(sqrt(2 g H), 10) m/s for 0.12 s x s, falling at 8 m/s^2
+                  (Classic never ran the dust of a big blast).
+Fuel:             fuel kg M = kFuelKgPerHit (3.7) x hit (hit / 0.1 l x 0.74 kg/l, half in the
+                  ball), from 1 kg to kMaxFuelKg 150; CCPS / TNO fireball: D = 5.8 M^(1/3) m,
+                  t = 0.45 M^(1/3) s; flame kFuelFlameK 1900 K, rising from 1650 K over 0.2 t,
+                  held for t, cooling with max(0.3 t, 0.08 s). Fireball puffs 0.9 R (R = D / 2),
+                  30 over 0.5 t, outward 1.2 m/s per m, buoyant (1.5 m/s^2 up to 3 m/s), live 0.6 t,
+                  grow 0.25 t, fade 0.8 + 0.4 t; black soot (the classic dark fire, 0.15 0.15 0.10)
+                  1.0 R from the ball's top (0.6 R over its centre), 25 per t for 1.5 t, rising
+                  0.6 .. 2 m/s, live 3 + 2 t, fade 4 + 2 t; the wreck then burns and smokes 32 to
+                  48 s (SetSourceTimes, as the damaging fuel blast always did). Light:
+                  kDeflagrationI1 (60) x M^(2/3) x Wien(T vs 1900 K), flickering 15 % + 8 %.
+                  The damage and the explosion sound keep the original hit > 50 gate: gameplay is
+                  unchanged.
+
+Other changes
+-------------
+- Object::DrawDecal: a fireball's glowing puff takes no detonation light (the flash's white over
+  its own glow washed the night fireball to pale grey); a detonation's light lights smoke on
+  the fire's hue-kept path (its afterburn lit the dust khaki); the glow follows the bursts' day
+  scale (CombatLightSet::BurstDayScale / 0.2: x 1 by day and dusk, up to x 5 by night), so by
+  night the flames stay brighter than the smoke they light.
+- EngineGL33_PostCombat: a blast's surface light reaches 10 balls (was 3), at most 10 m, at gain
+  0.12 (was 0.3; a fuel fireball 0.04): the ground round a burst is a pool fading with distance,
+  not a flat saturated ellipse, and a fuel fireball no longer draws an orange line along the
+  horizon. The air scatter of a detonation is half its ball (was 2 core + 1.5 m: the soft globe
+  of light by night).
+
+Constants (name: old -> new)
+----------------------------
+- Blast size for effects: hit x 0.003 clamped 0.25..1 -> the Detonation model above (all new
+  constants in CombatLights.hpp; the classic size still sets the classic LightPoint and the
+  explosion's network copy, DetonationFromBlastSize).
+- Fireball emission time: size x 0.05 s -> tf + tb (HE 0.20 s, grenade 0.10 s, HEAT 0.05 s).
+- Fireball puff birth T / cooling: 2500 K / -4000 K/s -> T(age) / -(T - 1100)/max(tf + tb, 0.1).
+- Fireball puff spread: +-5 m cube at 4 m/s per m -> +-0.5 R at 3 m/s per m, centre 0.5 R up.
+- Crater column puff life: 2.4 + 1.2 s -> 0.45 L + 0.45 L (HE 7.3 + 7.3 s).
+- Explosion light: classic envelope (420 e^2, 0.15 s hold at night, 0.05 s fall, 0.16 s tail,
+  0.9 s) -> EvaluateDetonationLight.
+- kBurstSurfaceReachCores 3 -> 10 (+ kBurstSurfaceReachMax 10 m); explosion surface gain under
+  the camera 0.3 -> 0.12 (kBurstSurfaceGain), fuel 0.04 (kFuelSurfaceGain).
+- ScatterMedium(Explosion) 2 core + 1.5 m -> 0.5 core.
+- Fuel fireball: only when hit > 50 (never for a car) -> whenever the fuel in it is 1 kg or more.
+
+Per munition, what it now looks like (final build, fixed 1/30 s step)
+----------------------------------------------------------------------
+Frame numbers are the clip's (f9 = +33 ms after the spawn); every burst lands one or two frames
+after its spawn. Read from final/zoom_*.png and the strips.
+- 120 mm HE (dusk): W 2.5 kg, s 1.36, R 2.2 m, tf 41 ms, tb 0.16 s, column 8.1 m / 16 s.
+  f10: a white-yellow fireball about 4 m across, the ground under it lit in a small pool (no
+  disc, no line); f11: the fireball orange and darkening into soot, thrown earth flying; f12 on:
+  a dark earth-and-soot column with clods, growing to a wide dark cloud by 1 to 2 s and still
+  standing at the end of the 3 s clip; it lingers into the next clips (the grey haze on the left
+  of the grenade clip's first frames is this shell's column, 5 s later), drifting with the wind.
+  Flash: 1 frame white-hot + 1 frame orange (Classic: 1 frame orange, flat bottom, smoke gone by
+  1.5 s).
+- Hand grenade (dusk): W 0.26 kg, s 0.64, R 1.0 m, tf 19 ms, tb 77 ms, column 3.8 m / 7.7 s.
+  f12: one frame of a compact orange-yellow fireball about 2 m across with a hot core; then a
+  low dark dust and smoke cloud that spreads to about 6 m and lingers past the 5 s clip.
+- 120 mm HEAT (dusk): W 0.63 kg, shaped, s 0.86, R 1.0 m, tf 19 ms, tb 34 ms, column 3.6 m / 10 s.
+  f10: one frame of a small white-hot flash (smaller than the HE shell's) with a bright pool round
+  its foot; f11 a small orange remnant; then a low, thinner dark cloud and a few clods. Classic
+  drew it as the biggest fireball of the three.
+- Fuel, a Jeep (dusk): M about 11.5 kg (hit about 3.1), D about 13 m, burning 1.0 s.
+  From +200 ms an orange rolling fireball with soot round it grows for about 0.3 s; from +400 ms
+  it is a large black soot cloud with the fire glowing inside, which rises and drifts and is
+  still a dark mass at +2 s; at +4 s the wreck's own smoke column stands. Classic: no fireball at
+  all for a car. The orange glow is visible for about 0.5 s (the puffs glow 0.6 t each), shorter
+  than the CCPS 1 s.
+- 120 mm HE (night): f10 a white-hot fireball with a lens-flare star and a warm halo, the plain
+  round it lit for that frame; f11 an orange fireball (Classic by night: a soft ball of light, no
+  core, then grey smoke); then a grey column lit by the moon, lingering.
+- Fuel (night): f13 to f17 bright orange flames inside a large pale cloud (the soot lit by the
+  fire's own light), f18 to f20 the flames dying with a flare star at the base, then the wreck
+  burning with its small fire and smoke.
+
+Tests
+-----
+- Unit tags [CombatLights],[PhotoCamera],[Shaders],[remaster],[fog] on the final build, run from
+  D:\ : All tests passed (958693 assertions in 324 test cases) (unit.txt).
+- New cases in test_combat_lights.cpp ([remaster][CombatLights]): the charges, shaped flag and
+  cube-root scaling of Shell120 / GrenadeHand / Heat120 from their CfgAmmo values, and HEAT
+  smaller and briefer than HE; the gas temperature curve, the light's W^(2/3) peak, its fall a
+  frame and two frames later, white flash and orange afterburn, its end; the puff cooling and
+  the 0.1 s minimum glow span; the bursts' day scale on the set; the fuel deflagration (CCPS
+  diameter and time, under 1900 K and over 1600 K while it burns, the 150 kg cap, its end); a
+  source contract that all seven Explosion sites in Shots.cpp take their round's charge, the
+  crater its column, the explosion and the fuel their detonation light, the fireball puffs are
+  drawn at birth, and the surface reach is capped. Two existing contracts updated for the new
+  CombatLitParticle argument and its detonation routing.
+- clang-format clean on every file I changed (run on each).
+
+Cost
+----
+The probe tests do not log frame times (no capReadTimers in them), so no frame time change can be
+read from the logs; run wall time was 163.5 s (run1), 162.2 s (run2), 161.0 s (run3, final) against the before run's
+219.8 s on a busier machine, not comparable. Particle counts: an HE shell's fireball is about 24
+puffs (Classic, the same order: 0.03 s at 0.36 ms x gen^2), its column now about 30 puffs of
+CraterSmoke1, 8 of Smoke2, 20 of Smoke3 alive for up to 15 s (Classic: a few, for 3.6 s), plus
+about 16 thrown-earth puffs for 2 s. A fuel fireball is about 30 fire and 38 soot puffs. So a
+lingering column costs tens of large alpha puffs for 10 to 20 s per blast: in a heavy barrage
+the overdraw of many overlapping columns is the thing to watch. No new lights: one combat light
+per blast as before, shorter-lived.
+
+Weak points (honest)
+--------------------
+1. The flash is one frame (as physics says it should be at 30 fps); in motion it is a pop, not a
+   held glow. A judge expecting a Hollywood fireball will find the HE and HEAT bursts small and
+   brief; the lingering dark column is what carries them now.
+2. Fuel: the orange is visible for about 0.5 s, not the full CCPS second, and by night the soot
+   round it reads pale beige (lit by its own fire at night exposure) rather than black. The
+   classic LightPoint's lens-flare star still shows at the fireball's base by night.
+3. Night HE: a warm halo round the white flash in its frame (bloom plus the flash exposure
+   response and the classic glow sprite), smaller than before but still a soft glow.
+4. The ground pool under a HEAT or grenade flash is still a bright thin ellipse for its one
+   frame at grazing view (no longer a flat saturated disc with a hard edge; it fades out).
+5. The charge comes from indirectHit x indirectHitRange with one calibration (480 per kg, from a
+   2.5 kg 120 mm shell); mods with odd blast values will get odd charges (clamped 0.02 .. 500 kg).
+   Shaped is hit > blast energy: an AP sabot with small indirect values counts as shaped (a tiny
+   flash, harmless).
+6. The lingering columns now stay 8 to 20 s: in a barrage the overlapping columns are many big
+   alpha puffs (overdraw); not measured (no frame times in these probes).
+7. Network copies of blasts get the charge from the classic size only; remote craters keep the
+   classic column (SetDetonation is local). The Ural in the staging now also gets its fuel
+   fireball (before the clips start), and its soot drifts over the first clip's sky.
+8. Rockets (LAW, RPG) were not in the clip set; they take the same model through Shots.cpp
+   (LAW: hit 500 > 150 x 2.5 = 375, so a shaped 0.78 kg charge). The rprobe "lower half black"
+   frame was not on my path and not checked.

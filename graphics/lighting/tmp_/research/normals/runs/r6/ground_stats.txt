@@ -1,0 +1,15 @@
+﻿lowsun_fp        classic  lit   93.8 sd   8.5 rgb [104.1  91.1  90.1] | shade   82.9 sd  12.5 | shade/lit 0.884
+lowsun_fp        cur      lit  107.4 sd   9.8 rgb [115.4 106.   96.9] | shade   91.3 sd  16.1 | shade/lit 0.851
+lowsun_fp        v8cav    lit  105.3 sd  13.2 rgb [113.1 104.   95.3] | shade   89.9 sd  16.5 | shade/lit 0.854
+lowsun_fp        v9bold   lit   99.4 sd  19.8 rgb [105.9  98.3  90.9] | shade   86.4 sd  17.2 | shade/lit 0.869
+lowsun_fp        v6mean   lit  109.1 sd  24.2 rgb [117.9 107.7  97.4] | shade   90.5 sd  22.0 | shade/lit 0.829
+hull_close       classic  lit   89.4 sd  11.4 rgb [99.5 86.7 85.8] | shade   75.2 sd  17.7 | shade/lit 0.842
+hull_close       cur      lit  101.3 sd  14.4 rgb [108.3 100.1  92.8] | shade   77.4 sd  15.2 | shade/lit 0.764
+hull_close       v8cav    lit   99.7 sd  16.2 rgb [106.4  98.5  91.4] | shade   76.4 sd  15.4 | shade/lit 0.766
+hull_close       v9bold   lit   94.6 sd  20.5 rgb [100.3  93.6  87.6] | shade   74.1 sd  15.8 | shade/lit 0.783
+hull_close       v6mean   lit  102.9 sd  25.3 rgb [110.6 101.6  93.1] | shade   75.2 sd  17.6 | shade/lit 0.731
+sinai_lowsun_fp  classic  lit   62.7 sd   9.8 rgb [71.7 60.3 59.3] | shade   50.8 sd   5.6 | shade/lit 0.811
+sinai_lowsun_fp  cur      lit   78.3 sd  10.2 rgb [89.5 76.2 66.3] | shade   67.4 sd   7.0 | shade/lit 0.860
+sinai_lowsun_fp  v8cav    lit   75.9 sd  12.0 rgb [86.2 73.9 64.8] | shade   66.4 sd   7.4 | shade/lit 0.875
+sinai_lowsun_fp  v9bold   lit   71.9 sd  14.0 rgb [80.8 70.2 62.2] | shade   64.6 sd   8.1 | shade/lit 0.898
+sinai_lowsun_fp  v6mean   lit   75.7 sd  17.4 rgb [86.4 73.7 64.2] | shade   64.6 sd   8.1 | shade/lit 0.852

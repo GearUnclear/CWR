@@ -1,0 +1,61 @@
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index c664977..89ed25d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -327 +327 @@ layout(std140) uniform LitConstants {
+-    vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun
++    vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun, w = crowns lit as a canopy
+@@ -594,0 +595,12 @@ float g_sunVisibility = 1.0;
++// Tree crowns lit as a canopy (crownCanopy, litHorizonSun.w; research track
++// shade, crown V18). The sun reaching a leaf crosses the crown in front of it:
++// the path, in crown radii, from the leaf to the crown's surface toward the
++// sun, with the crown taken as a sphere around the ellipsoid's centre (the
++// leaf at |e| = vCrown.w along the gradient direction `cnDir`).
++float crownSunPath(vec3 cnDir, float r, vec3 l) {
++    vec3 p = cnDir * min(r, 1.0);
++    float b = dot(p, l);
++    float c = dot(p, p) - 1.0;
++    return max(-b + sqrt(max(b * b - c, 0.0)), 0.0);
++}
++
+@@ -619,0 +632,10 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
++    // A crown lit as a canopy (crownCanopy; grass shades as terrain and keeps
++    // its look): the sun reaching a leaf crosses the crown in front of it
++    // (optical depth 1 per crown radius, a quarter of the sun passes whatever
++    // the depth), the core sees less sky (0.45 of it, 0.6 without), and below
++    // 35 degrees of sun, fully below 12, the crown takes 0.65 of the sun and
++    // 0.75 of the sky: a low sun's wrapped terminator and the exposure meter
++    // otherwise light the whole crown pale. `crownSun` and `crownSky` stay 1
++    // and the stock values without it.
++    bool canopy = crown && !terrain && litHorizonSun.w > 0.5;
++    float crownSun = 1.0;
+@@ -625 +647 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+-        crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
++        crownSky = mix(canopy ? 0.45 : 0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
+@@ -628,0 +651,5 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
++    if (canopy) {
++        float lowSun = 1.0 - smoothstep(12.0, 35.0, litSun.w);
++        crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);
++        crownSky *= mix(1.0, 0.75, lowSun);
++    }
+@@ -646 +673 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+-        sunShadow = mix(0.45, 1.0, sunVisibility);
++        sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;
+@@ -659,0 +687,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
++    if (canopy) {
++        // Light that bounces between leaves before it leaves the crown picks
++        // up the leaf colour again: the canopy's albedo is the leaf's with its
++        // saturation deepened (a power of 1.3) at the same luminance.
++        vec3 p = pow(a, vec3(1.3));
++        a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
++    }
+@@ -666,2 +700,3 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+-    if (litFlags.z > 0.5 && litFlags.z < 3.5) {
+-        // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
++    if (litFlags.z > 0.5 && litFlags.z < 4.5) {
++        // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal,
++        // 4 = the albedo in display space (debug=7; LightRig.hpp kShaderDebugAlbedo).
+@@ -670 +705,2 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+-        return nLight * 0.5 + 0.5;
++        if (litFlags.z < 3.5) return nLight * 0.5 + 0.5;
++        return albedo;

@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\lead\runs\moving-fix\moving-fix.mkv  frames 105  band 0.077  sky 0.045
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       153.7 [-1.12, -0.06]  0.069  0.194  0.026 -0.263 [-9, 12]   0.026 [-9, 12]  0.005  0.869 -0.443    nan    nan -0.164             -
+   valley    128.5 [-0.93, 0.01]  0.068  0.121  0.035 -0.396 [0, -16]   0.035 [0, -16]  0.004  0.696 -0.497    nan    nan -0.266             -
+   farhill   116.9 [-0.88, 0.07]  0.048  0.108  0.022 -0.325  [4, 16]   0.022  [4, 16]  0.002  0.727 -0.420    nan    nan -0.184             -
+   haze      181.0 [-0.75, 0.02]  0.039  0.105  0.040 -0.233 [-16, -1]   0.040 [-16, -1]  0.004  0.605 -0.295    nan    nan -0.137             -
+   slope      54.3 [-0.94, 0.08]  0.059  0.140  0.022 -0.382 [-13, -8]   0.022 [-13, -8]  0.003  1.005 -0.384    nan    nan -0.240             -

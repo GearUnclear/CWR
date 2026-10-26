@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\mist\\5\\runs\\fogvis1\\frames", "frames": 120, "band": 0.583, "band_max": 2.06, "sky": 0.046, "spikes": 6267, "worst": [[47, 4.7], [92, 4.2], [140, 3.96], [35, 3.8], [85, 3.72], [81, 3.69], [84, 3.62], [46, 3.56]]}

@@ -1,0 +1,70 @@
+diff --git a/a/test_volumetric_fog.cpp b/b/test_volumetric_fog.cpp
+index 10fa2818..adb5358c 100644
+--- a/a/test_volumetric_fog.cpp
++++ b/b/test_volumetric_fog.cpp
+@@ -732,6 +732,65 @@ TEST_CASE("Volumetric fog: the shaders read the slices and the medium the way Vo
+           1);
+ }
+ 
++TEST_CASE("Volumetric fog: the injection's jitter is turned per cell, so its history leaves no frame-wide pump",
++          "[remaster][fog][Shaders]")
++{
++    // The dawn valley's flicker (2026-10-23): with one jitter for every cell
++    // the history's residual of the jitter had the same sign over whole
++    // regions each frame, and the far haze and the valley mist pumped as one
++    // sheet. The injection turns the frame's offset per cell (and per slice in
++    // depth) by an interleaved-gradient offset.
++    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
++    REQUIRE_FALSE(inject.empty());
++    CHECK(CountOf(inject, "float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, "
++                          "0.00583715)))); }") == 1);
++    CHECK(CountOf(inject, "fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z)") == 1);
++    CHECK(CountOf(inject, "g_cellJitter = fogCellNoise(gl_FragCoord.xy);") == 1);
++    CHECK(CountOf(inject, "vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;") == 1);
++    // No cell takes the frame's offset alone any more.
++    CHECK(CountOf(inject, "(s + fogDepth.w)") == 0);
++    CHECK(CountOf(inject, "gl_FragCoord.xy + fogFrame.xy") == 0);
++
++    // The mirror: the frame's depth offset is the stage's golden-ratio
++    // sequence (EngineGL33_PostFog.cpp, jz), each cell keeps 0.88 of its last
++    // frame (kFogHistoryShare 0.12), and a block of 5 x 5 cells (about 60 px
++    // at 1080p) averages its cells' residuals, as the eye and the apply's
++    // lookup do.
++    auto fract = [](double x) { return x - std::floor(x); };
++    auto cellNoise = [&](double x, double y) { return fract(52.9829189 * fract(x * 0.06711056 + y * 0.00583715)); };
++    constexpr double kShare = 0.12;
++    double frameWide = 0.0;
++    double cell[25] = {};
++    double sumW = 0.0, sumW2 = 0.0, sumC = 0.0, sumC2 = 0.0;
++    int n = 0;
++    for (int frame = 0; frame < 2000; ++frame)
++    {
++        const double jz = fract(0.6180339887 * frame);
++        frameWide += kShare * ((jz - 0.5) - frameWide);
++        double block = 0.0;
++        for (int i = 0; i < 25; ++i)
++        {
++            const double offset = fract(jz + cellNoise(40.5 + i % 5, 20.5 + i / 5)) - 0.5;
++            cell[i] += kShare * (offset - cell[i]);
++            block += cell[i] / 25.0;
++        }
++        if (frame < 100)
++            continue;
++        ++n;
++        sumW += frameWide;
++        sumW2 += frameWide * frameWide;
++        sumC += block;
++        sumC2 += block * block;
++    }
++    const double sdFrameWide = std::sqrt(sumW2 / n - (sumW / n) * (sumW / n));
++    const double sdPerCell = std::sqrt(sumC2 / n - (sumC / n) * (sumC / n));
++    // The frame's offset alone: the block's residual swings by about 3% of a
++    // slice each frame (the far slices are hundreds of metres deep). Turned
++    // per cell: under a quarter of that (about a sixth).
++    CHECK(sdFrameWide > 0.025);
++    CHECK(sdPerCell < 0.25 * sdFrameWide);
++}
++
+ TEST_CASE("Volumetric fog: round 3 medium rules (clear near air, dust, hilltops, night fog, stars)", "[remaster][fog]")
+ {
+     LightingTuning t;

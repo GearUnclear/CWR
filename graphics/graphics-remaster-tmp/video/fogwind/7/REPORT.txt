@@ -1,0 +1,126 @@
+AGENT 7 REPORT: a stable far field for the froxel fog (fogwind swarm, 2026-10-23)
+==============================================================================
+
+VERDICT: PARTIAL. The approach as specified (past some distance, no jitter AND no history) kills
+the wind and the pump and is bit-still on a held camera, but in motion it is measurably LESS calm
+than the history-smoothed candidates (about 2x their low-frequency block flicker under the pan).
+With a light history smoother kept (0.12, read at the cell centre) the same deterministic far taps
+reach the floor class (S2 / Ac level), but then it is essentially agent 4's q4 with fewer taps near
+the eye, not a new winner. Recommendation: do not ship a history-free far field; if the lead picks a
+zero-jitter scheme (q4 class), my far80n4fh is a cheaper variant of it (taps only where slices are
+deep); otherwise prefer the jittered floor-class schemes with the look-restoring blur (agent 2's Act25).
+
+
+1. WHAT I BUILT (shader-only, live psFogInject override; no C++ change, no rebuild)
+-----------------------------------------------------------------------------------
+gen_shader.py writes shaders/<variant>/psFogInject.glsl from d91a08e0's per-cell shader:
+  - slices whose mid view depth is past kFarFrom (ramped to kFarTo) take N FIXED taps: depth strata
+    (s + (i + 0.5) / N) times an R2 pattern across the cell (2 taps: the cell's diagonal), averaged;
+    no frame offset, so the far cell is a pure function of the camera pose;
+  - kFarShare: the far cells' history share (1 = none; 0.12 = the shipped share, read at the
+    cell / slice centre, never at a jittered point);
+  - nearer slices: d91's per-cell jitter (--near percell) or one fixed tap at the slice and cell
+    centre (--near frozen), history 0.12;
+  - the column's light (g_air from the horizon ring, the sun's share, the forward lobe) is evaluated
+    at the cell centre for every slice;
+  - optional: the sun's visibility once per far cell (--visonce).
+Same medium, same per-cell estimator (the cell mean), only the sampling changes, so the AI link
+(ComputeFogMedium in the simulation) is untouched and still matches what is drawn.
+Variants measured: far80n4 (from 80 m, ramp to 160 m, 4 taps, no far history, d91 near),
+far80n8 (8 taps), far80n4fh (fixed near tap + 4 far taps, history 0.12 at the centre everywhere).
+Generated but not run: far80n4v, far80n2v, far150n4v, far300n4, far80n4f.
+
+
+2. NUMBERS (agent 1's kit fogmotion.py; regions bay / valley / farhill / haze; mkv vs mkv)
+------------------------------------------------------------------------------------------
+STATIC (mist3_static, camera held at the frame 328 pose, frames 15-119)
+                      WIND b/v/f/h             mid b/v/f/h             band   lowd2 valley
+  far80n4             0.002/0.001/0.001/0.001  0.121/0.045/0.042/0.044 0.033  0.026
+  frozen (floor)      0.002/0.001/0.001/0.001  0.121/0.050/0.044/0.044 0.033  0.025
+  d91 per-cell        0.055/0.167/0.107/0.056  0.213/0.494/0.268/0.157 0.058  0.136
+  original            0.011/0.040/0.000/0.009                          0.456  1.618
+  => the far air is at the jitter-frozen floor by construction.
+
+MOVING (fog1_moving = the real pan, frames 15-119)
+                      WIND b/v/f/h             max rho_off  band(mkv)  lowd2 b/v/f/h (frames 15-119)
+  far80n4             0.012/0.007/0.003/0.004  0.052        0.098      0.138/0.091/0.063/0.081
+  far80n4fh           0.010/0.006/0.003/0.005  0.051        0.075      0.073/0.058/0.050/0.040
+  vanilla clip        0.017/0.007/0.002/0.007  0.048        0.102      valley 0.057
+  d91 per-cell        0.047/0.123/0.078/0.035  0.29         0.086      valley 0.117
+  original            0.009/0.025/0.001/0.007               0.522      valley 1.621
+  Clean window, frames 68-119 (my far80n4 run had an exposure-meter dip at 62-65 the others lacked):
+                      lowd2 bay/valley/farhill/haze
+  far80n4             0.140/0.102/0.068/0.077
+  far80n8             0.136/0.090/0.063/0.074   (8 taps: no gain, so not the taps' integration error)
+  far80n4fh           0.070/0.054/0.052/0.036   (= the floor class)
+  6/S2                0.065/0.053/0.049/0.039
+  2/Ac                0.071/0.061/0.052/0.038
+  => (a) flicker: gone in all (band 0.075-0.098 vs vanilla 0.102, original 0.52);
+     (b) wind: gone in all (WIND at vanilla level, rho_off < 0.08, x-t RESID flat);
+     but the history-free far field leaves about 2x the 60 px block change of the others under the pan.
+
+WHY history-free is noisier in motion (by eye, look/diffstrip_70.png and diffstrip_70_q4_fh_Ac.png:
+camera-compensated differences, 3 px blur, x40, frames 70-75, crop x1100-1900 y470-770): far80n4 and
+far80n8 show faint VERTICAL column streaks near the right screen edge (x about 1700-1860) and soft
+column bands. The column light g_air comes from the horizon ring's 9 taps over +-11 degrees of
+azimuth; near the screen edges the ring bins enter and leave view (hard cut at |ndc| 0.985, sureness
+jumps to 1 on the first measurement), so a column's light steps as the camera pans (the handoff's
+hypothesis 2). The shipped 0.88 history turns those steps into fades, and jitter (Ac, S2) also
+softens them; a history-free far field shows them raw. far80n4fh and q4 (both zero jitter, with
+history) still show them faintly; Ac and S2 do not show them by eye. A column-mean metric over the
+right edge did not separate the variants (0.24-0.27 for all, dominated by the sun path on the water),
+so this is a by-eye observation, low amplitude.
+
+LOOK (time means of the static probe vs the ORIGINAL approved look, RGB codes; lookdiff.py)
+  far80n4: valley -0.9/-1.4/-1.7, farhill -0.4..-0.7, bay and haze within 1, sky 0.1
+           (agent 1's table: bay/valley/farhill 154.1/126.8/115.3 vs original 154.0/128.1/115.9)
+  d91 was +2.4/+2.7/+2.8 in the valley, frozen -2.3..-3.3.
+  Moving clip mean valley: far80n4 126.6, far80n4fh 126.5, original 127.9, d91 130.3.
+  The difference is the shipped history read at the jittered point, which also blurred the volume
+  (posted 04:09); agent 2's Act25 reproduces that blur on purpose and is the only one back at the
+  original look. Sun, sky and haze colour unchanged by eye (look/moving_runs_compare.png).
+
+COST (contended GPU: 4 games on the machine, frame 115-145 ms, so only ratios mean anything)
+  air stage / frame, median over the shots: far80n4 0.026, far80n8 0.028, d91 build 0.025,
+  q4 0.027, S2 0.026, Ac 0.025, q8 0.038. Injection work at zFar 4000 m, 64 slices: far80n4 does 191
+  medium evaluations per column instead of 64 (slices 0-23 one tap, 24-30 the ramp, 31-63 four
+  taps), q4 does 256. Agent 3 measured +0.1..0.4 ms for a 4-tap injection; mine should be at or
+  under that. Not measured uncontended.
+
+
+3. RULED OUT / LESSONS
+----------------------
+  - History-free far field as the fix: fails the "as calm as vanilla" bar in motion relative to the
+    other candidates (2x lowd2); more taps (8) do not help.
+  - My first moving run (runs/moving-far80n4) is INVALID: a generator bug left g_visFix undeclared,
+    the game logged "GL33 fog: shader compile error [psFogInject]" and drew thin fog (the inject did
+    not run). The mkv is deleted; INVALID.txt marks the folder. Lesson posted: grep the game log for
+    "shader compile error", "override loaded" alone proves nothing.
+  - The exposure meter dithers by 0.01-0.02 between shots (cam ev in udcap.log) and produces
+    whole-frame steps in some runs and not others; compare lowd2 on windows clear of those steps.
+
+
+4. RISKS IF far80n4fh (or any zero-jitter scheme) IS CHOSEN
+------------------------------------------------------------
+  - The near field's single fixed tap per cell (my --near frozen) can draw grid curtains on hard
+    shadow edges close to the eye (canopy shafts in pine_shafts); agent 3's pine probe is the test.
+    Use 2+ fixed taps near, or a jittered near field.
+  - Zero-jitter schemes keep the ring's edge steps (faint column streaks at the screen edges); a
+    softer ring entry (fade a bin's sureness in over the last 10-15% of the screen) would remove them.
+  - Look: about 1.4 codes clearer in the valley than the original unless Act25's fixed blur is added.
+
+
+5. FILES (all under D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/7/)
+---------------------------------------------------------------------------------
+  gen_shader.py           the override generator (python gen_shader.py <name> --from --to --taps
+                          --xy --share --near --visonce)
+  shaders/<variant>/psFogInject.glsl  far80n4, far80n8, far80n4fh (+ unrun far80n4v, far80n2v,
+                          far150n4v, far300n4, far80n4f; base_percell is a pre-fix leftover, unused)
+  runs/static-far80n4/    mist3_static, mkv + band + grey band crop
+  runs/moving-far80n4b/, moving-far80n8/, moving-far80n4fh/   fog1_moving, mkv + motion.txt
+  runs/moving-far80n4/    INVALID (compile error), mkv removed
+  look/                   lookdiff images, moving_runs_compare.png, diffstrip_70*.png,
+                          xt_moving/ and xt_moving_fh/ (xt.png, yt.png, crop2x.mp4, resid2x.mp4),
+                          lowmap_moving.png
+  run7.ps1, motion7.py, lookdiff.py, events.py, lowmap.py, diffstrip.py, edgestreak.py, globalmean.py
+Junction: video-work/arma_CWR/packages/RemasterUD-fog-7 (no game of mine left running).

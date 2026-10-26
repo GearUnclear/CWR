@@ -1,0 +1,562 @@
+--- shipped/psRemasterCommon.glsl
++++ ov8/psRemasterCommon.glsl
+@@ -49,6 +49,8 @@
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
+     vec4 litResearch0;    // 58: foliage research knobs f0..f3
+     vec4 litResearch1;    // 59: foliage research knobs f4..f7
++    vec4 litResearch2;    // 60: canopy research knobs c0..c3
++    vec4 litResearch3;    // 61: canopy research knobs c4..c7
+ };
+ 
+ uniform sampler2D tex0;
+@@ -57,6 +59,7 @@
+ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
++uniform sampler2D canopyMap;               // unit 6 (research): r cover, g top * cover, b base * cover (m above ground)
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -66,12 +69,67 @@
+ in vec3 vWorldRel;
+ in vec3 vNormalW;
+ in vec4 vCrown;
++// Foliage research (track foliage): the leaf's position inside its crown
++// ellipsoid (unit-sphere space), the matrix taking a world direction into that
++// space (three columns), and the object origin (camera relative).
++in vec3 vCrownE;
++in vec3 vCrownA0;
++in vec3 vCrownA1;
++in vec3 vCrownA2;
++in vec3 vOrigin;
+ flat in float vLitMode;
+ 
+ out vec4 fragColor;
+ 
+ const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+ 
++// ---- foliage research knobs (triSetLighting f0..f7) -----------------------
++// f0  model: 0 = shipped Remastered foliage (bit-identical path), 1 = volumetric crown
++// f1  crown optical depth across a full crown diameter (default 2.0 when 0); depths are
++//     fractions of the crown's diameter along each ray, so big and small crowns match
++// f2  translucency (backlit leaf transmission) strength (0 = off)
++// f3  per-tree colour variation amplitude (0 = off, 1 = +-10% value, hue swing)
++// f4  sky occlusion inside the crown (0 = shipped crownSky, 1 = optical depth / 2 toward the sky)
++// f5  in-crown multiple scattering (green fill of the lost sky and sun light), 0..1
++// f6  packed: units = research debug view (1 sun depth fraction, 2 translucency only,
++//     3 crown sky, 4 tree hash, 5 exit visibility, 6 front sun visibility);
++//     tens = tenths of the leaf-green share of the transmission tint (0 = texture chroma only);
++//     hundreds = 1: sky light transmitted through thin crown edges (sky rim)
++// f7  sun self-shadow weight of the analytic crown depth (0..1)
++float folKnob(float v, float d) { return v > 0.0 ? v : d; }
++
++// Distance (m) from the point e inside the unit sphere to the sphere along a,
++// where a is a world direction mapped into the sphere's space.
++float crownExit(vec3 e, vec3 a) {
++    float A = max(dot(a, a), 1e-10);
++    float B = dot(e, a);
++    float C = dot(e, e) - 1.0;
++    return max((-B + sqrt(max(B * B - A * C, 0.0))) / A, 0.0);
++}
++
++// The same depth as a fraction of the crown's diameter along a (0..1).
++float crownDepthN(vec3 e, vec3 a) {
++    return clamp(crownExit(e, a) * length(a) * 0.5, 0.0, 1.0);
++}
++
++uint folHash(uvec2 v) {
++    uint h = v.x * 1664525u + v.y * 1013904223u + 374761393u;
++    h ^= h >> 16;
++    h *= 0x7feb352du;
++    h ^= h >> 15;
++    h *= 0x846ca68bu;
++    h ^= h >> 16;
++    return h;
++}
++
++// Three uniform numbers per object, from its world origin (half-metre cells,
++// offset by a quarter cell so integer-placed objects never sit on an edge).
++vec3 folTreeRand(vec3 originAbs) {
++    ivec2 c = ivec2(floor(originAbs.xz * 2.0 + 0.5)) + ivec2(65536);
++    uint h = folHash(uvec2(c));
++    return vec3(float(h & 1023u), float((h >> 10) & 1023u), float((h >> 20) & 1023u)) / 1023.0;
++}
++
+ vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
+ vec3 toDisplay(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
+ 
+@@ -157,9 +215,43 @@
+     return 1.0 - (1.0 - lit) * fade;
+ }
+ 
++// Foliage research: sun visibility of a point in the air (camera relative),
++// no normal offset, one cascade, 4 wide taps. Used at the point where the sun
++// ray leaves a leaf's own crown, so the crown never shadows its own
++// translucency but other trees and buildings do.
++float shadowMapVisibilityAt(vec3 relIn) {
++    if (shadowCtl.x < 0.5) return 1.0;
++    vec3 rel = relIn + litShadowDelta.xyz;
++    int nC = int(cascadeCtl.x);
++    int omniN = int(cascadeCtl.w);
++    float eyeDepth = dot(rel, camFwd.xyz);
++    float dist3D = length(rel);
++    int ci = nC;
++    for (int i = 0; i < 4; ++i) {
++        if (i >= nC) break;
++        float metric = (i < omniN) ? dist3D : eyeDepth;
++        if (metric <= cascadeSplits[i]) { ci = i; break; }
++    }
++    if (ci >= nC) return 1.0;
++    vec4 cp = cascadeVP[ci] * vec4(rel, 1.0);
++    vec3 sc = cp.xyz / cp.w;
++    vec2 suv = sc.xy * 0.5 + 0.5;
++    if (!(suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0)) return 1.0;
++    float bias = cascadeCtl.z * float(ci + 1) * float(ci + 1);
++    float radius = 2.0 * shadowCtl.w * litShadowDelta.w / float(ci + 1);
++    float lit = 0.0;
++    for (int k = 0; k < 4; ++k)
++        lit += texture(shadowMap, vec4(suv + kPoisson[k * 3] * radius, float(ci), sc.z - bias));
++    lit *= 0.25;
++    float fade = clamp((cascadeSplits[nC - 1] - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
++    return 1.0 - (1.0 - lit) * fade;
++}
++
+ // Colour of the light the ground below bounces (luminance 1; white when there
+ // is no map). Set by terrainSunVisibility, read by skyIrradiance.
+ vec3 g_groundTint = vec3(1.0);
++// Terrain height under the last shaded point (research: canopy map), -1e6 = no map.
++float g_groundY = -1e6;
+ 
+ // Hills shadowing the sun, from the precomputed horizon map. Also returns the
+ // terrain sky visibility (valley floors see less sky) and sets the ground
+@@ -173,6 +265,7 @@
+     if (g.x < 0.0 || g.y < 0.0 || g.x > last || g.y > last) return 1.0;
+     vec2 uv = (g + 0.5) * litTerrain.z;
+     vec4 hs = texture(terrainHeight, uv);
++    g_groundY = hs.x;
+     g_groundTint = vec3(hs.b, (1.0 - 0.2126 * hs.b - 0.0722 * hs.a) / 0.7152, hs.a);
+     float lift = smoothstep(litTerrainLift.x, litTerrainLift.y, posAbs.y - hs.x);
+     skyVisibility = mix(1.0, mix(hs.g, 1.0, lift), litTerrain.w);
+@@ -201,6 +294,71 @@
+     return mix(1.0, litCloud.y, covered);
+ }
+ 
++// ---- canopy map research (knobs c0..c7) -----------------------------------
++// c0  canopy sky occlusion strength (0 off)
++// c1  canopy sun shadow beyond the shadow-map range (0 off, 1 full)
++// c2  debug: 1 cover, 2 canopy sun visibility, 3 canopy sky occlusion
++// c3  extinction per metre of canopy along the sun ray (default 0.12)
++vec2 canopyUV(vec2 xz) { return xz * (litTerrain.y * litTerrain.z); }
++
++// Share of the sky hidden by the canopy around and above a point: the crown
++// right above (6 m texels, skipped for leaves, whose own crown is the crown
++// model's business) and the stand around it (25 m and 100 m mips), each
++// counted while the point is below that canopy's top.
++float canopySkyOcclusion(vec3 posAbs, bool foliage) {
++    if (g_groundY < -9e5) return 0.0;
++    vec2 uv = canopyUV(posAbs.xz);
++    float h = posAbs.y - g_groundY;
++    vec4 c0 = textureLod(canopyMap, uv, 0.0);
++    vec4 c2 = textureLod(canopyMap, uv, 2.0);
++    vec4 c4 = textureLod(canopyMap, uv, 4.0);
++    float top0 = c0.g / max(c0.r, 1e-3);
++    float base0 = c0.b / max(c0.r, 1e-3);
++    float top2 = c2.g / max(c2.r, 1e-3);
++    float top4 = c4.g / max(c4.r, 1e-3);
++    float below0 = clamp((top0 - h) / max(top0 - base0, 2.0), 0.0, 1.0);
++    float below2 = clamp((top2 - h) / max(0.6 * top2, 2.0), 0.0, 1.0);
++    float below4 = clamp((top4 - h) / max(0.6 * top4, 2.0), 0.0, 1.0);
++    float occ = 0.3 * c2.r * below2 + 0.25 * c4.r * below4;
++    if (!foliage) occ += 0.45 * c0.r * below0;
++    return clamp(occ, 0.0, 1.0);
++}
++
++// Sun through the canopy layer: a march toward the sun over the canopy map
++// (and the terrain height), steps growing from 3 m to ~45 m, out to ~170 m.
++float canopySunVisibility(vec3 posAbs, float startT) {
++    vec3 l = litSunDir.xyz;
++    if (l.y <= 0.02 || g_groundY < -9e5) return 1.0;
++    float sigma = litResearch2.w > 0.0 ? litResearch2.w : 0.12;
++    float occ = 0.0;
++    float t = max(startT, 1.5);
++    float stepLen = 3.0;
++    for (int i = 0; i < 10; ++i) {
++        vec3 p = posAbs + l * (t + 0.5 * stepLen);
++        vec4 c = textureLod(canopyMap, canopyUV(p.xz), 0.0);
++        float g = texture(terrainHeight, (p.xz * litTerrain.y + 0.5) * litTerrain.z).r;
++        float h = p.y - g;
++        float top = c.g / max(c.r, 1e-3);
++        float base = c.b / max(c.r, 1e-3);
++        float inside = c.r * smoothstep(top + 0.5, top - 1.5, h) * smoothstep(base - 1.5, base + 0.5, h);
++        occ += inside * stepLen * sigma;
++        if (h > 45.0) break;
++        t += stepLen;
++        stepLen *= 1.35;
++    }
++    return exp(-occ);
++}
++
++// 0 inside the shadow-map range, 1 beyond it (and everywhere without maps).
++float canopyFarWeight() {
++    if (shadowCtl.x < 0.5) return 1.0;
++    int nC = int(cascadeCtl.x);
++    if (nC < 1) return 1.0;
++    float last = cascadeSplits[nC - 1];
++    float eyeDepth = dot(vWorldRel, camFwd.xyz);
++    return smoothstep(last - max(cascadeCtl.y, 1.0), last, eyeDepth);
++}
++
+ // Irradiance from the sky hemisphere (and the ground below it) onto a surface
+ // with normal n. The horizon band is brighter, and takes the sky's colour,
+ // toward the sun; opposite the sun it keeps the cool zenith colour, so a low
+@@ -257,6 +415,37 @@
+     return sum;
+ }
+ 
++// Foliage research: local lights on a crown. The crown normal with a wrapped
++// terminator instead of the scattered card normal, and leaves between the
++// viewer and a lamp glow with the light they pass (tinted by the leaf).
++vec3 localLightsFoliage(vec3 nL, vec3 v, vec3 kd, vec3 ka, vec3 tint, float trans) {
++    vec3 sum = vec3(0.0);
++    int count = int(litLightCount.x);
++    for (int i = 0; i < 8; ++i) {
++        if (i >= count) break;
++        vec3 toLight = litLightPos[i].xyz - vWorldRel;
++        float d2 = dot(toLight, toLight);
++        float start2 = litLightPos[i].w * litLightPos[i].w;
++        float end2 = start2 * 100.0;
++        if (d2 >= end2) continue;
++        float cone = 1.0;
++        if (litLightColor[i].w > 0.5) {
++            float inside = -dot(toLight, litLightDir[i].xyz);
++            if (inside <= 0.0) continue;
++            float cos2 = inside * inside / max(d2, 1e-6);
++            cone = smoothstep(0.9415, 0.9806, cos2);
++            if (cone <= 0.0) continue;
++        }
++        float atten = (d2 > start2) ? start2 / d2 : 1.0;
++        atten *= 1.0 - smoothstep(0.5 * end2, end2, d2);
++        vec3 ld = toLight * inversesqrt(max(d2, 1e-6));
++        float wrapL = clamp((dot(ld, nL) + 0.35) / 1.35, 0.0, 1.0);
++        float through = trans * pow(max(dot(-v, ld), 0.0), 3.0);
++        sum += (kd * litLightColor[i].rgb * (wrapL + through * tint) + ka * litLightAmb[i].rgb) * (atten * cone);
++    }
++    return sum;
++}
++
+ // Sun highlight and sky reflection for glossy materials (specular power > 0).
+ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
+     float power = litMatSpecular.w;
+@@ -282,6 +471,172 @@
+ // Sun visibility of the last shaded fragment (water reuses it for its glint).
+ float g_sunVisibility = 1.0;
+ 
++// Foliage research: a crown lit as a participating volume. The crown is the
++// ellipsoid fitted to the shape; a ray/ellipsoid intersection gives every leaf
++// fragment its depth inside the crown toward the sun, the sky and the moon in
++// metres. From that:
++//  - the sun reaching a leaf falls off with depth (Beer-Lambert), so the core
++//    and the far side of a crown darken even beyond the shadow-map range;
++//  - leaves facing away from the sun transmit it, tinted by the leaf (a second
++//    pass through chlorophyll), strongest looking into the sun and where the
++//    crown is thin: backlit crowns glow at their edges;
++//  - light lost inside the crown is partly re-scattered by the leaves, so the
++//    shade of a crown is a saturated green rather than a grey;
++//  - each tree gets a small value / hue / saturation offset from its position.
++vec3 shadeFoliageResearch(vec3 albedo, vec3 n, vec3 v, out float ambientShare) {
++    vec3 posAbs = vWorldRel + litCamPos.xyz;
++    vec3 l = litSunDir.xyz;
++    float sunOn = litSunDir.w;
++    vec3 cn = vCrown.xyz * inversesqrt(max(dot(vCrown.xyz, vCrown.xyz), 1e-12));
++    vec3 card = dot(n, cn) < 0.0 ? -n : n;
++    vec3 nLight = normalize(card * 0.3 + cn * 0.7);
++    vec3 nCast = dot(n, l) < 0.0 ? -n : n;
++    float nlCast = max(dot(nCast, l), 0.0);
++
++    float tauC = folKnob(litResearch0.y, 2.0);
++    float tintGreenGate = 1.0;
++    float transK = litResearch0.z;
++    float varAmp = litResearch0.w;
++    float skyK = litResearch1.x;
++    float msK = litResearch1.y;
++    float fPack = litResearch1.z;
++    float dbg = mod(fPack, 10.0);
++    float tintGreen = mod(floor(fPack / 10.0), 10.0) / 10.0;
++    float skyRim = floor(fPack / 100.0);
++    // Leaves are alpha-cut textures (alpha test, or alpha-to-coverage under
++    // MSAA); bark and branches in the same half-lit material are opaque. Only
++    // leaves transmit light or take the leaf tint.
++    // (Alpha test turned out to be on for whole trees, trunks included.) A
++    // trunk is the thin column on the crown's vertical axis below the crown:
++    // keep bark out of the leaf terms by that geometry instead.
++    float trunk = (1.0 - smoothstep(0.07, 0.16, length(vCrownE.xz))) * (1.0 - smoothstep(-0.55, -0.35, vCrownE.y));
++    float leafDraw = 1.0 - trunk;
++    transK *= leafDraw;
++    tintGreenGate = leafDraw;
++    float selfK = litResearch1.w;
++
++    mat3 Am = mat3(vCrownA0, vCrownA1, vCrownA2);
++    vec3 e = vCrownE / max(1.0, length(vCrownE));
++    vec3 aSun = Am * l;
++    float dSunM = crownExit(e, aSun);                     // metres, for the exit point
++    float dSun = clamp(dSunM * length(aSun) * 0.5, 0.0, 1.0);
++    float dUp = crownDepthN(e, Am * vec3(0.0, 1.0, 0.0));
++    float dOut = crownDepthN(e, Am * cn);
++    float dMoon = crownDepthN(e, Am * litMoonDir.xyz);
++
++    // Per-tree colour: value +-10%, a hue swing between yellow-green and
++    // blue-green, saturation +-15% (times the amplitude knob).
++    vec3 a = toLinear(albedo);
++    vec3 rnd = folTreeRand(vOrigin + litCamPos.xyz);
++    varAmp *= mix(0.5, 1.0, leafDraw);
++    if (varAmp > 0.0) {
++        float val = 1.0 + varAmp * 0.10 * (rnd.x * 2.0 - 1.0);
++        vec3 hue = mix(vec3(1.04, 1.0, 0.90), vec3(0.94, 1.0, 1.08), rnd.y);
++        hue /= dot(hue, kLuma);
++        float sat = 1.0 + varAmp * 0.15 * (rnd.z * 2.0 - 1.0);
++        vec3 c = a * mix(vec3(1.0), hue, min(varAmp, 1.0));
++        float lum = dot(c, kLuma);
++        a = max(mix(vec3(lum), c, sat) * val, vec3(0.0));
++    }
++    // Leaf colour of light that passed through or between leaves: the leaf's
++    // chroma at luminance 1.
++    float la = max(dot(a, kLuma), 1e-5);
++    vec3 chroma = clamp(a / la, 0.0, 4.0);
++    // How leaf-like the texel is: saturated, and green above blue. White
++    // flowers, blue-grey foliage and bark keep their own colour.
++    float amax = max(a.r, max(a.g, a.b));
++    float asat = (amax - min(a.r, min(a.g, a.b))) / max(amax, 1e-5);
++    float leafy = smoothstep(0.15, 0.45, asat) * smoothstep(-0.02, 0.06, (a.g - a.b) / la);
++    vec3 tint = mix(vec3(1.0), chroma, 0.7);
++    tint /= max(dot(tint, kLuma), 1e-5);
++    // Light that went through a leaf lost most of its red and blue to
++    // chlorophyll: lean the tint toward a leaf-transmission yellow-green so an
++    // olive or brown leaf texture glows green, not mustard.
++    const vec3 kLeafTrans = vec3(0.30, 1.0, 0.07) / (0.2126 * 0.30 + 0.7152 + 0.0722 * 0.07);
++    // Transmission gets the full green lean; light scattered between leaves
++    // (the in-crown fill) keeps mostly the texture's own chroma.
++    vec3 tintT = mix(tint, kLeafTrans, tintGreen * tintGreenGate * leafy);
++    tint = mix(vec3(1.0), mix(tint, kLeafTrans, 0.3 * tintGreen * leafy), tintGreenGate);
++
++    float skyVisibility;
++    float sMap = shadowMapVisibility(nCast, nlCast, 1.0);
++    float tVis = terrainSunVisibility(posAbs, skyVisibility);
++    float cVis = cloudSunVisibility(posAbs);
++    float tSun = exp(-tauC * dSun);
++    float visFront = min(sMap, mix(1.0, tSun, selfK)) * tVis * cVis;
++    g_sunVisibility = visFront;
++    float visExit = tVis * cVis;
++    if (sunOn > 0.0 && (transK > 0.0 || msK > 0.0) && visExit > 0.0)
++        visExit *= shadowMapVisibilityAt(vWorldRel + l * (dSunM + 0.75));
++    float canSun = 1.0;
++    float canSky = 0.0;
++    if (litResearch2.x > 0.0 || litResearch2.y > 0.0) {
++        canSky = canopySkyOcclusion(posAbs, true);
++        skyVisibility *= 1.0 - litResearch2.x * canSky;
++        float far = canopyFarWeight() * litResearch2.y;
++        if (far > 0.0 && sunOn > 0.0) {
++            canSun = mix(1.0, canopySunVisibility(posAbs, dSunM + 1.0), far);
++            visFront *= canSun;
++            visExit *= canSun;
++            g_sunVisibility = visFront;
++        }
++    }
++
++    vec3 kd = litMatDiffuse.rgb;
++    vec3 ka = litMatAmbient.rgb;
++    vec3 m = kd + litMatForced.rgb;
++    float wrapSun = clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0);
++    vec3 reflSun = m * (wrapSun * visFront);
++    vec3 msSun = m * tint * (msK * 0.35 * exp(-0.5 * tauC * dSun) * visExit);
++    float backL = clamp(0.5 - 0.5 * dot(nLight, l), 0.0, 1.0);
++    float cosFwd = max(dot(-v, l), 0.0);
++    float fwd2 = cosFwd * cosFwd;
++    float fwd = fwd2 * fwd2 * fwd2; // cos^6: the glow gathers around the sun
++    // Transmitted light keeps more of its energy than the direct beam (it is
++    // forward scattered through the leaves): half the optical depth.
++    vec3 trans = m * tintT * (transK * exp(-0.75 * tauC * dSun) * visExit * backL * (0.2 + 1.8 * fwd));
++    vec3 direct = litSun.rgb * (reflSun + msSun + trans) * sunOn;
++    // Sky behind a thin crown edge shines through it (the viewer looks through
++    // the leaves at the sky): the depth of the crown behind the leaf, away from
++    // the viewer, decides how much.
++    vec3 rim = vec3(0.0);
++    if (skyRim > 0.5) {
++        float dBack = crownDepthN(e, Am * (-v));
++        rim = ka * tintT * skyIrradiance(-v) * (0.6 * transK * exp(-tauC * dBack) * sunOn);
++    }
++
++    float crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
++    float vSky = skyK > 0.0 ? mix(1.0, exp(-0.5 * tauC * 0.5 * (dUp + dOut)), clamp(skyK, 0.0, 1.0)) : crownSky;
++    vec3 ambient = ka * skyIrradiance(nLight) * (skyVisibility * sunOn) * (vSky + (1.0 - vSky) * (msK * 0.6) * tint);
++    float moonSelf = mix(1.0, exp(-tauC * dMoon), selfK);
++    vec3 moon = kd * litMoon.rgb * (max(dot(nLight, litMoonDir.xyz), 0.0) * moonSelf * sunOn);
++    vec3 local = toLinear(min(localLightsFoliage(nLight, v, kd, ka, tintT, transK) * litGround.w, vec3(1.5)));
++    vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
++
++    float exposure = litZenith.w;
++    vec3 radiance = (a * (direct + ambient + rim + moon + local + emissive) + glossy(n, v, visFront) * sunOn) * exposure;
++    float total = dot(radiance, kLuma);
++    ambientShare = 0.5 * clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
++
++    if (litResearch2.z > 0.5) {
++        if (litResearch2.z < 1.5) return vec3(textureLod(canopyMap, canopyUV(posAbs.xz), 0.0).r, 0.0, 0.0);
++        if (litResearch2.z < 2.5) return vec3(canSun);
++        return vec3(1.0 - canSky);
++    }
++    if (dbg > 0.5) {
++        if (dbg < 1.5) return vec3(dSun);
++        if (dbg < 2.5) return toDisplay(tonemapNeutral(a * litSun.rgb * trans * (sunOn * exposure)));
++        if (dbg < 3.5) return vec3(vSky);
++        if (dbg < 4.5) return rnd;
++        if (dbg < 5.5) return vec3(visExit);
++        if (dbg < 6.5) return vec3(visFront);
++        return vec3(leafDraw, 1.0 - leafDraw, 0.0);
++    }
++    vec3 display = toDisplay(tonemapNeutral(radiance));
++    float grey = dot(display, kLuma);
++    return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
++}
++
+ // Lights a fragment of a VSTransform draw. `albedo` is the display-space surface
+ // colour (texture, tint and detail already applied); `terrain` marks surfaces
+ // that never cast into the shadow map. Returns the tonemapped display-space
+@@ -300,6 +655,7 @@
+     // leaves), keep some sun inside the crown's own shadow and dim the sky fill
+     // toward the crown's core.
+     bool foliage = dot(litMatForced.rgb, kLuma) > 1e-4;
++    if (foliage && vCrown.w > 0.0 && litResearch0.x > 0.5) return shadeFoliageResearch(albedo, n, v, ambientShare);
+     vec3 nCast = (foliage && dot(n, l) < 0.0) ? -n : n;
+     vec3 nLight = n;
+     float crownSky = 1.0;
+@@ -319,6 +675,17 @@
+     float skyVisibility;
+     float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0) *
+                           terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
++    float canSun = 1.0;
++    float canSky = 0.0;
++    if (litResearch2.x > 0.0 || litResearch2.y > 0.0) {
++        canSky = canopySkyOcclusion(posAbs, foliage);
++        skyVisibility *= 1.0 - litResearch2.x * canSky;
++        float far = canopyFarWeight() * litResearch2.y;
++        if (far > 0.0 && sunOn > 0.0) {
++            canSun = mix(1.0, canopySunVisibility(posAbs, 1.0), far);
++            sunVisibility *= canSun;
++        }
++    }
+     g_sunVisibility = sunVisibility;
+ 
+     vec3 kd = litMatDiffuse.rgb;
+@@ -345,6 +712,11 @@
+     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+     if (foliage) ambientShare *= 0.5;
+ 
++    if (litResearch2.z > 0.5) {
++        if (litResearch2.z < 1.5) return vec3(textureLod(canopyMap, canopyUV(posAbs.xz), 0.0).r, 0.0, 0.0);
++        if (litResearch2.z < 2.5) return vec3(canSun);
++        return vec3(1.0 - canSky);
++    }
+     if (litFlags.z > 0.5) {
+         // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
+         if (litFlags.z < 1.5) return vec3(sunVisibility);
+--- shipped/vsTransformRemaster.glsl
++++ ov8/vsTransformRemaster.glsl
+@@ -36,6 +36,18 @@
+ out vec3 vWorldRel;
+ out vec3 vNormalW;
+ out vec4 vCrown;
++// Foliage research: the position inside the crown ellipsoid (unit-sphere
++// space) and the matrix A that takes a world direction into that space, as
++// three columns. A world ray p + t d (t in metres) is e + t (A d) there, so a
++// ray / unit-sphere intersection gives the leaf's depth inside its crown in
++// metres along any direction. vOrigin is the object's origin (camera
++// relative); the fragment shader adds the camera position for a stable
++// per-tree hash.
++out vec3 vCrownE;
++out vec3 vCrownA0;
++out vec3 vCrownA1;
++out vec3 vCrownA2;
++out vec3 vOrigin;
+ flat out float vLitMode;
+ 
+ void main() {
+@@ -46,19 +58,24 @@
+     vWorldRel        = worldPos.xyz; // camera-relative world position
+     vNormalW         = worldNormal;
+     vLitMode         = 1.0;
+-    // Crown frame for foliage: the position inside an ellipsoid fitted to the
+-    // shape (w = 1 on its surface) and the ellipsoid's outward normal, which
+-    // lights a tree crown as one volume instead of as scattered leaf cards.
++    vOrigin          = worldArr[gl_InstanceID][3].xyz;
+     if (crownCenter.w > 0.5) {
+         vec3 e = (pos - crownCenter.xyz) * crownScale.xyz;
+         vCrown = vec4(mat3(worldArr[gl_InstanceID]) * (e * crownScale.xyz), length(e));
++        mat3 winv = inverse(mat3(worldArr[gl_InstanceID]));
++        vCrownE  = e;
++        // A = diag(crownScale) * winv; column j = crownScale * winv[j].
++        vCrownA0 = winv[0] * crownScale.xyz;
++        vCrownA1 = winv[1] * crownScale.xyz;
++        vCrownA2 = winv[2] * crownScale.xyz;
+     } else {
+         vCrown = vec4(0.0);
++        vCrownE = vec3(0.0);
++        vCrownA0 = vec3(0.0);
++        vCrownA1 = vec3(0.0);
++        vCrownA2 = vec3(0.0);
+     }
+ 
+-    // The fragment shader lights per pixel. The vertex colour keeps the classic
+-    // sun term for the unlit fallback (PSFlat) and, above all, the classic
+-    // material alpha, which depends on N.L and fades objects in and out.
+     float NdotL = max(0.0, dot(worldNormal, -sunDir.xyz));
+     vec4 litColor;
+     litColor.rgb = emissive.rgb + ambient.rgb * sunEn.x + diffuse.rgb * NdotL * sunEn.x;
+--- shipped/vsScreenRemaster.glsl
++++ ov8/vsScreenRemaster.glsl
+@@ -30,6 +30,11 @@
+ out vec3 vWorldRel;
+ out vec3 vNormalW;
+ out vec4 vCrown;
++out vec3 vCrownE;
++out vec3 vCrownA0;
++out vec3 vCrownA1;
++out vec3 vCrownA2;
++out vec3 vOrigin;
+ flat out float vLitMode;
+ 
+ void main() {
+@@ -46,5 +51,10 @@
+     vWorldRel = vec3(0.0);
+     vNormalW = vec3(0.0, 1.0, 0.0);
+     vCrown = vec4(0.0);
++    vCrownE = vec3(0.0);
++    vCrownA0 = vec3(0.0);
++    vCrownA1 = vec3(0.0);
++    vCrownA2 = vec3(0.0);
++    vOrigin = vec3(0.0);
+     vLitMode = 0.0; // pre-lit colour: the fragment shader passes it through
+ }
+--- shipped/vsShadowRemaster.glsl
++++ ov8/vsShadowRemaster.glsl
+@@ -36,6 +36,11 @@
+ out vec3 vWorldRel;
+ out vec3 vNormalW;
+ out vec4 vCrown;
++out vec3 vCrownE;
++out vec3 vCrownA0;
++out vec3 vCrownA1;
++out vec3 vCrownA2;
++out vec3 vOrigin;
+ flat out float vLitMode;
+ 
+ void main() {
+@@ -49,5 +54,10 @@
+     vWorldRel     = vec3(0.0);
+     vNormalW      = vec3(0.0, 1.0, 0.0);
+     vCrown        = vec4(0.0);
++    vCrownE       = vec3(0.0);
++    vCrownA0      = vec3(0.0);
++    vCrownA1      = vec3(0.0);
++    vCrownA2      = vec3(0.0);
++    vOrigin       = vec3(0.0);
+     vLitMode      = 0.0;
+ }

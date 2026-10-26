@@ -1,0 +1,20 @@
+tests: the trailer's voice fitting, music, Shorts layout, thumbnail and fog checks
+
+The tools behind the finished part 1 trailer, saved before the scratch
+worktrees are cleaned up (they ran from the detached video-work copy):
+- trailer_v2.py: --layout short (1080x1920, vanilla on top, Uslu dur!
+  below, a caption band between; split and sbs proven byte-identical) and
+  an optional --timing file so the picture can follow a narrator's voice;
+- owner_vo.py: split a narration recording into lines and takes, pick,
+  clean lightly, fit the edit to the voice, mix and verify;
+- short_captions.py: the vertical captions, audio mux and phone previews;
+- run_v2_lane.ps1 -Expect N: collect a clip reshot longer than its table;
+- owner_take1/: the owner's free take (light clean, -16 LUFS) and the music
+  bed under each voice (ducked, CC BY 4.0 tracks; credits ship with the files);
+- thumbnail_bay/: the picked thumbnail's compositor and specs;
+- fogcheck/: the flicker and motion checks behind ITERATIONS.md F1 and F2.
+
+HANDOFF-2026-10-23.md gets a status block: both tasks done, the assets moved
+to Z:\uploads\uslu_dur_trailer_part1, and the junction warning for cleanup.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

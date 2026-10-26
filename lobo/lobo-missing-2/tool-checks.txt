@@ -1,0 +1,30 @@
+LoBo_FAB.pbo pbo list exit 0 lines 936
+LoBo_Ob.pbo pbo list exit 0 lines 833
+LoBoRadios.pbo pbo list exit 0 lines 26
+LoBo_F4.pbo pbo list exit 0 lines 113
+LoBo_M1.pbo pbo list exit 0 lines 99
+LoboF5.pbo pbo list exit 0 lines 53
+Traceback (most recent call last):
+  File "C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\d843177f-910b-4ac7-a0cb-9ea5c8b088a2\scratchpad\tool_checks.py", line 38, in <module>
+    res[label] = flat(json.loads(r.stdout.decode("utf8", errors="replace")))
+                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\json\__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Python313\Lib\json\decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\json\decoder.py", line 361, in raw_decode
+    obj, end = self.scan_once(s, idx)
+               ~~~~~~~~~~~~~~^^^^^^^^
+json.decoder.JSONDecodeError: Expecting ',' delimiter: line 1 column 6 (char 5)
+LoBo_FAB.pbo parsed leaves 2400 differences 1
+    ('/CfgVehicles/loBo_Snunit/picture', '\\LoBo_FAB\\Snunit.paa', '\\LoBo_FAB\\SN\\Snunit.paa')
+LoBo_Ob.pbo parsed leaves 1231 differences 1
+    ('/CfgVehicles/LoBo_B_Medic_MDA/icon', '\\LoBo_Ob\\bar\\b4.jpg', '\\Baracken\\b4.jpg')
+LoBoRadios.pbo parsed leaves 55 differences 2
+    ('/CfgWeapons/BAS_Satcom/picture', '\\LoBoRadios\\icon\\BAS_satcom.paa', '\\LoBoRadios\\icons\\BAS_satcom.paa')
+    ('/CfgWeapons/BAS_Satcom/uiPicture', '\\LoBoRadios\\icon\\BASirto.paa', '\\LoBoRadios\\icons\\BASirto.paa')
+lobo_m1a1e_r.p3d model inspect exit 0 ['File: D:\\Arma_CWA\\tmp\\lobo-missing-2\\work\\toolcheck\\lobo_m1a1e_r.p3d', 'Format: MLOD', 'Version: 257']
+lobo_f4_ww_iaf.p3d model inspect exit 0 ['File: D:\\Arma_CWA\\tmp\\lobo-missing-2\\work\\toolcheck\\lobo_f4_ww_iaf.p3d', 'Format: MLOD', 'Version: 257']
+LoBo_F5_AA_Jor.p3d model inspect exit 0 ['File: D:\\Arma_CWA\\tmp\\lobo-missing-2\\work\\toolcheck\\LoBo_F5_AA_Jor.p3d', 'Format: MLOD', 'Version: 257']

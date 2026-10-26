@@ -1,0 +1,10 @@
+{
+  "id": "b19",
+  "bank": "kBio1Hostile",
+  "variant": 0,
+  "text": "After working as a school inspector, {Name} supervised police near {Place}. When residents came to the police office seeking protection from soldiers, the former inspector ordered the visitors detained.",
+  "word_count": 29,
+  "self_review": "A former school inspector took charge of police and ordered residents seeking protection detained.",
+  "source_pattern": "The supplied Akayesu judgment documents a school inspector becoming a local official with police authority and later participating in crimes.",
+  "fictional_changes": "The police-supervisor appointment and detention of petitioners are fictional. The card omits real communities, chronology, crimes, and political identities."
+}

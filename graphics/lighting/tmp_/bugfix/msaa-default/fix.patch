@@ -1,0 +1,239 @@
+diff --git a/arma_CWR/apps/cwr/Game/GameApplication.cpp b/arma_CWR/apps/cwr/Game/GameApplication.cpp
+index 388c513..706f789 100644
+--- a/arma_CWR/apps/cwr/Game/GameApplication.cpp
++++ b/arma_CWR/apps/cwr/Game/GameApplication.cpp
+@@ -412,8 +412,8 @@ void LoadAndApplyGraphicsConfig()
+     }
+ 
+     if (cfg.Migrate(refreshHz) && cfg.Save(path))
+-        LOG_INFO(Graphics, "LoadGraphicsConfig: migrated '{}' to version {} (fpsCap={}, display {} Hz)", path,
+-                 GraphicsConfig::kVersion, cfg.fpsCap, refreshHz);
++        LOG_INFO(Graphics, "LoadGraphicsConfig: migrated '{}' to version {} (fpsCap={}, display {} Hz, msaa={})", path,
++                 GraphicsConfig::kVersion, cfg.fpsCap, refreshHz, cfg.msaaSamples);
+ 
+     LiveGraphicsEnv env;
+     if (cfg.Normalize(env))
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index f994cd0..59ae967 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -73,6 +73,10 @@ well above the ~0.42 of the shadow-map darkening that reviewers called crushed.
+ 
+ - Options > Graphics > **Lighting**: Classic or Remastered (the default on this
+   branch). Remastered turns the shadow maps on unless the shadow quality is Off.
++- Options > Graphics > **Anti-aliasing**: 4x MSAA by default. Opaque cutouts
++  (foliage, fences) use alpha-to-coverage with alpha-to-one; blended draws
++  (camouflage nets, glass) keep plain blending. A graphics.cfg older than v3
++  holding the old default Off is lifted to 4x once; Off chosen after that stays.
+ - Dev overlay, **Lighting** tab: live sliders for exposure, sun, sky, bounce,
+   warmth, saturation, specular, local lights, moonlight, terrain shadows and
+   occlusion, cloud shadows, shadow softness, AO, bloom and shafts, plus debug
+diff --git a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.cpp b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.cpp
+index a72ef0d..3b164dd 100644
+--- a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.cpp
++++ b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.cpp
+@@ -110,9 +110,15 @@ bool GraphicsConfig::Migrate(int refreshHz)
+ 
+     // A cap of 0 below v2 is indistinguishable from the old default, so it is
+     // taken as never set.  From v2 on it is the user's Unlimited and survives.
+-    if (fpsCap == 0)
++    if (version < 2 && fpsCap == 0)
+         fpsCap = FpsCapForRefreshRate(refreshHz);
+ 
++    // MSAA was off by default below v3 and every save wrote that 0, so a 0
++    // there is taken as never chosen.  2x and 8x were chosen and stay; from v3
++    // on 0 is the user's Off and survives.
++    if (version < 3 && msaaSamples == 0)
++        msaaSamples = kDefaultMsaaSamples;
++
+     version = kVersion;
+     return true;
+ }
+diff --git a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.hpp b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.hpp
+index c9c9f64..1a94df5 100644
+--- a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.hpp
++++ b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsConfig.hpp
+@@ -71,6 +71,9 @@ public:
+ 		LightingRemastered = 1,
+ 	};
+ 
++	// Anti-aliasing out of the box: 4x MSAA, with alpha-to-coverage on cutouts.
++	static constexpr int kDefaultMsaaSamples = 4;
++
+ 	// Persistable fields.
+ 	Preset    qualityPreset    = PresetUltra;
+ 	Tier      terrainDetail    = TierUltra;     // → grid 6.25 m
+@@ -86,7 +89,7 @@ public:
+ 	float     renderScale      = 1.0f;          // SSAA: render at scale x window and downsample.
+ 	                                             // 1.0 = off; up to 2.0.  The only general cure for
+ 	                                             // sub-pixel OPAQUE geometry sparkle (fence bars)
+-	int       msaaSamples      = 0;             // MSAA on the frame target: 0 (off) / 2 / 4 / 8
++	int       msaaSamples      = kDefaultMsaaSamples; // MSAA on the frame target: 0 (off) / 2 / 4 / 8
+ 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
+ 	                                             // objects.  Off drops those draws to the base texture
+ 	LightingMode lighting      = LightingRemastered; // Classic = the original lighting, unchanged
+@@ -95,7 +98,7 @@ public:
+ 
+ 	// Schema version of the persisted file.  Load resets this to 0 first, so a
+ 	// file written before versioning reads back as 0 and Migrate can act on it.
+-	static constexpr int kVersion = 2;
++	static constexpr int kVersion = 3;
+ 	int       version          = kVersion;
+ 
+ 	// Bring a loaded config up to kVersion.  Returns true when the caller needs
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.cpp
+index 0ac32e0..a7e46cb 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.cpp
+@@ -292,9 +292,9 @@ EngineGL33::EngineGL33(int width, int height, bool windowed, int bpp)
+ 
+     // The default framebuffer is single-sampled on purpose: every frame
+     // renders into the offscreen frame target (BindFrameRenderTarget), which
+-    // carries the MSAA samples — 8x at render scale 1, 4x at SSAA scales —
+-    // and resolves into the window with a blit.  A multisampled window
+-    // framebuffer would make the scaled-resolve blit illegal
++    // carries the configured MSAA samples (GraphicsConfig, 4x by default) at
++    // the configured render scale, and resolves into the window with a blit.
++    // A multisampled window framebuffer would make the scaled-resolve blit illegal
+     // (GL_INVALID_OPERATION: scaling blits need single-sampled targets) and
+     // glReadPixels on it is out-of-spec anyway.
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+index b3d955d..19e7413 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+@@ -441,7 +441,9 @@ void EngineGL33::ApplyPendingRenderScale()
+     // is single-sampled (scaling blits into a multisampled target are
+     // illegal), so the frame target carries whatever AA is configured: the
+     // MSAA sample count and the SSAA scale are both live knobs (dev panel
+-    // Render tab / GraphicsConfig).  Both default OFF.
++    // Render tab / GraphicsConfig).  The engine starts with both off until
++    // GraphicsConfig applies the user's values at boot (4x MSAA, scale 1 by
++    // default).
+     const float want = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
+     const int sw = static_cast<int>(winW * want + 0.5f);
+     const int sh = static_cast<int>(winH * want + 0.5f);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/UI/Settings/test_graphicsConfig.cpp b/arma_CWR/tests/unit/engine/Poseidon/UI/Settings/test_graphicsConfig.cpp
+index 526b471..a291dfc 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/UI/Settings/test_graphicsConfig.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/UI/Settings/test_graphicsConfig.cpp
+@@ -48,6 +48,9 @@ TEST_CASE("GraphicsConfig: factory defaults match spec", "[Settings][GraphicsCon
+     CHECK(c.particlesQuality == GraphicsConfig::TierHigh);
+     CHECK(c.vsync == GraphicsConfig::VsyncOn);
+     CHECK(c.fpsCap == 0); // Unlimited
++    CHECK(c.msaaSamples == 4);
++    CHECK(c.alphaToCoverage);
++    CHECK(c.renderScale == 1.0f);
+     CHECK(c.brightness == 1.6f);
+     CHECK(c.gamma == 1.2f);
+     CHECK(c.version == GraphicsConfig::kVersion);
+@@ -162,6 +165,90 @@ TEST_CASE("GraphicsConfig: Unlimited survives once the file is current", "[Setti
+     CHECK(c.fpsCap == 0);
+ }
+ 
++// v2 already made a cap of 0 the user's Unlimited; a later bump must keep it.
++TEST_CASE("GraphicsConfig: a v2 Unlimited cap survives the v3 migration", "[Settings][GraphicsConfig]")
++{
++    GraphicsConfig c;
++    c.version = 2;
++    c.fpsCap = 0;
++
++    REQUIRE(c.Migrate(144));
++    CHECK(c.fpsCap == 0);
++    CHECK(c.version == GraphicsConfig::kVersion);
++}
++
++// Below v3 MSAA defaulted to off and every save wrote that 0.
++TEST_CASE("GraphicsConfig: Migrate turns an untouched MSAA Off into 4x", "[Settings][GraphicsConfig]")
++{
++    for (int version : {0, 1, 2})
++    {
++        INFO("from version " << version);
++        GraphicsConfig c;
++        c.version = version;
++        c.msaaSamples = 0;
++
++        REQUIRE(c.Migrate(60));
++        CHECK(c.msaaSamples == 4);
++        CHECK(c.version == GraphicsConfig::kVersion);
++    }
++}
++
++TEST_CASE("GraphicsConfig: Migrate keeps an MSAA count the user chose", "[Settings][GraphicsConfig]")
++{
++    for (int chosen : {2, 4, 8})
++    {
++        INFO("samples " << chosen);
++        GraphicsConfig c;
++        c.version = 2;
++        c.msaaSamples = chosen;
++
++        REQUIRE(c.Migrate(60));
++        CHECK(c.msaaSamples == chosen);
++    }
++}
++
++TEST_CASE("GraphicsConfig: MSAA Off survives once the file is current", "[Settings][GraphicsConfig]")
++{
++    GraphicsConfig c;
++    c.version = GraphicsConfig::kVersion;
++    c.msaaSamples = 0;
++
++    CHECK_FALSE(c.Migrate(60));
++    CHECK(c.msaaSamples == 0);
++}
++
++// The boot path end to end: a v2 file from before the default changed gets 4x
++// once, and an Off picked after that comes back as Off on every later boot.
++TEST_CASE("GraphicsConfig: an old file gets 4x MSAA once, a later Off sticks", "[Settings][GraphicsConfig]")
++{
++    const std::string path = TmpPath("graphics.cfg");
++    {
++        std::ofstream out(path, std::ios::trunc);
++        out << "qualityPreset=3;\nmsaaSamples=0;\nfpsCap=60;\nversion=2;\n";
++    }
++
++    GraphicsConfig first;
++    REQUIRE(first.Load(path));
++    REQUIRE(first.version == 2);
++    REQUIRE(first.Migrate(60));
++    CHECK(first.msaaSamples == 4);
++    REQUIRE(first.Save(path));
++
++    GraphicsConfig second;
++    REQUIRE(second.Load(path));
++    CHECK(second.version == GraphicsConfig::kVersion);
++    CHECK_FALSE(second.Migrate(60));
++    CHECK(second.msaaSamples == 4);
++
++    second.msaaSamples = 0; // the user picks Off in Options
++    REQUIRE(second.Save(path));
++
++    GraphicsConfig third;
++    REQUIRE(third.Load(path));
++    CHECK_FALSE(third.Migrate(60));
++    CHECK(third.msaaSamples == 0);
++}
++
+ TEST_CASE("GraphicsConfig: a file without a version reloads as version 0", "[Settings][GraphicsConfig]")
+ {
+     const std::string path = TmpPath("graphics.cfg");
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/UI/test_graphics_page.cpp b/arma_CWR/tests/unit/engine/Poseidon/UI/test_graphics_page.cpp
+index 7da4b7a..b5a8f93 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/UI/test_graphics_page.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/UI/test_graphics_page.cpp
+@@ -119,11 +119,11 @@ TEST_CASE("GraphicsPage anti-aliasing rows round-trip through the provider", "[U
+     TestableGraphicsPage page;
+     auto& p = page.Provider();
+ 
+-    CHECK(p.RowValue(10) == 0);
++    CHECK(p.RowValue(10) == 2); // 4x MSAA by default
+     CHECK(p.RowValue(11) == 0);
+ 
+-    p.SetRowValue(10, 2);
+-    CHECK(p.RowValue(10) == 2);
++    p.SetRowValue(10, 0);
++    CHECK(p.RowValue(10) == 0);
+     p.SetRowValue(11, 4);
+     CHECK(p.RowValue(11) == 4);
+ }

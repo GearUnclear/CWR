@@ -1,0 +1,401 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/ITERATIONS.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/ITERATIONS.md
+index f47cfaa8..7ba75c19 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/ITERATIONS.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/ITERATIONS.md
+@@ -206,6 +206,14 @@ The owner saw the haze flicker in the trailer's dawn shot ("Moving out at dawn",
+ - **Fix.** psFogInject turns the frame's jitter per cell with an interleaved-gradient offset of the cell, and in depth also per slice, so neighbouring cells' residuals are independent and average out. The sequence, the history share and the uniforms are unchanged. New test `[remaster][fog][Shaders]`.
+ - **Result.** Valley band on the reshot clip: 0.567 to 0.103, 25076 spikes to 2 (vanilla 0.112). In play at 60 fps: 0.308 to 0.112. The look is unchanged apart from a hair more mist. Fog cells with no history (after a camera cut) may show cell-size speckle for a few frames; not seen in the clips.
+ 
++## F2. The fog wind (2026-10-23)
++
++The F1 fix stopped the pump but the owner saw "motion in the fog that makes it look like wind is blowing through it". A second board (`graphics-remaster/tmp/video/fogwind/`, not in git: eight Opus agents and three Fable agents) found two mechanisms and a fix.
++
++- **Cause.** The interleaved-gradient offset of a cell is a ramp over the cells (one cell to the right adds 0.556 of a slice), and the frame's golden-ratio step adds 0.618, so the next frame's offset field was this frame's read one cell over: the history's residual slid through the fog about one froxel cell (12 px) per render, in play and in the captures, in every region, with the camera held or moving. Any per-cell offset that is a lattice-periodic or linear function of the cell plus a frame-global step translates the same way. On top of that the history was read at the frame's jittered point, which made the stored value a leaky sum of the offsets (gain 1 / 0.12 = 8.3) instead of their average, and was the amplifier of the F1 pump.
++- **Fix.** psFogInject samples each cell at two fixed points (depth strata 1/4 and 3/4 of the slice, each weighted by the metres of its half slice, on the diagonal quarter points of the cell; `VolumetricFog.hpp` kFogTapZ, kFogTapXY) and never jitters, so the history has no residual to pump or to move; it is read at the cell's centre and is only a smoother of the light's own changes, through a fixed tetrahedral blur of a quarter cell and slice, the mean of the blur the jittered read used to give the stored volume, which is the mist's softness in the approved look (every centre-read variant without it was about 2 code values clearer in the valley). The jitter uniforms stay 0 (the sequence still steps the near field's march). Test `[remaster][fog][Shaders]` "fixed points": a mirror of the history over a cell grid measures the block-mean pump and the frame-to-frame travel of the residual at cell lags; the frame-wide offset trips the pump bar, the per-cell gradient the travel bar, the fixed taps neither.
++- **Result.** Stepped probes of the dawn valley (the fogwind kit, five regions, the per-cell F1 fix in brackets): with the camera held, the residual's travel correlation 0.04 (0.47), the in-place cell-scale change 0.048 (0.49) against the jitter-frozen floor 0.050, and the region means within 1.0 code value of the approved look (F1 +2.7 in the valley); on the real pan, wind 0.005 / 0.003 / 0.002 / 0.004 over bay / valley / far hill / haze against vanilla's 0.017 / 0.007 / 0.002 / 0.007 (F1 0.047 / 0.123 / 0.078 / 0.035), block flicker 0.078 against vanilla's 0.057 and the original's 1.62; in play at 60 fps with the camera held, in-place change 0.058 / 0.047 (F1 0.42 / 0.32, the floor 0.06 / 0.05). Cost: one more medium and light sample per cell and three more history fetches in the injection; the air stage's change is inside the contended machine's noise and needs the idle timing run of P1.
++
+ ## P1. Pending
+ 
+ - A clean timing run on an idle machine at 1080p, ideally on an RTX 3060.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+index 8edb980a..809a6778 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+@@ -68,6 +68,16 @@ struct FogGrid
+ // The injection and the integration each write this many slices per draw
+ // (eight colour attachments, the GL 3.3 minimum).
+ constexpr int kFogSlicesPerDraw = 8;
++// The injection samples each cell at these two fixed points, never jittered:
++// depth strata at a quarter and three quarters of the slice (each weighted by
++// the metres of its half slice) on the two diagonal quarter points of the
++// cell's footprint (cells). The history (kFogHistoryShare) is then only a
++// smoother of the light's own changes: with no residual of a moving sample it
++// can neither pump the far haze (one offset for the frame) nor slide a
++// pattern through the fog (an offset per cell plus the frame's step). The
++// shader's constants mirror these.
++constexpr float kFogTapZ[2] = {0.25f, 0.75f};
++constexpr float kFogTapXY[2][2] = {{-0.25f, -0.25f}, {0.25f, 0.25f}};
+ // The grid for a viewport of w x h pixels at a quality (0 coarse, 1 shipped,
+ // 2 fine; the fogQuality knob, rounded and clamped): cells of 16, 12 or 8
+ // pixels, 48, 64 or 96 slices.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+index c18bfea8..7835af94 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+@@ -686,13 +686,14 @@ void EngineGL33::PostFog(const PostFrame& f)
+         prevRow[r][2] = row[2];
+         prevRow[r][3] = row[0] * dx + row[1] * dy + row[2] * dz;
+     }
+-    // The frame's jitter in a cell: psFogInject turns it per cell (and per
+-    // slice in depth, fogCellNoise), so the history's residual of it does not
+-    // swing whole regions of the volume together.
++    // No jitter in the volume: psFogInject samples two fixed points of every
++    // cell (VolumetricFog.hpp kFogTapZ), so the history has no residual to
++    // pump (one offset for the frame, the dawn valley's flicker) or to slide
++    // through the fog (an offset pattern per cell plus the frame's step, the
++    // wind of the first fix). The jitter uniforms stay 0; the sequence still
++    // steps the near field's march (fogNearGrid.w).
+     const std::uint32_t seq = _fog.sequence++;
+-    const float jz = Fract(0.6180339887 * static_cast<double>(seq));
+-    const float jx = Fract(0.7548776662 * static_cast<double>(seq)) - 0.5f;
+-    const float jy = Fract(0.5698402910 * static_cast<double>(seq)) - 0.5f;
++    const float jz = 0.0f, jx = 0.0f, jy = 0.0f;
+ 
+     // The night air's light: the night sky's share of the classic fog colour.
+     const float nightW = Smooth(0.1f, 0.8f, m.night);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+index 3312ec1f..4a4b692a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+@@ -19,11 +19,11 @@
+ //     share of it that is scattered sunlight goes dark where the cell is in
+ //     the shade of the shadow cascades, the canopy, the terrain horizon or the
+ //     cloud field (the shadows of ridges in the haze), and the mist and fog
+-//     above a cell take light out of its sun. Each frame samples a jittered
+-//     point of each cell and blends it with the last frame's volume
+-//     reprojected to that point, so the history averages the jitter (the
+-//     frame's jitter turned per cell, and per slice in depth, so neighbouring
+-//     cells' history residuals are independent, fogCellNoise);
++//     above a cell take light out of its sun. Each frame samples two fixed
++//     points of each cell (a quadrature over the cell's depth span) and
++//     blends them with the last frame's volume reprojected to the cell's
++//     centre, so the history only smooths the light's own changes (nothing
++//     in the sampling moves between frames: no pump, no wind; kFogTapZ);
+ //   - psFogIntegrate: front to back along each column, the light scattered
+ //     toward the eye and the transmittance from the eye to the far face of
+ //     each cell (energy-conserving per slice);
+@@ -54,8 +54,8 @@ const char kPostFogInjectHeadGLSL[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler3D fogHistory; // unit 0: the last frame's injection (rgb in-scatter, a extinction; per km)
+ uniform vec4 fogGrid;      // xy cells, z slices, w the first slice of this draw
+-uniform vec4 fogDepth;     // x far (m), y k, z 1 / (exp(k) - 1), w this frame's depth jitter in a slice (0..1)
+-uniform vec4 fogFrame;     // xy this frame's jitter in a cell (cells), z this frame's share (1 = no history), w time (s)
++uniform vec4 fogDepth;     // x far (m), y k, z 1 / (exp(k) - 1), w 0 (the taps are fixed; was the frame's depth jitter)
++uniform vec4 fogFrame;     // xy 0 (the taps are fixed; was the frame's jitter), z this frame's share (1 = no history), w time (s)
+ uniform vec4 prevRow0;     // camera-relative world to the previous frame's view space, by rows
+ uniform vec4 prevRow1;
+ uniform vec4 prevRow2;
+@@ -369,43 +369,69 @@ vec4 fogCell(vec3 rel) {
+     return vec4(inscatter, sMie + sAir) * 1000.0;
+ }
+ 
+-// The jitter of a cell: the frame's offset (one golden-ratio sequence for the
+-// frame, fogFrame.xy and fogDepth.w) turned by an interleaved-gradient offset
+-// of the cell, and in depth also by the slice. With the frame's offset alone
+-// every cell sat at the same point of its cell, so the history's residual of
+-// the jitter (it keeps 0.88 of the last frame) had the same sign over whole
+-// regions each frame, and the far haze and the valley mist pumped as one
+-// sheet, in play and in the captures (the dawn valley's flicker, 2026-10-23).
+-// Turned per cell, the residuals are independent and average out in the
+-// apply's lookup and the TAA.
+-float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+-float g_cellJitter = 0.0; // this column's depth offset (main sets it)
++// A cell's value is the mean of its medium and light over the cell's own depth
++// span, from two FIXED points of the cell: depth strata at a quarter and three
++// quarters of the slice, each weighted by the metres of its half slice, on the
++// two diagonal quarter points of the cell's footprint (VolumetricFog.hpp
++// kFogTapZ, kFogTapXY). No sample moves between frames, so the history (it
++// keeps 0.88 of the last frame, read at the cell's centre) only smooths the
++// light's own changes (the ring, the shadows, the pan) and can neither pump
++// nor travel. (The dawn valley, 2026-10-23: one jittered point per cell at
++// the frame's golden-ratio offset left the history a residual of the same
++// sign over whole regions, and the far haze and the valley mist pumped as one
++// sheet; the offset turned per cell by an interleaved-gradient pattern is a
++// ramp over the cells, so with the frame's step the next frame's field was
++// this frame's read one cell over: the residual slid through the fog about a
++// cell per frame and the mist read as wind. A fixed quadrature leaves no
++// residual at all.)
++const vec2 kFogTapXY[2] = vec2[2](vec2(-0.25, -0.25), vec2(0.25, 0.25));
++const float kFogTapZ[2] = float[2](0.25, 0.75);
++vec3 g_tapDir[2]; // the columns through the two tap points, per metre of view depth (main sets them)
+ 
+-// The cell of slice s on this column: this frame's jittered point, blended with
+-// the last frame's volume at the same point.
++// The cell of slice s on this column: its two taps' mean, blended with the last
++// frame's volume at the cell's centre.
+ vec4 fogSlice(float s, vec3 dirZ) {
+-    float z = fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z);
+-    vec3 rel = dirZ * z;
+-    vec4 cur = fogCell(rel);
++    vec4 acc = vec4(0.0);
++    float wsum = 0.0;
++    for (int i = 0; i < 2; ++i) {
++        float w = fogSliceDepth((s + kFogTapZ[i] + 0.25) / fogGrid.z) - fogSliceDepth((s + kFogTapZ[i] - 0.25) / fogGrid.z);
++        acc += w * fogCell(g_tapDir[i] * fogSliceDepth((s + kFogTapZ[i]) / fogGrid.z));
++        wsum += w;
++    }
++    vec4 cur = acc / max(wsum, 1e-6);
+     if (fogFrame.z < 1.0) {
++        // The history at the point the stored value stands for, the cell's
++        // centre. (Read at the frame's jittered point it was a leaky sum of
++        // the offsets, eight times the swing of their average.)
++        vec3 rel = dirZ * fogSliceDepth((s + 0.5) / fogGrid.z);
+         vec3 pv = vec3(dot(prevRow0.xyz, rel) + prevRow0.w, dot(prevRow1.xyz, rel) + prevRow1.w,
+                        dot(prevRow2.xyz, rel) + prevRow2.w);
+         if (pv.z > 0.05) {
+             vec2 puv = pv.xy * prevProj.xy / pv.z * 0.5 + 0.5;
+             float pt = prevProj.w < 1e-3 ? pv.z / prevProj.z
+                                          : log(1.0 + pv.z * (exp(prevProj.w) - 1.0) / prevProj.z) / prevProj.w;
+-            if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0)
+-                cur = mix(texture(fogHistory, vec3(puv, pt)), cur, fogFrame.z);
++            if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0) {
++                // Through a fixed tetrahedral blur of a quarter cell and
++                // slice: the mean of the blur the jittered read used to give
++                // the stored volume, the mist's softness in the approved look.
++                vec3 tq = vec3(puv, pt), te = vec3(0.25) / fogGrid.xyz;
++                vec4 hist = 0.25 * (texture(fogHistory, tq + te * vec3(1.0, 1.0, 1.0)) +
++                                    texture(fogHistory, tq + te * vec3(1.0, -1.0, -1.0)) +
++                                    texture(fogHistory, tq + te * vec3(-1.0, 1.0, -1.0)) +
++                                    texture(fogHistory, tq + te * vec3(-1.0, -1.0, 1.0)));
++                cur = mix(hist, cur, fogFrame.z);
++            }
+         }
+     }
+     return cur;
+ }
+ 
+ void main() {
+-    g_cellJitter = fogCellNoise(gl_FragCoord.xy);
+-    vec2 cellJ = fract(fogFrame.xy + 0.5 + vec2(fogCellNoise(gl_FragCoord.xy + vec2(17.0, 59.0)),
+-                                                fogCellNoise(gl_FragCoord.xy + vec2(83.0, 29.0)))) - 0.5;
+-    vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;
++    for (int i = 0; i < 2; ++i) {
++        vec2 ndcI = (gl_FragCoord.xy + kFogTapXY[i]) / fogGrid.xy * 2.0 - 1.0;
++        g_tapDir[i] = viewToWorld * vec3(ndcI.x * projInfo.z, ndcI.y * projInfo.w, 1.0);
++    }
++    vec2 ndc = gl_FragCoord.xy / fogGrid.xy * 2.0 - 1.0;
+     vec3 dirZ = viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0); // per metre of view depth
+     vec3 d = normalize(dirZ);
+     // The air's light along this column: the colour the forward fog fades
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+index adb5358c..6c90ae7f 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -7,6 +7,7 @@
+ #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <memory>
+ #include <string>
+@@ -732,63 +733,148 @@ TEST_CASE("Volumetric fog: the shaders read the slices and the medium the way Vo
+           1);
+ }
+ 
+-TEST_CASE("Volumetric fog: the injection's jitter is turned per cell, so its history leaves no frame-wide pump",
+-          "[remaster][fog][Shaders]")
++namespace
+ {
+-    // The dawn valley's flicker (2026-10-23): with one jitter for every cell
+-    // the history's residual of the jitter had the same sign over whole
+-    // regions each frame, and the far haze and the valley mist pumped as one
+-    // sheet. The injection turns the frame's offset per cell (and per slice in
+-    // depth) by an interleaved-gradient offset.
+-    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
+-    REQUIRE_FALSE(inject.empty());
+-    CHECK(CountOf(inject, "float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, "
+-                          "0.00583715)))); }") == 1);
+-    CHECK(CountOf(inject, "fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z)") == 1);
+-    CHECK(CountOf(inject, "g_cellJitter = fogCellNoise(gl_FragCoord.xy);") == 1);
+-    CHECK(CountOf(inject, "vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;") == 1);
+-    // No cell takes the frame's offset alone any more.
+-    CHECK(CountOf(inject, "(s + fogDepth.w)") == 0);
+-    CHECK(CountOf(inject, "gl_FragCoord.xy + fogFrame.xy") == 0);
+ 
+-    // The mirror: the frame's depth offset is the stage's golden-ratio
+-    // sequence (EngineGL33_PostFog.cpp, jz), each cell keeps 0.88 of its last
+-    // frame (kFogHistoryShare 0.12), and a block of 5 x 5 cells (about 60 px
+-    // at 1080p) averages its cells' residuals, as the eye and the apply's
+-    // lookup do.
+-    auto fract = [](double x) { return x - std::floor(x); };
+-    auto cellNoise = [&](double x, double y) { return fract(52.9829189 * fract(x * 0.06711056 + y * 0.00583715)); };
++// What the history leaves of a sampling scheme, measured on a mirror of the
++// injection: a grid of cells, one depth offset per cell and frame (in slices,
++// -0.5 to 0.5), each cell keeping 0.88 of its last frame (kFogHistoryShare
++// 0.12, the history read at the cell's centre). Two numbers:
++//   pump   the swing over frames of a 5 x 5 block's mean residual (about 60
++//          px at 1080p, what the apply's lookup and the eye average): a
++//          residual of one sign over whole regions pumps the far haze;
++//   travel the frame-to-frame correlation of the residual field at its best
++//          cell lag other than zero: a pattern that slides through the fog
++//          reads as wind, however small its block mean.
++struct JitterResidual
++{
++    double pump = 0.0;
++    double travel = 0.0;
++};
++
++template <class OffsetOf> // double(int cellX, int cellY, int slice, int frame)
++JitterResidual MeasureJitterResidual(OffsetOf offsetOf)
++{
++    constexpr int kN = 48, kSlice = 40, kFrames = 300, kWarm = 100, kLag = 3;
+     constexpr double kShare = 0.12;
+-    double frameWide = 0.0;
+-    double cell[25] = {};
+-    double sumW = 0.0, sumW2 = 0.0, sumC = 0.0, sumC2 = 0.0;
+-    int n = 0;
+-    for (int frame = 0; frame < 2000; ++frame)
++    std::vector<double> cell(kN * kN, 0.0), prev(kN * kN, 0.0);
++    auto at = [&](std::vector<double>& v, int x, int y) -> double& { return v[static_cast<size_t>(y) * kN + x]; };
++    std::vector<double> lagSum((2 * kLag + 1) * (2 * kLag + 1), 0.0);
++    double blockSum = 0.0, blockSum2 = 0.0;
++    int frames = 0;
++    for (int frame = 0; frame < kFrames; ++frame)
+     {
+-        const double jz = fract(0.6180339887 * frame);
+-        frameWide += kShare * ((jz - 0.5) - frameWide);
+-        double block = 0.0;
+-        for (int i = 0; i < 25; ++i)
+-        {
+-            const double offset = fract(jz + cellNoise(40.5 + i % 5, 20.5 + i / 5)) - 0.5;
+-            cell[i] += kShare * (offset - cell[i]);
+-            block += cell[i] / 25.0;
+-        }
+-        if (frame < 100)
++        prev = cell;
++        for (int y = 0; y < kN; ++y)
++            for (int x = 0; x < kN; ++x)
++                at(cell, x, y) += kShare * (offsetOf(x, y, kSlice, frame) - at(cell, x, y));
++        if (frame < kWarm)
+             continue;
+-        ++n;
+-        sumW += frameWide;
+-        sumW2 += frameWide * frameWide;
+-        sumC += block;
+-        sumC2 += block * block;
++        ++frames;
++        double block = 0.0;
++        for (int y = 20; y < 25; ++y)
++            for (int x = 20; x < 25; ++x)
++                block += at(cell, x, y) / 25.0;
++        blockSum += block;
++        blockSum2 += block * block;
++        for (int dy = -kLag; dy <= kLag; ++dy)
++            for (int dx = -kLag; dx <= kLag; ++dx)
++            {
++                double sa = 0.0, sb = 0.0, saa = 0.0, sbb = 0.0, sab = 0.0;
++                int n = 0;
++                for (int y = kLag + 1; y < kN - kLag - 1; ++y)
++                    for (int x = kLag + 1; x < kN - kLag - 1; ++x)
++                    {
++                        const double a = at(cell, x, y), b = at(prev, x + dx, y + dy);
++                        sa += a;
++                        sb += b;
++                        saa += a * a;
++                        sbb += b * b;
++                        sab += a * b;
++                        ++n;
++                    }
++                const double va = saa / n - (sa / n) * (sa / n), vb = sbb / n - (sb / n) * (sb / n);
++                const double rho = (va < 1e-18 || vb < 1e-18) ? 0.0 : (sab / n - (sa / n) * (sb / n)) / std::sqrt(va * vb);
++                lagSum[static_cast<size_t>((dy + kLag) * (2 * kLag + 1) + dx + kLag)] += rho;
++            }
+     }
+-    const double sdFrameWide = std::sqrt(sumW2 / n - (sumW / n) * (sumW / n));
+-    const double sdPerCell = std::sqrt(sumC2 / n - (sumC / n) * (sumC / n));
+-    // The frame's offset alone: the block's residual swings by about 3% of a
+-    // slice each frame (the far slices are hundreds of metres deep). Turned
+-    // per cell: under a quarter of that (about a sixth).
+-    CHECK(sdFrameWide > 0.025);
+-    CHECK(sdPerCell < 0.25 * sdFrameWide);
++    JitterResidual r;
++    r.pump = std::sqrt(std::max(blockSum2 / frames - (blockSum / frames) * (blockSum / frames), 0.0));
++    for (int dy = -kLag; dy <= kLag; ++dy)
++        for (int dx = -kLag; dx <= kLag; ++dx)
++            if (dx != 0 || dy != 0)
++                r.travel = std::max(r.travel, lagSum[static_cast<size_t>((dy + kLag) * (2 * kLag + 1) + dx + kLag)] / frames);
++    return r;
++}
++
++} // namespace
++
++TEST_CASE("Volumetric fog: the injection samples fixed points of each cell, so its history can neither pump nor travel",
++          "[remaster][fog][Shaders]")
++{
++    // The dawn valley (2026-10-23), twice. One jittered point per cell at the
++    // frame's golden-ratio offset: the history's residual of the jitter had
++    // the same sign over whole regions, and the far haze and the valley mist
++    // pumped as one sheet. Then the offset turned per cell by an
++    // interleaved-gradient pattern (d91a08e0): the pump went, but the pattern
++    // is a ramp over the cells, so with the frame's step the next frame's
++    // field was this frame's read one cell over, and the residual slid
++    // through the fog as wind. Now the cell's two taps are fixed
++    // (VolumetricFog.hpp kFogTapZ, kFogTapXY: depth strata of the slice on
++    // the diagonal quarter points of the cell, weighted by their metres) and
++    // the history is read at the cell's centre.
++    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
++    REQUIRE_FALSE(inject.empty());
++    CHECK(CountOf(inject, "const float kFogTapZ[2] = float[2](0.25, 0.75);") == 1);
++    CHECK(kFogTapZ[0] == 0.25f);
++    CHECK(kFogTapZ[1] == 0.75f);
++    CHECK(CountOf(inject, "const vec2 kFogTapXY[2] = vec2[2](vec2(-0.25, -0.25), vec2(0.25, 0.25));") == 1);
++    CHECK(kFogTapXY[0][0] == -0.25f);
++    CHECK(kFogTapXY[0][1] == -0.25f);
++    CHECK(kFogTapXY[1][0] == 0.25f);
++    CHECK(kFogTapXY[1][1] == 0.25f);
++    CHECK(CountOf(inject, "fogSliceDepth((s + kFogTapZ[i] + 0.25) / fogGrid.z) - fogSliceDepth((s + kFogTapZ[i] - 0.25) / "
++                          "fogGrid.z)") == 1);
++    CHECK(CountOf(inject, "acc += w * fogCell(g_tapDir[i] * fogSliceDepth((s + kFogTapZ[i]) / fogGrid.z));") == 1);
++    CHECK(CountOf(inject, "vec2 ndcI = (gl_FragCoord.xy + kFogTapXY[i]) / fogGrid.xy * 2.0 - 1.0;") == 1);
++    // The history is read at the cell's centre (read at the sample it was a
++    // leaky sum of the offsets, not their average) through the fixed quarter
++    // blur that stands in for the old jittered read's blur of the volume.
++    CHECK(CountOf(inject, "vec3 rel = dirZ * fogSliceDepth((s + 0.5) / fogGrid.z);") == 1);
++    CHECK(CountOf(inject, "vec3 tq = vec3(puv, pt), te = vec3(0.25) / fogGrid.xyz;") == 1);
++    CHECK(CountOf(inject, "cur = mix(hist, cur, fogFrame.z);") == 1);
++    // Nothing in the injection moves with the frame: no jitter uniform is
++    // read and no per-cell noise is left.
++    CHECK(CountOf(inject, "fogDepth.w") == 0);
++    CHECK(CountOf(inject, "fogFrame.xy") == 0);
++    CHECK(CountOf(inject, "fogCellNoise") == 0);
++    CHECK(CountOf(inject, "fract(fogDepth") == 0);
++    CHECK(CountOf(inject, "fract(fogFrame") == 0);
++
++    // The two failures on the mirror, so the test knows them: the frame-wide
++    // offset pumps (the block mean swings by about 3% of a slice, and the far
++    // slices are hundreds of metres deep) without travelling; the per-cell
++    // gradient pattern does not pump but travels (its residual field is the
++    // last frame's at a one-cell lag).
++    auto fract = [](double x) { return x - std::floor(x); };
++    auto golden = [&](int frame) { return fract(0.6180339887 * frame); };
++    auto gradient = [&](double x, double y) { return fract(52.9829189 * fract(x * 0.06711056 + y * 0.00583715)); };
++    const JitterResidual frameWide =
++        MeasureJitterResidual([&](int, int, int, int frame) { return golden(frame) - 0.5; });
++    const JitterResidual perCell = MeasureJitterResidual([&](int x, int y, int s, int frame)
++                                                         { return fract(golden(frame) + gradient(x + 0.5, y + 0.5) + 0.618034 * s) - 0.5; });
++    constexpr double kPumpBar = 0.01, kTravelBar = 0.2;
++    CHECK(frameWide.pump > 0.025);
++    CHECK(frameWide.travel < kTravelBar);
++    CHECK(perCell.pump < kPumpBar);
++    CHECK(perCell.travel > 0.5);
++    // The fixed taps: the same two points of the cell every frame, so the
++    // history's residual is zero and both bars hold with nothing to spare.
++    const JitterResidual fixed = MeasureJitterResidual([&](int, int, int, int) { return 0.0; });
++    CHECK(fixed.pump == 0.0);
++    CHECK(fixed.travel == 0.0);
++    CHECK(fixed.pump < kPumpBar);
++    CHECK(fixed.travel < kTravelBar);
+ }
+ 
+ TEST_CASE("Volumetric fog: round 3 medium rules (clear near air, dust, hilltops, night fog, stars)", "[remaster][fog]")

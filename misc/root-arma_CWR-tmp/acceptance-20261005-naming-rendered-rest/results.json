@@ -1,0 +1,37 @@
+[
+  {
+    "Case": "tests/integration/scripting/guerrilla_legend_save.seq",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-naming-rendered-rest\\guerrilla_legend_save"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_legends_place.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-naming-rendered-rest\\guerrilla_legends_place"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_legends_defeat.test.sqf",
+    "ExitCode": 1,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-naming-rendered-rest\\guerrilla_legends_defeat"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_legends_save_reload.seq",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-naming-rendered-rest\\guerrilla_legends_save_reload"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_journal_pages.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-naming-rendered-rest\\guerrilla_journal_pages"
+  },
+  {
+    "Case": "tests/integration/ui/guerrilla_journal_capture_800.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-naming-rendered-rest\\guerrilla_journal_capture_800"
+  },
+  {
+    "Case": "tests/integration/ui/guerrilla_journal_capture_1440.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-naming-rendered-rest\\guerrilla_journal_capture_1440"
+  }
+]

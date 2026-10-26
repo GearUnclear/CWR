@@ -1,0 +1,11 @@
+docs: handoff for the photoreal overhaul, the merge and the comparison video
+
+research/HANDOFF-2026-10-19.md hands the remastered lighting work to a new
+session. It covers the owner's goals and decisions, the branches and scratch
+copies, what graphics-remaster holds (A0-A7, B1-B11, final check), the
+photoreal overhaul and its open critic and owner findings (the wet-ground
+seam first), the next tasks in order (finish the overhaul as a parallel
+workflow, three-way comparison, merge, the vanilla-vs-everything video
+with a local Breeze TTS voice-over), the tooling and the gotchas.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

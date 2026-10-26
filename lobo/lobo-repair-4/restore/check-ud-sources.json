@@ -1,0 +1,123 @@
+{
+  "repair_version": "2026-10-11.4",
+  "rule_sha256": "dd931ca544627c5b4848d5549181cd48cb7e963ad5fe3794356f6929b80bcd9f",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "ud",
+  "changed_members": 10,
+  "added_members": 10,
+  "archives": [
+    "lobo_airammo",
+    "loboegypt"
+  ],
+  "skipped": [],
+  "members": [
+    {
+      "member": "lobo_airammo/lobo_mk81.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk81.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "02e83da4b977cc78bfe351357423dab55064dd65ac450d07a97f0092737a5336",
+      "after_bytes": 23291
+    },
+    {
+      "member": "lobo_airammo/lobo_mk81_ldgb.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk81_LDGB.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "fd59a0bfdfaa93e6d690efe835f9d39a360ceb0eaaa7f7817769f648c34980d9",
+      "after_bytes": 25562
+    },
+    {
+      "member": "lobo_airammo/lobo_mk81_ldgb_d.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk81_LDGB_d.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "54a6e76b488551b83bbe8bc0c2ce0c82bad97b80d498010d62792998c12813cd",
+      "after_bytes": 30592
+    },
+    {
+      "member": "lobo_airammo/lobo_mk82_ldgb.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk82_LDGB.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "51254074addff3a70adac198d51bfb9a7f19bf026d7655cc901e46b7e98e42bc",
+      "after_bytes": 25968
+    },
+    {
+      "member": "lobo_airammo/lobo_mk82_ldgb_d.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk82_LDGB_d.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "3ce1aad6ec76a4ee35831015e64f060a1767878a7183f9ddc2bfb33ec39e5adc",
+      "after_bytes": 30592
+    },
+    {
+      "member": "lobo_airammo/lobo_mk83_ldgb.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk83_LDGB.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "65dc83bef7944e27bd2f9311eb74c3f9806e05d1dee9f88850e7dca95d686806",
+      "after_bytes": 26050
+    },
+    {
+      "member": "lobo_airammo/lobo_mk83_ldgb_d.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk83_LDGB_d.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "18b13a48e160f4b605f282c671042b6fa500c6488536ec80392e1b13a7a55567",
+      "after_bytes": 30674
+    },
+    {
+      "member": "lobo_airammo/lobo_mk84_ldgb.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk84_LDGB.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "5a4436dc254c8b8d4943e14bb2da6413d057e93198e15ef3e4bf392d28b5adc5",
+      "after_bytes": 26050
+    },
+    {
+      "member": "lobo_airammo/lobo_mk84_ldgb_d.p3d",
+      "added": true,
+      "stored_name": "LoBo_Mk84_LDGB_d.p3d",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "09db3129eb6bc21d2495488af9c9a6c18f4c8755f090d66032bf020d38da38f5",
+      "after_bytes": 30592
+    },
+    {
+      "member": "loboegypt/inf/helm_s_in.pac",
+      "added": true,
+      "stored_name": "inf\\helm_s_in.pac",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "e21bd718fa96dd5b6e51c29af5f1a8ec1332d55461f4505ae10d9a00be874669",
+      "after_bytes": 43839
+    }
+  ],
+  "asset_sources": [
+    {
+      "path": "D:\\LoBo-Reloaded\\sources\\recovered-2026-10-11\\derived\\TheHKpack-1.75.pbo",
+      "sha256": "79cdb0bb937e9e05d43781da0337af36f6d3cca93e4d09658e9847a4d70b3ff5",
+      "rule": "weapons"
+    },
+    {
+      "path": "D:\\LoBo-Reloaded\\sources\\recovered-2026-10-11\\derived\\LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo",
+      "sha256": "de7f4728cc41bd98e93a40e8d01d4816632a39805f191dc05ea6c023b56489fd",
+      "rule": "restore"
+    },
+    {
+      "path": "D:\\LoBo-Reloaded\\sources\\recovered-2026-10-11\\derived\\LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo",
+      "sha256": "992d304a27fefae4105da52cfc58fd9ae6ae0c33d9a963d0ee20161ce77340e9",
+      "rule": "restore"
+    }
+  ]
+}

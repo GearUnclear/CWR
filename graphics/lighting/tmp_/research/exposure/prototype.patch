@@ -1,0 +1,840 @@
+﻿diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..02a154b 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -547,6 +547,27 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"terrainShadows", &remaster::LightingTuning::terrainShadows},
+         {"terrainOcclusion", &remaster::LightingTuning::terrainOcclusion},
+         {"cloudShadows", &remaster::LightingTuning::cloudShadows},
++        // RESEARCH PROTOTYPE (track exposure)
++        {"hdr", &remaster::LightingTuning::hdr},
++        {"ltmShadow", &remaster::LightingTuning::ltmShadow},
++        {"ltmHighlight", &remaster::LightingTuning::ltmHighlight},
++        {"ltmDetail", &remaster::LightingTuning::ltmDetail},
++        {"ltmBlur", &remaster::LightingTuning::ltmBlur},
++        {"ltmMid", &remaster::LightingTuning::ltmMid},
++        {"ltmMidAdapt", &remaster::LightingTuning::ltmMidAdapt},
++        {"ltmMaxGain", &remaster::LightingTuning::ltmMaxGain},
++        {"ltmMinGain", &remaster::LightingTuning::ltmMinGain},
++        {"ltmNight", &remaster::LightingTuning::ltmNight},
++        {"ltmSigma", &remaster::LightingTuning::ltmSigma},
++        {"adapt", &remaster::LightingTuning::adapt},
++        {"adaptKey", &remaster::LightingTuning::adaptKey},
++        {"adaptSpeed", &remaster::LightingTuning::adaptSpeed},
++        {"adaptMin", &remaster::LightingTuning::adaptMin},
++        {"adaptMax", &remaster::LightingTuning::adaptMax},
++        {"tmCurve", &remaster::LightingTuning::tmCurve},
++        {"hdrWhite", &remaster::LightingTuning::hdrWhite},
++        {"bloomHdr", &remaster::LightingTuning::bloomHdr},
++        {"ltmDebug", &remaster::LightingTuning::ltmDebug},
+         {"shadowSoftness", &remaster::LightingTuning::shadowSoftness},
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..c145eba 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -80,6 +80,32 @@ struct LightingTuning
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
++
++    // ---- RESEARCH PROTOTYPE (track exposure): HDR frame + local exposure ----
++    // hdr 1: the frame target becomes RGBA16F, the remastered world shaders stop
++    // tonemapping per fragment (they write display-encoded HDR), pre-lit near-
++    // white is expanded through the inverse of the shoulder, and the post pass
++    // applies local exposure, eye adaptation and the tonemap once.
++    float hdr = 0.0f;
++    float ltmShadow = 1.0f;    // contrast scale below the mid point (1 = off, <1 lifts shade)
++    float ltmHighlight = 1.0f; // contrast scale above the mid point (1 = off, <1 holds highlights)
++    float ltmDetail = 1.0f;    // detail strength (1 = keep local detail as is)
++    float ltmBlur = 0.4f;      // 0 = bilateral grid base, 1 = plain Gaussian base
++    float ltmMid = -2.47f;     // log2 mid point (0.18)
++    float ltmMidAdapt = 0.0f;  // 0 = fixed mid, 1 = the adapted frame average
++    float ltmMaxGain = 3.0f;   // clamp of the local gain
++    float ltmMinGain = 0.5f;
++    float ltmNight = 0.0f;     // 0 = local exposure fades out at night, 1 = full
++    float ltmSigma = 1.0f;     // bilateral grid range blur (bins)
++    float adapt = 0.0f;        // eye adaptation strength (0 off, 1 full auto exposure)
++    float adaptKey = -2.0f;    // log2 target of the adapted average
++    float adaptSpeed = 1.5f;   // 1/s
++    float adaptMin = -1.0f;    // EV clamp of the adaptation gain
++    float adaptMax = 1.5f;
++    float tmCurve = 0.0f;      // 0 Neutral (shipped), 1 AgX-style, 2 hue-keeping filmic, 3 Reinhard-lum
++    float hdrWhite = 24.0f;    // HDR value pure white pre-lit (sun disc, fire) expands to
++    float bloomHdr = 0.0f;     // 0 bloom from the tonemapped frame (shipped calibration), 1 from HDR energy
++    float ltmDebug = 0.0f;     // 1 = show the local gain, 2 = show the base
+ };
+ 
+ struct LightRigInputs
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..f61eb10 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -444,6 +444,9 @@ class EngineGL33 : public Engine
+     unsigned int _ssaaResolveRb = 0;
+     int _ssaaW = 0;
+     int _ssaaH = 0;
++    bool _ssaaFloat = false; // RESEARCH (exposure): RGBA16F frame target for the HDR path
++    bool WantFloatFrame() const;
++    bool HdrFrameActive() const { return _ssaaFloat && SSAAActive() && WantFloatFrame(); }
+ 
+     bool SSAAActive() const { return _ssaaFbo != 0; }
+     // Pixel size of the current render target: the scaled offscreen target
+@@ -794,6 +797,18 @@ class EngineGL33 : public Engine
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
+         bool programsTried = false;
+         bool unavailable = false;
++        // RESEARCH (exposure): HDR local exposure + eye adaptation resources.
++        bool colorFloat = false;
++        unsigned int lumTex = 0, lumFbo = 0; // half-res log2 luminance (r) + weight (g), mipmapped
++        int lumW = 0, lumH = 0, lumLevels = 1;
++        unsigned int gridTex[2] = {}, gridFbo[2] = {}; // bilateral grid atlas: bins side by side in x
++        int gridW = 0, gridH = 0, gridBins = 0;
++        unsigned int adaptTex[2] = {}, adaptFbo[2] = {}; // 1x1 adapted log2 luminance, ping-pong
++        int adaptIdx = 0;
++        bool adaptValid = false;
++        double adaptLastTime = -1.0;
++        unsigned int progLum = 0, progGridSplat = 0, progGridBlur = 0, progAdapt = 0;
++        bool ltmUnavailable = false;
+     } _post;
+     void DestroyPostTargets();
+     void DestroyPostPrograms();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..b8f5a23 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -478,6 +478,7 @@ void EngineGL33::UploadLitLights(const LightList& lights, float nightEffect)
+             n++;
+         }
+     }
+-    SetSlot(LitConst::LightCount, static_cast<float>(n), 0.0f, 0.0f, 0.0f);
++    // RESEARCH (exposure): y = 1 when the frame target is float and the post pass tonemaps.
++    SetSlot(LitConst::LightCount, static_cast<float>(n), HdrFrameActive() ? 1.0f : 0.0f, 0.0f, 0.0f);
+     FlushLitConstants();
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e..c99f4a7 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -314,6 +314,26 @@ vec3 tonemapNeutral(vec3 c) {
+     return mix(c, vec3(newPeak), g);
+ }
+ 
++// RESEARCH (track exposure): HDR frame. litLightCount.y = 1 when the frame
++// target is RGBA16F and the post pass tonemaps: lit fragments then write
++// display-encoded scene radiance (no per-fragment tonemap), and display-referred
++// colours (pre-lit draws, fog) go through the inverse of the Neutral shoulder so
++// the post tonemap gives them back unchanged.
++bool hdrFrame() { return litLightCount.y > 0.5; }
++vec3 tonemapFrame(vec3 c) { return hdrFrame() ? c : tonemapNeutral(c); }
++vec3 hdrExpand(vec3 display) {
++    if (!hdrFrame()) return display;
++    vec3 o = toLinear(display);
++    float np = max(o.r, max(o.g, o.b));
++    if (np <= 0.8) return display;
++    np = min(np, 0.9929);
++    const float d = 0.2;
++    float peak = d * d / (1.0 - np) - d + 0.8;
++    float g = 1.0 - 1.0 / (0.15 * (peak - np) + 1.0);
++    vec3 cs = (min(o, vec3(np)) - g * np) / max(1.0 - g, 1e-3);
++    return toDisplay(max(cs, vec3(0.0)) * (peak / np));
++}
++
+ // 12-tap Poisson disc; each tap is a hardware 2x2 comparison (bilinear PCF),
+ // so the penumbra is smooth without per-pixel noise.
+ const vec2 kPoisson[12] = vec2[](
+@@ -578,7 +598,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         if (litFlags.z < 2.5) return vec3(skyVisibility);
+         return nLight * 0.5 + 0.5;
+     }
+-    vec3 display = toDisplay(tonemapNeutral(radiance));
++    vec3 display = toDisplay(tonemapFrame(radiance));
+     float grey = dot(display, kLuma);
+     return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+ }
+@@ -606,7 +626,8 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+         float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
+         r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
+     }
+-    r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
++    if (vLitMode < 0.5) r0.rgb = hdrExpand(r0.rgb);
++    r0.rgb = mix(hdrExpand(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb), r0.rgb, vFogTC);
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+ }
+ )";
+@@ -688,12 +709,13 @@ void main() {
+         vec3 sky = toLinear(fogColorToward(vec3(r.x, 0.0, r.z)));
+         vec3 sparkle = litSun.rgb * pow(glint, 12.0) * 6.0 * (litSunDir.w * g_sunVisibility);
+         vec3 radiance = mix(toLinear(base), sky, fresnel * 0.6) + sparkle * litZenith.w;
+-        r0 = vec4(toDisplay(tonemapNeutral(radiance)), vColor.a * t0.a);
++        r0 = vec4(toDisplay(tonemapFrame(radiance)), vColor.a * t0.a);
+     } else {
+         r0 = vColor * t0;
+         r0.rgb += glint;
++        r0.rgb = hdrExpand(r0.rgb);
+     }
+-    r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
++    r0.rgb = mix(hdrExpand(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb), r0.rgb, vFogTC);
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+ }
+ )";
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..3b97004 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -32,7 +32,9 @@
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
++#include <cstdlib>
+ 
+ namespace
+ {
+@@ -139,7 +141,17 @@ in vec2 vUV;
+ uniform sampler2D srcTex;
+ uniform vec2 srcTexel;
+ uniform vec4 bloomParams; // x threshold (linear), y knee, z 1 = first level
++uniform vec4 hdrParams;   // RESEARCH (exposure): x 1 = HDR frame, y 1 = bloom from HDR energy
+ out vec4 fragColor;
++vec3 tonemapNeutral(vec3 c) {
++    float peak = max(c.r, max(c.g, c.b));
++    if (peak < 0.8) return c;
++    const float d = 0.2;
++    float newPeak = 1.0 - d * d / (peak + d - 0.8);
++    c *= newPeak / peak;
++    float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
++    return mix(c, vec3(newPeak), g);
++}
+ void main() {
+     vec3 c = texture(srcTex, vUV + srcTexel * vec2(-1.0, -1.0)).rgb;
+     c += texture(srcTex, vUV + srcTexel * vec2(1.0, -1.0)).rgb;
+@@ -148,6 +160,7 @@ void main() {
+     c *= 0.25;
+     if (bloomParams.z > 0.5) {
+         c = pow(max(c, vec3(0.0)), vec3(2.2));
++        if (hdrParams.x > 0.5 && hdrParams.y < 0.5) c = tonemapNeutral(c);
+         float peak = max(c.r, max(c.g, c.b));
+         float knee = bloomParams.y;
+         float soft = clamp(peak - bloomParams.x + knee, 0.0, 2.0 * knee);
+@@ -182,6 +195,7 @@ in vec2 vUV;
+ uniform sampler2D depthTex;
+ uniform sampler2D colorTex;
+ uniform vec4 sunScreen; // xy sun position (uv), z on-screen weight, w aspect (width/height)
++uniform vec4 hdrParams; // RESEARCH (exposure): x 1 = HDR frame (sky expanded: clamp back to display range)
+ out vec4 fragColor;
+ void main() {
+     if (sunScreen.z <= 0.0) { fragColor = vec4(0.0); return; }
+@@ -197,6 +211,7 @@ void main() {
+         vec2 c = clamp(uv, vec2(0.001), vec2(0.999));
+         float sky = texture(depthTex, c).r >= 0.999999 ? 1.0 : 0.0;
+         vec3 s = pow(texture(colorTex, c).rgb, vec3(2.2));
++        if (hdrParams.x > 0.5) s *= min(1.0, 1.0 / max(max(s.r, max(s.g, s.b)), 1e-4));
+         sum += s * sky * decay;
+         decay *= 0.965;
+     }
+@@ -206,16 +221,239 @@ void main() {
+ }
+ )";
+ 
++// ---- RESEARCH PROTOTYPE (track exposure): local exposure + eye adaptation ----
++//
++// The frame is display-encoded. In the shipped (LDR) path it is already
++// tonemapped per fragment with the toe-less Neutral curve, which is identity
++// below 0.8 linear and exactly invertible above it (the curve keeps the max
++// channel at newPeak, so the peak and the desaturation weight can be solved
++// back), so the post pass recovers a scene-linear estimate up to ~5.6x. In the
++// HDR path (hdr=1, RGBA16F frame) the world shaders skip their tonemap and the
++// frame already holds display-encoded scene radiance.
++//
++// psPostLum: quarter-res log2 luminance (r), 1 (g), and the metering-weighted
++// log2 luminance (b = logL * w, a = w), mipmapped for the blurred base and the
++// frame average.
++static const char s_psPostLumGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D colorTex;
++uniform sampler2D depthTex;
++uniform vec4 srcTexel;    // xy 1/full-res size, z 1 = HDR frame, w 1 = depth valid
++uniform vec4 meterParams; // x sky weight, y centre-weight sigma (uv), zw log2 range
++out vec4 fragColor;
++const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
++vec3 neutralInverse(vec3 o) {
++    float np = max(o.r, max(o.g, o.b));
++    if (np <= 0.8) return o;
++    np = min(np, 0.9929);
++    const float d = 0.2;
++    float peak = d * d / (1.0 - np) - d + 0.8;
++    float g = 1.0 - 1.0 / (0.15 * (peak - np) + 1.0);
++    vec3 cs = (min(o, vec3(np)) - g * np) / max(1.0 - g, 1e-3);
++    return max(cs, vec3(0.0)) * (peak / np);
++}
++vec3 sceneLinear(vec3 display) {
++    vec3 lin = pow(max(display, vec3(0.0)), vec3(2.2));
++    return srcTexel.z > 0.5 ? lin : neutralInverse(lin);
++}
++void main() {
++    float s = 0.0;
++    s += log2(max(dot(sceneLinear(texture(colorTex, vUV + srcTexel.xy * vec2(-1.0, -1.0)).rgb), kLuma), 1e-5));
++    s += log2(max(dot(sceneLinear(texture(colorTex, vUV + srcTexel.xy * vec2( 1.0, -1.0)).rgb), kLuma), 1e-5));
++    s += log2(max(dot(sceneLinear(texture(colorTex, vUV + srcTexel.xy * vec2(-1.0,  1.0)).rgb), kLuma), 1e-5));
++    s += log2(max(dot(sceneLinear(texture(colorTex, vUV + srcTexel.xy * vec2( 1.0,  1.0)).rgb), kLuma), 1e-5));
++    float logL = clamp(s * 0.25, meterParams.z, meterParams.w);
++    float w = 1.0;
++    if (srcTexel.w > 0.5 && texture(depthTex, vUV).r >= 0.999999) w = meterParams.x;
++    vec2 d = vUV - 0.5;
++    w *= exp(-dot(d, d) / (2.0 * meterParams.y * meterParams.y));
++    fragColor = vec4(logL, 1.0, logL * w, w);
++}
++)";
++
++// psPostGrid: bilateral grid (Chen, Paris, Durand 2007) built by gathering.
++// Atlas layout: bins side by side in x, each bin a gx * gy slice. Each grid
++// vertex gathers the quarter-res luminance texels within one cell of its centre
++// (bilinear tent in xy) whose log2 luminance falls near its bin (tent in z).
++static const char s_psPostGridGLSL[] = R"(#version 330 core
++uniform sampler2D lumTex;
++uniform vec4 gridDim;   // x gx, y gy, z bins, w cell (lum texels)
++uniform vec4 gridRange; // x log2 min, y log2 max, zw lum size
++out vec4 fragColor;
++void main() {
++    ivec2 ip = ivec2(gl_FragCoord.xy);
++    int gx = int(gridDim.x);
++    int bin = ip.x / gx;
++    int cx = ip.x - bin * gx;
++    float cell = gridDim.w;
++    int c = int(cell);
++    vec2 centre = (vec2(cx, ip.y) + 0.5) * cell;
++    ivec2 lo = ivec2(floor(centre - cell));
++    ivec2 maxp = ivec2(gridRange.zw) - 1;
++    float binScale = (gridDim.z - 1.0) / (gridRange.y - gridRange.x);
++    vec2 sum = vec2(0.0);
++    for (int j = 0; j < 2 * c; ++j) {
++        for (int i = 0; i < 2 * c; ++i) {
++            ivec2 p = lo + ivec2(i, j);
++            if (p.x < 0 || p.y < 0 || p.x > maxp.x || p.y > maxp.y) continue;
++            vec2 wxy = max(vec2(0.0), 1.0 - abs(vec2(p) + 0.5 - centre) / cell);
++            float logL = texelFetch(lumTex, p, 0).r;
++            float z = (logL - gridRange.x) * binScale;
++            float w = wxy.x * wxy.y * max(0.0, 1.0 - abs(z - float(bin)));
++            sum += vec2(logL * w, w);
++        }
++    }
++    fragColor = vec4(sum, 0.0, 1.0);
++}
++)";
++
++// psPostGridBlur: separable Gaussian along one grid axis (x, y or bins).
++static const char s_psPostGridBlurGLSL[] = R"(#version 330 core
++uniform sampler2D gridTex;
++uniform vec4 gridDim;  // x gx, y gy, z bins
++uniform vec4 blurDir;  // xyz one-hot axis, w sigma (cells or bins)
++out vec4 fragColor;
++void main() {
++    ivec2 ip = ivec2(gl_FragCoord.xy);
++    int gx = int(gridDim.x), gy = int(gridDim.y), bins = int(gridDim.z);
++    int bin = ip.x / gx;
++    int cx = ip.x - bin * gx;
++    int cy = ip.y;
++    float sigma = max(blurDir.w, 0.3);
++    vec2 sum = vec2(0.0);
++    for (int k = -3; k <= 3; ++k) {
++        int x = cx, y = cy, b = bin;
++        if (blurDir.x > 0.5) x = clamp(cx + k, 0, gx - 1);
++        else if (blurDir.y > 0.5) y = clamp(cy + k, 0, gy - 1);
++        else b = clamp(bin + k, 0, bins - 1);
++        float w = exp(-float(k * k) / (2.0 * sigma * sigma));
++        sum += texelFetch(gridTex, ivec2(b * gx + x, y), 0).rg * w;
++    }
++    fragColor = vec4(sum, 0.0, 1.0);
++}
++)";
++
++// psPostAdapt: 1x1 eye adaptation. r = adapted log2 luminance, g = this
++// frame's metered log2 luminance.
++static const char s_psPostAdaptGLSL[] = R"(#version 330 core
++uniform sampler2D lumTex;
++uniform sampler2D prevTex;
++uniform vec4 adaptParams; // x top mip level, y blend weight (1 = snap)
++out vec4 fragColor;
++void main() {
++    vec4 m = textureLod(lumTex, vec2(0.5), adaptParams.x);
++    float metered = m.b / max(m.a, 1e-6);
++    float prev = texelFetch(prevTex, ivec2(0), 0).r;
++    fragColor = vec4(mix(prev, metered, clamp(adaptParams.y, 0.0, 1.0)), metered, 0.0, 1.0);
++}
++)";
++
+ static const char s_psPostCompositeGLSL[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D colorTex;
+ uniform sampler2D aoTex;
+ uniform sampler2D bloomTex;
+ uniform sampler2D shaftTex;
++uniform sampler2D lumTex;   // RESEARCH (exposure) unit 5
++uniform sampler2D gridTex;  // unit 6
++uniform sampler2D adaptTex; // unit 8
+ uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+ uniform vec4 shaftColor; // rgb sun tint
+ uniform vec4 debugView;  // x: 1 = show occlusion
++uniform vec4 ltmA; // x on, y shadow contrast, z highlight contrast, w detail
++uniform vec4 ltmB; // x mid (log2), y mid follows adaptation, z log2 max gain, w log2 min gain
++uniform vec4 ltmC; // x strength (night fade), y blurred-base blend, z curve, w debug
++uniform vec4 ltmD; // x adaptation strength, y key (log2), z min EV, w max EV
++uniform vec4 ltmE; // x HDR frame, y blurred-base mip level, z lum width, w lum height
++uniform vec4 gridDim;   // x gx, y gy, z bins, w cell
++uniform vec4 gridRange; // x log2 min, y log2 max, zw grid uv scale
+ out vec4 fragColor;
++const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
++
++vec3 tonemapNeutral(vec3 c) {
++    float peak = max(c.r, max(c.g, c.b));
++    if (peak < 0.8) return c;
++    const float d = 0.2;
++    float newPeak = 1.0 - d * d / (peak + d - 0.8);
++    c *= newPeak / peak;
++    float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
++    return mix(c, vec3(newPeak), g);
++}
++vec3 neutralInverse(vec3 o) {
++    float np = max(o.r, max(o.g, o.b));
++    if (np <= 0.8) return o;
++    np = min(np, 0.9929);
++    const float d = 0.2;
++    float peak = d * d / (1.0 - np) - d + 0.8;
++    float g = 1.0 - 1.0 / (0.15 * (peak - np) + 1.0);
++    vec3 cs = (min(o, vec3(np)) - g * np) / max(1.0 - g, 1e-3);
++    return max(cs, vec3(0.0)) * (peak / np);
++}
++// Hue-keeping shoulder: the same peak curve as Neutral, no whitening.
++vec3 tonemapHue(vec3 c) {
++    float peak = max(c.r, max(c.g, c.b));
++    if (peak < 0.8) return c;
++    const float d = 0.2;
++    float newPeak = 1.0 - d * d / (peak + d - 0.8);
++    return c * (newPeak / peak);
++}
++// AgX base (Sobotka), minimal fit (Wrensch). Returns linear.
++vec3 agxContrast(vec3 x) {
++    vec3 x2 = x * x;
++    vec3 x4 = x2 * x2;
++    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
++}
++vec3 tonemapAgx(vec3 c) {
++    const mat3 inM = mat3(0.842479062253094, 0.0423282422610123, 0.0423756549057051,
++                          0.0784335999999992, 0.878468636469772, 0.0784336,
++                          0.0792237451477643, 0.0791661274605434, 0.879142973793104);
++    const mat3 outM = mat3(1.19687900512017, -0.0528968517574562, -0.0529716355144438,
++                           -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
++                           -0.0990297440797205, -0.0989611768448433, 1.15107367264116);
++    const float minEv = -12.47393;
++    const float maxEv = 4.026069;
++    vec3 v = inM * max(c, vec3(1e-10));
++    v = clamp(log2(v), minEv, maxEv);
++    v = (v - minEv) / (maxEv - minEv);
++    v = agxContrast(v);
++    v = outM * v;
++    return pow(max(v, vec3(0.0)), vec3(2.2));
++}
++vec3 tonemapCurve(vec3 c, float curve) {
++    if (curve < 0.5) return tonemapNeutral(c);
++    if (curve < 1.5) return tonemapAgx(c);
++    return tonemapHue(c);
++}
++// Smooth (B-spline) sample of a mip level: four bilinear taps.
++float lumBicubic(vec2 uv, float level) {
++    vec2 size = max(floor(ltmE.zw / exp2(level)), vec2(1.0));
++    vec2 p = uv * size - 0.5;
++    vec2 f = fract(p);
++    vec2 i = floor(p);
++    vec2 w0 = (1.0 - f) * (1.0 - f) * (1.0 - f) / 6.0;
++    vec2 w1 = (4.0 - 6.0 * f * f + 3.0 * f * f * f) / 6.0;
++    vec2 w2 = (1.0 + 3.0 * f + 3.0 * f * f - 3.0 * f * f * f) / 6.0;
++    vec2 w3 = f * f * f / 6.0;
++    vec2 g0 = w0 + w1;
++    vec2 g1 = w2 + w3;
++    vec2 h0 = (i - 1.0 + w1 / g0 + 0.5) / size;
++    vec2 h1 = (i + 1.0 + w3 / g1 + 0.5) / size;
++    float a = textureLod(lumTex, vec2(h0.x, h0.y), level).r;
++    float b = textureLod(lumTex, vec2(h1.x, h0.y), level).r;
++    float c = textureLod(lumTex, vec2(h0.x, h1.y), level).r;
++    float d = textureLod(lumTex, vec2(h1.x, h1.y), level).r;
++    return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
++}
++float gridSlice(vec2 uv, float logL, float fallback) {
++    float gx = gridDim.x, gy = gridDim.y, bins = gridDim.z;
++    float z = (clamp(logL, gridRange.x, gridRange.y) - gridRange.x) * (bins - 1.0) / (gridRange.y - gridRange.x);
++    float b0 = min(floor(z), bins - 2.0);
++    float t = clamp(z - b0, 0.0, 1.0);
++    vec2 g = clamp(uv * gridRange.zw * vec2(gx, gy) - 0.5, vec2(0.0), vec2(gx - 1.0, gy - 1.0));
++    vec2 a0 = vec2((b0 * gx + g.x + 0.5) / (gx * bins), (g.y + 0.5) / gy);
++    vec2 s = mix(texture(gridTex, a0).rg, texture(gridTex, a0 + vec2(1.0 / bins, 0.0)).rg, t);
++    return s.g > 1e-3 ? s.r / s.g : fallback;
++}
+ 
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+@@ -225,7 +463,33 @@ void main() {
+     // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+     float share = 1.0 - clamp(c.a, 0.0, 1.0);
+     float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+-    vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
++    vec3 lin;
++    if (ltmA.x > 0.5) {
++        bool hdr = ltmE.x > 0.5;
++        lin = pow(max(c.rgb, vec3(0.0)), vec3(2.2));
++        if (!hdr) lin = neutralInverse(min(lin, vec3(1.0)));
++        lin *= keep;
++        float L = dot(lin, kLuma);
++        float logL = log2(max(L, 1e-5));
++        float blurred = lumBicubic(vUV, ltmE.y);
++        float bil = gridSlice(vUV, logL, blurred);
++        float base = mix(bil, blurred, ltmC.y);
++        float adapted = texelFetch(adaptTex, ivec2(0), 0).r;
++        float mid = mix(ltmB.x, adapted, ltmB.y);
++        float dm = base - mid;
++        float contrast = dm > 0.0 ? ltmA.z : ltmA.y;
++        float logGain = (dm * (contrast - 1.0) + (logL - base) * (ltmA.w - 1.0)) * ltmC.x;
++        logGain = clamp(logGain, ltmB.w, ltmB.z);
++        float ev = clamp(ltmD.y - adapted, ltmD.z, ltmD.w) * ltmD.x;
++        lin *= exp2(logGain + ev);
++        if (ltmC.w > 0.5) {
++            if (ltmC.w < 1.5) { fragColor = vec4(vec3(clamp(0.5 + (logGain + ev) * 0.25, 0.0, 1.0)), 1.0); return; }
++            fragColor = vec4(vec3(clamp((base + 10.0) / 12.0, 0.0, 1.0)), 1.0); return;
++        }
++        lin = tonemapCurve(lin, ltmC.z);
++    } else {
++        lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
++    }
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+@@ -234,7 +498,7 @@ void main() {
+     vec3 col = pow(lin, vec3(1.0 / 2.2));
+     // Dither only what the composite changed: elsewhere the frame passes
+     // through exactly (the 2.2 round trip is exact on 8-bit values).
+-    if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5)) {
++    if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5 || ltmA.x > 0.5)) {
+         float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+         float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+         col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
+@@ -356,14 +620,25 @@ void EngineGL33::DestroyPostTargets()
+     delTex(p.aoTex[0]);
+     delTex(p.aoTex[1]);
+     delTex(p.shaftTex);
++    // RESEARCH (exposure)
++    delFbo(p.lumFbo);
++    delTex(p.lumTex);
++    for (int i = 0; i < 2; ++i)
++    {
++        delFbo(p.gridFbo[i]);
++        delTex(p.gridTex[i]);
++        delFbo(p.adaptFbo[i]);
++        delTex(p.adaptTex[i]);
++    }
++    p.adaptValid = false;
+     p.w = p.h = 0;
+ }
+ 
+ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+-    for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
++                               &p.progComposite, &p.progLum, &p.progGridSplat, &p.progGridBlur, &p.progAdapt})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -391,6 +666,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+         p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+         p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        // RESEARCH (exposure)
++        p.progLum = LinkPostProgram(vs, s_psPostLumGLSL, "psPostLum");
++        p.progGridSplat = LinkPostProgram(vs, s_psPostGridGLSL, "psPostGrid");
++        p.progGridBlur = LinkPostProgram(vs, s_psPostGridBlurGLSL, "psPostGridBlur");
++        p.progAdapt = LinkPostProgram(vs, s_psPostAdaptGLSL, "psPostAdapt");
++        p.ltmUnavailable = !p.progLum || !p.progGridSplat || !p.progGridBlur || !p.progAdapt;
++        LOG_INFO(Graphics, "GL33 post: RESEARCH local exposure programs {}", p.ltmUnavailable ? "FAILED" : "built");
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+@@ -402,14 +684,53 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     if (p.unavailable)
+         return false;
+-    if (p.w == w && p.h == h && p.colorTex)
++    const bool wantFloat = HdrFrameActive();
++    if (p.w == w && p.h == h && p.colorTex && p.colorFloat == wantFloat)
+         return true;
+ 
+     DestroyPostTargets();
+     const int hw = (w + 1) / 2;
+     const int hh = (h + 1) / 2;
+     GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
+-    p.colorTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, true);
++    p.colorTex = wantFloat ? MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true)
++                           : MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, true);
++    p.colorFloat = wantFloat;
++    // RESEARCH (exposure): quarter-res luminance pyramid, bilateral grid atlas,
++    // 1x1 adaptation ping-pong.
++    {
++        p.lumW = (w + 3) / 4;
++        p.lumH = (h + 3) / 4;
++        int levels = 1;
++        while ((std::max(p.lumW, p.lumH) >> levels) > 0)
++            ++levels;
++        p.lumLevels = levels;
++        glGenTextures(1, &p.lumTex);
++        glBindTexture(GL_TEXTURE_2D, p.lumTex);
++        int lw = p.lumW, lh = p.lumH;
++        for (int l = 0; l < levels; ++l)
++        {
++            glTexImage2D(GL_TEXTURE_2D, l, GL_RGBA16F, lw, lh, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
++            lw = std::max(1, lw / 2);
++            lh = std::max(1, lh / 2);
++        }
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
++        constexpr int kCell = 8;
++        constexpr int kBins = 16;
++        p.gridBins = kBins;
++        p.gridW = (p.lumW + kCell - 1) / kCell;
++        p.gridH = (p.lumH + kCell - 1) / kCell;
++        for (int i = 0; i < 2; ++i)
++        {
++            p.gridTex[i] = MakeTexture(GL_RG32F, GL_RG, GL_FLOAT, p.gridW * kBins, p.gridH, true);
++            p.adaptTex[i] = MakeTexture(GL_RG32F, GL_RG, GL_FLOAT, 1, 1, false);
++        }
++        p.adaptValid = false;
++    }
+     p.depthTex = MakeTexture(GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, w, h, false);
+     p.aoTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+@@ -450,6 +771,16 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+         check();
+     }
++    // RESEARCH (exposure)
++    p.lumFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.lumTex);
++    check();
++    for (int i = 0; i < 2; ++i)
++    {
++        p.gridFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.gridTex[i]);
++        check();
++        p.adaptFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.adaptTex[i]);
++        check();
++    }
+     BindFrameRenderTarget();
+     if (!complete)
+     {
+@@ -485,7 +816,12 @@ void EngineGL33::EndWorldScene()
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
+         return;
+-    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
++    // RESEARCH (exposure): local exposure / adaptation / post tonemap wanted.
++    const bool hdrFrame = HdrFrameActive();
++    const bool ltmWanted = hdrFrame || _lighting.ltmShadow != 1.0f || _lighting.ltmHighlight != 1.0f ||
++                           _lighting.ltmDetail != 1.0f || _lighting.adapt > 0.0f || _lighting.tmCurve != 0.0f ||
++                           _lighting.ltmDebug > 0.0f;
++    if (!ltmWanted && _lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
+         return; // nothing to add: leave the frame as drawn
+ 
+     FlushAndFreeAllQueues(_queueNo);
+@@ -605,6 +941,7 @@ void EngineGL33::EndWorldScene()
+             bindTex(0, src);
+             u2f(p.progBloomDown, "srcTexel", 1.0f / sw, 1.0f / sh);
+             u4f(p.progBloomDown, "bloomParams", kBloomThreshold, kBloomKnee, first ? 1.0f : 0.0f, 0.0f);
++            u4f(p.progBloomDown, "hdrParams", hdrFrame ? 1.0f : 0.0f, _lighting.bloomHdr, 0.0f, 0.0f);
+             drawTo(p.bloomFbo[i], p.bloomW[i], p.bloomH[i]);
+         }
+         glUseProgram(p.progBloomUp);
+@@ -655,20 +992,114 @@ void EngineGL33::EndWorldScene()
+         bindTex(0, p.depthTex);
+         bindTex(2, p.colorTex);
+         u4f(p.progShafts, "sunScreen", sunU, sunV, shaftWeight, static_cast<float>(w) / static_cast<float>(h));
++        u4f(p.progShafts, "hdrParams", hdrFrame ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+         drawTo(p.shaftFbo, hw, hh);
+         GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
+     }
+ 
++    // 3b. RESEARCH (exposure): luminance pyramid, bilateral grid, adaptation.
++    constexpr float kLogMin = -12.0f;
++    constexpr float kLogMax = 4.0f;
++    constexpr int kCell = 8;
++    const bool ltm = ltmWanted && !p.ltmUnavailable;
++    for (int unit : {6, 8})
++        glBindSampler(static_cast<GLuint>(unit), 0);
++    if (ltm)
++    {
++        glUseProgram(p.progLum);
++        u1i(p.progLum, "colorTex", 0);
++        u1i(p.progLum, "depthTex", 2);
++        bindTex(0, p.colorTex);
++        bindTex(2, p.depthTex);
++        u4f(p.progLum, "srcTexel", 1.0f / w, 1.0f / h, hdrFrame ? 1.0f : 0.0f, worldDepth ? 1.0f : 0.0f);
++        u4f(p.progLum, "meterParams", 0.25f, 0.35f, kLogMin, kLogMax);
++        drawTo(p.lumFbo, p.lumW, p.lumH);
++        bindTex(0, p.lumTex);
++        glGenerateMipmap(GL_TEXTURE_2D);
++
++        const int gridAtlasW = p.gridW * p.gridBins;
++        glUseProgram(p.progGridSplat);
++        u1i(p.progGridSplat, "lumTex", 0);
++        u4f(p.progGridSplat, "gridDim", static_cast<float>(p.gridW), static_cast<float>(p.gridH),
++            static_cast<float>(p.gridBins), static_cast<float>(kCell));
++        u4f(p.progGridSplat, "gridRange", kLogMin, kLogMax, static_cast<float>(p.lumW), static_cast<float>(p.lumH));
++        drawTo(p.gridFbo[0], gridAtlasW, p.gridH);
++
++        glUseProgram(p.progGridBlur);
++        u1i(p.progGridBlur, "gridTex", 0);
++        u4f(p.progGridBlur, "gridDim", static_cast<float>(p.gridW), static_cast<float>(p.gridH),
++            static_cast<float>(p.gridBins), 0.0f);
++        bindTex(0, p.gridTex[0]);
++        u4f(p.progGridBlur, "blurDir", 1.0f, 0.0f, 0.0f, 1.0f);
++        drawTo(p.gridFbo[1], gridAtlasW, p.gridH);
++        bindTex(0, p.gridTex[1]);
++        u4f(p.progGridBlur, "blurDir", 0.0f, 1.0f, 0.0f, 1.0f);
++        drawTo(p.gridFbo[0], gridAtlasW, p.gridH);
++        bindTex(0, p.gridTex[0]);
++        u4f(p.progGridBlur, "blurDir", 0.0f, 0.0f, 1.0f, _lighting.ltmSigma);
++        drawTo(p.gridFbo[1], gridAtlasW, p.gridH);
++
++        const double now =
++            std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
++        const double dt = p.adaptLastTime >= 0.0 ? now - p.adaptLastTime : 1e9;
++        p.adaptLastTime = now;
++        // Frame dt clamped to 0.1 s (a stalled or frame-stepped game must not
++        // jump the adaptation); CWR_RESEARCH_ADAPT_DT forces a fixed step for
++        // reproducible capture sequences. Snap only on first use or after 5 s
++        // without local exposure.
++        static const char* s_fixedDt = std::getenv("CWR_RESEARCH_ADAPT_DT");
++        float blend = 1.0f;
++        if (p.adaptValid && dt < 5.0)
++        {
++            const float step = s_fixedDt ? static_cast<float>(std::atof(s_fixedDt)) : static_cast<float>(std::min(dt, 0.1));
++            blend = 1.0f - std::exp(-step * std::max(_lighting.adaptSpeed, 0.0f));
++        }
++        glUseProgram(p.progAdapt);
++        u1i(p.progAdapt, "lumTex", 0);
++        u1i(p.progAdapt, "prevTex", 2);
++        bindTex(0, p.lumTex);
++        bindTex(2, p.adaptTex[p.adaptIdx]);
++        u4f(p.progAdapt, "adaptParams", static_cast<float>(p.lumLevels - 1), blend, 0.0f, 0.0f);
++        drawTo(p.adaptFbo[1 - p.adaptIdx], 1, 1);
++        p.adaptIdx = 1 - p.adaptIdx;
++        p.adaptValid = true;
++    }
++
+     // 4. Composite into the frame target (every sample gets the resolved value).
+     glUseProgram(p.progComposite);
+     u1i(p.progComposite, "colorTex", 0);
+     u1i(p.progComposite, "aoTex", 2);
+     u1i(p.progComposite, "bloomTex", 3);
+     u1i(p.progComposite, "shaftTex", 4);
++    u1i(p.progComposite, "lumTex", 5);
++    u1i(p.progComposite, "gridTex", 6);
++    u1i(p.progComposite, "adaptTex", 8);
+     bindTex(0, p.colorTex);
+     bindTex(2, aoStrength > 0.0f ? p.aoTex[0] : p.whiteTex);
+     bindTex(3, bloomStrength > 0.0f ? p.bloomTex[0] : p.blackTex);
+     bindTex(4, shaftWeight > 0.001f ? p.shaftTex : p.blackTex);
++    bindTex(5, ltm ? p.lumTex : p.blackTex);
++    bindTex(6, ltm ? p.gridTex[1] : p.blackTex);
++    bindTex(8, ltm ? p.adaptTex[p.adaptIdx] : p.blackTex);
++    {
++        const float night = GScene && GScene->MainLight() ? GScene->MainLight()->NightEffect() : 0.0f;
++        const float strength = glow ? (1.0f + (_lighting.ltmNight - 1.0f) * night) : 0.0f;
++        u4f(p.progComposite, "ltmA", ltm ? 1.0f : 0.0f, _lighting.ltmShadow, _lighting.ltmHighlight, _lighting.ltmDetail);
++        u4f(p.progComposite, "ltmB", _lighting.ltmMid, _lighting.ltmMidAdapt,
++            std::log2(std::max(_lighting.ltmMaxGain, 1e-3f)), std::log2(std::max(_lighting.ltmMinGain, 1e-3f)));
++        u4f(p.progComposite, "ltmC", strength, _lighting.ltmBlur, _lighting.tmCurve, _lighting.ltmDebug);
++        u4f(p.progComposite, "ltmD", glow ? _lighting.adapt : 0.0f, _lighting.adaptKey, _lighting.adaptMin,
++            _lighting.adaptMax);
++        u4f(p.progComposite, "ltmE", hdrFrame ? 1.0f : 0.0f, static_cast<float>(std::min(4, p.lumLevels - 1)),
++            static_cast<float>(p.lumW), static_cast<float>(p.lumH));
++        u4f(p.progComposite, "gridDim", static_cast<float>(p.gridW), static_cast<float>(p.gridH),
++            static_cast<float>(p.gridBins), static_cast<float>(kCell));
++        u4f(p.progComposite, "gridRange", kLogMin, kLogMax, static_cast<float>(p.lumW) / (p.gridW * kCell),
++            static_cast<float>(p.lumH) / (p.gridH * kCell));
++        // Research spare: x = hdrWhite knob (read by override shaders as the adaptation
++        // dead band), y = bloomHdr, z = night effect.
++        u4f(p.progComposite, "ltmF", _lighting.hdrWhite, _lighting.bloomHdr, night, 0.0f);
++    }
+     u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+@@ -678,7 +1109,7 @@ void EngineGL33::EndWorldScene()
+ 
+     // Hand the GL state back: frame target bound with its full viewport, unit 0
+     // sampler restored, caches invalidated so the next draw re-applies state.
+-    for (int unit : {0, 2, 3, 4, 5})
++    for (int unit : {0, 2, 3, 4, 5, 6, 8})
+     {
+         glActiveTexture(GL_TEXTURE0 + unit);
+         glBindTexture(GL_TEXTURE_2D, 0);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+index b3d955d..99a1161 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+@@ -445,9 +445,13 @@ void EngineGL33::ApplyPendingRenderScale()
+     const float want = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
+     const int sw = static_cast<int>(winW * want + 0.5f);
+     const int sh = static_cast<int>(winH * want + 0.5f);
+-    if (SSAAActive() && sw == _ssaaW && sh == _ssaaH && want == _renderScale && _pendingMsaaSamples == _msaaSamples)
++    // RESEARCH (exposure): the HDR path renders into an RGBA16F frame target.
++    const bool wantFloat = WantFloatFrame();
++    if (SSAAActive() && sw == _ssaaW && sh == _ssaaH && want == _renderScale && _pendingMsaaSamples == _msaaSamples &&
++        wantFloat == _ssaaFloat)
+         return;
+     DestroySSAATarget();
++    const GLenum colorFormat = wantFloat ? GL_RGBA16F : GL_RGBA8;
+ 
+     GLint maxSamples = 1;
+     glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+@@ -455,7 +459,7 @@ void EngineGL33::ApplyPendingRenderScale()
+ 
+     glGenRenderbuffers(1, &_ssaaColorRb);
+     glBindRenderbuffer(GL_RENDERBUFFER, _ssaaColorRb);
+-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, sw, sh);
++    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, colorFormat, sw, sh);
+     glGenRenderbuffers(1, &_ssaaDepthRb);
+     glBindRenderbuffer(GL_RENDERBUFFER, _ssaaDepthRb);
+     glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, sw, sh);
+@@ -467,7 +471,7 @@ void EngineGL33::ApplyPendingRenderScale()
+ 
+     glGenRenderbuffers(1, &_ssaaResolveRb);
+     glBindRenderbuffer(GL_RENDERBUFFER, _ssaaResolveRb);
+-    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, sw, sh);
++    glRenderbufferStorage(GL_RENDERBUFFER, colorFormat, sw, sh);
+     glGenFramebuffers(1, &_ssaaResolveFbo);
+     glBindFramebuffer(GL_FRAMEBUFFER, _ssaaResolveFbo);
+     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _ssaaResolveRb);
+@@ -489,12 +493,18 @@ void EngineGL33::ApplyPendingRenderScale()
+ 
+     _ssaaW = sw;
+     _ssaaH = sh;
++    _ssaaFloat = wantFloat;
+     _renderScale = want;
+     _msaaSamples = static_cast<int>(samples);
+     // Alpha-to-coverage gate: the frame target carries the samples now.
+     _msaaActive = samples > 1;
+-    LOG_INFO(Graphics, "GL33: frame target {}x{} ({}x MSAA, render scale {}), window {}x{}", sw, sh,
+-             static_cast<int>(samples), want, winW, winH);
++    LOG_INFO(Graphics, "GL33: frame target {}x{} ({}x MSAA, render scale {}, {}), window {}x{}", sw, sh,
++             static_cast<int>(samples), want, wantFloat ? "RGBA16F" : "RGBA8", winW, winH);
++}
++
++bool EngineGL33::WantFloatFrame() const
++{
++    return _lightingActive && _lighting.hdr > 0.5f && _lighting.postEffects;
+ }
+ 
+ void EngineGL33::ResolveSSAAToDefault()

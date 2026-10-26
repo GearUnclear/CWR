@@ -1,0 +1,8 @@
+{
+  "id": "b07",
+  "bank": "kBio0Hostile",
+  "variant": 0,
+  "text": "Career quartermaster {Name} requisitioned crops from disputed farms near {Place} to feed the garrison. Farmers lost their market income. The posting paid regularly, and part of each month's wages went home.",
+  "word_count": 31,
+  "self_review": "Requisitioning crops keeps the garrison fed and costs farmers market income; regular wages support family at home. Routine work and pay convey the priorities without a moral verdict."
+}

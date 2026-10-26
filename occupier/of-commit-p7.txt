@@ -1,0 +1,43 @@
+guerrilla: occupier forces phase 7, the key defaults on, the forces* descriptor lint, the OFFSCREEN-CONTRACT rewrite and the final docs (OCCUPIER-FORCES.md 14)
+
+occupierForces now defaults to 1 through one constant
+(OccupierForcesTuning::KeyDefault) read by OccupierForces, CounterAttack
+(forcesOn: real speeds and the birth chain) and ZoneRegistry (baseRetake
+follows it). Every mission with campaignEnd = 0 authors it off (Market,
+Qrf, Undercover, the native and offscreen fixtures already did; the two
+Demo fixtures are pinned here). Old saves are unchanged: a save without
+the block derives with legacySave, so gmLegacyQrf stays true and the
+scripted QRF keeps running there. Eden, Sinai, Lebanon80, Demo, Showcase
+and the test missions run with the director on (Eden poolStart 54,
+Lebanon80 24, Sinai 88, Abel 60; every catalogue offers foot, APC, tank,
+transport helicopter, attack helicopter and jet, plus truck where the
+ladder has one; IDF has no truck, content not lint).
+
+ZoneRegistry's resolution pass probes the seven forces* keys
+(IsForceHullKey): a class missing from the loaded data is WARNed and
+cleared, the package falls back to the ladder, air is not offered, and
+`guerrilla lint` reports DROPPED. Vanilla (Abel, Eden: 8 factions) and
+@LoBo (Sinai, Lebanon80: 24 factions) lint with 0 substituted, 0 dropped,
+0 unresolvable.
+
+OFFSCREEN-CONTRACT.md rewritten (1303 lines, every number source-tagged):
+decisions C and R replaced by the pool, the director, alarm answers, air
+and the landmass rule; S and S5 as hard rules with their tests; the HQ,
+win, wave and lose rules; presence; budgets (pool, tokens, born ops, live
+hulls, columns, leftovers); the phase 7 default; air rows landed; a dated
+changelog. OCCUPIER-FORCES.md: status rows 6 and 7, 3.1 and 3.2 landmass
+and air as landed, 12.2, 16, 17 (the real open list), 18 (dated entries);
+FACTION-PACKS.md and ARCHITECTURE.md document the forces* keys and which
+rosters author air; AIR-SPIKE.md lint note updated.
+
+Tests: test_counter_attack (ConfigWith pins 0 unless the keys mention it,
+absent means on), test_occupier_forces, test_zone_registry (absent means
+on; the forces* probe keeps a shipped hull and clears a missing one).
+Verified on build/agent-rwdi: the guerrilla / counterattack /
+occupierforces / packages / save / air / campaignend tags 663 cases; lint
+tags 11; full suite 3205 of 3214 with only the 5 known reds; human suite
+OK; tri on remaster-shadow-of1: 16 forces / offscreen / reference / civ
+tests green, 8 mod-lane boots green, tests/integration/ui/remaster 11/11
+(--focus), ui/main_menu 4/4. The Demo-world tests cannot run locally.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

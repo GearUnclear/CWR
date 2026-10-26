@@ -1,0 +1,2 @@
+cd /d/Arma_CWA_worktrees/lighting && export PATH="/c/Program Files/LLVM/bin:$PATH"
+for f in $(git diff --cached --name-only | grep -E '\.(cpp|hpp|h)$'); do clang-format --dry-run --Werror "$f" >/dev/null 2>&1 && echo "clean $f" || echo "DIRTY $f ($(clang-format --dry-run "$f" 2>&1 | grep -c warning); at HEAD: $(git show HEAD:$f 2>/dev/null | clang-format --dry-run --assume-filename=$f 2>&1 | grep -c warning))"; done

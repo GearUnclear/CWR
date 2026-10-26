@@ -1,0 +1,257 @@
+{
+ "pan": {
+  "off": {
+   "frames": 40,
+   "residual": 0.0163715255377433,
+   "sharpness": 0.02842445015115417,
+   "shifts": [
+    [
+     2,
+     0
+    ]
+   ]
+  },
+  "on": {
+   "frames": 40,
+   "residual": 0.012666756219277455,
+   "sharpness": 0.02452029017161985,
+   "shifts": [
+    [
+     1,
+     0
+    ],
+    [
+     2,
+     0
+    ]
+   ]
+  },
+  "residual_change_pct": -22.629346971513332,
+  "sharpness_change_pct": -13.735217247028409
+ },
+ "strafe": {
+  "frames": 40,
+  "slow_mean": 1808.5,
+  "fast_mean": 1712.1052631578948,
+  "per_frame": [
+   {
+    "k": 1,
+    "band_over24": 1977,
+    "rest_over24_per_band": 2071.0
+   },
+   {
+    "k": 2,
+    "band_over24": 1562,
+    "rest_over24_per_band": 1929.8
+   },
+   {
+    "k": 3,
+    "band_over24": 1628,
+    "rest_over24_per_band": 1904.6
+   },
+   {
+    "k": 4,
+    "band_over24": 1585,
+    "rest_over24_per_band": 1834.2
+   },
+   {
+    "k": 5,
+    "band_over24": 1595,
+    "rest_over24_per_band": 1856.0
+   },
+   {
+    "k": 6,
+    "band_over24": 1846,
+    "rest_over24_per_band": 1898.0
+   },
+   {
+    "k": 7,
+    "band_over24": 1882,
+    "rest_over24_per_band": 1833.2
+   },
+   {
+    "k": 8,
+    "band_over24": 1925,
+    "rest_over24_per_band": 1866.8
+   },
+   {
+    "k": 9,
+    "band_over24": 2107,
+    "rest_over24_per_band": 2152.4
+   },
+   {
+    "k": 10,
+    "band_over24": 1646,
+    "rest_over24_per_band": 1818.8
+   },
+   {
+    "k": 11,
+    "band_over24": 1792,
+    "rest_over24_per_band": 2114.8
+   },
+   {
+    "k": 12,
+    "band_over24": 1594,
+    "rest_over24_per_band": 1881.4
+   },
+   {
+    "k": 13,
+    "band_over24": 1501,
+    "rest_over24_per_band": 1800.0
+   },
+   {
+    "k": 14,
+    "band_over24": 1802,
+    "rest_over24_per_band": 1856.6
+   },
+   {
+    "k": 15,
+    "band_over24": 2135,
+    "rest_over24_per_band": 2163.4
+   },
+   {
+    "k": 16,
+    "band_over24": 1893,
+    "rest_over24_per_band": 1831.4
+   },
+   {
+    "k": 17,
+    "band_over24": 1919,
+    "rest_over24_per_band": 1867.8
+   },
+   {
+    "k": 18,
+    "band_over24": 2111,
+    "rest_over24_per_band": 2139.0
+   },
+   {
+    "k": 19,
+    "band_over24": 1816,
+    "rest_over24_per_band": 1796.2
+   },
+   {
+    "k": 20,
+    "band_over24": 1854,
+    "rest_over24_per_band": 1885.8
+   },
+   {
+    "k": 21,
+    "band_over24": 1929,
+    "rest_over24_per_band": 2133.0
+   },
+   {
+    "k": 22,
+    "band_over24": 1516,
+    "rest_over24_per_band": 1852.4
+   },
+   {
+    "k": 23,
+    "band_over24": 1739,
+    "rest_over24_per_band": 2120.6
+   },
+   {
+    "k": 24,
+    "band_over24": 1591,
+    "rest_over24_per_band": 1883.2
+   },
+   {
+    "k": 25,
+    "band_over24": 1564,
+    "rest_over24_per_band": 1810.8
+   },
+   {
+    "k": 26,
+    "band_over24": 1613,
+    "rest_over24_per_band": 1974.2
+   },
+   {
+    "k": 27,
+    "band_over24": 1538,
+    "rest_over24_per_band": 1772.6
+   },
+   {
+    "k": 28,
+    "band_over24": 1592,
+    "rest_over24_per_band": 1861.8
+   },
+   {
+    "k": 29,
+    "band_over24": 1817,
+    "rest_over24_per_band": 2096.4
+   },
+   {
+    "k": 30,
+    "band_over24": 1644,
+    "rest_over24_per_band": 1874.8
+   },
+   {
+    "k": 31,
+    "band_over24": 1587,
+    "rest_over24_per_band": 1814.4
+   },
+   {
+    "k": 32,
+    "band_over24": 1766,
+    "rest_over24_per_band": 2053.2
+   },
+   {
+    "k": 33,
+    "band_over24": 1587,
+    "rest_over24_per_band": 1676.4
+   },
+   {
+    "k": 34,
+    "band_over24": 1648,
+    "rest_over24_per_band": 1797.0
+   },
+   {
+    "k": 35,
+    "band_over24": 1763,
+    "rest_over24_per_band": 2025.0
+   },
+   {
+    "k": 36,
+    "band_over24": 1778,
+    "rest_over24_per_band": 1812.2
+   },
+   {
+    "k": 37,
+    "band_over24": 1653,
+    "rest_over24_per_band": 1734.6
+   },
+   {
+    "k": 38,
+    "band_over24": 1739,
+    "rest_over24_per_band": 1737.0
+   },
+   {
+    "k": 39,
+    "band_over24": 2187,
+    "rest_over24_per_band": 2028.6
+   },
+   {
+    "k": 40,
+    "band_over24": 2208,
+    "rest_over24_per_band": 1880.2
+   }
+  ]
+ },
+ "fire": {
+  "region_px": 93264,
+  "threshold": 0.06,
+  "off": {
+   "temporal_std": 0.1018667983323229,
+   "mean": 0.6290694766641073,
+   "peak_top1pct": 0.9918834075990911,
+   "frame_change": 0.1101730443034994,
+   "still_frame_change": 0.0006958464160234588
+  },
+  "on": {
+   "temporal_std": 0.09455419112565519,
+   "mean": 0.6344016253495594,
+   "peak_top1pct": 0.9887353928581447,
+   "frame_change": 0.10888257003631635,
+   "still_frame_change": 0.0026352736805092445
+  }
+ }
+}

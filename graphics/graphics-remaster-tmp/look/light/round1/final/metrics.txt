@@ -1,0 +1,33 @@
+==== classic
+noon_fields  p99 195 p50 173 zenith (159,184,215) horizon (175,192,213) ground p99 194 jeep p10 36
+sinai        p99 200 p50 177 zenith (158,184,218) horizon (173,197,216) sand p99 207 mean (178,162,144) hummer p10 26
+sunrise      near-sun rows (158,136,122) sky L 83..160 clip% 0.08 white 0 ground (20,20,17)
+coastline    white 0 band (168,143,141) olive% 0.0 sea (73,57,56) sky top (163,163,167)
+lowsun_fp    white 524 px 26x26 sun peak 255 sky by sun (168,187,213) sky far (168,171,188)
+town_night   fire top5% (253,252,201) r-b>60 4721 smoke (136,135,134) ground (130,127,111) frame 95
+woods        canopy (66,61,47) r/g 1.09 g/b 1.29 sky gap clip% 0.0 sky gap (133,148,158)
+blue_hour    zenith (94,47,46) horizon band (105,46,41) beach luma 34 sea (15,14,14)
+overcast     MAD@480 0.0 sky sat 0.25 sky L p5..p95 153..202 ground L p5..p95 67..96
+MAD@480: lowsun_fp 0, noon_field 0, forest_edg 0, sunrise_ri 0, coastline_ 0, overcast_b 0, town_night 0, sinai_dese 0, woods_pine 0, blue_hour_ 0
+==== off
+noon_fields  p99 197 p50 174 zenith (149,187,238) horizon (159,192,231) ground p99 194 jeep p10 22
+sinai        p99 202 p50 176 zenith (140,175,222) horizon (158,192,228) sand p99 210 mean (175,158,141) hummer p10 18
+sunrise      near-sun rows (204,155,141) sky L 122..170 clip% 0.51 white 0 ground (38,38,27)
+coastline    white 0 band (166,147,139) olive% 0.0 sea (123,99,89) sky top (168,162,180)
+lowsun_fp    white 569 px 77x101 sun peak 255 sky by sun (212,224,242) sky far (145,168,195)
+town_night   fire top5% (186,152,122) r-b>60 1843 smoke (118,105,94) ground (58,57,58) frame 54
+woods        canopy (55,50,30) r/g 1.12 g/b 1.62 sky gap clip% 0.0 sky gap (162,173,183)
+blue_hour    zenith (86,52,61) horizon band (123,61,49) beach luma 17 sea (51,34,33)
+overcast     MAD@480 12.6 sky sat 0.30 sky L p5..p95 152..203 ground L p5..p95 49..73
+MAD@480: lowsun_fp 15, noon_field 8, forest_edg 9, sunrise_ri 15, coastline_ 22, overcast_b 13, town_night 41, sinai_dese 9, woods_pine 17, blue_hour_ 18
+==== on
+noon_fields  p99 200 p50 163 zenith (103,137,182) horizon (114,152,193) ground p99 203 jeep p10 21
+sinai        p99 188 p50 155 zenith (97,128,169) horizon (120,155,192) sand p99 191 mean (176,155,134) hummer p10 14
+sunrise      near-sun rows (229,201,174) sky L 143..210 clip% 0.11 white 1944 px 85x76 ground (46,47,36)
+coastline    white 287 px 19x19 band (150,142,122) olive% 10.9 sea (106,93,77) sky top (133,131,133)
+lowsun_fp    white 429 px 25x22 sun peak 255 sky by sun (204,190,175) sky far (100,118,139)
+town_night   fire top5% (161,140,121) r-b>60 782 smoke (100,91,88) ground (57,59,66) frame 52
+woods        canopy (63,55,32) r/g 1.14 g/b 1.71 sky gap clip% 0.0 sky gap (181,172,153)
+blue_hour    zenith (82,80,101) horizon band (137,103,99) beach luma 31 sea (69,54,54)
+overcast     MAD@480 11.8 sky sat 0.27 sky L p5..p95 163..199 ground L p5..p95 57..94
+MAD@480: lowsun_fp 21, noon_field 25, forest_edg 25, sunrise_ri 33, coastline_ 29, overcast_b 12, town_night 42, sinai_dese 24, woods_pine 15, blue_hour_ 38

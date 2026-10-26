@@ -1,0 +1,177 @@
+AGENT 1 REPORT (fogwind swarm): MEASUREMENT AND CHARACTERISATION OF THE FOG "WIND"
+==================================================================================
+2026-10-23, agent 1 of 8. Folder: graphics-remaster/tmp/video/fogwind/1/
+Role: the team's measurer. No fix of my own; I built the motion check kit, characterised the
+wind, made the shared static and real-time probes, and re-measured every candidate posted.
+
+1. VERDICT ON THE WIND (d91a08e0, per-cell IGN jitter)
+------------------------------------------------------
+The owner's "wind" is real, it is a game bug (not a capture artefact), and it has an exact cause:
+
+  IGN(x+1, y) = fract(IGN(x, y) + 52.9829189 * 0.06711056) = fract(IGN(x, y) + 0.5557)
+  (one cell to the right = +0.556 of a phase, apart from a 0.017 seam every 14.9 cells).
+  The frame's golden/R2 step adds 0.618 (depth, jz), 0.570 (jy), 0.755 (jx) every render.
+  So the next render's jitter field equals this render's field read ONE CELL TO THE RIGHT, to
+  within 0.062 (depth), 0.014 (jy) and 0.199 (jx) of a phase. The history residual of that
+  field therefore SLIDES ONE FROXEL CELL (12 px at 1080p) TO THE LEFT EVERY RENDER.
+
+What it looks like: blotches 2 to 4 cells across (24 to 48 px; spectral peaks of the frame
+difference at 30 to 47 px), +-1 to 2 code values, streaming left at about 11 to 13 px per frame
+(about 700 px/s at 60 fps) over every fogged region, whatever the camera does.
+
+Measured (kit: fogmotion.py; rho_off = correlation of consecutive camera-compensated residuals at
+their best non-zero lag, vel_off = that lag in px/frame relative to the scene):
+  stepped probe, camera HELD (mist3 static-percell):  rho_off 0.26-0.40 at [-13, 0] in all
+      regions; lag 2 frames peaks at [-25, 0] (+0.20): a coherent travel, not an alias.
+  trailer clip (v2/ud/valley_mist frames 240-390):    rho_off 0.22-0.38 at [-12, 0].
+  REAL PLAY at 60 fps, camera panning (mist/1/rec/pc_rt60.mkv): rho_off 0.35/0.53/0.40
+      (bay/farhill/haze) at [-10..-11, 0]; unfixed all_rt60 0.02-0.07.
+  REAL PLAY at 60 fps, camera HELD (my rt probe, rec/pc_rtst.mkv): rho_off 0.15/0.48/0.52/0.47
+      at [-9..-12, 0]; boil valley 0.422 (q4 0.061).
+  By eye: out/dstrip_static.png (stepped, held camera) and out/dstrip_rtst_pc_q4.png (real time,
+      held camera): per-cell diffs x24 are covered in cell blotches that shift left frame to
+      frame; the candidates are flat. x-t RESID strips (out/xt_val_240_390/xt_view.png and
+      out/xt_moving/xt_resid_view.png): original = horizontal lines (pumping), per-cell = a fast
+      shallow-slanted hatching (travel), vanilla and the candidates = only the camera's own slope.
+
+Rule that follows: a per-cell offset that is (quasi-)linear in the cell index (IGN, an R2 or
+golden ramp of the cell, any lattice ramp) plus a frame-global phase step is a translation of
+the residual. Use a white per-cell hash / blue-noise tile (no translation symmetry), or no
+per-frame jitter at all. A white hash alone (agent 2's A) removes the travel but BOILS (in-place
+cell-scale noise 10x the floor) unless the history is read at the cell centre.
+
+2. THE KIT (tmp/video/fogwind/1/kit/, plain `python`, docstrings explain every column)
+-------------------------------------------------------------------------------------
+  fogmotion.py   per region (bay, valley, farhill, haze, slope; soldiers excluded):
+                 FLICKER band (= bandmetric) and lowd2 (60 px block d2); MOTION camera shift,
+                 mid (cell-scale residual rms), rho_off / vel_off / WIND (= mid * rho_off),
+                 rho_c / vslow (slow creep under 1 px/frame); GRAIN fine / fine0;
+                 --static: no camera estimate (the wind biased it) + boil / slow (in-place change).
+  xtslice.py     x-t and y-t slices (RAW | STAB | RESID) + crop2x.mp4 / resid2x.mp4 (2x bay and
+                 far valley), per-clip first frame with LABEL@first.
+  dstrip.py      consecutive camera-compensated diffs x gain, crops, one row per clip.
+  windchar.py    static-camera wind characterisation: spectral peaks of the diff, multi-lag travel.
+  curtain.py     screen-locked streaks on a moving clip (time mean in screen coordinates).
+  kxnu.py, spectrum3d.py  spectral views (not discriminative here; kept for reference).
+  gen_probe_fog1.py + run_probe_fog.ps1  the shared probes look_probe_fog1_static (frame 328 pose
+                 held, k = 270..404) and look_probe_fog1_moving, run + mkv + measure.
+  gen_rt_probe.py + run_rt.ps1 + measure_rt.sh  REAL-TIME probes on the mist-1 recorder build:
+                 rt60 (the pan, one render per 1/60 s tick, 200 frames) and rtst (camera held,
+                 real time, 200 frames).
+  Validation (valley_mist 240-390): original band 0.516 / WIND <= 0.019; per-cell band 0.093 /
+  WIND up to 0.162, rho_off 0.34; vanilla band 0.103 / WIND <= 0.017, rho_off 0.035.
+  Lesson kept: the flicker metric alone is blind to travel; the kit judges travel (rho_off,
+  vel_off), in-place boil (static) and look (region means) separately, and every result here was
+  also looked at by eye.
+
+3. REFERENCE NUMBERS (flicker / motion / grain; original, per-cell d91a08e0, vanilla)
+-------------------------------------------------------------------------------------
+All with the kit. WIND = mid * rho_off (code values, the travelling part); lowd2 = 60 px block
+flicker; boil/slow = in-place cell-scale change with the camera held (raw / 6-frame smoothed);
+fine = fine-scale residual (grain; only comparable ud vs ud, the warp leaves terrain error).
+
+TRAILER CLIP valley_mist, frames 240-390 (out/val_240_390.txt), region bay/valley/farhill/haze:
+                      band    lowd2 valley  WIND                       max rho_off  fine valley
+  original (pre-d91)  0.516   1.625         0.015/0.019/0.001/0.007    0.03         1.125
+  per-cell d91        0.093   0.121         0.061/0.162/0.104/0.060    0.38 [-12,0] 0.833
+  vanilla             0.103   0.062         0.017/0.011/0.002/0.003    0.035        2.054 (sharper terrain)
+
+STEPPED PROBES, frames 15-119 (k 285-389), mkv:
+  static (camera held; --static):  WIND b/v/f/h            lowd2 v  boil v  slow v
+    original (mist3 static-base)   0.014/0.024/0.000/0.009  1.618    0.375   0.151
+    d91 (as built, percellbuild)   0.059/0.174/0.127/0.068  0.110    0.416   0.173
+    jitter frozen (floor)          0.002/0.001/0.001/0.001  0.025    0.079   0.067
+  moving (the real pan):           WIND b/v/f/h            max rho_off  lowd2 v  band(mkv)
+    original (moving-base)         0.009/0.025/0.001/0.007  0.04         1.621    0.522
+    d91 (moving-percell)           0.047/0.123/0.078/0.035  0.29 [-13,0] 0.117    0.086
+    jitter frozen (mist6)          0.012/0.023/0.007/0.005  0.15 [3,-7]  0.072    0.076
+    vanilla clip 285-390           0.017/0.007/0.002/0.007  0.048        0.057    0.102
+
+REAL TIME 60 fps (mist-1 recorder, one render per 1/60 s tick):
+  held camera (rtst, 190 fr):      max rho_off  WIND valley  boil/slow valley  boil/slow farhill
+    d91                            0.52 [-11,0] 0.138        0.422/0.321       0.252/0.199
+  pan (rt60, frames 0-150):        max rho_off  bay lowd2
+    original (mist/1 all_rt60)     0.07         0.696
+    d91 (pc_rt60)                  0.53 [-11,0] 0.063
+  (no vanilla real-time recording exists; vanilla has no fog jitter.)
+
+4. CANDIDATES RE-MEASURED (all shader overrides; numbers mine unless marked)
+-----------------------------------------------------------------------------
+STEPPED STATIC (mist3/fog3/fog4/fog1 static, frames 15-119, --static; out/re_static_1.txt, re_static_2.txt):
+  clip           WIND b/v/f/h             max rho_off  mid v  lowd2 v  BOIL v  SLOW v  mean bay/valley/farhill
+  2/A white rot  0.007/0.023/0.008/0.003  0.05         0.508  0.166    -       -       154.5/129.3/116.7  boils, fails
+  2/B white t    0.014/0.074/0.024/0.012  0.08         0.924  0.325    -       -       154.4/128.9/116.4  boils, fails
+  2/Ac           0.002/0.004/0.001/0.001  0.038        0.117  0.037    0.125   0.080   153.9/126.1/115.2
+  2/Act25        0.003/0.002/0.001/0.001  0.033        0.073  0.033    0.073   0.049   154.4/128.8/116.4
+  5/c8           0.003/0.001/0.001/0.001  0.022        0.048  0.029    0.058   0.046   153.9/126.2/115.2
+  4/q4           0.003/0.001/0.001/0.001  0.025        0.052  0.020    0.057   0.043   153.9/126.1/115.2
+  4/q8           0.002/0.001/0.001/0.001  0.029        0.047  0.024    0.053   0.040   153.2/125.6/114.5
+  6/S2           0.002/0.001/0.001/0.001  0.025        0.050  0.022    0.055   0.041   153.9/126.6/115.3
+  3/t4w          0.002/0.002/0.001/0.001  0.029        0.057  0.039    0.064   0.047   153.8/126.0/115.1
+  7/far80n4      0.002/0.001/0.001/0.001  0.03         0.045  0.026    -       -       154.1/126.8/115.3
+  (original 154.0/128.1/115.9; d91 as built 154.9/130.7/117.5)
+
+STEPPED MOVING (real pan, frames 15-119; out/re_moving_1..3.txt):
+  clip      WIND b/v/f/h             max rho_off  lowd2 v  band(mkv)  mean valley (original 127.9, d91 130.3)
+  2/Ac      0.007/0.005/0.003/0.004  0.036        0.066    0.076      125.9
+  3/t4w     0.010/0.003/0.002/0.004  0.049        0.070    0.079      125.9
+  3/t2w     0.011/0.003/0.002/0.004  0.051        0.077    0.080      126.0
+  4/q4      0.010/0.006/0.002/0.004  0.047        0.080    0.077      125.8
+  4/q8      0.009/0.006/0.002/0.004  0.050        0.076    0.077      126.1
+  5/c8      0.008/0.003/0.002/0.005  0.040        0.068    0.077      125.9
+  6/S2      0.007/0.004/0.002/0.003  0.033        0.060    0.073      126.4
+  (q2b, Act25, c8b, S2z moving: their owners' kit numbers on the board are in the same class.)
+  Curtains (kit/curtain.py, moving, screen-locked x band-pass): q4 0.131/0.125/0.245/0.183 vs original
+  0.123/0.102/0.223/0.169, frozen 0.132/0.129/0.252/0.186; no 12 px lattice peak in any run. Every
+  overhaul run (original included) carries a screen-locked 6 px diagonal pattern vanilla lacks: it
+  predates this work and is not from the injection.
+
+REAL TIME 60 fps (mist-1 recorder; rtst = camera held 190 frames, rt60 = pan 150 frames;
+out/rt_<tag>.txt). boil/slow valley | boil/slow farhill | max rho_off rtst / rt60 | rt60 bay lowd2 |
+held-camera mean valley/farhill:
+  d91 (pc, and mist-1 as built)  0.422/0.321 | 0.252/0.199 | 0.52 / 0.53 | 0.063 | 130.0/116.9   WIND
+  2/Ac                           0.131/0.119 | 0.078/0.070 | 0.021/0.024 | 0.067 | 125.4/114.5   slow boil 2x
+  2/Act25                        0.080/0.065 | 0.056/0.045 | 0.021/0.025 | 0.064 | 128.1/115.7   boil 1.3x
+  4/q4                           0.061/0.049 | 0.046/0.037 | 0.024/0.025 | 0.066 | 125.3/114.3
+  6/S2                           0.061/0.048 | 0.048/0.039 | 0.026/0.026 | 0.068 | 125.9/114.6
+  3/t4w                          0.065/0.054 | 0.047/0.039 | 0.024/0.026 | 0.066 | 125.3/114.5
+  5/c8b                          0.059/0.045 | 0.050/0.039 | 0.026/0.026 | 0.063 | 128.0/115.7
+  4/q2b                          0.058/0.047 | 0.047/0.038 | 0.025/0.028 | 0.062 | 128.2/115.6
+  3/t2wb                         0.060/0.048 | 0.049/0.040 | 0.025/0.027 | 0.064 | 128.1/115.7
+  6/S2z                          0.058/0.046 | 0.049/0.039 | 0.033/0.029 | 0.066 | 127.0/114.9
+  3/t4wb                         0.058/0.047 | 0.052/0.043 | 0.031/0.029 | 0.062 | 128.1/115.7   haze boil 0.071 (others 0.047); not visible by eye in a 320x100 haze crop at 8-frame spacing x32 (out/dstrip_haze_t4wb_q2b.png)
+  original pre-d91 (all_rt60): rt60 bay lowd2 0.696 (the pump), rho_off 0.07.
+  By eye (out/rt_view_static/crop2x.mp4, resid2x.mp4: d91/Ac/q4/S2/t4w stacked, 2x, diff x16;
+  out/dstrip_rtst_pc_q4.png, out/dstrip_rtst_slow.png): d91's blotches stream left frame after
+  frame with the camera still; the candidates are flat apart from the sea's waves and the soldier;
+  Ac shows faint slow blotches by the shore at 8-frame spacing.
+  8-frame cadence (kit/tempspec.py): every overhaul run, zero-jitter q4 included, has peaks at 1/8,
+  1/4 and 1/2 cycles/frame (an engine-wide cadence, likely the TAA sequence); c8b adds a little at
+  1/8 inside a boil equal to q4's.
+
+5. WHAT I CONCLUDE FOR THE LEAD
+-------------------------------
+- The wind is the IGN translation (section 1). Any fix must not combine a lattice-linear per-cell
+  offset with a frame-global phase step.
+- On every probe I have (stepped and real-time, held and panning, valley_mist), the following meet
+  the motion bar at the floor: q2b, t2wb, c8b, q4, S2, S2z, t4w, t4wb. Of
+  these, q2b, t2wb and c8b also keep the original look in play (valley 128.0-128.2, farhill
+  115.6-115.7 against the original's 128.1/115.9); S2z is about 1 code clearer; q4, S2, t4w about
+  2 to 3 codes clearer. Act25 keeps the look but boils 1.3x the floor in play; Ac boils 2x.
+- My kit cannot separate q2b, t2wb and c8b. The choice between them is cost, simplicity and
+  robustness on other scenes (cuts, fast turns, night, other clips), which my probes do not cover.
+- Limits: all on one shot (the dawn valley); vanilla has no real-time recording; the kit's band on an
+  mkv reads about +0.04 above bandmetric on PNGs; the fine (grain) column is only comparable ud vs
+  ud; region boxes are tuned to the frame-328 pose.
+
+6. FILES
+--------
+  kit/            the tools (section 2)
+  out/            all measurement text files and the images named above
+  rec/            real-time recordings (<tag>_rt60.mkv, <tag>_rtst.mkv; raw dumps deleted)
+  runs/rt-<tag>/  tri logs of the real-time runs (override.txt confirms each override loaded)
+  Probes I added in video-work/arma_CWR/tests/rendering/captures/video/: look_probe_fog1_static,
+  look_probe_fog1_moving, look_probe_fog1_rt_<tag> (mist-1 build only).
+  Scratch build used, not rebuilt: D:/Arma_CWA_worktrees/mist-1 (dist/mist-1-rwdi = d91a08e0 +
+  the first swarm's recorder). Junction: RemasterUD-fog-1. No git branch, no commit, no edit in
+  graphics-remaster or D:/Arma_CWA.

@@ -1,0 +1,17 @@
+[
+  {
+    "Algorithm": "SHA256",
+    "Hash": "F0BCDA0852C3AAF84F00F23E23B0FF81275689DE0D937B9E9F46176384A85A0A",
+    "Path": "D:\\Arma_CWA\\arma_CWR\\dist\\x64-win-rwdi\\PoseidonGame.exe"
+  },
+  {
+    "Algorithm": "SHA256",
+    "Hash": "1C7DAF28BD66562836C71CB64623D638873B8FB0F950953C63BFF0FF75CC871A",
+    "Path": "D:\\Arma_CWA\\arma_CWR\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+  },
+  {
+    "Algorithm": "SHA256",
+    "Hash": "82647BE1399C7A85E81EB06F59D55E106702EEE5F69472D7A23B714EF8A327FD",
+    "Path": "D:\\Arma_CWA\\@LoBo\\Bin\\config.cpp"
+  }
+]

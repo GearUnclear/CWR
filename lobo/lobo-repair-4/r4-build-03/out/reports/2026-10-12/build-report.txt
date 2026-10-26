@@ -1,0 +1,117 @@
+LoBo Reloaded build report: LoBo-Reloaded-2026-10-12
+====================================================
+Built 2026-10-12 14:49:29 local, 2026-10-12T21:49:29Z UTC.
+Builder: arma_CWR/tools/lobo/package-lobo-family.ps1
+Builder commit: 69fe8b60d33a0dc169879fc39cf703c2b56366bd
+PowerShell 5.1.22621.6133, python C:\Python313\python.exe
+
+INPUTS
+------
+@LoBo source    D:\Arma_CWA\@LoBo
+                124 addon pbos, 361 files copied, 2280586253 bytes
+cache           D:\LoBo-Reloaded\sources\mega_nc-cache
+                server not contacted (-SkipFetch)
+ExtraDir        none
+ExtrasDir       D:\LoBo-Reloaded\_work\build-2026-10-12\@LoBo_Extras
+                22 files, 11 addon pbos, 2 missions, 124773967 bytes
+                built by build-lobo-extras.py 2026-10-11.1
+                its class check ran against the stock game and:
+                  @LoBo (124 pbos, digest bf8829cee292108ffe5be84b0717f6b6754a6122e3bbfc62846ab83939c29280)
+                  @LoBo_Deps (40 pbos, digest 2dacddfc9f5bdb1da296d9747deb58e5b1f411ca0e08fcb8cee8d3cc0bb1a6cd)
+                class check at packaging: no clash against 209 configs of the staged
+                modfolders and the stock game; 14 reported overlap(s), listed in
+                reports\2026-10-12\extras-class-check.json
+                stock game: D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered
+known issues    D:\LoBo-Reloaded\docs\known-issues.txt (sha256 a3311c626a966082793f18db521431a32c526cff443faec60c69ddad3f154e41)
+Bin\config.cpp  sha256 82647be1399c7a85e81eb06f59d55e106702eee5f69472d7a23b714ef8a327fd
+PoseidonTools   D:\Arma_CWA\arma_CWR\dist\x64-win-rwdi\PoseidonTools.exe
+                sha256 21547126582b12752a054d8de5cb3ee3328ca27818845f6c7b1c0dc4150fd351
+repair tool     D:\Arma_CWA\.claude\worktrees\lobo-repair-4\arma_CWR\tools\lobo\repair_lobo.py
+                sha256 3b3b1db5de0345a324587d9cc870aa677e376e5f5d5d2e1ac0171a2924f2c8d2
+
+REPAIR IDENTITIES
+-----------------
+mod doctor (report only): nothing to do in 124 source pbos and 126 staged pbos
+mod doctor --fix on the staged @LoBo_Deps and @LoBo_Extras (the cache and ExtrasDir
+   keep their bytes; originals moved to _work\2026-10-12\doctor-orig):
+   @LoBo_Deps\Addons\bas_mah60.pbo  2 site(s)
+      BURIED_MODEL_ORIGIN  BAS_ROPER.p3d  boundingCenter.Y -9.4992 -> 1.0739 (mesh -1.0739..1.0739, buried 8.43 m)
+      BURIED_MODEL_ORIGIN  BAS_TJSvetlo.p3d  boundingCenter.Y -7.0129 -> 2.4783 (mesh -2.4783..2.4783, buried 4.53 m)
+      before da59767058af190ae2e868b6e56df81c20118fd6a97463e128fef7e9cf55b427
+      after  4d3fb885bee2a347b43d42c92672f5d5632a1c65499e420bbdf60785bae5c832
+   @LoBo_Deps\Addons\IRAR_EE9.pbo  1 site(s)
+      MALFORMED_FLOAT  config.cpp:55  '0.0.1' -> '0.000'
+      before 882562d65e84ec92a717497e261348b507e6c98b86de46d067478dafc37407fd
+      after  3c80c20949111a3e27a7e100cb26092977da5eb186e79da563099b77843c6fa9
+mod doctor gate (report only, before SHA256SUMS.txt): nothing to do in
+   @LoBo 126 pbos, @LoBo_Deps 40 pbos, @LoBo_Extras 11 pbos, @LoBo_UD 14 pbos
+repair_lobo.py at build time: repair_version 2026-10-11.4
+   rule sha256 98f07a96676496b149528e96450c63c27755341e9e47c87aa6f977049385aa48
+   UD check on the source, classic apply + check on the staged copy and
+   UD check on the composite all ran with this identity.
+classic switch: 16 members in 14 archives rewritten
+applied content repair batches on the source (oldest first):
+   20261011T105837Z-33d55270  2026-10-11.1  state applied  profile ud  25 archives  76 members
+      rule sha256 54a34c7b1144259b89d4c5522795f8b65f8ffc72b43a4dfddecb386e00f2c1fb
+   20261011T201747Z-5b12c00c  2026-10-11.2  state applied  profile ud  3 archives  3 members
+      rule sha256 1520e54c8b0c601887abcada96325a41ba4b0c361275d05090b684acaf0c0c53
+   20261012T034210Z-8eb814a2  2026-10-11.3  state rolled-back  profile ud  41 archives  91 members
+      rule sha256 9868339d6f8d320f336fb0cbc70ae072e1dfd395290d6d0f9d77c353d04d5385
+   20261012T034354Z-0532e837  2026-10-11.3  state applied  profile ud  41 archives  91 members
+      rule sha256 81bf8fe8cfccada323a7d872e06385e1088414f271851acbb9d9632be80745c4
+   20261012T042613Z-b68ba5de  2026-10-11.3  state applied  profile ud  3 archives  6 members
+      rule sha256 75c456dcab6fbece460edd479eedc296253255e709a3c58260f28072562a0427
+   20261012T085301Z-fdbc36a3  2026-10-11.4  state applied  profile ud  5 archives  7 members
+      rule sha256 f6e16ee80ec1c0698394d17ede66506c18a31bb443c9ef63f8cb12373374d1f9
+   20261012T185029Z-2990ea75  2026-10-11.4  state applied  profile ud  1 archives  19 members
+      rule sha256 de63a7e05bb1973cc8cc1899ad148ca1a0d1473c2515b3c5318c8a3d51dcf3c5
+   20261012T205817Z-7a0580a4  2026-10-11.4  state applied  profile ud  8 archives  19 members
+      rule sha256 98f07a96676496b149528e96450c63c27755341e9e47c87aa6f977049385aa48
+profile switch overlay (@LoBo_UD\addons):
+   LoBo_airammo.pbo   classic e1954a6c48ac45d95c01fa820bdf52bad42842f95cd429816dd0ccc1ef7e75a3
+                      UD      d54dc5c4d33c54a581b8c602a5b4c37f24057625a484bc056b0f895731427d99
+   LoBo_BTR60.pbo     classic 59e3489b6c47be03191c0aa2d67ea952a0cbc442a53b207d2a0df5de52fc7393
+                      UD      c2daf92e718ac717512970061b34d87bc8e3f4364874261ee836632540797f5e
+   LoBo_FAB.pbo       classic ec8f2bfbc7336d1c3e1b7fa67a8dea8bc5bd1704401acb3c934d4cb5d7474427
+                      UD      6f44009f57e1e3c1cb08b12a0966c59b0000a996afba67f497f2d954328732e7
+   LoBo_Zelda.pbo     classic e8b1b04497fa0ca222574559aac50e7e2d51c77a3d6ecd7859640481cc878b2f
+                      UD      04b86d898777ebd77b29896eeddece9e749aa22e60866882e78b68a75eebcc4d
+   LoBo_ZU23.pbo      classic bea32c0ad8967e6f2569ba1be9afd6c50b7f30c384a44589849327312e985621
+                      UD      7f1425189c9aba377bab7b190803b2c28c262b74acc6930b859bc62887bd071f
+   LoBoCen.pbo        classic 72eabce74adb36d527afe01b3153c48a23794b2839588dec57c497af90126576
+                      UD      94b17f998689c43d015d424bd328460f66fa098c764b09dd90b461d207812475
+   LoBoEgAPC.pbo      classic fe44e35261895459f574f5e054558cb0df45ecfcc5d4eb0ca01bdde8255e8680
+                      UD      45c21ba836a708947df037e9c81b34660dddcf2d87c6410feebdb814179e1a2d
+   LoBoF15.pbo        classic 9652dbd776c4de5978ab18d0faa8c4662fb2982271d75c6a888272f635e667de
+                      UD      a357669e730e75e1e8800bed2381d77274d9c9d602b4e08548d5a68ce2ce5419
+   LoBoF16.pbo        classic cca793c7fceb964e991c5a28af1e1dbd963c1e051aad3b0f2b5344a09181a34f
+                      UD      f6a6de457b2e1ad4c3d36ab9cb57391406decc35a2bbbdf74b164d62f0368d58
+   LoBoM60.pbo        classic aa1b0618ed2fd81a835f76f35e7c0be4abbeaa01d600a97030c0cf02f53a417d
+                      UD      460473d42d5b648d6859eed1742bb4e8142728da0b218526e3d71449a348e069
+   LoBoMerkava2.pbo   classic 09e2603413fb06d30dbcdc87972f2ad2f4bda6c3b0cd9ddb3c5e40e0c38dcd87
+                      UD      6075c05276e57742c164cac1379994eb14806ecdcc996f3f400b7bf16fd3650a
+   LoBoMerkava4.pbo   classic 769ff83d040a8297476df8b209762e7a1f0ce4a5dfc7574422e0f70c6cf1f6f2
+                      UD      1b0516726697db3e591f73247cafb8bedd7ec6b4e81dcb9cc9bb8f9e7259b3ef
+   LoBoSA6.pbo        classic a4c79f524cdbb5f6ae80157a56eee83ad4246b159a1dc3cb98ccd65b5943a5d5
+                      UD      1cdbe6758a45e7a020de62342f7042f0dbf32e43cc9c82b86b9d5a364d922953
+   LoBoTer.pbo        classic f8a4b0615ea0a68acf0c133edc78a9debac92045f67f95901de7ef47a55eaaf6
+                      UD      8cd559fe7b5da8d16db33f588f3a98526e463f855fab3977974e2f12b3af5c57
+
+COUNTS
+------
+   folder                files     pbos            bytes
+   @LoBo\                  366      143       2289655401
+   @LoBo_Deps\              68       40        286758617
+   @LoBo_Extras\            22       13        124773967
+   @LoBo_UD\                16       14        512739618
+   (root files)              2        0            61626
+   TOTAL                   474      210       3213989229
+SHA256SUMS.txt: 473 entries, sha256 2855073b2ebf235ee4fb14a561c149464a6b6f6e5ba36074c8b6acbd976e06d7
+
+OUTPUTS
+-------
+staged folder   D:\Arma_CWA\tmp\lobo-repair-4\r4-build-03\out\stage\LoBo-Reloaded-2026-10-12
+archive         D:\Arma_CWA\tmp\lobo-repair-4\r4-build-03\out\LoBo-Reloaded-2026-10-12.7z
+                sha256 9dd1e854f748c489ad0524a3a9370074cf234b700c9442f556c59de49bcaca0e, 885057397 bytes
+library         D:\LoBo-Reloaded
+                modfolders\2026-10-12, dist\, docs\build-2026-10-12.txt

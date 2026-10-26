@@ -1,0 +1,5 @@
+constexpr float kAoFadeEnd
+constexpr float kAoFadeStart
+constexpr float kAoRadius
+constexpr float kBloomKnee
+constexpr float kBloomThreshold

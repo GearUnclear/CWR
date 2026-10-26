@@ -1,0 +1,5 @@
+    CHECK(static_cast<int>(LC::Surface) == 79);
+    CHECK(static_cast<int>(LC::Surface3) == 88);
+    // The photoreal camera (look lane "light") follows the surface slots.
+    CHECK(static_cast<int>(LC::Camera) == 89);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::CameraLook) + 1);

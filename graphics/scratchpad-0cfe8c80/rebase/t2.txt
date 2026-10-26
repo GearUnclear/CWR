@@ -1,0 +1,2 @@
+               parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" || parent == "airBeams" ||
+               parent == "nightLights" || parent == "photoLight"));

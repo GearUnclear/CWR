@@ -1,0 +1,138 @@
+Round 4 SUN fixer: the sun disc, the low-sun glow, the disc's shape and the pine shafts
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-veil (base tree d2f866e4 = fec1075 + fix4/base.patch).
+Build build/look-fix-veil-rwdi, game dist/look-fix-veil-rwdi, junction RemasterUD-r4-sun.
+Nothing committed, no branch. Patch: fix.patch (8 files, +153 / -17), made with
+git diff --cached --binary <base tree>; it applies with git apply --cached --check on a
+fresh index of the base tree. Probe capture tests look_r4sun* are not in the patch.
+
+Status: (a) fixed, (c) fixed, (d) fixed, (b) not fixed (cause found, see below).
+
+IMAGES (each: vanilla | landed | before (director/final) | after, then a crop of the problem)
+- a_sun_glow_lowsun_fp.png: (a) at 960x640. The sun is a white disc with a glow that falls off.
+- a_sun_glow_coastline_sunset.png: (a) at 960x640, sunset over the sea.
+- c_disc_round_sinai_lowsun_fp.png: (c) 960x640, crop 8.3x: the oval is now round.
+- d_pine_rays_shafts.png: (d) 1080p, the shafts between the crowns.
+- b_dawn_valley_bay.png: (b) 1080p, unchanged (open).
+- a_banding_check_highpass.png: 12x high-pass round the sun, before and after.
+- Shots: shots_2 (final build: the six views at 1080p in tri/look_r4sun1_*, lowsun_fp,
+  sinai_lowsun_fp and coastline_sunset at 960x640 in tri/look_r4sun960_*). shots_1 is the
+  first fixed build (before the beam gain). Probes: shots_p1 to shots_p6, sheets work/p1.png
+  to work/p6.png, override shaders work/ovAB, ovB2, ovC.
+
+(a) THE SUN: A PALE DISC IN A FLAT CREAM PLATEAU
+Cause, two parts.
+1. The disc's colour. The disc is drawn at kSunDiscLevel (12, past white) in the colour of
+   the sunlight through the air, about (1, 0.62, 0.3) at a low sun. The hue-keeping curve
+   whitens light past white only by 1 - kChromaKeep * chroma^2 (0.61 for chroma 0.7). That
+   gives (255, 237, 220) on paper; the shots measure (255, 238, 219). So the disc was a peach
+   dot, never white.
+2. The glow. The sky's roll-off has one cap everywhere (kSkyRolloffCap 2.4, about 0.85 of
+   white on the curve). Round a low sun the aureole is far brighter than the cap, so it was
+   pressed flat. Probe: the radial profile of lowsun_fp (960) round the sun is
+   237,207,166 at 8 px, 237,206,164 at 12, 16 and 24 px, 235,206,165 at 32 px: a plateau at
+   the cap's value, then the fall. Landed: white out to about 16 px, then a smooth fall.
+Change.
+- PhotoCamera.hpp/.cpp: toward the sun the roll-off's cap rises from kSkyRolloffCap to
+  kSkySunCap (10, past white). The rise is SkySunGlow = 1 / (1 + 2 (1 - cos) / r^2), about
+  1 / (1 + (angle / 1.2 deg)^2). New SkySunGlow, SkyRolloffCapToward, SkyRolloffToward
+  (C++ mirror for the tests). The GLSL camSkyRolloff(lin, d) takes the direction and every
+  caller passes it (the dome, the clouds, the aerial colour, the sky reflection).
+- The disc's colour goes kSunDiscWhite (0.85) of the way to white from 4 degrees up, none at
+  the horizon (a reddened sun at sunrise keeps its colour). A sensor clips every channel of
+  the sun.
+Result (960 lowsun_fp, from the sun's centre): 254,253,252 at 0 px, 253,245,234 at 8,
+252,234,212 at 12, 248,227,200 at 16, 244,218,184 at 24, 238,210,171 at 32, 223,194,152 at
+48. A white core, a warm halo, no plateau. Coastline_sunset: white disc, a small peach core
+glow (254,228,203 from 8 to 16 px), then a smooth fall. Disc peak (255,255,254) in every
+low-sun view. Bloom picks up the brighter sky round the sun on its own.
+
+(c) THE OVAL DISC
+Cause: the disc was drawn by its angle from the sun. A rectilinear projection stretches a
+small circle near the frame's corners along the radius (ratio about 1 / cos of the angle
+off axis), and the low sun sits near the top-left corner. Measured axis ratio of the disc:
+1.23 (lowsun_fp 960), 1.26 (sinai_lowsun_fp 960), 1.27 (lowsun_fp 1080). So 1080 was oval
+too, only less visible. Landed draws a screen-aligned sprite, so it is round.
+Change (EngineGL33_LightingShaders.cpp camSunDisc): the offset to the sun in pixels is
+solved per pixel from the view ray's change per pixel (dFdx, dFdy) in the sky's tangent
+plane, times the angle of a pixel of the same solid angle (det^(1/4)). The disc is an
+equal-area circle on the screen. Falls back to the angle when the derivatives vanish.
+Result: axis ratio 1.02 (lowsun_fp 960), 1.01 (sinai_lowsun_fp 960), 1.00 (both at 1080).
+
+(d) PINE_RAYS: FAINT SHAFTS
+Under the camera the screen-space shafts are off. The shafts are the volumetric fog's
+near-field pass (psFogNear): the wet air's forward lobe, marched with the sun's visibility.
+Probes (pine_rays, shots_p4 to shots_p6):
+- debug=8 (the air alone) shows clear shafts, so the beams exist; they are just faint in
+  the frame.
+- volGain=8 changes nothing (that knob is the old air pass's).
+- Taking the pass's soft cap (0.45) before the lit share, or using the lit share linearly:
+  no change (box std 24.2 -> 24.2 / 23.9). The cap is not what holds them.
+- The beam term times 2.5 (shader override): clear shafts on the dark crowns at thumbnail
+  size, the open sky round them unchanged.
+So the beams are linear in kFogBeamGain and the gain was too low to read.
+Change: VolumetricFog.hpp kFogBeamGain 14 -> 35. Result: shafts read at thumbnail size
+(d_pine_rays_shafts.png); no wash over the sky.
+
+(b) DAWN_VALLEY: THE CREAM HAZE OVER THE BAY (NOT FIXED)
+Probe results (dawn_valley at 1080, the bay box x 60-98%, y 45-75%, luma std as contrast):
+- fogDensity=0: the bay and the far shore are crisp (std 57.9; landed 53.8; ours 34.3).
+  So it is the volumetric fog.
+- fogDensity=0.5: almost the same as 1 (far shore 216 against 224).
+- fogMist=0, fogSun=0, camAerial=0.5, volGain=8: no visible change.
+- The humid ground air off (shader override): no change (std 34.3 -> 34.4).
+- The ring not measuring the sky within 12 degrees of the sun (was 5): no change (33.2).
+- camHaze=1: the sky goes blue and the haze grey-blue, the bay still veiled.
+So the cream is the clear haze's in-scatter on the sun side. Its light is the horizon sky
+in the sun's azimuth (the ring), which at a low sun is the brightest air in the frame (near
+the sky's cap). Against a dark backlit shore even a transmittance of 0.6 leaves a bright
+cream veil, so halving the density barely shows. Likely root fix for a later round: the air's
+light toward a low sun should follow the phase at the ray's own angle to the sun; the ring
+samples the sky 2 degrees or more above the land, closer to the sun than a downward ray over
+the bay, so it brings the aureole's flank into the haze. Not done here: it needs the ring's
+sample elevation in the injection and a check on every low-sun view. My changes do not make
+it worse (bay box std 34.3 before and after).
+
+CONSTANTS TOUCHED (name: old -> new)
+- PhotoCamera.hpp kSkySunCap: new, 10.0 (GLSL kCamSkySunCap)
+- PhotoCamera.hpp kSkySunGlowRad: new, 0.021 rad = 1.2 degrees (GLSL kCamSkyGlowRad)
+- PhotoCamera.hpp kSunDiscWhite: new, 0.85 (GLSL kCamSunWhite)
+- VolumetricFog.hpp kFogBeamGain: 14 -> 35
+- Unchanged: kSkyRolloffKnee 1.2, kSkyRolloffCap 2.4 (the broad sky's cap), kSunDiscLevel 12,
+  kSunDiscRadiusDeg 0.45, the curve, kChromaKeep, the exposure and the noon sky (NOON's).
+  The roll-off far from the sun moves by under 2% at 20 degrees and under 0.1% opposite.
+
+TESTS
+PoseidonTests.exe "[remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],
+[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],
+[PhotoCamera],[TerrainHorizon],[StateOwnership],[atmosphere]" run from D:\ on the final
+build: all pass, 321 cases, 957,604 assertions (glslang compiles every program).
+New or changed:
+- test_photo_camera.cpp "PhotoCamera: toward the sun the sky burns white, its glare falls off
+  smoothly to the sky's cap": the cap at the sun past white, half the rise at kSkySunGlowRad,
+  output falling with the angle with no step over 1% of white per 0.1 degree, no plateau
+  from 0.6 to 3 degrees, the far sky's cap within 2% from 20 degrees, kSunDiscWhite range.
+- test_remaster_lighting.cpp: the GLSL constants kCamSunWhite, kCamSkySunCap,
+  kCamSkyGlowRad match PhotoCamera.hpp; every camSkyRolloff call takes a direction; the disc
+  is solved with dFdx.
+- test_volumetric_fog.cpp "the morning shafts between crowns are strong enough to read":
+  kFogBeamGain in 30..40.
+clang-format: clean on all 8 files.
+
+AI SIGHT AND FOG
+Intact. Target.cpp lines 639 to 646 still multiply vis by FogSightTransmittance while
+FogSightActive(). VolumetricFog.cpp (FogSightExtinctionAt, SetFogSight) and Target.cpp are
+not in the patch. The beam gain is a render-only term of the near pass; the AI never read it.
+
+STILL OPEN
+- (b) dawn_valley's bay, see above.
+- Under a 12x high-pass the glow shows fine one-level contour rings, as round 3's did, and
+  coastline_sunset has one ring where the peach core glow ends (about 16 px at 960). Not
+  visible at full size or thumbnail.
+- The halo is smaller than landed's painted sprite halo (landed's is a large yellow-white
+  ball). Ours reads as a burning sun at thumbnail but a wider kSkySunGlowRad (1.8 to 2
+  degrees) would match landed more closely at the cost of more bright sky round the sun.
+- The broad cream on the sun side of the low-sun skies (camHaze 6) is unchanged.
+- Night and grey views were not reshot: the new cap only rises within a few degrees of the
+  sun's direction and only where the sky is past the knee (1.2), so they should not change.
+- Only my games were run; run-captures' scoped cleanup stopped them.

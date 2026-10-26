@@ -1,0 +1,912 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..2fa2e82 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,13 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"ssr", &remaster::LightingTuning::ssr},
++        {"ssrWater", &remaster::LightingTuning::ssrWater},
++        {"ssrWave", &remaster::LightingTuning::ssrWave},
++        {"ssrWet", &remaster::LightingTuning::ssrWet},
++        {"ssrGlossy", &remaster::LightingTuning::ssrGlossy},
++        {"ssrDebug", &remaster::LightingTuning::ssrDebug},
++        {"ssrRough", &remaster::LightingTuning::ssrRough},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GLDepthStencilState.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/GLDepthStencilState.hpp
+index 1406dd6..5e38d04 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GLDepthStencilState.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GLDepthStencilState.hpp
+@@ -30,7 +30,9 @@ inline void StencilAlwaysReplaceZero()
+ inline void StencilEqualZeroIncr()
+ {
+     glEnable(GL_STENCIL_TEST);
+-    glStencilFunc(GL_EQUAL, 0, 0xFF);
++    // SSR prototype: the top three bits carry surface tags (water, terrain,
++    // glossy); the projected-shadow exclusion only looks at the low bits.
++    glStencilFunc(GL_EQUAL, 0, 0x1F);
+     glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+ }
+ } // namespace detail
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..9e50970 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,15 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // SSR research prototype (gfx-ssr): screen-space reflections on water, wet
++    // ground and glossy materials. 0 = off (the shipped look).
++    float ssr = 0.0f;         // overall strength
++    float ssrWater = 1.0f;    // water reflection strength
++    float ssrWave = 1.0f;     // procedural ripple slope on water (0 = mirror)
++    float ssrWet = -1.0f;     // wetness override 0..1 (-1 = engine rain density)
++    float ssrGlossy = 1.0f;   // glossy material (paint, glass) reflection strength
++    float ssrDebug = 0.0f;    // 1 tags, 2 reflection only, 3 hit mask
++    float ssrRough = 1.0f;    // roughness scale for the cone (mip) blur
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Vehicles/TransportCore.cpp b/arma_CWR/engine/Poseidon/World/Entities/Vehicles/TransportCore.cpp
+index df48f09..a96bcf0 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Vehicles/TransportCore.cpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Vehicles/TransportCore.cpp
+@@ -37,6 +37,10 @@
+ #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
+ #include <Poseidon/Foundation/Enums/EnumNames.hpp>
+ 
++// SSR prototype (gfx-ssr): the class of the object being drawn, read by the
++// GL33 backend to tag vehicle bodies in the stencil (1 = vehicle).
++int g_ssrDrawClass = 0;
++
+ namespace Poseidon
+ {
+ using namespace Dev;
+@@ -1877,7 +1881,22 @@ void Transport::Draw(int level, ClipFlags clipFlags, const FrameBase& pos)
+         GEngine->Clear(true, false);
+     }
+ 
++    // SSR prototype: tag the vehicle's own draws (not the interior views).
++    const int oldSsrClass = ::g_ssrDrawClass;
++    GEngine->FlushQueues(); // queued faces of earlier objects keep their own tag
++    if (!zSpace)
++        ::g_ssrDrawClass = 1;
++    {
++        static int s_ssrLog = 0;
++        if (s_ssrLog < 5)
++        {
++            ++s_ssrLog;
++            LOG_INFO(Graphics, "SSR Transport::Draw level {} zSpace {}", level, zSpace);
++        }
++    }
+     base::Draw(level, clipFlags, pos);
++    GEngine->FlushQueues(); // the vehicle's queued (non-T&L) faces draw while tagged
++    ::g_ssrDrawClass = oldSsrClass;
+ 
+     if (GWorld->GetCameraType() == CamGunner && GWorld->CameraOn() == this)
+     {
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..5049187 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -65,6 +65,10 @@ enum PixelShaderMode
+     NPixelShaderModes
+ };
+ 
++// SSR prototype (gfx-ssr): object class being drawn, set by Transport::Draw
++// (1 = vehicle). Defined in TransportCore.cpp.
++extern int g_ssrDrawClass;
++
+ enum PixelShaderID
+ {
+     PSNormal,
+@@ -792,9 +796,31 @@ class EngineGL33 : public Engine
+         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
++        // SSR prototype: surface tags read out of the stencil, a mip chain of
++        // the frame for the roughness cone, the reflected frame.
++        unsigned int tagTex = 0, tagFbo = 0;
++        unsigned int mipTex = 0, mipFbo = 0;
++        int mipLevels = 1;
++        unsigned int ssrTex = 0, ssrFbo = 0;
++        unsigned int progTag = 0, progSsr = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
++    // SSR prototype: stencil tag of the draw in flight (top bits: 0x80 water,
++    // 0x40 terrain, 0x20 glossy material). Written with the depth-pass stencil
++    // REPLACE every opaque and blended draw already does, so a later draw over
++    // a pixel clears the tag of what it covers.
++    unsigned int _ssrFamilyTag = 0;
++    unsigned int _ssrGlossyTag = 0;
++    unsigned int _ssrTagApplied = 0;
++    bool _ssrOnSurface = false;
++    int _ssrDrawClassSeen = 0; // g_ssrDrawClass at the last tag update (1 = vehicle)
++    float _ssrMatGloss = 0.0f; // specular luminance of the material in flight (0 = not glossy)
++    void ApplySsrStencilTag();
++    void UpdateSsrFamilyTag();
++    void ApplySsrStencilMask();
++    unsigned int _ssrStencilMask = 0xFF;
++    void RunSsrPass(int w, int h);
+     void DestroyPostTargets();
+     void DestroyPostPrograms();
+     bool EnsurePostResources(int w, int h);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..57e80b5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -442,6 +442,12 @@ void EngineGL33::UploadLitMaterial(const Poseidon::TLMaterial& mat)
+     SetSlot(LitConst::MatSpecular, mat.specular.R(), mat.specular.G(), mat.specular.B(),
+             mat.specularPower > 0 ? static_cast<float>(mat.specularPower) : 0.0f);
+     s_lit[LitConst::SunDir * 4 + 3] = _sunEnabled ? 1.0f : 0.0f;
++    // SSR prototype: glossy materials (specular power and colour) tag the stencil.
++    {
++        const float gloss = 0.2126f * mat.specular.R() + 0.7152f * mat.specular.G() + 0.0722f * mat.specular.B();
++        _ssrMatGloss = mat.specularPower > 0 ? gloss : 0.0f;
++        UpdateSsrFamilyTag();
++    }
+     // The flush happens in UploadLitLights, which DoSetMaterial always calls next.
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..cfe1b9b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -243,6 +243,307 @@ void main() {
+ }
+ )";
+ 
++// SSR prototype: writes a constant colour where the stencil test passes (the
++// surface tags of the world pass, read out channel by channel).
++static const char s_psPostSsrTagGLSL[] = R"(#version 330 core
++uniform vec4 tagColor;
++out vec4 fragColor;
++void main() { fragColor = tagColor; }
++)";
++
++// SSR prototype: screen-space reflections for water (stencil tag 0x80), wet
++// terrain (0x40, scaled by rain) and glossy materials (0x20). Reads the
++// resolved frame (display space) and writes the reflected frame, alpha kept.
++static const char s_psPostSsrGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D depthTex;  // unit 0
++uniform sampler2D colorTex;  // unit 2: resolved frame (display space)
++uniform sampler2D mipTex;    // unit 3: the frame with a mip chain (cone blur)
++uniform sampler2D tagTex;    // unit 4: r water, g terrain, b glossy
++uniform sampler2D heightTex; // unit 6: terrain r = height (m)
++uniform vec4 projInfo;   // x _33, y _43, z 1/_11, w 1/_22
++uniform vec4 depthMap;   // ndcZ = depth * x + y
++uniform vec4 screen;     // xy size, zw 1/size
++uniform vec4 worldRect;  // 3D viewport in uv
++uniform mat3 w2v;        // world -> view rotation
++uniform vec4 camWorld;   // xyz camera world position, w sea level
++uniform vec4 ssrA;       // x strength, y water, z wave, w wetness
++uniform vec4 ssrB;       // x glossy, y debug, z time (s), w mip levels
++uniform vec4 ssrC;       // x rough scale, y night effect, z far plane (m)
++uniform vec4 fogParam;   // start, invRange, enabled
++uniform vec4 fogCol;     // display fog colour
++layout(std140) uniform LitConstants {
++    vec4 litSunDir; vec4 litSun; vec4 litZenith; vec4 litHorizon; vec4 litGround;
++    vec4 litMoonDir; vec4 litMoon; vec4 litCamPos; vec4 litMatDiffuse; vec4 litMatAmbient;
++    vec4 litMatForced; vec4 litMatEmissive; vec4 litMatSpecular; vec4 litTerrain;
++    vec4 litTerrainSel0; vec4 litTerrainSel1; vec4 litTerrainSun; vec4 litTerrainLift;
++    vec4 litCloud; vec4 litCloudOffset; vec4 litShadowDelta; vec4 litFlags; vec4 litLightCount;
++    vec4 litHorizonSun; vec4 litFogSun; vec4 litFogCap;
++};
++out vec4 fragColor;
++
++vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
++vec3 toDisplay(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
++float viewZ(float d) { return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x); }
++vec3 viewPos(vec2 uv, float z) {
++    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    return vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++}
++vec2 projUV(vec3 p) {
++    vec2 ndc = vec2(p.x / (projInfo.z * p.z), p.y / (projInfo.w * p.z));
++    return worldRect.xy + (ndc * 0.5 + 0.5) * worldRect.zw;
++}
++float sceneZ(vec2 uv) {
++    float d = textureLod(depthTex, uv, 0.0).r;
++    return d >= 0.999999 ? 1e9 : viewZ(d);
++}
++vec3 fogColorToward(vec3 dirW) {
++    if (litFogSun.w < 0.5) return fogCol.rgb;
++    float c = max(dot(dirW * inversesqrt(max(dot(dirW, dirW), 1e-12)), litSunDir.xyz), 0.0);
++    float c2 = c * c;
++    return min(fogCol.rgb + litFogSun.rgb * (c2 * c2 * c2), max(litFogCap.rgb, fogCol.rgb));
++}
++float hash12(vec2 p) {
++    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
++    p3 += dot(p3, p3.yzx + 33.33);
++    return fract((p3.x + p3.y) * p3.z);
++}
++float vnoise(vec2 p) {
++    vec2 i = floor(p), f = fract(p);
++    vec2 u = f * f * (3.0 - 2.0 * f);
++    return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
++}
++
++// Directional ripples: the slope of waves too short for this pixel's
++// footprint is filtered out of the normal and returned as variance (blur).
++vec3 waterNormal(vec2 xz, float t, float foot, out float lostVar) {
++    const vec2 dirs[6] = vec2[](vec2(0.94, 0.34), vec2(0.62, -0.78), vec2(-0.33, 0.94),
++                                vec2(0.99, -0.12), vec2(-0.71, -0.70), vec2(0.20, 0.98));
++    const float lambda[6] = float[](23.0, 11.0, 5.3, 2.7, 1.3, 0.7);
++    const float slope[6] = float[](0.030, 0.035, 0.040, 0.040, 0.035, 0.030);
++    vec2 g = vec2(0.0);
++    lostVar = 0.0;
++    for (int i = 0; i < 6; ++i) {
++        float k = 6.2831853 / lambda[i];
++        float ph = dot(dirs[i], xz) * k - sqrt(9.81 * k) * t + float(i) * 1.7;
++        float keep = clamp(lambda[i] / (3.0 * foot) - 0.5, 0.0, 1.0);
++        float s = slope[i] * ssrA.z;
++        g += dirs[i] * (s * cos(ph) * keep);
++        lostVar += 0.5 * s * s * (1.0 - keep * keep);
++    }
++    return normalize(vec3(-g.x, 1.0, -g.y));
++}
++
++vec3 depthNormalV(vec2 uv, vec3 p) {
++    vec2 tx = vec2(screen.z, 0.0), ty = vec2(0.0, screen.w);
++    vec3 pr = viewPos(uv + tx, viewZ(textureLod(depthTex, uv + tx, 0.0).r));
++    vec3 pl = viewPos(uv - tx, viewZ(textureLod(depthTex, uv - tx, 0.0).r));
++    vec3 pu = viewPos(uv + ty, viewZ(textureLod(depthTex, uv + ty, 0.0).r));
++    vec3 pd = viewPos(uv - ty, viewZ(textureLod(depthTex, uv - ty, 0.0).r));
++    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
++    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
++    vec3 n = normalize(cross(dx, dy));
++    if (dot(n, p) > 0.0) n = -n;
++    return n;
++}
++
++// Screen-space march of a view-space ray: linear in screen space with a
++// perspective-correct depth, an interval overlap test and a binary refine.
++// kind: 0 left the screen, 1 hit geometry, 2 ended on visible sky.
++const int kSteps = 80;
++vec2 traceRay(vec3 p0, vec3 r, float jitter, out int kind, out float travel, out vec2 exitUV) {
++    kind = 0;
++    travel = 0.0;
++    float len = ssrC.z * 0.98;
++    if (r.z < 0.0) len = min(len, (p0.z - 0.3) / -r.z);
++    vec3 p1 = p0 + r * len;
++    vec2 s0 = projUV(p0) * screen.xy;
++    vec2 s1 = projUV(p1) * screen.xy;
++    float k0 = 1.0 / p0.z, k1 = 1.0 / p1.z;
++    vec2 lo = worldRect.xy * screen.xy + 1.0;
++    vec2 hi = (worldRect.xy + worldRect.zw) * screen.xy - 1.0;
++    vec2 dS = s1 - s0;
++    float tc = 1.0;
++    if (dS.x > 1e-4) tc = min(tc, (hi.x - s0.x) / dS.x); else if (dS.x < -1e-4) tc = min(tc, (lo.x - s0.x) / dS.x);
++    if (dS.y > 1e-4) tc = min(tc, (hi.y - s0.y) / dS.y); else if (dS.y < -1e-4) tc = min(tc, (lo.y - s0.y) / dS.y);
++    tc = max(tc, 0.0);
++    bool clipped = tc < 0.9999;
++    float pix = max(abs(dS.x), abs(dS.y)) * tc;
++    int n = int(clamp(pix / 1.5, 4.0, float(kSteps)));
++    float dt = tc / float(n);
++    float tPrev = 0.0;
++    float zPrev = p0.z;
++    float startT = 2.0 / max(max(abs(dS.x), abs(dS.y)), 1e-3); // skip the first two pixels
++    exitUV = (s0 + dS * tc) * screen.zw;
++    for (int i = 0; i < kSteps; ++i) {
++        if (i >= n) break;
++        float t = min(dt * (float(i) + jitter) + startT, tc);
++        vec2 s = s0 + dS * t;
++        float rz = 1.0 / mix(k0, k1, t);
++        vec2 uv = s * screen.zw;
++        float sz = sceneZ(uv);
++        float thick = 0.4 + 0.04 * sz;
++        if (max(zPrev, rz) >= sz && min(zPrev, rz) <= sz + thick) {
++            float a = tPrev, b = t;
++            for (int j = 0; j < 6; ++j) {
++                float m = 0.5 * (a + b);
++                vec2 su = (s0 + dS * m) * screen.zw;
++                float mz = 1.0 / mix(k0, k1, m);
++                if (mz >= sceneZ(su)) b = m; else a = m;
++            }
++            float zr = 1.0 / mix(k0, k1, b);
++            travel = abs(r.z) > 1e-3 ? abs((zr - p0.z) / r.z) : len * b;
++            kind = 1;
++            return (s0 + dS * b) * screen.zw;
++        }
++        tPrev = t;
++        zPrev = rz;
++    }
++    if (!clipped && sceneZ(exitUV) > 1e8) { kind = 2; travel = 1e9; }
++    return exitUV;
++}
++
++void main() {
++    vec4 c = texture(colorTex, vUV);
++    vec3 tags = texture(tagTex, vUV).rgb;
++    float d0 = texture(depthTex, vUV).r;
++    int dbg = int(ssrB.y + 0.5);
++    if (dbg == 1) {
++        float anyTag = max(tags.r, max(tags.g, tags.b));
++        fragColor = vec4(mix(c.rgb * 0.5, tags, anyTag * 0.75), c.a);
++        return;
++    }
++    float wet = clamp(ssrA.w, 0.0, 1.0);
++    bool water = tags.r > 0.5 && ssrA.y > 0.0;
++    bool terrain = !water && tags.g > 0.5 && wet > 0.0;
++    bool glossy = !water && !terrain && tags.b > 0.5 && ssrB.x > 0.0;
++    if (d0 >= 0.999999 || !(water || terrain || glossy) || ssrA.x <= 0.0) {
++        fragColor = dbg >= 2 ? vec4(0.0, 0.0, 0.0, c.a) : c;
++        return;
++    }
++    float z = viewZ(d0);
++    vec3 p = viewPos(vUV, z);
++    mat3 v2w = inverse(w2v);
++    vec3 relW = v2w * p;
++    vec3 posW = relW + camWorld.xyz;
++    vec3 vW = normalize(-relW);
++    float dist = length(relW);
++    float pixAngle = 2.0 * projInfo.w * screen.w;
++
++    vec3 nW;
++    float cone; // reflected cone half angle (radians) for the mip blur
++    float puddle = 0.0;
++    if (water) {
++        float foot = dist * pixAngle / sqrt(max(vW.y, 0.01));
++        float lostVar;
++        nW = waterNormal(posW.xz, ssrB.z, foot, lostVar);
++        cone = 2.0 * sqrt(lostVar) + 0.004;
++    } else {
++        vec3 nD = normalize(v2w * depthNormalV(vUV, p));
++        if (terrain) {
++            float pn = vnoise(posW.xz / 6.0) * 0.65 + vnoise(posW.xz / 1.7) * 0.35;
++            float flatness = smoothstep(0.85, 0.98, nD.y);
++            puddle = wet * flatness * smoothstep(0.50, 0.58, pn + 0.15 * (wet - 0.5));
++            // Up-facing wet ground: a smoothed normal; a puddle is a level mirror.
++            nW = normalize(mix(nD, vec3(0.0, 1.0, 0.0), mix(0.5, 1.0, puddle)));
++            float rip = 0.04 * puddle * (vnoise(posW.xz * 3.0 + ssrB.z * 0.7) - 0.5);
++            nW = normalize(nW + vec3(rip, 0.0, -rip));
++            cone = mix(0.22, 0.01, puddle);
++        } else {
++            nW = nD;
++            cone = 0.06;
++        }
++    }
++    cone *= ssrC.x;
++    vec3 rW = reflect(-vW, nW);
++    if (water) {
++        rW.y = max(rW.y, 0.002 + 0.25 * vW.y);
++        rW = normalize(rW);
++    }
++    vec3 rV = normalize(w2v * rW);
++    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    int kind;
++    float travel;
++    vec2 exitUV;
++    vec2 huv = traceRay(p, rV, jitter, kind, travel, exitUV);
++
++    float conf = 0.0;
++    vec3 R = vec3(0.0);
++    if (kind != 0) {
++        vec2 e = min(huv - worldRect.xy, worldRect.xy + worldRect.zw - huv) / worldRect.zw;
++        conf = smoothstep(0.0, 0.03, min(e.x, e.y));
++        float hz = kind == 2 ? 1.0 : max(sceneZ(huv), 0.1);
++        float px = kind == 2 ? cone / pixAngle : cone * travel / (hz * pixAngle);
++        float maxLod = max(ssrB.w - 1.0, 0.0);
++        if (water) {
++            // Waves stretch a reflection along the view: vertical taps, a
++            // narrower horizontal footprint.
++            float pxH = px * sqrt(max(vW.y, 0.02)) * 2.0;
++            float lod = clamp(log2(max(pxH, 1.0)), 0.0, maxLod);
++            float span = min(px, 64.0) * screen.w;
++            vec3 acc = vec3(0.0);
++            float wsum = 0.0;
++            for (int k = -3; k <= 3; ++k) {
++                float w = exp(-float(k * k) / 4.5);
++                vec2 u = clamp(huv + vec2(0.0, float(k) * span / 3.0), worldRect.xy, worldRect.xy + worldRect.zw);
++                acc += toLinear(textureLod(mipTex, u, lod).rgb) * w;
++                wsum += w;
++            }
++            R = acc / wsum;
++        } else {
++            float lod = clamp(log2(max(px, 1.0)), 0.0, maxLod);
++            R = toLinear(textureLod(mipTex, huv, lod).rgb);
++        }
++    }
++
++    vec3 lin = toLinear(c.rgb);
++    float strength = ssrA.x;
++    if (water) {
++        // The water shader already reflects its sky approximation S with
++        // weight 0.6 F (flat normal); swap S for what the ray found.
++        float fFlat = 0.02 + 0.98 * pow(1.0 - clamp(vW.y, 0.0, 1.0), 5.0);
++        float fWave = 0.02 + 0.98 * pow(1.0 - clamp(dot(nW, vW), 0.0, 1.0), 5.0);
++        float F = mix(fFlat, fWave, 0.5);
++        vec3 rFlat = reflect(-vW, vec3(0.0, 1.0, 0.0));
++        vec3 S = toLinear(fogColorToward(vec3(rFlat.x, 0.0, rFlat.z)));
++        float fogT = fogParam.z > 0.5 ? clamp(1.0 - (dist - fogParam.x) * fogParam.y, 0.0, 1.0) : 1.0;
++        float depthFade = 1.0;
++        if (litTerrain.x > 0.5) {
++            vec2 g = posW.xz * litTerrain.y;
++            vec2 huv2 = (g + 0.5) * litTerrain.z;
++            float gh = textureLod(heightTex, huv2, 0.0).r;
++            depthFade = smoothstep(0.0, 1.2, camWorld.w - gh);
++        }
++        float w = F * clamp(0.6 * ssrA.y, 0.0, 1.0) * conf * fogT * depthFade * strength;
++        lin = max(lin + w * (R - S), vec3(0.0));
++    } else if (terrain) {
++        if (kind == 0 || conf < 1.0) {
++            // Off-screen: the sky at the edge the ray left through, else the fog sky.
++            vec3 sky = toLinear(fogColorToward(rW));
++            if (sceneZ(exitUV) > 1e8)
++                sky = toLinear(textureLod(mipTex, exitUV, max(ssrB.w - 4.0, 0.0)).rgb);
++            R = mix(sky, R, conf);
++            conf = 1.0;
++        }
++        float nv = clamp(dot(nW, vW), 0.0, 1.0);
++        float F = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
++        float specW = mix(0.45 * wet, 1.0, puddle) * F * strength;
++        vec3 base = lin * mix(1.0, 0.62, wet * (1.0 - puddle) * strength) * mix(1.0, 0.5, puddle * strength);
++        float fogT = fogParam.z > 0.5 ? clamp(1.0 - (dist - fogParam.x) * fogParam.y, 0.0, 1.0) : 1.0;
++        vec3 wetLin = base * (1.0 - specW) + specW * R;
++        lin = mix(lin, wetLin, fogT);
++    } else {
++        float nv = clamp(dot(nW, vW), 0.0, 1.0);
++        float F = 0.04 + 0.96 * pow(1.0 - nv, 5.0);
++        float w = F * ssrB.x * conf * strength;
++        lin = mix(lin, R, w);
++    }
++    if (dbg == 2) { fragColor = vec4(toDisplay(R * conf), c.a); return; }
++    if (dbg == 3) { fragColor = vec4(kind == 1 ? conf : 0.0, 0.0, kind == 2 ? conf : 0.0, c.a); return; }
++    fragColor = vec4(toDisplay(lin), c.a);
++}
++)";
++
+ // Post constants shared with the lab (tests/rendering/lighting_lab/postfx.py).
+ constexpr float kAoRadius = 1.2f;      // metres
+ constexpr float kAoFadeStart = 120.0f; // metres: AO fades out with distance
+@@ -346,6 +647,12 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.aoFbo[0]);
+     delFbo(p.aoFbo[1]);
+     delFbo(p.shaftFbo);
++    delFbo(p.tagFbo);
++    delFbo(p.mipFbo);
++    delFbo(p.ssrFbo);
++    delTex(p.tagTex);
++    delTex(p.mipTex);
++    delTex(p.ssrTex);
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -363,7 +670,8 @@ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+     for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite, &p.progTag,
++          &p.progSsr})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -391,6 +699,12 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+         p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+         p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        p.progTag = LinkPostProgram(vs, s_psPostSsrTagGLSL, "psPostSsrTag");
++        p.progSsr = LinkPostProgram(vs, s_psPostSsrGLSL, "psPostSsr");
++        if (!p.progTag || !p.progSsr)
++            LOG_ERROR(Graphics, "GL33 post: SSR prototype programs failed to build; SSR off");
++        else
++            LOG_INFO(Graphics, "GL33 post: SSR prototype programs built");
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+@@ -414,6 +728,30 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.aoTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    // SSR prototype targets.
++    p.tagTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
++    p.ssrTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, true);
++    {
++        int levels = 1;
++        for (int m = std::max(w, h); m > 1; m >>= 1)
++            ++levels;
++        p.mipLevels = levels;
++        glGenTextures(1, &p.mipTex);
++        glBindTexture(GL_TEXTURE_2D, p.mipTex);
++        int lw = w, lh = h;
++        for (int l = 0; l < levels; ++l)
++        {
++            glTexImage2D(GL_TEXTURE_2D, l, GL_RGBA8, lw, lh, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++            lw = std::max(1, lw / 2);
++            lh = std::max(1, lh / 2);
++        }
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
++    }
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -445,6 +783,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.shaftFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.shaftTex);
+     check();
++    p.tagFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.tagTex);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, p.depthTex, 0);
++    check();
++    p.mipFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.mipTex);
++    check();
++    p.ssrFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.ssrTex);
++    check();
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -479,13 +824,20 @@ void EngineGL33::EndWorldScene()
+     _worldPassOpen = false;
+     _worldEffectsOn = false;
+     _worldSceneEnded = true;
++    _ssrTagApplied = 0; // SSR prototype: the HUD and dialogs write no tags
++    if (_glContext && _ssrStencilMask != 0xFF)
++    {
++        _ssrStencilMask = 0xFF;
++        glStencilMask(0xFF); // the next frame's clear needs every bit
++    }
+     UpdateRemasterPrograms();
+     if (_lightingActive)
+         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
+         return;
+-    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
++    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f &&
++        _lighting.ssr <= 0.0f)
+         return; // nothing to add: leave the frame as drawn
+ 
+     FlushAndFreeAllQueues(_queueNo);
+@@ -556,6 +908,16 @@ void EngineGL33::EndWorldScene()
+     const bool glow = !_worldOverlayDrawn;
+     const float bloomStrength = glow ? _lighting.bloom : 0.0f;
+ 
++    // 0. SSR prototype: reflections, before the glow passes so the reflected
++    // sun and highlights bloom. Its cost lands in the "ao" timing section.
++    GLuint frameTex = p.colorTex;
++    if (worldDepth && _lighting.ssr > 0.0f && p.progSsr && p.progTag && GScene && GScene->GetCamera())
++    {
++        RunSsrPass(w, h);
++        frameTex = p.ssrTex;
++        glBindVertexArray(p.vao);
++    }
++
+     // 1. Ambient occlusion + blur.
+     const GfxMatrix& proj = _frameState.projection;
+     // The 3D scene may fill only a sub-rectangle (aspect pillarbox); uv <-> NDC
+@@ -599,7 +961,7 @@ void EngineGL33::EndWorldScene()
+         for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+         {
+             const bool first = i == 0;
+-            const GLuint src = first ? p.colorTex : p.bloomTex[i - 1];
++            const GLuint src = first ? frameTex : p.bloomTex[i - 1];
+             const int sw = first ? w : p.bloomW[i - 1];
+             const int sh = first ? h : p.bloomH[i - 1];
+             bindTex(0, src);
+@@ -653,7 +1015,7 @@ void EngineGL33::EndWorldScene()
+         u1i(p.progShafts, "depthTex", 0);
+         u1i(p.progShafts, "colorTex", 2);
+         bindTex(0, p.depthTex);
+-        bindTex(2, p.colorTex);
++        bindTex(2, frameTex);
+         u4f(p.progShafts, "sunScreen", sunU, sunV, shaftWeight, static_cast<float>(w) / static_cast<float>(h));
+         drawTo(p.shaftFbo, hw, hh);
+         GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
+@@ -665,7 +1027,7 @@ void EngineGL33::EndWorldScene()
+     u1i(p.progComposite, "aoTex", 2);
+     u1i(p.progComposite, "bloomTex", 3);
+     u1i(p.progComposite, "shaftTex", 4);
+-    bindTex(0, p.colorTex);
++    bindTex(0, frameTex);
+     bindTex(2, aoStrength > 0.0f ? p.aoTex[0] : p.whiteTex);
+     bindTex(3, bloomStrength > 0.0f ? p.bloomTex[0] : p.blackTex);
+     bindTex(4, shaftWeight > 0.001f ? p.shaftTex : p.blackTex);
+@@ -678,7 +1040,7 @@ void EngineGL33::EndWorldScene()
+ 
+     // Hand the GL state back: frame target bound with its full viewport, unit 0
+     // sampler restored, caches invalidated so the next draw re-applies state.
+-    for (int unit : {0, 2, 3, 4, 5})
++    for (int unit : {0, 2, 3, 4, 5, 6})
+     {
+         glActiveTexture(GL_TEXTURE0 + unit);
+         glBindTexture(GL_TEXTURE_2D, 0);
+@@ -692,3 +1054,115 @@ void EngineGL33::EndWorldScene()
+     GL33Bind::Invalidate();
+     InvalidatePipelineCache();
+ }
++
++// SSR prototype pass (gfx-ssr research): stencil tags -> tagTex, the frame ->
++// a mip chain, then the reflection march into ssrTex. Leaves the post pass's
++// common state (no depth, no blend, no stencil) as it found it.
++void EngineGL33::RunSsrPass(int w, int h)
++{
++    PostTargets& p = _post;
++    // 1. Surface tags out of the resolved stencil, one channel per bit.
++    glBindFramebuffer(GL_FRAMEBUFFER, p.tagFbo);
++    glViewport(0, 0, w, h);
++    GLfloat oldClear[4];
++    glGetFloatv(GL_COLOR_CLEAR_VALUE, oldClear);
++    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
++    glClear(GL_COLOR_BUFFER_BIT);
++    glClearColor(oldClear[0], oldClear[1], oldClear[2], oldClear[3]);
++    glUseProgram(p.progTag);
++    const GLint tagLoc = glGetUniformLocation(p.progTag, "tagColor");
++    glUniform4f(tagLoc, 1.0f, 1.0f, 1.0f, 1.0f);
++    glEnable(GL_STENCIL_TEST);
++    glStencilMask(0x00);
++    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
++    const GLint bits[3] = {0x80, 0x40, 0x20};
++    for (int i = 0; i < 3; ++i)
++    {
++        glColorMask(i == 0, i == 1, i == 2, GL_FALSE);
++        glStencilFunc(GL_EQUAL, bits[i], static_cast<GLuint>(bits[i]));
++        glDrawArrays(GL_TRIANGLES, 0, 3);
++    }
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    glStencilMask(0xFF);
++    glStencilFunc(GL_ALWAYS, 0, 0xFF);
++    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
++    glDisable(GL_STENCIL_TEST);
++
++    // 2. The frame with a mip chain for the roughness cone.
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, p.colorFbo);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.mipFbo);
++    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    glActiveTexture(GL_TEXTURE3);
++    glBindTexture(GL_TEXTURE_2D, p.mipTex);
++    glGenerateMipmap(GL_TEXTURE_2D);
++
++    // 3. The march.
++    const GLuint prog = p.progSsr;
++    glUseProgram(prog);
++    auto loc = [prog](const char* n) { return glGetUniformLocation(prog, n); };
++    const GLuint litIdx = glGetUniformBlockIndex(prog, "LitConstants");
++    if (litIdx != GL_INVALID_INDEX)
++        glUniformBlockBinding(prog, litIdx, Poseidon::gl33lighting::kLitBinding);
++    glUniform1i(loc("depthTex"), 0);
++    glUniform1i(loc("colorTex"), 2);
++    glUniform1i(loc("mipTex"), 3);
++    glUniform1i(loc("tagTex"), 4);
++    glUniform1i(loc("heightTex"), 6);
++    const GfxMatrix& proj = _frameState.projection;
++    const Poseidon::AspectSettings& as = _aspectSettings;
++    const bool fullRect =
++        as.worldLeft <= 0.0f && as.worldTop <= 0.0f && as.worldRight >= 1.0f && as.worldBottom >= 1.0f;
++    const float rectX = fullRect ? 0.0f : as.worldLeft;
++    const float rectY = fullRect ? 0.0f : 1.0f - as.worldBottom;
++    const float rectW = fullRect ? 1.0f : as.worldRight - as.worldLeft;
++    const float rectH = fullRect ? 1.0f : as.worldBottom - as.worldTop;
++    const float depthScale = GLAD_GL_ARB_clip_control ? 1.0f : 2.0f;
++    const float depthBias = GLAD_GL_ARB_clip_control ? 0.0f : -1.0f;
++    glUniform4f(loc("projInfo"), proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++    glUniform4f(loc("depthMap"), depthScale, depthBias, 0.0f, 0.0f);
++    glUniform4f(loc("screen"), static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
++    glUniform4f(loc("worldRect"), rectX, rectY, rectW, rectH);
++    Camera* cam = GScene->GetCamera();
++    const Matrix4 inv = cam->InverseScaled();
++    const Vector3 ex = inv.Rotate(Vector3(1, 0, 0));
++    const Vector3 ey = inv.Rotate(Vector3(0, 1, 0));
++    const Vector3 ez = inv.Rotate(Vector3(0, 0, 1));
++    const float m[9] = {ex.X(), ex.Y(), ex.Z(), ey.X(), ey.Y(), ey.Z(), ez.X(), ez.Y(), ez.Z()};
++    glUniformMatrix3fv(loc("w2v"), 1, GL_FALSE, m);
++    Landscape* land = GScene->GetLandscape();
++    const Vector3 cp = cam->Position();
++    glUniform4f(loc("camWorld"), cp.X(), cp.Y(), cp.Z(), land ? land->GetSeaLevel() : 0.0f);
++    float wet = _lighting.ssrWet >= 0.0f ? _lighting.ssrWet : (land ? land->GetRainDensity() : 0.0f);
++    wet = wet < 0.0f ? 0.0f : (wet > 1.0f ? 1.0f : wet);
++    glUniform4f(loc("ssrA"), _lighting.ssr, _lighting.ssrWater, _lighting.ssrWave, wet);
++    glUniform4f(loc("ssrB"), _lighting.ssrGlossy, _lighting.ssrDebug, Glob.time.toFloat(),
++                static_cast<float>(p.mipLevels));
++    float farZ = std::fabs(1.0f - proj._33) > 1e-6f ? proj._43 / (1.0f - proj._33) : 5000.0f;
++    if (!(farZ > 1.0f && farZ < 1e6f))
++        farZ = 5000.0f;
++    LightSun* sun = GScene->MainLight();
++    glUniform4f(loc("ssrC"), _lighting.ssrRough, sun ? sun->NightEffect() : 0.0f, farZ, 0.0f);
++    glUniform4f(loc("fogParam"), _frameState.fogParams[0], _frameState.fogParams[1], _frameState.fogParams[2], 0.0f);
++    glUniform4f(loc("fogCol"), _frameState.fogColor[0], _frameState.fogColor[1], _frameState.fogColor[2], 1.0f);
++    auto bindTex = [](int unit, GLuint tex)
++    {
++        glActiveTexture(GL_TEXTURE0 + unit);
++        glBindTexture(GL_TEXTURE_2D, tex);
++    };
++    glBindSampler(6, 0);
++    bindTex(0, p.depthTex);
++    bindTex(2, p.colorTex);
++    bindTex(3, p.mipTex);
++    bindTex(4, p.tagTex);
++    bindTex(6, _terrainHeightTex ? _terrainHeightTex : _dummyHeightTex);
++    glBindFramebuffer(GL_FRAMEBUFFER, p.ssrFbo);
++    glViewport(0, 0, w, h);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++    static int s_logged = 0;
++    if (s_logged < 3)
++    {
++        ++s_logged;
++        LOG_INFO(Graphics, "GL33 post: SSR pass {}x{} strength {} wet {} far {} mips {} sea {}", w, h, _lighting.ssr,
++                 wet, farZ, p.mipLevels, land ? land->GetSeaLevel() : 0.0f);
++    }
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 02f6162..2af1ffd 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -128,6 +128,22 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
+         FlushVSConstants();
+         FlushPSConstants();
+ 
++        // SSR prototype: the object class in flight picks this draw's stencil tag.
++        if (g_ssrDrawClass != _ssrDrawClassSeen)
++        {
++            _ssrDrawClassSeen = g_ssrDrawClass;
++            UpdateSsrFamilyTag();
++        }
++        {
++            static int s_ssrQ = 0;
++            if (g_ssrDrawClass != 0 && s_ssrQ < 5)
++            {
++                ++s_ssrQ;
++                LOG_INFO(Graphics, "SSR FlushQueue sees class {} vs {} ps {} tag {:#x}", g_ssrDrawClass,
++                         static_cast<int>(_vertexShaderSel), static_cast<int>(_pixelShaderSel), _ssrTagApplied);
++            }
++        }
++
+         glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+         ++Poseidon::gPerfDrawCalls;
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..e2463a4 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -2008,6 +2008,9 @@ void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, Pix
+     _pixelShaderSel = ps;
+     _pixelShaderModeSel = mode;
+     _pixelShaderSpecularSel = spec;
++    // SSR prototype: water and terrain (detail / grass layers through the
++    // mesh path) tag the stencil for the reflection pass.
++    UpdateSsrFamilyTag();
+ }
+ 
+ void EngineGL33::EnableNightEye(float night)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+index da2b229..3ee7e7a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+@@ -127,6 +127,71 @@ void EngineGL33::ApplyDepthMode(DepthMode mode)
+             ds::Shadow(_hasStencilBuffer);
+             break;
+     }
++    // SSR prototype: the helpers reset the stencil reference to 0; keep the
++    // surface tag of the draw in flight.
++    if (mode != DepthMode::Shadow && _hasStencilBuffer && _ssrTagApplied != 0)
++        glStencilFunc(GL_ALWAYS, static_cast<GLint>(_ssrTagApplied), 0xFF);
++    ApplySsrStencilMask();
++}
++
++// SSR prototype: while tagging, draws that do not write depth and carry no tag
++// (sun and lamp flares, 2D quads, particles) leave the stencil alone, so a
++// screen-space quad does not wipe the tags of the surfaces it is drawn over.
++void EngineGL33::ApplySsrStencilMask()
++{
++    if (!_glContext || !_hasStencilBuffer)
++        return;
++    const bool tagging = _remasterPrograms && _worldPassOpen && _lighting.ssr > 0.0f;
++    const bool write = !tagging || _currentDepthMode == DepthMode::Normal || _currentDepthMode == DepthMode::Shadow ||
++                       _ssrTagApplied != 0;
++    const unsigned int mask = write ? 0xFFu : 0x00u;
++    if (mask != _ssrStencilMask)
++    {
++        _ssrStencilMask = mask;
++        glStencilMask(mask);
++    }
++}
++
++void EngineGL33::UpdateSsrFamilyTag()
++{
++    // Water and terrain (detail / grass layers), plus ground decals drawn on
++    // the surface (roads, tracks) through the mesh path.
++    // The sea is a PSDetail landscape draw like the terrain (its faces carry
++    // only SpecularTexture); its material is glossy (specular luminance ~0.6,
++    // the terrain's ~0.08), which tells the two apart.
++    // Tag codes (bits read out separately: r 0x80, g 0x40, b 0x20):
++    //   0x80 water, 0x40 terrain, 0x60 road / on-surface decal,
++    //   0xA0 vehicle body (a Transport draw), 0x20 other glossy material.
++    _ssrFamilyTag = 0;
++    _ssrGlossyTag = 0;
++    const bool mesh = _vertexShaderSel == VSTransform;
++    if (mesh && _pixelShaderSel == PSWater)
++        _ssrFamilyTag = 0x80;
++    else if (mesh && (_pixelShaderSel == PSDetail || _pixelShaderSel == PSGrass))
++        _ssrFamilyTag = _ssrMatGloss > 0.3f ? 0x80 : 0x40;
++    else if (mesh && _pixelShaderSel == PSNormal && _ssrOnSurface)
++        _ssrFamilyTag = 0x60;
++    else if (_ssrDrawClassSeen == 1 && !_ssrOnSurface && (_pixelShaderSel == PSNormal || _pixelShaderSel == PSFlat))
++        _ssrFamilyTag = 0xA0; // vehicle body: T&L mesh or the queued (non-T&L) path
++    else if (mesh && _pixelShaderSel == PSNormal && _ssrMatGloss > 0.02f)
++        _ssrGlossyTag = 0x20;
++    ApplySsrStencilTag();
++}
++
++void EngineGL33::ApplySsrStencilTag()
++{
++    unsigned int tag = 0;
++    if (_remasterPrograms && _worldPassOpen && _lighting.ssr > 0.0f)
++        tag = (_ssrFamilyTag != 0 ? _ssrFamilyTag : 0u) | _ssrGlossyTag;
++    if (tag == _ssrTagApplied)
++    {
++        ApplySsrStencilMask();
++        return;
++    }
++    _ssrTagApplied = tag;
++    if (_glContext && _hasStencilBuffer && _currentDepthMode != DepthMode::Shadow)
++        glStencilFunc(GL_ALWAYS, static_cast<GLint>(tag), 0xFF);
++    ApplySsrStencilMask();
+ }
+ 
+ void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
+@@ -209,6 +274,9 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
+                   static_cast<int>(d.fog));
+     }
+ 
++    _ssrOnSurface = d.surface == Poseidon::render::SurfaceMode::OnSurface &&
++                    d.shader != Poseidon::render::ShaderFamily::Shadow;
++
+     // -- Sampler --------------------------------------------------------
+     _pointSampling = (d.sampler.filter == Poseidon::render::SamplerFilter::Point);
+     _lastClampU = d.sampler.clampU;
+@@ -361,6 +429,8 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
+     else
+         Poseidon::render::cull::FrontFaceCCW();
+ 
++    UpdateSsrFamilyTag();
++
+     _lastApplied.d = d;
+     _lastApplied.in3d = ctxIn3d;
+     _lastApplied.a2c = ctxA2c;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+index b3d955d..1824f58 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+@@ -307,6 +307,32 @@ void EngineGL33::EmitDraw(const Poseidon::render::frame::Draw& d)
+ 
+     GL33Bind::Vao(d.mesh.vao);
+ 
++    // SSR prototype: the object class in flight (set around Transport::Draw)
++    // picks the stencil tag of this draw.
++    {
++        static int s_ssrSeen = 0;
++        if (g_ssrDrawClass != 0 && s_ssrSeen < 5)
++        {
++            ++s_ssrSeen;
++            LOG_INFO(Graphics, "SSR EmitDraw sees class {} (seen {}) ssr {}", g_ssrDrawClass, _ssrDrawClassSeen,
++                     _lighting.ssr);
++        }
++    }
++    if (g_ssrDrawClass != _ssrDrawClassSeen)
++    {
++        _ssrDrawClassSeen = g_ssrDrawClass;
++        UpdateSsrFamilyTag();
++        static int s_ssrClassLog = 0;
++        if (s_ssrClassLog < 40 && _lighting.ssr > 0.0f)
++        {
++            ++s_ssrClassLog;
++            LOG_INFO(Graphics, "SSR class {} vs {} ps {} onSurf {} tag {:#x} world {} remaster {} depthMode {}",
++                     _ssrDrawClassSeen, static_cast<int>(_vertexShaderSel), static_cast<int>(_pixelShaderSel),
++                     _ssrOnSurface, _ssrTagApplied, _worldPassOpen, _remasterPrograms,
++                     static_cast<int>(_currentDepthMode));
++        }
++    }
++
+     // TEXTURE0 + TEXTURE1 binds.  Both handles were captured from the
+     // `SetTexture` / `SetMultiTexturing` callsites, so this rebinds
+     // the same multi-tex configuration regardless of what's currently

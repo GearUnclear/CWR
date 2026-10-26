@@ -1,0 +1,2 @@
+﻿run exit=2 frames=0 minutes=0 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\6\runs\noshadow
+done 02:07:47

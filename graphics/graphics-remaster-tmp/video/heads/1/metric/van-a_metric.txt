@@ -1,0 +1,10 @@
+src D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/heads/1/van-a/tri
+frames 120
+g1safe_a   mean   0.38 p95   0.04 max  11.22 median  0.00 jumps 4
+g1safe_b   mean   0.44 p95   0.02 max  12.31 median  0.00 jumps 5
+g2watch_a  mean   0.10 p95   1.21 max   1.23 median  0.01 jumps 9
+g2watch_b  mean   0.04 p95   0.39 max   0.40 median  0.00 jumps 0
+g3comb_a   mean   0.25 p95   0.41 max   5.82 median  0.00 jumps 6
+g3comb_b   mean   0.48 p95   0.01 max  13.51 median  0.00 jumps 5
+g4cwatch_a mean   0.09 p95   1.01 max   1.01 median  0.00 jumps 9
+g4cwatch_b mean   0.04 p95   0.50 max   0.50 median  0.00 jumps 0

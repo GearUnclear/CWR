@@ -1,0 +1,10 @@
+{
+  "id": "b28",
+  "bank": "kBio2Friendly",
+  "variant": 3,
+  "text": "{Name}, a photographer from {Place}, escaped to a resistance camp and became a medic without medical training. Despite the commander's ban, the photographer secretly treated a wounded enemy and stayed with the group.",
+  "word_count": 33,
+  "self_review": "A photographer became an untrained resistance medic, secretly treated a wounded enemy against orders, and stayed with the group.",
+  "source_pattern": "The supplied Schulman profile documents a photographer accepted into a partisan group for urgently needed medical help despite lacking medical training.",
+  "fictional_changes": "The resistance camp, wounded enemy, commander's ban, secret treatment, and continued membership are fictional. The source supports a photographer becoming an untrained medic; no historical treatment dispute is transferred."
+}

@@ -1,0 +1,54 @@
+## track
+gbuffer
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabricated files: every cited image, shader override, patch, NOTES.md, timings.md and timing_rounds.md exists, and the run folders hold real tri logs and raw shots.",
+ "BEST_town_day.png overstates the GI. Its third panel combines late VBO and GI, and it comes from a different run (run07) than the Remastered panel (run06). The same mode (rm_vbo) shot in run06 and again in run07 differs on 2.5% of pixels by more than 4 levels. The GI x2 variant differs from rm_vbo on only 1.1% of pixels, so it sits inside run-to-run noise. Only x3 with the whole-frame source (6.5%) rises clearly above that noise. BEST_town_day_crop.png separates the two changes correctly.",
+ "The per-panel GPU ms on the BEST sheets are single noisy shots on a shared GPU. In BEST_town_day the GI panel reads 5.23 ms against 8.76 ms for stock Remastered, which looks as if GI is cheaper. The footnote warns about this, but the panels still mislead. The cost figures to trust are the interleaved ao/gi segment numbers, which do back the claimed +1.5 to +2.5 ms.",
+ "The cause of the night failure is a hypothesis, not a demonstrated fact. Production need 1 says calling OptimizeRendering inside ShapeBank::New 'broke the fire pit', and the notes blame the late fire pit, yet the whole town lights up, not just the pit. The broken frames look much like the G-buffer's pre-night-eye radiance target, so the late-VBO path may be bypassing night-eye or exposure globally. Which of these it is was not isolated.",
+ "'Classic stays bit-identical' (production needs 1 and 7) is no longer a requirement under the 2026-10-17 owner decision. It is not false, just irrelevant.",
+ "Verified as claimed: the exe dist/gfx-gbuffer-rwdi/PoseidonGame.exe (15:20:08) is newer than the newest source edit (15:19:54). run09_stock really used D:/Arma_CWA_worktrees/lighting/arma_CWR/dist/lighting-rwdi: there are no late-VBO log lines, and run.txt shows --game-dir set to that path. My own pixel stats match the explorer's: town_day x3 mean +0.68 and p99 +6.7; lowsun_fp +0.30 and p99 +9.7; sinai +0.65 and p99 +11.0."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+small
+## rtx_vision_score_0_to_10
+1.5
+## taste_violations
+[
+ "Only darker: with giAo=1 (the GI's own occlusion replacing the stock AO), frames net darker (mean -0.04 to -0.6 levels). Only the bounce-only variants avoid this.",
+ "Crushed shade risk: late VBO darkens the shaded faces of spawned vehicles (Jeep rear in scratch_lateVbo_town.png and BEST_town_day_crop.png). This is correct parity with mission-placed vehicles, but GI x3 barely lifts them back.",
+ "Lambert-like flat hull shading is unchanged: the bounce adds a few levels and no visible colour bleeding or contact shading.",
+ "Olive tint: x3 bounce from grass gives shaded faces a faint warm-green tint. It is mild now, and any multiplier strong enough to be visible would push toward olive.",
+ "Night is broken with late VBO: the town is lit like day (run10_night/cmp_town_night.png, run12_fire/fire_sheet.png). The explorer flagged this as not shippable.",
+ "Not tested: evening hull warmth at about 5600 K versus Classic (the low-sun views are 08:00 morning). No grading, haze or new art was used."
+]
+## cost_ok
+true
+## score_0_to_10
+5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\gbuffer\BEST_lowsun_shadow.png
+## one_line
+The G-buffer plumbing is real and clean, and it found a genuine stock bug: script-spawned shapes skip the Remastered shader. The GI consumer built on it is invisible at a glance (rtx about 1.5/10), and the late-VBO hack breaks night.
+## critique
+Verification. Every cited path exists and nothing was fabricated. The logs for runs 06, 07, 10, 11 and 12 show 'shader override loaded ... override_v2\psPostGi.glsl (5420 bytes)' and 'gbuffer prototype programs gi=185 temporal=187 blur=189 debug=191', with no shader compile errors. The only 'ERROR' grep hits in the Sinai logs are the word 'loboterror'. The prototype exe was built after the last source edit, and run09 really used the shared stock exe. The after images do differ from the before images. In my own PIL diffs within one run, town_day x3 bounce-only changes 6.5% of pixels by more than 4 levels (mean +0.68, p99 +6.7); lowsun_fp 7.3% (p99 +9.7); sinai 7.2% (p99 +11.0). A single frame against accumulated frames differs on only 0.18%, so within-run noise is low. Across runs, though, the same mode differs on 2.5% of pixels, which swamps the x1 and x2 variants.
+
+Look. At the viewing size used for the side-by-side judgement, the GI panels cannot be told apart from Remastered + late VBO (run06_v2/str_town_day.png: four panels that look identical). Only an 8x-amplified diff shows the lift on the soldier, the Jeep, the M113's shaded front, the tent and the walls. There is no visible colour bleeding, no contact darkening and no sky-occlusion character. Nothing a player would call RTX-like. Minor artefacts show up in the amplified diff: thin dark lines along the tent ropes (thin geometry at half resolution), some sky-visibility halos around tree crowns in the debug targets, and a lift on the Sinai Jeep's windows that may be bounce gathered on alpha-blended glass. None of these are visible at 1:1. There are no NaNs, and no noise in stills.
+
+The one real visible change is the late-VBO fix. In stock Remastered, spawned vehicles never reach the lit shader, so a Jeep standing in an M113's shadow is drawn sunlit (BEST_lowsun_shadow.png makes this unambiguous). With the fix they match mission-placed vehicles. This matters a lot for Guerrilla Mode, where traffic, garrisons and spawns are all script-created. It is a correctness fix, not RTX-on.
+
+Diagnosis and honesty are good. The wedge fix (rebuilding the geometric normal from depth) is verified in wedge_forest_edge_golden.png, and the explanation of why one bounce is weak is quantified: dark albedo of about 0.16, and the rig's analytic ground bounce already supplies the indirect term. The production list is candid: radiance stored before night-eye, roughness almost empty, unblended writes from blended draws, holes left by birch leaf cards.
+
+Missed bold move. The GI was only added on top of the rig's analytic sky and ground bounce, at x1 to x3. The test that matters for a path-traced look is to switch the analytic ambient and bounce off (or scale them down hard) and let the traced visibility and bounce carry the indirect light, so occlusion and bleeding gain real dynamic range. That was never tried. Neither was the consumer that reads most like RTX in CWA scenes: SSR on water and glass.
+
+Cost. GI is +1.5 to +2.5 ms on a 4060 Ti at 1440x960 with 4x MSAA. The G-buffer adds an estimated 1 to 2 ms more, and that part could not be resolved on the shared GPU. On a 3060 at 1080p, expect very roughly 1.5 to 2x that. It fits the budget, but the GI buys nothing visible for it.
+
+Verdict. Build the late-VBO fix now. It is needed regardless, but rebuild VBOs after the shape is fully initialised and prove night is fixed first. Keep the G-buffer as infrastructure for SSR, contact shadows and a stronger GI, with packed multisample textures and radiance stored after night-eye. Do not ship this GI consumer as a look.
+## artefacts_seen
+At 1:1 nothing is visible in the day stills. The 8x-amplified diffs show: thin dark lines along the tent guy ropes (lowsun_fp), sky-visibility halos and a faint residual lighter smear where v1's wedge was (lower left of forest_edge_golden), and a strong lift on the Sinai Jeep's window texels (a possible light leak through blended glass). Night with late VBO is catastrophically broken: the whole town is lit like day. No NaNs, banding or embossing. Stills cannot show temporal swimming, and the accumulation resets on any camera move, so motion quality equals the single-frame quality (claimed clean after the blur; single frame vs accumulated differ on only 0.18% of pixels).
+## prototype_actually_loaded
+Yes. The game logs in run06_v2, run07_v3, run10_night, run11_pre and run12_fire show the override_v2 psPostGi.glsl (5420 bytes) loading, the prototype programs created (gi=185, temporal=187, blur=189, debug=191), 'late shape vertex buffers: data3d\jeep.p3d / m113.p3d' lines, and the knob echo lines (gbuffer=1, gi=3, giSource=1, giRadius=15, giAo=0, lateVbo=1). The exe dist/gfx-gbuffer-rwdi/PoseidonGame.exe (15:20:08) is newer than all 12 modified source files (newest 15:19:54). run09_stock ran on lighting-rwdi, with no late-VBO lines and no prototype programs.

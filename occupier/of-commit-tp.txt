@@ -1,0 +1,13 @@
+guerrilla: the showcase recruit chapter and the civilian-outfit e2e test anchor on the HQ (gmHqPos), not the Camp centre
+
+With the default Camp HQ of phase 4B (c825a5f) the recruiting menu mounts
+at the HQ house, about 83 m from the Camp centre and beyond the 30 m menu
+radius, and the HQ may have moved since. The chapter waits up to 10 s for
+gmHqEstablished and SKIPs with no HQ; the e2e test waits for it and
+teleports to gmHqPos before waiting for gmRecruitActive.
+
+Tri on dist/agent71-rwdi + remaster-shadow-of4: guerrilla_outfit_civilian_e2e
+(recovered on retry 3 from a companion-spawn wait earlier in the test) and
+showcase_smoke green.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

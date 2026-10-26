@@ -1,0 +1,4 @@
+    // Combat light holds off with no combat light near, its shadows by day.
+    CHECK(s.find(" combatLights=1:off:") != std::string::npos);
+    CHECK(s.find(" combatShadows=1:off") != std::string::npos);
+    CHECK(s.find("landed=28/28") != std::string::npos);

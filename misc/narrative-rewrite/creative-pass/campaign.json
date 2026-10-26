@@ -1,0 +1,91 @@
+{
+  "kOpenA": [
+    "The people of {Island} still tell how families near {Place} lost rights their grandparents had expected to leave to the children.",
+    "Near {Place}, families in {Island} inherited an old dispute along with their grandparents' belongings. Outsiders had claimed what kept those families fed.",
+    "For generations, families near {Place} in {Island} taught children where they belonged. Then outsiders arrived with papers saying the children had no claim.",
+    "People in {Island} trace the trouble to {Place}, where outside owners dismissed local agreements. Families kept copies that nobody in authority would read.",
+    "Families near {Place} in {Island} kept old agreements long after outsiders stopped respecting them. Each generation tried to reclaim those rights.",
+    "Families near {Place} in {Island} inherited their grandparents' old unanswered petitions. They kept sending new ones, asking for the same rights."
+  ],
+  "kOpenB": [
+    "{OccupierCap} arrived with orders to enforce obedience. A complaint could bring armed visitors to the same door where neighbours once gathered.",
+    "{OccupierCap} controlled the main roads. People learned which guards would listen, which would shout, and when to turn around without arguing.",
+    "Under {Occupier}, residents watched their words in public. Families argued behind closed doors about whether silence was keeping anyone safe anymore.",
+    "{OccupierCap} posted guards and demanded obedience. Some residents tried written petitions; others stopped expecting an answer and began meeting behind shutters.",
+    "{OccupierCap} made the rules, but local people still had to eat. Neighbours traded small favours and warned each other about patrols.",
+    "When {Occupier} took control, arguments with officials became arguments with armed soldiers. Even close friends disagreed about how much they could endure."
+  ],
+  "kOpenC": [
+    "An agreement near {Place} briefly gave families reason to hope. The authorities broke its terms, leaving its signers to explain.",
+    "Representatives near {Place} came home with an agreement and promises. When the authorities broke it, neighbours demanded to know what happened.",
+    "Near {Place}, both sides agreed to a settlement. After the authorities broke it, residents brought copies to confront the guards.",
+    "An agreement near {Place} promised peace. The authorities broke it, and residents who trusted the negotiators felt betrayed.",
+    "People near {Place} accepted a settlement they could live with. When the authorities broke it, even patient neighbours talked of fighting.",
+    "Near {Place}, negotiators promised an agreement would protect local rights. After the authorities broke it, nobody volunteered for another delegation."
+  ],
+  "kOpenD": [
+    "Fighting followed. {ResistanceCap} remember the dead through surviving friends, who can still describe their laughter as readily as their deaths.",
+    "{ResistanceCap} lost people in the fighting that followed. Some families still ask returning fighters for news nobody wants to give.",
+    "Later fighting left empty places at family tables. {ResistanceCap} keep the names, including those neighbours still find difficult to discuss.",
+    "Fighting killed residents. {ResistanceCap} hear from families still wanting to know where their relatives were taken or buried.",
+    "The fighting left families grieving. {ResistanceCap} still hear from survivors who remember who came back and who never came home.",
+    "People died when the dispute became fighting. {ResistanceCap} carry those losses into every argument about what another battle might cost."
+  ],
+  "kTitle0": [
+    "Terrace Claims near {Place}",
+    "Well Ownership near {Place}",
+    "Water Rights near {Place}",
+    "Pasture Fences near {Place}",
+    "Crossing Tolls near {Place}",
+    "Salt Licences near {Place}"
+  ],
+  "kTitle1": [
+    "Closed Roads near {Place}",
+    "Pump Restrictions near {Place}",
+    "The Truce near {Place}",
+    "The Charter near {Place}",
+    "Market Checkpoints near {Place}",
+    "The Boundary near {Place}"
+  ],
+  "kTitle2": [
+    "Road Battle near {Place}",
+    "The Fires near {Place}",
+    "Delaying Action near {Place}",
+    "The Encirclement near {Place}",
+    "Ridge Battle near {Place}",
+    "Winter Losses near {Place}"
+  ],
+  "kText0": [
+    "Families near {Place} built terraces on the slopes and farmed them for generations. Surveyors later divided the land into plots and registered it under outside owners. The families who had built and maintained the terraces were left without a recognised claim to the ground that fed them.",
+    "Families near {Place} dug and maintained four wells that supplied the valley. Water was shared under arrangements passed down through nine generations. An outside clerk later registered the wells as private property, giving an absent owner control over water the families had previously drawn by right.",
+    "Road builders near {Place} marked the rock beside each well to record who could draw water. Local families used those marks to settle access disputes. When officials produced the first regional map, the water rights were omitted. Officials then rejected claims based on the older markings.",
+    "Herders near {Place} shared pasture under agreements maintained by local families for generations. An outside landholder fenced the common ground within a week and barred the herds. Families that had always used the pasture had to find other grazing or pay to enter it.",
+    "Families near {Place} maintained a river crossing and used it freely to move goods between the banks. A new authority claimed ownership, posted a toll and stationed a guard to collect it. The families then had to pay whenever work took them across a route those families had kept open.",
+    "Workers near {Place} cut salt from nearby flats and agreed on each family's share before the season began. A company obtained an exclusive licence from the capital and cancelled those arrangements. Families lost the right to gather salt independently and had to seek wages from the new operator."
+  ],
+  "kText1": [
+    "Representatives near {Place} agreed that the high ground would remain common and the roads open. Within a season, {Occupier} fenced the ground and gated the roads. Families who had accepted the settlement now needed permission to reach land and routes the agreement had left open.",
+    "Witnesses from six villages signed an agreement near {Place} to share water and keep the coast road open. The terms also barred armed guards from the pumps. {OccupierCap} seized the pumps and began checking road traffic twice a day, restricting the access the witnesses had secured.",
+    "Elders marked a truce boundary with stones near {Place} and agreed which wells would remain available to local families. {OccupierCap} later occupied those wells and shifted the markers. Families arriving for water found guards enforcing a boundary that no longer matched the one the elders had walked.",
+    "A charter near {Place} guaranteed local access to shared land and was read aloud each year. {OccupierCap} stopped the readings, removed the charter and began requiring permits. Residents seeking to challenge a refusal could no longer consult the document that set out the original terms.",
+    "An agreement kept the market near {Place} open to both sides and barred armed patrols from its trading area. {OccupierCap} installed checkpoints at both entrances. Traders now faced searches and delays on a route the agreement had kept open, although the authorities never formally cancelled it.",
+    "Under an agreement near {Place}, anyone crossing the boundary for a funeral could return before nightfall. {OccupierCap} began keeping mourners at the posts until dark, then refusing passage. Families stopped attending burials across the boundary, although the agreement was still posted beside the guards."
+  ],
+  "kText2": [
+    "Defenders near {Place} stopped an advancing column for two days without relief. The column broke through on the third day, leaving local fighters dead and others missing. Survivors later gave {Resistance} an account of the positions held and the names of those who failed to return.",
+    "Fighting near {Place} set homes alight, and the fires continued through the night. Families who returned found collapsed houses and neighbours missing. {ResistanceCap} collected names from survivors and recorded where each person had last been seen. Relatives used the list to search for people carried away during the evacuation.",
+    "Defenders with two machine guns held an advancing column near {Place} until dusk. The delay allowed families to leave the coastal route, but several defenders died before the survivors withdrew. The coast fell the next day. {ResistanceCap} preserved the survivors' account of the action and the losses.",
+    "A garrison near {Place} was surrounded before dawn and held out until the following evening. Ammunition ran out before relief arrived, and survivors later reported dead and missing comrades. {ResistanceCap} gathered the names from returning personnel and families whose relatives had served in the garrison.",
+    "Local farmers with hunting rifles held a ridge near {Place} for eleven hours before an advancing force drove the defenders off. Survivors returned after dark to recover the dead. {ResistanceCap} later recorded the names and accounts from families who had sent people up to the ridge.",
+    "The siege near {Place} left families short of food and shelter as winter began. More residents died during that winter than in the fighting. Promised relief reached the area in spring. {ResistanceCap} recorded the deaths from household accounts, including the names of people buried before help arrived."
+  ],
+  "review_notes": [
+    "Read all six research memos and the complete campaign prose banks in FactionHistory.cpp before rewriting. The prose uses actors, actions and practical consequences rather than aphorisms or symbolic conclusions.",
+    "Opening slots advance the history through inherited grievances, armed occupation, a broken agreement and losses remembered by the resistance. Variants use family belongings, petitions, visits, guards and private arguments without naming a specific resource, battle duration, weapon or position.",
+    "Faction slots take bare plural group labels. No preceding article is required. Beat zero contains no faction reference; every beat one passage contains one occupier slot and every beat two passage contains one resistance slot.",
+    "Titles and event text remain paired by index, preserving six different livelihood disputes, six forms of breached agreement and six fighting or aftermath events.",
+    "Place references use near or equivalent phrasing so named settlements and generic locations both fit. People of {Island} and families in {Island} accept this country naturally.",
+    "Short opening C and D options leave space for longer substituted place and faction names. Rendered opening length remains the responsibility of the existing selection and budget walk.",
+    "No production files were edited. ASCII, slot counts, word counts and rendered combinations are checked separately before delivery."
+  ]
+}

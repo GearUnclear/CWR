@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\5\runs\static-c8b\static-c8b.mkv  frames 120  band 0.034  sky 0.018
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       154.3 [-0.0, -0.0]  0.028  0.116  0.016 -0.287 [3, -16]   0.016 [3, -16]  0.002  0.457 -0.409    nan    nan -0.178             -
+   valley    128.8 [-0.0, -0.0]  0.023  0.050  0.034 -0.382 [-4, 16]   0.034 [-4, 16]  0.002  0.228 -0.353    nan    nan -0.253             -
+   farhill   116.3  [-0.0, 0.0]  0.018  0.049  0.015 -0.440 [16, -7]   0.015 [16, -7]  0.001  0.220 -0.353    nan    nan -0.267             -
+   haze      181.1  [0.0, -0.0]  0.017  0.045  0.019 -0.380 [-16, 8]   0.019 [-16, 8]  0.001  0.197 -0.306    nan    nan -0.246             -
+   slope      53.3 [-0.0, -0.0]  0.028  0.093  0.033 -0.674  [16, 4]   0.033  [16, 4]  0.003  0.632 -0.732    nan    nan -0.399             -

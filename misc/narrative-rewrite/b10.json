@@ -1,0 +1,10 @@
+{
+  "id": "b10",
+  "bank": "kBio0Hostile",
+  "variant": 3,
+  "text": "{Name} sold travel permits near {Place}, using a civilian partner to collect bribes. When investigators arrived, the administrator named the partner in exchange for keeping the post.",
+  "word_count": 27,
+  "self_review": "A corrupt permit administrator betrayed the civilian partner who collected the bribes to keep the job.",
+  "source_pattern": "The supplied research documents civilian office skills becoming administrative careers; it does not document permit bribery in these cases.",
+  "fictional_changes": "Permit sales, the civilian partner, exposure, and retention of the post are fictional. The historical administrative career is only a broad reference."
+}

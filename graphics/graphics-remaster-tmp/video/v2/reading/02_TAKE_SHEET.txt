@@ -1,0 +1,57 @@
+TAKE SHEET: recording the narration in Audacity
+================================================
+
+Before you start
+- Quiet room. Phone on silent. Fan, heater or fridge off if you can.
+- Mic about a hand-span away (15 to 20 cm), a little to the side of your mouth so
+  "p" and "b" do not pop. Keep the same distance for the whole session.
+- Audacity:
+  - Project rate (bottom left): 48000 Hz.
+  - Recording channels: 1 (Mono).
+  - Speak a test line and watch the meter: loud words should reach about -12 to -6 dB.
+    It must never touch 0 (that clips and cannot be fixed).
+
+Recording
+1. Press record and stay silent for 5 seconds (room tone; I use it to clean the noise).
+2. For each line: say its number ("one"), pause a second, then read the line
+   2 or 3 times with about 2 seconds of silence between takes.
+   - Take 1: as written.
+   - Take 2: a little slower and softer.
+   - Take 3: only if something felt off.
+3. A slip is fine: pause, then start that sentence again. No need to stop recording.
+4. One long recording is fine. Separate files per line are fine too.
+
+Export
+- File > Export > Export as WAV.
+- Encoding: Signed 24-bit PCM (16-bit is fine if 24 is not offered). Mono, 48000 Hz.
+- Save into:
+    D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\reading\recordings\
+  (any file names) and tell me when it is there.
+
+Favourites (optional)
+If you already like a take, tick it below or just tell me "line 4, take 2".
+Otherwise I pick the best one (complete words, clean, fits) and you can swap later.
+
+  Line                     Take 1   Take 2   Take 3   Favourite
+  1  intro                 [ ]      [ ]      [ ]      ____
+  2  opening (Malden)      [ ]      [ ]      [ ]      ____
+  3  valley mist           [ ]      [ ]      [ ]      ____
+  4  pine shafts           [ ]      [ ]      [ ]      ____
+  5  bay                   [ ]      [ ]      [ ]      ____
+  6  outpost               [ ]      [ ]      [ ]      ____
+  7  cloud shadows         [ ]      [ ]      [ ]      ____
+  8  Sinai camp            [ ]      [ ]      [ ]      ____
+  9  ambush                [ ]      [ ]      [ ]      ____
+  10 convoy                [ ]      [ ]      [ ]      ____
+  11 checkpoint            [ ]      [ ]      [ ]      ____
+  12 town patrol           [ ]      [ ]      [ ]      ____
+  13 rain                  [ ]      [ ]      [ ]      ____
+  14 supply run            [ ]      [ ]      [ ]      ____
+  15 firefight             [ ]      [ ]      [ ]      ____
+  16 outro                 [ ]      [ ]      [ ]      ____
+
+What happens next
+I cut it into lines, pick the takes, clean it lightly (low rumble filter, a little
+noise reduction from the room tone, soft "s" control, gentle compression), fit the
+picture to your timing, level it to YouTube loudness (-16 LUFS) and send you a
+phone-sized preview. Your voice is never sped up or pitched.

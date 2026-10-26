@@ -1,0 +1,20 @@
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 87cf1ce..17c9d2a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -690 +690,4 @@ void EngineGL33::UploadLitFrameConstants()
+-    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, 0.0f);
++    // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
++    // gate are on; 0 leaves shadeRemastered's foliage as it was before.
++    const float crownCanopy = _featureGates[rm::Feature::CrownCanopy].on ? 1.0f : 0.0f;
++    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, crownCanopy);
+@@ -775,2 +778,3 @@ void EngineGL33::UploadLitFrameConstants()
+-    // Debug views of the forward shaders: 1 to 3 (shadeRemastered) and the
+-    // lights per tile (6); 4 and 5 are the post pass's.
++    // Debug views of the forward shaders: 1 to 3 and the albedo (7, drawn as 4)
++    // by rm::ShaderDebugView (shadeRemastered), and the lights per tile (6);
++    // 4 and 5 are the post pass's.
+@@ -778,2 +782 @@ void EngineGL33::UploadLitFrameConstants()
+-    const float debug =
+-        (dv >= 1 && dv <= 3) || dv == fl::kDebugViewLightTiles ? static_cast<float>(_lighting.debugView) : 0.0f;
++    const float debug = dv == fl::kDebugViewLightTiles ? static_cast<float>(dv) : rm::ShaderDebugView(dv);

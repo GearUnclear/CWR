@@ -1,0 +1,3 @@
+    // The photoreal camera's clear sky gain (its clouds keep their light).
+    if (litCamera.x > 0.5) a *= max(litCamera.z, 0.0);
+    float c = dot(d, skySunDir());

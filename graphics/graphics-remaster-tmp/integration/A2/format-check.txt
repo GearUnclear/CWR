@@ -1,0 +1,14 @@
+# clang-format --dry-run --Werror on every touched C++ file (whole file where HEAD was clean)
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+0 arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+0 arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
+# EngineGL33_ShadowDepth.cpp (HEAD already had 4 format warnings): clang-format-diff.py on the changed lines
+diff lines: 0

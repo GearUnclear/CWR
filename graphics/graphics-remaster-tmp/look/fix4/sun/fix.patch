@@ -1,0 +1,310 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index 70f8ed23..38ce1670 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -269,6 +269,25 @@ float SkyRolloff(float m)
+     return kSkyRolloffKnee + r * (1.0f - std::exp(-(m - kSkyRolloffKnee) / r));
+ }
+ 
++float SkySunGlow(float cosToSun)
++{
++    const float c = std::min(std::max(cosToSun, -1.0f), 1.0f);
++    return 1.0f / (1.0f + 2.0f * (1.0f - c) / (kSkySunGlowRad * kSkySunGlowRad));
++}
++
++float SkyRolloffCapToward(float cosToSun)
++{
++    return kSkyRolloffCap + (kSkySunCap - kSkyRolloffCap) * SkySunGlow(cosToSun);
++}
++
++float SkyRolloffToward(float m, float cosToSun)
++{
++    if (!(m > kSkyRolloffKnee))
++        return m;
++    const float r = SkyRolloffCapToward(cosToSun) - kSkyRolloffKnee;
++    return kSkyRolloffKnee + r * (1.0f - std::exp(-(m - kSkyRolloffKnee) / r));
++}
++
+ float SunRingWeight(float sunElevationDeg)
+ {
+     return 1.0f - Smoothstep(kSunRingFullDeg, kSunRingOffDeg, sunElevationDeg);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+index b64d7bb4..39527719 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -385,17 +385,35 @@ constexpr float kPhysicalSkyRebuildDeg = 0.25f;
+ constexpr float kSkyRolloffKnee = 1.2f;
+ constexpr float kSkyRolloffCap = 2.4f;
+ float SkyRolloff(float preExposedPeak);
++// Toward the sun the cap rises to kSkySunCap (past the curve's white): a real
++// camera burns the sky round the sun white and its glare falls off smoothly.
++// With one cap everywhere the aureole round a low sun was a flat cream
++// plateau (0.85 of white) out to about 2 degrees, a pale disc inside it. The
++// rise is SkySunGlow, 1 / (1 + 2 (1 - cos) / kSkySunGlowRad^2), about
++// 1 / (1 + (angle / kSkySunGlowRad)^2): half at kSkySunGlowRad from the sun.
++constexpr float kSkySunCap = 10.0f;
++constexpr float kSkySunGlowRad = 0.021f; // 1.2 degrees
++float SkySunGlow(float cosToSun);
++float SkyRolloffCapToward(float cosToSun);
++// The roll-off of the sky along a direction with this cosine to the sun.
++float SkyRolloffToward(float preExposedPeak, float cosToSun);
+ 
+ // ---- The sun disk -----------------------------------------------------------
+ // Under the camera the sun's sprite (its painted halo and star) is not drawn:
+ // both of its quads draw a disc of this angular radius around the sun's
+ // direction, anti-aliased over its rim, at kSunDiscLevel (pre-exposed light:
+ // past the curve's white at any exposure, so the sun is the frame's one
+-// clipped white point) in the colour of the sunlight through the air (orange-
+-// gold under 5 degrees). Its glow is the sky table's aureole and the camera's
+-// bloom.
++// clipped white point) in the colour of the sunlight through the air taken
++// kSunDiscWhite of the way to white (a sensor clips every channel of the sun:
++// in the sunlight's own colour the hue-keeping curve held a low sun's disc at
++// a pale peach, 255, 238, 219), all of it from 4 degrees up, none at the
++// horizon, where the reddened sun keeps its colour. The disc is round on the
++// screen (an equal-area circle, not the lens's oval near the frame's corners).
++// Its glow is the sky's roll-off toward the sun (kSkySunCap), the sky table's
++// aureole and the camera's bloom.
+ constexpr float kSunDiscRadiusDeg = 0.45f;
+ constexpr float kSunDiscLevel = 12.0f;
++constexpr float kSunDiscWhite = 0.85f;
+ // The scene light (after exposure) where bloom starts, and its knee: light
+ // past the curve's white.
+ constexpr float kCameraBloomThreshold = 3.0f;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+index 6ad5866e..3c6740b2 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+@@ -189,8 +189,13 @@ constexpr float kFogBackShare = 0.12f;
+ // The near-field pass marches the sun's forward lobe this far (m), times
+ // this gain: the morning aerosols' lobe is narrower and stronger than the
+ // haze's g (the shafts between crowns).
++// (Look fix round 4 "sun": 35, was 14. At 14 the shafts between the crowns of
++// a morning wood were too faint to read at a thumbnail. The pass's soft cap
++// (0.45) is not what held them: taking it before the lit share changed
++// nothing, the beams are linear in this gain, and 2.5 times it draws clear
++// shafts on the dark crowns while the open sky round them stays as it was.)
+ constexpr float kFogBeamReach = 180.0f;
+-constexpr float kFogBeamGain = 14.0f;
++constexpr float kFogBeamGain = 35.0f;
+ // The classic engine's visibility in rain at full density (Landscape.cpp: 350 m).
+ constexpr float kRainVisibility = 350.0f;
+ // A grey deck thickens the clear haze by 1 + this (times the sky's greyness,
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f08aab97..49ee8826 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -529,9 +529,11 @@ vec3 camEncode(vec3 lin) { return camFold(lin * litCamera.w); }
+ // of the fold's top.
+ // The sun disk under the camera (PhotoCamera.hpp kSunDiscRadiusDeg,
+ // kSunDiscLevel): its angular radius (radians) and the light of its core,
+-// pre-exposed (past the curve's white at any exposure).
++// pre-exposed (past the curve's white at any exposure), and how far its
++// colour goes to white (kSunDiscWhite).
+ const float kCamSunRadius = 0.007854; // kSunDiscRadiusDeg
+ const float kCamSunLevel = 12.0;      // kSunDiscLevel
++const float kCamSunWhite = 0.85;      // kSunDiscWhite
+ 
+ // A lit fragment's radiance on the display: the shipped tonemap with the
+ // display saturation (litFlags.w), or under the camera the scene light itself
+@@ -1095,21 +1097,39 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+ // Finish: alpha, the night eye and fog, the tail every main ends with.
+ static const char s_psRemasterFinish[] = R"(
+ // The sun disk under the photoreal camera (sky mode 3; PhotoCamera.hpp
+-// kSunDiscRadiusDeg, kSunDiscLevel): a disc of kCamSunRadius around the
+-// sun's direction, anti-aliased over its rim, at kCamSunLevel in the colour of
+-// the sunlight through the air; its glow is the sky table's aureole and the
+-// camera's bloom. Display coded, alpha its coverage (the sprite blends by
+-// alpha, so outside the disc the sky stays as the dome drew it).
++// kSunDiscRadiusDeg, kSunDiscLevel, kSunDiscWhite): a disc of kCamSunRadius
++// around the sun's direction, anti-aliased over its rim, at kCamSunLevel in the
++// colour of the sunlight through the air taken kCamSunWhite of the way to white
++// (from 4 degrees up; a sensor clips every channel of the sun, so it burns
++// white, and the hue-keeping curve held it at a pale peach); its glow is the
++// sky's roll-off toward the sun (camSkyRolloff), the aureole and the bloom.
++// The disc is round on the screen: the offset to the sun in pixels (the view
++// ray's change per pixel solved in the sky's tangent plane) times the angle of
++// a pixel of the same solid angle. The angle itself drew the rectilinear
++// lens's oval near the frame's corners. Display coded, alpha its coverage
++// (the sprite blends by alpha, so outside the disc the sky stays as the dome
++// drew it).
+ vec4 camSunDisc() {
+     if (dot(vWorldRel, vWorldRel) <= 0.0 || skySunElevation() < -1.0) return vec4(0.0);
+     vec3 d = normalize(vWorldRel);
+     vec3 s = skySunDir();
+     float ang = atan(length(cross(d, s)), dot(d, s));
+     float aa = max(fwidth(ang), 1e-5);
++    vec3 dx = dFdx(d), dy = dFdy(d);
++    float a11 = dot(dx, dx), a12 = dot(dx, dy), a22 = dot(dy, dy);
++    float det = a11 * a22 - a12 * a12;
++    if (det > 1e-24) {
++        vec3 o = s - d;
++        float b1 = dot(dx, o), b2 = dot(dy, o);
++        vec2 px = vec2(a22 * b1 - a12 * b2, a11 * b2 - a12 * b1) / det;
++        aa = sqrt(sqrt(det)); // the angle of a pixel of the same solid angle
++        ang = length(px) * aa;
++    }
+     float disc = 1.0 - smoothstep(kCamSunRadius - aa, kCamSunRadius + aa, ang);
+     vec3 sun = skySunRadiance();
+     float pk = max(sun.r, max(sun.g, sun.b));
+     vec3 chroma = pk > 1e-6 ? sun / pk : vec3(1.0);
++    chroma = mix(chroma, vec3(1.0), kCamSunWhite * smoothstep(0.0, 4.0, skySunElevation()));
+     return vec4(toDisplay(chroma * kCamSunLevel), disc);
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index 4ca14b8b..1ab7347d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -135,13 +135,21 @@ vec3 skyClear(vec3 d, vec3 baseDisp, vec3 glowDisp, vec3 capDisp) {
+ // (PhotoCamera.hpp kSkyRolloffKnee, kSkyRolloffCap): only the sun's disc
+ // clips, and the glow round a low sun is a smooth golden gradient instead of
+ // a ragged white plateau where the sky's clouds and the aureole crossed white.
+-const float kCamSkyKnee = 1.2; // kSkyRolloffKnee
+-const float kCamSkyCap = 2.4;  // kSkyRolloffCap
+-vec3 camSkyRolloff(vec3 lin) {
++// Toward the sun (the unit direction d) the cap rises to kCamSkySunCap, past
++// white, as 1 / (1 + 2 (1 - cos) / kCamSkyGlowRad^2) (PhotoCamera.hpp
++// kSkySunCap, kSkySunGlowRad, SkyRolloffToward): the sky round the sun burns
++// white and its glare falls off smoothly; one cap everywhere drew a flat cream
++// plateau out to about 2 degrees round a pale disc.
++const float kCamSkyKnee = 1.2;      // kSkyRolloffKnee
++const float kCamSkyCap = 2.4;       // kSkyRolloffCap
++const float kCamSkySunCap = 10.0;   // kSkySunCap
++const float kCamSkyGlowRad = 0.021; // kSkySunGlowRad
++vec3 camSkyRolloff(vec3 lin, vec3 d) {
+     if (litCamera.x < 0.5) return lin;
+     float m = max(lin.r, max(lin.g, lin.b)) * max(litCamera.w, 1e-6);
+     if (m <= kCamSkyKnee) return lin;
+-    float r = kCamSkyCap - kCamSkyKnee;
++    float glow = 1.0 / (1.0 + 2.0 * (1.0 - clamp(dot(d, skySunDir()), -1.0, 1.0)) / (kCamSkyGlowRad * kCamSkyGlowRad));
++    float r = kCamSkyCap + (kCamSkySunCap - kCamSkyCap) * glow - kCamSkyKnee;
+     return lin * ((kCamSkyKnee + r * (1.0 - exp(-(m - kCamSkyKnee) / r))) / m);
+ }
+ 
+@@ -221,7 +229,7 @@ vec3 atmoFogColor(vec3 rel, vec3 classicFog) {
+     vec3 h = vec3(d.x, clamp(d.y, 0.0, 0.25) * 0.5 + 0.015, d.z);
+     h *= inversesqrt(max(dot(h, h), 1e-12));
+     vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
+-    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(h, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), h)));
++    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(h, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), h), h));
+     disp = mix(disp, classicFog, litAtmo.y);
+     return mix(classicFog, disp, litAtmo.z);
+ }
+@@ -466,7 +474,7 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+     // Cover over clear sky in display space, where the mask measured it: a
+     // faint cloud keeps about the texture's own contrast (mixed in linear light
+     // the texture's faint blotches read 40 % stronger than in the original).
+-    vec3 disp = mix(skyDisplay(camSkyRolloff(a)), skyDisplay(camSkyRolloff(cloudLin)), cloud);
++    vec3 disp = mix(skyDisplay(camSkyRolloff(a, d)), skyDisplay(camSkyRolloff(cloudLin, d)), cloud);
+     // Under the photoreal camera the night the table fades into is the
+     // original dome's brightness in a night blue (its dusk red under the
+     // physical twilight turned the blue hour's zenith mauve).
+@@ -484,7 +492,7 @@ vec3 skyReflection(vec3 r) {
+     vec3 classic = fogColorToward(r);
+     if (litAtmo.x <= 0.0) return classic;
+     vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
+-    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), r)));
++    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), r), r));
+     disp = mix(disp, classic, litAtmo.y);
+     return mix(classic, disp, litAtmo.x);
+ }
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 9c640e09..1ef356ba 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -237,6 +237,48 @@ TEST_CASE("PhotoCamera: the sky rolls off under white, and the guards' sky limit
+     CHECK(kSunDiscLevel > c.white);
+ }
+ 
++TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off smoothly to the sky's cap",
++          "[Remaster][PhotoCamera]")
++{
++    LightingTuning t;
++    const ToneCurve c = MakeToneCurve(t.camContrast, t.camShoulder, t.camWhite);
++    const float deg = 3.14159265f / 180.0f;
++    // At the sun the cap is past the curve's white: the sky round the disc
++    // clips (no flat cream plateau of 0.85 round a low sun).
++    CHECK(SkySunGlow(1.0f) == Catch::Approx(1.0f));
++    CHECK(SkyRolloffCapToward(1.0f) == Catch::Approx(kSkySunCap));
++    CHECK(kSkySunCap > c.white);
++    CHECK(ApplyToneCurve(c, SkyRolloffToward(1000.0f, std::cos(0.5f * deg))) >= 0.999f);
++    // Half the rise at kSkySunGlowRad.
++    CHECK(SkySunGlow(std::cos(kSkySunGlowRad)) == Catch::Approx(0.5f).margin(0.01f));
++    // A bright aureole's output falls with the angle, smoothly: no step of
++    // more than a percent of white per tenth of a degree, and no plateau of
++    // the same value from 0.6 to 3 degrees.
++    float prev = 2.0f;
++    for (float a = 0.6f; a <= 6.0f; a += 0.1f)
++    {
++        const float y = ApplyToneCurve(c, SkyRolloffToward(200.0f, std::cos(a * deg)));
++        CHECK(y <= prev + 1e-6f);
++        if (prev <= 1.0f)
++            CHECK(prev - y < 0.01f);
++        prev = y;
++    }
++    CHECK(ApplyToneCurve(c, SkyRolloffToward(200.0f, std::cos(0.6f * deg))) -
++              ApplyToneCurve(c, SkyRolloffToward(200.0f, std::cos(3.0f * deg))) >
++          0.05f);
++    // Far from the sun the cap is the sky's (within 2% from 20 degrees): the
++    // broad sky, a silver lining and the guards are unchanged.
++    CHECK(SkyRolloffCapToward(std::cos(20.0f * deg)) < kSkyRolloffCap * 1.02f);
++    CHECK(SkyRolloffCapToward(-1.0f) < kSkyRolloffCap * 1.001f);
++    // Under the knee nothing changes, at the sun as anywhere.
++    CHECK(SkyRolloffToward(0.5f, 1.0f) == 0.5f);
++    CHECK(SkyRolloffToward(3.0f, -1.0f) == Catch::Approx(SkyRolloff(3.0f)).epsilon(0.002));
++    // The sun's disc goes most of the way to white (a sensor clips every
++    // channel of the sun).
++    CHECK(kSunDiscWhite >= 0.7f);
++    CHECK(kSunDiscWhite <= 1.0f);
++}
++
+ TEST_CASE("PhotoCamera: the sky seen through a canopy stays pale sky, the sun's own glare may clip",
+           "[Remaster][PhotoCamera]")
+ {
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 6808abb7..e4759bcd 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1159,9 +1159,23 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
+     const std::string inputs = Piece(gl::FragmentPiece::Inputs);
+     CHECK(constant(inputs, "kCamSunRadius") == Catch::Approx(kSunDiscRadiusDeg * 3.14159265f / 180.0f).epsilon(1e-4));
+     CHECK(constant(inputs, "kCamSunLevel") == Catch::Approx(kSunDiscLevel));
++    CHECK(constant(inputs, "kCamSunWhite") == Catch::Approx(kSunDiscWhite));
+     const std::string skyPiece = Piece(gl::FragmentPiece::Sky);
+     CHECK(constant(skyPiece, "kCamSkyKnee") == Catch::Approx(kSkyRolloffKnee));
+     CHECK(constant(skyPiece, "kCamSkyCap") == Catch::Approx(kSkyRolloffCap));
++    CHECK(constant(skyPiece, "kCamSkySunCap") == Catch::Approx(kSkySunCap));
++    CHECK(constant(skyPiece, "kCamSkyGlowRad") == Catch::Approx(kSkySunGlowRad));
++    // Every sky roll-off knows its direction to the sun (the glow round it),
++    // and the sun's disc is round on the screen (solved per pixel, not the
++    // angle's oval near the corners).
++    CHECK(skyPiece.find("vec3 camSkyRolloff(vec3 lin, vec3 d)") != std::string::npos);
++    CHECK(skyPiece.find("camSkyRolloff(a)") == std::string::npos);
++    const std::string common = gl::RemasterFragmentCommon();
++    const size_t disc = common.find("vec4 camSunDisc()");
++    REQUIRE(disc != std::string::npos);
++    const std::string discBody = common.substr(disc, common.find("\n}\n", disc) - disc);
++    CHECK(discBody.find("dFdx(d)") != std::string::npos);
++    CHECK(discBody.find("kCamSunWhite") != std::string::npos);
+ }
+ 
+ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+index dcff276b..0b579c83 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -768,3 +768,13 @@ TEST_CASE("Volumetric fog: the air's colour along the screen's edges is the ring
+                           "fogLightK.y;") == 1);
+     CHECK(CountOf(inject, "clamp(ring.a, 0.0, 1.0)") == 0);
+ }
++
++TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough to read", "[fog][remaster]")
++{
++    // Look fix round 4 "sun": at 14 the shafts of pine_rays barely read; the
++    // near pass's soft cap was not the limit (the beams are linear in the
++    // gain there), so the gain itself rose. The beams' gain at fogSun 1.
++    CHECK(kFogBeamGain >= 30.0f);
++    CHECK(kFogBeamGain <= 40.0f);
++    CHECK(kFogBeamReach == Catch::Approx(180.0f));
++}

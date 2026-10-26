@@ -1,0 +1,18 @@
+﻿
+D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\runs\static-far80n4\run.log:2:shader override: 
+D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\shaders\far80n4
+D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\runs\static-far80n4\tri\look_probe_mist3_static\game_stdout
+.log:18:[2026-10-23 04:03:41.650] [app-6140] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  GL33: Initializing engine — 
+bootstrap 1920x1080 32bpp windowed before display.cfg/user overrides
+D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\runs\static-far80n4\tri\look_probe_mist3_static\game_stdout
+.log:24:[2026-10-23 04:03:41.841] [app-6140] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  GL33: shader override dir = 
+'D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\shaders\far80n4'
+D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\runs\static-far80n4\tri\look_probe_mist3_static\game_stdout
+.log:31:[2026-10-23 04:03:42.289] [app-6140] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  LoadDisplayConfig: applied 
+explicit CLI display overrides
+D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\runs\static-far80n4\tri\look_probe_mist3_static\game_stdout
+.log:32:[2026-10-23 04:03:42.289] [app-6140] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Aspect: viewport=1920x1080 
+style=0 clamp=1 override=0 -> leftFOV=1.333 topFOV=0.750 uiX=[0.000..1.000] uiY=[0.000..1.000] 
+world=[0.000..1.000]x[0.000..1.000]
+
+

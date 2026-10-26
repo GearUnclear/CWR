@@ -1,0 +1,229 @@
+{
+ "cards": [
+  {
+   "lines": [
+    [
+     "h",
+     "Operation Stone Lantern"
+    ],
+    [
+     "s",
+     "a fictional campaign on Guerrilla.Abel, one engine run, 12835 s of game time (Day 1, 07:30 to 11:03)"
+    ],
+    [
+     "p",
+     "occupier-forces at e9698d8 (the eight levers a5b40f0, generated bases step 3), built in build/agent67-rwdi, on the Remaster shadow of6, stock Guerrilla.Abel at forcesDifficulty Normal (poolStart 48). Two towns taken and held by their garrisons."
+    ],
+    [
+     "d",
+     "Levers (resistance side only): forcesLog on (a diagnostic); the player and his companion invulnerable in the north-western hills; Arudy (four fighters) and Sainte Marie (six) set to garrison 0 and support 55 and held to the end by invulnerable fighters kept within 120 m, magazines topped up every 300 s; a rising at 98 min: both generated outposts, Chapoi and Cancon raided by invulnerable cells that leave once each falls; time x8, x4 while a force is live. No director key tuned. One tri run, --retries 0 -j1, strict mode, 2064 s wall."
+    ]
+   ],
+   "voice": "Operation Stone Lantern: one engine run on the stock Abel campaign, the eight levers at Normal. Two towns are taken and held by real garrisons. The script plays only the resistance; every occupier move is the engine's own.",
+   "dur": 18
+  }
+ ],
+ "cues": [
+  {
+   "sim": 7.91,
+   "text": "Four fighters take Arudy and stay. The first town gets the old forty percent roll, and this time nobody answers.",
+   "line": "[9 s] CounterAttack: Arudy rose; the occupier does not answer (chance 0.40, 0 town(s) taken before)",
+   "rate": 5
+  },
+  {
+   "sim": 191.49,
+   "text": "Six take Sainte Marie and stay. The second town wakes the director, with a pool of forty-eight: the two generated outposts are paid out of it.",
+   "line": "[192 s] OccupierForces: AWAKE after 2 distinct towns (Sainte Marie the latest), 2 token(s)",
+   "rate": 5
+  },
+  {
+   "sim": 300.56,
+   "text": "From the new Vigny Outpost, walking to Arudy would take twenty-two minutes, past the fifteen-minute rule, so a truck goes. Neither attack knows of a single defender.",
+   "line": "[301 s] OccupierForces: [op 2] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 1308 s; TRUCK goes, road 147 s",
+   "rate": 4
+  },
+  {
+   "sim": 574.86,
+   "text": "Three of four riflemen fall and the last one breaks off. The town is still held, so the force withdraws at once and its truck follows it home.",
+   "line": "[575 s] CounterAttack: [op 2] Broken off at Arudy: 3 lost, 1 going home (born 4, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Vigny Outpost, 2805 m from the player",
+   "rate": 6
+  },
+  {
+   "sim": 613.96,
+   "text": "First rung of the repel ladder: the next attack on Sainte Marie needs half again the lethality, and ten infantry, twice the fighters it has seen.",
+   "line": "[614 s] OccupierForces: Sainte Marie: first repel (TRUCK from La Riviere Outpost, 5 fighter(s) reported), next attack needs lethality x1.5 and at least 10 infantry",
+   "rate": 10
+  },
+  {
+   "sim": 2282.04,
+   "text": "Arudy's rest ends with its four fighters reported. The ladder buys a truck and a tank: twenty-one units leave the pool, and the band drops to stretched on that spend alone.",
+   "line": "[2283 s] OccupierForces: [op 3] the repel ladder on Arudy (1 repel(s)): lethality 21.60 needed, at least 8 infantry   [2283 s] OccupierForces: band STRONG -> STRETCHED (pool 27 of 48; strength 27: 0 committed in the air, 10 lost and 7 repaid in the last 1.0 h)",
+   "rate": 5
+  },
+  {
+   "sim": 2642.52,
+   "text": "No base can spare twelve men, so the director holds its token and masses. Regrowth adds one body per base every ten minutes; three minutes of massing change nothing.",
+   "line": "[2643 s] OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 6 (the token is held, tick 1 of 3)",
+   "rate": 4
+  },
+  {
+   "sim": 2822.66,
+   "text": "Then the strongest single-base package goes anyway: a BMP and a T72, twenty-eight units. The pool falls from thirty-two to four, strong to thin in one tick.",
+   "line": "[2823 s] OccupierForces: [op 4] APC (6, BMP) with T72 from Le Port Harbour to Sainte Marie (34 unit(s), the pool pays 28, lethality 25.50 of 32.40, 6 fighter(s) reported, short of the required lethality: the most lethal affordable package, road 393 s)   [2823 s] OccupierForces: band STRONG -> THIN (pool 4 of 48; strength 4: 0 committed in the air, 10 lost and 10 repaid in the last 1.0 h)",
+   "rate": 3
+  },
+  {
+   "sim": 3005.9,
+   "text": "Arudy beats the tank column too: six dead, two walk home. Second rung: the next attack comes from a different source, or by air.",
+   "line": "[3006 s] CounterAttack: [op 3] Broken off at Arudy: 6 lost, 2 going home (born 8, alive 2; rule: living infantry below a third of the strength born, the target still held); on foot toward Airfield; the hulls wait for it to clear 250 m (at most 120 s), 2803 m from the player   [3006 s] OccupierForces: Arudy: second repel (TRUCK from Airfield), next attack from a different source or by air; a strike may go with it if the pool stays STRETCHED",
+   "rate": 6
+  },
+  {
+   "sim": 5344.95,
+   "text": "So the third attack on Arudy flies, with an attack helicopter strike on top. The rule tests the pool, which reads stretched; the line says strong, because both airframes count as committed.",
+   "line": "[5345 s] OccupierForces: [op 5] the repel ladder on Arudy (2 repel(s)): lethality 21.60 needed, at least 8 infantry; a different approach: by air instead of TRUCK from Airfield   [5345 s] OccupierForces: [op 6] escalation strike: Arudy repelled 2 time(s), the pool stays STRONG (pool 16 of 48)",
+   "rate": 4
+  },
+  {
+   "sim": 5406.15,
+   "text": "The strike cuts Arudy's standing to ten. Its locals stop talking to the occupier, and that matters later.",
+   "line": "[5407 s] OccupierForces: [op 6] Struck Arudy: support 60, standing 10 (-40 each), heat +15, half income until 6607; 4 town(s) within 2000 m -10 each",
+   "rate": 5
+  },
+  {
+   "sim": 5727.95,
+   "text": "Third repel: Arudy is contained. No more attacks on it; four bodies surge the Vigny Outpost instead.",
+   "line": "[5728 s] OccupierForces: Arudy: third repel (TRANSPORT_HELI from Airfield), contained: no more attacks on it; Vigny Outpost surged by 4 (the containment lifts when its reports decay, a wave fires or control changes band)",
+   "rate": 4
+  },
+  {
+   "sim": 5909.09,
+   "text": "Sainte Marie gets six men by helicopter, a quarter of the lethality the ladder asked for, and repels them. Contained, and La Riviere Outpost is surged by eight.",
+   "line": "[5646 s] OccupierForces: [op 7] Helicopter insertion (6, Mi17) from Airfield (infantry of Le Port Harbour) to Sainte Marie (18 unit(s), the pool pays 12, lethality 7.50 of 32.40, 6 fighter(s) reported, short of the required lethality: the most lethal affordable package, line 54 s)   [5910 s] OccupierForces: Sainte Marie: third repel (TRANSPORT_HELI from Le Port Harbour), contained: no more attacks on it; La Riviere Outpost surged by 8 (the containment lifts when its reports decay, a wave fires or control changes band)",
+   "rate": 8
+  },
+  {
+   "sim": 5913.29,
+   "text": "Now the scripted rising: raiders take both generated outposts, Chapoi and Cancon. Control falls to seventy-two percent, and both containments lift.",
+   "line": "[6126 s] OccupierForces: Arudy: containment lifted: control 0.72 crossed a wave threshold (band 0 -> 1) (3 repel(s) remembered)",
+   "rate": 25
+  },
+  {
+   "sim": 6185.49,
+   "text": "Wave one is called: thirty bodies, ten minutes out.",
+   "line": "[6186 s] OccupierForces: Wave 1 (30) inbound to Airfield, control 0.72 (control threshold; lands in 600 s)",
+   "rate": 8
+  },
+  {
+   "sim": 6786.48,
+   "text": "It tops up the Airfield, flies six men at Arudy, and sends a two-man column on an eighty-five minute walk. Three bodies stay in the pool, below the ceiling, so no surge is ever needed.",
+   "line": "[6787 s] OccupierForces: Wave 1: strikes on the cluster around Arudy (1 target(s), up to 15)   [6787 s] OccupierForces: Wave 1: 3 stay in the pool (pool 36 of 48)",
+   "rate": 4
+  },
+  {
+   "sim": 7054.04,
+   "text": "Arudy repels the wave strike as well, and is contained again.",
+   "line": "[7055 s] CounterAttack: [op 10] Broken off at Arudy: 5 lost, 1 going home (born 6, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Airfield, 2771 m from the player",
+   "rate": 10
+  },
+  {
+   "sim": 7927.3,
+   "text": "Sainte Marie's rest ends. Its fourth attack, nine men in a truck with a tank, crosses country from the Outpost.",
+   "line": "[7928 s] OccupierForces: [op 13] the repel ladder on Sainte Marie (3 repel(s)): lethality 32.40 needed, at least 12 infantry; a different approach: TRUCK from Outpost instead of TRANSPORT_HELI from Le Port Harbour",
+   "rate": 12
+  },
+  {
+   "sim": 8364.5,
+   "text": "Here is this run's defect. The truck is born two hundred and ninety-seven metres out and never moves again. Its nine men never get out.",
+   "line": "[8365 s] CounterAttack: [op 13] born for Sainte Marie (spawnReason route) at [5770, 4429], 5302 m from the player",
+   "rate": 25
+  },
+  {
+   "sim": 8493.23,
+   "text": "The defenders' RPG kills the tank escort. The truck still sits at the edge, full.",
+   "line": "[8494 s] CounterAttack: [op 13] the escort T72 of the force on Sainte Marie is lost (destroyed; 0 of 3 crew alive)",
+   "rate": 40
+  },
+  {
+   "sim": 8888.04,
+   "text": "With its locals silent, Arudy's reports decay, and push-outs creep back with no fighter reported. Sainte Marie's locals keep talking, so it stays contained to the end.",
+   "line": "[8889 s] OccupierForces: Arudy: containment lifted: its reports decayed (4 repel(s) remembered)",
+   "rate": 40
+  },
+  {
+   "sim": 9981.69,
+   "text": "After twenty-seven minutes the live timeout ends it: none lost, nine going home, and the director books it as a repel.",
+   "line": "[9982 s] CounterAttack: [op 13] Withdrew from Sainte Marie: 0 lost, 9 going home (born 9, alive 9; rule: counterAttackLiveTimeout 1200 s at the target); the infantry rides home in its carrier, 5301 m from the player",
+   "rate": 3
+  },
+  {
+   "sim": 9982.39,
+   "text": "In the same second the band line says stretched, then strong. The pool never left thirty-four: the line was written halfway through one booking.",
+   "line": "[9982 s] OccupierForces: band STRONG -> STRETCHED (pool 23 of 48; strength 23: 0 committed in the air, 22 lost and 15 repaid in the last 1.0 h)",
+   "rate": 3
+  },
+  {
+   "sim": 12804.4,
+   "text": "Three and a half hours: sixty-four occupiers lost, eleven operations on the two towns, and both still held.",
+   "line": "[12834 s] scenario note: end: pool 47 of 48, band STRONG, tokens 1, operation counter 16, waves fired 1, control 0.942857, lost 64, repels [[\"Arudy\",6,\"TRUCK\",\"Outpost\",true],[\"Sainte Marie\",4,\"TRUCK\",\"Outpost\",true]]",
+   "rate": 4
+  }
+ ],
+ "table": [
+  [
+   "1. Outside STRONG vs kills",
+   "17.5 % outside STRONG (STRETCHED 2053 s, THIN 193 s); occupier lost 64 in 3.6 h, 18 an hour, the worst hour 38 (refill 37 an hour). Every demotion followed a launch debit; losses held the strength under the pool for 86 min but changed the band for only 9 min"
+  ],
+  [
+   "2. Launch spacing",
+   "14 gaps, median 540 s, min 0 (the wave's strike and column in one tick), max 3422; per town: Arudy 1982, 3062, 1442, 2282, 3422 s, Sainte Marie 2582, 2823, 2282 s"
+  ],
+  [
+   "3. Urgent share",
+   "0 of 15 ground launches urgent; the one urgent line is the escalation strike (strikes are always urgent)"
+  ],
+  [
+   "4. Slow legs",
+   "9 arrival-rule lines, two in the 900 to 1500 s window (FOOT 1308 s from Vigny Outpost to Arudy, a truck went); 3 helicopters (two ladder rung 2, one wave strike)"
+  ],
+  [
+   "5. Lethality vs reported",
+   "first attacks 5.0 against 0 reported; rung 1 on Arudy 22.0 of 21.6; every later ladder plan short: 25.5, 11.25, 7.5 and 23.25 against 21.6 to 32.4 (the most lethal affordable)"
+  ],
+  [
+   "6. Three in flight",
+   "born operations peaked at 2 of 3; never three"
+  ],
+  [
+   "7. First wave",
+   "staged: fired at 6186 s at control 0.72 after the rising, landed 600 s later; 1 strike target, 1 reinforce column, 3 left in the pool"
+  ],
+  [
+   "8. Peaks",
+   "live AI 50 of 130 (occupier 25, resistance 18, civilian 14); groups on one side 7 of 40"
+  ],
+  [
+   "Repel ladder",
+   "Arudy: first 575, second 3006, third 5728, lifted 6126, further 7055, lifted 8889, further 10454, lifted 11290, further 12832. Sainte Marie: first 614, second 3387, third 5910, lifted 6126, further 9982"
+  ],
+  [
+   "Massing, break-off",
+   "4 massing holds, all ended by the 3-tick limit, none could staff; 8 break-offs, 2 live-timeout withdrawals; hulls left after their infantry each time"
+  ],
+  [
+   "Surge, spare hulls",
+   "wave surge: none (the wave was spent at landing, the pool never at the ceiling); stored spare hulls: 1 (an APC at Le Port Harbour, back in the pool 96 s later); containment surges 6"
+  ],
+  [
+   "WARN / ERRR",
+   "190 WARN (sound and texture), 0 ERRR; none from the director"
+  ],
+  [
+   "Verdict",
+   "Three findings contradict the docs: a carrier stuck at 297 m with its infantry seated for 27 min (6.5); band lines written on a half-booked ledger (5.6); Malden's pool figures still 60 (5.6, 6.3). The loop does not stop."
+  ]
+ ],
+ "table_title": "The audit's eight numbers, and what else the run counted",
+ "outro_voice": "Three findings for the next round: a truck that sits at the edge with its riflemen inside, band lines written halfway through a booking, and the plan's Malden numbers, which still assume a pool of sixty. The loop goes on.",
+ "foot": "Scripts, trace and logs: tmp/of-director-video-6. Narration: OpenRouter gpt-audio-mini via arma_CWR/voice-lines/generate_voice.py."
+}

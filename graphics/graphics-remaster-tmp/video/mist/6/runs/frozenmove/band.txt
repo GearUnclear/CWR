@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\mist\\6\\runs\\frozenmove\\frames", "frames": 120, "band": 0.038, "band_max": 0.095, "sky": 0.025, "spikes": 0, "worst": [[138, 0.46], [109, 0.38], [81, 0.35], [55, 0.3], [47, 0.28], [57, 0.25], [111, 0.25], [87, 0.24]]}

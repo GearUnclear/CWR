@@ -1,0 +1,149 @@
+graphics: long views draw the same frame from a fraction of the draw calls
+
+What the player sees: the same picture, faster. From the ridge south of
+the Abel airfield at sunrise the frame issues 1,912 draw calls instead
+of 12,910 and the GPU's world pass takes 2.5 ms instead of 18.2; the
+game runs at 72 fps on the CPU instead of 34. Every sunrise view and
+the 120-frame walk over the ridge are pixel-identical with the two
+switches off and on; the street lamps of a town at night differ in one
+pixel by one level.
+
+How it works, drawGrouping: instanced runs no longer stop at the first
+light slot in the scene. Abel's street lamps hold 12 slots by day, so
+until now every object drew alone at any hour. The rule is per object:
+RunEntry.localLit (InstancedRunRules.hpp) is set from the light list
+the object's own draw would select (Scene::SelectLights, asked only
+when a slot exists), and CanHead and CanJoin keep a lit object out of
+runs, so a run's empty light list is right for every member. The same
+switch stops resending unchanged constants: Graphics/Core/UboMirror.hpp
+records what the LitConstants and VSConstants buffers hold, every
+upload, whole or partial, goes through EngineGL33::UploadLitSlots or
+its VS twin, and a flush sends only the range of slots that changed,
+or nothing (1,236 kB and 3,731 kB a frame at sunrise_ridge become 3.6
+and 9.5). A new buffer starts unknown, so its first flush is whole; the
+VS world slots never count while WorldInstances exists (no shader reads
+them).
+
+How it works, hillCull: World/Scene/TerrainOcclusion (pure) copies the
+terrain grid once per island (1,024 x 1,024 in 1.7 ms) and keeps, from
+the eye, per azimuth wedge (512) and chord (25 m apart to 500 m, 50 m
+to 1,500 m, 100 m beyond), the steepest slope the lowest drawn terrain
+along the chord blocks. The surface is the drawn triangles, so the
+lowest point of a chord is exact; a notch narrower than a wedge cannot
+hide anything, and an object below the eye is judged by its far side
+(the prototype's single rays got both wrong). An object is hidden when
+every wedge its sphere (x1.25 plus 1 m) spans blocks a steeper slope
+than any point of the sphere; static objects only, never within 75 m,
+never the camera's own. Wedges are built when an object first asks, for
+the exact eye of the frame. The cull runs after LOD selection and the
+object occlusion pass and only flags the object (hillHidden): it keeps
+its draw LOD and its place in every sort, the shadow-map pass still
+casts it (long dawn shadows of trees behind the ridge still fall on
+ground in view), Object::PrepareDrawTextures gives its mipmap hints
+without the draw, and the draw loops skip it. CullGovernor idles the
+cull after 30 frames that tested fewer than 200 objects or hid under
+10%, and probes once every 30 frames.
+
+A leak older than this change made the cull visible at first: the
+shadow-map pass's alpha-tested casters sample their textures with
+whatever sampler the last draw before the pass left on unit 0, and that
+draw is the last road or decal blend section of Pass2's pre-shadow
+loop. Hiding that road changed the cutout of every leaf-card shadow in
+view (3,291 pixels over 2 levels at sunrise_ridge, 13,829 under the
+sun-visibility view). A fixed sampler only moved the difference to the
+other side of the switch. The last overlay of that loop is now drawn
+even when hidden, and in a view without overlays the last object Pass1
+draws (KeepLastPass1Draw): 2 objects a frame, counted as kept.
+
+Counters: GpuTimings splits the world pass into ground, pass1 (the
+opaque objects) and rest, from marks Landscape::DrawRect sets after its
+existing queue flushes, and keeps each section's minimum ("| min
+frame=..."). PerfCounters (runs, lit objects, tested, hidden, kept,
+table builds and wedges, the CPU of the cull, LOD selection and
+occlusion, uniform uploads and skips) rides in triPerfStats after
+" || ", averaged over the profiler's window; triSceneStats adds
+culled=, and objects= still counts hidden objects so capture tables
+stay comparable. make_pairs.py and summarize_timing.py read the new
+columns.
+
+The switch and its gates: drawGrouping and hillCull (perf, Frame
+cost), landed. Their gates are on whenever the remastered lighting
+draws the world (night vision included) and off with the classic
+lighting, so Classic draws as before. Off, each one takes exactly its
+old path: runs only with no light slot, whole-block uploads, no cull.
+
+Kept, rewritten and dropped from the prototype (research perf track):
+kept the per-object light gate (flag 4), terrain horizon occlusion
+(flag 256), both UBO mirrors (flags 1 and 2), the ground / pass1 /
+rest sections and the minimum. Rewritten: the light gate as
+RunEntry.localLit; the horizon table as exact wedges and chords in a
+pure module, built lazily per frame instead of a worker thread for a
+raised eye; the cull after LOD selection, flagging instead of removing;
+the mirrors behind one upload helper per block; the research counters
+as one PerfCounters struct. Dropped: CWR_PERF_PIN_LOD (F1 has
+triPinObjectDetail), flags 8, 16, 32, 64 (landed as F6) and 128, the
+debug=100+flags channel, the shader-side cutout and tap experiments.
+
+Measured cost (RTX 4060 Ti, 1920x1080, scale 1.0, 4x MSAA, one game
+per view set, off then on, one reading, no clock sampler; another
+lane's game ran at the end of the extra-views run): sunrise_ridge GPU
+frame 19.32 to 3.85 ms, world 18.16 to 2.52 (pass1 15.69 to 1.78);
+its walk end 13,712 to 1,714 draws, world 20.46 to 2.01; the 120-frame
+walk 12,939 to 1,937 draws, world 19.87 to 3.35, CPU 31 to 64 fps;
+valley 05:15 11,406 to 5,242 draws, world 29.71 to 15.28; noon_fields
+6,398 to 1,566 draws, frame 9.54 to 5.95 (not slower than off, the
+critic's case); forest_edge_golden 2,142 to 866 draws; lowsun_fp
+(governor idle) 1,890 to 1,212. Alone at sunrise_ridge: hillCull 3,025
+draws, drawGrouping 7,551. The cull's CPU: 0.86 ms a frame at
+sunrise_ridge (8,887 objects tested), 1.07 ms walking (43 wedges a
+frame), 0.38 at noon_fields, 0.001 idle.
+
+Tests: new test_terrain_occlusion.cpp [scene][occlusion]: the grid
+draws Landscape::SurfaceY's triangles and finds a segment's lowest
+point; nothing the table hides is visible to brute-force sight lines
+on hilly synthetic terrain; a notch narrower than a wedge shows what is
+behind it; an object below the eye is judged by its far side; ridges
+hide what is below their line, never what is near; chord spacing; the
+governor. New test_ubo_mirror.cpp [gpu][UboMirror] (a recording fake
+buffer equals the CPU block after every flush and partial upload;
+dedupe ranges; ignored slots; a partial upload is recorded) and
+test_perf_counters.cpp [gpu][PerfCounters]. test_instanced_run_rules:
+a lit object neither heads nor joins a run. test_gpu_timings: the world
+split and the minimum. test_feature_switches: the frame-cost switches
+have landed, nothing after A4 has. Five mutations (lit objects allowed
+in runs, the prototype's near-distance test below the eye, a chord's
+terrain under one ray, partial uploads not recorded, the switches not
+landed) each turn their cases red. Gate tags plus the new ones:
+484/484.
+
+In game (tmp/integration/A4/lane of the graphics-remaster worktree):
+before 20261018-055434-before (the A3 build), final 20261018-061039-new4
+(plus smoke_abel: KHR_debug ids 131154, 131169 and 131218 only, no GL
+error, no shader error), extra views 20261018-061218-extra and
+20261018-061357-extra-before, night lamps 20261018-061609-night and
+-night-before. Pixel-identical off against on in one game and off
+against the A3 build across boots: perf_sunrise_ridge, the hill-only
+and grouping-only pairs, debug=1 sun visibility, the walk end, both
+walks. town_night's lamps: off is identical to the A3 build, on
+differs from off in 1 pixel by 1 level. Within each view's own
+same-game noise on the A3 build: valley 05:15 (the sea), noon_fields,
+lowsun_fp, town_night with its fire. forest_edge_golden: only the
+spawned soldier's head differs (he turned it between the shots).
+
+Known risks: PerfCounters.{hpp,cpp}, UboMirror.hpp,
+TerrainOcclusion.{hpp,cpp} and three test files are new and must be
+added with the commit. The kept-draw rule assumes the last overlay's
+blend draw issues triangles; if it were clipped or fogged away the
+leaf-shadow cutout could still follow the cull in that view. The cull
+assumes the terrain draws at full grid detail (LandCache asks for
+segment LOD 0); a coarser far terrain would need the lowest vertex per
+coarse cell. The table is rebuilt for every moved eye, costing up to
+about 1 ms of CPU a frame on this machine while walking. The live
+soldier's head pose differed between the forest shots; whether the
+faster frame changes the AI's timing was not verified. Timing is one
+reading without the GPU clock sampler; the full timing run comes at the
+end of the branch. No RTX 3060 was measured. Object.hpp keeps its
+file's tab style for the new declaration (clang-format-diff would
+re-indent it with spaces).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -1,0 +1,4 @@
+file 'D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/pipeline-test/cards/intro.mp4'
+file 'D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/pipeline-test/cards/sunset_sea__card.mp4'
+file 'D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/pipeline-test/clips/sunset_sea.mp4'
+file 'D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/pipeline-test/cards/outro.mp4'

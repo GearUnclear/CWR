@@ -1,0 +1,3 @@
+﻿start 04:11:09 test=tests/rendering/captures/video/look_probe_fog3_moving.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\shaders\t4w junction=RemasterUD-fog-3
+run exit=0 frames=120 minutes=5.9 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\runs\moving-t4w
+done 04:17:06

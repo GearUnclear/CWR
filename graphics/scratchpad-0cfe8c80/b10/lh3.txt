@@ -1,0 +1,15 @@
+    // The sky's own clouds (EngineGL33_SkyClouds.cpp, Graphics/Remaster/SkyDensity.hpp).
+    Sky = 68,       // x lit-cloud strength, y sky-matched shadows on (1), z the dome's turn (u offset), w sky-through
+    SkyShadow = 69, // xy shadow anchor - camera (m, east and north), z previous anchor's angle (rad), w its weight
+    // 70-73: allocated to features still to land (70 free, LitConstPlanned
+    // Night to Weather); one padding member in the block until they do.
+    Planned = 70,
+    // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
+    Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
+    Water1 =
+        75, // rgb sheen light (linear: the sun in the original sun's hue, times the sheen), w sheen's flat-normal share
+    // 76: allocated to the canopy heightfield (LitConstPlanned Canopy); a
+    // second padding member in the block until it lands.
+    Planned2 = 76,
+    Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
+    Count = 78,

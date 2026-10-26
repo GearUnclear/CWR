@@ -1,0 +1,6 @@
+PLAN ONLY (no audio): line lengths estimated at 2.3 words a second. Montage 22.50 s, 3 lines, target -16.0 LUFS.
+
+id                       start     end   len  window          over
+v2_00_intro               0.35    3.83  3.48    0.00-  4.50 -0.07
+v2_09_sunset_sea          4.85   11.81  6.96    4.50- 14.50 -2.09
+v2_99_outro              14.85   21.81  6.96   14.50- 22.50 -0.09

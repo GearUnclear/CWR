@@ -1,0 +1,25 @@
+guerrilla: occupier forces phase 5, the package catalogue side (OCCUPIER-FORCES.md 6.5 armour and columns)
+
+ForcePackages offers every ground package (DefaultPackages = foot, truck,
+armed car, APC, tank; Phase3Packages stays for tests), with crew counts
+(driver, gunner, commander as the hull has them), a seat cap of
+min(12, transportSoldier) marking a hull that cannot hold the minimum as
+seatsShort (quoted, never chosen), the town-edge role (armed hulls
+support, trucks hold back), the foot downgrade when the source has no
+stored spare (MustDowngrade / Downgrade, refund = the hull price), and
+columns: a carrier (truck or APC) plus at most one escort (armed car, APC
+or tank), priced as both hulls and both crews, lethality = carried
+infantry x 1.25 + the escort bonus, pace = the slower hull. The choice is
+unchanged over the enlarged set; both 6.5 worked examples still pick the
+plain truck. Orchestrator decision: armour escorts a carrier rather than
+going alone, since 3.2 prices a column by the slowest hull and the 6.5
+table gives the tank a bonus with no seats.
+
+The director still offers Phase3Packages until the CounterAttack side
+(escort hull per record, support at the edge, commander seat) lands, so
+live behaviour is unchanged by this commit.
+
+Unit: [packages] 26 cases green; [packages],[occupierforces],[counterattack]
+126 cases green on build/ud66-rwdi.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

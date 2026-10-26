@@ -1,0 +1,61 @@
+--- mist/3/shaders/percell/psFogInject.glsl	2026-10-23 01:47:31.953129200 -0700
++++ fogwind/2/shaders/Act25/psFogInject.glsl	2026-10-23 04:18:46.697910300 -0700
+@@ -1052,32 +1052,50 @@
+ 
+ // The cell of slice s on this column: this frame's jittered point, blended with
+ // the last frame's volume at the same point.
+-float fogIgn(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+-float g_cellJ = 0.0;
++uint fogHashU(uint x) {
++    x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;
++    return x;
++}
++float fogHash3(uvec3 p) { return float(fogHashU(p.x + fogHashU(p.y + fogHashU(p.z))) >> 8u) * (1.0 / 16777216.0); }
++uvec2 g_cell = uvec2(0u);
++uint g_frameKey = 0u;
++float g_dSeq = 0.0; float g_dSign = 1.0;
++
++vec3 g_dirC = vec3(0.0);
+ vec4 fogSlice(float s, vec3 dirZ) {
+-    float z = fogSliceDepth((s + fract(fogDepth.w + g_cellJ + 0.618034 * s)) / fogGrid.z);
++    vec3 relC = g_dirC * fogSliceDepth((s + 0.5) / fogGrid.z);
++    float z = fogSliceDepth((s + fract(fogDepth.w + fogHash3(uvec3(g_cell, uint(s) + 7u)))) / fogGrid.z);
+     vec3 rel = dirZ * z;
+     vec4 cur = fogCell(rel);
+     if (fogFrame.z < 1.0) {
+-        vec3 pv = vec3(dot(prevRow0.xyz, rel) + prevRow0.w, dot(prevRow1.xyz, rel) + prevRow1.w,
+-                       dot(prevRow2.xyz, rel) + prevRow2.w);
++        vec3 pv = vec3(dot(prevRow0.xyz, relC) + prevRow0.w, dot(prevRow1.xyz, relC) + prevRow1.w,
++                       dot(prevRow2.xyz, relC) + prevRow2.w);
+         if (pv.z > 0.05) {
+             vec2 puv = pv.xy * prevProj.xy / pv.z * 0.5 + 0.5;
+             float pt = prevProj.w < 1e-3 ? pv.z / prevProj.z
+                                          : log(1.0 + pv.z * (exp(prevProj.w) - 1.0) / prevProj.z) / prevProj.w;
+             if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0)
+-                cur = mix(texture(fogHistory, vec3(puv, pt)), cur, fogFrame.z);
++            {
++                vec3 tq = vec3(puv, pt), te = vec3(0.2500) / fogGrid.xyz;
++                vec4 hist = 0.25 * (texture(fogHistory, tq + te * vec3(1.0, 1.0, 1.0)) + texture(fogHistory, tq + te * vec3(1.0, -1.0, -1.0)) +
++                                    texture(fogHistory, tq + te * vec3(-1.0, 1.0, -1.0)) + texture(fogHistory, tq + te * vec3(-1.0, -1.0, 1.0)));
++                cur = mix(hist, cur, fogFrame.z);
++            }
+         }
+     }
+     return cur;
+ }
+ 
+ void main() {
+-    g_cellJ = fogIgn(gl_FragCoord.xy);
+-    vec2 cj = fract(fogFrame.xy + 0.5 + vec2(fogIgn(gl_FragCoord.xy + vec2(17.0, 59.0)), fogIgn(gl_FragCoord.xy + vec2(83.0, 29.0)))) - 0.5;
++    g_cell = uvec2(gl_FragCoord.xy);
++    vec2 cj = fract(fogFrame.xy + 0.5 + vec2(fogHash3(uvec3(g_cell, 1001u)), fogHash3(uvec3(g_cell, 2003u)))) - 0.5;
+     vec2 ndc = (gl_FragCoord.xy + cj) / fogGrid.xy * 2.0 - 1.0;
+     vec3 dirZ = viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0); // per metre of view depth
+     vec3 d = normalize(dirZ);
++    {
++        vec2 ndcC = gl_FragCoord.xy / fogGrid.xy * 2.0 - 1.0;
++        g_dirC = viewToWorld * vec3(ndcC.x * projInfo.z, ndcC.y * projInfo.w, 1.0);
++    }
+     // The air's light along this column: the colour the forward fog fades
+     // to, the sky's horizon in this azimuth (fogColorToward, and the sky
+     // table's aerial perspective while it draws), in linear light; at night

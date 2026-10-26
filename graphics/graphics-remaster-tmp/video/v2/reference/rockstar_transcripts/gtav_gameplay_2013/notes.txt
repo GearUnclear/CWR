@@ -1,0 +1,7 @@
+Status on 2026-10-19: identification done, analysis blocked.
+
+1. Age gate. Without a login, yt-dlp got "Sign in to confirm your age". With --cookies-from-browser firefox (default profile gslt7obb.default-release, which has YouTube account cookies), the default web client returned "The page needs to be reloaded". The web_safari client got past the gate when run with --ignore-no-formats-error, which is how raw/info.json was obtained.
+2. Captions. The web_safari, mweb and web clients all report zero subtitle tracks and zero automatic-caption languages for this video. There is nothing to download for captions, so timing would rest on Whisper alone.
+3. Audio. Every client tried (web_safari, mweb, tv_simply, web_embedded) offers only storyboard images, no audio or video formats. yt-dlp says its "n challenge" failed because no supported JavaScript runtime and challenge solver are installed. Per the owner's instruction nothing else was installed, so no audio was downloaded and Whisper was not run.
+4. Cookies were read only in memory by yt-dlp for this URL. No cookie file was written, and raw/info.json drops the formats list (where yt-dlp keeps per-request cookies).
+5. No transcript text, caption file, audio file or Whisper output exists on disk for this video.

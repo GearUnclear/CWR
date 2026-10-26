@@ -1,0 +1,7 @@
+# Bug fix msaa-default research capture (not a regression test).
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_sinai.Sinai"
+tags = ["lighting_capture", "lobo", "headful", "exclusive"]
+timeout = 900
+assert_timeout = 240
+extra_args = ["--no-strict", "--mods-dir", ".", "--mod", "@LoBo", "--display-mode", "windowed", "--width", "960", "--height", "640"]

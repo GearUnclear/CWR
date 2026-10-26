@@ -1,0 +1,10 @@
+{
+  "id": "b05",
+  "bank": "kBio0Friendly",
+  "variant": 4,
+  "text": "{Name}, a shepherd from {Place}, guided displaced neighbours along familiar grazing paths. A cousin stayed behind to tend the flock; the shepherd lost contact with that cousin during the journey.",
+  "word_count": 30,
+  "self_review": "The shepherd guided displaced neighbours away while a cousin tended the flock, then lost contact with the cousin.",
+  "source_pattern": "The supplied forest-fighter interview describes reliance on village support and the hardship when that support was cut off.",
+  "fictional_changes": "The shepherd, guidance along grazing routes, and missing flock keeper are fictional extrapolations; these actions are not in the interview."
+}

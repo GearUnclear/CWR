@@ -1,0 +1,177 @@
+FOGWIND SWARM, AGENT 4: INTEGRATE EACH CELL'S DEPTH SPAN (ZERO TEMPORAL JITTER)
+==============================================================================
+2026-10-23. Folder: graphics-remaster/tmp/video/fogwind/4/
+No engine edit, no build, no branch, no commit. Everything is a live psFogInject override on the
+trailer's overhaul build (look-director-rwdi), junction RemasterUD-fog-4.
+
+VERDICT
+-------
+Meets the bar on the valley_mist probes, stepped capture AND real time at 60 fps (agent 1's
+recorder ran q4 and q2b). The recommended form is q2b:
+  - each froxel cell is the metric-weighted mean of 2 FIXED taps (depth strata 1/4 and 3/4 of the
+    slice, xy -0.25/+0.25 of the cell on the diagonal), the same in every cell and every frame:
+    NO temporal jitter at all, so nothing exists that could pump, travel or boil;
+  - the history (0.88 kept) is read at the cell/slice CENTRE through agent 2's fixed tetrahedral
+    +-0.25 cell/slice blur (Act25), which restores the shipped look (the shipped jittered history
+    read blurred the volume, and that blur is part of the approved look).
+Static camera: the fog is still (floor class). Moving: wind and flicker at vanilla level.
+Look: within 1 code value of the original (pre-d91) look; d91 was +2.4 in the valley.
+Curtains (the risk of fixed sampling, agent 3's "frozen" streaks): gone (0.143 vs original 0.152).
+Cost: one extra medium + light evaluation per cell and 3 extra history fetches per cell; the GPU
+was heavily contended (frame 130-150 ms from other games), so the cost is NOT resolved here.
+
+WHAT I TRIED (all overrides compiled clean: 0 "shader compile error" in game_stdout.log)
+------------------------------------------------------------------------------------------
+q4    4 fixed taps (4-rook xy x 4 depth strata, metric weights), history at the centre (plain read)
+q8    8 fixed taps (3D rank-1 lattice, generator (1,3,5)/8)
+q4nt  q4 with the hills' sun visibility off (diagnostic for the curtains)
+q2b   2 fixed taps + Act25's fixed tetrahedral history read   <- recommended
+q4w   4 taps at tent quantiles (+-0.5 cell, depth 0..1 of the slice), plain centre read.
+      RULED OUT: static valley 126.2 (= q4), curtain box 0.217 (q4 0.189). Widening one frame's
+      tap footprint neither restores the look nor smooths the streaks; the shipped look's extra
+      mist is the COMPOUNDED history blur, which only a blur in the history (Act25, q2b) or a
+      display tent (agent 6's S2z) reproduces.
+Probes: look_probe_fog4_{static,moving} (agent 3's mist3 recipe: valley_mist staging, exact 1/60 s
+step, clock k=270..389, static = camera held at the frame 327 pose); --from 15.
+
+NUMBERS
+-------
+Static camera (agent 1 kit, fogmotion --static, frames 15-119). valley mid / lowd2 / boil / slow,
+max WIND, look means bay/valley/farhill:
+  original (pre-d91)  0.477 / 1.618 / 0.375 / 0.151   WIND 0.024   154.0/128.1/115.9
+  d91 per-cell        0.498 / 0.110 / 0.416 / 0.173   WIND 0.174   154.9/130.7/117.5  (the wind)
+  frozen (1 tap)      0.050 / 0.025 / 0.079 / 0.067   WIND 0.002   153.9/125.4/115.1  (curtains)
+  q4                  0.052 / 0.020 / 0.057 / 0.043   WIND 0.003   153.9/126.1/115.2
+  q8                  0.047 / 0.024 / 0.053 / 0.040   WIND 0.002   153.2/125.6/114.5
+  q2b                 0.044 / 0.023 / 0.051 / 0.039   WIND 0.003   154.4/129.1/116.4
+  bandmetric (PNG): q4 0.025, q8 0.024, q2b 0.025, q4nt 0.024; d91 same-batch 0.056.
+
+Moving camera (real pan, kit, frames 15-119, mkv). WIND bay/valley/farhill/haze, max rho_off,
+lowd2 valley, band(mkv), look valley mean:
+  original            0.009/0.025/0.001/0.007  0.04   1.621  0.522  127.9
+  d91 per-cell        0.047/0.123/0.078/0.035  0.29   0.117  0.086  130.3
+  vanilla (clip 285-389) 0.017/0.007/0.002/0.007 0.048 0.057  0.102  (no fog)
+  q4                  0.010/0.006/0.002/0.004  0.047  0.080  0.077  125.8
+  q8                  0.009/0.006/0.002/0.004  0.050  0.076  0.077  126.1
+  q2b                 0.005/0.003/0.002/0.004  0.034  0.078  0.079  128.5
+  bandmetric (PNG): q4 0.039, q8 0.038, q2b 0.038, all 0 spikes (original 0.517, d91 0.063).
+  Look in motion vs original (time means, luma codes): q2b bay +0.15 valley +0.62 farhill +0.36
+  haze +0.03 sky +0.07; q4 -0.35/-2.17/-0.88/0.00/+0.11; d91 +0.79/+2.37/+1.54/+0.05/+0.06.
+  Block flicker on agent 7's clean window (frames 68-119, lowd2 bay/valley/farhill/haze):
+  q2b 0.067/0.072/0.054/0.037, q4 0.073/0.060/0.053/0.036; S2 0.065/0.053/0.049/0.039,
+  Ac 0.071/0.061/0.052/0.038 (agent 7), history-free fixed taps far80n4 0.140/0.102/0.068/0.077.
+  Keeping the history as a smoother puts fixed taps in the smoothed class.
+
+Real time 60 fps (agent 1's mist-1 recorder, one render per tick; fogwind/1/out/rt_<tag>.txt).
+Camera held (rtst): valley boil/slow, farhill boil/slow, max WIND, valley mean; pan (rt60): max
+rho_off, bay lowd2:
+  d91 per-cell  0.422/0.321  0.252/0.199  WIND 0.138  130.0 | 0.53   0.063   (the wind)
+  2/Ac          0.131/0.119  0.078/0.070             125.4 | 0.024  0.067
+  2/Act25       0.080/0.065  0.056/0.045             128.1 | 0.025  0.064
+  4/q4          0.061/0.049  0.046/0.037  WIND 0.002  125.3 | 0.026  0.066
+  4/q2b         0.058/0.047  0.047/0.038  WIND 0.002  128.2 | 0.028  0.062
+  pre-d91 original (all_rt60): bay lowd2 0.696 (the pump). Stepped original valley mean 128.1.
+q2b in play: the lowest in-place boil of all measured candidates (= q4, the floor) AND the
+original look (128.2 vs 128.1); no wind (WIND <= 0.004 in rt60), no pump.
+
+Curtains (tools/curtain4.py: time mean of the static clip, column means of a box below the sun,
+x high-pass minus a 31 px box, rms codes):
+  box 1150,540,250,80: original 0.152, d91 0.143, frozen 0.317, q4 0.189, q8 0.198, q4nt 0.169,
+                       q2b 0.143
+  low sky by the sun 1300,440,600,80: original 0.051, frozen 0.100, q4 0.097, q2b 0.064
+  (the low-sky residue has the same 38-40 px periods as the original: scene structure, under
+  0.1 code value; invisible at normal contrast).
+  q4nt shows the hills' horizon term is not the main source of the residual streak.
+
+Cost (triGpuTimes "air" section, run average read at the end of each probe; the machine ran
+other agents' games, frame 128-155 ms, so these are noisy):
+  d91 same batch 3.32 ms; q4nt 3.22; q4 3.64 / 4.13; q4w 3.80; q2b 4.07 (static) / 3.71 (moving);
+  q8 5.31 / 5.73. Agent 3 measured d91 3.57 vs t4w 3.71 on its runs. Reading: 2 to 4 taps add
+  roughly +0.1 to +0.8 ms on this contended GPU; 8 taps clearly cost more (+2 ms). The lead
+  should time q2b against d91 on an idle machine before landing.
+
+LOOKED AT BY EYE
+----------------
+- look/xt_moving/xt_resid_crop.png and look/xt_moving2/xt_resid_crop.png: x-t RESID of the band
+  (time down). Original: horizontal stripes (the pump). d91: fine slanted hatching (the wind,
+  bands travelling left about one cell per frame). q4, Act25, q2b: flat grey, only the pan's
+  object-edge lines (which every clip has).
+- look/xt_moving/resid_01.png, look/xt_moving2/resid_01.png: 2x camera-compensated frame
+  differences of the bay and valley. Original: the whole land flips as one sheet. d91: 2-4 cell
+  blotches. q4, q2b: flat, only edges and encode grain.
+- look/zoom2x_static_f50_q4q8.png, zoom2x_static_f50_q2b.png, zoom2x_static_f50_q4nt.png
+  (contrast-stretched 2x below the sun): frozen has strong vertical curtains, q4/q8 faint ones,
+  q2b is as smooth as the original.
+- look/look_static_f50.png, look_moving_f50.png, look_moving_f50_q2b.png: frames with |diff| x8
+  against the reference; q2b's diff against the original is nearly black, q4 shows the clearer
+  valley (-2 codes).
+
+WHY IT WORKS
+------------
+- The far slices are hundreds of metres deep and the mist and haze change strongly inside one.
+  With one jittered point per cell the history carried a residual of that swing; frame-wide it
+  pumped (original), per-cell IGN plus the golden-ratio step made the residual pattern translate
+  one cell per frame (agent 1: the wind). Integrating the depth span with fixed strata removes
+  the need for a depth jitter altogether: the cell value is a pure function of the camera pose.
+- Point sampling without jitter aliases in xy (frozen's curtains). Fixed xy taps inside the cell
+  plus the fixed history blur give the same smooth reconstruction as the shipped look, without
+  any time dependence.
+- Agent 3's ladder agrees: 2 stratified taps already reach the static floor; 4 or 8 buy nothing
+  in motion. The look needs the history blur (Act25), not more taps.
+
+AI LINK
+-------
+Unchanged. The medium (fogMediumAt) and its C++ mirror are untouched; only where the renderer
+samples it and how it filters its own history changed. AI sight is the CPU line integral
+FogSightTransmittance (VolumetricFog.hpp/.cpp), independent of the froxel sampling. q2b's drawn
+haze sits within 1 code of the original look, so the drawn-vs-AI match is as before.
+
+THE CHANGE (for the lead; not applied anywhere)
+-----------------------------------------------
+psFogInject only (kPostFogInjectMainGLSL in EngineGL33_PostFogShaders.cpp): replace fogCellNoise,
+g_cellJitter, fogSlice and main's jitter lines with the block in q2b_fogSlice_main.glsl.txt
+(this folder). The full assembled override is shaders/q2b/psFogInject.glsl. Summary:
+  const int KT = 2;
+  kTapXY = (-0.25,-0.25), (0.25,0.25);  kTapZ = 0.25, 0.75   (fractions of the slice)
+  fogSlice: cur = sum_i w_i fogCell(g_tapDir[i] * depth(s + kTapZ[i])) / sum_i w_i,
+            w_i = depth(s + kTapZ[i] + 0.25) - depth(s + kTapZ[i] - 0.25)   (metric weights)
+            history: reproject the cell CENTRE (dirC * depth(s + 0.5)), read 0.25 * the sum of
+            4 trilinear fetches at +-0.25 cell/slice on a tetrahedron (Act25), mix with fogFrame.z.
+  main: g_tapDir[i] = viewToWorld * (ndc of gl_FragCoord.xy + kTapXY[i]); the column light
+        (g_air, ring, sun share, lobe) from the cell centre direction.
+C++: nothing required. fogFrame.xy and fogDepth.w become unused by the injection (the C++ jitter
+jx/jy/jz and its comment can go). Unit test idea: the injection's sample points must not depend on
+the frame (no fogFrame.xy / fogDepth.w in psFogInject), and the history read is centred.
+Re-verify after landing: reshoot valley_mist ud side with the head recipe; also re-measure
+pine_shafts (hard canopy-shadow edges in the air, agent 3's harder probe) and bay_reflections.
+
+RISKS
+-----
+- Cost on an idle GPU not measured (contended numbers above).
+- The fixed tap pattern is view-locked: on scenes with hard visibility edges in the air (pine
+  canopy shafts) a 2-tap cell could show faint standing streaks or a 2-cell pan pulse; agent 3's
+  pine_shafts probe is the test (q2b not run there by me).
+- The every-27-frame whole-band pulse (~0.1 code) seen in every variant (also d91) is not from
+  the injection jitter (agents 3, 6); untouched here.
+- The column light (g_air from the horizon ring, the sun share, the lobe) is taken at the cell
+  centre direction, so nothing averages the ring's bin stepping at the screen edges (agent 7's
+  finding for history-free taps). With the history kept, q2b's block flicker is in the smoothed
+  class (numbers above), but a pan that sweeps fast past the screen edge was not probed.
+- The history blur makes the look depend on the history's age: for about 10 frames after a cut
+  or a history reset the haze is about 2 codes clearer, then it settles (fable-1's point). Their
+  alternative q2z = this injection + agent 6's S2z display tent (no history blur) has a stateless
+  look; either works for the trailer, the lead picks.
+- Only the valley_mist scene was probed by me (stepped static + moving, real time via agent 1).
+  Other volFog clips (cloud_shadows, convoy, bay_reflections) need a re-measure after landing.
+
+FILES
+-----
+tools/mk_shader4.py (generator: --taps 1/2/4/8, --pattern box|tent, --hblur), gen_probe4.py,
+run_probe4.ps1, batch.ps1, look4.py, zoom4.py, curtain4.py, colspec4.py
+shaders/{q4,q8,q4nt,q4v1(unrun),q2b,q4b(unrun),q4w,q2w(unrun),percell_ref}/psFogInject.glsl
+runs/<tag>/ (mkv crf 4, band.txt/json, gpu.txt, motion.txt, keep/ PNGs, tri logs) for moving-q4,
+static-q4, moving-q8, static-q8, static-q4nt, static-pcref, static-q2b, moving-q2b, static-q4w
+look/ (x-t slices, residual frames, crops), ref/ (kit numbers on the reference clips)
+q2b_fogSlice_main.glsl.txt (the shader block to land)
+Probe tests: D:/Arma_CWA_worktrees/video-work/arma_CWR/tests/rendering/captures/video/
+look_probe_fog4_{static,moving}.test.sqf/.toml. Junction video-work/arma_CWR/packages/RemasterUD-fog-4.

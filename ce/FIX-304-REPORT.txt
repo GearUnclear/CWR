@@ -1,0 +1,95 @@
+Issue 304: weapon collision impacts on human models
+
+Source and build
+Latest main/official CI build checked for this task: aa522583b59025921340c68122692154902d0dbf.
+Source worktree: D:\Arma_CWA\tmp\ce-304-fix
+Local branch: codex/fix-304-weapon-impacts (changes are uncommitted).
+Patch: issue-304-fix.patch, including the new tests and mission fixture.
+Modified executable: handcheck-game\PoseidonGame.exe
+SHA256: 7601993cbb3b8add2aba387a5cbf516426e8372ec16cce1a3941ff47e14621b9
+Build: Clang 22.1.8, x64 Windows, RelWithDebInfo, same configuration for baseline and patch.
+Data: D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered
+This is a modified local test build, not an official release.
+
+Implemented behavior
+- Cache exclusive bone membership for fire-geometry components when each ManType loads.
+- Use the model's actual rifle/launcher bones, not fixed component numbers. Mixed or unweighted
+  components retain their previous behavior.
+- Classify only components actually intersected by a ray. Ordinary physical geometry is unchanged.
+- Check current weapon visibility and inventory before accepting a weapon component.
+- Weapon hits use an ordinary world impact with dust and a solid/armor hit sound. Flesh keeps its
+  existing blood effect and flesh-hit sound. The ordinary effect stays at the contact point.
+- Skip both direct damage and the stock bullet's small indirectHit contribution to its carrier
+  for weapon-only non-explosive hits. Explosive direct and splash damage remain active.
+- Transfer weaponHit in ExplosionDammageEffects messages. Older message formats default to false.
+
+Reproduction and verification
+Original issue was reproduced on the official latest build; rifle-blood-latest-ce.png is the
+unedited capture from Dane's manual firing at the AK stock beside a dead soldier.
+The first patch removed blood but Dane reported no visible impact. The revised patch uses the
+ordinary world-impact path. fixed-rifle-dust-impact.png shows the verified rifle hit producing dust.
+
+Hand check:
+1. Run the modified executable with the Steam Remastered data and PatchedHandCheck.Abel mission.
+2. Approach the dead SoldierEB immediately ahead of the M16 player.
+3. Shoot the protruding AK74 stock/receiver: ordinary dust/impact, no blood spray from the weapon.
+4. Shoot flesh: existing flesh effects remain.
+5. Take the rifle and shoot its old position: no invisible weapon component remains.
+The final modified build was opened on the desktop for this check; its controls are left to Dane.
+
+Automated live checks (runtime-verification.json and runtime-summary.log):
+- Used triFireGeometry and triTraceFire to verify the exact first component hit before firing.
+- Fired actual BulletSingleW projectiles with createVehicle, setPosASL, and setVelocity.
+- Rifle-only bullet: carrier damage 0.
+- Launcher-only bullet: carrier damage 0.
+- Torso bullet: damage 0.616236.
+- Removed/re-added AK74 and RPGLauncher: component changes ignored/weapon as expected.
+- The old rifle ray no longer hits the rifle component after removal.
+- Shell73 explosive into the rifle: damage 1 (lethal).
+- Settled dead soldier's rifle still classifies as a weapon and accepts an ordinary impact.
+- For the screenshot, traced vertically into rifle component 12, fired BulletSingleW downward,
+  advanced at 0.25 time scale in six-frame increments, and captured unedited renderer screenshots.
+  The selected image is corpse-weapon-impact-03.png.
+
+Regression tests
+- New [weapon-impact] tests: 45 assertions in 3 cases passed (bone membership, collision filtering,
+  message transfer including legacy formats).
+- [Collision] group: 101 assertions in 5 cases passed.
+- Added weapon_impacts.test.sqf, .toml, and weapon_impacts.Abel fixture. All assertions passed when
+  replayed through the live harness (integration-script.log). The Trident runner itself was not run.
+- The broader World/animation/network run is not clean: Landscape ID cache uses the highest sparse
+  object ID crashes both this patch and the unchanged aa52258 baseline in the combined run. The
+  ObjectID group passes alone. Baseline evidence is in baseline-regression-tests.log.
+- A separate broad network run also encounters Windows-incompatible /tmp fixtures and an existing
+  vehicle-AI test failure. Those broader failures are not fixed by this change.
+- No live multiplayer observer session was run; message transfer and legacy-format behavior were
+  checked in the focused tests. Full live MP remains a follow-up validation item.
+
+Performance study
+Baseline = clean aa52258 production code plus the same read-only measurement helpers.
+Patched = final production fix. Both local builds use the same compiler/configuration/dependencies.
+Workload = real stock SoldierEB objects with AK74 and RPGLauncher; rays through animated fire
+geometry component centers. Both variants returned matching intersection counts.
+Counts = 1, 32, 128, 512 soldiers. Seven samples each; 200,000 rays/sample; 20,000 warmup rays.
+Alternated baseline/patched ordering. 11.2 million measured ray tests total.
+The timer covers Object::Intersect, including animation, convex clipping and classification.
+Scene creation, rendering, AI, projectile simulation, effects, and network transport are excluded.
+
+Soldiers   Baseline median ms   Patched median ms   Change
+1          836.355              819.865             -1.97%
+32         838.951              822.498             -1.96%
+128        841.320              824.657             -1.98%
+512        845.990              825.620             -2.41%
+
+No collision-throughput regression was observed at these scales. The small improvement is not
+evidence of a general FPS gain: code layout, compiler and host noise can affect this measurement.
+Raw samples: performance-results.json. Reproduction driver: benchmark.py, using harness.py.
+Bone classification is cached per model type; each intersected component adds a lookup and weapon
+hits additionally check the small inventory list. There is no per-frame scan of all model vertices.
+
+Further performance coverage, before making a general performance claim:
+- Matched frame-time runs with increasing visible AI counts, graphics settings, and incoming shots.
+- Miss-heavy rays and model mixtures, including addon models, in addition to the hit-heavy stock test.
+- Sustained automatic fire to measure particle/effect load and allocations.
+- Two updated multiplayer clients to verify observer visuals, sounds, and impact-message bandwidth.
+- Multiple hardware profiles and repeated runs. Finite samples cannot prove behavior at every scale.

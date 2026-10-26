@@ -1,0 +1,54 @@
+# CPU analysis of the shipped cloud-shadow field (numpy port of BuildCloudNoise; matches the engine's C++ output on 65534 of 65536 texels, the other 2 differ by 1 level, dumpnoise.cpp)
+
+## noise_scale.py: blob sizes (connected regions, wrap-aware) and 1.5 km view cones (uniform in ground area)
+shipped 6 km tile                  cover 0.041 covered 0.043 | cloud blobs n= 14 median    360 m, area-weighted mean    573 m | gaps n=  1 area-weighted  19870 m | views mixed 0.18 all-lit 0.67 all-shade 0.00
+shipped 6 km tile                  cover 0.100 covered 0.102 | cloud blobs n= 11 median    179 m, area-weighted mean   1267 m | gaps n=  3 area-weighted  19247 m | views mixed 0.31 all-lit 0.57 all-shade 0.00
+shipped 6 km tile                  cover 0.263 covered 0.266 | cloud blobs n= 15 median    513 m, area-weighted mean   4773 m | gaps n=  3 area-weighted   9974 m | views mixed 0.64 all-lit 0.20 all-shade 0.00
+shipped 6 km tile                  cover 0.300 covered 0.301 | cloud blobs n= 20 median    243 m, area-weighted mean   4882 m | gaps n=  8 area-weighted   9736 m | views mixed 0.67 all-lit 0.15 all-shade 0.00
+shipped 6 km tile                  cover 0.500 covered 0.500 | cloud blobs n= 15 median    115 m, area-weighted mean   8129 m | gaps n= 15 area-weighted   7995 m | views mixed 0.79 all-lit 0.03 all-shade 0.02
+
+same field, 3 km tile              cover 0.263 covered 0.266 | cloud blobs n= 15 median    256 m, area-weighted mean   2387 m | gaps n=  3 area-weighted   4987 m | views mixed 0.78 all-lit 0.01 all-shade 0.00
+same field, 3 km tile              cover 0.300 covered 0.301 | cloud blobs n= 20 median    121 m, area-weighted mean   2441 m | gaps n=  8 area-weighted   4868 m | views mixed 0.86 all-lit 0.00 all-shade 0.00
+
+## noise_scale2.py: chord lengths along a line (how long a point stays shadowed / lit), eye-level frame weighting (flat ground, 1/r^2 in r), share of views with a cloud edge within 400 m
+shipped: base period 4, 6 km tile    cover 0.263: shadow chord mean   715 m, lit chord mean  1807 m; eye-level frame mixed 0.02; edge within 400 m in view 0.40
+shipped: base period 4, 6 km tile    cover 0.300: shadow chord mean   762 m, lit chord mean  1743 m; eye-level frame mixed 0.03; edge within 400 m in view 0.42
+shipped: base period 4, 6 km tile    cover 0.500: shadow chord mean   985 m, lit chord mean   985 m; eye-level frame mixed 0.03; edge within 400 m in view 0.47
+
+tile 3 km (kCloudScale 1/3000)       cover 0.263: shadow chord mean   357 m, lit chord mean   904 m; eye-level frame mixed 0.03; edge within 400 m in view 0.63
+tile 3 km (kCloudScale 1/3000)       cover 0.300: shadow chord mean   381 m, lit chord mean   871 m; eye-level frame mixed 0.04; edge within 400 m in view 0.67
+tile 3 km (kCloudScale 1/3000)       cover 0.500: shadow chord mean   492 m, lit chord mean   492 m; eye-level frame mixed 0.05; edge within 400 m in view 0.75
+
+tile 2 km                            cover 0.263: shadow chord mean   238 m, lit chord mean   602 m; eye-level frame mixed 0.05; edge within 400 m in view 0.78
+tile 2 km                            cover 0.300: shadow chord mean   254 m, lit chord mean   581 m; eye-level frame mixed 0.06; edge within 400 m in view 0.83
+tile 2 km                            cover 0.500: shadow chord mean   328 m, lit chord mean   328 m; eye-level frame mixed 0.08; edge within 400 m in view 0.93
+
+base period 8, 6 km tile, 5 oct      cover 0.263: shadow chord mean   449 m, lit chord mean  1241 m; eye-level frame mixed 0.03; edge within 400 m in view 0.50
+base period 8, 6 km tile, 5 oct      cover 0.300: shadow chord mean   496 m, lit chord mean  1152 m; eye-level frame mixed 0.03; edge within 400 m in view 0.51
+base period 8, 6 km tile, 5 oct      cover 0.500: shadow chord mean   673 m, lit chord mean   673 m; eye-level frame mixed 0.04; edge within 400 m in view 0.63
+
+base period 16, 6 km tile, 4 oct     cover 0.263: shadow chord mean   234 m, lit chord mean   646 m; eye-level frame mixed 0.07; edge within 400 m in view 0.78
+base period 16, 6 km tile, 4 oct     cover 0.300: shadow chord mean   246 m, lit chord mean   572 m; eye-level frame mixed 0.07; edge within 400 m in view 0.81
+base period 16, 6 km tile, 4 oct     cover 0.500: shadow chord mean   382 m, lit chord mean   382 m; eye-level frame mixed 0.07; edge within 400 m in view 0.91
+
+
+## edge_width.py: soft edge width in metres at the threshold
+tile 6000 cover 0.041: edge +-0.013, median |grad| at threshold 0.427 per km -> soft edge width 59 m
+tile 6000 cover 0.100: edge +-0.029, median |grad| at threshold 0.637 per km -> soft edge width 90 m
+tile 6000 cover 0.263: edge +-0.062, median |grad| at threshold 1.088 per km -> soft edge width 114 m
+tile 6000 cover 0.300: edge +-0.067, median |grad| at threshold 1.138 per km -> soft edge width 118 m
+tile 6000 cover 0.500: edge +-0.080, median |grad| at threshold 1.362 per km -> soft edge width 117 m
+tile 6000 cover 0.900: edge +-0.029, median |grad| at threshold 0.529 per km -> soft edge width 109 m
+
+## cover_check.py: rig cover -> shader covered share (bilinear, soft threshold) and mean sun vs classic, fixed rig (shader off at cover 0)
+overcast 0.00 through 0.9586 cover 0.0414 shadowCover 0.0000 covered 0.0000 meanSun 0.9669 classic 0.9669 rel +0.0000 litgap 0.9669
+overcast 0.01 through 0.9534 cover 0.0466 shadowCover 0.0000 covered 0.0000 meanSun 0.9628 classic 0.9628 rel +0.0000 litgap 0.9628
+overcast 0.02 through 0.9483 cover 0.0517 shadowCover 0.0002 covered 0.0030 meanSun 0.9565 classic 0.9586 rel -0.0022 litgap 0.9588
+overcast 0.05 through 0.9328 cover 0.0672 shadowCover 0.0185 covered 0.0200 meanSun 0.9450 classic 0.9462 rel -0.0012 litgap 0.9604
+overcast 0.10 through 0.9069 cover 0.0931 shadowCover 0.0883 covered 0.0897 meanSun 0.9244 classic 0.9255 rel -0.0012 litgap 0.9958
+overcast 0.30 through 0.8034 cover 0.1966 shadowCover 0.1966 covered 0.1973 meanSun 0.8422 classic 0.8428 rel -0.0007 litgap 1.0000
+overcast 0.50 through 0.7000 cover 0.3000 shadowCover 0.3000 covered 0.3006 meanSun 0.7595 classic 0.7600 rel -0.0006 litgap 1.0000
+overcast 0.60 through 0.3250 cover 0.6750 shadowCover 0.6750 covered 0.6749 meanSun 0.4600 classic 0.4600 rel +0.0001 litgap 1.0000
+overcast 0.66 through 0.1000 cover 0.9000 shadowCover 0.9000 covered 0.8987 meanSun 0.2810 classic 0.2800 rel +0.0037 litgap 1.0000
+overcast 0.80 through 0.0588 cover 0.9412 shadowCover 0.9412 covered 0.9396 meanSun 0.2483 classic 0.2471 rel +0.0052 litgap 1.0000
+overcast 1.00 through 0.0000 cover 1.0000 shadowCover 1.0000 covered 1.0000 meanSun 0.2000 classic 0.2000 rel -0.0000 litgap 1.0000

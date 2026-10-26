@@ -1,0 +1,2 @@
+rt-orig-rt60|mist/1/rec/all_rt60.mkv|--from 10 --amp
+rt-orig-rtst|mist/1/rec/all_st.mkv|--static --from 10 --amp

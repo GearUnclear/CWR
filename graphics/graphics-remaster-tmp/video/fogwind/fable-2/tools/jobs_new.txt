@@ -1,0 +1,15 @@
+rt-q2b-rtst|fogwind/1/rec/q2b_rtst.mkv|--static --from 10 --amp
+rt-q2b-rt60|fogwind/1/rec/q2b_rt60.mkv|--from 10 --amp
+rt-t2wb-rtst|fogwind/1/rec/t2wb_rtst.mkv|--static --from 10 --amp
+rt-t2wb-rt60|fogwind/1/rec/t2wb_rt60.mkv|--from 10 --amp
+rt-S2z-rtst|fogwind/1/rec/S2z_rtst.mkv|--static --from 10 --amp
+rt-S2z-rt60|fogwind/1/rec/S2z_rt60.mkv|--from 10 --amp
+rt-t4wb-rtst|fogwind/1/rec/t4wb_rtst.mkv|--static --from 10 --amp
+rt-t4wb-rt60|fogwind/1/rec/t4wb_rt60.mkv|--from 10 --amp
+st-q2z|fogwind/fable-1/runs/static-q2z/static-q2z.mkv|--static --from 15
+st-c8h|fogwind/5/runs/static-c8h/static-c8h.mkv|--static --from 15
+st-t4wb|fogwind/3/runs/static-t4wb/static-t4wb.mkv|--static --from 15
+mv-c8h|fogwind/5/runs/moving-c8h/moving-c8h.mkv|--from 15
+mv-t4wb|fogwind/3/runs/moving-t4wb/moving-t4wb.mkv|--from 15
+mv-S2h|fogwind/6/runs/moving-S2h/moving-S2h.mkv|--from 15
+mv-far80n4fh|fogwind/7/runs/moving-far80n4fh/moving-far80n4fh.mkv|--from 15

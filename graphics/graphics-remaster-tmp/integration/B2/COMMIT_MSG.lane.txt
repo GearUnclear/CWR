@@ -1,0 +1,118 @@
+graphics: low-sun vehicles keep Classic's evening hue and readable shaded sides
+
+What the player sees: at a low sun the side of a vehicle turned away from
+it is no longer a dark grey shape. Its paint, stowage and markings read at
+about 0.6 of the sunlit side (M113 and Jeep 0.61 / 0.62 at a 12.7 degree
+sun, 0.57 / 0.61 at 7.5, 0.55 / 0.61 at 4.8; the Sinai Zelda and HMMWV
+0.60 / 0.63 at 12.2 and 0.56 / 0.59 at 7.6), where it was 0.41 to 0.49
+(Classic 0.33 to 0.53). The sunlit side of a hull takes the original's
+evening colour from 25 degrees of sun down, as Classic's own sunset ramp
+does: warmer than before in every measured box and at least as warm as
+Classic. Golden-hour tree crowns lose their pale grey-green: the big
+broadleaf at forest_edge_golden comes down to Classic's brightness and
+reads greener, with the same light-to-dark spread inside the crown. The
+ground, its cast shadows and the noon frame keep their light.
+
+How it works:
+- lowSunRig (Graphics/Remaster/LightRig, ComputeLightRig): the sun takes a
+  further LowSunHueShare of Classic's sunset hue over EveningSunChroma (0.4
+  from 25 degrees down, 0.3 more below 9). Vertical faces get sideways fill
+  below 40 degrees (LowSunFill: full from 8 degrees down to the horizon,
+  faded out under it): the sky part of the anti-sun horizon times
+  1 + 2.6 fill, the sunward one 1 + 0.5 fill, the ground bounce 1 + 1.3
+  fill. The zenith term, the exposure meter and the sun's strength are
+  untouched, so up-facing ground and its shadows keep their light; from 40
+  degrees up, and at night, the rig is unchanged to the bit. New: the
+  twilight cap holds for walls too; the fill lifts a vertical face at most
+  to the visible sky and never below its value without the fill (under a
+  dim dusk sky the prototype lit a wall facing away from a 1 to 3 degree
+  sun at 1.4 to 2.1 times the visible sky; under a clear sky the limit does
+  not bind).
+- crownCanopy (shadeRemastered, the research's crown V18 as plain code): the
+  sun reaching a leaf crosses the crown in front of it (crownSunPath, the
+  crown as a sphere, optical depth 1 per radius, a quarter always passes),
+  the core sees 0.45 of the sky instead of 0.6, the leaf albedo deepens its
+  saturation at equal luminance (a power of 1.3, renormalised), and below
+  35 degrees of sun, fully below 12, the crown takes 0.65 of the sun and
+  0.75 of the sky. Crowns only: grass (terrain draws) keeps its look.
+- The canopy flag rides in litHorizonSun.w (slot 23 had a free w): no
+  LitConstants slot lands, the layout is unchanged.
+- Debug view 6 shows each lit surface's albedo (display space; the lit
+  shaders see it as 4 through ShaderDebugView). With post=0 a shot of it
+  divides a lit shot into the light on every surface: the research's
+  calibration view, kept as the plan allowed (5 is the linear depth).
+
+Switches and gates: lowSunRig and crownCanopy have landed (10/26), both
+gated "always" (the rig is constants once a frame; the canopy is a few
+terms on foliage, and both fade themselves by sun height). The rig reads
+the switch (it runs before the gates, which take its cloud cover); the
+canopy flag comes from its gate. GPU section: world for both. Off (both 0)
+is the rig and the foliage of 807ce4b.
+
+From the prototype (tmp/research/shade): kept the hue share, the fill and
+its three factors, and V18 (canopy saturation, crown optical depth, core
+sky 0.45, low-sun crown sun 0.65 and sky 0.75). Rewritten: the moonlight
+1.01 sentinel became lowSunRig and the g_variant selector plain code under
+crownCanopy, ported onto F2's single crown normal and B1's leaf lift.
+Added: the twilight limit on the fill, grass left out of the canopy.
+Dropped: the lazy vertex buffer (F8), the cloud floor (F4) and the
+in-scatter composite (F5), all landed as fixes; the debug-3 albedo hack
+became debug view 6.
+
+Cost: no GPU work of its own for the rig (constants); the canopy adds a
+sqrt, an exp and a pow per foliage fragment. One reading per view (S mode,
+1920x1080, 4x MSAA, scale 1.0, another lane's game on the machine, GPU
+clock not logged): frame minimum on minus off -0.41 to +0.35 ms over nine
+views with no consistent sign (the base build's own off and on, the same
+frame twice, spread -0.13 to +0.23 ms), so the reading does not resolve a
+cost. The full gate times it on a quiet GPU.
+
+Tests: test_remaster_lighting.cpp gains six cases: the shaded side of a
+hull readable with the rig (model of the research boxes' faces, 45 and 135
+degrees from the sun: 0.5 to 0.65, below 0.41 without, 4.8 to 14 degrees)
+and noon and night unchanged to the bit; the evening hue from 25 degrees
+and the lit face at least as warm as without the rig; lowSunRig=0 (and
+baseline) equal to 807ce4b's rig at 7.5, 12.7 and 30 degrees; the twilight
+limit; the debug view mapping; the canopy's shader contract and its upload
+from the gate. test_feature_switches.cpp: shade landed (landed=10/26),
+test_post_stages.cpp: the albedo view adds no post stage. The 7 degree hue
+case did not move. The README calibration table is recomputed. Gate tags
+plus [FeatureSwitches], [FeatureGates], [PostStages], [SunShadows],
+[atmosphere], [triSetFixedStep], [triPinCloudDrift]: 529/529. Twelve
+mutations turn their cases red (switch ignored, fill or hue without the
+switch, no twilight limit, hue from 35 degrees, anti-sun fill 1.0, canopy
+ungated, canopy on grass, the stock core changed, canopy from the switch
+instead of the gate, albedo view unmapped, shade not landed).
+
+In game (tmp/integration/B2 of the graphics-remaster worktree): before
+(base build 807ce4b) and after sets of nine views (lowsun_fp, lowsun_box,
+dawn_box, dawn_box5, forest_edge_golden, noon_fields on Abel;
+sinai_lowsun_fp, sinai_box, sinai_dusk_box on Sinai with @LoBo), each shot
+classic, off, on and albedo in one game; measure_b2.md has the
+albedo-normalised boxes. Off equals before: the box values of off and of
+the base build are equal to 0.01 on every view, and the Abel views differ
+from the base build (a second boot) by the same kinds and sizes as the base
+build's own repeat within one game, in pixels over 2 levels: lowsun_fp
+40,918 against 43,969, lowsun_box 56,542 against 45,618, dawn_box5 45,159
+against 35,716, forest_edge_golden 148,132 against 147,872, noon_fields
+127,172 against 127,159, mostly in the horizon band, the largest on the
+posed soldier, whose pose differs between shots. Sinai's
+ground band differs between boots as A0 found, with equal means. smoke_abel 1/1 on the final
+build, KHR_debug ids 131154, 131169 and 131218 only.
+
+Known risks: the M113 at 7.5 and 4.8 degrees (0.57, 0.55) and the Zelda at
+7.6 (0.56) sit 0.01 to 0.03 under the plan's 0.58 floor in these boxes;
+the conifers at golden hour are 9% darker than before and 15% darker than
+Classic (the big broadleaf is at Classic's brightness); the golden slope
+at forest_edge_golden reads more orange than Classic (r:b 1.60 against
+1.39) and sunlit ground pinker (not mustard: its g:r falls); the fill is
+a flat lift on vertical faces, not bounce light; shaded hull faces are
+neutral where Classic's are bluish; the canopy also applies to the other
+half-lit shapes (bushes and, by the README, camouflage nets; the Sinai
+hero's net comes out brighter, 0.56 to 0.62 of its albedo, and the Abel
+hero's tent 0.51 to 0.61, lifted by the fill); spawned vehicle sides at
+noon stay at
+the per-pixel level F8 made real (bounce is the lever). No RTX 3060
+measured.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -1,0 +1,10 @@
+{
+  "id": "b11",
+  "bank": "kBio0Hostile",
+  "variant": 4,
+  "text": "{Name} lost a dock job near {Place} and enlisted for regular wages. During years of army service, the former laborer regularly helped younger soldiers write letters to their families.",
+  "word_count": 29,
+  "self_review": "An unemployed dockworker enlisted for regular pay and spent years helping younger soldiers write to their families.",
+  "source_pattern": "The supplied Sierra Leone TRC findings link some army recruitment to unemployment and monthly wages.",
+  "fictional_changes": "Dock work, promotion to sergeant, and help with letters are plausible inventions, not details of a documented recruit."
+}

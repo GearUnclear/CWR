@@ -1,0 +1,3 @@
+﻿start 04:18:56 test=tests/rendering/captures/video/look_probe_mistlead_cloud_shadows.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\6\shaders\S2 junction=RemasterUD-fog-6
+run exit=0 frames=150 minutes=4.1 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\6\runs\cloud-S2
+done 04:23:09

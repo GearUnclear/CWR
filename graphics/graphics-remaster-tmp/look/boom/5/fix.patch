@@ -1,0 +1,530 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+index fa89c752..820c35bb 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+@@ -269,17 +269,40 @@ void SmokeSourceVehicle::SimulateExplosion()
+             type.hit = hit;
+             type.indirectHit = indirectRatio * hit;
+         }
+-        if (type.hit > 50)
++        // Look "boom" 5: any fuel aboard burns as a fireball; only a big one
++        // (hit over 50, as before) also blasts and lengthens the wreck's
++        // smoke. A Jeep's (its fuel x 0.1, hit about 3 to 6) drew nothing.
++        if (type.hit > lighting::kFuelFireballMinHit)
+         {
+-            // change fire and darkFire parameters based on type.hit value
+-            float fireSize = type.hit * 0.001;
+-            float fireTime = type.hit * 0.002;
+-            saturate(fireSize, 0.25, 1.25);
+-            saturate(fireTime, 0.25, 1.25);
+-            _fire.SetSize(fireSize);
+-            _darkFire.SetSize(fireSize);
++            const float fireSize = lighting::FuelFireballSize(type.hit);
++            const float fireTime = lighting::FuelFireballBurnSeconds(type.hit);
++            // The fuel burns as a deflagration, a large, slower,
++            // rolling fireball (CombatLights.hpp, kFuelFireballK): fewer,
++            // bigger puffs born cooler that glow orange for about a second
++            // each while they roll up (the config's 2500 K at -4000 K/s and
++            // puffs of fireSize metres gave a white blink a metre wide), and
++            // thick black soot that climbs and lingers over it.
++            const float glow = lighting::FuelFireballGlowSeconds();
++            _fire.SetSize(2.0f + 2.0f * fireSize, 0.8f + 1.2f * fireSize);
++            _fire.SetInterval(0.012f);
++            _fire.SetTemperatureRange(lighting::kFuelFireballK, lighting::kFuelCoolRate);
++            _fire.SetDuration(0.5f * glow);
++            _fire.SetFades(0.5f, 0.03f, 0.9f * glow);
++            _fire.SetClimbRate(2.0f, 0.0f, 5.0f);
++            _fire.SetLinger(0.25f, lighting::kSmokeWindTau);
++            _darkFire.SetSize(1.5f + 2.0f * fireSize, 0.8f + 1.2f * fireSize);
++            _darkFire.SetInterval(0.03f);
++            _darkFire.SetTimes(3.0f, 1.0f);
++            _darkFire.SetFades(1.0f, 0.2f, 5.0f);
++            _darkFire.SetClimbRate(1.0f, 0.3f, 4.0f);
++            _darkFire.SetLinger(lighting::kCraterSmokeSpread, lighting::kSmokeWindTau);
++            _fireballLight = fireTime + glow;
++            _fireballStrength = 3.0f * fireSize;
+             _fire.Start(fireTime);
+-            _darkFire.Start(fireTime);
++            _darkFire.Start(fireTime * 1.6f);
++        }
++        if (type.hit > 50)
++        {
+             float rndTime = GRandGen.RandomValue() * 0.4 + 0.8;
+             SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
+             // sound of explosion
+@@ -355,6 +378,20 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
+     {
+         _combatEmbers.Release();
+     }
++    if (_fireballLight > 0 && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
++    {
++        // The fireball rolls up: its light rises with it and dims as it cools.
++        float left = _fireballLight / lighting::FuelFireballGlowSeconds();
++        saturate(left, 0.0f, 1.0f);
++        const Vector3 at = Position() + VUp * (1.5f + 2.0f * (1.0f - left));
++        const float p[3] = {at.X(), at.Y(), at.Z()};
++        _combatFireball.Set(lighting::CombatLightKind::Fire, p, _fireballStrength * left);
++    }
++    else
++    {
++        _combatFireball.Release();
++    }
++    _fireballLight -= deltaT;
+ 
+     if (_light)
+     {
+@@ -842,13 +879,35 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
+     Friction(_speed[0], _xFriction, 0, deltaT);
+     Friction(_speed[2], _zFriction, 0, deltaT);
+     Limit(_speed[1], _minYSpeed, _maxYSpeed);
+-    SetOrientScaleOnly(_growSize * _size);
++    // A lingering puff (SetLinger) spreads once grown, thinning as it spreads,
++    // and its sideways speed relaxes to the wind's.
++    float spread = 1;
++    if (_spread > 0 && _growUpTime <= 0)
++    {
++        _spreadAge += deltaT;
++        spread = 1 + _spread * _spreadAge;
++    }
++    if (_windTau > 0 && GLandscape)
++    {
++        Vector3Val wind = GLandscape->GetWind();
++        const float k = 1 - exp(-deltaT / _windTau);
++        _speed[0] += (wind[0] - _speed[0]) * k;
++        _speed[2] += (wind[2] - _speed[2]) * k;
++    }
++    SetOrientScaleOnly(_growSize * _size * spread);
+     SetPosition(Position() + _speed * deltaT);
+ 
+     _t += _dt * deltaT;
+     _constantColor = PackedColor(_cloudletColor * _cloudletTTable->GetColor(_t));
+ 
+     Smoke::Simulate(deltaT, prec);
++    if (spread > 1)
++    {
++        // The same smoke over a wider disc: its opacity falls as it spreads.
++        int alpha255 = toIntFloor(_alpha * _fadeValue * 255 / spread);
++        saturate(alpha255, 0, 255);
++        _constantColor = PackedColorRGB(_constantColor, alpha255);
++    }
+ }
+ 
+ void Cloudlet::SetTemperature(float t, float dt, CloudletTTable* table)
+@@ -892,6 +951,10 @@ Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed)
+     float delta = _cloudletDeltaT * (0.7 + 0.6 * GRandGen.RandomValue());
+     cloudlet->SetTemperature(_cloudletInitT, delta, _cloudletTTable);
+     cloudlet->SetPosition(pos);
++    if (_cloudletSpread > 0 || _cloudletWindTau > 0)
++    {
++        cloudlet->SetLinger(_cloudletSpread * (0.8 + 0.4 * GRandGen.RandomValue()), _cloudletWindTau);
++    }
+     return cloudlet;
+ }
+ 
+@@ -1401,6 +1464,38 @@ void Crater::Init(float timeToLive, float size, bool smoke, bool blood, bool wat
+         _smoke3.Load(Pars >> "CfgCloudlets" >> "CraterSmoke3");
+         _smoke3.SetSize(1.0 * cloudletSize, 1.5 * size);
+         _smoke3.SetColor(_smoke3.GetColor() * (0.6 + 0.4 * GRandGen.RandomValue()));
++
++        // Look "boom" 5: the column lingers (CombatLights.hpp, crater smoke).
++        // Every puff holds and fades over seconds scaled by the crater, keeps
++        // spreading and drifts with the wind; its rise slows to a hang, so the
++        // dark cloud stands over the crater and then leans away downwind.
++        const float life = lighting::CraterSmokeLifeScale(size);
++        const float hold = lighting::kCraterSmokeHold * life;
++        const float fade = lighting::kCraterSmokeFade * life;
++        // The rising dark cloud: no whitening as it ages (its table ran from
++        // grey at 500 K to white at 0 K; held for seconds it went white).
++        _smoke1.SetDuration(hold);
++        _smoke1.SetFades(0.6, 0.08, fade);
++        _smoke1.SetTemperatureRange(500, 0);
++        _smoke1.SetClimbRate(lighting::kCraterSmokeRiseDecay, lighting::kCraterSmokeHangRise, 5.0 / 0.8);
++        _smoke1.SetLinger(lighting::kCraterSmokeSpread, lighting::kSmokeWindTau);
++        // The low dust skirt: earth-coloured, it spreads wider and settles.
++        _smoke2.SetDuration(hold * 0.8);
++        _smoke2.SetFades(0.8, 0.08, fade);
++        _smoke2.SetColor(Color(0.55, 0.50, 0.42) * (0.7 + 0.3 * GRandGen.RandomValue()));
++        _smoke2.SetClimbRate(-0.1, 0.0, 1.0);
++        _smoke2.SetLinger(lighting::kCraterSmokeSpread * 1.5f, lighting::kSmokeWindTau);
++        // The thin veil rising behind it.
++        _smoke3.SetDuration(hold * 0.8);
++        _smoke3.SetFades(0.8, 0.4, fade);
++        _smoke3.SetColor(Color(0.5, 0.48, 0.45) * (0.7 + 0.3 * GRandGen.RandomValue()));
++        _smoke3.SetClimbRate(lighting::kCraterSmokeRiseDecay, lighting::kCraterSmokeHangRise, 5.0 / 0.8);
++        _smoke3.SetLinger(lighting::kCraterSmokeSpread, lighting::kSmokeWindTau);
++        // The thrown earth: a dark dust curtain that rises and falls back
++        // (CraterDustBig, loaded above but never run for a big burst).
++        _dustTimeToLive = 0.35 * timeSize;
++        _dust.SetSize(0.5 * size, 1.0 * size);
++        _dust.SetInterval(0.02);
+     }
+     else
+     {
+@@ -1441,10 +1536,7 @@ void Crater::Simulate(float deltaT, SimulationImportance prec)
+                    (GRandGen.RandomValue() * 6 * scale - 3 * scale) * _size);
+         float density = floatMax(_size, 0.02);
+         _dustTimeToLive -= deltaT;
+-        if (!_isSmoke)
+-        {
+-            _dust.Simulate(Position(), Speed() + up, density, deltaT);
+-        }
++        _dust.Simulate(Position(), Speed() + up, density, deltaT);
+     }
+     Smoke::Simulate(deltaT, prec);
+ }
+@@ -1883,6 +1975,15 @@ Explosion::Explosion(LODShapeWithShadow* shape, Vehicle* owner, float duration)
+     _fire.SetInterval(Square(invCoef) * _fire.GetInterval());
+     _fire.Start(duration * 0.05);
+     _minLightTime = 0.2;
++    // Look "boom" 5: a detonation's flash lasts tens of milliseconds, growing
++    // with the cube root of the charge (the size): its puffs cool from white
++    // past glowing in ExplosionFlashSeconds (a heavy shell's 60 ms, two frames
++    // at 30 fps; the config's -4000 K/s kept them glowing 0.2 s, a slow orange
++    // ball). Then they are its first dark smoke for their 0.4 s; the crater's
++    // column (Crater::Init) is what lingers. (Held longer, a grenade's and a
++    // HEAT round's puffs turned a flat khaki from 0.13 s: kept as before.)
++    _fire.SetTemperatureRange(lighting::kFireballBirthK,
++                              lighting::FireballCoolingRate(lighting::ExplosionFlashSeconds(_exSize)));
+ }
+ 
+ Explosion::~Explosion() = default;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+index 9b262bd6..9e5e29e8 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+@@ -100,10 +100,19 @@ class Cloudlet: public Smoke
+ 	float _t, _dt;
+ 	Ref<CloudletTTable> _cloudletTTable;
+ 	Color _cloudletColor;
+-		
++
++	// Lingering smoke (an explosion's dust and smoke column, a fuel fire's
++	// soot): after it has grown, the puff keeps spreading (its size grows by
++	// _spread of itself per second and it thins as it spreads) and drifts
++	// with the wind (its sideways speed relaxes to the wind's in _windTau s).
++	// 0 for every other puff.
++	float _spread = 0, _spreadAge = 0, _windTau = 0;
++
+ 	public:
+ 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
+ 
++	void SetLinger(float spread, float windTau) {_spread = spread; _windTau = windTau;}
++
+ 	// Its temperature (K) and its table's hottest (the last entry's maxT; 0
+ 	// without a table): a fireball's puff glows (CombatLights FireballPuff).
+ 	float Temperature() const {return _t;}
+@@ -179,6 +188,7 @@ class CloudletSource: public SerializeClass
+ 	Color _cloudletColor;
+ 	Ref<CloudletTTable> _cloudletTTable;
+ 	Vector3 _cloudletSpeed;
++	float _cloudletSpread = 0, _cloudletWindTau = 0;
+ 
+ 	Vector3 _lastPosition;
+ 	bool _lastPositionValid;
+@@ -212,6 +222,13 @@ class CloudletSource: public SerializeClass
+ 	}
+ 	Color GetColor() const {return _cloudletColor;}
+ 	void SetColor(ColorVal color) {_cloudletColor = color;}
++	// The puffs' life: held for `duration` s at full strength, then faded.
++	void SetDuration( float duration ) {_cloudletDuration=duration;}
++	// The puffs' temperature at birth (K) and its rate (K/s; the config's
++	// initT and deltaT): a fireball's puff glows while it is hot.
++	void SetTemperatureRange( float initT, float deltaT ) {_cloudletInitT=initT; _cloudletDeltaT=deltaT;}
++	// Lingering puffs (Cloudlet::SetLinger); 0, 0 = none.
++	void SetLinger( float spread, float windTau ) {_cloudletSpread=spread; _cloudletWindTau=windTau;}
+ 
+ 	Cloudlet *Drop( Vector3Par pos, Vector3Par speed );
+ 	void Simulate
+@@ -403,6 +420,11 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
+     // and the embers glowing under a burning wreck's smoke.
+     bool _combatBurst = false;
+     lighting::CombatLightHandle _combatEmbers;
++    // The fuel fireball's own light while it burns (s left; look "boom" 5):
++    // a deflagration lights its surroundings for its whole second.
++    float _fireballLight = 0;
++    float _fireballStrength = 0;
++    lighting::CombatLightHandle _combatFireball;
+     // A burning wreck's smoke (SmokeSourceOnVehicle): its embers glow.
+     virtual bool GlowsAsWreck() const { return false; }
+ };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+index aa1e7325..53fced86 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+@@ -170,17 +170,22 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
+             // research's saturated orange (1.0, 0.40, 0.11), whose light
+             // turned the ground round a crater khaki (red over blue 1.55).
+             const float e = Clamp(strength, 0.2f, 1.5f);
+-            const float cool = std::min(age / 0.45f, 1.0f);
++            // Its times scale with the size (the cube root of the charge,
++            // ExplosionVisualSize): a heavy burst (size 1 and over) holds
++            // kExplosionFlashHold, a 120 mm HE shell (0.6) 0.09 s, a hand
++            // grenade (0.28) 0.04 s; the light lasts as long as its flash.
++            const float ts = Clamp(strength, 0.2f, 1.0f);
++            const float cool = std::min(age / (0.45f * ts), 1.0f);
+             const float c = cool * cool * (3.0f - 2.0f * cool);
+             SetColour(s, 1.0f, 0.90f + (kFireRgb[1] - 0.90f) * c, 0.74f + (kFireRgb[2] - 0.74f) * c);
+             const float flash = std::max(kFlashGain * tuning.flash, 0.0f);
+             const float peak = 0.65f * flash + 0.35f;
+-            const float afterHold = std::max(age - std::max(tuning.flashHold, 0.0f), 0.0f);
++            const float afterHold = std::max(age - std::max(tuning.flashHold, 0.0f) * ts, 0.0f);
+             const float flicker =
+                 1.0f + std::min(afterHold / 0.05f, 1.0f) *
+                            (0.22f * Noise1(age * 14.0f, seed) + 0.1f * Noise1(age * 31.0f, seed ^ 0x51ed27U));
+-            const float flashEnv = std::exp(-afterHold / 0.05f);
+-            const float env = (0.65f * flash * flashEnv + 0.35f * std::exp(-age / 0.16f)) * flicker;
++            const float flashEnv = std::exp(-afterHold / (0.05f * ts));
++            const float env = (0.65f * flash * flashEnv + 0.35f * std::exp(-age / (0.16f * ts))) * flicker;
+             // The window is sized for the peak.
+             SetPower(s, 420.0f * e * e * jitter * peak, 0.8f + 1.8f * e, kCombatMaxRange);
+             s.intensity *= std::max(env, 0.0f) / peak;
+@@ -376,6 +381,43 @@ bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emi
+     return true;
+ }
+ 
++float ExplosionVisualSize(float indirectHit, float indirectHitRange)
++{
++    const float charge = std::max(indirectHit, 0.0f) * std::max(indirectHitRange, 0.0f);
++    const float size = kExplosionRefSize * std::cbrt(charge / kExplosionRefCharge);
++    return Clamp(size, kExplosionMinSize, kExplosionMaxSize);
++}
++
++float ExplosionFlashSeconds(float size)
++{
++    return kExplosionFlashPerSize * Clamp(size, kExplosionMinSize, 1.5f);
++}
++
++float FireballCoolingRate(float flashSeconds)
++{
++    return -(kFireballBirthK - kFireballFlashEndK) / std::max(flashSeconds, 0.005f);
++}
++
++float FuelFireballGlowSeconds()
++{
++    return (kFuelFireballK - kFireballFlashEndK) / -kFuelCoolRate;
++}
++
++float FuelFireballSize(float hit)
++{
++    return Clamp(0.6f * std::cbrt(std::max(hit, 0.0f) / 50.0f), 0.35f, 1.25f);
++}
++
++float FuelFireballBurnSeconds(float hit)
++{
++    return Clamp(0.5f * std::cbrt(std::max(hit, 0.0f) / 50.0f), 0.3f, 1.25f);
++}
++
++float CraterSmokeLifeScale(float craterSize)
++{
++    return Clamp(craterSize, 0.4f, 1.2f);
++}
++
+ float CombatTwilight(float sunElevationDeg)
+ {
+     const float above = std::max(sunElevationDeg - kTwilightNightDeg, 0.0f);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+index 649332b6..985cd533 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+@@ -234,6 +234,66 @@ constexpr float kFireballSoot[3] = {0.24f, 0.21f, 0.18f};
+ void BlackBodyRgb(float temperatureK, float out[3]);
+ bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emit[3]);
+ 
++// Explosion timing (look "boom" 5, time and lifetimes). Everything here runs in
++// simulation time (the step the world simulates by), never in frames.
++//
++// A cased high explosive (shell, grenade, HEAT round) detonates: a flash of
++// tens of milliseconds whose size and duration grow with the cube root of the
++// charge, little lasting flame, then a dark dust and smoke cloud that rises a
++// few tens of metres, spreads, drifts with the wind and lingers many seconds.
++// The charge is read from the ammo's blast (indirectHit times
++// indirectHitRange; a 120 mm HE shell's 150 x 8 = kExplosionRefCharge is the
++// reference), not from its direct hit (a HEAT round's 700 is its penetration:
++// it was drawn as the biggest burst of all). ExplosionVisualSize is the
++// engine's explosion size (Explosion, the combat light's strength):
++// kExplosionRefSize times the cube root of the charge over the reference,
++// kept in [kExplosionMinSize, kExplosionMaxSize] (the old 0.25 .. 1).
++constexpr float kExplosionRefCharge = 1200.0f;
++constexpr float kExplosionRefSize = 0.6f;
++constexpr float kExplosionMinSize = 0.2f;
++constexpr float kExplosionMaxSize = 1.0f;
++float ExplosionVisualSize(float indirectHit, float indirectHitRange);
++// The visible flash of a detonation (s): kExplosionFlashPerSize times the size
++// (a 120 mm HE shell 60 ms, a HEAT round's 38 ms, a hand grenade's 28 ms). Its
++// fireball puffs are born at kFireballBirthK and cool past kFireballFlashEndK
++// (where their glow has fallen under a tenth of a 2200 K puff's) by the end of
++// it: FireballCoolingRate is that rate, K/s, negative (the config's deltaT; the
++// old -4000 for every burst kept a heavy shell's puffs glowing 0.2 s).
++constexpr float kExplosionFlashPerSize = 0.1f;
++constexpr float kFireballBirthK = 2500.0f;
++constexpr float kFireballFlashEndK = 1800.0f;
++float ExplosionFlashSeconds(float size);
++float FireballCoolingRate(float flashSeconds);
++// A vehicle's fuel burns as a deflagration, not a detonation: a large, slower,
++// rolling fireball. Its puffs are born cooler (kFuelFireballK) and cool at
++// kFuelCoolRate K/s, so each glows orange for about a second
++// (FuelFireballGlowSeconds: from birth to kFireballFlashEndK).
++constexpr float kFuelFireballK = 2150.0f;
++constexpr float kFuelCoolRate = -420.0f;
++float FuelFireballGlowSeconds();
++// Its size (the engine's fire size, 0.35 .. 1.25) and how long it keeps
++// feeding (s, 0.3 .. 1.25) grow with the cube root of the fuel's hit (the
++// vehicle's explosives: a Jeep's fuel about 5, a fuel truck's hundreds); under
++// kFuelFireballMinHit nothing burns.
++constexpr float kFuelFireballMinHit = 1.0f;
++float FuelFireballSize(float hit);
++float FuelFireballBurnSeconds(float hit);
++// The dust and smoke column of a crater (CfgCloudlets CraterSmoke1..3; the old
++// puffs held 2 to 2.4 s and were gone 4 s after the burst, most of them by
++// 1.5 s): each puff holds kCraterSmokeHold s and fades over kCraterSmokeFade s,
++// both times the crater's size kept to [0.4, 1.2] (a heavy shell's column about
++// 20 s, a grenade's about 8 s), spreading kCraterSmokeSpread of its size per
++// second and drifting with the wind (kSmokeWindTau). Its rise slows by
++// kCraterSmokeRiseDecay m/s^2 to a slow kCraterSmokeHangRise, so the column
++// stands 15 to 25 m tall, not 60.
++constexpr float kCraterSmokeHold = 9.0f;
++constexpr float kCraterSmokeFade = 9.0f;
++constexpr float kCraterSmokeSpread = 0.08f;
++constexpr float kSmokeWindTau = 3.0f;
++constexpr float kCraterSmokeRiseDecay = -1.1f;
++constexpr float kCraterSmokeHangRise = 0.25f;
++float CraterSmokeLifeScale(float craterSize);
++
+ // A fire burns inside the foot of its own smoke, and the light reaching a
+ // particle of that smoke has crossed the smoke below it. Soot drinks what it
+ // does not scatter: under a burning wreck's black column only the base glows
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+index 663337a5..14cf9e4d 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+@@ -6,6 +6,7 @@
+ #include <Random/randomGen.hpp>
+ #include <Poseidon/World/World.hpp>
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/AI/VehicleAI.hpp>
+@@ -740,8 +741,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
+                     if (Type()->hit > 50)
+                     {
+                         Vector3 ePos = pos;
+-                        float size = Type()->hit * 0.001;
+-                        saturate(size, MinExplosion, MaxExplosion);
++                        // Look "boom" 5: sized by its charge's cube root, not its hit.
++                        float size = lighting::ExplosionVisualSize(Type()->indirectHit, Type()->indirectHitRange);
+                         float minY = GLandscape->RoadSurfaceY(ePos[0], ePos[2]) + 2 * size;
+                         if (ePos[1] < minY)
+                         {
+@@ -777,8 +778,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
+                     Vector3 exploPos = position;
+                     if (Type()->explosive)
+                     {
+-                        float size = Type()->hit * 0.003;
+-                        saturate(size, MinExplosion, MaxExplosion);
++                        // Look "boom" 5: sized by its charge's cube root, not its hit.
++                        float size = lighting::ExplosionVisualSize(Type()->indirectHit, Type()->indirectHitRange);
+                         exploPos[1] += 0.5 * size;
+                         Explosion* explosion = new Explosion(nullptr, _parent, size);
+                         explosion->SetPosition(exploPos);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+index dd920052..7810eced 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+@@ -1210,3 +1210,95 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
+     REQUIRE(tick != std::string::npos);
+     CHECK(doSim < tick);
+ }
++
++TEST_CASE("Combat lights: explosion stages last as long as their physics, in simulation time",
++          "[CombatLights][remaster]")
++{
++    // Sized by the charge's cube root (indirectHit x indirectHitRange), not by
++    // the direct hit: the 120 mm HE shell is the reference, the HEAT round
++    // (its 700 hit is penetration) and the hand grenade are smaller.
++    const float he = ExplosionVisualSize(150.0f, 8.0f);
++    const float heat = ExplosionVisualSize(300.0f, 1.0f);
++    const float grenade = ExplosionVisualSize(18.0f, 7.0f);
++    CHECK(he == Approx(kExplosionRefSize));
++    CHECK(heat < 0.7f * he);
++    CHECK(grenade < heat);
++    CHECK(grenade >= kExplosionMinSize);
++    CHECK(ExplosionVisualSize(1.0e6f, 50.0f) == Approx(kExplosionMaxSize));
++    // An eighth of the charge, half the size (cube root).
++    CHECK(ExplosionVisualSize(150.0f / 8.0f, 8.0f) == Approx(0.5f * he).epsilon(0.01));
++    // The detonation flash: tens of milliseconds, growing with the size; a
++    // heavy shell's within two frames at 30 fps, a grenade's within one.
++    CHECK(ExplosionFlashSeconds(he) > 0.04f);
++    CHECK(ExplosionFlashSeconds(he) <= 2.0f / 30.0f + 1e-4f);
++    CHECK(ExplosionFlashSeconds(grenade) <= 1.0f / 30.0f);
++    CHECK(ExplosionFlashSeconds(heat) < ExplosionFlashSeconds(he));
++    // Its puffs cool from birth past glowing within the flash: their glow is
++    // under a tenth of a 2200 K puff's at its end (it was 0.2 s at -4000 K/s).
++    const float rate = FireballCoolingRate(ExplosionFlashSeconds(he));
++    CHECK(rate < -4000.0f);
++    const float endT = kFireballBirthK + rate * ExplosionFlashSeconds(he);
++    CHECK(endT == Approx(kFireballFlashEndK));
++    float albedo[3], hot[3], cooled[3];
++    REQUIRE(FireballPuff(kFireballRefK, 2200.0f, albedo, hot));
++    REQUIRE(FireballPuff(endT, 2200.0f, albedo, cooled));
++    CHECK(cooled[0] < 0.35f * hot[0]);
++    CHECK(cooled[1] < 0.12f * hot[1]);
++    // The fuel fireball burns, it does not detonate: each puff glows for
++    // about a second, ten times a shell's flash.
++    CHECK(FuelFireballGlowSeconds() > 0.7f);
++    CHECK(FuelFireballGlowSeconds() < 1.3f);
++    CHECK(FuelFireballGlowSeconds() > 10.0f * ExplosionFlashSeconds(he));
++    // Any fuel burns: a Jeep's (hit about 5) gives a small fireball feeding
++    // for a third of a second; a big one (a fuel truck's hundreds) is the
++    // largest and feeds over a second.
++    CHECK(5.0f > kFuelFireballMinHit);
++    CHECK(FuelFireballSize(5.0f) == Approx(0.35f));
++    CHECK(FuelFireballBurnSeconds(5.0f) == Approx(0.3f));
++    CHECK(FuelFireballSize(1000.0f) == Approx(1.25f));
++    CHECK(FuelFireballBurnSeconds(1000.0f) == Approx(1.25f));
++    CHECK(FuelFireballSize(100.0f) > FuelFireballSize(20.0f));
++    // The crater's column lingers: a heavy shell's puffs live 15 s and more, a
++    // grenade's still several seconds; the column stops rising (its climb
++    // decays to a slow hang).
++    const float heavyLife = (kCraterSmokeHold + kCraterSmokeFade) * CraterSmokeLifeScale(0.95f);
++    const float grenadeLife = (kCraterSmokeHold + kCraterSmokeFade) * CraterSmokeLifeScale(0.3f);
++    CHECK(heavyLife >= 15.0f);
++    CHECK(heavyLife <= 30.0f);
++    CHECK(grenadeLife >= 6.0f);
++    CHECK(grenadeLife < heavyLife);
++    const float riseS = (5.0f / 0.8f - kCraterSmokeHangRise) / -kCraterSmokeRiseDecay;
++    const float riseM = 0.5f * (5.0f / 0.8f + kCraterSmokeHangRise) * riseS;
++    CHECK(riseM > 10.0f);
++    CHECK(riseM < 30.0f);
++    // The combat light lasts as long as the flash: a grenade's has fallen
++    // under a third of its peak by the third frame, while a heavy burst's
++    // (size 1, kExplosionFlashHold) still holds there.
++    CombatTuning t;
++    const float g0 = EvaluateCombatLight(CombatLightKind::Explosion, grenade, 0.0f, 7, t).intensity;
++    const float g3 = EvaluateCombatLight(CombatLightKind::Explosion, grenade, 3.0f / 30.0f, 7, t).intensity;
++    CHECK(g3 < 0.33f * g0);
++    const float h0 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 0.0f, 7, t).intensity;
++    const float h3 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 3.0f / 30.0f, 7, t).intensity;
++    CHECK(h3 > 0.9f * h0);
++    // Source contract: every stage ages by the simulation step it is given.
++    // The burst's puffs take the timing above, the fuel takes the slow
++    // fireball and its own light, and a lingering puff spreads and drifts by
++    // its deltaT (no frame counts, no wall clock).
++    const std::string smokes =
++        ReadTextFile(EngineDir() / "Poseidon" / "Graphics" / "Rendering" / "Effects" / "Smokes.cpp");
++    const std::string ctor = FunctionBody(smokes, "Explosion::Explosion(");
++    CHECK(ctor.find("FireballCoolingRate(lighting::ExplosionFlashSeconds(_exSize))") != std::string::npos);
++    const std::string fuel = FunctionBody(smokes, "void SmokeSourceVehicle::SimulateExplosion(");
++    CHECK(fuel.find("lighting::kFuelCoolRate") != std::string::npos);
++    CHECK(fuel.find("_fireballLight = fireTime + glow;") != std::string::npos);
++    CHECK(fuel.find("if (type.hit > lighting::kFuelFireballMinHit)") < fuel.find("if (type.hit > 50)"));
++    const std::string cl = FunctionBody(smokes, "void Cloudlet::Simulate(");
++    CHECK(cl.find("_spreadAge += deltaT;") != std::string::npos);
++    CHECK(cl.find("exp(-deltaT / _windTau)") != std::string::npos);
++    const std::string crater = FunctionBody(smokes, "void Crater::Init(");
++    CHECK(crater.find("lighting::CraterSmokeLifeScale(size)") != std::string::npos);
++    const std::string shots = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Entities" / "Weapons" / "Shots.cpp");
++    CHECK(shots.find("lighting::ExplosionVisualSize(Type()->indirectHit, Type()->indirectHitRange)") !=
++          std::string::npos);
++}
+\ No newline at end of file

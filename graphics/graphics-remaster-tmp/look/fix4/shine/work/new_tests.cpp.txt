@@ -1,0 +1,191 @@
+
+namespace
+{
+
+float Fract(float x)
+{
+    return x - std::floor(x);
+}
+
+float SmoothStep(float e0, float e1, float x)
+{
+    const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// The puddles piece's puddleHash and puddleNoise.
+float PuddleHashMirror(float px, float py)
+{
+    float x = Fract(px * 0.1031f);
+    float y = Fract(py * 0.1031f);
+    float z = Fract(px * 0.1031f);
+    const float d = x * (y + 33.33f) + y * (z + 33.33f) + z * (x + 33.33f);
+    x += d;
+    y += d;
+    z += d;
+    return Fract((x + y) * z);
+}
+
+float PuddleNoiseMirror(float px, float py)
+{
+    const float ix = std::floor(px);
+    const float iy = std::floor(py);
+    const float fx = px - ix;
+    const float fy = py - iy;
+    const float ux = fx * fx * (3.0f - 2.0f * fx);
+    const float uy = fy * fy * (3.0f - 2.0f * fy);
+    const float a = PuddleHashMirror(ix, iy) + (PuddleHashMirror(ix + 1.0f, iy) - PuddleHashMirror(ix, iy)) * ux;
+    const float b = PuddleHashMirror(ix, iy + 1.0f) +
+                    (PuddleHashMirror(ix + 1.0f, iy + 1.0f) - PuddleHashMirror(ix, iy + 1.0f)) * ux;
+    return a + (b - a) * uy;
+}
+
+// The puddles piece's wetGroundGloss (kWetGlossScale 6, kWetGlossFine 1.9).
+float WetGroundGlossMirror(float x, float z)
+{
+    const float n = PuddleNoiseMirror(x / 6.0f + 71.0f, z / 6.0f + 71.0f) * 0.65f +
+                    PuddleNoiseMirror(x / 1.9f + 113.0f, z / 1.9f + 113.0f) * 0.35f;
+    return SmoothStep(0.36f, 0.64f, n);
+}
+
+// wetGreenness, and the land's grass share with the texture's grain
+// (wetSurface: kWetVegGrain 10, kWetVegGrainMax 0.45).
+float GreennessMirror(const float* c)
+{
+    return c[1] - 0.5f * (c[0] + c[2]);
+}
+
+float GrainVegMirror(float fieldVeg, float grain)
+{
+    return std::clamp(fieldVeg + std::clamp(grain * 10.0f, -0.45f, 0.45f), 0.0f, 1.0f);
+}
+
+} // namespace
+
+TEST_CASE("Wet weather ground: damp and glossy patches from the position alone, the same in both passes",
+          "[remaster][wet][Shaders]")
+{
+    // Round 3 classed the land from the continuous ground field alone, and the
+    // owner's town square turned into one lacquered sheet ("the whole ground
+    // looks shiny now"). The ground now holds water in patches: a pure
+    // function of the world position, shared by the forward pass and the
+    // trace, so it has no edge at any square or grid line.
+    const std::string puddles = gl::RemasterFragmentPiece(gl::FragmentPiece::Puddles);
+    CHECK(puddles.find("const float kWetGlossScale = 6.0;") != std::string::npos);
+    CHECK(puddles.find("const float kWetGlossFine = 1.9;") != std::string::npos);
+    CHECK(puddles.find("float n = puddleNoise(xz / kWetGlossScale + 71.0) * 0.65 + puddleNoise(xz / kWetGlossFine + "
+                       "113.0) * 0.35;\n    return smoothstep(0.36, 0.64, n);") != std::string::npos);
+    // The puddles stand in the wet patches (zero on average: their share holds).
+    CHECK(puddles.find("field += kPuddleGlossLift * (wetGroundGloss(posW.xz) - 0.5);") != std::string::npos);
+    CHECK(puddles.find("float wetGreenness(vec3 c) {\n    return c.g - 0.5 * (c.r + c.b);\n}") != std::string::npos);
+
+    // The forward pass: the film thins and roughens in the damp patches, on the
+    // land more than on a road; the puddles keep the field's class.
+    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
+    CHECK(surface.find("float gloss = ground ? wetGroundGloss(posAbs.xz) : 1.0;") != std::string::npos);
+    CHECK(surface.find("if (ground) film *= mix(g_wetDraw == 0 ? kWetRoadDampFilm : kWetDampFilm, 1.0, gloss);") !=
+          std::string::npos);
+    CHECK(surface.find("if (ground) rough = mix(max(rough, kWetDampRough), rough, gloss);") != std::string::npos);
+    CHECK(surface.find("const float kWetVegGrain = 10.0;") != std::string::npos);
+    CHECK(surface.find("const float kWetVegGrainMax = 0.45;") != std::string::npos);
+    CHECK(surface.find("if (g_wetDraw == 1) veg = clamp(veg + clamp(g_wetGrain * kWetVegGrain, -kWetVegGrainMax, "
+                       "kWetVegGrainMax), 0.0, 1.0);") != std::string::npos);
+    // The land's main gives the grain against the texture's own coarse mip.
+    const std::string detail = gl::RemasterFragmentMain(1); // PSDetail
+    CHECK(detail.find("g_wetGrain = wetGreenness(textureLod(tex0, vUV0, max(lodW, 0.5)).rgb) -\n"
+                      "                         wetGreenness(textureLod(tex0, vUV0, max(lodW + 3.0, 3.5)).rgb);") !=
+          std::string::npos);
+    // The trace: the same patches weaken, roughen and widen its reflection.
+    const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
+    CHECK(trace.find("float damp = wetWeather ? 1.0 - wetGroundGloss(posW.xz) : 0.0;") != std::string::npos);
+    CHECK(trace.find("mix(1.0, road ? kSsrRoadDampWeight : kSsrDampWeight, damp), 1.0, puddle);") !=
+          std::string::npos);
+
+    // The patches vary: over a 300 m square a good share of the ground is
+    // damp and a good share glossy, about half on average.
+    int damp = 0, glossy = 0, count = 0;
+    double sum = 0.0;
+    for (float z = 0.0f; z < 300.0f; z += 0.7f)
+        for (float x = 0.0f; x < 300.0f; x += 0.7f)
+        {
+            const float g = WetGroundGlossMirror(7000.0f + x, 8800.0f + z);
+            damp += g < 0.2f ? 1 : 0;
+            glossy += g > 0.8f ? 1 : 0;
+            sum += g;
+            ++count;
+        }
+    CHECK(damp > count / 6);
+    CHECK(glossy > count / 6);
+    CHECK(sum / count == Catch::Approx(0.5).margin(0.1));
+
+    // ... and have no edge: walking a tenth of a metre at a time, the biggest
+    // change across the terrain's 12.5 m grid lines is no bigger than the
+    // biggest anywhere else, and that is a smooth slope, not a step.
+    float atGrid = 0.0f, elsewhere = 0.0f;
+    for (float z = 8800.0f; z < 8900.0f; z += 3.1f)
+        for (float x = 7000.0f; x < 7200.0f; x += 0.1f)
+        {
+            const float d = std::fabs(WetGroundGlossMirror(x + 0.1f, z) - WetGroundGlossMirror(x, z));
+            const float k = std::floor((x + 0.1f) / 12.5f);
+            if (k * 12.5f > x)
+                atGrid = std::max(atGrid, d);
+            else
+                elsewhere = std::max(elsewhere, d);
+        }
+    CHECK(elsewhere < 0.25f);
+    CHECK(atGrid <= elsewhere * 1.05f);
+}
+
+TEST_CASE("Wet weather land: the texture's own grain mottles the grass share without a step at a square's edge",
+          "[remaster][wet][TerrainHorizon]")
+{
+    // The owner's square: a mottled gravel-and-grass texture beside a flat
+    // olive one, under one continuous field class. The grain is each
+    // texture's green lean against its own mean (the coarse mip; the lean is
+    // linear in the colour, so the mip's lean is the texels' mean lean), so
+    // the mottled side keeps its tufts and gravel while its mean grass share
+    // is the field's, as the flat side's is: no step at their shared edge.
+    const float gravel[3] = {0.50f, 0.49f, 0.46f};
+    const float grass[3] = {0.40f, 0.46f, 0.30f};
+    const int n = 64;
+    std::vector<float> mottled(static_cast<size_t>(n) * n * 3);
+    uint32_t seed = 12345u;
+    for (int by = 0; by < n; by += 4)
+        for (int bx = 0; bx < n; bx += 4)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            const float* c = ((seed >> 16) & 1u) ? grass : gravel;
+            for (int y = by; y < by + 4; ++y)
+                for (int x = bx; x < bx + 4; ++x)
+                    for (int k = 0; k < 3; ++k)
+                        mottled[(static_cast<size_t>(y) * n + x) * 3 + k] = c[k];
+        }
+    // The coarse mip: the mean of the texels around (a box of 11, wrapped).
+    auto grainAt = [&](int x, int y) {
+        float mean[3] = {0.0f, 0.0f, 0.0f};
+        for (int dy = -5; dy <= 5; ++dy)
+            for (int dx = -5; dx <= 5; ++dx)
+                for (int k = 0; k < 3; ++k)
+                    mean[k] +=
+                        mottled[(static_cast<size_t>((y + dy + n) % n) * n + (x + dx + n) % n) * 3 + k] / 121.0f;
+        return GreennessMirror(&mottled[(static_cast<size_t>(y) * n + x) * 3]) - GreennessMirror(mean);
+    };
+    for (const float fieldVeg : {0.3f, 0.5f, 0.7f})
+    {
+        double sumA = 0.0, sumA2 = 0.0;
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n; ++x)
+            {
+                const float v = GrainVegMirror(fieldVeg, grainAt(x, y));
+                sumA += v;
+                sumA2 += static_cast<double>(v) * v;
+            }
+        const double meanA = sumA / (n * n);
+        const double sdA = std::sqrt(std::max(sumA2 / (n * n) - meanA * meanA, 0.0));
+        // The flat texture has no grain: its share is the field's.
+        const float vegB = GrainVegMirror(fieldVeg, 0.0f);
+        INFO("field " << fieldVeg << ": mottled mean " << meanA << " sd " << sdA << ", flat " << vegB);
+        CHECK(std::fabs(meanA - vegB) < 0.03);
+        CHECK(sdA > 0.2);
+    }
+}

@@ -1,0 +1,5 @@
+    // strengths (B3, test_night_lights.cpp), the reflections' two (B6), the
+    // wet weather's two (B7, test_wet_weather.cpp), combat light's four (B4,
+    // test_combat_lights.cpp), the surfaces lane's, the photoreal camera's
+    // (look lane "light", test_photo_camera.cpp) and the volumetric fog's five
+    // (look-fog).

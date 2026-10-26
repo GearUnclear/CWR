@@ -1,0 +1,2733 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index 55655c3..559c270 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -237,6 +237,16 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
+                 return Off("sky density map building");
+             return On("cloud cover");
+ 
++        case Feature::PhotoLight:
++            // The camera is a post stage (the composite): no post pass, no
++            // camera, and the world keeps its own tonemap. The debug views show
++            // raw buffers, which the camera would grade.
++            if (!t.postEffects)
++                return Off("post effects off");
++            if (t.debugView != 0)
++                return Off("debug view");
++            return On("world drawn");
++
+         case Feature::Sharpen:
+             // One sharpen pass: TAA's own when it runs, this one otherwise.
+             if (FeatureOn(t.features, Feature::Taa) && WorldVisible(in, why))
+@@ -325,6 +335,18 @@ std::string FeatureStateString(const LightingTuning& tuning, const FeatureGates&
+         if (!info.landed)
+             out += ":inert";
+     }
++    const CameraReadout& c = gates.camera;
++    if (c.valid)
++    {
++        char cam[192];
++        std::snprintf(cam, sizeof(cam),
++                      " | cam ev=%.2f target=%.2f mean=%.2f high=%.2f wb=%.2f sky=%.2f sun=%.3f skyup=%.3f reads=%u",
++                      static_cast<double>(c.exposureLog2), static_cast<double>(c.targetLog2),
++                      static_cast<double>(c.meterMean), static_cast<double>(c.meterHighlight),
++                      static_cast<double>(c.whiteBalance), static_cast<double>(c.skyGain),
++                      static_cast<double>(c.sunLum), static_cast<double>(c.skyUpLum), c.readbacks);
++        out += cam;
++    }
+     return out;
+ }
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+index 5387cc3..f2a3819 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+@@ -100,10 +100,30 @@ struct Gate
+     const char* reason = "not computed";
+ };
+ 
++// The photoreal camera's state (photoLight, PhotoCamera.hpp) for the capture
++// logs: the exposure in use and the one it adapts toward (log2), the last
++// meter's mean and highlight (log2 scene luminance), the white balance's
++// strength, the clear sky's gain, the rig's sun and sky luminance on an
++// up-facing surface, and how many meter readbacks arrived.
++struct CameraReadout
++{
++    bool valid = false;
++    float exposureLog2 = 0.0f;
++    float targetLog2 = 0.0f;
++    float meterMean = 0.0f;
++    float meterHighlight = 0.0f;
++    float whiteBalance = 0.0f;
++    float skyGain = 1.0f;
++    float sunLum = 0.0f;
++    float skyUpLum = 0.0f;
++    std::uint32_t readbacks = 0;
++};
++
+ struct FeatureGates
+ {
+     Gate gate[kFeatureCount];
+     GateInputs inputs;
++    CameraReadout camera; // filled by the backend when it hands the gates out
+     bool computed = false;
+     std::uint32_t frame = 0; // backend frame counter when computed
+     const Gate& operator[](Feature f) const { return gate[static_cast<int>(f)]; }
+@@ -117,7 +137,8 @@ float GateWetness(const GateInputs& in);
+ 
+ // triFeatureState: the switches and their gates as one line, for capture logs.
+ //   "mode=remastered gates=1 computed=1 frame=<n> sun=<deg> night=<0..1> sky=<0..1> rain=<0..1>
+-//    fog=<0..1> lights=<n> landed=<n>/<26> | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ..."
++//    fog=<0..1> lights=<n> landed=<n>/<27> | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...
++//    [| cam ev=.. target=.. mean=.. high=.. wb=.. sky=.. sun=.. skyup=.. reads=..]"
+ // Fields are separated by spaces, never ';' (the UDCAP log lines split on it);
+ // reasons have their spaces replaced by '-'. ":inert" marks a switch that
+ // nothing reads yet (FeatureInfo::landed false), so its on and off look the
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 0a55d20..3ab85df 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -77,6 +77,11 @@ constexpr FeatureInfo kFeatures[] = {
+      &FS::terrainDetail, "ground"},
+     {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
+      "sharpen"},
++    // Look lane "light" (PhotoCamera.hpp): the physical rig is constants once a
++    // frame (plus the sky integral when the sun has moved), the camera is the
++    // meter pass and a few terms of the composite.
++    {Feature::PhotoLight, "photoLight", "Photoreal light and camera", "look-light", "Light and shadow", "L1", true,
++     &FS::photoLight, "composite"},
+ };
+ static_assert(sizeof(kFeatures) / sizeof(kFeatures[0]) == kFeatureCount, "one FeatureInfo per Feature");
+ 
+@@ -206,6 +211,33 @@ struct KeyTable
+                         "the mean share of sky the sea reflects; the waves' share stays", &LT::seaSky, 0.0f, 2.0f),
+             MakeSubKnob(Feature::SeaWaves, "seaSheen", "Sea sheen",
+                         "the broad sheen toward the sun, in the original hue", &LT::seaSheen, 0.0f, 3.0f),
++            MakeSubKnob(Feature::PhotoLight, "camEv", "Exposure compensation", "EV on top of the metered exposure",
++                        &LT::camEv, -3.0f, 3.0f),
++            MakeSubKnob(Feature::PhotoLight, "camAdapt", "Eye adaptation time",
++                        "seconds; opening up to the dark takes 1.5 x as long", &LT::camAdapt, 0.0f, 5.0f),
++            MakeSubKnob(Feature::PhotoLight, "camCurve", "Tone curve",
++                        "0 filmic hue-keeping, 1 filmic per channel, 2 ACES fit, 3 Khronos Neutral", &LT::camCurve,
++                        0.0f, 3.0f),
++            MakeSubKnob(Feature::PhotoLight, "camContrast", "Curve contrast", "the toe: higher = deeper shadows",
++                        &LT::camContrast, 0.8f, 2.0f),
++            MakeSubKnob(Feature::PhotoLight, "camShoulder", "Curve shoulder", "lower = a longer highlight roll-off",
++                        &LT::camShoulder, 0.8f, 1.0f),
++            MakeSubKnob(Feature::PhotoLight, "camWhite", "Curve white", "scene light reaching white, in middle greys",
++                        &LT::camWhite, 4.0f, 64.0f),
++            MakeSubKnob(Feature::PhotoLight, "camSat", "Scene saturation", "1 = as lit", &LT::camSat, 0.5f, 1.6f),
++            MakeSubKnob(Feature::PhotoLight, "camWb", "White balance",
++                        "how far the camera adapts to the light's colour", &LT::camWb, 0.0f, 1.0f),
++            MakeSubKnob(Feature::PhotoLight, "camSky", "Clear sky brightness",
++                        "against the physical sky's (1); the dome, fog and the sea's sky", &LT::camSky, 0.2f, 3.0f),
++            MakeSubKnob(Feature::PhotoLight, "camSkyHue", "Clear sky hue",
++                        "under the camera, in place of atmoHue: 0 the original's, 1 physical", &LT::camSkyHue, 0.0f,
++                        1.0f),
++            MakeSubKnob(Feature::PhotoLight, "camNight", "Night exposure", "EV at full night", &LT::camNight, -3.0f,
++                        1.0f),
++            MakeSubKnob(Feature::PhotoLight, "camVignette", "Vignette", "corner darkening of the lens",
++                        &LT::camVignette, 0.0f, 0.6f),
++            MakeSubKnob(Feature::PhotoLight, "camBloom", "Highlight bloom", "glare around light brighter than white",
++                        &LT::camBloom, 0.0f, 3.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+index e26412e..e0daeb2 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+@@ -60,6 +60,7 @@ enum class Feature : std::uint8_t
+     SkyCloudShadows,
+     TerrainDetail,
+     Sharpen,
++    PhotoLight,
+     Count
+ };
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index 5017aef..5727839 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -49,6 +49,9 @@ constexpr float kSkyNight = 0.0009f; // display parity with the classic night am
+ constexpr float kMoonFull = 0.02f;
+ constexpr float kMoonSky = 0.25f;
+ constexpr float kGroundAlbedo = 0.2f;
++// The photoreal rig's ground: CWA's ground textures are pale (sand, dry
++// grass, gravel), and the light they bounce is what shows a hull's shaded side.
++constexpr float kPhysicalGroundAlbedo = 0.3f;
+ constexpr float kExtinction = 0.05f; // optical depth per air mass beyond the zenith
+ constexpr float kCloudTransmit = 0.2f;
+ // The clearest weather the engine has is not cloud-free: setOvercast 0 sits
+@@ -68,8 +71,98 @@ float SkyDayFraction(float sinSun)
+     const float day = std::pow(std::min(std::max(sinSun / 0.866f, 0.0f), 1.15f), 0.6f);
+     return std::max(day, 0.12f * Smoothstep(-0.10f, 0.03f, sinSun));
+ }
++
++// The photoreal rig (FeatureSet::photoLight): sun and sky from the sky
++// table's atmosphere (LightRigInputs::physical) in their physical ratio and
++// colours. `rig` holds the cloud fields already; `overcastDim` and
++// `fieldMean` are the sun's uniform and cloud-field dimming, `aboveHorizon`
++// the sun's fade at the horizon. No exposure meter: the camera meters the
++// frame (PhotoCamera.hpp).
++LightRig ComputePhysicalRig(const LightRigInputs& in, const LightingTuning& tuning, LightRig rig, float overcastDim,
++                            float fieldMean, float aboveHorizon)
++{
++    const PhysicalSky& p = in.physical;
++    const float sinSun = std::max(-1.0f, std::min(1.0f, in.towardSun[1]));
++    const float skyThrough = Clamp01(in.skyThrough);
++    const float cover = 1.0f - skyThrough;
++    const float scale = (1.0f / kBrightness) / std::max(p.referenceIrradiance, 1e-6f);
++
++    // --- sun: the transmittance of the air toward it ------------------------
++    const float sunGain = scale * overcastDim * aboveHorizon * tuning.sun;
++    rig.sun = p.sun * sunGain;
++    // --- sky: the clear sky dims under cloud, and the deck sends down part of
++    // the sunlight it takes out as a grey, even light (a uniform dome lights a
++    // wall with half of what it gives the ground).
++    const float clearSunUp = Luminance(p.sun) * scale * aboveHorizon * std::max(sinSun, 0.0f);
++    const float lost = clearSunUp * (1.0f - (skyThrough * 0.8f + 0.2f));
++    const float clearShare = 1.0f - 0.5f * cover;
++    const Rgb grey = NormaliseLuminance(Rgb(0.96f, 1.0f, 1.05f)) * (kOvercastDiffuse * lost);
++    const float skyK = scale * clearShare * tuning.sky;
++    Rgb up = PhysicalSkyFill(p.skyUp, p.sun) * skyK + grey * tuning.sky;
++    Rgb sunward = PhysicalSkyFill(p.skySunward, p.sun) * skyK + grey * (0.5f * tuning.sky);
++    Rgb anti = PhysicalSkyFill(p.skyAntiSun, p.sun) * skyK + grey * (0.5f * tuning.sky);
++    // Night: the classic night ambient as the floor (a moonless night keeps
++    // the classic level), the moon as the key light with its sky as fill.
++    const float upLum = Luminance(up);
++    const float floorLum = kSkyNight * tuning.sky;
++    if (upLum < floorLum)
++    {
++        const Rgb nightZenith = NormaliseLuminance(Rgb(0.60f, 0.69f, 0.88f)) * floorLum;
++        const float t = upLum / floorLum;
++        up = Mix(nightZenith, up, t);
++        sunward = Mix(nightZenith * 0.55f, sunward, t);
++        anti = Mix(nightZenith * 0.55f, anti, t);
++    }
++    const float sinMoon = std::max(in.towardMoon[1], 0.0f);
++    const float moonUp = Smoothstep(0.0f, 0.2f, sinMoon);
++    const float night = Clamp01(in.nightEffect);
++    const float moonPower = kMoonFull * Clamp01(in.moonPhaseLight) * moonUp * night * (skyThrough * 0.8f + 0.2f) *
++                            tuning.moonlight;
++    const Rgb moonChroma = NormaliseLuminance(Rgb(0.82f, 0.90f, 1.00f));
++    rig.moon = moonChroma * moonPower;
++    const float moonSky = kMoonSky * moonPower * tuning.sky;
++    rig.skyZenith = up + moonChroma * moonSky;
++
++    // --- ground bounce: the open ground lit by sun, sky and moon, in the
++    // colour of that light (the shader tints it by the ground below).
++    const Rgb sunOnGround = rig.sun * (std::max(sinSun, 0.0f) * fieldMean);
++    const Rgb groundLight = sunOnGround + up + rig.moon * sinMoon + moonChroma * moonSky;
++    rig.skyGround = groundLight * (kPhysicalGroundAlbedo * tuning.bounce);
++    const Rgb moonHorizon = moonChroma * (0.55f * moonSky);
++    rig.skyHorizonSun = sunward + rig.skyGround * 0.5f + moonHorizon;
++    rig.skyHorizon = anti + rig.skyGround * 0.5f + moonHorizon;
++    rig.exposure = tuning.exposure;
++    rig.physical = true;
++    rig.illuminant = sunOnGround + up;
++
++    // --- the clear sky's brightness against the classic dome's: the dome and
++    // the fog are the original sky's brightness, the physical horizon is
++    // usually darker than that next to sunlit ground. Under an overcast deck
++    // (the dome is cloud) and as the sky table fades at night, 1.
++    const float classicHorizon = Luminance(ToLinear(in.fogColor));
++    float gain = 1.0f;
++    if (classicHorizon > 1e-5f && p.horizonRadiance > 0.0f)
++        gain = PhysicalRadianceToDisplay(scale) * p.horizonRadiance / classicHorizon;
++    gain = std::min(std::max(gain * tuning.camSky, 0.3f), 1.0f);
++    const float deck = Clamp01((0.7f - skyThrough) / 0.6f); // SkyOvercastCloudFloor
++    const float day = Smoothstep(-9.0f, -3.0f, rig.sunElevationDeg); // SkyDayFade
++    rig.skyGain = 1.0f + (gain - 1.0f) * (1.0f - deck) * day;
++    return rig;
++}
+ } // namespace
+ 
++Rgb PhysicalSkyFill(const Rgb& c, const Rgb& sun)
++{
++    const float l = Luminance(c);
++    const Rgb haze = Luminance(sun) > 1e-6f ? NormaliseLuminance(sun) * l : Rgb(l, l, l);
++    return Mix(c, haze, kPhysicalSkyWhiten) * kPhysicalSkyGain;
++}
++
++float PhysicalRadianceToDisplay(float scale)
++{
++    return kBrightness * kPi * scale;
++}
++
+ float Luminance(const Rgb& c)
+ {
+     return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+@@ -262,8 +355,10 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     const float fieldMean = 1.0f - fieldCover * (1.0f - rig.cloudTransmit);
+     const float overcastDim = std::min(1.0f, (skyThrough * 0.8f + 0.2f) / fieldMean);
+ 
+-    const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
+     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);
++    if (in.physical.valid && tuning.features.photoLight > 0.0f)
++        return ComputePhysicalRig(in, tuning, rig, overcastDim, fieldMean, aboveHorizon);
++    const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
+     const float clearSun = kSunNoon * extinction * aboveHorizon;
+     const float sunPower = clearSun * overcastDim * tuning.sun;
+     const Rgb sunChroma = lowSunRig ? LowSunChroma(elevation, in.classicSunDiffuse, tuning.warmth)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 117b581..c1163c4 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -94,6 +94,10 @@ struct FeatureSet
+     float skyCloudShadows = 1.0f; // B10 cloud shadows that match the sky
+     float terrainDetail = 1.0f;   // B11 grass and rock grain on terrain
+     float sharpen = 1.0f;         // B11 luma sharpening when TAA is off
++    // Look lane "light" (PhotoCamera.hpp): a physical sun and sky from the sky
++    // table's atmosphere, and a camera (metered exposure, eye adaptation, white
++    // balance, filmic curve) in the post pass instead of the per-fragment tonemap.
++    float photoLight = 1.0f;
+ };
+ 
+ // Art-direction knobs, live-tunable from the dev overlay Lighting tab. The
+@@ -153,6 +157,32 @@ struct LightingTuning
+     float seaRelief = 1.0f;
+     float seaSky = 1.0f;
+     float seaSheen = 1.0f;
++    // Photoreal light and camera (FeatureSet::photoLight, PhotoCamera.hpp)
++    // sub-knobs: exposure compensation (EV), the eye's adaptation time (s), the
++    // tone curve (0 hue-keeping filmic, 1 the same curve per channel, 2 ACES
++    // fit, 3 Khronos Neutral with its toe), the curve's contrast (toe power),
++    // shoulder and white (scene light that reaches display white, in units of
++    // middle grey 0.18), the scene saturation, the white balance's strength,
++    // the clear sky's brightness against the physical sky (1 = physical) and
++    // its hue (camSkyHue), the
++    // night's exposure compensation (EV at full night), the vignette and the
++    // bloom of light brighter than the curve's shoulder.
++    float camEv = 0.3f;
++    float camAdapt = 1.0f;
++    float camCurve = 0.0f;
++    float camContrast = 1.3f;
++    float camShoulder = 0.97f;
++    float camWhite = 16.0f;
++    float camSat = 1.15f;
++    float camWb = 0.45f;
++    float camSky = 0.85f;
++    // The clear sky's hue under the camera, in place of atmoHue (0 the
++    // original sky's hue relit, 1 the physical hue: a golden band under a blue
++    // sky at sunset instead of a pink wash).
++    float camSkyHue = 1.0f;
++    float camNight = -2.0f;
++    float camVignette = 0.18f;
++    float camBloom = 1.0f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+@@ -168,6 +198,29 @@ struct LightingTuning
+     int debugView = 0;
+ };
+ 
++// The clear sky's light at the viewer from the sky table's atmosphere
++// (Atmosphere.hpp; PhotoCamera.hpp ComputePhysicalSky), per unit of solar
++// irradiance at the top of the atmosphere. The photoreal rig (photoLight) is
++// built from it: direct sun and sky fill in their physical ratio and colours.
++struct PhysicalSky
++{
++    bool valid = false;
++    float sunElevationDeg = 0.0f;
++    Rgb sun;        // direct sun irradiance on a surface facing it (the transmittance)
++    Rgb skyUp;      // sky irradiance onto an up-facing surface
++    Rgb skySunward; // onto a vertical surface facing the sun's azimuth (the sky half)
++    Rgb skyAntiSun; // onto a vertical surface facing away from it (the sky half)
++    // Azimuthal mean radiance (luminance) of the sky just above the horizon:
++    // what distant ground fades into.
++    float horizonRadiance = 0.0f;
++    // Sun plus sky on an up-facing surface (luminance) for a sun at
++    // kPhysicalReferenceSunDeg: the rig's scale (that light shows a white
++    // surface at the brightness the classic noon shows it).
++    float referenceIrradiance = 0.0f;
++    // That light's colour (sun plus sky): the camera's daylight white.
++    Rgb referenceIlluminant;
++};
++
+ struct LightRigInputs
+ {
+     float towardSun[3] = {0.0f, 1.0f, 0.0f};   // unit, y up
+@@ -183,6 +236,10 @@ struct LightRigInputs
+     // SkyDensity.hpp SkyShadowCoverage); negative while the noise field casts
+     // them. The field then carries the same mean dimming over this share.
+     float skyShadowCoverage = -1.0f;
++    // The photoreal rig (FeatureSet::photoLight) runs when this is valid and
++    // the camera that tonemaps it runs this frame (the backend leaves it
++    // invalid otherwise): the old rig and its exposure meter are then unused.
++    PhysicalSky physical;
+ };
+ 
+ struct LightRig
+@@ -204,6 +261,14 @@ struct LightRig
+     // field's mean dimming over the sky's own covered share.
+     float cloudCover = 0.0f;
+     float cloudTransmit = 1.0f;
++    // The photoreal rig (photoLight) only: whether it built this rig, the
++    // light on an open up-facing surface (sun times its mean cloud
++    // transmission plus sky; the camera's white balance reads its colour) and
++    // the clear sky's brightness against the classic dome's (the dome, the fog
++    // colour and the sky the sea reflects take it; 1 = unchanged).
++    bool physical = false;
++    Rgb illuminant;
++    float skyGain = 1.0f;
+ };
+ 
+ // The debug view (LightingTuning::debugView) that shows the albedo, and the
+@@ -219,6 +284,30 @@ float ShaderDebugView(int debugView);
+ 
+ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning);
+ 
++// The photoreal rig's scale (photoLight): a white surface facing up under the
++// clear sky's sun and sky at this sun height shows at the brightness classic
++// shows a white surface at noon. Every other light keeps its physical ratio to
++// that one, so a low sun and the twilight are as much darker as they are in
++// nature (the camera's metered exposure brings the frame back up).
++constexpr float kPhysicalReferenceSunDeg = 60.0f;
++// Share of the sunlight an overcast deck takes out that still reaches the
++// ground as diffuse light.
++constexpr float kOvercastDiffuse = 0.55f;
++// Display-linear brightness of one unit of the PhysicalSky's radiance under the
++// rig's scale (`scale` = the rig's units per unit of irradiance): a white
++// surface shows 1.6 (the default brightness in the materials) times its
++// irradiance, and a sky of radiance L gives pi L.
++float PhysicalRadianceToDisplay(float scale);
++// The sky table's air is the clean Bruneton atmosphere: its sky light is deep
++// blue and about a tenth of the noon sun. A Mediterranean summer sky holds
++// more haze, which scatters the sun's own light with little change of colour:
++// the rig takes the table's sky light kPhysicalSkyWhiten toward the sun's
++// colour (white at noon, golden at a low sun; at equal luminance) and
++// kPhysicalSkyGain times stronger.
++constexpr float kPhysicalSkyWhiten = 0.35f;
++constexpr float kPhysicalSkyGain = 1.4f;
++Rgb PhysicalSkyFill(const Rgb& tableSky, const Rgb& sun);
++
+ // Sun chroma at an elevation (degrees), normalised to unit luminance.
+ Rgb SunChroma(float elevationDeg, float warmth);
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+new file mode 100644
+index 0000000..b5327b2
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -0,0 +1,377 @@
++#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
++
++#include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <utility>
++#include <vector>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++constexpr float kPi = 3.14159265358979323846f;
++
++float Clamp01(float v)
++{
++    return std::min(1.0f, std::max(0.0f, v));
++}
++
++float Smoothstep(float e0, float e1, float x)
++{
++    const float t = Clamp01((x - e0) / (e1 - e0));
++    return t * t * (3.0f - 2.0f * t);
++}
++
++float MaxOf(const Rgb& c)
++{
++    return std::max(c.r, std::max(c.g, c.b));
++}
++
++Mat3 Inverse(const Mat3& a)
++{
++    const float* m = a.m;
++    const float c00 = m[4] * m[8] - m[5] * m[7];
++    const float c01 = m[5] * m[6] - m[3] * m[8];
++    const float c02 = m[3] * m[7] - m[4] * m[6];
++    const float det = m[0] * c00 + m[1] * c01 + m[2] * c02;
++    Mat3 r;
++    if (std::fabs(det) < 1e-12f)
++        return r;
++    const float id = 1.0f / det;
++    r.m[0] = c00 * id;
++    r.m[1] = (m[2] * m[7] - m[1] * m[8]) * id;
++    r.m[2] = (m[1] * m[5] - m[2] * m[4]) * id;
++    r.m[3] = c01 * id;
++    r.m[4] = (m[0] * m[8] - m[2] * m[6]) * id;
++    r.m[5] = (m[2] * m[3] - m[0] * m[5]) * id;
++    r.m[6] = c02 * id;
++    r.m[7] = (m[1] * m[6] - m[0] * m[7]) * id;
++    r.m[8] = (m[0] * m[4] - m[1] * m[3]) * id;
++    return r;
++}
++
++// Linear sRGB (D65) to Bradford cone responses: Bradford times sRGB-to-XYZ.
++Mat3 RgbToCone()
++{
++    const Mat3 rgbToXyz{
++        {0.4124564f, 0.3575761f, 0.1804375f, 0.2126729f, 0.7151522f, 0.0721750f, 0.0193339f, 0.1191920f, 0.9503041f}};
++    const Mat3 bradford{{0.8951f, 0.2664f, -0.1614f, -0.7502f, 1.7135f, 0.0367f, 0.0389f, -0.0685f, 1.0296f}};
++    return Multiply(bradford, rgbToXyz);
++}
++} // namespace
++
++// ---- Encoding -----------------------------------------------------------------
++
++float EncodePeak(float m)
++{
++    if (!(m > kEncodeKnee))
++        return std::max(m, 0.0f);
++    const float t = (m - kEncodeKnee) / (1.0f - kEncodeKnee);
++    return kEncodeKnee + (1.0f - kEncodeKnee) * t / (1.0f + t);
++}
++
++float DecodePeak(float e)
++{
++    if (!(e > kEncodeKnee))
++        return std::max(e, 0.0f);
++    const float u = std::min((e - kEncodeKnee) / (1.0f - kEncodeKnee), 0.9999f);
++    const float t = u / (1.0f - u);
++    return std::min(kEncodeKnee + (1.0f - kEncodeKnee) * t, kDecodeMax);
++}
++
++Rgb CameraEncode(const Rgb& linear)
++{
++    const Rgb c(std::max(linear.r, 0.0f), std::max(linear.g, 0.0f), std::max(linear.b, 0.0f));
++    const float m = MaxOf(c);
++    const Rgb folded = m > kEncodeKnee ? c * (EncodePeak(m) / m) : c;
++    return {ToDisplay(folded.r), ToDisplay(folded.g), ToDisplay(folded.b)};
++}
++
++Rgb CameraDecode(const Rgb& display)
++{
++    const Rgb c = ToLinear(display);
++    const float m = MaxOf(c);
++    return m > kEncodeKnee ? c * (DecodePeak(m) / m) : c;
++}
++
++// ---- Metering -----------------------------------------------------------------
++
++MeterResult Meter(const float* logLum, const float* weight, const float* maxLog, int n)
++{
++    MeterResult r;
++    std::vector<std::pair<float, float>> s, peaks;
++    peaks.reserve(static_cast<size_t>(std::max(n, 0)));
++    s.reserve(static_cast<size_t>(std::max(n, 0)));
++    double total = 0.0;
++    for (int i = 0; i < n; ++i)
++    {
++        const float w = weight[i];
++        const float l = logLum[i];
++        if (!(w > 0.0f) || !std::isfinite(l))
++            continue;
++        s.emplace_back(std::max(l, kMeterFloorLog2), w);
++        const float pk = maxLog && std::isfinite(maxLog[i]) ? maxLog[i] : l;
++        peaks.emplace_back(std::max(pk, kMeterFloorLog2), w);
++        total += w;
++    }
++    if (s.empty() || total <= 0.0)
++        return r;
++    auto byValue = [](const auto& a, const auto& b) { return a.first < b.first; };
++    std::sort(s.begin(), s.end(), byValue);
++    std::sort(peaks.begin(), peaks.end(), byValue);
++    auto percentileOf = [total](const std::vector<std::pair<float, float>>& v, double p)
++    {
++        const double target = p * total;
++        double acc = 0.0;
++        for (const auto& [value, w] : v)
++        {
++            acc += w;
++            if (acc >= target)
++                return value;
++        }
++        return v.back().first;
++    };
++    auto percentile = [&](double p) { return percentileOf(s, p); };
++    // The mean over the weight between the two cuts (a sample straddling a
++    // cut counts with the part of its weight inside).
++    const double lo = kMeterLowCut * total;
++    const double hi = (1.0 - kMeterHighCut) * total;
++    double acc = 0.0, sum = 0.0, wsum = 0.0;
++    for (const auto& [v, w] : s)
++    {
++        const double a0 = acc;
++        acc += w;
++        const double inside = std::min(acc, hi) - std::max(a0, lo);
++        if (inside > 0.0)
++        {
++            sum += inside * v;
++            wsum += inside;
++        }
++    }
++    r.valid = wsum > 0.0;
++    r.mean = r.valid ? static_cast<float>(sum / wsum) : 0.0f;
++    r.low = percentile(kMeterLowCut);
++    r.high = percentile(1.0 - kMeterHighCut);
++    r.highlight = percentileOf(peaks, kMeterHighlight);
++    r.weight = static_cast<float>(total);
++    return r;
++}
++
++// ---- Exposure -----------------------------------------------------------------
++
++float TargetExposureLog2(const MeterResult& m, float nightEffect, const LightingTuning& t)
++{
++    if (!m.valid)
++        return 0.0f;
++    const float night = Clamp01(nightEffect);
++    float comp = t.camEv + t.camNight * night;
++    const float fromDay = m.mean - kDaylightMeanLog2;
++    comp += fromDay < 0.0f ? fromDay * kDarkKeep : fromDay * kBrightKeep;
++    float e = std::log2(kMiddleGrey) + comp - m.mean;
++    // The highlight guard: the bright end of the frame stays below the
++    // curve's white (a sunset sky is not blown out to lift the dark ground).
++    const float eHigh = std::log2(kHighlightLimit) - m.highlight;
++    if (e > eHigh)
++        e += (eHigh - e) * kHighlightGuard;
++    const float maxE = kExposureMaxLog2 + (kExposureNightMaxLog2 - kExposureMaxLog2) * night;
++    return std::min(std::max(e, kExposureMinLog2), maxE);
++}
++
++float CameraNight(float sunElevationDeg)
++{
++    return 1.0f - Smoothstep(kCameraNightFullDeg, kCameraNightStartDeg, sunElevationDeg);
++}
++
++float AdaptExposureLog2(float current, float target, float dt, float seconds)
++{
++    if (!(seconds > 0.0f) || !std::isfinite(current))
++        return target;
++    // Opening up to a darker scene (a larger exposure) is the slower way.
++    const float tau = seconds * (target > current ? 1.5f : 1.0f);
++    const float k = 1.0f - std::exp(-std::max(dt, 0.0f) / tau);
++    return current + (target - current) * k;
++}
++
++// ---- Tone curve ---------------------------------------------------------------
++
++ToneCurve MakeToneCurve(float contrast, float shoulder, float white)
++{
++    ToneCurve c;
++    c.a = std::max(contrast, 0.2f);
++    c.d = std::min(std::max(shoulder, 0.5f), 1.0f);
++    const float midIn = kMiddleGrey;
++    const float midOut = kCurveMidOut;
++    const float hdrMax = std::max(kMiddleGrey * white, midIn * 1.5f);
++    const float ad = c.a * c.d;
++    const float mA = std::pow(midIn, c.a), mAd = std::pow(midIn, ad);
++    const float hA = std::pow(hdrMax, c.a), hAd = std::pow(hdrMax, ad);
++    const float den = (hAd - mAd) * midOut;
++    c.b = (-mA + hA * midOut) / den;
++    c.c = (hAd * mA - hA * mAd * midOut) / den;
++    return c;
++}
++
++float ApplyToneCurve(const ToneCurve& c, float x)
++{
++    if (!(x > 0.0f))
++        return 0.0f;
++    const float y = std::pow(x, c.a) / (std::pow(x, c.a * c.d) * c.b + c.c);
++    return Clamp01(y);
++}
++
++Rgb ApplyToneCurveHueKeeping(const ToneCurve& curve, const Rgb& in)
++{
++    const Rgb c(std::max(in.r, 0.0f), std::max(in.g, 0.0f), std::max(in.b, 0.0f));
++    const float peak = MaxOf(c);
++    if (!(peak > 0.0f))
++        return {0.0f, 0.0f, 0.0f};
++    const float y = ApplyToneCurve(curve, peak);
++    const float toWhite = std::pow(y, kCrosstalk);
++    const Rgb ratio = c * (1.0f / peak);
++    return Mix(ratio, Rgb(1.0f, 1.0f, 1.0f), toWhite) * y;
++}
++
++// ---- Colour -------------------------------------------------------------------
++
++Rgb Mat3::Apply(const Rgb& c) const
++{
++    return {m[0] * c.r + m[1] * c.g + m[2] * c.b, m[3] * c.r + m[4] * c.g + m[5] * c.b,
++            m[6] * c.r + m[7] * c.g + m[8] * c.b};
++}
++
++Mat3 Multiply(const Mat3& a, const Mat3& b)
++{
++    Mat3 r;
++    for (int i = 0; i < 3; ++i)
++        for (int j = 0; j < 3; ++j)
++            r.m[i * 3 + j] = a.m[i * 3] * b.m[j] + a.m[i * 3 + 1] * b.m[3 + j] + a.m[i * 3 + 2] * b.m[6 + j];
++    return r;
++}
++
++Mat3 WhiteBalance(const Rgb& illuminant, float strength)
++{
++    const float lum = Luminance(illuminant);
++    const float s = Clamp01(strength);
++    if (!(lum > 1e-9f) || s <= 0.0f)
++        return Mat3{};
++    const Rgb ill = illuminant * (1.0f / lum);
++    const Mat3 toCone = RgbToCone();
++    const Rgb coneIll = toCone.Apply(ill);
++    const Rgb coneWhite = toCone.Apply(Rgb(1.0f, 1.0f, 1.0f));
++    auto gain = [s](float w, float i) { return i > 1e-6f ? std::pow(w / i, s) : 1.0f; };
++    Mat3 d;
++    d.m[0] = gain(coneWhite.r, coneIll.r);
++    d.m[4] = gain(coneWhite.g, coneIll.g);
++    d.m[8] = gain(coneWhite.b, coneIll.b);
++    Mat3 wb = Multiply(Inverse(toCone), Multiply(d, toCone));
++    // Keep the luminance of a white surface under this light: the balance
++    // moves its colour, the exposure owns its brightness.
++    const float l = Luminance(wb.Apply(ill));
++    if (l > 1e-6f)
++        for (float& v : wb.m)
++            v /= l;
++    return wb;
++}
++
++Mat3 Saturation(float s)
++{
++    const float lr = 0.2126f, lg = 0.7152f, lb = 0.0722f;
++    const float k = 1.0f - s;
++    return Mat3{{lr * k + s, lg * k, lb * k, lr * k, lg * k + s, lb * k, lr * k, lg * k, lb * k + s}};
++}
++
++float WhiteBalanceShare(float sunElevationDeg)
++{
++    return 0.15f + 0.35f * Smoothstep(5.0f, 35.0f, sunElevationDeg);
++}
++
++Rgb WhiteBalanceTarget(const Rgb& reference, const Rgb& current, float share)
++{
++    const float lr = Luminance(reference), lc = Luminance(current);
++    if (!(lr > 1e-9f))
++        return current;
++    if (!(lc > 1e-9f))
++        return reference;
++    const Rgb a = reference * (1.0f / lr), b = current * (1.0f / lc);
++    const float s = Clamp01(share);
++    auto mixLog = [s](float x, float y)
++    { return std::pow(std::max(x, 1e-6f), 1.0f - s) * std::pow(std::max(y, 1e-6f), s); };
++    return {mixLog(a.r, b.r), mixLog(a.g, b.g), mixLog(a.b, b.b)};
++}
++
++// ---- The physical sun and sky ---------------------------------------------------
++
++PhysicalSky ComputePhysicalSky(const AtmosphereTables& t, float sunElevationRad)
++{
++    PhysicalSky p;
++    if (!t.Valid())
++        return p;
++    // Rows above the horizon (the parametrisation is dense near it) and
++    // columns from the sun's azimuth to the opposite one; the sky is mirror
++    // symmetric about the sun's vertical plane.
++    static const int kRows[] = {32, 33, 34, 35, 37, 39, 42, 45, 49, 53, 58, 63};
++    static const int kCols[] = {0, 2, 5, 9, 14, 20, 27, 35, 44, 53, 63};
++    constexpr int nr = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
++    constexpr int nc = static_cast<int>(sizeof(kCols) / sizeof(kCols[0]));
++    float elev[nr], az[nc];
++    for (int i = 0; i < nr; ++i)
++        elev[i] = std::max(SkyViewRowElevation(kRows[i]), 0.0f);
++    for (int j = 0; j < nc; ++j)
++        az[j] = SkyViewColumnAzimuth(kCols[j]);
++    const float sinS = std::sin(sunElevationRad), cosS = std::cos(sunElevationRad);
++    Rgb up, toward, away;
++    double horizonSum = 0.0, horizonW = 0.0;
++    for (int i = 0; i < nr; ++i)
++    {
++        const float eLo = i == 0 ? 0.0f : 0.5f * (elev[i - 1] + elev[i]);
++        const float eHi = i == nr - 1 ? 0.5f * kPi : 0.5f * (elev[i] + elev[i + 1]);
++        const float sLo = std::sin(eLo), sHi = std::sin(eHi);
++        // Integrals over the band: sin e cos e (up) and cos^2 e (walls).
++        const float wUp = 0.5f * (sHi * sHi - sLo * sLo);
++        auto cos2 = [](float e) { return 0.5f * e + 0.25f * std::sin(2.0f * e); };
++        const float wWall = cos2(eHi) - cos2(eLo);
++        for (int j = 0; j < nc; ++j)
++        {
++            const float pLo = j == 0 ? 0.0f : 0.5f * (az[j - 1] + az[j]);
++            const float pHi = j == nc - 1 ? kPi : 0.5f * (az[j] + az[j + 1]);
++            const float cosToSun = std::sin(elev[i]) * sinS + std::cos(elev[i]) * cosS * std::cos(az[j]);
++            const Rgb l = SkyViewTexel(t, 0, kCols[j], kRows[i], sunElevationRad) +
++                          SkyViewTexel(t, 1, kCols[j], kRows[i], sunElevationRad) * AtmosphereMiePhase(cosToSun);
++            // Both halves of the sky (x2); the wall facing the sun sees
++            // cos(phi) > 0, the one facing away cos(phi) < 0.
++            const float dPhi = pHi - pLo;
++            const float half = 0.5f * kPi;
++            const float sinLoC = std::sin(std::min(pLo, half)), sinHiC = std::sin(std::min(pHi, half));
++            const float posCos = std::max(sinHiC - sinLoC, 0.0f);
++            const float negCos = std::max(std::sin(std::max(pLo, half)) - std::sin(std::max(pHi, half)), 0.0f);
++            up = up + l * (2.0f * wUp * dPhi);
++            toward = toward + l * (2.0f * wWall * posCos);
++            away = away + l * (2.0f * wWall * negCos);
++            if (kRows[i] == 37)
++            {
++                horizonSum += Luminance(l) * dPhi;
++                horizonW += dPhi;
++            }
++        }
++    }
++    const float r0 = atmo::kGroundRadius + std::max(kSkyViewerHeight, 1.0f);
++    p.sun = AtmosphereTransmittance(t, r0, sinS);
++    p.skyUp = up;
++    p.skySunward = toward;
++    p.skyAntiSun = away;
++    p.horizonRadiance = horizonW > 0.0 ? static_cast<float>(horizonSum / horizonW) : 0.0f;
++    p.sunElevationDeg = sunElevationRad * 180.0f / kPi;
++    p.valid = true;
++    return p;
++}
++
++Rgb PhysicalIlluminant(const PhysicalSky& p)
++{
++    const float s = std::max(std::sin(p.sunElevationDeg * kPi / 180.0f), 0.0f);
++    return p.sun * s + PhysicalSkyFill(p.skyUp, p.sun);
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+new file mode 100644
+index 0000000..dd317ff
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -0,0 +1,184 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++
++#include <cstdint>
++
++// Photoreal light and camera (look lane "light", feature switch photoLight).
++// Pure math, no GL, no engine state; the GL33 backend runs it
++// (EngineGL33_Camera.cpp) and the shaders mirror the constants below.
++//
++// The remastered world used to tonemap every fragment (Khronos Neutral without
++// its toe, identity below 0.8) after an exposure meter that held sunlit ground
++// at the classic brightness: the frame stayed as flat as the original. With
++// the switch on:
++//
++//   - the light rig is physical (LightRig.cpp ComputePhysicalRig): the sun and
++//     the sky fill come from the sky table's atmosphere (Atmosphere.hpp) in
++//     their real ratio and colours (ComputePhysicalSky integrates the clear
++//     sky over the hemisphere for an up-facing and two vertical surfaces), so a
++//     noon sun out-lights the blue sky fill about six to one, a low sun is
++//     golden and much dimmer, and the clear sky dome and the fog take the
++//     physical sky's brightness against the sunlit ground;
++//   - the world's passes write scene light, not a tonemapped colour: linear
++//     light up to kEncodeKnee as it is, brighter light folded into the codes
++//     above it (Encode), so the post composite can unfold it (Decode);
++//   - a camera in the post composite: a metered exposure from a log-luminance
++//     histogram of the frame (Meter: the darkest kMeterLowCut and the
++//     brightest kMeterHighCut of the weighted samples ignored, the centre
++//     weighted, the sky counted less), eye adaptation over about a second
++//     (AdaptExposure), a white balance that adapts to the light the way a
++//     camera does (neutral at noon, golden hour kept warm, blue hour blue;
++//     WhiteBalanceStrength), a scene saturation, and a filmic tone curve with
++//     a real shoulder that keeps hue and saturation up to the highlights and
++//     then goes to white (Lottes 2016; ToneCurve), so the sun, the sky near it
++//     and glints read as bright light and the shade keeps its colour.
++
++namespace Poseidon::remaster
++{
++
++// ---- The world pass's encoding (shader camEncode / camDecode) --------------
++// Linear light up to the knee is stored as it is (display gamma 2.2); the
++// peak channel above it is folded as knee + (1 - knee) t / (1 + t), t = (m -
++// knee) / (1 - knee), hue kept. Exactly invertible; Decode caps the unfolded
++// peak at kDecodeMax (an 8-bit top code).
++constexpr float kEncodeKnee = 0.6f;
++constexpr float kDecodeMax = 64.0f;
++float EncodePeak(float linearPeak);
++float DecodePeak(float encodedPeak);
++// Linear light to the stored display value and back (per pixel, hue kept).
++Rgb CameraEncode(const Rgb& linear);
++Rgb CameraDecode(const Rgb& display);
++
++// ---- Metering ---------------------------------------------------------------
++// The meter pass writes kMeterWidth x kMeterHeight texels: the weighted mean
++// log2 luminance of its block of the frame (scene light, decoded) and the
++// block's weight (centre weighted; sky pixels count kMeterSkyWeight).
++constexpr int kMeterWidth = 64;
++constexpr int kMeterHeight = 36;
++constexpr float kMeterSkyWeight = 0.6f;
++constexpr float kMeterLowCut = 0.05f;    // darkest share of the weight ignored
++constexpr float kMeterHighCut = 0.03f;   // brightest share ignored
++constexpr float kMeterHighlight = 0.97f; // the percentile of the blocks' brightest taps the guard reads
++constexpr float kMeterFloorLog2 = -16.0f;
++
++struct MeterResult
++{
++    bool valid = false;
++    float mean = 0.0f;      // weighted mean log2 luminance between the cuts
++    float low = 0.0f;       // log2 luminance at kMeterLowCut
++    float high = 0.0f;      // at 1 - kMeterHighCut
++    float highlight = 0.0f; // at kMeterHighlight
++    float weight = 0.0f;    // total weight
++};
++// `logLum` and `weight` hold n samples (texels of the meter pass); `maxLog`
++// (or nullptr: logLum) each sample's brightest tap, which the highlight
++// percentile reads, so a small bright patch (the sky at the sun) is seen.
++MeterResult Meter(const float* logLum, const float* weight, const float* maxLog, int n);
++
++// ---- Exposure ---------------------------------------------------------------
++// The camera maps metered scene light to the curve's input: the frame's
++// metered mean goes to middle grey (kMiddleGrey) times 2^compensation. The
++// compensation: the knob camEv; a scene darker than a sunny day
++// (kDaylightMeanLog2) keeps kDarkKeep of how much darker it is (evening, an
++// overcast day and interiors stay darker than noon, as the eye sees them,
++// rather than all being pulled to one grey); at night camNight more. A
++// highlight guard pulls the exposure down so the kMeterHighlight percentile
++// stays below kHighlightLimit (a sunset sky is not blown out to rescue the dark
++// ground). The result is clamped to kExposureMinLog2 .. kExposureMaxLog2.
++constexpr float kMiddleGrey = 0.18f;
++constexpr float kDaylightMeanLog2 = -2.3f;
++constexpr float kDarkKeep = 0.4f;
++// A scene brighter than that keeps this much of how much brighter it is (a
++// sunlit plain is a bright picture, not a grey one).
++constexpr float kBrightKeep = 0.4f;
++constexpr float kHighlightLimit = 2.2f; // scene light after exposure, in the curve's input units
++constexpr float kHighlightGuard = 0.6f; // how far the guard pulls toward its limit
++constexpr float kExposureMinLog2 = -3.0f;
++constexpr float kExposureMaxLog2 = 2.5f;
++// At night the exposure may brighten the frame at most this far.
++constexpr float kExposureNightMaxLog2 = 0.0f;
++float TargetExposureLog2(const MeterResult& m, float nightEffect, const LightingTuning& t);
++// How much of the night the camera's exposure and colour treat the frame as
++// (the night compensation, the night's exposure limit, the white balance's
++// fade and the cool night white): 0 down to kCameraNightStartDeg of sun, 1
++// from kCameraNightFullDeg. Classic's own night effect is 1 as soon as the
++// sun is under the horizon, which would hold the blue hour as dark as night.
++constexpr float kCameraNightStartDeg = -2.0f;
++constexpr float kCameraNightFullDeg = -10.0f;
++float CameraNight(float sunElevationDeg);
++// One step of the eye's adaptation (log2 exposure), `dt` seconds, toward
++// `target`, with time constant `seconds` (opening up to the dark takes 1.5 x
++// as long as closing down to the light).
++float AdaptExposureLog2(float current, float target, float dt, float seconds);
++
++// ---- Tone curve (Lottes 2016, "Advanced techniques and optimization of HDR
++// color pipelines") --------------------------------------------------------
++// y = x^a / (x^(a d) b + c), through (midIn, midOut) and (white, 1); a > 1 is
++// the toe (deeper, richer shadows), d < 1 the shoulder. The hue-keeping form
++// applies it to the peak channel and keeps the channel ratios, which go to
++// white as the output nears 1 (kCrosstalk), so a bright sky stays blue and a
++// low sun stays orange until it is truly bright.
++constexpr float kCurveMidOut = 0.18f;
++constexpr float kCrosstalk = 4.0f;
++struct ToneCurve
++{
++    float a = 1.0f, d = 1.0f, b = 0.0f, c = 1.0f;
++};
++// `white` is in units of middle grey (scene light kMiddleGrey * white maps to 1).
++ToneCurve MakeToneCurve(float contrast, float shoulder, float white);
++float ApplyToneCurve(const ToneCurve& curve, float x);
++// The hue-keeping form on a colour (linear in, linear display out).
++Rgb ApplyToneCurveHueKeeping(const ToneCurve& curve, const Rgb& c);
++
++// ---- White balance and colour ----------------------------------------------
++struct Mat3
++{
++    float m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // row major
++    Rgb Apply(const Rgb& c) const;
++};
++Mat3 Multiply(const Mat3& a, const Mat3& b);
++// Bradford adaptation in linear sRGB: maps the illuminant's colour toward
++// white by `strength` (0 none, 1 full), keeping luminance of white.
++Mat3 WhiteBalance(const Rgb& illuminant, float strength);
++// Scene saturation about luminance.
++Mat3 Saturation(float s);
++// The camera's white balance is set for daylight: the light of the clear sky
++// with the sun at kPhysicalReferenceSunDeg (PhysicalSky::referenceIlluminant)
++// is white. On top of that it follows the light it is in by this share
++// (WhiteBalanceShare): half of it at a high sun (an overcast day greys rather
++// than going blue), little at a low sun (golden hour stays golden, the blue
++// hour blue). At night it fades out (the night eye handles the moon).
++float WhiteBalanceShare(float sunElevationDeg);
++// At night the camera is balanced for a light warmer than the night's (a
++// tungsten-ish white), by this much at full night, so moonlight reads cool
++// while lamps and fires keep some warmth.
++inline const Rgb kNightCameraWhite{1.0f, 0.9f, 0.75f};
++constexpr float kNightCameraCool = 0.45f;
++// The light the balance makes white: the daylight reference and the light
++// the camera is in, mixed by the share (geometric, per channel, at unit
++// luminance).
++Rgb WhiteBalanceTarget(const Rgb& reference, const Rgb& current, float share);
++
++// ---- The physical sun and sky (from the sky table's atmosphere) ------------
++struct AtmosphereTables;
++// The clear sky's light at the viewer for a sun at this elevation (radians):
++// the direct sun's transmittance and the sky irradiance on an up-facing and
++// two vertical surfaces, integrated over the hemisphere on a coarse grid of
++// the sky-view parametrisation (CPU, about a millisecond). No reference.
++PhysicalSky ComputePhysicalSky(const AtmosphereTables& t, float sunElevationRad);
++// The light on an open up-facing surface under that sky (sun plus sky).
++Rgb PhysicalIlluminant(const PhysicalSky& p);
++// Recompute when the sun moved this far.
++constexpr float kPhysicalSkyRebuildDeg = 0.25f;
++
++// ---- The sun disk -----------------------------------------------------------
++// The sun disk's pre-lit sprite is display white at best; the camera takes it
++// as light this many times brighter (it blooms and holds its colour).
++constexpr float kSunDiskGain = 3.0f;
++// The scene light (after exposure) where bloom starts, and its knee: light
++// past the curve's white.
++constexpr float kCameraBloomThreshold = 3.0f;
++constexpr float kCameraBloomKnee = 1.0f;
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+index 5414f5d..4e1138f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+@@ -79,7 +79,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+     // The stages that can ask for the pass ask by their knob, switch or debug
+     // view, whatever this frame's conditions then decide for them.
+     const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
+-                       in.temporal || in.lumaSharpen;
++                       in.temporal || in.lumaSharpen || in.camera;
+     if (!asked)
+         return plan;
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+index 672984f..b4799ba 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+@@ -90,6 +90,10 @@ struct PostFrameInputs
+     // TAA is not running this frame) and its strength is above 0. The Sharpen
+     // stage then runs alone, on the composited frame.
+     bool lumaSharpen = false;
++    // The photoreal camera (photoLight, PhotoCamera.hpp): the world was drawn
++    // as scene light this frame, and the composite is the camera that turns
++    // it into the picture, so it asks for the pass by itself.
++    bool camera = false;
+ };
+ 
+ // A frame's stages: which run and the strengths the composite uses.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index 24b5f89..ce1be8a 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -37,6 +37,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Sky table (switch `atmosphere`) | `Atmosphere.cpp`, `PoseidonGL33/EngineGL33_SkyTable.cpp`, shaders `shadeSkyDome`, `atmoFogColor` | A physically based clear sky (Rayleigh, Mie, ozone and multiple scattering, after Hillaire 2020) shades the sky dome under the original sky texture's clouds and gives the fog of every world draw its colour (aerial perspective, the far horizon polygon included). A low sun gets a golden horizon band and an aureole, dusk an orange band under a mauve sky, sunrise keeps its pink with a coral glow at the sun, noon a graded blue with its cirrus. Each sky row keeps the original dome's brightness on average (its sun glow included); the table supplies how a direction differs from its row, and the hue is half way between the original's and the physical one (`atmoHue` 0.5, `atmoSat` 1.15). The clouds are the texture's own, masked against each row's clearest texel and lit by the sun seen from 2.5 km. The transmittance and multiple-scattering tables are built on a worker thread when the haze changes; the 192x64 sky-view table on the GPU, in two fullscreen passes, whenever the sun moves 0.02 degrees. It fades out between -3 and -9 degrees of sun (night keeps the classic sky); an overcast deck keeps the classic fog colour. |
+ | Sky clouds (switches `litClouds`, `skyCloudShadows`) | `SkyDensity.cpp`, `PoseidonGL33/EngineGL33_SkyClouds.cpp`, shaders `litCloudTermsDome`, `litCloudTermsSheet`, `domeCloudCover` | The sky's own painted clouds become a density map (built from the weather sky texture on a worker thread when the weather sky changes: whiteness above the clearest sky of the same row, a grey row as an overcast deck, darkness as thickness; no new art). Lit clouds: a short march from each sky pixel toward the sun through the dome's own texture mapping gives mean-free relief, so at a low sun the sun-facing edges glow peach and the far sides go slate, with a silver lining on thin rims near the sun, darker thick cloud against the sun and deeper bellies under a deck; every one of these terms fades out between 25 and 45 degrees of sun, so a midday sky is the sky before (the relief embossed it, and the darkening against the sun on its own made it only darker; above 45 degrees the shaders skip the march), and they work on luminance tinted only by the sun's colour (no colour fringes). The sky's mean brightness is kept within about 1.5 %. Sky-matched shadows: a lit point is projected along the sun to a deck at 1800 m and that point is looked up in the map in the direction an anchor near the camera sees it, so the cloud in the sky is the cloud whose shadow lies on the ground (and the sun disk dims behind it); the anchor stays put until the camera is 1.5 km away, then steps and cross-fades, so shadows do not slide under a moving player. They keep the classic overcast dimming on average over the sky's own covered share (`LightRigInputs::skyShadowCoverage`). The dome turns about the zenith with the sky clouds' drift (`Landscape::CloudsPosition`, about 6 degrees a minute at overcast 0.5), its clouds, their light and their shadows together. |
+ | Sea waves (switch `seaWaves`) | `SeaWaves.cpp`, `PoseidonGL33/EngineGL33_Sea.cpp`, shader `s_psWaterRemasterMain`, `skyReflection` | The sea is the landscape's own faces, which carry the specular layer alone and used to draw through the detail shader like the terrain (the engine's `IsWater` family was never used for it). `Landscape::DrawWater` now opens `Engine::BeginSea` around them, and with the switch on the backend draws them with the water program. The sea texture's brightness is the wave height: the texture, a swell copy at 0.27x frequency and the ripple pattern of `specular_dx` give a wave normal (the texture-to-world mapping solved from screen derivatives), fading from 400 m to 3 km. The sea is its lit texture under the sky reflected by Fresnel on that normal, with a low mean share (no pale mirror at grazing range) and the waves' share at full weight, so rows of waves show to the horizon; the sky is the one the player sees (the sky table's when it is on, else the fog colour with its sun glow). The sun lays a broad path and a tight sparkle on the waves, and the material's own broad lobe keeps the original's sheen in the original sun's hue, which is what made the original's noon sea green-yellow: at a high sun it grows and moves to the flat normal, a smooth wash as the original's per-vertex sheen, and the mean sky share halves (noon hue within 8 degrees of the original's). The landscape's 7-frame animation is cross-faded (the neighbouring frame on texture unit 11), so the waves do not pop every 0.14 s. Sub-knobs `seaRelief`, `seaSky`, `seaSheen`. |
++| Photoreal light and camera (switch `photoLight`, look lane "light") | `PhotoCamera.cpp`, `LightRig.cpp` `ComputePhysicalRig`, `PoseidonGL33/EngineGL33_Camera.cpp`, shaders `camEncode`, `litDisplay`, `psPostComposite`, `psPostMeter` | The rig becomes physical: the sun is the sky table's transmittance toward it (near white at noon, golden at 10 degrees, red at the horizon) and the sky fill is the table's clear sky integrated over the hemisphere for an up-facing surface and for walls toward and away from the sun, a little whitened toward the sun's colour and strengthened for haze (`PhysicalSkyFill`), so a clear noon sun gives the ground about six times the sky's light, a low sun is golden and far dimmer, the shade is blue, and twilight is the sky's light alone. Its scale shows a white surface under the 60 degree sun at the classic noon brightness; nothing holds sunlit ground at the classic brightness any more. The world's passes then write scene light (linear up to 0.6, the peak above it folded into the codes left, hue kept), and the post composite is a camera: a metered exposure from a 64 x 36 log-luminance meter read back through a ring of pixel-pack buffers (the darkest 5 % and brightest 3 % of the weight ignored, centre weighted, the sky counted at 0.6; a scene darker than a sunny day keeps 0.4 of its darkness, a brighter one 0.4 of its brightness; a guard on the brightest taps keeps skies from blowing out; at night it never brightens and sits 2 EV lower), eye adaptation over about a second (1.5 s opening up to the dark; a cut or a lighting change snaps it), a daylight white balance (the 60 degree clear sky's light is white) that follows the light it is in by 15 to 50 % (golden hour stays golden, the blue hour blue, overcast grey; moonlight reads cool), a scene saturation of 1.15, a filmic curve (Lottes 2016: middle grey 0.18 to 0.18, a toe for deep shadows, a shoulder up to 16 middle greys) applied to the peak channel with the channel ratios kept until the output nears white, glare (bloom) only from light past the curve's white, the shafts capped, a light vignette and a dither. The clear sky dome, the fog colour and the sky the sea reflects take the physical sky's brightness against the sunlit world (at most the original's), and the dome the physical hue (`camSkyHue` in place of `atmoHue`): a golden band under a blue sky at sunset, a deep blue dusk. The sun disk's core is light 3 times its sprite. Off (or with the post effects off, a debug view or night vision) the frame is the one before the switch. Sub-knobs `camEv`, `camAdapt`, `camCurve` (0 hue-keeping filmic, 1 per channel, 2 ACES fit, 3 Khronos Neutral), `camContrast`, `camShoulder`, `camWhite`, `camSat`, `camWb`, `camSky`, `camSkyHue`, `camNight`, `camVignette`, `camBloom`; `triFeatureState` appends the camera's state (`| cam ev= target= mean= high= wb= sky= sun= skyup= reads=`). |
+ | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. The sum is clamped where classic clamps it, so where pools overlap a lamp-lit wall is never brighter than the original's. Glossy materials get normalised Blinn-Phong and a sky reflection. |
+ | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
+ | Temporal anti-aliasing | `TemporalAA.cpp`, `EngineGL33_PostTemporal.cpp` | The world is drawn with a sub-pixel jitter (Halton 2, 3 over 16 frames) and each frame is blended into a history of the frames before it (switch `taa`): the history is moved with the camera motion and the depth, clipped to the colours around each pixel and mixed in at 0.1, then sharpened back into the frame target (bounded, no halos). Alpha-tested leaves and wires stop crawling, sub-pixel wire stays continuous, and the AO and shaft sample patterns turn every frame so the history averages them. Smoke, fire, muzzle flashes, glass and rain take most of their own frame (a particle mask from a copy of the frame made between the opaque and the translucent objects), so they do not smear. MSAA stays under it; a texture LOD bias of -0.5 wins back texture detail. |
+@@ -174,7 +175,9 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ 
+ | File | Role |
+ |---|---|
+-| `Graphics/Remaster/LightRig.{hpp,cpp}` | Light rig, exposure meter, tonemap, sun chroma, crown ellipsoid. Pure math. |
++| `Graphics/Remaster/LightRig.{hpp,cpp}` | Light rig, exposure meter, tonemap, sun chroma, crown ellipsoid; the photoreal rig from the physical sky (`ComputePhysicalRig`). Pure math. |
++| `Graphics/Remaster/PhotoCamera.{hpp,cpp}` | The photoreal camera (`photoLight`): the world pass's encoding, the meter, the exposure and its adaptation, the filmic curve, the white balance, the physical sun and sky integrated from the atmosphere tables. Pure math. |
++| `PoseidonGL33/EngineGL33_Camera.cpp` | The camera in the backend: the frame's decision and colour matrix, the meter pass and its readback ring, the adaptation, the `Camera` slot of `LitConstants` (70). |
+ | `Graphics/Remaster/TerrainHorizon.{hpp,cpp}` | Horizon map builder and the CPU reference of the shader's sun visibility. Pure math. |
+ | `Graphics/Remaster/CloudNoise.{hpp,cpp}` | Tileable, histogram-equalised cloud noise. Pure math. |
+ | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 7467949..6b056e4 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -39,6 +39,7 @@ enum PixelShaderSpecular
+ #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
++#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
+ #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+ #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+@@ -702,6 +703,7 @@ class EngineGL33 : public Engine
+     bool GetFeatureGates(Poseidon::remaster::FeatureGates& out) const override
+     {
+         out = _featureGates;
++        out.camera = CameraReadoutNow();
+         return true;
+     }
+     bool LocalLightsFromTiles() const override { return _lightTilesActive; }
+@@ -930,6 +932,9 @@ class EngineGL33 : public Engine
+         unsigned int opaqueTex = 0, opaqueFbo = 0;
+         unsigned int progTaa = 0, progTaaSharpen = 0;
+         unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off (B11)
++        // The photoreal camera's meter (EngineGL33_Camera.cpp): kMeterWidth x
++        // kMeterHeight RGBA16F, read back through _camera's ring.
++        unsigned int meterTex = 0, meterFbo = 0, progMeter = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+@@ -965,6 +970,66 @@ class EngineGL33 : public Engine
+     // samplers, each only when it changes.
+     void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
+     void BeginTranslucentObjects() override;
++    // The photoreal camera (look lane "light", feature switch photoLight;
++    // EngineGL33_Camera.cpp, Graphics/Remaster/PhotoCamera.hpp): the physical
++    // rig's inputs, the metered and adapted exposure, the white balance, and
++    // the meter pass with its readback (a ring of pixel-pack buffers read a few
++    // frames later; the CPU never waits on the GPU).
++    struct CameraState
++    {
++        static constexpr int kRing = 3;
++        // This frame's world passes write scene light (decided with the gates,
++        // read by the post pass).
++        bool frameOn = false;
++        std::uint32_t frame = 0;
++        // Exposure (log2 of the gain before the curve): in use and adapting
++        // toward the target of the last meter.
++        float exposureLog2 = 0.0f;
++        float targetLog2 = 0.0f;
++        bool adapted = false;
++        bool snap = true; // take the next meter at once (a cut, a mode change)
++        double lastStep = -1.0;
++        float lastCam[3] = {};
++        float lastDir[3] = {};
++        bool haveCam = false;
++        Poseidon::remaster::MeterResult meter;
++        float nightEffect = 0.0f;
++        // Colour: white balance times the scene saturation.
++        Poseidon::remaster::Mat3 color;
++        float whiteBalance = 0.0f;
++        float skyGain = 1.0f;
++        float sunLum = 0.0f, skyUpLum = 0.0f;
++        // The physical sky, recomputed when the sun moved, and the reference.
++        Poseidon::remaster::PhysicalSky physical;
++        float physicalHaze = -1.0f;
++        float referenceIrradiance = 0.0f;
++        Poseidon::remaster::Rgb referenceIlluminant;
++        float referenceHaze = -1.0f;
++        // GL: the readback ring of the meter pass (its target and program
++        // are post targets: _post.meterTex, _post.progMeter), each slot with
++        // the frame it metered.
++        unsigned int pbo[kRing] = {};
++        void* fence[kRing] = {};
++        std::uint32_t pboFrame[kRing] = {};
++        int next = 0;
++        std::uint32_t snapFrame = 0; // a snap takes a meter from this frame on
++        bool wasOn = false;
++        std::vector<float> texels, logs, weights, peaks; // readback scratch
++        std::uint32_t readbacks = 0;
++    } _camera;
++    // The camera can run this frame (switch, post effects, no debug view, no
++    // night vision, a frame target with a post pass, not a portrait).
++    bool CameraWanted() const;
++    // The physical sky for the sun at this elevation from the sky table's
++    // atmosphere tables (EngineGL33_SkyTable.cpp); false while they build.
++    bool PhysicalSkyFor(float sunElevationRad, Poseidon::remaster::PhysicalSky& out);
++    // After the gates: this frame's camera decision, colour matrix and the
++    // Camera slot of LitConstants.
++    void UpdateCameraFrame(const Poseidon::remaster::LightRig& rig, bool atmosphereOn);
++    // At the post pass: collect finished meter readbacks and adapt.
++    void CameraAdapt();
++    void DestroyCamera();
++    Poseidon::remaster::CameraReadout CameraReadoutNow() const;
+     void DestroyPostTargets();
+     void DestroyPostPrograms();
+     bool EnsurePostResources(int w, int h);
+@@ -990,6 +1055,10 @@ class EngineGL33 : public Engine
+         float noiseShift = 0.0f;
+         // Which stages run this frame and the strengths the composite uses.
+         Poseidon::remaster::PostStagePlan plan;
++        // The photoreal camera runs this frame: the frame holds scene light
++        // (camEncode) and the composite is the camera; its exposure (linear).
++        bool camera = false;
++        float exposure = 1.0f;
+     };
+     void PostFrameGeometry(PostFrame& f) const;
+     void PostFrameSun(PostFrame& f) const;
+@@ -1009,6 +1078,9 @@ class EngineGL33 : public Engine
+     void PostTemporal(const PostFrame& f);
+     void PostSharpen(const PostFrame& f);
+     void PostDebugView(const PostFrame& f);
++    // The photoreal camera's meter pass on the resolved frame, its readback
++    // queued (EngineGL33_Camera.cpp); run inside the Composite stage.
++    void PostCameraMeter(const PostFrame& f);
+     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
+     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
+     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+new file mode 100644
+index 0000000..e16d341
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+@@ -0,0 +1,259 @@
++// The photoreal camera (look lane "light", feature switch photoLight;
++// Graphics/Remaster/PhotoCamera.hpp holds the math).
++//
++// Per frame:
++//   - UploadLitFrameConstants asks for the physical sky (PhysicalSkyFor, from
++//     the sky table's atmosphere tables) while the camera can run, so the rig
++//     is the physical one, and after the gates UpdateCameraFrame decides
++//     whether this frame's world passes write scene light (LitConstants
++//     Camera slot) and sets the white balance;
++//   - EndWorldScene, before its stages, collects the meter readbacks that
++//     have arrived and adapts the exposure toward their target (CameraAdapt);
++//   - inside the Composite stage the meter pass reduces the resolved frame
++//     to kMeterWidth x kMeterHeight log-luminance texels, read back through a
++//     ring of pixel-pack buffers a few frames later (the CPU never waits on
++//     the GPU), and the composite applies the camera.
++// A camera cut (more than 50 m or 60 degrees in a frame), the camera turning
++// on and a lighting change snap the exposure to the first meter of a frame
++// after it. Black-through meter blocks (an optic's mask) weigh nothing, so
++// through gunner optics the camera meters the scene in the optic.
++
++#include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <PoseidonGL33/EngineGL33_PostPass.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
++#include <Poseidon/World/Scene/Scene.hpp>
++#include <Poseidon/World/Scene/Camera/Camera.hpp>
++
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <vector>
++
++namespace rm = Poseidon::remaster;
++using namespace Poseidon::gl33post;
++
++namespace
++{
++constexpr float kCutMetres = 50.0f;
++constexpr float kCutCos = 0.5f; // 60 degrees
++
++double NowSeconds()
++{
++    using clock = std::chrono::steady_clock;
++    return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
++}
++} // namespace
++
++bool EngineGL33::CameraWanted() const
++{
++    return _lightingActive && rm::FeatureOn(_lighting.features, rm::Feature::PhotoLight) && _lighting.postEffects &&
++           _lighting.debugView == 0 && !_nightVision && SSAAActive() && !_portraitTargetSize && !_post.unavailable;
++}
++
++void EngineGL33::UpdateCameraFrame(const rm::LightRig& rig, bool atmosphereOn)
++{
++    CameraState& c = _camera;
++    const bool on =
++        rig.physical && _featureGates.computed && _featureGates[rm::Feature::PhotoLight].on && CameraWanted();
++    if (on && !c.wasOn)
++    {
++        c.snap = true;
++        c.snapFrame = GetFrameCounter();
++    }
++    c.wasOn = on;
++    c.frameOn = on;
++    c.frame = GetFrameCounter();
++    if (!on)
++        return;
++    c.nightEffect = rm::CameraNight(rig.sunElevationDeg);
++    // Daylight white balance, following the light it is in by a share; it
++    // fades out at night.
++    c.whiteBalance = _lighting.camWb * (1.0f - std::min(std::max(c.nightEffect, 0.0f), 1.0f));
++    const rm::Rgb white =
++        rm::WhiteBalanceTarget(c.referenceIlluminant, rig.illuminant, rm::WhiteBalanceShare(rig.sunElevationDeg));
++    rm::Mat3 wb = rm::WhiteBalance(white, c.whiteBalance);
++    // At night the camera sees moonlight cool (the day-for-night convention):
++    // balanced for a light warmer than the night's.
++    const float night = std::min(std::max(c.nightEffect, 0.0f), 1.0f);
++    if (night > 0.0f && _lighting.camWb > 0.0f)
++        wb = rm::Multiply(rm::WhiteBalance(rm::kNightCameraWhite, rm::kNightCameraCool * night), wb);
++    c.color = rm::Multiply(rm::Saturation(_lighting.camSat), wb);
++    c.skyGain = atmosphereOn ? rig.skyGain : 1.0f;
++    const float sinSun = std::sin(rig.sunElevationDeg / 57.29578f);
++    c.sunLum = rm::Luminance(rig.sun) * std::max(sinSun, 0.0f);
++    c.skyUpLum = rm::Luminance(rig.skyZenith);
++
++    // A cut: snap to the first meter of a frame from now on.
++    if (Camera* cam = GScene ? GScene->GetCamera() : nullptr)
++    {
++        const Vector3 p = cam->Position();
++        Vector3 d = cam->Direction();
++        d.Normalize();
++        if (c.haveCam)
++        {
++            const float dx = p.X() - c.lastCam[0], dy = p.Y() - c.lastCam[1], dz = p.Z() - c.lastCam[2];
++            const float turn = d.X() * c.lastDir[0] + d.Y() * c.lastDir[1] + d.Z() * c.lastDir[2];
++            if (dx * dx + dy * dy + dz * dz > kCutMetres * kCutMetres || turn < kCutCos)
++            {
++                c.snap = true;
++                c.snapFrame = GetFrameCounter();
++            }
++        }
++        c.lastCam[0] = p.X();
++        c.lastCam[1] = p.Y();
++        c.lastCam[2] = p.Z();
++        c.lastDir[0] = d.X();
++        c.lastDir[1] = d.Y();
++        c.lastDir[2] = d.Z();
++        c.haveCam = true;
++    }
++}
++
++void EngineGL33::CameraAdapt()
++{
++    CameraState& c = _camera;
++    // The meters that have arrived, oldest first; the newest wins.
++    bool fresh = false;
++    std::uint32_t freshFrame = 0;
++    std::vector<float>& s_texels = c.texels;
++    std::vector<float>& s_log = c.logs;
++    std::vector<float>& s_w = c.weights;
++    std::vector<float>& s_peak = c.peaks;
++    constexpr int n = rm::kMeterWidth * rm::kMeterHeight;
++    for (int k = 0; k < CameraState::kRing; ++k)
++    {
++        const int i = (c.next + k) % CameraState::kRing;
++        if (!c.fence[i])
++            continue;
++        GLsync sync = static_cast<GLsync>(c.fence[i]);
++        const GLenum st = glClientWaitSync(sync, 0, 0);
++        if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED)
++            continue;
++        glDeleteSync(sync);
++        c.fence[i] = nullptr;
++        // The fence has passed: copying the buffer out does not wait (no
++        // direct buffer mapping in the backend, GLBufferMap.hpp audit).
++        glBindBuffer(GL_PIXEL_PACK_BUFFER, c.pbo[i]);
++        s_texels.resize(static_cast<size_t>(n) * 4);
++        glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, static_cast<GLsizeiptr>(n * 4 * sizeof(float)), s_texels.data());
++        {
++            s_log.resize(n);
++            s_w.resize(n);
++            s_peak.resize(n);
++            for (int t = 0; t < n; ++t)
++            {
++                s_log[t] = s_texels[t * 4 + 0];
++                s_w[t] = s_texels[t * 4 + 1];
++                s_peak[t] = s_texels[t * 4 + 2];
++            }
++            const rm::MeterResult m = rm::Meter(s_log.data(), s_w.data(), s_peak.data(), n);
++            if (m.valid)
++            {
++                c.meter = m;
++                fresh = true;
++                freshFrame = c.pboFrame[i];
++                ++c.readbacks;
++            }
++        }
++        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
++    }
++    const double now = NowSeconds();
++    const float dt = c.lastStep < 0.0 ? 0.0f : static_cast<float>(std::min(std::max(now - c.lastStep, 0.0), 0.25));
++    c.lastStep = now;
++    if (c.meter.valid)
++        c.targetLog2 = rm::TargetExposureLog2(c.meter, c.nightEffect, _lighting);
++    if (c.snap)
++    {
++        if (fresh && freshFrame >= c.snapFrame)
++        {
++            c.exposureLog2 = c.targetLog2;
++            c.snap = false;
++            c.adapted = true;
++        }
++        return;
++    }
++    if (c.meter.valid)
++    {
++        c.exposureLog2 = rm::AdaptExposureLog2(c.exposureLog2, c.targetLog2, dt, _lighting.camAdapt);
++        c.adapted = true;
++    }
++}
++
++void EngineGL33::PostCameraMeter(const PostFrame& f)
++{
++    CameraState& c = _camera;
++    const PostTargets& p = _post;
++    if (!p.progMeter || !p.meterFbo)
++        return;
++    glUseProgram(p.progMeter);
++    SetInt(p.progMeter, "colorTex", 0);
++    SetInt(p.progMeter, "depthTex", 2);
++    BindTex(0, p.colorTex);
++    BindTex(2, p.depthTex);
++    Set4(p.progMeter, "meterParams", rm::kMeterSkyWeight, 1.0f, static_cast<float>(rm::kMeterWidth),
++         static_cast<float>(rm::kMeterHeight));
++    DrawTo(p.meterFbo, rm::kMeterWidth, rm::kMeterHeight);
++
++    // Queue the readback into the next slot of the ring.
++    constexpr GLsizeiptr bytes = rm::kMeterWidth * rm::kMeterHeight * 4 * sizeof(float);
++    const int i = c.next;
++    if (!c.pbo[i])
++    {
++        glGenBuffers(1, &c.pbo[i]);
++        glBindBuffer(GL_PIXEL_PACK_BUFFER, c.pbo[i]);
++        glBufferData(GL_PIXEL_PACK_BUFFER, bytes, nullptr, GL_STREAM_READ);
++    }
++    if (c.fence[i])
++    {
++        glDeleteSync(static_cast<GLsync>(c.fence[i]));
++        c.fence[i] = nullptr;
++    }
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, p.meterFbo);
++    glReadBuffer(GL_COLOR_ATTACHMENT0);
++    glBindBuffer(GL_PIXEL_PACK_BUFFER, c.pbo[i]);
++    glPixelStorei(GL_PACK_ALIGNMENT, 4);
++    glReadPixels(0, 0, rm::kMeterWidth, rm::kMeterHeight, GL_RGBA, GL_FLOAT, nullptr);
++    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
++    c.fence[i] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++    c.pboFrame[i] = GetFrameCounter();
++    c.next = (i + 1) % CameraState::kRing;
++    (void)f;
++}
++
++void EngineGL33::DestroyCamera()
++{
++    CameraState& c = _camera;
++    for (int i = 0; i < CameraState::kRing; ++i)
++    {
++        if (c.fence[i])
++            glDeleteSync(static_cast<GLsync>(c.fence[i]));
++        c.fence[i] = nullptr;
++        if (c.pbo[i])
++            glDeleteBuffers(1, &c.pbo[i]);
++        c.pbo[i] = 0;
++    }
++    c.next = 0;
++    c.snap = true;
++    c.wasOn = false;
++}
++
++rm::CameraReadout EngineGL33::CameraReadoutNow() const
++{
++    rm::CameraReadout r;
++    const CameraState& c = _camera;
++    // The state of the last world pass, while it is recent (the classic
++    // programs do not reach UpdateCameraFrame).
++    r.valid = c.frameOn && GetFrameCounter() - c.frame <= 2;
++    r.exposureLog2 = c.exposureLog2;
++    r.targetLog2 = c.targetLog2;
++    r.meterMean = c.meter.mean;
++    r.meterHighlight = c.meter.highlight;
++    r.whiteBalance = c.whiteBalance;
++    r.skyGain = c.skyGain;
++    r.sunLum = c.sunLum;
++    r.skyUpLum = c.skyUpLum;
++    r.readbacks = c.readbacks;
++    return r;
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 3e68a2c..372fc3d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -13,6 +13,7 @@
+ 
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
+ #include <PoseidonGL33/GL33BindCache.hpp>
+ #include <Poseidon/Graphics/Core/PerfCounters.hpp>
+ #include <Poseidon/Graphics/Core/UboMirror.hpp>
+@@ -430,6 +431,9 @@ void EngineGL33::SetLightingTuning(const rm::LightingTuning& tuning)
+ {
+     const bool wasActive = _lightingActive;
+     _lighting = tuning;
++    // A lighting change: the camera's exposure snaps to the next meter.
++    _camera.snap = true;
++    _camera.snapFrame = GetFrameCounter();
+     _lightingActive = tuning.remastered && _lightingProgramsBuilt;
+     if (wasActive != _lightingActive && _glContext)
+     {
+@@ -667,6 +671,15 @@ void EngineGL33::UploadLitFrameConstants()
+     in.skyThrough = land ? land->SkyThrough() : 1.0f;
+     in.nightEffect = sun->NightEffect();
+     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
++    // The photoreal camera (photoLight): while it can run, the rig is the
++    // physical one, from the sky table's atmosphere (EngineGL33_Camera.cpp).
++    if (CameraWanted())
++    {
++        rm::PhysicalSky physical;
++        const float y = toSun.Y() < -1.0f ? -1.0f : (toSun.Y() > 1.0f ? 1.0f : toSun.Y());
++        if (PhysicalSkyFor(std::asin(y), physical))
++            in.physical = physical;
++    }
+     rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
+     UpdateFeatureGates(&rig);
+     // Sky-matched cloud shadows lie over the sky's own covered share of the
+@@ -678,6 +691,12 @@ void EngineGL33::UploadLitFrameConstants()
+         rig = rm::ComputeLightRig(in, _lighting);
+     }
+     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
++    // The photoreal camera: whether this frame's world passes write scene
++    // light, the white balance, and the clear sky's gain (only where the dome
++    // is the sky table's).
++    UpdateCameraFrame(rig, _featureGates[rm::Feature::Atmosphere].on && SkyTablesReady());
++    SetSlot(LitConst::Camera, _camera.frameOn ? 1.0f : 0.0f, rm::kSunDiskGain, _camera.frameOn ? _camera.skyGain : 1.0f,
++            0.0f);
+ 
+     // The tiled light list: built once per frame while its gate is on, and
+     // then read by every draw of the world's passes instead of the draw's own
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index aa784c1..84d3842 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -79,6 +79,10 @@ enum class PostShader : int
+     // The canopy's sun-visibility map (B9). Not a post stage: it runs before
+     // the world when the sun or the camera moved (EngineGL33_Canopy.cpp).
+     CanopySun,
++    // The photoreal camera's meter (photoLight): the resolved frame's log
++    // luminance in kMeterWidth x kMeterHeight texels, read back by the CPU
++    // (EngineGL33_Camera.cpp); run inside the Composite stage.
++    Meter,
+     Count,
+ };
+ // The override file stem (vsPost, psPostAo, ...) and the assembled source.
+@@ -252,9 +256,14 @@ enum : int
+     // The sky's own clouds (EngineGL33_SkyClouds.cpp, Graphics/Remaster/SkyDensity.hpp).
+     Sky = 68,       // x lit-cloud strength, y sky-matched shadows on (1), z the dome's turn (u offset), w sky-through
+     SkyShadow = 69, // xy shadow anchor - camera (m, east and north), z previous anchor's angle (rad), w its weight
+-    // 70-73: allocated to features still to land (70 free, LitConstPlanned
+-    // Night to Weather); one padding member in the block until they do.
+-    Planned = 70,
++    // The photoreal camera (look lane "light", photoLight; Graphics/Remaster/
++    // PhotoCamera.hpp): x 1 = the world's passes write scene light for the
++    // camera (camEncode), y the sun disk's light gain, z the clear sky's
++    // brightness gain (linear), w 0.
++    Camera = 70,
++    // 71-73: allocated to features still to land (LitConstPlanned Night to
++    // Weather); one padding member in the block until they do.
++    Planned = 71,
+     // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
+     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
+     Water1 =
+@@ -276,7 +285,8 @@ static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow
+ static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
+ static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
+ static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slots follow the sky table's");
+-static_assert(Planned == SkyShadow + 1, "the planned padding follows the clouds slots");
++static_assert(Camera == SkyShadow + 1, "the camera slot follows the clouds slots");
++static_assert(Planned == Camera + 1, "the planned padding follows the camera slot");
+ static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
+               "LitConst water slots follow the planned padding");
+ static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
+@@ -293,14 +303,15 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
+ // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+ // padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
+ // SkyShadow), B5 the water slots 74 and 75, B9 the canopy at 76 and B11 the
+-// terrain detail at 77, so 70 to 73 are the padding member litPlanned.
++// terrain detail at 77, and the photoreal camera took 70, so 71 to 73 are the
++// padding member litPlanned.
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+ // 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
+ // 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
+-// 70 is free: the light list (A6) needs only a tile size and a night factor,
+-// which ride in litLightCount.yz (LitConst::LightCount).
++// 70: the light list (A6) needed no slot (its tile size and night factor ride
++// in litLightCount.yz); the photoreal camera took it (LitConst::Camera).
+ constexpr int Night = 71;        // night: flags, beam profile, moon key
+ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+@@ -311,8 +322,8 @@ constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
+ constexpr int End = 79;  // one past the last planned slot
+ static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+               "the planned slot below the sun shadows is the reserved padding");
+-static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+-              "the planned slots between the clouds and the water are the planned padding (70 free)");
++static_assert(Night == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
++              "the planned slots between the camera and the water are the planned padding");
+ static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 0b91364..0adaf02 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -355,7 +355,8 @@ layout(std140) uniform LitConstants {
+     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
+     vec4 litSky;          // 68: x lit-cloud strength, y sky-matched shadows on, z the dome's turn (u), w sky-through
+     vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
+-    vec4 litPlanned[4];   // 70-73: allocated to features still to land (night, combat, materials; 70 free)
++    vec4 litCamera;       // 70: photo camera: x 1 = write scene light (camEncode), y sun disk gain, z clear sky gain
++    vec4 litPlanned[3];   // 71-73: allocated to features still to land (night, combat, materials)
+     vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
+     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
+     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
+@@ -405,6 +406,33 @@ vec3 tonemapNeutral(vec3 c) {
+     float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
+     return mix(c, vec3(newPeak), g);
+ }
++
++// The photoreal camera (photoLight, litCamera.x; Graphics/Remaster/
++// PhotoCamera.hpp): the world's passes then write scene light, not a
++// tonemapped colour, and the post composite is the camera (metered exposure,
++// white balance, filmic curve). Linear light up to kCamKnee is stored as it
++// is; the peak channel above it is folded into the codes left, hue kept
++// (CameraEncode), so the composite can unfold it (camDecode).
++const float kCamKnee = 0.6; // kEncodeKnee
++vec3 camEncode(vec3 lin) {
++    lin = max(lin, vec3(0.0));
++    float m = max(lin.r, max(lin.g, lin.b));
++    if (m > kCamKnee) {
++        float t = (m - kCamKnee) / (1.0 - kCamKnee);
++        lin *= (kCamKnee + (1.0 - kCamKnee) * t / (1.0 + t)) / m;
++    }
++    return toDisplay(lin);
++}
++
++// A lit fragment's radiance on the display: the shipped tonemap with the
++// display saturation (litFlags.w), or under the camera the scene light itself
++// (finishFragment encodes it after the fog).
++vec3 litDisplay(vec3 radiance) {
++    if (litCamera.x > 0.5) return toDisplay(max(radiance, vec3(0.0)));
++    vec3 display = toDisplay(tonemapNeutral(radiance));
++    float grey = dot(display, kLuma);
++    return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
++}
+ )";
+ 
+ // Shadows: the sun's visibility from the cascaded shadow maps.
+@@ -820,9 +848,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         if (litFlags.z < 3.5) return nLight * 0.5 + 0.5;
+         return albedo;
+     }
+-    vec3 display = toDisplay(tonemapNeutral(radiance));
+-    float grey = dot(display, kLuma);
+-    display = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
++    vec3 display = litDisplay(radiance);
+     // Debug view 6: the lights per tile of the tiled light list.
+     return litFlags.z > 5.5 ? lightTileView(display) : display;
+ }
+@@ -872,7 +898,20 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
+         fogC = atmoFogColor(vWorldRel, fogC);
+     }
++    // Under the photoreal camera the clear sky (and with it the fog, which is
++    // the sky behind the far ground) takes its physical brightness against
++    // the sunlit world (litCamera.z, 1 under an overcast deck and at night).
++    if (litCamera.x > 0.5) fogC *= pow(max(litCamera.z, 0.0), 1.0 / 2.2);
+     r0.rgb = mix(fogC, r0.rgb, vFogTC);
++    if (litCamera.x > 0.5) {
++        // Scene light for the camera. The sun disk (sky mode 3) is light far
++        // brighter than its pale sprite: its core (not the sprite's painted
++        // halo) takes the gain.
++        vec3 lin = toLinear(r0.rgb);
++        if (vLitMode < 0.5 && vLitMode > -0.5 && litSkyFwd.w > 2.5 && litSkyFwd.w < 3.5)
++            lin *= mix(1.0, litCamera.y, smoothstep(0.55, 0.95, max(lin.r, max(lin.g, lin.b))));
++        r0.rgb = camEncode(lin);
++    }
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+ }
+ )";
+@@ -1236,6 +1275,8 @@ void main() {
+         r.y = max(r.y, 0.01);
+         r = normalize(r);
+         vec3 skyDisp = mix(skyReflection(r), fogColor.rgb, litWater0.w);
++        // The camera's clear sky gain (the sea reflects the sky the player sees).
++        if (litCamera.x > 0.5) skyDisp *= pow(max(litCamera.z, 0.0), 1.0 / 2.2);
+         vec3 sky = toLinear(skyDisp) * mix(1.0, 0.82, smoothstep(0.15, 0.9, r.y));
+         float skyMean = litWater0.z * mix(kSeaFarSkyFloor, 1.0, 1.0 - smoothstep(kSeaFarSkyStart, kSeaFarSkyEnd, dist));
+         float wSky = clamp(skyMean * Ff + kSeaSkyVar * (F - Ff), 0.0, 0.95);
+@@ -1260,9 +1301,7 @@ void main() {
+         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
+                    (sunVis * sunOn * litHorizon.w);
+         vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
+-        vec3 display = toDisplay(tonemapNeutral(radiance));
+-        float grey = dot(display, kLuma);
+-        r0.rgb = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
++        r0.rgb = litDisplay(radiance);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else if (lit) {
+         // The debug views (sun visibility, sky visibility, normals) show the
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index 2453240..f75c259 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -105,7 +105,9 @@ vec3 skyClear(vec3 d, vec3 baseDisp, vec3 glowDisp, vec3 capDisp) {
+ // Linear sky radiance to the display, with the sky's own saturation
+ // (litAtmoGlow.w; the dome and the fog colour only).
+ vec3 skyDisplay(vec3 lin) {
+-    vec3 disp = toDisplay(tonemapNeutral(lin));
++    // Under the photoreal camera the sky is scene light too (the camera's
++    // curve rolls off the glow around the sun).
++    vec3 disp = litCamera.x > 0.5 ? toDisplay(max(lin, vec3(0.0))) : toDisplay(tonemapNeutral(lin));
+     return max(mix(vec3(dot(disp, kLuma)), disp, litAtmoGlow.w), vec3(0.0));
+ }
+ 
+@@ -286,6 +288,8 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+     float local = clamp((lumT - bg - litAtmo.w) / max(kSkyCloudWhite - bg, 0.08), 0.0, 1.0);
+     float cloud = max(local, litAtmo.y);
+     vec3 a = skyClear(d, bgC * litAtmoDome.rgb, bgC * litAtmoGlow.rgb, bgC);
++    // The photoreal camera's clear sky gain (its clouds keep their light).
++    if (litCamera.x > 0.5) a *= max(litCamera.z, 0.0);
+     float c = dot(d, litSunDir.xyz);
+     const float g = 0.6; // forward scattering of a thin cloud deck
+     float hg = (1.0 - g * g) / (4.0 * kSkyPi * pow(max(1.0 + g * g - 2.0 * g * c, 1e-4), 1.5));
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index ad6c3eb..dd1a97a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -174,6 +174,9 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.histFbo[0]);
+     delFbo(p.histFbo[1]);
+     delFbo(p.opaqueFbo);
++    delFbo(p.meterFbo);
++    delTex(p.meterTex);
++    DestroyCamera();
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -198,7 +201,7 @@ void EngineGL33::DestroyPostPrograms()
+     PostTargets& p = _post;
+     for (unsigned int* prog :
+          {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
+-          &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen})
++          &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen, &p.progMeter})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -236,11 +239,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progTaa = link(PostShader::Taa);
+         p.progTaaSharpen = link(PostShader::TaaSharpen);
+         p.progLumaSharpen = link(PostShader::LumaSharpen);
++        p.progMeter = link(PostShader::Meter);
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+         if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite ||
+-            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen || !p.progLumaSharpen)
++            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen || !p.progLumaSharpen ||
++            !p.progMeter)
+         {
+             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
+             p.unavailable = true;
+@@ -267,6 +272,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.histTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
+     p.histTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
+     p.opaqueTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
++    p.meterTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, rm::kMeterWidth, rm::kMeterHeight, false);
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -309,6 +315,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.opaqueFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.opaqueTex);
+     check();
++    p.meterFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.meterTex);
++    check();
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -428,6 +436,9 @@ void EngineGL33::EndWorldScene()
+     // With TAA off this frame, the luma sharpen when its switch and gate are on.
+     in.lumaSharpen = !taaFrame && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
+                      _featureGates[rm::Feature::Sharpen].on && _lighting.sharpenStrength > 0.0f;
++    // The photoreal camera: this frame's world passes wrote scene light.
++    in.camera = _camera.frameOn && _camera.frame == GetFrameCounter();
++    f.camera = in.camera;
+     f.plan = rm::PlanPostStages(in);
+     if (f.plan.Empty())
+         return; // nothing to add: leave the frame as drawn
+@@ -442,6 +453,13 @@ void EngineGL33::EndWorldScene()
+         return;
+     f.hw = (f.w + 1) / 2;
+     f.hh = (f.h + 1) / 2;
++    // The camera's exposure for this frame: the meters read back so far,
++    // and the eye's adaptation toward them.
++    if (f.camera)
++    {
++        CameraAdapt();
++        f.exposure = std::exp2(_camera.exposureLog2);
++    }
+ 
+     // The stages in list order, each followed by its GPU mark. The resolve
+     // blits under the state the world left, as it always has; the fullscreen
+@@ -574,7 +592,12 @@ void EngineGL33::PostBloom(const PostFrame& f)
+         const int sh = first ? f.h : p.bloomH[i - 1];
+         BindTex(0, src);
+         Set2(p.progBloomDown, "srcTexel", 1.0f / sw, 1.0f / sh);
+-        Set4(p.progBloomDown, "bloomParams", kBloomThreshold, kBloomKnee, first ? 1.0f : 0.0f, 0.0f);
++        if (f.camera)
++            Set4(p.progBloomDown, "bloomParams", rm::kCameraBloomThreshold, rm::kCameraBloomKnee, first ? 1.0f : 0.0f,
++                 0.0f);
++        else
++            Set4(p.progBloomDown, "bloomParams", kBloomThreshold, kBloomKnee, first ? 1.0f : 0.0f, 0.0f);
++        Set4(p.progBloomDown, "camParams", f.camera ? 1.0f : 0.0f, f.exposure, 0.0f, 0.0f);
+         DrawTo(p.bloomFbo[i], p.bloomW[i], p.bloomH[i]);
+     }
+     glUseProgram(p.progBloomUp);
+@@ -599,6 +622,7 @@ void EngineGL33::PostShafts(const PostFrame& f)
+     BindTex(2, p.colorTex);
+     Set4(p.progShafts, "sunScreen", f.sunU, f.sunV, f.shaftWeight, static_cast<float>(f.w) / static_cast<float>(f.h));
+     SetFloat(p.progShafts, "noiseShift", f.noiseShift);
++    Set4(p.progShafts, "camParams", f.camera ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+     DrawTo(p.shaftFbo, f.hw, f.hh);
+ }
+ 
+@@ -610,6 +634,9 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     // not run this frame reads as its 1x1 stand-in.
+     const PostTargets& p = _post;
+     const rm::PostStagePlan& plan = f.plan;
++    // The camera meters this frame for the frames to come.
++    if (f.camera)
++        PostCameraMeter(f);
+     glUseProgram(p.progComposite);
+     SetInt(p.progComposite, "colorTex", 0);
+     SetInt(p.progComposite, "aoTex", 2);
+@@ -632,6 +659,23 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
+     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    // The photoreal camera: exposure, curve, colour, glare and vignette.
++    if (f.camera)
++    {
++        const rm::ToneCurve curve = rm::MakeToneCurve(_lighting.camContrast, _lighting.camShoulder, _lighting.camWhite);
++        Set4(p.progComposite, "camParams", 1.0f, f.exposure, _lighting.camCurve, _lighting.camVignette);
++        Set4(p.progComposite, "camCurve", curve.a, curve.d, curve.b, curve.c);
++        const float* m = _camera.color.m;
++        Set4(p.progComposite, "camColor0", m[0], m[1], m[2], 0.0f);
++        Set4(p.progComposite, "camColor1", m[3], m[4], m[5], 0.0f);
++        Set4(p.progComposite, "camColor2", m[6], m[7], m[8], 0.0f);
++        Set4(p.progComposite, "camGlow", plan.bloomStrength * _lighting.camBloom * 0.1f, _lighting.sunShafts * 0.06f,
++             static_cast<float>(f.w) / static_cast<float>(std::max(f.h, 1)), 0.0f);
++    }
++    else
++    {
++        Set4(p.progComposite, "camParams", 0.0f, 1.0f, 0.0f, 0.0f);
++    }
+     DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 23db52b..cebea45 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -122,24 +122,55 @@ void main() {
+ }
+ )";
+ 
++// The photoreal camera's decoding (photoLight; Graphics/Remaster/PhotoCamera.hpp
++// CameraDecode): with it on, the world's passes stored scene light, linear up
++// to kCamKnee and the peak channel above it folded into the codes left (the
++// lit shaders' camEncode). camDecode unfolds it, hue kept, capped at kCamMax.
++// Pasted by every post pass that reads the frame's colour.
++static const char s_glslCameraCommon[] = R"(
++const float kCamKnee = 0.6; // kEncodeKnee
++const float kCamMax = 64.0; // kDecodeMax
++vec3 camDecode(vec3 disp) {
++    vec3 c = pow(max(disp, vec3(0.0)), vec3(2.2));
++    float m = max(c.r, max(c.g, c.b));
++    if (m <= kCamKnee) return c;
++    float u = min((m - kCamKnee) / (1.0 - kCamKnee), 0.9999);
++    float t = u / (1.0 - u);
++    return c * (min(kCamKnee + (1.0 - kCamKnee) * t, kCamMax) / m);
++}
++)";
++
+ // Bloom downsample: four bilinear taps (a 4x4 box). The first level linearises
+ // the display-space image and keeps only what is close to white, with a soft
+ // knee: the sky as a whole and sunlit walls stay out (no haze halo along the
+-// skyline), the sun, its halo, glints and sharp highlights bloom.
+-static const char s_psPostBloomDownGLSL[] = R"(#version 330 core
++// skyline), the sun, its halo, glints and sharp highlights bloom. Under the
++// photoreal camera (camParams.x) the first level unfolds the stored scene light
++// and takes it at the camera's exposure (camParams.y), so the threshold is the
++// light past the curve's shoulder.
++static const char s_psPostBloomDownHead[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D srcTex;
+ uniform vec2 srcTexel;
+ uniform vec4 bloomParams; // x threshold (linear), y knee, z 1 = first level
++uniform vec4 camParams;   // x 1 = the photoreal camera, y its exposure (linear)
+ out vec4 fragColor;
++)";
++
++static const char s_psPostBloomDownMain[] = R"(
++vec3 bloomTap(vec2 uv) {
++    vec3 c = texture(srcTex, uv).rgb;
++    // The camera's bloom: light past the shoulder, capped so the sun's disk
++    // spreads a glare, not a flood.
++    return (bloomParams.z > 0.5 && camParams.x > 0.5) ? min(camDecode(c) * camParams.y, vec3(8.0)) : c;
++}
+ void main() {
+-    vec3 c = texture(srcTex, vUV + srcTexel * vec2(-1.0, -1.0)).rgb;
+-    c += texture(srcTex, vUV + srcTexel * vec2(1.0, -1.0)).rgb;
+-    c += texture(srcTex, vUV + srcTexel * vec2(-1.0, 1.0)).rgb;
+-    c += texture(srcTex, vUV + srcTexel * vec2(1.0, 1.0)).rgb;
++    vec3 c = bloomTap(vUV + srcTexel * vec2(-1.0, -1.0));
++    c += bloomTap(vUV + srcTexel * vec2(1.0, -1.0));
++    c += bloomTap(vUV + srcTexel * vec2(-1.0, 1.0));
++    c += bloomTap(vUV + srcTexel * vec2(1.0, 1.0));
+     c *= 0.25;
+     if (bloomParams.z > 0.5) {
+-        c = pow(max(c, vec3(0.0)), vec3(2.2));
++        if (camParams.x < 0.5) c = pow(max(c, vec3(0.0)), vec3(2.2));
+         float peak = max(c.r, max(c.g, c.b));
+         float knee = bloomParams.y;
+         float soft = clamp(peak - bloomParams.x + knee, 0.0, 2.0 * knee);
+@@ -169,13 +200,17 @@ void main() {
+ // Sun shafts: march from each pixel toward the sun's screen position and gather
+ // the sky that is visible (depth at the far plane) along the way. Geometry in
+ // front of the sun - tree crowns, roofs, ridges - cuts the beams.
+-static const char s_psPostShaftsGLSL[] = R"(#version 330 core
++static const char s_psPostShaftsHead[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D depthTex;
+ uniform sampler2D colorTex;
+ uniform vec4 sunScreen; // xy sun position (uv), z on-screen weight, w aspect (width/height)
+ uniform float noiseShift; // TAA: this frame's shift of the march start (0 = the fixed pattern)
++uniform vec4 camParams;   // x 1 = the photoreal camera: the frame holds scene light (camDecode)
+ out vec4 fragColor;
++)";
++
++static const char s_psPostShaftsMain[] = R"(
+ void main() {
+     if (sunScreen.z <= 0.0) { fragColor = vec4(0.0); return; }
+     const int kSteps = 40;
+@@ -189,7 +224,10 @@ void main() {
+         uv += stepUV;
+         vec2 c = clamp(uv, vec2(0.001), vec2(0.999));
+         float sky = texture(depthTex, c).r >= 0.999999 ? 1.0 : 0.0;
+-        vec3 s = pow(texture(colorTex, c).rgb, vec3(2.2));
++        vec3 t = texture(colorTex, c).rgb;
++        // Under the camera the sky near the sun is far brighter than white:
++        // the shafts gather it capped, so they stay rays, not a white flood.
++        vec3 s = camParams.x > 0.5 ? min(camDecode(t), vec3(1.5)) : pow(t, vec3(2.2));
+         sum += s * sky * decay;
+         decay *= 0.965;
+     }
+@@ -199,7 +237,7 @@ void main() {
+ }
+ )";
+ 
+-static const char s_psPostCompositeGLSL[] = R"(#version 330 core
++static const char s_psPostCompositeHead[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D colorTex;
+ uniform sampler2D aoTex;
+@@ -212,8 +250,18 @@ uniform vec4 projInfo;   // as psPostAo
+ uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
+ uniform vec4 worldRect;  // as psPostAo
+ uniform vec4 debugView;  // x: 1 = show occlusion
++// The photoreal camera (photoLight; Graphics/Remaster/PhotoCamera.hpp):
++uniform vec4 camParams;  // x 1 = on, y exposure (linear), z curve (0 hue-keeping, 1 per channel, 2 ACES,
++                         // 3 Neutral), w vignette
++uniform vec4 camCurve;   // the filmic curve y = x^a / (x^(a d) b + c): a, d, b, c
++uniform vec4 camColor0;  // rows of the white balance times the scene saturation
++uniform vec4 camColor1;
++uniform vec4 camColor2;
++uniform vec4 camGlow;    // x bloom gain, y shaft gain, z aspect (w / h)
+ out vec4 fragColor;
++)";
+ 
++static const char s_psPostCompositeMain[] = R"(
+ // The shaft pass gathers the sky toward the sun, which is the light the air
+ // scatters toward the eye along an endless ray. A surface ends the ray: only
+ // the air in front of it scatters, 1 - exp(-distance / length) of the sky's
+@@ -228,6 +276,36 @@ float shaftInscatter() {
+     return 1.0 - exp(-max(dist, 0.0) * depthMap.z);
+ }
+ 
++// The camera's tone curve (camParams.z): the filmic curve on the peak channel
++// with the channel ratios kept until the output nears white (hue-keeping), the
++// same curve per channel, the ACES fit (Narkowicz) or Khronos PBR Neutral.
++float camCurveY(float x) {
++    x = max(x, 0.0);
++    return clamp(pow(x, camCurve.x) / (pow(x, camCurve.x * camCurve.y) * camCurve.z + camCurve.w), 0.0, 1.0);
++}
++vec3 camTone(vec3 x) {
++    int kind = int(camParams.z + 0.5);
++    if (kind == 1) return vec3(camCurveY(x.r), camCurveY(x.g), camCurveY(x.b));
++    if (kind == 2) {
++        x *= 0.6;
++        return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
++    }
++    if (kind == 3) {
++        float lo = min(x.r, min(x.g, x.b));
++        x -= lo < 0.08 ? lo - 6.25 * lo * lo : 0.04;
++        float pk = max(x.r, max(x.g, x.b));
++        if (pk < 0.76) return x;
++        float newPeak = 1.0 - 0.0576 / (pk - 0.52);
++        x *= newPeak / pk;
++        return mix(x, vec3(newPeak), 1.0 - 1.0 / (0.15 * (pk - newPeak) + 1.0));
++    }
++    float peak = max(x.r, max(x.g, x.b));
++    if (peak <= 0.0) return vec3(0.0);
++    float y = camCurveY(peak);
++    vec3 ratio = x / peak;
++    return mix(ratio, vec3(1.0), pow(y, 4.0)) * y; // kCrosstalk
++}
++
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
+@@ -236,26 +314,83 @@ void main() {
+     // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+     float share = 1.0 - clamp(c.a, 0.0, 1.0);
+     float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
++    vec3 shaft = texture(shaftTex, vUV).rgb;
++    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
++    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
++    if (camParams.x > 0.5) {
++        // The camera: the stored scene light, its occlusion, the glare of
++        // light past the shoulder and the shafts, at the metered exposure;
++        // white balance and saturation; the curve; the lens's vignette; a
++        // dither everywhere (the curve moves every value).
++        vec3 x = camDecode(c.rgb) * keep * camParams.y;
++        x += texture(bloomTex, vUV).rgb * camGlow.x;
++        x += shaft * shaftColor.rgb * (camGlow.y * camParams.y);
++        x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
++        vec3 y = camTone(x);
++        vec2 q = (vUV - 0.5) * vec2(camGlow.z, 1.0);
++        y *= 1.0 - camParams.w * smoothstep(0.1, 1.1, dot(q, q) * 2.2);
++        vec3 col = pow(clamp(y, 0.0, 1.0), vec3(1.0 / 2.2));
++        col += (n + m - 1.0) / 255.0;
++        fragColor = vec4(col, 1.0);
++        return;
++    }
+     vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+-    vec3 shaft = texture(shaftTex, vUV).rgb;
+-    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
+     vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft * shaftColor.rgb * compParams.z;
+     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
+     vec3 col = pow(lin, vec3(1.0 / 2.2));
+     // Dither only what the composite changed: elsewhere the frame passes
+     // through exactly (the 2.2 round trip is exact on 8-bit values).
+     if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5)) {
+-        float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+-        float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+         col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
+     }
+     fragColor = vec4(col, 1.0);
+ }
+ )";
+ 
++// The photoreal camera's meter (photoLight; PhotoCamera.hpp Meter): the
++// resolved frame into kMeterWidth x kMeterHeight texels, each the weighted
++// mean log2 luminance of the scene light (camDecode) over a 4 x 4 grid of
++// bilinear taps across its block, its weight (centre weighted, sky taps
++// counting meterParams.x) and the block's brightest and darkest tap. A block
++// that is black through (an optic's mask, pillarbox bars) weighs nothing, so
++// the camera meters the scene inside it. Read back by the CPU, which builds
++// the histogram.
++static const char s_psPostMeterHead[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D colorTex;
++uniform sampler2D depthTex;
++uniform vec4 meterParams; // x the sky's weight, y 1 = the frame holds scene light, zw meter size
++out vec4 fragColor;
++)";
++
++static const char s_psPostMeterMain[] = R"(
++void main() {
++    vec2 cell = floor(gl_FragCoord.xy);
++    float sum = 0.0, wsum = 0.0, hi = -32.0, lo = 32.0;
++    for (int j = 0; j < 4; ++j) {
++        for (int i = 0; i < 4; ++i) {
++            vec2 uv = (cell + (vec2(float(i), float(j)) + 0.5) / 4.0) / meterParams.zw;
++            vec3 t = textureLod(colorTex, uv, 0.0).rgb;
++            vec3 lin = meterParams.y > 0.5 ? camDecode(t) : pow(t, vec3(2.2));
++            float l = log2(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-5));
++            float w = textureLod(depthTex, uv, 0.0).r >= 0.999999 ? meterParams.x : 1.0;
++            sum += l * w;
++            wsum += w;
++            hi = max(hi, l);
++            lo = min(lo, l);
++        }
++    }
++    vec2 q = (gl_FragCoord.xy / meterParams.zw - 0.5) * vec2(1.0, 0.8);
++    float centre = 0.3 + 0.7 * exp(-dot(q, q) / (2.0 * 0.3 * 0.3));
++    if (hi < -15.0) centre = 0.0; // black through (log2 of the 1e-5 floor is -16.6)
++    fragColor = vec4(sum / max(wsum, 1e-6), wsum / 16.0 * centre, hi, lo);
++}
++)";
++
+ // Half-resolution linear depth (the LinearDepth stage), for the stages that
+ // trace or upsample at half resolution. Output r = view depth in metres of one
+ // of the four full-resolution pixels under the texel, 1e6 for the sky. Its
+@@ -560,10 +695,10 @@ const PostShaderDef kPostShaders[] = {
+     {"vsPost", {s_vsPostGLSL}},
+     {"psPostAo", {s_psPostAoInputs, s_glslPostCommon, s_psPostAoMain}},
+     {"psPostAoBlur", {s_psPostAoBlurGLSL}},
+-    {"psPostBloomDown", {s_psPostBloomDownGLSL}},
++    {"psPostBloomDown", {s_psPostBloomDownHead, s_glslCameraCommon, s_psPostBloomDownMain}},
+     {"psPostBloomUp", {s_psPostBloomUpGLSL}},
+-    {"psPostShafts", {s_psPostShaftsGLSL}},
+-    {"psPostComposite", {s_psPostCompositeGLSL}},
++    {"psPostShafts", {s_psPostShaftsHead, s_glslCameraCommon, s_psPostShaftsMain}},
++    {"psPostComposite", {s_psPostCompositeHead, s_glslCameraCommon, s_psPostCompositeMain}},
+     {"psPostLinearDepth", {s_psPostLinearDepthInputs, s_glslPostCommon, s_psPostLinearDepthMain}},
+     {"psPostDebugDepth", {s_psPostDebugDepthGLSL}},
+     {"psPostTaa", {s_psPostTaaInputs, s_psPostTaaMain}},
+@@ -575,6 +710,7 @@ const PostShaderDef kPostShaders[] = {
+      {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyViewMeanMainGLSL}},
+     {"psPostLumaSharpen", {s_psPostLumaSharpenGLSL}},
+     {"psCanopySun", {Poseidon::gl33lighting::kPostCanopySunGLSL}},
++    {"psPostMeter", {s_psPostMeterHead, s_glslCameraCommon, s_psPostMeterMain}},
+ };
+ constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
+ static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
+index 1997ed2..caf2420 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
+@@ -32,6 +32,7 @@
+ #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
+ #include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+@@ -298,6 +299,36 @@ bool EngineGL33::PollSkyTables()
+     return false;
+ }
+ 
++bool EngineGL33::PhysicalSkyFor(float sunElevationRad, rm::PhysicalSky& out)
++{
++    // The photoreal rig (photoLight): the clear sky's light from the same
++    // atmosphere tables, integrated on the CPU when the sun has moved
++    // kPhysicalSkyRebuildDeg (about a millisecond), and the reference once per
++    // haze.
++    if (!PollSkyTables())
++        return false;
++    CameraState& c = _camera;
++    const float haze = s_sky.tables.haze;
++    if (c.referenceHaze != haze)
++    {
++        const rm::PhysicalSky ref = rm::ComputePhysicalSky(s_sky.tables, rm::kPhysicalReferenceSunDeg / kDeg);
++        c.referenceIlluminant = rm::PhysicalIlluminant(ref);
++        c.referenceIrradiance = rm::Luminance(c.referenceIlluminant);
++        c.referenceHaze = haze;
++    }
++    const float deg = sunElevationRad * kDeg;
++    if (!c.physical.valid || c.physicalHaze != haze ||
++        std::fabs(c.physical.sunElevationDeg - deg) >= rm::kPhysicalSkyRebuildDeg)
++    {
++        c.physical = rm::ComputePhysicalSky(s_sky.tables, sunElevationRad);
++        c.physicalHaze = haze;
++    }
++    out = c.physical;
++    out.referenceIrradiance = c.referenceIrradiance;
++    out.referenceIlluminant = c.referenceIlluminant;
++    return out.valid && out.referenceIrradiance > 0.0f;
++}
++
+ bool EngineGL33::RemasterSkyPending() const
+ {
+     return s_sky.building || SkyDensityPending();
+@@ -425,14 +456,18 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
+         return;
+     const bool wantAtmosphere = rm::FeatureOn(_lighting.features, rm::Feature::Atmosphere);
+     const bool wantClouds = SkyCloudsWanted();
+-    // The sun disk is the clouds' alone (it dims behind a dome cloud).
++    // The photoreal camera (photoLight) takes the sky as scene light too: the
++    // dome and the sun disk draw through the remastered programs for it.
++    const bool wantCamera = CameraWanted();
++    // The sun disk is the clouds' (it dims behind a dome cloud) and the
++    // camera's (it is light far brighter than its sprite).
+     const bool sunDisk = mode == Poseidon::RemasterSky::Sun;
+-    if (sunDisk ? !wantClouds : !wantAtmosphere && !wantClouds)
++    if (sunDisk ? !wantClouds && !wantCamera : !wantAtmosphere && !wantClouds && !wantCamera)
+         return;
+     // Until the worker has the atmosphere tables the sky table stays off (the
+     // gate reads "atmosphere tables building").
+     const bool tables = !sunDisk && wantAtmosphere && PollSkyTables();
+-    if (!tables && !wantClouds)
++    if (!tables && !wantClouds && !wantCamera)
+         return;
+     // Draws queued so far keep their programs.
+     FlushQueues();
+@@ -464,7 +499,8 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
+             clouds = _featureGates[rm::Feature::SkyCloudShadows].on;
+             break;
+     }
+-    if (!(sunDisk ? clouds : atmosphere || clouds))
++    const bool camera = _camera.frameOn && _camera.frame == GetFrameCounter();
++    if (!(sunDisk ? clouds || camera : atmosphere || clouds || camera))
+     {
+         if (s_sky.forcedPrograms)
+         {
+@@ -576,7 +612,11 @@ void EngineGL33::UploadLitSky(const Vector3& toSun, float skyThrough)
+     Color dome = sun->SkyColor() * _accomodateEye;
+     dome.SaturateMinMax();
+     const Color glow = sun->SunSkyColor() * _accomodateEye;
+-    SetLitSlot(LC::AtmoDome, dome.R(), dome.G(), dome.B(), std::max(0.0f, std::min(1.0f, _lighting.atmoHue)));
++    // Under the photoreal camera the clear sky takes the camera's hue knob
++    // (the physical hue by default).
++    const bool photoCamera = _camera.frameOn && _camera.frame == GetFrameCounter();
++    const float hue = photoCamera ? _lighting.camSkyHue : _lighting.atmoHue;
++    SetLitSlot(LC::AtmoDome, dome.R(), dome.G(), dome.B(), std::max(0.0f, std::min(1.0f, hue)));
+     SetLitSlot(LC::AtmoGlow, glow.R(), glow.G(), glow.B(), _lighting.atmoSat);
+     // The clouds' light: the classic dome light's luminance, split into the
+     // sun seen from the cloud deck and the sky above (whose colour the shader
+diff --git a/arma_CWR/tests/rendering/captures/gen_look_light.py b/arma_CWR/tests/rendering/captures/gen_look_light.py
+new file mode 100644
+index 0000000..226595b
+--- /dev/null
++++ b/arma_CWR/tests/rendering/captures/gen_look_light.py
+@@ -0,0 +1,104 @@
++"""Generate the look-light capture tests: the eight hero views of the photoreal
++light and camera lane (switch photoLight), each shot in several lighting modes
++in one game, so the Original (Classic) and the overhaul share camera, clock,
++weather, props and clouds.
++
++    python gen_look_light.py --modes "classic=classic;off=remastered,photoLight=0;on=remastered" [--tag NAME]
++                             [--only view,view] [--frames N]
++
++Writes look_<tag>_<world>.test.sqf + .test.toml next to this file (one test
++per world that has a selected view). Each mode is `label=setting`; the shot of
++view V in mode label L is saved as <V>__<L>.png. 1920x1080 windowed, render
++scale 1.0, 4x MSAA, the presented frame (capgen.header).
++"""
++import argparse
++from pathlib import Path
++
++import capgen
++import views
++
++HERO_NAMES = {
++    "Abel": ["lowsun_fp", "noon_fields", "forest_edge_golden", "sunrise_ridge", "coastline_sunset", "town_night",
++             "woods_pine2_evening", "blue_hour_coast"],
++    "Eden": ["overcast_broken"],
++    "Sinai": ["sinai_desert_noon"],
++}
++TABLES = {"Abel": views.TIMING_ABEL, "Eden": views.TIMING_EDEN, "Sinai": views.TIMING_SINAI}
++SIM_T0, SIM_DT = 2000, 600
++# The lane's own views: the blue hour over the west coast (sun 4.9 deg under
++# the horizon, looking into the afterglow).
++EXTRA = {
++    "blue_hour_coast": dict(name="blue_hour_coast", x=1550, z=5150, eye=3, h=295, p=2, date=[1985, 7, 5, 19, 55],
++                            vd=4000),
++}
++
++
++def find(world, name):
++    if name in EXTRA:
++        return dict(EXTRA[name])
++    for v in TABLES[world]:
++        if v["name"] == name:
++            v = dict(v)
++            v.pop("f10", None)
++            v.pop("note", None)
++            return v
++    raise KeyError(name)
++
++
++def shot(v, label, setting, shot_label, frames):
++    out = [f'"{setting}" call capMode',
++           f"triSimFrames {frames}",
++           "[] call capReadTimers",
++           "[] call capPin"]
++    if v.get("refresh"):
++        out.append(v["refresh"])
++    out += ["triSimFrames 3",
++            f'triScreenshot "{shot_label}"',
++            f'"{shot_label}" call capRecord']
++    return out
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--modes", required=True, help="label=setting;label=setting;...")
++    ap.add_argument("--tag", default="light")
++    ap.add_argument("--only", default="")
++    ap.add_argument("--frames", type=int, default=90)
++    ap.add_argument("--out", default=str(capgen.HERE))
++    a = ap.parse_args()
++    modes = []
++    for item in a.modes.split(";"):
++        item = item.strip()
++        if not item:
++            continue
++        label, setting = item.split("=", 1)
++        modes.append((label.strip(), setting.strip()))
++    want = {s.strip() for s in a.only.split(",") if s.strip()}
++    written = []
++    index = 0
++    for world, names in HERO_NAMES.items():
++        vs = [find(world, n) for n in names if not want or n in want]
++        if not vs:
++            continue
++        title = f"look-light hero views on {world}: gen_look_light.py, modes {', '.join(m[0] for m in modes)}."
++        lines = [capgen.header(world, vs[0], title)]
++        for v in vs:
++            lines.append(f"\n// ---- {v['name']}")
++            lines += capgen.begin(v, v["name"], False, sim_time=SIM_T0 + SIM_DT * index)
++            index += 1
++            lines.append("triSimFrames 150")
++            for label, setting in modes:
++                lines += shot(v, v["name"], setting, f"{v['name']}__{label}", a.frames)
++            lines += capgen.end(v, False)
++        lines.append('\ncall { "view=done;event=done" call capLog }')
++        lines.append("triEndTest")
++        name = f"look_{a.tag}_{world.lower()}"
++        out = Path(a.out)
++        capgen.write(out / f"{name}.test.sqf", "\n".join(lines) + "\n")
++        capgen.write(out / f"{name}.test.toml", capgen.toml(world, title, views.WORLDS, timeout=3600))
++        written.append(f"tests/rendering/captures/{name}.test.sqf")
++    print(",".join(written))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index afafb85..4ce2aba 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -176,6 +176,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_sea_waves.cpp
+     Graphics/test_sky_density.cpp
+     Graphics/test_canopy.cpp
++    Graphics/test_photo_camera.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index a88f0c1..51a7031 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -113,7 +113,8 @@ TEST_CASE("Feature switches: each switch reads and writes its own FeatureSet mem
+     CHECK(set.drawGrouping == 2.0f);
+     CHECK(set.taa == 4.0f);
+     CHECK(set.combatLights == 14.0f);
+-    CHECK(set.sharpen == static_cast<float>(kFeatureCount + 1));
++    CHECK(set.sharpen == 27.0f);
++    CHECK(set.photoLight == static_cast<float>(kFeatureCount + 1));
+ }
+ 
+ TEST_CASE("Feature switches: the table holds every knob once, with a usable range", "[remaster][FeatureSwitches]")
+@@ -313,8 +314,9 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+     }
+     // Every knob with a parent sits under a landed feature switch, in its
+     // track's group: TAA's three, the sky table's three (A7, test_atmosphere.cpp),
+-    // texsharp's two (B11), the sun shadows' three (B1, below) and the sea's
+-    // three (B5).
++    // texsharp's two (B11), the sun shadows' three (B1, below), the sea's
++    // three (B5) and the photoreal camera's thirteen (look lane "light",
++    // test_photo_camera.cpp).
+     int children = 0;
+     int taaChildren = 0;
+     for (int i = 0; i < LightingKeyCount(); ++i)
+@@ -325,7 +327,8 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         INFO(k.key);
+         const std::string_view parent(k.parent);
+         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
+-               parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves"));
++               parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" ||
++               parent == "photoLight"));
+         REQUIRE(FindFeature(k.parent) != nullptr);
+         CHECK(FindFeature(k.parent)->landed);
+         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
+@@ -333,7 +336,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         ++children;
+     }
+     CHECK(taaChildren == 3);
+-    CHECK(children == 14);
++    CHECK(children == 27);
+ }
+ 
+ TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
+@@ -742,8 +745,11 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+         const bool sea = info.id == Feature::SeaWaves;
+         const bool canopy = info.id == Feature::CanopyShadows;
+         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
+-        CHECK(info.landed ==
+-              (perf || taa || lightList || atmosphere || texsharp || shadows || shade || sea || canopy || clouds));
++        // The look lane "light" (photoLight, step L1): the camera's meter and
++        // curve are in the composite's section.
++        const bool look = info.id == Feature::PhotoLight;
++        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || sea || canopy ||
++                              clouds || look));
+         if (info.landed)
+         {
+             CHECK(std::string_view(info.step) == (perf         ? "A4"
+@@ -755,6 +761,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+                                                   : sea        ? "B5"
+                                                   : canopy     ? "B9"
+                                                   : clouds     ? "B10"
++                                                  : look       ? "L1"
+                                                                : "B11"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+@@ -777,7 +784,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     CHECK(s.find(" lowSunRig=1:on:always ") != std::string::npos);
+     CHECK(s.find(" crownCanopy=1:on:always ") != std::string::npos);
+     CHECK(s.find(" seaWaves=1:on:per-sea-fragment ") != std::string::npos);
+-    CHECK(s.find("landed=15/26") != std::string::npos);
++    CHECK(s.find("landed=16/27") != std::string::npos);
+     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
+     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
+     CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+new file mode 100644
+index 0000000..aae7726
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -0,0 +1,324 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_message.hpp>
++#include <catch2/catch_test_macros.hpp>
++#include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
++#include <Poseidon/Graphics/Remaster/PostStages.hpp>
++
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <vector>
++
++// The photoreal light and camera (look lane "light", feature switch
++// photoLight; Graphics/Remaster/PhotoCamera.hpp): the world pass's encoding,
++// the meter, the exposure and its adaptation, the tone curve, the white
++// balance, the physical sun and sky from the atmosphere and the rig built on
++// them, the gate and the post plan.
++
++using namespace Poseidon::remaster;
++
++namespace
++{
++constexpr float kPi = 3.14159265f;
++
++const AtmosphereTables& Tables()
++{
++    static const AtmosphereTables t = BuildAtmosphereTables(1.0f);
++    return t;
++}
++
++PhysicalSky SkyAt(float deg)
++{
++    PhysicalSky p = ComputePhysicalSky(Tables(), deg * kPi / 180.0f);
++    const PhysicalSky ref = ComputePhysicalSky(Tables(), kPhysicalReferenceSunDeg * kPi / 180.0f);
++    p.referenceIlluminant = PhysicalIlluminant(ref);
++    p.referenceIrradiance = Luminance(p.referenceIlluminant);
++    return p;
++}
++
++LightRigInputs PhysicalInputs(float deg, float skyThrough = 1.0f)
++{
++    LightRigInputs in;
++    const float e = deg * kPi / 180.0f;
++    in.towardSun[0] = std::cos(e);
++    in.towardSun[1] = std::sin(e);
++    in.towardSun[2] = 0.0f;
++    in.fogColor = Rgb(0.75f, 0.8f, 0.9f);
++    in.classicSunDiffuse = Rgb(0.9f, 0.85f, 0.7f);
++    in.skyThrough = skyThrough;
++    in.physical = SkyAt(deg);
++    return in;
++}
++
++float RedOverBlue(const Rgb& c)
++{
++    return c.r / std::max(c.b, 1e-9f);
++}
++} // namespace
++
++TEST_CASE("PhotoCamera: the world pass's encoding is linear below the knee and invertible above it",
++          "[Remaster][PhotoCamera]")
++{
++    for (float x : {0.0f, 0.01f, 0.18f, 0.5f, kEncodeKnee})
++        CHECK(EncodePeak(x) == Catch::Approx(x));
++    float prev = 0.0f;
++    for (float x = 0.61f; x < 60.0f; x *= 1.3f)
++    {
++        const float e = EncodePeak(x);
++        CHECK(e > prev);
++        CHECK(e < 1.0f);
++        CHECK(DecodePeak(e) == Catch::Approx(x).epsilon(1e-3));
++        prev = e;
++    }
++    // Hue kept: the encoded colour is the scaled colour.
++    const Rgb c(3.0f, 1.5f, 0.3f);
++    const Rgb back = CameraDecode(CameraEncode(c));
++    CHECK(back.r == Catch::Approx(c.r).epsilon(1e-3));
++    CHECK(back.g == Catch::Approx(c.g).epsilon(1e-3));
++    CHECK(back.b == Catch::Approx(c.b).epsilon(1e-3));
++    // An 8-bit top code decodes to a bounded light.
++    CHECK(DecodePeak(1.0f) <= kDecodeMax);
++}
++
++TEST_CASE("PhotoCamera: the meter ignores the darkest and brightest shares and finds small bright patches",
++          "[Remaster][PhotoCamera]")
++{
++    // 90 samples at -3, 5 very dark, 5 very bright.
++    std::vector<float> l, w, pk;
++    for (int i = 0; i < 90; ++i)
++        l.push_back(-3.0f);
++    for (int i = 0; i < 5; ++i)
++        l.push_back(-14.0f);
++    for (int i = 0; i < 5; ++i)
++        l.push_back(4.0f);
++    w.assign(l.size(), 1.0f);
++    pk = l;
++    MeterResult m = Meter(l.data(), w.data(), pk.data(), static_cast<int>(l.size()));
++    REQUIRE(m.valid);
++    // The 5 % darkest go; 2 of the 5 bright samples are left inside the cut.
++    CHECK(m.mean == Catch::Approx((90.0f * -3.0f + 2.0f * 4.0f) / 92.0f).margin(0.02));
++    CHECK(m.highlight == Catch::Approx(4.0f));
++    // A bright patch inside a block shows through the block's brightest tap.
++    pk.assign(l.size(), -3.0f);
++    for (int i = 0; i < 10; ++i)
++        pk[i] = 2.0f;
++    m = Meter(l.data(), w.data(), pk.data(), static_cast<int>(l.size()));
++    CHECK(m.highlight >= 2.0f);
++    // No weight, no meter.
++    std::vector<float> zero(l.size(), 0.0f);
++    CHECK_FALSE(Meter(l.data(), zero.data(), nullptr, static_cast<int>(l.size())).valid);
++}
++
++TEST_CASE("PhotoCamera: exposure keeps part of a scene's darkness, guards its highlights and darkens the night",
++          "[Remaster][PhotoCamera]")
++{
++    LightingTuning t;
++    t.camEv = 0.0f;
++    MeterResult day;
++    day.valid = true;
++    day.mean = kDaylightMeanLog2;
++    day.highlight = kDaylightMeanLog2 + 2.0f;
++    // A daylight frame: its mean goes to middle grey.
++    CHECK(TargetExposureLog2(day, 0.0f, t) == Catch::Approx(std::log2(kMiddleGrey) - kDaylightMeanLog2));
++    // Four stops darker: opened up, but less than four stops.
++    MeterResult dark = day;
++    dark.mean -= 4.0f;
++    dark.highlight -= 4.0f;
++    const float opened = TargetExposureLog2(dark, 0.0f, t) - TargetExposureLog2(day, 0.0f, t);
++    CHECK(opened > 1.0f);
++    CHECK(opened < 4.0f);
++    // A bright patch far above the mean pulls the exposure down.
++    MeterResult hot = dark;
++    hot.highlight = dark.mean + 9.0f;
++    CHECK(TargetExposureLog2(hot, 0.0f, t) < TargetExposureLog2(dark, 0.0f, t));
++    // At night it never brightens past kExposureNightMaxLog2 and sits lower.
++    CHECK(TargetExposureLog2(dark, 1.0f, t) <= kExposureNightMaxLog2 + 1e-6f);
++    CHECK(TargetExposureLog2(dark, 1.0f, t) < TargetExposureLog2(dark, 0.0f, t));
++    // The camera's night follows the sun, not classic's night effect (1 at
++    // any sun under the horizon): the blue hour is not exposed as night.
++    CHECK(CameraNight(5.0f) == 0.0f);
++    CHECK(CameraNight(-15.0f) == 1.0f);
++    CHECK(CameraNight(-4.9f) > 0.0f);
++    CHECK(CameraNight(-4.9f) < 0.5f);
++    // camEv adds.
++    LightingTuning plus = t;
++    plus.camEv = 1.0f;
++    CHECK(TargetExposureLog2(day, 0.0f, plus) == Catch::Approx(TargetExposureLog2(day, 0.0f, t) + 1.0f));
++}
++
++TEST_CASE("PhotoCamera: eye adaptation converges in about its time constant, slower into the dark",
++          "[Remaster][PhotoCamera]")
++{
++    float e = 0.0f;
++    for (int i = 0; i < 60; ++i)
++        e = AdaptExposureLog2(e, -2.0f, 1.0f / 60.0f, 1.0f);
++    CHECK(e == Catch::Approx(-2.0f * (1.0f - std::exp(-1.0f))).margin(0.01));
++    float up = 0.0f;
++    for (int i = 0; i < 60; ++i)
++        up = AdaptExposureLog2(up, 2.0f, 1.0f / 60.0f, 1.0f);
++    CHECK(up < 2.0f * (1.0f - std::exp(-1.0f)));
++    CHECK(AdaptExposureLog2(0.5f, 1.0f, 0.1f, 0.0f) == 1.0f);
++}
++
++TEST_CASE("PhotoCamera: the filmic curve passes middle grey, reaches white and keeps hue until it whitens",
++          "[Remaster][PhotoCamera]")
++{
++    const ToneCurve c = MakeToneCurve(1.35f, 0.97f, 16.0f);
++    CHECK(ApplyToneCurve(c, kMiddleGrey) == Catch::Approx(kCurveMidOut).epsilon(1e-3));
++    CHECK(ApplyToneCurve(c, kMiddleGrey * 16.0f) == Catch::Approx(1.0f).epsilon(1e-3));
++    float prev = 0.0f;
++    for (float x = 0.001f; x < 3.0f; x *= 1.2f)
++    {
++        const float y = ApplyToneCurve(c, x);
++        CHECK(y >= prev);
++        prev = y;
++    }
++    // The toe: a dark value comes out darker than linear.
++    CHECK(ApplyToneCurve(c, kMiddleGrey / 8.0f) < kMiddleGrey / 8.0f);
++    // An orange at middle grey keeps its ratios; far past white it is white.
++    const Rgb orange(0.18f, 0.09f, 0.03f);
++    const Rgb mid = ApplyToneCurveHueKeeping(c, orange);
++    CHECK(mid.g / mid.r == Catch::Approx(0.5f).margin(0.03));
++    const Rgb hot = ApplyToneCurveHueKeeping(c, orange * 40.0f);
++    CHECK(hot.b == Catch::Approx(1.0f).margin(0.01));
++}
++
++TEST_CASE("PhotoCamera: the white balance makes its target white and keeps white's luminance",
++          "[Remaster][PhotoCamera]")
++{
++    const Rgb warm(1.0f, 0.75f, 0.45f);
++    const Mat3 wb = WhiteBalance(warm, 1.0f);
++    const Rgb w = wb.Apply(warm * (1.0f / Luminance(warm)));
++    CHECK(w.r == Catch::Approx(w.g).epsilon(0.01));
++    CHECK(w.b == Catch::Approx(w.g).epsilon(0.01));
++    CHECK(Luminance(w) == Catch::Approx(1.0f).epsilon(1e-3));
++    const Mat3 none = WhiteBalance(warm, 0.0f);
++    for (int i = 0; i < 9; ++i)
++        CHECK(none.m[i] == Catch::Approx(i % 4 == 0 ? 1.0f : 0.0f));
++    // The target follows the light by the share only.
++    const Rgb ref(1.0f, 1.0f, 1.0f);
++    CHECK(RedOverBlue(WhiteBalanceTarget(ref, warm, 0.0f)) == Catch::Approx(1.0f));
++    CHECK(RedOverBlue(WhiteBalanceTarget(ref, warm, 1.0f)) == Catch::Approx(RedOverBlue(warm)));
++    CHECK(WhiteBalanceShare(60.0f) > WhiteBalanceShare(8.0f));
++    // Saturation keeps grey.
++    const Rgb g = Saturation(1.3f).Apply(Rgb(0.4f, 0.4f, 0.4f));
++    CHECK(g.r == Catch::Approx(0.4f));
++    CHECK(g.b == Catch::Approx(0.4f));
++}
++
++TEST_CASE("PhotoCamera: the physical sun out-lights the sky at noon, and a low sun is golden and dim",
++          "[Remaster][PhotoCamera]")
++{
++    const PhysicalSky noon = SkyAt(60.0f);
++    const PhysicalSky low = SkyAt(10.0f);
++    const PhysicalSky twilight = SkyAt(-4.0f);
++    REQUIRE(noon.valid);
++    const float noonSun = Luminance(noon.sun) * std::sin(60.0f * kPi / 180.0f);
++    const float noonSky = Luminance(noon.skyUp);
++    char buf[512];
++    std::snprintf(buf, sizeof(buf),
++                  "noon sun %.3f (%.3f %.3f %.3f) sky %.3f (%.3f %.3f %.3f) walls %.3f / %.3f horizon %.4f | "
++                  "10 deg sun %.3f (%.3f %.3f %.3f) sky %.3f (%.3f %.3f %.3f) walls %.3f / %.3f | -4 deg sky %.4f",
++                  noonSun, noon.sun.r, noon.sun.g, noon.sun.b, noonSky, noon.skyUp.r, noon.skyUp.g, noon.skyUp.b,
++                  Luminance(noon.skySunward), Luminance(noon.skyAntiSun), noon.horizonRadiance,
++                  Luminance(low.sun) * std::sin(10.0f * kPi / 180.0f), low.sun.r, low.sun.g, low.sun.b,
++                  Luminance(low.skyUp), low.skyUp.r, low.skyUp.g, low.skyUp.b, Luminance(low.skySunward),
++                  Luminance(low.skyAntiSun), Luminance(twilight.skyUp));
++    INFO(buf);
++    // Clear noon: the sun gives several times the sky's light to the ground.
++    CHECK(noonSun / noonSky > 4.0f);
++    CHECK(noonSun / noonSky < 15.0f);
++    // The sky light is blue, the noon sun near white, a low sun golden.
++    CHECK(RedOverBlue(noon.skyUp) < 0.8f);
++    CHECK(RedOverBlue(noon.sun) > 1.0f);
++    CHECK(RedOverBlue(low.sun) > RedOverBlue(noon.sun) * 1.5f);
++    // A low sun lights the ground far less; the wall toward it sees more sky.
++    CHECK(Luminance(low.sun) * std::sin(10.0f * kPi / 180.0f) < noonSun * 0.4f);
++    CHECK(Luminance(low.skySunward) > Luminance(low.skyAntiSun));
++    // Twilight: no sun, a dim sky.
++    CHECK(Luminance(twilight.sun) == 0.0f);
++    CHECK(Luminance(twilight.skyUp) < noonSky * 0.2f);
++    // The integral runs on the render thread when the sun has moved: a few
++    // milliseconds at most.
++    const auto t0 = std::chrono::steady_clock::now();
++    for (int i = 0; i < 5; ++i)
++        (void)ComputePhysicalSky(Tables(), (20.0f + i) * kPi / 180.0f);
++    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 5.0;
++    INFO("physical sky integral ms: " << ms);
++    CHECK(ms < 25.0);
++}
++
++TEST_CASE("PhotoCamera: the physical rig shows white at the classic noon level and replaces the meter",
++          "[Remaster][PhotoCamera]")
++{
++    LightingTuning t;
++    const LightRigInputs in = PhysicalInputs(kPhysicalReferenceSunDeg);
++    const LightRig rig = ComputeLightRig(in, t);
++    REQUIRE(rig.physical);
++    const float sinRef = std::sin(kPhysicalReferenceSunDeg * kPi / 180.0f);
++    // A white surface facing up: 1.6 times the irradiance is 1 (as classic noon).
++    CHECK(1.6f * (Luminance(rig.sun) * sinRef + Luminance(rig.skyZenith)) == Catch::Approx(1.0f).epsilon(0.02));
++    CHECK(rig.exposure == Catch::Approx(t.exposure));
++    // The sun dominates; the shade is the blue sky.
++    CHECK(Luminance(rig.sun) * sinRef > 4.0f * Luminance(rig.skyZenith));
++    CHECK(RedOverBlue(rig.skyZenith) < 0.8f);
++    // A low sun: far less light (the camera's exposure brings it back).
++    const LightRig low = ComputeLightRig(PhysicalInputs(8.0f), t);
++    CHECK(Luminance(low.illuminant) < 0.3f * Luminance(rig.illuminant));
++    CHECK(RedOverBlue(low.sun) > RedOverBlue(rig.sun));
++    // Overcast: dimmer sun, a sky that greys and gains the cloud's diffuse light.
++    const LightRig grey = ComputeLightRig(PhysicalInputs(50.0f, 0.1f), t);
++    const LightRig clear = ComputeLightRig(PhysicalInputs(50.0f, 1.0f), t);
++    CHECK(Luminance(grey.sun) < 0.5f * Luminance(clear.sun));
++    CHECK(Luminance(grey.skyZenith) > Luminance(clear.skyZenith));
++    CHECK(RedOverBlue(grey.skyZenith) > RedOverBlue(clear.skyZenith));
++    CHECK(grey.skyGain == Catch::Approx(1.0f));
++    // The switch off: the old rig, to the bit.
++    LightingTuning off = t;
++    off.features.photoLight = 0.0f;
++    const LightRig old = ComputeLightRig(in, off);
++    LightRigInputs plain = in;
++    plain.physical = PhysicalSky{};
++    const LightRig ref = ComputeLightRig(plain, t);
++    CHECK_FALSE(old.physical);
++    CHECK(old.sun.r == ref.sun.r);
++    CHECK(old.skyZenith.b == ref.skyZenith.b);
++    CHECK(old.exposure == ref.exposure);
++}
++
++TEST_CASE("PhotoCamera: the switch, its sub-knobs, its gate and the post plan", "[Remaster][PhotoCamera]")
++{
++    const FeatureInfo* f = FindFeature("photoLight");
++    REQUIRE(f);
++    CHECK(f->id == Feature::PhotoLight);
++    CHECK(f->landed);
++    for (const char* key : {"camEv", "camAdapt", "camCurve", "camContrast", "camShoulder", "camWhite", "camSat",
++                            "camWb", "camSky", "camSkyHue", "camNight", "camVignette", "camBloom"})
++    {
++        const LightingKey* k = FindLightingKey(key);
++        REQUIRE(k);
++        CHECK(std::string(k->parent) == "photoLight");
++    }
++    LightingTuning t;
++    GateInputs in;
++    CHECK(ComputeFeatureGates(in, t)[Feature::PhotoLight].on);
++    LightingTuning noPost = t;
++    noPost.postEffects = false;
++    CHECK_FALSE(ComputeFeatureGates(in, noPost)[Feature::PhotoLight].on);
++    LightingTuning debug = t;
++    debug.debugView = 1;
++    CHECK_FALSE(ComputeFeatureGates(in, debug)[Feature::PhotoLight].on);
++    GateInputs nv;
++    nv.nightVision = true;
++    CHECK_FALSE(ComputeFeatureGates(nv, t)[Feature::PhotoLight].on);
++    // The camera asks for the post pass by itself, composite included.
++    PostFrameInputs pin;
++    pin.camera = true;
++    const PostStagePlan plan = PlanPostStages(pin);
++    CHECK(plan.Runs(PostStage::Composite));
++    CHECK(plan.Runs(PostStage::Resolve));
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index bdc9b0d..402a0ec 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1094,8 +1094,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+     }
+     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
+     // and its debug view, the TAA resolve and its sharpen, the sky table's
+-    // two passes, the luma sharpen, and the canopy's sun-visibility pass
+-    CHECK(post == 15);
++    // two passes, the luma sharpen, the canopy's sun-visibility pass, and the
++    // photoreal camera's meter
++    CHECK(post == 16);
+ }
+ 
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+@@ -1439,6 +1440,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litAtmoDome", LC::AtmoDome, 1},
+         {"litSky", LC::Sky, 1},
+         {"litSkyShadow", LC::SkyShadow, 1},
++        {"litCamera", LC::Camera, 1},
+         {"litPlanned", LC::Planned, LC::PlannedCount},
+         {"litWater0", LC::Water0, 1},
+         {"litWater1", LC::Water1, 1},
+@@ -1516,10 +1518,12 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     CHECK(static_cast<int>(LC::AtmoDome) == 67);
+     CHECK(static_cast<int>(LC::Sky) == 68);
+     CHECK(static_cast<int>(LC::SkyShadow) == 69);
+-    // 70 is free (the light list rides in slot 22), so the padding starts there.
+-    CHECK(static_cast<int>(LC::Planned) == 70);
+-    CHECK(LC::PlannedCount == 4);
+-    CHECK(gl::LitConstPlanned::Night == static_cast<int>(LC::Planned) + 1);
++    // 70 was free (the light list rides in slot 22): the photoreal camera
++    // (look lane "light") took it, so the padding starts at 71.
++    CHECK(static_cast<int>(LC::Camera) == 70);
++    CHECK(static_cast<int>(LC::Planned) == 71);
++    CHECK(LC::PlannedCount == 3);
++    CHECK(gl::LitConstPlanned::Night == static_cast<int>(LC::Planned));
+     CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Planned) + LC::PlannedCount - 1);
+     CHECK(static_cast<int>(LC::Water0) == 74);
+     CHECK(static_cast<int>(LC::Water1) == 75);

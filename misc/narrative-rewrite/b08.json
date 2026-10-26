@@ -1,0 +1,10 @@
+{
+  "id": "b08",
+  "bank": "kBio0Hostile",
+  "variant": 1,
+  "text": "{Name} earned a living playing at weddings before enlisting for regular wages. Posted near {Place}, the musician hoped to leave the army and earn money performing again.",
+  "word_count": 27,
+  "self_review": "A wedding musician joined the army for steady wages and hoped to return to paid performances.",
+  "source_pattern": "The supplied Sierra Leone TRC findings describe recruits entering the army for monthly pay.",
+  "fictional_changes": "The music work, wedding performances, military posting, and hope of returning to that work are fictional. The wage motive is the documented general pattern."
+}

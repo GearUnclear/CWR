@@ -1,0 +1,143 @@
+{
+  "repair_version": "2026-10-11.4",
+  "rule_sha256": "dd931ca544627c5b4848d5549181cd48cb7e963ad5fe3794356f6929b80bcd9f",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "classic",
+  "changed_members": 16,
+  "added_members": 0,
+  "archives": [
+    "lobo_airammo",
+    "lobo_btr60",
+    "lobo_fab",
+    "lobo_zelda",
+    "lobo_zu23",
+    "lobocen",
+    "loboegapc",
+    "lobof15",
+    "lobof16",
+    "lobom60",
+    "lobomerkava2",
+    "lobomerkava4",
+    "lobosa6",
+    "loboter"
+  ],
+  "skipped": [
+    "lobo_airammo: 9 member(s) not restored (LoBo_Mk81.p3d, LoBo_Mk81_LDGB.p3d, LoBo_Mk81_LDGB_d.p3d, LoBo_Mk82_LDGB.p3d, LoBo_Mk82_LDGB_d.p3d, LoBo_Mk83_LDGB.p3d, LoBo_Mk83_LDGB_d.p3d, LoBo_Mk84_LDGB.p3d, LoBo_Mk84_LDGB_d.p3d): pass --asset-source <LoBo_airammo.pbo of LoBoAddonPack3 (2007-01-06), sha256 de7f4728cc41bd98e93a40e8d01d4816632a39805f191dc05ea6c023b56489fd, e.g. D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo>",
+    "loboegypt: 1 member(s) not restored (helm_s_in.pac): pass --asset-source <LoBoEgypt.pbo of LoBoAddonPack1 (2004-06-11) or LoBoDemo2 (2004-08-25), sha256 992d304a27fefae4105da52cfc58fd9ae6ae0c33d9a963d0ee20161ce77340e9, e.g. D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo>"
+  ],
+  "members": [
+    {
+      "member": "lobo_airammo/scripts/smoke/fire.sqs",
+      "before_sha256": "7e5ef1d877736fe393f348c19f780891cf7165092e7b38bafb0934d3e2025511",
+      "after_sha256": "12ed6bcb54ac83dd2f4d1bcc6e28af8f4d85c8ac17ec420e12fd238732cf0c6f",
+      "before_bytes": 4782,
+      "after_bytes": 4831
+    },
+    {
+      "member": "lobo_btr60/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_fab/lcm/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_fab/saar5/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_fab/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_zelda/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_zu23/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobocen/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "loboegapc/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobof15/scr/fire.sqs",
+      "before_sha256": "61cf111084db28328f1865b9b09e5f36932b2e6e4386528418712c7cf1d0862d",
+      "after_sha256": "777dbda8fd97826b566b1a79ad98a1580fec362b3d00c593b699ad2706a3bef1",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobof16/scr/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobom60/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "lobomerkava2/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "lobomerkava4/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "lobosa6/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "loboter/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    }
+  ]
+}

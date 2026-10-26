@@ -1,0 +1,34 @@
+{
+ "clear_high_n": {
+  "ground_px_share": 0.7717447916666667,
+  "cloud_shadow_share_of_frame": 0.002132161458333333,
+  "cloud_shadow_share_of_ground": 0.00013075755019402734,
+  "remastered_luma": 0.5058158518241932
+ },
+ "clear_high_s": {
+  "ground_px_share": 0.8373681640625,
+  "cloud_shadow_share_of_frame": 0.051435546875,
+  "cloud_shadow_share_of_ground": 0.05676616538284361,
+  "remastered_luma": 0.46778286998825563
+ },
+ "coastline_sunset": {
+  "ground_px_share": 0.6491731770833333,
+  "cloud_shadow_share_of_frame": 0.000322265625,
+  "cloud_shadow_share_of_ground": 0.00015544613039423144,
+  "remastered_luma": 0.5285376398577921,
+  "cs0_luma": 0.5264189012867647
+ },
+ "forest_edge_noon": {
+  "ground_px_share": 0.7716162109375,
+  "cloud_shadow_share_of_frame": 0.23946614583333334,
+  "cloud_shadow_share_of_ground": 0.3067977835011317,
+  "remastered_luma": 0.45551533921185655,
+  "cs0_luma": 0.46261680365859886
+ },
+ "light_high_n": {
+  "ground_px_share": 0.7723128255208334,
+  "cloud_shadow_share_of_frame": 0.010608723958333333,
+  "cloud_shadow_share_of_ground": 0.00027185996472142785,
+  "remastered_luma": 0.5137554005859374
+ }
+}

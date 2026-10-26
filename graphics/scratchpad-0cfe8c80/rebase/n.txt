@@ -1,0 +1,5 @@
+    CHECK(static_cast<int>(LC::Haze) == static_cast<int>(LC::Detail) + 1);
+    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Haze) + 1);
+    // The photoreal camera (look lane "light") follows the planned slots at 79.
+    CHECK(static_cast<int>(LC::Camera) == 79);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::Camera) + 1);

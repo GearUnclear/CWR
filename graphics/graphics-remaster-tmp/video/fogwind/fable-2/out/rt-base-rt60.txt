@@ -1,0 +1,8 @@
+rt-base-rt60: 190 frames (clip 10..200), camera |shift| mean 0.26 px/frame (x -0.25, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.146  0.049  0.423  0.385 |  -9.6  -1.4  +0.30  +0.04 | +28.0 +11.6  +0.17 | +0.26   0.038
+  valley   0.162  0.068  0.946  0.573 |  -0.3  -0.1  +0.18  +0.18 |  -0.7  -1.4  +0.15 | +0.00   0.000
+  farhill  0.129  0.057  0.340  0.414 | -11.0  -0.5  +0.54  +0.08 | -22.5  -0.8  +0.41 | +0.47   0.060
+  haze     0.115  0.033  0.345  0.298 | -11.0  -0.3  +0.32  -0.06 | -21.8  -0.6  +0.22 | +0.32   0.036
+  slope    0.085  0.064  0.308  0.371 |  -7.0 -15.0  +0.02  -0.20 | -19.4  -4.0  +0.02 | +0.02   0.002
+  wrote amp_rt-base-rt60.png, xt_rt-base-rt60.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

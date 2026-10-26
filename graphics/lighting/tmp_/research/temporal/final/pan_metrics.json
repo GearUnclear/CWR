@@ -1,0 +1,73 @@
+{
+ "forest_edge_golden": {
+  "MSAA4 150%": {
+   "pan_residual": 0.00788,
+   "sharpness": 0.05766,
+   "residual_per_sharpness": 0.1367
+  },
+  "TAA 150%": {
+   "pan_residual": 0.00596,
+   "sharpness": 0.05306,
+   "residual_per_sharpness": 0.1123
+  },
+  "TAA+MSAA4 100%": {
+   "pan_residual": 0.00593,
+   "sharpness": 0.04813,
+   "residual_per_sharpness": 0.1232
+  },
+  "static flicker best15": 0.00177,
+  "static flicker best10msaa4": 0.00183
+ },
+ "town_night": {
+  "MSAA4 150%": {
+   "pan_residual": 0.02544,
+   "sharpness": 0.07332,
+   "residual_per_sharpness": 0.347
+  },
+  "TAA 150%": {
+   "pan_residual": 0.02419,
+   "sharpness": 0.06769,
+   "residual_per_sharpness": 0.3574
+  },
+  "TAA+MSAA4 100%": {
+   "pan_residual": 0.02464,
+   "sharpness": 0.06166,
+   "residual_per_sharpness": 0.3996
+  }
+ },
+ "sinai_lowsun_fp": {
+  "MSAA4 150%": {
+   "pan_residual": 0.00416,
+   "sharpness": 0.03178,
+   "residual_per_sharpness": 0.1308
+  },
+  "TAA 150%": {
+   "pan_residual": 0.00322,
+   "sharpness": 0.02813,
+   "residual_per_sharpness": 0.1145
+  },
+  "TAA+MSAA4 100%": {
+   "pan_residual": 0.00381,
+   "sharpness": 0.02609,
+   "residual_per_sharpness": 0.146
+  },
+  "static flicker best15": 0.00073
+ },
+ "overcast_broken": {
+  "MSAA4 150%": {
+   "pan_residual": 0.00287,
+   "sharpness": 0.02041,
+   "residual_per_sharpness": 0.1405
+  },
+  "TAA 150%": {
+   "pan_residual": 0.00277,
+   "sharpness": 0.01917,
+   "residual_per_sharpness": 0.1443
+  },
+  "TAA+MSAA4 100%": {
+   "pan_residual": 0.00329,
+   "sharpness": 0.01814,
+   "residual_per_sharpness": 0.1813
+  }
+ }
+}

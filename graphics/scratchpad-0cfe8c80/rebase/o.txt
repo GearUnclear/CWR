@@ -1,0 +1,2 @@
+    CHECK(static_cast<int>(LC::Haze) == static_cast<int>(LC::Detail) + 1);
+    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Count));

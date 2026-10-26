@@ -1,0 +1,49 @@
+## track
+temporal
+## files_verified
+true
+## missing_or_false_claims
+[
+ "Every cited image, sheet, GIF, JSON, NOTES.md and prototype.patch exists with the claimed timestamps. The patch reverse-applies to the gfx-temporal worktree at 3c53141. PoseidonGame.exe (3:11:57 PM) is newer than all patched sources. The game logs show a shader cache miss followed by 'compiling all programs' with no GLSL compile or link errors, and the triSetLighting taa/stochastic knobs are logged in run10 and run15. Timing and metric numbers in NOTES match timings_run12/13/14.md, pan_metrics.json and r4_noise.json. Nothing was fabricated.",
+ "The headline convergence sheet (final/forest_edge_golden__convergence.png) uses run15's first shot, r4_remastered, as its 'current (PCF, 4x MSAA 150%)' panel. In that shot the soldier's shadow is cut off: only the legs and a stray dot are drawn. The same 'current' mode in run02, run10 and run15 strafemsaa draws the full silhouette, so this is a capture-state glitch. The explorer did not flag it, and it makes the PCSS gain look bigger than it is.",
+ "The '~20 % lower high-frequency proxy with TAA in motion' is offered as evidence of noise removal, but the same proxy rates TAA+FX lower than the noise-free current image (strafe 0.0103 vs 0.0127 strafemsaa) and lower than the 16-tap reference (0.0129-0.0134 vs 0.0141). My own Laplacian measure on the shadow crop agrees: 0.0348 for TAA f64 vs 0.0423 for ref16. The metric mostly measures TAA blur. The visual de-noising is real, but this number does not quantify it.",
+ "'Contact hardening ... modest on Sinai' is too kind. In BEST_sinai and pcss_longshadow, the crisp, readable long leg shadows of the current renderer become faint, lower-contrast smears. On that view the result is neutral to slightly worse.",
+ "PCSS with sunSize 2.5 deg is presented as physically based. The real sun subtends about 0.53 deg, so the 2.5 deg default gives about 5x the true penumbra. A path-traced sun shadow of a standing man would be nearly crisp, so the soft-headed shadow is a stylised effect, not a physical one.",
+ "sinai_lowsun_fp__pcss_longshadow.png, pcss_sunsize and the run02-05 based sheets (aa_crops, pcss_converge) come from captures taken before the final rebuild at 3:11:57 PM (run03 ended 2:49, run05 2:54, run02 3:08). They do not necessarily show the code in prototype.patch.",
+ "The run15 log reports 'screenshots copied: 0; pairs: 0', yet shots/ holds 40 files that were copied by a later script. This is minor bookkeeping and does not affect the evidence.",
+ "Production need 6 (a Classic bit-identity test) is moot under owner decision 1."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+large
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[
+ "The whole frame gets softer. Sharpness drops 6 to 18 % by measurement, and the TAA rows in the ghosting grid and the strafe sheet are visibly softer on the Jeep, the M113 and the soldier. That is close to the rejected 'wash over the frame', and only sharpen 0.5 with MSAA kept under TAA holds it back.",
+ "On sinai_lowsun_fp, the low-sun leg shadows lose contrast and definition. This washes out shadow detail locally; it is not a darkening and not a grade.",
+ "No colour, exposure or grading change, and nothing darker. Mean luminance of the prototype frames is within 0.6 % of current Remastered (forest 0.396 vs 0.394, sinai 0.417 vs 0.414). There is no vignette, grain or new art, so the warm-evening and crushed-shade rules are untouched."
+]
+## cost_ok
+true
+## score_0_to_10
+5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\temporal\final\forest_edge_golden__strafefx_motion.png
+## one_line
+Real, working TAA infrastructure that removes the dotting from 4-tap stochastic PCSS and AO cheaply, but a player would barely see any change on its own: the only visible effect is a softer soldier shadow, exaggerated by the 2.5 deg sun.
+## critique
+Verification. The work is genuine. All cited files exist, the patch matches the scratch worktree, the binary post-dates the patched sources, the shaders compiled cleanly, and the TAA knobs are logged during the captures. Pixel diffs confirm the AFTER frames differ from BEFORE: mean abs 0.007 to 0.016 per view, with 33 to 40 % of pixels changed by more than 2/255. That change is tiny next to Classic to Remastered (0.074).
+
+What a player would see. On full frames, almost nothing. BEST_town_night and BEST_overcast are indistinguishable from current apart from particle state. BEST_sinai differs only in softer, fainter leg shadows. BEST_forest shows the one real change: the soldier's shadow on the slope goes soft toward the head. The convergence and strafe sheets prove the enabler claim honestly. 4-tap stochastic PCSS without TAA is visibly dotted. Under TAA it is clean by frame 1 to 2, matches the 16-tap reference and stays clean under strafe and pan. That is a solid technical result. Two caveats undercut the presentation, though. First, the convergence sheet's 'current' panel is a glitched capture with a truncated shadow, which inflates the apparent gain; the strafe sheet's bottom row is the honest reference. Second, the 2.5 deg sun is 5x the real sun, so the softness is stylised rather than path-traced-looking. On Sinai it erases readable long shadows. TAA as AA is a sideways move: 23 to 25 % steadier on foliage, about 4 % on town and overcast, worse on overcast with MSAA, and always softer. Only TAA with 4x MSAA kept underneath preserves the antennas. Ghosting was tested only at walking pace (0.12 m per frame). Fast vehicles, rotors, the first-person weapon, particles and muzzle flashes are untested. Vehicle interiors simply turn TAA off, and the resolve runs on post-tonemap RGBA8.
+
+RTX vision. TAA itself contributes nothing visible toward bounce light, sky occlusion, reflections or volumetrics. Its value is purely as the accumulator those effects need at 1 to 2 samples per pixel. The PCSS piece nudges the 'soft contact-hardening shadows' item, and it would look more physical with a 0.5 to 1 deg sun and per-object motion vectors.
+
+Cost. +0.07 to 0.14 ms for the resolve is believable and trivial against a 16.7 ms budget on an RTX 3060. The world-pass numbers are noise-dominated (TAA modes repeatedly measured slower, which is likely contention). The headline saving from dropping 150 % SSAA was never measured.
+
+Verdict. Build it properly only as shared infrastructure, bundled with a consumer (SSGI, SSR, volumetrics or stochastic AO) that turns it into a visible jump. As a standalone feature it is not worth the softness risk. For a production pass, retune the sun to 0.5 to 1 deg, add per-object motion vectors and a reactive mask, and resolve in HDR.
+## artefacts_seen
+No NaN, black-pixel or banding artefacts (black-pixel fraction 0.0000 to 0.0005, the same as current). There are no halos from the bounded sharpen at 0.5 to 0.8. Problems seen: 4-tap PCSS and AO dotting when TAA is off, as expected. TAA itself softens the frame. The 4-tap unblurred AO keeps a faint residual grain, as the explorer reports. Sub-pixel antennas break into fragments without MSAA. Low-sun shadows on Sinai lose contrast. No ghost trail was visible at walking-pace object motion; faster motion and particles are untested.
+## prototype_actually_loaded
+Yes. dist/gfx-temporal-rwdi/PoseidonGame.exe (built 3:11:57 PM, git=3c53141, after all patched sources) ran for runs 07 to 15. The game_stdout logs show 'shader cache miss/invalid, compiling all programs' with no GLSL errors, and the triSetLighting taa=1, shadowStochastic, aoStochastic and taaSharpen knobs are logged before the TAA captures. Runs 02 to 05 used earlier builds of the same prototype, and some sheets (pcss_longshadow, pcss_sunsize, aa_crops, pcss_converge) draw from them.

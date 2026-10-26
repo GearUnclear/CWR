@@ -1,0 +1,3 @@
+﻿start 02:39:06 test=tests/rendering/captures/video/look_probe_mistlead_rt.test.sqf game=D:\Arma_CWA_worktrees\mist-1\arma_CWR\dist\mist-1-rwdi override= junction=RemasterUD-mist-lead
+run exit=0 frames=0 minutes=1 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\lead\runs\rt_fixed
+done 02:40:08

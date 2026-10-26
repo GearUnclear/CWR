@@ -1,0 +1,153 @@
+Round 5 realism critic (thumbnail size, about 320 px a panel)
+================================================================
+
+Verdict: ready_for_owner. I see no blocker at thumbnail size. Round 4's two blockers are fixed or reduced
+to a caveat. The owner's seam is still gone. The owner's puddle rule holds in all five rain views. What is
+left is a set of caveats that are the owner's taste calls (how wet night rain should look, how dense the
+morning mist should be, how big the low sun should glare). None of them is a defect.
+
+What I did: I built my own four-way thumbnail sheets (Original | landed | overhaul R4 | overhaul R5, 320 px a
+panel, with frame and lower-half luma) for all 39 strips. I also looked at the director's THREEWAY.png.
+Then I cropped and measured the full-size shots in director/final, director/final/rainviews,
+director/round4/final, puddle/4/final and ref/. I ran no game and no build, edited no source and
+committed nothing. I opened every image listed below.
+
+Evidence (all in this folder):
+  thumb5_lowsun.png         woods_pine2_evening, sinai_lowsun_fp (960 + 1080), lowsun_fp (960 + 1080),
+                            pine_rays, dawn_valley: four-way at 320 px with mean / lower-half luma
+  thumb5_sunset.png         sunrise_ridge, coastline_sunset, forest_edge_golden (960 + 1080), blue_hour_coast
+  thumb5_mist_grey.png      optics_mist_hud / sight / sight_f1, rain_day, overcast_heavy, overcast_broken
+  thumb5_noon.png           noon_fields, noon_vista, town_noon, jeep_close_noon, sinai_desert_noon,
+                            forest_morning
+  thumb5_night_combat.png   town_night, town_fog_night, town_night_rain, firefight_1/2/3,
+                            tank_gunner_interior / optics
+  thumb5_rain.png           owner report | landed | R4 | R5 (town_night_rain), then the five rain views:
+                            vanilla | landed | puddle 4's own shot | R5 merged
+  seam_owner_region_r5.png  owner's circled region, 6 versions, plain and equalized
+  rain_seam_b_day_puddle4_vs_r5.png   seam_b and seam_day at 640 px, puddle 4's own vs R5
+  mist_right_4way.png       right-hand rock and tree line of both mist views, four-way, with rgb and spread
+  pair_woods_sunrise.png    landed | R5 at 640 px: woods_pine2_evening, sunrise_ridge, sinai_lowsun_fp
+  pair_lowsun_dawn.png      landed | R5 at 640 px: lowsun_fp, dawn_valley, coastline_sunset
+  pair_town_fog_night.png   vanilla | landed | R5 at 480 px: town_fog_night, town_night
+  firefights_horizon_4way.png, firefights_bursts_2x.png   the three firefights, horizon band and bursts
+
+ROUND 4 BLOCKERS, BY NAME
+-------------------------
+1. Sun-in-frame exposure (woods_pine2_evening, sinai_lowsun_fp and the milder ones): FIXED.
+   Frame mean / lower half (R4 -> R5, landed and original in brackets):
+     woods_pine2_evening   35 / 33 -> 56 / 55   [landed 62 / 65, original 89 / 107]
+     sinai_lowsun_fp       68 / 41 -> 85 / 54   [landed 108 / 71, original 95 / 57]
+     lowsun_fp             84 / 54 -> 97 / 64   [landed 132 / 96]
+     pine_rays             80 / 39 -> 88 / 45   [landed 100 / 56]
+     dawn_valley          107 / 75 -> 114 / 76  [landed 141 / 97]
+     sunrise_ridge         95 / 41 -> 105 / 49  [landed 88 / 38]
+   At thumbnail woods_pine2_evening is a clear evening forest again: sun patches on the grass, the soldier
+   and the jeep readable, about as legible as landed (pair_woods_sunrise.png). sinai_lowsun_fp's ground is
+   lit sand again, not muddy brown. The sun disc stays white and round. No view darkened that had not
+   been dark before; noon, overcast_broken, forest_edge_golden and blue_hour_coast are bit-for-bit the
+   same frame means as R4.
+
+2. optics_mist_hud / optics_mist_sight pale sheet: REDUCED TO A CAVEAT.
+   Measured at full size (R4 -> R5, original and landed in brackets):
+     hud air (top left)   (211,213,222) -> (195,198,206)   [original (183,183,175), landed (182,187,196)]
+     hud rock block       mean 172 -> 122, spread 11.2 -> 13.4   [original 104 / 29.2]
+     sight rock block     mean 106 -> 73,  spread 38.9 -> 24.2   [original 75 / 7.7]
+     hud near grass       (99,105,96) -> (67,73,63)   [original (79,90,61), landed (64,75,48)]
+     frame mean hud / sight  143 / 129 -> 129 / 115   [original 115 / 110]
+   At thumbnail this is no longer a white wall or dense fog. The air is a light grey only about 12 levels
+   over the original's, and the hill ridge, the tree line and the rock read as layered grey silhouettes
+   receding into mist, which is how a real misty morning photographs (mist_right_4way.png). The original's
+   own upper frame is also a flat grey plate, so the overhaul is not worse there. What landed still does
+   better: it keeps the tree line green and the rock's texture, so it reads as a lighter mist. The overhaul's
+   trees and grass are grey-green. The green and black specks are gone at full size.
+
+ROUND 4 MINOR ITEMS, BY NAME
+----------------------------
+- firefight_3 salmon-pink burst foot: FIXED. The middle plume is a dark grey dust silhouette, no pink smudge
+  at thumbnail (firefights_bursts_2x.png).
+- firefight_2 short horizon line: now tied to the fireball. The pinned shot always shows a young fireball;
+  its base lights a short stretch of ground under it, which reads as the burst lighting the ground.
+- firefight_3 1 px horizon line: the bullet traces remain at full size only; not visible at thumbnail.
+- Firefights not timing-pinned: FIXED (capFixStep). firefight_2 now always catches a fireball, so the drama
+  landed had is back. See the new caveat below on its colour.
+- dawn_valley sun-side cream haze: IMPROVED, still a caveat. The bay and the far shore now read through the
+  haze at thumbnail (R4 hid them more), but landed's bay is crisper and brighter (pair_lowsun_dawn.png).
+- Low-sun disc a small dot: UNCHANGED. In coastline_sunset, dawn_valley, lowsun_fp and sinai_lowsun_fp the
+  sun is a small white dot with a soft warm glow. Landed's larger bloom still reads more like a burning sun.
+- rain_day: IMPROVED but the rain is not legible at thumbnail. The deck is darker than R4 (frame mean 147 ->
+  128, landed 119) and has structure. It reads as a wet, misty overcast day. The original and landed show
+  rain streaks at thumbnail; the overhaul does not (the streaks show at full size only).
+- overcast_heavy: IMPROVED. Frame mean 139 -> 122 (landed 113), ground lower half 69 against landed 66. The
+  far hills are still hazed but the frame is no longer a pale plate.
+- sunrise_ridge warm dome: FIXED. The warm colour is now a band along the horizon behind the cypresses, blue
+  above. A pale glow behind the cypresses remains; it reads as the sun about to rise.
+- town_night / town_fog_night peach plume: UNCHANGED and acceptable. It reads as fire-lit smoke.
+- Sinai sand darker than the original: unchanged (lower half 140 against 164). It reads as sand under a deep
+  blue sky.
+- pine_rays: the shafts still read and still beat landed's.
+- No banding, halos, hard seams, blown areas or screen-edge strips at thumbnail in any view.
+
+OWNER'S SEAM AND PUDDLE RULE
+----------------------------
+- Seam: GONE. In the owner's circled region (seam_owner_region_r5.png, plain and equalized) the R5 final
+  shot and the R5 rain view show no diagonal edge. Round 4's long vertical lamp streak across the square is
+  also gone.
+- Puddle rule: HOLDS in all five rain views (town_night_rain, seam_b, seam_d, seam_day, rain_day). Only the
+  puddle shapes mirror anything; the ground between them is darker and has no mirror image of the lamp or the
+  houses. The merged shots match puddle 4's own shots in shape and place (thumb5_rain.png); lower-half luma
+  at night 48.9 / 47.8, 44.1 / 44.4, 41.3 / 41.2. The day views are darker than puddle 4's (seam_day 83
+  against 105, rain_day 81 against 96), which reads as a duller grey day, not as a defect.
+- The cost of the rule at thumbnail: town_night_rain (the first strip on THREEWAY) reads as a dark, damp night
+  street rather than an obviously wet one. Landed's glossy road reads wetter, but landed breaks the owner's
+  rule. The owner approved option 4 from these same shots ("1 3 and 4 all look good"), so this is a taste
+  call for the owner, not a blocker. If more water is wanted: kPuddleMore, or the dim broad glint the rule
+  allows on the non-puddle ground near the lamp.
+
+PER VIEW AT THUMBNAIL (is the overhaul clearly more realistic than the original at a glance?)
+--------------------------------------------------------------------------------------------
+Clear wins: town_night, town_fog_night (lamp halos in fog, fire-lit plume), blue_hour_coast, overcast_broken,
+  noon_vista, noon_fields, town_noon, jeep_close_noon, forest_morning, forest_edge_golden, pine_rays,
+  sinai_desert_noon, woods_pine2_evening (back from R4's blocker), sinai_lowsun_fp, sunrise_ridge (warm band
+  along the horizon), overcast_heavy, firefight_3 (dark dust plume, natural dusk sky).
+Wins with a caveat:
+  town_night_rain (more real light than the original, but not obviously wet; see above),
+  lowsun_fp (golden backlit evening; the sun-side sky is a broad cream-amber haze reaching the top of the
+    frame, smooth with no seam; landed's crisp blue sky reads clearer),
+  coastline_sunset (golden sky and glitter path; the sun is a small dot, landed's sun glares),
+  dawn_valley (bay readable, but hazier than landed on the sun side),
+  rain_day (a convincing grey wet day; the rain itself is not legible),
+  firefight_1 (the first shell now shows sparks with a faint glow and a short bright line on the horizon,
+    48 px in one row at full size; a faint dot at thumbnail),
+  firefight_2 (the fireball is back, but it is a cluster of evenly lit golden-yellow puffs, about
+    (215,192,107), with no hot white core or dark smoke mixed in; it reads slightly like cotton balls at 2x
+    and as a yellow glow at thumbnail).
+Not clearly better than the original, but not worse: optics_mist_hud, optics_mist_sight (plausible mist, grey
+  where landed keeps colour).
+Neutral: tank_gunner_interior (dimmer than the original, as in R4), tank_gunner_optics.
+
+WHERE LANDED STILL LOOKS BETTER THAN THE OVERHAUL
+------------------------------------------------
+- town_night_rain: landed reads obviously wet (but by mirroring non-puddle ground, which the owner ruled out).
+- rain_day: landed's darker deck and visible streaks say rain; the overhaul says misty overcast.
+- optics_mist_hud / sight: landed keeps the tree line green and the rock textured.
+- dawn_valley: landed's bay and far shore are crisper on the sun side.
+- Low-sun views (coastline_sunset, lowsun_fp, dawn_valley): landed's sun is a larger radiant glare; the
+  overhaul's is a small white dot. lowsun_fp's landed sky is a cleaner blue.
+- firefight_2: landed's fireball has a white-hot core; the overhaul's is uniformly golden-yellow.
+
+IMPROVED SINCE ROUND 4
+----------------------
+Sun-view exposure restored (woods_pine2_evening 35 -> 56, sinai_lowsun_fp 68 -> 85, lowsun_fp 84 -> 97).
+The optics mist is no longer a white wall, and its specks are gone. The rain_day and overcast_heavy frames
+are no longer pale plates. sunrise_ridge's warm dome became a horizon band. dawn_valley's bay shows through.
+firefight_3's pink foot is a dark dust silhouette. Firefights are timing-pinned, so the fireball drama is back.
+Round 4's lamp streaks across the wet square are gone, and the seam stays gone.
+
+Suggestions if the owner wants another pass (none needed for thumbnail realism):
+  1. Night rain legibility: a little more puddle (kPuddleMore) or the allowed dim broad glint near the lamp.
+  2. Rain streaks drawn after the post chain so TAA does not average them away.
+  3. firefight_2 fireball: a hotter white-yellow core grading to orange, with dark smoke mixed into the puffs.
+  4. A larger bloom round a low sun in coastline_sunset and lowsun_fp.
+
+Cost: not measured. I ran no game and no build. The merger did not re-time round 5 either; round2/cost.md
+and critic_r3_artefacts/timing/cost_r3.md are the last measurements.

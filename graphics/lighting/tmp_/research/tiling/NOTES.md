@@ -1,0 +1,189 @@
+﻿# Track "tiling": terrain anti-tiling and macro variation
+
+Shader-override prototype only (no C++, no scratch worktree, no engine rebuild). Every image in
+this folder was shot in game through `run-captures.ps1` with `-DataJunction RemasterUD-tiling`
+on the shared `dist/lighting-rwdi` build, on real Remaster data (Abel, Eden, Sinai + @LoBo),
+960x640, render scale 1.5, 4x MSAA, captured after the gamma pass.
+
+## Verdict (short)
+
+**Mixed, with one real win.** The full package (hex-tiled land texture + hex-tiled multi-scale
+detail + a heightfield-tied "patch" brightness macro + reconstructed relief) changes the look a
+lot where terrain fills the frame from above: the flat beige Sinai plateau
+(`BEST_high_sinai_noon.png`) turns into varied desert ground with darker gravel-like patches and
+lighter sand that follow the land's shape; the far dunes in `sinai_desert_noon` gain readable
+form. Repetition of distinctive land-texture features (the dark specks of the Sinai sand, the dark
+blobs of Eden's grass) is gone (`cmp_hex_land_texture_sinai.png`). At low sun the reconstructed
+relief makes the near ground read as gravel (`BEST_lowsun_fp.png`, `BEST_forest_edge_golden.png`).
+At eye level at noon (`noon_fields`, `overcast_broken`) the change is small. It does not fix the
+biggest eye-level weakness of CWA terrain, which is the magnified, smeared 50 m cell texture on
+slopes 10-60 m away (`forest_edge_golden`): the domain-warp attempt at that failed (see below).
+
+## Files
+
+- `BEST_<view>.png`: Classic | Remastered (current) | Remastered + the balanced full package
+  (ovr_final2, k = 6), full frames with GPU ms on top, 2x crops of the yellow box below. All from
+  run6, except `BEST_lowsun_fp.png` (run6 did not include that view: run5, ovr_final k = 4, the
+  asymmetric macro).
+- `cmp_hex_land_texture_sinai.png`, `cmp_hex_land_texture_overcast.png` (run2): hex-tiled land
+  texture alone. `cmp_noon_fields_antitiling_relief.png` (run5): anti-tiling + relief, no macro.
+  `cmp_bold_lush_high_sinai.png` (run4): the first sight of the macro win.
+- `rejected_warp_forest.png`, `rejected_bold_lush_noon_fields.png` (run4): the two failures.
+- `runN/cmp/<view>__all.png`: every variant of a view on one sheet; `runN/cmp/timings.csv`.
+- `stats_run5.txt`, `stats_run6.txt`: tint guard per view (mean RGB, luma, chroma, hue, fine and
+  macro texture energy of the ground band).
+- `timings_interleaved.md`: the interleaved GPU cost test.
+- `ovr_v1`, `ovr_v2` (previous agent), `ovr_v3`, `ovr_v4`, `ovr_v5`, `ovr_final`, `ovr_final2`:
+  override GLSL per iteration (`psRemasterCommon.glsl`, `psDetailRemasterMain.glsl`,
+  `psGrassRemasterMain.glsl`); each file's header lists its variant map. `ovr_v3` was written but
+  never captured (superseded by `ovr_v4` before its run started).
+- `scripts/`: `gen_tests.py` (research capture tests), `gen_timing.py`, `collect.py`, `best.py`,
+  `stats.py`, `timing.py`, `glslcheck.exe` (glslang compile check used on every override).
+- Research tests live in `<lighting>\arma_CWR\tests\rendering\research\tiling\` (git-excluded).
+
+## How CWA terrain is textured (read from the code)
+
+- `World/Terrain/LandscapeRender.cpp` (`GenerateSegmentInto`): every land grid cell (50 m on the
+  stock islands) draws one land texture `tex0` over u, v = 0..1 of the cell, plus a per-vertex
+  random UV jitter (`_random(x, z).uOff * 0.1`) that warps the texture a little inside the cell.
+  Tileable base textures (`offsetUV`, `ClampFlags` = NoClamp, sampler REPEAT) take u = cell index,
+  so neighbouring cells of the same type continue one another; transition textures are clamped.
+- Every cell is drawn with `DetailTexture`, so all terrain, near and far, goes through `psDetail`
+  (remastered: `psDetailRemasterMain.glsl`). The detail texture (`detail_dx.paa`, 128 px, alpha
+  only, mean 0.508, std 0.075) is mapped by `texMat1` = 32 x the cell UV
+  (`EngineGL33_Shaders.cpp` `UploadVSTexGenConstants`): one period every 50 / 32 = 1.56 m.
+- The grass layers (`LandscapeRender.cpp` ~1329, `GrassTexture`) redraw the land mesh with
+  `psGrass` (`t0 * grass * 2`), so they must take the same land-texture lookup and macro as the
+  ground or they ring the camera. Every override here changes both mains identically.
+- Sampler state already has 16x anisotropy (`EngineGL33_State.cpp`).
+
+## Techniques (all in `ovr_final2/`, shared helpers in its `psRemasterCommon.glsl`)
+
+1. **Hex-tiled land texture** (`tHexTex0`): a world-anchored triangle lattice (30 m) gives each
+   vertex a random UV offset (offsets only, no rotation, so directional content keeps its
+   direction); three `textureGrad` taps blended with sharpened weights (w^4) and a
+   variance-preserving blend about the texture's own mean colour (1x1 mip). Only for tileable
+   cells: `tTex0Tileable()` detects REPEAT vs CLAMP from four mip-3 taps (a research hack; a
+   production version passes the clamp flag as a uniform).
+2. **Hex-tiled detail, two octaves** (`tHexAlpha`): the 1.56 m detail and a 1/8-scale coarse
+   octave (12.5 m period), each with random 90-degree rotation / mirror and offset per lattice
+   vertex (exact on the integer lattice, so cell borders stay continuous). The coarse octave fades
+   in 4-20 m from the camera, where the fine one has mipped to grey. Fine-detail contrast varies
+   0.75-1.35 over the land (260 m noise), x1.8 on steep slopes.
+3. **Patch macro** (`tLushSignalBold` + `tPatch` / `tPatchBalanced`): brightness only, so hue and
+   saturation are exactly the authored ones. Signal = three octaves of the equalised cloud noise
+   (700 / 190 / 60 m) minus heightfield convexity (`tCurvature` on the terrain height map, ridges
+   drier/lighter, hollows darker) minus slope. `tPatch` (final, k = 4): lush end darkens up to
+   18 %, dry end lightens up to 15 % only where the albedo has chroma (pale fields never bleach).
+   `tPatchBalanced` (final2, k = 6/7): symmetric about the authored brightness, amplitude gated by
+   chroma at both ends (a third on near-neutral ground), so the expected frame brightness is
+   unchanged.
+4. **Relief from albedo** (`tBump`, Mikkelsen 2010 tangent-free bump): height = fine detail
+   (3.5 cm) + coarse detail (30 cm) + land-texture luminance (45 cm), each faded in only once its
+   texels are minified (a bilinear height under magnification would facet). Feeds the normal used
+   by `shadeRemastered` (sun, sky, shadows unchanged).
+
+## Variants and what the real data showed
+
+| Run | Override | Variants | What it showed |
+|---|---|---|---|
+| run1 | ovr_v1 | (previous agent, cut off at forest_edge_golden classic) | noon_fields only; kept, not used |
+| run2 | ovr_v2 | 1 hex detail + macro +-12 % (1.7 km / 470 m), 2 +relief, 3 strong + cues, 5 +relief + hex land, 6 hex land only | hex land texture removes repeated specks/blobs (Sinai, Eden); macro +-12 % invisible at eye level, the 1.7 km octave only shifts a whole view up or down (noon_fields v1 -10 % luma); relief visible at low sun |
+| run3 | ovr_v4 | 4 warp 3 texels, 7 hex land + hex detail + macro, 8 lush macro (brightness + saturation) + cues + warp, 9 +relief | warp 3 texels: no measurable change; lush macro on Sinai: +7 % luma, chroma -9 % (paler, wash risk); overcast hue moved 3.7 deg toward yellow (hex land shows other texture regions) |
+| run4 | ovr_v5 | 1-5 warp sweep 6-20 texels at 0.1-0.4 m noise, 6 bold lush macro (+-20 % brightness and saturation), 7 hex + macro, 9 bold + relief | **warp rejected**: marbled liquid swirls, and seams along triangle edges from the per-triangle footprint fade (`rejected_warp_forest.png`); **bold lush rejected on pale ground**: noon_fields field +6.5 % luma, bleached (`rejected_bold_lush_noon_fields.png`), but on the high Sinai view it was the first big visible win (`cmp_bold_lush_high_sinai.png`) |
+| run5 | ovr_final | 1 anti-tiling, 2 +relief, 3 +patch macro, 4 full, 5 full bolder; plus `tiling_timing` | the asymmetric patch macro keeps the Sinai win without the bleaching (chroma up, hue fixed); but darkens low-chroma ground: high_valley_eden v4 -10 % luma vs v0 (v1 -2 %, v2 with relief -4 %, v3 macro without relief -10 %), forest_edge_golden -7 % |
+| run6 | ovr_final2 | 4 full (asymmetric), 6 full balanced amp 0.18, 7 full balanced amp 0.26 | the same v4 shader that read -10 % on high_valley_eden in run5 reads -1.5 % here: the run5 Eden darkening was mostly cloud-shadow coverage, not the macro. Balanced v6 is +0.3..+1.8 % brighter than v4 everywhere; chosen for the BEST images |
+
+Tint guard (`stats_run5.txt`, `scripts/stats.py`, ground band of each view, v0 = current
+Remastered): hue of the full package (v4) within 2.5 deg of v0 on every view except noon_fields
+(57.8 -> 51.9, i.e. back toward Classic's 51.5, from the hex land texture showing other parts of
+the same texture) and high_valley_eden (117 -> 130, toward blue-green: that frame has cloud
+shadows and is darker overall, see the Eden caveat below). No olive/mustard drift: the final macro
+never changes saturation. Luma v4 vs v0: high_sinai +0.8 %, sinai_desert_noon +9 % (the near sand
+sits in a "dry" patch), overcast_broken 0 %, noon_fields +1 %, high_fields_noon -3.4 %,
+forest_edge_golden -6.7 %, lowsun_fp -1.5 %, high_valley_eden -10 %.
+
+Eden caveat: the Eden views run under overcast 0.5 with drifting cloud shadows; shots of the same
+view show different shadow coverage (even between variants of one run), so Eden luma deltas mix
+macro and cloud shadow. Proof: v4 (same shader file content for that variant) read 0.302 in run5
+and 0.338 in run6 against v0 0.336 / 0.343.
+
+Run6 (`stats_run6.txt`), luma of the chosen balanced package v6 against v0: high_sinai_noon
++1.5 %, sinai_desert_noon +11 % (near sand in a dry patch; chroma up 0.134 -> 0.148, so brighter
+sand rather than a wash, but it can read as over-bright), overcast_broken +0.6 %, noon_fields
++3 %, high_fields_noon -1.7 %, forest_edge_golden -6 % (the view sits in a lush patch), and
+high_valley_eden -1.2 %. Hue moves at most 2.2 deg except noon_fields (hex land texture, toward
+Classic). Any single view can sit in a dark or light patch; that is the nature of a macro signal
+and the main thing an owner review must judge.
+
+## GPU cost
+
+The per-shot GPU numbers in every comparison PNG are honest readings but unreliable for cost:
+up to 4 games (other research agents) share the GPU, so the stock Remastered overcast_broken
+shot read 39.2 ms (run2), 11.4 ms (run3) and 23.9 ms (run5) against 10.5 ms in the 20261017-final
+baseline. The cost estimate is the interleaved test `tiling_timing.test.sqf`
+(`timings_interleaved.md`): v0, anti-tiling (v1) and the full package (v4) alternated four times
+on three Abel views, 120 frames each, paired deltas against v0 in the same rep:
+
+| view | v0 median | v1 - v0 median (range) | v4 - v0 median (range) |
+|---|---|---|---|
+| noon_fields | 3.38 ms | +0.94 (+0.16..+1.89) | +0.79 (-1.01..+1.78) |
+| high_fields_noon | 3.90 ms | +2.35 (-0.07..+3.19) | +1.27 (-0.64..+5.65) |
+| forest_edge_golden | 4.74 ms | +0.71 (-0.59..+2.02) | +0.44 (-0.57..+2.11) |
+
+Honest reading: roughly +0.5 to +2.5 ms per frame at 1440x960 internal with 4x MSAA, more when
+terrain fills the frame; the noise (v4, a superset of v1, medians lower than v1) is as large as
+the effect. Per terrain fragment the full package adds about 3 land-texture taps + 4 tileability
+taps (removable in production), 6 detail taps, 4 noise taps, 5 height-map taps, and derivative
+work for the bump.
+
+## What a production version needs
+
+- C++ (small): pass the cell's clamp flag (`Landscape::ClampFlags`) and the land grid size as
+  uniforms instead of `tTex0Tileable()`'s four probe taps; a dedicated mipmapped macro-noise
+  texture (the cloud noise has `MAX_LEVEL 0`, so the 60 m octave aliases at distance; not seen in
+  these stills but expected in motion).
+- Drop the variant switch (`tilingVariant()` decodes the saturation knob) and the `g_normalOverride`
+  hook becomes a parameter of `shadeRemastered`.
+- Classic stays bit-identical: everything lives in the remastered `psDetail`/`psGrass` mains and
+  helpers; the classic programs are untouched.
+- Per-island tuning of the patch amplitude (desert gains most, green Eden least), or drive it from
+  the per-cell ground tint already baked with the horizon map.
+- Motion test: everything is world-anchored (stable by construction), but the bump and the
+  60 m noise octave were not checked in motion; no sequence was shot.
+- Check seams where a hex-tiled base cell meets a clamped transition cell; none were visible in
+  the high views here (field/grass edge, `high_fields_noon`), but ploughed-row textures lose
+  their row regularity inside hex blend zones.
+
+## Risks against the owner's taste list
+
+- "Only darker": the asymmetric macro (final, k = 4) is biased dark on low-chroma ground (dark end
+  at full strength, light end gated); the balanced macro (final2, k = 6/7) removes that bias. The
+  run5 Eden -10 % turned out to be mostly cloud shadow (see the caveat). forest_edge_golden still
+  reads -6 % with v6 because that spot is a lush patch.
+- Wash: the saturation-moving macros (lush, bold) bleached pale fields and were dropped; the final
+  macro is brightness-only and chroma-gated.
+- Olive/mustard: no saturation change in the final macro; hue stays within 2.5 deg except where
+  the hex land texture reveals other regions of the same texture.
+- Dark patches can read as cloud shadows on a clear day (they are soft-edged); crisper,
+  terrain-shaped boundaries would help.
+- Relief overlaps with the normals-from-albedo track.
+
+## Reproduce
+
+```
+python scripts\gen_tests.py --variants 0,4,6,7 --views <ids> --suffix _rN   # research tests
+powershell -NoProfile -File <lighting>\arma_CWR\tests\rendering\captures\run-captures.ps1 ^
+  -Tests tests/rendering/research/tiling/tiling_abel_rN.test.sqf,... -DataJunction RemasterUD-tiling ^
+  -OutDir <this folder>\runN -ShaderOverrideDir <this folder>\ovr_final2
+python scripts\collect.py runN --names "v0=Remastered (current),v4=..."
+python scripts\best.py runN\cmp <view> v4 "<label>" x0,y0,x1,y1 BEST_<view>.png
+python scripts\timing.py run5 > timings_interleaved.md
+```
+
+In game, the full package is `triSetLighting "saturation=1.124"` with `-ShaderOverrideDir
+ovr_final` or `ovr_final2`; the balanced one is `saturation=1.126` with `ovr_final2`.
+Every run's `game_stdout.log` shows the six "shader override loaded" lines and no compile or link
+errors (checked for run2 to run6: each game log names its override dir and loads 6 override pieces, 0 errors).
+
+

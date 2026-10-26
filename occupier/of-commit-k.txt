@@ -1,0 +1,25 @@
+guerrilla: the settlement probe returns for K (OCCUPIER-FORCES.md 5.1)
+
+A seeded CITY (seedCities = 1: a label from the map) counts toward K and
+G only when the Auto seed's LandscapeSettlementProbe says it is a
+settlement (dry land, at least 3 Building objects with a bounding sphere
+over 4 m within 300 m); authored CITYs always count. The verdict is
+stored on the zone row (ZoneRecord::settlement: 0 not probed, 1
+settlement, -1 label; saved) and probed once, so K is stable across
+sessions: OccupierForces::ActivateProbed runs it on the first active
+tick, and a save without the block probes when it derives; a block saved
+before this change keeps its K (re-sizing a running pool would break the
+5.5 ledger). The sizing INFO line reports the probed-out count and a
+second line names the towns; gmOccupierForces slot 29. Abel: K 14,
+poolStart 60 unchanged (all 13 seeded towns pass). Sinai: K 37 to 26, G
+148 to 104, poolStart 88 to 66, refill 62.5 to 46.0 per hour; the 11
+labels kept out are six in the water and five with 0 or 1 building.
+Section 17's K item is closed; 5.1, 12.1, 16 and 18 updated.
+
+Verified on build/agent2-rwdi: [guerrilla],[occupierforces],[save] 674
+cases; tri guerrilla_forces_pool_off (30 slots), _pool_on,
+guerrilla_sinai_swap 3/3 on the final build, refill_pushout, wave_base,
+offscreen and native save_reload seqs green on the previous build (only
+a field rename and a log re-wrap since); human suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

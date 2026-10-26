@@ -1,0 +1,12 @@
+docs: remastered lighting research findings and the graphics-remaster plan
+
+Remaster/research/ documents the 22-track research run toward an "RTX on" look
+from the existing models and textures: the owner's goal and decisions, how each
+prototype was built and critic-checked on real Remaster captures, one page per
+track (technique, what real data showed, cost, verdict, overclaims, what
+production needs), the water study, every bug found with its fix commit, the GPU
+budget and the road to RTX-on. INTEGRATION-PLAN.md is the plan for compiling the
+ideas that worked into this branch, and Remaster/ITERATIONS.md is the change log.
+Pictures are renders of game data and stay on the development machine.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

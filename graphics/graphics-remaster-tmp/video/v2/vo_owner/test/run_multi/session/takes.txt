@@ -1,0 +1,65 @@
+TAKES FOUND IN THE RECORDING
+============================
+
+source line03.wav: 15.6 s, 48000 Hz, 1 ch; floor -57.5 dBFS, speech -14.8 dBFS; noise profile from the quietest pauses
+source Line 4 pines.wav: 20.8 s, 44100 Hz, 2 ch; floor -57.8 dBFS, speech -15.2 dBFS; noise profile from the quietest pauses
+source misc.wav: 32.7 s, 48000 Hz, 1 ch; floor -57.3 dBFS, speech -13.9 dBFS; noise profile from the quietest pauses
+spoken line numbers: none found (the takes were found by their words alone)
+
+take   wording     start      end   len match   peak clip  wps  heard / notes
+
+line 1 (v2_00_intro): "Uslu dur is a total overhaul of Arma: Cold War Assault. This first video is about the light."
+  NOT FOUND in the recording
+
+line 2 (v2_01_opening): "Malden, under occupation. The models are the originals. The light is new."
+  NOT FOUND in the recording
+
+line 3 (v2_02_valley_mist): "A resistance squad moves out at first light. The sun is still burning off the valley mist."
+  3.1   main      0:00.53  0:07.19  6.21  100%   -4.0 no    2.9  a resistance squad moves out at first light the sun is still burning o
+  3.2   main      0:08.46  0:15.13  6.29  100%   -4.0 no    2.9  a resistance squad moves out at first light the sun is still burning o
+
+line 4 (v2_03_pine_shafts): "In the pine woods, morning sun falls through the haze in shafts. The guerrillas keep to cover."
+  4.1   main      0:00.53  0:07.41  6.43  100%   -5.5 no    2.8  in the pine woods morning sun falls through the haze in shafts the gue
+  4.x1  main      0:08.70  0:13.43  4.43   59%   -7.9 no    2.3  in the pine woods morning sun falls through the haze
+        FRAGMENT; missing: in shafts the guerrillas keep to cover
+  4.2   main      0:13.32  0:20.34  6.63  100%   -4.0 no    2.7  in the pine woods morning sun falls through the haze in shafts the gue
+
+line 5 (v2_04_bay_reflections): "On the bay, an occupier patrol boat crosses calm water that mirrors the hills and the sky."
+  5.1   main      0:00.53  0:07.60  6.62  100%   -4.0 no    2.7  on the bay an occupier patrol boat crosses calm water that mirrors the
+  5.2   main      0:08.92  0:15.86  6.59  100%   -4.0 no    2.7  on the bay an occupier patrol boat crosses calm water that mirrors the
+
+line 6 (v2_05_outpost): "A low winter sun lights the occupier outpost from the side. The shade stays cool and deep."
+  6.1   main      0:15.96  0:23.33  6.92  100%   -4.0 no    2.6  a low winter sun lights the occupier outpost from the side the shade s
+  6.2   main      0:24.70  0:32.23  7.12  100%   -4.0 no    2.5  a low winter sun lights the occupier outpost from the side the shade s
+
+line 7 (v2_06_cloud_shadows): "Over Everon, the clouds catch the sun, and their shadows move slowly across the hills."
+  NOT FOUND in the recording
+
+line 8 (v2_07_sinai_camp): "Modded islands get it too. In Sinai, a camp sits under netting in the late sun."
+  NOT FOUND in the recording
+
+line 9 (v2_08_ambush): "Golden hour. Guerrillas wait at the forest edge; every tree throws a long shadow downhill."
+  NOT FOUND in the recording
+
+line 10 (v2_09_convoy): "At sunset, an occupier convoy drives into the low sun."
+  NOT FOUND in the recording
+
+line 11 (v2_10_checkpoint): "At dusk, the sentries at the checkpoint gather around a fire."
+  NOT FOUND in the recording
+
+line 12 (v2_11_town_patrol): "At night, street lamps and the fire light the occupied town. A patrol comes down the street."
+  NOT FOUND in the recording
+
+line 13 (v2_12_rain_town): "Then the rain. Puddles catch the lamps, and the resistance slips past the patrol."
+  NOT FOUND in the recording
+
+line 14 (v2_13_supply_run): "Out in the country, the nights are dark. A supply run drives by its headlights alone."
+  NOT FOUND in the recording
+
+line 15 (v2_14_firefight): "When a firefight breaks out, every flare, fire and shell burst lights the field."
+  NOT FOUND in the recording
+
+line 16 (v2_99_outro): "Uslu dur. Part two covers the gameplay: Guerrilla Mode and the AI."
+  NOT FOUND in the recording
+
+len = the finished line (0.10 s before the first word, 0.25 s after the last); peak in dBFS; wps = words a second.

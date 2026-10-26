@@ -1,0 +1,107 @@
+MIST FLICKER SWARM, AGENT 6: FEATURE BISECTION
+=============================================
+Shot: trailer scene 2, valley_mist ("MOVING OUT AT DAWN"), overhaul side.
+Build: D:/Arma_CWA_worktrees/look-director/arma_CWR/dist/look-director-rwdi (the trailer's overhaul side,
+same engine code as graphics-remaster 907906c). No engine change, no rebuild, no branch.
+
+VERDICT
+-------
+Confirmed. The band flicker lives entirely in the volumetric fog's medium sampling (volFog, psFogInject).
+Every way of removing the froxel medium kills it (no air 0.035, B8 air pass instead 0.028, empty medium with
+the stage still running 0.039, injection jitter frozen under the real pan 0.038), while every other active
+feature is ruled out (TAA, GTAO, exposure/meter, the whole photoreal camera, sun in the air, every shadow,
+the dawn phase gain, the far ring). The valley mist is not special: the haze alone still flickers (0.347).
+Agent 3's causal result (frame-global jitter of the froxel injection under the 0.12 history) is the
+mechanism; my axis split shows the DEPTH jitter carries about 80% of it.
+Agents 1 and 3 report it also shows in real-time play (rt60 0.308 vs vanilla 0.106), so it is a game bug:
+fix in the engine with a unit test, not in the capture.
+
+PROBE (shared on the board)
+---------------------------
+D:/Arma_CWA_worktrees/video-work/arma_CWR/tests/rendering/captures/video/look_probe_mist6_<tag>.test.sqf
+= ud_valley_mist with its full staging (spawn, settle, capMode, capPin), then the clip's own frames with
+0-based index 240..389 (files f0241..f0390), exact head-recipe step per shot. Shots 1-30 are warm-up for the
+temporal filters after the jump from the staging view; measured with bandmetric --from 30, which is the
+real clip's --from 270 --to 390 window.
+Generator: tmp/video/mist/6/mk_probe.py --tag <t> --mode "remastered,<key>=<v>"
+Runner:    tmp/video/mist/6/run_probe.ps1 -Tag <t> [-ShaderOverrideDir <abs dir>]
+           (run-captures.ps1 on junction RemasterUD-mist-6, bandmetric, mkv, PNGs deleted)
+Outputs:   tmp/video/mist/6/runs/<tag>/ (band.txt, band.json, <tag>.mkv, keep/ six PNGs, udcap.log, tri/)
+
+Reproduction: base probe band 0.506, band_max 2.02, spikes 5568, sky 0.034. Real clip same window:
+0.526 / 2.09 / 5482 / 0.057. Vanilla same window: 0.102 / 0.235 / 0. Run-to-run spread of unchanged-looking
+variants about +-0.03 to 0.04 (agent 3's moving base 0.517, noao 0.465, agent 4's frozen exposure 0.485).
+
+TABLE (bandmetric --from 30 on the shared cut; "base" = remastered)
+-------------------------------------------------------------------
+variant      setting (triSetLighting / override)                    band   b_max  spikes  sky    effect
+base         remastered                                             0.506  2.02   5568    0.034  reproduces
+noair        volFog=0,airBeams=0,airHaze=0,valleyMist=0             0.035  0.066  0       0.025  KILLS
+b8air        volFog=0 (B8 screen-space air pass runs instead)       0.028  0.062  0       0.021  KILLS
+nodens       fogDensity=0 (fog stage runs, medium empty)            0.039  0.135  0       0.022  KILLS
+frozenmove   psFogInject at cell centre (agent 3 frozen), real pan  0.038  0.095  0       0.025  KILLS
+nomist       fogMist=0 (valley mist off, haze kept)                 0.347  1.40   3869    0.047  partial (mist ~1/3)
+xyglobal     depth at slice centre, frame-global xy jitter kept     0.147  0.63   567     0.038  mostly gone
+zglobal      xy at cell centre, frame-global depth jitter kept      0.426  1.82   5027    0.028  stays
+notaa        taa=0                                                  0.692  2.47   7025    0.055  worse (TAA damps)
+noao         ao=0 (GTAO / Ao stage off)                             0.465  1.80   5102    0.043  none
+From other agents on the same cut (their board entries):
+frozen exp.  camAdapt=100000 (agent 4)                              0.485                        none
+nophoto      photoLight=0 (agent 4)                                 0.511  2.01   5985           none
+nophase      round 5 dawn phase gain off (agent 4)                  0.672                        worse
+nosun        fogSun=0 (agent 5)                                     0.794  3.17   7156           worse
+noshade      terrain/canopy shadows off + shadow range 5 m (ag. 5)  0.575  2.14   6208           none
+fogvis1      fog ignores all shadows (agent 5)                      0.583  2.06   6267           none
+percell      per-cell jitter, real pan (agent 3)                    0.063  0.175  0       0.025  fix candidate
+
+What the table says
+- The froxel fog volume is necessary: B8's air pass draws THICKER haze over this valley (look/
+  crop_base_b8air_nodens_f0328.png) and does not flicker, so thick air is not flickery in itself.
+- The fog stage's machinery without a medium (ring, history buffers, near field, apply) is clean (nodens).
+- Under the real pan, with only the injection jitter removed, the band sits on the no-air floor (frozenmove
+  0.038 vs 0.035): the far ring stepping (round 3 critic, handoff hypothesis 2), the history reprojection,
+  the near-field beams and the ring's phase gain add nothing measurable. Ring hypothesis ruled out.
+- Axis split: the frame-global DEPTH jitter (jz -> fogDepth.w, fogSlice "s + fogDepth.w") carries about 80%
+  of the band rms, the xy jitter (fogFrame.xy) the rest; they add roughly in power
+  (sqrt(0.426^2 + 0.147^2) = 0.45 vs 0.506). Both axes need per-cell decorrelation.
+- TAA, the sun's shade and the dawn phase gain all DAMP the sheet (turning them off makes it worse); they are
+  not sources.
+
+Visual checks (looked at by me, crops in tmp/video/mist/6/look/)
+- real_strip.png / real_diff.png: real clip frames 325-330, x1000-1480 y520-790; the x8 frame differences
+  show one broad sheet of the mist and haze between the near ridge and the far hills brightening and darkening
+  as a whole, edges along the terrain silhouettes. Not grain, not a pan edge.
+- base_vs_noair_f0328.png, crop_base_nomist_noair_f0328.png, crop_base_b8air_nodens_f0328.png: the variants
+  did what their switches say (mist gone, haze kept; B8 haze; clear air).
+- bay2x_base_vs_frozenmove_f0328.png: 2x of the bay; frozen jitter is not a fix (faint grid curtains in the
+  haze, as agent 3 reported).
+
+RUNTIME SWITCHES (posted on the board at the start)
+---------------------------------------------------
+triSetLighting "<mode>,<key>=<v>,..." (FeatureSwitches.cpp registry; capMode in the clip tests applies it);
+volFog supersedes airBeams/airHaze/valleyMist (FeatureGates.cpp:349), so "no air" needs all four off;
+volFog knobs fogDensity, fogMist, fogSun, fogLights, fogQuality; camAdapt (huge = frozen exposure);
+ao, taa, taaAlpha, post, gates, debug; triFeatureState for the gates per shot; run-captures.ps1
+-ShaderOverrideDir (CWR_SHADER_OVERRIDE_DIR) loads <name>.glsl for any post shader, so GLSL changes to
+psFogInject need no rebuild. Assembled post shaders: tmp/video/mist/6/shaders/all/ (glsl_extract.py --dump).
+
+RECOMMENDED FIX (for the lead; engine, it is the product)
+---------------------------------------------------------
+In psFogInject (EngineGL33_PostFogShaders.cpp kPostFogInjectMainGLSL, fogSlice and main) decorrelate the
+sub-cell jitter PER CELL on both axes, keeping the frame's golden-ratio sequence: add a per-cell blue-noise /
+interleaved-gradient offset of the cell (and slice) to fogDepth.w and fogFrame.xy, as agent 3's
+mist/3/shaders/percell/psFogInject.glsl does (moving 0.063, real-time 0.112, 0 spikes). The depth axis
+matters most; do not fix xy alone. Add a unit test that the injection's jitter offset differs between
+neighbouring cells within one frame (or that the per-frame mean of the offsets over a block is near zero),
+then reshoot valley_mist with the head recipe.
+
+Files
+-----
+tmp/video/mist/6/REPORT.txt (this), mk_probe.py, run_probe.ps1, run_batch.ps1, blocks.py, corr.py, batch.txt
+tmp/video/mist/6/runs/<tag>/ for base, noair, nomist, notaa, noao, nodens, b8air, frozenmove, zglobal, xyglobal
+tmp/video/mist/6/shaders/{all, frozen, percell, zglobal, xyglobal, ringfreeze (unrun)}
+tmp/video/mist/6/look/*.png
+Probe tests: video-work/arma_CWR/tests/rendering/captures/video/look_probe_mist6_{base,noair,nomist,notaa,
+noao,nodens,b8air,frozenmove,zglobal,xyglobal}.test.sqf/.toml
+Junction used: video-work/arma_CWR/packages/RemasterUD-mist-6 (no games left running; checked with
+stop-owned-games.ps1).

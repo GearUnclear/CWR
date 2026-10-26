@@ -1,0 +1,80 @@
+== profile ud: 7 changed members
+   lobo_a4/scripts/firemissiles_a2.sqs 4399 -> 4412
+   lobo_a4/scripts/firemissiles_a3.sqs 4395 -> 4408
+   lobo_airammo/scripts/cbu/rbk500.sqs 1635 -> 1638
+   lobo_f4/scripts/firemissiles_ww.sqs 3091 -> 3104
+   lobof5/scripts/rockeye.sqs 1524 -> 1525
+   loboil28/script/fire_mk20.sqs 454 -> 548
+   loboil28/script/rockeye.sqs 1526 -> 1527
+    --- lobo_a4/scripts/firemissiles_a2.sqs
+    +++ lobo_a4/scripts/firemissiles_a2.sqs
+    @@ -103 +103 @@
+    -?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBoF16\scr\rockeye.sqs"
+    +?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBo_airammo\Scripts\cbu\rockeye.sqs"
+
+    --- lobo_a4/scripts/firemissiles_a3.sqs
+    +++ lobo_a4/scripts/firemissiles_a3.sqs
+    @@ -103 +103 @@
+    -?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBoF16\scr\rockeye.sqs"
+    +?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBo_airammo\Scripts\cbu\rockeye.sqs"
+
+    --- lobo_airammo/scripts/cbu/rbk500.sqs
+    +++ lobo_airammo/scripts/cbu/rbk500.sqs
+    @@ -49 +49 @@
+    -_bomblet = "LoBoRBKBomblet" createvehicle [_newposx, _newposy, _height]
+    +_bomblet = "LoBoRBK500Bomblet" createvehicle [_newposx, _newposy, _height]
+
+    --- lobo_f4/scripts/firemissiles_ww.sqs
+    +++ lobo_f4/scripts/firemissiles_ww.sqs
+    @@ -130 +130 @@
+    -?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBoF16\scr\rockeye.sqs"
+    +?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBo_airammo\Scripts\cbu\rockeye.sqs"
+
+    --- lobof5/scripts/rockeye.sqs
+    +++ lobof5/scripts/rockeye.sqs
+    @@ -28 +28 @@
+    -_deployed= "LoBoMk20Deployed" createvehicle _bpos
+    +_deployed= "LoBo_mk20Deployed" createvehicle _bpos
+
+    --- loboil28/script/fire_mk20.sqs
+    +++ loboil28/script/fire_mk20.sqs
+    @@ -19 +19,3 @@
+    -?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBoF15\scr\rockeye.sqs"
+    +? isNull _missobj: goto "Exit"
+    +? !(local _missobj): goto "Exit"
+    +?(_ammoname == "LoBo_mk20Bomb"): [_missobj] exec "\LoBo_airammo\Scripts\cbu\rockeye.sqs"
+    @@ -21,0 +24,3 @@
+    +
+    +#Exit
+    +exit
+
+    --- loboil28/script/rockeye.sqs
+    +++ loboil28/script/rockeye.sqs
+    @@ -28 +28 @@
+    -_deployed= "LoBoMk20Deployed" createvehicle _bpos
+    +_deployed= "LoBo_mk20Deployed" createvehicle _bpos
+
+== profile classic: 23 changed members
+   lobo_a4/scripts/firemissiles_a2.sqs 4399 -> 4412
+   lobo_a4/scripts/firemissiles_a3.sqs 4395 -> 4408
+   lobo_airammo/scripts/cbu/rbk500.sqs 1635 -> 1638
+   lobo_airammo/scripts/smoke/fire.sqs 4782 -> 4840
+   lobo_btr60/scripts/fire.sqs 4765 -> 4823
+   lobo_f4/scripts/firemissiles_ww.sqs 3091 -> 3104
+   lobo_fab/lcm/scripts/fire.sqs 4765 -> 4823
+   lobo_fab/saar5/scripts/fire.sqs 4765 -> 4823
+   lobo_fab/scripts/fire.sqs 4765 -> 4823
+   lobo_zelda/scripts/fire.sqs 4765 -> 4823
+   lobo_zu23/scripts/fire.sqs 4765 -> 4823
+   lobocen/scripts/fire.sqs 4766 -> 4824
+   loboegapc/scripts/fire.sqs 4765 -> 4823
+   lobof15/scr/fire.sqs 4765 -> 4823
+   lobof16/scr/fire.sqs 4765 -> 4823
+   lobof5/scripts/rockeye.sqs 1524 -> 1525
+   loboil28/script/fire_mk20.sqs 454 -> 548
+   loboil28/script/rockeye.sqs 1526 -> 1527
+   lobom60/scripts/fire.sqs 4766 -> 4824
+   lobomerkava2/scripts/fire.sqs 4766 -> 4824
+   lobomerkava4/scripts/fire.sqs 4766 -> 4824
+   lobosa6/scripts/fire.sqs 4765 -> 4823
+   loboter/scripts/fire.sqs 4765 -> 4823

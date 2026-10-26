@@ -1,0 +1,201 @@
+Round 5 critic: artefacts and cost
+==================================
+
+Build: D:/Arma_CWA_worktrees/look-director, dist/look-director-rwdi (PoseidonGame.exe 2026-10-19 04:28,
+the round 5 merge, fec1075 + combined.patch). Shots: LOOK/director/final (+ final/rainviews), compared
+with round 4 (director/round4/final), round 3, landed and vanilla (LOOK/ref).
+Everything below is in D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r5_artefacts/.
+
+VERDICT: ready_for_owner. I found no artefact blocker and the cost is flat. Round 4's blocker is fixed:
+woods_pine2_evening's mean luma is 56.6 (round 4 35.5, round 3 54.3, landed 63.2), and the soldier and
+the jeep read. The remaining items below are minor or belong to the realism critic.
+
+
+1. Full-size inspection
+-----------------------
+
+Owner's wet seam (town_night_rain): GONE in both the 1080 cut and rainviews/town_night_rain. The diagonal
+  edge from the tree base is absent. Round 4's vertical lamp streak across the square is gone too: only
+  the puddles reflect, and the non-puddle wet ground shows darker colour and no streak. This meets the
+  owner's rain rule.
+  owner_wet_seam_r5.png (owner reference | r5 1080 | r5 rainview | r4 1080, same box; owner_seam_ref.png
+  is the webp as PNG).
+  Near puddles (rain_nearpuddle_compare.png, rain_puddles_r5.png): the bottom-left puddle shows a beige
+  reflection of the house with straight, blocky edges. Option 4's own shot, round 4 and landed all
+  show the same blob, so it is not new. Night puddles near the camera reflect the black sky, as the
+  merger noted.
+
+Mist specks: FIXED for the green and black specks. In the tree lines, round 4 had dozens of single green
+  and black pixels in both optics views. Round 5 has none (optics_specks_r5.png, 3x).
+  What remains: a purple cluster on the blurred right edge of the sight in optics_mist_sight and
+  sight_f1. It is 32 pixels in 8 clusters inside a 7 px wide strip (x 1543..1549, y 661..708). Round 4
+  had 25 pixels there. Landed and vanilla have 0, and the HUD view has 0. It sits on the same pixels in
+  both frames, so it is fixed per pixel on a still sight and will crawl when the sight moves. It is too
+  small to see at thumbnail size.
+  optics_sight_edge_r5.png (3x: r5 | r4 | landed | vanilla). A likely cause, not verified: the overlay
+  ratio over/lin0 inside the overlay's partly transparent blur, where G darkens more than R and B.
+  (The fixer's eps change only covers pixels the overlay did not draw.)
+
+Banding and hard light edges round the sun: none at full size. A 12x luma high-pass shows only
+  one-level rings in the glow.
+  - sunrise_ridge: the glow is now a band along the horizon. I found no edge at the sun's height,
+    where the new camLowSunGlowCos clamps the sky below the sun (band_sun_r5.png).
+  - coastline_sunset and lowsun_fp: same result (band_lowsun_r5.png).
+  - Cypress edges against the warm sky are clean, with no rim or halo (sunrise_cypress_edges.png, 4x).
+
+dawn_valley: the bay is crisper than in round 4. The 2-row ring, read per column, adds no vertical
+  azimuth stripes in the haze (dawn_valley_haze_r5.png, 12x high-pass). The bright line along the far
+  shore is the water reflecting the lit shore, and landed has it too (dawn_shore_line.png).
+
+Grey skies (band_grey_skies_r5.png): no seam in the deck relief of rain_day or overcast_heavy, and no halo
+  at the noon_vista ridge.
+  rain_day: the rain streaks thin out over about 40 rows near y 340..380 and the lower sky band is
+  clean. There is no hard line at full size (rain_day_streak_edge.png, 3x). Landed keeps its streaks
+  down to the hills. The streaks are visible at full size and faint at thumbnail size (known item 6).
+
+Firefights (ff_all_r5.png, ff_bursts_zoom_r5.png at 4x):
+  - firefight_3: round 4's rose dust foot is gone. The smoke foot is now a dark silhouette in the dusk
+    sky's colour.
+  - firefight_1, the young-burst horizon streak: still there, and it moved views because of the pinned
+    timing. It is a 1 to 2 row line (rows 335..336, x 428..497 at 960x640) with peak luma 146 over
+    ground at 30. Round 4 had it in firefight_2: 3 rows, peak 184. The sparks show and the air glows,
+    but no fireball has drawn yet. It is a small tick at thumbnail size and will flash once per burst in
+    motion.
+  - firefight_2: the pinned 6-frame fireball is a cluster of round, flat, lemon-yellow discs. The top 10%
+    colour is (223, 203, 114), R/G 1.10. A real fireball at 0.2 s reads orange to white. It looks like
+    sprites, but at thumbnail size it is small. This is the particles fixer's remaining item 3 and is
+    for the realism critic.
+    Hypothesis, not verified: a per-channel shoulder in the filmic curve pushes a bright orange emissive
+    toward yellow.
+  - Particle fallback (code read, not seen in any shot): Object::DrawDecal uses the rig light only when
+    ParticleRigLight passes its frame guard (_camera.frame and _particleRigFrame equal the current
+    frame). Otherwise the puff falls back to the classic sun, sun->FullResult(0.5), the salmon light the
+    fixer removed. On a frame where the guard fails (the first frame after a camera switch, say), a puff
+    would pop to the old colour for one frame. No shot shows it.
+
+Clipped whites: under 0.005% of pixels in every view (only lamps and fires). luma_table.txt has mean
+  luma per view for r3, r4, r5, landed and vanilla, with r5's clipped and near-black shares.
+  Exposure recovered:
+  - woods_pine2_evening: 35.5 -> 56.6
+  - lowsun_fp: 84.0 -> 96.5
+  - sinai_lowsun_fp: 67.5 -> 84.6
+  - pine_rays: 80.0 -> 87.6
+  - dawn_valley: 107.0 -> 113.6
+  No view is blown or near black. Night views are 45 to 55, as in round 4.
+  The grey-day frame means dropped and now sit near vanilla: rain_day 148 -> 128 (vanilla 129) and
+  overcast_heavy 140 -> 122 (vanilla 121).
+
+Horizon lines: a scan for any new full-width row step against round 4 found only blue_hour_coast's sea
+  horizon, which moved down by one pixel. That is not an artefact.
+
+rain_day far forest (rain_day_forest.png): the pale vertical stripes are the forest's trunk texture,
+  and vanilla has them too. In rain the forest is far greyer and paler than in landed or vanilla, which
+  is a realism point.
+
+HUD: tank_gunner_optics and tank_gunner_interior match round 4: compass, ammo, tank icon and the action
+  menu (hud_tank_r5.png). The optics HUD text is unchanged.
+
+Motion (new this round): I ran tests/rendering/captures/look_motion_abel (a copy in tests/crit5m_motion),
+  modes on and off. The pan crosses the low sun of lowsun_fp at 1.5 degrees a step; the other move
+  tilts woods_pine2_evening from shade to sky and back. Files: motion_ev_r5.png,
+  motion_pan_sun_strip_r5.png, motion_hold_crowns_r5.png, raw data in motion/.
+  - The exposure under the new meterSkyLight is smooth in both moves. The ev and its target never
+    reverse direction.
+  - Largest ev step between steps (8 engine frames each): 0.17 on the pan, 0.22 on the tilt. The
+    target's largest single step is 0.51, when the sky enters the frame, and the ev eases after it. No
+    pumping.
+  - Held frames: the mean change between consecutive held shots is 0.9 to 1.1 of 255 with the overhaul
+    on, against 0.5 to 1.15 with it off. The changing pixels are crowns moving in the wind; I found no
+    shimmer in the shafts.
+
+
+2. AITEST review: do the new tests fail if render path state leaks into AI sight?
+--------------------------------------------------------------------------------
+
+Mostly yes. [aisight] passes on the merged build: 298 assertions in 5 cases, run from D:\ with
+build/look-director-rwdi PoseidonTests.exe.
+
+What the tests cover (tests/unit/engine/Poseidon/World/test_fog_sight_link.cpp):
+  - Case "ignores every render path state" runs the real call, SimulateFogSight(&land), on a real
+    Landscape (a 64x64 valley at setFog 0.3) under an EngineDummy subclass that reports each state:
+      post effects off, classic lighting, volFog off, fogQuality/fogSun/fogLights, every gate off with
+      an interior view, another drawn medium, no drawn medium, tacticalZ 300, GEngine null.
+    For each state it checks the AI medium's march fields and FogSightTransmittance with exact
+    equality (==).
+  - SimulateFogSight passes GEngine->GetLightingTuning() whole into ComputeFogMedium(in, t, true).
+    Any leak placed in SimulateFogSight, ComputeFogMedium or FogSightTransmittance that reads one of
+    those states changes a value, and the case fails. That includes the fixer's mutation,
+    "if (!tuning.postEffects) SetFogSight(nullptr, nullptr)".
+  - I could not re-run the mutation: it needs a source edit and a rebuild, and no log of the fixer's
+    mutation run is on disk. Reading the code agrees with the fixer's claim.
+  - SetDrawnFogMedium copies its argument, so the lambda's local "other" medium does not dangle.
+  - FogSightMedium() now returns by value; a static_assert pins it.
+  - The classic early return in UploadLitFrameConstants clears the drawn medium
+    (EngineGL33_Lighting.cpp 796).
+
+Gaps, where a leak would still pass every unit test:
+  a) The call site is checked by string only. The contract finds "SimulateFogSight(GLOB_LAND)" in
+     World::SimulateLandscape, after the sun, the weather and SetFog and before PerformAI. It does not
+     check that the call is unconditional, and the render-state token check covers only the bodies of
+     SimulateFogSight and WorldFogInputs. A guard such as "if (GEngine->LightingRemasterActive())
+     SimulateFogSight(GLOB_LAND);" in WorldSetup.cpp would pass. AI would then keep a stale medium, or
+     none.
+  b) The consumer is checked by string only. In Target.cpp, EntityAI::CalcVisibility is checked only
+     for FogSightActive() before the "vis *= FogSightTransmittance(from, to)" text. No unit test
+     executes it. A render condition wrapped round the multiply would pass; only the in-game probe verb
+     triAiSight would show it.
+  c) Through the real step, case 1 does not vary exposure, saturation or sun. Case 4 covers them in the
+     pure ComputeFogMedium only. A read of those knobs inside SimulateFogSight itself would slip.
+  The cheap fix for (a) and (b): extend the token check to SimulateLandscape's body up to the call and to
+  CalcVisibility's fog branch. Better, drive CalcVisibility in a unit test. None of these gaps blocks the
+  look.
+  Still open, not part of this change: the ground field is about 0.6 s late after island load, and AI's
+  weather part is still the classic tactical fog (owner call).
+
+
+3. Cost
+-------
+
+How I ran it: tests/rendering/captures/run-timing.ps1 from the look-director engine root against
+dist/look-director-rwdi, junction RemasterUD-look-director-timing. Tests: critic_r4_artefacts/tests
+crit4t_abel_a/b/c, crit4t_eden and crit4t_sinai, the 21 views of round2/cost.md. Each view was shot 2x
+"tip" (remastered,photoLight=0,surfaces=0,volFog=0) and 2x overhaul, in the same build.
+
+The machine was quiet:
+  - before each of the 4 runs, tri slots read 0/4 and no PoseidonGame was running (0 s wait);
+  - the GPU sampler logged 0 of 142 two-second samples with a foreign PoseidonGame;
+  - round 3 also had 0 of 142, while round 4's run was contaminated, with 170 of 179 samples foreign.
+Table: timing/cost_r5_table.txt (script timing/cost_r5.py). Raw data: timing/<part>-timing/.
+
+GPU frame, overhaul minus tip, mean over the 21 views:
+  r2 +1.40 ms   r3 +1.45 ms   r5 +1.52 ms   (r4 +1.94 ms, not quiet, disregard)
+  median: r2 +1.47, r3 +1.61, r5 +1.50; mean ratio overhaul/tip: r2 1.152, r3 1.158, r5 1.158
+  min-frame delta: r3 +1.58 ms, r5 +1.65 ms
+
+Per view, versus round 3:
+  - Most views are within +-0.3 ms.
+  - Real growth is in the low-sun day views:
+      dawn_valley +2.60 -> +3.07 ms (min-frame +3.22 -> +3.72; world pass +3.47), 34.4 ms in all
+      sunrise_ridge +0.21 -> +0.68
+      woods_pine2_evening +1.45 -> +1.78
+    This fits the dawn fixer's per-column ring phase gain: 9 extra sky-table taps per froxel column
+    in psFogInject, active by day with the sky table on.
+  - town_night_rain shows +2.75 against r3's +1.61, but one overhaul sample spiked (frame 16.6 ms, min
+    12.7). Its min-frame delta is +1.04 against r3's +1.71, so I see no regression from puddle option 4.
+  - jeep_close_noon's +0.77 is low for the same reason, a spiked tip sample.
+  - CPU frame time with the overhaul on: 15.80 ms against 15.48 in round 3 (the tip runs went
+    14.25 -> 14.40). This is noise level; the particle rig light is one upload per frame.
+The heaviest view is still dawn_valley, at 34.4 ms here, against 31.3 ms for the tip.
+
+
+Files
+-----
+owner_wet_seam_r5.png, owner_seam_ref.png, rain_puddles_r5.png, rain_nearpuddle_compare.png,
+optics_specks_r5.png, optics_sight_edge_r5.png, band_sun_r5.png, sunrise_cypress_edges.png,
+band_lowsun_r5.png, dawn_valley_haze_r5.png, dawn_shore_line.png, band_grey_skies_r5.png,
+rain_day_streak_edge.png, rain_day_forest.png, ff_all_r5.png, ff_bursts_zoom_r5.png, hud_tank_r5.png,
+motion_ev_r5.png, motion_pan_sun_strip_r5.png, motion_hold_crowns_r5.png, luma_table.txt,
+timing/cost_r5_table.txt, timing/cost_r5.py, tools/ (specks.py, stats.py, rowsteps.py, motion.py),
+tests/crit5m_motion.test.sqf (copy of look_motion_abel), motion/ (raw motion run).
+Only my own games ran (5 timing and motion runs, one at a time), and none is left running. I edited no
+source, made no commits and created no branches.

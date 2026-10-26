@@ -1,0 +1,7 @@
+    // shows the opaque objects' GPU section for them. A5 lands taa, A6 the
+    // tiled light list (the world pass: it has no pass of its own), A7
+    // atmosphere, B11 terrainDetail and sharpen, B1 treeShadows (the shadow
+    // depth pass) and softShadows (the world pass), B2 lowSunRig and
+    // crownCanopy (the world pass's lighting), B5 seaWaves (its draws are in
+    // the world pass's ground section), B10 litClouds (the sky section) and
+    // skyCloudShadows (the world section: one density tap per lit fragment).

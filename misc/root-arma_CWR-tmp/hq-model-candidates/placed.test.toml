@@ -1,0 +1,4 @@
+mission = "tests/integration/missions/guerrilla_native.abel"
+binary = "PoseidonGame"
+timeout = 120
+extra_args = ["--dev", "--no-sound", "--width", "1600", "--height", "1000"]

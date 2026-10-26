@@ -1,0 +1,23 @@
+    // Surfaces and ambient light (the look lane "surface", SurfaceLight.hpp):
+    // x on (the switch and its gate), y specular strength, z canopy occlusion
+    // strength, w the spherical-harmonics sky light's weight.
+    Surface = 79,
+    // The canopy heightfield on unit 10 as the world programs read it: x its
+    // height base (m), y its height range (m), z 1 / its extent (1/m), w 1 when
+    // a canopy is uploaded.
+    SurfaceCanopy = 80,
+    Surface2 = 81,  // surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
+    SurfaceSh = 82, // kSkyShCoeffs vec4: the sky light's irradiance coefficients (rgb), the sun frame
+    Surface3 = 88,  // surfaces: x cavity strength
+    // The photoreal camera (look lane "light", photoLight; Graphics/Remaster/
+    // PhotoCamera.hpp): x 1 = the world's passes write scene light for the
+    // camera (camEncode), y the additive pre-lit draws' code scale, z the
+    // clear sky's scale (LightRig::skyScale), w the frame's pre-exposure.
+    Camera = 89,
+    // The camera's look of the world (photoLight; zero while it is off): x the
+    // weather's veil (0 clear .. 1 a grey sky over broken cloud), y a street
+    // lamp's classic ambient kept (kCameraLampAmbient), z a street lamp's
+    // intensity gain (kCameraLampGain), w how far a low sun turns the upper
+    // sky toward the zenith's blue.
+    CameraLook = 90,
+    Count = 91,

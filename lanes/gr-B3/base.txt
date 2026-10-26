@@ -1,0 +1,8 @@
+lane: gr-B3
+source: D:/Arma_CWA_worktrees/gr-B3
+HEAD: 7b7e3e61b6e4d696013f23a485d0a304fb3b6d33
+subject: graphics: every tree casts a long golden-hour shadow at any distance
+commit date: 2026-10-18 09:12:40 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 27
+binary files changed (content not in patch): none

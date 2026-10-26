@@ -1,0 +1,27 @@
+As built in B1: `kShadowRawUnit` (6) is in use, with its `kLitSamplers` row (`shadowDepth`) and a
+NEAREST, non-compare sampler object kept on the unit. It holds the depth stand-in from
+`InitLightingResources` on; `BindLightingTextures` binds the cascade array (or the stand-in) on
+every world pass and `EnsureArrayTarget` rebinds it the moment it recreates the array, the F3 rule
+of unit 2. The `[ShadowSampler]` audit case for unit 6 is in `test_gl_state_cache_audit.cpp`.
+
+As built in A6: unit 13 is sampled (`lightTiles`, a `usampler2D` in RGBA8UI, not RGBA16UI: a light
+index plus one fits a byte with 64 lights, which halves the upload) and has its `kLitSamplers` row.
+Unit 12 stays free: the light data is a uniform block, `FrameLights` on binding point 4
+(`kLightListBinding`, `vec4 frameLights[256]`, 4 KB), not a texture buffer. A build that read the
+lights through `texelFetch` on a `samplerBuffer` took 1.6 ms more world time than the per-draw path
+at the 10-light town view (minimum of 3 interleaved rounds, 4060 Ti, another lane's game running);
+with the uniform block, which the fragments of a tile read alike, and the tile's texels read once,
+the same reading on a quiet machine is 0.5 ms (5 A6). No stand-ins: `InitLightingResources`
+creates the real block (zeroed) and a one-tile texture with no light, parks the texture on its unit,
+and `BindLightingTextures` binds it with the others. The unit-table test now counts integer samplers
+(`[iu]?sampler`).
+
+As built in B5: `kSeaNextFrameUnit` (11) is in use, with its `kLitSamplers` row (`seaNext`, declared
+by the water program only) and the white 1x1 `_post.whiteTex` parked on it at
+`InitLightingResources`. `Engine::BeginSea` binds the animation frame the sea faces do not carry
+there, with unit 0's sampler object (`_samplerObjects[0]`: wrap, anisotropy, the TAA LOD bias), and
+`EndSea` puts the stand-in and sampler 0 back.
+
+As built in B10: `kSkyDensityUnit` (9) is in use, with its `kLitSamplers` row (`skyDensity`) and a
+1x1 RGBA8 no-cloud stand-in bound at `InitLightingResources` (`InitSkyClouds`); `BindLightingTextures`
+and the sky pass bind the map or the stand-in.

@@ -1,0 +1,12 @@
+arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp

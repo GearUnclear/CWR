@@ -1,0 +1,26 @@
+{
+  "repair_version": "2026-10-11.3",
+  "rule_sha256": "75c456dcab6fbece460edd479eedc296253255e709a3c58260f28072562a0427",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "classic",
+  "changed_members": 16,
+  "added_members": 0,
+  "archives": [
+    "lobo_airammo",
+    "lobo_btr60",
+    "lobo_fab",
+    "lobo_zelda",
+    "lobo_zu23",
+    "lobocen",
+    "loboegapc",
+    "lobof15",
+    "lobof16",
+    "lobom60",
+    "lobomerkava2",
+    "lobomerkava4",
+    "lobosa6",
+    "loboter"
+  ],
+  "skipped": []
+}

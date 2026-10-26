@@ -1,0 +1,66 @@
+[
+ {
+  "id": "v2_00_intro",
+  "text": "Uslu dur is a total overhaul of Arma: Cold War Assault. This video covers the graphics and rendering improvements."
+ },
+ {
+  "id": "v2_01_opening",
+  "text": "Original game on the left, Uslu dur on the right. The models and textures are unchanged."
+ },
+ {
+  "id": "v2_02_valley_mist",
+  "text": "The fog is volumetric. Mist settles in the valley, and the rising sun shines through it."
+ },
+ {
+  "id": "v2_03_pine_shafts",
+  "text": "In the pine woods, sunlight comes through the trees as visible shafts in the haze."
+ },
+ {
+  "id": "v2_04_bay_reflections",
+  "text": "The water reflects its surroundings, including the hills and the patrol boat."
+ },
+ {
+  "id": "v2_05_outpost",
+  "text": "The outpost is lit by a low winter sun. Ambient occlusion darkens the corners and the ground under the vehicles."
+ },
+ {
+  "id": "v2_06_cloud_shadows",
+  "text": "From the air you can see the cloud shadows moving across Everon."
+ },
+ {
+  "id": "v2_07_sinai_camp",
+  "text": "It also works with mods. This is the Sinai map from the Lost Brothers mod."
+ },
+ {
+  "id": "v2_08_ambush",
+  "text": "At golden hour the trees cast long shadows over the resistance waiting at the forest edge."
+ },
+ {
+  "id": "v2_09_convoy",
+  "text": "An occupier convoy drives into the setting sun. Exposure is handled like a real camera."
+ },
+ {
+  "id": "v2_10_checkpoint",
+  "text": "At the checkpoint, the fire lights the sentries standing around it."
+ },
+ {
+  "id": "v2_11_town_patrol",
+  "text": "At night, street lamps light the town as an occupier patrol walks through."
+ },
+ {
+  "id": "v2_12_rain_town",
+  "text": "In the rain, wet ground turns darker and the puddles reflect the street lights."
+ },
+ {
+  "id": "v2_13_supply_run",
+  "text": "Outside town there are no street lights, and the supply run drives on its headlights."
+ },
+ {
+  "id": "v2_14_firefight",
+  "text": "Flares, fires and explosions light up their surroundings. The size of each blast depends on the munition."
+ },
+ {
+  "id": "v2_99_outro",
+  "text": "Part two will cover the gameplay: Guerrilla Mode and the AI."
+ }
+]

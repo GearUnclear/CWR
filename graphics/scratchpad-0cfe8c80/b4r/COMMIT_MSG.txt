@@ -1,0 +1,174 @@
+graphics: fires, flares and shell bursts light the men and cast shadows
+
+What the player sees: at night a camp fire, a burning wreck, a shell
+burst, a flare, a muzzle flash, a tracer and a missile motor now light
+the ground and the men around them as real light sources, warm and
+bright near the source and falling off with distance, and the four
+strongest throw long radial shadows from the men and vehicles. A shell
+burst whitens the frame for as long as Classic's does: at eye height the
+first flash frame reads 57.9 against Classic's 56.0 and the frame 0.13 s
+later 57.6 against 58.5; from 5 m up both frames read brighter than
+Classic (115.6 and 114.1 against 71.4 and 77.0). The flash is white-hot
+and cools to a fire's warmth, so the ground it lights reads warm white
+and sand, not khaki (red over blue of the lit ground 1.22 to 1.39). Smoke
+and dust round a fire or a burst glow from inside, and the air round a
+flash takes a faint glow. By day the same lights keep a fifth of their
+strength (bursts) or 12% (fires), so a noon shell still marks the crater;
+the shadows run only at night. A paused game holds every light where it
+was.
+
+How it works: Graphics/Rendering/Lighting/CombatLights (pure) keeps the
+combat lights of the world in one set, ticked by the simulation step in
+World::Simulate (so a paused frame does not age them). Bursts (muzzle,
+cannon, explosion) are spawned and forgotten; continuous lights (wreck
+embers, camp fires, tracers, flares, missile motors) are owned by their
+object through a CombatLightHandle. The sources are the existing
+gameplay hooks: WeaponLightSource and WeaponFireSource (the firing
+vehicles and soldiers now pass the round's hit, which sets the muzzle
+strength), SmokeSourceVehicle (the fuel burst and the wreck's embers),
+Explosion (a burst sized by the explosion), ShotBullet (tracers),
+Missile (the motor while it thrusts), IlluminatingShell (flares) and
+Fireplace. Each kind has its envelope (EvaluateCombatLight: a 30 ms
+muzzle; an explosion whose white-hot flash holds 0.15 s
+(kExplosionFlashHold), then falls in 50 ms while a flicker fades in and
+the colour cools to the fire's; a fire that breathes on two slow sines
+and smooth noise, never a new brightness every frame) and a ball
+falloff E = I * window / (1 + d^2 / r0^2) that ends at the light's
+range (at most 120 m, a flare 400 m). Burst colours stay at or under the
+fire's red over blue.
+
+The lights enter A6's tiled list as up to 12 HDR entries at the head of
+the frame's list, strongest at the camera first (MergeCombatFrameLights,
+packed as kind 2 with the window range), and the forward shader shades
+them in linear light outside the classic clamp (combatLights), with a
+flash highlight on glossy materials but not on terrain. While they are
+on, the classic light of the same source lights nothing: the tiled list
+and the smoke skip the Combat and Fire kinds at selection (the classic
+light stays for its glow sprite and for the switch off). The shadows: up
+to four lights are picked for the four channels of a half-resolution
+RGBA8 mask, with hysteresis (a light keeps its channel unless another is
+1.5 times stronger for 0.3 s; tracers and motors cast none). At the
+start of each world pass EngineGL33_PostCombat traces from each mask
+texel toward each shadowed light through the previous frame's half-res
+linear depth (24 steps over at most 25 m), then blurs the mask across
+and down with a depth-aware 7-tap filter. The forward shader maps its
+fragment into last frame's screen through three rows in the FrameLights
+block (CombatMaskRows) and takes one bilinear tap for all four lights.
+The flash exposure: explosions and cannon at the camera open the
+exposure in proportion to their irradiance there, at night only, at
+most 4x, held with a 0.12 s decay. The composite adds the in-scatter of
+up to 8 lights (an analytic integral along each pixel's ray through the
+light's smoke ball). Debug view 7 ("Combat shadow mask") shows the mask.
+
+The switch and its gates: combatLights (Combat light, Night and combat)
+and combatShadows (Combat light shadows), both landed (11/26), with the
+sub-knobs combatFlash, combatFire, combatSmoke and combatScatter (0 to
+3, default 1). combatLights is on with the light list and a combat light
+within 60 m of the camera (its range included); without the light list
+it is off and the classic lights light the frame as before.
+combatShadows also needs a night above 0.3, the post effects (the mask
+reads the post pass's linear depth, which LinearDepth now runs for) and
+the world in view. The simulation does not depend on either switch, so
+off and on shoot the same paused frame. GPU sections: the mask pass
+shows as "combatmask", the shading in "world".
+
+Kept, rewritten and dropped from the research prototype: kept the
+envelopes' shapes, the ball falloff and its window, the day scaling, the
+gameplay hooks, the analytic in-scatter, smoke lit from inside, the
+glossy flash and the night-eye lift. Rewritten: the lights are A6's
+Combat and Fire kinds at the head of the tiled list instead of an HDR
+flag through the 8 per-draw slots; the per-fragment trace through last
+frame's depth became the half-res mask pass with hysteresis and blur;
+strengths come from the round's hit and the explosion size, not a
+table; the explosion's flash holds 0.15 s instead of falling from its
+birth, and the fireball, muzzle and cannon colours are less saturated
+(the research's fireball cooled to (1.0, 0.40, 0.11)). Dropped:
+LitConstants slots 59 to 64 (the rows ride in the FrameLights block;
+slot 72 is not used either), unit 6 (the mask is on unit 14), the 2x2
+ordered jitter, the combatWreck knob, and the prototype's own light
+flags in Lights.hpp. Corrections to plan section 5 B4 are recorded in
+the plan.
+
+The critic list: the seam down the screen centre was the terrain, not
+the mask: the capture camera stood on the segment line x = 7600, one
+segment's material is specular and the other not, and the low flash's
+glint drew the line. Terrain takes no flash glint now; the centre
+columns of the final shots show no step above the texture's own, and
+the mask mapping is tested at the centre and edges for even and odd
+frame sizes. Shadow flipping between two fires: the hysteresis (no flip
+over 600 frames of two flickering fires in the unit test). The flash
+frame: a probe of the capture showed a shell's burst is first drawn at
+age 1/30 s and the second flash shot at 0.13 s, where Classic still
+whitens the frame; the research's envelope had fallen there and read 24
+levels under Classic. Fire-lit ground red over blue 1.43 to 1.44 (the
+plan's 1.4).
+
+Measured cost (RTX 4060 Ti, 1920x1080, scale 1.0, 4x MSAA; one reading,
+three interleaved rounds, a process list during the run showed only
+this lane's game, GPU clock not logged): the camp fire and burning wreck view:
+mask 0.10 to 0.11 ms, frame on minus off -0.25 to +0.03 ms (noise); a
+shell burst paused at eye height: mask 0.20 ms, frame -0.01 to +0.23 ms
+(minimum frame +0.16 to +0.33). The plan allows 1 to 3 ms in fights. By
+day the mask gate is off ("day (night below 0.3)"); with no combat light
+near, both gates are off and sunrise_ridge and road_night draw the same
+frame.
+
+Tests: new test_combat_lights.cpp [CombatLights], 21 cases: each kind's
+envelope, colour and finish; a burst's flash holds through the frame
+0.13 s after it and no burst colour exceeds the fire's red over blue
+(fails with the first envelope: 56 assertions); a fire breathes
+smoothly; the day scale; strength from the round; the falloff and its
+window; lit smoke; the flash exposure (night only, capped, held); two
+flickering fires keep their channels and a much stronger light takes
+one only after the hold; the set ages by the simulation step;
+evaluation and handles; the mask mapping at the centre and edges, for a
+moving camera and a pillarbox; the frame list (combat first, at most
+12, HDR packing); the gates; the linear depth stage; the registry; the
+shader and backend contracts. Updated test_feature_switches,
+test_frame_lights, test_post_stages and test_remaster_lighting. Seven
+further mutations applied together turned 8 cases red, each caught by
+its own (no hysteresis, mask rows ignoring the half-size rounding,
+terrain flash glint, the mask's GPU section, the gate ignoring the post
+effects, no linear depth for the mask, the combat cap lifted). The gate
+tags of plan section 8 item 3 plus [CombatLights], [FrameLights],
+[FeatureSwitches], [FeatureGates] and [PostStages]: 555 test cases, all
+passed. Build: no compiler warning in the rebuilds; every touched C++ file
+clang-format clean (Smokes.hpp, Shots.hpp, Fireplace.hpp and
+SoldierOldAI.cpp fail at the base and pass clang-format-diff on the
+touched lines).
+
+In game (tmp/integration/B4 of the graphics-remaster worktree):
+before-combat (the base build 706b9a3), runs/v7-combat (this change:
+classic, off and on of the same paused frame for the fires, a shell
+burst from above and at eye height, a flare, muzzle flashes and noon;
+the timing rounds; sunrise_ridge and road_night off and on;
+strips/ holds classic | off | on side by side), runs/v7-smoke-abel
+(1/1, KHR_debug ids 131154, 131169 and 131218 only, as at the base, no
+shader error), runs/v5-combat (the cost reading), runs/x1 to x7 (the
+seam hunt). Off against the base build: within the boot-to-boot repeat
+of the same off code per band (final/gate5-v7off-vs-before-on.md
+against final/noise-v7off-vs-v6off.md). New capture test
+combat_ab.test.sqf (generated by gen_combat_ab.py).
+
+Known risks: the burst's tail is longer and warmer than Classic's
+(0.27 s after a burst at eye height 33.1 against 22.4, from above 59.9
+against 31.5); a noon shell adds 8.5 levels to the frame mean on its
+first frame, with a pale orange ring round the crater and a faint glow
+ball; a flare low over the ground blows the ground out white beside it
+(75.5 against Classic's 52.3); the capture labels kNN are not steps
+after the shot (k05 is 0.03 s, k06 0.13 s and k08 0.27 s after the
+burst: pause and unpause each take a step). The shadows lag moving men
+by a frame (the mask uses last frame's depth), and the mask keeps no
+history of its own: TAA averages its noise, and the far ground at
+grazing angles shows a hatch in debug view 7. Combat lights take up to
+12 of a tile's 16 entries, so a busy tile can cut a classic light. A
+muzzle flash shows in one captured frame of four (the 30 ms burst falls
+in one 1/30 s step), as intended. The explosion cloudlets are yellow
+with the switch off too (not this change). Not tested: tank cannon,
+interiors, MP, rain, smoke_eden and smoke_sinai_lobo, a moving capture,
+an RTX 3060. CombatLights.{hpp,cpp}, EngineGL33_PostCombat.cpp,
+EngineGL33_PostCombatShaders.cpp, test_combat_lights.cpp,
+combat_ab.test.{sqf,toml} and gen_combat_ab.py are new files to add
+with the commit.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

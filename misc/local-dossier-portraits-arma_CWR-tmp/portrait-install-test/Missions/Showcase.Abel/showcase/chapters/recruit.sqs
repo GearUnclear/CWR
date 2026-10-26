@@ -1,0 +1,55 @@
+; ============================================================================
+;  chapters/recruit.sqs  -  the Camp recruiting menu.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: recruit.sqs (script manager) - proximity-gated Camp
+;  menu, HR/R debits, 12-cap overflow groups, gear-unlock kit-out.
+;  Seams: SC_fnGrant (top-up), gmReqId/gmReqPending (the menu's own request
+;  queue - we drive exactly what a menu click enqueues).
+; ============================================================================
+? isNil "SC_READY" : exit
+
+; ---- precondition: room in the player group (the count-growth check needs it) ---
+? (count units (group aP)) >= 12 : ["SKIP", "player group is at the 12-unit engine cap"] call SC_fnDone
+? (count units (group aP)) >= 12 : exit
+
+"Recruiting: fighters cost 1 HR each (specialists +40 R, squad training 30 R). Manpower is the ceiling - money without people recruits nobody." call SC_fnSay
+~SC_BEAT
+
+; ---- stage: at the Camp, funded --------------------------------------------------
+[(gmZone SC_CAMP) select GM_Z_POS, 10] call SC_fnTpGroup
+? gmManpower < 1 : [0, 2] call SC_fnGrant
+"At the Camp. The menu is proximity-gated: recruit.sqs polls your distance every second and mounts the actions within 30 m - check your action menu now." call SC_fnSay
+
+; ---- wait for the manager's own proximity poll to mount the menu -----------------
+SC_cW = 0
+#mwait
+? gmRecruitActive : goto "mounted"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 20 : goto "mwait"
+["FAIL", "Camp menu did not mount within 20 s of arrival"] call SC_fnDone
+exit
+
+#mounted
+~SC_BEAT
+SC_cN0 = count units (group aP)
+SC_cHR0 = gmManpower
+"Driving RECRUIT FIGHTER through the same request queue a menu click fills. Watch the Camp: the fighter spawns beside you, kitted from unlocked gear - or the base rifle until the loot chapter changes that." call SC_fnSay
+gmReqId = gmActRecruit
+gmReqPending = true
+
+; ---- observable outcome: the group grew and the HR debit landed -------------------
+SC_cW = 0
+#rwait
+? (count units (group aP)) > SC_cN0 : goto "grew"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 15 : goto "rwait"
+["FAIL", "no fighter joined within 15 s of the request"] call SC_fnDone
+exit
+
+#grew
+(format ["Recruited: squad %1 -> %2 fighters, manpower %3 -> %4 HR. Overflow past 12 opens a second group automatically; TRAIN SQUAD raises everyone's skill up to a War-Level cap.", SC_cN0, count units (group aP), SC_cHR0, gmManpower]) call SC_fnSay
+? gmManpower == (SC_cHR0 - 1) : ["PASS", "fighter spawned, 1 HR debited, menu verified"] call SC_fnDone
+? gmManpower != (SC_cHR0 - 1) : ["FAIL", format ["fighter spawned but HR debit is off (%1 -> %2)", SC_cHR0, gmManpower]] call SC_fnDone
+exit

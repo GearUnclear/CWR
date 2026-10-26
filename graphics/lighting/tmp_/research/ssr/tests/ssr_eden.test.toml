@@ -1,0 +1,7 @@
+# SSR research captures on Eden (gfx-ssr): overcast_heavy with rain. Photo generator.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_eden.Eden"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 600
+assert_timeout = 180
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "960", "--height", "640"]

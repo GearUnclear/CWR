@@ -1,0 +1,51 @@
+## track
+foliage
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabricated files: every cited image (BEST_*.png, r9/backlit_hornbeam__all.png, r9/backlit_birch__all.png), ov8/, prototype.patch, NOTES.md, work/t2_summary.txt, work/t3_summary.txt and work/r9_regstats.txt exist. The timings in the summaries match the 48 GPU samples in t2/tri/fol_abel_t2/game_stdout.log.",
+ "Overstated reach. NOTES calls vH2 'a different, lusher game', but a frame-wide pixel diff against current Remastered (r9) shows a mean absolute change of only 0.2 to 2.5 of 255. Just 0.1 to 5.4% of pixels move by more than 16/255 (noon_fields 0.1%, noon_grove 0.1%, pine_stand 0.3%, backlit_birch 0.7%, backlit_hornbeam 2.7%, overcast_forest 5.4%). Only backlit_hornbeam shows an obvious change.",
+ "'Crown cores stay dark' is not visible on the key tree. In BEST_backlit_hornbeam the crown in front of the sun becomes a fairly uniform light spring green, with less internal variation than current Remastered, not a dark core with a glowing rim.",
+ "The vHc 'light streaks between trunks' are faint. The dominant effect in backlit_hornbeam is a uniform darkening and greying of the whole foreground: frame luma -11.4%, saturation -16.6%. In backlit_birch it is luma -5.5% and saturation -10.4%.",
+ "'Flowers stay white' is only partly true. In overcast_broken the vH2 and vJ bush turns from blue-grey with white flowers to saturated yellow-green with yellowish flowers. NOTES admits the leaf part.",
+ "The Abel GPU timing run (t2) used shader ov7, not the final ov8. NOTES says so; the difference is the tint gate only and should not change the cost.",
+ "The regstats per-crown luma and saturation numbers (-7% luma and +12% saturation on the birch, etc.) are real but measured on hand-picked crown boxes. They overstate how much of the frame changes."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+3
+## taste_violations
+[
+ "vH2 recolours authored foliage. The green lean turns the blue-grey leaves of the overcast_broken flowering bush yellow-green, and the backlit hornbeams go lime or spring green. This is closer to a per-texture tint or grade than to light transport, and it is the 'new art by shader' risk.",
+ "Flattened crowns risk. The sun-facing hornbeam in BEST_backlit_hornbeam loses internal light and dark variation and reads as one flat light-green mass.",
+ "vHc is only darker where it acts. pine_stand_noon frame luma drops 25.6% against current Remastered, and backlit_hornbeam drops 11.4% with a saturation loss of 16.6%. The foreground grass turns muddy grey-green, which is close to the rejected crushed and dull look.",
+ "vHc pushes backlit trees toward grey-teal and desaturates them, a mild wash over the far crowns.",
+ "The khaki and olive pine crown textures in pine_stand_noon and forest_edge_golden are left as they are. vH2 does not fix them, though it does not worsen them either.",
+ "No violation on evening warmth: the golden birch R/B is 1.84, above Classic's 1.65. No grading, vignette or new art files are involved."
+]
+## cost_ok
+true
+## score_0_to_10
+4.5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\foliage\BEST_backlit_hornbeam.png
+## one_line
+The crown-volume shader is real, cheap and loaded correctly. Outside the into-the-sun hornbeam shot it mostly makes crowns a bit greener, and the C++ canopy map mostly makes things darker. It is a modest step toward the RTX goal, plus a valuable bug find: shipped shadow maps vanish when the camera faces the sun.
+## critique
+Verification. The folder holds everything the report cites. The r9 game_stdout.log for both islands shows the ov8 overrides loading (vsTransform, vsScreen, vsShadow, psRemasterCommon) and a clean recompile with the shader cache saved (144 entries), with no compile errors. The canopy map built at load (Abel: 68764 trees/bushes and 1424 forest blocks in 123 ms; Eden: 29374 and 6273 in 131 ms). The per-shot knob sets (f0=1, f2=1.3, f6=150; c0=1, c1=1, c3=0.12 for vHc) appear right before each screenshot. The r3 compile failure is honestly quarantined. The debug image r9/backlit_hornbeam__dbgsunvis.png really is pure white on all geometry, so the finding that shipped cascades contribute nothing when the camera faces a low sun is real. It is the most valuable item in this report, and the shadows track should chase it.
+
+Look. Pixel diffs against current Remastered are small almost everywhere. Mean absolute change is about 1/255, and pixels moving by more than 16/255 are under 3% in every daylight view except overcast_forest (5.4%). Night is unchanged (the 5/255 town_night diff is equal across all labels, so it is noise). The one view where a player would notice is backlit_hornbeam: the crowns go from pale grey-olive to saturated green, and the tree in front of the sun turns light lime. It reads as livelier, but more like greener leaves than light glowing through them. The crown is evenly bright rather than a dark core with a translucent rim, and the per-tree hue variation is the most convincing part. backlit_birch shows a modest yellow-green glow on the bush and cypress next to the sun. forest_edge_golden, noon_grove and overcast_forest are A/B-only differences: slightly greener, slightly darker cores. The overcast_broken flower bush loses its authored blue-grey for yellow-green, which is a recolour, not lighting. I found no artefacts (no NaNs; black-pixel counts match the baseline; no halos, banding or swimming visible in stills, though motion was not tested).
+
+Canopy map. It turns the grey trunk wall at Everon's forest edge into a dark interior, which is a real but tiny win at normal view distance. Elsewhere it applies a broad Beer-Lambert darkening at 6.25 m texel scale. Sparse hornbeams therefore produce a uniformly dim, greyed foreground rather than distinct shadow streaks, and the pine-stand floor only gets darker (-25.6% frame luma). It is not shippable as a look, though the far-field shadow march is a sensible fallback for the missing-cascade case.
+
+Cost. vH2 adds 0 to 1 ms (quiet-machine samples +0.0 to +0.4 ms) at 1440x960 internal with 4x MSAA; vHc adds 0.3 to 0.9 ms more, plus 43 MB of GPU texture and about 125 ms of CPU at island load. Both fit an RTX 3060 at 1080p and 60 fps easily.
+
+Against the RTX-on vision. Leaf translucency and canopy occlusion are the right ideas, but this is still per-fragment shading on an analytic ellipsoid. There are no sun flecks on the ground, no bounce, and no visible light shafts through crowns. Most views would pass a side-by-side as 'the same game, slightly greener'. Worth building only in a reduced form: keep the ellipsoid self-shadow, per-tree variation and the translucency lobe, drop or heavily gate the chlorophyll green lean (it recolours art), and fix the camera-into-sun shadow cascade bug before investing in the canopy map.
+## artefacts_seen
+BEST_backlit_hornbeam, BEST_backlit_birch, BEST_forest_edge_golden, BEST_overcast_broken, BEST_pine_stand_noon, BEST_noon_grove, BEST_overcast_forest, plus native-resolution crops from r9 (hornbeam crowns and foreground, birch-sun bushes, overcast_broken forest edge and flower bush) and r9/backlit_hornbeam__dbgsunvis.png. The r9 game_stdout logs, t2 run log, t2/t3 summaries, r9_regstats and prototype.patch were checked.
+## prototype_actually_loaded
+Yes. The r9 Abel and Eden game_stdout.log both show 'shader override loaded' for all four ov8 files, a full recompile with the cache saved (144 entries), no GLSL errors, 'canopy map 2048x2048 ... (research)' at load, and per-shot triSetLighting f0..f7 and c0..c7 values matching vJ, vH2 and vHc. The t2 timing run loaded ov7, the t3 run ov8.

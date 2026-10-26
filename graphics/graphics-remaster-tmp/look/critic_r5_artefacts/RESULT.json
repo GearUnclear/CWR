@@ -1,0 +1,33 @@
+{
+ "verdict": "ready_for_owner",
+ "owner_seam_gone": true,
+ "blockers": [],
+ "minor": [
+  "Mist specks: the green and black specks are fixed. Round 4 had dozens in the tree lines; round 5 has none (optics_specks_r5.png). A purple cluster remains on the blurred right edge of the sight in optics_mist_sight and sight_f1: 32 px in 8 clusters, x 1543..1549, y 661..708. Round 4 had 25 px there; landed and vanilla have 0. It sits on the same pixels in both frames, so it will crawl when the sight moves. Likely cause, not verified: the overlay ratio inside the overlay's partly transparent blur, which the eps fix does not cover (optics_sight_edge_r5.png).",
+  "Young-burst horizon streak: still there, now in firefight_1 because the timing is pinned. It is a 1 to 2 row line (rows 335..336, x 428..497 at 960x640), peak luma 146 over ground at 30. The sparks and the air glow show before any fireball draws. It will flash once per burst in motion (ff_bursts_zoom_r5.png).",
+  "firefight_2's pinned 6-frame fireball is a cluster of round, flat, lemon-yellow discs: top 10% colour (223,203,114), R/G 1.10. It looks like sprites rather than an orange-to-white fireball; this is for the realism critic. Hypothesis, not verified: a per-channel shoulder in the filmic curve shifts the bright orange emissive toward yellow.",
+  "Particle fallback (code read, not seen in any shot): DrawDecal falls back to the classic sun->FullResult(0.5), the salmon light the fixer removed, whenever ParticleRigLight's frame guard fails. A puff would then pop to the old colour for one frame, for example on the first frame after a camera switch.",
+  "rain_day: the rain streaks thin out over about 40 rows near y 340..380, and the lower sky band is clean (landed keeps its streaks down to the hills). There is no hard line at full size; the streaks stay faint at thumbnail size (rain_day_streak_edge.png).",
+  "Near-camera puddles in town_night_rain and seam_day show a beige, blocky, straight-edged reflection of the house. Option 4, round 4 and landed show the same blob, so it is not new (rain_nearpuddle_compare.png).",
+  "AITEST gaps: (a) the call site in World::SimulateLandscape is checked by string only for presence and order, not that the call is unconditional, so a render-state guard round SimulateFogSight(GLOB_LAND) would pass every test; (b) Target.cpp CalcVisibility's multiply is also checked by string only and never executed, so a render condition wrapped round it would pass; (c) exposure, saturation and sun are not varied through the real step, only in the pure ComputeFogMedium. No log of the fixer's mutation run is on disk, but reading the code agrees with the claim.",
+  "Cost grows only in the low-sun day views: dawn_valley +2.60 -> +3.07 ms (34.4 ms in all), sunrise_ridge +0.21 -> +0.68, woods_pine2_evening +1.45 -> +1.78. This fits the dawn ring phase gain's 9 sky-table taps per froxel column. town_night_rain's +2.75 is one spiked sample; its min-frame delta is +1.04 against r3's +1.71."
+ ],
+ "report_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r5_artefacts/REPORT.txt",
+ "cost_summary": "Run on a quiet machine: tri slots 0/4 before each of the 4 runs, and 0 of 142 sampler samples had a foreign PoseidonGame (round 4's run had 170 of 179 foreign). Same build, overhaul minus tip, GPU frame mean over the 21 views of cost.md: r2 +1.40 ms, r3 +1.45 ms, r5 +1.52 ms. Median: r2 +1.47, r3 +1.61, r5 +1.50. Mean ratio: r2 1.152, r3 1.158, r5 1.158. Min-frame delta: r3 +1.58, r5 +1.65 ms. The only real growth is about +0.3 to +0.5 ms in the low-sun day views (dawn_valley 34.4 ms in all, sunrise_ridge, woods), which fits the dawn ring phase gain. CPU frame is +0.3 ms, noise level. Table: critic_r5_artefacts/timing/cost_r5_table.txt.",
+ "improved_since_r4": [
+  "woods_pine2_evening exposure is fixed: mean luma 35.5 -> 56.6 (r3 54.3), and the soldier and the jeep read. Round 4's blocker is resolved.",
+  "The other into-the-sun views recovered: lowsun_fp 84.0 -> 96.5, sinai_lowsun_fp 67.5 -> 84.6, pine_rays 80.0 -> 87.6, dawn_valley 107.0 -> 113.6. The sun disc stays white, nothing clips (under 0.005% everywhere) and no view is near black.",
+  "The green and black mist specks are gone from both optics views.",
+  "The lamp streak across the wet square in town_night_rain is gone; only puddles reflect, as the owner's rain rule asks, and the seam is still gone.",
+  "firefight_3's rose dust foot is now a dark silhouette in the dusk sky's colour.",
+  "The dawn_valley bay is crisper, with no azimuth stripes from the 2-row ring. sunrise_ridge's warm glow is a horizon band, with no edge at the sun's height.",
+  "Motion pan across the low sun and the shade-to-sky tilt: the exposure eases smoothly with no reversals or pumping (largest ev step 0.22 per 8 frames); held frames are as stable as with the overhaul off.",
+  "The AI link now has end-to-end tests through SimulateFogSight on a real Landscape, with exact equality across 9 render path states. The classic path clears the drawn medium, and FogSightMedium returns by value."
+ ],
+ "landed_beats_overhaul": [
+  "firefight_2: landed's burst reads as a hot white-orange flash; the overhaul's pinned fireball reads as flat lemon-yellow discs.",
+  "optics_mist_hud and optics_mist_sight: landed and vanilla show a green tree line; the overhaul's mist is still a pale grey sheet that greys out the trees.",
+  "town_night_rain at thumbnail size: landed reads more obviously wet, with lamp streaks on the ground. Under the owner's rule, only the overhaul's puddles reflect, and the near ones reflect black sky.",
+  "rain_day far forest: landed keeps green trees in the rain; the overhaul's forest is grey and washed out."
+ ]
+}

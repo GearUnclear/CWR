@@ -1,0 +1,170 @@
+diff --git a/a/EngineGL33_PostFog.cpp b/b/EngineGL33_PostFog.cpp
+index c18bfea8..104c36f9 100644
+--- a/a/EngineGL33_PostFog.cpp
++++ b/b/EngineGL33_PostFog.cpp
+@@ -257,11 +257,6 @@ float ToLinear(float display)
+     return std::pow(std::max(display, 0.0f), 2.2f);
+ }
+ 
+-float Fract(double x)
+-{
+-    return static_cast<float>(x - std::floor(x));
+-}
+-
+ // A sample of one of the sight map's grids at world x, z (the nearest cell,
+ // clamped to the edge), 0 without a map.
+ float SampleMap(const rm::FogSightMap* map, std::vector<float> rm::FogSightMap::* grid, float x, float z)
+@@ -686,13 +681,11 @@ void EngineGL33::PostFog(const PostFrame& f)
+         prevRow[r][2] = row[2];
+         prevRow[r][3] = row[0] * dx + row[1] * dy + row[2] * dz;
+     }
+-    // The frame's jitter in a cell: psFogInject turns it per cell (and per
+-    // slice in depth, fogCellNoise), so the history's residual of it does not
+-    // swing whole regions of the volume together.
++    // The frame's place in psFogInject's 8-frame jitter cycle: strictly
++    // periodic, so the history's residual of the jitter has no part slower
++    // than an eighth of a cycle per frame (no pumping, no travelling pattern).
+     const std::uint32_t seq = _fog.sequence++;
+-    const float jz = Fract(0.6180339887 * static_cast<double>(seq));
+-    const float jx = Fract(0.7548776662 * static_cast<double>(seq)) - 0.5f;
+-    const float jy = Fract(0.5698402910 * static_cast<double>(seq)) - 0.5f;
++    const float cycle = static_cast<float>(seq & 7u);
+ 
+     // The night air's light: the night sky's share of the classic fog colour.
+     const float nightW = Smooth(0.1f, 0.8f, m.night);
+@@ -825,8 +818,8 @@ void EngineGL33::PostFog(const PostFrame& f)
+     glBindTexture(GL_TEXTURE_3D, _fog.injectTex[prev]);
+     bindShared();
+     setShared(inject);
+-    Set4(inject, "fogDepth", zFar, k, invEk, jz);
+-    Set4(inject, "fogFrame", jx, jy, history ? kFogHistoryShare : 1.0f, Glob.time.toFloat());
++    Set4(inject, "fogDepth", zFar, k, invEk, cycle);
++    Set4(inject, "fogFrame", 0.0f, 0.0f, history ? kFogHistoryShare : 1.0f, Glob.time.toFloat());
+     Set4(inject, "prevRow0", prevRow[0][0], prevRow[0][1], prevRow[0][2], prevRow[0][3]);
+     Set4(inject, "prevRow1", prevRow[1][0], prevRow[1][1], prevRow[1][2], prevRow[1][3]);
+     Set4(inject, "prevRow2", prevRow[2][0], prevRow[2][1], prevRow[2][2], prevRow[2][3]);
+diff --git a/a/EngineGL33_PostFogShaders.cpp b/b/EngineGL33_PostFogShaders.cpp
+index 3312ec1f..95d775dc 100644
+--- a/a/EngineGL33_PostFogShaders.cpp
++++ b/b/EngineGL33_PostFogShaders.cpp
+@@ -21,9 +21,10 @@
+ //     cloud field (the shadows of ridges in the haze), and the mist and fog
+ //     above a cell take light out of its sun. Each frame samples a jittered
+ //     point of each cell and blends it with the last frame's volume
+-//     reprojected to that point, so the history averages the jitter (the
+-//     frame's jitter turned per cell, and per slice in depth, so neighbouring
+-//     cells' history residuals are independent, fogCellNoise);
++//     reprojected at the cell's centre, so the history averages the jitter (a
++//     strictly periodic 8-frame cycle, each 2 x 2 x 2 block of cells holding
++//     every place of it each frame: no residual slower than 7.5 Hz to pump or
++//     travel);
+ //   - psFogIntegrate: front to back along each column, the light scattered
+ //     toward the eye and the transmittance from the eye to the far face of
+ //     each cell (energy-conserving per slice);
+@@ -54,8 +55,8 @@ const char kPostFogInjectHeadGLSL[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler3D fogHistory; // unit 0: the last frame's injection (rgb in-scatter, a extinction; per km)
+ uniform vec4 fogGrid;      // xy cells, z slices, w the first slice of this draw
+-uniform vec4 fogDepth;     // x far (m), y k, z 1 / (exp(k) - 1), w this frame's depth jitter in a slice (0..1)
+-uniform vec4 fogFrame;     // xy this frame's jitter in a cell (cells), z this frame's share (1 = no history), w time (s)
++uniform vec4 fogDepth;     // x far (m), y k, z 1 / (exp(k) - 1), w this frame's place in the 8-frame jitter cycle (0..7)
++uniform vec4 fogFrame;     // z this frame's share (1 = no history), w time (s)
+ uniform vec4 prevRow0;     // camera-relative world to the previous frame's view space, by rows
+ uniform vec4 prevRow1;
+ uniform vec4 prevRow2;
+@@ -369,42 +370,74 @@ vec4 fogCell(vec3 rel) {
+     return vec4(inscatter, sMie + sAir) * 1000.0;
+ }
+ 
+-// The jitter of a cell: the frame's offset (one golden-ratio sequence for the
+-// frame, fogFrame.xy and fogDepth.w) turned by an interleaved-gradient offset
+-// of the cell, and in depth also by the slice. With the frame's offset alone
+-// every cell sat at the same point of its cell, so the history's residual of
+-// the jitter (it keeps 0.88 of the last frame) had the same sign over whole
+-// regions each frame, and the far haze and the valley mist pumped as one
+-// sheet, in play and in the captures (the dawn valley's flicker, 2026-10-23).
+-// Turned per cell, the residuals are independent and average out in the
+-// apply's lookup and the TAA.
+-float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+-float g_cellJitter = 0.0; // this column's depth offset (main sets it)
++// The jitter of a cell: a strictly periodic 8-frame cycle (fogDepth.w), the
++// same in every frame of play and capture. Each 2 x 2 x 2 block of cells (x, y
++// and the slice's parity) holds all eight places of the cycle every frame, so
++// the block samples every eighth of its slice depth each frame; in depth the
++// cycle runs in van der Corput order (0 4 2 6 1 5 3 7) from a fixed sub-offset
++// of the cell (a hash of the cell and slice), in the cell on an 8-point
++// lattice. The history (it keeps 0.88 of the last frame) then has no residual
++// of the jitter slower than an eighth of a cycle per frame: nothing that can
++// pump (the frame-wide golden-ratio offset made the far haze and the valley
++// mist pump as one sheet, 2026-10-23) and nothing that can travel (the same
++// sequence turned per cell by an interleaved gradient slid one cell per frame
++// and read as wind, 2026-10-23); what is left is a standing 2 x 2 x 2 pattern
++// at 7.5 Hz and faster, under the TAA's and the encoder's own noise.
++// The history is read at the cell's centre (not at the jittered point): an
++// average of the cell, not a leaky sum of the jitter.
++const int kFogCycleVdc[8] = int[8](0, 4, 2, 6, 1, 5, 3, 7);
++uint fogCellHash(uvec3 v) {
++    v = v * 1664525u + 1013904223u;
++    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
++    v ^= v >> 16u;
++    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
++    return v.x ^ v.y ^ v.z;
++}
++int g_cycle = 0;         // this frame's place in the cycle (main sets it)
++vec3 g_dirCentre = vec3(0.0); // the cell centre's column, per metre of view depth (main sets it)
+ 
+-// The cell of slice s on this column: this frame's jittered point, blended with
+-// the last frame's volume at the same point.
++// The cell of slice s on this column: this frame's point of the cycle, blended
++// with the last frame's volume at the cell's centre.
+ vec4 fogSlice(float s, vec3 dirZ) {
+-    float z = fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z);
++    ivec2 cell = ivec2(gl_FragCoord.xy);
++    int place = (g_cycle + (cell.x & 1) + 2 * (cell.y & 1) + 4 * (int(s) & 1)) & 7;
++    float sub = float(fogCellHash(uvec3(uvec2(cell), uint(s) + 977u)) >> 8u) * (1.0 / 16777216.0);
++    float z = fogSliceDepth((s + (float(kFogCycleVdc[place]) + sub) * 0.125) / fogGrid.z);
+     vec3 rel = dirZ * z;
+     vec4 cur = fogCell(rel);
+     if (fogFrame.z < 1.0) {
+-        vec3 pv = vec3(dot(prevRow0.xyz, rel) + prevRow0.w, dot(prevRow1.xyz, rel) + prevRow1.w,
+-                       dot(prevRow2.xyz, rel) + prevRow2.w);
++        vec3 relC = g_dirCentre * fogSliceDepth((s + 0.5) / fogGrid.z);
++        vec3 pv = vec3(dot(prevRow0.xyz, relC) + prevRow0.w, dot(prevRow1.xyz, relC) + prevRow1.w,
++                       dot(prevRow2.xyz, relC) + prevRow2.w);
+         if (pv.z > 0.05) {
+             vec2 puv = pv.xy * prevProj.xy / pv.z * 0.5 + 0.5;
+             float pt = prevProj.w < 1e-3 ? pv.z / prevProj.z
+                                          : log(1.0 + pv.z * (exp(prevProj.w) - 1.0) / prevProj.z) / prevProj.w;
+-            if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0)
+-                cur = mix(texture(fogHistory, vec3(puv, pt)), cur, fogFrame.z);
++            if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0) {
++                // A fixed light blur of the history (four trilinear taps on a
++                // tetrahedron, a quarter of a cell or slice out: [1/8 3/4 1/8]
++                // per axis, the mean of what the old read at the jittered point
++                // did at random each frame), so the air keeps its softness and
++                // the valley mist its density. Fixed, so it moves nothing on a
++                // held camera.
++                vec3 q = vec3(0.25) / fogGrid.xyz;
++                vec3 c0 = vec3(puv, pt);
++                vec4 h = (texture(fogHistory, c0 + q * vec3(1.0, 1.0, 1.0)) + texture(fogHistory, c0 + q * vec3(1.0, -1.0, -1.0)) +
++                          texture(fogHistory, c0 + q * vec3(-1.0, 1.0, -1.0)) + texture(fogHistory, c0 + q * vec3(-1.0, -1.0, 1.0))) * 0.25;
++                cur = mix(h, cur, fogFrame.z);
++            }
+         }
+     }
+     return cur;
+ }
+ 
+ void main() {
+-    g_cellJitter = fogCellNoise(gl_FragCoord.xy);
+-    vec2 cellJ = fract(fogFrame.xy + 0.5 + vec2(fogCellNoise(gl_FragCoord.xy + vec2(17.0, 59.0)),
+-                                                fogCellNoise(gl_FragCoord.xy + vec2(83.0, 29.0)))) - 0.5;
++    g_cycle = int(fogDepth.w + 0.5) & 7;
++    ivec2 cell = ivec2(gl_FragCoord.xy);
++    int placeXY = (g_cycle + 2 * ((cell.x & 1) + 2 * (cell.y & 1))) & 7;
++    vec2 cellJ = vec2(float(placeXY) + 0.5, float((3 * placeXY) & 7) + 0.5) * 0.125 - 0.5;
++    vec2 ndcC = gl_FragCoord.xy / fogGrid.xy * 2.0 - 1.0;
++    g_dirCentre = viewToWorld * vec3(ndcC.x * projInfo.z, ndcC.y * projInfo.w, 1.0);
+     vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;
+     vec3 dirZ = viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0); // per metre of view depth
+     vec3 d = normalize(dirZ);

@@ -1,0 +1,8 @@
+st-q2b: 105 frames (clip 15..120), camera |shift| mean 0.00 px/frame (x +0.00, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.080  0.021  0.063  0.262 |  +9.5  -1.1  +0.03  -0.37 |  +0.9  -2.2  +0.02 | +0.03   0.002
+  valley   0.034  0.015  0.025  0.138 | +15.7  +1.6  +0.02  -0.28 |  -5.9 +19.2  +0.02 | +0.02   0.001
+  farhill  0.038  0.012  0.023  0.162 |  -5.5 -13.4  +0.02  -0.28 | -10.2  -5.4  +0.02 | +0.02   0.001
+  haze     0.031  0.010  0.022  0.113 |  -5.0 +14.6  +0.02  -0.27 | +17.9  +1.4  +0.02 | +0.02   0.000
+  slope    0.059  0.019  0.031  0.291 |  -5.6  +6.9  +0.03  -0.57 |  -0.0  +0.0  +0.25 | +0.03   0.002
+  wrote amp_st-q2b.png, xt_st-q2b.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

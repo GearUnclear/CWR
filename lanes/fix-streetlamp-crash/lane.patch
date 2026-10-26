@@ -1,0 +1,81 @@
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp b/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp
+index 5a90395e..d7104fc6 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp
+@@ -205,6 +205,8 @@ void StreetLampType::DeinitShape()
+     base::DeinitShape();
+ }
+ 
++DEFINE_CASTING(StreetLamp)
++
+ StreetLamp::StreetLamp(LODShapeWithShadow* shape, StreetLampType* type, int id)
+     : base(shape, type, id), _pilotLight(true), _lightPos(shape->MemoryPoint("light"))
+ {
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.hpp b/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.hpp
+index 4b2a5bc2..04756359 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.hpp
+@@ -122,6 +122,10 @@ public:
+ 	void HitBy( EntityAI *killer, float howMuch, RString ammo ) override;
+ 
+ 	LSError Serialize(ParamArchive &ar) override;
++
++	// switchLight and lightIsOn find lamps with dyn_cast<StreetLamp>; without its
++	// own id that cast accepts every Entity
++	USE_CASTING(base)
+ };
+ 
+ class RoadType: public RefCount
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 4cb79cef..bf0e2f0d 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -470,6 +470,7 @@ list(APPEND POSEIDON_TEST_SOURCES
+     World/Scene/test_scene_preloader.cpp
+     World/Scene/test_surface_draw_order.cpp
+     World/Scene/test_alpha_sort_order.cpp
++    World/Scene/test_streetlamp_casting.cpp
+ 
+     # Core subsystem tests
+     UI/Locale/test_stringtable_system.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_streetlamp_casting.cpp b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_streetlamp_casting.cpp
+new file mode 100644
+index 00000000..8dc61aa3
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_streetlamp_casting.cpp
+@@ -0,0 +1,35 @@
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/AI/AI.hpp>
++#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
++#include <Poseidon/World/Scene/ObjectClasses.hpp>
++
++#include <type_traits>
++
++// The switchLight and lightIsOn script commands find their lamp with
++// dyn_cast<StreetLamp>. StreetLamp used to declare no casting id of its own, so
++// StreetLamp::_classId named Entity::_classId and the cast accepted every Entity:
++// a house, a soldier or a car came back as a "lamp". SwitchLight then wrote lamp
++// state into that object's memory and SimulateSwitch read a bulb hit point
++// through the wrong type layout: an access violation in EntityHit::GetHit, or a
++// corrupted soldier that crashed in EntityAI::GetHitCont on its next draw.
++
++using namespace Poseidon;
++
++TEST_CASE("StreetLamp - declares its own casting id", "[scene][streetlamp][casting]")
++{
++    // Without USE_CASTING the class inherits its parent's IsClassId, so the member
++    // pointer type names the parent and the id object is the parent's.
++    CHECK(std::is_same_v<decltype(&StreetLamp::IsClassId), bool (StreetLamp::*)(const int*) const>);
++    CHECK(&StreetLamp::_classId != &Entity::_classId);
++}
++
++TEST_CASE("StreetLamp - dyn_cast does not take a plain entity for a lamp", "[scene][streetlamp][casting]")
++{
++    Ref<EntityType> type = new EntityType(nullptr);
++    Ref<Entity> entity = new Entity(nullptr, type, -1);
++    Object* obj = entity;
++
++    CHECK(dyn_cast<Entity>(obj) == entity.GetRef());
++    CHECK(dyn_cast<StreetLamp>(obj) == nullptr);
++}

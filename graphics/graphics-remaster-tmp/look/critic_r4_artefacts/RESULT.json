@@ -1,0 +1,47 @@
+{
+ "verdict": "needs_another_round",
+ "owner_seam_gone": true,
+ "blockers": [
+  {
+   "view": "woods_pine2_evening",
+   "problem": "Round 4 exposes this view about 1.5 EV darker than round 3, and at thumbnail size it reads almost black. Mean luma is 35.5 (round 3 54.3, landed 63.2, vanilla 89.7). The soldier and jeep 30 m away are nearly invisible. Camera ev was 1.82 in round 3 and 2.13 in the noon fixer's base build. The merged shot has 0.27, and my own timing run gave 0.28 as an independent control. The other into-the-sun views darkened too, by less (r3 -> r4 ev): lowsun_fp -0.02 -> -0.71, sinai_lowsun_fp 0.53 -> -0.29, pine_rays 1.25 -> 0.63, dawn_valley 0.03 -> -0.29. Those still read as backlit photos, so only the wood is a blocker.",
+   "evidence": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_artefacts/woods_exposure_probe.png (r4 merged ev 0.27 | r4 with only kCamSkySunCap set back to 2.4 by shader override, ev 2.27 and luma 61.4 | round 3 | landed); D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_artefacts/woods_pine2_evening_r3r4.png; D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_artefacts/exposure_drop_lowsun.png; probe data in critic_r4_artefacts/probe_suncap/",
+   "likely_cause": "Confirmed by probe: the sun fixer's near-sun sky cap (kSkySunCap 10, past white, applied in camSkyRolloff(lin, d)) feeds the camera meter's guards. TargetExposureLog2 (PhotoCamera.cpp 298-334) pulls exposure toward kHighlightLimit on the kMeterHighlight percentile and toward kSkyTopLimit on the sky's bright end. The glow of a sun at or just past the frame edge now meters several times brighter, so the whole frame drops. The sun fixer never shot woods_pine2_evening. Its own build already showed the smaller drops in lowsun_fp and pine_rays. Root fix: the meter should read the sky at the plain roll-off cap, or leave the glow's extra light out of the highlight and sky-top readings, or exclude blocks within the glow radius whether the sun is in frame or just outside it."
+  }
+ ],
+ "minor": [
+  "The owner's wet seam in town_night_rain is still gone in both round 4 cuts; only the soft vertical lamp reflection remains (critic_r4_artefacts/owner_wet_seam_r4.png).",
+  "Gunner optic HUD: tank_gunner_optics shows the action menu again (Get out, Reload HEAT, To driver's seat, To commander's seat), as vanilla and landed do. The rest of the HUD is identical (hud_tank_optics_r4.png).",
+  "firefight_2 horizon band is mostly fixed. Round 3: 11 rows across x 0..400, peak luma 227. Round 4: a 3-row streak (rows 336..338, x 112..191), peak 184, mean 114, against ground at 28. At 640 px it is a small tick, but it will still flash once per young burst in motion. The burst's sparks show with no fireball yet, so the surface light seems to start before the fireball puffs draw (ff2_left_horizon_r4.png, ff_horizon_lines_r4.png).",
+  "Thin 1 px lines in firefight_1 and firefight_3 (firefight_3 row 338, x 118..754) run from rifle to rifle at weapon height. They are bullet traces, not lighting.",
+  "firefight_3 dust foot is still rose, (73,48,46) over a sky of (69,46,45). This is burst's known remaining item 1 (ff3_dust_foot_r4.png).",
+  "Mist specks are not fixed. optics_mist_hud has 22 black and 71 green single-pixel specks (round 3: 19 and 71). 87 of 93 sit on exactly the same pixels as in round 3, and 99 of 105 on the same pixels one frame later. A still view shows them fixed per pixel; in motion they will crawl. No non-optics view has any (optics_specks_r4.png).",
+  "Sun disc is round in round 4 (oval in round 3) and white. The glow falls off smoothly. A 12x high-pass shows only one-level rings (band_sun_r4.png, sinai_sun_glow.png).",
+  "No banding in the deepened noon skies through a 12x high-pass (band_skies_r4.png). No seam where the grey deck's relief fades in, in rain_day and overcast_heavy. No halo at the noon_vista ridge: the sky stays flat at 181 down to the ridge row (band_grey_skies_r4.png).",
+  "Clipped whites are under 0.005% in every view. Town fires keep orange cores; round 3's white blowout is gone (town_fires_r4.png). dawn_valley's bay haze is unchanged from round 3, with no seam (dawn_valley_haze.png).",
+  "Motion only, not checked: kFogBeamGain went from 14 to 35, so the froxel shafts and any temporal noise in them are 2.5x brighter. A pan capture of pine_rays would settle it.",
+  "AI link review: AI sight is now simulation. SimulateFogSight runs at the end of World::SimulateLandscape (WorldSetup.cpp 1326), before PerformAI (World.cpp 682 before 1729). It uses ComputeFogMedium(WorldFogInputs(land), tuning, true), the same function and inputs the renderer uses, which adds only aridity (not an AI term). The AI terms do not read viewDistance or the fog range. The renderer no longer calls SetFogSight; only TerrainLighting.cpp does. Target.cpp 636-646 is unchanged. The inputs are deterministic from synced weather, date and heights, except the per-machine knobs fogDensity and fogMist. It is thread-safe today because BACKGROUND_AI is 0 and everything runs on the main thread. FogSightMedium() returns a reference into a static, which would race if AI moved to a worker thread.",
+  "AI link test gap: tests 376, 421 and 463 pin the pure helpers (AI medium equals the drawn medium across the knobs; invariant under post off, interior and render-only knobs; renderer-free map equals the horizon map). Case 421 cannot fail, because UpdateFogSightMedium never receives gate state. Nothing pins that the renderer cannot call SetFogSight, that SimulateFogSight runs before PerformAI, or what WorldFogInputs reads. A source contract test would close this.",
+  "Owner call (from the fixer, kept): in classic lighting, or with volFog off, AI still takes the mist that the screen does not draw. Also, a day's setFog is now drawn at 0.75 of the classic extinction while AI's weather part stays the classic tactical fog, so about a fifth of a surface is still drawn at the AI's tactical end.",
+  "Cost: the machine was busy, so the raw means cannot be compared with round 3. Treat the cost as provisional until a quiet re-time; see cost_summary."
+ ],
+ "report_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_artefacts/REPORT.txt",
+ "cost_summary": "There is no measurable cost growth over rounds 2 and 3, but the machine was not quiet. I ran run-timing.ps1 from the look-director engine root against dist/look-director-rwdi on junction RemasterUD-look-director-timing, using round 3's split tests (renamed crit4t_*, same views, clocks and interleaved tip/overhaul order). It ran as 4 background runs, checked at least every 3 minutes. 170 of 179 GPU samples had a foreign PoseidonGame (up to 4 at once during the first part: look-puddle, look_shine, look_probe and van_* runs). Round 3 had 0 of 142. Because of that, the raw mean delta of +1.94 ms against round 3's +1.45 ms over 21 views is not a cost result. Usable estimate: take each shot's minimum GPU frame and keep the 14 views whose tip minimum matched round 3 within 0.5 ms. On those the overhaul delta is +1.56 ms against round 3's +1.54 ms, and the overhaul minimum frame averages 10.46 ms against 10.37 ms. Every one of those views is within 0.2 ms except sinai_desert_noon (+3.59 against +1.70), and that one is noise: its two overhaul samples differ by 3 ms within one run with a foreign game running. Seven contended views cannot be compared: noon_fields, lowsun_fp, forest_edge_golden, sunrise_ridge, woods_pine2_evening, dawn_valley, town_fog_night. Static check: the five round 4 patches add no texture reads, draw calls or passes, only ALU work plus a per-step 64x64 height hash on the CPU. The AI sight map build (about 150 ms) now runs on the main thread at island load. A quiet-machine re-time is still needed for a formal number. Files: critic_r4_artefacts/timing/cost_r4_table.txt, cost_r4.py, <part>-timing/.",
+ "improved_since_r3": [
+  "firefight_2 burst: the flat yellow cloud is gone (black-body fireball over soot; in this shot the cloud is already dark smoke)",
+  "firefight_2 horizon band reduced from 11 rows x 400 px (peak 227) to 3 rows x 80 px (peak 184)",
+  "Town fires: the white flame core is now orange (no fully white pixels)",
+  "Sun disc is round and white, and the aureole falls off smoothly with no plateau",
+  "pine_rays shafts now read at thumbnail size",
+  "Grey decks (rain_day, overcast_heavy) show cloud relief",
+  "Noon sky is blue instead of slate, and the bright ground is lifted",
+  "optics mist views: the rock and tree line show through",
+  "tank_gunner_optics action menu is back",
+  "AI sight is computed in the simulation, independent of render path state"
+ ],
+ "landed_beats_overhaul": [
+  "woods_pine2_evening: landed keeps the soldier, jeep and ground readable; the overhaul is nearly black (exposure 1.5 EV under round 3)",
+  "optics_mist_hud and optics_mist_sight: landed keeps green ground and the right tree line; the overhaul is still paler (known)",
+  "firefight_2: landed shows a hot fireball; the overhaul shot caught the burst as dark smoke (timing not pinned)"
+ ]
+}

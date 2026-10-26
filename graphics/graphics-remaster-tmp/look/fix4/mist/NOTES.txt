@@ -1,0 +1,132 @@
+Mist fixer, round 4: mist wall, specks, grey rain sky
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-plate (fec1075 + LOOK/fix4/base.patch, base tree
+d2f866e4d02278023d36c79f08a4b693fe0c6c1d). Build build/look-fix-plate-rwdi, game dist/look-fix-plate-rwdi,
+junction RemasterUD-r4-mist. Nothing committed, no branch.
+
+Patch: fix.patch, 6 files, +108 / -9, my delta over the base tree only (no capture or probe tests):
+  engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp, VolumetricFog.cpp, PhotoCamera.hpp,
+  engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp,
+  tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp, test_remaster_lighting.cpp.
+
+Look first
+- sbs_thumbnails.png: the four views at 320 px (the owner's thumbnail test), vanilla | landed | before | after.
+- sbs_c_rain_day.png, sbs_c_overcast_heavy.png: grey sky, with a 2x crop of the upper sky.
+- sbs_a_optics_mist_hud.png, sbs_a_optics_mist_sight.png: the mist, with a 2x crop of the rock and tree line.
+- sbs_b_specks.png: the specks, 3x crop. NOT fixed (see below).
+Before = LOOK/director/final/<view>__overhaul.png (1080p copies for rain_day and overcast_heavy).
+After = shots_4/tri/look_r4mist_all/ (final build). shots_3 is the same code for these day views
+(the last edit only touches the night); shots_1 and shots_2 are earlier iterations.
+Sky numbers (rows 3% to 30% of the frame, mean and spread of luma) are in sbs_stats.txt.
+
+(a) The mist views were a white wall
+
+Cause, with probes:
+- probe_depth/depth_half.png colours the fog's view depth: the near grass is under 100 m, the rock
+  outcrop 200 to 400 m, the tree line 300 to 500 m, the hill behind 500 to 700 m, the far end 742 m.
+  The classic fog keeps the first 300 m or more crisp, which is why vanilla shows the rock.
+- The game log gave the medium at setFog 0.3 under the 0.7 deck: weather 2.03e-3 /m before the
+  2.8 boost (5.7e-3 with it), grey haze 1.31e-3, valley mist 1.09e-3, humid air 3.4e-4. With the
+  boost a level line kept 0.40 at 150 m and 0.15 at 300 m (my mirror of the shader's medium): the
+  rock was gone. kSetFogBoost alone at 1 (probe_taa/hud_boost1.png) still left the rock faint,
+  because the grey haze and the mist layer stacked on top of setFog's own fog.
+- probe_layers/layers_hud.png: volFog=0 brings the rock and tree line back, surfaces=0 and
+  photoLight=0 do not. So it is the volume's medium, not the camera or the surfaces.
+
+Change (VolumetricFog):
+- kSetFogBoost 2.8 -> 0.75: by day setFog's own fog takes 0.75 of the classic extinction, as rain
+  takes kRainFogShare 0.5.
+- The grey haze no longer stacks on a day's setFog: its gain is cut by (1 - 0.7 wetAir), wetAir =
+  max(rain, smoothstep(0, 0.3, fog) x (1 - night)). It was rain only.
+- setFog's share of the valley mist weight: new kMistFogWeight 0.6 by day (was 1.2), kMistFogWeightNight
+  1.2 at night.
+- kNightFogBoost 1 -> 6.47 (2 x 2.8 / 0.75 - 1), so a foggy night keeps exactly round 3's weather
+  fog (town_fog_night, the critics' best view, is unchanged by construction; not reshot).
+Result (level line at the fog floor, outside / inside a mist layer): 150 m 0.76 / 0.74 (was
+0.40), 300 m 0.56 / 0.49 (was 0.15), 742 m 0.19 / 0.12 (was 0.01). In the shots the near grass is
+green again (optics_mist_sight bottom left (76,83,71), was grey), the rock and its texture show
+through the mist, the tree line and the hill behind are legible, the far end fades.
+Still open: the optics_mist_hud view is still much paler than vanilla at thumbnail size. Most of
+that frame is far fill and air, and the air sits at about (210,213,221) under the camera, brighter
+than vanilla's fog colour (178,178,171). fogDensity 0.75 on top (probe_taaclip/hud_density075.png)
+helps a little more; the real lever is the air's brightness under the camera's exposure, which I
+did not touch.
+
+(b) Single green and black pixels over the hidden tree line: NOT fixed
+
+What I proved it is not (each probe with a shader override or a knob, crops in each folder):
+- not the overlay snapshot (probe_specks: the world before the overlay and the frame after it do
+  not differ at the specks);
+- not sky-classified MSAA edge pixels (probe_edge: taking the nearest geometry depth for sky pixels
+  changes nothing; the specks sit on geometry);
+- not NaN, negative depth or unfogged far pixels in the fog apply (probe_nan: none flagged);
+- not the near-field light (probe_near), GTAO and the surface terms (surfaces=0), SSR, the crown
+  canopy, the local tone (camLocal=0), bloom.
+What changes them: taa=0 with sharpen=0 removes nearly all (probe_post/specks_post.png); a few faint
+green pixels stay. Clamping the TAA history to the 3x3 RGB range of the current frame does not help
+(probe_taaclip), so the dark or green value is already in the composite's output under the jittered
+frame. Likely cause for the next fixer: with jitter, alpha-tested foliage samples change each frame
+and a few pixels get a depth (sample 0 of the MSAA depth blit) that does not match their colour, so
+they are fogged as another surface; TAA then holds them. Next probe: a min or max depth resolve in
+PostResolve, or the fog apply reading the 3x3 depth range at foliage pixels. They are fewer and
+fainter in the after shot because the tree line is less hidden.
+
+(c) Grey-day skies were a near-white sheet
+
+Cause: under a full deck the dome draws the painted deck at the rig's full cloud light; under the
+camera it sat high in the curve's shoulder, so its relief was compressed to a spread of about 10
+levels at (200,203,209). Nothing in the fog flattens the upper sky: in rain the apply leaves the sky
+alone (wetSky) and the grey fill only acts below about 8 degrees.
+Change (shadeSkyDome, under the camera, by day, grey deck under the weather veil): the deck's light
+relative to its row's mean (the 12 row taps the shader already reads) is raised to the power
+1 + kDeckRelief, and the deck is kDeckDark of its light, faded in from sin 0.12 to 0.3 of elevation
+(7 to 17 degrees). The band the grey-sky horizon ring measures (3.8 to 7 degrees) is untouched, so
+the far air, round 3's ridge fading and the halo fixes keep their colour.
+Result: rain_day sky (188,191,199) spread 16.3 (was (196,200,208) 10.8; landed 22.0, vanilla 27.2);
+overcast_heavy (191,193,199) spread 17.4 (was 10.4; landed 23.6). The cloud base reads at thumbnail
+size, the ridges still fade in layers, no seam at the horizon. The rain day still reads lighter than
+landed's dark deck; kDeckDark lower would go further.
+
+(d) AI sight and fog
+
+The link is intact: Target.cpp 639 and 645 still gate on FogSightActive and multiply vis by
+FogSightTransmittance; FogSightTransmittance, FogSightExtinctionAt and SetFogSight are unchanged.
+AI visibility now (tactical range times the fog sight factor, my mirror of FogSightTransmittance on a
+level line 1.75 m over the fog floor):
+- setFog 0.3, VD 1500 (the mist views): tactical range 742 m. Outside a mist layer the factor is
+  0.95 at 300 m and 0.82 at 742 m (unchanged). In a 20 m valley mist layer 0.84 and 0.53 (was 0.79
+  and 0.42, from the lower day mist weight).
+- rain_day (rain 0.8, VD 3500): tactical range 980 m, unchanged: 0.92 / 0.64 at 300 m / 980 m
+  outside a layer, 0.75 / 0.24 inside one.
+Drawn against AI: a fifth of a surface (0.19, 0.12 in a layer) is left at the AI's 742 m end, the
+same rule rain follows since round 3.
+
+Constants (name: old -> new)
+- VolumetricFog.hpp kSetFogBoost: 2.8 -> 0.75
+- VolumetricFog.hpp kNightFogBoost: 1.0 -> 6.47 (2 x 2.8 / 0.75 - 1, night unchanged)
+- VolumetricFog.hpp kMistFogWeight (new, was the inline 1.2 in ComputeFogMedium): 1.2 -> 0.6 by day;
+  kMistFogWeightNight (new) 1.2
+- VolumetricFog.cpp grey haze: (1 - 0.7 rain) -> (1 - 0.7 max(rain, smoothstep(0, 0.3, fog) (1 - night)))
+- PhotoCamera.hpp new kDeckRelief 2.4, kDeckDark 0.5, kDeckFromSin 0.12, kDeckFullSin 0.3
+  (GLSL kCamDeckRelief, kCamDeckDark, kCamDeckFromSin, kCamDeckFullSin)
+
+Tests
+- New case "a day's setFog is a light mist, the foggy night keeps its density" (day weather =
+  0.75 classic, night = 5.6 classic, grey haze cut under setFog, 150 m keeps over 60 %, a share
+  left at the far end). The setFog opacity case now checks about half at a third of the fog end and
+  over 60 % at 150 m. The sky contract test pins the four deck constants against PhotoCamera.hpp.
+- Gate tags [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],[AirMedium],
+  [ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],[TerrainHorizon],
+  [StateOwnership],[atmosphere] on the final build, run from D:\: 320 cases, 957,489 assertions, all
+  pass (glslang compiles the sky piece). Full suite not run.
+- clang-format clean on every changed file.
+
+Still open
+- (b) the specks, see above.
+- (a) the HUD mist view is still pale at thumbnail size (bright air under the camera).
+- Not reshot: town_fog_night and town_night_rain (night paths unchanged by construction: the night
+  setFog density, the night mist weight and the night grey haze are round 3's, the deck change is
+  day only), overcast_broken (the deck change needs the full veil, sky-through under 0.3).
+- Capture tests used: look_r4mist_all (my four views, overhaul only), look_r4mist_eden (generated),
+  look_probe_r4_mist; untracked in the scratch copy, not in the patch. Probe shader overrides are in
+  probe_*/ (psFogApply.glsl, psPostTaa.glsl), glsl_base/ holds the extracted base programs.

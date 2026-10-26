@@ -1,0 +1,11 @@
+# Scratch scenario for the branch comparison video (not a regression test).
+# Boots a scratch copy of Guerrilla.Abel (forcesPoolMin 50, forcesPoolPerTown 1) on the
+# shadow passed with --data-dir and writes UD* lines to the game log.
+# Not headless: births need a real camera.
+mission = "D:/Arma_CWA/tmp/of-director-video-3/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+tags = ["scratch", "occupierforces"]
+timeout = 10800
+assert_timeout = 900
+extra_args = ["--dev", "--no-strict"]
+# --no-strict: the player build default; strict mode stopped attempt 1 at an AIUnitImpl.cpp(748) check (a finding), every ERRR line is still logged and counted

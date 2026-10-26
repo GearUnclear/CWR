@@ -1,0 +1,158 @@
+{
+ "valley_0515|on": {
+  "clean": 2,
+  "all": 6,
+  "frame": [
+   26.125,
+   25.96
+  ],
+  "world": [
+   23.37,
+   23.32
+  ],
+  "shadow": [
+   0.04,
+   0.04
+  ],
+  "ground": [
+   2.24,
+   2.23
+  ],
+  "pass1": [
+   18.83,
+   18.78
+  ],
+  "rest": [
+   2.3,
+   2.29
+  ],
+  "sky": [
+   0.09,
+   0.09
+  ],
+  "canopy": null,
+  "post": [
+   2.49,
+   2.38
+  ],
+  "frame_min": [
+   25.38,
+   25.29
+  ],
+  "cpu": 36.06,
+  "draws": 5242.0,
+  "mhz": 2775.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "valley_0515|base": {
+  "clean": 2,
+  "all": 6,
+  "frame": [
+   33.760000000000005,
+   33.18
+  ],
+  "world": [
+   32.355000000000004,
+   31.86
+  ],
+  "shadow": [
+   0.04,
+   0.04
+  ],
+  "ground": [
+   5.825,
+   5.5
+  ],
+  "pass1": [
+   24.65,
+   24.51
+  ],
+  "rest": [
+   1.88,
+   1.85
+  ],
+  "sky": null,
+  "canopy": null,
+  "post": [
+   1.2650000000000001,
+   1.18
+  ],
+  "frame_min": [
+   32.7,
+   32.14
+  ],
+  "cpu": 36.82,
+  "draws": 11406.0,
+  "mhz": 2775.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "sunrise_ridge|on": {
+  "clean": 1,
+  "all": 6,
+  "frame": [
+   16.2,
+   16.2
+  ],
+  "world": [
+   13.0,
+   13.0
+  ],
+  "shadow": [
+   0.11,
+   0.11
+  ],
+  "ground": [
+   9.78,
+   9.78
+  ],
+  "pass1": [
+   2.56,
+   2.56
+  ],
+  "rest": [
+   0.66,
+   0.66
+  ],
+  "sky": [
+   0.16,
+   0.16
+  ],
+  "canopy": null,
+  "post": [
+   2.8,
+   2.8
+  ],
+  "frame_min": [
+   5.09,
+   5.09
+  ],
+  "cpu": 21.73,
+  "draws": 1912,
+  "mhz": 2775.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "sunrise_ridge|base": {
+  "clean": 0,
+  "all": 6,
+  "frame": null,
+  "world": null,
+  "shadow": null,
+  "ground": null,
+  "pass1": null,
+  "rest": null,
+  "sky": null,
+  "canopy": null,
+  "post": null,
+  "frame_min": null,
+  "cpu": null,
+  "draws": null,
+  "mhz": null,
+  "ps": []
+ }
+}

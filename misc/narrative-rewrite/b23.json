@@ -1,0 +1,10 @@
+{
+  "id": "b23",
+  "bank": "kBio1Hostile",
+  "variant": 4,
+  "text": "{Name} acted with an amateur theatre group near {Place} before taking a military publicity job. The former actor later helped announce an army ban that forced the group to close.",
+  "word_count": 30,
+  "self_review": "An amateur actor took military publicity work and helped announce the army ban that closed the former theatre group.",
+  "source_pattern": "The supplied research documents civilian skills being put to work in coercive administrative institutions, but not an actor's publicity career.",
+  "fictional_changes": "Acting, military publicity, the ban, and the theater group are fictional. No source claim is made for the officer's feelings about the ban."
+}

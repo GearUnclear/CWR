@@ -1,0 +1,8 @@
+lane: gr-B7
+source: D:/Arma_CWA_worktrees/gr-B7
+HEAD: c36ee4ba6d94d64521b7fdcd0ba5019553027ffd
+subject: graphics: calm water and wet streets reflect what is on screen
+commit date: 2026-10-18 18:09:52 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 35
+binary files changed (content not in patch): none

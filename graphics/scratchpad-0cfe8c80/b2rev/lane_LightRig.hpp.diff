@@ -1,0 +1,58 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index c0c24bf..c86a198 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -16 +16,2 @@
+-//     screen as the original's) and whose strength follows the classic
++//     screen as the original's; with the low-sun rig from 25 degrees, as
++//     classic's own sunset ramp) and whose strength follows the classic
+@@ -21 +22,3 @@
+-//     on the sun side and cool shade on the other,
++//     on the sun side and cool shade on the other. Below 40 degrees the low-sun
++//     rig adds sideways fill to vertical faces, so the shaded side of a hull
++//     stays readable at a low sun,
+@@ -75,2 +78,2 @@ struct FeatureSet
+-    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides
+-    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy
++    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides (ComputeLightRig)
++    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy (shader shadeRemastered)
+@@ -154 +157,4 @@ struct LightingTuning
+-    // linear depth (PostStages.hpp kDebugViewLinearDepth).
++    // linear depth (PostStages.hpp kDebugViewLinearDepth), 6 the surface
++    // albedo (kDebugViewAlbedo: the display-space colour the lit shaders light,
++    // texture, tint and detail applied; with post=0 a shot of it divides a lit
++    // shot into the light on each surface).
+@@ -189,0 +196,9 @@ struct LightRig
++// The debug view (LightingTuning::debugView) that shows the albedo, and the
++// value the lit shaders read for it (litFlags.z; 1 to 3 are the views of
++// the same number).
++constexpr int kDebugViewAlbedo = 6;
++constexpr float kShaderDebugAlbedo = 4.0f;
++// litFlags.z for a debug view: 1 to 3 and the albedo view are drawn by the lit
++// shaders, every other view (4 and 5 by the post pass) leaves them as they are.
++float ShaderDebugView(int debugView);
++
+@@ -199,0 +215,23 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
++// With the low-sun rig (FeatureSet::lowSunRig, plan step B2) the sun then
++// takes a further LowSunHueShare of the classic sunset hue: from 25 degrees
++// down (where classic's own sunset ramp starts; EveningSunChroma reaches only
++// 14% of it at 12.7 degrees) and more in the last 9, where classic's sun is
++// nearly pure red and the remastered sky fill would otherwise leave a sunlit
++// hull less red than the original's. Times the warmth (clamped to 1).
++float LowSunHueShare(float elevationDeg);
++Rgb LowSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
++
++// The low-sun rig's sideways fill on vertical faces. At a low sun the light on
++// a wall comes mostly sideways, from the bright horizon band and the sunlit
++// ground in front of it, which the hemisphere split under-counts: the face of
++// a hull turned away from a 7 to 14 degree sun fell to 0.32 to 0.42 of its
++// sunlit side on screen (0.6 is the target; 0.42 was called crushed). The fill
++// weight is LowSunFill (full from 8 degrees down to the horizon, gone by 40,
++// and faded out under the horizon); the sky part of the anti-sun horizon takes
++// 1 + kLowSunFillAntiSun * fill, the sunward one 1 + kLowSunFillSunward * fill
++// and the ground bounce 1 + kLowSunFillBounce * fill. Up-facing ground (the
++// zenith term) is unchanged, so cast shadows on the ground keep their depth.
++constexpr float kLowSunFillAntiSun = 2.6f;
++constexpr float kLowSunFillSunward = 0.5f;
++constexpr float kLowSunFillBounce = 1.3f;
++float LowSunFill(float elevationDeg);

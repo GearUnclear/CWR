@@ -1,0 +1,94 @@
+USLU DUR! TRAILER, PART 1: GRAPHICS - the brief every agent follows (orchestrator, 2026-10-19)
+
+WHAT
+A YouTube trailer for Uslu dur!, a total overhaul of Arma: Cold War Assault. Part 1 shows only
+the new graphics (lighting, air, water, night, rain, explosions); part 2 (later) shows the
+gameplay: Guerrilla Mode (a persistent insurgency: a resistance against an occupying army across
+islands; towns, roadblocks, convoys, hidden camps, civilians) and the AI. About 2 to 2.5 minutes.
+
+THE OWNER'S DIRECTIONS (all binding)
+1. Every scene shows the vanilla game and Uslu dur! of the SAME camera shot at the SAME moment:
+   vanilla = a build of the vanilla upstream repo; Uslu dur! = our final build with everything on.
+2. Scenes come from the Uslu dur world and are cool to look at: resistance fighters, the
+   occupier, checkpoints and roadblocks, convoys, occupied towns, hidden camps, firefights.
+   Each scene also shows off one lighting feature (dawn mist, sun shafts, golden-hour shadows,
+   sunset over the sea, lamplit night town, rain and puddles, headlights under stars, fire and
+   explosions, desert light, clouds and their shadows).
+3. 60 fps on both sides. Deliver a 16:9 YouTube master (1920x1080 60 fps; 3840x2160 if the
+   panels stay sharp): H.264 High, 12 to 20 Mbps or CRF 16 to 18, yuv420p, faststart; audio
+   AAC 48 kHz stereo 320 kbps or more, -16 LUFS integrated, true peak under -1 dBTP; an SRT and a
+   subtitled copy. A 3840x1080 full side-by-side is a secondary file only.
+4. NEVER shrink two 16:9 frames into one 16:9 frame. Both shots are full-size frames of the same
+   camera, composited in ONE full-size frame with a moving divider: a split screen.
+5. Mood: cool, calm and composed. Wipes and transitions are slow and eased (no snaps, no
+   bounces); soft dissolves or gentle directional wipes between scenes; slow dips through black;
+   no flash cuts, no light leaks, no shakes. Let shots breathe; one idea per scene at most. Even
+   the explosion scene enters calmly; the explosion is the only sudden thing.
+6. The divider: a plain thin line (about 2 px, off-white at modest opacity). No glow, no blur, no
+   shadow. Labels "VANILLA" and "USLU DUR!" small, upper case, riding the line, no glow, never over
+   the action. Vary the divider direction and timing per scene (vertical, diagonal where it suits),
+   for example: open fully vanilla, sweep slowly to reveal Uslu dur!, settle into a split, sweep
+   back once, end on Uslu dur!.
+7. Text: the game's own OFL fonts in D:/Arma_CWA_worktrees/graphics-remaster/arma_CWR/thirdparty/
+   guerrilla-fonts/ (read README.md and OFL.txt): cwr_title.ttf (Oswald) for titles and the
+   wordmark, cwr_body.ttf (Roboto) for labels and subtitles, cwr_mono.ttf for the typed line of
+   scene 1 if it reads better. No boxes behind text; off-white text with a soft, wide, low-opacity
+   shadow or a gentle dark gradient; a consistent safe margin (about 5%). The ONLY accent colour
+   is the game's HUD green, sampled from a real capture (for example the action-menu text in
+   D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/ref/vanilla/tank_gunner_optics.png; median of
+   text pixels), used sparingly. NO gold, amber or orange anywhere in added graphics. Never
+   grade or tint the game footage; both sides stay exactly as rendered.
+8. Scene 1 only: its title types on letter by letter like a field report (island, time, scene
+   name), calm (12 to 16 characters per second), a thin HUD-green block cursor that blinks twice
+   and fades with the line; no shaking, no glitch effects, no typing sounds.
+9. Words: never "official". Nothing cringe: plain, confident, understated; no marketing clichés
+   (next level, like never before, breathtaking, stunning, revolutionary, immersive, experience,
+   brand new, epic), no puns, no rhetorical questions, no exclamation marks except in the brand.
+   Titles are short and factual (place, time, scene). Narration says what is on screen and what is
+   new, calmly; at most one quietly dry line in the whole video. The outro tease is factual (part
+   2 covers the gameplay: Guerrilla Mode and the AI). Original wording only (style notes:
+   tmp/video/v2/reference/STYLE_NOTES.txt; never Rockstar's or GTA's lines).
+10. NPC heads must not wiggle. Give units fixed look targets (doWatch / commandWatch), disable
+   target and auto-target AI where not needed, use calm behaviour and fixed stances, pin units once
+   (only vehicles move on per-frame paths), and advance animation time by exactly 1/60 s per
+   captured frame on both sides. Verify with 2x head crops over 60 frames per side.
+11. The Uslu dur! side must really be the overhaul: a test once showed vanilla on both halves.
+   Prove per scene from the capture log (game dir and lighting mode); before compositing check the
+   mean absolute difference between the two sides at the same frame is clearly non-zero; never put
+   placeholder frames in anything the owner can see (stamp any stand-in "PLACEHOLDER" and keep it
+   out of final/).
+12. Narration: a pleasant, warm, confident female voice, calm and measured (local Breeze TTS,
+   recording approved by the owner) - but it is recorded only AFTER the owner has reviewed the
+   on-screen text and the narration lines. This team delivers the silent cut and the text first.
+
+BUILDS (do not rebuild either)
+- Vanilla: D:/Arma_CWA_worktrees/vanilla-upstream (Bohemia upstream/main 3.05; engine root = the
+  worktree root; game dist path in D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/vanilla/
+  BUILD_STATUS.txt). Vanilla lacks these fork commands: triPinCloudDrift, triGpuTimes,
+  triSettleScene, triSetLighting, triSceneStats, triPinObjectDetail, triFeatureState,
+  triCaptureAtPresent, triSetFixedStep (an unknown command fails the whole script); it has
+  triSimFrames, triScreenshot, triSetSimTime, triSetView, triCheatWeather, triAssertConfigClass,
+  triGetWindowSize, triSimUntil, triSetRenderScale. Vanilla cannot boot with the shadow's @LoBo
+  Bin; mount @LoBo addons and dta only (see tmp/look/ref/NOTES.md). Vanilla lowers object detail
+  when frames are slow: seed the profile with frameRate=3 as the previous video agent did.
+- Uslu dur!: D:/Arma_CWA_worktrees/graphics-remaster/arma_CWR/dist/graphics-remaster-rwdi (the
+  landed overhaul; identical code to look-director's final build), triSetLighting "remastered".
+
+TOOLS AND STATE
+- Earlier video tooling (30 fps, side-by-side, title cards): D:/Arma_CWA_worktrees/video-work/
+  arma_CWR/tests/rendering/captures/video/ (gen_video_v2.py, run_v2_lane.ps1, collect_frames.py,
+  make_video_v2.py, vo_v2.py, mix_vo.py, capture_motion.sqf) and the vanilla-safe variants in
+  D:/Arma_CWA_worktrees/vanilla-upstream/tests/rendering/captures/video/. The previous agent's
+  handover: D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/HANDOVER.txt. Old outputs in
+  tmp/video/v2/ (keep them; do not delete).
+- New outputs go to D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v3/ only.
+- Capture runner and rules: arma_CWR/tests/rendering/captures/run-captures.ps1 (hidden desktop,
+  per-run junction to D:/Arma_CWA/tmp/remaster-shadow-67, scoped cleanup). tri allows 4 games
+  machine-wide and queues. NEVER Stop-Process PoseidonGame globally; only
+  D:/Arma_CWA/arma_CWR/tools/stop-owned-games.ps1 -DataDir <engine root>/packages/<your junction>.
+- ffmpeg: C:/ffmpeg/bin/ffmpeg.exe (ffprobe beside it).
+
+TIME RULE: never make one tool call or wait longer than about 3 minutes (subagent caches go cold
+after 4); run builds, captures and encodes in the background and check at least every 3 minutes.
+OTHER RULES: no git branches, no commits, no pushes; no em dashes in any prose; open and look at
+every image you produce before you report it; never report a file that does not exist.

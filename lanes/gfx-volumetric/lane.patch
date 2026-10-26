@@ -1,0 +1,870 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd2..5e8224d1 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,22 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"vol", &remaster::LightingTuning::volumetric},
++        {"volHaze", &remaster::LightingTuning::volHaze},
++        {"volMist", &remaster::LightingTuning::volMist},
++        {"volMistHeight", &remaster::LightingTuning::volMistHeight},
++        {"volAniso", &remaster::LightingTuning::volAniso},
++        {"volDistance", &remaster::LightingTuning::volDistance},
++        {"volLocal", &remaster::LightingTuning::volLocal},
++        {"volCarve", &remaster::LightingTuning::volCarve},
++        {"volSteps", &remaster::LightingTuning::volSteps},
++        {"volDebug", &remaster::LightingTuning::volDebug},
++        {"volTemporal", &remaster::LightingTuning::volTemporal},
++        {"volBlur", &remaster::LightingTuning::volBlur},
++        {"volHighpass", &remaster::LightingTuning::volHighpass},
++        {"volGain", &remaster::LightingTuning::volGain},
++        {"volSpot", &remaster::LightingTuning::volSpot},
++        {"volEdge", &remaster::LightingTuning::volEdge},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0c..b61e7b05 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,25 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // RESEARCH (volumetric track): ray-marched sun and local-light scattering
++    // through height mist, shadow-map + horizon-map + cloud occluded. 0 = off
++    // (the screen-space shafts run instead).
++    float volumetric = 0.0f;     // overall strength
++    float volHaze = 1.0f;        // base haze density multiplier
++    float volMist = 1.0f;        // ground mist density multiplier
++    float volMistHeight = 18.0f; // ground mist scale height (m)
++    float volAniso = 0.75f;      // Henyey-Greenstein g of the forward lobe
++    float volDistance = 500.0f;  // march length cap (m)
++    float volLocal = 1.0f;       // local lights (lamps, headlights, fires)
++    float volCarve = 0.0f;       // remove the unshadowed mean: beams only, no wash (0..1)
++    float volSteps = 48.0f;      // march steps
++    float volDebug = 0.0f;       // 1 = show the scattering alone
++    float volTemporal = 0.0f;    // 1 = per-frame jitter + reprojected history (0.1 blend)
++    float volBlur = 1.0f;        // bilateral blur radius scale (0 = none)
++    float volHighpass = 0.0f;    // remove this share of the scattering's broad local mean (beams, not haze)
++    float volGain = 0.0f;        // >= 1: depth-aware local mean, boost scattering above it by (gain - 1)
++    float volEdge = 0.0f;        // 1: gain path uses full-res depth and distrusts poorly matched upsample taps
++    float volSpot = 0.0f;        // 1: spotlights (headlights) scatter over their shading reach (10x start, <= 60 m)
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab7..6956adc0 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -787,11 +787,22 @@ class EngineGL33 : public Engine
+         unsigned int depthTex = 0, depthFbo = 0;
+         unsigned int aoTex[2] = {}, aoFbo[2] = {};
+         unsigned int shaftTex = 0, shaftFbo = 0;
++        unsigned int volTex[2] = {}, volFbo[2] = {}; // RESEARCH: volumetric scattering (half res), ping-pong
++        unsigned int volHist[2] = {}, volHistFbo[2] = {}; // RESEARCH: temporal history, ping-pong
++        int volHistIdx = 0;
++        bool volHistValid = false;
++        unsigned int volFrame = 0;
++        float volPrevCam[3] = {};
++        float volPrevView[16] = {};
++        float volPrevProj[2] = {};
++        unsigned int progVolTemporal = 0;
++        unsigned int volResultTex = 0; // what the composite reads this frame
+         unsigned int bloomTex[kBloomLevels] = {}, bloomFbo[kBloomLevels] = {};
+         int bloomW[kBloomLevels] = {}, bloomH[kBloomLevels] = {};
+         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
++        unsigned int progVol = 0, progVolBlur = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094f..70b24cb5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -33,6 +33,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <cstring>
+ 
+ namespace
+ {
+@@ -206,17 +207,363 @@ void main() {
+ }
+ )";
+ 
++// RESEARCH (volumetric track): ray-marched single scattering of the sun (and of
++// local lights) through a height-dependent medium: a thin haze plus a ground
++// mist hugging the terrain. Each sample's sun visibility is the cascaded shadow
++// map (trees, buildings, vehicles), the terrain horizon map (ridges) and the
++// cloud field, so the lit air is cut into beams by whatever casts a shadow.
++// Half resolution, interleaved-gradient jitter of the sample positions, then a
++// depth-aware blur. Output rgb = in-scattered radiance (linear, exposure
++// applied; negative where `carve` takes shadowed air below the mean),
++// a = view depth for the bilateral filters.
++static const char s_psPostVolumetricGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D depthTex;
++uniform sampler2DArrayShadow shadowArr;
++uniform sampler2DArray terrainHorizon;
++uniform sampler2D terrainHeight;
++uniform sampler2D cloudNoise;
++layout(std140) uniform LitConstants {
++    vec4 litSunDir; vec4 litSun; vec4 litZenith; vec4 litHorizon; vec4 litGround;
++    vec4 litMoonDir; vec4 litMoon; vec4 litCamPos; vec4 litMatDiffuse; vec4 litMatAmbient;
++    vec4 litMatForced; vec4 litMatEmissive; vec4 litMatSpecular; vec4 litTerrain; vec4 litTerrainSel0;
++    vec4 litTerrainSel1; vec4 litTerrainSun; vec4 litTerrainLift; vec4 litCloud; vec4 litCloudOffset;
++    vec4 litShadowDelta; vec4 litFlags; vec4 litLightCount; vec4 litHorizonSun; vec4 litFogSun;
++    vec4 litFogCap; vec4 litLightPos[8]; vec4 litLightColor[8]; vec4 litLightAmb[8]; vec4 litLightDir[8];
++};
++uniform vec4 projInfo;     // x = _33, y = _43, z = 1/_11, w = 1/_22
++uniform vec4 depthMap;     // ndcZ = depth * x + y
++uniform vec4 worldRect;    // 3D viewport in uv
++uniform mat4 viewRot;      // the frame's view rotation, as the vertex shaders get it
++uniform mat4 cascadeVP[4];
++uniform vec4 cascadeSplits;
++uniform vec4 cascadeCtl;   // count, fade range, bias base, omni count
++uniform vec4 shadowCam;    // xyz camera forward of the depth pass, w = 1 map valid
++uniform vec4 shadowDelta;  // xyz camera move since the depth pass
++uniform vec4 volParams;    // x strength, y haze sigma (1/m), z mist sigma at the ground (1/m), w mist scale height (m)
++uniform vec4 volParams2;   // x HG g, y max distance (m), z steps, w carve
++uniform vec4 volParams3;   // x sun on (day), y local strength, z light count, w frame jitter
++uniform vec4 volParams4;   // x 1 = spotlights scatter over their shading reach
++uniform vec4 volLightPos[16];   // xyz camera-relative, w start attenuation distance
++uniform vec4 volLightColor[16]; // rgb linear, w 1 = spotlight
++uniform vec4 volLightDir[16];   // xyz beam direction
++out vec4 fragColor;
++
++float viewZ(float d) { return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x); }
++
++float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
++
++// Henyey-Greenstein, normalised so an isotropic medium gives 1.
++float hg(float c, float g) {
++    float g2 = g * g;
++    return (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * c, 1e-4), 1.5);
++}
++
++// One hardware PCF tap of the cascade that holds the point (the shading's tier
++// selection without the cross-fade).
++float shadowAt(vec3 rel) {
++    if (shadowCam.w < 0.5) return 1.0;
++    vec3 r = rel + shadowDelta.xyz;
++    int nC = int(cascadeCtl.x);
++    int omniN = int(cascadeCtl.w);
++    float ed = dot(r, shadowCam.xyz);
++    float d3 = length(r);
++    for (int i = 0; i < 4; ++i) {
++        if (i >= nC) break;
++        float metric = (i < omniN) ? d3 : ed;
++        if (metric <= cascadeSplits[i]) {
++            vec4 cp = cascadeVP[i] * vec4(r, 1.0);
++            vec3 sc = cp.xyz / cp.w;
++            vec2 suv = sc.xy * 0.5 + 0.5;
++            if (suv.x <= 0.0 || suv.x >= 1.0 || suv.y <= 0.0 || suv.y >= 1.0 || sc.z <= 0.0 || sc.z >= 1.0) return 1.0;
++            float bias = cascadeCtl.z * float(i + 1) * float(i + 1);
++            return texture(shadowArr, vec4(suv, float(i), sc.z - bias));
++        }
++    }
++    return 1.0;
++}
++
++// Ridges: the horizon angle stored for the ground below, lowered for a point
++// hAbove metres up (an occluder ~800 m away on average).
++float terrainSunAt(vec2 uv, float hAbove) {
++    float h0 = dot(texture(terrainHorizon, vec3(uv, litTerrainSun.x)), litTerrainSel0);
++    float h1 = dot(texture(terrainHorizon, vec3(uv, litTerrainSun.y)), litTerrainSel1);
++    float horizonDeg = mix(-5.0, 45.0, mix(h0, h1, litTerrainSun.z)) - max(hAbove, 0.0) * 0.07;
++    float soft = litTerrainSun.w;
++    float vis = smoothstep(horizonDeg - soft, horizonDeg + soft, litSun.w);
++    return mix(1.0, vis, litTerrainLift.z);
++}
++
++float cloudAt(vec3 posAbs) {
++    if (litCloud.w < 0.5) return 1.0;
++    float up = max(litSunDir.y, 0.12);
++    vec2 p = posAbs.xz + litSunDir.xz / up * (litCloudOffset.z - posAbs.y);
++    float n = texture(cloudNoise, (p + litCloudOffset.xy) * litCloud.z).r;
++    float cover = clamp(litCloud.x, 0.0, 1.0);
++    float edge = litCloudOffset.w * clamp(4.0 * cover * (1.0 - cover), 0.0, 1.0);
++    float covered = edge > 1e-4 ? smoothstep(1.0 - cover - edge, 1.0 - cover + edge, n) : step(1.0 - cover, n);
++    return mix(1.0, litCloud.y, covered);
++}
++
++float groundAt(vec2 xz, out vec2 tuv, out bool onMap) {
++    onMap = false;
++    tuv = vec2(0.0);
++    if (litTerrain.x < 0.5) return litCamPos.y - 1.75;
++    vec2 g = xz * litTerrain.y;
++    float last = 1.0 / litTerrain.z - 1.0;
++    if (g.x < 0.0 || g.y < 0.0 || g.x > last || g.y > last) return 0.0;
++    tuv = (g + 0.5) * litTerrain.z;
++    onMap = true;
++    return texture(terrainHeight, tuv).r;
++}
++
++float sigmaAt(float hAbove) {
++    return volParams.y + volParams.z * exp(-max(hAbove, 0.0) / volParams.w);
++}
++
++void main() {
++    float d = texture(depthTex, vUV).r;
++    bool sky = d >= 0.999999;
++    float z = sky ? 1e6 : viewZ(d);
++    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    vec3 vdir = vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0);
++    vec3 wdir = inverse(mat3(viewRot)) * vdir;
++    float lenPerZ = length(wdir);
++    wdir /= lenPerZ;
++    float rayLen = z * lenPerZ;
++    float tEnd = min(rayLen, volParams2.y);
++    float jitter = fract(ign(gl_FragCoord.xy) + volParams3.w);
++
++    vec3 sumSun = vec3(0.0);
++    // No sun below the horizon (the rig keeps a night "sun" colour for the
++    // classic ambient, and off-map points have no horizon test).
++    float sunOn = volParams3.x * smoothstep(-0.035, 0.0175, litSunDir.y);
++    if (sunOn > 0.0) {
++        int n = int(volParams2.z);
++        float optical = 0.0;
++        float sumLit = 0.0;
++        float sumAll = 0.0;
++        for (int i = 0; i < 128; ++i) {
++            if (i >= n) break;
++            float x = (float(i) + jitter) / float(n);
++            float t = tEnd * x * x; // denser near the camera
++            float dt = tEnd * 2.0 * max(x, 0.5 / float(n)) / float(n);
++            vec3 rel = wdir * t;
++            vec3 pa = rel + litCamPos.xyz;
++            vec2 tuv;
++            bool onMap;
++            float ground = groundAt(pa.xz, tuv, onMap);
++            float hA = pa.y - ground;
++            float sigma = sigmaAt(hA);
++            float w = sigma * exp(-optical) * dt;
++            optical += sigma * dt;
++            float vis = shadowAt(rel) * cloudAt(pa);
++            if (onMap) vis *= terrainSunAt(tuv, hA);
++            sumLit += w * vis;
++            sumAll += w;
++        }
++        float c = dot(wdir, litSunDir.xyz);
++        float phase = 0.85 * hg(c, volParams2.x) + 0.15 * hg(c, -0.3);
++        vec3 sunRad = litSun.rgb * litZenith.w * litSunDir.w * sunOn;
++        // E = pi * litSun (litSun is the radiance of a white Lambert face);
++        // L = sigma * p * E with p = phase / (4 pi): a factor 1/4.
++        sumSun = sunRad * phase * 0.25 * (sumLit - volParams2.w * sumAll);
++    }
++
++    // Local lights: point lights integrated in closed form along the ray (the
++    // shading's falloff, softened inside the start distance), spotlights
++    // marched through their reach so the cone shows.
++    vec3 sumLocal = vec3(0.0);
++    int nl = int(volParams3.z);
++    for (int i = 0; i < 16; ++i) {
++        if (i >= nl) break;
++        vec3 p = volLightPos[i].xyz;
++        // The scattering halo keeps the light's colour but not its (sometimes
++        // tens of metres) start distance: a lamp glows in the mist around it.
++        float s = clamp(volLightPos[i].w, 0.05, 1.5);
++        float reach = 8.0 * s;
++        float t0 = dot(p, wdir);
++        float h2 = max(dot(p, p) - t0 * t0, 0.0);
++        if (h2 > reach * reach) continue;
++        vec3 pAbs = p + litCamPos.xyz;
++        vec2 tuv;
++        bool onMap;
++        float sigmaL = sigmaAt(pAbs.y - groundAt(pAbs.xz, tuv, onMap));
++        float integral = 0.0;
++        if (volLightColor[i].w < 0.5) {
++            float he = sqrt(h2 + 0.25 * s * s);
++            float halfLen = sqrt(reach * reach - h2);
++            float ta = max(0.0, t0 - halfLen);
++            float tb = min(rayLen, t0 + halfLen);
++            if (tb <= ta) continue;
++            // Falloff s^2 / (d^2 + s^2/4) integrated in closed form over the
++            // part of the ray inside the light's reach, minus a constant so the
++            // halo ends at the reach instead of leaving a 1/d^2 tail.
++            integral = s * s / he * (atan((tb - t0) / he) - atan((ta - t0) / he));
++            integral = max(integral - (tb - ta) * s * s / (reach * reach), 0.0);
++        } else {
++            // RESEARCH (probe 6): a headlight's beam reaches as far as its
++            // pool on the ground does (the shading's 10x start distance, here
++            // capped at 60 m), with the shading's own start^2/d^2 falloff.
++            float sp = s;
++            float reachS = reach;
++            if (volParams4.x > 0.5) {
++                sp = clamp(volLightPos[i].w, 0.5, 6.0);
++                reachS = min(10.0 * sp, 60.0);
++                if (h2 > reachS * reachS) continue;
++            }
++            float halfLen = sqrt(reachS * reachS - h2);
++            float ta = max(0.0, t0 - halfLen);
++            float tb = min(rayLen, t0 + halfLen);
++            if (tb <= ta) continue;
++            int kSpot = volParams4.x > 0.5 ? 32 : 16;
++            float dts = (tb - ta) / float(kSpot);
++            for (int k = 0; k < 32; ++k) {
++                if (k >= kSpot) break;
++                float t = ta + (float(k) + jitter) * dts;
++                vec3 fromLight = wdir * t - p;
++                float d2 = max(dot(fromLight, fromLight), 1e-4);
++                float inside = dot(fromLight, volLightDir[i].xyz);
++                if (inside <= 0.0) continue;
++                float cone = smoothstep(0.9415, 0.9806, inside * inside / d2);
++                float fade = 1.0 - smoothstep(0.25 * reachS * reachS, reachS * reachS, d2);
++                // Forward scattering: looking into the beam is brighter. The
++                // scattering angle is between the light's travel (fromLight)
++                // and the way to the eye (-wdir); probe 5 had the sign
++                // flipped (no spotlight was in any shot before probe 6).
++                float cf = -dot(fromLight * inversesqrt(d2), wdir);
++                integral += cone * fade * sp * sp / max(d2, sp * sp) * hg(cf, 0.5) * dts;
++            }
++        }
++        sumLocal += volLightColor[i].rgb * (sigmaL * integral * 0.25);
++    }
++    vec3 L = (sumSun + sumLocal * volParams3.y) * volParams.x;
++    fragColor = vec4(L, sky ? 1e5 : min(z, 1e5));
++}
++)";
++
++// RESEARCH: depth-aware separable blur of the scattering (horizontal, then vertical).
++static const char s_psPostVolBlurGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D volTex;
++uniform vec2 stepUV;
++out vec4 fragColor;
++void main() {
++    vec4 c = texture(volTex, vUV);
++    vec3 sum = c.rgb;
++    float wsum = 1.0;
++    for (int i = -5; i <= 5; ++i) {
++        if (i == 0) continue;
++        vec4 s = texture(volTex, vUV + stepUV * float(i));
++        float w = exp(-float(i * i) / 12.0) * max(0.0, 1.0 - abs(s.a - c.a) / (0.08 * c.a + 0.5));
++        sum += s.rgb * w;
++        wsum += w;
++    }
++    fragColor = vec4(sum / wsum, c.a);
++}
++)";
++
++// RESEARCH: temporal accumulation of the jittered scattering. Reprojects the
++// pixel's world point (camera-relative, from the view depth in .a) into the
++// previous frame, rejects history that left the screen or belongs to another
++// surface, clips it to the current 3x3 neighbourhood (mean +- k sigma), and
++// blends 10 % of the new frame in.
++static const char s_psPostVolTemporalGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D curTex;
++uniform sampler2D histTex;
++uniform mat4 viewRot;
++uniform mat4 prevViewRot;
++uniform vec4 projInfo;   // z = 1/_11, w = 1/_22 (current)
++uniform vec4 prevProj;   // x = _11, y = _22 (previous)
++uniform vec4 camDelta;   // xyz current camera - previous camera, w = 1 history valid
++uniform vec4 worldRect;
++uniform vec4 halfTexel;  // xy 1/size, z blend, w clip sigma
++out vec4 fragColor;
++void main() {
++    vec4 cur = texture(curTex, vUV);
++    vec3 m1 = vec3(0.0);
++    vec3 m2 = vec3(0.0);
++    for (int j = -1; j <= 1; ++j) {
++        for (int i = -1; i <= 1; ++i) {
++            vec3 s = texture(curTex, vUV + vec2(i, j) * halfTexel.xy).rgb;
++            m1 += s;
++            m2 += s * s;
++        }
++    }
++    m1 /= 9.0;
++    vec3 sigma = sqrt(max(m2 / 9.0 - m1 * m1, vec3(0.0)));
++    float z = min(cur.a, 1e4);
++    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    vec3 rel = inverse(mat3(viewRot)) * (vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0) * z);
++    vec3 pv = mat3(prevViewRot) * (rel + camDelta.xyz);
++    float a = 1.0;
++    if (camDelta.w > 0.5 && pv.z > 0.01) {
++        vec2 pndc = vec2(pv.x * prevProj.x, pv.y * prevProj.y) / pv.z;
++        vec2 puv = worldRect.xy + (pndc * 0.5 + 0.5) * worldRect.zw;
++        if (puv.x > 0.0 && puv.x < 1.0 && puv.y > 0.0 && puv.y < 1.0) {
++            vec4 h = texture(histTex, puv);
++            bool sameSurface = (cur.a >= 9e4 && h.a >= 9e4) || abs(h.a - pv.z) < 0.1 * pv.z + 0.5;
++            if (sameSurface) {
++                vec3 lo = m1 - halfTexel.w * sigma;
++                vec3 hi = m1 + halfTexel.w * sigma;
++                vec3 hc = clamp(h.rgb, lo, hi);
++                fragColor = vec4(mix(hc, cur.rgb, halfTexel.z), cur.a);
++                return;
++            }
++        }
++    }
++    fragColor = vec4(m1 * 0.5 + cur.rgb * 0.5, cur.a); // no history: a little spatial help
++}
++)";
++
+ static const char s_psPostCompositeGLSL[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D colorTex;
+ uniform sampler2D aoTex;
+ uniform sampler2D bloomTex;
+ uniform sampler2D shaftTex;
++uniform sampler2D fullDepthTex; // RESEARCH: full-res depth for the volumetric upsample
+ uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+ uniform vec4 shaftColor; // rgb sun tint
+ uniform vec4 debugView;  // x: 1 = show occlusion
++uniform vec4 volUp;      // RESEARCH: x 1 = shaftTex holds volumetric scattering, y 1 = show it alone, zw half-res size
++uniform vec4 volProj;    // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z depth scale, w depth bias
++uniform vec4 volHp;      // RESEARCH: x high-pass strength (0 = off), y radius (uv of the frame height), z aspect w/h
++uniform vec4 volHp2;     // RESEARCH (probe 8): x 1 = edge fix (full-res depth for the mean, distrust poor upsample matches)
+ out vec4 fragColor;
+ 
++// Joint-bilateral upsample of the half-resolution scattering: the four nearest
++// texels, bilinear weights times depth similarity to this pixel.
++float volZFull;  // this pixel's view depth (set by volumetricAt)
++float volConf;   // 1 = some half-res tap matched this pixel's depth, 0 = none did
++vec3 volumetricAt(vec2 uv) {
++    float d = texture(fullDepthTex, uv).r;
++    float z = d >= 0.999999 ? 1e5 : min(volProj.y / ((d * volProj.z + volProj.w) - volProj.x), 1e5);
++    volZFull = z;
++    float best = 1e9;
++    vec2 pos = uv * volUp.zw - 0.5;
++    vec2 base = floor(pos);
++    vec2 f = pos - base;
++    vec3 sum = vec3(0.0);
++    float wsum = 0.0;
++    for (int j = 0; j < 2; ++j) {
++        for (int i = 0; i < 2; ++i) {
++            ivec2 tc = clamp(ivec2(base) + ivec2(i, j), ivec2(0), ivec2(volUp.zw) - 1);
++            vec4 s = texelFetch(shaftTex, tc, 0);
++            float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
++            float dn = abs(s.a - z) / (0.05 * z + 0.3);
++            best = min(best, dn);
++            float wd = 1.0 / (1e-3 + dn);
++            float w = wb * wd + 1e-6;
++            sum += s.rgb * w;
++            wsum += w;
++        }
++    }
++    volConf = 1.0 - smoothstep(0.5, 2.0, best);
++    return sum / wsum;
++}
++
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
+@@ -226,10 +573,71 @@ void main() {
+     float share = 1.0 - clamp(c.a, 0.0, 1.0);
+     float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+     vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
++    vec3 shaft;
++    if (volUp.x > 0.5) {
++        shaft = volumetricAt(vUV) * compParams.z;
++        if (volHp.w >= 1.0) {
++            // RESEARCH (probe 6): beam contrast. The local mean takes only
++            // samples at a similar view depth (sky with sky, a tree line with
++            // the tree line), so a silhouette against bright glow gets no rim.
++            // The floored high-pass fades smooth glow; scattering that stands
++            // above its surroundings (a lit shaft between shadowed ones) is
++            // boosted by (gain - 1). Only adds light: never below zero.
++            float zc = volHp2.x > 0.5 ? volZFull : texelFetch(shaftTex, clamp(ivec2(vUV * volUp.zw), ivec2(0), ivec2(volUp.zw) - 1), 0).a;
++            vec3 mean = vec3(0.0);
++            float wm = 0.0;
++            for (int k = 0; k < 24; ++k) {
++                float a = float(k) * 2.39996;
++                float r = volHp.y * sqrt((float(k) + 0.5) / 24.0);
++                vec2 o = vec2(cos(a) * r / volHp.z, sin(a) * r);
++                vec4 sm = texture(shaftTex, clamp(vUV + o, vec2(0.0), vec2(1.0)));
++                float wk = exp(-abs(sm.a - zc) / (0.25 * zc + 2.0));
++                mean += sm.rgb * wk;
++                wm += wk;
++            }
++            mean = mean / max(wm, 1e-4) * compParams.z;
++            float boost = volHp.w - 1.0;
++            if (volHp2.x > 0.5) {
++                // Thin foliage: when no half-res tap matched this pixel's
++                // depth, the upsample borrowed the sky's (far brighter)
++                // scattering. Clamp it to the depth-matched mean and give it
++                // no boost, so crowns against the glow get no speckled rim.
++                shaft = mix(min(shaft, mean), shaft, volConf);
++                boost *= volConf;
++            }
++            vec3 base = max(shaft - volHp.x * mean, (1.0 - volHp.x) * shaft);
++            shaft = base + boost * max(shaft - mean, vec3(0.0));
++        } else if (volHp.x > 0.0) {
++            // "Beams, not haze": take away part of the scattering's broad local
++            // mean (a 16-tap disc over the half-res result), so smooth glow over
++            // open ground fades while shadow edges in the air keep their
++            // contrast. What goes below zero darkens colour-neutrally below.
++            vec3 mean = vec3(0.0);
++            for (int k = 0; k < 16; ++k) {
++                float a = float(k) * 2.39996;
++                float r = volHp.y * sqrt((float(k) + 0.5) / 16.0);
++                vec2 o = vec2(cos(a) * r / volHp.z, sin(a) * r);
++                mean += texture(shaftTex, clamp(vUV + o, vec2(0.0), vec2(1.0))).rgb;
++            }
++            // Never below (1 - k) of itself and never negative: a dark object
++            // in front of bright glow must not turn darker than the frame.
++            shaft = max(shaft - volHp.x * mean / 16.0 * compParams.z, (1.0 - volHp.x) * shaft);
++        }
++        if (volUp.y > 0.5) { fragColor = vec4(pow(1.0 - exp(-max(shaft, vec3(0.0))), vec3(1.0 / 2.2)) + vec3(max(-shaft.g, 0.0), 0.0, 0.0), 1.0); return; }
++        // Carved (negative) scattering: shadowed air below the mean takes its
++        // share of the haze out of the pixel, never more than 40 %.
++        // Colour-neutral: subtracting a warm sun colour from a pink sky
++        // would turn it cyan.
++        float negLum = -dot(min(shaft, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
++        lin *= 1.0 - clamp(negLum / max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-3), 0.0, 0.4);
++        shaft = max(shaft, vec3(0.0));
++    } else {
++        shaft = texture(shaftTex, vUV).rgb * shaftColor.rgb * compParams.z;
++    }
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+-    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + texture(shaftTex, vUV).rgb * shaftColor.rgb * compParams.z;
++    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft;
+     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
+     vec3 col = pow(lin, vec3(1.0 / 2.2));
+     // Dither only what the composite changed: elsewhere the frame passes
+@@ -346,6 +754,10 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.aoFbo[0]);
+     delFbo(p.aoFbo[1]);
+     delFbo(p.shaftFbo);
++    delFbo(p.volFbo[0]);
++    delFbo(p.volFbo[1]);
++    delFbo(p.volHistFbo[0]);
++    delFbo(p.volHistFbo[1]);
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -356,6 +768,11 @@ void EngineGL33::DestroyPostTargets()
+     delTex(p.aoTex[0]);
+     delTex(p.aoTex[1]);
+     delTex(p.shaftTex);
++    delTex(p.volTex[0]);
++    delTex(p.volTex[1]);
++    delTex(p.volHist[0]);
++    delTex(p.volHist[1]);
++    p.volHistValid = false;
+     p.w = p.h = 0;
+ }
+ 
+@@ -363,7 +780,8 @@ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+     for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite, &p.progVol,
++          &p.progVolBlur, &p.progVolTemporal})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -391,6 +809,18 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+         p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+         p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        // RESEARCH: volumetric scattering (optional: its failure only disables it).
++        p.progVol = LinkPostProgram(vs, s_psPostVolumetricGLSL, "psPostVolumetric");
++        p.progVolBlur = LinkPostProgram(vs, s_psPostVolBlurGLSL, "psPostVolBlur");
++        p.progVolTemporal = LinkPostProgram(vs, s_psPostVolTemporalGLSL, "psPostVolTemporal");
++        if (p.progVol)
++        {
++            const GLuint blk = glGetUniformBlockIndex(p.progVol, "LitConstants");
++            if (blk != GL_INVALID_INDEX)
++                glUniformBlockBinding(p.progVol, blk, Poseidon::gl33lighting::kLitBinding);
++        }
++        LOG_INFO(Graphics, "GL33 post: volumetric programs {} {}", p.progVol ? "ok" : "FAILED",
++                 p.progVolBlur ? "ok" : "FAILED");
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+@@ -414,6 +844,10 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.aoTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    p.volTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    p.volTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    p.volHist[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    p.volHist[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -445,6 +879,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.shaftFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.shaftTex);
+     check();
++    for (int i = 0; i < 2; ++i)
++    {
++        p.volFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.volTex[i]);
++        check();
++        p.volHistFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.volHist[i]);
++        check();
++    }
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -485,7 +926,8 @@ void EngineGL33::EndWorldScene()
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
+         return;
+-    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
++    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f &&
++        _lighting.volumetric <= 0.0f)
+         return; // nothing to add: leave the frame as drawn
+ 
+     FlushAndFreeAllQueues(_queueNo);
+@@ -624,7 +1066,11 @@ void EngineGL33::EndWorldScene()
+     float shaftWeight = 0.0f;
+     float sunU = 0.5f, sunV = 0.5f;
+     Color shaftTint(1, 1, 1, 1);
+-    if (worldDepth && glow && _lighting.sunShafts > 0.0f && GScene)
++    const bool volumetric = worldDepth && glow && _lighting.volumetric > 0.0f && GScene && GScene->GetCamera() &&
++                            p.progVol && p.progVolBlur;
++    if (!volumetric)
++        p.volHistValid = false;
++    if (!volumetric && worldDepth && glow && _lighting.sunShafts > 0.0f && GScene)
+     {
+         LightSun* sun = GScene->MainLight();
+         Camera* cam = GScene->GetCamera();
+@@ -659,17 +1105,234 @@ void EngineGL33::EndWorldScene()
+         GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
+     }
+ 
++    // 3b. RESEARCH: ray-marched volumetric scattering (replaces the shafts).
++    if (volumetric)
++    {
++        LightSun* sun = GScene->MainLight();
++        Camera* cam = GScene->GetCamera();
++        const GLuint prog = p.progVol;
++        glUseProgram(prog);
++        u1i(prog, "depthTex", 0);
++        u1i(prog, "shadowArr", 2);
++        u1i(prog, "terrainHorizon", 3);
++        u1i(prog, "terrainHeight", 4);
++        u1i(prog, "cloudNoise", 5);
++        bindTex(0, p.depthTex);
++        const bool shadowValid = ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0;
++        const bool map = _terrainHorizonTex && _terrainHeightTex;
++        glActiveTexture(GL_TEXTURE2);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        glBindTexture(GL_TEXTURE_2D_ARRAY, shadowValid ? _shadowMapTex : _dummyDepthArray);
++        glBindSampler(2, _shadowCompareSampler);
++        glActiveTexture(GL_TEXTURE3);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
++        bindTex(4, map ? _terrainHeightTex : _dummyHeightTex);
++        bindTex(5, _cloudNoiseTex);
++        u4f(prog, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(prog, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        u4f(prog, "worldRect", rectX, rectY, rectW, rectH);
++        {
++            const GLint loc = glGetUniformLocation(prog, "viewRot");
++            if (loc >= 0)
++                glUniformMatrix4fv(loc, 1, GL_FALSE, &_frameState.view._11);
++        }
++        if (shadowValid)
++        {
++            const GLint loc = glGetUniformLocation(prog, "cascadeVP");
++            if (loc >= 0)
++                glUniformMatrix4fv(loc, _shadowCascades, GL_FALSE, _shadowMapVP);
++            u4f(prog, "cascadeSplits", _shadowSplits[0], _shadowSplits[1], _shadowSplits[2], _shadowSplits[3]);
++            u4f(prog, "cascadeCtl", static_cast<float>(_shadowCascades), _shadowTuning.fadeRange,
++                _shadowTuning.biasBase, static_cast<float>(_shadowOmniCount));
++            u4f(prog, "shadowCam", _shadowCamFwd[0], _shadowCamFwd[1], _shadowCamFwd[2], 1.0f);
++        }
++        else
++        {
++            u4f(prog, "shadowCam", 0.0f, 0.0f, 1.0f, 0.0f);
++        }
++        const Vector3 camPos = cam->Position();
++        u4f(prog, "shadowDelta", camPos.X() - _shadowCamPos[0], camPos.Y() - _shadowCamPos[1],
++            camPos.Z() - _shadowCamPos[2], 0.0f);
++        // Medium: a haze whose density follows the weather's visibility (fog
++        // range), and a ground mist that thickens as the fog closes in.
++        const float fogMax = std::max(50.0f, GScene->GetFogMaxRange());
++        const float viewDist = std::max(fogMax, GScene->GetPreferredViewDistance());
++        const float fogness = std::clamp(1.0f - fogMax / viewDist, 0.0f, 1.0f);
++        const float hazeSigma = _lighting.volHaze * 0.6f / fogMax;
++        const float mistSigma = _lighting.volMist * 0.004f * (1.0f + 6.0f * fogness);
++        u4f(prog, "volParams", _lighting.volumetric, hazeSigma, mistSigma, std::max(1.0f, _lighting.volMistHeight));
++        u4f(prog, "volParams2", std::clamp(_lighting.volAniso, -0.95f, 0.95f), std::max(10.0f, _lighting.volDistance),
++            std::clamp(_lighting.volSteps, 4.0f, 128.0f), _lighting.volCarve);
++        // Local lights: the scene's active point and spot lights at night.
++        const float night = sun->NightEffect();
++        float lpos[16 * 4] = {}, lcol[16 * 4] = {}, ldir[16 * 4] = {};
++        int nLights = 0;
++        if (night > 0.0f && _lighting.volLocal > 0.0f)
++        {
++            // The scene's active list is cleared after the object passes:
++            // take every switched-on light within 250 m, nearest first.
++            Light* cand[64];
++            float candD2[64];
++            int nCand = 0;
++            for (int i = 0; i < GScene->NLights(); i++)
++            {
++                Light* light = GScene->GetLight(i);
++                if (!light || !light->IsOn())
++                    continue;
++                const float d2 = (light->Position() - camPos).SquareSize();
++                if (d2 > 250.0f * 250.0f)
++                    continue;
++                int at = nCand < 64 ? nCand++ : 63;
++                if (at == 63 && nCand == 64 && d2 >= candD2[63])
++                    continue;
++                while (at > 0 && candD2[at - 1] > d2)
++                {
++                    cand[at] = cand[at - 1];
++                    candD2[at] = candD2[at - 1];
++                    --at;
++                }
++                cand[at] = light;
++                candD2[at] = d2;
++            }
++            for (int i = 0; i < nCand && nLights < 16; i++)
++            {
++                Light* light = cand[i];
++                LightDescription desc;
++                light->GetDescription(desc);
++                const bool isSpot = desc.type == LTSpotLight;
++                if (desc.type != LTPoint && !isSpot)
++                    continue;
++                Vector3 beam = desc.dir;
++                beam.Normalize();
++                const Color dif = desc.diffuse * night;
++                float* pp = lpos + nLights * 4;
++                pp[0] = desc.pos.X() - camPos.X();
++                pp[1] = desc.pos.Y() - camPos.Y();
++                pp[2] = desc.pos.Z() - camPos.Z();
++                pp[3] = desc.startAtten;
++                float* pc = lcol + nLights * 4;
++                pc[0] = std::pow(std::max(dif.R(), 0.0f), 2.2f);
++                pc[1] = std::pow(std::max(dif.G(), 0.0f), 2.2f);
++                pc[2] = std::pow(std::max(dif.B(), 0.0f), 2.2f);
++                pc[3] = isSpot ? 1.0f : 0.0f;
++                float* pd = ldir + nLights * 4;
++                pd[0] = beam.X();
++                pd[1] = beam.Y();
++                pd[2] = beam.Z();
++                nLights++;
++            }
++        }
++        if (nLights > 0)
++        {
++            const GLint lp = glGetUniformLocation(prog, "volLightPos");
++            const GLint lc = glGetUniformLocation(prog, "volLightColor");
++            const GLint ld = glGetUniformLocation(prog, "volLightDir");
++            if (lp >= 0)
++                glUniform4fv(lp, nLights, lpos);
++            if (lc >= 0)
++                glUniform4fv(lc, nLights, lcol);
++            if (ld >= 0)
++                glUniform4fv(ld, nLights, ldir);
++        }
++        static int s_volLogFrame = 0;
++        if ((s_volLogFrame % 300) == 0)
++            for (int i = 0; i < nLights; i++)
++                LOG_INFO(Graphics, "GL33 post: volumetric light {} rel {} {} {} start {} col {} {} {} spot {}", i,
++                         lpos[i * 4], lpos[i * 4 + 1], lpos[i * 4 + 2], lpos[i * 4 + 3], lcol[i * 4], lcol[i * 4 + 1],
++                         lcol[i * 4 + 2], lcol[i * 4 + 3]);
++        if ((s_volLogFrame++ % 300) == 0)
++            LOG_INFO(Graphics,
++                     "GL33 post: volumetric fogMax {} vd {} haze {} mist {} lights {}/{} shadow {} (en {} act {} "
++                     "casc {} splits {} {} {} {}) map {}",
++                     fogMax, viewDist, hazeSigma, mistSigma, nLights, GScene->NLights(), shadowValid ? 1 : 0,
++                     ShadowMapsEnabled() ? 1 : 0, _shadowMapActive ? 1 : 0, _shadowCascades, _shadowSplits[0],
++                     _shadowSplits[1], _shadowSplits[2], _shadowSplits[3], map ? 1 : 0);
++        const bool temporal = _lighting.volTemporal > 0.5f && p.progVolTemporal;
++        p.volFrame++;
++        const float frameJitter = temporal ? std::fmod(static_cast<float>(p.volFrame) * 0.61803399f, 1.0f) : 0.0f;
++        u4f(prog, "volParams3", _sunEnabled ? 1.0f - night : 0.0f, _lighting.volLocal, static_cast<float>(nLights),
++            frameJitter);
++        u4f(prog, "volParams4", _lighting.volSpot, 0.0f, 0.0f, 0.0f);
++        drawTo(p.volFbo[0], hw, hh);
++        glBindSampler(2, 0);
++        glActiveTexture(GL_TEXTURE2);
++        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
++        glActiveTexture(GL_TEXTURE3);
++        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
++        GLuint volResult = p.volTex[0];
++        if (temporal)
++        {
++            const int cur = p.volHistIdx ^ 1;
++            const GLuint tp = p.progVolTemporal;
++            glUseProgram(tp);
++            u1i(tp, "curTex", 0);
++            u1i(tp, "histTex", 2);
++            bindTex(0, p.volTex[0]);
++            bindTex(2, p.volHist[p.volHistIdx]);
++            const GLint lv = glGetUniformLocation(tp, "viewRot");
++            if (lv >= 0)
++                glUniformMatrix4fv(lv, 1, GL_FALSE, &_frameState.view._11);
++            const GLint lpv = glGetUniformLocation(tp, "prevViewRot");
++            if (lpv >= 0)
++                glUniformMatrix4fv(lpv, 1, GL_FALSE, p.volPrevView);
++            u4f(tp, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++            u4f(tp, "prevProj", p.volPrevProj[0], p.volPrevProj[1], 0.0f, 0.0f);
++            u4f(tp, "camDelta", camPos.X() - p.volPrevCam[0], camPos.Y() - p.volPrevCam[1],
++                camPos.Z() - p.volPrevCam[2], p.volHistValid ? 1.0f : 0.0f);
++            u4f(tp, "worldRect", rectX, rectY, rectW, rectH);
++            u4f(tp, "halfTexel", 1.0f / hw, 1.0f / hh, 0.1f, 2.0f);
++            drawTo(p.volHistFbo[cur], hw, hh);
++            p.volHistIdx = cur;
++            p.volHistValid = true;
++            volResult = p.volHist[cur];
++        }
++        else
++        {
++            p.volHistValid = false;
++        }
++        std::memcpy(p.volPrevView, &_frameState.view._11, sizeof(p.volPrevView));
++        p.volPrevProj[0] = proj._11;
++        p.volPrevProj[1] = proj._22;
++        p.volPrevCam[0] = camPos.X();
++        p.volPrevCam[1] = camPos.Y();
++        p.volPrevCam[2] = camPos.Z();
++        if (_lighting.volBlur > 0.0f)
++        {
++            glUseProgram(p.progVolBlur);
++            u1i(p.progVolBlur, "volTex", 0);
++            bindTex(0, volResult);
++            u2f(p.progVolBlur, "stepUV", _lighting.volBlur / hw, 0.0f);
++            drawTo(p.volFbo[1], hw, hh);
++            bindTex(0, p.volTex[1]);
++            u2f(p.progVolBlur, "stepUV", 0.0f, _lighting.volBlur / hh);
++            drawTo(p.volFbo[0], hw, hh);
++            volResult = p.volTex[0];
++        }
++        p.volResultTex = volResult;
++        GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
++    }
++
+     // 4. Composite into the frame target (every sample gets the resolved value).
+     glUseProgram(p.progComposite);
+     u1i(p.progComposite, "colorTex", 0);
+     u1i(p.progComposite, "aoTex", 2);
+     u1i(p.progComposite, "bloomTex", 3);
+     u1i(p.progComposite, "shaftTex", 4);
++    u1i(p.progComposite, "fullDepthTex", 5);
+     bindTex(0, p.colorTex);
+     bindTex(2, aoStrength > 0.0f ? p.aoTex[0] : p.whiteTex);
+     bindTex(3, bloomStrength > 0.0f ? p.bloomTex[0] : p.blackTex);
+-    bindTex(4, shaftWeight > 0.001f ? p.shaftTex : p.blackTex);
+-    u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
++    bindTex(4, volumetric ? p.volResultTex : (shaftWeight > 0.001f ? p.shaftTex : p.blackTex));
++    bindTex(5, p.depthTex);
++    u4f(p.progComposite, "volUp", volumetric ? 1.0f : 0.0f, _lighting.volDebug > 0.5f ? 1.0f : 0.0f,
++        static_cast<float>(hw), static_cast<float>(hh));
++    u4f(p.progComposite, "volProj", proj._33, proj._43, depthScale, depthBias);
++    u4f(p.progComposite, "volHp", _lighting.volHighpass, 0.12f, static_cast<float>(w) / static_cast<float>(h),
++        _lighting.volGain);
++    u4f(p.progComposite, "volHp2", _lighting.volEdge, 0.0f, 0.0f, 0.0f);
++    u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f,
++        volumetric ? 1.0f : _lighting.sunShafts * 0.6f, 1.0f);
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);

@@ -1,0 +1,99 @@
+; ============================================================================
+;  showcase/boot.sqs  -  SHOWCASE overlay bootstrap (issue #9, v2).
+; ----------------------------------------------------------------------------
+;  Exec'd from mission.sqm (the player unit's init line): mission.sqm is the
+;  sanctioned per-mission divergence point, so the mission's two-line
+;  init.sqs stays untouched and the shared core it boots out of
+;  <GameDir>\gmcore is reached, never copied (test_mission_script_core.cpp
+;  pins that).
+;
+;  PURPOSE: every gameplay system demonstrated as a NARRATED, SELF-VERIFYING
+;  CHAPTER - for oversight (watchable, readable, paced), for testing (the
+;  Trident smoke test drives the same queue with SC_AUTO), and for
+;  verification (each chapter reports PASS/FAIL/SKIP into a ledger).
+;  Architecture, contract and extension guide: showcase/README.md.
+;
+;  CONVENTIONS: core rules apply (SQS dialect, one statement per line,
+;  single-line code-value helpers). Overlay-owned names are SC_* only; the
+;  overlay writes core state only through the sanctioned seams listed in
+;  README.md. Native event slots are single-owner, so the overlay registers
+;  NO native handlers; run.sqs detects campaign loads by polling GM_pSaveAct.
+; ============================================================================
+
+; core booted + helper lib ready (init.sqs runs after mission.sqm init lines)
+@ not (isNil "GM_LIB_READY")
+@GM_LIB_READY
+; campaign.sqs mounted its Save action (its id doubles as our load detector)
+@ not (isNil "GM_pSaveAct")
+
+; ---- overlay libraries -----------------------------------------------------------
+SC_LIB_READY = false
+[] exec "showcase/lib.sqs"
+@SC_LIB_READY
+SC_CH_READY = false
+[] exec "showcase/chapters.sqs"
+@SC_CH_READY
+
+; ---- overlay state ---------------------------------------------------------------
+;   SC_QUEUE      pending chapter indices (action.sqs/test/reel write, run.sqs reads)
+;   SC_CH         index of the chapter being served (-1 idle)
+;   SC_BUSY       a chapter is running
+;   SC_LASTDONE   index of the last COMPLETED chapter (test handshake)
+;   SC_RES(MSG)   per-chapter outcome ledger, parallel to the manifest
+;   SC_DONE/SC_OUTCOME/SC_OUTMSG   the chapter completion contract
+;   SC_AUTO       harness mode: short beats, no accTime cosmetics
+;   SC_BEAT       seconds between narration beats (run.sqs recomputes per dispatch)
+;   SC_CH_TIMEOUT runner's bound on one chapter (s)
+;   SC_TICKER     event ticker enabled?
+;   SC_ACCEL      time-x4 toggle state
+;   SC_SAVEACT    last-seen campaign.sqs Save-action id (load detector)
+SC_QUEUE = []
+SC_CH = -1
+SC_BUSY = false
+SC_STAGED = false
+SC_LASTDONE = -1
+SC_DONE = false
+SC_OUTCOME = ""
+SC_OUTMSG = ""
+? isNil "SC_AUTO" : SC_AUTO = false
+SC_BEAT = 6
+SC_CH_TIMEOUT = 300
+SC_TICKER = true
+SC_ACCEL = false
+SC_SAVEACT = GM_pSaveAct
+
+; ---- ledger + reel index list, sized off the manifest ------------------------------
+SC_RES = []
+SC_RESMSG = []
+SC_ALLIDX = []
+SC_bI = 0
+#ledger
+? SC_bI >= (count SC_CH_IDS) : goto "ledgerdone"
+SC_RES = SC_RES + ["-"]
+SC_RESMSG = SC_RESMSG + [""]
+SC_ALLIDX = SC_ALLIDX + [SC_bI]
+SC_bI = SC_bI + 1
+goto "ledger"
+#ledgerdone
+
+; ---- zone anchors: the three authored zones (seeded towns index after them) --------
+SC_CAMP = gmZoneIndex "Camp"
+SC_VILL = gmZoneIndex "Village"
+SC_OUT  = gmZoneIndex "Outpost"
+
+; ---- menu mount/unmount (single-line code values; run.sqs re-arms after a load) ----
+SC_fnMount = {SC_ACT_ALL = aP addAction ["DEMO ALL: full narrated reel", "showcase/action.sqs"]; SC_ACTS = []; SC_mI = 0; while {SC_mI < (count SC_CH_IDS)} do {SC_ACTS = SC_ACTS + [aP addAction [format ["DEMO %1: %2", SC_mI + 1, SC_CH_TITLES select SC_mI], "showcase/action.sqs"]]; SC_mI = SC_mI + 1}; SC_ACT_TICKER = aP addAction ["SHOWCASE: event ticker on/off", "showcase/action.sqs"]; SC_ACT_TIME = aP addAction ["SHOWCASE: time x4 on/off", "showcase/action.sqs"]}
+SC_fnUnmount = {aP removeAction SC_ACT_ALL; {aP removeAction _x} forEach SC_ACTS; aP removeAction SC_ACT_TICKER; aP removeAction SC_ACT_TIME}
+
+[] call SC_fnMount
+
+[] exec "showcase/run.sqs"
+[] exec "showcase/ticker.sqs"
+
+; handshake for the Trident smoke test (showcase_smoke.test.sqf)
+SC_READY = true
+
+[] exec "human/boot.sqs"
+
+hint "SHOWCASE ready.\n\nHUMAN TESTS opens the guided player acceptance suite using the actual Guerrilla campaign. Start it before running staged demos.\n\nDEMO ALL runs the older staged narrated reel. Radio-log narration and the event ticker describe live changes."
+exit

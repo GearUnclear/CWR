@@ -1,0 +1,29 @@
+graphics: leaves without a mesh normal no longer get NaN lighting
+
+Some tree crowns lit with NaN normals in the remastered shader and fell
+back to driver-defined lighting (ground-only sky), and their sun shadow
+lookup always returned lit.
+
+Root cause: s_vsTransformRemasterGLSL normalised the world normal with
+normalize(), which is undefined for the zero mesh normals some leaf
+cards carry and gives NaN on NVIDIA. The NaN interpolated across the
+triangle, and shadeRemastered guarded a zero length but not NaN, so the
+crown blend, sun, sky, moon and shadow lookup all went NaN. Measured in
+game with diagnostic overrides: no non-finite crown constants in any
+view, only zero mesh normals.
+
+Fix:
+- VSTransform uses n *= inversesqrt(max(dot(n,n), 1e-12)), so a zero
+  normal stays zero.
+- shadeRemastered computes the crown normal once; a foliage fragment
+  without its own normal takes it for sun, sky, moon, local lights and
+  the shadow-lookup offset. Healthy leaves compute what they did before.
+- Hardening: CrownEllipsoid replaces an axis with a non-finite bound or
+  extent by a 5 cm crown at the origin.
+
+Tests: 'Remaster crown ellipsoid stays finite for degenerate boxes' and
+'Remaster lighting normals survive leaves without a mesh normal' (21 of
+96 assertions fail without the fix). In game: 0 NaN crown pixels in all
+four debug views, whole-frame means move by at most 0.15 levels.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

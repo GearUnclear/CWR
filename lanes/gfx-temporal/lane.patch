@@ -1,0 +1,856 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd2..b98742f6 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,20 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"taa", &remaster::LightingTuning::taa},
++        {"taaAlpha", &remaster::LightingTuning::taaAlpha},
++        {"taaSharpen", &remaster::LightingTuning::taaSharpen},
++        {"taaJitter", &remaster::LightingTuning::taaJitter},
++        {"taaGamma", &remaster::LightingTuning::taaGamma},
++        {"taaDepthReject", &remaster::LightingTuning::taaDepthReject},
++        {"taaMipBias", &remaster::LightingTuning::taaMipBias},
++        {"taaStochAlpha", &remaster::LightingTuning::taaStochAlpha},
++        {"aoStochastic", &remaster::LightingTuning::aoStochastic},
++        {"aoTaps", &remaster::LightingTuning::aoTaps},
++        {"aoRadius", &remaster::LightingTuning::aoRadius},
++        {"shadowStochastic", &remaster::LightingTuning::shadowStochastic},
++        {"shadowTaps", &remaster::LightingTuning::shadowTaps},
++        {"sunSize", &remaster::LightingTuning::sunSize},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0c..259b4d14 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,21 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // RESEARCH (temporal track): temporal anti-aliasing and stochastic effects.
++    float taa = 0.0f;           // 1 = TAA on (sub-pixel jitter, history, reprojection, clip)
++    float taaAlpha = 0.1f;      // weight of the current frame in the history blend
++    float taaSharpen = 0.25f;   // output sharpening (0 = none)
++    float taaJitter = 1.0f;     // 0 = no projection jitter (temporal smoothing only)
++    float taaGamma = 1.0f;      // variance clip width (sigma)
++    float taaDepthReject = 1.0f; // 1 = reject history where the previous depth disagrees (moving objects)
++    float taaMipBias = 0.0f;    // texture LOD bias in the world pass while TAA runs (negative = sharper)
++    float taaStochAlpha = 0.0f; // 1 = alpha-tested cutouts use a per-frame random threshold (A2C look, no MSAA)
++    float aoStochastic = 0.0f;  // 1 = AO taps rotate per frame, no spatial blur
++    float aoTaps = 12.0f;       // AO taps per pixel per frame
++    float aoRadius = 1.2f;      // AO radius (m)
++    float shadowStochastic = 0.0f; // 1 = per-pixel per-frame random shadow taps (+ contact hardening)
++    float shadowTaps = 12.0f;   // shadow taps per pixel per frame in stochastic mode
++    float sunSize = 0.0f;       // > 0: contact-hardening penumbra, apparent light size (degrees)
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab7..9a845b07 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -759,6 +759,7 @@ class EngineGL33 : public Engine
+     unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
+     unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
+     unsigned int _shadowCompareSampler = 0;
++    unsigned int _shadowRawSampler = 0; // RESEARCH temporal
+     unsigned int _shaderProgramRemaster[NVertexShaders][NPixelShaderSpecular][NPixelShaderModes][NPixelShaders] = {};
+ 
+     void InitLightingResources();
+@@ -792,9 +793,30 @@ class EngineGL33 : public Engine
+         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
++        // RESEARCH (temporal): TAA targets. cur = the composited frame, hist =
++        // the accumulated output (ping-pong, RGBA16F).
++        unsigned int curTex = 0, curFbo = 0;
++        unsigned int histTex[2] = {}, histFbo[2] = {};
++        unsigned int histZTex[2] = {}; // view depth (m) of each history frame, second attachment
++        unsigned int progTaa = 0, progTaaOut = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
++    // RESEARCH (temporal): TAA frame state.
++    struct TaaState
++    {
++        unsigned int frame = 0;           // advances once per resolved frame
++        float jitterPx[2] = {0.0f, 0.0f}; // sub-pixel offset of the frame being drawn (render-target pixels)
++        bool histValid = false;
++        int histIdx = 0; // which histTex holds the latest output
++        bool prevValid = false;
++        double prevView[9] = {}; // previous frame view rotation (row-vector, rows _11.._33)
++        float prevCam[3] = {};   // previous camera position
++        float prevP11 = 1.0f, prevP22 = 1.0f;
++    } _taa;
++    float _taaMipBiasApplied = 0.0f;
++    bool TaaJitterWanted() const;
++    void ApplyTaaJitter();
+     void DestroyPostTargets();
+     void DestroyPostPrograms();
+     bool EnsurePostResources(int w, int h);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5f..561028b0 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -116,6 +116,13 @@ void EngineGL33::InitLightingResources()
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
++    // RESEARCH temporal: raw depth reads of the same array (blocker search).
++    glGenSamplers(1, &_shadowRawSampler);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+ 
+     // The map (if any) belongs to the landscape, not the context: re-upload it.
+     _terrainMapDirty = _terrainMap != nullptr;
+@@ -273,6 +280,10 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    // RESEARCH temporal: the same depth array on unit 6 for raw reads.
++    GL33Bind::ActiveUnit(kShadowRawUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, (ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0) ? _shadowMapTex : _dummyDepthArray);
++    glBindSampler(kShadowRawUnit, _shadowRawSampler);
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -364,6 +375,9 @@ void EngineGL33::UploadLitFrameConstants()
+     SetSlot(LitConst::Moon, rig.moon.r, rig.moon.g, rig.moon.b, 0.0f);
+     const Vector3 cam = camera ? camera->Position() : VZero;
+     SetSlot(LitConst::CamPos, cam.X(), cam.Y(), cam.Z(), 0.0f);
++    // RESEARCH temporal: frame index for the stochastic patterns, shadow mode.
++    SetSlot(LitConst::Taa, static_cast<float>(_taa.frame % 4096u), (_lighting.shadowStochastic > 0.5f ? 1.0f : 0.0f) + (_lighting.taa > 0.5f && _lighting.taaStochAlpha > 0.5f && !_msaaActive ? 2.0f : 0.0f),
++            _lighting.shadowTaps, _lighting.sunSize > 0.0f ? 0.5f * std::tan(_lighting.sunSize * 3.14159265f / 180.0f) : 0.0f);
+ 
+     // Terrain horizon: the two stored azimuths around the sun and the blend.
+     const bool terrain = _worldEffectsOn && _terrainHorizonTex && _terrainMap && _terrainMap->Valid() &&
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e2..adce6e00 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -23,6 +23,7 @@ constexpr unsigned int kLitBinding = 3;
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++constexpr int kShadowRawUnit = 6; // RESEARCH temporal: the shadow array again, raw depth reads
+ 
+ // LitConstants vec4 slots; must match the GLSL block in s_psRemasterCommon.
+ namespace LitConst
+@@ -59,14 +60,15 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    Taa = 58,        // RESEARCH temporal: x frame, y stochastic shadows, z taps, w penumbra radius per metre
++    Count = 59,
+ };
+ constexpr int MaxLights = 8;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Count == LightDir + MaxLights + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e0..ce02f793 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -82,6 +82,7 @@ void main() {
+     gl_Position.y = (1.0 - aPos.y * vpScale.y) * w;
+     gl_Position.z = aPos.z * w;
+     gl_Position.w = w;
++    gl_Position.xy += vpScale.zw * gl_Position.w; // RESEARCH temporal: TAA sub-pixel jitter (0 = off)
+     vColor = aColor;
+     vSpecColor = aSpecular;
+     vUV0 = aUV0;
+@@ -139,6 +140,7 @@ void main() {
+     vec3 worldNormal = normalize(mat3(worldArr[gl_InstanceID]) * normal);
+     vec4 viewPos     = view * worldPos;
+     gl_Position      = proj * viewPos;
++    gl_Position.xy += vpScale.zw * gl_Position.w; // RESEARCH temporal: TAA sub-pixel jitter (0 = off)
+     vWorldRel        = worldPos.xyz; // camera-relative world position
+     vNormalW         = worldNormal;
+     vLitMode         = 1.0;
+@@ -214,6 +216,7 @@ flat out float vLitMode;
+ void main() {
+     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
+     gl_Position   = proj * view * worldPos;
++    gl_Position.xy += vpScale.zw * gl_Position.w; // RESEARCH temporal: TAA sub-pixel jitter (0 = off)
+     vColor        = diffuse;
+     vSpecColor    = vec4(0.0);
+     vUV0          = (texCtrl.x > 0.5) ? (texMat0 * vec4(uv, 0, 1)).xy : uv;
+@@ -276,6 +279,7 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
++    vec4 litTaa;          // 58: RESEARCH temporal: x frame, y stochastic shadows, z taps, w penumbra radius per metre
+ };
+ 
+ uniform sampler2D tex0;
+@@ -284,6 +288,7 @@ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound i
+ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
++uniform sampler2DArray shadowRaw;          // unit 6: RESEARCH temporal: the shadow array, raw depth
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -329,6 +334,50 @@ const vec2 kPoisson[12] = vec2[](
+ // never casts into the map and passes offsetScale 0, and up-facing surfaces fade
+ // the offset out: an offset there would slide every shadow away from its caster
+ // by metres at a low sun.
++// RESEARCH temporal: stochastic, contact-hardening sun shadow. Per pixel and per
++// frame a randomly rotated Vogel disc of `taps` samples (TAA integrates the
++// rotations): a blocker search in raw depth finds how far above the receiver
++// the occluder is, and the filter radius grows with that distance times the
++// apparent size of the sun (PCSS). Each filter tap is still a hardware 2x2
++// comparison.
++float ignNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
++
++float shadowStochastic(vec2 suv, int c, float zr, float bias, float radius, float tanSlope) {
++    float uvPerM = 0.5 * length(vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0]));
++    float zPerM = length(vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2]));
++    int n = int(clamp(litTaa.z, 1.0, 16.0));
++    float frame = mod(litTaa.x, 64.0);
++    float ang0 = 6.2831853 * ignNoise(gl_FragCoord.xy + 5.588238 * frame);
++    float ang1 = 6.2831853 * ignNoise(gl_FragCoord.yx + vec2(17.0, 31.0) + 3.1 * frame);
++    float filterR = radius;
++    if (litTaa.w > 0.0) {
++        // Search as wide as a 30 m deep occluder's penumbra (capped).
++        float searchR = min(max(radius, 30.0 * litTaa.w * uvPerM), 0.05);
++        float zbSum = 0.0;
++        float nb = 0.0;
++        for (int k = 0; k < n; ++k) {
++            float r = sqrt((float(k) + 0.5) / float(n)) * searchR;
++            float a = float(k) * 2.39996323 + ang0;
++            vec2 o = vec2(cos(a), sin(a)) * r;
++            float d = texture(shadowRaw, vec3(suv + o, float(c))).r;
++            // the receiver plane rises toward the light on a slope: no self-blocking
++            float selfBias = bias + r / uvPerM * zPerM * tanSlope;
++            if (d < zr - selfBias) { zbSum += d; nb += 1.0; }
++        }
++        if (nb < 0.5) return 1.0;
++        float distM = max(zr - zbSum / nb, 0.0) / max(zPerM, 1e-6);
++        filterR = clamp(distM * litTaa.w * uvPerM, radius, 0.05);
++    }
++    float lit = 0.0;
++    for (int k = 0; k < n; ++k) {
++        float r = sqrt((float(k) + 0.5) / float(n)) * filterR;
++        float a = float(k) * 2.39996323 + ang1;
++        float fBias = bias + r / uvPerM * zPerM * tanSlope;
++        lit += texture(shadowMap, vec4(suv + vec2(cos(a), sin(a)) * r, float(c), zr - fBias));
++    }
++    return lit / float(n);
++}
++
+ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
+     if (shadowCtl.x < 0.5) return 1.0;
+     vec3 rel = vWorldRel + litShadowDelta.xyz;
+@@ -371,9 +420,15 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
+             // the penumbra width in metres stays comparable across tiers.
+             float radius = ts * litShadowDelta.w / float(c + 1);
+             float lit = 0.0;
+-            for (int k = 0; k < 12; ++k)
+-                lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), sc.z - bias));
+-            litSum += w * (lit / 12.0);
++            if (mod(litTaa.y, 2.0) > 0.5) {
++                float tanSlope = offsetScale > 0.5 ? min(slope / max(nl, 0.25), 4.0) : 0.0;
++                lit = shadowStochastic(suv, c, sc.z, bias, radius, tanSlope);
++            } else {
++                for (int k = 0; k < 12; ++k)
++                    lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), sc.z - bias));
++                lit /= 12.0;
++            }
++            litSum += w * lit;
+             wSum += w;
+         }
+     }
+@@ -593,7 +648,13 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+         if (cov <= 0.0) discard;
+         r0.a = cov;
+     } else {
+-        if (r0.a - alphaRef.x * alphaRef.y < 0.0) discard;
++        if (litTaa.y > 1.5 && alphaRef.y > 0.5) {
++            // RESEARCH temporal: alpha-to-coverage without MSAA. The cutout keeps the
++            // coverage the A2C path would give, as a per-pixel, per-frame random
++            // threshold that TAA averages back into partial coverage.
++            float cov = clamp((r0.a - alphaRef.x) / max(fwidth(r0.a), 1e-4) + 0.5, 0.0, 1.0);
++            if (cov <= ignNoise(gl_FragCoord.xy + vec2(7.13, 3.71) * mod(litTaa.x, 64.0))) discard;
++        } else if (r0.a - alphaRef.x * alphaRef.y < 0.0) discard;
+         // Opaque draws keep their alpha free (no blending reads it): store one
+         // minus the share of sky light that survives the fog, for the post
+         // pass's ambient occlusion. Pre-lit surfaces store 1 (nothing to
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094f..c7016d65 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -57,6 +57,7 @@ uniform vec4 depthMap;  // ndcZ = depth * x + y
+ uniform vec4 aoParams;  // x radius (m), y strength, z fade start (m), w fade end (m)
+ uniform vec4 screen;    // xy full-res size, zw 1/size
+ uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv (pillarbox crop)
++uniform vec4 aoStoch;   // RESEARCH temporal: x frame index, y taps, z 1 = rotate the pattern per frame
+ out vec4 fragColor;
+ 
+ float viewZ(vec2 uv) {
+@@ -91,10 +92,16 @@ void main() {
+     float radius = aoParams.x;
+     vec2 radiusUV = vec2(radius / projInfo.z, radius / projInfo.w) * (0.5 / z) * worldRect.zw;
+     float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+-    const int kTaps = 12;
++    float noise2 = noise;
++    if (aoStoch.z > 0.5) {
++        // Per-frame decorrelated pattern: TAA integrates it over time.
++        noise = fract(noise + aoStoch.x * 0.61803399);
++        noise2 = fract(52.9829189 * fract(dot(gl_FragCoord.yx + vec2(aoStoch.x * 7.0, aoStoch.x * 13.0), vec2(0.06711056, 0.00583715))));
++    }
++    int kTaps = int(clamp(aoStoch.y, 1.0, 32.0));
+     float occlusion = 0.0;
+     for (int i = 0; i < kTaps; ++i) {
+-        float t = (float(i) + 0.5 + noise * 0.5) / float(kTaps);
++        float t = (float(i) + 0.5 + noise2 * 0.5) / float(kTaps);
+         float angle = (float(i) * 2.39996 + noise * 6.2831853); // golden-angle spiral
+         vec2 suv = vUV + vec2(cos(angle), sin(angle)) * radiusUV * t;
+         vec3 q = viewPos(suv, viewZ(suv));
+@@ -243,6 +250,179 @@ void main() {
+ }
+ )";
+ 
++// RESEARCH (temporal): TAA resolve. Reprojects the history with the camera
++// motion (depth + previous view), clips it to the variance box of the current
++// 3x3 neighbourhood in YCoCg, and blends in the current frame reconstructed at
++// the unjittered pixel centre (Gaussian weights over the 3x3, Karis 2014).
++static const char s_psPostTaaGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D curTex;
++uniform sampler2D depthTex;
++uniform sampler2D histTex;
++uniform vec4 projInfo;  // x _33, y _43, z 1/_11, w 1/_22 (this frame)
++uniform vec4 depthMap;  // ndcZ = depth * x + y
++uniform vec4 prevProj;  // x _11, y _22 (previous frame)
++uniform vec4 reproj0;   // previous view pos = (dot(r.xyz, p) + r.w) per row
++uniform vec4 reproj1;
++uniform vec4 reproj2;
++uniform vec4 screen;    // xy size, zw 1/size
++uniform vec4 jitter;    // xy jitter of this frame (pixels), z history valid, w current-frame weight
++uniform vec4 taaParams; // x variance clip gamma, y debug view, z depth rejection on
++uniform sampler2D prevZTex; // previous frame's view depth (m), written below
++layout(location = 0) out vec4 fragColor;
++layout(location = 1) out vec4 zOut;
++
++vec3 toYCoCg(vec3 c) { return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b); }
++vec3 fromYCoCg(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
++
++vec3 clipAabb(vec3 bmin, vec3 bmax, vec3 q) {
++    vec3 c = 0.5 * (bmax + bmin);
++    vec3 e = 0.5 * (bmax - bmin) + 1e-4;
++    vec3 v = q - c;
++    vec3 a = abs(v / e);
++    float m = max(a.x, max(a.y, a.z));
++    return m > 1.0 ? c + v / m : q;
++}
++
++// Catmull-Rom history fetch from nine bilinear taps (keeps detail under motion).
++vec3 sampleHistory(vec2 uv) {
++    vec2 sp = uv * screen.xy;
++    vec2 t1 = floor(sp - 0.5) + 0.5;
++    vec2 f = sp - t1;
++    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
++    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
++    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
++    vec2 w3 = f * f * (-0.5 + 0.5 * f);
++    vec2 w12 = w1 + w2;
++    vec2 t0 = (t1 - 1.0) * screen.zw;
++    vec2 t3 = (t1 + 2.0) * screen.zw;
++    vec2 t12 = (t1 + w2 / w12) * screen.zw;
++    vec3 r = texture(histTex, vec2(t0.x, t0.y)).rgb * w0.x * w0.y;
++    r += texture(histTex, vec2(t12.x, t0.y)).rgb * w12.x * w0.y;
++    r += texture(histTex, vec2(t3.x, t0.y)).rgb * w3.x * w0.y;
++    r += texture(histTex, vec2(t0.x, t12.y)).rgb * w0.x * w12.y;
++    r += texture(histTex, vec2(t12.x, t12.y)).rgb * w12.x * w12.y;
++    r += texture(histTex, vec2(t3.x, t12.y)).rgb * w3.x * w12.y;
++    r += texture(histTex, vec2(t0.x, t3.y)).rgb * w0.x * w3.y;
++    r += texture(histTex, vec2(t12.x, t3.y)).rgb * w12.x * w3.y;
++    r += texture(histTex, vec2(t3.x, t3.y)).rgb * w3.x * w3.y;
++    return max(r, vec3(0.0));
++}
++
++void main() {
++    ivec2 ip = ivec2(gl_FragCoord.xy);
++    ivec2 lim = ivec2(screen.xy) - 1;
++    vec3 m1 = vec3(0.0), m2 = vec3(0.0);
++    vec3 cmin = vec3(1e9), cmax = vec3(-1e9);
++    vec3 cur = vec3(0.0);
++    float wsum = 0.0;
++    float closest = 2.0;
++    vec2 closestOff = vec2(0.0);
++    for (int y = -1; y <= 1; ++y) {
++        for (int x = -1; x <= 1; ++x) {
++            ivec2 q = clamp(ip + ivec2(x, y), ivec2(0), lim);
++            vec3 c = texelFetch(curTex, q, 0).rgb;
++            vec3 yc = toYCoCg(c);
++            m1 += yc;
++            m2 += yc * yc;
++            cmin = min(cmin, yc);
++            cmax = max(cmax, yc);
++            vec2 d = vec2(float(x), float(y)) - jitter.xy;
++            float w = exp(-2.29 * dot(d, d));
++            cur += c * w;
++            wsum += w;
++            float dz = texelFetch(depthTex, q, 0).r;
++            if (dz < closest) { closest = dz; closestOff = vec2(float(x), float(y)); }
++        }
++    }
++    cur /= wsum;
++
++    // Camera reprojection from the nearest depth of the neighbourhood (moving
++    // silhouettes keep the motion of the foreground).
++    vec2 uvC = vUV + closestOff * screen.zw;
++    vec2 ndc = (uvC - jitter.xy * screen.zw) * 2.0 - 1.0; // unjittered position of what that pixel shows
++    float z = projInfo.y / ((closest * depthMap.x + depthMap.y) - projInfo.x);
++    vec3 p = vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++    vec3 pp = vec3(dot(reproj0.xyz, p) + reproj0.w, dot(reproj1.xyz, p) + reproj1.w, dot(reproj2.xyz, p) + reproj2.w);
++    vec2 prevUV = vec2(pp.x * prevProj.x / pp.z, pp.y * prevProj.y / pp.z) * 0.5 + 0.5;
++    vec2 motion = prevUV - (ndc * 0.5 + 0.5);
++    vec2 histUV = vUV + motion;
++
++    bool valid = jitter.z > 0.5 && pp.z > 0.0 && all(greaterThanEqual(histUV, vec2(0.0))) && all(lessThanEqual(histUV, vec2(1.0)));
++    // This pixel's own view depth, for the next frame's rejection test.
++    float zSelf = projInfo.y / ((texelFetch(depthTex, ip, 0).r * depthMap.x + depthMap.y) - projInfo.x);
++    zOut = vec4(zSelf, 0.0, 0.0, 1.0);
++    // Depth rejection: where the camera-reprojected point is not within the
++    // previous frame's depth range around histUV, the history belongs to some
++    // other surface (a moving vehicle, a disocclusion): start again from the
++    // current frame. The 3x3 range keeps sub-pixel jitter on leaf edges from
++    // tripping it.
++    bool rejected = false;
++    if (valid && taaParams.z > 0.5 && closest < 0.999999) {
++        vec2 hp = histUV * screen.xy - 0.5;
++        float zmin = 1e9, zmax = 0.0;
++        for (int y = -1; y <= 1; ++y)
++            for (int x = -1; x <= 1; ++x) {
++                float zq = texelFetch(prevZTex, clamp(ivec2(floor(hp + 0.5)) + ivec2(x, y), ivec2(0), lim), 0).r;
++                zmin = min(zmin, zq);
++                zmax = max(zmax, zq);
++            }
++        float tol = 0.03 * pp.z + 0.15;
++        rejected = pp.z < zmin - tol || pp.z > zmax + tol;
++    }
++    float alpha = valid ? (rejected ? 1.0 : jitter.w) : 1.0;
++    vec3 hist = valid ? sampleHistory(histUV) : cur;
++
++    vec3 mu = m1 / 9.0;
++    vec3 sigma = sqrt(abs(m2 / 9.0 - mu * mu));
++    vec3 bmin = max(mu - taaParams.x * sigma, cmin);
++    vec3 bmax = min(mu + taaParams.x * sigma, cmax);
++    vec3 hy = toYCoCg(hist);
++    vec3 hc = clipAabb(bmin, bmax, hy);
++    hist = fromYCoCg(hc);
++    // Fast motion: lean on the current frame a little more (less smear).
++    float motionPx = length(motion * screen.xy);
++    alpha = clamp(alpha + 0.1 * clamp(motionPx / 8.0, 0.0, 1.0), 0.0, 1.0);
++
++    // Luma weighting suppresses flicker from isolated bright samples.
++    float lc = dot(cur, vec3(0.2126, 0.7152, 0.0722));
++    float lh = dot(hist, vec3(0.2126, 0.7152, 0.0722));
++    float wc = alpha / (1.0 + lc);
++    float wh = (1.0 - alpha) / (1.0 + lh);
++    vec3 res = (cur * wc + hist * wh) / max(wc + wh, 1e-5);
++    if (taaParams.y > 0.5) res = vec3(abs(motion.x) * screen.x * 0.25, abs(motion.y) * screen.y * 0.25, (valid && !rejected) ? 0.0 : 1.0);
++    fragColor = vec4(max(res, vec3(0.0)), 1.0);
++}
++)";
++
++// RESEARCH (temporal): TAA output. A bounded unsharp mask (cannot overshoot the
++// 3x3 cross) counters the softness of the accumulation, then the frame goes
++// back into the frame target with a +-1 LSB dither (the history is half float).
++static const char s_psPostTaaOutGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D srcTex;
++uniform vec4 outParams; // x sharpen, yz size
++out vec4 fragColor;
++void main() {
++    ivec2 ip = ivec2(gl_FragCoord.xy);
++    ivec2 lim = ivec2(outParams.yz) - 1;
++    vec3 c = texelFetch(srcTex, ip, 0).rgb;
++    vec3 n = texelFetch(srcTex, clamp(ip + ivec2(0, 1), ivec2(0), lim), 0).rgb;
++    vec3 s = texelFetch(srcTex, clamp(ip - ivec2(0, 1), ivec2(0), lim), 0).rgb;
++    vec3 e = texelFetch(srcTex, clamp(ip + ivec2(1, 0), ivec2(0), lim), 0).rgb;
++    vec3 w = texelFetch(srcTex, clamp(ip - ivec2(1, 0), ivec2(0), lim), 0).rgb;
++    vec3 mn = min(c, min(min(n, s), min(e, w)));
++    vec3 mx = max(c, max(max(n, s), max(e, w)));
++    // up to a quarter of the local range of overshoot: crisper than a hard clamp, no halos
++    vec3 margin = 0.25 * (mx - mn);
++    vec3 o = clamp(c + outParams.x * (c - 0.25 * (n + s + e + w)), mn - margin, mx + margin);
++    float a = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    float b = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
++    o += (a + b - 1.0) / 255.0;
++    fragColor = vec4(o, 1.0);
++}
++)";
++
+ // Post constants shared with the lab (tests/rendering/lighting_lab/postfx.py).
+ constexpr float kAoRadius = 1.2f;      // metres
+ constexpr float kAoFadeStart = 120.0f; // metres: AO fades out with distance
+@@ -346,6 +526,9 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.aoFbo[0]);
+     delFbo(p.aoFbo[1]);
+     delFbo(p.shaftFbo);
++    delFbo(p.curFbo);
++    delFbo(p.histFbo[0]);
++    delFbo(p.histFbo[1]);
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -356,6 +539,12 @@ void EngineGL33::DestroyPostTargets()
+     delTex(p.aoTex[0]);
+     delTex(p.aoTex[1]);
+     delTex(p.shaftTex);
++    delTex(p.curTex);
++    delTex(p.histTex[0]);
++    delTex(p.histTex[1]);
++    delTex(p.histZTex[0]);
++    delTex(p.histZTex[1]);
++    _taa.histValid = false;
+     p.w = p.h = 0;
+ }
+ 
+@@ -363,7 +552,8 @@ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+     for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite, &p.progTaa,
++          &p.progTaaOut})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -391,6 +581,10 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+         p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+         p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        p.progTaa = LinkPostProgram(vs, s_psPostTaaGLSL, "psPostTaa");
++        p.progTaaOut = LinkPostProgram(vs, s_psPostTaaOutGLSL, "psPostTaaOut");
++        if (!p.progTaa || !p.progTaaOut)
++            LOG_ERROR(Graphics, "GL33 post: TAA programs failed to build");
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+@@ -414,6 +608,12 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.aoTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    p.curTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
++    p.histTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
++    p.histTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
++    p.histZTex[0] = MakeTexture(GL_R32F, GL_RED, GL_FLOAT, w, h, false);
++    p.histZTex[1] = MakeTexture(GL_R32F, GL_RED, GL_FLOAT, w, h, false);
++    _taa.histValid = false;
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -445,6 +645,16 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.shaftFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.shaftTex);
+     check();
++    p.curFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.curTex);
++    check();
++    for (int i = 0; i < 2; ++i)
++    {
++        p.histFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.histTex[i]);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, p.histZTex[i], 0);
++        const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
++        glDrawBuffers(2, bufs);
++        check();
++    }
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -482,10 +692,21 @@ void EngineGL33::EndWorldScene()
+     UpdateRemasterPrograms();
+     if (_lightingActive)
+         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
++    if (_glContext)
++        ApplyTaaJitter(); // RESEARCH temporal: zero jitter for the HUD and dialogs
++    // RESEARCH temporal: TAA needs the world depth (reprojection); a vehicle
++    // interior frame clears it, so that frame skips TAA and drops the history.
++    const bool taaOn = worldDrawn && _lighting.taa > 0.5f && !_worldDepthCleared && _post.progTaa &&
++                       _post.progTaaOut && _lightingActive && _lighting.postEffects && !_portraitTargetSize;
++    if (!taaOn && worldDrawn)
++    {
++        _taa.histValid = false;
++        _taa.prevValid = false;
++    }
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
+         return;
+-    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
++    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f && !taaOn)
+         return; // nothing to add: leave the frame as drawn
+ 
+     FlushAndFreeAllQueues(_queueNo);
+@@ -575,19 +796,28 @@ void EngineGL33::EndWorldScene()
+         u1i(p.progAo, "depthTex", 0);
+         u4f(p.progAo, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
+         u4f(p.progAo, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
+-        u4f(p.progAo, "aoParams", kAoRadius, 1.0f, kAoFadeStart, kAoFadeEnd);
++        const bool aoStoch = _lighting.aoStochastic > 0.5f;
++        u4f(p.progAo, "aoParams", _lighting.aoRadius > 0.0f ? _lighting.aoRadius : kAoRadius, 1.0f, kAoFadeStart,
++            kAoFadeEnd);
+         u4f(p.progAo, "screen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
+         u4f(p.progAo, "worldRect", rectX, rectY, rectW, rectH);
++        u4f(p.progAo, "aoStoch", static_cast<float>(_taa.frame % 1024u), aoStoch ? _lighting.aoTaps : 12.0f,
++            aoStoch ? 1.0f : 0.0f, 0.0f);
+         bindTex(0, p.depthTex);
+         drawTo(p.aoFbo[0], hw, hh);
+-        glUseProgram(p.progAoBlur);
+-        u1i(p.progAoBlur, "aoTex", 0);
+-        bindTex(0, p.aoTex[0]);
+-        u2f(p.progAoBlur, "stepUV", 1.0f / hw, 0.0f);
+-        drawTo(p.aoFbo[1], hw, hh);
+-        bindTex(0, p.aoTex[1]);
+-        u2f(p.progAoBlur, "stepUV", 0.0f, 1.0f / hh);
+-        drawTo(p.aoFbo[0], hw, hh);
++        // RESEARCH temporal: the stochastic AO skips the spatial blur and lets
++        // TAA integrate the per-frame pattern instead.
++        if (!aoStoch)
++        {
++            glUseProgram(p.progAoBlur);
++            u1i(p.progAoBlur, "aoTex", 0);
++            bindTex(0, p.aoTex[0]);
++            u2f(p.progAoBlur, "stepUV", 1.0f / hw, 0.0f);
++            drawTo(p.aoFbo[1], hw, hh);
++            bindTex(0, p.aoTex[1]);
++            u2f(p.progAoBlur, "stepUV", 0.0f, 1.0f / hh);
++            drawTo(p.aoFbo[0], hw, hh);
++        }
+         GpuMark(Poseidon::gpu::Mark::AoEnd);
+     }
+ 
+@@ -673,7 +903,122 @@ void EngineGL33::EndWorldScene()
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+-    drawTo(_ssaaFbo, w, h);
++    drawTo(taaOn ? p.curFbo : _ssaaFbo, w, h);
++
++    // 5. RESEARCH temporal: TAA resolve into the history, then sharpen it back
++    // into the frame target. (Its GPU time lands in the "composite" section.)
++    if (taaOn)
++    {
++        Camera* cam = GScene ? GScene->GetCamera() : nullptr;
++        // Current view rotation (row-vector: p = worldRel * V) and camera.
++        double V[9] = {_frameState.view._11, _frameState.view._12, _frameState.view._13,
++                       _frameState.view._21, _frameState.view._22, _frameState.view._23,
++                       _frameState.view._31, _frameState.view._32, _frameState.view._33};
++        const Vector3 camPos = cam ? cam->Position() : VZero;
++        // Reprojection p_prev = p * (V^-1 * Vprev) + (C - Cprev) * Vprev (row
++        // vectors); handed to the shader as rows of the column-vector form.
++        double row[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
++        bool reprojOk = false;
++        if (_taa.prevValid)
++        {
++            const double det = V[0] * (V[4] * V[8] - V[5] * V[7]) - V[1] * (V[3] * V[8] - V[5] * V[6]) +
++                               V[2] * (V[3] * V[7] - V[4] * V[6]);
++            if (std::fabs(det) > 1e-12)
++            {
++                const double id = 1.0 / det;
++                double Vi[9] = {(V[4] * V[8] - V[5] * V[7]) * id,  -(V[1] * V[8] - V[2] * V[7]) * id,
++                                (V[1] * V[5] - V[2] * V[4]) * id,  -(V[3] * V[8] - V[5] * V[6]) * id,
++                                (V[0] * V[8] - V[2] * V[6]) * id,  -(V[0] * V[5] - V[2] * V[3]) * id,
++                                (V[3] * V[7] - V[4] * V[6]) * id,  -(V[0] * V[7] - V[1] * V[6]) * id,
++                                (V[0] * V[4] - V[1] * V[3]) * id};
++                const double* Vp = _taa.prevView;
++                double M[9];
++                for (int r = 0; r < 3; ++r)
++                    for (int c = 0; c < 3; ++c)
++                        M[r * 3 + c] = Vi[r * 3 + 0] * Vp[0 * 3 + c] + Vi[r * 3 + 1] * Vp[1 * 3 + c] +
++                                       Vi[r * 3 + 2] * Vp[2 * 3 + c];
++                const double dC[3] = {static_cast<double>(camPos.X() - _taa.prevCam[0]),
++                                      static_cast<double>(camPos.Y() - _taa.prevCam[1]),
++                                      static_cast<double>(camPos.Z() - _taa.prevCam[2])};
++                double t[3];
++                for (int c = 0; c < 3; ++c)
++                    t[c] = dC[0] * Vp[0 * 3 + c] + dC[1] * Vp[1 * 3 + c] + dC[2] * Vp[2 * 3 + c];
++                // Column-vector rows: pp[c] = sum_r p[r] * M[r][c] + t[c].
++                for (int c = 0; c < 3; ++c)
++                {
++                    row[c][0] = M[0 * 3 + c];
++                    row[c][1] = M[1 * 3 + c];
++                    row[c][2] = M[2 * 3 + c];
++                    row[c][3] = t[c];
++                }
++                // A camera cut (teleport or a big turn) starts a fresh history.
++                const double move = std::sqrt(dC[0] * dC[0] + dC[1] * dC[1] + dC[2] * dC[2]);
++                reprojOk = move < 50.0 && M[8] > 0.5;
++            }
++        }
++        const bool histValid = _taa.histValid && reprojOk;
++        const int src = _taa.histIdx;
++        const int dst = 1 - src;
++        glUseProgram(p.progTaa);
++        u1i(p.progTaa, "curTex", 0);
++        u1i(p.progTaa, "depthTex", 2);
++        u1i(p.progTaa, "histTex", 3);
++        bindTex(0, p.curTex);
++        bindTex(2, p.depthTex);
++        bindTex(3, p.histTex[src]);
++        u1i(p.progTaa, "prevZTex", 4);
++        bindTex(4, p.histZTex[src]);
++        u4f(p.progTaa, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(p.progTaa, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        u4f(p.progTaa, "prevProj", _taa.prevValid ? _taa.prevP11 : proj._11, _taa.prevValid ? _taa.prevP22 : proj._22,
++            0.0f, 0.0f);
++        u4f(p.progTaa, "reproj0", static_cast<float>(row[0][0]), static_cast<float>(row[0][1]),
++            static_cast<float>(row[0][2]), static_cast<float>(row[0][3]));
++        u4f(p.progTaa, "reproj1", static_cast<float>(row[1][0]), static_cast<float>(row[1][1]),
++            static_cast<float>(row[1][2]), static_cast<float>(row[1][3]));
++        u4f(p.progTaa, "reproj2", static_cast<float>(row[2][0]), static_cast<float>(row[2][1]),
++            static_cast<float>(row[2][2]), static_cast<float>(row[2][3]));
++        u4f(p.progTaa, "screen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
++        const bool jitterOn = _lighting.taaJitter > 0.5f;
++        u4f(p.progTaa, "jitter", jitterOn ? _taa.jitterPx[0] : 0.0f, jitterOn ? _taa.jitterPx[1] : 0.0f,
++            histValid ? 1.0f : 0.0f, std::clamp(_lighting.taaAlpha, 0.01f, 1.0f));
++        u4f(p.progTaa, "taaParams", _lighting.taaGamma, _lighting.debugView == 5 ? 1.0f : 0.0f,
++            _lighting.taaDepthReject > 0.5f ? 1.0f : 0.0f, 0.0f);
++        drawTo(p.histFbo[dst], w, h);
++
++        glUseProgram(p.progTaaOut);
++        u1i(p.progTaaOut, "srcTex", 0);
++        bindTex(0, p.histTex[dst]);
++        u4f(p.progTaaOut, "outParams", _lighting.taaSharpen, static_cast<float>(w), static_cast<float>(h), 0.0f);
++        drawTo(_ssaaFbo, w, h);
++
++        _taa.histIdx = dst;
++        _taa.histValid = true;
++        for (int i = 0; i < 9; ++i)
++            _taa.prevView[i] = V[i];
++        _taa.prevCam[0] = camPos.X();
++        _taa.prevCam[1] = camPos.Y();
++        _taa.prevCam[2] = camPos.Z();
++        _taa.prevP11 = proj._11;
++        _taa.prevP22 = proj._22;
++        _taa.prevValid = true;
++        // Next frame's sub-pixel offset: Halton(2, 3), 16-frame cycle.
++        ++_taa.frame;
++        auto halton = [](unsigned int i, unsigned int b)
++        {
++            float f = 1.0f, r = 0.0f;
++            while (i > 0)
++            {
++                f /= static_cast<float>(b);
++                r += f * static_cast<float>(i % b);
++                i /= b;
++            }
++            return r;
++        };
++        const unsigned int k = (_taa.frame % 16u) + 1u;
++        _taa.jitterPx[0] = halton(k, 2) - 0.5f;
++        _taa.jitterPx[1] = halton(k, 3) - 0.5f;
++    }
+     GpuMark(Poseidon::gpu::Mark::CompositeEnd);
+ 
+     // Hand the GL state back: frame target bound with its full viewport, unit 0
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 02f61624..3a2daaa2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -356,6 +356,7 @@ void EngineGL33::BeginPass(PassId passId)
+         // shaders.  No-op until a depth pass has run with shadow maps enabled.
+         UpdateShadowMapLitState();
+         UploadLitFrameConstants();
++        ApplyTaaJitter(); // RESEARCH temporal: jitter for the world's 3D passes only
+     }
+ 
+     // Crop the 3D scene to the AspectSettings world rect (pillarbox /
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc4..d769c5c5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -62,6 +62,7 @@ void main() {
+     gl_Position.y = (1.0 - aPos.y * vpScale.y) * w;
+     gl_Position.z = aPos.z * w;
+     gl_Position.w = w;
++    gl_Position.xy += vpScale.zw * gl_Position.w; // RESEARCH temporal: TAA sub-pixel jitter (0 = off)
+     vColor = aColor;
+     vSpecColor = aSpecular;
+     vUV0 = aUV0;
+@@ -124,6 +125,7 @@ void main() {
+     vec3 worldNormal = normalize(mat3(worldArr[gl_InstanceID]) * normal);
+     vec4 viewPos     = view * worldPos;
+     gl_Position      = proj * viewPos;
++    gl_Position.xy += vpScale.zw * gl_Position.w; // RESEARCH temporal: TAA sub-pixel jitter (0 = off)
+     vWorldRel        = worldPos.xyz; // camera-relative world pos for cascade shadow lookup
+ 
+     float NdotL = max(0.0, dot(worldNormal, -sunDir.xyz));
+@@ -636,6 +638,7 @@ out vec3 vWorldRel;
+ void main() {
+     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
+     gl_Position   = proj * view * worldPos;
++    gl_Position.xy += vpScale.zw * gl_Position.w; // RESEARCH temporal: TAA sub-pixel jitter (0 = off)
+     vColor        = diffuse;        // unlit — direct from material.diffuse
+     vSpecColor    = vec4(0.0);
+     vUV0          = (texCtrl.x > 0.5) ? (texMat0 * vec4(uv, 0, 1)).xy : uv;
+@@ -961,7 +964,43 @@ void EngineGL33::UploadVSScreenConstants()
+ {
+     float vpScale[4] = {2.0f / _w, 2.0f / _h, 0, 0};
+     memcpy(s_vsShadow + VSConst::SlotVpScale * 4, vpScale, 16);
++    ApplyTaaJitter(); // flushes
++}
++
++// RESEARCH (temporal): the TAA sub-pixel jitter rides in vpScale.zw, an NDC
++// offset every vertex shader adds (times w). Zero whenever TAA is off or
++// outside the world's 3D passes, so the HUD and Classic are untouched.
++bool EngineGL33::TaaJitterWanted() const
++{
++    return _lighting.taa > 0.5f && _lighting.taaJitter > 0.5f && _lightingActive && _lighting.postEffects &&
++           _worldEffectsOn && !_portraitTargetSize && SSAAActive();
++}
++
++void EngineGL33::ApplyTaaJitter()
++{
++    float zw[2] = {0.0f, 0.0f};
++    if (TaaJitterWanted())
++    {
++        int w = 0, h = 0;
++        RenderTargetSize(w, h);
++        if (w > 0 && h > 0)
++        {
++            zw[0] = 2.0f * _taa.jitterPx[0] / static_cast<float>(w);
++            zw[1] = 2.0f * _taa.jitterPx[1] / static_cast<float>(h);
++        }
++    }
++    s_vsShadow[VSConst::SlotVpScale * 4 + 2] = zw[0];
++    s_vsShadow[VSConst::SlotVpScale * 4 + 3] = zw[1];
+     FlushVSConstants();
++    // Texture LOD bias for the world's material samplers while TAA integrates
++    // the jittered texture samples (0 for the HUD and when TAA is off).
++    const float bias = TaaJitterWanted() ? _lighting.taaMipBias : 0.0f;
++    if (bias != _taaMipBiasApplied && _samplerObjects[0])
++    {
++        for (unsigned int s : _samplerObjects)
++            glSamplerParameterf(s, GL_TEXTURE_LOD_BIAS, bias);
++        _taaMipBiasApplied = bias;
++    }
+ }
+ 
+ FrameState EngineGL33::BuildFrameState(Camera* camera, LightSun* sun, int bias, const Color& fogColor, bool sunEnabled)
+@@ -1692,7 +1731,8 @@ void EngineGL33::InitPixelShaders()
+             int unit;
+         } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+                            {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
++                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit},
++                           {"shadowRaw", Poseidon::gl33lighting::kShadowRawUnit}};
+         for (const auto& ls : litSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);

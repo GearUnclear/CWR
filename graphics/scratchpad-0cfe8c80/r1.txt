@@ -1,0 +1,4 @@
+    // shares, trace, rough blur and composite, and the combat shadow mask and
+    // its blur, the surfaces lane's horizon occlusion and its accumulation
+    // over frames, and the photoreal camera's meter
+    CHECK(post == 29);

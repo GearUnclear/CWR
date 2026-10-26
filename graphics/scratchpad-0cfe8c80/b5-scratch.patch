@@ -1,0 +1,1670 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index b0ded45..50ae288 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -895,6 +895,15 @@ class Engine : public IGraphicsEngine
+     /// triSkyTableCheck: the GPU sky-view table read back against its CPU
+     /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
+     virtual std::string RemasterSkyCheck(int /*texels*/) { return "FAIL:no sky table in this backend"; }
++    /// The remastered sea (feature switch `seaWaves`, Graphics/Remaster/
++    /// SeaWaves.hpp): Landscape::DrawWater opens it around its sea draws with
++    /// the animation frame its faces do not carry (`otherFrame`, may be null)
++    /// and that frame's share of the cross-fade. The backend draws the sea
++    /// faces in between with the remastered water program. A backend without
++    /// it, Classic, or the feature switched or gated off, leaves them on the
++    /// detail program as before.
++    virtual void BeginSea(Texture* /*otherFrame*/, float /*otherWeight*/) {}
++    virtual void EndSea() {}
+ 
+     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
+     /// Default base returns an all-default set; only the GL33 backend stores it.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index ff53770..2b0d2cc 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -43,7 +43,9 @@ constexpr FeatureInfo kFeatures[] = {
+      &FS::combatLights, ""},
+     {Feature::CombatShadows, "combatShadows", "Combat light shadows", "combat", "Night and combat", "B4", false,
+      &FS::combatShadows, ""},
+-    {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", false, &FS::seaWaves, ""},
++    // B5 (water): the sea's draws, in the ground section of the world pass
++    // (sky, terrain, water, horizon).
++    {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", true, &FS::seaWaves, "ground"},
+     {Feature::Ssr, "ssr", "Screen-space reflections", "ssr", "Water and shine", "B6", false, &FS::ssr, ""},
+     {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", false,
+      &FS::wetWeather, ""},
+@@ -173,6 +175,12 @@ struct KeyTable
+                         "display-space saturation of the dome and fog colour", &LT::atmoSat, 0.5f, 1.6f),
+             MakeSubKnob(Feature::Atmosphere, "atmoHaze", "Haze",
+                         "Mie density of the air (rebuilds the atmosphere tables)", &LT::atmoHaze, 0.25f, 4.0f),
++            MakeSubKnob(Feature::SeaWaves, "seaRelief", "Wave relief", "0 = a flat sea; 1 = the shipped waves",
++                        &LT::seaRelief, 0.0f, 2.0f),
++            MakeSubKnob(Feature::SeaWaves, "seaSky", "Sea sky reflection",
++                        "the mean share of sky the sea reflects; the waves' share stays", &LT::seaSky, 0.0f, 2.0f),
++            MakeSubKnob(Feature::SeaWaves, "seaSheen", "Sea sheen",
++                        "the broad sheen toward the sun, in the original hue", &LT::seaSheen, 0.0f, 3.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 59c9d0b..198af52 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -130,6 +130,12 @@ struct LightingTuning
+     float atmoHue = 0.5f;
+     float atmoSat = 1.15f;
+     float atmoHaze = 1.0f;
++    // Sea (FeatureSet::seaWaves, SeaWaves.hpp) sub-knobs, each a multiplier of
++    // the shipped value: the wave relief, the mean sky reflection and the
++    // sheen toward the sun in the original sun's hue.
++    float seaRelief = 1.0f;
++    float seaSky = 1.0f;
++    float seaSheen = 1.0f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index 6b94e48..4ba8e0b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -34,7 +34,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. Leaf cards authored without normals (zero mesh normals, common in CWA crowns) take the ellipsoid's normal outright. |
+ | Fog toward the sun | shader `fogColorToward` | Fog takes the sky dome's own sun glow (`SunSkyColor * cos^6`, as `TLVertexTable::DoSkyLighting` shades the dome). Distant ground fades into the colour of the sky behind it, which removes the flat band along the horizon at sunrise and sunset. Away from the sun it is exactly the classic fog. |
+ | Sky table (switch `atmosphere`) | `Atmosphere.cpp`, `PoseidonGL33/EngineGL33_SkyTable.cpp`, shaders `shadeSkyDome`, `atmoFogColor` | A physically based clear sky (Rayleigh, Mie, ozone and multiple scattering, after Hillaire 2020) shades the sky dome under the original sky texture's clouds and gives the fog of every world draw its colour (aerial perspective, the far horizon polygon included). A low sun gets a golden horizon band and an aureole, dusk an orange band under a mauve sky, sunrise keeps its pink with a coral glow at the sun, noon a graded blue with its cirrus. Each sky row keeps the original dome's brightness on average (its sun glow included); the table supplies how a direction differs from its row, and the hue is half way between the original's and the physical one (`atmoHue` 0.5, `atmoSat` 1.15). The clouds are the texture's own, masked against each row's clearest texel and lit by the sun seen from 2.5 km. The transmittance and multiple-scattering tables are built on a worker thread when the haze changes; the 192x64 sky-view table on the GPU, in two fullscreen passes, whenever the sun moves 0.02 degrees. It fades out between -3 and -9 degrees of sun (night keeps the classic sky); an overcast deck keeps the classic fog colour. |
+-| Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
++| Sea waves (switch `seaWaves`) | `SeaWaves.cpp`, `PoseidonGL33/EngineGL33_Sea.cpp`, shader `s_psWaterRemasterMain`, `skyReflection` | The sea is the landscape's own faces, which carry the specular layer alone and used to draw through the detail shader like the terrain (the engine's `IsWater` family was never used for it). `Landscape::DrawWater` now opens `Engine::BeginSea` around them, and with the switch on the backend draws them with the water program. The sea texture's brightness is the wave height: the texture, a swell copy at 0.27x frequency and the ripple pattern of `specular_dx` give a wave normal (the texture-to-world mapping solved from screen derivatives), fading from 400 m to 3 km. The sea is its lit texture under the sky reflected by Fresnel on that normal, with a low mean share (no pale mirror at grazing range) and the waves' share at full weight, so rows of waves show to the horizon; the sky is the one the player sees (the sky table's when it is on, else the fog colour with its sun glow). The sun lays a broad path and a tight sparkle on the waves, and the material's own broad lobe keeps the original's sheen in the original sun's hue, which is what made the original's noon sea green-yellow: at a high sun it grows and moves to the flat normal, a smooth wash as the original's per-vertex sheen, and the mean sky share halves (noon hue within 8 degrees of the original's). The landscape's 7-frame animation is cross-faded (the neighbouring frame on texture unit 11), so the waves do not pop every 0.14 s. Sub-knobs `seaRelief`, `seaSky`, `seaSheen`. |
+ | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. The sum is clamped where classic clamps it, so where pools overlap a lamp-lit wall is never brighter than the original's. Glossy materials get normalised Blinn-Phong and a sky reflection. |
+ | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
+ | Temporal anti-aliasing | `TemporalAA.cpp`, `EngineGL33_PostTemporal.cpp` | The world is drawn with a sub-pixel jitter (Halton 2, 3 over 16 frames) and each frame is blended into a history of the frames before it (switch `taa`): the history is moved with the camera motion and the depth, clipped to the colours around each pixel and mixed in at 0.1, then sharpened back into the frame target (bounded, no halos). Alpha-tested leaves and wires stop crawling, sub-pixel wire stays continuous, and the AO and shaft sample patterns turn every frame so the history averages them. Smoke, fire, muzzle flashes, glass and rain take most of their own frame (a particle mask from a copy of the frame made between the opaque and the translucent objects), so they do not smear. MSAA stays under it; a texture LOD bias of -0.5 wins back texture detail. |
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SeaWaves.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SeaWaves.cpp
+new file mode 100644
+index 0000000..a56e0b0
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SeaWaves.cpp
+@@ -0,0 +1,100 @@
++#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++float Clamp01(float v)
++{
++    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
++}
++
++float Smoothstep(float a, float b, float x)
++{
++    const float t = Clamp01((x - a) / (b - a));
++    return t * t * (3.0f - 2.0f * t);
++}
++} // namespace
++
++SeaFrameBlend SeaAnimationBlend(float phase, int frames, int bound)
++{
++    SeaFrameBlend b;
++    if (frames <= 1)
++        return b;
++    b.bound = std::max(0, std::min(frames - 1, bound));
++    // Frame k shows alone at phase k / (n - 1); in between, the two around
++    // the phase share it linearly.
++    const float s = Clamp01(phase) * static_cast<float>(frames - 1);
++    const int lo = std::min(static_cast<int>(std::floor(s)), frames - 2);
++    const float f = Clamp01(s - static_cast<float>(lo)); // share of lo + 1
++    if (b.bound == lo)
++    {
++        b.other = lo + 1;
++        b.otherWeight = f;
++    }
++    else if (b.bound == lo + 1)
++    {
++        b.other = lo;
++        b.otherWeight = 1.0f - f;
++    }
++    else
++    {
++        // Neither (AnimateTexture wraps phase 1 exactly to frame 0, and its
++        // rounding floor may bind the frame below at an exact frame edge):
++        // the nearer of the two, through the other unit alone.
++        b.other = f >= 0.5f ? lo + 1 : lo;
++        b.otherWeight = 1.0f;
++    }
++    return b;
++}
++
++float SeaFrameWeight(const SeaFrameBlend& blend, int frame)
++{
++    float w = 0.0f;
++    if (frame == blend.bound)
++        w += 1.0f - blend.otherWeight;
++    if (frame == blend.other)
++        w += blend.otherWeight;
++    return w;
++}
++
++float SeaCrossFadeGain(float w)
++{
++    w = Clamp01(w);
++    const float a = 1.0f - w;
++    const float spread = a * a + w * w + 2.0f * w * a * kSeaFrameCorrelation;
++    return 1.0f / std::sqrt(std::max(spread, 1e-6f));
++}
++
++float SeaHighSun(float sunElevationDeg)
++{
++    return Smoothstep(kSeaHighSunStartDeg, kSeaHighSunFullDeg, sunElevationDeg);
++}
++
++SeaWaveConstants ComputeSeaWaveConstants(float sunElevationDeg, const LightingTuning& tuning,
++                                         const SeaFrameBlend& blend)
++{
++    SeaWaveConstants c;
++    const float high = SeaHighSun(sunElevationDeg);
++    c.relief = std::max(0.0f, tuning.seaRelief);
++    c.crossFade = Clamp01(blend.otherWeight);
++    c.skyMean = kSeaSkyMean * (1.0f + (kSeaSkyMeanNoon - 1.0f) * high) * std::max(0.0f, tuning.seaSky);
++    c.skyTint = kSeaSkyTintNoon * high;
++    c.sheen = (kSeaSheen + (kSeaSheenNoon - kSeaSheen) * high) * std::max(0.0f, tuning.seaSheen);
++    c.sheenFlat = high;
++    return c;
++}
++
++Rgb SeaSheenLight(const Rgb& rigSun, const Rgb& classicSunDiffuse, float sheen)
++{
++    const float lum = Luminance(rigSun);
++    const float classicLum = Luminance(classicSunDiffuse);
++    const Rgb hue = classicLum > 1e-6f ? classicSunDiffuse * (1.0f / classicLum) : Rgb(1.0f, 1.0f, 1.0f);
++    return hue * (lum * std::max(0.0f, sheen));
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SeaWaves.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SeaWaves.hpp
+new file mode 100644
+index 0000000..dbc33a8
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SeaWaves.hpp
+@@ -0,0 +1,111 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++
++// Remastered sea (feature switch `seaWaves`, research/INTEGRATION-PLAN.md
++// section 5 B5): the parts of the sea shading that are plain math, shared by
++// the backend (EngineGL33_Sea.cpp), the landscape and the tests. No GL, no
++// engine state.
++//
++// The landscape draws the sea as faces of its own (Landscape::DrawWater) with
++// the animated sea texture (more_anim.01 to .07, one repeat per 50 m) and the
++// specular detail texture (data\specular_dx.paa, a ripple pattern in its
++// alpha). With the switch on, the backend draws them with the remastered water
++// program (EngineGL33_LightingShaders.cpp, s_psWaterRemasterMain): the wave
++// normal comes from the sea texture's own brightness, the sky is reflected by
++// Fresnel on that normal, and the sun lays a broken path of glints on it.
++
++namespace Poseidon::remaster
++{
++
++// ---- The sea texture's animation ------------------------------------------
++//
++// The landscape's phase runs 0 -> 1 -> 0 every 2 s (fmod(time, 2), mirrored)
++// and PolyProperties::AnimateTexture binds frame floor(phase * n): a hard
++// switch every 1/n s (0.14 s for the 7 frames of the Remaster sea), which the
++// waves derived from the texture would show as a pop. SeaAnimationBlend
++// spreads the frames evenly over the phase instead (frame k shows alone at
++// phase k / (n - 1)) and cross-fades the two around the phase: the frame the
++// landscape bound is one of them, the backend binds the other next to it and
++// the shader mixes `otherWeight` of it in. The mix is continuous in the phase,
++// so the waves flow from one frame into the next.
++
++struct SeaFrameBlend
++{
++    int bound = 0;            // the frame the landscape bound (texture unit 0)
++    int other = 0;            // the frame mixed in (the backend's next-frame unit)
++    float otherWeight = 0.0f; // share of `other` in the colour (0 = the bound frame alone)
++};
++// `bound` is the frame the landscape's faces carry at `phase` (0 .. 1) of an
++// animation of `frames` frames.
++SeaFrameBlend SeaAnimationBlend(float phase, int frames, int bound);
++// Frame `frame`'s share of the mix (the shares sum to 1).
++float SeaFrameWeight(const SeaFrameBlend& blend, int frame);
++
++// Consecutive frames of the Remaster sea are much alike: the correlation of
++// their luminance gradients is 0.65 to 0.82 (more_anim.01 to .07). A mix of two
++// frames loses a little relief halfway (the gradient's spread falls to
++// sqrt((1 - w)^2 + w^2 + 2 w (1 - w) rho) of a frame's); the shader divides it
++// out with this rho so the waves do not breathe at the frame rate.
++constexpr float kSeaFrameCorrelation = 0.75f;
++// The relief gain that keeps a mix with share `w` of the other frame as
++// strong as a single frame.
++float SeaCrossFadeGain(float w);
++
++// ---- Per-frame constants of the water program ------------------------------
++//
++// LitConstants Water0 and Water1 (EngineGL33_Lighting.hpp). The layer heights,
++// the lobes and the distance fades are constants of the shader.
++
++// The share of the flat-water Fresnel reflection of the sky the sea shows on
++// average (the part of the Fresnel term that comes from the waves goes in at
++// full weight, which is where the definition comes from). Low, so the sea
++// never turns into a pale mirror at grazing range.
++constexpr float kSeaSkyMean = 0.3f;
++// The material's own broad sun lobe: the original's sheen. The original lit
++// it per vertex, with the flat normal, in its own sun colour (a broad
++// unnormalised lobe of sun diffuse times material specular), which is what
++// made its noon sea green-yellow; the remastered sheen keeps that hue
++// (SeaSheenLight). On the wave normal it carries the waves; at a high sun the
++// wave normal would split it into yellow facets and blue troughs (a mustard
++// sea), so there it moves to the flat normal, a smooth wash as the original's.
++constexpr float kSeaSheen = 0.35f;
++// A high sun: the sea keeps more of its own colour, as the original's noon sea
++// does. Between these elevations the mean sky weight falls to kSeaSkyMeanNoon
++// of itself, the reflected sky takes kSeaSkyTintNoon of the original fog
++// colour in place of its own, the sheen grows to kSeaSheenNoon and moves to
++// the flat normal.
++constexpr float kSeaHighSunStartDeg = 15.0f;
++constexpr float kSeaHighSunFullDeg = 50.0f;
++constexpr float kSeaSkyMeanNoon = 0.5f;
++constexpr float kSeaSkyTintNoon = 0.6f;
++constexpr float kSeaSheenNoon = 2.4f;
++
++struct SeaWaveConstants
++{
++    float relief = 0.0f;    // wave relief scale (1 = the shader's layer heights)
++    float crossFade = 0.0f; // share of the next-frame unit
++    float skyMean = 0.0f;   // mean sky reflection weight
++    float skyTint = 0.0f;   // reflected sky toward the original fog colour (0 none)
++    float sheen = 0.0f;     // weight of the material's broad lobe
++    float sheenFlat = 0.0f; // share of the flat normal in the sheen's normal (0 the wave normal)
++};
++
++// 0 for a sun below kSeaHighSunStartDeg, 1 above kSeaHighSunFullDeg, smooth in between.
++float SeaHighSun(float sunElevationDeg);
++
++// The constants for a sun `sunElevationDeg` above the horizon, the tuning's
++// sea sub-knobs (seaRelief, seaSky, seaSheen) and the frame's animation blend.
++SeaWaveConstants ComputeSeaWaveConstants(float sunElevationDeg, const LightingTuning& tuning,
++                                         const SeaFrameBlend& blend);
++
++// The light of the sheen: the remastered sun's radiance `rigSun` (linear) in
++// the hue of the original sun `classicSunDiffuse` (LightSun::Diffuse(), display
++// values), times `sheen`. The luminance is the rig's, so the sheen is as
++// bright as the remastered sun makes it; only its hue is the original's. The
++// original added its sheen to a near-grey sea in display space, and a small
++// increment keeps its display chroma through the 2.2 power, so the hue is
++// taken from the display values as they are.
++Rgb SeaSheenLight(const Rgb& rigSun, const Rgb& classicSunDiffuse, float sheen);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index c8b4d31..251175f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -283,6 +283,15 @@ colour the shader takes from the table. `SkyFwd.w` is the sky mode of the draws
+ world, 1 the dome, 2 the sky clouds; `Poseidon::RemasterSky`), `SkyRight.w` the Mie asymmetry,
+ `SkyUp.w` free.
+ 
++As built in B5 (a parallel lane on 5d7e7ae): slots 74 and 75 landed (`LitConst::Water0`, `Water1`,
++`Count` 76), with 68 to 73 declared as a second padding member `litReserved2[6]`
++(`LitConst::Reserved2`, `Reserved2Count`); `LitConstPlanned` keeps `Sky` to `Weather` (static_assert:
++they are the second reserved padding) and `Canopy` to `Haze` (static_assert: `Canopy ==
++LitConst::Count`). A step that lands one of 68 to 73 splits `litReserved2`. `Water0` is the wave
++relief scale, the next animation frame's share, the mean sky weight and the sky's tint toward the
++fog colour; `Water1` the sheen light (rgb) and the sheen's flat-normal share. The layer heights, lobes
++and fades stay shader constants, not slots.
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -329,6 +338,12 @@ built; `BindLightingTextures` binds the table or the stand-in on every world pas
+ that build the table read their inputs with `texelFetch` on unit 0 and, while the table itself is
+ not bound, unit 8, and rebind the table after them.
+ 
++As built in B5: `kSeaNextFrameUnit` (11) is in use, with its `kLitSamplers` row (`seaNext`, declared
++by the water program only) and the white 1x1 `_post.whiteTex` parked on it at
++`InitLightingResources`. `Engine::BeginSea` binds the animation frame the sea faces do not carry
++there, with unit 0's sampler object (`_samplerObjects[0]`: wrap, anisotropy, the TAA LOD bias), and
++`EndSea` puts the stand-in and sampler 0 back.
++
+ ### 3.5 Shader sources: split by concern, test through the accessors
+ 
+ `EngineGL33_LightingShaders.cpp` (757 lines) and `EngineGL33_PostFX.cpp` (725 lines) are the two
+@@ -1384,6 +1399,68 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+   faces route to `ShaderFamily::Water` only in Remastered.
+ - **Effort**: 3 days.
+ 
++**Result (2026-10-18, uncommitted change on 5d7e7ae in the scratch copy `gr-B5`, a parallel lane;
++evidence in `tmp/integration/B5/` of the graphics-remaster worktree, gitignored; light gate).**
++
++- Built: `Graphics/Remaster/SeaWaves.{hpp,cpp}` (pure: the frame cross-fade, the relief gain of a
++  mix of two frames, the per-frame constants, the sheen's light); `EngineGL33_Sea.cpp`
++  (`Engine::BeginSea` / `EndSea`); `BuildContext::remasteredSea` and its rule in
++  `BuildRenderPassDescriptor`; the variant C model as `s_psWaterRemasterMain` (its old constant
++  "bump normal" is gone), `skyReflection` in the sky piece; slots 74 and 75 (3.3), unit 11 (3.4);
++  the switch landed with sub-knobs `seaRelief`, `seaSky`, `seaSheen` (1 each; 3.1 said none) and
++  GPU section `ground` (the sea has no pass of its own). Dropped: the dead `waterBump` texture
++  (`GetWaterBumpMap`, its load); the README's Water row rewritten.
++- Correction, routing: the face spec has no free bit (`RenderFlags.hpp` asserts that the three
++  categories cover all 32), so the sea is not an `IsWater`-style face bit. The route is a draw scope:
++  `Landscape::DrawWater` opens `Engine::BeginSea` around its sea draws; with the switch on and
++  gated on in the remastered world pass the backend sets `BuildContext::remasteredSea`, and an
++  opaque 3D face carrying the specular layer alone (the landscape's `WaterFlags`) routes to
++  `ShaderFamily::Water` with the detail texgen (its ripple layer at 32 repeats) and the specular
++  layer on unit 1. Classic and the switch off never open the scope: the sea stays on PSDetail.
++- Correction, cross-fade: `AnimateTexture` binds `floor(phase * n)`; the lane spreads the 7 frames
++  evenly over the phase instead (frame k alone at k / (n - 1)) and mixes the bound frame with its
++  neighbour on unit 11, so the mix is continuous in the phase, and divides out the relief lost
++  halfway (consecutive frames' luminance gradients correlate 0.65 to 0.82, measured on
++  `more_anim.01` to `.07`; the shader uses 0.75).
++- Correction, sky term: the reflection reads the A7 table only while the sky table is on
++  (`litAtmo.x`); with `atmosphere` off it is the classic fog colour with its glow, the sky the
++  player then sees. The table is not built for `seaWaves` alone (a reflection of the physical sky
++  under the classic dome would not match the sky above it).
++- Correction, noon colour: lowering the mean sky weight and tinting the sky toward the fog colour
++  cannot reach the original's hue. Its green-yellow noon sea is the blue-grey texture (mean
++  (91, 106, 115) over `more_anim.01`) plus its per-vertex sheen: a broad, unnormalised lobe in the
++  yellow classic sun colour on the flat normal. The sheen keeps the original sun's hue (display
++  chroma), grows from 0.35 to 2.4 between 15 and 50 degrees of sun and moves to the flat normal
++  there (on the wave normal it split into yellow facets and blue troughs, a mustard sea). A sweep
++  (`seaSheen` 0.8 to 3, `seaSky` 0.5 to 3) set the constants: `sea_noon` hue 126.1 against 133.7
++  degrees (7.6 off), mean 150.1 against 143.8; the mid-sun shore (16:30) hue 72.2 against 76.4,
++  mean 164.3 against 169.7. The far sea's mean sky share fades to half between 1 and 3 km.
++- Off equals before: `seaWaves=0` on the B5 build against the base build's off shot at the same
++  place in the sequence: 1,994 / 1,040 / 7,654 / 1,324 pixels over 2 levels (hero, noon, shore,
++  night) against the base build's own boot repeat of 1,208 / 10,470 / 10,916; Classic within 6
++  pixels. In one game of the base build the second shot of an identical setting differs from the
++  first by 9,379 (hero) to 171,765 (noon) pixels, so off is judged against the off shot.
++- On: water-region fine detail (sd of a 9x9 high-pass) 2.0 to 20.7 at the hero, 3.8 to 8.2 at
++  noon, 2.7 to 9.2 at mid-sun, 2.2 to 4.2 at night; the hero sea's mean 89.4 to 100.4 (Classic
++  44.5). Motion, the sea clock at 1/30 s per frame for 24 frames: off spikes at every frame switch
++  (1.07 to 1.16 against a median change of 0.74, max/median 1.56), on has no spike there (max/median
++  1.20; 7.72, 8.30, 8.63, 7.12 and 6.44 at those frames against a median of 7.40).
++- Cost (a single reading, 3 interleaved rounds, one foreign game holding a slot, P0): the ground
++  section on minus off +0.56 ms median at the hero, +1.00 at noon and +1.10 at mid-sun (frames full
++  of sea), the frame +0.18, +1.00 and +0.54. The plan's 0.2 ms was low; MENU's 1.5 to 2x rule puts a
++  3060 at 1.5 to 2.2 ms on a frame full of sea.
++- Gate: build 0 warnings; touched files clang-format clean (`EngineGL33_Queue.cpp` and
++  `EngineGL33_State.cpp`, not clean at the base, by `clang-format-diff.py` on the changed lines);
++  unit gate tags plus `[SeaWaves],[build-descriptor],[FeatureSwitches],[FeatureGates],[atmosphere],
++  [PostStages],[TemporalAA]` 541/541 (9 new cases); twelve mutations red; smoke_abel 1/1 and the
++  lane run with KHR_debug ids 131154, 131169 and 131218 only.
++- Known risks: the hero's near field (eye 3 m ASL, the sea from 2 m out, which the research never
++  shot) reads as large smooth swells; the noon near band is beige-grey (159, 160, 150) where the
++  original's is yellow-green-grey (154, 159, 146), and a near-grey hue swings 30 to 40 degrees for
++  0.2 of `seaSheen`; the 7-frame ping-pong now moves the normals (the frame-to-frame change is
++  about 10 times off's), with no travelling waves; at night on is 5 levels darker than off with
++  twice the detail and no moon glint; Eden, Sinai, rain, overcast and the shoreline unverified.
++
+ ### B6. ssr (screen-space reflections)
+ 
+ - **Prototype touched**: `GLDepthStencilState.hpp` (`StencilEqualZeroIncr` compare mask 0xFF to
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp
+index 3c19ac8..937d7e6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp
+@@ -34,6 +34,15 @@ struct BuildContext
+     // soldier first-person proxies).  `Routing::NoDropdown` is not used for
+     // pass routing; it remains input metadata for fog and the LOD/PassNum logic.
+     PassKindHint passKindHint = PassKindHint::None;
++
++    // The landscape's sea in Remastered with the `seaWaves` switch on: set by
++    // the backend between Engine::BeginSea and EndSea, which the landscape
++    // calls around its sea draws (Landscape::DrawWater). A sea face (the
++    // specular layer alone: the landscape's water flags) in the world's 3D
++    // pass then routes to ShaderFamily::Water, the remastered water program.
++    // Classic and the switch off leave it false, so the sea stays on the
++    // detail program (PSDetail) exactly as before.
++    bool remasteredSea = false;
+ };
+ 
+ // Pure, header-implemented to keep the seam visible.  Inline so callers
+@@ -178,6 +187,16 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
+             d.shader = grass ? ShaderFamily::Grass : ShaderFamily::Detail;
+             if (ctx.isIn3DPass)
+                 d.texGen = grass ? TexGenMode::Grass : TexGenMode::Detail;
++            // The remastered sea: an opaque world face of the landscape's sea
++            // (the specular layer alone) keeps the detail texgen (the ripple
++            // layer at 32 repeats per sea texture) and draws with the water
++            // program.
++            if (ctx.remasteredSea && ctx.isIn3DPass && (backend & mtMask) == Backend::SpecularTexture &&
++                d.pass == PassKind::WorldOpaque && d.surface == SurfaceMode::Default)
++            {
++                d.shader = ShaderFamily::Water;
++                d.pass = PassKind::WorldWater;
++            }
+         }
+         else
+         {
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+index 50055f7..549694a 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+@@ -7,6 +7,7 @@
+ #include <Poseidon/Graphics/Core/TLVertex.hpp>
+ #include <Poseidon/World/World.hpp>
+ #include <Poseidon/Graphics/Core/Engine.hpp>
++#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ #include <Poseidon/IO/ParamFileExt.hpp>
+ #include <Poseidon/Game/OperMap.hpp>
+@@ -317,8 +318,14 @@ __forceinline float Bilint(float y00, float y01, float y10, float y11, float xf,
+ 
+ static Vector3 WaterNormal(0, -1, 0);
+ 
+-// const int WaterFlags = IsWater|SpecularTexture;
+-
++// The sea's faces carry the specular layer alone (data\specular_dx.paa, a
++// ripple pattern in its alpha), so they draw through the detail program like
++// the terrain. They never carry IsWater: that bit selects the engine's water
++// family, whose classic shader binds the detail texture as a bump map (the
++// waterBump texture of the remaster config does not exist). The remastered sea
++// is routed explicitly instead: DrawWater opens Engine::BeginSea around these
++// faces' draws, and the backend draws them with its water program while the
++// feature switch seaWaves is on.
+ const int WaterFlags = SpecularTexture;
+ 
+ #define SEAMS 1
+@@ -1144,6 +1151,42 @@ static AnimatorDefault GAnimatorWater(Color(0.8, 0.8, 0.8));
+ 
+ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
+ {
++    // The remastered sea (feature switch seaWaves, Graphics/Remaster/
++    // SeaWaves.hpp): the backend draws the faces below with its water program
++    // and cross-fades the animation frame they carry (AnimateTexture in the
++    // loop) into its neighbour, so the waves it derives from the texture do
++    // not pop at each frame switch. Classic and the switch off draw them as
++    // before.
++    {
++        float texPhase = fastFmod(Glob.time.toFloat(), 2);
++        if (texPhase > 1.0f)
++        {
++            texPhase = 2 - texPhase;
++        }
++        Texture* sea = _texture[0];
++        Texture* other = nullptr;
++        float otherWeight = 0.0f;
++        const int frames = sea ? sea->AnimationLength() : 1;
++        if (frames > 1)
++        {
++            PolyProperties faces;
++            faces.Init();
++            faces.SetTexture(sea);
++            faces.AnimateTexture(texPhase);
++            int bound = 0;
++            for (int i = 0; i < frames; i++)
++            {
++                if (sea->GetAnimation(i) == faces.GetTexture())
++                {
++                    bound = i;
++                }
++            }
++            const remaster::SeaFrameBlend blend = remaster::SeaAnimationBlend(texPhase, frames, bound);
++            other = sea->GetAnimation(blend.other);
++            otherWeight = blend.otherWeight;
++        }
++        GEngine->BeginSea(other, otherWeight);
++    }
+     for (int x = bigRect.xBeg; x < bigRect.xEnd; x += LandSegmentSize)
+     {
+         for (int z = bigRect.zBeg; z < bigRect.zEnd; z += LandSegmentSize)
+@@ -1214,6 +1257,7 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
+             }
+         }
+     }
++    GEngine->EndSea();
+ }
+ 
+ struct GroundLayerInfo
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 2767d07..9c32e43 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -723,6 +723,13 @@ class EngineGL33 : public Engine
+     void EndRemasterSky() override;
+     bool RemasterSkyPending() const override;
+     std::string RemasterSkyCheck(int texels) override;
++    // --- The remastered sea (EngineGL33_Sea.cpp) ---
++    void BeginSea(Texture* otherFrame, float otherWeight) override;
++    void EndSea() override;
++    // Between BeginSea and EndSea with the feature on: the landscape's sea
++    // faces route to the water program (BuildContext::remasteredSea).
++    bool SeaRouted() const { return _seaOpen; }
++    bool _seaOpen = false;
+ 
+     Poseidon::remaster::LightingTuning _lighting;
+     // Remastered programs built and the setting asks for them: DoSelectPixelShader
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 374868a..e232fa0 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -147,6 +147,10 @@ void EngineGL33::InitLightingResources()
+     GL33Bind::ActiveUnit(0);
+     // The sky table's unit 8 gets its stand-in the same way.
+     InitSkyTable();
++    // So does the sea's next-frame unit (EngineGL33_Sea.cpp binds an animation
++    // frame there only inside the sea's draws).
++    GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
++    GL33Bind::ActiveUnit(0);
+ 
+     glGenSamplers(1, &_shadowCompareSampler);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index af5f7c9..dd97469 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -90,15 +90,17 @@ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
+ constexpr int kSkyLutUnit = 8; // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
++// The sea animation frame the water program cross-fades into (the sea,
++// EngineGL33_Sea.cpp); a white stand-in outside the sea's draws.
++constexpr int kSeaNextFrameUnit = 11;
+ // Allocated to the features still to land; no shader samples them yet.
+-constexpr int kShadowRawUnit = 6;     // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
+-constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
+-constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
+-constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
+-constexpr int kLightDataUnit = 12;    // light buffer, samplerBuffer (light list)
+-constexpr int kLightTileUnit = 13;    // per-tile light indices (light list)
+-constexpr int kCombatMaskUnit = 14;   // combat shadow mask (combat)
+-constexpr int kCanopyVisUnit = 15;    // canopy sun visibility (hfrt)
++constexpr int kShadowRawUnit = 6;   // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
++constexpr int kSkyDensityUnit = 9;  // cloud density map from the weather sky texture (clouds)
++constexpr int kCanopyUnit = 10;     // canopy heightfield (hfrt)
++constexpr int kLightDataUnit = 12;  // light buffer, samplerBuffer (light list)
++constexpr int kLightTileUnit = 13;  // per-tile light indices (light list)
++constexpr int kCombatMaskUnit = 14; // combat shadow mask (combat)
++constexpr int kCanopyVisUnit = 15;  // canopy sun visibility (hfrt)
+ 
+ namespace detail
+ {
+@@ -165,6 +167,7 @@ constexpr LitSampler kLitSamplers[] = {
+     {"terrainHeight", kTerrainHeightUnit},
+     {"cloudNoise", kCloudNoiseUnit},
+     {"skyLut", kSkyLutUnit},
++    {"seaNext", kSeaNextFrameUnit},
+ };
+ 
+ // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
+@@ -214,17 +217,27 @@ enum : int
+     AtmoCloudSun = 65, // rgb sun light on the sky clouds (linear), w sky light on them (linear; the table's colour)
+     AtmoGlow = 66,     // rgb classic dome sun glow (display, SunSkyColor), w sky saturation
+     AtmoDome = 67,     // rgb classic dome light (display, SkyColor), w hue (0 the original hue relit, 1 physical)
+-    Count = 68,
++    // 68-73: allocated to features still to land (LitConstPlanned Sky to
++    // Weather); one padding member in the block until they do.
++    Reserved2 = 68,
++    // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
++    Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
++    Water1 =
++        75, // rgb sheen light (linear: the sun in the original sun's hue, times the sheen), w sheen's flat-normal share
++    Count = 76,
+ };
+ constexpr int MaxLights = 8;
+ constexpr int ReservedCount = 3;
++constexpr int Reserved2Count = 6;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+ static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
+ static_assert(SkyRight == Reserved + ReservedCount, "LitConst sky slots follow the reserved ones");
+-static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
++static_assert(Reserved2 == AtmoDome + 1, "LitConst second reserved range follows the sky slots");
++static_assert(Water0 == Reserved2 + Reserved2Count, "LitConst water slots follow the second reserved range");
++static_assert(Count == Water1 + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ // The slots allocated to the features still to land (INTEGRATION-PLAN.md
+@@ -233,7 +246,9 @@ static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
+ // feature moves its rows into LitConst, declares them in LitConstantsBlock()
+ // (a slot below it that has not landed yet becomes a padding member there) and
+ // raises LitConst::Count, which the upload and the shaders follow. A7 landed
+-// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved.
++// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved; B5
++// landed the water slots 74 and 75, so 68 to 73 are the padding member
++// litReserved2.
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58;     // materials, per draw: class, object kind, blend, hash
+@@ -245,15 +260,15 @@ constexpr int LightTiles = 70;   // light list: tile size, tile counts, light co
+ constexpr int Night = 71;        // night: flags, beam profile, moon key
+ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+-constexpr int Water0 = 74;       // water: wave, swell, ripple, sky weight
+-constexpr int Water1 = 75;       // water: sheen, glint, sparkle
+ constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
+ constexpr int Detail = 77;       // texsharp: terrain detail constants
+ constexpr int Haze = 78;         // haze: the analytic fallback for blended surfaces
+ constexpr int End = 79;          // one past the last planned slot
+ static_assert(MatClass == LitConst::Reserved && Pcss == LitConst::Reserved + LitConst::ReservedCount - 1,
+               "the planned slots below the sky pass are the reserved padding");
+-static_assert(Sky == LitConst::Count, "the other planned slots follow the declared ones");
++static_assert(Sky == LitConst::Reserved2 && Weather == LitConst::Reserved2 + LitConst::Reserved2Count - 1,
++              "the planned slots between the sky pass and the water are the second reserved padding");
++static_assert(Canopy == LitConst::Count, "the other planned slots follow the declared ones");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+ } // namespace LitConstPlanned
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index e174a1d..057bc98 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -338,6 +338,9 @@ layout(std140) uniform LitConstants {
+     vec4 litAtmoCloudSun; // 65: rgb sun light on the sky clouds (linear), w sky light on them (linear)
+     vec4 litAtmoGlow;     // 66: rgb classic dome sun glow (display), w sky saturation
+     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
++    vec4 litReserved2[6]; // 68-73: allocated to features still to land (clouds, light list, night, combat, materials)
++    vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
++    vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
+ };
+ )";
+ 
+@@ -704,42 +707,208 @@ void main() {
+ )";
+ 
+ static const char s_psWaterRemasterMain[] = R"(
++// The sea (feature switch seaWaves, Graphics/Remaster/SeaWaves.hpp). The
++// landscape's sea faces come here in Remastered with the switch on (the
++// backend routes them between Engine::BeginSea and EndSea); off, they stay on
++// the detail program. tex0 is the sea texture's animation frame (one repeat per
++// 50 m), seaNext the frame it cross-fades into (litWater0.y of it) and tex1
++// the specular detail texture (data/specular_dx.paa), whose alpha is a ripple
++// pattern (32 repeats per 50 m through the detail texgen).
++//
++// The texture's brightness is taken as the wave height. Three layers (the
++// texture, a swell copy at 0.27x frequency rotated 37 degrees, the ripples)
++// give the wave normal. The texture-to-world mapping is solved per pixel from
++// screen derivatives (exact on the flat sea, so no tangents are needed), and
++// the finite-difference step follows the pixel footprint, so the gradient is
++// filtered by the same mips as the colour. The sea is its lit texture under
++// the sky reflected by Fresnel on that normal: a low mean share, so it never
++// turns into a pale mirror, and the part of the Fresnel term that comes from
++// the waves at full weight, so a facet tilted away from the viewer shows sky
++// and one tilted toward shows water. The sun lays a broad lobe and a tight
++// sparkle on the waves (the sparkle widens with the footprint, so distant
++// glitter turns into sheen instead of aliasing), and the material's own broad
++// lobe keeps the original's sheen in the original sun's hue (litWater1.rgb).
++uniform sampler2D seaNext; // unit 11: the animation frame tex0 cross-fades into
++
++const float kSeaWaveK = 0.8;          // metres of height per unit of texture luminance
++const float kSeaSwellK = 1.2;         // the swell layer
++const float kSeaRippleK = 0.004;      // the ripple layer
++const float kSeaFrameRho = 0.75;      // gradient correlation of consecutive frames (SeaWaves.hpp)
++const float kSeaSkyVar = 1.0;         // weight of the wave-driven part of the Fresnel term
++const float kSeaBroadPow = 32.0;      // the sun path
++const float kSeaBroadW = 2.5;
++const float kSeaTightPow = 1500.0;    // the sparkle
++const float kSeaTightW = 1.0;
++const float kSeaFadeStart = 400.0;    // m: the waves fade from here ...
++const float kSeaFadeEnd = 3000.0;     // ... to here,
++const float kSeaFadeFloor = 0.35;     // ... down to this share
++const float kSeaAnisoFloor = 0.3;     // wave share kept where the footprint exceeds the 16:1 filter
++const float kSeaFarSkyStart = 1000.0; // m: the mean sky share fades from here ...
++const float kSeaFarSkyEnd = 3000.0;   // ... to here,
++const float kSeaFarSkyFloor = 0.5;    // ... down to this share: the far sea keeps its own colour
++
++vec4 seaTex(vec2 uv) {
++    vec4 a = texture(tex0, uv);
++    return litWater0.y > 0.0 ? mix(a, texture(seaNext, uv), litWater0.y) : a;
++}
++
++float seaLum(vec2 uv) { return dot(seaTex(uv).rgb, kLuma); }
++
++// World gradients of the two texture coordinates on the horizontal sea plane,
++// gU = (du/dX, du/dZ), solved from the screen derivatives.
++void seaUvGradients(vec2 uv, out vec2 gU, out vec2 gV) {
++    vec2 dPx = dFdx(vWorldRel.xz), dPy = dFdy(vWorldRel.xz);
++    vec2 dUx = dFdx(uv), dUy = dFdy(uv);
++    float det = dPx.x * dPy.y - dPx.y * dPy.x;
++    float id = abs(det) > 1e-12 ? 1.0 / det : 0.0;
++    gU = vec2(dUx.x * dPy.y - dUy.x * dPx.y, dUy.x * dPx.x - dUx.x * dPy.x) * id;
++    gV = vec2(dUx.y * dPy.y - dUy.y * dPx.y, dUy.y * dPx.x - dUx.y * dPy.x) * id;
++}
++
++// Finite-difference step in texture space, matched to what the anisotropic
++// filter keeps.
++float seaUvStep(vec2 uv, float texel) {
++    float a = length(dFdx(uv)), b = length(dFdy(uv));
++    return max(texel, max(min(a, b), max(a, b) / 16.0));
++}
++
++// World-space height gradient (metres per metre per unit of height) of the sea
++// texture at uv, whose height there is h0.
++vec2 seaGrad(vec2 uv, float h0, vec2 gU, vec2 gV, float e) {
++    float hu = seaLum(uv + vec2(e, 0.0));
++    float hv = seaLum(uv + vec2(0.0, e));
++    return ((hu - h0) * gU + (hv - h0) * gV) / e;
++}
++
++// The same for the ripple pattern (tex1's alpha).
++vec2 seaRippleGrad(vec2 uv, float h0, vec2 gU, vec2 gV, float e) {
++    float hu = texture(tex1, uv + vec2(e, 0.0)).a;
++    float hv = texture(tex1, uv + vec2(0.0, e)).a;
++    return ((hu - h0) * gU + (hv - h0) * gV) / e;
++}
++
++// The sea's lit body under its flat normal: shadeRemastered without the gloss
++// and the foliage branch, as linear radiance after exposure, with the sky
++// light's share and the sun's visibility.
++vec3 seaBody(vec3 albedo, out float ambientShare, out float sunVis) {
++    vec3 n = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
++    vec3 posAbs = vWorldRel + litCamPos.xyz;
++    float sunOn = litSunDir.w;
++    float nl = max(dot(n, litSunDir.xyz), 0.0);
++    float skyVisibility;
++    sunVis = shadowMapVisibility(n, nl, 0.0) * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
++    g_sunVisibility = sunVis;
++    vec3 kd = litMatDiffuse.rgb;
++    vec3 ka = litMatAmbient.rgb;
++    vec3 direct = litSun.rgb * (kd * nl + litMatForced.rgb) * (sunVis * sunOn);
++    vec3 ambient = ka * skyIrradiance(n) * (skyVisibility * sunOn);
++    vec3 moon = kd * litMoon.rgb * (max(dot(n, litMoonDir.xyz), 0.0) * sunOn);
++    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0)));
++    vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
++    vec3 a = toLinear(albedo);
++    float exposure = litZenith.w;
++    vec3 radiance = a * (direct + ambient + moon + local + emissive) * exposure;
++    ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(dot(radiance, kLuma), 1e-5), 0.0, 1.0);
++    return radiance;
++}
++
+ void main() {
+-    vec4 t0 = texture(tex0, vUV0);
+     vec4 t1 = texture(tex1, vUV1);
+-    vec3 bumpNormal = -(t1.xyz * 2.0 - 1.0);
+-    float glint = clamp(dot(psC4.xyz, bumpNormal), 0.0, 1.0);
+     vec4 r0;
++    float ambientShare = 0.0;
++    // Derivatives first, in uniform control flow.
++    vec2 gU, gV;
++    seaUvGradients(vUV0, gU, gV);
++    float e0 = seaUvStep(vUV0, 1.0 / 512.0);
++    float e1 = seaUvStep(vUV1, 1.0 / 256.0);
++    float foot = length(fwidth(vWorldRel.xz));
++    float fa = length(dFdx(vUV0)), fb = length(dFdy(vUV0));
++    float anisoRatio = min(fa, fb) / max(max(fa, fb), 1e-12);
+     bool lit = vLitMode > 0.5 && vLitMode < 1.5;
+-    if (lit) {
+-        float ambientShare;
+-        vec3 base = shadeRemastered(t0.rgb, true, ambientShare);
+-        // The water reflects the sky the player sees behind it (the fog colour
+-        // with its sun glow, so the low sun lays a bright path across the sea),
+-        // rising toward grazing angles (Fresnel). The classic bump glint becomes
+-        // a tight HDR sparkle that clouds and shadows put out.
++    if (lit && litFlags.z < 0.5) {
++        vec4 t0 = seaTex(vUV0);
++        vec3 albedo = t0.rgb * constColor.rgb * (t1.a * 2.0);
++        float dist = length(vWorldRel);
++        // ---- The wave normal.
++        vec2 grad = kSeaWaveK * seaGrad(vUV0, dot(t0.rgb, kLuma), gU, gV, e0);
++        // The swell: the same texture at about 1/4 frequency, rotated 37 degrees.
++        const mat2 R = mat2(0.7986, 0.6018, -0.6018, 0.7986) * 0.27;
++        vec2 uvS = R * vUV0 + vec2(0.31, 0.57);
++        vec2 gUs = R[0][0] * gU + R[1][0] * gV;
++        vec2 gVs = R[0][1] * gU + R[1][1] * gV;
++        float eS = max(1.0 / 512.0, e0 * 0.27);
++        grad += kSeaSwellK * seaGrad(uvS, seaLum(uvS), gUs, gVs, eS);
++        // The ripples: specular_dx's alpha at the detail tiling (vUV1 = 32 x vUV0).
++        grad += kSeaRippleK * seaRippleGrad(vUV1, t1.a, gU * 32.0, gV * 32.0, e1);
++        grad *= mix(kSeaFadeFloor, 1.0, 1.0 - smoothstep(kSeaFadeStart, kSeaFadeEnd, dist));
++        // Beyond the 16:1 the anisotropic filter covers, the texture is
++        // under-filtered along the view and its gradient aliases into
++        // pixel-high stripes at grazing range: fewer waves there.
++        grad *= clamp(16.0 * anisoRatio, kSeaAnisoFloor, 1.0);
++        // Two frames mixed keep the relief of one (SeaCrossFadeGain).
++        float w = litWater0.y;
++        float spread = (1.0 - w) * (1.0 - w) + w * w + 2.0 * w * (1.0 - w) * kSeaFrameRho;
++        grad *= litWater0.x * inversesqrt(max(spread, 1e-6));
++        vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
+         vec3 v = -vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
+-        float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
+-        vec3 r = reflect(-v, vec3(0.0, 1.0, 0.0));
+-        vec3 sky = toLinear(fogColorToward(vec3(r.x, 0.0, r.z)));
+-        vec3 sparkle = litSun.rgb * pow(glint, 12.0) * 6.0 * (litSunDir.w * g_sunVisibility);
+-        vec3 radiance = mix(toLinear(base), sky, fresnel * 0.6) + sparkle * litZenith.w;
+-        r0 = vec4(toDisplay(tonemapNeutral(radiance)), vColor.a * t0.a);
++        vec3 l = litSunDir.xyz;
++        float sunOn = litSunDir.w;
++        float exposure = litZenith.w;
++        float sunVis;
++        vec3 body = seaBody(albedo, ambientShare, sunVis);
++        // ---- The sky in the reflected direction, by Fresnel on the wave
++        // normal: the mean share low (litWater0.z, less at a high sun and
++        // beyond 1 km), the waves' share at full weight. At a high sun the
++        // reflected sky also takes litWater0.w of the original fog colour.
++        float nv = max(dot(n, v), 0.0);
++        float F = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
++        float Ff = 0.02 + 0.98 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
++        vec3 r = reflect(-v, n);
++        r.y = max(r.y, 0.01);
++        r = normalize(r);
++        vec3 skyDisp = mix(skyReflection(r), fogColor.rgb, litWater0.w);
++        vec3 sky = toLinear(skyDisp) * mix(1.0, 0.82, smoothstep(0.15, 0.9, r.y));
++        float skyMean = litWater0.z * mix(kSeaFarSkyFloor, 1.0, 1.0 - smoothstep(kSeaFarSkyStart, kSeaFarSkyEnd, dist));
++        float wSky = clamp(skyMean * Ff + kSeaSkyVar * (F - Ff), 0.0, 0.95);
++        // ---- The sun: a broad path and a tight sparkle on the wave normal
++        // (normalised Blinn-Phong, Schlick on v.h; the sparkle widens with the
++        // footprint), and the original's sheen, the material's broad lobe in the
++        // original sun's hue, on a normal that turns flat (litWater1.w) at a
++        // high sun, a smooth wash as the original's per-vertex sheen.
++        vec3 h = normalize(l + v);
++        float nh = max(dot(n, h), 0.0);
++        float vh = max(dot(v, h), 0.0);
++        float Fh = 0.02 + 0.98 * pow(1.0 - vh, 5.0);
++        float pT = kSeaTightPow / (1.0 + kSeaTightPow * 0.004 * foot);
++        const float kInv8Pi = 0.0397887;
++        float lobes = kSeaBroadW * (kSeaBroadPow + 8.0) * kInv8Pi * pow(nh, kSeaBroadPow) +
++                      kSeaTightW * (pT + 8.0) * kInv8Pi * pow(nh, pT);
++        vec3 nS = normalize(mix(n, vec3(0.0, 1.0, 0.0), litWater1.w));
++        float nhS = max(dot(nS, h), 0.0);
++        float pM = max(litMatSpecular.w, 1.0);
++        float sheen = pow(nhS, pM) * (pM + 8.0) / 28.0 * (1.0 + 2.0 * pow(1.0 - vh, 5.0)) *
++                      smoothstep(0.0, 0.15, dot(nS, l));
++        vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
++                   (sunVis * sunOn * litHorizon.w);
++        vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
++        vec3 display = toDisplay(tonemapNeutral(radiance));
++        float grey = dot(display, kLuma);
++        r0.rgb = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
++        r0.a = vColor.a * t0.a * constColor.a;
++    } else if (lit) {
++        // The debug views (sun visibility, sky visibility, normals) show the
++        // sea as the detail program does.
++        vec4 t0 = texture(tex0, vUV0);
++        r0.rgb = shadeRemastered(t0.rgb * constColor.rgb * (t1.a * 2.0), true, ambientShare);
++        r0.a = vColor.a * t0.a * constColor.a;
+     } else {
++        vec4 t0 = texture(tex0, vUV0);
+         r0 = vColor * t0;
+-        r0.rgb += glint;
+-    }
+-    // The sea's own fog: as finishFragment's (the reflection term above is the
+-    // water step's to change).
+-    vec3 fogC = fogColor.rgb;
+-    if (lit) {
+-        fogC = fogColorToward(vWorldRel);
+-        if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);
+-    } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
+-        fogC = atmoFogColor(vWorldRel, fogC);
++        r0 *= constColor;
++        r0.rgb *= t1.a * 2.0;
++        r0 += vSpecColor;
+     }
+-    r0.rgb = mix(fogC, r0.rgb, vFogTC);
+-    fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
++    finishFragment(r0, ambientShare, true);
+ }
+ )";
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index 3f04c99..6d0829d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -181,6 +181,21 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+     vec3 disp = mix(skyDisplay(a), skyDisplay(cloudLin), cloud);
+     return mix(classic, disp, litAtmo.x);
+ }
++
++// The clear sky a mirror-like surface reflects along the unit direction r
++// (above the horizon), display. It is the sky the player sees: without the sky
++// table the fog colour with its sun glow (fogColorToward, the original sky
++// behind the horizon); with it, the table's sky in that direction at that
++// brightness, as the dome draws it, and the classic colour again under an
++// overcast deck (litAtmo.y) and as the table fades out at night (litAtmo.x).
++vec3 skyReflection(vec3 r) {
++    vec3 classic = fogColorToward(r);
++    if (litAtmo.x <= 0.0) return classic;
++    vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
++    vec3 disp = skyDisplay(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)));
++    disp = mix(disp, classic, litAtmo.y);
++    return mix(classic, disp, litAtmo.x);
++}
+ )";
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 1359dd5..a1223eb 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -251,6 +251,7 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
+     ctx.isMultitexturing = IsMultitexturing();
+     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
+     ctx.passKindHint = GetPassKindHint();
++    ctx.remasteredSea = SeaRouted();
+ 
+     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
+     const PipelineVertexInput previousVertexInput = _pipelineVertexInput;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Sea.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Sea.cpp
+new file mode 100644
+index 0000000..9f10e5c
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Sea.cpp
+@@ -0,0 +1,85 @@
++// Remastered sea: the feature switch `seaWaves` (INTEGRATION-PLAN.md section
++// 5 B5; the shading model is in Graphics/Remaster/SeaWaves.hpp and the water
++// program s_psWaterRemasterMain).
++//
++// The sea is the landscape's own faces (Landscape::DrawWater), which carry the
++// specular layer alone and so drew through the detail program (PSDetail) like
++// the terrain. The landscape now opens the sea's draws with BeginSea and closes
++// them with EndSea. In between, with the switch on and gated on in the
++// remastered world pass, the descriptor routes those faces to the water
++// program (BuildContext::remasteredSea), the animation frame the faces do not
++// carry is bound on kSeaNextFrameUnit for the cross-fade, and the water slots
++// of LitConstants (Water0, Water1) hold this frame's constants.
++//
++// Off (the switch, Classic, a portrait, a 3D preview after the world, night
++// vision) the scope does nothing: the sea draws through the detail program as
++// before the feature, and the water slots are not read.
++
++#include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <PoseidonGL33/GL33BindCache.hpp>
++#include <PoseidonGL33/TextureGL33.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
++#include <Poseidon/World/Scene/Scene.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++using namespace Poseidon::gl33lighting;
++namespace rm = Poseidon::remaster;
++
++void EngineGL33::BeginSea(Texture* otherFrame, float otherWeight)
++{
++    if (_seaOpen)
++        EndSea();
++    if (!_glContext || !_remasterPrograms || !GScene || !GScene->MainLight() || _portraitTargetSize ||
++        _worldSceneEnded || _nightVision || !rm::FeatureOn(_lighting.features, rm::Feature::SeaWaves))
++        return;
++    // The gates of this frame (computed at the world's first 3D pass).
++    if (!_featureGates.computed || !_featureGates[rm::Feature::SeaWaves].on)
++        return;
++    // Draws queued so far keep their programs.
++    FlushQueues();
++
++    // The frame to cross-fade into, at its finest level (the faces' own frame
++    // is loaded for the nearest sea; every frame comes round every 2 s). Until
++    // it has a texture, the faces' frame shows alone.
++    TextureGL33* other = otherWeight > 0.0f ? static_cast<TextureGL33*>(otherFrame) : nullptr;
++    unsigned int handle = 0;
++    if (other && _textBank)
++    {
++        _textBank->UseMipmap(other, 0, 0);
++        handle = other->GetHandle();
++    }
++    const rm::SeaFrameBlend blend{0, 0, handle ? otherWeight : 0.0f};
++    GL33Bind::Tex2D(kSeaNextFrameUnit, handle ? handle : _post.whiteTex);
++    // The faces' frame samples through unit 0's sampler object (linear, wrap,
++    // anisotropic, the TAA texture LOD bias): the other frame gets the same.
++    glBindSampler(kSeaNextFrameUnit, _samplerObjects[0]);
++    GL33Bind::ActiveUnit(0);
++
++    LightSun* sun = GScene->MainLight();
++    const float toSunY = -sun->Direction().Y();
++    const float sunElevDeg = std::asin(std::max(-1.0f, std::min(1.0f, toSunY))) * 57.29578f;
++    const rm::SeaWaveConstants c = rm::ComputeSeaWaveConstants(sunElevDeg, _lighting, blend);
++    const Color classic = sun->Diffuse();
++    const rm::Rgb sheen = rm::SeaSheenLight(rm::Rgb(_lightRigSun.R(), _lightRigSun.G(), _lightRigSun.B()),
++                                            rm::Rgb(classic.R(), classic.G(), classic.B()), c.sheen);
++    SetLitSlot(LitConst::Water0, c.relief, c.crossFade, c.skyMean, c.skyTint);
++    SetLitSlot(LitConst::Water1, sheen.r, sheen.g, sheen.b, c.sheenFlat);
++    FlushLitConstants();
++    _seaOpen = true;
++}
++
++void EngineGL33::EndSea()
++{
++    if (!_seaOpen)
++        return;
++    // The sea's draws commit with the water program.
++    FlushQueues();
++    _seaOpen = false;
++    GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
++    glBindSampler(kSeaNextFrameUnit, 0);
++    GL33Bind::ActiveUnit(0);
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+index a1e1ca4..0193c86 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+@@ -299,7 +299,10 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
+         case Poseidon::render::ShaderFamily::Water:
+             vs = meshVertexInput ? VSTransform : VSNone;
+             ps = PSWater;
+-            fmt = DetailTex;
++            // The landscape's sea (routed here in Remastered, BuildContext::
++            // remasteredSea) keeps the detail texgen and its specular layer:
++            // data\specular_dx.paa, whose alpha is the ripple pattern.
++            fmt = d.texGen == Poseidon::render::TexGenMode::Detail ? SpecularTex : DetailTex;
+             break;
+         case Poseidon::render::ShaderFamily::Detail:
+             vs = meshVertexInput ? VSTransform : VSNone;
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp
+index c758903..4e836f4 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp
+@@ -241,15 +241,9 @@ void TextBankGL33::InitDetailTextures()
+         _grass->SetMaxSize(1024);
+         _grass->_isDetail = true;
+     }
+-
+-    RStringB waterName = names >> "waterBump";
+-    if (QIFStreamB::FileExist(waterName))
+-    {
+-        _waterBump = new TextureGL33;
+-        _waterBump->Init(waterName);
+-        _waterBump->SetMaxSize(1024);
+-        _waterBump->_isDetail = true;
+-    }
++    // CfgDetailTextures >> waterBump (misc\waveBumpMap.paa) is not read: the
++    // file is not in the Remaster data and nothing samples it. The remastered
++    // sea derives its waves from the sea texture (EngineGL33_Sea.cpp).
+ }
+ 
+ void TextBankGL33::FlushTextures()
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp
+index c5082f0..3d58721 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp
+@@ -82,7 +82,6 @@ TextBankGL33::~TextBankGL33()
+     PoseidonAssert(_texture.Size() == 0);
+     _texture.Clear();
+     _detail.Free();
+-    _waterBump.Free();
+     _specular.Free();
+     _grass.Free();
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+index b60d65a..b8d222c 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+@@ -256,7 +256,6 @@ class TextBankGL33 : public AbstractTextBank
+     Ref<TextureGL33> _detail;
+     Ref<TextureGL33> _specular;
+     Ref<TextureGL33> _grass;
+-    Ref<TextureGL33> _waterBump;
+ 
+     AutoArray<SurfaceInfoGL33> _freeTextures;
+ 
+@@ -341,7 +340,6 @@ class TextBankGL33 : public AbstractTextBank
+     TextureGL33* GetDetailTexture() const { return _detail; }
+     TextureGL33* GetGrassTexture() const { return _grass; }
+     TextureGL33* GetSpecularTexture() const { return _specular; }
+-    TextureGL33* GetWaterBumpMap() const { return _waterBump; }
+ 
+     bool VerifyChecksums() override;
+     bool ReserveMemory(GL33MipCacheRoot& root, int limit);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 5ffaebf..d89fbe4 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -170,6 +170,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_post_stages.cpp
+     Graphics/test_temporal_aa.cpp
+     Graphics/test_atmosphere.cpp
++    Graphics/test_sea_waves.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/Rendering/test_build_render_pass_descriptor.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/Rendering/test_build_render_pass_descriptor.cpp
+index 3c770f8..5ed2048 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/Rendering/test_build_render_pass_descriptor.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/Rendering/test_build_render_pass_descriptor.cpp
+@@ -1,6 +1,7 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <Poseidon/Core/Types.hpp>
+ #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
++#include <Poseidon/Graphics/Rendering/ValidateRenderPassDescriptor.hpp>
+ #include <catch2/catch_message.hpp>
+ #include <initializer_list>
+ 
+@@ -401,3 +402,56 @@ TEST_CASE("BuildRenderPassDescriptor: special pass branches ignore PassKindHint"
+         REQUIRE(d.pass == PassKind::WorldTransparent);
+     }
+ }
++
++TEST_CASE("BuildRenderPassDescriptor: the landscape's sea routes to the water family only in the remastered sea scope",
++          "[build-descriptor][remaster][SeaWaves]")
++{
++    // Landscape::DrawWater's faces carry the specular layer alone (its
++    // WaterFlags) plus NoClamp. In Classic, and with seaWaves off, they draw
++    // through the detail family as they always did; between Engine::BeginSea
++    // and EndSea with the feature on (BuildContext::remasteredSea) they draw
++    // through the water family, keeping the detail texgen of their ripple layer.
++    constexpr int kSeaFace = SpecularTexture | NoClamp;
++    BuildContext ctx;
++    ctx.isMultitexturing = true;
++
++    const RenderPassDescriptor classic = buildFromInt(kSeaFace, ctx);
++    REQUIRE(classic.shader == ShaderFamily::Detail);
++    REQUIRE(classic.pass == PassKind::WorldOpaque);
++    REQUIRE(classic.texGen == TexGenMode::Detail);
++
++    BuildContext sea = ctx;
++    sea.remasteredSea = true;
++    const RenderPassDescriptor d = buildFromInt(kSeaFace, sea);
++    REQUIRE(d.shader == ShaderFamily::Water);
++    REQUIRE(d.pass == PassKind::WorldWater);
++    REQUIRE(d.texGen == TexGenMode::Detail);
++    // Everything else is the sea's state as before.
++    RenderPassDescriptor same = d;
++    same.shader = classic.shader;
++    same.pass = classic.pass;
++    REQUIRE(same == classic);
++    REQUIRE(ValidateRenderPassDescriptor(d) == nullptr);
++
++    SECTION("terrain, grass and blended faces in the scope keep their families")
++    {
++        REQUIRE(buildFromInt(DetailTexture, sea).shader == ShaderFamily::Detail);
++        REQUIRE(buildFromInt(GrassTexture, sea).shader == ShaderFamily::Grass);
++        REQUIRE(buildFromInt(DetailTexture | SpecularTexture, sea).shader == ShaderFamily::Detail);
++        REQUIRE(buildFromInt(kSeaFace | IsAlpha, sea).shader == ShaderFamily::Detail);
++        REQUIRE(buildFromInt(kSeaFace | IsTransparent, sea).shader == ShaderFamily::Detail);
++        REQUIRE(buildFromInt(kSeaFace | OnSurface, sea).shader == ShaderFamily::Detail);
++    }
++    SECTION("a sea face outside the world's 3D pass (pre-transformed) keeps the detail family")
++    {
++        BuildContext screen = sea;
++        screen.isIn3DPass = false;
++        REQUIRE(buildFromInt(kSeaFace, screen).shader == ShaderFamily::Detail);
++    }
++    SECTION("no multitexturing: the plain family, as before")
++    {
++        BuildContext single = sea;
++        single.isMultitexturing = false;
++        REQUIRE(buildFromInt(kSeaFace, single).shader == ShaderFamily::Normal);
++    }
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 3032355..dab87bc 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -312,7 +312,8 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.3,baseline"), *k) == sub.value);
+     }
+     // Only the landed switches have sub-knobs yet: every knob with a parent is
+-    // TAA's or the sky table's (A7, test_atmosphere.cpp), three each.
++    // TAA's, the sky table's (A7, test_atmosphere.cpp) or the sea's (B5), three
++    // each.
+     int children = 0;
+     int taaChildren = 0;
+     for (int i = 0; i < LightingKeyCount(); ++i)
+@@ -322,13 +323,13 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+             continue;
+         INFO(k.key);
+         const std::string_view parent(k.parent);
+-        CHECK((parent == "taa" || parent == "atmosphere"));
++        CHECK((parent == "taa" || parent == "atmosphere" || parent == "seaWaves"));
+         CHECK(FindFeature(k.parent) != nullptr);
+         taaChildren += parent == "taa" ? 1 : 0;
+         ++children;
+     }
+     CHECK(taaChildren == 3);
+-    CHECK(children == 6);
++    CHECK(children == 9);
+ }
+ 
+ TEST_CASE("Feature gates: the light list runs with a lamp at night or a combat light", "[remaster][FeatureGates]")
+@@ -597,13 +598,14 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
+-TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have landed, nothing else has",
++TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table and the sea have landed, nothing else has",
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+     // classic): triFeatureState no longer marks them inert, and the overlay
+     // shows the opaque objects' GPU section for them. A5 lands taa, A7
+-    // atmosphere.
++    // atmosphere, B5 seaWaves (its draws are in the world pass's ground
++    // section).
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -614,10 +616,11 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have
+         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
+         const bool taa = info.id == Feature::Taa;
+         const bool atmosphere = info.id == Feature::Atmosphere;
+-        CHECK(info.landed == (perf || taa || atmosphere));
++        const bool sea = info.id == Feature::SeaWaves;
++        CHECK(info.landed == (perf || taa || atmosphere || sea));
+         if (info.landed)
+         {
+-            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : "A7"));
++            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : atmosphere ? "A7" : "B5"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+     }
+@@ -627,7 +630,8 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have
+     INFO(s);
+     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
+     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+-    CHECK(s.find("landed=4/26") != std::string::npos);
++    CHECK(s.find(" seaWaves=1:on:per-sea-fragment ") != std::string::npos);
++    CHECK(s.find("landed=5/26") != std::string::npos);
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index fbfd2b7..de4cbda 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -8,6 +8,7 @@
+ #include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
++#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+@@ -888,6 +889,7 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
+         {P::Sky, "vec3 skyRadiance("},
+         {P::Sky, "vec3 atmoFogColor("},
+         {P::Sky, "vec3 shadeSkyDome("},
++        {P::Sky, "vec3 skyReflection("},
+         {P::Lights, "vec3 localLights("},
+         {P::Surface, "vec3 glossy("},
+         {P::Shade, "vec3 shadeRemastered("},
+@@ -1113,6 +1115,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litAtmoCloudSun", LC::AtmoCloudSun, 1},
+         {"litAtmoGlow", LC::AtmoGlow, 1},
+         {"litAtmoDome", LC::AtmoDome, 1},
++        {"litReserved2", LC::Reserved2, LC::Reserved2Count},
++        {"litWater0", LC::Water0, 1},
++        {"litWater1", LC::Water1, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+     auto checkBlock = [](const std::string& block)
+@@ -1172,14 +1177,19 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+             CHECK(CountOf(program, shared) == 1);
+     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
+ 
+-    // The planned slots: the three below the sky pass are the reserved padding,
+-    // the rest continue the declared ones (A7 landed the sky slots 61 to 67 of
+-    // plan section 3.3).
++    // The planned slots: the three below the sky pass and the six between the
++    // sky pass and the water are the reserved padding, the rest continue the
++    // declared ones (A7 landed the sky slots 61 to 67 of plan section 3.3, B5
++    // the water slots 74 and 75).
+     CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
+     CHECK(gl::LitConstPlanned::Pcss == static_cast<int>(LC::Reserved) + LC::ReservedCount - 1);
+     CHECK(static_cast<int>(LC::SkyRight) == 61);
+     CHECK(static_cast<int>(LC::AtmoDome) == 67);
+-    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Count));
++    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Reserved2));
++    CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Reserved2) + LC::Reserved2Count - 1);
++    CHECK(static_cast<int>(LC::Water0) == 74);
++    CHECK(static_cast<int>(LC::Water1) == 75);
++    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.
+     std::ostringstream range;
+@@ -1258,10 +1268,11 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
+     CHECK(finish.find("if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);") !=
+           std::string::npos);
+     CHECK(finish.find("} else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {") != std::string::npos);
++    // The sea (B5) fogs through finishFragment like the detail program it
++    // replaces, and its sky reflection is the classic one while litAtmo.x is 0.
+     const std::string water = gl::RemasterFragmentMain(3); // PSWater
+-    CHECK(CountOf(water, "atmoFogColor(") == 2);
+-    CHECK(water.find("if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);") !=
+-          std::string::npos);
++    CHECK(CountOf(water, "atmoFogColor(") == 0);
++    CHECK(CountOf(water, "finishFragment(r0, ambientShare, true);") == 1);
+     // The dome branch is PSNormal's; the other mains light only vLitMode 1.
+     const std::string normal = gl::RemasterFragmentMain(0); // PSNormal
+     CHECK(normal.find("if (vLitMode > 1.5) {") != std::string::npos);
+@@ -1277,6 +1288,7 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
+     const std::string sky = Piece(gl::FragmentPiece::Sky);
+     CHECK(sky.find("return mix(classic, disp, litAtmo.x);") != std::string::npos);
+     CHECK(sky.find("return mix(classicFog, disp, litAtmo.z);") != std::string::npos);
++    CHECK(sky.find("if (litAtmo.x <= 0.0) return classic;") != std::string::npos);
+ }
+ 
+ TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp lays it out",
+@@ -1334,3 +1346,94 @@ TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp
+         CHECK(engine.find(use) != std::string::npos);
+     }
+ }
++
++TEST_CASE("Remaster sea: the water program is the variant C model on the shared pieces",
++          "[Graphics][Shaders][remaster][SeaWaves]")
++{
++    const std::string water = gl::RemasterFragmentMain(3); // PSWater
++    REQUIRE_FALSE(water.empty());
++    // The next animation frame on its own unit, from the one unit table.
++    bool row = false;
++    for (const auto& s : gl::kLitSamplers)
++        row = row || (std::string(s.name) == "seaNext" && s.unit == gl::kSeaNextFrameUnit);
++    CHECK(row);
++    CHECK(gl::kSeaNextFrameUnit == 11);
++    CHECK(water.find("uniform sampler2D seaNext;") != std::string::npos);
++    // The cross-fade: litWater0.y of the next frame, and the relief gain with
++    // SeaWaves.hpp's frame correlation.
++    CHECK(water.find("mix(a, texture(seaNext, uv), litWater0.y)") != std::string::npos);
++    std::ostringstream rho;
++    rho << "const float kSeaFrameRho = " << kSeaFrameCorrelation << ";";
++    CHECK(water.find(rho.str()) != std::string::npos);
++    CHECK(water.find("2.0 * w * (1.0 - w) * kSeaFrameRho") != std::string::npos);
++    CHECK(water.find("grad *= litWater0.x * inversesqrt(max(spread, 1e-6));") != std::string::npos);
++    // The engine's constants: the relief, the mean sky weight and its tint,
++    // the sheen light and its flat-normal share at a high sun.
++    for (const char* use : {"litWater0.x", "litWater0.z", "litWater0.w", "litWater1.rgb", "litWater1.w"})
++    {
++        CAPTURE(use);
++        CHECK(water.find(use) != std::string::npos);
++    }
++    // The sky term is the shared reflection lookup (the sky table's sky when
++    // it is on), not a copy of its own.
++    CHECK(CountOf(water, "skyReflection(r)") == 1);
++    CHECK(CountOf(gl::RemasterFragmentCommon(), "vec3 skyReflection(vec3 r) {") == 1);
++    // Local light through the shared lights piece with the shaded surfaces'
++    // clamp (F9: 1.0), not the prototype's 1.5.
++    CHECK(CountOf(water, "localLights(n, kd, ka) * litGround.w, vec3(1.0))") == 1);
++    CHECK(water.find("litGround.w, vec3(1.5)") == std::string::npos);
++    // No sea detection by material any more (the prototype's isSea()), and the
++    // previous main's constant bump normal (the detail texture read as one) is
++    // gone.
++    CHECK(water.find("isSea(") == std::string::npos);
++    CHECK(water.find("bumpNormal") == std::string::npos);
++    // Pre-lit faces draw exactly as the detail program's pre-lit branch, and
++    // every branch ends in the shared tail (night eye, AO alpha, fog).
++    const std::string detail = gl::RemasterFragmentMain(1); // PSDetail
++    const std::string preLit = "r0 = vColor * t0;\n        r0 *= constColor;\n        r0.rgb *= t1.a * 2.0;\n"
++                               "        r0 += vSpecColor;";
++    CHECK(detail.find(preLit) != std::string::npos);
++    CHECK(water.find(preLit) != std::string::npos);
++    CHECK(water.find("finishFragment(r0, ambientShare, true);") != std::string::npos);
++}
++
++TEST_CASE("Remaster sea: the backend routes the landscape's sea faces only inside the sea scope",
++          "[Graphics][remaster][SeaWaves]")
++{
++    // The descriptor flag comes from the scope, and the scope opens only in the
++    // remastered world pass with the switch on and gated on.
++    const std::string queue = ReadTextFile(Gl33Dir() / "EngineGL33_Queue.cpp");
++    CHECK(CountOf(queue, "ctx.remasteredSea = SeaRouted();") == 1);
++    const std::string sea = ReadTextFile(Gl33Dir() / "EngineGL33_Sea.cpp");
++    REQUIRE_FALSE(sea.empty());
++    for (const char* gate :
++         {"!_remasterPrograms", "_nightVision", "_portraitTargetSize", "_worldSceneEnded",
++          "!rm::FeatureOn(_lighting.features, rm::Feature::SeaWaves)", "!_featureGates[rm::Feature::SeaWaves].on"})
++    {
++        CAPTURE(gate);
++        CHECK(sea.find(gate) < sea.find("_seaOpen = true;"));
++    }
++    CHECK(CountOf(sea, "_seaOpen = true;") == 1);
++    CHECK(CountOf(sea, "_seaOpen = false;") == 1);
++    // The sea keeps its ripple layer on unit 1 under the water family.
++    const std::string state = ReadTextFile(Gl33Dir() / "EngineGL33_State.cpp");
++    CHECK(state.find("fmt = d.texGen == Poseidon::render::TexGenMode::Detail ? SpecularTex : DetailTex;") !=
++          std::string::npos);
++    // The landscape opens the scope around its sea draws, and its sea faces
++    // are the specular layer alone (never IsWater).
++    const std::string land = ReadTextFile(std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" /
++                                          "World" / "Terrain" / "LandscapeRender.cpp");
++    CHECK(land.find("const int WaterFlags = SpecularTexture;") != std::string::npos);
++    CHECK(CountOf(land, "water.OrSpecial(WaterFlags | NoClamp);") == 2);
++    const size_t draw = land.find("void Landscape::DrawWater(");
++    REQUIRE(draw != std::string::npos);
++    const size_t begin = land.find("GEngine->BeginSea(other, otherWeight);", draw);
++    const size_t loop = land.find("for (int x = bigRect.xBeg;", draw);
++    const size_t end = land.find("GEngine->EndSea();", draw);
++    const size_t next = land.find("struct GroundLayerInfo", draw);
++    CHECK(begin < loop);
++    CHECK(loop < end);
++    CHECK(end < next);
++    // The water bump map nothing sampled is gone with its missing file.
++    CHECK(ReadTextFile(Gl33Dir() / "TextureGL33.hpp").find("GetWaterBumpMap") == std::string::npos);
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_sea_waves.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_sea_waves.cpp
+new file mode 100644
+index 0000000..8e4e4f4
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_sea_waves.cpp
+@@ -0,0 +1,229 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
++
++#include <cmath>
++#include <string>
++#include <string_view>
++#include <vector>
++
++// The remastered sea's plain math (INTEGRATION-PLAN.md section 5 B5,
++// Graphics/Remaster/SeaWaves.hpp): the cross-fade of the sea texture's
++// animation frames, the relief gain that keeps a mix of two frames as strong
++// as one, the per-frame constants of the water program and the sheen's light.
++
++using namespace Poseidon::remaster;
++
++namespace
++{
++
++// The frame PolyProperties::AnimateTexture binds: floor(phase * n), wrapped
++// once (phase 1 exactly wraps to frame 0).
++int AnimateTextureFrame(float phase, int n)
++{
++    int i = static_cast<int>(std::floor(phase * static_cast<float>(n)));
++    if (i < 0)
++        i += n;
++    else if (i >= n)
++        i -= n;
++    return i;
++}
++
++std::vector<float> Weights(const SeaFrameBlend& b, int n)
++{
++    std::vector<float> w(static_cast<size_t>(n));
++    for (int k = 0; k < n; ++k)
++        w[static_cast<size_t>(k)] = SeaFrameWeight(b, k);
++    return w;
++}
++
++} // namespace
++
++TEST_CASE("Sea animation: the frames cross-fade continuously instead of switching every 1/n s", "[remaster][SeaWaves]")
++{
++    for (const int n : {2, 7, 8})
++    {
++        INFO("frames " << n);
++        const int steps = 7000;
++        std::vector<float> prev;
++        for (int i = 0; i <= steps; ++i)
++        {
++            const float phase = static_cast<float>(i) / steps;
++            const int bound = AnimateTextureFrame(phase, n);
++            const SeaFrameBlend b = SeaAnimationBlend(phase, n, bound);
++            INFO("phase " << phase << " bound " << bound << " other " << b.other << " w " << b.otherWeight);
++            // The landscape's frame is on unit 0; the backend binds the other.
++            CHECK(b.bound == bound);
++            CHECK(b.other >= 0);
++            CHECK(b.other < n);
++            CHECK(b.otherWeight >= 0.0f);
++            CHECK(b.otherWeight <= 1.0f);
++            const std::vector<float> w = Weights(b, n);
++            float sum = 0.0f;
++            for (float x : w)
++                sum += x;
++            CHECK(sum == Catch::Approx(1.0f).margin(1e-5));
++            // The mix is the even spread: frame k alone at phase k / (n - 1),
++            // the two around the phase in between.
++            const float s = phase * static_cast<float>(n - 1);
++            for (int k = 0; k < n; ++k)
++            {
++                const float want = std::max(0.0f, 1.0f - std::fabs(s - static_cast<float>(k)));
++                CHECK(w[static_cast<size_t>(k)] == Catch::Approx(want).margin(1e-4));
++            }
++            // Continuous: no frame's share jumps between neighbouring phases
++            // (a hard switch moves a whole frame's share at once).
++            if (!prev.empty())
++            {
++                const float step = static_cast<float>(n - 1) / steps;
++                for (int k = 0; k < n; ++k)
++                    CHECK(std::fabs(w[static_cast<size_t>(k)] - prev[static_cast<size_t>(k)]) <= step * 1.01f + 1e-5f);
++            }
++            prev = w;
++        }
++    }
++}
++
++TEST_CASE("Sea animation: a bound frame off the pair still gives the even spread", "[remaster][SeaWaves]")
++{
++    // AnimateTexture's rounding floor can bind the frame below at an exact frame
++    // edge, and phase 1 wraps to frame 0: the mix then shows the nearer frame of
++    // the pair through the other unit alone, never the bound frame.
++    const int n = 7;
++    const SeaFrameBlend top = SeaAnimationBlend(1.0f, n, 0);
++    CHECK(top.other == n - 1);
++    CHECK(top.otherWeight == 1.0f);
++    CHECK(SeaFrameWeight(top, 0) == 0.0f);
++    CHECK(SeaFrameWeight(top, n - 1) == 1.0f);
++    // Phase 3 / 6 is frame 3 alone; AnimateTexture binds frame 3 there
++    // (floor(3.5)), its rounding could give 2.
++    const SeaFrameBlend mid = SeaAnimationBlend(0.5f, n, 3);
++    CHECK(SeaFrameWeight(mid, 3) == Catch::Approx(1.0f));
++    const SeaFrameBlend off = SeaAnimationBlend(0.5f, n, 1);
++    CHECK(SeaFrameWeight(off, 3) == Catch::Approx(1.0f));
++    CHECK(SeaFrameWeight(off, 1) == 0.0f);
++    // No animation: the bound frame alone.
++    const SeaFrameBlend still = SeaAnimationBlend(0.3f, 1, 0);
++    CHECK(still.otherWeight == 0.0f);
++}
++
++TEST_CASE("Sea animation: a mix of two frames keeps the relief of one", "[remaster][SeaWaves]")
++{
++    CHECK(SeaCrossFadeGain(0.0f) == Catch::Approx(1.0f));
++    CHECK(SeaCrossFadeGain(1.0f) == Catch::Approx(1.0f));
++    // Halfway the gradient's spread of two frames with correlation rho is
++    // sqrt(0.5 + 0.5 rho) of one frame's.
++    CHECK(SeaCrossFadeGain(0.5f) == Catch::Approx(1.0f / std::sqrt(0.5f + 0.5f * kSeaFrameCorrelation)));
++    float last = 0.0f;
++    for (int i = 0; i <= 50; ++i)
++    {
++        const float g = SeaCrossFadeGain(static_cast<float>(i) / 100.0f);
++        CHECK(g >= 1.0f);
++        CHECK(g >= last);
++        last = g;
++    }
++    // Measured on the Remaster sea (more_anim.01 to .07): gradient correlation
++    // 0.65 to 0.82 between consecutive frames.
++    CHECK(kSeaFrameCorrelation >= 0.65f);
++    CHECK(kSeaFrameCorrelation <= 0.82f);
++}
++
++TEST_CASE("Sea constants: a low sun keeps the research look, a high sun keeps more of the sea's own colour",
++          "[remaster][SeaWaves]")
++{
++    const LightingTuning t{};
++    const SeaFrameBlend blend{2, 3, 0.25f};
++    const SeaWaveConstants sunset = ComputeSeaWaveConstants(8.4f, t, blend);
++    CHECK(sunset.relief == 1.0f);
++    CHECK(sunset.crossFade == 0.25f);
++    CHECK(sunset.skyMean == Catch::Approx(kSeaSkyMean));
++    CHECK(sunset.skyTint == 0.0f);
++    CHECK(sunset.sheen == Catch::Approx(kSeaSheen));
++    CHECK(sunset.sheenFlat == 0.0f);
++    const SeaWaveConstants noon = ComputeSeaWaveConstants(71.9f, t, blend);
++    CHECK(noon.skyMean == Catch::Approx(kSeaSkyMean * kSeaSkyMeanNoon));
++    CHECK(noon.skyTint == Catch::Approx(kSeaSkyTintNoon));
++    CHECK(noon.sheen == Catch::Approx(kSeaSheenNoon));
++    // At a high sun the sheen is the original's flat wash, not yellow facets.
++    CHECK(noon.sheenFlat == Catch::Approx(1.0f));
++    CHECK(noon.skyMean < sunset.skyMean);
++    CHECK(noon.skyTint > 0.0f);
++    // Monotone and smooth with the sun's height in between.
++    float lastMean = 1.0f, lastTint = -1.0f;
++    for (int e = 0; e <= 90; ++e)
++    {
++        const SeaWaveConstants c = ComputeSeaWaveConstants(static_cast<float>(e), t, blend);
++        CHECK(c.skyMean <= lastMean + 1e-6f);
++        CHECK(c.skyTint >= lastTint - 1e-6f);
++        lastMean = c.skyMean;
++        lastTint = c.skyTint;
++    }
++    // The sub-knobs scale what they name.
++    LightingTuning k{};
++    k.seaRelief = 0.0f;
++    k.seaSky = 2.0f;
++    k.seaSheen = 0.5f;
++    const SeaWaveConstants knobs = ComputeSeaWaveConstants(8.4f, k, blend);
++    CHECK(knobs.relief == 0.0f);
++    CHECK(knobs.skyMean == Catch::Approx(2.0f * kSeaSkyMean));
++    CHECK(knobs.sheen == Catch::Approx(0.5f * kSeaSheen));
++}
++
++TEST_CASE("Sea sheen: the rig sun's brightness in the original sun's hue", "[remaster][SeaWaves]")
++{
++    // The classic noon sun, display values times the 1.6 brightness.
++    const Rgb classic = Rgb(0.85f, 0.75f, 0.4f) * 1.6f;
++    const Rgb rig(1.0f, 0.98f, 0.95f);
++    const Rgb s = SeaSheenLight(rig, classic, 0.5f);
++    CHECK(Luminance(s) == Catch::Approx(0.5f * Luminance(rig)));
++    // Its hue is the original's display chroma (a small increment on a
++    // near-grey sea keeps it through the 2.2 power), not the more saturated
++    // chroma of the linear colour.
++    CHECK(s.r / s.g == Catch::Approx(classic.r / classic.g));
++    CHECK(s.b / s.g == Catch::Approx(classic.b / classic.g));
++    CHECK(s.r > s.g);
++    CHECK(s.g > s.b);
++    // A black original sun leaves the rig's luminance, neutral.
++    const Rgb n = SeaSheenLight(rig, Rgb(0.0f, 0.0f, 0.0f), 1.0f);
++    CHECK(n.r == Catch::Approx(n.b));
++}
++
++TEST_CASE("Sea switch: landed, gated per sea fragment, with its sub-knobs under it",
++          "[remaster][SeaWaves][FeatureSwitches]")
++{
++    const FeatureInfo& info = GetFeatureInfo(Feature::SeaWaves);
++    CHECK(info.landed);
++    CHECK(std::string_view(info.key) == "seaWaves");
++    CHECK(std::string_view(info.step) == "B5");
++    CHECK(std::string_view(info.gpuSection) == "ground");
++    for (const char* key : {"seaRelief", "seaSky", "seaSheen"})
++    {
++        INFO(key);
++        const LightingKey* k = FindLightingKey(key);
++        REQUIRE(k != nullptr);
++        CHECK(k->kind == KeyKind::Knob);
++        REQUIRE(k->parent != nullptr);
++        CHECK(std::string_view(k->parent) == "seaWaves");
++        CHECK(std::string_view(k->group) == "water");
++        CHECK(KeyDefault(*k) == 1.0f);
++        // Baseline puts it back with the switch off.
++        LightingTuning t{};
++        bool modeSet = false;
++        REQUIRE(ApplyLightingSetting(t, std::string(key) + "=0.5,baseline", modeSet).empty());
++        CHECK(GetKeyValue(t, *k) == 1.0f);
++        CHECK_FALSE(FeatureOn(t.features, Feature::SeaWaves));
++    }
++    // Day and night, the sea runs wherever it is drawn; classic holds it off.
++    GateInputs noon;
++    noon.sunElevationDeg = 60.0f;
++    CHECK(ComputeFeatureGates(noon, LightingTuning{})[Feature::SeaWaves].on);
++    GateInputs night = noon;
++    night.sunElevationDeg = -30.0f;
++    night.nightEffect = 1.0f;
++    CHECK(ComputeFeatureGates(night, LightingTuning{})[Feature::SeaWaves].on);
++    LightingTuning classic{};
++    classic.remastered = false;
++    CHECK_FALSE(ComputeFeatureGates(noon, classic)[Feature::SeaWaves].on);
++}
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index 75f8bd8..9b8c9bc 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -2207,3 +2207,4 @@ items:
+       - "2026-10-18: graphics-remaster step A4 (frame cost, plan section 5 A4): drawGrouping and hillCull landed. drawGrouping keeps only the objects a light slot reaches out of instanced runs (RunEntry.localLit) instead of stopping instancing for the whole scene at the first slot, and a UboMirror sends only the changed range of the LitConstants and VSConstants blocks. hillCull (World/Scene/TerrainOcclusion, pure) hides static objects beyond 75 m that the drawn terrain blocks in every azimuth wedge they span; it only flags them after LOD selection, the shadow-map pass still casts them, and the last draw before that pass is kept (an older sampler leak made leaf-shadow cutouts follow it). sunrise_ridge 12,910 to 1,912 draws, GPU world pass 18.16 to 2.52 ms, CPU 34 to 72 fps (one reading, RTX 4060 Ti). Off equals the A3 build; on is pixel-identical at the sunrise views and walks, the town lamps differ in 1 pixel by 1 level, the other views stay within their own noise. GpuTimings splits the world pass into ground, pass1 and rest; PerfCounters rides in triPerfStats. Unit gate 484/484 (terrain occlusion, UBO mirror and perf counter cases new), five mutations red, smoke_abel clean on the merged build."
+       - "2026-10-18: graphics-remaster step A5 (temporal anti-aliasing, plan section 5 A5; a parallel lane on ced77ae): the taa switch lands. The world is drawn with a Halton(2, 3) sub-pixel jitter (remastered vertex shaders only, guarded so a zero jitter leaves positions exact; never the HUD, dialogs, portraits or the shadow-map pass) and the new Temporal and Sharpen post stages blend it into a half-float history: camera reprojection built in double precision from the nearest depth, depth rejection with the view depth stored in the history alpha, a YCoCg variance clip, alpha 0.1, a bounded sharpen 0.5, a -0.5 texture LOD bias. A particle mask from a copy of the frame between the opaque and the translucent objects (Engine::BeginTranslucentObjects) lets smoke, fire, muzzle flashes, glass and rain take most of their own frame; AO and shaft patterns turn per frame under TAA. Sub-knobs taaSharpen, taaMipBias, taaAlpha; the gate also needs the post effects. The reconstruction kernel is exp(-4 d^2) (the prototype's exp(-2.29 d^2) left the hero view 15.5% softer; now 6.7%). Off equals the base build at the hero view (0 pixels over 2 levels). On: antennas and ropes continuous, crowns 22.6% steadier under a pan, no trail behind a Jeep at 0.5 m per step, the Fire keeps its flicker; 9.5 to 10.7% softer under the pan. Cost on the 4060 Ti at 1080p: taa 0.16 to 0.22 ms, sharpen 0.05 to 0.10 ms, frame +0.7 to 0.8 ms of which most is the LOD bias. Not built: the Taa LitConstants slot and unit 6 (B1), per-object motion vectors, an HDR resolve (the frame target is display space). Unit gate 478/478 (12 new), twelve mutations red, smoke 1/1. Landed on A4 (c584185) by a three-way apply: the registry keeps A4's two landed rows and the taa row, and A4's landed-switch case now expects taa too (landed=3/26); merged unit gate 496/496, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only)."
+       - "2026-10-18: graphics-remaster step A7 (sky table and the remastered sky pass, plan section 5 A7; feature switch atmosphere): a physically based clear sky (Graphics/Remaster/Atmosphere: Rayleigh, Mie, ozone, multiple scattering) shades the sky dome under the original sky textures' clouds and colours the fog of every world draw (aerial perspective, the horizon polygon included): a golden horizon band and aureole at a low sun, an orange twilight band at dusk, sunrise keeps its pink, noon a graded blue with its cirrus; night keeps the classic sky (fade -3 to -9 degrees). The transmittance and multiple-scattering tables build on a worker thread, the 192x64 sky-view table on the GPU in two passes when the sun moves 0.02 degrees (0.06 ms; the prototype's CPU rebuild was an 8 to 12 ms hitch); one hook (Engine::BeginRemasterSky / EndRemasterSky from Landscape::DrawSky and DrawClouds) replaces the BeginMesh hack. Critic fixes: hue 0.5 and saturation 1.15, the original hue relit by brightness only (no olive band), each row keeps the original dome's brightness with its sun glow (sky band -0.1 to +6 % of the original's luminance), dead zone 0.004 and de-composited cloud colour (noon cirrus kept). LitConstants slots 61 to 67 landed, unit 8 in use, GPU sections sky and skytable, triSkyTableCheck (GPU table against its CPU mirror, max relative error 3.7e-4). Off equals before on the hero views; cost at P0 about +0.5 ms on the frame (single reading). Unit gate 476/476 (10 new), ten contract mutations red, smoke 1/1. Merged onto A5 (193c735; a parallel lane on ced77ae) by a three-way apply: A4's ground, pass1 and rest sections and the sky sections side by side, TAA's sub-knobs then the sky table's, the TAA jitter kept in the screen vertex shader; on the merged tree the gate tags plus A4's, A5's and A7's tags pass 506/506 and smoke_abel 1/1 (landed=4/26)."
++      - "2026-10-18: graphics-remaster step B5 (sea waves, plan section 5 B5; feature switch seaWaves; a parallel lane on 5d7e7ae): the sea gets wave relief and a broken, glittering sun path. The sea is the landscape's own faces (the specular layer alone; the face spec has no free bit, so no IsWater-style flag): Landscape::DrawWater opens Engine::BeginSea around them and, with the switch on in the remastered world pass, BuildContext::remasteredSea routes them to the water family, whose program is the research variant C (a wave normal from the sea texture's brightness with its swell copy and the specular_dx ripples, solved per pixel from screen derivatives, Fresnel sky with a low mean and the waves' share at full weight, a broad path and a footprint-widened sparkle). The sky term is the A7 table's sky while it is on, else the classic fog colour with its glow. The 7-frame animation is cross-faded (frames spread evenly over the phase, the neighbour on unit 11, relief kept for correlated frames), so the waves do not pop every 0.14 s: off spikes 1.56x the median frame-to-frame change at every switch, on has no spike there. The noon colour: the original's green-yellow is its per-vertex sheen in the yellow classic sun colour, so the sheen keeps that hue and grows to 2.4 on the flat normal at a high sun; sea_noon hue 7.6 degrees and mean 6 levels from Classic, mid-sun 4.2 degrees. LitConstants slots 74 and 75 (68 to 73 padding), sub-knobs seaRelief, seaSky, seaSheen; the dead waterBump texture dropped. Off equals before within boot noise; Classic unchanged. Cost (single reading at P0, 4060 Ti, 1080p): about +1 ms on a frame full of sea, not the 0.2 ms estimated. Unit gate 541/541 (9 new), twelve mutations red, smoke_abel 1/1. Risks: smooth large swells in the 2 to 20 m near field of the hero view, a beige-grey noon near band, no travelling waves, no moon glint."

@@ -1,0 +1,238 @@
+{
+ "new": {
+  "src": "v2/ud/valley_mist/valley_mist__ud.mkv",
+  "frames": 570,
+  "range": [
+   0,
+   570
+  ],
+  "pix_d2": 1.71,
+  "pix_d2_p99": 3.826,
+  "pix_d2_median": 1.654,
+  "blk4_d2": 0.497,
+  "blk4_d2_maxblock": 1.161,
+  "blk16_d2": 0.194,
+  "blk16_d2_maxblock": 0.387,
+  "blk64_d2": 0.1,
+  "blk64_d2_maxblock": 0.172,
+  "blk64_hf": 0.066,
+  "blk64_mid": 0.345,
+  "blk178_d2": 0.087,
+  "blk178_d2_maxblock": 0.134,
+  "coh_d2": 0.0701,
+  "coh_mid": 0.106,
+  "coh_hf": 0.0371,
+  "coh_d2_thirds": [
+   0.1075,
+   0.0709,
+   0.0419
+  ],
+  "coh_worst": [
+   [
+    28,
+    -0.166
+   ],
+   [
+    44,
+    -0.142
+   ],
+   [
+    36,
+    -0.141
+   ],
+   [
+    16,
+    -0.14
+   ],
+   [
+    20,
+    -0.139
+   ],
+   [
+    40,
+    -0.133
+   ]
+  ],
+  "band_mean": [
+   94.56,
+   111.8
+  ]
+ },
+ "old": {
+  "src": "v2/ud/valley_mist_before_mistfix/valley_mist__ud.mkv",
+  "frames": 570,
+  "range": [
+   0,
+   570
+  ],
+  "pix_d2": 1.93,
+  "pix_d2_p99": 3.882,
+  "pix_d2_median": 1.95,
+  "blk4_d2": 0.93,
+  "blk4_d2_maxblock": 2.074,
+  "blk16_d2": 0.788,
+  "blk16_d2_maxblock": 1.754,
+  "blk64_d2": 0.707,
+  "blk64_d2_maxblock": 1.405,
+  "blk64_hf": 0.56,
+  "blk64_mid": 0.438,
+  "blk178_d2": 0.548,
+  "blk178_d2_maxblock": 0.991,
+  "coh_d2": 0.3969,
+  "coh_mid": 0.1858,
+  "coh_hf": 0.3109,
+  "coh_d2_thirds": [
+   0.1955,
+   0.5653,
+   0.5015
+  ],
+  "coh_worst": [
+   [
+    328,
+    0.904
+   ],
+   [
+    471,
+    -0.843
+   ],
+   [
+    539,
+    0.795
+   ],
+   [
+    540,
+    -0.761
+   ],
+   [
+    340,
+    -0.758
+   ],
+   [
+    329,
+    -0.755
+   ]
+  ],
+  "band_mean": [
+   92.83,
+   111.57
+  ]
+ },
+ "van": {
+  "src": "v2/vanilla/valley_mist/valley_mist__vanilla.mkv",
+  "frames": 570,
+  "range": [
+   0,
+   570
+  ],
+  "pix_d2": 3.039,
+  "pix_d2_p99": 7.079,
+  "pix_d2_median": 3.197,
+  "blk4_d2": 0.787,
+  "blk4_d2_maxblock": 2.798,
+  "blk16_d2": 0.216,
+  "blk16_d2_maxblock": 0.793,
+  "blk64_d2": 0.119,
+  "blk64_d2_maxblock": 0.258,
+  "blk64_hf": 0.066,
+  "blk64_mid": 0.3,
+  "blk178_d2": 0.103,
+  "blk178_d2_maxblock": 0.158,
+  "coh_d2": 0.0847,
+  "coh_mid": 0.0172,
+  "coh_hf": 0.0462,
+  "coh_d2_thirds": [
+   0.1265,
+   0.0825,
+   0.0531
+  ],
+  "coh_worst": [
+   [
+    19,
+    -0.164
+   ],
+   [
+    23,
+    -0.16
+   ],
+   [
+    27,
+    -0.149
+   ],
+   [
+    31,
+    -0.148
+   ],
+   [
+    39,
+    -0.147
+   ],
+   [
+    35,
+    -0.147
+   ]
+  ],
+  "band_mean": [
+   90.57,
+   101.95
+  ]
+ },
+ "vanold": {
+  "src": "v2/vanilla/valley_mist_before_mistfix/valley_mist__vanilla.mkv",
+  "frames": 570,
+  "range": [
+   0,
+   570
+  ],
+  "pix_d2": 3.037,
+  "pix_d2_p99": 7.077,
+  "pix_d2_median": 3.198,
+  "blk4_d2": 0.78,
+  "blk4_d2_maxblock": 2.811,
+  "blk16_d2": 0.204,
+  "blk16_d2_maxblock": 0.622,
+  "blk64_d2": 0.111,
+  "blk64_d2_maxblock": 0.191,
+  "blk64_hf": 0.066,
+  "blk64_mid": 0.299,
+  "blk178_d2": 0.101,
+  "blk178_d2_maxblock": 0.158,
+  "coh_d2": 0.0847,
+  "coh_mid": 0.0161,
+  "coh_hf": 0.0461,
+  "coh_d2_thirds": [
+   0.1261,
+   0.0813,
+   0.0533
+  ],
+  "coh_worst": [
+   [
+    19,
+    -0.165
+   ],
+   [
+    23,
+    -0.16
+   ],
+   [
+    27,
+    -0.152
+   ],
+   [
+    39,
+    -0.148
+   ],
+   [
+    35,
+    -0.148
+   ],
+   [
+    31,
+    -0.145
+   ]
+  ],
+  "band_mean": [
+   90.57,
+   101.95
+  ]
+ }
+}

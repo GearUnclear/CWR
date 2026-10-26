@@ -1,0 +1,64 @@
+Uslu dur! comparison video v2: narration draft
+==============================================
+
+Voice: a pleasant, warm, confident woman, narrating a trailer, calm and measured
+(the instruction in C:/dev/local-tts/uslu_dur_vo.py). Original copy; nothing from Rockstar or GTA. Part 1 of 2: graphics only.
+Planning rate 2.3 words a second. Each line starts 0.35 s into its scene's window and
+should end 0.6 s or more before the window ends. A window runs from the middle of the
+transition that brings the scene in to the middle of the one that takes it away (titles are
+overlays now, no title cards). Times are positions in the montage (trailer_v2.py);
+mix_vo.py places the rendered lines by the same rule.
+The spoken lines write the brand as "Uslu dur" (no exclamation mark) so the voice does not
+shout it; the subtitles (mix_vo.py) put the mark back.
+Owner approved recording on 2026-10-19; rendered after the overhaul clips are shot, with no games on the GPU.
+
+id                                window  words  est. s  room s
+v2_00_intro             0:00.00- 0:09.00     18     7.8     0.8   intro, over the opening scene
+    "Uslu dur is a total overhaul of Arma: Cold War Assault. This first video is about the light."
+
+v2_01_opening           0:09.60- 0:15.80     12     5.2     0.6   scene opening (Malden, under occupation)
+    "Malden, under occupation. The models are the originals. The light is new."
+
+v2_02_valley_mist       0:15.80- 0:24.10     17     7.4     0.6   scene valley_mist (Moving out at dawn)
+    "A resistance squad moves out at first light. The sun is still burning off the valley mist."
+
+v2_03_pine_shafts       0:24.10- 0:32.60     17     7.4     0.8   scene pine_shafts (Through the pines)
+    "In the pine woods, morning sun falls through the haze in shafts. The guerrillas keep to cover."
+
+v2_04_bay_reflections   0:32.60- 0:41.10     17     7.4     0.8   scene bay_reflections (Coastal patrol, dawn)
+    "On the bay, an occupier patrol boat crosses calm water that mirrors the hills and the sky."
+
+v2_05_outpost           0:41.10- 0:50.10     17     7.4     1.3   scene outpost (Occupier outpost)
+    "A low winter sun lights the occupier outpost from the side. The shade stays cool and deep."
+
+v2_06_cloud_shadows     0:50.10- 0:57.60     15     6.5     0.6   scene cloud_shadows (Everon from the air)
+    "Over Everon, the clouds catch the sun, and their shadows move slowly across the hills."
+
+v2_07_sinai_camp        0:57.60- 1:05.60     16     7.0     0.7   scene sinai_camp (Hidden camp, Sinai)
+    "Modded islands get it too. In Sinai, a camp sits under netting in the late sun."
+
+v2_08_ambush            1:05.60- 1:14.10     15     6.5     1.6   scene ambush (Ambush at golden hour)
+    "Golden hour. Guerrillas wait at the forest edge; every tree throws a long shadow downhill."
+
+v2_09_convoy            1:14.10- 1:21.90     10     4.3     3.1   scene convoy (Convoy at sunset)
+    "At sunset, an occupier convoy drives into the low sun."
+
+v2_10_checkpoint        1:21.90- 1:29.50     11     4.8     2.5   scene checkpoint (Checkpoint at dusk)
+    "At dusk, the sentries at the checkpoint gather around a fire."
+
+v2_11_town_patrol       1:29.50- 1:37.80     17     7.4     0.6   scene town_patrol (Night patrol in town)
+    "At night, street lamps and the fire light the occupied town. A patrol comes down the street."
+
+v2_12_rain_town         1:37.80- 1:46.10     14     6.1     1.9   scene rain_town (Town in the rain)
+    "Then the rain. Puddles catch the lamps, and the resistance slips past the patrol."
+
+v2_13_supply_run        1:46.10- 1:54.80     16     7.0     1.4   scene supply_run (Supply run at night)
+    "Out in the country, the nights are dark. A supply run drives by its headlights alone."
+
+v2_14_firefight         1:54.80- 2:03.80     14     6.1     2.6   scene firefight (Firefight after dark)
+    "When a firefight breaks out, every flare, fire and shell burst lights the field."
+
+v2_99_outro             2:03.80- 2:13.40     12     5.2     4.0   closing card
+    "Uslu dur. Part two covers the gameplay: Guerrilla Mode and the AI."
+
+Montage length 2:13.40; smallest room after a line 0.6 s.

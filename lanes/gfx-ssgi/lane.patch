@@ -1,0 +1,711 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd2..eeecf7ea 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,15 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"gi", &remaster::LightingTuning::gi},
++        {"giMode", &remaster::LightingTuning::giMode},
++        {"giRadius", &remaster::LightingTuning::giRadius},
++        {"giRays", &remaster::LightingTuning::giRays},
++        {"giSteps", &remaster::LightingTuning::giSteps},
++        {"giTemporal", &remaster::LightingTuning::giTemporal},
++        {"giDebug", &remaster::LightingTuning::giDebug},
++        {"giFallbackShare", &remaster::LightingTuning::giFallbackShare},
++        {"giAlbedoCap", &remaster::LightingTuning::giAlbedoCap},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0c..78b2bdb9 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,16 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // RESEARCH (ssgi track): screen-space ray-traced diffuse GI in the post pass.
++    float gi = 0.0f;          // bounce strength (0 = off, the shipped look)
++    float giMode = 1.0f;      // 1 = ray marched (cosine rays), 2 = SSDO-style colour bleed, 3 = signed (replaces sky)
++    float giRadius = 1.0f;    // ray length multiplier
++    float giRays = 4.0f;      // rays per half-res pixel
++    float giSteps = 16.0f;    // march steps per ray
++    float giTemporal = 1.0f;  // 1 = temporal accumulation with reprojection
++    float giDebug = 0.0f;     // 1 = show the added bounce only
++    float giFallbackShare = 0.5f; // sky share assumed for pixels without one (foliage coverage, alpha 1)
++    float giAlbedoCap = 0.8f;      // cap on the estimated albedo * material ambient of a receiver
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab7..2577d43c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -746,6 +746,11 @@ class EngineGL33 : public Engine
+     bool _litOpaque = false;
+     // The rig's sun colour this frame (sun-shaft tint).
+     Color _lightRigSun = Color(1, 1, 1, 1);
++    // RESEARCH (ssgi): the rig's sky hemisphere this frame for the GI pass:
++    // zenith, horizon (anti-sun), horizon (sun), ground (rgb), exposure in [0].w.
++    float _giRig[4][4] = {};
++    float _giUpView[3] = {0.0f, 1.0f, 0.0f};
++    float _giSunView[3] = {0.0f, 1.0f, 0.0f};
+     // World position of the camera when the shadow depth pass ran: the map is
+     // sampled one frame later, from wherever the camera is then.
+     float _shadowCamPos[3] = {};
+@@ -792,6 +797,15 @@ class EngineGL33 : public Engine
+         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
++        // RESEARCH (ssgi): half-res GI trace, temporal history ping-pong, blur.
++        unsigned int giTex[2] = {}, giFbo[2] = {};     // trace / blur ping-pong
++        unsigned int giHist[2] = {}, giHistFbo[2] = {}; // temporal history ping-pong
++        int giHistCur = 0;
++        bool giHistValid = false;
++        unsigned int giMipSampler = 0;
++        unsigned int progGi = 0, progGiTemporal = 0, progGiBlur = 0;
++        unsigned int giFrame = 0;
++        float giPrevPos[3] = {}, giPrevAxes[9] = {}, giPrevProj[2] = {};
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5f..57322d48 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -330,6 +330,18 @@ void EngineGL33::UploadLitFrameConstants()
+     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
+     const rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
+     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
++    {
++        const rm::Rgb* hemi[4] = {&rig.skyZenith, &rig.skyHorizon, &rig.skyHorizonSun, &rig.skyGround};
++        for (int i = 0; i < 4; ++i)
++        {
++            _giRig[i][0] = hemi[i]->r;
++            _giRig[i][1] = hemi[i]->g;
++            _giRig[i][2] = hemi[i]->b;
++            _giRig[i][3] = 0.0f;
++        }
++        _giRig[0][3] = rig.exposure;
++        _giRig[1][3] = _sunEnabled ? 1.0f : 0.0f;
++    }
+ 
+     SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
+     SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094f..02781520 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -215,8 +215,41 @@ uniform sampler2D shaftTex;
+ uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+ uniform vec4 shaftColor; // rgb sun tint
+ uniform vec4 debugView;  // x: 1 = show occlusion
++uniform sampler2D giTex;    // unit 5: RESEARCH ssgi ratio (rgb) + view depth (a), half res
++uniform sampler2D giDepth;  // unit 6: full-res depth for the joint-bilateral upsample
++uniform vec4 giComp;        // x strength, y fallback share, z debug, w on
++uniform vec4 giProj;        // x _33, y _43, z depth scale, w depth bias
++uniform vec4 giRigZ;        // rig hemisphere times the material ambient (eye): zenith, w = exposure
++uniform vec4 giRigH;        // horizon away from the sun
++uniform vec4 giRigHS;       // horizon toward the sun
++uniform vec4 giRigG;        // ground
++uniform vec4 giUp;          // world up in view space
++uniform vec4 giSun;         // toward the sun in view space
++uniform vec4 giView;        // x 1/_11, y 1/_22, z albedo cap (albedo * ka), w unused
++uniform vec4 giScreen;      // xy size, zw 1/size
++uniform vec4 giRect;        // world viewport in uv
+ out vec4 fragColor;
+ 
++float giViewZ(vec2 uv) {
++    float d = texture(giDepth, uv).r;
++    return giProj.y / ((d * giProj.z + giProj.w) - giProj.x);
++}
++vec3 giViewPos(vec2 uv, float z) {
++    vec2 ndc = (uv - giRect.xy) / giRect.zw * 2.0 - 1.0;
++    return vec3(ndc.x * z * giView.x, ndc.y * z * giView.y, z);
++}
++vec3 giSkyIrr(vec3 nv) {
++    float ny = dot(nv, giUp.xyz);
++    vec3 nh = nv - giUp.xyz * ny;
++    vec3 sh = giSun.xyz - giUp.xyz * dot(giSun.xyz, giUp.xyz);
++    float hl = length(nh);
++    float sl = length(sh);
++    float toward = (hl > 1e-3 && sl > 1e-3) ? 0.5 + 0.5 * dot(nh / hl, sh / sl) : 0.5;
++    vec3 horizon = mix(giRigH.rgb, giRigHS.rgb, toward);
++    float t = clamp(ny, -1.0, 1.0);
++    return t >= 0.0 ? mix(horizon, giRigZ.rgb, t) : mix(horizon, giRigG.rgb, -t);
++}
++
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
+@@ -225,7 +258,67 @@ void main() {
+     // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+     float share = 1.0 - clamp(c.a, 0.0, 1.0);
+     float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+-    vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
++    vec3 lin0 = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2));
++    // Mode 3 (traced sky visibility + bounce) replaces the screen-space AO.
++    if (giComp.w > 2.5 && giComp.w < 3.5) keep = 1.0;
++    vec3 lin = lin0 * keep;
++    vec3 giAdd = vec3(0.0);
++    if (giComp.w > 0.5) {
++        float d = texture(giDepth, vUV).r;
++        if (d < 0.999999) {
++            float z = giProj.y / ((d * giProj.z + giProj.w) - giProj.x);
++            vec2 hs = vec2(textureSize(giTex, 0));
++            vec2 f = vUV * hs - 0.5;
++            vec2 i0 = floor(f);
++            vec2 fr = f - i0;
++            vec3 acc = vec3(0.0);
++            float ws = 0.0;
++            for (int k = 0; k < 4; ++k) {
++                ivec2 o = ivec2(k & 1, k >> 1);
++                ivec2 ip = clamp(ivec2(i0) + o, ivec2(0), ivec2(hs) - 1);
++                vec4 g = texelFetch(giTex, ip, 0);
++                float bw = (o.x == 1 ? fr.x : 1.0 - fr.x) * (o.y == 1 ? fr.y : 1.0 - fr.y);
++                float dw = 1.0 / (1e-3 + abs(g.a - z) / (0.02 * z + 0.05));
++                float w = (bw + 1e-3) * dw;
++                acc += g.rgb * w;
++                ws += w;
++            }
++            vec3 ratio = acc / max(ws, 1e-6);
++            float s = share;
++            // Coverage and alpha-tested pixels (tree crowns, windows) store alpha 1: no share.
++            if (c.a > 0.995) s = giComp.y * (1.0 - smoothstep(150.0, 400.0, z));
++            // Albedo the shader lit with: share * colour = albedo * ka * sky(n) * exposure.
++            // The sky irradiance comes from the full-res depth normal; the albedo is
++            // capped, so a pixel whose light is not sky (lamp pools, coverage
++            // pixels in sun) cannot claim a white albedo.
++            vec3 p = giViewPos(vUV, z);
++            vec2 tx = vec2(giScreen.z, 0.0);
++            vec2 ty = vec2(0.0, giScreen.w);
++            vec3 pr = giViewPos(vUV + tx, giViewZ(vUV + tx));
++            vec3 pl = giViewPos(vUV - tx, giViewZ(vUV - tx));
++            vec3 pu = giViewPos(vUV + ty, giViewZ(vUV + ty));
++            vec3 pd = giViewPos(vUV - ty, giViewZ(vUV - ty));
++            vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
++            vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
++            vec3 n = normalize(cross(dx, dy));
++            if (dot(n, p) > 0.0) n = -n;
++            vec3 skyN = max(giSkyIrr(n), vec3(1e-5));
++            float exposure = max(giRigZ.w, 1e-4);
++            vec3 albedoKa = min(s * lin0 / (skyN * exposure), vec3(giView.z));
++            // ratio * skyN = the added (mode 1) or changed (mode 3) irradiance.
++            giAdd = albedoKa * exposure * skyN * ratio * giComp.x;
++            if (giComp.w > 2.5 && giComp.w < 3.5) giAdd = max(giAdd, -s * lin0); // never below black
++            // Undo the shaders' tonemap shoulder (identity below 0.8), add the
++            // bounce, shoulder again: identity where nothing is added.
++            float pk = max(lin.r, max(lin.g, lin.b));
++            float pkU = pk < 0.8 ? pk : 0.6 + 0.04 / max(1.0 - pk, 1e-3);
++            vec3 sum = max(lin * (pkU / max(pk, 1e-6)) + giAdd, vec3(0.0));
++            float ps = max(sum.r, max(sum.g, sum.b));
++            float po = ps < 0.8 ? ps : 1.0 - 0.04 / (ps - 0.6);
++            lin = sum * (po / max(ps, 1e-6));
++        }
++        if (giComp.z > 0.5) { fragColor = vec4(pow(clamp(abs(giAdd) * 4.0, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0); return; }
++    }
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+@@ -234,7 +327,8 @@ void main() {
+     vec3 col = pow(lin, vec3(1.0 / 2.2));
+     // Dither only what the composite changed: elsewhere the frame passes
+     // through exactly (the 2.2 round trip is exact on 8-bit values).
+-    if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5)) {
++    if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5 ||
++                               abs(giAdd.r) + abs(giAdd.g) + abs(giAdd.b) > 1e-5)) {
+         float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+         float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+         col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
+@@ -243,6 +337,234 @@ void main() {
+ }
+ )";
+ 
++// RESEARCH (ssgi track): screen-space ray-traced diffuse GI. See
++// tmp/research/ssgi/NOTES.md for the model; the sources double as override files.
++static const char s_psPostGiGLSL[] = R"(#version 330 core
++// RESEARCH (ssgi): half-resolution screen-space diffuse GI.
++//
++// Per pixel, a few cosine-distributed rays leave the surface (view-space
++// position and normal from the depth buffer) and march through the depth buffer
++// with quadratically growing steps. A ray that passes behind the depth surface
++// within a thickness hits; the lit colour there (from a mip of the frame, a cone
++// footprint) is the radiance coming back along the ray.
++//
++// The engine already lights every surface with a uniform sky hemisphere that
++// includes a ground bounce (skyIrradiance in the remastered shaders). Mode 1
++// adds only what a hit sends back in EXCESS of what that hemisphere assumes for
++// the ray's direction (sunlit sand under a hull, a lamp pool, a lit wall), so it
++// can only add light. Mode 3 replaces the hemisphere by the traced result (hits:
++// their radiance, misses: the sky), which can also darken. Mode 2 is the cheap
++// SSDO-style colour bleed: no marching; disc samples above the tangent plane
++// act as emitters.
++//
++// Output: rgb = ratio to the pixel's own sky irradiance (the composite adds
++// share * colour * ratio: share * colour / skyIrradiance(n) is the albedo the
++// shader lit with), a = view depth (m).
++in vec2 vUV;
++uniform sampler2D depthTex;  // unit 0
++uniform sampler2D colorTex;  // unit 2, mipmapped (trilinear sampler)
++uniform vec4 projInfo;       // x _33, y _43, z 1/_11, w 1/_22
++uniform vec4 depthMap;
++uniform vec4 screen;         // full-res size, 1/size
++uniform vec4 worldRect;
++uniform vec4 giParams;       // x radius scale, y frame, z mode
++uniform vec4 giParams2;      // x rays, y steps, z exposure, w sun on
++uniform vec4 upView;         // world up in view space
++uniform vec4 sunView;        // toward the sun in view space
++uniform vec4 rigZenith;
++uniform vec4 rigHorizon;
++uniform vec4 rigHorizonSun;
++uniform vec4 rigGround;
++out vec4 fragColor;
++
++float viewZ(vec2 uv) {
++    float d = textureLod(depthTex, uv, 0.0).r;
++    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++}
++vec3 viewPos(vec2 uv, float z) {
++    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    return vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++}
++vec2 toUV(vec3 q) {
++    vec2 ndc = vec2(q.x / (q.z * projInfo.z), q.y / (q.z * projInfo.w));
++    return worldRect.xy + (ndc * 0.5 + 0.5) * worldRect.zw;
++}
++float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
++
++// The remastered shaders' sky hemisphere (skyIrradiance), ground tint left out
++// (it is luminance-neutral).
++vec3 skyIrr(vec3 nv) {
++    float ny = dot(nv, upView.xyz);
++    vec3 nh = nv - upView.xyz * ny;
++    vec3 sh = sunView.xyz - upView.xyz * dot(sunView.xyz, upView.xyz);
++    float hl = length(nh);
++    float sl = length(sh);
++    float toward = (hl > 1e-3 && sl > 1e-3) ? 0.5 + 0.5 * dot(nh / hl, sh / sl) : 0.5;
++    vec3 horizon = mix(rigHorizon.rgb, rigHorizonSun.rgb, toward);
++    float t = clamp(ny, -1.0, 1.0);
++    return t >= 0.0 ? mix(horizon, rigZenith.rgb, t) : mix(horizon, rigGround.rgb, -t);
++}
++
++void main() {
++    float d0 = textureLod(depthTex, vUV, 0.0).r;
++    if (d0 >= 0.999999) { fragColor = vec4(0.0, 0.0, 0.0, 1e6); return; }
++    float z = viewZ(vUV);
++    vec3 p = viewPos(vUV, z);
++    vec2 tx = vec2(screen.z, 0.0);
++    vec2 ty = vec2(0.0, screen.w);
++    vec3 pr = viewPos(vUV + tx, viewZ(vUV + tx));
++    vec3 pl = viewPos(vUV - tx, viewZ(vUV - tx));
++    vec3 pu = viewPos(vUV + ty, viewZ(vUV + ty));
++    vec3 pd = viewPos(vUV - ty, viewZ(vUV - ty));
++    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
++    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
++    vec3 n = normalize(cross(dx, dy));
++    if (dot(n, p) > 0.0) n = -n;
++
++    float exposure = max(giParams2.z, 1e-4);
++    int mode = int(giParams.z + 0.5);
++    vec3 skyN = max(skyIrr(n), vec3(1e-4));
++    float frame = giParams.y;
++    vec2 fc = gl_FragCoord.xy;
++    float n1 = ign(fc + 5.588238 * frame);
++    float n2 = ign(fc.yx + 7.31 * frame + 17.0);
++    float n3 = ign(fc + vec2(29.0, 3.0) + 3.77 * frame);
++    vec3 sum = vec3(0.0);
++
++    if (mode == 2) {
++        // SSDO-style colour bleed: disc points above the tangent plane send
++        // their excess radiance, weighted by the receiver cosine and a falloff.
++        float radius = 2.5 * giParams.x;
++        vec2 radiusUV = vec2(radius / projInfo.z, radius / projInfo.w) * (0.5 / z) * worldRect.zw;
++        int taps = clamp(int(giParams2.x * giParams2.y * 0.25), 4, 32);
++        for (int i = 0; i < 32; ++i) {
++            if (i >= taps) break;
++            float t = sqrt((float(i) + n3) / float(taps));
++            float angle = float(i) * 2.39996 + n1 * 6.2831853;
++            vec2 suv = vUV + vec2(cos(angle), sin(angle)) * radiusUV * t;
++            vec3 q = viewPos(suv, viewZ(suv));
++            vec3 v = q - p;
++            float dist = length(v);
++            float c = dot(v, n) / max(dist, 1e-4);
++            if (c > 0.1 && dist < radius) {
++                vec3 L = pow(textureLod(colorTex, suv, 1.0).rgb, vec3(2.2)) / exposure;
++                sum += max(L - skyIrr(v / dist), 0.0) * c * (1.0 - dist / radius);
++            }
++        }
++        vec3 E = sum / float(taps) * 2.0;
++        fragColor = vec4(E / skyN, z);
++        return;
++    }
++
++    vec3 t = normalize(abs(n.y) < 0.9 ? cross(n, vec3(0.0, 1.0, 0.0)) : cross(n, vec3(1.0, 0.0, 0.0)));
++    vec3 b = cross(n, t);
++    int rays = int(giParams2.x);
++    int steps = int(giParams2.y);
++    float maxDist = clamp(0.25 * z, 3.0, 25.0) * giParams.x;
++    vec3 origin = p + n * (0.01 * z + 0.04);
++    vec3 open = vec3(0.0);
++    for (int r = 0; r < 16; ++r) {
++        if (r >= rays) break;
++        float u1 = fract(n1 + float(r) * 0.6180340);
++        float u2 = fract(n2 + float(r) * 0.7548777);
++        float rr = sqrt(u1);
++        float phi = 6.2831853 * u2;
++        vec3 dir = normalize(t * (rr * cos(phi)) + b * (rr * sin(phi)) + n * sqrt(max(1.0 - u1, 0.0)));
++        bool hit = false;
++        vec3 L = vec3(0.0);
++        for (int s = 0; s < 48; ++s) {
++            if (s >= steps) break;
++            float f = (float(s) + n3) / float(steps);
++            float tt = maxDist * f * f + 0.05;
++            vec3 q = origin + dir * tt;
++            if (q.z < 0.2) break;
++            vec2 uv = toUV(q);
++            if (uv.x < worldRect.x || uv.y < worldRect.y || uv.x > worldRect.x + worldRect.z ||
++                uv.y > worldRect.y + worldRect.w) break;
++            float sz = viewZ(uv);
++            float dz = q.z - sz;
++            float thick = 0.35 + 0.2 * tt;
++            if (dz > 0.0 && dz < thick) {
++                float footPx = (0.3 * tt) / (sz * projInfo.z) * 0.5 * screen.x / worldRect.z;
++                float lod = clamp(log2(max(footPx, 1.0)), 0.0, 5.0);
++                L = pow(textureLod(colorTex, uv, lod).rgb, vec3(2.2)) / exposure;
++                hit = true;
++                break;
++            }
++        }
++        vec3 skyDir = skyIrr(dir);
++        if (mode == 3) sum += hit ? L : skyDir;
++        else if (hit) sum += max(L - skyDir, 0.0);
++        open += skyDir;
++    }
++    // v2: ratio estimator against the same rays seen as an open hemisphere, so
++    // an unoccluded pixel gets exactly 1 (mode 3) or 0 (mode 1) and the sky
++    // dome's shape cancels out.
++    vec3 openE = max(open, vec3(1e-4));
++    vec3 ratio = mode == 3 ? sum / openE - 1.0 : sum / openE;
++    fragColor = vec4(ratio, z);
++}
++)";
++
++static const char s_psPostGiTemporalGLSL[] = R"(#version 330 core
++// RESEARCH (ssgi): temporal accumulation. Reproject each pixel into last
++// frame's history with the camera move; keep the history where its depth agrees.
++in vec2 vUV;
++uniform sampler2D curTex;   // unit 0
++uniform sampler2D histTex;  // unit 2
++uniform vec4 projInfo;      // current: z = 1/_11, w = 1/_22
++uniform vec4 prevProj;      // previous: z = 1/_11, w = 1/_22
++uniform vec4 worldRect;
++uniform vec4 curX;
++uniform vec4 curY;
++uniform vec4 curZ;
++uniform vec4 prevX;
++uniform vec4 prevY;
++uniform vec4 prevZ;
++uniform vec4 dPos;          // xyz current camera position minus previous
++uniform vec4 tParams;       // x blend weight of the new frame, y history valid
++out vec4 fragColor;
++void main() {
++    vec4 c = texture(curTex, vUV);
++    if (c.a > 1e5 || tParams.y < 0.5) { fragColor = c; return; }
++    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    vec3 p = vec3(ndc.x * c.a * projInfo.z, ndc.y * c.a * projInfo.w, c.a);
++    vec3 w = p.x * curX.xyz + p.y * curY.xyz + p.z * curZ.xyz + dPos.xyz;
++    vec3 q = vec3(dot(w, prevX.xyz), dot(w, prevY.xyz), dot(w, prevZ.xyz));
++    if (q.z < 0.1) { fragColor = c; return; }
++    vec2 pndc = vec2(q.x / (q.z * prevProj.z), q.y / (q.z * prevProj.w));
++    vec2 uv = worldRect.xy + (pndc * 0.5 + 0.5) * worldRect.zw;
++    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { fragColor = c; return; }
++    vec4 h = texture(histTex, uv);
++    bool valid = abs(h.a - q.z) < 0.03 * q.z + 0.15;
++    float a = valid ? tParams.x : 1.0;
++    fragColor = vec4(mix(h.rgb, c.rgb, a), c.a);
++}
++)";
++
++static const char s_psPostGiBlurGLSL[] = R"(#version 330 core
++// RESEARCH (ssgi): depth-aware separable blur of the GI ratio (horizontal, then
++// vertical), 13 taps at half resolution.
++in vec2 vUV;
++uniform sampler2D giSrc;
++uniform vec2 stepUV;
++out vec4 fragColor;
++void main() {
++    vec4 c = texture(giSrc, vUV);
++    if (c.a > 1e5) { fragColor = c; return; }
++    vec3 sum = c.rgb;
++    float wsum = 1.0;
++    for (int i = -6; i <= 6; ++i) {
++        if (i == 0) continue;
++        vec4 s = texture(giSrc, vUV + stepUV * float(i));
++        float w = exp(-float(i * i) / 18.0) * max(0.0, 1.0 - abs(s.a - c.a) / (0.03 * c.a + 0.1));
++        sum += s.rgb * w;
++        wsum += w;
++    }
++    fragColor = vec4(sum / wsum, c.a);
++}
++)";
++
+ // Post constants shared with the lab (tests/rendering/lighting_lab/postfx.py).
+ constexpr float kAoRadius = 1.2f;      // metres
+ constexpr float kAoFadeStart = 120.0f; // metres: AO fades out with distance
+@@ -356,6 +678,14 @@ void EngineGL33::DestroyPostTargets()
+     delTex(p.aoTex[0]);
+     delTex(p.aoTex[1]);
+     delTex(p.shaftTex);
++    for (int i = 0; i < 2; ++i)
++    {
++        delFbo(p.giFbo[i]);
++        delFbo(p.giHistFbo[i]);
++        delTex(p.giTex[i]);
++        delTex(p.giHist[i]);
++    }
++    p.giHistValid = false;
+     p.w = p.h = 0;
+ }
+ 
+@@ -363,7 +693,8 @@ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+     for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite, &p.progGi,
++          &p.progGiTemporal, &p.progGiBlur})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -375,6 +706,9 @@ void EngineGL33::DestroyPostPrograms()
+         glDeleteVertexArrays(1, &p.vao);
+     }
+     p.vao = 0;
++    if (p.giMipSampler)
++        glDeleteSamplers(1, &p.giMipSampler);
++    p.giMipSampler = 0;
+     p.programsTried = false;
+ }
+ 
+@@ -391,6 +725,16 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+         p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+         p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        p.progGi = LinkPostProgram(vs, s_psPostGiGLSL, "psPostGi");
++        p.progGiTemporal = LinkPostProgram(vs, s_psPostGiTemporalGLSL, "psPostGiTemporal");
++        p.progGiBlur = LinkPostProgram(vs, s_psPostGiBlurGLSL, "psPostGiBlur");
++        LOG_INFO(Graphics, "GL33 post: ssgi programs gi={} temporal={} blur={}", p.progGi, p.progGiTemporal,
++                 p.progGiBlur);
++        glGenSamplers(1, &p.giMipSampler);
++        glSamplerParameteri(p.giMipSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++        glSamplerParameteri(p.giMipSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glSamplerParameteri(p.giMipSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glSamplerParameteri(p.giMipSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+@@ -414,6 +758,15 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.aoTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    // RESEARCH (ssgi): the colour gets a mip chain for cone-footprint hit fetches
++    // (sampled only through the GI pass's trilinear sampler object).
++    glBindTexture(GL_TEXTURE_2D, p.colorTex);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 6);
++    for (int i = 0; i < 2; ++i)
++    {
++        p.giTex[i] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++        p.giHist[i] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    }
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -445,6 +798,14 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.shaftFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.shaftTex);
+     check();
++    for (int i = 0; i < 2; ++i)
++    {
++        p.giFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.giTex[i]);
++        check();
++        p.giHistFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.giHist[i]);
++        check();
++    }
++    p.giHistValid = false;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -485,7 +846,8 @@ void EngineGL33::EndWorldScene()
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
+         return;
+-    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
++    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f &&
++        _lighting.gi <= 0.0f)
+         return; // nothing to add: leave the frame as drawn
+ 
+     FlushAndFreeAllQueues(_queueNo);
+@@ -511,7 +873,7 @@ void EngineGL33::EndWorldScene()
+     glDisable(GL_SCISSOR_TEST);
+     Poseidon::render::pipeline::DisableDepthClamp();
+     glBindVertexArray(p.vao);
+-    for (int unit : {0, 2, 3, 4, 5})
++    for (int unit : {0, 2, 3, 4, 5, 6})
+         glBindSampler(static_cast<GLuint>(unit), 0);
+ 
+     auto bindTex = [](int unit, GLuint tex)
+@@ -588,9 +950,119 @@ void EngineGL33::EndWorldScene()
+         bindTex(0, p.aoTex[1]);
+         u2f(p.progAoBlur, "stepUV", 0.0f, 1.0f / hh);
+         drawTo(p.aoFbo[0], hw, hh);
+-        GpuMark(Poseidon::gpu::Mark::AoEnd);
+     }
+ 
++    // RESEARCH (ssgi): trace, temporal accumulation, spatial blur. Its GPU time
++    // lands in the "ao" section (it runs before the AoEnd mark).
++    const bool giOn = worldDepth && _lighting.gi > 0.0f && p.progGi && p.progGiTemporal && p.progGiBlur && GScene &&
++                      GScene->GetCamera() && GScene->MainLight();
++    if (giOn)
++    {
++        Camera* cam = GScene->GetCamera();
++        LightSun* sun = GScene->MainLight();
++        const Matrix4 inv = cam->InverseScaled();
++        const Vector3 upV = inv.Rotate(Vector3(0, 1, 0));
++        const Vector3 sunV = inv.Rotate(-sun->SunDirection());
++        Vector3 ax = cam->DirectionAside(), ay = cam->DirectionUp(), az = cam->Direction();
++        ax.Normalize();
++        ay.Normalize();
++        az.Normalize();
++        const Vector3 pos = cam->Position();
++
++        // Colour mips for the hit fetches.
++        glActiveTexture(GL_TEXTURE0 + 2);
++        glBindTexture(GL_TEXTURE_2D, p.colorTex);
++        glGenerateMipmap(GL_TEXTURE_2D);
++        glBindSampler(2, p.giMipSampler);
++
++        const bool temporal = _lighting.giTemporal > 0.5f;
++        if (temporal)
++            ++p.giFrame;
++        glUseProgram(p.progGi);
++        u1i(p.progGi, "depthTex", 0);
++        u1i(p.progGi, "colorTex", 2);
++        u4f(p.progGi, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(p.progGi, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        u4f(p.progGi, "screen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
++        u4f(p.progGi, "worldRect", rectX, rectY, rectW, rectH);
++        u4f(p.progGi, "giParams", _lighting.giRadius, static_cast<float>(p.giFrame % 64u), _lighting.giMode, 0.0f);
++        u4f(p.progGi, "giParams2", _lighting.giRays, _lighting.giSteps, _giRig[0][3], _giRig[1][3]);
++        u4f(p.progGi, "upView", upV.X(), upV.Y(), upV.Z(), 0.0f);
++        u4f(p.progGi, "sunView", sunV.X(), sunV.Y(), sunV.Z(), 0.0f);
++        // The shaders' sky term is ka * rig; ka (material ambient) carries the
++        // eye accommodation (user brightness), so the rig goes in times the eye.
++        const Color eye = GetAccomodateEye();
++        u4f(p.progGi, "rigZenith", _giRig[0][0] * eye.R(), _giRig[0][1] * eye.G(), _giRig[0][2] * eye.B(), 0.0f);
++        u4f(p.progGi, "rigHorizon", _giRig[1][0] * eye.R(), _giRig[1][1] * eye.G(), _giRig[1][2] * eye.B(), 0.0f);
++        u4f(p.progGi, "rigHorizonSun", _giRig[2][0] * eye.R(), _giRig[2][1] * eye.G(), _giRig[2][2] * eye.B(), 0.0f);
++        u4f(p.progGi, "rigGround", _giRig[3][0] * eye.R(), _giRig[3][1] * eye.G(), _giRig[3][2] * eye.B(), 0.0f);
++        _giUpView[0] = upV.X();
++        _giUpView[1] = upV.Y();
++        _giUpView[2] = upV.Z();
++        _giSunView[0] = sunV.X();
++        _giSunView[1] = sunV.Y();
++        _giSunView[2] = sunV.Z();
++        bindTex(0, p.depthTex);
++        drawTo(p.giFbo[0], hw, hh);
++        glBindSampler(2, 0);
++
++        GLuint blurInput = p.giTex[0];
++        if (temporal)
++        {
++            const int prev = p.giHistCur;
++            const int cur = 1 - prev;
++            glUseProgram(p.progGiTemporal);
++            u1i(p.progGiTemporal, "curTex", 0);
++            u1i(p.progGiTemporal, "histTex", 2);
++            u4f(p.progGiTemporal, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++            u4f(p.progGiTemporal, "prevProj", 0.0f, 0.0f, p.giPrevProj[0], p.giPrevProj[1]);
++            u4f(p.progGiTemporal, "worldRect", rectX, rectY, rectW, rectH);
++            u4f(p.progGiTemporal, "curX", ax.X(), ax.Y(), ax.Z(), 0.0f);
++            u4f(p.progGiTemporal, "curY", ay.X(), ay.Y(), ay.Z(), 0.0f);
++            u4f(p.progGiTemporal, "curZ", az.X(), az.Y(), az.Z(), 0.0f);
++            u4f(p.progGiTemporal, "prevX", p.giPrevAxes[0], p.giPrevAxes[1], p.giPrevAxes[2], 0.0f);
++            u4f(p.progGiTemporal, "prevY", p.giPrevAxes[3], p.giPrevAxes[4], p.giPrevAxes[5], 0.0f);
++            u4f(p.progGiTemporal, "prevZ", p.giPrevAxes[6], p.giPrevAxes[7], p.giPrevAxes[8], 0.0f);
++            u4f(p.progGiTemporal, "dPos", pos.X() - p.giPrevPos[0], pos.Y() - p.giPrevPos[1], pos.Z() - p.giPrevPos[2],
++                0.0f);
++            u4f(p.progGiTemporal, "tParams", _lighting.giTemporal > 1.5f ? 0.04f : 0.1f, p.giHistValid ? 1.0f : 0.0f,
++                0.0f, 0.0f);
++            bindTex(0, p.giTex[0]);
++            bindTex(2, p.giHist[prev]);
++            drawTo(p.giHistFbo[cur], hw, hh);
++            p.giHistCur = cur;
++            p.giHistValid = true;
++            blurInput = p.giHist[cur];
++        }
++        else
++        {
++            p.giHistValid = false;
++        }
++        glUseProgram(p.progGiBlur);
++        u1i(p.progGiBlur, "giSrc", 0);
++        bindTex(0, blurInput);
++        u2f(p.progGiBlur, "stepUV", 1.0f / hw, 0.0f);
++        drawTo(p.giFbo[1], hw, hh);
++        bindTex(0, p.giTex[1]);
++        u2f(p.progGiBlur, "stepUV", 0.0f, 1.0f / hh);
++        drawTo(p.giFbo[0], hw, hh);
++
++        p.giPrevPos[0] = pos.X();
++        p.giPrevPos[1] = pos.Y();
++        p.giPrevPos[2] = pos.Z();
++        const float axes[9] = {ax.X(), ax.Y(), ax.Z(), ay.X(), ay.Y(), ay.Z(), az.X(), az.Y(), az.Z()};
++        for (int i = 0; i < 9; ++i)
++            p.giPrevAxes[i] = axes[i];
++        p.giPrevProj[0] = 1.0f / proj._11;
++        p.giPrevProj[1] = 1.0f / proj._22;
++    }
++    else
++    {
++        p.giHistValid = false;
++    }
++    if (aoStrength > 0.0f || giOn)
++        GpuMark(Poseidon::gpu::Mark::AoEnd);
++
+     // 2. Bloom chain.
+     if (bloomStrength > 0.0f)
+     {
+@@ -673,12 +1145,30 @@ void EngineGL33::EndWorldScene()
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    u1i(p.progComposite, "giTex", 5);
++    u1i(p.progComposite, "giDepth", 6);
++    bindTex(5, giOn ? p.giTex[0] : p.blackTex);
++    bindTex(6, p.depthTex);
++    u4f(p.progComposite, "giComp", _lighting.gi, _lighting.giFallbackShare, _lighting.giDebug, giOn ? _lighting.giMode : 0.0f);
++    u4f(p.progComposite, "giProj", proj._33, proj._43, depthScale, depthBias);
++    {
++        const Color eye = GetAccomodateEye();
++        u4f(p.progComposite, "giRigZ", _giRig[0][0] * eye.R(), _giRig[0][1] * eye.G(), _giRig[0][2] * eye.B(), _giRig[0][3]);
++        u4f(p.progComposite, "giRigH", _giRig[1][0] * eye.R(), _giRig[1][1] * eye.G(), _giRig[1][2] * eye.B(), 0.0f);
++        u4f(p.progComposite, "giRigHS", _giRig[2][0] * eye.R(), _giRig[2][1] * eye.G(), _giRig[2][2] * eye.B(), 0.0f);
++        u4f(p.progComposite, "giRigG", _giRig[3][0] * eye.R(), _giRig[3][1] * eye.G(), _giRig[3][2] * eye.B(), 0.0f);
++        u4f(p.progComposite, "giUp", _giUpView[0], _giUpView[1], _giUpView[2], 0.0f);
++        u4f(p.progComposite, "giSun", _giSunView[0], _giSunView[1], _giSunView[2], 0.0f);
++        u4f(p.progComposite, "giView", 1.0f / proj._11, 1.0f / proj._22, _lighting.giAlbedoCap, 0.0f);
++        u4f(p.progComposite, "giScreen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
++        u4f(p.progComposite, "giRect", rectX, rectY, rectW, rectH);
++    }
+     drawTo(_ssaaFbo, w, h);
+     GpuMark(Poseidon::gpu::Mark::CompositeEnd);
+ 
+     // Hand the GL state back: frame target bound with its full viewport, unit 0
+     // sampler restored, caches invalidated so the next draw re-applies state.
+-    for (int unit : {0, 2, 3, 4, 5})
++    for (int unit : {0, 2, 3, 4, 5, 6})
+     {
+         glActiveTexture(GL_TEXTURE0 + unit);
+         glBindTexture(GL_TEXTURE_2D, 0);

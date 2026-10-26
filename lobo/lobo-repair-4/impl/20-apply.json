@@ -1,0 +1,70 @@
+{
+  "repair_version": "2026-10-11.4",
+  "rule_sha256": "f6e16ee80ec1c0698394d17ede66506c18a31bb443c9ef63f8cb12373374d1f9",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "apply",
+  "compatibility": "ud",
+  "changed_members": 7,
+  "added_members": 0,
+  "archives": [
+    "lobo_airammo",
+    "lobo_pilot",
+    "loboil28",
+    "lobomig",
+    "loboter"
+  ],
+  "skipped": [],
+  "members": [
+    {
+      "member": "lobo_airammo/lobo_aim9.p3d",
+      "before_sha256": "0b294d9e18111eb549a138cdd313b8c60de20121433bf24648a25491e3e665e9",
+      "after_sha256": "4e7f2e733e882174ebfbbe4b2700e0147c9a79461d84f5a7587d7773f43ee6b5",
+      "before_bytes": 23113,
+      "after_bytes": 23113
+    },
+    {
+      "member": "lobo_pilot/config.cpp",
+      "before_sha256": "db7da9fb7347d772633e8208fff7eb44095c642184367e6160db362fd7806e28",
+      "after_sha256": "47ac0111b99b0f9d088a4fa56b7426293d75cbed8433f925f4422196069f80d6",
+      "before_bytes": 22148,
+      "after_bytes": 22148
+    },
+    {
+      "member": "lobo_pilot/lobo_epilot.p3d",
+      "before_sha256": "bdb8ebbf99c7f1d16b3df6c63f32642a5ca0ef39d3d30b29bd101c9f546316e5",
+      "after_sha256": "18422e9da1a384b126be0574a8b13ad58a63efc60e5e658c465344cfaed94f71",
+      "before_bytes": 1231511,
+      "after_bytes": 1231511
+    },
+    {
+      "member": "loboil28/script/tailgun.sqs",
+      "before_sha256": "9b92d408f3d64b7d934cdd01ec1622567e53bfd2eaa0ae8e04eb98bbc2770151",
+      "after_sha256": "a2aed3ca23bb70b997e3bfdadb02e4df2547803426e110057a93304dd7bb98a0",
+      "before_bytes": 1872,
+      "after_bytes": 1908
+    },
+    {
+      "member": "lobomig/config.cpp",
+      "before_sha256": "599760d9a35419ad84a8d34bdeae09332198680eff38959a0c1a9a7bd0b54eb7",
+      "after_sha256": "1ca20ca72027a21fccc47c569184611f8e401781f39a93dd30edff0e7ab24664",
+      "before_bytes": 39012,
+      "after_bytes": 39011
+    },
+    {
+      "member": "loboter/lobo_terhilux.p3d",
+      "before_sha256": "731a5d77540ad069678e13d86275c78f3dc52ff62c045c13818bcdd800dc64e0",
+      "after_sha256": "b96ec642ae6040067d1893bcad6e60783c50698eca9c3a9957f8e17a23e6607d",
+      "before_bytes": 3141285,
+      "after_bytes": 3141285
+    },
+    {
+      "member": "loboter/lobo_terhiluxmg.p3d",
+      "before_sha256": "6cb798ee256741971cef9b84fbaf672f0b56eeee2826f1b4f4f3f563faf423b2",
+      "after_sha256": "09ec6792486e02f733579752672b3a61303e8c1d1223fe975917ee4334bab116",
+      "before_bytes": 4252849,
+      "after_bytes": 4252849
+    }
+  ],
+  "asset_source_sha256": "79cdb0bb937e9e05d43781da0337af36f6d3cca93e4d09658e9847a4d70b3ff5",
+  "backup_manifest": "D:\\Arma_CWA\\@LoBo\\.ud-backups\\issue-69\\20261012T085301Z-fdbc36a3\\manifest.json"
+}

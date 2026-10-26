@@ -1,0 +1,126 @@
+; ============================================================================
+;  init.sqs  -  Qrf.Abel bootstrap (auto-loaded by RunInitScript)
+; ----------------------------------------------------------------------------
+;  A single-purpose sandbox for the occupier ALERT -> QRF chain. The native
+;  side (ZoneRegistry + AlertMachine + GarrisonCache, activated by
+;  CfgGuerrillaZones in description.ext) runs the zones, the garrison cache
+;  and the GREEN/YELLOW/RED FSM; the campaign's OWN qrf.sqs, exec'd out of
+;  the ONE shared core at <GameDir>\gmcore (no copy lives here), supplies
+;  the policy:
+;  garrison posture edges, YELLOW investigate moves, the RED QRF convoy, the
+;  stall-insertion fallback and the stand-down. This file only:
+;    1. seeds the script-side state qrf.sqs/lib.sqs read (GM_Z_* tuple
+;       constants, gmWarLevel, the gmEvtAlert queue + its one-line native
+;       handler) - the same names init.sqs of a Guerrilla campaign seeds;
+;    2. creates the zone markers (the engine repaints only markers that
+;       already exist);
+;    3. execs \gmcore\scripts\lib.sqs then \gmcore\scripts\qrf.sqs out of
+;       the SHARED CORE installed at <GameDir>\gmcore (the leading
+;       backslash resolves against the game data root, not this mission
+;       folder) - and NOTHING else from
+;       the core (no capture/economy/recruit/civilian managers), so the QRF
+;       system is the only moving part on display;
+;    4. props: binoculars, an RPG on the ground (kill the escort, watch the
+;       squad dismount), a resistance jeep to chase or flee the convoy;
+;    5. the debug self-actions (act_*.sqs) + the readout loop (hud.sqs).
+;  DIALECT: SQS. A mid-line ; is a STATEMENT SEPARATOR, not a comment.
+; ============================================================================
+
+? not (isNil "QRF_BOOTED") : exit
+QRF_BOOTED = true
+
+aP = player
+gmPlayer = player
+
+; ---- zone tuple index constants (the shape `gmZone <i>` returns; lib.sqs
+;      and qrf.sqs read GM_Z_POS / GM_Z_NAME / GM_Z_OWNER / GM_Z_TYPE) -------
+GM_Z_NAME    = 0
+GM_Z_TYPE    = 1
+GM_Z_OWNER   = 2
+GM_Z_GAR     = 3
+GM_Z_SUPPORT = 4
+GM_Z_INCOME  = 5
+GM_Z_HEAT    = 6
+GM_Z_MARKER  = 7
+GM_Z_POS     = 8
+GM_Z_CAPTURE = 9
+
+; ---- script scalars the native layer + qrf.sqs read --------------------------
+;   gmWarLevel   1..10: picks the QRF's troop tier (faction tiers[] /
+;                tiersMG/AT/Medic/Sniper[]) and escort hull (vehicles[]);
+;                act_warlevel.sqs cycles it live
+;   gmUndercover false here: you are an ARMED fighter, the garrison reads you
+;                as hostile the moment it perceives you (no disguise layer)
+gmWarLevel   = 1
+gmUndercover = false
+; lib.sqs helpers reference these rosters; seeded empty so a stray call is safe
+GM_GEAR_THRESHOLD = 25
+GM_GEAR_ITEMS     = []
+GM_GEAR_COUNT     = []
+GM_GEAR_UNLOCKED  = []
+GM_RESENT_ZONES   = []
+GM_RESENT_DUE     = []
+GM_RESENT_AMT     = []
+GM_RESENT_MAXPEND = 3
+
+; ---- zone markers (the engine repaints only markers that already exist) -----
+QRF_i = 0
+#mkmarkers
+? QRF_i >= gmZoneCount : goto "mkdone"
+QRF_rec = gmZone QRF_i
+QRF_m = createMarker [(QRF_rec select GM_Z_MARKER), (QRF_rec select GM_Z_POS)]
+(QRF_rec select GM_Z_MARKER) setMarkerType "Flag"
+(QRF_rec select GM_Z_MARKER) setMarkerSize [0.6, 0.6]
+QRF_i = QRF_i + 1
+goto "mkmarkers"
+#mkdone
+
+; ---- zone handles for the actions + HUD --------------------------------------
+QRF_ZO = gmZoneIndex "Outpost"
+QRF_ZD = gmZoneIndex "Depot"
+QRF_ZC = gmZoneIndex "Camp"
+
+; ---- the native alertChanged event -> queue (handlers cannot ~sleep;
+;      qrf.sqs is the one consumer, exactly as in the campaign) ---------------
+gmEvtAlert = []
+gmAlertOnEvent ["alertChanged", {gmEvtAlert = gmEvtAlert + [_this]}]
+
+; ---- mission-local state the HUD/actions share --------------------------------
+QRF_god = false
+QRF_REVEAL_ACTIVE = false
+
+; ============================================================================
+;  PROPS
+; ============================================================================
+aP addWeapon "Binocular"
+; an RPG + 3 rockets ~8 m east of the player start: for the escort vehicle
+QRF_wh = "WeaponHolder" createVehicle [7213, 6046, 0]
+QRF_wh addWeaponCargo ["RPGLauncher", 1]
+QRF_wh addMagazineCargo ["RPGLauncher", 3]
+QRF_wh addMagazineCargo ["AK47", 6]
+; a resistance jeep (faction descriptor, war-level 1 hull) parked behind you
+QRF_jc = gmFactionVehicle [gmResistanceSide, 1]
+? QRF_jc != "" : QRF_jeep = QRF_jc createVehicle [7190, 6058, 0]
+
+; ============================================================================
+;  SELF-ACTIONS (debug menu) + HUD
+; ============================================================================
+QRF_a1 = aP addAction ["Report: alert + QRF status", "act_status.sqs"]
+QRF_a2 = aP addAction ["DEBUG: reveal me to the Outpost garrison (30 s)", "act_reveal.sqs"]
+QRF_a3 = aP addAction ["DEBUG: War Level +1 (next QRF tier)", "act_warlevel.sqs"]
+QRF_a4 = aP addAction ["DEBUG: wipe garrison memory (force-despawn)", "act_despawn.sqs"]
+QRF_a5 = aP addAction ["DEBUG: recruit 3 fighters", "act_recruit.sqs"]
+QRF_a6 = aP addAction ["DEBUG: teleport to the Outpost wire", "act_tp_wire.sqs"]
+QRF_a7 = aP addAction ["DEBUG: teleport back to the Camp", "act_tp_camp.sqs"]
+QRF_a8 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
+
+; ============================================================================
+;  LAUNCH: helpers first (qrf.sqs gates on @GM_LIB_READY), then THE campaign
+;  QRF policy script, then the readout
+; ============================================================================
+GM_LIB_READY = false
+[] exec "\gmcore\scripts\lib.sqs"
+@GM_LIB_READY
+[] exec "\gmcore\scripts\qrf.sqs"
+[] exec "hud.sqs"
+exit

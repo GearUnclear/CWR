@@ -1,0 +1,254 @@
+[
+  {
+    "id": "b01",
+    "bank": "kBio0Friendly",
+    "variant": 0,
+    "beat": "A former farmhand near {Place} badly wants to write poetry and keeps trying after losing the family's fields.",
+    "direction": "Make this person likable and a little self-conscious. They can be useful at farm work and hopeless at rhymes, or hide drafts until a friend asks. Tell a small incident that shows the wish to write. No grand poem about land or destiny; keep the narration plain."
+  },
+  {
+    "id": "b02",
+    "bank": "kBio0Friendly",
+    "variant": 1,
+    "beat": "A furniture maker near {Place} uses humor to keep spirits up after the family loses its home.",
+    "direction": "Give them affectionate, slightly cheeky charm. A customer, sibling or older relative is a good partner for a tiny exchange. Their jokes should sound like something someone would actually say, not a polished one-liner about justice. Let a joke coexist with a real worry."
+  },
+  {
+    "id": "b03",
+    "bank": "kBio0Friendly",
+    "variant": 2,
+    "beat": "A former survey assistant near {Place} has a guilty secret: once helped falsify a land claim for money.",
+    "direction": "Give this companion a dark past and a reason to try to make amends. Do not automatically make the person noble now. One concrete attempt to put something right can be enough. Leave the secret troubling rather than ending with redemption."
+  },
+  {
+    "id": "b04",
+    "bank": "kBio0Friendly",
+    "variant": 3,
+    "beat": "A shop worker near {Place} sent complaints for years, then joined an earlier resistance cell and discovered it stole from local shops too.",
+    "direction": "Write about disappointment with people on their own side. They still help, but have a limit they will argue over. Show a specific disagreement, not a general sentence about imperfect ideals. Their stubbornness can make them likable."
+  },
+  {
+    "id": "b05",
+    "bank": "kBio0Friendly",
+    "variant": 4,
+    "beat": "A shepherd near {Place} is rough with people but absurdly patient with frightened animals.",
+    "direction": "Make this a charming contrast through a small event. They might swear at a guard and then spend an hour coaxing a stray animal home. Do not explain that they have a heart of gold. Let the behavior show it; mild humor is welcome."
+  },
+  {
+    "id": "b06",
+    "bank": "kBio0Friendly",
+    "variant": 5,
+    "beat": "A seasonal worker near {Place} keeps inviting lonely people to meals even when food is scarce.",
+    "direction": "Make this warm, sociable and credible. Tell one meal or awkward invitation, not a life summary. They may tease guests, hide that they ate less, or care about everyone turning up. Pick one; no sermon about generosity."
+  },
+  {
+    "id": "b07",
+    "bank": "kBio0Hostile",
+    "variant": 0,
+    "beat": "A career quartermaster near {Place} feeds stray dogs while requisitioning food from families.",
+    "direction": "Give this enemy a real soft spot and an ugly blind spot. Show both in a brief event; do not call them a hypocrite. Their care for an animal is sincere, not a fake kindness to soften a villain."
+  },
+  {
+    "id": "b08",
+    "bank": "kBio0Hostile",
+    "variant": 1,
+    "beat": "An officer near {Place} was pushed into the army by family and secretly wants to play music for a living.",
+    "direction": "Make this a private wish under pressure from a parent. Give one small musical habit or remembered performance. Do not make their background excuse everything they do. This is about an ordinary talent and the life they did not choose."
+  },
+  {
+    "id": "b09",
+    "bank": "kBio0Hostile",
+    "variant": 2,
+    "beat": "A military engineer near {Place} lost friends through a bad decision and now cannot leave faulty equipment alone.",
+    "direction": "Give them a troubled past that shows up in a believable habit. They overcheck repairs, stay awake, or become short-tempered when rushed. Choose one and tell a small incident. No diagnosis or neat moral."
+  },
+  {
+    "id": "b10",
+    "bank": "kBio0Hostile",
+    "variant": 3,
+    "beat": "An administrator near {Place} once sold access permits on the side and turned in an accomplice when caught.",
+    "direction": "Make this openly selfish and uneasy. They saved their career at someone else's expense. A single detail about the person betrayed can make it hurt. No grand statement about ambition or betrayal."
+  },
+  {
+    "id": "b11",
+    "bank": "kBio0Hostile",
+    "variant": 4,
+    "beat": "A veteran officer near {Place} has a knack for making frightened young soldiers laugh before an unpleasant job.",
+    "direction": "Make the charm feel earned: a bad joke, an embarrassing story or a silly routine. They are still an enemy officer, not secretly on the player's side. Avoid the standard gruff veteran with a hidden heart; give one particular moment."
+  },
+  {
+    "id": "b12",
+    "bank": "kBio0Hostile",
+    "variant": 5,
+    "beat": "An officer near {Place} enjoys humiliating petitioners and remembers the names of people who challenge them.",
+    "direction": "Make this person unpleasant in a specific, ordinary way. Show a petty punishment or a held grudge. Keep it clear and unsettling rather than theatrical or cartoonishly evil. No slogan about power."
+  },
+  {
+    "id": "b13",
+    "bank": "kBio1Friendly",
+    "variant": 0,
+    "beat": "A teacher near {Place} smuggled lessons to absent pupils and is embarrassed by being called brave.",
+    "direction": "Give this character a small, likable scene with a child or parent. They may have made mistakes or carried the wrong books. Warmth and awkwardness matter more than heroic praise. No automatic inspirational ending."
+  },
+  {
+    "id": "b14",
+    "bank": "kBio1Friendly",
+    "variant": 1,
+    "beat": "A former messenger near {Place} freezes when asked to deliver a letter after one earlier delivery led to a friend's arrest.",
+    "direction": "Make the earlier resistance experience concrete. The fear can be hard to admit, and the character can still be useful or caring. Show one hesitation or request. Avoid a poetic sentence about the weight of letters."
+  },
+  {
+    "id": "b15",
+    "bank": "kBio1Friendly",
+    "variant": 2,
+    "beat": "A bicycle repairer near {Place} gives machines silly names and argues with them while working.",
+    "direction": "Make this funny and fond, with a habit another person might enjoy or find tiresome. Include one small repair mishap or exchange. Keep road restrictions as background rather than the whole identity. A short ordinary quote is welcome."
+  },
+  {
+    "id": "b16",
+    "bank": "kBio1Friendly",
+    "variant": 3,
+    "beat": "A former clerk near {Place} served an earlier resistance cell and left after its leader falsely accused a friend of informing.",
+    "direction": "Give them a troubled history in the resistance, including anger at their own side. They can demand evidence, refuse to name people, or regret staying silent. Choose one strong incident. Avoid ending with a general lesson about trust."
+  },
+  {
+    "id": "b17",
+    "bank": "kBio1Friendly",
+    "variant": 4,
+    "beat": "A tailor near {Place} wants to make a wedding outfit and attend a family wedding despite travel restrictions.",
+    "direction": "Keep this hopeful and charming, with an ordinary ambition that matters to them. A fit problem, a teasing relative or saving cloth can make it personal. Do not turn every wish into liberation rhetoric. Let the wedding matter on its own."
+  },
+  {
+    "id": "b18",
+    "bank": "kBio1Friendly",
+    "variant": 5,
+    "beat": "A water carrier near {Place} remembers people's birthdays and has friends among guards and local families.",
+    "direction": "Give them easy social charm that sometimes creates trouble in the resistance. An earlier cell might question a friendly chat with a guard. Show how they respond without making them secretly an informer. One conversational moment."
+  },
+  {
+    "id": "b19",
+    "bank": "kBio1Hostile",
+    "variant": 0,
+    "beat": "An officer near {Place} is affectionate with family but threatened residents during an earlier crackdown.",
+    "direction": "Give this enemy a disturbing difference between home and work. Use two concrete actions or one encounter where the two meet. Do not tell the reader which side is the real person."
+  },
+  {
+    "id": "b20",
+    "bank": "kBio1Hostile",
+    "variant": 1,
+    "beat": "An officer near {Place} is a compulsive gambler and owes money to someone the army is supposed to arrest.",
+    "direction": "Make this a personal mess rather than a mastermind plot. A lost card game, a dodged meeting or a favor is enough. A little uncomfortable humor is fine. Do not imply a new gameplay mission or a guaranteed betrayal."
+  },
+  {
+    "id": "b21",
+    "bank": "kBio1Hostile",
+    "variant": 2,
+    "beat": "An officer near {Place} became overly violent after an earlier ambush and now scares their own troops.",
+    "direction": "Show what 'overly violent' means through a clear past incident, without graphic detail or combat instructions. A subordinate's reaction can tell us something. Do not excuse the violence or describe the person with a vague darkness metaphor."
+  },
+  {
+    "id": "b22",
+    "bank": "kBio1Hostile",
+    "variant": 3,
+    "beat": "A checkpoint officer near {Place} loves cooking and brags about meals while making travelers wait.",
+    "direction": "Make the person memorable through food and the everyday annoyance they cause. They can be funny and inconsiderate at once. Use one small incident, not a list of quirks or a verdict about cruelty."
+  },
+  {
+    "id": "b23",
+    "bank": "kBio1Hostile",
+    "variant": 4,
+    "beat": "An officer near {Place} used to act in amateur theatre and rehearses speeches to frightened visitors.",
+    "direction": "Make this vanity and performance slightly ridiculous, then let the visitor's actual problem matter. A short quote or awkward pause may help. No abstract explanation of 'rehearsed self-justification'."
+  },
+  {
+    "id": "b24",
+    "bank": "kBio1Hostile",
+    "variant": 5,
+    "beat": "A homesick officer near {Place} writes cheerful letters that hide how badly the posting is going.",
+    "direction": "Make this quiet and vulnerable. One thing omitted from a letter or one missed family occasion can tell the story. Do not make the officer automatically kind; the point is the difference between what they write and what they live through."
+  },
+  {
+    "id": "b25",
+    "bank": "kBio2Friendly",
+    "variant": 0,
+    "beat": "A radio repairer near {Place} wants to host a music show and has kept a box of records through several moves.",
+    "direction": "Make this lively, hopeful and specific. Let music be an interest they actually enjoy, not a symbol of freedom. A small mishap with an old set or a friend's terrible taste can supply charm. Fighting is background."
+  },
+  {
+    "id": "b26",
+    "bank": "kBio2Friendly",
+    "variant": 1,
+    "beat": "A survivor near {Place} deserted an earlier resistance group during a bad night and never told the family why.",
+    "direction": "Give this companion a dark, difficult past. They may have saved someone, abandoned someone or simply been afraid, but keep the facts understandable. Avoid both a heroic reveal and a final sentence judging cowardice."
+  },
+  {
+    "id": "b27",
+    "bank": "kBio2Friendly",
+    "variant": 2,
+    "beat": "A former orchard worker near {Place} tells entertaining stories about escaping the fighting, but changes an embarrassing detail each time.",
+    "direction": "Give them charm and a harmless lie rather than a grand heroic backstory. One changed detail or a friend correcting them can carry it. The memory should have a clear event, not lyrical symbolism."
+  },
+  {
+    "id": "b28",
+    "bank": "kBio2Friendly",
+    "variant": 3,
+    "beat": "A shop worker near {Place} cared for a wounded opponent during earlier fighting and was threatened by their own resistance cell.",
+    "direction": "Make this about a hard personal choice and trouble on their own side. Keep the care practical and the disagreement specific. Do not end with a speech about humanity transcending sides."
+  },
+  {
+    "id": "b29",
+    "bank": "kBio2Friendly",
+    "variant": 4,
+    "beat": "A person from {Place} keeps trying to learn a family recipe from a mother who will not talk about the fighting.",
+    "direction": "Make this an affectionate, awkward family scene with old pain underneath. The recipe can matter as food, not a contrived symbol. One failed attempt or teasing reply is enough. No neat explanation of inherited trauma."
+  },
+  {
+    "id": "b30",
+    "bank": "kBio2Friendly",
+    "variant": 5,
+    "beat": "An eager volunteer near {Place} loves the idea of being a fighter, but panicked during an earlier resistance operation.",
+    "direction": "Make them likable without hiding the failure. They might overprepare afterwards, make jokes when ashamed, or ask an older fighter for help. Pick one. Avoid a redemption arc completed in thirty words."
+  },
+  {
+    "id": "b31",
+    "bank": "kBio2Hostile",
+    "variant": 0,
+    "beat": "An officer near {Place} covered up a friend's misconduct and now avoids that friend's letters.",
+    "direction": "Make the secret concrete and the relationship uncomfortable. Say what they hid, in plain terms, without graphic detail. Avoid a grand line about lies consuming people."
+  },
+  {
+    "id": "b32",
+    "bank": "kBio2Hostile",
+    "variant": 1,
+    "beat": "An officer near {Place} writes poems in private and hates the patriotic verse they are ordered to read aloud.",
+    "direction": "Make this personal, a little awkward and memorable. They can be bad at writing or simply want to write about ordinary things. No lyrical narrator or polished quoted poem; the desire to write is enough."
+  },
+  {
+    "id": "b33",
+    "bank": "kBio2Hostile",
+    "variant": 2,
+    "beat": "An officer near {Place} lost a brother and now treats one young recruit like family, sometimes unfairly.",
+    "direction": "Make this both tender and troubling. One favor or scolding can show grief affecting how they act. Do not reduce it to revenge or explain that the recruit is a replacement brother."
+  },
+  {
+    "id": "b34",
+    "bank": "kBio2Hostile",
+    "variant": 3,
+    "beat": "An officer near {Place} once beat a prisoner badly and was disturbed by how little anyone questioned it.",
+    "direction": "Give this enemy a dark past with a believable later response: silence, shame, repeating the violence, or trying to avoid another interrogation. Pick one; no neat absolution. Keep the violence non-graphic."
+  },
+  {
+    "id": "b35",
+    "bank": "kBio2Hostile",
+    "variant": 4,
+    "beat": "An officer near {Place} proudly wears a medal for an action a subordinate actually carried out.",
+    "direction": "Make this vain, awkward and human. One encounter with the subordinate or one rehearsed account is enough. Let the reader see the stolen credit without calling it hypocrisy. No complicated battle timeline."
+  },
+  {
+    "id": "b36",
+    "bank": "kBio2Hostile",
+    "variant": 5,
+    "beat": "An officer near {Place} enjoys violence and told a funny barracks story that made the room go quiet.",
+    "direction": "Make this unsettling through a clear, non-graphic anecdote and the listeners' reaction. Avoid a villain monologue or grand claim about darkness. Show that what they find amusing alarms other people."
+  }
+]

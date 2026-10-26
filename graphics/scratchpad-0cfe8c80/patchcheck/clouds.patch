@@ -1,0 +1,851 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..10f2018 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,16 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"skyClouds", &remaster::LightingTuning::skyClouds},
++        {"cloudShadowSource", &remaster::LightingTuning::cloudShadowSource},
++        {"r0", &remaster::LightingTuning::r0},
++        {"r1", &remaster::LightingTuning::r1},
++        {"r2", &remaster::LightingTuning::r2},
++        {"r3", &remaster::LightingTuning::r3},
++        {"r4", &remaster::LightingTuning::r4},
++        {"r5", &remaster::LightingTuning::r5},
++        {"r6", &remaster::LightingTuning::r6},
++        {"r7", &remaster::LightingTuning::r7},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 8827196..42ea8e5 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -827,6 +827,9 @@ class Engine : public IGraphicsEngine
+     /// is being drawn inside the world pass: the remastered post pass then adds
+     /// no glow this frame, so the overlay's black surround stays black.
+     virtual void MarkWorldOverlay() {}
++    /// RESEARCH (clouds track): the draws that follow are the sky dome (1), the
++    /// cloud sheets (2) or ordinary geometry (0).
++    virtual void SetRemasterSkyMode(int /*mode*/) {}
+     /// Dev: rebuild every shader program at the start of the next frame, picking
+     /// up edits in the shader override directory (CWR_SHADER_OVERRIDE_DIR).
+     virtual void RequestShaderReload() {}
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..24ce592 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,11 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // RESEARCH (clouds track): lit sky clouds and sky-consistent cloud shadows.
++    float skyClouds = 1.0f;        // 0 = classic pre-lit sky and clouds, 1 = lit volumes
++    float cloudShadowSource = 1.0f; // 0 = noise field, 1 = shadows of the sky's own cloud sheets
++    float r0 = 0.0f, r1 = 0.0f, r2 = 0.0f, r3 = 0.0f; // free research knobs passed to the shaders
++    float r4 = 0.0f, r5 = 0.0f, r6 = 0.0f, r7 = 0.0f;
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp b/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp
+index 66f4e09..1275798 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp
+@@ -693,8 +693,23 @@ class Landscape: public SerializeClass
+ 	void DrawSky(Scene &scene);
+ 	void DrawHorizont(Scene &scene);
+ 	void DrawClouds(Scene &scene);
++	void DrawCloudsClassic(Scene &scene);
+ 	void Draw( Scene &scene );
+ 
++	// RESEARCH (clouds track): the sky's cloud sheets (DrawClouds) at their
++	// true world positions, for a cloud shadow map that matches the sky.
++	struct CloudSheet
++	{
++		float x, y, z, azimut;
++		int type;
++	};
++	// Sheets of one sky level whose centres lie in [xMin,xMax] x [zMin,zMax]
++	// (true world metres). Returns the count written.
++	int CollectCloudSheets(int level, float xMin, float zMin, float xMax, float zMax, CloudSheet *out, int maxOut) const;
++	static int CloudSheetLevels() {return 3;}
++	float CloudSheetAltitude(int level) const;
++	LODShapeWithShadow *CloudSheetShape(int type) const;
++
+ 	void DrawWater(const LandBegEnd &bigRect, Scene &scene);
+ 	void DrawGround
+ 	(
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+index 1c70b8e..e735b13 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+@@ -1673,7 +1673,9 @@ void Landscape::DrawSky(Scene& scene)
+     float clipLevel = skyPosition.Y();
+     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
+ 
++    GEngine->SetRemasterSkyMode(1); // RESEARCH (clouds): the dome is lit as a cloud layer
+     _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
++    GEngine->SetRemasterSkyMode(0);
+     float starsVisibility = (
+         // see TLVertexMesh::DoStarLighting
+         // overcast limitation
+@@ -1686,7 +1688,42 @@ void Landscape::DrawSky(Scene& scene)
+     }
+     scene.GetCamera()->CancelUserClip();
+ 
++    // RESEARCH (clouds track): one-time dump of the dome mesh (direction + UV).
++    static bool s_domeLogged = false;
++    if (!s_domeLogged && _skyObject)
++    {
++        s_domeLogged = true;
++        LODShapeWithShadow* ls = _skyObject->GetShape();
++        Shape* sh = ls ? ls->LevelOpaque(0) : nullptr;
++        if (sh)
++        {
++            Vector3 bc = ls->BoundingCenter();
++            for (int i = 0; i < sh->NPos(); i++)
++            {
++                Vector3 p = sh->Pos(i) + bc;
++                LOG_INFO(World, "CLOUDSDOME;i={};x={:.3f};y={:.3f};z={:.3f};u={:.4f};v={:.4f}", i, p.X(), p.Y(), p.Z(),
++                         sh->U(i), sh->V(i));
++            }
++        }
++        for (int t = 0; t < N_CLOUDS; t++)
++        {
++            LODShapeWithShadow* cs = GScene->Preloaded(CloudShapes[t]);
++            Shape* csh = cs ? cs->LevelOpaque(0) : nullptr;
++            if (!csh)
++                continue;
++            Vector3 cbc = cs->BoundingCenter();
++            for (int i = 0; i < csh->NPos(); i++)
++            {
++                Vector3 p = csh->Pos(i) + cbc;
++                LOG_INFO(World, "CLOUDSSHEET;type={};i={};x={:.1f};y={:.1f};z={:.1f};u={:.4f};v={:.4f}", t, i, p.X(),
++                         p.Y(), p.Z(), csh->U(i), csh->V(i));
++            }
++        }
++    }
++
++    GEngine->SetRemasterSkyMode(3); // RESEARCH (clouds): the sun disk dims behind a dome cloud
+     _sunObject->Draw(0, ClipAll & ~ClipBack, *_sunObject);
++    GEngine->SetRemasterSkyMode(0);
+     _moonObject->Draw(0, ClipAll & ~ClipBack, *_moonObject);
+ }
+ 
+@@ -1702,7 +1739,73 @@ struct CloudInfo
+     float posX, posZ, azimut;
+ };
+ 
++float Landscape::CloudSheetAltitude(int level) const
++{
++    const static float skyY[SKY_LEVELS] = {6000, 4000, 2000};
++    float height = CloudsBrightness();
++    saturate(height, 0.6, 1);
++    return skyY[level] * height;
++}
++
++LODShapeWithShadow* Landscape::CloudSheetShape(int type) const
++{
++    if (type < 0 || type >= N_CLOUDS || !GScene)
++        return nullptr;
++    return GScene->Preloaded(CloudShapes[type]);
++}
++
++// Same placement as DrawClouds, for any rectangle of the world.
++int Landscape::CollectCloudSheets(int level, float xMin, float zMin, float xMax, float zMax, CloudSheet* out,
++                                  int maxOut) const
++{
++#define SP (2.0f)
++    const static float skyXSpeed[SKY_LEVELS] = {+0.020 * SP, +0.012 * SP, +0.010 * SP};
++    const static float skyZSpeed[SKY_LEVELS] = {+0.004 * SP, -0.002 * SP, -0.004 * SP};
++#undef SP
++    if (level < 0 || level >= SKY_LEVELS)
++        return 0;
++    float cPos = CloudsPosition();
++    float xMove = cPos * skyXSpeed[level];
++    float zMove = cPos * skyZSpeed[level];
++    int xMoveInt = toIntFloor(xMove);
++    int zMoveInt = toIntFloor(zMove);
++    xMove -= xMoveInt;
++    zMove -= zMoveInt;
++    xMove *= SKY_GRID;
++    zMove *= SKY_GRID;
++    const float posY = CloudSheetAltitude(level);
++    const int xBeg = toIntFloor(xMin / SKY_GRID) - 1, xEnd = toIntCeil(xMax / SKY_GRID) + 1;
++    const int zBeg = toIntFloor(zMin / SKY_GRID) - 1, zEnd = toIntCeil(zMax / SKY_GRID) + 1;
++    int n = 0;
++    for (int zz = zBeg; zz <= zEnd; zz++)
++    {
++        for (int xx = xBeg; xx <= xEnd; xx++)
++        {
++            int seedXZ = _randGen.GetSeed(xx - xMoveInt, zz - zMoveInt, level);
++            int isHere = toIntFloor(_randGen.RandomValue(seedXZ) * 8);
++            if (isHere >= N_CLOUDS)
++                continue;
++            if (n >= maxOut)
++                return n;
++            CloudSheet& c = out[n++];
++            c.x = xx * SKY_GRID + xMove + _randGen.RandomValue(seedXZ + 1) * (SKY_GRID * 0.5);
++            c.z = zz * SKY_GRID + zMove + _randGen.RandomValue(seedXZ + 2) * (SKY_GRID * 0.5);
++            c.y = posY;
++            c.azimut = _randGen.RandomValue(seedXZ + 3) * (2 * H_PI / 2);
++            c.type = isHere;
++        }
++    }
++    return n;
++}
++
+ void Landscape::DrawClouds(Scene& scene)
++{
++    GEngine->SetRemasterSkyMode(2); // RESEARCH (clouds): cloud sheets lit as volumes
++    DrawCloudsClassic(scene);
++    GEngine->SetRemasterSkyMode(0);
++}
++
++void Landscape::DrawCloudsClassic(Scene& scene)
+ {
+     const Camera& camera = *scene.GetCamera();
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..4f3167e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -700,6 +700,17 @@ class EngineGL33 : public Engine
+             _worldOverlayDrawn = true;
+     }
+     std::string ShaderOverrideDirectory() const override { return ShaderOverrideDir(); }
++    // RESEARCH (clouds track): sky dome / cloud sheet draws get lit-cloud shading.
++    void SetRemasterSkyMode(int mode) override;
++    void UploadSkyCamera();
++    unsigned int SkyTextureHandle() const;
++    // Cloud-density map derived from the weather sky texture (RGBA8 256x256:
++    // r = broken-cloud feature, g = overcast-deck row, b = darkness), rebuilt
++    // when the sky texture or its weather interpolation changes.
++    void UpdateSkyDensityMap();
++    unsigned int _skyDensityTex = 0;
++    const void* _skyDensityKey[2] = {};
++    float _skyDensityKeyF = -1.0f;
+     void SetGpuTimingEnabled(bool enabled) override;
+     bool GpuTimingEnabled() const override { return _gpuTiming; }
+     std::string GpuTimingSummary() const override;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..af87c86 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -10,14 +10,17 @@
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ #include <PoseidonGL33/GL33BindCache.hpp>
++#include <PoseidonGL33/TextureGL33.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <cstring>
++#include <vector>
+ 
+ using namespace Poseidon::gl33lighting;
+ namespace rm = Poseidon::remaster;
+@@ -136,6 +139,8 @@ void EngineGL33::DeinitLightingResources()
+         t = 0;
+     };
+     delTex(_terrainHorizonTex);
++    delTex(_skyDensityTex); // RESEARCH (clouds track)
++    _skyDensityKey[0] = _skyDensityKey[1] = nullptr;
+     delTex(_terrainHeightTex);
+     delTex(_cloudNoiseTex);
+     delTex(_dummyDepthArray);
+@@ -273,6 +278,196 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    {
++        const unsigned int sky = SkyTextureHandle();
++        GL33Bind::Tex2D(kSkyTexUnit, sky ? sky : _post.whiteTex);
++    }
++    GL33Bind::ActiveUnit(0);
++}
++
++// RESEARCH (clouds track) -------------------------------------------------------
++unsigned int EngineGL33::SkyTextureHandle() const
++{
++    return _skyDensityTex;
++}
++
++namespace
++{
++float SmoothStep(float a, float b, float x)
++{
++    float t = (x - a) / (b - a);
++    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
++    return t * t * (3.0f - 2.0f * t);
++}
++} // namespace
++
++// The weather skies (jasno, oblacno, zatazeno) are painted panoramas: clear sky
++// is saturated blue that pales toward the horizon. Cloud is judged against its
++// own row (same elevation): whiter than the clearest sky in that row is broken
++// cloud; a row that is grey all the way round is a candidate overcast deck
++// (the shader gates it by the weather). Runtime-derived, no new art.
++void EngineGL33::UpdateSkyDensityMap()
++{
++    Landscape* land = GScene ? GScene->GetLandscape() : nullptr;
++    Texture* t = land ? land->SkyTexture() : nullptr;
++    if (!t)
++        return;
++    const TextureGL33* tg = static_cast<const TextureGL33*>(t);
++    const void* k0 = tg;
++    const void* k1 = tg->InterpolationPartner();
++    const float kf = tg->InterpolationFactor();
++    if (_skyDensityTex && k0 == _skyDensityKey[0] && k1 == _skyDensityKey[1] &&
++        std::fabs(kf - _skyDensityKeyF) < 0.01f)
++        return;
++    std::vector<Color> px;
++    int w = 0, h = 0;
++    if (!tg->GetPixels(0, px, w, h))
++        return;
++    _skyDensityKey[0] = k0;
++    _skyDensityKey[1] = k1;
++    _skyDensityKeyF = kf;
++    std::vector<unsigned char> out(static_cast<size_t>(w) * h * 4);
++    for (int y = 0; y < h; y++)
++    {
++        float qmin = 1e9f, sat = 0.0f;
++        for (int x = 0; x < w; x++)
++        {
++            const Color& c = px[static_cast<size_t>(y) * w + x];
++            const float mx = std::max(c.R(), std::max(c.G(), c.B()));
++            const float mn = std::min(c.R(), std::min(c.G(), c.B()));
++            sat += (mx - mn) / std::max(mx, 1e-3f);
++            qmin = std::min(qmin, (c.R() + c.G()) / std::max(2.0f * c.B(), 1e-3f));
++        }
++        sat /= static_cast<float>(w);
++        const float deckRow = 1.0f - SmoothStep(0.08f, 0.16f, sat);
++        for (int x = 0; x < w; x++)
++        {
++            const Color& c = px[static_cast<size_t>(y) * w + x];
++            const float q = (c.R() + c.G()) / std::max(2.0f * c.B(), 1e-3f);
++            const float feature = SmoothStep(0.03f, 0.30f, q - qmin);
++            const float lum = 0.2126f * c.R() + 0.7152f * c.G() + 0.0722f * c.B();
++            float dark = 1.2f - lum * 1.3f;
++            dark = dark < 0.0f ? 0.0f : (dark > 1.0f ? 1.0f : dark);
++            unsigned char* o = &out[(static_cast<size_t>(y) * w + x) * 4];
++            o[0] = static_cast<unsigned char>(feature * 255.0f + 0.5f);
++            o[1] = static_cast<unsigned char>(deckRow * 255.0f + 0.5f);
++            o[2] = static_cast<unsigned char>(dark * 255.0f + 0.5f);
++            o[3] = 255;
++        }
++    }
++    // The weather skies are 8-bit palettised: thresholds on them show the
++    // palette steps as contour bands. A 5-tap binomial blur (u wraps, v clamps)
++    // of the feature and darkness channels removes them.
++    {
++        static const float kW[5] = {1.0f / 16, 4.0f / 16, 6.0f / 16, 4.0f / 16, 1.0f / 16};
++        std::vector<float> a(static_cast<size_t>(w) * h), b(a.size());
++        for (int ch : {0, 2})
++        {
++            for (size_t i = 0; i < a.size(); i++)
++                a[i] = out[i * 4 + ch];
++            for (int y = 0; y < h; y++)
++                for (int x = 0; x < w; x++)
++                {
++                    float s = 0.0f;
++                    for (int k = -2; k <= 2; k++)
++                        s += kW[k + 2] * a[static_cast<size_t>(y) * w + ((x + k + w) % w)];
++                    b[static_cast<size_t>(y) * w + x] = s;
++                }
++            for (int y = 0; y < h; y++)
++                for (int x = 0; x < w; x++)
++                {
++                    float s = 0.0f;
++                    for (int k = -2; k <= 2; k++)
++                    {
++                        const int yy = std::min(std::max(y + k, 0), h - 1);
++                        s += kW[k + 2] * b[static_cast<size_t>(yy) * w + x];
++                    }
++                    out[(static_cast<size_t>(y) * w + x) * 4 + ch] = static_cast<unsigned char>(s + 0.5f);
++                }
++        }
++    }
++    if (!_skyDensityTex)
++        glGenTextures(1, &_skyDensityTex);
++    GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, _skyDensityTex);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    GL33Bind::Invalidate();
++    LOG_INFO(Graphics, "GL33: sky cloud-density map {}x{} rebuilt (interp {:.2f})", w, h, kf);
++}
++
++void EngineGL33::UploadSkyCamera()
++{
++    Camera* cam = GScene ? GScene->GetCamera() : nullptr;
++    if (!cam)
++        return;
++    const GfxMatrix& proj = _frameState.projection;
++    Vector3 r = cam->DirectionAside();
++    Vector3 u = cam->DirectionUp();
++    Vector3 f = cam->Direction();
++    r.Normalize();
++    u.Normalize();
++    f.Normalize();
++    const float p11 = proj._11 != 0.0f ? proj._11 : 1.0f;
++    const float p22 = proj._22 != 0.0f ? proj._22 : 1.0f;
++    SetSlot(LitConst::SkyRight, r.X() / p11, r.Y() / p11, r.Z() / p11, 0.0f);
++    SetSlot(LitConst::SkyUp, u.X() / p22, u.Y() / p22, u.Z() / p22, 0.0f);
++    SetSlot(LitConst::SkyFwd, f.X(), f.Y(), f.Z(), p11);
++    GLint vp[4] = {0, 0, 1, 1};
++    glGetIntegerv(GL_VIEWPORT, vp);
++    SetSlot(LitConst::SkyVp, static_cast<float>(vp[0]), static_cast<float>(vp[1]),
++            1.0f / static_cast<float>(vp[2] > 0 ? vp[2] : 1), 1.0f / static_cast<float>(vp[3] > 0 ? vp[3] : 1));
++}
++
++void EngineGL33::SetRemasterSkyMode(int mode)
++{
++    if (!_lightingActive || !s_litUBO || _portraitTargetSize || _worldSceneEnded || _nightVision)
++        return;
++    // Draws queued so far belong to the previous mode.
++    FlushQueues();
++    if (mode != 0)
++        UpdateSkyDensityMap();
++    // The sky, the cloud sheets and the sun are pre-lit TL draws issued before
++    // the first mesh opens the world's 3D pass, so they normally go through the
++    // classic programs. Force the remastered set around them.
++    static bool s_forced = false;
++    if (mode != 0 && !_remasterPrograms)
++    {
++        s_forced = true;
++        _remasterPrograms = true;
++        glBindSampler(2, _shadowCompareSampler);
++        InvalidatePipelineCache();
++        if (GScene || _pixelShaderSel != PSWater)
++            DoSelectPixelShader(_pixelShaderSel, _pixelShaderModeSel, _pixelShaderSpecularSel);
++        else
++            _pixelShaderSel = PSNone;
++    }
++    else if (mode == 0 && s_forced)
++    {
++        s_forced = false;
++        _remasterPrograms = false;
++        glBindSampler(2, 0);
++        InvalidatePipelineCache();
++        if (GScene || _pixelShaderSel != PSWater)
++            DoSelectPixelShader(_pixelShaderSel, _pixelShaderModeSel, _pixelShaderSpecularSel);
++        else
++            _pixelShaderSel = PSNone;
++    }
++    if (mode != 0)
++        UploadSkyCamera();
++    s_lit[LitConst::Sky * 4 + 0] = static_cast<float>(mode);
++    glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
++    glBufferSubData(GL_UNIFORM_BUFFER, LitConst::Sky * 16, 16 * (LitConst::SkyFwd - LitConst::Sky + 1),
++                    s_lit + LitConst::Sky * 4);
++    // The sky texture may have been (re)uploaded by the dome draw just flushed.
++    const unsigned int sky = SkyTextureHandle();
++    GL33Bind::Tex2D(kSkyTexUnit, sky ? sky : _post.whiteTex);
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -410,6 +605,13 @@ void EngineGL33::UploadLitFrameConstants()
+     const bool clouds = _worldEffectsOn && rig.cloudCover > 0.0f;
+     SetSlot(LitConst::Cloud, rig.cloudCover, rig.cloudTransmit, kCloudScale, clouds ? 1.0f : 0.0f);
+     SetSlot(LitConst::CloudOffset, s_cloudDrift[0], s_cloudDrift[1], kCloudDeckAltitude, kCloudEdge);
++    // RESEARCH (clouds track): sky mode starts at 0 (geometry) every pass.
++    SetSlot(LitConst::Sky, 0.0f, _worldEffectsOn ? _lighting.skyClouds : 0.0f, _lighting.cloudShadowSource,
++            land ? land->SkyThrough() : 1.0f);
++    UploadSkyCamera();
++    SetSlot(LitConst::Knob0, _lighting.r0, _lighting.r1, _lighting.r2, _lighting.r3);
++    SetSlot(LitConst::Knob1, _lighting.r4, _lighting.r5, _lighting.r6, _lighting.r7);
++    UpdateSkyDensityMap();
+ 
+     // The shadow map was rendered from where the camera was then.
+     SetSlot(LitConst::ShadowDelta, cam.X() - _shadowCamPos[0], cam.Y() - _shadowCamPos[1], cam.Z() - _shadowCamPos[2],
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e..5fdf682 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -23,6 +23,9 @@ constexpr unsigned int kLitBinding = 3;
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++// RESEARCH (clouds track): the landscape's sky dome texture, for lit sky clouds
++// and sky-consistent cloud shadows.
++constexpr int kSkyTexUnit = 6;
+ 
+ // LitConstants vec4 slots; must match the GLSL block in s_psRemasterCommon.
+ namespace LitConst
+@@ -59,14 +62,22 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    // RESEARCH (clouds track)
++    Sky = 58,      // x sky mode (0 geometry, 1 dome, 2 cloud sheets), y lit-cloud strength, z shadow source, w deck altitude
++    SkyVp = 59,    // viewport x, y, 1/w, 1/h (framebuffer pixels)
++    SkyRight = 60, // camera right / proj._11
++    SkyUp = 61,    // camera up / proj._22
++    SkyFwd = 62,   // camera forward, w = proj._11
++    Knob0 = 63,    // research knobs r0..r3
++    Knob1 = 64,    // research knobs r4..r7
++    Count = 65,
+ };
+ constexpr int MaxLights = 8;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Sky == LightDir + MaxLights, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e..7ea71a5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -56,7 +56,7 @@ layout(std140) uniform VSConstants {
+     vec4 _pad_spec;
+     vec4 _pad_specEn;
+     vec4 _pad_sunEn;
+-    vec4 vpScale;       // 21 — {2/width, 2/height, 0, 0}
++    vec4 vpScale;       // 21 â€” {2/width, 2/height, 0, 0}
+ };
+ 
+ layout(location = 0) in vec3 aPos;
+@@ -276,6 +276,14 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
++    // RESEARCH (clouds track)
++    vec4 litSky;          // 58: x sky mode (0 geometry, 1 dome, 2 sheets, 3 sun disk), y lit-cloud strength, z shadow source (0 noise, 1 dome), w skyThrough
++    vec4 litSkyVp;        // 59: viewport x, y, 1/w, 1/h
++    vec4 litSkyRight;     // 60: camera right / proj11
++    vec4 litSkyUp;        // 61: camera up / proj22
++    vec4 litSkyFwd;       // 62: camera forward
++    vec4 litKnob0;        // 63: research knobs r0..r3
++    vec4 litKnob1;        // 64: research knobs r4..r7
+ };
+ 
+ uniform sampler2D tex0;
+@@ -284,6 +292,7 @@ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound i
+ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
++uniform sampler2D skyTex;                  // unit 6: the landscape's sky dome texture (RESEARCH, clouds track)
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -417,8 +426,195 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
+ // the soft edge is symmetric about the threshold and narrows toward a clear or
+ // a fully covered sky, so the covered fraction is exactly the overcast (no sun
+ // patches under a full overcast, no stray shadows under a clear sky).
++// ---- RESEARCH (clouds track): lit sky clouds and sky-consistent shadows ----
++float knob(float v, float def) { return v != 0.0 ? v : def; }
++
++// Cloud amount at a sky dome texture coordinate. skyTex is the cloud-density
++// map the engine derives from the weather sky texture (EngineGL33::
++// UpdateSkyDensityMap): r = broken cloud (whiter than the clearest sky of its
++// row), g = the row is grey all round (an overcast deck candidate), b = how
++// dark (thick) the cloud is. The deck counts only when the weather says so,
++// so the pale horizon rows of a clear sky are not cloud.
++float g_skyFeature = 0.0; // the broken-cloud part of the last density (no deck)
++float g_skyDeck = 0.0;    // the overcast-deck weight of the last density
++float g_skyDark = 0.0;    // its darkness (thickness)
++float skyCloudDensity(vec4 m) {
++    float deck = m.g * (1.0 - smoothstep(0.35, 0.75, litSky.w));
++    float cloud = max(m.r, deck);
++    g_skyFeature = m.r * (0.75 + 0.25 * m.b);
++    g_skyDeck = deck;
++    g_skyDark = m.b;
++    return cloud * mix(0.75 + 0.25 * m.b, 0.5 + 0.5 * m.b, deck);
++}
++float skyDensityAt(vec2 uv) { return skyCloudDensity(textureLod(skyTex, uv, 0.0)); }
++
++// Sky drift: the dome texture turns about the zenith by r6 degrees (static for
++// the prototype; a production version would integrate it from the wind like
++// the cloud-shadow drift). The visible clouds and their shadows share it.
++vec2 skyDrift() { return vec2(litKnob1.z / 180.0, 0.0); }
++
++// Sky dome texture coordinate of a world direction, from obloha.p3d's own
++// mesh (dumped in game): u = azimuth / 180 deg (the texture wraps twice around
++// the horizon, REPEAT), v piecewise linear over the dome's rings at -15, 0.9,
++// 29.5, 59.5 and 89 deg elevation.
++vec2 skyDomeUv(vec3 w) {
++    float az = atan(w.x, w.z) * 57.29578;
++    float e = asin(clamp(w.y, -1.0, 1.0)) * 57.29578;
++    float v;
++    if (e < 0.87) v = mix(1.0, 0.9869, clamp((e + 15.0) / 15.87, 0.0, 1.0));
++    else if (e < 29.5) v = mix(0.9869, 0.5434, (e - 0.87) / 28.63);
++    else if (e < 59.5) v = mix(0.5434, 0.1736, (e - 29.5) / 30.0);
++    else v = mix(0.1736, 0.036, clamp((e - 59.5) / 29.5, 0.0, 1.0));
++    return vec2(az / 180.0, v) + skyDrift();
++}
++
++// World view direction of this fragment (sky draws carry no world position).
++vec3 skyViewDir() {
++    vec2 ndc = (gl_FragCoord.xy - litSkyVp.xy) * litSkyVp.zw * 2.0 - 1.0;
++    return normalize(litSkyFwd.xyz + ndc.x * litSkyRight.xyz + ndc.y * litSkyUp.xyz);
++}
++
++vec2 skyNdc(vec3 d) {
++    float z = max(dot(d, litSkyFwd.xyz), 1e-4);
++    float x = dot(d, litSkyRight.xyz) / max(dot(litSkyRight.xyz, litSkyRight.xyz), 1e-12);
++    float y = dot(d, litSkyUp.xyz) / max(dot(litSkyUp.xyz, litSkyUp.xyz), 1e-12);
++    return vec2(x, y) / z;
++}
++
++// Normalised texture-space direction toward the sun at this fragment: a small
++// step along the great circle toward the sun, taken to pixels and then to UV
++// through the screen-space UV derivatives.
++vec2 skySunUvDir(vec3 v, vec2 dUVdx, vec2 dUVdy) {
++    vec3 l = litSunDir.xyz;
++    vec3 t = l - v * dot(v, l);
++    float tl = length(t);
++    if (tl < 1e-4) return vec2(0.0);
++    vec3 v2 = normalize(v + t * (0.01 / tl));
++    vec2 dPix = (skyNdc(v2) - skyNdc(v)) * 0.5 / litSkyVp.zw;
++    vec2 duv = dUVdx * dPix.x + dUVdy * dPix.y;
++    float l2 = length(duv);
++    return l2 > 1e-9 ? duv / l2 : vec2(0.0);
++}
++
++float hgPhase(float g, float c) {
++    float g2 = g * g;
++    return (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * c, 1e-4), 1.5);
++}
++
++// Classic sky colour in, lit cloud out. The texture's own cloud shapes are
++// treated as a density field: a short march toward the sun in texture space
++// gives how much cloud the sunlight crosses before reaching this point.
++// Sun-facing edges (thinner toward the sun) brighten and take the sun's
++// colour, the far side darkens; the difference is mean-free, so the sky keeps
++// its average brightness. Thin cloud near the sun gets a forward-scattered
++// silver lining, thick cloud in front of the sun goes dark.
++vec4 skyCloudShade(vec4 classic, vec4 t0) {
++    vec2 dUVdx = dFdx(vUV0);
++    vec2 dUVdy = dFdy(vUV0);
++    float mode = litSky.x;
++    float strength = litSky.y;
++    vec3 v = skyViewDir();
++    vec3 l = litSunDir.xyz;
++    float cosT = dot(v, l);
++    bool dome = mode < 1.5;
++    float d;
++    float feature;
++    float deck = 0.0;
++    float dark = 0.0;
++    if (dome) {
++        // The dome's own texture is the landscape sky texture, also on unit 6
++        // with a linear sampler: read it there (no per-draw sampler surprises).
++        d = skyDensityAt(vUV0 + skyDrift());
++        feature = g_skyFeature;
++        deck = g_skyDeck;
++        dark = g_skyDark;
++    } else {
++        d = t0.a;
++        feature = t0.a;
++    }
++    int dbg = int(litKnob1.w + 0.5);
++    if (dbg == 3) return vec4(v * 0.5 + 0.5, classic.a);
++    vec2 dir = skySunUvDir(v, dUVdx, dUVdy);
++    if (dbg == 4) return vec4(dir * 0.5 + 0.5, 0.0, classic.a);
++    float tau = 0.0;
++    float wsum = 0.0;
++    if (dome) {
++        // The dome mesh is coarse (12 x 4 quads) and its UV is piecewise linear,
++        // so screen-space UV derivatives jump at every triangle edge. March in
++        // direction space instead: rotate the view ray toward the sun and map
++        // each step through the dome's own UV mapping, relative to this
++        // fragment's mesh UV (continuous across triangles).
++        vec3 tSun = litSunDir.xyz - v * dot(v, litSunDir.xyz);
++        float tl = length(tSun);
++        tSun = tl > 1e-4 ? tSun / tl : vec3(0.0, 1.0, 0.0);
++        vec2 uvA = skyDomeUv(v);
++        float stepAng = knob(litKnob0.w, 1.2) * 0.01745329;
++        for (int k = 1; k <= 6; ++k) {
++            float fk = float(k);
++            float a = stepAng * fk * (0.5 + 0.5 * fk);
++            vec2 duv = skyDomeUv(v * cos(a) + tSun * sin(a)) - uvA;
++            duv.x -= floor(duv.x + 0.5);
++            float w = 1.0 / fk;
++            tau += w * skyDensityAt(vUV0 + skyDrift() + duv);
++            wsum += w;
++        }
++    } else {
++        for (int k = 1; k <= 6; ++k) {
++            float fk = float(k);
++            vec2 p = vUV0 + dir * (0.025 * fk * (0.5 + 0.5 * fk));
++            float w = 1.0 / fk;
++            tau += w * textureGrad(tex0, p, dUVdx, dUVdy).a;
++            wsum += w;
++        }
++    }
++    tau /= wsum;
++    if (dbg == 1) return vec4(vec3(d), classic.a);
++    float kRelief = knob(litKnob1.x, 1.8);
++    float relief = clamp((d - tau) * kRelief, -0.35, 0.8);
++    if (dbg == 2) return vec4(vec3(0.5 + relief * 0.5), classic.a);
++    float sunUp = smoothstep(-0.06, 0.04, l.y);
++    vec3 sunChroma = litSun.rgb / max(dot(litSun.rgb, kLuma), 1e-4);
++    sunChroma = mix(vec3(1.0), sunChroma, 0.85);
++    // Overcast flattens the relief: the light inside a full deck is diffuse.
++    float through = clamp(litSky.w, 0.0, 1.0);
++    float direct = sunUp * mix(0.45, 1.0, through);
++    vec3 factor = vec3(1.0) + (relief > 0.0 ? sunChroma * relief : vec3(relief)) * direct;
++    // Under an overcast deck the texture's dark lumps are the thick bellies:
++    // deepen them and lift the thin gaps (mean-free about mid darkness).
++    factor *= 1.0 + (0.55 - dark) * 0.7 * deck;
++    // Thick broken cloud in front of the sun darkens (seen against the light) ...
++    float towardSun = pow(max(cosT, 0.0), 6.0);
++    factor *= 1.0 - 0.35 * towardSun * smoothstep(0.35, 0.9, feature) * direct;
++    // ... and its sun-facing rim glows (forward scattering, a silver lining):
++    // the rim is where the density falls off toward the sun.
++    float rim = clamp((d - tau) * 3.0, 0.0, 1.0) * (1.0 - 0.5 * d);
++    float silver = (hgPhase(0.8, cosT) / hgPhase(0.8, 1.0)) * rim * knob(litKnob1.y, 1.0);
++    vec3 rgb = classic.rgb * mix(vec3(1.0), factor, strength * smoothstep(0.02, 0.25, d));
++    rgb += sunChroma * silver * strength * direct * 0.9 * max(classic.rgb, vec3(0.3));
++    return vec4(rgb, classic.a);
++}
++
++// Sky-consistent cloud shadows: the ground point is projected along the sun
++// ray to a cloud deck, and the deck point is looked up in the sky dome
++// texture in the direction the camera sees it. The cloud the player sees in
++// the sky is the cloud whose shadow lies on the ground.
++float domeCloudCover(vec3 posAbs) {
++    vec3 l = litSunDir.xyz;
++    float up = max(l.y, 0.06);
++    float deck = knob(litKnob0.x, 1800.0);
++    vec3 q = posAbs + l * (max(deck - posAbs.y, 0.0) / up);
++    vec3 w = q - litCamPos.xyz;
++    if (w.y <= 1.0) return 0.0;
++    w = normalize(w);
++    float d = skyDensityAt(skyDomeUv(w));
++    float th = knob(litKnob0.y, 0.55);
++    float e = knob(litKnob0.z, 0.12);
++    return smoothstep(th - e, th + e, d);
++}
++
+ float cloudSunVisibility(vec3 posAbs) {
+     if (litCloud.w < 0.5 || litFlags.y < 0.5) return 1.0;
++    if (litSky.z > 0.5) return mix(1.0, litCloud.y, domeCloudCover(posAbs));
+     float up = max(litSunDir.y, 0.12);
+     vec2 p = posAbs.xz + litSunDir.xz / up * (litCloudOffset.z - posAbs.y);
+     float n = texture(cloudNoise, (p + litCloudOffset.xy) * litCloud.z).r;
+@@ -620,9 +816,22 @@ void main() {
+         r0.rgb = shadeRemastered(t0.rgb * constColor.rgb, false, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
++        // RESEARCH (clouds track): the dome turns with the sky drift.
++        if (litSky.x > 0.5 && litSky.x < 1.5 && litKnob1.z != 0.0) t0 = texture(tex0, vUV0 + skyDrift());
+         r0 = vColor * t0;
+         r0 *= constColor;
+         r0.rgb += vSpecColor.rgb;
++        // RESEARCH (clouds track): lit sky clouds; the sun disk behind a cloud.
++        if (litSky.x > 0.5) {
++            if (litSky.x < 2.5) {
++                r0 = skyCloudShade(r0, t0);
++            } else if (litSky.z > 0.5 && litCloud.w > 0.5) {
++                float sd = skyDensityAt(skyDomeUv(litSunDir.xyz));
++                float th = knob(litKnob0.y, 0.55);
++                float e = knob(litKnob0.z, 0.12);
++                r0.rgb *= mix(1.0, 0.12, smoothstep(th - e, th + e, sd));
++            }
++        }
+     }
+     finishFragment(r0, ambientShare, true);
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..777a2da 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1692,7 +1692,8 @@ void EngineGL33::InitPixelShaders()
+             int unit;
+         } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+                            {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
++                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit},
++                           {"skyTex", Poseidon::gl33lighting::kSkyTexUnit}};
+         for (const auto& ls : litSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+index b60d65a..641c8e4 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+@@ -120,6 +120,11 @@ class TextureGL33 : public Texture
+     int LoadLevels(int levelMin);
+     int UploadToGPU(SurfaceInfoGL33& surface, int levelMin);
+ 
++    // RESEARCH (clouds track): decode one whole mip (weather interpolation included).
++    bool GetPixels(int level, std::vector<Color>& out, int& w, int& h) const;
++    float InterpolationFactor() const { return _iFactor; }
++    const TextureGL33* InterpolationPartner() const { return _interpolate; }
++
+     unsigned int GetHandle() const
+     {
+         unsigned int handle = GetBigHandle();
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp b/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp
+index 9e45f24..a37bb47 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp
+@@ -299,6 +299,48 @@ Color TextureGL33::GetPixel(int level, float u, float v) const
+     return col;
+ }
+ 
++// RESEARCH (clouds track): every texel of one mip, decoded once (GetPixel
++// re-reads and re-decodes the whole mip per call). Honours the weather-sky
++// interpolation like GetPixel.
++bool TextureGL33::GetPixels(int level, std::vector<Color>& out, int& w, int& h) const
++{
++    LoadHeadersNV();
++    if (!_src || level < 0 || level >= _nMipmaps)
++        return false;
++    PacLevelMem mip = _mipmaps[level];
++    w = mip._w;
++    h = mip._h;
++    if (w <= 0 || h <= 0)
++        return false;
++    std::vector<char> mem(static_cast<size_t>(mip._pitch) * mip._h);
++    _src->GetMipmapData(mem.data(), mip, level);
++    std::vector<char> imem;
++    PacLevelMem imip;
++    const bool ipol = _interpolate && _interpolate->_src && level < _interpolate->_nMipmaps;
++    if (ipol)
++    {
++        imip = _interpolate->_mipmaps[level];
++        imem.resize(static_cast<size_t>(imip._pitch) * imip._h);
++        _interpolate->_src->GetMipmapData(imem.data(), imip, level);
++    }
++    out.resize(static_cast<size_t>(w) * h);
++    for (int y = 0; y < h; y++)
++    {
++        for (int x = 0; x < w; x++)
++        {
++            const float u = (x + 0.5f) / w, v = (y + 0.5f) / h;
++            Color col = mip.GetPixel(mem.data(), u, v);
++            if (ipol)
++            {
++                Color icol = imip.GetPixel(imem.data(), u, v);
++                col = col * (1 - _iFactor) + icol * _iFactor;
++            }
++            out[static_cast<size_t>(y) * w + x] = col;
++        }
++    }
++    return true;
++}
++
+ // Decode the top (full-resolution) mip once and classify its alpha channel.
+ // Reads the texture's bytes through the VFS (so it works for PBO-packed textures) and
+ // decodes via the shared DecodePAABuffer, which handles every PAA/PAC pixel format

@@ -1,0 +1,57 @@
+## track
+ssgi
+## files_verified
+true
+## artefacts_seen
+All 25 cited paths exist (every BEST image, the cmp/v3, v6, v7, v8 and v9 3-way images, the motion strip, override_v6 to v9, glsl_final, NOTES.md, prototype.patch). The run folders runs/v7, v8, v9 hold raw tri shots and game_stdout.log. Each log says "shader override loaded" for psPostComposite.glsl and psPostGi.glsl, and the logged byte sizes match the override files (v9: 9271 and 9751). No shader compile errors. runs/v9_crash and v9_crash2 contain the EntityHit::GetHit <- StreetLamp::SimulateSwitch stack, as claimed. prototype.patch has the same sha256 as `git diff` in D:\Arma_CWA_worktrees\gfx-ssgi (HEAD 3c53141, 5 files, +542 lines), and dist/gfx-ssgi-rwdi exists. tests_copy/abel_ssgi_v9.test.sqf really does set gi=0/1/2, giFallbackShare=2, and switches off the six lamp ids. I ran my own PIL diffs on the raw v9 shots. headlights_bounce: rem_end against remastered is 0.00 mean with 0% of pixels over 2 levels, so the baseline is clean. GI x1 is +1.45 mean, p99 +22, 5.4% of pixels over 8 levels. GI x2 is +2.37 mean, p99 +34, 10.8% over 8. Day views: m1 x1 p99 is +3.0 (lowsun) and +6.3 (noon). m6 p99 is +12.3 and +21, with 2 to 2.5% of pixels over 8. town_dark_fire: GI changes 20.8% of pixels by more than 2 levels, against 18.6% for rem_end versus rem (smoke animation), so the change is inside the noise. The v8 strafe, with each GI frame paired to its gi=0 frame: every frame is +1.1 to +1.6 mean, 0.00 to 0.01% of pixels below -4, and over 8 levels falls steadily from 5.9% to 4.7%. No ghosting and no flicker at this slow speed. Hull row profile at x2: the cupola rows get +2 to +9, the upper and middle hull a nearly flat +12 to +13, and the running gear +21 to +28. The change is neutral grey (B/R 0.96).
+## prototype_actually_loaded
+Yes. The scratch C++ build dist/gfx-ssgi-rwdi ran with -ShaderOverrideDir override_v7/v8/v9. Every game_stdout.log in v6 to v9 and diag1 logs the two override files loaded at the right sizes. The shots differ from the gi=0 baseline by the amounts above, and the debug (added light) shots show the bounce field directly.
+## missing_or_false_claims
+[
+ "No fabrication: every file exists, the overrides loaded, the patch is byte-identical to the scratch worktree diff, and the crash stacks are real.",
+ "The headline night image (BEST_headlights_bounce, crop) is gi=2, twice the physical bounce. The physical x1 result is the +9 figure (+1.45 frame mean). The x1 3-way is noticeably weaker, so the best picture is art-boosted.",
+ "'Bottom-heavy falloff' is only partly true. At x2 the upper and middle hull get a nearly flat +12 to +13 levels and only the running gear doubles (+21 to +28). Because the upper hull starts at about 10 levels, the whole rear face reads as an even grey lift, cupola included, not as a gradient rising from the pool.",
+ "The explanation 'the soldier's lit side faces away' is doubtful. The soldier crouches at the edge of the pool and his legs face the camera, yet he gains only +1 to +2. That inconsistency (hull lit, man standing in the pool stays black) is more likely a limitation of the thin receiver, the half-resolution trace or the albedo stand-in.",
+ "The 'Remastered (current)' baseline is the scratch build at 3c53141, not necessarily the lighting branch's present look.",
+ "The GPU frame columns are as noisy as admitted: noon_fields rem_end is +7.5 ms against its own Remastered shot, and town_dark_fire rem_end is +2.9 ms. Only the ao(+GI) column (0.3 -> 2.7-3.7 ms) can be used.",
+ "The temporal stability claim rests on one 8-frame, 0.25 m/frame strafe with static objects. Fast turns, moving vehicles and the history clamp were not tested."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+small
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[
+ "Night headlight bounce: the lift is neutral grey and nearly uniform over the M113's whole rear face. It reads partly as a flat ambient fill on that object rather than light carried off a lit pool, a mild local wash, and it does not reach the soldier standing in the same pool.",
+ "Daylight mode 6 (the only daylight variant with any visible change) lifts the low-sun running gear with a cool blue-grey taken from the shadowed ground. That leans toward the rejected blue side, and it is a non-physical double count.",
+ "Stock town_night (first session, mode 1): brightens an already over-lit town and pales the tree crowns. That is a wash plus flattened crowns, both rejected looks.",
+ "Light leak: smoke sprites keep the depth of the house behind them, so the house picks up warm 'bounce' from glowing smoke (visible in the town_dark_fire added-light panel).",
+ "Mode 3 (traced visibility replacing AO) only darkens (-0.1 to -0.8 mean, p1 to -7), which is on the rejected list. The explorer already rejected it."
+]
+## cost_ok
+true
+## score_0_to_10
+3
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\ssgi\BEST_headlights_bounce_crop.png
+## one_line
+This report is honest and fully backed by files. Screen-space GI is invisible by day (p99 a few levels; you need x8 change maps to see it) and gives one real but narrow night win: a hull beside a headlight pool goes from near-black to a grey-lit, textured face at x2. That is not an RTX-on look.
+## critique
+Verification: nothing is fabricated. The overrides demonstrably loaded in every run, the raw shots differ from the gi=0 baseline exactly as described, the repeated gi=0 shot reproduces the baseline to 0.00, and the strafe pairs show no ghosting.
+
+Look, by day: Remastered and +SSGI side by side, even the non-physical mode-6 upper bound, are indistinguishable at normal size. In a 2x crop at low sun, the M113's road wheels pick up a slight cool-grey lift. The noon Jeep's tyres are a touch lighter. A player would not notice either. Physical mode 1 at x1 is a few levels at most. The explorer's own explanation holds: the rig's bright sky fill already supplies the hemisphere, and CWA's sunlit ground sits near the rig's assumed ground albedo. Measured against the four owner areas, this adds nothing to light and shadow, sky and air, or water and shine in daylight.
+
+Look, at night: the headlight case is the only scene where the path-traced cue (a surface next to a bright pool picks up its light) shows. The M113's rear face goes from about 10 to 25 levels to about 22 to 40 at x2, with texture and panel lines kept intact by the v9 detail albedo. It is a real, readable improvement in that shot. Its limits:
+- It is double-strength. At x1 it is about half as strong.
+- The lift is neutral and almost flat over the whole face, cupola included, so it reads more like a fill light on the hull than light carried off the pool.
+- The soldier standing in that same pool stays black, an inconsistency a player would see.
+- The campfire scene shows nothing above the smoke-animation noise.
+- The stock lamp town gets worse: more wash and paler crowns.
+- Smoke sprites leak warm light onto walls.
+- The result depends on stand-in albedos, so a production version needs a G-buffer albedo MRT and a particle-free colour copy before it can be trusted.
+
+Cost: the ao+GI column goes from 0.3 to 2.7 to 3.7 ms at 1440x960 on a shared RTX 4060 Ti. That extrapolates to roughly 4 to 6 ms at 1080p on an RTX 3060. Night frames today are 6 to 13 ms, so it fits the 16.6 ms budget only when gated to local-light scenes. Ungated by day it is pure cost for no picture.
+
+Verdict: this is a good, honest negative result with one narrow positive. It is worth keeping as a later add-on for headlights, muzzle flashes, fires and explosions once a real albedo buffer exists, and once the night/lamp track makes local lights physical. It is not the lever that makes CWA look like a different game. The RTX-on jump has to come from sky occlusion that reaches objects, contact-hardening shadows, reflections and volumetrics.

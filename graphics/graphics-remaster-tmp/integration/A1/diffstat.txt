@@ -1,0 +1,75 @@
+ arma_CWR/engine/Poseidon/Core/Game/GameLoop.cpp    |  26 ++-
+ arma_CWR/engine/Poseidon/Core/Game/GameLoop.hpp    |  11 +
+ .../engine/Poseidon/Dev/Debug/DebugOverlay.cpp     | 244 ++++++++++++++++-----
+ .../engine/Poseidon/Dev/Debug/DebugOverlay.hpp     |   4 +
+ .../Poseidon/Game/Commands/GameStateExtTest.cpp    |  18 ++
+ .../Game/Commands/GameStateExtTestAudio.cpp        |   8 +
+ .../Game/Commands/GameStateExtTestRender.cpp       | 172 +++++++--------
+ .../Game/Commands/GameStateExtTestShadow.cpp       |  13 ++
+ arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp  |  18 +-
+ .../engine/Poseidon/Graphics/Remaster/LightRig.hpp |  42 ++++
+ .../engine/Poseidon/Graphics/Remaster/README.md    |  41 +++-
+ .../Graphics/Remaster/research/INTEGRATION-PLAN.md | 115 +++++++++-
+ .../engine/Poseidon/World/Terrain/Landscape.cpp    |   4 +-
+ .../engine/Poseidon/World/Terrain/Landscape.hpp    |  10 +
+ arma_CWR/engine/PoseidonGL33/EngineGL33.hpp        |  21 ++
+ .../engine/PoseidonGL33/EngineGL33_GpuTimer.cpp    |  13 ++
+ .../engine/PoseidonGL33/EngineGL33_Lifecycle.cpp   |   5 +-
+ .../engine/PoseidonGL33/EngineGL33_Lighting.cpp    |  82 ++++++-
+ arma_CWR/tests/rendering/captures/README.md        |  65 +++++-
+ arma_CWR/tests/rendering/captures/capture_lib.sqf  |  18 +-
+ arma_CWR/tests/rendering/captures/make_pairs.py    |  73 ++++--
+ arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt |   1 +
+ .../Poseidon/Game/test_tri_capture_verbs.cpp       | 173 ++++++++++++++-
+ roadmap/roadmap.yaml                               |   1 +
+ 24 files changed, 977 insertions(+), 201 deletions(-)
+new: arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+new: arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+new: arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+new: arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+new: arma_CWR/tests/rendering/captures/banddiff.py
+new: arma_CWR/tests/rendering/captures/capgen.py
+new: arma_CWR/tests/rendering/captures/features_ab.test.sqf
+new: arma_CWR/tests/rendering/captures/features_ab.test.toml
+new: arma_CWR/tests/rendering/captures/gen_features_ab.py
+new: arma_CWR/tests/rendering/captures/gen_timing.py
+new: arma_CWR/tests/rendering/captures/gpu_sampler.ps1
+new: arma_CWR/tests/rendering/captures/run-timing.ps1
+new: arma_CWR/tests/rendering/captures/summarize_timing.py
+new: arma_CWR/tests/rendering/captures/timing_abel.test.sqf
+new: arma_CWR/tests/rendering/captures/timing_abel.test.toml
+new: arma_CWR/tests/rendering/captures/timing_eden.test.sqf
+new: arma_CWR/tests/rendering/captures/timing_eden.test.toml
+new: arma_CWR/tests/rendering/captures/timing_sinai.test.sqf
+new: arma_CWR/tests/rendering/captures/timing_sinai.test.toml
+new: arma_CWR/tests/rendering/captures/video/.gitignore
+new: arma_CWR/tests/rendering/captures/video/capture_motion.sqf
+new: arma_CWR/tests/rendering/captures/video/gen_video_tests.py
+new: arma_CWR/tests/rendering/captures/video/make_video.py
+new: arma_CWR/tests/rendering/captures/views.py
+new: arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+   319 arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+   117 arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+   366 arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+   166 arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+   137 arma_CWR/tests/rendering/captures/banddiff.py
+   147 arma_CWR/tests/rendering/captures/capgen.py
+   458 arma_CWR/tests/rendering/captures/features_ab.test.sqf
+     9 arma_CWR/tests/rendering/captures/features_ab.test.toml
+    77 arma_CWR/tests/rendering/captures/gen_features_ab.py
+    69 arma_CWR/tests/rendering/captures/gen_timing.py
+    32 arma_CWR/tests/rendering/captures/gpu_sampler.ps1
+    49 arma_CWR/tests/rendering/captures/run-timing.ps1
+   208 arma_CWR/tests/rendering/captures/summarize_timing.py
+  1253 arma_CWR/tests/rendering/captures/timing_abel.test.sqf
+     9 arma_CWR/tests/rendering/captures/timing_abel.test.toml
+   186 arma_CWR/tests/rendering/captures/timing_eden.test.sqf
+     9 arma_CWR/tests/rendering/captures/timing_eden.test.toml
+   207 arma_CWR/tests/rendering/captures/timing_sinai.test.sqf
+     9 arma_CWR/tests/rendering/captures/timing_sinai.test.toml
+     3 arma_CWR/tests/rendering/captures/video/.gitignore
+   169 arma_CWR/tests/rendering/captures/video/capture_motion.sqf
+   376 arma_CWR/tests/rendering/captures/video/gen_video_tests.py
+   233 arma_CWR/tests/rendering/captures/video/make_video.py
+   176 arma_CWR/tests/rendering/captures/views.py
+   539 arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp

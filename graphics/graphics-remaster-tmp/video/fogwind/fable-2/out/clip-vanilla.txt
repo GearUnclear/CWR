@@ -1,0 +1,8 @@
+clip-vanilla: 105 frames (clip 285..390), camera |shift| mean 0.83 px/frame (x -0.83, y +0.01)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.343  0.075  0.391  0.951 | +14.0  +2.6  +0.03  -0.36 | -24.0  -2.1  +0.03 | +0.03   0.010
+  valley   0.232  0.049  0.277  1.125 | +12.6 -16.3  +0.02  -0.43 |  -0.4  -0.1  +0.14 | +0.02   0.005
+  farhill  0.116  0.039  0.260  0.548 |  +0.1 -16.3  +0.02  -0.21 | +20.9  +1.1  +0.02 | +0.02   0.003
+  haze     0.043  0.011  0.032  0.128 | +16.9  +1.5  +0.03  -0.33 | -11.2  -0.6  +0.03 | +0.03   0.001
+  slope    0.362  0.066  0.601  1.879 | -11.1  -6.3  +0.03  -0.39 |  -0.9  -0.0  +0.18 | +0.03   0.009
+  wrote amp_clip-vanilla.png, xt_clip-vanilla.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

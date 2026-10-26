@@ -1,0 +1,50 @@
+﻿clang-format --dry-run --Werror on every touched C++ file (after the port):
+ok   arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+ok   arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+ok   arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+ok   arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+ok   arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+ok   arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+ok   arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+ok   arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+ok   arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+ok   arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+FAIL arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp : 1197 issues
+ok   arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp
+ok   arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp
+FAIL arma_CWR/engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp : 1 issues
+ok   arma_CWR/engine/Poseidon/World/Entities/Vehicles/Air/AirplaneAI.cpp
+ok   arma_CWR/engine/Poseidon/World/Entities/Vehicles/Air/HelicopterAI.cpp
+ok   arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/Car.cpp
+ok   arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/Motorcycle.cpp
+ok   arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/TankWithAI.cpp
+ok   arma_CWR/engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+ok   arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+FAIL arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.hpp : 391 issues
+ok   arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
+FAIL arma_CWR/engine/Poseidon/World/Scene/Fireplace.hpp : 74 issues
+ok   arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+ok   arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+ok   arma_CWR/engine/Poseidon/World/World.cpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+ok   arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+ok   arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp
+ok   arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+ok   arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+ok   arma_CWR/tests/unit/engine/Poseidon/Graphics/test_screen_reflections.cpp
+ok   arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+ok   arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+ok   arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+ok   arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombatShaders.cpp
+ok   arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+
+The four that fail fail at the base cb3dd0d with the same issue counts (git show HEAD:<file> | clang-format --dry-run --Werror):
+Smokes.hpp 1197, Shots.hpp 391, Fireplace.hpp 74, SoldierOldAI.cpp 1 (after the change: 1197, 391, 74, 1).

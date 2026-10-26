@@ -1,0 +1,16 @@
+{
+ "clip": "firefight",
+ "side": "ud",
+ "frames": 630,
+ "fps": 60,
+ "size": [
+  1920,
+  1080
+ ],
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\ud\\firefight\\firefight__ud.mkv",
+ "game_dir": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+ "mode_line": "view=firefight;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=UNSETTLED:150;draws=992;objects=810;culled=0;lights=19;lod=0.0104167;pin=1;horizon=ready",
+ "gamma": null,
+ "run": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\runs\\ud-firefight",
+ "mb": 521.2
+}

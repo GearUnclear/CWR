@@ -1,0 +1,139 @@
+REWRITTEN CHARACTER STORIES
+Name and place placeholders are shown as written.
+
+b01 - kBio0Friendly / 1
+{Name} handed a friend a poem, then snatched it back. "It's awful. Help me fix it?" The former farmhand had kept writing since losing the family fields near {Place}.
+
+b02 - kBio0Friendly / 2
+After losing the family home near {Place}, furniture maker {Name} told a worried sister, "I'll build you a palace. Stool first, though." The sister laughed, then asked where they would sleep.
+
+b03 - kBio0Friendly / 3
+{Name}, a former survey assistant near {Place}, took money to falsify a family's land claim. They brought food after the eviction, but the family's thanks made them ashamed to admit what they'd done.
+
+b04 - kBio0Friendly / 4
+"Pay for it," {Name} told fellow rebels caught robbing a shop near {Place}. Years of unanswered complaints had driven the shop worker to join them. They still cooked for the cell, but refused its stolen food.
+
+b05 - kBio0Friendly / 5
+A frightened lamb blocked the road near {Place}. {Name}, a shepherd, told an impatient guard to piss off, then spent an hour asking the lamb very politely to come home.
+
+b06 - kBio0Friendly / 6
+{Name} had two potatoes left when the widower next door stopped by. The harvest worker near {Place} pulled out the usual chair. "You're peeling. I did it last time."
+
+b07 - kBio0Hostile / 1
+Near {Place}, quartermaster {Name} softened bread for a toothless stray while soldiers loaded a family's grain onto the garrison wagon. When the mother asked what they would eat, the quartermaster pointed toward the next farm.
+
+b08 - kBio0Hostile / 2
+Near {Place}, {Name} tapped out piano pieces on a desk before answering a parent's letter. The army had been their father's choice; they still hid job advertisements for pianists inside the officer's handbook.
+
+b09 - kBio0Hostile / 3
+The repaired brakes held, but army engineer {Name} made the driver test them a fifth time outside {Place}. The last truck they had waved through with faulty brakes had killed two friends.
+
+b10 - kBio0Hostile / 4
+Arrested for selling access permits near {Place}, administrator {Name} kept their job by naming an accomplice. They couldn't watch the clerk who'd taught them to read being led away.
+
+b11 - kBio0Hostile / 5
+Frightened young soldiers near {Place} laughed when veteran officer {Name} wore a spoon as a moustache and inspected them as "General Soup." Then came the orders to evict the families.
+
+b12 - kBio0Hostile / 6
+The baker near {Place} had corrected Officer {Name} in public. Months later, the baker's flour permit was refused for untidy handwriting. The officer smiled and offered to demonstrate how to hold a pencil.
+
+b13 - kBio1Friendly / 1
+Visiting a pupil beyond the roadblocks near {Place}, {Name} blushed when the child's mother called them brave. Then the child opened the lesson bag. "Teacher, these are cookbooks." They all sat down to read anyway.
+
+b14 - kBio1Friendly / 2
+Asked to deliver a letter near {Place}, {Name} kept their hands in their pockets. The former messenger had carried resistance letters before; one got a friend arrested. "Could someone come with me?"
+
+b15 - kBio1Friendly / 3
+Near {Place}, {Name} called a customer's bicycle Princess Squeak. When its chain slipped during repairs, they told it, "Don't start." The customer apologized for bringing it up badly.
+
+b16 - kBio1Friendly / 4
+When a resistance leader near {Place} falsely accused a friend of informing, former clerk {Name} slammed the table. "Show me the evidence!" They left the cell that night.
+
+b17 - kBio1Friendly / 5
+While waiting for a travel permit near {Place}, {Name} cut their own suit for a cousin's wedding. Their aunt suggested leaving room for cake. The tailor quietly added an inch.
+
+b18 - kBio1Friendly / 6
+Carrying water near {Place}, {Name} remembered every birthday. When their old resistance cell questioned a friendly chat with a guard, they said, "I brought your mother cake too. Is that suspicious?"
+
+b19 - kBio1Hostile / 1
+During the crackdown near {Place}, {Name} threatened to jail a grocer's children. That evening, the officer laughed while their own child tied ribbons through the officer's hair.
+
+b20 - kBio1Hostile / 2
+{Name}, an officer near {Place}, kept borrowing to play cards. After losing again to someone the army wanted arrested, they begged for another week to pay, then stayed for one more hand.
+
+b21 - kBio1Hostile / 3
+After an ambush near {Place}, {Name} beat a recruit for dropping a mug. When another soldier reached to help, the officer raised a fist, and the whole table backed away.
+
+b22 - kBio1Hostile / 4
+Checkpoint officer {Name} held up a bus near {Place}, describing their perfect roast duck. When a passenger pretended to snore, they raised their voice and started on the gravy.
+
+b23 - kBio1Hostile / 5
+"Welcome, friend!" In an office near {Place}, officer {Name}, once an amateur actor, spread both arms with practiced warmth. The frightened visitor whispered, "My daughter's missing." The officer lowered both arms and fetched a map.
+
+b24 - kBio1Hostile / 6
+{Name} wrote home that everyone was cheerful near {Place}. That morning, the officer had punished a sentry for coughing, then cried over news that their youngest had started walking.
+
+b25 - kBio2Friendly / 1
+Radio repairer {Name} kept a box of records through three moves near {Place}. They practiced hosting a music show until an old set blew its fuse, then carried on singing.
+
+b26 - kBio2Friendly / 2
+Someone was calling for help when {Name} fled the resistance camp near {Place}. They spent that night hiding under a cart. Their family still believes the group disbanded.
+
+b27 - kBio2Friendly / 3
+{Name}, once an orchard worker near {Place}, loved describing the wall they jumped while escaping the fighting. Each telling made it taller. "You got stuck halfway," a friend always added.
+
+b28 - kBio2Friendly / 4
+The wounded enemy couldn't stand. {Name}, a shop worker near {Place}, kept changing the bandages after their resistance leader threatened to throw them both outside. They asked for clean cloth and got none.
+
+b29 - kBio2Friendly / 5
+{Name}'s mother never answered questions about the fighting near {Place}, but corrected every attempt at Grandma's dumplings. "Less flour, sweetheart." They asked how much less. "Well, look at them," Mum said, laughing.
+
+b30 - kBio2Friendly / 6
+{Name} had begged to join the resistance raid near {Place}, then hid when shooting started. Afterwards, they pulled an older fighter aside. "Could we practise again? Just us?"
+
+b31 - kBio2Hostile / 1
+Near {Place}, officer {Name} lied to protect a friend who stole money meant for a dead soldier's children. The friend still wrote, "Your oldest friend." The officer never replied.
+
+b32 - kBio2Hostile / 2
+{Name}, an officer near {Place}, hated reciting the required patriotic poems. Alone, they wrote about a dog asleep in a doorway, then changed 'doorway' to 'mat' because 'mat' was easier to rhyme.
+
+b33 - kBio2Hostile / 3
+A young recruit near {Place} got a coat from {Name}, then a furious scolding for walking home alone. The officer's brother had died on that road; the recruit stopped asking to visit family.
+
+b34 - kBio2Hostile / 4
+{Name} badly beat a prisoner near {Place}. Nobody even asked why. That frightened them enough to invent a fever before the next interrogation, but they let another officer take their place.
+
+b35 - kBio2Hostile / 5
+Near {Place}, {Name} tilted their rescue medal toward the photographer. The corporal who had pulled the wounded soldiers out stood beside them. "A little farther back," the officer said.
+
+b36 - kBio2Hostile / 6
+In the barracks near {Place}, Officer {Name} laughed about slapping a prisoner who kept apologizing for falling over. The soldiers stopped laughing when they realized that was the whole story.
+
+CAMPAIGN HISTORY EXAMPLES
+
+Campaign A
+The people of Malden still tell how families near Larche lost rights their grandparents had expected to leave to the children. Soviet Army troops arrived with orders to enforce obedience. A complaint could bring armed visitors to the same door where neighbours once gathered. People near Houdan accepted a settlement they could live with. When the authorities broke it, even patient neighbours talked of fighting. Fighting followed. FIA soldiers remember the dead through surviving friends, who can still describe their laughter as readily as their deaths.
+
+Families near Larche built terraces on the slopes and farmed them for generations. Surveyors later divided the land into plots and registered it under outside owners. The families who had built and maintained the terraces were left without a recognised claim to the ground that fed them.
+
+Representatives near Houdan agreed that the high ground would remain common and the roads open. Within a season, Soviet Army units fenced the ground and gated the roads. Families who had accepted the settlement now needed permission to reach land and routes the agreement had left open.
+
+Defenders near Chapoi stopped an advancing column for two days without relief. The column broke through on the third day, leaving local fighters dead and others missing. Survivors later gave FIA fighters an account of the positions held and the names of those who failed to return.
+
+Campaign B
+Near Ghajar, families in Lebanon inherited an old dispute along with their grandparents' belongings. Outsiders had claimed what kept those families fed. Hizballah units controlled the main roads. People learned which guards would listen, which would shout, and when to turn around without arguing. Representatives near Tyre came home with an agreement and promises. When the authorities broke it, neighbours demanded to know what happened. IDF fighters lost people in the fighting that followed. Some families still ask returning fighters for news nobody wants to give.
+
+Families near Ghajar dug and maintained four wells that supplied the valley. Water was shared under arrangements passed down through nine generations. An outside clerk later registered the wells as private property, giving an absent owner control over water the families had previously drawn by right.
+
+Witnesses from six villages signed an agreement near Tyre to share water and keep the coast road open. The terms also barred armed guards from the pumps. Hizballah troops seized the pumps and began checking road traffic twice a day, restricting the access the witnesses had secured.
+
+Fighting near Saida set homes alight, and the fires continued through the night. Families who returned found collapsed houses and neighbours missing. IDF soldiers collected names from survivors and recorded where each person had last been seen. Relatives used the list to search for people carried away during the evacuation.
+
+Campaign C
+For generations, families near Nuweiba in Sinai taught children where they belonged. Then outsiders arrived with papers saying the children had no claim. Under IDF forces, residents watched their words in public. Families argued behind closed doors about whether silence was keeping anyone safe anymore. Near El Tor, both sides agreed to a settlement. After the authorities broke it, residents brought copies to confront the guards. Later fighting left empty places at family tables. PLO East troops keep the names, including those neighbours still find difficult to discuss.
+
+Road builders near Nuweiba marked the rock beside each well to record who could draw water. Local families used those marks to settle access disputes. When officials produced the first regional map, the water rights were omitted. Officials then rejected claims based on the older markings.
+
+Elders marked a truce boundary with stones near El Tor and agreed which wells would remain available to local families. IDF soldiers later occupied those wells and shifted the markers. Families arriving for water found guards enforcing a boundary that no longer matched the one the elders had walked.
+
+Defenders with two machine guns held an advancing column near Ras Nasrani until dusk. The delay allowed families to leave the coastal route, but several defenders died before the survivors withdrew. The coast fell the next day. PLO East units preserved the survivors' account of the action and the losses.

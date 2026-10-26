@@ -1,0 +1,54 @@
+; ============================================================================
+;  chapters/garrison.sqs  -  the native garrison distance-cache.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: GarrisonCache (native) - reserve <-> live spawn within
+;  the 800 m cache radius, officer-first tier spawning, survivor write-back.
+;  Seams: gmGarrisonForceDespawn (the engine's own escape hatch).
+; ============================================================================
+? isNil "SC_READY" : exit
+
+; ---- precondition: the Outpost is still occupier-held -----------------------------
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : ["SKIP", "Outpost already liberated - restart the mission to re-run this chapter"] call SC_fnDone
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : exit
+
+"Garrisons are DISTANCE-CACHED: while nobody is near, a zone's garrison is just a reserve number. Step inside 800 m and the native cache spawns real groups - officer first, troops at the tier the current War Level selects." call SC_fnSay
+~SC_BEAT
+
+; ---- stage inside the cache radius, outside the wire (SOLO - cover is personal) ----
+SC_cOP = (gmZone SC_OUT) select GM_Z_POS
+[[(SC_cOP select 0) - 120, (SC_cOP select 1) - 120, 0], 10] call SC_fnTpSolo
+SC_cW = 0
+#swait
+? (gmGarrisonSpawned SC_OUT) and ((gmGarrisonLive SC_OUT) > 0) : goto "spawned"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 25 : goto "swait"
+["FAIL", "garrison did not spawn within 25 s inside the cache radius"] call SC_fnDone
+exit
+
+#spawned
+SC_cL0 = gmGarrisonLive SC_OUT
+(format ["Garrison live: %1 bodies on the ground (reserve now %2 - it moved INTO the world). The cache re-decides every 5 s with 50 m of hysteresis so the boundary never flickers.", SC_cL0, (gmZone SC_OUT) select GM_Z_GAR]) call SC_fnSay
+~SC_BEAT
+
+"Force-despawning through gmGarrisonForceDespawn - the same write-back that runs when you leave the radius. Watch the post empty and the reserve refill." call SC_fnSay
+gmGarrisonForceDespawn SC_OUT
+~1
+(format ["Banked: %1 live bodies wrote back to a reserve of %2. Casualties are permanent - the cache banks SURVIVORS, it does not resurrect.", SC_cL0, (gmZone SC_OUT) select GM_Z_GAR]) call SC_fnSay
+~SC_BEAT
+
+"We are still inside the radius, so the next cache decision respawns them - within about 5 s." call SC_fnSay
+SC_cW = 0
+#rwait
+? (gmGarrisonSpawned SC_OUT) and ((gmGarrisonLive SC_OUT) > 0) : goto "respawned"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 20 : goto "rwait"
+["FAIL", "garrison did not respawn within 20 s of the forced write-back"] call SC_fnDone
+exit
+
+#respawned
+(format ["Respawned: %1 bodies back on post. Reserve <-> live round-trip verified against the native cache.", gmGarrisonLive SC_OUT]) call SC_fnSay
+[(gmZone SC_CAMP) select GM_Z_POS, 15] call SC_fnTpSolo
+["PASS", format ["%1 live -> banked -> %2 live round-trip", SC_cL0, gmGarrisonLive SC_OUT]] call SC_fnDone
+exit

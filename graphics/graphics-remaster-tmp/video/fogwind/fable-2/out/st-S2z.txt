@@ -1,0 +1,8 @@
+st-S2z: 105 frames (clip 15..120), camera |shift| mean 0.00 px/frame (x +0.00, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.080  0.022  0.066  0.264 |  +2.6 -13.0  +0.02  -0.33 | -18.3  +0.1  +0.02 | +0.02   0.001
+  valley   0.038  0.018  0.027  0.160 |  +3.4 +19.1  +0.02  -0.30 |  -8.4 +30.0  +0.02 | +0.02   0.001
+  farhill  0.040  0.013  0.024  0.178 | +10.1 +17.2  +0.01  -0.28 | +17.9  +4.2  +0.02 | +0.01   0.000
+  haze     0.032  0.010  0.022  0.117 |  -3.7 +11.1  +0.02  -0.27 | -10.3  -0.3  +0.01 | +0.02   0.001
+  slope    0.062  0.021  0.034  0.315 | +12.2  +5.3  +0.05  -0.57 |  +0.0  +0.0  +0.25 | +0.05   0.003
+  wrote amp_st-S2z.png, xt_st-S2z.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

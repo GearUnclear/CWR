@@ -1,0 +1,899 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index a5bdd70..a75f543 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -33,9 +33,12 @@ constexpr FeatureInfo kFeatures[] = {
+      &FS::treeShadows, "shadow"},
+     {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", true,
+      &FS::softShadows, "world"},
+-    {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", false, &FS::lowSunRig, ""},
+-    {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", false,
+-     &FS::crownCanopy, ""},
++    // B2 (shade): the low-sun rig is constants computed once a frame (no GPU
++    // cost of its own; the world pass is what it lights); the crown canopy is
++    // a few terms on the world pass's foliage.
++    {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", true, &FS::lowSunRig, "world"},
++    {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", true,
++     &FS::crownCanopy, "world"},
+     {Feature::NightLights, "nightLights", "Lamps and low beams", "night", "Night and combat", "B3", false,
+      &FS::nightLights, ""},
+     {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", false, &FS::moonShadows,
+@@ -155,8 +158,8 @@ struct KeyTable
+             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
+             MakeChoice("debug", "View", "Diagnostics",
+                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
+-                       "Linear depth (half res)\0",
+-                       &LT::debugView, 0, 5),
++                       "Linear depth (half res)\0Albedo\0",
++                       &LT::debugView, 0, kDebugViewAlbedo),
+             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
+                        &LT::gates),
+         };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index 52a4193..ca04c05 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -187,8 +187,45 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth)
+     return NormaliseLuminance(Mix(physical, NormaliseLuminance(classicLinear), w));
+ }
+ 
++float LowSunHueShare(float elevationDeg)
++{
++    // Classic's sunset colour ramps in from 25 degrees (LightSun::Recalculate,
++    // begSunset), so 0.4 of it from there down, and 0.3 more in the last 9
++    // degrees (shade research V20: the lit side of a hull at a 4.8 degree sun
++    // came out as red as classic's only with it).
++    return 0.4f * (1.0f - Smoothstep(6.0f, 25.0f, elevationDeg)) + 0.3f * (1.0f - Smoothstep(4.0f, 9.0f, elevationDeg));
++}
++
++Rgb LowSunChroma(float elevationDeg, const Rgb& classicSun, float warmth)
++{
++    const Rgb evening = EveningSunChroma(elevationDeg, classicSun, warmth);
++    const Rgb classicLinear = ToLinear(classicSun);
++    const float w = LowSunHueShare(elevationDeg) * Clamp01(warmth);
++    // Above 25 degrees (and with no classic colour, or warmth 0) the share is
++    // 0: the sun is EveningSunChroma's to the bit.
++    if (w <= 0.0f || Luminance(classicLinear) < 1e-5f)
++        return evening;
++    return NormaliseLuminance(Mix(evening, NormaliseLuminance(classicLinear), w));
++}
++
++float LowSunFill(float elevationDeg)
++{
++    return (1.0f - Smoothstep(8.0f, 40.0f, elevationDeg)) * Smoothstep(-2.0f, 3.0f, elevationDeg);
++}
++
++float ShaderDebugView(int debugView)
++{
++    if (debugView >= 1 && debugView <= 3)
++        return static_cast<float>(debugView);
++    return debugView == kDebugViewAlbedo ? kShaderDebugAlbedo : 0.0f;
++}
++
+ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+ {
++    // The low-sun rig (B2): the evening hue from 25 degrees and the sideways
++    // fill on vertical faces. Off, the rig is the one before that step to the
++    // bit (every term below multiplies by exactly 1 or keeps its chroma).
++    const bool lowSunRig = tuning.features.lowSunRig > 0.0f;
+     LightRig rig;
+     const float sinSun = std::max(-1.0f, std::min(1.0f, in.towardSun[1]));
+     const float elevation = std::asin(sinSun) * 180.0f / kPi;
+@@ -216,7 +253,9 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);
+     const float clearSun = kSunNoon * extinction * aboveHorizon;
+     const float sunPower = clearSun * overcastDim * tuning.sun;
+-    rig.sun = EveningSunChroma(elevation, in.classicSunDiffuse, tuning.warmth) * sunPower;
++    const Rgb sunChroma = lowSunRig ? LowSunChroma(elevation, in.classicSunDiffuse, tuning.warmth)
++                                    : EveningSunChroma(elevation, in.classicSunDiffuse, tuning.warmth);
++    rig.sun = sunChroma * sunPower;
+ 
+     // --- sky hemisphere ------------------------------------------------------
+     const float clearSky = kSkyNoon * SkyDayFraction(sinSun);
+@@ -277,13 +316,38 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     const float moonOnGround = moonPower * sinMoon;
+     const float bouncePower = kGroundAlbedo * (sunOnGround + moonOnGround + skyPower + moonSky) * tuning.bounce;
+     const Rgb bounceChroma = NormaliseLuminance(Rgb(1.0f, 1.0f, 0.96f));
+-    rig.skyGround = bounceChroma * bouncePower;
++    // The low-sun rig's sideways fill (LowSunFill; 0 with the switch off, by
++    // day above 40 degrees and at night).
++    const float fill = lowSunRig ? LowSunFill(elevation) : 0.0f;
++    rig.skyGround = bounceChroma * (bouncePower * (1.0f + kLowSunFillBounce * fill));
+     // A vertical surface sees half the dome and half the ground. The sky toward
+     // a low sun is brighter than the sky opposite it.
+     const float low = 1.0f - Clamp01(sinSun);
+     const Rgb moonHorizon = moonChroma * (0.55f * moonSky);
+-    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low)) + rig.skyGround * 0.5f + moonHorizon;
+-    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low)) + rig.skyGround * 0.5f + moonHorizon;
++    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low) * (1.0f + kLowSunFillSunward * fill)) +
++                        rig.skyGround * 0.5f + moonHorizon;
++    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low) * (1.0f + kLowSunFillAntiSun * fill)) +
++                     rig.skyGround * 0.5f + moonHorizon;
++    if (fill > 0.0f)
++    {
++        // The twilight rule above holds for walls too: the fill lifts a
++        // vertical face at most to the visible sky (skyCap), never above it,
++        // and never below what it had without the fill. Only a dim dusk sky
++        // binds (a clear sky's fog colour caps far above the fill).
++        const Rgb groundHalf = bounceChroma * (bouncePower * 0.5f) + moonHorizon;
++        const Rgb plainSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low)) + groundHalf;
++        const Rgb plainAnti = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low)) + groundHalf;
++        auto limit = [skyCap](Rgb& lifted, const Rgb& plain)
++        {
++            const float plainLum = Luminance(plain);
++            const float liftedLum = Luminance(lifted);
++            const float cap = std::max(plainLum, skyCap);
++            if (liftedLum > cap && liftedLum > plainLum)
++                lifted = Mix(plain, lifted, (cap - plainLum) / (liftedLum - plainLum));
++        };
++        limit(rig.skyHorizonSun, plainSun);
++        limit(rig.skyHorizon, plainAnti);
++    }
+     return rig;
+ }
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index c0c24bf..c86a198 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -13,12 +13,15 @@
+ //
+ //   - a sun whose colour follows its elevation (near-neutral by day; below 16
+ //     degrees it takes the classic sunset colour, so evenings are as warm on
+-//     screen as the original's) and whose strength follows the classic
++//     screen as the original's; with the low-sun rig from 25 degrees, as
++//     classic's own sunset ramp) and whose strength follows the classic
+ //     overcast and night ramps,
+ //   - a sky hemisphere (zenith, ground bounce and a horizon band split into a
+ //     sunward half and an anti-sun half). The sunward horizon takes the engine
+ //     fog colour, so a mod's sky tints the light and a low sun gives warm light
+-//     on the sun side and cool shade on the other,
++//     on the sun side and cool shade on the other. Below 40 degrees the low-sun
++//     rig adds sideways fill to vertical faces, so the shaded side of a hull
++//     stays readable at a low sun,
+ //   - an exposure meter, so sunlit ground keeps its classic on-screen
+ //     brightness from noon down to a low sun (the frame does not just get
+ //     darker),
+@@ -72,8 +75,8 @@ struct FeatureSet
+     float atmosphere = 1.0f;      // A7 sky table for the dome and the fog colour
+     float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map, leaves without self-shadow stripes
+     float softShadows = 1.0f;     // B1 contact-hardening (PCSS) sun shadows
+-    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides
+-    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy
++    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides (ComputeLightRig)
++    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy (shader shadeRemastered)
+     float nightLights = 1.0f;     // B3 physical lamps and low-beam headlights
+     float moonShadows = 1.0f;     // B3 the moon as a shadow-casting key light
+     float stars = 1.0f;           // B3 stars in a dark sky
+@@ -151,7 +154,10 @@ struct LightingTuning
+     FeatureSet features;
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion, 5 the post pass's half-resolution
+-    // linear depth (PostStages.hpp kDebugViewLinearDepth).
++    // linear depth (PostStages.hpp kDebugViewLinearDepth), 6 the surface
++    // albedo (kDebugViewAlbedo: the display-space colour the lit shaders light,
++    // texture, tint and detail applied; with post=0 a shot of it divides a lit
++    // shot into the light on each surface).
+     int debugView = 0;
+ };
+ 
+@@ -187,6 +193,15 @@ struct LightRig
+     float cloudTransmit = 1.0f;
+ };
+ 
++// The debug view (LightingTuning::debugView) that shows the albedo, and the
++// value the lit shaders read for it (litFlags.z; 1 to 3 are the views of
++// the same number).
++constexpr int kDebugViewAlbedo = 6;
++constexpr float kShaderDebugAlbedo = 4.0f;
++// litFlags.z for a debug view: 1 to 3 and the albedo view are drawn by the lit
++// shaders, every other view (4 and 5 by the post pass) leaves them as they are.
++float ShaderDebugView(int debugView);
++
+ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning);
+ 
+ // Sun chroma at an elevation (degrees), normalised to unit luminance.
+@@ -197,6 +212,29 @@ Rgb SunChroma(float elevationDeg, float warmth);
+ // space, LightSun's colorFull or Diffuse) taken to linear, so evenings keep the
+ // original's warm hue on screen. `warmth` 0 = neutral.
+ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
++// With the low-sun rig (FeatureSet::lowSunRig, plan step B2) the sun then
++// takes a further LowSunHueShare of the classic sunset hue: from 25 degrees
++// down (where classic's own sunset ramp starts; EveningSunChroma reaches only
++// 14% of it at 12.7 degrees) and more in the last 9, where classic's sun is
++// nearly pure red and the remastered sky fill would otherwise leave a sunlit
++// hull less red than the original's. Times the warmth (clamped to 1).
++float LowSunHueShare(float elevationDeg);
++Rgb LowSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
++
++// The low-sun rig's sideways fill on vertical faces. At a low sun the light on
++// a wall comes mostly sideways, from the bright horizon band and the sunlit
++// ground in front of it, which the hemisphere split under-counts: the face of
++// a hull turned away from a 7 to 14 degree sun fell to 0.32 to 0.42 of its
++// sunlit side on screen (0.6 is the target; 0.42 was called crushed). The fill
++// weight is LowSunFill (full from 8 degrees down to the horizon, gone by 40,
++// and faded out under the horizon); the sky part of the anti-sun horizon takes
++// 1 + kLowSunFillAntiSun * fill, the sunward one 1 + kLowSunFillSunward * fill
++// and the ground bounce 1 + kLowSunFillBounce * fill. Up-facing ground (the
++// zenith term) is unchanged, so cast shadows on the ground keep their depth.
++constexpr float kLowSunFillAntiSun = 2.6f;
++constexpr float kLowSunFillSunward = 0.5f;
++constexpr float kLowSunFillBounce = 1.3f;
++float LowSunFill(float elevationDeg);
+ 
+ // Ellipsoid that stands in for a tree crown when lighting foliage, from the
+ // model's bounding box (min, max; y up). Trunks make the box taller than the
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index a98122d..b3428e0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -25,13 +25,13 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ 
+ | Piece | Where | What it changes on screen |
+ |---|---|---|
+-| Light rig | `LightRig.cpp` | The sun's colour follows its height (near-neutral by day, red at the horizon; air-mass extinction). Below 16 degrees it takes Classic's own sunset colour (`EveningSunChroma`: 0.65 of LightSun's colorFull hue, taken to linear because Classic applies it in display space), so a sunlit vehicle at golden hour has the original's warm hue instead of a ~5600 K white. The sky is a hemisphere: zenith, ground bounce, and a horizon band split into a warmer, brighter sunward half and a cool anti-sun half, so low sun gives warm light and cool shade. An exposure meter keeps sunlit ground at Classic's on-screen brightness from noon down to about 20 degrees, then lets golden hour darken into a warm, contrasty frame. In twilight the fill is capped by the visible sky, so the twilight fill never makes a wall brighter than the sky behind it (the moonlit sky fill is added after that cap). At night the moon is the key light (cool and pale, dimmed by overcast) and the moonlit sky fills its shade; a moonless night keeps the classic ambient level. |
++| Light rig | `LightRig.cpp` | The sun's colour follows its height (near-neutral by day, red at the horizon; air-mass extinction). Below 16 degrees it takes Classic's own sunset colour (`EveningSunChroma`: 0.65 of LightSun's colorFull hue, taken to linear because Classic applies it in display space), so a sunlit vehicle at golden hour has the original's warm hue instead of a ~5600 K white. The sky is a hemisphere: zenith, ground bounce, and a horizon band split into a warmer, brighter sunward half and a cool anti-sun half, so low sun gives warm light and cool shade. The low-sun rig (switch `lowSunRig`) starts the evening hue at 25 degrees, where Classic's own sunset ramp starts (`LowSunHueShare`: a further 0.4 of Classic's hue from 25 degrees down and 0.3 more below 9), and gives vertical faces sideways fill below 40 degrees (`LowSunFill`: the sky part of the anti-sun horizon x(1 + 2.6 fill), the sunward one x(1 + 0.5 fill), the ground bounce x(1 + 1.3 fill)), so the side of a hull turned away from a 5 to 13 degree sun shows at about 0.6 of its sunlit side instead of 0.3 to 0.45; up-facing ground and its cast shadows keep their light, and in twilight the fill lifts a wall at most to the visible sky. An exposure meter keeps sunlit ground at Classic's on-screen brightness from noon down to about 20 degrees, then lets golden hour darken into a warm, contrasty frame. In twilight the fill is capped by the visible sky, so the twilight fill never makes a wall brighter than the sky behind it (the moonlit sky fill is added after that cap). At night the moon is the key light (cool and pale, dimmed by overcast) and the moonlit sky fills its shade; a moonless night keeps the classic ambient level. |
+ | Tonemap | shader `tonemapNeutral` | Khronos PBR Neutral without its toe: identity below 0.8 linear (authored texture colour is kept), a soft shoulder above it. |
+ | Sun shadows | shader `shadowMapVisibility` | The engine's cascaded shadow maps now dim only direct sun, never the sky fill: shadows have readable detail instead of a flat darkening. 12-tap Poisson over hardware 2x2 PCF. Casters use a slope-scaled normal offset; the terrain never casts into the map and gets no offset, so shadows stay attached to their casters at a low sun. Shadow maps follow the true sun down to 4 degrees (Classic clamps to 11.5), so evening shadows have their full length (`SceneShadowPass.cpp`). |
+ | Hill shadows and valley sky | `TerrainHorizon.cpp`, `World/Terrain/TerrainLighting.cpp` | A 16-azimuth horizon map built off-thread from the heightfield when an island loads. Ridges shadow the valleys behind them at any range (the shadow maps cover objects near the camera only) and valley floors see less sky. |
+ | Ground-coloured bounce | `GroundTint`, `TerrainLighting.cpp` `GroundColors` | The light bounced off the ground takes the colour of the landscape texture under each point (its average colour, baked with the horizon map): warm on sand, green over grass. The tint is luminance-neutral, so it changes the colour of the shade, never its brightness. |
+ | Cloud shadows | `CloudNoise.cpp`, shader `cloudSunVisibility` | Under broken cloud, the classic uniform sun dimming moves into drifting cloud shadows whose mean transmission equals the classic dimming, so the average frame brightness is unchanged. A clear sky casts none: `setOvercast 0` still reports 4% cover (the clear weather keyframe sits at overcast -0.08), so the shadows fade in from 5% cover and take the full cover from 10% (about overcast 0.1); the dimming they do not carry stays uniform. |
+-| Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. Leaf cards authored without normals (zero mesh normals, common in CWA crowns) take the ellipsoid's normal outright. |
++| Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. Leaf cards authored without normals (zero mesh normals, common in CWA crowns) take the ellipsoid's normal outright. With the crown canopy (switch `crownCanopy`) a crown is lit as a canopy: the sun reaching a leaf crosses the crown in front of it (optical depth 1 per crown radius, a quarter of the sun always passes), the core sees 0.45 of the sky instead of 0.6, the leaf albedo deepens its saturation at equal luminance (light bounced between leaves), and below 35 degrees of sun, fully below 12, the crown takes 0.65 of the sun and 0.75 of the sky, so golden-hour crowns read green instead of pale grey-green. Grass shades as terrain and keeps its look. |
+ | Fog toward the sun | shader `fogColorToward` | Fog takes the sky dome's own sun glow (`SunSkyColor * cos^6`, as `TLVertexTable::DoSkyLighting` shades the dome). Distant ground fades into the colour of the sky behind it, which removes the flat band along the horizon at sunrise and sunset. Away from the sun it is exactly the classic fog. |
+ | Sky table (switch `atmosphere`) | `Atmosphere.cpp`, `PoseidonGL33/EngineGL33_SkyTable.cpp`, shaders `shadeSkyDome`, `atmoFogColor` | A physically based clear sky (Rayleigh, Mie, ozone and multiple scattering, after Hillaire 2020) shades the sky dome under the original sky texture's clouds and gives the fog of every world draw its colour (aerial perspective, the far horizon polygon included). A low sun gets a golden horizon band and an aureole, dusk an orange band under a mauve sky, sunrise keeps its pink with a coral glow at the sun, noon a graded blue with its cirrus. Each sky row keeps the original dome's brightness on average (its sun glow included); the table supplies how a direction differs from its row, and the hue is half way between the original's and the physical one (`atmoHue` 0.5, `atmoSat` 1.15). The clouds are the texture's own, masked against each row's clearest texel and lit by the sun seen from 2.5 km. The transmittance and multiple-scattering tables are built on a worker thread when the haze changes; the 192x64 sky-view table on the GPU, in two fullscreen passes, whenever the sun moves 0.02 degrees. It fades out between -3 and -9 degrees of sun (night keeps the classic sky); an overcast deck keeps the classic fog colour. |
+ | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
+@@ -84,12 +84,15 @@ of 1.2, clear sky, default tuning (before the tonemap shoulder):
+ | Sun | Exposure | Sunlit ground | Cast shadow | Wall facing sun | Wall facing away |
+ |---|---|---|---|---|---|
+ | 60 deg | 1.00 | 1.00 | 0.58 | 0.86 | 0.57 |
+-| 30 deg | 1.56 | 0.97 | 0.61 | 1.00 | 0.57 |
+-| 14 deg | 1.31 | 0.70 | 0.48 | 1.00 | 0.42 |
+-| 7 deg | 1.03 | 0.49 | 0.38 | 0.88 (warm) | 0.32 (cool) |
++| 30 deg | 1.56 | 0.97 | 0.61 | 1.00 | 0.66 (0.57) |
++| 14 deg | 1.31 | 0.70 | 0.48 | 1.00 | 0.64 (0.42) |
++| 7 deg | 1.03 | 0.49 | 0.38 | 0.90 (warm) | 0.49 (0.32) (cool) |
+ 
+ Classic shows sunlit ground and most shade at 1.0. Shade near 0.6 is bold but
+ well above the ~0.42 of the shadow-map darkening that reviewers called crushed.
++The walls are with the low-sun rig (`lowSunRig`); in brackets without it, where
++a wall turned from a low sun fell to 0.32 to 0.42. The ground and its cast
++shadows are the same either way, and so is everything from 40 degrees up.
+ `test_remaster_lighting.cpp` pins these ranges.
+ 
+ At night (same units, before the classic night-eye pass, which fades dim
+@@ -125,7 +128,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+   exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
+   moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
+   bloom and shafts, debug views (sun visibility, sky visibility, normals, AO,
+-  the post pass's half-resolution linear depth),
++  the post pass's half-resolution linear depth, the surface albedo: with
++  `post=0` a shot of it divides a lit shot into the light on every surface),
+   a **Features** section (per area, one checkbox per switch with its live gate,
+   "active" or "gated: <reason>", and its GPU section once it has one) and a
+   summary line that is a `triSetLighting` setting, to copy back.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 08c290a..b063757 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -305,6 +305,12 @@ x the soft filter's per-frame turn, y 1 in a TAA frame, z taps per frame there,
+ angular radius (0 = the stock filter); `litPcss` x the search reach (m), y the smallest filter
+ radius (texels), z the soft strength (the gate-edge fade), w the leaf lift (texels).
+ 
++As built in B2 (a parallel lane on 807ce4b): no slot lands. The low-sun rig is rig math in
++`ComputeLightRig`, and the crown canopy needs one flag per frame: `litHorizonSun.w` (slot 23,
++unused before), 1 while `crownCanopy` and its gate are on. `LitConst::Count` and the padding are
++unchanged; only the block's comment for slot 23 changes (which changes the text, not the layout,
++of every remastered program).
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -1276,6 +1282,44 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+   rig. Update the README calibration table.
+ - **Effort**: 2 days.
+ 
++**Result (2026-10-18, uncommitted change on 807ce4b in the scratch copy `gr-B2`; evidence in
++`tmp/integration/B2/` of the graphics-remaster worktree, gitignored).**
++
++- Built as the bullets above. `lowSunRig` is read by `ComputeLightRig` from the switch (its gate is
++  "always"; the rig runs before the gates, which take its cloud cover): `LowSunChroma` blends a
++  further `LowSunHueShare` of the classic hue over `EveningSunChroma`, and `LowSunFill` scales the
++  horizon and bounce terms with the named constants `kLowSunFill{AntiSun,Sunward,Bounce}`. Off,
++  every term multiplies by exactly 1, so the rig equals 807ce4b's (a unit case pins 807ce4b's values
++  at 7.5, 12.7 and 30 degrees). `crownCanopy` is V18 as plain code in `shadeRemastered`, from its gate
++  (`litHorizonSun.w`, 3.3).
++- Corrections and additions: the fill obeys the twilight cap (a vertical face goes at most to the
++  visible sky, never below its value without the fill); under a dim dusk sky the prototype's fill lit
++  a wall facing away from a 1 to 3 degree sun at 1.4 to 2.1 times the visible sky. Under a clear sky the
++  limit does not bind (the unit test's clear-sky rig is the same with and without it). The canopy terms skip
++  grass (`terrain` draws), which the prototype also darkened; `crownCanopy` is the crowns' switch.
++  The albedo view is kept as `debug=6` (5 is the linear depth since A3), mapped to the lit shaders'
++  4 by `ShaderDebugView`. The 7 degree hue case did not move (its hull, N.L 0.5, stays within 10% of
++  Classic); the new pins are a model of the research boxes' faces (45 and 135 degrees from the sun):
++  shade/lit 0.5 to 0.65 with the rig, below 0.41 without, from 4.8 to 14 degrees (the model reads
++  0.52 to 0.59; the game 0.02 to 0.07 higher), and the lit face at least as warm as without the rig.
++- In game (albedo-normalised boxes, 1920x1080, `b2_abel` / `b2_sinai`; the research's 960x640 boxes
++  do not carry over): hull shade/lit on 0.61 / 0.62 (M113 / Jeep) at 12.7 degrees, 0.57 / 0.61 at 7.5,
++  0.55 / 0.61 at 4.8; Sinai Zelda / HMMWV 0.60 / 0.63 at 12.2 and 0.56 / 0.59 at 7.6 (before 0.41 to
++  0.49, Classic 0.33 to 0.53). Sunlit hull faces warmer than before in every box and at least as warm
++  as Classic except two Jeep values within 0.02 on one of the two ratios. Ground cast shadows and the
++  noon frame unchanged; sunlit ground warmer (g:r 0.92 to 0.86 at 12.7 degrees, Classic 0.87). Golden
++  crowns greener with an unchanged p10:p90 spread; the broadleaf crown at Classic's brightness, the
++  conifer 9% darker than before and 15% darker than Classic.
++- Off equals before: the box values of off and of the base build are equal to 0.01 on every view; the
++  Abel views differ from the base build (another boot) by the same kinds and sizes as the base
++  build's own repeat within one game (pixels over 2 levels, lowsun_fp 40,918 against 43,969,
++  lowsun_box 56,542 against 45,618); Sinai's ground band differs between boots as A0 found, with
++  equal means.
++- Cost: one reading per view, frame minimum on minus off -0.41 to +0.35 ms with no consistent sign
++  (the base build's same frame twice spreads -0.13 to +0.23 ms): not resolved. Gate: build 0
++  warnings, clang-format clean, unit gate tags 529/529 (6 new cases), twelve mutations red,
++  smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only).
++
+ ### B3. night (moon shadows, low beams, stars, physical lamps)
+ 
+ - **Prototype touched**: `GameStateExtTestRender.cpp` (12 knobs), `LightRig.hpp`, `Lights.cpp`
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 5a65482..25bec22 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -460,7 +460,10 @@ void EngineGL33::UploadLitFrameConstants()
+     SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
+     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, rig.exposure);
+     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
+-    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, 0.0f);
++    // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
++    // gate are on; 0 leaves shadeRemastered's foliage as it was before.
++    const float crownCanopy = _featureGates[rm::Feature::CrownCanopy].on ? 1.0f : 0.0f;
++    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, crownCanopy);
+ 
+     // Fog toward the sun: the sky dome adds SunSkyColor * cos^6 to SkyColor
+     // before modulating the sky texture (TLVertexTable::DoSkyLighting), while
+@@ -545,8 +548,7 @@ void EngineGL33::UploadLitFrameConstants()
+         rm::ComputeSunShadowConstants(_lighting, _featureGates, TaaWantedThisFrame(), _taa.sequence);
+     SetSlot(LitConst::Taa, sunShadows.taa[0], sunShadows.taa[1], sunShadows.taa[2], sunShadows.taa[3]);
+     SetSlot(LitConst::Pcss, sunShadows.pcss[0], sunShadows.pcss[1], sunShadows.pcss[2], sunShadows.pcss[3]);
+-    const float debug =
+-        _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
++    const float debug = rm::ShaderDebugView(_lighting.debugView);
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+     // The sky table: the camera basis, the dome and fog blends, the clouds' light.
+     UploadLitSky(toSun, in.skyThrough);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index e9245ce..49d92bf 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -323,7 +323,7 @@ layout(std140) uniform LitConstants {
+     vec4 litShadowDelta;  // 20: xyz camera move since the shadow pass, w filter radius (texels)
+     vec4 litFlags;        // 21: x AO share to alpha, y world effects on, z debug view, w saturation
+     vec4 litLightCount;   // 22: x active local lights
+-    vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun
++    vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun, w = crowns lit as a canopy
+     vec4 litFogSun;       // 24: rgb sky-dome sun glow added to the fog (display), w enabled
+     vec4 litFogCap;       // 25: rgb fog colour limit (the sky texture colour)
+     vec4 litLightPos[8];  // 26-33: xyz camera-relative, w start attenuation distance
+@@ -588,6 +588,18 @@ static const char s_psRemasterShade[] = R"(
+ // Sun visibility of the last shaded fragment (water reuses it for its glint).
+ float g_sunVisibility = 1.0;
+ 
++// Tree crowns lit as a canopy (crownCanopy, litHorizonSun.w; research track
++// shade, crown V18). The sun reaching a leaf crosses the crown in front of it:
++// the path, in crown radii, from the leaf to the crown's surface toward the
++// sun, with the crown taken as a sphere around the ellipsoid's centre (the
++// leaf at |e| = vCrown.w along the gradient direction `cnDir`).
++float crownSunPath(vec3 cnDir, float r, vec3 l) {
++    vec3 p = cnDir * min(r, 1.0);
++    float b = dot(p, l);
++    float c = dot(p, p) - 1.0;
++    return max(-b + sqrt(max(b * b - c, 0.0)), 0.0);
++}
++
+ // Lights a fragment of a VSTransform draw. `albedo` is the display-space surface
+ // colour (texture, tint and detail already applied); `terrain` marks surfaces
+ // that never cast into the shadow map. Returns the tonemapped display-space
+@@ -613,15 +625,30 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     if (foliage && dot(n, n) < 0.25) n = cn;
+     vec3 nCast = (foliage && dot(n, l) < 0.0) ? -n : n;
+     vec3 nLight = n;
++    // A crown lit as a canopy (crownCanopy; grass shades as terrain and keeps
++    // its look): the sun reaching a leaf crosses the crown in front of it
++    // (optical depth 1 per crown radius, a quarter of the sun passes whatever
++    // the depth), the core sees less sky (0.45 of it, 0.6 without), and below
++    // 35 degrees of sun, fully below 12, the crown takes 0.65 of the sun and
++    // 0.75 of the sky: a low sun's wrapped terminator and the exposure meter
++    // otherwise light the whole crown pale. `crownSun` and `crownSky` stay 1
++    // and the stock values without it.
++    bool canopy = crown && !terrain && litHorizonSun.w > 0.5;
++    float crownSun = 1.0;
+     float crownSky = 1.0;
+     if (crown) {
+         vec3 card = dot(n, cn) < 0.0 ? -n : n;
+         vec3 blend = card * 0.3 + cn * 0.7;
+         nLight = blend * inversesqrt(max(dot(blend, blend), 1e-12));
+-        crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
++        crownSky = mix(canopy ? 0.45 : 0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
+     } else if (foliage) {
+         nLight = nCast;
+     }
++    if (canopy) {
++        float lowSun = 1.0 - smoothstep(12.0, 35.0, litSun.w);
++        crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);
++        crownSky *= mix(1.0, 0.75, lowSun);
++    }
+ 
+     float nl = max(dot(n, l), 0.0);
+     float nlCast = max(dot(nCast, l), 0.0);
+@@ -639,7 +666,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     float sunShadow = sunVisibility;
+     if (foliage) {
+         sunTerm = clamp((dot(nLight, l) + 0.35) / 1.35, 0.0, 1.0);
+-        sunShadow = mix(0.45, 1.0, sunVisibility);
++        sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;
+     }
+     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
+     vec3 ambient = ka * skyIrradiance(nLight) * (skyVisibility * crownSky * sunOn);
+@@ -653,6 +680,13 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
+ 
+     vec3 a = toLinear(albedo);
++    if (canopy) {
++        // Light that bounces between leaves before it leaves the crown picks
++        // up the leaf colour again: the canopy's albedo is the leaf's with its
++        // saturation deepened (a power of 1.3) at the same luminance.
++        vec3 p = pow(a, vec3(1.3));
++        a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
++    }
+     float exposure = litZenith.w;
+     vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn) * exposure;
+     float total = dot(radiance, kLuma);
+@@ -660,10 +694,12 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     if (foliage) ambientShare *= 0.5;
+ 
+     if (litFlags.z > 0.5) {
+-        // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
++        // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal,
++        // 4 = the albedo in display space (debug=6; LightRig.hpp kShaderDebugAlbedo).
+         if (litFlags.z < 1.5) return vec3(sunVisibility);
+         if (litFlags.z < 2.5) return vec3(skyVisibility);
+-        return nLight * 0.5 + 0.5;
++        if (litFlags.z < 3.5) return nLight * 0.5 + 0.5;
++        return albedo;
+     }
+     vec3 display = toDisplay(tonemapNeutral(radiance));
+     float grey = dot(display, kLuma);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index de45949..2097453 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -686,15 +686,16 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
+-TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsharp and the sun shadows have landed, "
+-          "nothing else has",
++TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsharp, the sun shadows and shade have "
++          "landed, nothing else has",
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+     // classic): triFeatureState no longer marks them inert, and the overlay
+     // shows the opaque objects' GPU section for them. A5 lands taa, A7
+     // atmosphere, B11 terrainDetail and sharpen, B1 treeShadows (the shadow
+-    // depth pass) and softShadows (the world pass).
++    // depth pass) and softShadows (the world pass), B2 lowSunRig and
++    // crownCanopy (the world pass's lighting).
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -707,19 +708,23 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsha
+         const bool atmosphere = info.id == Feature::Atmosphere;
+         const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
+         const bool shadows = info.id == Feature::TreeShadows || info.id == Feature::SoftShadows;
+-        CHECK(info.landed == (perf || taa || atmosphere || texsharp || shadows));
++        const bool shade = info.id == Feature::LowSunRig || info.id == Feature::CrownCanopy;
++        CHECK(info.landed == (perf || taa || atmosphere || texsharp || shadows || shade));
+         if (info.landed)
+         {
+             CHECK(std::string_view(info.step) == (perf         ? "A4"
+                                                   : taa        ? "A5"
+                                                   : atmosphere ? "A7"
+                                                   : shadows    ? "B1"
++                                                  : shade      ? "B2"
+                                                                : "B11"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+     }
+     CHECK(std::string_view(GetFeatureInfo(Feature::TreeShadows).gpuSection) == "shadow");
+     CHECK(std::string_view(GetFeatureInfo(Feature::SoftShadows).gpuSection) == "world");
++    CHECK(std::string_view(GetFeatureInfo(Feature::LowSunRig).gpuSection) == "world");
++    CHECK(std::string_view(GetFeatureInfo(Feature::CrownCanopy).gpuSection) == "world");
+     const LightingTuning t = Apply("remastered");
+     FeatureGates g = ComputeFeatureGates(GateInputs{}, t);
+     const std::string s = FeatureStateString(t, g);
+@@ -728,7 +733,11 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsha
+     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+     CHECK(s.find(" treeShadows=1:on:sun-above-4-deg ") != std::string::npos);
+     CHECK(s.find(" softShadows=1:on:sun-above-4-deg ") != std::string::npos);
+-    CHECK(s.find("landed=8/26") != std::string::npos);
++    // The low-sun rig is constants and the canopy a few terms on foliage:
++    // both run whenever they are on (their own math fades them by sun height).
++    CHECK(s.find(" lowSunRig=1:on:always ") != std::string::npos);
++    CHECK(s.find(" crownCanopy=1:on:always ") != std::string::npos);
++    CHECK(s.find("landed=10/26") != std::string::npos);
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+index a291fc1..0108865 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+@@ -333,7 +333,8 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
+     CHECK(GetPostStageInfo(PostStage::DebugView).readsLinearDepth);
+ 
+     PostFrameInputs in = Shipped();
+-    for (int view = 0; view <= 5; ++view)
++    // Up to the albedo view (6, B2), which the lit shaders draw: no post stage.
++    for (int view = 0; view <= kDebugViewAlbedo; ++view)
+     {
+         CAPTURE(view);
+         in.debugView = view;
+@@ -344,10 +345,12 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
+         CHECK((plan.runs & ~Mask({PostStage::LinearDepth, PostStage::DebugView})) ==
+               Mask({PostStage::Resolve, PostStage::Ao, PostStage::Bloom, PostStage::Shafts, PostStage::Composite}));
+     }
+-    // The registry offers the view (the overlay's combo, triSetLighting debug=5).
++    // The registry offers the view (the overlay's combo, triSetLighting debug=5);
++    // B2's albedo view (6) is the last one.
+     const LightingKey* debug = FindLightingKey("debug");
+     REQUIRE(debug != nullptr);
+-    CHECK(debug->maxValue == static_cast<float>(kDebugViewLinearDepth));
++    CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
++    CHECK(debug->maxValue == static_cast<float>(kDebugViewAlbedo));
+ }
+ 
+ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][remaster][PostStages]")
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 2b4bad0..a5b6b2b 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+@@ -172,6 +173,267 @@ TEST_CASE("Remaster light rig: evening sun keeps the original's sunset hue on sc
+     CHECK(RedOverBlue(flat.sun) < 1.1f);
+ }
+ 
++namespace
++{
++// Classic's sun colour at an elevation (LightSun::Recalculate's colorFull):
++// FullSunColor (0.85, 0.75, 0.4) toward SunsetColor (0.8, 0.3, 0.23) as the
++// sine of the elevation falls below sin 25 degrees. At 7 degrees it is the
++// (0.814, 0.43, 0.279) of the case above.
++Rgb ClassicSunColor(float elevationDeg)
++{
++    const float s = std::sin(std::max(elevationDeg, 0.0f) * kPi / 180.0f);
++    const float t = std::min(std::max(1.0f - s / 0.42262f, 0.0f), 1.0f);
++    return Mix(Rgb(0.85f, 0.75f, 0.4f), Rgb(0.8f, 0.30f, 0.23f), t);
++}
++
++LightRigInputs ClearSkyClassicSun(float elevationDeg)
++{
++    LightRigInputs in = ClearSky(elevationDeg);
++    in.classicSunDiffuse = ClassicSunColor(elevationDeg);
++    return in;
++}
++
++LightingTuning WithLowSunRig(bool on)
++{
++    LightingTuning t;
++    t.features.lowSunRig = on ? 1.0f : 0.0f;
++    return t;
++}
++
++// Light (rig units, linear) on a vertical face whose normal is `offDeg` from
++// the sun's azimuth: the sun times N.L and the horizon band between its
++// anti-sun and sunward halves, as the shader's skyIrradiance gives it for a
++// horizontal normal. The shade track's calibration boxes turn a hull 45
++// degrees from the sun (lit) and 135 (shaded).
++Rgb VerticalFace(const LightRig& rig, float elevationDeg, float offDeg)
++{
++    const float cosOff = std::cos(offDeg * kPi / 180.0f);
++    const float sunTerm = std::max(std::cos(elevationDeg * kPi / 180.0f) * cosOff, 0.0f);
++    const float toward = 0.5f + 0.5f * cosOff;
++    return rig.sun * sunTerm + Mix(rig.skyHorizon, rig.skyHorizonSun, toward);
++}
++
++bool SameRgb(const Rgb& a, const Rgb& b)
++{
++    return a.r == b.r && a.g == b.g && a.b == b.b;
++}
++} // namespace
++
++TEST_CASE("Remaster light rig: the low-sun rig keeps the shaded side of a hull readable", "[Graphics][remaster]")
++{
++    // Plan step B2 (research track shade): the face of a hull turned away from
++    // a low sun was crushed (0.32 to 0.42 of its sunlit side on screen in the
++    // research's calibration boxes; the target is about 0.6, and 0.42 was
++    // rejected). The sideways fill lifts it into a readable range without
++    // flattening the hull. The game measures 0.02 to 0.07 above this model
++    // (AO, ground tint and the measured faces' exact angles).
++    for (float e : {4.8f, 7.5f, 9.0f, 12.7f, 14.0f})
++    {
++        CAPTURE(e);
++        const LightRigInputs in = ClearSkyClassicSun(e);
++        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
++        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
++        auto ratio = [e](const LightRig& rig)
++        {
++            return Shown(Luminance(VerticalFace(rig, e, 135.0f)), rig.exposure) /
++                   Shown(Luminance(VerticalFace(rig, e, 45.0f)), rig.exposure);
++        };
++        CAPTURE(ratio(on), ratio(off));
++        CHECK(ratio(off) < 0.41f);
++        CHECK(ratio(on) > 0.5f);
++        CHECK(ratio(on) < 0.65f); // still a shaded side, not flat light
++        CHECK(ratio(on) > ratio(off) + 0.15f);
++        // The sunlit side is not dimmed to get there.
++        CHECK(Luminance(VerticalFace(on, e, 45.0f)) >= Luminance(VerticalFace(off, e, 45.0f)));
++        // Up-facing ground and its cast shadows keep their light, and the
++        // exposure is the meter's: only walls and the sun's hue change.
++        CHECK(Luminance(on.skyZenith) == Luminance(off.skyZenith));
++        CHECK(on.exposure == off.exposure);
++        CHECK(Luminance(on.sun) == Catch::Approx(Luminance(off.sun)).epsilon(1e-5));
++    }
++    // The fill is full from 8 degrees down to the horizon, gone by 40 and
++    // faded out under the horizon; noon and night are untouched to the bit.
++    CHECK(LowSunFill(40.0f) == 0.0f);
++    CHECK(LowSunFill(8.0f) == Catch::Approx(1.0f));
++    CHECK(LowSunFill(3.0f) == Catch::Approx(1.0f));
++    CHECK(LowSunFill(-2.0f) == 0.0f);
++    float last = 0.0f;
++    for (float e = 40.0f; e >= 8.0f; e -= 1.0f)
++    {
++        CAPTURE(e);
++        CHECK(LowSunFill(e) >= last);
++        last = LowSunFill(e);
++    }
++    for (float e : {40.0f, 45.0f, 60.0f, 85.0f, -3.0f, -30.0f})
++    {
++        CAPTURE(e);
++        const LightRigInputs in = ClearSkyClassicSun(e);
++        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
++        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
++        CHECK(SameRgb(on.sun, off.sun));
++        CHECK(SameRgb(on.skyZenith, off.skyZenith));
++        CHECK(SameRgb(on.skyHorizon, off.skyHorizon));
++        CHECK(SameRgb(on.skyHorizonSun, off.skyHorizonSun));
++        CHECK(SameRgb(on.skyGround, off.skyGround));
++        CHECK(on.exposure == off.exposure);
++    }
++}
++
++TEST_CASE("Remaster light rig: the low-sun rig warms the evening sun from 25 degrees, as classic does",
++          "[Graphics][remaster]")
++{
++    // Classic's sunset colour ramps in from 25 degrees; EveningSunChroma takes
++    // it only below 16 (14% of it at 12.7 degrees), so the sunlit ground and
++    // hulls read greener and greyer than the original's. The low-sun rig takes
++    // a further share of it from 25 degrees down and more in the last 9.
++    CHECK(LowSunHueShare(25.0f) == 0.0f);
++    CHECK(LowSunHueShare(60.0f) == 0.0f);
++    CHECK(LowSunHueShare(4.0f) == Catch::Approx(0.7f));
++    CHECK(LowSunHueShare(0.0f) == Catch::Approx(0.7f));
++    float last = 0.0f;
++    for (float e = 25.0f; e >= 0.0f; e -= 0.5f)
++    {
++        CAPTURE(e);
++        CHECK(LowSunHueShare(e) >= last);
++        last = LowSunHueShare(e);
++    }
++    for (float e : {4.8f, 7.5f, 9.0f, 12.7f, 14.0f, 20.0f})
++    {
++        CAPTURE(e);
++        const LightRigInputs in = ClearSkyClassicSun(e);
++        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
++        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
++        // The sun itself: redder and less green than before the step.
++        CHECK(RedOverBlue(on.sun) > RedOverBlue(off.sun));
++        CHECK(on.sun.g / on.sun.r < off.sun.g / off.sun.r);
++        // The sunlit face of a hull (45 degrees from the sun) is at least as
++        // warm as before the step, though the fill adds cool sky to it: owner
++        // rule, evenings no less warm than the original look on hulls.
++        const Rgb litOn = VerticalFace(on, e, 45.0f);
++        const Rgb litOff = VerticalFace(off, e, 45.0f);
++        CAPTURE(RedOverBlue(litOn), RedOverBlue(litOff));
++        CHECK(RedOverBlue(litOn) >= RedOverBlue(litOff));
++        CHECK(litOn.g / litOn.r <= litOff.g / litOff.r);
++    }
++    // Warmth 0 keeps a neutral sun with the rig on, and no classic colour
++    // leaves the physical one.
++    LightingTuning neutral = WithLowSunRig(true);
++    neutral.warmth = 0.0f;
++    CHECK(RedOverBlue(ComputeLightRig(ClearSkyClassicSun(7.0f), neutral).sun) < 1.1f);
++    LightRigInputs noClassic = ClearSky(7.0f);
++    noClassic.classicSunDiffuse = Rgb(0.0f, 0.0f, 0.0f);
++    CHECK(SameRgb(ComputeLightRig(noClassic, WithLowSunRig(true)).sun,
++                  ComputeLightRig(noClassic, WithLowSunRig(false)).sun));
++}
++
++TEST_CASE("Remaster light rig: with lowSunRig off the rig is the one before the low-sun step", "[Graphics][remaster]")
++{
++    // The video's "off" is honest only if the switch restores the earlier rig:
++    // values of ComputeLightRig at the branch tip before B2 (807ce4b), the
++    // ClearSky inputs with classic's sun colour.
++    struct Golden
++    {
++        float e;
++        Rgb sun, zenith, horizon, horizonSun, ground;
++        float exposure;
++    };
++    const Golden golden[] = {
++        {7.5f,
++         {0.800340891f, 0.308145106f, 0.15937148f},
++         {0.0422399715f, 0.0485759676f, 0.0619519576f},
++         {0.028278444f, 0.0310057588f, 0.0363595635f},
++         {0.0425428152f, 0.0463276245f, 0.0500698723f},
++         {0.0201927219f, 0.0201927219f, 0.0193850119f},
++         1.04015148f},
++        {12.7f,
++         {0.605924964f, 0.435198337f, 0.311057419f},
++         {0.0577532463f, 0.0664162338f, 0.0847047642f},
++         {0.0423756465f, 0.0462110043f, 0.0536355972f},
++         {0.0599935316f, 0.0650311857f, 0.0698774755f},
++         {0.0336132348f, 0.0336132348f, 0.032268703f},
++         1.2436173f},
++        {30.0f,
++         {0.542771995f, 0.521061122f, 0.488494784f},
++         {0.0945555493f, 0.108738877f, 0.138681471f},
++         {0.0825667083f, 0.0893924385f, 0.102319837f},
++         {0.101729915f, 0.1092733f, 0.116054296f},
++         {0.0741237104f, 0.0741237104f, 0.0711587593f},
++         1.56306732f},
++    };
++    auto same = [](const Rgb& a, const Rgb& b)
++    {
++        return a.r == Catch::Approx(b.r).epsilon(1e-6) && a.g == Catch::Approx(b.g).epsilon(1e-6) &&
++               a.b == Catch::Approx(b.b).epsilon(1e-6);
++    };
++    for (const Golden& g : golden)
++    {
++        CAPTURE(g.e);
++        const LightRigInputs in = ClearSkyClassicSun(g.e);
++        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
++        CHECK(same(off.sun, g.sun));
++        CHECK(same(off.skyZenith, g.zenith));
++        CHECK(same(off.skyHorizon, g.horizon));
++        CHECK(same(off.skyHorizonSun, g.horizonSun));
++        CHECK(same(off.skyGround, g.ground));
++        CHECK(off.exposure == Catch::Approx(g.exposure).epsilon(1e-6));
++        // On (the default) differs on the walls.
++        const LightRig on = ComputeLightRig(in, LightingTuning{});
++        CHECK_FALSE(same(on.skyHorizon, g.horizon));
++    }
++    // baseline (every switch off) is the same rig.
++    const LightRig b = ComputeLightRig(ClearSkyClassicSun(12.7f), TuningForMode(LightingMode::Baseline));
++    CHECK(same(b.skyHorizon, golden[1].horizon));
++    CHECK(same(b.sun, golden[1].sun));
++}
++
++TEST_CASE("Remaster light rig: the low-sun fill never lights a wall above the visible sky in twilight",
++          "[Graphics][remaster]")
++{
++    // The twilight cap of the sky fill holds for walls with the fill on: a
++    // vertical face goes at most to the visible sky, and never below what it
++    // had without the fill. A clear sky's fog colour caps far above the fill,
++    // so by day the fill is the research's to the bit (the case above).
++    for (float e : {-1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 5.0f})
++    {
++        CAPTURE(e);
++        LightRigInputs in = ClearSkyClassicSun(e);
++        in.fogColor = Rgb(0.20f, 0.12f, 0.12f); // dim dusk sky
++        const float skyShown = Luminance(ToLinear(in.fogColor));
++        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
++        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
++        for (const auto& [lit, plain] :
++             {std::pair{on.skyHorizon, off.skyHorizon}, std::pair{on.skyHorizonSun, off.skyHorizonSun}})
++        {
++            const float shown = Luminance(lit) * kBrightness * on.exposure;
++            const float before = Luminance(plain) * kBrightness * off.exposure;
++            CAPTURE(shown, before, skyShown);
++            CHECK(shown <= std::max(skyShown, before) * 1.001f);
++            CHECK(shown >= before * 0.999f);
++        }
++    }
++    // Under the dim sky the fill still lifts the shaded wall where it can.
++    LightRigInputs in = ClearSkyClassicSun(1.0f);
++    in.fogColor = Rgb(0.20f, 0.12f, 0.12f);
++    CHECK(Luminance(ComputeLightRig(in, WithLowSunRig(true)).skyHorizon) >
++          1.2f * Luminance(ComputeLightRig(in, WithLowSunRig(false)).skyHorizon));
++}
++
++TEST_CASE("Remaster debug views: the albedo view is drawn by the lit shaders", "[Graphics][remaster]")
++{
++    // debug=6 shows each lit surface's albedo (display space), the shade
++    // track's calibration view: with post=0 a shot of it divides a lit shot
++    // into the light on every surface. The lit shaders see it as 4; the post
++    // pass's views (4 ambient occlusion, 5 linear depth) leave them alone.
++    CHECK(ShaderDebugView(0) == 0.0f);
++    CHECK(ShaderDebugView(1) == 1.0f);
++    CHECK(ShaderDebugView(2) == 2.0f);
++    CHECK(ShaderDebugView(3) == 3.0f);
++    CHECK(ShaderDebugView(4) == 0.0f);
++    CHECK(ShaderDebugView(5) == 0.0f);
++    CHECK(ShaderDebugView(kDebugViewAlbedo) == kShaderDebugAlbedo);
++    CHECK(ShaderDebugView(7) == 0.0f);
++}
++
+ TEST_CASE("Remaster light rig: twilight fill never outshines the visible sky", "[Graphics][remaster]")
+ {
+     const LightingTuning tuning;
+@@ -1024,6 +1286,54 @@ TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Gr
+     CHECK(std::regex_search(shade, std::regex(R"(if\s*\(\s*foliage\s*&&\s*dot\(n,\s*n\)\s*<[^)]*\)\s*n\s*=\s*cn;)")));
+ }
+ 
++TEST_CASE("Remaster tree crowns as a canopy: the shader's switch, its terms and its off path",
++          "[Graphics][Shaders][remaster]")
++{
++    // crownCanopy (plan step B2, research track shade crown V18): the backend
++    // sets litHorizonSun.w from the switch's frame gate, and shadeRemastered
++    // lights a crown (not grass, which shades as terrain) as a canopy only
++    // while it is 1. Off, every term is the stock one.
++    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
++    CHECK(lighting.find("const float crownCanopy = _featureGates[rm::Feature::CrownCanopy].on ? 1.0f : 0.0f;") !=
++          std::string::npos);
++    CHECK(lighting.find("SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, "
++                        "rig.skyHorizonSun.b, crownCanopy);") != std::string::npos);
++    // The debug view the lit shaders draw comes from one mapping.
++    CHECK(lighting.find("const float debug = rm::ShaderDebugView(_lighting.debugView);") != std::string::npos);
++
++    const std::string piece = Piece(gl::FragmentPiece::Shade);
++    const size_t start = piece.find("vec3 shadeRemastered(");
++    REQUIRE(start != std::string::npos);
++    const std::string shade = piece.substr(start);
++    CHECK(shade.find("bool canopy = crown && !terrain && litHorizonSun.w > 0.5;") != std::string::npos);
++    // Off: the stock crown core (0.6 of the sky) and the stock leaf shadow;
++    // on: the deeper core, the sun through the crown and the low-sun canopy.
++    CHECK(shade.find("crownSky = mix(canopy ? 0.45 : 0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));") !=
++          std::string::npos);
++    CHECK(shade.find("sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;") != std::string::npos);
++    CHECK(shade.find("float lowSun = 1.0 - smoothstep(12.0, 35.0, litSun.w);") != std::string::npos);
++    CHECK(shade.find("crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);") !=
++          std::string::npos);
++    CHECK(shade.find("crownSky *= mix(1.0, 0.75, lowSun);") != std::string::npos);
++    // The canopy terms sit inside `if (canopy)` blocks, crownSun and crownSky
++    // start at 1 (the stock values), and the saturated canopy albedo too.
++    CHECK(shade.find("float crownSun = 1.0;") != std::string::npos);
++    CHECK(std::regex_search(shade, std::regex(R"(if \(canopy\) \{\s*float lowSun)")));
++    CHECK(
++        std::regex_search(shade, std::regex(R"(if \(canopy\) \{\s*(//[^\n]*\n\s*)*vec3 p = pow\(a, vec3\(1\.3\)\);)")));
++    CHECK(CountOf(shade, "pow(a, vec3(1.3))") == 1);
++    // The path through the crown is declared in the same piece, before it.
++    CHECK(piece.find("float crownSunPath(vec3 cnDir, float r, vec3 l) {") < start);
++    // The albedo debug view.
++    CHECK(shade.find("if (litFlags.z < 3.5) return nLight * 0.5 + 0.5;\n        return albedo;") != std::string::npos);
++    // The LitConstants block names the w.
++    CHECK(
++        std::string(gl::LitConstantsBlock())
++            .find(
++                "vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun, w = crowns lit as a canopy") !=
++        std::string::npos);
++}
++
+ TEST_CASE("Remaster sun shafts brighten the air, not the surfaces near the eye", "[Graphics][Shaders][remaster]")
+ {
+     // Clear air: the fog end of any view distance from 900 m up.
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index 230b5ed..9ef8ae4 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -2209,3 +2209,4 @@ items:
+       - "2026-10-18: graphics-remaster step A7 (sky table and the remastered sky pass, plan section 5 A7; feature switch atmosphere): a physically based clear sky (Graphics/Remaster/Atmosphere: Rayleigh, Mie, ozone, multiple scattering) shades the sky dome under the original sky textures' clouds and colours the fog of every world draw (aerial perspective, the horizon polygon included): a golden horizon band and aureole at a low sun, an orange twilight band at dusk, sunrise keeps its pink, noon a graded blue with its cirrus; night keeps the classic sky (fade -3 to -9 degrees). The transmittance and multiple-scattering tables build on a worker thread, the 192x64 sky-view table on the GPU in two passes when the sun moves 0.02 degrees (0.06 ms; the prototype's CPU rebuild was an 8 to 12 ms hitch); one hook (Engine::BeginRemasterSky / EndRemasterSky from Landscape::DrawSky and DrawClouds) replaces the BeginMesh hack. Critic fixes: hue 0.5 and saturation 1.15, the original hue relit by brightness only (no olive band), each row keeps the original dome's brightness with its sun glow (sky band -0.1 to +6 % of the original's luminance), dead zone 0.004 and de-composited cloud colour (noon cirrus kept). LitConstants slots 61 to 67 landed, unit 8 in use, GPU sections sky and skytable, triSkyTableCheck (GPU table against its CPU mirror, max relative error 3.7e-4). Off equals before on the hero views; cost at P0 about +0.5 ms on the frame (single reading). Unit gate 476/476 (10 new), ten contract mutations red, smoke 1/1. Merged onto A5 (193c735; a parallel lane on ced77ae) by a three-way apply: A4's ground, pass1 and rest sections and the sky sections side by side, TAA's sub-knobs then the sky table's, the TAA jitter kept in the screen vertex shader; on the merged tree the gate tags plus A4's, A5's and A7's tags pass 506/506 and smoke_abel 1/1 (landed=4/26)."
+       - "2026-10-18: graphics-remaster step B11 (terrain detail and luma sharpen, plan section 5 B11; research track texsharp; a parallel lane on 193c735): the terrainDetail and sharpen switches land. Each land fragment of the remastered terrain main takes the luminance high-pass of its own square's texture, zoomed six times in 78 cm cells with a random rotation per cell, the four cells blended keeping the grain's variance, softly limited at +-0.4, strength 1.5 (sub-knob detailStrength); the detail texture keeps its grain as its mips average it out (capped at 2x) with an anti-tiling sample where it is minified; near fade 8 to 16 m and far fade 220 to 300 m; brightness only (ground band mean luma +0.04 to +0.4%, R/G and G/B unchanged, sharpness proxy +5.9 to +38.7%). LitConstants slot 77 (Detail) landed with 68 to 76 as the padding litPlanned[9]; the sea, also drawn by PSDetail, is left out by a per-draw flag from the multitexture stage (SelectTerrainDetailLayer). With TAA off the Sharpen stage runs alone as a brightness-only CAS (sub-knob sharpenStrength 0.3). Off equals before at the hero view with TAA off (identical to the pixel). Cost on the 4060 Ti at 1080p: ground +0.29 to 0.37 ms, luma sharpen 0.05 ms (not a quiet machine). Lane unit gate 505/505, 12 of 13 mutations red. Landed on A7 (5d7e7ae) by a three-way apply (11 files in conflict: A7's sky slots and B11's Detail slot side by side, both features' sub-knobs, post programs and landed rows, landed=6/26); merged unit gate 517/517, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only). Open: the luma sharpen also runs by default in vehicle interiors and under optics, views nobody has looked at; paths painted into terrain textures get the grain; a golden slope reads more like dry straw; no RTX 3060 measured."
+       - "2026-10-18: graphics-remaster step B1 (sun shadows, plan section 5 B1; research track shadows; a parallel lane on 193c735): the treeShadows and softShadows switches land. Contact-hardening soft sun shadows (PCSS in the remastered prelude): a blocker search in the cascade array read as raw depth on unit 6 (kShadowRawUnit, NEAREST non-compare sampler, the depth stand-in from init and rebound by EnsureArrayTarget) gives the distance to the blocker, the filter radius is that distance times tan of the sun radius (sunSize 1 deg, shadowReach 40 m, at least 0.6 texels); 16 + 12 to 32 taps without TAA, 4 + 4 taps turned per frame under TAA; the stock 12-tap filter fades into the soft one from 4 to 6 deg of sun. Leaves lift their lookup leafBias 6 texels toward the sun (no self-shadow stripes on crowns); with the treeShadows gate on every static object casts into the sun map whatever the legacy object-shadow toggle says. Not darker: woods hero +1.4% mean brightness, other views within 0.1 to 0.6%. LitConstants 59 Taa and 60 Pcss land out of A7's padding, which shrinks to litReserved (58, MatClass). Off equals before at the hero view (within the repeat noise). Cost unresolved: frame minimum on minus off -0.08 to +0.31 ms on the 4060 Ti, inside the base build's own spread. Lane unit gate 502/502, twelve mutations red. Landed on B11 (d25476b) by a three-way apply (8 files in conflict: the sky, Detail and sun shadow slots side by side, unit 6 beside the sky table's unit 8, both registries' landed rows and sub-knobs, landed=8/26, eleven sub-knobs); merged unit gate 525/525, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only). Open: the cost on a quiet GPU, the tighter near tiers 0.04 / 0.15 (dropped: they made a shadow slab at the Sinai camp, cause not found), crowns keep less self-shadow, no RTX 3060 measured."
++      - "2026-10-18: graphics-remaster step B2 (low-sun shade, plan section 5 B2; research track shade; a parallel lane on 807ce4b): the lowSunRig and crownCanopy switches land. lowSunRig (ComputeLightRig): the sun takes a further share of Classic's sunset hue from 25 degrees down (LowSunHueShare, 0.4 from 25 degrees and 0.3 more below 9), and vertical faces get sideways fill below 40 degrees (LowSunFill: anti-sun horizon x(1 + 2.6 fill), sunward x(1 + 0.5 fill), bounce x(1 + 1.3 fill)); up-facing ground, its cast shadows, the exposure and everything from 40 degrees up are unchanged, and in twilight the fill lifts a wall at most to the visible sky (new: the prototype could light a wall above a dim dusk sky). crownCanopy (shadeRemastered, crown V18): sun through the crown (optical depth 1 per radius, a quarter always passes), core sky 0.45 instead of 0.6, leaf albedo saturated at equal luminance, below 35 degrees (fully below 12) 0.65 of the sun and 0.75 of the sky on crowns; grass keeps its look. The flag rides in litHorizonSun.w (no new slot). New debug view 6, the albedo (the research's calibration view, kept). In game (albedo-normalised, 1080p): hull shade/lit 0.61 / 0.62 at 12.7 deg (M113 / Jeep; before 0.45 / 0.47, Classic 0.47 / 0.48), 0.57 / 0.61 at 7.5, 0.55 / 0.61 at 4.8, Sinai 0.60 / 0.63 at 12.2 and 0.56 / 0.59 at 7.6; sunlit hull faces warmer than before everywhere and as warm as Classic or warmer (two Jeep values within 0.02); ground cast shadows unchanged; noon unchanged; golden crowns greener and no flatter (p10:p90 unchanged), big crown at Classic's brightness, conifer 9% darker than before. Off equals before (box values equal to 0.01; the Abel views differ from the base build by the kinds and sizes of the base build's own same-game repeat). Cost not resolved by a single reading (frame minimum on minus off -0.41 to +0.35 ms with no consistent sign; the base build's same frame twice spreads -0.13 to +0.23 ms). Unit gate 529/529 (6 new cases), twelve mutations red, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only). Open: the conifers and the golden slope (more orange than Classic), the 4.8 to 7.6 degree M113 and Zelda below the 0.58 floor by 0.01 to 0.03, the flat fill (not bounce light), no RTX 3060 measured."

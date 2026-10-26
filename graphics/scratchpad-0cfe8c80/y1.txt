@@ -1,0 +1,4 @@
+    CHECK(set.sharpen == static_cast<float>(static_cast<int>(Feature::Sharpen) + 2));
+    CHECK(set.surfaces == static_cast<float>(static_cast<int>(Feature::Surfaces) + 2));
+    CHECK(set.photoLight == static_cast<float>(static_cast<int>(Feature::PhotoLight) + 2));
+    CHECK(set.volFog == static_cast<float>(kFeatureCount + 1));

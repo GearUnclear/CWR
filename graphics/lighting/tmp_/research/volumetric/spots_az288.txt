@@ -1,0 +1,26 @@
+trees 26271 other 12404
+score 31.5 wedge 33 behind 0 spread 1.5  at 4355 3275  y~54
+score 31.0 wedge 31 behind 0 spread 0.0  at 4355 3260  y~54
+score 27.0 wedge 27 behind 0 spread 0.0  at 4370 3275  y~54
+score 26.0 wedge 26 behind 0 spread 0.0  at 4370 3260  y~54
+score 25.6 wedge 30 behind 0 spread 4.4  at 2915 6650  y~207
+score 25.6 wedge 30 behind 0 spread 4.4  at 2915 6635  y~207
+score 25.3 wedge 29 behind 0 spread 3.7  at 4340 3275  y~53
+score 23.0 wedge 23 behind 0 spread 0.0  at 4475 3575  y~64
+score 22.0 wedge 22 behind 0 spread 0.0  at 6035 4040  y~158
+score 22.0 wedge 22 behind 0 spread 0.0  at 5060 5975  y~373
+score 21.2 wedge 24 behind 1 spread 2.3  at 5825 6785  y~342
+score 21.0 wedge 22 behind 1 spread 0.5  at 6995 9905  y~136
+score 21.0 wedge 21 behind 0 spread 0.0  at 4850 5585  y~313
+score 20.2 wedge 21 behind 0 spread 0.8  at 4745 7175  y~421
+score 20.0 wedge 21 behind 2 spread 0.0  at 4745 7160  y~421
+score 19.7 wedge 22 behind 0 spread 2.3  at 5825 6770  y~342
+score 19.7 wedge 20 behind 0 spread 0.3  at 3245 6395  y~232
+score 19.5 wedge 21 behind 0 spread 1.5  at 3245 6410  y~233
+score 19.0 wedge 23 behind 0 spread 4.0  at 2915 6665  y~207
+score 19.0 wedge 19 behind 0 spread 0.0  at 6950 7565  y~143
+score 19.0 wedge 19 behind 0 spread 0.0  at 1460 1415  y~56
+score 18.3 wedge 27 behind 0 spread 8.7  at 2900 6665  y~205
+score 18.3 wedge 26 behind 3 spread 6.2  at 6965 9935  y~133
+score 18.1 wedge 22 behind 0 spread 3.9  at 2915 6620  y~208
+score 18.0 wedge 19 behind 1 spread 0.5  at 6995 9920  y~136

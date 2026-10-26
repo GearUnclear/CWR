@@ -1,0 +1,32 @@
+[
+ {
+  "clip": "valley_mist",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=valley_mist;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:9",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=valley_mist;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draw",
+  "diff": {
+   "first.png": 29.4,
+   "mid.png": 31.88,
+   "last.png": 30.59
+  },
+  "mean_diff": 30.62,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "pine_shafts",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=pine_shafts;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:9",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=pine_shafts;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draw",
+  "diff": {
+   "first.png": 27.34,
+   "mid.png": 24.07,
+   "last.png": 20.41
+  },
+  "mean_diff": 23.94,
+  "ok": true,
+  "problems": []
+ }
+]

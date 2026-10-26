@@ -1,0 +1,140 @@
+{
+  "repair_version": "2026-10-11.3",
+  "rule_sha256": "81bf8fe8cfccada323a7d872e06385e1088414f271851acbb9d9632be80745c4",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "ud",
+  "changed_members": 16,
+  "added_members": 0,
+  "archives": [
+    "lobo_airammo",
+    "lobo_btr60",
+    "lobo_fab",
+    "lobo_zelda",
+    "lobo_zu23",
+    "lobocen",
+    "loboegapc",
+    "lobof15",
+    "lobof16",
+    "lobom60",
+    "lobomerkava2",
+    "lobomerkava4",
+    "lobosa6",
+    "loboter"
+  ],
+  "skipped": [],
+  "members": [
+    {
+      "member": "lobo_airammo/scripts/smoke/fire.sqs",
+      "before_sha256": "5668a7ccc5364529c8581418610f63ac72e7a9cb5d87a48c458facf31ad0e91c",
+      "after_sha256": "7e5ef1d877736fe393f348c19f780891cf7165092e7b38bafb0934d3e2025511",
+      "before_bytes": 4840,
+      "after_bytes": 4782
+    },
+    {
+      "member": "lobo_btr60/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobo_fab/lcm/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobo_fab/saar5/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobo_fab/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobo_zelda/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobo_zu23/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobocen/scripts/fire.sqs",
+      "before_sha256": "1a35ec254d1d69c23d69a053f074275f05c4e409640c8cbcb3eca9e595a50b44",
+      "after_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "before_bytes": 4824,
+      "after_bytes": 4766
+    },
+    {
+      "member": "loboegapc/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobof15/scr/fire.sqs",
+      "before_sha256": "36782d26c62f6e41a0e1a99b9e498419bee47c66cae0099a08bf528f5490b40f",
+      "after_sha256": "61cf111084db28328f1865b9b09e5f36932b2e6e4386528418712c7cf1d0862d",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobof16/scr/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "lobom60/scripts/fire.sqs",
+      "before_sha256": "1a35ec254d1d69c23d69a053f074275f05c4e409640c8cbcb3eca9e595a50b44",
+      "after_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "before_bytes": 4824,
+      "after_bytes": 4766
+    },
+    {
+      "member": "lobomerkava2/scripts/fire.sqs",
+      "before_sha256": "1a35ec254d1d69c23d69a053f074275f05c4e409640c8cbcb3eca9e595a50b44",
+      "after_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "before_bytes": 4824,
+      "after_bytes": 4766
+    },
+    {
+      "member": "lobomerkava4/scripts/fire.sqs",
+      "before_sha256": "1a35ec254d1d69c23d69a053f074275f05c4e409640c8cbcb3eca9e595a50b44",
+      "after_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "before_bytes": 4824,
+      "after_bytes": 4766
+    },
+    {
+      "member": "lobosa6/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    },
+    {
+      "member": "loboter/scripts/fire.sqs",
+      "before_sha256": "f3b52116fcb1b4154b6486d1018ec06ba8bf574ea6a306b20ce9d6b1f1aa60a9",
+      "after_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "before_bytes": 4823,
+      "after_bytes": 4765
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+CHANGED lobo_f4/lobo_f4_ww_iaf.p3d 2399576 -> 2399576 0d0f501c8ea5edfed0f3264f55b81362b964c997492170588678a8be041b0427
+CHANGED lobo_fab/config.cpp 61039 -> 61042 870b473723d8f20d47090d499fe6a8f4d3e4d8472e5e9b9c9db8f28863106e4c
+CHANGED lobo_m1/lobo_m1a1e_r.p3d 4916073 -> 4916073 7d5b7be2a6265efd795dcb25b87487dd66ee65ab255c297d92279c2ddfe1c944
+CHANGED lobo_m1/lobo_m1a2e_r.p3d 4984596 -> 4984596 15cc080655b045c23b4e70eba5f07abf5838ace6640b2ae69d3690f89aeefb2f
+CHANGED lobo_ob/config.cpp 43836 -> 43833 8cef85d53a47a97ba7780ba54940d3a68fec471012ae0e5eb0321e7c0c9711d1
+CHANGED lobof5/lobo_f5_aa_jor.p3d 1380062 -> 1380062 c8112991532aef8c1ddbab1f3ae5c21b9e81aa173cc014fc3bc35d0d13b6ee06
+CHANGED lobof5/lobo_f5_at_jor.p3d 1427928 -> 1427928 1e34d8cf70b7bce3b17cb55d4448766f7f191c8da8c00339d20e0b732143000d
+CHANGED lobof5/lobo_f5_mir_jor.p3d 1438036 -> 1438036 18bd6716c38509b72766d42114e14146cd690dd37a6ab27fbbb14182b93b96af
+CHANGED loboradios/config.cpp 2690 -> 2692 b2ac8b02e1b54a8656a7e141e3c0d8ae9c87e7997d25157fb831d25b9bce04f8
+ADDED lobo_airammo/lobo_mk81.p3d 0 -> 23291 02e83da4b977cc78bfe351357423dab55064dd65ac450d07a97f0092737a5336
+ADDED lobo_airammo/lobo_mk81_ldgb.p3d 0 -> 25562 fd59a0bfdfaa93e6d690efe835f9d39a360ceb0eaaa7f7817769f648c34980d9
+ADDED lobo_airammo/lobo_mk81_ldgb_d.p3d 0 -> 30592 54a6e76b488551b83bbe8bc0c2ce0c82bad97b80d498010d62792998c12813cd
+ADDED lobo_airammo/lobo_mk82_ldgb.p3d 0 -> 25968 51254074addff3a70adac198d51bfb9a7f19bf026d7655cc901e46b7e98e42bc
+ADDED lobo_airammo/lobo_mk82_ldgb_d.p3d 0 -> 30592 3ce1aad6ec76a4ee35831015e64f060a1767878a7183f9ddc2bfb33ec39e5adc
+ADDED lobo_airammo/lobo_mk83_ldgb.p3d 0 -> 26050 65dc83bef7944e27bd2f9311eb74c3f9806e05d1dee9f88850e7dca95d686806
+ADDED lobo_airammo/lobo_mk83_ldgb_d.p3d 0 -> 30674 18b13a48e160f4b605f282c671042b6fa500c6488536ec80392e1b13a7a55567
+ADDED lobo_airammo/lobo_mk84_ldgb.p3d 0 -> 26050 5a4436dc254c8b8d4943e14bb2da6413d057e93198e15ef3e4bf392d28b5adc5
+ADDED lobo_airammo/lobo_mk84_ldgb_d.p3d 0 -> 30592 09db3129eb6bc21d2495488af9c9a6c18f4c8755f090d66032bf020d38da38f5
+ADDED loboegypt/inf/helm_s_in.pac 0 -> 43839 e21bd718fa96dd5b6e51c29af5f1a8ec1332d55461f4505ae10d9a00be874669
+   same length True, 63 bytes differ
+   LOD 5: 3 x LoBo_F4\idf\dark_grey.pac -> LoBo_F4\com\dark_grey.pac
+   LOD 5: 6 x LoBo_F4\idf\mer.pac -> LoBo_F4\idf\1\mer.pac
+   all other bytes equal: True
+    --- 
+    +++ 
+    @@ -890 +890 @@
+    -		picture="\LoBo_FAB\Snunit.paa";
+    +		picture="\LoBo_FAB\SN\Snunit.paa";
+   same length True, 221 bytes differ
+   LOD 15: 117 x LoBo_M1\tex1\main_side.paa -> LoBo_M1\tex1\main_side.pac
+   LOD 15: 84 x LoBo_M1\tex1\kolo.pac -> LoBo_M1\tex1\kolo.paa
+   LOD 20: 20 x LoBo_M1\tex1\main_side.paa -> LoBo_M1\tex1\main_side.pac
+   all other bytes equal: True
+   same length True, 221 bytes differ
+   LOD 15: 117 x LoBo_M1\tex1\main_side.paa -> LoBo_M1\tex1\main_side.pac
+   LOD 15: 84 x LoBo_M1\tex1\kolo.pac -> LoBo_M1\tex1\kolo.paa
+   LOD 20: 20 x LoBo_M1\tex1\main_side.paa -> LoBo_M1\tex1\main_side.pac
+   all other bytes equal: True
+    --- 
+    +++ 
+    @@ -149 +149 @@
+    -		icon="\LoBo_Ob\bar\b4.jpg";
+    +		icon="\Baracken\b4.jpg";
+   same length True, 7497 bytes differ
+   LOD 500: 10 x LoBoF5\com\white.paa -> LoBo_Kfir\kfir1\white.paa
+   LOD 1100: 347 x LoBoF5\com\white.paa -> LoBo_Kfir\kfir1\white.paa
+   all other bytes equal: True
+   same length True, 7497 bytes differ
+   LOD 500: 10 x LoBoF5\com\white.paa -> LoBo_Kfir\kfir1\white.paa
+   LOD 1100: 347 x LoBoF5\com\white.paa -> LoBo_Kfir\kfir1\white.paa
+   all other bytes equal: True
+   same length True, 7497 bytes differ
+   LOD 500: 10 x LoBoF5\com\white.paa -> LoBo_Kfir\kfir1\white.paa
+   LOD 1100: 347 x LoBoF5\com\white.paa -> LoBo_Kfir\kfir1\white.paa
+   all other bytes equal: True
+    --- 
+    +++ 
+    @@ -74 +74 @@
+    -		picture = "\LoBoRadios\icon\BAS_satcom.paa"
+    +		picture = "\LoBoRadios\icons\BAS_satcom.paa"
+    @@ -91 +91 @@
+    -		uiPicture = "\LoBoRadios\icon\BASirto.paa";
+    +		uiPicture = "\LoBoRadios\icons\BASirto.paa";
+skipped 0

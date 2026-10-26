@@ -1,0 +1,3 @@
+﻿start 04:34:50 test=tests/rendering/captures/video/look_probe_fog2_pine_moving.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\3\shaders\percell junction=RemasterUD-fog-2
+run exit=0 frames=120 minutes=3.9
+done 04:38:56

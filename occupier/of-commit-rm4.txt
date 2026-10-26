@@ -1,0 +1,3 @@
+roadmap: occupier-forces phase 4 landed (c825a5f, 6e1ee27) and the phase 5 catalogue (863b8aa), gate green
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

@@ -1,0 +1,50 @@
+﻿Randomness seeded to: 3787031128
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PoseidonCoreTests.exe is a Catch2 v3.5.2 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+PBO Game Scan: All AddOns PBOs open and enumerate
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(60)
+...............................................................................
+
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(65): SKIPPED:
+explicitly with message:
+  Game AddOns directory not available
+
+-------------------------------------------------------------------------------
+PBO Game Scan: All AddOns PBOs -- read every file
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(112)
+...............................................................................
+
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(117): SKIPPED:
+explicitly with message:
+  Game AddOns not available
+
+-------------------------------------------------------------------------------
+PBO Game Scan: DTA PBOs open and read
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(165)
+...............................................................................
+
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(170): SKIPPED:
+explicitly with message:
+  Game DTA not available
+
+-------------------------------------------------------------------------------
+PBO Game Scan: Compressed entries decompress correctly
+-------------------------------------------------------------------------------
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(214)
+...............................................................................
+
+D:\Arma_CWA_worktrees\lighting\arma_CWR\tests\unit\engine\Poseidon\IO\Streams\test_qstream_pbo_game_scan.cpp(219): SKIPPED:
+explicitly with message:
+  Game AddOns not available
+
+================================================================================
+test cases:  827 |  823 passed | 4 skipped
+assertions: 6353 | 6353 passed
+

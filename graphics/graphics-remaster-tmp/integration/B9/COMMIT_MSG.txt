@@ -1,0 +1,198 @@
+graphics: every tree casts a long golden-hour shadow at any distance
+
+What the player sees: at a low sun every tree, bush, forest block and
+building on the island casts its long shadow beyond the reach of the sun
+shadow maps too (about 200 m at a 2 km view distance), so whole hillsides
+of trees stand on their shadows at golden hour instead of floating, and
+distant groves get a lit and a shaded side. On the Malden hill at 17:30
+(sun 9 deg) the far groves gain shadow streaks running away from the sun
+and shade between their trees; through the telephoto onto the wooded
+slope every tree has its long shadow. Where the canopy shades, the ground
+falls to 0.80 to 0.83 of its lit value (display luma; R 0.72 to 0.77,
+B 0.92 to 0.93): shade, not black, and cooler than the lit grass because
+the shade is the sky fill. The ground band of the hero view loses 0.5%
+of its mean brightness, the telephoto 1.8%; the sky band is unchanged and
+the horizon band moves 0.14% at most. The near range, where B1's shadow
+maps draw every tree, is unchanged, and so are noon, overcast and the
+night (the gate holds the feature off there).
+
+How it works:
+- The canopy (Graphics/Remaster/Canopy): every Primary landscape object
+  whose map type shades the ground at a distance (tree 0.8, small tree
+  0.65, bush 0.5, forest block 0.95, buildings, churches, towers,
+  bunkers and rocks 1.0; 84,395 of 98,198 objects on Abel) is drawn
+  top-down at 6.25 m a texel (2048x2048 on Abel, 4x4 samples a texel):
+  crowns as ellipses at 0.85 of their box, forest blocks and buildings
+  as the convex hull of their geometry level. A texel stores the absolute
+  top (its own ground plus the tallest covering object's height above the
+  ground at that object's centre, so a forest block on a slope follows
+  the slope and one fetch a step holds the terrain too) and the occluder
+  density, 1 - the product of each object's (1 - opacity * coverage), as
+  RG16. Each mip level keeps the mean ground plus the tallest covered
+  child's height, and the mean density, so a far occluder blurs into a
+  wider, lighter penumbra. The objects are gathered on the main thread
+  at island load (18 to 30 ms on Abel) and rasterised on the terrain
+  horizon map's worker (332 to 505 ms); the build counts as pending for
+  triSettleScene. A destroyed object (Object::SetDestroyed of a Primary
+  object) takes its footprint out and only the texels it covered are
+  rasterised again, at every level (CanopyRaster::Remove, uploaded with
+  glTexSubImage2D).
+- The sun-visibility map (EngineGL33_Canopy.cpp, psCanopySun in
+  EngineGL33_PostCanopyShaders.cpp): a world-space RGBA8 map around the
+  camera, 2048 texels a side at the view distance / 900 per texel
+  (1.5625 to 3.125 m), filled by one fullscreen pass that cone-traces the
+  canopy toward the sun from every texel (step max(texel, 0.15 t), the
+  mip level following the step, softness over a 0.8 deg cone, a partly
+  covered texel crossed with the probability sqrt(density), up to 45 m /
+  tan(sun) or 900 m). A texel stores the ground's visibility, the
+  visibility of a raised receiver 1.5 m up that skips its first 6 m (its
+  own crown), and the envelope of the heights above the ground from which
+  raised receivers (crowns, walls, roofs) leave a neighbour's shadow,
+  with its softness; a thin sample sinks out of that envelope smoothly.
+  The map is rebuilt before the world only when the sun has moved 0.05
+  deg (about every 12 s at the normal clock), the camera has left the
+  middle eighth of the map, the view distance changed the texel, or the
+  canopy changed. It is world-locked: no jitter, no history, nothing to
+  crawl, and a cost that does not grow with the screen.
+- The read (canopySunVisibility, the TerrainClouds piece of the
+  remastered prelude): one bilinear fetch per fragment, multiplied into
+  the sun visibility after the terrain lookup, weighted in over the
+  shadow maps' far fade (without shadow maps from 100 to 150 m, so the
+  near range never gets canopy slabs) and faded out at the map's edge;
+  a receiver between 0.5 and 1.5 m above the ground blends the ground
+  and the raised reads.
+- LitConstants slot 76 (Canopy: strength, the map's origin, 1 / its
+  extent) lands as planned (on the lane the padding litPlanned shrank
+  to 68 to 75; on the merged tree litCanopy replaces B5's litPlanned2).
+  Unit 10 holds the canopy (sampled only by the build pass) and unit 15
+  the map (kLitSamplers row canopySun), both with 1x1 stand-ins from
+  init on; the build binds the stand-in on unit 15 while it draws into
+  the map. GPU marks CanopyBegin and CanopyEnd, section canopy (frames
+  that rebuild; the build runs at the frame's first upload of the lit
+  constants, in the remastered sky's hook before the sky section, or
+  without the sky pass just inside the world section, which then counts
+  it too). triCanopyCheck <texels> reads the map back and compares
+  it with its C++ mirror (CanopySunAt, CanopyReceiverVisibility).
+
+Switch and gates: canopyShadows has landed (15/26 on the merged tree),
+gpu section canopy.
+Gate as plan 3.2 (sun between 2 and 25 deg, sky-through above 0.5),
+scale 1 (a world-space map, not a frame-relative buffer); the strength
+fades in from 2 to 4 deg and out from 21 to 25 deg of sun and in from a
+sky-through of 0.5 to 0.6, so a sunset time-lapse sees no switch. Off
+(the switch, its gate, no canopy or map) zeroes the slot and the read
+returns 1 before it reads anything: the look before this step. The
+switch stops only the per-frame work (the map's build and the read): the
+canopy's gather and raster at island load (18 to 30 ms on the main
+thread, 332 to 505 ms on the worker) and its 21 MiB upload run whenever
+the remastered horizon map is built, switch on or off, so switching it
+on needs no reload.
+
+From the prototype (tmp/research/hfrt, mode 20): kept the canopy gather
+(map types and opacities, crown ellipses, geometry hulls), the
+worker-thread rasteriser with 4x4 samples, the max and mean mip rules,
+k = 2 (6.25 m) with the sqrt crossing density, the cone trace's step,
+softness and reach, the baked horizon map for the terrain, raised
+receivers that skip their own crown. Rewritten: the trace leaves the
+forward pass for a world-space map rebuilt only when the sun or the
+camera moved (the plan asked for a half-resolution screen buffer from
+last frame's depth with temporal accumulation; the world-space map needs
+no reprojection or history and cannot crawl); the terrain height packed
+into the canopy's top (one fetch a step); the raised receivers read a
+smooth shadow-height envelope instead of tracing per pixel; the canopy
+only beyond the shadow maps, cross-faded over their far fade; the
+canopyShadows switch and the Canopy slot instead of terrainShadows=<mode>;
+destroyed objects re-rasterise their texels. Dropped: terrain tracing,
+terrain GI and per-pixel sky visibility, the per-vertex mode, the
+12.5 m canopy and the canopy folded into the horizon map, the canopy
+sky occlusion, the static interleaved-gradient jitter, the
+CWR_HFRT_CANOPY_RES and CWR_HFRT_CANOPY_HORIZON variables.
+
+Cost: single reading, RTX 4060 Ti at P0 (2,775 MHz), 1920x1080, render
+scale 1.0, 4x MSAA, three interleaved rounds with one other lane's game
+on the machine. Frame minimum on minus off +0.03 ms (hero), +0.04 ms
+(telephoto, the research's +13 to 16 ms worst case), +0.03 ms (forest
+edge), +0.01 ms at noon (gate off). A rebuild 0.66 / 0.62 ms (median /
+min of three rounds of 20 rebuilds at a 9 deg sun); two earlier runs at
+unlogged clocks read 0.78 and 1.47 ms. Memory: the canopy 21 MiB and the
+map 16 MiB on the GPU.
+
+Tests: [Canopy] (new, 17 cases): map types and opacities, a crown's
+coverage and height, overlapping objects and hulls, a forest block on a
+slope, the mip rules, a removal equal to a build without the object at
+every level, a block's shadow length against height / tan(sun), the sqrt
+crossing density, the raised receivers' own-crown skip and edge, a read
+that changes smoothly with an occluder's density, the map's placement
+and rebuild rule, the strength over the gate's edges matching the gate,
+the frame constants (switch, gate, map, baseline, noon, gates=0), the
+landed switch and its GPU section, the shader constants and read against
+the mirror, units 10 and 15, the canopy GPU section; the LitConstants
+layout (litCanopy at 76), the sampler table, the post program count, the
+landed list (9/26 on the lane) and the canopy gate's scale updated. Gate tags plus
+[FeatureSwitches],[FeatureGates],[PostStages],[TemporalAA],
+[TerrainDetail],[LumaSharpen],[SunShadows],[Canopy] 540/540; the full
+suite has the 6 known localisation failures only. 18 mutations each turn
+their cases red (linear crossing in the mirror and in the pass, a hard
+density threshold on the edge, no own-crown skip, mean instead of max
+mips, a removal without mips, a flat canopy, no edge fade, no re-centre,
+constants without a map, not landed, a half-resolution gate scale, no
+sampler row, the slot below the padding, no stand-in on unit 15, the read
+without the shadow maps' fade or before the terrain lookup, no canopy
+section).
+
+In game (tmp/integration/B9 of the graphics-remaster worktree): BEFORE
+on the base build 20261018-080651-before; the B9 build
+20261018-084937final-new (hero, telephoto, eye 2.5 m among the summit
+trees, forest edge, the October morning, an hour earlier, noon, each off
+and on plus the sun visibility under debug=1), timing
+20261018-084049-timing, motion 20261018-084519motion-test, smoke
+20261018-083630-smoke. Off against the base build: 1 pixel over 2 levels
+at the hero view in two runs, the other six views within the repeat noise
+(TAA phase on edges, band means equal to 0.02%). On against off, the eye
+2.5 m view loses 0.11% of its ground band (3,423 newly shaded pixels,
+0.17% of the frame; 14,924 pixels over 8 levels against 5,525 to 5,769
+between repeat runs), a small change beyond the repeat noise; the forest
+edge and noon (gate off) stay within it. triCanopyCheck 4096 OK at
+four sun heights and two map scales: stored channels within 0.004 to
+0.015, a receiver's read within 0.064 (one storage step of the edge on
+its steepest slope) and 0.007 to 0.030 at the 99th percentile. Motion: a
+walk at 0.5 m a frame keeps the second temporal difference of the shaded
+region at 0.0350 against 0.0353 off (no crawl); a time-lapse at 0.2 deg
+of sun a frame changes the shaded region by 4.5e-3 a frame in both passes
+(no steps). Smoke and every run: KHR_debug ids 131169, 131154, 131218
+only; Trident's GL error post-check passed.
+
+Known risks: it only takes light away (no bounce), and the shade is the
+cool sky fill (B/R in the shade 0.63 to 0.68 against 0.52 to 0.56 lit),
+the research's "cool shade on pink rock". The canopy is a column from the
+ground to the top: the ground under a crown is shaded at any sun (no
+crown base height, no trunk term), and the far shadows are 6 to 12 m wide
+soft streaks rather than tree shapes. A raised receiver deeper than 6 m
+inside a wide crown or roof reads its own far side as shade. Its hand-over
+to the shadow maps at their far fade swaps tree-shaped shadows for these
+streaks over the fade. A repaired object, or a mission restarted on the
+same island, keeps a destroyed object out of the canopy. The world-space
+map covers 3.2 to 6.4 km around the camera and fades out at its edge.
+Canopy shadows on far vehicles and men do not exist (only landscape
+objects cast). The cost is not measured on a quiet machine or on an RTX
+3060.
+
+Landed on B10 (9a40228; A6, B5, B2 and B10 landed after the lane's
+base) by a three-way apply, 11 files in conflict, both sides kept: the
+canopy slot replaces B5's padding litPlanned2 at 76, so the block reads
+litSky, litSkyShadow, litPlanned[4] (70 to 73), litWater0, litWater1,
+litCanopy and litDetail and Count stays 78 (LitConst::Planned2 and its
+static_asserts gone, Canopy is Water1 + 1; the layout test follows);
+units 10 and 15 beside units 6, 8, 9, 11 and 13, the canopySun sampler
+row after lightTiles, both skyDensity and canopySun in the inputs piece;
+InitCanopy, DeinitCanopy and BindCanopy beside the clouds' and the light
+list's; the landed registry rows (B9 before B10, landed=15/26) and their
+test; the CMake test list; the plan, the README and the roadmap. Past the
+conflicts the GPU marks' comment says where the build runs (the sky hook
+before the sky section, or just inside the world section without the sky
+pass) and BindLightingTextures' comment lists its units. Merged gate:
+build 0 warnings, clang-format clean on the touched files, the gate tags
+plus the landed lanes' tags and [Canopy] 611/611, smoke_abel 1/1
+(KHR_debug ids 131154, 131169 and 131218 only).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

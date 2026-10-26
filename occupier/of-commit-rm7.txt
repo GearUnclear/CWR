@@ -1,0 +1,3 @@
+roadmap: occupier-forces done, phases 6 (bcca80e) and 7 (fff2c0b) landed with green gates
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

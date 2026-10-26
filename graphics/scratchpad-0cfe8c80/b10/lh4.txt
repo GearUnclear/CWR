@@ -1,0 +1,8 @@
+static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
+static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
+static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slots follow the sky table's");
+static_assert(Planned == SkyShadow + 1, "the planned padding follows the clouds slots");
+static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
+              "LitConst water slots follow the planned padding");
+static_assert(Planned2 == Water1 + 1, "the second planned padding follows the water slots");
+static_assert(Count == Detail + 1, "LitConst size out of sync");

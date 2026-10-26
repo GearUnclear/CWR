@@ -1,0 +1,7 @@
+static_assert(Surface == Haze + 1, "the surface slots follow the haze");
+static_assert(SurfaceCanopy == Surface + 1 && Surface2 == SurfaceCanopy + 1 && SurfaceSh == Surface2 + 1,
+              "LitConst surface slots out of order");
+static_assert(Surface3 == SurfaceSh + SurfaceShCount, "LitConst surface slots out of order");
+static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots");
+static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
+static_assert(Count == CameraLook + 1, "LitConst size out of sync");

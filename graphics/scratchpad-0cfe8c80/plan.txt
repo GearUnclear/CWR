@@ -1,0 +1,9 @@
+
+As built in the look lane "light" (`photoLight`) and merged by the look director onto fec1075 with the
+look lane "surface" (which holds 79 to 88: `Surface`, `SurfaceCanopy`, `Surface2`, `SurfaceSh[6]`,
+`Surface3`): `Camera` at 89 and `CameraLook` at 90, `Count` 91 (static_assert). `Camera`: x 1 while
+the camera runs (the world's passes then store pre-exposed scene light on the camera's encoding,
+`kCameraCodecGLSL`), y the additive pre-lit scale, z the sky table's radiance scale, w the frame's
+pre-exposure. Any pass that reads or writes the frame's colour while `litCamera.x` is 1 must
+`camDecode` what it reads and `camFold` what it writes (the air apply and the fog apply do); SSR
+(B6), combat scatter (B4) and wet materials (B7) included.

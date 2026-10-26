@@ -1,0 +1,74 @@
+## track
+ssr
+## files_verified
+true
+## missing_or_false_claims
+[
+ "Edge claim is understated. NOTES says edges are clean except a 2 px line on the bay's left edge. In runs/r11/shots/bay_offshore__ssrcalm.png and __ssr.png, the RIGHT edge also has a broken dark vertical seam about 10 px in, running from the horizon to the bottom of the frame, and the hill reflection ends in a hard vertical cut. In town_rain__ssrwet and the r10 town_wet_dusk ssrwet shot, there is a smeared lighter vertical band at the left edge and pale or pink rectangular blocks on the grass at the right edge.",
+ "lowsun_fp wet was described as 'a few puddles reflecting the M113 and the jeep'. The real capture (runs/r11/shots/lowsun_fp__ssrwet.png) also shows pale translucent rectangles with hard vertical edges under the jeep and around the soldier. They lighten the cast shadows. This artefact class was reported only for the overcast bush.",
+ "overcast_heavy_rain was described as having 'no puddles on grass' and a 'slightly whiter grazing sheen' on the distant hills. The capture shows pale puddle-like blotches across the grass field. A hill that the fog hid in Remastered comes back as a pale grey shape with vertical streaks above it, so the SSR composite is not faded by fog correctly.",
+ "prototype.patch is described as an 11-file diff but contains only 10 files. The triSetLighting knob registration (ssr, ssrWater, ssrWave, ssrWet, ssrGlossy, ssrDebug, ssrRough in GameStateExtTestRender.cpp) exists only in the scratch worktree, so the patch alone cannot drive the captures.",
+ "The 'most RTX-like' dusk frame (ALT_town_wet_dusk_lampsoff_r10.png) uses shader v11 from r10, not the final v12. Its lamp state varied between runs, so it is not reproducible with the final shader. NOTES does disclose this."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+5
+## taste_violations
+[
+ "Wash on the coastline_sunset sea. With SSR the sea turns pale lilac-grey: sea mean RGB goes from 123/95/84 (Remastered) to 136/111/102 at ssrWater 0.6. Luminance std drops from 28 to 22, and the warm orange column is weakened against Classic's dark sea with its warm path.",
+ "Wash on lamp-lit wet asphalt. In town_wet_dusk with the lamps on and in street_night, the road becomes a smooth light-grey sheet that loses its asphalt texture.",
+ "The bay water is lighter and bluer overall: frame mean rises by about 15 per channel, almost all of it on the water. In a calm-morning bay this is plausible, but the owner could read it as a milky wash.",
+ "Overcast rain grass is mostly darker and greyer, with blotchy procedural-looking sheen patches, so this view risks being 'only darker'.",
+ "The evening sea loses some warmth in the sun column against Classic. The dusk street puddles do keep the warm sky."
+]
+## cost_ok
+true
+## score_0_to_10
+6
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\ssr\BEST_bay_offshore.png
+## one_line
+Real and visible on calm water and wet daytime streets: the boat, the hill and the houses are mirrored. The sunset sea washes out, paint is null, nights get nothing, and there are more edge and box artefacts than reported.
+## critique
+Verification. Every cited path exists. All seven BEST/ALT images are byte-identical to their source cmp_*.png files in runs/r11, and the ALT image matches runs/r10. The game logs in runs/r11/tri/ssr_abel4 and ssr_eden show the v12 override loaded (20319 bytes), followed by 'GL33 post: SSR prototype programs built' and per-frame 'SSR pass 1440x960' lines. The ssr_eden log reports engine rain at wet 0.9993. The logs contain no errors, and tri passed 2/2. Pixel diffs against Remastered in r11:
+- bay ssrcalm: mean abs 16.7, with 40% of pixels changed by more than 24.
+- coastline ssrw06: 5.4.
+- town_rain ssrwet: 6.4.
+- town_wet_dusk: 9.3.
+- overcast: 3.3.
+- lowsun dry paint: 0.11, with only 0.2% of pixels changed by more than 8. The paint result is null, as the explorer admits.
+The four bay sequence frames differ only in the water rows (about 4.5 mean against 0.03 in the sky), so the ripples really animate.
+
+Look. The bay is the honest win. The patrol boat sits on its own reflection, and the shore rocks and green hill are mirrored and broken up by ripples. A player would notice at once, and it reads like a modern water shader on unchanged CWA assets. The daytime rain street is the second win: the half-timbered house, the lamp post and the jeep appear in road puddles, while the grass verge stays dry. The r10 lamps-off dusk frame, with a pink sky in a flooded street and black silhouettes, is the most RTX-like image here. It uses v11, though, and it depends on a lamp state the final run did not reproduce.
+
+The rest is weaker than reported.
+- Coastline sunset: the sea turns pale lilac-grey with less contrast and a weaker warm column. That is the owner's 'wash'. The only clear gain is the removal of Remastered's dark wedge.
+- Lamp-lit dusk and night streets: the asphalt becomes a light-grey sheet with no lamp streaks. The town_night fire is not reflected at all, so night and combat get essentially nothing.
+- Paint: no visible effect.
+- Overcast rain: blotchy grey sheen patches and pale puddle-like spots appear on grass. A hill that the fog hid comes back as a pale streaky shape, and a box appears under the bush.
+- lowsun wet: hard-edged translucent rectangles under the jeep and around the soldier lighten the shadows.
+- Frame edges: both the left and right edges of the bay show vertical seams, and the town views have edge bands or blocks. In motion, with camera pans, these would read as classic SSR edge artefacts. Temporal behaviour under camera motion was never tested; the static per-pixel jitter and the edge seams are the likely failure points.
+
+RTX vision. Reflective water and wet streets are a core part of the RTX look, and the stencil-tag classification is a clever way to get material classes out of a fixed-function era renderer. What is missing: glass, gloss on paint, emissive and lamp reflections at night, and fire on wet ground. The sea also needs to coordinate with the forward water shader rather than blend over it. That puts it mid-scale, around 5.
+
+Cost. The ao+ssr deltas in timings_final_r11.md match the claims: +0.35 to +1.9 ms at 1440x960 internal with 4x MSAA. Scaled to 1080p and with no Hi-Z yet, the worst case is perhaps 2.5 to 3 ms, which fits an RTX 3060 at 60 fps. The FlushQueues around every Transport::Draw is an unmeasured CPU and batching cost.
+
+Worth building properly. Water reflections alone justify a production pass with these parts:
+- Hi-Z at half resolution, with a temporal pass.
+- Fading by distance from the frame edge.
+- Fog-correct composite.
+- A sea reflection fed into the forward water shader instead of a blend over the frame.
+- A per-draw material class in place of the global flag.
+- Puddle masks from road geometry, not value noise.
+The sunset-sea tuning has to keep Classic's contrast and warmth, or the owner will reject it as a wash.
+## artefacts_seen
+- Bay (ssrcalm and ssr): a vertical seam about 8 px in at the left edge, and a broken dark vertical seam about 10 px in at the right edge. The hill reflection ends in a hard vertical cut at the right edge.
+- town_rain and town_wet_dusk: a smeared lighter vertical band at the left edge, and pale or pink rectangular blocks on the grass at the right edge. Bright flecks at the bush bases and the far end of the road. Asphalt texture is lost under the wet sheen.
+- lowsun_fp wet: translucent pale rectangles with hard edges under the jeep and around the soldier.
+- overcast_heavy_rain: a rectangular reflection under the clutter bush and pale puddle-like blotches on the grass. A fog-hidden distant hill reappears as a pale shape with vertical streaks.
+- Not seen: NaN, embossing or banding.
+## prototype_actually_loaded
+Yes. runs/r11/tri/ssr_abel4/game_stdout.log and ssr_eden/game_stdout.log both log 'shader override loaded — ...glsl_v12\psPostSsr.glsl (20319 bytes)', 'GL33 post: SSR prototype programs built' and per-frame 'GL33 post: SSR pass 1440x960 strength 1 wet ...' lines. There are no ERROR lines. The r10 logs show glsl_v11 loaded. The binary is dist/gfx-ssr-rwdi built from the D:\Arma_CWA_worktrees\gfx-ssr scratch worktree. That worktree has 11 modified files, but prototype.patch contains only 10 of them: it is missing the triSetLighting knob registration.

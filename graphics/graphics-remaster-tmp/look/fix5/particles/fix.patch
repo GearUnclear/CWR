@@ -1,0 +1,322 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 4d428284..fcf2076e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -859,6 +859,14 @@ class Engine : public IGraphicsEngine
+     /// term), and true. False when they are off: every light then lights the
+     /// particle by the classic model, as before.
+     virtual bool ParticleNightLight(Vector3Par /*pos*/, float /*linear*/[3]) const { return false; }
++    /// The photoreal camera (photoLight): the frame's light rig on a lit
++    /// particle (smoke, dust, a fireball's soot; LightRig.hpp
++    /// ParticleRigIrradiance), linear, at the rig's exposure and the frame's
++    /// pre-exposure, as the world's passes store scene light; before the
++    /// material's brightness and the particle's own colour. True while the
++    /// camera writes this frame's scene light: the particle then takes it in
++    /// place of the classic sun and ambient. False otherwise (classic light).
++    virtual bool ParticleRigLight(float /*linear*/[3]) const { return false; }
+     /// True while the frame's combat lights (the combatLights feature,
+     /// Graphics/Rendering/Lighting/CombatLights.hpp) light the world: the
+     /// classic light of a muzzle flash, an explosion, a wreck, a fire, a flare
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index 3105e1c0..d3bcbecc 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -519,6 +519,15 @@ KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShar
+     return key;
+ }
+ 
++Rgb ParticleRigIrradiance(const LightRig& rig, const KeyLight& key, float shade)
++{
++    const float field = 1.0f - Clamp01(rig.cloudCover) * (1.0f - Clamp01(rig.cloudTransmit));
++    const Rgb direct =
++        key.radiance * (kParticleKeyShare * (key.IsMoon() ? 1.0f : field)) + rig.moon * kParticleKeyShare;
++    const Rgb sky = (rig.skyZenith + rig.skyHorizon + rig.skyHorizonSun + rig.skyGround) * 0.25f;
++    return direct + sky * std::max(shade, 0.0f);
++}
++
+ float ShaftScatterLength(float fogEnd)
+ {
+     if (!(fogEnd > 0.0f))
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 41f84613..da7e94dc 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -438,6 +438,24 @@ struct KeyLight
+ // it is above 0 (rig.moon keeps the rest); leaves the rig alone otherwise. The
+ // sky's sun is the sun either way.
+ KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShare);
++
++// A lit particle (smoke, dust, a fireball's soot; Object::DrawDecal) under the
++// photoreal rig: the light the world gets, not the classic sun. A puff has no
++// face: it takes kParticleKeyShare of the key light (the sun, or the moon under
++// the moon key) and of the moon's shadowless rest (a thick puff scatters the
++// sun from its whole lit half: about what a sunlit wall gets; the classic
++// decal's 0.375 with the sky's weaker physical share left white smoke duller
++// than the sand under it by day), the sun dimmed by the cloud
++// field's mean, plus the sky's irradiance averaged over every direction (the
++// lit shaders' skyIrradiance: a quarter of the zenith's, a quarter of each
++// horizon side's and a quarter of the ground's bounce) times `shade`, the
++// share of the sky fill the world's surfaces keep (SurfaceLight.hpp
++// SurfaceShadeFactor; 1 without the surfaces lane). Irradiance in the rig's
++// units, before the material's brightness and the exposure. A dusk burst's
++// dust then takes the dusk air's dim light, not the classic sunset's pink sun,
++// which the classic model keeps shining for 5 degrees after sunset.
++constexpr float kParticleKeyShare = 0.6f;
++Rgb ParticleRigIrradiance(const LightRig& rig, const KeyLight& key, float shade);
+ // The photoreal rig's scale (photoLight): a white surface facing up under the
+ // clear sky's sun and sky at this sun height shows at the brightness classic
+ // shows a white surface at noon. Every other light keeps its physical ratio to
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index d71c0050..eec4d168 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -1102,6 +1102,19 @@ Color AddParticleNightLight(ColorVal classic, const float physical[3], float nig
+                  toDisplay(toLinear(classic.B()) + s * physical[2]), classic.A());
+ }
+ 
++// The photoreal rig's light on the puff (ParticleRigLight: linear, at the
++// frame's exposure and pre-exposure) at the material's brightness (the eye's
++// accommodation, which carries the user brightness as the lit shaders'
++// materials do), added in linear light to the display-space local lights.
++Color AddParticleRigLight(ColorVal display, const float rig[3], ColorVal accom)
++{
++    auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
++    auto toDisplay = [](float v) { return std::pow(std::max(v, 0.0f), 1.0f / 2.2f); };
++    return Color(toDisplay(toLinear(display.R()) + rig[0] * accom.R()),
++                 toDisplay(toLinear(display.G()) + rig[1] * accom.G()),
++                 toDisplay(toLinear(display.B()) + rig[2] * accom.B()), display.A());
++}
++
+ // A smoke or dust particle lit from inside by the frame's combat lights
+ // (CombatLights.hpp): their irradiance at the particle, isotropic, added to its
+ // display-space colour in linear light. A fire's light crosses its own smoke
+@@ -1246,7 +1259,14 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+             mat.specFlags = 0;
+             LightSun* sun = GScene->MainLight();
+             sun->SetMaterial(mat);
+-            colorI = sun->FullResult(0.5);
++            // Under the photoreal camera the frame's rig lights the puff
++            // (ParticleRigLight; added below, after the local lights), not the
++            // classic sun and ambient: the classic dusk sun is still a pink
++            // light 1.7 degrees after sunset, and the camera's white balance
++            // for the blue dusk air made it a salmon smudge on the horizon.
++            float rigLight[3];
++            const bool rigLit = GEngine->ParticleRigLight(rigLight);
++            colorI = rigLit ? Color(0, 0, 0, 1) : sun->FullResult(0.5);
+             // While the combat lights light the frame, the classic light of a
+             // flash, a fire or a flare draws its glow and lights nothing: the
+             // particle takes the combat lights below instead.
+@@ -1285,6 +1305,8 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+             }
+             ColorVal accom = GEngine->GetAccomodateEye();
+             colorI = colorI * accom;
++            if (rigLit)
++                colorI = AddParticleRigLight(colorI, rigLight, accom);
+             if (combat)
+             {
+                 // The particle's own colour (multiplied in below) is its albedo.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 2464a934..4ca59445 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -718,6 +718,7 @@ class EngineGL33 : public Engine
+     bool LocalLightsFromTiles() const override { return _lightTilesActive; }
+     bool RemasterMoonKey() const override;
+     bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
++    bool ParticleRigLight(float linear[3]) const override;
+     bool CombatLightsActive() const override { return _combat.active; }
+     void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
+     void RequestShaderReload() override { _shaderReloadPending = true; }
+@@ -900,6 +901,11 @@ class EngineGL33 : public Engine
+     // x, the nightLights gate with the tiled list): particles take them too
+     // (ParticleNightLight). Decided with _lightTilesActive, cleared with it.
+     bool _nightLightsActive = false;
++    // The rig's light on a lit particle under the photoreal camera
++    // (ParticleRigLight; pre-exposed linear), set with the frame's rig
++    // (UploadLitFrameConstants) for the frame it names.
++    float _particleRigLight[3] = {0.0f, 0.0f, 0.0f};
++    std::uint32_t _particleRigFrame = 0xffffffffu;
+     // Wet weather (B7, Graphics/Remaster/Wetness.hpp, SurfaceMaterials.hpp):
+     // this frame's wetness (the world's state or the knob), set with the gates;
+     // _wetShading while the wetWeather gate is on in the world's passes, which
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 6f84ab9d..b3f561be 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -21,6 +21,7 @@
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+ #include <Poseidon/Graphics/Remaster/NightLights.hpp>
+ #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/IO/ParamFileExt.hpp>
+@@ -920,6 +921,20 @@ void EngineGL33::UploadLitFrameConstants()
+     // A burst's flash at the camera opens the exposure for as long as it lasts
+     // (B4; 1 without one).
+     _combat.exposure = rig.exposure * _combat.flashGain;
++    // Lit particles take the rig's light under the camera (ParticleRigLight):
++    // the world's sky fill share and exposure, at the frame's pre-exposure.
++    if (_camera.frameOn)
++    {
++        const float shade = _featureGates.computed && _featureGates[rm::Feature::Surfaces].on
++                                ? rm::SurfaceShadeFactor(_lighting.surfShade, rig.sunElevationDeg, in.skyThrough)
++                                : 1.0f;
++        const rm::Rgb irr = rm::ParticleRigIrradiance(rig, key, shade);
++        const float k = _combat.exposure * std::exp2(_camera.preExposureLog2);
++        _particleRigLight[0] = irr.r * k;
++        _particleRigLight[1] = irr.g * k;
++        _particleRigLight[2] = irr.b * k;
++        _particleRigFrame = GetFrameCounter();
++    }
+     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, _combat.exposure);
+     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
+     // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
+@@ -1157,6 +1172,14 @@ bool EngineGL33::RemasterMoonKey() const
+            rm::MoonKeyShare(_featureGates) > 0.0f;
+ }
+ 
++bool EngineGL33::ParticleRigLight(float linear[3]) const
++{
++    const bool on = _camera.frameOn && _camera.frame == GetFrameCounter() && _particleRigFrame == GetFrameCounter();
++    for (int i = 0; i < 3; ++i)
++        linear[i] = on ? _particleRigLight[i] : 0.0f;
++    return on;
++}
++
+ bool EngineGL33::ParticleNightLight(Vector3Par pos, float linear[3]) const
+ {
+     linear[0] = linear[1] = linear[2] = 0.0f;
+diff --git a/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf b/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf
+index 3ab3cc5f..5eb2264e 100644
+--- a/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf
++++ b/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf
+@@ -247,6 +247,12 @@ triScreenshot "town_night__remastered"
+ //  allowDamage false notwithstanding). The whole set is staged afresh for
+ //  each mode (capFFStage / capFFClear), so both modes start from the same
+ //  layout; AI fire and the sim clock are not re-pinned, so the flashes differ.
++//  The shells are timed: from the first drop to the third shot the world steps
++//  a fixed 1/30 s a frame (capFixStep, triSetFixedStep), so every run and every
++//  round catches the second shell's burst at the same age: firefight_2 6
++//  frames (0.2 s) after its drop, a young fireball (the shell falls 40 m in
++//  about 5 frames), firefight_3 26 frames (0.87 s) after it, a smoke column
++//  with its dust foot. Real time again after the third shot.
+ // ----------------------------------------------------------------------------
+ ["firefight", 7600, 10850, 2, 0, 0, [1985, 7, 5, 19, 35], 0, 0, 1000] call capBegin
+ capPinTime = false
+@@ -294,12 +300,15 @@ capBoom = {
+     if ((count capFE) > 0) then { capShell = createShell ["Shell120", [_p select 0, _p select 1, 40], [0, 0, -250], capFE select 0, objNull] };
+ }
+ capBurn = { if (not (isNull capBurnV)) then { capBurnV inflame true } }
++// <seconds> call capFixStep: a fixed sim step (0 = real time again).
++capFixStep = { capFixRes = triSetFixedStep _this; format ["view=firefight;event=fixstep;step=%1;res=%2", _this, capFixRes] call capLog }
+ [] call capFFStage
+ "classic" call capMode
+ [] call capEngage
+ triSimFrames 200
+ [] call capReadTimers
+ call { [] call capPinEnv; [] call capPinView; [] call capEngage; [] call capBurn }
++0.0333333 call capFixStep
+ [62, -2] call capBoom
+ triSimFrames 5
+ triScreenshot "firefight_1__classic"
+@@ -313,6 +322,7 @@ triScreenshot "firefight_2__classic"
+ triSimFrames 20
+ triScreenshot "firefight_3__classic"
+ "firefight_3__classic" call capRecord
++0 call capFixStep
+ [] call capFFClear
+ triSimFrames 30
+ [] call capFFStage
+@@ -321,6 +331,7 @@ triSimFrames 30
+ triSimFrames 200
+ [] call capReadTimers
+ call { [] call capPinEnv; [] call capPinView; [] call capEngage; [] call capBurn }
++0.0333333 call capFixStep
+ [62, -2] call capBoom
+ triSimFrames 5
+ triScreenshot "firefight_1__remastered"
+@@ -334,6 +345,7 @@ triScreenshot "firefight_2__remastered"
+ triSimFrames 20
+ triScreenshot "firefight_3__remastered"
+ "firefight_3__remastered" call capRecord
++0 call capFixStep
+ [] call capFFClear
+ 
+ // ----------------------------------------------------------------------------
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 5f8d5e0a..cee6373e 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -686,3 +686,71 @@ TEST_CASE("PhotoCamera: look fix noon: the clear day sky deepens toward a camera
+     CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 1.0f) == 0.0f);
+     CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.5f) == Catch::Approx(0.5f));
+ }
++
++TEST_CASE("PhotoCamera: look fix particles: smoke and dust take the rig's light, not the classic sun",
++          "[Remaster][PhotoCamera]")
++{
++    // A lit particle (Object::DrawDecal) under the camera: kParticleKeyShare of
++    // the key light (a thick puff's lit half, about a sunlit wall's share) plus
++    // the sky's irradiance averaged over every direction, the sky term times
++    // the world's shade share.
++    LightingTuning t{};
++    LightRigInputs in = PhysicalInputs(60.0f);
++    LightRig noon = ComputeLightRig(in, t);
++    REQUIRE(noon.physical);
++    const KeyLight key = ComputeKeyLight(in, noon, 0.0f);
++    const Rgb irr = ParticleRigIrradiance(noon, key, 1.0f);
++    const Rgb sky = (noon.skyZenith + noon.skyHorizon + noon.skyHorizonSun + noon.skyGround) * 0.25f;
++    CHECK(irr.r == Catch::Approx(noon.sun.r * kParticleKeyShare + sky.r));
++    CHECK(irr.g == Catch::Approx(noon.sun.g * kParticleKeyShare + sky.g));
++    CHECK(irr.b == Catch::Approx(noon.sun.b * kParticleKeyShare + sky.b));
++    // A noon puff is lit less than a white up-facing surface in the sun, more
++    // than the shade: the sun dominates it.
++    const float upLit = Luminance(noon.sun) * std::sin(60.0f * kPi / 180.0f) + Luminance(noon.skyZenith);
++    CHECK(Luminance(irr) < upLit);
++    CHECK(Luminance(irr) > 0.6f * upLit);
++    CHECK(Luminance(irr) > Luminance(noon.skyZenith));
++    CHECK(Luminance(noon.sun) * kParticleKeyShare > Luminance(sky));
++    // The shade share scales the sky's part only.
++    const Rgb shaded = ParticleRigIrradiance(noon, key, 0.5f);
++    CHECK(shaded.g == Catch::Approx(noon.sun.g * kParticleKeyShare + 0.5f * sky.g));
++    // The cloud field's mean dims the sun's part as it dims the open ground.
++    LightRig cloudy = noon;
++    cloudy.cloudCover = 1.0f;
++    cloudy.cloudTransmit = 0.08f;
++    const Rgb under = ParticleRigIrradiance(cloudy, key, 1.0f);
++    CHECK(under.g == Catch::Approx(noon.sun.g * kParticleKeyShare * 0.08f + sky.g));
++
++    // firefight_3: 19:35, the sun 1.7 degrees under the horizon. The classic
++    // model still shines its sunset sun (pink) on every puff; the rig's sun has
++    // set, so the burst's dust takes the dusk sky's light alone: dim and not
++    // warmer than the sky that lights it (the camera balances that sky to
++    // white), so the foot reads grey against the twilight, not salmon.
++    LightRigInputs duskIn = PhysicalInputs(-1.7f);
++    duskIn.classicSunDiffuse = Rgb(0.6f, 0.3f, 0.25f);
++    duskIn.nightEffect = 0.3f;
++    LightRig dusk = ComputeLightRig(duskIn, t);
++    REQUIRE(dusk.physical);
++    const KeyLight duskKey = ComputeKeyLight(duskIn, dusk, 0.0f);
++    CHECK(Luminance(duskKey.radiance) == 0.0f);
++    const Rgb duskIrr = ParticleRigIrradiance(dusk, duskKey, 1.0f);
++    CHECK(Luminance(duskIrr) > 0.0f);
++    CHECK(Luminance(duskIrr) < 0.1f * Luminance(irr));
++    CHECK(RedOverBlue(duskIrr) <= RedOverBlue(dusk.skyZenith + dusk.skyHorizon + dusk.skyHorizonSun) * 1.02f);
++    CHECK(RedOverBlue(duskIrr) < 1.1f);
++
++    // Under the moon key the moon's key share and its shadowless rest both
++    // light the puff at the key share (no cloud field on the moon).
++    LightRig night = noon;
++    night.sun = Rgb();
++    night.moon = Rgb(0.01f, 0.011f, 0.012f);
++    KeyLight moonKey;
++    moonKey.moonShare = 0.6f;
++    moonKey.radiance = night.moon * 0.6f;
++    night.moon = night.moon * 0.4f;
++    night.cloudCover = 1.0f;
++    night.cloudTransmit = 0.08f;
++    const Rgb nightSky = (night.skyZenith + night.skyHorizon + night.skyHorizonSun + night.skyGround) * 0.25f;
++    const Rgb moonLit = ParticleRigIrradiance(night, moonKey, 1.0f);
++    CHECK(moonLit.b == Catch::Approx(0.012f * kParticleKeyShare + nightSky.b));
++}

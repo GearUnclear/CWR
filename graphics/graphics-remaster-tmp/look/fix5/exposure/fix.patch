@@ -1,0 +1,324 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index bfe46c2e..bf91268c 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -390,16 +390,17 @@ std::string FeatureStateString(const LightingTuning& tuning, const FeatureGates&
+     const CameraReadout& c = gates.camera;
+     if (c.valid)
+     {
+-        char cam[320];
++        char cam[400];
+         std::snprintf(cam, sizeof(cam),
+                       " | cam ev=%.2f target=%.2f pre=%.2f mean=%.2f high=%.2f wb=%.2f sky=%.3f sun=%.3f skyup=%.3f "
+-                      "reads=%u cpu=%.3f/%.3f skip=%u",
++                      "reads=%u cpu=%.3f/%.3f skip=%u skytop=%.2f ring=%.2f ringw=%.2f free=%.2f",
+                       static_cast<double>(c.exposureLog2), static_cast<double>(c.targetLog2),
+                       static_cast<double>(c.preExposureLog2), static_cast<double>(c.meterMean),
+                       static_cast<double>(c.meterHighlight), static_cast<double>(c.whiteBalance),
+                       static_cast<double>(c.skyScale), static_cast<double>(c.sunLum), static_cast<double>(c.skyUpLum),
+                       c.readbacks, static_cast<double>(c.cpuCollectMs), static_cast<double>(c.cpuQueueMs),
+-                      c.skippedMeters);
++                      c.skippedMeters, static_cast<double>(c.meterSkyTop), static_cast<double>(c.meterSunRing),
++                      static_cast<double>(c.meterSunRingWeight), static_cast<double>(c.unguardedLog2));
+         out += cam;
+     }
+     return out;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+index 49b751d0..384884f9 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+@@ -128,6 +128,14 @@ struct CameraReadout
+     float cpuCollectMs = 0.0f;
+     float cpuQueueMs = 0.0f;
+     std::uint32_t skippedMeters = 0;
++    // The guards' readings (log2 scene luminance; kMeterFloorLog2 when none):
++    // the sky's bright end, the sky by a low sun in frame and that guard's
++    // weight, and the exposure the meter's mean alone asks for (no guard), so
++    // a log shows which guard holds the frame down.
++    float meterSkyTop = -16.0f;
++    float meterSunRing = -16.0f;
++    float meterSunRingWeight = 0.0f;
++    float unguardedLog2 = 0.0f;
+ };
+ 
+ struct FeatureGates
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index b3cfd658..b60a38d9 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -288,6 +288,15 @@ float SkyRolloffToward(float m, float cosToSun)
+     return kSkyRolloffKnee + r * (1.0f - std::exp(-(m - kSkyRolloffKnee) / r));
+ }
+ 
++float SkyMeterLight(float storedPeak, float cosToSun)
++{
++    if (!(storedPeak > kSkyRolloffKnee))
++        return storedPeak;
++    const float rs = SkyRolloffCapToward(cosToSun) - kSkyRolloffKnee;
++    const float m = kSkyRolloffKnee - rs * std::log(std::max(1.0f - (storedPeak - kSkyRolloffKnee) / rs, 1e-6f));
++    return SkyRolloff(m);
++}
++
+ float SunRingWeight(float sunElevationDeg)
+ {
+     return 1.0f - Smoothstep(kSunRingFullDeg, kSunRingOffDeg, sunElevationDeg);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+index 794099a2..81188954 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -430,6 +430,18 @@ float SkySunGlow(float cosToSun);
+ float SkyRolloffCapToward(float cosToSun);
+ // The roll-off of the sky along a direction with this cosine to the sun.
+ float SkyRolloffToward(float preExposedPeak, float cosToSun);
++// The sky as the meter reads it (the meter pass's meterSkyLight): a sky
++// tap's stored peak (SkyRolloffToward along its view ray) taken back to the
++// light it came from and rolled off with the plain cap (SkyRolloff), so the
++// meter and its guards see the sky round the sun as they see the rest of the
++// sky and the sun's glow burns white without closing the camera down. Light
++// at or past the cap toward the sun (the disc, the air's glow over it) reads
++// as the plain cap. (Look fix round 5 "exposure": the meter read the burn;
++// with the sun in or just out of frame the guards on the sky's bright end and
++// on the sky by a low sun took 0.3 to 1.5 EV off, woods_pine2_evening went
++// from ev 1.82 to 0.27, its frame mean from 50 to 33 of 255, darker than
++// town_night.)
++float SkyMeterLight(float storedPeak, float cosToSun);
+ 
+ // ---- The grey deck ------------------------------------------------------------
+ // Under the camera a full grey deck (the overcast cloud floor under the
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+index 72265a0d..0d7ef7b5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+@@ -283,6 +283,33 @@ void EngineGL33::PostCameraMeter(const PostFrame& f)
+     // Scene light: the stored frame divided by its pre-exposure.
+     Set4(p.progMeter, "meterParams", rm::kMeterSkyWeight, std::exp2(-c.preExposureLog2),
+          static_cast<float>(rm::kMeterWidth), static_cast<float>(rm::kMeterHeight));
++    // The sky at its plain roll-off (SkyMeterLight): the dome's cap rises
++    // toward the sun so its glow burns white; the meter takes that rise back
++    // out along each sky tap's view ray, so the guards do not close the camera
++    // down for the sun's burn.
++    Set4(p.progMeter, "meterSky", rm::kSkyRolloffKnee, rm::kSkyRolloffCap, rm::kSkySunCap, rm::kSkySunGlowRad);
++    {
++        float sunView[3] = {0.0f, 0.0f, 1.0f};
++        bool sunOk = false;
++        LightSun* sun = GScene ? GScene->MainLight() : nullptr;
++        Camera* cam = GScene ? GScene->GetCamera() : nullptr;
++        if (sun && cam)
++        {
++            // Camera space as PostFrameSun's: x right, y up, z forward.
++            const Vector3 v = cam->InverseScaled().Rotate(-sun->SunDirection());
++            const float len = v.Size();
++            if (len > 1e-6f)
++            {
++                sunView[0] = v.X() / len;
++                sunView[1] = v.Y() / len;
++                sunView[2] = v.Z() / len;
++                sunOk = true;
++            }
++        }
++        Set4(p.progMeter, "meterSun", sunView[0], sunView[1], sunView[2], sunOk ? 1.0f : 0.0f);
++    }
++    Set4(p.progMeter, "meterProj", f.projInfo[2], f.projInfo[3], 0.0f, 0.0f);
++    Set4(p.progMeter, "meterRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+     DrawTo(p.meterFbo, rm::kMeterWidth, rm::kMeterHeight);
+ 
+     // Queue the readback into the free slot: the target's own format (RGBA16F
+@@ -353,5 +380,16 @@ rm::CameraReadout EngineGL33::CameraReadoutNow() const
+     r.cpuCollectMs = c.cpuCollectMs;
+     r.cpuQueueMs = c.cpuQueueMs;
+     r.skippedMeters = c.skippedMeters;
++    r.meterSkyTop = c.meter.skyTop;
++    r.meterSunRing = c.meter.sunRing;
++    r.meterSunRingWeight = c.meter.sunRingWeight;
++    if (c.meter.valid)
++    {
++        rm::MeterResult free = c.meter;
++        free.highlight = rm::kMeterFloorLog2;
++        free.skyTop = rm::kMeterFloorLog2;
++        free.sunRingWeight = 0.0f;
++        r.unguardedLog2 = rm::TargetExposureLog2(free, c.nightEffect, _lighting, c.duskEffect, c.duskKeep, c.timeEv);
++    }
+     return r;
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index d7f4ea6f..7be03139 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -597,15 +597,48 @@ void main() {
+ // that is black through (an optic's mask, pillarbox bars) weighs nothing, so
+ // the camera meters the scene inside it. Read back by the CPU, which builds
+ // the histogram.
++// The meter reads the sky at its plain roll-off (PhotoCamera.hpp
++// SkyMeterLight): toward the sun the dome's roll-off rises past white
++// (camSkyRolloff, kSkySunCap) so the sun's glow burns, and the guards that
++// keep the sky under white closed the camera down for that burn (look fix
++// round 5 "exposure"). Each sky tap's peak is taken back through the roll-off
++// toward the sun along its own view ray (meterProj, meterRect, meterSun) and
++// rolled off with the plain cap (meterSky: knee, cap, the cap toward the sun,
++// the glow's radius), so the meter sees the sky round the sun as it sees the
++// rest of the sky, and the frame keeps its burn.
+ static const char s_psPostMeterHead[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D colorTex;
+ uniform sampler2D depthTex;
+ uniform vec4 meterParams; // x the sky's weight, y 1 / the frame's pre-exposure, zw meter size
++uniform vec4 meterSky;    // the sky's roll-off: x knee, y cap, z the cap toward the sun, w the glow's radius (rad)
++uniform vec4 meterSun;    // xyz the unit direction to the sun in view space (z forward), w 1: take the sun's cap out
++uniform vec4 meterProj;   // x 1 / proj._11, y 1 / proj._22: the view ray is (ndc.x x, ndc.y y, 1)
++uniform vec4 meterRect;   // the 3D viewport in uv (x, y, w, h)
+ out vec4 fragColor;
+ )";
+ 
+ static const char s_psPostMeterMain[] = R"(
++// The factor that takes a sky tap's pre-exposed light (the dome's roll-off
++// toward the sun along this tap's view ray) to the plain roll-off of the same
++// light (PhotoCamera.cpp SkyMeterLight): the roll-off with cap C is
++// k + r (1 - exp(-(m - k) / r)), r = C - k; it is inverted with the cap toward
++// the sun and rolled off again with the plain cap. Light at or past the cap
++// toward the sun (the disc, the air's glow over it) reads as the plain cap.
++float meterSkyLight(vec3 pre, vec2 uv) {
++    float o = max(pre.r, max(pre.g, pre.b));
++    float k = meterSky.x;
++    if (meterSun.w < 0.5 || o <= k) return 1.0;
++    vec2 ndc = (uv - meterRect.xy) / max(meterRect.zw, vec2(1e-6)) * 2.0 - 1.0;
++    vec3 ray = normalize(vec3(ndc.x * meterProj.x, ndc.y * meterProj.y, 1.0));
++    float c = clamp(dot(ray, meterSun.xyz), -1.0, 1.0);
++    float glow = 1.0 / (1.0 + 2.0 * (1.0 - c) / (meterSky.w * meterSky.w));
++    float rs = meterSky.y + (meterSky.z - meterSky.y) * glow - k;
++    float rp = meterSky.y - k;
++    float m = k - rs * log(max(1.0 - (o - k) / rs, 1e-6));
++    return (k + rp * (1.0 - exp(-(m - k) / rp))) / o;
++}
++
+ void main() {
+     vec2 cell = floor(gl_FragCoord.xy);
+     float sum = 0.0, wsum = 0.0, hi = -32.0, lo = 32.0, skyHi = -32.0;
+@@ -613,9 +646,11 @@ void main() {
+         for (int i = 0; i < 4; ++i) {
+             vec2 uv = (cell + (vec2(float(i), float(j)) + 0.5) / 4.0) / meterParams.zw;
+             vec3 t = textureLod(colorTex, uv, 0.0).rgb;
+-            vec3 lin = camDecode(t) * meterParams.y;
+-            float l = log2(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-5));
++            vec3 pre = camDecode(t);
+             bool sky = textureLod(depthTex, uv, 0.0).r >= 0.999999;
++            if (sky) pre *= meterSkyLight(pre, uv);
++            vec3 lin = pre * meterParams.y;
++            float l = log2(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-5));
+             float w = sky ? meterParams.x : 1.0;
+             sum += l * w;
+             wsum += w;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 5f8d5e0a..0d4b6d13 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -279,6 +279,76 @@ TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off
+     CHECK(kSunDiscWhite <= 1.0f);
+ }
+ 
++TEST_CASE("PhotoCamera: look fix exposure: the meter reads the sky round the sun at the plain roll-off",
++          "[Remaster][PhotoCamera]")
++{
++    const float deg = 3.14159265f / 180.0f;
++    // The sky's stored light toward the sun, read back, is the plain
++    // roll-off of the same light at any angle: the burn is the display's, not
++    // the meter's.
++    for (float a : {0.3f, 1.0f, 2.0f, 3.0f, 5.0f, 8.0f, 20.0f, 90.0f})
++    {
++        const float c = std::cos(a * deg);
++        for (float m = 0.2f; m < 60.0f; m *= 1.3f)
++        {
++            CAPTURE(a, m);
++            const float stored = SkyRolloffToward(m, c);
++            const float read = SkyMeterLight(stored, c);
++            const float plain = SkyRolloff(m);
++            // log2 within 0.02 EV until the plain roll-off is within a
++            // hundredth of its cap (where float precision of the inverse
++            // runs out, and the reading saturates at the cap either way).
++            if (plain < kSkyRolloffCap - 0.024f)
++                CHECK(std::fabs(std::log2(read / plain)) < 0.02f);
++            CHECK(read <= kSkyRolloffCap + 1e-4f);
++            CHECK(read <= stored + 1e-4f);
++        }
++    }
++    // Under the knee and far from the sun nothing changes.
++    CHECK(SkyMeterLight(0.9f, 1.0f) == 0.9f);
++    CHECK(SkyMeterLight(2.0f, -1.0f) == Catch::Approx(2.0f).epsilon(0.002));
++    // The disc and anything past the cap toward the sun read as the plain cap.
++    CHECK(SkyMeterLight(kSunDiscLevel, 1.0f) == Catch::Approx(kSkyRolloffCap).epsilon(0.001));
++    CHECK(SkyMeterLight(kSkySunCap * 2.0f, std::cos(0.5f * deg)) == Catch::Approx(kSkyRolloffCap).epsilon(0.001));
++
++    // The camera into a low sun (woods_pine2_evening, lowsun_fp): the sky a
++    // few degrees from the sun is many times past the cap. Closed loop: the
++    // frame is drawn at the exposure, the meter reads it back, the guard on
++    // the sky by the sun sets the next exposure. Reading the dome's own
++    // stored light, the burn's higher cap held the guard's tap past its limit
++    // and the camera closed down; read through SkyMeterLight it settles where
++    // the plain roll-off (round 3) settled.
++    LightingTuning t;
++    auto settle = [&](auto stored, auto read)
++    {
++        float e = 2.0f;
++        for (int i = 0; i < 200; ++i)
++        {
++            MeterResult m;
++            m.valid = true;
++            m.mean = -7.7f;
++            m.highlight = -4.0f;
++            // The ring's brightest tap: sky 4 degrees from the sun, scene light 6.
++            const float c = std::cos(4.0f * deg);
++            const float pre = 6.0f * std::exp2(e);
++            m.sunRing = std::log2(read(stored(pre, c), c)) - e;
++            m.sunRingWeight = 0.72f;
++            e = TargetExposureLog2(m, 0.0f, t);
++        }
++        return e;
++    };
++    auto towardSun = [](float pre, float c) { return SkyRolloffToward(pre, c); };
++    auto plainSky = [](float pre, float) { return SkyRolloff(pre); };
++    auto dome = [](float stored, float) { return stored; };
++    auto meter = [](float stored, float c) { return SkyMeterLight(stored, c); };
++    const float round3 = settle(plainSky, dome);
++    const float burnt = settle(towardSun, dome);
++    const float fixed = settle(towardSun, meter);
++    CAPTURE(round3, burnt, fixed);
++    CHECK(burnt < round3 - 0.3f); // the cause: the meter read the burn
++    CHECK(fixed == Catch::Approx(round3).margin(0.05f));
++}
++
+ TEST_CASE("PhotoCamera: the sky seen through a canopy stays pale sky, the sun's own glare may clip",
+           "[Remaster][PhotoCamera]")
+ {
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 5c87c692..a35b5354 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1130,6 +1130,29 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
+     CHECK(strings >= 32); // today 3 VS, 10 prelude pieces and 4 mains; 15 post strings
+ }
+ 
++TEST_CASE("The camera's meter reads the sky round the sun at the plain roll-off (look fix exposure)",
++          "[Graphics][Shaders][remaster]")
++{
++    // The meter pass takes each sky tap through meterSkyLight (PhotoCamera.cpp
++    // SkyMeterLight) before its luminance, so the mean, the blocks' brightest
++    // tap and their brightest sky tap all read the sky at the plain roll-off;
++    // its constants come in as uniforms from PhotoCamera.hpp (EngineGL33_Camera.cpp).
++    const std::string meter = gl::PostShaderSource(gl::PostShader::Meter);
++    const size_t fn = meter.find("float meterSkyLight(vec3 pre, vec2 uv)");
++    REQUIRE(fn != std::string::npos);
++    const size_t use = meter.find("if (sky) pre *= meterSkyLight(pre, uv);");
++    REQUIRE(use != std::string::npos);
++    CHECK(use > fn);
++    const size_t lum = meter.find("float l = log2(", use);
++    CHECK(lum != std::string::npos);
++    for (const char* u :
++         {"uniform vec4 meterSky;", "uniform vec4 meterSun;", "uniform vec4 meterProj;", "uniform vec4 meterRect;"})
++    {
++        CAPTURE(u);
++        CHECK(meter.find(u) != std::string::npos);
++    }
++}
++
+ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[Graphics][Shaders][remaster]")
+ {
+     // The lit prelude stores with the same text the post passes decode with.

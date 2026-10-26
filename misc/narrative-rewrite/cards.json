@@ -1,0 +1,218 @@
+[
+  {
+    "id": "b01",
+    "bank": "kBio0Friendly",
+    "variant": 0,
+    "beat": "A farm worker grew up near {Place}, learned paths while tending crops, and wants the family to work its former land again. Show practical local knowledge, not an inherited mystical bond."
+  },
+  {
+    "id": "b02",
+    "bank": "kBio0Friendly",
+    "variant": 1,
+    "beat": "A furniture maker grew up hearing a grandfather talk about land lost near {Place}. The character cares about earning a living and is tired of the same family argument, but still wants the family home back."
+  },
+  {
+    "id": "b03",
+    "bank": "kBio0Friendly",
+    "variant": 2,
+    "beat": "A survey assistant near {Place} found an official boundary cutting through farms still in use. Refused to sign the false survey and lost the job. Straightforward choice, no grand statement about maps."
+  },
+  {
+    "id": "b04",
+    "bank": "kBio0Friendly",
+    "variant": 3,
+    "beat": "After the family was forced from land near {Place}, a literate shop worker spent years sending appeals and receiving no answer. Stopped paying for postage and started helping local opponents. Practical frustration, no symbolically worthless papers."
+  },
+  {
+    "id": "b05",
+    "bank": "kBio0Friendly",
+    "variant": 4,
+    "beat": "A shepherd near {Place} was blocked from customary grazing by a new fence. Cut a way through for the flock despite risk of a fine. Stubborn, focused on feeding animals, not a political speech."
+  },
+  {
+    "id": "b06",
+    "bank": "kBio0Friendly",
+    "variant": 5,
+    "beat": "A seasonal farm worker near {Place} learned the old boundaries from an uncle and stayed close to neighbors after the land dispute. Knows which households offer work or a meal. Sociable, wants to return for harvest."
+  },
+  {
+    "id": "b07",
+    "bank": "kBio0Hostile",
+    "variant": 0,
+    "beat": "A career quartermaster near {Place} administered disputed farmland as a routine posting. Requisitioned local produce to keep soldiers fed and sent money home. Practical priorities, uneasy local consequences; no all-knowing moral judgment."
+  },
+  {
+    "id": "b08",
+    "bank": "kBio0Hostile",
+    "variant": 1,
+    "beat": "An officer came from a family that helped survey land near {Place}. Grew up expecting a commission and wants to match a parent's reputation. Uses inherited maps without asking residents about old claims."
+  },
+  {
+    "id": "b09",
+    "bank": "kBio0Hostile",
+    "variant": 2,
+    "beat": "A military engineer was posted near {Place}, trusted official maps, and dismissed residents' boundary corrections. Wants an efficient road and treats disputes as delays. Show a concrete professional blind spot."
+  },
+  {
+    "id": "b10",
+    "bank": "kBio0Hostile",
+    "variant": 3,
+    "beat": "A district administrator near {Place} requested a field posting for advancement. Ordered disputed land fenced because headquarters wanted a completed report. Ambition and impatience, no cryptic file metaphor."
+  },
+  {
+    "id": "b11",
+    "bank": "kBio0Hostile",
+    "variant": 4,
+    "beat": "An officer spent eleven years escorting survey teams before the posting near {Place}. Learned to stop work when a crowd gathered and talk before moving on. Experienced and pragmatic, not uniformly evil."
+  },
+  {
+    "id": "b12",
+    "bank": "kBio0Hostile",
+    "variant": 5,
+    "beat": "An officer near {Place} refused family land claims without stamped ownership papers. Keeps tidy appointments and asks petitioners for copies they cannot obtain. Believes procedure is fair; show what this means in practice."
+  },
+  {
+    "id": "b13",
+    "bank": "kBio1Friendly",
+    "variant": 0,
+    "beat": "A teacher near {Place} grew up hearing promises made in the agreement. Later had to explain new restrictions to pupils whose parents were stopped on the road. Wants school life to resume, feels responsible for neighbors."
+  },
+  {
+    "id": "b14",
+    "bank": "kBio1Friendly",
+    "variant": 1,
+    "beat": "As a child, the character was lifted onto a parent's shoulders at {Place} to hear the agreement announced. Later watched guards turn neighbors away. Lost trust in official promises but still hopes to travel freely."
+  },
+  {
+    "id": "b15",
+    "bank": "kBio1Friendly",
+    "variant": 2,
+    "beat": "A bicycle repairer near {Place} had a father who repeatedly explained which agreement clause was broken. Knows the clause but dislikes family political arguments. Helps neighbors get around restrictions using repaired bicycles."
+  },
+  {
+    "id": "b16",
+    "bank": "kBio1Friendly",
+    "variant": 3,
+    "beat": "A clerk near {Place} was told to change records after the agreement failed. Refused, left the office, and took knowledge of local files. Has useful administrative experience, not a vague paperwork punchline."
+  },
+  {
+    "id": "b17",
+    "bank": "kBio1Friendly",
+    "variant": 4,
+    "beat": "A tailor born around the failure of the agreement near {Place} grew up with family trips repeatedly cancelled. Wants reliable travel for trade and visits to relatives. A modest everyday ambition rather than generational destiny."
+  },
+  {
+    "id": "b18",
+    "bank": "kBio1Friendly",
+    "variant": 5,
+    "beat": "A water carrier near {Place} passed guards twice daily for years under the restrictions. Chatted with them and learned shift times. Lost the work after a new permit rule. Friendly and observant; skill comes from the job."
+  },
+  {
+    "id": "b19",
+    "bank": "kBio1Hostile",
+    "variant": 0,
+    "beat": "An officer signed restrictions following the failed agreement at {Place}. Wanted quiet roads and thought written complaints could wait. Later faced angry relatives while off duty. Show limited perspective, not a polished moral."
+  },
+  {
+    "id": "b20",
+    "bank": "kBio1Hostile",
+    "variant": 1,
+    "beat": "An officer put up road barriers near {Place} after the agreement failed. The posting seemed safe, and the character wanted to keep it. A relative's shop benefited from soldiers buying supplies. Self-interest with everyday ties."
+  },
+  {
+    "id": "b21",
+    "bank": "kBio1Hostile",
+    "variant": 2,
+    "beat": "An administrative officer near {Place} rewrote permits after the agreement failed. Learned that small changes to forms could deny access without sending a patrol. Likes being useful to superiors. Concrete institutional coercion, no aphorism."
+  },
+  {
+    "id": "b22",
+    "bank": "kBio1Hostile",
+    "variant": 3,
+    "beat": "An officer ran road inspections near {Place} after the agreement failed. Recognized regular drivers, sometimes waved them through, but delayed strangers. Wanted predictable shifts and fewer arguments. Mixed conduct, a plausible working routine."
+  },
+  {
+    "id": "b23",
+    "bank": "kBio1Hostile",
+    "variant": 4,
+    "beat": "An officer near {Place} keeps the original agreement and unfolds it for visitors to defend new restrictions. Rehearsed explanation, defensive when asked about actual enforcement. Show the performance through a plain action."
+  },
+  {
+    "id": "b24",
+    "bank": "kBio1Hostile",
+    "variant": 5,
+    "beat": "An officer was posted near {Place} to enforce the failed agreement. Kept requesting a transfer to be closer to family and received refusals. Resents the posting yet follows orders. A clear personal tension."
+  },
+  {
+    "id": "b25",
+    "bank": "kBio2Friendly",
+    "variant": 0,
+    "beat": "A radio repairer grew up hearing veterans discuss fighting at {Place}. Knows local routes and can fix equipment, but had little weapons training before joining. Curious and practical; avoid claiming live campaign skills or achievements."
+  },
+  {
+    "id": "b26",
+    "bank": "kBio2Friendly",
+    "variant": 1,
+    "beat": "Two uncles were caught in the fighting at {Place}; only one returned. The survivor avoids talking about it, and the character eventually stopped asking. Family relationship and unresolved worry; avoid ambiguous ritual gestures."
+  },
+  {
+    "id": "b27",
+    "bank": "kBio2Friendly",
+    "variant": 2,
+    "beat": "The character was carried out of {Place} through an orchard as a child during fighting. Later worked picking fruit and recognized the escape route. Chose to join rather than leave again. Concrete memory, no symbolic orchard."
+  },
+  {
+    "id": "b28",
+    "bank": "kBio2Friendly",
+    "variant": 3,
+    "beat": "A shop worker helped neighbors list people missing after fighting at {Place}. Went door to door correcting names and asking who had returned. Joined because some neighbors remained missing. Practical care, no announced symbolism in a folded list."
+  },
+  {
+    "id": "b29",
+    "bank": "kBio2Friendly",
+    "variant": 4,
+    "beat": "The character's mother escaped the fighting at {Place} with two children and no shoes, then would not discuss it. Learned pieces from neighbors. Became a shoemaker and kept contact with those neighbors. Understated family concern, no tidy trauma-to-skill moral."
+  },
+  {
+    "id": "b30",
+    "bank": "kBio2Friendly",
+    "variant": 5,
+    "beat": "The character was a year too young to help during the fighting at {Place}. Later kept volunteering for local defense drills to prove useful. Eager and impatient; older volunteers had to slow the practice down."
+  },
+  {
+    "id": "b31",
+    "bank": "kBio2Hostile",
+    "variant": 0,
+    "beat": "An officer commanded a nearby sector during the fighting at {Place}. Wrote an official report calling it a policing operation without visiting the damaged streets. Trusted subordinate reports and wanted the investigation finished quickly."
+  },
+  {
+    "id": "b32",
+    "bank": "kBio2Hostile",
+    "variant": 1,
+    "beat": "An officer entered {Place} after the fighting and remembers wet boots and exhausted troops. Wrote a cleaner account for headquarters that left out confused orders. Embarrassment and professional self-protection, no timeline needing a particular event variant."
+  },
+  {
+    "id": "b33",
+    "bank": "kBio2Hostile",
+    "variant": 2,
+    "beat": "An officer lost a brother in fighting at {Place} and requested a posting nearby. Keeps writing to family about the town while avoiding the battle itself. Grief explains the request; don't turn it into a verdict about revenge."
+  },
+  {
+    "id": "b34",
+    "bank": "kBio2Hostile",
+    "variant": 3,
+    "beat": "An officer arrived near {Place} after the fighting to inspect damage. Approved road repairs first and delayed residents' claims for compensation. Wanted transport moving before the next inspection. Mundane priorities with clear consequences; do not require burning."
+  },
+  {
+    "id": "b35",
+    "bank": "kBio2Hostile",
+    "variant": 4,
+    "beat": "An officer received a decoration for bringing a supply column through near {Place} after fighting. The citation omitted delays caused by wrong orders. Keeps the ribbon and avoids discussing the delays. No exact days, relief claims, or praise for lateness."
+  },
+  {
+    "id": "b36",
+    "bank": "kBio2Hostile",
+    "variant": 5,
+    "beat": "An officer kept photographs of damage after fighting at {Place} for teaching recruits. Pointed out blocked roads and poor convoy spacing, skipping questions about residents. A concrete training habit and limited priorities, not a grand philosophical ending."
+  }
+]

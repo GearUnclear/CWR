@@ -1,0 +1,5 @@
+ce-latest
+source: D:/Arma_CWA/tmp/ce-latest
+remote: https://github.com/ofpisnotdead-com/CWR-CE.git
+HEAD: aa522583b59025921340c68122692154902d0dbf Initialize terrain slopes outside the map (2026-10-07 03:23:59 +0200)
+ce-latest.patch = git diff HEAD; ce-latest-untracked.patch = untracked files as new-file diffs

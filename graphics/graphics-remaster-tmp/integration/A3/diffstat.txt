@@ -1,0 +1,42 @@
+ .../engine/Poseidon/Graphics/Core/GpuTimings.cpp   |  58 ++-
+ .../engine/Poseidon/Graphics/Core/GpuTimings.hpp   |  74 ++-
+ .../Poseidon/Graphics/Remaster/FeatureSwitches.cpp |   5 +-
+ .../engine/Poseidon/Graphics/Remaster/LightRig.hpp |   3 +-
+ .../engine/Poseidon/Graphics/Remaster/README.md    |  10 +-
+ .../Graphics/Remaster/research/INTEGRATION-PLAN.md |  86 +++-
+ arma_CWR/engine/PoseidonGL33/EngineGL33.hpp        |  39 ++
+ .../engine/PoseidonGL33/EngineGL33_Lighting.hpp    |  27 ++
+ arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp | 514 +++++++++++++--------
+ .../engine/PoseidonGL33/EngineGL33_PostShaders.cpp |  57 ++-
+ arma_CWR/tests/rendering/captures/README.md        |   2 +-
+ arma_CWR/tests/rendering/captures/make_pairs.py    |  14 +-
+ .../tests/rendering/captures/summarize_timing.py   |   6 +-
+ arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt |   1 +
+ .../engine/Poseidon/Graphics/test_gpu_timings.cpp  |  96 +++-
+ .../Poseidon/Graphics/test_remaster_lighting.cpp   |  36 +-
+ roadmap/roadmap.yaml                               |   1 +
+ 17 files changed, 783 insertions(+), 246 deletions(-)
+ M arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+ M arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+ M arma_CWR/tests/rendering/captures/README.md
+ M arma_CWR/tests/rendering/captures/make_pairs.py
+ M arma_CWR/tests/rendering/captures/summarize_timing.py
+ M arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+ M roadmap/roadmap.yaml
+?? arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+?? arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+?? arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+  106 arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+  107 arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+  303 arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+  516 total

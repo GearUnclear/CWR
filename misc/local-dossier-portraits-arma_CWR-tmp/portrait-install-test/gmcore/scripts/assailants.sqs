@@ -1,0 +1,31 @@
+; Issue #42. One global incident clock, in eligible simulation seconds.
+; Script text, callback, countdown and last tick serialize with the campaign.
+; Native records own bodies/groups; resuming never equips or panics again.
+@GM_CI_READY
+@GM_CIV_READY
+GM_AS_ROLL = {random 1}
+GM_AS_REMAINING = gmAssailantInterval ([] call GM_AS_ROLL)
+GM_AS_LAST = time
+GM_AS_TICKS = 0
+GM_AS_fnBegin = {gmAsBody = _this select 0; gmAsMode = _this select 1; gmAsActor = _this select 2; gmAsZone = _this select 3; gmAsOK = gmAssailantRegister [gmAsBody, gmAsMode, gmAsActor, gmAsZone]; if (gmAsOK) then {[gmZoneIndex gmAsZone] call GM_fnPanicStart; gmAsText = "An armed civilian has begun attacking people."; if (gmAsMode == "RESISTER") then {gmAsText = "A civilian drew a pistol in retaliation for extortion."}; gmJournalNote [gmAsText, gmAsZone, "danger"]}; gmAsOK}
+GM_CI_ON_RESIST = {[_this select 0, "RESISTER", _this select 1, _this select 2] call GM_AS_fnBegin}
+; Candidates come only from existing ambient groups, deduplicated across
+; overlapping towns. No interaction profile allocation or RNG per town.
+GM_AS_fnCandidates = {gmAsCandidates = []; gmAsGi = 0; while {gmAsGi < count GM_CIV_GROUPS} do {gmAsZn = GM_CIV_GROUP_ZONE select gmAsGi; gmAsZi = gmZoneIndex gmAsZn; if (gmAsZi >= 0) then {if ((((gmZone gmAsZi) select GM_Z_TYPE) == "CITY") and ((aP distance ((gmZone gmAsZi) select GM_Z_POS)) <= 300) and (not (gmAsZn in GM_PANIC_ZONES))) then {{gmAsU = _x; gmAsPending = (gmAsU == gmCiMenuBody) or (gmAsU == gmCiConfirmBody); if ((count GM_CI_REQUEST) > 0) then {gmAsPending = gmAsPending or (gmAsU == (GM_CI_REQUEST select 0))}; if (not (isNil "GM_SHK_ACTIVE")) then {if (GM_SHK_ACTIVE) then {gmAsPending = gmAsPending or (gmAsU == GM_SHK_VICTIM)}}; if ((not gmAsPending) and ((aP distance gmAsU) <= 300) and (gmAssailantEligible [gmAsU, "ROGUE"])) then {gmAsSeen = false; {if ((_x select 0) == gmAsU) then {gmAsSeen = true}} forEach gmAsCandidates; if (not gmAsSeen) then {gmAsCandidates = gmAsCandidates + [[gmAsU, gmAsZn]]}}} forEach (units (GM_CIV_GROUPS select gmAsGi))}}; gmAsGi = gmAsGi + 1}; gmAsCandidates}
+GM_AS_READY = true
+#loop
+~1
+GM_AS_TICKS = GM_AS_TICKS + 1
+gmAsDt = time - GM_AS_LAST
+GM_AS_LAST = time
+gmAsPool = [] call GM_AS_fnCandidates
+GM_AS_REMAINING = gmAssailantAdvance [GM_AS_REMAINING, gmAsDt, (count gmAsPool) > 0]
+? (count gmAsPool) == 0 : goto "loop"
+? GM_AS_REMAINING > 0 : goto "loop"
+gmAsIndex = random (count gmAsPool)
+gmAsPick = gmAsPool select (gmAsIndex - (gmAsIndex mod 1))
+gmAsStarted = [gmAsPick select 0, "ROGUE", objNull, gmAsPick select 1] call GM_AS_fnBegin
+; Reset once, even if admission failed; never bank overdue incidents.
+GM_AS_REMAINING = gmAssailantInterval ([] call GM_AS_ROLL)
+? gmAsStarted : hint "An armed civilian has turned on people nearby. Take cover."
+goto "loop"

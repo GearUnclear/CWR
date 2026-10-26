@@ -1,0 +1,717 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
+index e7c687a..f2c0c8b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
+@@ -78,7 +78,7 @@ void Downsample(const float* src, int size, float cellSize, int maxSize, std::ve
+ // visible step when the sun is low. Steps one texel at a time near the start,
+ // then grows geometrically out to maxDistance.
+ float MarchHorizon(const std::vector<float>& h, int size, float cell, int x, int z, float dx, float dz,
+-                   float maxDistance)
++                   float maxDistance, const std::vector<float>* occ = nullptr)
+ {
+     const float h0 = h[static_cast<size_t>(z) * size + x];
+     const float limit = static_cast<float>(size - 1);
+@@ -90,7 +90,7 @@ float MarchHorizon(const std::vector<float>& h, int size, float cell, int x, int
+         const float fz = static_cast<float>(z) + dz * dist / cell;
+         if (fx < 0.0f || fz < 0.0f || fx > limit || fz > limit)
+             break;
+-        const float t = (SampleHeight(h, size, fx, fz) - h0) / dist;
++        const float t = (SampleHeight(occ ? *occ : h, size, fx, fz) - h0) / dist;
+         if (t > best)
+             best = t;
+         dist += std::max(cell, dist * 0.08f);
+@@ -195,6 +195,9 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
+     out.horizon.assign(static_cast<size_t>(TerrainHorizonMap::kLayers) * n * n * 4, 0);
+     out.skyVisibility.assign(static_cast<size_t>(n) * n, 255);
+     out.height = h;
++    std::vector<float> occ;
++    if (options.occluders && n == size)
++        occ.assign(options.occluders, options.occluders + static_cast<size_t>(n) * n);
+ 
+     float dirX[TerrainHorizonMap::kDirections];
+     float dirZ[TerrainHorizonMap::kDirections];
+@@ -223,7 +226,8 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
+                 float visible = 0.0f;
+                 for (int i = 0; i < TerrainHorizonMap::kDirections; ++i)
+                 {
+-                    const float deg = MarchHorizon(h, n, cell, x, z, dirX[i], dirZ[i], options.maxDistance);
++                    const float deg = MarchHorizon(h, n, cell, x, z, dirX[i], dirZ[i], options.maxDistance,
++                                                   occ.empty() ? nullptr : &occ);
+                     angles[static_cast<size_t>(i) * texels + t] = deg;
+                     // Cosine-weighted sky seen above a horizon at `deg`: cos^2.
+                     const float c = std::cos(std::max(0.0f, deg) / kDegPerRad);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
+index ae65ff8..e7c6a53 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
+@@ -50,6 +50,19 @@ struct TerrainHorizonMap
+     // the tint never changes how bright the bounce is, only its colour. Empty
+     // when no ground colours were given (the shader then uses a neutral tint).
+     std::vector<float> groundTint;
++    // HFRT research prototype: the canopy of the landscape objects (trees,
++    // bushes, forests, buildings, rocks) rasterised onto the same grid, size *
++    // size pairs (top of the tallest object covering the texel, ASL metres;
++    // occluder density 0..1). Empty when not built.
++    std::vector<float> canopy;
++    // HFRT research v5: the same canopy on a finer, cell-aligned grid (texel j
++    // covers [j, j+1) * size * cellSize / canopyFineSize), every mip level
++    // concatenated as RG16 pairs: r = canopy height above the terrain / 100 m
++    // (max over the covered children), g = occluder density (mean). Empty when
++    // not built (CWR_HFRT_CANOPY_RES unset).
++    std::vector<std::uint16_t> canopyFine;
++    int canopyFineSize = 0;
++    int canopyFineLevels = 0;
+ 
+     bool Valid() const { return size > 1 && cellSize > 0.0f; }
+     // Decoded horizon angle (degrees) of direction `dir` at texel (x, z).
+@@ -70,6 +83,10 @@ struct TerrainHorizonOptions
+     // Set to abandon a build early (the landscape changed, the game quits);
+     // the builder then returns false. Checked once per row.
+     const std::atomic<bool>* cancel = nullptr;
++    // HFRT research: optional occluder heights on the same grid (terrain with
++    // the landscape objects' canopy folded in). Receivers stay on the terrain;
++    // the march compares against these. Ignored when the grid is downsampled.
++    const float* occluders = nullptr;
+ };
+ 
+ std::uint16_t EncodeHorizonDeg(float deg);
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+index 6e50129..977d3e4 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+@@ -4,6 +4,9 @@
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
++#include <Poseidon/World/Scene/Object.hpp>
++#include <Poseidon/World/MapTypes.hpp>
++#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+ #include <Poseidon/Foundation/Framework/Log.hpp>
+ 
+ #include <algorithm>
+@@ -11,6 +14,7 @@
+ #include <chrono>
+ #include <cmath>
+ #include <cstdint>
++#include <cstdlib>
+ #include <cstring>
+ #include <future>
+ #include <memory>
+@@ -193,6 +197,399 @@ std::vector<float> ExpandGroundColors(const GroundCells& cells, int range, float
+     }
+     return rgb;
+ }
++
++// ---------------------------------------------------------------------------
++// HFRT research prototype: canopy heightfield. Every landscape object that can
++// shade the ground at a distance (trees, bushes, forest blocks, buildings,
++// rocks) is rasterised top-down onto the terrain grid: per texel the top of the
++// tallest object over it and an occluder density (coverage x opacity), so the
++// shaders can trace sun shadows and sky occlusion of tree lines and forests far
++// beyond the shadow maps.
++struct CanopyItem
++{
++    float cx = 0.0f, cz = 0.0f; // footprint centre (world)
++    float ux = 1.0f, uz = 0.0f; // unit axis 1 of the footprint
++    float vx = 0.0f, vz = 1.0f; // unit axis 2
++    float a = 0.0f, b = 0.0f;   // half extents along u, v
++    float top = 0.0f;           // world height of the object's top
++    float density = 0.0f;       // opacity of a fully covered texel
++    bool ellipse = false;       // crowns: the ellipse inscribed in the rectangle
++    std::vector<float> hull;    // optional convex hull (x, z pairs, CCW)
++};
++
++float CanopyDensity(MapType type, bool& ellipse)
++{
++    ellipse = false;
++    switch (type)
++    {
++        case MapTree:
++            ellipse = true;
++            return 0.8f;
++        case MapSmallTree:
++            ellipse = true;
++            return 0.65f;
++        case MapBush:
++            ellipse = true;
++            return 0.5f;
++        case MapForestBorder:
++        case MapForestTriangle:
++        case MapForestSquare:
++            return 0.95f;
++        case MapBuilding:
++        case MapHouse:
++        case MapChurch:
++        case MapChapel:
++        case MapBunker:
++        case MapFortress:
++        case MapViewTower:
++        case MapLighthouse:
++        case MapFuelstation:
++        case MapHospital:
++        case MapRock:
++            return 1.0f;
++        default:
++            return 0.0f;
++    }
++}
++
++std::vector<float> ConvexHull(std::vector<float> pts)
++{
++    const size_t n = pts.size() / 2;
++    if (n < 3)
++        return {};
++    std::vector<std::pair<float, float>> p(n);
++    for (size_t i = 0; i < n; ++i)
++        p[i] = {pts[i * 2], pts[i * 2 + 1]};
++    std::sort(p.begin(), p.end());
++    p.erase(std::unique(p.begin(), p.end()), p.end());
++    if (p.size() < 3)
++        return {};
++    auto cross = [](const std::pair<float, float>& o, const std::pair<float, float>& a, const std::pair<float, float>& b)
++    { return (a.first - o.first) * (b.second - o.second) - (a.second - o.second) * (b.first - o.first); };
++    std::vector<std::pair<float, float>> h(2 * p.size());
++    size_t k = 0;
++    for (size_t i = 0; i < p.size(); ++i)
++    {
++        while (k >= 2 && cross(h[k - 2], h[k - 1], p[i]) <= 0.0f)
++            --k;
++        h[k++] = p[i];
++    }
++    for (size_t i = p.size() - 1, t = k + 1; i > 0; --i)
++    {
++        while (k >= t && cross(h[k - 2], h[k - 1], p[i - 1]) <= 0.0f)
++            --k;
++        h[k++] = p[i - 1];
++    }
++    h.resize(k - 1);
++    std::vector<float> out;
++    out.reserve(h.size() * 2);
++    for (const auto& q : h)
++    {
++        out.push_back(q.first);
++        out.push_back(q.second);
++    }
++    return out;
++}
++
++// Main thread: one footprint per occluding landscape object.
++std::vector<CanopyItem> GatherCanopy(const Landscape& land, int& nObjects)
++{
++    std::vector<CanopyItem> items;
++    nObjects = 0;
++    const int n = land.GetLandRange();
++    for (int z = 0; z < n; ++z)
++    {
++        for (int x = 0; x < n; ++x)
++        {
++            const ObjectList& list = land.GetObjects(z, x);
++            for (int i = 0; i < list.Size(); ++i)
++            {
++                Object* obj = list[i];
++                if (!obj || obj->GetType() != Primary)
++                    continue;
++                LODShapeWithShadow* shape = obj->GetShape();
++                if (!shape)
++                    continue;
++                ++nObjects;
++                bool ellipse = false;
++                const float density = CanopyDensity(shape->GetMapType(), ellipse);
++                if (density <= 0.0f)
++                    continue;
++                const Vector3 mn = shape->Min();
++                const Vector3 mx = shape->Max();
++                const Vector3 c = (mn + mx) * 0.5f;
++                const Vector3 wc = obj->PositionModelToWorld(c);
++                const Vector3 wu = obj->PositionModelToWorld(Vector3(mx.X(), c.Y(), c.Z())) -
++                                   obj->PositionModelToWorld(Vector3(mn.X(), c.Y(), c.Z()));
++                const Vector3 wv = obj->PositionModelToWorld(Vector3(c.X(), c.Y(), mx.Z())) -
++                                   obj->PositionModelToWorld(Vector3(c.X(), c.Y(), mn.Z()));
++                float top = -1e9f;
++                for (int k = 0; k < 8; ++k)
++                {
++                    const Vector3 corner((k & 1) ? mx.X() : mn.X(), (k & 2) ? mx.Y() : mn.Y(),
++                                         (k & 4) ? mx.Z() : mn.Z());
++                    top = std::max(top, obj->PositionModelToWorld(corner).Y());
++                }
++                CanopyItem it;
++                it.cx = wc.X();
++                it.cz = wc.Z();
++                const float lu = std::sqrt(wu.X() * wu.X() + wu.Z() * wu.Z());
++                const float lv = std::sqrt(wv.X() * wv.X() + wv.Z() * wv.Z());
++                if (lu < 0.2f || lv < 0.2f)
++                    continue;
++                it.ux = wu.X() / lu;
++                it.uz = wu.Z() / lu;
++                it.vx = wv.X() / lv;
++                it.vz = wv.Z() / lv;
++                // Crowns are rounder and a little smaller than their boxes.
++                const float shrink = ellipse ? 0.85f : 1.0f;
++                it.a = 0.5f * lu * shrink;
++                it.b = 0.5f * lv * shrink;
++                it.top = top;
++                it.density = density;
++                it.ellipse = ellipse;
++                if (!ellipse)
++                {
++                    // Forest triangles and odd footprints: the hull of the
++                    // geometry LOD when it is loaded, else the box.
++                    const Shape* geo = shape->GeometryLevel();
++                    if (geo && geo->NPos() >= 3)
++                    {
++                        std::vector<float> pts;
++                        pts.reserve(geo->NPos() * 2);
++                        for (int k = 0; k < geo->NPos(); ++k)
++                        {
++                            const Vector3 w = obj->PositionModelToWorld(geo->Pos(k));
++                            pts.push_back(w.X());
++                            pts.push_back(w.Z());
++                        }
++                        it.hull = ConvexHull(std::move(pts));
++                    }
++                }
++                items.push_back(std::move(it));
++            }
++        }
++    }
++    return items;
++}
++
++bool CanopyInside(const CanopyItem& it, float px, float pz)
++{
++    if (!it.hull.empty())
++    {
++        const size_t n = it.hull.size() / 2;
++        for (size_t i = 0; i < n; ++i)
++        {
++            const float x0 = it.hull[i * 2], z0 = it.hull[i * 2 + 1];
++            const float x1 = it.hull[((i + 1) % n) * 2], z1 = it.hull[((i + 1) % n) * 2 + 1];
++            if ((x1 - x0) * (pz - z0) - (z1 - z0) * (px - x0) < 0.0f)
++                return false;
++        }
++        return true;
++    }
++    const float dx = px - it.cx, dz = pz - it.cz;
++    const float s = (dx * it.ux + dz * it.uz) / it.a;
++    const float t = (dx * it.vx + dz * it.vz) / it.b;
++    return it.ellipse ? s * s + t * t <= 1.0f : (std::fabs(s) <= 1.0f && std::fabs(t) <= 1.0f);
++}
++
++// Worker thread: rasterise the footprints, 4x4 samples per texel.
++std::vector<float> RasterizeCanopy(const std::vector<CanopyItem>& items, const std::vector<float>& heights, int range,
++                                   float grid)
++{
++    const size_t cells = static_cast<size_t>(range) * range;
++    std::vector<float> top(heights.begin(), heights.begin() + cells);
++    std::vector<float> trans(cells, 1.0f);
++    for (const CanopyItem& it : items)
++    {
++        float minx, maxx, minz, maxz;
++        if (!it.hull.empty())
++        {
++            minx = maxx = it.hull[0];
++            minz = maxz = it.hull[1];
++            for (size_t i = 0; i + 1 < it.hull.size(); i += 2)
++            {
++                minx = std::min(minx, it.hull[i]);
++                maxx = std::max(maxx, it.hull[i]);
++                minz = std::min(minz, it.hull[i + 1]);
++                maxz = std::max(maxz, it.hull[i + 1]);
++            }
++        }
++        else
++        {
++            const float ex = std::fabs(it.ux) * it.a + std::fabs(it.vx) * it.b;
++            const float ez = std::fabs(it.uz) * it.a + std::fabs(it.vz) * it.b;
++            minx = it.cx - ex;
++            maxx = it.cx + ex;
++            minz = it.cz - ez;
++            maxz = it.cz + ez;
++        }
++        const int x0 = std::max(0, static_cast<int>(std::floor(minx / grid - 0.5f)));
++        const int x1 = std::min(range - 1, static_cast<int>(std::ceil(maxx / grid + 0.5f)));
++        const int z0 = std::max(0, static_cast<int>(std::floor(minz / grid - 0.5f)));
++        const int z1 = std::min(range - 1, static_cast<int>(std::ceil(maxz / grid + 0.5f)));
++        for (int z = z0; z <= z1; ++z)
++        {
++            for (int x = x0; x <= x1; ++x)
++            {
++                int inside = 0;
++                for (int sz = 0; sz < 4; ++sz)
++                    for (int sx = 0; sx < 4; ++sx)
++                        inside += CanopyInside(it, (x + (sx + 0.5f) * 0.25f - 0.5f) * grid,
++                                               (z + (sz + 0.5f) * 0.25f - 0.5f) * grid)
++                                      ? 1
++                                      : 0;
++                if (!inside)
++                    continue;
++                const size_t idx = static_cast<size_t>(z) * range + x;
++                top[idx] = std::max(top[idx], it.top);
++                trans[idx] *= 1.0f - it.density * (static_cast<float>(inside) / 16.0f);
++            }
++        }
++    }
++    std::vector<float> out(cells * 2);
++    for (size_t i = 0; i < cells; ++i)
++    {
++        out[i * 2] = top[i];
++        out[i * 2 + 1] = 1.0f - trans[i];
++    }
++    return out;
++}
++
++// HFRT research v5: the canopy at k texels per terrain cell (cell-aligned:
++// texel j covers [j, j+1) * grid / k), with a max/mean mip chain so the shader
++// can cone-trace it (coarser levels further from the receiver).
++constexpr float kCanopyFineRelMax = 100.0f; // metres above the terrain at r = 1
++
++struct FineCanopy
++{
++    std::vector<std::uint16_t> data;
++    int size = 0;
++    int levels = 0;
++};
++
++float BilinearHeight(const std::vector<float>& h, int range, float grid, float x, float z)
++{
++    const float fx = std::clamp(x / grid, 0.0f, static_cast<float>(range - 1));
++    const float fz = std::clamp(z / grid, 0.0f, static_cast<float>(range - 1));
++    const int x0 = std::min(static_cast<int>(fx), range - 2);
++    const int z0 = std::min(static_cast<int>(fz), range - 2);
++    const float tx = fx - static_cast<float>(x0), tz = fz - static_cast<float>(z0);
++    auto at = [&](int xx, int zz) { return h[static_cast<size_t>(zz) * range + xx]; };
++    return (at(x0, z0) * (1.0f - tx) + at(x0 + 1, z0) * tx) * (1.0f - tz) +
++           (at(x0, z0 + 1) * (1.0f - tx) + at(x0 + 1, z0 + 1) * tx) * tz;
++}
++
++FineCanopy RasterizeCanopyFine(const std::vector<CanopyItem>& items, const std::vector<float>& heights, int range,
++                               float grid, int k)
++{
++    FineCanopy out;
++    const int n = range * k;
++    const float c = grid / static_cast<float>(k);
++    const size_t cells = static_cast<size_t>(n) * n;
++    std::vector<float> rel(cells, 0.0f);
++    std::vector<float> trans(cells, 1.0f);
++    for (const CanopyItem& it : items)
++    {
++        float minx, maxx, minz, maxz;
++        if (!it.hull.empty())
++        {
++            minx = maxx = it.hull[0];
++            minz = maxz = it.hull[1];
++            for (size_t i = 0; i + 1 < it.hull.size(); i += 2)
++            {
++                minx = std::min(minx, it.hull[i]);
++                maxx = std::max(maxx, it.hull[i]);
++                minz = std::min(minz, it.hull[i + 1]);
++                maxz = std::max(maxz, it.hull[i + 1]);
++            }
++        }
++        else
++        {
++            const float ex = std::fabs(it.ux) * it.a + std::fabs(it.vx) * it.b;
++            const float ez = std::fabs(it.uz) * it.a + std::fabs(it.vz) * it.b;
++            minx = it.cx - ex;
++            maxx = it.cx + ex;
++            minz = it.cz - ez;
++            maxz = it.cz + ez;
++        }
++        const float relTop =
++            std::clamp(it.top - BilinearHeight(heights, range, grid, it.cx, it.cz), 0.0f, kCanopyFineRelMax);
++        if (relTop < 0.5f)
++            continue;
++        const int x0 = std::max(0, static_cast<int>(std::floor(minx / c)));
++        const int x1 = std::min(n - 1, static_cast<int>(std::floor(maxx / c)));
++        const int z0 = std::max(0, static_cast<int>(std::floor(minz / c)));
++        const int z1 = std::min(n - 1, static_cast<int>(std::floor(maxz / c)));
++        for (int z = z0; z <= z1; ++z)
++        {
++            for (int x = x0; x <= x1; ++x)
++            {
++                int inside = 0;
++                for (int sz = 0; sz < 4; ++sz)
++                    for (int sx = 0; sx < 4; ++sx)
++                        inside += CanopyInside(it, (x + (sx + 0.5f) * 0.25f) * c, (z + (sz + 0.5f) * 0.25f) * c) ? 1 : 0;
++                if (!inside)
++                    continue;
++                const size_t idx = static_cast<size_t>(z) * n + x;
++                rel[idx] = std::max(rel[idx], relTop);
++                trans[idx] *= 1.0f - it.density * (static_cast<float>(inside) / 16.0f);
++            }
++        }
++    }
++    std::vector<float> den(cells);
++    for (size_t i = 0; i < cells; ++i)
++        den[i] = 1.0f - trans[i];
++    trans.clear();
++    trans.shrink_to_fit();
++
++    int levels = 1;
++    for (int s = n; s > 1; s = std::max(1, s / 2))
++        ++levels;
++    out.data.reserve(cells * 2 * 4 / 3 + 64);
++    auto enc = [](float v) { return static_cast<std::uint16_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 65535.0f)); };
++    int s = n;
++    for (int l = 0; l < levels; ++l)
++    {
++        const size_t m = static_cast<size_t>(s) * s;
++        for (size_t i = 0; i < m; ++i)
++        {
++            out.data.push_back(enc(rel[i] / kCanopyFineRelMax));
++            out.data.push_back(enc(den[i]));
++        }
++        if (s == 1)
++            break;
++        const int s2 = std::max(1, s / 2);
++        std::vector<float> rel2(static_cast<size_t>(s2) * s2, 0.0f);
++        std::vector<float> den2(static_cast<size_t>(s2) * s2, 0.0f);
++        for (int z = 0; z < s2; ++z)
++        {
++            for (int x = 0; x < s2; ++x)
++            {
++                float r = 0.0f, d = 0.0f;
++                for (int dz = 0; dz < 2; ++dz)
++                {
++                    for (int dx = 0; dx < 2; ++dx)
++                    {
++                        const int cx = std::min(s - 1, x * 2 + dx), cz = std::min(s - 1, z * 2 + dz);
++                        const size_t ci = static_cast<size_t>(cz) * s + cx;
++                        d += den[ci];
++                        if (den[ci] > 0.004f)
++                            r = std::max(r, rel[ci]);
++                    }
++                }
++                rel2[static_cast<size_t>(z) * s2 + x] = r;
++                den2[static_cast<size_t>(z) * s2 + x] = d * 0.25f;
++            }
++        }
++        rel = std::move(rel2);
++        den = std::move(den2);
++        s = s2;
++    }
++    out.size = n;
++    out.levels = levels;
++    return out;
++}
+ } // namespace
+ 
+ void UpdateTerrainLighting(Landscape* land)
+@@ -242,12 +639,33 @@ void UpdateTerrainLighting(Landscape* land)
+     // Texture headers load on this (the main) thread, once per texture cell;
+     // the worker expands the cells to the terrain grid.
+     GroundCells cells = GroundColors(*land);
++    // HFRT research: the occluding landscape objects, gathered on the main
++    // thread (the object index belongs to it), rasterised by the worker.
++    int nObjects = 0;
++    const auto tg0 = std::chrono::steady_clock::now();
++    std::vector<CanopyItem> canopyItems = GatherCanopy(*land, nObjects);
++    LOG_INFO(Graphics, "HFRT canopy: {} occluders of {} landscape objects gathered in {} ms", canopyItems.size(),
++             nObjects,
++             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tg0).count());
++
++    if (const char* env = std::getenv("CWR_HFRT_CANOPY_HORIZON"); env && env[0] == '1')
++        LOG_INFO(Graphics, "HFRT: canopy folded into the horizon map occluders (CWR_HFRT_CANOPY_HORIZON=1)");
++    // HFRT research v5: fine canopy, k texels per terrain cell (0 = off).
++    int fineK = 0;
++    if (const char* env = std::getenv("CWR_HFRT_CANOPY_RES"); env && env[0])
++        fineK = std::clamp(std::atoi(env), 0, 16);
++    while (fineK > 1 && range * fineK > 8192)
++        --fineK;
++    if (fineK > 0)
++        LOG_INFO(Graphics, "HFRT: fine canopy requested, {} texels per {} m cell ({}x{} at {} m)", fineK, grid,
++                 range * fineK, range * fineK, grid / static_cast<float>(fineK));
+ 
+     Build build;
+     std::shared_ptr<std::atomic<bool>> cancel = build.cancel;
+     build.result = std::async(
+         std::launch::async,
+-        [heights = std::move(heights), cells = std::move(cells), cancel, range, grid]()
++        [heights = std::move(heights), cells = std::move(cells), canopyItems = std::move(canopyItems), cancel, range,
++         grid, fineK]()
+         {
+             const auto t0 = std::chrono::steady_clock::now();
+             const std::vector<float> ground = ExpandGroundColors(cells, range, grid);
+@@ -255,9 +673,39 @@ void UpdateTerrainLighting(Landscape* land)
+             remaster::TerrainHorizonOptions options;
+             options.cancel = cancel.get();
+             BuildResult r;
++            std::vector<float> canopy = RasterizeCanopy(canopyItems, heights, range, grid);
++            // HFRT research, the cheap production candidate: fold the canopy
++            // into the horizon map's occluders (receivers stay on the terrain),
++            // so the shipped shader gets forest shadows and forest-floor sky
++            // occlusion at no runtime cost. Opt-in for A/B runs.
++            std::vector<float> occluders;
++            const char* env = std::getenv("CWR_HFRT_CANOPY_HORIZON");
++            if (env && env[0] == '1')
++            {
++                occluders.resize(heights.size());
++                for (size_t i = 0; i < heights.size(); ++i)
++                {
++                    const float top = canopy[i * 2], dens = canopy[i * 2 + 1];
++                    occluders[i] = std::max(heights[i], heights[i] + (top - heights[i]) * dens);
++                }
++                options.occluders = occluders.data();
++            }
+             if (remaster::BuildTerrainHorizonMap(heights.data(), range, grid, options, *map,
+                                                  ground.empty() ? nullptr : ground.data()))
++            {
++                if (map->size == range)
++                {
++                    map->canopy = std::move(canopy);
++                    if (fineK > 0)
++                    {
++                        FineCanopy fine = RasterizeCanopyFine(canopyItems, heights, range, grid, fineK);
++                        map->canopyFine = std::move(fine.data);
++                        map->canopyFineSize = fine.size;
++                        map->canopyFineLevels = fine.levels;
++                    }
++                }
+                 r.map = std::move(map);
++            }
+             r.ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+             return r;
+         });
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..dc8c8d4 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -16,6 +16,7 @@
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <cstring>
+ 
+@@ -30,6 +31,14 @@ GLuint s_litUBO = 0;
+ // instead of jumping the whole field.
+ float s_cloudDrift[2] = {1830.0f, 970.0f};
+ float s_cloudDriftTime = -1.0f;
++// HFRT research prototype: the canopy heightfield (RG32F: top ASL, density) on
++// unit 6, and its 1x1 stand-in. Kept here so the prototype does not touch the
++// engine class layout.
++GLuint s_terrainCanopyTex = 0;
++GLuint s_dummyCanopyTex = 0;
++// HFRT research v5: the fine canopy (RG16, mip chain) on unit 8.
++GLuint s_terrainCanopyFineTex = 0;
++GLuint s_dummyCanopyFineTex = 0;
+ 
+ constexpr float kCloudDeckAltitude = 1500.0f; // metres
+ constexpr float kCloudScale = 1.0f / 6000.0f; // noise tile = 6 km
+@@ -90,6 +99,10 @@ void EngineGL33::InitLightingResources()
+     _dummyHorizonTex = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_RGBA16, GL_RGBA, GL_UNSIGNED_SHORT, open);
+     const float heightSky[4] = {-1e6f, 1.0f, 1.0f, 1.0f}; // height, sky visibility, neutral ground tint
+     _dummyHeightTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA32F, GL_RGBA, GL_FLOAT, heightSky);
++    const float noCanopy[2] = {-1e6f, 0.0f};
++    s_dummyCanopyTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RG32F, GL_RG, GL_FLOAT, noCanopy);
++    const unsigned short noFine[2] = {0, 0};
++    s_dummyCanopyFineTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RG16, GL_RG, GL_UNSIGNED_SHORT, noFine);
+ 
+     const std::vector<std::uint8_t> noise = rm::BuildCloudNoise(256, 1);
+     glGenTextures(1, &_cloudNoiseTex);
+@@ -141,6 +154,10 @@ void EngineGL33::DeinitLightingResources()
+     delTex(_dummyDepthArray);
+     delTex(_dummyHorizonTex);
+     delTex(_dummyHeightTex);
++    delTex(s_terrainCanopyTex);
++    delTex(s_dummyCanopyTex);
++    delTex(s_terrainCanopyFineTex);
++    delTex(s_dummyCanopyFineTex);
+     delTex(_post.whiteTex);
+     delTex(_post.blackTex);
+     _post.unavailable = false;
+@@ -219,6 +236,8 @@ void EngineGL33::UploadTerrainHorizonMap()
+     };
+     delTex(_terrainHorizonTex);
+     delTex(_terrainHeightTex);
++    delTex(s_terrainCanopyTex);
++    delTex(s_terrainCanopyFineTex);
+     if (!_terrainMap || !_terrainMap->Valid())
+         return;
+     const rm::TerrainHorizonMap& m = *_terrainMap;
+@@ -256,6 +275,47 @@ void EngineGL33::UploadTerrainHorizonMap()
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+     glBindTexture(GL_TEXTURE_2D, 0);
++    if (m.canopy.size() == static_cast<size_t>(n) * n * 2)
++    {
++        glGenTextures(1, &s_terrainCanopyTex);
++        glBindTexture(GL_TEXTURE_2D, s_terrainCanopyTex);
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, n, n, 0, GL_RG, GL_FLOAT, m.canopy.data());
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        size_t covered = 0;
++        for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
++            covered += m.canopy[i * 2 + 1] > 0.05f ? 1 : 0;
++        LOG_INFO(Graphics, "GL33: HFRT canopy {}x{} uploaded, {} texels covered", n, n, covered);
++    }
++    if (m.canopyFineSize > 0 && !m.canopyFine.empty())
++    {
++        glGenTextures(1, &s_terrainCanopyFineTex);
++        glBindTexture(GL_TEXTURE_2D, s_terrainCanopyFineTex);
++        size_t off = 0;
++        int s = m.canopyFineSize;
++        for (int l = 0; l < m.canopyFineLevels; ++l)
++        {
++            glTexImage2D(GL_TEXTURE_2D, l, GL_RG16, s, s, 0, GL_RG, GL_UNSIGNED_SHORT, m.canopyFine.data() + off);
++            off += static_cast<size_t>(s) * s * 2;
++            s = std::max(1, s / 2);
++        }
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, m.canopyFineLevels - 1);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        size_t covered = 0;
++        const size_t n0 = static_cast<size_t>(m.canopyFineSize) * m.canopyFineSize;
++        for (size_t i = 0; i < n0; ++i)
++            covered += m.canopyFine[i * 2 + 1] > 3000 ? 1 : 0;
++        LOG_INFO(Graphics, "GL33: HFRT fine canopy {}x{} ({} levels) uploaded, {} texels covered", m.canopyFineSize,
++                 m.canopyFineSize, m.canopyFineLevels, covered);
++    }
+     GL33Bind::Invalidate();
+     LOG_INFO(Graphics, "GL33: terrain horizon map {}x{} at {} m uploaded", n, n, m.cellSize);
+ }
+@@ -273,6 +333,8 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    GL33Bind::Tex2D(kTerrainCanopyUnit, s_terrainCanopyTex ? s_terrainCanopyTex : s_dummyCanopyTex);
++    GL33Bind::Tex2D(kTerrainCanopyFineUnit, s_terrainCanopyFineTex ? s_terrainCanopyFineTex : s_dummyCanopyFineTex);
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e..b6fb475 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -23,6 +23,8 @@ constexpr unsigned int kLitBinding = 3;
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++constexpr int kTerrainCanopyUnit = 6; // HFRT research prototype
++constexpr int kTerrainCanopyFineUnit = 8; // HFRT research v5 (unit 7 is the upload unit)
+ 
+ // LitConstants vec4 slots; must match the GLSL block in s_psRemasterCommon.
+ namespace LitConst
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..aa93c37 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1692,7 +1692,9 @@ void EngineGL33::InitPixelShaders()
+             int unit;
+         } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+                            {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
++                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit},
++                           {"terrainCanopy", Poseidon::gl33lighting::kTerrainCanopyUnit},
++                           {"terrainCanopyFine", Poseidon::gl33lighting::kTerrainCanopyFineUnit}};
+         for (const auto& ls : litSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);

@@ -1,0 +1,19 @@
+docs: OCCUPIER-FORCES.md reconciled to the committed code of phases 1 to 5 and the air spike (the code wins)
+
+Sections 3.1 (the gate incl. the hull band, the ground birth chain as ten
+steps with the RoadRoute join, immediate re-source, the wait, the air
+re-plan placeholder, cancel unseen, the edge hold, legacy records on the
+chain; air births per AIR-SPIKE.md), 3.2 (dismount rule, columns,
+seated-man removal, Leftovers, the insertion and strike recipes, the
+3D unseen rule for aircraft), 5.1 and 12.1 (K without the settlement
+probe, open note), 5.5 (room caps, REINFORCE arrival, stragglers, the
+pending refund to the pool, hqLost settle, per-hull refunds), 6.1
+(informant exception), 6.3 (HQ candidate, final push, wave born cap),
+6.5 (retake minimum cap, the M1 grant), 6.6 (instrument layouts), 7.1
+(allocation order, no-hub case), 7.2 (occCapture as built), 9.1 (HQ as
+built), 9.2 (the lose clauses, test name), 11 (persisted fields), 12.2
+(test list), 16 (knob rows), 17 (the real open list), 18 (decision log
+entries for the escort column and the aircraft unseen rule).
+Reference: OFFSCREEN-CONTRACT.draft.md (phase 7 swaps it in).
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

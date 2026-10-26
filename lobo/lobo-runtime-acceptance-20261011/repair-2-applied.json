@@ -1,0 +1,37 @@
+{
+  "repair_version": "2026-10-11.2",
+  "rule_sha256": "1520e54c8b0c601887abcada96325a41ba4b0c361275d05090b684acaf0c0c53",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "apply",
+  "compatibility": "ud",
+  "changed_members": 3,
+  "archives": [
+    "lobo_mines",
+    "loboidfhelo",
+    "lobomig"
+  ],
+  "members": [
+    {
+      "member": "lobo_mines/scripts/ap_mine.sqs",
+      "before_sha256": "51e1a308c78042bf9c35d0aa220e118014a8ea7d276c4b00ef2dcf4e2fa86ad2",
+      "after_sha256": "b180df1ef00a1dd15ea5a8e04e3e45c9d818562b8716c305fec5a492579e7aec",
+      "before_bytes": 724,
+      "after_bytes": 724
+    },
+    {
+      "member": "loboidfhelo/uh60/fx/fastins.sqs",
+      "before_sha256": "141471c3e49180e5a9c804da8484e92e076529d05057cf179ec5b183fc976365",
+      "after_sha256": "462433133c0339e6069f03150fc56d11d1db52bb7b90308347b0eb856ab722ad",
+      "before_bytes": 1050,
+      "after_bytes": 1051
+    },
+    {
+      "member": "lobomig/mig23/scr/swingwing.sqs",
+      "before_sha256": "52600415a00634683750f96e30c9c1a5c2c93ed9eeb25dfd636ef9e72df9d982",
+      "after_sha256": "c78c62a0d6135a1aa782064046ab0b88ec3045ab49e56b51797924af34ecefa4",
+      "before_bytes": 388,
+      "after_bytes": 390
+    }
+  ],
+  "backup_manifest": "D:\\Arma_CWA\\@LoBo\\.ud-backups\\issue-69\\20261011T201747Z-5b12c00c\\manifest.json"
+}

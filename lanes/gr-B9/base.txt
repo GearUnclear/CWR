@@ -1,0 +1,8 @@
+lane: gr-B9
+source: D:/Arma_CWA_worktrees/gr-B9
+HEAD: 807ce4bf177b02815f1d7a803d57880cf34479bb
+subject: graphics: trees and buildings cast soft, contact-hardening sun shadows
+commit date: 2026-10-18 07:52:45 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 28
+binary files changed (content not in patch): none

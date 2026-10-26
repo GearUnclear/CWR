@@ -1,0 +1,4 @@
+﻿tank_gunner_interior__classic 97.6 103.3
+tank_gunner_interior__remastered 59.4 62.4
+placed_tank_gunner_interior__classic 97.6 103.3
+placed_tank_gunner_interior__remastered 59.3 62.4

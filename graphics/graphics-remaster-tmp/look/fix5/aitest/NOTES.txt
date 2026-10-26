@@ -1,0 +1,176 @@
+AITEST fixer, round 5: the AI sight and fog link's tests made real, plus its leftovers
+=====================================================================================
+
+Scratch copy: D:/Arma_CWA_worktrees/look-fix-seam (base tree 12117cf9, fec1075 + fix5/base.patch).
+Build build/look-fix-seam-rwdi, game dist/look-fix-seam-rwdi, junction RemasterUD-r5-aitest.
+Patch: fix.patch (8 files; the look_r5* capture/probe tests are excluded as instructed; copies of the
+probe test are kept here: look_r5_aitest_probe.test.sqf/.toml). Nothing committed, no branch.
+No fog look constant changed (MIST owns those).
+
+
+1. The test gap (critic r4 artefacts, AI link review)
+----------------------------------------------------
+Cause: the round 4 cases pin pure helpers only. Case "AI sight does not follow the render path"
+(test_volumetric_fog.cpp, was line 421) calls UpdateFogSightMedium directly, which never receives
+gate state, so it cannot fail. Nothing drove SimulateFogSight, the call the engine makes.
+
+Proof (mutation probe): I made SimulateFogSight drop AI sight when the engine's tuning has post
+effects off (one line, "if (!tuning.postEffects) SetFogSight(nullptr, nullptr)"), rebuilt the
+tests and ran them:
+  - old case "AI sight does not follow the render path": All tests passed (8 assertions).
+  - new [aisight] cases: 2 of 5 failed, 8 assertions (the end-to-end case, state "post effects
+    off", and the source contract, "render path state postEffects").
+The mutation was reverted (and the file re-touched and rebuilt; every binary used for the shots
+and the final test runs is the clean one).
+
+Change: new tests/unit/engine/Poseidon/World/test_fog_sight_link.cpp, tag [aisight] (also
+[remaster][fog]), registered in tests/unit/engine/Poseidon/CMakeLists.txt:
+  a. "the simulation step ignores every render path state": a real Landscape (64 x 64 cells of
+     50 m, a valley floor at 20 m between 90 m walls, setFog 0.3) and an engine (EngineDummy
+     subclass) that reports render path state; Poseidon::SimulateFogSight(&land) is called as
+     World::SimulateLandscape calls it. States, each in turn: post effects off; classic lighting
+     (remastered off, LightingRemasterActive false); the volFog switch off; fogQuality 0, fogSun
+     0.2, fogLights 0; every feature gate off with an interior view (GetFeatureGates); the renderer
+     published another drawn medium; the renderer drew nothing; a 300 m view distance
+     (ENGINE_CONFIG.tacticalZ); no renderer at all (GEngine null). AI medium fields and the
+     transmittance along a 1 km valley line must stay bit-identical (and below 0.97, so the mist
+     is really there).
+  b. "the simulation step's air is the drawn fog's for the same weather": with the engine's
+     fogDensity 0.5/1/2 x fogMist 0/0.5/1 and the renderer's own aridity 0 or 0.8, AI's medium and
+     transmittance equal the renderer's recipe (WorldFogInputs + aridity, ComputeFogMedium(in,
+     tuning, true)) exactly; WorldFogInputs(&land).fog == 0.3; at fog 0.6 both thicken and stay
+     equal.
+  c. "deterministic from synced state, rebuilt only when the ground changes": a second landscape
+     object with the same heights and weather, from a cold start with no renderer (a client),
+     gets a map with identical ground/floor/layer grids and a bit-identical medium and T; the
+     same step again keeps the map pointer; one changed height rebuilds the map; a copy of the
+     medium does not follow the next step; no island gives classic sight.
+  d. "the per-machine render inputs never reach AI's terms": viewDistance, the classic fog range,
+     aridity and the render-only knobs change no field AI's march reads.
+  e. "the engine's call path (source contract)": scans every .cpp/.hpp under engine/: only
+     VolumetricFog.* and TerrainLighting.* may call SetFogSight( / UpdateFogSightMedium( and only
+     WorldSetup.cpp may call SimulateFogSight( (so no renderer file and no script verb can set AI
+     sight). SimulateFogSight and WorldFogInputs read no render state (gates, drawn medium,
+     postEffects, SSAA, interior, frame counter, volFog, fogQuality; WorldFogInputs no GEngine).
+     World::SimulateLandscape calls SimulateFogSight(GLOB_LAND) after the sun recalculation,
+     GLOB_LAND->Simulate and SetFog; World::Simulate calls SimulateLandscape before PerformAI.
+     EntityAI::CalcVisibility multiplies vis by FogSightTransmittance under FogSightActive.
+     EngineGL33::UpdateFogMedium builds its medium from Poseidon::WorldFogInputs and
+     ComputeFogMedium(in, _lighting, on); the fog floor reads FogSightMapInUse.
+  The old case keeps its pure-helper role; a comment now says so and points at [aisight].
+  A static_assert pins that FogSightMedium() hands out a copy.
+
+
+2. Determinism and thread safety, again
+---------------------------------------
+Determinism: AI's medium reads only fog, rain, skyThrough, the sun's elevation and azimuth, night,
+the date (synced or derived from the synced clock) and the knobs fogDensity and fogMist; its map
+only the island's heights. No wall clock or frame counter enters (ComputeFogMedium and
+FogSightTransmittanceThrough checked; AI's march (FogSightExtinctionAt, MistShape) does not read
+mistNoise, so the drawn mist's banks are the shader's alone). Pinned by tests c and d. The in-game probe shows the
+remaining drift in a run is the mission clock: Tai 0.9293 -> 0.9282 over 90 frames of 09:30.
+Remaining per-machine inputs (unchanged from round 4): the debug knobs fogDensity and fogMist.
+Also noted: the map is rebuilt when SampleHeights changes; for ranges over 64 it samples a
+sparse diagonal pattern, so a single height edit off the pattern keeps the old map (the same rule
+as the terrain horizon map, so the drawn floor and AI stay on one map).
+
+Thread safety: unchanged verdict, safe today. BACKGROUND_AI is 0 (WorldInit.cpp 103): the
+simulation step, PerformAI (Target.cpp) and the renderer all run on the main thread, and only
+SimulateFogSight and ShutdownFogSight write the state. One hazard removed: FogSightMedium()
+returned a reference into the static state, which the next step rewrites; it now returns a copy
+(VolumetricFog.hpp/.cpp; the header documents the main-thread contract). The two callers (the
+renderer's drift warning and triFogSight) bind it to a const reference, so they keep working.
+If AI ever moves off the main thread, the sight state needs a snapshot handed over (for example
+an immutable shared state swapped atomically); FogSightMapInUse is already a shared pointer to an
+immutable map.
+
+
+3. Found on the way: the published drawn medium went stale in classic lighting
+-----------------------------------------------------------------------------
+Probe evidence (probe_1, before the fix, after triSetLighting "classic"):
+  state=classic t=3: Tai=0.9962 drawn=1 Tdrawn=0.9981
+  state=classic t=5: Tai=0.9422 drawn=1 Tdrawn=0.9668
+The renderer drew no volumetric fog, yet GetDrawnFogMedium still reported the last remastered
+frame's medium (the fogMist=0.5 one). Cause: EngineGL33::UpdateFogMedium (which publishes it)
+runs only inside the remastered path of UploadLitFrameConstants; the classic early return never
+cleared it. AI never reads it (pinned by test a and the contract), so this only misled probes and
+the drift guard. Fix: the classic branch of EngineGL33::UploadLitFrameConstants calls
+SetDrawnFogMedium(nullptr) (EngineGL33_Lighting.cpp). After (probe_3): state=classic drawn=0 on
+every line.
+
+
+4. In-game probe at fog 0.3 (look_director_optics staging)
+---------------------------------------------------------
+New test verb triAiSight [observer, target] (GameStateExtTestRender.cpp, registered next to
+triFogSight): the observer's real EntityAI::CalcVisibility (line of sight assumed) next to the
+classic tactical fog, the size term, AI sight's T between the observer's eye and the target's aim,
+and the same line through the drawn medium. fogAi = vis / (classic x size) is the share AI sight
+took inside the real visibility.
+Probe look_r5_aitest_probe.test.sqf (copy here), Eden 9200,3700, heading 288, 09:30 5 July 1985,
+overcast 0.7, fog 0.3 (the optics staging), an east soldier and west soldiers at 126 to 1109 m;
+then the lowest ground ahead (500 m out, 175 m ASL) with an observer and soldiers 124 and 255 m
+down the valley. Results (probe_3/udcap.log, sheet aitest_probe_fog03.png):
+  - Every line, every state: fogAi = Tai to 4 digits, so the real AI visibility carries AI sight.
+  - Overhaul (fog drawn): Tai = Tdrawn to 4 digits on all 7 lines (hill: 1.0000 .. 0.9443;
+    valley floor: 0.9936 at 124 m, 0.9293 at 255 m). fogMist=0.5: both move to 0.9677 at 1109 m.
+  - Post effects off and classic lighting: drawn=0, AI unchanged (only the clock drift above).
+  - On the optics hill the eye is 273 m ASL above most of the mist, so T stays near 1 there; the
+    valley lines show the mist taking 7% of a man at 255 m. Beyond about 600 m the classic
+    tactical fog alone makes vis 0 at fog 0.3 (classic=0 at 756 m), while the drawn picture still
+    shows ridges at 1 km: that is the weather part, AI's classic tactical fog, which the critic
+    already noted (the mist fixer draws setFog at 0.75 of the classic extinction). Not changed
+    here (fog look and AI weather fog belong to MIST and the owner).
+  - The soldiers stand behind the near crest in both shots (the probe assumes line of sight), so
+    the shots show the air, not the men.
+
+
+5. Optional leftover: the ground field late after load (not done)
+-----------------------------------------------------------------
+TerrainHorizonMap::groundColor comes from the async horizon build (UpdateTerrainLighting:
+GroundColors on the main thread, then ExpandGroundColors + BuildTerrainHorizonMap on the worker,
+about 0.6 s), and the renderer only uploads _groundFieldTex with the whole map, so the wet classes
+fall back to the old seam (a = 0 stand-in) until then. Making it ready at load cleanly needs a new
+path: run ExpandGroundColors and the three-channel box downsample on the main thread at the island
+change (tens of ms), hand the field to the renderer through a new Engine call (for example
+SetTerrainGroundField) that uploads only _groundFieldTex, and let the full map replace it. That is
+a new engine API across TerrainLighting, Engine.hpp, EngineGL33 and a load-time cost, and a 0.6 s
+window after load is hard to verify in a capture; I left it for a round that owns the wet ground.
+
+
+Images (all opened and checked)
+-------------------------------
+aitest_probe_fog03.png: the optics staging shot and the valley shot (my build, overhaul), with the
+  probe table: vis, classic, Tdrawn, Tai, fogAi per soldier and state.
+aitest_dawn_valley_4way.png: vanilla | landed | before (director/final) | after (shots_2), plus 2x
+  crops of the valley mist (before | after, vanilla | landed). The look did not move: before vs
+  after mean abs 1.85 of 255, 99th percentile 5 (frame noise; nothing in the change draws).
+probe_1/: the first probe run (before the stale-medium fix). probe_2/: an aborted run, stopped
+  while queued (no game ran). probe_3/: after. shots_2/: the
+  dawn_valley after shot.
+
+
+Constants
+---------
+None changed.
+
+
+Tests
+-----
+PoseidonTests "[aisight]": All tests passed (298 assertions in 5 test cases).
+PoseidonTests "[fog]": All tests passed (6415 assertions in 31 test cases).
+PoseidonTests "[remaster]": All tests passed (957954 assertions in 308 test cases).
+Full suite (unit_all.log): 3400 passed, 6 failed, 4 skipped; the failures are UI localization
+  (test_equipment_localization, test_map_legend_localized, test_mp_version_message_localization)
+  and "PBO+Inspect: InspectModel on all P3D in AddOns PBOs": game-data and language environment,
+  nothing near the fog, AI or renderer code touched here (not re-run on the bare base).
+fix.patch applies cleanly to base tree 12117cf9 (git apply --cached --check on a scratch index).
+
+
+Open items
+----------
+- Ground field ready at load (section 5).
+- Owner call kept from round 4: in classic lighting AI keeps the mist while none is drawn (test a
+  pins today's behaviour in its "classic lighting" state; change that line if the owner decides
+  AI should drop it).
+- AI's weather part is the classic tactical fog, stronger than the drawn setFog (section 4).
+- Threading: a snapshot hand-over is needed only if AI or the renderer leaves the main thread.

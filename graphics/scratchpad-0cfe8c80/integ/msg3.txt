@@ -1,0 +1,28 @@
+graphics: the shadow-map unit always holds a complete depth array
+
+NVIDIA KHR_debug reported GL undefined behaviour from the shadow sampler
+on texture unit 2: 131204 (texture object 0 has no base level) at every
+start-up, and 131222 (comparison sampler used with texture 0) after a
+shadow-map resolution or cascade change in Remastered.
+
+Root cause: every lit program samples unit 2 (GL_TEXTURE_2D_ARRAY), and
+both the classic sampler2DArray and the remastered sampler2DArrayShadow
+uniforms are live, so the driver validates unit 2 at every draw.
+(1) InitLightingResources created the 1x1 depth stand-in on upload
+unit 7 and never put it on unit 2, so the first classic draws (and the
+whole session in Classic with shadow maps off) ran against texture 0.
+(2) EnsureArrayTarget deleted the cascade array bound on unit 2 and
+bound its replacement on whatever unit was active, leaving the
+comparison sampler on texture 0 until the map was rebound after the
+depth pass.
+
+Fix: InitLightingResources binds the depth stand-in on unit 2, and
+EnsureArrayTarget selects unit 2 before it creates the new array. Both
+textures are complete depth formats. No per-draw work, no shader change.
+
+Tests: three [ShadowSampler] audits in test_gl_state_cache_audit.cpp
+(two fail without the fix). In game: 131204 and 131222 no longer fire,
+and the images are unchanged. The remaining clang-format violation at
+EngineGL33_ShadowDepth.cpp:470 is pre-existing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

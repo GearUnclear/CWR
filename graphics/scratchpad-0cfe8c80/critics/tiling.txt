@@ -1,0 +1,54 @@
+## track
+tiling
+## files_verified
+true
+## artefacts_seen
+All 28 cited image, override and note paths exist (Test-Path true for each). Every run1-run6 game_stdout.log, including run5 tiling_timing, names its own override dir (ovr_v1, ovr_v2, ovr_v4, ovr_v5, ovr_final, ovr_final2), shows 6 'shader override loaded' lines and has no shader compile or link errors. The logged byte sizes for ovr_final (30711/3721/1195) and ovr_final2 (31353/4064/1339) match the files on disk. The ovr_final2 psRemasterCommon.glsl is the stock dump (glsl_dump_lighting, taken after the last source edit at 13:06) plus the inserted tiling block and two one-line hooks that do nothing at k=0. v0 runs at saturation=1.12, which is the LightRig.hpp default, so v0 really is the current Remastered look. A PIL pixel diff confirms AFTER differs from BEFORE. Run6 v0->v6 mean abs diff is 4-13/255, with 40-64% of pixels changed by more than 4/255. The sky barely moves (top-sixth diff 0.06-0.6, except overcast and Eden, where the clouds drift). Patch-matching the BEST right panels against the raw captures: noon_fields = run6 v6 exactly, lowsun_fp = run5 v4 exactly, and the others are closest to run6 v6 (the only remainder is the yellow box overlay). Images opened: BEST_high_sinai_noon, BEST_sinai_desert_noon, BEST_lowsun_fp, BEST_forest_edge_golden, BEST_high_fields_noon, BEST_noon_fields, BEST_overcast_broken, BEST_high_valley_eden, cmp_hex_land_texture_sinai, rejected_warp_forest and run6 high_sinai_noon__all, plus my own 2-3x crops of lowsun, forest, noon_fields, high_sinai, sinai_desert and high_fields.
+## prototype_actually_loaded
+Yes. The shader overrides loaded in every capture process with 0 shader errors, the variant decode (saturation 1.12 + 0.001k) is in the GLSL, and the captures differ in pixels as the claims describe.
+## missing_or_false_claims
+[
+ "forest_edge_golden is understated as -6% luma. My lower-half luma reads v0 0.352 -> v6 0.323 (-8.2%), and the 'balanced' v6 is no better there than the asymmetric v4 (-8.7%). The balanced macro does not remove the darkening on this view.",
+ "noon_fields 'hue moves toward Classic' is framed as a plus, but the near field gets paler and brighter, moving further from Classic: crop luma Classic 0.577, v0 0.638, v6 0.664 (+4%), chroma 0.053 / 0.030 / 0.033. The authored green and pink mottling is blended away. That is a mild wash, not a step toward Classic.",
+ "BEST_lowsun_fp is presented as the full package, but on that view v2 (anti-tiling + relief, no macro) differs from v4 by only 0.37/255 mean abs. The low-sun gain comes from the relief alone.",
+ "'The slope smear is not solved' undersells one result: in forest_edge_golden the near grass slope and trail get crisper, grass-like detail from the hex detail and relief. The domain warp failed, but the near-field smear is partly reduced.",
+ "The per-shot GPU numbers printed on the BEST images are meaningless (high_sinai v0 13 ms vs v6 22 ms, while sinai_desert v0 22 ms vs v6 14.6 ms). The explorer says so, but the images still show them prominently."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[
+ "Mild wash on pale ground: noon_fields near field is +4% luma, with the colour mottling blended into a more uniform pale grey-beige. Sinai near sand is +11% luma (chroma is up, so not grey, but it reads over-bright).",
+ "Only darker on forest_edge_golden: -8% lower-half luma with both macro variants. The scene sits in a 'lush' patch and the balanced version does not fix it.",
+ "Soft procedural dark blotches on the high Sinai view read as cloud shadows or Perlin noise on a clear day, more than as terrain-driven ground cover.",
+ "Hex blending flattens authored texture contrast: Abel grass in high_fields_noon is more muted and smoother, and ploughed rows lose their regularity.",
+ "It does nothing about the existing olive/khaki ground on Abel (it moves neither hue nor saturation), so the mustard look stays."
+]
+## cost_ok
+true
+## score_0_to_10
+4.5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\tiling\BEST_high_sinai_noon.png
+## one_line
+The prototype is real and verified: anti-tiling plus a heightfield-tied macro plus relief from albedo gives a clear win on Sinai seen from height and crisper near-ground grit at low sun or on trails. On green islands at eye level the gain is small, with a mild wash on pale fields and darkening on forest_edge. This is texture work, not RTX-style light.
+## critique
+Verification: clean. All files exist, the overrides loaded and compiled in every run, v0 is the true stock Remastered path at the default saturation, and the BEST panels are the claimed variants. No fabrication found.
+
+What a player would see:
+(1) Sinai from height: clearly different. The flat beige plateau becomes mottled, dune-like ground (macroStd 0.049 -> 0.070, fineStd +67%), and the far dunes in sinai_desert_noon gain readable form. This is the one result an owner would notice in a side-by-side. The blotches are soft generic noise, though, and read partly as cloud shadows. The near sand is 11% brighter.
+(2) Near ground at low sun and on the forest trail: the relief gives tactile gravel and grit, the grass slope gets crisper, and the trail edge gains a strong ridged, rut-like band. That band is close to embossed but plausible.
+(3) Eye level at noon on Abel and Eden (noon_fields, overcast_broken, high_valley_eden, high_fields_noon): small. Some views are slightly worse. The pale field gets paler and loses its authored colour mottling, and hex blending mutes the grass contrast.
+The macro is also a lottery per view: forest_edge_golden is -8% darker with either macro.
+
+No NaN, banding, halos or seams were visible in stills. The rejected domain warp really did produce marbled swirls. Motion was never checked: the 60 m noise octave samples a mipless texture and the bump uses per-quad derivatives, so shimmer and swimming are open risks.
+
+Against the RTX-on vision this track barely moves: it changes albedo and adds a bump normal. There is no bounce light, occlusion, reflection or volumetric effect, so rtx_vision_score is 2.
+
+Cost is acceptable: about +0.5 to +2.5 ms paired-median at 1440x960 with 4x MSAA, n=4, with ranges that straddle zero. There is headroom, and removing the 4 probe taps helps.
+
+Worth building as a cheap supporting layer, not as a headline feature: anti-tiling plus the relief everywhere, and the patch macro only per island (desert maps), with crisper terrain-shaped boundaries and an amplitude that cannot pull a whole view darker or paler.

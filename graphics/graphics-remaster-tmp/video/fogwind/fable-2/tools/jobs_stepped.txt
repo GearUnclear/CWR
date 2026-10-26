@@ -1,0 +1,28 @@
+# stepped probes (one render per shot, camera held = static, real pan = moving)
+st-Ac|fogwind/2/runs/static-Ac/static-Ac.mkv|--static --from 15
+st-Act25|fogwind/2/runs/static-Act25/static-Act25.mkv|--static --from 15 --amp
+st-t4w|fogwind/3/runs/static-t4w/static-t4w.mkv|--static --from 15
+st-t2w|fogwind/3/runs/static-t2w/static-t2w.mkv|--static --from 15
+st-q4|fogwind/4/runs/static-q4/static-q4.mkv|--static --from 15
+st-q2b|fogwind/4/runs/static-q2b/static-q2b.mkv|--static --from 15 --amp
+st-c8|fogwind/5/runs/static-c8/static-c8.mkv|--static --from 15
+st-c8b|fogwind/5/runs/static-c8b/static-c8b.mkv|--static --from 15
+st-S2|fogwind/6/runs/static-S2/static-S2.mkv|--static --from 15
+st-S2z|fogwind/6/runs/static-S2z/static-S2z.mkv|--static --from 15 --amp
+st-S2h|fogwind/6/runs/static-S2h/static-S2h.mkv|--static --from 15
+st-far80n4|fogwind/7/runs/static-far80n4/static-far80n4.mkv|--static --from 15
+mv-Ac|fogwind/2/runs/moving-Ac/moving-Ac.mkv|--from 15
+mv-Act25|fogwind/2/runs/moving-Act25/moving-Act25.mkv|--from 15 --amp
+mv-t4w|fogwind/3/runs/moving-t4w/moving-t4w.mkv|--from 15
+mv-t2w|fogwind/3/runs/moving-t2w/moving-t2w.mkv|--from 15
+mv-q4|fogwind/4/runs/moving-q4/moving-q4.mkv|--from 15
+mv-q8|fogwind/4/runs/moving-q8/moving-q8.mkv|--from 15
+mv-c8|fogwind/5/runs/moving-c8/moving-c8.mkv|--from 15
+mv-c8b|fogwind/5/runs/moving-c8b/moving-c8b.mkv|--from 15
+mv-S2|fogwind/6/runs/moving-S2/moving-S2.mkv|--from 15
+mv-S2z|fogwind/6/runs/moving-S2z/moving-S2z.mkv|--from 15 --amp
+mv-C0|fogwind/6/runs/moving-C0/moving-C0.mkv|--from 15
+mv-far80n4b|fogwind/7/runs/moving-far80n4b/moving-far80n4b.mkv|--from 15
+mv-far80n8|fogwind/7/runs/moving-far80n8/moving-far80n8.mkv|--from 15
+mv-q2b|fogwind/4/runs/moving-q2b/moving-q2b.mkv|--from 15 --amp
+st-q4w|fogwind/4/runs/static-q4w/static-q4w.mkv|--static --from 15

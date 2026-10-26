@@ -1,0 +1,360 @@
+{
+  "biographies": [
+    {
+      "id": "b01",
+      "bank": "kBio0Friendly",
+      "variant": 0,
+      "text": "{Name} handed a friend a poem, then snatched it back. \"It's awful. Help me fix it?\" The former farmhand had kept writing since losing the family fields near {Place}.",
+      "word_count": 29,
+      "self_review": "A former farmhand snatches back a poem in embarrassment, then asks a friend for help improving it.",
+      "direction": "Make this person likable and a little self-conscious. They can be useful at farm work and hopeless at rhymes, or hide drafts until a friend asks. Tell a small incident that shows the wish to write. No grand poem about land or destiny; keep the narration plain."
+    },
+    {
+      "id": "b02",
+      "bank": "kBio0Friendly",
+      "variant": 1,
+      "text": "After losing the family home near {Place}, furniture maker {Name} told a worried sister, \"I'll build you a palace. Stool first, though.\" The sister laughed, then asked where they would sleep.",
+      "word_count": 31,
+      "self_review": "A furniture maker makes a worried sister laugh after losing their home, but they still need somewhere to sleep.",
+      "direction": "Give them affectionate, slightly cheeky charm. A customer, sibling or older relative is a good partner for a tiny exchange. Their jokes should sound like something someone would actually say, not a polished one-liner about justice. Let a joke coexist with a real worry."
+    },
+    {
+      "id": "b03",
+      "bank": "kBio0Friendly",
+      "variant": 2,
+      "text": "{Name}, a former survey assistant near {Place}, took money to falsify a family's land claim. They brought food after the eviction, but the family's thanks made them ashamed to admit what they'd done.",
+      "word_count": 33,
+      "self_review": "They accepted money to falsify a family's land claim, then brought food after the eviction without admitting their part in it.",
+      "direction": "Give this companion a dark past and a reason to try to make amends. Do not automatically make the person noble now. One concrete attempt to put something right can be enough. Leave the secret troubling rather than ending with redemption."
+    },
+    {
+      "id": "b04",
+      "bank": "kBio0Friendly",
+      "variant": 3,
+      "text": "\"Pay for it,\" {Name} told fellow rebels caught robbing a shop near {Place}. Years of unanswered complaints had driven the shop worker to join them. They still cooked for the cell, but refused its stolen food.",
+      "word_count": 36,
+      "self_review": "A shop worker keeps cooking for fellow rebels but demands they pay the shopkeepers they rob.",
+      "direction": "Write about disappointment with people on their own side. They still help, but have a limit they will argue over. Show a specific disagreement, not a general sentence about imperfect ideals. Their stubbornness can make them likable."
+    },
+    {
+      "id": "b05",
+      "bank": "kBio0Friendly",
+      "variant": 4,
+      "text": "A frightened lamb blocked the road near {Place}. {Name}, a shepherd, told an impatient guard to piss off, then spent an hour asking the lamb very politely to come home.",
+      "word_count": 30,
+      "self_review": "The shepherd swears at an impatient guard and spends an hour gently coaxing a frightened lamb home.",
+      "direction": "Make this a charming contrast through a small event. They might swear at a guard and then spend an hour coaxing a stray animal home. Do not explain that they have a heart of gold. Let the behavior show it; mild humor is welcome."
+    },
+    {
+      "id": "b06",
+      "bank": "kBio0Friendly",
+      "variant": 5,
+      "text": "{Name} had two potatoes left when the widower next door stopped by. The harvest worker near {Place} pulled out the usual chair. \"You're peeling. I did it last time.\"",
+      "word_count": 29,
+      "self_review": "A harvest worker makes room for a regular supper guest despite having little food left.",
+      "direction": "Make this warm, sociable and credible. Tell one meal or awkward invitation, not a life summary. They may tease guests, hide that they ate less, or care about everyone turning up. Pick one; no sermon about generosity."
+    },
+    {
+      "id": "b07",
+      "bank": "kBio0Hostile",
+      "variant": 0,
+      "text": "Near {Place}, quartermaster {Name} softened bread for a toothless stray while soldiers loaded a family's grain onto the garrison wagon. When the mother asked what they would eat, the quartermaster pointed toward the next farm.",
+      "word_count": 35,
+      "self_review": "The quartermaster carefully feeds an old dog while sending a family elsewhere for food after taking their grain.",
+      "direction": "Give this enemy a real soft spot and an ugly blind spot. Show both in a brief event; do not call them a hypocrite. Their care for an animal is sincere, not a fake kindness to soften a villain."
+    },
+    {
+      "id": "b08",
+      "bank": "kBio0Hostile",
+      "variant": 1,
+      "text": "Near {Place}, {Name} tapped out piano pieces on a desk before answering a parent's letter. The army had been their father's choice; they still hid job advertisements for pianists inside the officer's handbook.",
+      "word_count": 33,
+      "self_review": "An officer practices music on a desk and hides piano job advertisements while answering a parent who chose the army for them.",
+      "direction": "Make this a private wish under pressure from a parent. Give one small musical habit or remembered performance. Do not make their background excuse everything they do. This is about an ordinary talent and the life they did not choose."
+    },
+    {
+      "id": "b09",
+      "bank": "kBio0Hostile",
+      "variant": 2,
+      "text": "The repaired brakes held, but army engineer {Name} made the driver test them a fifth time outside {Place}. The last truck they had waved through with faulty brakes had killed two friends.",
+      "word_count": 32,
+      "self_review": "An engineer makes a driver test repaired brakes repeatedly after approving a faulty truck that killed two friends.",
+      "direction": "Give them a troubled past that shows up in a believable habit. They overcheck repairs, stay awake, or become short-tempered when rushed. Choose one and tell a small incident. No diagnosis or neat moral."
+    },
+    {
+      "id": "b10",
+      "bank": "kBio0Hostile",
+      "variant": 3,
+      "text": "Arrested for selling access permits near {Place}, administrator {Name} kept their job by naming an accomplice. They couldn't watch the clerk who'd taught them to read being led away.",
+      "word_count": 29,
+      "self_review": "An administrator saves their job by turning in the clerk who helped them learn to read.",
+      "direction": "Make this openly selfish and uneasy. They saved their career at someone else's expense. A single detail about the person betrayed can make it hurt. No grand statement about ambition or betrayal."
+    },
+    {
+      "id": "b11",
+      "bank": "kBio0Hostile",
+      "variant": 4,
+      "text": "Frightened young soldiers near {Place} laughed when veteran officer {Name} wore a spoon as a moustache and inspected them as \"General Soup.\" Then came the orders to evict the families.",
+      "word_count": 30,
+      "self_review": "The officer makes frightened soldiers laugh with a spoon moustache before orders arrive to evict local families.",
+      "direction": "Make the charm feel earned: a bad joke, an embarrassing story or a silly routine. They are still an enemy officer, not secretly on the player's side. Avoid the standard gruff veteran with a hidden heart; give one particular moment."
+    },
+    {
+      "id": "b12",
+      "bank": "kBio0Hostile",
+      "variant": 5,
+      "text": "The baker near {Place} had corrected Officer {Name} in public. Months later, the baker's flour permit was refused for untidy handwriting. The officer smiled and offered to demonstrate how to hold a pencil.",
+      "word_count": 33,
+      "self_review": "The officer remembers a public correction and later humiliates the baker over a permit.",
+      "direction": "Make this person unpleasant in a specific, ordinary way. Show a petty punishment or a held grudge. Keep it clear and unsettling rather than theatrical or cartoonishly evil. No slogan about power."
+    },
+    {
+      "id": "b13",
+      "bank": "kBio1Friendly",
+      "variant": 0,
+      "text": "Visiting a pupil beyond the roadblocks near {Place}, {Name} blushed when the child's mother called them brave. Then the child opened the lesson bag. \"Teacher, these are cookbooks.\" They all sat down to read anyway.",
+      "word_count": 35,
+      "self_review": "A teacher brings the wrong books to a pupil beyond the roadblocks, and the family reads them together.",
+      "direction": "Give this character a small, likable scene with a child or parent. They may have made mistakes or carried the wrong books. Warmth and awkwardness matter more than heroic praise. No automatic inspirational ending."
+    },
+    {
+      "id": "b14",
+      "bank": "kBio1Friendly",
+      "variant": 1,
+      "text": "Asked to deliver a letter near {Place}, {Name} kept their hands in their pockets. The former messenger had carried resistance letters before; one got a friend arrested. \"Could someone come with me?\"",
+      "word_count": 32,
+      "self_review": "A former messenger hesitates over a letter and asks for company after an earlier delivery led to a friend's arrest.",
+      "direction": "Make the earlier resistance experience concrete. The fear can be hard to admit, and the character can still be useful or caring. Show one hesitation or request. Avoid a poetic sentence about the weight of letters."
+    },
+    {
+      "id": "b15",
+      "bank": "kBio1Friendly",
+      "variant": 2,
+      "text": "Near {Place}, {Name} called a customer's bicycle Princess Squeak. When its chain slipped during repairs, they told it, \"Don't start.\" The customer apologized for bringing it up badly.",
+      "word_count": 28,
+      "self_review": "A bicycle repairer scolds a bicycle and its owner joins in the joke.",
+      "direction": "Make this funny and fond, with a habit another person might enjoy or find tiresome. Include one small repair mishap or exchange. Keep road restrictions as background rather than the whole identity. A short ordinary quote is welcome."
+    },
+    {
+      "id": "b16",
+      "bank": "kBio1Friendly",
+      "variant": 3,
+      "text": "When a resistance leader near {Place} falsely accused a friend of informing, former clerk {Name} slammed the table. \"Show me the evidence!\" They left the cell that night.",
+      "word_count": 28,
+      "self_review": "A former clerk angrily demands evidence against an innocent friend and leaves the resistance cell that night.",
+      "direction": "Give them a troubled history in the resistance, including anger at their own side. They can demand evidence, refuse to name people, or regret staying silent. Choose one strong incident. Avoid ending with a general lesson about trust."
+    },
+    {
+      "id": "b17",
+      "bank": "kBio1Friendly",
+      "variant": 4,
+      "text": "While waiting for a travel permit near {Place}, {Name} cut their own suit for a cousin's wedding. Their aunt suggested leaving room for cake. The tailor quietly added an inch.",
+      "word_count": 30,
+      "self_review": "A tailor waiting to travel to a family wedding makes room in a new suit for cake.",
+      "direction": "Keep this hopeful and charming, with an ordinary ambition that matters to them. A fit problem, a teasing relative or saving cloth can make it personal. Do not turn every wish into liberation rhetoric. Let the wedding matter on its own."
+    },
+    {
+      "id": "b18",
+      "bank": "kBio1Friendly",
+      "variant": 5,
+      "text": "Carrying water near {Place}, {Name} remembered every birthday. When their old resistance cell questioned a friendly chat with a guard, they said, \"I brought your mother cake too. Is that suspicious?\"",
+      "word_count": 31,
+      "self_review": "A water carrier answers suspicions about a guard by reminding a resistance member about a birthday cake.",
+      "direction": "Give them easy social charm that sometimes creates trouble in the resistance. An earlier cell might question a friendly chat with a guard. Show how they respond without making them secretly an informer. One conversational moment."
+    },
+    {
+      "id": "b19",
+      "bank": "kBio1Hostile",
+      "variant": 0,
+      "text": "During the crackdown near {Place}, {Name} threatened to jail a grocer's children. That evening, the officer laughed while their own child tied ribbons through the officer's hair.",
+      "word_count": 27,
+      "self_review": "The officer threatened a grocer with jailing the children, then laughed while playing with their own child at home.",
+      "direction": "Give this enemy a disturbing difference between home and work. Use two concrete actions or one encounter where the two meet. Do not tell the reader which side is the real person."
+    },
+    {
+      "id": "b20",
+      "bank": "kBio1Hostile",
+      "variant": 1,
+      "text": "{Name}, an officer near {Place}, kept borrowing to play cards. After losing again to someone the army wanted arrested, they begged for another week to pay, then stayed for one more hand.",
+      "word_count": 32,
+      "self_review": "An officer begs a wanted creditor for more time to repay a gambling debt and immediately plays again.",
+      "direction": "Make this a personal mess rather than a mastermind plot. A lost card game, a dodged meeting or a favor is enough. A little uncomfortable humor is fine. Do not imply a new gameplay mission or a guaranteed betrayal."
+    },
+    {
+      "id": "b21",
+      "bank": "kBio1Hostile",
+      "variant": 2,
+      "text": "After an ambush near {Place}, {Name} beat a recruit for dropping a mug. When another soldier reached to help, the officer raised a fist, and the whole table backed away.",
+      "word_count": 30,
+      "self_review": "The officer beat a recruit over a dropped mug and frightened the soldiers who witnessed it.",
+      "direction": "Show what 'overly violent' means through a clear past incident, without graphic detail or combat instructions. A subordinate's reaction can tell us something. Do not excuse the violence or describe the person with a vague darkness metaphor."
+    },
+    {
+      "id": "b22",
+      "bank": "kBio1Hostile",
+      "variant": 3,
+      "text": "Checkpoint officer {Name} held up a bus near {Place}, describing their perfect roast duck. When a passenger pretended to snore, they raised their voice and started on the gravy.",
+      "word_count": 29,
+      "self_review": "An officer delays a bus to boast about cooking and talks louder when a passenger pretends to snore.",
+      "direction": "Make the person memorable through food and the everyday annoyance they cause. They can be funny and inconsiderate at once. Use one small incident, not a list of quirks or a verdict about cruelty."
+    },
+    {
+      "id": "b23",
+      "bank": "kBio1Hostile",
+      "variant": 4,
+      "text": "\"Welcome, friend!\" In an office near {Place}, officer {Name}, once an amateur actor, spread both arms with practiced warmth. The frightened visitor whispered, \"My daughter's missing.\" The officer lowered both arms and fetched a map.",
+      "word_count": 35,
+      "self_review": "An officer abandons a theatrical welcome to help a frightened visitor find a missing daughter.",
+      "direction": "Make this vanity and performance slightly ridiculous, then let the visitor's actual problem matter. A short quote or awkward pause may help. No abstract explanation of 'rehearsed self-justification'."
+    },
+    {
+      "id": "b24",
+      "bank": "kBio1Hostile",
+      "variant": 5,
+      "text": "{Name} wrote home that everyone was cheerful near {Place}. That morning, the officer had punished a sentry for coughing, then cried over news that their youngest had started walking.",
+      "word_count": 29,
+      "self_review": "The officer sends a cheerful letter after punishing a sentry and crying about missing their youngest child learning to walk.",
+      "direction": "Make this quiet and vulnerable. One thing omitted from a letter or one missed family occasion can tell the story. Do not make the officer automatically kind; the point is the difference between what they write and what they live through."
+    },
+    {
+      "id": "b25",
+      "bank": "kBio2Friendly",
+      "variant": 0,
+      "text": "Radio repairer {Name} kept a box of records through three moves near {Place}. They practiced hosting a music show until an old set blew its fuse, then carried on singing.",
+      "word_count": 30,
+      "self_review": "A radio repairer keeps practicing a music show even after the old set gives out.",
+      "direction": "Make this lively, hopeful and specific. Let music be an interest they actually enjoy, not a symbol of freedom. A small mishap with an old set or a friend's terrible taste can supply charm. Fighting is background."
+    },
+    {
+      "id": "b26",
+      "bank": "kBio2Friendly",
+      "variant": 1,
+      "text": "Someone was calling for help when {Name} fled the resistance camp near {Place}. They spent that night hiding under a cart. Their family still believes the group disbanded.",
+      "word_count": 28,
+      "self_review": "They fled while someone called for help and let their family believe the resistance group had disbanded.",
+      "direction": "Give this companion a dark, difficult past. They may have saved someone, abandoned someone or simply been afraid, but keep the facts understandable. Avoid both a heroic reveal and a final sentence judging cowardice."
+    },
+    {
+      "id": "b27",
+      "bank": "kBio2Friendly",
+      "variant": 2,
+      "text": "{Name}, once an orchard worker near {Place}, loved describing the wall they jumped while escaping the fighting. Each telling made it taller. \"You got stuck halfway,\" a friend always added.",
+      "word_count": 30,
+      "self_review": "An orchard worker exaggerates an escape over a wall while a friend keeps recalling how they got stuck.",
+      "direction": "Give them charm and a harmless lie rather than a grand heroic backstory. One changed detail or a friend correcting them can carry it. The memory should have a clear event, not lyrical symbolism."
+    },
+    {
+      "id": "b28",
+      "bank": "kBio2Friendly",
+      "variant": 3,
+      "text": "The wounded enemy couldn't stand. {Name}, a shop worker near {Place}, kept changing the bandages after their resistance leader threatened to throw them both outside. They asked for clean cloth and got none.",
+      "word_count": 33,
+      "self_review": "A shop worker keeps tending a wounded enemy despite threats and a refusal to provide clean cloth.",
+      "direction": "Make this about a hard personal choice and trouble on their own side. Keep the care practical and the disagreement specific. Do not end with a speech about humanity transcending sides."
+    },
+    {
+      "id": "b29",
+      "bank": "kBio2Friendly",
+      "variant": 4,
+      "text": "{Name}'s mother never answered questions about the fighting near {Place}, but corrected every attempt at Grandma's dumplings. \"Less flour, sweetheart.\" They asked how much less. \"Well, look at them,\" Mum said, laughing.",
+      "word_count": 32,
+      "self_review": "A mother avoids questions about the fighting but laughs over another attempt at the family dumplings.",
+      "direction": "Make this an affectionate, awkward family scene with old pain underneath. The recipe can matter as food, not a contrived symbol. One failed attempt or teasing reply is enough. No neat explanation of inherited trauma."
+    },
+    {
+      "id": "b30",
+      "bank": "kBio2Friendly",
+      "variant": 5,
+      "text": "{Name} had begged to join the resistance raid near {Place}, then hid when shooting started. Afterwards, they pulled an older fighter aside. \"Could we practise again? Just us?\"",
+      "word_count": 28,
+      "self_review": "After hiding during a raid they had begged to join, the volunteer quietly asks an older fighter to practise with them.",
+      "direction": "Make them likable without hiding the failure. They might overprepare afterwards, make jokes when ashamed, or ask an older fighter for help. Pick one. Avoid a redemption arc completed in thirty words."
+    },
+    {
+      "id": "b31",
+      "bank": "kBio2Hostile",
+      "variant": 0,
+      "text": "Near {Place}, officer {Name} lied to protect a friend who stole money meant for a dead soldier's children. The friend still wrote, \"Your oldest friend.\" The officer never replied.",
+      "word_count": 29,
+      "self_review": "The officer lies to protect a friend who stole money from a dead soldier's children, then stops replying to the friend's letters.",
+      "direction": "Make the secret concrete and the relationship uncomfortable. Say what they hid, in plain terms, without graphic detail. Avoid a grand line about lies consuming people."
+    },
+    {
+      "id": "b32",
+      "bank": "kBio2Hostile",
+      "variant": 1,
+      "text": "{Name}, an officer near {Place}, hated reciting the required patriotic poems. Alone, they wrote about a dog asleep in a doorway, then changed 'doorway' to 'mat' because 'mat' was easier to rhyme.",
+      "word_count": 32,
+      "self_review": "The officer privately writes about a sleeping dog and changes its sleeping spot to find a rhyme.",
+      "direction": "Make this personal, a little awkward and memorable. They can be bad at writing or simply want to write about ordinary things. No lyrical narrator or polished quoted poem; the desire to write is enough."
+    },
+    {
+      "id": "b33",
+      "bank": "kBio2Hostile",
+      "variant": 2,
+      "text": "A young recruit near {Place} got a coat from {Name}, then a furious scolding for walking home alone. The officer's brother had died on that road; the recruit stopped asking to visit family.",
+      "word_count": 33,
+      "self_review": "The officer gives a recruit a coat but makes visiting family frightening after losing a brother.",
+      "direction": "Make this both tender and troubling. One favor or scolding can show grief affecting how they act. Do not reduce it to revenge or explain that the recruit is a replacement brother."
+    },
+    {
+      "id": "b34",
+      "bank": "kBio2Hostile",
+      "variant": 3,
+      "text": "{Name} badly beat a prisoner near {Place}. Nobody even asked why. That frightened them enough to invent a fever before the next interrogation, but they let another officer take their place.",
+      "word_count": 31,
+      "self_review": "After beating a prisoner and facing no questions, the officer pretended to be ill to avoid the next interrogation.",
+      "direction": "Give this enemy a dark past with a believable later response: silence, shame, repeating the violence, or trying to avoid another interrogation. Pick one; no neat absolution. Keep the violence non-graphic."
+    },
+    {
+      "id": "b35",
+      "bank": "kBio2Hostile",
+      "variant": 4,
+      "text": "Near {Place}, {Name} tilted their rescue medal toward the photographer. The corporal who had pulled the wounded soldiers out stood beside them. \"A little farther back,\" the officer said.",
+      "word_count": 29,
+      "self_review": "An officer poses with a rescue medal and moves the corporal who performed the rescue out of the photograph.",
+      "direction": "Make this vain, awkward and human. One encounter with the subordinate or one rehearsed account is enough. Let the reader see the stolen credit without calling it hypocrisy. No complicated battle timeline."
+    },
+    {
+      "id": "b36",
+      "bank": "kBio2Hostile",
+      "variant": 5,
+      "text": "In the barracks near {Place}, Officer {Name} laughed about slapping a prisoner who kept apologizing for falling over. The soldiers stopped laughing when they realized that was the whole story.",
+      "word_count": 30,
+      "self_review": "An officer laughs about hurting an apologetic prisoner, and the soldiers fall silent.",
+      "direction": "Make this unsettling through a clear, non-graphic anecdote and the listeners' reaction. Avoid a villain monologue or grand claim about darkness. Show that what they find amusing alarms other people."
+    }
+  ],
+  "campaign_examples": [
+    {
+      "campaign": "A",
+      "opening": "The people of Malden still tell how families near Larche lost rights their grandparents had expected to leave to the children. Soviet Army troops arrived with orders to enforce obedience. A complaint could bring armed visitors to the same door where neighbours once gathered. People near Houdan accepted a settlement they could live with. When the authorities broke it, even patient neighbours talked of fighting. Fighting followed. FIA soldiers remember the dead through surviving friends, who can still describe their laughter as readily as their deaths.",
+      "events": [
+        "Families near Larche built terraces on the slopes and farmed them for generations. Surveyors later divided the land into plots and registered it under outside owners. The families who had built and maintained the terraces were left without a recognised claim to the ground that fed them.",
+        "Representatives near Houdan agreed that the high ground would remain common and the roads open. Within a season, Soviet Army units fenced the ground and gated the roads. Families who had accepted the settlement now needed permission to reach land and routes the agreement had left open.",
+        "Defenders near Chapoi stopped an advancing column for two days without relief. The column broke through on the third day, leaving local fighters dead and others missing. Survivors later gave FIA fighters an account of the positions held and the names of those who failed to return."
+      ],
+      "bio": "Petra handed a friend a poem, then snatched it back. \"It's awful. Help me fix it?\" The former farmhand had kept writing since losing the family fields near Larche."
+    },
+    {
+      "campaign": "B",
+      "opening": "Near Ghajar, families in Lebanon inherited an old dispute along with their grandparents' belongings. Outsiders had claimed what kept those families fed. Hizballah units controlled the main roads. People learned which guards would listen, which would shout, and when to turn around without arguing. Representatives near Tyre came home with an agreement and promises. When the authorities broke it, neighbours demanded to know what happened. IDF fighters lost people in the fighting that followed. Some families still ask returning fighters for news nobody wants to give.",
+      "events": [
+        "Families near Ghajar dug and maintained four wells that supplied the valley. Water was shared under arrangements passed down through nine generations. An outside clerk later registered the wells as private property, giving an absent owner control over water the families had previously drawn by right.",
+        "Witnesses from six villages signed an agreement near Tyre to share water and keep the coast road open. The terms also barred armed guards from the pumps. Hizballah troops seized the pumps and began checking road traffic twice a day, restricting the access the witnesses had secured.",
+        "Fighting near Saida set homes alight, and the fires continued through the night. Families who returned found collapsed houses and neighbours missing. IDF soldiers collected names from survivors and recorded where each person had last been seen. Relatives used the list to search for people carried away during the evacuation."
+      ],
+      "bio": "Asked to deliver a letter near Tyre, Petra kept their hands in their pockets. The former messenger had carried resistance letters before; one got a friend arrested. \"Could someone come with me?\""
+    },
+    {
+      "campaign": "C",
+      "opening": "For generations, families near Nuweiba in Sinai taught children where they belonged. Then outsiders arrived with papers saying the children had no claim. Under IDF forces, residents watched their words in public. Families argued behind closed doors about whether silence was keeping anyone safe anymore. Near El Tor, both sides agreed to a settlement. After the authorities broke it, residents brought copies to confront the guards. Later fighting left empty places at family tables. PLO East troops keep the names, including those neighbours still find difficult to discuss.",
+      "events": [
+        "Road builders near Nuweiba marked the rock beside each well to record who could draw water. Local families used those marks to settle access disputes. When officials produced the first regional map, the water rights were omitted. Officials then rejected claims based on the older markings.",
+        "Elders marked a truce boundary with stones near El Tor and agreed which wells would remain available to local families. IDF soldiers later occupied those wells and shifted the markers. Families arriving for water found guards enforcing a boundary that no longer matched the one the elders had walked.",
+        "Defenders with two machine guns held an advancing column near Ras Nasrani until dusk. The delay allowed families to leave the coastal route, but several defenders died before the survivors withdrew. The coast fell the next day. PLO East units preserved the survivors' account of the action and the losses."
+      ],
+      "bio": "Petra, once an orchard worker near Ras Nasrani, loved describing the wall they jumped while escaping the fighting. Each telling made it taller. \"You got stuck halfway,\" a friend always added."
+    }
+  ]
+}

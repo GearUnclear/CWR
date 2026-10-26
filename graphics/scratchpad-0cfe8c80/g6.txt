@@ -1,0 +1,11 @@
+    // Under the photoreal camera lit surfaces and the dome (vLitMode 1, 2) are
+    // scene light, stored at the frame's pre-exposure; pre-lit draws carry the
+    // original's display colour (and the sun disk its own level) and are
+    // stored as they are, so their fog colour (scene light) takes the
+    // pre-exposure first.
+    bool camScene = vLitMode > 0.5;
+    if (litCamera.x > 0.5 && !camScene) fogC *= pow(max(litCamera.w, 0.0), 1.0 / 2.2);
+    // With the aerial haze or the volumetric fog on (litHaze.x above 0) the
+    // classic fog keeps only the view-distance edge: its start moves out
+    // (AirMedium.hpp and VolumetricFog.hpp FogEdgeScale) and the post pass
+    // takes over the distance before it.

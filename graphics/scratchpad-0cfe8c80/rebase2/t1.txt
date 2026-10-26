@@ -1,0 +1,2 @@
+    // strengths (B3, test_night_lights.cpp), the reflections' two (B6) and the
+    // photoreal camera's (look lane "light", test_photo_camera.cpp).

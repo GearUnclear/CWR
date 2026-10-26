@@ -1,0 +1,34 @@
+graphics: capture runs pin object detail, settle the scene and reset lighting knobs
+
+The Classic | Remastered capture rig gave misleading before pictures.
+
+Root cause:
+- Scene::AdjustComplexity holds any refinement for 5 s after the object
+  detail coarsens. A camera jump coarsens it, and the rig waited a fixed
+  150+90 frames, so whether a shot fell inside the hold depended on
+  machine load (sunrise_ridge: 1,063 objects at the hold, 7,680 after).
+- triSetLighting "remastered" read the current tuning and changed only
+  the mode, so knobs from an earlier call carried over. Comma lists were
+  parsed with atof and silently set only the first knob.
+- No per-shot draw or object count was logged.
+- World::SetDate did not call GLandscape->OnTimeSkipped() the way
+  skipTime does, so auto street lamps switched up to 12.1 s later, at
+  random relative to the shots (draws 2,797 -> 11,172 mid-run).
+
+Fix:
+- New tri verbs: triPinObjectDetail (Scene::PinObjectDetail, an early
+  return in AdjustComplexity; 0 = adaptive), triSettleScene (pumps frames
+  until draws and LOD width are steady and no horizon build is pending,
+  decision logic in Dev::SceneSettle) and triSceneStats.
+- triSetLighting mode words reset every knob to its default, comma
+  lists apply all or none, bad values FAIL.
+- capture_lib.sqf pins detail, settles and logs stats on every shot;
+  make_pairs.py adds them to the tables and flags mismatched pairs.
+- Gameplay-visible: setDate now switches auto street lamps immediately,
+  matching skipTime and the first simulated frame.
+
+Tests: test_tri_capture_verbs.cpp (7 cases, 61 assertions; 3 cases fail
+at the previous tip). [tri], [remaster], [GL33], [gpu] and the audits
+pass; [graphics] fails only the known DDS fixture case.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

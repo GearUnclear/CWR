@@ -1,0 +1,7 @@
+      Poseidon::gl33lighting::kCameraCodecGLSL, Poseidon::gl33lighting::kPostSsrCompositeMainGLSL}},
+    {"psCombatMask", {Poseidon::gl33lighting::kPostCombatMaskGLSL}},
+    {"psCombatMaskBlur", {Poseidon::gl33lighting::kPostCombatMaskBlurGLSL}},
+    {"psPostGtao",
+     {Poseidon::gl33lighting::kPostGtaoInputsGLSL, s_glslPostCommon, Poseidon::gl33lighting::kPostGtaoMainGLSL}},
+    {"psPostGtaoAccum", {Poseidon::gl33lighting::kPostGtaoAccumGLSL}},
+    {"psPostMeter", {s_psPostMeterHead, Poseidon::gl33lighting::kCameraCodecGLSL, s_psPostMeterMain}},

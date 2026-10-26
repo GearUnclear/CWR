@@ -1,0 +1,932 @@
+diff --git a/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp b/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+index 3deb284..ced64af 100644
+--- a/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
++++ b/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+@@ -35,6 +35,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <algorithm>
++#include <chrono>
+ #include <cfloat>
+ #include <cmath>
+ #include <filesystem>
+@@ -1991,6 +1992,125 @@ GameValue TriDamagePlayer(const GameState* /*state*/, GameValuePar arg)
+     return GameValue("OK");
+ }
+ 
++/// triFireGeometry object -> [component index, surface (0=body, 1=weapon, 2=absent),
++/// world X, world Y (height), world Z] rows. Uses the animated collision geometry.
++GameValue TriFireGeometry(const GameState* state, GameValuePar arg)
++{
++    GameValue result = state->CreateGameValue(GameArray);
++    GameArrayType& rows = result;
++    Object* object = GetObject(arg);
++    if (!object || !object->GetShape())
++        return result;
++    LODShape* shape = object->GetShape();
++    const int level = shape->FindFireGeometryLevel();
++    if (level < 0)
++        return result;
++    ConvexComponents* components = shape->GetConvexComponents(level);
++    if (!components)
++        return result;
++    object->AnimateComponentLevel(level);
++    components->RecalculateAsNeeded(shape->LevelOpaque(level));
++    for (int i = 0; i < components->Size(); ++i)
++    {
++        const Vector3 position = object->PositionModelToWorld(components->Get(i)->GetCenter());
++        GameValue row = state->CreateGameValue(GameArray);
++        GameArrayType& values = row;
++        values.Add(GameValue(float(i)));
++        values.Add(GameValue(float(object->GetCollisionSurface(level, i))));
++        values.Add(GameValue(position.X()));
++        values.Add(GameValue(position.Y()));
++        values.Add(GameValue(position.Z()));
++        rows.Add(row);
++    }
++    object->DeanimateComponentLevel(level);
++    return result;
++}
++
++/// triTraceFire [object, [x,y,z], [x,y,z]] -> [nearest component, weapon hit].
++/// Coordinates use engine axes (Y is height), as in triFireGeometry.
++GameValue TriTraceFire(const GameState* state, GameValuePar arg)
++{
++    GameValue result = state->CreateGameValue(GameArray);
++    GameArrayType& values = result;
++    const GameArrayType& args = arg;
++    if (args.Size() != 3 || args[0].GetType() != GameObject || args[1].GetType() != GameArray ||
++        args[2].GetType() != GameArray)
++        return result;
++    Object* object = GetObject(args[0]);
++    const GameArrayType& begin = args[1];
++    const GameArrayType& end = args[2];
++    if (!object || begin.Size() != 3 || end.Size() != 3)
++        return result;
++    CollisionBuffer collisions;
++    object->Intersect(collisions, Vector3(float(begin[0]), float(begin[1]), float(begin[2])),
++                      Vector3(float(end[0]), float(end[1]), float(end[2])), 0, ObjIntersectFire);
++    int nearest = -1;
++    for (int i = 0; i < collisions.Size(); ++i)
++        if (nearest < 0 || collisions[i].under < collisions[nearest].under)
++            nearest = i;
++    if (nearest >= 0)
++    {
++        values.Add(GameValue(float(collisions[nearest].component)));
++        values.Add(GameValue(collisions[nearest].weaponHit));
++    }
++    return result;
++}
++
++/// triBenchmarkFireGeometry [objects, iterations] -> [rays, intersections, milliseconds].
++/// Time only animated fire-geometry intersections; scene setup and rendering are excluded.
++GameValue TriBenchmarkFireGeometry(const GameState* state, GameValuePar arg)
++{
++    GameValue result = state->CreateGameValue(GameArray);
++    GameArrayType& values = result;
++    const GameArrayType& args = arg;
++    if (args.Size() != 2 || args[0].GetType() != GameArray || args[1].GetType() != GameScalar)
++        return result;
++    const GameArrayType& objects = args[0];
++    const int iterations = std::clamp(int(float(args[1])), 1, 1000000);
++    struct Ray { Object* object; Vector3 begin, end; };
++    std::vector<Ray> rays;
++    for (int i = 0; i < objects.Size(); ++i)
++    {
++        if (objects[i].GetType() != GameObject)
++            continue;
++        Object* object = GetObject(objects[i]);
++        if (!object || !object->GetShape())
++            continue;
++        LODShape* shape = object->GetShape();
++        const int level = shape->FindFireGeometryLevel();
++        if (level < 0)
++            continue;
++        ConvexComponents* components = shape->GetConvexComponents(level);
++        if (!components)
++            continue;
++        object->AnimateComponentLevel(level);
++        components->RecalculateAsNeeded(shape->LevelOpaque(level));
++        for (int j = 0; j < components->Size(); ++j)
++        {
++            const Vector3 center = object->PositionModelToWorld(components->Get(j)->GetCenter());
++            rays.push_back({object, center + Vector3(0, 0, 2), center - Vector3(0, 0, 2)});
++        }
++        object->DeanimateComponentLevel(level);
++    }
++    if (rays.empty())
++        return result;
++    CollisionBuffer collisions;
++    int hits = 0;
++    const auto start = std::chrono::steady_clock::now();
++    for (int i = 0; i < iterations; ++i)
++    {
++        const Ray& ray = rays[size_t(i) % rays.size()];
++        collisions.Clear();
++        ray.object->Intersect(collisions, ray.begin, ray.end, 0, ObjIntersectFire);
++        hits += collisions.Size();
++    }
++    const auto end = std::chrono::steady_clock::now();
++    values.Add(GameValue(float(iterations)));
++    values.Add(GameValue(float(hits)));
++    values.Add(GameValue(float(std::chrono::duration<double, std::milli>(end - start).count())));
++    return result;
++}
++
+ /// triPlayerDammage — returns current GetTotalDammage() of the real
+ /// player (0..1 scalar), or -1 if no player.
+ GameValue TriPlayerDammage(const GameState* /*state*/)
+@@ -3152,6 +3272,9 @@ INIT_MODULE(GameStateExtTest, 3)
+     GGameState.NewNularOp(GameNular(GameScalar, "triLatchPlayerAmmo", TriLatchPlayerAmmo));
+     GGameState.NewFunction(GameFunction(GameString, "triDoDammageToPlayer", TriDoDammageToPlayer, GameScalar));
+     GGameState.NewFunction(GameFunction(GameString, "triDamagePlayer", TriDamagePlayer, GameScalar));
++    GGameState.NewFunction(GameFunction(GameArray, "triFireGeometry", TriFireGeometry, GameObject));
++    GGameState.NewFunction(GameFunction(GameArray, "triTraceFire", TriTraceFire, GameArray));
++    GGameState.NewFunction(GameFunction(GameArray, "triBenchmarkFireGeometry", TriBenchmarkFireGeometry, GameArray));
+     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerDammage", TriPlayerDammage));
+     GGameState.NewNularOp(GameNular(GameString, "triPlayerAuthority", TriPlayerAuthority));
+     GGameState.NewFunction(GameFunction(GameString, "triAssertCheatActive", TriAssertCheatActive, GameArray));
+diff --git a/engine/Poseidon/Network/NetworkClientActions.cpp b/engine/Poseidon/Network/NetworkClientActions.cpp
+index 2714d72..7bc8c65 100644
+--- a/engine/Poseidon/Network/NetworkClientActions.cpp
++++ b/engine/Poseidon/Network/NetworkClientActions.cpp
+@@ -1766,7 +1766,7 @@ void NetworkClient::AskForHideBody(Person* vehicle)
+ }
+ 
+ void NetworkClient::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos,
+-                                            Vector3Par dir, const AmmoType* type, bool enemyDammage)
++                                            Vector3Par dir, const AmmoType* type, bool enemyDammage, bool weaponHit)
+ {
+     if (_state < NGSPlay)
+     {
+@@ -1781,6 +1781,7 @@ void NetworkClient::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object*
+     msg.dir = dir;
+     msg.type = type->GetName();
+     msg.enemyDammage = enemyDammage;
++    msg.weaponHit = weaponHit;
+     SendMsg(&msg, NMFGuaranteed);
+ }
+ 
+diff --git a/engine/Poseidon/Network/NetworkClientOnMessage.cpp b/engine/Poseidon/Network/NetworkClientOnMessage.cpp
+index b450c22..e1a382e 100644
+--- a/engine/Poseidon/Network/NetworkClientOnMessage.cpp
++++ b/engine/Poseidon/Network/NetworkClientOnMessage.cpp
+@@ -1153,7 +1153,7 @@ void NetworkClient::OnMessage(int from, NetworkMessage* msg, NetworkMessageType
+                 ammo = dynamic_cast<AmmoType*>(type);
+             }
+             GLandscape->ExplosionDammageEffects(ask.owner, ask.shot, ask.directHit, ask.pos, ask.dir, ammo,
+-                                                ask.enemyDammage);
++                                                ask.enemyDammage, ask.weaponHit);
+         }
+         break;
+         case NMTAskForGetIn:
+diff --git a/engine/Poseidon/Network/NetworkIface.hpp b/engine/Poseidon/Network/NetworkIface.hpp
+index e15591b..a0bb465 100644
+--- a/engine/Poseidon/Network/NetworkIface.hpp
++++ b/engine/Poseidon/Network/NetworkIface.hpp
+@@ -390,7 +390,7 @@ public:
+ 	(
+ 		EntityAI *owner, Shot *shot,
+ 		Object *directHit, Vector3Par pos, Vector3Par dir, const AmmoType *type,
+-		bool enemyDammage
++		bool enemyDammage, bool weaponHit = false
+ 	) = 0;
+ 	// Transfer fire effects (sound, fire, smoke, recoil effect, etc.) to other clients
+ 	virtual void FireWeapon
+diff --git a/engine/Poseidon/Network/NetworkImpl.hpp b/engine/Poseidon/Network/NetworkImpl.hpp
+index d52201a..7d1e3c8 100644
+--- a/engine/Poseidon/Network/NetworkImpl.hpp
++++ b/engine/Poseidon/Network/NetworkImpl.hpp
+@@ -126,7 +126,7 @@ class NetworkManager : public INetworkManager
+     void AskForJoin(AIGroup* join, OLinkArray<AIUnit>& units) override;
+     void AskForHideBody(Person* vehicle) override;
+     void ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
+-                                 const AmmoType* type, bool enemyDammage) override;
++                                 const AmmoType* type, bool enemyDammage, bool weaponHit = false) override;
+     void FireWeapon(EntityAI* vehicle, int weapon, const Magazine* magazine, EntityAI* target) override;
+     void UpdateWeapons(EntityAI* vehicle) override;
+     void AddWeaponCargo(VehicleSupply* vehicle, RString weapon) override;
+diff --git a/engine/Poseidon/Network/NetworkImplClient.hpp b/engine/Poseidon/Network/NetworkImplClient.hpp
+index 427d85d..dc92d7c 100644
+--- a/engine/Poseidon/Network/NetworkImplClient.hpp
++++ b/engine/Poseidon/Network/NetworkImplClient.hpp
+@@ -236,7 +236,7 @@ class NetworkClient : public NetworkComponent
+     void AskForHideBody(Person* vehicle);
+     // Transfer explosion effects (explosion, smoke, etc.) to other clients
+     void ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
+-                                 const AmmoType* type, bool enemyDammage);
++                                 const AmmoType* type, bool enemyDammage, bool weaponHit = false);
+     // Transfer fire effects (sound, fire, smoke, recoil effect, etc.) to other clients
+     void FireWeapon(EntityAI* vehicle, int weapon, const Magazine* magazine, EntityAI* target);
+     // Send update of weapons to vehicle owner
+diff --git a/engine/Poseidon/Network/NetworkMessages.cpp b/engine/Poseidon/Network/NetworkMessages.cpp
+index b60ddfa..5795f39 100644
+--- a/engine/Poseidon/Network/NetworkMessages.cpp
++++ b/engine/Poseidon/Network/NetworkMessages.cpp
+@@ -537,6 +537,7 @@ class IndicesExplosionDammageEffects : public NetworkMessageIndices
+     int dir;
+     int type;
+     int enemyDammage;
++    int weaponHit;
+ 
+     IndicesExplosionDammageEffects();
+     NetworkMessageIndices* Clone() const override { return new IndicesExplosionDammageEffects; }
+@@ -552,10 +553,11 @@ IndicesExplosionDammageEffects::IndicesExplosionDammageEffects()
+     dir = -1;
+     type = -1;
+     enemyDammage = -1;
++    weaponHit = -1;
+ }
+ 
+ void IndicesExplosionDammageEffects::Scan(NetworkMessageFormatBase* format){
+-    SCAN(owner) SCAN(shot) SCAN(directHit) SCAN(pos) SCAN(dir) SCAN(type) SCAN(enemyDammage)}
++    SCAN(owner) SCAN(shot) SCAN(directHit) SCAN(pos) SCAN(dir) SCAN(type) SCAN(enemyDammage) SCAN(weaponHit)}
+ 
+ // Create network message indices for ExplosionDammageEffectsMessage class
+ NetworkMessageIndices* GetIndicesExplosionDammageEffects()
+@@ -573,6 +575,7 @@ NetworkMessageFormat& ExplosionDammageEffectsMessage::CreateFormat(NetworkMessag
+     format.Add("dir", NDTVector, NCTNone, DEFVALUE(Vector3, VForward), DOC_MSG("Explosion direction"));
+     format.Add("type", NDTString, NCTNone, DEFVALUE(RString, ""), DOC_MSG("Ammunition type"));
+     format.Add("enemyDammage", NDTBool, NCTNone, DEFVALUE(bool, false), DOC_MSG("Some enemy was damaged"));
++    format.Add("weaponHit", NDTBool, NCTNone, DEFVALUE(bool, false), DOC_MSG("Impact on a carried weapon"));
+     return format;
+ }
+ 
+@@ -589,6 +592,7 @@ TMError ExplosionDammageEffectsMessage::TransferMsg(NetworkMessageContext& ctx)
+     TMCHECK(ctx.IdxTransfer(indices->dir, dir))
+     TMCHECK(ctx.IdxTransfer(indices->type, type))
+     TMCHECK(ctx.IdxTransfer(indices->enemyDammage, enemyDammage))
++    TMCHECK(ctx.IdxTransfer(indices->weaponHit, weaponHit))
+     return TMOK;
+ }
+ 
+diff --git a/engine/Poseidon/Network/NetworkMessages.hpp b/engine/Poseidon/Network/NetworkMessages.hpp
+index bdada4d..3ffd7a6 100644
+--- a/engine/Poseidon/Network/NetworkMessages.hpp
++++ b/engine/Poseidon/Network/NetworkMessages.hpp
+@@ -873,6 +873,7 @@ struct ExplosionDammageEffectsMessage : public NetworkSimpleObject
+ 	RString type;
+ 	// some enemy was damaged
+ 	bool enemyDammage;
++	bool weaponHit = false;
+ 
+ 	NetworkMessageType GetNMType(NetworkMessageClass cls) const override {return NMTExplosionDammageEffects;}
+ 	static NetworkMessageFormat &CreateFormat
+diff --git a/engine/Poseidon/Network/NetworkMisc.cpp b/engine/Poseidon/Network/NetworkMisc.cpp
+index cc6abe3..7c791d7 100644
+--- a/engine/Poseidon/Network/NetworkMisc.cpp
++++ b/engine/Poseidon/Network/NetworkMisc.cpp
+@@ -1956,11 +1956,11 @@ void NetworkManager::AskForJoin(AIGroup* join, OLinkArray<AIUnit>& units)
+ }
+ 
+ void NetworkManager::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos,
+-                                             Vector3Par dir, const AmmoType* type, bool enemyDammage)
++                                             Vector3Par dir, const AmmoType* type, bool enemyDammage, bool weaponHit)
+ {
+     if (_client)
+     {
+-        _client->ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
++        _client->ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage, weaponHit);
+     }
+ }
+ 
+diff --git a/engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp b/engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp
+index a9a3b7d..68c8831 100644
+--- a/engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp
++++ b/engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp
+@@ -382,6 +382,7 @@ class ManType: public EntityAIType, public MotionType
+ 	int _rpgMatIndex;
+ 	int _handMatIndex;
+ 	int _rightHandMatIndex;
++	AutoArray<int> _fireGeometryComponentBones;
+ 
+ 	int _stepLIndex,_stepRIndex; // index in memory LOD
+ 
+@@ -652,6 +653,7 @@ class Man: public Person
+ 	void OnWeaponAdded() override;
+ 	void OnWeaponRemoved() override;
+ 	void OnWeaponChanged() override;
++	CollisionSurface GetCollisionSurface(int level, int component) const override;
+ 	void OnDanger() override;
+ 
+ 	void Init( Matrix4Par pos ) override;
+diff --git a/engine/Poseidon/World/Entities/Infantry/SoldierOldSimProxy.cpp b/engine/Poseidon/World/Entities/Infantry/SoldierOldSimProxy.cpp
+index e6b9c9f..7faeb74 100644
+--- a/engine/Poseidon/World/Entities/Infantry/SoldierOldSimProxy.cpp
++++ b/engine/Poseidon/World/Entities/Infantry/SoldierOldSimProxy.cpp
+@@ -31,6 +31,26 @@ bool Man::CastProxyShadow(int level, int index) const
+     return true;
+ }
+ 
++CollisionSurface Man::GetCollisionSurface(int level, int component) const
++{
++    const ManType* type = Type();
++    if (!type->_isMan || level != _shape->FindFireGeometryLevel() || component < 0 ||
++        component >= type->_fireGeometryComponentBones.Size())
++        return CollisionSurface::Default;
++
++    const int bone = type->_fireGeometryComponentBones[component];
++    if (bone < 0)
++        return CollisionSurface::Default;
++    if (bone == type->_gunMatIndex)
++        return _showPrimaryWeapon && FindWeaponType(MaskSlotPrimary) >= 0 ? CollisionSurface::Weapon
++                                                                         : CollisionSurface::Ignored;
++    if (bone == type->_rpgMatIndex)
++        return _showSecondaryWeapon && FindWeaponType(MaskSlotSecondary, MaskSlotPrimary) >= 0
++                   ? CollisionSurface::Weapon
++                   : CollisionSurface::Ignored;
++    return CollisionSurface::Default;
++}
++
+ Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform, Matrix4& invTransform,
+                       const FrameBase& parentPos, int i) const
+ {
+@@ -1492,6 +1512,19 @@ void ManType::InitShape()
+         _rightHandMatIndex = -1;
+     }
+ 
++    _fireGeometryComponentBones.Clear();
++    const int fireLevel = _shape->FindFireGeometryLevel();
++    if (_isMan && fireLevel >= 0)
++    {
++        const ConvexComponents* components = _shape->GetConvexComponents(fireLevel);
++        if (components)
++        {
++            const AnimationRTWeights& weights = GetWeights()[fireLevel];
++            for (int i = 0; i < components->Size(); ++i)
++                _fireGeometryComponentBones.Add(weights.FindComponentBone(*components->Get(i)));
++        }
++    }
++
+     // Note: search proxies in memory level instead of MemoryLevel()
+     Shape* proxyContainer = _shape->MemoryLevel();
+     _priWeaponIndex = -1; // index of corresponding proxy
+@@ -1538,6 +1571,7 @@ void ManType::InitShape()
+ 
+ void ManType::DeinitShape()
+ {
++    _fireGeometryComponentBones.Clear();
+     _headWound.Unload();
+     _bodyWound.Unload();
+     _lArmWound.Unload();
+diff --git a/engine/Poseidon/World/Entities/Weapons/Shots.cpp b/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+index 69e2832..7d20c0e 100644
+--- a/engine/Poseidon/World/Entities/Weapons/Shots.cpp
++++ b/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+@@ -709,7 +709,7 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
+                     {
+                         continue;
+                     }
+-                    if (!info.object)
++                    if (!info.object || (info.weaponHit && !Type()->explosive))
+                     {
+                         continue;
+                     }
+@@ -741,7 +741,7 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
+                         GLOB_WORLD->AddAnimal(explosion);
+                         GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
+                     }
+-                    GLandscape->ExplosionDammage(_parent, this, info.object, pos, info.dirOut, Type());
++                    GLandscape->ExplosionDammage(_parent, this, info.object, pos, info.dirOut, Type(), info.weaponHit);
+                 }
+                 _delete = true;
+                 return;
+@@ -1189,7 +1189,7 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
+                 explosion->SetPosition(pos);
+                 GLOB_WORLD->AddAnimal(explosion);
+                 GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
+-                GLandscape->ExplosionDammage(_parent, this, info.object, pos, info.dirOut, Type());
++                GLandscape->ExplosionDammage(_parent, this, info.object, pos, info.dirOut, Type(), info.weaponHit);
+                 _delete = true;
+ #if _ENABLE_CHEATS
+                 if (this == GWorld->CameraOn() && _parent)
+diff --git a/engine/Poseidon/World/Scene/Object.hpp b/engine/Poseidon/World/Scene/Object.hpp
+index 8b8bc8f..bd9f73f 100644
+--- a/engine/Poseidon/World/Scene/Object.hpp
++++ b/engine/Poseidon/World/Scene/Object.hpp
+@@ -86,6 +86,13 @@ enum DestructType
+ 
+ class CollisionBuffer;
+ 
++enum class CollisionSurface
++{
++	Default,
++	Weapon,
++	Ignored
++};
++
+ // Place USE_CASTING on a class that should be recognized by dynamic casting.
+ // Pair it with DEFINE_CASTING near the class definition. Forgetting to do so
+ // lets the class share _classId with its parent, so IsClassId returns true for
+@@ -652,6 +659,8 @@ public:
+ 	// Debugging function: Verify internal structure of the object.
+ 	virtual bool VerifyStructure() const;
+ 
++	// Classify an intersected component without changing physical geometry.
++	virtual CollisionSurface GetCollisionSurface(int level, int component) const {return CollisionSurface::Default;}
+ 	// Check if point is inside the object
+ 	bool IsInside( Vector3Par pos, ObjIntersect type=ObjIntersectGeom) const;
+ 	// Check if given two objects placed on arbitrary positions intersect.
+@@ -905,6 +914,7 @@ struct CollisionInfo
+ 	float under;
+ 	float underVolume; // volume of intersection
+ 	int component; // index of component in corresponding geometry level
++	bool weaponHit = false;
+ };
+ 
+ class CollisionBuffer: public StaticArray<CollisionInfo>
+diff --git a/engine/Poseidon/World/Scene/ObjectIntersect.cpp b/engine/Poseidon/World/Scene/ObjectIntersect.cpp
+index f2d9134..86a9869 100644
+--- a/engine/Poseidon/World/Scene/ObjectIntersect.cpp
++++ b/engine/Poseidon/World/Scene/ObjectIntersect.cpp
+@@ -875,6 +875,12 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
+ #endif
+             }
+ 
++            const CollisionSurface surface = (type == ObjIntersectFire || type == ObjIntersectIFire)
++                                                 ? GetCollisionSurface(geomLevel, iThis)
++                                                 : CollisionSurface::Default;
++            if (surface == CollisionSurface::Ignored)
++                continue;
++
+             // return collision information
+             CollisionInfo& ret = result.Append();
+             // check nearest point of intersections
+@@ -900,6 +906,7 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
+             ret.hierLevel = hierLevel;
+             ret.object = const_cast<Object*>(this);
+             ret.component = iThis;
++            ret.weaponHit = surface == CollisionSurface::Weapon;
+         }
+ 
+     NotInside:;
+diff --git a/engine/Poseidon/World/Simulation/Animation/RtAnimation.cpp b/engine/Poseidon/World/Simulation/Animation/RtAnimation.cpp
+index eaa5215..17f6951 100644
+--- a/engine/Poseidon/World/Simulation/Animation/RtAnimation.cpp
++++ b/engine/Poseidon/World/Simulation/Animation/RtAnimation.cpp
+@@ -80,6 +80,33 @@ AnimationRTWeights::~AnimationRTWeights() = default;
+ 
+ AnimationRTWeights::AnimationRTWeights() : _needNormalize(false), _isSimple(false) {}
+ 
++int AnimationRTWeights::FindComponentBone(const NamedSelection& component) const
++{
++    int bone = -1;
++    for (int i = 0; i < component.Size(); ++i)
++    {
++        const int vertex = component[i];
++        if (vertex < 0 || vertex >= _data.Size())
++            return -1;
++        const AnimationRTWeight& weights = _data[vertex];
++        int vertexBone = -1;
++        for (int j = 0; j < weights.Size(); ++j)
++        {
++            if (weights[j].GetWeight() <= 0)
++                continue;
++            const int selection = weights[j].GetSel();
++            if (selection < 0 || (vertexBone >= 0 && vertexBone != selection))
++                return -1;
++            vertexBone = selection;
++        }
++        // Mixed or unweighted components retain their original collision behavior.
++        if (vertexBone < 0 || (bone >= 0 && bone != vertexBone))
++            return -1;
++        bone = vertexBone;
++    }
++    return bone;
++}
++
+ void AnimationRTWeights::Init(Shape* shape)
+ {
+     _data.Realloc(shape->NPos());
+diff --git a/engine/Poseidon/World/Simulation/Animation/RtAnimation.hpp b/engine/Poseidon/World/Simulation/Animation/RtAnimation.hpp
+index ca1bff2..188bf83 100644
+--- a/engine/Poseidon/World/Simulation/Animation/RtAnimation.hpp
++++ b/engine/Poseidon/World/Simulation/Animation/RtAnimation.hpp
+@@ -55,6 +55,7 @@ class AnimationRTWeights
+ 	int	MatrixIndex( RStringB name ) const;
+ 	void Normalize();
+ 	bool IsSimple() const {return _isSimple;}
++	int FindComponentBone(const NamedSelection &component) const;
+ 	const AnimationRTWeight &operator [] ( int i )const {return _data[i];}
+ 	const AnimationRTWeight *Data() const {return _data.Data();}
+ 
+diff --git a/engine/Poseidon/World/Simulation/Collisions.cpp b/engine/Poseidon/World/Simulation/Collisions.cpp
+index 561ca8e..d41e7eb 100644
+--- a/engine/Poseidon/World/Simulation/Collisions.cpp
++++ b/engine/Poseidon/World/Simulation/Collisions.cpp
+@@ -875,7 +875,7 @@ void Landscape::GroundCollisionPlane(GroundCollisionBuffer& retVal, Object* with
+ }
+ 
+ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
+-                                        const AmmoType* type, bool enemyDammage)
++                                        const AmmoType* type, bool enemyDammage, bool weaponHit)
+ {
+     if (!type)
+     {
+@@ -891,7 +891,7 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
+     const RandomSound* hitSounds = &type->_hitGround;
+     if (directHit)
+     {
+-        hitSounds = &type->_hitBuilding;
++        hitSounds = weaponHit ? &type->_hitArmor : &type->_hitBuilding;
+         // different hit types for different objects
+         EntityAI* hitAI = dyn_cast<EntityAI>(directHit);
+         if (hitAI)
+@@ -899,7 +899,8 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
+             const VehicleType* typeAI = hitAI->GetType();
+             if (typeAI->IsKindOf(GWorld->Preloaded(VTypeMan)))
+             {
+-                hitSounds = &type->_hitMan;
++                if (!weaponHit)
++                    hitSounds = &type->_hitMan;
+             }
+             else if (typeAI->IsKindOf(GWorld->Preloaded(VTypeAllVehicles)))
+             {
+@@ -945,7 +946,7 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
+             Vector3 rPos = toModel.FastTransform(pos);
+             Vector3 rDir = dir;
+             Crater* crater = nullptr;
+-            if (vehicleHit)
++            if (vehicleHit && !weaponHit)
+             {
+                 CraterOnVehicle* cov = new CraterOnVehicle(shape, VehicleTypes.New("crateronvehicle"), timeToLive,
+                                                            scale * 0.5, directHit, rPos, rDir);
+@@ -956,7 +957,9 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
+                 crater = new Crater(shape, VehicleTypes.New("crater"), timeToLive, scale * 0.5, false, false, water);
+                 Matrix4 transform;
+                 Matrix4 toWorld = directHit->WorldTransform();
+-                Vector3Val wDir = toWorld.Rotate(rDir);
++                Vector3 wDir = toWorld.Rotate(rDir);
++                if (weaponHit)
++                    wDir.Normalize();
+                 Vector3 pDir = fabs(wDir.Y()) < 0.9 ? VUp : VForward;
+                 transform.SetDirectionAndUp(wDir, pDir);
+                 transform.SetScale(scale * 0.5);
+@@ -1066,7 +1069,7 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
+ }
+ 
+ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
+-                                 const AmmoType* type)
++                                 const AmmoType* type, bool weaponHit)
+ {
+     bool enemyDammage = false;
+ 
+@@ -1080,7 +1083,9 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
+     {
+         float hitVal = type->hit - type->indirectHit;
+ 
+-        directHit->DirectDammage(shot, owner, pos, hitVal);
++        // A carried weapon stops a bullet without wounding its owner. Explosions retain their damage.
++        if (!weaponHit || type->explosive)
++            directHit->DirectDammage(shot, owner, pos, hitVal);
+         // if directHit is vehicle, add force impulse
+         Vehicle* veh = dyn_cast<Vehicle>(directHit);
+         if (veh && shot)
+@@ -1134,6 +1139,10 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
+                 {
+                     continue;
+                 }
++                // Stock bullets also have a small indirectHit value. A weapon-only
++                // kinetic impact must not wound its carrier through that second path.
++                if (obj == directHit && weaponHit && !type->explosive)
++                    continue;
+                 float dist2 = obj->Position().Distance2(pos);
+                 float maxDist2 = Square(maxRadius + obj->GetRadius());
+                 if (dist2 > maxDist2)
+@@ -1173,8 +1182,8 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
+         }
+     }
+ 
+-    ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
+-    GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
++    ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage, weaponHit);
++    GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage, weaponHit);
+ }
+ 
+ #include <Poseidon/Foundation/Containers/StaticArray.hpp>
+diff --git a/engine/Poseidon/World/Terrain/Landscape.hpp b/engine/Poseidon/World/Terrain/Landscape.hpp
+index 40f2b61..c043830 100644
+--- a/engine/Poseidon/World/Terrain/Landscape.hpp
++++ b/engine/Poseidon/World/Terrain/Landscape.hpp
+@@ -949,13 +949,13 @@ class Landscape: public SerializeClass
+ 	(
+ 		EntityAI *owner, Shot *shot,
+ 		Object *directHit, Vector3Par pos, Vector3Par dir,
+-		const AmmoType *type, bool enemyDammage
++		const AmmoType *type, bool enemyDammage, bool weaponHit = false
+ 	);
+ 	// explosion does dammage
+ 	void ExplosionDammage
+ 	(
+ 		EntityAI *owner, Shot *shot,
+-		Object *directHit, Vector3Par pos, Vector3Par dir, const AmmoType *type
++		Object *directHit, Vector3Par pos, Vector3Par dir, const AmmoType *type, bool weaponHit = false
+ 	);
+ 	void Disclose
+ 	(
+diff --git a/tests/integration/ingame/units/weapon_impacts.test.sqf b/tests/integration/ingame/units/weapon_impacts.test.sqf
+new file mode 100644
+index 0000000..bf8c77f
+--- /dev/null
++++ b/tests/integration/ingame/units/weapon_impacts.test.sqf
+@@ -0,0 +1,76 @@
++// Issue #304: stock SoldierEB fire components 12/13 are rifle/launcher.
++// Classification uses bones in production; these indices belong only to this fixture.
++setAccTime 0
++player setPos [7600,5890,0]
++corpse304 addWeapon "RPGLauncher"
++triAssertEq [((triFireGeometry corpse304) select 12) select 1, 1]
++triAssertEq [((triFireGeometry corpse304) select 13) select 1, 1]
++corpse304 setDammage 0
++
++// rifle impact: verify the nearest component, then exercise the real projectile path.
++tri304Row = (triFireGeometry corpse304) select 12
++tri304X = tri304Row select 2
++tri304Y = tri304Row select 3
++tri304Z = tri304Row select 4
++triAssertEq [triTraceFire [corpse304,[tri304X,tri304Y,tri304Z+0.8],[tri304X,tri304Y,tri304Z-0.2]], [12,true]]
++tri304Shot = "BulletSingleW" createVehicle [tri304X,tri304Z+0.8,30]
++tri304Shot setPosASL [tri304X,tri304Z+0.8,tri304Y]
++tri304Shot setVelocity [0,-200,0]
++setAccTime 0.25
++triSimFrames 15
++setAccTime 0
++triAssertEq [getDammage corpse304, 0]
++
++// launcher impact: verify the nearest component, then exercise the real projectile path.
++tri304Row = (triFireGeometry corpse304) select 13
++tri304X = tri304Row select 2
++tri304Y = tri304Row select 3
++tri304Z = tri304Row select 4
++triAssertEq [triTraceFire [corpse304,[tri304X,tri304Y,tri304Z+0.8],[tri304X,tri304Y,tri304Z-0.2]], [13,true]]
++tri304Shot = "BulletSingleW" createVehicle [tri304X,tri304Z+0.8,30]
++tri304Shot setPosASL [tri304X,tri304Z+0.8,tri304Y]
++tri304Shot setVelocity [0,-200,0]
++setAccTime 0.25
++triSimFrames 15
++setAccTime 0
++triAssertEq [getDammage corpse304, 0]
++
++// body impact: verify the nearest component, then exercise the real projectile path.
++tri304Row = (triFireGeometry corpse304) select 2
++tri304X = tri304Row select 2
++tri304Y = tri304Row select 3
++tri304Z = tri304Row select 4
++triAssertEq [triTraceFire [corpse304,[tri304X,tri304Y,tri304Z+0.8],[tri304X,tri304Y,tri304Z-0.2]], [2,false]]
++tri304Shot = "BulletSingleW" createVehicle [tri304X,tri304Z+0.8,30]
++tri304Shot setPosASL [tri304X,tri304Z+0.8,tri304Y]
++tri304Shot setVelocity [0,-200,0]
++setAccTime 0.25
++triSimFrames 15
++setAccTime 0
++triAssertGt [getDammage corpse304, 0]
++
++// Pickup/removal must not leave either invisible collision component active.
++corpse304 removeWeapon "AK74"
++triAssertEq [((triFireGeometry corpse304) select 12) select 1, 2]
++corpse304 addWeapon "AK74"
++triAssertEq [((triFireGeometry corpse304) select 12) select 1, 1]
++corpse304 removeWeapon "RPGLauncher"
++triAssertEq [((triFireGeometry corpse304) select 13) select 1, 2]
++corpse304 addWeapon "RPGLauncher"
++triAssertEq [((triFireGeometry corpse304) select 13) select 1, 1]
++
++// Explosive damage remains active even on a weapon component.
++corpse304 setDammage 0
++tri304Row = (triFireGeometry corpse304) select 12
++tri304X = tri304Row select 2
++tri304Y = tri304Row select 3
++tri304Z = tri304Row select 4
++triAssertEq [triTraceFire [corpse304,[tri304X,tri304Y,tri304Z+0.8],[tri304X,tri304Y,tri304Z-0.2]], [12,true]]
++tri304Shot = "Shell73" createVehicle [tri304X,tri304Z+0.8,30]
++tri304Shot setPosASL [tri304X,tri304Z+0.8,tri304Y]
++tri304Shot setVelocity [0,-200,0]
++setAccTime 0.25
++triSimFrames 15
++setAccTime 0
++triAssertGt [getDammage corpse304, 0]
++triEndTest
+diff --git a/tests/integration/ingame/units/weapon_impacts.test.toml b/tests/integration/ingame/units/weapon_impacts.test.toml
+new file mode 100644
+index 0000000..9a8a9b1
+--- /dev/null
++++ b/tests/integration/ingame/units/weapon_impacts.test.toml
+@@ -0,0 +1,7 @@
++tags = ["units", "collision", "external-data"]
++binary = "PoseidonGame"
++mission = "tests/integration/missions/weapon_impacts.Abel"
++data_dir = "packages/Remaster"
++timeout = 90
++assert_timeout = 20
++extra_args = ["--dev", "--no-splash", "--focus"]
+diff --git a/tests/integration/missions/weapon_impacts.Abel/mission.sqm b/tests/integration/missions/weapon_impacts.Abel/mission.sqm
+new file mode 100644
+index 0000000..c674463
+--- /dev/null
++++ b/tests/integration/missions/weapon_impacts.Abel/mission.sqm
+@@ -0,0 +1,44 @@
++version=11;
++class Mission
++{
++ randomSeed=304;
++ class Intel { year=1985; month=7; day=1; hour=12; minute=0; startWeather=0; forecastWeather=0; };
++ class Groups
++ {
++  items=2;
++  class Item0
++  {
++   side="WEST";
++   class Vehicles
++   {
++    items=1;
++    class Item0
++    {
++     position[]={7515,20,5790}; id=0; side="WEST"; vehicle="SoldierWB";
++     player="PLAYER COMMANDER"; leader=1; skill=1; text="tester304";
++    };
++   };
++  };
++  class Item1
++  {
++   side="EAST";
++   class Vehicles
++   {
++    items=2;
++    class Item0
++    {
++     position[]={7515,20,5794}; id=1; side="EAST"; vehicle="SoldierEB";
++     leader=1; skill=1; text="corpse304"; azimut=180;
++     init="this setBehaviour ""CARELESS""; this disableAI ""TARGET""; this disableAI ""AUTOTARGET""; this disableAI ""MOVE"";";
++    };
++    class Item1
++    {
++     position[]={9515,20,7794}; id=2; side="EAST"; vehicle="SoldierEB";
++     skill=0.1; text="missionKeepAlive304";
++     init="this setBehaviour ""CARELESS""; this disableAI ""TARGET""; this disableAI ""AUTOTARGET""; this disableAI ""MOVE"";";
++    };
++   };
++  };
++ };
++};
++class Intro { class Intel {}; };
+diff --git a/tests/unit/engine/Poseidon/Network/test_network.cpp b/tests/unit/engine/Poseidon/Network/test_network.cpp
+index 0b41e8c..fceceef 100644
+--- a/tests/unit/engine/Poseidon/Network/test_network.cpp
++++ b/tests/unit/engine/Poseidon/Network/test_network.cpp
+@@ -2,6 +2,46 @@
+ 
+ #include <Poseidon/AI/AI.hpp>
+ #include <Poseidon/Network/Network.hpp>
++#include <Poseidon/Network/NetworkMessages.hpp>
++#include <catch2/generators/catch_generators.hpp>
++
++NetworkMessageIndices* GetIndicesExplosionDammageEffects();
++
++TEST_CASE("Impact surface survives network message transfer", "[network][weapon-impact]")
++{
++    class ImpactFormat : public NetworkMessageFormat
++    {
++      public:
++        void RemoveWeaponField() { _items.Resize(_items.Size() - 1); }
++    };
++    ImpactFormat format;
++    ExplosionDammageEffectsMessage::CreateFormat(NMCCreate, format);
++    const bool legacy = GENERATE(false, true);
++    if (legacy)
++        format.RemoveWeaponField();
++    format.Init(GetIndicesExplosionDammageEffects());
++
++    ExplosionDammageEffectsMessage source;
++    source.owner = nullptr;
++    source.shot = nullptr;
++    source.directHit = nullptr;
++    source.pos = Vector3(1, 2, 3);
++    source.dir = VForward;
++    source.type = "BulletSingleW";
++    source.enemyDammage = false;
++    source.weaponHit = GENERATE(false, true);
++    NetworkMessage message;
++    NetworkMessageContext sending(&message, &format, nullptr, 0, true);
++    REQUIRE(source.TransferMsg(sending) == TMOK);
++
++    ExplosionDammageEffectsMessage observer;
++    CHECK_FALSE(observer.weaponHit);
++    NetworkMessageContext receiving(&message, &format, nullptr, 0, false);
++    REQUIRE(observer.TransferMsg(receiving) == TMOK);
++    CHECK(observer.weaponHit == (!legacy && source.weaponHit));
++    CHECK(observer.type == source.type);
++    CHECK(observer.pos == source.pos);
++}
+ 
+ TEST_CASE("network.hpp compiles", "[network]")
+ {
+diff --git a/tests/unit/engine/Poseidon/World/Simulation/test_animation.cpp b/tests/unit/engine/Poseidon/World/Simulation/test_animation.cpp
+index c4b0a33..e2dfb3b 100644
+--- a/tests/unit/engine/Poseidon/World/Simulation/test_animation.cpp
++++ b/tests/unit/engine/Poseidon/World/Simulation/test_animation.cpp
+@@ -1,6 +1,60 @@
+ #include <catch2/catch_test_macros.hpp>
+ #include <Poseidon/World/Simulation/Animation/Animation.hpp>
+ #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
++#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
++
++using namespace Poseidon;
++
++TEST_CASE("Collision components require exclusive bone membership", "[animation][weapon-impact]")
++{
++    Ref<Shape> shape = new Shape();
++    shape->Init(4);
++    const SelInfo componentPoints[] = {{0, 255}, {1, 255}, {2, 255}};
++    const NamedSelection component("arbitrary_component_name", componentPoints, 3, nullptr, 0);
++    AnimationRTWeights weights(shape);
++    const auto addBone = [&](const char* name, const SelInfo* points, int count, int bone)
++    {
++        shape->AddNamedSel(NamedSelection(name, points, count, nullptr, 0));
++        weights.AddSelection(shape, shape->FindNamedSel(name), bone);
++    };
++
++    SECTION("rifle and launcher bone indices need not be fixed")
++    {
++        addBone("zbran", componentPoints, 3, 17);
++        const SelInfo launcherPoint[] = {{3, 255}};
++        addBone("roura", launcherPoint, 1, 29);
++        weights.Normalize();
++        CHECK(weights.FindComponentBone(component) == 17);
++        CHECK(weights.FindComponentBone(NamedSelection("other", launcherPoint, 1, nullptr, 0)) == 29);
++    }
++    SECTION("body overlap retains body collisions")
++    {
++        addBone("zbran", componentPoints, 3, 17);
++        const SelInfo bodyPoint[] = {{1, 128}};
++        addBone("body", bodyPoint, 1, 4);
++        weights.Normalize();
++        CHECK(weights.FindComponentBone(component) == -1);
++    }
++    SECTION("different bones on different vertices are mixed")
++    {
++        addBone("zbran", componentPoints, 2, 17);
++        addBone("roura", componentPoints + 2, 1, 29);
++        weights.Normalize();
++        CHECK(weights.FindComponentBone(component) == -1);
++    }
++    SECTION("partly unweighted components retain body collisions")
++    {
++        addBone("zbran", componentPoints, 2, 17);
++        weights.Normalize();
++        CHECK(weights.FindComponentBone(component) == -1);
++    }
++    SECTION("empty or invalid selections do not classify as weapons")
++    {
++        CHECK(weights.FindComponentBone(NamedSelection("empty", nullptr, 0, nullptr, 0)) == -1);
++        const SelInfo invalidPoint[] = {{9, 255}};
++        CHECK(weights.FindComponentBone(NamedSelection("invalid", invalidPoint, 1, nullptr, 0)) == -1);
++    }
++}
+ 
+ TEST_CASE("animation.hpp - compile check", "[simulation][animation]")
+ {
+diff --git a/tests/unit/engine/Poseidon/World/test_collision_nonfinite.cpp b/tests/unit/engine/Poseidon/World/test_collision_nonfinite.cpp
+index 6cb757c..ec718cf 100644
+--- a/tests/unit/engine/Poseidon/World/test_collision_nonfinite.cpp
++++ b/tests/unit/engine/Poseidon/World/test_collision_nonfinite.cpp
+@@ -45,6 +45,40 @@ class CollisionShape : public LODShapeWithShadow
+ };
+ } // namespace
+ 
++TEST_CASE("Fire intersections carry weapon surfaces and skip absent weapons", "[World][Collision][weapon-impact]")
++{
++    class WeaponObject : public ObjectPlain
++    {
++      public:
++        using ObjectPlain::ObjectPlain;
++        CollisionSurface surface = CollisionSurface::Weapon;
++        CollisionSurface GetCollisionSurface(int, int) const override { return surface; }
++    };
++    Ref<CollisionShape> shape = new CollisionShape();
++    Ref<WeaponObject> object = new WeaponObject(shape, 1);
++    const auto type = GENERATE(ObjIntersectFire, ObjIntersectIFire);
++    CollisionBuffer collisions;
++    object->Intersect(collisions, Vector3(0, 0, -2), Vector3(0, 0, 2), 0, type);
++    REQUIRE(collisions.Size() == 1);
++    CHECK(collisions[0].weaponHit);
++
++    object->surface = CollisionSurface::Ignored;
++    collisions.Clear();
++    object->Intersect(collisions, Vector3(0, 0, -2), Vector3(0, 0, 2), 0, type);
++    CHECK(collisions.Size() == 0);
++
++    // Physical geometry retains its original behavior regardless of weapon visibility.
++    object->Intersect(collisions, Vector3(0, 0, -2), Vector3(0, 0, 2), 0, ObjIntersectGeom);
++    REQUIRE(collisions.Size() == 1);
++    CHECK_FALSE(collisions[0].weaponHit);
++
++    object->surface = CollisionSurface::Default;
++    collisions.Clear();
++    object->Intersect(collisions, Vector3(0, 0, -2), Vector3(0, 0, 2), 0, type);
++    REQUIRE(collisions.Size() == 1);
++    CHECK_FALSE(collisions[0].weaponHit);
++}
++
+ TEST_CASE("Object line intersections reject nonfinite transforms", "[World][Collision][Nonfinite]")
+ {
+     Ref<CollisionShape> shape = new CollisionShape();

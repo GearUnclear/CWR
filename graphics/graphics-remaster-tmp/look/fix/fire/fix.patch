@@ -1,0 +1,661 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 0ac9c361..4d428284 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -865,6 +865,12 @@ class Engine : public IGraphicsEngine
+     /// or a missile (Light::Kind Combat or Fire) then draws its glow but lights
+     /// nothing, and smoke takes the combat lights instead.
+     virtual bool CombatLightsActive() const { return false; }
++    /// Light past the 8-bit colour of the next DrawDecal (display space,
++    /// rgb): the backend adds it to the decal's colour under the photoreal
++    /// camera, which stores light above white, so a smoke puff at the foot of
++    /// a camp fire's column glows brighter than its colour can say. The draw
++    /// clears it. Without the camera (or on another backend) it is dropped.
++    virtual void SetDecalGlow(PackedColor /*glow*/) {}
+     /// Captures: hold the remastered cloud-shadow field at a drift offset in
+     /// metres (pinned = false lets it drift with the wind again from where it
+     /// is). The field integrates the wind every frame, so re-pinning the sim
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index f81d4ec8..70f8ed23 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -319,6 +319,20 @@ float CameraGolden(float sunElevationDeg)
+     return Smoothstep(32.0f, 16.0f, sunElevationDeg) * Smoothstep(1.0f, 5.0f, sunElevationDeg);
+ }
+ 
++Rgb GoldenWarmGain(float golden)
++{
++    const float g = Clamp01(golden);
++    const Rgb w = kCameraGoldenWarm * (1.0f / Luminance(kCameraGoldenWarm));
++    return {1.0f + (w.r - 1.0f) * g, 1.0f + (w.g - 1.0f) * g, 1.0f + (w.b - 1.0f) * g};
++}
++
++float GoldenWarmShare(const Rgb& c)
++{
++    const float peak = MaxOf(c);
++    const float warmth = peak > 0.0f ? (c.r - c.b) / peak : 0.0f;
++    return Smoothstep(kGoldenShareFrom, kGoldenShareTo, warmth);
++}
++
+ float CameraTimeOfDayEv(float sunElevationDeg, float veil)
+ {
+     return kCameraGoldenEv * CameraGolden(sunElevationDeg) +
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+index d7218277..b64d7bb4 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -188,6 +188,20 @@ float TargetExposureLog2(const MeterResult& m, float nightEffect, const Lighting
+ constexpr float kCameraGoldenEv = -0.7f;
+ inline const Rgb kCameraGoldenWarm{1.1f, 1.0f, 0.76f};
+ float CameraGolden(float sunElevationDeg);
++// The warm balance's gain per channel at golden share `golden` (0..1):
++// kCameraGoldenWarm at unit luminance, that far.
++Rgb GoldenWarmGain(float golden);
++// The golden hour's warmth is the low sun's light: the composite lays it on
++// what that light shows and leaves the blue alone (look fix "fire": over the
++// whole frame it turned the clear sky and the clouds teal-grey, (129, 148,
++// 163) on forest_edge_golden, and the picture read as a dull afternoon).
++// The share a colour takes: none at a warmth (r - b) / peak of
++// kGoldenShareFrom (a blue sky), all from kGoldenShareTo (a sunlit field; a
++// grey cloud takes most of it). A wide ramp: from -0.25 to 0.1 the sunrise
++// sky drew an edge round the sun's glow where it met the blue.
++constexpr float kGoldenShareFrom = -0.7f;
++constexpr float kGoldenShareTo = 0.4f;
++float GoldenWarmShare(const Rgb& c);
+ // A high sun under a clear sky (look director round 2: the noon ground stayed
+ // near-white paper): kCameraHighSunEv from 35 degrees, full from 55, gone
+ // under the weather's veil.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+index b3579562..1772970b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+@@ -18,6 +18,29 @@ constexpr float kSmokeGain = 0.35f; // combat light on smoke particles
+ // Material brightness the remastered shaders give a white surface: a particle
+ // lit by irradiance e shows what a white surface lit by e shows.
+ constexpr float kParticleBrightness = 1.6f;
++// The fire's light deepens toward its own hue in the smoke it lights
++// (CombatTuning::smokeTint): each channel's share of the peak to this power,
++// reached as the light's luminance on the particle grows at this rate (look
++// fix "fire": 1.6 left the lit column peach, 3 turned it salmon red).
++constexpr float kSmokeTintPower = 2.2f;
++// The flame's body (look fix "fire"): a fire's flames are its own smoke
++// glowing, incandescent soot in a volume round the light. The classic fire's
++// light lit the puffs there past white, and that yellow column was the
++// flame; the combat light on smoke only scatters, so under the camera the
++// fire had no flame. A puff within kFlameBodyCores core radii of a fire's
++// light emits the flame's colour (linear, kFlameRgb at its peak channel)
++// up to kFlameEmission at the light, falling off squared, times the fire's
++// strength and flicker.
++constexpr float kFlameBodyCores = 3.0f;
++constexpr float kFlameEmission = 8.0f;
++constexpr float kFlameRgb[3] = {1.0f, 0.55f, 0.16f};
++// The fire's own power at strength 1 (EvaluateCombatLight's Fire).
++constexpr float kFirePower = 7.0f;
++constexpr float kSmokeTintRate = 0.6f;
++// The ceiling of the colour version's soft saturation (CombatParticleLight),
++// linear light added at most: the scalar's 4 held the foot of a camp fire's
++// column at the level of the smoke 3 m up, a flat glow with no flame in it.
++constexpr float kParticleLightCap = 12.0f;
+ // The fire's colour, and the warmth a fireball cools to: (1.0, 0.66, 0.39)
+ // lit the ground round a camp fire at red over blue 1.43 to 1.53 on screen,
+ // over the 1.4 that keeps it from reading khaki; one step less saturated.
+@@ -176,7 +199,7 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
+             const float f = 0.80f + 0.10f * std::sin(kTwoPi * 1.3f * age + ph) +
+                             0.07f * std::sin(kTwoPi * 3.7f * age + 2.1f * ph) + 0.10f * Noise1(age * 6.0f, seed) +
+                             0.04f * Noise1(age * 11.0f, seed ^ 0x2545f491U);
+-            SetPower(s, 7.0f * kFireGain * std::max(tuning.fire, 0.0f) * st, 0.45f, kCombatMaxRange);
++            SetPower(s, kFirePower * kFireGain * std::max(tuning.fire, 0.0f) * st, 0.45f, kCombatMaxRange);
+             s.intensity *= std::max(f, 0.2f);
+             break;
+         }
+@@ -250,6 +273,57 @@ float CombatParticleChannel(float display, float irradiance, float smokeGain)
+     return std::pow(lin, 1.0f / 2.2f);
+ }
+ 
++void CombatParticleLight(const float display[3], const float irradiance[3], float smokeGain, float tint, float out[3])
++{
++    const float k = kParticleBrightness * kSmokeGain * std::max(smokeGain, 0.0f);
++    float x[3];
++    for (int i = 0; i < 3; ++i)
++        x[i] = std::max(irradiance[i], 0.0f) * k;
++    const float peak = std::max(x[0], std::max(x[1], x[2]));
++    if (peak <= 0.0f)
++    {
++        for (int i = 0; i < 3; ++i)
++            out[i] = display[i];
++        return;
++    }
++    // A soft saturation on the peak channel (to kParticleLightCap), the same
++    // share off every channel: the light keeps its hue however strong.
++    const float keep = 1.0f / (1.0f + peak / kParticleLightCap);
++    const float lum = (0.2126f * x[0] + 0.7152f * x[1] + 0.0722f * x[2]) * keep;
++    const float w = Clamp(tint, 0.0f, 1.0f) * (1.0f - std::exp(-lum * kSmokeTintRate));
++    for (int i = 0; i < 3; ++i)
++    {
++        const float hue = std::pow(x[i] / peak, kSmokeTintPower);
++        const float add = x[i] * keep * (1.0f + (hue - 1.0f) * w);
++        out[i] = std::pow(std::pow(std::max(display[i], 0.0f), 2.2f) + add, 1.0f / 2.2f);
++    }
++}
++
++void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float d, float out[3])
++{
++    out[0] = out[1] = out[2] = 0.0f;
++    if (kind != CombatLightKind::Fire || s.intensity <= 0.0f)
++        return;
++    const float body = kFlameBodyCores * std::max(s.core, 0.05f);
++    if (d >= body)
++        return;
++    const float t = 1.0f - d / body;
++    // The fire's strength times its flicker (and the fire knob): the light's
++    // power over a strength 1 fire's.
++    const float level = s.intensity * s.core * s.core / (kFirePower * kFireGain);
++    const float e = kFlameEmission * level * t * t;
++    for (int i = 0; i < 3; ++i)
++        out[i] = kFlameRgb[i] * e;
++}
++
++void KeepHueUnderOne(float rgb[3])
++{
++    const float peak = std::max(rgb[0], std::max(rgb[1], rgb[2]));
++    if (peak > 1.0f)
++        for (int i = 0; i < 3; ++i)
++            rgb[i] /= peak;
++}
++
+ float CombatSmokeReach(float core, float albedo)
+ {
+     const float a = Clamp(albedo, 0.0f, 1.0f);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+index 1cf11d6a..94235933 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+@@ -117,6 +117,24 @@ float CombatIrradiance(const CombatLightSample& s, float d2);
+ // saturation (a particle in the fireball's core glows, the cloud around it
+ // shades off instead of clipping to flat cream), times the smoke gain.
+ float CombatParticleChannel(float display, float irradiance, float smokeGain);
++// The same on a colour, keeping the light's hue (look fix "fire"): the soft
++// saturation is taken on the light's peak channel and scales every channel
++// alike, so a puff in a fire's light glows the fire's colour however close it
++// is. Per channel the three saturated toward one value, and the column over a
++// camp fire went to white steam. `tint` (CombatTuning::smokeTint) deepens the
++// light toward its own hue (each channel's share of the peak to the power
++// 2.2) as it grows: what lights a pale smoke from inside has crossed it. The
++// result is in display space and may pass 1 (KeepHueUnderOne).
++void CombatParticleLight(const float display[3], const float irradiance[3], float smokeGain, float tint, float out[3]);
++// A display colour brought under 1 by its peak channel, so an 8-bit vertex
++// colour keeps its hue instead of clipping each channel to white.
++void KeepHueUnderOne(float rgb[3]);
++// The flame's body (look fix "fire"): the light (linear rgb) a puff of smoke
++// `d` metres from a fire's light emits as part of the flames (incandescent
++// soot), added to what it scatters and not scaled by its own colour. A
++// yellow-orange glow that falls off within a metre or so of the light (3
++// core radii); zero for every other kind and outside it.
++void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float d, float out[3]);
+ 
+ // A fire burns inside the foot of its own smoke, and the light reaching a
+ // particle of that smoke has crossed the smoke below it. Soot drinks what it
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index c7e5e559..2c40a875 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -1106,11 +1106,14 @@ Color AddParticleNightLight(ColorVal classic, const float physical[3], float nig
+ // display-space colour in linear light. A fire's light crosses its own smoke
+ // to reach the particle: the darker the particle (`albedo`, the luminance of
+ // its own colour), the shorter the reach (CombatSmokeTransmittance), so a
+-// burning wreck's black column glows at its base only.
+-Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo)
++// burning wreck's black column glows at its base only. A puff inside a fire's
++// flames glows as part of them (CombatFlameEmission): that light, linear,
++// goes to `emit`, added after the particle's own colour.
++Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3])
+ {
+     const lighting::CombatLightSet& set = lighting::GCombatLights();
+     float e[3] = {0.0f, 0.0f, 0.0f};
++    emit[0] = emit[1] = emit[2] = 0.0f;
+     for (const lighting::CombatLightRecord& r : set.Records())
+     {
+         const float dx = r.pos[0] - at.X(), dy = r.pos[1] - at.Y(), dz = r.pos[2] - at.Z();
+@@ -1118,33 +1121,23 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo)
+         float irr = lighting::CombatIrradiance(r.sample, d2);
+         if (irr <= 0.0f)
+             continue;
+-        irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, std::sqrt(d2), albedo);
++        const float d = std::sqrt(d2);
++        irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);
+         for (int i = 0; i < 3; ++i)
+             e[i] += r.sample.rgb[i] * irr;
++        float flame[3];
++        lighting::CombatFlameEmission(r.kind, r.sample, d, flame);
++        for (int i = 0; i < 3; ++i)
++            emit[i] += flame[i];
+     }
+     if (e[0] + e[1] + e[2] <= 1e-5f)
+         return color;
+-    const float gain = set.Tuning().smoke;
+-    // The light's hue on the particle's own colour (CombatTuning::smokeTint).
+-    Color base = color;
+-    const float tint = set.Tuning().smokeTint;
+-    if (tint > 0.0f)
+-    {
+-        const float peak = std::max(e[0], std::max(e[1], e[2]));
+-        const float lum = 0.2126f * e[0] + 0.7152f * e[1] + 0.0722f * e[2];
+-        const float w = tint * (1.0f - std::exp(-lum * 0.6f));
+-        float c[3] = {color.R(), color.G(), color.B()};
+-        for (int i = 0; i < 3; ++i)
+-        {
+-            const float hue = std::pow(std::max(e[i] / peak, 0.0f), 1.6f);
+-            const float lin = std::pow(std::max(c[i], 0.0f), 2.2f) * (1.0f + (hue - 1.0f) * w);
+-            c[i] = std::pow(lin, 1.0f / 2.2f);
+-        }
+-        base = Color(c[0], c[1], c[2], color.A());
+-    }
+-    return Color(lighting::CombatParticleChannel(base.R(), e[0], gain),
+-                 lighting::CombatParticleChannel(base.G(), e[1], gain),
+-                 lighting::CombatParticleChannel(base.B(), e[2], gain), color.A());
++    // The light keeps its hue on the puff, deepened toward it by the tint
++    // (CombatTuning::smokeTint); DrawDecal keeps that hue under one.
++    const float base[3] = {color.R(), color.G(), color.B()};
++    float lit[3];
++    lighting::CombatParticleLight(base, e, set.Tuning().smoke, set.Tuning().smokeTint, lit);
++    return Color(lit[0], lit[1], lit[2], color.A());
+ }
+ } // namespace
+ 
+@@ -1211,6 +1204,8 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+         // world space normal is opposite to camera direction
+         ClipFlags hints = shape->GetOrHints();
+         Color colorI;
++        // The light a puff inside a fire's flames emits (linear; CombatLitParticle).
++        float flameEmit[3] = {0.0f, 0.0f, 0.0f};
+         int mat = (hints & ClipUserMask) / ClipUserStep;
+         if (mat != MSShining)
+         {
+@@ -1270,7 +1265,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+                     const Color own = (ColorVal)GetConstantColor();
+                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
+                 }
+-                colorI = CombatLitParticle(colorI, pos.Position(), albedo);
++                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);
+             }
+             colorI.SetA(1);
+         }
+@@ -1283,6 +1278,28 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+         {
+             colorI = colorI * (ColorVal)GetConstantColor();
+         }
++        // A puff in a strong combat light (the foot of a camp fire's column)
++        // passes 1: brought under it by its peak, it keeps the light's hue
++        // instead of clipping to white in the 8-bit vertex colour, and the
++        // light past 1 goes to the backend as the decal's glow (SetDecalGlow),
++        // so the column's foot glows brighter than the smoke above it.
++        if (mat != MSShining && GEngine->CombatLightsActive())
++        {
++            // The flame's own light (not its colour's: it glows, it does not
++            // scatter) joins in linear light.
++            float rgb[3] = {colorI.R(), colorI.G(), colorI.B()};
++            for (int i = 0; i < 3; ++i)
++                if (flameEmit[i] > 0.0f)
++                    rgb[i] = std::pow(std::pow(std::max(rgb[i], 0.0f), 2.2f) + flameEmit[i], 1.0f / 2.2f);
++            float glow[3] = {rgb[0], rgb[1], rgb[2]};
++            lighting::KeepHueUnderOne(rgb);
++            for (int i = 0; i < 3; ++i)
++                glow[i] -= rgb[i];
++            lighting::KeepHueUnderOne(glow);
++            colorI = Color(rgb[0], rgb[1], rgb[2], colorI.A());
++            if (glow[0] + glow[1] + glow[2] > 1.0f / 255.0f)
++                GEngine->SetDecalGlow(PackedColor(Color(glow[0], glow[1], glow[2], 0.0f)));
++        }
+         // check if there are not some unsupported lighting flags
+         float dist2 = Position().Distance2(camera.Position());
+         float fog = GScene->Fog8(dist2) * (1.0 / 255);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 4b7ba5fd..052c9c92 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -270,6 +270,8 @@ class EngineGL33 : public Engine
+ #endif
+ 
+     RString _pendingScreenshotPath;
++    // The next decal's light past its colour (SetDecalGlow), cleared by it.
++    PackedColor _decalGlow = PackedColor(0u);
+ 
+     void DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
+                    const Poseidon::MipInfo& mip, int specFlags) override;
+@@ -717,6 +719,7 @@ class EngineGL33 : public Engine
+     bool RemasterMoonKey() const override;
+     bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
+     bool CombatLightsActive() const override { return _combat.active; }
++    void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
+     void RequestShaderReload() override { _shaderReloadPending = true; }
+     void MarkWorldOverlay() override
+     {
+@@ -1188,6 +1191,9 @@ class EngineGL33 : public Engine
+         float timeEv = 0.0f;     // CameraTimeOfDayEv: the golden hour's and the high sun's EV (look director round 2)
+         // Colour: white balance times the scene saturation.
+         Poseidon::remaster::Mat3 color;
++        // The golden hour's warm gain (GoldenWarmGain), laid by the composite
++        // on the light that is not blue (camGolden).
++        Poseidon::remaster::Rgb goldenGain{1.0f, 1.0f, 1.0f};
+         float shadeCool = 0.0f; // the cool shade of a low sun (composite camShade.w)
+         float whiteBalance = 0.0f;
+         float skyScale = 0.0f;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+index 2b1883c8..72265a0d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+@@ -133,17 +133,10 @@ void EngineGL33::UpdateCameraFrame(const rm::LightRig& rig, bool atmosphereOn)
+         _lighting.camSat - rm::kLowSunSaturationDrop * lowSun * (1.0f - c.nightEffect) - rm::kVeilSaturationDrop * veil;
+     c.color = rm::Multiply(rm::Saturation(sat), wb);
+     c.timeEv = rm::CameraTimeOfDayEv(rig.sunElevationDeg, veil);
+-    // The golden hour's warm balance (kCameraGoldenWarm, at unit luminance).
+-    if (c.golden > 0.0f)
+-    {
+-        const rm::Rgb w = rm::kCameraGoldenWarm * (1.0f / rm::Luminance(rm::kCameraGoldenWarm));
+-        const float g = c.golden * (1.0f - veil);
+-        rm::Mat3 warm;
+-        warm.m[0] = 1.0f + (w.r - 1.0f) * g;
+-        warm.m[4] = 1.0f + (w.g - 1.0f) * g;
+-        warm.m[8] = 1.0f + (w.b - 1.0f) * g;
+-        c.color = rm::Multiply(warm, c.color);
+-    }
++    // The golden hour's warm balance (kCameraGoldenWarm, at unit luminance):
++    // the composite lays it on the light that is not blue (GoldenWarmShare),
++    // so the clear sky and the sky-lit shade keep their blue.
++    c.goldenGain = rm::GoldenWarmGain(c.golden * (1.0f - veil));
+     // The cool shade of a low sun.
+     const float lowShade = 1.0f - rm::SmoothStep(15.0f, 45.0f, rig.sunElevationDeg);
+     c.shadeCool =
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+index d10896de..da6cc7ff 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+@@ -24,6 +24,8 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
+     // the sun; its rays were the starburst round a low sun and, added over the
+     // bright sky, ran the frame's codes into the top of the encoding), at
+     // night a lamp's halo (PhotoCamera.hpp kCameraFlareNight).
++    const DWORD glow = (_camera.frameOn && _camera.frame == GetFrameCounter()) ? static_cast<DWORD>(_decalGlow) : 0u;
++    _decalGlow = PackedColor(0u);
+     constexpr int kFlareBits =
+         static_cast<int>(Poseidon::render::Backend::IsLight) | static_cast<int>(Poseidon::render::Backend::NoZBuf);
+     if ((specFlags & kFlareBits) == kFlareBits && _camera.frameOn && _camera.frame == GetFrameCounter())
+@@ -121,6 +123,12 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
+         v[0].specular = PackedColor(0xff000000 - (color & 0xff000000));
+         v[0].color = PackedColor(color | 0xff000000);
+     }
++    // The light past the colour (SetDecalGlow) rides in the specular colour,
++    // which the shaders add to the decal's (the pre-lit path, r0 + vSpecColor)
++    // and blend by its coverage; only the photoreal camera stores it above
++    // white.
++    if (glow != 0u)
++        v[0].specular = PackedColor((static_cast<DWORD>(v[0].specular) & 0xff000000u) | (glow & 0x00ffffffu));
+ 
+     int i;
+     for (i = 0; i < 4; i++)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index f3bf1b98..d32d481b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -686,14 +686,16 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
+         ct.flash = _lighting.combatFlash;
+         ct.fire = _lighting.combatFire;
+         ct.smoke = _lighting.combatSmoke;
+-        // Under the photoreal camera at night (look director round 2) a fire
+-        // lights its own smoke three times as strongly: the classic fire's
+-        // light, which lit the column yellow, lights nothing now, and the
+-        // column read as white steam over the flame.
++        // Under the photoreal camera at night the fire's light on its own
++        // smoke deepens toward its hue (look director round 2). Look fix
++        // "fire": the column read as white steam because the smoke's light
++        // saturated channel by channel and clipped in the 8-bit colour, not
++        // because it was too weak; with the hue kept and the light past white
++        // carried as the puff's glow (CombatParticleLight, SetDecalGlow) the
++        // round-2 boost of three times lit the column flat orange to 4 m up.
+         if (_camera.frameOn)
+         {
+             const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
+-            ct.smoke *= 1.0f + 2.0f * camNight;
+             ct.smokeTint = 0.85f * camNight;
+         }
+         ct.scatter = _lighting.combatScatter;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+index b5a906d1..abc45166 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+@@ -124,6 +124,12 @@ void DeleteTex(unsigned int& t)
+     t = 0;
+ }
+ 
++// A fire's light on surfaces under the photoreal camera comes from a body of
++// flames this wide (m), not from the 0.45 m ball the smoke reach is measured
++// in (look fix "fire": the stones round a camp fire went past white to a
++// cream slab).
++constexpr float kFireSurfaceBody = 1.3f;
++
+ // How thick the lit smoke and dust around a light is (m): muzzle gas, the
+ // dust and smoke of a blast, the hot air round a fire's flames. A fire's own
+ // smoke is lit particle by particle (Object::DrawDecal), its base glowing; a
+@@ -278,9 +284,21 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
+                 case fl::CombatLightKind::Fire:
+                     // (A burning wreck's fire at its roof lit the plain behind
+                     // it out to 120 m: a strip along the horizon at dusk.)
++                    // Look fix "fire": a wood fire's light is near 2000 K;
++                    // at (0.74, 0.48) the stones round a camp fire went to a
++                    // cream slab past white and the lit grass stayed
++                    // grey-green (red over green 5.8 levels).
+                     f.range = std::min(f.range, 20.0f);
+-                    warmG = 0.74f;
+-                    warmB = 0.48f;
++                    warmG = 0.6f;
++                    warmB = 0.3f;
++                    // The flames are a body, not a point: the stones round
++                    // them take a flame's light (1 / (body^2 + d^2) at the
++                    // same power); from 3 m out the pool loses under a quarter stop.
++                    if (f.start < kFireSurfaceBody)
++                    {
++                        gain *= (f.start * f.start) / (kFireSurfaceBody * kFireSurfaceBody);
++                        f.start = kFireSurfaceBody;
++                    }
+                     break;
+                 default:
+                     break;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c7736d4f..59db8762 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -971,6 +971,9 @@ void EngineGL33::PostComposite(const PostFrame& f)
+         Set4(p.progComposite, "camColor0", m[0], m[1], m[2], 0.0f);
+         Set4(p.progComposite, "camColor1", m[3], m[4], m[5], 0.0f);
+         Set4(p.progComposite, "camColor2", m[6], m[7], m[8], 0.0f);
++        // The golden hour's warm gain, on the light that is not blue
++        // (PhotoCamera.hpp GoldenWarmShare).
++        Set4(p.progComposite, "camGolden", _camera.goldenGain.r, _camera.goldenGain.g, _camera.goldenGain.b, 0.0f);
+         // No screen-space shafts under the camera: their 40-step radial march
+         // drew a fan of streaks and a hatch round a low sun, in the frame's
+         // focal point; the air pass's beams (B8) are the camera's sun beams.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 51ae32cd..b88c2b3f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -264,6 +264,7 @@ uniform vec4 camCurve;   // the filmic curve y = x^a / (x^(a d) b + c): a, d, b,
+ uniform vec4 camColor0;  // rows of the white balance times the scene saturation
+ uniform vec4 camColor1;
+ uniform vec4 camColor2;
++uniform vec4 camGolden;  // rgb the golden hour's warm gain (1 = none), laid on the light that is not blue
+ uniform vec4 camGlow;    // x bloom gain, y shaft gain, z aspect (w / h), w the rods' warmth fade width
+ uniform vec4 camNight;   // x the night's rod shift, y its luminance, z the curve's white (scene light), w stops past
+                          // it to white
+@@ -495,6 +496,17 @@ void main() {
+         // Combat light scattered in the air (B4), as light at the exposure.
+         x += combatScatter();
+         x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
++        // The golden hour's warm balance (camGolden) is the low sun's light:
++        // what it shows takes it, the blue sky and the sky-lit blue do not
++        // (PhotoCamera.hpp GoldenWarmShare: none at a warmth (r - b) / peak
++        // of -0.7, all from 0.4, a wide ramp so a sky's gradient from the
++        // sun's glow to its blue stays smooth). Over the whole frame it
++        // turned the clear sky teal-grey.
++        if (camGolden.r != 1.0 || camGolden.b != 1.0) {
++            float pk = max(x.r, max(x.g, x.b));
++            float warmth = pk > 0.0 ? (x.r - x.b) / pk : 0.0;
++            x *= mix(vec3(1.0), camGolden.rgb, smoothstep(-0.7, 0.4, warmth)); // kGoldenShareFrom, kGoldenShareTo
++        }
+         // At a low sun the camera, on daylight balance, sees the shade lit by
+         // the blue sky: what the sky lights more than the sun (the world's
+         // sky light share, `share`) leans cool (camShade), what the sun
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+index 70be92af..4bea29fc 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+@@ -279,6 +279,93 @@ TEST_CASE("Combat lights: smoke takes the light softly; no light leaves it as it
+     CHECK(CombatParticleChannel(0.3f, 1e4f, 1.0f) < 2.0f);
+ }
+ 
++TEST_CASE("Combat lights: a fire lights its smoke in its own colour however close, brighter at the foot",
++          "[remaster][CombatLights]")
++{
++    // Look fix "fire": the channels saturated one by one toward the same
++    // value, so the foot of a camp fire's column went white (town_night
++    // plume (179, 166, 151)), and the 8-bit colour clipped each channel. The
++    // colour version saturates on the peak and keeps the light's hue.
++    const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
++    const float ambient[3] = {0.08f, 0.08f, 0.09f}; // a puff under the night's light
++    auto lit = [&](float d, float tint, float out[3])
++    {
++        const float e = CombatIrradiance(fire, d * d) * CombatSmokeTransmittance(CombatLightKind::Fire, fire, d, 0.7f);
++        const float irr[3] = {fire.rgb[0] * e, fire.rgb[1] * e, fire.rgb[2] * e};
++        CombatParticleLight(ambient, irr, 3.0f, tint, out);
++    };
++    // No light: as it was.
++    const float none[3] = {0.0f, 0.0f, 0.0f};
++    float same[3];
++    CombatParticleLight(ambient, none, 3.0f, 0.85f, same);
++    for (int i = 0; i < 3; ++i)
++        CHECK(same[i] == ambient[i]);
++    float foot[3], mid[3], top[3];
++    lit(0.8f, 0.0f, foot);
++    lit(3.0f, 0.0f, mid);
++    lit(6.0f, 0.0f, top);
++    // Warm through: red over blue stays well above grey at the foot, where
++    // the per-channel form had all three near its ceiling.
++    CHECK(foot[0] / foot[2] > 1.3f);
++    const float perChannel = CombatParticleChannel(0.08f, fire.rgb[0] * 40.0f, 3.0f) /
++                             CombatParticleChannel(0.09f, fire.rgb[2] * 40.0f, 3.0f);
++    CHECK(perChannel < 1.25f);
++    // The foot glows past white (the backend carries it as the decal's glow)
++    // and well above the smoke 3 m up, which is above the smoke 6 m up.
++    CHECK(foot[0] > 1.5f);
++    CHECK(foot[0] > 1.6f * mid[0]);
++    CHECK(mid[0] > top[0]);
++    // Bounded: the ceiling of the soft saturation.
++    float core[3];
++    const float huge[3] = {1e5f, 7e4f, 4.5e4f};
++    CombatParticleLight(ambient, huge, 3.0f, 0.0f, core);
++    CHECK(core[0] < 3.3f);
++    // The tint deepens the hue toward the light's own, never brightens red.
++    float tinted[3];
++    lit(0.8f, 0.85f, tinted);
++    CHECK(tinted[0] == Catch::Approx(foot[0]));
++    CHECK(tinted[1] / tinted[0] < foot[1] / foot[0]);
++    CHECK(tinted[2] / tinted[0] < foot[2] / foot[0]);
++    // Under one by the peak: the hue stays.
++    float c[3] = {2.0f, 1.2f, 0.6f};
++    KeepHueUnderOne(c);
++    CHECK(c[0] == Catch::Approx(1.0f));
++    CHECK(c[1] == Catch::Approx(0.6f));
++    CHECK(c[2] == Catch::Approx(0.3f));
++    float d[3] = {0.5f, 0.4f, 0.3f};
++    KeepHueUnderOne(d);
++    CHECK(d[0] == 0.5f);
++}
++
++TEST_CASE("Combat lights: the smoke inside a fire's flames glows as the flame", "[remaster][CombatLights]")
++{
++    // Look fix "fire": the classic fire's light lit the puffs round it past
++    // white, and that yellow column was the flame; the combat light on smoke
++    // only scatters, so under the camera a camp fire had no flame. A puff in
++    // the flames' body emits a yellow-orange light, strongest at the light,
++    // none a metre or so out, and only for a fire.
++    const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
++    float at[3], half[3], out[3];
++    CombatFlameEmission(CombatLightKind::Fire, fire, 0.0f, at);
++    CombatFlameEmission(CombatLightKind::Fire, fire, 0.5f, half);
++    CombatFlameEmission(CombatLightKind::Fire, fire, 1.5f, out);
++    CHECK(at[0] > 1.5f);
++    CHECK(at[0] > at[1]);
++    CHECK(at[1] > 2.0f * at[2]);
++    CHECK(half[0] > 0.0f);
++    CHECK(half[0] < at[0]);
++    CHECK(out[0] == 0.0f);
++    // A stronger fire's flames glow more; a flash, a flare or no fire not at all.
++    float big[3];
++    CombatFlameEmission(CombatLightKind::Fire, At(CombatLightKind::Fire, 1.0f, 2.0f), 0.0f, big);
++    CHECK(big[0] > 1.5f * at[0]);
++    float flash[3];
++    CombatFlameEmission(CombatLightKind::Explosion, At(CombatLightKind::Explosion, 0.0f), 0.0f, flash);
++    CHECK(flash[0] == 0.0f);
++    CombatFlameEmission(CombatLightKind::Flare, At(CombatLightKind::Flare, 1.0f), 0.0f, flash);
++    CHECK(flash[0] == 0.0f);
++}
++
+ TEST_CASE("Combat lights: a burning wreck's black smoke glows at its base and its column stays dark",
+           "[remaster][CombatLights]")
+ {
+@@ -866,11 +953,17 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
+     CHECK(decal.find("if (combat &&") != std::string::npos);
+     CHECK(decal.find("(kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire)") !=
+           std::string::npos);
+-    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo);") != std::string::npos);
++    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);") != std::string::npos);
++    // Look fix "fire": a puff's colour comes under one by its peak (no
++    // clipped white column) and the light past it goes to the decal's glow.
++    CHECK(decal.find("lighting::KeepHueUnderOne(rgb);") != std::string::npos);
++    CHECK(decal.find("GEngine->SetDecalGlow(") != std::string::npos);
+     // A fire's light crosses its smoke to reach a particle (the wreck's plume).
+     const std::string litParticle = FunctionBody(object, "Color CombatLitParticle(");
+-    CHECK(litParticle.find("irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, std::sqrt(d2), albedo);") !=
++    CHECK(litParticle.find("irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);") !=
+           std::string::npos);
++    CHECK(litParticle.find("lighting::CombatParticleLight(") != std::string::npos);
++    CHECK(litParticle.find("lighting::CombatFlameEmission(r.kind, r.sample, d, flame);") != std::string::npos);
+     // The frame's list keeps the steady lights past the twelve, and a fire's
+     // lit air is a small halo, not a 4.4 m ball over its smoke.
+     const std::string post = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_PostCombat.cpp");
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 1eb3073a..9c640e09 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -535,4 +535,31 @@ TEST_CASE("PhotoCamera: critic round 2: the histogram meter, the low sun's balan
+     CHECK_FALSE(PlanPostStages(pin).Runs(PostStage::Shafts));
+     pin.camera = false;
+     CHECK(PlanPostStages(pin).Runs(PostStage::Shafts));
+-}
+\ No newline at end of file
++}
++TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and leaves the blue sky blue",
++          "[Remaster][PhotoCamera]")
++{
++    // Look fix "fire": the warm balance over the whole frame turned the clear
++    // sky and its clouds teal-grey on forest_edge_golden ((129, 148, 163)).
++    // The gain: none out of the golden hour, kCameraGoldenWarm at unit
++    // luminance in it.
++    const Rgb none = GoldenWarmGain(0.0f);
++    CHECK(none.r == 1.0f);
++    CHECK(none.g == 1.0f);
++    CHECK(none.b == 1.0f);
++    const Rgb full = GoldenWarmGain(1.0f);
++    CHECK(Luminance(full) == Catch::Approx(1.0f).epsilon(1e-4));
++    CHECK(full.r > 1.05f);
++    CHECK(full.b < 0.8f);
++    CHECK(GoldenWarmGain(2.0f).r == Catch::Approx(full.r));
++    // The share: a clear sky's blue takes none, a sunlit field all of it, a
++    // grey cloud most of it; it rises with the warmth.
++    CHECK(GoldenWarmShare(Rgb(0.20f, 0.30f, 0.49f)) < 0.05f);
++    CHECK(GoldenWarmShare(Rgb(0.10f, 0.20f, 0.50f)) == 0.0f);
++    CHECK(GoldenWarmShare(Rgb(0.28f, 0.17f, 0.05f)) == 1.0f);
++    const float grey = GoldenWarmShare(Rgb(0.5f, 0.5f, 0.5f));
++    CHECK(grey > 0.5f);
++    CHECK(grey < 1.0f);
++    CHECK(GoldenWarmShare(Rgb(0.45f, 0.5f, 0.55f)) < grey);
++    CHECK(GoldenWarmShare(Rgb(0.0f, 0.0f, 0.0f)) > 0.0f);
++}

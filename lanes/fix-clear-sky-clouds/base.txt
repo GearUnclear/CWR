@@ -1,0 +1,8 @@
+lane: fix-clear-sky-clouds
+source: D:/Arma_CWA_worktrees/fix-clear-sky-clouds
+HEAD: 3c53141a86cdefd84023e0120d520c1687eaa61b
+subject: tests: capture runs take their own data junction and a shader override dir
+commit date: 2026-10-17 14:03:33 -0700
+origin branches containing HEAD: origin/claude/remaster-water-research, origin/claude/youthful-lovelace-8imbdh, origin/graphics-remaster
+files in lane.patch: 4
+binary files changed (content not in patch): none

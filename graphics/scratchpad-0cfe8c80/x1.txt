@@ -1,0 +1,2 @@
+# reflections' trace its LitConstants block and sky piece (psPostSsrTrace), the
+# volumetric fog the same three (psFogInject, psFogApply).

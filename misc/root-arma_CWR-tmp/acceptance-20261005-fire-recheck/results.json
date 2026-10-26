@@ -1,0 +1,22 @@
+[
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_civilian.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-fire-recheck\\guerrilla_assailant_fire_civilian"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_covered.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-fire-recheck\\guerrilla_assailant_fire_covered"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_occupier.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-fire-recheck\\guerrilla_assailant_fire_occupier"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_resistance.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-fire-recheck\\guerrilla_assailant_fire_resistance"
+  }
+]

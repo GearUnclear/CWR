@@ -1,0 +1,11 @@
+; Only maps an actual overlay action to an overlay request. Production
+; recruitment / market / conversation / save actions retain their own handlers.
+HT_click = HT_ACTIONS find (_this select 2)
+? HT_click < 0 : exit
+? HT_REQUEST != "" : exit
+? not HT_OPEN : HT_REQUEST = "open"
+? not HT_OPEN : exit
+? HT_ACTIVE : HT_REQUEST = ["check", "repeat", "fail", "blocked", "stop"] select HT_click
+? HT_ACTIVE : exit
+HT_REQUEST = ["begin", "next", "previous", "unpassed", "report", "close", "roads"] select HT_click
+exit

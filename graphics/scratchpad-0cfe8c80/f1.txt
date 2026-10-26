@@ -1,0 +1,5 @@
+    // The reflections march the half-resolution linear depth.
+    {PostStage::Ssr, "ssr", "B6", true, true, Mark::SsrEnd, Section::Ssr},
+    // B8: the air pass marches at half resolution, on the linear depth; the
+    // look lane's volumetric fog (EngineGL33_PostFog.cpp) runs on the same
+    // stage in its place.

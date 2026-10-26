@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.25)
+project(DependencyProbe LANGUAGES C CXX)
+include("D:/Arma_CWA/arma_CWR/cmake/ClangClDependencyTracking.cmake")
+add_library(probe OBJECT probe.c probe.cpp pch_probe.cpp)
+target_precompile_headers(probe PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp>")
+set_source_files_properties(probe.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)

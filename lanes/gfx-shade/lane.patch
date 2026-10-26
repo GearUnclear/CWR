@@ -1,0 +1,140 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index e81d4c35..09e30e77 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -182,16 +182,46 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     // averages 1 - c(1 - T), so c = (1 - skyThrough) for T = 0.2.
+     const float skyThrough = Clamp01(in.skyThrough);
+     const float cover = 1.0f - skyThrough;
+-    const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && cover > 0.02f;
+-    const float overcastDim = clouds ? 1.0f : skyThrough * 0.8f + 0.2f;
+-    rig.cloudCover = clouds ? cover : 0.0f;
++    // shade research: the C++ port of the shader prototype (rig V20 + V21), switched
++    // on by the moonlight knob set to 1.01 (no visible effect of that value by day).
++    const bool shadeRig = tuning.moonlight > 1.005f && tuning.moonlight < 1.015f;
++    // shade research: the clearest weather the engine has (setOvercast 0) still
++    // reports skyThrough 0.959 (Weather::SetSky interpolates from the -0.08 "jasno"
++    // keyframe), so 4% of a clear day sat under 0.2-transmission cloud shadows with
++    // no cloud in the sky. Cloud shadows start above that floor; the rest of the
++    // classic dimming stays uniform, so the mean still equals classic's.
++    constexpr float kClearCover = 0.05f;
++    const float shadowCover = shadeRig ? Clamp01((cover - kClearCover) / (1.0f - kClearCover)) : cover;
++    const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && shadowCover > 0.02f;
++    rig.cloudCover = clouds ? shadowCover : 0.0f;
+     rig.cloudTransmit = clouds ? 1.0f - (1.0f - kCloudTransmit) * std::min(1.0f, tuning.cloudShadows) : 1.0f;
++    const float classicDim = skyThrough * 0.8f + 0.2f;
++    float overcastDim = clouds ? 1.0f : classicDim;
++    if (shadeRig && clouds)
++        overcastDim = std::min(1.0f, classicDim / std::max(1.0f - shadowCover * (1.0f - rig.cloudTransmit), 1e-3f));
+ 
+     const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
+     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);
+     const float clearSun = kSunNoon * extinction * aboveHorizon;
+     const float sunPower = clearSun * overcastDim * tuning.sun;
+-    rig.sun = EveningSunChroma(elevation, in.classicSunDiffuse, tuning.warmth) * sunPower;
++    Rgb sunChroma = EveningSunChroma(elevation, in.classicSunDiffuse, tuning.warmth);
++    if (shadeRig)
++    {
++        // Classic's sunset hue ramps in from 25 degrees (LightSun::Recalculate,
++        // begSunset); the shipped blend above starts at 16 and reaches only 14%
++        // at 12.7 degrees. Take a further share of it from 25 degrees down, and
++        // more in the last 9 degrees, where classic's sun is nearly pure red and
++        // the remastered sky fill would otherwise leave the hull less red.
++        const Rgb classicLinear = ToLinear(in.classicSunDiffuse);
++        if (Luminance(classicLinear) > 1e-5f)
++        {
++            const float share = 0.4f * (1.0f - Smoothstep(6.0f, 25.0f, elevation)) +
++                                0.3f * (1.0f - Smoothstep(4.0f, 9.0f, elevation));
++            const float w2 = share * Clamp01(tuning.warmth);
++            sunChroma = NormaliseLuminance(Mix(sunChroma, NormaliseLuminance(classicLinear), w2));
++        }
++    }
++    rig.sun = sunChroma * sunPower;
+ 
+     // --- sky hemisphere ------------------------------------------------------
+     const float clearSky = kSkyNoon * SkyDayFraction(sinSun);
+@@ -236,12 +266,19 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     const float sunOnGround = Luminance(rig.sun) * std::max(sinSun, 0.0f);
+     const float bouncePower = kGroundAlbedo * (sunOnGround + skyPower) * tuning.bounce;
+     const Rgb bounceChroma = NormaliseLuminance(Rgb(1.0f, 1.0f, 0.96f));
+-    rig.skyGround = bounceChroma * bouncePower;
++    // shade research: at a low sun the light on vertical faces comes mostly
++    // sideways (the bright horizon band and the sunlit ground in front of a
++    // face), which the hemisphere split above under-counts: the face away from
++    // the sun fell to 0.42 of its sunlit side at 14 degrees and 0.32 at 7.
++    // Brighten the horizon terms (most on the anti-sun side) and the bounce
++    // from 40 degrees down; up-facing ground (zenith only) is unchanged.
++    const float fill = shadeRig ? (1.0f - Smoothstep(8.0f, 40.0f, elevation)) * Smoothstep(-2.0f, 3.0f, elevation) : 0.0f;
++    rig.skyGround = bounceChroma * bouncePower * (1.0f + 1.3f * fill);
+     // A vertical surface sees half the dome and half the ground. The sky toward
+     // a low sun is brighter than the sky opposite it.
+     const float low = 1.0f - Clamp01(sinSun);
+-    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low)) + rig.skyGround * 0.5f;
+-    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low)) + rig.skyGround * 0.5f;
++    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low) * (1.0f + 0.5f * fill)) + rig.skyGround * 0.5f;
++    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low) * (1.0f + 2.6f * fill)) + rig.skyGround * 0.5f;
+ 
+     // --- moon ----------------------------------------------------------------
+     const float moonUp = Smoothstep(0.0f, 0.2f, in.towardMoon[1]);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+index e5d46b7c..5c59eb1f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+@@ -308,6 +308,8 @@ class Shape: public Poseidon::VertexTable
+ 	bool _faceNormalsValid;
+ 	bool _loadWarning; // some warning during load - report filename
+ 	mutable signed char _hasBlendSections = -1; // cached: any section's texture is alpha-blend (-1 = not computed)
++	bool _lazyVBTried = false; // shade research: a vertex buffer was tried for a shape loaded after OptimizeAll
++	bool _lazyVB = false;      // shade research: _buffer was created on first draw (used only by the remastered lighting)
+ 
+ 	// proxy objects
+ 	RefArray<ProxyObject> _proxy;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+index 0c861888..99d4cc2d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+@@ -26,6 +26,7 @@
+ #include <Poseidon/World/MapTypes.hpp>
+ #include <stdio.h>
+ #include <cmath>
++#include <cstdlib>
+ #include <memory>
+ #include <string>
+ #include <Poseidon/Foundation/Containers/Array.hpp>
+@@ -86,7 +87,35 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags
+ 
+     bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+ 
+-    if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
++    // shade research prototype: a shape first loaded after the mission's
++    // Shapes.OptimizeAll() (a script-spawned vehicle whose class the mission
++    // did not place) never got a vertex buffer, so it fell back to the CPU T&L
++    // path: classic per-vertex lighting baked into pre-lit vertices, which the
++    // remastered shaders pass through untouched (no per-pixel light, no shadow
++    // maps received). Give it a buffer on first draw, with the exclusions of
++    // LODShape::OptimizeRendering plus any special per-vertex lighting (sun,
++    // moon, halo, sky, cloud, stars, lines: SpecLighting / ClipLight hints).
++    // The lazily made buffer is used only while the remastered lighting is
++    // active, so Classic keeps its CPU path bit for bit.
++    const bool remasterActive = engine->LightingRemasterActive();
++    if (!_buffer && !_lazyVBTried && remasterActive && ENGINE_CONFIG.enableHWTL && engine->GetTL() && EnableHWTLState &&
++        tlAble && std::getenv("CWR_NO_LAZY_VB") == nullptr)
++    {
++        _lazyVBTried = true;
++        const bool normalLighting = ((GetOrHints() | GetAndHints()) & ClipLightMask) == ClipLightNormal;
++        const bool plain = ((Special() | spec) & (IsLight | OnSurface | SpecLighting)) == 0;
++        if (NVertex() > 0 && NFaces() > 0 && normalLighting && plain)
++        {
++            ConvertToVBuffer(VBDynamic);
++            _lazyVB = _buffer != nullptr;
++            static int s_lazyCount = 0;
++            if (_lazyVB && ++s_lazyCount <= 64)
++                LOG_INFO(Graphics, "shade: lazy vertex buffer for a shape loaded after OptimizeAll ({} vertices)", NVertex());
++        }
++    }
++    const bool useBuffer = _buffer && (!_lazyVB || remasterActive);
++
++    if (engine->GetTL() && EnableHWTLState && tlAble && useBuffer)
+     {
+         if (BeginFaces() < EndFaces() && NSections() > 0)
+         {

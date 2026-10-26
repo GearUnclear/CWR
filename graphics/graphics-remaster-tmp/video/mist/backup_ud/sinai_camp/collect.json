@@ -1,0 +1,16 @@
+{
+ "clip": "sinai_camp",
+ "side": "ud",
+ "frames": 540,
+ "fps": 60,
+ "size": [
+  1920,
+  1080
+ ],
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\ud\\sinai_camp\\sinai_camp__ud.mkv",
+ "game_dir": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+ "mode_line": "view=sinai_camp;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=495;objects=371;culled=185;lights=4;lod=0.0104167;pin=1;horizon=ready",
+ "gamma": null,
+ "run": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\runs\\ud-sinai_camp",
+ "mb": 371.6
+}

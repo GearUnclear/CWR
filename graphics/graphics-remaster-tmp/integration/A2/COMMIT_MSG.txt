@@ -1,0 +1,86 @@
+graphics: remastered shaders split by concern, one LitConstants block
+
+What the player sees: nothing. A2 reorganises the shader sources the
+visible steps will edit, and every program the engine compiles is byte
+for byte what it was, so no pixel changes.
+
+How it works: the remastered fragment prelude, one 20 KB string until
+now, is ten pieces by concern (FragmentPiece: header, LitConstants,
+inputs, shadows, terrain and clouds, sky, local lights, surface, shade,
+finish), joined in that order by the kFragmentPieces table in
+RemasterFragmentCommon(). Sky, local lights and surface, the pieces the
+later steps grow, have files of their own
+(EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp). The LitConstants
+block is one string, LitConstantsBlock(), for every shader that reads the
+rig; four prototypes pasted copies of their own. The post GLSL moved to
+EngineGL33_PostShaders.cpp, which has no GL code, so the unit tests link
+and compile the sources the engine builds: a kPostShaders table assembles
+each post shader (PostShaderName, PostShaderSource), and s_glslPostCommon
+holds the depth reconstruction AO uses (viewZ, viewPos); EnsurePostResources
+builds from the table. EngineGL33_Lighting.hpp fixes the shared tables of
+plan 3.3 and 3.4: LitConstPlanned holds slots 58 to 78 for the features
+still to land (LitConst itself is unchanged, so the block's GLSL is
+too), and the texture units are named constants (kShadowMapUnit 2, the
+four in use, 6 and 8 to 15 allocated) under one static_assert (2 to 15,
+never the upload unit 7, all distinct). kLitSamplers is the one table
+InitPixelShaders binds every lit sampler from, the shadow map of both
+program sets included; the literal unit 2 in the lighting, shadow-depth
+and shader code is kShadowMapUnit.
+
+The switch and its gates: none; A2 adds no feature.
+
+Kept, rewritten and dropped from the prototypes: no prototype code. The
+plan's post common (noise, cascade lookup, terrain and cloud helpers) is
+narrowed to what has a consumer: AO declares its own uniforms between
+the ones the shared functions read, so moving the declarations would
+reorder its source; the rest joins with its first post pass, and the
+terrain and cloud helpers are reusable as the TerrainClouds piece. Plan
+3.3 to 3.5 and 6 carry the as-built notes.
+
+Measured cost (RTX 4060 Ti, 1920x1080, scale 1.0, 4x MSAA, 3 interleaved
+rounds, 0 of 4 tri slots held, no foreign game in 235 clock samples):
+none. Where both runs read P0 the Remastered frame medians are within
+-0.27 to +0.18 ms of A1's (sunrise_ridge 17.49 against 17.31, valley
+05:15 23.82 against 23.76, Eden broken_high 24.74 against 24.65).
+
+Tests: test_remaster_lighting.cpp reads the shaders through the
+accessors (RemasterVertexSource, RemasterFragmentCommon with each
+RemasterFragmentMain, PostShaderSource) and keeps the 3 vertex and 4
+fragment counts and the varying check for every VS. New cases: every raw
+GLSL string of EngineGL33_LightingShaders*.cpp and EngineGL33_Post*.cpp
+sits inside a compiled program; the prelude is its pieces with each
+concern's functions in its own piece, and the kFragmentPieces and
+kPostShaders tables read from the source (as the lighting lab reads them)
+give exactly what the accessors return; the texture unit table binds
+every sampler the remastered programs declare. The layout case checks
+every "uniform LitConstants {" in the backend's sources member by member
+and that there is one. The two shadow-unit audits follow the named
+constant. Dropping a kLitSamplers row, a stale hand copy of the block,
+two table pieces swapped, psPostAo without the shared string and two
+block members swapped each turn their case red. Gate tags 456/456; the
+full suite has only the 6 known localisation failures. The lighting lab's
+glsl_extract.py assembles the same programs (load_programs, so --dump
+writes psRemasterCommon.glsl whole) and decodes git output as UTF-8; its
+remaster and post renderers read the assembled names.
+
+In game (tmp/integration/A2 of the graphics-remaster worktree): the 30
+programs dumped from the tip and from this change are byte-identical,
+and a scratch program linked against this build's shader objects returns
+the tip's sources from every accessor. Smoke 3/3 (KHR_debug ids 131169,
+131154 and 131218 only). features_ab 20261018-024320-ab-A2 against the
+A1 build's 20261018-022516-ab-A1build: the five views that repeat to the
+pixel between boots are pixel-identical, off and on; the others differ
+only as the A1 build differs from itself (fire, smoke and lamps at
+night, a posed soldier's head, the sea). The three-island set
+20261018-025637-set against the A1 build's 20261018-025658-set-A1build:
+within boot-to-boot noise, Classic included. Timing
+20261018-024623-timing.
+
+Known risks: the new piece files and EngineGL33_PostShaders.cpp are new
+files and must be added with the commit; a slot landed before a lower
+planned one needs padding members in the block (std140 is contiguous);
+GL33Bind caches units 0 to 7 only, so the planned units 8 to 15 bind
+uncached; the lighting lab's renderers were checked through their
+loaders only (moderngl is not installed here); no RTX 3060 was measured.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

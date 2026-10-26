@@ -1,0 +1,105 @@
+Puddle swarm, approach 3 of 6: the smallest safe change (constants and masks only)
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-3 (fec1075 + fix4/base.patch = round 3, base tree
+d2f866e). Build build/look-puddle-3-rwdi, game dist/look-puddle-3-rwdi, junction RemasterUD-puddle-3.
+Nothing committed, no branch, no push. Patch: fix.patch (4 files, +51 / -11, look_shine and
+look_probe capture tests left out).
+
+LOOK FIRST
+- compare.png: rows town_night_rain, seam_b, seam_d, seam_day, rain_day, then 2x crops of the
+  tree base (yellow box) and the open street (blue box) in town_night_rain. Columns: round 3
+  (shiny, fix/seam/shots_4) | first rework (fix4/shine/shots_3) | this.
+- final/<view>.png: the five views from the final build (shots_final/tri), native 1920x1080.
+
+APPROACH
+Keep round 3's structure (ground field classes, no-seam puddle field, same passes) and only turn
+down what reflects outside the puddles, in the two places that draw it:
+1. Forward pass (wetSurface): the ground's film outside puddles (it scales the lamp streaks, the
+   sun glint and, when the reflections' pass is off, the sky) is multiplied by kWetGroundFilm and
+   held at least kWetGroundFilmRough rough. Puddle terms (pud.x) are untouched, so puddles keep
+   their sharp lamp lobe (kWetPuddleRough) and their darkening.
+2. Reflections' trace (B6): under the wet weather the non-puddle sheen weight is multiplied by
+   kSsrWetSheen; mix(sheen, 1.0, puddle) keeps puddles full mirrors. The legacy B6 path (rain
+   with wetWeather off) keeps its old weight (the wetWeather mask).
+3. Puddles: a little more water (thresholds) and a wider, darker damp margin round each puddle,
+   the "patchy darkening" (the margin follows the puddle noise, so it is patchy and has no edge).
+
+CONSTANTS old -> new (and why)
+- kWetGroundFilm (new) 0.1: one tenth of the film an object would get. Round 3's ground film was
+  about 0.36 x wet on the square and 0.74 x wet on roads; now 0.04 and 0.07. Low enough that no
+  lamp, window or fire makes a streak on open ground (probe: the long streaks from the house wall
+  and the fire are gone in every night view), high enough to leave a faint warm lift right next
+  to the fire (the "dim glint near a close light").
+- kWetGroundFilmRough (new) 0.55: GGX alpha 0.30 instead of round 3's 0.0144 (rough 0.12). The
+  lobe's peak drops by about (0.30 / 0.0144)^2 = 430x and spreads over tens of degrees, so a lamp
+  gives a broad smudge, never a line. 0.55 sits just above kWetSunGroundRough 0.5, the bare
+  ground's sun glint, so day and night ground use the same lobe width.
+- kSsrWetSheen (new, trace) 0.08: the wet ground outside puddles keeps 8% of B6's sheen weight
+  (roads 0.65 -> 0.052, bare land 0.5 -> 0.04, grass less). At grazing Fresnel (about 0.3) that is
+  about 1.5% of the reflected image: under one display level for walls and sky, a faint lift only
+  for the fire. Not zero so that a wet road still looks a touch less matte than dry at grazing.
+- kPuddleRoad 0.61 -> 0.58, kPuddleGround 0.67 -> 0.63 (forward piece), and B6's mirrors
+  kSsrPuddleRoad / kSsrPuddleGround (trace and ScreenReflections.hpp) to the same values, so the
+  test that ties the two passes' thresholds together still holds. Once the sheen is gone the
+  puddles are the only rain cue, and at the old thresholds seam_b had puddles on about 1.6% of the
+  lower half of the frame (probe below). kPuddleGrass 0.74 unchanged (grass fields stay mostly dry).
+- kPuddleDamp 0.06 -> 0.1 and kWetDampDark 0.9 -> 0.85: the damp margin below the puddle threshold
+  is wider and a bit darker: darker patches round the puddles, the "a little patchy darkening".
+- Unchanged: kWetGroundDarken 0.35 (the overall wet darkening), kWetPuddleDark 0.55, every puddle
+  roughness and weight, the ground field, the puddle noise field, cones and roughness in the trace.
+
+WHAT I FOUND (probe evidence; frames under shots_*, sheets in work/)
+- shots_base = round 3 shot with my own build: one shiny sheet, long vertical streaks of the lit
+  wall and the fire across non-puddle ground (work/ab1_crops.png, left column).
+- Variant a (film 0.1, rough 0.55, sheen 0.08 only): all streaks and images on non-puddle ground
+  are gone (work/ab1_crops.png right). Lower-half pixels above 120: town_night_rain 3.3% -> 1.2%,
+  seam_d 1.9% -> 1.2%. Day views barely change (they had little sheen).
+- But the night puddles near the tree nearly vanished. Measured (town_night_rain, inside | beside
+  a puddle): base 59 | 78 and 64 | 96, variant a 42 | 40 and 53 | 57. In round 3 the puddles read
+  only because they were darker holes in a bright sheen.
+- Probe shots_probe (work/glsl_p: puddle share painted red, damp margin green; work/
+  probe_vs_base.png): the puddles are there, unchanged in place; they mirror an overcast night sky
+  that is about as bright as the wet ground, so a puddle that does not face a lit wall, lamp or
+  the fire looks like ground. Puddle share of the lower half at the old thresholds:
+  town_night_rain 8.5%, seam_b 1.6%, seam_d 2.1%, seam_day 9.1%, rain_day 1.4%.
+- Variant c: darker puddle bed (kWetPuddleDark 0.55 -> 0.3) changed puddle pixels by only 2 to 3
+  levels (the reflection dominates at these grazing angles), so it was dropped (it would also
+  have broken B6's pin for no gain).
+- Variants d and e: more puddles plus the wider damp margin. e is the final; the final build's
+  frames match the override run within shot noise (lower-half means within 1.2 levels).
+
+TESTS
+- PoseidonTests.exe "[wet],[ssr],[Shaders],[TerrainHorizon],[remaster]" (run from D:, final
+  build): All tests passed, 957,219 assertions in 298 test cases (glslang compiles every program).
+- Round 3's no-seam tests are kept and pass unchanged.
+- New: "Wet weather shaders: only puddles mirror; the ground outside them is darker, with a dim
+  rough film" pins kWetGroundFilm <= 0.15, kWetGroundFilmRough >= 0.5, kSsrWetSheen <= 0.1, the
+  film and roughness masks, the puddle lamp lobe and the trace's mix(sheen, 1.0, puddle).
+- clang-format clean on the changed files. Target.cpp (AI sight and fog link) not touched: its
+  diff against the base tree is empty.
+
+HONEST WEAK POINTS
+- At night the scene reads as rainy only weakly. Without the sheen the rain shows as darker
+  ground, puddles that mirror lit walls (left of the tree, the road puddle on the right of
+  town_night_rain, the left foreground of seam_d) and the rain itself. Puddles that face only the
+  night sky are near the ground's brightness and do not read. Pure tuning cannot fix that: it
+  needs a brighter, slightly cloud-lit night sky in the puddle mirror, puddles placed where they
+  catch lights, or rain rings that sparkle. Round 3's "rainy" read came mostly from the very
+  streaks the owner rejects.
+- The fire and the lamp no longer throw a reflection in town_night_rain at all: no puddle lies
+  between them and the eye in that view. That is the target ("only puddles reflect"), but the
+  owner may miss it.
+- More puddles change B6's legacy path too (rain with wetWeather off), by design of the pin.
+- Day views (seam_day, rain_day) change little; seam_day gains some puddles. The far hillside
+  sheen in rain_day (beyond the puddle fade, 150 to 400 m) should now be down to the 8%
+  sheen; not checked closely.
+- Puddle edges keep round 3's thin bright rim in places (the rim where the puddle normal blends);
+  not changed here.
+- The smoke and puddle level timing differ shot to shot (smoke stage visible in the sheet).
+- Not measured: motion, cost (no added work; same number of texture reads).
+
+FILES
+- fix.patch, compare.png, final/*.png, NOTES.txt (this).
+- work/: apply.py (applies the constants to a copy of the sources), mkvar.sh (override GLSL per
+  variant), ab.py and compare.py (sheets), glsl_a..e and glsl_p (overrides), ab*.png.
+- shots_base, shots_a..e, shots_probe, shots_final: run-captures output per run.

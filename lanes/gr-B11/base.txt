@@ -1,0 +1,8 @@
+lane: gr-B11
+source: D:/Arma_CWA_worktrees/gr-B11
+HEAD: 193c7354cd48976a97a37bfc5140e6b605f483d2
+subject: graphics: temporal anti-aliasing steadies foliage and cleans cheap soft effects
+commit date: 2026-10-18 06:51:01 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 23
+binary files changed (content not in patch): none

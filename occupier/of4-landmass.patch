@@ -1,0 +1,119 @@
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp
+@@ -1351,6 +1351,12 @@
+         {
+             continue;
+         }
++        // a ground force walks or drives: a base on another landmass (Malden's
++        // Southeast Compound, an island of its own) never sources one
++        if (!RoadRoute::SameLandmass(z->pos, town->pos))
++        {
++            continue;
++        }
+         const int liveBodies = i < view.garrisonLive.Size() ? view.garrisonLive[i] : 0;
+         const bool useLive = allowLive && liveBodies > 0;
+         const int s = Spare(_tuning, z->garrison, liveBodies, z->garrisonMax, useLive);
+@@ -2776,6 +2782,12 @@
+         {
+             continue;
+         }
++        if (!RoadRoute::SameLandmass(z->pos, dest))
++        {
++            LOG_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: it stands on another landmass", r.opId,
++                     (const char*)z->name, (const char*)r.target);
++            continue;
++        }
+         const float d = Dist2D(z->pos, dest);
+         cands.Add(i);
+         dists.Add(d);
+@@ -3475,10 +3487,12 @@
+     // to a link near the town, then the town centre.  A base whose nearest
+     // roads are a pocket of their own starts from the first link outside it;
+     // a base whose roads the island never joined to the town's network
+-    // (Malden's Southeast Compound) leaves along its own road, crosses
+-    // country to the town network's best link within
+-    // RoadRouteServiceJoinRadius, and follows the road from there, instead
+-    // of a straight line through its walls.
++    // leaves along its own road, crosses country to the town network's best
++    // link within RoadRouteServiceJoinRadius on its own landmass, and
++    // follows the road from there, instead of a straight line through its
++    // walls.  A base on another landmass (Malden's Southeast Compound, an
++    // island of its own) has no route and is never a ground source
++    // (PickSource, Resource, OccupierForces::BuildSources).
+     void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
+     {
+         route.Clear();
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp
+@@ -5,6 +5,7 @@
+ #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // LaunchFunded, the listener, Roll01 / MakeSeed / Spare
+ #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // live garrison bodies (a base's spare)
+ #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp> // HqZone: never a target
++#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>     // SameLandmass: ground sources share the target's land
+ #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+ 
+ #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
+@@ -1680,6 +1681,13 @@
+         {
+             continue;
+         }
++        // ground packages walk or drive: a base on another landmass than the
++        // target (Malden's Southeast Compound) is no source (air is chosen
++        // from HeldAirfield, not from this list)
++        if (!RoadRoute::SameLandmass(s->pos, dest))
++        {
++            continue;
++        }
+         PackageSource src;
+         src.zone = i;
+         if (fixedSource >= 0)
+@@ -2466,7 +2474,7 @@
+                 {
+                     const ZoneRecord* s = registry.GetZone(i);
+                     if (!s || !CampaignEnd::IsMilitaryType(s->type) || stricmp(s->owner, occupier) != 0 ||
+-                        SurgeAt(s->name) > 0)
++                        SurgeAt(s->name) > 0 || !RoadRoute::SameLandmass(s->pos, dest))
+                     {
+                         continue;
+                     }
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/Traffic.hpp
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/Traffic.hpp
+@@ -392,6 +392,7 @@
+     float z = 0;    // northing
+     bool isCity = false;
+     bool occupierOwned = false; // owner == the campaign's occupier side
++    int landmass = -1;          // RoadRoute::Landmass of the centre, -1 unknown (any leg allowed)
+ };
+ 
+ // One encounter check for the pure StepEncounter (issue #66): the world
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/Traffic.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/Traffic.cpp
+@@ -2,6 +2,7 @@
+ #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+ #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // GetZoneState (modulation)
+ #include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the occupier-side war level (7.1)
++#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>      // Landmass: no leg across the sea
+ #include <Poseidon/Game/Guerrilla/Undercover.hpp>   // ClassifyWeaponShow
+ 
+ #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
+@@ -896,6 +897,12 @@
+         {
+             continue;
+         }
++        // a car never drives across the sea (Malden's Southeast Compound is
++        // an island of its own: its patrols and convoys stalled at the shore)
++        if (origin->landmass >= 0 && z.landmass >= 0 && z.landmass != origin->landmass)
++        {
++            continue;
++        }
+         if (kind == TKCiv)
+         {
+             float d2 = Dist2DSq(z.x, z.z, origin->x, origin->z);
+@@ -1498,6 +1505,7 @@
+         c.z = z->pos.Z();
+         c.isCity = stricmp(z->type, "CITY") == 0;
+         c.occupierOwned = stricmp(z->owner, occ) == 0;
++        c.landmass = RoadRoute::Landmass(z->pos);
+         out.Add(c);
+     }
+ }

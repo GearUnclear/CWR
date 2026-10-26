@@ -1,0 +1,19 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index a5bdd70..a75f543 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -36,3 +36,6 @@ constexpr FeatureInfo kFeatures[] = {
+-    {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", false, &FS::lowSunRig, ""},
+-    {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", false,
+-     &FS::crownCanopy, ""},
++    // B2 (shade): the low-sun rig is constants computed once a frame (no GPU
++    // cost of its own; the world pass is what it lights); the crown canopy is
++    // a few terms on the world pass's foliage.
++    {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", true, &FS::lowSunRig, "world"},
++    {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", true,
++     &FS::crownCanopy, "world"},
+@@ -158,2 +161,2 @@ struct KeyTable
+-                       "Linear depth (half res)\0",
+-                       &LT::debugView, 0, 5),
++                       "Linear depth (half res)\0Albedo\0",
++                       &LT::debugView, 0, kDebugViewAlbedo),

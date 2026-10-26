@@ -1,0 +1,32 @@
+graphics: a clear sky casts no cloud shadows
+
+With setOvercast 0 the remastered cloud-shadow model still put about 4%
+of the map under 0.2-transmission cloud shadows, with no cloud in the
+sky.
+
+Root cause: the clearest reachable weather is not cloud-free.
+GetWeatherBasics puts the clear keyframe at overcast -0.08 and
+Weather::SetOvercast clamps to 0..1 and interpolates, so setOvercast 0
+gives skyThrough 0.9586, cover 0.0414. ComputeLightRig turned cloud
+shadows on for any cover above 0.02 and set the uniform dimming to 1,
+so the shader thresholded the noise at 1 - cover and about 4.3% of the
+ground lost 80% of its sun.
+
+Fix (LightRig.cpp only): kClearSkyCover = 0.05, tied to the weather
+table in a comment. The shadow cover is cover * Smoothstep(0.05, 0.10,
+cover): zero for a clear sky, full cover from 0.10 (about overcast
+0.11). The uniform dimming is min(1, classicDim / fieldMean), so the
+mean sun equals the stock dimming at every overcast. From cover 0.10 up
+the rig is bit-identical to before with the knob at 1. The cloudShadows
+dev knob below 1 now keeps the mean too.
+
+Overcast 0.5 showing few visible shadows is not a coverage bug (the
+mapping is exact); it is a scale and composition question, left open.
+
+Tests: three new [remaster] cases (clear sky, fade-in, coverage mapping)
+and an extended mean test; 3 cases and 18 assertions fail without the
+fix. In game: forest_edge_noon cloud-shadowed share 74.5% -> 0%,
+coastline_sunset's sun path is whole again, overcast 0.1/0.5/0.9 frames
+are unchanged to 3 decimals.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

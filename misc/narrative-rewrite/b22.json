@@ -1,0 +1,10 @@
+{
+  "id": "b22",
+  "bank": "kBio1Hostile",
+  "variant": 3,
+  "text": "A former railway porter, {Name} joined the army for regular wages to support an elderly parent. After being posted near {Place}, they requested a transfer closer to home.",
+  "word_count": 28,
+  "self_review": "A railway porter joined the army to support an elderly parent and requested a posting closer to home.",
+  "source_pattern": "The supplied Sierra Leone TRC findings document regular wages as a reason some recruits enlisted.",
+  "fictional_changes": "Railway work, financial support for a parent, officer status, and transfer request are plausible inventions rather than documented details."
+}

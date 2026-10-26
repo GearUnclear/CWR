@@ -1,0 +1,37 @@
+== q2b (200 frames, using 190)
+  farhill   CHG 0.057 SLOW8 0.100 B60 0.016 | travel 0.013 at (-16,2) core -0.146
+  farvalley CHG 0.045 SLOW8 0.086 B60 0.016 | travel 0.021 at (5,7) core -0.138
+  valley    CHG 0.066 SLOW8 0.121 B60 0.029 | travel 0.028 at (-3,11) core -0.154
+  bay       CHG 0.130 SLOW8 0.240 B60 0.030 | travel 0.014 at (-10,6) core -0.172
+  haze      CHG 0.044 SLOW8 0.079 B60 0.010 | travel 0.014 at (-4,5) core -0.169
+== pc_d91 (200 frames, using 190)
+  farhill   CHG 0.195 SLOW8 0.267 B60 0.059 | travel 0.382 at (-12,0) core -0.096
+  farvalley CHG 0.161 SLOW8 0.223 B60 0.044 | travel 0.145 at (-11,0) core -0.111
+  valley    CHG 0.264 SLOW8 0.423 B60 0.094 | travel 0.304 at (-10,0) core +0.039
+  bay       CHG 0.162 SLOW8 0.288 B60 0.044 | travel 0.038 at (-9,-3) core -0.165
+  haze      CHG 0.130 SLOW8 0.165 B60 0.024 | travel 0.256 at (-12,0) core -0.128
+== base_d91 (200 frames, using 190)
+  farhill   CHG 0.197 SLOW8 0.269 B60 0.061 | travel 0.404 at (-12,0) core -0.088
+  farvalley CHG 0.159 SLOW8 0.222 B60 0.045 | travel 0.143 at (-11,0) core -0.102
+  valley    CHG 0.258 SLOW8 0.413 B60 0.092 | travel 0.313 at (-10,0) core +0.037
+  bay       CHG 0.163 SLOW8 0.289 B60 0.044 | travel 0.039 at (-9,-3) core -0.173
+  haze      CHG 0.129 SLOW8 0.165 B60 0.024 | travel 0.253 at (-12,0) core -0.125
+[Parsed_crop_0 @ 000001e3216d1680] Invalid too big or non positive size for width '1920' or height '290'
+[Parsed_crop_0 @ 000001e3216d1680] Failed to configure input pad on Parsed_crop_0
+[vf#0:0 @ 000001e3237709c0] Error reinitializing filters!
+[vf#0:0 @ 000001e3237709c0] Task finished with error code: -22 (Invalid argument)
+[vf#0:0 @ 000001e3237709c0] Terminating thread with return code -22 (Invalid argument)
+[vost#0:0/rawvideo @ 000001e322f08700] [enc:rawvideo @ 000001e323770480] Could not open encoder before EOF
+[vost#0:0/rawvideo @ 000001e322f08700] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/rawvideo @ 000001e322f08700] Terminating thread with return code -22 (Invalid argument)
+[out#0/rawvideo @ 000001e322ef8f40] Nothing was written into output file, because at least one of its streams received no packets.
+Traceback (most recent call last):
+  File "D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\critic1\tools\held.py", line 32, in <module>
+    a = decode(path, 460, 750, 0, 1920).astype(np.float32)  # rgb False -> luma float16 -> float32
+        ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\critic1\tools\cache.py", line 34, in decode
+    return np.stack(out)
+           ~~~~~~~~^^^^^
+  File "C:\Users\Dane\AppData\Roaming\Python\Python313\site-packages\numpy\_core\shape_base.py", line 456, in stack
+    raise ValueError('need at least one array to stack')
+ValueError: need at least one array to stack

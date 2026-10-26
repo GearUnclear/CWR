@@ -1,0 +1,45 @@
+﻿1. HAZE RAMPS (the clear haze sigma 6e-4 * exp(-y/1200) * hazeKeep): per slice, far slices
+   slice span (m)      haze: swing   rms   mid   2pt  4st  |  lobe keep: swing  mid
+      80..   88 (  8)     0.0%   0.0%  0.00%  0.00%  0.00%  |    3.1%  0.08%
+     181..  200 ( 19)     0.1%   0.0%  0.00% -0.00% -0.00%  |   10.7%  0.10%
+     398..  439 ( 41)     7.9%   2.3% -0.01% -0.01% -0.00%  |   12.9%  0.08%
+     587..  647 ( 60)    13.3%   3.9% -0.01%  0.04%  0.05%  |    8.9%  0.12%
+     864..  951 ( 87)    16.1%   4.7% -0.01% -0.01% -0.00%  |    0.4%  0.00%
+    1269.. 1396 (127)    16.0%   4.6%  0.00% -0.01% -0.00%  |    0.6%  0.00%
+    1861.. 2048 (187)    13.3%   3.8%  0.05%  0.01%  0.00%  |    0.8%  0.00%
+    2729.. 3003 (274)     3.1%   0.9%  0.36%  0.05%  0.01%  |    0.6%  0.15%
+
+2. MIST with the cloudNoise top and banks (ray -8 deg, eye 120 m over the floor, layer 35 m):
+   per slice: point-sample swing / rms vs the slice mean; errors of: mid tap, 2 taps at 1/4,3/4 (det1n),
+   4 strata.  'smooth' = the same ray with the noise replaced by 0.5 (the ramps only).
+  SMOOTH (noise = 0.5)
+   slice span (m)     mean/m    swing    rms    mid    2pt    4st
+     398..  439 ( 41)  3.46e-04     31%     9%   -0.2%   -0.1%   -0.0%
+     484..  533 ( 49)  6.96e-04     37%    11%   -0.4%   -0.1%   -0.0%
+     587..  647 ( 60)  1.52e-03     22%     7%    5.8%   -0.0%    0.1%
+     647..  712 ( 65)  1.60e-03      0%     0%   -0.0%   -0.0%   -0.0%
+     712..  784 ( 72)  1.60e-03      0%     0%   -0.0%   -0.0%   -0.0%
+     784..  864 ( 80)  1.60e-03      0%     0%   -0.0%   -0.0%   -0.0%
+     864..  951 ( 87)  1.60e-03      0%     0%   -0.0%   -0.0%   -0.0%
+     951.. 1047 ( 96)  1.60e-03      0%     0%    0.0%    0.0%    0.0%
+  WITH NOISE
+   slice span (m)     mean/m    swing    rms    mid    2pt    4st
+     398..  439 ( 41)  1.76e-04    125%    36%   54.3%    4.0%   -2.7%
+     484..  533 ( 49)  1.04e-04     71%    23%  -27.3%   14.7%   -1.1%
+     587..  647 ( 60)  2.01e-03    111%    35%   24.7%    8.1%   -2.1%
+     647..  712 ( 65)  2.70e-03     35%    14%    0.1%    1.3%   -1.0%
+     712..  784 ( 72)  2.91e-03     34%     8%    4.7%   -0.6%    1.1%
+     784..  864 ( 80)  2.26e-03     45%    13%  -19.9%    3.3%    5.3%
+     864..  951 ( 87)  2.64e-03     52%    16%   16.6%    6.4%   -3.4%
+     951.. 1047 ( 96)  2.64e-03     35%    10%    4.2%   -2.5%    0.2%
+
+   over 200 random slice positions of 60 m in the crossing zone (ray -8 deg): rms error of each estimator
+   point  rms  36.2%  max 257.2%
+   mid    rms  21.7%  max  66.8%
+   2pt    rms  10.5%  max  42.3%
+   4st    rms   3.0%  max  14.7%
+
+   the same for the mist's lateral (cell) footprint at 600 m: a 12 px cell = 7.0 m
+   point  rms   7.2%  max  39.3%
+   mid    rms   2.0%  max   9.7%
+   2pt    rms   0.5%  max   2.3%

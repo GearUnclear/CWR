@@ -1,0 +1,5 @@
+{
+  "Case": "tests/integration/scripting/guerrilla_assailant_save_reload.seq/01_save.test.sqf",
+  "ExitCode": 0,
+  "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-legacy-save\\01_save"
+}

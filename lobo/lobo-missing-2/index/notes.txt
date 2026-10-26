@@ -1,0 +1,13 @@
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\CoCDKMM_M46.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\CoCHWK_2S19.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\CoC_Arty.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\CoC_Cobra.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\coc_fed.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\CoC_M55.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\CoC_NS.PBO
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\DKMM_M46.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\SFP_ARTHUR.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@CoC\Addons\SFP_ssg120.pbo
+unstreamable	dependencies\archives\CoC_UA110_Setup.exe	@wgl5\Addons\WGL_UAMortars.pbo
+unlistable	recovered-2026-10-11\files\HKupdate.zip :: HKRealismPatch.exe	ERROR: D:\Arma_CWA\tmp\lobo-missing-2\nested\8933a01ac3885e9e\HKRealismPatch.exe : Cannot open the file as archive
+unlistable	recovered-2026-10-11\files\Vit_Iraq_Shilka.ace	ERROR: D:\LoBo-Reloaded\sources\recovered-2026-10-11\files\Vit_Iraq_Shilka.ace : Cannot open the file as archive

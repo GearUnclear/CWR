@@ -1,0 +1,4 @@
+; debug action: back to the Camp (the player start on the fig-tree plain)
+aP setPos [7515, 5790, 0]
+hint "DEBUG: back at the Camp. Establishing the HQ here exercises the edge-of-town fallback (no buildings)."
+exit

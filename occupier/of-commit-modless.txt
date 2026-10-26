@@ -1,0 +1,25 @@
+guerrilla: rebind the saved player handles after a load that rebuilt the body (modless reload); the assailant loop skips a null player
+
+When a save made with @LoBo is loaded without the mod, the engine drops
+the LoBo body and rebuilds the player as the template class
+(RebuildPlayerBodyAfterLoad); the script globals aP and gmPlayer still
+point at the dropped body and come back objNull. assailants.sqs then
+raised "0 elements provided, 3 expected" (objNull distance goes through
+GetRelPos, which reads a null object as an empty array), and the Save,
+market and recruit actions sat on nothing. campaign.sqs campaignLoaded
+gets a step (0): on a body change it rebinds aP and gmPlayer to the live
+player, resets the Save action id and clears the market and recruit mount
+globals so each manager re-mounts on its next poll; step (c) removes a
+stale Save action before re-adding it. assailants.sqs skips the tick while
+aP is null (campaign owns the rebind; polling orders differ). Saves made
+before this change resume their saved script text and keep the old
+behaviour. The modless seq phase 02 now asserts aP == player, the Save
+action, and the recruit menu mounting at gmHqPos.
+
+Verified on dist/agent2-rwdi + remaster-shadow-of2: the modless seq 1/1
+(negative control with the HEAD campaign.sqs fails as before), the body,
+native, civilian-interaction, human and assailant save/reload seqs green,
+assailants and market_reference_mission recovered on retry (eval timeouts
+while another session ran a game), human suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

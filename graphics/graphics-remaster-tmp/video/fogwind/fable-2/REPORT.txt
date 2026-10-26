@@ -1,0 +1,132 @@
+fable-2 REPORT: the owner's eyes (independent motion-first check of every fog candidate)      2026-10-23
+
+WHAT I BUILT (tmp/video/fogwind/fable-2/tools/, numpy + scipy + ffmpeg only, nothing from agent 1's kit)
+  fogflow.py <clip.mkv> [--from N --to M] [--static] [--amp] [--mp4]
+    1. luma decode (ffmpeg gray, -vsync 0: without it the rawvideo muxer drops frames after a trim).
+    2. camera: global sub-pixel shift per frame pair, phase correlation of the whole half-res frame
+       (--static forces 0 for held-camera probes).
+    3. per region (agent 1's five boxes, reused only so regions line up by name): all frames of a 32-frame
+       chunk are warped (cubic) onto the chunk centre's pose, then every pixel's time series is split into
+         hp  = above ~5 Hz at 60 fps (frame minus a sigma 1.5 frame smoothing)
+         bp  = ~1.5..5 Hz (sigma 1.5 minus sigma 6)
+       and spatially into
+         LOW  = hp smoothed over 12 px  (the sheet: the original frame-wide pump lives here)
+         MID  = hp band 3..24 px        (cell-scale blotches: wind, boil)
+         FINE = hp below 3 px           (encode grain, fizz)
+         SLOW = bp band 3..24 px        (slow boil / drift)
+       Fog that changes without the camera explaining it is what survives the stabilisation; vanilla
+       calibrates the floor the warp itself leaves at object edges.
+    4. TRAVEL: the MID residual's normalised cross-correlation surface between frames t and t+1 (and t+2)
+       is AVERAGED over all pairs of the clip. A travel that is the same every frame adds up; random boil
+       cancels. v1 = peak lag (px/frame vs the scene), p1 = correlation there, TRAVEL = p1 minus the lag-0
+       value, WIND = MID x TRAVEL. A real travel has v2 = 2 v1 at lag 2.
+       Reading: p1 ~ 0 = fizz that changes every frame; TRAVEL high with |v1| > 0 = travelling structure
+       (wind, or a screen-locked pattern under a pan, which travels at minus the camera); LOW high = pump.
+    5. VIS = rms code values of MID / LOW / SLOW / FINE.
+    --amp: amp_<label>.png = 2x crop of the bay + far valley, 4 consecutive frames stabilised to one pose
+       with the >5 Hz residual x8 added back (wind and boil become visible to a human); xt_<label>.png =
+       stabilised x-t strips of three fog rows (valley, bay, haze), time down.  --mp4: amp2x_<label>.mp4,
+       the raw 2x crop with the residual x8 added, 60 fps, to watch at real speed.
+  compare.py: one sheet, one row per clip, 3 consecutive frames of a x3 valley/shore crop with the residual
+    x10 added, plus the plain frame and the residual alone x30 (held-camera clips only).
+  table.py: one line per clip from out/*.json; verdict = TRAVEL <= 0.05 in every fog region, LOW <= 0.08,
+    WIND <= 0.012 (vanilla: TRAVEL 0.02-0.03, LOW 0.05-0.075, WIND 0.005-0.010).
+  run.sh <jobs file> <parallel>: batch driver; jobs_*.txt list what was run.
+
+VALIDATION (out/<label>.txt, out/<label>.json; valley unless noted)
+  static held camera (mist/3 probes, frames 15-119):
+    base frame-wide    LOW 1.05 (bay 0.49, farhill 0.51)   TRAVEL 0.02-0.05    = the original pump, nothing travels
+    d91 per-cell       v1 (-12.0,-0.3) p1 0.37, v2 (-24.0,0.1) p2 0.30; farhill (-12.4,-0.2) 0.36, haze (-11.7,0) 0.29,
+                       bay (-12.1,0.4) 0.15; WIND 0.093 valley  = one cell per render leftwards, coherent over two
+                       frames, every region: the wind, found without agent 1's kit
+    frozen jitter      MID 0.037 LOW 0.018 SLOW 0.028 TRAVEL 0.02  = the floor
+  trailer clips, frames 285-390 (the pan): original LOW 1.18 TRAVEL 0.03 | d91 v1 (-11.5,-0.3) p1 0.39 TRAVEL 0.39
+    WIND 0.097 (farhill 0.32, haze 0.28, bay 0.13) | vanilla LOW 0.05 TRAVEL 0.02-0.03 WIND 0.005-0.010.
+  real time, pre-d91 original (mist/1/rec/all_st, all_rt60): held LOW 0.39 valley / 0.81 bay, SLOW 2.0; pan LOW 0.35/0.47.
+  real time, d91 (fogwind/1/rec/pc_*): held v1 (-10.0,-0.8) p1 0.51 TRAVEL 0.37, farhill (-11.4,-0.2) 0.48;
+    pan farhill (-11.0,-0.5) TRAVEL 0.47 WIND 0.061.  The wind is in play, held or panning, 10-11 px/frame left.
+
+RESULTS, REAL TIME 60 fps (agent 1's mist-1 recordings, frames 10-199; python tools/table.py rt-)
+  NB: in the rt60 pan the camera pose differs from the stepped pose and the walking soldier sits inside the
+  'valley' box (out/amp_rt-q4-rt60.png), so pan verdicts use bay / farhill / haze only.
+  held (rtst)   valley MID / LOW / SLOW    TRAVEL (max region)     pan (rt60)  max TRAVEL / LOW / WIND
+    d91 pc      0.159 / 0.050 / 0.155      0.48 farhill (-11.4,-0.2)            0.47 / 0.057 / 0.061     FAIL (wind)
+    q4          0.033 / 0.022 / 0.032      0.02                                 0.02 / 0.050 / 0.002     PASS
+    S2          0.034 / 0.022 / 0.033      0.02                                 0.02 / 0.050 / 0.002     PASS
+    t4w         0.033 / 0.022 / 0.032      0.02                                 0.02 / 0.050 / 0.002     PASS
+    c8b         0.035 / 0.021 / 0.032      0.02                                 0.02 / 0.050 / 0.002     PASS
+    Act25       0.038 / 0.023 / 0.039      0.02                                 0.02 / 0.049 / 0.002     PASS
+    Ac          0.042 / 0.025 / 0.049      0.02                                 0.02 / 0.050 / 0.002     PASS (most residual boil: 1.3x MID, 1.5x SLOW)
+  (second batch: q2b, t2wb, S2z, t4wb: see the addendum at the end)
+  BY EYE, held camera, frame 100-102 (out/cmp_rtst_f100.png; out/cmp_rtst_f100_resid_d91_q4_Ac_Act25.png is the
+  residual-alone column at 1:1): d91 = soft 2-4 cell blotches over the whole mist, different every frame;
+  q4, S2, Act25, c8b, t4w = flat grey, only the shoreline glints, the soldier and encode speckle; Ac = flat
+  with two or three faint blotches. BY EYE, pan (out/amp_rt-pc-rt60.png vs amp_rt-q4-rt60.png, x8): d91 patchy
+  haze over the far shore and valley, q4 even.
+
+RESULTS, STEPPED PROBES (frames 15-119; python tools/table.py st- mv-)
+  static held      MID    LOW    SLOW   TRAVEL        moving pan     LOW(max) TRAVEL(max)   verdict
+    frozen floor   0.037  0.018  0.028  0.02
+    Ac             0.070  0.029  0.062  0.04          mv-Ac          0.063    0.04           PASS, 2x the floor's MID, SLOW at my limit
+    Act25          0.047  0.022  0.034  0.04          mv-Act25       0.057    0.03           PASS
+    t2w            0.044  0.020  0.036  0.03          mv-t2w         0.064    0.03           PASS
+    t4w            0.041  0.022  0.031  0.03          mv-t4w         0.065    0.03           PASS
+    q4             0.038  0.016  0.027  0.02          mv-q4          0.065    0.03           PASS
+    q4w            0.035  0.018  0.027  0.02                                                 PASS
+    q2b            0.034  0.015  0.025  0.02          mv-q2b         0.059    0.02           PASS (lowest static numbers)
+    c8             0.036  0.018  0.027  0.02          mv-c8          0.061    0.03           PASS
+    c8b            0.037  0.017  0.029  0.03          mv-c8b         0.057    0.03           PASS
+    S2             0.036  0.016  0.026  0.04          mv-S2          0.059    0.03           PASS
+    S2z            0.038  0.018  0.027  0.02          mv-S2z         0.060    0.02           PASS
+    S2h            0.034  0.017  0.026  0.03                                                 PASS
+    far80n4        0.035  0.017  0.026  0.02          mv-far80n4b    0.094    0.04           FAIL on LOW (history-free far field pumps 1.25x vanilla; agent 7 agrees)
+                                                      mv-far80n8     0.088    0.04           FAIL on LOW
+                                                      mv-C0          0.108    0.04           FAIL on LOW (frame-wide jitter + centre read alone still pumps)
+    q8                                                mv-q8          0.064    0.04           PASS
+  moving MID is 0.089-0.107 for every candidate and 0.242-0.274 for base/d91/vanilla alike: in a pan that band
+  is dominated by what the warp leaves at object edges, so TRAVEL and LOW decide, not MID.
+  BY EYE, moving x-t (out/xt_moving_compare.png, x48, time down): original = horizontal stripes (whole rows
+  flip = pump); d91 = fine slanted hatching (travel); q2b, Act25, S2z = flat like vanilla apart from the pan's
+  object-edge lines.
+
+WHAT THE CHECK SAYS
+  1. The wind is real, camera-independent and present in play: a coherent -10..-12 px/frame (one froxel cell)
+     leftward travel of 2-4 cell blotches in every fog region, on a held camera and under the pan, in the
+     stepped probes and at one render per frame. My estimator finds it from scratch (averaged cross-correlation
+     peak at (-12, 0) with a lag-2 peak at (-24, 0)), agreeing with agent 1's rho_off at [-12..-13, 0].
+  2. Every centre-read candidate with a per-cell pattern that has no translation symmetry (white hash: Ac, Act25,
+     t2w, t4w, t2wb, t4wb; antithetic 2x2: S2, S2z, S2h; 8-cycle: c8, c8b) or no temporal jitter at all (q4, q8,
+     q2b, q4w) passes on motion: TRAVEL at the vanilla/frozen level (0.02-0.04), no v2 = 2 v1 lock, LOW at or
+     below vanilla, and flat by eye at x8-x30 amplification, held and panning, stepped and real time.
+  3. What still separates them is in-place boil with the camera held, only resolvable at one render per frame:
+     Ac (1 tap, no blur) 1.3-1.5x the others; Act25 1.15x; q4/S2/t4w/c8b at the floor. None of this is visible
+     at x10 amplification except Ac's two or three faint blotches.
+  4. History-free far fields (far80n4/n8) and C0 fail on the sheet (LOW), not on travel.
+  5. Not judged by this check: the look (density). Agent 1/2/4/6 means: Act25, c8b, q2b, t2wb, S2z, S2h, t4wb and
+     fable-1's q2z keep the original density within about 1 code; q4, S2, t4w, Ac are ~2 codes clearer.
+
+ADDENDUM: SECOND BATCH (real time q2b, t2wb, S2z; stepped q2z, c8h, t4wb, S2h, far80n4fh)
+  real time held (valley MID / LOW / SLOW, max TRAVEL)      pan (max TRAVEL / LOW / WIND)
+    q2b     0.032 / 0.020 / 0.030   0.02 (lowest of all)      0.02 / 0.050 / 0.002   PASS
+    t2wb    0.033 / 0.021 / 0.032   0.02                      0.02 / 0.050 / 0.002   PASS
+    S2z     0.033 / 0.021 / 0.032   0.02                      0.02 / 0.049 / 0.002   PASS
+  stepped static: q2z 0.036/0.017/0.027 TRAVEL 0.02 (floor), t4wb 0.034/0.017/0.026, c8h 0.049/0.044/0.032 (its sheet
+    is 2.5x the floor, under the bar); stepped moving: S2h LOW 0.055 TRAVEL 0.02, t4wb 0.058/0.03, c8h 0.057/0.03,
+    far80n4fh 0.063/0.03 (the history smoother fixes agent 7's far field): all PASS.
+  late arrivals: fable-1's q2z moving LOW 0.059 TRAVEL 0.03 (PASS, = q2b); t4wb real time held 0.032/0.021/0.030
+    TRAVEL 0.03, pan 0.02/0.050/0.002 (PASS, floor; agent 1's 1.5x haze boil is below what my bands resolve).
+
+WHAT I WOULD SHOW THE OWNER
+  On motion alone, my check cannot separate the floor class: q2b, t2wb, c8b, q4, S2, S2z, t4w, t4wb, q2z, Act25 are
+  all at the frozen-jitter floor for travel, pump, boil and grain, held and panning, stepped and at 60 fps, and
+  flat by eye at x8-x30 amplification. So the choice falls to the look and to robustness, and there my pick is
+  q2b (agent 4): zero temporal jitter (nothing exists that could ever travel, cycle or settle), the lowest
+  held-camera numbers of every clip I measured (0.032/0.020/0.030), real-time pan at the floor, and the original
+  density by agent 1/4's means (valley 128.2 vs 128.1 in play). Equal on my numbers and also acceptable to show:
+  t2wb and c8b (same floor, same look; c8b needs its frame counter plumbed), and fable-1's q2z (q2b's injection
+  with a stateless display tent for the look: same static floor, moving in the addendum line below if it landed
+  in time). I would NOT show Ac (in-place boil 1.3-2x the floor with the camera held, faint blotches visible at
+  x10) and not far80n4/n8 or C0 (the sheet pumps above vanilla).
+  Before the owner sees anything: reshoot the dawn clip with the chosen override, run fogflow on it (stepped
+  frames 240-389 plus a real-time rtst/rt60 pair) and look at amp2x_<label>.mp4 and the x-t sheet; the bar is
+  TRAVEL <= 0.05 everywhere, LOW <= 0.08, and nothing visible at x8.

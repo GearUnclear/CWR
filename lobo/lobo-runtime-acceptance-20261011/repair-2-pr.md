@@ -1,0 +1,5 @@
+Correct three confirmed installed LoBo script typos through fail-closed, reproducible repair rules: AP mine pickup points to AP_Mine1.sqs (LoBo #6), the IDF UH-60 insertion callback includes the FX directory separator (#7), and MiG-23 wing sweep clamps the local _fraction with numeric 1 (#10).
+
+Repair 2026-10-11.2 was applied to the requested UD installation with verified backups. Exactly three members in LoBo_Mines.pbo, LoboIDFhelo.pbo and LoBoMig.pbo changed. All 86 synthetic LoBo tests pass; the installed second pass exits 0 with zero changes; report-only doctor exits 0 with Nothing to do (15 existing unreadable entries). Independent verification confirms all archive/member hashes and 1,360 untouched members in the changed archives.
+
+No runtime verification is claimed for this follow-up. The larger performance, cluster-bomb, numbering and wreck-emitter issues remain outside this deadline-bound batch. Full local evidence is under D:/Arma_CWA/tmp/lobo-runtime-acceptance-20261011/repair-2-*.

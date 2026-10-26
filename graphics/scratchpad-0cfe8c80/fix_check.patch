@@ -1,0 +1,425 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index f994cd0..5b4653e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -38,6 +38,15 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun. A screen-style composite that is an exact identity where those are zero. |
+ 
+ Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged.
++Only shapes with a vertex buffer take the per-fragment path. A shape first
++loaded after the mission starts (`createVehicle` of a class the mission does not
++place, as Guerrilla Mode does for nearly every vehicle) gets its buffers from
++`ShapeBank::OptimizeLate` before the next frame draws it, the same ones
++`Shapes.OptimizeAll` gives the mission's own shapes; before that fix such
++shapes drew pre-lit with the classic light and received no shadow maps. Their
++crew views (gunner, driver, commander, cargo interiors) stay pre-lit: inside a
++hull this lighting has no interior light, so a tank interior on the per-pixel
++path is far darker (mission-placed vehicles still draw theirs per pixel).
+ The remastered programs are used only inside the world's 3D passes
+ (`EngineGL33::UpdateRemasterPrograms`). Portrait captures, 3D previews in
+ dialogs and night vision draw through the classic programs, because their own
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+index e5d46b7..998950e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+@@ -876,7 +876,9 @@ class LODShape: public RefCountWithLinks
+ 	void AllowAnimation( bool allow=true ) {_allowAnimation=allow;} // non static usage detected
+ 	bool GetAllowAnimation() const {return _allowAnimation;} // non static usage detected
+ 
+-	void OptimizeRendering();
++	// keepInsideViews: leave the crew views (gunner, driver, commander, cargo
++	// interiors) without a vertex buffer, on the CPU T&L path.
++	void OptimizeRendering( bool keepInsideViews=false );
+ 	void CalculateBoundingSphere();
+ 	void CalculateBoundingSphereRadius();
+ 	void CalculateMinMax( bool recalcLevels=false );
+@@ -1057,6 +1059,10 @@ class ShapeBank
+ 	LODShapeWithShadow *NewUnique(const char *name, bool reversed, bool shadow);
+ 
+ 	void OptimizeAll();
++	// Gives the shapes New loaded since the last call the vertex buffers
++	// OptimizeAll gives a mission's own shapes, crew views excepted. Called
++	// once per drawn frame, before any object is drawn.
++	void OptimizeLate();
+ 	void OptimizeOneShape(LODShape *shape);
+ 	void ReleaseAllVBuffers();
+ 
+@@ -1073,6 +1079,11 @@ class ShapeBank
+ 	private:
+ 	::Poseidon::AssetCache<LODShapeWithShadow, Link<LODShapeWithShadow>> _cache;
+ 	Foundation::MemoryDomainProbe _memProbe;
++	// Set by OptimizeAll. From then on New queues each shape it loads (a
++	// class created at run time, e.g. by createVehicle) for OptimizeLate.
++	bool _optimizedAll = false;
++	// Weak links: a shape released before the next frame drops out by itself.
++	LinkArray<LODShapeWithShadow> _late;
+ };
+ 
+ extern ShapeBank Shapes;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+index 0c86188..ea77abd 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+@@ -266,6 +266,17 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
+         shape->OrSpecial(NoShadow);
+     }
+     _cache.Insert(cacheKey, Link<LODShapeWithShadow>(shape));
++    // A shape first loaded after the mission's OptimizeAll (a class a script
++    // creates at run time) would otherwise never get a vertex buffer and would
++    // draw through the CPU T&L path, missing the remastered per-pixel light and
++    // the shadow maps. Queue it for OptimizeLate, which runs before the next
++    // frame draws it. It is not optimised here because the caller is still
++    // setting the shape up (special flags, light hints, animation), and
++    // OptimizeRendering decides from those.
++    if (_optimizedAll && (ENGINE_CONFIG.enableHWTL || ENGINE_CONFIG.enablePIII))
++    {
++        _late.Add(shape);
++    }
+ 
+     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
+     if (_perfShapeLoadMs >= 1.0)
+@@ -314,7 +325,7 @@ void ShapeBank::ReleaseAllVBuffers()
+         });
+ }
+ 
+-void LODShape::OptimizeRendering()
++void LODShape::OptimizeRendering(bool keepInsideViews)
+ {
+     LODShape* shape = this;
+     bool reload = false;
+@@ -327,6 +338,11 @@ void LODShape::OptimizeRendering()
+         {
+             optimizeHW = level->NVertex() > 0 && level->NFaces() > 0;
+         }
++        if (keepInsideViews && (shape->IsSpecLevel(l, VIEW_GUNNER) || shape->IsSpecLevel(l, VIEW_PILOT) ||
++                                shape->IsSpecLevel(l, VIEW_CARGO) || shape->IsSpecLevel(l, VIEW_COMMANDER)))
++        {
++            optimizeHW = false;
++        }
+         if (ENGINE_CONFIG.enablePIII)
+         {
+             optimizeSSE = !shape->GetAllowAnimation() && level->NVertex() >= 16;
+@@ -419,11 +435,57 @@ void ShapeBank::OptimizeAll()
+         LOG_DEBUG(Graphics, "ShapeBank::OptimizeAll");
+     }
+     ForEach([](LODShapeWithShadow& shape) { shape.OptimizeRendering(); });
++    // Every cached shape, queued ones included, has just been optimised.
++    _late.Clear();
++    _optimizedAll = true;
++}
++
++void ShapeBank::OptimizeLate()
++{
++    if (_late.Size() == 0)
++    {
++        return;
++    }
++    const auto start = ::Poseidon::Dev::Perf::Now();
++    int optimized = 0;
++    for (int i = 0; i < _late.Size(); i++)
++    {
++        LODShapeWithShadow* shape = _late[i];
++        if (!shape)
++        {
++            continue; // released before it was ever drawn
++        }
++        bool hasBuffer = false;
++        for (int l = 0; l < shape->NLevels() && !hasBuffer; l++)
++        {
++            hasBuffer = shape->Level(l) && shape->Level(l)->GetVertexBuffer();
++        }
++        if (hasBuffer)
++        {
++            continue; // already optimised elsewhere
++        }
++        // The same levels, buffer types and exclusions (sky, stars, clouds,
++        // lights, surface decals, geometry levels) OptimizeAll gives a shape the
++        // mission loaded, except the crew views (VIEW_GUNNER / PILOT / CARGO /
++        // COMMANDER levels, a soldier's first-person level among them): they
++        // keep the CPU path they have always had for these shapes. Inside a
++        // hull the remastered light has no interior light and the hull shadows
++        // the sun, so on the per-pixel path a tank's gunner view only gets darker.
++        shape->OptimizeRendering(true);
++        optimized++;
++    }
++    _late.Clear();
++    const double ms = ::Poseidon::Dev::Perf::ElapsedMs(start);
++    if (ms >= 1.0)
++    {
++        LOG_DEBUG(Graphics, "PERF: ShapeBank::OptimizeLate {} shapes took {:.2f}ms", optimized, ms);
++    }
+ }
+ 
+ void ShapeBank::Clear()
+ {
+     _cache.Clear();
++    _late.Clear();
+ }
+ 
+ ShapeBank Shapes;
+diff --git a/arma_CWR/engine/Poseidon/World/World.cpp b/arma_CWR/engine/Poseidon/World/World.cpp
+index 92a4afd..8e8a1c9 100644
+--- a/arma_CWR/engine/Poseidon/World/World.cpp
++++ b/arma_CWR/engine/Poseidon/World/World.cpp
+@@ -12,6 +12,7 @@
+ #include <Poseidon/Input/InputSubsystem.hpp>
+ #include <Poseidon/Input/CheatCode.hpp>
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
++#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+ #include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
+ #include <Poseidon/Audio/Speaker.hpp>
+ #include <stdint.h>
+@@ -1389,6 +1390,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
+ 
+     if (enableDraw)
+     {
++        // Shapes loaded since the last frame (createVehicle and every other
++        // run-time spawn) get their vertex buffers before anything draws them.
++        Shapes.OptimizeLate();
+         _scene.BeginObjects();
+         DrawViewerSceneAddons();
+     }
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 4cb79ce..4050bf7 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -248,6 +248,7 @@ list(APPEND POSEIDON_TEST_SOURCES
+     # Rendering tests (batch-06)
+     Graphics/Rendering/test_shape.cpp
+     Graphics/Rendering/test_shape_section_inheritance.cpp
++    Graphics/Rendering/test_shape_late_vertex_buffers.cpp
+     Graphics/Rendering/test_render_flags.cpp
+     Graphics/Rendering/test_render_pass_descriptor.cpp
+     Graphics/Rendering/test_build_render_pass_descriptor.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/Rendering/test_shape_late_vertex_buffers.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/Rendering/test_shape_late_vertex_buffers.cpp
+new file mode 100644
+index 0000000..bd20f02
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/Rendering/test_shape_late_vertex_buffers.cpp
+@@ -0,0 +1,226 @@
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Core/Config/EngineConfig.hpp>
++#include <Poseidon/Core/Types.hpp>
++#include <Poseidon/Graphics/Core/Engine.hpp>
++#include <Poseidon/Graphics/Dummy/EngineDummy.hpp>
++#include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
++#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
++#include <Poseidon/Foundation/Types/Pointers.hpp>
++
++#include <filesystem>
++#include <map>
++#include <string>
++#include <vector>
++
++// Shapes.OptimizeAll() gives every shape a mission loads its vertex buffers.
++// A shape first loaded later (createVehicle of a class the mission did not
++// place: nearly every Guerrilla Mode vehicle) never got one, so Shape::Draw
++// sent it down the CPU T&L path: classic per-vertex light baked into the
++// vertices, no remastered per-pixel light, no shadow maps. ShapeBank now
++// queues such shapes and OptimizeLate (once per drawn frame) gives them the
++// same buffers OptimizeAll would have, except the crew views (vehicle
++// interiors), which keep the CPU path. A recording engine stands in for the
++// GL backend, so this runs without a GPU.
++
++using namespace Poseidon;
++
++namespace
++{
++
++class FakeVertexBuffer : public VertexBuffer
++{
++  public:
++    void Update(const Shape& /*src*/, bool /*dynamic*/) override {}
++};
++
++// Hands out a buffer for every CreateVertexBuffer call, as the GL backend does,
++// and remembers the type asked for per shape level.
++class VertexBufferEngine : public EngineDummy
++{
++  public:
++    std::map<const Shape*, VBType> types;
++
++    VertexBuffer* CreateVertexBuffer(const Shape& src, VBType type) override
++    {
++        types[&src] = type;
++        return new FakeVertexBuffer;
++    }
++};
++
++struct GEngineGuard
++{
++    Engine* prev;
++    explicit GEngineGuard(Engine* tmp) : prev(GEngine) { GEngine = tmp; }
++    ~GEngineGuard() { GEngine = prev; }
++};
++
++// Hardware T&L on, the SSE quad path off, as on a GL client.
++struct EngineConfigGuard
++{
++    bool hwtl = ENGINE_CONFIG.enableHWTL;
++    bool piii = ENGINE_CONFIG.enablePIII;
++    EngineConfigGuard()
++    {
++        ENGINE_CONFIG.enableHWTL = true;
++        ENGINE_CONFIG.enablePIII = false;
++    }
++    ~EngineConfigGuard()
++    {
++        ENGINE_CONFIG.enableHWTL = hwtl;
++        ENGINE_CONFIG.enablePIII = piii;
++    }
++};
++
++std::string FixtureShape(const char* name)
++{
++    const std::filesystem::path root = std::filesystem::path(TESTS_ROOT_DIR).parent_path();
++    return (root / "tests" / "fixtures" / "p3d" / name).generic_string();
++}
++
++// Which levels of the shape hold a buffer, and of which type (-1 = none).
++std::vector<int> BufferLayout(const LODShape& shape, const VertexBufferEngine& engine)
++{
++    std::vector<int> layout;
++    for (int l = 0; l < shape.NLevels(); l++)
++    {
++        const Shape* level = shape.Level(l);
++        int entry = -1;
++        if (level && level->GetVertexBuffer())
++        {
++            auto it = engine.types.find(level);
++            entry = it != engine.types.end() ? static_cast<int>(it->second) : 99;
++        }
++        layout.push_back(entry);
++    }
++    return layout;
++}
++
++int BufferedLevels(const LODShape& shape)
++{
++    int n = 0;
++    for (int l = 0; l < shape.NLevels(); l++)
++    {
++        if (shape.Level(l) && shape.Level(l)->GetVertexBuffer())
++        {
++            n++;
++        }
++    }
++    return n;
++}
++
++} // namespace
++
++TEST_CASE("A shape loaded after OptimizeAll gets the vertex buffers of a mission-loaded one",
++          "[Graphics][remaster][Shape][VertexBuffer]")
++{
++    VertexBufferEngine engine;
++    GEngineGuard engineGuard(&engine);
++    EngineConfigGuard configGuard;
++
++    Shapes.OptimizeAll(); // the mission has loaded
++
++    // createVehicle of a class the mission did not place (this model has no
++    // crew views, so every level follows OptimizeAll)
++    Ref<LODShapeWithShadow> late = Shapes.New(FixtureShape("multi_lod_vehicle.p3d").c_str(), false, true);
++    REQUIRE(late);
++    REQUIRE(late->NLevels() > 0);
++    // Nothing yet: the loader is still setting the shape up.
++    CHECK(BufferedLevels(*late) == 0);
++
++    Shapes.OptimizeLate(); // the next frame, before anything draws it
++    const std::vector<int> lateLayout = BufferLayout(*late, engine);
++    CHECK(BufferedLevels(*late) > 0);
++
++    // Queued once: the frame after builds nothing more.
++    const size_t built = engine.types.size();
++    Shapes.OptimizeLate();
++    CHECK(engine.types.size() == built);
++
++    // The same levels and buffer types OptimizeAll gives it when the mission
++    // itself loads the class (OptimizeAll releases and rebuilds every buffer).
++    engine.types.clear();
++    Shapes.OptimizeAll();
++    CHECK(BufferLayout(*late, engine) == lateLayout);
++}
++
++TEST_CASE("Late vertex buffers follow the flags the loader sets after ShapeBank::New",
++          "[Graphics][remaster][Shape][VertexBuffer]")
++{
++    VertexBufferEngine engine;
++    GEngineGuard engineGuard(&engine);
++    EngineConfigGuard configGuard;
++
++    Shapes.OptimizeAll();
++    Ref<LODShapeWithShadow> late = Shapes.New(FixtureShape("flat_quad.p3d").c_str(), false, true);
++    REQUIRE(late);
++    REQUIRE(late->NLevels() > 0);
++    REQUIRE(late->LevelOpaque(0)->NFaces() > 0);
++
++    SECTION("a light shape stays on its own lighting path")
++    {
++        late->OrSpecial(IsLight);
++        Shapes.OptimizeLate();
++        CHECK(BufferedLevels(*late) == 0);
++    }
++
++    SECTION("a sky shape stays on its own lighting path")
++    {
++        // what Landscape does to the sky dome right after loading it
++        Shape* level = late->LevelOpaque(0);
++        for (int i = 0; i < level->NPos(); i++)
++        {
++            level->SetClip(i, ClipLightSky | ClipFogDisable);
++        }
++        level->CalculateHints();
++        late->CalculateHints();
++        Shapes.OptimizeLate();
++        CHECK(BufferedLevels(*late) == 0);
++    }
++
++    SECTION("a plain prop gets its buffer")
++    {
++        Shapes.OptimizeLate();
++        CHECK(BufferedLevels(*late) > 0);
++    }
++
++    SECTION("a crew view (the gunner's interior) keeps the CPU path")
++    {
++        late->AddShape(new Shape(*late->LevelOpaque(0)), VIEW_GUNNER);
++        const int gunner = late->FindSpecLevel(VIEW_GUNNER);
++        REQUIRE(gunner > 0);
++        Shapes.OptimizeLate();
++        CHECK(late->Level(0)->GetVertexBuffer() != nullptr);
++        CHECK(late->Level(gunner)->GetVertexBuffer() == nullptr);
++    }
++}
++
++TEST_CASE("Late vertex buffers skip released shapes and shapes the mission loaded",
++          "[Graphics][remaster][Shape][VertexBuffer]")
++{
++    VertexBufferEngine engine;
++    GEngineGuard engineGuard(&engine);
++    EngineConfigGuard configGuard;
++
++    SECTION("a shape released before its first frame drops out of the queue")
++    {
++        Shapes.OptimizeAll();
++        {
++            Ref<LODShapeWithShadow> gone = Shapes.New(FixtureShape("flat_quad.p3d").c_str(), true, true);
++            REQUIRE(gone);
++        }
++        Shapes.OptimizeLate();
++        CHECK(engine.types.empty());
++    }
++
++    SECTION("a shape loaded before OptimizeAll is optimised once, by OptimizeAll")
++    {
++        Ref<LODShapeWithShadow> early = Shapes.New(FixtureShape("multi_lod_vehicle.p3d").c_str(), true, true);
++        REQUIRE(early);
++        Shapes.OptimizeAll();
++        const int built = static_cast<int>(engine.types.size());
++        CHECK(BufferedLevels(*early) > 0);
++        Shapes.OptimizeLate();
++        CHECK(static_cast<int>(engine.types.size()) == built);
++    }
++}

@@ -1,0 +1,12 @@
+Write one short character story for a game dossier. Read your assigned beat in cards.json and your own direction in directions.json. Follow that direction. You can change smaller details of the beat to make the direction work.
+
+Do not read other drafts or imitate a shared example. Tell this particular story in everyday words. We should understand it the first time. Do not finish with a saying about life, justice or history. Do not squeeze a job, trauma, motive, habit and final decision into every entry.
+
+Use 20-36 words. The direction tells you how many sentences and where to begin. Use {Name} once and {Place} once. They/them/their is fine if we can tell who you mean. Avoid he/she/his/her/him/hers because the game picks appearance separately. Spell numbers out and use ASCII punctuation. A short spoken line is fine when your direction allows it.
+
+This happened before the player's campaign. Do not describe current XP, rank, promotions, kills or captured zones. Do not use faction-name placeholders or invent game abilities.
+
+Each story belongs to one part of the shared history: families lost places they needed for work; an agreement was followed by restrictions; or fighting caused local losses. Fit the broad event. Do not require a particular battle day, burning, ridge, well or relief column.
+
+Read it aloud once. Replace anything that needs an explanation. Save JSON with id, bank, variant, text, word_count and self_review. self_review should be a plain sentence saying what happens. Do not use editing jargon. Return only the story and its path. Do not edit source or anyone else's draft.
+

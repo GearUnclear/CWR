@@ -1,0 +1,397 @@
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f08aab97..0201656d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -1446,6 +1446,18 @@ void main() {
+                 g_surfCavity += clamp((bf - bm) * (kSurfBaseCavity * litSurface3.x * fadeB), -0.035, 0.03);
+             }
+         }
++        // The wet weather's grain of the square's own texture (g_wetGrain,
++        // wetSurface): its green lean against the mean of about 11 texels
++        // around it (the mips as the cavity's above), so grass tufts stay
++        // matte and gravel takes the film without a step at the square's edge.
++        if (litDetail.w > 0.5 && (litWeather.x > 0.0 || litWeather.z > 0.0)) {
++            vec2 ts0 = vec2(textureSize(tex0, 0));
++            vec2 w0x = dFdx(vUV0) * ts0;
++            vec2 w0y = dFdy(vUV0) * ts0;
++            float lodW = max(0.5 * log2(max(max(dot(w0x, w0x), dot(w0y, w0y)), 1e-8)), 0.0);
++            g_wetGrain = wetGreenness(textureLod(tex0, vUV0, max(lodW, 0.5)).rgb) -
++                         wetGreenness(textureLod(tex0, vUV0, max(lodW + 3.0, 3.5)).rgb);
++        }
+         r0.rgb = shadeRemastered(albedo, true, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+index b31b3203..554e4a5b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+@@ -66,6 +66,14 @@ float wetGroundPorosity(vec3 c) {
+     return mix(mix(0.7, 0.9, warm), 0.3, rock);
+ }
+ 
++// How green a colour leans: its green above the mean of red and blue. Linear
++// in the colour, so a texture's coarse mip has its texels' mean lean and the
++// grain against it (g_wetGrain) is zero on average; for the texture's own
++// grain only (the land's class above is the ground field's).
++float wetGreenness(vec3 c) {
++    return c.g - 0.5 * (c.r + c.b);
++}
++
+ // The ground's own colour (display) at world xz: the landscape textures'
+ // average colours blended over the squares that share each vertex
+ // (SampleGroundColor mirrors this), read with smoothed interpolation between
+@@ -124,6 +132,22 @@ float puddleHeight(vec2 xz) {
+     return textureLod(terrainHeight, (i + f + 0.5) * litTerrain.z, 0.0).r;
+ }
+ 
++// The wet ground's patchiness (0..1): how much water stands on the surface of
++// this stretch of ground, a pure function of xz at a few metres' scale (two
++// octaves of the puddles' value noise), so the forward pass and the trace
++// agree and it has no edge anywhere. Low: the ground is only damp, with a
++// thinner, rougher film. High: a glossy wet patch. The ground's sheen, its roughness,
++// its reflection and its puddles follow it, so the wet ground reads in
++// patches instead of one lacquered sheet (the owner's round 3 "the whole
++// ground looks shiny").
++const float kWetGlossScale = 6.0;     // m: the patches' size ...
++const float kWetGlossFine = 1.9;      // ... and their ragged edges'
++const float kPuddleGlossLift = 0.1;   // the puddle field's rise across the patches (zero on average)
++float wetGroundGloss(vec2 xz) {
++    float n = puddleNoise(xz / kWetGlossScale + 71.0) * 0.65 + puddleNoise(xz / kWetGlossFine + 113.0) * 0.35;
++    return smoothstep(0.36, 0.64, n);
++}
++
+ // x: standing water 0..1, y: the damp margin around it. posW the world
+ // position, footT the pixel's footprint along the ground (m), road 1 on a road,
+ // veg the grass share (0..1), level the puddle level (litWeather.z).
+@@ -132,6 +156,8 @@ vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
+     float o2 = mix(0.5, puddleNoise(posW.xz / 1.3 + 17.0), clamp(1.3 / (3.0 * footT), 0.0, 1.0));
+     float o3 = mix(0.5, puddleNoise(posW.xz / 0.45 + 41.0), clamp(0.45 / (3.0 * footT), 0.0, 1.0));
+     float field = puddleNoise(posW.xz / 3.5) * 0.55 + o2 * 0.3 + o3 * 0.15;
++    // Water stands in the wet patches rather than the damp ones.
++    field += kPuddleGlossLift * (wetGroundGloss(posW.xz) - 0.5);
+     float flatness = 1.0;
+     if (litTerrain.x > 0.5) {
+         float cell = 1.0 / litTerrain.y;
+@@ -196,6 +222,11 @@ const float kWetFilmRough = 0.12;   // the water film's roughness
+ const float kWetPuddleRough = 0.05; // a puddle's
+ const float kWetGrassFilm = 0.1;    // grass blades break the film up: this share of it ...
+ const float kWetGrassRough = 0.4;   // ... this rough
++const float kWetDampFilm = 0.25;    // the land's damp patches (wetGroundGloss 0) keep this share of the film ...
++const float kWetRoadDampFilm = 0.6; // ... a road's this (asphalt holds a film more evenly) ...
++const float kWetDampRough = 0.32;   // ... at least this rough, so a lamp's streak breaks up across them
++const float kWetVegGrain = 12.0;    // the land texture's own grain: its swing per unit of green lean ...
++const float kWetVegGrainMax = 0.45; // ... times at most this share of grass, within the field's own headroom
+ const float kWetSunRough = 0.3;     // the film's sun glint is at least this rough (a sharp one burns white)
+ const float kWetSunGroundRough = 0.5; // bare ground's: grit and stones stand through the thin film ...
+ const float kWetSunGroundFilm = 0.5;  // ... and break up this share of it
+@@ -214,6 +245,11 @@ const float kWetRingsFar = 40.0;    // rain rings on puddles within this distanc
+ // What the main is shading: 0 an object (its class from litMatClass.x), 1 the
+ // land, 2 grass clutter, 3 the sea on the detail program (never wet).
+ int g_wetDraw = 0;
++// The land's main sets this: the square's texture's green lean against the
++// mean of about 11 texels around it (zero on average over any stretch of a
++// texture, so it mottles the grass share with the texture's own tufts and
++// gravel and never steps at a square's edge the way a class of the texel did).
++float g_wetGrain = 0.0;
+ 
+ // How much rain a surface takes: up-facing fully, vertical with run-down
+ // streaks near the eye (low and soft: hulls must not stripe), undersides
+@@ -594,6 +630,15 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
+         if (field.a > 0.5) groundC = field.rgb;
+     }
+     float veg = g_wetDraw == 2 ? 1.0 : (g_wetDraw == 1 ? wetVegetation(groundC) : 0.0);
++    // The puddles take the field's class alone (the trace's, pixel for pixel);
++    // the film, its roughness and the darkening follow the texture's grain too.
++    float vegPud = veg;
++    // The swing stays inside the field's class's headroom (never clipped at 0
++    // or 1, which would shift the mean on a mottled texture and not a flat one).
++    if (g_wetDraw == 1)
++        veg += clamp(g_wetGrain * kWetVegGrain, -1.0, 1.0) * min(kWetVegGrainMax, min(veg, 1.0 - veg));
++    // The ground's wet and damp patches (wetGroundGloss, the trace's too).
++    float gloss = ground ? wetGroundGloss(posAbs.xz) : 1.0;
+     float porosity = g_wetDraw == 0 ? kWetPorosity[cls] : mix(wetGroundPorosity(groundC), kWetGrassPorosity, veg);
+     float w = (ground ? mix(0.45, 1.0, skyVisibility) : wetCoverage(n, posAbs, skyVisibility, dist)) * wet;
+     // Standing water on the land and on roads. The land pools as bare ground
+@@ -602,7 +647,7 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
+     vec2 pud = vec2(0.0);
+     if (ground && g_wetDraw != 2) {
+         float footT = max(length(fwidth(posAbs.xz)), 1e-3);
+-        pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, veg, litWeather.z);
++        pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, vegPud, litWeather.z);
+     }
+     w = max(w, pud.y);
+     if (w <= 0.0 && pud.x <= 0.0) return;
+@@ -616,11 +661,14 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
+     a *= (1.0 - (ground ? kWetGroundDarken : kWetDarken) * soak * w) * mix(1.0, kWetDampDark, pud.y * (1.0 - pud.x)) *
+          mix(1.0, kWetPuddleDark, pud.x);
+     mirror = pud.x;
+-    // The film: what the surface does not soak up; grass breaks it up.
++    // The film: what the surface does not soak up; grass breaks it up, and on
++    // the ground it is thin and rough in the damp patches.
+     float film = w * (1.0 - 0.75 * porosity) * (1.0 - veg) + kWetGrassFilm * w * veg;
++    if (ground) film *= mix(g_wetDraw == 0 ? kWetRoadDampFilm : kWetDampFilm, 1.0, gloss);
+     float filmW = max(film, pud.x);
+     if (filmW <= 0.0) return;
+     float rough = mix(kWetFilmRough, kWetGrassRough, veg);
++    if (ground) rough = mix(max(rough, kWetDampRough), rough, gloss);
+     vec3 nf = n;
+     if (pud.x > 0.0) {
+         // A puddle is level; rain rings break it while it rains near the eye.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+index 29f4c75e..c6df7a15 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+@@ -163,6 +163,12 @@ const float kSsrPuddleRoad = 0.61;
+ const float kSsrPuddleGround = 0.67;
+ const float kSsrPuddleFadeStart = 150.0;
+ const float kSsrPuddleFadeEnd = 400.0;
++// The wet weather's damp patches (wetGroundGloss 0): the land's reflection
++// keeps this share of its weight, a road's this, at this roughness and cone.
++const float kSsrDampWeight = 0.25;
++const float kSsrRoadDampWeight = 0.6;
++const float kSsrDampRough = 0.8;
++const float kSsrDampCone = 0.4;
+ // The sea program's mean sky weight (s_psWaterRemasterMain): its far fade.
+ const float kSeaFarSkyStart = 1000.0;
+ const float kSeaFarSkyEnd = 3000.0;
+@@ -633,9 +639,15 @@ void main() {
+         // Rain rings on the puddles.
+         float rip = 0.03 * puddle * (vnoise(posW.xz * 4.0 + ssrParams.z * 1.3) - 0.5);
+         nW = normalize(nW + vec3(rip, 0.0, -rip));
+-        float rough = mix(road ? 0.30 : mix(0.45, 0.75, grass), 0.02, puddle);
+-        float cone = mix(road ? 0.10 : 0.22, 0.008, puddle);
+-        float weight = mix(road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass), 1.0, puddle);
++        // The wet weather's damp patches (wetGroundGloss, the forward pass's
++        // own): the reflection there is weaker, rougher and wider, so a lamp's
++        // or a window's streak breaks up across the ground instead of running
++        // as one clean line over all of it.
++        float damp = wetWeather ? 1.0 - wetGroundGloss(posW.xz) : 0.0;
++        float rough = mix(mix(road ? 0.30 : mix(0.45, 0.75, grass), kSsrDampRough, damp), 0.02, puddle);
++        float cone = mix(mix(road ? 0.10 : 0.22, kSsrDampCone, damp), 0.008, puddle);
++        float weight = mix((road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass)) *
++                           mix(1.0, road ? kSsrRoadDampWeight : kSsrDampWeight, damp), 1.0, puddle);
+         vec3 rW = reflect(-vW, nW);
+         if (rW.y < 0.002) rW = normalize(vec3(rW.x, 0.002, rW.z));
+         float hidden;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+index fb7a8ed6..4e10c595 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+@@ -11,6 +11,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <cstdint>
+ #include <filesystem>
+ #include <fstream>
+ #include <regex>
+@@ -665,7 +666,7 @@ TEST_CASE("Wet weather shaders: the forward pass and the trace class the land fr
+     CHECK(surface.find("wetGroundPorosity(groundC)") != std::string::npos);
+     CHECK(surface.find("wetVegetation(albedo)") == std::string::npos);
+     CHECK(surface.find("wetGroundPorosity(albedo)") == std::string::npos);
+-    CHECK(surface.find("pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, veg, litWeather.z);") !=
++    CHECK(surface.find("pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, vegPud, litWeather.z);") !=
+           std::string::npos);
+     CHECK(surface.find("cls == 7) ? 1.0 : 0.0, veg") == std::string::npos);
+ 
+@@ -693,3 +694,200 @@ TEST_CASE("Wet weather shaders: the forward pass and the trace class the land fr
+     CHECK(ssr.find("SetInt(tr, \"groundField\", Poseidon::gl33lighting::kGroundFieldUnit);") != std::string::npos);
+     CHECK(ssr.find("BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());") != std::string::npos);
+ }
++
++namespace
++{
++
++float Fract(float x)
++{
++    return x - std::floor(x);
++}
++
++float SmoothStep(float e0, float e1, float x)
++{
++    const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++// The puddles piece's puddleHash and puddleNoise.
++float PuddleHashMirror(float px, float py)
++{
++    float x = Fract(px * 0.1031f);
++    float y = Fract(py * 0.1031f);
++    float z = Fract(px * 0.1031f);
++    const float d = x * (y + 33.33f) + y * (z + 33.33f) + z * (x + 33.33f);
++    x += d;
++    y += d;
++    z += d;
++    return Fract((x + y) * z);
++}
++
++float PuddleNoiseMirror(float px, float py)
++{
++    const float ix = std::floor(px);
++    const float iy = std::floor(py);
++    const float fx = px - ix;
++    const float fy = py - iy;
++    const float ux = fx * fx * (3.0f - 2.0f * fx);
++    const float uy = fy * fy * (3.0f - 2.0f * fy);
++    const float a = PuddleHashMirror(ix, iy) + (PuddleHashMirror(ix + 1.0f, iy) - PuddleHashMirror(ix, iy)) * ux;
++    const float b = PuddleHashMirror(ix, iy + 1.0f) +
++                    (PuddleHashMirror(ix + 1.0f, iy + 1.0f) - PuddleHashMirror(ix, iy + 1.0f)) * ux;
++    return a + (b - a) * uy;
++}
++
++// The puddles piece's wetGroundGloss (kWetGlossScale 6, kWetGlossFine 1.9).
++float WetGroundGlossMirror(float x, float z)
++{
++    const float n = PuddleNoiseMirror(x / 6.0f + 71.0f, z / 6.0f + 71.0f) * 0.65f +
++                    PuddleNoiseMirror(x / 1.9f + 113.0f, z / 1.9f + 113.0f) * 0.35f;
++    return SmoothStep(0.36f, 0.64f, n);
++}
++
++// wetGreenness, and the land's grass share with the texture's grain
++// (wetSurface: kWetVegGrain 12, kWetVegGrainMax 0.45, inside the field's
++// class's headroom).
++float GreennessMirror(const float* c)
++{
++    return c[1] - 0.5f * (c[0] + c[2]);
++}
++
++float GrainVegMirror(float fieldVeg, float grain)
++{
++    return fieldVeg + std::clamp(grain * 12.0f, -1.0f, 1.0f) * std::min(0.45f, std::min(fieldVeg, 1.0f - fieldVeg));
++}
++
++} // namespace
++
++TEST_CASE("Wet weather ground: damp and glossy patches from the position alone, the same in both passes",
++          "[remaster][wet][Shaders]")
++{
++    // Round 3 classed the land from the continuous ground field alone, and the
++    // owner's town square turned into one lacquered sheet ("the whole ground
++    // looks shiny now"). The ground now holds water in patches: a pure
++    // function of the world position, shared by the forward pass and the
++    // trace, so it has no edge at any square or grid line.
++    const std::string puddles = gl::RemasterFragmentPiece(gl::FragmentPiece::Puddles);
++    CHECK(puddles.find("const float kWetGlossScale = 6.0;") != std::string::npos);
++    CHECK(puddles.find("const float kWetGlossFine = 1.9;") != std::string::npos);
++    CHECK(puddles.find("float n = puddleNoise(xz / kWetGlossScale + 71.0) * 0.65 + puddleNoise(xz / kWetGlossFine + "
++                       "113.0) * 0.35;\n    return smoothstep(0.36, 0.64, n);") != std::string::npos);
++    // The puddles stand in the wet patches (zero on average: their share holds).
++    CHECK(puddles.find("field += kPuddleGlossLift * (wetGroundGloss(posW.xz) - 0.5);") != std::string::npos);
++    CHECK(puddles.find("float wetGreenness(vec3 c) {\n    return c.g - 0.5 * (c.r + c.b);\n}") != std::string::npos);
++
++    // The forward pass: the film thins and roughens in the damp patches, on the
++    // land more than on a road; the puddles keep the field's class.
++    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
++    CHECK(surface.find("float gloss = ground ? wetGroundGloss(posAbs.xz) : 1.0;") != std::string::npos);
++    CHECK(surface.find("if (ground) film *= mix(g_wetDraw == 0 ? kWetRoadDampFilm : kWetDampFilm, 1.0, gloss);") !=
++          std::string::npos);
++    CHECK(surface.find("if (ground) rough = mix(max(rough, kWetDampRough), rough, gloss);") != std::string::npos);
++    CHECK(surface.find("const float kWetVegGrain = 12.0;") != std::string::npos);
++    CHECK(surface.find("const float kWetVegGrainMax = 0.45;") != std::string::npos);
++    CHECK(surface.find(
++              "veg += clamp(g_wetGrain * kWetVegGrain, -1.0, 1.0) * min(kWetVegGrainMax, min(veg, 1.0 - veg));") !=
++          std::string::npos);
++    // The land's main gives the grain against the texture's own coarse mip.
++    const std::string detail = gl::RemasterFragmentMain(1); // PSDetail
++    CHECK(detail.find("g_wetGrain = wetGreenness(textureLod(tex0, vUV0, max(lodW, 0.5)).rgb) -\n"
++                      "                         wetGreenness(textureLod(tex0, vUV0, max(lodW + 3.0, 3.5)).rgb);") !=
++          std::string::npos);
++    // The trace: the same patches weaken, roughen and widen its reflection.
++    const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
++    CHECK(trace.find("float damp = wetWeather ? 1.0 - wetGroundGloss(posW.xz) : 0.0;") != std::string::npos);
++    CHECK(trace.find("mix(1.0, road ? kSsrRoadDampWeight : kSsrDampWeight, damp), 1.0, puddle);") != std::string::npos);
++
++    // The patches vary: over a 300 m square a good share of the ground is
++    // damp and a good share glossy, about half on average.
++    int damp = 0, glossy = 0, count = 0;
++    double sum = 0.0;
++    for (float z = 0.0f; z < 300.0f; z += 0.7f)
++        for (float x = 0.0f; x < 300.0f; x += 0.7f)
++        {
++            const float g = WetGroundGlossMirror(7000.0f + x, 8800.0f + z);
++            damp += g < 0.2f ? 1 : 0;
++            glossy += g > 0.8f ? 1 : 0;
++            sum += g;
++            ++count;
++        }
++    CHECK(damp > count / 6);
++    CHECK(glossy > count / 6);
++    CHECK(sum / count == Catch::Approx(0.5).margin(0.1));
++
++    // ... and have no edge: walking a tenth of a metre at a time, the biggest
++    // change across the terrain's 12.5 m grid lines is no bigger than the
++    // biggest anywhere else, and that is a smooth slope, not a step.
++    float atGrid = 0.0f, elsewhere = 0.0f;
++    for (float z = 8800.0f; z < 8900.0f; z += 3.1f)
++        for (float x = 7000.0f; x < 7200.0f; x += 0.1f)
++        {
++            const float d = std::fabs(WetGroundGlossMirror(x + 0.1f, z) - WetGroundGlossMirror(x, z));
++            const float k = std::floor((x + 0.1f) / 12.5f);
++            if (k * 12.5f > x)
++                atGrid = std::max(atGrid, d);
++            else
++                elsewhere = std::max(elsewhere, d);
++        }
++    CHECK(elsewhere < 0.25f);
++    CHECK(atGrid <= elsewhere * 1.05f);
++}
++
++TEST_CASE("Wet weather land: the texture's own grain mottles the grass share without a step at a square's edge",
++          "[remaster][wet][TerrainHorizon]")
++{
++    // The owner's square: a mottled gravel-and-grass texture beside a flat
++    // olive one, under one continuous field class. The grain is each
++    // texture's green lean against its own mean (the coarse mip; the lean is
++    // linear in the colour, so the mip's lean is the texels' mean lean), so
++    // the mottled side keeps its tufts and gravel while its mean grass share
++    // is the field's, as the flat side's is: no step at their shared edge.
++    const float gravel[3] = {0.50f, 0.49f, 0.46f};
++    const float grass[3] = {0.40f, 0.46f, 0.30f};
++    const int n = 64;
++    std::vector<float> mottled(static_cast<size_t>(n) * n * 3);
++    uint32_t seed = 12345u;
++    for (int by = 0; by < n; by += 4)
++        for (int bx = 0; bx < n; bx += 4)
++        {
++            seed = seed * 1664525u + 1013904223u;
++            const float* c = ((seed >> 16) & 1u) ? grass : gravel;
++            for (int y = by; y < by + 4; ++y)
++                for (int x = bx; x < bx + 4; ++x)
++                    for (int k = 0; k < 3; ++k)
++                        mottled[(static_cast<size_t>(y) * n + x) * 3 + k] = c[k];
++        }
++    // The coarse mip: the mean of the texels around (a box of 11, wrapped).
++    auto grainAt = [&](int x, int y)
++    {
++        float mean[3] = {0.0f, 0.0f, 0.0f};
++        for (int dy = -5; dy <= 5; ++dy)
++            for (int dx = -5; dx <= 5; ++dx)
++                for (int k = 0; k < 3; ++k)
++                    mean[k] += mottled[(static_cast<size_t>((y + dy + n) % n) * n + (x + dx + n) % n) * 3 + k] / 121.0f;
++        return GreennessMirror(&mottled[(static_cast<size_t>(y) * n + x) * 3]) - GreennessMirror(mean);
++    };
++    for (const float fieldVeg : {0.3f, 0.5f, 0.7f})
++    {
++        double sumA = 0.0, sumA2 = 0.0;
++        float lo = 1.0f, hi = 0.0f;
++        for (int y = 0; y < n; ++y)
++            for (int x = 0; x < n; ++x)
++            {
++                const float v = GrainVegMirror(fieldVeg, grainAt(x, y));
++                lo = std::min(lo, v);
++                hi = std::max(hi, v);
++                sumA += v;
++                sumA2 += static_cast<double>(v) * v;
++            }
++        const double meanA = sumA / (n * n);
++        const double sdA = std::sqrt(std::max(sumA2 / (n * n) - meanA * meanA, 0.0));
++        // The flat texture has no grain: its share is the field's.
++        const float vegB = GrainVegMirror(fieldVeg, 0.0f);
++        INFO("field " << fieldVeg << ": mottled mean " << meanA << " sd " << sdA << ", flat " << vegB);
++        CHECK(std::fabs(meanA - vegB) < 0.01);
++        CHECK(sdA > 0.12);
++        CHECK(lo >= 0.0f); // the swing stays a share of grass
++        CHECK(hi <= 1.0f);
++    }
++}

@@ -1,0 +1,3 @@
+roadmap: occupier-forces owner decisions applied (8909838), #76 auto-detection slice started
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

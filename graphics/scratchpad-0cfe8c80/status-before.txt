@@ -1,0 +1,19 @@
+﻿ M arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+ M arma_CWR/tests/rendering/lighting_lab/README.md
+ M arma_CWR/tests/rendering/lighting_lab/glsl_extract.py
+ M arma_CWR/tests/rendering/lighting_lab/postfx.py
+ M arma_CWR/tests/rendering/lighting_lab/remaster.py
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+ M roadmap/roadmap.yaml
+?? arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+?? arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+?? arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+?? arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp

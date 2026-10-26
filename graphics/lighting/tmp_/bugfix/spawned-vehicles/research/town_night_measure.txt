@@ -1,0 +1,4 @@
+﻿BEFORE spawned: frame luma remastered 24.4, classic 25.5, lower half remastered 29.8; pit remastered RGB [130.7 108.9  86.1], pit debug RGB [244.6 129.5 240.2]
+AFTER spawned: frame luma remastered 25.0, classic 25.3, lower half remastered 29.9; pit remastered RGB [130.3 108.5  85. ], pit debug RGB [238.2 167.4 234.2]
+AFTER placed: frame luma remastered 25.0, classic 24.8, lower half remastered 30.8; pit remastered RGB [144.6 129.2  86.2], pit debug RGB [238.2 168.1 234.2]
+BEFORE placed: frame luma remastered 24.3, classic 24.9, lower half remastered 30.0; pit remastered RGB [131.1 109.4  85.1], pit debug RGB [238.4 167.6 234.3]

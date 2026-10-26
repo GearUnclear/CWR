@@ -1,0 +1,42 @@
+graphics: the remastered night takes Classic's lamp clamp and a real moon
+
+The Remastered night was over-bright and yellow-green: the town under
+moonlight metered near noon-ground brightness and the olive grass turned
+yellow-green. (The grey wash over the open country near towns is the
+separate lamp-colour fix in the next commit.)
+
+Root cause (two of the three found):
+- EngineGL33_LightingShaders.cpp capped the display-space local-light
+  sum at 1.5 where Classic clamps it at 1.0, so lamp-lit surfaces got up
+  to 2.44x Classic's linear light. In the town square the overlapping
+  lamp discs reach that cap everywhere (ground -1.53 log2 vs Classic
+  -2.39), and pixels that bright skip the night-eye greying, so the olive
+  texture showed at full saturation.
+- kMoonFull = 0.0035 and the moon chroma (0.70, 0.80, 1.00) made the moon
+  invisible (moonlight=0 changed nothing measurable in any view), and the
+  night-eye pass greyed moonlit ground to neutral.
+
+Fix:
+- The Remastered local-light clamp is 1.0, Classic's own; pool size and
+  falloff are unchanged. (A hue-keeping cap was tried and rejected: it
+  turned the dusk lawn mustard.)
+- The moon is a key light: kMoonFull 0.02 with a cool, pale chroma
+  (0.82, 0.90, 1.00), dimmed by overcast like the sun, plus a moonlit
+  sky fill kMoonSky = 0.25 added after the twilight cap; the bounce
+  includes moonlit ground. All moon terms are zero by day, so day rigs
+  are bit-identical (unit tested).
+- In the night-eye pass, lit fragments fade to a grey of the same
+  luminance with only blue raised (0.985, 0.995, 1.1).
+
+Measured (ground = lower 28% of the frame): town_night 164,159,123
+(sat 0.25) -> 124,122,111 (sat 0.10), Classic's level; dusk 111,106,67
+vs Classic 110,106,71; fires stay orange. Open question: with a waxing
+moon up at sunset the moon lifts twilight by up to +1.3 EV (reviewer's
+run; frames still read as dusk). All night local lights, fires,
+headlights and muzzle flashes included, now peak at 1.0 instead of 1.5.
+
+Tests: 'Remaster light rig: a full moon lights a cool, pale, readable
+night' (4 of 18 assertions fail without the fix). The shader changes
+have glslang compile coverage only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

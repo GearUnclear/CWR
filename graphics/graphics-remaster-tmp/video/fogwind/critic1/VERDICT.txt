@@ -1,0 +1,142 @@
+CRITIC 1 VERDICT (round 1) on agent 8's ship: q2b, 2 fixed taps per froxel cell, zero temporal jitter,
+history read at the cell centre through a fixed tetrahedral +-0.25 blur. 2026-10-23, about 06:15.
+
+VERDICT: PASS. I tried to find fog motion the camera does not explain, flicker, grain or a changed look
+in the new dawn clip with my own instruments and by eye, and found none. F1's wind is found by the same
+instruments at once, so they are not blind to it. Residual items below are pre-existing or hidden by the
+trailer, not from this change.
+
+WHAT I MEASURED (own tools in critic1/tools, numpy/scipy, nothing from agent 1's kit or fable-2's fogflow)
+Clips: NEW v2/ud/valley_mist/valley_mist__ud.mkv; F1 fogwind/lead/percell_valley_mist/valley_mist__ud.mkv;
+ORIGINAL mist/backup_ud/valley_mist_before_mistfix/valley_mist__ud.mkv; VANILLA v2/vanilla/valley_mist.
+Camera: measured per region on the VANILLA clip (same deterministic path; NEW/F1/ORIGINAL match it to
+0.01 px/frame on the near hill and the shore), so the fog cannot bias the camera estimate. The pan runs
+up to -1.05 px/frame (content leftward), about 436 px over the clip.
+
+1. Travel of the change the camera does not explain (motion.py, table2.py; out/motion_table2.txt).
+   Six regions carried with the scene (far hill, far valley, valley mist, bay, haze, low mist), 19
+   windows of 30 frames over the WHOLE clip (frames 0-569). Residual = frame t+1 minus frame t moved
+   by the camera; band 2-16 px; normalised cross-correlation of consecutive residuals (the earlier one
+   aligned to the scene), averaged per window. FAR = best correlation at |lag| >= 3 px minus the core.
+     F1:      FAR mean 0.15-0.32 at (-11..-12, 0) px/frame in far hill, far valley, valley, haze, low
+              mist; 93 of 114 windows above 0.08. (The wind, found from scratch.)
+     NEW:     FAR mean 0.006-0.037 per region; 3 of 114 windows above 0.08, at scattered lags (10,4),
+              (-9,-2), (-5,2): no consistent velocity anywhere.
+     VANILLA: 6 of 114 windows above 0.08 (0.114 max), scattered lags.
+     ORIGINAL: no travel (FAR <= 0.08), the pump instead (60 px block change 0.8-2.2 codes).
+   60 px block change (B60, codes) NEW / VANILLA / ORIGINAL: far hill 0.071 / 0.080 / 1.021, far valley
+   0.075 / 0.037 / 0.860, valley 0.105 / 0.117 / 2.234, bay 0.108 / 0.159 / 0.802, low mist 0.137 /
+   0.198 / 1.830, haze 0.059 / 0 (vanilla's haze box is a flat sky) / 0.307.
+
+2. x-t slices (xt.py, look/xt/), six rows (y 520, 560, 600, 660, 700, 790), scene-stabilised, RESID x16:
+   ORIGINAL horizontal stripes (pump), F1 shallow slants and broken streaks (wind), NEW no horizontal
+   stripes and no shallow slants. Looked at: sheet_y520/600/660/790 *_z2.png.
+   y-t slices following a scene column (yt_sheet_farvalley.png, yt_sheet_bay.png): ORIGINAL vertical
+   stripes, F1 blotchy segments, NEW uniform fine noise, no slant (no rising or sinking mist). In the
+   far haze above the bay NEW keeps faint vertical lines (a small-area brightness flutter): a 40x60 px
+   scene-followed box, high-passed, is 0.108 codes rms (max 0.36) in NEW, 0.106 in F1, 0.264 in
+   ORIGINAL, 0.023 in VANILLA (flat there); a period of about 8-11 frames, so the overhaul's own
+   cadence (TAA, agent 1's 8-frame peaks), equal to F1, a third of a code at worst: not visible.
+   The one structure NEW shows in x-t is a 45-degree fine hatch = a pattern STILL ON THE SCREEN while
+   the scene pans (screenlock.py, out/screenlock.txt): a fine dither (spectrum peak at 1.8 px period,
+   93% of its power below 6.5 px, only 2% at the 10-16 px froxel cell scale), rms of the 40-frame
+   screen mean's x high-pass in the haze 0.34 codes NEW vs 0.29 ORIGINAL vs 0.32 F1, absent in vanilla.
+   Pre-existing in every overhaul clip (agent 1's "screen-locked 6 px diagonal pattern"), about 15%
+   stronger in NEW because nothing random sits on top of it any more. It is sub-code and does not move
+   on the screen, so it reads as nothing; it is not the fog sampling (no cell-scale lattice).
+
+3. Temporal spectra at fixed scene points (tspec.py, out/tspec.txt; rms codes per band, row segments,
+   three 128-frame windows): NEW is at or below F1 and well below ORIGINAL in every band above 2 Hz, e.g.
+   far hill 2-6 / 6-15 / 15-30 Hz: NEW 0.24 / 0.23 / 0.24, ORIGINAL 0.43 / 0.57 / 0.52, VANILLA 0.34 /
+   0.26 / 0.22; bay 700: NEW 0.39 / 0.26 / 0.29, VANILLA 0.54 / 0.31 / 0.31. The region-mean 2-6 Hz
+   line is 0.08-0.13 codes for NEW (F1 0.075-0.12, ORIGINAL 0.18-0.32).
+
+4. By eye, 12 consecutive frames at 2x and their 11 camera-compensated differences x16 at three places
+   (consec.py, look/consec/): frames 127-138 (x 1450-1690), 322-333 (x 1250-1490), 466-477 (x 1050-1290).
+   ORIGINAL: whole-sheet flips. F1: soft 2-4 cell blotches, different each frame. NEW: flat speckle
+   (encode, dither) plus the scene's edges only, in all 33 differences. The frames themselves look
+   continuous and identical in look (consec_322_new_frames.png).
+
+5. Flicker: bandmetric (mist/tools/bandmetric.py, full clip): NEW band 0.092, 1 spike; VANILLA 0.112;
+   F1 0.103; ORIGINAL 0.567, 25076 spikes. Scene-tracked small-box pulses (pulse.py, out/pulse.txt):
+   high-passed box means NEW 0.07-0.19 codes rms, max 0.85 (F1 equal, ORIGINAL 0.17-1.8, max 4.6).
+   The far-shore strip under the sun (the "every 27 frames" dash): NEW 0.243 rms, F1 0.249, VANILLA
+   0.177, ORIGINAL 0.989; lag-27 autocorrelation only 0.06-0.21; its biggest events (frames 244-247)
+   are in vanilla too. At vanilla level, not a regression.
+
+6. Grain and fizz: fine residual (< 1.5 px) per region NEW <= ORIGINAL and F1 (haze 0.500 / 0.502 /
+   0.506, valley 0.564 / 0.736 / 0.596, low mist 0.709 / 0.986 / 0.761). Fine 6-30 Hz at scene points
+   NEW 0.23-0.31 codes, ORIGINAL 0.21-0.32. No added fizz or boil.
+
+7. Real-time 60 fps, camera held (held.py on agent 1's mist-1 recordings, q2b shader as override, which
+   equals production): q2b travel <= 0.028 in every region, consecutive change (2-16 px) 0.044-0.066 in
+   the fog (bay 0.130 with the waves), 60 px blocks 0.010-0.030 codes; d91 (pc and base runs) travel
+   0.14-0.40 at (-10..-12, 0), change 0.13-0.26. out/held_rt.txt.
+
+8. Look: time-mean RGB frames 30-560 (look.py, out/look.txt): every region within 0.3 codes of ORIGINAL
+   (valley 116.3/106.5/88.5 vs 116.2/106.3/88.2; F1 117.8/108.1/90.1); whole-frame mean |d| 0.084,
+   p99 0.64. look_new_minus_orig_x8.png is flat grey; frame 328 side by side (look_f328_valley_orig_top_
+   new_bottom.png, look_f328_orig_top_new_bottom.png with the sun): the same mist, haze, colour and sun.
+
+9. NEW PROBE (a gap nobody covered): pine_shafts with the camera MOVING on a zero-jitter build (hard
+   sun-visibility edges in the air could crawl or step on fixed taps). look_probe_fog2_pine_moving, 120
+   frames, junction RemasterUD-fog-C1: production look-director-rwdi (no override) vs ORIGINAL
+   (graphics-remaster-rwdi + mist/3/shaders/base override, loaded, no compile error). Per box NEW / ORIG:
+   temporal second difference (shafts left 7.046 / 7.052, shaft right 8.026 / 8.027, sky glow 3.343 /
+   3.380, far air 2.211 / 2.202), cell-lattice share of the screen mean 0.027 / 0.028 ... 0.133 / 0.133:
+   equal within 1%. By eye (look/pine_shafts_new_vs_orig_half.png, frames 60-63 at 2x plus their second
+   differences x16): shafts smooth and identical; only foliage moves. runs/fog2_pine_moving-{new,orig}/.
+
+10. Start of the shot: the history settles over the first ~10 frames (valley mist 129.2 -> 128.3 codes,
+   a ~0.5 code step at frames 5-8 in every region, near terrain too). The trailer brings this shot in
+   through a 1.4 s dip from black (TRANSITIONS "opening": dip), so it is not visible. Worth knowing if
+   the clip is ever used with a hard cut in.
+
+PATCH AND TEST (f)
+- Read fix.patch: the shader samples (s + 0.25) and (s + 0.75) of each slice on the (-0.25,-0.25) and
+  (+0.25,+0.25) columns, weights = metres of each half slice (correct), history at the cell centre
+  (pt = the centre slice, so a held camera reads texel centres) through 4 trilinear taps at +-0.25 cell
+  and slice (per-axis [1 6 1]/8). No other shader or C++ reads fogDepth.w or fogFrame.xy (grep);
+  _fog.sequence still steps psFogNear (seq % 64). Fract removed and unused. Camera cut: share 1.0 as
+  before. Fast turns: cells without valid history take the 2 taps alone (sharper for ~10 frames at the
+  entering edge, the same class of settle as before). Edge taps past the volume clamp. The medium
+  (fogMediumAt / ComputeFogMedium) is untouched: the AI fog link is unchanged. Night and rain: same
+  code path, only the sampling changed; not shot by me.
+- Unit test: ran build/fog-8-rwdi PoseidonTests.exe "Volumetric fog: the injection samples fixed
+  points*": 33 assertions pass (wideHeld pump 0.0426, cellHeld travel 0.878, cellPan travel 0.886,
+  fixed pump 0, travel 0, still 0.0); whole [fog] tag 34 cases / 6485 assertions pass. The mirror does
+  not model the tetrahedral blur and does not assert the fixed taps' pump under the pan (only held);
+  minor, the string pins cover the blur.
+- No em dashes in fix.patch, commitmsg.txt, DECISION.txt.
+
+PROVENANCE (g)
+- collect.json: game_dir look-director-rwdi, mode=remastered;lit=OK, 570 frames, 60 fps. The run's
+  game_stdout.log has no shader override line (the shot is the built shader).
+- look-director-rwdi PoseidonGame.exe (05:09:53, after its sources at 05:09:36) contains the new shader
+  text ("const float kFogHistoryBlur = 0.25;", "kFogTapXY[i]") and no fogCellNoise / g_cellJitter;
+  graphics-remaster-rwdi (d91) still has fogCellNoise.
+- look-director's compiled tree = d91a08e0 + fix.patch: its HEAD fec10759 is an ancestor of d91a08e0;
+  git diff d91a08e0 shows only the four code files of the patch (each equal to d91a08e0 + fix.patch
+  applied in a scratch tree, modulo CRLF) plus docs and video scripts; no untracked engine sources.
+  fix.patch applies to graphics-remaster HEAD d91a08e0 (git apply --check OK).
+
+OWNER VIDEO (h)
+- lead/owner_compare.mp4: 1280x720, 60 fps, 1380 frames, 23.0 s, 6.06 MB (< 30 MB), decodes with no
+  error. Parts as labelled, from the right sources (ffmpeg command in owner_video.log): ORIGINAL
+  mist/backup_ud, LAST FIX percell_valley_mist, NEW v2/ud valley_mist, then the full NEW shot.
+  Amplified frame differences (look/owner_video_parts_check.png): ORIGINAL sheet change, LAST FIX faint
+  blotches, NEW flat.
+- Caveat: after the crf 18 / yuv420p encode the LAST FIX wind is much weaker in the mp4 than in the
+  source (travel 0.07 at (-24,0) px/frame at 2x in the haze, vs 0.2-0.4 in the mkv); NEW shows 0.00
+  there. The difference is real but subtle in the video; if the owner says "I can't see the wind in
+  the last-fix part either", that is the encode. A lower crf or a 4x crop would show it plainly.
+
+NOT CHECKED BY ME
+- Other trailer scenes (cloud_shadows was probed by the lead; convoy, sinai_camp not by anyone), night
+  and rain scenes, low frame rates, GPU cost (lead: +0.09 ms).
+- A real-time recording of the production binary itself (the recorder exists only on mist-1; the q2b
+  override there equals the production shader and ignores the jitter uniforms mist-1 still sets).
+
+FILES: critic1/tools/*.py (cache, cam, motion, table2, xt, xtsheet, screenlock, tspec, pulse, consec,
+look, held, pine, runprobe.ps1); critic1/out/*.txt|json; critic1/look/ (xt/, consec/, screen means,
+look diffs, owner video check, pine sheet); critic1/runs/fog2_pine_moving-{new,orig}/*.mkv.

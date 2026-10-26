@@ -1,0 +1,5 @@
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex\data2\mutt_plachtag.pac  top 256x256  coverage(a>=192) top=1.000
+stored (PAA): L0 cov=1.000 mean=(64,61,56)  L1 cov=1.000 mean=(64,61,56)  L2 cov=1.000 mean=(63,61,57)  L3 cov=1.000 mean=(63,60,57)  L4 cov=1.000 mean=(63,59,56)
+box: L0 cov=1.000 mean=(64,61,56)  L1 cov=1.000 mean=(64,61,56)  L2 cov=1.000 mean=(64,61,56)  L3 cov=1.000 mean=(64,61,56)  L4 cov=1.000 mean=(64,61,56)
+Lanczos-2: L0 cov=1.000 mean=(64,61,56)  L1 cov=1.000 mean=(64,61,56)  L2 cov=1.000 mean=(64,61,56)  L3 cov=1.000 mean=(64,61,56)  L4 cov=1.000 mean=(64,61,56)
+Lanczos-2 + coverage: L0 cov=1.000 mean=(64,61,56)  L1 cov=1.000 mean=(64,61,56)  L2 cov=1.000 mean=(64,61,56)  L3 cov=1.000 mean=(64,61,56)  L4 cov=1.000 mean=(64,61,56)

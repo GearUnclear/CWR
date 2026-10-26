@@ -1,0 +1,71 @@
+// Atmosphere research track, Eden: overcast_broken three-way.
+#include "capture_lib.sqf"
+#include "atmo_lib.sqf"
+
+triSimUntil { alive player }
+
+capWorld = "Eden"
+capFov = 0.7
+capSimT = 0
+capPinTime = false
+capUseView = false
+capProps = []
+capView = "setup"
+capModeName = "none"
+capLit = "none"
+capGpu = "none"
+capPerf = "none"
+
+triCaptureAtPresent true
+triSetMsaa 4
+triSetRenderScale 1.5
+showCinemaBorder false
+enableRadio false
+player setCaptive true
+player allowDamage false
+
+createCenter west
+capGrpW = createGroup west
+capProbe = "HeliHEmpty" createVehicle [9200, 3700, 0]
+capCam = "camera" camCreate [9200, 3700, 2]
+capCam cameraEffect ["internal", "back"]
+
+triSimFrames 240
+call { "view=setup;event=setup;world=Eden;msaa=4;scale=1.5;window=960x640;capture=present" call capLog }
+
+["overcast_broken", 9200, 3700, 1.75, 288, -4, [1985, 7, 5, 14, 30], 0.5, 0, 3500] call capBegin
+call {
+    [["Jeep"], 12, -5, 70, "veh"] call capSpawn;
+}
+triSimFrames 150
+"classic" call capMode
+triSimFrames 90
+[] call capReadTimers
+[] call capPin
+triSimFrames 3
+triScreenshot "overcast_broken__classic"
+"overcast_broken__classic" call capRecord
+["remastered", []] call capVariant
+triSimFrames 90
+[] call capReadTimers
+[] call capPin
+triSimFrames 3
+triScreenshot "overcast_broken__remastered"
+"overcast_broken__remastered" call capRecord
+["atmo", ["atmosphere=1", "atmoFog=1", "atmoLight=1"]] call capVariant
+triSimFrames 90
+[] call capReadTimers
+[] call capPin
+triSimFrames 3
+triScreenshot "overcast_broken__atmo"
+"overcast_broken__atmo" call capRecord
+["dbgcloud", ["atmosphere=1", "atmoDebug=1"]] call capVariant
+triSimFrames 10
+[] call capPin
+triSimFrames 3
+triScreenshot "overcast_broken__dbgcloud"
+"overcast_broken__dbgcloud" call capRecord
+[] call capClear
+
+call { "view=done;event=done" call capLog }
+triEndTest

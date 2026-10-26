@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\2\\runs\\fog2-pine_moving-d91\\frames", "frames": 105, "band": 0.082, "band_max": 0.371, "sky": 0.06, "spikes": 153, "worst": [[35, 1.34], [55, 1.19], [114, 1.16], [115, 1.12], [67, 1.09], [34, 1.02], [86, 1.0], [54, 0.98]]}

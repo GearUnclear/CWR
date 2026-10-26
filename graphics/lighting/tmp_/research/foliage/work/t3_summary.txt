@@ -1,0 +1,7 @@
+t3 (Eden, ov8): alternating per rep (remastered, vH2, vHc), 120 settle frames each, 4 reps; GPU frame ms
+eden_forest_golden   remastered frame median   2.94 (delta +0.00)  world median   2.23  samples [3.4, 2.27, 3.17, 2.7]
+eden_forest_golden   vH2        frame median   3.92 (delta +0.98)  world median   3.33  samples [4.05, 3.79, 4.9, 3.49]
+eden_forest_golden   vHc        frame median   2.55 (delta -0.39)  world median   1.84  samples [2.56, 2.42, 3.63, 2.54]
+overcast_broken      remastered frame median   5.49 (delta +0.00)  world median   4.71  samples [6.5, 5.37, 5.44, 5.54]
+overcast_broken      vH2        frame median   5.17 (delta -0.32)  world median   4.41  samples [5.04, 5.31, 4.94, 6.7]
+overcast_broken      vHc        frame median   5.33 (delta -0.16)  world median   4.64  samples [5.54, 6.77, 5.13, 4.98]

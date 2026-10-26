@@ -1,0 +1,21 @@
+guerrilla: Market.Abel debug teleports aim at the dealer body, not its planned spot (market_reference_mission flake)
+
+act_tp_vehicle.sqs and act_tp_arms.sqs put the player 4 m east and 4 m
+north of the dealer record's planned position, but Market::SpawnDealer's
+free-position search can push the body several metres off that spot; when
+it went the other way the player stood just outside the 12 m buy radius
+(La Trinite: body 6.9 m off, player 12.28 m away), the menu never mounted
+and gmMktDealerKind kept the earlier WEAPON. Which town hosts the nearest
+vehicle dealer varies with the seed, so the test failed one run in three
+or four (and timed out under gate load). Both actions now aim at the live
+body (record select 3) and fall back to the planned spot. Market.Abel also
+pins cityGarrison off like the other campaignEnd = 0 slices (a garrison
+standing on a dealer since the hashed spawn points). Open: DealerRecord.pos
+(the map marker) is the planned spot, up to about 7 m off the body.
+
+Verified on dist/agent2-rwdi + remaster-shadow-of2: market_reference_mission
+8 of 8 at --retries 0 (one seed exercised a 4.7 m push); reference_mission_
+market, showcase_smoke, guerrilla_native_save_reload.seq, guerrilla_forces_
+hq_assault 4/4; human suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

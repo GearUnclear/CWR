@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\fable-1\runs\static-q2z\static-q2z.mkv  frames 120  band 0.033  sky 0.018
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       154.2 [-0.0, -0.0]  0.030  0.122  0.020 -0.338 [3, -14]   0.020 [3, -14]  0.002  0.488 -0.462    nan    nan -0.199             -
+   valley    127.9 [-0.0, -0.0]  0.025  0.048  0.022 -0.398 [-16, 13]   0.022 [-16, 13]  0.001  0.234 -0.399    nan    nan -0.255             -
+   farhill   115.7  [0.0, -0.0]  0.019  0.045  0.011 -0.429 [15, -7]   0.011 [15, -7]  0.000  0.207 -0.346    nan    nan -0.254             -
+   haze      181.3  [0.0, -0.0]  0.016  0.044  0.014 -0.392 [-2, -16]   0.014 [-2, -16]  0.001  0.198 -0.311    nan    nan -0.256             -
+   slope      52.7 [-0.0, -0.0]  0.023  0.091  0.038 -0.698  [13, 6]   0.038  [13, 6]  0.003  0.628 -0.765    nan    nan -0.402             -

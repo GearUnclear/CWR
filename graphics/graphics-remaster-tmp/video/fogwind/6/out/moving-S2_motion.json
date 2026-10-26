@@ -1,0 +1,137 @@
+[
+ {
+  "src": "runs/moving-S2/moving-S2.mkv",
+  "frm": 15,
+  "to": 0,
+  "band": 0.073,
+  "sky": 0.054,
+  "regions": {
+   "bay": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 153.23,
+    "camera": [
+     -1.12,
+     -0.06
+    ],
+    "lowd2": 0.069,
+    "mid": 0.203,
+    "rho": 0.033,
+    "rho0": -0.28,
+    "vel": [
+     -2,
+     15
+    ],
+    "rho_off": 0.033,
+    "vel_off": [
+     -2,
+     15
+    ],
+    "wind": 0.007,
+    "fine": 0.883,
+    "fine0": -0.451
+   },
+   "valley": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 126.4,
+    "camera": [
+     -0.94,
+     0.01
+    ],
+    "lowd2": 0.06,
+    "mid": 0.123,
+    "rho": 0.03,
+    "rho0": -0.42,
+    "vel": [
+     -1,
+     16
+    ],
+    "rho_off": 0.03,
+    "vel_off": [
+     -1,
+     16
+    ],
+    "wind": 0.004,
+    "fine": 0.702,
+    "fine0": -0.493
+   },
+   "farhill": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 115.91,
+    "camera": [
+     -0.89,
+     0.07
+    ],
+    "lowd2": 0.049,
+    "mid": 0.112,
+    "rho": 0.013,
+    "rho0": -0.337,
+    "vel": [
+     16,
+     -16
+    ],
+    "rho_off": 0.013,
+    "vel_off": [
+     16,
+     -16
+    ],
+    "wind": 0.002,
+    "fine": 0.728,
+    "fine0": -0.423
+   },
+   "haze": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 181.01,
+    "camera": [
+     -0.79,
+     0.02
+    ],
+    "lowd2": 0.042,
+    "mid": 0.108,
+    "rho": 0.032,
+    "rho0": -0.228,
+    "vel": [
+     -14,
+     0
+    ],
+    "rho_off": 0.032,
+    "vel_off": [
+     -14,
+     0
+    ],
+    "wind": 0.003,
+    "fine": 0.62,
+    "fine0": -0.332
+   },
+   "slope": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 53.56,
+    "camera": [
+     -0.94,
+     0.08
+    ],
+    "lowd2": 0.058,
+    "mid": 0.14,
+    "rho": 0.022,
+    "rho0": -0.393,
+    "vel": [
+     -12,
+     -9
+    ],
+    "rho_off": 0.022,
+    "vel_off": [
+     -12,
+     -9
+    ],
+    "wind": 0.003,
+    "fine": 1.015,
+    "fine0": -0.396
+   }
+  },
+  "frames": 105
+ }
+]

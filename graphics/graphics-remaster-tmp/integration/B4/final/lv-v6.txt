@@ -1,0 +1,28 @@
+combat_day_k00          classic: all 160.2 low 161.1 R/B 1.07  off: all 161.6 low 163.5 R/B 1.04  on: all 161.8 low 163.4 R/B 1.04
+combat_day_k05          classic: all 160.4 low 161.1 R/B 1.07  off: all 161.7 low 163.5 R/B 1.04  on: all 170.1 low 169.9 R/B 1.06
+combat_day_k06          classic: all 165.3 low 160.9 R/B 1.07  off: all 166.5 low 163.2 R/B 1.04  on: all 169.5 low 165.8 R/B 1.05
+combat_eye_k00          classic: all  18.1 low  23.2 R/B 1.01  off: all  15.8 low  18.8 R/B 0.92  on: all  22.8 low  23.3 R/B 1.25
+combat_eye_k05          classic: all  57.0 low  90.2 R/B 1.02  off: all  52.3 low  80.5 R/B 0.95  on: all  59.4 low  78.7 R/B 1.22
+combat_eye_k06          classic: all  59.6 low  90.2 R/B 1.02  off: all  55.0 low  80.5 R/B 0.95  on: all  45.7 low  53.5 R/B 1.27
+combat_eye_k08          classic: all  22.1 low  23.2 R/B 1.01  off: all  19.9 low  18.8 R/B 0.92  on: all  30.4 low  28.8 R/B 1.30
+combat_eye_k11          classic: all  20.2 low  23.2 R/B 1.01  off: all  17.9 low  18.8 R/B 0.92  on: all  25.7 low  23.9 R/B 1.26
+combat_fires            classic: all  21.4 low  24.9 R/B 1.01  off: all  18.3 low  19.6 R/B 0.92  on: all  27.2 low  24.4 R/B 1.26
+combat_flare_k240       classic: all  53.5 low  72.7 R/B 1.02  off: all  46.9 low  61.1 R/B 0.95  on: all  75.7 low 101.7 R/B 1.08
+combat_flare_k90        classic: all 105.4 low 159.3 R/B 1.05  off: all 103.1 low 154.8 R/B 1.03  on: all  99.0 low 144.7 R/B 1.07
+combat_flashtiming_r1   off: all  51.8 low  80.5 R/B 0.95  on: all  52.3 low  68.0 R/B 1.22
+combat_flashtiming_r2   off: all  51.7 low  80.5 R/B 0.95  on: all  52.3 low  68.0 R/B 1.22
+combat_flashtiming_r3   off: all  51.7 low  80.5 R/B 0.95  on: all  52.3 low  68.0 R/B 1.22
+combat_muzzle_k04       classic: all  15.3 low  19.8 R/B 0.99  off: all  14.7 low  18.7 R/B 0.92  on: all  14.7 low  18.7 R/B 0.92
+combat_muzzle_k05       classic: all  15.3 low  19.8 R/B 0.99  off: all  14.7 low  18.7 R/B 0.92  on: all  14.7 low  18.7 R/B 0.92
+combat_muzzle_k06       classic: all  15.3 low  19.8 R/B 0.99  off: all  14.7 low  18.7 R/B 0.92  on: all  27.6 low  45.5 R/B 1.34
+combat_muzzle_k08       classic: all  15.3 low  19.8 R/B 0.99  off: all  14.7 low  18.7 R/B 0.92  on: all  14.5 low  18.1 R/B 0.95
+combat_shell_k05        classic: all  72.4 low  94.3 R/B 1.03  off: all  66.4 low  84.4 R/B 0.96  on: all 116.3 low 149.0 R/B 1.22
+combat_shell_k06        classic: all  79.3 low  94.2 R/B 1.03  off: all  73.7 low  84.3 R/B 0.96  on: all  81.8 low  87.7 R/B 1.27
+combat_shell_k08        classic: all  35.5 low  24.6 R/B 1.01  off: all  32.8 low  19.3 R/B 0.92  on: all  51.8 low  39.3 R/B 1.35
+combat_shell_k11        classic: all  29.0 low  24.1 R/B 1.01  off: all  26.2 low  19.0 R/B 0.92  on: all  37.7 low  27.1 R/B 1.33
+combat_shell_k16        classic: all  22.2 low  24.7 R/B 1.01  off: all  19.3 low  19.5 R/B 0.92  on: all  29.7 low  25.0 R/B 1.28
+combat_timing_r1        off: all  18.4 low  19.6 R/B 0.92  on: all  24.5 low  23.4 R/B 1.21
+combat_timing_r2        off: all  18.6 low  19.6 R/B 0.92  on: all  23.1 low  21.9 R/B 1.16
+combat_timing_r3        off: all  18.5 low  19.6 R/B 0.92  on: all  24.1 low  22.9 R/B 1.20
+nc_road_night           off: all  29.3 low  50.8 R/B 0.97  on: all  29.3 low  50.8 R/B 0.97
+nc_sunrise_ridge        off: all  85.8 low  35.5 R/B 1.42  on: all  85.8 low  35.5 R/B 1.42

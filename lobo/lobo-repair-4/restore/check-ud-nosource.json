@@ -1,0 +1,15 @@
+{
+  "repair_version": "2026-10-11.4",
+  "rule_sha256": "dd931ca544627c5b4848d5549181cd48cb7e963ad5fe3794356f6929b80bcd9f",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "ud",
+  "changed_members": 0,
+  "added_members": 0,
+  "archives": [],
+  "skipped": [
+    "lobo_airammo: 9 member(s) not restored (LoBo_Mk81.p3d, LoBo_Mk81_LDGB.p3d, LoBo_Mk81_LDGB_d.p3d, LoBo_Mk82_LDGB.p3d, LoBo_Mk82_LDGB_d.p3d, LoBo_Mk83_LDGB.p3d, LoBo_Mk83_LDGB_d.p3d, LoBo_Mk84_LDGB.p3d, LoBo_Mk84_LDGB_d.p3d): pass --asset-source <LoBo_airammo.pbo of LoBoAddonPack3 (2007-01-06), sha256 de7f4728cc41bd98e93a40e8d01d4816632a39805f191dc05ea6c023b56489fd, e.g. D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo>",
+    "loboegypt: 1 member(s) not restored (helm_s_in.pac): pass --asset-source <LoBoEgypt.pbo of LoBoAddonPack1 (2004-06-11) or LoBoDemo2 (2004-08-25), sha256 992d304a27fefae4105da52cfc58fd9ae6ae0c33d9a963d0ee20161ce77340e9, e.g. D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo>"
+  ],
+  "members": []
+}

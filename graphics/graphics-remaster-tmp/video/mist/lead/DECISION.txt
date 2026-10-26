@@ -1,0 +1,200 @@
+MIST FLICKER: DECISION (lead of the mist swarm, 2026-10-23)
+============================================================
+Owner's symptom: "there is some flickering obvious in the 'morning fog' shot. this MUST be
+fixed". Shot: trailer scene 2, clip valley_mist, "MOVING OUT AT DAWN".
+
+VERDICT: a REAL GAME BUG in the overhaul's volumetric fog. It also shows in normal play at
+60 fps. The trailer's stepped capture makes it about 1.6x to 2x stronger, but it does not
+create it. Fixed in the engine (fix.patch, with a unit test). No change to the capture
+staging and none to vanilla.
+
+
+1. THE CAUSE IN PLAIN WORDS
+---------------------------
+The volumetric fog is computed in a coarse 3D grid of cells (160 x 90 cells, 64 depth
+slices at 1080p). Each frame it samples one point inside every cell and blends it with the
+last frame (it keeps 88% of the old value), so over time the samples average out. The bug:
+every cell in the whole grid sampled the SAME point of its cell each frame (one jitter
+offset for the whole frame). The history's leftover of that jitter therefore had the same
+sign everywhere at once, so the far haze and the valley mist over the dawn valley, the bay
+and the far hills got a little thicker, then a little thinner, as one sheet, frame after
+frame. That is the "breathing" the owner saw. Most of it comes from the depth part of the
+jitter (deep far slices are hundreds of metres long, so the sample point moves a lot).
+
+The fix keeps the frame's jitter sequence but turns it per cell (and per slice in depth)
+with a fixed interleaved-gradient offset of the cell. Neighbouring cells now sample
+different points, their leftovers are independent, and they average out on screen.
+
+Why the capture made it worse: each shot of the trailer renders 7 to 10 frames at the held
+pose, so the jitter history runs 7 to 10 steps per video frame and the slow part of the
+pump aliases into frame-to-frame jumps. That only amplifies the bug; with the fix in, the
+capture cadence no longer matters (below).
+
+
+2. EVIDENCE (all numbers bandmetric: tmp/video/mist/tools/bandmetric.py, block-mean d2 in the
+   mist band; vanilla is the reference; compare PNG with PNG and mkv with mkv)
+---------------------------------------------------------------------------------------
+Game bug, not capture artefact:
+  - Agent 1 (mist-1 recorder, the clip's view and pan, every presented frame recorded):
+    real-time 60 fps cadence (one render per 1/60 s tick, what a player sees) band 0.308,
+    22 spikes per frame; stepped capture 0.492; vanilla 0.106, 0 spikes. Wall-clock real
+    time, static camera: 0.278 to 0.293. So play itself flickers at 3x vanilla.
+  - Agent 2: one render per 1/60 s step (rt10) 0.268; K warm-up frames per shot make it
+    WORSE (K=1..8: 0.577 to 0.602, base 0.50): a capture-only fix cannot work.
+Where it comes from (bisection):
+  - Agent 6: only removing the froxel medium kills it (noair 0.035, B8 air instead 0.028,
+    empty medium 0.039, jitter frozen at the cell centre under the real pan 0.038).
+    Axis split: depth jitter alone 0.426, xy jitter alone 0.147 (both must be fixed).
+  - Agent 3: jitter-history model fits the band brightness (R2 0.45 to 0.57 on the shot
+    clip at the logged frame counter minus 29, 0.83 to 0.91 on a static probe).
+Ruled out (each with numbers on the board and in mist/<n>/REPORT.txt):
+  - exposure and camera (agent 4: exposure frozen 0.485, whole photo camera off 0.511,
+    base 0.506; corr(band, exposure) 0.00), sun disc, aureole, sky roll-off;
+  - round 5 dawn phase gain (agent 4: off 0.672, it damps the pump);
+  - sun shafts, shadows, shadowed mist (agent 5: off 0.575 to 0.794, they damp it);
+  - far ring tap stepping and history reprojection (agent 6: frozen jitter under the pan
+    0.038 = no-air floor);
+  - TAA (off 0.692, it damps), GTAO (off 0.465); the mist field is not the sole source
+    (mist off still 0.347: the haze pumps too).
+
+
+3. THE FIX
+----------
+tmp/video/mist/lead/fix.patch (git diff --binary; applies cleanly to graphics-remaster
+907906c; no commit, no branch). Suggested commit message: fix.commitmsg.txt.
+  - arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp (psFogInject): new
+    fogCellNoise (interleaved-gradient hash of the cell); fogSlice samples depth at
+    s + fract(fogDepth.w + g_cellJitter + 0.618034 s); main jitters xy by
+    fract(fogFrame.xy + 0.5 + per-cell offsets) - 0.5. Same sequence, same history share,
+    same uniforms. Agent 3's diff, unchanged.
+  - arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp: a three-line comment at the jitter
+    source pointing at the per-cell turn (no code change).
+  - arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp: new test
+    "Volumetric fog: the injection's jitter is turned per cell, so its history leaves no
+    frame-wide pump" [remaster][fog][Shaders]: pins the per-cell strings, forbids the old
+    frame-global forms, and a C++ mirror checks a 5 x 5 cell block's history residual drops
+    from about 0.031 slice to under a quarter of that.
+Unit gate (mist-1 build, all 17 tags of HANDOFF-2026-10-23 section 6): All tests passed,
+958963 assertions in 347 test cases (346 before + the new one). The new test alone:
+9 assertions pass.
+Built: D:/Arma_CWA_worktrees/mist-1 (graphics-remaster 907906c + agent 1's diagnostic
+recorder + this fix; build/mist-1-rwdi) and D:/Arma_CWA_worktrees/look-director
+(look-director-rwdi rebuilt 2026-10-23 02:24 with the fix, PoseidonGame target only).
+look-director before state: look-director-before.patch is EMPTY because every change in
+that tree is staged; the staged state is saved as look-director-before-staged.patch. The
+fix sits there as an unstaged change; "git -C D:/Arma_CWA_worktrees/look-director apply -R
+<lead>/fix.patch" undoes it. Its engine code otherwise equals graphics-remaster 907906c.
+
+
+4. VERIFICATION
+---------------
+a) 120-frame repro (agent 6's look_probe_mist6_base unchanged: the clip's own staging and
+   head recipe, frames 240-389, measured 270-389), same test on the old and the fixed
+   look-director-rwdi, no shader override (log: mode=remastered;lit=OK, no GL errors):
+                         band    band_max  spikes  sky
+     before (PNG)        0.506   2.02      5568    0.034   (mist/6/runs/base)
+     after  (PNG)        0.064   0.178     1       0.024   (lead/runs/fixed)
+     before (mkv)        0.508   1.99      5364    0.051
+     after  (mkv)        0.085   0.166     1       0.044
+     shot clip 270-390   0.526   2.09      5482    0.057   (mkv)
+     vanilla 270-390     0.102   0.235     0       0.023   (mkv)
+b) FULL clip ud_valley_mist (570 frames, unchanged test) on the fixed build, shot into
+   lead/runs/fullclip (nothing in v2 touched):
+     after  (PNG)        0.064   0.147     1       0.027
+     after  (mkv)        0.100   0.172     2       0.044
+     shot clip (mkv)     0.567   1.415     25076   0.051
+     vanilla (mkv)       0.106   0.193     0       0.025
+c) At the froxel cell scale (lead/tools/cellscale.py: d2 rms of 1, 2 and 5 cell block means
+   in the band at 960x540), full clip: fixed 0.222 / 0.156 / 0.097, vanilla 0.258 / 0.158 /
+   0.109, shot clip 0.805 / 0.775 / 0.706. The fixed overhaul changes LESS from frame to
+   frame than vanilla at every scale; no per-cell boil is traded in.
+d) Real time with the COMPILED fix (mist-1, agent 1's recorder, my copy
+   look_probe_mistlead_rt, no override), pan window t 0..2 s, mkv:
+     60 fps cadence (300 frames, every sim step 16.67 ms): band 0.112, band_max 0.213,
+       0 spikes (unfixed 0.308 / 1.34 / 22.3 per frame; vanilla 0.106)
+     wall-clock real time at 25 fps, camera static at the pan end: 0.042, 0 spikes
+       (unfixed 0.293, 25.6 spikes per frame)
+e) Looked at by eye (2x crops and d2 x20 strips, rows before / after / vanilla):
+     lead/look/repro_d2x20.png      frames 327-329: before, the whole land under the haze
+                                    flips dark, dark, bright as one sheet; after, only
+                                    faint cell-size specks well under one code value
+     lead/look/full_d2x20.png       frames 133, 472, 540 (the clip's other worst frames):
+                                    the same
+     lead/look/repro_crop2x_f328.png, full_crop2x_f472.png: the bay and the far valley at
+                                    2x, no curtains, no blocks, no grid; a hair mistier
+                                    (agent 3 measured +1.6/255 in the band)
+     lead/look/repro_full_f328.png  whole frame: sky, sun disc, clouds, shadows, men
+                                    unchanged
+   Sky grain: after the fix the sky is at vanilla level in PNG terms (0.024 to 0.027 vs
+   0.034 before); the mkv codec adds about 0.02 to the overhaul's smooth sky, far under one
+   code value. No capture change needed for it.
+
+
+5. OTHER CLIPS THE SAME CAUSE HITS
+---------------------------------
+Every overhaul clip with the volumetric fog uses the same injection, so the landed fix
+changes all of them slightly. Screening every v2 pair (lead/screen_clips.txt, bandmetric's
+band on the shot clips, ud vs vanilla): only two outliers.
+  - cloud_shadows (Everon, "Over Everon, the clouds catch the sun"): band 3.6x vanilla,
+    17002 spikes. SAME CAUSE, confirmed: a cut of the clip (look_probe_mistlead_cloud_shadows,
+    frames 120-269, unchanged otherwise) on the fixed build gives band 0.099, band_max 0.172,
+    0 spikes (shot clip same window 0.396 / 1.31 / 4195; vanilla 0.104 / 0.204 / 0); cell
+    scale fixed 0.190 / 0.138 / 0.103, vanilla 0.305 / 0.169 / 0.111. Looked:
+    lead/look/cloud_d2x20.png, cloud_crop2x_f198.png. RESHOOT its ud side too.
+  - valley_mist: 5.3x, 25076 spikes (this decision).
+  - mildly above vanilla, re-measure after a reshoot if convenient: convoy 1.4x (125 spikes
+    vs 2), pine_shafts 1.2x (1173 vs 19), sinai_camp 1.1x (72 vs 4). All the others sit at
+    about vanilla, 1.0x to 1.1x (ambush, bay_reflections, opening, outpost), or below it
+    (checkpoint, rain_town, supply_run, town_patrol, firefight).
+
+
+6. RESHOOT AND RECOMPOSITE (for a fresh agent)
+----------------------------------------------
+Precondition: look-director-rwdi already has the fix (built 02:24; check: grep -c
+"g_cellJitter = fogCellNoise" D:/Arma_CWA_worktrees/look-director/arma_CWR/dist/
+look-director-rwdi/PoseidonGame.exe prints 1). Do not rebuild it, do not touch vanilla.
+The tests need no regeneration: gen_video_v2.py as it is now writes byte-identical
+ud_valley_mist and van_valley_mist tests (checked into a scratch folder with
+lead/tools/regen_check.py). The head recipe (exact 1/60 s step, gaze hold) is in them.
+  1. Keep the old clips for before/after: move
+     tmp/video/v2/ud/valley_mist/valley_mist__ud.mkv (and vanilla's, if reshooting it) to
+     tmp/video/mist/lead/backup/ (not inside v2, so nothing reads them by mistake).
+  2. Overhaul side, from D:/Arma_CWA_worktrees/video-work/arma_CWR/tests/rendering/
+     captures/video, in the background (about 7.5 min), poll every 3 min:
+       powershell -NoProfile -ExecutionPolicy Bypass -File run_v2_lane.ps1 -Side ud
+         -Clips valley_mist -GameDir D:\Arma_CWA_worktrees\look-director\arma_CWR\dist\look-director-rwdi
+         -DataJunction RemasterUD-video-final -LaneTag mistfix
+     Progress: tmp/video/v2/runs/lane-ud-mistfix.txt ("collect valley_mist exit=0 ...
+     570/570"). collect_frames.py writes v2/ud/valley_mist/valley_mist__ud.mkv and
+     collect.json (proof: look-director-rwdi, mode=remastered;lit=OK).
+  3. Vanilla side, after step 2 (one game at a time), about 10 min:
+       powershell -NoProfile -ExecutionPolicy Bypass -File run_v2_lane.ps1 -Side vanilla
+         -Clips valley_mist -LaneTag mistfix
+     (defaults: vanilla-upstream-rwdi, junction RemasterUD-video-vanilla, the seeded
+     profile tmp/video-userseed; gamma 1.2 applied by collect_frames.py). The vanilla
+     build and test are unchanged, so this repeats the existing vanilla clip; it may be
+     skipped and the old one kept.
+  4. If the owner's voice fit (owner_vo.py fit, FIT_PLAN.txt) asks for a longer
+     valley_mist, use its N instead: python gen_video_v2.py --clip valley_mist --frames N
+     --side both, then steps 2 and 3 with -Expect N added.
+  5. Check: python D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/mist/tools/bandmetric.py
+     D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/ud/valley_mist/valley_mist__ud.mkv
+     must read about band 0.10, band_max under 0.2, spikes under 10 (mine: 0.100 / 0.172 /
+     2). Look at a 2x crop of the bay with lead/tools/look.py (rows: old clip from the
+     backup, new clip, vanilla).
+  6. Same for cloud_shadows: step 2 with -Clips cloud_shadows (vanilla optional).
+  7. Recomposite: python trailer_v2.py (silent master, 1920x1080 60 fps, into
+     tmp/video/v2/out-split/; quick look first with --seconds 15-25), then the narration
+     mix with the voice the owner picks, as before (mix_vo.py or owner_vo.py finish).
+
+
+7. LEFT IN PLACE
+----------------
+  - D:/Arma_CWA_worktrees/mist-1 (claimed by agent 1, reused by the lead): recorder + fix,
+    built. Remove it when the fix has landed (owner's call; it is about 1.1 GB of build).
+  - D:/Arma_CWA_worktrees/look-director: the fix applied (unstaged), look-director-rwdi
+    rebuilt with it.
+  - Junction video-work/arma_CWR/packages/RemasterUD-mist-lead (no game running).
+  - Probe tests in video-work .../video/: look_probe_mistlead_cloud_shadows and
+    look_probe_mistlead_rt (.test.sqf/.toml).
+  - My outputs: tmp/video/mist/lead/ (runs/*/ *.mkv, rec/*.mkv, look/*.png, tools/).

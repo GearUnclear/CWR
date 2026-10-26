@@ -1,0 +1,8 @@
+rt-q4-rtst: 190 frames (clip 10..200), camera |shift| mean 0.00 px/frame (x +0.00, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.057  0.023  0.053  0.195 | -24.7  +2.2  +0.02  -0.20 |  -6.4 +14.0  +0.01 | +0.02   0.001
+  valley   0.033  0.022  0.032  0.127 |  +9.4 +11.4  +0.02  -0.13 | +18.5  +5.0  +0.02 | +0.02   0.001
+  farhill  0.031  0.016  0.029  0.126 |  -2.5 +15.4  +0.01  -0.13 | +14.9  +6.1  +0.02 | +0.01   0.000
+  haze     0.024  0.011  0.023  0.085 |  +7.1 +11.0  +0.01  -0.16 | -10.5 +18.0  +0.01 | +0.01   0.000
+  slope    0.052  0.029  0.048  0.235 |  -9.3 -16.8  +0.02  -0.16 |  +4.9 +16.3  +0.02 | +0.02   0.001
+  wrote amp_rt-q4-rtst.png, xt_rt-q4-rtst.png, amp2x_rt-q4-rtst.mp4 in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

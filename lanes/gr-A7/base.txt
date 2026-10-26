@@ -1,0 +1,8 @@
+lane: gr-A7
+source: D:/Arma_CWA_worktrees/gr-A7
+HEAD: ced77aeef3efa3baa1483e944c9610c503509234
+subject: graphics: the post pass runs as a list of stages
+commit date: 2026-10-18 04:37:21 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 30
+binary files changed (content not in patch): none

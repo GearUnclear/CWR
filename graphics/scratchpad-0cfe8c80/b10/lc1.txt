@@ -1,0 +1,6 @@
+// (binding 3), the shadow map through a comparison sampler on unit 2 (and as
+// raw depth on unit 6), the terrain horizon map on units 3 and 4, the cloud
+// noise on unit 5, the sky table on unit 8, the sky's cloud density on unit 9
+// and the frame's tiled light list from the FrameLights block (binding 4) and
+// its tile indices on unit 13. Selection between the remastered and classic
+// sets happens in DoSelectPixelShader via

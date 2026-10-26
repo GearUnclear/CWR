@@ -1,0 +1,178 @@
+[
+  {
+    "view": "overcast_broken",
+    "label": "classic",
+    "gpu_frame": 22.79,
+    "gpu_world": 22.68,
+    "gpu_post": null,
+    "gpu_composite": null,
+    "lap_far": 8.889217376708984,
+    "lap_mid": 12.6021089553833,
+    "lap_near": 9.32668399810791
+  },
+  {
+    "view": "overcast_broken",
+    "label": "remastered",
+    "gpu_frame": 18.56,
+    "gpu_world": 17.86,
+    "gpu_post": 0.6,
+    "gpu_composite": 0.03,
+    "lap_far": 7.7288994789123535,
+    "lap_mid": 10.758169174194336,
+    "lap_near": 9.081149101257324
+  },
+  {
+    "view": "overcast_broken",
+    "label": "rsl15",
+    "gpu_frame": 21.39,
+    "gpu_world": 20.61,
+    "gpu_post": 0.68,
+    "gpu_composite": 0.03,
+    "lap_far": 7.704145431518555,
+    "lap_mid": 12.006485939025879,
+    "lap_near": 10.49902057647705
+  },
+  {
+    "view": "overcast_broken",
+    "label": "rfinal",
+    "gpu_frame": 28.9,
+    "gpu_world": 28.22,
+    "gpu_post": 0.58,
+    "gpu_composite": 0.05,
+    "lap_far": 11.274868965148926,
+    "lap_mid": 20.238370895385742,
+    "lap_near": 17.816545486450195
+  },
+  {
+    "view": "overcast_broken",
+    "label": "rsl15r",
+    "gpu_frame": 25.6,
+    "gpu_world": 24.96,
+    "gpu_post": 0.54,
+    "gpu_composite": 0.03,
+    "lap_far": 8.023588180541992,
+    "lap_mid": 12.631570816040039,
+    "lap_near": 10.542741775512695
+  },
+  {
+    "view": "overcast_broken",
+    "label": "rsl15z4",
+    "gpu_frame": 27.76,
+    "gpu_world": 26.92,
+    "gpu_post": 0.74,
+    "gpu_composite": 0.03,
+    "lap_far": 7.945218563079834,
+    "lap_mid": 12.633306503295898,
+    "lap_near": 10.077252388000488
+  },
+  {
+    "view": "overcast_broken",
+    "label": "rsl15z8",
+    "gpu_frame": 27.77,
+    "gpu_world": 27.14,
+    "gpu_post": 0.53,
+    "gpu_composite": 0.03,
+    "lap_far": 7.738849639892578,
+    "lap_mid": 12.016079902648926,
+    "lap_near": 10.909147262573242
+  },
+  {
+    "view": "overcast_broken",
+    "label": "rfinalr",
+    "gpu_frame": 29.0,
+    "gpu_world": 28.19,
+    "gpu_post": 0.72,
+    "gpu_composite": 0.05,
+    "lap_far": 11.915693283081055,
+    "lap_mid": 21.390947341918945,
+    "lap_near": 17.871440887451172
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "classic",
+    "gpu_frame": 3.11,
+    "gpu_world": 3.0,
+    "gpu_post": null,
+    "gpu_composite": null,
+    "lap_far": 5.741967678070068,
+    "lap_mid": 15.424773216247559,
+    "lap_near": 19.19490623474121
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "remastered",
+    "gpu_frame": 14.13,
+    "gpu_world": 13.09,
+    "gpu_post": 0.92,
+    "gpu_composite": 0.03,
+    "lap_far": 6.567388534545898,
+    "lap_mid": 15.87491512298584,
+    "lap_near": 19.01606559753418
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "rsl15",
+    "gpu_frame": 8.14,
+    "gpu_world": 7.24,
+    "gpu_post": 0.78,
+    "gpu_composite": 0.03,
+    "lap_far": 8.409714698791504,
+    "lap_mid": 17.89270782470703,
+    "lap_near": 22.84427833557129
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "rfinal",
+    "gpu_frame": 12.14,
+    "gpu_world": 11.17,
+    "gpu_post": 0.85,
+    "gpu_composite": 0.05,
+    "lap_far": 13.80215835571289,
+    "lap_mid": 30.78705596923828,
+    "lap_near": 31.764822006225586
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "rsl15r",
+    "gpu_frame": 7.71,
+    "gpu_world": 6.87,
+    "gpu_post": 0.72,
+    "gpu_composite": 0.03,
+    "lap_far": 8.674321174621582,
+    "lap_mid": 18.14592742919922,
+    "lap_near": 22.837921142578125
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "rsl15z4",
+    "gpu_frame": 8.45,
+    "gpu_world": 7.56,
+    "gpu_post": 0.78,
+    "gpu_composite": 0.03,
+    "lap_far": 9.963140487670898,
+    "lap_mid": 19.311674118041992,
+    "lap_near": 21.904361724853516
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "rsl15z8",
+    "gpu_frame": 7.26,
+    "gpu_world": 6.41,
+    "gpu_post": 0.73,
+    "gpu_composite": 0.03,
+    "lap_far": 8.33618450164795,
+    "lap_mid": 17.575462341308594,
+    "lap_near": 23.62553596496582
+  },
+  {
+    "view": "sinai_desert_noon",
+    "label": "rfinalr",
+    "gpu_frame": 13.67,
+    "gpu_world": 12.84,
+    "gpu_post": 0.71,
+    "gpu_composite": 0.05,
+    "lap_far": 14.226865768432617,
+    "lap_mid": 31.06333351135254,
+    "lap_near": 31.7900333404541
+  }
+]

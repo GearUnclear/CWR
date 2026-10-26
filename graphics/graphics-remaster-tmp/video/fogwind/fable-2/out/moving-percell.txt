@@ -1,0 +1,8 @@
+moving-percell: 105 frames (clip 15..120), camera |shift| mean 0.76 px/frame (x -0.76, y -0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.169  0.077  0.239  0.490 | -11.2  +3.1  +0.11  -0.22 | +24.0  +2.1  +0.11 | +0.11   0.018
+  valley   0.242  0.117  0.218  0.413 | -11.8  -0.1  +0.30  -0.15 | +24.0  +1.1  +0.25 | +0.30   0.073
+  farhill  0.158  0.075  0.242  0.422 | -12.4  -0.5  +0.24  -0.16 | -23.2  -1.0  +0.21 | +0.24   0.038
+  haze     0.104  0.052  0.093  0.340 | -11.9  -0.0  +0.15  -0.16 | -20.8  -0.9  +0.12 | +0.15   0.015
+  slope    0.119  0.050  0.372  0.604 | -12.6  -4.2  +0.10  -0.25 | -24.0  -3.2  +0.09 | +0.10   0.012
+  wrote amp_moving-percell.png, xt_moving-percell.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

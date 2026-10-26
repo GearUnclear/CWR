@@ -1,0 +1,5 @@
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex\merged\00001&krovi4.paa  top 1024x1024  coverage(a>=192) top=0.522
+stored (PAA): L0 cov=0.522 mean=(39,40,36)  L1 cov=0.542 mean=(40,41,37)  L2 cov=0.529 mean=(39,40,37)  L3 cov=0.523 mean=(38,40,37)  L4 cov=0.518 mean=(38,39,37)
+box: L0 cov=0.522 mean=(39,40,36)  L1 cov=0.473 mean=(39,40,36)  L2 cov=0.471 mean=(39,40,36)  L3 cov=0.462 mean=(39,40,36)  L4 cov=0.447 mean=(39,40,36)
+Lanczos-2: L0 cov=0.522 mean=(39,40,36)  L1 cov=0.486 mean=(39,40,36)  L2 cov=0.473 mean=(39,40,36)  L3 cov=0.459 mean=(39,40,37)  L4 cov=0.443 mean=(39,41,37)
+Lanczos-2 + coverage: L0 cov=0.522 mean=(39,40,36)  L1 cov=0.523 mean=(39,40,36)  L2 cov=0.523 mean=(39,40,36)  L3 cov=0.523 mean=(39,40,37)  L4 cov=0.523 mean=(39,41,37)

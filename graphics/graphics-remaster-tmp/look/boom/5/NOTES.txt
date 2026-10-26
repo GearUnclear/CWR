@@ -1,0 +1,164 @@
+Boom 5 (approach 5 of 6): time and lifetimes
+=============================================
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-5 (fec1075 + LOOK/boom/base.patch, base tree 43c4ff8f).
+Build build/look-puddle-5-rwdi, game dist/look-puddle-5-rwdi, junction RemasterUD-boom-5. Nothing
+committed, no branch. fix.patch = git diff --cached --binary 43c4ff8f after git add -A arma_CWR, the
+look_probe* capture tests excluded: 6 files, +341 / -23 (Smokes.cpp/.hpp, CombatLights.cpp/.hpp,
+Shots.cpp, test_combat_lights.cpp). The AI sight and fog link is not in the diff (Target.cpp,
+VolumetricFog.cpp, WorldSetup.cpp untouched).
+
+Look first
+----------
+- final/<time>_<clip>.mp4 and *_strip.png: the six shared clips from the final build (shots3).
+- final/x_linger_24s.png: my extra probe (look_probe_x5_linger, HE shell and the Jeep's fuel together
+  at dusk, one shot every 1/3 s for 24 s): the column's whole life, which the 3 s shared HE clip cannot
+  show.
+- final/x_dusk_he_crops.png, x_dusk_grenade_crops.png, x_dusk_fuel_crops.png: frame by frame crops
+  (+33 ms to +3 s / +5 s) around the burst.
+- Before (round 5): LOOK/boom/before/clips. Working runs: shots1 (first build), shots2 (second),
+  shots3 (final); clips1 holds shots1's clips.
+
+Approach
+--------
+Check every stage of each explosion runs in simulation time and give it a physical duration.
+Timing check: every stage already runs on the simulation step. Cloudlets (puffs) are simulated with the
+frame's deltaT in World::SimulateCloudlets; Explosion, Crater and SmokeSourceVehicle are "animals"
+simulated by SimulateRest with the frame's deltaT whenever the step is under 1/15 s (their
+SetSimulationPrecision 0.2 only matters under 15 fps, where SimulateOptimized steps them by 0.2 s);
+combat lights age by GCombatLights().Tick(deltaT) in World::Simulate. Under the shared clips' fixed
+1/30 s step nothing runs on wall clock. So the blink was not a clock bug: the stages were simply given
+the wrong lengths (and one was never run).
+
+What each munition spawned before (config dump of CfgCloudlets/CfgAmmo, engine code, probe frames)
+--------------------------------------------------------------------------------------------------
+- Every explosive shell: an Explosion (CfgCloudlets Explosion, cl_fired puffs, born 2500 K, cooling
+  -4000 K/s x 0.7..1.3, held 0.2 s, faded 0.2 s; emitted for 0.05 x size s = one step) sized
+  hit x 0.003 (ground) or hit x 0.001 (object), 0.25..1; a combat light burst (hold 0.15 s, then
+  falls); a Crater with smoke (CraterSmoke1..3: puffs held 2.0 to 2.4 s, faded 0.8 to 1.2 s, emitted
+  over 0.3 to 3 s, all gone about 4 to 6 s after the burst, most of the visible dark cloud by 1.5 s);
+  CraterDustBig loaded but never run for a big burst; 20 thrown earth pieces.
+- 120 mm HE (Shell120: hit 200, indirectHit 150, range 8): size 0.6. 120 mm HEAT (Heat120: hit 700,
+  indirectHit 300, range 1): size 1.0, the biggest burst of all, because the size read the direct hit
+  (its penetration). Hand grenade (hit 20, 18, range 7): size 0.25 (clamped from 0.06).
+- Jeep destroyed: SmokeSourceVehicle's fuel explosion needs FuelExplosion hit > 50, the vehicle's
+  explosives (fuel x 0.1) x 0.5..1. A Jeep's is about 3 to 6, so NO fireball at all: the "fireball" in
+  the round 5 clip was the dust of ObjectDestructed and the dark wreck smoke. Where it did run (hit over
+  50), its puffs were fireSize metres (0.25..1.25 m) at 0.001 s intervals (up to 1250 puffs), each
+  glowing 0.15 s, and its black soot lived 0.6 s.
+
+The change
+----------
+1. HE / HEAT / grenade size by charge (Shots.cpp, ground and object hits of shells): size = 0.6 x
+   cbrt(indirectHit x indirectHitRange / 1200) in [0.2, 1] (ExplosionVisualSize). HE 0.6 (same),
+   HEAT 0.38 (was 1.0), grenade 0.28 (was 0.25). Missiles, pipe bombs, mines unchanged.
+2. Detonation flash (Explosion ctor): the fireball puffs cool from 2500 K past 1800 K (glow under a
+   tenth of a 2200 K puff's) in ExplosionFlashSeconds = 0.1 x size: HE 60 ms, HEAT 38 ms, grenade
+   28 ms (cube root of the charge, as for real detonations). Rate -700 / flash: HE -11,700 K/s, HEAT
+   -18,500, grenade -24,700 (was -4,000 for all).
+3. Combat light (EvaluateCombatLight, Explosion): its hold and decay times scale by min(size, 1), so the
+   light lasts as long as its flash: HE hold 0.09 s, HEAT 0.057 s, grenade 0.042 s; size 1 (and the
+   unit tests' strength 1) keeps 0.15 s.
+4. Crater column (Crater::Init, big burst): every puff holds 9 x L s and fades over 9 x L s, L = crater
+   size in [0.4, 1.2] (HE crater about 0.95: 8.6 + 8.6 s; grenade about 0.3 -> 0.4: 3.6 + 3.6 s). The
+   rising dark cloud (smoke1) no longer whitens as it ages (its table ran grey 500 K -> white 0 K at
+   -40 K/s; now held at 500 K), its rise slows by 1.1 m/s^2 from 6.25 to a 0.25 m/s hang (about 18 m
+   high). Lingering puffs keep spreading (size grows 8 % per second after growing up, opacity falls in
+   proportion) and their sideways speed relaxes to the landscape wind in 3 s (new Cloudlet::SetLinger;
+   only these puffs and the fuel's soot use it). smoke2 (low dust skirt) is earth-tinted
+   (0.55, 0.50, 0.42) and spreads 1.5x; smoke3 a grey veil.
+5. Dust fall: CraterDustBig now runs for a big burst too, 0.35 x timeSize s at 0.02 s intervals: a dark
+   earth curtain thrown about 4 m up that falls back within about 2 s.
+6. Fuel (SmokeSourceVehicle::SimulateExplosion): any fuel (hit over 1) burns as a deflagration; the
+   blast damage, sound and the longer wreck smoke still need hit over 50 (gameplay unchanged). Size
+   0.6 x cbrt(hit / 50) in [0.35, 1.25], feeding 0.5 x cbrt(hit / 50) s in [0.3, 1.25]. Puffs
+   2 + 2 x size m from a 0.8 + 1.2 x size m source, every 0.012 s, born 2150 K cooling -420 K/s
+   (each glows about 0.83 s: FuelFireballGlowSeconds), held 0.42 s, faded 0.75 s, buoyant (+2.4 m/s^2
+   to 5 m/s). Black soot puffs 1.5 + 2 x size m every 0.03 s for 1.6 x the feed time, held 3 s, faded
+   5 s, climbing 0.3 to 4 m/s, spreading, drifting. A Fire-kind combat light (strength 3 x size) burns
+   for feed + 0.83 s, rising 2 m and dimming as it cools.
+
+Constants (old -> new)
+----------------------
+- Explosion size: hit x 0.003 / 0.001, [0.25, 1] -> 0.6 cbrt(q / 1200), [0.2, 1]
+  (kExplosionRefCharge 1200, kExplosionRefSize 0.6, kExplosionMinSize 0.2, kExplosionMaxSize 1).
+- Fireball puff cooling: -4000 K/s -> -700 / (0.1 x size) K/s (kExplosionFlashPerSize 0.1,
+  kFireballBirthK 2500, kFireballFlashEndK 1800).
+- Explosion combat light hold / decays: 0.15 / 0.05 / 0.16 / 0.45 s -> the same x min(size, 1).
+- CraterSmoke hold: 2.0 to 2.4 s -> 9 x L (kCraterSmokeHold); fade 0.8 to 1.2 s -> 9 x L
+  (kCraterSmokeFade); smoke1 climb accY -0.1, min 0 -> -1.1, 0.25 (kCraterSmokeRiseDecay,
+  kCraterSmokeHangRise); spread 0 -> 0.08 / s (kCraterSmokeSpread; 0.12 in the first build ballooned);
+  wind relaxation none -> 3 s (kSmokeWindTau); smoke1 deltaT -40 -> 0.
+- CraterDustBig for big bursts: never -> 0.35 x timeSize s at 0.02 s, size 0.5 x crater size.
+- Fuel fireball threshold: hit > 50 -> hit > 1 (kFuelFireballMinHit; damage still > 50);
+  initT 2500 -> 2150 (kFuelFireballK), deltaT -4000 -> -420 (kFuelCoolRate), interval 0.001 -> 0.012,
+  puff size fireSize -> 2 + 2 fireSize; soot life 0.6 s -> 8 s.
+
+Per munition, now (fixed 1/30 s step, frames after the burst)
+--------------------------------------------------------------
+- 120 mm HE (dusk_he): frame 1 a white-yellow to orange fireball about 6 to 8 m wide with sparks
+  (flash 60 ms: one full-bright frame, the second already dark with a few hot bits), then a dark grey-
+  brown cloud that swells to about 15 m by 0.5 s, rises and stands over a darker dust skirt. In the
+  24 s probe the column is still clearly there at 8 s, faint at 10 s, gone by about 12 s; the dust
+  curtain falls back within 2 s. Smoke life about 11 s visible (17 s per puff). Night (night_he): one
+  frame of flash and a small hot core, then a moonlit grey column that is still growing at +3 s.
+- 120 mm HEAT (dusk_heat): smaller flash (38 ms, under one frame of full glow; the strip catches the
+  dark puffs at +100 ms), smaller first cloud than HE (it was the biggest), the same lingering column
+  pattern from its crater.
+- Hand grenade (dusk_grenade): a one-frame flash and ground light at +100 ms, then a dark cloud that
+  rises and lingers (about 7 s per puff, crater size floor 0.4).
+- Jeep fuel (dusk_fuel, night_fuel): before nothing burned. Now a white ignition burst (the combat
+  light) then a rolling orange fireball about 5 m wide at +300 to +400 ms, black soot puffs climbing
+  from +500 ms to about 8 s, the wreck's dark smoke under it. Night: a soft light ball at ignition,
+  then glowing orange puffs and embers for about 0.5 s.
+
+Cost
+----
+Puff counts at generalization 1 (they fall with the square of the camera distance):
+- HE: fireball puffs unchanged (one step, about 33); crater smoke about 38 puffs, now alive 15 to 17 s
+  instead of about 3.5 s (so about 38 lingering puffs per recent shell, not about 10 averaged); dust
+  curtain about 17 puffs for 3.5 s (new); thrown earth unchanged.
+- Fuel (Jeep): 25 fireball puffs (1.2 s) and 16 soot puffs (8 s): new, there was nothing. A big fuel
+  load: fireball puffs capped at about 104 (was up to 1250 at 0.001 s).
+- One extra Fire-kind combat light for about 1.1 to 2 s per fuel fireball.
+No per-frame timing is logged in these captures. Wall time of the tri run: before (round 5, 2 tests)
+219.8 s; mine (the same 2 tests plus the 24 s linger probe) 199.3 s, 202.0 s, 203.4 s. No visible cost.
+
+Unit tests
+----------
+New case "Combat lights: explosion stages last as long as their physics, in simulation time"
+([CombatLights][remaster], 41 assertions): size by the charge's cube root (HEAT and grenade under
+HE, an eighth of the charge half the size), the flash in tens of ms (HE within 2 frames, grenade
+within 1), the cooling ends the glow within the flash, the fuel glow about a second and ten times a
+shell's flash, any fuel burns (Jeep size and feed), the crater column 15 to 30 s for a heavy shell and
+standing 10 to 30 m, a grenade's combat light gone by the third frame while size 1 holds, and a source
+contract that the engine uses these (Explosion ctor, the fuel branch order, the linger by deltaT, the
+crater scale, Shots.cpp). Gate [CombatLights],[PhotoCamera],[Shaders],[remaster],[fog] on the final
+build, run from D:\: all pass, 321 cases, 958,627 assertions (unit_gate.txt). clang-format clean on
+CombatLights.cpp/.hpp, Smokes.cpp and the test file.
+
+Honest weak points
+------------------
+1. The HE column is visible about 11 s, at the short end of 10 to 30 s: the linear fade plus the
+   spread thinning hide it before the puffs die. A longer hold or a slower fade would stretch it.
+2. The HE column reads as two blobs (a rising dark ball over a separate dark dust skirt with a gap) in
+   the first seconds; a real column is continuous. smoke1 rises 18 m while smoke2 stays low.
+3. The wind drift is implemented (puffs relax to the landscape wind) but the staged dusk/night views
+   look calm, so no lean is visible in the probes.
+4. The Jeep's orange phase is visible about 0.3 to 0.4 s, not a full second: a Jeep's fuel hit is
+   small, so it feeds 0.3 s; each puff glows about 0.8 s in theory but the soot in front of it and the
+   Wien drop make it read shorter. The fireball is also visibly made of separate puffs.
+5. The shell flash is now physically short: at 30 fps the HE flash is one bright frame, HEAT and the
+   grenade can fall between strip key frames. That is the brief detonation the reference asks for, but
+   in motion the burst still opens with a blink; the lingering column is what now carries it.
+6. A first build that also held the cl_fired fireball puffs longer (0.4 s + 1.2 s fade, spreading)
+   turned the grenade's and the HEAT round's puffs a flat khaki from 0.13 s (shots2, cause not found);
+   I reverted that part, so those puffs keep their old 0.4 s life.
+7. Not touched (other approaches): the hard sprite/ground line under the fireball, the ground light
+   patch at the flash, the night ball of light, rockets (never arm in these tests).
+
+Files
+-----
+fix.patch, NOTES.txt, unit_gate.txt, final/ (six clips and strips, x_*.png), shots1/2/3 (tri trees),
+clips1/ (first build's clips), tools/ (gen_x5_linger.py wrote
+look_probe_x5_linger.test.sqf/.toml into my copy, excluded from the patch; crops.py and linger_strip.py made the x_*.png).

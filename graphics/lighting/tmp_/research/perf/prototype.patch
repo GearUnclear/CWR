@@ -1,0 +1,660 @@
+﻿diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.cpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.cpp
+index b0db965..61afeb0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.cpp
+@@ -24,6 +24,12 @@ Engine* GEngine;
+ // Perf counter: written by RHI renderer, read by World::Simulate for diagnostics.
+ // Defined in Core (Engine.cpp) so headless Server builds link without Client.
+ int gPerfDrawCalls = 0;
++// PERF RESEARCH: experiment flags (set from the GL33 debug-view knob) and
++// Pass1 instancing / light counters for the GPU timing summary.
++int gPerfResearchFlags = 0;
++int gPerfLightsTotal = 0, gPerfLightsActive = 0, gPerfInstRuns = 0, gPerfInstObjects = 0, gPerfPass1Objects = 0;
++int gPerfTerrainCulled = 0, gPerfTerrainTested = 0, gPerfHorizonBuilds = 0;
++float gPerfHorizonBuildMs = 0.0f;
+ bool gPerfDumpShapesOnce = false;
+ bool gPerfDumpShadowsOnce = false;
+ int gSmDepthCachedCasters = 0;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 8827196..b651a4a 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -39,6 +39,8 @@ namespace Poseidon
+ // Per-frame draw-call counter — incremented at the GL emission seams,
+ // consumed + reset by World::Simulate's FrameProfiler EndFrame.
+ extern int gPerfDrawCalls;
++extern int gPerfResearchFlags; // PERF RESEARCH
++extern int gPerfLightsTotal, gPerfLightsActive, gPerfInstRuns, gPerfInstObjects, gPerfPass1Objects; // PERF RESEARCH
+ namespace render
+ {
+ namespace frame
+@@ -834,6 +836,8 @@ class Engine : public IGraphicsEngine
+     virtual void SetGpuTimingEnabled(bool /*enabled*/) {}
+     virtual bool GpuTimingEnabled() const { return false; }
+     virtual std::string GpuTimingSummary() const { return "gpu: timing not supported by this backend"; }
++    /// PERF RESEARCH: timestamp after a world phase (0 = ground drawn, 1 = opaque objects drawn).
++    virtual void GpuMarkPhase(int /*phase*/) {}
+     /// True when the backend would use a terrain horizon map (remastered
+     /// lighting with terrain shadows or occlusion on); the world builds one only
+     /// then.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+index a2294f9..5012996 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+@@ -23,6 +23,9 @@ constexpr SectionDef kSections[kSectionCount] = {
+     {"shafts", Mark::BloomEnd, Mark::ShaftsEnd},
+     {"composite", Mark::ShaftsEnd, Mark::CompositeEnd},
+     {"post", Mark::WorldEnd, Mark::CompositeEnd},
++    {"ground", Mark::WorldBegin, Mark::GroundEnd},
++    {"pass1", Mark::GroundEnd, Mark::Pass1End},
++    {"rest", Mark::Pass1End, Mark::WorldEnd},
+ };
+ 
+ // Sections whose start may fall back to an earlier recorded mark: the post
+@@ -73,6 +76,7 @@ void GpuTimings::Submit(const std::uint64_t stamps[kMarkCount], std::uint32_t re
+         const float ms = static_cast<float>(b - a) * 1e-6f;
+         _last[i] = ms;
+         _avg[i] = _count[i] == 0 ? ms : _avg[i] + (ms - _avg[i]) * kSmoothing;
++        _min[i] = _count[i] == 0 ? ms : (ms < _min[i] ? ms : _min[i]);
+         ++_count[i];
+     }
+ }
+@@ -111,6 +115,20 @@ std::string GpuTimings::Summary() const
+         add(Section::Shafts, " %s %.2f");
+         add(Section::Composite, " %s %.2f");
+     }
++    // PERF RESEARCH: per-phase split of the world pass and the smallest frame
++    // since the reset (other processes on the GPU only ever add time).
++    {
++        const Section ext[] = {Section::Frame, Section::World, Section::Ground, Section::Pass1, Section::Rest};
++        out += " ||";
++        for (Section s : ext)
++        {
++            const int i = static_cast<int>(s);
++            if (_count[i] == 0)
++                continue;
++            std::snprintf(buf, sizeof(buf), " %s=%.2f/%.2f", SectionName(s), _avg[i], _min[i]);
++            out += buf;
++        }
++    }
+     return out.empty() ? "gpu: no sections measured yet" : out;
+ }
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+index 98f8aaf..f722944 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+@@ -28,6 +28,8 @@ enum class Mark : int
+     ShaftsEnd,    // post: sun shafts
+     CompositeEnd, // post: composite into the frame
+     FrameEnd,     // before the swap
++    GroundEnd,    // PERF RESEARCH: terrain, water and horizon drawn (land:gnd)
++    Pass1End,     // PERF RESEARCH: opaque objects drawn (land:obj)
+     Count
+ };
+ 
+@@ -41,6 +43,9 @@ enum class Section : int
+     Shafts,
+     Composite,
+     Post, // Ao + Bloom + Shafts + Composite
++    Ground, // PERF RESEARCH: WorldBegin..GroundEnd
++    Pass1,  // PERF RESEARCH: GroundEnd..Pass1End
++    Rest,   // PERF RESEARCH: Pass1End..WorldEnd (grass, alpha, shadow pass)
+     Count
+ };
+ 
+@@ -69,7 +74,8 @@ class GpuTimings
+ 
+   private:
+     float _avg[kSectionCount] = {};
+-    float _last[kSectionCount] = {-1, -1, -1, -1, -1, -1, -1, -1};
++    float _last[kSectionCount] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
++    float _min[kSectionCount] = {}; // PERF RESEARCH: smallest frame since Reset
+     int _count[kSectionCount] = {};
+     int _frames = 0;
+ };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.cpp
+index c35eeef..881e7ea 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.cpp
+@@ -42,7 +42,9 @@ void ObserveRenderedFrame(Engine& engine, Scene& scene)
+         // the perf bench can measure normal-play behavior.
+         static const bool s_everyFrame =
+             Foundation::AppConfig::Instance().AutoTest() && getenv("POSEIDON_OBSERVER_SAMPLE") == nullptr;
+-        if (!s_everyFrame)
++        // PERF RESEARCH: perf flag 32 observes every frame, as the harness does
++        // without POSEIDON_OBSERVER_SAMPLE (run with it set, toggle per config).
++        if (!s_everyFrame && (gPerfResearchFlags & 32) == 0)
+         {
+             if (--s_sampleCountdown > 0)
+                 return;
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 866e7bb..62b761b 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -1,3 +1,5 @@
++#include <chrono>  // PERF RESEARCH: horizon build timing
++#include <cstdlib> // PERF RESEARCH: getenv
+ #include <Poseidon/Core/Application.hpp>
+ #include <Poseidon/Core/Config/EngineConfig.hpp>
+ #include <Poseidon/Core/Global.hpp>
+@@ -753,6 +755,108 @@ inline void CheckMinMaxIter(Vector3& min, Vector3& max, Vector3Par val)
+ #endif
+ }
+ 
++// PERF RESEARCH: terrain horizon occlusion (perf flag 256). From the camera,
++// march kHzAz rays over the heightfield and keep, per ray and per distance step,
++// the highest terrain elevation (as a tangent) seen so far. An object whose
++// bounding sphere lies wholly under that horizon along every ray it spans,
++// measured only with terrain samples in front of its near edge, is behind a
++// ridge and is not drawn. Conservative by construction except for notches
++// narrower than one ray spacing; the terrain is lowered by kHzMargin first so
++// a coarser rendered terrain LOD cannot reveal what the table hides.
++namespace
++{
++constexpr int kHzAz = 1024;
++constexpr float kHzStep = 25.0f;
++constexpr int kHzMaxSteps = 240;
++constexpr float kHzMargin = 2.0f;
++struct HorizonTable
++{
++    bool valid = false;
++    float cx = 0, cy = 0, cz = 0, range = 0;
++    int steps = 0;
++    std::vector<float> maxTan; // [az * kHzMaxSteps + k]: max tangent of samples 1..k+1
++};
++HorizonTable s_hz;
++} // namespace
++namespace Poseidon
++{
++extern int gPerfTerrainCulled, gPerfTerrainTested, gPerfHorizonBuilds; // defined in Engine.cpp
++extern float gPerfHorizonBuildMs;
++} // namespace Poseidon
++
++static void TerrainHorizonCull(SortObjectList& list, Vector3Par cam, float range)
++{
++    gPerfTerrainCulled = 0;
++    gPerfTerrainTested = 0;
++    if (!GLandscape)
++        return;
++    const bool moved = !s_hz.valid || std::fabs(cam.X() - s_hz.cx) > 0.25f || std::fabs(cam.Y() - s_hz.cy) > 0.25f ||
++                       std::fabs(cam.Z() - s_hz.cz) > 0.25f || std::fabs(range - s_hz.range) > 1.0f;
++    if (moved)
++    {
++        const auto t0 = std::chrono::steady_clock::now();
++        s_hz.cx = cam.X();
++        s_hz.cy = cam.Y();
++        s_hz.cz = cam.Z();
++        s_hz.range = range;
++        s_hz.steps = std::min(kHzMaxSteps, static_cast<int>(range / kHzStep) + 1);
++        s_hz.maxTan.assign(static_cast<size_t>(kHzAz) * kHzMaxSteps, 1e30f);
++        for (int a = 0; a < kHzAz; ++a)
++        {
++            const float ang = a * (6.2831853f / kHzAz);
++            const float dx = std::sin(ang), dz = std::cos(ang);
++            float m = -1e30f;
++            float* row = &s_hz.maxTan[static_cast<size_t>(a) * kHzMaxSteps];
++            for (int k = 0; k < s_hz.steps; ++k)
++            {
++                const float d = (k + 1) * kHzStep;
++                const float h = GLandscape->SurfaceY(cam.X() + dx * d, cam.Z() + dz * d) - kHzMargin;
++                m = std::max(m, (h - cam.Y()) / d);
++                row[k] = m;
++            }
++        }
++        s_hz.valid = true;
++        ++gPerfHorizonBuilds;
++        gPerfHorizonBuildMs =
++            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
++    }
++    for (int i = 0; i < list.Size(); i++)
++    {
++        SortObject* oi = list[i];
++        if (oi->drawLOD == LOD_INVISIBLE || !oi->object || oi->object == GWorld->CameraOn())
++            continue;
++        const Vector3 p = oi->object->Position();
++        const float r = oi->radius * 1.25f + 1.0f;
++        const float ox = p.X() - s_hz.cx, oz = p.Z() - s_hz.cz;
++        const float d = std::sqrt(ox * ox + oz * oz);
++        const float dn = d - r;
++        if (dn < 3.0f * kHzStep)
++            continue;
++        ++gPerfTerrainTested;
++        int k = static_cast<int>(dn / kHzStep) - 1; // samples at (k+1)*step <= near edge
++        k = std::min(k, s_hz.steps - 1);
++        const float tObj = (p.Y() + r - s_hz.cy) / dn;
++        float ang = std::atan2(ox, oz);
++        if (ang < 0)
++            ang += 6.2831853f;
++        const float halfBins = std::asin(std::min(1.0f, r / d)) * (kHzAz / 6.2831853f) + 1.0f;
++        const int b0 = static_cast<int>(std::floor(ang * (kHzAz / 6.2831853f) - halfBins));
++        const int b1 = static_cast<int>(std::ceil(ang * (kHzAz / 6.2831853f) + halfBins));
++        bool hidden = true;
++        for (int b = b0; b <= b1 && hidden; ++b)
++        {
++            const int bw = ((b % kHzAz) + kHzAz) % kHzAz;
++            if (!(tObj < s_hz.maxTan[static_cast<size_t>(bw) * kHzMaxSteps + k]))
++                hidden = false;
++        }
++        if (hidden)
++        {
++            oi->drawLOD = LOD_INVISIBLE;
++            ++gPerfTerrainCulled;
++        }
++    }
++}
++
+ static bool FarEnoughForOcclusion(const SortObject* oi)
+ {
+     // do not occlude things that are very near
+@@ -777,6 +881,16 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
+ 
+ void Scene::AdjustComplexity()
+ {
++    // PERF RESEARCH: CWR_PERF_PIN_LOD holds the object detail at its finest
++    // setting, so A/B timings are not fed back into the LOD choice.
++    static const bool s_pinLod = std::getenv("CWR_PERF_PIN_LOD") != nullptr;
++    if (s_pinLod)
++    {
++        _lodInvWidth = _minLodInvWidth;
++        AdjustComplexity(_drawObjects);
++        AdjustShadowComplexity(_drawObjects);
++        return;
++    }
+     float oldLodInvWidth = _lodInvWidth;
+ 
+     // adjust lodInvWidth so we are on the line given by points
+@@ -1513,6 +1627,16 @@ void Scene::DrawObjectsAndShadowsPass1()
+         }
+     }
+ 
++    // PERF RESEARCH: flag 256, terrain horizon occlusion (see TerrainHorizonCull).
++    if ((gPerfResearchFlags & 256) && _camera)
++    {
++        TerrainHorizonCull(_drawMergers, _camera->Position(), GetFogMaxRange());
++    }
++    else
++    {
++        gPerfTerrainCulled = gPerfTerrainTested = 0;
++    }
++
+     QSort(_drawMergers.Data(), _drawMergers.Size(), CmpShapeObj);
+     // first of all draw non-alpha objects
+ 
+@@ -1527,6 +1651,39 @@ void Scene::DrawObjectsAndShadowsPass1()
+         // scene, and a tight distance band so the head's constant-fog value
+         // is representative for the whole batch.
+         const bool noLocalLights = NLights() == 0;
++        // PERF RESEARCH: flag 4 lets an object into an instanced run when the
++        // light list its own draw would select is empty (a lamp kilometres away,
++        // or a freed light's empty slot, no longer turns instancing off for the
++        // whole scene). The head's light list is what the batched draw uses.
++        const bool perObjectLights = (gPerfResearchFlags & 4) != 0;
++        auto unlitByLocal = [&](SortObject* so) -> bool
++        {
++            if (noLocalLights)
++                return true;
++            if (!perObjectLights)
++                return false;
++            LightList work;
++            const LightList& l = SelectLights(so->object->Transform(), so->object, so->drawLOD, work);
++            return l.Size() == 0;
++        };
++        // PERF RESEARCH: flag 64 keeps objects whose draw changes the shape's
++        // vertices per object (Object::IsAnimated: land-following ClipLandKeep /
++        // ClipLandOn vertices, damage, skewed forests) out of instanced runs. An
++        // instanced run draws the head's animated vertex buffer for every member,
++        // so a member bush took the head's terrain fit (its silhouette changed).
++        const bool skipAnimated = (gPerfResearchFlags & 64) != 0;
++        // Flag 128 (with 64): beyond 400 m the head's terrain fit is within a
++        // pixel of the member's own, so far animated objects batch again.
++        const float farAnimated2 = (gPerfResearchFlags & 128) ? 400.0f * 400.0f : 1e30f;
++        auto animatedPerObject = [&](SortObject* so) -> bool
++        {
++            return skipAnimated && so->distance2 < farAnimated2 && so->object->IsAnimated(so->drawLOD);
++        };
++        gPerfLightsTotal = NLights();
++        gPerfLightsActive = _aLights.Size();
++        gPerfInstRuns = 0;
++        gPerfInstObjects = 0;
++        gPerfPass1Objects = 0;
+         for (int i = 0; i < _drawMergers.Size();)
+         {
+             SortObject* oi = _drawMergers[i];
+@@ -1552,10 +1709,11 @@ void Scene::DrawObjectsAndShadowsPass1()
+             int runEnd = i + 1;
+             const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
+             const render::LegacySpec headSpec = render::SplitLegacy(headSpecial);
+-            const bool headBatchable = noLocalLights && oi->object->Static() && sShape->NProxies() == 0 &&
++            const bool headBatchable = oi->object->Static() && sShape->NProxies() == 0 &&
+                                        !render::Has(headSpec.routing, render::Routing::OnSurface) &&
+                                        !render::Has(headSpec.routing, render::Routing::IsColored) &&
+-                                       oi->object != GWorld->CameraOn();
++                                       oi->object != GWorld->CameraOn() && unlitByLocal(oi) &&
++                                       !animatedPerObject(oi);
+             if (headBatchable)
+             {
+                 GEngine->InstancedRunReset();
+@@ -1563,8 +1721,13 @@ void Scene::DrawObjectsAndShadowsPass1()
+                 {
+                     // Fog band: keep members within ~5% of the head's distance so
+                     // the head's per-object constant fog approximates all of them.
+-                    const float d2lo = oi->distance2 * 0.90f;
+-                    const float d2hi = oi->distance2 * 1.10f;
++                    // PERF RESEARCH: the GL33 TL path fogs per vertex (VSTransform
++                    // reads the instance's own world matrix), so flag 8 widens the
++                    // band to 0.5x..2x of the head's distance and flag 16 drops it.
++                    const float bandLo = (gPerfResearchFlags & 16) ? 0.0f : ((gPerfResearchFlags & 8) ? 0.25f : 0.90f);
++                    const float bandHi = (gPerfResearchFlags & 16) ? 1e30f : ((gPerfResearchFlags & 8) ? 4.0f : 1.10f);
++                    const float d2lo = oi->distance2 * bandLo;
++                    const float d2hi = oi->distance2 * bandHi;
+                     while (runEnd < _drawMergers.Size())
+                     {
+                         SortObject* oj = _drawMergers[runEnd];
+@@ -1575,6 +1738,14 @@ void Scene::DrawObjectsAndShadowsPass1()
+                         {
+                             break;
+                         }
++                        if (!noLocalLights && !unlitByLocal(oj))
++                        {
++                            break; // PERF RESEARCH: a lit member ends the run
++                        }
++                        if (animatedPerObject(oj))
++                        {
++                            break; // PERF RESEARCH: flag 64, see above
++                        }
+                         if (!GEngine->InstancedRunAdd(oj->object->Transform()))
+                         {
+                             break;
+@@ -1586,8 +1757,11 @@ void Scene::DrawObjectsAndShadowsPass1()
+ 
+             const int runLen = runEnd - i;
+             GSectionFilter = SectionClassFilter::OpaqueAndCutout;
++            gPerfPass1Objects += runLen;
+             if (headBatchable && runLen >= 4)
+             {
++                ++gPerfInstRuns;
++                gPerfInstObjects += runLen;
+                 GEngine->BeginInstancedRunUpload();
+                 DrawSortObject(oi);
+                 if (!GEngine->EndInstancedRun())
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+index 1c70b8e..1cf8917 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+@@ -1534,10 +1534,12 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
+ #endif
+ 
+     GEngine->FlushQueues();
++    GEngine->GpuMarkPhase(0); // PERF RESEARCH
+     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
+     GEngine->EnableReorderQueues(true);
+     // draw non-alpha objects
+     scene.DrawObjectsAndShadowsPass1();
++    GEngine->GpuMarkPhase(1); // PERF RESEARCH
+     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandObjects);
+ 
+ #if LANDDRAW
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..fa87f4f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -703,6 +703,7 @@ class EngineGL33 : public Engine
+     void SetGpuTimingEnabled(bool enabled) override;
+     bool GpuTimingEnabled() const override { return _gpuTiming; }
+     std::string GpuTimingSummary() const override;
++    void GpuMarkPhase(int phase) override;
+     bool WantsTerrainHorizonMap() const override;
+     void SetTerrainHorizonMap(std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> map) override;
+     void EndWorldScene() override;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp
+index cfccb2f..17ee60c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp
+@@ -5,17 +5,36 @@
+ 
+ #include <PoseidonGL33/EngineGL33.hpp>
+ 
++#include <cstdio>
+ #include <cstring>
+ 
+ using Poseidon::gpu::kMarkCount;
+ using Poseidon::gpu::Mark;
+ 
++// PERF RESEARCH: UBO flush counters (EngineGL33_Lighting.cpp / _Shaders.cpp),
++// averaged over the frames since the timing reset.
++extern int g_perfFlags;
++extern int g_perfLitFlushes, g_perfLitSkips, g_perfLitBytes;
++extern int g_perfVsFlushes, g_perfVsSkips;
++namespace Poseidon
++{
++extern int gPerfTerrainCulled, gPerfTerrainTested, gPerfHorizonBuilds; // PERF RESEARCH (SceneDraw.cpp)
++extern float gPerfHorizonBuildMs;
++} // namespace Poseidon
++namespace
++{
++double s_sumLit = 0, s_sumLitSkip = 0, s_sumLitBytes = 0, s_sumVs = 0, s_sumVsSkip = 0;
++int s_sumFrames = 0;
++} // namespace
++
+ void EngineGL33::SetGpuTimingEnabled(bool enabled)
+ {
+     if (enabled == _gpuTiming)
+         return;
+     _gpuTiming = enabled;
+     _gpuTimings.Reset();
++    s_sumLit = s_sumLitSkip = s_sumLitBytes = s_sumVs = s_sumVsSkip = 0; // PERF RESEARCH
++    s_sumFrames = 0;
+     if (!enabled)
+         DestroyGpuQueries();
+     LOG_INFO(Graphics, "GL33: GPU timing {}", enabled ? "on" : "off");
+@@ -25,7 +44,19 @@ std::string EngineGL33::GpuTimingSummary() const
+ {
+     if (!_gpuTiming)
+         return "gpu: timing off";
+-    return _gpuTimings.Summary();
++    // PERF RESEARCH: per-frame UBO flush counts appended.
++    char buf[200];
++    const double n = s_sumFrames > 0 ? s_sumFrames : 1;
++    std::snprintf(buf, sizeof(buf), " || ubo flags=%d lit=%.0f litskip=%.0f litKB=%.1f vs=%.0f vsskip=%.0f", g_perfFlags,
++                  s_sumLit / n, s_sumLitSkip / n, s_sumLitBytes / n / 1024.0, s_sumVs / n, s_sumVsSkip / n);
++    char buf2[200];
++    std::snprintf(buf2, sizeof(buf2), " || lights=%d active=%d pass1obj=%d instruns=%d instobj=%d",
++                  Poseidon::gPerfLightsTotal, Poseidon::gPerfLightsActive, Poseidon::gPerfPass1Objects,
++                  Poseidon::gPerfInstRuns, Poseidon::gPerfInstObjects);
++    char buf3[160];
++    std::snprintf(buf3, sizeof(buf3), " || tocc culled=%d tested=%d builds=%d buildms=%.2f", Poseidon::gPerfTerrainCulled,
++                  Poseidon::gPerfTerrainTested, Poseidon::gPerfHorizonBuilds, Poseidon::gPerfHorizonBuildMs);
++    return _gpuTimings.Summary() + buf + buf2 + buf3;
+ }
+ 
+ void EngineGL33::DestroyGpuQueries()
+@@ -38,6 +69,14 @@ void EngineGL33::DestroyGpuQueries()
+ 
+ void EngineGL33::GpuFrameBegin()
+ {
++    // PERF RESEARCH: fold the last frame's UBO flush counters into the sums.
++    s_sumLit += g_perfLitFlushes;
++    s_sumLitSkip += g_perfLitSkips;
++    s_sumLitBytes += g_perfLitBytes;
++    s_sumVs += g_perfVsFlushes;
++    s_sumVsSkip += g_perfVsSkips;
++    ++s_sumFrames;
++    g_perfLitFlushes = g_perfLitSkips = g_perfLitBytes = g_perfVsFlushes = g_perfVsSkips = 0;
+     if (!_gpuTiming || !_glContext)
+         return;
+     if (!_gpuQueries[0][0])
+@@ -68,6 +107,16 @@ void EngineGL33::GpuFrameBegin()
+     GpuMark(Mark::FrameBegin);
+ }
+ 
++// PERF RESEARCH: phase marks inside the world pass. Pending queued draws are
++// flushed first so they land before the stamp (timing on only).
++void EngineGL33::GpuMarkPhase(int phase)
++{
++    if (!_gpuTiming || !_worldPassOpen)
++        return;
++    FlushQueues();
++    GpuMark(phase == 0 ? Mark::GroundEnd : Mark::Pass1End);
++}
++
+ void EngineGL33::GpuMark(Mark mark)
+ {
+     if (!_gpuTiming || !_gpuQueries[0][0])
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..89e834a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -65,17 +65,60 @@ GLuint MakeDummyTexture(GLenum target, GLenum internalFormat, GLenum format, GLe
+ }
+ } // namespace
+ 
++// PERF RESEARCH: per-frame counters and the dirty-range flush. Perf flags ride
++// on the debug-view knob (triSetLighting "debug=<100 + flags>"; the shader only
++// sees debug views 1..3): bit 1 = lit UBO dirty-range flush, bit 2 = VS UBO
++// skip-unchanged flush.
++int g_perfFlags = 0;
++int g_perfLitFlushes = 0, g_perfLitSkips = 0, g_perfLitBytes = 0;
++int g_perfVsFlushes = 0, g_perfVsSkips = 0;
++namespace
++{
++float s_litUploaded[LitConst::Count * 4] = {};
++bool s_litUploadedValid = false;
++} // namespace
++
+ void EngineGL33::FlushLitConstants()
+ {
+     if (!s_litUBO)
+         return;
++    if ((g_perfFlags & 1) && s_litUploadedValid)
++    {
++        int first = -1, last = -1;
++        for (int i = 0; i < LitConst::Count; ++i)
++        {
++            if (std::memcmp(s_lit + i * 4, s_litUploaded + i * 4, 16) != 0)
++            {
++                if (first < 0)
++                    first = i;
++                last = i;
++            }
++        }
++        if (first < 0)
++        {
++            ++g_perfLitSkips;
++            return;
++        }
++        const int n = last - first + 1;
++        glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
++        glBufferSubData(GL_UNIFORM_BUFFER, first * 16, n * 16, s_lit + first * 4);
++        std::memcpy(s_litUploaded + first * 4, s_lit + first * 4, static_cast<size_t>(n) * 16);
++        ++g_perfLitFlushes;
++        g_perfLitBytes += n * 16;
++        return;
++    }
+     glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
+     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_lit), s_lit);
++    std::memcpy(s_litUploaded, s_lit, sizeof(s_lit));
++    s_litUploadedValid = true;
++    ++g_perfLitFlushes;
++    g_perfLitBytes += static_cast<int>(sizeof(s_lit));
+ }
+ 
+ void EngineGL33::InitLightingResources()
+ {
+     glGenBuffers(1, &s_litUBO);
++    s_litUploadedValid = false; // PERF RESEARCH: a new buffer holds nothing yet
+     glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
+     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_lit), nullptr, GL_DYNAMIC_DRAW);
+     glBindBufferBase(GL_UNIFORM_BUFFER, kLitBinding, s_litUBO);
+@@ -161,6 +204,8 @@ void EngineGL33::SetLightingTuning(const rm::LightingTuning& tuning)
+ {
+     const bool wasActive = _lightingActive;
+     _lighting = tuning;
++    g_perfFlags = tuning.debugView >= 100 ? tuning.debugView - 100 : 0; // PERF RESEARCH
++    Poseidon::gPerfResearchFlags = g_perfFlags;
+     _lightingActive = tuning.remastered && _lightingProgramsBuilt;
+     if (wasActive != _lightingActive && _glContext)
+     {
+@@ -294,6 +339,9 @@ void EngineGL33::SetLitOpaque(bool opaque)
+     {
+         glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
+         glBufferSubData(GL_UNIFORM_BUFFER, LitConst::Flags * 16, 16, s_lit + LitConst::Flags * 4);
++        std::memcpy(s_litUploaded + LitConst::Flags * 4, s_lit + LitConst::Flags * 4, 16); // PERF RESEARCH
++        ++g_perfLitFlushes;
++        g_perfLitBytes += 16;
+     }
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..e0c6e02 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -789,20 +789,44 @@ static GLuint LinkGLProgram(GLuint vs, GLuint fs, const char* name)
+ }
+ 
+ static float s_vsShadow[280] = {}; // 70 vec4 slots — through SlotLightVP (c66-c69)
++// PERF RESEARCH: what s_vsUBO holds (perf flag 2 skips an unchanged full flush).
++static float s_vsUploaded[280] = {};
++static bool s_vsUploadedValid = false;
+ static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
+ 
+ static GLuint s_vsUBO = 0;
+ static GLuint s_worldUBO = 0;
+ static GLuint s_psUBO = 0;
+ 
++extern int g_perfFlags;     // PERF RESEARCH (EngineGL33_Lighting.cpp)
++extern int g_perfVsFlushes; // PERF RESEARCH
++extern int g_perfVsSkips;   // PERF RESEARCH
++
+ void EngineGL33::FlushVSConstants()
+ {
+     if (!s_vsUBO)
+         return;
++    // PERF RESEARCH: perf flag 2 skips a flush whose block equals what this
++    // UBO holds (s_vsUploaded mirrors it; the partial crown / world uploads
++    // keep it in step). With the WorldInstances UBO the VSConstants world slot
++    // is std140 padding nobody reads, so it is left out of the comparison.
++    const int wFirst = VSConst::SlotWorld * 4, wEnd = (VSConst::SlotWorld + 4) * 4;
++    const bool sameOutsideWorld =
++        memcmp(s_vsUploaded, s_vsShadow, wFirst * sizeof(float)) == 0 &&
++        memcmp(s_vsUploaded + wEnd, s_vsShadow + wEnd, sizeof(s_vsShadow) - wEnd * sizeof(float)) == 0;
++    const bool sameWorld = s_worldUBO || memcmp(s_vsUploaded + wFirst, s_vsShadow + wFirst, 64) == 0;
++    if ((g_perfFlags & 2) && s_vsUploadedValid && sameOutsideWorld && sameWorld)
++    {
++        ++g_perfVsSkips;
++        return;
++    }
+     // glBindBufferBase is sticky — done once at UBO creation in
+     // InitVertexShaders.  Per-flush we only update buffer contents.
+     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_vsShadow), s_vsShadow);
++    memcpy(s_vsUploaded, s_vsShadow, sizeof(s_vsShadow));
++    s_vsUploadedValid = true;
++    ++g_perfVsFlushes;
+ }
+ 
+ void EngineGL33::FlushPSConstants()
+@@ -860,6 +884,7 @@ void EngineGL33::InitVertexShaders()
+     // Bind the VS UBO to base 0 once; subsequent FlushVSConstants only
+     // update buffer contents.
+     glGenBuffers(1, &s_vsUBO);
++    s_vsUploadedValid = false; // PERF RESEARCH
+     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_vsShadow), s_vsShadow, GL_DYNAMIC_DRAW);
+     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_vsUBO);
+@@ -1188,6 +1213,7 @@ void EngineGL33::UploadVSCrown(const float center[3], const float invHalf[3])
+     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+     glBufferSubData(GL_UNIFORM_BUFFER, VSConst::SlotCrown * 4 * sizeof(float), sizeof(v),
+                     s_vsShadow + VSConst::SlotCrown * 4);
++    memcpy(s_vsUploaded + VSConst::SlotCrown * 4, v, sizeof(v)); // PERF RESEARCH
+ }
+ 
+ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
+@@ -1209,6 +1235,7 @@ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
+         return;
+     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+     glBufferSubData(GL_UNIFORM_BUFFER, VSConst::SlotWorld * 4 * sizeof(float), 64, s_vsShadow + VSConst::SlotWorld * 4);
++    memcpy(s_vsUploaded + VSConst::SlotWorld * 4, worldMatrix, 64); // PERF RESEARCH
+ }
+ 
+ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnabled)

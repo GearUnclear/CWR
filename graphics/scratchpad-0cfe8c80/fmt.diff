@@ -1,0 +1,30 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index 27adf570..f81d4ec8 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -283,7 +283,8 @@ float TargetExposureLog2(const MeterResult& m, float nightEffect, const Lighting
+         return 0.0f;
+     const float night = Clamp01(nightEffect);
+     // The dusk's step hands over to the night's compensation (camNight).
+-    float comp = t.camEv + t.camNight * night + kCameraDuskEv * Clamp01(dusk) * (1.0f - night) + timeEv * (1.0f - night);
++    float comp =
++        t.camEv + t.camNight * night + kCameraDuskEv * Clamp01(dusk) * (1.0f - night) + timeEv * (1.0f - night);
+     const float fromDay = m.mean - kDaylightMeanLog2;
+     // At dusk a dark scene keeps more of its darkness (kDuskDarkKeep).
+     const float darkKeep = kDarkKeep + (kDuskDarkKeep - kDarkKeep) * Clamp01(duskKeep) * (1.0f - night);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.cpp
+index 93109bbf..035140e4 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceLight.cpp
+@@ -134,8 +134,9 @@ SurfaceFrameConstants ComputeSurfaceFrameConstants(const LightingTuning& tuning,
+     // Under a low sun (look director round 2) they keep kSurfLowSunGrain: a
+     // grazing sun lit every grain of the land into frosty speckles on the
+     // backlit foreground of a sunrise.
+-    const float sunGrain = Smoothstep(-6.0f, 0.0f, rig.sunElevationDeg) *
+-                           (kSurfLowSunGrain + (1.0f - kSurfLowSunGrain) * Smoothstep(4.0f, 14.0f, rig.sunElevationDeg));
++    const float sunGrain =
++        Smoothstep(-6.0f, 0.0f, rig.sunElevationDeg) *
++        (kSurfLowSunGrain + (1.0f - kSurfLowSunGrain) * Smoothstep(4.0f, 14.0f, rig.sunElevationDeg));
+     c.surface2[0] = std::max(tuning.surfRelief, 0.0f) * sunGrain;
+     c.surface2[1] = SurfaceDebugView(tuning.debugView);
+     c.surface2[3] = SurfaceShadeFactor(tuning.surfShade, rig.sunElevationDeg, skyThrough);

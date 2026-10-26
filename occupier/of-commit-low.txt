@@ -1,0 +1,40 @@
+guerrilla: occupier forces review LOW items L6 to L15 and the top-up adoption cap (OCCUPIER-FORCES.md 3.3, 5.5, 8.2, 11, 17)
+
+L6: PruneOps drops only finished rows with nothing outstanding, never a
+live row; past 128 rows the oldest finished row's outstanding units go to
+the pool first. L8: a block saved before SaveFormat with an empty
+TownsEver is seeded from the zone owners on the second load pass (the D20
+derivation filter) and invariant W re-checked. L10: RevertTown,
+RevertBase and AllocateWave write through ZoneRegistry::AddReserveNow,
+which uses the last tick's player, asks the world for the real player
+before the first tick after a load, and goes pending when none is known
+(NoteTickPlayer for tests). L11: SpawnGarrison places every body on
+hashed per-zone points (GarrisonCache::SpawnPoint) and the S5 release
+check tests the 3x3 grid AND the next spawn's points, so a release never
+materialises a body on a watched point; variety between materialisations
+is gone, bodies move to their hold positions afterwards. L13: a live
+force is not returned to abstract travel while its road ahead passes
+within the despawn edge of the player (RouteAheadWithin); a hull whose
+home base fell drives to the nearest occupier base on its landmass, else
+stops and leaves unseen with its crew credited; the ArriveLive trap is
+not reproducible (declined). L14: test levers book a "lever" ledger row
+(BookLeverOp / CancelLeverOp; refunds and losses only, no heat, cooldown
+or director action) so the 5.5 equation holds in tri tests; ClampF maps
+NaN to the low bound; gmForcesTune "enabled" stays unpersisted (a lever).
+L15 recorded in section 18 as a known bisect gap (8f9482a needs 7a143ec).
+Top-up adoption cap: a REINFORCE squad or alarm answer reaching its town
+goes through AdoptTopUp (room = garrisonMax - live - reserve - pending;
+stored reserve and pending give way to the pool; the surplus splits off
+on foot (CounterAttackOps::SplitOff) as a Leftover that walks home and is
+removed unseen, its bodies home through CrewHome; nothing fits: the whole
+squad walks home), superseding the phase 6 "adopts its whole squad"
+deviation. Plan doc and contract open lists updated.
+
+Verified on build/agent-rwdi: the guerrilla / counterattack /
+occupierforces / packages / save / air / campaignend tags 670 cases
+(mutation check: the two L13 cases go red with the fixes disabled);
+tri 21/21 on remaster-shadow-of1 (every guerrilla_forces_* test, the
+counter-attack and offscreen sets, town_defenders); human suite OK.
+SplitOff is unit-tested through a fake only.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

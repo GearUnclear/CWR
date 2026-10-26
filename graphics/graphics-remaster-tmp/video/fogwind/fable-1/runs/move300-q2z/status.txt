@@ -1,0 +1,3 @@
+﻿start 04:58:44 test=tests/rendering/captures/video/look_probe_fable1_move300.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\fable-1\shaders\q2z junction=RemasterUD-fog-F1 game=D:\Arma_CWA_worktrees\graphics-remaster\arma_CWR\dist\graphics-remaster-rwdi
+run exit=0 frames=300 minutes=4.2
+done 05:04:31

@@ -1,0 +1,77 @@
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+index 1cc0bed..da52cac 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+@@ -7,6 +7,7 @@
+ #include <Poseidon/Graphics/Core/GLClear.hpp>
+ #include <Poseidon/Graphics/Core/GLCullState.hpp>
+ #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
++#include <Poseidon/Graphics/Core/GLSampler.hpp>
+ #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
+ #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+@@ -332,9 +333,19 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
+ // `depthClamp` (remastered lighting): casters beyond the light's near plane are
+ // flattened onto it instead of clipped. A sun a few degrees up throws shadows
+ // hundreds of metres long, from casters far outside a cascade's depth range.
++// `casterSampler`: the sampler the alpha-cutout batches sample their caster
++// textures with on unit 0 (the lit draws' linear wrap one), or 0 to keep the
++// binding as found. Kept as found, they sample with whatever sampler the last
++// lit draw before the shadow pass left on unit 0 (the last road's blend
++// section: clamped or wrapped, point or linear), so a leaf card's cutout, and
++// the shadow it casts, changes with which object happened to draw last. The
++// hill cull hides roads behind ridges, which changed the shadows of the trees
++// in view (plan section 5 A4), so it sets a fixed sampler; with hillCull off
++// the pass keeps the old binding and draws the frame of the step before. A set
++// sampler is restored afterwards.
+ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades, int res, const float* solidXYZ,
+                         int solidVertCount, const float* alphaXYZUV, int alphaVertCount,
+-                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp)
++                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp, GLuint casterSampler)
+ {
+     const bool haveSolid = solidXYZ && solidVertCount >= 3;
+     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
+@@ -388,6 +399,15 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
+                      GL_DYNAMIC_DRAW);
+     }
+ 
++    const bool setSampler = haveAlpha && casterSampler != 0;
++    GLint prevSampler = 0;
++    if (setSampler)
++    {
++        GL33Bind::ActiveUnit(0);
++        glGetIntegerv(GL_SAMPLER_BINDING, &prevSampler);
++        Poseidon::render::sampler::BindSlot0(casterSampler);
++    }
++
+     glClearDepth(1.0);
+     for (int i = 0; i < numCascades; i++)
+     {
+@@ -425,6 +445,8 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
+         }
+     }
+ 
++    if (setSampler)
++        Poseidon::render::sampler::BindSlot0(static_cast<GLuint>(prevSampler));
+     if (depthClamp)
+         Poseidon::render::pipeline::DisableDepthClamp(); // the 3D pass runs without it
+     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
+@@ -469,11 +491,14 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
+         resolved.push_back({handle, src.firstVertex, src.vertexCount});
+     }
+ 
++    // hillCull: a fixed sampler for the cutout casters (RenderCascadeArray).
++    const GLuint casterSampler = _featureGates[Poseidon::remaster::Feature::HillCull].on ? _samplerObjects[0] : 0u;
+     GpuMark(Poseidon::gpu::Mark::ShadowBegin);
+-    const bool rendered = numCascades >= 1 &&
+-                          RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ,
+-                                             casters.solidVertexCount, casters.alphaXYZUV, casters.alphaVertexCount,
+-                                             resolved.data(), static_cast<int>(resolved.size()), _lightingActive);
++    const bool rendered =
++        numCascades >= 1 &&
++        RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ, casters.solidVertexCount,
++                           casters.alphaXYZUV, casters.alphaVertexCount, resolved.data(),
++                           static_cast<int>(resolved.size()), _lightingActive, casterSampler);
+     GpuMark(Poseidon::gpu::Mark::ShadowEnd);
+     if (numCascades >= 1)
+     {

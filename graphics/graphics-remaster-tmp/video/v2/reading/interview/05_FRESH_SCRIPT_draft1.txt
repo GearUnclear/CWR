@@ -1,0 +1,54 @@
+FRESH SCRIPT, draft 1 (2026-10-23)
+==================================
+Plain spoken, says what changed in each shot. Owner's answers so far:
+ - intro: "graphics and rendering improvements" (instead of "about the light")
+ - "Malden, under occupation. The models are the originals. The light is new" -> "this sounds so ai";
+   asked for a fresh script.
+
+ 0  Title card
+    Uslu dur is a total overhaul of Arma: Cold War Assault. First up: the graphics and rendering improvements.
+
+ 1  Malden at sunset, occupied
+    The original game is on the left, Uslu dur is on the right. Same models and textures on both.
+
+ 2  Dawn, squad on the ridge
+    Fog is volumetric now. The mist sits low in the valley, and the sun lights it from behind.
+
+ 3  Pine woods
+    Same thing in the woods: sunlight breaking through the trees makes proper light shafts in the haze.
+
+ 4  Bay, patrol boat
+    Water has real reflections now, so the hills and the patrol boat show up in the bay.
+
+ 5  Occupier outpost
+    Every object casts a real shadow now, and ambient occlusion darkens the corners and the ground under the vehicles.
+
+ 6  Everon from the air
+    Clouds cast shadows on the ground too, and you can watch them drift across Everon.
+
+ 7  Sinai camp
+    It works with mods too. This is Sinai, from the Lost Brothers mod.
+
+ 8  Ambush at golden hour
+    At golden hour the shadows get long. Here the resistance is set up at the treeline, waiting.
+
+ 9  Convoy at sunset
+    An occupier convoy, driving into the sun. Exposure now works like a real camera's.
+
+10  Checkpoint at dusk
+    At the checkpoint, the campfire now actually lights the guards around it.
+
+11  Night patrol in town
+    At night, the street lamps actually light the street. Here an occupier patrol walks through town.
+
+12  Town in the rain
+    In the rain the ground gets darker, and puddles pick up the street lights.
+
+13  Supply run at night
+    Out of town it's properly dark, so headlights are all you've got.
+
+14  Firefight after dark
+    Flares, fires and explosions all light up their surroundings, and the size of a blast now depends on the shell.
+
+15  Closing card
+    That's it for the graphics. Part two covers the gameplay: Guerrilla Mode and the new AI.

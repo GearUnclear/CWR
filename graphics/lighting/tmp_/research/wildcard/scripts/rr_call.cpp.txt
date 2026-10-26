@@ -1,0 +1,72 @@
+    if (rendered && _lightingActive && _lighting.skyOcc > 0.0f && GScene && GScene->GetCamera())
+    {
+        namespace sm = Poseidon::shadow;
+        const int k = std::max(1, std::min(kSkyMaxDirs, static_cast<int>(_lighting.skyDirs + 0.5f)));
+        static int s_envRes = -1;
+        static int s_envStride = -1;
+        if (s_envRes < 0)
+        {
+            const char* e = std::getenv("CWR_SKYVIS_RES");
+            s_envRes = e ? std::max(64, std::min(2048, std::atoi(e))) : 512;
+            const char* st = std::getenv("CWR_SKYVIS_STRIDE");
+            s_envStride = st ? std::max(1, std::min(16, std::atoi(st))) : 4;
+            LOG_INFO(Graphics, "wildcard sky maps: res {} stride {}", s_envRes, s_envStride);
+        }
+        const int skyRes = s_envRes;
+        const float radius = std::max(4.0f, _lighting.skyRadius);
+        const bool albedo = _lighting.skyAlbedo > 0.0f;
+        // Round robin: 1/stride of the directions per frame; a change of the
+        // direction set, map size, radius or the colour layer redoes them all.
+        static int s_phase = 0;
+        static int s_lastK = -1, s_lastRes = -1;
+        static float s_lastRadius = -1.0f;
+        static bool s_lastAlbedo = false;
+        static float s_layerCam[kSkyMaxDirs * 3] = {};
+        const bool all = !s_skyEverRendered || k != s_lastK || skyRes != s_lastRes || radius != s_lastRadius ||
+                         albedo != s_lastAlbedo;
+        s_lastK = k;
+        s_lastRes = skyRes;
+        s_lastRadius = radius;
+        s_lastAlbedo = albedo;
+        SkyDirections(k, s_sky.dir);
+        const Vector3 cam = GScene->GetCamera()->Position();
+        const sm::Vec3 camW{cam.X(), cam.Y(), cam.Z()};
+        bool update[kSkyMaxDirs] = {};
+        for (int i = 0; i < k; ++i)
+        {
+            update[i] = all || (i % s_envStride) == s_phase;
+            if (!update[i])
+                continue;
+            const sm::Vec3 travel{-s_sky.dir[i * 4 + 0], -s_sky.dir[i * 4 + 1], -s_sky.dir[i * 4 + 2]};
+            const sm::Vec3 up = std::fabs(travel.y) > 0.95f ? sm::Vec3{0.0f, 0.0f, 1.0f} : sm::Vec3{0.0f, 1.0f, 0.0f};
+            const sm::Mat4 vp = sm::OmniSphereLightVP(camW, radius, travel, up, skyRes, 60.0f);
+            memcpy(s_sky.vp + i * 16, vp.m.data(), sizeof(float) * 16);
+            s_layerCam[i * 3 + 0] = cam.X();
+            s_layerCam[i * 3 + 1] = cam.Y();
+            s_layerCam[i * 3 + 2] = cam.Z();
+        }
+        s_phase = (s_phase + 1) % s_envStride;
+        // Each layer is anchored where the camera was when it was drawn; the lit
+        // shader works relative to this pass's camera.
+        for (int i = 0; i < k; ++i)
+        {
+            s_sky.off[i * 4 + 0] = cam.X() - s_layerCam[i * 3 + 0];
+            s_sky.off[i * 4 + 1] = cam.Y() - s_layerCam[i * 3 + 1];
+            s_sky.off[i * 4 + 2] = cam.Z() - s_layerCam[i * 3 + 2];
+            s_sky.off[i * 4 + 3] = 0.0f;
+        }
+        s_sky.ctl[2] = (2.0f * radius) / static_cast<float>(skyRes);
+        s_sky.ctl2[3] = radius;
+        const float grey[4] = {0.45f, 0.45f, 0.42f, 1.0f}; // display-space stand-in for untextured casters
+        const bool haveSolid = casters.solidXYZ && casters.solidVertexCount >= 3;
+        const bool haveAlpha = casters.alphaXYZUV && casters.alphaVertexCount >= 3 && !resolved.empty();
+        const bool ok = RenderSkyMaps(s_sky.vp, s_sky.dir, update, k, skyRes, haveSolid, casters.solidVertexCount,
+                                      haveAlpha, resolved.data(), static_cast<int>(resolved.size()), grey, albedo);
+        s_skyRendered = ok;
+        s_skyEverRendered = s_skyEverRendered || ok;
+    }
+    else
+    {
+        s_skyRendered = false;
+        s_skyEverRendered = false;
+    }

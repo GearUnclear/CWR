@@ -1,0 +1,156 @@
+FOG WIND SWARM, AGENT 6: SPATIAL CANCELLATION (S2)
+===================================================
+Role: spatial filtering and slicing. Folder tmp/video/fogwind/6/ (graphics-remaster worktree).
+No engine change, no rebuild, no branch, no commit. Live shader overrides only, on the trailer's
+overhaul build look-director-rwdi, junction RemasterUD-fog-6, one game at a time.
+
+VERDICT
+-------
+MEETS THE BAR on the stepped valley probes (static and moving), on a second scene (cloud_shadows),
+and (S2, agent 1's recorder) in real-time 60 fps play. Recommended form: S2z (shaders/S2z).
+ (a) flicker: bandmetric moving 0.039 (original 0.517, d91 0.063, vanilla 0.102 on the same frames).
+ (b) motion: no wind, no drift, no travelling bands: WIND <= vanilla in every region, rho_off <= 0.035
+     (bar 0.08; d91 0.27 at [-13,0] px/frame), x-t RESID flat; static camera at the jitter-frozen floor.
+ (c) grain: static boil/slow at or under the frozen floor (valley 0.057/0.042 vs 0.079/0.067); no
+     checker survives (the tent removes it), no curtains (frozen's vertical streaks are absent).
+ (d) look: S2z within 0.7 code values of the ORIGINAL approved look in every region, static and
+     moving alike (d91 was +2.2..2.8 too misty in the valley; plain S2 is -1.1..-1.8 too clear).
+ Cost: one sample per cell as today; the injection is unchanged in fetch count; psFogIntegrate reads
+ 8 trilinear taps instead of 1 texelFetch per step (S2: 4 bilinear). Not resolvable under the
+ machine's contention (air/post share 0.44-0.48 for every variant incl. d91); estimated well under
+ 0.3 ms at 1080p, and a production version can tent the volume once in its own pass (64 slices x 8
+ taps per cell) instead of inside integrate's per-draw re-walk.
+ The medium is untouched (AI link unchanged).
+
+THE DESIGN (shaders/S2, generator gen_shaders.py)
+-------------------------------------------------
+Three parts, one sample per cell as today (no extra injection cost):
+ 1. History read at the cell and slice CENTRE (psFogInject fogSlice): the jittered point is still
+    sampled for this frame's value, but the reprojection for the history fetch uses the unjittered
+    column (cell centre) and fogSliceDepth((s + 0.5) / N). The shipped code reprojects the jittered
+    point, which makes the stored value a LEAKY SUM of the jitter (s_n = o_n + 0.88 s_{n-1}, gain
+    1/(1-0.88) = 8.3) instead of its EMA (s_n = 0.12 o_n + 0.88 s_{n-1}). Golden-ratio sequence:
+    residual rms 0.261 cell/slice (p2p 1.10) shipped vs 0.031 (p2p 0.13) with the centre read.
+    Confirmed in the game by C0 (below): the centre read alone cuts the original pump 9x.
+ 2. A 2x2-PERIODIC antithetic jitter instead of a per-cell IGN offset: the four cells of each 2x2
+    block take the four 90-degree rotations of r (cos t_n, sin t_n) in xy (diagonal cells opposite),
+    and r cos(t_n + k pi/2 + pi/2 + 2.39996 s) in depth (k = the cell's place in the block, s the
+    slice), r = sqrt(1/6) = 0.408 (a box's second moment per axis), t_n = 2 pi fogDepth.w (the
+    frame's golden-ratio phase, so no new uniform). Per block and every frame: the offsets sum to 0,
+    all odd moments are 0, the second moments (xx, yy, zz, and the mixed ones) are constant in time.
+    A 2-periodic pattern cannot translate (agent 1's rule: no ramp in the cell index), so there is
+    nothing that can read as wind; it can only stand.
+ 3. psFogIntegrate reads the injected volume through a 3x3 tent [1 2 1] x [1 2 1] / 16 in xy (four
+    bilinear taps at +-0.5 cell, the slice centre in z; the volume is GL_LINEAR, clamp to edge). The
+    tent's response at the 2x2 block's three frequencies is exactly 0, so the standing residual of
+    any locally smooth medium cancels to first and second order every frame; bilinear history
+    resampling under a pan maps a 2-periodic zero-mean pattern to another one, so it still cancels
+    when the camera moves. The tent filters only what is displayed; the history is not filtered, so
+    there is no feedback. No z blur is needed: the depth jitter's residual cancels in xy too (the
+    depth gradient of the medium is the same in neighbouring columns).
+AI link: the medium (ComputeFogMedium / FogMedium) is untouched; only how the renderer samples and
+filters the volume changes, so AI sight still follows the rendered fog.
+
+VARIANTS (all in shaders/<name>/, made by gen_shaders.py, S2z and S2h by small scripts noted below)
+  S2    antithetic 2x2 jitter + centre history read + xy tent [1 2 1]^2 in psFogIntegrate
+  S2z   S2 with the integrate tent in 3D ([1 2 1]^3, 8 trilinear taps at +-0.5 cell/slice):
+        adds the half-slice depth blur the shipped jittered history read gave the mist (the look);
+        a display filter only, the history is untouched, so it cannot compound in motion
+  S2h   S2 + agent 2's fixed tetrahedral +-0.25 history read (Act25's kernel) + xy tent
+  S2nt  S2 without the tent (stock integrate)
+  C0    the ORIGINAL frame-wide jitter + only the centre history read (tests the leaky-sum claim)
+  S1    d91 per-cell + tent (not shot: the toy model showed the tent weakens d91's wind ~30x but
+        leaves it travelling, rho 0.70, so it cannot meet (b))
+
+TOY MODEL (tools/sim.py: 96x64 cells x 8 slices, static camera, smooth haze + soft mist top +
+shadow edge, share 0.12; frame-diff rms of the column sum; travelling rho at lag != 0)
+  orig 0.443 | d91 0.182, rho 0.65 | d91+tent 0.0059, rho 0.70 | C0 0.062 | S2nt 0.036 |
+  S2 with jittered history 0.016 | S2 0.0035, rho 0.13 (noise level)
+
+PROBES (agent 3's look_probe_fog3_static / _moving = the mist3 recipe: valley_mist staging, clock
+k=270..389, static = the frame 328 pose held; agent 1's kit fogmotion.py, --from 15; bandmetric on
+the PNGs; references from mist/3/runs and v2/vanilla). Kit columns: WIND bay/valley/farhill/haze,
+max rho_off, valley mid, valley lowd2, valley boil/slow (static only).
+
+STATIC (camera held; any change is an artefact)
+  variant  bandm  WIND b/v/f/h             rho_off  mid    lowd2  boil   slow   look valley vs base
+  base     0.456  0.014/0.024/0.000/0.009  0.05     0.477  1.618  0.375  0.151   0
+  d91      0.058  0.059/0.174/0.127/0.068  0.47     0.498  0.110  0.416  0.173  +2.4..+2.8
+  frozen   0.033  0.002/0.001/0.001/0.001  0.025    0.050  0.025  0.079  0.067  -2.3..-3.3
+  S2nt     0.026  0.002/0.002/0.001/0.001  0.029    0.062  0.025  0.064  0.045  about -2
+  S2       0.025  0.002/0.001/0.001/0.001  0.025    0.050  0.022  0.055  0.041  -1.07/-1.49/-1.76
+  S2z      0.027  0.002/0.002/0.001/0.001  0.028    0.054  0.023  0.057  0.042  -0.30/-0.50/-0.67
+  S2h      0.025  0.002/0.001/0.001/0.001  0.027    0.045  0.025  0.053  0.041  +0.75/+0.98/+1.11
+  (look = 20-frame mean RGB, code values, tools/lookcmp.py; S2z farhill -0.2..-0.3, bay/haze +-0.2)
+
+MOVING (the clip's real pan, frames 285-389)
+  variant  bandm  WIND b/v/f/h             rho_off  lowd2 v  look valley vs base (moving)
+  base     0.517  0.009/0.025/0.001/0.007  0.04     1.621     0
+  d91      0.063  0.047/0.123/0.078/0.035  0.29     0.117    +2.19/+2.44/+2.37
+  vanilla  -      0.017/0.007/0.002/0.007  0.048    0.057     (no fog; kit band(mkv) 0.102)
+  C0       0.062  0.009/0.013/0.004/0.004  0.068    0.177     -  (4 spikes)
+  S2       0.039  0.007/0.004/0.002/0.003  0.033    0.060    -0.98/-1.32/-1.50
+  S2z      0.039  0.006/0.003/0.002/0.004  0.035    0.079    -0.33/-0.49/-0.63
+  S2h      0.038  0.004/0.003/0.002/0.003  0.027    0.067    +0.44/+0.68/+0.75
+  C0 confirms the leaky sum in the game: the centre read alone cuts the original pump 9.2x (lowd2
+  1.621 -> 0.177; predicted 8.3x) but stays 3x vanilla: a per-cell pattern is still needed.
+
+SECOND SCENE: cloud_shadows (lead's look_probe_mistlead_cloud_shadows, Everon, 150 shots, --from 30;
+the clip the original bug hit at 3.6x vanilla). S2: bandmetric 0.034 (d91 0.045), rho_off <= 0.042,
+WIND <= 0.011 in every region (d91 farhill rho_off 0.273 WIND 0.092, haze 0.191/0.038; vanilla same
+frames WIND 0.003..0.096).
+
+REAL TIME 60 fps (agent 1, mist-1 recorder, one render per tick, board 04:39): S2 rtst valley
+boil/slow 0.061/0.048 (= q4, the floor), farhill 0.048/0.039, max rho_off 0.026 held and 0.026 pan,
+bay lowd2 0.068 (d91: 0.422/0.321 and rho_off 0.52). S2z is in agent 1's real-time queue.
+
+BY EYE (files in out/)
+  static_zoom_bay.png      2x + frame diff x24, held camera: S2's diff is as flat as frozen's
+                           (rms 0.281 = 0.281; orig 0.589 sheets, d91 0.488 blotches).
+  static_look_crops.png    temporal mean crops: S2 looks like orig/d91; frozen shows vertical
+                           curtains at the bay that S2 does not have.
+  xt_moving/xt_resid_only.png  x-t RESID x16 (time down): orig horizontal pump lines, d91 slanted
+                           hatching (the wind), S2 flat grey except the pan's object-edge lines.
+  xt_moving/resid_f40_41.png   two consecutive camera-compensated diffs: orig sheets, d91 drifting
+                           blotches, S2 flat.
+  moving_zoom_f60.png      2x crops + raw diff x16 in motion: orig, d91 (blotches over the valley),
+                           S2, S2z (edges only); S2z's crop matches orig's haze over the peninsula.
+  streaks_sun.png          low sky by the sun, 20-frame mean, high-pass x10: S2 column-profile rms
+                           0.044 (base 0.031, d91 0.034, S2nt 0.059, frozen 0.065): faint, only at
+                           x10, and the tent is what keeps it near base.
+
+WHAT I RULED OUT OR FOUND ON THE WAY
+  - The depth slice layout is not the lever: 64 exponential slices to the classic fog end keep the
+    last slice at 6.5-9.5% of its depth (zFar 900 m: 59 m; 1500 m: 111 m; 3000 m: 259 m; 5000 m:
+    474 m). More far slices cut the jitter error only linearly, at linear cost; the antithetic
+    pattern cancels the depth residual in xy whatever the slice depth, so I did not pursue it.
+  - A z blur is not needed for the cancellation (S2's xy tent already cancels the depth residual);
+    it is useful only to restore the shipped look (S2z).
+  - The tent alone on d91 (S1, toy model) weakens the wind but leaves it travelling.
+  - An every-27-frame ~1 code value pulse on the far shoreline (x 1762-1800, y 669; frames 25, 51,
+    79, 108) is present in the original, C0, d91 (frame 79), S2, S2z and S2h, and absent with the
+    camera held: not from any jitter pattern; agent 2 sees it in every variant too. Source not
+    identified (not a camera-path jerk: the measured shift is smooth there).
+
+RISKS AND OPEN POINTS
+  - The 2x2 cancellation is exact for a locally smooth medium; at hard edges (shadow edges in the
+    haze, the mist top seen edge-on) a small standing residual is left over 1-2 cells. It cannot
+    travel (2-periodic), and the static/moving numbers show nothing above the floor, but the pine
+    probe class (hard canopy shadows in the air) was only checked by agent 3 on Act25 (not
+    discriminating there: swaying foliage dominates).
+  - The xy tent softens the volume by a kernel of 0.7 cell rms (12 px cells): not visible in the crops
+    and offset by the absence of the jittered-history blur; the 3D tent (S2z) restores the base
+    density. If the lead prefers Act25/S2h's history blur for the look, use plain S2's xy tent with
+    it (S2h lands about +0.7..1.0 code mistier than base; a +-0.18 blur would centre it).
+  - Production: t_n comes from fogDepth.w (already the golden-ratio phase), so no new uniform; the
+    C++ comment at the jitter source and the unit test pinning fogCellNoise need updating; a unit
+    test can check that the four rotations sum to zero and that the tent's response at (1/2,0),
+    (0,1/2), (1/2,1/2) is 0.
+
+FILES
+  shaders/{S2,S2z,S2h,S2nt,C0}/   overrides (psFogInject.glsl, psFogIntegrate.glsl)
+  gen_shaders.py                  S2, S2nt, S1, C0 from agent 3's d91 assembly + the engine integrate
+  tools/run_probe.ps1, batch*.ps1 runners (agent 3's, my junction; -Probe/-Label for any probe)
+  tools/sim.py, lookcmp.py, zoomdiff.py, popscan.py, streaks.py, airtime.py, camshift.py
+  runs/<static|moving|cloud>-<variant>/  mkv, band.txt, udcap.log (GPU times)
+  out/                            motion json, look comparisons, x-t slices, crops (above)

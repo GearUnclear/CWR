@@ -1,0 +1,45 @@
+#include <iterator>
+#include <string>
+
+// The photoreal camera's frame encoding (Graphics/Remaster/PhotoCamera.hpp
+// CameraEncode / CameraDecode; photoLight): pre-exposed linear light as it is
+// up to the knee (display gamma), the peak channel's code above it on the
+// fold cK + (1 - cK) (1 - (knee / m)^p) / span, hue kept. Pasted into the lit
+// prelude (camFold) and, as kCameraCodecGLSL, into every post pass that reads
+// or writes the frame's colour (camDecode).
+#define CWR_CAMERA_CODEC_GLSL                                                                                          \
+    R"(
+const float kCamKnee = 0.6;          // kEncodeKnee
+const float kCamMax = 16.0;          // kDecodeMax
+const float kCamPower = 0.7;         // kEncodePower
+const float kCamKneeCode = 0.792793; // kEncodeKnee^(1/2.2)
+const float kCamFoldSpan = 0.899580; // 1 - (kEncodeKnee / kDecodeMax)^kEncodePower
+vec3 camFold(vec3 lin) {
+    lin = max(lin, vec3(0.0));
+    float m = max(lin.r, max(lin.g, lin.b));
+    if (m > kCamKnee) {
+        float code = kCamKneeCode + (1.0 - kCamKneeCode) * (1.0 - pow(kCamKnee / min(m, kCamMax), kCamPower)) / kCamFoldSpan;
+        lin *= pow(code, 2.2) / m;
+    }
+    return pow(lin, vec3(1.0 / 2.2));
+}
+vec3 camDecode(vec3 disp) {
+    disp = max(disp, vec3(0.0));
+    vec3 c = pow(disp, vec3(2.2));
+    float code = max(disp.r, max(disp.g, disp.b));
+    if (code <= kCamKneeCode) return c;
+    float u = min((code - kCamKneeCode) / (1.0 - kCamKneeCode), 1.0);
+    float q = max(1.0 - u * kCamFoldSpan, 1e-6);
+    return c * (min(kCamKnee / pow(q, 1.0 / kCamPower), kCamMax) / pow(code, 2.2));
+}
+)"
+
+namespace Poseidon::gl33lighting
+{
+const char kCameraCodecGLSL[] = CWR_CAMERA_CODEC_GLSL;
+} // namespace Poseidon::gl33lighting
+
+namespace
+{
+
+// Shared varyings of the remastered set

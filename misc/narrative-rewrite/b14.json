@@ -1,0 +1,10 @@
+{
+  "id": "b14",
+  "bank": "kBio1Friendly",
+  "variant": 1,
+  "text": "Former postal worker {Name} from {Place} became a resistance courier, then quit after police seized the courier's address book, found a friend's home address inside, and arrested the friend there.",
+  "word_count": 30,
+  "self_review": "A former postal worker quit resistance courier work after police seized the courier's own address book and used it to find and arrest a friend.",
+  "source_pattern": "The supplied Manning interview describes a police raid, exposure through a personal connection, detention, and later underground information work.",
+  "fictional_changes": "The postal job, resistance message work, address book, friend's arrest, and withdrawal are fictional; they are not the interviewee's story."
+}

@@ -1,0 +1,9 @@
+roadmap: object shadows at start-up and the 4x MSAA default landed
+
+Log line on remastered-lighting for b4f14d6 and 0e85455: the unit suite
+results, the smoke run, and the capture set 20261018-fixes2 against
+20261018-bugfix with its per-view changes and shadow-pass GPU times,
+including the Sinai low-sun foreground that Classic now shades almost
+evenly.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

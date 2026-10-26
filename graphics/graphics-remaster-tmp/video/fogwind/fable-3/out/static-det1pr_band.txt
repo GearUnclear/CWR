@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\fable-3\\runs\\static-det1pr\\static-det1pr.mkv", "frames": 120, "band": 0.035, "band_max": 0.077, "sky": 0.017, "spikes": 0, "worst": [[89, 0.2], [72, 0.19], [119, 0.18], [120, 0.18], [88, 0.17], [49, 0.17], [41, 0.17], [16, 0.16]]}

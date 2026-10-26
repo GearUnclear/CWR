@@ -1,0 +1,17 @@
+# real-time 60 fps recordings (agent 1's mist-1 recorder; one render per presented frame): the owner's case
+rt-pc-rtst|fogwind/1/rec/pc_rtst.mkv|--static --from 10 --amp --mp4
+rt-pc-rt60|fogwind/1/rec/pc_rt60.mkv|--from 10 --amp --mp4
+rt-base-rtst|fogwind/1/rec/base_rtst.mkv|--static --from 10 --amp
+rt-base-rt60|fogwind/1/rec/base_rt60.mkv|--from 10 --amp
+rt-q4-rtst|fogwind/1/rec/q4_rtst.mkv|--static --from 10 --amp --mp4
+rt-q4-rt60|fogwind/1/rec/q4_rt60.mkv|--from 10 --amp --mp4
+rt-Ac-rtst|fogwind/1/rec/Ac_rtst.mkv|--static --from 10 --amp
+rt-Ac-rt60|fogwind/1/rec/Ac_rt60.mkv|--from 10 --amp
+rt-S2-rtst|fogwind/1/rec/S2_rtst.mkv|--static --from 10 --amp --mp4
+rt-S2-rt60|fogwind/1/rec/S2_rt60.mkv|--from 10 --amp --mp4
+rt-t4w-rtst|fogwind/1/rec/t4w_rtst.mkv|--static --from 10 --amp
+rt-t4w-rt60|fogwind/1/rec/t4w_rt60.mkv|--from 10 --amp
+rt-Act25-rtst|fogwind/1/rec/Act25_rtst.mkv|--static --from 10 --amp --mp4
+rt-Act25-rt60|fogwind/1/rec/Act25_rt60.mkv|--from 10 --amp --mp4
+rt-c8b-rtst|fogwind/1/rec/c8b_rtst.mkv|--static --from 10 --amp
+rt-c8b-rt60|fogwind/1/rec/c8b_rt60.mkv|--from 10 --amp

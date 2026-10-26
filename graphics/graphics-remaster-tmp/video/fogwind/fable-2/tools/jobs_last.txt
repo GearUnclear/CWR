@@ -1,0 +1,3 @@
+mv-q2z|fogwind/fable-1/runs/moving-q2z/moving-q2z.mkv|--from 15 --amp
+rt-t4wb-rtst|fogwind/1/rec/t4wb_rtst.mkv|--static --from 10
+rt-t4wb-rt60|fogwind/1/rec/t4wb_rt60.mkv|--from 10

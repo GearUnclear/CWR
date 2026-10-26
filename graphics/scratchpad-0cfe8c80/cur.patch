@@ -1,0 +1,396 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..24a5f1b 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,17 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"pcssSun", &remaster::LightingTuning::pcssSunDeg},
++        {"pcssSearch", &remaster::LightingTuning::pcssSearchM},
++        {"pcssMin", &remaster::LightingTuning::pcssMinTexels},
++        {"contact", &remaster::LightingTuning::contactShadows},
++        {"contactLen", &remaster::LightingTuning::contactLength},
++        {"contactThick", &remaster::LightingTuning::contactThickness},
++        {"contactFar", &remaster::LightingTuning::contactFar},
++        {"contactFarThick", &remaster::LightingTuning::contactFarThick},
++        {"contactFarMax", &remaster::LightingTuning::contactFarMax},
++        {"contactSteps", &remaster::LightingTuning::contactSteps},
++        {"contactFade", &remaster::LightingTuning::contactFadeEnd},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+@@ -571,6 +582,26 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         t.debugView = static_cast<int>(v);
+         found = true;
+     }
++    else if (key == "objShadows")
++    {
++        // RESEARCH (shadows track): static objects (trees, buildings) cast too.
++        // Off by default in a fresh profile (Scene::_objectShadows), so the
++        // capture runs never had tree or building shadows.
++        if (!GScene)
++            return GameValue("FAIL:no scene");
++        GScene->SetObjectShadows(v != 0.0f);
++        LOG_INFO(Core, "[tri] triSetLighting {}", setting);
++        return GameValue("OK");
++    }
++    else if (key == "casterLod")
++    {
++        // RESEARCH (shadows track): shadow caster LOD distance bias (1 = cast the draw LOD).
++        Engine::ShadowMapTuning st = GEngine->GetShadowMapTuning();
++        st.casterLodBias = v;
++        GEngine->SetShadowMapTuning(st);
++        LOG_INFO(Core, "[tri] triSetLighting {}", setting);
++        return GameValue("OK");
++    }
+     if (!found)
+         return GameValue(("FAIL:unknown knob " + key).c_str());
+     GEngine->SetLightingTuning(t);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..7e8837e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,18 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // RESEARCH (shadows track): contact-hardening soft shadows and contact shadows.
++    float pcssSunDeg = 0.0f;        // 0 = stock filter; >0 = PCSS with the sun as a disk of this diameter (deg)
++    float pcssSearchM = 40.0f;      // farthest blocker distance the PCSS search covers (m)
++    float pcssMinTexels = 0.6f;     // smallest PCF radius (texels) at contact
++    float contactShadows = 0.0f;    // screen-space contact shadow strength (0 = off)
++    float contactLength = 1.0f;     // contact shadow ray length (m)
++    float contactThickness = 0.35f; // assumed occluder thickness (m)
++    float contactFar = 0.0f;        // far-field: extra ray length per metre of view depth
++    float contactFarThick = 0.01f;  // occluder thickness per metre of view depth
++    float contactFarMax = 40.0f;    // longest ray (m)
++    float contactSteps = 16.0f;     // ray steps (<= 48)
++    float contactFadeEnd = 120.0f;  // contact shadows fade out by this view depth (m); start at half
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..1f86f23 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -759,6 +759,7 @@ class EngineGL33 : public Engine
+     unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
+     unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
+     unsigned int _shadowCompareSampler = 0;
++    unsigned int _shadowRawSampler = 0; // RESEARCH: raw depth reads of the shadow map (PCSS blocker search)
+     unsigned int _shaderProgramRemaster[NVertexShaders][NPixelShaderSpecular][NPixelShaderModes][NPixelShaders] = {};
+ 
+     void InitLightingResources();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..c75587d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -117,6 +117,15 @@ void EngineGL33::InitLightingResources()
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+ 
++    // RESEARCH (shadows track): the same depth array read as raw depth on its own
++    // unit, for the PCSS blocker search.
++    glGenSamplers(1, &_shadowRawSampler);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
++
+     // The map (if any) belongs to the landscape, not the context: re-upload it.
+     _terrainMapDirty = _terrainMap != nullptr;
+ }
+@@ -150,6 +159,12 @@ void EngineGL33::DeinitLightingResources()
+         glDeleteSamplers(1, &_shadowCompareSampler);
+         _shadowCompareSampler = 0;
+     }
++    if (_shadowRawSampler)
++    {
++        glBindSampler(kShadowDepthUnit, 0);
++        glDeleteSamplers(1, &_shadowRawSampler);
++        _shadowRawSampler = 0;
++    }
+     if (s_litUBO)
+     {
+         glDeleteBuffers(1, &s_litUBO);
+@@ -269,6 +284,11 @@ void EngineGL33::BindLightingTextures()
+     if (!(ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0))
+         glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+     glBindSampler(2, _shadowCompareSampler);
++    GL33Bind::ActiveUnit(kShadowDepthUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, (ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
++                                           ? _shadowMapTex
++                                           : _dummyDepthArray);
++    glBindSampler(kShadowDepthUnit, _shadowRawSampler);
+     GL33Bind::ActiveUnit(kTerrainHorizonUnit);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+@@ -414,6 +434,12 @@ void EngineGL33::UploadLitFrameConstants()
+     // The shadow map was rendered from where the camera was then.
+     SetSlot(LitConst::ShadowDelta, cam.X() - _shadowCamPos[0], cam.Y() - _shadowCamPos[1], cam.Z() - _shadowCamPos[2],
+             kShadowFilterTexels * _lighting.shadowSoftness);
++    // RESEARCH (shadows track): PCSS with the sun as a disk.
++    {
++        const float halfRad = 0.5f * _lighting.pcssSunDeg * 3.14159265f / 180.0f;
++        SetSlot(LitConst::Pcss, _lighting.pcssSunDeg > 0.0f ? std::tan(halfRad) : 0.0f, _lighting.pcssSearchM,
++                _lighting.pcssMinTexels, 0.0f);
++    }
+     const float debug =
+         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e..372c880 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -23,6 +23,7 @@ constexpr unsigned int kLitBinding = 3;
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++constexpr int kShadowDepthUnit = 6; // RESEARCH: the shadow map array again, raw depth (no comparison)
+ 
+ // LitConstants vec4 slots; must match the GLSL block in s_psRemasterCommon.
+ namespace LitConst
+@@ -59,14 +60,16 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    Pcss = 58,       // RESEARCH: x tan(sun angular radius) (0 = stock filter), y search distance (m), z min texels
++    Count = 59,
+ };
+ constexpr int MaxLights = 8;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Pcss == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Count == Pcss + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e..9c92538 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -276,11 +276,13 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
++    vec4 litPcss;         // 58: RESEARCH x tan(sun angular radius) (0 = stock filter), y search (m), z min texels
+ };
+ 
+ uniform sampler2D tex0;
+ uniform sampler2D tex1;
+ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound in remastered mode
++uniform sampler2DArray shadowDepth;        // unit 6: RESEARCH the same map, raw depth (PCSS blocker search)
+ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
+@@ -321,6 +323,50 @@ const vec2 kPoisson[12] = vec2[](
+     vec2( 0.962, -0.195), vec2( 0.473, -0.480), vec2( 0.519,  0.767), vec2( 0.185, -0.893),
+     vec2( 0.507,  0.064), vec2( 0.896,  0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+ 
++// RESEARCH (shadows track): contact-hardening soft shadows (PCSS). The sun is a
++// disk of angular radius atan(litPcss.x): a blocker search in the raw depth map
++// finds the mean distance d (m) from the receiver to what shadows it, and the
++// penumbra radius in the light plane is d * tan(radius). Sharp where a caster
++// touches the ground, soft at the far end of a long evening shadow.
++const vec2 kDisk16[16] = vec2[](
++    vec2(-0.9465, -0.1484), vec2(-0.7431,  0.5353), vec2(-0.5863, -0.5371), vec2(-0.3633,  0.1035),
++    vec2(-0.2591,  0.9132), vec2(-0.1793, -0.9353), vec2( 0.0164, -0.3410), vec2( 0.0918,  0.4562),
++    vec2( 0.1924, -0.0293), vec2( 0.3313,  0.8988), vec2( 0.4017, -0.7120), vec2( 0.5164,  0.2908),
++    vec2( 0.6812, -0.2402), vec2( 0.8080,  0.5590), vec2( 0.9384, -0.0179), vec2(-0.6200,  0.0700));
++
++float pcssLit(vec2 suv, float zR, int c, float texelWorld, float ts) {
++    float tanA = litPcss.x;
++    float depthPerM = max(length(vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2])), 1e-9);
++    float searchT = clamp(litPcss.y * tanA / texelWorld, 2.0, 48.0);
++    float ang = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853;
++    vec2 cs = vec2(cos(ang), sin(ang));
++    mat2 rot = mat2(cs.x, cs.y, -cs.y, cs.x);
++    // Blocker search: the centre texel plus a rotated 16-tap disk.
++    float bSum = 0.0;
++    float bN = 0.0;
++    float z0 = texture(shadowDepth, vec3(suv, float(c))).r;
++    if (z0 < zR) { bSum += z0; bN += 1.0; }
++    for (int k = 0; k < 16; ++k) {
++        float zb = texture(shadowDepth, vec3(suv + rot * kDisk16[k] * (searchT * ts), float(c))).r;
++        if (zb < zR) { bSum += zb; bN += 1.0; }
++    }
++    if (bN < 0.5) return 1.0;
++    float dB = max(zR - bSum / bN, 0.0) / depthPerM; // metres along the sun ray
++    float rT = clamp(dB * tanA / texelWorld, litPcss.z, searchT);
++    // Filter: a rotated Vogel (golden-angle) spiral, denser when the penumbra is
++    // wide so a soft edge is a gradient rather than grain. Each tap is a
++    // hardware 2x2 comparison.
++    int nTaps = rT < 3.0 ? 12 : (rT < 10.0 ? 24 : 32);
++    float lit = 0.0;
++    for (int k = 0; k < 32; ++k) {
++        if (k >= nTaps) break;
++        float r = sqrt((float(k) + 0.5) / float(nTaps));
++        float th = float(k) * 2.39996323 + ang;
++        lit += texture(shadowMap, vec4(suv + vec2(cos(th), sin(th)) * (r * rT * ts), float(c), zR));
++    }
++    return lit / float(nTaps);
++}
++
+ // Sun visibility from the cascaded shadow maps: 1 = lit. Same tier selection,
+ // cross-fade and far fade as the classic shaders, re-anchored to the camera
+ // position the depth pass used. Casters self-shadow, so their lookup point is
+@@ -369,6 +415,11 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
+             float bias = cascadeCtl.z * float(c + 1) * float(c + 1);
+             // Looser tiers cover more ground per texel: shrink their radius so
+             // the penumbra width in metres stays comparable across tiers.
++            if (litPcss.x > 0.0) {
++                litSum += w * pcssLit(suv, sc.z - bias, c, texelWorld, ts);
++                wSum += w;
++                continue;
++            }
+             float radius = ts * litShadowDelta.w / float(c + 1);
+             float lit = 0.0;
+             for (int k = 0; k < 12; ++k)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..e451522 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -214,9 +214,70 @@ uniform sampler2D bloomTex;
+ uniform sampler2D shaftTex;
+ uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+ uniform vec4 shaftColor; // rgb sun tint
+-uniform vec4 debugView;  // x: 1 = show occlusion
++uniform vec4 debugView;  // x: 1 = show occlusion, y: 1 = show contact shadows
++// RESEARCH (shadows track): screen-space contact shadows.
++uniform sampler2D depthTex; // unit 5
++uniform vec4 projInfo;      // as psPostAo
++uniform vec4 depthMap;
++uniform vec4 worldRect;
++uniform vec4 csSun;         // xyz toward the sun in view space (unit), w strength (0 = off)
++uniform vec4 csParams;      // x ray length (m), y occluder thickness (m), z fade start (m), w fade end (m)
++uniform vec4 csFar;         // x ray length per metre of depth, y thickness per metre, z max length (m), w steps
+ out vec4 fragColor;
+ 
++float csViewZ(vec2 uv) {
++    float d = texture(depthTex, uv).r;
++    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++}
++vec3 csViewPos(vec2 uv, float z) {
++    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    return vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++}
++vec2 csUV(vec3 p) {
++    vec2 ndc = vec2(p.x / (p.z * projInfo.z), p.y / (p.z * projInfo.w));
++    return worldRect.xy + (ndc * 0.5 + 0.5) * worldRect.zw;
++}
++
++// Marches from the pixel toward the sun through the depth buffer. A sample
++// that lands behind the visible surface, by less than an occluder's assumed
++// thickness, is in the shadow of whatever that surface is: wheels on the
++// ground, boots, track skirts, small self-shadowing the shadow map's texels
++// and bias miss. Returns 0 (lit) .. 1 (occluded).
++float contactOcclusion() {
++    if (csSun.w <= 0.0) return 0.0;
++    float d0 = texture(depthTex, vUV).r;
++    if (d0 >= 0.999999) return 0.0;
++    float z = csViewZ(vUV);
++    float fade = 1.0 - smoothstep(csParams.z, csParams.w, z);
++    if (fade <= 0.0) return 0.0;
++    vec3 p = csViewPos(vUV, z);
++    int nSteps = int(csFar.w);
++    // Far field: the ray grows with distance (csFar.x metres per metre of view
++    // depth), so trees and buildings past the shadow maps' reach still shade
++    // the ground behind them when both are on screen.
++    float len = min(max(csParams.x, csFar.x * z), csFar.z);
++    float stepLen = len / float(nSteps);
++    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    vec3 start = p * 0.999; // a hair toward the camera: depth quantisation
++    for (int i = 0; i < 48; ++i) {
++        if (i >= nSteps) break;
++        float t = (float(i) + jitter) * stepLen + 0.015;
++        vec3 q = start + csSun.xyz * t;
++        if (q.z < 0.1) break;
++        vec2 suv = csUV(q);
++        if (suv.x < worldRect.x || suv.y < worldRect.y || suv.x > worldRect.x + worldRect.z || suv.y > worldRect.y + worldRect.w) break;
++        float sz = csViewZ(suv);
++        float dz = q.z - sz;
++        float bias = 0.015 + 0.0012 * q.z;
++        float along = (float(i) + jitter) / float(nSteps);
++        if (dz > bias && dz < csParams.y + csFar.y * q.z) {
++            fade *= 1.0 - 0.6 * along * along;
++            return fade;
++        }
++    }
++    return 0.0;
++}
++
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
+@@ -225,6 +286,12 @@ void main() {
+     // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+     float share = 1.0 - clamp(c.a, 0.0, 1.0);
+     float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
++    // Contact shadows take the direct (non-sky) share out, opaque lit pixels only.
++    if (csSun.w > 0.0 && c.a < 0.999) {
++        float occ = contactOcclusion();
++        if (debugView.y > 0.5) { fragColor = vec4(vec3(1.0 - occ), 1.0); return; }
++        keep = max(keep - clamp(c.a, 0.0, 1.0) * occ * csSun.w, 0.0);
++    } else if (debugView.y > 0.5) { fragColor = vec4(vec3(1.0), 1.0); return; }
+     vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+@@ -672,7 +739,37 @@ void EngineGL33::EndWorldScene()
+     u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+-    u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    // RESEARCH (shadows track): screen-space contact shadows toward the sun.
++    {
++        float cs[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++        if (worldDepth && _lighting.contactShadows > 0.0f && GScene && GScene->MainLight() && GScene->GetCamera())
++        {
++            LightSun* sun = GScene->MainLight();
++            Camera* cam = GScene->GetCamera();
++            const Vector3 toSun = -sun->SunDirection();
++            Vector3 v = cam->InverseScaled().Rotate(toSun);
++            const float len = std::sqrt(v.X() * v.X() + v.Y() * v.Y() + v.Z() * v.Z());
++            if (len > 1e-6f && toSun.Y() > 0.0f)
++            {
++                cs[0] = v.X() / len;
++                cs[1] = v.Y() / len;
++                cs[2] = v.Z() / len;
++                cs[3] = _lighting.contactShadows * (1.0f - sun->NightEffect());
++            }
++        }
++        u1i(p.progComposite, "depthTex", 5);
++        bindTex(5, p.depthTex);
++        u4f(p.progComposite, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(p.progComposite, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        u4f(p.progComposite, "worldRect", rectX, rectY, rectW, rectH);
++        u4f(p.progComposite, "csSun", cs[0], cs[1], cs[2], cs[3]);
++        u4f(p.progComposite, "csParams", _lighting.contactLength, _lighting.contactThickness,
++            0.5f * _lighting.contactFadeEnd, _lighting.contactFadeEnd);
++        u4f(p.progComposite, "csFar", _lighting.contactFar, _lighting.contactFarThick, _lighting.contactFarMax,
++            std::min(48.0f, std::max(1.0f, _lighting.contactSteps)));
++    }
++    u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, _lighting.debugView == 5 ? 1.0f : 0.0f,
++        0.0f, 0.0f);
+     drawTo(_ssaaFbo, w, h);
+     GpuMark(Poseidon::gpu::Mark::CompositeEnd);
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..dcc6e5b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1692,7 +1692,8 @@ void EngineGL33::InitPixelShaders()
+             int unit;
+         } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+                            {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
++                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit},
++                           {"shadowDepth", Poseidon::gl33lighting::kShadowDepthUnit}};
+         for (const auto& ls : litSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);

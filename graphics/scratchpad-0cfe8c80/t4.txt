@@ -1,0 +1,2 @@
+    constexpr int kPhotoLightKnobs = 18; // test_photo_camera.cpp
+    CHECK(children == 36 + kPhotoLightKnobs);

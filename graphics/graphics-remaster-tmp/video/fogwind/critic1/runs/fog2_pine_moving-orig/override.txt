@@ -1,0 +1,2 @@
+﻿[2026-10-23 06:02:34.281] [app-55bc] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  GL33: shader override dir = 'D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\3\shaders\base'
+[2026-10-23 06:02:36.423] [app-55bc] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  GL33: shader override loaded — D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\3\shaders\base\psFogInject.glsl (65797 bytes)

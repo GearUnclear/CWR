@@ -1,0 +1,26 @@
+From 00401f2047e76cb28f15614cbcf82832e2f68088 Mon Sep 17 00:00:00 2001
+From: GearUnclear <dane@danewagenhoffer.com>
+Date: Fri, 17 Jul 2026 02:41:10 -0700
+Subject: [PATCH 2/2] Fix clang-format violation in test_wrp.cpp
+
+---
+ tests/unit/engine/Poseidon/Asset/Formats/test_wrp.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/tests/unit/engine/Poseidon/Asset/Formats/test_wrp.cpp b/tests/unit/engine/Poseidon/Asset/Formats/test_wrp.cpp
+index 9c61ffa..62e6616 100644
+--- a/tests/unit/engine/Poseidon/Asset/Formats/test_wrp.cpp
++++ b/tests/unit/engine/Poseidon/Asset/Formats/test_wrp.cpp
+@@ -101,7 +101,8 @@ TEST_CASE("WRP: WrpReader reports error for invalid data", "[Formats][WRP]")
+ static std::vector<char> BuildRvw4Blob()
+ {
+     std::vector<char> blob;
+-    auto put = [&blob](const void* p, size_t n) {
++    auto put = [&blob](const void* p, size_t n)
++    {
+         const char* c = static_cast<const char*>(p);
+         blob.insert(blob.end(), c, c + n);
+     };
+-- 
+2.53.0.windows.1
+

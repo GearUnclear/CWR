@@ -1,0 +1,344 @@
+{
+ "overcast_broken|classic": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   10.71,
+   10.56
+  ],
+  "world": [
+   10.57,
+   10.43
+  ],
+  "shadow": null,
+  "ground": [
+   0.15,
+   0.15
+  ],
+  "pass1": [
+   8.23,
+   8.19
+  ],
+  "rest": [
+   2.23,
+   2.05
+  ],
+  "sky": null,
+  "canopy": null,
+  "post": null,
+  "frame_min": [
+   9.92,
+   9.74
+  ],
+  "cpu": 17.35,
+  "draws": 8243,
+  "mhz": 2790.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "overcast_broken|remastered": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   8.92,
+   8.91
+  ],
+  "world": [
+   7.52,
+   7.43
+  ],
+  "shadow": [
+   0.23,
+   0.23
+  ],
+  "ground": [
+   1.99,
+   1.95
+  ],
+  "pass1": [
+   4.95,
+   4.82
+  ],
+  "rest": [
+   0.58,
+   0.55
+  ],
+  "sky": [
+   0.1,
+   0.1
+  ],
+  "canopy": null,
+  "post": [
+   1.13,
+   1.12
+  ],
+  "frame_min": [
+   8.43,
+   8.43
+  ],
+  "cpu": 15.7,
+  "draws": 2214,
+  "mhz": 2790.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "broken_high|classic": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   20.01,
+   19.95
+  ],
+  "world": [
+   19.9,
+   19.85
+  ],
+  "shadow": null,
+  "ground": [
+   6.44,
+   6.34
+  ],
+  "pass1": [
+   11.85,
+   11.73
+  ],
+  "rest": [
+   1.68,
+   1.59
+  ],
+  "sky": null,
+  "canopy": null,
+  "post": null,
+  "frame_min": [
+   18.8,
+   18.7
+  ],
+  "cpu": 22.95,
+  "draws": 10789,
+  "mhz": 2790.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "broken_high|remastered": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   29.2,
+   29.09
+  ],
+  "world": [
+   27.18,
+   27.1
+  ],
+  "shadow": [
+   0.04,
+   0.04
+  ],
+  "ground": [
+   7.59,
+   7.57
+  ],
+  "pass1": [
+   18.07,
+   17.96
+  ],
+  "rest": [
+   1.54,
+   1.52
+  ],
+  "sky": [
+   0.07,
+   0.07
+  ],
+  "canopy": null,
+  "post": [
+   1.78,
+   1.77
+  ],
+  "frame_min": [
+   28.21,
+   28.14
+  ],
+  "cpu": 31.95,
+  "draws": 5479,
+  "mhz": 2790.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "sinai_lowsun_fp|classic": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   3.24,
+   3.1
+  ],
+  "world": [
+   3.01,
+   2.86
+  ],
+  "shadow": null,
+  "ground": [
+   0.21,
+   0.2
+  ],
+  "pass1": [
+   1.51,
+   1.47
+  ],
+  "rest": [
+   1.18,
+   1.11
+  ],
+  "sky": null,
+  "canopy": null,
+  "post": null,
+  "frame_min": [
+   2.22,
+   2.15
+  ],
+  "cpu": 6.94,
+  "draws": 789,
+  "mhz": 1875.0,
+  "ps": [
+   "P0",
+   "P3"
+  ]
+ },
+ "sinai_lowsun_fp|remastered": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   6.35,
+   5.82
+  ],
+  "world": [
+   4.25,
+   3.83
+  ],
+  "shadow": [
+   0.27,
+   0.24
+  ],
+  "ground": [
+   1.16,
+   1.05
+  ],
+  "pass1": [
+   2.1,
+   1.92
+  ],
+  "rest": [
+   0.97,
+   0.86
+  ],
+  "sky": [
+   0.12,
+   0.11
+  ],
+  "canopy": null,
+  "post": [
+   1.77,
+   1.7
+  ],
+  "frame_min": [
+   6.0,
+   5.49
+  ],
+  "cpu": 9.59,
+  "draws": 497,
+  "mhz": 1822.5,
+  "ps": [
+   "P0",
+   "P3"
+  ]
+ },
+ "sinai_desert_noon|classic": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   7.25,
+   7.05
+  ],
+  "world": [
+   7.09,
+   6.89
+  ],
+  "shadow": null,
+  "ground": [
+   0.18,
+   0.18
+  ],
+  "pass1": [
+   3.25,
+   3.23
+  ],
+  "rest": [
+   3.54,
+   3.46
+  ],
+  "sky": null,
+  "canopy": null,
+  "post": null,
+  "frame_min": [
+   6.2,
+   6.08
+  ],
+  "cpu": 12.08,
+  "draws": 2689,
+  "mhz": 2790.0,
+  "ps": [
+   "P0"
+  ]
+ },
+ "sinai_desert_noon|remastered": {
+  "clean": 3,
+  "all": 3,
+  "frame": [
+   6.96,
+   6.94
+  ],
+  "world": [
+   5.35,
+   5.34
+  ],
+  "shadow": [
+   0.1,
+   0.1
+  ],
+  "ground": [
+   1.08,
+   1.03
+  ],
+  "pass1": [
+   2.66,
+   2.58
+  ],
+  "rest": [
+   1.64,
+   1.6
+  ],
+  "sky": [
+   0.11,
+   0.11
+  ],
+  "canopy": null,
+  "post": [
+   1.31,
+   1.3
+  ],
+  "frame_min": [
+   6.29,
+   6.27
+  ],
+  "cpu": 11.9,
+  "draws": 1266,
+  "mhz": 2790.0,
+  "ps": [
+   "P0"
+  ]
+ }
+}

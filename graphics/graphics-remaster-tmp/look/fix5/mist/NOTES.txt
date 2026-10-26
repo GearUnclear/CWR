@@ -1,0 +1,164 @@
+Mist fixer, round 5: light mist, mist specks, rain legibility
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-plate (fec1075 + LOOK/fix5/base.patch, base tree
+12117cf941fd37d5e793d2e81b2a6a6f54042730). Build build/look-fix-plate-rwdi, game dist/look-fix-plate-rwdi,
+junction RemasterUD-r5-mist. Nothing committed, no branch.
+
+Patch: fix.patch, 12 files, +190 / -19, my delta over the base tree only (no capture or probe tests).
+It applies with git apply --cached --check on a fresh index of the base tree.
+  engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp, PhotoCamera.cpp, VolumetricFog.hpp, VolumetricFog.cpp,
+  engine/PoseidonGL33/EngineGL33.hpp, EngineGL33_Camera.cpp, EngineGL33_LightingShadersSky.cpp,
+  EngineGL33_PostFogShaders.cpp, engine/Poseidon/World/Scene/SceneDraw.cpp,
+  tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp, test_volumetric_fog.cpp, test_remaster_lighting.cpp.
+
+Look first
+- sbs_thumbnails.png: the four views at 320 px, vanilla | landed | before (round 4) | after.
+- sbs_a_optics_mist_hud.png, sbs_a_optics_mist_sight.png: the mist, with a 2x crop of the rock and the tree line.
+- sbs_b_specks_hud.png, sbs_b_specks_sight.png: the specks, 2x crop of the tree line.
+- sbs_c_rain_day.png: rain, with a 2x crop of the sky (the streaks and the deck).
+- sbs_c_overcast_heavy.png: the nearby grey day, checked for side effects (2x crop of the deck).
+Before = LOOK/director/final/<view>__overhaul.png (the 1080 copy for overcast_heavy); vanilla and landed from
+LOOK/ref (the __1080 copies for overcast_heavy). After = shots_3/ (final build): shots_3/opt (the optics test)
+and shots_3/wx (overcast_heavy, rain_day). shots_2 is an earlier iteration (no speck fix, thicker mist),
+shots_1 the exposure change alone (its weather half failed, see Capture).
+
+(b) The single green and black specks: FIXED
+
+Cause, with probes:
+- probe_1 (knobs, same build): the HUD view's specks go from about 40 green and 20 dark to 10 and 4 with taa=0
+  and sharpen=0; sharpen=0 alone changes nothing. In the sight view TAA is already off (feat taa=off:
+  optics-overlay) and the specks are there all the same, so TAA is not the cause, only an amplifier.
+- probe_2 (psPostTaa override writing the raw current frame, no history): the black specks are on the same
+  pixels, so they are in the composite's output.
+- probe_3 (psFogApply override): both optics shots are overlay-snapshot frames (corner flag yellow), the
+  early-out for an overlay's black is never taken (no magenta), and the speck pixels sit inside the clusters
+  of near-black world pixels (cyan, max code under 0.04) in the tree line.
+- That leaves the snapshot branch of the fog apply, where the overlay's darkening is laid back per channel as
+  clamp(over / max(lin0, 1e-5)). Both the frame and the snapshot are RGBA8 resolves of the same RGBA8 MSAA
+  frame, so where the overlay did not draw over == lin0; but a world channel at code 0 decodes to 0, giving a
+  ratio 0 / 1e-5 = 0, and code 1 decodes to (1/255)^2.2 = 5e-6, under the 1e-5 floor, giving 0.5. The fogged
+  pixel is multiplied by that per channel: all channels near black gives a black speck, R and B near black
+  with G above gives a green speck. Dark pine needles hit code 0 or 1; under TAA the texture LOD bias picks
+  sharper mips, so more texels are that dark (why taa=0 removed most). Round 4's probe flagged differences
+  over 0.004 in linear light, far above these values, so it saw nothing.
+Change: the ratio is (over + eps) / (lin0 + eps) with eps = 1e-7 (GLSL kSnapRatioEps, C++ kFogSnapRatioEps and
+the mirror FogSnapRatio): a channel the overlay left alone keeps ratio 1 at any level, and a black mask over the
+darkest world (code 1) still darkens it to 0.02.
+Result: my counter over the tree line (isolated pixels off the 5x5 median) 39 green and 16 dark in round 4,
+0 and 0 now in the HUD view; the sight view's green clusters are gone (sbs_b_*). One small purple dot at the
+blurred sight edge in the sight view is NOT from this: it is on the same pixel in round 4 (open item).
+
+(a) The light-mist views were a pale sheet with the rock nearly erased: IMPROVED
+
+Cause:
+- The exposure. The capture log gives ev 1.04 (HUD) and 0.85 (sight) with the meter's bright end (high) at
+  -0.58 and -0.39: the highlight guard held the bright end at kHighlightLimit 1.3 of scene light, where the
+  curve sits in its shoulder (about 214 of 255). Under a grey sky that bright end is the mist itself (or the
+  deck), so the whole mist sat in the shoulder with its contrast pressed flat. The same guard held the grey
+  decks of overcast_heavy (1.41) and rain_day (1.32) there.
+- The medium. With the exposure fixed alone (shots_1) the air went 208 to 191 but the rock's spread stayed 11.8
+  (vanilla 29): the mist was still too thick. A level line at the fog floor under the 0.7 deck had weather fog
+  8.2e-4 /m (at kSetFogBoost 0.4), the clear haze 8.1e-4, the humid ground air 3.4e-4 and the valley mist
+  5.5e-4: the clear summer haze stood as thick as setFog's own fog under it.
+Change:
+- PhotoCamera: by day the highlight limit moves from kHighlightLimit 1.3 toward a new kGreyHighlightLimit 0.8
+  with the weather's veil (CameraWeatherVeil, the value the camera already uses for saturation and the time of
+  day EV); at night (the bright end is a lamp) nothing changes. TargetExposureLog2 takes the veil as a new last
+  argument (default 0); the camera stores it per frame (EngineGL33.hpp CameraState::veil).
+- VolumetricFog: kSetFogBoost 0.75 -> 0.3, kMistFogWeight 0.6 -> 0.2 by day, and a new kSetFogHazeCut 0.5:
+  the clear haze is cut by half under a day's setFog of 0.3 and over (setFog's mist is that humid air; rain
+  keeps its haze, the night keeps its haze). kNightFogBoost follows the same rule as round 4,
+  2 x 2.8 / kSetFogBoost - 1 = 17.67, so the foggy night keeps round 3's weather fog exactly (not reshot).
+Result (HUD view, block means): air (208,211,219) -> (192,195,202), vanilla (179,180,172); the rock block
+(x 1650-1900, y 700-950) mean 172 -> 123 (vanilla 104), spread 11.2 -> 13.4 (vanilla 29.2); near grass
+(95,102,92) -> (65,71,61) (vanilla 79,90,60). ev 1.04 -> 0.18 (HUD), 0.85 -> 0.11 (sight). At thumbnail the
+right-hand hills now stand as grey layers fading with distance and the tree line is a dark silhouette; in the
+sight view the trunks, the crowns and the rock's texture read through the mist (sbs_a_optics_mist_sight.png).
+Level line at the fog floor (my unit-test mirror at noon, grey deck): 300 m 0.67 (round 4 about 0.45),
+500 m 0.51, the classic fog end 767 m 0.36.
+Still short of the brief: the rock is legible but still far paler and greyer than vanilla's crisp rock (spread
+13 against 29), the trees have lost their green, and the top of the frame is still a light grey sheet at
+about 192. The original keeps its first 300 m nearly unfogged; this medium does not.
+
+(c) rain_day read as a wet misty day: IMPROVED
+
+Cause: the deck sat at the guard's 1.3 like every grey day (above), with no darker look for rain; the rain
+streaks were cut to 0.45 of the original overlay under the photoreal camera (look director round 2) and,
+with the TAA averaging the moving streaks, none read at all.
+Change:
+- The grey-day exposure above.
+- Sky shader (shadeSkyDome): under rain the grey deck's light takes a further 1 - kDeckRainDark x rain,
+  kDeckRainDark 0.4 (PhotoCamera.hpp; GLSL kCamDeckRainDark, read from litWeather.y, the rain's density while
+  the wet weather runs). The relief and the band over the horizon are as round 4 left them.
+- SceneDraw: the streaks' share under the photoreal camera 0.45 -> 0.9.
+Result: rain_day sky (rows 3 to 30 %) (188,192,199) spread 15.5 -> (167,170,177) spread 19.6; landed
+(164,168,174) 22.0, vanilla (180,184,183) 27.2. Ground (80,88,70) -> (61,67,54), landed (62,71,48). The deck is
+now landed's darkness with round 4's relief kept, and fine vertical streaks show over the lighter low sky
+at full size (sbs_c_rain_day.png crop). At thumbnail the darker deck reads as rain; the streaks are faint.
+I tried drawing the rain after pass 3 to get it past TAA; pass 3 is the cockpits (rain would draw inside a
+vehicle), so I reverted that, and the opaque copy is already taken before the rain anyway.
+
+Nearby check, overcast_heavy (dry grey day, same exposure rule): sky (191,193,199) spread 17.4 ->
+(172,174,180) spread 19.5, landed (171,173,178) 23.6. The ground went (75,84,63) -> (56,62,47), under landed
+(64,74,48) and vanilla (78,87,59): a darker, duller grey day, not muddy at thumbnail but the darkest it has
+been (open item).
+
+AI sight and fog
+The link is untouched: Target.cpp, SimulateFogSight, FogSightTransmittance and FogSightExtinctionAt are not
+changed. AI follows the new medium through ComputeFogMedium: the day's valley mist weight 0.6 -> 0.2 reaches
+AI; kSetFogBoost and kSetFogHazeCut do not (AI's weather part stays the classic tactical fog, the haze was never
+in it). The exposure and the overlay ratio are screen only.
+AI range at setFog 0.3, VD 1500 (my mirror at noon, grey deck, a level line 1.75 m over the fog floor):
+tactical range (classic fog end) 767 m, times the fog sight factor: outside a mist layer 0.91 at 300 m and
+0.78 at 767 m; inside a 20 m valley mist layer 0.79 at 300 m and 0.54 at 767 m. The drawn medium leaves
+0.67 at 300 m and 0.36 at 767 m outside a layer, so the AI still sees a little farther than the player at the
+far end, the same rule as before. rain_day (rain 0.8, VD 3500) is unchanged by this patch: tactical range
+980 m, factor 0.85 at 300 m, 0.60 at 980 m outside a layer.
+
+Constants (name: old -> new)
+- PhotoCamera.hpp kGreyHighlightLimit (new): 0.8 (kHighlightLimit 1.3 by day under a full veil -> 0.8)
+- PhotoCamera.hpp kDeckRainDark (new): 0.4 (GLSL kCamDeckRainDark)
+- VolumetricFog.hpp kSetFogBoost: 0.75 -> 0.3
+- VolumetricFog.hpp kNightFogBoost: 6.47 -> 17.67 (2 x 2.8 / kSetFogBoost - 1; the night is unchanged)
+- VolumetricFog.hpp kMistFogWeight: 0.6 -> 0.2 (kMistFogWeightNight 1.2 unchanged)
+- VolumetricFog.hpp kSetFogHazeCut (new): 0.5
+- VolumetricFog.hpp kFogSnapRatioEps (new): 1e-7, replacing the floor max(lin0, 1e-5) in the fog apply
+  (GLSL kSnapRatioEps)
+- SceneDraw.cpp rain streaks under photoLight: 0.45 -> 0.9
+
+Tests
+- New: "PhotoCamera: a grey day holds its bright end, the deck or the mist, at a light grey" (the optics mist
+  meter: grey < clear, the bright end lands near kGreyHighlightLimit, half a veil halfway, a dim scene and the
+  night untouched).
+- New: "Volumetric fog: an optic overlay's darkening leaves a near-black world channel alone" (FogSnapRatio at
+  0 and code 1 is 1, a black mask still darkens the darkest world, the GLSL uses kSnapRatioEps and no longer the
+  1e-5 floor).
+- Changed: "a day's setFog is a light mist" (300 m keeps over 60 %, 500 m over 45 %, the fog end under 45 %,
+  the haze cut by day and not at night); "the weather fog reaches the classic visibility's opacity" (now about
+  two thirds at a third of the fog end); the sky contract test pins kCamDeckRainDark and its rain term.
+- Gate tags [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],[AirMedium],[ssr],
+  [wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],[TerrainHorizon],[StateOwnership],
+  [atmosphere] on the final build, run from D:\: 331 cases, 957,992 assertions, all pass. Full suite not run.
+- clang-format clean on every file I changed, except VolumetricFog.hpp and EngineGL33.hpp, whose base
+  version already fails clang-format on lines I did not touch (left as they are).
+
+Capture
+- Tests (untracked in the scratch copy, not in the patch): look_r5mist_opt (the optics block of
+  look_r4_optics, overhaul only), look_r5mist_wx (overcast_heavy and rain_day from look_final_eden),
+  look_r5mist_p1/p2 (probes), look_r5mist_s and look_r5mist_base (unused: tri expects static screenshot names
+  first, so mixing the optics block's formatted names with static ones failed the overcast shot). Probe
+  shader overrides: probe_2/over/psPostTaa.glsl, probe_3/over/psFogApply.glsl; glsl_base/ holds the extracted
+  base programs. One game at a time; only my own games, none left running.
+
+Still open
+- (a) The mist is a light mist now but not vanilla-crisp: rock spread 13 against 29, trees grey rather than
+  green, top of frame about 192. Next levers: the humid ground air and the morning valley mist at the fog
+  floor (in game the 9:30 morning adds more than my noon mirror shows), and the veil's saturation drop.
+- overcast_heavy's ground is 8 to 12 levels under landed after the grey-day exposure; kGreyHighlightLimit 0.9
+  would split the difference (the mist air would go back up a few levels).
+- rain streaks are legible at full size, faint at thumbnail; the TAA still averages them. A real fix draws
+  them after the post chain (outside the cockpit pass), which needs its own depth handling.
+- The purple dot at the blurred sight edge in optics_mist_sight (also in round 4): the add-back term
+  max(over - lin0) at the overlay's soft edge; not looked into.
+- Not reshot: town_fog_night and town_night_rain (night setFog and night haze unchanged by construction, the
+  grey-day exposure is day only), dawn_valley and any other day view with setFog > 0 (it thins there too).

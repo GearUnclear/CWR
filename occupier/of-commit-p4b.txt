@@ -1,0 +1,38 @@
+guerrilla: occupier forces phase 4B, the HQ model, its destruction and the lose state (OCCUPIER-FORCES.md 9.1, 9.2)
+
+GuerrillaBase: a campaign with no START TOWN establishes its HQ at the
+first CAMP zone on the first active tick (once per session, never after a
+destruction, only with campaignEnd on; the campaignEnd = 0 fixtures keep
+no HQ at boot). HasHq, HqDestroyed, HqEver, HqEpoch, HqCapture,
+FirstCampZone, WantsDefaultHq, NextHqCapture, TickHqMeter: the HQ meter at
+HqPos reads only CounterAttack::HqAssaultPresence (deliberate HQ_ASSAULT
+records; a patrol parked on the HQ does nothing, D14), rises by
+captureRate x crew, freezes under resistance HOLD presence within 150 m,
+decays with no assault units. Destroy empties the cache, unlocks and wrecks
+every garaged vehicle where it stands (D22), queues the holder and prop
+as ruins deleted once the perception gate says hidden, bumps the epoch and
+queues ZEHqLost. Re-establishing is free and allowed in any zone, an enemy
+town included, which keeps its owner, garrison and census (D24).
+gmHqState, gmHqEpoch, gmHqForceCapture.
+
+CampaignEnd: the Lost latch (no HQ and no resistance-held zone, after the
+campaign once had either), OnLost INFO line, RequestEnd as EMLoser never
+EMEnd2 (D10), the lose debriefing text, gmCampaignLost, gmCampaignEnd
+slot 8; UIMapDialogs shows the lose debriefing on display 50. Saves are
+untouched. recruit.sqs anchors on gmHqPos while an HQ stands; market.sqs
+watches gmHqEpoch and re-arms its marker and objective on hqLost.
+Persistence: hqDestroyed, hqEpoch, hqCapture, Ruins; lost, lostDay,
+lostMinute, OnceHeld.
+
+Deviation: a START TOWN HQ keeps the #79 B2 garrison exemption (it comes
+from the start-town pick, not the HQ); a re-established HQ never gets it.
+
+Tests: test_guerrilla_base 6 cases, test_campaign_end 5 cases; tri
+guerrilla_forces_hq_assault and remaster_ud_guerrilla_forces_lose.
+Verified on a clean rebuild of build/agent2-rwdi: [guerrilla],
+[campaignend],[save],[journal] 626 cases green; both new tri tests green;
+tests/integration/ui/remaster 10/10 (continue flaked twice without
+--focus); scripting regression 7/8, the red being
+guerrilla_counter_attack_watched_base from the 4A re-sourcing change.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

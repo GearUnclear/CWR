@@ -1,0 +1,8 @@
+{
+  "id": "b09",
+  "bank": "kBio0Hostile",
+  "variant": 2,
+  "text": "The repaired brakes held, but army engineer {Name} made the driver test them a fifth time outside {Place}. The last truck they had waved through with faulty brakes had killed two friends.",
+  "word_count": 32,
+  "self_review": "An engineer makes a driver test repaired brakes repeatedly after approving a faulty truck that killed two friends."
+}

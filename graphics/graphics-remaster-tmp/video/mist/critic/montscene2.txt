@@ -1,0 +1,2 @@
+old {"pause_60": {"rms": 0.719, "spikes": 1445, "n": 90}, "pause_20": {"rms": 0.838, "spikes": 16173, "n": 90}, "allud_60": {"rms": 0.68, "spikes": 1130, "n": 30}, "allud_20": {"rms": 0.751, "spikes": 11391, "n": 30}}
+new {"pause_60": {"rms": 0.082, "spikes": 0, "n": 90}, "pause_20": {"rms": 0.182, "spikes": 838, "n": 90}, "allud_60": {"rms": 0.101, "spikes": 1, "n": 30}, "allud_20": {"rms": 0.181, "spikes": 602, "n": 30}}

@@ -1,0 +1,2 @@
+powershell -NoProfile -File D:\Arma_CWA_worktrees\vanilla-upstream\tests\rendering\captures\run-captures.ps1 -GameDir D:\Arma_CWA_worktrees\vanilla-upstream\dist\vanilla-upstream-rwdi -DataJunction RemasterUD-vanilla -Tests tests/rendering/captures/ref_vanilla_960_eden_a.test.sqf -OutDir D:\Arma_CWA_worktrees\graphics-remaster\tmp\look\ref\raw\vanilla_smoke *> D:\Arma_CWA_worktrees\graphics-remaster\tmp\look\ref\raw\vanilla_smoke_runner.log
+"exit=$LASTEXITCODE" | Out-File -Encoding ascii D:\Arma_CWA_worktrees\graphics-remaster\tmp\look\ref\raw\vanilla_smoke_DONE.txt

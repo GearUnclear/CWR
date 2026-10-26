@@ -1,0 +1,10 @@
+src D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/heads/1/ud-a/tri
+frames 120
+g1safe_a   mean   1.82 p95   8.33 max  12.22 median  0.86 jumps 16
+g1safe_b   mean   1.80 p95   9.50 max  10.37 median  0.73 jumps 19
+g2watch_a  mean   0.77 p95   1.17 max   1.28 median  0.73 jumps 0
+g2watch_b  mean   0.65 p95   0.76 max   0.82 median  0.64 jumps 0
+g3comb_a   mean   0.84 p95   1.04 max   4.70 median  0.69 jumps 4
+g3comb_b   mean   1.10 p95   1.22 max  12.87 median  0.63 jumps 6
+g4cwatch_a mean   0.64 p95   0.99 max   1.09 median  0.59 jumps 0
+g4cwatch_b mean   0.59 p95   0.71 max   0.80 median  0.58 jumps 0

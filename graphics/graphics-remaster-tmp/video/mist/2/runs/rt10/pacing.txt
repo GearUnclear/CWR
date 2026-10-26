@@ -1,0 +1,3 @@
+﻿shots 150
+dframe histogram [(1, 135), (2, 14)]
+wall per shot: median 0.417 min 0.329 max 0.632

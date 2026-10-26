@@ -1,0 +1,146 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 8827196..58511f0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -830,6 +830,9 @@ class Engine : public IGraphicsEngine
+     /// Dev: rebuild every shader program at the start of the next frame, picking
+     /// up edits in the shader override directory (CWR_SHADER_OVERRIDE_DIR).
+     virtual void RequestShaderReload() {}
++    /// Research (haze): the sky pass is complete (Landscape::Draw); a backend
++    /// may keep a copy for the world shaders (aerial perspective toward the sky behind).
++    virtual void CaptureSkyBackdrop() {}
+     virtual std::string ShaderOverrideDirectory() const { return {}; }
+     virtual void SetGpuTimingEnabled(bool /*enabled*/) {}
+     virtual bool GpuTimingEnabled() const { return false; }
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+index 1c70b8e..6d2dee4 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+@@ -1840,6 +1840,7 @@ void Landscape::Draw(Scene& scene)
+         DrawSky(scene);
+         DrawClouds(scene);
+         GEngine->FlushQueues();
++        GEngine->CaptureSkyBackdrop();
+ 
+         camera.SetClipRange(oldNear, oldFar);
+     }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..572fc16 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -776,6 +776,10 @@ class EngineGL33 : public Engine
+     void SetLitOpaque(bool opaque);
+     // Binds units 2..5 for the remastered shaders (compare sampler on 2).
+     void BindLightingTextures();
++    // Research (haze): the sky pass, resolved and mipmapped, on unit 6.
++    void CaptureSkyBackdrop() override;
++    unsigned int _skyBackdropTex = 0, _skyBackdropFbo = 0;
++    int _skyBackdropW = 0, _skyBackdropH = 0;
+     void FlushLitConstants();
+     unsigned int SelectProgram(int vs, int spec, int mode, int ps) const;
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..18c9a23 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -481,3 +481,86 @@ void EngineGL33::UploadLitLights(const LightList& lights, float nightEffect)
+     SetSlot(LitConst::LightCount, static_cast<float>(n), 0.0f, 0.0f, 0.0f);
+     FlushLitConstants();
+ }
++
++// Research (haze track): keep the finished sky pass (dome, sun, moon, stars,
++// clouds) as a mipmapped texture on unit 6, so the world shaders can fade
++// distant geometry into the sky that is actually behind it. Called by
++// Landscape::Draw between the sky and the ground. Research code, not
++// production: no reset handling beyond a size check, unit 6 assumed free.
++void EngineGL33::CaptureSkyBackdrop()
++{
++    {
++        static int s_skyLog = 0;
++        if ((s_skyLog++ % 600) == 0)
++            LOG_INFO(Graphics, "GL33 haze: CaptureSkyBackdrop lighting={} ssaa={} portrait={} ended={} nv={}",
++                     _lightingActive, SSAAActive(), _portraitTargetSize, _worldSceneEnded, _nightVision);
++    }
++    // The sky draws through pre-lit screen-space vertices, so the world's 3D
++    // pass (and _remasterPrograms / _worldEffectsOn) has not begun yet here.
++    if (!_lightingActive || !SSAAActive() || _portraitTargetSize || _worldSceneEnded || _nightVision)
++        return;
++    GLint prevDraw = 0, prevRead = 0, prevViewport[4] = {};
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw);
++    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
++    glGetIntegerv(GL_VIEWPORT, prevViewport);
++    FlushAndFreeAllQueues(_queueNo);
++    int w = 0, h = 0;
++    RenderTargetSize(w, h);
++    if (w <= 0 || h <= 0)
++        return;
++    if (!_skyBackdropTex || _skyBackdropW != w || _skyBackdropH != h)
++    {
++        if (_skyBackdropFbo)
++        {
++            glDeleteFramebuffers(1, &_skyBackdropFbo);
++            _skyBackdropFbo = 0;
++        }
++        if (_skyBackdropTex)
++        {
++            GL33Bind::OnTexDeleted(_skyBackdropTex);
++            glDeleteTextures(1, &_skyBackdropTex);
++            _skyBackdropTex = 0;
++        }
++        GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++        glGenTextures(1, &_skyBackdropTex);
++        glBindTexture(GL_TEXTURE_2D, _skyBackdropTex);
++        int levels = 0;
++        for (int lw = w, lh = h;; lw = lw > 1 ? lw / 2 : 1, lh = lh > 1 ? lh / 2 : 1)
++        {
++            glTexImage2D(GL_TEXTURE_2D, levels++, GL_RGBA8, lw, lh, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++            if (lw == 1 && lh == 1)
++                break;
++        }
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        glGenFramebuffers(1, &_skyBackdropFbo);
++        glBindFramebuffer(GL_FRAMEBUFFER, _skyBackdropFbo);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, _skyBackdropTex, 0);
++        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
++            LOG_WARN(Graphics, "GL33 haze: sky backdrop target {}x{} incomplete", w, h);
++        else
++            LOG_INFO(Graphics, "GL33 haze: sky backdrop {}x{}, {} levels", w, h, levels);
++        _skyBackdropW = w;
++        _skyBackdropH = h;
++        GL33Bind::Invalidate();
++    }
++    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
++    glDisable(GL_SCISSOR_TEST);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, _ssaaFbo);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, _skyBackdropFbo);
++    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    if (scissor)
++        glEnable(GL_SCISSOR_TEST);
++    GL33Bind::Tex2D(6, _skyBackdropTex);
++    glGenerateMipmap(GL_TEXTURE_2D);
++    GL33Bind::ActiveUnit(0);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(prevDraw));
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevRead));
++    glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
++    GL33Bind::Invalidate();
++    InvalidatePipelineCache();
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..cd321d5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1692,7 +1692,8 @@ void EngineGL33::InitPixelShaders()
+             int unit;
+         } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+                            {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
++                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit},
++                           {"skyBackdrop", 6}};
+         for (const auto& ls : litSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);

@@ -1,0 +1,3 @@
+        // The first level reads the frame with the fog or the air applied when
+        // the Air stage ran (PostSceneTex), so the glow toward the sun blooms.
+        const GLuint src = first ? PostSceneTex(f) : p.bloomTex[i - 1];

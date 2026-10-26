@@ -1,0 +1,136 @@
+graphics: trees and buildings cast soft, contact-hardening sun shadows
+
+What the player sees: sun shadows are sharp where a caster meets the
+ground and soften with the distance to what casts them. A soldier's leg
+shadows start hard at his boots and blur toward their ends, a Jeep's
+shadow keeps its wheels crisp and loses its far outline into the ground,
+and the long evening shadows of trees run out soft instead of as leaf
+cut-outs; under a high canopy the sun flecks on the forest floor become
+soft ellipses. Tree crowns lose the stripes their own leaf cards printed
+on them. The frame is not darker: mean brightness of the woods hero view
++1.4%, forest edge +0.6%, town, open field and the Sinai camp within
+0.1%, the red/blue balance of the evening views unchanged.
+
+How it works:
+- Contact-hardening soft shadows (PCSS) in the shadows piece of the
+  remastered prelude (pcssVisibility): a blocker search in the cascade
+  array read as raw depth (shadowDepth, unit 6) gives the mean distance
+  along the sun ray from receiver to blocker, and the filter radius is
+  that distance times tan(sun angular radius), clamped between 0.6
+  texels and the search radius (sunSize 1 deg, the search reaching 40 m
+  along the ray). Without TAA the taps are a fixed per-pixel rotation of
+  a 16-tap search (8 on the frustum tiers, where it spans 2 to 4 texels)
+  and a 12, 24 or 32-tap filter; in a TAA frame 4 search and 4 filter
+  taps turn every frame by the golden-ratio step of the TAA sequence and
+  the history averages them. Sloped casters take a receiver-plane bias;
+  the terrain, which never casts, takes none.
+- The stock 12-tap filter is pcfVisibility, the old loop unchanged. The
+  soft filter fades in from the gate's edge (sun 4 deg) to 6 deg, mixing
+  the two, so a sunset sees no switch of filters.
+- Leaves (foliage receivers, not grass) move their lookup leafBias (6)
+  shadow-map texels toward the sun: their two-sided cards are in the
+  map, and no normal offset keeps a card at a grazing sun off its own
+  depth. The move is in texels, so it grows with the tier and a crown's
+  self-shadow thins with distance, where it only flickered.
+- With the treeShadows gate on, every static object casts into the sun
+  shadow map whatever the legacy per-profile object-shadow toggle says
+  (Scene::RenderShadowMapDepthPass through CastsIntoSunShadowMap); the
+  Graphics shadow tier still turns the maps off. F10 already casts them
+  on every profile with a shadow tier, so this part only shows where the
+  old toggle was off.
+- Pure rules and math in Graphics/Remaster/SunShadows.{hpp,cpp}: the
+  penumbra conversion, tap counts, the gate-edge fade, the per-frame
+  turn, the two LitConstants slots and the caster rule.
+- LitConstants: 59 Taa (turn, TAA flag, taps per frame, tan of the sun
+  radius; 0 = stock filter) and 60 Pcss (search reach, minimum filter
+  radius, soft strength, leaf lift) land out of A7's padding
+  litReserved[3], which shrinks to vec4 litReserved (58, the materials'
+  MatClass, still to land; ReservedCount 1); Count stays 78.
+- Unit 6 (kShadowRawUnit) holds the cascade array under a NEAREST,
+  non-compare sampler: the depth stand-in from init on, rebound by every
+  lit pass and by EnsureArrayTarget the moment it recreates the array
+  (the F3 rule of unit 2); kLitSamplers gains the shadowDepth row.
+
+Switches and gates: treeShadows and softShadows have landed (8/26), both
+under the sun shadow gate (sun above 4 deg, or B3's moon key). Sub-knobs
+under softShadows: sunSize 1.0 deg and shadowReach 40 m; under
+treeShadows: leafBias 6 texels. Off (both 0) is the stock filter, the
+stock casters and no lift, the look before this step. The overlay shows
+the shadow section for treeShadows and the world section for
+softShadows, whose taps run in the world pass.
+
+From the prototype (tmp/research/shadows): kept pcssLit's blocker search
+and Vogel filter, the 1 deg sun, the 40 m search and the 0.6 texel
+contact radius, on the stock 2048 map. Rewritten: one PCSS with a TAA
+path (4 + 4 taps, turned per frame) and a deterministic path, the
+receiver-plane slope bias of the temporal prototype, the stock filter
+kept as its own function, the slots and unit of plan 3.3 and 3.4.
+Dropped: contact shadows and the far-field variant, bestlong, the
+objShadows and casterLod knobs (F10 drives the casters), 4096 maps (the
+Graphics shadow tier caps at High, there is no Ultra shadow tier), and
+the tighter near tiers 0.04 / 0.15: with them the Sinai camp's right
+foreground went into a solid shadow slab, with the stock filter as much
+as with the soft one, and the cause was not found, so the plan's rule
+applies (gate the tight tiers off if not understood). Not built: the
+leaf transmittance layer (leafLight): the woods did not get darker.
+
+Cost: one reading per view (light gate), RTX 4060 Ti, 1920x1080, render
+scale 1.0, 4x MSAA, GPU clock not logged. Frame minimum, on minus off:
+-0.08 to +0.31 ms over six views (woods hero +0.28, noon woods +0.31);
+the smoothed averages read +0.23 to +3.08 ms, but the base build's own
+off and on shots, the same frame twice, spread -3.88 to +2.83 ms on the
+same views, so the cost is not resolved by this reading. The full gate
+times it on a quiet GPU.
+
+Tests: [SunShadows] (new, 6 cases: the blocker-to-metres and penumbra
+conversion against a real OmniSphereLightVP, tap counts, the frame
+constants under gates, switches and TAA, the caster rule, the stock
+tiers, the shader contracts), [ShadowSampler] for unit 6,
+[FeatureSwitches] for the landed switches and the three sub-knobs, the
+LitConstants layout. Gate tags 502/502; full suite the 6 known
+localisation failures only; [Graphics] the known DDS fixture failure
+only. Twelve mutations turn their cases red (unit 6 not rebound or
+without its stand-in, two slots swapped, no gate-edge fade, constants
+from the switch instead of the gate, statics cast without the switch,
+the shadow pass asking the object alone or tightening the first tier,
+the stock filter skipped, grass lifted, softShadows not landed, 12
+search taps).
+
+Merged onto B11 (d25476b, on A7 5d7e7ae; the lane is on 193c735) by a
+three-way apply, 8 files in conflict: LitConst keeps A7's sky slots and
+B11's Detail beside Taa and Pcss (the padding shrinks to slot 58 alone,
+static_asserts and the layout test follow); unit 6's shadowDepth row and
+uniform sit beside A7's skyLut; the registry keeps A7's and B11's landed
+rows and sub-knobs and adds B1's; the landed case expects A4, A5, A7,
+B11 and B1 (landed=8/26) and the parent case eleven sub-knobs, each
+under a landed switch in its track's group; plan 3.3 and 3.4 gain an
+"As built in B1" note. On the merged tree the build is clean, the gate
+tags plus the earlier steps' and B1's pass 525/525, smoke_abel 1/1
+(KHR_debug ids 131154, 131169 and 131218 only; tmp/integration/B1
+land-smoke).
+
+In game (tmp/integration/B1 of the graphics-remaster worktree): the
+before set 20261018-065737-before on the base build, the final set
+20261018-072619-final-test (lane stills, Sinai, smoke_abel, a still
+and a walking clip). Off against the base build at the hero view: 66,761
+pixels over 2 levels against the base build's own repeat of 69,077, mean
+brightness equal to 0.0001; the other four Abel views likewise within
+the repeat or boot-to-boot noise (the widest, the noon woods, 65,449
+against 59,807 between two boots of the same off state), the
+differences on edges only (the TAA phase). Smoke and every run: KHR_debug ids 131169, 131154, 131218 only;
+Trident's GL error post-check passed. Motion: a still view's frame to
+frame change on the ground rises from 0.0008 to 0.0013 (under a level);
+on a walk the ground's second temporal difference falls from 0.045 to
+0.042.
+
+Known risks: the crowns keep less self-shadow (the sun visibility of the
+hero crowns is mostly lit where it was striped; crown crops are 3%
+brighter; in colour they keep their shaded side and texture, and B2's
+crownCanopy owns crown shading). At 1 deg the sun flecks under a high
+canopy are softer than at the real 0.53 deg (sunSize is the knob). The
+Sinai slab follows the first tier's radius, not this step: a profile
+whose shadow distance makes the stock first tier about 17 m may show it
+(not tested). Before B3 the gate also opens for the moon key, where the
+soft filter costs without showing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

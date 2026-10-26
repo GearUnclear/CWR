@@ -1,0 +1,41 @@
+box: per clip rms(HP box mean) | max |excursion| at frame | dominant period (frames) and its share of HP power
+--- shore_sun
+  orig  rms 1.078 | max 3.025 at f233 | period 5.7 share 0.05  (frames 232-560)
+  f1    rms 0.209 | max 0.918 at f240 | period 14.3 share 0.08  (frames 232-560)
+  new   rms 0.194 | max 0.848 at f241 | period 12.7 share 0.10  (frames 232-560)
+  van   rms 0.098 | max 0.283 at f480 | period 4.0 share 0.12  (frames 232-560)
+--- farshore
+  orig  rms 0.268 | max 0.610 at f450 | period 11.1 share 0.33  (frames 106-560)
+  f1    rms 0.099 | max 0.331 at f127 | period 16.9 share 0.05  (frames 106-560)
+  new   rms 0.098 | max 0.319 at f224 | period 13.0 share 0.10  (frames 106-560)
+  van   rms 0.014 | max 0.042 at f401 | period 10.1 share 0.09  (frames 106-560)
+--- bay_mid
+  orig  rms 0.171 | max 0.458 at f213 | period 10.9 share 0.34  (frames 189-560)
+  f1    rms 0.085 | max 0.230 at f220 | period 21.9 share 0.06  (frames 189-560)
+  new   rms 0.089 | max 0.335 at f391 | period 12.8 share 0.11  (frames 189-560)
+  van   rms 0.051 | max 0.132 at f507 | period 10.1 share 0.12  (frames 189-560)
+--- farvalley
+  orig  rms 0.489 | max 1.426 at f200 | period 6.2 share 0.14  (frames 30-560)
+  f1    rms 0.089 | max 0.252 at f382 | period 16.1 share 0.07  (frames 30-560)
+  new   rms 0.098 | max 0.328 at f382 | period 16.1 share 0.10  (frames 30-560)
+  van   rms 0.021 | max 0.077 at f470 | period 2.0 share 0.19  (frames 30-560)
+--- valleymist
+  orig  rms 1.816 | max 4.629 at f504 | period 11.1 share 0.10  (frames 30-560)
+  f1    rms 0.128 | max 0.433 at f58 | period 12.3 share 0.20  (frames 30-560)
+  new   rms 0.097 | max 0.346 at f391 | period 2.0 share 0.14  (frames 30-560)
+  van   rms 0.060 | max 0.283 at f560 | period 4.0 share 0.19  (frames 30-560)
+--- haze_hi
+  orig  rms 0.302 | max 0.705 at f245 | period 11.1 share 0.33  (frames 30-560)
+  f1    rms 0.076 | max 0.311 at f127 | period 17.1 share 0.08  (frames 30-560)
+  new   rms 0.072 | max 0.264 at f127 | period 14.8 share 0.06  (frames 30-560)
+  van   rms 0.000 | max 0.000 at f30 | period inf share nan  (frames 30-560)
+--- farhill
+  orig  rms 0.828 | max 2.485 at f143 | period 11.1 share 0.16  (frames 30-560)
+  f1    rms 0.096 | max 0.336 at f125 | period 16.1 share 0.08  (frames 30-560)
+  new   rms 0.093 | max 0.321 at f391 | period 16.1 share 0.10  (frames 30-560)
+  van   rms 0.044 | max 0.105 at f159 | period 4.0 share 0.29  (frames 30-560)
+--- lowmist
+  orig  rms 1.396 | max 3.919 at f143 | period 9.3 share 0.08  (frames 30-560)
+  f1    rms 0.133 | max 0.652 at f66 | period 17.1 share 0.04  (frames 30-560)
+  new   rms 0.115 | max 0.393 at f70 | period 2.0 share 0.16  (frames 30-560)
+  van   rms 0.086 | max 0.966 at f560 | period 2.0 share 0.16  (frames 30-560)

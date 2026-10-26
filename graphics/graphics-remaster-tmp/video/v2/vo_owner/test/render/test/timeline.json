@@ -1,0 +1,57 @@
+{
+ "fps": 60,
+ "layout": "split",
+ "total_frames": 1092,
+ "duration": 18.2,
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\render\\test\\uslu_dur_v2.mp4",
+ "windows": {
+  "valley_mist": [
+   0.0,
+   9.1
+  ],
+  "pine_shafts": [
+   9.1,
+   18.2
+  ]
+ },
+ "segments": [
+  {
+   "kind": "clip",
+   "clip": "valley_mist",
+   "title": "Moving out at dawn",
+   "start": 0.0,
+   "end": 9.5,
+   "frames": 570,
+   "transition_in": null,
+   "transition_out": [
+    "fade",
+    48
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "pine_shafts",
+   "title": "Through the pines",
+   "start": 8.7,
+   "end": 18.2,
+   "frames": 570,
+   "transition_in": [
+    "fade",
+    48
+   ],
+   "transition_out": null
+  }
+ ],
+ "timing": {
+  "file": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\render_timing.json",
+  "spec": {
+   "transitions": {
+    "valley_mist": [
+     "fade",
+     0.8
+    ]
+   },
+   "closing_s": 11.0
+  }
+ }
+}

@@ -1,0 +1,46 @@
+graphics: the fog samples fixed points of each cell, so the dawn valley's haze has no wind
+
+The per-cell jitter of d91a08e0 stopped the far haze pumping, but the owner
+saw "motion in the fog that makes it look like wind is blowing through it".
+Its per-cell offset, interleaved gradient noise, is a ramp over the cells
+(one cell to the right adds 0.556 of a slice), and the frame's golden-ratio
+step adds 0.618, so every frame's offset field was the last one read about a
+cell over. The history's residual slid through the fog about one 12 px cell
+per frame, with the camera held or moving, in play at 60 fps and in the
+captures. The history was also read at the jittered point, which made it a
+leaky sum of the offsets (about 8 times their average): the amplifier of the
+original pump.
+
+psFogInject now samples each cell at two fixed points (depth strata at a
+quarter and three quarters of the slice, each weighted by the metres of its
+half slice, on the diagonal quarter points of the cell; VolumetricFog.hpp
+kFogTapZ, kFogTapXY) and never jitters them. The history is read at the
+cell's centre through a fixed tetrahedral blur of a quarter cell and slice
+(kFogHistoryBlur), the mean of the blur the jittered read gave the stored
+volume, which keeps the approved mist density. Nothing in the sampling
+changes between frames, so the history has no residual to pump or to move,
+at any frame rate or capture cadence. The jitter uniforms stay 0; the frame
+count still steps the near field's march. The medium is unchanged, so AI
+sight still follows the drawn fog.
+
+The [remaster][fog][Shaders] test replaces d91a08e0's: it pins the taps, the
+centre read and the blur in the shader, and runs a mirror of the injection
+and its history over a cell grid. The frame-wide offset trips its pump bar,
+the per-cell gradient its travel bar (held and panning), and the fixed taps
+neither, standing exactly still with the camera held.
+
+Dawn valley probes (camera held / real pan, stepped at 1/60 s):
+- held: travel correlation 0.47 to 0.03, in-place change 0.42 to 0.05 code
+  values (the jitter-frozen floor 0.08), block flicker 0.11 to 0.02;
+- pan: wind 0.047 / 0.123 / 0.078 / 0.035 to 0.005 / 0.004 / 0.002 / 0.004
+  over bay / valley / far hill / haze (vanilla 0.017 / 0.007 / 0.002 /
+  0.007), valley block flicker 0.117 to 0.068 (vanilla 0.057, the original
+  1.62);
+- the reshot dawn clip (frames 30 to 560): band 0.091 (vanilla 0.107, the
+  F1 shot 0.103, the original 0.567), wind at most 0.004 (F1 0.101), region
+  means within 0.2 code values of the original approved look;
+- cost +0.09 ms on the air stage at 1080p (two uncontended pairs).
+Unit gate 347/347. Found and checked by eight Opus and three Fable agents
+(graphics-remaster tmp/video/fogwind, not in git); ITERATIONS.md F2.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

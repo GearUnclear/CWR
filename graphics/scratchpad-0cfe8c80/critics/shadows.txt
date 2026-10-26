@@ -1,0 +1,54 @@
+## track
+shadows
+## files_verified
+true
+## missing_or_false_claims
+[
+ "Every cited image and artefact path exists, prototype.patch is byte-identical (CRLF aside) to the live diff of D:\\Arma_CWA_worktrees\\gfx-shadows at 3c53141, and the brightness and timing tables match run8prod\\frame_brightness.md and timings.md. Nothing appears fabricated.",
+ "Wrong: 'sinai_lowsun_fp: almost no change (no static casters at the camp)'. The camo net does cast once objShadows is on. In best (4096, tight tiers 0.04/0.15, PCSS) the near tier puts almost the whole right foreground in solid shadow, with an edge shaped like the tier boundary (run4\\shots\\sinai_lowsun_fp__dbgsunvisbest.png, run3 dbgsunvisobjpcss). Lit ground in the lower right drops from RGB 91/77/67 (rem) to 73/67/62 (best), about 20%. The same ground is mostly lit with stripes under obj (2048, stock tiers) and under bestlong. The tier configurations disagree on a large shadow, so at least one is broken and it will pop in motion. prod uses the same tight tiers and was never shot on Sinai.",
+ "Missed: bestlong differs from best mainly because the Sinai net shadow disappears. 'No visible gain' is true, but the evidence of tier inconsistency went unnoticed.",
+ "Overclaimed in the title: contact-hardening PCSS is close to invisible at frame scale. Pixel diffs of obj vs objpcss2k, and of prod vs best, give a mean abs diff of 0.001-0.004 with under 4% of pixels above 0.02. Almost all the visible change comes from switching on object casters, which is an existing engine feature. The soldier-feet grounding shows only in a 4x crop.",
+ "Not fully new: the missing-casters finding was already documented in code. The triEnableShadows comment in GameStateExtTestViewer.cpp lines 460-466 says fresh/test profiles keep _objectShadows=false. The boot-order root cause (GameApplication.cpp 681/683, GraphicsApply.cpp 76-85) is verified and is a real addition.",
+ "Not reported: every shadows-run game_stdout.log contains a GL undefined-behaviour warning (comparison sampler with depth compare sampled from texture object 0). No stock, baseline or other-track log on 3c53141 has it, except the clouds track."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+small
+## rtx_vision_score_0_to_10
+3
+## taste_violations
+[
+ "Only darker in woodland: woods_mixed_noon is 0.310 against Classic 0.362 (-14%) and woods_pine2_evening is 0.265 against 0.336 (-21%). Exposure x1.25 recovers only 27-46% of the gap.",
+ "Evening warmth lost: woods_pine2_evening frame R/B falls to 1.43, against 1.56 for rem and 1.64 for Classic, so the evening reads cooler than Classic.",
+ "Greyer, desaturated shade: the forest floor and the meadow in shade are lit by blue sky only, which is the 'greyer ground' complaint. The shade-to-lit ratio of about 0.52 is closer to the crushed 0.42 than to the 0.6 target.",
+ "Flat, Lambert-only shade in town_golden: the lawn, soldier and jeep sink into one uniform dark olive shade with no bounce. The soldier loses his form and the readable trunk and soldier shadows that rem had. The frame is flatter, not richer.",
+ "Crown self-shadow from leaf cards shows as large hard-edged slabs and halftone in the sun-visibility debug. It is hidden in colour stills but is a flicker source (vobj 14% of crown pixels over the 2nd-diff threshold, against 0.8% for rem).",
+ "Pre-existing and not caused by this track: mustard/khaki ground on the Abel slopes."
+]
+## cost_ok
+true
+## score_0_to_10
+5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\shadows\BEST_woods_mixed_noon.png
+## one_line
+Switching on the tree and building shadow casters (a boot-order bug fix) is the one change a player would see: dappled forest floors and long golden-hour tree shadows. PCSS and contact shadows are close to invisible, the woods get 14-21% darker and greyer than Classic, and the 4096/tight-tier setup has an unflagged near-tier shadow artefact on Sinai.
+## critique
+Verification. All cited files exist. prototype.patch matches the scratch worktree diff exactly. The exe (built 14:50 at 3c53141) loaded in every run: logs show version 3.05-3c53141, a clean shader compile and OK answers for objShadows, pcssSun, contact and casterLod. Before and after images really differ: rem to prod mean abs diff is 0.109 (woods evening), 0.067 (woods noon), 0.034 (town), 0.019 (forest edge), 0.003 (lowsun_fp) and 0.002 (noon_fields).
+
+What actually changes the picture. Nearly all of the change comes from objShadows, which turns on the engine's existing static-object casters. Those were off in every capture because Scene::_objectShadows defaults to false and LoadAndApplyGraphicsConfig runs before GScene exists. This is a real and cheap finding: every Remastered picture the owner has judged lacked tree and building shadows. In woods_mixed_noon it gives believable dappled sun on the forest floor. In woods_pine2_evening and forest_edge_golden it gives long raking tree shadows. A player would notice this at a glance in wooded terrain.
+
+Everything else in the track barely registers. PCSS at 1 degree, 4096 maps, full-LOD casters and contact shadows add 0.001-0.004 mean abs diff on top of casters. The grounding of the soldier's shadow shows only in a 4x crop. The explorer correctly calls contact shadows a near-negative, and PCSS is effectively one too.
+
+Against the RTX-on vision. This is shadowing of direct sun only. RTX remasters read the way they do because shade is filled with bounced, coloured light. Here shade is blue-sky-only grey. Woodland frames end up 14-21% darker than Classic, the evening woods frame is cooler than Classic, and town_golden goes flat (the lawn and soldier sink into uniform dark olive and lose the readable shadows rem had). On its own it pushes against several owner taste rules. Canopy transmission or a bounce/GI term is needed before the owner will like it. It is still a necessary foundation, since any GI, AO or volumetric work needs correct sun visibility from trees and buildings.
+
+Missed artefact. On Sinai, best's tight near tier (0.04/0.15 on 4096) puts almost the whole foreground in solid camo-net shadow behind a tier-shaped edge. Stock tiers and the doubled range both show the same ground mostly lit. prod shares those tight tiers and was never tested on Sinai. There is also an unexplained GL undefined-behaviour warning (comparison sampler on texture object 0) that appears only in this track's runs and the clouds track's.
+
+Cost is fine for an RTX 3060 at 1080p60. The shadow pass goes from about 0.03 to 0.2-1.4 ms with prod. PCSS at 0-3 ms is unresolved but small, and the frame totals in these captures are noisy, 5-24 ms on a shared GPU.
+
+Recommendation: ship the boot-order caster fix (cheap, high value) together with canopy transmission or a shade-fill term. Keep stock or validated tiers until the near-tier inconsistency is understood. Treat PCSS as optional polish and drop contact shadows.
+## artefacts_seen
+Sinai best/objpcss: the near tier renders the foreground in solid shadow behind a tier-shaped edge, about 20% darker lit ground, inconsistent with the obj and bestlong variants. Crown leaf-card self-shadow slabs and halftone in the sun-visibility debug, which flicker in the sunvis dolly (14-16% of pixels vs 0.8%) but stay hidden in colour. A fine screen-fixed PCSS dither at 1:1 in wide penumbrae. Flat uniform shade with no bounce in town_golden and the woods. A GL undefined-behaviour warning in every shadows run log. No NaN, halos, banding or light leaks seen in the colour frames.
+## prototype_actually_loaded
+Yes. Every run's game_stdout.log shows version 3.05-3c53141 from dist/gfx-shadows-rwdi (PoseidonGame.exe built 14:50; run1 at 14:33 used an earlier build), the GL33 shader cache recompiled with no errors, and every research knob (objShadows, pcssSun, contact, casterLod) answered OK. PIL diffs confirm the variant shots differ from rem, and prototype.patch is identical to the live worktree diff.

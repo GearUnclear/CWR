@@ -1,0 +1,8 @@
+Title: Red Dead Redemption 2: Official Gameplay Video
+Upload date: 2018-08-09 (checked from yt-dlp metadata, upload_date field)
+Channel: Rockstar Games (channel ID UC6VcWc1rAoWdBCM0JxrRQ3A), verified from yt-dlp metadata
+URL: https://www.youtube.com/watch?v=Dw_oH5oiUSE
+Duration: 366 s; age_limit 18 (age-gated, read with the owner-approved Firefox login)
+Source used: none yet. The video has no caption tracks (no creator-uploaded subtitles and no auto-generated captions), and the audio could not be downloaded (see notes.txt).
+Confidence: the identification of the video is certain (channel name and upload date match). There is no transcription data, so outline.txt, summary.txt and delivery.txt were not produced.
+Metadata: raw/info.json (cookie-free subset: id, title, channel, date, duration, caption track list).

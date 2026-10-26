@@ -1,0 +1,22 @@
+PICKED TAKES
+============
+the owner's median pace: 2.58 words a second
+
+ 1 v2_00_intro              take 1.3   main      7.46 s  best; others: 1.1, 1.2
+ 2 v2_01_opening            take 2.2   main      6.28 s  best  (longer than its scene); others: 2.1
+ 3 v2_02_valley_mist        take 3.2   main      6.29 s  best; others: 3.1
+ 4 v2_03_pine_shafts        take 4.2   main      6.63 s  best; others: 4.1
+ 5 v2_04_bay_reflections    take 5.1   main      6.62 s  best; others: 5.2
+ 6 v2_05_outpost            take 6.1   main      6.91 s  best; others: 6.2
+ 7 v2_06_cloud_shadows      take 7.1   main      6.20 s  best; others: 7.2
+ 8 v2_07_sinai_camp         take 8.2   main      6.25 s  best; others: 8.1
+ 9 v2_08_ambush             take 9.1   main      7.51 s  best; others: 9.2
+10 v2_09_convoy             take 10.1  main      4.50 s  best; others: 10.2
+11 v2_10_checkpoint         take 11.1  main      4.20 s  best; others: 11.2
+12 v2_11_town_patrol        take 12.2  main      6.46 s  best; others: 12.1, 12.3
+13 v2_12_rain_town          take 13.1  main      6.02 s  best; others: 13.2
+14 v2_13_supply_run         take 14.2  main      6.21 s  best; others: 14.1
+15 v2_14_firefight          take 15.1  main      5.76 s  best; others: 15.2
+16 v2_99_outro              take 16.2  main      5.71 s  best; others: 16.1
+
+Change a pick: write lines like "4 2" (line 4, take 2) or "4 short" into D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\test\run_plain\favourites.txt (or pass --take 4=2) and run pick and clean again.

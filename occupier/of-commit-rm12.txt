@@ -1,0 +1,3 @@
+roadmap: occupier-forces #76 auto-detection slice landed (3946b5a, f9d0444), gate green
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

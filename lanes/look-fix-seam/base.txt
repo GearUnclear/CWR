@@ -1,0 +1,8 @@
+lane: look-fix-seam
+source: D:/Arma_CWA_worktrees/look-fix-seam
+HEAD: fec10759dfd4bbcc8fa9227f28e4c1f342f40ef0
+subject: graphics: fires, flares and shell bursts light the men and cast shadows
+commit date: 2026-10-18 20:00:53 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 116
+binary files changed (content not in patch): none

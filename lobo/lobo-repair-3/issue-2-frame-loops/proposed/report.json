@@ -1,0 +1,103 @@
+{
+ "loboeghelo/mk2/float.sqs": {
+  "before_findings": [],
+  "after_findings": [],
+  "before_waitless_backedges": [
+   [
+    6,
+    "loop"
+   ]
+  ],
+  "after_waitless_backedges": [],
+  "idempotent": true,
+  "before_bytes": 210,
+  "after_bytes": 268,
+  "after_sha256": "040259d5dc920e143e89046b5a6f3e5f38d07747f5ac0677eba0e370d951d74d"
+ },
+ "lobo_fab/dolp/init.sqs": {
+  "before_findings": [],
+  "after_findings": [],
+  "before_waitless_backedges": [
+   [
+    14,
+    "loop"
+   ]
+  ],
+  "after_waitless_backedges": [],
+  "idempotent": true,
+  "before_bytes": 431,
+  "after_bytes": 465,
+  "after_sha256": "bc39564d9f19164e48020508a45e841333d5a7b07a15bf5dab0d7c0f0f9a61b6"
+ },
+ "lobomig/mig25/sqs/mig25gear.sqs": {
+  "before_findings": [
+   "missing label: checkposition"
+  ],
+  "after_findings": [],
+  "before_waitless_backedges": [
+   [
+    32,
+    "checkposloop"
+   ],
+   [
+    56,
+    "checkposloop"
+   ],
+   [
+    66,
+    "checkposloop"
+   ],
+   [
+    76,
+    "checkposloop"
+   ]
+  ],
+  "after_waitless_backedges": [],
+  "idempotent": true,
+  "before_bytes": 2136,
+  "after_bytes": 2143,
+  "after_sha256": "b490a9c408bdc3a340bf45ee83c445eebe8284db4bcca6b5784d2e4c47dc1a10"
+ },
+ "lobosyrapc/scripts/bmp11anim.sqs": {
+  "before_findings": [
+   "missing label: exit"
+  ],
+  "after_findings": [],
+  "before_waitless_backedges": [
+   [
+    15,
+    "go"
+   ]
+  ],
+  "after_waitless_backedges": [],
+  "idempotent": true,
+  "before_bytes": 717,
+  "after_bytes": 738,
+  "after_sha256": "8d07ebe6b3dce67aedf7323c61feb59b0163f653d4ace876ff1835a3b64e1959"
+ },
+ "lobof5/scripts/autocanopy.sqs": {
+  "before_findings": [],
+  "after_findings": [],
+  "before_waitless_backedges": [
+   [
+    16,
+    "pollloop"
+   ]
+  ],
+  "after_waitless_backedges": [],
+  "idempotent": true,
+  "before_bytes": 661,
+  "after_bytes": 667,
+  "after_sha256": "890e1ed8c0a3db06fc7c2d3bb8a9489f69abf0e4c4cc6b4d2721514924fa017b"
+ },
+ "lobo_a4/scripts/canopy.sqs": {
+  "before_findings": [],
+  "after_findings": [],
+  "before_waitless_backedges": [],
+  "after_waitless_backedges": [],
+  "idempotent": true,
+  "before_bytes": 408,
+  "after_bytes": 433,
+  "after_sha256": "6feb25562bb5d49421db8031239d94b56c3b831e2c1f654b05173f7fd5fdccc7"
+ }
+}

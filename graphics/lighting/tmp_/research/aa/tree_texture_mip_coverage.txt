@@ -1,0 +1,560 @@
+﻿C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\abel_strom1b.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.503   bilinear(corner) >= 0.753: 0.429   >= 0.5: 0.532
+  L1  128x128  texel coverage 0.532   bilinear(corner) >= 0.753: 0.471   >= 0.5: 0.555
+  L2   64x64   texel coverage 0.537   bilinear(corner) >= 0.753: 0.485   >= 0.5: 0.557
+  L3   32x32   texel coverage 0.544   bilinear(corner) >= 0.753: 0.479   >= 0.5: 0.568
+  L4   16x16   texel coverage 0.527   bilinear(corner) >= 0.753: 0.410   >= 0.5: 0.570
+  L5    8x8    texel coverage 0.516   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.609
+  L6    4x4    texel coverage 0.562   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.688
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\abel_strom1b_kura.pac  format=0xff01  mips=5
+  L0   64x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1   32x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   16x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3    8x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4    4x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\abel_strom4.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.514   bilinear(corner) >= 0.753: 0.481   >= 0.5: 0.527
+  L1  128x128  texel coverage 0.527   bilinear(corner) >= 0.753: 0.491   >= 0.5: 0.541
+  L2   64x64   texel coverage 0.521   bilinear(corner) >= 0.753: 0.475   >= 0.5: 0.540
+  L3   32x32   texel coverage 0.521   bilinear(corner) >= 0.753: 0.450   >= 0.5: 0.549
+  L4   16x16   texel coverage 0.523   bilinear(corner) >= 0.753: 0.410   >= 0.5: 0.562
+  L5    8x8    texel coverage 0.500   bilinear(corner) >= 0.753: 0.281   >= 0.5: 0.531
+  L6    4x4    texel coverage 0.562   bilinear(corner) >= 0.753: 0.188   >= 0.5: 0.688
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\abel_strom4_kura.pac  format=0xff01  mips=5
+  L0   64x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1   32x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   16x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3    8x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4    4x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\afn_strom_02.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.170   bilinear(corner) >= 0.753: 0.118   >= 0.5: 0.190
+  L1  128x128  texel coverage 0.189   bilinear(corner) >= 0.753: 0.128   >= 0.5: 0.214
+  L2   64x64   texel coverage 0.177   bilinear(corner) >= 0.753: 0.105   >= 0.5: 0.203
+  L3   32x32   texel coverage 0.163   bilinear(corner) >= 0.753: 0.072   >= 0.5: 0.190
+  L4   16x16   texel coverage 0.148   bilinear(corner) >= 0.753: 0.031   >= 0.5: 0.180
+  L5    8x8    texel coverage 0.125   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.141
+  L6    4x4    texel coverage 0.000   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\afn_strom_03.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.233   bilinear(corner) >= 0.753: 0.189   >= 0.5: 0.252
+  L1  128x128  texel coverage 0.253   bilinear(corner) >= 0.753: 0.200   >= 0.5: 0.275
+  L2   64x64   texel coverage 0.243   bilinear(corner) >= 0.753: 0.166   >= 0.5: 0.273
+  L3   32x32   texel coverage 0.238   bilinear(corner) >= 0.753: 0.124   >= 0.5: 0.285
+  L4   16x16   texel coverage 0.223   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.289
+  L5    8x8    texel coverage 0.250   bilinear(corner) >= 0.753: 0.031   >= 0.5: 0.297
+  L6    4x4    texel coverage 0.188   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.125
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\afn_strom_04_new2.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.332   bilinear(corner) >= 0.753: 0.260   >= 0.5: 0.359
+  L1  128x128  texel coverage 0.359   bilinear(corner) >= 0.753: 0.286   >= 0.5: 0.387
+  L2   64x64   texel coverage 0.352   bilinear(corner) >= 0.753: 0.251   >= 0.5: 0.392
+  L3   32x32   texel coverage 0.354   bilinear(corner) >= 0.753: 0.217   >= 0.5: 0.403
+  L4   16x16   texel coverage 0.328   bilinear(corner) >= 0.753: 0.148   >= 0.5: 0.383
+  L5    8x8    texel coverage 0.312   bilinear(corner) >= 0.753: 0.078   >= 0.5: 0.391
+  L6    4x4    texel coverage 0.250   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.312
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\afn_strom_06_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.309   bilinear(corner) >= 0.753: 0.263   >= 0.5: 0.326
+  L1  128x128  texel coverage 0.326   bilinear(corner) >= 0.753: 0.267   >= 0.5: 0.349
+  L2   64x64   texel coverage 0.313   bilinear(corner) >= 0.753: 0.227   >= 0.5: 0.353
+  L3   32x32   texel coverage 0.308   bilinear(corner) >= 0.753: 0.183   >= 0.5: 0.366
+  L4   16x16   texel coverage 0.328   bilinear(corner) >= 0.753: 0.176   >= 0.5: 0.371
+  L5    8x8    texel coverage 0.281   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.328
+  L6    4x4    texel coverage 0.250   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.312
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\ah-1_list_vrtule.paa  format=0x4444  mips=5
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\ah-1_list_vrtule_gif.pac  format=0xff01  mips=4
+  L0  256x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1  128x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   64x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   32x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\betondlouhastenabez.pac  format=0xff01  mips=6
+  L0  256x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1  128x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   64x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   32x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4   16x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L5    8x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\briza.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.371   bilinear(corner) >= 0.753: 0.306   >= 0.5: 0.396
+  L1  128x128  texel coverage 0.396   bilinear(corner) >= 0.753: 0.341   >= 0.5: 0.418
+  L2   64x64   texel coverage 0.394   bilinear(corner) >= 0.753: 0.324   >= 0.5: 0.421
+  L3   32x32   texel coverage 0.396   bilinear(corner) >= 0.753: 0.310   >= 0.5: 0.426
+  L4   16x16   texel coverage 0.418   bilinear(corner) >= 0.753: 0.316   >= 0.5: 0.461
+  L5    8x8    texel coverage 0.375   bilinear(corner) >= 0.753: 0.219   >= 0.5: 0.422
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.500
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\briza_kriv_kmen.pac  format=0xff01  mips=5
+  L0   64x256  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1   32x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   16x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3    8x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4    4x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\briza_rovna.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.368   bilinear(corner) >= 0.753: 0.304   >= 0.5: 0.394
+  L1  128x128  texel coverage 0.394   bilinear(corner) >= 0.753: 0.340   >= 0.5: 0.416
+  L2   64x64   texel coverage 0.392   bilinear(corner) >= 0.753: 0.324   >= 0.5: 0.419
+  L3   32x32   texel coverage 0.395   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.429
+  L4   16x16   texel coverage 0.406   bilinear(corner) >= 0.753: 0.316   >= 0.5: 0.445
+  L5    8x8    texel coverage 0.375   bilinear(corner) >= 0.753: 0.219   >= 0.5: 0.422
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.500
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\briza_rovna2.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.505   bilinear(corner) >= 0.753: 0.437   >= 0.5: 0.534
+  L1  128x128  texel coverage 0.534   bilinear(corner) >= 0.753: 0.472   >= 0.5: 0.563
+  L2   64x64   texel coverage 0.533   bilinear(corner) >= 0.753: 0.453   >= 0.5: 0.576
+  L3   32x32   texel coverage 0.511   bilinear(corner) >= 0.753: 0.404   >= 0.5: 0.582
+  L4   16x16   texel coverage 0.527   bilinear(corner) >= 0.753: 0.359   >= 0.5: 0.621
+  L5    8x8    texel coverage 0.516   bilinear(corner) >= 0.753: 0.234   >= 0.5: 0.703
+  L6    4x4    texel coverage 0.688   bilinear(corner) >= 0.753: 0.250   >= 0.5: 0.875
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\cihl_okno2sklobez.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.439   bilinear(corner) >= 0.753: 0.424   >= 0.5: 0.453
+  L1  128x128  texel coverage 0.459   bilinear(corner) >= 0.753: 0.429   >= 0.5: 0.487
+  L2   64x64   texel coverage 0.457   bilinear(corner) >= 0.753: 0.397   >= 0.5: 0.512
+  L3   32x32   texel coverage 0.449   bilinear(corner) >= 0.753: 0.325   >= 0.5: 0.560
+  L4   16x16   texel coverage 0.449   bilinear(corner) >= 0.753: 0.242   >= 0.5: 0.609
+  L5    8x8    texel coverage 0.438   bilinear(corner) >= 0.753: 0.156   >= 0.5: 0.625
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.562
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\civilista_bryle.paa  format=0x4444  mips=8
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\civilista_zrcadlovky.paa  format=0x4444  mips=8
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\hip_list_vrtule.pac  format=0xff01  mips=4
+  L0  256x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1  128x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   64x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   32x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\kancl_kytka_listy.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.362   bilinear(corner) >= 0.753: 0.345   >= 0.5: 0.368
+  L1  128x128  texel coverage 0.368   bilinear(corner) >= 0.753: 0.335   >= 0.5: 0.380
+  L2   64x64   texel coverage 0.365   bilinear(corner) >= 0.753: 0.307   >= 0.5: 0.386
+  L3   32x32   texel coverage 0.360   bilinear(corner) >= 0.753: 0.265   >= 0.5: 0.395
+  L4   16x16   texel coverage 0.328   bilinear(corner) >= 0.753: 0.168   >= 0.5: 0.395
+  L5    8x8    texel coverage 0.359   bilinear(corner) >= 0.753: 0.109   >= 0.5: 0.422
+  L6    4x4    texel coverage 0.312   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.375
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\kerik_bobul_02.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.378   bilinear(corner) >= 0.753: 0.345   >= 0.5: 0.390
+  L1  128x128  texel coverage 0.391   bilinear(corner) >= 0.753: 0.354   >= 0.5: 0.404
+  L2   64x64   texel coverage 0.385   bilinear(corner) >= 0.753: 0.336   >= 0.5: 0.402
+  L3   32x32   texel coverage 0.390   bilinear(corner) >= 0.753: 0.324   >= 0.5: 0.411
+  L4   16x16   texel coverage 0.375   bilinear(corner) >= 0.753: 0.285   >= 0.5: 0.418
+  L5    8x8    texel coverage 0.344   bilinear(corner) >= 0.753: 0.203   >= 0.5: 0.422
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.500
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\kerik_list_03.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.405   bilinear(corner) >= 0.753: 0.383   >= 0.5: 0.413
+  L1  128x128  texel coverage 0.413   bilinear(corner) >= 0.753: 0.383   >= 0.5: 0.423
+  L2   64x64   texel coverage 0.410   bilinear(corner) >= 0.753: 0.371   >= 0.5: 0.424
+  L3   32x32   texel coverage 0.399   bilinear(corner) >= 0.753: 0.339   >= 0.5: 0.424
+  L4   16x16   texel coverage 0.406   bilinear(corner) >= 0.753: 0.297   >= 0.5: 0.445
+  L5    8x8    texel coverage 0.422   bilinear(corner) >= 0.753: 0.234   >= 0.5: 0.484
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.500
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\kerik_list_04.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.369   bilinear(corner) >= 0.753: 0.317   >= 0.5: 0.389
+  L1  128x128  texel coverage 0.390   bilinear(corner) >= 0.753: 0.332   >= 0.5: 0.411
+  L2   64x64   texel coverage 0.386   bilinear(corner) >= 0.753: 0.311   >= 0.5: 0.413
+  L3   32x32   texel coverage 0.390   bilinear(corner) >= 0.753: 0.294   >= 0.5: 0.421
+  L4   16x16   texel coverage 0.383   bilinear(corner) >= 0.753: 0.266   >= 0.5: 0.430
+  L5    8x8    texel coverage 0.391   bilinear(corner) >= 0.753: 0.234   >= 0.5: 0.453
+  L6    4x4    texel coverage 0.312   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.375
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\kerik_list_05.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.420   bilinear(corner) >= 0.753: 0.373   >= 0.5: 0.437
+  L1  128x128  texel coverage 0.436   bilinear(corner) >= 0.753: 0.390   >= 0.5: 0.454
+  L2   64x64   texel coverage 0.431   bilinear(corner) >= 0.753: 0.374   >= 0.5: 0.451
+  L3   32x32   texel coverage 0.430   bilinear(corner) >= 0.753: 0.354   >= 0.5: 0.456
+  L4   16x16   texel coverage 0.434   bilinear(corner) >= 0.753: 0.316   >= 0.5: 0.473
+  L5    8x8    texel coverage 0.422   bilinear(corner) >= 0.753: 0.266   >= 0.5: 0.516
+  L6    4x4    texel coverage 0.438   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.625
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\kovnavez_jehlan.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1  128x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   64x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   32x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4   16x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L5    8x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L6    4x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\lesni_kmen_smrku.pac  format=0xff01  mips=5
+  L0   64x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1   32x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   16x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3    8x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4    4x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_borovice1.pac  format=0xff01  mips=6
+  L0  256x128  texel coverage 0.406   bilinear(corner) >= 0.753: 0.346   >= 0.5: 0.436
+  L1  128x64   texel coverage 0.435   bilinear(corner) >= 0.753: 0.352   >= 0.5: 0.469
+  L2   64x32   texel coverage 0.423   bilinear(corner) >= 0.753: 0.297   >= 0.5: 0.473
+  L3   32x16   texel coverage 0.428   bilinear(corner) >= 0.753: 0.275   >= 0.5: 0.492
+  L4   16x8    texel coverage 0.414   bilinear(corner) >= 0.753: 0.203   >= 0.5: 0.492
+  L5    8x4    texel coverage 0.438   bilinear(corner) >= 0.753: 0.156   >= 0.5: 0.562
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_borovice2.pac  format=0xff01  mips=6
+  L0  256x128  texel coverage 0.579   bilinear(corner) >= 0.753: 0.517   >= 0.5: 0.602
+  L1  128x64   texel coverage 0.601   bilinear(corner) >= 0.753: 0.525   >= 0.5: 0.630
+  L2   64x32   texel coverage 0.598   bilinear(corner) >= 0.753: 0.482   >= 0.5: 0.642
+  L3   32x16   texel coverage 0.596   bilinear(corner) >= 0.753: 0.438   >= 0.5: 0.652
+  L4   16x8    texel coverage 0.648   bilinear(corner) >= 0.753: 0.422   >= 0.5: 0.742
+  L5    8x4    texel coverage 0.594   bilinear(corner) >= 0.753: 0.219   >= 0.5: 0.781
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_dark_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.746   bilinear(corner) >= 0.753: 0.705   >= 0.5: 0.762
+  L1  128x128  texel coverage 0.759   bilinear(corner) >= 0.753: 0.707   >= 0.5: 0.781
+  L2   64x64   texel coverage 0.757   bilinear(corner) >= 0.753: 0.690   >= 0.5: 0.787
+  L3   32x32   texel coverage 0.749   bilinear(corner) >= 0.753: 0.653   >= 0.5: 0.796
+  L4   16x16   texel coverage 0.734   bilinear(corner) >= 0.753: 0.570   >= 0.5: 0.816
+  L5    8x8    texel coverage 0.750   bilinear(corner) >= 0.753: 0.531   >= 0.5: 0.875
+  L6    4x4    texel coverage 0.688   bilinear(corner) >= 0.753: 0.250   >= 0.5: 0.875
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlic1.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.347   bilinear(corner) >= 0.753: 0.298   >= 0.5: 0.368
+  L1  128x128  texel coverage 0.367   bilinear(corner) >= 0.753: 0.305   >= 0.5: 0.392
+  L2   64x64   texel coverage 0.361   bilinear(corner) >= 0.753: 0.280   >= 0.5: 0.390
+  L3   32x32   texel coverage 0.357   bilinear(corner) >= 0.753: 0.263   >= 0.5: 0.389
+  L4   16x16   texel coverage 0.355   bilinear(corner) >= 0.753: 0.227   >= 0.5: 0.395
+  L5    8x8    texel coverage 0.344   bilinear(corner) >= 0.753: 0.172   >= 0.5: 0.406
+  L6    4x4    texel coverage 0.312   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.375
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlic2.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.689   bilinear(corner) >= 0.753: 0.653   >= 0.5: 0.706
+  L1  128x128  texel coverage 0.706   bilinear(corner) >= 0.753: 0.655   >= 0.5: 0.727
+  L2   64x64   texel coverage 0.701   bilinear(corner) >= 0.753: 0.629   >= 0.5: 0.734
+  L3   32x32   texel coverage 0.701   bilinear(corner) >= 0.753: 0.588   >= 0.5: 0.754
+  L4   16x16   texel coverage 0.703   bilinear(corner) >= 0.753: 0.539   >= 0.5: 0.773
+  L5    8x8    texel coverage 0.703   bilinear(corner) >= 0.753: 0.469   >= 0.5: 0.797
+  L6    4x4    texel coverage 0.625   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.812
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlic2_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.518   bilinear(corner) >= 0.753: 0.462   >= 0.5: 0.544
+  L1  128x128  texel coverage 0.544   bilinear(corner) >= 0.753: 0.477   >= 0.5: 0.575
+  L2   64x64   texel coverage 0.536   bilinear(corner) >= 0.753: 0.448   >= 0.5: 0.580
+  L3   32x32   texel coverage 0.540   bilinear(corner) >= 0.753: 0.419   >= 0.5: 0.599
+  L4   16x16   texel coverage 0.520   bilinear(corner) >= 0.753: 0.367   >= 0.5: 0.578
+  L5    8x8    texel coverage 0.562   bilinear(corner) >= 0.753: 0.328   >= 0.5: 0.641
+  L6    4x4    texel coverage 0.438   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.562
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlic2_new_spod.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.255   bilinear(corner) >= 0.753: 0.196   >= 0.5: 0.278
+  L1  128x128  texel coverage 0.278   bilinear(corner) >= 0.753: 0.220   >= 0.5: 0.299
+  L2   64x64   texel coverage 0.264   bilinear(corner) >= 0.753: 0.199   >= 0.5: 0.283
+  L3   32x32   texel coverage 0.256   bilinear(corner) >= 0.753: 0.182   >= 0.5: 0.277
+  L4   16x16   texel coverage 0.258   bilinear(corner) >= 0.753: 0.172   >= 0.5: 0.277
+  L5    8x8    texel coverage 0.234   bilinear(corner) >= 0.753: 0.109   >= 0.5: 0.266
+  L6    4x4    texel coverage 0.250   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.312
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlicnan1.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.271   bilinear(corner) >= 0.753: 0.220   >= 0.5: 0.291
+  L1  128x128  texel coverage 0.291   bilinear(corner) >= 0.753: 0.232   >= 0.5: 0.313
+  L2   64x64   texel coverage 0.283   bilinear(corner) >= 0.753: 0.215   >= 0.5: 0.308
+  L3   32x32   texel coverage 0.277   bilinear(corner) >= 0.753: 0.203   >= 0.5: 0.305
+  L4   16x16   texel coverage 0.270   bilinear(corner) >= 0.753: 0.172   >= 0.5: 0.289
+  L5    8x8    texel coverage 0.266   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.328
+  L6    4x4    texel coverage 0.312   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.375
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlicnan2.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.588   bilinear(corner) >= 0.753: 0.539   >= 0.5: 0.608
+  L1  128x128  texel coverage 0.608   bilinear(corner) >= 0.753: 0.555   >= 0.5: 0.628
+  L2   64x64   texel coverage 0.596   bilinear(corner) >= 0.753: 0.531   >= 0.5: 0.619
+  L3   32x32   texel coverage 0.595   bilinear(corner) >= 0.753: 0.498   >= 0.5: 0.624
+  L4   16x16   texel coverage 0.598   bilinear(corner) >= 0.753: 0.434   >= 0.5: 0.652
+  L5    8x8    texel coverage 0.562   bilinear(corner) >= 0.753: 0.281   >= 0.5: 0.625
+  L6    4x4    texel coverage 0.500   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.688
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlicnan2_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.432   bilinear(corner) >= 0.753: 0.370   >= 0.5: 0.455
+  L1  128x128  texel coverage 0.455   bilinear(corner) >= 0.753: 0.393   >= 0.5: 0.477
+  L2   64x64   texel coverage 0.444   bilinear(corner) >= 0.753: 0.371   >= 0.5: 0.472
+  L3   32x32   texel coverage 0.440   bilinear(corner) >= 0.753: 0.339   >= 0.5: 0.478
+  L4   16x16   texel coverage 0.430   bilinear(corner) >= 0.753: 0.281   >= 0.5: 0.480
+  L5    8x8    texel coverage 0.438   bilinear(corner) >= 0.753: 0.234   >= 0.5: 0.531
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.500
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlic_new_spod.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.642   bilinear(corner) >= 0.753: 0.614   >= 0.5: 0.655
+  L1  128x128  texel coverage 0.656   bilinear(corner) >= 0.753: 0.620   >= 0.5: 0.669
+  L2   64x64   texel coverage 0.648   bilinear(corner) >= 0.753: 0.598   >= 0.5: 0.668
+  L3   32x32   texel coverage 0.643   bilinear(corner) >= 0.753: 0.557   >= 0.5: 0.679
+  L4   16x16   texel coverage 0.648   bilinear(corner) >= 0.753: 0.500   >= 0.5: 0.707
+  L5    8x8    texel coverage 0.672   bilinear(corner) >= 0.753: 0.453   >= 0.5: 0.750
+  L6    4x4    texel coverage 0.688   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.875
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_jehlic_spod.pac  format=0xff01  mips=6
+  L0  128x128  texel coverage 0.346   bilinear(corner) >= 0.753: 0.248   >= 0.5: 0.382
+  L1   64x64   texel coverage 0.384   bilinear(corner) >= 0.753: 0.290   >= 0.5: 0.416
+  L2   32x32   texel coverage 0.360   bilinear(corner) >= 0.753: 0.261   >= 0.5: 0.395
+  L3   16x16   texel coverage 0.320   bilinear(corner) >= 0.753: 0.219   >= 0.5: 0.340
+  L4    8x8    texel coverage 0.375   bilinear(corner) >= 0.753: 0.203   >= 0.5: 0.422
+  L5    4x4    texel coverage 0.250   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.312
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_pruchozi_lod.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.550   bilinear(corner) >= 0.753: 0.468   >= 0.5: 0.600
+  L1  128x128  texel coverage 0.600   bilinear(corner) >= 0.753: 0.503   >= 0.5: 0.663
+  L2   64x64   texel coverage 0.591   bilinear(corner) >= 0.753: 0.459   >= 0.5: 0.684
+  L3   32x32   texel coverage 0.583   bilinear(corner) >= 0.753: 0.418   >= 0.5: 0.681
+  L4   16x16   texel coverage 0.578   bilinear(corner) >= 0.753: 0.398   >= 0.5: 0.664
+  L5    8x8    texel coverage 0.609   bilinear(corner) >= 0.753: 0.359   >= 0.5: 0.672
+  L6    4x4    texel coverage 0.750   bilinear(corner) >= 0.753: 0.500   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\les_suche_vetvicky.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.138   bilinear(corner) >= 0.753: 0.041   >= 0.5: 0.183
+  L1  128x128  texel coverage 0.182   bilinear(corner) >= 0.753: 0.043   >= 0.5: 0.246
+  L2   64x64   texel coverage 0.097   bilinear(corner) >= 0.753: 0.017   >= 0.5: 0.116
+  L3   32x32   texel coverage 0.063   bilinear(corner) >= 0.753: 0.006   >= 0.5: 0.067
+  L4   16x16   texel coverage 0.031   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.023
+  L5    8x8    texel coverage 0.000   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+  L6    4x4    texel coverage 0.000   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_destroy.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_dot.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_empty.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_exclamation.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_explode.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_goal.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_join.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_objective.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_pickup.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_question.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_sipka.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_smiley1.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_smiley2.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_smiley3.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_start.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_waypoint.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\marker_x.paa  format=0x8080  mips=6
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_01_kura.pac  format=0xff01  mips=6
+  L0  128x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1   64x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   32x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   16x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4    8x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L5    4x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_04_new2.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.485   bilinear(corner) >= 0.753: 0.398   >= 0.5: 0.517
+  L1  128x128  texel coverage 0.517   bilinear(corner) >= 0.753: 0.435   >= 0.5: 0.547
+  L2   64x64   texel coverage 0.511   bilinear(corner) >= 0.753: 0.393   >= 0.5: 0.558
+  L3   32x32   texel coverage 0.515   bilinear(corner) >= 0.753: 0.359   >= 0.5: 0.569
+  L4   16x16   texel coverage 0.500   bilinear(corner) >= 0.753: 0.293   >= 0.5: 0.570
+  L5    8x8    texel coverage 0.500   bilinear(corner) >= 0.753: 0.203   >= 0.5: 0.594
+  L6    4x4    texel coverage 0.562   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.750
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_05_new3.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.503   bilinear(corner) >= 0.753: 0.415   >= 0.5: 0.537
+  L1  128x128  texel coverage 0.535   bilinear(corner) >= 0.753: 0.481   >= 0.5: 0.555
+  L2   64x64   texel coverage 0.528   bilinear(corner) >= 0.753: 0.465   >= 0.5: 0.553
+  L3   32x32   texel coverage 0.522   bilinear(corner) >= 0.753: 0.423   >= 0.5: 0.567
+  L4   16x16   texel coverage 0.508   bilinear(corner) >= 0.753: 0.352   >= 0.5: 0.574
+  L5    8x8    texel coverage 0.500   bilinear(corner) >= 0.753: 0.219   >= 0.5: 0.594
+  L6    4x4    texel coverage 0.438   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.625
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_06_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.418   bilinear(corner) >= 0.753: 0.368   >= 0.5: 0.438
+  L1  128x128  texel coverage 0.438   bilinear(corner) >= 0.753: 0.378   >= 0.5: 0.461
+  L2   64x64   texel coverage 0.428   bilinear(corner) >= 0.753: 0.344   >= 0.5: 0.460
+  L3   32x32   texel coverage 0.425   bilinear(corner) >= 0.753: 0.321   >= 0.5: 0.466
+  L4   16x16   texel coverage 0.422   bilinear(corner) >= 0.753: 0.293   >= 0.5: 0.469
+  L5    8x8    texel coverage 0.391   bilinear(corner) >= 0.753: 0.188   >= 0.5: 0.438
+  L6    4x4    texel coverage 0.438   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.625
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_08_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.381   bilinear(corner) >= 0.753: 0.334   >= 0.5: 0.399
+  L1  128x128  texel coverage 0.399   bilinear(corner) >= 0.753: 0.342   >= 0.5: 0.422
+  L2   64x64   texel coverage 0.391   bilinear(corner) >= 0.753: 0.303   >= 0.5: 0.428
+  L3   32x32   texel coverage 0.399   bilinear(corner) >= 0.753: 0.265   >= 0.5: 0.454
+  L4   16x16   texel coverage 0.379   bilinear(corner) >= 0.753: 0.191   >= 0.5: 0.441
+  L5    8x8    texel coverage 0.359   bilinear(corner) >= 0.753: 0.078   >= 0.5: 0.469
+  L6    4x4    texel coverage 0.312   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.438
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_10_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.591   bilinear(corner) >= 0.753: 0.536   >= 0.5: 0.614
+  L1  128x128  texel coverage 0.614   bilinear(corner) >= 0.753: 0.563   >= 0.5: 0.636
+  L2   64x64   texel coverage 0.609   bilinear(corner) >= 0.753: 0.542   >= 0.5: 0.638
+  L3   32x32   texel coverage 0.611   bilinear(corner) >= 0.753: 0.505   >= 0.5: 0.660
+  L4   16x16   texel coverage 0.590   bilinear(corner) >= 0.753: 0.406   >= 0.5: 0.668
+  L5    8x8    texel coverage 0.672   bilinear(corner) >= 0.753: 0.391   >= 0.5: 0.781
+  L6    4x4    texel coverage 0.688   bilinear(corner) >= 0.753: 0.250   >= 0.5: 0.875
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_13.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.342   bilinear(corner) >= 0.753: 0.323   >= 0.5: 0.349
+  L1  128x128  texel coverage 0.349   bilinear(corner) >= 0.753: 0.330   >= 0.5: 0.356
+  L2   64x64   texel coverage 0.346   bilinear(corner) >= 0.753: 0.313   >= 0.5: 0.359
+  L3   32x32   texel coverage 0.346   bilinear(corner) >= 0.753: 0.289   >= 0.5: 0.365
+  L4   16x16   texel coverage 0.355   bilinear(corner) >= 0.753: 0.254   >= 0.5: 0.387
+  L5    8x8    texel coverage 0.328   bilinear(corner) >= 0.753: 0.172   >= 0.5: 0.406
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.500
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_14_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.415   bilinear(corner) >= 0.753: 0.344   >= 0.5: 0.443
+  L1  128x128  texel coverage 0.443   bilinear(corner) >= 0.753: 0.371   >= 0.5: 0.473
+  L2   64x64   texel coverage 0.435   bilinear(corner) >= 0.753: 0.348   >= 0.5: 0.471
+  L3   32x32   texel coverage 0.433   bilinear(corner) >= 0.753: 0.313   >= 0.5: 0.485
+  L4   16x16   texel coverage 0.438   bilinear(corner) >= 0.753: 0.242   >= 0.5: 0.527
+  L5    8x8    texel coverage 0.438   bilinear(corner) >= 0.753: 0.172   >= 0.5: 0.578
+  L6    4x4    texel coverage 0.438   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.500
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_15.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.367   bilinear(corner) >= 0.753: 0.318   >= 0.5: 0.385
+  L1  128x128  texel coverage 0.385   bilinear(corner) >= 0.753: 0.354   >= 0.5: 0.397
+  L2   64x64   texel coverage 0.384   bilinear(corner) >= 0.753: 0.348   >= 0.5: 0.399
+  L3   32x32   texel coverage 0.383   bilinear(corner) >= 0.753: 0.327   >= 0.5: 0.403
+  L4   16x16   texel coverage 0.379   bilinear(corner) >= 0.753: 0.277   >= 0.5: 0.406
+  L5    8x8    texel coverage 0.406   bilinear(corner) >= 0.753: 0.234   >= 0.5: 0.484
+  L6    4x4    texel coverage 0.375   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.562
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_17.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.425   bilinear(corner) >= 0.753: 0.357   >= 0.5: 0.450
+  L1  128x128  texel coverage 0.450   bilinear(corner) >= 0.753: 0.392   >= 0.5: 0.472
+  L2   64x64   texel coverage 0.447   bilinear(corner) >= 0.753: 0.379   >= 0.5: 0.469
+  L3   32x32   texel coverage 0.444   bilinear(corner) >= 0.753: 0.353   >= 0.5: 0.478
+  L4   16x16   texel coverage 0.445   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.492
+  L5    8x8    texel coverage 0.438   bilinear(corner) >= 0.753: 0.250   >= 0.5: 0.484
+  L6    4x4    texel coverage 0.500   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.625
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_17_pokus.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.576   bilinear(corner) >= 0.753: 0.505   >= 0.5: 0.606
+  L1  128x128  texel coverage 0.603   bilinear(corner) >= 0.753: 0.538   >= 0.5: 0.631
+  L2   64x64   texel coverage 0.604   bilinear(corner) >= 0.753: 0.519   >= 0.5: 0.645
+  L3   32x32   texel coverage 0.605   bilinear(corner) >= 0.753: 0.480   >= 0.5: 0.670
+  L4   16x16   texel coverage 0.586   bilinear(corner) >= 0.753: 0.371   >= 0.5: 0.691
+  L5    8x8    texel coverage 0.578   bilinear(corner) >= 0.753: 0.234   >= 0.5: 0.719
+  L6    4x4    texel coverage 0.688   bilinear(corner) >= 0.753: 0.125   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_18_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.290   bilinear(corner) >= 0.753: 0.245   >= 0.5: 0.308
+  L1  128x128  texel coverage 0.307   bilinear(corner) >= 0.753: 0.261   >= 0.5: 0.326
+  L2   64x64   texel coverage 0.304   bilinear(corner) >= 0.753: 0.253   >= 0.5: 0.324
+  L3   32x32   texel coverage 0.306   bilinear(corner) >= 0.753: 0.245   >= 0.5: 0.334
+  L4   16x16   texel coverage 0.297   bilinear(corner) >= 0.753: 0.203   >= 0.5: 0.324
+  L5    8x8    texel coverage 0.266   bilinear(corner) >= 0.753: 0.109   >= 0.5: 0.281
+  L6    4x4    texel coverage 0.250   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.312
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_20.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.572   bilinear(corner) >= 0.753: 0.515   >= 0.5: 0.593
+  L1  128x128  texel coverage 0.594   bilinear(corner) >= 0.753: 0.532   >= 0.5: 0.617
+  L2   64x64   texel coverage 0.587   bilinear(corner) >= 0.753: 0.513   >= 0.5: 0.617
+  L3   32x32   texel coverage 0.594   bilinear(corner) >= 0.753: 0.495   >= 0.5: 0.631
+  L4   16x16   texel coverage 0.602   bilinear(corner) >= 0.753: 0.449   >= 0.5: 0.656
+  L5    8x8    texel coverage 0.516   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.594
+  L6    4x4    texel coverage 0.625   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.812
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_20_acess.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.595   bilinear(corner) >= 0.753: 0.553   >= 0.5: 0.614
+  L1  128x128  texel coverage 0.610   bilinear(corner) >= 0.753: 0.562   >= 0.5: 0.633
+  L2   64x64   texel coverage 0.605   bilinear(corner) >= 0.753: 0.541   >= 0.5: 0.640
+  L3   32x32   texel coverage 0.604   bilinear(corner) >= 0.753: 0.509   >= 0.5: 0.657
+  L4   16x16   texel coverage 0.598   bilinear(corner) >= 0.753: 0.434   >= 0.5: 0.707
+  L5    8x8    texel coverage 0.609   bilinear(corner) >= 0.753: 0.375   >= 0.5: 0.781
+  L6    4x4    texel coverage 0.625   bilinear(corner) >= 0.753: 0.250   >= 0.5: 0.875
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_20_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.577   bilinear(corner) >= 0.753: 0.520   >= 0.5: 0.597
+  L1  128x128  texel coverage 0.598   bilinear(corner) >= 0.753: 0.536   >= 0.5: 0.620
+  L2   64x64   texel coverage 0.592   bilinear(corner) >= 0.753: 0.517   >= 0.5: 0.621
+  L3   32x32   texel coverage 0.584   bilinear(corner) >= 0.753: 0.491   >= 0.5: 0.620
+  L4   16x16   texel coverage 0.598   bilinear(corner) >= 0.753: 0.453   >= 0.5: 0.660
+  L5    8x8    texel coverage 0.562   bilinear(corner) >= 0.753: 0.359   >= 0.5: 0.656
+  L6    4x4    texel coverage 0.625   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.812
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_lipa_kmen.pac  format=0xff01  mips=5
+  L0   64x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1   32x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   16x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3    8x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4    4x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\n_strom_lipa_new.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.506   bilinear(corner) >= 0.753: 0.410   >= 0.5: 0.543
+  L1  128x128  texel coverage 0.544   bilinear(corner) >= 0.753: 0.478   >= 0.5: 0.569
+  L2   64x64   texel coverage 0.542   bilinear(corner) >= 0.753: 0.462   >= 0.5: 0.573
+  L3   32x32   texel coverage 0.544   bilinear(corner) >= 0.753: 0.438   >= 0.5: 0.583
+  L4   16x16   texel coverage 0.547   bilinear(corner) >= 0.753: 0.379   >= 0.5: 0.617
+  L5    8x8    texel coverage 0.547   bilinear(corner) >= 0.753: 0.344   >= 0.5: 0.609
+  L6    4x4    texel coverage 0.625   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.812
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\pahejl_strom_02.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.028   bilinear(corner) >= 0.753: 0.018   >= 0.5: 0.033
+  L1  128x128  texel coverage 0.032   bilinear(corner) >= 0.753: 0.016   >= 0.5: 0.042
+  L2   64x64   texel coverage 0.025   bilinear(corner) >= 0.753: 0.007   >= 0.5: 0.033
+  L3   32x32   texel coverage 0.018   bilinear(corner) >= 0.753: 0.001   >= 0.5: 0.028
+  L4   16x16   texel coverage 0.016   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.016
+  L5    8x8    texel coverage 0.000   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+  L6    4x4    texel coverage 0.000   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\pahejl_strom_04.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.044   bilinear(corner) >= 0.753: 0.034   >= 0.5: 0.049
+  L1  128x128  texel coverage 0.047   bilinear(corner) >= 0.753: 0.031   >= 0.5: 0.056
+  L2   64x64   texel coverage 0.045   bilinear(corner) >= 0.753: 0.020   >= 0.5: 0.057
+  L3   32x32   texel coverage 0.039   bilinear(corner) >= 0.753: 0.009   >= 0.5: 0.059
+  L4   16x16   texel coverage 0.031   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.039
+  L5    8x8    texel coverage 0.016   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+  L6    4x4    texel coverage 0.000   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\pahejl_strom_08.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.057   bilinear(corner) >= 0.753: 0.042   >= 0.5: 0.065
+  L1  128x128  texel coverage 0.065   bilinear(corner) >= 0.753: 0.038   >= 0.5: 0.078
+  L2   64x64   texel coverage 0.058   bilinear(corner) >= 0.753: 0.023   >= 0.5: 0.076
+  L3   32x32   texel coverage 0.046   bilinear(corner) >= 0.753: 0.008   >= 0.5: 0.063
+  L4   16x16   texel coverage 0.027   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.039
+  L5    8x8    texel coverage 0.016   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+  L6    4x4    texel coverage 0.000   bilinear(corner) >= 0.753: 0.000   >= 0.5: 0.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\scud_lista.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1  128x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   64x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   32x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4   16x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L5    8x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L6    4x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\sidebez.pac  format=0xff01  mips=6
+  L0  256x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1  128x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   64x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   32x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4   16x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L5    8x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\slgr_up_vybezek.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L1  128x128  texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L2   64x64   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L3   32x32   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L4   16x16   texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L5    8x8    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+  L6    4x4    texel coverage 1.000   bilinear(corner) >= 0.753: 1.000   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\smrk_vysoky_new2.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.397   bilinear(corner) >= 0.753: 0.309   >= 0.5: 0.430
+  L1  128x128  texel coverage 0.431   bilinear(corner) >= 0.753: 0.335   >= 0.5: 0.475
+  L2   64x64   texel coverage 0.421   bilinear(corner) >= 0.753: 0.298   >= 0.5: 0.485
+  L3   32x32   texel coverage 0.423   bilinear(corner) >= 0.753: 0.278   >= 0.5: 0.491
+  L4   16x16   texel coverage 0.414   bilinear(corner) >= 0.753: 0.250   >= 0.5: 0.480
+  L5    8x8    texel coverage 0.391   bilinear(corner) >= 0.753: 0.219   >= 0.5: 0.469
+  L6    4x4    texel coverage 0.312   bilinear(corner) >= 0.753: 0.062   >= 0.5: 0.375
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\smrk_vys_new_aces3.pac  format=0xff01  mips=6
+  L0  128x128  texel coverage 0.720   bilinear(corner) >= 0.753: 0.667   >= 0.5: 0.743
+  L1   64x64   texel coverage 0.737   bilinear(corner) >= 0.753: 0.682   >= 0.5: 0.764
+  L2   32x32   texel coverage 0.726   bilinear(corner) >= 0.753: 0.643   >= 0.5: 0.777
+  L3   16x16   texel coverage 0.730   bilinear(corner) >= 0.753: 0.586   >= 0.5: 0.824
+  L4    8x8    texel coverage 0.672   bilinear(corner) >= 0.753: 0.438   >= 0.5: 0.859
+  L5    4x4    texel coverage 0.688   bilinear(corner) >= 0.753: 0.312   >= 0.5: 0.875
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\stromky.pac  format=0xff01  mips=6
+  L0  256x128  texel coverage 0.472   bilinear(corner) >= 0.753: 0.373   >= 0.5: 0.539
+  L1  128x64   texel coverage 0.538   bilinear(corner) >= 0.753: 0.401   >= 0.5: 0.638
+  L2   64x32   texel coverage 0.525   bilinear(corner) >= 0.753: 0.346   >= 0.5: 0.646
+  L3   32x16   texel coverage 0.582   bilinear(corner) >= 0.753: 0.428   >= 0.5: 0.656
+  L4   16x8    texel coverage 0.523   bilinear(corner) >= 0.753: 0.328   >= 0.5: 0.602
+  L5    8x4    texel coverage 0.406   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.625
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\stromky2.pac  format=0xff01  mips=6
+  L0  256x128  texel coverage 0.783   bilinear(corner) >= 0.753: 0.738   >= 0.5: 0.802
+  L1  128x64   texel coverage 0.799   bilinear(corner) >= 0.753: 0.751   >= 0.5: 0.821
+  L2   64x32   texel coverage 0.792   bilinear(corner) >= 0.753: 0.729   >= 0.5: 0.823
+  L3   32x16   texel coverage 0.787   bilinear(corner) >= 0.753: 0.689   >= 0.5: 0.830
+  L4   16x8    texel coverage 0.781   bilinear(corner) >= 0.753: 0.617   >= 0.5: 0.867
+  L5    8x4    texel coverage 0.750   bilinear(corner) >= 0.753: 0.500   >= 0.5: 1.000
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\strom_06.pac  format=0xff01  mips=6
+  L0  256x128  texel coverage 0.454   bilinear(corner) >= 0.753: 0.361   >= 0.5: 0.492
+  L1  128x64   texel coverage 0.493   bilinear(corner) >= 0.753: 0.408   >= 0.5: 0.527
+  L2   64x32   texel coverage 0.487   bilinear(corner) >= 0.753: 0.371   >= 0.5: 0.536
+  L3   32x16   texel coverage 0.514   bilinear(corner) >= 0.753: 0.371   >= 0.5: 0.578
+  L4   16x8    texel coverage 0.516   bilinear(corner) >= 0.753: 0.328   >= 0.5: 0.609
+  L5    8x4    texel coverage 0.500   bilinear(corner) >= 0.753: 0.188   >= 0.5: 0.656
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\strom_07_new.pac  format=0xff01  mips=6
+  L0  128x256  texel coverage 0.494   bilinear(corner) >= 0.753: 0.392   >= 0.5: 0.536
+  L1   64x128  texel coverage 0.536   bilinear(corner) >= 0.753: 0.458   >= 0.5: 0.566
+  L2   32x64   texel coverage 0.542   bilinear(corner) >= 0.753: 0.471   >= 0.5: 0.571
+  L3   16x32   texel coverage 0.531   bilinear(corner) >= 0.753: 0.447   >= 0.5: 0.568
+  L4    8x16   texel coverage 0.516   bilinear(corner) >= 0.753: 0.359   >= 0.5: 0.602
+  L5    4x8    texel coverage 0.531   bilinear(corner) >= 0.753: 0.281   >= 0.5: 0.625
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\strom_09_new.pac  format=0xff01  mips=6
+  L0  128x256  texel coverage 0.425   bilinear(corner) >= 0.753: 0.304   >= 0.5: 0.475
+  L1   64x128  texel coverage 0.473   bilinear(corner) >= 0.753: 0.362   >= 0.5: 0.520
+  L2   32x64   texel coverage 0.471   bilinear(corner) >= 0.753: 0.340   >= 0.5: 0.533
+  L3   16x32   texel coverage 0.475   bilinear(corner) >= 0.753: 0.318   >= 0.5: 0.547
+  L4    8x16   texel coverage 0.461   bilinear(corner) >= 0.753: 0.242   >= 0.5: 0.555
+  L5    4x8    texel coverage 0.406   bilinear(corner) >= 0.753: 0.156   >= 0.5: 0.531
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\strom_10.pac  format=0xff01  mips=7
+  L0  256x256  texel coverage 0.445   bilinear(corner) >= 0.753: 0.408   >= 0.5: 0.461
+  L1  128x128  texel coverage 0.460   bilinear(corner) >= 0.753: 0.416   >= 0.5: 0.478
+  L2   64x64   texel coverage 0.458   bilinear(corner) >= 0.753: 0.396   >= 0.5: 0.482
+  L3   32x32   texel coverage 0.456   bilinear(corner) >= 0.753: 0.374   >= 0.5: 0.488
+  L4   16x16   texel coverage 0.426   bilinear(corner) >= 0.753: 0.301   >= 0.5: 0.457
+  L5    8x8    texel coverage 0.438   bilinear(corner) >= 0.753: 0.250   >= 0.5: 0.500
+  L6    4x4    texel coverage 0.500   bilinear(corner) >= 0.753: 0.125   >= 0.5: 0.625
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\uh60_list_vrtule.pac  format=0x4747  mips=0
+  not DXT1, skipped
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex2\uh60_list_vrt_m.paa  format=0x4444  mips=6
+  not DXT1, skipped

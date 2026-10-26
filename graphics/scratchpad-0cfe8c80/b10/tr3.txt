@@ -1,0 +1,6 @@
+    // The planned slots: the one below the sun shadows is the reserved padding,
+    // the four between the clouds and the water and the one between the water
+    // and the terrain detail are the planned padding, the rest continue the
+    // declared ones (B1 landed the sun shadow slots 59 and 60, A7 the sky slots
+    // 61 to 67 of plan section 3.3, B10 the clouds slots 68 and 69, B5 the
+    // water slots 74 and 75).

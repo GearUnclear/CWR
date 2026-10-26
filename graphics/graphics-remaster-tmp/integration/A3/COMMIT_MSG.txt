@@ -1,0 +1,104 @@
+graphics: the post pass runs as a list of stages
+
+What the player sees: nothing. A3 restructures the post pass the visible
+steps will extend; every shader the engine compiled before is byte for
+byte the same and the passes issue the same GL commands, so no pixel
+changes. One new diagnostic: debug=5 ("Linear depth (half res)" in the
+Lighting tab's View list) shows the new half-resolution linear depth.
+
+How it works: EngineGL33::EndWorldScene, one function until now (resolve,
+AO, bloom, shafts, composite), runs a fixed list of stages on one
+PostFrame (frame and half size, projInfo, the 3D rect, depth scale and
+bias, the sun on screen, the frame's plan). The list is PostStage in the
+new pure module Graphics/Remaster/PostStages: thirteen stages in the order
+of plan 3.6 (resolve, linear depth, tag readout, AO, reflections, air,
+bloom, shafts, combat scatter, composite, TAA resolve, sharpen) plus a
+debug view stage at the end. Every planned stage holds its place, its
+GPU mark and its section from now on; seven have a pass (resolve, linear
+depth, AO, bloom, shafts, composite, debug view) and the others never run
+until their step lands them (a pass, a RunPostStage case, landed = true).
+PlanPostStages decides per frame which stages run and the AO and bloom
+strengths; the early return asks every stage and keeps its old meaning (a
+knob that is on keeps the pass, so a frame that holds AO off in a vehicle
+interior still gets the composite, which writes the resolved value into
+every MSAA sample). The resolve blits under the world's state as before;
+the fullscreen stages share one state set after it and torn down after
+the last stage, binding their inputs to kPostUnits {0, 2, 3, 4, 5}
+(EngineGL33_Lighting.hpp, static_assert: never unit 1 or 7). GpuTimings
+has one mark and section per stage, contiguous after WorldEnd, plus
+PostEnd (20 of the 32 marks); post runs from WorldEnd to PostEnd, and a
+stage section starts at the latest stage mark the frame recorded.
+triGpuTimes now reads "post 1.00: resolve 0.46 ao 0.13 bloom 0.06 shafts
+0.27 composite 0.07", and make_pairs.py and summarize_timing.py carry the
+resolve and lindepth columns.
+
+PostLinearDepth (psPostLinearDepth): R32F at half resolution, the view
+depth in metres from the shared viewZ at the four full-resolution texel
+centres under each texel, the sky at 1e6 as AO marks it. Even texels keep
+the nearest of the four and odd texels the farthest, so along a
+silhouette a depth-aware upsample finds a tap at either depth (the speckled
+rim volumetric's probe 8 saw on thin foliage). It feeds nothing yet: AO
+still reads the full-resolution depth (moving it changes AO's pixels), so
+its gate, "a running stage reads it", keeps it off on the shipped frame;
+only the debug view reads it today.
+
+The switch and its gates: no feature switch; the stage plan is the gate of
+each stage. The feature gates of plan 3.2 join PostFrameInputs with the
+first post stage that reads one (A5, B4, B6, B8).
+
+Kept, rewritten and dropped from the prototypes: no prototype code. Plan
+3.6 is followed with the as-built notes there (pairs split, the debug view
+stage, "gates" became the plan, PostEnd, the old early return kept, no
+mip chain on the linear depth).
+
+Measured cost (RTX 4060 Ti, 1920x1080, scale 1.0, 4x MSAA, 3 interleaved
+rounds, 0 of 4 tri slots held, no foreign game in 241 clock samples):
+none on the shipped frame. Where both runs read P0 the Remastered frame
+medians are within -0.22 to +0.27 ms of A2's run (sunrise_ridge 17.67
+against 17.49, valley 05:15 23.97 against 23.82, Eden broken_high 24.58
+against 24.74); Classic, untouched, moved -0.35 to +0.34 ms between the
+same runs. The linear depth costs 0.01 ms at P0 under debug=5. The new
+sections correct the plan: the MSAA resolve (0.22 to 0.65 ms at P0), not
+AO and its blur (0.06 to 0.20 ms), is the largest fixed post cost, and
+the old ao section held the resolve.
+
+Tests: new test_post_stages.cpp [PostStages]: the list of plan 3.6 with
+one mark and section per stage, the shipped knobs run the pass as before,
+the early return asks every stage (knob on, frame held off: still a
+pass), interior and optics frames, the linear depth runs exactly when a
+stage reads it, a stage that has not landed never runs, and the backend
+runs every landed stage, has no case for the others and marks them from
+the table. test_gpu_timings.cpp: the resolve section, every stage section
+chaining from the stage before it, post ending at PostEnd.
+test_remaster_lighting.cpp: nine post programs, the linear depth shader's
+contract (texel centres, checkerboard, sky at 1e6, the shared viewZ).
+Seven mutations (the linear depth on every pass, an early return that
+asks the frame-gated strengths, post ending at the composite, no fall-back
+of a stage section, a landed stage without its case, the linear depth
+keeping the nearest sample everywhere, the debug view not reading it) each
+turn their cases red. Gate tags 466/466 (10 new); the full suite has only
+the 6 known localisation failures.
+
+In game (tmp/integration/A3 of the graphics-remaster worktree): the 30
+programs dumped from af5b999 and from this change are byte-identical, two
+are new. Smoke 3/3 (KHR_debug ids 131169, 131154 and 131218 only).
+features_ab 20261018-040749-ab-A3 against the A2 build's
+20261018-040811-ab-A2build: the five views that repeat to the pixel
+between boots are pixel-identical, off and on; the others differ only as
+each build differs from itself (fire, smoke and lamps at night, the sea,
+the posed soldier). The three-island set 20261018-041416-set against
+20261018-040948-set-A2build: within boot-to-boot noise, Classic included.
+Timing 20261018-035421-timing; linear depth cost and picture
+20261018-040520-lindepth-timing.
+
+Known risks: PostStages.hpp, PostStages.cpp and test_post_stages.cpp are
+new files and must be added with the commit; the ao GPU section no longer
+holds the resolve, so ao numbers before A3 are resolve plus AO; the linear
+depth has no reader yet, and its layout (one level, checkerboard, sky at
+1e6) is a choice the first reader may extend (SSR Hi-Z, SAO mip taps);
+keeping the old early return means a frame that holds every knob-on stage
+off still pays the resolve and composite; the backend and shader
+contract tests match source text, so a rename breaks them; no RTX 3060
+was measured.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

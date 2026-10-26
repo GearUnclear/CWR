@@ -1,0 +1,46 @@
+## track
+combat
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabricated files: every cited image, GIF, patch and NOTES path exists, and prototype.patch lists the same 20 modified files plus the 2 new CombatLights files as the gfx-combat worktree diff (HEAD 3c53141).",
+ "Not disclosed: the shadow-casting light flips between the campfire and the burning Ural from one sim frame to the next. In run9/shots/ffn_x_*, b05 (frame 10) has campfire shadows, b06 (frame 11) has Ural shadows, b07 (frame 12) campfire, b10 Ural, va Ural, vb campfire. ShadowCaster() in CombatLights.cpp picks the max of the instantaneous flickering intensity with no hysteresis, so whole shadow sets pop. In real play a muzzle flash near the camera can also steal the shadow for a frame.",
+ "Not disclosed: a vertical seam at exactly the screen-centre column (x=480 of 960) in combat mode only. Column means step from 76.7 to 81.0 (ffh b02), 54.0 to 57.3 (ffd b02) and 45.1 to 48.5 (ffn b02). Classic and Remastered are flat across the same columns. It is visible by eye in ffd_x_b02 and already shows in run6's 'combat lights as run 5' panel, so the cause sits in the lighting or in-scatter path, not in the shadow.",
+ "BEST_ffn_fires caption says the shadows come from the Ural, but the steady-state frames with this look (ffn_x_0, vb, vc) show campfire-cast shadows; the Ural-cast frames have radial lines from the right-hand men. This is a minor mislabel, and the flipping above causes it.",
+ "'By day nearly invisible' is a little generous: at noon (ffday_x_0) small orange glows remain at the campfire base and behind the Ural (|x-r| mean 4.6 before the shell). They are small but readable."
+]
+## visible_gain_vs_current_remastered
+large
+## visible_gain_vs_classic
+large
+## rtx_vision_score_0_to_10
+6
+## taste_violations
+[
+ "Only darker at the moment of the flash: at eye height ffn b02 is frame 37 against Classic 63, and lower third 42 against 97. At dusk ffd b02 is 70 against 80. Classic's whole-screen whiteout becomes backlit silhouettes. The steady state is brighter (ffh before the shell 27 against 15), but the climactic frame reads dimmer.",
+ "Mild mustard/khaki ground risk: under the flash and fires the grey ground turns beige or khaki-brown (ffh b02 lower third R/B 1.41, ffn steady state R/B 1.48). This is physically plausible for warm light, but it is close to the rejected khaki look.",
+ "A bright warm strip runs along the horizon behind the fires across the whole frame width in every ffn frame (grazing light on distant ground). It can read as a glow band. Not a frame-wide wash, but next to it."
+]
+## cost_ok
+true
+## score_0_to_10
+7
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\combat\BEST_ffh.png
+## one_line
+A real, bold night-combat win: fires, flares and shell flashes now cast long contact-hardening shadows and light the men, so night battles look like a different game. The prototype has stipple, shadows popping between two fires, a centre-column seam it did not disclose, and a flash frame darker than Classic's whiteout.
+## prototype_actually_loaded
+Yes. build9.log compiled CombatLights.cpp, EngineGL33_LightingShaders.cpp, Fireplace.cpp and Smokes.cpp at git 3c53141 and copied PoseidonGame.exe to dist/gfx-combat-rwdi. In run9/tri/combat_r9/game_stdout.log the GL33 shader cache missed, all programs compiled, 144 entries were saved, and there are no error or GL HIGH lines (runs 6-8 are the same). Every combat knob got an OK from triSetLighting, and the '[combat] lights' diagnostic lines show muzzle (up to 7), fire, tracer (up to 6) and flare lights alive. PIL diffs: |x-r| mean 21.9 (ffh b02), 26.1 (ffn b02), 15.1 (flr 2), 10.7 (ffh 0), with 47-57% of pixels changed by more than 15 levels at flash frames. x equals r exactly (diff 0.0) on muzzle frames with no live light. The quoted brightness numbers (ffh 72/75 vs 63, ffn 37 vs 63, ffd 70 vs 80, flr frame 3: 77 vs 53/57) reproduce from the raw shots.
+## artefacts_seen
+1) Interleaved-gradient-noise stipple in every penumbra. At 1:1 it reads as heavy halftone dithering along the long shadows (zoom_shadow_stipple.png; my 3x crop of ffh_x_b02 shows it plainly). 2) A cross-hatch beside the low wreck fire, fainter than round 8's grid but still there (zoom_r8_grid_vs_r9.png right panel). 3) The shadowed light pops between campfire and Ural on consecutive sim frames (ffn_x_b05/b06/b07). 4) A centre-column seam of 3-4.5 sRGB levels, combat mode only. 5) Overexposure near the flare: the ground on the flare side goes almost white, with green/pink albedo mottling (flr_x_3 left third). 6) The burning Ural's black smoke column is lit to light grey well above the fire (ffn and ffh steady state), which softens the oily black-smoke read. 7) The muzzle light lands in only one captured frame per shot, so its gain is fleeting. No NaNs, black pixels, embossing or frame-wide haze. Shadow and lit ground in ffh b02 measure about 0.5 linear (0.69 sRGB), so the shade is not crushed.
+## critique
+Verification: the record is honest and backed by files. All cited artefacts exist, the patch matches the scratch worktree, run 9 was built from the final code, shaders compiled cleanly, and the AFTER shots differ strongly from BEFORE where combat lights exist and match exactly where none do. The quoted means reproduce from the raw 960x640 shots. The explorer also flagged its own weak spots: the darker flash frame, the stipple, the cross-hatch and the unmatched run 9 campfire view (combat x mean 130 against 26, an environment change).
+
+Look: this is the most RTX-like single result I would expect from this track. In BEST_ffh the shell flash throws long radial shadows of every man toward the camera, sharp at the feet and soft at the tips, and the crater glows. Classic and Remastered both show an evenly whitened floor with a pasted sprite. In BEST_flr a parachute flare finally lights the field with falloff and long shadows that swing as it sinks; Classic lights it flat grey. BEST_ffn_fires and the steady ffn frames show the campfire and the burning wreck lighting the men and the ground, where Classic shows near-black. A player would notice this immediately at night. The isolation in run6/ffh_b02_5way shows the shadow is the ingredient that turns flat warm pools into something that reads as path traced. Muzzle (BEST_muz) is a real but fleeting gain, campfire under bright moonlight (BEST_camp) is modest, and by day the effect is correctly almost absent.
+
+Problems a production pass must fix, two of them undisclosed. (a) Shadow-caster flipping: with two comparable fires, ShadowCaster() picks the strongest light by instantaneous flicker with no hysteresis, so the whole shadow set jumps between campfire-cast and Ural-cast on consecutive frames. In motion this is worse than the stipple. A sticky selection, or 2-4 shadowed lights as the production plan already proposes, is required. (b) A seam at the exact screen-centre column, combat mode only, 3-4.5 levels, present since round 5. It looks like a bug in the lighting or in-scatter path and is cheap to find. (c) The stipple at 1:1 is heavy; it needs the temporal or bilateral resolve the explorer lists. (d) The flash frame at eye height is half as bright as Classic in the lower third. The physics are right, but it breaks the owner's 'only darker' rule for the most dramatic moment. The production version needs the brief exposure response or flash fill the explorer proposes, and the before/after frames should be judged together. (e) Warm khaki ground under flash and a horizon glow strip behind fires are taste risks to tune.
+
+RTX vision: it delivers emissive combat light with contact-hardening shadows from existing assets, which is a core RTX-remaster ingredient. It has no bounce or colour bleeding, no reflections of fire in water, glass or wet ground, only one shadowed light at a time, and particles are lit isotropically. That gives about 6 of 10 on the vision for this track.
+
+Cost: the contended machine could not resolve it. The run 9 per-cycle medians reproduce at x-r -0.32 ms and x-w -0.05 ms from timings.json, against noise of several ms. The design (24 dependent depth fetches per fragment, inside one light's range, forward-shaded with overdraw) plausibly costs 1-3 ms at 1080p on a 3060. That fits the 60 fps budget, and the planned move to a half-resolution screen-space pass flattens it. Verdict: worth building properly (7/10). The gain is large and obvious at night, and the flaws are known, engineering-shaped problems rather than a dead end.

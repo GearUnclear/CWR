@@ -1,0 +1,177 @@
+Boom 6 of 6: art direction within physics, each munition its own explosion
+==========================================================================
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-6 (fec1075 + LOOK/boom/base.patch, base tree 43c4ff8f).
+Build build/look-puddle-6-rwdi, game dist/look-puddle-6-rwdi, junction RemasterUD-boom-6. Nothing
+committed, no branch. fix.patch = git diff --cached --binary 43c4ff8f after git add -A arma_CWR, the
+look_probe* capture tests excluded: 7 files, +536 / -13. It applies with git apply --cached --check on
+a fresh index of the base tree.
+
+Look first
+----------
+- final/ALL_strips.png: the six shared clips from the final build, key frames -100 to +4000 ms.
+- final/<time>_<clip>.mp4 and _strip.png: dusk_he, dusk_grenade, dusk_heat, dusk_fuel, night_he,
+  night_fuel (from run r5, the final build).
+- Before: LOOK/boom/before/clips/.
+
+Visual rules I followed
+-----------------------
+1. A cased charge (shell, grenade, warhead) is a flash, not a fire: the brightest thing on screen for
+   a frame, white-hot, sitting on the ground as a dome (never a flat cut-off bottom), then a short orange
+   afterburn of its products, then nothing glowing. No Hollywood fireball on an HE shell.
+2. Size and glow time grow with the cube root of the charge (blast scaling). The charge is read from
+   the ammo's blast, indirectHit x indirectHitRange, with the 120 mm HE shell (150 x 8 = 1200) as
+   reference: HE scale 1, HEAT 0.63, hand grenade 0.47. A shaped charge (indirectHitRange < 3: HEAT)
+   throws its fireball narrower (0.6) and taller (1.35).
+3. What lingers is the earth: a dark grey-brown dust and smoke column, thrown dirt flying up and
+   falling back, the cloud drifting on the wind for many seconds. Bigger crater, longer linger.
+4. Fuel burns slow: a vehicle's tank is a deflagration, a large rolling orange fireball (never white)
+   under thick black soot, then fire and smoke. It follows the fuel fireball rules D = 5.8 M^(1/3) m,
+   t = 0.45 M^(1/3) s.
+5. The light lasts as long as the fire and is a pool that fades out, never a disc with a rim or a line
+   on the horizon. The light sits inside the fireball.
+6. At thumbnail every munition must read differently: HE = white flash then a big dark column;
+   grenade = small flash, small brown puff; HEAT = narrow yellow flash, narrow column; fuel = big
+   orange ball turning black.
+
+What each munition spawned before (probe evidence)
+---------------------------------------------------
+Code path: a shell hit makes an Explosion (Smokes.cpp; size = hit x 0.003 clamped 0.25..1: Shell120
+0.6, Heat120 1.0, grenade 0.25) and Landscape::ExplosionDammage a Crater (Collisions.cpp; big branch for
+explosive ammo, size = landAlpha x 0.5, landAlpha from indirectHit x range / 200 capped 2) plus
+landAlpha x 10 TEGround debris things.
+- Explosion: CfgCloudlets Explosion puffs (cl_fired, 2500 K, -4000 K/s, 0.2 s + 0.2 s fade), all
+  dropped in one batch (the Explosion simulates at 5 Hz), plus the combat light burst.
+- Crater (big): CraterSmoke1/2/3 grey puffs living 2 to 2.4 s with 1.2 s fades (gone by about 3 s,
+  thinning from 1.5 s), CraterDustBig loaded but never simulated (`if (!_isSmoke)`).
+- Why the fire lasted one frame (proven with a temporary DrawDecal log, removed): the fireball puffs
+  were drawn every frame with bright colours (frame 2: rgb (1, 0.97, 0.6), glow 0.39), yet nothing
+  showed. The puff's cl_fired texture steps through 47 frames (fired.73..119) in 0.5 s, a new texture
+  every game frame, each streamed in on first use under the per-frame texture budget, so after the
+  first frame the puffs mostly had no texture to draw and returned before DrawDecal. Also each new puff
+  was invisible for its first two frames (alpha 0 at birth, fade-in value 0 on its first simulate), so
+  the burst light lit a flat patch of ground a frame before any fire showed.
+- Fuel (Jeep): SmokeSourceVehicle::SimulateExplosion computes the blast from GetExplosives(), which for
+  a plain Transport is only its ammo (Jeep 0), so `type.hit > 50` failed: a destroyed Jeep had no fuel
+  explosion at all, only its engine smoke (in 1 s, 6 s, out 6 s). The pale puff in the before clip is the
+  smoke lit by the wreck's embers. This is a misbehaving munition in the shared test: there was no fuel
+  explosion to judge.
+- The grenade's and HEAT's ground light: a bright flat ellipse with a rim (the window at 3 core radii
+  cut the pool where it was still a tenth of its peak, and the 0.3 gain saturated it), brighter than
+  the fireball, for 3 to 4 frames.
+
+The change
+----------
+CombatLights.hpp/.cpp (pure, unit tested): BurstScale(blast), BurstScaleFromSize (network copies without
+ammo), BurstFireballRadius, BurstCoolRate, BurstFlashCoolRate, BurstGlowSeconds, CraterLinger(size),
+FuelBallDiameter(litres), FuelBallDuration(litres), FuelBallEnvelope(age, duration).
+Shots.cpp: every `new Explosion` (7 sites) gets SetBlast(indirectHit x indirectHitRange,
+indirectHitRange < 3). Gameplay damage is untouched.
+Smokes.cpp:
+- Explosion::EmitBurst on its first simulate: one flash puff (3600 K, 2.1 r across) and 9 + 7 s
+  fireball puffs (core hotter than edge, 2580..3000 K) placed as a dome on the ground (centre 0.45 r up,
+  each puff's centre at least 0.4 of its diameter above the ground), expanding 3..6 m/s x s, rising,
+  slowed by side friction. Born full size, no fade-in, Simulate(0) at birth: drawn the same frame the
+  light starts. They use the resident cl_basic puff, its first texture frame held (the fix for the
+  one-frame fire). Each puff lives while it glows, then fades as soot into the crater's smoke.
+- The burst's combat light sits in the fireball (0.7 r up for a ground burst) with strength scale^1.5.
+- Crater::Init big branch: earth colour (0.66, 0.58, 0.49) x 0.55..1 times the table grey; puff life x
+  CraterLinger (HE about 5, HEAT about 4, grenade 2.6), fade-out x 0.8 linger, swelling x 0.6..1 linger;
+  smoke1 emits 2x as long, rises at 0.75 x (0.45 + 0.55 size) of 6.25 m/s and brakes at 1.4 x that factor
+  m/s^2 (stops after about 4 s, column some 10 to 15 m for HE); puff size x (0.35 + 0.4 size); the table
+  lightening slowed by the linger. The thrown earth (CraterDustBig) is now simulated for big bursts:
+  0.15 s of dark clods, up to 16 m/s, falling at 9.8 m/s^2.
+- SmokeSourceVehicle::StartFuelBall (from SimulateExplosion, whatever the blast): litres = GetFuel();
+  the ball is D = FuelBallDiameter, t = FuelBallDuration; per frame (precision 1/30 s while it burns)
+  fire puffs at 30/s over the first 45 %, born 2150 K, cooling 520 K/s, swelling over 0.25 s, buoyant
+  (+3 m/s^2); black soot puffs (0.05, 0.045, 0.04) at 15/s rolling out of its top; a Fire combat light
+  following FuelBallEnvelope; the wreck's smoke then runs 40 s (as after the classic burst). The classic
+  _fire/_darkFire burst is skipped when the fuel ball runs.
+EngineGL33_PostCombat.cpp: the Explosion's surface light: reach 3 -> 6 core radii, gain 0.3 -> 0.15
+(kBurstSurfaceGain; cannon keeps 0.3). With the light inside the fireball the pool's own fall-off has it
+under a fiftieth of its peak where the window bites: it fades out instead of ending at a rim.
+
+Constants (name: old -> new)
+----------------------------
+- Explosion puffs: birth 2500 K -> flash 3600 K (kBurstFlashK), ball 2580..3000 K (kBurstBallK 3000);
+  cooling -4000 K/s -> -6000 / scale (kBurstCoolRef; tried 9000 first: one orange frame only, too
+  brief to read) and the flash -20000 / scale; fade-in 0.01 -> 0, grow-up 0.05 -> 0; cl_fired animated
+  -> cl_basic held (kBurstHoldTexture 1e4 s); radius kBurstRefRadius 2.4 m x scale.
+- Burst light: height 1 + 2.5 exSize -> 0.7 r above ground; strength exSize -> scale^1.5 in [0.2, 1.5].
+- kBurstSurfaceReachCores 3 -> 6; Explosion surface gain 0.3 -> 0.15.
+- Crater smoke (big): puff life 2.4 / 2.0 / 2.4 s -> x 1.5 + 3.5 size (HE about 12 s); fade-out 1.2 /
+  1.2 / 0.8 s -> x 0.8 / 0.8 / 1.0 linger; colour neutral grey -> earth; smoke1 rise 6.25 m/s -> 4.7 m/s
+  (HE), climb acc -0.1 -> -1.4 x factor; puff size x 0.35 + 0.4 size; CraterDustBig not run -> run
+  (0.15 s, interval 0.006, size 0.15 + 0.2 size, up 2 + 6 size m/s, max 16 m/s).
+- Fuel: none (Jeep) -> kFuelBallShare 0.4 of the tank at kFuelKgPerLitre 0.75, kFuelBallMaxDiameter 16,
+  kFuelBallBirthK 2150, kFuelBallCool 520 K/s, kFuelBallLight 5 (9 first: lit its own soot pale grey by
+  night).
+
+Per munition, now (final build, 30 fps fixed step)
+--------------------------------------------------
+- 120 mm HE (dusk, 50 m): frame 1 a white-hot dome about 5 m across sitting on the ground, ground lit
+  under it; frame 2 an orange afterburn ball fading into brown dust; frame 3 on dark earth: clods and
+  20 to 30 dark dust puffs thrown up to about 10 m and falling back, a dark grey-brown column to about
+  15 m within 1 s, spreading 20 m wide by 2 s and drifting, still present at the clip's end (3 s);
+  puffs live about 12 s plus 5 s of fade.
+- Hand grenade (dusk, 22 m): frame 1 a small yellow-white flash (about 2.4 m) with a soft ground glow,
+  frame 2 a small orange ball (about 3 m), then a brown dust puff a few metres across lingering about
+  6 s. Reads clearly smaller than the HE.
+- 120 mm HEAT (dusk, 40 m): frame 1 a narrow, taller yellow-white flash, frame 2 a pale remnant, then
+  a narrow dark column, smoke lingering about 9 s. Smaller and more focused than the HE.
+- Jeep fuel (dusk, 45 m; it blows 0.2 to 1.5 s after death): an orange ball growing to about 14 m over
+  0.2 s, rolling up with black soot round its top; orange for about 0.4 s, deep orange inside black at
+  0.5 s, black soot by 0.6 s; light for 1.1 s; then the wreck burns with black smoke for 40 s. Night:
+  the same ball, bright orange, lighting the plain warm; its soot turns pale grey (lit by its own
+  fire) at 0.33 to 0.5 s.
+- Night HE: a white dome flash for a frame that lights the ground and men, an orange frame, then dim
+  grey dust in the moonlight (the bright grey night smoke of round 5 is now earth coloured and darker).
+
+Tests
+-----
+- New in test_combat_lights.cpp ([remaster][CombatLights]): a burst's size and glow follow the cube
+  root of its charge (HE / HEAT / grenade scales, radii, glow times, flash shorter than the fireball,
+  white flash and yellow-white ball birth colours, crater linger order and lengths); a fuel tank burns
+  as a slower, larger fireball (Jeep 14 m and 1.1 s, cap, envelope, orange never white); each
+  munition's burst reaches the explosion (source contracts: every `new Explosion` in Shots.cpp gets
+  SetBlast, EmitBurst runs and draws at once and on the ground, CraterLinger is used, the big crater's
+  dust is simulated, StartFuelBall is called and the blast's damage branch is unchanged).
+- Tags [CombatLights],[PhotoCamera],[Shaders],[remaster],[fog] on the final build, run from D:\:
+  All tests passed (958646 assertions in 323 test cases) (unit.txt).
+- clang-format clean on every changed .cpp and CombatLights.hpp (the base files were clean).
+
+AI sight and fog
+----------------
+Target.cpp, VolumetricFog.cpp and SimulateFogSight are not in the diff; the link is untouched.
+
+Cost
+----
+No GPU or frame timers are read by the munition tests, so I have no frame time numbers; the tri run
+for both tests took 156 s (final) against 220 s for the before run (machine load differs, not a frame
+time measure). Particles per burst: HE 17 fireball puffs for at most 0.3 s, 20 to 30 dust puffs for
+about 3.5 s, about 36 crater smoke puffs now alive for about 15 s instead of about 3 s (so a barrage keeps
+about five times as many crater puffs alive); grenade and HEAT fewer and shorter. Fuel: about 15 fire
+and 14 soot puffs over 2 to 3 s, one extra Fire combat light for 1.1 s, the vehicle's smoke source
+simulated every frame for 1.3 s, and a destroyed vehicle's smoke now runs 40 s (it was 6 s for cars).
+
+Honest weak points
+------------------
+1. Lingering smoke enters the later clips of the shared test: the HE's column is still in the
+   grenade clip, and the burning Ural staged behind the line now gets its own fuel ball at staging and
+   smokes heavily for 40 s, so every dusk clip has a bigger black column in the background than the
+   before clips. That is the new behaviour, not a test fault.
+2. The white flash is a single frame; at 30 fps whether it lands on a captured frame depends on timing.
+   The HE afterburn reads for one to two frames; at full speed it is a sharp pop, by design.
+3. One crater smoke puff sometimes shoots up much faster than the rest (HE frames 13 to 18, a dark
+   ball climbing to about 20 m); I did not find which source launches it.
+4. By night the fuel ball's soot is lit pale grey by its own fire light; "thick black soot" holds only
+   at dusk. kFuelBallLight is the knob (9 -> 5 already).
+5. All burst puffs use the first frame of cl_basic: close up, the fireball's puffs share one shape.
+6. The burst's ground pool still reads as a soft ellipse on flat ground for a frame or two from eye
+   height (softer, with no rim, under the fire), as a lit patch on flat ground does.
+7. Not checked: rockets (LAW, RPG never arm in the tests) and the LAW probe's black lower half frame.
+   Missile explosions also get SetBlast and the new burst; I did not shoot them.
+8. Every destroyed vehicle with 2 l of fuel or more now gets a fuel ball, including aircraft, ships and
+   the staged Ural (capped at 16 m and 2 s). Not shot for aircraft.
+9. The classic lighting path (no combat lights) was not shot: there the burst puffs show the config
+   table's colours (white above 2200 K), which should still read as a flash.

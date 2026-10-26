@@ -1,0 +1,7 @@
+# crown-nan research capture (generated; research only)
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_abel.Abel"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 1800
+assert_timeout = 180
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "960", "--height", "640"]

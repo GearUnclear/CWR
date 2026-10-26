@@ -1,0 +1,393 @@
+[
+ {
+  "kind": "take",
+  "start": 5.6,
+  "end": 12.8,
+  "line": "v2_00_intro",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 7.2,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 14.8,
+  "end": 22.01,
+  "line": "v2_00_intro",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 7.21,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 24.01,
+  "end": 31.21,
+  "line": "v2_00_intro",
+  "take": 3,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 7.2,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 33.81,
+  "end": 39.89,
+  "line": "v2_01_opening",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.08,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 41.89,
+  "end": 47.94,
+  "line": "v2_01_opening",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.05,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 50.54,
+  "end": 56.47,
+  "line": "v2_02_valley_mist",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.93,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 58.47,
+  "end": 64.51,
+  "line": "v2_02_valley_mist",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.04,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 67.11,
+  "end": 73.29,
+  "line": "v2_03_pine_shafts",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.18,
+  "restart": false
+ },
+ {
+  "kind": "fragment",
+  "start": 75.29,
+  "end": 78.804,
+  "line": "v2_03_pine_shafts",
+  "voice": "lily"
+ },
+ {
+  "kind": "take",
+  "start": 79.904,
+  "end": 86.294,
+  "line": "v2_03_pine_shafts",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.39,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 88.894,
+  "end": 95.284,
+  "line": "v2_04_bay_reflections",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.39,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 97.284,
+  "end": 103.624,
+  "line": "v2_04_bay_reflections",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.34,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 104.324,
+  "end": 111.054,
+  "line": "v2_05_outpost",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.73,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 113.054,
+  "end": 119.984,
+  "line": "v2_05_outpost",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.93,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 122.584,
+  "end": 128.504,
+  "line": "v2_06_cloud_shadows",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.92,
+  "restart": false
+ },
+ {
+  "kind": "cough",
+  "start": 129.204,
+  "end": 129.784
+ },
+ {
+  "kind": "take",
+  "start": 132.504,
+  "end": 138.694,
+  "line": "v2_06_cloud_shadows",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.19,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 141.294,
+  "end": 147.134,
+  "line": "v2_07_sinai_camp",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.84,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 149.134,
+  "end": 155.144,
+  "line": "v2_07_sinai_camp",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.01,
+  "restart": false
+ },
+ {
+  "kind": "cough",
+  "start": 158.144,
+  "end": 158.724
+ },
+ {
+  "kind": "take",
+  "start": 159.324,
+  "end": 163.544,
+  "line": "v2_09_convoy",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 4.22,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 165.544,
+  "end": 169.824,
+  "line": "v2_09_convoy",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 4.28,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 172.424,
+  "end": 179.634,
+  "line": "v2_08_ambush",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 7.21,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 181.634,
+  "end": 188.964,
+  "line": "v2_08_ambush",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 7.33,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 191.564,
+  "end": 195.494,
+  "line": "v2_10_checkpoint",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 3.93,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 197.494,
+  "end": 201.344,
+  "line": "v2_10_checkpoint",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 3.85,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 203.944,
+  "end": 210.034,
+  "line": "v2_11_town_patrol",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.09,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 212.034,
+  "end": 218.254,
+  "line": "v2_11_town_patrol",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.22,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 220.254,
+  "end": 225.741,
+  "line": "v2_11_town_patrol",
+  "take": 3,
+  "voice": "sarah",
+  "wording": "shorter",
+  "secs": 5.487,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 228.341,
+  "end": 234.061,
+  "line": "v2_12_rain_town",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.72,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 236.061,
+  "end": 244.256,
+  "line": "v2_12_rain_town",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 8.194,
+  "restart": true
+ },
+ {
+  "kind": "take",
+  "start": 246.856,
+  "end": 252.616,
+  "line": "v2_13_supply_run",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.76,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 254.616,
+  "end": 260.576,
+  "line": "v2_13_supply_run",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 5.96,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 263.176,
+  "end": 268.706,
+  "line": "v2_14_firefight",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.53,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 270.706,
+  "end": 276.656,
+  "line": "v2_14_firefight",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 5.95,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 279.256,
+  "end": 284.676,
+  "line": "v2_99_outro",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.42,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 286.676,
+  "end": 292.146,
+  "line": "v2_99_outro",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 5.47,
+  "restart": false
+ }
+]

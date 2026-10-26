@@ -1,0 +1,347 @@
+# Track ssgi: screen-space ray-traced diffuse GI with temporal accumulation
+
+Verdict (updated by the resume run, v7-v9, 2026-10-17 evening): **mixed.**
+
+- **Daylight: failed as an "RTX on" lever (unchanged from the first session).**
+  A physically consistent screen-space bounce on top of the Remastered light
+  rig changes the daytime frames by 0.0 to 0.5 8-bit levels on average and by
+  a few levels at most on objects. With the object sky share forced to 1 (what
+  a G-buffer would give) the physical mode still adds only +0.2 to +1.5 levels
+  on vehicles. Only the non-physical upper bound (the full radiance of every
+  hit added on top of the rig, double counting the rig's own ground bounce)
+  reaches +9 to +13 levels on the lower halves of vehicles and soldiers (v9):
+  a visible but small lift of the running gear and tyres, not a different game.
+- **Night with a bright local light on screen: works and reads right.** A
+  crewed Jeep's headlights light the ground beside an M113 (`headlights_bounce`,
+  a new research view): the bounce off the headlight pool lights the hull's
+  rear and flank from below, +9 levels at x1 and +15 at x2 on a hull whose
+  Remastered mean is 25, with a bottom-heavy falloff, stable under camera
+  motion. This is the one scene type in this track where the path-traced cue
+  (a surface next to a bright pool picks up its light) shows. It needs a
+  stand-in albedo (night pixels carry no usable sky share); the v9
+  detail-keeping version of that stand-in is what makes it look like light on
+  a textured hull instead of a grey wash. `BEST_headlights_bounce.png`,
+  `BEST_headlights_bounce_crop.png`.
+- **Campfire night with the street lamps off: too small to matter** (+1 to +3
+  levels on the tree trunk and the soldier); the fire's light pool is dim.
+
+First-session verdict, kept for the record: a physically consistent bounce
+changes the daytime frames by 0.0 to 0.5 levels on average (p99 at most +5,
+inside the shot-to-shot noise floor of about +-3); the over-bright upper bound
+stays at +0.06 to +0.30 levels mean; night is the only place where the bounce
+shows, and in the stock town_night it brightens a town the street lamps
+already over-light. (Pre-resume NOTES: `cmp/prev_best/NOTES_before_resume.md`.)
+
+## What was built (C++ scratch prototype, `prototype.patch`)
+
+Scratch worktree `D:\Arma_CWA_worktrees\gfx-ssgi` (detached at 3c53141, not a
+branch), build `dist/gfx-ssgi-rwdi`. Classic is untouched (the GI only runs in
+the remastered post pass and is off at `gi=0`, the default). The resume added
+no C++: `prototype.patch` is still byte-identical to the scratch worktree's
+`git diff` (checked 2026-10-17 evening).
+
+Post pass (`EngineGL33_PostFX.cpp`), after the AO blur and before the `AoEnd`
+GPU mark (so its cost is in the `ao` column of the timings):
+
+1. **Trace** (`psPostGi`, half resolution, 720x480 for the 1440x960 target).
+   View-space position and normal from depth (the AO's own reconstruction).
+   N cosine-distributed rays per pixel (default 6), each marched with 20
+   quadratically spaced steps out to `clamp(0.25 z, 3, 25) m * giRadius`.
+   Hit = the ray passes behind the depth surface within `0.35 + 0.2 t` m.
+   Hit radiance = the resolved frame colour, fetched from a mip chain
+   (`glGenerateMipmap` on the post colour copy, own trilinear sampler) at a
+   cone-footprint LOD, linearised and divided by the rig exposure.
+   Per-pixel interleaved-gradient noise, rotated every frame.
+2. **Temporal accumulation** (`psPostGiTemporal`): each pixel is reprojected
+   into last frame's history with the previous camera axes, position and
+   projection (C++ keeps them), accepted where the stored view depth agrees
+   (3% + 0.15 m), blend weight 0.1 for the new frame, reset on disocclusion.
+3. **Spatial denoise** (`psPostGiBlur`): separable 13-tap depth-aware blur.
+4. **Composite** (`psPostComposite`): joint-bilateral 2x2 upsample to full
+   resolution; the receiver's albedo is recovered from the sky-light share the
+   remastered shaders already write into the colour alpha:
+   `share * colour = albedo * ka * skyIrradiance(n) * exposure`, so
+   `albedo*ka = share * colour / (skyIrradiance(n) * exposure)`, with
+   `skyIrradiance` re-evaluated from the depth normal and the rig hemisphere
+   (zenith / horizon / horizon-sun / ground) times the material ambient `ka`.
+   The albedo is capped (`giAlbedoCap`, 0.8) so a lamp-lit pixel cannot claim
+   a white albedo. Added light goes through an inverse-then-forward tonemap
+   shoulder, so pixels with no GI pass through exactly.
+
+Modes (`triSetLighting "giMode=..."`):
+
+| mode | what a ray contributes | intent |
+|---|---|---|
+| 1 | hit: `max(L - sky(dir), 0)`, miss: 0 | **add only** the light a hit sends back in excess of what the rig's hemisphere already assumes for that direction (the main prototype) |
+| 3 | hit: `L`, miss: `sky(dir)`, minus the open hemisphere | the traced result **replaces** the rig hemisphere and the shipped AO (can darken) |
+| 2 | disc samples above the tangent plane, excess radiance x cosine x falloff | the cheap SSAO-plus-colour-bleed (SSDO-style) variant |
+| 6 | hit: `L` (override_v4 and later) | art-directed fill / upper bound: full hit radiance on top of the rig |
+| 7, 8 | diagnostics (override_v5 and later): hit fraction / mean LOD / hit radiance | |
+
+Tuning knobs (`LightingTuning`, `triSetLighting key=value`): `gi`, `giMode`,
+`giRadius`, `giRays`, `giSteps`, `giTemporal`, `giDebug` (1 = added light only
+x4, 2 = raw GI texture, 3 = share/alpha/depth), `giFallbackShare` (from v7:
+values >= 1.5 select the hue albedo), `giAlbedoCap`.
+
+GLSL per variant (pass the dir to `run-captures.ps1 -ShaderOverrideDir` with
+the scratch build): `glsl/` (first version), `override_v2/` (ratio
+estimator), `override_v4/` (adds mode 6), `override_v5/` (diagnostics),
+`override_v6/` (crossing-tolerant hit test), `override_v7/` (hue albedo),
+`override_v8/` (hit-normal test, capped crossing tolerance and LOD, receiver
+distance fade), `override_v9/` (detail-keeping hue albedo; the best night
+version), `glsl_final/` (the GI and composite shaders as compiled into the
+patch).
+
+## Runs (all on the hidden desktop, junction `RemasterUD-ssgi`, 960x640, 150%, 4x MSAA)
+
+| run | what | note |
+|---|---|---|
+| `runs/smoke1` | lowsun_fp, pipeline check | test lacked `triEndTest`, stopped by hand |
+| `runs/abel1` | first variant set, 4 Abel views | **units bug**: the GI rig was not multiplied by the material ambient `ka`; mode 3 not normalised. Those images are wrong; kept as the record of the bug |
+| `runs/v3` | fixed units + ratio estimator + albedo from share, 5 Abel views + Sinai, motion strafe | a first try with a composite compile error was deleted and rerun |
+| `runs/v4` | rig bounce off alone, traced bounce replacing it, fill mode 6 at 0.5 and 1, Abel + Sinai | override_v4 |
+| `runs/diag1` | lowsun_fp raw GI texture views | override_v5, `diag_lowsun_fp_tiles.png` |
+| `runs/v5` | town_night, moonlight 0.3 vs 1, temporal on/off strafe in the debug view | |
+| `runs/v6` | crossing-tolerant hit test, 3 Abel day views | override_v6 |
+| `runs/v7` | **resume**: headlights_bounce, town_dark_fire (hue / share-1 albedo, x1, x2, mode 6, debug), lowsun_fp and noon_fields with object share 1 | override_v7 |
+| `runs/v8` | **resume**: trace fixes on the night views and noon_fields, an 8-frame strafe on headlights_bounce (GI and gi=0) | override_v8 |
+| `runs/v9_crash`, `runs/v9_crash2` | the v9 test with `switchLight` over all objects near the spot: the game crashed both times (see below) | no images |
+| `runs/v9` | **resume**: detail-keeping hue albedo on the four views, 1200-frame lamp settle, a gi=0 shot repeated at the end of each view (`rem_end`) | override_v9 |
+
+Per-run comparison images are in `cmp/<run>/` (`<view>__all.png` grid,
+`<view>__3way_<variant>.png` Classic | Remastered | variant with GPU ms,
+`<view>__crop_<variant>.png` 3x crop of the most-changed 160 px square).
+`timings_and_deltas.txt` holds the region change statistics, `timings.md` the
+GPU timings of every shot (resume runs appended at the end of both).
+
+## What the real data showed (first session)
+
+Whole-frame change against Remastered (8-bit levels; `>2` = share of pixels
+changed by more than 2 levels):
+
+| view | mode 1 x1 (physical) | mode 1 x2 | mode 3 (replaces AO) | mode 2 SSDO x2 | mode 6 x1 (upper bound) |
+|---|---|---|---|---|---|
+| lowsun_fp | +0.00, p99 +0.7 | +0.01, p99 +1.0 | -0.26, p1 -4.7 | -0.02 | +0.06, p99 +2.3 |
+| sinai_lowsun_fp | +0.02, p99 +0.7 | +0.02, p99 +1.3 | -0.41, p1 -6.0 | +0.01 | +0.11, p99 +2.7 |
+| noon_fields | +0.02, p99 +1.7 | +0.04, p99 +2.7 | -0.13, p1 -4.7 | +0.04 | +0.11, p99 +4.3 |
+| forest_edge_golden | +0.05, p99 +1.3 | +0.12, p99 +2.3 | -0.36, p1 -4.3 | +0.15 | +0.30, p99 +3.3 |
+| town_golden (research view) | +0.00, p99 +0.7 | -0.00, p99 +1.3 | -0.80, p1 -6.0 | -0.09 | n/a |
+| town_night | +4.07 (tree +10.6) | +7.23 (tree +17.5) | +3.65 | +1.32 | +3.84 |
+
+Correction (resume run): the `noon_fields` "jeep" and "soldier" boxes of
+`regions.py` sat on empty ground, so every "jeep: +0.00" printed for noon in
+the first-session block of `timings_and_deltas.txt` was wrong. With boxes on
+the actual Jeep and soldier (`regions_noon_fixed.txt`): Jeep +0.5 to +1.0
+levels (mode 1, x1 to x2), +2.6 to +3.1 (mode 6); soldier +0.0 to +1.6. Still
+invisible.
+
+Turning the rig's own ground bounce off (`rem_b0`, `bounce=0`) changes the
+daytime frames by only -0.01 to -0.49 levels, and replacing it with the traced
+bounce (`gi_b0m3`) by -0.23 to -0.76: at these sun heights the rig's uniform
+bounce is small, and the traced one is about the same size.
+
+Why the daylight bounce is invisible (checked with the diagnostics):
+
+- **The sky dominates the hemisphere.** The rig's sky fill is bright (shade at
+  about 0.6 of lit, which the owner asked for), so a hit only adds light if it
+  is brighter than the sky it hides. Sunlit Abel and Sinai ground sits close to
+  the rig's assumed ground albedo, so ground hits add about nothing.
+- **The acceptance views are backlit.** In lowsun_fp and sinai_lowsun_fp every
+  face the camera sees looks down onto its own cast shadow.
+  `diag_lowsun_fp_tiles.png` shows the hulls' hit fraction at 0.18-0.35 and the
+  mode-6 ratio (full hit radiance over the hull's sky irradiance) at only
+  0.10-0.19.
+- **Not a missed-hit artefact.** `override_v6` also accepts a front-to-behind
+  crossing within `max(1.5 m, 0.12 z)`; hull hit fractions rose to 0.25-0.39
+  and the result stayed the same.
+- **Vehicles, soldiers, the tent and tree crowns carry no sky share.** Under 4x
+  MSAA these draws store alpha 1, so the GI has to assume a share for them.
+  **Side finding for the AO owner: the shipped Remastered AO therefore never
+  darkens vehicles, soldiers or tree crowns either.** The resume bounded this
+  (share forced to 1): it does not change the daylight verdict.
+
+## Resume run (2026-10-17 evening): v7, v8, v9
+
+The first session ended with a negative daylight verdict and the open
+question "if SSGI is revisited, it belongs at night with local lights". The
+resume tested that directly, bounded the object-share limitation, and fixed
+the artefacts the night scenes exposed. GLSL only.
+
+### New research views (`scripts/gen_tests_v7.py`)
+
+| view | what | why |
+|---|---|---|
+| `headlights_bounce` | Abel 7300/10900 (the lowsun_fp spot), heading 152.5, moonless 1985-03-17 23:00, VD 800. A crewed Jeep (driver SAFE, so its headlights are on) 9.5 m ahead aimed at an M113 7 m ahead; a soldier beside the hull | best case for screen-space bounce: a very bright pool on screen right next to surfaces that face it |
+| `town_dark_fire` | the town_night camera with the six Saint Louis street lamps switched OFF by object id, the campfire at 9 m, a soldier beside it | the stock town_night is flat-lit by the lamps' 50 m discs (the night track's finding), which hides any bounce |
+
+Day views were re-shot with the object sky share forced to 1
+(`giFallbackShare=1`) and with the hue albedos.
+
+### Shader variants
+
+| dir | change |
+|---|---|
+| `override_v7` | v6 + a **hue albedo** path in the composite (`giFallbackShare >= 1.5`): albedo x ka = the pixel's chroma at a fixed mid-tone (0.2 x 1.6). At night the share-based albedo is useless: the sky share is a few 8-bit steps of alpha, and CWA's local lights have an ambient term that lights every surface in range whatever its facing, so `colour / sky` exceeds the cap everywhere and the albedo saturates at the cap |
+| `override_v8` | v7 + trace fixes: a **hit-normal test** (the surface hit must face back along the ray: no co-planar or self hits; 5 extra depth fetches per hit), the crossing tolerance capped at 4 m, the hit mip LOD capped at 3 (was 5), and a **receiver distance fade** (80-160 m) |
+| `override_v9` | v8 + a **detail-keeping hue albedo**: the hue albedo times the pixel's luminance over the local mean of the same surface (5x5 taps 3 px apart, taps at other depths dropped, ratio clamped 0.3-2), so dark texels (tyres, panel lines) stay dark under the added light |
+
+### What the real data showed
+
+8-bit change of the region mean against the gi=0 shot of the same lamp state
+(resume block of `timings_and_deltas.txt`; v7 against the first Remastered
+shot, v8 against `strafe_rem0`, v9 against `remastered`, which matches
+`rem_end` to 0.00):
+
+| view / region (Remastered mean) | v7 x1 hue | v8 x1 hue | v8 x2 hue | v9 x1 detail | v9 x2 detail |
+|---|---|---|---|---|---|
+| headlights_bounce / M113 (25) | +9.1 | +10.0 | +15.9 | **+9.4** | **+15.1** |
+| headlights_bounce / Jeep (16) | +3.0 | +2.1 | +3.3 | +1.6 | +2.7 |
+| headlights_bounce / soldier (36) | +4.3 | +1.5 | +2.6 | +1.2 | +2.1 |
+| town_dark_fire / trunk (32) | +1.6 | +2.5 | +2.9 | +1.3 | +1.5 |
+| town_dark_fire / soldier (40) | +1.0 | +1.9 | +2.7 | +1.4 | +2.2 |
+
+(In v8 the first Remastered shot and a later gi=0 shot differ by 2.4 levels
+on the soldier, so the v7 soldier figure, taken against v7's first Remastered
+shot, likely carries a similar drift.)
+
+Day views:
+
+| view / region (Remastered mean) | mode 1, share 1 (v7, v8) | mode 6, share 1 (v7, v8) | v9 mode 1 x1 | v9 mode 1 x2 | v9 mode 6 (upper bound) |
+|---|---|---|---|---|---|
+| lowsun_fp / M113 (45) | +0.2 (v7) | +1.5 (v7) | +1.5 | +2.8 | **+9.5** |
+| lowsun_fp / tent (81) | +0.1 (v7) | +0.8 (v7) | +1.0 | +2.0 | +3.5 |
+| lowsun_fp / soldier (84) | +0.1 (v7) | +0.9 (v7) | +1.1 | +2.1 | +4.1 |
+| noon_fields / Jeep (98) | +1.2, +1.5 | +5.2, +5.3 | +4.4 | +7.7 | **+13.1** |
+| noon_fields / soldier (106) | +0.1, +0.4 | +2.2, +2.4 | +3.0 | +5.3 | +10.2 |
+
+How it looks (judged on the images, not only the numbers):
+
+- `headlights_bounce`, v9 x2 (`BEST_headlights_bounce.png`, crop
+  `BEST_headlights_bounce_crop.png`): the M113's rear door and running gear go
+  from a dark silhouette beside a blazing pool to a hull lit from below by
+  that pool, brightest at the bottom (in v8's debug shot the added light at
+  the hull bottom is about 15 times that at the roof edge), texture and panel
+  lines intact. The v8 version of the same light (flat hue albedo) washed the
+  hull to a uniform grey (middle panel of the crop); v9 fixes that. The soldier
+  and the Jeep gain little: the soldier's lit side faces away from the camera,
+  and the Jeep's body sits behind its own lamps.
+- Temporal accumulation under motion (`motion_headlights_v8.gif`,
+  `motion_headlights_v8_strip.png`, camera 0.25 m per frame for 8 frames): the
+  bounce on the hull stays attached and stable (hull mean +8 to +10 levels over
+  Remastered on every frame), no ghosting or flicker at this speed.
+- `lowsun_fp` mode 6 (`BEST_lowsun_fp.png`): the backlit M113's running gear
+  and lower hull become readable with a cool grey lift (the radiance of the
+  shadowed ground in front of it); the upper flank stays dark. A partial,
+  non-physical answer to the "crushed shaded faces" complaint. `noon_fields`
+  mode 6 (`BEST_noon_fields.png`): tyres and the lower body a little lighter.
+  Neither reads as a new look; physical mode 1 stays invisible.
+- `town_dark_fire` (`BEST_town_dark_fire.png`): with the lamps off the town is
+  a real night (dark, the fire and its smoke glowing). The bounce barely
+  shows; the change map is dominated by the smoke plume, which animates
+  between shots. The debug panel shows one more artefact: blended smoke
+  sprites keep the depth of the house behind them, so a ray that hits the
+  house fetches the glowing smoke colour and the house "lights itself" warm.
+
+### Found on the way (outside this track)
+
+- **Far-town street lamps switch on between shots.** In v7/v8 every GI shot of
+  `headlights_bounce` showed a lit town band on the horizon that the first
+  Remastered shot did not have. Not GI: a gi=0 shot taken after the GI shots
+  (`strafe_rem0`) shows the same band. `StreetLamp` in auto mode only
+  re-evaluates on its 12 s simulation step, so lamps switch on several seconds
+  into a capture (the first session's "time-dependent night brightness" in
+  town_night is this). v9 waits 1200 frames before its first shot; its gi=0
+  shot at the end of the view matches the first to 0.00 levels.
+- **`switchLight` crashes the engine on some map lamps.** `{ _x switchLight
+  "ON" } forEach (nearestObjects [[7300,10900,0], [], 3000])`, and the same
+  with "OFF" and a 1 km radius, both died with an access violation in
+  `StreetLamp::SimulateSwitch -> EntityHit::GetHit` (some lamp near that spot
+  has no valid bulb hit). Stack in
+  `runs/v9_crash2/tri/abel_ssgi_v9/game_stdout.log`. Switching the six known
+  Saint Louis lamps by object id works. A mission-callable command should not
+  crash; worth an engine issue.
+
+## GPU cost
+
+First session (RTX 4060 Ti, 1440x960 internal, GI at 720x480; other agents'
+games shared the GPU, so the `ao` column, AO + GI before the `AoEnd` mark, is
+the usable number):
+
+- Modes 1/3, 6 rays x 20 steps + temporal + blur: **+1.5 to +2.2 ms**
+  (`ao` 0.16-0.39 ms without GI, 1.87-2.47 with it, runs v3/v4).
+- 4 rays x 16 steps: +0.6 to +1.6 ms (run abel1).
+- Mode 2 (SSDO, 16 taps): its time does not show in the `ao` column; the `post`
+  total grows by 0.2-1.5 ms, too noisy to pin down.
+
+Resume (v7-v9): `ao` 0.16-0.35 ms without GI, 1.66-3.70 ms with it, so **+1.4
+to +3.5 ms**; v8/v9 sit at the top (+2.4 to +3.5 ms) because of the hit-normal
+fetches and the 25-tap albedo. Up to three other games shared the GPU, so
+these are upper bounds; the frame and world columns are too noisy to use.
+
+## What a production version would need
+
+- A real albedo and sky-share buffer: an MRT written by the remastered world
+  shaders. Every albedo here is a stand-in, and the night result depends on
+  one (the hue stand-in assumes every surface is mid-tone, so a dark-painted
+  hull gets more bounce than its paint reflects). Same need as the gbuffer track's.
+- Particles out of the hit radiance (or a particle-free colour copy): smoke
+  and flare sprites keep the background depth.
+- The v8 hit-normal test, crossing cap and distance fade; the temporal path as
+  it is; a history clamp for moving objects; its own GPU mark.
+- Scope it to local lights. In daylight the rig's sky fill dominates every
+  hemisphere and a physical bounce is a few levels at most; gate the GI on
+  the local-light energy in view (or on night and dusk), so it costs nothing
+  by day.
+
+## Risks against the owner's taste list
+
+- Night with the stock lamps (town_night): makes the over-bright town brighter
+  and the crowns paler (rejected looks: wash, flattened crowns). The lamp model
+  has to be fixed first (night track).
+- The flat hue albedo (v7/v8) is a grey wash on dark hulls; v9 fixes that on
+  the hull, but it is still a stand-in.
+- Daylight mode 6 lifts shaded running gear with a cool grey (the colour of the
+  shadowed ground): local, not a frame wash, but it leans toward the rejected
+  blue side at low sun.
+- Mode 3 (traced sky visibility replacing AO) is net darker (-0.1 to -0.8
+  levels, p1 down to -7): "only darker" is on the rejected list.
+- The abel1 images (wrong units) looked like a warm golden-hour bounce into the
+  crowns; that look is not real and should not be quoted.
+- Night bounce (v9) only adds light, never darkens.
+
+## Recommendation
+
+Do not spend production effort on SSGI for daylight CWA scenes: with this rig
+and this content the physical bounce is a few 8-bit levels at most. If SSGI
+is built, build it as a **local-light bounce** (headlights, lamps once the
+lamp model is physical, fires, muzzle flashes, explosions), on top of a real
+albedo buffer, gated off by day. The headlight case shows the payoff: a hull
+next to a lit patch of ground picks up its light, which Remastered today
+cannot show. The "path traced" jump for daylight has to come from other
+tracks (sky occlusion that reaches objects, contact-hardening shadows,
+reflections, volumetrics).
+
+## Files
+
+- `prototype.patch`: the C++ prototype (git diff of the scratch worktree).
+- `BEST_headlights_bounce.png` (v9 x2: Classic | Remastered | +SSGI | change
+  x4 against the end-of-view gi=0 shot | added light only) and
+  `BEST_headlights_bounce_crop.png` (2x crop: Remastered | v8 flat hue albedo
+  | v9 detail-keeping albedo): the positive result.
+- `BEST_town_dark_fire.png` (v9 x2), `BEST_lowsun_fp.png` and
+  `BEST_noon_fields.png` (v9 mode 6, the upper bound; the pre-resume versions
+  are in `cmp/prev_best/`), `BEST_sinai_lowsun_fp.png`,
+  `BEST_forest_edge_golden.png` (first session, mode 6 x1),
+  `BEST_town_night.png` (first session, mode 1 x1).
+- `motion_headlights_v8.gif` / `_strip.png` (resume) and
+  `motion_town_night_gi_debug.gif` / `_strip.png` (first session): temporal
+  accumulation under camera motion.
+- `scripts/`: `gen_tests.py`, `gen_tests_v7.py`, `gen_tests_v8.py`,
+  `gen_tests_v9.py` (research capture tests), `compare.py` (3-way images,
+  grids, timing tables), `make_best.py`, `make_best_v2.py` (BEST images with a
+  chosen gi=0 baseline), `regions.py` (region change statistics),
+  `motion.py`, `motion_v8.py` (strips and GIFs), `apply_postfx.py` (first
+  patch step).
+- `tests_copy/`: the generated research tests as run (originals in the scratch
+  worktree under `arma_CWR/tests/rendering/research/ssgi/`, git-excluded).
+- `regions_noon_fixed.txt`: v3/v4/v6 noon statistics with corrected boxes.

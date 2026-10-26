@@ -1,0 +1,153 @@
+[
+ {
+  "key": "ailink",
+  "status": "fixed",
+  "root_cause": "AI sight was driven by the renderer. Only EngineGL33::UpdateFogMedium called SetFogSight, and it passed nullptr whenever this frame's fog did not draw: post effects off, SSAA off, fog unavailable, or a vehicle interior. A dedicated server or headless process never called it at all. The sight map was also built inside the fog stage (UpdateFogFloor) from the terrain horizon map, so it existed only after the fog first drew, and only while terrainShadows or terrainOcclusion was above 0. A probe proved this using the new triFogSight command (Eden, 06:10, overcast 0.7, setFog 0.3). With post effects on, the drawn fog and AI both had mist 1.950e-03. With post effects off, AI went inactive (ai=0, mist 0) even though the weather still held the mist.",
+  "change_summary": "AI sight is now part of the simulation. World::SimulateLandscape calls the new SimulateFogSight(GLOB_LAND) once per step, after the clock, sun and weather move and before PerformAI. When the island's heights change, it builds the sight map at once on the main thread with BuildFogSightMap. That map uses the same box downsample as the terrain horizon map (DownsampleTerrainGrid) plus the fog floor and the mist layer, and does not depend on any render setting (Eden 1024x1024: about 150 ms). Each step, the medium comes from ComputeFogMedium(WorldFogInputs(land), GEngine tuning or the base defaults, applied=true). The renderer no longer calls SetFogSight. It fills its own medium from the same WorldFogInputs function and draws its fog floor texture from AI sight's map (FogSightMapInUse), so the drawn mist sits where AI finds it from the first frame, even with terrain shadows off. A rate-limited warning fires if the drawn mist or humid air ever differs from AI's. Pure helpers added: FogSightTransmittanceThrough, FogSightMedium, FogSightMapInUse, UpdateFogSightMedium, and Set/GetDrawnFogMedium (probe readout only; AI never reads it). triFogSight reports AI transmittance next to the drawn transmittance and the classic tactical fog. After the fix, with post effects off: ai=1, mist 1.952e-03, the same as with the fog drawn. With fogMist=0.5 and fogDensity=2, the AI values equal the drawn values exactly. The drawn fog is unchanged: dawn_valley after vs the round-3 final has a mean absolute difference of 0.75/255 and a 99th percentile of 7.",
+  "constants_changed": "none (no fog look constants touched)",
+  "patch_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/ailink/fix.patch",
+  "evidence_images": [
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/ailink/ailink_probe_post_off.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/ailink/ailink_dawn_valley_4way.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/ailink/shots_1/dawn_valley__overhaul.png"
+  ],
+  "ai_fog_link_intact": true,
+  "files_touched": [
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp",
+   "arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp",
+   "arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp",
+   "arma_CWR/engine/Poseidon/World/WorldSetup.cpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33.hpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp",
+   "arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp",
+   "arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp"
+  ],
+  "unit_tests": "The PoseidonTests \"[fog]\" tag passed: 6105 assertions in 24 test cases. The \"[remaster]\" tag also passed: 962033 assertions in 376 test cases. Three new cases in test_volumetric_fog.cpp. (1) AI sight equals the drawn fog's air for the same inputs and knobs, across fogDensity 0.5/1/2 times fogMist 0/0.5/1: the AI medium fields equal ComputeFogMedium(in,t,true), FogSightTransmittance equals the march through the renderer's medium, and the knobs move AI the same way. (2) AI sight does not follow the render path: post effects off and an interior view turn the VolFog gate off while AI transmittance stays bit-identical, and fogQuality/fogSun/fogLights change nothing. (3) AI sight works without a renderer: the map built from raw heights matches the horizon map's heights and fog floor, the base engine's classic tuning still gives active sight, and no island gives classic sight.",
+  "remaining": "The in-game probe could not reach the interior state: the volFog gate stayed on in the M1A1 driver view, so the interior case is covered only by a unit test. The probe line from a hilltop eye stays mostly above the valley mist (T about 0.999), so the in-game proof rests on the ai flag and the medium values. The optional groundColor ready-at-load fix was not done. Owner call: AI keeps the mist in classic lighting mode or with the volFog switch off, where the mist is not drawn; this keeps every machine's AI the same. Multiplayer: everything AI reads is synced simulation state except the per-machine knobs fogDensity and fogMist (default 1 on a server), and skyThrough if it ever drifts per machine. The map build (about 150 ms) runs on the main thread at island load; the renderer did the same work on its first fog frame before. Notes: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/ailink/NOTES.txt"
+ },
+ {
+  "key": "sun",
+  "status": "partly_fixed",
+  "root_cause": "(a) The sun disc was drawn in the low sun's own colour (about 1, 0.62, 0.3). The hue-keeping curve only whitens light past white by 1 - kChromaKeep*chroma^2 (0.61), which gives (255,237,220) on paper; the shots measure (255,238,219), so the disc was a peach dot. The sky roll-off had a single cap everywhere (kSkyRolloffCap 2.4, about 0.85 of white), so the aureole round a low sun was pressed into a plateau: the radial profile in lowsun_fp at 960 reads 237,206,164 from 8 to 24 px, then falls. (c) The disc was drawn by its angle from the sun, so the rectilinear projection stretched it near the frame corner. Axis ratio measured 1.23 at 960 and 1.27 at 1080 (1080 was also oval). (d) The shafts come from the volumetric fog's near pass (psFogNear). Moving the pass's soft cap before the lit share, or using the lit share linearly, changed nothing. A 2.5x gain override drew clear shafts, so kFogBeamGain was simply too low. (b) With fogDensity=0 the bay is crisp. fogMist, fogSun, camAerial, turning off the humid ground air and widening the ring's exclusion round the sun all left it unchanged. So the cause is the clear haze's in-scatter on the sun side, lit by the brightest horizon sky (the ring).",
+  "change_summary": "Sky roll-off (PhotoCamera.hpp/.cpp and GLSL camSkyRolloff(lin, d)): near the sun the cap now rises from 2.4 to kSkySunCap 10 (past white) along 1/(1+2(1-cos)/r^2), with r = 1.2 degrees. Every caller passes its direction (dome, clouds, aerial colour, sky reflection). New C++ mirrors: SkySunGlow, SkyRolloffCapToward, SkyRolloffToward. Sun disc (camSunDisc): it is solved per pixel in screen space from dFdx/dFdy as an equal-area circle, so it is round anywhere in the frame. Its colour goes kSunDiscWhite 0.85 of the way to white from 4 degrees up and keeps its colour at the horizon. kFogBeamGain goes from 14 to 35 so the shafts read. Results: the disc is (255,255,254) and round (axis ratio 1.00 to 1.02 at 960 and 1080). At 960 the glow falls off smoothly: 253 at 8 px, 248 at 16 px, 238 at 32 px, 223 at 48 px, with no plateau. pine_rays shafts read at thumbnail size and the sky round them is unchanged. dawn_valley is not fixed (bay contrast is the same before and after).",
+  "patch_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/fix.patch",
+  "evidence_images": [
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/a_sun_glow_lowsun_fp.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/a_sun_glow_coastline_sunset.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/c_disc_round_sinai_lowsun_fp.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/d_pine_rays_shafts.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/b_dawn_valley_bay.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/a_banding_check_highpass.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/work/p3.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/work/p6.png"
+  ],
+  "ai_fog_link_intact": true,
+  "remaining": "(b) dawn_valley's bay is still veiled by cream haze on the sun side. Likely root fix: the haze's light toward a low sun should follow the phase function at the ray's own angle to the sun. Today the ring samples the sky 2 degrees or more above the land, which brings the aureole's flank into the haze. This needs the ring's sample elevation in the injection. Under a 12x high-pass the glow shows fine one-level rings, as round 3 did, plus one ring where coastline_sunset's peach core glow ends; neither is visible at full size or thumbnail. The halo is smaller than landed's painted sprite: a kSkySunGlowRad of 1.8 to 2 degrees would come closer but adds bright sky. The broad cream low-sun sky (camHaze 6) is unchanged. Night and grey views were not reshot (the cap only rises within a few degrees of the sun and only above the knee). Full notes: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/sun/NOTES.txt; shots in fix4/sun/shots_2 (1080 and 960x640).",
+  "files_touched": [
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp"
+  ],
+  "constants_changed": "kSkySunCap: new 10.0 (GLSL kCamSkySunCap); kSkySunGlowRad: new 0.021 rad = 1.2 deg (GLSL kCamSkyGlowRad); kSunDiscWhite: new 0.85 (GLSL kCamSunWhite); kFogBeamGain: 14 -> 35. Unchanged: kSkyRolloffKnee 1.2, kSkyRolloffCap 2.4, kSunDiscLevel 12, kSunDiscRadiusDeg 0.45, the curve, kChromaKeep, exposure and the noon sky.",
+  "unit_tests": "PoseidonTests.exe with tags [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],[TerrainHorizon],[StateOwnership],[atmosphere], run from D:\\ on the final build: all pass, 321 cases, 957,604 assertions (glslang compiles every program). New cases: the sun glow roll-off (white at the sun, smooth falloff, no plateau, far cap within 2%), the GLSL constant and contract checks for the disc and the roll-off, and a kFogBeamGain range check. clang-format is clean on all 8 files. The patch applies on a fresh index of base tree d2f866e4."
+ },
+ {
+  "key": "mist",
+  "status": "partly_fixed",
+  "root_cause": "(a) The setFog medium was several times denser than the classic fog at mid range. The weather fog was 2.8 times the classic extinction (kSetFogBoost). On top of it sat the grey-deck haze gain, which was cut only for rain, and a valley mist weighted 1.2 x fog. The game log at fog 0.3 under the 0.7 deck: weather 5.7e-3/m with the boost, haze 1.31e-3, mist 1.09e-3. A probe colouring the fog's view depth puts the rock at 200-400 m and the tree line at 300-500 m, where 15% and less of the surface was left; vanilla keeps the first 300 m or more crisp. volFog=0 brings them back; surfaces=0 and photoLight=0 do not. (c) Under a full grey deck the camera dome drew the painted deck at full cloud light, high in the curve's shoulder, which squeezed its relief to a spread of about 10 levels. The fog apply leaves the upper sky alone. (b) Specks: the probes show they do not come from the fog apply, the overlay snapshot, sky-classified MSAA edges, the near field, GTAO, SSR, the canopy, camLocal or bloom. taa=0 with sharpen=0 removes nearly all of them. Clamping the TAA history did not help, so the bad value is already in the composite output of the jittered frame. The exact cause is not found.",
+  "change_summary": "VolumetricFog: by day setFog's own fog takes 0.75 of the classic extinction (was 2.8). The grey haze gain no longer stacks on a day's setFog; it is cut by max(rain, fog share), as it already was for rain. The day mist weight from setFog is 0.6 (was 1.2). The night keeps round 3's density exactly: kNightFogBoost 6.47 and night mist weight 1.2, so town_fog_night is unchanged by construction. Sky dome (EngineGL33_LightingShadersSky.cpp shadeSkyDome, under the camera, by day, full grey deck): the deck's light relative to its row's mean (the 12 row taps the shader already reads) is raised to the power 1 + 2.4, and the deck is darkened to 0.5. Both fade in from 7 to 17 degrees of elevation, so the horizon band the grey-sky ring measures (3.8 to 7 degrees) and round 3's ridge fading and halo fixes are untouched. Results: level line at fog 0.3 keeps 0.76 at 150 m (was 0.40), 0.56 at 300 m (was 0.15) and 0.19 at the 742 m classic end. Near grass is green again, and the rock, tree line and hill show through the mist. rain_day sky spread 10.8 -> 16.3, overcast_heavy 10.4 -> 17.4 (landed 22-24): the cloud base reads at thumbnail size and the ridges still fade in layers. New unit test case plus a sky constant contract; gate tags pass, 320 cases. AI sight at fog 0.3: tactical range 742 m times the fog sight factor, which is 0.95 at 300 m and 0.82 at 742 m outside a mist layer (unchanged), and 0.84 and 0.53 inside a 20 m layer (was 0.79 and 0.42). rain_day is unchanged: 980 m, factor 0.92 at 300 m and 0.64 at 980 m outside a layer, 0.75 and 0.24 inside one. Drawn fog leaves a fifth of a surface at the AI's tactical end, the same rule rain follows.",
+  "constants_changed": "kSetFogBoost 2.8 -> 0.75; kNightFogBoost 1.0 -> 6.47 (2*2.8/0.75-1, night unchanged); kMistFogWeight new 0.6 (was inline 1.2), kMistFogWeightNight new 1.2; grey haze factor (1-0.7 rain) -> (1-0.7 max(rain, smoothstep(0,0.3,fog)(1-night))); new PhotoCamera.hpp kDeckRelief 2.4, kDeckDark 0.5, kDeckFromSin 0.12, kDeckFullSin 0.3 (GLSL kCamDeck*)",
+  "patch_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/fix.patch",
+  "evidence_images": [
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/sbs_thumbnails.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/sbs_a_optics_mist_hud.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/sbs_a_optics_mist_sight.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/sbs_b_specks.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/sbs_c_rain_day.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/sbs_c_overcast_heavy.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/probe_depth/depth_half.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/probe_layers/layers_hud.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/probe_post/specks_post.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/probe_taaclip/specks_taaclip.png"
+  ],
+  "ai_fog_link_intact": true,
+  "remaining": "(b) The specks are NOT fixed. They come from the TAA path (taa=0 removes nearly all). The bad value is already in the composite output of the jittered frame. My guess for the next fixer: foliage pixels whose MSAA depth (sample 0) does not match their colour. Next probe: a min or max depth resolve in PostResolve, or a 3x3 depth range check at foliage pixels in the fog apply. (a) optics_mist_hud is still paler than vanilla at thumbnail size, because the air under the camera sits at about (210,213,221) against vanilla's fog colour (178,178,171). The air's brightness under the camera exposure was not touched. (c) The rain sky is still lighter than landed's dark deck; a lower kDeckDark would go further. Not reshot: town_fog_night and town_night_rain (night paths unchanged by construction) and overcast_broken (needs the full veil). Full unit suite not run; gate tags pass. Notes: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/NOTES.txt. Final shots: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/mist/shots_4/tri/look_r4mist_all/.",
+  "files_touched": [
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp"
+  ],
+  "unit_tests": "Gate tags [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],[TerrainHorizon],[StateOwnership],[atmosphere] on the final build, run from D:\\: 320 cases, 957,489 assertions, all pass. One new case: day setFog is 0.75 of the classic extinction, night is 5.6 of it, grey haze is cut under setFog, more than 60% is left at 150 m. The setFog opacity case was updated, and the sky contract test pins the four deck constants. Full suite not run."
+ },
+ {
+  "key": "burst",
+  "status": "partly_fixed",
+  "root_cause": "(a) The guess that the burst light reaches its whole cloud was wrong. Probe 1 (round 3 code, same burst shot paused at fixed ages, with and without combatSmoke=0) gave the same picture at every age. The cloud was exactly its CfgCloudlets Explosion temperature-table colour (white at 2200 K, lemon at 1900 K, mustard at 1600 K). Cause: the fireball puffs use a self-lit (MSShining) shape. Object::DrawDecal draws one as its table colour times the eye's accommodation, which the photoreal camera holds at 1. So the fireball showed one flat table colour, never brighter than a white wall. A first fix applied only in the lit branch changed nothing, which confirmed the puffs take the self-lit branch. (b) Under the camera a burst's light on surfaces reached 20 m. Seen from 2 m at 60 to 90 m that lit disc squashes into a 9 px strip, brighter than the fireball. (c) The dusk ground is metered nearly as dark as night, so the wreck's fire at day scale 0.12 still lit the plain behind it. (d) The composite's hue-keeping curve mixed all three channels toward white by one amount, so bright orange (1, 0.55, 0.16) became cream (1, 0.68, 0.38).",
+  "change_summary": "(a) New FireballPuff and BlackBodyRgb in CombatLights. A puff counts as a fireball when its table tops out between 1500 and 3000 (read as kelvin). Camp fire smoke and smoke shells (1000), gun fire (4200) and crater smoke are excluded. A fireball puff glows the colour of a black body at its temperature. Brightness follows Wien's law at 580 nm, each channel softly saturated at 2 so the hottest core goes white-yellow. What it reflects is dark soot. Object::DrawDecal sends a fireball puff under the combat lights through the lit branch: scene light on the soot, then the glow added and carried past 1 as decal glow. Cloudlet gained Temperature() and HottestTemperature(). CombatSmokeTransmittance now also applies to Explosion, so a burst lights its cloud's base and near side. Fixed-age probe result: 6 frames yellow-white fireball, 8 frames orange fireball with dark puffs, 10 frames and later dark grey-brown smoke. (b) Under the camera an Explosion's surface light now ends at 3 ball radii (7.8 m for a heavy shell); cannon flashes keep 20 m. Horizon band beside a 1 frame old burst, 99th percentile: 60 -> 32 (ground 28). (c) New CombatTwilight(sun elevation), camera only, scales steady lights (fire, flare, motor) on surfaces and in the air. It is 1 at 6 degrees or more under the horizon (night unchanged), 10 times lower per 2.5 degrees above that, floor 0.1. Flames and smoke keep their full brightness. Wreck horizon 99th percentile 48 -> 31; the line is gone. (d) Each channel now whitens by w^(1 + 3(1 - its share of the peak)), in GLSL and in the C++ mirror (which also gained the chroma keep it lacked). town_night: flame core (239,199,150) -> (239,188,108), stones top tenth (254,225,194) -> (254,206,130), fully white pixels in the fire box 171 -> 0, plume unchanged. town_fog_night: white pixels 597 -> 0.",
+  "constants_changed": "New: kFireballTableK 1500, kFireballTableMaxK 3000, kFireballGlowFromK 900, kFireballGlowFullK 1300, kFireballRefK 2200, kFireballWienK 24800, kFireballEmission 8 (tried 3: too dim), kFireballEmitCap 2, kFireballSoot (0.24,0.21,0.18), kTwilightNightDeg -6, kTwilightDecadeDeg 2.5, kTwilightFloor 0.1, CombatTuning::twilight 1 (camera: CombatTwilight), kBurstSurfaceReachCores 3, kHueRoll 3. Changed: Explosion surface range under the camera 20 m -> 3 x core. CombatSmokeTransmittance for Explosion: 1 -> exp(-(d-core)/reach), as for Fire.",
+  "patch_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/fix.patch",
+  "evidence_images": [
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/a_burst_ages.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/a_burst_firefight_2.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/a_burst_firefight_3.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/b_band_firefight_2.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/b_band_probe_f06.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/c_wreck_firefight_1.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/d_town_night_fire.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/d_town_fog_night_fire.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/probe_1/sheet_full.png"
+  ],
+  "ai_fog_link_intact": true,
+  "remaining": "1. The burst's dust foot (CraterSmoke, grey table) is still lit salmon-pink by the classic dusk sun colour times accommodation, plus the burst's cooled light. It now shows clearly under the dark cloud in firefight_3 and at 24 frames. Particles are still lit by the classic sun, not the photoreal rig; that needs a separate root fix. 2. At 8 frames the fireball is a fairly even orange, because its puffs are born and cool together. 3. The firefight views are not timing-pinned, so in this run firefight_2 caught the burst at about 0.37 s, as dark smoke with no young burst on the left. The fixed-age probe (look_probe_r4b1, generator tools/gen_probe_burst.py, not in the patch) is the fair measure. 4. In this run firefight_1 caught the Ural before it read as a wreck (staging). 5. By day a steady light's surface light is now 0.012 of its night power (was 0.12). No day view with a fire was checked. Tests: [CombatLights],[PhotoCamera] 46 cases pass. All 16 gate tags pass on the final formatted build: 321 cases, 957,683 assertions. clang-format is clean on the changed files. The patch applies with git apply --cached --check on the base tree. Target.cpp and VolumetricFog.cpp are not in the diff. Only my own games were stopped. Notes: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/burst/NOTES.txt",
+  "files_touched": [
+   "arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp",
+   "arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp",
+   "arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp",
+   "arma_CWR/engine/Poseidon/World/Scene/Object.cpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp"
+  ],
+  "unit_tests": "[CombatLights],[PhotoCamera]: 46 cases, 1629 assertions, all pass. Gate tags [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],[TerrainHorizon],[StateOwnership],[atmosphere] on the final formatted build: 321 cases, 957,683 assertions, all pass (glslang compiles every program). New cases: fireball puff glow and soot, which puffs are not fireballs, twilight scale for steady lights, burst light crossing its own cloud. Updated: hue-keeping curve roll-off test."
+ },
+ {
+  "key": "noon",
+  "status": "fixed",
+  "root_cause": "Two causes. (1) The sky table's clear sky has the right chromaticity: the overhaul's zenith ratios (0.34,0.56,1) match landed's (0.36,0.59,1) and the real sky's. But the overhaul draws it at the physical scale (about a third of landed's linear light), and the hue-keeping curve keeps those ratios exactly. A real camera's per-channel film curve deepens a mid-tone blue. So a dim sky with landed's ratios read as slate (91,114,148). Probe 1 ruled out fog (volFog=0 changed it by 2 levels), white balance (camWb=0, 2 levels) and haze (camHaze=1, about 5 levels). Probe 2 used a shader override that raised only the clear sky's chroma, and the sky turned clean blue at the same luminance. (2) Over a bright plain the camera exposed 0.63 EV under the average scene: kBrightKeep -0.45 times the meter's 0.84 EV, plus kCameraHighSunEv -0.25 (readout ev=-0.35). That darkened both the ground (Sinai sand 149 against 186) and the sky. Probe 1 with camEv +0.5 lifted both.",
+  "change_summary": "1) Exposure: kBrightKeep -0.45 -> -0.05 (PhotoCamera.hpp). Only scenes brighter than the average scene change. A bright plain at noon is still about 0.3 EV under the average scene through kCameraHighSunEv. noon_fields ev -0.35 -> -0.01, sinai 0.03 -> 0.33, jeep_close_noon +0.2 EV. Golden, evening, town_noon, noon_vista, overcast and night views keep their exposure to within 0.02 EV. 2) New camSkyDeepen in camSkyLook (EngineGL33_LightingShadersSky.cpp), with a C++ mirror DaySkyDeepen and DaySkyDeepWeight (PhotoCamera.cpp/.hpp). It scales the clear sky's chroma about its luminance in linear light by 1 + 0.65*w, keeping luminance and dominant hue, and no channel goes under 0.25 of the luminance. w applies by day only (sun 8..25 deg), above the horizon band (view sine 0.03..0.4) and away from the sun's glow, and is zero under the weather's veil. It feeds the dome, the aerial-perspective colour and the sea's sky reflection; clouds are untouched. Results at 1080p: noon_fields sky top (91,114,148) -> (74,121,173), horizon paler (120,148,180), ground 140 -> 152. Sinai sky top (86,109,144) -> (66,115,168), sand 149 -> 158. jeep_close_noon ground 160 -> 168 (vanilla 169). noon_vista sky top (118,152,201) -> (89,146,212). An A/B at the same sim clock shows forest_edge_golden and woods_pine2_evening unchanged to within 1 level. town_night differs only in the smoke puffs (particle timing). New unit cases are in test_photo_camera.cpp, and the shader-constant pins are in test_remaster_lighting.cpp. clang-format is clean.",
+  "patch_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/noon/fix.patch",
+  "evidence_images": [
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/noon/a_noon_sky.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/noon/b_bright_ground.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/noon/c_other_noon_views.png",
+   "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/noon/d_checks_ab.png"
+  ],
+  "ai_fog_link_intact": true,
+  "remaining": "The Sinai sand is still about 29 levels under the original (158 against 187). The LoBo Sinai world's July noon sun sits near 35 to 40 degrees (sunLum 0.33 against Abel's 0.58), so the high-sun step does not engage there. Lifting it more would push jeep_close_noon toward white paper. Against the deeper blue, the noon cirrus streaks stand out more. The deepening does not depend on exposure; if a bright-sky scene ever reads vivid, the next step is to scale it with the exposed luminance. The full unit suite was not run; the 16 related tags pass (321 cases, 957,499 assertions). Notes: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/fix4/noon/NOTES.txt. Shots: shots_2 (final build), shots_base (base game A/B at the same clocks), shots_1 (strength 0.8). Probes: probe1, probe2, probe3. Only my own games were stopped.",
+  "files_touched": [
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp",
+   "arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp",
+   "arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp",
+   "arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp"
+  ],
+  "constants_changed": "PhotoCamera.hpp kBrightKeep: -0.45 -> -0.05. New PhotoCamera.hpp kCameraDaySkyDeep 0.65 (shader kCamSkyDeep). New PhotoCamera.hpp kCameraDaySkyFloor 0.25 (shader kCamSkyDeepFloor). New weight ramps inline in DaySkyDeepWeight and camSkyLook: sun 8..25 deg, view-elevation sine 0.03..0.4, cosine to sun 0.86..0.985, times (1 - veil). Unchanged: kCameraHighSunEv, white balance, camSat, camHaze, sky roll-off cap, sun core.",
+  "unit_tests": "Two new cases in test_photo_camera.cpp: the bright plain exposed 0.2..0.45 EV under; DaySkyDeepen keeps luminance and hue, respects the floor, and its weight ramps. The shader pins in test_remaster_lighting.cpp cover kCamSkyDeep, kCamSkyDeepFloor and the camSkyDeepen call. The related tags ([PhotoCamera],[Shaders],[remaster],[atmosphere],[fog],[SurfaceLight],[PostStages],[FeatureSwitches],[FeatureGates],[AirMedium],[ssr],[wet],[CombatLights],[StateCacheAudit],[TerrainHorizon],[StateOwnership]) all pass on the final build, run from D:\\: 321 cases, 957,499 assertions."
+ }
+]

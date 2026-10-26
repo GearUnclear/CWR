@@ -1,0 +1,39 @@
+graphics: script-spawned vehicles get the remastered lighting
+
+Vehicles and objects created after mission start (createVehicle; Guerrilla
+Mode spawns nearly every vehicle this way) drew with the stock pre-lit
+CPU T&L lighting and received no shadow maps.
+
+Root cause: Shape::Draw takes the hardware T&L path only when the level
+has a vertex buffer. _buffer is built only by LODShape::OptimizeRendering,
+which runs only from ShapeBank::OptimizeAll at mission load, save load
+and device restore. ShapeBank::New builds none, so a shape first loaded
+after mission start stayed bufferless for the whole mission and drew
+through VSScreen with vLitMode 0 (classic vColor * t0, no per-pixel
+light, no shadow maps).
+
+Fix: ShapeBank::New queues every shape it loads after the first
+OptimizeAll (weak Link array, only with HW T&L or the SSE path). Nothing
+is built inside New, because loaders set the flags OptimizeRendering
+reads (sky clip hints, IsLight, animation, cockpit) after New returns.
+ShapeBank::OptimizeLate, called once per drawn frame in World::Simulate
+right before _scene.BeginObjects(), runs the same OptimizeRendering on
+each queued, live, bufferless shape, so spawned shapes get the same
+levels, buffer types and exclusions as mission-loaded ones. OptimizeAll
+and Clear empty the queue. Crew views of late shapes (VIEW_GUNNER,
+PILOT, CARGO, COMMANDER) keep the CPU path for now
+(OptimizeRendering(keepInsideViews = true)); OptimizeAll and the
+portrait renderer are unchanged.
+
+Known follow-up: crew-view lighting now depends on load time (spawned
+interiors classic, placed interiors per pixel, and a savegame load gives
+spawned classes full parity).
+
+Tests: test_shape_late_vertex_buffers.cpp [Shape][VertexBuffer] (3
+cases, 29 assertions; 2 cases fail without the queue). In game:
+spawned Jeep, M113 and tent render pixel-identical to mission-placed
+ones on Abel (0.00 mean diff); OptimizeLate costs about 1.2-1.4 ms on
+the frame after a burst of 8 createVehicle calls. Shape.hpp is a legacy
+tab-style header outside the Format list; the new lines follow its style.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

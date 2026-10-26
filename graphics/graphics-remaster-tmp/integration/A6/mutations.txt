@@ -1,0 +1,73 @@
+﻿A6 mutations: each applied alone, PoseidonTests rebuilt, tags [FrameLights],[FeatureSwitches],[remaster],[PerfCounters]
+mutated engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp with naive_rect
+build exit 0
+== naive_rect
+Frame lights: every tile a light can reach lists it, and few others do
+test cases:    76 |    75 passed | 1 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\FeatureGates.cpp
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\FeatureSwitches.cpp
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\Poseidon\Graphics\Rendering\Lighting\FrameLights.cpp
+mutated engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp with spot_half
+build exit 0
+== spot_half
+Frame lights: every tile a light can reach lists it, and few others do
+Frame lights: a spotlight's reach is its cone, about half its point sphere
+test cases:    76 |    74 passed | 2 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\Poseidon\Graphics\Rendering\Lighting\FrameLights.cpp
+mutated engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp with tile_overwrite
+build exit 0
+== tile_overwrite
+Frame lights: a full tile keeps the strongest lights, in rank order
+test cases:     76 |     75 passed |  1 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\Poseidon\Graphics\Rendering\Lighting\FrameLights.cpp
+mutated engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp with rank_brightness
+build exit 0
+== rank_brightness
+Frame lights: ranking keeps the lights strongest at the camera
+test cases:     76 |     75 passed |  1 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\Poseidon\Graphics\Rendering\Lighting\FrameLights.cpp
+mutated engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp with no_night
+build exit 0
+== no_night
+Frame lights: ranking keeps the lights strongest at the camera
+Frame lights: the shaders read the list with the model and sizes of
+test cases:     76 |     74 passed |  2 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\PoseidonGL33\EngineGL33_LightingShadersLights.cpp
+mutated engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp with no_budget
+build exit 0
+== no_budget
+Frame lights: ranking keeps the lights strongest at the camera
+Frame lights: the shaders read the list with the model and sizes of
+test cases:     76 |     74 passed |  2 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\PoseidonGL33\EngineGL33_LightingShadersLights.cpp
+mutated engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp with budget_hard
+build exit 0
+== budget_hard
+Remaster fragment prelude is its concern pieces in order
+Frame lights: the classic budget keeps the 7 strongest at a fragment, blending
+Frame lights: the shaders read the list with the model and sizes of
+test cases:     76 |     72 passed | 4 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\Poseidon\Graphics\Rendering\Lighting\FrameLights.cpp
+mutated engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp with not_landed
+build exit 0
+== not_landed
+Remaster fragment prelude is its concern pieces in order
+Feature switches: the frame-cost switches and the light list have landed,
+Frame lights: the classic budget keeps the 7 strongest at a fragment, blending
+Frame lights: the shaders read the list with the model and sizes of
+Frame lights: the light list switch has landed
+test cases:     76 |     70 passed |  6 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\Poseidon\Graphics\Remaster\FeatureSwitches.cpp
+mutated engine/PoseidonGL33/EngineGL33_Lighting.cpp with per_draw_in_tiles
+build exit 0
+== per_draw_in_tiles
+Remaster fragment prelude is its concern pieces in order
+Feature switches: the frame-cost switches and the light list have landed,
+Frame lights: the classic budget keeps the 7 strongest at a fragment, blending
+Frame lights: the shaders read the list with the model and sizes of
+Frame lights: the backend lights from the tiles only while they are on
+Frame lights: the light list switch has landed
+test cases:     76 |     69 passed |  7 failed
+restored D:\Arma_CWA_worktrees\gr-A6\arma_CWR\engine\PoseidonGL33\EngineGL33_Lighting.cpp
+final rebuild exit 0
+done

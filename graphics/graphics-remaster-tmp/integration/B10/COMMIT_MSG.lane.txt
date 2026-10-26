@@ -1,0 +1,183 @@
+graphics: sky clouds glow on their sun side and their shadows match the sky
+
+What the player sees: at dawn and dusk the painted sky becomes lit
+cloud. The sun-facing edges of the cloud bands turn peach and gold and
+their far sides and bellies slate; cloud bases facing a rising sun catch
+pink; thin rims near the sun get a silver lining and thick cloud in
+front of it goes dark. The light goes both ways and the sky keeps its
+brightness: at the hero view a third of the sky band brightens and a
+third darkens, and the sky band's mean luminance stays within -0.6 %
+and +0.6 % of the look before this change on the nine views measured.
+All of it is the low sun's: it fades out between 25 and 45 degrees of
+sun, and from there up the sky is the one before (no embossed and no
+greyed midday clouds). Cloud shadows now belong to the clouds in the
+sky: under broken cloud the shadow bands on the hills are the clouds
+you see, the sun disk fades when a cloud in the sky crosses it at the
+same moment the ground at the camera falls into shadow, and the sky's
+clouds turn slowly with their drift (about 6 degrees a minute at
+overcast 0.5), carrying their shadows across the ground. The shadows
+stay put on the ground while the player moves. A clear sky is
+unchanged.
+
+How it works: Graphics/Remaster/SkyDensity (pure) reads the sky's own
+painted clouds back from the weather sky texture as a cloud-density map
+(no new art): whiteness above the clearest sky of the same row is
+broken cloud, a row grey all the way round is an overcast deck counted
+as far as the weather is overcast, darkness is thickness, blurred 5-tap
+binomial so the palette steps do not show. EngineGL33_SkyClouds.cpp
+reads each weather sky file once and builds the map (decode, the mix of
+two weather skies as the engine mixes the dome's texture, the map and
+its shadow coverage) on a worker thread when the weather sky changes;
+texture unit 9 holds a no-cloud stand-in until the first one, the last
+map stays in use while the next weather builds, and triSettleScene
+waits for a pending build. Lit clouds: from each dome pixel a 6-step
+march toward the sun through the dome's own texture mapping (obloha.p3d,
+u = azimuth / 180 deg, v piecewise over its rings) gives the cloud the
+sunlight crosses; the difference to the pixel's own density is
+mean-free relief on luminance, tinted only by the sun's colour, plus a
+Henyey-Greenstein silver lining on rims, darker thick cloud against the
+sun and deeper bellies under a deck. Every one of these terms fades in
+one step on the way out of litCloudTerms between 25 and 45 degrees of
+sun (SkyDensity's LitCloudTerms is its C++ mirror), and from 45 degrees
+up the dome and sheet marches return the identity terms before they
+sample. Under the sky table it shades the table's sky and cloud colours
+in linear light before their display mapping; without it, the classic
+dome colour. DrawClouds' sheets get the same terms from a march in their
+own texture. Sky-matched shadows: a lit point is projected along the sun
+to a deck at 1800 m and the deck point is looked up in the map in the
+direction an anchor near the camera sees it (one density tap per lit
+fragment, two while an anchor change fades). The anchor stays until the
+camera is 1.5 km away, then steps 1.5 km toward it and cross-fades over
+4 s; a cut of 500 m snaps it; captures pin it to the camera
+(triPinCloudDrift). The rig keeps the classic overcast dimming on
+average over the sky's own covered share of the ground
+(LightRigInputs::skyShadowCoverage: the shadowed part of the ground
+within 3 km of the anchor at the sun's height, from a table built with
+the map): over a larger share more light passes under each cloud, over
+a smaller one the rest stays uniform. The dome turns about the zenith
+with the sky clouds' own drift (Landscape::CloudsPosition, 0.3 deg per
+unit), whenever a clouds switch is on, so a gate opening never makes it
+jump. The sky pass hook is A7's: BeginRemasterSky opens for the clouds
+too, and a new RemasterSky::Sun pass around the sun disk fades it
+(colour and coverage) behind a dome cloud. LitConstants slots 68 (Sky)
+and 69 (SkyShadow) land (Count 70); unit 9 gets its kLitSamplers row.
+
+The switches and their gates: litClouds (GPU section sky) and
+skyCloudShadows (section world), both FeatureSet members, landed. Lit
+clouds run while the sky-through is below 0.85 and the sun above -9
+degrees (fading with the sky table's night fade); above 45 degrees they
+cost one uniform branch, so they need no high-sun gate. The shadows run
+while the cloud cover is above the clear-sky cover (F4) and the sun
+above -1.5 degrees, where the rig's sun has faded out, so the hand-over
+to the noise field never shows (A1 had 0). Both read "sky density map
+building" until a map exists. Off (both switches, a gate, classic
+lighting, night vision, a portrait or a 3D preview) the clouds slots
+stay zero: the dome keeps its texture coordinate, the sheets and the
+sun pass through, the noise field casts the shadows, and every draw is
+the one before.
+
+Kept, rewritten and dropped from the prototype: kept the density map
+(row-relative whiteness, deck row, darkness, the blur), the march in
+direction space through the dome mapping, the mean-free relief, the
+silver lining, the darkening against the sun, the belly contrast, the
+dome-matched shadows, the sun disk under a dome cloud and the sheets'
+own march. Rewritten: the builder as a pure module on a worker thread,
+the sky hook A7's, r0..r7 as constants the shaders mirror (deck 1800 m,
+threshold 0.55, edge 0.12, relief 1.8, silver 1.0, step 1.2 deg), the
+relief and lining on luminance tinted by the sun's chroma only (the
+critic's colour fringes), every term faded between 25 and 45 degrees of
+sun (the critic's midday emboss; a reviewed build faded only the relief
+and the lining, which left the darkening against the sun alone at
+midday: looking up at 54 degrees of sun, 35 % of the sky band went
+darker by more than 2 levels and none brighter, and the white cumulus
+greyed), the shadow anchor with a cross-fade instead of the camera, the
+drift from the sky clouds' own integrator, the mean over the sky's own
+covered share at the sun's height, the sun disk faded rather than
+darkened (a first build drew a dark disk), the shadows' sun threshold.
+Dropped: the CLOUDSDOME and CLOUDSSHEET dumps, the unused
+CollectCloudSheets scaffolding (sheet shadows are a follow-up), variant
+B, the research knobs, the viewport slot (the view ray comes from the
+vertex position since A7), the screen-derivative march on the dome (its
+seams), the mis-encoded comment hunk. Correction to the plan:
+atmosphere keeps its own cloud mask (A7 tuned it, noon cirrus included);
+the lit-cloud terms read the map.
+
+Measured cost (single readings: RTX 4060 Ti, 1920x1080, scale 1.0, 4x
+MSAA, off then on interleaved, other games running, not quiet-checked,
+GPU clock not sampled): at the hero view coast_oc_up (sun 8 degrees,
+overcast 0.5, mostly sky) the sky section rises from 0.14 to 0.17 ms to
+0.22 to 0.28 ms (+0.08 median over 3 rounds) on the build that lands,
++0.18 in a second run of 2 rounds and +0.26 on the reviewed build (the
+low-sun path is the same); the frame +0.27, +0.66 and +0.76 median,
+while the control under a clear sky (noon_fields, both gates off, so
+on equals off) moved +0.80 and +0.15: the frame figure is within the
+noise. From 45 degrees of sun up lit clouds skip the march (one uniform
+branch). Plan estimate 0.5 to 1.5 ms.
+
+Tests: new test_sky_density.cpp [SkyDensity]: the dome mapping (rings,
+inverse, azimuth), the density map on a clear, a broken and an overcast
+sky made like the shipped ones (no cloud and no deck under a clear sky,
+streaks as cloud and the blue between them not, a deck covering the
+sky once the weather is overcast), the blur across the u seam, shadow
+cover, density and the weather mix, the coverage reading the rows the
+shadows look up at that sun height and its table, the low-sun fade, the
+lit-cloud terms (identity from 45 degrees of sun up over a grid of
+cloud, view and weather; at a low sun lighter on the sun-facing edge,
+darker on the far side, against the sun and in a belly; half way at 35
+degrees), the turn and its wrap, the anchor (stays, steps, cross-fades,
+snaps on a cut, holds when pinned) and the rig keeping the overcast
+dimming over the covered share. test_remaster_lighting.cpp: the slot
+layout with 68 and 69, the clouds' off contract, the shaders' constants
+and dome mapping against SkyDensity.hpp, the shader's litCloudTerms
+against its mirror line by line (one fade, on the way out) and the
+marches skipped at a high sun; A7's off contract follows the widened
+screen vertex gate. test_feature_switches.cpp: the gates (density map
+building, -1.5 degrees) and the landed list (6 of 26). Twenty mutations
+each turn a case red, six of them from the review round (the reviewed
+litCloudTerms and its mirror, the gain not faded in either, the dome or
+the sheet march at a high sun). The gate tags plus [SkyDensity],
+[clouds], [FeatureSwitches], [FeatureGates], [atmosphere], [PostStages],
+[triSetFixedStep] and [triPinCloudDrift] pass 519/519 (15 new cases);
+the full suite has only the 6 known localisation failures.
+
+In game (tmp/integration/B10/final4 of the graphics-remaster worktree,
+all shot on the build that lands): off equals before,
+litClouds=0,skyCloudShadows=0 against the base build on nine views, the
+sky band within 2 levels on four views and one pixel at 3 on a fifth,
+the rest by the base build's own repeat (gate5-off-vs-before-final4.md);
+hero pairs and the weather and time views (coast_oc_up, sunrise_oc,
+coast_oc, noon_fields at overcast 0.5, a clear coast view, Eden
+broken_high with the sky turned 7.5 and 15 degrees, overcast_broken,
+broken_up, overcast 0.9; onesided-final4.md, bandstats-final4.md); the
+sky sweep on Eden (the sun disk fades where the ground falls into
+shadow; sweep_strip_final4.png); the sun-up view under each switch
+combination (lit clouds alone change one pixel there by more than 2
+levels at 54 degrees of sun; seam-final4.md); smoke_abel 1/1 on the
+build that lands, KHR_debug ids 131169, 131154 and 131218 only; and,
+from an earlier build of this change, a debug override in debug-sheets/
+marking the lit sheets.
+
+Known risks: a still under a cloud reads darker (overcast_broken ground
+-28 %, the Jeep loses its sun shadow), though the mean over the ground
+is the classic one; below about 12 degrees of sun the painted skies'
+horizon holds no cloud the row test finds, so golden hour gets the
+uniform classic dimming and no sky-matched shadows, and the cloud seen
+near a low sun is a classic sheet, which casts none (sheet shadows are
+a follow-up); shadow shapes are the painted streaks, long bands rather
+than cumulus patches; the dome now turns (a rotation about the zenith,
+so clouds near the horizon move as fast across the sky as those
+overhead), and it is not turned under night vision; the coverage takes
+the deck from sea level, so a camera high above the ground sees
+slightly different lookups; between 25 and 45 degrees of sun the
+lit-cloud terms are part way (half at 35), and from 45 up an overcast
+deck keeps its painted bellies as they were (the prototype deepened
+them at any sun height; overcast 0.9 at 14:30 is now the sky before);
+golden hour skies gain saturation on the clouds' sun-facing edges
+(coast_oc_up 0.111 to 0.124, sunrise 0.183 to 0.224); with the sun
+clear in the sky the sea's sun path is a broad bright column the noise
+field used to cover (B5 reworks it); a straight sheet edge high in the
+sky is Classic's, present with every switch off; the contract tests
+match shader source text; the timing was not taken on a quiet machine;
+no RTX 3060 was measured.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

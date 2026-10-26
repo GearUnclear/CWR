@@ -1,0 +1,3 @@
+﻿start 04:03:27 test=tests/rendering/captures/video/look_probe_mist3_static.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\2\shaders\B junction=RemasterUD-fog-2
+run exit=0 frames=120 minutes=3.3
+done 04:06:48

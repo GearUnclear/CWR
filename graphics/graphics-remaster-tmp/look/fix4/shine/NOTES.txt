@@ -1,0 +1,96 @@
+Wet ground: no seam, and no longer one shiny sheet (round 4, "shine")
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-shine (fec1075 + fix4/base.patch, base tree d2f866e).
+Build build/look-fix-shine-rwdi, game dist/look-fix-shine-rwdi, junction RemasterUD-r4-shine.
+Nothing committed, no branch. Patch: fix.patch (4 files, shaders and test_wet_weather.cpp only;
+the look_shine capture tests are left out as asked).
+
+LOOK FIRST
+- compare_town_night_rain.png: round 2 (old, seam) | round 3 (shiny) | this fix. Full frame,
+  then a 2x crop of the tree base and of the open street.
+- compare_second_angle_seam_b.png: the same square from heading 20 (the seam's other side).
+- compare_day_town_rain.png: the same square at 11:00 in rain.
+- compare_day_rain_eden.png: Eden rain_day (grass field, puddles by the jeep).
+Round 2 and round 3 frames are the seam fixer's shots (fix/seam/shots_before2 and shots_4).
+Mine are shots_3/tri (final build). shots_1 and shots_2 are earlier iterations.
+
+CAUSE
+Round 3 took the land's grass share and porosity only from the ground field (the per-vertex
+average colour, continuous). That removed the seam, but on the town square the field is one
+mixed colour, so every pixel got the same class: the same film everywhere, the same lamp streak
+roughness everywhere, and in the SSR trace the same reflection weight (0.5 x wet) everywhere.
+Result: one lacquered sheet with long clean vertical streaks. Round 2 looked varied only because
+its per-pixel class was steep and binary (grass tufts 1, gravel 0), which is also what made the seam.
+
+CHANGE (shader only, no C++ or binding change)
+1. wetGroundGloss(xz), new, in the shared Puddles piece: two octaves of the puddles' own value
+   noise (6 m and 1.9 m), smoothstep(0.36, 0.64). A pure function of world xz, so it has no edge
+   at any square or triangle, and the forward pass and the SSR trace read the same value.
+   Low = damp patch, high = glossy wet patch.
+2. Forward pass (wetSurface), on the ground:
+   - film *= mix(kWetDampFilm 0.25 (land) or kWetRoadDampFilm 0.6 (roads), 1, gloss)
+   - rough = mix(max(rough, kWetDampRough 0.32), rough, gloss), so the lamp streaks break into
+     pieces across damp patches instead of one long line.
+3. SSR trace (land and roads): in damp patches the reflection weight drops to kSsrDampWeight 0.25
+   (roads kSsrRoadDampWeight 0.6), roughness rises toward kSsrDampRough 0.8, the cone widens toward
+   kSsrDampCone 0.4. Puddles stay full mirrors.
+4. Puddles: wetPuddle's noise field gets + kPuddleGlossLift 0.1 x (gloss - 0.5), so water stands
+   in the wet patches. Zero on average, so the puddle share holds.
+5. Texture grain (the zero-mean detail idea, done so it cannot step): the land main sets
+   g_wetGrain = wetGreenness(texel at max(lod, 0.5)) - wetGreenness(same texture at
+   max(lod + 3, 3.5)), the same mips the cavity term uses. wetGreenness(c) = c.g - 0.5(c.r + c.b)
+   is linear, so a coarse mip has the texels' mean lean and the grain is zero on average over
+   any stretch of a texture. veg += clamp(grain x kWetVegGrain 12, -1, 1) x
+   min(kWetVegGrainMax 0.45, veg, 1 - veg): the swing stays inside the field class's headroom,
+   so it is never clipped and cannot shift the mean on a mottled texture against a flat one.
+   It drives the film, roughness and darkening (grass tufts matte and less dark, gravel takes
+   the film). The puddles keep the field's class alone (vegPud), so the trace's puddles match the
+   forward pass pixel for pixel, as in round 3.
+Why not "relative to the texture's own average class" as first suggested: on corner-blend
+textures the texels are continuous across a square's edge while the two textures' averages
+differ, so a detail relative to each texture's global mean steps at that edge. The local coarse
+mip has no such jump, and the steep class functions are kept away from the per-pixel term.
+
+CONSTANTS old -> new
+- kWetDampFilm, kWetRoadDampFilm, kWetDampRough, kWetVegGrain, kWetVegGrainMax, kWetGlossScale,
+  kWetGlossFine, kPuddleGlossLift, kSsrDampWeight, kSsrRoadDampWeight, kSsrDampRough,
+  kSsrDampCone: new (values above).
+- wetPuddle call in wetSurface: veg -> vegPud (the field class, unchanged value).
+- No existing constant changed. wetVegetation, wetGroundPorosity, groundFieldAt and veg * veg
+  in the puddle threshold are untouched.
+Tried in shots_2: gloss smoothstep(0.3, 0.7), damp film 0.3, damp rough 0.38, SSR damp weight
+0.3 (shots_1, too matte at night); sharper patches read better.
+
+TESTS (build/look-fix-shine-rwdi/tests/unit/engine/Poseidon/PoseidonTests.exe, run from D:)
+"[wet],[ssr],[Shaders],[TerrainHorizon],[remaster]": all tests passed, 957,239 assertions in 299
+cases (glslang compiles every program). clang-format clean on the changed files.
+Round 3's seam tests are kept (field continuity, no crease, the field reads); one call string
+updated (vegPud). New in test_wet_weather.cpp:
+- "Wet weather ground: damp and glossy patches from the position alone, the same in both passes":
+  the shader strings for the gloss field, its use in the film, roughness, trace and puddles; a C++
+  mirror of puddleNoise and wetGroundGloss shows the patches vary (over 1/6 of the ground damp,
+  over 1/6 glossy, mean about 0.5) and that the biggest change across a 12.5 m grid line is no
+  bigger than anywhere else (no edge).
+- "Wet weather land: the texture's own grain mottles the grass share without a step at a
+  square's edge": a mottled gravel and grass texture beside a flat one under one field class; the
+  mottled side's mean grass share equals the flat side's within 0.01 (field 0.3, 0.5, 0.7), its
+  spread is above 0.12, and it stays in 0..1.
+(A first version that clipped veg to 0..1 failed this test with a 0.04 mean shift; the headroom
+form fixed it.)
+
+AI SIGHT AND FOG: untouched (no change to Target.cpp or VolumetricFog.cpp).
+
+OPEN ITEMS
+- Round 2's puddles near the tree base sat in other places; puddles now follow the wet patches,
+  so the frames differ in where water stands. Share looks about the same; not measured.
+- The rain_day haze and sky in my frames differ from the round-3 shot (shots_4). My shaders do
+  not touch the sky or fog, so this comes from the base tree (fix4/base.patch) versus the seam
+  fixer's build. A same-build A/B (base vs this patch) was not shot for lack of time.
+- The fire's smoke differs per shot (timing), ignore it in the sheets.
+- The puddle by the jeep in rain_day has a straight right edge in all three rounds (the jeep's
+  occlusion), not part of this fix.
+- Not measured: cost (two extra noise reads per wet ground pixel in each pass, two texture reads
+  in the land main) and motion. No probe tints were made in this round; the proof is the shots and
+  the unit mirrors.
+- Before the terrain field is built (about 0.6 s after load) the land falls back to the per-pixel
+  class, as in round 3; the gloss patches and grain still apply then.

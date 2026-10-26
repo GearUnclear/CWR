@@ -1,0 +1,63 @@
+## track
+texsharp
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabricated files. All 6 BEST/ALT images, every cited crop (run4, run6, run8, run11, run12), glsl5/6/6amp/7, prototype.patch, NOTES.md, the scripts and the offline mip analysis exist. run5 holds only run.txt and tri.log, and run2 has no folder, both as the explorer says.",
+ "Override load verified in the game_stdout.log files for run10 (glsl6amp), run11, run12 and run13 (glsl7). Each shows 'shader override dir' and 'shader override loaded' for psDetailRemasterMain.glsl and psPostComposite.glsl. There are no ERROR, compile or link lines. Every knob line answers res=OK, including texK3=-11.5, texK2=2 and texSharpen=0.3. My 'not OK' grep hits were only the 'l5+=0' stats lines.",
+ "Pixel diff confirms the AFTER images are real and differ. rfinalr against Remastered: mean abs 3.4 to 6.8, with 15 to 32% of pixels changed by more than 8. The mid-band Laplacian rises 95 to 131%, which matches the claimed +96 to 131%. Most of that comes from CAS and K2, though. Self-detail alone (rsl15r) gives only +41% on forest, +23% on noon, +18% on overcast, +14% on sinai and +12% on lowsun.",
+ "Overstated: 'ground mean luminance rises 1.0 to 1.5%' with detail kept. The explorer's own run8/ground_colour.txt gives +0.5% overcast, +0.6% lowsun and +0.65% noon, against +1.4% forest and +1.5% sinai. The R/G and G/B ratios really are unchanged.",
+ "Overstated: 'composite pass goes from 0.03 to 0.05 ms, stable across all runs'. That holds for forest and noon only. In lowsun_fp the composite median is 0.06 to 0.32 ms in run13, and 0.84 to 1.35 ms in run9 and run10.",
+ "Caveat on the baseline: 'Remastered (current)' is the research build (detached at 3c53141) with the override loaded and all knobs at 0, not a no-override exe. It reproduces across runs 1, 4, 8 and 11 within 0.03 to 0.5 mean abs, so it is a fair baseline. It may still lag the lighting branch's current Remastered look.",
+ "Cost per evaluation (0.35 ms) is extrapolated linearly from a 16x amplified probe. The single-evaluation pairs (-0.8, +1.1, -3.7 ms) and the direct final-vs-stock pairs (-9.5 to +8.6 ms) cannot resolve it. The '0.5 to 2 ms' range is honest, not measured."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[
+ "Khaki/straw risk: the forest_edge_golden slope is already khaki in Remastered, and the added blade grain makes it read even more like dry straw. The mean hue is unchanged, but the read moves toward the rejected mustard/khaki ground.",
+ "Olive mottling: on the overcast_broken meadow, self-detail amplifies the brown/olive patches already in the base texture (overcast_right crop), so the lawn looks patchier and more olive-brown at mid range.",
+ "Locally dirtier: K2=2 boosts the detail texture's deviation up to 4x. On the forest foreground dirt path this paints dark blotchy mottling that reads as grime and locally darker, though the frame mean does not drop.",
+ "Global sharpening: CAS 0.3 sharpens objects as well as terrain. It is not on the banned list (grading, vignette, grain, lens dirt), but it is a whole-frame post filter, and the luma-only path avoids the colour speckle that CAS 0.5 on full RGB caused."
+]
+## cost_ok
+true
+## score_0_to_10
+5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\texsharp\BEST_forest_edge_golden.png
+## one_line
+An honest, well-evidenced shader-only terrain micro-detail layer: the slope goes from airbrushed to grassy on Abel and Eden at 10 to 150 m for about 0.5 to 2 ms. It is invisible on Sinai sand and near gravel and adds no light at all, so it is a supporting remaster layer, not an RTX-on step.
+## critique
+Verification: the report is genuine. Every cited file exists. The glsl7 override and the composite override are logged as loaded in run11, run12 and run13, with no compile or link errors and every knob at res=OK. Pixel diffs show real changes. The shader does what it claims: 4 rotated cells, a textureGrad high-pass relative to a log2(zoom) local mean, a Heitz-Neyret blend and a soft limit, applied as a scalar albedo multiply in the Remastered branch only, so hue stays fixed and the Classic else-branch is stock code.
+
+The look: forest_edge_golden is a real change a player would notice. The smeared, painted slope becomes dense dry-grass grain in the full frame, not only in a crop. The overcast_broken meadow gains turf texture, clear but moderate. On noon_fields the pale ground gets a little grittier and objects get crisper, mostly from CAS; the gain is small. sinai_desert_noon and the lowsun_fp gravel are near-identical at 2x, so the gain there is none to small. The self-detail alone adds only 12 to 41% of the proxy; the rest of the "crisper" read comes from CAS 0.3 and the K2 boost.
+
+Artefacts: no NaN, halos, banding or embossing. Rotation does remove the stripes. Negatives:
+- The K2 boost turns the forest foreground path into dark blotchy mottling that reads as grime.
+- Self-detail amplifies the olive/brown patches on the Eden meadow.
+- Grain on a golden slope pushes it toward the khaki/straw read the owner dislikes.
+
+Motion: the shimmer ratio stays near stock, but that metric is normalised by spatial detail. The run13 diff image shows the whole slope becoming a field of fine frame-to-frame change. All shots are 1.5x SSAA plus 4x MSAA, downscaled, which hides aliasing. At native 1080p without SSAA, both the high-frequency grain and CAS (applied at render resolution before the linear downscale) will behave differently, and crawl is untested.
+
+Further limits:
+- The cell hash and grid live in per-square UV space. The pattern repeats with the base texture every 50 m. That adds no new tiling, but wrap sampling within about 2.3 m of a square edge breaks locality on transition squares.
+
+The diagnosis work is valuable. It shows aniso is already 16x and that residency, mip quality, LOD bias and Catmull-Rom are dead ends, so nobody should spend time there again.
+
+Against the RTX vision: this touches no light transport (no bounce, occlusion, reflection, volumetrics or emissives). It is the "texture upscale" slice of a Remix-style remaster, and a modest one. Cost is fine for an RTX 3060 at 1080p.
+
+Worth building as a cheap supporting layer, with these changes:
+- Self-detail at about 1.2 to 1.5.
+- K2 lowered or dropped to avoid grime.
+- CAS optional.
+- Validated at native 1080p in motion first.
+## artefacts_seen
+I opened and judged all 5 BEST_*.png images, ALT_selfdetail_only_forest_edge_golden.png and run13/forest_edge_golden__motion_diff.png. I built my own full-resolution crops from run11/run12 shots comparing remastered, rsl15r and rfinalr: forest foreground, forest slope, forest path, noon mid, lowsun near, overcast mid and right, sinai mid. I read NOTES.md, glsl7/psDetailRemasterMain.glsl, glsl7/psPostComposite.glsl, run13/shimmer.md, the run9, run10 and run13 timing_summary.md files and run8/ground_colour.txt. I grepped game_stdout.log in run10, run11, run12 (eden and sinai) and run13 (motion and timing). I ran a PIL diff of every run11/run12 variant against Remastered, plus a cross-run check that the stock baseline reproduces.
+## prototype_actually_loaded
+Yes. The game_stdout.log files for run11 (abel), run12 (eden, sinai) and run13 (abel_motion, abel_timing) show "GL33: shader override dir = ...texsharp\glsl7". They also show "shader override loaded" for psRemasterCommon.glsl (19844 bytes), psDetailRemasterMain.glsl (9591 bytes) and psPostComposite.glsl (3850 bytes), and a "texsharp: samplers maxAniso=16" line from the patched exe. There are no error, compile or link lines. Every knob, including texK3=-11.5, texK2=2, texK1=1, texSharpen=0.3 and texPost2=1, answered res=OK. run10 loaded glsl6amp (9411 bytes) for the cost probe.

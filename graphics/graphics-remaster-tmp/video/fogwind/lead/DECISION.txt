@@ -1,0 +1,138 @@
+FOGWIND LEAD DECISION (agent 8), 2026-10-23
+===========================================
+
+CHOSEN: q2b (agent 4), built as production code on top of graphics-remaster HEAD d91a08e0.
+  psFogInject samples each froxel cell at TWO FIXED points and never jitters them:
+  depth strata at 1/4 and 3/4 of the slice (each weighted by the metres of its half
+  slice) on the diagonal quarter points of the cell (-0.25,-0.25) and (+0.25,+0.25).
+  The history (0.88 kept) is read at the cell's CENTRE (agent 6's finding) through a
+  fixed tetrahedral blur of +-0.25 cell and slice per axis (agent 2's Act25 read,
+  [1 6 1]/8 per axis), which restores the approved mist density. The column's own
+  light (ring, sun share, lobe) is the cell centre's. The jitter uniforms are 0; the
+  frame count still steps the near-field march. The medium is untouched, so AI sight
+  (ComputeFogMedium / Target.cpp) still matches what is drawn.
+
+WHY THIS ONE
+- Every instrument puts it at the floor: agent 1's kit (stepped held + pan, and real
+  time 60 fps held + pan as a live override on the recorder build), fable-2's
+  independent fogflow (lowest held-camera numbers of every clip measured), agent 4's
+  probes, and my runs of the production build without overrides.
+- Nothing temporal is left in the sampling. Pump, travel and boil are impossible by
+  construction at any frame rate and any capture cadence (stepped or real time,
+  warm-up renders or not). The equal-scoring rivals keep a temporal pattern: c8b an
+  8-frame cycle (7.5 Hz at 60 fps, 2.5 Hz at 20 fps) and a new uniform; t2wb/Act25 a
+  white-rotated golden sequence (Act25 boils 1.3x the floor in play); S2z/q2z change
+  the integrate pass and cost 8 trilinear taps per integrate step.
+- Shader-only in effect (the C++ only zeroes the uniforms), one extra fogCell and
+  three extra history fetches per cell.
+- The look is the approved one: over the whole reshot clip the region means match
+  the ORIGINAL within 0.2 code values (F1 was +1 to +1.8 mistier).
+
+THE CAUSE OF THE WIND (agent 1, confirmed by fable-2 from scratch)
+  d91's per-cell offset was interleaved gradient noise: IGN(x+1, y) = IGN(x, y) + 0.556.
+  The frame's golden-ratio step adds 0.618 (0.570, 0.755 in xy). So each frame's
+  offset field was the last one read one cell to the right: the history's residual
+  slid LEFT about one 12 px cell per frame (about 700 px/s) as 2-4 cell blotches, in
+  every region, camera held or panning, in play at 60 fps and in the captures.
+  The amplifier of both bugs: the history was read at the jittered point, so it stored
+  a leaky SUM of the offsets (gain 1/0.12, about 8) instead of their average.
+
+NUMBERS (agent 1's kit fogmotion.py; WIND in code values over bay/valley/farhill/haze;
+rho_off = travel correlation; lowd2 = 60 px block flicker; boil = in-place change, held)
+Full valley_mist clip, frames 30-560, mkv (new = fixed build, no override):
+                 band   WIND max  rho_off max          valley lowd2  means bay/valley/farhill/haze
+  original       0.567  0.019     0.032                1.192         145.8/105.2/111.3/175.6
+  F1 (d91)       0.103  0.101     0.39 at [-12,0] px   0.108         146.8/107.0/112.6/175.7
+  NEW            0.091  0.004     0.024                0.095         145.9/105.4/111.5/175.5
+  vanilla        0.107  0.016     0.031                0.090         (no froxel fog)
+Frames 240-390 (agent 1's validation window): NEW band 0.077, WIND 0.005/0.004/0.002/0.004,
+  rho_off <= 0.036, valley lowd2 0.074 | vanilla 0.103, 0.017/0.011/0.002/0.003, 0.035,
+  0.062 | F1 0.093, 0.061/0.162/0.104/0.060, 0.22-0.38 at [-12,0], 0.121 | original 0.516,
+  lowd2 1.625. Grain (fine valley, 30-560): new 0.92, F1 0.96, original 1.12, vanilla 2.35.
+Static probe fog3_static (camera held at the frame 328 pose), production build, two runs:
+  WIND <= 0.003 all regions, rho_off <= 0.033, valley mid 0.043-0.047, lowd2 0.024-0.028,
+  boil/slow 0.050-0.054 / 0.039-0.041 (jitter-frozen floor 0.079/0.067; d91 same session
+  WIND valley 0.174, rho_off 0.26-0.41 at [-13,0], boil 0.429; original boil 0.375,
+  lowd2 1.618). Region means equal agent 4's q2b override to 0.1: production == q2b.
+Moving probe fog3_moving: WIND 0.005/0.004/0.002/0.004, rho_off <= 0.040, valley lowd2
+  0.068, band 0.077 (vanilla 0.017/0.007/0.002/0.007, lowd2 0.057, band 0.102).
+Real time 60 fps (agent 1, the same shader as a live override on mist-1, rt_q2b.txt):
+  held valley boil/slow 0.058/0.047 (d91 0.422/0.321), WIND <= 0.002; pan rho_off
+  <= 0.028, bay lowd2 0.062 (pre-d91 0.696). Held valley mean 128.2 (original 128.1).
+
+LOOKED AT (myself)
+- lead/look/xt_static/xt_resid_zoom.png: held camera x-t RESID: original horizontal
+  stripes, F1 slanted hatching, NEW flat apart from the soldiers' columns.
+- lead/look/xt_moving/xt_resid_zoom.png: pan, original / F1 / NEW / vanilla: NEW flat
+  apart from the pan's object edges (vanilla shows more of those).
+- lead/look/xt_static/resid_f50_51_half.png: two consecutive held-camera residuals at
+  2x, x16: original whole-sheet flips, F1 cell blotches, NEW flat (shoreline edge, salt).
+- lead/owner_compare.png, lead/look/owner_video_check.png (consecutive frames of each
+  part of the owner video with their difference x12), owner_video_full_f300.png.
+- lead/look/pine_static_mean_fix_vs_d91.png: pine shafts time mean and difference x8:
+  only the animated soldier differs; shafts and haze unchanged.
+
+UNIT TEST (would have caught both failures)
+  [remaster][fog][Shaders] "the injection samples fixed points of each cell, so its
+  history can neither pump nor travel": pins kFogTapZ / kFogTapXY / kFogHistoryBlur in
+  the shader and in VolumetricFog.hpp, the metric weights, the per-tap columns, the
+  centre read and the blur, and that no fogDepth.w / fogFrame.xy / fogCellNoise /
+  g_cellJitter is left (both the original and d91 shaders fail these). A mirror of the
+  injection and its history over a 40x40 grid (smooth medium with a per-cell depth
+  gradient, EMA 0.12 with reprojection, residual vs the cell centre) measures pump
+  (5x5 block mean swing), travel (best non-zero-lag correlation of consecutive residual
+  changes minus lag 0) and stillness. Measured in the test: frame-wide pump 0.043
+  (bar 0.01, must trip at 2x), d91 IGN travel 0.878 held / 0.886 at the valley's pan
+  (bar 0.2, must trip at 2x), fixed taps pump 0, travel 0 held and panning, held
+  exactly still (max change 0.0).
+  Gate: the handoff section 6 tags, 347/347 test cases, 958987 assertions
+  (lead/unit_gate.txt). clang-format clean on the changed files (VolumetricFog.hpp's one
+  pre-existing finding unchanged).
+
+COST (triGpuTimes "air", fog3_static, 1080p, this machine's GPU, uncontended runs where
+  the frame equals its own minimum, 30.5-30.8 ms), two interleaved pairs:
+  d91 0.70 / 0.70 ms, fix 0.79 / 0.78 ms: +0.09 ms on the air stage (post 1.89 -> 1.98).
+  (Contended runs read 1.9-4 ms for every variant; do not compare across loads.)
+
+OTHER CLIPS
+  Every overhaul clip uses the froxel fog, so every ud clip changes slightly. All v2/ud
+  clips other than valley_mist are still from 2026-10-19 (the ORIGINAL frame-wide
+  jitter, i.e. the pump). Reshoot the ud side of at least:
+  - cloud_shadows: probe look_probe_mistlead_cloud_shadows on the fixed build (frames
+    150-269): band 0.105, WIND <= 0.008, rho_off <= 0.030; the shot clip (original) band
+    0.396, farhill lowd2 0.848; F1 farhill rho_off 0.273 / WIND 0.092 (wind); vanilla
+    band 0.104. Fixed = vanilla level.
+  - pine_shafts: probe look_probe_fog3_pine_static: fixed = F1 within noise in every
+    region (foliage and the near beams dominate), look unchanged (time mean |d| 0.12).
+    First swarm: original 1.2x vanilla.
+  - convoy (original 1.4x vanilla), sinai_camp (1.1x): not probed here.
+  - The rest (ambush, bay_reflections, opening, outpost at about vanilla; checkpoint,
+    rain_town, supply_run, town_patrol, firefight below) for consistency only.
+  The per-cell (F1) versions in tmp/video/mist/percell_ud/ must not be used.
+
+FILES
+  lead/fix.patch (git diff --binary on graphics-remaster HEAD d91a08e0: VolumetricFog.hpp,
+    EngineGL33_PostFog.cpp, EngineGL33_PostFogShaders.cpp, test_volumetric_fog.cpp,
+    ITERATIONS.md F2, roadmap.yaml log line), lead/commitmsg.txt.
+  Scratch worktree D:/Arma_CWA_worktrees/fog-8 (detached at d91a08e0, the fix unstaged,
+    build/fog-8-rwdi). look-director: unstaged = d91 change + fix (engine files identical
+    to fog-8's), look-director-rwdi rebuilt; its previous unstaged diff is in
+    lead/look-director-unstaged-before.patch.
+  New clip: v2/ud/valley_mist/valley_mist__ud.mkv (collect.json: look-director-rwdi,
+    mode=remastered;lit=OK). The F1 clip and its run logs: lead/percell_valley_mist/.
+  Owner: lead/owner_compare.mp4 (1280x720, 60 fps, 23 s, 6 MB: ORIGINAL / LAST FIX / NEW
+    2x crops 4.5 s each, then the full NEW shot), lead/owner_compare.png.
+  Runs: lead/runs/{static-fix,moving-fix,cost-fix,cost-d91,cost2-*,cloud-fix,pine-fix}/,
+    measurements lead/full/*.txt, x-t sheets lead/look/.
+
+KNOWN LEFTOVERS (not from this change)
+- A faint dash at the far shoreline under the sun about every 27 frames under the pan
+  (about 1 code value in a 38x14 px box, d2 rms 0.28 vs vanilla's 0.63 at that spot).
+  It is in the original and in C0 at the same frames and absent with the camera held;
+  agents 6/7 tie it to the column light (horizon ring). Follow-up if the owner sees it.
+- Every overhaul build (original too) has a screen-locked 6 px diagonal pattern and
+  8-frame-cadence peaks (likely TAA) that vanilla lacks (agent 1).
+- After a camera cut the history-age blur means about 10 frames slightly clearer haze,
+  as in the original approved build.
+- Only the dawn valley, cloud_shadows and pine_shafts were probed; no low frame rate run
+  (nothing temporal is left to depend on it).

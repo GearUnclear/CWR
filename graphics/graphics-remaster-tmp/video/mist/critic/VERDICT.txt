@@ -1,0 +1,175 @@
+MIST CRITIC VERDICT (valley_mist, trailer scene 2 "MOVING OUT AT DAWN"), 2026-10-23
+===================================================================================
+
+VERDICT: PASS. The flicker the owner saw is gone from the new overhaul clip and from scene 2 of
+both new montages. I found nothing that the fix or the reshoot broke. There are open items below;
+none of them is in scene 2.
+
+Everything here was measured or looked at by me, on disk, with my own tools in critic/tools/
+(indep.py, slow.py, specks.py, edges.py, look.py, montdiff.py, montscene2.py, montlook.py,
+bacheck.py). No game was run. No engine, worktree or junction was touched.
+
+
+(a) THE NEW OVERHAUL CLIP (v2/ud/valley_mist/valley_mist__ud.mkv)
+-----------------------------------------------------------------
+bandmetric (shared tool), rerun by me:
+  full 570      band 0.103  band_max 0.185  sky 0.044  spikes 2   (old 0.567 / 1.415 / 25076)
+  270-390       band 0.093  band_max 0.175  sky 0.048  spikes 0   (old 0.526 / 2.086 / 5482)
+  vanilla full  0.112 / 0.308 / 67 (new vanilla), 0.106 / 0.193 / 0 (old vanilla)
+  Matches the reshoot's numbers exactly.
+
+My own measures (indep.py, NATIVE resolution, mist band x 288-1920, y 486-842, luma, temporal
+second difference d2; values in code values):
+                         new     old     vanilla
+  per-pixel d2 rms       1.71    1.93    3.04     (vanilla has more aliasing; no new grain)
+  4 px blocks            0.497   0.930   0.787
+  16 px blocks           0.194   0.788   0.216
+  64 px blocks           0.100   0.707   0.119
+  178 px blocks          0.087   0.548   0.103
+  whole band mean (the "one sheet" mode)
+                         0.070   0.397   0.085
+  worst 16 px block      0.387   1.754   0.793
+  At every block size the new clip is at or below vanilla. The coherent sheet is gone
+  (0.397 -> 0.070, vanilla 0.085). The old worst frames 328, 471, 540 no longer lead the
+  list; the new worst whole-band frames are 16-44 (the pan start), all under 0.17.
+
+Far haze patch where the d2 sheets still show faint specks (specks.py, x 1100-1820,
+y 490-650, 4x4 px means):
+  new  rms 0.364  median 0.125  p99 1.16  share > 1 code value 1.4%
+  old  rms 0.876  median 0.312  p99 3.22  share > 1 code value 16.1%
+  van  rms 0.477  median 0.031  p99 2.09  share > 1 code value 2.9%
+  The new clip's tail is below vanilla. Its median is higher (0.125 against 0.031 code values)
+  because vanilla's smooth haze is analytic and perfectly still: a sub-code-value floor.
+
+Slow breathing check (slow.py; d2 under-weights 1-6 Hz, so I measured that band separately,
+box5 minus box31 of region means):
+  band 1-6 Hz rms: new 0.106, old 0.185, vanilla 0.017
+  sky  1-6 Hz rms: new 0.124, old 0.125, vanilla 0.011
+  corr(band, sky) new 0.94: this residual is a WHOLE-IMAGE gain (the photo camera's exposure
+  following its meter), not the fog. It was there before the fix at the same size (old sky
+  0.125), peak to peak 0.63 levels = 0.6% in the band and 0.47% in the sky. Above 4 Hz the new
+  band holds 35 / 16 / 26 power units (4-8 / 8-15 / 15-30 Hz) against the old 1690 / 2319 / 2762.
+
+x-t slice (look/xt_old_new_van.png; one row per frame, band row y 600-700, temporal high pass
+x25): the old clip is covered in horizontal stripes over the valley and bay (the sheet
+flicker); the new clip has none and looks like vanilla, only pan streaks. The zoom
+(look/xt_right_zoom.png) shows a few faint screen-locked dashes near x 1770 in the new clip,
+far weaker than the old stripes.
+
+Screen edges (edges.py; cells revealed by the pan have no fog history): left strip 0.226,
+right 0.197, interior 0.197; vanilla 0.332 / 0.169 / 0.227. No edge speckle in this pan.
+
+
+(b) BY EYE: 2x crops and d2 x20 around the old worst frames, NEW clip
+----------------------------------------------------------------------
+look/new_win328_crop2x.png, new_win540_crop2x.png (12 consecutive frames each, 2x crop of the
+far valley and bay): the haze and bay hold steady from frame to frame; no curtains, no blocks,
+no grid. Compared with old_win328_crop2x.png.
+look/old_win328_d2x20.png: the whole land under the haze flips dark / bright / dark as one
+sheet over frames 325-330. look/new_win328_d2x20.png, new_win471_d2x20.png,
+new_win540_d2x20.png: flat grey with pan outlines and a faint lattice of cell-size specks in
+the far haze (well under one code value, see specks.py above). look/van_win328_d2x20.png for
+the vanilla floor (pan edges and vegetation aliasing).
+
+
+(c) PROVENANCE
+--------------
+ud collect.json: game_dir look-director-rwdi, mode=remastered;lit=OK, 570 frames, 301.5 MB;
+  run log shows volFog=1:on, no shader compile errors, no "shader override" line, and
+  run-captures.ps1 clears CWR_SHADER_OVERRIDE_DIR when -ShaderOverrideDir is not passed.
+  PoseidonGame.exe mtime 02:24, the shoot ran 02:44-02:50, and the exe contains
+  "g_cellJitter = fogCellNoise" (grep count 1).
+look-director worktree: its unstaged diff is byte-for-byte fix.patch (apart from index lines);
+  its staged state equals lead/look-director-before-staged.patch; its index differs from
+  graphics-remaster 907906c only in docs (ITERATIONS.md and the two handoffs). So the trailer
+  build's engine = 907906c + fix.patch, nothing else.
+vanilla collect.json: vanilla-upstream-rwdi, mode=vanilla, gamma 1.2, 570 frames. That exe is
+  dated 2026-10-19 01:21 (untouched).
+Same shot, new vs old: stills differ by 0.5-0.6 mean (band +0.7 to +1.2 brighter = the
+  "hair more mist"; sky 0.15-0.20), so the staging is identical. New vs old vanilla 0.3-0.5.
+Pair difference ud vs vanilla: first 29.57, mid 31.79, last 30.83 (mean 30.7, guard is 4).
+pairs.json of both montages: valley_mist ok=true; every other pair record unchanged.
+
+
+(d) MONTAGES
+------------
+ffprobe: split 1920x1080 and sbs 3840x1080, both h264 yuv420p, 60/1, 8004 frames, 133.4 s,
+  same as their backups; timeline.json byte-identical to the backups (split and sbs).
+Split, old vs new, every frame (montdiff.py): 7455 of 8004 frames bit-identical; the only
+  differing span is frames 960-1497 (16.0-24.95 s): scene 2 itself (segment 15.1-24.6 s) plus
+  21 frames of encoder carry-over into the fade (mean diff <= 0.42, max 6 at 240x135).
+Scene 2 in the split, divider parked at 0.52 (19.1-20.6 s = clip frames 240-330, the old worst
+  cluster), overhaul side x > 65%, mist band (montscene2.py):
+     60 px blocks: old 0.719 / 1445 spikes  ->  new 0.082 / 0 spikes
+     20 px blocks: old 0.838 / 16173       ->  new 0.182 / 838 (codec macroblocks)
+  The all-overhaul span 23.1-23.6 s: 0.680 / 1130 -> 0.101 / 1.
+  By eye: look/montage_d2x20_t20.4_old_top_new_bottom.png: the old row shows the bay and
+  valley as big dark and bright sheets; the new row shows only h264 block noise and edges.
+Sbs, old vs new: frames differ over 16.0-81.7 s, but at codec level only (mean <= 0.76 at
+  240x135; at full res 1.5-1.9 mean, spread like quantisation noise over textured areas of
+  both halves, look/sbs_diff_t40.png); the sbs backup is the 2026-10-19 10:10 render, older
+  than the split backup (12:28). No content change outside scene 2.
+
+
+(e) THE FIX (game bug; fix.patch, read and run)
+-----------------------------------------------
+Correct as far as I can see:
+  - xy: cellJ = fract(fogFrame.xy + 0.5 + cell offset) - 0.5 stays in [-0.5, 0.5) of the cell,
+    so each cell still covers its whole footprint over time.
+  - z: s + fract(fogDepth.w + g_cellJitter + 0.618034 s) stays in [s, s+1): the slice range
+    is unchanged; the per-slice turn also decorrelates the column's slices.
+  - Uniforms, sequence, history share, reprojection: unchanged. No C++ logic change.
+  - fix.patch applies cleanly to graphics-remaster 907906c (git apply --check). mist-1's diff
+    of the three fix files equals fix.patch.
+  - Unit test run by me: mist-1 PoseidonTests.exe "Volumetric fog: the injection*": 9/9
+    assertions pass (sdFrameWide 0.0313 > 0.025; sdPerCell 0.0054 < 0.0078, a ratio of 0.17).
+    [fog] tag: 34 test cases, 6461 assertions, all pass. Lead's 17-tag gate log: 347/347.
+  - The extra mist (+0.7 to +1.2 levels in the band) is expected, not a defect: with the
+    old coherent jitter the column's optical depth fluctuated as a whole, and the average
+    of exp(-tau) over a fluctuating tau is larger (Jensen), so the old haze read slightly
+    thin. The decorrelated version is closer to the true mean.
+Side notes (none blocks):
+  - The three per-cell offsets are not independent per axis: fogCellNoise(p + (17,59)) and
+    fogCellNoise(p + (83,29)) equal fogCellNoise(p) plus a constant (0.711-0.728 and
+    0.178-0.196, checked over the 160x90 grid). Across cells each axis is still well spread,
+    which is what kills the sheet, so this is harmless; a cleaner hash per axis would be tidier.
+  - Not tested: cells without history (camera cuts, map close, fast mouse turns revealing new
+    screen edge) now start from a per-cell offset instead of one coherent offset, so dense
+    mist may show cell-size speckle for the first ~10-20 frames after such an event. The
+    clip's slow pan shows nothing at the edges (above).
+  - The unit test's mirror re-implements the hash in C++ and only checks the depth axis; the
+    string pins are what tie it to the real shader. Acceptable, in line with the file's style.
+
+
+(f) BEFORE/AFTER VIDEO (mist/reshoot/before_after_scene2.mp4)
+-------------------------------------------------------------
+7,836,756 bytes (7.8 MB, under 30 MB); h264 1280x720 60/1, 1890 frames, 31.5 s, no audio;
+full decode with ffmpeg reports no error. Parts as claimed: 0-11 s old scene 2 labelled
+BEFORE, 11-22 s new scene 2 labelled AFTER, 22-31.5 s the overhaul's bay crop, BEFORE on top
+and AFTER below (stills critic/ba/ba_sheet.png). The labels are on the right clips: 16 px block
+d2 of part 3, top (BEFORE) 0.775 / 187827 spikes, bottom (AFTER) 0.229 / 26806. Parts 1 and 2
+include the moving divider, so they differ less (right half 0.621 vs 0.420).
+
+
+OPEN ITEMS (outside scene 2; for the orchestrator)
+--------------------------------------------------
+1. cloud_shadows (scene 6, "Everon from the air", 49.6-58.1 s) is still the 2026-10-19 clip
+   from the unfixed build: bandmetric band 0.386, band_max 1.162, 17002 spikes (rerun by me).
+   The lead showed it has the same cause and its cut reads 0.099 / 0 spikes on the fixed
+   build. The trailer still carries that flicker until its ud side is reshot (lead step 6).
+2. The fix is not landed. graphics-remaster has no commit; the trailer build carries it only
+   as an unstaged change in the look-director worktree. Under the owner rule (real game bug ->
+   engine fix with unit test) it still has to be committed to graphics-remaster (fix.patch +
+   fix.commitmsg.txt). Any reset or rebuild of look-director from its staged state would drop it.
+3. A pre-existing whole-image exposure wander at 1-4 Hz (0.47-0.6% peak to peak, same before
+   and after the fix, vanilla 0.04-0.13%) is the only slow temporal change left in the shot.
+   I judge it below visibility; it is the photo camera, not the fog.
+4. Housekeeping: the old clips were kept inside v2 (v2/ud/valley_mist_before_mistfix and
+   v2/vanilla/valley_mist_before_mistfix), against the lead's "keep backups outside v2".
+   trailer_v2.py reads only named clips, so the montage is unaffected, but
+   lead/tools/screen_clips.py iterates v2/ud and would now list the backup as a clip.
+5. The new vanilla clip has an object-detail pop at frames 563-568. It is hidden (the split
+   shows only the overhaul by then; the sbs fades it to about 8%). The old, clean vanilla clip
+   would have served equally.
+6. Other overhaul clips in the montage were shot on the unfixed build; the lead's screen puts
+   convoy 1.4x, pine_shafts 1.2x and sinai_camp 1.1x vanilla. Re-measure if they are reshot.

@@ -1,0 +1,142 @@
+AGENT 3 REPORT: the volumetric fog itself (mist swarm, valley_mist "MOVING OUT AT DAWN")
+=====================================================================================
+2026-10-23, agent 3 of the mist swarm. Folder: graphics-remaster/tmp/video/mist/3/
+
+VERDICT
+-------
+Confirmed, with a causal test. The flicker in the dawn mist comes from the froxel fog's
+injection jitter. Every froxel cell gets the SAME sub-cell offset each frame, in x, y and depth.
+The offsets are uniforms set once per frame (EngineGL33_PostFog.cpp:689-692: jz, jx and jy are
+golden-ratio sequences of the frame index, used in psFogInject's fogSlice and main). The history
+takes a 0.12 share of each new frame (kFogHistoryShare), so 0.88 of the old jitter state is still
+there next frame. That leftover is the same over whole regions in the same frame. In the far
+slices (hundreds of metres deep at zFar 4000) a depth offset of a few per cent of a slice moves
+every sample along a downward ray in the same direction, deeper into or out of the mist. The haze
+and mist opacity over the whole valley, bay and far hills then swings as one sheet from frame to
+frame. Land brightens toward the air colour, and the sky just above the horizon dims a little
+(agent 4 saw that anti-swing independently).
+
+It is temporal noise, not camera motion. With the camera held still the flicker stays (band
+0.468 against 0.517 under the pan). The far ring's tap stepping and the fog's reprojection add
+only about 10% while panning.
+
+It is a game bug, not a capture artefact. Each rendered frame draws a new jitter whatever the
+simulation step is, so play shows it too. Agents 1 and 2 measured it at a real-time 60 fps
+cadence: band 0.27 to 0.31, against 0.106 for vanilla. The capture cadence (about 8 renders per
+shot) roughly doubles what is visible.
+
+Fix at the cause, in the engine: give each cell its own jitter (details below). Measured with
+a shader override on the trailer's build: the pump is gone (band 0.063 on the moving probe,
+0.056 static), no grain or curtains are added, and the look barely changes.
+
+WHAT I MEASURED (all numbers are bandmetric.py unless marked; --from 15 on 120-shot probes)
+---------------------------------------------------------------------------------------
+Probes: the real ud_valley_mist staging, mode and head recipe (exact 1/60 s step, setAccTime 0
+between shots), clock and props at k = 270..389. Shot on the trailer's overhaul build
+(look-director-rwdi). Tests: video-work/arma_CWR/tests/rendering/captures/video/
+look_probe_mist3_static (camera HELD at the frame-328 pose) and look_probe_mist3_moving (the real
+pan), both made by tools/gen_probe3.py. Fog variants come through CWR_SHADER_OVERRIDE_DIR. The
+game log confirms "shader override loaded ... psFogInject.glsl" for each variant, with no compile
+error. The assembled source is tools/assemble_fog.py, built from the C++ raw strings exactly as
+kPostShaders joins them.
+
+                          band   band_max spikes  sky    valley bay   farhill (region d2 rms, series.py)
+  static, base           0.468  2.06     4926   0.038  0.951  0.326 0.445
+  static, jitter frozen  0.024  0.048    0      0.015  0.030  0.023 0.017
+  static, per-cell       0.056  0.22     1      0.016  0.045  0.031 0.026
+  moving, base           0.517  2.10     4966   0.047  1.042  0.370 0.469
+  moving, per-cell       0.063  0.175    0      0.025  0.067  0.042 0.044
+  for scale: full ud clip 0.567 / 1.415 / 25076; vanilla full clip 0.106 / 0.193 / 0
+  (agent 6: no air at all 0.035; empty medium with the fog machinery running 0.039)
+
+Jitter model (tools/jitfit.py): I regressed each region's high-passed brightness on the
+modelled history residual of the frame-global jitter. The model is the EMA 0.12 of the three
+golden-ratio sequences at seq = the logged frame= counter + an offset.
+  shot ud clip (570 frames): R2 0.45 to 0.57 at offset -29/-30 in all four regions; 0.01 to 0.03
+    at every other offset.
+  static base: R2 0.83 to 0.91 at offset -29. Moving base: 0.75 to 0.79 at offset -29.
+  frozen and per-cell runs: no peak (R2 at the noise level, the best offset wanders).
+  Frames rendered per shot (7 to 10) do not correlate with the flicker (r -0.03 to 0.04).
+
+Fine scale (tools/finegrain.py; d2 rms at 960x540 in the band, block 1/3/6/12/30 px):
+  static base 1.06/0.95/0.93/0.90/0.83: the same at every scale, so it is one coherent sheet.
+  static frozen 0.29/0.11/0.06/0.04/0.03 (the TAA and encode floor).
+  static per-cell 0.45/0.26/0.21/0.14/0.07: a faint cell-scale residue, under a quarter of a
+    code value per frame.
+  moving base 1.52/1.05/1.00/0.96/0.89; moving per-cell 1.16/0.38/0.25/0.16/0.08 (lower at
+    every scale).
+
+LOOKED AT (images in this folder)
+---------------------------------
+  d2_strip_f327_330.png   the shot clip's worst cluster. Left: the frame. Right: d2 x40. The
+                          whole land surface under the haze turns white, black, white, black in
+                          step, frame to frame. The water changes less and the sky hardly at all.
+  zoom2x_base_vs_frozen.png  2x crop of the bay and slope, static (base above, frozen below).
+                          Frozen jitter is NOT a fix: without jitter the froxel grid aliases
+                          into vertical curtains in the haze.
+  zoom2x_moving_base_vs_percell_f50.png  2x crop, base above, per-cell below. Smooth, no
+                          curtains, no cells. Per-cell is a hair mistier (band mean +1.6/255,
+                          valley 84.2 -> 86.2). The coherent leftover had biased the old mean:
+                          it is correlated along each column, and the integration's exp turns
+                          that into a mean shift (Jensen).
+  d2_strip_moving_base_top_percell_bottom.png  d2 x40 under the pan. Base: a whole-land sheet.
+                          Per-cell: faint specks the size of a few cells.
+  cmp_moving_base_top_percell_bottom.mp4  60 fps crop video of the band, base above, per-cell
+                          below (1 MB), for the lead to judge by eye.
+
+RULED OUT OR MINOR ON MY ANGLE
+------------------------------
+  - Far ring stepping (the round 3 note: the freshest tap with 0.1 weight steps): minor. The pan
+    adds about 0.05 to the base (0.468 -> 0.517) and 0.007 with per-cell (0.056 -> 0.063).
+    That bounds the ring and reprojection together. In this shot every azimuth in view sees sky
+    above land, so the centre tap is always fresh (ringSure 1).
+  - Fog reprojection while the camera moves: inside the same small bound.
+  - The valley mist density field (kMistSigma, noise banks): it is the medium that the jitter
+    samples, not a source of flicker by itself. With the jitter decorrelated it is calm.
+    Agent 6: fogMist=0 leaves 0.347 (haze alone still pumps), and fogDensity=0 gives 0.039.
+  - Froxel depth slicing near the horizon: this is the mechanism's lever (the far slices are deep,
+    so a coherent depth offset moves a lot of air), not a separate defect.
+
+THE FIX (at the cause; engine, graphics-remaster; the lead applies it)
+------------------------------------------------------------------------
+psFogInject, kPostFogInjectMainGLSL in EngineGL33_PostFogShaders.cpp. Keep the frame's
+golden-ratio offset, but turn it per cell with an interleaved-gradient offset of the cell (and,
+in depth, also per slice):
+    float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+    fogSlice:  float z = fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z);
+    main:      g_cellJitter = fogCellNoise(gl_FragCoord.xy);
+               vec2 cellJ = fract(fogFrame.xy + 0.5 + vec2(fogCellNoise(gl_FragCoord.xy + vec2(17.0, 59.0)),
+                                                           fogCellNoise(gl_FragCoord.xy + vec2(83.0, 29.0)))) - 0.5;
+               vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;
+No C++ change, no new uniforms, no extra cost beyond three hashes per cell.
+  Ready diffs (reference copies, NOT applied anywhere and NOT compiled):
+    patch/fog_cell_jitter_shader.diff   the shader change with comments. The assembled result
+                                        equals the tested override shaders/percell/psFogInject.glsl
+                                        except for names, comments and line wrapping (checked).
+    patch/fog_cell_jitter_test.diff     a new [remaster][fog][Shaders] test in
+                                        tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp.
+                                        It pins the per-cell strings and that the old frame-wide
+                                        forms are gone. It also checks a C++ mirror: a 5x5 block
+                                        of cells' EMA-0.12 residual of the depth offset has std
+                                        0.0313 slice with the frame-wide jitter and 0.0054
+                                        per-cell (checked in Python: ratio 0.173; the test
+                                        requires > 0.025 and < 0.25x).
+    patch/b/ holds the full patched copies of both files.
+  The capture needs no change for this. With the engine fix the head recipe as shot gives
+  0.063 here. Agent 2 is checking per-cell at the real-time cadence (rt10pc).
+  After the fix: reshoot valley_mist on the ud side only (vanilla is unaffected), with the head
+  recipe unchanged. Because the bug is in the shared injection, every clip with volFog on (most
+  day clips) should calm a little too; re-measure pine_shafts and bay_reflections.
+  Optional, not needed for the trailer: the per-cell residue (0.14 at 12 px blocks) could go
+  lower with a blue-noise tile in place of the IGN hash, or two stratified depth samples per
+  cell.
+
+FILES
+-----
+  tools/series.py, jitfit.py, finegrain.py, gen_probe3.py, assemble_fog.py, run_probe3.ps1
+  shaders/base, frozen, percell (psFogInject.glsl overrides)
+  runs/<static|moving>-<base|frozen|percell>/ (mkv of the 120 shots, band.json, series.csv,
+    udcap.log, tri logs, one kept PNG f0050)
+  ud_series.csv, van_series.csv, ud_frames_per_shot.npy (the shot clips' region series)
+  Junctions used (video-work/arma_CWR/packages): RemasterUD-mist-3, -3b, -3c, -3d.
+  No worktree, no build, no engine or graphics-remaster edit.

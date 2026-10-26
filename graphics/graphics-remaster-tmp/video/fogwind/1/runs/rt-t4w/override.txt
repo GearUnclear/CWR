@@ -1,0 +1,3 @@
+﻿shader override: D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\shaders\t4w
+[2026-10-23 04:36:40.278] [app-c114] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  GL33: shader override dir = 'D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\shaders\t4w'
+[2026-10-23 04:36:43.050] [app-c114] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  GL33: shader override loaded — D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\shaders\t4w\psFogInject.glsl (67885 bytes)

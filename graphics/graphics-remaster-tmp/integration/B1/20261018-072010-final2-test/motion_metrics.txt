@@ -1,0 +1,4 @@
+b1still off (16 frames): frame d1 0.00154; crowns d1 0.00221; ground d1 0.00084
+b1still on (16 frames): frame d1 0.00201; crowns d1 0.00245; ground d1 0.00162
+b1walk off (30 frames): frame d2 0.06919 (>0.05: 51.7%); crowns d2 0.09685 (>0.05: 76.2%); ground d2 0.04499 (>0.05: 24.6%)
+b1walk on (30 frames): frame d2 0.06961 (>0.05: 48.7%); crowns d2 0.10040 (>0.05: 76.8%); ground d2 0.04229 (>0.05: 17.2%)

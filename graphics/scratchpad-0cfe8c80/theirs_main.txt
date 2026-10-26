@@ -1,0 +1,57 @@
+=======
+    if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
+    // Take the occluded part of the sky light out of the radiance. c.a is one
+    // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+    float share = 1.0 - clamp(c.a, 0.0, 1.0);
+    float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+    vec3 shaft = texture(shaftTex, vUV).rgb;
+    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
+    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+    if (camParams.x > 0.5) {
+        // The camera: the stored scene light, its occlusion, the glare of
+        // light past the shoulder and the shafts, at the metered exposure;
+        // white balance and saturation; the curve; the lens's vignette; a
+        // dither everywhere (the curve moves every value).
+        vec3 x = camDecode(c.rgb) * keep * camParams.y;
+        x += texture(bloomTex, vUV).rgb * camGlow.x;
+        x += shaft * shaftColor.rgb * (camGlow.y * camParams.y);
+        x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
+        // At a low sun the camera, on daylight balance, sees the shade lit by
+        // the blue sky: what the sky lights more than the sun (the world's
+        // sky light share, `share`) leans cool (camShade), what the sun
+        // lights keeps its amber (a pine crown stays green-dark, warm only at
+        // its sunlit tips; pre-lit draws and the sky are left alone).
+        if (camShade.w > 0.0) x = mix(x, x * camShade.rgb, camShade.w * smoothstep(0.2, 0.6, share));
+        // Dark tones carry less colour than the mid tones (camDark): the
+        // hue-keeping curve keeps a dark olive's full linear ratios, which
+        // read as a candied mustard in a pine crown's shade.
+        if (camDark.x < 1.0) {
+            float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+            float s = mix(camDark.x, 1.0, smoothstep(camDark.y, camDark.z, l));
+            x = max(mix(vec3(l), x, s), vec3(0.0));
+        }
+        // The night's rods: dim light toward a cool grey of its brightness;
+        // lamp and fire pools, far brighter, keep their colour, and so does
+        // warm light however dim (warmth (r - b) / peak from camRod.w over
+        // the width camGlow.w): the fire's smoke is warm through, not orange
+        // particles among grey ones.
+        if (camNight.x > 0.0) {
+            float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
+            float pk = max(x.r, max(x.g, x.b));
+            float warm = pk > 0.0 ? (x.r - x.b) / pk : 0.0;
+            float rod = camNight.x * (1.0 - smoothstep(0.25 * camNight.y, camNight.y, l)) *
+                        (1.0 - smoothstep(camRod.w, camRod.w + camGlow.w, warm));
+            vec3 tint = camRod.rgb / dot(camRod.rgb, vec3(0.2126, 0.7152, 0.0722));
+            x = mix(x, l * tint, rod);
+        }
+        // The lens's vignette, on the light before the curve: the corners
+        // darken, light far past white (the sun) still clips.
+        vec2 q = (vUV - 0.5) * vec2(camGlow.z, 1.0);
+        x *= 1.0 - camParams.w * smoothstep(0.1, 1.1, dot(q, q) * 2.2);
+        vec3 y = camTone(x);
+        vec3 col = pow(clamp(y, 0.0, 1.0), vec3(1.0 / 2.2));
+        col += (n + m - 1.0) / 255.0;
+        fragColor = vec4(col, 1.0);
+        return;
+>>>>>>> theirs

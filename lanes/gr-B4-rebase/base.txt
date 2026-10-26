@@ -1,0 +1,8 @@
+lane: gr-B4-rebase
+source: D:/Arma_CWA_worktrees/gr-B4-rebase
+HEAD: cb3dd0d813621c1da641b84567a738d879ea30bd
+subject: graphics: rain wets cloth and stone, fills puddles and streaks lamp light
+commit date: 2026-10-18 19:21:30 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 51
+binary files changed (content not in patch): none

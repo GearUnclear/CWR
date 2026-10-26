@@ -1,0 +1,4 @@
+        // The surface target: the body's sky light, as the stock share has it.
+        g_surfShare = ambientShare * (1.0 - wSky);
+        g_surfAlbedo = sqrt(clamp(dot(toLinear(albedo), kLuma), 0.0, 1.0));
+        r0.rgb = litDisplay(radiance);

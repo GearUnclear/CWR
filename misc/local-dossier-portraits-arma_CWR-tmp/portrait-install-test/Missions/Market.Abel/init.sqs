@@ -1,0 +1,112 @@
+; ============================================================================
+;  init.sqs  -  Market.Abel bootstrap (auto-loaded by RunInitScript)
+; ----------------------------------------------------------------------------
+;  A single-purpose sandbox for the MONEY loop: headquarters election (in a
+;  town building or at the edge of town), the HQ weapon cache, the vehicle
+;  garage (lock = beep beep, invulnerable, persists) and the arms / vehicle
+;  dealers drawn over the island's towns. The native side (ZoneRegistry +
+;  GuerrillaBase + Market, activated by CfgGuerrillaZones /
+;  CfgGuerrillaMarket in description.ext) owns the facts; the campaign's OWN
+;  market.sqs, exec'd out of the ONE shared core at <GameDir>\gmcore (no
+;  copy lives here), supplies the policy: the action menus, the
+;  gmResources debit, the
+;  purchase effects and delivery. This file only:
+;    1. seeds the script-side state lib.sqs / market.sqs read (GM_Z_* tuple
+;       constants, a FAT treasury, the usual lib rosters) - the same names
+;       init.sqs of a Guerrilla campaign seeds;
+;    2. creates the zone markers (the engine repaints only markers that
+;       already exist);
+;    3. execs \gmcore\scripts\lib.sqs then \gmcore\scripts\market.sqs out
+;       of the SHARED CORE installed at <GameDir>\gmcore (the leading
+;       backslash resolves against the game data root, not this mission
+;       folder) - and NOTHING else from
+;       the core (no capture/economy/recruit/qrf/civilian managers), so the
+;       market loop is the only moving part on display;
+;    4. the debug self-actions (act_*.sqs: teleports to the nearest arms /
+;       vehicle dealer, the garage, the nearest town, the Camp; status; god
+;       mode; +10000 R) + the readout loop (hud.sqs).
+;  DIALECT: SQS. A mid-line ; is a STATEMENT SEPARATOR, not a comment.
+; ============================================================================
+
+? not (isNil "MKT_BOOTED") : exit
+MKT_BOOTED = true
+
+aP = player
+gmPlayer = player
+
+; ---- zone tuple index constants (the shape `gmZone <i>` returns; lib.sqs
+;      reads GM_Z_POS / GM_Z_NAME / GM_Z_OWNER / GM_Z_TYPE) ------------------
+GM_Z_NAME    = 0
+GM_Z_TYPE    = 1
+GM_Z_OWNER   = 2
+GM_Z_GAR     = 3
+GM_Z_SUPPORT = 4
+GM_Z_INCOME  = 5
+GM_Z_HEAT    = 6
+GM_Z_MARKER  = 7
+GM_Z_POS     = 8
+GM_Z_CAPTURE = 9
+
+; ---- script scalars the native layer + market.sqs read -----------------------
+;   gmResources  the treasury market.sqs debits - seeded FAT so every stock
+;                row (the T55 is 20000 R) and a few HQ moves are affordable
+;   gmManpower   untouched here (no recruit manager runs)
+;   gmWarLevel   1: read by the native layers that scale with it
+;   gmUndercover false: an ARMED fighter (no disguise layer in this slice)
+gmResources  = 50000
+gmManpower   = 10
+gmWarLevel   = 1
+gmUndercover = false
+; lib.sqs helpers reference these rosters; seeded empty so a stray call is safe
+GM_GEAR_THRESHOLD = 25
+GM_GEAR_ITEMS     = []
+GM_GEAR_COUNT     = []
+GM_GEAR_UNLOCKED  = []
+GM_RESENT_ZONES   = []
+GM_RESENT_DUE     = []
+GM_RESENT_AMT     = []
+GM_RESENT_MAXPEND = 3
+
+; ---- zone markers (the engine repaints only markers that already exist) -----
+MKT_i = 0
+#mkmarkers
+? MKT_i >= gmZoneCount : goto "mkdone"
+MKT_rec = gmZone MKT_i
+MKT_m = createMarker [(MKT_rec select GM_Z_MARKER), (MKT_rec select GM_Z_POS)]
+(MKT_rec select GM_Z_MARKER) setMarkerType "Flag"
+(MKT_rec select GM_Z_MARKER) setMarkerSize [0.6, 0.6]
+MKT_i = MKT_i + 1
+goto "mkmarkers"
+#mkdone
+
+; ---- mission-local state the HUD/actions share --------------------------------
+MKT_god = false
+MKT_ZC = gmZoneIndex "Camp"
+
+; ============================================================================
+;  PROPS: a rifle to stash, binoculars to look at the town
+; ============================================================================
+aP addWeapon "Binocular"
+
+; ============================================================================
+;  SELF-ACTIONS (debug menu) + HUD
+; ============================================================================
+MKT_a1 = aP addAction ["Report: HQ / garage / dealers / treasury", "act_status.sqs"]
+MKT_a2 = aP addAction ["DEBUG: teleport to the nearest ARMS dealer", "act_tp_arms.sqs"]
+MKT_a3 = aP addAction ["DEBUG: teleport to the nearest VEHICLE dealer", "act_tp_vehicle.sqs"]
+MKT_a4 = aP addAction ["DEBUG: teleport to the HQ garage", "act_tp_garage.sqs"]
+MKT_a5 = aP addAction ["DEBUG: teleport into the nearest town", "act_tp_town.sqs"]
+MKT_a6 = aP addAction ["DEBUG: teleport back to the Camp", "act_tp_camp.sqs"]
+MKT_a7 = aP addAction ["DEBUG: +10000 R", "act_money.sqs"]
+MKT_a8 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
+
+; ============================================================================
+;  LAUNCH: helpers first (market.sqs gates on @GM_LIB_READY), then THE
+;  campaign market policy script, then the readout
+; ============================================================================
+GM_LIB_READY = false
+[] exec "\gmcore\scripts\lib.sqs"
+@GM_LIB_READY
+[] exec "\gmcore\scripts\market.sqs"
+[] exec "hud.sqs"
+exit

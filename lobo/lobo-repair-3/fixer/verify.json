@@ -1,0 +1,52 @@
+{
+ "batch": "20261012T042613Z-b68ba5de",
+ "state": "applied",
+ "repair_version": "2026-10-11.3",
+ "rule_sha256": "75c456dcab6fbece460edd479eedc296253255e709a3c58260f28072562a0427",
+ "compatibility": "ud",
+ "attribute_warnings": null,
+ "archives": [
+  {
+   "file": "LoBo_ZU23.pbo",
+   "installed_eq_after": true,
+   "backup_eq_before": true,
+   "changed": [
+    "config.cpp"
+   ],
+   "untouched_identical": 314,
+   "problems": [],
+   "readonly": false,
+   "checksummed": false,
+   "trailer_eq": true
+  },
+  {
+   "file": "LoBoEghelo.pbo",
+   "installed_eq_after": true,
+   "backup_eq_before": true,
+   "changed": [
+    "engine/fire.sqs",
+    "engine2/fire.sqs",
+    "engine3/fire.sqs"
+   ],
+   "untouched_identical": 412,
+   "problems": [],
+   "readonly": false,
+   "checksummed": false,
+   "trailer_eq": true
+  },
+  {
+   "file": "LoboIDFhelo.pbo",
+   "installed_eq_after": true,
+   "backup_eq_before": true,
+   "changed": [
+    "ch53/engine/fire.sqs",
+    "uh1/engine/fire.sqs"
+   ],
+   "untouched_identical": 610,
+   "problems": [],
+   "readonly": false,
+   "checksummed": false,
+   "trailer_eq": true
+  }
+ ]
+}

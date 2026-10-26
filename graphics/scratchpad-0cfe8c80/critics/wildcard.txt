@@ -1,0 +1,48 @@
+## track
+wildcard
+## files_verified
+true
+## missing_or_false_claims
+[
+ "Memory is understated by about 2x: the patch allocates 24 layers of 512^2 RGBA32F plus 24 of RGBA8, both with full mip chains (EnsureSkyTarget). That is about 160 MiB, not about 85 MB. A 12 GB RTX 3060 still has room for it.",
+ "'The rounds agree within about 0.3 ms' holds for the final rows only. The maps-off rows in rt7 spread by up to 2 ms (overcast_close off 6.04/3.99/5.57, town_day off 4.87/3.33/5.02, lowsun off 5.94/4.75/4.76), so each per-view delta carries about +-1 ms of noise.",
+ "The quoted +1.6 to +3.1 ms range leaves out the pine woods. rt6 measured woods_pine2_evening with the foliage skip (H) at 9.56 ms against 5.62 off, which is +3.9 ms.",
+ "'Trunk bases darker' in woods is not visible in the visibility field. In woods_mixed_noon dbg_final the trunks render white (they seem to count as foliage receivers and skip the maps), and the forest floor is an almost uniform grey with no visible pool at the trunk bases. The darkening is a broad floor dimming, not contact grounding.",
+ "The 'one bounce' for opaque casters uses a fixed grey albedo (0.16, 0.16, 0.14) in the shader, so there is no colour bleeding from vehicles or walls. The explorer does say this under production_needs, but the title's 'one-bounce light' oversells it.",
+ "Everything else checks out. Every cited image and artefact exists. prototype.patch is 988 lines and git apply --check --reverse passes on gfx-wildcard at 3c53141. My PIL diffs of the r16 luminance changes reproduce measure_remastered.md to two decimals."
+]
+## prototype_actually_loaded
+Yes. In r16, game_stdout.log for both the abel and eden runs logs 'wildcard sky maps: 24 directions at 512x512 (10 mips)', and every sky* triSetLighting knob returns res=OK. There are no GL or shader errors (the shader cache compiled all 144 programs). The exe at dist/gfx-wildcard-rwdi was built at 20:28:32 and r16 started at 20:28:34, which matches build8.log. The shipped baseline (r8s) ran dist/lighting-rwdi and logs no sky-map line. Final against maps-off really differs per pixel: woods_overcast changes by 6.0 levels on average (32% of pixels by more than 4), town_street by 4.0 (25%), overcast_close by 2.9 (12%). The open sunny views change by 0.9 to 1.3 levels (1 to 3%).
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+small
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[
+ "Only darker in woods: woods_overcast final has a mean of -2.8 levels and its p95 falls from 128 to 113, so the bright floor patches get compressed and the floor reads flatter and greyer. With final_phys the drops are -7.5 (woods_overcast), -5.0 (woods_mixed_noon) and -4.8 (town_street).",
+ "Visible artefact on large flat walls: the church side wall in town_street gets uneven blotchy darkening and streaky dark smears. In the debug field these look like smeared tree shapes on the facade, from the 24 discrete directions plus mean-depth leakage, and they show in the final frame.",
+ "The 1.15 sky gain is a global brightening of the sky fill. It lifts open ground about +1 level to cancel the darkening the maps cause elsewhere. It is mild and not a wash, but it is a calibration fudge rather than physics.",
+ "Grey bounce: opaque occluders send back a fixed grey, so the 'bounce light and colour bleeding' item in the vision is not delivered.",
+ "Evening warmth: this track leaves it unchanged (only the sky fill is scaled), but it does nothing for the baseline Remastered woods_pine2_evening, which already reads cooler and greyer than Classic.",
+ "Compliant: no haze, no grading, vignette, grain or new art, and crowns are not flattened in the final setting (leaf receivers skip the maps). The skyCrown=1 variant does flatten and darken crowns and costs +10 ms."
+]
+## cost_ok
+true
+## score_0_to_10
+3
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\wildcard\BEST_overcast_close.png
+## one_line
+This is a real, working world-space sky-occlusion system built from the shadow casters: soft contact pools under the Jeep and M113 on overcast close-ups. Elsewhere the frame is barely changed or just a bit darker and greyer, it is not path-traced, and it costs 2 to 4 ms.
+## critique
+Verification: the evidence holds up. All cited files exist, the patch reverse-applies cleanly, and the r16 logs show the prototype build loaded with its 24 sky maps and every knob accepted. My own pixel diffs match the explorer's measurement table almost exactly. There is no sign of fabrication. The overstatements are the memory figure (about 160 MiB, not 85), the timing noise (maps-off rounds spread up to 2 ms), the missing pine-woods cost (+3.9 ms), and 'trunk bases darker', which the visibility field does not show.
+
+Look: the one honest win is overcast_close. A soft dark pool forms under the Jeep's floor and wheels and along the M113's track skirt, and both vehicles stop hovering on the grass. That is a real grounding improvement a player could notice on an overcast close-up. Even there it reads like a good AO pass, not 'a different game'. In town_day, lowsun_fp, the evening pines, noon_fields, forest_edge and night, panels 3 and 4 are effectively the same picture: under 1.5 levels of mean absolute change, with only a faint pool under the birch and Jeep. In woods the floor dims fairly uniformly and the overcast woods lose their brightest floor patches (p95 128 to 113), so they read flatter and greyer. That is the 'only darker' failure, softened by the 1.15 gain. The church wall in town_street shows blotchy, streaky darkening that a player would see as dirt or a bug. The big jumps between Classic and the final frame in every BEST image come from the baseline Remastered rig plus object shadows (panels 1 to 3), not from this track.
+
+RTX vision: the technique aims at the right physics (world-space, off-screen-aware sky visibility with contact hardening), but in this engine the sky fill is a small share of daylight, so the payoff is inherently small. The 'one bounce' is a grey fill with no colour bleeding. Nothing touches reflections, volumetrics, sky or emissives. I score it 2 of 10 on the vision.
+
+Cost: measured at +1.6 to +3.9 ms on what the notes call an RTX 4060 Ti at 1.38 MP. At 1080p on a 3060 (about 1.5x the pixels and a slower GPU), expect roughly 2.5 to 5 ms plus about 160 MiB of VRAM. That fits the 60 fps budget, but it is poor value for a mostly sub-perceptual change. The per-fragment forward march also scales with overdraw: leaf receivers had to be excluded because they cost +10 ms.
+
+Worth building properly? Only as infrastructure. A camera-anchored, caster-set sky-visibility volume could later feed GI, a sky light for SSR fallback, or local exposure. On its own it is a 'nice AO' feature, not the RTX-on leap. If pursued, it needs half-res deferred evaluation, temporal rotation of the direction set to kill the wall blotches, real caster albedo for colour bleeding, and an exposure answer for woods. Score 3.

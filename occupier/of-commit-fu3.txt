@@ -1,0 +1,36 @@
+guerrilla: the air re-plan settles through the ledger, dealer markers follow the body, script player handles repointed after a body-rebuilding load (follow-ups #97)
+
+Air re-plan: OccupierForces::SpendOnOp spends the airframe from the pool
+and, when the operation has a ledger row and this service is the
+CounterAttack listener, books the price on the row (package
+FPTransportHeli); the airframe then settles like any hull through
+CAOpHullRefund / CAOpHullLost. airReplanned / AirHome.direct now mean only
+"no row took it" (older saves keep paying the pool directly). A refund
+noted "insertion impossible" moves the row to FOOT like "no stored spare".
+
+Market: SyncDealerPos moves DealerRecord.pos (and a weapon dealer's
+lotPos) to the body when the free-position search pushed it more than
+0.5 m, after spawn, after load and on every alive tick, so the map marker
+and gmDealer sit on the dealer; market_reference_mission asserts every
+dealer within 1 m of its body.
+
+World: the save writes playerOnVars, the names of the global script
+variables whose object value is the player body; after
+RebuildPlayerBodyAfterLoad the engine repoints each such global that
+still reads objNull to the rebuilt body (one INFO line; a save older
+than the key falls back to aP and gmPlayer), so saves made before
+5c7a771 recover their handles too. Proved by running the modless seq
+with the pre-5c7a771 campaign.sqs and assailants.sqs installed.
+
+Open (parked, noted in the tests): a row's outstanding keeps the crew
+units after the crew settle as bodies, so ground hulls and re-planned
+airframes leave a 2-unit residue that PruneOps may refund.
+
+Verified on build/agent-rwdi: the guerrilla / counterattack /
+occupierforces / packages / save / air / market tags 676 cases; tri 8/8 on
+remaster-shadow-of1 (air_op, air_save_reload.seq, watched_route, pool_on,
+reference_mission_market, modless and body save_reload seqs, native
+save_reload.seq), market_reference_mission 3 of 3 at --retries 0; human
+suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

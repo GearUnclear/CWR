@@ -1,0 +1,3 @@
+roadmap: occupier-forces third close-out pass (ledger, dealer markers, player handles), final gate green
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

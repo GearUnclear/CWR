@@ -1,0 +1,14 @@
+    // when the Air stage ran; otherwise the frame the stages before it left
+    // (the resolved frame, or the reflections' output), as before
+    // (PostSceneTex, which picks the volumetric fog's output when the fog ran
+    // the stage instead). The air pass applies over that frame.
+    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+    REQUIRE_FALSE(post.empty());
+    CHECK(CountOf(post, "first ? PostSceneTex(f) : p.bloomTex[i - 1]") == 1);
+    CHECK(CountOf(post, "BindTex(0, PostSceneTex(f));") == 1);
+    CHECK(CountOf(air, "BindTex(0, f.frameColor);") == 1);
+    const std::string scene =
+        FunctionBody(ReadTextFile(Gl33Dir() / "EngineGL33_PostFog.cpp"), "unsigned int EngineGL33::PostSceneTex");
+    REQUIRE_FALSE(scene.empty());
+    CHECK(scene.find("if (!f.plan.Runs(rm::PostStage::Air))\n        return f.frameColor;") != std::string::npos);
+    CHECK(scene.find("if (!f.plan.fog)\n        return _post.airOutTex;") != std::string::npos);

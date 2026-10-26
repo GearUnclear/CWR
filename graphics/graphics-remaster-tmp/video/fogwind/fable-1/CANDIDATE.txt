@@ -1,0 +1,139 @@
+FABLE TEAM CANDIDATE: q2z (fable-1, integrator; fable-2 the eyes; fable-3 root cause)
+=====================================================================================
+Base: graphics-remaster HEAD d91a08e0. Prototype: shader overrides tmp/video/fogwind/fable-1/shaders/q2z/
+(psFogInject.glsl + psFogIntegrate.glsl, BOTH needed). Production: fable-1/fix.patch (5 files, unit test
+included, [fog] gate green in worktree D:/Arma_CWA_worktrees/fable-wt). Owner video: fable-1/compare.mp4.
+
+THE CAUSE OF THE WIND, in plain words
+-------------------------------------
+The first fix (d91a08e0) gave every froxel cell its own sub-cell offset from an interleaved-gradient
+pattern, on top of the frame's golden-ratio step. That pattern is a ramp over the cells: one cell to the
+right adds 0.556 of a slice, two cells down add 0.619, and the frame step adds 0.618. So the next frame's
+offset field is this frame's field read one cell over, and what the history keeps of it (0.88 per frame)
+slides through the fog about one cell (12 px) per render, in every region, camera held or moving, in play
+and in the captures. The owner saw that slide as wind. (Agent 1 derived it, fable-2 and agent 1 measured it
+at -10..-13 px/frame; my unit-test mirror reproduces it: frame-to-frame correlation 0.98 at a two-cell lag.)
+Two things amplified it: the history was read at the jittered point, which turns the stored value into a
+leaky SUM of the offsets (gain 8.3) instead of their average (agent 6), and the far slices are hundreds of
+metres deep, so a sub-slice offset is a large change of the medium (the first swarm; fable-3's root cause).
+
+THE FIX (what q2z does)
+-----------------------
+1. No temporal jitter at all. Each cell is a two-point quadrature of its own depth span: taps at 1/4 and 3/4
+   of the slice (weighted by the metres of each half slice) on the two diagonal quarter points of the cell,
+   the same points every frame (agent 4's q2b injection). The history has no residual of a moving sample, so
+   it can neither pump (the original bug) nor travel (the regression): nothing is left to average.
+2. The history (0.88 of the last frame) is read at the cell's CENTRE (agent 6): it is only a smoother of the
+   light's own changes (the horizon ring, shadows, the pan), an EMA instead of a leaky sum.
+3. The softness of the look comes from a DISPLAY filter, not from the history: psFogIntegrate reads the
+   injected volume through a 3x3x3 tent (eight trilinear taps half a cell and half a slice out; agent 6's
+   S2z integrate). The old jittered history read blurred the stored volume by about a cell, and that blur is
+   the mist's softness in the approved look; every centre-read variant without a blur is about 2 code values
+   clearer in the valley. As a display filter the tent gives the same softness on a held and a moving camera
+   and from the first frame after a cut, because nothing compounds through the history (q2b and Act25 get
+   their look back through a blur IN the history, so their look depends on the history's age).
+The medium itself is untouched (fogMediumAt, ComputeFogMedium): the AI sight link is unchanged.
+
+Why two fixed taps and not one (fable-3's root cause, fable-3/REPORT.txt, a 1-D model of psFogInject along
+the real rays with the real slice table): the SMOOTH medium is not the problem, a single fixed tap at the slice
+mid is within 1% of the slice mean everywhere, and an analytic integral would buy nothing over it. What a
+sub-slice offset really swings is the mist top's cloudNoise (5 m and 17 m finest octaves against 35..300 m far
+slices, no mips): over the crossing zone a point sample's error vs the slice mean is 36% rms (max 257%), one
+fixed mid tap 22% (max 67%), two taps at 1/4 and 3/4 10% (max 42%), four strata 3%. The per-cell jittered
+schemes boil on exactly that term; one fixed tap aliases it into static curtains; two taps quarter it and the
+tent takes the rest. fable-3 also named the per-column terms a fixed tap leaves as faint vertical streaks
+(the sun visibility's per-column smoothstep and the horizon ring's 256-bin kinks), which the old leaky
+history hid under its ~1.3-cell lateral blur: in q2z the display tent plays that role (curtains below the sun
+0.147 vs the original 0.152).
+
+NUMBERS (agent 1's kit fogmotion.py, five regions bay / valley / farhill / haze; the valley column unless
+stated; "floor" = the jitter-frozen probe, the kit's own noise)
+------------------------------------------------------------------------------------------------------
+Stepped, camera HELD (fog1_static / mist3_static pose, frames 15-119):
+                    band    WIND b/v/f/h              rho_off  mid    lowd2  boil   slow   look bay/valley/farhill/haze
+  original (frame)  0.456   0.011/0.040/0.000/0.009   0.06     0.629  1.618  0.375  0.151  154.0/128.1/115.9/181.0
+  d91 per-cell      0.058   0.055/0.167/0.107/0.056   0.34     0.494  0.136  0.416  0.173  154.9/130.8/117.5/181.2  (wind)
+  q2z (candidate)   0.033   0.002/0.001/0.000/0.001   0.04     0.048  0.025  0.054  0.041  154.2/127.9/115.7/181.3
+  floor (frozen)    0.033   0.002/0.001/0.001/0.001   0.02     0.050  0.025  0.079  0.067  153.9/125.4/115.1
+  vanilla           (no held-camera vanilla probe exists; vanilla has no froxel fog)
+Stepped, the real PAN (fog1_moving / mist3_moving, frames 15-119, mkv):
+                    band    WIND b/v/f/h              rho_off  lowd2 valley   look valley
+  original          0.522   0.009/0.025/0.001/0.007   0.04     1.621          127.9
+  d91 per-cell      0.086   0.047/0.123/0.078/0.035   0.29     0.117          130.3
+  q2z (candidate)   0.074   0.006/0.004/0.002/0.004   0.036    0.059          128.6
+  vanilla clip      0.102   0.017/0.007/0.002/0.007   0.02     0.057          (no fog)
+Curtains (agent 4's curtain4.py, held camera, box below the sun / low sky, rms codes): original 0.152 / 0.051,
+  d91 0.144 / 0.056, q2z 0.147 / 0.072, q2b 0.143 / 0.064, S2z 0.157 / 0.070 (0.02 codes: invisible).
+fable-2's independent estimator (fogflow, held: MID / LOW / SLOW / max TRAVEL): q2z 0.036/0.017/0.027/0.02 =
+  frozen floor 0.037/0.018/0.028/0.02; moving LOW 0.059, TRAVEL 0.03 (PASS, = q2b).
+REAL TIME, 60 fps, one render per frame (mist-1 recorder = d91 + the recorder, both overrides loaded, 0 compile
+  errors; fable-1/runs/rt-q2z/, rec/q2z_rtst.mkv + q2z_rt60.mkv, 200 frames each; the owner's case):
+                    HELD: boil/slow valley   farhill       haze          max rho_off  WIND     look valley/farhill
+  d91 per-cell            0.422/0.321        0.252/0.199   -             0.52         0.138    130.0/116.9   (wind)
+  q2z (candidate)         0.059/0.048        0.048/0.040   0.049/0.040   0.024        <=0.002  127.1/114.7
+  q2b (agent 4)           0.058/0.047        0.047/0.038   0.047/0.039   0.025        <=0.002  128.2/115.6
+  S2z (agent 6)           0.058/0.046        0.049/0.039   0.047/0.039   0.033        <=0.002  127.0/114.9
+  q4 (4 fixed taps)       0.061/0.049        0.046/0.037   -             0.024        <=0.002  125.3/114.3
+                    PAN (rt60, frames 0-150): max rho_off | bay lowd2 | WIND b/v/f/h
+  d91 per-cell            0.53 | 0.063 | wind (rho_off 0.47 at [-11,0])
+  q2z (candidate)         0.028 | 0.065 | 0.003/0.004/0.001/0.001
+  q2b                     0.028 | 0.062 ; q4 0.025 | 0.066 ; pre-d91 original bay lowd2 0.696 (the pump)
+  Look in play: every candidate reads about 0.8 codes lower in play than stepped (q2b 129.1 -> 128.2, d91 130.7 ->
+  130.0; the stepped original is 128.1), so q2z's 127.1 in play is the original's level (q2b +0.9, S2z -0.1).
+300-frame pan (look_probe_fable1_move300, clip frames 240-539, the compare.mp4 source; kit frames 15-284):
+  WIND 0.006/0.004/0.002/0.003, max rho_off 0.034, lowd2 bay/valley/farhill/haze 0.068/0.072/0.053/0.039, band 0.088
+  (a longer and busier span of the pan than the 120-frame probes; vanilla's lowd2 over 240-390 is 0.062).
+  Looked at myself: fable-1/look/move300/crop2x_f150_152.png (three consecutive 2x crops) and
+  diff_x16_f150_152.png (their raw differences x16): only the pan's edge lines and the sea's waves; the bay, the
+  far valley and the haze are flat.
+Unit-test mirror (48x48 cells x 300 frames, EMA 0.12 at the centre): PUMP (sd of a 5x5 block mean) frame-wide
+  0.031, d91 0.0036, white hash 0.0054, fixed taps 0; TRAVEL (best frame-to-frame correlation at a nonzero cell
+  lag) frame-wide 0.10, d91 0.98, white hash 0.014, fixed taps 0. Bars: pump < 0.01, travel < 0.2.
+
+COST
+----
+Injection: 2 fogCell evaluations per slice instead of 1 (medium + sun visibility twice), no hashes, 1 history
+fetch (as shipped). Integration: 8 trilinear reads instead of 1 texelFetch per step. Contended-machine air
+stage samples: agent 4 q2b 4.07 ms vs d91 3.32 same batch (noise band +-0.5 ms); agent 6 S2z "same as d91
+within noise"; agent 3's least-contended samples: d91 1.58 / Act25 1.67 / t4wb 1.67 ms. Expect +0.2..0.5 ms
+at 1080p; needs the idle timing run (ITERATIONS P1). If cost bites: evaluate the sun visibility once per
+cell (agent 7's note) and keep the two medium taps.
+
+PATCHES
+-------
+- fix.patch      the q2z form (this candidate): inject fixed taps + plain centre read, integrate 3x3x3 tent,
+                 C++ jitter uniforms 0 (sequence kept for psFogNear), VolumetricFog.hpp kFogTapZ/kFogTapXY,
+                 the unit test, ITERATIONS.md F2. Built and [fog] gate green (34 cases, 6484 assertions).
+- fix-q2b.patch  the q2b form for the lead's pick (agent 8, 05:03): the same, with the tetrahedral +-0.25
+                 history read instead of the plain one and the integrate untouched; the test pins the tetra
+                 read instead of the tent. That exact shader + test state was built and green earlier in the
+                 same worktree (build3: 6480 assertions); the patch itself was regenerated by a text swap and
+                 verified with git apply --check on graphics-remaster HEAD, not rebuilt after the swap.
+Both apply cleanly to d91a08e0 (git apply --check). Neither touches the medium or the AI link.
+
+RISKS AND WHAT IS NOT VERIFIED
+------------------------------
+- Cost on an idle machine (above).
+- The 300-frame pan and the real-time runs were shot once each; no second seed. The stepped static and moving
+  probes agree with agent 1's and fable-2's instruments on every candidate they share.
+- Fixed taps are view-locked: a deterministic quadrature's bias moves with the view. Measured curtains are at
+  the original's level and the tent removes the lattice's two-cell frequencies; agent 6 saw a faint periodic
+  dash at the far shoreline under the sun every ~27 frames with S2 (also present in the original and with C0,
+  not with the camera held): a ring/pan item, not from the sampling.
+- The display tent blurs half a slice in depth: at the near slices (a metre deep) harmless; near geometry
+  edges the apply still reads by depth, the tent is inside the froxel grid only.
+- Shader-only change plus 2 trivial C++ lines (jitter uniforms 0, the sequence kept for the near field's
+  march) and mirror constants; no new uniforms, no history layout change.
+- The every-27-frame whole-band pulse (~0.1 code, frames 25/51/79/108 of the pan) is in every candidate and
+  in d91: a scene or ring cadence the old noise masked; not addressed here.
+
+VERDICT ON THE OPUS CANDIDATES (agent 1's real-time table + the stepped probes)
+----------------------------------------------------------------------------
+Floor in play AND the original look: q2b (agent 4), t2wb (agent 3), c8b (agent 5). Floor in play but 1-2
+codes clearer: S2z (agent 6), q4, S2, t4w. Act25 (agent 2) 1.3x the floor's in-place boil; Ac 2x; A/B boil.
+Best Opus candidate: q2b. Deterministic, 2 taps, no hash, no counter, original look restored, curtains at
+the original's level, floor in stepped and real time. q2z is q2b with the look blur moved out of the history
+into the integrate's tent (S2z's), which makes the look the same held/moving and from frame 1 after a cut, and
+gives the closest look to the original of anything measured (0.3 codes held, +0.7 pan). If the lead prefers a
+single-shader change, q2b is the right fallback and the unit test in fix.patch applies to it too (swap the
+tetra read checks back in).

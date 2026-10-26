@@ -1,0 +1,282 @@
+{
+  "status": "passed",
+  "manifest": "@LoBo\\.ud-backups\\issue-69\\20261011T105837Z-33d55270\\manifest.json",
+  "checked_utc": "2026-10-11T11:00:48.105662+00:00",
+  "archives_verified": 25,
+  "changed_members_verified": 76,
+  "untouched_members_verified": 6129,
+  "models_verified": 6,
+  "models_idempotent": true,
+  "game_launched": false,
+  "method": "Independent PBO header/payload comparison against backups; SHA-256 verification of archives and decoded changed members; real PoseidonTools model inspect on installed model bytes.",
+  "archives": [
+    {
+      "file": "coc_diver.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 70,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_A4.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 3,
+      "untouched_members_verified": 128,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_airammo.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 2,
+      "untouched_members_verified": 202,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_BTR60.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 297,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_F4.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 4,
+      "untouched_members_verified": 107,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_FAB.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 5,
+      "untouched_members_verified": 929,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_Kfir.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 76,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_M1.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 5,
+      "untouched_members_verified": 92,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_Zelda.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 169,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBo_ZU23.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 314,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoammo.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 131,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoCen.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 71,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoEgAPC.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 338,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoF15.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 9,
+      "untouched_members_verified": 109,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoF16.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 11,
+      "untouched_members_verified": 147,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoboF5.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 3,
+      "untouched_members_verified": 48,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoJordan.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 195,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoM60.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 271,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoMerkava2.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 4,
+      "untouched_members_verified": 155,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoMerkava4.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 2,
+      "untouched_members_verified": 18,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoMig.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 12,
+      "untouched_members_verified": 572,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoSA6.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 2,
+      "untouched_members_verified": 233,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoTer.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 2,
+      "untouched_members_verified": 544,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoWeapat.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 198,
+      "member_order_metadata_payload_preserved": true
+    },
+    {
+      "file": "LoBoWeapons.pbo",
+      "backup_sha256_verified": true,
+      "installed_sha256_verified": true,
+      "modified_members": 1,
+      "untouched_members_verified": 715,
+      "member_order_metadata_payload_preserved": true
+    }
+  ],
+  "models": [
+    {
+      "member": "lobo_m1/lobo_m1a1e.p3d",
+      "poseidon_reader_exit_code": 0,
+      "hitpoint_point_counts": {
+        "hull": 30,
+        "turet": 41,
+        "pasl": 16,
+        "pasp": 16
+      },
+      "inspection_log": "tmp\\lobo-issue69-validation\\installed-models\\lobo_m1\\lobo_m1a1e.inspect.txt"
+    },
+    {
+      "member": "lobo_m1/lobo_m1a1e_r.p3d",
+      "poseidon_reader_exit_code": 0,
+      "hitpoint_point_counts": {
+        "hull": 30,
+        "turet": 41,
+        "pasl": 16,
+        "pasp": 16
+      },
+      "inspection_log": "tmp\\lobo-issue69-validation\\installed-models\\lobo_m1\\lobo_m1a1e_r.inspect.txt"
+    },
+    {
+      "member": "lobo_m1/lobo_m1a2e.p3d",
+      "poseidon_reader_exit_code": 0,
+      "hitpoint_point_counts": {
+        "hull": 30,
+        "turet": 41,
+        "pasl": 16,
+        "pasp": 16
+      },
+      "inspection_log": "tmp\\lobo-issue69-validation\\installed-models\\lobo_m1\\lobo_m1a2e.inspect.txt"
+    },
+    {
+      "member": "lobo_m1/lobo_m1a2e_r.p3d",
+      "poseidon_reader_exit_code": 0,
+      "hitpoint_point_counts": {
+        "hull": 30,
+        "turet": 41,
+        "pasl": 16,
+        "pasp": 16
+      },
+      "inspection_log": "tmp\\lobo-issue69-validation\\installed-models\\lobo_m1\\lobo_m1a2e_r.inspect.txt"
+    },
+    {
+      "member": "lobomerkava2/lobomerkava2.p3d",
+      "poseidon_reader_exit_code": 0,
+      "hitpoint_point_counts": {
+        "hull": 17,
+        "turet": 12,
+        "pasl": 24,
+        "pasp": 24
+      },
+      "inspection_log": "tmp\\lobo-issue69-validation\\installed-models\\lobomerkava2\\lobomerkava2.inspect.txt"
+    },
+    {
+      "member": "lobomerkava2/lobomerkava3.p3d",
+      "poseidon_reader_exit_code": 0,
+      "hitpoint_point_counts": {
+        "hull": 17,
+        "turet": 12,
+        "pasl": 24,
+        "pasp": 24
+      },
+      "inspection_log": "tmp\\lobo-issue69-validation\\installed-models\\lobomerkava2\\lobomerkava3.inspect.txt"
+    }
+  ]
+}

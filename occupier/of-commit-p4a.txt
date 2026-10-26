@@ -1,0 +1,72 @@
+guerrilla: occupier forces phase 4A, waves, base recapture, standing and the director's base and HQ operations (OCCUPIER-FORCES.md 5, 6.3, 7.1, 7.2, 8.1)
+
+ZoneRegistry: ZEBaseLost / ZEHqLost events and QueueEvent; ZoneTuning
+baseRetake (follows occupierForces unless authored); ZoneRecord occCapture,
+standing, struckUntil, lostCount (saved); RevertBase and IsHeldBase; the
+base recapture branch in EvaluateTick (any occupier unit in a held
+military zone, or an abstract BASE / HQ_ASSAULT force holding it, raises
+occCapture by captureRate x min(crew, 3) with no resistance HOLD presence;
+both present freeze it; nobody present decays it; at 100 the owner reverts,
+the holding force settles as the garrison or a pool deposit, income 0,
+lostCount++, ZEBaseLost; refused after Won/Lost, D19); gmZoneSim slots
+14 to 17, gmZoneSet occCapture / standing. capture.sqs keeps per-zone
+hold groups, says "Retaken" by lostCount and handles baseLost.
+
+CounterAttack: CounterAttackView lost / hq fields; Record destPos, hqDone;
+HqAssaultPresence counts CAKHqAssault records only (D14: patrols and
+columns never touch the HQ meter); FindHqAssault, WaveRecords, OpsCap
+(forcesOpsMax + live wave records), BornOps, DestOf, SettleHqAssaults;
+LaunchFunded validates per kind (RETAKE / BASE / HQ_ASSAULT / REINFORCE);
+HQ records hold or go live at destPos and settle on ZEHqLost;
+gmCounterAttackLaunchFunded takes a kind string. The Won / Lost freeze.
+
+OccupierForces: base candidates while STRONG (D16) and through push-out;
+the HQ candidate (STRONG, or in a wave within 1800 s of landing; the final
+push unconditional, min 6); waves (D7: control <= 0.75, <= 0.50 and the
+final stand, each once, two-tick dwell, merged when due together, size
+12..48, lead 600 / 120 s, hub forcesWaveHub / AIRFIELD / SEAPORT /
+strongest, allocation hub top-up, final-stand surge never spare, the
+cluster strike origin CAOWave up to retakeShare and waveOps, REINFORCE
+columns, the rest to the pool; gmForcesForce ["wave", n]); standing (D21:
+recovery toward 50 at 1 per 600 s, informant tips rolled at standing/200
+from 50 up with the true count jittered 100 m, MoraleFactor 0.8 below 25,
+the mean standing scales the refill; the strike that cuts it is phase 6);
+every war-level reader (garrison tiers, CounterAttack tiers and
+ForceSize, Traffic class pick and modulation, Undercover detect, qrf.sqs
+via gmWarLevelOccupier) switched to OccupierWarLevel; qrf.sqs skips the
+YELLOW chase in THIN / SPENT.
+
+Phase 3 gaps closed: the S5 pending deposit of a zone that changes owner
+goes to the pool with the key on (OccupierForces::Clear installs the
+GarrisonCache refund hook; the 5.5 equation holds across the change);
+with no unseen birth point a force re-sources at once to the next base
+whose spare covers it and whose route passes the gate (waits
+counterAttackBirthGiveUp only when none passes, then once more, then
+cancelled unseen); with the key on a legacy DORMANT record takes the same
+chain and never turns back (D6; key off unchanged). Undercover: a never
+stamped weapon-seen time (TIME_MIN) reads false in release builds too
+(UndercoverWeaponSeenStampCurrent; the old subtraction overflowed, so a
+disguised player held every town once any group knew him, D11).
+
+Accepted deviations (status row): baseRetake key; resistance alone decays
+occCapture at captureDecayDefended; "in a wave" = inbound or landed
+within 1800 s; the surge is excluded from spare only in the director's
+sources; a base route is the road A*, else the straight line.
+
+Tests: test_zone_registry 6 cases; test_occupier_forces (HQ candidate,
+final push, wave size / cluster / hub / triggers / merge / freeze /
+allocation / save, war level, standing, the refund hook, the birth chain,
+the legacy chain); test_counter_attack (kind validation, HqAssaultPresence,
+HQ settle, BASE via occCapture, OpsCap, destPos / hqDone save, lose
+freeze); test_undercover TIME_MIN; tri guerrilla_forces_base_retake,
+_wave_base, _refill_pushout; guerrilla_counter_attack_watched_base now
+asserts the re-source (Abel runs with the key on); guerrilla_forces_pool_off
+reads the 24-slot gmOccupierForces. OFFSCREEN-CONTRACT rows 1, 2b, 4, 16,
+section 9 and the unseen-births paragraph updated; the 6.5 / 16 lines for
+the phase 5 catalogue (863b8aa) and the phase 4 status row ride along.
+
+Verified on build/agent-rwdi: [guerrilla],[counterattack],[occupierforces],
+[save] 625 cases green; tri 22-test run on remaster-shadow-of1 green after
+the two test updates (19 regression + 3 phase 4); test_human_suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

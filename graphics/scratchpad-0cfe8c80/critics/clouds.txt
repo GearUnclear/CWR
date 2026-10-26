@@ -1,0 +1,48 @@
+## track
+clouds
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabrication found: every cited image, GIF, patch, NOTES.md, glsl_final file and run folder exists. prototype.patch is 851 lines, the same as the live git diff of the 12 modified files in D:\\Arma_CWA_worktrees\\gfx-clouds. build5.log ends in a successful link, and the exe is dated 19:15, before the run5 captures at 19:18.",
+ "The run5 game_stdout.log files show the prototype build ran. They log 'sky cloud-density map 256x256 rebuilt' twice per session, and every skyClouds, cloudShadowSource and r0-r7 knob set returned res=OK. The shader cache compiled 144 programs with no compile or link errors.",
+ "BEST_overcast_heavy.png is the heavy_up view (looking up at the overcast 0.9 deck), not the matched overcast_heavy ground view. The matched view (cmp_overcast_heavy_matched.png) shows almost no visible change: its ground diff is 0.00.",
+ "Unmentioned side effect: in coast_oc the sun glitter on the sea changes a lot (ground-band diff 23.5/255). Today's Remastered shows a dim horizon streak, while A and B show a broad, bright sun column on the water, because the sun is no longer treated as covered by the noise field. This is arguably more consistent with the visible sun, but the report does not mention it.",
+ "Cost claim needs a caveat: the run5_eden single shots show overcast_broken going from 18.67 ms today to 24.19 ms with A (+5.5 ms), and broken_high going from 38.5 ms today to 47.0 ms with B. The interleaved run5_perf pairs (+0.2 to +0.9 ms) are the better evidence. The sunrise jump is real drift: draw calls climb from 1989 to 11172 within the session whether the prototype is on or off, so streaming explains it, not the prototype.",
+ "The sky luminance numbers are roughly right. My own 35% top band gives broken_up sky mean 0.583 for today and 0.567 for A (slightly darker), std 0.102 to 0.137. overcast_broken ground drops from 0.332 to 0.241, matching the claimed 0.341 to 0.247."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+3
+## taste_violations
+[
+ "Only darker in a still: in the matched overcast_broken frame the camera sits under the projected cloud. Foreground ground luminance drops about 28%, the jeep loses its sun shadow and directional light, and the frame reads flatter and darker. Only one lit patch on the far right hill sells it as a cloud shadow. The owner judges stills, so this frame will likely read as 'only darker'.",
+ "Midday embossing and iridescence: in broken_up with A (and worse with B) the rim highlights carry pastel green, yellow and pink fringes, like a chrome or oil-film highlight (visible in a 2x crop). The wispy painted clouds turn into a marbled, embossed, stormy-looking sheet, and bright white midday clouds go grey-blue. This is the relief term behaving as a 2D emboss on top of the painted lighting."
+]
+## cost_ok
+true
+## score_0_to_10
+5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\clouds\BEST_sunrise_oc.png
+## one_line
+The prototype is real and verified. Its lit clouds give a clear win at golden hour: the flat painted sky becomes salmon-lit cloud bands. Midday turns embossed and iridescent, overcast barely changes, and in stills the sky-matched shadows mostly show up as different placement or a darker frame.
+## critique
+Verification: the evidence is solid. All cited paths exist. The patch matches the scratch worktree diff line for line, the build log ends cleanly, and the game logs show the density map being built and every knob accepted. Pixel diffs against today's Remastered confirm the effect. Sky-band diffs are 11 to 19/255 at golden hour and midday (sunrise_oc, coast_oc_up, broken_up); ground diffs are about 23/255 where the camera falls under a projected cloud. The clear-sky views stay within 0.35/255 of today, so the sanity claim holds. The perf analysis is honest: draw calls climb from 1989 to 11172 in the sunrise session with the prototype off or on, so object streaming explains the jump.
+
+Look: the best result is the low sun. In sunrise_oc and coast_oc_up the existing painted bands pick up salmon and peach light on their sun-facing edges, and their bodies go darker slate. A player would notice this, and it is warm, consistent with the light rig, and adds no new art. Even so, it is an emboss filter on a painted panorama (density here minus density toward the sun), not a volumetric light model. That shows at midday: in broken_up the rims turn into glossy, iridescent streaks (green, yellow and pink fringes in a 2x crop), and the bright white wisps turn into a grey-blue marbled sheet that reads stormy and painterly rather than sunlit cumulus. The overcast deck change (heavy_up) is only visible when you squint, and the matched overcast_heavy ground view does not change.
+
+Cloud shadows: the idea is right (the cloud you see is the cloud whose shadow you stand in), and the drift strip proves the shadows sweep with the sky. In stills, though, today's Remastered already shows noise-field shadows from height (broken_high), so the prototype mostly moves them. In the eye-level overcast_broken frame the main visible change is a darker, flatter foreground: the jeep loses its sun shadow, which risks the owner's 'only darker' rejection. The camera-centred dome projection also means the shadow pattern moves with the camera, which aircraft and fast vehicles would expose. The report states this honestly, but it is a real production problem, not a footnote. The long streak shapes from the painted texture read as bands, not cumulus patches.
+
+RTX vision: this nudges the sky and atmosphere area, giving clouds that respond to the sun at dawn and dusk, but it is not path-traced-looking light. There is no volumetric scattering, no light shafts through cloud gaps, and the cloud shadows are a 2D lookup with the existing 0.2 transmission. Score 3.
+
+Cost: about 0.2 to 0.9 ms in interleaved pairs, with 6 density taps on sky pixels and 1 tap per lit fragment. That fits an RTX 3060 budget easily.
+
+Worth building (5/10): ship the lit sky clouds gated to low sun elevation, scaling relief and silver lining down hard as the sun rises to remove the midday emboss and iridescence. Treat the sky-matched shadows as a second step that needs a world-anchored deck before it beats today's noise field visibly. Add a still where the camera is in sunlight with shadowed hills nearby, so the owner does not see only the darker frame.
+## artefacts_seen
+Iridescent pastel colour fringes on bright rim streaks at midday (broken_up, A and B), with a glossy, embossed and painterly cloud surface. Some white bands near the sunrise horizon look slightly chrome-like. I saw no NaNs, banding or dome-triangle seams in run5 (the run4 seams and banding are gone). The cloud-shadow edge on the right hill in overcast_broken is soft and plausible. Swimming cannot be judged from stills, but the camera-centred shadow projection will translate with the camera by design.
+## prototype_actually_loaded
+Yes. The run5_abel, run5_eden, run5_perf and run5_seq game_stdout.log files all show the gfx-clouds-rwdi build (exe built 19:15:32, before the 19:18 runs) logging 'GL33: sky cloud-density map 256x256 rebuilt (interp 0.14)' and '(interp 0.00)'. Every triSetLighting skyClouds, cloudShadowSource and r0-r7 set returned res=OK, and the 144-program shader cache compiled with no errors. Pixel diffs between remcur and protoA/B/C are large at golden hour and midday and near zero on the clear-sky sanity views.

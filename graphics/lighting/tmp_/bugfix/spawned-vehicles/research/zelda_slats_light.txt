@@ -1,0 +1,12 @@
+﻿slats (shaded side): albedo RGB [174.1 150.9 122.8]  r:g:b norm [1.    0.867 0.705]
+   BEFORE spawned remastered (CPU path): shot RGB [64.7 60.8 62. ]  light=shot/albedo [0.372 0.403 0.505]  b/r 1.36  g/r 1.08
+   AFTER spawned remastered (per-pixel): shot RGB [74.6 64.1 53.5]  light=shot/albedo [0.429 0.424 0.435]  b/r 1.02  g/r 0.99
+   AFTER placed remastered: shot RGB [74.6 64.1 53.5]  light=shot/albedo [0.429 0.424 0.435]  b/r 1.02  g/r 0.99
+   BEFORE spawned classic: shot RGB [60.6 56.7 58.6]  light=shot/albedo [0.348 0.376 0.477]  b/r 1.37  g/r 1.08
+   AFTER spawned classic: shot RGB [60.9 56.7 58.7]  light=shot/albedo [0.35  0.376 0.478]  b/r 1.37  g/r 1.07
+rear door (sunlit): albedo RGB [189.2 163.  121.3]  r:g:b norm [1.    0.862 0.641]
+   BEFORE spawned remastered (CPU path): shot RGB [117.   92.2  75.3]  light=shot/albedo [0.619 0.566 0.621]  b/r 1.00  g/r 0.91
+   AFTER spawned remastered (per-pixel): shot RGB [124.3  96.7  67.5]  light=shot/albedo [0.657 0.593 0.557]  b/r 0.85  g/r 0.90
+   AFTER placed remastered: shot RGB [124.3  96.7  67.5]  light=shot/albedo [0.657 0.593 0.557]  b/r 0.85  g/r 0.90
+   BEFORE spawned classic: shot RGB [113.1  87.3  69.2]  light=shot/albedo [0.598 0.536 0.57 ]  b/r 0.95  g/r 0.90
+   AFTER spawned classic: shot RGB [113.1  87.4  69.1]  light=shot/albedo [0.598 0.536 0.569]  b/r 0.95  g/r 0.90

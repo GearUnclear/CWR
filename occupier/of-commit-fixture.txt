@@ -1,0 +1,21 @@
+tests: guerrilla_interaction.abel pins cityGarrison off (the town garrison shot the player)
+
+The fixture puts an armed player at the Village centre; since the town
+defenders (#79) every non-resistance CITY keeps a four-man garrison, and
+once cover is blown and the alert goes RED a SoldierEB 21 m away kills
+the player, the autotest mission ends and tri loses the harness ("failed
+to read from harness", "command timed out"). Random garrison placement
+made this an intermittent flake; the hashed per-zone spawn points of
+12f2a75 made it happen every run. None of the 17 tomls on this fixture
+relies on a town garrison (the occupier tests create their own
+SoldierEB), so it pins cityGarrison = 0 like guerrilla_native.abel and
+guerrilla_offscreen.abel. Bisect cleared e6bff81, 5c7a771 and the engine
+side of 12f2a75 (eval of the eight registrations stays at about 70 ms).
+
+Verified on dist/agent-rwdi + remaster-shadow-of1: guerrilla_assailants
+3 of 3 at --retries 0; the assailant, shakedown, civilian-interaction,
+modless, pool_on and offscreen_capture set 7/7; the other 11 tests on
+this fixture 10/11, the red (guerrilla_assailant_fire_rogue) failing
+identically before this change and on 08c6ae2.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

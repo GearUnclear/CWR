@@ -1,0 +1,3 @@
+﻿start 04:38:31 override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\2\shaders\Act25
+run exit=0 04:44:12
+done 04:44:17

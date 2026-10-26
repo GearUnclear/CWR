@@ -1,0 +1,5 @@
+C:\Users\Dane\AppData\Local\Temp\claude\D--Arma-CWA\0cfe8c80-fc33-4f8e-a86e-52fa1175350d\scratchpad\tex\data2\jablon.pac  top 256x256  coverage(a>=192) top=0.256
+stored (PAA): L0 cov=0.256 mean=(12,12,9)  L1 cov=0.281 mean=(11,12,8)  L2 cov=0.262 mean=(10,11,7)  L3 cov=0.258 mean=(9,10,7)  L4 cov=0.250 mean=(9,9,6)
+box: L0 cov=0.256 mean=(12,12,9)  L1 cov=0.184 mean=(12,12,9)  L2 cov=0.182 mean=(12,12,9)  L3 cov=0.174 mean=(12,12,9)  L4 cov=0.145 mean=(12,12,9)
+Lanczos-2: L0 cov=0.256 mean=(12,12,9)  L1 cov=0.203 mean=(12,12,9)  L2 cov=0.186 mean=(12,12,9)  L3 cov=0.167 mean=(12,13,9)  L4 cov=0.145 mean=(12,13,9)
+Lanczos-2 + coverage: L0 cov=0.256 mean=(12,12,9)  L1 cov=0.256 mean=(12,12,9)  L2 cov=0.256 mean=(12,12,9)  L3 cov=0.258 mean=(12,13,9)  L4 cov=0.258 mean=(12,13,9)

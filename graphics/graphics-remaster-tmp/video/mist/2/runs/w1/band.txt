@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\mist\\2\\runs\\w1\\frames", "frames": 120, "band": 0.577, "band_max": 2.377, "sky": 0.042, "spikes": 5635, "worst": [[114, 5.86], [130, 5.73], [64, 5.71], [147, 4.56], [129, 4.52], [119, 4.45], [74, 4.18], [113, 4.13]]}

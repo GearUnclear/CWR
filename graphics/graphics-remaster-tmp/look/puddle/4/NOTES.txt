@@ -1,0 +1,129 @@
+Wet ground: only the puddles reflect (puddle agent 4 of 6, "audit first, then cut")
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-4 (fec1075 + fix4/base.patch, round 3, base tree
+d2f866e). Build build/look-puddle-4-rwdi, game dist/look-puddle-4-rwdi, junction RemasterUD-puddle-4.
+Nothing committed, no branch. fix.patch: 4 files, +197 / -14 (two shader files, one header comment,
+test_wet_weather.cpp). The look_shine capture tests and my probe tests are left out.
+
+LOOK FIRST
+- compare.png: rows town_night_rain, seam_b, seam_d, seam_day, rain_day; columns round 3 (shiny,
+  fix/seam/shots_4) | first rework (fix4/shine/shots_3) | this fix (final/). Last two rows: 2x crops
+  of the tree base and the open street in town_night_rain.
+- audit.png: the probe sheet, one panel per term (see AUDIT).
+- final/<view>.png: the five shared views from the final build, native 1920x1080.
+
+APPROACH
+Audit every term that brightens or reflects the ground in the rain, measure each one's share by
+turning it off alone, then cut exactly the ones that make non-puddle ground look reflective.
+Probe mechanism (work/make_probe.py, work/glsl_probe): a shader override keyed on the forced
+wetness knob, wetness = 1 - p/1000 (litWeather.x, also visible in the SSR trace), so one game shoots
+every probe in a row ("remastered,wetness=0.997" and so on). The world's wetness in these views is
+1.00 (feat= line, wet=1.00), and the unforced frame matches wetness=1 within noise (town_night_rain
+lower half mean 51.7 vs 51.9 of 255), so forcing it changes nothing.
+Probes: p1 film lamp streaks off, p2 film sun/moon glint off, p3 SSR trace on non-puddle ground off
+(weight = puddle), p4 the surface lane's specular on the ground off (sp.sun, sp.sky,
+g_physicalSpec), p5 every puddle term off, p6 all non-puddle reflective terms off, p7 the forward
+sky reflection (env) on the ground off, p8 the puddle mask; plus knobs camBloom=0, fogLights=0 and
+the SSR reflection-only view (debug=10). Shares are linear luminance, ref minus off over ref, on
+non-puddle pixels (mask from p8) in the two regions the earlier sheets use (tree base 780,610 and
+open street 330,790, 320x180; seam_b and seam_day their own). Raw numbers: audit_numbers.txt.
+
+AUDIT (what each term adds to non-puddle ground)
+                              town_night_rain       seam_b               seam_day
+                              tree / street         tree / street        tree / open ground
+  film lamp streaks (B7)      34% / 36%             61% / 54%            (day: no lamps)
+  film sun/moon glint (B7)    -3% / 0%              0% / 1%              0% / -1%
+  SSR on non-puddle (B6)      -6% / -1%             -1% / 1%             0% / 3%
+  surface lane specular       1% / 1%               0% / 1%              0% / 0%
+  forward sky env (B7)        0% / 0%               0% / -1%             3% / 1%
+  puddle terms (puddle px)    1% / 17%              20% / -              7% / 46%
+  camera bloom                -3% / -1%             1% / 2%              -
+  lights in the fog           -19% / -25%           -14% / -18%          -
+Reading: the film's lamp streaks are the reflection on non-puddle ground: a third to over half of
+its light at night, the three long vertical streaks (lamps and fire) that run across dry-looking
+ground in every round-3 night shot. Everything else is within the shots' noise (smoke and rain
+particles differ per shot; a few percent either way). The SSR trace on non-puddle ground is small
+in these regions but visible on the road to the right in town_night_rain (heat panel): it mirrors
+the houses there. The forward sky env only runs while SSR is off, so it is 0 at night; by day it
+is a few percent. The "lights in the fog" and bloom rows are negative because the photoreal camera
+meters the frame: taking light out of the air raises the exposure for everything, so those two
+cannot be read as ground terms (they are halos in the air, not on the ground).
+
+THE CHANGE (shaders only; no C++ logic, no binding, no knob)
+1. Lamp streaks (EngineGL33_LightingShadersSurface.cpp wetSurface): on the ground outside a
+   puddle the film's lamp lobe takes the ground's glint roughness and share, as the sun glint
+   already did: wetLampStreaks(nf, v, max(rough, kWetSunGroundRough)) times film x
+   kWetSunGroundFilm. Puddles keep their sharp kWetPuddleRough streak. Objects (walls, hulls,
+   paint) keep their own film and streaks.
+2. SSR trace (EngineGL33_PostSsrShaders.cpp): weight = wetWeather ? puddle : <B6's old mix>. With
+   the wet weather on, only standing water mirrors; the B6-only path (wet weather off) is unchanged.
+3. Forward sky env on the ground (SSR off): the reflection is the puddle's alone
+   (F x pud.x, at kWetPuddleRough) instead of the whole film's.
+4. Darker, deeper: the ground's film darkens it outside its puddles,
+   a *= 1 - kWetGroundFilmDark x film x (1 - pud.x). Asphalt and gravel, which soak up little and
+   used to show their wetness as shine, now show it as depth.
+5. Puddles carry the rain's look, so roads and bare ground hold a little more water:
+   th = mix(mix(kPuddleGround, kPuddleRoad, road) - kPuddleMore, kPuddleGrass, veg * veg) + ...
+   Grass does not get more. It is in the shared puddle field, so the forward pass and the trace
+   still agree pixel for pixel, and it is a pure function of the position and the ground field: no
+   seam can come from it.
+Left alone on purpose: the surface lane's own specular (1%, broad, not wet-related), bloom and fog
+glow (air, not ground), the sun glint (already rough; only its constants change, see below).
+AI sight and fog: untouched (Target.cpp and VolumetricFog.cpp not in the diff).
+
+CONSTANTS old -> new
+- kWetSunGroundRough 0.5 -> 0.6 (now also the ground's lamp glint roughness)
+- kWetSunGroundFilm 0.5 -> 0.3 (now also the ground's lamp glint share)
+- kWetGroundFilmDark new, 0.25
+- kPuddleMore new, 0.04 (roads 0.61 -> 0.57, bare ground 0.67 -> 0.63 effective; grass 0.74)
+- SSR non-puddle weight with the wet weather on: 0.5 x wet x (1 - 0.85 grass) land, 0.65 x wet
+  roads -> 0
+- ground lamp streak roughness 0.12 (kWetFilmRough) -> 0.6; share film -> 0.3 x film
+- ground forward sky env share: max(film, puddle) -> puddle
+Unchanged: kPuddleRoad, kPuddleGround (still pinned to B6's kSsrPuddle*), kWetFilmRough (objects),
+kWetPuddleRough, kWetPuddleDark, the ground field and every round-3 seam piece.
+Variants tried (shots_var1, one game, same selector trick, work/make_variants.py): threshold -0.03
+and -0.06 on every class (-0.06 put too much water on Eden's grass; hence 0.04 and no grass),
+no ground glint at all (seam_b loses the warm sheen under the fire; kept the dim glint), no film
+darkening (ground reads lighter and drier).
+
+GGX numbers (the new unit test's mirror of wetLobe; lamp 5 m up, eye 1.75 m up 15 m away, gravel
+film 0.775): puddle streak peak 0.051, 0.48 m long x 0.08 m wide; the old film streak 0.044,
+1.1 m x 0.13 m (nearly a puddle's: that is the "reflection on non-puddle ground"); the new ground
+glint 0.001 (2% of the puddle's), 7.2 m x 1.8 m (a broad dim patch, no image of the lamp).
+
+TESTS
+build/look-puddle-4-rwdi/tests/unit/engine/Poseidon/PoseidonTests.exe, run from D:,
+"[wet],[ssr],[Shaders],[TerrainHorizon],[remaster]": all tests passed, 957,235 assertions in 298
+test cases (glslang compiles every program). Round 3's seam tests are kept unchanged and pass.
+New: "Wet weather shaders: only the puddles mirror; the ground around them darkens and glints
+dimly" ([remaster][wet][Shaders][ssr]): the trace weight line, the ground lamp glint line, the
+puddle-only env, the film darkening and its range, the puddle threshold line and kPuddleMore range,
+and the GGX mirror above (old film nearly as bright and thin as a puddle; new ground glint under
+5% of the puddle's peak and over 10 times its width). The existing sun glint test still holds
+(kWetSunGroundRough > kWetSunRough, kWetSunGroundFilm <= 0.5, cap x film <= 2).
+clang-format clean on the changed files.
+
+WEAK POINTS (honest)
+- At night the scene reads less obviously rainy than round 3. With the sheen and streaks gone the
+  rain is carried by the puddles alone, and a puddle mirrors only what its reflected ray finds: near
+  the eye that is the black night sky, so near puddles are dark patches, and lamp or fire streaks
+  appear only where a puddle happens to lie on the line to the light. In town_night_rain the
+  puddles mirror the facades and the lamp (mid square, road on the right, the big patch lower
+  left); seam_b and seam_d show few reflections because few puddles lie in view. The fire has no
+  reflection in seam_b/seam_d any more: it stood on non-puddle ground. kPuddleMore 0.04 helps but
+  is a trade against "too many puddles"; it is the knob to turn if the owner wants more.
+- The rain particles themselves are faint in these frames; nothing in this change touches them.
+- The probe shares are per region and noisy (smoke and particles differ per shot); the bloom and
+  fog glow rows are confounded by the camera's metering.
+- Objects keep their wet film and lamp streaks (paint, glass, walls); the owner's complaint was
+  about the ground, so they were not touched.
+- Not measured: cost (no new texture reads; the ground lamp lobe is the same loop), motion, other
+  islands at dusk.
+
+FILES
+- final/<view>.png, compare.png, audit.png, audit_numbers.txt, fix.patch, this file.
+- shots_probe1/ (the audit's frames), shots_var1/ (the variants and the puddle mask),
+  shots_final/ (run-captures output of the final build).
+- work/: make_probe.py, make_variants.py, gen_probe_test.py, audit.py, compare.py, the override dirs
+  and copies of the probe/variant .test.sqf files (removed from the scratch copy).

@@ -1,0 +1,3 @@
+static_assert(CombatShadow == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+              "the planned slots between the night and the water are the planned padding");
+static_assert(End == LitConst::Camera, "every planned slot above the padding has landed; the camera follows them");

@@ -1,0 +1,7 @@
+# Research track aa capture run (generated; not a regression test).
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_abel.Abel"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 1500
+assert_timeout = 240
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "1920", "--height", "1080"]

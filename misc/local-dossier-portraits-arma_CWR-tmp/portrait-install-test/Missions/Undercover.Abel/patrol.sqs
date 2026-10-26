@@ -1,0 +1,22 @@
+; ============================================================================
+;  patrol.sqs  -  generic doMove waypoint loop
+;  _this = [group, [[x,y,z], ...]]  (points in getPos order)
+;  The leader is doMoved point to point; the group follows in formation. A leg
+;  ends on arrival (12 m), on a 150 s timeout (pathfinding dead ends), or when
+;  the group dies.
+; ============================================================================
+_grp = _this select 0
+_wps = _this select 1
+_n = count _wps
+_k = 0
+
+#loop
+? (count units _grp) < 1 : exit
+_dst = _wps select _k
+(leader _grp) doMove _dst
+_t0 = time
+@((count units _grp) < 1) or (((leader _grp) distance _dst) < 12) or (time > _t0 + 150)
+~4
+_k = _k + 1
+? _k >= _n : _k = 0
+goto "loop"

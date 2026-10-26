@@ -1,0 +1,10 @@
+# Scratch scenario for the second director video (not a regression test).
+# Boots the shipped Guerrilla.Abel template on the Remaster shadow passed with
+# --data-dir and writes UDTRACE lines to the game log for the video renderer.
+# Not headless: births need a real camera.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+tags = ["scratch", "occupierforces"]
+timeout = 10800
+assert_timeout = 900
+extra_args = ["--dev"]

@@ -1,0 +1,53 @@
+## track
+haze
+## files_verified
+true
+## missing_or_false_claims
+[
+ "Says 'the near slope is unchanged' at 05:15 (v43). It is not: the bottom-right near slope differs by a mean 5.7 levels, 52% of pixels move more than 4 levels, and the shift leans blue (B +6, R +3). At 06:30 the bottom third moves +7/+8/+14 RGB. The risks section half-admits this for 06:30 only.",
+ "Calls the 12-sample sun march 'a clear win at low sun'. Measured v32 against v33 at sunrise, only 2.2% of pixels change by more than 16 levels, and 0.0% do at 06:30. It is a small, local gain for 48 extra texture fetches per fragment.",
+ "'All runs ... show sky backdrop 1440x960, 11 levels' is true for rounds cpp3chk to r9, where the log first prints 960x640 x10 and then 1440x960 x11 after triSetMsaa and render scale. The check1, cpp1 and cpp2chk logs have no backdrop line at all (pre-backdrop builds).",
+ "The cost claim of 'about +9 ms' is the most favourable reading, not an estimate. In round 7 the v33 minimum frame was 33.6 ms against 5.3 ms for v0 (sunrise) and 44.2 against 18.1 ms (valley). Round 8 single readings have v43 cheaper than v0 (14.8 vs 24.6 ms). The cost is unknown, and it may be much larger than +9 ms.",
+ "In the hero sheet BEST_valley_sunrise_mist.png, the left forest in the v43 panel renders as a flat dark LOD block while the v0 panel shows canopy. The explorer blames forest LOD state, which is plausible because the Classic panel shows the block too. Even so, the left third of the hero pair does not compare like with like.",
+ "Production step 7 ('Keep Classic bit-identical') contradicts owner decision 1. It is stale, not false, but it should be dropped from the plan.",
+ "The GPU ms printed on every panel are single contended readings and mean nothing. They are labelled as such, but they should not appear on images the owner judges."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+3
+## taste_violations
+[
+ "Blue haze tendency: far-hill B-R on overcast_broken goes from 11.8 to 20.2 (v33). In the valley at 06:30 the bottom third lifts +7 R / +8 G / +14 B. That is a cool lift in the near-to-mid field, not only in the far distance.",
+ "Wash risk at 06:00 to 06:30: luma contrast drops about 9% (std 46.6 to 42.5 frame-wide, 37.3 to 33.9 mid-third at 06:00). The lake and lowland vanish under white, and the sunrise_ridge massif nearly dissolves into the sky. It is time-limited, but the owner judges exactly these side-by-sides.",
+ "Water and shine regress in the morning: the mist covers Classic's warm sun glint and the lake surface (lake region +36 levels at 05:15), which works against the 'reflections on water' pillar.",
+ "No violations found for colour grading, vignette, grain, new art, only-darker, or neutral evenings: dusk is essentially unchanged and stays as warm as the sky."
+]
+## cost_ok
+false
+## score_0_to_10
+5.5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\haze\BEST_valley_sunrise_mist.png
+## prototype_actually_loaded
+Yes. Every run from check1 to cpp_r9_timing logs 'GL33: shader override loaded' for all five override files (vsScreen, vsTransform, vsShadow, psRemasterCommon x4 and psWaterRemasterMain) from the matching shaders_rN folder, with no compile or link errors (only the usual GL 131218 recompile warning). From cpp3chk on, the patched exe runs from D:\Arma_CWA_worktrees\gfx-haze\arma_CWR\packages\RemasterUD-hazecpp8 and logs 'GL33 haze: CaptureSkyBackdrop ...' and 'sky backdrop 1440x960, 11 levels'; those lines exist only in the patched code. prototype.patch matches the scratch worktree diff after newline normalisation (5 files, +93/-1), and dist/gfx-haze-rwdi/PoseidonGame.exe is dated 2:54 PM. The BEST sheets are pixel-exact copies of the raw r8/r6 captures (body error 0.00). AFTER differs from BEFORE: valley 05:15 v43 against v0 has a mean diff of 9.0 with 19% of pixels above 16 levels; valley 06:30 has 9.3 and 23%; sunrise_ridge has 2.7 and 3.6%; overcast v31 has 4.0 and 9.8%; noon v33 has 1.0 and 1.2% (effectively null).
+## artefacts_seen
+At 3x zoom the static interleaved-gradient-noise crosshatch from the 12-sample march is clearly visible across the thick mist. It is screen-locked with no temporal offset, so in motion it will read as a fixed screen-door pattern over moving mist. The sky dome's flat horizon band still meets the mist top in a hard straight line at 05:15 (present in every mode). The vertical seam at the right edge is visible in v33 (r6 06:00 frame, a dark streak near x 950) and gone in v43, so the fix works. There is a dark smudge in the mist at the top right of the 05:15 frame, probably the cloud-shadow term of the march. No NaN or black pixels: the pure-black share is identical to v0. No halos at silhouettes in the sampled crops. Forest LOD blocks flip between canopy and flat dark slabs from shot to shot, which the explorer plausibly attributes to LOD state rather than the haze.
+## one_line
+The real, verified sky-matched aerial perspective and terrain-pooled morning mist give one strong sunrise image and small gains elsewhere, at an unmeasured and probably large per-fragment cost, and they lean toward blue lift and wash in the 06:00 to 06:30 frames.
+## critique
+Provenance is clean. Every cited image, shader folder, patch and note exists. The logs prove that the override files loaded and the patched backdrop build ran. The BEST sheets are byte-exact crops of the raw captures. AFTER frames differ from BEFORE wherever the explorer says they should, and noon is an honest null.
+
+The look. The 05:15 valley frame is the one picture a player would remember. Pink inversion mist fills the lake basin, the small islands poke through, and the hard sea edge of current Remastered is gone. It reads like a real dawn photograph and is still recognisably Malden. The 06:00 to 06:30 frames are believable fog banks on the lake. They come with a pale, cool lift over the whole mid field (bottom third +7/+8/+14 RGB, contrast down about 9%), which is the wash and blue direction the owner rejected. On sunrise_ridge the massif dissolving into the dawn sky is atmospheric but borders on washed out. Overcast v31 adds mild depth layering and a cooler cast on far hills (B-R 11.8 to 20.2). Dusk is essentially unchanged. Noon is unchanged. So the clear gain is confined to sunrise and early morning valley views. At other times of day the effect is a refinement you have to look for.
+
+The 48-fetch sun march, the 'volumetric' part, changes about 2% of pixels at 5 degrees sun and nothing at 06:30. It is not yet the light-shafts-through-haze look the vision asks for. Against the RTX bar this is one pillar (aerial perspective plus ground fog) done as single-scatter fog. There are no visible god rays through trees, no physically based sky, and nothing for night or combat. It also hides water shine in the mornings. RTX vision 3/10.
+
+Artefacts. The crosshatch is visible at zoom and will be screen-locked in motion. The horizon band still meets the mist in a hard line. The seam is fixed in v43.
+
+Cost. It is honestly flagged as unmeasured, but the '+9 ms' headline is cherry-picked. Round 7 minima (33.6 against 5.3 ms, 44.2 against 18.1 ms) suggest the forward per-fragment form could cost far more. With foliage overdraw at 1440x960 4x MSAA it is not acceptable as built. The proposed deferred, half-resolution, temporally accumulated pass with a precomputed mist-floor texture is sound and would plausibly land around 1 to 2 ms at 1080p on a 3060. That makes the idea fundable, but the cost is unproven.
+
+A risk the explorer missed: the mist is purely visual. AI spotting runs on engine fog values, so a player blinded by a valley mist bank while the AI sees through it is a gameplay fairness problem. A production version must feed the mist into AI visibility, or keep it thin over gameplay ground. The plan's 'keep Classic bit-identical' step is stale per owner decision 1. Also, the 'eastern sun only' gate is a hack that needs weather and humidity drivers, as the explorer notes.
+
+Verdict: worth building properly as a deferred atmosphere pass (5.5/10), with grey extinction (v38) as the default, a thinner mist (v36), and an AI-visibility tie-in. It is not by itself the 'different game' moment outside sunrise.

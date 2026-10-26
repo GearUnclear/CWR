@@ -1,0 +1,155 @@
+graphics: terrain slopes show grass and rock grain instead of a smear
+
+What the player sees: hillsides and meadows from about 10 m to 150 m out
+show grass and rock grain instead of an airbrushed smear (every terrain
+square is one 128 px texture over 50 m, so a texel covered 5 to 15
+pixels there). On the forest edge at 18:15 the slope turns into dry
+grass, the Eden meadow gains turf, the noon hillside and the Abel beach
+get finer grain; the near path keeps its authored pebbles, and the near
+gravel at lowsun_fp is near unchanged (+0.5%). Brightness only, relative
+to the local mean: on the ground band the mean luma moves +0.04 to
++0.4%, R/G and G/B are unchanged to three decimals, the low-frequency
+contrast (luma std after a 10 px blur) moves 0.0 to +0.7% (no new
+mottling), and the sharpness proxy (mean absolute Laplacian) rises
++38.7% on the hero view, +17.0% at noon, +15.8% on the beach and +5.9%
+on the meadow. The sea, the sky, objects, vehicles and trees are
+untouched. With TAA off, a contrast-adaptive sharpen of brightness only
+takes TAA's sharpen's place.
+
+How it works: Graphics/Remaster/TerrainDetail (pure) holds the constants
+and a C++ mirror of the shader math. The terrain main
+(s_psDetailRemasterMain) gives each land fragment the luminance
+high-pass of its own square's texture, zoomed six times and read within
+a few metres (grass grain from grass, rock grain from rock): 2-texel (78
+cm) cells, each cell's patch turned by its own random angle and offset
+by its own jitter, the four cells around the fragment blended so the
+grain keeps its variance (sum w h / sqrt(sum w^2)), through a soft
+limiter at +-0.4, at strength 1.5. The zoomed sample takes the zoomed
+derivatives, so it mip-maps away by itself once the base texture stops
+being magnified; near the eye it fades in with the zoomed patch's mip
+level (-3.5 to -2.5: 8 to 16 m on flat ground from a standing eye at
+1080p), and everything fades out between 220 and 300 m, with nothing
+evaluated beyond 300 m. The authored detail texture keeps its grain as
+its mips average it out (2^lod, capped at 2x, back to 1 by 300 m), with
+a rotated, rescaled second sample against tiling where it is minified.
+LitConstants slot 77 (Detail) lands: xyz per frame (strength, kept rate,
+anti-tiling weight; zero while the switch or its gate is off, which
+leaves the stock terrain main), w per draw: the land and the sea are
+both drawn by PSDetail (Landscape draws the sea with SpecularTexture,
+not IsWater), so ApplyPassState flags each PSDetail draw from its
+multitexture stage (SelectTerrainDetailLayer, next to SetTexture's stage
+selection; the land carries DetailTexture) and uploads the one slot when
+it changes. Slots 58 to 76 are one padding member (litPlanned) until
+their features land. The luma sharpen is the Sharpen post stage run
+alone: PostFrameInputs::lumaSharpen asks for the pass, the composite
+then draws into the TAA input whenever Sharpen runs, and PostSharpen
+runs psPostLumaSharpen (CAS 3x3, the sharpened luma onto the pixel's own
+colour) into every sample of the frame target when the resolve did not
+run.
+
+The switches and their gates: terrainDetail (A1 registry, now landed,
+GPU time in the "ground" section) with detailStrength 1.5 under it, and
+sharpen (landed, section "sharpen") with sharpenStrength 0.3.
+terrainDetail runs in the remastered world by day and night (off in
+classic and under night vision), the 300 m range is in the shader.
+sharpen runs only where TAA does not (A1's gate: TAA switched off, or
+held off in a vehicle interior or under optics), and only in a post
+pass. terrainDetail=0,sharpen=0 draws the frame of before: with TAA off
+the B11 build's "remastered,taa=0, terrainDetail=0,sharpen=0" and the
+base build's "remastered,taa=0" are identical to the pixel at the hero
+view.
+
+Kept, rewritten and dropped from the prototype (texsharp track, glsl7
+rfinalr): kept the rotated self-detail (zoom 6, 4 cells, Heitz-Neyret
+blend, limiter, textureGrad), strength 1.5, detail kept (K2 2) with the
+anti-tiling sample (K1 1) and the luma-only CAS 0.3. Rewritten: into the
+remastered terrain main with the real Detail slot instead of
+litLightCount.yzw and litCamPos.w; the kept boost capped at 2x instead
+of 4x (the critic's dark blotches on paths); the boost fades by 300 m
+instead of 400 m (no step at the 300 m skip); the CAS in the Sharpen
+stage after the composite instead of inside it, never with TAA's
+sharpen; the sea left out by a per-draw flag. New after the first
+in-game look: the near fade of the self-detail (it painted soft blotches
+over the path at 2 to 8 m, where the zoomed patch is itself magnified)
+and the anti-tiling sample only where the detail texture is minified (it
+smeared the authored pebbles near the eye). Dropped: the remip, aniso
+and LOD-bias knobs, texture stats, the release hook, the UD_TEX_*
+variables, the Catmull-Rom and relief branches, the second octave, the
+3-cell hex grid option (the 4-cell look is the approved one) and
+StreamFix (identity at render scale 1.0, no visible change in the
+research at 1.5, and a residency change outside the switch registry).
+
+Measured cost (RTX 4060 Ti, 1920x1080, render scale 1.0, 4x MSAA, single
+readings, not a quiet machine: other lanes' games ran beside it): the
+ground section +0.29 ms on the forest edge and +0.37 ms at noon_fields
+(medians of 3 interleaved rounds), +0.27 to +0.31 ms with TAA off at the
+hero view in a separate game; the luma sharpen 0.05 ms. Frame totals
+were noise in these rounds (the base build's inert switches read +1.7
+and +3.3 ms).
+
+Tests: new test_terrain_detail.cpp [TerrainDetail] (the soft limiter,
+the blend's variance against a plain mean, the spread of the cell
+rotations, each cell reading its own neighbourhood six times finer, the
+near fade on flat ground at 1080p, the 300 m fade and the 2x cap, the
+anti-tiling weight, the frame constants and gate, the shader's constants
+against the mirror's, the stock path when off, only the terrain main
+reading litDetail, and source audits of the upload and the per-draw land
+flag); test_post_stages.cpp [LumaSharpen] (the Sharpen stage alone with
+TAA off, one sharpen per frame, the composite into the TAA input and the
+stage's program choice); test_feature_switches.cpp (terrainDetail and
+sharpen landed with their sub-knobs, landed=5/26);
+test_remaster_lighting.cpp (the Detail slot and the padding in the
+layout, twelve post programs compile); the spec-bit boundary audit's
+comment names the new reader of the stage bits. Unit gate tags plus
+[FeatureSwitches],[FeatureGates],[PostStages],
+[TemporalAA],[TerrainDetail],[LumaSharpen] 505/505; the full suite has
+the 6 known localisation failures only. 12 of 13 mutations turn their
+cases red (the 4x cap, the gate ignored, the shader at 400 m, no near
+fade, anti-tiling on magnified detail, no luma sharpen plan, the
+composite into the frame target, terrainDetail not landed, no land flag,
+the sea flagged as land, the slot order, the stock expression); the 13th
+(the luma sharpen asked on a TAA frame) plans the same stages.
+
+Rebased onto A7 (5d7e7ae; the lane was built on 193c735) by a three-way
+apply in a second scratch copy: the slots become A7's litReserved[3] and
+sky slots 61 to 67, then litPlanned[9] (68 to 76) and litDetail at 77
+(Count 78); the registry, the tuning and the post shader table keep A7's
+rows and add B11's; the frame upload sets Detail after UploadLitSky; the
+landed case expects atmosphere (A7) and texsharp (B11), landed=6/26, and
+eight sub-knobs. On the merged tree the build is clean, the gate tags
+plus A7's and B11's pass 515/515, smoke_abel 1/1 (KHR_debug ids 131169,
+131154 and 131218 only), and at the hero view with TAA off A7's sky
+changes only the sky band (the ground band 0 pixels over 2 against the
+lane's base) while the terrain detail changes the same pixels as on the
+lane (562,712 against 562,710 over 2 levels). Landed on 5d7e7ae with
+that resolution plus the lane's check that every sub-knob sits in its
+switch's track group (kept beside A7's list of parents) and a comment on
+the litPlanned padding; the landing build is clean, the gate tags plus
+the earlier steps' and B11's pass 517/517, smoke_abel 1/1 (KHR_debug ids
+131154, 131169 and 131218 only; tmp/integration/B11/land).
+
+In game (tmp/integration/B11/lane of the graphics-remaster worktree,
+gitignored): 20261018-065644-before (the base build: hero, sharpen pair,
+noon_fields, coastline_sunset, lowsun_fp, Eden overcast_broken, cost
+rounds), 20261018-071100-new (the first try, with the near blotches),
+20261018-071657-all (the final build: the same views, the TAA-off off
+check of offcheck.md, the 40-frame walk of motion.md, cost rounds),
+20261018-072144-smoke (smoke_abel 1/1, KHR_debug ids 131169, 131154 and
+131218 only); video/b11walk/b11walk__sbs.mp4.
+
+Known risks: a golden slope reads more like dry straw (the grain is
+brightness only, the hue is unchanged; owner taste); paths painted into
+terrain textures get the grain from 10 m on (they cannot be told apart
+before B7's terrain classes; roads are objects and never get it); in
+motion the grain moves with the ground in cell-sized blobs:
+frame-to-frame change over spatial detail 1.09 to 1.11x of off and the
+second temporal difference 1.13 to 1.17x, no single-pixel sparkle, but
+only a 10 m walk at 1080p was checked; the luma sharpen (TAA off only)
+nearly doubles the sharpness proxy and touches the whole frame, and by
+A1's gate it also runs by default in vehicle interiors and under optics
+(where TAA holds off), views nobody has looked at yet; the
+per-draw land flag relies on the landscape's DetailTexture and
+SpecularTexture bits (a p3d face authored with the DetailTexture bit
+would get the grain); no RTX 3060 was measured.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

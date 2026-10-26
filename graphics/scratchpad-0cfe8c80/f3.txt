@@ -1,0 +1,5 @@
+    // beams and the fog's own sun light in the air replace them, and so does
+    // the photoreal camera (its composite adds none: their radial march drew
+    // a fan of streaks round a low sun).
+    if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight &&
+        !(air && (in.airBeams || plan.fog)) && !in.camera)

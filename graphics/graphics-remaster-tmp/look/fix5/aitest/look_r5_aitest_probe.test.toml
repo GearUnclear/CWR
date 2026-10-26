@@ -1,0 +1,7 @@
+# fix5 aitest probe: AI visibility next to the drawn fog at the optics staging (fog 0.3). Not a regression test.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_eden.Eden"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 900
+assert_timeout = 240
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "1920", "--height", "1080"]

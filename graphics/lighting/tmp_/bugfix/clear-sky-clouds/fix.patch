@@ -1,0 +1,250 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index e81d4c3..9d49886 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -47,6 +47,11 @@ constexpr float kMoonFull = 0.0035f;
+ constexpr float kGroundAlbedo = 0.2f;
+ constexpr float kExtinction = 0.05f; // optical depth per air mass beyond the zenith
+ constexpr float kCloudTransmit = 0.2f;
++// The clearest weather the engine has is not cloud-free: setOvercast 0 sits
++// between the "jasno" keyframe at overcast -0.08 and "oblacno" at 0.5
++// (GetWeatherBasics in Landscape.cpp), so it reports skyThrough 0.959, a cover
++// of 0.041. A cover up to this much is a clear sky and casts no cloud shadows.
++constexpr float kClearSkyCover = 0.05f;
+ constexpr float kBrightness = 1.6f; // default user brightness folded into the materials
+ constexpr float kMaxMeterGain = 1.6f;
+ 
+@@ -179,13 +184,19 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     // Classic dims the sun by overcast (diffuse = full * (skyThrough*0.8+0.2)).
+     // With cloud shadows on, that dimming moves into a moving cloud field whose
+     // mean transmission matches it: cover c with transmission T under a cloud
+-    // averages 1 - c(1 - T), so c = (1 - skyThrough) for T = 0.2.
++    // averages 1 - c(1 - T), so c = (1 - skyThrough) for T = 0.2. A clear sky
++    // casts no cloud shadows: the field's cover fades in from kClearSkyCover and
++    // is the full sky cover from twice that on. Whatever dimming the field does
++    // not carry (the faded-in part, or a cloudShadows knob below 1) stays
++    // uniform, so the mean sun is classic's at every overcast.
+     const float skyThrough = Clamp01(in.skyThrough);
+     const float cover = 1.0f - skyThrough;
+-    const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && cover > 0.02f;
+-    const float overcastDim = clouds ? 1.0f : skyThrough * 0.8f + 0.2f;
+-    rig.cloudCover = clouds ? cover : 0.0f;
++    const float shadowCover = cover * Smoothstep(kClearSkyCover, 2.0f * kClearSkyCover, cover);
++    const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && shadowCover > 0.0f;
++    rig.cloudCover = clouds ? shadowCover : 0.0f;
+     rig.cloudTransmit = clouds ? 1.0f - (1.0f - kCloudTransmit) * std::min(1.0f, tuning.cloudShadows) : 1.0f;
++    const float fieldMean = 1.0f - rig.cloudCover * (1.0f - rig.cloudTransmit);
++    const float overcastDim = std::min(1.0f, (skyThrough * 0.8f + 0.2f) / fieldMean);
+ 
+     const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
+     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..75467b0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -107,8 +107,9 @@ struct LightRig
+     // Gain before the tonemap: tuning.exposure times a meter that keeps sunlit
+     // ground at its classic on-screen brightness as the sun gets lower.
+     float exposure = 1.0f;
+-    // Broken-cloud field for the shader: fraction of the sky covered and the
+-    // fraction of sunlight that survives under a cloud.
++    // Broken-cloud field for the shader: fraction of the ground under cloud
++    // shadow (0 under a clear sky, the sky cover once it is clearly cloudy) and
++    // the fraction of sunlight that survives under a cloud.
+     float cloudCover = 0.0f;
+     float cloudTransmit = 1.0f;
+ };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index f994cd0..d5157ed 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -30,7 +30,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Sun shadows | shader `shadowMapVisibility` | The engine's cascaded shadow maps now dim only direct sun, never the sky fill: shadows have readable detail instead of a flat darkening. 12-tap Poisson over hardware 2x2 PCF. Casters use a slope-scaled normal offset; the terrain never casts into the map and gets no offset, so shadows stay attached to their casters at a low sun. Shadow maps follow the true sun down to 4 degrees (Classic clamps to 11.5), so evening shadows have their full length (`SceneShadowPass.cpp`). |
+ | Hill shadows and valley sky | `TerrainHorizon.cpp`, `World/Terrain/TerrainLighting.cpp` | A 16-azimuth horizon map built off-thread from the heightfield when an island loads. Ridges shadow the valleys behind them at any range (the shadow maps cover objects near the camera only) and valley floors see less sky. |
+ | Ground-coloured bounce | `GroundTint`, `TerrainLighting.cpp` `GroundColors` | The light bounced off the ground takes the colour of the landscape texture under each point (its average colour, baked with the horizon map): warm on sand, green over grass. The tint is luminance-neutral, so it changes the colour of the shade, never its brightness. |
+-| Cloud shadows | `CloudNoise.cpp`, shader `cloudSunVisibility` | Under broken cloud, the classic uniform sun dimming moves into drifting cloud shadows whose mean transmission equals the classic dimming, so the average frame brightness is unchanged. |
++| Cloud shadows | `CloudNoise.cpp`, shader `cloudSunVisibility` | Under broken cloud, the classic uniform sun dimming moves into drifting cloud shadows whose mean transmission equals the classic dimming, so the average frame brightness is unchanged. A clear sky casts none: `setOvercast 0` still reports 4% cover (the clear weather keyframe sits at overcast -0.08), so the shadows fade in from 5% cover and take the full cover from 10% (about overcast 0.1); the dimming they do not carry stays uniform. |
+ | Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. |
+ | Fog toward the sun | shader `fogColorToward` | Fog takes the sky dome's own sun glow (`SunSkyColor * cos^6`, as `TLVertexTable::DoSkyLighting` shades the dome). Distant ground fades into the colour of the sky behind it, which removes the flat band along the horizon at sunrise and sunset. Away from the sun it is exactly the classic fog. |
+ | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 68e8c01..51a3d9b 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -58,6 +58,23 @@ float RedOverBlue(const Rgb& c)
+ {
+     return c.r / std::max(c.b, 1e-6f);
+ }
++
++// skyThrough for a setOvercast value: Weather::SetOvercast interpolates the
++// GetWeatherBasics keyframes (Landscape.cpp): overcast -0.08 "jasno" 1.0, 0.5
++// "oblacno" 0.7, 0.66 "zatazeno" 0.1, 1.0 0.0.
++float SkyThroughAtOvercast(float overcast)
++{
++    static const float kKeys[4][2] = {{-0.08f, 1.0f}, {0.5f, 0.7f}, {0.66f, 0.1f}, {1.0f, 0.0f}};
++    for (int i = 1; i < 4; ++i)
++    {
++        if (overcast < kKeys[i][0])
++        {
++            const float t = (overcast - kKeys[i - 1][0]) / (kKeys[i][0] - kKeys[i - 1][0]);
++            return kKeys[i - 1][1] + (kKeys[i][1] - kKeys[i - 1][1]) * t;
++        }
++    }
++    return 0.0f;
++}
+ } // namespace
+ 
+ TEST_CASE("Remaster light rig: sunlit ground keeps its classic brightness through the day", "[Graphics][remaster]")
+@@ -171,22 +188,78 @@ TEST_CASE("Remaster light rig: night keeps the classic ambient level", "[Graphic
+ 
+ TEST_CASE("Remaster light rig: cloud shadows carry the classic overcast dimming on average", "[Graphics][remaster]")
+ {
++    // At every overcast, and with the cloud-shadow knob turned down, the mean
++    // sun over the field is the classic uniform dimming.
++    for (float knob : {1.0f, 0.5f})
++    {
++        LightingTuning tuning;
++        tuning.cloudShadows = knob;
++        for (float overcast : {0.0f, 0.02f, 0.05f, 0.1f, 0.25f, 0.5f, 0.6f, 0.66f, 0.8f, 1.0f})
++        {
++            CAPTURE(knob, overcast);
++            LightRigInputs in = ClearSky(45.0f);
++            in.skyThrough = SkyThroughAtOvercast(overcast);
++            in.cloudShadowsActive = false;
++            const LightRig classicDim = ComputeLightRig(in, tuning);
++            in.cloudShadowsActive = true;
++            const LightRig field = ComputeLightRig(in, tuning);
++            const float meanSun = Luminance(field.sun) * (1.0f - field.cloudCover * (1.0f - field.cloudTransmit));
++            CHECK(meanSun == Catch::Approx(Luminance(classicDim.sun)).epsilon(1e-4));
++            if (overcast >= 0.1f)
++                CHECK(field.cloudCover > 0.0f);
++            // A clearly cloudy sky shadows the share of the ground it covers.
++            if (overcast >= 0.25f)
++                CHECK(field.cloudCover == Catch::Approx(1.0f - in.skyThrough));
++        }
++    }
++}
++
++TEST_CASE("Remaster light rig: a clear sky casts no cloud shadows", "[Graphics][remaster]")
++{
++    // setOvercast 0 is the clearest weather the engine has, yet it reports
++    // skyThrough 0.959. No cloud shows in that sky, so no cloud shadow may
++    // fall on the ground; its slight classic dimming stays uniform.
+     const LightingTuning tuning;
+-    for (float skyThrough : {0.2f, 0.6f, 0.9f})
++    for (float overcast : {0.0f, 0.01f})
+     {
+-        CAPTURE(skyThrough);
++        CAPTURE(overcast);
+         LightRigInputs in = ClearSky(45.0f);
+-        in.skyThrough = skyThrough;
++        in.skyThrough = SkyThroughAtOvercast(overcast);
++        CHECK(in.skyThrough < 0.96f);
+         in.cloudShadowsActive = false;
+-        const LightRig classicDim = ComputeLightRig(in, tuning);
++        const LightRig uniform = ComputeLightRig(in, tuning);
+         in.cloudShadowsActive = true;
+-        const LightRig field = ComputeLightRig(in, tuning);
+-        CHECK(field.cloudCover == Catch::Approx(1.0f - skyThrough));
+-        const float meanSun = Luminance(field.sun) * (1.0f - field.cloudCover * (1.0f - field.cloudTransmit));
+-        CHECK(meanSun == Catch::Approx(Luminance(classicDim.sun)).epsilon(1e-4));
++        const LightRig rig = ComputeLightRig(in, tuning);
++        CHECK(rig.cloudCover == 0.0f);
++        CHECK(rig.cloudTransmit == 1.0f);
++        CHECK(Luminance(rig.sun) == Catch::Approx(Luminance(uniform.sun)).epsilon(1e-5));
+     }
+ }
+ 
++TEST_CASE("Remaster light rig: cloud shadows fade in with the overcast", "[Graphics][remaster]")
++{
++    // A weather change sweeps skyThrough slowly: neither the shadowed share of
++    // the ground nor the sun between the shadows may jump on the way.
++    const LightingTuning tuning;
++    LightRigInputs in = ClearSky(45.0f);
++    in.cloudShadowsActive = true;
++    float lastCover = 0.0f;
++    float lastSun = Luminance(ComputeLightRig(in, tuning).sun);
++    for (int i = 1; i <= 1000; ++i)
++    {
++        in.skyThrough = 1.0f - static_cast<float>(i) / 1000.0f;
++        CAPTURE(in.skyThrough);
++        const LightRig rig = ComputeLightRig(in, tuning);
++        const float sun = Luminance(rig.sun);
++        CHECK(rig.cloudCover >= lastCover);
++        CHECK(rig.cloudCover - lastCover < 0.005f);
++        CHECK(std::abs(sun - lastSun) < 0.005f * lastSun);
++        lastCover = rig.cloudCover;
++        lastSun = sun;
++    }
++    CHECK(lastCover == Catch::Approx(1.0f));
++}
++
+ TEST_CASE("Remaster sun chroma and tonemap", "[Graphics][remaster]")
+ {
+     float prev = 0.0f;
+@@ -363,6 +436,65 @@ TEST_CASE("Remaster cloud noise is uniform, so a threshold sets the covered frac
+     CHECK(columnStep(n - 1, 0) < 2.0 * columnStep(n / 2, n / 2 + 1) + 4.0);
+ }
+ 
++TEST_CASE("Remaster cloud shadows cover the share of the ground the rig asks for", "[Graphics][remaster]")
++{
++    // The engine's field (BuildCloudNoise(256, 1), read with GL_LINEAR and
++    // GL_REPEAT) under the shader's soft threshold (cloudSunVisibility: an edge
++    // of kCloudEdge 0.08 that narrows toward a clear or a full sky): from a
++    // nearly clear sky to a full overcast the shadowed share is the rig's cover,
++    // so the mean sun on the ground is the classic dimming.
++    const int n = 256;
++    const std::vector<std::uint8_t> noise = BuildCloudNoise(n, 1);
++    REQUIRE(noise.size() == static_cast<size_t>(n) * n);
++    auto texel = [&](int x, int y) { return noise[static_cast<size_t>(y & (n - 1)) * n + (x & (n - 1))] / 255.0f; };
++    auto sample = [&](float u, float v)
++    {
++        const float x = u * n - 0.5f;
++        const float y = v * n - 0.5f;
++        const int x0 = static_cast<int>(std::floor(x));
++        const int y0 = static_cast<int>(std::floor(y));
++        const float tx = x - static_cast<float>(x0);
++        const float ty = y - static_cast<float>(y0);
++        const float a = texel(x0, y0) + (texel(x0 + 1, y0) - texel(x0, y0)) * tx;
++        const float b = texel(x0, y0 + 1) + (texel(x0 + 1, y0 + 1) - texel(x0, y0 + 1)) * tx;
++        return a + (b - a) * ty;
++    };
++    auto smoothstep = [](float e0, float e1, float x)
++    {
++        const float t = std::min(1.0f, std::max(0.0f, (x - e0) / (e1 - e0)));
++        return t * t * (3.0f - 2.0f * t);
++    };
++    const LightingTuning tuning;
++    for (float overcast : {0.02f, 0.05f, 0.1f, 0.3f, 0.5f, 0.6f, 0.66f, 0.8f})
++    {
++        CAPTURE(overcast);
++        LightRigInputs in = ClearSky(45.0f);
++        in.skyThrough = SkyThroughAtOvercast(overcast);
++        in.cloudShadowsActive = false;
++        const float classicSun = Luminance(ComputeLightRig(in, tuning).sun);
++        in.cloudShadowsActive = true;
++        const LightRig rig = ComputeLightRig(in, tuning);
++        const float cover = rig.cloudCover;
++        const float edge = 0.08f * std::min(1.0f, std::max(0.0f, 4.0f * cover * (1.0f - cover)));
++        // Two samples per texel each way, off the texel centres.
++        const int m = 2 * n;
++        double covered = 0.0;
++        for (int j = 0; j < m; ++j)
++        {
++            for (int i = 0; i < m; ++i)
++            {
++                const float v = sample((static_cast<float>(i) + 0.37f) / m, (static_cast<float>(j) + 0.71f) / m);
++                covered += edge > 1e-4f ? smoothstep(1.0f - cover - edge, 1.0f - cover + edge, v)
++                                        : (v >= 1.0f - cover ? 1.0f : 0.0f);
++            }
++        }
++        covered /= static_cast<double>(m) * m;
++        CHECK(covered == Catch::Approx(cover).margin(0.01));
++        const float meanSun = Luminance(rig.sun) * (1.0f - static_cast<float>(covered) * (1.0f - rig.cloudTransmit));
++        CHECK(meanSun == Catch::Approx(classicSun).epsilon(0.01));
++    }
++}
++
+ // --- GLSL contracts --------------------------------------------------------
+ 
+ namespace

@@ -1,0 +1,44 @@
+{
+  "LoBoMig.pbo": {
+    "leaves_before": 1227,
+    "leaves_after": 1227,
+    "differences": [
+      {
+        "path": "CfgVehicles/LoBo_E_mig21bis_MR1/soundLandCrash/0",
+        "before": "\\LoBoMig\\soundss\\jet_crash.wss",
+        "after": "\\LoBoMig\\sounds\\jet_crash.wss"
+      }
+    ]
+  },
+  "LoBo_Pilot.pbo": {
+    "leaves_before": 993,
+    "leaves_after": 993,
+    "differences": [
+      {
+        "path": "CfgVehicles/LoBo_Egypt_Pilot/wounds/108",
+        "before": "\\LoBo_Pilot\\EAF\\tex\\back.pac",
+        "after": "\\LoBo_Pilot\\EAF\\tex\\back.paa"
+      },
+      {
+        "path": "CfgVehicles/LoBo_Egypt_Pilot/wounds/112",
+        "before": "\\LoBo_Pilot\\EAF\\tex\\legsbk.pac",
+        "after": "\\LoBo_Pilot\\EAF\\tex\\legsbk.paa"
+      },
+      {
+        "path": "CfgVehicles/LoBo_IAF_Pilot_grey/wounds/112",
+        "before": "\\LoBo_Pilot\\IAF\\tex2\\legsbk.pac",
+        "after": "\\LoBo_Pilot\\IAF\\tex2\\legsbk.paa"
+      },
+      {
+        "path": "CfgVehicles/LoBo_Jordan_Pilot/wounds/108",
+        "before": "\\LoBo_Pilot\\RJAF\\tex\\back.pac",
+        "after": "\\LoBo_Pilot\\RJAF\\tex\\back.paa"
+      },
+      {
+        "path": "CfgVehicles/LoBo_Jordan_Pilot/wounds/112",
+        "before": "\\LoBo_Pilot\\RJAF\\tex\\legsbk.pac",
+        "after": "\\LoBo_Pilot\\RJAF\\tex\\legsbk.paa"
+      }
+    ]
+  }
+}

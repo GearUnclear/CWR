@@ -1,0 +1,17 @@
+// The cascade array again under a non-compare NEAREST sampler (the soft
+// shadows' blocker search, B1): like unit 2, a complete depth array from init
+// on (the stand-in, then each cascade array as it is created).
+constexpr int kShadowRawUnit = 6;
+constexpr int kSkyLutUnit = 8;     // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
+constexpr int kSkyDensityUnit = 9; // the weather sky's cloud density (EngineGL33_SkyClouds.cpp); a stand-in
+constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI (light list)
+// The sea animation frame the water program cross-fades into (the sea,
+// EngineGL33_Sea.cpp); a white stand-in outside the sea's draws.
+constexpr int kSeaNextFrameUnit = 11;
+// Allocated to the features still to land; no shader samples them yet.
+// kLightDataUnit is free: the light list keeps its lights in a uniform block
+// (kLightListBinding), which the fragments of a tile read faster.
+constexpr int kLightDataUnit = 12;
+constexpr int kCanopyUnit = 10;     // canopy heightfield (hfrt)
+constexpr int kCombatMaskUnit = 14; // combat shadow mask (combat)
+constexpr int kCanopyVisUnit = 15;  // canopy sun visibility (hfrt)

@@ -1,0 +1,318 @@
+{
+ "fps": 60,
+ "layout": "split",
+ "total_frames": 8070,
+ "duration": 134.5,
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\fit\\uslu_dur_v2.mp4",
+ "windows": {
+  "intro": [
+   0.0,
+   9.0
+  ],
+  "opening": [
+   9.6,
+   16.9
+  ],
+  "valley_mist": [
+   16.9,
+   25.2
+  ],
+  "pine_shafts": [
+   25.2,
+   33.7
+  ],
+  "bay_reflections": [
+   33.7,
+   42.2
+  ],
+  "outpost": [
+   42.2,
+   51.2
+  ],
+  "cloud_shadows": [
+   51.2,
+   58.7
+  ],
+  "sinai_camp": [
+   58.7,
+   66.7
+  ],
+  "ambush": [
+   66.7,
+   75.2
+  ],
+  "convoy": [
+   75.2,
+   83.0
+  ],
+  "checkpoint": [
+   83.0,
+   90.6
+  ],
+  "town_patrol": [
+   90.6,
+   98.9
+  ],
+  "rain_town": [
+   98.9,
+   107.2
+  ],
+  "supply_run": [
+   107.2,
+   115.9
+  ],
+  "firefight": [
+   115.9,
+   124.9
+  ],
+  "outro": [
+   124.9,
+   134.5
+  ]
+ },
+ "segments": [
+  {
+   "kind": "clip",
+   "clip": "opening",
+   "title": "Malden, under occupation",
+   "start": 0.0,
+   "end": 17.6,
+   "frames": 1056,
+   "transition_in": null,
+   "transition_out": [
+    "dip",
+    84
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "valley_mist",
+   "title": "Moving out at dawn",
+   "start": 16.2,
+   "end": 25.7,
+   "frames": 570,
+   "transition_in": [
+    "dip",
+    84
+   ],
+   "transition_out": [
+    "fade",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "pine_shafts",
+   "title": "Through the pines",
+   "start": 24.7,
+   "end": 34.2,
+   "frames": 570,
+   "transition_in": [
+    "fade",
+    60
+   ],
+   "transition_out": [
+    "wipe_left",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "bay_reflections",
+   "title": "Coastal patrol, dawn",
+   "start": 33.2,
+   "end": 42.7,
+   "frames": 570,
+   "transition_in": [
+    "wipe_left",
+    60
+   ],
+   "transition_out": [
+    "fade",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "outpost",
+   "title": "Occupier outpost",
+   "start": 41.7,
+   "end": 51.7,
+   "frames": 600,
+   "transition_in": [
+    "fade",
+    60
+   ],
+   "transition_out": [
+    "fade",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "cloud_shadows",
+   "title": "Everon from the air",
+   "start": 50.7,
+   "end": 59.2,
+   "frames": 510,
+   "transition_in": [
+    "fade",
+    60
+   ],
+   "transition_out": [
+    "wipe_right",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "sinai_camp",
+   "title": "Hidden camp, Sinai",
+   "start": 58.2,
+   "end": 67.2,
+   "frames": 540,
+   "transition_in": [
+    "wipe_right",
+    60
+   ],
+   "transition_out": [
+    "fade",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "ambush",
+   "title": "Ambush at golden hour",
+   "start": 66.2,
+   "end": 75.7,
+   "frames": 570,
+   "transition_in": [
+    "fade",
+    60
+   ],
+   "transition_out": [
+    "fade",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "convoy",
+   "title": "Convoy at sunset",
+   "start": 74.7,
+   "end": 83.7,
+   "frames": 540,
+   "transition_in": [
+    "fade",
+    60
+   ],
+   "transition_out": [
+    "dip",
+    84
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "checkpoint",
+   "title": "Checkpoint at dusk",
+   "start": 82.3,
+   "end": 91.3,
+   "frames": 540,
+   "transition_in": [
+    "dip",
+    84
+   ],
+   "transition_out": [
+    "dip",
+    84
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "town_patrol",
+   "title": "Night patrol in town",
+   "start": 89.9,
+   "end": 99.4,
+   "frames": 570,
+   "transition_in": [
+    "dip",
+    84
+   ],
+   "transition_out": [
+    "fade",
+    60
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "rain_town",
+   "title": "Town in the rain",
+   "start": 98.4,
+   "end": 107.9,
+   "frames": 570,
+   "transition_in": [
+    "fade",
+    60
+   ],
+   "transition_out": [
+    "dip",
+    84
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "supply_run",
+   "title": "Supply run at night",
+   "start": 106.5,
+   "end": 116.5,
+   "frames": 600,
+   "transition_in": [
+    "dip",
+    84
+   ],
+   "transition_out": [
+    "fade",
+    72
+   ]
+  },
+  {
+   "kind": "clip",
+   "clip": "firefight",
+   "title": "Firefight after dark",
+   "start": 115.3,
+   "end": 125.8,
+   "frames": 630,
+   "transition_in": [
+    "fade",
+    72
+   ],
+   "transition_out": [
+    "dip",
+    108
+   ]
+  },
+  {
+   "kind": "closing",
+   "clip": "",
+   "title": "",
+   "start": 124.0,
+   "end": 134.5,
+   "frames": 630,
+   "transition_in": [
+    "dip",
+    108
+   ],
+   "transition_out": null
+  }
+ ],
+ "timing": {
+  "file": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\fit\\timing_owner.json",
+  "spec": {
+   "frames": {
+    "opening": 1056
+   },
+   "note": "owner_vo.py fit: the picture follows the owner's voice; frames = 60 fps clip lengths (a longer reshoot), transitions = a scene's out-transition [kind, seconds], intro_extra = seconds the intro holds longer, closing_s = the closing card"
+  }
+ }
+}

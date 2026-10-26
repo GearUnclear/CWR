@@ -1,0 +1,108 @@
+USLU DUR! TRAILER, PART 1: GRAPHICS
+Narration script, 16 lines
+==========================================
+
+How to read it
+- Calm, measured, warm, understated. Like telling a friend about something you made.
+  No announcer voice, no hype, no big build-ups.
+- A little slower than normal talking. Let full stops land.
+- Do not watch a clock. The "about N s" below is only a guide. I fit the picture
+  to your voice: if a line runs long, its scene simply stays on screen longer.
+- Say the number before each line (for example "five"), pause, then read the line.
+  That lets me cut the recording into lines cleanly.
+
+
+1   (v2_00_intro)   Opening card and the first view   about 8 s
+    Unhurried. Small pause after "Assault". The second sentence a touch warmer.
+
+    Uslu dur is a total overhaul of Arma: Cold War Assault. This first video is about the light.
+
+
+2   (v2_01_opening)   Malden at 18:15, under occupation   about 5 s
+    Three short sentences. Let each one land. "The light is new" plain, not a punchline.
+
+    Malden, under occupation. The models are the originals. The light is new.
+
+
+3   (v2_02_valley_mist)   Moving out at dawn   about 7 s
+    Quiet, early morning. "First light" soft.
+
+    A resistance squad moves out at first light. The sun is still burning off the valley mist.
+
+
+4   (v2_03_pine_shafts)   Through the pines   about 7 s
+    Slow. A small pause after "shafts". "Keep to cover" a little lower.
+
+    In the pine woods, morning sun falls through the haze in shafts. The guerrillas keep to cover.
+
+
+5   (v2_04_bay_reflections)   Coastal patrol, dawn   about 7 s
+    Smooth and even, one breath if it is comfortable.
+
+    On the bay, an occupier patrol boat crosses calm water that mirrors the hills and the sky.
+
+
+6   (v2_05_outpost)   Occupier outpost   about 7 to 8 s
+    Matter of fact. Slow down a little on "cool and deep".
+
+    A low winter sun lights the occupier outpost from the side. The shade stays cool and deep.
+
+
+7   (v2_06_cloud_shadows)   Everon from the air   about 6 s
+    Unhurried. "Move slowly" read slowly.
+
+    Over Everon, the clouds catch the sun, and their shadows move slowly across the hills.
+
+
+8   (v2_07_sinai_camp)   Hidden camp, Sinai   about 7 s
+    "Modded islands get it too" plain and light, not a sales pitch. Small pause after it.
+
+    Modded islands get it too. In Sinai, a camp sits under netting in the late sun.
+
+
+9   (v2_08_ambush)   Ambush at golden hour   about 6 to 7 s
+    "Golden hour." on its own, then a pause. The rest quiet, a little tense.
+
+    Golden hour. Guerrillas wait at the forest edge; every tree throws a long shadow downhill.
+
+
+10  (v2_09_convoy)   Convoy at sunset   about 4 to 5 s (lots of room)
+    Short line with plenty of room. Take your time.
+
+    At sunset, an occupier convoy drives into the low sun.
+
+
+11  (v2_10_checkpoint)   Checkpoint at dusk   about 5 s (lots of room)
+    Calm and warm. Plenty of room.
+
+    At dusk, the sentries at the checkpoint gather around a fire.
+
+
+12  (v2_11_town_patrol)   Night patrol in town   about 7 s
+    Night: a little lower and quieter.
+
+    At night, street lamps and the fire light the occupied town. A patrol comes down the street.
+
+
+13  (v2_12_rain_town)   Town in the rain   about 6 s
+    "Then the rain." on its own, then a pause. Quiet.
+
+    Then the rain. Puddles catch the lamps, and the resistance slips past the patrol.
+
+
+14  (v2_13_supply_run)   Supply run at night   about 7 s
+    Slow on "the nights are dark".
+
+    Out in the country, the nights are dark. A supply run drives by its headlights alone.
+
+
+15  (v2_14_firefight)   Firefight after dark   about 6 s
+    A bit more energy than the rest, but still controlled. Not hype.
+
+    When a firefight breaks out, every flare, fire and shell burst lights the field.
+
+
+16  (v2_99_outro)   Closing card   about 5 s (lots of room)
+    "Uslu dur." then a short beat. The rest plain and friendly.
+
+    Uslu dur. Part two covers the gameplay: Guerrilla Mode and the AI.

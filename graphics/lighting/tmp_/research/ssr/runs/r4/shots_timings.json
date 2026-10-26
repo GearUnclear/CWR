@@ -1,0 +1,352 @@
+{
+ "bay_offshore__classic": {
+  "label": "bay_offshore__classic",
+  "gpu_raw": "frame 1.53 ms | world 1.40",
+  "frame": 1.53,
+  "world": 1.4,
+  "post": null,
+  "ao": null,
+  "bloom": null,
+  "composite": null
+ },
+ "bay_offshore__remastered": {
+  "label": "bay_offshore__remastered",
+  "gpu_raw": "frame 8.60 ms | world 8.01 (shadow 0.03) | post 0.48: ao 0.40 bloom 0.05 composite 0.03",
+  "frame": 8.6,
+  "world": 8.01,
+  "post": 0.48,
+  "ao": 0.4,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "bay_offshore__ssr": {
+  "label": "bay_offshore__ssr",
+  "gpu_raw": "frame 9.92 ms | world 8.46 (shadow 0.03) | post 1.35: ao 1.21 bloom 0.10 composite 0.04",
+  "frame": 9.92,
+  "world": 8.46,
+  "post": 1.35,
+  "ao": 1.21,
+  "bloom": 0.1,
+  "composite": 0.04
+ },
+ "bay_offshore__ssrcalm": {
+  "label": "bay_offshore__ssrcalm",
+  "gpu_raw": "frame 10.12 ms | world 8.66 (shadow 0.03) | post 1.34: ao 1.27 bloom 0.05 composite 0.03",
+  "frame": 10.12,
+  "world": 8.66,
+  "post": 1.34,
+  "ao": 1.27,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "bay_offshore__ssrtags": {
+  "label": "bay_offshore__ssrtags",
+  "gpu_raw": "frame 8.23 ms | world 7.53 (shadow 0.03) | post 0.59: ao 0.51 bloom 0.05 composite 0.03",
+  "frame": 8.23,
+  "world": 7.53,
+  "post": 0.59,
+  "ao": 0.51,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "bay_offshore__ssrhits": {
+  "label": "bay_offshore__ssrhits",
+  "gpu_raw": "frame 8.91 ms | world 7.21 (shadow 0.03) | post 1.58: ao 1.50 bloom 0.05 composite 0.03",
+  "frame": 8.91,
+  "world": 7.21,
+  "post": 1.58,
+  "ao": 1.5,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "coastline_sunset__classic": {
+  "label": "coastline_sunset__classic",
+  "gpu_raw": "frame 1.09 ms | world 0.97",
+  "frame": 1.09,
+  "world": 0.97,
+  "post": null,
+  "ao": null,
+  "bloom": null,
+  "composite": null
+ },
+ "coastline_sunset__remastered": {
+  "label": "coastline_sunset__remastered",
+  "gpu_raw": "frame 1.77 ms | world 0.91 (shadow 0.00) | post 0.74: ao 0.42 bloom 0.07 shafts 0.22 composite 0.04",
+  "frame": 1.77,
+  "world": 0.91,
+  "post": 0.74,
+  "ao": 0.42,
+  "bloom": 0.07,
+  "composite": 0.04
+ },
+ "coastline_sunset__ssr": {
+  "label": "coastline_sunset__ssr",
+  "gpu_raw": "frame 2.73 ms | world 0.81 (shadow 0.00) | post 1.79: ao 1.47 bloom 0.06 shafts 0.21 composite 0.04",
+  "frame": 2.73,
+  "world": 0.81,
+  "post": 1.79,
+  "ao": 1.47,
+  "bloom": 0.06,
+  "composite": 0.04
+ },
+ "coastline_sunset__ssrcalm": {
+  "label": "coastline_sunset__ssrcalm",
+  "gpu_raw": "frame 2.60 ms | world 1.17 (shadow 0.00) | post 1.31: ao 0.92 bloom 0.06 shafts 0.20 composite 0.13",
+  "frame": 2.6,
+  "world": 1.17,
+  "post": 1.31,
+  "ao": 0.92,
+  "bloom": 0.06,
+  "composite": 0.13
+ },
+ "coastline_sunset__ssrtags": {
+  "label": "coastline_sunset__ssrtags",
+  "gpu_raw": "frame 1.39 ms | world 0.40 (shadow 0.00) | post 0.87: ao 0.49 bloom 0.06 shafts 0.20 composite 0.12",
+  "frame": 1.39,
+  "world": 0.4,
+  "post": 0.87,
+  "ao": 0.49,
+  "bloom": 0.06,
+  "composite": 0.12
+ },
+ "coastline_sunset__ssrhits": {
+  "label": "coastline_sunset__ssrhits",
+  "gpu_raw": "frame 2.41 ms | world 0.73 (shadow 0.00) | post 1.57: ao 1.14 bloom 0.06 shafts 0.19 composite 0.17",
+  "frame": 2.41,
+  "world": 0.73,
+  "post": 1.57,
+  "ao": 1.14,
+  "bloom": 0.06,
+  "composite": 0.17
+ },
+ "town_rain__classic": {
+  "label": "town_rain__classic",
+  "gpu_raw": "frame 1.70 ms | world 1.59",
+  "frame": 1.7,
+  "world": 1.59,
+  "post": null,
+  "ao": null,
+  "bloom": null,
+  "composite": null
+ },
+ "town_rain__remastered": {
+  "label": "town_rain__remastered",
+  "gpu_raw": "frame 2.86 ms | world 2.11 (shadow 0.04) | post 0.63: ao 0.55 bloom 0.05 composite 0.03",
+  "frame": 2.86,
+  "world": 2.11,
+  "post": 0.63,
+  "ao": 0.55,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_rain__ssr": {
+  "label": "town_rain__ssr",
+  "gpu_raw": "frame 4.01 ms | world 2.24 (shadow 0.08) | post 1.66: ao 1.59 bloom 0.05 composite 0.03",
+  "frame": 4.01,
+  "world": 2.24,
+  "post": 1.66,
+  "ao": 1.59,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_rain__ssrwet": {
+  "label": "town_rain__ssrwet",
+  "gpu_raw": "frame 4.43 ms | world 2.71 (shadow 0.06) | post 1.61: ao 1.53 bloom 0.05 composite 0.03",
+  "frame": 4.43,
+  "world": 2.71,
+  "post": 1.61,
+  "ao": 1.53,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_rain__ssrtags": {
+  "label": "town_rain__ssrtags",
+  "gpu_raw": "frame 2.36 ms | world 1.53 (shadow 0.03) | post 0.71: ao 0.64 bloom 0.05 composite 0.03",
+  "frame": 2.36,
+  "world": 1.53,
+  "post": 0.71,
+  "ao": 0.64,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_wet_dusk__classic": {
+  "label": "town_wet_dusk__classic",
+  "gpu_raw": "frame 3.20 ms | world 3.10",
+  "frame": 3.2,
+  "world": 3.1,
+  "post": null,
+  "ao": null,
+  "bloom": null,
+  "composite": null
+ },
+ "town_wet_dusk__remastered": {
+  "label": "town_wet_dusk__remastered",
+  "gpu_raw": "frame 6.29 ms | world 5.44 (shadow 0.50) | post 0.74: ao 0.39 bloom 0.05 shafts 0.16 composite 0.14",
+  "frame": 6.29,
+  "world": 5.44,
+  "post": 0.74,
+  "ao": 0.39,
+  "bloom": 0.05,
+  "composite": 0.14
+ },
+ "town_wet_dusk__ssrwet": {
+  "label": "town_wet_dusk__ssrwet",
+  "gpu_raw": "frame 9.29 ms | world 6.90 (shadow 0.03) | post 2.29: ao 2.04 bloom 0.05 shafts 0.16 composite 0.03",
+  "frame": 9.29,
+  "world": 6.9,
+  "post": 2.29,
+  "ao": 2.04,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_night__classic": {
+  "label": "town_night__classic",
+  "gpu_raw": "frame 13.12 ms | world 12.96",
+  "frame": 13.12,
+  "world": 12.96,
+  "post": null,
+  "ao": null,
+  "bloom": null,
+  "composite": null
+ },
+ "town_night__remastered": {
+  "label": "town_night__remastered",
+  "gpu_raw": "frame 19.80 ms | world 19.08 | post 0.29: ao 0.22 bloom 0.05 composite 0.03",
+  "frame": 19.8,
+  "world": 19.08,
+  "post": 0.29,
+  "ao": 0.22,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_night__ssr": {
+  "label": "town_night__ssr",
+  "gpu_raw": "frame 18.76 ms | world 18.15 | post 0.45: ao 0.37 bloom 0.05 composite 0.03",
+  "frame": 18.76,
+  "world": 18.15,
+  "post": 0.45,
+  "ao": 0.37,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_night__ssrwet": {
+  "label": "town_night__ssrwet",
+  "gpu_raw": "frame 23.25 ms | world 20.25 | post 2.48: ao 2.40 bloom 0.05 composite 0.03",
+  "frame": 23.25,
+  "world": 20.25,
+  "post": 2.48,
+  "ao": 2.4,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "town_night__ssrtags": {
+  "label": "town_night__ssrtags",
+  "gpu_raw": "frame 20.38 ms | world 19.85 | post 0.38: ao 0.30 bloom 0.05 composite 0.03",
+  "frame": 20.38,
+  "world": 19.85,
+  "post": 0.38,
+  "ao": 0.3,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "lowsun_fp__classic": {
+  "label": "lowsun_fp__classic",
+  "gpu_raw": "frame 10.96 ms | world 10.85",
+  "frame": 10.96,
+  "world": 10.85,
+  "post": null,
+  "ao": null,
+  "bloom": null,
+  "composite": null
+ },
+ "lowsun_fp__remastered": {
+  "label": "lowsun_fp__remastered",
+  "gpu_raw": "frame 9.64 ms | world 8.02 (shadow 0.14) | post 1.49: ao 0.21 bloom 0.05 shafts 0.22 composite 1.01",
+  "frame": 9.64,
+  "world": 8.02,
+  "post": 1.49,
+  "ao": 0.21,
+  "bloom": 0.05,
+  "composite": 1.01
+ },
+ "lowsun_fp__ssr": {
+  "label": "lowsun_fp__ssr",
+  "gpu_raw": "frame 15.16 ms | world 13.06 (shadow 0.50) | post 1.98: ao 0.54 bloom 0.05 shafts 0.22 composite 1.17",
+  "frame": 15.16,
+  "world": 13.06,
+  "post": 1.98,
+  "ao": 0.54,
+  "bloom": 0.05,
+  "composite": 1.17
+ },
+ "lowsun_fp__ssrwet": {
+  "label": "lowsun_fp__ssrwet",
+  "gpu_raw": "frame 16.20 ms | world 13.44 (shadow 0.41) | post 2.64: ao 2.33 bloom 0.05 shafts 0.22 composite 0.03",
+  "frame": 16.2,
+  "world": 13.44,
+  "post": 2.64,
+  "ao": 2.33,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "lowsun_fp__ssrtags": {
+  "label": "lowsun_fp__ssrtags",
+  "gpu_raw": "frame 12.55 ms | world 10.59 (shadow 0.88) | post 1.84: ao 0.27 bloom 0.05 shafts 0.22 composite 1.30",
+  "frame": 12.55,
+  "world": 10.59,
+  "post": 1.84,
+  "ao": 0.27,
+  "bloom": 0.05,
+  "composite": 1.3
+ },
+ "overcast_heavy_rain__classic": {
+  "label": "overcast_heavy_rain__classic",
+  "gpu_raw": "frame 2.02 ms | world 1.91",
+  "frame": 2.02,
+  "world": 1.91,
+  "post": null,
+  "ao": null,
+  "bloom": null,
+  "composite": null
+ },
+ "overcast_heavy_rain__remastered": {
+  "label": "overcast_heavy_rain__remastered",
+  "gpu_raw": "frame 2.41 ms | world 1.69 (shadow 0.03) | post 0.59: ao 0.52 bloom 0.05 composite 0.03",
+  "frame": 2.41,
+  "world": 1.69,
+  "post": 0.59,
+  "ao": 0.52,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "overcast_heavy_rain__ssr": {
+  "label": "overcast_heavy_rain__ssr",
+  "gpu_raw": "frame 4.06 ms | world 2.30 (shadow 0.03) | post 1.63: ao 1.55 bloom 0.05 composite 0.03",
+  "frame": 4.06,
+  "world": 2.3,
+  "post": 1.63,
+  "ao": 1.55,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "overcast_heavy_rain__ssrwet": {
+  "label": "overcast_heavy_rain__ssrwet",
+  "gpu_raw": "frame 2.82 ms | world 1.36 (shadow 0.03) | post 1.34: ao 1.26 bloom 0.05 composite 0.03",
+  "frame": 2.82,
+  "world": 1.36,
+  "post": 1.34,
+  "ao": 1.26,
+  "bloom": 0.05,
+  "composite": 0.03
+ },
+ "overcast_heavy_rain__ssrtags": {
+  "label": "overcast_heavy_rain__ssrtags",
+  "gpu_raw": "frame 1.68 ms | world 1.04 (shadow 0.03) | post 0.51: ao 0.44 bloom 0.05 composite 0.03",
+  "frame": 1.68,
+  "world": 1.04,
+  "post": 0.51,
+  "ao": 0.44,
+  "bloom": 0.05,
+  "composite": 0.03
+ }
+}

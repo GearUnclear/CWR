@@ -1,0 +1,33 @@
+firefight_1 bottom band            classic: (17,17,18) L17 | overhaul: (26,26,27) L26
+firefight_1 sky over horizon       classic: (112,55,49) L67 | overhaul: (105,74,63) L79
+firefight_2 bottom band            classic: (17,17,18) L17 | overhaul: (28,28,29) L28
+firefight_2 sky over horizon       classic: (118,63,56) L74 | overhaul: (113,84,73) L89
+firefight_3 bottom band            classic: (17,17,18) L17 | overhaul: (26,26,27) L26
+firefight_3 sky over horizon       classic: (111,57,49) L68 | overhaul: (108,77,65) L83
+rain_day right hill                classic: (102,106,98) L105 | overhaul: (188,191,194) L190
+rain_day gap                       classic: (168,168,161) L168 | overhaul: (196,198,193) L197
+rain_day sky band                  classic: (189,191,188) L190 | overhaul: (208,211,217) L211
+pine_rays ground                   classic: R-B 26.2 R-G 8.3 L58 | overhaul: R-B 14.7 R-G 1.7 L46
+woods ground                       classic: R-B 40.1 R-G 6.7 L90 | overhaul: R-B 21.3 R-G 2.3 L55
+sinai_lowsun ground                classic: R-B 9.8 R-G 9.4 L52 | overhaul: R-B 20.9 R-G 10.1 L60
+lowsun_fp ground                   classic: R-B 13.5 R-G 12.4 L92 | overhaul: R-B 22.2 R-G 8.6 L68
+town_night fire box                classic: 255px 0 (160,157,132) L156 | overhaul: 255px 0 (129,109,77) L111
+town_night fire ground             classic: R-B 15.6 R-G 0.4 L116 | overhaul: R-B 18.2 R-G 5.8 L45
+noon_fields foreground             classic: (165,163,153) L163 | overhaul: (139,136,126) L136
+jeep_close_noon foreground         classic: (170,167,156) L167 | overhaul: (158,154,142) L154
+sinai_desert_noon foreground       classic: (185,168,149) L170 | overhaul: (150,131,111) L134
+town_noon grass                    classic: sat 0.362 L107 | overhaul: sat 0.398 L153
+town_noon plaster                  classic: (64,60,49) L60 | overhaul: (90,85,72) L85
+forest_edge_golden sky             classic: (138,139,168) L141 | overhaul: (114,138,159) L134
+forest_edge_golden grass           classic: (88,67,53) L71 | overhaul: (129,107,73) L109
+overcast_broken sky                classic: sat 0.241 L178 | overhaul: sat 0.243 L184
+sunrise sky hp                     classic: hp3 std 0.24 | overhaul: hp3 std 0.42
+coastline sky hp                   classic: hp3 std 0.21 | overhaul: hp3 std 0.50
+sunrise foreground                 classic: R-B 3.7 R-G 0.1 L19 | overhaul: R-B 15.9 R-G 1.7 L41
+dawn_valley under horizon          classic: (179,191,207) L190 | overhaul: (206,182,146) L185
+dawn_valley sky over it            classic: (171,193,210) L190 | overhaul: (191,172,144) L174
+mist_hud right hill                classic: (163,164,156) L163 | overhaul: (185,186,184) L186
+mist_hud sky band                  classic: (180,181,173) L180 | overhaul: (200,202,205) L202
+town_fog_night houses std          classic: std 64.3 L87 | overhaul: std 17.9 L44
+tank interior                      classic: (96,98,98) L98 | overhaul: (64,67,68) L66
+whole frame mean (blue hour)       classic: (69,36,34) L43 | overhaul: (76,67,79) L70

@@ -1,0 +1,94 @@
+owner: 29 cues, widest row 725 px 'We got, you know, cloud shadows,' -> D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\short\owner\subs.ass
+     0.00    3.13  under card y=1173      Hey y'all, Uslu dur! / is a total overhaul
+     3.13    5.25  under card y=1173      for Arma: Cold War Assault.
+     5.25    8.90  under card y=1173      Today we're going / to do a little video
+     8.90   11.59  band                   on the graphics / and rendering improvements.
+    12.84   16.62  band                   The models are all unchanged, / but as you can see,
+    16.62   19.55  band                   there's a couple / of nice changes here.
+    19.60   23.56  band                   We got some volumetric fog. / You'll be able
+    23.56   29.41  band                   to see light shafts come through / the trees, very impressively.
+    30.00   35.15  band                   The water now shows reflections / of the islands and sky above it.
+    35.20   40.22  band                   Color palette is a bit more / reminiscent of Arma 3 as a whole,
+    40.22   43.50  band                   you might find, / for better or for worse,
+    43.50   47.45  band                   going for a little bit more / of a realistic vibe.
+    47.50   49.75  band                   It works with mods.
+    49.75   56.85  band                   We got, you know, cloud shadows, / those can be pretty freaky.
+    57.90   64.65  band                   Lost Brothers Reloaded mod, / we got that in.
+    64.90   67.99  band                   You know, golden hour, / ground textures,
+    67.99   73.15  band                   everything's looking a lot nicer. / The shadows, they're beautiful.
+    78.20   81.84  band                   The color palette / is not the same.
+    81.84   85.49  band                   I will admit, / it's a bit less red.
+    85.88   89.33  band                   Not for everyone, / but this is for Uslu dur!
+    90.32   94.39  band                   A lot of improvements / have been made to nighttime.
+    96.20   99.91  band                   The buildings, / they look beautiful at night.
+    99.91  103.03  band                   The street lights, / they look amazing.
+   104.14  107.13  band                   Nighttime as a whole / is just a lot darker.
+   107.13  110.05  band                   More impressive, / more realistic lighting.
+   110.10  115.40  band                   I think that this is going / to really impress y'all,
+   115.40  122.05  band                   and I hope that you're excited / to see more of the Uslu dur! mod.
+   122.10  129.38  glide 918->1173        Next time we'll be discussing / a little bit about some gameplay
+   129.38  131.85  under card y=1173      and enemy AI systems.
+sarah: 31 cues, widest row 682 px 'checkpoint gather around a fire.' -> D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\short\sarah\subs.ass
+     0.35    5.00  under card y=1173      Uslu dur! is a total overhaul / of Arma: Cold War Assault.
+     5.00    7.96  under card y=1173      This first video / is about the light.
+     9.95   12.20  band                   Malden, under occupation.
+    12.20   16.44  band                   The models are the originals. / The light is new.
+    16.49   19.62  band                   A resistance squad moves / out at first light.
+    19.62   22.82  band                   The sun is still burning / off the valley mist.
+    24.45   29.09  band                   In the pine woods, morning sun / falls through the haze in shafts.
+    29.09   31.02  band                   The guerrillas keep to cover.
+    32.95   37.08  band                   On the bay, an occupier / patrol boat crosses calm water
+    37.08   39.76  band                   that mirrors the hills / and the sky.
+    41.45   46.12  band                   A low winter sun lights the / occupier outpost from the side.
+    46.12   48.50  band                   The shade stays cool and deep.
+    50.45   53.28  band                   Over Everon, / the clouds catch the sun,
+    53.28   56.78  band                   and their shadows move / slowly across the hills.
+    57.95   60.03  band                   Modded islands get it too.
+    60.03   64.20  band                   In Sinai, a camp sits / under netting in the late sun.
+    65.95   66.97  band                   Golden hour.
+    66.97   70.00  band                   Guerrillas wait / at the forest edge;
+    70.00   73.56  band                   every tree throws / a long shadow downhill.
+    74.45   79.02  band                   At sunset, an occupier convoy / drives into the low sun.
+    82.25   86.58  band                   At dusk, the sentries at the / checkpoint gather around a fire.
+    89.85   94.13  band                   At night, street lamps and the / fire light the occupied town.
+    94.13   96.34  band                   A patrol comes down the street.
+    98.15  101.12  band                   Then the rain. / Puddles catch the lamps,
+   101.12  104.24  band                   and the resistance / slips past the patrol.
+   106.45  109.39  band                   Out in the country, / the nights are dark.
+   109.39  112.62  band                   A supply run drives / by its headlights alone.
+   115.15  117.25  band                   When a firefight breaks out,
+   117.25  121.08  band                   every flare, fire / and shell burst lights the field.
+   124.15  127.56  under card y=1173      Uslu dur! / Part two covers the gameplay:
+   127.56  129.84  under card y=1173      Guerrilla Mode and the AI.
+lily: 31 cues, widest row 682 px 'checkpoint gather around a fire.' -> D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\short\lily\subs.ass
+     0.35    5.00  under card y=1173      Uslu dur! is a total overhaul / of Arma: Cold War Assault.
+     5.00    7.96  under card y=1173      This first video / is about the light.
+     9.95   12.20  band                   Malden, under occupation.
+    12.20   16.44  band                   The models are the originals. / The light is new.
+    16.49   19.66  band                   A resistance squad moves / out at first light.
+    19.66   22.90  band                   The sun is still burning / off the valley mist.
+    24.45   29.26  band                   In the pine woods, morning sun / falls through the haze in shafts.
+    29.26   31.26  band                   The guerrillas keep to cover.
+    32.95   37.03  band                   On the bay, an occupier / patrol boat crosses calm water
+    37.03   39.68  band                   that mirrors the hills / and the sky.
+    41.45   46.23  band                   A low winter sun lights the / occupier outpost from the side.
+    46.23   48.66  band                   The shade stays cool and deep.
+    50.45   53.42  band                   Over Everon, / the clouds catch the sun,
+    53.42   57.10  band                   and their shadows move / slowly across the hills.
+    57.95   60.09  band                   Modded islands get it too.
+    60.09   64.36  band                   In Sinai, a camp sits / under netting in the late sun.
+    65.95   66.99  band                   Golden hour.
+    66.99   70.09  band                   Guerrillas wait / at the forest edge;
+    70.09   73.72  band                   every tree throws / a long shadow downhill.
+    74.45   79.18  band                   At sunset, an occupier convoy / drives into the low sun.
+    82.25   86.50  band                   At dusk, the sentries at the / checkpoint gather around a fire.
+    89.85   94.18  band                   At night, street lamps and the / fire light the occupied town.
+    94.18   96.42  band                   A patrol comes down the street.
+    98.15  101.16  band                   Then the rain. / Puddles catch the lamps,
+   101.16  104.32  band                   and the resistance / slips past the patrol.
+   106.45  109.50  band                   Out in the country, / the nights are dark.
+   109.50  112.86  band                   A supply run drives / by its headlights alone.
+   115.15  117.42  band                   When a firefight breaks out,
+   117.42  121.56  band                   every flare, fire / and shell burst lights the field.
+   124.15  127.66  under card y=1173      Uslu dur! / Part two covers the gameplay:
+   127.66  130.00  under card y=1173      Guerrilla Mode and the AI.

@@ -1,0 +1,8 @@
+moving-base: 105 frames (clip 15..120), camera |shift| mean 0.77 px/frame (x -0.77, y -0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.249  0.537  0.251  0.512 |  +4.0 -24.0  +0.03  -0.24 | +22.7 -24.0  +0.04 | +0.03   0.008
+  valley   0.262  1.101  0.180  0.483 | +18.7 -22.8  +0.04  -0.24 | -23.1 +24.0  +0.05 | +0.04   0.009
+  farhill  0.170  0.547  0.226  0.427 | +23.3 +22.0  +0.02  -0.28 | -21.2 -23.2  +0.02 | +0.02   0.004
+  haze     0.115  0.256  0.073  0.336 |  +3.8 +13.9  +0.03  -0.26 | +15.1 -13.6  +0.05 | +0.03   0.004
+  slope    0.123  0.192  0.373  0.621 |  +8.9  -5.4  +0.02  -0.29 |  +9.8 -12.7  +0.01 | +0.02   0.002
+  wrote amp_moving-base.png, xt_moving-base.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

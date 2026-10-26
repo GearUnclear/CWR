@@ -1,0 +1,137 @@
+; ============================================================================
+;  hud.sqs  -  intro briefing + change-driven alert/QRF readout + map trail
+; ----------------------------------------------------------------------------
+;  Polls the native alert state of every zone (gmZoneAlert), the garrison's
+;  perception of you (max knowsAbout over gmGarrisonGroups) and qrf.sqs's
+;  own globals (GM_QRF_ACTIVE / _ZONE / _TIMER / _GROUP / _VEH / _OPOS /
+;  _MID / _APOS / _TPOS) once a second. Repaints the title line on CHANGE
+;  (plus a 5 s refresh while anything is non-GREEN or a convoy is out),
+;  hints the QRF lifecycle edges (launched -> arrived / inserted -> stood
+;  down) and keeps map markers on the staging point, the MOVE leg, the SAD
+;  target and the moving convoy so the whole chain is readable on the map.
+;  READ-ONLY towards qrf.sqs: nothing here writes a GM_QRF_* global.
+; ============================================================================
+
+~3
+titleText ["HOUDAN SLOPE, MALDEN\nAn occupier outpost sits 200 m below you.", "PLAIN DOWN"]
+~7
+hint "QRF TEST\n\nThe OUTPOST (garrison 6) is 200 m ESE down the dirt track; the DEPOT (garrison 4) is 330 m further on. An RPG lies 8 m east of you; a jeep is parked behind you.\n\nTHE CHAIN (native FSM + the campaign's qrf.sqs):\n- each zone watches what its garrison PERCEIVES of you (knowsAbout)\n- 0.5 = YELLOW: garrison AWARE, walks to your last-known position\n- 1.5, or 20 s of YELLOW = RED: garrison COMBAT, Heat +15\n- RED fields ONE QRF: officer + War-Level squad + escort vehicle, staged ~600 m out on a road, MOVE then SEARCH-AND-DESTROY on your last-known spot\n- 120 s without arriving = insertion fallback (teleport to the wire)\n- zone drops below RED = QRF deleted\n\nUse the ACTION MENU: status report, forced reveal, War Level, memory wipe, recruits, teleports, god mode."
+
+QRF_hLast = ""
+QRF_hQrf = false
+QRF_hArr = false
+QRF_hAlive = 0
+QRF_hTotal = 0
+QRF_hPrevD = 99999
+QRF_hTick = 0
+
+#loop
+~1
+QRF_hTick = QRF_hTick + 1
+
+; ---- per-zone alert line ----------------------------------------------------
+QRF_hLine = ""
+QRF_hBusy = false
+QRF_hZ = 0
+#zwalk
+? QRF_hZ >= gmZoneCount : goto "zdone"
+QRF_hA = gmZoneAlert QRF_hZ
+QRF_hS = "GREEN"
+? QRF_hA == 1 : QRF_hS = "YELLOW"
+? QRF_hA == 2 : QRF_hS = "RED"
+? QRF_hA > 0 : QRF_hBusy = true
+QRF_hK = 0
+{if ((_x knowsAbout aP) > QRF_hK) then {QRF_hK = _x knowsAbout aP}} forEach (gmGarrisonGroups QRF_hZ)
+QRF_hLine = QRF_hLine + format ["%1: %2 (knows %3, garrison %4)   ", (gmZone QRF_hZ) select GM_Z_NAME, QRF_hS, QRF_hK, gmGarrisonLive QRF_hZ]
+QRF_hZ = QRF_hZ + 1
+goto "zwalk"
+#zdone
+
+; ---- QRF lifecycle edges -------------------------------------------------------
+QRF_hQ = false
+? not (isNil "GM_QRF_ACTIVE") : QRF_hQ = GM_QRF_ACTIVE
+? QRF_hQ and (not QRF_hQrf) : goto "launched"
+? (not QRF_hQ) and QRF_hQrf : goto "stooddown"
+#resume
+? not QRF_hQ : goto "paint"
+
+; ---- convoy telemetry while a QRF is out ---------------------------------------
+QRF_hN = 0
+{if (alive _x) then {QRF_hN = QRF_hN + 1}} forEach (units GM_QRF_GROUP)
+QRF_hAlive = QRF_hN
+QRF_hD = 99999
+? QRF_hN > 0 : QRF_hD = (getPos (leader GM_QRF_GROUP)) distance GM_QRF_TPOS
+? QRF_hN > 0 : "qrfLeader" setMarkerPos (getPos (leader GM_QRF_GROUP))
+? (not (isNull GM_QRF_VEH)) and (alive GM_QRF_VEH) : "qrfVeh" setMarkerPos (getPos GM_QRF_VEH)
+; first time inside the arrival radius: a teleport-sized jump after the
+; travel budget expired is the insertion fallback, anything else arrived
+? (not QRF_hArr) and (QRF_hD <= GM_QRF_ARRIVE) and (GM_QRF_TIMER >= GM_QRF_MAXTRAVEL) and (QRF_hPrevD > 160) : goto "inserted"
+? (not QRF_hArr) and (QRF_hD <= GM_QRF_ARRIVE) : goto "arrived"
+#afterarr
+QRF_hPrevD = QRF_hD
+QRF_hLine = QRF_hLine + format ["\nQRF -> %1: %2/%3 up, %4 m out, %5 s on the road (fallback at %6 s)", (gmZone GM_QRF_ZONE) select GM_Z_NAME, QRF_hAlive, QRF_hTotal, QRF_hD, GM_QRF_TIMER, GM_QRF_MAXTRAVEL]
+
+; ---- paint: on change, or every 5 s while anything is live -------------------
+#paint
+? (QRF_hLine == QRF_hLast) and (not ((QRF_hBusy or QRF_hQ) and ((QRF_hTick mod 5) == 0))) : goto "loop"
+QRF_hLast = QRF_hLine
+titleText [QRF_hLine, "PLAIN DOWN"]
+goto "loop"
+
+; ---- edge: qrf.sqs fielded a convoy ---------------------------------------------
+#launched
+QRF_hQrf = true
+QRF_hArr = false
+QRF_hPrevD = 99999
+QRF_hTotal = 0
+QRF_hComp = ""
+{QRF_hTotal = QRF_hTotal + 1; QRF_hComp = QRF_hComp + (typeOf _x) + " "} forEach (units GM_QRF_GROUP)
+QRF_hAlive = QRF_hTotal
+QRF_hVehT = "none (the faction fields no hull at this War Level)"
+? not (isNull GM_QRF_VEH) : QRF_hVehT = typeOf GM_QRF_VEH
+hint format ["QRF LAUNCHED on %1 (War Level %2)\n\nSquad (%3): %4\nEscort: %5\nStaged %6 m from the zone, road-snapped.\nMOVE leg ends %7 m out, then SEARCH-AND-DESTROY on your last-known position.\n\nMap: STAGE / MOVE / TARGET markers + the moving QRF and escort dots.", (gmZone GM_QRF_ZONE) select GM_Z_NAME, gmWarLevel, QRF_hTotal, QRF_hComp, QRF_hVehT, GM_QRF_OPOS distance GM_QRF_TPOS, GM_QRF_MID distance GM_QRF_TPOS]
+QRF_hM = createMarker ["qrfStage", GM_QRF_OPOS]
+"qrfStage" setMarkerType "Start"
+"qrfStage" setMarkerColor "ColorRed"
+"qrfStage" setMarkerText "QRF stage"
+QRF_hM = createMarker ["qrfMid", GM_QRF_MID]
+"qrfMid" setMarkerType "Dot"
+"qrfMid" setMarkerColor "ColorRed"
+"qrfMid" setMarkerText "QRF move leg"
+QRF_hM = createMarker ["qrfTarget", GM_QRF_APOS]
+"qrfTarget" setMarkerType "Destroy"
+"qrfTarget" setMarkerColor "ColorRed"
+"qrfTarget" setMarkerText "QRF S+D (your last-known)"
+QRF_hM = createMarker ["qrfLeader", GM_QRF_OPOS]
+"qrfLeader" setMarkerType "Warning"
+"qrfLeader" setMarkerColor "ColorRed"
+"qrfLeader" setMarkerText "QRF"
+? isNull GM_QRF_VEH : goto "resume"
+QRF_hM = createMarker ["qrfVeh", GM_QRF_OPOS]
+"qrfVeh" setMarkerType "Dot"
+"qrfVeh" setMarkerColor "ColorRed"
+"qrfVeh" setMarkerText "QRF escort"
+goto "resume"
+
+; ---- edge: convoy reached the zone on its own --------------------------------------
+#arrived
+QRF_hArr = true
+hint format ["QRF ARRIVED at %1 after %2 s on the road - %3 of %4 still up. The SEARCH-AND-DESTROY waypoint owns the fight now.", (gmZone GM_QRF_ZONE) select GM_Z_NAME, GM_QRF_TIMER, QRF_hAlive, QRF_hTotal]
+goto "afterarr"
+
+; ---- edge: qrf.sqs gave up on pathing and teleported the foot element ------------
+#inserted
+QRF_hArr = true
+hint format ["INSERTION FALLBACK: the convoy had not arrived after %1 s, so qrf.sqs teleported the foot element to within 60 m of %2 and re-issued the move (the escort is left where it stalled). %3 of %4 up.", GM_QRF_MAXTRAVEL, (gmZone GM_QRF_ZONE) select GM_Z_NAME, QRF_hAlive, QRF_hTotal]
+goto "afterarr"
+
+; ---- edge: the target zone dropped below RED ---------------------------------------
+#stooddown
+QRF_hQrf = false
+hint format ["QRF STOOD DOWN - the target zone dropped below RED, so qrf.sqs deleted the convoy (%1 of %2 were still up). No survivors bank, no loot stays: the next RED spawns a fresh one.", QRF_hAlive, QRF_hTotal]
+deleteMarker "qrfStage"
+deleteMarker "qrfMid"
+deleteMarker "qrfTarget"
+deleteMarker "qrfLeader"
+deleteMarker "qrfVeh"
+goto "resume"

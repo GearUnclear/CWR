@@ -1,0 +1,5 @@
+    // The night's three hold off by day.
+    CHECK(s.find(" nightLights=1:off:day ") != std::string::npos);
+    CHECK(s.find(" moonShadows=1:off:day ") != std::string::npos);
+    CHECK(s.find(" stars=1:off:day ") != std::string::npos);
+    CHECK(s.find("landed=22/27") != std::string::npos);

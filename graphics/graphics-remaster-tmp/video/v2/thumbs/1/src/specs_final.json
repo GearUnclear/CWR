@@ -1,0 +1,85 @@
+{
+ "1_dawn_ridge": {
+  "clip": "valley_mist",
+  "n": 200,
+  "xm": 470,
+  "ang": 12,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "cap_top": 128,
+    "bottom": true,
+    "size": 40
+   },
+   {
+    "kind": "brand",
+    "after_line": 34,
+    "cap_top": 44,
+    "size": 106,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/1/split1_dawn_ridge"
+ },
+ "2_night_road": {
+  "clip": "supply_run",
+  "n": 400,
+  "crop": [
+   284,
+   200,
+   1360
+  ],
+  "xm": 640.0,
+  "ang": 0,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "cap_top": 128,
+    "bottom": true,
+    "size": 40
+   },
+   {
+    "kind": "brand",
+    "after_line": 34,
+    "cap_top": 44,
+    "size": 112,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/1/split2_night_road"
+ },
+ "3_bay": {
+  "clip": "bay_reflections",
+  "n": 300,
+  "xm": 560,
+  "ang": -6,
+  "texts": [
+   {
+    "kind": "vanilla",
+    "cap_top": 128,
+    "bottom": true,
+    "size": 40
+   },
+   {
+    "kind": "brand",
+    "after_line": 34,
+    "cap_top": 44,
+    "size": 120,
+    "rule": [
+     96,
+     6,
+     16
+    ]
+   }
+  ],
+  "out": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/v2/thumbs/1/split3_bay"
+ }
+}

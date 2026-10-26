@@ -1,0 +1,10 @@
+{
+  "id": "b16",
+  "bank": "kBio1Friendly",
+  "variant": 3,
+  "text": "{Name}, a bookkeeper from {Place}, kept records for a resistance cell but left after its leader ordered the bookkeeper's friend beaten as an informer. The leader had no evidence.",
+  "word_count": 29,
+  "self_review": "The bookkeeper left a resistance cell after its leader ordered a friend beaten on an unsupported accusation of informing.",
+  "source_pattern": "The supplied Manning interview describes underground analysis of possible informants; it does not establish this wrongful accusation.",
+  "fictional_changes": "The bookkeeper, cell records, falsely accused friend, punishment order, and departure are fictional. The source supports only the existence of suspicion and information work."
+}

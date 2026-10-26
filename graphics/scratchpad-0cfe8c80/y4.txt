@@ -1,0 +1,3 @@
+    constexpr int kPhotoLightKnobs = 18; // test_photo_camera.cpp
+    constexpr int kVolFogKnobs = 5;
+    CHECK(children == 36 + kPhotoLightKnobs + kVolFogKnobs);

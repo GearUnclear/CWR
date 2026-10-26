@@ -1,0 +1,10 @@
+{
+  "id": "b20",
+  "bank": "kBio1Hostile",
+  "variant": 1,
+  "text": "{Name} ran a checkpoint near {Place} and owed a smuggler money after gambling losses. In exchange for more time to repay the debt, the officer let the smuggler's wagons pass without inspection.",
+  "word_count": 32,
+  "self_review": "A checkpoint officer owed a smuggler gambling debts and allowed unchecked wagons through in exchange for delayed repayment.",
+  "source_pattern": "Plausible invention; the supplied research does not document gambling debts or this arrangement.",
+  "fictional_changes": "The gambling, smuggler, debt, and checkpoint favor are entirely fictional."
+}

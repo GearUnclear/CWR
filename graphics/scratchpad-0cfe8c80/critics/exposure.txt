@@ -1,0 +1,47 @@
+## track
+exposure
+## files_verified
+true
+## artefacts_seen
+Listed D:\Arma_CWA_worktrees\lighting\tmp\research\exposure myself. Folder contents and per-folder file counts match the explorer's listing exactly (run_r1 89/81, r2 105/97, r3 134/126, r4 82/74, r5 122/114, r6_seq 25/17, override_r2..r5 one GLSL each, tests 13). Every cited path exists: all seven BEST_*, HUE_sunrise_ridge, the four NEG_*, adapt_sequence.png/.gif, the run_r1/r2 sheets, override_r2/r3/r5 GLSL, prototype.patch (7 files, includes psPostLum/psPostGrid/psPostAdapt/neutralInverse), NOTES.md, cost_summary.md and timings.md. The scratch worktree gfx-exposure exists, detached at 3c53141 with the 7 modified files the patch names. I opened BEST lowsun_fp (full and crop), sunrise_ridge, coastline_sunset, town_night, forest_edge_golden, tank_gunner_interior, HUE_sunrise_ridge, adapt_sequence, NEG_ungated_lift_coastline and NEG_hdr_frame_town_night, plus my own 2x crops of lowsun edges, the sunrise ground and the town fire.
+## prototype_actually_loaded
+Yes. Every run used --game-dir dist/gfx-exposure-rwdi. The r2-r6 game_stdout.log files each show "shader override loaded" for the matching override_rN\psPostComposite.glsl, and the logged byte counts (8566/9189/9669/10184) match the files on disk. No GLSL compile or link errors appear. In udcap.log the triSetLighting knob sets are applied per shot, and the composite GPU section rises from 0.03 ms (Remastered) to about 1 ms (F-variants). Pixel diffs (r5, F1A vs Remastered, mean abs 0-255): lowsun 5.2, sunrise 19.4, coast 2.1, forest 7.5, town_night 21.8, tank 4.2. The noise floor (Remastered r1/r2/r4 vs r5) is 0.00-0.17 for the static views and 6.4 for town_night because of the smoke, so every change is real. The F1A panel in BEST_lowsun_fp.png matches run_r5/lowsun_fp__F1A.png pixel for pixel (error 0.0), so the BEST sheets come from real captures.
+## missing_or_false_claims
+[
+ "sunrise_ridge F1A is described as 'sky unchanged', but that is false for the final variant. The top-30% sky mean goes from 143.0 to 160.5 because the +0.5 EV day adaptation is global. F1 and F1K do keep the sky at 142.9. The r3 note itself admits that day adaptation brightens the sky.",
+ "forest_edge_golden 'almost no change' undersells it: mean abs diff is 7.5 levels, 55% of pixels change by more than 8 levels (noise floor 0.16), and the upper-right tree crowns brighten from 66.5 to 79.0 mean (about +0.27 EV). The std is unchanged, so the crowns are not flattened, but this is a real lift.",
+ "The GPU 'best estimate +0.25 to +0.35 ms' rests on the tank interior, where the whole post chain is unusually cheap (0.15 ms baseline). On every exterior view in r5 the composite delta is a steady 0.9 to 1.1 ms (lowsun 0.96, sunrise 1.09, forest 0.98, town 0.95, coast 0.87). The consistency points to about 1 ms as the real cost rather than contention noise. It still fits the budget.",
+ "The adaptation sequence ground means (43.6/48.3/56.4 vs 30.6) do not reproduce exactly with Rec.709 luma (47.8/52.9/61.7 vs 33.5). The ratios match, so this is a metric difference, not fabrication. The lower half of frames f031 to f311 is identical (61.7) because the +1 EV cap is hit by about 1.2 s; the later adapted numbers only move the debug bar.",
+ "'Classic is untouched / Classic stays bit-identical' is cited as a virtue, but the owner no longer requires it, so it earns no credit."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+small
+## rtx_vision_score_0_to_10
+1.5
+## taste_violations
+[
+ "Wash on sunrise_ridge F1A: the backlit foreground is lifted from about 36 to 58 mean into a flat grey-green, ground std barely rises, and the frame loses its backlit mood.",
+ "Evening warmth lost on sunrise_ridge: the warm orange sun streak across the ground in Remastered is mostly gone in F1A, the ground reads cooler and greyer, and the sky turns paler pink (+17 levels).",
+ "The settled adapt_sequence frames (+1.2 s onward) are a low-contrast grey-green ground, which is the wash the owner rejects.",
+ "Night is only darker: town_night F1A drops from 123.4 to 101.9 mean, about Classic's level. This is a global -0.75 EV nudge with no new light, and local exposure is off at night.",
+ "Coastline near-sea strip is lifted greyer (admitted near-gate cost). That is mild wash on water.",
+ "The hue-keeping shoulder makes the sun a saturated yellow-orange ball. It is a tone-curve change rather than grading, but it risks reading as a cartoon or graded sun."
+]
+## cost_ok
+true
+## score_0_to_10
+3.5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\exposure\BEST_lowsun_fp_crop.png
+## one_line
+Honest, real tone-mapping work: local exposure makes the crushed Jeep and tent flanks readable at low sun, but it washes the sunrise, only darkens the night, and moves almost nothing toward an RTX-on look.
+## critique
+Provenance is solid. Files, logs, override loads and knob settings all check out, BEST panels are pixel-identical to the r5 shots, and the negative results (ungated sea wash, HDR smoke blowout, AgX grey sun, uncalibrated key) are real and correctly labelled. The explorer did real engineering: an exact inverse of the shipped Neutral shoulder, a bilateral grid built by gathering under GL 3.3, and a working adaptation loop with a meter readout.
+
+Look: this is a tone-mapping track, so it cannot produce bounce light, sky occlusion, reflections, volumetrics or emissive lighting. Of the six views, one is a clear win. In lowsun_fp the Jeep flank, tent folds, M113 and soldier get back the readability Remastered crushed, with no halos at the tent or hull edges. That gain is visible side by side but modest, roughly a return to Classic's legibility while keeping Remastered's soft shadows. The coastline, tank interior and forest are near neutral, although the forest is lifted more than claimed. Sunrise_ridge is a regression on taste: a flat grey-green foreground, the warm sun streak gone, and a sky that also brightens despite the 'sky unchanged' claim. Town_night is just 0.75 EV darker plus a more orange fire core.
+
+Score reasoning: rtx_vision is 1.5 because readable shade and an orange fire core do not make a player say this is a different game. The idea most worth building is not this post pass. It is production item 1: an illumination/light-buffer MRT that separates shade from dark albedo. That would let local exposure lift only shade without the sea and sunrise wash, and other tracks could use it too. Two smaller pieces are worth taking as by-products: the zero-cost hue-keeping curve in the world shaders, for fire and sun colour, and the eye-adaptation loop with a meter, which belongs with the night track. As shipped here (F1A), it would not survive the owner's anti-wash and keep-evenings-warm rules on the sunrise view.
+
+Cost: realistically about 1 ms at 1440x960 with 4x MSAA, well within an RTX 3060 at 1080p/60. Worth building properly only as a narrow readability and infrastructure item, not as a headline visual change.

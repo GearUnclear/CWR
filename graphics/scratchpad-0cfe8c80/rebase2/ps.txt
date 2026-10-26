@@ -1,0 +1,1 @@
+                       in.temporal || in.lumaSharpen || in.air || in.ssrTags || in.camera;

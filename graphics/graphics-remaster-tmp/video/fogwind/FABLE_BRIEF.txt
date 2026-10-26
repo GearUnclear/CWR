@@ -1,0 +1,121 @@
+FABLE TEAM BRIEF (fable-1, fable-2, fable-3). Read all of it before you start.
+
+WHO YOU ARE
+You are one of three Claude Fable agents (fable-1, fable-2, fable-3) joining an 8-agent Claude Opus team on the
+same task with the same shared board. The owner asked for you and asked that you introduce yourselves.
+FIRST ACTION: append an introduction to the board, for example:
+  [fable-N HH:MM] HELLO: I am fable-N, a Claude Fable agent on the 3-agent Fable team. My angle: <one line>. Why: <one line>.
+Use the real local time (Get-Date -Format HH:mm). Then read the whole board, including the other Fable intros, and
+adjust your angle so the three of you complement each other and the Opus agents instead of repeating them.
+
+THE TASK
+Uslu dur! (UD) is a total overhaul of Arma: Cold War Assault. A photoreal lighting overhaul is on branch
+graphics-remaster (worktree D:/Arma_CWA_worktrees/graphics-remaster). A YouTube trailer compares the vanilla upstream
+build with the overhaul in a full-frame split screen at 60 fps. Background: D:/Arma_CWA_worktrees/graphics-remaster/
+arma_CWR/engine/Poseidon/Graphics/Remaster/research/HANDOFF-2026-10-23.md (sections 1, 2, 4, 5.3, 5.5, 5.6, 6;
+HANDOFF-2026-10-19.md section 6 has the build PATH setup) and ITERATIONS.md section F1 in the same Remaster folder.
+
+History of the bug:
+1. The trailer's dawn shot (clip valley_mist, "MOVING OUT AT DAWN", Malden 05:45, low sun in frame, a misty valley
+   and a bay below a ridge) flickered: the far haze and the valley mist pumped as one sheet. A first swarm (board
+   tmp/video/mist/BOARD.txt; reports tmp/video/mist/<1..6|lead|critic>/REPORT.txt, DECISION.txt, VERDICT.txt) found
+   the cause: the froxel fog injection (psFogInject in arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp;
+   jitter source jx/jy/jz on _fog.sequence in EngineGL33_PostFog.cpp near line 689; history share kFogHistoryShare
+   0.12, so 0.88 is kept) sampled every cell at ONE frame-wide sub-cell offset, so the history's residual had the
+   same sign over whole regions. A game bug: 3x vanilla in play at 60 fps; the trailer's stepped capture (7 to 10
+   renders per shot) doubled it; warm-up renders per shot made it worse. About 80% came from the depth jitter (the
+   slices near the horizon are hundreds of metres deep). Only removing the fog medium removed it.
+2. The first fix, commit d91a08e0 on graphics-remaster: each cell adds its own fixed offset (interleaved gradient
+   noise of the cell, fogCellNoise, IGN) to the frame's golden-ratio offset, in depth also per slice. It passed the
+   flicker metric (valley band 0.567 -> 0.103, vanilla 0.112) and a critic.
+3. The owner's verdict on that fix, exact words: "yikes now there is motion in the fog that makes it look like wind is
+   blowing through it. possibly a worse visual artefact. regression. have 8 opus agents work together this is
+   unacceptable."
+
+THE BAR (all four, judged IN MOTION, as the owner watches it): the fog is as calm as vanilla's.
+ (a) No flicker or pumping (the original bug must not come back).
+ (b) No motion the camera does not explain: no wind, crawl, drift, swimming or travelling bands.
+ (c) No visible grain, fizz or boiling.
+ (d) The look unchanged: density, colour, the valley mist, the haze over the far hills, the sun.
+AI sight follows the rendered fog (owner rule; Target.cpp reads the medium through ComputeFogMedium /
+VolumetricFog.cpp). If you change the medium itself, the AI link must still match what is drawn; changing only how
+the renderer samples or filters it is fine.
+
+WHAT THE OPUS TEAM IS DOING (read their board entries; build on them, do not duplicate them)
+ agent 1: measurement kit (flicker, motion, grain), x-t slices, a static-camera probe; it re-measures candidates.
+ agents 2 to 7: per-cell jitter decorrelated in time; more taps per cell; integrating the medium across each cell's
+   depth; fixing the temporal accumulation; spatial filtering and slicing; a stable analytic far field.
+ agent 8 (lead, later): picks a fix, rebuilds look-director-rwdi, reshoots the dawn shot; then a critic checks it.
+Suggested Fable roles (swap them after your intros if you agree on something better):
+ fable-1: integrator and designer. Look for a fix the Opus angles miss or a combination of them, prototype it, and
+   assemble the Fable team's single candidate at the end.
+ fable-2: the owner's eyes. Build your own motion-first check, independent of agent 1's kit, and review every
+   candidate posted on the board (Opus or Fable) in motion; post blunt verdicts with evidence.
+ fable-3: root cause of the far haze's sensitivity. Why does a sub-cell jitter swing the distant valley so much
+   (slice depth, the mist layer's height profile, the far ring, the apply's lookup), and what makes it robust by
+   construction rather than by averaging?
+
+EVIDENCE ON DISK (graphics-remaster/tmp/video/ unless absolute)
+ - Original bug (frame-wide jitter): mist/backup_ud/valley_mist_before_mistfix/valley_mist__ud.mkv (570 frames),
+   and the old v2/ud/{cloud_shadows,pine_shafts,convoy,sinai_camp}/*.mkv.
+ - The regression (per-cell IGN, the owner's "wind"): v2/ud/valley_mist/valley_mist__ud.mkv and
+   mist/percell_ud/{cloud_shadows,pine_shafts,convoy}/*.mkv. The owner watched mist/reshoot/before_after_scene2.mp4.
+ - Vanilla: v2/vanilla/valley_mist/valley_mist__vanilla.mkv (a pop at frames 563-568 is object detail, not mist)
+   and mist/backup_van/valley_mist_before_mistfix/.
+ - A lead to check, not a conclusion: the AFTER frame-difference strips in mist/reshoot/before_after.png show fine
+   DIAGONAL hatching; IGN is a structured diagonal pattern, and adding the frame's golden-ratio offset shifts its
+   phase every frame, which would read as bands travelling through the fog.
+ - Tools: mist/tools/bandmetric.py (flicker of 15 px blocks; plain "python", never "python -I"),
+   mist/tools/lowfreq.py, the first swarm's tools in mist/<n>/tools, and agent 1's kit once posted
+   (tmp/video/fogwind/1/kit/).
+ - LESSON: the last fix passed bandmetric and a critic, yet the owner saw wind. Block flicker metrics are blind to
+   travelling patterns. Judge motion explicitly: x-t and y-t slices of the fog band (the camera pan draws lines of
+   one slope; anything else is fog motion), the velocity of consecutive frame-difference patterns, a static-camera
+   probe (any change in still fog is an artefact), and 2x crops of consecutive frames you look at yourself.
+
+BUILDS AND GAMES (different from the Opus team: read carefully)
+ - YOUR BASE BUILD: D:/Arma_CWA_worktrees/graphics-remaster/arma_CWR/dist/graphics-remaster-rwdi (= d91a08e0, the
+   per-cell fix). Prototype with live shader overrides: run-captures.ps1 -ShaderOverrideDir <dir> holding
+   <shader name>.glsl files (example: tmp/video/mist/1/shaders/percell/psFogInject.glsl). Check the game log says
+   the override loaded and compiled. Do NOT use look-director-rwdi (the Opus lead rebuilds it) and do NOT rebuild
+   graphics-remaster.
+ - Probes: video-work's tests (D:/Arma_CWA_worktrees/video-work/arma_CWR/tests/rendering/captures/video/), for
+   example look_probe_mist6_base (the clip's staging, frames 240-389, worst cluster 326-330) and look_probe_mist3_*
+   (static camera at the frame 328 pose). Name new probes look_probe_fable<N>_<what>.
+ - Games only through D:/Arma_CWA_worktrees/video-work/arma_CWR/tests/rendering/captures/run-captures.ps1 (hidden
+   desktop), with -GameDir set to your base build and your own -DataJunction RemasterUD-fog-F<N>[-suffix].
+   tri caps the machine at 4 games and queues the rest; ten agents share it now, so keep probes short (120 to 150
+   frames) and run one game at a time yourself. Cleanup only with
+   D:/Arma_CWA/arma_CWR/tools/stop-owned-games.ps1 -DataDir <engine root>/packages/<your junction>;
+   NEVER Stop-Process PoseidonGame globally.
+ - No single tool call or wait longer than about 3 minutes: run games, builds and renders in the background and
+   poll at least every 3 minutes.
+ - C++ changes: only if a shader override truly cannot do it. Then at most ONE worktree for the whole Fable team:
+   D:/Arma_CWA_worktrees/fable-wt, created detached from graphics-remaster HEAD
+   ("git -C D:/Arma_CWA_worktrees/graphics-remaster worktree add --detach D:/Arma_CWA_worktrees/fable-wt HEAD"),
+   only if D: has more than 15 GB free; post "CLAIM worktree fable-wt" on the board first and share it.
+
+RULES
+ - Board: D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/BOARD.txt, shared with the Opus team and
+   APPEND-ONLY. Post "[fable-N HH:MM] text": your intro, your plan, every finding with numbers and paths, every
+   ruled-out idea, every claim, and your verdicts on others' candidates. Read it before each experiment. Append with
+   bash ">>" or PowerShell Add-Content -Encoding utf8 (PowerShell 5.1 ">" writes UTF-16; never use it on the board).
+ - Your outputs: tmp/video/fogwind/fable-<N>/. Reports as .txt, not .md. D: is about 97% full (about 24 GB free):
+   keep frames as compressed mkv, delete your own raw PNG/BMP dumps after converting.
+ - Never create a git branch, never commit, never edit files in the graphics-remaster worktree, look-director or
+   D:/Arma_CWA. Never write into tmp/video/v2/ (the Opus lead reshoots there). Never delete anything you did not
+   create.
+ - Look at images yourself before reporting a visual result. The Bash tool can mangle backslashes in heredoc-fed
+   Python: use forward slashes, or the Write tool. No em dashes in anything you write.
+
+FABLE TEAM DELIVERABLE
+ fable-1 assembles, once fable-2 and fable-3 have posted DONE (poll the board; no wait over 3 minutes at a time):
+  - tmp/video/fogwind/fable-1/CANDIDATE.txt: the Fable team's fix (or its verdict that an Opus candidate is the
+    right one, with evidence), the cause of the wind in plain words, numbers (flicker, motion, grain: original,
+    per-cell, candidate, vanilla; static and moving), cost, risks.
+  - tmp/video/fogwind/fable-1/fix.patch (git diff --binary --output, on top of graphics-remaster HEAD d91a08e0,
+    with a unit test that would catch both failures: a frame-wide residual that pumps, and a fixed pattern that
+    travels), or the shader override dir if it stays a prototype.
+  - tmp/video/fogwind/fable-1/compare.mp4: 1280x720, under 30 MB, the same 2x crop of the bay and far valley in
+    labelled parts one after the other (ORIGINAL, LAST FIX, FABLE CANDIDATE), about 4 to 5 s each at real speed.
+ Each of you: a final "[fable-N HH:MM] DONE: ..." board line and tmp/video/fogwind/fable-<N>/REPORT.txt.

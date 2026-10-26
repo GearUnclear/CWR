@@ -1,0 +1,412 @@
+[
+  {
+    "view": "sunrise_ridge",
+    "mode": "off",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 17.64,
+    "gpu_frame_min": 17.57,
+    "gpu_world_median": 16.44,
+    "gpu_world_min": 16.44,
+    "gpu_shadow_median": 0.09,
+    "gpu_shadow_min": 0.08,
+    "gpu_post_median": 1.0,
+    "gpu_post_min": 0.97,
+    "gpu_resolve_median": 0.48,
+    "gpu_resolve_min": 0.45,
+    "gpu_lindepth_median": null,
+    "gpu_lindepth_min": null,
+    "gpu_ao_median": 0.13,
+    "gpu_ao_min": 0.13,
+    "gpu_bloom_median": 0.06,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": 0.27,
+    "gpu_shafts_min": 0.27,
+    "gpu_composite_median": 0.07,
+    "gpu_composite_min": 0.06,
+    "cpu_frame_median": 26.69,
+    "cpu_frame_min": 26.62,
+    "draws_median": 12910,
+    "objects_median": 8897,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "sunrise_ridge",
+    "mode": "on",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 17.6,
+    "gpu_frame_min": 17.6,
+    "gpu_world_median": 16.41,
+    "gpu_world_min": 16.35,
+    "gpu_shadow_median": 0.08,
+    "gpu_shadow_min": 0.08,
+    "gpu_post_median": 1.04,
+    "gpu_post_min": 1.02,
+    "gpu_resolve_median": 0.48,
+    "gpu_resolve_min": 0.44,
+    "gpu_lindepth_median": 0.01,
+    "gpu_lindepth_min": 0.01,
+    "gpu_ao_median": 0.13,
+    "gpu_ao_min": 0.13,
+    "gpu_bloom_median": 0.06,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": 0.27,
+    "gpu_shafts_min": 0.27,
+    "gpu_composite_median": 0.08,
+    "gpu_composite_min": 0.06,
+    "cpu_frame_median": 26.59,
+    "cpu_frame_min": 26.33,
+    "draws_median": 12910,
+    "objects_median": 8897,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2790.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "forest_edge_golden",
+    "mode": "off",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.67,
+    "gpu_frame_min": 5.4,
+    "gpu_world_median": 4.92,
+    "gpu_world_min": 4.67,
+    "gpu_shadow_median": 0.26,
+    "gpu_shadow_min": 0.26,
+    "gpu_post_median": 0.54,
+    "gpu_post_min": 0.54,
+    "gpu_resolve_median": 0.24,
+    "gpu_resolve_min": 0.24,
+    "gpu_lindepth_median": null,
+    "gpu_lindepth_min": null,
+    "gpu_ao_median": 0.17,
+    "gpu_ao_min": 0.17,
+    "gpu_bloom_median": 0.08,
+    "gpu_bloom_min": 0.08,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.05,
+    "gpu_composite_min": 0.05,
+    "cpu_frame_median": 8.07,
+    "cpu_frame_min": 8.02,
+    "draws_median": 2142,
+    "objects_median": 1459,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2100.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "forest_edge_golden",
+    "mode": "on",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 5.97,
+    "gpu_frame_min": 5.93,
+    "gpu_world_median": 5.13,
+    "gpu_world_min": 5.1,
+    "gpu_shadow_median": 0.28,
+    "gpu_shadow_min": 0.28,
+    "gpu_post_median": 0.63,
+    "gpu_post_min": 0.62,
+    "gpu_resolve_median": 0.25,
+    "gpu_resolve_min": 0.24,
+    "gpu_lindepth_median": 0.01,
+    "gpu_lindepth_min": 0.01,
+    "gpu_ao_median": 0.18,
+    "gpu_ao_min": 0.18,
+    "gpu_bloom_median": 0.09,
+    "gpu_bloom_min": 0.09,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.05,
+    "gpu_composite_min": 0.05,
+    "cpu_frame_median": 8.56,
+    "cpu_frame_min": 8.51,
+    "draws_median": 2142,
+    "objects_median": 1459,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1875.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "coastline_sunset",
+    "mode": "off",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 3.79,
+    "gpu_frame_min": 3.64,
+    "gpu_world_median": 1.54,
+    "gpu_world_min": 1.46,
+    "gpu_shadow_median": 0.0,
+    "gpu_shadow_min": 0.0,
+    "gpu_post_median": 1.92,
+    "gpu_post_min": 1.8,
+    "gpu_resolve_median": 0.33,
+    "gpu_resolve_min": 0.32,
+    "gpu_lindepth_median": null,
+    "gpu_lindepth_min": null,
+    "gpu_ao_median": 0.26,
+    "gpu_ao_min": 0.26,
+    "gpu_bloom_median": 0.17,
+    "gpu_bloom_min": 0.17,
+    "gpu_shafts_median": 0.84,
+    "gpu_shafts_min": 0.84,
+    "gpu_composite_median": 0.31,
+    "gpu_composite_min": 0.2,
+    "cpu_frame_median": 3.74,
+    "cpu_frame_min": 3.74,
+    "draws_median": 177,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 1050.0,
+    "pstates": [
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "coastline_sunset",
+    "mode": "on",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 4.53,
+    "gpu_frame_min": 4.36,
+    "gpu_world_median": 1.95,
+    "gpu_world_min": 1.76,
+    "gpu_shadow_median": 0.0,
+    "gpu_shadow_min": 0.0,
+    "gpu_post_median": 2.3,
+    "gpu_post_min": 2.26,
+    "gpu_resolve_median": 0.35,
+    "gpu_resolve_min": 0.34,
+    "gpu_lindepth_median": 0.03,
+    "gpu_lindepth_min": 0.03,
+    "gpu_ao_median": 0.32,
+    "gpu_ao_min": 0.32,
+    "gpu_bloom_median": 0.22,
+    "gpu_bloom_min": 0.2,
+    "gpu_shafts_median": 1.03,
+    "gpu_shafts_min": 1.03,
+    "gpu_composite_median": 0.19,
+    "gpu_composite_min": 0.19,
+    "cpu_frame_median": 4.28,
+    "cpu_frame_min": 4.24,
+    "draws_median": 177,
+    "objects_median": 0,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 645.0,
+    "pstates": [
+      "P3"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "woods_pine2_evening",
+    "mode": "off",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.51,
+    "gpu_frame_min": 6.46,
+    "gpu_world_median": 5.22,
+    "gpu_world_min": 5.18,
+    "gpu_shadow_median": 0.35,
+    "gpu_shadow_min": 0.35,
+    "gpu_post_median": 1.13,
+    "gpu_post_min": 1.13,
+    "gpu_resolve_median": 0.29,
+    "gpu_resolve_min": 0.27,
+    "gpu_lindepth_median": null,
+    "gpu_lindepth_min": null,
+    "gpu_ao_median": 0.2,
+    "gpu_ao_min": 0.2,
+    "gpu_bloom_median": 0.07,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": 0.5,
+    "gpu_shafts_min": 0.49,
+    "gpu_composite_median": 0.09,
+    "gpu_composite_min": 0.07,
+    "cpu_frame_median": 9.04,
+    "cpu_frame_min": 9.04,
+    "draws_median": 2842,
+    "objects_median": 1811,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2775.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "woods_pine2_evening",
+    "mode": "on",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 6.56,
+    "gpu_frame_min": 6.52,
+    "gpu_world_median": 5.19,
+    "gpu_world_min": 5.18,
+    "gpu_shadow_median": 0.35,
+    "gpu_shadow_min": 0.35,
+    "gpu_post_median": 1.18,
+    "gpu_post_min": 1.18,
+    "gpu_resolve_median": 0.3,
+    "gpu_resolve_min": 0.3,
+    "gpu_lindepth_median": 0.01,
+    "gpu_lindepth_min": 0.01,
+    "gpu_ao_median": 0.19,
+    "gpu_ao_min": 0.19,
+    "gpu_bloom_median": 0.07,
+    "gpu_bloom_min": 0.07,
+    "gpu_shafts_median": 0.5,
+    "gpu_shafts_min": 0.49,
+    "gpu_composite_median": 0.08,
+    "gpu_composite_min": 0.07,
+    "cpu_frame_median": 9.05,
+    "cpu_frame_min": 9.03,
+    "draws_median": 2842,
+    "objects_median": 1811,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2775.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "noon_fields",
+    "mode": "off",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 9.23,
+    "gpu_frame_min": 9.21,
+    "gpu_world_median": 8.63,
+    "gpu_world_min": 8.63,
+    "gpu_shadow_median": 0.07,
+    "gpu_shadow_min": 0.07,
+    "gpu_post_median": 0.46,
+    "gpu_post_min": 0.44,
+    "gpu_resolve_median": 0.24,
+    "gpu_resolve_min": 0.22,
+    "gpu_lindepth_median": null,
+    "gpu_lindepth_min": null,
+    "gpu_ao_median": 0.11,
+    "gpu_ao_min": 0.11,
+    "gpu_bloom_median": 0.06,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.04,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 14.18,
+    "cpu_frame_min": 14.15,
+    "draws_median": 6398,
+    "objects_median": 4508,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2775.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  },
+  {
+    "view": "noon_fields",
+    "mode": "on",
+    "rounds": [
+      1,
+      2,
+      3
+    ],
+    "gpu_frame_median": 9.19,
+    "gpu_frame_min": 9.18,
+    "gpu_world_median": 8.54,
+    "gpu_world_min": 8.54,
+    "gpu_shadow_median": 0.07,
+    "gpu_shadow_min": 0.07,
+    "gpu_post_median": 0.5,
+    "gpu_post_min": 0.49,
+    "gpu_resolve_median": 0.24,
+    "gpu_resolve_min": 0.23,
+    "gpu_lindepth_median": 0.01,
+    "gpu_lindepth_min": 0.01,
+    "gpu_ao_median": 0.11,
+    "gpu_ao_min": 0.11,
+    "gpu_bloom_median": 0.06,
+    "gpu_bloom_min": 0.06,
+    "gpu_shafts_median": null,
+    "gpu_shafts_min": null,
+    "gpu_composite_median": 0.04,
+    "gpu_composite_min": 0.04,
+    "cpu_frame_median": 14.11,
+    "cpu_frame_min": 14.03,
+    "draws_median": 6398,
+    "objects_median": 4508,
+    "settle": "OK:30,OK:30,OK:30",
+    "gpu_mhz_median": 2775.0,
+    "pstates": [
+      "P0"
+    ],
+    "games_seen": [
+      "1/foreign0"
+    ]
+  }
+]

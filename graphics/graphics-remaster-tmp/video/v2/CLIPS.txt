@@ -1,0 +1,116 @@
+Uslu dur! trailer, part 1: graphics. Clip list (director's cut, 2026-10-19)
+=============================================================================
+
+Every scene is a moment from the Uslu dur! world (Guerrilla Mode: a resistance
+fighting an occupying army across Malden, Everon and modded islands such as
+Sinai), staged so one lighting feature shows. Base-game units and vehicles
+only (resistance SoldierG*, occupier SoldierE*, BMP, UAZ, Ural, Fortress
+bunkers), LoBo's own set on Sinai, so the vanilla game shows the same scene.
+Men are captive and posed; vehicles move only by teleport. Head fix
+(tmp/video/heads/RECIPE.txt): every frame advances the world by exactly 1/60 s on
+both sides (setAccTime 0 between shots, one tick per shot), and every posed man
+holds his gaze 300 m straight ahead (doWatch in the staging block); fire, smoke,
+flares and shells now play at real speed. Kneeling men use switchMove "Crouch".
+
+Near-object check (2026-10-19, the owner saw a blurry birch trunk fill half the
+frame in town_patrol): every clip was scanned on both sides for anything within
+about 2 m of the camera filling a large part of the frame. Fixed: town_patrol
+(the path ran through the birch and past a house corner), rain_town (a cypress
+by that corner filled a quarter of the frame) and supply_run (the camera eases
+in and out while the car kept an even speed, so the camera caught up with the
+car and passed through it mid-clip; the car now follows the camera's pace).
+Those three were reshot on both sides with the head fix. The rest keep at
+least a few metres to anything that fills the frame.
+
+Both sides: the same spot, date and time, camera path, props, events and frame
+count; 1920x1080 at 60 frames a second (the sim clock pinned to k/60 s per
+frame); S mode. Left: the vanilla upstream game (Bohemia 3.05,
+vanilla-upstream\dist\vanilla-upstream-rwdi). Right: Uslu dur! with every
+feature on (look-director\arma_CWR\dist\look-director-rwdi, round 5 plus the
+owner's picks). Fire, smoke, rain, flares and the shell bursts may differ
+between the halves.
+
+The master is one full 16:9 frame per moment: vanilla left of a plain thin
+divider line, Uslu dur! right of it, small upper-case labels riding the line.
+Calm throughout (the owner: "cool calm and composed"). Every scene is one full
+sweep, edge to edge (the owner: "let the wipes go across the whole screen"): it
+opens fully vanilla, the line eases in from the right edge to a split in about
+2.5 s, pauses there, then eases on out past the left edge, and the scene ends
+fully Uslu dur!, so each scene is seen whole in both versions. Long dissolves,
+soft slow wipes that cross the whole frame and slow dips through black join the
+scenes. The labels ride the line and stop at the 5% safe margin at the edges. Titles are quiet lower-thirds (Oswald over Roboto, the
+game's own OFL fonts); the opening's line is typed on like a field report in
+the game's mono font with a HUD-green cursor. The only accent colour is the
+game's HUD green (63, 148, 61), sampled from the vanilla HUD text
+(trailer_v2.py).
+
+ #  clip             title                       island  length  time          scene, and what it shows
+--  ---------------  --------------------------  ------  ------  ------------  -------------------------------------------
+ 1  opening          Malden, under occupation    Malden  16.5 s  18:15 clear   establishing shot under the intro: evening
+                                                                               sun behind a cypress row, an occupier BMP and
+                                                                               two sentries; sun beams, long soft shadows,
+                                                                               camera-like exposure
+ 2  valley_mist      Moving out at dawn          Malden   9.5 s  05:45 clear   a resistance squad on a ridge over the dawn
+                                                                               valley: mist lit by the rising sun, haze
+ 3  pine_shafts      Through the pines           Malden   9.5 s  06:00 fog     guerrillas among the pines: volumetric fog
+                                                                               and sun shafts
+ 4  bay_reflections  Coastal patrol, dawn        Malden   9.5 s  06:30 clear   an occupier patrol boat on the calm bay:
+                                                                               reflections of the hill, sea waves
+ 5  outpost          Occupier outpost            Malden  10.0 s  08:00 March   orbit around a BMP, UAZ, tent and sentries in
+                                                                               a low winter sun: rim light, deep shade,
+                                                                               ambient occlusion, specular
+ 6  cloud_shadows    Everon from the air         Everon   8.5 s  14:30 broken  from 250 m up: lit clouds, cloud shadows
+                                                                               sweeping over the hills
+ 7  sinai_camp       Hidden camp, Sinai          Sinai    9.0 s  16:10 clear   a LoBo IDF camp under netting in hard late
+                                                                               sun: shade, warm sand, a modded island
+ 8  ambush           Ambush at golden hour       Malden   9.5 s  18:15 clear   guerrillas waiting at a forest edge as an
+                                                                               occupier UAZ crosses the slope: soft tree
+                                                                               shadows, canopy shadows, terrain detail
+ 9  convoy           Convoy at sunset            Malden   9.0 s  18:25 clear   an occupier convoy (UAZ, two Urals) driving
+                                                                               into a low sunset: backlight, long shadows
+10  checkpoint       Checkpoint at dusk          Malden   9.0 s  19:25 clear   an occupier checkpoint at dusk: sandbag
+                                                                               bunkers, Ural, UAZ, sentries by a fire
+11  town_patrol      Night patrol in town        Malden   9.5 s  22:00 clear   the occupied town: street lamps, two
+                                                                               occupiers at a fire, a parked Ural, a patrol
+                                                                               UAZ's headlights; a short push across the
+                                                                               square right of the fire, 7 m or more from
+                                                                               the men, 10 m from the birch
+12  rain_town        Town in the rain            Malden   9.5 s  22:00 rain    guerrillas crouched at the roadside as a patrol
+                                                                               passes: wet street, puddle reflections; the
+                                                                               camera on the road, 7 m clear of the cypress
+                                                                               by the house corner
+13  supply_run       Supply run at night         Malden  10.0 s  23:00 moonless  a resistance Skoda on a country road: low
+                                                                               beams, a sky full of stars; the camera holds
+                                                                               7 m behind the car the whole way
+14  firefight        Firefight after dark        Malden  10.5 s  23:00 moonless  resistance against occupiers between a
+                                                                               burning Ural and BMP: a flare and three shell
+                                                                               bursts (physics explosions) lighting the men
+    closing card     "USLU DUR!" / "PART 2: GAMEPLAY · COMING SOON"   10.5 s, a slow push on the opening's overhaul frame, blurred and darkened
+
+Montage: 2:13.4 at 60 fps (trailer_v2.py --plan-only prints it).
+
+Feature coverage:
+  camera exposure and filmic curve ....... every scene, first seen in 1
+  volumetric fog, sun shafts ............. 1, 2, 3
+  light beams and valley mist ............ 2, 3
+  ambient occlusion and specular ......... 5, 7
+  soft tree and building shadows ......... 1, 8
+  canopy shadows ......................... 8
+  low-sun light .......................... 5, 7, 8, 9
+  lit clouds and cloud shadows ........... 6
+  sea waves, screen-space reflections .... 4
+  terrain detail ......................... 7, 8
+  night lamps ............................ 11, 12
+  rain, wet materials, puddles ........... 12
+  stars .................................. 13
+  combat light from fires, flares, bursts  10, 11, 14
+
+Tools: D:\Arma_CWA_worktrees\video-work\arma_CWR\tests\rendering\captures\video\
+  gen_video_v2.py (the clip table and both test sets), run_v2_lane.ps1 (one game
+  at a time per lane), collect_frames.py (near-lossless RGB video per side),
+  trailer_v2.py (the master and the side-by-side copy), vo_v2.py (VO_SCRIPT.txt,
+  lines.json), check_vo.py (whisper transcript check), mix_vo.py (-16 LUFS, SRT,
+  subtitled copy, finals in tmp\video\v2\final\).
+Vanilla side: vanilla-safe verbs only, gamma 1.2 applied offline, @LoBo without
+its Bin on Sinai, a seeded profile with frameRate=3 so the object detail stays
+at its finest, long waits in 90-frame statements.

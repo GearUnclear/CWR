@@ -1,0 +1,8 @@
+cwrce
+source: D:/Arma_CWA_worktrees/cwrce
+remote: https://github.com/ofpisnotdead-com/CWR-CE.git
+branch: fix-4wvr-empty-islands
+local-only commits (not on any remote):
+00401f2047e76cb28f15614cbcf82832e2f68088 Fix clang-format violation in test_wrp.cpp
+6d8c4f5593fb11a1014769aa1c79bfcf37546685 Fix empty community (4WVR) islands: seekg must clear latched EOF
+uncommitted changes: none

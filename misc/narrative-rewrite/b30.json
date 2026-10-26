@@ -1,0 +1,10 @@
+{
+  "id": "b30",
+  "bank": "kBio2Friendly",
+  "variant": 5,
+  "text": "{Name}, an apprentice mason from {Place}, volunteered for the resistance expecting adventure. During the first attack, the recruit panicked and could not leave cover. Afterward, they asked for more training.",
+  "word_count": 30,
+  "self_review": "An apprentice mason joins the resistance expecting adventure, panics under attack, and asks for more training.",
+  "source_pattern": "The supplied Sierra Leone TRC findings record bravado among some army recruits and a recruit encouraged by a radio advertisement.",
+  "fictional_changes": "The masonry apprenticeship, resistance enlistment, first attack, panic, and training request are fictional. The documented army recruitment pattern is being extrapolated to a fictional resistance volunteer."
+}

@@ -1,0 +1,2 @@
+﻿run exit=0 frames=150 minutes=3.3 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\2\runs\w1
+done 02:14:06

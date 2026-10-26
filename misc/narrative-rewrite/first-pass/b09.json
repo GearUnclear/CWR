@@ -1,0 +1,8 @@
+{
+  "id": "b09",
+  "bank": "kBio0Hostile",
+  "variant": 2,
+  "text": "Posted near {Place}, military engineer {Name} trusted official maps when planning a supply road. They dismissed residents' boundary corrections as delays and sent crews ahead, blocking the track farmers used to reach their fields.",
+  "word_count": 34,
+  "self_review": "Trust in official maps leads the engineer to dismiss corrections and continue construction. Blocking farm access gives that professional blind spot a practical consequence without requiring a particular historical variant."
+}

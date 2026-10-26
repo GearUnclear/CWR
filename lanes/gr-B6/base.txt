@@ -1,0 +1,8 @@
+lane: gr-B6
+source: D:/Arma_CWA_worktrees/gr-B6
+HEAD: e91b3f3a97bd6b34e7c225785ac38e367c36d127
+subject: graphics: the sea gets wave relief and a broken, glittering sun path
+commit date: 2026-10-18 08:28:41 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 30
+binary files changed (content not in patch): none

@@ -1,0 +1,10 @@
+{
+  "repair_version": "2026-10-11.1",
+  "rule_sha256": "e025a5228caebc861cc39a981e8b84322ffbc180de6625980ba3e0e3c43e38f3",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "ud",
+  "changed_members": 0,
+  "archives": [],
+  "members": []
+}

@@ -1,0 +1,8 @@
+g1safe_a    skinpx  190 xrange  60.8- 65.8 snaps   8 flips   7 | first60 snaps  4 flips  3
+g1safe_b    skinpx  244 xrange  25.5- 38.5 snaps  13 flips   7 | first60 snaps  7 flips  4
+g2watch_a   skinpx  306 xrange  63.1- 63.5 snaps   0 flips   0 | first60 snaps  0 flips  0
+g2watch_b   skinpx  114 xrange  55.1- 56.9 snaps   0 flips   0 | first60 snaps  0 flips  0
+g3comb_a    skinpx  216 xrange  60.3- 64.3 snaps   3 flips   1 | first60 snaps  1 flips  0
+g3comb_b    skinpx   80 xrange  41.5- 61.4 snaps   6 flips   3 | first60 snaps  2 flips  1
+g4cwatch_a  skinpx  202 xrange  58.5- 59.4 snaps   0 flips   0 | first60 snaps  0 flips  0
+g4cwatch_b  skinpx  118 xrange  34.8- 36.9 snaps   0 flips   0 | first60 snaps  0 flips  0

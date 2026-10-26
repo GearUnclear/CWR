@@ -1,0 +1,56 @@
+As built in B11 (a parallel lane on 193c735): `Detail` landed at 77 as planned. `LitConst` gained
+`Planned` = 58 (`PlannedCount` = 19 slots, declared in the block as one padding array
+`vec4 litPlanned[19]`), `Detail` = 77 and `Count` = 78; on top of A7 the padding is 68 to 76
+(`Planned` = 68, `litPlanned[9]`, after A7's `litReserved[3]` and sky slots); `LitConstPlanned` keeps the rows that
+have not landed (`Haze` 78 is now at `Count`). A lane that lands a lower slot splits the padding
+array around it. `litDetail.xyz` is per frame (self-detail strength, detail-kept rate,
+anti-tiling weight; zero while the switch or its gate is off) and `litDetail.w` per draw (1 for
+the land, 0 for the sea: both are drawn by PSDetail until B5 moves the sea out). The w flag is set
+in `ApplyPassState` from the draw's multitexture stage (`SelectTerrainDetailLayer` in
+`EngineGL33_State.cpp`, the land's faces carry `DetailTexture`, the sea's `SpecularTexture`) and
+uploads one slot only when it changes, a few times a frame.
+
+As built in B1 (a parallel lane on 193c735, merged onto A7 and B11): `Taa` (59) and `Pcss` (60)
+landed, so A7's padding `litReserved[3]` became `vec4 litReserved` for `MatClass` alone
+(`LitConst::Reserved` 58, `ReservedCount` 1) followed by `litTaa` and `litPcss`; `Count` stays 78.
+`LitConstPlanned` keeps `MatClass` (static_assert: the reserved padding). `litTaa` is per frame:
+x the soft filter's per-frame turn, y 1 in a TAA frame, z taps per frame there, w tan of the sun's
+angular radius (0 = the stock filter); `litPcss` x the search reach (m), y the smallest filter
+radius (texels), z the soft strength (the gate-edge fade), w the leaf lift (texels).
+
+As built in A6 (a parallel lane on c584185, merged onto A5, A7, B11 and B1): slot 70 (`LightTiles`)
+is not used and its row left `LitConstPlanned`; it stays inside B11's padding `litPlanned`. The light
+list needs no tile counts (the tile texture is 2D and the shader finds its tile from `gl_FragCoord`)
+and no light count (each tile's list ends at a 0 index), so its two values, the tile size and the
+draw's night factor, ride in the free lanes `litLightCount.y` and `.z` of slot 22
+(`LitConst::LightCount`, the local-light slot). A6 adds no `LitConst` slot and no padding member
+(`Count` stays 78).
+
+As built in B5 (a parallel lane on 5d7e7ae, merged onto B11, B1 and A6): slots 74 and 75 landed
+(`LitConst::Water0`, `Water1`). On the lane, which sat on A7 alone, 68 to 73 were a second padding
+member `litReserved2[6]` and `Count` was 76; on the merged tree B11's padding splits around the water
+slots instead: `litPlanned[6]` for 68 to 73 (`LitConst::Planned`, `PlannedCount` 6; `LitConstPlanned`
+`Sky` to `Weather`, static_assert), the two water slots, then `vec4 litPlanned2` for 76
+(`LitConst::Planned2`, `Planned2Count` 1; `LitConstPlanned::Canopy`, static_assert) before `Detail`
+77, so `Count` stays 78. A step that lands one of 68 to 73 splits `litPlanned`, the canopy step
+replaces `litPlanned2`. `Water0` is the wave relief scale, the next animation frame's share, the mean
+sky weight and the sky's tint toward the fog colour; `Water1` the sheen light (rgb) and the sheen's
+flat-normal share. The layer heights, lobes and fades stay shader constants, not slots. With the
+switch on in the remastered world pass the sea's faces leave PSDetail for the water program, which
+does not read `litDetail`; `litDetail.w` still tells the land from the sea when the switch is off.
+
+As built in B2 (a parallel lane on 807ce4b, merged onto A6 and B5): no slot lands. The low-sun
+rig is rig math in `ComputeLightRig`, and the crown canopy needs one flag per frame:
+`litHorizonSun.w` (slot 23, unused before), 1 while `crownCanopy` and its gate are on.
+`LitConst::Count` and the padding are unchanged; only the block's comment for slot 23 changes
+(which changes the text, not the layout, of every remastered program).
+
+As built in B10 (a parallel lane on 5d7e7ae, merged onto B11, B1, A6, B5 and B2): slots 68 and 69
+landed: `Sky` (x lit-cloud strength with the sky table's night fade, y sky-matched shadows on, z the
+dome's turn as a u offset, w sky-through) and `SkyShadow` (xy the shadow anchor minus the camera in
+metres, z the previous anchor's angle, w its fade weight). The planned `SkyVp` is gone: A7's view ray
+comes from the vertex position, so no viewport is needed. On the lane, which sat on A7 alone, `Count`
+was 70 and `LitConstPlanned` began at `LightTiles` (70); on the merged tree the clouds slots split B5's
+padding instead: `litSky` and `litSkyShadow`, then `litPlanned[4]` for 70 to 73 (`LitConst::Planned`
+70, `PlannedCount` 4; 70 free since A6, `LitConstPlanned` `Night` to `Weather`, static_assert), then
+the water slots, `litPlanned2` and `Detail`, so `Count` stays 78.

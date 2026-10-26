@@ -1,0 +1,162 @@
+[
+ {
+  "src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\5\\runs\\m3moving-c8b\\m3moving-c8b.mkv",
+  "frm": 15,
+  "to": 0,
+  "band": 0.102,
+  "sky": 0.049,
+  "regions": {
+   "bay": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 153.69,
+    "camera": [
+     -1.12,
+     -0.06
+    ],
+    "lowd2": 0.071,
+    "mid": 0.201,
+    "rho": 0.022,
+    "rho0": -0.291,
+    "vel": [
+     -1,
+     15
+    ],
+    "rho_off": 0.022,
+    "vel_off": [
+     -1,
+     15
+    ],
+    "wind": 0.004,
+    "rho_c": -0.192,
+    "vslow": [
+     2.0,
+     -2.0
+    ],
+    "fine": 0.87,
+    "fine0": -0.448
+   },
+   "valley": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 128.39,
+    "camera": [
+     -0.93,
+     0.01
+    ],
+    "lowd2": 0.084,
+    "mid": 0.144,
+    "rho": 0.033,
+    "rho0": -0.408,
+    "vel": [
+     -16,
+     -16
+    ],
+    "rho_off": 0.033,
+    "vel_off": [
+     -16,
+     -16
+    ],
+    "wind": 0.005,
+    "rho_c": -0.289,
+    "vslow": [
+     2.0,
+     2.0
+    ],
+    "fine": 0.718,
+    "fine0": -0.499
+   },
+   "farhill": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 116.92,
+    "camera": [
+     -0.89,
+     0.07
+    ],
+    "lowd2": 0.055,
+    "mid": 0.111,
+    "rho": 0.02,
+    "rho0": -0.334,
+    "vel": [
+     16,
+     8
+    ],
+    "rho_off": 0.02,
+    "vel_off": [
+     16,
+     8
+    ],
+    "wind": 0.002,
+    "rho_c": -0.19,
+    "vslow": [
+     2.0,
+     -2.0
+    ],
+    "fine": 0.727,
+    "fine0": -0.42
+   },
+   "haze": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 180.96,
+    "camera": [
+     -0.76,
+     0.02
+    ],
+    "lowd2": 0.043,
+    "mid": 0.107,
+    "rho": 0.034,
+    "rho0": -0.237,
+    "vel": [
+     -16,
+     -3
+    ],
+    "rho_off": 0.034,
+    "vel_off": [
+     -16,
+     -3
+    ],
+    "wind": 0.004,
+    "rho_c": -0.141,
+    "vslow": [
+     2.0,
+     2.0
+    ],
+    "fine": 0.609,
+    "fine0": -0.3
+   },
+   "slope": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 54.3,
+    "camera": [
+     -0.94,
+     0.08
+    ],
+    "lowd2": 0.062,
+    "mid": 0.14,
+    "rho": 0.019,
+    "rho0": -0.374,
+    "vel": [
+     15,
+     8
+    ],
+    "rho_off": 0.019,
+    "vel_off": [
+     15,
+     8
+    ],
+    "wind": 0.003,
+    "rho_c": -0.235,
+    "vslow": [
+     2.0,
+     2.0
+    ],
+    "fine": 1.01,
+    "fine0": -0.376
+   }
+  },
+  "frames": 105
+ }
+]

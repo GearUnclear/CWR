@@ -1,0 +1,18 @@
+tests: guerrilla_assailant_fire_rogue keeps its target standing (fire visibility just under the threshold)
+
+The test registers its target as a ROGUE too, so the engine puts it in a
+COMBAT group and it takes a low stance; from the shooter 17 m away the
+terrain hides enough of the body that the fire visibility settles at
+0.6297, under MinVisibleFire 0.63, so WhatFireResult never assigns the
+target and no shot is fired. Rogue hostility itself works (the target is
+EnemyCombat, knowsAbout 4). The test now sets the target UP, keeping its
+hostility asserts; the sibling fire tests pass because their targets
+stand. Pre-existing red, independent of this branch (same 0.6297 on
+Classic data).
+
+Verified on dist/agent71-rwdi + remaster-shadow-of4: fire_rogue 3 of 3 at
+--retries 0; the 13 guerrilla_assailant* tests 12/13 (guerrilla_assailants
+flaked on its own candidate-exclusion race, handled separately); human
+suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

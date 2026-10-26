@@ -1,0 +1,175 @@
+diff -ru a/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp b/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp
+--- a/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp	2026-10-16 00:46:27.361883300 -0700
++++ b/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp	2026-10-16 00:46:27.700095600 -0700
+@@ -6,7 +6,7 @@
+ #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // LaunchFunded, the listener, Roll01 / MakeSeed / Spare
+ #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // live garrison bodies (a base's spare)
+ #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp> // HqZone: never a target
+-#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>     // SameLandmass: ground sources share the target's land
++#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>     // SameLandmass, RoadQuoteCache (the road quote)
+ #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+ 
+ #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
+@@ -275,6 +275,8 @@
+     t.slowEta = ReadRanged(c, "forcesSlowEta", t.slowEta, 0.0f, 86400.0f);
+     t.slowCostShare = ReadRanged(c, "forcesSlowCostShare", t.slowCostShare, 1.0f, 5.0f);
+     t.airEta = ReadRanged(c, "forcesAirEta", t.airEta, 0.0f, 86400.0f);
++    // 2026-10-16: the road quote (6.5)
++    t.roadFactor = ReadRanged(c, "forcesRoadFactor", t.roadFactor, 1.0f, 5.0f);
+     // phase 4: the HQ assault and the waves (16)
+     t.hqAssaultMin = RoundToInt(ReadRanged(c, "forcesHqAssaultMin", (float)t.hqAssaultMin, 1.0f, 12.0f));
+     t.waveDwell = RoundToInt(ReadRanged(c, "forcesControlDwell", (float)t.waveDwell, 1.0f, 10.0f));
+@@ -1968,6 +1970,7 @@
+     req.pool = _pool;
+     req.poolActive = Active();
+     req.offered = OfferedPackages;
++    req.roadFactor = _tuning.roadFactor; // the road quote (6.5): a ground leg with no road route known
+     // the arrival rule (6.5, 2026-10-15) for the director's own operations;
+     // a push-out keeps the minimal package (6.4) and a wave strike its
+     // staged hub budget (7.1)
+@@ -2064,6 +2067,11 @@
+         const float dx = s->pos.X() - dest.X();
+         const float dz = s->pos.Z() - dest.Z();
+         src.distance = sqrtf(dx * dx + dz * dz);
++        // the road quote (6.5, 2026-10-16): the road route the service will
++        // march, cached per pair (RoadQuoteCache, planned at most once a
++        // tick); -1 = the straight line x forcesRoadFactor.  Air flies the
++        // straight line.
++        src.road = src.airOnly ? -1.0f : RoadQuoteCache::Instance().Length(s->pos, dest);
+         sources.Add(src);
+     }
+ }
+@@ -2308,11 +2316,13 @@
+     if (a.choice.etaRule != PackageChoice::EtaNone)
+     {
+         GM_DIRECTOR_INFO(Core,
+-                         "OccupierForces: [op {}] arrival rule ({}): the cheapest, {}, needs about {:.0f} s; {} goes, "
+-                         "about {:.0f} s",
++                         "OccupierForces: [op {}] arrival rule ({}): the cheapest, {}, needs {}; {} goes, {}",
+                          opId, a.choice.etaRule == PackageChoice::EtaAir ? "forcesAirEta" : "forcesSlowEta",
+-                         ForcePackages::PackageName(a.choice.cheapestPackage), (double)a.choice.cheapestSeconds,
+-                         ForcePackages::PackageName(q.package), (double)q.seconds);
++                         ForcePackages::PackageName(a.choice.cheapestPackage),
++                         a.choice.cheapestIndex >= 0
++                             ? (const char*)ForcePackages::LogEtaNote(a.choice.quotes[a.choice.cheapestIndex])
++                             : "?",
++                         ForcePackages::PackageName(q.package), (const char*)ForcePackages::EtaNote(q));
+     }
+ 
+     const bool push = a.origin == CAOPushout;
+@@ -2334,10 +2344,10 @@
+         {
+             GM_DIRECTOR_INFO(Core,
+                      "OccupierForces: [op {}] {}{} ({}) from {} to {} ({} unit(s), the pool pays {}, lethality {:.2f} "
+-                     "of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
++                     "of {:.2f}, {} fighter(s) reported{}{}, {})",
+                      opId, push ? "Push-out: " : "", label, q.bodies, ZoneNameOf(registry, q.source), targetName,
+                      q.price, q.poolPrice, (double)q.lethality, (double)a.choice.lReq, RoundToInt(a.fighters),
+-                     a.urgent ? ", urgent" : "", shortNote, (double)q.seconds);
++                     a.urgent ? ", urgent" : "", shortNote, (const char*)ForcePackages::LogEtaNote(q));
+         }
+         else
+         {
+@@ -2355,10 +2365,10 @@
+             }
+             GM_DIRECTOR_INFO(Core,
+                      "OccupierForces: [op {}] {}{} ({}, {}) from {} to {} ({} unit(s), the pool pays {}, lethality "
+-                     "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
++                     "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, {})",
+                      opId, push ? "Push-out: " : "", label, q.bodies, (const char*)q.hullClass, from, targetName,
+                      q.price, q.poolPrice, (double)q.lethality, (double)a.choice.lReq, RoundToInt(a.fighters),
+-                     a.urgent ? ", urgent" : "", shortNote, (double)q.seconds);
++                     a.urgent ? ", urgent" : "", shortNote, (const char*)ForcePackages::LogEtaNote(q));
+         }
+         return true;
+     }
+@@ -2391,11 +2401,11 @@
+         }
+         GM_DIRECTOR_INFO(Core,
+                  "OccupierForces: [op {}] Alarm answer: {} ({}{}{}) from {} to {} ({} unit(s), the pool pays {}, "
+-                 "lethality {:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
++                 "lethality {:.2f} of {:.2f}, {} fighter(s) reported{}{}, {})",
+                  opId, ForcePackages::PackageName(q.package), q.bodies, q.package != FPFoot ? ", " : "",
+                  (const char*)q.hullClass, from, targetName, q.price, q.poolPrice, (double)q.lethality,
+                  (double)a.choice.lReq, RoundToInt(a.fighters), a.urgent ? ", urgent" : ", THIN: the cheapest",
+-                 shortNote, (double)q.seconds);
++                 shortNote, (const char*)ForcePackages::LogEtaNote(q));
+         return true;
+     }
+     // base retakes, HQ assaults and wave strikes (6.6 wording)
+@@ -2406,11 +2416,12 @@
+     const char* pkg = q.package == FPFoot ? "foot" : (q.package == FPTruck ? "motorized" : "package");
+     GM_DIRECTOR_INFO(Core,
+              "OccupierForces: [op {}] {}{}{} ({} {}{}{}) from {} on {} ({} unit(s), the pool pays {}{}, lethality "
+-             "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
++             "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, {})",
+              opId, push ? "Push-out: " : "", wave, what, pkg, q.bodies, q.package != FPFoot ? ", " : "",
+              (const char*)q.hullClass, ZoneNameOf(registry, q.source), targetName, q.price, q.poolPrice,
+              stagedBodies > 0 ? " and stages the infantry" : "", (double)q.lethality, (double)a.choice.lReq,
+-             RoundToInt(a.fighters), a.urgent ? ", urgent" : "", shortNote, (double)q.seconds);
++             RoundToInt(a.fighters), a.urgent ? ", urgent" : "", shortNote,
++             (const char*)ForcePackages::LogEtaNote(q));
+     return true;
+ }
+ 
+@@ -3639,6 +3650,7 @@
+     req.pool = _pool;
+     req.poolActive = Active();
+     req.offered = OfferedPackages;
++    req.roadFactor = _tuning.roadFactor; // the road quote (6.5): a ground leg with no road route known
+     // the arrival rule (6.5) answers alarms too, except THIN (the cheapest)
+     if (a.urgent)
+     {
+diff -ru a/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp b/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp
+--- a/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp	2026-10-16 00:46:27.249040100 -0700
++++ b/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp	2026-10-16 00:46:27.698196100 -0700
+@@ -335,6 +335,10 @@
+     float slowEta = 900.0f;        // forcesSlowEta, 0..86400 s
+     float slowCostShare = 3.0f;    // forcesSlowCostShare, 1..5
+     float airEta = 1500.0f;        // forcesAirEta, 0..86400 s
++    // the road quote (6.5, 2026-10-16): a ground leg whose road route is not
++    // known (none, a detour the service does not march, or not planned this
++    // tick) is quoted as the straight distance x roadFactor
++    float roadFactor = 1.5f;       // forcesRoadFactor, 1..5
+     // phase 4: the HQ assault and the waves (7.1, 16)
+     int hqAssaultMin = 6;          // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
+     int waveDwell = 2;             // forcesControlDwell, 1..10: consecutive due ticks before a wave fires
+diff -ru a/engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp b/engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp
+--- a/engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp	2026-10-16 00:46:27.473101000 -0700
++++ b/engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp	2026-10-16 00:46:27.701072700 -0700
+@@ -103,7 +103,8 @@
+ //                                  (0..6), "spareCap" (0/1),
+ //                                  "spareCapFloor" (1..12), "slowEta"
+ //                                  (0..86400 s), "slowCostShare" (1..5),
+-//                                  "airEta" (0..86400 s); phase 4: "hqAssaultMin"
++//                                  "airEta" (0..86400 s); 2026-10-16:
++//                                  "roadFactor" (1..5); phase 4: "hqAssaultMin"
+ //                                  (1..12), "waveDwell" (1..10 ticks),
+ //                                  "waveFinal" (0/1), "waveShare" (0..2),
+ //                                  "waveMin" (0..200), "waveMax" (0..400),
+@@ -446,6 +447,10 @@
+     {
+         t.airEta = ClampF(v, 0, 86400);
+     }
++    else if (stricmp(key, "roadFactor") == 0)
++    {
++        t.roadFactor = ClampF(v, 1, 5);
++    }
+     else if (stricmp(key, "intelDecay") == 0)
+     {
+         t.intelDecay = ClampF(v, 1, 86400);
+diff -ru a/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp b/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp
+--- a/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp	2026-10-16 00:46:27.593982900 -0700
++++ b/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp	2026-10-16 00:46:27.702048000 -0700
+@@ -4357,6 +4357,11 @@
+     CHECK(f.of.Tuning().slowEta == Approx(900.0f));
+     CHECK(f.of.Tuning().slowCostShare == Approx(3.0f));
+     CHECK(f.of.Tuning().airEta == Approx(1500.0f));
++    // the road quote (2026-10-16): no road net in the fixture, so a ground
++    // leg is the straight line x forcesRoadFactor (1.5); this case pins the
++    // straight line (factor 1) to keep its distances
++    CHECK(f.of.Tuning().roadFactor == Approx(1.5f));
++    f.of.TuningMutable().roadFactor = 1.0f;
+     FakeLauncher launcher;
+     FlipTown(f, "Houdan", 1);
+     REQUIRE(FlipTown(f, "Trinite", 2));

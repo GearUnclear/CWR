@@ -1,0 +1,3 @@
+﻿start 04:34:21 test=tests/rendering/captures/video/look_probe_fog3_pine_static.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\shaders\act25 junction=RemasterUD-fog-3
+run exit=0 frames=120 minutes=2.3 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\runs\pine_static-act25
+done 04:36:46

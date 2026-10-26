@@ -1,0 +1,53 @@
+FRESH SCRIPT, draft 2 (2026-10-23)
+==================================
+Owner on draft 1: "sans cringe ;)". Draft 2 drops the forced casual bits ("First up", "proper",
+"actually", "all you've got", "That's it") and the repeated "now" and "real"; plain statements of what
+each shot shows.
+
+ 0  Title card
+    Uslu dur is a total overhaul of Arma: Cold War Assault. This video covers the graphics and rendering improvements.
+
+ 1  Malden at sunset, occupied
+    Original game on the left, Uslu dur on the right. The models and textures are unchanged.
+
+ 2  Dawn, squad on the ridge
+    The fog is volumetric. Mist settles in the valley, and the rising sun shines through it.
+
+ 3  Pine woods
+    In the pine woods, sunlight comes through the trees as visible shafts in the haze.
+
+ 4  Bay, patrol boat
+    The water reflects its surroundings, including the hills and the patrol boat.
+
+ 5  Occupier outpost
+    The outpost is lit by a low winter sun. Ambient occlusion darkens the corners and the ground under the vehicles.
+
+ 6  Everon from the air
+    From the air you can see the cloud shadows moving across Everon.
+
+ 7  Sinai camp
+    It also works with mods. This is the Sinai map from the Lost Brothers mod.
+
+ 8  Ambush at golden hour
+    At golden hour the trees cast long shadows over the resistance waiting at the forest edge.
+
+ 9  Convoy at sunset
+    An occupier convoy drives into the setting sun. Exposure is handled like a real camera.
+
+10  Checkpoint at dusk
+    At the checkpoint, the fire lights the sentries standing around it.
+
+11  Night patrol in town
+    At night, street lamps light the town as an occupier patrol walks through.
+
+12  Town in the rain
+    In the rain, wet ground turns darker and the puddles reflect the street lights.
+
+13  Supply run at night
+    Outside town there are no street lights, and the supply run drives on its headlights.
+
+14  Firefight after dark
+    Flares, fires and explosions light up their surroundings. The size of each blast depends on the munition.
+
+15  Closing card
+    Part two will cover the gameplay: Guerrilla Mode and the AI.

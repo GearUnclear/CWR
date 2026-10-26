@@ -1,0 +1,49 @@
+{
+  "against": [
+    "@LoBo",
+    "@LoBo_Deps",
+    "@LoBo_UD"
+  ],
+  "against_folders": [
+    {
+      "name": "@LoBo",
+      "pbos": 126,
+      "sha256": "9cc1b18b14c89cfe8c3645db319e5fbf6bad85b7b2d41a1935fd10bcfca3da3c"
+    },
+    {
+      "name": "@LoBo_Deps",
+      "pbos": 40,
+      "sha256": "196c0f3a7bb3b6fd65292075065d71c19c8403f80c1cd97dde7e41b2ff10e3ad"
+    },
+    {
+      "name": "@LoBo_UD",
+      "pbos": 14,
+      "sha256": "9f01770afb081e1eaee992381a63db984fcb6979a2fe10ba2cd28db19d01ca91"
+    }
+  ],
+  "build_version": "2026-10-11.1",
+  "checked": true,
+  "config_defects": [],
+  "errors": [],
+  "folder": "@LoBo_Extras",
+  "indexed_configs": 209,
+  "pbos": 11,
+  "stock_game": "BIN/CONFIG.BIN + AddOns",
+  "tool": "build-lobo-extras --check",
+  "warnings": [
+    "accepted-base: cfgModels>>Helicopter in @LoBo_Extras/bas_lbs185.pbo: \": <none>\" here, \": air\" there (the stock shape); stock-shaped base-less stub; core LoBoEghelo/LoBo_FAB declare Helicopter: Air (plan: low risk) (vs @LoBo/LoBo_FAB.pbo, @LoBo/LoBoEghelo.pbo, @LoBo_Deps/bas_mah60.pbo and 1 more)",
+    "additive: cfgRecoils in @LoBo_Extras/BWMOD_Config.pbo: both add entries, no shared key differs (vs @LoBo/CoC_Arty.pbo, @LoBo/JAM_Magazines.pbo, @LoBo/LoBo_IAk47Iraqi.pbo and 8 more)",
+    "additive: CfgGroups>>West in @LoBo_Extras/HYK_USsol.pbo: both add entries, no shared key differs (vs @LoBo/LoBoCen.pbo, @LoBo/LoBoIs.pbo, @LoBo/LoBoM60.pbo and 8 more)",
+    "additive: CfgGroups>>East in @LoBo_Extras/TheHKpack.pbo: both add entries, no shared key differs (vs @LoBo/JAM_Magazines.pbo, @LoBo/JAM_Vehicles.pbo, @LoBo_Deps/CoC_M55.pbo and 2 more)",
+    "additive: CfgGroups>>Resistance in @LoBo_Extras/TheHKpack.pbo: both add entries, no shared key differs (vs @LoBo/JAM_Magazines.pbo, @LoBo/LoBoJordan.pbo, @LoBo/LoBoJorHelo.pbo and 2 more)",
+    "existing-value: CfgGroups>>West in @LoBo_Extras/HYK_USsol.pbo: keys ['name'] differ from stock, but core already uses the value here (vs stock BIN/CONFIG.BIN)",
+    "existing-value: CfgGroups>>West in @LoBo_Extras/HYK_USsol.pbo: keys ['name'] differ, but the value here is one that core or stock already use (vs @LoBo/CoC_Arty.pbo, @LoBo/coc_diver.pbo, @LoBo/JAM_Magazines.pbo and 1 more)",
+    "existing-value: CfgGroups>>East in @LoBo_Extras/TheHKpack.pbo: keys ['name'] differ, but the value here is one that core or stock already use (vs @LoBo/LoBo_M1.pbo, @LoBo/LoBo_T55.pbo, @LoBo/LoBo_T72.pbo and 11 more)",
+    "existing-value: CfgGroups>>Resistance in @LoBo_Extras/TheHKpack.pbo: keys ['name'] differ, but the value here is one that core or stock already use (vs @LoBo/JAM_Vehicles.pbo, @LoBo/MAP_Editorupgrad.pbo, @LoBo_Deps/IRAR_inftr.pbo)",
+    "stock-base-locked: cfgAmmo>>AA in @LoBo_Extras/BWMOD_Config.pbo: \": default\" here, \": carlgustav\" in stock; stock access 3 refuses the rebase (vs stock BIN/CONFIG.BIN)",
+    "stock-base-locked: cfgWeapons>>AALauncher in @LoBo_Extras/BWMOD_Config.pbo: \": default\" here, \": carlgustavlauncher\" in stock; stock access 3 refuses the rebase (vs stock BIN/CONFIG.BIN)",
+    "stock-keys-added: cfgRecoils in @LoBo_Extras/BWMOD_Config.pbo: adds keys ['bwmod_recoil_g22', 'bwmod_recoil_mg3'] to the stock class (stock access 1) (vs stock BIN/CONFIG.BIN)",
+    "stock-values-locked: CfgWorlds>>GroupNameList in @LoBo_Extras/BWMOD_Config.pbo: keys ['letters'] differ; stock access 1 keeps the stock values (vs stock BIN/CONFIG.BIN)",
+    "index note: @LoBo/73eastings.pbo: engine parser missed 8 class(es); added from the text reader"
+  ]
+}

@@ -1,0 +1,6 @@
+mission = "guerrilla-mode/mission/Guerrilla.Eden"
+binary = "PoseidonGame"
+tags = ["probe"]
+timeout = 420
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict"]

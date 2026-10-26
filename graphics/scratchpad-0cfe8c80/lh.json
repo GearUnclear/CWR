@@ -1,0 +1,1 @@
+[{"text": "// The LitConstants block and the terrain and clouds piece are named here too:\n// the post air pass pastes them, and the reflections' trace pastes the block\n// and the sky piece (kPostShaders).\nextern const char kLitConstantsBlockGLSL[];\nextern const char kRemasterTerrainCloudsGLSL[];\n"}, "ours+theirs", "ours+theirs"]

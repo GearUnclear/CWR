@@ -1,0 +1,212 @@
+[
+ {
+  "clip": "opening",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=opening;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=opening;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=21",
+  "diff": {
+   "first.png": 19.94,
+   "mid.png": 21.6,
+   "last.png": 22.18
+  },
+  "mean_diff": 21.24,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "valley_mist",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=valley_mist;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:9",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=valley_mist;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draw",
+  "diff": {
+   "first.png": 29.4,
+   "mid.png": 31.88,
+   "last.png": 30.59
+  },
+  "mean_diff": 30.62,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "pine_shafts",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=pine_shafts;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:9",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=pine_shafts;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draw",
+  "diff": {
+   "first.png": 27.34,
+   "mid.png": 24.07,
+   "last.png": 20.41
+  },
+  "mean_diff": 23.94,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "bay_reflections",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=bay_reflections;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=bay_reflections;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;",
+  "diff": {
+   "first.png": 32.26,
+   "mid.png": 32.79,
+   "last.png": 32.53
+  },
+  "mean_diff": 32.53,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "outpost",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=outpost;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=outpost;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=12",
+  "diff": {
+   "first.png": 36.74,
+   "mid.png": 30.85,
+   "last.png": 34.54
+  },
+  "mean_diff": 34.04,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "cloud_shadows",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=cloud_shadows;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=cloud_shadows;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;dr",
+  "diff": {
+   "first.png": 20.58,
+   "mid.png": 20.32,
+   "last.png": 19.69
+  },
+  "mean_diff": 20.2,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "sinai_camp",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=sinai_camp;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=sinai_camp;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws",
+  "diff": {
+   "first.png": 20.28,
+   "mid.png": 20.8,
+   "last.png": 19.88
+  },
+  "mean_diff": 20.32,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "ambush",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=ambush;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=ambush;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=939",
+  "diff": {
+   "first.png": 16.31,
+   "mid.png": 15.36,
+   "last.png": 14.82
+  },
+  "mean_diff": 15.5,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "convoy",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=convoy;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=convoy;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=183",
+  "diff": {
+   "first.png": 18.6,
+   "mid.png": 13.77,
+   "last.png": 12.75
+  },
+  "mean_diff": 15.04,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "checkpoint",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=checkpoint;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=checkpoint;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:82;draws",
+  "diff": {
+   "first.png": 23.73,
+   "mid.png": 19.85,
+   "last.png": 18.1
+  },
+  "mean_diff": 20.56,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "town_patrol",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=town_patrol;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:9",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=town_patrol;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:76;draw",
+  "diff": {
+   "first.png": 51.72,
+   "mid.png": 52.27,
+   "last.png": 54.44
+  },
+  "mean_diff": 52.81,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "rain_town",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=rain_town;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=rain_town;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=",
+  "diff": {
+   "first.png": 35.41,
+   "mid.png": 46.22,
+   "last.png": 49.93
+  },
+  "mean_diff": 43.85,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "supply_run",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=supply_run;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=supply_run;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws",
+  "diff": {
+   "first.png": 33.84,
+   "mid.png": 46.42,
+   "last.png": 60.61
+  },
+  "mean_diff": 46.96,
+  "ok": true,
+  "problems": []
+ },
+ {
+  "clip": "firefight",
+  "vanilla_game": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+  "vanilla_mode": "view=firefight;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+  "ud_game": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+  "ud_mode": "view=firefight;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=UNSETTLED:15",
+  "diff": {
+   "first.png": 18.16,
+   "mid.png": 57.44,
+   "last.png": 17.43
+  },
+  "mean_diff": 31.01,
+  "ok": true,
+  "problems": []
+ }
+]

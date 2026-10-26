@@ -1,0 +1,33 @@
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.hpp
+ M arma_CWR/engine/Poseidon/World/WorldImpl.cpp
+ M arma_CWR/guerrilla-mode/ARCHITECTURE.md
+ M arma_CWR/guerrilla-mode/HUMAN-TESTS.md
+ M arma_CWR/guerrilla-mode/NAMING_ACCEPTANCE.md
+ M arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_civilian.test.sqf
+ M arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_covered.test.sqf
+ M arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_occupier.test.sqf
+ M arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_resistance.test.sqf
+ M arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_retaliation.test.sqf
+ M arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_rogue.test.sqf
+ M arma_CWR/tests/integration/scripting/guerrilla_assailants.test.sqf
+ M arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/01_save.test.toml
+ M arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/02_reload.test.toml
+ M arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/01_mutate_save.test.toml
+ M arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/02_reload.test.toml
+ M roadmap/roadmap.yaml
+?? "ChatGPT Image Oct 5, 2026, 09_49_52 PM.png"
+?? arma_CWR/guerrilla-mode/acceptance/
+?? arma_CWR/tests/fixtures/assailants/
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_death_pool.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_death_pool.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_response.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_response.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_retaliation_vehicle.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_retaliation_vehicle.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_lobo_fire_occupier.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_lobo_fire_occupier.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_lobo_fire_resistance.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_lobo_fire_resistance.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_save_reload.seq.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_assailant_save_reload.seq/

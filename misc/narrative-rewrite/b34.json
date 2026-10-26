@@ -1,0 +1,10 @@
+{
+  "id": "b34",
+  "bank": "kBio2Hostile",
+  "variant": 3,
+  "text": "{Name}, a former foundry worker from {Place}, served in the army. After a superior threatened death for refusing, the soldier helped execute prisoners and later admitted taking part.",
+  "word_count": 28,
+  "self_review": "A former foundry worker served in the army, helped execute prisoners after a superior threatened death for refusal, and later admitted participation.",
+  "source_pattern": "The supplied Erdemovic sentencing summary records participation in executions under a threat of death, a guilty plea, and treatment of duress as mitigation rather than exoneration.",
+  "fictional_changes": "The foundry work, character, and conflict are invented; only the general pressure-choice-admission pattern is retained. No real victim, execution site, date, or sentence is copied."
+}

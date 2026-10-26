@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\4\\runs\\static-q2b\\frames", "frames": 105, "band": 0.025, "band_max": 0.054, "sky": 0.016, "spikes": 0, "worst": [[62, 0.11], [30, 0.11], [103, 0.11], [67, 0.11], [78, 0.1], [31, 0.1], [28, 0.1], [63, 0.1]]}

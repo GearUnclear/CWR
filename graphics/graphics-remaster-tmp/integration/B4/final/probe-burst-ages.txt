@@ -1,0 +1,20 @@
+event=shell;ammo=Shell120;pos=[7594,10890];object=NOID shell
+B4PROBE frame=890 sim=14.902999492362142 dt=0.0333333 flash=0.3065077 held=0.3065077 gain=1.7038023 night=1 n=3 explosion id=3 age=0.000000 I=146.084457 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=891 sim=14.936332793906331 dt=0.0333333 flash=0.3017606 held=0.3017606 gain=1.6954288 night=1 n=3 explosion id=3 age=0.033333 I=143.821945 core=1.880000 st=0.600000 d=40.468502
+event=shot;label=combat_eye_k05__classic
+event=shot;label=combat_eye_k05__off
+event=shot;label=combat_eye_k05__on
+B4PROBE frame=930 sim=14.96966609545052 dt=0.0333333 flash=0.2979063 held=0.2979063 gain=1.688585 night=1 n=3 explosion id=3 age=0.066667 I=141.984955 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=931 sim=15.00299939699471 dt=0.0333333 flash=0.20010784 held=0.2256537 gain=1.5523266 night=1 n=3 explosion id=3 age=0.100000 I=95.373291 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=932 sim=15.0363326985389 dt=0.0333333 flash=0.095448054 held=0.17092484 gain=1.4379227 night=1 n=3 explosion id=3 age=0.133333 I=45.491440 core=1.880000 st=0.600000 d=40.468502
+event=shot;label=combat_eye_k06__classic
+event=shot;label=combat_eye_k06__off
+event=shot;label=combat_eye_k06__on
+B4PROBE frame=970 sim=15.069666000083089 dt=0.0333333 flash=0.048562203 held=0.12946963 gain=1.3438861 night=1 n=3 explosion id=3 age=0.166667 I=23.145203 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=971 sim=15.102999301627278 dt=0.0333333 flash=0.035436872 held=0.09806875 gain=1.2679306 night=1 n=3 explosion id=3 age=0.200000 I=16.889547 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=972 sim=15.136332603171468 dt=0.0333333 flash=0.02119446 held=0.074283674 gain=1.2074414 night=1 n=3 explosion id=3 age=0.233333 I=10.101480 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=973 sim=15.169665904715657 dt=0.0333333 flash=0.011242473 held=0.056267306 gain=1.1598098 night=1 n=3 explosion id=3 age=0.266666 I=5.358269 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=1014 sim=15.202999206259847 dt=0.0333333 flash=0.006848709 held=0.042620532 gain=1.1226349 night=1 n=3 explosion id=3 age=0.300000 I=3.264159 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=1015 sim=15.236332507804036 dt=0.0333333 flash=0.0052064885 held=0.032283574 gain=1.0938218 night=1 n=3 explosion id=3 age=0.333333 I=2.481462 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=1016 sim=15.269665809348226 dt=0.0333333 flash=0.0037403116 held=0.024453687 gain=1.07161 night=1 n=3 explosion id=3 age=0.366666 I=1.782668 core=1.880000 st=0.600000 d=40.468502
+B4PROBE frame=1017 sim=15.302999110892415 dt=0.0333333 flash=0.0029316822 held=0.01852282 gain=1.0545579 night=1 n=3 explosion id=3 age=0.400000 I=1.397267 core=1.880000 st=0.600000 d=40.468502

@@ -1,0 +1,111 @@
+RUNBOOK: the owner's narration, from his Audacity WAV to the mixed trailer
+=========================================================================
+Uslu dur! trailer, part 1: graphics. The picture follows the voice: his voice is never sped
+up, pitched or stretched; if a line runs long, its scene gets more screen time.
+
+The tool: D:\Arma_CWA_worktrees\video-work\arma_CWR\tests\rendering\captures\video\owner_vo.py
+Run every command below from that folder (PowerShell):
+
+    cd D:\Arma_CWA_worktrees\video-work\arma_CWR\tests\rendering\captures\video
+
+Plain "python" is fine for every command: the steps that need faster-whisper start the
+resolve-edit venv themselves (used read-only, nothing is installed). Whisper uses CUDA when
+nvidia-smi shows 6 GB free, else the CPU (int8). The CPU is slow: about 20 s per pause-separated
+chunk, so a 10 minute session takes about 25 minutes (CUDA: under a minute). Force one with
+--device cuda or --device cpu.
+
+
+0. THE RECORDING
+   Put his WAV(s) in D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\reading\recordings\
+   One long file or one file per line, any names (a number in a file name, like "line04.wav",
+   is used as that file's line when it holds no spoken number). 48 kHz mono 24-bit is the ask;
+   44.1 kHz, 16-bit or stereo also work (resampled to 48 kHz, mixed down to mono).
+
+
+1. ONE COMMAND: split, pick, clean, fit
+
+    python owner_vo.py all
+
+   Writes into D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\
+     session\takes.txt    every take found: line, take number, where in the recording, what
+                          whisper heard, word match, length, peak, clipping, main or shorter
+                          wording, restarts cut out, sounds that belong to no take
+     session\takes\       one WAV per take (raw cut, for listening)
+     picks.txt            the take picked per line and why
+     lines\<id>.wav       the 16 finished lines (48 kHz mono 24-bit), lines\LINES.txt
+     fit\FIT_PLAN.txt     which lines fit their scene and, if not, the picture change
+     fit\timing_owner.json, fit\timeline.json   only when the picture must change
+
+   How takes are found: the words are aligned to the script, so missing, wrong or no spoken
+   numbers, lines out of order, extra takes, coughs and restarts are all handled. Spoken numbers
+   ("five", "line five") are used as anchors when present. A take whose words whisper did not
+   all hear is marked; a broken attempt is listed as a fragment (4.x1) and never picked.
+
+   His favourites: write lines like these into vo_owner\favourites.txt
+       4 2          line 4, take 2
+       12 short     line 12, his shorter wording
+       line 7 take 3
+   then run:  python owner_vo.py pick ; python owner_vo.py clean ; python owner_vo.py fit
+   (or one-off: python owner_vo.py pick --take 4=2)
+
+   A line NOT FOUND (or only fragments): ask him to read it again into a new file in
+   recordings\ and run "python owner_vo.py all" again (finished transcripts are cached).
+
+
+2. THE PICTURE (only if FIT_PLAN.txt asks for it)
+   "Every line fits ... mix now": go to 3.
+   Otherwise FIT_PLAN.txt lists, in order of preference:
+     - small overruns (up to 0.5 s into the next transition): accepted, nothing to do
+     - a slightly shorter transition next to the scene (never below 0.8 s for a fade or
+       wipe, 1.2 s for a dip): only a re-render
+     - more clip frames: reshoot that clip longer on BOTH sides, the same camera path at a
+       slower pace, then re-render. It prints the exact commands, for example:
+         python gen_video_v2.py --clip opening --frames 1056 --side both
+         powershell -NoProfile -File run_v2_lane.ps1 -Side vanilla -Clips opening -Expect 1056
+         powershell -NoProfile -File run_v2_lane.ps1 -Side ud -Clips opening -Expect 1056 -GameDir <the build collect_frames.py REQUIRE["ud"] names> -DataJunction RemasterUD-video-reshoot
+     - the intro: it holds longer (intro_extra) and the opening clip gets that many frames more
+     - the outro: the closing card holds longer (no reshoot)
+   Then re-render both montages with the timing file (writes out-split and out-sbs):
+         python trailer_v2.py --timing D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\fit\timing_owner.json
+         python trailer_v2.py --layout sbs --timing D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\fit\timing_owner.json
+   Games, reshoots and renders follow the handoff's rules (the pause rule, one game at a time,
+   hidden desktop, scoped cleanup). Without --timing, trailer_v2.py renders exactly as before.
+
+
+3. ONE COMMAND: mix, verify, preview
+
+    python owner_vo.py finish
+
+   This runs, in order:
+   a) the mix (the voice is placed, never stretched; -16 LUFS, under -1 dBTP):
+         python mix_vo.py --wav-dir D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\lines --fit --name uslu_dur_part1_graphics_owner --out D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\out-split --final-dir D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\final
+      -> final\uslu_dur_part1_graphics_owner_youtube_1080p60.mp4, _subtitled.mp4, .srt,
+         _side_by_side_3840x1080p60.mp4 (and vo_raw.wav, vo_norm.wav, vo_plan.txt in out-split)
+   b) the verification (also alone: python owner_vo.py verify), written to vo_owner\VERIFY.txt:
+      - ffprobe: every mp4 at 60/1 with the frame count of out-split\timeline.json
+        (8004 frames today; more after a reshoot):
+          C:\ffmpeg\bin\ffprobe.exe -v error -select_streams v:0 -show_entries stream=r_frame_rate,nb_frames -of csv=p=0 <mp4>
+      - the loudnorm print of the master (target -16 LUFS integrated, true peak under -1 dBTP):
+          C:\ffmpeg\bin\ffmpeg.exe -hide_banner -nostats -i <master mp4> -vn -af loudnorm=I=-16:TP=-1.5:LRA=11:print_format=summary -f null -
+      - a whisper listen-check of the final mix: every line transcribed where mix_vo.py placed
+        it and compared with the script
+      - check_vo.py on the finished lines (its own fit test is the strict 0.6 s rule, so a line
+        with an accepted small overrun shows FAIL there; the words are what matters):
+          C:\dev\resolve-edit\.venv\Scripts\python.exe check_vo.py --wav-dir <vo_owner\lines> --out <vo_owner\vo_check_owner.json>
+   c) the phone preview (also alone: python owner_vo.py preview), under 30 MB:
+         final\uslu_dur_part1_graphics_owner_preview_720p60.mp4
+
+   finish refuses to mix when FIT_PLAN.txt changed the picture but the montage was not yet
+   re-rendered with it (--anyway mixes on the old montage; mix_vo.py --fit then pushes the
+   long lines later).
+
+
+DISK: D: is nearly full. Each full mix writes about 0.9 GB into final\ (master, subtitled,
+side by side). Delete what is not needed.
+
+Tested before the recording arrived on a stand-in session (the rejected ElevenLabs takes laid
+out like his session, with room tone, hum, a cough, a clipped take, a restart mid-take, a broken
+take, a shorter wording, two lines swapped, a missing gap; once without and once with spoken
+numbers including "line five", a missing number and a wrong number). See test\ for the
+stand-in builder (make_standin.py), the evaluator (evaluate.py) and the plan test
+(test_plan_unchanged.py).

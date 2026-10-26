@@ -1,0 +1,49 @@
+## track
+normals
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabricated files. All 24 cited image and artefact paths exist, the listing matches (1180 files), and the scratch worktree D:\\Arma_CWA_worktrees\\gfx-normals exists. The ground_stats, hull_stats, timings and load-time figures match the logs: 592 textures in 5034 ms, 552 in 6631 ms, worst single texture 229.5 ms, and the min-of-6 samples in tm3_abel.",
+ "Misleading framing of the core technique. In the best variant V6, terrain relief does not use the load-time normal map at all (kBumpTerrNmap = 0.0 in override_v6). It comes entirely from a shader-only height field built from the existing detail texture alpha (tex1.a). The C++ companion maps only reach objects, and objects show no visible gain. So the track's headline technique (normal maps generated at load time) is a negative result, and the best image is effectively a shader effect.",
+ "'No swimming' is overclaimed. The two motion strips are 5 frames each, with steps of 0.25 to 0.35 m per frame. They show the relief is locked to the texture, but they cannot show sub-pixel shimmer of the high-frequency, near-black micro-shadow specks in real 60 fps motion. 4x MSAA does not anti-alias shader detail.",
+ "'Mean lit brightness matches as shipped' holds on Abel (107.4 to 109.1) but not on Sinai: lit ground goes 78.3 to 75.7 (3% darker), and whole-frame mean drops 1.0 to 1.6 levels on both Sinai views. NOTES.md lists the Sinai number; the JSON headline does not.",
+ "V6 itself was never timed in the interleaved run. Its only GPU sample is a single shot on lowsun_fp, 12.41 ms against 7.35 ms as shipped. That is noise on a shared GPU, but the claim that V6 costs about 1 to 2 ms is an extrapolation from V9.",
+ "The 'Remastered (as shipped)' panels come from the prototype exe with the O=1 runtime toggle and the V6 override shader at V=0, not from the shipped lighting exe. Nothing checks that this path is bit-identical to the shipped exe. The magenta CPU-path diagnostic did run on dist/lighting-rwdi, so side finding 1 itself is grounded."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[
+ "Embossed or overlay look. On Sinai the desert hardpan turns into something like cobblestone or pebble paving. The same detail grain is applied to every surface (Abel gravel, a forest-edge dirt road, grass slopes, desert), so it reads as a uniform texture overlay, not as material.",
+ "Harsh near-black micro-shadow specks ('pepper') on the forest_edge_golden dirt road and on grass at native resolution, visible in the 2x crop. They are high-frequency and are likely to shimmer in motion.",
+ "Leans slightly darker on Sinai: lit ground is 3% darker, the whole frame 1 to 1.6 levels darker, and the cavity term takes 1 to 4% off the shade. Not crushed (shade/lit 0.73 to 0.85), but not neutral either.",
+ "Side finding colour shift: on the per-pixel path the Zelda slats go from grey (as in Classic) to tan. That helps the owner's evening-warmth rule, but it may be a material or tint the per-pixel path drops, not a lighting improvement. It needs a root cause before it ships.",
+ "None of the following: no blue haze, wash, grading, vignette, grain or lens dirt; no mustard ground; no flattened crowns; no new art. The interior per-pixel darkening was correctly rejected and excluded."
+]
+## cost_ok
+true
+## score_0_to_10
+4
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\normals\BEST_lowsun_fp.png
+## one_line
+Real, honestly documented, but small. The load-time normal maps are a negative result on CWA's flat-painted vehicles. The useful pieces are a shader-only, low-sun gravel micro-relief that is taste-risky on sand and grass, and a valuable side finding that runtime-spawned vehicles never get Remastered per-pixel shading.
+## critique
+Verification: every cited file exists, and the numbers match the logs. In r6 the override_v6 shaders load and compile in both worlds ('shader cache saved (144 entries)', no errors). The prototype logs 592 and 552 companion-map generations. The late-VB path logs that it skips the sky, sun halo and clouds. The variant knob (saturation 101.12 / 1.12 / 81.12 / 91.12 / 61.12) is set before each shot. My PIL diff confirms the AFTER images really differ: as shipped to V6 mean absolute difference is 4.7 (lowsun_fp), 3.5 (Sinai lowsun), 3.4 (hull_close), 2.5 (forest edge) and 0.9 (noon). 28% of lowsun_fp pixels change by more than 4 levels, and 10% by more than 16.
+
+Look: the one real gain is close sunlit ground at a low sun. In BEST_lowsun_fp the near gravel gets visible pebbles with lit faces and small cast shadows, the mean stays put, and the gain shows without squinting in the foreground. Everything else is a wash or worse. Hulls are unchanged at x1 and x2. Noon is unchanged. Shaded ground is unchanged, and so is the tree-covered hillside. Sinai sand becomes cobbles. The forest-edge dirt road gains black pepper specks. A player would say 'the ground has more grain at sunrise', not 'this looks like a different game'. It moves almost nothing toward the RTX-on vision: no bounce, no colour bleeding, no macro sky occlusion, no reflections, no volumetrics, no emissive light. The cavity term is texel-scale AO on a detail texture. Hence rtx_vision 2.
+
+The most important technical point the report underplays: the best result does not use the C++ load-time normal map. Terrain gets kBumpTerrNmap = 0, and relief comes from the detail texture alpha in the shader. The companion maps, with their 5 to 6.6 s render-thread generation and RGBA16F memory, feed only objects, where there is no visible gain. Production should drop the whole texture-generation path. The terrain relief is shader-only. If it is wanted, it needs per-surface strength (much weaker on sand and grass), a distance fade, and a proper shimmer test at 60 fps with real camera motion. The 5-frame strips do not establish temporal stability for near-black, texel-frequency micro shadows.
+
+The side finding is worth more than the track. Vehicles spawned after Shapes.OptimizeAll draw on the CPU T&L path with pre-lit vertex colour in the shipped Remastered build: the magenta diagnostic on dist/lighting-rwdi shows M113, Jeep and interior all on that path. So no per-pixel sun, no shadow receiving and no specular for every capture prop and Guerrilla spawn. That invalidates hull judgements in earlier baselines and deserves its own fix and re-review. The grey-to-tan slat shift that comes with it must be root-caused (a dropped material tint, or a CPU-path tint) before anyone credits it as evening warmth.
+
+Cost: fine against an RTX 3060 at 1080p. Measured deltas are within about 1 to 2 ms on a noisy shared GPU, and V6 adds roughly 44 taps per terrain pixel. The load-time CPU generation is not fine (230 ms hitches), but as noted it is unnecessary for the best result. Worth building properly: the late-VB fix, yes. Terrain micro-relief: maybe, as a cheap shader polish with heavy taste tuning. Load-time normal maps: no. Overall 4.
+## artefacts_seen
+Opened and judged: BEST_lowsun_fp.png, BEST_sinai_lowsun_fp.png, BEST_hull_close.png, three_sinai_hull_close.png, three_noon_fields.png, three_forest_edge_golden.png, evidence_zelda_cpu_path_vs_per_pixel_r6.png, evidence_micro_shadow_debug_r4.png, evidence_interior_per_pixel_too_dark_r5.png, evidence_cpu_path_magenta_shipped_build.png and runs/seq2_abel/lowsun_fp__motion2_strip.png, plus my own native-resolution as-shipped vs V6 crops made from runs/r6/shots for forest_edge_golden, sinai_lowsun_fp and lowsun_fp. Artefacts found: black micro-shadow specks on the dirt road and grass (forest edge), a cobblestone look on Sinai sand, and a uniform tiled-grain overlay feel. No NaN, halos, banding, seams (detail-only path) or light leaks.
+## prototype_actually_loaded
+Yes. runs/r6/tri/nrm_abel_r6 and nrm_sinai_r6 game_stdout.log both show 'shader override dir = ...\normals\override_v6', psRemasterCommon.glsl (32473 bytes) and the main shaders loaded, 'shader cache saved (144 entries)', and no compile or link errors. The prototype C++ is active: 'RESEARCH normals: #592 ... (total 5034 ms)' on Abel, '#552 ... (total 6631 ms)' on Sinai, and 'RESEARCH late VB: ... skipped (special light/fog hints)' for obloha, sunhalo and mrak*. triSetLighting saturation values per shot match the variant labels. tm3_abel ran with override_v5, and its per-shot gpu=frame values match timings.md exactly.

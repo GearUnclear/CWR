@@ -1,0 +1,70 @@
+docs: graphics-remaster A0 checks and the 1080p timing baseline
+
+What the player sees: nothing. A0 changes no engine code, shader or data;
+this commit records its results in the integration plan and the roadmap.
+
+What A0 checked: F10 and F11 are in their narrowed form. In code,
+Scene::LoadConfig applies only ApplyGraphicsShadowsToScene from the boot
+config (object and vehicle shadows, cloudlets), the terrain grid and object
+LOD bias stay on the live Graphics page path, and GraphicsConfig::Migrate
+lifts msaaSamples 0 to 4 only below v3 and with renderScale < 1.001. In
+game, a fresh user dir boots to a 4x MSAA frame target at render scale 1
+before the test sets anything, and triShadowSceneDump at sunrise_ridge
+with no spawned unit answers OK with the trees and bushes in the depth map.
+
+Measured cost (quiet machine: no other PoseidonGame for the whole run,
+0 of 4 tri slots held; RTX 4060 Ti, 1920x1080 windowed, render scale 1.0,
+4x MSAA, 20 hero views, 3 interleaved rounds): Remastered takes 2.0 to
+11.9 ms of GPU time on 17 views and 17.4, 23.3 and 24.3 ms on the long
+views (sunrise_ridge, the valley at 05:15, Eden broken_high, 10,800 to
+12,900 draws). There the GPU span is set by draw submission rather than
+shading: the 26 to 31 ms CPU frame is longer than the GPU span,
+nvidia-smi reads 54 to 73% utilisation at 39 to 46 W, at P0, in the 3 s
+before those shots, and Classic costs the same as Remastered on
+sunrise_ridge (frame 18.10 against 17.41 ms, world 17.95 against 16.26).
+Remastered takes more time per draw on the other two: on Eden broken_high
+the draw counts match (10,784 against 10,787), yet it adds 6.25 ms of
+world time and 4.4 ms of CPU frame. MENU's 2.5 to 7.5 ms base frame was
+measured after the frame-cost fixes (the perf track, step A4), so these
+pre-A4 numbers are not a resolution scale-up of it, and the B steps judge
+headroom on the long views only after A4. Sky and sea views run the GPU
+mostly at P3 or P5 clocks, so their milliseconds overstate full-clock
+cost and swing between rounds by up to about 7x (sea_noon 1.20 to 8.60 ms,
+coast_oc_up 1.73 to 8.58, hill_1730 1.58 to 8.36); the plan's timing gate
+now logs the GPU clock with every shot and compares at a matching clock.
+Table in plan section 5 A0.
+
+Plan corrections: section 3.2 gains the measured base frame and why it
+is not a scale-up of MENU's post-A4 base frame; section 5 A0 lists where
+the timing views deviate from their 7.3 start views (forest_edge_golden
+Jeep parked, town_night without driven Jeeps, coastline_sunset heading
+and eye, woods_pine2_evening props, lowsun_fp camera,
+road_flat_drive_moonless Jeep not driven, broken_high without sky drift,
+ffh static); section 8 item 5 notes which views are not repeatable
+between boots (Sinai ground band, crew views, fire and smoke), so
+pixel-exact checks use the others; item 7 adds the clock logging, and A1
+takes A0's timing rig (gpu_sampler.ps1, summarize_timing.py, the twenty
+views) into the repo so the gate stops depending on a gitignored folder;
+MENU's 1.5 to 2x rule already includes the 1440x960 to 1080p pixel
+ratio, so applying all of it to A0's 1080p numbers is conservative; 7.1
+records that the hidden desktop holds 1920x1080; section 9's branch
+question is settled.
+
+Tests: PoseidonTests gate tags of plan section 8 item 3, 425 of 425
+cases; [GraphicsPage],[graphics] 378 of 379, the known
+test_dds_converter.cpp:347 fixture case. Build of 0779350 exit 0; a
+rebuild runs only the build-info step and relinks nothing.
+
+In game (tmp/integration/A0 in the graphics-remaster worktree): smoke 3/3
+(KHR_debug ids 131169, 131154 and 131218 only, no 131204 or 131222);
+look baseline 20261017-233303-gr-base, 3/3 and 30 shots, plus a second
+boot 20261017-235653-gr-base-repeat for the boot-to-boot noise; timing
+20261017-234549-gr-timing.
+
+Known risks: no RTX 3060 was measured; the GPU clock state is set by the
+driver from the load and cannot be pinned without a system setting; the
+ffh timing view is a static stand-in that never reports settled within
+300 frames; eight timing views deviate from their 7.3 start views (listed
+in 5 A0), so a later step's hero still is not always the A0 view.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

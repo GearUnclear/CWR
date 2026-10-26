@@ -1,0 +1,1 @@
+call { { if (("Man" countType [_x select 0]) == 1) then { capWg0 = [_x select 1, _x select 2] call capGround; capWx1 = (_x select 1) + 300 * (sin (_x select 3)); capWz1 = (_x select 2) + 300 * (cos (_x select 3)); capWg1 = [capWx1, capWz1] call capGround; (_x select 0) doWatch [capWx1, capWz1, 1.6 + capWg0 - capWg1] } } forEach capProps }

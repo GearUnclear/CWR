@@ -1,0 +1,16 @@
+{
+ "clip": "bay_reflections",
+ "side": "ud",
+ "frames": 570,
+ "fps": 60,
+ "size": [
+  1920,
+  1080
+ ],
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\ud\\bay_reflections\\bay_reflections__ud.mkv",
+ "game_dir": "D:\\Arma_CWA_worktrees\\look-director\\arma_CWR\\dist\\look-director-rwdi",
+ "mode_line": "view=bay_reflections;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=1808;objects=2961;culled=1673;lights=13;lod=0.0104167;pin=1;horizon=ready",
+ "gamma": null,
+ "run": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\runs\\ud-bay_reflections",
+ "mb": 445.9
+}

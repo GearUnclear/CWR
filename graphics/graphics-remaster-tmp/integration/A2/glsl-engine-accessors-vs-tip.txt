@@ -1,0 +1,25 @@
+Engine accessors (RemasterVertexSource, RemasterFragmentCommon, RemasterFragmentMain, PostShaderSource),
+linked from the A2 build's own objects by a scratch dumper, against the tip's (HEAD 7e013c2) raw strings
+read with git show (UTF-8).
+
+psDetailRemasterMain          638 bytes  engine-accessor sha1 30d51e26d9cd  tip sha1 30d51e26d9cd  identical
+psGrassRemasterMain           521 bytes  engine-accessor sha1 fbd6cb72cf26  tip sha1 fbd6cb72cf26  identical
+psNormalRemasterMain          397 bytes  engine-accessor sha1 5c4a6f8c637e  tip sha1 5c4a6f8c637e  identical
+psPostAo                     2567 bytes  engine-accessor sha1 758285f6e877  tip sha1 758285f6e877  identical
+psPostAoBlur                  517 bytes  engine-accessor sha1 36812669e6e9  tip sha1 36812669e6e9  identical
+psPostBloomDown               852 bytes  engine-accessor sha1 ee00cebc6578  tip sha1 ee00cebc6578  identical
+psPostBloomUp                 639 bytes  engine-accessor sha1 e57c03c82fd1  tip sha1 e57c03c82fd1  identical
+psPostComposite              2899 bytes  engine-accessor sha1 4b621d2d7153  tip sha1 4b621d2d7153  identical
+psPostShafts                 1036 bytes  engine-accessor sha1 92133a783921  tip sha1 92133a783921  identical
+psRemasterCommon            20424 bytes  engine-accessor sha1 a626c89aa9ea  tip sha1 a626c89aa9ea  identical
+psWaterRemasterMain          1393 bytes  engine-accessor sha1 460317f50f85  tip sha1 460317f50f85  identical
+vsPost                        240 bytes  engine-accessor sha1 baa61f9dd96f  tip sha1 baa61f9dd96f  identical
+vsScreenRemaster             1237 bytes  engine-accessor sha1 01c28544718a  tip sha1 01c28544718a  identical
+vsShadowRemaster             1382 bytes  engine-accessor sha1 c10d05c741e1  tip sha1 c10d05c741e1  identical
+vsTransformRemaster          3076 bytes  engine-accessor sha1 76362e77f6e1  tip sha1 76362e77f6e1  identical
+common+psNormalRemasterMain  20821 bytes  identical
+common+psDetailRemasterMain  21062 bytes  identical
+common+psGrassRemasterMain  20945 bytes  identical
+common+psWaterRemasterMain  21817 bytes  identical
+names in tip not dumped: []
+ALL IDENTICAL

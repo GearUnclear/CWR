@@ -1,0 +1,20 @@
+== v3 noon_fields (corrected jeep/soldier boxes)
+region means of Remastered: jeep:97.6 soldier:106.3 ground:152.8 far:185.1 sky:188.5
+classic                frame:-0.88 p99:+20.0 p1: -6.3 >2:48.3% | jeep: +0.81 soldier: +8.69 ground: -2.19 far: +0.86 sky: -0.02
+gi_m1s1                frame:+0.02 p99: +1.7 p1: -1.3 >2: 0.7% | jeep: +0.51 soldier: +0.04 ground: +0.03 far: -0.01 sky: +0.00
+gi_m1s2                frame:+0.04 p99: +2.7 p1: -2.3 >2: 2.7% | jeep: +1.03 soldier: +0.32 ground: +0.06 far: -0.02 sky: +0.01
+gi_m1s2_notemporal     frame:+0.05 p99: +3.7 p1: -3.3 >2: 5.1% | jeep: +1.04 soldier: +0.31 ground: +0.06 far: -0.01 sky: +0.04
+gi_m2s2                frame:+0.04 p99: +4.7 p1: -4.0 >2: 6.3% | jeep: +0.09 soldier: -0.15 ground: +0.00 far: -0.02 sky: +0.10
+gi_m3s1                frame:-0.13 p99: +4.0 p1: -4.7 >2: 6.5% | jeep: -2.19 soldier: -1.43 ground: -0.28 far: -0.03 sky: +0.07
+== v4 noon_fields (corrected jeep/soldier boxes)
+region means of Remastered: jeep:97.6 soldier:106.2 ground:152.8 far:185.1 sky:188.5
+classic                frame:-0.87 p99:+20.0 p1: -6.3 >2:48.2% | jeep: +0.82 soldier: +8.87 ground: -2.19 far: +0.86 sky: +0.02
+gi_b0m3                frame:-0.34 p99: +3.7 p1: -7.0 >2: 5.7% | jeep: +0.10 soldier: -2.93 ground: -0.50 far: -0.26 sky: -0.02
+gi_m6s05               frame:+0.04 p99: +3.0 p1: -3.0 >2: 3.9% | jeep: +1.30 soldier: +0.73 ground: +0.09 far: -0.02 sky: -0.04
+gi_m6s1                frame:+0.11 p99: +4.3 p1: -3.3 >2: 5.8% | jeep: +2.56 soldier: +1.46 ground: +0.20 far: -0.02 sky: -0.02
+rem_b0                 frame:-0.31 p99: +1.0 p1: -6.0 >2: 2.7% | jeep: -0.24 soldier: -3.33 ground: -0.44 far: -0.24 sky: -0.01
+== v6 noon_fields (corrected jeep/soldier boxes)
+region means of Remastered: jeep:97.6 soldier:106.2 ground:152.8 far:185.1 sky:188.5
+classic                frame:-0.88 p99:+20.0 p1: -6.3 >2:47.9% | jeep: +0.82 soldier: +8.99 ground: -2.19 far: +0.85 sky: -0.03
+gi_m1s1                frame:+0.02 p99: +1.7 p1: -1.3 >2: 1.1% | jeep: +0.64 soldier: +0.45 ground: +0.04 far: -0.01 sky: -0.02
+gi_m6s1                frame:+0.14 p99: +4.7 p1: -2.3 >2: 4.6% | jeep: +3.09 soldier: +1.57 ground: +0.27 far: -0.01 sky: -0.02

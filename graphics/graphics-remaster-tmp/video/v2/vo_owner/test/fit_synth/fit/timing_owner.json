@@ -1,0 +1,19 @@
+{
+ "intro_extra": 0.9,
+ "frames": {
+  "opening": 1044,
+  "cloud_shadows": 600
+ },
+ "transitions": {
+  "opening": [
+   "dip",
+   1.3
+  ],
+  "valley_mist": [
+   "fade",
+   0.9
+  ]
+ },
+ "closing_s": 11.9,
+ "note": "owner_vo.py fit: the picture follows the owner's voice; frames = 60 fps clip lengths (a longer reshoot), transitions = a scene's out-transition [kind, seconds], intro_extra = seconds the intro holds longer, closing_s = the closing card"
+}

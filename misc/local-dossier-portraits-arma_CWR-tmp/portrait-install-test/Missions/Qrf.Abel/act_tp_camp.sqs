@@ -1,0 +1,4 @@
+; debug action: back to the Camp overwatch (the player start)
+aP setPos [7205, 6048, 0]
+hint "DEBUG: back at the Camp overwatch."
+exit

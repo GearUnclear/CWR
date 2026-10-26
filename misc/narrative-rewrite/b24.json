@@ -1,0 +1,10 @@
+{
+  "id": "b24",
+  "bank": "kBio1Hostile",
+  "variant": 5,
+  "text": "Posted to {Place}, officer {Name} missed a first child's birth. Letters home described good meals and new friends, leaving out long shifts checking travel papers and orders barring leave.",
+  "word_count": 29,
+  "self_review": "An officer missed the birth of a child while posted away and concealed long duties and barred leave in cheerful letters home.",
+  "source_pattern": "Plausible invention; the supplied research does not document these letters or this family separation.",
+  "fictional_changes": "The parenthood, missed birth, letters, posting, and omissions are entirely fictional."
+}

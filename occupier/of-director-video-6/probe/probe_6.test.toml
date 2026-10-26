@@ -1,0 +1,7 @@
+# Scratch probe for the sixth director video (not a regression test): zones, generated bases, the new surfaces.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+tags = ["scratch", "occupierforces"]
+timeout = 900
+assert_timeout = 600
+extra_args = ["--dev"]

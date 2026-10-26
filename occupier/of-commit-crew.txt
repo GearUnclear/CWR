@@ -1,0 +1,31 @@
+guerrilla: crew settle off the operation ledger one for one (CAOpCrewSettled); the prune never refunds crew
+
+A ledger row's outstanding kept the crew units after the crew settled as
+bodies (CrewHome, a partial spawn, NoteLoss, the Leftover hand-off), so a
+ground hull and a re-planned airframe left a 2-unit residue that PruneOps
+could refund past the cap, creating units. CounterAttack now emits
+CAOpCrewSettled with the crew count wherever crew leave an operation's
+price (SettleCrew: partial spawn, dead crew on a return to abstract
+travel, CheckHull / CheckEscort, FinishEscort / FinishHull, StepHomeHulls,
+and the air paths: airframe lost, home after a partial unload,
+StepAirHomes, strikes); the ledger takes outstanding -= units and credits
+nothing, so a fully settled row reads 0 (home: reserve +n, surplus: pool
++n, dead: losses +n, partial spawn: pool +n, each row -n). The forced
+prune refunds only outstanding minus the crew CounterAttack still holds
+(OwedOnOp). Old saves: OpRow::crewLedger is false for rows from older
+blocks and ReconcileLegacyOpRows lowers them to what is still owed on
+load, credits nothing, logs once. _airHomes now counts as CounterAttack
+state so airframes flying home survive a save.
+
+Unit: the air re-plan case asserts 0 with the Post and loss deltas for
+the refund, landed and shot-down endings; a truck row 4 to 0 with pool +
+outstanding + Post bodies conserved; 140 operations pruned past the cap
+create nothing; a legacy row settles on load once. 679 cases over the
+guerrilla / counterattack / occupierforces / packages / save / air tags;
+full suite 3221 of 3230 with only the 5 known reds; tri 9/9 on
+remaster-shadow-of1 (pool_off, pool_on, motorized, armoured_column,
+air_op, refill_pushout, wave_base, counter_attack_offscreen,
+offscreen_save_reload.seq); human suite OK. OFFSCREEN-CONTRACT 10.2 row
+"Crew of a hull or airframe".
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

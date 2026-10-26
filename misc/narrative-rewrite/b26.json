@@ -1,0 +1,10 @@
+{
+  "id": "b26",
+  "bank": "kBio2Friendly",
+  "variant": 1,
+  "text": "{Name}, a quarry worker from {Place}, deserted a resistance position during an attack. A surviving fighter later reported that a companion had stayed to defend the position and been killed.",
+  "word_count": 30,
+  "self_review": "A quarry worker deserted a resistance position and later learned that a companion who stayed had died.",
+  "source_pattern": "The supplied Bleichman testimony describes flight during a camp attack, later return, and burial of dead companions.",
+  "fictional_changes": "The quarry work, assigned position, desertion, and particular companion are invented. Historical escape is not being labeled desertion."
+}

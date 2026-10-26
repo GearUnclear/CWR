@@ -1,0 +1,206 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index 70f8ed23..c36d769a 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -339,6 +339,23 @@ float CameraTimeOfDayEv(float sunElevationDeg, float veil)
+            kCameraHighSunEv * Smoothstep(35.0f, 55.0f, sunElevationDeg) * (1.0f - Clamp01(veil));
+ }
+ 
++float DaySkyDeepWeight(float sunElevationDeg, float sinViewElevation, float cosToSun, float veil)
++{
++    return Smoothstep(8.0f, 25.0f, sunElevationDeg) * Smoothstep(0.03f, 0.4f, sinViewElevation) *
++           (1.0f - Clamp01(veil)) * (1.0f - Smoothstep(0.86f, 0.985f, cosToSun));
++}
++
++Rgb DaySkyDeepen(const Rgb& c, float weight)
++{
++    const float l = Luminance(c);
++    const float lo = std::min(c.r, std::min(c.g, c.b));
++    if (!(weight > 0.0f) || !(l > 1e-8f) || lo >= l)
++        return c;
++    const float s = std::max(
++        1.0f, std::min(1.0f + kCameraDaySkyDeep * Clamp01(weight), (1.0f - kCameraDaySkyFloor) * l / (l - lo)));
++    return {l + (c.r - l) * s, l + (c.g - l) * s, l + (c.b - l) * s};
++}
++
+ float CameraDuskKeep(float sunElevationDeg)
+ {
+     return Smoothstep(5.0f, 0.0f, sunElevationDeg) * Smoothstep(-6.0f, -3.0f, sunElevationDeg);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+index b64d7bb4..371f7d5d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -149,7 +149,12 @@ constexpr float kDuskDarkKeep = 0.62f;
+ // round 2: the pale Abel fields and the Sinai sand at noon stayed near-white
+ // paper at +0.15; a photographer exposes a bright plain for its highlights,
+ // so the ground gets its tonal range and texture, about 0.3 to 0.4 EV under).
+-constexpr float kBrightKeep = -0.45f;
++// Look fix "noon" (round 4): at -0.45 a bright plain went 0.38 EV under on
++// top of the high sun's kCameraHighSunEv, 0.63 EV in all: the Sinai sand sat
++// 35 levels under the original (149 against 186) and read dull rather than
++// sun-baked, and the clear sky over it went slate with it. With the high
++// sun's step a bright plain is still about 0.3 EV under the average scene.
++constexpr float kBrightKeep = -0.05f;
+ // The guard: the kMeterHighlight percentile of the blocks' brightest taps
+ // stays at this scene light after exposure (the curve shows 1.3 at about 0.8
+ // of white: a bright sky, the glow by a low sun, the sky between crowns keep
+@@ -355,6 +360,27 @@ constexpr float kVeilSaturationDrop = 0.15f;
+ // this at 30 degrees up and above): the haze's grey otherwise washed the
+ // sunset's upper sky (133, 131, 133) and the sea with it.
+ constexpr float kCameraLowSunSkyBlue = 0.6f;
++// A clear day's sky as a camera renders it (look fix "noon", round 4; the
++// dome's camSkyLook and camSkyDeepen, EngineGL33_LightingShadersSky.cpp). The
++// table's clear sky has the real sky's chromaticity (zenith near x 0.25,
++// y 0.27) and the hue-keeping curve keeps it exactly, where a camera's colour
++// rendition (its per-channel film curve) deepens that blue. Without it the
++// noon sky over a bright plain read as slate, (89, 112, 146): the original's
++// and landed's hue at a third of their light. The clear sky's chroma about
++// its luminance (linear light: same luminance, same dominant hue) is scaled
++// by 1 + kCameraDaySkyDeep times DaySkyDeepWeight: by day only (none under 8
++// degrees of sun, all from 25), above the horizon band (from a view
++// elevation's sine of 0.03 to 0.4, so the horizon stays pale), not in the
++// sun's glow (none within about 10 degrees of the sun, all from 30), not
++// under the weather's veil. No channel goes under kCameraDaySkyFloor of the
++// luminance (no neon blue).
++constexpr float kCameraDaySkyDeep = 0.65f;
++constexpr float kCameraDaySkyFloor = 0.25f;
++// The weight (0..1) at a sun elevation (degrees), the view's sine of
++// elevation, its cosine to the sun and the weather's veil.
++float DaySkyDeepWeight(float sunElevationDeg, float sinViewElevation, float cosToSun, float veil);
++// The clear sky's colour (linear) deepened at that weight.
++Rgb DaySkyDeepen(const Rgb& c, float weight);
+ // Additive pre-lit draws (the fire's flame) at full night: their codes times
+ // this on top of camAdditive (the flame reads at a glance against the night).
+ constexpr float kCameraAdditiveNight = 1.0f;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index 4ca14b8b..5ecfe60e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -155,8 +155,25 @@ vec3 camSkyRolloff(vec3 lin) {
+ //     blue (the table's own zenith hue), which the haze otherwise greyed at
+ //     sunset, and at twilight the band along the horizon is brighter and
+ //     warmer toward the sun's bearing, dimmer away from it;
++//   - by day, above that band, the clear blue a camera renders (camSkyDeepen);
+ //   - the weather's veil (litCameraLook.x): a pale grey layer over the blue,
+ //     the broken cloud of an overcast day rather than a clear one.
++// The clear day's blue (look fix "noon"; PhotoCamera.hpp kCameraDaySkyDeep,
++// DaySkyDeepen): the clear sky's chroma about its luminance, in linear light
++// (same luminance, same dominant hue), times 1 + kCamSkyDeep * w, no channel
++// under kCamSkyDeepFloor of the luminance. The table's sky has the real
++// sky's chromaticity, which the hue-keeping curve keeps exactly; a camera's
++// per-channel film curve deepens it, and without that the noon zenith over a
++// bright plain read as slate.
++const float kCamSkyDeep = 0.65;      // kCameraDaySkyDeep
++const float kCamSkyDeepFloor = 0.25; // kCameraDaySkyFloor
++vec3 camSkyDeepen(vec3 a, float w) {
++    float l = dot(a, kLuma);
++    float lo = min(a.r, min(a.g, a.b));
++    if (w <= 0.0 || l <= 1e-8 || lo >= l) return a;
++    float s = max(1.0, min(1.0 + kCamSkyDeep * clamp(w, 0.0, 1.0), (1.0 - kCamSkyDeepFloor) * l / (l - lo)));
++    return vec3(l) + (a - vec3(l)) * s;
++}
+ vec3 camSkyLook(vec3 a, vec3 d) {
+     if (litCamera.x < 0.5) return a;
+     float e = max(d.y, 0.0);
+@@ -165,6 +182,10 @@ vec3 camSkyLook(vec3 a, vec3 d) {
+     float day = smoothstep(8.0, 25.0, sunEl);
+     float band = exp(-e / 0.16) * day;
+     a = mix(a, vec3(lum), 0.6 * band) * (1.0 + 0.45 * band);
++    // DaySkyDeepWeight: by day, above the horizon band, out of the sun's glow,
++    // not under the weather's veil.
++    a = camSkyDeepen(a, day * smoothstep(0.03, 0.4, e) * (1.0 - clamp(litCameraLook.x, 0.0, 1.0)) *
++                            (1.0 - smoothstep(0.86, 0.985, dot(d, skySunDir()))));
+     float low = litCameraLook.w;
+     if (low > 0.0) {
+         vec4 mz;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 9c640e09..a204474c 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -563,3 +563,69 @@ TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and le
+     CHECK(GoldenWarmShare(Rgb(0.45f, 0.5f, 0.55f)) < grey);
+     CHECK(GoldenWarmShare(Rgb(0.0f, 0.0f, 0.0f)) > 0.0f);
+ }
++
++TEST_CASE("PhotoCamera: look fix noon: a bright plain at a high sun is exposed a little under, not dull",
++          "[Remaster][PhotoCamera]")
++{
++    // Round 2 put a bright plain 0.38 EV under on top of the high sun's
++    // step: the Sinai sand sat 35 levels under the original and the clear
++    // sky over it went slate. Now a plain that meters about 0.84 EV above the
++    // average scene (noon_fields) sits between a quarter and under half a
++    // stop under the average scene's grey, the high sun's step included.
++    LightingTuning t;
++    t.camEv = 0.0f;
++    MeterResult plain;
++    plain.valid = true;
++    plain.mean = kDaylightMeanLog2 + 0.84f;
++    plain.highlight = plain.mean + 1.0f;
++    const float timeEv = CameraTimeOfDayEv(60.0f, 0.0f);
++    const float under = TargetExposureLog2(plain, 0.0f, t, 0.0f, 0.0f, timeEv) - (std::log2(kMiddleGrey) - plain.mean);
++    CHECK(under < -0.2f);
++    CHECK(under > -0.45f);
++    // Still under the average scene: a bright plain is not pulled up to grey.
++    CHECK(kBrightKeep <= 0.0f);
++}
++
++TEST_CASE("PhotoCamera: look fix noon: the clear day sky deepens toward a camera's blue, the horizon stays pale",
++          "[Remaster][PhotoCamera]")
++{
++    // The table's noon zenith (linear, the slate (91, 114, 148) of round 3).
++    const Rgb zenith(0.104f, 0.170f, 0.302f);
++    const float w = DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.0f);
++    CHECK(w == Catch::Approx(1.0f));
++    const Rgb deep = DaySkyDeepen(zenith, w);
++    // Same luminance, more chroma, the same dominant hue (the chroma vector
++    // is scaled, not turned), no channel under the floor.
++    const float l = Luminance(zenith);
++    CHECK(Luminance(deep) == Catch::Approx(l).epsilon(1e-4));
++    CHECK(deep.b - deep.r > 1.5f * (zenith.b - zenith.r));
++    CHECK((deep.g - l) / (deep.b - l) == Catch::Approx((zenith.g - l) / (zenith.b - l)).epsilon(1e-4));
++    CHECK(std::min(deep.r, std::min(deep.g, deep.b)) >= kCameraDaySkyFloor * l - 1e-6f);
++    // In display terms a deep, clean blue: red well under half of blue.
++    CHECK(std::pow(deep.r, 1.0f / 2.2f) < 0.45f * std::pow(deep.b, 1.0f / 2.2f));
++    // A strongly coloured sky deepens only to the floor (no neon), and one
++    // already past it is left as it is.
++    const Rgb blue(0.06f, 0.12f, 0.50f);
++    const Rgb held = DaySkyDeepen(blue, 1.0f);
++    CHECK(held.b > blue.b);
++    CHECK(std::min(held.r, std::min(held.g, held.b)) >= kCameraDaySkyFloor * Luminance(blue) - 1e-5f);
++    const Rgb neon(0.02f, 0.10f, 0.60f);
++    CHECK(DaySkyDeepen(neon, 1.0f).r == Catch::Approx(neon.r));
++    // Grey and black stay as they are; no weight is the identity.
++    const Rgb grey(0.3f, 0.3f, 0.3f);
++    CHECK(DaySkyDeepen(grey, 1.0f).r == Catch::Approx(0.3f));
++    CHECK(DaySkyDeepen(grey, 1.0f).b == Catch::Approx(0.3f));
++    CHECK(DaySkyDeepen(Rgb(0.0f, 0.0f, 0.0f), 1.0f).b == 0.0f);
++    CHECK(DaySkyDeepen(zenith, 0.0f).r == zenith.r);
++    // The weight: none at the horizon (the pale band), at a low sun (golden
++    // hour, dusk, night keep their own sky), in the sun's glow, under the
++    // weather's veil; it grows with the view's elevation.
++    CHECK(DaySkyDeepWeight(60.0f, 0.0f, 0.3f, 0.0f) == 0.0f);
++    CHECK(DaySkyDeepWeight(60.0f, 0.1f, 0.3f, 0.0f) < DaySkyDeepWeight(60.0f, 0.3f, 0.3f, 0.0f));
++    CHECK(DaySkyDeepWeight(6.0f, 0.5f, 0.3f, 0.0f) == 0.0f);
++    CHECK(DaySkyDeepWeight(-10.0f, 0.5f, 0.3f, 0.0f) == 0.0f);
++    CHECK(DaySkyDeepWeight(12.0f, 0.5f, 0.3f, 0.0f) < 0.2f);
++    CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.99f, 0.0f) == 0.0f);
++    CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 1.0f) == 0.0f);
++    CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.5f) == Catch::Approx(0.5f));
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 6808abb7..b26d5d5e 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1162,6 +1162,12 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
+     const std::string skyPiece = Piece(gl::FragmentPiece::Sky);
+     CHECK(constant(skyPiece, "kCamSkyKnee") == Catch::Approx(kSkyRolloffKnee));
+     CHECK(constant(skyPiece, "kCamSkyCap") == Catch::Approx(kSkyRolloffCap));
++    // Look fix "noon": the clear day's blue (DaySkyDeepen) is the dome's, with
++    // DaySkyDeepWeight's ramps, inside the camera's look of the clear sky.
++    CHECK(constant(skyPiece, "kCamSkyDeep") == Catch::Approx(kCameraDaySkyDeep));
++    CHECK(constant(skyPiece, "kCamSkyDeepFloor") == Catch::Approx(kCameraDaySkyFloor));
++    CHECK(skyPiece.find("a = camSkyDeepen(a, day * smoothstep(0.03, 0.4, e)") != std::string::npos);
++    CHECK(skyPiece.find("smoothstep(0.86, 0.985, dot(d, skySunDir()))));") != std::string::npos);
+ }
+ 
+ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")

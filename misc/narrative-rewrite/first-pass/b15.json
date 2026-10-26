@@ -1,0 +1,8 @@
+{
+  "id": "b15",
+  "bank": "kBio1Friendly",
+  "variant": 2,
+  "text": "{Name} repairs bicycles near {Place}. Their father keeps explaining how the restrictions broke an agreement. They know the clause but avoid family arguments, fixing neighbors' bicycles for trips along the smaller roads.",
+  "word_count": 32,
+  "self_review": "The father repeatedly explains the broken agreement; the repairer knows the clause but prefers useful work to family arguments. Smaller roads give the bicycle repairs a practical connection to restrictions without specifying a disputed clause."
+}

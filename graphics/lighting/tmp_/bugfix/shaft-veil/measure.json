@@ -1,0 +1,132 @@
+{
+ "lowsun_fp": {
+  "jeep_side_front": {
+   "before": 63.726966545454545,
+   "before_noshafts": 27.82169490909091,
+   "after": 31.698545636363637,
+   "after_noshafts": 27.82169490909091,
+   "classic_after_run": 27.81560436363636
+  },
+  "jeep_side_rear": {
+   "before": 65.01856261437908,
+   "before_noshafts": 39.406427450980395,
+   "after": 40.98501359477124,
+   "after_noshafts": 39.406427450980395,
+   "classic_after_run": 39.37757019607843
+  },
+  "m113_side": {
+   "before": 43.71723721428571,
+   "before_noshafts": 30.932925928571425,
+   "after": 31.882493142857143,
+   "after_noshafts": 30.932925928571425,
+   "classic_after_run": 30.933794071428572
+  },
+  "m113_rear45": {
+   "before": 53.47622412121212,
+   "before_noshafts": 43.42002012121212,
+   "after": 44.086335636363636,
+   "after_noshafts": 43.42002012121212,
+   "classic_after_run": 43.55116557575757
+  },
+  "tent": {
+   "before": 63.147927403508774,
+   "before_noshafts": 40.69186189473684,
+   "after": 42.887550315789476,
+   "after_noshafts": 40.69186189473684,
+   "classic_after_run": 40.7830447368421
+  },
+  "soldier": {
+   "before": 67.76839176608186,
+   "before_noshafts": 58.93800776608187,
+   "after": 59.24844093567251,
+   "after_noshafts": 58.93804154385964,
+   "classic_after_run": 53.73555957894737
+  },
+  "ground_lit": {
+   "before": 109.2035989,
+   "before_noshafts": 108.52226196666668,
+   "after": 108.53933613333334,
+   "after_noshafts": 108.52226196666668,
+   "classic_after_run": 95.13408006666667
+  },
+  "ground_shadow": {
+   "before": 77.74617771428571,
+   "before_noshafts": 74.79758314285714,
+   "after": 74.82816692857143,
+   "after_noshafts": 74.79758314285714,
+   "classic_after_run": 73.32562214285714
+  },
+  "far_hills": {
+   "before": 76.98925526923077,
+   "before_noshafts": 73.37821046153846,
+   "after": 76.27304899999999,
+   "after_noshafts": 73.37821046153846,
+   "classic_after_run": 67.74697023076922
+  },
+  "sky_near_sun": {
+   "before": 193.28651164583334,
+   "before_noshafts": 185.51039974999998,
+   "after": 193.2433956666667,
+   "after_noshafts": 185.47682724999999,
+   "classic_after_run": 185.43543641666668
+  },
+  "sky_top": {
+   "before": 174.16820802666666,
+   "before_noshafts": 171.99055870666666,
+   "after": 174.24843371999998,
+   "after_noshafts": 172.08627468,
+   "classic_after_run": 172.14749415999998
+  }
+ },
+ "sinai_lowsun_fp": {
+  "hmmwv_side": {
+   "before": 57.02869096296296,
+   "before_noshafts": 18.394112148148146,
+   "after": 22.319733777777778,
+   "after_noshafts": 18.394112148148146,
+   "classic_after_run": 18.392577185185186
+  },
+  "hmmwv_side2": {
+   "before": 50.69738363636363,
+   "before_noshafts": 18.840208727272724,
+   "after": 21.867041575757575,
+   "after_noshafts": 18.840208727272724,
+   "classic_after_run": 18.83839612121212
+  },
+  "zelda_front": {
+   "before": 96.22025905956113,
+   "before_noshafts": 94.67580714733543,
+   "after": 94.73552376175549,
+   "after_noshafts": 94.6760754858934,
+   "classic_after_run": 94.62433040752352
+  },
+  "zelda_side": {
+   "before": 60.46081031111111,
+   "before_noshafts": 57.74841902222223,
+   "after": 57.90968297777777,
+   "after_noshafts": 57.77782413333333,
+   "classic_after_run": 57.26993991111111
+  },
+  "camnet": {
+   "before": 51.80189114285714,
+   "before_noshafts": 45.786193619047616,
+   "after": 46.11196243809524,
+   "after_noshafts": 45.786329847619044,
+   "classic_after_run": 44.33256264761904
+  },
+  "ground_lit": {
+   "before": 85.13013391999998,
+   "before_noshafts": 84.93262035999999,
+   "after": 84.98402008,
+   "after_noshafts": 84.98501488,
+   "classic_after_run": 70.37672859999999
+  },
+  "sky_top": {
+   "before": 170.00336365333334,
+   "before_noshafts": 167.71220926666666,
+   "after": 170.04489021333333,
+   "after_noshafts": 167.7276132,
+   "classic_after_run": 167.98793754666667
+  }
+ }
+}

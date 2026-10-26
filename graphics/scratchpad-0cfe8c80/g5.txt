@@ -1,0 +1,8 @@
+    vec4 litHaze;         // 78: aerial haze (B8) or volumetric fog: x classic fog factor scale minus 1 (0 = the classic fog)
+    vec4 litSurface;      // 79: surfaces: x on, y specular strength, z canopy occlusion, w SH sky light weight
+    vec4 litSurfCanopy;   // 80: the canopy heightfield: x height base (m), y height range (m), z 1 / extent, w valid
+    vec4 litSurface2;     // 81: surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
+    vec4 litSkySh[6];     // 82-87: the sky light's irradiance coefficients (rgb), sun frame (SurfaceLight.hpp)
+    vec4 litSurface3;     // 88: surfaces: x cavity strength, y 1 = a vehicle interior (pre-lit fragments' share)
+    vec4 litCamera;       // 89: photo camera: x 1 = write scene light (camEncode), y additive pre-lit scale, z sky scale, w pre-exposure
+    vec4 litCameraLook;   // 90: photo camera's look: x weather veil, y lamp ambient kept, z lamp gain, w low-sun sky blue

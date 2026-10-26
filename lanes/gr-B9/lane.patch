@@ -1,0 +1,3349 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+index 2589d833..88bfd510 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+@@ -173,6 +173,7 @@ GameValue TriSetLighting(const GameState*, GameValuePar);
+ GameValue TriFeatureState(const GameState*);
+ GameValue TriPinCloudDrift(const GameState*, GameValuePar);
+ GameValue TriSkyTableCheck(const GameState*, GameValuePar);
++GameValue TriCanopyCheck(const GameState*, GameValuePar);
+ GameValue TriGpuTimes(const GameState*, GameValuePar);
+ GameValue TriShadowSceneDump(const GameState*, GameValuePar);
+ GameValue TriSetAlphaToCoverage(const GameState*, GameValuePar);
+@@ -3257,6 +3258,7 @@ INIT_MODULE(GameStateExtTest, 3)
+     GGameState.NewNularOp(GameNular(GameString, "triFeatureState", TriFeatureState));
+     GGameState.NewFunction(GameFunction(GameString, "triPinCloudDrift", TriPinCloudDrift, GameArray));
+     GGameState.NewFunction(GameFunction(GameString, "triSkyTableCheck", TriSkyTableCheck, GameScalar));
++    GGameState.NewFunction(GameFunction(GameString, "triCanopyCheck", TriCanopyCheck, GameScalar));
+     GGameState.NewFunction(GameFunction(GameString, "triGpuTimes", TriGpuTimes, GameBool));
+     GGameState.NewFunction(GameFunction(GameString, "triShadowSceneDump", TriShadowSceneDump, GameString));
+     GGameState.NewFunction(GameFunction(GameString, "triSetAlphaToCoverage", TriSetAlphaToCoverage, GameScalar));
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 2bb66ae5..bf4c796c 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -689,6 +689,23 @@ GameValue TriSkyTableCheck(const GameState* /*state*/, GameValuePar arg)
+     return GameValue(res.c_str());
+ }
+ 
++/// triCanopyCheck <texels>: the canopy's sun-visibility map (feature switch
++/// canopyShadows, the long tree shadows) read back from the GPU and compared
++/// with its CPU mirror (Graphics/Remaster/Canopy.hpp CanopySunAt) at about
++/// <texels> texels spread over the map. Returns "OK:..." or "FAIL:..." with the
++/// largest error of each stored channel and of what a receiver reads; "FAIL:no
++/// sun-visibility map ..." before the first build (the switch or its gate off,
++/// or no canopy yet).
++GameValue TriCanopyCheck(const GameState* /*state*/, GameValuePar arg)
++{
++    if (!GEngine)
++        return GameValue("FAIL:no engine");
++    const int texels = std::max(16, toInt(static_cast<float>(arg)));
++    const std::string res = GEngine->RemasterCanopyCheck(texels);
++    LOG_INFO(Core, "[tri] triCanopyCheck {}", res);
++    return GameValue(res.c_str());
++}
++
+ /// triPinCloudDrift [x, z] or [x, z, sky]: hold the clouds still for captures
+ /// until released: the remastered cloud-shadow field at drift offset x, z
+ /// (metres) and the sky dome clouds at `sky` (Landscape::CloudsPosition; where
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index b0ded45c..5b11c647 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -28,6 +28,8 @@ namespace Poseidon::remaster
+ {
+ struct TerrainHorizonMap;
+ struct FeatureGates;
++struct CanopyField;
++struct CanopyRect;
+ } // namespace Poseidon::remaster
+ 
+ // Forward-decl for `EmitDraw` — the frame layer's `Draw` value (full param-pack
+@@ -874,6 +876,16 @@ class Engine : public IGraphicsEngine
+     virtual bool WantsTerrainHorizonMap() const { return false; }
+     /// Hands over the horizon map for the current landscape (nullptr clears it).
+     virtual void SetTerrainHorizonMap(std::shared_ptr<const remaster::TerrainHorizonMap> /*map*/) {}
++    /// Hands over the canopy of the current landscape's objects (the long tree
++    /// shadows, Graphics/Remaster/Canopy.hpp), built with the horizon map;
++    /// nullptr clears it. The field stays the world's: it changes in place.
++    virtual void SetTerrainCanopy(std::shared_ptr<const remaster::CanopyField> /*canopy*/) {}
++    /// Texel rectangles of the canopy that changed in place since it was handed
++    /// over (a destroyed tree or building).
++    virtual void TerrainCanopyChanged(const remaster::CanopyRect* /*rects*/, int /*count*/) {}
++    /// triCanopyCheck: the GPU sun-visibility map read back against its CPU
++    /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
++    virtual std::string RemasterCanopyCheck(int /*texels*/) { return "FAIL:no canopy in this backend"; }
+     /// World/HUD boundary: called once per frame after the 3D world and before
+     /// the map, HUD and dialogs; runs the remastered post effects.
+     virtual void EndWorldScene() {}
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+index 8459d133..e7136482 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+@@ -23,6 +23,7 @@ constexpr SectionDef kSections[kSectionCount] = {
+     {"rest", Mark::Pass1End, Mark::WorldEnd},
+     {"sky", Mark::SkyBegin, Mark::SkyEnd},
+     {"skytable", Mark::SkyBegin, Mark::SkyTableEnd},
++    {"canopy", Mark::CanopyBegin, Mark::CanopyEnd},
+     {"resolve", Mark::WorldEnd, Mark::ResolveEnd},
+     {"lindepth", Mark::ResolveEnd, Mark::LinearDepthEnd},
+     {"tags", Mark::LinearDepthEnd, Mark::TagReadoutEnd},
+@@ -166,6 +167,7 @@ std::string GpuTimings::Summary() const
+     }
+     if (add(Section::Sky, " | %s %.2f"))
+         add(Section::SkyTable, " (%s %.2f)");
++    add(Section::Canopy, " | %s %.2f");
+     if (add(Section::Post, " | %s %.2f:"))
+     {
+         for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+index d16c04b9..06823388 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+@@ -27,6 +27,10 @@ enum class Mark : int
+     SkyBegin,
+     SkyTableEnd,
+     SkyEnd,
++    // The canopy's sun-visibility map (the long tree shadows, B9), in the
++    // frames that rebuild it: before the world, at its first lit pass.
++    CanopyBegin,
++    CanopyEnd,
+     WorldBegin, // first 3D pass of the world
+     // Inside the world pass (Landscape::DrawRect, at its existing queue
+     // flushes): the sky, terrain, water and horizon drawn; the opaque objects
+@@ -70,6 +74,7 @@ enum class Section : int
+     Rest,
+     Sky,      // the remastered sky dome, with the table build when it runs
+     SkyTable, // the sky-view table build (frames that rebuild it)
++    Canopy,   // the canopy's sun-visibility map build (frames that rebuild it)
+     // One per post stage, in Mark order: from the end of the latest stage that
+     // ran before it (or WorldEnd) to its own end.
+     Resolve,
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Canopy.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Canopy.cpp
+new file mode 100644
+index 00000000..d03abe04
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Canopy.cpp
+@@ -0,0 +1,619 @@
++#include <Poseidon/Graphics/Remaster/Canopy.hpp>
++
++#include <Poseidon/World/MapTypes.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <utility>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++
++constexpr float kDegToRad = 0.017453292519943295f;
++
++float Smoothstep(float e0, float e1, float x)
++{
++    const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++float Mix(float a, float b, float t)
++{
++    return a + (b - a) * t;
++}
++
++std::uint16_t Unorm16(float v)
++{
++    return static_cast<std::uint16_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 65535.0f));
++}
++
++// The covered threshold of a mip child, in the stored density.
++constexpr int kCoveredU16 = static_cast<int>(kCanopyMipCovered * 65535.0f);
++
++} // namespace
++
++// ---- The canopy -------------------------------------------------------------------
++
++CanopyKind CanopyKindOfMapType(int mapType)
++{
++    switch (mapType)
++    {
++        case MapTree:
++            return CanopyKind::Tree;
++        case MapSmallTree:
++            return CanopyKind::SmallTree;
++        case MapBush:
++            return CanopyKind::Bush;
++        case MapForestBorder:
++        case MapForestTriangle:
++        case MapForestSquare:
++            return CanopyKind::Forest;
++        case MapBuilding:
++        case MapHouse:
++        case MapChurch:
++        case MapChapel:
++        case MapBunker:
++        case MapFortress:
++        case MapViewTower:
++        case MapLighthouse:
++        case MapFuelstation:
++        case MapHospital:
++        case MapRock:
++            return CanopyKind::Solid;
++        default:
++            return CanopyKind::None;
++    }
++}
++
++float CanopyOpacity(CanopyKind kind)
++{
++    switch (kind)
++    {
++        case CanopyKind::Tree:
++            return 0.8f;
++        case CanopyKind::SmallTree:
++            return 0.65f;
++        case CanopyKind::Bush:
++            return 0.5f;
++        case CanopyKind::Forest:
++            return 0.95f;
++        case CanopyKind::Solid:
++            return 1.0f;
++        case CanopyKind::None:
++            break;
++    }
++    return 0.0f;
++}
++
++bool CanopyRound(CanopyKind kind)
++{
++    return kind == CanopyKind::Tree || kind == CanopyKind::SmallTree || kind == CanopyKind::Bush;
++}
++
++void CanopyItemBounds(CanopyItem& item)
++{
++    if (!item.hull.empty())
++    {
++        item.minX = item.maxX = item.hull[0];
++        item.minZ = item.maxZ = item.hull[1];
++        for (size_t i = 0; i + 1 < item.hull.size(); i += 2)
++        {
++            item.minX = std::min(item.minX, item.hull[i]);
++            item.maxX = std::max(item.maxX, item.hull[i]);
++            item.minZ = std::min(item.minZ, item.hull[i + 1]);
++            item.maxZ = std::max(item.maxZ, item.hull[i + 1]);
++        }
++        return;
++    }
++    const float ex = std::fabs(item.ux) * item.a + std::fabs(item.vx) * item.b;
++    const float ez = std::fabs(item.uz) * item.a + std::fabs(item.vz) * item.b;
++    item.minX = item.cx - ex;
++    item.maxX = item.cx + ex;
++    item.minZ = item.cz - ez;
++    item.maxZ = item.cz + ez;
++}
++
++bool CanopyInside(const CanopyItem& item, float x, float z)
++{
++    if (!item.hull.empty())
++    {
++        const size_t n = item.hull.size() / 2;
++        for (size_t i = 0; i < n; ++i)
++        {
++            const float x0 = item.hull[i * 2], z0 = item.hull[i * 2 + 1];
++            const float x1 = item.hull[((i + 1) % n) * 2], z1 = item.hull[((i + 1) % n) * 2 + 1];
++            if ((x1 - x0) * (z - z0) - (z1 - z0) * (x - x0) < 0.0f)
++                return false;
++        }
++        return true;
++    }
++    if (!(item.a > 0.0f) || !(item.b > 0.0f))
++        return false;
++    const float dx = x - item.cx, dz = z - item.cz;
++    const float s = (dx * item.ux + dz * item.uz) / item.a;
++    const float t = (dx * item.vx + dz * item.vz) / item.b;
++    return item.round ? s * s + t * t <= 1.0f : (std::fabs(s) <= 1.0f && std::fabs(t) <= 1.0f);
++}
++
++std::vector<float> CanopyConvexHull(std::vector<float> xz)
++{
++    const size_t n = xz.size() / 2;
++    if (n < 3)
++        return {};
++    std::vector<std::pair<float, float>> p(n);
++    for (size_t i = 0; i < n; ++i)
++        p[i] = {xz[i * 2], xz[i * 2 + 1]};
++    std::sort(p.begin(), p.end());
++    p.erase(std::unique(p.begin(), p.end()), p.end());
++    if (p.size() < 3)
++        return {};
++    auto cross =
++        [](const std::pair<float, float>& o, const std::pair<float, float>& a, const std::pair<float, float>& b)
++    { return (a.first - o.first) * (b.second - o.second) - (a.second - o.second) * (b.first - o.first); };
++    std::vector<std::pair<float, float>> h(2 * p.size());
++    size_t k = 0;
++    for (size_t i = 0; i < p.size(); ++i)
++    {
++        while (k >= 2 && cross(h[k - 2], h[k - 1], p[i]) <= 0.0f)
++            --k;
++        h[k++] = p[i];
++    }
++    for (size_t i = p.size() - 1, t = k + 1; i > 0; --i)
++    {
++        while (k >= t && cross(h[k - 2], h[k - 1], p[i - 1]) <= 0.0f)
++            --k;
++        h[k++] = p[i - 1];
++    }
++    h.resize(k - 1);
++    if (h.size() < 3)
++        return {};
++    std::vector<float> out;
++    out.reserve(h.size() * 2);
++    for (const auto& q : h)
++    {
++        out.push_back(q.first);
++        out.push_back(q.second);
++    }
++    return out;
++}
++
++int CanopyField::LevelSize(int level) const
++{
++    int s = size;
++    for (int l = 0; l < level; ++l)
++        s = std::max(1, s / 2);
++    return s;
++}
++
++float CanopyField::Top(int level, int x, int z) const
++{
++    const int s = LevelSize(level);
++    const std::uint16_t r = levels[static_cast<size_t>(level)][(static_cast<size_t>(z) * s + x) * 2];
++    return heightBase + static_cast<float>(r) / 65535.0f * heightRange;
++}
++
++float CanopyField::Density(int level, int x, int z) const
++{
++    const int s = LevelSize(level);
++    return static_cast<float>(levels[static_cast<size_t>(level)][(static_cast<size_t>(z) * s + x) * 2 + 1]) / 65535.0f;
++}
++
++int CanopyTexelsPerCell(float cellSize, int range)
++{
++    if (!(cellSize > 0.0f) || range < 1)
++        return 1;
++    int k = std::max(1, static_cast<int>(std::lround(cellSize / kCanopyTargetTexel)));
++    while (k > 1 && range * k > kCanopyMaxSize)
++        --k;
++    return k;
++}
++
++float CanopyRaster::Ground(float x, float z) const
++{
++    const float fx = std::clamp(x / _grid, 0.0f, static_cast<float>(_range - 1));
++    const float fz = std::clamp(z / _grid, 0.0f, static_cast<float>(_range - 1));
++    const int x0 = std::min(static_cast<int>(fx), std::max(0, _range - 2));
++    const int z0 = std::min(static_cast<int>(fz), std::max(0, _range - 2));
++    const int x1 = std::min(x0 + 1, _range - 1), z1 = std::min(z0 + 1, _range - 1);
++    const float tx = fx - static_cast<float>(x0), tz = fz - static_cast<float>(z0);
++    auto at = [&](int xx, int zz) { return _heights[static_cast<size_t>(zz) * _range + xx]; };
++    return (at(x0, z0) * (1.0f - tx) + at(x1, z0) * tx) * (1.0f - tz) +
++           (at(x0, z1) * (1.0f - tx) + at(x1, z1) * tx) * tz;
++}
++
++std::uint16_t CanopyRaster::Encode(float height) const
++{
++    return Unorm16((height - _field->heightBase) / _field->heightRange);
++}
++
++float CanopyRaster::Decode(std::uint16_t value) const
++{
++    return _field->heightBase + static_cast<float>(value) / 65535.0f * _field->heightRange;
++}
++
++bool CanopyRaster::Build(std::vector<CanopyItem> items, std::vector<float> heights, int range, float grid, int k,
++                         const std::atomic<bool>* cancel)
++{
++    _field.reset();
++    if (range < 2 || !(grid > 0.0f) || heights.size() < static_cast<size_t>(range) * range)
++        return false;
++    k = std::max(1, k);
++    while (k > 1 && range * k > kCanopyMaxSize)
++        --k;
++    _items = std::move(items);
++    _heights = std::move(heights);
++    _range = range;
++    _grid = grid;
++    _removed.assign(_items.size(), false);
++    _byId.clear();
++    for (size_t i = 0; i < _items.size(); ++i)
++    {
++        CanopyItemBounds(_items[i]);
++        if (_items[i].id >= 0)
++            _byId.emplace(_items[i].id, static_cast<int>(i));
++    }
++
++    auto field = std::make_shared<CanopyField>();
++    field->size = range * k;
++    field->texel = grid / static_cast<float>(k);
++    const auto [lo, hi] = std::minmax_element(_heights.begin(), _heights.begin() + static_cast<long>(range) * range);
++    field->heightBase = *lo - 1.0f;
++    field->heightRange = (*hi + kCanopyMaxRelTop + 1.0f) - field->heightBase;
++    int levels = 1;
++    for (int s = field->size; s > 1; s = std::max(1, s / 2))
++        ++levels;
++    field->levels.resize(static_cast<size_t>(levels));
++    _ground.assign(static_cast<size_t>(levels), {});
++    for (int l = 0; l < levels; ++l)
++    {
++        const size_t s = static_cast<size_t>(field->LevelSize(l));
++        field->levels[static_cast<size_t>(l)].assign(s * s * 2, 0);
++        _ground[static_cast<size_t>(l)].assign(s * s, 0);
++    }
++    _field = field;
++
++    // Items into square bins of level-0 texels (indices ascending in each).
++    const int n = field->size;
++    const float c = field->texel;
++    _bins1 = (n + kBinTexels - 1) / kBinTexels;
++    _bins.assign(static_cast<size_t>(_bins1) * _bins1, {});
++    for (size_t i = 0; i < _items.size(); ++i)
++    {
++        const CanopyItem& it = _items[i];
++        if (!(it.opacity > 0.0f))
++            continue;
++        const int x0 = std::clamp(static_cast<int>(std::floor(it.minX / c)), 0, n - 1) / kBinTexels;
++        const int x1 = std::clamp(static_cast<int>(std::floor(it.maxX / c)), 0, n - 1) / kBinTexels;
++        const int z0 = std::clamp(static_cast<int>(std::floor(it.minZ / c)), 0, n - 1) / kBinTexels;
++        const int z1 = std::clamp(static_cast<int>(std::floor(it.maxZ / c)), 0, n - 1) / kBinTexels;
++        for (int bz = z0; bz <= z1; ++bz)
++            for (int bx = x0; bx <= x1; ++bx)
++                _bins[static_cast<size_t>(bz) * _bins1 + bx].push_back(static_cast<int>(i));
++    }
++
++    // The ground of every level (fixed), then the canopy, a band of bins at a
++    // time so a cancel stops it within one band.
++    for (int z = 0; z < n; ++z)
++        for (int x = 0; x < n; ++x)
++            _ground[0][static_cast<size_t>(z) * n + x] =
++                Encode(Ground((static_cast<float>(x) + 0.5f) * c, (static_cast<float>(z) + 0.5f) * c));
++    for (int l = 1; l < levels; ++l)
++    {
++        const int s = field->LevelSize(l), sc = field->LevelSize(l - 1);
++        const std::vector<std::uint16_t>& child = _ground[static_cast<size_t>(l - 1)];
++        std::vector<std::uint16_t>& dst = _ground[static_cast<size_t>(l)];
++        for (int z = 0; z < s; ++z)
++            for (int x = 0; x < s; ++x)
++            {
++                unsigned sum = 0;
++                for (int dz = 0; dz < 2; ++dz)
++                    for (int dx = 0; dx < 2; ++dx)
++                        sum += child[static_cast<size_t>(std::min(sc - 1, z * 2 + dz)) * sc +
++                                     std::min(sc - 1, x * 2 + dx)];
++                dst[static_cast<size_t>(z) * s + x] = static_cast<std::uint16_t>((sum + 2) / 4);
++            }
++    }
++    for (int bz = 0; bz < _bins1; ++bz)
++    {
++        if (cancel && cancel->load(std::memory_order_relaxed))
++        {
++            _field.reset();
++            return false;
++        }
++        RasterLevel0(0, bz * kBinTexels, n, std::min(n, (bz + 1) * kBinTexels));
++    }
++    for (int l = 1; l < levels; ++l)
++    {
++        const int s = field->LevelSize(l);
++        Downsample(l, 0, 0, s, s);
++    }
++    field->version = 1;
++    return true;
++}
++
++void CanopyRaster::RasterLevel0(int x0, int z0, int x1, int z1)
++{
++    CanopyField& f = *_field;
++    const int n = f.size;
++    const float c = f.texel;
++    const float sub = 1.0f / static_cast<float>(kCanopySamples);
++    std::vector<std::uint16_t>& dst = f.levels[0];
++    for (int z = z0; z < z1; ++z)
++    {
++        for (int x = x0; x < x1; ++x)
++        {
++            const std::vector<int>& bin = _bins[static_cast<size_t>(z / kBinTexels) * _bins1 + x / kBinTexels];
++            const float tx0 = static_cast<float>(x) * c, tz0 = static_cast<float>(z) * c;
++            float height = 0.0f;
++            float trans = 1.0f;
++            bool covered = false;
++            for (int idx : bin)
++            {
++                if (_removed[static_cast<size_t>(idx)])
++                    continue;
++                const CanopyItem& it = _items[static_cast<size_t>(idx)];
++                if (it.maxX < tx0 || it.minX > tx0 + c || it.maxZ < tz0 || it.minZ > tz0 + c)
++                    continue;
++                int inside = 0;
++                for (int sz = 0; sz < kCanopySamples; ++sz)
++                    for (int sx = 0; sx < kCanopySamples; ++sx)
++                        inside += CanopyInside(it, tx0 + (static_cast<float>(sx) + 0.5f) * sub * c,
++                                               tz0 + (static_cast<float>(sz) + 0.5f) * sub * c)
++                                      ? 1
++                                      : 0;
++                if (!inside)
++                    continue;
++                covered = true;
++                height = std::max(height, it.height);
++                trans *= 1.0f -
++                         it.opacity * static_cast<float>(inside) / static_cast<float>(kCanopySamples * kCanopySamples);
++            }
++            const size_t i = static_cast<size_t>(z) * n + x;
++            const std::uint16_t ground = _ground[0][i];
++            dst[i * 2] = covered ? Encode(Decode(ground) + height) : ground;
++            dst[i * 2 + 1] = covered ? Unorm16(1.0f - trans) : 0;
++        }
++    }
++}
++
++void CanopyRaster::Downsample(int level, int x0, int z0, int x1, int z1)
++{
++    CanopyField& f = *_field;
++    const int s = f.LevelSize(level), sc = f.LevelSize(level - 1);
++    const std::vector<std::uint16_t>& child = f.levels[static_cast<size_t>(level - 1)];
++    const std::vector<std::uint16_t>& childGround = _ground[static_cast<size_t>(level - 1)];
++    std::vector<std::uint16_t>& dst = f.levels[static_cast<size_t>(level)];
++    const std::vector<std::uint16_t>& ground = _ground[static_cast<size_t>(level)];
++    for (int z = z0; z < z1; ++z)
++    {
++        for (int x = x0; x < x1; ++x)
++        {
++            unsigned den = 0;
++            float height = 0.0f;
++            for (int dz = 0; dz < 2; ++dz)
++            {
++                for (int dx = 0; dx < 2; ++dx)
++                {
++                    const size_t ci =
++                        static_cast<size_t>(std::min(sc - 1, z * 2 + dz)) * sc + std::min(sc - 1, x * 2 + dx);
++                    const std::uint16_t g = child[ci * 2 + 1];
++                    den += g;
++                    if (g > kCoveredU16)
++                        height = std::max(height, Decode(child[ci * 2]) - Decode(childGround[ci]));
++                }
++            }
++            const size_t i = static_cast<size_t>(z) * s + x;
++            dst[i * 2] = height > 0.0f ? Encode(Decode(ground[i]) + height) : ground[i];
++            dst[i * 2 + 1] = static_cast<std::uint16_t>((den + 2) / 4);
++        }
++    }
++}
++
++std::vector<CanopyRect> CanopyRaster::Remove(int id)
++{
++    std::vector<CanopyRect> rects;
++    if (!_field)
++        return rects;
++    const auto found = _byId.find(id);
++    if (found == _byId.end() || _removed[static_cast<size_t>(found->second)])
++        return rects;
++    _removed[static_cast<size_t>(found->second)] = true;
++    const CanopyItem& it = _items[static_cast<size_t>(found->second)];
++    CanopyField& f = *_field;
++    const int n = f.size;
++    const float c = f.texel;
++    CanopyRect r;
++    r.x0 = std::clamp(static_cast<int>(std::floor(it.minX / c)), 0, n - 1);
++    r.x1 = std::clamp(static_cast<int>(std::floor(it.maxX / c)), 0, n - 1) + 1;
++    r.z0 = std::clamp(static_cast<int>(std::floor(it.minZ / c)), 0, n - 1);
++    r.z1 = std::clamp(static_cast<int>(std::floor(it.maxZ / c)), 0, n - 1) + 1;
++    RasterLevel0(r.x0, r.z0, r.x1, r.z1);
++    rects.push_back(r);
++    for (int l = 1; l < f.Levels(); ++l)
++    {
++        const int s = f.LevelSize(l);
++        CanopyRect p;
++        p.level = l;
++        p.x0 = std::min(r.x0 / 2, s - 1);
++        p.z0 = std::min(r.z0 / 2, s - 1);
++        p.x1 = std::clamp((r.x1 + 1) / 2, p.x0 + 1, s);
++        p.z1 = std::clamp((r.z1 + 1) / 2, p.z0 + 1, s);
++        Downsample(l, p.x0, p.z0, p.x1, p.z1);
++        rects.push_back(p);
++        r = p;
++    }
++    ++f.version;
++    return rects;
++}
++
++// ---- Sampling and the trace ---------------------------------------------------------
++
++void CanopySample(const CanopyField& field, float x, float z, float lod, float& top, float& density)
++{
++    const int levels = field.Levels();
++    const float extent = static_cast<float>(field.size) * field.texel;
++    const float u = x / extent, v = z / extent;
++    auto bilinear = [&](int level, float& t, float& d)
++    {
++        const int s = field.LevelSize(level);
++        const float fx = u * static_cast<float>(s) - 0.5f, fz = v * static_cast<float>(s) - 0.5f;
++        const float flx = std::floor(fx), flz = std::floor(fz);
++        const float ax = fx - flx, az = fz - flz;
++        const int ix = static_cast<int>(flx), iz = static_cast<int>(flz);
++        auto cx = [s](int i) { return std::clamp(i, 0, s - 1); };
++        const std::vector<std::uint16_t>& l = field.levels[static_cast<size_t>(level)];
++        float r[2] = {0.0f, 0.0f};
++        for (int c = 0; c < 2; ++c)
++        {
++            auto at = [&](int xx, int zz)
++            { return static_cast<float>(l[(static_cast<size_t>(cx(zz)) * s + cx(xx)) * 2 + c]); };
++            r[c] = ((at(ix, iz) * (1.0f - ax) + at(ix + 1, iz) * ax) * (1.0f - az) +
++                    (at(ix, iz + 1) * (1.0f - ax) + at(ix + 1, iz + 1) * ax) * az) /
++                   65535.0f;
++        }
++        t = field.heightBase + r[0] * field.heightRange;
++        d = r[1];
++    };
++    const float l = std::clamp(lod, 0.0f, static_cast<float>(levels - 1));
++    const int l0 = static_cast<int>(std::floor(l));
++    const float w = l - static_cast<float>(l0);
++    bilinear(l0, top, density);
++    if (w > 0.0f && l0 + 1 < levels)
++    {
++        float t1 = 0.0f, d1 = 0.0f;
++        bilinear(l0 + 1, t1, d1);
++        top = Mix(top, t1, w);
++        density = Mix(density, d1, w);
++    }
++}
++
++CanopySunRay CanopySunRayToward(float x, float y, float z)
++{
++    CanopySunRay ray;
++    const float sl = std::sqrt(x * x + z * z);
++    if (sl < 1e-3f || y <= 0.0f)
++        return ray; // no trace: the sun overhead or under the horizon
++    ray.dirX = x / sl;
++    ray.dirZ = z / sl;
++    ray.tanSun = y / sl;
++    ray.tanSoft = std::tan(kCanopySoftDeg * kDegToRad);
++    ray.length = std::min(kCanopyReach / std::max(ray.tanSun, 0.02f), kCanopyMaxTrace);
++    return ray;
++}
++
++CanopySunTexel CanopySunAt(const CanopyField& field, float x, float z, float groundY, const CanopySunRay& ray)
++{
++    CanopySunTexel out;
++    if (!field.Valid() || ray.length <= 0.0f)
++        return out;
++    const float c0 = field.texel;
++    float t = 0.5f * c0;
++    float upper = kCanopyMinSoft, lower = -kCanopyMinSoft;
++    for (int i = 0; i < kCanopyMaxSteps; ++i)
++    {
++        if (t > ray.length)
++            break;
++        const float step = std::max(c0, kCanopyGrowth * t);
++        const float lod = std::log2(step / c0);
++        float top = 0.0f, den = 0.0f;
++        CanopySample(field, x + ray.dirX * t, z + ray.dirZ * t, lod, top, den);
++        if (den > kCanopyMinDensity)
++        {
++            const float soft = t * ray.tanSoft + 0.25f * step + 0.5f;
++            const float crossing = std::sqrt(den - kCanopyMinDensity);
++            const float rise = t * ray.tanSun;
++            out.ground *=
++                std::max(1.0f - crossing * Smoothstep(-0.5f, 1.0f, (top - (groundY + kCanopyGroundLift + rise)) / soft),
++                         kCanopyMinTransmit);
++            if (t >= kCanopyRaisedSkip)
++            {
++                out.raisedLow *= std::max(
++                    1.0f - crossing * Smoothstep(-0.5f, 1.0f, (top - (groundY + kCanopyRaisedLift + rise)) / soft),
++                    kCanopyMinTransmit);
++                // The raised receivers' shadow edge: the envelope of every
++                // sample's edge, plus and minus its softness. A thin sample
++                // sinks its edge out of the envelope as its crossing falls
++                // (continuously, so the edge never jumps where a density
++                // crosses a threshold).
++                const float w = Smoothstep(kCanopyEdgeCrossFrom, kCanopyEdgeCrossTo, crossing);
++                const float h = (top - rise - groundY + soft + 1.0f) * w - soft - 1.0f;
++                upper = std::max(upper, h + soft);
++                lower = std::max(lower, h - soft);
++            }
++        }
++        t += step;
++    }
++    out.edge = 0.5f * (upper + lower);
++    out.soft = 0.5f * (upper - lower);
++    return out;
++}
++
++float CanopyReceiverVisibility(const CanopySunTexel& texel, float heightAboveGround)
++{
++    const float h = texel.edge;
++    const float s = std::max(texel.soft, kCanopyMinReadSoft);
++    const float raised =
++        Mix(texel.raisedLow, 1.0f, Smoothstep(h - s, h + s, std::max(heightAboveGround, kCanopyRaisedFrom)));
++    return Mix(texel.ground, raised, Smoothstep(kCanopyGroundTo, kCanopyRaisedFrom, heightAboveGround));
++}
++
++// ---- The sun-visibility map --------------------------------------------------------
++
++float CanopySunTexelFor(float viewDistance)
++{
++    const float t = std::clamp(viewDistance * kCanopySunTexelPerVd, kCanopySunMinTexel, kCanopySunMaxTexel);
++    return std::round(t * 32.0f) / 32.0f;
++}
++
++void CanopySunOrigin(float camX, float camZ, float texel, float& originX, float& originZ)
++{
++    const float half = 0.5f * static_cast<float>(kCanopySunSize) * texel;
++    originX = std::floor(camX / texel) * texel - half;
++    originZ = std::floor(camZ / texel) * texel - half;
++}
++
++bool CanopySunNeedsRebuild(const CanopySunKey& built, const CanopySunKey& want, float camX, float camZ)
++{
++    if (!built.valid || built.canopyVersion != want.canopyVersion || built.texel != want.texel)
++        return true;
++    const float dot = built.sun[0] * want.sun[0] + built.sun[1] * want.sun[1] + built.sun[2] * want.sun[2];
++    if (dot < std::cos(kCanopySunRebuildDeg * kDegToRad))
++        return true;
++    const float extent = static_cast<float>(kCanopySunSize) * built.texel;
++    const float cx = built.originX + 0.5f * extent, cz = built.originZ + 0.5f * extent;
++    const float limit = kCanopySunRecentre * extent;
++    return std::fabs(camX - cx) > limit || std::fabs(camZ - cz) > limit;
++}
++
++float CanopyStrength(float sunElevationDeg, float skyThrough)
++{
++    if (sunElevationDeg <= kGateCanopyMinSunDeg || sunElevationDeg >= kGateCanopyMaxSunDeg ||
++        skyThrough <= kGateCanopyMinSkyThrough)
++        return 0.0f;
++    return Smoothstep(kGateCanopyMinSunDeg, kCanopyFadeInToSunDeg, sunElevationDeg) *
++           (1.0f - Smoothstep(kCanopyFadeOutFromSunDeg, kGateCanopyMaxSunDeg, sunElevationDeg)) *
++           Smoothstep(kGateCanopyMinSkyThrough, kCanopyFadeInToSkyThrough, skyThrough);
++}
++
++CanopyFrameConstants ComputeCanopyFrameConstants(const LightingTuning& tuning, const FeatureGates& gates, bool mapReady,
++                                                 float sunElevationDeg, float skyThrough, float originX, float originZ,
++                                                 float texel)
++{
++    CanopyFrameConstants out;
++    if (!gates[Feature::CanopyShadows].on || !mapReady || !(texel > 0.0f))
++        return out;
++    const float strength =
++        tuning.gates ? CanopyStrength(sunElevationDeg, skyThrough) : (sunElevationDeg > 0.0f ? 1.0f : 0.0f);
++    if (!(strength > 0.0f))
++        return out;
++    out.canopy[0] = strength;
++    out.canopy[1] = originX;
++    out.canopy[2] = originZ;
++    out.canopy[3] = 1.0f / (static_cast<float>(kCanopySunSize) * texel);
++    return out;
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Canopy.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Canopy.hpp
+new file mode 100644
+index 00000000..99a0c98c
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Canopy.hpp
+@@ -0,0 +1,306 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++
++#include <atomic>
++#include <cstdint>
++#include <memory>
++#include <unordered_map>
++#include <vector>
++
++// Long tree shadows at any distance (INTEGRATION-PLAN.md step B9, research
++// track hfrt): the canopy heightfield, its sun-visibility map and the rules
++// the GL backend and the shaders share. Pure, no GL, no engine state.
++//
++// What the player sees: at a low sun every tree, bush, forest block and
++// building on the island casts its long shadow, also beyond the reach of the
++// sun shadow maps (a few hundred metres), so whole hillsides of trees stand on
++// their shadows at golden hour instead of floating.
++//
++// How:
++//   - The canopy (CanopyField): every landscape object that can shade the
++//     ground at a distance is drawn top-down into a texture at about 6.25 m a
++//     texel (k texels per terrain cell): r = the absolute height of the top of
++//     the tallest object over the texel (its height above the ground at its
++//     centre, set on the texel's ground; the ground where nothing covers it),
++//     so one fetch per step holds the terrain too; g = its occluder density,
++//     1 - the product of each object's (1 - opacity * coverage). Crowns are
++//     ellipses at kCanopyCrownShrink of their box, forest blocks and buildings
++//     the convex hull of their geometry level. A mip texel keeps the mean
++//     ground plus the tallest covered child's height above its own ground, and
++//     the mean density, so a far occluder blurs into a wider, lighter penumbra
++//     and a slope stays a slope at every level. Built on the
++//     terrain horizon map's worker thread at island load (CanopyRaster); a
++//     destroyed tree or building takes its footprint out and re-rasterises
++//     only the texels it covered (CanopyRaster::Remove).
++//   - The sun-visibility map: a world-space map around the camera (2048
++//     texels a side, 1.5 to 3.1 m a texel by the view distance) that a GPU
++//     pass fills by cone-tracing the canopy toward the sun from every texel
++//     (CanopySunAt is its C++ mirror). It is rebuilt only when the sun has
++//     moved kCanopySunRebuildDeg, the camera has left the middle of the map,
++//     or the canopy changed, so it is world-locked: no dither, nothing to
++//     accumulate, no crawl in motion. Each texel stores the visibility of the
++//     ground, the visibility of a receiver kCanopyRaisedLift above it that
++//     skips the first kCanopyRaisedSkip metres (its own crown), and the height
++//     above the ground below which a raised receiver (a crown, a wall, a roof)
++//     is in a neighbour's shadow, with that edge's softness.
++//   - The world shaders read the map once per fragment beyond the shadow maps'
++//     reach (cross-faded over their far fade) and multiply the sun visibility
++//     by it (CanopyReceiverVisibility is the mirror of that read).
++//
++// The plan asked for a half-resolution screen buffer built from last frame's
++// depth and accumulated over frames. A world-space map gives the same trace at
++// a fixed cost that does not grow with the screen, is paid only when the sun or
++// the camera moved enough, needs no reprojection or history, and cannot crawl.
++//
++// Feature switch canopyShadows; gate: the sun between 2 and 25 deg and the sky
++// more than half clear (FeatureGates.cpp); the shadows fade in and out over the
++// edges of that band (CanopyStrength) so a sunset time-lapse sees no switch.
++
++namespace Poseidon::remaster
++{
++
++// ---- The canopy ---------------------------------------------------------------
++
++// Target texel of the canopy (metres): k texels per terrain cell, k the nearest
++// whole number to cell / this, at most kCanopyMaxSize texels a side.
++constexpr float kCanopyTargetTexel = 6.25f;
++constexpr int kCanopyMaxSize = 4096;
++// Crowns are rounder and a little smaller than their boxes.
++constexpr float kCanopyCrownShrink = 0.85f;
++// Objects whose top is less than this above the ground at their centre do not
++// shade anything; tops more than kCanopyMaxRelTop above it are clamped there.
++constexpr float kCanopyMinRelTop = 0.5f;
++constexpr float kCanopyMaxRelTop = 100.0f;
++// Supersamples per texel side when a footprint is rasterised.
++constexpr int kCanopySamples = 4;
++// A mip texel keeps the tallest top among its children denser than this.
++constexpr float kCanopyMipCovered = 0.004f;
++
++// What a landscape object is to the canopy.
++enum class CanopyKind : std::uint8_t
++{
++    None,      // does not shade the ground at a distance (fences, walls, crosses, ...)
++    Tree,      // MapTree
++    SmallTree, // MapSmallTree
++    Bush,      // MapBush
++    Forest,    // the three forest block types
++    Solid,     // buildings, houses, churches, towers, bunkers, rocks, ...
++};
++
++// The kind of a landscape shape's map type (World/MapTypes.hpp MapType).
++CanopyKind CanopyKindOfMapType(int mapType);
++// Opacity of a texel the object covers whole: tree 0.8, small tree 0.65, bush
++// 0.5, forest 0.95, solid 1; 0 for None.
++float CanopyOpacity(CanopyKind kind);
++// Crowns (tree, small tree, bush) are ellipses; the others boxes or hulls.
++bool CanopyRound(CanopyKind kind);
++
++// One footprint. World metres, x east, z north, heights above sea level.
++struct CanopyItem
++{
++    int id = -1;                // the object's id (Object::ID), for Remove
++    float cx = 0.0f, cz = 0.0f; // centre
++    float ux = 1.0f, uz = 0.0f; // unit axis 1
++    float vx = 0.0f, vz = 1.0f; // unit axis 2
++    float a = 0.0f, b = 0.0f;   // half extents along the axes
++    // Height of the object's top above the ground at its centre (m). The
++    // canopy keeps it above the ground of every texel the object covers, so a
++    // forest block on a slope follows the slope.
++    float height = 0.0f;
++    float opacity = 0.0f;
++    bool round = false;      // the ellipse inscribed in the box (crowns)
++    std::vector<float> hull; // convex hull (x, z pairs, counter-clockwise); empty = the box
++    // Bounding box of the footprint (CanopyItemBounds fills it).
++    float minX = 0.0f, maxX = 0.0f, minZ = 0.0f, maxZ = 0.0f;
++};
++
++// Fills an item's bounding box from its hull, or from its axes and extents.
++void CanopyItemBounds(CanopyItem& item);
++bool CanopyInside(const CanopyItem& item, float x, float z);
++// Andrew's monotone chain over (x, z) pairs; counter-clockwise, no repeated
++// points; empty for fewer than three distinct points or a degenerate set.
++std::vector<float> CanopyConvexHull(std::vector<float> xz);
++
++// The canopy texture as it is uploaded: every mip level of RG16 unorm pairs,
++// r = (top - heightBase) / heightRange, g = density.
++struct CanopyField
++{
++    int size = 0;       // level-0 texels a side; texel j covers [j, j + 1) * texel metres
++    float texel = 0.0f; // metres per level-0 texel
++    float heightBase = 0.0f;
++    float heightRange = 1.0f;
++    std::vector<std::vector<std::uint16_t>> levels; // level l: LevelSize(l)^2 RG pairs
++    // Bumped by every change (a build, a removal), so the sun-visibility map
++    // knows to rebuild.
++    std::uint32_t version = 0;
++
++    bool Valid() const { return size > 0 && texel > 0.0f && !levels.empty(); }
++    int Levels() const { return static_cast<int>(levels.size()); }
++    int LevelSize(int level) const;
++    float Top(int level, int x, int z) const;     // decoded, metres
++    float Density(int level, int x, int z) const; // decoded, 0..1
++};
++
++// A changed texel rectangle of one level, [x0, x1) x [z0, z1).
++struct CanopyRect
++{
++    int level = 0;
++    int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
++};
++
++// Texels per terrain cell for a cell size and terrain range.
++int CanopyTexelsPerCell(float cellSize, int range);
++
++// Builds and keeps the canopy of one landscape. Build runs on a worker; after
++// it the owner (the main thread) may Remove objects.
++class CanopyRaster
++{
++  public:
++    // `heights`: the terrain grid, range * range, row-major heights[z * range + x],
++    // vertex (x, z) at (x * grid, z * grid). k texels per cell. False (and no
++    // field) for an empty grid or a cancelled build.
++    bool Build(std::vector<CanopyItem> items, std::vector<float> heights, int range, float grid, int k,
++               const std::atomic<bool>* cancel = nullptr);
++    // The field (shared with the backend, which uploads it); null before Build.
++    std::shared_ptr<const CanopyField> Field() const { return _field; }
++    // Takes object `id`'s footprint out and re-rasterises the texels it
++    // covered, at every level; returns those rectangles (empty when the object
++    // is not in the canopy or was removed already).
++    std::vector<CanopyRect> Remove(int id);
++    int ItemCount() const { return static_cast<int>(_items.size()); }
++
++  private:
++    static constexpr int kBinTexels = 32;
++    void RasterLevel0(int x0, int z0, int x1, int z1);
++    void Downsample(int level, int x0, int z0, int x1, int z1); // level - 1 into level
++    float Ground(float x, float z) const;
++    std::uint16_t Encode(float height) const;
++    float Decode(std::uint16_t value) const;
++
++    std::shared_ptr<CanopyField> _field;
++    // The mean ground of every texel of every level, encoded as r is.
++    std::vector<std::vector<std::uint16_t>> _ground;
++    std::vector<CanopyItem> _items;
++    std::vector<bool> _removed;
++    std::unordered_map<int, int> _byId;
++    std::vector<std::vector<int>> _bins; // item indices per kBinTexels square, ascending
++    int _bins1 = 0;                      // bins a side
++    std::vector<float> _heights;
++    int _range = 0;
++    float _grid = 0.0f;
++};
++
++// ---- Sampling and the trace (C++ mirrors of the GPU pass) ----------------------
++
++// Trilinear sample of the field (GL_LINEAR_MIPMAP_LINEAR, clamp to edge) at world
++// (x, z) and level of detail `lod`: the decoded top (m) and density.
++void CanopySample(const CanopyField& field, float x, float z, float lod, float& top, float& density);
++
++// The trace's shape (shared with psCanopySun).
++constexpr float kCanopyReach = 45.0f;       // nothing in the canopy stands taller above its ground
++constexpr float kCanopyMaxTrace = 900.0f;   // metres toward the sun at most
++constexpr float kCanopyGrowth = 0.15f;      // step = max(texel, growth * distance)
++constexpr int kCanopyMaxSteps = 40;         // the loop bound of the shader (a 2 deg sun needs 29)
++constexpr float kCanopySoftDeg = 0.8f;      // the occluder edge's angular softness
++constexpr float kCanopyMinDensity = 0.003f; // a sample thinner than this is skipped
++constexpr float kCanopyMinTransmit = 0.02f; // one sample takes out at most this much
++constexpr float kCanopyGroundLift = 0.3f;   // a ground receiver sits this high
++constexpr float kCanopyRaisedLift = 1.8f;   // the lowest raised receiver (1.5 m plus the lift)
++constexpr float kCanopyRaisedSkip = 6.0f;   // a raised receiver never shades itself within this
++constexpr float kCanopyRaisedFrom = 1.5f;   // receivers this high above the ground are raised
++constexpr float kCanopyGroundTo = 0.5f;     // receivers this low are ground (blend between)
++// A sample sets the raised receivers' edge in full from this crossing on, and
++// not at all below kCanopyEdgeCrossFrom (its edge sinks below the ground).
++constexpr float kCanopyEdgeCrossFrom = 0.3f;
++constexpr float kCanopyEdgeCrossTo = 0.6f;
++constexpr float kCanopyEdgeRange = 48.0f;   // stored edge height range (m)
++constexpr float kCanopySoftRange = 16.0f;   // stored edge softness range (m)
++constexpr float kCanopyMinSoft = 0.5f;      // softness of "no edge"
++constexpr float kCanopyMinReadSoft = 0.25f; // the read never takes a narrower edge (8-bit storage)
++
++// The sun as the trace takes it: horizontal unit direction toward the sun and
++// the tangents of its elevation and of the edge softness.
++struct CanopySunRay
++{
++    float dirX = 0.0f, dirZ = 1.0f;
++    float tanSun = 0.0f;
++    float tanSoft = 0.0f;
++    float length = 0.0f; // trace length (m)
++};
++// From the direction toward the sun (need not be normalised, y up).
++CanopySunRay CanopySunRayToward(float x, float y, float z);
++
++// One texel of the sun-visibility map: ground visibility, the lowest raised
++// receiver's visibility, and the raised receivers' shadow edge (height above
++// the ground, softness), all as stored before the 8-bit quantisation.
++struct CanopySunTexel
++{
++    float ground = 1.0f;
++    float raisedLow = 1.0f;
++    float edge = 0.0f;
++    float soft = kCanopyMinSoft;
++};
++// The trace from the ground at (x, z), height groundY: psCanopySun's loop.
++CanopySunTexel CanopySunAt(const CanopyField& field, float x, float z, float groundY, const CanopySunRay& ray);
++// What a receiver `heightAboveGround` above the ground reads from a texel (the
++// world shaders' canopySunVisibility).
++float CanopyReceiverVisibility(const CanopySunTexel& texel, float heightAboveGround);
++
++// ---- The sun-visibility map: placement, rebuilds, strength, constants ---------
++
++constexpr int kCanopySunSize = 2048;                  // texels a side
++constexpr float kCanopySunMinTexel = 1.5625f;         // metres
++constexpr float kCanopySunMaxTexel = 3.125f;          // metres
++constexpr float kCanopySunTexelPerVd = 1.0f / 900.0f; // texel = view distance / 900, clamped
++constexpr float kCanopySunRebuildDeg = 0.05f;         // the sun moved this much: rebuild
++constexpr float kCanopySunRecentre = 0.125f;          // the camera left the middle by this share of the map: rebuild
++// The map fades out toward its edges (uv distance from the centre).
++constexpr float kCanopySunEdgeFrom = 0.42f;
++constexpr float kCanopySunEdgeTo = 0.48f;
++// Without sun shadow maps the canopy starts this far out (fading in over the
++// fade before it), so the near range keeps no tree shadows, as before.
++constexpr float kCanopyNoMapReach = 150.0f;
++constexpr float kCanopyNoMapFade = 50.0f;
++// The strength fades over the gate's edges (degrees of sun, sky-through).
++constexpr float kCanopyFadeInToSunDeg = 4.0f;
++constexpr float kCanopyFadeOutFromSunDeg = 21.0f;
++constexpr float kCanopyFadeInToSkyThrough = 0.6f;
++
++// The map's texel for a view distance (metres), a multiple of 1/32 m.
++float CanopySunTexelFor(float viewDistance);
++// The map's origin (its corner, texel-aligned) for a camera at (camX, camZ).
++void CanopySunOrigin(float camX, float camZ, float texel, float& originX, float& originZ);
++
++// What the map was built for, and what the frame wants.
++struct CanopySunKey
++{
++    bool valid = false;
++    float sun[3] = {0.0f, 1.0f, 0.0f}; // toward the sun, normalised
++    float originX = 0.0f, originZ = 0.0f;
++    float texel = 0.0f;
++    std::uint32_t canopyVersion = 0;
++};
++// True when `want` (for a camera at camX, camZ) needs a new map: none yet, a new
++// canopy or texel, the sun moved kCanopySunRebuildDeg, or the camera is more than
++// kCanopySunRecentre of the map from its middle.
++bool CanopySunNeedsRebuild(const CanopySunKey& built, const CanopySunKey& want, float camX, float camZ);
++
++// The shadows' strength at a sun height and sky-through: 0 outside the gate,
++// fading in from 2 to 4 deg and out from 21 to 25 deg of sun, and in from a
++// sky-through of 0.5 to 0.6.
++float CanopyStrength(float sunElevationDeg, float skyThrough);
++
++// LitConstants slot Canopy (76): x strength (0 = off: the switch, its gate, no
++// canopy or no map), yz the map's origin (m), w 1 / its extent (1/m). With the
++// gates off (gates=0, debugging) an enabled switch runs at full strength while
++// the sun is up.
++struct CanopyFrameConstants
++{
++    float canopy[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++};
++CanopyFrameConstants ComputeCanopyFrameConstants(const LightingTuning& tuning, const FeatureGates& gates, bool mapReady,
++                                                 float sunElevationDeg, float skyThrough, float originX, float originZ,
++                                                 float texel);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index c3ea5e12..099ca41f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -19,8 +19,9 @@ Gate Off(const char* reason, float scale = 1.0f)
+ }
+ 
+ // The pass resolution of each feature (plan section 3.2): the air pass, the
+-// SSR trace, the combat shadow mask and the canopy visibility buffer run at
+-// half resolution; everything else at full (or has no pass of its own).
++// SSR trace and the combat shadow mask run at half resolution; everything else
++// at full or has no screen pass of its own (the canopy's sun-visibility map is
++// a world-space map around the camera, Canopy.hpp, not a screen buffer).
+ float FeatureScale(Feature f)
+ {
+     switch (f)
+@@ -30,7 +31,6 @@ float FeatureScale(Feature f)
+         case Feature::AirBeams:
+         case Feature::AirHaze:
+         case Feature::ValleyMist:
+-        case Feature::CanopyShadows:
+             return 0.5f;
+         default:
+             return 1.0f;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index a5bdd70e..76cf90ca 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -55,8 +55,10 @@ constexpr FeatureInfo kFeatures[] = {
+      &FS::airBeams, ""},
+     {Feature::AirHaze, "airHaze", "Aerial haze", "haze", "Sky and air", "B8", false, &FS::airHaze, ""},
+     {Feature::ValleyMist, "valleyMist", "Valley mist", "haze", "Sky and air", "B8", false, &FS::valleyMist, ""},
+-    {Feature::CanopyShadows, "canopyShadows", "Long canopy shadows", "hfrt", "Light and shadow", "B9", false,
+-     &FS::canopyShadows, ""},
++    // B9 (hfrt): the sun-visibility map's build shows in its own section on
++    // the frames that rebuild it; the one read per fragment is in the world pass.
++    {Feature::CanopyShadows, "canopyShadows", "Long canopy shadows", "hfrt", "Light and shadow", "B9", true,
++     &FS::canopyShadows, "canopy"},
+     {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", false, &FS::litClouds, ""},
+     {Feature::SkyCloudShadows, "skyCloudShadows", "Sky-matched cloud shadows", "clouds", "Sky and air", "B10", false,
+      &FS::skyCloudShadows, ""},
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index a98122d0..617b26b2 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -29,6 +29,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Tonemap | shader `tonemapNeutral` | Khronos PBR Neutral without its toe: identity below 0.8 linear (authored texture colour is kept), a soft shoulder above it. |
+ | Sun shadows | shader `shadowMapVisibility` | The engine's cascaded shadow maps now dim only direct sun, never the sky fill: shadows have readable detail instead of a flat darkening. 12-tap Poisson over hardware 2x2 PCF. Casters use a slope-scaled normal offset; the terrain never casts into the map and gets no offset, so shadows stay attached to their casters at a low sun. Shadow maps follow the true sun down to 4 degrees (Classic clamps to 11.5), so evening shadows have their full length (`SceneShadowPass.cpp`). |
+ | Hill shadows and valley sky | `TerrainHorizon.cpp`, `World/Terrain/TerrainLighting.cpp` | A 16-azimuth horizon map built off-thread from the heightfield when an island loads. Ridges shadow the valleys behind them at any range (the shadow maps cover objects near the camera only) and valley floors see less sky. |
++| Long tree shadows (switch `canopyShadows`) | `Canopy.cpp`, `World/Terrain/TerrainLighting.cpp` `GatherCanopy`, `PoseidonGL33/EngineGL33_Canopy.cpp`, shader `canopySunVisibility` | At a low sun (2 to 25 degrees, fading over both ends, sky more than half clear) every tree, bush, forest block and building casts its long shadow beyond the shadow maps' reach too, so whole hillsides of trees stand on their shadows at golden hour. The landscape objects are drawn top-down into a canopy heightfield at 6.25 m when an island loads (on the horizon map's worker; a destroyed tree or building takes its footprint out). A GPU pass cone-traces that canopy toward the sun into a world-space map around the camera (2048 texels a side, 1.6 to 3.1 m a texel by the view distance), only when the sun has moved 0.05 degrees, the camera has left the middle of the map or the canopy changed, so it is still in motion and costs nothing on frames that do not rebuild. The world reads it once per fragment beyond the shadow maps, cross-faded over their far fade: the ground, and raised receivers (crowns, walls, roofs) that never shade themselves. It only takes sun away; the shade is the sky fill, cooler than the lit ground. |
+ | Ground-coloured bounce | `GroundTint`, `TerrainLighting.cpp` `GroundColors` | The light bounced off the ground takes the colour of the landscape texture under each point (its average colour, baked with the horizon map): warm on sand, green over grass. The tint is luminance-neutral, so it changes the colour of the shade, never its brightness. |
+ | Cloud shadows | `CloudNoise.cpp`, shader `cloudSunVisibility` | Under broken cloud, the classic uniform sun dimming moves into drifting cloud shadows whose mean transmission equals the classic dimming, so the average frame brightness is unchanged. A clear sky casts none: `setOvercast 0` still reports 4% cover (the clear weather keyframe sits at overcast -0.08), so the shadows fade in from 5% cover and take the full cover from 10% (about overcast 0.1); the dimming they do not carry stays uniform. |
+ | Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. Leaf cards authored without normals (zero mesh normals, common in CWA crowns) take the ellipsoid's normal outright. |
+@@ -137,7 +138,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+   `triPinCloudDrift` holds the cloud shadows and sky clouds still;
+   `triSetFixedStep` fixes the simulation step; `triSkyTableCheck <texels>`
+   reads the GPU sky-view table back and compares it with its CPU mirror
+-  (`SkyViewTexel`, `SkyViewRowMean`, `SkyViewRowGlow`). The sky table's
++  (`SkyViewTexel`, `SkyViewRowMean`, `SkyViewRowGlow`), and `triCanopyCheck
++  <texels>` does the same for the canopy's sun-visibility map (`CanopySunAt`). The sky table's
+   sub-knobs are `atmoHue`, `atmoSat` and `atmoHaze`. `triPinObjectDetail 1` holds the
+   object detail at its finest so both shots draw the same objects, and
+   `triSettleScene` waits until a view has finished loading
+@@ -177,9 +179,11 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
+ | `Graphics/Remaster/TemporalAA.{hpp,cpp}` | TAA's math: the Halton jitter and the rule that gives a pass its jitter, the camera reprojection built in double precision (the C++ mirror of the resolve's), the cut and history-chain rules, the particle mask thresholds. Pure. |
+ | `Graphics/Remaster/TerrainDetail.{hpp,cpp}` | The terrain detail's constants and the C++ mirror of the terrain main's math: the cell hash, rotation and patch position, the variance-preserving blend, the soft limiter, the near and far fades, the detail-kept boost and the anti-tiling weight, and the frame constants (zero when the switch or its gate is off). Pure. |
+-| `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
++| `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map and the canopy in step with the landscape (async build, hand-over on the render thread); gathers the canopy's footprints from the landscape objects and takes a destroyed object's out (`TerrainCanopyObjectDestroyed`, from `Object::SetDestroyed`). |
++| `Graphics/Remaster/Canopy.{hpp,cpp}` | The long tree shadows: the canopy raster and its mip rules, the removal of a destroyed object, the C++ mirrors of the GPU trace (`CanopySunAt`) and of the world's read (`CanopyReceiverVisibility`), the sun-visibility map's placement and rebuild rule, the strength over the gate's edges, the frame constants. Pure. |
++| `PoseidonGL33/EngineGL33_Canopy.cpp`, `EngineGL33_PostCanopyShaders.cpp` | The canopy on the GPU: its upload (whole, or the rectangles a removal changed), the fullscreen pass that builds the sun-visibility map (its GLSL in a GL-free file, a row of `kPostShaders`), the `Canopy` slot of `LitConstants`, the stand-ins on units 10 and 15, and `triCanopyCheck`. |
+ | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
+-| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 and 8 in use, 6 and 9-15 allocated) and the sampler table the programs are bound from, program-set selection. |
++| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-6, 8, 10 and 15 in use, 9 and 11-14 allocated) and the sampler table the programs are bound from, program-set selection. |
+ | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+ | `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages (with TAA off the Sharpen stage is the luma sharpen); the GL helpers the post stages share. |
+ | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
+@@ -187,6 +191,7 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, the TAA stages running together and only on a jittered frame, and the backend running and marking every landed stage. |
+ | `tests/unit/.../Graphics/test_temporal_aa.cpp` | The jitter sequence and range, the jitter of a pass, the reprojection against hand values and camera pairs, cuts and the history chain, the jitter in the remastered vertex shaders only, the resolve and sharpen contracts, and source audits that the jitter and LOD bias never reach the HUD and that the opaque copy sits between the opaque and the translucent objects. |
+ | `tests/unit/.../Graphics/test_atmosphere.cpp` | The atmosphere against an independent brute-force integration (the vertical optical depth in closed form, transmittance and sky-view texels at noon, sunset and 4 degrees under), the colours of a clear day, a sunset and a twilight, the table's lookups and row means, and the frame rules, switch, gate and sub-knobs of the sky table. |
++| `tests/unit/.../Graphics/test_canopy.cpp` | The canopy raster on synthetic crowns, boxes, hulls and slopes, its mip rules, a removal equal to a build without the object at every level, the trace's shadow length and its sqrt crossing density, the raised receivers' own-crown skip and smooth edge, the map's placement and rebuild rule, the strength over the gate's edges, the frame constants, the canopy's GPU section, the shader constants against the mirror's, and source audits of units 10 and 15. |
+ | `tests/unit/.../Graphics/test_terrain_detail.cpp` | The terrain detail's mirror (limiter, blend variance, rotation spread, locality and zoom of a cell's patch, the near fade on flat ground at 1080p, the 300 m fade, the 2x cap), its frame constants and gate, the shader's constants against the mirror's, and source audits that only the land's draws and only the terrain main take it. |
+ | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
+ | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 08c290a8..57909ff3 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -211,6 +211,11 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
+   the resolve is a post stage, and a jittered frame that nothing resolves would shake. The
+   backend jitters a frame only when the gate is on and the frame gets a post pass (an offscreen
+   frame target, the post programs built; `TaaWantedThisFrame`).
++- As built in B9: the canopy gate keeps its thresholds (sun 2 to 25 deg, sky-through above 0.5)
++  but reports scale 1: its sun visibility is a world-space map around the camera, not a
++  frame-relative buffer (5 B9). The shadows fade in from 2 to 4 deg and out from 21 to 25 deg of
++  sun and in from a sky-through of 0.5 to 0.6 (`CanopyStrength`), so the gate's edges switch
++  nothing on screen; the gate is on exactly where that strength is above 0.
+ 
+ Worst cases from MENU section 4 (a low sun over water and woods: about 20 ms) do not fit; the
+ gates above keep the beams, hfrt and SSR from all being at full cost together only if the
+@@ -305,6 +310,13 @@ x the soft filter's per-frame turn, y 1 in a TAA frame, z taps per frame there,
+ angular radius (0 = the stock filter); `litPcss` x the search reach (m), y the smallest filter
+ radius (texels), z the soft strength (the gate-edge fade), w the leaf lift (texels).
+ 
++As built in B9 (a parallel lane on 807ce4b): `Canopy` landed at 76 as planned, so the padding
++`litPlanned` shrinks to 68 to 75 (`vec4 litPlanned[8]`, `PlannedCount` 8) before `litCanopy` and
++`litDetail`; `LitConstPlanned` keeps `Sky` to `Water1` (static_assert: `Water1` is `Canopy` - 1) and
++`Haze`. `litCanopy` is per frame: x the shadows' strength (0 while the switch, its gate, the canopy or
++the map is off, and then the world programs read nothing), yz the sun-visibility map's origin
++(metres), w 1 / its extent.
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -357,6 +369,14 @@ NEAREST, non-compare sampler object kept on the unit. It holds the depth stand-i
+ every world pass and `EnsureArrayTarget` rebinds it the moment it recreates the array, the F3 rule
+ of unit 2. The `[ShadowSampler]` audit case for unit 6 is in `test_gl_state_cache_audit.cpp`.
+ 
++As built in B9: `kCanopyUnit` (10) holds the canopy heightfield (RG16, every mip level) and only
++the pass that builds the sun-visibility map samples it, so it has no `kLitSamplers` row (no world
++program declares it); `kCanopyVisUnit` (15) holds that map, which is a world-space RGBA8 map 2048
++texels a side around the camera, not the half-resolution screen buffer the table names, with its
++`kLitSamplers` row `canopySun`. Both hold a 1x1 stand-in from `InitLightingResources` on
++(`InitCanopy`: no canopy, all lit), and the build binds the stand-in on unit 15 while it draws into
++the map (a `[Canopy][ShadowSampler]` audit case).
++
+ ### 3.5 Shader sources: split by concern, test through the accessors
+ 
+ `EngineGL33_LightingShaders.cpp` (757 lines) and `EngineGL33_PostFX.cpp` (725 lines) are the two
+@@ -482,7 +502,8 @@ As built in A3 (corrections to the list and the paragraph above):
+   teardown unbinds; "restores what it binds" applies to anything else a stage changes (bloom's
+   additive blend goes back to opaque; a stage that binds another unit restores it).
+ - GPU marks: one per stage, contiguous after `WorldEnd` in list order (`ResolveEnd` ..
+-  `DebugViewEnd`), then `PostEnd`; 20 of the 32. The `post` section runs from `WorldEnd` to
++  `DebugViewEnd`), then `PostEnd`; 20 of the 32 (B9 adds `CanopyBegin` and `CanopyEnd` before
++  `WorldBegin` and a `canopy` section, so 27). The `post` section runs from `WorldEnd` to
+   `PostEnd` (it ended at `CompositeEnd`), so stages after the composite count. Every stage section
+   starts at the latest stage mark the frame recorded before it. Section names: `resolve`,
+   `lindepth`, `tags`, `ao`, `ssr`, `air`, `bloom`, `shafts`, `scatter`, `composite`, `taa`,
+@@ -1587,6 +1608,70 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+   (`Canopy`); glslang.
+ - **Effort**: 6 days.
+ 
++**Result (2026-10-18, uncommitted change on 807ce4b in the scratch copy `gr-B9`, a parallel lane;
++evidence in `tmp/integration/B9/` of the graphics-remaster worktree, gitignored; light gate).**
++
++- Built: `Graphics/Remaster/Canopy.{hpp,cpp}` (pure: the canopy raster and its mip rules,
++  `CanopyRaster::Remove`, the C++ mirrors of the GPU trace `CanopySunAt` and of the world's read
++  `CanopyReceiverVisibility`, the map's placement and rebuild rule, `CanopyStrength`, the frame
++  constants); the gather in `TerrainLighting.cpp` (`GatherCanopy`, main thread, 18 to 30 ms for
++  84,395 of 98,198 objects on Abel) and the raster on the horizon map's worker (332 to 505 ms,
++  2048x2048 at 6.25 m, 12 levels); `EngineGL33_Canopy.cpp` (upload, the build pass, the slot,
++  units 10 and 15, `triCanopyCheck`) and `psCanopySun` in `EngineGL33_PostCanopyShaders.cpp`
++  (a `kPostShaders` row); the read `canopySunVisibility` in the TerrainClouds piece, multiplied
++  into the sun visibility in `shadeRemastered`; the `Canopy` slot (3.3), units 10 and 15 (3.4),
++  `canopyShadows` landed (9/26) with the GPU section `canopy`; `triCanopyCheck <texels>`.
++- Corrections to the bullets above. The sun visibility is not a half-resolution screen buffer
++  from last frame's depth: it is a world-space map around the camera (2048 texels a side, the
++  view distance / 900 per texel, clamped to 1.5625 to 3.125 m), built in one fullscreen pass that
++  traces the canopy from every texel, and only when the sun has moved 0.05 deg, the camera has
++  left the middle eighth of the map or the canopy changed. It is world-locked, so it needs no
++  reprojection, history or jitter and cannot crawl (the "fixed dither crawl" item is solved by
++  construction), and its cost does not grow with the screen. A texel stores the ground's
++  visibility, a raised receiver's at 1.5 m that skips its first 6 m (its own crown), and the
++  envelope of the heights above which raised receivers (crowns, walls, roofs) leave a
++  neighbour's shadow, with its softness; a thin sample sinks out of that envelope smoothly
++  (crossing 0.3 to 0.6). A first build that let a density threshold set the edge disagreed with
++  its C++ mirror by up to 1.0 of visibility at single texels (`triCanopyCheck`): a density on
++  either side of the threshold flipped the edge, so a crown flipped from lit to shaded; the
++  smooth rule replaced it. The terrain height is packed into the canopy's r (the absolute top: the
++  texel's ground plus the tallest covered object's height above its own centre's ground, so a
++  forest block on a slope follows the slope; a mip texel keeps its mean ground plus its tallest
++  covered child's height), so each step is one fetch. The canopy only takes over beyond the shadow
++  maps (over their far fade; without maps from 100 to 150 m), so the near range keeps the B1
++  shadows unchanged. A destroyed object (`Object::SetDestroyed` of a `Primary` object) takes its
++  footprint out and re-rasterises its texels at every level (`glTexSubImage2D` of those
++  rectangles); the canopy build counts in `TerrainLightingPending`. Not built: a temporal
++  accumulation (nothing to accumulate), crown base heights and a trunk term (documented risk).
++- Off equals before: `remastered,canopyShadows=0` on the B9 build against the base build's shots
++  of the same views differs in 1 pixel over 2 levels at the hero view (`hfrt_hill_1730`, two runs),
++  and within the repeat noise at the other six lane views (the telephoto 1 pixel in one run and
++  25,388 in the next, against the base build's own inert off/on 17,774; the others 38,624 to
++  156,971 against 38,859 to 153,234; TAA phase on edges, band means equal to 0.02%).
++- On against off (1080p, 4x MSAA, TAA on): the hero view's ground band -0.5% mean luma (32,272
++  pixels over 8 levels), the telephoto -1.75% (94,245), the October morning -0.8%, an hour earlier
++  (sun 20 deg) -0.5%, the near-field views (`ground_b_1730`, `forest_edge_golden`) and noon (gate
++  off) within the repeat noise; sky band unchanged, horizon band -0.14% at most. Where the canopy
++  shades, the display value falls to 0.80 to 0.83 of lit (luma; R 0.72 to 0.77, B 0.92 to 0.93):
++  not crushed, cooler (the shade is the sky fill). Motion: a walk at 0.5 m a frame keeps the
++  second temporal difference of the shaded region at 0.0350 against 0.0353 off; a time-lapse at
++  0.2 deg of sun a frame (a rebuild every frame) changes the shaded region by 4.5e-3 a frame in
++  both passes, no steps.
++- GPU against mirror (`triCanopyCheck 4096`, OK at four sun heights and two map scales): stored
++  channels within 0.004 to 0.015; what a receiver reads (against the mirror stored at 8 bits)
++  within 0.055 to 0.064 at the worst texel and 0.007 to 0.030 at the 99th percentile, about one
++  storage step of the edge on its steepest slope.
++- Cost (single reading, 4060 Ti at P0 2,775 MHz, one other lane's game running): frame minimum on
++  minus off +0.03 ms (hero), +0.04 ms (telephoto), +0.03 ms (forest edge), +0.01 ms at noon (gate
++  off); the map's rebuild 0.66 / 0.62 ms (median / min of three rounds of 20 rebuilds at a 9 deg
++  sun), read 0.78 and 1.47 ms in two earlier runs at unlogged clocks. A rebuild happens about
++  every 12 s at the normal clock (0.05 deg of sun) and when the camera moves 1/8 of the map.
++- Gate: build 0 warnings; touched files clang-format clean (TerrainLighting.cpp formatted whole:
++  clean at the base); unit gate tags plus `[FeatureSwitches],[FeatureGates],[PostStages],
++  [TemporalAA],[TerrainDetail],[LumaSharpen],[SunShadows],[Canopy]` 540/540 (17 new cases);
++  smoke_abel 1/1 with KHR_debug ids 131169, 131154 and 131218 only. 18 mutations each turn their
++  cases red.
++
+ ### B10. clouds (lit sky clouds, sky-matched cloud shadows)
+ 
+ - **Prototype touched**: `GameStateExtTestRender.cpp` (`skyClouds`, `cloudShadowSource`,
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Dammage.cpp b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Dammage.cpp
+index ad7d2732..a41007c9 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Dammage.cpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Dammage.cpp
+@@ -8,6 +8,7 @@
+ #include <Random/randomGen.hpp>
+ #include <Poseidon/World/World.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
++#include <Poseidon/World/Terrain/TerrainLighting.hpp>
+ #include <Poseidon/AI/VehicleAI.hpp>
+ #include <Poseidon/AI/AI.hpp>
+ 
+@@ -501,6 +502,8 @@ void Object::SetDestroyed(float anim)
+                     GLandscape->OperationalCache()->RemoveField(x, z);
+                 }
+             }
++            // A fallen tree or a ruin no longer casts its long shadow.
++            TerrainCanopyObjectDestroyed(ID());
+         }
+     }
+ }
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+index 61df03ee..55dcfde6 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+@@ -1,8 +1,11 @@
+ #include <Poseidon/World/Terrain/TerrainLighting.hpp>
+ 
+ #include <Poseidon/Graphics/Core/Engine.hpp>
++#include <Poseidon/Graphics/Remaster/Canopy.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
++#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+ #include <Poseidon/Graphics/Textures/TextureBank.hpp>
++#include <Poseidon/World/Scene/Object.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ #include <Poseidon/Foundation/Framework/Log.hpp>
+ 
+@@ -25,7 +28,11 @@ namespace
+ struct BuildResult
+ {
+     std::shared_ptr<const remaster::TerrainHorizonMap> map; // null when cancelled
++    // The canopy heightfield of the landscape objects (long tree shadows,
++    // canopyShadows), built with the map; null when cancelled or empty.
++    std::shared_ptr<remaster::CanopyRaster> canopy;
+     long long ms = 0;
++    long long canopyMs = 0;
+ };
+ 
+ // One build in flight: its cancel flag lives with it, so a retired build can
+@@ -46,6 +53,11 @@ struct BuildState
+     bool handed = true;
+     // Builds abandoned for a newer landscape: cancelled, dropped once they stop.
+     std::vector<Build> retired;
++    // The canopy of the current landscape once handed over (main thread), and
++    // the landscape objects destroyed since its objects were gathered: each
++    // takes its footprint out of the canopy (TerrainCanopyObjectDestroyed).
++    std::shared_ptr<remaster::CanopyRaster> canopy;
++    std::vector<int> destroyed;
+ 
+     void Retire(Build& b)
+     {
+@@ -74,6 +86,8 @@ struct BuildState
+                 b.result.wait();
+         retired.clear();
+         handed = true;
++        canopy.reset();
++        destroyed.clear();
+     }
+     ~BuildState() { Stop(); }
+ };
+@@ -193,6 +207,125 @@ std::vector<float> ExpandGroundColors(const GroundCells& cells, int range, float
+     }
+     return rgb;
+ }
++
++// The canopy (Graphics/Remaster/Canopy.hpp): one footprint per landscape
++// object that shades the ground at a distance, gathered on the main thread (the
++// object lists belong to it) and rasterised by the worker. Destroyed objects
++// are left out; ones destroyed later are taken out by Remove.
++std::vector<remaster::CanopyItem> GatherCanopy(const Landscape& land, int& considered)
++{
++    std::vector<remaster::CanopyItem> items;
++    considered = 0;
++    const int n = land.GetLandRange();
++    for (int z = 0; z < n; ++z)
++    {
++        for (int x = 0; x < n; ++x)
++        {
++            const ObjectList& list = land.GetObjects(z, x);
++            for (int i = 0; i < list.Size(); ++i)
++            {
++                Object* obj = list[i];
++                if (!obj || obj->GetType() != Primary || obj->IsDestroyed())
++                    continue;
++                LODShapeWithShadow* shape = obj->GetShape();
++                if (!shape)
++                    continue;
++                ++considered;
++                const remaster::CanopyKind kind = remaster::CanopyKindOfMapType(shape->GetMapType());
++                const float opacity = remaster::CanopyOpacity(kind);
++                if (opacity <= 0.0f)
++                    continue;
++                const Vector3 mn = shape->Min();
++                const Vector3 mx = shape->Max();
++                const Vector3 c = (mn + mx) * 0.5f;
++                const Vector3 wc = obj->PositionModelToWorld(c);
++                const Vector3 wu = obj->PositionModelToWorld(Vector3(mx.X(), c.Y(), c.Z())) -
++                                   obj->PositionModelToWorld(Vector3(mn.X(), c.Y(), c.Z()));
++                const Vector3 wv = obj->PositionModelToWorld(Vector3(c.X(), c.Y(), mx.Z())) -
++                                   obj->PositionModelToWorld(Vector3(c.X(), c.Y(), mn.Z()));
++                const float lu = std::sqrt(wu.X() * wu.X() + wu.Z() * wu.Z());
++                const float lv = std::sqrt(wv.X() * wv.X() + wv.Z() * wv.Z());
++                if (lu < 0.2f || lv < 0.2f)
++                    continue;
++                float top = -1e9f;
++                for (int k = 0; k < 8; ++k)
++                {
++                    const Vector3 corner((k & 1) ? mx.X() : mn.X(), (k & 2) ? mx.Y() : mn.Y(),
++                                         (k & 4) ? mx.Z() : mn.Z());
++                    top = std::max(top, obj->PositionModelToWorld(corner).Y());
++                }
++                remaster::CanopyItem it;
++                it.id = obj->ID();
++                it.cx = wc.X();
++                it.cz = wc.Z();
++                it.ux = wu.X() / lu;
++                it.uz = wu.Z() / lu;
++                it.vx = wv.X() / lv;
++                it.vz = wv.Z() / lv;
++                it.round = remaster::CanopyRound(kind);
++                const float shrink = it.round ? remaster::kCanopyCrownShrink : 1.0f;
++                it.a = 0.5f * lu * shrink;
++                it.b = 0.5f * lv * shrink;
++                // The absolute top for now; the worker turns it into the height
++                // above the ground at the centre.
++                it.height = top;
++                it.opacity = opacity;
++                if (!it.round)
++                {
++                    // Forest triangles and odd footprints: the hull of the
++                    // geometry level when it is loaded, else the box.
++                    const Shape* geo = shape->GeometryLevel();
++                    if (geo && geo->NPos() >= 3)
++                    {
++                        std::vector<float> pts;
++                        pts.reserve(static_cast<size_t>(geo->NPos()) * 2);
++                        for (int k = 0; k < geo->NPos(); ++k)
++                        {
++                            const Vector3 w = obj->PositionModelToWorld(geo->Pos(k));
++                            pts.push_back(w.X());
++                            pts.push_back(w.Z());
++                        }
++                        it.hull = remaster::CanopyConvexHull(std::move(pts));
++                    }
++                }
++                items.push_back(std::move(it));
++            }
++        }
++    }
++    return items;
++}
++
++// Worker: each footprint's height above the ground at its centre, then the
++// raster (null when cancelled).
++std::shared_ptr<remaster::CanopyRaster> BuildCanopy(std::vector<remaster::CanopyItem> items,
++                                                    const std::vector<float>& heights, int range, float grid,
++                                                    const std::atomic<bool>* cancel)
++{
++    auto ground = [&](float x, float z)
++    {
++        const float fx = std::clamp(x / grid, 0.0f, static_cast<float>(range - 1));
++        const float fz = std::clamp(z / grid, 0.0f, static_cast<float>(range - 1));
++        const int x0 = std::min(static_cast<int>(fx), range - 2), z0 = std::min(static_cast<int>(fz), range - 2);
++        const float tx = fx - static_cast<float>(x0), tz = fz - static_cast<float>(z0);
++        auto at = [&](int xx, int zz) { return heights[static_cast<size_t>(zz) * range + xx]; };
++        return (at(x0, z0) * (1.0f - tx) + at(x0 + 1, z0) * tx) * (1.0f - tz) +
++               (at(x0, z0 + 1) * (1.0f - tx) + at(x0 + 1, z0 + 1) * tx) * tz;
++    };
++    std::vector<remaster::CanopyItem> kept;
++    kept.reserve(items.size());
++    for (remaster::CanopyItem& it : items)
++    {
++        const float rel = it.height - ground(it.cx, it.cz);
++        if (rel < remaster::kCanopyMinRelTop)
++            continue;
++        it.height = std::min(rel, remaster::kCanopyMaxRelTop);
++        kept.push_back(std::move(it));
++    }
++    auto raster = std::make_shared<remaster::CanopyRaster>();
++    if (!raster->Build(std::move(kept), heights, range, grid, remaster::CanopyTexelsPerCell(grid, range), cancel))
++        return nullptr;
++    return raster;
++}
+ } // namespace
+ 
+ void UpdateTerrainLighting(Landscape* land)
+@@ -219,6 +352,29 @@ void UpdateTerrainLighting(Landscape* land)
+                      r.map->size, s_state.range, s_state.range, s_state.grid, r.ms);
+             GEngine->SetTerrainHorizonMap(std::move(r.map));
+         }
++        if (r.canopy && r.canopy->Field())
++        {
++            const remaster::CanopyField& f = *r.canopy->Field();
++            LOG_INFO(Graphics, "Canopy {}x{} at {} m ({} levels) from {} objects built in {} ms", f.size, f.size,
++                     f.texel, f.Levels(), r.canopy->ItemCount(), r.canopyMs);
++            s_state.canopy = std::move(r.canopy);
++            GEngine->SetTerrainCanopy(s_state.canopy->Field());
++        }
++    }
++
++    // Objects destroyed since the canopy's objects were gathered take their
++    // footprints out of it (a few texels each), once it is here.
++    if (s_state.canopy && !s_state.destroyed.empty())
++    {
++        std::vector<remaster::CanopyRect> rects;
++        for (int id : s_state.destroyed)
++        {
++            const std::vector<remaster::CanopyRect> r = s_state.canopy->Remove(id);
++            rects.insert(rects.end(), r.begin(), r.end());
++        }
++        s_state.destroyed.clear();
++        if (!rects.empty())
++            GEngine->TerrainCanopyChanged(rects.data(), static_cast<int>(rects.size()));
+     }
+ 
+     const std::uint64_t sample = SampleHeights(*land, range, grid);
+@@ -234,6 +390,10 @@ void UpdateTerrainLighting(Landscape* land)
+     s_state.sample = sample;
+     s_state.handed = false;
+     GEngine->SetTerrainHorizonMap(nullptr); // no stale map over the new ground
++    GEngine->SetTerrainCanopy(nullptr);
++    s_state.canopy.reset();
++    // The gather below leaves out what is destroyed by now.
++    s_state.destroyed.clear();
+ 
+     std::vector<float> heights(static_cast<size_t>(range) * range);
+     for (int z = 0; z < range; ++z)
+@@ -242,25 +402,39 @@ void UpdateTerrainLighting(Landscape* land)
+     // Texture headers load on this (the main) thread, once per texture cell;
+     // the worker expands the cells to the terrain grid.
+     GroundCells cells = GroundColors(*land);
++    const auto gather0 = std::chrono::steady_clock::now();
++    int considered = 0;
++    std::vector<remaster::CanopyItem> canopyItems = GatherCanopy(*land, considered);
++    LOG_INFO(Graphics, "Canopy: {} occluders of {} landscape objects gathered in {} ms", canopyItems.size(), considered,
++             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - gather0).count());
+ 
+     Build build;
+     std::shared_ptr<std::atomic<bool>> cancel = build.cancel;
+-    build.result = std::async(
+-        std::launch::async,
+-        [heights = std::move(heights), cells = std::move(cells), cancel, range, grid]()
+-        {
+-            const auto t0 = std::chrono::steady_clock::now();
+-            const std::vector<float> ground = ExpandGroundColors(cells, range, grid);
+-            auto map = std::make_shared<remaster::TerrainHorizonMap>();
+-            remaster::TerrainHorizonOptions options;
+-            options.cancel = cancel.get();
+-            BuildResult r;
+-            if (remaster::BuildTerrainHorizonMap(heights.data(), range, grid, options, *map,
+-                                                 ground.empty() ? nullptr : ground.data()))
+-                r.map = std::move(map);
+-            r.ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+-            return r;
+-        });
++    build.result = std::async(std::launch::async,
++                              [heights = std::move(heights), cells = std::move(cells),
++                               canopyItems = std::move(canopyItems), cancel, range, grid]() mutable
++                              {
++                                  const auto t0 = std::chrono::steady_clock::now();
++                                  const std::vector<float> ground = ExpandGroundColors(cells, range, grid);
++                                  auto map = std::make_shared<remaster::TerrainHorizonMap>();
++                                  remaster::TerrainHorizonOptions options;
++                                  options.cancel = cancel.get();
++                                  BuildResult r;
++                                  if (remaster::BuildTerrainHorizonMap(heights.data(), range, grid, options, *map,
++                                                                       ground.empty() ? nullptr : ground.data()))
++                                      r.map = std::move(map);
++                                  const auto t1 = std::chrono::steady_clock::now();
++                                  r.ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
++                                  if (r.map)
++                                  {
++                                      r.canopy =
++                                          BuildCanopy(std::move(canopyItems), heights, range, grid, cancel.get());
++                                      r.canopyMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                                       std::chrono::steady_clock::now() - t1)
++                                                       .count();
++                                  }
++                                  return r;
++                              });
+     s_state.pending = std::move(build);
+ }
+ 
+@@ -277,4 +451,13 @@ bool TerrainLightingPending()
+     return GEngine && GEngine->WantsTerrainHorizonMap() && !s_state.handed;
+ }
+ 
++void TerrainCanopyObjectDestroyed(int objectId)
++{
++    // Only while a canopy is here or on its way: otherwise there is nothing
++    // to take the object out of (classic lighting builds none).
++    if (objectId < 0 || (!s_state.canopy && s_state.handed))
++        return;
++    s_state.destroyed.push_back(objectId);
++}
++
+ } // namespace Poseidon
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
+index b8ad3fe5..ec71f41f 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
+@@ -18,5 +18,9 @@ void ShutdownTerrainLighting();
+ // True while the backend wants a horizon map and the build for the current
+ // landscape has not been handed over yet (triSettleScene waits for it).
+ bool TerrainLightingPending();
++// A landscape object was destroyed (Object::SetDestroyed): its footprint
++// leaves the canopy of the long tree shadows (Graphics/Remaster/Canopy.hpp) on
++// the next UpdateTerrainLighting, or as soon as the canopy is handed over.
++void TerrainCanopyObjectDestroyed(int objectId);
+ 
+ } // namespace Poseidon
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 31f9a0b8..af269ac2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -723,6 +723,10 @@ class EngineGL33 : public Engine
+     void EndRemasterSky() override;
+     bool RemasterSkyPending() const override;
+     std::string RemasterSkyCheck(int texels) override;
++    // --- Long tree shadows: the canopy and its sun-visibility map (EngineGL33_Canopy.cpp) ---
++    void SetTerrainCanopy(std::shared_ptr<const Poseidon::remaster::CanopyField> canopy) override;
++    void TerrainCanopyChanged(const Poseidon::remaster::CanopyRect* rects, int count) override;
++    std::string RemasterCanopyCheck(int texels) override;
+ 
+     Poseidon::remaster::LightingTuning _lighting;
+     // Remastered programs built and the setting asks for them: DoSelectPixelShader
+@@ -828,6 +832,16 @@ class EngineGL33 : public Engine
+     bool BuildSkyViewTableGpu(float sunElevationRad);
+     void UploadLitSky(const Vector3& toSun, float skyThrough);
+     void BindSkyTable();
++    // The canopy (EngineGL33_Canopy.cpp): the stand-ins on units 10 and 15, the
++    // canopy texture (uploaded whole, or the rectangles that changed), the GPU
++    // build of the sun-visibility map when the sun or the camera moved, the
++    // Canopy slot of LitConstants and the unit-15 binding.
++    void InitCanopy();
++    void DeinitCanopy();
++    void UploadCanopyField();
++    bool BuildCanopySunGpu(const Vector3& toSun, float originX, float originZ, float texel);
++    void UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, float skyThrough);
++    void BindCanopy();
+     // One LitConstants slot (flushed with the next FlushLitConstants), and the
+     // sky mode (litSkyFwd.w, flushed at once).
+     void SetLitSlot(int slot, float x, float y, float z, float w);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Canopy.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Canopy.cpp
+new file mode 100644
+index 00000000..903c3c90
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Canopy.cpp
+@@ -0,0 +1,551 @@
++// Long tree shadows (feature switch `canopyShadows`, INTEGRATION-PLAN.md
++// section 5 B9, research track hfrt).
++//
++// At a low sun every tree, bush, forest block and building casts its long
++// shadow, also beyond the sun shadow maps' few hundred metres
++// (Graphics/Remaster/Canopy.hpp). Three parts here:
++//
++//   - the canopy texture (unit 10): the heightfield of the landscape objects
++//     the world builds with the terrain horizon map (TerrainLighting.cpp),
++//     uploaded whole when it arrives, and only the rectangles a destroyed tree
++//     or building changed after that;
++//   - the sun-visibility map (unit 15): a world-space map around the camera,
++//     built on the GPU in one fullscreen pass (psCanopySun,
++//     EngineGL33_PostCanopyShaders.cpp) that cone-traces the canopy toward the
++//     sun from every texel, before the world, and only when the sun has moved
++//     kCanopySunRebuildDeg, the camera has left the middle of the map or the
++//     canopy changed (CanopySunNeedsRebuild);
++//   - the Canopy slot of LitConstants, which the world programs read
++//     (canopySunVisibility in the remastered prelude).
++//
++// Off (the switch, its gate outside a low clear sun, classic lighting, a
++// portrait, a 3D preview after the world, night vision) nothing is built and
++// the slot is zero, so the world programs read nothing and draw the frame
++// before the feature.
++
++#include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <PoseidonGL33/GL33BindCache.hpp>
++#include <Poseidon/Graphics/Core/GLBlendState.hpp>
++#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
++#include <Poseidon/Graphics/Core/GLPipelineState.hpp>
++#include <Poseidon/Graphics/Remaster/Canopy.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
++#include <Poseidon/Core/Global.hpp>
++#include <Poseidon/World/Scene/Scene.hpp>
++#include <Poseidon/World/Scene/Camera/Camera.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <string>
++#include <vector>
++
++using namespace Poseidon::gl33lighting;
++namespace rm = Poseidon::remaster;
++
++namespace
++{
++
++struct CanopyState
++{
++    // What the world handed over (it changes in place: TerrainCanopyChanged).
++    std::shared_ptr<const rm::CanopyField> field;
++    bool uploadWhole = false;
++    std::vector<rm::CanopyRect> changed;
++
++    // GL objects of the current context.
++    GLuint fieldTex = 0;     // RG16 with every level (unit 10)
++    GLuint fieldStandIn = 0; // 1x1 RG16, no canopy (unit 10 until the first upload)
++    std::uint32_t uploadedVersion = 0;
++    GLuint sunTex = 0, sunFbo = 0; // the sun-visibility map, RGBA8 (unit 15)
++    GLuint sunStandIn = 0;         // 1x1 RGBA8, all lit (unit 15 until the first build)
++    GLuint prog = 0, vao = 0;
++    bool programTried = false;
++    bool unavailable = false;
++
++    // The map in sunTex.
++    rm::CanopySunKey built;
++    unsigned builds = 0;
++};
++
++CanopyState s_canopy;
++
++constexpr float kDeg = 57.29578f;
++
++GLuint CompileCanopyShader(GLenum type, const char* src, const char* name)
++{
++    std::string overrideSource;
++    if (LoadShaderOverride(name, overrideSource))
++        src = overrideSource.c_str();
++    GLuint s = glCreateShader(type);
++    glShaderSource(s, 1, &src, nullptr);
++    glCompileShader(s);
++    GLint ok = 0;
++    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
++    if (!ok)
++    {
++        char log[1024];
++        glGetShaderInfoLog(s, sizeof(log), nullptr, log);
++        LOG_ERROR(Graphics, "GL33 canopy: shader compile error [{}]: {}", name, log);
++        glDeleteShader(s);
++        return 0;
++    }
++    return s;
++}
++
++GLuint LinkCanopyProgram()
++{
++    GLuint vs =
++        CompileCanopyShader(GL_VERTEX_SHADER, PostShaderSource(PostShader::Vertex), PostShaderName(PostShader::Vertex));
++    GLuint fs = CompileCanopyShader(GL_FRAGMENT_SHADER, PostShaderSource(PostShader::CanopySun),
++                                    PostShaderName(PostShader::CanopySun));
++    if (!vs || !fs)
++    {
++        if (vs)
++            glDeleteShader(vs);
++        if (fs)
++            glDeleteShader(fs);
++        return 0;
++    }
++    GLuint p = glCreateProgram();
++    glAttachShader(p, vs);
++    glAttachShader(p, fs);
++    glLinkProgram(p);
++    glDeleteShader(vs);
++    glDeleteShader(fs);
++    GLint ok = 0;
++    glGetProgramiv(p, GL_LINK_STATUS, &ok);
++    if (!ok)
++    {
++        char log[1024];
++        glGetProgramInfoLog(p, sizeof(log), nullptr, log);
++        LOG_ERROR(Graphics, "GL33 canopy: program link error [{}]: {}", PostShaderName(PostShader::CanopySun), log);
++        glDeleteProgram(p);
++        return 0;
++    }
++    return p;
++}
++
++GLuint MakeTexture(GLenum internalFormat, GLenum format, GLenum type, int w, int h, const void* data, bool linear)
++{
++    GLuint t = 0;
++    glGenTextures(1, &t);
++    glBindTexture(GL_TEXTURE_2D, t);
++    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, data);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++    return t;
++}
++
++void DeleteTexture(GLuint& t)
++{
++    if (t)
++    {
++        Poseidon::GL33Bind::OnTexDeleted(t);
++        glDeleteTextures(1, &t);
++    }
++    t = 0;
++}
++
++void BindUnit(int unit, GLuint tex)
++{
++    Poseidon::GL33Bind::Tex2D(unit, tex);
++}
++
++void SetUniform4(GLuint prog, const char* name, float a, float b, float c, float d)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform4f(loc, a, b, c, d);
++}
++
++void SetSampler(GLuint prog, const char* name, int unit)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform1i(loc, unit);
++}
++
++} // namespace
++
++void EngineGL33::InitCanopy()
++{
++    // Units 10 and 15 always hold a complete texture of the right kind (the F3
++    // rule): stand-ins until the first canopy and the first map.
++    GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++    const unsigned short none[2] = {0, 0};
++    s_canopy.fieldStandIn = MakeTexture(GL_RG16, GL_RG, GL_UNSIGNED_SHORT, 1, 1, none, false);
++    const unsigned char lit[4] = {255, 255, 0, 8}; // ground and raised lit, no edge, softness 0.5 m
++    s_canopy.sunStandIn = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 1, 1, lit, false);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    GL33Bind::Invalidate();
++    BindUnit(kCanopyUnit, s_canopy.fieldStandIn);
++    BindUnit(kCanopyVisUnit, s_canopy.sunStandIn);
++    GL33Bind::ActiveUnit(0);
++    // The canopy (if any) belongs to the landscape, not the context: upload it
++    // again, and build a new map.
++    s_canopy.uploadWhole = s_canopy.field != nullptr;
++    s_canopy.changed.clear();
++    s_canopy.built = rm::CanopySunKey{};
++}
++
++void EngineGL33::DeinitCanopy()
++{
++    // GL objects only: the canopy is the world's.
++    DeleteTexture(s_canopy.fieldTex);
++    DeleteTexture(s_canopy.fieldStandIn);
++    DeleteTexture(s_canopy.sunTex);
++    DeleteTexture(s_canopy.sunStandIn);
++    if (s_canopy.sunFbo)
++        glDeleteFramebuffers(1, &s_canopy.sunFbo);
++    s_canopy.sunFbo = 0;
++    if (s_canopy.prog)
++        glDeleteProgram(s_canopy.prog);
++    s_canopy.prog = 0;
++    if (s_canopy.vao)
++    {
++        GL33Bind::OnVaoDeleted(s_canopy.vao);
++        glDeleteVertexArrays(1, &s_canopy.vao);
++    }
++    s_canopy.vao = 0;
++    s_canopy.programTried = false;
++    s_canopy.unavailable = false;
++    s_canopy.uploadedVersion = 0;
++    s_canopy.built = rm::CanopySunKey{};
++}
++
++void EngineGL33::SetTerrainCanopy(std::shared_ptr<const rm::CanopyField> canopy)
++{
++    s_canopy.field = std::move(canopy);
++    s_canopy.uploadWhole = true;
++    s_canopy.changed.clear();
++    s_canopy.built = rm::CanopySunKey{};
++}
++
++void EngineGL33::TerrainCanopyChanged(const rm::CanopyRect* rects, int count)
++{
++    if (!s_canopy.field || !rects)
++        return;
++    s_canopy.changed.insert(s_canopy.changed.end(), rects, rects + count);
++}
++
++void EngineGL33::UploadCanopyField()
++{
++    const rm::CanopyField* f = s_canopy.field.get();
++    if (s_canopy.uploadWhole)
++    {
++        s_canopy.uploadWhole = false;
++        s_canopy.changed.clear();
++        DeleteTexture(s_canopy.fieldTex);
++        s_canopy.uploadedVersion = 0;
++        if (f && f->Valid())
++        {
++            GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++            glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
++            glGenTextures(1, &s_canopy.fieldTex);
++            glBindTexture(GL_TEXTURE_2D, s_canopy.fieldTex);
++            for (int l = 0; l < f->Levels(); ++l)
++            {
++                const int s = f->LevelSize(l);
++                glTexImage2D(GL_TEXTURE_2D, l, GL_RG16, s, s, 0, GL_RG, GL_UNSIGNED_SHORT,
++                             f->levels[static_cast<size_t>(l)].data());
++            }
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, f->Levels() - 1);
++            glBindTexture(GL_TEXTURE_2D, 0);
++            GL33Bind::Invalidate();
++            s_canopy.uploadedVersion = f->version;
++            LOG_INFO(Graphics, "GL33: canopy {}x{} at {} m ({} levels) uploaded", f->size, f->size, f->texel,
++                     f->Levels());
++        }
++        BindUnit(kCanopyUnit, s_canopy.fieldTex ? s_canopy.fieldTex : s_canopy.fieldStandIn);
++        GL33Bind::ActiveUnit(0);
++        return;
++    }
++    if (s_canopy.changed.empty() || !f || !s_canopy.fieldTex)
++        return;
++    // A destroyed tree or building: the rectangles of every level it changed.
++    GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
++    glBindTexture(GL_TEXTURE_2D, s_canopy.fieldTex);
++    for (const rm::CanopyRect& r : s_canopy.changed)
++    {
++        if (r.level < 0 || r.level >= f->Levels() || r.x1 <= r.x0 || r.z1 <= r.z0)
++            continue;
++        const int s = f->LevelSize(r.level);
++        glPixelStorei(GL_UNPACK_ROW_LENGTH, s);
++        const std::uint16_t* src =
++            f->levels[static_cast<size_t>(r.level)].data() + (static_cast<size_t>(r.z0) * s + r.x0) * 2;
++        glTexSubImage2D(GL_TEXTURE_2D, r.level, r.x0, r.z0, r.x1 - r.x0, r.z1 - r.z0, GL_RG, GL_UNSIGNED_SHORT, src);
++    }
++    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    GL33Bind::Invalidate();
++    GL33Bind::ActiveUnit(0);
++    s_canopy.changed.clear();
++    s_canopy.uploadedVersion = f->version;
++}
++
++bool EngineGL33::BuildCanopySunGpu(const Vector3& toSun, float originX, float originZ, float texel)
++{
++    const rm::CanopyField* f = s_canopy.field.get();
++    if (s_canopy.unavailable || !f || !s_canopy.fieldTex || !_terrainMap || !_terrainMap->Valid() || !_terrainHeightTex)
++        return false;
++    constexpr int n = rm::kCanopySunSize;
++    if (!s_canopy.programTried)
++    {
++        s_canopy.programTried = true;
++        s_canopy.prog = LinkCanopyProgram();
++        glGenVertexArrays(1, &s_canopy.vao);
++        GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++        s_canopy.sunTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, n, n, nullptr, true);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        GL33Bind::Invalidate();
++        glGenFramebuffers(1, &s_canopy.sunFbo);
++        glBindFramebuffer(GL_FRAMEBUFFER, s_canopy.sunFbo);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_canopy.sunTex, 0);
++        const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
++        BindFrameRenderTarget();
++        if (!s_canopy.prog || !complete)
++        {
++            LOG_ERROR(Graphics, "GL33 canopy: program or target failed; no long tree shadows");
++            s_canopy.unavailable = true;
++            return false;
++        }
++    }
++    const rm::CanopySunRay ray = rm::CanopySunRayToward(toSun.X(), toSun.Y(), toSun.Z());
++
++    // What the pass changes that the next draw does not set again (as the sky
++    // table's passes): the viewport, the target, cull, scissor, stencil and
++    // depth clamp; depth, blend, the program and the vertex array come back
++    // through the pipeline and bind caches, invalidated at the end.
++    GLint viewport[4] = {0, 0, 0, 0};
++    glGetIntegerv(GL_VIEWPORT, viewport);
++    const bool cull = glIsEnabled(GL_CULL_FACE) == GL_TRUE;
++    const bool scissor = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE;
++    const bool stencil = glIsEnabled(GL_STENCIL_TEST) == GL_TRUE;
++    const bool depthClamp = glIsEnabled(GL_DEPTH_CLAMP) == GL_TRUE;
++    Poseidon::render::depthstencil::Disabled(/*hasStencil*/ false);
++    glDisable(GL_STENCIL_TEST);
++    Poseidon::render::blend::Opaque();
++    glDisable(GL_CULL_FACE);
++    glDisable(GL_SCISSOR_TEST);
++    Poseidon::render::pipeline::DisableDepthClamp();
++    GL33Bind::Vao(s_canopy.vao);
++
++    glUseProgram(s_canopy.prog);
++    SetSampler(s_canopy.prog, "canopyMap", kCanopyUnit);
++    SetSampler(s_canopy.prog, "terrainHeight", kTerrainHeightUnit);
++    const float extent = static_cast<float>(f->size) * f->texel;
++    SetUniform4(s_canopy.prog, "canopyField", 1.0f / extent, f->texel, f->heightBase, f->heightRange);
++    SetUniform4(s_canopy.prog, "terrainGrid", 1.0f / _terrainMap->cellSize,
++                1.0f / static_cast<float>(_terrainMap->size), 0.0f, 0.0f);
++    SetUniform4(s_canopy.prog, "sunRay", ray.dirX, ray.dirZ, ray.tanSun, ray.tanSoft);
++    SetUniform4(s_canopy.prog, "sunMap", originX, originZ, texel, ray.length);
++    BindUnit(kCanopyUnit, s_canopy.fieldTex);
++    BindUnit(kTerrainHeightUnit, _terrainHeightTex);
++    // The map is the target: nothing samples it meanwhile.
++    BindUnit(kCanopyVisUnit, s_canopy.sunStandIn);
++    glBindFramebuffer(GL_FRAMEBUFFER, s_canopy.sunFbo);
++    glViewport(0, 0, n, n);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++
++    glUseProgram(0);
++    BindFrameRenderTarget();
++    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
++    if (cull)
++        glEnable(GL_CULL_FACE);
++    if (scissor)
++        glEnable(GL_SCISSOR_TEST);
++    if (stencil)
++        glEnable(GL_STENCIL_TEST);
++    if (depthClamp)
++        Poseidon::render::pipeline::EnableDepthClamp();
++    _pixelShaderSel = PSNone;
++    GL33Bind::Invalidate();
++    InvalidatePipelineCache();
++    BindUnit(kCanopyVisUnit, s_canopy.sunTex);
++    GL33Bind::ActiveUnit(0);
++    ++s_canopy.builds;
++    return true;
++}
++
++void EngineGL33::UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, float skyThrough)
++{
++    // The canopy texture follows the world's canopy whether or not the
++    // feature runs this frame, so it is current when the gate opens.
++    if (s_canopy.uploadWhole || !s_canopy.changed.empty())
++        UploadCanopyField();
++    const rm::CanopyField* f = s_canopy.field.get();
++    Camera* camera = GScene ? GScene->GetCamera() : nullptr;
++    const bool live = _featureGates.computed && _featureGates[rm::Feature::CanopyShadows].on && _worldEffectsOn &&
++                      !_portraitTargetSize && !_worldSceneEnded && camera && f && s_canopy.fieldTex &&
++                      _terrainHeightTex && _terrainMap && _terrainMap->Valid();
++    bool ready = false;
++    if (live)
++    {
++        rm::CanopySunKey want;
++        want.valid = true;
++        Vector3 sun = toSun;
++        sun.Normalize();
++        want.sun[0] = sun.X();
++        want.sun[1] = sun.Y();
++        want.sun[2] = sun.Z();
++        want.texel = rm::CanopySunTexelFor(GScene->GetFogMaxRange());
++        want.canopyVersion = s_canopy.uploadedVersion;
++        const Vector3 cam = camera->Position();
++        rm::CanopySunOrigin(cam.X(), cam.Z(), want.texel, want.originX, want.originZ);
++        ready = s_canopy.built.valid;
++        // Only in the world's own passes (`live`): a portrait or a 3D preview
++        // after the world never rebuilds the world's map.
++        if (rm::CanopySunNeedsRebuild(s_canopy.built, want, cam.X(), cam.Z()))
++        {
++            GpuMark(Poseidon::gpu::Mark::CanopyBegin);
++            if (BuildCanopySunGpu(toSun, want.originX, want.originZ, want.texel))
++            {
++                GpuMark(Poseidon::gpu::Mark::CanopyEnd);
++                s_canopy.built = want;
++                ready = true;
++            }
++        }
++    }
++    const rm::CanopySunKey& b = s_canopy.built;
++    const rm::CanopyFrameConstants c = rm::ComputeCanopyFrameConstants(
++        _lighting, _featureGates, live && ready, sunElevationDeg, skyThrough, b.originX, b.originZ, b.texel);
++    SetLitSlot(LitConst::Canopy, c.canopy[0], c.canopy[1], c.canopy[2], c.canopy[3]);
++}
++
++void EngineGL33::BindCanopy()
++{
++    BindUnit(kCanopyVisUnit, s_canopy.built.valid && s_canopy.sunTex ? s_canopy.sunTex : s_canopy.sunStandIn);
++}
++
++std::string EngineGL33::RemasterCanopyCheck(int texels)
++{
++    if (!_glContext)
++        return "FAIL:no context";
++    const rm::CanopyField* f = s_canopy.field.get();
++    if (!f || !s_canopy.built.valid || !s_canopy.sunTex)
++        return "FAIL:no sun-visibility map built (switch or gate off, or no canopy yet)";
++    if (s_canopy.built.canopyVersion != f->version)
++        return "FAIL:the canopy changed since the map was built";
++    if (!_terrainMap || !_terrainMap->Valid())
++        return "FAIL:no terrain map";
++    constexpr int n = rm::kCanopySunSize;
++    FlushQueues();
++    std::vector<unsigned char> gpu(static_cast<size_t>(n) * n * 4);
++    GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, s_canopy.sunTex);
++    glPixelStorei(GL_PACK_ALIGNMENT, 1);
++    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, gpu.data());
++    glBindTexture(GL_TEXTURE_2D, 0);
++    GL33Bind::Invalidate();
++    GL33Bind::ActiveUnit(0);
++
++    // The receiver's ground as the pass reads it: the terrain height texture,
++    // bilinear on its grid (GL_LINEAR, clamp to edge).
++    const rm::TerrainHorizonMap& tm = *_terrainMap;
++    auto ground = [&tm](float x, float z)
++    {
++        const int s = tm.size;
++        const float fx = std::clamp(x / tm.cellSize, 0.0f, static_cast<float>(s - 1));
++        const float fz = std::clamp(z / tm.cellSize, 0.0f, static_cast<float>(s - 1));
++        const int x0 = std::min(static_cast<int>(fx), s - 2), z0 = std::min(static_cast<int>(fz), s - 2);
++        const float tx = fx - static_cast<float>(x0), tz = fz - static_cast<float>(z0);
++        auto at = [&](int xx, int zz) { return tm.height[static_cast<size_t>(zz) * s + xx]; };
++        return (at(x0, z0) * (1.0f - tx) + at(x0 + 1, z0) * tx) * (1.0f - tz) +
++               (at(x0, z0 + 1) * (1.0f - tx) + at(x0 + 1, z0 + 1) * tx) * tz;
++    };
++    const rm::CanopySunKey& b = s_canopy.built;
++    const rm::CanopySunRay ray = rm::CanopySunRayToward(b.sun[0], b.sun[1], b.sun[2]);
++    const int count = std::max(16, std::min(texels, n * n));
++    const int step = std::max(1, static_cast<int>(std::sqrt(static_cast<float>(n) * n / count)));
++    float worst[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float worstRead = 0.0f;
++    int worstAt[2] = {0, 0};
++    int checked = 0, shaded = 0;
++    std::vector<float> reads;
++    for (int y = step / 2; y < n; y += step)
++    {
++        for (int x = step / 2; x < n; x += step)
++        {
++            const float wx = b.originX + (static_cast<float>(x) + 0.5f) * b.texel;
++            const float wz = b.originZ + (static_cast<float>(y) + 0.5f) * b.texel;
++            const rm::CanopySunTexel cpu = rm::CanopySunAt(*f, wx, wz, ground(wx, wz), ray);
++            const unsigned char* g = gpu.data() + (static_cast<size_t>(y) * n + x) * 4;
++            rm::CanopySunTexel got;
++            got.ground = g[0] / 255.0f;
++            got.raisedLow = g[1] / 255.0f;
++            got.edge = g[2] / 255.0f * rm::kCanopyEdgeRange;
++            got.soft = g[3] / 255.0f * rm::kCanopySoftRange;
++            const float want[4] = {cpu.ground, cpu.raisedLow, std::clamp(cpu.edge / rm::kCanopyEdgeRange, 0.0f, 1.0f),
++                                   std::clamp(cpu.soft / rm::kCanopySoftRange, 0.0f, 1.0f)};
++            for (int c = 0; c < 4; ++c)
++            {
++                const float err = std::fabs(g[c] / 255.0f - want[c]);
++                if (!(err <= worst[c]))
++                    worst[c] = std::isfinite(err) ? err : 1e9f;
++            }
++            // The mirror's texel as the map stores it (8 bits a channel), so
++            // the reads compare the two traces, not the storage.
++            auto store = [](float v) { return std::round(std::clamp(v, 0.0f, 1.0f) * 255.0f) / 255.0f; };
++            rm::CanopySunTexel stored;
++            stored.ground = store(want[0]);
++            stored.raisedLow = store(want[1]);
++            stored.edge = store(want[2]) * rm::kCanopyEdgeRange;
++            stored.soft = store(want[3]) * rm::kCanopySoftRange;
++            float texelRead = 0.0f;
++            for (float hr : {0.0f, 1.0f, 3.0f, 8.0f, 15.0f})
++            {
++                const float err =
++                    std::fabs(rm::CanopyReceiverVisibility(got, hr) - rm::CanopyReceiverVisibility(stored, hr));
++                texelRead = std::isfinite(err) ? std::max(texelRead, err) : 1e9f;
++                if (!(err <= worstRead))
++                {
++                    worstRead = std::isfinite(err) ? err : 1e9f;
++                    worstAt[0] = x;
++                    worstAt[1] = y;
++                }
++            }
++            reads.push_back(texelRead);
++            shaded += cpu.ground < 0.9f ? 1 : 0;
++            ++checked;
++        }
++    }
++    // The stored channels against the mirror: the GPU's filter weights keep 8
++    // bits of the texel fraction, so beside a 20 m crown the canopy's top
++    // moves by a few centimetres and a sample's occlusion by up to a few
++    // hundredths; 0.03 is 8 storage steps. What a receiver reads (against the
++    // mirror stored the same way) can differ by one storage step of the edge
++    // (48 m / 255) on its steepest slope (1.5 / (2 x 2.06 m) at the softest
++    // edge a sample sets), about 0.07, at the texels where the two land on
++    // either side of a rounding; most texels agree far closer.
++    std::sort(reads.begin(), reads.end());
++    const float p99 = reads.empty() ? 0.0f : reads[static_cast<size_t>(0.99 * static_cast<double>(reads.size() - 1))];
++    constexpr float kToleranceStored = 0.03f;
++    constexpr float kToleranceMax = 0.08f;
++    constexpr float kToleranceP99 = 0.035f;
++    const bool ok = worst[0] <= kToleranceStored && worst[1] <= kToleranceStored && worst[2] <= kToleranceStored &&
++                    worst[3] <= kToleranceStored && worstRead <= kToleranceMax && p99 <= kToleranceP99;
++    char buf[448];
++    std::snprintf(
++        buf, sizeof(buf),
++        "%s:texels=%d shaded=%d sun=%.2f texel=%.3f origin=%.0f,%.0f builds=%u abs_err ground=%.4f "
++        "raised=%.4f edge=%.4f soft=%.4f read=%.4f@%d,%d read_p99=%.4f tolerance=%.3f/%.3f/%.3f",
++        ok ? "OK" : "FAIL", checked, shaded, static_cast<double>(std::asin(std::clamp(b.sun[1], -1.0f, 1.0f)) * kDeg),
++        static_cast<double>(b.texel), static_cast<double>(b.originX), static_cast<double>(b.originZ), s_canopy.builds,
++        static_cast<double>(worst[0]), static_cast<double>(worst[1]), static_cast<double>(worst[2]),
++        static_cast<double>(worst[3]), static_cast<double>(worstRead), worstAt[0], worstAt[1], static_cast<double>(p99),
++        static_cast<double>(kToleranceStored), static_cast<double>(kToleranceMax), static_cast<double>(kToleranceP99));
++    LOG_INFO(Graphics, "GL33 canopy check: {}", buf);
++    return buf;
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 5a654825..21d8cc8b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -3,8 +3,9 @@
+ // The remastered program set (EngineGL33_LightingShaders.cpp) reads the light
+ // rig, the per-draw material and the local lights from the LitConstants block
+ // (binding 3), the shadow map through a comparison sampler on unit 2 (and as
+-// raw depth on unit 6), the terrain horizon map on units 3 and 4 and the cloud
+-// noise on unit 5. Selection between the remastered and classic sets happens
++// raw depth on unit 6), the terrain horizon map on units 3 and 4, the cloud
++// noise on unit 5 and the canopy's sun-visibility map on unit 15
++// (EngineGL33_Canopy.cpp). Selection between the remastered and classic sets happens
+ // in DoSelectPixelShader via SelectProgram; Classic leaves every classic upload
+ // and program untouched.
+ 
+@@ -153,8 +154,10 @@ void EngineGL33::InitLightingResources()
+     GL33Bind::ActiveUnit(kShadowRawUnit);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+     GL33Bind::ActiveUnit(0);
+-    // The sky table's unit 8 gets its stand-in the same way.
++    // The sky table's unit 8 gets its stand-in the same way, and the canopy's
++    // units 10 and 15.
+     InitSkyTable();
++    InitCanopy();
+ 
+     glGenSamplers(1, &_shadowCompareSampler);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+@@ -201,6 +204,7 @@ void EngineGL33::DeinitLightingResources()
+     delTex(_post.whiteTex);
+     delTex(_post.blackTex);
+     DeinitSkyTable();
++    DeinitCanopy();
+     _post.unavailable = false;
+     if (_shadowCompareSampler)
+     {
+@@ -343,6 +347,7 @@ void EngineGL33::BindLightingTextures()
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
+     BindSkyTable();
++    BindCanopy();
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -556,6 +561,9 @@ void EngineGL33::UploadLitFrameConstants()
+     const std::array<float, 3> detail =
+         rm::terrain_detail::FrameConstants(_lighting, _featureGates[rm::Feature::TerrainDetail].on);
+     SetSlot(LitConst::Detail, detail[0], detail[1], detail[2], s_lit[LitConst::Detail * 4 + 3]);
++    // Long tree shadows (B9): the sun-visibility map, rebuilt when the sun or
++    // the camera moved enough; zero while the switch or its gate is off.
++    UploadLitCanopy(toSun, _featureGates.inputs.sunElevationDeg, _featureGates.inputs.skyThrough);
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index ac4ae6e3..9fcab22a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -47,6 +47,9 @@ extern const char kPostSkyTableHeaderGLSL[];
+ extern const char kPostSkyTableModelGLSL[];
+ extern const char kPostSkyViewMainGLSL[];
+ extern const char kPostSkyViewMeanMainGLSL[];
++// The canopy's sun-visibility pass (EngineGL33_PostCanopyShaders.cpp; read it
++// through PostShaderSource).
++extern const char kPostCanopySunGLSL[];
+ 
+ // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
+ // layout below. Every shader that reads the rig pastes this string instead of
+@@ -73,6 +76,9 @@ enum class PostShader : int
+     SkyView,     // regions 0 and 1 of the sky-view table
+     SkyViewMean, // the whole table: those two copied and each row's mean
+     LumaSharpen, // the composited frame, sharpened in brightness only, into the frame target (Sharpen, TAA off)
++    // The canopy's sun-visibility map (B9). Not a post stage: it runs before
++    // the world when the sun or the camera moved (EngineGL33_Canopy.cpp).
++    CanopySun,
+     Count,
+ };
+ // The override file stem (vsPost, psPostAo, ...) and the assembled source.
+@@ -95,14 +101,20 @@ constexpr int kCloudNoiseUnit = 5;
+ // on (the stand-in, then each cascade array as it is created).
+ constexpr int kShadowRawUnit = 6;
+ constexpr int kSkyLutUnit = 8; // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
++// The canopy heightfield (B9, EngineGL33_Canopy.cpp): sampled only by the
++// pass that builds the sun-visibility map, never by a world program; holds a
++// stand-in until the first canopy is uploaded.
++constexpr int kCanopyUnit = 10;
++// The canopy's sun-visibility map (B9): a world-space map around the camera
++// the world programs read beyond the shadow maps; a stand-in (all lit) until
++// the first map is built.
++constexpr int kCanopyVisUnit = 15;
+ // Allocated to the features still to land; no shader samples them yet.
+ constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
+-constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
+ constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
+ constexpr int kLightDataUnit = 12;    // light buffer, samplerBuffer (light list)
+ constexpr int kLightTileUnit = 13;    // per-tile light indices (light list)
+ constexpr int kCombatMaskUnit = 14;   // combat shadow mask (combat)
+-constexpr int kCanopyVisUnit = 15;    // canopy sun visibility (hfrt)
+ 
+ namespace detail
+ {
+@@ -170,6 +182,7 @@ constexpr LitSampler kLitSamplers[] = {
+     {"cloudNoise", kCloudNoiseUnit},         // cloud-shadow noise
+     {"shadowDepth", kShadowRawUnit},         // the cascade array as raw depth (soft shadows)
+     {"skyLut", kSkyLutUnit},                 // sky-view table (the sky table)
++    {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
+ };
+ 
+ // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
+@@ -226,15 +239,18 @@ enum : int
+     AtmoCloudSun = 65, // rgb sun light on the sky clouds (linear), w sky light on them (linear; the table's colour)
+     AtmoGlow = 66,     // rgb classic dome sun glow (display, SunSkyColor), w sky saturation
+     AtmoDome = 67,     // rgb classic dome light (display, SkyColor), w hue (0 the original hue relit, 1 physical)
+-    // 68-76: allocated to features still to land (LitConstPlanned Sky to
+-    // Canopy); one padding member in the block until they do.
++    // 68-75: allocated to features still to land (LitConstPlanned Sky to
++    // Water1); one padding member in the block until they do.
+     Planned = 68,
++    // Long tree shadows (B9, Graphics/Remaster/Canopy.hpp): x strength (0 =
++    // off), yz the sun-visibility map's origin (m), w 1 / its extent (1/m).
++    Canopy = 76,
+     Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
+     Count = 78,
+ };
+ constexpr int MaxLights = 8;
+ constexpr int ReservedCount = 1;
+-constexpr int PlannedCount = Detail - Planned;
++constexpr int PlannedCount = Canopy - Planned;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+@@ -243,6 +259,7 @@ static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow
+ static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
+ static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
+ static_assert(Planned == AtmoDome + 1, "the planned padding follows the sky slots");
++static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
+ static_assert(Count == Detail + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+@@ -253,8 +270,8 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
+ // (a slot below it that has not landed yet becomes a padding member there) and
+ // raises LitConst::Count, which the upload and the shaders follow. A7 landed
+ // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+-// padding member litReserved; B11 landed the terrain detail at 77, so 68 to 76
+-// are the padding member litPlanned.
++// padding member litReserved; B11 landed the terrain detail at 77 and B9 the
++// canopy at 76, so 68 to 75 are the padding member litPlanned.
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+@@ -267,14 +284,14 @@ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+ constexpr int Water0 = 74;       // water: wave, swell, ripple, sky weight
+ constexpr int Water1 = 75;       // water: sheen, glint, sparkle
+-constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
+-// 77: texsharp's terrain detail landed (LitConst::Detail, B11).
++// 76: hfrt's canopy landed (LitConst::Canopy, B9); 77: texsharp's terrain
++// detail landed (LitConst::Detail, B11).
+ constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
+ constexpr int End = 79;  // one past the last planned slot
+ static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+               "the planned slot below the sun shadows is the reserved padding");
+-static_assert(Sky == LitConst::Planned && Canopy == LitConst::Detail - 1,
+-              "the planned slots between the sky pass and the terrain detail are the planned padding");
++static_assert(Sky == LitConst::Planned && Water1 == LitConst::Canopy - 1,
++              "the planned slots between the sky pass and the canopy are the planned padding");
+ static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index e9245cec..5939fa1f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -340,7 +340,8 @@ layout(std140) uniform LitConstants {
+     vec4 litAtmoCloudSun; // 65: rgb sun light on the sky clouds (linear), w sky light on them (linear)
+     vec4 litAtmoGlow;     // 66: rgb classic dome sun glow (display), w sky saturation
+     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
+-    vec4 litPlanned[9];   // 68-76: allocated to features still to land (clouds .. hfrt)
++    vec4 litPlanned[8];   // 68-75: allocated to features still to land (clouds .. water)
++    vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
+     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
+ };
+ )";
+@@ -356,6 +357,7 @@ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky vi
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
+ uniform sampler2DArray shadowDepth;        // unit 6: the cascade array again, raw depth (soft-shadow blocker search)
+ uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
++uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -538,6 +540,9 @@ static const char s_psRemasterTerrainClouds[] = R"(
+ // Colour of the light the ground below bounces (luminance 1; white when there
+ // is no map). Set by terrainSunVisibility, read by skyIrradiance.
+ vec3 g_groundTint = vec3(1.0);
++// Height of the ground below the fragment (m; far below anything without a
++// map). Set by terrainSunVisibility, read by canopySunVisibility.
++float g_groundHeight = -1e6;
+ 
+ // Hills shadowing the sun, from the precomputed horizon map. Also returns the
+ // terrain sky visibility (valley floors see less sky) and sets the ground
+@@ -552,6 +557,7 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
+     vec2 uv = (g + 0.5) * litTerrain.z;
+     vec4 hs = texture(terrainHeight, uv);
+     g_groundTint = vec3(hs.b, (1.0 - 0.2126 * hs.b - 0.0722 * hs.a) / 0.7152, hs.a);
++    g_groundHeight = hs.x;
+     float lift = smoothstep(litTerrainLift.x, litTerrainLift.y, posAbs.y - hs.x);
+     skyVisibility = mix(1.0, mix(hs.g, 1.0, lift), litTerrain.w);
+     float h0 = dot(texture(terrainHorizon, vec3(uv, litTerrainSun.x)), litTerrainSel0);
+@@ -578,6 +584,36 @@ float cloudSunVisibility(vec3 posAbs) {
+     float covered = edge > 1e-4 ? smoothstep(1.0 - cover - edge, 1.0 - cover + edge, n) : step(1.0 - cover, n);
+     return mix(1.0, litCloud.y, covered);
+ }
++
++// Long tree shadows beyond the shadow maps (canopyShadows; Canopy.hpp): the
++// sun-visibility map traced through the canopy of every tree, bush, forest and
++// building, read once. A texel holds r the ground's visibility, g the lowest
++// raised receiver's (one that never shades itself), b the height above the
++// ground below which a raised receiver (a crown, a wall, a roof) is in a
++// neighbour's shadow (/ 48 m) and a that edge's softness (/ 16 m). It takes
++// over where the shadow maps fade out (their far fade, or from 100 to 150 m
++// without them) and fades out at the map's edge. 1 while off (litCanopy.x 0).
++// Reads g_groundHeight: call it after terrainSunVisibility.
++float canopySunVisibility(vec3 posAbs) {
++    if (litCanopy.x <= 0.0 || litFlags.y < 0.5) return 1.0;
++    int nC = int(cascadeCtl.x);
++    bool maps = shadowCtl.x > 0.5 && nC > 0;
++    vec3 rel = vWorldRel + litShadowDelta.xyz;
++    float depth = maps ? dot(rel, camFwd.xyz) : length(vWorldRel);
++    float reach = maps ? cascadeSplits[nC - 1] : 150.0;
++    float fade = maps ? max(cascadeCtl.y, 1.0) : 50.0;
++    float w = clamp((depth - (reach - fade)) / fade, 0.0, 1.0);
++    vec2 uv = (posAbs.xz - litCanopy.yz) * litCanopy.w;
++    vec2 e = abs(uv - 0.5);
++    w *= litCanopy.x * (1.0 - smoothstep(0.42, 0.48, max(e.x, e.y)));
++    if (w <= 0.0) return 1.0;
++    vec4 m = texture(canopySun, uv);
++    float hr = posAbs.y - g_groundHeight;
++    float h = m.b * 48.0;
++    float s = max(m.a * 16.0, 0.25);
++    float raised = mix(m.g, 1.0, smoothstep(h - s, h + s, max(hr, 1.5)));
++    return mix(1.0, mix(m.r, raised, smoothstep(0.5, 1.5, hr)), w);
++}
+ )";
+ 
+ // Sky, local lights and surface are in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp.
+@@ -631,6 +667,8 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     float leafLift = (foliage && !terrain) ? litPcss.w : 0.0;
+     float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift) *
+                           terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
++    // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
++    sunVisibility *= canopySunVisibility(posAbs);
+     g_sunVisibility = sunVisibility;
+ 
+     vec3 kd = litMatDiffuse.rgb;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCanopyShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCanopyShaders.cpp
+new file mode 100644
+index 00000000..882a212b
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCanopyShaders.cpp
+@@ -0,0 +1,88 @@
++// Long tree shadows: the GLSL of the pass that fills the canopy's
++// sun-visibility map (EngineGL33_Canopy.cpp runs it before the world when the
++// sun or the camera moved; it is not a post stage). No GL code, so the unit
++// tests compile this very source; kPostShaders in EngineGL33_PostShaders.cpp
++// assembles it with the fullscreen vertex shader the post passes share.
++//
++// It is the GPU side of Graphics/Remaster/Canopy.cpp: CanopySunAt traces the
++// same texel step for step (the shape constants below are Canopy.hpp's, which
++// the tests check), so triCanopyCheck can compare the two.
++
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++namespace Poseidon::gl33lighting
++{
++
++// One texel of the map is a ground point at world (x, z): from there it
++// cone-traces the canopy heightfield toward the sun. The step grows with the
++// distance and the mip level follows the step, so a far occluder blurs into a
++// wide, light penumbra and a near one stays crisp. A sample shades the ray
++// where the ray runs under the canopy's top (soft over the sun-disk cone
++// width); a partly covered texel is crossed with the probability
++// sqrt(density) (less the thinnest density, so the crossing starts from 0).
++// Output: r the ground's visibility, g the lowest raised receiver's (1.5 m up,
++// skipping the first 6 m: its own crown), b the height above the ground below
++// which a raised receiver is in a neighbour's shadow (/ 48 m), a that edge's
++// softness (/ 16 m). The edge is the envelope of every sample's own edge plus
++// and minus its softness; a thin sample's edge drops out of it smoothly, so
++// the map never jumps where a density crosses a threshold.
++const char kPostCanopySunGLSL[] = R"(#version 330 core
++in vec2 vUV;
++out vec4 fragColor;
++uniform sampler2D canopyMap;     // unit 10: r = top (base + r * range, m), g = density; mips
++uniform sampler2D terrainHeight; // unit 4: r = terrain height (m)
++uniform vec4 canopyField;        // x 1 / the field's extent (1/m), y level-0 texel (m), z height base (m), w height range (m)
++uniform vec4 terrainGrid;        // x 1 / cell size (1/m), y 1 / texels a side (the world shaders' litTerrain.yz)
++uniform vec4 sunRay;             // xy toward the sun (horizontal, unit), z tan(sun elevation), w tan(edge softness)
++uniform vec4 sunMap;             // xy the map's origin (m), z its texel (m), w the trace length (m)
++
++const int kMaxSteps = 40;
++const float kGrowth = 0.15;
++const float kMinDensity = 0.003;
++const float kMinTransmit = 0.02;
++const float kGroundLift = 0.3;
++const float kRaisedLift = 1.8;
++const float kRaisedSkip = 6.0;
++const float kEdgeCrossFrom = 0.3;
++const float kEdgeCrossTo = 0.6;
++const float kEdgeRange = 48.0;
++const float kSoftRange = 16.0;
++const float kMinSoft = 0.5;
++
++void main() {
++    vec2 p = sunMap.xy + gl_FragCoord.xy * sunMap.z;
++    float y0 = textureLod(terrainHeight, (p * terrainGrid.x + 0.5) * terrainGrid.y, 0.0).r;
++    float c0 = canopyField.y;
++    float t = 0.5 * c0;
++    float ground = 1.0;
++    float raised = 1.0;
++    float upper = kMinSoft;
++    float lower = -kMinSoft;
++    for (int i = 0; i < kMaxSteps; ++i) {
++        if (t > sunMap.w) break;
++        float stepLen = max(c0, kGrowth * t);
++        float lod = log2(stepLen / c0);
++        vec2 c = textureLod(canopyMap, (p + sunRay.xy * t) * canopyField.x, lod).rg;
++        if (c.y > kMinDensity) {
++            float top = canopyField.z + c.x * canopyField.w;
++            float s = t * sunRay.w + 0.25 * stepLen + 0.5;
++            float crossing = sqrt(c.y - kMinDensity);
++            float rise = t * sunRay.z;
++            ground *= max(1.0 - crossing * smoothstep(-0.5, 1.0, (top - (y0 + kGroundLift + rise)) / s), kMinTransmit);
++            if (t >= kRaisedSkip) {
++                raised *= max(1.0 - crossing * smoothstep(-0.5, 1.0, (top - (y0 + kRaisedLift + rise)) / s), kMinTransmit);
++                float w = smoothstep(kEdgeCrossFrom, kEdgeCrossTo, crossing);
++                float h = (top - rise - y0 + s + 1.0) * w - s - 1.0;
++                upper = max(upper, h + s);
++                lower = max(lower, h - s);
++            }
++        }
++        t += stepLen;
++    }
++    float edge = 0.5 * (upper + lower);
++    float soft = 0.5 * (upper - lower);
++    fragColor = vec4(ground, raised, clamp(edge / kEdgeRange, 0.0, 1.0), clamp(soft / kSoftRange, 0.0, 1.0));
++}
++)";
++
++} // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 3dbae1c7..23db52bc 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -574,6 +574,7 @@ const PostShaderDef kPostShaders[] = {
+     {"psSkyViewMean",
+      {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyViewMeanMainGLSL}},
+     {"psPostLumaSharpen", {s_psPostLumaSharpenGLSL}},
++    {"psCanopySun", {Poseidon::gl33lighting::kPostCanopySunGLSL}},
+ };
+ constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
+ static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
+diff --git a/arma_CWR/tests/rendering/captures/make_pairs.py b/arma_CWR/tests/rendering/captures/make_pairs.py
+index 19f33c23..08ac0e78 100644
+--- a/arma_CWR/tests/rendering/captures/make_pairs.py
++++ b/arma_CWR/tests/rendering/captures/make_pairs.py
+@@ -43,12 +43,13 @@ UDCAP_RE = re.compile(r"UDCAP;(.*)$")
+ # triGpuTimes sections: the frame, the world (with its shadow pass, and its
+ # three parts from A4 on: ground, the opaque objects, the rest), the
+ # remastered sky dome (with the sky table's build on the frames that rebuild
+-# it, A7 on) and the post pass, then the post stages that run today, in their
++# it, A7 on), the canopy's sun-visibility map build (on the frames that rebuild
++# it, B9 on) and the post pass, then the post stages that run today, in their
+ # order (GpuTimings.hpp; a section that did not run leaves its cell empty).
+ # frame_min is the best frame of the timer window (the "| min frame=" field,
+ # A4 on).
+-GPU_FIELDS = ("frame", "world", "shadow", "ground", "pass1", "rest", "sky", "skytable", "post", "resolve", "lindepth",
+-              "ao", "bloom", "shafts", "composite", "frame_min")
++GPU_FIELDS = ("frame", "world", "shadow", "ground", "pass1", "rest", "sky", "skytable", "canopy", "post", "resolve",
++              "lindepth", "ao", "bloom", "shafts", "composite", "frame_min")
+ GPU_RES = {
+     "frame": re.compile(r"\bframe ([\d.]+) ms"),
+     "world": re.compile(r"\bworld ([\d.]+)"),
+@@ -58,6 +59,7 @@ GPU_RES = {
+     "rest": re.compile(r"\brest ([\d.]+)"),
+     "sky": re.compile(r"\bsky ([\d.]+)"),
+     "skytable": re.compile(r"\(skytable ([\d.]+)\)"),
++    "canopy": re.compile(r"\| canopy ([\d.]+)"),
+     "post": re.compile(r"\bpost ([\d.]+):"),
+     "resolve": re.compile(r"\bresolve ([\d.]+)"),
+     "lindepth": re.compile(r"\blindepth ([\d.]+)"),
+diff --git a/arma_CWR/tests/rendering/captures/summarize_timing.py b/arma_CWR/tests/rendering/captures/summarize_timing.py
+index d2f2e059..4e4445ef 100644
+--- a/arma_CWR/tests/rendering/captures/summarize_timing.py
++++ b/arma_CWR/tests/rendering/captures/summarize_timing.py
+@@ -33,9 +33,10 @@ from PIL import Image
+ 
+ # ground, pass1 and rest split the world pass and frame_min is the best frame of
+ # a shot's timer window (GpuTimings, A4 on); empty for runs before A4. sky and
+-# skytable are the remastered sky dome and its table build (A7 on).
+-SECTIONS = ("frame", "world", "shadow", "ground", "pass1", "rest", "sky", "skytable", "post", "resolve", "lindepth",
+-            "ao", "bloom", "shafts", "composite", "frame_min")
++# skytable are the remastered sky dome and its table build (A7 on); canopy the
++# canopy's sun-visibility map build (B9 on, frames that rebuild it).
++SECTIONS = ("frame", "world", "shadow", "ground", "pass1", "rest", "sky", "skytable", "canopy", "post", "resolve",
++            "lindepth", "ao", "bloom", "shafts", "composite", "frame_min")
+ ROUND_RE = re.compile(r"^(.+)_r(\d+)$")
+ # banddiff.py's 640-row bands (0-250 sky, 250-350 horizon, 350-640 ground) at 1080 rows
+ BANDS = ((0, 422), (422, 591), (591, 1080))
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index c3857ab2..1fcd15b0 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -172,6 +172,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_atmosphere.cpp
+     Graphics/test_terrain_detail.cpp
+     Graphics/test_sun_shadows.cpp
++    Graphics/test_canopy.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_canopy.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_canopy.cpp
+new file mode 100644
+index 00000000..527f1514
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_canopy.cpp
+@@ -0,0 +1,637 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Graphics/Core/GpuTimings.hpp>
++#include <Poseidon/Graphics/Remaster/Canopy.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/World/MapTypes.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <cmath>
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <sstream>
++#include <string>
++#include <vector>
++
++// Long tree shadows (INTEGRATION-PLAN.md step B9, Graphics/Remaster/Canopy.hpp):
++// the canopy raster and its mip rules on synthetic crowns, forests and slopes,
++// the removal of a destroyed object, the trace's shadow length and its sqrt
++// crossing density, what a receiver reads, the sun-visibility map's placement
++// and rebuild rule, the strength over the gate's edges, the frame constants,
++// and the contracts that tie the shaders to the C++ mirror.
++
++using namespace Poseidon::remaster;
++namespace gl = Poseidon::gl33lighting;
++using Catch::Approx;
++
++namespace
++{
++
++std::string ReadTextFile(const std::filesystem::path& p)
++{
++    std::ifstream f(p);
++    if (!f.is_open())
++        return {};
++    std::stringstream ss;
++    ss << f.rdbuf();
++    return ss.str();
++}
++
++std::filesystem::path Gl33Dir()
++{
++    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33";
++}
++
++LightingTuning Apply(const std::string& setting)
++{
++    LightingTuning t{};
++    bool modeSet = false;
++    const std::string why = ApplyLightingSetting(t, setting, modeSet);
++    INFO(setting << ": " << why);
++    REQUIRE(why.empty());
++    return t;
++}
++
++constexpr int kRange = 64;     // terrain vertices a side
++constexpr float kGrid = 12.5f; // metres between them
++constexpr int kK = 2;          // canopy texels per cell: 6.25 m texels, 128 a side
++constexpr float kTexel = kGrid / kK;
++
++std::vector<float> FlatHeights(float h)
++{
++    return std::vector<float>(static_cast<size_t>(kRange) * kRange, h);
++}
++
++// Ground rising 0.2 m per metre eastward.
++std::vector<float> SlopeHeights()
++{
++    std::vector<float> h(static_cast<size_t>(kRange) * kRange);
++    for (int z = 0; z < kRange; ++z)
++        for (int x = 0; x < kRange; ++x)
++            h[static_cast<size_t>(z) * kRange + x] = 50.0f + 0.2f * static_cast<float>(x) * kGrid;
++    return h;
++}
++
++// The centre of level-0 texel j, metres.
++float TexelCentre(int j)
++{
++    return (static_cast<float>(j) + 0.5f) * kTexel;
++}
++
++CanopyItem Crown(int id, float x, float z, float radius, float height, float opacity)
++{
++    CanopyItem it;
++    it.id = id;
++    it.cx = x;
++    it.cz = z;
++    it.a = it.b = radius;
++    it.height = height;
++    it.opacity = opacity;
++    it.round = true;
++    return it;
++}
++
++// An axis-aligned box covering level-0 texels [x0, x1) x [z0, z1) exactly.
++CanopyItem Box(int id, int x0, int z0, int x1, int z1, float height, float opacity)
++{
++    CanopyItem it;
++    it.id = id;
++    it.cx = 0.5f * static_cast<float>(x0 + x1) * kTexel;
++    it.cz = 0.5f * static_cast<float>(z0 + z1) * kTexel;
++    it.a = 0.5f * static_cast<float>(x1 - x0) * kTexel;
++    it.b = 0.5f * static_cast<float>(z1 - z0) * kTexel;
++    it.height = height;
++    it.opacity = opacity;
++    return it;
++}
++
++CanopyRaster Raster(std::vector<CanopyItem> items, std::vector<float> heights = FlatHeights(100.0f))
++{
++    CanopyRaster r;
++    REQUIRE(r.Build(std::move(items), std::move(heights), kRange, kGrid, kK));
++    REQUIRE(r.Field());
++    return r;
++}
++
++// The sun from the east (+x) at `deg` degrees.
++CanopySunRay EastSun(float deg)
++{
++    const float e = deg * 0.017453292f;
++    return CanopySunRayToward(std::cos(e), std::sin(e), 0.0f);
++}
++
++std::string Fixed(float v, int decimals)
++{
++    char buf[32];
++    std::snprintf(buf, sizeof(buf), "%.*f", decimals, static_cast<double>(v));
++    return buf;
++}
++
++} // namespace
++
++TEST_CASE("Canopy: trees, bushes, forests and buildings shade the ground, fences and crosses do not",
++          "[remaster][Canopy]")
++{
++    CHECK(CanopyKindOfMapType(Poseidon::MapTree) == CanopyKind::Tree);
++    CHECK(CanopyKindOfMapType(Poseidon::MapSmallTree) == CanopyKind::SmallTree);
++    CHECK(CanopyKindOfMapType(Poseidon::MapBush) == CanopyKind::Bush);
++    for (int t : {Poseidon::MapForestBorder, Poseidon::MapForestTriangle, Poseidon::MapForestSquare})
++        CHECK(CanopyKindOfMapType(t) == CanopyKind::Forest);
++    for (int t : {Poseidon::MapBuilding, Poseidon::MapHouse, Poseidon::MapChurch, Poseidon::MapChapel,
++                  Poseidon::MapBunker, Poseidon::MapFortress, Poseidon::MapViewTower, Poseidon::MapLighthouse,
++                  Poseidon::MapFuelstation, Poseidon::MapHospital, Poseidon::MapRock})
++        CHECK(CanopyKindOfMapType(t) == CanopyKind::Solid);
++    for (int t : {Poseidon::MapCross, Poseidon::MapFountain, Poseidon::MapQuay, Poseidon::MapFence, Poseidon::MapWall,
++                  Poseidon::MapHide, Poseidon::MapBusStop})
++        CHECK(CanopyKindOfMapType(t) == CanopyKind::None);
++    CHECK(CanopyOpacity(CanopyKind::Tree) == Approx(0.8f));
++    CHECK(CanopyOpacity(CanopyKind::SmallTree) == Approx(0.65f));
++    CHECK(CanopyOpacity(CanopyKind::Bush) == Approx(0.5f));
++    CHECK(CanopyOpacity(CanopyKind::Forest) == Approx(0.95f));
++    CHECK(CanopyOpacity(CanopyKind::Solid) == Approx(1.0f));
++    CHECK(CanopyOpacity(CanopyKind::None) == 0.0f);
++    CHECK(CanopyRound(CanopyKind::Tree));
++    CHECK(CanopyRound(CanopyKind::Bush));
++    CHECK_FALSE(CanopyRound(CanopyKind::Forest));
++    CHECK_FALSE(CanopyRound(CanopyKind::Solid));
++    // About 6.25 m texels, at most 4096 a side.
++    CHECK(CanopyTexelsPerCell(12.5f, 1024) == 2);
++    CHECK(CanopyTexelsPerCell(50.0f, 256) == 8);
++    CHECK(CanopyTexelsPerCell(12.5f, 4096) == 1);
++    CHECK(CanopyTexelsPerCell(6.25f, 512) == 1);
++}
++
++TEST_CASE("Canopy: a crown covers its texels by the share of samples inside, at its height above their ground",
++          "[remaster][Canopy]")
++{
++    // A 3 m crown centred on texel (32, 32): the 4x4 samples sit 0.78 and
++    // 2.34 m from the texel centre, so the four corner ones (3.31 m) fall out
++    // and 12 of 16 cover: density 0.8 * 12 / 16.
++    const CanopyRaster r = Raster({Crown(1, TexelCentre(32), TexelCentre(32), 3.0f, 15.0f, 0.8f)});
++    const CanopyField& f = *r.Field();
++    CHECK(f.size == kRange * kK);
++    CHECK(f.texel == Approx(kTexel));
++    CHECK(f.Density(0, 32, 32) == Approx(0.6f).margin(1e-4f));
++    CHECK(f.Top(0, 32, 32) == Approx(115.0f).margin(0.02f));
++    // The neighbour texels the crown does not reach keep the bare ground.
++    CHECK(f.Density(0, 33, 32) == 0.0f);
++    CHECK(f.Top(0, 33, 32) == Approx(100.0f).margin(0.02f));
++    CHECK(f.Density(0, 32, 31) == 0.0f);
++    CHECK(f.version == 1u);
++}
++
++TEST_CASE("Canopy: overlapping objects multiply their transmission and keep the tallest top", "[remaster][Canopy]")
++{
++    const CanopyRaster r = Raster({Box(1, 10, 10, 12, 12, 8.0f, 0.5f), Box(2, 10, 10, 12, 12, 20.0f, 0.5f)});
++    const CanopyField& f = *r.Field();
++    CHECK(f.Density(0, 10, 10) == Approx(0.75f).margin(1e-4f));
++    CHECK(f.Top(0, 11, 11) == Approx(120.0f).margin(0.02f));
++    // A convex hull footprint: the triangle below its diagonal.
++    CanopyItem tri;
++    tri.id = 3;
++    tri.height = 10.0f;
++    tri.opacity = 1.0f;
++    tri.hull = CanopyConvexHull(
++        {40 * kTexel, 40 * kTexel, 48 * kTexel, 40 * kTexel, 40 * kTexel, 48 * kTexel, 42 * kTexel, 42 * kTexel});
++    REQUIRE(tri.hull.size() == 6u); // the interior point is dropped
++    const CanopyRaster h = Raster({tri});
++    CHECK(h.Field()->Density(0, 41, 41) == Approx(1.0f));
++    CHECK(h.Field()->Density(0, 46, 46) == 0.0f);
++}
++
++TEST_CASE("Canopy: a forest block on a slope follows the slope", "[remaster][Canopy]")
++{
++    const std::vector<float> slope = SlopeHeights();
++    const CanopyRaster r = Raster({Box(1, 20, 20, 36, 28, 18.0f, 0.95f)}, slope);
++    const CanopyField& f = *r.Field();
++    for (int x : {20, 27, 35})
++    {
++        CAPTURE(x);
++        const float ground = 50.0f + 0.2f * TexelCentre(x);
++        CHECK(f.Top(0, x, 24) == Approx(ground + 18.0f).margin(0.03f));
++    }
++}
++
++TEST_CASE("Canopy: a mip texel keeps its mean ground plus its tallest covered child, and the mean density",
++          "[remaster][Canopy]")
++{
++    // One full texel of a 20 m tree in a 2x2 block on flat ground, then a
++    // slope: the parent keeps the child's height above the mean ground.
++    const CanopyRaster flat = Raster({Box(1, 10, 10, 11, 11, 20.0f, 1.0f)});
++    const CanopyField& f = *flat.Field();
++    CHECK(f.Levels() == 8); // 128, 64, ..., 1
++    CHECK(f.Density(1, 5, 5) == Approx(0.25f).margin(1e-4f));
++    CHECK(f.Top(1, 5, 5) == Approx(120.0f).margin(0.03f));
++    CHECK(f.Top(1, 6, 5) == Approx(100.0f).margin(0.03f)); // nothing covered: the ground
++    CHECK(f.Density(2, 2, 2) == Approx(0.0625f).margin(1e-4f));
++    CHECK(f.Top(2, 2, 2) == Approx(120.0f).margin(0.03f));
++
++    const CanopyRaster sloped = Raster({Box(1, 10, 10, 11, 11, 20.0f, 1.0f)}, SlopeHeights());
++    const CanopyField& g = *sloped.Field();
++    const float meanGround = 50.0f + 0.2f * 0.5f * (TexelCentre(10) + TexelCentre(11));
++    CHECK(g.Top(1, 5, 5) == Approx(meanGround + 20.0f).margin(0.05f));
++}
++
++TEST_CASE("Canopy: removing a destroyed object gives the canopy built without it, at every level", "[remaster][Canopy]")
++{
++    const std::vector<CanopyItem> all = {Crown(7, TexelCentre(30), TexelCentre(30), 4.0f, 14.0f, 0.8f),
++                                         Crown(8, TexelCentre(31), TexelCentre(32), 3.0f, 11.0f, 0.65f),
++                                         Box(9, 40, 40, 44, 42, 9.0f, 1.0f)};
++    CanopyRaster live = Raster(all);
++    const std::uint32_t v0 = live.Field()->version;
++    const std::vector<CanopyRect> rects = live.Remove(7);
++    REQUIRE_FALSE(rects.empty());
++    CHECK(live.Field()->version == v0 + 1);
++    CHECK(rects.size() == static_cast<size_t>(live.Field()->Levels()));
++    CHECK(rects[0].level == 0);
++    CHECK(rects[0].x0 <= 30);
++    CHECK(rects[0].x1 > 30);
++    // Removing it again, or an id the canopy never had, changes nothing.
++    CHECK(live.Remove(7).empty());
++    CHECK(live.Remove(12345).empty());
++    CHECK(live.Field()->version == v0 + 1);
++
++    const CanopyRaster rebuilt = Raster({all[1], all[2]});
++    const CanopyField& a = *live.Field();
++    const CanopyField& b = *rebuilt.Field();
++    REQUIRE(a.Levels() == b.Levels());
++    for (int l = 0; l < a.Levels(); ++l)
++    {
++        CAPTURE(l);
++        CHECK(a.levels[static_cast<size_t>(l)] == b.levels[static_cast<size_t>(l)]);
++    }
++}
++
++TEST_CASE("Canopy: a tree's shadow on flat ground is as long as its height over the sun's tangent",
++          "[remaster][Canopy]")
++{
++    // A 12.5 m square block, 15 m tall, under a 10 degree sun from the east:
++    // the shadow falls west and ends near 15 / tan(10 deg) = 85 m.
++    const CanopyRaster r = Raster({Box(1, 78, 60, 80, 62, 15.0f, 1.0f)});
++    const CanopyField& f = *r.Field();
++    const CanopySunRay ray = EastSun(10.0f);
++    const float edgeX = 78.0f * kTexel; // the block's west edge
++    const float z = 61.0f * kTexel;
++    auto ground = [&](float d) { return CanopySunAt(f, edgeX - d, z, 100.0f, ray).ground; };
++    CHECK(ground(10.0f) < 0.1f);
++    CHECK(ground(40.0f) < 0.1f);
++    CHECK(ground(120.0f) > 0.95f);
++    // East of the block (between it and the sun) the ground is lit.
++    CHECK(CanopySunAt(f, edgeX + 30.0f, z, 100.0f, ray).ground > 0.95f);
++    // The half-shadow point lies within one coarse step of the geometric end.
++    float half = 0.0f;
++    for (float d = 10.0f; d < 160.0f; d += 1.0f)
++        if (ground(d) < 0.5f)
++            half = d;
++    CHECK(half > 65.0f);
++    CHECK(half < 105.0f);
++    // A higher sun shortens it.
++    const CanopySunRay high = EastSun(20.0f);
++    CHECK(CanopySunAt(f, edgeX - 60.0f, z, 100.0f, high).ground > 0.95f);
++    // No sun, no trace.
++    CHECK(CanopySunAt(f, edgeX - 10.0f, z, 100.0f, CanopySunRayToward(1.0f, -0.1f, 0.0f)).ground == 1.0f);
++}
++
++TEST_CASE("Canopy: a partly covered texel is crossed with the probability sqrt(density)", "[remaster][Canopy]")
++{
++    // A uniform canopy 5 m tall of density 0.25 under a 45 degree sun: only the
++    // first sample (3.125 m out, the ray at 3.4 m) runs under the top.
++    CanopyField f;
++    f.size = 128;
++    f.texel = kTexel;
++    f.heightBase = 0.0f;
++    f.heightRange = 200.0f;
++    for (int s = 128; s >= 1; s /= 2)
++    {
++        std::vector<std::uint16_t> level(static_cast<size_t>(s) * s * 2);
++        for (size_t i = 0; i < level.size(); i += 2)
++        {
++            level[i] = static_cast<std::uint16_t>(std::lround(5.0 / 200.0 * 65535.0));
++            level[i + 1] = static_cast<std::uint16_t>(std::lround(0.25 * 65535.0));
++        }
++        f.levels.push_back(level);
++    }
++    const CanopySunRay ray = CanopySunRayToward(1.0f, 1.0f, 0.0f);
++    const CanopySunTexel t = CanopySunAt(f, 400.0f, 400.0f, 0.0f, ray);
++    const float soft = 0.5f * kTexel * ray.tanSoft + 0.25f * kTexel + 0.5f;
++    const float x = (5.0f - (kCanopyGroundLift + 0.5f * kTexel)) / soft;
++    const float u = std::fmin(std::fmax((x + 0.5f) / 1.5f, 0.0f), 1.0f);
++    const float occ = u * u * (3.0f - 2.0f * u);
++    CHECK(t.ground == Approx(1.0f - std::sqrt(0.25f - kCanopyMinDensity) * occ).margin(2e-3f));
++    CHECK(t.ground < 1.0f - 0.25f * occ - 0.1f); // not the linear density
++}
++
++TEST_CASE("Canopy: a raised receiver never shades itself, and reads a neighbour's shadow edge", "[remaster][Canopy]")
++{
++    const CanopySunRay ray = EastSun(9.0f);
++    // A lone crown one texel wide: the ground under it is in its own shadow
++    // (the first sample, half a texel out, sees the crown half filtered
++    // away), its crown is not.
++    const CanopyRaster lone = Raster({Box(1, 60, 60, 61, 61, 15.0f, 0.95f)});
++    const CanopySunTexel under = CanopySunAt(*lone.Field(), TexelCentre(60), TexelCentre(60), 100.0f, ray);
++    CHECK(under.ground < 0.5f);
++    CHECK(CanopyReceiverVisibility(under, 0.0f) == Approx(under.ground));
++    for (float hr : {2.0f, 6.0f, 12.0f})
++    {
++        CAPTURE(hr);
++        CHECK(CanopyReceiverVisibility(under, hr) > 0.95f);
++    }
++    // Ten metres west of a taller neighbour: a raised receiver low down is in
++    // its shadow, one above its shadow edge is lit.
++    const CanopyRaster pair = Raster({Box(1, 60, 60, 62, 62, 20.0f, 0.95f)});
++    const float x = 60.0f * kTexel - 10.0f;
++    const CanopySunTexel west = CanopySunAt(*pair.Field(), x, TexelCentre(61), 100.0f, ray);
++    CHECK(west.edge > 15.0f);
++    CHECK(west.edge < 20.0f);
++    CHECK(CanopyReceiverVisibility(west, 4.0f) < 0.2f);
++    CHECK(CanopyReceiverVisibility(west, west.edge + west.soft + 1.0f) > 0.95f);
++    // Between the ground and the raised receivers the read blends.
++    const float g = CanopyReceiverVisibility(west, 0.0f), r = CanopyReceiverVisibility(west, kCanopyRaisedFrom);
++    const float mid = CanopyReceiverVisibility(west, 1.0f);
++    CHECK(mid >= std::fmin(g, r) - 1e-5f);
++    CHECK(mid <= std::fmax(g, r) + 1e-5f);
++    // Open ground: everything lit.
++    const CanopySunTexel open = CanopySunAt(*pair.Field(), TexelCentre(20), TexelCentre(20), 100.0f, ray);
++    CHECK(open.ground == 1.0f);
++    CHECK(open.raisedLow == 1.0f);
++    CHECK(open.edge == 0.0f);
++    CHECK(CanopyReceiverVisibility(open, 5.0f) == 1.0f);
++}
++
++TEST_CASE("Canopy: what a raised receiver reads changes smoothly with an occluder's density", "[remaster][Canopy]")
++{
++    // A tall neighbour 10 m toward the sun, its opacity swept in small steps
++    // across the edge rule's crossing band: no read jumps (a threshold on the
++    // density made the edge, and with it a crown's light, flip between texels).
++    const CanopySunRay ray = EastSun(9.0f);
++    const float x = 60.0f * kTexel - 10.0f;
++    float prev[3] = {-1.0f, -1.0f, -1.0f};
++    float worst = 0.0f;
++    for (int i = 1; i <= 500; ++i)
++    {
++        const float opacity = 0.001f * static_cast<float>(i);
++        const CanopyRaster r = Raster({Box(1, 60, 60, 62, 62, 20.0f, opacity)});
++        const CanopySunTexel t = CanopySunAt(*r.Field(), x, TexelCentre(61), 100.0f, ray);
++        const float reads[3] = {CanopyReceiverVisibility(t, 3.0f), CanopyReceiverVisibility(t, 10.0f),
++                                CanopyReceiverVisibility(t, 16.0f)};
++        for (int k = 0; k < 3; ++k)
++        {
++            if (prev[k] >= 0.0f)
++                worst = std::fmax(worst, std::fabs(reads[k] - prev[k]));
++            prev[k] = reads[k];
++        }
++    }
++    // A threshold on the density jumps by most of (1 - raisedLow) in one step.
++    CHECK(worst < 0.1f);
++}
++
++TEST_CASE("Canopy: the sun-visibility map is texel-aligned and rebuilt only when the sun or the camera moved",
++          "[remaster][Canopy]")
++{
++    CHECK(CanopySunTexelFor(800.0f) == Approx(kCanopySunMinTexel));
++    CHECK(CanopySunTexelFor(2000.0f) == Approx(2.21875f));
++    CHECK(CanopySunTexelFor(4000.0f) == Approx(kCanopySunMaxTexel));
++    float ox = 0.0f, oz = 0.0f;
++    CanopySunOrigin(5501.3f, 6248.7f, 2.0f, ox, oz);
++    CHECK(std::fmod(ox, 2.0f) == Approx(0.0f).margin(1e-3f));
++    CHECK(5501.3f - ox == Approx(0.5f * kCanopySunSize * 2.0f + 1.3f).margin(1e-2f));
++
++    CanopySunKey built;
++    CHECK(CanopySunNeedsRebuild(built, built, 0.0f, 0.0f)); // none yet
++    built.valid = true;
++    built.texel = 2.0f;
++    built.canopyVersion = 3;
++    const float e = 9.0f * 0.017453292f;
++    built.sun[0] = std::cos(e);
++    built.sun[1] = std::sin(e);
++    built.sun[2] = 0.0f;
++    CanopySunOrigin(1000.0f, 1000.0f, 2.0f, built.originX, built.originZ);
++    CanopySunKey want = built;
++    CHECK_FALSE(CanopySunNeedsRebuild(built, want, 1000.0f, 1000.0f));
++    auto turned = [&](float deg)
++    {
++        CanopySunKey k = built;
++        const float a = e + deg * 0.017453292f;
++        k.sun[0] = std::cos(a);
++        k.sun[1] = std::sin(a);
++        return k;
++    };
++    CHECK_FALSE(CanopySunNeedsRebuild(built, turned(0.04f), 1000.0f, 1000.0f));
++    CHECK(CanopySunNeedsRebuild(built, turned(0.06f), 1000.0f, 1000.0f));
++    const float extent = kCanopySunSize * 2.0f;
++    CHECK_FALSE(CanopySunNeedsRebuild(built, want, 1000.0f + 0.12f * extent, 1000.0f));
++    CHECK(CanopySunNeedsRebuild(built, want, 1000.0f, 1000.0f - 0.13f * extent));
++    want.canopyVersion = 4; // a destroyed tree
++    CHECK(CanopySunNeedsRebuild(built, want, 1000.0f, 1000.0f));
++    want = built;
++    want.texel = 2.5f; // a new view distance
++    CHECK(CanopySunNeedsRebuild(built, want, 1000.0f, 1000.0f));
++}
++
++TEST_CASE("Canopy: the shadows fade in and out over the gate's edges and are on exactly where the gate is",
++          "[remaster][Canopy][FeatureGates]")
++{
++    CHECK(CanopyStrength(2.0f, 1.0f) == 0.0f);
++    CHECK(CanopyStrength(3.0f, 1.0f) == Approx(0.5f));
++    CHECK(CanopyStrength(4.0f, 1.0f) == Approx(1.0f));
++    CHECK(CanopyStrength(15.0f, 1.0f) == Approx(1.0f));
++    CHECK(CanopyStrength(23.0f, 1.0f) == Approx(0.5f));
++    CHECK(CanopyStrength(25.0f, 1.0f) == 0.0f);
++    CHECK(CanopyStrength(10.0f, 0.55f) == Approx(0.5f));
++    CHECK(CanopyStrength(10.0f, 0.5f) == 0.0f);
++    const LightingTuning t = Apply("remastered");
++    for (float sun = -5.0f; sun <= 40.0f; sun += 0.5f)
++        for (float sky = 0.3f; sky <= 1.0f; sky += 0.05f)
++        {
++            GateInputs in;
++            in.sunElevationDeg = sun;
++            in.skyThrough = sky;
++            const bool on = ComputeFeatureGates(in, t)[Feature::CanopyShadows].on;
++            CAPTURE(sun, sky);
++            CHECK(on == (CanopyStrength(sun, sky) > 0.0f));
++        }
++}
++
++TEST_CASE("Canopy: the frame constants are zero while the switch, its gate or the map is off", "[remaster][Canopy]")
++{
++    GateInputs low;
++    low.sunElevationDeg = 9.0f;
++    const LightingTuning on = Apply("remastered");
++    const FeatureGates g = ComputeFeatureGates(low, on);
++    REQUIRE(g[Feature::CanopyShadows].on);
++    const CanopyFrameConstants c = ComputeCanopyFrameConstants(on, g, true, 9.0f, 1.0f, 100.0f, 200.0f, 2.0f);
++    CHECK(c.canopy[0] == Approx(1.0f));
++    CHECK(c.canopy[1] == 100.0f);
++    CHECK(c.canopy[2] == 200.0f);
++    CHECK(c.canopy[3] == Approx(1.0f / (kCanopySunSize * 2.0f)));
++    // No map yet.
++    CHECK(ComputeCanopyFrameConstants(on, g, false, 9.0f, 1.0f, 100.0f, 200.0f, 2.0f).canopy[0] == 0.0f);
++    // The switch off: the look before this step.
++    const LightingTuning off = Apply("remastered,canopyShadows=0");
++    const FeatureGates go = ComputeFeatureGates(low, off);
++    CHECK_FALSE(go[Feature::CanopyShadows].on);
++    const CanopyFrameConstants co = ComputeCanopyFrameConstants(off, go, true, 9.0f, 1.0f, 100.0f, 200.0f, 2.0f);
++    for (float v : co.canopy)
++        CHECK(v == 0.0f);
++    // Baseline turns it off with every other switch.
++    const LightingTuning base = Apply("baseline");
++    CHECK(ComputeCanopyFrameConstants(base, ComputeFeatureGates(low, base), true, 9.0f, 1.0f, 0, 0, 2.0f).canopy[0] ==
++          0.0f);
++    // Noon: the gate holds it off.
++    GateInputs noon;
++    noon.sunElevationDeg = 55.0f;
++    CHECK(ComputeCanopyFrameConstants(on, ComputeFeatureGates(noon, on), true, 55.0f, 1.0f, 0, 0, 2.0f).canopy[0] ==
++          0.0f);
++    // Gates off (debugging): full strength while the sun is up.
++    const LightingTuning forced = Apply("remastered,gates=0");
++    CHECK(ComputeCanopyFrameConstants(forced, ComputeFeatureGates(noon, forced), true, 55.0f, 1.0f, 0, 0, 2.0f)
++              .canopy[0] == 1.0f);
++}
++
++TEST_CASE("Canopy: the switch has landed with its own GPU section", "[remaster][Canopy][FeatureSwitches]")
++{
++    const FeatureInfo& info = GetFeatureInfo(Feature::CanopyShadows);
++    CHECK(info.landed);
++    CHECK(std::string(info.step) == "B9");
++    CHECK(std::string(info.gpuSection) == "canopy");
++    CHECK(std::string(Poseidon::gpu::SectionName(Poseidon::gpu::Section::Canopy)) == "canopy");
++    // The map is world-space: no frame-relative pass resolution.
++    GateInputs low;
++    low.sunElevationDeg = 9.0f;
++    CHECK(ComputeFeatureGates(low, Apply("remastered"))[Feature::CanopyShadows].scale == 1.0f);
++}
++
++TEST_CASE("Canopy: the GPU pass and the world read follow the C++ mirror", "[remaster][Canopy][Shaders]")
++{
++    const std::string pass = gl::PostShaderSource(gl::PostShader::CanopySun);
++    REQUIRE_FALSE(pass.empty());
++    CHECK(std::string(gl::PostShaderName(gl::PostShader::CanopySun)) == "psCanopySun");
++    const std::pair<const char*, std::string> constants[] = {
++        {"kMaxSteps", std::to_string(kCanopyMaxSteps)}, {"kGrowth", Fixed(kCanopyGrowth, 2)},
++        {"kMinDensity", Fixed(kCanopyMinDensity, 3)},   {"kMinTransmit", Fixed(kCanopyMinTransmit, 2)},
++        {"kGroundLift", Fixed(kCanopyGroundLift, 1)},   {"kRaisedLift", Fixed(kCanopyRaisedLift, 1)},
++        {"kRaisedSkip", Fixed(kCanopyRaisedSkip, 1)},   {"kEdgeCrossFrom", Fixed(kCanopyEdgeCrossFrom, 1)},
++        {"kEdgeCrossTo", Fixed(kCanopyEdgeCrossTo, 1)}, {"kEdgeRange", Fixed(kCanopyEdgeRange, 1)},
++        {"kSoftRange", Fixed(kCanopySoftRange, 1)},     {"kMinSoft", Fixed(kCanopyMinSoft, 1)},
++    };
++    for (const auto& [name, value] : constants)
++    {
++        const std::string decl = std::string(name) + " = " + value + ";";
++        CAPTURE(decl);
++        CHECK(pass.find(decl) != std::string::npos);
++    }
++    // The sqrt crossing density and the step rule.
++    CHECK(pass.find("float crossing = sqrt(c.y - kMinDensity);") != std::string::npos);
++    CHECK(pass.find("float stepLen = max(c0, kGrowth * t);") != std::string::npos);
++    CHECK(pass.find("float t = 0.5 * c0;") != std::string::npos);
++    // 40 steps cover the longest trace (900 m, a sun at 2 deg).
++    {
++        float t = 0.5f * kTexel;
++        int steps = 0;
++        while (t <= kCanopyMaxTrace)
++        {
++            t += std::fmax(kTexel, kCanopyGrowth * t);
++            ++steps;
++        }
++        CHECK(steps <= kCanopyMaxSteps);
++    }
++
++    // The world read (the TerrainClouds piece): the stored ranges, the
++    // no-shadow-map reach, the map's edge fade, the read's minimum softness and
++    // the ground-to-raised blend are the mirror's.
++    const std::string read = gl::RemasterFragmentPiece(gl::FragmentPiece::TerrainClouds);
++    CHECK(read.find("float canopySunVisibility(vec3 posAbs) {") != std::string::npos);
++    CHECK(read.find("m.b * " + Fixed(kCanopyEdgeRange, 1)) != std::string::npos);
++    CHECK(read.find("m.a * " + Fixed(kCanopySoftRange, 1) + ", " + Fixed(kCanopyMinReadSoft, 2)) != std::string::npos);
++    CHECK(read.find(": " + Fixed(kCanopyNoMapReach, 1) + ";") != std::string::npos);
++    CHECK(read.find(": " + Fixed(kCanopyNoMapFade, 1) + ";") != std::string::npos);
++    CHECK(read.find("smoothstep(" + Fixed(kCanopySunEdgeFrom, 2) + ", " + Fixed(kCanopySunEdgeTo, 2)) !=
++          std::string::npos);
++    CHECK(read.find("max(hr, " + Fixed(kCanopyRaisedFrom, 1) + ")") != std::string::npos);
++    // It takes over where the shadow maps fade out: over their far fade, from
++    // the last tier's reach back by the fade (shadowMapVisibility's fade).
++    CHECK(read.find("float reach = maps ? cascadeSplits[nC - 1] :") != std::string::npos);
++    CHECK(read.find("float w = clamp((depth - (reach - fade)) / fade, 0.0, 1.0);") != std::string::npos);
++    const std::string shadows = gl::RemasterFragmentPiece(gl::FragmentPiece::Shadows);
++    CHECK(shadows.find("float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);") !=
++          std::string::npos);
++    CHECK(read.find("smoothstep(" + Fixed(kCanopyGroundTo, 1) + ", " + Fixed(kCanopyRaisedFrom, 1) + ", hr)") !=
++          std::string::npos);
++    // It multiplies the sun visibility once, after the terrain lookup that
++    // sets the ground height it reads.
++    const std::string shade = gl::RemasterFragmentPiece(gl::FragmentPiece::Shade);
++    const size_t terrain = shade.find("terrainSunVisibility(posAbs, skyVisibility)");
++    const size_t canopy = shade.find("sunVisibility *= canopySunVisibility(posAbs);");
++    REQUIRE(terrain != std::string::npos);
++    REQUIRE(canopy != std::string::npos);
++    CHECK(terrain < canopy);
++    const std::string statement = "sunVisibility *= canopySunVisibility(posAbs);";
++    CHECK(shade.find("canopySunVisibility", canopy + statement.size()) == std::string::npos);
++    // While off (litCanopy.x 0) it returns before reading anything.
++    CHECK(read.find("if (litCanopy.x <= 0.0 || litFlags.y < 0.5) return 1.0;") != std::string::npos);
++}
++
++TEST_CASE("Canopy: units 10 and 15 hold stand-ins from init on, and the map is never sampled while it is drawn",
++          "[remaster][Canopy][ShadowSampler]")
++{
++    CHECK(gl::kCanopyUnit == 10);
++    CHECK(gl::kCanopyVisUnit == 15);
++    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
++    const std::string canopy = ReadTextFile(Gl33Dir() / "EngineGL33_Canopy.cpp");
++    REQUIRE_FALSE(lighting.empty());
++    REQUIRE_FALSE(canopy.empty());
++    CHECK(lighting.find("InitCanopy();") != std::string::npos);
++    CHECK(lighting.find("DeinitCanopy();") != std::string::npos);
++    CHECK(lighting.find("BindCanopy();") != std::string::npos);
++    const size_t init = canopy.find("void EngineGL33::InitCanopy()");
++    REQUIRE(init != std::string::npos);
++    const size_t initEnd = canopy.find("\n}\n", init);
++    const std::string initBody = canopy.substr(init, initEnd - init);
++    CHECK(initBody.find("BindUnit(kCanopyUnit, s_canopy.fieldStandIn);") != std::string::npos);
++    CHECK(initBody.find("BindUnit(kCanopyVisUnit, s_canopy.sunStandIn);") != std::string::npos);
++    // The build binds the stand-in on unit 15 before it draws into the map,
++    // and the map back after.
++    const size_t build = canopy.find("bool EngineGL33::BuildCanopySunGpu(");
++    REQUIRE(build != std::string::npos);
++    const size_t standIn = canopy.find("BindUnit(kCanopyVisUnit, s_canopy.sunStandIn);", build);
++    const size_t draw = canopy.find("glDrawArrays(GL_TRIANGLES, 0, 3);", build);
++    const size_t back = canopy.find("BindUnit(kCanopyVisUnit, s_canopy.sunTex);", build);
++    REQUIRE(standIn != std::string::npos);
++    REQUIRE(draw != std::string::npos);
++    REQUIRE(back != std::string::npos);
++    CHECK(standIn < draw);
++    CHECK(draw < back);
++}
++
++TEST_CASE("GpuTimings: the canopy map's build has its own section on the frames that rebuild it",
++          "[Graphics][gpu][Canopy]")
++{
++    using namespace Poseidon::gpu;
++    std::uint64_t stamps[kMarkCount] = {};
++    std::uint32_t recorded = 0;
++    auto set = [&](Mark m, double ms)
++    {
++        stamps[static_cast<int>(m)] = static_cast<std::uint64_t>(ms * 1e6);
++        recorded |= 1u << static_cast<int>(m);
++    };
++    set(Mark::FrameBegin, 0.0);
++    set(Mark::CanopyBegin, 0.1);
++    set(Mark::CanopyEnd, 0.9);
++    set(Mark::WorldBegin, 1.0);
++    set(Mark::WorldEnd, 4.0);
++    set(Mark::FrameEnd, 5.0);
++    GpuTimings t;
++    t.Submit(stamps, recorded);
++    CHECK(t.LastMs(Section::Canopy) == Approx(0.8).margin(1e-3));
++    CHECK(t.LastMs(Section::World) == Approx(3.0).margin(1e-3));
++    CHECK(t.Summary().find(" | canopy 0.80") != std::string::npos);
++    // A frame that does not rebuild records no canopy section.
++    recorded &= ~(1u << static_cast<int>(Mark::CanopyBegin));
++    recorded &= ~(1u << static_cast<int>(Mark::CanopyEnd));
++    t.Submit(stamps, recorded);
++    CHECK(t.LastMs(Section::Canopy) < 0.0f);
++    CHECK(kMarkCount <= 32);
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index de459494..169e11bf 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -588,7 +588,8 @@ TEST_CASE("Feature gates: canopy shadows run with the sun between 2 and 25 degre
+     CHECK_FALSE(G(in, Feature::CanopyShadows).on);
+     in.sunElevationDeg = 10.0f;
+     CHECK(G(in, Feature::CanopyShadows).on);
+-    CHECK(G(in, Feature::CanopyShadows).scale == 0.5f);
++    // A world-space map around the camera (Canopy.hpp): no frame-relative pass.
++    CHECK(G(in, Feature::CanopyShadows).scale == 1.0f);
+     in.sunElevationDeg = 1.5f;
+     CHECK_FALSE(G(in, Feature::CanopyShadows).on);
+     in.sunElevationDeg = 10.0f;
+@@ -686,15 +687,16 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
+-TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsharp and the sun shadows have landed, "
+-          "nothing else has",
++TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsharp, the sun shadows and the canopy "
++          "shadows have landed, nothing else has",
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+     // classic): triFeatureState no longer marks them inert, and the overlay
+     // shows the opaque objects' GPU section for them. A5 lands taa, A7
+     // atmosphere, B11 terrainDetail and sharpen, B1 treeShadows (the shadow
+-    // depth pass) and softShadows (the world pass).
++    // depth pass) and softShadows (the world pass), B9 canopyShadows (the
++    // canopy's sun-visibility map build).
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -707,13 +709,15 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsha
+         const bool atmosphere = info.id == Feature::Atmosphere;
+         const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
+         const bool shadows = info.id == Feature::TreeShadows || info.id == Feature::SoftShadows;
+-        CHECK(info.landed == (perf || taa || atmosphere || texsharp || shadows));
++        const bool canopy = info.id == Feature::CanopyShadows;
++        CHECK(info.landed == (perf || taa || atmosphere || texsharp || shadows || canopy));
+         if (info.landed)
+         {
+             CHECK(std::string_view(info.step) == (perf         ? "A4"
+                                                   : taa        ? "A5"
+                                                   : atmosphere ? "A7"
+                                                   : shadows    ? "B1"
++                                                  : canopy     ? "B9"
+                                                                : "B11"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+@@ -728,7 +732,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsha
+     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+     CHECK(s.find(" treeShadows=1:on:sun-above-4-deg ") != std::string::npos);
+     CHECK(s.find(" softShadows=1:on:sun-above-4-deg ") != std::string::npos);
+-    CHECK(s.find("landed=8/26") != std::string::npos);
++    CHECK(s.find("landed=9/26") != std::string::npos);
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 2b4bad0d..e609a5a7 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -827,8 +827,8 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+     }
+     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
+     // and its debug view, the TAA resolve and its sharpen, the sky table's
+-    // two passes, and the luma sharpen
+-    CHECK(post == 14);
++    // two passes, the luma sharpen, and the canopy's sun-visibility pass
++    CHECK(post == 15);
+ }
+ 
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+@@ -1116,6 +1116,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litAtmoGlow", LC::AtmoGlow, 1},
+         {"litAtmoDome", LC::AtmoDome, 1},
+         {"litPlanned", LC::Planned, LC::PlannedCount},
++        {"litCanopy", LC::Canopy, 1},
+         {"litDetail", LC::Detail, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+@@ -1186,9 +1187,12 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     CHECK(static_cast<int>(LC::SkyRight) == 61);
+     CHECK(static_cast<int>(LC::AtmoDome) == 67);
+     CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Planned));
+-    // B11 landed the terrain detail at 77; 68 to 76 are the planned padding.
++    // B11 landed the terrain detail at 77 and B9 the canopy at 76; 68 to 75
++    // are the planned padding.
+     CHECK(static_cast<int>(LC::Detail) == 77);
+-    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Detail) - 1);
++    CHECK(static_cast<int>(LC::Canopy) == 76);
++    CHECK(LC::PlannedCount == 8);
++    CHECK(gl::LitConstPlanned::Water1 == static_cast<int>(LC::Canopy) - 1);
+     CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index 230b5edf..225c037d 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -2209,3 +2209,4 @@ items:
+       - "2026-10-18: graphics-remaster step A7 (sky table and the remastered sky pass, plan section 5 A7; feature switch atmosphere): a physically based clear sky (Graphics/Remaster/Atmosphere: Rayleigh, Mie, ozone, multiple scattering) shades the sky dome under the original sky textures' clouds and colours the fog of every world draw (aerial perspective, the horizon polygon included): a golden horizon band and aureole at a low sun, an orange twilight band at dusk, sunrise keeps its pink, noon a graded blue with its cirrus; night keeps the classic sky (fade -3 to -9 degrees). The transmittance and multiple-scattering tables build on a worker thread, the 192x64 sky-view table on the GPU in two passes when the sun moves 0.02 degrees (0.06 ms; the prototype's CPU rebuild was an 8 to 12 ms hitch); one hook (Engine::BeginRemasterSky / EndRemasterSky from Landscape::DrawSky and DrawClouds) replaces the BeginMesh hack. Critic fixes: hue 0.5 and saturation 1.15, the original hue relit by brightness only (no olive band), each row keeps the original dome's brightness with its sun glow (sky band -0.1 to +6 % of the original's luminance), dead zone 0.004 and de-composited cloud colour (noon cirrus kept). LitConstants slots 61 to 67 landed, unit 8 in use, GPU sections sky and skytable, triSkyTableCheck (GPU table against its CPU mirror, max relative error 3.7e-4). Off equals before on the hero views; cost at P0 about +0.5 ms on the frame (single reading). Unit gate 476/476 (10 new), ten contract mutations red, smoke 1/1. Merged onto A5 (193c735; a parallel lane on ced77ae) by a three-way apply: A4's ground, pass1 and rest sections and the sky sections side by side, TAA's sub-knobs then the sky table's, the TAA jitter kept in the screen vertex shader; on the merged tree the gate tags plus A4's, A5's and A7's tags pass 506/506 and smoke_abel 1/1 (landed=4/26)."
+       - "2026-10-18: graphics-remaster step B11 (terrain detail and luma sharpen, plan section 5 B11; research track texsharp; a parallel lane on 193c735): the terrainDetail and sharpen switches land. Each land fragment of the remastered terrain main takes the luminance high-pass of its own square's texture, zoomed six times in 78 cm cells with a random rotation per cell, the four cells blended keeping the grain's variance, softly limited at +-0.4, strength 1.5 (sub-knob detailStrength); the detail texture keeps its grain as its mips average it out (capped at 2x) with an anti-tiling sample where it is minified; near fade 8 to 16 m and far fade 220 to 300 m; brightness only (ground band mean luma +0.04 to +0.4%, R/G and G/B unchanged, sharpness proxy +5.9 to +38.7%). LitConstants slot 77 (Detail) landed with 68 to 76 as the padding litPlanned[9]; the sea, also drawn by PSDetail, is left out by a per-draw flag from the multitexture stage (SelectTerrainDetailLayer). With TAA off the Sharpen stage runs alone as a brightness-only CAS (sub-knob sharpenStrength 0.3). Off equals before at the hero view with TAA off (identical to the pixel). Cost on the 4060 Ti at 1080p: ground +0.29 to 0.37 ms, luma sharpen 0.05 ms (not a quiet machine). Lane unit gate 505/505, 12 of 13 mutations red. Landed on A7 (5d7e7ae) by a three-way apply (11 files in conflict: A7's sky slots and B11's Detail slot side by side, both features' sub-knobs, post programs and landed rows, landed=6/26); merged unit gate 517/517, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only). Open: the luma sharpen also runs by default in vehicle interiors and under optics, views nobody has looked at; paths painted into terrain textures get the grain; a golden slope reads more like dry straw; no RTX 3060 measured."
+       - "2026-10-18: graphics-remaster step B1 (sun shadows, plan section 5 B1; research track shadows; a parallel lane on 193c735): the treeShadows and softShadows switches land. Contact-hardening soft sun shadows (PCSS in the remastered prelude): a blocker search in the cascade array read as raw depth on unit 6 (kShadowRawUnit, NEAREST non-compare sampler, the depth stand-in from init and rebound by EnsureArrayTarget) gives the distance to the blocker, the filter radius is that distance times tan of the sun radius (sunSize 1 deg, shadowReach 40 m, at least 0.6 texels); 16 + 12 to 32 taps without TAA, 4 + 4 taps turned per frame under TAA; the stock 12-tap filter fades into the soft one from 4 to 6 deg of sun. Leaves lift their lookup leafBias 6 texels toward the sun (no self-shadow stripes on crowns); with the treeShadows gate on every static object casts into the sun map whatever the legacy object-shadow toggle says. Not darker: woods hero +1.4% mean brightness, other views within 0.1 to 0.6%. LitConstants 59 Taa and 60 Pcss land out of A7's padding, which shrinks to litReserved (58, MatClass). Off equals before at the hero view (within the repeat noise). Cost unresolved: frame minimum on minus off -0.08 to +0.31 ms on the 4060 Ti, inside the base build's own spread. Lane unit gate 502/502, twelve mutations red. Landed on B11 (d25476b) by a three-way apply (8 files in conflict: the sky, Detail and sun shadow slots side by side, unit 6 beside the sky table's unit 8, both registries' landed rows and sub-knobs, landed=8/26, eleven sub-knobs); merged unit gate 525/525, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only). Open: the cost on a quiet GPU, the tighter near tiers 0.04 / 0.15 (dropped: they made a shadow slab at the Sinai camp, cause not found), crowns keep less self-shadow, no RTX 3060 measured."
++      - "2026-10-18: graphics-remaster step B9 (long tree shadows, plan section 5 B9; research track hfrt; a parallel lane on 807ce4b): the canopyShadows switch lands. Every landscape object that shades the ground at a distance (trees, bushes, forest blocks, buildings, rocks; 84,395 of 98,198 on Abel) is drawn top-down into a canopy heightfield at 6.25 m (2048x2048 RG16, 12 levels, the terrain height packed into the top so a step is one fetch) on the horizon map's worker at island load; a destroyed object takes its footprint out (Object::SetDestroyed). A GPU pass cone-traces it toward the sun into a world-space sun-visibility map around the camera (2048 a side, 1.6 to 3.1 m a texel), rebuilt only when the sun moves 0.05 deg, the camera leaves the middle eighth or the canopy changes; the world reads it once per fragment beyond the shadow maps, ground and raised receivers (crowns, walls, roofs never shade themselves). Plan correction: a world-space map instead of a half-resolution screen buffer from last frame's depth (no reprojection, no history, no crawl, cost independent of the screen). Gate sun 2 to 25 deg and sky-through above 0.5 with faded edges. LitConstants slot 76 (Canopy) lands (padding 68 to 75), units 10 and 15 in use, GPU section canopy, triCanopyCheck (GPU map against its C++ mirror, OK). Off equals before at the hero view (1 pixel over 2 levels). On: every tree beyond the shadow maps stands on its long shadow at golden hour (hero ground band -0.5%, telephoto -1.8%), shade 0.80 to 0.83 of lit, cooler; near range unchanged; no crawl on a walk, no steps in a time-lapse. Cost on the 4060 Ti at P0 (single reading, not a quiet machine): frame minimum +0.03 to +0.04 ms, a rebuild 0.62 to 0.66 ms. Lane unit gate 540/540 (17 new), 18 mutations red, smoke_abel 1/1. Open: it only takes light away (cool shade on pink rock), crown base heights (the ground under a crown is shaded at any sun), a repaired object stays out of the canopy, no RTX 3060 measured."

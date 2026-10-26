@@ -1,0 +1,14 @@
+# clang-format 22.1.8 --dry-run --Werror on every touched C++ file (HEAD was clean on all of them; three are new)
+0 arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+0 arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+0 arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+0 arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+0 arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+0 arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+0 arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+0 arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
+0 arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+0 arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp

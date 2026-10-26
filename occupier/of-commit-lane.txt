@@ -1,0 +1,33 @@
+tests: mod-lane tomls follow the Remaster layout (--mods-dir . and ${repo_root}); wizard tests retarget to the Remaster templates
+
+Every unpinned toml that passed "--mods-dir .." (the old Classic layout
+with @LoBo beside the data dir) spawn-failed on a Remaster shadow under
+tmp, where @LoBo sits inside the data dir and the repo fixtures are not
+two levels up. tri now expands a ${repo_root} token (the arma_CWR
+checkout root, the same root data_dir and mission resolve against) in
+single-instance extra_args and the sqf, mission and seq runners, and
+registers it among the multi-instance placeholders; 32 tomls use
+"--mods-dir ." for @LoBo and ${repo_root}/tests/fixtures/... for fixture
+mods (the engine already accepts absolute --mod entries), so they run the
+same on a tmp shadow and on the packages/RemasterUD junction. Pinned
+Demo / Game tomls are unchanged; a legacy Classic dir with @LoBo beside
+it no longer satisfies the LoBo tests (Remaster is the target).
+
+mp_wizard_template_overview and mp_wizard_finish_demo asserted the
+"1-6_C_Cooperative" template on packages/Demo, which ships no Templates
+folder; they now pin packages/RemasterUD and select Abel (the Remaster
+ships Templates/1-6_C_Cooperative.Abel.pbo with the same overview).
+editor_wizard_finish stays a known red: it needs both the stock Mission
+Editor entry (dropped on purpose by RscDisplayMainUD) and SPTemplates
+(absent from Demo), which only packages/Game has.
+
+Verified on dist/agent2-rwdi + remaster-shadow-of2: tri unit tests 9/9
+(cargo test expand_), ui/main_menu 33/33, the 15 changed scripting tests
+13/15 (many_mag_slots_no_crash is a Demo-world mission and passes 2/2 on
+packages/Demo; guerrilla_lobo_body_save_reload_modless phase 02 now boots
+and exposes a pre-existing assailant-loop script error after a modless
+reload, handled separately), ui/remaster 11/11. The leaning, e2e,
+debriefing and gamepad tomls carry the same mechanical rewrite and were
+not run. FRESH-INSTALL.md documents the convention.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

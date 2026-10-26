@@ -1,0 +1,201 @@
+FABLE-3 REPORT: why a sub-cell jitter swings the far haze, and what is robust by construction
+===========================================================================================
+Swarm: tmp/video/fogwind (board BOARD.txt). Shot: trailer scene 2, valley_mist ("MOVING OUT AT DAWN").
+Base build: graphics-remaster-rwdi (= d91a08e0, the per-cell IGN fix). Overrides only, no engine change,
+no branch. Tools and outputs: tmp/video/fogwind/fable-3/{tools,shaders,runs,out}/.
+
+1. THE QUESTION
+---------------
+The first swarm found the mechanism (the frame-wide jitter under the 0.12 history pumped the whole
+sheet); agent 6 found the amplifier (the history is read at the JITTERED point, so the stored value sits
+at a leaky SUM of the offsets, gain 8.3x, not an EMA); agent 1 found the wind (IGN + a frame-global
+phase step = the same pattern one cell to the right every frame). My question was the one under all
+of those: why does ONE sub-cell offset move a far cell's value so much in the first place, and which
+parts of that are fixed by construction (no averaging, no history, no sequence) and which are not.
+
+2. METHOD
+---------
+A 1-D model of psFogInject along one ray with the real numbers (tools/sens.py, out/sens.txt;
+tools/noise.py, out/noise.txt): the slice table (FogDepthK: 64 slices, first slice 0.9 m, zFar = the
+view distance 4000 m, k = 6.099), the medium of fogMediumAt (the clear haze 6e-4/m at sea level over
+1200 m, its near-thinning ramp 0.06 -> 1 over 200..3000 m, the lobe keep 0.1 -> 1 over 30..800 m, the
+valley mist 2e-3/m in the layer with the top's exponential fall over 18 m, the layer's top moved by the
+two cloudNoise octave sets), and the valley_mist geometry (eye 1.75 m over the ridge, pitch -6, fov 0.7
+x topFOV 0.75: 0.0557 deg per px, a 12 px cell = 0.67 deg; the kit's valley/bay/farhill regions are the
+rays at -5..-14 deg). Per slice: the slice MEAN of sigma (what the cell should hold) against the point
+sample at a depth offset u in [0,1) (the shipped estimator), at a y offset of +-0.5 cell, and against
+fixed estimators: 1 tap at the slice mid, 2 Gauss points, 2 taps at 1/4 and 3/4, 4 strata.
+
+3. FINDINGS (the model)
+-----------------------
+3.1 Where the far haze lives in the slice table. A ray at -5..-14 deg from the ridge meets the valley
+    floor and the bay at 400..1000 m. The slices there (s 38..49) are 35..95 m deep, so one slice drops
+    the ray by only 4..12 m against the mist's 18 m fall: the mist top is crossed over 2..4 slices, not
+    inside one. The clear haze's far slices (1..3 km) are 100..300 m deep.
+3.2 The SMOOTH medium is not very sensitive, and a fixed tap is exact on it.
+      point sample, depth offset u in [0,1): swing 10..20% of the slice's value in the crossing slices
+        (sens.txt), the haze ramp's far slices 8..16% (noise.txt section 1);
+      point sample, y offset +-0.5 cell: 10..38% in the crossing slices;
+      the whole column's S for ONE offset shared by all slices (the frame-wide scheme): 1..3%;
+      independent offsets per slice (the per-cell scheme): 0.1..0.3% rms;
+      a FIXED tap at the slice mid: < 1% error vs the slice mean in every slice (2 Gauss points and 4
+        strata the same). An analytic integral of the ramps would buy nothing measurable over the mid
+        point: I dropped it (board 04:51).
+    So the pump of the original build = 1..3% per frame x the 8.3x leaky-sum amplifier, coherent over
+    the frame (agent 6's C0 measured 9.2x in game). With the history read at the centre, the smooth
+    medium's residual is already below everything the kit resolves (agents 2..6 measured that).
+3.3 What is NOT smooth: the mist top's noise. cloudNoise is a 256x256 R8 tile of 5 octaves of value
+    noise (periods 4..64 per tile), rank-equalised, NO mips, linear filtering (EngineGL33_Lighting.cpp
+    141..150, CloudNoise.cpp). fogMediumAt reads it at the 310 m scale (n2, also + p.y * 0.002) and at
+    1100 m (n1): the finest octave is 5 m at n2 and 17 m at n1, far below a far slice's 35..300 m span.
+    It moves the layer top by (n2 - 0.5) * 0.35 * depth = +-6 m and depth * mix(0.6, 1.35, n1), and the
+    banks x1..1.7 (smoothstep of 0.6 n1 + 0.4 n2). Modelled along the -8 deg ray over the crossing
+    zone (60 m slices, 200 random positions, noise.txt section 2), error vs the slice's mean mist:
+      point sample          rms 36%   max 257%
+      1 fixed tap at mid    rms 22%   max  67%
+      2 taps at 1/4, 3/4    rms 10%   max  42%
+      4 strata              rms  3%   max  15%
+    Across the cell (7 m footprint at 600 m): point 7%, mid 2%, 2 taps 0.5%: the lateral footprint is
+    10x smaller than the slice's span, depth is where the noise aliases.
+    This is the per-sample term every jittered scheme boils on and every single fixed tap aliases
+    (agent 3's "frozen" curtains 0.317 vs original 0.152 in agent 4's curtain box; agent 3's tap ladder
+    1 tap 0.125 -> 2 taps 0.072 -> 4 taps 0.064 static boil; agent 1's real-time Ac 2x the 4-tap floor).
+    The shadow-map vis is the other hard term, but the cascades end in the near slices (metres deep),
+    and the first swarm's fogvis1 showed it carries none of the far pump.
+3.4 What the lookup side adds. The apply reads the integrated volume with a trilinear texture() at
+    (f - 0.5)/N: a smooth interpolation between two slices' S and T; it cannot make a residual, only
+    pass one. The ring (g_air) is per column (9 taps over 22 deg, linear-filtered 256 bins): smooth in
+    the xy jitter (0.33 deg at most); agent 7 found its bins stepping at the screen edges in a
+    history-free far field, a separate item.
+
+4. ROBUST BY CONSTRUCTION (what follows from 3)
+-----------------------------------------------
+  (as corrected by the runs in section 5; the first draft of this section blamed the mist noise)
+  (a) No temporal jitter is needed for the MEDIUM: a deterministic tap at the slice mid on the
+      cell-centre ray is exact to < 1% on every smooth term, and the runs show the mist noise's
+      aliasing does not reach the kit either (det1 = det1n = det1nq = det1g on every number).
+      Nothing temporal, nothing to travel, nothing to pump: det1 alone is at the floor on flicker,
+      wind, boil and grain.
+  (b) The history must be read at the centre (agent 6) so it is an EMA smoother, not an amplifier.
+  (c) What a fixed tap reads HARD, and so must be band-limited to the froxel by construction, is the
+      LIGHT, not the medium: the sun visibility (canopy map / terrain horizon smoothstep per column;
+      det1v -80% of the streak excess; the shadow map alone is not it, det1s = det1) and the horizon
+      ring's bin noise (det1r; a C++ item in the ring pass, 0.05 codes, under the visible). Fix: vis
+      = the mean of fogSunVisibility over 4 points of the froxel (a quincunx +-0.25 cell across,
+      +-0.25 slice along), the medium still one tap (det1p: streak excess 0.104 -> 0.035).
+  (d) The look: the shipped look included the jittered history read's blur (agent 7, sigma ~1.3
+      cells); Act25's fixed tetra history read (det1pb/det1prb) or agent 6's display tent restores it
+      and takes the last 0.035 of the streaks with it (det1prb 0.183 = q2b 0.185 = base 0.192).
+  Prototypes (shaders/<variant>/psFogInject.glsl, generator tools/gen.py from the d91 per-cell shader):
+    det1    = (a) + (b): ONE tap per cell, slice mid, cell centre, no jitter anywhere; history 0.12
+              read at the same point.
+    det1n   = det1 + n1/n2 averaged over 2 points at 1/4 and 3/4 of the slice's span.
+    det1nq  = det1n + the noise also averaged across the cell (+-0.25 cell).
+    det1n4  = det1 + the mist density averaged over 4 strata along the slice (generated, not run:
+              the noise turned out not to matter).
+    det1v / det1s / det1r / det1g = attribution only (vis = 1 / shadow map off / ring off / ground
+              air + mist off).
+    det1p   = det1 + (c).            det1pb  = det1p + (d).   <- the hand-off
+    det1pr  = det1p + 17 ring taps.  det1prb = det1pr + (d).  (ring taps neutral)
+
+5. MEASUREMENTS (filled in as the runs land; static = fog1_static, camera held at the frame 328 pose,
+   kit --static --from 15; curtains = agent 4's curtain4.py, box 1150,520,450,120 time-mean column
+   high-pass rms)
+---------------------------------------------------------------------------------------------------
+  static, camera held (fog1_static, 120 measured frames); kit columns valley mid / lowd2 / boil / slow,
+  WIND max over regions, max rho_off, bandmetric band; look = region means bay/valley/farhill;
+  curtains = agent 4's boxes 1150,520,450,120 | 1300,440,600,80 (below the sun | low sky)
+    variant   mid    lowd2  boil   slow   WIND   rho_off band   look                 curtains
+    base      0.477  1.618  0.375  0.151  0.024  0.051   0.456  154.0/128.1/115.9    0.192 | 0.051
+    d91       0.498  0.110  0.416  0.173  0.174  0.466   0.058  154.9/130.7/117.5    0.176 | 0.056 (wind)
+    frozen    0.050  0.025  0.079  0.067  0.002  0.025   0.033  153.9/125.4/115.1    0.296 | 0.100
+    q4        0.052  0.020  0.057  0.043  0.003  0.025   0.025  153.9/126.1/115.2    0.239 | 0.097
+    q2b       0.044  0.023  0.051  0.039  0.003  -       0.025  154.4/129.1/116.4    0.185 | 0.064
+    Act25     0.073  0.033  0.073  0.049  0.003  0.033   0.028  154.4/128.8/116.4    0.192 | 0.064
+    det1      0.047  0.022  0.057  0.045  0.003  0.041   0.033  154.4/126.7/115.5    0.296 | 0.099
+    det1n     0.047  0.027  0.058  0.046  0.002  0.025   0.035  154.4/126.5/115.5    0.300 | 0.099
+    det1nq    0.052  0.026  0.059  0.045  0.002  0.032   0.038  154.4/126.5/115.5    0.300 | 0.099
+    det1v     0.049  0.028  0.076  0.065  0.003  0.027   0.033  154.5/127.7/117.3    0.210 | 0.092  (vis = 1: attribution only)
+    det1r     0.049  0.022  0.058  0.046  0.001  0.023   0.032  173.2/146.8/113.4    0.218*| 0.054  (ring off: attribution only; *air level 183 vs 168)
+    det1s     0.050  0.025  0.058  0.045  0.002  0.036   0.035  154.4/126.6/115.6    0.307 | 0.099  (shadow map alone off: = det1, the cascades are not the term)
+    det1g     0.046  0.022  0.054  0.041  0.003  0.036   0.031  152.8/120.9/115.0    0.298 | 0.100  (ground air + mist off: attribution only)
+    det1p     0.046  0.029  0.056  0.044  0.003  0.036   0.034  154.2/127.3/115.6    0.227 | 0.098  (candidate part 1: vis = mean of 4 points over the froxel)
+    det1pr    0.052  0.024  0.066  0.054  0.003  0.021   0.035  154.1/127.3/115.5    0.224 | 0.097  (det1p + 17 ring taps one bin apart: no gain; the ring's streaks are bin NOISE, not tap kinks)
+    det1prb   0.047  0.025  0.055  0.042  0.002  0.026   0.036  154.5/129.7/116.7    0.183 | 0.063  (det1p + Act25's tetra history read: = q2b on every number; the ring taps are neutral)
+    det1pb    0.046  0.024  0.054  0.042  0.002  0.026   0.035  154.6/129.8/116.7    0.190 | 0.064  (THE HAND-OFF: det1p + tetra history, no ring change)
+  By eye (out/curtains_det1pb.png, time means 2x and x high-pass x8; out/crop2x_f60_det1.png): det1
+  shows vertical streaks in the mist left of the spit, det1p faint ones, det1pb none, like base and
+  q2b.
+  Attribution: with the sun visibility forced to 1 the mist-box streak excess over base drops from
+  0.104 to 0.018 (80%); with the ring off the low-sky box falls to base (0.054 vs 0.051). The two
+  per-column terms a fixed tap reads HARD are therefore named: the SUN VISIBILITY in the air (NOT
+  the shadow cascades: det1s = det1; so canopySunVisibility and/or fogTerrainSun, hard functions of
+  texture lookups at the sample's xz, read at one point per column and slice; a shadow boundary in
+  the dawn air is a surface the 7 m column lattice cuts) and the HORIZON RING (256 bins = 1 per 2.6
+  columns; NOT the taps' bin kinks, det1pr with 17 taps one bin apart = det1p; bin-to-bin noise of
+  the ring's own values, each bin measured on its own from 6 samples' darker half with a 0.3 share:
+  a C++ item in the ring pass, 0.05 codes rms in the low sky, under what agent 4 called visible).
+  The shipped jitter + leaky history hid both under a ~1.3-cell lateral blur; q2b/Act25 hide them
+  under the tetra history blur; q4 under its 4 taps' spread; det1p takes the vis part out by
+  construction (0.296 -> 0.227, vis-off bound 0.210), det1pb the rest with the tetra read (0.190).
+
+  MOVING (fog1_moving, real pan, kit --from 15, mkv; out/moving-det1pb_motion.txt):
+    variant   WIND bay/valley/farhill/haze   max rho_off  lowd2 valley  band(mkv)  look valley
+    det1pb    0.005/0.005/0.002/0.004        0.040        0.074         0.079      130.3 (fog1_moving reads ~1 code over mist3/fog4, agent 5)
+    q2b       0.005/0.003/0.002/0.004        0.034        0.078         0.079      +0.62 vs original (fog4_moving)
+    vanilla   0.017/0.007/0.002/0.007        0.048        0.057         0.102
+    d91       0.047/0.123/0.078/0.035        0.29         0.117         0.086      130.3 (wind)
+    original  0.009/0.025/0.001/0.007        0.04         1.621         0.522      127.9 (pump)
+  Not run in real time (agent 1's recorder was queued to the end); det1pb is deterministic like q2b,
+  which agent 1 measured at the floor in play (held: valley boil/slow 0.058/0.047; pan rho_off
+  <= 0.028).
+  (base, d91, frozen, q4, q2b, Act25 from agent 1's re_static_2 table and my own curtain4 run on their
+  clips; det1* from out/static-det1*_motion.txt, _band.txt, _curtain.txt.)
+  det1nq (the noise also averaged ACROSS the cell, +-0.25 cell, 4 lookups per octave) changes nothing
+  either (0.300): the mist top's noise is NOT the streak source, along or across. The noise aliasing
+  the model predicts is real but lands as broad static blotches the kit does not resolve. The
+  streaks are a per-column term of the AIR (they are in the clear-air sky box too: frozen 0.100 vs
+  base 0.051): attribution runs det1v (vis = 1), det1r (ring off), det1g (ground air + mist off).
+  Reading: ONE fixed tap with no jitter at all is at the floor on flicker, wind, boil and grain (the
+  smooth medium needs no jitter, as the model said), and reproduces agent 3's "frozen" exactly,
+  streaks included (0.296 = 0.296). Averaging the mist noise ALONG the slice (det1n) leaves the
+  streaks untouched (0.300): the curtain metric is a column-to-column measure, and neighbouring
+  columns share their along-ray error (their rays run 7 m apart inside the noise's 20..80 m
+  octaves), so that error is a broad, static blotch, not a streak. The streaks are LATERAL
+  aliasing of something that changes over 5..10 m across the view. By eye (out/curtains_det1.png,
+  out/crop2x_f60_det1.png): frozen and det1 show faint vertical streaks in the mist left of the spit
+  at 2x without a stretch; base, q2b none; q4 fainter than frozen.
+
+6. WHAT I HANDED TO FABLE-1
+---------------------------
+  - shaders/det1pb/psFogInject.glsl: the override (base: the d91 per-cell shader of
+    tmp/video/mist/1/shaders/percell, byte-equal in its fog sources to graphics-remaster-rwdi).
+    Diff vs d91 in three places: (1) fogSlice samples the slice mid on the cell-centre ray, no
+    jitter in depth or xy, history read at the same point (an EMA); (2) fogCell's vis = the mean of
+    fogSunVisibility over a quincunx of 4 points (+-0.25 cell across, +-0.25 slice along, g_cellLat
+    and g_span); (3) Act25's fixed tetrahedral +-0.25 history read. The medium (fogMediumAt) is
+    untouched, so the AI link through ComputeFogMedium is untouched.
+  - tools/gen.py regenerates every variant from the base (det1, det1n, det1nq, det1n4, det1v,
+    det1s, det1r, det1g, det1p, det1pb, det1pr, det1prb); tools/measure.ps1 measures a run against
+    the references; tools/sens.py and tools/noise.py are the model; tools/curtainview.py and
+    tools/crop2x.py the pictures.
+  - Position for CANDIDATE.txt: not a bid against production q2b (agent 8 built it; det1pb has the
+    same numbers in the same class). It is the explanation of what q2b's second tap pays for (the
+    sun visibility of the air, not the medium) and a cheaper equivalent if cost bites: one fogCell
+    plus three extra fogSunVisibility per cell instead of two fogCell. Two C++ follow-ups for the
+    look director: smooth the ring across bins in the ring pass (its bin noise is the last 0.05
+    codes of low-sky structure every zero-jitter scheme shows), and read the canopy/horizon sun
+    visibility of the air over the froxel's footprint in production rather than through a tap
+    spread.
+  - For the unit test: the model's two numbers worth asserting are (a) a fixed mid tap's error on
+    the exponential/ramp medium of one slice stays under 1% (it did in every slice of sens.py), and
+    (b) the frame-wide and IGN schemes' pump and travel (fable-1's test already asserts those).
+
+7. WHAT IS NOT DONE
+-------------------
+  - No real-time 60 fps recording of det1pb (agent 1's recorder queue ran to the end of the session).
+  - The vis split stops at "canopy and/or terrain horizon" (det1s rules the cascades out); one more
+    attribution run each would name it.
+  - det1n4 (mist density over 4 strata) was generated, not run: the runs showed the noise does not
+    reach the kit, so it would measure nothing.
+  - Cost not timed (contended GPU all night, like everyone's).

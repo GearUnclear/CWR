@@ -1,0 +1,48 @@
+## track
+aa
+## files_verified
+true
+## missing_or_false_claims
+[
+ "NOTES.md says 'Lanczos2 alone is already crisper than the blit'. My Laplacian-energy check finds Lanczos2 alone (H-lz) slightly SOFTER than the stock bilinear 1.5x blit (H-rem) in all three views I checked: town_night 26.97 vs 27.22, forest_edge_golden 20.28 vs 21.43, sinai_lowsun_fp 7.68 vs 8.06. Lanczos2 gives a cleaner, less aliased downsample. The crispness comes from RCAS (H-lzrcas05: 32.3 / 24.0 / 10.4).",
+ "The claim that present-pass minima are 'stable to 0.001 ms' holds only at 960x640. At 1080p the p6 minima spread 0.289 to 0.302, the Classic blit 0.104 to 0.142, and one p2 round read 1.011. So the +0.155 ms delta is good to about +/-0.04 ms. The conclusion stands; the precision claim is overstated.",
+ "The separable vs 2D difference is quoted as 0.03-0.06/255. That figure comes from the lower 55% of the frame (scripts/sep_vs_2d.py). Over the full frame I measure 0.15-0.21/255. Both are below the round-to-round noise of the same variant (0.25-0.27/255), so the two kernels really are equivalent. The quoted figure is just region-specific.",
+ "run_v6.console.txt reports 'screenshots copied: 0; pairs: 0', but run_v6 holds flat copies. I hash-checked three of them against the raw tri/aa_msaa_m shots and they are identical, so this is not fabricated. The collection step simply ran outside the logged runner.",
+ "The headline is 'ship AA in the default, offer 1.5x'. The fps cost of that is not proven. Every D/M/H still and pan is at 960x640 output. No Remastered frame cost exists for H at 1080p. In run_v5, Remastered H at 1080p logged 18-29 ms frames against Classic's 4-14 ms, under contention, so there is no evidence that the 1.5x preset fits 60 fps on an RTX 3060 once the other lighting tracks land."
+]
+## visible_gain_vs_current_remastered
+small
+## visible_gain_vs_classic
+small
+## rtx_vision_score_0_to_10
+1
+## taste_violations
+[]
+## cost_ok
+true
+## score_0_to_10
+4
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\aa\figures\SETTINGS_town_night_crop.png
+## one_line
+The track is honest and every file checks out. The real win is turning on MSAA, which the shipped Remastered default lacks, plus a cheap Lanczos2+RCAS present pass. The result is less shimmer and crisper detail at crop scale, with no change to light, so it does almost nothing for the RTX-on vision.
+## prototype_actually_loaded
+Yes. All 14 game_stdout.log files under the run folders log the expected override dir (overrides\all for run_eden1, v2 for run_v2, v3 for runs v3-v6 and run_check_noprez). Each loads psRemasterCommon.glsl (20467 B), psNormalRemasterMain.glsl (1759 B in v3) and psPostComposite.glsl (9709 B), matching the files on disk. 'GL33 present (aa research): on' appears in every prototype run and is absent in run_check_noprez (UD_AA_PRESENT=0). No shader compile or link errors were logged, only the stock GL performance warning. The UDCAP gpu lines carry the new 'present <ema> min <min>' timer, which exists only in the patched build, and the run_v5 present_cost.md table matches those log lines exactly. prototype.patch (SceneDraw LOD pin, GpuTimer, VertexBuffer present pass with Lanczos2/RCAS/RGBA16F separable target) passes git apply --check on the lighting worktree. Pixel diffs confirm the AFTER images really differ. H-rem to H-best3 changes 26.8% / 37.6% / 16.6% of lower-frame pixels by more than 2/255 (forest / town / sinai), with mean luma shifts of only -0.04 to -0.29. D-rem to M-rem changes 20.7% of town_night pixels by more than 2/255. The v3 coverage gate keeps the Sinai camouflage net intact; I confirmed this visually against the v2 bug figure.
+## artefacts_seen
+Checked against the folder: all 22 cited image and artefact paths exist; figures holds 91 files; 7 run folders, 14 stdout logs. The run_v6 flat copies hash-match the raw tri shots. Images I opened: SETTINGS_town_night_crop, PLAYER_DEFAULT_forest_edge_golden_crop, forest_edge_golden_1080p_present_zoom2, BEST_forest_edge_golden, BEST_town_night, PAN_DMH_town_night, forest_edge_golden__H_coverage_crop1, BUG_v2_net_vanishes. I also built my own native-resolution strips from run_v3/run_v6 (D|M|H|H-best forest crop at 1:1, town_night full frames D|M|H-best, H-rem|RCAS0.5|RCAS1.0 at 2x, Sinai Classic|Rem|best). Artefacts: no halos, NaN, banding or embossing at RCAS 0.5. RCAS 1.0 visibly over-crisps the foliage into a processed, grainy look, as reported. The prototype also sharpens HUD text, which the explorer acknowledges.
+## critique
+This is a clean, well-instrumented and honest report. It has no fabrication; the overclaims are minor (the Lanczos-alone crispness and the 0.001 ms stability). The track just cannot serve the owner vision. What it found, in order of value:
+
+(1) The shipped Remastered default runs with no AA at all. Turning on 4x MSAA (with the alpha-to-coverage path that already exists) visibly calms foliage. In the D/M/H strips the pixel-chunk leaf edges and sparkling holes against the lamp glow soften, and the pan diff maps show far fewer popping leaf pixels: the motion-compensated residual drops from 6.96 to 5.39 to 3.54 on the town tree. That is a real gain a player would feel in motion. It is a default-setting change, not new technology, and it was only shot at 960x640 output, which exaggerates aliasing compared with the 1080p target.
+
+(2) The separable Lanczos2 + RCAS 0.5 present pass makes bark, needles and the net weave crisper at 1:1 and 2x crops, for a measured +0.155 ms at 1080p. At full frame, the BEST Remastered and Remastered + prototype panels are indistinguishable to me. My Laplacian check shows Lanczos alone is not crisper than the blit, only cleaner; RCAS supplies the acutance. It needs a HUD-ordering fix before it can ship.
+
+(3) j3 coverage is a sound analysis: the 0.753 threshold on filtered 1-bit alpha thins crowns by about 21%. Visibly, though, it is near nothing (sky-through 0.1871 to 0.1845, 1.8% of lower-frame pixels). It is free, it does not flatten crowns, and the v2 net bug is properly fixed.
+
+(4) FXAA only matters if MSAA stays off, and recommendation (1) makes it moot.
+
+No taste rules are broken. There is no grading, haze, tint or darkening (luma shifts are fractions of a level), and Classic stays untouched. The khaki ground and other Remastered base-look issues visible in the figures belong to the baseline, not this track.
+
+On cost, the shader passes are trivially cheap and M is near free. The 1.5x preset's cost on a 3060 at 1080p was never measured for Remastered, where contended 1080p H frames ran 18-29 ms. Ship M by default and treat 1.5x as an optional preset.
+
+Toward RTX-on, this is image-quality hygiene, not light: no bounce, occlusion, reflections, volumetrics or emissives. Worth folding in as cheap polish (MSAA default, separable Lanczos+RCAS at scale > 1, j3), but nobody will look at these pictures and say 'different game'.

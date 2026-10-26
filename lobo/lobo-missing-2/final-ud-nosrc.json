@@ -1,0 +1,86 @@
+{
+  "repair_version": "2026-10-11.4",
+  "rule_sha256": "98f07a96676496b149528e96450c63c27755341e9e47c87aa6f977049385aa48",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "ud",
+  "changed_members": 9,
+  "added_members": 0,
+  "archives": [
+    "lobo_f4",
+    "lobo_fab",
+    "lobo_m1",
+    "lobo_ob",
+    "lobof5",
+    "loboradios"
+  ],
+  "skipped": [
+    "lobo_airammo: 9 member(s) not restored (LoBo_Mk81.p3d, LoBo_Mk81_LDGB.p3d, LoBo_Mk81_LDGB_d.p3d, LoBo_Mk82_LDGB.p3d, LoBo_Mk82_LDGB_d.p3d, LoBo_Mk83_LDGB.p3d, LoBo_Mk83_LDGB_d.p3d, LoBo_Mk84_LDGB.p3d, LoBo_Mk84_LDGB_d.p3d): pass --asset-source <LoBo_airammo.pbo of LoBoAddonPack3 (2007-01-06), sha256 de7f4728cc41bd98e93a40e8d01d4816632a39805f191dc05ea6c023b56489fd, e.g. D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo>",
+    "loboegypt: 1 member(s) not restored (helm_s_in.pac): pass --asset-source <LoBoEgypt.pbo of LoBoAddonPack1 (2004-06-11) or LoBoDemo2 (2004-08-25), sha256 992d304a27fefae4105da52cfc58fd9ae6ae0c33d9a963d0ee20161ce77340e9, e.g. D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo>"
+  ],
+  "members": [
+    {
+      "member": "lobo_f4/lobo_f4_ww_iaf.p3d",
+      "before_sha256": "2ab8725ba6dfa34ae9246a3f1ee0bda7dee68ce7941c0011b3e46e3c0271f358",
+      "after_sha256": "0d0f501c8ea5edfed0f3264f55b81362b964c997492170588678a8be041b0427",
+      "before_bytes": 2399576,
+      "after_bytes": 2399576
+    },
+    {
+      "member": "lobo_fab/config.cpp",
+      "before_sha256": "710b6081237dd5c48edb0673d848ae6f7f194ba484eca4b68f9ce685173a97cd",
+      "after_sha256": "870b473723d8f20d47090d499fe6a8f4d3e4d8472e5e9b9c9db8f28863106e4c",
+      "before_bytes": 61039,
+      "after_bytes": 61042
+    },
+    {
+      "member": "lobo_m1/lobo_m1a1e_r.p3d",
+      "before_sha256": "35755ab68f470db561c96dc44290f376613f08536792af4eeb827f5a1eda8b09",
+      "after_sha256": "7d5b7be2a6265efd795dcb25b87487dd66ee65ab255c297d92279c2ddfe1c944",
+      "before_bytes": 4916073,
+      "after_bytes": 4916073
+    },
+    {
+      "member": "lobo_m1/lobo_m1a2e_r.p3d",
+      "before_sha256": "1a343b3a17bb2c2c05c00f2819aed6d394e0db7529331edfa46ddfcfa504be71",
+      "after_sha256": "15cc080655b045c23b4e70eba5f07abf5838ace6640b2ae69d3690f89aeefb2f",
+      "before_bytes": 4984596,
+      "after_bytes": 4984596
+    },
+    {
+      "member": "lobo_ob/config.cpp",
+      "before_sha256": "089cd5c6f61001bef1b4e379234fa4a0a44334b75121ae7cacfc2dd1426798dc",
+      "after_sha256": "8cef85d53a47a97ba7780ba54940d3a68fec471012ae0e5eb0321e7c0c9711d1",
+      "before_bytes": 43836,
+      "after_bytes": 43833
+    },
+    {
+      "member": "lobof5/lobo_f5_aa_jor.p3d",
+      "before_sha256": "65dc106b83a9fcff94415fbc2c0c2df3c047b30a569d9f600ce15bd64631e6a4",
+      "after_sha256": "c8112991532aef8c1ddbab1f3ae5c21b9e81aa173cc014fc3bc35d0d13b6ee06",
+      "before_bytes": 1380062,
+      "after_bytes": 1380062
+    },
+    {
+      "member": "lobof5/lobo_f5_at_jor.p3d",
+      "before_sha256": "96f4966a7d0965e779e76f699ed3ff438b68c5dd1364321c3dd2d5eb4951c63e",
+      "after_sha256": "1e34d8cf70b7bce3b17cb55d4448766f7f191c8da8c00339d20e0b732143000d",
+      "before_bytes": 1427928,
+      "after_bytes": 1427928
+    },
+    {
+      "member": "lobof5/lobo_f5_mir_jor.p3d",
+      "before_sha256": "ef090d6891cb65839e91d9d14061777b97850b39bdae79cfc91bcd9a688a4872",
+      "after_sha256": "18bd6716c38509b72766d42114e14146cd690dd37a6ab27fbbb14182b93b96af",
+      "before_bytes": 1438036,
+      "after_bytes": 1438036
+    },
+    {
+      "member": "loboradios/config.cpp",
+      "before_sha256": "b352b63260a72a1f4309908efd957114c2b7953bf13fa920257fd8350ae4fb33",
+      "after_sha256": "b2ac8b02e1b54a8656a7e141e3c0d8ae9c87e7997d25157fb831d25b9bce04f8",
+      "before_bytes": 2690,
+      "after_bytes": 2692
+    }
+  ]
+}

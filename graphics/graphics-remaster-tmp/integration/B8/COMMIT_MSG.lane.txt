@@ -1,0 +1,170 @@
+graphics: sun beams, headlight cones, aerial haze and morning valley mist
+
+What the player sees: with the sun low and in view, light shafts fall
+through tree crowns, between cypress trunks and over roofs, and the
+shadow of a tree line or a ridge cuts through the lit air. In setFog,
+in rain and with the sun at the horizon the air is misty and the shafts
+fan out; in clear air only narrow beams through gaps show and open
+ground toward a low sun gets no glowing band. At night a vehicle's
+headlights draw cones in the mist above the road. Distant ground fades
+into the sky behind it through air that thins with height, so valleys
+sit in haze below clear ridges, a ridge's shadow in the haze stays
+grey and the far horizon has depth; at noon in clear weather only the
+far haze changes (+0.3% horizon-band brightness at noon_fields). At
+dawn (an eastern sun up to 10 degrees) and in setFog, pink mist pools
+on valley floors and along shores while ridges, plains and the open
+sea stay clear. Nothing changes within 150 m, and the night sky stays
+as it was.
+
+How it works:
+- One post stage, Air (EngineGL33_PostAir.cpp, its GLSL in the GL-free
+  EngineGL33_PostAirShaders.cpp), after the occlusion and before the
+  bloom. A half-resolution march on the linear depth writes two
+  targets: sun beams (single scattering in a ground mist, 24 steps over
+  the first 250 m, the sun's visibility from the shadow map, the
+  horizon map seen from the point's height and the cloud field, phase
+  0.85 HG(0.75) + 0.15 HG(-0.3)) and the same scattering as if the
+  whole ray saw the sun, headlight cones (up to four spotlights within
+  150 m at night, the shading's cone, forward scattering toward the
+  eye), the haze's sun visibility (12 density-weighted samples beyond
+  150 m) and the valley mist's top and density where the ray ends. A
+  depth-aware blur, the beams' depth-matched local mean, then a
+  full-resolution apply: haze and mist in closed form, C' = C T + S,
+  toward the sky table's fog colour (the colour the forward fog uses),
+  then the beams added like light on a screen with the research's
+  contrast (what stands above the mean is boosted, the smooth glow
+  loses a share, never below zero) and its edge clamp for thin
+  foliage. The contrast works on the share of each ray's scattering
+  that sees the sun (BeamShaft), not on the scattering itself, so a
+  ray that only runs longer through the mist, as over open ground
+  toward the horizon, is not boosted into a band. Air that a ridge or
+  a cloud shades keeps a dimmer zenith-coloured sky light (0.55 of the
+  sky's luminance). The march's start turns every frame with the TAA
+  sequence and the TAA history averages it. The bloom and the
+  composite read the frame with the air applied; with the stage off
+  they read the resolved frame as before.
+- The beams replace the legacy screen-space shafts while they run.
+- With the haze on the classic fog keeps only its view-distance edge:
+  its start moves out to 55% of its end in clear weather, through a
+  per-fragment scale of the vertex fog factor in finishFragment and the
+  water main (LitConstants 78 Haze, x = the scale minus 1, 0 = the
+  classic fog; the last planned slot, Count 79). The apply puts the
+  haze under that edge, so the mist dissolves into the sky toward the
+  view distance instead of ending in a hard line at the horizon.
+- The medium is pure, Graphics/Remaster/AirMedium.{hpp,cpp}: the
+  constants, the weather and time rules (ComputeAirMedium: beam mist
+  0.12 in clear air, 1.5 from setFog 0.1, more above, gain 4 and
+  high-pass 0.85 in clear air, 2.5 and 0.6 in mist; the haze x4 at
+  setFog 1, x2 in rain; the valley mist full from 1 to 6 degrees of an
+  eastern sun and gone by 10, and in setFog, 40% of it under an
+  overcast, only where the ring taps' mean ground stands 20 to 60 m
+  above the floor), the beams' contrast, the closed forms the shaders
+  mirror, the valley floor, the classic fog's moved edge, and
+  AirOpticalDepth for a line of sight, for AI sight later.
+- The march pastes the remastered prelude's LitConstants block and its
+  terrain and clouds piece (cloudSunVisibility), the apply the
+  LitConstants block and the sky piece: those pieces are now
+  kLitConstantsBlockGLSL and kRemasterTerrainCloudsGLSL in
+  Poseidon::gl33lighting (the assembled bytes of every existing program
+  are unchanged by the move); kPostShaders rows hold up to 7 pieces;
+  the table test resolves names over both families and the lab's
+  glsl_extract.py loads them together. The march binds the horizon and
+  height maps whenever the shading reads them (terrain shadows or
+  terrain occlusion on).
+
+Switches and gates: airBeams, airHaze and valleyMist have landed
+(11/26). The beams run with a low sun in view, mist, or headlights at
+night; the haze always beyond 150 m; the valley mist with an eastern
+sun from -4 to 10 degrees (gate shortened from 38) or setFog. The
+stage needs the post effects, the world depth and no screen overlay;
+interiors, optics and night vision skip it and the forward fog keeps
+its classic edge there (a frame later). Sub-knob volGain under
+airBeams (-1 = from the weather). Debug view 6 shows the air's
+in-scatter alone. GPU section air.
+
+From the prototypes: kept the volumetric march, phase, spotlight march,
+depth-aware mean with gain, floored high-pass and edge clamp, and the
+haze's closed-form height extinction (sigma 1.1e-4, scale height
+350 m, chroma 0.85 / 1 / 1.2), valley mist (2.5e-3, 40 m over the
+lowest of 15 taps, noise banks), its sun visibility and its light.
+Rewritten: one stage instead of a composite rewrite and per-fragment
+haze in every pixel shader; TAA as the accumulation; the sky table as
+the limit colour (no backdrop blit); the forward fog's edge by a
+fragment-side scale (no vertex shader change); the weather-driven
+medium; the beam contrast on the lit share; the haze's air without its
+own sun lobe (its limit already holds the glow toward the sun; the
+extra lobe lit far ground toward a low sun above the sky behind it).
+Dropped: halos for lamps and fires (brown sky), volCarve, the
+un-floored high-pass, CaptureSkyBackdrop, the variant channel, the
+other haze variants, the research's own temporal resolve; the
+precomputed mist floor was not needed (15 taps once per
+half-resolution pixel where the mist runs).
+
+Look check corrections: lowsun_fp (08:00 in March, sun 12.7 degrees,
+clear) took a mist veil over the plain and the hillside with the haze
+notes' morning (to 38 degrees) and still with one to 15 degrees; with
+the research's clear-air beam mist 0.3 and high-pass 0.6 it took a warm
+band along the horizon toward the sun (+7% horizon-band brightness from
+the beams), and the contrast on the scattering itself kept a band over
+the plain below the horizon (+5.4% there); with the contrast on the lit
+share that strip is -4.5% against the frame with the legacy shafts.
+
+Measured cost (RTX 4060 Ti, 1080p, scale 1.0, 4x MSAA, single readings
+of the smoothed air section with one other game on the machine, no
+clock log): 0.62 to 1.05 ms with beams, 0.16 to 0.28 ms haze and mist
+alone, 0.04 to 0.05 ms at noon and at night; the legacy shafts it
+replaces took 0.27 to 0.43 ms in the same views. The plan budgets 2 to
+4 ms on a 3060 at dawn, dusk and in mist.
+
+Tests: test_air_medium.cpp [AirMedium] (12 cases: the closed forms
+against numeric integration, AirOpticalDepth for the haze and for AI
+sight, the valley floor and depth on a synthetic valley, the morning
+and weather rules, the classic fog's moved edge at every distance, the
+beams' contrast on the lit share, the shaders' constants and closed
+forms against AirMedium's, the pasted pieces, off leaving every draw
+and stage as it was, unit 2 around the march), plus the air stage's
+plan (PostStages) and the landed switches and volGain
+(FeatureSwitches); layout, compile, table and stage tests updated.
+Lane unit gate 537/537, the full suite the 6 known localisation
+failures only; 28 contract mutations each turn their case red (Air not
+landed, beams not replacing the shafts, air over an optics overlay,
+the fog edge not moving or moving without the post pass, the density
+read at the far end, a western morning, fog not thickening the beam
+mist, the shader's scale height or chroma drifting, the forward fog
+ignoring the haze, litHaze out of the block, unit 2 keeping the
+comparison sampler or meeting texture 0, airHaze not landed, the mist
+ignoring the valley depth or the fog edge, a morning to 38 or to 15
+degrees in the medium or the gate, the composite reading the resolved
+frame, the beam contrast on the scattering itself, its mean share from
+the lit mean alone or over r and g only, the glow not scaled back by
+the open scattering, the march without it, the shaded-air light
+hard-coded, the terrain maps bound only with terrain shadows).
+
+In game (tmp/integration/B8 of the graphics-remaster worktree):
+20261018-080035-before (base build) and 20261018-092937-review-new
+(lane views off, on and split: pinewood_morn, valley 05:15, pine_eve,
+lowsun_fp, sunrise_ridge, noon_fields, town_night, hl_front). Off
+equals before with TAA off: pixel-identical at pinewood_morn, pine_eve
+and sunrise_ridge; the other views within their own repeat noise (the
+water, a moving object, the posed soldier's head, fire and smoke).
+smoke_abel 1/1, KHR_debug ids 131154, 131169 and 131218 only.
+
+Known risks: in setFog the backlit crowns near the sun take a pale
+veil (physical in mist, close to "flattened crowns"; volGain is the
+lever); at sunrise the far massif lies under pink mist that glows next
+to the sun (the haze notes' "too washed out" risk); in clear air with
+a low sun in view the legacy shafts' glow is gone and the thin beams
+give back only part of it (lowsun_fp -1.2 / -2.1 / -0.1% per band, the
+M113's backlit side -2.1% with its hue kept; pine_eve's frame R/B
+0.951 to 0.939; keeping the legacy shafts in clear air is the lever);
+the 06:00 to 06:30 valley mist of the haze notes is gone with the
+shorter morning; the dawn views lose 3 to 7% of their red/blue balance
+where the warm legacy shaft glow is gone and the mist is paler than the
+lit ground; with TAA off thin foliage against the glow shows speckles;
+half-resolution shafts beside trunks have blocky edges; a smoke puff
+in front of far terrain takes that terrain's haze; the beams and the
+legacy shafts swap at the beams' gate edge, not seen in motion; AI
+sight ignores the medium (AirOpticalDepth is ready); no RTX 3060
+measured, no quiet-machine timing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

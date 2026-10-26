@@ -1,0 +1,8 @@
+static-base: 105 frames (clip 15..120), camera |shift| mean 0.00 px/frame (x +0.00, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.211  0.489  0.117  0.385 |  +6.5 +18.4  +0.04  -0.29 | +13.7 -23.4  +0.04 | +0.04   0.008
+  valley   0.233  1.048  0.123  0.417 |  +6.3 -24.0  +0.05  -0.25 | -20.5 +16.1  +0.03 | +0.05   0.012
+  farhill  0.157  0.510  0.093  0.320 |  -4.7 +17.6  +0.02  -0.30 | -24.0 -20.6  +0.02 | +0.02   0.003
+  haze     0.110  0.249  0.065  0.260 |  -8.5 -10.1  +0.04  -0.26 |  -7.1 +11.4  +0.03 | +0.04   0.005
+  slope    0.091  0.158  0.057  0.341 |  +6.6 +15.9  +0.02  -0.40 |  +4.7 -10.3  +0.01 | +0.02   0.002
+  wrote amp_static-base.png, xt_static-base.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

@@ -1,0 +1,214 @@
+{
+ "v2_00_intro": {
+  "line": 1,
+  "label": "1.3",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L01_v2_00_intro__t3.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -1.0,
+  "why": [],
+  "finished_secs": 7.46,
+  "others": [
+   "1.1",
+   "1.2"
+  ]
+ },
+ "v2_01_opening": {
+  "line": 2,
+  "label": "2.2",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L02_v2_01_opening__t2.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -6.9,
+  "why": [
+   "longer than its scene"
+  ],
+  "finished_secs": 6.28,
+  "others": [
+   "2.1"
+  ]
+ },
+ "v2_02_valley_mist": {
+  "line": 3,
+  "label": "3.2",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L03_v2_02_valley_mist__t2.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -1.3,
+  "why": [],
+  "finished_secs": 6.29,
+  "others": [
+   "3.1"
+  ]
+ },
+ "v2_03_pine_shafts": {
+  "line": 4,
+  "label": "4.2",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L04_v2_03_pine_shafts__t2.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -0.5,
+  "why": [],
+  "finished_secs": 6.63,
+  "others": [
+   "4.1"
+  ]
+ },
+ "v2_04_bay_reflections": {
+  "line": 5,
+  "label": "5.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L05_v2_04_bay_reflections__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -0.2,
+  "why": [],
+  "finished_secs": 6.62,
+  "others": [
+   "5.2"
+  ]
+ },
+ "v2_05_outpost": {
+  "line": 6,
+  "label": "6.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L06_v2_05_outpost__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": 0.8,
+  "why": [],
+  "finished_secs": 6.91,
+  "others": [
+   "6.2"
+  ]
+ },
+ "v2_06_cloud_shadows": {
+  "line": 7,
+  "label": "7.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L07_v2_06_cloud_shadows__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": 0.6,
+  "why": [],
+  "finished_secs": 6.2,
+  "others": [
+   "7.2"
+  ]
+ },
+ "v2_07_sinai_camp": {
+  "line": 8,
+  "label": "8.2",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L08_v2_07_sinai_camp__t2.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -0.3,
+  "why": [],
+  "finished_secs": 6.25,
+  "others": [
+   "8.1"
+  ]
+ },
+ "v2_08_ambush": {
+  "line": 9,
+  "label": "9.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L09_v2_08_ambush__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -3.8,
+  "why": [],
+  "finished_secs": 7.51,
+  "others": [
+   "9.2"
+  ]
+ },
+ "v2_09_convoy": {
+  "line": 10,
+  "label": "10.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L10_v2_09_convoy__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -0.5,
+  "why": [],
+  "finished_secs": 4.5,
+  "others": [
+   "10.2"
+  ]
+ },
+ "v2_10_checkpoint": {
+  "line": 11,
+  "label": "11.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L11_v2_10_checkpoint__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -1.2,
+  "why": [],
+  "finished_secs": 4.2,
+  "others": [
+   "11.2"
+  ]
+ },
+ "v2_11_town_patrol": {
+  "line": 12,
+  "label": "12.2",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L12_v2_11_town_patrol__t2.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -0.6,
+  "why": [],
+  "finished_secs": 6.46,
+  "others": [
+   "12.1",
+   "12.3"
+  ]
+ },
+ "v2_12_rain_town": {
+  "line": 13,
+  "label": "13.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L13_v2_12_rain_town__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -0.1,
+  "why": [],
+  "finished_secs": 6.02,
+  "others": [
+   "13.2"
+  ]
+ },
+ "v2_13_supply_run": {
+  "line": 14,
+  "label": "14.2",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L14_v2_13_supply_run__t2.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -0.3,
+  "why": [],
+  "finished_secs": 6.21,
+  "others": [
+   "14.1"
+  ]
+ },
+ "v2_14_firefight": {
+  "line": 15,
+  "label": "15.1",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L15_v2_14_firefight__t1.wav",
+  "wording": "main",
+  "how": "best",
+  "score": 0.3,
+  "why": [],
+  "finished_secs": 5.76,
+  "others": [
+   "15.2"
+  ]
+ },
+ "v2_99_outro": {
+  "line": 16,
+  "label": "16.2",
+  "wav": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vo_owner\\test\\run_plain\\session\\takes\\L16_v2_99_outro__t2.wav",
+  "wording": "main",
+  "how": "best",
+  "score": -5.5,
+  "why": [],
+  "finished_secs": 5.71,
+  "others": [
+   "16.1"
+  ]
+ }
+}

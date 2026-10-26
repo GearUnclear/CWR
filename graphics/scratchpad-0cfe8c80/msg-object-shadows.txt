@@ -1,0 +1,41 @@
+graphics: trees and buildings cast sun shadows from the first frame
+
+Root cause: boot applies graphics.cfg (LoadAndApplyGraphicsConfig) before
+InitializeWorld builds the World and its Scene, and the whole scene half of
+ApplyGraphicsConfigToEngine sits behind if (GScene), so at boot it did
+nothing. A Scene starts with object shadows off and reads the legacy
+per-profile objectShadows / vehicleShadows / cloudlets keys, which ~Scene
+writes back, so every session that never opened the Graphics page saved
+objectShadows=0 and booted with it. Object::CastShadow and
+Building::CastShadow then return false and the shadow depth pass skips every
+static caster: trees, bushes and buildings cast nothing, and with no spawned
+unit in view the shadow map goes inactive (the "shadows vanish when facing
+the sun" report). Every capture run starts in a fresh user dir, so the
+captures so far had no tree or building shadows either.
+
+Fix: ApplyGraphicsConfigToEngine keeps a copy of the config it pushed
+(AppliedGraphicsConfig, null before the first push). Scene::LoadConfig,
+which runs at construction (boot, mod re-mount) and on a profile switch,
+ends by applying the draw-only tiers of that config through the new
+ApplyGraphicsShadowsToScene: object and vehicle shadows from the shadow
+tier, cloudlets from the particles tier. ApplyGraphicsConfigToScene (the
+live Graphics page path) sets the terrain grid and object LOD bias and then
+calls the same helper. The terrain grid stays out of the construction path
+because it subdivides the terrain heights that SurfaceY reads, so applying
+it at boot would move the physical ground of every session; the LOD bias
+stays out with it. graphics.cfg now wins over the legacy profile shadow and
+smoke keys, the rule the Graphics page already follows live. Apps that never
+apply a GraphicsConfig (server, Tetris) get null and keep the old behaviour.
+The triEnableShadows doc comment is brought up to date.
+
+Tests: new test_graphicsApply.cpp, tags [Settings][GraphicsApply][graphics]:
+a Scene built after the boot apply takes the shadow and smoke tiers but
+keeps its own terrain grid and LOD bias (measured from a reference Scene,
+with a REQUIRE that the config's values differ); shadow quality Off turns
+both shadow flags off; a profile switch keeps the Graphics options over the
+profile's legacy keys. All three fail on the previous code. [GraphicsApply],
+[remaster], [gpu], [GL33], [Settings] and the GL audit tags pass; [graphics]
+has one failure, test_dds_converter.cpp:347, which fails the same way
+without this change.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

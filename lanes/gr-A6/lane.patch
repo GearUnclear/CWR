@@ -1,0 +1,2357 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index efe812f1..9542d47e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -825,6 +825,11 @@ class Engine : public IGraphicsEngine
+     /// first 3D pass of a frame; Graphics/Remaster/FeatureGates.hpp). False
+     /// when this backend computes none.
+     virtual bool GetFeatureGates(remaster::FeatureGates& /*out*/) const { return false; }
++    /// True while the world's draws are lit from the frame's tiled light list
++    /// (the lightTiles feature, Graphics/Rendering/Lighting/FrameLights.hpp)
++    /// instead of each draw's own light list: a draw's list then lights
++    /// nothing, so the scene may draw lit objects in instanced runs.
++    virtual bool LocalLightsFromTiles() const { return false; }
+     /// Captures: hold the remastered cloud-shadow field at a drift offset in
+     /// metres (pinned = false lets it drift with the wind again from where it
+     /// is). The field integrates the wind every frame, so re-pinning the sim
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.cpp b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.cpp
+index daaf4976..d8cd9271 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.cpp
+@@ -22,7 +22,8 @@ constexpr Field kFieldList[] = {
+     {&FC::hillWedges, nullptr},  {nullptr, &FC::hillMs},       {nullptr, &FC::lodMs},
+     {nullptr, &FC::occlusionMs}, {&FC::litUploads, nullptr},   {&FC::litSkips, nullptr},
+     {&FC::litBytes, nullptr},    {&FC::vsUploads, nullptr},    {&FC::vsSkips, nullptr},
+-    {&FC::vsBytes, nullptr},
++    {&FC::vsBytes, nullptr},     {&FC::tileLights, nullptr},   {&FC::tileRefs, nullptr},
++    {nullptr, &FC::tileMs},
+ };
+ // The list holds every member (all are 4 bytes), and the header sized the sums
+ // for it.
+@@ -75,17 +76,18 @@ std::string Counters::Summary() const
+                 return _sum[i] / n;
+         return 0.0;
+     };
+-    char buf[512];
++    char buf[640];
+     std::snprintf(buf, sizeof(buf),
+                   "objs opaque=%.0f runs=%.0f runobj=%.0f litobj=%.0f lights=%.0f/%.0f | hill ran=%.2f idle=%.2f "
+                   "tested=%.0f hidden=%.0f kept=%.1f builds=%.2f wedges=%.0f hillcpu=%.3f | prep lod=%.3f occ=%.3f | "
+-                  "ubo lit=%.0f/%.0f litKB=%.1f vs=%.0f/%.0f vsKB=%.1f",
++                  "ubo lit=%.0f/%.0f litKB=%.1f vs=%.0f/%.0f vsKB=%.1f | tiles lights=%.1f refs=%.0f tilecpu=%.3f",
+                   avg(&FC::opaqueObjects), avg(&FC::runs), avg(&FC::runObjects), avg(&FC::litObjects),
+                   avg(&FC::lightSlots), avg(&FC::activeLights), avg(&FC::hillRan), avg(&FC::hillIdle),
+                   avg(&FC::hillTested), avg(&FC::hillHidden), avg(&FC::hillKept), avg(&FC::hillBuilds),
+                   avg(&FC::hillWedges), avgf(&FC::hillMs), avgf(&FC::lodMs), avgf(&FC::occlusionMs),
+                   avg(&FC::litUploads), avg(&FC::litSkips), avg(&FC::litBytes) / 1024.0, avg(&FC::vsUploads),
+-                  avg(&FC::vsSkips), avg(&FC::vsBytes) / 1024.0);
++                  avg(&FC::vsSkips), avg(&FC::vsBytes) / 1024.0, avg(&FC::tileLights), avg(&FC::tileRefs),
++                  avgf(&FC::tileMs));
+     return buf;
+ }
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.hpp
+index c23b1f78..733e2c04 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.hpp
+@@ -41,6 +41,11 @@ struct FrameCounters
+     int vsUploads = 0;
+     int vsSkips = 0;
+     int vsBytes = 0;
++    // The tiled light list (FrameLights.hpp, EngineGL33::UpdateLightTiles), on
++    // the frames that build one
++    int tileLights = 0;  // lights in the frame's list
++    int tileRefs = 0;    // tile entries: a light counts once per tile its reach covers
++    float tileMs = 0.0f; // CPU: gather, rank, bin and upload
+ };
+ 
+ class Counters
+@@ -58,12 +63,13 @@ class Counters
+     // Per-frame averages over the window, for triPerfStats:
+     // "objs opaque=<n> runs=<n> runobj=<n> litobj=<n> lights=<slots>/<on> | hill ran=<share> idle=<share>
+     //  tested=<n> hidden=<n> kept=<n> builds=<n> wedges=<n> hillcpu=<ms> | prep lod=<ms> occ=<ms> |
+-    //  ubo lit=<uploads>/<skips> litKB=<kB> vs=<uploads>/<skips> vsKB=<kB>"
++    //  ubo lit=<uploads>/<skips> litKB=<kB> vs=<uploads>/<skips> vsKB=<kB> | tiles lights=<n> refs=<n>
++    //  tilecpu=<ms>"
+     std::string Summary() const;
+ 
+     // One per FrameCounters member (PerfCounters.cpp lists them; a static_assert
+     // there keeps the count).
+-    static constexpr int kFields = 22;
++    static constexpr int kFields = 25;
+ 
+   private:
+     FrameCounters _frame;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 1bccde69..d6d2a3b8 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -23,8 +23,10 @@ constexpr FeatureInfo kFeatures[] = {
+      "pass1"},
+     {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", true, &FS::hillCull, "pass1"},
+     {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", false, &FS::taa, ""},
+-    {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", false,
+-     &FS::lightTiles, ""},
++    // A6: no pass of its own; the per-fragment light loop is part of the
++    // world pass's shading.
++    {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", true,
++     &FS::lightTiles, "world"},
+     {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", false,
+      &FS::atmosphere, ""},
+     {Feature::TreeShadows, "treeShadows", "Tree and building sun shadows", "shadows", "Light and shadow", "B1", false,
+@@ -140,8 +142,8 @@ struct KeyTable
+             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
+             MakeChoice("debug", "View", "Diagnostics",
+                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
+-                       "Linear depth (half res)\0",
+-                       &LT::debugView, 0, 5),
++                       "Linear depth (half res)\0Light tiles (lights per tile)\0",
++                       &LT::debugView, 0, 6),
+             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
+                        &LT::gates),
+         };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 8bf3413e..aec2152b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -122,7 +122,8 @@ struct LightingTuning
+     FeatureSet features;
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion, 5 the post pass's half-resolution
+-    // linear depth (PostStages.hpp kDebugViewLinearDepth).
++    // linear depth (PostStages.hpp kDebugViewLinearDepth), 6 the lights per
++    // tile of the tiled light list (FrameLights.hpp kDebugViewLightTiles).
+     int debugView = 0;
+ };
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index a23233bb..d6cfc1bf 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -261,6 +261,12 @@ step that lands a feature moves its row into `LitConst`, declares it in `LitCons
+ lower planned one (A5's `Taa` at 59 before B7's `MatClass` at 58) declares the lower ones as padding
+ members.
+ 
++As built in A6: slot 70 (`LightTiles`) is not used and its row left `LitConstPlanned`. The light list
++needs no tile counts (the tile texture is 2D and the shader finds its tile from `gl_FragCoord`) and
++no light count (each tile's list ends at a 0 index), so its two values, the tile size and the draw's
++night factor, ride in the free lanes `litLightCount.y` and `.z` of slot 22 (`LitConst::LightCount`,
++the local-light slot). `LitConst::Count` stays 58 and A6 adds no padding member next to A5's and A7's.
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -299,6 +305,18 @@ units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's (named `kPostUnits`
+ `GL33Bind` caches units 0 to 7 only (`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
+ for unit 6 belongs to the step that first samples it (A5 or B1).
+ 
++As built in A6: unit 13 is sampled (`lightTiles`, a `usampler2D` in RGBA8UI, not RGBA16UI: a light
++index plus one fits a byte with 64 lights, which halves the upload) and has its `kLitSamplers` row.
++Unit 12 stays free: the light data is a uniform block, `FrameLights` on binding point 4
++(`kLightListBinding`, `vec4 frameLights[256]`, 4 KB), not a texture buffer. A build that read the
++lights through `texelFetch` on a `samplerBuffer` took 1.6 ms more world time than the per-draw path
++at the 10-light town view (minimum of 3 interleaved rounds, 4060 Ti, another lane's game running);
++with the uniform block, which the fragments of a tile read alike, and the tile's texels read once,
++the same reading on a quiet machine is 0.5 ms (5 A6). No stand-ins: `InitLightingResources`
++creates the real block (zeroed) and a one-tile texture with no light, parks the texture on its unit,
++and `BindLightingTextures` binds it with the others. The unit-table test now counts integer samplers
++(`[iu]?sampler`).
++
+ ### 3.5 Shader sources: split by concern, test through the accessors
+ 
+ `EngineGL33_LightingShaders.cpp` (757 lines) and `EngineGL33_PostFX.cpp` (725 lines) are the two
+@@ -941,6 +959,70 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+   samplers compile under 3.30).
+ - **Effort**: 5 days.
+ 
++**Result (2026-10-18, uncommitted change on c584185 in the scratch copy `gr-A6`; evidence in
++`tmp/integration/A6/` of the graphics-remaster worktree, gitignored).**
++
++- Built as the bullets above with these corrections. `FrameLights` holds per light its kind, the
++  camera-relative position, the start distance (full strength inside it; the reach ends at 10 times
++  it, the classic model's window), the colours as authored, the unit beam direction, the sort
++  brightness, the owner's object id and a shadow slot; there is no separate range or linear radiance,
++  because every kind keeps the classic model at A6 (the display-space sum and its 1.0 clamp; moving
++  `Fire` and `Combat` to linear HDR changes their look, which is B4's to tune). The kind comes from a
++  new `Light::Kind`, set where lights are made: street lamps `Lamp`, camp fires `Fire`, weapon flashes,
++  explosions, burning wrecks, flares and missile motors `Combat`, any spotlight `Spot`. The owner and
++  the shadow slot stay on the CPU (no shader reads them before B3 and B4); owner exclusion and
++  `ParticleLight` are not written (B3 or B4, whichever lands first).
++- The source is the scene's active lights (`Scene::ActiveLights`: on, within the horizon range plus
++  500 m, the 16 strongest at the camera), ranked as `Light::Compare` ranks them, at most 64 in the
++  buffer. A light is binned by its reach, a sphere of 10 start distances, a spotlight too: the classic
++  budget below ranks a spotlight wherever it is in reach, inside its cone or not, so every tile in
++  reach must list it (a spotlight's cone has an enclosing sphere about half as large, centred
++  reach / (2 cos a) ahead of the lamp; B3, which gives headlights their own model, can bin them by it).
++  The screen box comes from the tangent planes per axis (the exact box of the projected sphere), a
++  reach outside one of the four frustum side planes is skipped, and one that crosses the eye plane
++  covers the viewport. The tiles (32 px) cover the whole frame target from pixel (0, 0), so a fragment
++  finds its tile from `gl_FragCoord` alone and the aspect pillarbox needs nothing; 16 entries per tile,
++  not 8: the active list holds up to 16 lights, so no tile drops one today, and 8 would cut a lamp at a
++  tile edge. With the classic model's reach (street lamps start at 50 m, so they reach 500 m;
++  headlights 1.1 km) every light of the Saint Louis views covers every tile: the tiles cull nothing
++  there, and will once B3's lamps have a physical reach.
++- The classic budget is kept, per fragment. The first build shaded every light of the tile; at the
++  Saint Louis lamps view (10 lights) walls and crowns came out 16 levels brighter on average over 24%
++  of the frame, from the lamps' ambient term, which the per-object cap of 7 (`Scene::SelectLights`)
++  had limited; the ground was already at the clamp. A budget by contribution (the 7 that add the most)
++  changed nothing there, and binning spotlights by their cone (so they rank only near their beam)
++  brought the brightening back: the classic cap is spent largely on near headlights that light little.
++  As built, the tiled path ranks the tile's lights by the classic rule (sort brightness over squared
++  distance) at the fragment, faded to 0 from half the squared reach to the reach (where no tile lists
++  a light it must not rank, or the budget would change at a tile edge), and keeps 7, the 7th and 8th
++  blending within 25% of the 7th's importance; `ClassicImportance` and `ClassicBudgetWeights` are the
++  C++ mirrors. The set follows the light across a surface instead of breaking at object edges.
++  `kClassicLightsPerSurface` is also the per-object cap in `Scene.cpp`.
++- GLSL: `localLight()` is the one model both paths call; the light data is a uniform block (3.4),
++  the tile indices an RGBA8UI texture on unit 13, read once per fragment; `litLightCount.y` is the
++  tile size while the tiles light the pass and `.z` the draw's night factor (1 for a material without
++  sun, as `UploadLitLights` gives it), so no slot 70 (3.3). In tile mode `UploadLitLights` sends only
++  slot 22, and Pass1 leaves `localLit` false (`Engine::LocalLightsFromTiles`), so lit objects join
++  instanced runs; with `drawGrouping=0` the pre-A4 rule stays. Debug view 6 draws the lights per tile
++  and the grid. `triPerfStats` gained `tiles lights= refs= tilecpu=`, and `make_pairs.py` its columns.
++- Pixels (1080p, scale 1.0, 4x MSAA; `gate5-off-vs-before.md`, `gate6-on-vs-off.md`): `lightTiles=0`
++  against the base build is pixel-identical at sunrise_ridge and within the base build's own off/on
++  repeat at the two lamp views (283 and 266 pixels over 2 levels against 279 and 290, the AI drivers'
++  heads); the hero `town_night` with its fire is not repeatable (313,257 against the base's own
++  322,330). On against off: 22,111 and 22,115 pixels over 2 levels at the lamp views (1% of the frame,
++  mean +4.8 levels where they differ): a tree crown beside a lamp and some far window frames, which
++  now rank the lamps nearest to each pixel rather than to the object's centre; nothing by day.
++- Cost (4060 Ti, 1080p, scale 1.0, 4x MSAA, the lamps view, where all 10 lights cover every tile; GPU
++  minimum over the 90-frame window): world pass +0.54 to 0.69 ms on (3.99 to 4.66, 4.12 to 4.66 and,
++  at a lower clock, 2.30 to 2.99 ms in three interleaved rounds while the B5 lane ran a game; Pass1
++  +0.41 to 0.53, ground +0.15 to 0.18). A quiet run of the build before the reach fade read +0.42 to
++  0.61 ms. CPU frame within 0.2 ms (medians 9.04, 9.18, 7.60 ms off; 9.24, 9.38, 7.59 on); the tile
++  build takes 0.03 ms. Draw calls 877 to 790 or 804 (10 instanced runs of 57 objects), LitConstants
++  bytes per frame 101.1 to 5.8 KB. By day the gate holds it off and sunrise_ridge draws the same frame.
++  Seen on the way, for A4: at this view `drawGrouping=0` gave a lower CPU frame than `drawGrouping=1`
++  on a quiet machine (median 7.4 to 8.0 ms against 9.2 to 10.2, `drw:obj` 3.5 to 3.9 against 5.0 to
++  5.4) and less world time (3.81 against 4.10 to 4.18 ms with the tiles off).
++
+ ### A7. Sky table and the remastered sky pass (atmosphere)
+ 
+ - **Prototype touched**: new `Graphics/Remaster/Atmosphere.{hpp,cpp}` (Hillaire / Bruneton
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+index 26fa96ca..177e17e7 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+@@ -329,6 +329,7 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
+         if (!_light)
+         {
+             _light = new LightPoint(HBlack, HBlack);
++            _light->SetKind(lighting::FrameLightKind::Combat);
+             GLOB_SCENE->AddLight(_light);
+         }
+     }
+@@ -1218,6 +1219,7 @@ void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
+             if (!_light)
+             {
+                 _light = new LightPoint(FireColor, FireAmbient);
++                _light->SetKind(lighting::FrameLightKind::Combat);
+                 GLOB_SCENE->AddLight(_light);
+             }
+             if (_light)
+@@ -1874,6 +1876,7 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
+         if (!_light)
+         {
+             _light = new LightPoint(HBlack, HBlack);
++            _light->SetKind(lighting::FrameLightKind::Combat);
+             GLOB_SCENE->AddLight(_light);
+         }
+         if (_light)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp
+new file mode 100644
+index 00000000..88647886
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp
+@@ -0,0 +1,266 @@
++#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::lighting
++{
++
++namespace
++{
++
++float Importance(const FrameLight& l)
++{
++    const float d2 = l.pos[0] * l.pos[0] + l.pos[1] * l.pos[1] + l.pos[2] * l.pos[2];
++    return l.sortBrightness / std::max(d2, 1e-6f);
++}
++
++// The view-space slopes (a / z) of the two tangents from the eye to the circle
++// of radius r around (a, z), for z > r: the reach's extent along one screen
++// axis.
++void TangentSlopes(float a, float z, float r, float& lo, float& hi)
++{
++    const float t = std::sqrt(std::max(a * a + z * z - r * r, 0.0f));
++    // Both denominators are positive for z > r: (zt)^2 - (ra)^2 = (z^2 - r^2)(a^2 + z^2).
++    lo = (a * t - r * z) / (z * t + r * a);
++    hi = (a * t + r * z) / (z * t - r * a);
++}
++
++} // namespace
++
++const char* FrameLightKindName(FrameLightKind kind)
++{
++    switch (kind)
++    {
++        case FrameLightKind::Classic:
++            return "classic";
++        case FrameLightKind::Lamp:
++            return "lamp";
++        case FrameLightKind::Spot:
++            return "spot";
++        case FrameLightKind::Fire:
++            return "fire";
++        case FrameLightKind::Combat:
++            return "combat";
++    }
++    return "unknown";
++}
++
++bool LightIsDark(const FrameLight& light)
++{
++    for (int i = 0; i < 3; ++i)
++    {
++        if (light.diffuse[i] > 0.0f || light.ambient[i] > 0.0f)
++            return false;
++    }
++    return true;
++}
++
++LightSphere LightBounds(const FrameLight& light)
++{
++    return LightSphere{{light.pos[0], light.pos[1], light.pos[2]}, kRangeFactor * std::fabs(light.start)};
++}
++
++void RankFrameLights(std::vector<FrameLight>& lights, int capacity)
++{
++    lights.erase(std::remove_if(lights.begin(), lights.end(), LightIsDark), lights.end());
++    std::stable_sort(lights.begin(), lights.end(),
++                     [](const FrameLight& a, const FrameLight& b) { return Importance(a) > Importance(b); });
++    if (capacity >= 0 && static_cast<int>(lights.size()) > capacity)
++        lights.resize(static_cast<size_t>(capacity));
++}
++
++void ResizeTileGrid(TileGrid& grid, int targetW, int targetH, int tileSize)
++{
++    grid.tileSize = tileSize > 0 ? tileSize : kTileSize;
++    grid.tilesX = targetW > 0 ? (targetW + grid.tileSize - 1) / grid.tileSize : 0;
++    grid.tilesY = targetH > 0 ? (targetH + grid.tileSize - 1) / grid.tileSize : 0;
++    grid.indices.assign(static_cast<size_t>(grid.tilesX) * grid.tilesY * kMaxLightsPerTile, 0);
++    grid.refs = 0;
++    grid.dropped = 0;
++    grid.litTiles = 0;
++}
++
++bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4])
++{
++    const float vx0 = view.viewport[0], vy0 = view.viewport[1];
++    const float vw = view.viewport[2], vh = view.viewport[3];
++    if (vw <= 0.0f || vh <= 0.0f)
++        return false;
++    const LightSphere s = LightBounds(light);
++    float v[3];
++    for (int r = 0; r < 3; ++r)
++        v[r] = view.rot[r][0] * s.c[0] + view.rot[r][1] * s.c[1] + view.rot[r][2] * s.c[2];
++    const float r = s.r;
++    // Behind the eye, or wholly outside one side of the view frustum (the four
++    // side planes pass through the eye: |x| = z / p11, |y| = z / p22).
++    if (v[2] + r <= 0.0f)
++        return false;
++    const float ix = 1.0f / std::fabs(view.p11), iy = 1.0f / std::fabs(view.p22);
++    const float nx = std::sqrt(1.0f + ix * ix), ny = std::sqrt(1.0f + iy * iy);
++    if ((v[0] - v[2] * ix) / nx >= r || (-v[0] - v[2] * ix) / nx >= r || (v[1] - v[2] * iy) / ny >= r ||
++        (-v[1] - v[2] * iy) / ny >= r)
++        return false;
++
++    float x0 = vx0, x1 = vx0 + vw, y0 = vy0, y1 = vy0 + vh;
++    if (v[2] - r >= view.nearZ)
++    {
++        float lo, hi;
++        TangentSlopes(v[0], v[2], r, lo, hi);
++        float a = view.p11 * lo, b = view.p11 * hi;
++        x0 = vx0 + (std::min(a, b) * 0.5f + 0.5f) * vw;
++        x1 = vx0 + (std::max(a, b) * 0.5f + 0.5f) * vw;
++        TangentSlopes(v[1], v[2], r, lo, hi);
++        a = view.p22 * lo;
++        b = view.p22 * hi;
++        y0 = vy0 + (std::min(a, b) * 0.5f + 0.5f) * vh;
++        y1 = vy0 + (std::max(a, b) * 0.5f + 0.5f) * vh;
++        // One pixel of slack for the GPU's rounding of the same projection.
++        x0 -= 1.0f;
++        y0 -= 1.0f;
++        x1 += 1.0f;
++        y1 += 1.0f;
++    }
++    // Clip to the viewport's pixels (inclusive bounds).
++    x0 = std::max(x0, vx0);
++    y0 = std::max(y0, vy0);
++    x1 = std::min(x1, vx0 + vw - 1.0f);
++    y1 = std::min(y1, vy0 + vh - 1.0f);
++    if (x1 < x0 || y1 < y0)
++        return false;
++    rect[0] = x0;
++    rect[1] = y0;
++    rect[2] = x1;
++    rect[3] = y1;
++    return true;
++}
++
++void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid)
++{
++    std::fill(grid.indices.begin(), grid.indices.end(), std::uint8_t{0});
++    grid.refs = 0;
++    grid.dropped = 0;
++    grid.litTiles = 0;
++    if (grid.tilesX <= 0 || grid.tilesY <= 0)
++        return;
++    const int n = std::min(static_cast<int>(lights.size()), kMaxFrameLights);
++    const float ts = static_cast<float>(grid.tileSize);
++    for (int i = 0; i < n; ++i)
++    {
++        float rect[4];
++        if (!LightScreenRect(lights[static_cast<size_t>(i)], view, rect))
++            continue;
++        const int tx0 = std::clamp(static_cast<int>(std::floor(rect[0] / ts)), 0, grid.tilesX - 1);
++        const int ty0 = std::clamp(static_cast<int>(std::floor(rect[1] / ts)), 0, grid.tilesY - 1);
++        const int tx1 = std::clamp(static_cast<int>(std::floor(rect[2] / ts)), 0, grid.tilesX - 1);
++        const int ty1 = std::clamp(static_cast<int>(std::floor(rect[3] / ts)), 0, grid.tilesY - 1);
++        for (int ty = ty0; ty <= ty1; ++ty)
++        {
++            for (int tx = tx0; tx <= tx1; ++tx)
++            {
++                std::uint8_t* tile =
++                    grid.indices.data() + (static_cast<size_t>(ty) * grid.tilesX + tx) * kMaxLightsPerTile;
++                int k = 0;
++                while (k < kMaxLightsPerTile && tile[k] != 0)
++                    ++k;
++                if (k == kMaxLightsPerTile)
++                {
++                    ++grid.dropped;
++                    continue;
++                }
++                if (k == 0)
++                    ++grid.litTiles;
++                tile[k] = static_cast<std::uint8_t>(i + 1);
++                ++grid.refs;
++            }
++        }
++    }
++}
++
++int TileLightsAt(const TileGrid& grid, int px, int py, int out[kMaxLightsPerTile])
++{
++    if (px < 0 || py < 0 || grid.tileSize <= 0)
++        return 0;
++    const int tx = px / grid.tileSize, ty = py / grid.tileSize;
++    if (tx >= grid.tilesX || ty >= grid.tilesY)
++        return 0;
++    const std::uint8_t* tile = grid.indices.data() + (static_cast<size_t>(ty) * grid.tilesX + tx) * kMaxLightsPerTile;
++    int n = 0;
++    while (n < kMaxLightsPerTile && tile[n] != 0)
++    {
++        out[n] = tile[n] - 1;
++        ++n;
++    }
++    return n;
++}
++
++void PackFrameLights(const std::vector<FrameLight>& lights, std::vector<float>& texels)
++{
++    texels.assign(lights.size() * kTexelsPerLight * 4, 0.0f);
++    float* t = texels.data();
++    for (const FrameLight& l : lights)
++    {
++        t[0] = l.pos[0];
++        t[1] = l.pos[1];
++        t[2] = l.pos[2];
++        t[3] = l.start;
++        t[4] = l.diffuse[0];
++        t[5] = l.diffuse[1];
++        t[6] = l.diffuse[2];
++        t[7] = l.IsSpot() ? 1.0f : 0.0f;
++        t[8] = l.ambient[0];
++        t[9] = l.ambient[1];
++        t[10] = l.ambient[2];
++        t[11] = l.sortBrightness;
++        t[12] = l.dir[0];
++        t[13] = l.dir[1];
++        t[14] = l.dir[2];
++        t[15] = static_cast<float>(static_cast<int>(l.kind));
++        t += kTexelsPerLight * 4;
++    }
++}
++
++float ClassicImportance(const FrameLight& light, const float p[3])
++{
++    const LightSphere s = LightBounds(light);
++    float d2 = 0.0f, c2 = 0.0f;
++    for (int i = 0; i < 3; ++i)
++    {
++        d2 += (light.pos[i] - p[i]) * (light.pos[i] - p[i]);
++        c2 += (s.c[i] - p[i]) * (s.c[i] - p[i]);
++    }
++    const float r2 = s.r * s.r;
++    const float t = std::clamp((c2 - 0.5f * r2) / std::max(0.5f * r2, 1e-12f), 0.0f, 1.0f);
++    const float fade = 1.0f - t * t * (3.0f - 2.0f * t); // 1 - smoothstep(0.5 r2, r2, c2)
++    return fade * light.sortBrightness / std::max(d2, 1e-4f);
++}
++
++void ClassicBudgetWeights(const float* importance, int n, float* weight)
++{
++    const int budget = kClassicLightsPerSurface;
++    float edgeIn = 0.0f, edgeOut = 0.0f;
++    if (n > budget)
++    {
++        // The strongest budget + 1 kept sorted, as the shader keeps them in
++        // registers: the last two are the 7th and the 8th.
++        float top[kClassicLightsPerSurface + 1] = {};
++        for (int i = 0; i < n; ++i)
++        {
++            float v = importance[i];
++            for (float& t : top)
++            {
++                const float m = std::max(t, v);
++                v = std::min(t, v);
++                t = m;
++            }
++        }
++        edgeIn = top[budget - 1];
++        edgeOut = top[budget];
++    }
++    const float mid = 0.5f * (edgeIn + edgeOut);
++    const float band = std::max(edgeIn - edgeOut, kClassicBudgetSoftness * edgeIn);
++    for (int k = 0; k < n; ++k)
++        weight[k] = n > budget ? std::clamp(0.5f + (importance[k] - mid) / band, 0.0f, 1.0f) : 1.0f;
++}
++
++} // namespace Poseidon::lighting
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp
+new file mode 100644
+index 00000000..8ca1434e
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp
+@@ -0,0 +1,182 @@
++#pragma once
++
++#include <cstdint>
++#include <vector>
++
++// The frame's light list (INTEGRATION-PLAN.md section 5 A6, the lightTiles
++// switch): every local light the remastered shaders shade, in one block,
++// binned into screen tiles so a fragment loops over only the lights whose
++// reach covers its tile. One list for every surface: terrain, roads and
++// objects see the same lights, instead of the list each draw selected for
++// itself (Scene::SelectLights: up to 7 lights, ranked from the object's or the
++// terrain segment's centre, with a brightness cut at its bounding sphere).
++//
++// Pure: no GL, no engine state. The GL33 backend fills FrameLight records from
++// the scene's active lights once per frame, ranks them, bins them against the
++// frame's camera and uploads the packed data (EngineGL33_Lighting.cpp,
++// UpdateLightTiles); the shader side is localLightsTiled() in
++// EngineGL33_LightingShadersLights.cpp.
++//
++// Every kind is shaded with the classic local-light model today (full strength
++// inside the start distance, a quadratic falloff past it ending in a smooth
++// window at kRangeFactor times it, a smoothed spotlight cone, the sum taken in
++// display space and clamped at 1, as the per-draw path does). The kind travels
++// with each light so the steps that give a kind its own model (B3 lamps and
++// low beams, B4 fire and combat light) find it here.
++
++namespace Poseidon::lighting
++{
++
++enum class FrameLightKind : std::uint8_t
++{
++    Classic, // any other point light: vehicle marker and cargo lights, lightning, script lights
++    Lamp,    // a street lamp (StreetLamp)
++    Spot,    // a headlight (LightReflector)
++    Fire,    // a camp fire (Fireplace)
++    Combat,  // a muzzle flash, an explosion or burning wreck, a flare, a missile motor
++};
++
++const char* FrameLightKindName(FrameLightKind kind);
++
++// The classic local-light model the shaders apply (EngineGL33_LightingShadersLights.cpp
++// localLight; the test pins the shader's numbers to these).
++constexpr float kRangeFactor = 10.0f;     // the reach ends at this many start distances (end2 = 100 * start2)
++constexpr float kSpotOuterCos2 = 0.9415f; // squared cosine of the cone edge (about 14 deg): nothing outside
++constexpr float kSpotInnerCos2 = 0.9806f; // full strength inside this (about 8 deg)
++
++// The classic engine lights a surface with at most this many local lights:
++// the ones its own selection ranks strongest by sort brightness over the
++// squared distance (Scene::SelectLights, per object or terrain segment). The
++// tiled list keeps that budget, ranked at the fragment (ClassicBudgetWeights).
++// Without it a lamp-lit wall in a town took the ambient term of every lamp in
++// reach (a street lamp's start distance is 50 m, its reach 500 m) and went
++// pale and flat; Saint Louis at night has 10 lights on.
++constexpr int kClassicLightsPerSurface = 7;
++// Where the 7th and 8th strongest are within this share of the 7th's
++// importance of each other, they share a blend instead of a cut, so the set
++// changes smoothly across a surface.
++constexpr float kClassicBudgetSoftness = 0.25f;
++
++// Capacities. The GL buffer and texture are sized from these.
++constexpr int kMaxFrameLights = 64;   // lights in the frame's buffer; an index + 1 fits one byte
++constexpr int kTexelsPerLight = 4;    // vec4s (four floats) per light in the light block
++constexpr int kMaxLightsPerTile = 16; // light indices per tile
++constexpr int kIndicesPerTexel = 4;   // RGBA8UI tile texture: four indices per texel
++constexpr int kTileTexels = kMaxLightsPerTile / kIndicesPerTexel; // texels per tile, side by side in a row
++constexpr int kTileSize = 32;                                     // tile side in frame-target pixels
++static_assert(kMaxFrameLights <= 255, "a light index + 1 must fit the tile texture's byte");
++static_assert(kMaxLightsPerTile % kIndicesPerTexel == 0, "whole texels per tile");
++
++// LightingTuning::debugView value that shows the number of lights per tile over
++// the frame (shadeRemastered), with the tile grid.
++constexpr int kDebugViewLightTiles = 6;
++
++struct FrameLight
++{
++    FrameLightKind kind = FrameLightKind::Classic;
++    float pos[3] = {};                 // camera-relative world position (m), like the shaders' vWorldRel
++    float start = 1.0f;                // start distance (m): full strength inside it (LightDescription::startAtten)
++    float diffuse[3] = {};             // display-space colour the light adds at full strength
++    float ambient[3] = {};             // display-space colour it adds whatever the surface faces
++    float dir[3] = {0.0f, 0.0f, 1.0f}; // unit beam direction (spotlights)
++    float sortBrightness = 0.0f;       // Light::SortBrightness: the ranking weight (Light::Compare)
++    // The object the light is attached to (Object::ID, 0 = none), for the
++    // self-exclusion the night lamps need (B3). The shaders do not read it yet.
++    std::uint32_t owner = 0;
++    int shadowSlot = -1; // combat shadow mask channel (B4); -1 = none
++
++    bool IsSpot() const { return kind == FrameLightKind::Spot; }
++};
++
++// True when the light adds nothing (no diffuse and no ambient colour).
++bool LightIsDark(const FrameLight& light);
++
++// The sphere a light is binned by (camera-relative centre, radius in metres):
++// its reach, kRangeFactor start distances around it, for every kind. A
++// spotlight lights only the sector inside its cone edge, whose enclosing sphere
++// (centred reach / (2 cos a) ahead of the lamp, radius the same, a the cone
++// edge's angle) is about half as large; but the classic budget ranks a
++// spotlight wherever it is in reach, cone or not (as Scene::SelectLights does),
++// so every tile in reach must list it. The step that lifts the budget for
++// headlights (B3) can bin them by the cone.
++struct LightSphere
++{
++    float c[3];
++    float r;
++};
++LightSphere LightBounds(const FrameLight& light);
++
++// Ranks the lights as Light::Compare ranks the scene's active lights: by sort
++// brightness over the squared distance from the camera, strongest first
++// (stable for ties). Drops lights that add nothing and keeps at most
++// `capacity`.
++void RankFrameLights(std::vector<FrameLight>& lights, int capacity = kMaxFrameLights);
++
++// The camera and the screen the tiles cover.
++struct TileView
++{
++    // Camera-relative world to view space, as rows: view x right, y up, z
++    // forward (the camera's InverseScaled rotation).
++    float rot[3][3] = {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
++    float p11 = 1.0f, p22 = 1.0f; // projection: ndc.x = p11 * x / z, ndc.y = p22 * y / z
++    // The 3D viewport in frame-target pixels, lower-left origin: x, y, width,
++    // height (the aspect pillarbox may leave bars around it).
++    float viewport[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    // A reach that comes closer than this to the eye plane covers the whole
++    // viewport (its projection is unbounded or nearly so).
++    float nearZ = 0.05f;
++};
++
++// Tiles over the whole frame target from its pixel (0, 0), lower-left origin,
++// so a fragment finds its tile from gl_FragCoord alone.
++struct TileGrid
++{
++    int tileSize = kTileSize;
++    int tilesX = 0, tilesY = 0;
++    // kMaxLightsPerTile bytes per tile, tiles row by row from the bottom. A
++    // tile lists light index + 1 in rank order; 0 follows the last.
++    std::vector<std::uint8_t> indices;
++    int refs = 0;     // entries written
++    int dropped = 0;  // entries a full tile could not take
++    int litTiles = 0; // tiles with at least one light
++};
++
++// Sizes the grid for a frame target and clears it.
++void ResizeTileGrid(TileGrid& grid, int targetW, int targetH, int tileSize = kTileSize);
++
++// The light's reach on screen: the pixel rectangle x0, y0, x1, y1 (frame-target
++// pixels, lower-left origin, inclusive) that holds every pixel it can light,
++// clipped to the viewport. False when the reach is off screen.
++bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4]);
++
++// Bins the ranked lights into the grid (sized beforehand): every tile lists
++// the lights whose reach covers it, in rank order, up to kMaxLightsPerTile.
++void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid);
++
++// The lights listed in the tile that holds frame-target pixel (px, py): their
++// indices into the ranked list, in order. Returns how many.
++int TileLightsAt(const TileGrid& grid, int px, int py, int out[kMaxLightsPerTile]);
++
++// The light block's contents, kTexelsPerLight vec4s per light:
++//   0: xyz position (camera-relative), w start distance
++//   1: rgb diffuse, w 1 for a spotlight (the per-draw litLightColor layout)
++//   2: rgb ambient, w sort brightness (the classic budget's ranking)
++//   3: xyz beam direction, w kind
++void PackFrameLights(const std::vector<FrameLight>& lights, std::vector<float>& texels);
++
++// How strongly the classic budget ranks `light` at camera-relative point `p`,
++// as localLightsTiled computes it: sort brightness over squared distance
++// (Light::Compare), faded to 0 from half the squared radius of LightBounds'
++// sphere to its edge. Outside that sphere a tile does not list the light, so it
++// must not rank there either, or the budget would change at a tile edge.
++float ClassicImportance(const FrameLight& light, const float p[3]);
++
++// The classic budget at one fragment, as localLightsTiled applies it: the
++// weight (0..1) of each of `n` lights given their importance there (sort
++// brightness over squared distance). Up to kClassicLightsPerSurface lights all
++// weigh 1. Past it the strongest keep 1 and the rest 0, except that the 7th and
++// 8th strongest blend when they are within kClassicBudgetSoftness of the 7th's
++// importance; the weights change continuously with the importances.
++void ClassicBudgetWeights(const float* importance, int n, float* weight);
++
++} // namespace Poseidon::lighting
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp
+index 772f2716..cb9beffb 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include <Poseidon/Foundation/Math/Math3D.hpp>
+ #include <Poseidon/Core/Visual.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
+ #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+ 
+ 
+@@ -66,6 +67,13 @@ protected:
+ 	int Compare( const Light &with ) const;
+ 	bool operator < ( const Light &with ) const {return Compare(with)<0;}
+ 	bool operator > ( const Light &with ) const {return Compare(with)>0;}
++    // What the light is, for the frame's light list (FrameLights.hpp): set by
++    // the code that creates it. A spotlight is a Spot whatever this says.
++    lighting::FrameLightKind Kind() const { return _kind; }
++    void SetKind(lighting::FrameLightKind kind) { _kind = kind; }
++
++  protected:
++    lighting::FrameLightKind _kind = lighting::FrameLightKind::Classic;
+ };
+ 
+ // basic directional+ambient light
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+index 2ce7e967..1a25032d 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+@@ -1020,6 +1020,7 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
+                 {
+                     _light = new LightPointOnVehicle(GLOB_SCENE->Preloaded(SphereLight), _lightColor, Color(HBlack),
+                                                      this, Vector3(0, 0, -0.5));
++                    _light->SetKind(lighting::FrameLightKind::Combat);
+                     GLOB_SCENE->AddLight(_light);
+                 }
+                 if (_light)
+@@ -1316,6 +1317,7 @@ void IlluminatingShell::Simulate(float deltaT, SimulationImportance prec)
+     {
+         _light = new LightPointOnVehicle(GLOB_SCENE->Preloaded(SphereLight), _lightColor, Color(HBlack), this,
+                                          Vector3(0, 0, -0.5));
++        _light->SetKind(lighting::FrameLightKind::Combat);
+         _light->SetBrightness(2);
+         GLOB_SCENE->AddLight(_light);
+ 
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp b/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
+index 6a18d3e0..5374461b 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
+@@ -24,6 +24,7 @@ Fireplace::Fireplace(VehicleType* type) : VehicleWithAI(type)
+     _smoke.Load(cls >> "Smoke");
+ 
+     _light = new LightPointOnVehicle(this, VZero);
++    _light->SetKind(lighting::FrameLightKind::Fire);
+     _light->Switch(_burning);
+     _light->Load(cls >> "Light");
+     _lightColor = _light->GetDiffuse();
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp b/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
+index a640cd1a..88b7b08c 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
+@@ -17,7 +17,10 @@ namespace Poseidon::InstancedRun
+ // out of runs (Scene::NLights() != 0; Abel's street lamps hold slots by day
+ // too). With it on, the rule is per object: an object may head or join a run
+ // only when the light list its own draw would select is empty (localLit
+-// false), so the head's empty list is right for every member.
++// false), so the head's empty list is right for every member. While the
++// frame's tiled light list lights every draw (lightTiles,
++// Engine::LocalLightsFromTiles), no draw's own list is read and the caller
++// leaves localLit false for every object.
+ 
+ // What the grouping reads from one queued object.  POD; no engine dependencies.
+ struct RunEntry
+@@ -35,7 +38,8 @@ struct RunEntry
+     bool ownVertices;
+     // Scene::SelectLights for the object's own draw returns a light: its draw
+     // would be lit by a local light (a lamp, a headlight, a fire). False when
+-    // the scene has no light slot, or by day (SelectLights selects none then).
++    // the scene has no light slot, by day (SelectLights selects none then) and
++    // while the tiled light list lights every draw.
+     bool localLit = false;
+ };
+ 
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp b/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp
+index d7104fc6..df7912bd 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/ObjectClasses.cpp
+@@ -250,6 +250,7 @@ void StreetLamp::CreateLight(Matrix4Par pos)
+         {
+             Ref<LODShapeWithShadow> shape = GLOB_SCENE->Preloaded(HalfLight);
+             _light = new LightPointVisible(shape, Type()->_colorDiffuse, Type()->_colorAmbient);
++            _light->SetKind(lighting::FrameLightKind::Lamp);
+             _light->SetPosition(pos.FastTransform(_lightPos));
+             _light->SetBrightness(Type()->_brightness);
+             //_light->SetDirection(Vector3(0,-1,0),Vector3(0,0,1));
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+index d5b9a46a..24f24aa3 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+@@ -364,7 +364,8 @@ const LightList& Scene::SelectLights(Vector3Par pos, float radius, LightList& wo
+         LightContext context;
+         context.position = pos;
+         QSort(work.Data(), work.Size(), &context, CmpALight);
+-        const int maxLightsPerObject = 7;
++        // The remastered tiled light list keeps the same budget per fragment.
++        const int maxLightsPerObject = Poseidon::lighting::kClassicLightsPerSurface;
+         if (work.Size() > maxLightsPerObject)
+         {
+             work.Resize(maxLightsPerObject);
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 8d0e4f7c..bbe04eec 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -1775,10 +1775,12 @@ void Scene::DrawObjectsAndShadowsPass1()
+         // (InstancedRunRules.hpp). Local lights: with drawGrouping off, any
+         // light slot in the scene turns runs off for every object (Abel's
+         // street lamps hold slots by day too); with it on, an object is kept
+-        // out only when its own light list is not empty.
++        // out only when its own light list is not empty, unless the frame's
++        // tiled light list lights every draw (lightTiles): then no draw's own
++        // list matters and lit objects join runs too.
+         const bool noLocalLights = NLights() == 0;
+         const bool runsAllowed = noLocalLights || drawGrouping;
+-        Scene* lightsPerObject = drawGrouping && !noLocalLights ? this : nullptr;
++        Scene* lightsPerObject = drawGrouping && !noLocalLights && !GEngine->LocalLightsFromTiles() ? this : nullptr;
+         counters.lightSlots = NLights();
+         counters.activeLights = _aLights.Size();
+         for (int i = 0; i < _drawMergers.Size();)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 17acf5f5..5c681a6d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -35,6 +35,7 @@ enum PixelShaderSpecular
+ #include <glad/gl.h>
+ #include <SDL3/SDL.h>
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
+ #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+@@ -702,6 +703,7 @@ class EngineGL33 : public Engine
+         out = _featureGates;
+         return true;
+     }
++    bool LocalLightsFromTiles() const override { return _lightTilesActive; }
+     void RequestShaderReload() override { _shaderReloadPending = true; }
+     void MarkWorldOverlay() override
+     {
+@@ -795,8 +797,39 @@ class EngineGL33 : public Engine
+     void UpdateRemasterPrograms();
+     void UploadLitMaterial(const Poseidon::TLMaterial& mat);
+     void UploadLitShadowDelta();
++    // The draw's own light list into the per-draw light slots; while the tiled
++    // list lights the pass, only the draw's night factor (litLightCount.z).
+     void UploadLitLights(const LightList& lights, float nightEffect);
+     void SetLitOpaque(bool opaque);
++
++    // The frame's tiled light list (the lightTiles switch, plan section 5 A6;
++    // Graphics/Rendering/Lighting/FrameLights.hpp). Built once per frame at the
++    // world's first 3D pass when its gate is on: the scene's active lights,
++    // ranked, binned into kTileSize tiles over the frame target and uploaded to
++    // a uniform block of lights (kLightListBinding) and a tile index texture
++    // (kLightTileUnit).
++    struct LightTileState
++    {
++        std::vector<Poseidon::lighting::FrameLight> lights; // ranked
++        Poseidon::lighting::TileGrid grid;
++        std::vector<float> texels;                 // the buffer contents (PackFrameLights)
++        std::vector<float> uploadedTexels;         // what the buffer holds
++        std::vector<std::uint8_t> uploadedIndices; // what the tile texture holds
++        unsigned int dataBuf = 0;                  // uniform block (kLightListBinding), kMaxFrameLights lights
++        unsigned int tileTex = 0;                  // RGBA8UI, kTileTexels texels per tile
++        int texW = 0, texH = 0;                    // tile texture size
++        std::uint32_t frame = 0xffffffffu;         // frame counter of the last build
++    } _lightTiles;
++    // The remastered programs read the tiled list in the current world pass
++    // (litLightCount.y holds the tile size) instead of a draw's own lights:
++    // per-draw light uploads stop and the scene may draw lit objects in
++    // instanced runs (LocalLightsFromTiles). Decided at each world 3D pass from
++    // the frame's gate, cleared at EndWorldScene.
++    bool _lightTilesActive = false;
++    void InitLightTiles();
++    void DeinitLightTiles();
++    // Builds, bins and uploads the list (once per frame).
++    void UpdateLightTiles();
+     // Writes slots [first, first + count) of the CPU LitConstants block to its
+     // buffer and records them in the buffer's mirror: every upload of the
+     // block, whole or partial, goes through here (plan section 5 A4).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 22acd2a2..c9b69899 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -3,9 +3,11 @@
+ // The remastered program set (EngineGL33_LightingShaders.cpp) reads the light
+ // rig, the per-draw material and the local lights from the LitConstants block
+ // (binding 3), the shadow map through a comparison sampler on unit 2, the
+-// terrain horizon map on units 3 and 4 and the cloud noise on unit 5. Selection
+-// between the remastered and classic sets happens in DoSelectPixelShader via
+-// SelectProgram; Classic leaves every classic upload and program untouched.
++// terrain horizon map on units 3 and 4, the cloud noise on unit 5 and the
++// frame's tiled light list from the FrameLights block (binding 4) and its tile
++// indices on unit 13. Selection between the remastered and classic sets
++// happens in DoSelectPixelShader via SelectProgram; Classic leaves every
++// classic upload and program untouched.
+ 
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+@@ -18,11 +20,13 @@
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
++#include <chrono>
+ #include <cmath>
+ #include <cstring>
+ 
+ using namespace Poseidon::gl33lighting;
+ namespace rm = Poseidon::remaster;
++namespace fl = Poseidon::lighting;
+ 
+ namespace
+ {
+@@ -154,10 +158,199 @@ void EngineGL33::InitLightingResources()
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+ 
++    InitLightTiles();
++
+     // The map (if any) belongs to the landscape, not the context: re-upload it.
+     _terrainMapDirty = _terrainMap != nullptr;
+ }
+ 
++void EngineGL33::InitLightTiles()
++{
++    LightTileState& t = _lightTiles;
++    // The lights: a uniform block of kMaxFrameLights lights on its own binding
++    // point, zeroed, so a remastered program always meets a complete buffer.
++    const std::vector<float> none(static_cast<size_t>(fl::kMaxFrameLights) * fl::kTexelsPerLight * 4, 0.0f);
++    glGenBuffers(1, &t.dataBuf);
++    glBindBuffer(GL_UNIFORM_BUFFER, t.dataBuf);
++    glBufferData(GL_UNIFORM_BUFFER, static_cast<GLsizeiptr>(none.size() * sizeof(float)), none.data(), GL_DYNAMIC_DRAW);
++    glBindBufferBase(GL_UNIFORM_BUFFER, kLightListBinding, t.dataBuf);
++    // The tile indices: created on the upload unit, then parked on their own
++    // unit, one tile with no light until the first build sizes it for the frame
++    // target. Integer textures sample only with NEAREST filtering.
++    GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++    const std::uint8_t empty[fl::kTileTexels * 4] = {};
++    glGenTextures(1, &t.tileTex);
++    glBindTexture(GL_TEXTURE_2D, t.tileTex);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8UI, fl::kTileTexels, 1, 0, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, empty);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    GL33Bind::Invalidate();
++    t.texW = fl::kTileTexels;
++    t.texH = 1;
++    t.uploadedTexels.clear();
++    t.uploadedIndices.clear();
++    t.frame = 0xffffffffu;
++    GL33Bind::Tex2D(kLightTileUnit, t.tileTex);
++    GL33Bind::ActiveUnit(0);
++    _lightTilesActive = false;
++}
++
++void EngineGL33::DeinitLightTiles()
++{
++    LightTileState& t = _lightTiles;
++    if (t.tileTex)
++    {
++        GL33Bind::OnTexDeleted(t.tileTex);
++        glDeleteTextures(1, &t.tileTex);
++    }
++    t.tileTex = 0;
++    if (t.dataBuf)
++        glDeleteBuffers(1, &t.dataBuf);
++    t.dataBuf = 0;
++    t.texW = t.texH = 0;
++    t.uploadedTexels.clear();
++    t.uploadedIndices.clear();
++    t.frame = 0xffffffffu;
++    _lightTilesActive = false;
++}
++
++void EngineGL33::UpdateLightTiles()
++{
++    LightTileState& t = _lightTiles;
++    const std::uint32_t frame = GetFrameCounter();
++    if (t.frame == frame || !t.dataBuf || !t.tileTex)
++        return;
++    t.frame = frame;
++    const auto start = std::chrono::steady_clock::now();
++
++    // The scene's active lights (on, within the horizon range plus 500 m, the
++    // ENGINE_CONFIG.maxLights strongest at the camera): the set every draw's
++    // own list is chosen from. Positions camera-relative as in UploadLitLights;
++    // colours as authored, the draw's night factor scales them in the shader.
++    const float* camPos = _frameState.cameraPos;
++    t.lights.clear();
++    const LightList& active = GScene->ActiveLights();
++    for (int i = 0; i < active.Size(); i++)
++    {
++        Light* light = active[i];
++        if (!light)
++            continue;
++        LightDescription desc;
++        light->GetDescription(desc);
++        const bool spot = desc.type == LTSpotLight;
++        if (desc.type != LTPoint && !spot)
++            continue;
++        fl::FrameLight f;
++        f.kind = spot ? fl::FrameLightKind::Spot : light->Kind();
++        f.pos[0] = desc.pos.X() - camPos[0];
++        f.pos[1] = desc.pos.Y() - camPos[1];
++        f.pos[2] = desc.pos.Z() - camPos[2];
++        f.start = desc.startAtten;
++        Vector3 beam = desc.dir;
++        beam.Normalize();
++        f.dir[0] = beam.X();
++        f.dir[1] = beam.Y();
++        f.dir[2] = beam.Z();
++        f.diffuse[0] = desc.diffuse.R();
++        f.diffuse[1] = desc.diffuse.G();
++        f.diffuse[2] = desc.diffuse.B();
++        f.ambient[0] = desc.ambient.R();
++        f.ambient[1] = desc.ambient.G();
++        f.ambient[2] = desc.ambient.B();
++        f.sortBrightness = light->SortBrightness();
++        if (auto* attached = dynamic_cast<AttachedOnVehicle*>(light))
++        {
++            if (const Object* owner = attached->AttachedOn())
++                f.owner = static_cast<std::uint32_t>(owner->ID());
++        }
++        t.lights.push_back(f);
++    }
++    fl::RankFrameLights(t.lights);
++
++    // The camera as the world pass draws it: the view rotation of
++    // BuildFrameState, the projection's scale and the 3D viewport of
++    // ApplyWorldViewport, over the whole frame target.
++    fl::TileView view;
++    if (Camera* camera = GScene->GetCamera())
++    {
++        const Matrix4& toView = camera->InverseScaled();
++        const Vector3 axes[3] = {Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)};
++        for (int c = 0; c < 3; ++c)
++        {
++            const Vector3 col = toView.Rotate(axes[c]);
++            view.rot[0][c] = col.X();
++            view.rot[1][c] = col.Y();
++            view.rot[2][c] = col.Z();
++        }
++    }
++    view.p11 = _frameState.projection._11;
++    view.p22 = _frameState.projection._22;
++    int targetW = 0, targetH = 0;
++    RenderTargetSize(targetW, targetH);
++    const Poseidon::AspectSettings& a = _aspectSettings;
++    const bool full = a.worldLeft <= 0.0f && a.worldTop <= 0.0f && a.worldRight >= 1.0f && a.worldBottom >= 1.0f;
++    int x0 = 0, x1 = targetW, yTop = 0, yBottom = targetH;
++    if (!full)
++    {
++        x0 = static_cast<int>(a.worldLeft * targetW + 0.5f);
++        yTop = static_cast<int>(a.worldTop * targetH + 0.5f);
++        x1 = static_cast<int>(a.worldRight * targetW + 0.5f);
++        yBottom = static_cast<int>(a.worldBottom * targetH + 0.5f);
++    }
++    view.viewport[0] = static_cast<float>(x0);
++    view.viewport[1] = static_cast<float>(targetH - yBottom);
++    view.viewport[2] = static_cast<float>(x1 - x0);
++    view.viewport[3] = static_cast<float>(yBottom - yTop);
++
++    const int tilesX = (targetW + fl::kTileSize - 1) / fl::kTileSize;
++    const int tilesY = (targetH + fl::kTileSize - 1) / fl::kTileSize;
++    if (t.grid.tilesX != tilesX || t.grid.tilesY != tilesY)
++        fl::ResizeTileGrid(t.grid, targetW, targetH);
++    fl::BinLightsToTiles(t.lights, view, t.grid);
++    fl::PackFrameLights(t.lights, t.texels);
++
++    // Upload what changed since the last build (a still camera sends nothing).
++    if (t.texels != t.uploadedTexels && !t.texels.empty())
++    {
++        // The indexed binding stays; only the store's contents change.
++        glBindBuffer(GL_UNIFORM_BUFFER, t.dataBuf);
++        glBufferSubData(GL_UNIFORM_BUFFER, 0, static_cast<GLsizeiptr>(t.texels.size() * sizeof(float)),
++                        t.texels.data());
++        t.uploadedTexels = t.texels;
++    }
++    const int texW = t.grid.tilesX * fl::kTileTexels, texH = t.grid.tilesY;
++    if (texW > 0 && texH > 0 && (texW != t.texW || texH != t.texH || t.grid.indices != t.uploadedIndices))
++    {
++        // The upload unit, through the bind cache (it caches units 0 to 7).
++        GL33Bind::Tex2D(kUploadUnit - GL_TEXTURE0, t.tileTex);
++        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++        if (texW != t.texW || texH != t.texH)
++        {
++            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8UI, texW, texH, 0, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE,
++                         t.grid.indices.data());
++            t.texW = texW;
++            t.texH = texH;
++        }
++        else
++        {
++            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texW, texH, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE,
++                            t.grid.indices.data());
++        }
++        GL33Bind::ActiveUnit(0);
++        t.uploadedIndices = t.grid.indices;
++    }
++
++    Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Frame();
++    c.tileLights = static_cast<int>(t.lights.size());
++    c.tileRefs = t.grid.refs;
++    c.tileMs = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
++}
++
+ void EngineGL33::DeinitLightingResources()
+ {
+     DestroyGpuQueries();
+@@ -180,6 +373,7 @@ void EngineGL33::DeinitLightingResources()
+     delTex(_dummyHeightTex);
+     delTex(_post.whiteTex);
+     delTex(_post.blackTex);
++    DeinitLightTiles();
+     _post.unavailable = false;
+     if (_shadowCompareSampler)
+     {
+@@ -311,6 +505,9 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    // The tiled light list's indices (read only while litLightCount.y is set,
++    // complete either way).
++    GL33Bind::Tex2D(kLightTileUnit, _lightTiles.tileTex);
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -390,6 +587,8 @@ void EngineGL33::UploadLitFrameConstants()
+     if (!_remasterPrograms || !GScene)
+     {
+         UpdateFeatureGates(nullptr);
++        // Classic programs light each draw from its own list.
++        _lightTilesActive = false;
+         return;
+     }
+     if (_terrainMapDirty)
+@@ -423,6 +622,31 @@ void EngineGL33::UploadLitFrameConstants()
+     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+     UpdateFeatureGates(&rig);
+ 
++    // The tiled light list: built once per frame while its gate is on, and
++    // then read by every draw of the world's passes instead of the draw's own
++    // list. Off, the per-draw slots carry each draw's lights as before.
++    const bool wasTiled = _lightTilesActive;
++    _lightTilesActive =
++        _featureGates.computed && _featureGates.frame == GetFrameCounter() && _featureGates[rm::Feature::LightTiles].on;
++    if (_lightTilesActive)
++    {
++        UpdateLightTiles();
++        _lightTilesActive = _lightTiles.frame == GetFrameCounter();
++    }
++    // While the tiles light the draws the per-draw light slots go stale, and
++    // slot 22 is set here for the pass until each draw's material upload sets
++    // its own night factor: whenever the tiles are or were on, the next
++    // material upload must happen.
++    if (wasTiled || _lightTilesActive)
++        _materialSetSpec = -1;
++    float* lightCount = s_lit + LitConst::LightCount * 4;
++    lightCount[1] = _lightTilesActive ? static_cast<float>(fl::kTileSize) : 0.0f;
++    if (_lightTilesActive)
++    {
++        lightCount[0] = 0.0f;
++        lightCount[2] = sun->NightEffect();
++    }
++
+     SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
+     SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
+     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, rig.exposure);
+@@ -506,8 +730,11 @@ void EngineGL33::UploadLitFrameConstants()
+     // The shadow map was rendered from where the camera was then.
+     SetSlot(LitConst::ShadowDelta, cam.X() - _shadowCamPos[0], cam.Y() - _shadowCamPos[1], cam.Z() - _shadowCamPos[2],
+             kShadowFilterTexels * _lighting.shadowSoftness);
++    // Debug views of the forward shaders: 1 to 3 (shadeRemastered) and the
++    // lights per tile (6); 4 and 5 are the post pass's.
++    const int dv = _lighting.debugView;
+     const float debug =
+-        _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
++        (dv >= 1 && dv <= 3) || dv == fl::kDebugViewLightTiles ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+     FlushLitConstants();
+     BindLightingTextures();
+@@ -558,6 +785,16 @@ void EngineGL33::UploadLitLights(const LightList& lights, float nightEffect)
+ {
+     if (!_lightingActive)
+         return;
++    if (_lightTilesActive)
++    {
++        // The frame's tiled list lights every fragment of the pass; the draw
++        // adds only the factor this path scales its lights by (the night
++        // effect, 1 for a material without sun, nothing by day).
++        SetSlot(LitConst::LightCount, 0.0f, static_cast<float>(fl::kTileSize), nightEffect > 0.0f ? nightEffect : 0.0f,
++                0.0f);
++        FlushLitConstants();
++        return;
++    }
+     // Same selection as the classic UploadVSLights, but the colours are the raw
+     // light colours (the shader multiplies by the material) and positions are
+     // camera-relative like vWorldRel.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 61e6cdad..fa849167 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -67,6 +67,9 @@ const char* PostShaderSource(PostShader shader);
+ 
+ // Uniform-buffer binding point of LitConstants (VS = 0, PS = 1, WorldInstances = 2).
+ constexpr unsigned int kLitBinding = 3;
++// Uniform-buffer binding point of FrameLights, the frame's tiled light list
++// (EngineGL33_LightingShadersLights.cpp, Graphics/Rendering/Lighting/FrameLights.hpp).
++constexpr unsigned int kLightListBinding = 4;
+ 
+ // Texture units of the remastered inputs (INTEGRATION-PLAN.md section 3.4).
+ // Units 0 and 1 hold the material textures and 7 is the upload unit
+@@ -76,14 +79,16 @@ constexpr int kShadowMapUnit = 2; // cascade array; a complete depth array from
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI (light list)
+ // Allocated to the features still to land; no shader samples them yet.
++// kLightDataUnit is free: the light list keeps its lights in a uniform block
++// (kLightListBinding), which the fragments of a tile read faster.
++constexpr int kLightDataUnit = 12;
+ constexpr int kShadowRawUnit = 6;     // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
+ constexpr int kSkyLutUnit = 8;        // sky-view table (sky table)
+ constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
+ constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
+ constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
+-constexpr int kLightDataUnit = 12;    // light buffer, samplerBuffer (light list)
+-constexpr int kLightTileUnit = 13;    // per-tile light indices (light list)
+ constexpr int kCombatMaskUnit = 14;   // combat shadow mask (combat)
+ constexpr int kCanopyVisUnit = 15;    // canopy sun visibility (hfrt)
+ 
+@@ -146,10 +151,8 @@ struct LitSampler
+     int unit;
+ };
+ constexpr LitSampler kLitSamplers[] = {
+-    {"shadowMap", kShadowMapUnit},
+-    {"terrainHorizon", kTerrainHorizonUnit},
+-    {"terrainHeight", kTerrainHeightUnit},
+-    {"cloudNoise", kCloudNoiseUnit},
++    {"shadowMap", kShadowMapUnit},   {"terrainHorizon", kTerrainHorizonUnit}, {"terrainHeight", kTerrainHeightUnit},
++    {"cloudNoise", kCloudNoiseUnit}, {"lightTiles", kLightTileUnit},
+ };
+ 
+ // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
+@@ -218,7 +221,8 @@ constexpr int AtmoCloudAmb = 66; // sky table: sky light on the clouds (linear)
+ constexpr int AtmoDome = 67;     // sky table: classic dome light (linear), hue blend
+ constexpr int Sky = 68;          // clouds: sky mode, lit-cloud strength, shadow source
+ constexpr int SkyVp = 69;        // clouds: viewport origin and 1 / size (pixels)
+-constexpr int LightTiles = 70;   // light list: tile size, tile counts, light count
++// 70 is free: the light list (A6) needs only a tile size and a night factor,
++// which ride in litLightCount.yz (LitConst::LightCount).
+ constexpr int Night = 71;        // night: flags, beam profile, moon key
+ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index a54d9c1a..83ea3b4c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -20,7 +20,8 @@
+ //     instead of noise from scattered leaf cards;
+ //   - fog toward the sun takes the sky dome's sun glow, so distant ground
+ //     fades into the sky colour behind it;
+-//   - local lights (headlights, lamps, fires) are evaluated per fragment;
++//   - local lights (headlights, lamps, fires) are evaluated per fragment,
++//     from the frame's tiled light list while it is on (lightTiles);
+ //   - glossy materials get normalised Blinn-Phong with a Fresnel boost and a
+ //     sky reflection.
+ // Fog, the night-eye desaturation, alpha test / alpha-to-coverage, the IsColored
+@@ -289,7 +290,7 @@ layout(std140) uniform LitConstants {
+     vec4 litCloudOffset;  // 19: xy drift (m), z deck altitude (m), w edge softness
+     vec4 litShadowDelta;  // 20: xyz camera move since the shadow pass, w filter radius (texels)
+     vec4 litFlags;        // 21: x AO share to alpha, y world effects on, z debug view, w saturation
+-    vec4 litLightCount;   // 22: x active local lights
++    vec4 litLightCount;   // 22: x the draw's lights, y tile size of the tiled list (0 = off), z its night factor
+     vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun
+     vec4 litFogSun;       // 24: rgb sky-dome sun glow added to the fog (display), w enabled
+     vec4 litFogCap;       // 25: rgb fog colour limit (the sky texture colour)
+@@ -537,7 +538,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+     if (foliage) ambientShare *= 0.5;
+ 
+-    if (litFlags.z > 0.5) {
++    if (litFlags.z > 0.5 && litFlags.z < 3.5) {
+         // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
+         if (litFlags.z < 1.5) return vec3(sunVisibility);
+         if (litFlags.z < 2.5) return vec3(skyVisibility);
+@@ -545,7 +546,9 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     }
+     vec3 display = toDisplay(tonemapNeutral(radiance));
+     float grey = dot(display, kLuma);
+-    return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
++    display = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
++    // Debug view 6: the lights per tile of the tiled light list.
++    return litFlags.z > 5.5 ? lightTileView(display) : display;
+ }
+ )";
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+index 8f697ab8..13eca1a9 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+@@ -2,6 +2,15 @@
+ // prelude (FragmentPiece::Lights, joined by RemasterFragmentCommon() in
+ // EngineGL33_LightingShaders.cpp): headlights, lamps and fires per fragment.
+ // Further kinds of local light belong here.
++//
++// Two sources of lights, one model (localLight): the draw's own list in the
++// per-draw LitConstants slots (up to 8, the classic path and the lightTiles=0
++// fallback), or the frame's tiled light list (the lightTiles switch,
++// Graphics/Rendering/Lighting/FrameLights.hpp): a uniform block of lights and a
++// texture of light indices per 32-pixel screen tile, so every surface draws
++// from the same lights, those whose reach covers its tile, within the classic
++// budget of 7 per surface. litLightCount.y holds the tile size while the tiled
++// list lights the pass and is 0 otherwise.
+ 
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+@@ -9,34 +18,171 @@ namespace Poseidon::gl33lighting
+ {
+ 
+ const char kRemasterLightsGLSL[] = R"(
+-// Point lights and spotlights per fragment: the classic quadratic falloff past
+-// the start distance, ending in a smooth window instead of a hard cut at 10x
+-// the start distance, and a smoothed spotlight cone.
++// The frame's lights, kTexelsPerLight vec4 each (FrameLights.hpp
++// PackFrameLights), binding 4 (kLightListBinding). A uniform block, not a
++// buffer texture: the fragments of a tile read the same lights, and at a
++// 10-light town view the block cost less GPU time than texel fetches.
++layout(std140) uniform FrameLights {
++    vec4 frameLights[256]; // kMaxFrameLights * kTexelsPerLight
++};
++uniform usampler2D lightTiles; // unit 13: per tile kTileTexels texels of 4 light indices + 1, 0 after the last
++const int kTexelsPerLight = 4;
++const int kTileTexels = 4;
++const int kMaxTileLights = 16;
++// The classic engine's budget of local lights per surface (FrameLights.hpp
++// kClassicLightsPerSurface and ClassicBudgetWeights, its C++ mirror), kept per
++// fragment by the tiled list.
++const int kClassicBudget = 7;
++// A light's reach in start distances: the sphere the tiles bin it by
++// (FrameLights.hpp LightBounds).
++const float kReachFactor = 10.0;
++
++// One point light or spotlight at this fragment: the classic quadratic falloff
++// past the start distance, ending in a smooth window instead of a hard cut at
++// 10x the start distance, and a smoothed spotlight cone. pos: xyz
++// camera-relative, w start distance; color: rgb diffuse, w > 0.5 spotlight;
++// amb: rgb ambient; dir: the beam's unit direction.
++vec3 localLight(vec4 pos, vec4 color, vec3 amb, vec3 dir, vec3 n, vec3 kd, vec3 ka) {
++    vec3 toLight = pos.xyz - vWorldRel;
++    float d2 = dot(toLight, toLight);
++    float start2 = pos.w * pos.w;
++    float end2 = start2 * 100.0;
++    if (d2 >= end2) return vec3(0.0);
++    float cone = 1.0;
++    if (color.w > 0.5) {
++        float inside = -dot(toLight, dir);
++        if (inside <= 0.0) return vec3(0.0);
++        float cos2 = inside * inside / max(d2, 1e-6);
++        cone = smoothstep(0.9415, 0.9806, cos2); // 14 deg soft edge, full inside 8 deg
++        if (cone <= 0.0) return vec3(0.0);
++    }
++    float atten = (d2 > start2) ? start2 / d2 : 1.0;
++    atten *= 1.0 - smoothstep(0.5 * end2, end2, d2);
++    float cosFi = max(dot(toLight, n), 0.0) * inversesqrt(max(d2, 1e-6));
++    return (kd * color.rgb * cosFi + ka * amb) * (atten * cone);
++}
++
++// This fragment's tile list, its kTileTexels (4) texels read once
++// (loadTileList), and entry k of it: a light index + 1, 0 past the last.
++uvec4 g_tileIds0 = uvec4(0u), g_tileIds1 = uvec4(0u), g_tileIds2 = uvec4(0u), g_tileIds3 = uvec4(0u);
++
++int loadTileList() {
++    ivec2 tile = ivec2(gl_FragCoord.xy) / int(litLightCount.y);
++    int x = tile.x * kTileTexels;
++    g_tileIds0 = texelFetch(lightTiles, ivec2(x, tile.y), 0);
++    if (g_tileIds0.w == 0u) return int(g_tileIds0.x != 0u) + int(g_tileIds0.y != 0u) + int(g_tileIds0.z != 0u);
++    g_tileIds1 = texelFetch(lightTiles, ivec2(x + 1, tile.y), 0);
++    if (g_tileIds1.w == 0u) return 4 + int(g_tileIds1.x != 0u) + int(g_tileIds1.y != 0u) + int(g_tileIds1.z != 0u);
++    g_tileIds2 = texelFetch(lightTiles, ivec2(x + 2, tile.y), 0);
++    if (g_tileIds2.w == 0u) return 8 + int(g_tileIds2.x != 0u) + int(g_tileIds2.y != 0u) + int(g_tileIds2.z != 0u);
++    g_tileIds3 = texelFetch(lightTiles, ivec2(x + 3, tile.y), 0);
++    return 12 + int(g_tileIds3.x != 0u) + int(g_tileIds3.y != 0u) + int(g_tileIds3.z != 0u) + int(g_tileIds3.w != 0u);
++}
++
++int tileEntry(int k) {
++    uvec4 ids = k < 4 ? g_tileIds0 : (k < 8 ? g_tileIds1 : (k < 12 ? g_tileIds2 : g_tileIds3));
++    return int(ids[k & 3]);
++}
++
++// How strongly the classic selection ranks the light with index + 1 `id` at
++// this fragment: its sort brightness over the squared distance (Light::Compare),
++// faded to 0 toward the edge of its reach, the sphere the tiles bin it by
++// (FrameLights.hpp LightBounds and ClassicImportance): where a tile does not
++// list the light it must not rank either, or the budget would change at a tile
++// edge.
++float lightImportance(int id) {
++    int at = (id - 1) * kTexelsPerLight;
++    vec4 pos = frameLights[at];
++    vec3 toLight = pos.xyz - vWorldRel;
++    float d2 = dot(toLight, toLight);
++    float r2 = kReachFactor * kReachFactor * pos.w * pos.w;
++    float fade = 1.0 - smoothstep(0.5 * r2, r2, d2);
++    return fade * frameLights[at + 2].w / max(d2, 1e-4);
++}
++
++// The light with index + 1 `id` of the frame's buffer at this fragment.
++vec3 tiledLight(int id, vec3 n, vec3 kd, vec3 ka) {
++    int at = (id - 1) * kTexelsPerLight;
++    return localLight(frameLights[at], frameLights[at + 1], frameLights[at + 2].rgb, frameLights[at + 3].xyz, n, kd, ka);
++}
++
++// The frame's tiled list: the lights whose reach covers this fragment's tile
++// (an empty tile costs one fetch), within the classic budget. The classic
++// selection (Scene::SelectLights) ranks lights by their sort brightness over
++// the squared distance and keeps kClassicBudget of them per object; here the
++// ranking is taken at the fragment, and the 7th and 8th strongest share a
++// blend instead of a cut, so the set changes smoothly across a surface rather
++// than at object edges. The buffer holds the lights' own colours; the draw's
++// night factor (litLightCount.z, the factor the per-draw upload scales them
++// by) applies to the sum.
++vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
++    int count = loadTileList();
++    // The budget's edge: the importance of the 7th (edgeIn) and the 8th
++    // (edgeOut) strongest, from the eight strongest kept sorted in registers.
++    float edgeIn = 0.0;
++    float edgeOut = 0.0;
++    if (count > kClassicBudget) {
++        float t0 = 0.0, t1 = 0.0, t2 = 0.0, t3 = 0.0, t4 = 0.0, t5 = 0.0, t6 = 0.0, t7 = 0.0;
++        for (int k = 0; k < kMaxTileLights; ++k) {
++            if (k >= count) break;
++            float v = lightImportance(tileEntry(k));
++            float m;
++            m = max(t0, v); v = min(t0, v); t0 = m;
++            m = max(t1, v); v = min(t1, v); t1 = m;
++            m = max(t2, v); v = min(t2, v); t2 = m;
++            m = max(t3, v); v = min(t3, v); t3 = m;
++            m = max(t4, v); v = min(t4, v); t4 = m;
++            m = max(t5, v); v = min(t5, v); t5 = m;
++            m = max(t6, v); v = min(t6, v); t6 = m;
++            t7 = max(t7, v);
++        }
++        edgeIn = t6;
++        edgeOut = t7;
++    }
++    float mid = 0.5 * (edgeIn + edgeOut);
++    float band = max(edgeIn - edgeOut, 0.25 * edgeIn);
++    vec3 sum = vec3(0.0);
++    for (int k = 0; k < kMaxTileLights; ++k) {
++        if (k >= count) break;
++        int id = tileEntry(k);
++        float w = count > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : 1.0;
++        if (w > 0.0) sum += w * tiledLight(id, n, kd, ka);
++    }
++    return sum * litLightCount.z;
++}
++
++// Headlights, lamps and fires at this fragment (display space, before the
++// clamp and the linear conversion in shadeRemastered).
+ vec3 localLights(vec3 n, vec3 kd, vec3 ka) {
++    if (litLightCount.y > 0.5) return localLightsTiled(n, kd, ka);
+     vec3 sum = vec3(0.0);
+     int count = int(litLightCount.x);
+     for (int i = 0; i < 8; ++i) {
+         if (i >= count) break;
+-        vec3 toLight = litLightPos[i].xyz - vWorldRel;
+-        float d2 = dot(toLight, toLight);
+-        float start2 = litLightPos[i].w * litLightPos[i].w;
+-        float end2 = start2 * 100.0;
+-        if (d2 >= end2) continue;
+-        float cone = 1.0;
+-        if (litLightColor[i].w > 0.5) {
+-            float inside = -dot(toLight, litLightDir[i].xyz);
+-            if (inside <= 0.0) continue;
+-            float cos2 = inside * inside / max(d2, 1e-6);
+-            cone = smoothstep(0.9415, 0.9806, cos2); // 14 deg soft edge, full inside 8 deg
+-            if (cone <= 0.0) continue;
+-        }
+-        float atten = (d2 > start2) ? start2 / d2 : 1.0;
+-        atten *= 1.0 - smoothstep(0.5 * end2, end2, d2);
+-        float cosFi = max(dot(toLight, n), 0.0) * inversesqrt(max(d2, 1e-6));
+-        sum += (kd * litLightColor[i].rgb * cosFi + ka * litLightAmb[i].rgb) * (atten * cone);
++        sum += localLight(litLightPos[i], litLightColor[i], litLightAmb[i].rgb, litLightDir[i].xyz, n, kd, ka);
+     }
+     return sum;
+ }
++
++// Debug view 6 (FrameLights.hpp kDebugViewLightTiles): how many lights the
++// fragment's tile lists, blue for one to red for eight or more, over half of
++// the shaded colour, with the tile grid. Without the tiled list the frame
++// shows as it is.
++vec3 lightTileView(vec3 display) {
++    if (litLightCount.y < 0.5) return display;
++    int size = int(litLightCount.y);
++    ivec2 px = ivec2(gl_FragCoord.xy);
++    ivec2 tile = px / size;
++    int count = 0;
++    for (int t = 0; t < kTileTexels; ++t) {
++        uvec4 ids = texelFetch(lightTiles, ivec2(tile.x * kTileTexels + t, tile.y), 0);
++        count += int(ids.x != 0u) + int(ids.y != 0u) + int(ids.z != 0u) + int(ids.w != 0u);
++    }
++    vec3 heat = mix(vec3(0.0, 0.35, 1.0), vec3(1.0, 0.1, 0.0), clamp(float(count - 1) / 7.0, 0.0, 1.0));
++    vec3 c = count > 0 ? mix(display, heat, 0.5) : display;
++    ivec2 edge = px - tile * size;
++    return (edge.x == 0 || edge.y == 0) ? c * 0.6 : c;
++}
+ )";
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index 63b1202d..f544ec84 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -390,6 +390,9 @@ void EngineGL33::EndWorldScene()
+     _worldPassOpen = false;
+     _worldEffectsOn = false;
+     _worldSceneEnded = true;
++    // Passes after the world (portraits, 3D previews) light each draw from its
++    // own list.
++    _lightTilesActive = false;
+     UpdateRemasterPrograms();
+     if (_lightingActive)
+         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index f2557ded..6078d0dc 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1710,6 +1710,9 @@ void EngineGL33::InitPixelShaders()
+         GLuint litBlock = glGetUniformBlockIndex(prog, "LitConstants");
+         if (litBlock != GL_INVALID_INDEX)
+             glUniformBlockBinding(prog, litBlock, Poseidon::gl33lighting::kLitBinding);
++        GLuint lightBlock = glGetUniformBlockIndex(prog, "FrameLights");
++        if (lightBlock != GL_INVALID_INDEX)
++            glUniformBlockBinding(prog, lightBlock, Poseidon::gl33lighting::kLightListBinding);
+         // The lit samplers from the unit table, the shadow depth map of both
+         // sets (unit 2) among them.
+         for (const auto& ls : Poseidon::gl33lighting::kLitSamplers)
+diff --git a/arma_CWR/tests/rendering/captures/make_pairs.py b/arma_CWR/tests/rendering/captures/make_pairs.py
+index bcd415e2..0d4bc9c9 100644
+--- a/arma_CWR/tests/rendering/captures/make_pairs.py
++++ b/arma_CWR/tests/rendering/captures/make_pairs.py
+@@ -74,6 +74,10 @@ COUNTER_RES = {
+     "lod_ms": re.compile(r"\bprep lod=([\d.]+)"),
+     "lit_kb": re.compile(r"\blitKB=([\d.]+)"),
+     "vs_kb": re.compile(r"\bvsKB=([\d.]+)"),
++    # The tiled light list (A6 on): lights in the list, tile entries, CPU.
++    "tile_lights": re.compile(r"\btiles lights=([\d.]+)"),
++    "tile_refs": re.compile(r"\btiles lights=[\d.]+ refs=([\d.]+)"),
++    "tile_cpu_ms": re.compile(r"\btilecpu=([\d.]+)"),
+ }
+ PERF_RE = re.compile(r"\bfps=([\d.]+) frame=([\d.]+)/([\d.]+)/([\d.]+)")
+ CALLS_RE = re.compile(r"\bcalls=([\d.]+)")
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index b2ae4f04..43c111e1 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -168,6 +168,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_perf_counters.cpp
+     Graphics/test_ubo_mirror.cpp
+     Graphics/test_post_stages.cpp
++    Graphics/test_frame_lights.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index c273bfaf..8d1c610f 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -539,11 +539,14 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
+-TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after A4 has", "[remaster][FeatureSwitches]")
++TEST_CASE("Feature switches: the frame-cost switches and the light list have landed, nothing else has",
++          "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+-    // classic): triFeatureState no longer marks them inert, and the overlay
+-    // shows the opaque objects' GPU section for them.
++    // classic) and A6 the tiled light list: triFeatureState no longer marks
++    // them inert, and the overlay shows a GPU section for each (the opaque
++    // objects' for A4, the world pass for the light list, which has no pass of
++    // its own).
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -552,10 +555,11 @@ TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after
+         const FeatureInfo& info = GetFeatureInfo(static_cast<Feature>(i));
+         INFO(info.key);
+         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
+-        CHECK(info.landed == perf);
++        const bool lightList = info.id == Feature::LightTiles;
++        CHECK(info.landed == (perf || lightList));
+         if (info.landed)
+         {
+-            CHECK(std::string_view(info.step) == "A4");
++            CHECK(std::string_view(info.step) == (perf ? "A4" : "A6"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+     }
+@@ -565,7 +569,8 @@ TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after
+     INFO(s);
+     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
+     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+-    CHECK(s.find("landed=2/26") != std::string::npos);
++    CHECK(s.find(" lightTiles=1:off:no-local-light ") != std::string::npos);
++    CHECK(s.find("landed=3/26") != std::string::npos);
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp
+new file mode 100644
+index 00000000..5bb77568
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp
+@@ -0,0 +1,628 @@
++#include <catch2/catch_test_macros.hpp>
++#include <catch2/catch_approx.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <random>
++#include <set>
++#include <sstream>
++#include <string>
++#include <vector>
++
++// The frame's tiled light list (INTEGRATION-PLAN.md section 5 A6,
++// Graphics/Rendering/Lighting/FrameLights.hpp): binning must list every light
++// whose reach can touch a tile (a missed tile is a hard seam in a lamp's pool),
++// ranking keeps the lights strongest at the camera, a full tile keeps the
++// strongest, and the buffer and the shaders agree on the layout and the model.
++
++using namespace Poseidon::lighting;
++
++namespace
++{
++
++constexpr float kPi = 3.14159265f;
++
++struct Vec3
++{
++    float x, y, z;
++};
++
++Vec3 Cross(const Vec3& a, const Vec3& b)
++{
++    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
++}
++
++Vec3 Normalized(const Vec3& v)
++{
++    const float l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
++    return {v.x / l, v.y / l, v.z / l};
++}
++
++// A camera looking along heading h (0 = +z, clockwise toward +x) and pitch p
++// (degrees), a 1920x1080 target with the 3D viewport `vp` (x, y, w, h) and the
++// capture rig's horizontal field of view.
++TileView MakeView(float headingDeg, float pitchDeg, const float vp[4] = nullptr)
++{
++    const float h = headingDeg * kPi / 180.0f, p = pitchDeg * kPi / 180.0f;
++    const Vec3 f{std::sin(h) * std::cos(p), std::sin(p), std::cos(h) * std::cos(p)};
++    const Vec3 r = Normalized(Cross({0.0f, 1.0f, 0.0f}, f));
++    const Vec3 u = Cross(f, r);
++    TileView v;
++    const Vec3 rows[3] = {r, u, f};
++    for (int i = 0; i < 3; ++i)
++    {
++        v.rot[i][0] = rows[i].x;
++        v.rot[i][1] = rows[i].y;
++        v.rot[i][2] = rows[i].z;
++    }
++    v.p11 = 1.0f / std::tan(0.7f);
++    v.p22 = v.p11 * 1920.0f / 1080.0f;
++    const float full[4] = {0.0f, 0.0f, 1920.0f, 1080.0f};
++    for (int i = 0; i < 4; ++i)
++        v.viewport[i] = vp ? vp[i] : full[i];
++    return v;
++}
++
++// Where a camera-relative point lands: frame-target pixel, false when it is
++// behind the near distance or off the viewport.
++bool Project(const TileView& v, const Vec3& p, float& px, float& py)
++{
++    const float x = v.rot[0][0] * p.x + v.rot[0][1] * p.y + v.rot[0][2] * p.z;
++    const float y = v.rot[1][0] * p.x + v.rot[1][1] * p.y + v.rot[1][2] * p.z;
++    const float z = v.rot[2][0] * p.x + v.rot[2][1] * p.y + v.rot[2][2] * p.z;
++    if (z <= 0.1f)
++        return false;
++    px = v.viewport[0] + (v.p11 * x / z * 0.5f + 0.5f) * v.viewport[2];
++    py = v.viewport[1] + (v.p22 * y / z * 0.5f + 0.5f) * v.viewport[3];
++    return px >= v.viewport[0] && py >= v.viewport[1] && px < v.viewport[0] + v.viewport[2] &&
++           py < v.viewport[1] + v.viewport[3];
++}
++
++// Points the shaders light (localLight): inside the reach, and for a
++// spotlight in front of the lamp and inside the cone edge. Half of them on the
++// reach's boundary, where a missed tile would show first.
++std::vector<Vec3> LitPoints(const FrameLight& l, int n, std::mt19937& rng)
++{
++    std::uniform_real_distribution<float> u01(0.0f, 1.0f);
++    const float reach = kRangeFactor * l.start * 0.9995f;
++    std::vector<Vec3> out;
++    const Vec3 d = Normalized({l.dir[0], l.dir[1], l.dir[2]});
++    const Vec3 side = Normalized(std::fabs(d.y) < 0.9f ? Cross(d, {0.0f, 1.0f, 0.0f}) : Cross(d, {1.0f, 0.0f, 0.0f}));
++    const Vec3 up = Cross(side, d);
++    const float cosEdge = std::sqrt(kSpotOuterCos2) * 1.0005f;
++    for (int i = 0; i < n; ++i)
++    {
++        const float dist = (i % 2 == 0) ? reach : reach * std::cbrt(u01(rng));
++        Vec3 dir;
++        if (l.IsSpot())
++        {
++            const float c = (i % 4 < 2) ? cosEdge : cosEdge + (1.0f - cosEdge) * u01(rng);
++            const float s = std::sqrt(std::max(0.0f, 1.0f - c * c));
++            const float phi = 2.0f * kPi * u01(rng);
++            dir = {d.x * c + (side.x * std::cos(phi) + up.x * std::sin(phi)) * s,
++                   d.y * c + (side.y * std::cos(phi) + up.y * std::sin(phi)) * s,
++                   d.z * c + (side.z * std::cos(phi) + up.z * std::sin(phi)) * s};
++        }
++        else
++        {
++            const float z = 2.0f * u01(rng) - 1.0f;
++            const float s = std::sqrt(std::max(0.0f, 1.0f - z * z));
++            const float phi = 2.0f * kPi * u01(rng);
++            dir = {s * std::cos(phi), z, s * std::sin(phi)};
++        }
++        out.push_back({l.pos[0] + dir.x * dist, l.pos[1] + dir.y * dist, l.pos[2] + dir.z * dist});
++    }
++    return out;
++}
++
++bool TileLists(const TileGrid& g, int tx, int ty, int light)
++{
++    int ids[kMaxLightsPerTile];
++    const int n = TileLightsAt(g, tx * g.tileSize, ty * g.tileSize, ids);
++    return std::find(ids, ids + n, light) != ids + n;
++}
++
++FrameLight Point(float x, float y, float z, float start, float brightness = 1.0f)
++{
++    FrameLight l;
++    l.kind = FrameLightKind::Lamp;
++    l.pos[0] = x;
++    l.pos[1] = y;
++    l.pos[2] = z;
++    l.start = start;
++    l.diffuse[0] = l.diffuse[1] = l.diffuse[2] = 0.8f;
++    l.sortBrightness = brightness;
++    return l;
++}
++
++FrameLight Spot(float x, float y, float z, float start, const Vec3& dir)
++{
++    FrameLight l = Point(x, y, z, start);
++    l.kind = FrameLightKind::Spot;
++    const Vec3 d = Normalized(dir);
++    l.dir[0] = d.x;
++    l.dir[1] = d.y;
++    l.dir[2] = d.z;
++    return l;
++}
++
++std::string ReadTextFile(const std::filesystem::path& p)
++{
++    std::ifstream f(p);
++    std::stringstream ss;
++    ss << f.rdbuf();
++    return ss.str();
++}
++
++std::filesystem::path EngineDir()
++{
++    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine";
++}
++
++std::string FunctionBody(const std::string& source, const std::string& signature)
++{
++    const size_t start = source.find(signature);
++    if (start == std::string::npos)
++        return {};
++    const size_t end = source.find("\n}\n", start);
++    return source.substr(start, end == std::string::npos ? std::string::npos : end - start);
++}
++
++int CountOf(const std::string& haystack, const std::string& needle)
++{
++    int n = 0;
++    for (size_t at = haystack.find(needle); at != std::string::npos; at = haystack.find(needle, at + needle.size()))
++        ++n;
++    return n;
++}
++
++} // namespace
++
++TEST_CASE("Frame lights: every tile a light can reach lists it, and few others do", "[Graphics][remaster][FrameLights]")
++{
++    std::mt19937 rng(20261018);
++    std::uniform_real_distribution<float> pos(-120.0f, 120.0f);
++    std::uniform_real_distribution<float> height(-3.0f, 12.0f);
++    std::uniform_real_distribution<float> start(0.5f, 8.0f);
++    std::uniform_real_distribution<float> angle(0.0f, 360.0f);
++    std::uniform_real_distribution<float> pitch(-25.0f, 25.0f);
++    const float pillarbox[4] = {240.0f, 0.0f, 1440.0f, 1080.0f};
++    int checked = 0, fullScreen = 0, tight = 0;
++    for (int round = 0; round < 40; ++round)
++    {
++        const TileView view = MakeView(angle(rng), pitch(rng), round % 4 == 3 ? pillarbox : nullptr);
++        std::vector<FrameLight> lights;
++        for (int i = 0; i < 12; ++i)
++        {
++            const float a = angle(rng) * kPi / 180.0f;
++            const Vec3 beam{std::sin(a), -0.15f, std::cos(a)};
++            lights.push_back(i % 3 == 0 ? Spot(pos(rng), height(rng), pos(rng), start(rng), beam)
++                                        : Point(pos(rng), height(rng), pos(rng), start(rng)));
++        }
++        TileGrid grid;
++        ResizeTileGrid(grid, 1920, 1080);
++        BinLightsToTiles(lights, view, grid);
++        CHECK(grid.dropped == 0); // 12 lights never fill a 16-entry tile
++        for (int i = 0; i < static_cast<int>(lights.size()); ++i)
++        {
++            CAPTURE(round, i);
++            const FrameLight& l = lights[static_cast<size_t>(i)];
++            int minX = 1 << 30, minY = 1 << 30, maxX = -1, maxY = -1;
++            for (const Vec3& p : LitPoints(l, 3000, rng))
++            {
++                float px, py;
++                if (!Project(view, p, px, py))
++                    continue;
++                const int tx = static_cast<int>(px) / kTileSize, ty = static_cast<int>(py) / kTileSize;
++                CAPTURE(px, py);
++                REQUIRE(TileLists(grid, tx, ty, i));
++                minX = std::min(minX, tx);
++                maxX = std::max(maxX, tx);
++                minY = std::min(minY, ty);
++                maxY = std::max(maxY, ty);
++                ++checked;
++            }
++            // Tight for a point light well in front of the eye: its rectangle is
++            // the box around the projected sphere, so no listed tile lies more
++            // than a few tiles outside what the samples reach. (A spotlight is
++            // binned by its whole reach, which its cone fills only in part.)
++            float rect[4];
++            const LightSphere s = LightBounds(l);
++            const float z = view.rot[2][0] * s.c[0] + view.rot[2][1] * s.c[1] + view.rot[2][2] * s.c[2];
++            if (!LightScreenRect(l, view, rect))
++            {
++                CHECK(maxX < 0);
++                continue;
++            }
++            if (z - s.r < view.nearZ)
++            {
++                ++fullScreen;
++                continue;
++            }
++            // The box of a projected sphere that crosses the viewport's edge
++            // keeps its full height (or width) there: skip those too.
++            const bool clipped = rect[0] <= view.viewport[0] || rect[1] <= view.viewport[1] ||
++                                 rect[2] >= view.viewport[0] + view.viewport[2] - 1.0f ||
++                                 rect[3] >= view.viewport[1] + view.viewport[3] - 1.0f;
++            if (maxX < 0 || l.IsSpot() || z < 2.0f * s.r || clipped)
++                continue;
++            ++tight;
++            const int slack = 3;
++            for (int ty = 0; ty < grid.tilesY; ++ty)
++                for (int tx = 0; tx < grid.tilesX; ++tx)
++                    if (TileLists(grid, tx, ty, i))
++                    {
++                        CAPTURE(tx, ty, minX, maxX, minY, maxY);
++                        CHECK(tx >= minX - slack);
++                        CHECK(tx <= maxX + slack);
++                        CHECK(ty >= minY - slack);
++                        CHECK(ty <= maxY + slack);
++                    }
++        }
++        // Nothing lands outside the viewport.
++        for (int ty = 0; ty < grid.tilesY; ++ty)
++            for (int tx = 0; tx < grid.tilesX; ++tx)
++            {
++                const bool outside =
++                    (tx + 1) * kTileSize <= view.viewport[0] || tx * kTileSize >= view.viewport[0] + view.viewport[2];
++                if (outside)
++                {
++                    int ids[kMaxLightsPerTile];
++                    CHECK(TileLightsAt(grid, tx * kTileSize, ty * kTileSize, ids) == 0);
++                }
++            }
++    }
++    CHECK(checked > 100000);
++    CHECK(fullScreen > 0); // some reaches cross the eye plane
++    CHECK(tight > 10);     // and the tightness was checked on enough of them
++    INFO("tight-checked lights: " << tight);
++}
++
++TEST_CASE("Frame lights: every kind is binned by its whole reach, a spotlight too", "[Graphics][remaster][FrameLights]")
++{
++    // The classic budget ranks a spotlight wherever it is in reach, inside its
++    // cone or not, so the tiles must list it over the whole sphere, not only
++    // over its cone (which would be about half as large).
++    std::mt19937 rng(7);
++    const FrameLight spot = Spot(3.0f, 1.0f, -2.0f, 20.0f, {0.3f, -0.1f, 1.0f});
++    const LightSphere s = LightBounds(spot);
++    CHECK(s.r == Catch::Approx(kRangeFactor * 20.0f));
++    CHECK(s.c[0] == 3.0f);
++    CHECK(s.c[1] == 1.0f);
++    CHECK(s.c[2] == -2.0f);
++    for (const Vec3& p : LitPoints(spot, 20000, rng))
++    {
++        const float dx = p.x - s.c[0], dy = p.y - s.c[1], dz = p.z - s.c[2];
++        REQUIRE(std::sqrt(dx * dx + dy * dy + dz * dz) <= s.r * 1.0001f);
++    }
++    // Pointing away from the eye 40 m ahead, its reach (100 m) holds the eye:
++    // listed over the whole viewport, so it ranks there as Scene::SelectLights
++    // would rank it, though it lights none of it.
++    const TileView view = MakeView(0.0f, 0.0f);
++    const FrameLight away = Spot(0.0f, 0.0f, 40.0f, 10.0f, {0.0f, 0.0f, 1.0f});
++    float rect[4];
++    REQUIRE(LightScreenRect(away, view, rect));
++    CHECK(rect[0] == 0.0f);
++    CHECK(rect[2] == 1919.0f);
++    const LightSphere ps = LightBounds(Point(1.0f, 2.0f, 3.0f, 5.0f));
++    CHECK(ps.r == Catch::Approx(50.0f));
++    CHECK(ps.c[0] == 1.0f);
++}
++
++TEST_CASE("Frame lights: ranking keeps the lights strongest at the camera", "[Graphics][remaster][FrameLights]")
++{
++    std::vector<FrameLight> lights;
++    lights.push_back(Point(0.0f, 0.0f, 100.0f, 5.0f, 1000.0f)); // 1000 / 10000 = 0.1
++    lights.push_back(Point(0.0f, 0.0f, 10.0f, 5.0f, 100.0f));   // 100 / 100 = 1
++    lights.push_back(Point(0.0f, 0.0f, 20.0f, 5.0f, 100.0f));   // 0.25
++    lights.push_back(Point(0.0f, 0.0f, 10.0f, 5.0f, 100.0f));   // 1, after the first of its kind
++    FrameLight dark = Point(0.0f, 0.0f, 1.0f, 5.0f, 1e6f);
++    dark.diffuse[0] = dark.diffuse[1] = dark.diffuse[2] = 0.0f;
++    lights.push_back(dark); // strongest weight, but adds nothing
++    lights[3].owner = 42;
++    RankFrameLights(lights);
++    REQUIRE(lights.size() == 4);
++    CHECK(lights[0].pos[2] == 10.0f);
++    CHECK(lights[0].owner == 0);
++    CHECK(lights[1].owner == 42); // ties keep their order
++    CHECK(lights[2].pos[2] == 20.0f);
++    CHECK(lights[3].pos[2] == 100.0f);
++    // An ambient-only light still counts.
++    FrameLight glow = dark;
++    glow.ambient[1] = 0.1f;
++    CHECK_FALSE(LightIsDark(glow));
++    CHECK(LightIsDark(dark));
++
++    // Over capacity: the strongest stay.
++    std::vector<FrameLight> many;
++    for (int i = 0; i < kMaxFrameLights + 10; ++i)
++        many.push_back(Point(0.0f, 0.0f, 5.0f + static_cast<float>(i), 1.0f, 50.0f));
++    std::reverse(many.begin(), many.end());
++    RankFrameLights(many);
++    REQUIRE(many.size() == static_cast<size_t>(kMaxFrameLights));
++    for (int i = 0; i < kMaxFrameLights; ++i)
++        CHECK(many[static_cast<size_t>(i)].pos[2] == 5.0f + static_cast<float>(i));
++}
++
++TEST_CASE("Frame lights: a full tile keeps the strongest lights, in rank order", "[Graphics][remaster][FrameLights]")
++{
++    const TileView view = MakeView(0.0f, 0.0f);
++    std::vector<FrameLight> lights;
++    for (int i = 0; i < 20; ++i)
++        lights.push_back(Point(static_cast<float>(i % 5) - 2.0f, 1.0f, 3.0f, 10.0f, 100.0f - static_cast<float>(i)));
++    TileGrid grid;
++    ResizeTileGrid(grid, 1920, 1080);
++    BinLightsToTiles(lights, view, grid);
++    // Every reach holds the eye: every tile of the viewport lists the first 16.
++    REQUIRE(grid.tilesX == 60);
++    REQUIRE(grid.tilesY == 34);
++    CHECK(grid.litTiles == 60 * 34);
++    CHECK(grid.refs == 60 * 34 * kMaxLightsPerTile);
++    CHECK(grid.dropped == 60 * 34 * (20 - kMaxLightsPerTile));
++    for (int py : {0, 540, 1079})
++        for (int px : {0, 960, 1919})
++        {
++            int ids[kMaxLightsPerTile];
++            REQUIRE(TileLightsAt(grid, px, py, ids) == kMaxLightsPerTile);
++            for (int k = 0; k < kMaxLightsPerTile; ++k)
++                CHECK(ids[k] == k);
++        }
++    // Past the grid there is nothing.
++    int ids[kMaxLightsPerTile];
++    CHECK(TileLightsAt(grid, 1920 + kTileSize * 2, 0, ids) == 0);
++    CHECK(TileLightsAt(grid, -1, 5, ids) == 0);
++}
++
++TEST_CASE("Frame lights: reaches behind the eye or beside the view are not binned", "[Graphics][remaster][FrameLights]")
++{
++    const TileView view = MakeView(0.0f, 0.0f); // looking along +z
++    float rect[4];
++    // 100 m behind, reach 30 m.
++    CHECK_FALSE(LightScreenRect(Point(0.0f, 0.0f, -100.0f, 3.0f), view, rect));
++    // Far to the side of the view (90 deg off axis), reach 30 m.
++    CHECK_FALSE(LightScreenRect(Point(200.0f, 0.0f, 10.0f, 3.0f), view, rect));
++    // A headlight 300 m behind the eye (reach 200 m), whichever way it points.
++    CHECK_FALSE(LightScreenRect(Spot(0.0f, 0.0f, -300.0f, 20.0f, {0.0f, 0.0f, 1.0f}), view, rect));
++    // Pointing into the view, it covers the screen around its beam.
++    REQUIRE(LightScreenRect(Spot(0.0f, -1.0f, -5.0f, 20.0f, {0.0f, -0.05f, 1.0f}), view, rect));
++    // A lamp straight ahead (reach 10 m at 100 m) covers a box around the
++    // screen centre.
++    REQUIRE(LightScreenRect(Point(0.0f, 0.0f, 100.0f, 1.0f), view, rect));
++    CHECK(rect[0] < 960.0f);
++    CHECK(rect[2] > 960.0f);
++    CHECK(rect[1] < 540.0f);
++    CHECK(rect[3] > 540.0f);
++    CHECK(rect[2] - rect[0] < 400.0f);
++    // A reach around the eye covers the whole viewport.
++    REQUIRE(LightScreenRect(Point(1.0f, 0.0f, 1.0f, 2.0f), view, rect));
++    CHECK(rect[0] == 0.0f);
++    CHECK(rect[1] == 0.0f);
++    CHECK(rect[2] == 1919.0f);
++    CHECK(rect[3] == 1079.0f);
++    // An empty viewport bins nothing.
++    TileView none = view;
++    none.viewport[2] = 0.0f;
++    CHECK_FALSE(LightScreenRect(Point(0.0f, 0.0f, 10.0f, 2.0f), none, rect));
++}
++
++TEST_CASE("Frame lights: the light buffer holds four texels per light", "[Graphics][remaster][FrameLights]")
++{
++    std::vector<FrameLight> lights;
++    lights.push_back(Point(1.0f, 2.0f, 3.0f, 4.0f, 250.0f));
++    lights.push_back(Spot(-1.0f, 0.5f, 7.0f, 25.0f, {0.0f, 0.0f, 1.0f}));
++    lights[1].ambient[0] = 0.1f;
++    lights[1].sortBrightness = 10000.0f;
++    std::vector<float> t;
++    PackFrameLights(lights, t);
++    REQUIRE(t.size() == 2u * kTexelsPerLight * 4);
++    const float a[16] = {1, 2, 3, 4,   0.8f, 0.8f, 0.8f, 0,
++                         0, 0, 0, 250, 0,    0,    1,    static_cast<float>(FrameLightKind::Lamp)};
++    for (int i = 0; i < 16; ++i)
++        CHECK(t[static_cast<size_t>(i)] == a[i]);
++    const float* b = t.data() + 16;
++    CHECK(b[0] == -1.0f);
++    CHECK(b[3] == 25.0f);
++    CHECK(b[7] == 1.0f); // spotlight
++    CHECK(b[8] == 0.1f);
++    CHECK(b[11] == 10000.0f); // the ranking weight
++    CHECK(b[14] == 1.0f);
++    CHECK(b[15] == static_cast<float>(FrameLightKind::Spot));
++    CHECK(std::string(FrameLightKindName(FrameLightKind::Fire)) == "fire");
++}
++
++TEST_CASE("Frame lights: a light ranks only inside the sphere the tiles bin it by", "[Graphics][remaster][FrameLights]")
++{
++    // Where no tile lists a light, it must not take a place in the budget:
++    // its importance is 0 outside LightBounds' sphere, the classic sort
++    // brightness over squared distance well inside it, and continuous between.
++    for (const FrameLight& l :
++         {Point(2.0f, 3.0f, 40.0f, 5.0f, 100.0f), Spot(-3.0f, 0.5f, 10.0f, 20.0f, {0.2f, -0.1f, 1.0f})})
++    {
++        CAPTURE(l.IsSpot());
++        const LightSphere s = LightBounds(l);
++        const float c[3] = {s.c[0], s.c[1], s.c[2]};
++        // At the sphere's centre: the classic value.
++        const float d2 = (c[0] - l.pos[0]) * (c[0] - l.pos[0]) + (c[1] - l.pos[1]) * (c[1] - l.pos[1]) +
++                         (c[2] - l.pos[2]) * (c[2] - l.pos[2]);
++        CHECK(ClassicImportance(l, c) == Catch::Approx(l.sortBrightness / std::max(d2, 1e-4f)));
++        // Along a ray out of the sphere: falls to 0 at the edge, smoothly.
++        float prev = ClassicImportance(l, c);
++        for (int i = 1; i <= 400; ++i)
++        {
++            const float t = s.r * 1.2f * static_cast<float>(i) / 400.0f;
++            const float p[3] = {c[0] + t * 0.6f, c[1] + t * 0.48f, c[2] + t * 0.64f};
++            const float v = ClassicImportance(l, p);
++            if (t >= s.r)
++                CHECK(v == 0.0f);
++            CHECK(v >= 0.0f);
++            prev = v;
++        }
++        CHECK(prev == 0.0f);
++    }
++}
++
++TEST_CASE("Frame lights: the classic budget keeps the 7 strongest at a fragment, blending at its edge",
++          "[Graphics][remaster][FrameLights]")
++{
++    float w[kMaxLightsPerTile];
++    // Up to the budget, every light counts.
++    const float few[7] = {5, 1, 0.1f, 3, 2, 0.01f, 7};
++    ClassicBudgetWeights(few, 7, w);
++    for (int i = 0; i < 7; ++i)
++        CHECK(w[i] == 1.0f);
++    // Clearly separated: exactly the 7 strongest, as Scene::SelectLights keeps.
++    const float ten[10] = {10, 0.5f, 9, 8, 0.3f, 7, 6, 5, 0.1f, 4};
++    ClassicBudgetWeights(ten, 10, w);
++    for (int i = 0; i < 10; ++i)
++    {
++        CAPTURE(i);
++        CHECK(w[i] == (ten[i] >= 4.0f ? 1.0f : 0.0f));
++    }
++    // The 7th and 8th close together share a blend; the sum of weights stays
++    // at the budget.
++    const float close[9] = {10, 9, 8, 7, 6, 5, 4.0f, 3.9f, 1};
++    ClassicBudgetWeights(close, 9, w);
++    CHECK(w[6] > 0.5f);
++    CHECK(w[6] < 1.0f);
++    CHECK(w[7] > 0.0f);
++    CHECK(w[7] < 0.5f);
++    CHECK(w[6] + w[7] == Catch::Approx(1.0f));
++    CHECK(w[8] == 0.0f);
++    CHECK(w[5] == 1.0f);
++    // Continuous: sweeping one light's importance across the edge moves the
++    // weighted sum of fixed contributions without a jump.
++    float values[9] = {10, 9, 8, 7, 6, 5, 4, 0, 1};
++    const float contribution[9] = {0.1f, 0.2f, 0.1f, 0.3f, 0.1f, 0.2f, 0.4f, 0.9f, 0.05f};
++    float prev = -1.0f, maxStep = 0.0f;
++    for (int s = 0; s <= 2000; ++s)
++    {
++        values[7] = 2.0f + 4.0f * static_cast<float>(s) / 2000.0f; // from below the 8th to above the 6th
++        ClassicBudgetWeights(values, 9, w);
++        float sum = 0.0f;
++        for (int i = 0; i < 9; ++i)
++            sum += w[i] * contribution[i];
++        if (prev >= 0.0f)
++            maxStep = std::max(maxStep, std::fabs(sum - prev));
++        prev = sum;
++    }
++    CHECK(maxStep < 0.005f); // a hard cut would jump by 0.5 (0.9 in, 0.4 out)
++}
++
++TEST_CASE("Frame lights: the shaders read the list with the model and sizes of FrameLights.hpp",
++          "[Graphics][Shaders][remaster][FrameLights]")
++{
++    namespace gl = Poseidon::gl33lighting;
++    const std::string lights = gl::RemasterFragmentPiece(gl::FragmentPiece::Lights);
++    REQUIRE_FALSE(lights.empty());
++    // Capacities and layout.
++    CHECK(lights.find("const int kTexelsPerLight = " + std::to_string(kTexelsPerLight) + ";") != std::string::npos);
++    CHECK(lights.find("const int kTileTexels = " + std::to_string(kTileTexels) + ";") != std::string::npos);
++    CHECK(kIndicesPerTexel == 4); // RGBA8UI: the shader reads ids[0..3] of each texel
++    CHECK(kTileTexels == 4);      // loadTileList keeps a tile's texels in four registers
++    CHECK(lights.find("int count = loadTileList();") != std::string::npos);
++    CHECK(lights.find("layout(std140) uniform FrameLights {") != std::string::npos);
++    CHECK(lights.find("vec4 frameLights[" + std::to_string(kMaxFrameLights * kTexelsPerLight) + "];") !=
++          std::string::npos);
++    CHECK(lights.find("uniform usampler2D lightTiles;") != std::string::npos);
++    // The model the binning bounds: the reach ends at kRangeFactor start
++    // distances and the cone edge is kSpotOuterCos2.
++    CHECK(lights.find("float end2 = start2 * " + std::to_string(static_cast<int>(kRangeFactor * kRangeFactor)) +
++                      ".0;") != std::string::npos);
++    char cone[64];
++    std::snprintf(cone, sizeof(cone), "smoothstep(%.4f, %.4f, cos2)", kSpotOuterCos2, kSpotInnerCos2);
++    CHECK(lights.find(cone) != std::string::npos);
++    // One model for both sources: the per-draw slots and the tiles.
++    CHECK(CountOf(lights, "vec3 localLight(") == 1);
++    CHECK(lights.find("sum += localLight(litLightPos[i], litLightColor[i]") != std::string::npos);
++    CHECK(lights.find("return localLight(frameLights[at], frameLights[at + 1], frameLights[at + 2].rgb, "
++                      "frameLights[at + 3].xyz, n, kd, ka);") != std::string::npos);
++    CHECK(lights.find("if (litLightCount.y > 0.5) return localLightsTiled(n, kd, ka);") != std::string::npos);
++    // A tile is found from the pixel alone; the night factor scales the sum.
++    CHECK(lights.find("ivec2 tile = ivec2(gl_FragCoord.xy) / int(litLightCount.y);") != std::string::npos);
++    CHECK(CountOf(lights, "return sum * litLightCount.z;") == 1);
++    // The classic budget per surface, ranked at the fragment as
++    // ClassicBudgetWeights does: sort brightness (texel 2 w) over the squared
++    // distance, the 7th and 8th blended within the softness.
++    CHECK(lights.find("const int kMaxTileLights = " + std::to_string(kMaxLightsPerTile) + ";") != std::string::npos);
++    CHECK(lights.find("const int kClassicBudget = " + std::to_string(kClassicLightsPerSurface) + ";") !=
++          std::string::npos);
++    CHECK(lights.find("return fade * frameLights[at + 2].w / max(d2, 1e-4);") != std::string::npos);
++    CHECK(lights.find("float fade = 1.0 - smoothstep(0.5 * r2, r2, d2);") != std::string::npos);
++    // The sphere the importance fades with is the reach LightBounds bins by.
++    CHECK(lights.find("const float kReachFactor = " + std::to_string(static_cast<int>(kRangeFactor)) + ".0;") !=
++          std::string::npos);
++    CHECK(lights.find("float r2 = kReachFactor * kReachFactor * pos.w * pos.w;") != std::string::npos);
++    char band[96];
++    std::snprintf(band, sizeof(band), "float band = max(edgeIn - edgeOut, %.2f * edgeIn);", kClassicBudgetSoftness);
++    CHECK(lights.find(band) != std::string::npos);
++    CHECK(lights.find("float w = count > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : "
++                      "1.0;") != std::string::npos);
++    // The 7th and 8th strongest: the last two of the eight kept sorted.
++    CHECK(kClassicLightsPerSurface == 7);
++    CHECK(lights.find("edgeIn = t6;") != std::string::npos);
++    CHECK(lights.find("edgeOut = t7;") != std::string::npos);
++    CHECK(CountOf(lights, "m = max(t") == kClassicLightsPerSurface);
++    // The per-object selection's cap is the same number.
++    const std::string scene = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "Scene.cpp");
++    CHECK(scene.find("const int maxLightsPerObject = Poseidon::lighting::kClassicLightsPerSurface;") !=
++          std::string::npos);
++    // The debug view.
++    CHECK(kDebugViewLightTiles == 6);
++    const std::string shade = gl::RemasterFragmentPiece(gl::FragmentPiece::Shade);
++    CHECK(shade.find("litFlags.z > 5.5 ? lightTileView(display) : display") != std::string::npos);
++    // The tile texture's unit, and the block's binding point, which every
++    // program gets when it is linked.
++    bool tiles = false;
++    for (const auto& s : gl::kLitSamplers)
++        tiles = tiles || (std::string(s.name) == "lightTiles" && s.unit == gl::kLightTileUnit);
++    CHECK(tiles);
++    CHECK(gl::kLightListBinding != gl::kLitBinding);
++    const std::string shaders = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_Shaders.cpp");
++    CHECK(shaders.find("glUniformBlockBinding(prog, lightBlock, Poseidon::gl33lighting::kLightListBinding);") !=
++          std::string::npos);
++    const std::string lighting = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_Lighting.cpp");
++    CHECK(lighting.find("glBindBufferBase(GL_UNIFORM_BUFFER, kLightListBinding, t.dataBuf);") != std::string::npos);
++}
++
++TEST_CASE("Frame lights: the backend lights from the tiles only while they are on", "[Graphics][remaster][FrameLights]")
++{
++    const std::string lighting = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_Lighting.cpp");
++    REQUIRE_FALSE(lighting.empty());
++    // Tile mode skips the per-draw light slots and sends the draw's night factor.
++    const std::string upload = FunctionBody(lighting, "void EngineGL33::UploadLitLights(");
++    REQUIRE_FALSE(upload.empty());
++    const size_t tiled = upload.find("if (_lightTilesActive)");
++    const size_t perDraw = upload.find("SetSlot(LitConst::LightPos + n");
++    REQUIRE(tiled != std::string::npos);
++    REQUIRE(perDraw != std::string::npos);
++    CHECK(tiled < perDraw);
++    CHECK(upload.find("nightEffect > 0.0f ? nightEffect : 0.0f") != std::string::npos);
++    // The frame decides from the gate, and the slot says so.
++    const std::string frame = FunctionBody(lighting, "void EngineGL33::UploadLitFrameConstants()");
++    CHECK(frame.find("_featureGates[rm::Feature::LightTiles].on") != std::string::npos);
++    CHECK(frame.find("lightCount[1] = _lightTilesActive ? static_cast<float>(fl::kTileSize) : 0.0f;") !=
++          std::string::npos);
++    // Passes after the world light each draw from its own list again.
++    const std::string post = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_PostFX.cpp");
++    CHECK(FunctionBody(post, "void EngineGL33::EndWorldScene()").find("_lightTilesActive = false;") !=
++          std::string::npos);
++    // The scene keeps lit objects out of instanced runs only while draws read
++    // their own lists.
++    const std::string scene = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "SceneDraw.cpp");
++    CHECK(scene.find("drawGrouping && !noLocalLights && !GEngine->LocalLightsFromTiles() ? this : nullptr") !=
++          std::string::npos);
++}
++
++TEST_CASE("Frame lights: the light list switch has landed", "[Graphics][remaster][FrameLights]")
++{
++    const auto& info = Poseidon::remaster::GetFeatureInfo(Poseidon::remaster::Feature::LightTiles);
++    CHECK(info.landed);
++    CHECK(std::string(info.step) == "A6");
++    CHECK(std::string(info.key) == "lightTiles");
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_perf_counters.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_perf_counters.cpp
+index 977fef83..0da7a35d 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_perf_counters.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_perf_counters.cpp
+@@ -29,6 +29,9 @@ TEST_CASE("PerfCounters: frames close into per-frame averages over the window",
+     c.Frame().hillHidden = 4000;
+     c.Frame().hillMs = 1.5f;
+     c.Frame().litBytes = 4096;
++    c.Frame().tileLights = 9;
++    c.Frame().tileRefs = 3000;
++    c.Frame().tileMs = 0.2f;
+     c.EndFrame();
+     CHECK(c.WindowFrames() == 2);
+     const std::string s = c.Summary();
+@@ -37,6 +40,8 @@ TEST_CASE("PerfCounters: frames close into per-frame averages over the window",
+     CHECK(s.find("tested=6000 hidden=5000 kept=1.5") != std::string::npos);
+     CHECK(s.find("hillcpu=1.000") != std::string::npos);
+     CHECK(s.find("litKB=3.0") != std::string::npos);
++    // The tiled light list: averaged over every frame of the window.
++    CHECK(s.find("| tiles lights=4.5 refs=1500 tilecpu=0.100") != std::string::npos);
+     // It rides in UDCAP lines after triPerfStats' own fields: no ';', and none
+     // of the names the capture parser reads there (fps=, frame=, calls=).
+     CHECK(s.find(';') == std::string::npos);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+index 2964ef88..c2eb4867 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+@@ -228,7 +228,8 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
+     CHECK(GetPostStageInfo(PostStage::DebugView).readsLinearDepth);
+ 
+     PostFrameInputs in = Shipped();
+-    for (int view = 0; view <= 5; ++view)
++    // 6 is the forward shaders' light-tile view (A6): no post stage of its own.
++    for (int view = 0; view <= 6; ++view)
+     {
+         CAPTURE(view);
+         in.debugView = view;
+@@ -239,10 +240,12 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
+         CHECK((plan.runs & ~Mask({PostStage::LinearDepth, PostStage::DebugView})) ==
+               Mask({PostStage::Resolve, PostStage::Ao, PostStage::Bloom, PostStage::Shafts, PostStage::Composite}));
+     }
+-    // The registry offers the view (the overlay's combo, triSetLighting debug=5).
++    // The registry offers the view (the overlay's combo, triSetLighting debug=5),
++    // and the light tiles after it (debug=6).
+     const LightingKey* debug = FindLightingKey("debug");
+     REQUIRE(debug != nullptr);
+-    CHECK(debug->maxValue == static_cast<float>(kDebugViewLinearDepth));
++    CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
++    CHECK(debug->maxValue == 6.0f);
+ }
+ 
+ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][remaster][PostStages]")
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 1915fefb..687eac7f 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -883,7 +883,11 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
+         {P::TerrainClouds, "float cloudSunVisibility("},
+         {P::Sky, "vec3 skyIrradiance("},
+         {P::Sky, "vec3 fogColorToward("},
++        {P::Lights, "uniform FrameLights {"},
++        {P::Lights, "vec3 localLight("},
++        {P::Lights, "vec3 localLightsTiled("},
+         {P::Lights, "vec3 localLights("},
++        {P::Lights, "vec3 lightTileView("},
+         {P::Surface, "vec3 glossy("},
+         {P::Shade, "vec3 shadeRemastered("},
+         {P::Finish, "void finishFragment("},
+@@ -1176,8 +1180,9 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
+ 
+     // Every sampler a remastered program declares has its unit in the table
+     // (tex0 and tex1 are the material units): an unbound sampler reads unit 0.
++    // Integer samplers (usampler2D, the light tiles) count too.
+     std::set<std::string> declared;
+-    static const std::regex sampler(R"(uniform\s+sampler\w+\s+(\w+)\s*;)");
++    static const std::regex sampler(R"(uniform\s+[iu]?sampler\w+\s+(\w+)\s*;)");
+     for (const std::string& program : RemasterPrograms())
+         for (auto it = std::sregex_iterator(program.begin(), program.end(), sampler); it != std::sregex_iterator();
+              ++it)

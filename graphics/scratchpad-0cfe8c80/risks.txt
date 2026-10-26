@@ -1,0 +1,383 @@
+=== c584185 graphics: long views draw the same frame from a fraction of the draw calls
+Known risks: PerfCounters.{hpp,cpp}, UboMirror.hpp,
+TerrainOcclusion.{hpp,cpp} and three test files are new and must be
+added with the commit. The kept-draw rule assumes the last overlay's
+blend draw issues triangles; if it were clipped or fogged away the
+leaf-shadow cutout could still follow the cull in that view. The cull
+assumes the terrain draws at full grid detail (LandCache asks for
+segment LOD 0); a coarser far terrain would need the lowest vertex per
+coarse cell. The table is rebuilt for every moved eye, costing up to
+about 1 ms of CPU a frame on this machine while walking. The live
+soldier's head pose differed between the forest shots; whether the
+faster frame changes the AI's timing was not verified. Timing is one
+reading without the GPU clock sampler; the full timing run comes at the
+end of the branch. No RTX 3060 was measured. Object.hpp keeps its
+file's tab style for the new declaration (clang-format-diff would
+re-indent it with spaces).
+
+=== 193c735 graphics: temporal anti-aliasing steadies foliage and cleans cheap soft effects
+Known risks: during camera motion the frame is about 10% less sharp than
+without TAA (the look check's limit; taaSharpen 0.6 to 0.75 would buy it
+back, 0.75 gave +1.6% on the still hero view); the LOD bias costs 0.4 to
+0.7 ms of world time on these views (more than the 0.3 ms the plan
+estimated for TAA); moving soldiers and vehicles have camera motion only
+(no trail seen at 0.5 m per step, but rotors, first-person weapon sway and
+fast aircraft are untested); a still camera shows a frame-to-frame jitter
+residual of 0.0026 luma (0.0007 without TAA, under one level); glass edges
+and everything drawn after the opaque copy take most of their own frame,
+so they keep less anti-aliasing; vehicle interiors get no TAA and the
+first frame into an interior or optics goes out jittered and unresolved;
+no RTX 3060 was measured; the motion clips step the camera once per two
+rendered frames.
+
+=== 706b9a3 graphics: one tiled light list feeds every local light
+Known risks: the world pass costs about 0.5 to 1.1 ms more where many
+lights cover the screen (more on an RTX 3060, not measured); each
+fragment ranks up to 16 lights. The tiles hold 16 lights and the active
+list 16 today; when B4 adds combat lights past 16 a full tile would
+drop one and could show a seam at a tile edge. The budget ranks at the
+fragment, not the object's centre, so large objects and terrain can take
+a different 7 than before (the 1% above). A spotlight takes a budget
+slot over its whole reach, as the classic rule did. One timing run (not
+the others) showed single CPU frames of 23 to 39 ms in the windows
+after switching the tiles on. Lit objects now join instanced runs at
+night; A4's kept-draw rule concerns Pass2's pre-shadow loop, not runs,
+and was not checked with B3's moon shadow pass. Seen for A4 at the
+lamps view: drawGrouping=1 costs CPU there (frame 9.2 to 10.2 ms against
+7.4 to 8.0 with it off). FrameLights.{hpp,cpp} and test_frame_lights.cpp
+are new files to add with the commit. Lights.hpp keeps its file's tab
+style; the added lines are in clang-format style and clang-format-diff
+clean.
+
+=== 5d7e7ae graphics: a physically based sky table lights the dome and the fog colour
+Known risks: the anti-sun horizon band at a low sun is a warm grey 9 %
+darker than the original's pink (the sun side is 34 % brighter, the row
+average kept); the sky's faint texture blotches read up to 13 % stronger
+than the original's at sunrise and sunset; noon is a more saturated blue
+than the original (the owner's 1.15); the 40-step march overstates the
+haze by up to 7.5 %; the table builds only while this switch is on
+(water, air and clouds widen that when they land); the haze is a fixed
+knob, not yet tied to fog or overcast; the 3D sky clouds only take the
+fog colour (the clouds step lights them); the pillarbox check had the sun
+just outside the 4:3 rect; the contract tests match shader source text;
+LitConstants slots 58 to 60 are one padding member that B1 splits when
+it lands (A5 landed no slot); RemasterSkyPending reads a flag only the
+sky pass clears, so switching atmosphere off during a table build leaves
+triSettleScene waiting to its maxFrames (test tooling only, a
+follow-up); no RTX 3060 was measured.
+
+=== 807ce4b graphics: trees and buildings cast soft, contact-hardening sun shadows
+Known risks: the crowns keep less self-shadow (the sun visibility of the
+hero crowns is mostly lit where it was striped; crown crops are 3%
+brighter; in colour they keep their shaded side and texture, and B2's
+crownCanopy owns crown shading). At 1 deg the sun flecks under a high
+canopy are softer than at the real 0.53 deg (sunSize is the knob). The
+Sinai slab follows the first tier's radius, not this step: a profile
+whose shadow distance makes the stock first tier about 17 m may show it
+(not tested). Before B3 the gate also opens for the moon key, where the
+soft filter costs without showing.
+
+=== fcf12c5 graphics: low-sun vehicles keep Classic's evening hue and readable shaded sides
+Known risks: the M113 at 7.5 and 4.8 degrees (0.57, 0.55) and the Zelda at
+7.6 (0.56) sit 0.01 to 0.03 under the plan's 0.58 floor in these boxes;
+two Jeep values are slightly less warm than Classic (above); the conifers
+at golden hour are 9% darker than before and 15% darker than Classic (the
+big broadleaf is at Classic's brightness); the golden slope at
+forest_edge_golden reads more orange than Classic (r:b 1.60 against 1.39)
+and sunlit ground pinker (not mustard: its g:r falls); the fill is a flat
+lift on vertical faces, not bounce light; shaded hull faces are neutral
+where Classic's are bluish; the canopy also applies to the other half-lit
+shapes (bushes and, by the README, camouflage nets; the Sinai hero's net
+comes out brighter, 0.56 to 0.62 of its albedo, and the Abel hero's tent
+0.51 to 0.61, lifted by the fill); spawned vehicle sides at noon stay at
+the per-pixel level F8 made real (bounce is the lever). No RTX 3060
+measured.
+
+=== 06c7e4d graphics: low-beam headlights, moon shadows and stars at night
+Known risks:
+- With both lanes on, B8's headlight cones in the air take each
+  spotlight's configured direction and colour, while the surfaces take
+  B3's levelled low beam in white: the cone in the mist and the pool on
+  the road can differ in aim and tint. Not checked in game.
+- The plan's section 8 must-see "warm low beam" is not met: headlights
+  are white at the configured colour's linear luminance, by choice (the
+  configured rosy turned the khaki verges orange-tan).
+- LowBeamAim and the low-beam pattern apply to every spotlight attached
+  to a vehicle, not only to headlights: a reflector a config points down
+  or up (on an aircraft, a boat or a searchlight) is levelled to its
+  heading at the body's slope, 1% down, and takes the hard top edge.
+  The configs were not checked for such lights; restricting the aim to
+  lamps within a few degrees of the body's horizontal forward axis is
+  the fix if one turns up.
+- Towns at night are about half as bright as before (the lever is
+  nightLamp); moonless country away from the beam is darker (the open
+  night-exposure question).
+- A verge in the beam core 10 to 20 m out reads brighter than the noon
+  lawn and shows the grass texture's own pale olive (saturation 0.24).
+- F9's night eye greys medium-lit lamp light, so pools read grey-warm,
+  not amber.
+- Hill roads are checked by unit test only, not in game.
+- The low beam's pool on the sea is wider and brighter than the classic
+  pool (region means 39 to 87 levels, p95 120, against 49 to 56); the
+  sea's gleam term is in, but no lane view isolates it.
+- Physical lights skip the classic budget, so a tile with many lamps
+  evaluates all of them; lamp light still passes through walls; smoke,
+  like the surfaces, takes only the 64 lights the frame's list keeps.
+- The physical sums are file globals in the GLSL: a program that called
+  localLights twice would count the first call's lights again (each
+  calls it once; the new test counts the callers).
+- The splats make stars plain in the red dusk sky at a sun 7.8 deg
+  under, where the classic dots were faint (the stars gate reads the
+  night effect, 1.00 there). DrawPoints also draws the laser
+  designator's dot below one pixel, which becomes a tinted splat at
+  night.
+- The first frame of a moon key may sample the previous map with the
+  moon's direction (the key fades in from 0 there).
+
+NightLights.{hpp,cpp} and test_night_lights.cpp are new files.
+
+=== fec1075 graphics: fires, flares and shell bursts light the men and cast shadows
+Known risks: the ground round the camp fire reads red over blue above
+the plan's 1.4 wherever the fire lights it: 1.46 in combat_fires, 1.43
+in combat_eye_k00 and combat_eye_k11, 1.41 in combat_eye_k08, 1.42 in
+combat_shell_k08 and 1.46 in combat_shell_k11 and combat_shell_k16
+(rows 560 to 700, columns 150 to 700, pixels above 25; Classic 1.10 to
+1.11, off 1.09); a step toward white would bring it under, for the owner
+to decide. Under a flash the lit ground shows the grass texture's own
+sand-olive colour (red over blue 1.25 to 1.29 in the flash frames) where
+the night eye greys it off. The burst's tail is longer and brighter than
+Classic's (0.27 s after a burst at eye height 32.5 against 21.6, from
+above 59.8 against 30.5). A noon shell adds 8.3 levels to the frame
+mean on its first frame (6.6 on the next), with a pale orange ring round
+the crater. A flare low over the ground blows the ground beside it out
+white (combat_flare_k240: 75.5 against Classic's 53.2). A camp fire's
+smoke reads whiter than Classic's. Past 12 combat lights in view the cut
+bursts and tracers light nothing that frame, and with 12 or more fires,
+flares or motors in view every burst, including one beside the camera,
+lights nothing (KeepCombatLights keeps the steady lights first and the
+cut bursts' classic lights stay skipped). The shadows lag moving men by a
+frame (last frame's depth) and the mask keeps no history of its own.
+Combat lights take up to 12 of a tile's 16 entries, so a busy tile can
+cut a classic light. A muzzle flash shows in one captured frame of four.
+Not tested: the time-acceleration fix in game (a 4x Showcase run), tank
+cannon, interiors, MP, rain (the combat lamp streaks are covered by a
+shader contract only), smoke_eden and smoke_sinai_lobo, a moving
+capture, an RTX 3060.
+CombatLights.{hpp,cpp}, EngineGL33_PostCombat.cpp,
+EngineGL33_PostCombatShaders.cpp, test_combat_lights.cpp,
+combat_ab.test.{sqf,toml} and gen_combat_ab.py are new files to add
+with the commit.
+
+=== e91b3f3 graphics: the sea gets wave relief and a broken, glittering sun path
+Known risks: the hero view's eye 3 m above sea level puts the sea from 2 m
+out in frame, which the research never shot, and there the relief reads
+as large smooth swells; the noon near band is beige-grey (159, 160, 150)
+where the original's is yellow-green-grey (154, 159, 146), and the hue of
+so grey a sea swings 30 to 40 degrees for 0.2 of seaSheen; the 7-frame
+ping-pong animation now moves the normals (about 10 times off's
+frame-to-frame change in the water) and has no travelling waves; at night
+on is 5 levels darker than off with twice the detail, and there is no moon
+glint; the cost is about five times the plan's estimate; Eden, Sinai with
+@LoBo, rain, overcast and the shoreline are unverified; a model face that
+carries IsWater (none known) now draws with this model.
+
+=== c36ee4b graphics: calm water and wet streets reflect what is on screen
+Known risks: the hero hill's reflection is a grey band (110, 108, 109
+where it was measured) on the blue-grey sea; in the round before the
+review ssrWater 2.5 showed the hill more clearly but warmer, toward
+khaki, so the owner should judge the default. Wet ground turns darker;
+the dusk town reads darker except for its puddles, which show the base
+build's crimson rain sky and read as red pools.
+Puddles take the rain rings' slope at a grazing angle, so their
+content changes with time (dark in one still, pale with dark flecks in
+the motion frames). The covered-panel rule judges a card's opacity from
+the colour of the background next to it: a card in front of a
+background of its own colour lets more through, and a free-standing
+card that differs from its background reflects whole; no blended card
+was in the views shot. Reflections of a vehicle's windows show the
+window as the camera sees it (what lies through it), not the vehicle's
+inside. The rough blur is horizontal only; at a vehicle's wheels the
+outline stays sharp by design and the shadow's own edge still shows
+under it; the own-plane test leaves the lowest few centimetres of an
+object standing on the wet ground (0.05 m at 5 m, 0.09 m at 15 m) to
+the under-vehicle handling. Puddles are
+value noise on level ground, may read procedural, and the wetness is
+the rain density (no drying) until B7. SSR shows only what is on
+screen and fades at the frame's edges; particles and rain drawn over
+wet ground get the reflection under them. Nights get nothing (lamp
+streaks are B7's). With TAA off the per-frame march turn is not
+averaged (not looked at). The Eden view's shots started while the view
+was still loading (UNSETTLED); Sinai with @LoBo, smoke_eden and
+smoke_sinai_lobo are unverified, and the cost was read under
+contention.
+
+Landed on B3 (06c7e4d) from the lane's e91b3f3 by a three-way apply
+(15 files in conflict). B2's albedo and B8's air had taken debug
+views 7 and 8, so the reflections' views are 9 and 10 and the trace
+reads a reflections-alone flag instead of the view's number; the
+LitConstants block keeps B8's name (kLitConstantsBlockGLSL); Ssr and
+Air both read the linear depth; the sub-knobs follow B8's and B3's
+(19), landed=22/26, 24 post shaders, 3 linear depth readers. Past the
+conflicts the air pass applies over PostFrame::frameColor, so the
+reflections survive it, and the trace declares the lit clouds' names
+B10's sky piece now uses (skyDensity and stand-ins for
+skyCloudDensity and skyDomeUv). Merged gate: build clean, no new
+clang-format findings, unit tags 701/701 (plan 8 item 3 plus the
+landed lanes' tags and [ssr], [build-descriptor], [SpecSplit]),
+smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only). A
+landing check at the smoke view with the ground forced wet
+(ssrWet=1) ran both stages in one frame (ssr 0.54 ms, air 0.70 ms,
+one reading): the frame's lower third keeps the reflections with the
+air on and off (105, 98, 96 both, 109, 98, 90 with ssr=0), the upper
+third takes the haze.
+
+=== cb3dd0d graphics: rain wets cloth and stone, fills puddles and streaks lamp light
+Known risks: a puddle in the low sun's path still glows warm and bright (up
+to 234 levels on its sun side), though it keeps its mirror; by day in rain
+cloth and walls darken only a few levels; terrain classes come from the
+albedo, so a grey lawn under warm lamps may still pool water in the trace
+while the forward pass keeps it dry (a reflection without the puddle's
+darkening); dry glass has no sky reflection, which departs from the plan's
+Keep list (it needs a dry-weather switch, a follow-up); the trace's road
+test on land reads the class the terrain draw left set (harmless while no
+island texture code matches a road token); no persistence of the wetness
+across a save; motion not checked (rain rings animate, streaks follow the
+camera); cost unmeasured on a quiet GPU.
+
+=== 7c21bc7 graphics: sun beams, headlight cones, aerial haze and morning valley mist
+Known risks: in setFog the backlit crowns near the sun take a pale
+veil (physical in mist, close to "flattened crowns"; volGain is the
+lever); at sunrise the far massif lies under pink mist that glows next
+to the sun (the haze notes' "too washed out" risk); in clear air with
+a low sun in view the legacy shafts' glow is gone and the thin beams
+give back only part of it (lowsun_fp -1.2 / -2.1 / -0.1% per band, the
+M113's backlit side -2.1% with its hue kept; pine_eve's frame R/B
+0.951 to 0.939; keeping the legacy shafts in clear air is the lever);
+the 06:00 to 06:30 valley mist of the haze notes is gone with the
+shorter morning; the dawn views lose 3 to 7% of their red/blue balance
+where the warm legacy shaft glow is gone and the mist is paler than the
+lit ground; with TAA off thin foliage against the glow shows speckles;
+half-resolution shafts beside trunks have blocky edges; a smoke puff
+in front of far terrain takes that terrain's haze; the beams and the
+legacy shafts swap at the beams' gate edge, not seen in motion; AI
+sight ignores the medium (AirOpticalDepth is ready); no RTX 3060
+measured, no quiet-machine timing.
+
+Landed on B9 (7b7e3e6; A6, B5, B2, B10 and B9 landed after the lane's
+base) by a three-way apply, 13 files in conflict, both sides kept: Haze
+at 78 after litCanopy and litDetail and Count 79 (the clouds, water and
+canopy slots and litPlanned[4] as B9 left them; LitConstPlanned keeps
+Night to Weather, End equals Count); the air's debug view moves from 6
+to 8 (kDebugViewAir), after A6's light tiles (6) and B2's albedo (7);
+the sea's main ends in finishFragment since B5, which carries the haze's
+fog edge, so the lane's own water tail is dropped (the off case checks
+the call); the canopy's post shader beside the air pass's four (19 post
+programs); the landed registry rows (B8 between B5 and B9,
+landed=18/26) and the sea's three sub-knobs then volGain (15 in all);
+the CMake test list; the plan, the README and the roadmap. Past the
+conflicts, the semantic one: the terrain and clouds piece the march
+pastes now also holds B10's sky-matched cloud shadows (domeCloudCover)
+and B9's canopySunVisibility. The march reads the sky's cloud density on
+unit 9 (skyDensity, rebound with BindSkyDensity), so the beams and the
+haze's sun visibility take the sky-matched cloud shadows the ground
+gets, and declares canopySun (unit 15) and the world names
+canopySunVisibility reads (shadowCtl, camFwd, vWorldRel) without
+calling it; the apply, which pastes the sky piece but not the terrain
+and clouds piece, declares skyDensity and stand-ins for the lit clouds'
+density lookups (skyCloudDensity, skyDomeUv), which only the unused dome
+shading calls. Merged gate: build 0 warnings, clang-format clean on the
+touched files, the gate tags plus the landed lanes' tags and
+[AirMedium] 625/625, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and
+131218 only; the air programs link).
+
+=== 7b7e3e6 graphics: every tree casts a long golden-hour shadow at any distance
+Known risks: it only takes light away (no bounce), and the shade is the
+cool sky fill (B/R in the shade 0.63 to 0.68 against 0.52 to 0.56 lit),
+the research's "cool shade on pink rock". The canopy is a column from the
+ground to the top: the ground under a crown is shaded at any sun (no
+crown base height, no trunk term), and the far shadows are 6 to 12 m wide
+soft streaks rather than tree shapes. A raised receiver deeper than 6 m
+inside a wide crown or roof reads its own far side as shade. Its hand-over
+to the shadow maps at their far fade swaps tree-shaped shadows for these
+streaks over the fade. A repaired object, or a mission restarted on the
+same island, keeps a destroyed object out of the canopy. The world-space
+map covers 3.2 to 6.4 km around the camera and fades out at its edge.
+Canopy shadows on far vehicles and men do not exist (only landscape
+objects cast). The cost is not measured on a quiet machine or on an RTX
+3060.
+
+Landed on B10 (9a40228; A6, B5, B2 and B10 landed after the lane's
+base) by a three-way apply, 11 files in conflict, both sides kept: the
+canopy slot replaces B5's padding litPlanned2 at 76, so the block reads
+litSky, litSkyShadow, litPlanned[4] (70 to 73), litWater0, litWater1,
+litCanopy and litDetail and Count stays 78 (LitConst::Planned2 and its
+static_asserts gone, Canopy is Water1 + 1; the layout test follows);
+units 10 and 15 beside units 6, 8, 9, 11 and 13, the canopySun sampler
+row after lightTiles, both skyDensity and canopySun in the inputs piece;
+InitCanopy, DeinitCanopy and BindCanopy beside the clouds' and the light
+list's; the landed registry rows (B9 before B10, landed=15/26) and their
+test; the CMake test list; the plan, the README and the roadmap. Past the
+conflicts the GPU marks' comment says where the build runs (the sky hook
+before the sky section, or just inside the world section without the sky
+pass) and BindLightingTextures' comment lists its units. Merged gate:
+build 0 warnings, clang-format clean on the touched files, the gate tags
+plus the landed lanes' tags and [Canopy] 611/611, smoke_abel 1/1
+(KHR_debug ids 131154, 131169 and 131218 only).
+
+=== 9a40228 graphics: sky clouds glow on their sun side and their shadows match the sky
+Known risks: a still under a cloud reads darker (overcast_broken ground
+-28 %, the Jeep loses its sun shadow), though the mean over the ground
+is the classic one; below about 12 degrees of sun the painted skies'
+horizon holds no cloud the row test finds, so golden hour gets the
+uniform classic dimming and no sky-matched shadows, and the cloud seen
+near a low sun is a classic sheet, which casts none (sheet shadows are
+a follow-up); shadow shapes are the painted streaks, long bands rather
+than cumulus patches; the dome now turns (a rotation about the zenith,
+so clouds near the horizon move as fast across the sky as those
+overhead), and it is not turned under night vision; the coverage takes
+the deck from sea level, so a camera high above the ground sees
+slightly different lookups; between 25 and 45 degrees of sun the
+lit-cloud terms are part way (half at 35), and from 45 up an overcast
+deck keeps its painted bellies as they were (the prototype deepened
+them at any sun height; overcast 0.9 at 14:30 is now the sky before);
+golden hour skies gain saturation on the clouds' sun-facing edges
+(coast_oc_up 0.111 to 0.124, sunrise 0.183 to 0.224); with the sun
+clear in the sky the sea's sun path is a broad bright column the noise
+field used to cover (B5 reworks it); a straight sheet edge high in the
+sky is Classic's, present with every switch off; the contract tests
+match shader source text; the timing was not taken on a quiet machine;
+no RTX 3060 was measured.
+
+Landed on B2 (fcf12c5; B11, B1, A6, B5 and B2 landed after the lane's
+base, 5d7e7ae) by a three-way apply, 9 files in conflict, both sides
+kept: the clouds slots split B5's padding, so the block reads litSky (68),
+litSkyShadow (69), litPlanned[4] (70 to 73: LitConst::Planned 70, 70 free
+since A6, LitConstPlanned Night to Weather), litWater0, litWater1,
+litPlanned2 and litDetail, and Count stays 78 (the planned SkyVp row is
+gone; static_asserts and the layout test follow); unit 9 and its
+skyDensity sampler row beside units 6, 8, 11 and 13; InitSkyClouds,
+DeinitSkyClouds and BindSkyDensity beside the sea's stand-in and the light
+tiles; UploadLitClouds before the terrain detail slot; the landed registry
+rows and their test (landed=14/26); the test list, the README rows (the
+unit summary now names 2-6, 8, 9, 11 and 13 in use) and the plan notes.
+Merged gate: build clean, clang-format clean on the touched files, the
+gate tags with [SkyDensity] and [clouds] added to the merged set 594/594,
+smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only). The sea's
+sun path risk above was not re-checked with B5 on the merged tree.
+
+=== d25476b graphics: terrain slopes show grass and rock grain instead of a smear
+Known risks: a golden slope reads more like dry straw (the grain is
+brightness only, the hue is unchanged; owner taste); paths painted into
+terrain textures get the grain from 10 m on (they cannot be told apart
+before B7's terrain classes; roads are objects and never get it); in
+motion the grain moves with the ground in cell-sized blobs:
+frame-to-frame change over spatial detail 1.09 to 1.11x of off and the
+second temporal difference 1.13 to 1.17x, no single-pixel sparkle, but
+only a 10 m walk at 1080p was checked; the luma sharpen (TAA off only)
+nearly doubles the sharpness proxy and touches the whole frame, and by
+A1's gate it also runs by default in vehicle interiors and under optics
+(where TAA holds off), views nobody has looked at yet; the
+per-draw land flag relies on the landscape's DetailTexture and
+SpecularTexture bits (a p3d face authored with the DetailTexture bit
+would get the grain); no RTX 3060 was measured.
+

@@ -1,0 +1,287 @@
+// The night glow (psFogGlow): the frame's light blurred at a quarter and a
+// sixteenth of the resolution, in linear light with the clipped highlights
+// expanded back (a lamp's head is far brighter than white), alpha the
+// luminance-weighted view depth of that light. The apply lays it into the
+// fog in front of each pixel (to the nearer of the pixel and the light), so
+// lamps, headlights, fires and the walls they light glow in the fog at night
+// in their own colours and the sky away from them stays dark. Four modes:
+// 0 the frame down to a quarter (a 4x4 mean), 1 a glow target down by four,
+// 2 a nine-tap Gaussian along glowDir, 3 a quarter target plus a sixteenth
+// one upsampled.
+const char kPostFogGlowGLSL[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D srcTex;    // unit 0: the resolved frame (mode 0, display) or a glow target
+uniform sampler2D src2Tex;   // unit 3: the sixteenth glow (mode 3)
+uniform sampler2D depthTex;  // unit 5: the world depth (mode 0)
+uniform vec4 glowCtl;        // x mode, y the far end (m), zw the source's texel size
+uniform vec4 glowDir;        // xy the blur step (uv), z the sixteenth's share (mode 3)
+uniform vec4 projInfo;       // x = _33, y = _43
+uniform vec4 depthMap;       // ndcZ = depth * x + y
+out vec4 fragColor;
+
+vec3 glowExpand(vec3 lin) {
+    float peak = max(lin.r, max(lin.g, lin.b));
+    if (peak <= 0.8) return lin;
+    float hdr = 0.6 + 0.04 / (1.0 - min(peak, 0.99));
+    return lin * (hdr / peak);
+}
+
+vec4 glowFrame(vec2 uv) {
+    vec3 c = glowExpand(pow(clamp(textureLod(srcTex, uv, 0.0).rgb, 0.0, 1.0), vec3(2.2)));
+    float dz = textureLod(depthTex, uv, 0.0).r;
+    float z = dz >= 0.999999 ? glowCtl.y : min(projInfo.y / ((dz * depthMap.x + depthMap.y) - projInfo.x), glowCtl.y);
+    return vec4(c, dot(c, vec3(0.2126, 0.7152, 0.0722)) * z);
+}
+
+void main() {
+    int mode = int(glowCtl.x + 0.5);
+    vec2 t = glowCtl.zw;
+    if (mode <= 1) {
+        // Four bilinear taps, each the mean of a 2x2 block: a 4x4 mean.
+        vec4 s = vec4(0.0);
+        for (int k = 0; k < 4; ++k) {
+            vec2 o = vec2(float(k & 1) * 2.0 - 1.0, float(k >> 1) * 2.0 - 1.0) * t;
+            s += mode == 0 ? glowFrame(vUV + o) : textureLod(srcTex, vUV + o, 0.0);
+        }
+        fragColor = s * 0.25;
+    } else if (mode == 2) {
+        const float w[5] = float[5](0.2270270, 0.1945946, 0.1216216, 0.0540541, 0.0162162);
+        vec4 s = textureLod(srcTex, vUV, 0.0) * w[0];
+        for (int k = 1; k < 5; ++k) {
+            vec2 o = glowDir.xy * float(k);
+            s += (textureLod(srcTex, vUV + o, 0.0) + textureLod(srcTex, vUV - o, 0.0)) * w[k];
+        }
+        fragColor = s;
+    } else {
+        fragColor = mix(textureLod(srcTex, vUV, 0.0), textureLod(src2Tex, vUV, 0.0), glowDir.z);
+    }
+}
+)";
+
+// The apply: full resolution, the frame after the occlusion pass's inputs.
+// Each pixel's view depth (the sky at the volume's far end) is looked up in
+// the integrated volume (texel s holds the light and transmittance up to the
+// far face of slice s, so the lookup sits half a texel back) and the pixel's
+// linear colour, its highlights expanded back through the world's shoulder,
+// becomes C T + S, plus the near-field light and the night glow; then the
+// shoulder again. Alpha keeps the sky-light share the composite's occlusion
+// reads, minus what the fog veils.
+//
+// A pixel in a small gap of nearer geometry (alpha-tested foliage, a trunk
+// row, a fence) takes the fog of the geometry round it, not of the deeper
+// scene showing through: the gap is fogged as the surface it is a hole in.
+// The sky under the horizon (past the world's far end, where the dome's flat
+// fill shows) is a far sea or plain at the distance the ray reaches sea
+// level, darker than the sky and broken into patches, the clear haze laid
+// over it up to there: brighter and paler toward the horizon line.
+const char kPostFogApplyGLSL[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D colorTex;  // unit 0: the resolved frame (display space; alpha 1 - sky light share)
+uniform sampler2D glowTex;   // unit 1: the night glow (psFogGlow; linear rgb, a = luminance x depth)
+uniform sampler3D fogVolume; // unit 2: rgb light scattered toward the eye, a transmittance
+uniform sampler2D nearTex;   // unit 3: the near-field light (half resolution, linear)
+uniform sampler2D linDepth;  // unit 4: half-resolution view depth (m; the sky 1e6)
+uniform sampler2D depthTex;  // unit 5: the world depth
+uniform vec4 projInfo;       // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
+uniform vec4 depthMap;       // ndcZ = depth * x + y
+uniform vec4 worldRect;      // the 3D viewport in uv
+uniform vec4 fogGrid;        // xy cells, z slices
+uniform vec4 fogDepth;       // x far (m), y k
+uniform vec4 fogApply;       // x 1 = dither, y 1 = show the fog's light alone (debug), z the sky's fade (sin of elevation), w 1 = near-field light
+uniform vec4 fogNearSize;    // xy the near target's size
+uniform vec4 fogSkyEye;      // x the eye's height (m), y the fog floor under it (m), z the wet air at the eye (1/m), w its depth (m)
+uniform vec4 fogSkyWeather;  // x weather fog (1/m at the floor), y its scale height (m)
+uniform vec4 fogSkyClear;    // x haze (1/m at sea level), y its scale height, z Rayleigh (green, 1/m at sea level), w dust (1/m at 0 m)
+uniform vec4 fogSkyDust;     // x dust's scale height (m), yz the eye's world x, z (m)
+uniform vec4 fogGlow;        // x the night glow's gain (0 = none)
+uniform mat3 viewToWorld;    // view-space direction to world (camera-relative)
+out vec4 fragColor;
+
+const vec3 kApplyLuma = vec3(0.2126, 0.7152, 0.0722);
+
+// The world's per-fragment shoulder above 0.8 (tonemapNeutral's peak curve,
+// without its whitening, which the frame already holds) and its inverse: the
+// frame arrives through it, the fog is composited before it, so a pixel the
+// fog leaves alone comes out as it went in and a bright sky or sun behind
+// thin fog keeps its range. The inverse stops at a peak of 0.97 (a clipped
+// sun path on the sea is not eight times white behind the mist); what the
+// cap takes off is given back in proportion to what the fog leaves.
+vec3 fogShoulder(vec3 c) {
+    float peak = max(c.r, max(c.g, c.b));
+    if (peak < 0.8) return c;
+    return c * ((1.0 - 0.04 / (peak - 0.6)) / peak);
+}
+vec3 fogExpand(vec3 lin) {
+    float peak = max(lin.r, max(lin.g, lin.b));
+    if (peak <= 0.8) return lin;
+    float hdr = 0.6 + 0.04 / (1.0 - min(peak, 0.97));
+    return lin * (hdr / peak);
+}
+
+// Optical depth of an exponential layer along a ray from the eye: sigma0 at
+// the eye, scale height H, sine of the elevation s, length L.
+float fogLayerTau(float sigma0, float H, float s, float L) {
+    float x = clamp(L * s / H, -30.0, 30.0);
+    if (abs(x) < 1e-3) return sigma0 * L;
+    return sigma0 * H * (1.0 - exp(-x)) / s;
+}
+
+float fogViewZ(vec2 uv) {
+    float d = textureLod(depthTex, uv, 0.0).r;
+    return d >= 0.999999 ? 1e6 : projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
+}
+
+// A gap in nearer geometry: the further of the two nearest depths on either
+// side, across and down (a morphological closing over 9 px each way), when
+// both sides are markedly nearer than the pixel; else the pixel's own depth.
+float fogGapZ(float z) {
+    vec2 px = 1.0 / vec2(textureSize(depthTex, 0));
+    float l = 1e7, r = 1e7, u = 1e7, dn = 1e7;
+    for (int i = 0; i < 4; ++i) {
+        float o = 1.5 + 2.5 * float(i);
+        l = min(l, fogViewZ(vUV - vec2(o * px.x, 0.0)));
+        r = min(r, fogViewZ(vUV + vec2(o * px.x, 0.0)));
+        u = min(u, fogViewZ(vUV + vec2(0.0, o * px.y)));
+        dn = min(dn, fogViewZ(vUV - vec2(0.0, o * px.y)));
+    }
+    float zc = min(max(l, r), max(u, dn));
+    return zc < 0.8 * z ? zc : z;
+}
+
+// The volume at a view depth: S and T (nearer than the first slice's far
+// face, a share of it).
+vec4 fogAt(vec2 cuv, float z) {
+    float t = fogDepth.y < 1e-3 ? z / fogDepth.x : log(1.0 + max(z, 0.0) * (exp(fogDepth.y) - 1.0) / fogDepth.x) / fogDepth.y;
+    float f = clamp(t, 0.0, 1.0) * fogGrid.z;
+    vec4 v = textureLod(fogVolume, vec3(cuv, (f - 0.5) / fogGrid.z), 0.0);
+    float k0 = clamp(f, 0.0, 1.0);
+    return vec4(max(v.rgb, vec3(0.0)) * k0, mix(1.0, clamp(v.a, 0.0, 1.0), k0));
+}
+
+// The near-field light at this pixel: the four half-resolution texels around
+// it, weighted by how close their depth is to the pixel's.
+vec3 fogNear(float z) {
+    vec2 hp = vUV * fogNearSize.xy - 0.5;
+    vec2 f = fract(hp);
+    vec2 base = (floor(hp) + 0.5) / fogNearSize.xy;
+    vec2 px = 1.0 / fogNearSize.xy;
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    vec3 best = vec3(0.0);
+    float bestDz = 1e9;
+    for (int k = 0; k < 4; ++k) {
+        vec2 o = vec2(float(k & 1), float(k >> 1));
+        vec2 uv = base + o * px;
+        float zt = textureLod(linDepth, uv, 0.0).r;
+        vec3 s = textureLod(nearTex, uv, 0.0).rgb;
+        float wb = (o.x > 0.5 ? f.x : 1.0 - f.x) * (o.y > 0.5 ? f.y : 1.0 - f.y);
+        float dz = abs(min(zt, 1e5) - min(z, 1e5));
+        float wz = 1.0 / (1.0 + dz / (0.05 * min(z, 1e5) + 0.3));
+        sum += s * wb * wz;
+        wsum += wb * wz;
+        if (dz < bestDz) { bestDz = dz; best = s; }
+    }
+    return wsum > 1e-3 ? sum / wsum : best;
+}
+
+// Value noise (a hash lattice, smooth cells) for the far surface's patches.
+float fogHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float fogNoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(fogHash(i), fogHash(i + vec2(1.0, 0.0)), f.x),
+               mix(fogHash(i + vec2(0.0, 1.0)), fogHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void main() {
+    vec4 c = texture(colorTex, vUV);
+    float zRaw = fogViewZ(vUV);
+    float zg = fogGapZ(zRaw);
+    bool sky = zg >= 1e5;
+    float z = sky ? fogDepth.x : zg;
+    vec2 cuv = (vUV - worldRect.xy) / worldRect.zw;
+    vec4 v = fogAt(cuv, z);
+    vec3 S = v.rgb;
+    float T = v.a;
+    vec3 lin0 = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2));
+    vec3 base = lin0;
+    // The sky (and the far horizon polygon): the dome already holds the clear
+    // atmosphere above the horizon, so it takes the clear haze and air only
+    // near the horizon (fading over a few degrees above it); the weather fog,
+    // the mist and the humid air are not in it, so it takes their share whole
+    // and what of them lies beyond the far plane. Stars and the moon fade with
+    // them, and the sky behind fogged roofs is never darker than the air.
+    if (sky || z > 0.95 * fogDepth.x) {
+        vec2 ndc = cuv * 2.0 - 1.0;
+        vec3 dw = normalize(viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0));
+        float L = fogDepth.x * length(vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0));
+        float s = dw.y;
+        float y0 = fogSkyEye.x;
+        float hd = max(fogSkyDust.x, 1.0);
+        float tauW = fogLayerTau(fogSkyWeather.x * exp(-max(y0 - fogSkyEye.y, 0.0) / max(fogSkyWeather.y, 1.0)),
+                                 max(fogSkyWeather.y, 1.0), s, L);
+        float tauLow = fogLayerTau(fogSkyEye.z, max(fogSkyEye.w, 1.0), s, L);
+        float tauClear = fogLayerTau(fogSkyClear.x * exp(-max(y0, -50.0) / fogSkyClear.y), fogSkyClear.y, s, L) +
+                         fogLayerTau(fogSkyClear.w * exp(-max(y0, 0.0) / hd), hd, s, L) +
+                         fogLayerTau(fogSkyClear.z * exp(-max(y0, 0.0) / 8000.0), 8000.0, s, L);
+        float wet = (tauW + tauLow) / max(tauW + tauLow + tauClear, 1e-9);
+        float w = mix(exp(-max(s, 0.0) / fogApply.z), 1.0, wet);
+        vec3 airC = S / max(1.0 - T, 1e-3);
+        if (sky && s < 0.0) {
+            // Under the horizon: a far surface where the ray meets sea level
+            // (or the far end, if nearer), darker than the dome's fill and in
+            // patches, with the clear haze and the weather fog from the far
+            // end out to it, so the band brightens and pales toward the
+            // horizon line instead of standing as one flat colour.
+            float Lg = clamp(max(y0, 2.0) / max(-s, 1e-5), L, 2e5);
+            vec2 hit = fogSkyDust.yz + dw.xz * Lg;
+            float n = 0.6 * fogNoise(hit * (1.0 / 1800.0)) + 0.4 * fogNoise(hit * (1.0 / 520.0) + 7.3);
+            base = lin0 * mix(vec3(0.42, 0.47, 0.55), vec3(0.62, 0.66, 0.72), n);
+            float yMid = 0.5 * max(y0 + s * L, 0.0);
+            float sig = fogSkyClear.x * exp(-yMid / fogSkyClear.y) + fogSkyClear.z * exp(-yMid / 8000.0) +
+                        fogSkyClear.w * exp(-yMid / hd) +
+                        fogSkyWeather.x * exp(-max(yMid - fogSkyEye.y, 0.0) / max(fogSkyWeather.y, 1.0));
+            float rest = 1.0 - exp(-sig * (Lg - L) * mix(0.8, 1.25, n));
+            S += T * airC * rest;
+            T *= 1.0 - rest;
+        } else {
+            S *= w;
+            T = mix(1.0, T, w);
+            // Beyond the far plane the weather fog goes on: the rest of its
+            // layer along the ray, in the colour of the air this column
+            // already holds.
+            float yEnd = y0 + L * s;
+            float sigEnd = fogSkyWeather.x * exp(-max(yEnd - fogSkyEye.y, 0.0) / max(fogSkyWeather.y, 1.0));
+            float tauB = sigEnd * fogSkyWeather.y / max(s, 0.03);
+            float rest = 1.0 - exp(-tauB);
+            S += T * airC * rest * wet;
+            T *= 1.0 - rest * wet;
+        }
+    }
+    if (fogApply.w > 0.5) S += fogNear(sky ? 1e6 : z);
+    // The night glow: the blurred light of the frame, laid into the fog in
+    // front of the nearer of this pixel and the light's own depth.
+    if (fogGlow.x > 0.0) {
+        vec4 g = textureLod(glowTex, vUV, 0.0);
+        float lg = dot(g.rgb, kApplyLuma);
+        if (lg > 1e-6) {
+            float zs = min(g.a / lg, z);
+            S += g.rgb * ((1.0 - fogAt(cuv, zs).a) * fogGlow.x);
+        }
+    }
+    // The highlights expanded back as far as the fog leaves them; the cap's
+    // share given back where the fog leaves the pixel (identity unfogged).
+    vec3 e = fogExpand(base);
+    vec3 lin = mix(base, e, T);
+    vec3 outLin = fogApply.y > 0.5 ? S : fogShoulder(lin * T + S) + (base - fogShoulder(e)) * T;
+    vec3 col = pow(max(outLin, vec3(0.0)), vec3(1.0 / 2.2));
+    if (fogApply.x > 0.5) {
+        float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+        float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+        col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
+    }
+    fragColor = vec4(clamp(col, 0.0, 1.0), 1.0 - (1.0 - clamp(c.a, 0.0, 1.0)) * T);
+}
+)";
+
+} // namespace Poseidon::gl33lighting

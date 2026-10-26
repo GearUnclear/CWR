@@ -1,0 +1,16 @@
+; debug action: hand the Outpost garrison full knowledge of you (the engine's
+; `reveal` = AddTarget accuracy 1) every 5 s for 30 s. knowsAbout 1 sits in
+; the YELLOW band (0.5..1.5), so the zone turns YELLOW at once and RED when
+; the 20 s disengage window expires - the same FSM path a half-seen fighter
+; takes. Fire a shot at them instead to jump straight past 1.5.
+? QRF_REVEAL_ACTIVE : exit
+QRF_REVEAL_ACTIVE = true
+hint "DEBUG: revealing you to every Outpost garrison group for 30 s.\n\nknowsAbout -> 1.0 = YELLOW now; RED when the 20 s YELLOW window runs out; qrf.sqs then fields the convoy within 5 s. Watch the title line and the map."
+QRF_rN = 0
+#rl
+{_x reveal aP} forEach (gmGarrisonGroups QRF_ZO)
+~5
+QRF_rN = QRF_rN + 1
+? QRF_rN < 7 : goto "rl"
+QRF_REVEAL_ACTIVE = false
+exit

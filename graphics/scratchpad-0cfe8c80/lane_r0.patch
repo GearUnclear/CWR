@@ -1,0 +1,2790 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index 55655c3..a655c5e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -237,6 +237,17 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
+                 return Off("sky density map building");
+             return On("cloud cover");
+ 
++        case Feature::VolFog:
++            // The fog is applied in the post pass (the Air stage) with the
++            // world depth: no post pass, no depth (a vehicle interior) or a
++            // screen overlay, and the forward fog keeps its classic edge.
++            // Otherwise it always runs: it replaces the distance fog.
++            if (!t.postEffects)
++                return Off("post effects off");
++            if (!WorldVisible(in, why))
++                return Off(why);
++            return On("world drawn (replaces the distance fog)");
++
+         case Feature::Sharpen:
+             // One sharpen pass: TAA's own when it runs, this one otherwise.
+             if (FeatureOn(t.features, Feature::Taa) && WorldVisible(in, why))
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 0a55d20..bcda103 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -77,6 +77,13 @@ constexpr FeatureInfo kFeatures[] = {
+      &FS::terrainDetail, "ground"},
+     {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
+      "sharpen"},
++    // The look lane's volumetric fog (VolumetricFog.hpp): a froxel volume of
++    // haze, weather fog and valley mist lit by the sun, the sky and the local
++    // lights, applied in the post pass's Air stage in place of the flat
++    // distance fog (which keeps only the view-distance edge). It supersedes
++    // B8's air pass (airBeams, airHaze, valleyMist) on the same stage.
++    {Feature::VolFog, "volFog", "Volumetric fog and atmosphere", "fog", "Sky and air", "look-fog", true, &FS::volFog,
++     "air"},
+ };
+ static_assert(sizeof(kFeatures) / sizeof(kFeatures[0]) == kFeatureCount, "one FeatureInfo per Feature");
+ 
+@@ -206,6 +213,18 @@ struct KeyTable
+                         "the mean share of sky the sea reflects; the waves' share stays", &LT::seaSky, 0.0f, 2.0f),
+             MakeSubKnob(Feature::SeaWaves, "seaSheen", "Sea sheen",
+                         "the broad sheen toward the sun, in the original hue", &LT::seaSheen, 0.0f, 3.0f),
++            MakeSubKnob(Feature::VolFog, "fogDensity", "Fog density",
++                        "every part of the air: haze, weather fog and mist; 1 = shipped", &LT::fogDensity, 0.0f, 4.0f),
++            MakeSubKnob(Feature::VolFog, "fogQuality", "Fog quality",
++                        "froxel grid: 0 = 16 px cells, 48 slices; 1 = 12 px, 64; 2 = 8 px, 96", &LT::fogQuality, 0.0f,
++                        2.0f),
++            MakeSubKnob(Feature::VolFog, "fogMist", "Valley mist",
++                        "the morning, evening and weather mist pooled on low ground", &LT::fogMist, 0.0f, 4.0f),
++            MakeSubKnob(Feature::VolFog, "fogSun", "Sun in the air",
++                        "the sun's light scattered by the air: beams and the glow toward the sun", &LT::fogSun, 0.0f,
++                        4.0f),
++            MakeSubKnob(Feature::VolFog, "fogLights", "Lights in the fog",
++                        "lamps, headlights and fires glowing in the air", &LT::fogLights, 0.0f, 4.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+index e26412e..89af3fb 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.hpp
+@@ -60,6 +60,7 @@ enum class Feature : std::uint8_t
+     SkyCloudShadows,
+     TerrainDetail,
+     Sharpen,
++    VolFog,
+     Count
+ };
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 117b581..b48ba9f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -94,6 +94,7 @@ struct FeatureSet
+     float skyCloudShadows = 1.0f; // B10 cloud shadows that match the sky
+     float terrainDetail = 1.0f;   // B11 grass and rock grain on terrain
+     float sharpen = 1.0f;         // B11 luma sharpening when TAA is off
++    float volFog = 1.0f;          // look-fog: volumetric fog and atmosphere in place of the flat distance fog
+ };
+ 
+ // Art-direction knobs, live-tunable from the dev overlay Lighting tab. The
+@@ -153,6 +154,17 @@ struct LightingTuning
+     float seaRelief = 1.0f;
+     float seaSky = 1.0f;
+     float seaSheen = 1.0f;
++    // Volumetric fog and atmosphere (FeatureSet::volFog, VolumetricFog.hpp)
++    // sub-knobs: the density of every part of the medium (haze, weather fog,
++    // mist; 1 = shipped), the froxel grid's quality (0 coarse, 1 shipped,
++    // 2 fine), the morning and valley mist on its own, the sun's light in the
++    // air (beams and the glow toward the sun) and the glow of lamps,
++    // headlights and fires in it.
++    float fogDensity = 1.0f;
++    float fogQuality = 1.0f;
++    float fogMist = 1.0f;
++    float fogSun = 1.0f;
++    float fogLights = 1.0f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+index 5414f5d..f86723e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+@@ -18,7 +18,9 @@ constexpr PostStageInfo kStages[] = {
+     // in its own step (a pixel change).
+     {PostStage::Ao, "ao", "A3", true, false, Mark::AoEnd, Section::Ao},
+     {PostStage::Ssr, "ssr", "B6", false, false, Mark::SsrEnd, Section::Ssr},
+-    {PostStage::Air, "air", "B8", false, false, Mark::AirEnd, Section::Air},
++    // The look lane's volumetric fog lands the stage B8 planned for its air
++    // pass (EngineGL33_PostFog.cpp).
++    {PostStage::Air, "air", "look-fog", true, false, Mark::AirEnd, Section::Air},
+     {PostStage::Bloom, "bloom", "A3", true, false, Mark::BloomEnd, Section::Bloom},
+     {PostStage::Shafts, "shafts", "A3", true, false, Mark::ShaftsEnd, Section::Shafts},
+     {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
+@@ -79,7 +81,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+     // The stages that can ask for the pass ask by their knob, switch or debug
+     // view, whatever this frame's conditions then decide for them.
+     const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
+-                       in.temporal || in.lumaSharpen;
++                       in.temporal || in.lumaSharpen || in.fog;
+     if (!asked)
+         return plan;
+ 
+@@ -92,8 +94,14 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+     plan.bloomStrength = in.glow ? in.bloom : 0.0f;
+     if (plan.bloomStrength > 0.0f)
+         plan.runs |= Bit(PostStage::Bloom);
+-    // The shafts are depth tested glow toward a sun on screen.
+-    if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight)
++    // The fog volume is applied by the world depth, and a screen overlay
++    // drawn in the world pass (gunner optics) must not take it.
++    const bool fog = in.fog && in.worldDepth && in.glow;
++    if (fog)
++        plan.runs |= Bit(PostStage::Air);
++    // The shafts are depth tested glow toward a sun on screen; the fog's own
++    // sun light in the air replaces them.
++    if (!fog && in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight)
+         plan.runs |= Bit(PostStage::Shafts);
+     plan.runs |= Bit(PostStage::Composite);
+     // The resolve reprojects with the world depth (a vehicle interior cleared
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+index 672984f..3905262 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+@@ -28,7 +28,7 @@ enum class PostStage : std::uint8_t
+     TagReadout,    // SSR stencil tags (B6, only with ssr gated on)
+     Ao,            // ambient occlusion and its blur
+     Ssr,           // screen-space reflections (B6; before bloom, so reflected highlights bloom)
+-    Air,           // sun beams, headlight cones and haze (B8; replaces Shafts when on)
++    Air,           // the volumetric fog and atmosphere (look-fog, superseding B8's air pass; replaces Shafts when on)
+     Bloom,         // bloom chain
+     Shafts,        // the legacy sun shafts
+     CombatScatter, // combat light scattered in smoke and dust (B4)
+@@ -90,6 +90,12 @@ struct PostFrameInputs
+     // TAA is not running this frame) and its strength is above 0. The Sharpen
+     // stage then runs alone, on the composited frame.
+     bool lumaSharpen = false;
++    // The volumetric fog (FeatureSet::volFog and its frame gate, look-fog):
++    // the Air stage applies the fog volume to every pixel by its world depth
++    // and replaces the legacy shafts (its sun light in the air is the beams).
++    // It needs the world depth and no screen overlay; held off, the frame
++    // keeps the forward fog's classic edge (VolumetricFog.hpp).
++    bool fog = false;
+ };
+ 
+ // A frame's stages: which run and the strengths the composite uses.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+new file mode 100644
+index 0000000..f0dd875
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+@@ -0,0 +1,234 @@
++#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++
++float Clamp01(float x)
++{
++    return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x);
++}
++
++float Smooth(float e0, float e1, float x)
++{
++    const float t = Clamp01((x - e0) / (e1 - e0));
++    return t * t * (3.0f - 2.0f * t);
++}
++
++// Rayleigh scattering of air at sea level, green (1/m; Atmosphere.hpp).
++constexpr float kRayleighGreen = 13.558e-6f;
++constexpr float kRayleighHeight = 8000.0f;
++
++} // namespace
++
++FogGrid FogGridFor(int w, int h, float quality)
++{
++    FogGrid g;
++    if (w <= 0 || h <= 0)
++        return g;
++    const int q = std::clamp(static_cast<int>(std::lround(quality)), 0, 2);
++    static constexpr int kCell[3] = {16, 12, 8};
++    static constexpr int kSlices[3] = {48, 64, 96};
++    g.cellPixels = kCell[q];
++    g.slices = kSlices[q];
++    g.cellsX = std::max(1, (w + g.cellPixels - 1) / g.cellPixels);
++    g.cellsY = std::max(1, (h + g.cellPixels - 1) / g.cellPixels);
++    return g;
++}
++
++float FogSliceDepth(float t, float zFar, float k)
++{
++    if (k < 1e-3f)
++        return zFar * t;
++    return zFar * (std::exp(k * t) - 1.0f) / (std::exp(k) - 1.0f);
++}
++
++float FogSliceCoord(float z, float zFar, float k)
++{
++    if (zFar <= 0.0f)
++        return 0.0f;
++    if (k < 1e-3f)
++        return Clamp01(z / zFar);
++    return Clamp01(std::log(1.0f + std::max(z, 0.0f) * (std::exp(k) - 1.0f) / zFar) / k);
++}
++
++float FogDepthK(float zFar, int slices)
++{
++    if (slices <= 0 || zFar <= 0.0f)
++        return 1e-3f;
++    const float first = kFogFirstSliceMetres * 64.0f / static_cast<float>(slices);
++    const float t = 1.0f / static_cast<float>(slices);
++    if (zFar * t <= first)
++        return 1e-3f; // even slices are already this fine
++    // FogSliceDepth(t) falls as k grows: bisect for the first slice's depth.
++    float lo = 1e-3f, hi = 30.0f;
++    for (int i = 0; i < 60; ++i)
++    {
++        const float mid = 0.5f * (lo + hi);
++        if (FogSliceDepth(t, zFar, mid) > first)
++            lo = mid;
++        else
++            hi = mid;
++    }
++    return 0.5f * (lo + hi);
++}
++
++float WeatherVisibility(float fog, float rain, float viewDistance)
++{
++    // Landscape.cpp's tactical range with the night factor at 1.
++    const float fogVisibility = 1.0f - Clamp01(fog) * 0.95f;
++    const float r = Clamp01(rain);
++    const float noFog = (1.0f - r) * viewDistance + kRainVisibility * r;
++    const float defaultDistance = std::min(900.0f, noFog) * fogVisibility;
++    const float currentDistance = noFog * fogVisibility;
++    float range = defaultDistance;
++    constexpr float kThreshold = 0.6f;
++    if (fogVisibility > kThreshold)
++    {
++        const float i = (fogVisibility - kThreshold) / (1.0f - kThreshold);
++        range = i * currentDistance + (1.0f - i) * defaultDistance;
++    }
++    return std::max(range, 0.1f);
++}
++
++float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg)
++{
++    const bool east = sunAzimuthDeg > 0.0f && sunAzimuthDeg < 180.0f;
++    if (!east)
++        return 0.0f;
++    return Smooth(-6.0f, -2.0f, sunElevationDeg) * (1.0f - Smooth(8.0f, 24.0f, sunElevationDeg));
++}
++
++float FogEdgeScale(float fogStart, float fogEnd)
++{
++    const float range = fogEnd - fogStart;
++    if (range <= 1e-3f || fogEnd <= 0.0f)
++        return 1.0f;
++    const float edge = fogEnd * (1.0f - kFogEdgeStart);
++    return std::max(1.0f, range / std::max(edge, 1e-3f));
++}
++
++FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool applied)
++{
++    FogMedium m;
++    m.zFar = std::max(in.fogEnd, 50.0f);
++    if (!applied)
++        return m;
++    const float density = std::max(t.fogDensity, 0.0f);
++    const float overcast = 1.0f - Clamp01(in.skyThrough);
++    const float rain = Clamp01(in.rain);
++    const float fog = Clamp01(in.fog);
++    const float morning = FogMorningWeight(in.sunElevationDeg, in.sunAzimuthDeg);
++    m.morning = morning;
++    m.skyThrough = Clamp01(in.skyThrough);
++
++    // Haze: thicker under cloud, in rain and in the humid morning air.
++    m.hazeSigma = kHazeClear * density * (1.0f + 1.4f * overcast) * (1.0f + 0.4f * morning) * (1.0f + rain);
++    m.rayleigh = kRayleighScale * density;
++    // The humid air near the ground: at a low sun (the golden hours, where
++    // beams fall through trees), at night (headlight cones), under a grey sky
++    // and in rain.
++    const float lowSun = Smooth(28.0f, 8.0f, in.sunElevationDeg) * Smooth(-6.0f, 0.0f, in.sunElevationDeg);
++    const float groundWeight =
++        std::min(std::max(lowSun, 0.9f * Clamp01(in.nightEffect)) + 0.3f * overcast + 0.5f * rain, 1.5f);
++    m.groundSigma = kGroundHaze * groundWeight * density;
++
++    // Weather fog: the part of the classic tactical visibility the weather
++    // takes away, at the fog floor: half of a surface is gone a little before
++    // two thirds of the classic fog end (where its linear fog is half), and
++    // the forward fog's edge hides the rest.
++    const float vd = std::max(in.viewDistance, 100.0f);
++    const float visibility = WeatherVisibility(fog, rain, vd);
++    m.weatherSigma = kWeatherExtinction * std::max(0.0f, 1.0f / visibility - 1.0f / vd) * density;
++    const float wFog = fog / std::max(fog + rain, 1e-4f);
++    m.weatherHeight = kWeatherFogHeight * wFog + kRainHazeHeight * (1.0f - wFog);
++
++    // Valley mist: dawn, a little at dusk and at night, under a grey sky, in
++    // rain and in fog.
++    const bool west = !(in.sunAzimuthDeg > 0.0f && in.sunAzimuthDeg < 180.0f);
++    const float evening = west ? Smooth(6.0f, 0.0f, in.sunElevationDeg) : 0.0f;
++    const float night = Clamp01(in.nightEffect);
++    const float weight =
++        std::min(morning + 0.35f * std::max(evening, night) + 0.25f * overcast + 0.5f * rain + 1.5f * fog, 2.0f);
++    m.mistSigma = kMistSigma * weight * std::max(t.fogMist, 0.0f) * density;
++    m.mistDepth = kMistLayerDepth + 60.0f * fog + 20.0f * rain;
++    m.mistFall = kMistLayerFall * (1.0f + fog);
++    m.mistNoise = 0.8f - 0.5f * fog;
++
++    m.sun = std::max(t.fogSun, 0.0f);
++    m.sky = 1.0f;
++    m.lights = std::max(t.fogLights, 0.0f);
++    m.fogEdgeScale = FogEdgeScale(in.fogStart, in.fogEnd);
++    return m;
++}
++
++std::vector<float> BuildFogFloor(const float* heights, int size, float cellSize, float radius, float blur)
++{
++    std::vector<float> out;
++    if (!heights || size <= 1 || cellSize <= 0.0f)
++        return out;
++    const size_t n = static_cast<size_t>(size) * static_cast<size_t>(size);
++    const int r = std::max(1, static_cast<int>(std::lround(radius / cellSize)));
++    const int b = std::max(0, static_cast<int>(std::lround(blur / cellSize)));
++    std::vector<float> tmp(n);
++    out.assign(n, 0.0f);
++    // The lowest ground in a square window: across, then down.
++    for (int z = 0; z < size; ++z)
++        for (int x = 0; x < size; ++x)
++        {
++            float m = heights[static_cast<size_t>(z) * size + x];
++            for (int k = std::max(0, x - r); k <= std::min(size - 1, x + r); ++k)
++                m = std::min(m, heights[static_cast<size_t>(z) * size + k]);
++            tmp[static_cast<size_t>(z) * size + x] = m;
++        }
++    for (int z = 0; z < size; ++z)
++        for (int x = 0; x < size; ++x)
++        {
++            float m = tmp[static_cast<size_t>(z) * size + x];
++            for (int k = std::max(0, z - r); k <= std::min(size - 1, z + r); ++k)
++                m = std::min(m, tmp[static_cast<size_t>(k) * size + x]);
++            // Water holds its mist at its surface.
++            out[static_cast<size_t>(z) * size + x] = std::max(m, 0.0f);
++        }
++    if (b == 0)
++        return out;
++    // A box blur, across then down, so the layer's top runs smooth.
++    for (int z = 0; z < size; ++z)
++        for (int x = 0; x < size; ++x)
++        {
++            float s = 0.0f;
++            int c = 0;
++            for (int k = std::max(0, x - b); k <= std::min(size - 1, x + b); ++k, ++c)
++                s += out[static_cast<size_t>(z) * size + k];
++            tmp[static_cast<size_t>(z) * size + x] = s / static_cast<float>(c);
++        }
++    for (int z = 0; z < size; ++z)
++        for (int x = 0; x < size; ++x)
++        {
++            float s = 0.0f;
++            int c = 0;
++            for (int k = std::max(0, z - b); k <= std::min(size - 1, z + b); ++k, ++c)
++                s += tmp[static_cast<size_t>(k) * size + x];
++            out[static_cast<size_t>(z) * size + x] = s / static_cast<float>(c);
++        }
++    return out;
++}
++
++float FogExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround)
++{
++    const float above = std::max(y - floorY, 0.0f);
++    float sigma = m.hazeSigma * std::exp(-std::max(y, -50.0f) / m.hazeHeight);
++    sigma += m.groundSigma * std::exp(-std::max(aboveGround, 0.0f) / std::max(m.groundHeight, 1.0f));
++    sigma += m.rayleigh * kRayleighGreen * std::exp(-std::max(y, -50.0f) / kRayleighHeight);
++    sigma += m.weatherSigma * std::exp(-above / std::max(m.weatherHeight, 1.0f));
++    const float overTop = above - m.mistDepth;
++    sigma += m.mistSigma * (overTop <= 0.0f ? 1.0f : std::exp(-overTop / std::max(m.mistFall, 1.0f)));
++    return sigma;
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+new file mode 100644
+index 0000000..b35f104
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+@@ -0,0 +1,191 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++
++#include <vector>
++
++// Volumetric fog and atmosphere (feature switch volFog, the look lane "fog";
++// the GL side is EngineGL33_PostFog.cpp and EngineGL33_PostFogShaders.cpp).
++//
++// The flat distance fog of the original (a linear blend toward one colour
++// between two distances) is replaced by a medium that fills a froxel volume,
++// a grid of cells aligned with the screen and sliced in depth, every frame:
++//
++//   - haze: aerosol extinction thinning with height (scale height
++//     kHazeScaleHeight), thin on a clear day, thicker under an overcast, in
++//     rain and in the humid morning air;
++//   - Rayleigh air: the physical sea-level scattering of air molecules,
++//     strongest in blue, so far ground takes the blue of the sky over a few
++//     kilometres;
++//   - weather fog: setFog and rain, at the density that gives the classic
++//     engine's tactical visibility (WeatherVisibility) at sea level, thinning
++//     upward so hilltops stand out of it;
++//   - valley mist: a flat-topped layer above the lowest ground nearby (the
++//     fog floor map, BuildFogFloor) that pools in valleys, on lakes and the
++//     sea at dawn, a little at dusk and at night, in fog and in rain, broken
++//     into banks by drifting noise.
++//
++// Each cell's air takes the sky's own colour at the horizon in its azimuth
++// (the sky table's aerial perspective, with its glow toward the sun), so the
++// far end of every line of sight melts into the sky behind it. The share of
++// that light that is scattered sunlight (most of it under a clear sky, little
++// under an overcast) goes dark in the shade of the shadow-map cascades, the
++// long canopy shadows, the terrain horizon map and the cloud field, so light
++// falls through trees and over ridges in beams and a ridge's shadow lies in
++// the haze; the mist and fog above a cell take light out of its sun. In the
++// near field the sun's Mie forward lobe adds its own glow (strong toward a
++// low sun), and the frame's lamps, headlights and fires glow in the air. A
++// front-to-back integration gives each cell the light scattered toward the
++// eye and the transmittance from the eye to its far face; the post pass
++// applies C' = C T + S to every pixel by its depth, and the sky near the
++// horizon takes the volume's far end (above it the dome already holds the
++// whole atmosphere's light).
++//
++// The forward shaders keep the classic fog only for the view-distance edge
++// (FogEdgeScale): the world's end and object fade-in stay hidden, everything
++// before them is the volume's.
++//
++// Pure: no GL, no engine state, so the medium's rules, the slice layout and
++// the fog floor can be tested.
++
++namespace Poseidon::remaster
++{
++
++// ---- The froxel grid ---------------------------------------------------------
++
++struct FogGrid
++{
++    int cellsX = 0, cellsY = 0; // over the 3D viewport
++    int slices = 0;             // depth slices, a multiple of kFogSlicesPerDraw
++    int cellPixels = 0;         // frame-target pixels per cell side
++};
++
++// The injection and the integration each write this many slices per draw
++// (eight colour attachments, the GL 3.3 minimum).
++constexpr int kFogSlicesPerDraw = 8;
++// The grid for a viewport of w x h pixels at a quality (0 coarse, 1 shipped,
++// 2 fine; the fogQuality knob, rounded and clamped): cells of 16, 12 or 8
++// pixels, 48, 64 or 96 slices.
++FogGrid FogGridFor(int w, int h, float quality);
++
++// Depth slices are exponential: the view depth (metres along the view axis) of
++// the slice coordinate t in [0, 1] is far * (exp(k t) - 1) / (exp(k) - 1), so
++// the cells near the eye are about a metre deep and the last ones hundreds.
++float FogSliceDepth(float t, float zFar, float k);
++// The inverse: the slice coordinate of a view depth (clamped to [0, 1]).
++float FogSliceCoord(float z, float zFar, float k);
++// The k that makes the first of `slices` slices kFogFirstSliceMetres deep at
++// 64 slices (deeper with fewer slices), for a far end at zFar.
++float FogDepthK(float zFar, int slices);
++constexpr float kFogFirstSliceMetres = 0.9f;
++
++// ---- The medium ----------------------------------------------------------------
++
++// Scale heights (m) and shapes.
++constexpr float kHazeScaleHeight = 1200.0f; // aerosol haze
++constexpr float kWeatherFogHeight = 450.0f; // setFog: thins upward from the fog floor
++constexpr float kRainHazeHeight = 900.0f;   // rain haze
++constexpr float kGroundHazeHeight = 50.0f;  // the humid air near the ground: its scale height above the ground
++constexpr float kMistLayerDepth = 45.0f;    // valley mist: the layer's top above the fog floor
++constexpr float kMistLayerFall = 28.0f;     // and its exponential fall above the top
++constexpr float kFogFloorRadius = 700.0f;   // the fog floor: the lowest ground within this radius
++constexpr float kFogFloorBlur = 350.0f;     // smoothed over this radius
++// Haze extinction at sea level on a clear day (1/m): a hazy summer visibility
++// near 9 km, so ridges 2 to 4 km out sit deep in the air and fade into the sky.
++constexpr float kHazeClear = 4.5e-4f;
++// Physical Rayleigh scattering of air at sea level (1/m, red, green, blue;
++// Atmosphere.hpp's kRayleighScattering) times this.
++constexpr float kRayleighScale = 2.5f;
++// The humid air near the ground at full weight (1/m at the ground): at a low
++// sun and at night the air under the first tens of metres holds the light
++// that makes beams through trees and headlight cones.
++constexpr float kGroundHaze = 1.3e-3f;
++// Valley mist extinction inside the layer at full weight (1/m).
++constexpr float kMistSigma = 6.0e-3f;
++// Mie phase: the forward lobe's asymmetry and the back lobe's share.
++constexpr float kFogMieG = 0.78f;
++constexpr float kFogBackShare = 0.12f;
++// The classic engine's visibility in rain at full density (Landscape.cpp: 350 m).
++constexpr float kRainVisibility = 350.0f;
++// The weather fog's extinction times the visibility it takes away: what the
++// weather leaves of a surface at the classic fog end is about e^-3.2.
++constexpr float kWeatherExtinction = 3.2f;
++// The forward fog keeps the view-distance edge: it starts at this share of
++// the fog end.
++constexpr float kFogEdgeStart = 0.82f;
++
++struct FogInputs
++{
++    float sunElevationDeg = 90.0f;
++    float sunAzimuthDeg = 180.0f; // 0 north, 90 east
++    float nightEffect = 0.0f;     // 0 day .. 1 night
++    float skyThrough = 1.0f;      // 1 clear .. 0 overcast
++    float fog = 0.0f;             // setFog 0..1
++    float rain = 0.0f;            // rain density 0..1
++    float viewDistance = 1500.0f; // the user's view distance (tactical range, m)
++    float fogStart = 0.0f;        // the classic fog's start and end (Scene fog range, m)
++    float fogEnd = 1500.0f;
++};
++
++struct FogMedium
++{
++    // The volume's far end (m of view depth): the classic fog end, the far
++    // plane of the world's projection; the sky is taken at this distance.
++    float zFar = 1500.0f;
++    float hazeSigma = 0.0f; // 1/m at sea level
++    float hazeHeight = kHazeScaleHeight;
++    float rayleigh = 0.0f;    // times the physical sea-level Rayleigh scattering
++    float groundSigma = 0.0f; // 1/m at the ground (the humid air near it)
++    float groundHeight = kGroundHazeHeight;
++    float weatherSigma = 0.0f; // 1/m at the fog floor
++    float weatherHeight = kWeatherFogHeight;
++    float mistSigma = 0.0f; // 1/m inside the valley mist layer
++    float mistDepth = kMistLayerDepth;
++    float mistFall = kMistLayerFall;
++    float mistNoise = 0.0f; // 0 an even layer .. 1 broken into banks
++    float sun = 1.0f;       // the sun's light in the air
++    float sky = 1.0f;       // the sky's light in the air
++    float lights = 1.0f;    // lamps, headlights and fires
++    float g = kFogMieG;
++    // The forward fog factor's scale (>= 1): the classic linear fog's start
++    // moves out to kFogEdgeStart of its end. 1 = the classic fog.
++    float fogEdgeScale = 1.0f;
++    // Morning weight of the mist (0..1), for logs.
++    float morning = 0.0f;
++    // The sky-through (1 clear .. 0 overcast): how much of the air's light is
++    // scattered sunlight that shadows take away.
++    float skyThrough = 1.0f;
++};
++
++// The classic engine's tactical visibility (m) for setFog `fog`, rain
++// `rain` and a view distance (Landscape.cpp, the night factor at 1): the
++// distance at which its fog ends.
++float WeatherVisibility(float fog, float rain, float viewDistance);
++// The mist's morning weight: an eastern sun from 6 degrees under the horizon
++// (full from 2 under to 8 above), gone by 24 degrees.
++float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg);
++// The forward fog factor's scale that moves the classic start to
++// kFogEdgeStart of the end (1 when the range is empty).
++float FogEdgeScale(float fogStart, float fogEnd);
++// The frame's medium from the weather, the time of day and the knobs.
++// `applied` false (the pass does not run this frame) gives the classic fog:
++// fogEdgeScale 1, nothing else read.
++FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool applied);
++
++// ---- The fog floor ----------------------------------------------------------
++
++// The valley mist's floor over a heights grid (size x size, cellSize metres
++// apart, row-major by z then x as TerrainHorizonMap::height): the lowest
++// ground within `radius` metres (a square window), never below sea level (a
++// lake or the sea holds its mist at the water), smoothed by a box blur of
++// `blur` metres. Empty for an invalid grid.
++std::vector<float> BuildFogFloor(const float* heights, int size, float cellSize, float radius = kFogFloorRadius,
++                                 float blur = kFogFloorBlur);
++
++// Extinction (1/m) of the medium at an absolute height `y` over a fog floor
++// `floorY` and `aboveGround` metres over the ground, without the mist's
++// noise: the C++ mirror of the injection's density (Rayleigh at green), for
++// the tests and for AI sight later.
++float FogExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround = 1e4f);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 7467949..1a2a8eb 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -42,6 +42,7 @@ enum PixelShaderSpecular
+ #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+ #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
++#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+ 
+ #include <memory>
+ 
+@@ -1009,6 +1010,54 @@ class EngineGL33 : public Engine
+     void PostTemporal(const PostFrame& f);
+     void PostSharpen(const PostFrame& f);
+     void PostDebugView(const PostFrame& f);
++    // The volumetric fog (the Air stage, EngineGL33_PostFog.cpp; feature switch
++    // volFog, Graphics/Remaster/VolumetricFog.hpp): a froxel volume lit and
++    // integrated every frame and applied to every pixel by its depth, into
++    // fog.outTex, which the bloom and the composite then read in place of the
++    // resolved frame.
++    void PostFog(const PostFrame& f);
++    // The frame's medium and the forward fog's edge (LitConst::Haze), once per
++    // frame from UploadLitFrameConstants, with the gates.
++    void UpdateFogMedium();
++    bool EnsureFogResources(int w, int h, const Poseidon::remaster::FogGrid& grid);
++    void DestroyFogResources();
++    void UpdateFogFloor();
++    // The colour the stages after the Air stage read: the fogged frame when
++    // the fog ran this frame, else the resolved frame.
++    unsigned int PostSceneTex(const PostFrame& f) const;
++    struct FogState
++    {
++        // The volumes: the injection (ping-pong, last frame's is the history)
++        // and the integration, RGBA16F, cells x cells x slices; one FBO per
++        // eight slices of each (eight colour attachments, one slice each).
++        Poseidon::remaster::FogGrid grid;
++        unsigned int injectTex[2] = {}, integTex = 0;
++        std::vector<unsigned int> injectFbo[2], integFbo;
++        int current = 0;
++        // The fogged frame (RGBA8, full resolution).
++        unsigned int outTex = 0, outFbo = 0;
++        int outW = 0, outH = 0;
++        // The fog floor (R32F, the terrain map's grid) and the map it was built from.
++        unsigned int floorTex = 0;
++        const Poseidon::remaster::TerrainHorizonMap* floorFor = nullptr;
++        float floorCell = 0.0f;
++        int floorSize = 0;
++        unsigned int progInject = 0, progIntegrate = 0, progApply = 0;
++        bool programsTried = false;
++        bool unavailable = false;
++        // The frame's medium (UpdateFogMedium) and whether the fog applies.
++        Poseidon::remaster::FogMedium medium;
++        std::uint32_t mediumFrame = 0;
++        bool on = false;
++        // The last applied frame (PostSceneTex) and its camera and volume, for
++        // the next frame's reprojection.
++        std::uint32_t appliedFrame = 0xffffffffu;
++        bool historyValid = false;
++        float prevRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // world to view, rows
++        float prevPos[3] = {0, 0, 0};
++        float prevP11 = 1.0f, prevP22 = 1.0f, prevFar = 1.0f, prevK = 1.0f;
++        std::uint32_t sequence = 0;
++    } _fog;
+     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
+     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
+     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 3e68a2c..fea233f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -405,6 +405,7 @@ void EngineGL33::DeinitLightingResources()
+     DeinitLightTiles();
+     DeinitSkyClouds();
+     DeinitCanopy();
++    DestroyFogResources();
+     _post.unavailable = false;
+     if (_shadowCompareSampler)
+     {
+@@ -815,6 +816,9 @@ void EngineGL33::UploadLitFrameConstants()
+     // Long tree shadows (B9): the sun-visibility map, rebuilt when the sun or
+     // the camera moved enough; zero while the switch or its gate is off.
+     UploadLitCanopy(toSun, _featureGates.inputs.sunElevationDeg, _featureGates.inputs.skyThrough);
++    // The volumetric fog (look-fog): the frame's medium, and the forward fog
++    // keeps only its view-distance edge while the fog volume is applied.
++    UpdateFogMedium();
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index aa784c1..de05aee 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -38,6 +38,10 @@ enum class FragmentPiece : int
+ const char* RemasterFragmentPiece(FragmentPiece piece);
+ 
+ // The pieces kept in files of their own (read them through RemasterFragmentPiece).
++// The LitConstants block and the terrain and clouds piece are named here too:
++// the post fog pass pastes them (kPostShaders).
++extern const char kLitConstantsBlockGLSL[];
++extern const char kRemasterTerrainCloudsGLSL[];
+ extern const char kRemasterSkyGLSL[];
+ extern const char kRemasterLightsGLSL[];
+ extern const char kRemasterSurfaceGLSL[];
+@@ -50,6 +54,13 @@ extern const char kPostSkyViewMeanMainGLSL[];
+ // The canopy's sun-visibility pass (EngineGL33_PostCanopyShaders.cpp; read it
+ // through PostShaderSource).
+ extern const char kPostCanopySunGLSL[];
++// The volumetric fog (the Air stage, EngineGL33_PostFogShaders.cpp; read them
++// through PostShaderSource).
++extern const char kPostFogInjectInputsGLSL[];
++extern const char kPostFogSkyInputsGLSL[];
++extern const char kPostFogInjectMainGLSL[];
++extern const char kPostFogIntegrateGLSL[];
++extern const char kPostFogApplyGLSL[];
+ 
+ // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
+ // layout below. Every shader that reads the rig pastes this string instead of
+@@ -79,6 +90,12 @@ enum class PostShader : int
+     // The canopy's sun-visibility map (B9). Not a post stage: it runs before
+     // the world when the sun or the camera moved (EngineGL33_Canopy.cpp).
+     CanopySun,
++    // The volumetric fog (the Air stage, EngineGL33_PostFog.cpp): the froxel
++    // volume's lighting, eight slices per draw; its front-to-back integration;
++    // and the full-resolution apply by each pixel's depth.
++    FogInject,
++    FogIntegrate,
++    FogApply,
+     Count,
+ };
+ // The override file stem (vsPost, psPostAo, ...) and the assembled source.
+@@ -121,6 +138,10 @@ constexpr int kCanopyVisUnit = 15;
+ // kLightDataUnit is free: the light list keeps its lights in a uniform block
+ // (kLightListBinding), which the fragments of a tile read faster.
+ constexpr int kLightDataUnit = 12;
++// The volumetric fog's floor map (the lowest ground nearby, look-fog) takes the
++// free light-data unit: only the fog's injection pass samples it, and binds it
++// itself (no world program declares it).
++constexpr int kFogFloorUnit = kLightDataUnit;
+ constexpr int kCombatMaskUnit = 14; // combat shadow mask (combat)
+ 
+ namespace detail
+@@ -263,7 +284,12 @@ enum : int
+     // off), yz the sun-visibility map's origin (m), w 1 / its extent (1/m).
+     Canopy = 76,
+     Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
+-    Count = 78,
++    // The volumetric fog (look-fog, Graphics/Remaster/VolumetricFog.hpp) on
++    // the slot planned for B8's haze, with the same x: the classic fog
++    // factor's scale minus 1 (0 = the classic fog: the zero the block starts
++    // with leaves every fragment as before), yzw free.
++    Haze = 78,
++    Count = 79,
+ };
+ constexpr int MaxLights = 8;
+ constexpr int ReservedCount = 1;
+@@ -281,7 +307,8 @@ static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
+               "LitConst water slots follow the planned padding");
+ static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
+ static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
+-static_assert(Count == Detail + 1, "LitConst size out of sync");
++static_assert(Haze == Detail + 1, "LitConst haze slot follows the terrain detail");
++static_assert(Count == Haze + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ // The slots allocated to the features still to land (INTEGRATION-PLAN.md
+@@ -293,7 +320,8 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
+ // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+ // padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
+ // SkyShadow), B5 the water slots 74 and 75, B9 the canopy at 76 and B11 the
+-// terrain detail at 77, so 70 to 73 are the padding member litPlanned.
++// terrain detail at 77, so 70 to 73 are the padding member litPlanned; the
++// volumetric fog landed the haze slot at 78.
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+@@ -306,14 +334,14 @@ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+ // 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
+ // 76: hfrt's canopy landed (LitConst::Canopy, B9); 77: texsharp's terrain
+-// detail landed (LitConst::Detail, B11).
+-constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
+-constexpr int End = 79;  // one past the last planned slot
++// detail landed (LitConst::Detail, B11); 78: the haze (LitConst::Haze, the
++// volumetric fog).
++constexpr int End = 79; // one past the last planned slot
+ static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+               "the planned slot below the sun shadows is the reserved padding");
+ static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+               "the planned slots between the clouds and the water are the planned padding (70 free)");
+-static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");
++static_assert(End == LitConst::Count, "every planned slot above the padding has landed");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+ } // namespace LitConstPlanned
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 0b91364..8a3a200 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -306,10 +306,16 @@ layout(std140) uniform PSConstants {
+ };
+ )";
+ 
++} // namespace
++
++namespace Poseidon::gl33lighting
++{
++
+ // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
+ // layout in EngineGL33_Lighting.hpp. Every shader that reads the rig pastes this
+-// string (LitConstantsBlock()); the layout test checks it slot by slot.
+-static const char s_glslLitConstantsBlock[] = R"(
++// string (LitConstantsBlock(); the post fog pass names it in kPostShaders); the
++// layout test checks it slot by slot.
++const char kLitConstantsBlockGLSL[] = R"(
+ // Remastered light rig and per-draw material, binding 3. Layout mirrors
+ // LitConst in EngineGL33_Lighting.hpp.
+ layout(std140) uniform LitConstants {
+@@ -360,9 +366,15 @@ layout(std140) uniform LitConstants {
+     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
+     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
+     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
++    vec4 litHaze;         // 78: volumetric fog: x classic fog factor scale minus 1 (0 = the classic fog)
+ };
+ )";
+ 
++} // namespace Poseidon::gl33lighting
++
++namespace
++{
++
+ // Inputs: samplers, varyings and the colour space and tonemap helpers the
+ // later pieces use.
+ static const char s_psRemasterInputs[] = R"(
+@@ -552,9 +564,15 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
+ }
+ )";
+ 
++} // namespace
++
++namespace Poseidon::gl33lighting
++{
++
+ // Terrain and clouds: the sun's visibility past the hills and under the broken
+-// cloud field, the valley sky visibility and the ground-bounce tint.
+-static const char s_psRemasterTerrainClouds[] = R"(
++// cloud field, the valley sky visibility and the ground-bounce tint. The post
++// fog pass pastes it too (the dome's cloud cover, the canopy shadows).
++const char kRemasterTerrainCloudsGLSL[] = R"(
+ // Colour of the light the ground below bounces (luminance 1; white when there
+ // is no map). Set by terrainSunVisibility, read by skyIrradiance.
+ vec3 g_groundTint = vec3(1.0);
+@@ -697,6 +715,11 @@ float canopySunVisibility(vec3 posAbs) {
+ }
+ )";
+ 
++} // namespace Poseidon::gl33lighting
++
++namespace
++{
++
+ // Sky, local lights and surface are in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp.
+ 
+ // Shade: one fragment's light (sun, sky, moon, local lights, emissive, gloss),
+@@ -872,7 +895,10 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
+         fogC = atmoFogColor(vWorldRel, fogC);
+     }
+-    r0.rgb = mix(fogC, r0.rgb, vFogTC);
++    // With the volumetric fog on (litHaze.x above 0) the classic fog keeps only
++    // the view-distance edge: its start moves out (VolumetricFog.hpp
++    // FogEdgeScale) and the post pass's fog volume takes the distance before it.
++    r0.rgb = mix(fogC, r0.rgb, min(vFogTC * (1.0 + litHaze.x), 1.0));
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+ }
+ )";
+@@ -1291,16 +1317,16 @@ namespace
+ // The fragment prelude: these pieces in FragmentPiece order. The lighting lab's
+ // glsl_extract.py reads this table to assemble the same source.
+ const char* const kFragmentPieces[] = {
+-    s_psRemasterHeader,        // Header
+-    s_glslLitConstantsBlock,   // LitConstants
+-    s_psRemasterInputs,        // Inputs
+-    s_psRemasterShadows,       // Shadows
+-    s_psRemasterTerrainClouds, // TerrainClouds
+-    kRemasterSkyGLSL,          // Sky
+-    kRemasterLightsGLSL,       // Lights
+-    kRemasterSurfaceGLSL,      // Surface
+-    s_psRemasterShade,         // Shade
+-    s_psRemasterFinish,        // Finish
++    s_psRemasterHeader,         // Header
++    kLitConstantsBlockGLSL,     // LitConstants
++    s_psRemasterInputs,         // Inputs
++    s_psRemasterShadows,        // Shadows
++    kRemasterTerrainCloudsGLSL, // TerrainClouds
++    kRemasterSkyGLSL,           // Sky
++    kRemasterLightsGLSL,        // Lights
++    kRemasterSurfaceGLSL,       // Surface
++    s_psRemasterShade,          // Shade
++    s_psRemasterFinish,         // Finish
+ };
+ static_assert(std::size(kFragmentPieces) == static_cast<size_t>(FragmentPiece::Count), "one entry per FragmentPiece");
+ 
+@@ -1308,7 +1334,7 @@ static_assert(std::size(kFragmentPieces) == static_cast<size_t>(FragmentPiece::C
+ // glsl_extract.py reads this table too).
+ const char* const kScreenVertexPieces[] = {
+     s_vsScreenRemasterHead,
+-    s_glslLitConstantsBlock,
++    kLitConstantsBlockGLSL,
+     s_vsScreenRemasterMain,
+ };
+ } // namespace
+@@ -1359,7 +1385,7 @@ const char* RemasterFragmentPiece(FragmentPiece piece)
+ 
+ const char* LitConstantsBlock()
+ {
+-    return s_glslLitConstantsBlock;
++    return kLitConstantsBlockGLSL;
+ }
+ 
+ const char* RemasterFragmentMain(int ps)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index ad6c3eb..92a741c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -428,6 +428,8 @@ void EngineGL33::EndWorldScene()
+     // With TAA off this frame, the luma sharpen when its switch and gate are on.
+     in.lumaSharpen = !taaFrame && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
+                      _featureGates[rm::Feature::Sharpen].on && _lighting.sharpenStrength > 0.0f;
++    // The volumetric fog: its switch and gate (UpdateFogMedium, this frame).
++    in.fog = _fog.on && _fog.mediumFrame == GetFrameCounter();
+     f.plan = rm::PlanPostStages(in);
+     if (f.plan.Empty())
+         return; // nothing to add: leave the frame as drawn
+@@ -473,6 +475,9 @@ void EngineGL33::RunPostStage(rm::PostStage stage, const PostFrame& f)
+         case rm::PostStage::Ao:
+             PostAo(f);
+             break;
++        case rm::PostStage::Air:
++            PostFog(f); // the volumetric fog, EngineGL33_PostFog.cpp
++            break;
+         case rm::PostStage::Bloom:
+             PostBloom(f);
+             break;
+@@ -569,7 +574,9 @@ void EngineGL33::PostBloom(const PostFrame& f)
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         const bool first = i == 0;
+-        const GLuint src = first ? p.colorTex : p.bloomTex[i - 1];
++        // The first level reads the frame with the fog applied when the Air
++        // stage ran (PostSceneTex), so the glow toward the sun blooms.
++        const GLuint src = first ? PostSceneTex(f) : p.bloomTex[i - 1];
+         const int sw = first ? f.w : p.bloomW[i - 1];
+         const int sh = first ? f.h : p.bloomH[i - 1];
+         BindTex(0, src);
+@@ -615,7 +622,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     SetInt(p.progComposite, "aoTex", 2);
+     SetInt(p.progComposite, "bloomTex", 3);
+     SetInt(p.progComposite, "shaftTex", 4);
+-    BindTex(0, p.colorTex);
++    BindTex(0, PostSceneTex(f)); // the fogged frame when the Air stage ran
+     BindTex(2, plan.Runs(rm::PostStage::Ao) ? p.aoTex[0] : p.whiteTex);
+     BindTex(3, plan.Runs(rm::PostStage::Bloom) ? p.bloomTex[0] : p.blackTex);
+     BindTex(4, plan.Runs(rm::PostStage::Shafts) ? p.shaftTex : p.blackTex);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+new file mode 100644
+index 0000000..ed93202
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+@@ -0,0 +1,716 @@
++// Remastered lighting: the volumetric fog and atmosphere (the Air post stage;
++// feature switch volFog, the look lane "fog", superseding B8's air pass on the
++// same stage). The medium and its weather and time rules, the slice layout and
++// the fog floor are pure (Graphics/Remaster/VolumetricFog.hpp), the shaders
++// GL-free (EngineGL33_PostFogShaders.cpp).
++//
++// The stage runs after the occlusion and before the bloom, on the resolved
++// frame, whenever the switch and its gate are on (it replaces the distance
++// fog, so it always runs then):
++//   1. psFogInject: the froxel volume's medium and light, eight slices per
++//      draw into the injection volume, blended with the last frame's
++//      injection reprojected (the history), a jittered point per cell and
++//      frame;
++//   2. psFogIntegrate: front to back, the light scattered toward the eye and
++//      the transmittance up to each cell's far face;
++//   3. psFogApply: full resolution, C' = C T + S by each pixel's depth, into
++//      fog.outTex, which the bloom and the composite read in place of the
++//      resolved frame (PostSceneTex). With the stage off they read the
++//      resolved frame as before, so "off" is the frame before the feature.
++// The legacy shafts hold off while it runs (PlanPostStages): the sun's light
++// in the air is the beams. The forward fog keeps only its view-distance edge
++// (UpdateFogMedium sets litHaze.x; finishFragment).
++//
++// GL state: the stage binds its inputs to kPostUnits and unit 12 (the fog
++// floor, kFogFloorUnit) and reads units 8 (the sky table, rebound here), 9 and
++// 15 as the world bound them. Unit 2 takes the cascade array (or the depth
++// stand-in, never texture 0: the F3 rule) under the comparison sampler for the
++// injection and gets the post pass's sampler 0 back after it; the 3D volumes
++// and the floor are unbound at the end of the stage.
++
++#include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <PoseidonGL33/EngineGL33_PostPass.hpp>
++#include <PoseidonGL33/GL33BindCache.hpp>
++#include <Poseidon/Core/Application.hpp>
++#include <Poseidon/Core/Config/EngineConfig.hpp>
++#include <Poseidon/Core/Global.hpp>
++#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
++#include <Poseidon/World/Scene/Scene.hpp>
++#include <Poseidon/World/Scene/Camera/Camera.hpp>
++#include <Poseidon/World/Terrain/Landscape.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <string>
++
++namespace rm = Poseidon::remaster;
++namespace fl = Poseidon::lighting;
++using namespace Poseidon::gl33post;
++using namespace Poseidon::gl33lighting;
++
++namespace
++{
++
++constexpr int kFogMaxLights = 16;         // lights in the injection's uniform arrays
++constexpr float kFogLightRange = 400.0f;  // lights farther than this from the eye add nothing
++constexpr float kFogHistoryShare = 0.12f; // this frame's share in the blend with the reprojected history
++constexpr float kFogHistoryCut = 60.0f;   // a camera jump longer than this (m) starts the history again
++constexpr float kFogMistDrift = 1.6f;     // m/s the mist banks drift with the wind at least
++constexpr float kFogBeamGain = 3.5f;      // beams: the lift of the air above its local mean (times fogSun)
++constexpr float kFogMeanRadius = 6.0f;    // beams: the local mean's ring radius (cells, about 70 px)
++constexpr float kFogSkyFade = 0.044f;     // the sky keeps the volume's air with exp(-sin(elevation) / this): 2.5 deg
++
++GLuint CompileFogShader(GLenum type, const char* src, const char* name)
++{
++    std::string overrideSource;
++    if (LoadShaderOverride(name, overrideSource))
++        src = overrideSource.c_str();
++    GLuint s = glCreateShader(type);
++    glShaderSource(s, 1, &src, nullptr);
++    glCompileShader(s);
++    GLint ok = 0;
++    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
++    if (!ok)
++    {
++        char log[2048];
++        glGetShaderInfoLog(s, sizeof(log), nullptr, log);
++        LOG_ERROR(Graphics, "GL33 fog: shader compile error [{}]: {}", name, log);
++        glDeleteShader(s);
++        return 0;
++    }
++    return s;
++}
++
++GLuint LinkFogProgram(GLuint vs, PostShader shader)
++{
++    GLuint fs = CompileFogShader(GL_FRAGMENT_SHADER, PostShaderSource(shader), PostShaderName(shader));
++    if (!vs || !fs)
++    {
++        if (fs)
++            glDeleteShader(fs);
++        return 0;
++    }
++    GLuint p = glCreateProgram();
++    glAttachShader(p, vs);
++    glAttachShader(p, fs);
++    glLinkProgram(p);
++    glDeleteShader(fs);
++    GLint ok = 0;
++    glGetProgramiv(p, GL_LINK_STATUS, &ok);
++    if (!ok)
++    {
++        char log[2048];
++        glGetProgramInfoLog(p, sizeof(log), nullptr, log);
++        LOG_ERROR(Graphics, "GL33 fog: program link error [{}]: {}", PostShaderName(shader), log);
++        glDeleteProgram(p);
++        return 0;
++    }
++    // The rig: the LitConstants block at its binding.
++    const GLuint lit = glGetUniformBlockIndex(p, "LitConstants");
++    if (lit != GL_INVALID_INDEX)
++        glUniformBlockBinding(p, lit, kLitBinding);
++    return p;
++}
++
++GLuint MakeVolume(const rm::FogGrid& g, int levels = 1)
++{
++    GLuint t = 0;
++    glGenTextures(1, &t);
++    glBindTexture(GL_TEXTURE_3D, t);
++    int x = g.cellsX, y = g.cellsY, z = g.slices;
++    for (int level = 0; level < levels; ++level)
++    {
++        glTexImage3D(GL_TEXTURE_3D, level, GL_RGBA16F, x, y, z, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
++        x = std::max(1, x / 2);
++        y = std::max(1, y / 2);
++        z = std::max(1, z / 2);
++    }
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, levels > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, levels - 1);
++    return t;
++}
++
++// One FBO per kFogSlicesPerDraw slices of a volume, a slice per attachment.
++bool MakeSliceFbos(GLuint tex, int slices, std::vector<unsigned int>& fbos)
++{
++    static const GLenum kBufs[rm::kFogSlicesPerDraw] = {
++        GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3,
++        GL_COLOR_ATTACHMENT4, GL_COLOR_ATTACHMENT5, GL_COLOR_ATTACHMENT6, GL_COLOR_ATTACHMENT7};
++    bool complete = true;
++    for (int first = 0; first < slices; first += rm::kFogSlicesPerDraw)
++    {
++        GLuint f = 0;
++        glGenFramebuffers(1, &f);
++        glBindFramebuffer(GL_FRAMEBUFFER, f);
++        for (int i = 0; i < rm::kFogSlicesPerDraw; ++i)
++            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, tex, 0, first + i);
++        glDrawBuffers(rm::kFogSlicesPerDraw, kBufs);
++        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
++            complete = false;
++        fbos.push_back(f);
++    }
++    return complete;
++}
++
++void SetMat3(GLuint prog, const char* name, const float* columnMajor)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniformMatrix3fv(loc, 1, GL_FALSE, columnMajor);
++}
++
++// The view matrix's rotation, inverted: view-space directions (x right, y up,
++// z forward) to camera-relative world. View x = _11 X + _21 Y + _31 Z (the
++// vertex shaders' `view * p` with the matrix uploaded from &_11). The rotation
++// is orthonormal, so the inverse is the transpose.
++void ViewToWorld(const GfxMatrix& v, float out[9])
++{
++    // Column c of the result is view axis c in world space: row c of the
++    // world-to-view rotation.
++    const float rows[3][3] = {{v._11, v._21, v._31}, {v._12, v._22, v._32}, {v._13, v._23, v._33}};
++    for (int c = 0; c < 3; ++c)
++        for (int r = 0; r < 3; ++r)
++            out[c * 3 + r] = rows[c][r];
++}
++
++float ToLinear(float display)
++{
++    return std::pow(std::max(display, 0.0f), 2.2f);
++}
++
++float Fract(double x)
++{
++    return static_cast<float>(x - std::floor(x));
++}
++
++// Reach (m) and strength of a kind of light in the air: a street lamp's globe
++// and a fire glow within tens of metres, a headlight's beam reaches farther
++// along its cone.
++void FogLightKind(fl::FrameLightKind kind, float& reach, float& strength)
++{
++    switch (kind)
++    {
++        case fl::FrameLightKind::Lamp:
++            reach = 70.0f;
++            strength = 300.0f;
++            break;
++        case fl::FrameLightKind::Spot:
++            reach = 80.0f;
++            strength = 500.0f;
++            break;
++        case fl::FrameLightKind::Fire:
++            reach = 40.0f;
++            strength = 200.0f;
++            break;
++        case fl::FrameLightKind::Combat:
++            reach = 40.0f;
++            strength = 60.0f;
++            break;
++        default:
++            reach = 20.0f;
++            strength = 12.0f;
++            break;
++    }
++}
++
++} // namespace
++
++void EngineGL33::UpdateFogMedium()
++{
++    // Once per frame, with the gates (the world's first pass computes them).
++    const std::uint32_t frame = GetFrameCounter();
++    if (_featureGates.computed && _featureGates.frame == frame && _fog.mediumFrame != frame && GScene)
++    {
++        _fog.mediumFrame = frame;
++        // The fog is applied where the post effects run and, as the previous
++        // frame showed, on a world with its depth and no screen overlay (the
++        // gate); anywhere else the forward fog keeps its classic edge.
++        const bool post = _lighting.postEffects && SSAAActive() && !_post.unavailable && !_fog.unavailable;
++        const bool on = post && _featureGates[rm::Feature::VolFog].on;
++        const rm::GateInputs& g = _featureGates.inputs;
++        rm::FogInputs in;
++        in.sunElevationDeg = g.sunElevationDeg;
++        in.sunAzimuthDeg = g.sunAzimuthDeg;
++        in.nightEffect = g.nightEffect;
++        in.skyThrough = g.skyThrough;
++        in.fog = g.fog;
++        in.rain = g.rainDensity;
++        in.viewDistance = ENGINE_CONFIG.tacticalZ;
++        in.fogStart = GScene->GetFogMinRange();
++        in.fogEnd = GScene->GetFogMaxRange();
++        _fog.medium = rm::ComputeFogMedium(in, _lighting, on);
++        _fog.on = on;
++    }
++    const float scale = (_fog.mediumFrame == frame && _fog.on) ? _fog.medium.fogEdgeScale : 1.0f;
++    SetLitSlot(LitConst::Haze, scale - 1.0f, 0.0f, 0.0f, 0.0f);
++}
++
++void EngineGL33::DestroyFogResources()
++{
++    auto delTex = [](unsigned int& t)
++    {
++        if (t)
++        {
++            GL33Bind::OnTexDeleted(t);
++            glDeleteTextures(1, &t);
++        }
++        t = 0;
++    };
++    auto delFbos = [](std::vector<unsigned int>& fbos)
++    {
++        for (unsigned int& f : fbos)
++            if (f)
++                glDeleteFramebuffers(1, &f);
++        fbos.clear();
++    };
++    delFbos(_fog.injectFbo[0]);
++    delFbos(_fog.injectFbo[1]);
++    delFbos(_fog.integFbo);
++    delTex(_fog.injectTex[0]);
++    delTex(_fog.injectTex[1]);
++    delTex(_fog.integTex);
++    if (_fog.outFbo)
++        glDeleteFramebuffers(1, &_fog.outFbo);
++    _fog.outFbo = 0;
++    delTex(_fog.outTex);
++    delTex(_fog.floorTex);
++    for (unsigned int* prog : {&_fog.progInject, &_fog.progIntegrate, &_fog.progApply})
++    {
++        if (*prog)
++            glDeleteProgram(*prog);
++        *prog = 0;
++    }
++    _fog.grid = rm::FogGrid{};
++    _fog.outW = _fog.outH = 0;
++    _fog.floorFor = nullptr;
++    _fog.programsTried = false;
++    _fog.unavailable = false;
++    _fog.historyValid = false;
++}
++
++bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
++{
++    if (!_fog.programsTried)
++    {
++        _fog.programsTried = true;
++        GLuint vs = CompileFogShader(GL_VERTEX_SHADER, PostShaderSource(PostShader::Vertex),
++                                     PostShaderName(PostShader::Vertex));
++        _fog.progInject = LinkFogProgram(vs, PostShader::FogInject);
++        _fog.progIntegrate = LinkFogProgram(vs, PostShader::FogIntegrate);
++        _fog.progApply = LinkFogProgram(vs, PostShader::FogApply);
++        if (vs)
++            glDeleteShader(vs);
++        if (!_fog.progInject || !_fog.progIntegrate || !_fog.progApply)
++        {
++            LOG_ERROR(Graphics, "GL33 fog: programs failed to build; the classic distance fog stays");
++            _fog.unavailable = true;
++        }
++    }
++    if (_fog.unavailable || grid.slices <= 0)
++        return false;
++
++    bool complete = true;
++    const rm::FogGrid& g = _fog.grid;
++    if (g.cellsX != grid.cellsX || g.cellsY != grid.cellsY || g.slices != grid.slices || !_fog.integTex)
++    {
++        auto delTex = [](unsigned int& t)
++        {
++            if (t)
++            {
++                GL33Bind::OnTexDeleted(t);
++                glDeleteTextures(1, &t);
++            }
++            t = 0;
++        };
++        auto delFbos = [](std::vector<unsigned int>& fbos)
++        {
++            for (unsigned int& f : fbos)
++                if (f)
++                    glDeleteFramebuffers(1, &f);
++            fbos.clear();
++        };
++        for (int i = 0; i < 2; ++i)
++        {
++            delFbos(_fog.injectFbo[i]);
++            delTex(_fog.injectTex[i]);
++        }
++        delFbos(_fog.integFbo);
++        delTex(_fog.integTex);
++        GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++        for (int i = 0; i < 2; ++i)
++            _fog.injectTex[i] = MakeVolume(grid);
++        _fog.integTex = MakeVolume(grid);
++        glBindTexture(GL_TEXTURE_3D, 0);
++        GL33Bind::Invalidate();
++        for (int i = 0; i < 2; ++i)
++            complete = MakeSliceFbos(_fog.injectTex[i], grid.slices, _fog.injectFbo[i]) && complete;
++        complete = MakeSliceFbos(_fog.integTex, grid.slices, _fog.integFbo) && complete;
++        _fog.grid = grid;
++        _fog.historyValid = false;
++        LOG_INFO(Graphics, "GL33 fog: froxel volume {}x{}x{} ({} px cells)", grid.cellsX, grid.cellsY, grid.slices,
++                 grid.cellPixels);
++    }
++    if (_fog.outW != w || _fog.outH != h || !_fog.outTex)
++    {
++        if (_fog.outFbo)
++            glDeleteFramebuffers(1, &_fog.outFbo);
++        _fog.outFbo = 0;
++        if (_fog.outTex)
++        {
++            GL33Bind::OnTexDeleted(_fog.outTex);
++            glDeleteTextures(1, &_fog.outTex);
++        }
++        GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++        glGenTextures(1, &_fog.outTex);
++        glBindTexture(GL_TEXTURE_2D, _fog.outTex);
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        GL33Bind::Invalidate();
++        glGenFramebuffers(1, &_fog.outFbo);
++        glBindFramebuffer(GL_FRAMEBUFFER, _fog.outFbo);
++        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, _fog.outTex, 0);
++        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
++            complete = false;
++        _fog.outW = w;
++        _fog.outH = h;
++    }
++    if (!complete)
++    {
++        LOG_WARN(Graphics, "GL33 fog: targets incomplete; the classic distance fog stays");
++        DestroyFogResources();
++        _fog.programsTried = true;
++        _fog.unavailable = true;
++        return false;
++    }
++    return true;
++}
++
++void EngineGL33::UpdateFogFloor()
++{
++    // The fog floor follows the terrain map: built once per map on the CPU
++    // (VolumetricFog.hpp BuildFogFloor) and kept on its own texture.
++    const rm::TerrainHorizonMap* map = (_terrainMap && _terrainMap->Valid()) ? _terrainMap.get() : nullptr;
++    if (map == _fog.floorFor)
++        return;
++    _fog.floorFor = map;
++    if (_fog.floorTex)
++    {
++        GL33Bind::OnTexDeleted(_fog.floorTex);
++        glDeleteTextures(1, &_fog.floorTex);
++        _fog.floorTex = 0;
++    }
++    if (!map || map->height.size() < static_cast<size_t>(map->size) * static_cast<size_t>(map->size))
++        return;
++    const std::vector<float> floorY = rm::BuildFogFloor(map->height.data(), map->size, map->cellSize);
++    if (floorY.empty())
++        return;
++    GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++    glGenTextures(1, &_fog.floorTex);
++    glBindTexture(GL_TEXTURE_2D, _fog.floorTex);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, map->size, map->size, 0, GL_RED, GL_FLOAT, floorY.data());
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    GL33Bind::Invalidate();
++    _fog.floorCell = map->cellSize;
++    _fog.floorSize = map->size;
++    LOG_INFO(Graphics, "GL33 fog: fog floor {}x{} at {} m", map->size, map->size, map->cellSize);
++}
++
++unsigned int EngineGL33::PostSceneTex(const PostFrame& f) const
++{
++    const bool fogged = f.plan.Runs(rm::PostStage::Air) && _fog.appliedFrame == GetFrameCounter() && _fog.outTex;
++    return fogged ? _fog.outTex : _post.colorTex;
++}
++
++void EngineGL33::PostFog(const PostFrame& f)
++{
++    Camera* camera = GScene ? GScene->GetCamera() : nullptr;
++    LightSun* sun = GScene ? GScene->MainLight() : nullptr;
++    if (!camera || !sun || _fog.mediumFrame != GetFrameCounter() || !_fog.on)
++        return;
++    const int vw = std::max(1, static_cast<int>(f.rect[2] * static_cast<float>(f.w) + 0.5f));
++    const int vh = std::max(1, static_cast<int>(f.rect[3] * static_cast<float>(f.h) + 0.5f));
++    const rm::FogGrid grid = rm::FogGridFor(vw, vh, _lighting.fogQuality);
++    if (!EnsureFogResources(f.w, f.h, grid))
++        return;
++    UpdateFogFloor();
++    const PostTargets& p = _post;
++    const rm::FogMedium& m = _fog.medium;
++    const std::uint32_t frame = GetFrameCounter();
++
++    // The slices and the camera.
++    const float zFar = m.zFar;
++    const float k = rm::FogDepthK(zFar, grid.slices);
++    const float invEk = k < 1e-3f ? 0.0f : 1.0f / (std::exp(k) - 1.0f);
++    const GfxMatrix& v = _frameState.view;
++    float viewToWorld[9];
++    ViewToWorld(v, viewToWorld);
++    const float rot[9] = {v._11, v._21, v._31, v._12, v._22, v._32, v._13, v._23, v._33}; // world to view, rows
++    const float* cam = _frameState.cameraPos;
++    const float p11 = _frameState.projection._11, p22 = _frameState.projection._22;
++    const float dx = cam[0] - _fog.prevPos[0], dy = cam[1] - _fog.prevPos[1], dz = cam[2] - _fog.prevPos[2];
++    const bool history = _fog.historyValid && _fog.appliedFrame + 1 == frame &&
++                         dx * dx + dy * dy + dz * dz < kFogHistoryCut * kFogHistoryCut;
++    // The previous view of a point given camera-relative now:
++    // R_prev (rel + cam - cam_prev).
++    float prevRow[3][4];
++    for (int r = 0; r < 3; ++r)
++    {
++        const float* row = _fog.prevRot + r * 3;
++        prevRow[r][0] = row[0];
++        prevRow[r][1] = row[1];
++        prevRow[r][2] = row[2];
++        prevRow[r][3] = row[0] * dx + row[1] * dy + row[2] * dz;
++    }
++    const std::uint32_t seq = _fog.sequence++;
++    const float jz = Fract(0.6180339887 * static_cast<double>(seq));
++    const float jx = Fract(0.7548776662 * static_cast<double>(seq)) - 0.5f;
++    const float jy = Fract(0.5698402910 * static_cast<double>(seq)) - 0.5f;
++
++    // The frame's lamps, headlights and fires (night only: by day the world
++    // adds none of them either). The scene's active list is cleared by now:
++    // walk its lights, the nearest kFogMaxLights within kFogLightRange.
++    float lightPos[kFogMaxLights * 4] = {};
++    float lightCol[kFogMaxLights * 4] = {};
++    float lightDir[kFogMaxLights * 4] = {};
++    int lights = 0;
++    const float night = sun->NightEffect();
++    if (night > rm::kGateNightMinEffect && m.lights > 0.0f)
++    {
++        struct Near
++        {
++            Light* light;
++            float d2;
++        };
++        Near nearest[kFogMaxLights] = {};
++        for (int i = 0; i < GScene->NLights(); ++i)
++        {
++            Light* light = GScene->GetLight(i);
++            if (!light || !light->IsOn())
++                continue;
++            LightDescription desc;
++            light->GetDescription(desc);
++            if (desc.type != LTPoint && desc.type != LTSpotLight)
++                continue;
++            const float lx = desc.pos.X() - cam[0], ly = desc.pos.Y() - cam[1], lz = desc.pos.Z() - cam[2];
++            const float d2 = lx * lx + ly * ly + lz * lz;
++            if (d2 > kFogLightRange * kFogLightRange)
++                continue;
++            int at = lights < kFogMaxLights ? lights++ : kFogMaxLights;
++            if (at == kFogMaxLights)
++            {
++                if (d2 >= nearest[kFogMaxLights - 1].d2)
++                    continue;
++                at = kFogMaxLights - 1;
++            }
++            while (at > 0 && nearest[at - 1].d2 > d2)
++            {
++                nearest[at] = nearest[at - 1];
++                --at;
++            }
++            nearest[at] = Near{light, d2};
++        }
++        for (int i = 0; i < lights; ++i)
++        {
++            LightDescription desc;
++            nearest[i].light->GetDescription(desc);
++            const bool spot = desc.type == LTSpotLight;
++            float reach = 0.0f, strength = 0.0f;
++            FogLightKind(spot ? fl::FrameLightKind::Spot : nearest[i].light->Kind(), reach, strength);
++            const Color dif = desc.diffuse * night;
++            float* pos = lightPos + i * 4;
++            pos[0] = desc.pos.X() - cam[0];
++            pos[1] = desc.pos.Y() - cam[1];
++            pos[2] = desc.pos.Z() - cam[2];
++            pos[3] = reach;
++            float* col = lightCol + i * 4;
++            const float s = strength * m.lights;
++            col[0] = ToLinear(dif.R()) * s;
++            col[1] = ToLinear(dif.G()) * s;
++            col[2] = ToLinear(dif.B()) * s;
++            col[3] = spot ? 1.0f : 0.0f;
++            Vector3 beam = desc.dir;
++            beam.Normalize();
++            float* dir = lightDir + i * 4;
++            dir[0] = beam.X();
++            dir[1] = beam.Y();
++            dir[2] = beam.Z();
++            dir[3] = 0.0f;
++        }
++    }
++
++    // ---- 1. Injection --------------------------------------------------------
++    const int cur = _fog.current;
++    const int prev = 1 - cur;
++    const GLuint inject = _fog.progInject;
++    glUseProgram(inject);
++    SetInt(inject, "fogHistory", 0);
++    SetInt(inject, "shadowMap", kShadowMapUnit);
++    SetInt(inject, "terrainHorizon", kTerrainHorizonUnit);
++    SetInt(inject, "terrainHeight", kTerrainHeightUnit);
++    SetInt(inject, "cloudNoise", kCloudNoiseUnit);
++    SetInt(inject, "skyLut", kSkyLutUnit);
++    SetInt(inject, "skyDensity", kSkyDensityUnit);
++    SetInt(inject, "fogFloor", kFogFloorUnit);
++    SetInt(inject, "canopySun", kCanopyVisUnit);
++    glActiveTexture(GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_3D, _fog.injectTex[prev]);
++    const bool shadowMap = ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0;
++    glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, shadowMap ? _shadowMapTex : _dummyDepthArray);
++    glBindSampler(kShadowMapUnit, _shadowCompareSampler);
++    const bool terrain = _terrainHorizonTex && _terrainHeightTex && _terrainMap && _terrainMap->Valid();
++    glActiveTexture(GL_TEXTURE0 + kTerrainHorizonUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, terrain ? _terrainHorizonTex : _dummyHorizonTex);
++    BindTex(kTerrainHeightUnit, terrain ? _terrainHeightTex : _dummyHeightTex);
++    BindTex(kCloudNoiseUnit, _cloudNoiseTex);
++    BindTex(kFogFloorUnit, _fog.floorTex ? _fog.floorTex : p.blackTex);
++    BindSkyTable(); // unit 8: the table the world read, or its stand-in
++    if (shadowMap)
++    {
++        const GLint loc = glGetUniformLocation(inject, "cascadeVP");
++        if (loc >= 0)
++            glUniformMatrix4fv(loc, std::min(_shadowCascades, kShadowCascades), GL_FALSE, _shadowMapVP);
++        Set4(inject, "cascadeSplits", _shadowSplits[0], _shadowSplits[1], _shadowSplits[2], _shadowSplits[3]);
++        Set4(inject, "cascadeCtl", static_cast<float>(_shadowCascades), _shadowTuning.fadeRange, _shadowTuning.biasBase,
++             static_cast<float>(_shadowOmniCount));
++        Set4(inject, "camFwd", _shadowCamFwd[0], _shadowCamFwd[1], _shadowCamFwd[2], 0.0f);
++    }
++    Set4(inject, "shadowCtl", shadowMap ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    Set4(inject, "shadowDelta", cam[0] - _shadowCamPos[0], cam[1] - _shadowCamPos[1], cam[2] - _shadowCamPos[2], 0.0f);
++    Set4(inject, "fogDepth", zFar, k, invEk, jz);
++    Set4(inject, "fogFrame", jx, jy, history ? kFogHistoryShare : 1.0f, Glob.time.toFloat());
++    const bool floorMap = _fog.floorTex && _fog.floorCell > 0.0f && _fog.floorSize > 0;
++    Set4(inject, "fogTerrain", floorMap ? 1.0f : 0.0f, floorMap ? 1.0f / _fog.floorCell : 0.0f,
++         floorMap ? 1.0f / static_cast<float>(_fog.floorSize) : 0.0f, 0.0f);
++    Set4(inject, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++    SetMat3(inject, "viewToWorld", viewToWorld);
++    Set4(inject, "prevRow0", prevRow[0][0], prevRow[0][1], prevRow[0][2], prevRow[0][3]);
++    Set4(inject, "prevRow1", prevRow[1][0], prevRow[1][1], prevRow[1][2], prevRow[1][3]);
++    Set4(inject, "prevRow2", prevRow[2][0], prevRow[2][1], prevRow[2][2], prevRow[2][3]);
++    Set4(inject, "prevProj", _fog.prevP11, _fog.prevP22, _fog.prevFar, _fog.prevK);
++    Set4(inject, "fogHaze", m.hazeSigma, m.hazeHeight, m.rayleigh, m.morning);
++    Set4(inject, "fogWeather", m.weatherSigma, m.weatherHeight, m.skyThrough, 0.0f);
++    Set4(inject, "fogGround", m.groundSigma, m.groundHeight, 0.0f, 0.0f);
++    Set4(inject, "fogColor", _fogColor.R(), _fogColor.G(), _fogColor.B(), 1.0f);
++    Set4(inject, "fogMist", m.mistSigma, m.mistDepth, m.mistFall, m.mistNoise);
++    Set4(inject, "fogLightK", m.sun, m.sky, m.g, 1.0f);
++    // The mist banks drift with the ground wind (and slowly in a calm).
++    {
++        static float s_drift[2] = {0.0f, 0.0f};
++        static float s_driftTime = -1.0f;
++        const float now = Glob.time.toFloat();
++        if (s_driftTime >= 0.0f)
++        {
++            float dt = std::clamp(now - s_driftTime, 0.0f, 0.5f);
++            Landscape* land = GScene->GetLandscape();
++            const Vector3 wind = land ? land->GetWind() : VZero;
++            float wx = wind.X(), wz = wind.Z();
++            if (wx * wx + wz * wz < kFogMistDrift * kFogMistDrift)
++            {
++                wx += kFogMistDrift * 0.8f;
++                wz += kFogMistDrift * 0.6f;
++            }
++            s_drift[0] -= wx * dt;
++            s_drift[1] -= wz * dt;
++        }
++        s_driftTime = now;
++        Set4(inject, "fogWind", s_drift[0], s_drift[1], 0.0f, 0.0f);
++    }
++    Set4(inject, "fogLocal", static_cast<float>(lights), 0.0f, 0.0f, 0.0f);
++    if (lights > 0)
++    {
++        const GLint lp = glGetUniformLocation(inject, "fogLightPos");
++        const GLint lc = glGetUniformLocation(inject, "fogLightCol");
++        const GLint ld = glGetUniformLocation(inject, "fogLightDir");
++        if (lp >= 0)
++            glUniform4fv(lp, lights, lightPos);
++        if (lc >= 0)
++            glUniform4fv(lc, lights, lightCol);
++        if (ld >= 0)
++            glUniform4fv(ld, lights, lightDir);
++    }
++    for (int g = 0; g * rm::kFogSlicesPerDraw < grid.slices; ++g)
++    {
++        Set4(inject, "fogGrid", static_cast<float>(grid.cellsX), static_cast<float>(grid.cellsY),
++             static_cast<float>(grid.slices), static_cast<float>(g * rm::kFogSlicesPerDraw));
++        DrawTo(_fog.injectFbo[cur][g], grid.cellsX, grid.cellsY);
++    }
++    // The post pass's unit 2: no sampler object (BeginPostFullscreen).
++    glBindSampler(kShadowMapUnit, 0);
++
++    // ---- 2. Integration -------------------------------------------------------
++    const GLuint integrate = _fog.progIntegrate;
++    glUseProgram(integrate);
++    SetInt(integrate, "fogInject", 0);
++    glActiveTexture(GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_3D, _fog.injectTex[cur]);
++    Set4(integrate, "fogDepth", zFar, k, invEk, 0.0f);
++    Set4(integrate, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++    for (int g = 0; g * rm::kFogSlicesPerDraw < grid.slices; ++g)
++    {
++        Set4(integrate, "fogGrid", static_cast<float>(grid.cellsX), static_cast<float>(grid.cellsY),
++             static_cast<float>(grid.slices), static_cast<float>(g * rm::kFogSlicesPerDraw));
++        DrawTo(_fog.integFbo[g], grid.cellsX, grid.cellsY);
++    }
++
++    // ---- 3. Apply ------------------------------------------------------------
++    const GLuint apply = _fog.progApply;
++    glUseProgram(apply);
++    SetInt(apply, "colorTex", 0);
++    SetInt(apply, "fogVolume", 2);
++    SetInt(apply, "depthTex", 5);
++    glActiveTexture(GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_3D, 0);
++    BindTex(0, p.colorTex);
++    glActiveTexture(GL_TEXTURE0 + 2);
++    glBindTexture(GL_TEXTURE_3D, _fog.integTex);
++    BindTex(5, p.depthTex);
++    Set4(apply, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++    Set4(apply, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
++    Set4(apply, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++    Set4(apply, "fogGrid", static_cast<float>(grid.cellsX), static_cast<float>(grid.cellsY),
++         static_cast<float>(grid.slices), 0.0f);
++    Set4(apply, "fogDepth", zFar, k, invEk, 0.0f);
++    // The sky keeps the volume's air at the horizon, fading over the first
++    // few degrees above it.
++    Set4(apply, "fogApply", 1.0f, 0.0f, kFogSkyFade, 0.0f);
++    Set4(apply, "fogBeams", kFogBeamGain * std::min(m.sun, 2.0f), kFogMeanRadius, 0.0f, 0.0f);
++    SetMat3(apply, "viewToWorld", viewToWorld);
++    DrawTo(_fog.outFbo, f.w, f.h);
++
++    // Hand the units back: no 3D volume or floor left bound.
++    glActiveTexture(GL_TEXTURE0 + 2);
++    glBindTexture(GL_TEXTURE_3D, 0);
++    glActiveTexture(GL_TEXTURE0 + kFogFloorUnit);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    glActiveTexture(GL_TEXTURE0);
++
++    // The next frame's history: this frame's volume and camera.
++    _fog.appliedFrame = frame;
++    _fog.historyValid = true;
++    _fog.current = prev;
++    for (int i = 0; i < 9; ++i)
++        _fog.prevRot[i] = rot[i];
++    for (int i = 0; i < 3; ++i)
++        _fog.prevPos[i] = cam[i];
++    _fog.prevP11 = p11;
++    _fog.prevP22 = p22;
++    _fog.prevFar = zFar;
++    _fog.prevK = k;
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+new file mode 100644
+index 0000000..05358a0
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+@@ -0,0 +1,508 @@
++// Remastered lighting: the volumetric fog's shaders (the Air post stage, the
++// look lane "fog"; EngineGL33_PostFog.cpp runs them, and
++// Graphics/Remaster/VolumetricFog.hpp holds the medium, the slice layout and
++// the C++ mirrors). No GL code, so the unit tests compile the sources the
++// engine builds; kPostShaders (EngineGL33_PostShaders.cpp) assembles them from
++// these pieces and from three pieces of the remastered prelude: the
++// LitConstants block, the terrain and clouds piece and the sky piece, so the
++// air reads the same rig, cloud field, horizon map, canopy shadows and sky
++// table as the shading.
++//
++// Three passes over a froxel volume (cells of 8 to 16 pixels, 48 to 96
++// exponential depth slices out to the classic fog end):
++//   - psFogInject: per cell, eight slices per draw (eight colour attachments,
++//     each a slice of the 3D target), the medium's extinction and the light it
++//     scatters toward the eye. The air's light along a column is the sky's own
++//     colour at the horizon in that azimuth (the sky table's aerial
++//     perspective, its glow toward the sun included), so far ground melts into
++//     the sky behind it; the share of it that is scattered sunlight goes dark
++//     where the cell is in the shade of the shadow cascades, the canopy, the
++//     terrain horizon or the cloud field (beams through trees, the shadows of
++//     ridges in the haze), and the mist and fog above a cell take light out of
++//     its sun. In the near field the sun's Mie forward lobe adds its own glow,
++//     and the frame's lamps, headlights and fires glow in the air. Each frame
++//     samples a jittered point of each cell and blends it with the last
++//     frame's volume reprojected to that point, so the history averages the
++//     jitter;
++//   - psFogIntegrate: front to back along each column, the light scattered
++//     toward the eye and the transmittance from the eye to the far face of
++//     each cell (energy-conserving per slice);
++//   - psFogApply: full resolution, each pixel's depth looked up in that
++//     volume, C' = C T + S in linear light, with the beams lifted above the
++//     air around them; the sky takes the volume's far end near the horizon
++//     only (it holds the whole atmosphere's light above it).
++
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++namespace Poseidon::gl33lighting
++{
++
++// The injection's inputs. The LitConstants block and the terrain and clouds
++// piece follow it; the piece reads terrainHorizon, terrainHeight, cloudNoise,
++// skyDensity and canopySun, the world's shadow constants under their PSConstants
++// names, and vWorldRel (a global here).
++const char kPostFogInjectInputsGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler3D fogHistory;           // unit 0: the last frame's injection (rgb in-scatter, a extinction; per km)
++uniform sampler2DArrayShadow shadowMap; // unit 2: the sun's cascade array, comparison sampler
++uniform sampler2DArray terrainHorizon;  // unit 3: horizon angles
++uniform sampler2D terrainHeight;        // unit 4: r = ground height (m)
++uniform sampler2D cloudNoise;           // unit 5: cloud-shadow noise (also the mist banks)
++uniform sampler2D skyLut;               // unit 8: the sky table (or its stand-in)
++uniform sampler2D skyDensity;           // unit 9: the weather sky's cloud density (as the world bound it)
++uniform sampler2D fogFloor;             // unit 12: r = the fog floor (m), the terrain height's grid
++uniform sampler2D canopySun;            // unit 15: the canopy's sun-visibility map (as the world bound it)
++// The world shaders' shadow constants under their PSConstants names (the
++// terrain and clouds piece's canopySunVisibility reads them).
++uniform vec4 shadowCtl;     // x 1 = a shadow map this frame
++uniform mat4 cascadeVP[4];  // the depth pass's cascades, camera-relative
++uniform vec4 cascadeSplits;
++uniform vec4 cascadeCtl;    // x count, y fade range, z bias base, w omni count
++uniform vec4 camFwd;        // the depth pass's camera forward
++vec3 vWorldRel = vec3(0.0); // the camera-relative point canopySunVisibility reads
++// The grid and the frame.
++uniform vec4 fogGrid;      // xy cells, z slices, w the first slice of this draw
++uniform vec4 fogDepth;     // x far (m), y k, z 1 / (exp(k) - 1), w this frame's depth jitter in a slice (0..1)
++uniform vec4 fogFrame;     // xy this frame's jitter in a cell (cells), z this frame's share (1 = no history), w time (s)
++uniform vec4 fogTerrain;   // x 1 = a fog floor map, y 1 / its cell size (1/m), z 1 / its size
++uniform vec4 projInfo;     // z = 1/_11, w = 1/_22
++uniform mat3 viewToWorld;  // view-space direction to world (camera-relative)
++uniform vec4 prevRow0;     // camera-relative world to the previous frame's view space, by rows
++uniform vec4 prevRow1;
++uniform vec4 prevRow2;
++uniform vec4 prevProj;     // x _11, y _22, z far (m), w k of the previous frame's volume
++uniform vec4 shadowDelta;  // xyz camera move since the depth pass
++// The medium (VolumetricFog.hpp FogMedium).
++uniform vec4 fogHaze;      // x haze (1/m at sea level), y its scale height (m), z Rayleigh scale
++uniform vec4 fogWeather;   // x weather fog (1/m at the floor), y its scale height (m), z sky-through (1 clear .. 0 overcast)
++uniform vec4 fogGround;    // x humid ground air (1/m at the ground), y its scale height above the ground (m)
++uniform vec4 fogMist;      // x valley mist (1/m in the layer), y layer depth (m), z fall above it (m), w banks
++uniform vec4 fogLightK;    // x the sun's light in the air, y the sky's, z Mie g, w lights
++uniform vec4 fogWind;      // xy the mist banks' drift (m)
++uniform vec4 fogLocal;     // x lights
++uniform vec4 fogLightPos[16]; // xyz camera-relative, w reach (m)
++uniform vec4 fogLightCol[16]; // rgb intensity (linear, m^2), w 1 = spotlight
++uniform vec4 fogLightDir[16]; // xyz beam direction
++layout(location = 0) out vec4 fog0;
++layout(location = 1) out vec4 fog1;
++layout(location = 2) out vec4 fog2;
++layout(location = 3) out vec4 fog3;
++layout(location = 4) out vec4 fog4;
++layout(location = 5) out vec4 fog5;
++layout(location = 6) out vec4 fog6;
++layout(location = 7) out vec4 fog7;
++)";
++
++// What the sky piece reads besides the rig: the classic fog colour, the
++// colour helpers of the prelude's inputs, and the dome's texture names (its
++// dome and cloud-sheet functions are compiled, never called here).
++const char kPostFogSkyInputsGLSL[] = R"(
++uniform vec4 fogColor;     // the classic fog colour (display), PSConstants c0 in the world programs
++uniform sampler2D tex0;    // unused: the sky piece's dome functions name it
++vec2 vUV0 = vec2(0.0);     // unused: the sky piece's dome functions name it
++const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
++vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
++vec3 toDisplay(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
++vec3 tonemapNeutral(vec3 c) {
++    float peak = max(c.r, max(c.g, c.b));
++    if (peak < 0.8) return c;
++    const float d = 0.2;
++    float newPeak = 1.0 - d * d / (peak + d - 0.8);
++    c *= newPeak / peak;
++    float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
++    return mix(c, vec3(newPeak), g);
++}
++)";
++
++const char kPostFogInjectMainGLSL[] = R"(
++const float kFogPi = 3.14159265;
++const vec3 kFogLuma = vec3(0.2126, 0.7152, 0.0722);
++const vec3 kRayleighSea = vec3(5.802e-6, 13.558e-6, 33.1e-6); // Atmosphere.hpp kRayleighScattering
++const float kRayleighHeight = 8000.0;
++
++float fogSliceDepth(float t) {
++    return fogDepth.y < 1e-3 ? fogDepth.x * t : fogDepth.x * (exp(fogDepth.y * t) - 1.0) * fogDepth.z;
++}
++
++// Henyey-Greenstein, normalised over the sphere (isotropic = 1 / 4 pi).
++float fogHG(float c, float g) {
++    float g2 = g * g;
++    return (1.0 - g2) / (4.0 * kFogPi * pow(max(1.0 + g2 - 2.0 * g * c, 1e-4), 1.5));
++}
++float fogMiePhase(float c) { return mix(fogHG(c, fogLightK.z), fogHG(c, -0.3), 0.12); }
++
++// The ground and the fog floor under a world xz (m).
++float fogFloorAt(vec2 xz, out float ground) {
++    ground = 0.0;
++    if (fogTerrain.x < 0.5) return 0.0;
++    vec2 uv = (xz * fogTerrain.y + 0.5) * fogTerrain.z;
++    ground = texture(terrainHeight, uv).r;
++    return texture(fogFloor, uv).r;
++}
++
++// One hardware 2x2 comparison of the cascade that holds a camera-relative
++// point (the shading's tier selection and far fade, without its cross-fade).
++float fogShadowMap(vec3 rel) {
++    if (shadowCtl.x < 0.5) return 1.0;
++    vec3 r = rel + shadowDelta.xyz;
++    int nC = int(cascadeCtl.x);
++    int omniN = int(cascadeCtl.w);
++    float ed = dot(r, camFwd.xyz);
++    float d3 = length(r);
++    for (int i = 0; i < 4; ++i) {
++        if (i >= nC) break;
++        float metric = (i < omniN) ? d3 : ed;
++        if (metric <= cascadeSplits[i]) {
++            vec4 cp = cascadeVP[i] * vec4(r, 1.0);
++            vec3 sc = cp.xyz / cp.w;
++            vec2 suv = sc.xy * 0.5 + 0.5;
++            if (suv.x <= 0.0 || suv.x >= 1.0 || suv.y <= 0.0 || suv.y >= 1.0 || sc.z <= 0.0 || sc.z >= 1.0) return 1.0;
++            float bias = cascadeCtl.z * float(i + 1) * float(i + 1);
++            float lit = texture(shadowMap, vec4(suv, float(i), sc.z - bias));
++            float fade = clamp((cascadeSplits[nC - 1] - ed) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
++            return 1.0 - (1.0 - lit) * fade;
++        }
++    }
++    return 1.0;
++}
++
++// Hills between a point hAbove metres over the ground and the sun: the horizon
++// stored for the ground below, seen from that height (as from an occluder
++// about 900 m away).
++float fogTerrainSun(vec3 p, float hAbove) {
++    if (litTerrain.x < 0.5 || litTerrainLift.z <= 0.0) return 1.0;
++    vec2 g = p.xz * litTerrain.y;
++    float last = 1.0 / litTerrain.z - 1.0;
++    if (g.x < 0.0 || g.y < 0.0 || g.x > last || g.y > last) return 1.0;
++    vec2 uv = (g + 0.5) * litTerrain.z;
++    float h0 = dot(texture(terrainHorizon, vec3(uv, litTerrainSun.x)), litTerrainSel0);
++    float h1 = dot(texture(terrainHorizon, vec3(uv, litTerrainSun.y)), litTerrainSel1);
++    float horizonDeg = mix(-5.0, 45.0, mix(h0, h1, litTerrainSun.z));
++    float lift = degrees(atan(max(hAbove, 0.0) / 900.0));
++    float soft = litTerrainSun.w + 0.5;
++    float vis = smoothstep(horizonDeg - soft, horizonDeg + soft, litSun.w + lift);
++    return mix(1.0, vis, litTerrainLift.z);
++}
++
++// The cloud field's shadow on a point in the air (cloudSunVisibility without
++// the world pass's flag: the dome's own clouds or the noise field).
++float fogCloudSun(vec3 p) {
++    if (litCloud.w < 0.5) return 1.0;
++    if (litSky.y > 0.5) return mix(1.0, litCloud.y, domeCloudCover(p - litCamPos.xyz));
++    float up = max(litSunDir.y, 0.12);
++    vec2 q = p.xz + litSunDir.xz / up * (litCloudOffset.z - p.y);
++    float n = texture(cloudNoise, (q + litCloudOffset.xy) * litCloud.z).r;
++    float cover = clamp(litCloud.x, 0.0, 1.0);
++    float edge = litCloudOffset.w * clamp(4.0 * cover * (1.0 - cover), 0.0, 1.0);
++    float covered = edge > 1e-4 ? smoothstep(1.0 - cover - edge, 1.0 - cover + edge, n) : step(1.0 - cover, n);
++    return mix(1.0, litCloud.y, covered);
++}
++
++// The frame's lamps, headlights and fires scattered toward the eye at a
++// camera-relative point (per unit of scattering), the view ray along d.
++vec3 fogLocalLight(vec3 rel, vec3 d) {
++    vec3 sum = vec3(0.0);
++    int n = int(fogLocal.x);
++    for (int i = 0; i < 16; ++i) {
++        if (i >= n) break;
++        vec3 L = fogLightPos[i].xyz - rel;
++        float d2 = dot(L, L);
++        float r2 = fogLightPos[i].w * fogLightPos[i].w;
++        if (d2 >= r2) continue;
++        vec3 l = L * inversesqrt(max(d2, 1e-4));
++        float cone = 1.0;
++        if (fogLightCol[i].w > 0.5) {
++            // A headlight: the shading's cone, a little wider (the beam's edge
++            // scatters too).
++            float inside = -dot(l, fogLightDir[i].xyz);
++            cone = smoothstep(0.90, 0.975, inside);
++            if (cone <= 0.0) continue;
++        }
++        float window = 1.0 - smoothstep(0.35 * r2, r2, d2);
++        // The light travels along -l and reaches the eye along -d.
++        float ph = mix(fogHG(dot(l, d), 0.55), 1.0 / (4.0 * kFogPi), 0.4);
++        sum += fogLightCol[i].rgb * (cone * window * ph / (d2 + 1.0));
++    }
++    return sum;
++}
++
++// This column's light in the air (main sets them once per column): the unit
++// view direction, the air's light toward the eye (linear: the sky's own colour
++// at the horizon in this azimuth, the sky table's aerial perspective with its
++// glow and aureole toward the sun, so far ground melts into the sky behind
++// it) and the share of that light the sun gives (single scattering of the sun
++// against the sky's light along this direction; the rest is the sky's). A
++// cell in the shade of a tree, a ridge or a cloud keeps only the sky's share.
++vec3 g_dir = vec3(0.0, 0.0, 1.0);
++vec3 g_air = vec3(0.0);
++float g_sunShare = 0.0;
++float g_sinSun = 1.0;
++// The sun's own forward glow on top of the sky-matched air, in the near
++// field (beams through trees, the glow of the air toward a low sun): its
++// radiance (linear, exposed) and, for this column, pi times the Mie lobe above
++// the isotropic level. Far off the sky-matched air carries the glow alone (a
++// forward lobe over kilometres of air washed the view toward a low sun out).
++vec3 g_sunL = vec3(0.0);
++float g_sunFwd = 0.0;
++const float kFogForwardReach = 500.0; // m: the forward lobe fades out over this distance
++
++// One cell's medium and light at a camera-relative point: rgb the light it
++// scatters toward the eye per metre, a its extinction per metre, both per km.
++vec4 fogCell(vec3 rel) {
++    vec3 p = rel + litCamPos.xyz;
++    float ground;
++    float floorY = fogFloorAt(p.xz, ground);
++    float hAbove = max(p.y - ground, 0.0);
++
++    // The medium: the haze thinning with height, the humid air near the
++    // ground at a low sun and at night, the air's own Rayleigh scattering, the
++    // weather fog above the fog floor and the valley mist's banks.
++    float sHaze = fogHaze.x * exp(-max(p.y, -50.0) / fogHaze.y) + fogGround.x * exp(-hAbove / max(fogGround.y, 1.0));
++    vec3 sRay = kRayleighSea * (fogHaze.z * exp(-max(p.y, 0.0) / kRayleighHeight));
++    float overFloor = max(p.y - floorY, 0.0);
++    float sWeather = fogWeather.x * exp(-overFloor / max(fogWeather.y, 1.0));
++    float sMist = 0.0;
++    float mistTau = 0.0; // the mist's optical depth straight up from the point
++    if (fogMist.x > 0.0) {
++        vec2 q = p.xz + fogWind.xy;
++        float n1 = texture(cloudNoise, q * (1.0 / 1100.0) + vec2(0.37, 0.11)).r;
++        float n2 = texture(cloudNoise, q * (1.0 / 310.0) + vec2(0.71, 0.53) + p.y * 0.002).r;
++        float top = floorY + fogMist.y * mix(0.55, 1.45, n1) + (n2 - 0.5) * 14.0;
++        float above = p.y - top;
++        float banks = mix(1.0, 1.7 * smoothstep(0.2, 0.85, n1 * 0.6 + n2 * 0.4), fogMist.w);
++        float shape = above <= 0.0 ? 1.0 : exp(-above / fogMist.z);
++        sMist = fogMist.x * shape * banks;
++        mistTau = fogMist.x * banks * (max(-above, 0.0) + fogMist.z * min(shape, 1.0));
++    }
++    float sMie = sHaze + sWeather + sMist;
++    vec3 sigma = vec3(sMie) + sRay;
++
++    // The sun's visibility: shadow cascades, canopy, hills and clouds; and the
++    // light the mist and fog above the point take out of it on the way down.
++    float vis = 1.0;
++    float tSun = 1.0;
++    if (g_sunShare > 0.0) {
++        vWorldRel = rel;
++        g_groundHeight = ground;
++        vis = fogShadowMap(rel) * canopySunVisibility(p) * fogTerrainSun(p, hAbove) * fogCloudSun(p);
++        float tauUp = mistTau + fogWeather.x * fogWeather.y * exp(-overFloor / max(fogWeather.y, 1.0));
++        tSun = exp(-tauUp / g_sinSun);
++    }
++    float lit = (1.0 - g_sunShare) + g_sunShare * vis * tSun;
++    // Dense mist and fog glow in their own shade: light scattered more than
++    // once keeps a share of the sun there.
++    float dense = sMist + sWeather;
++    vec3 inscatter = g_air * (sMie * lit + dense * 0.35 * g_sunShare * tSun * (1.0 - vis)) + g_air * sRay * lit;
++    // The sun's forward glow beyond the sky's own: its single scattering in
++    // the forward lobe, through gaps in the trees and over ridges in beams.
++    inscatter += g_sunL * (g_sunFwd * sMie * vis * tSun * exp(-length(rel) / kFogForwardReach));
++    // Lamps, headlights and fires.
++    if (fogLocal.x > 0.5) inscatter += vec3(sMie + sRay.g) * fogLocalLight(rel, g_dir) * fogLightK.w;
++    return vec4(inscatter, dot(sigma, kFogLuma)) * 1000.0;
++}
++
++// The cell of slice s on this column: this frame's jittered point, blended with
++// the last frame's volume at the same point.
++vec4 fogSlice(float s, vec3 dirZ) {
++    float z = fogSliceDepth((s + fogDepth.w) / fogGrid.z);
++    vec3 rel = dirZ * z;
++    vec4 cur = fogCell(rel);
++    if (fogFrame.z < 1.0) {
++        vec3 pv = vec3(dot(prevRow0.xyz, rel) + prevRow0.w, dot(prevRow1.xyz, rel) + prevRow1.w,
++                       dot(prevRow2.xyz, rel) + prevRow2.w);
++        if (pv.z > 0.05) {
++            vec2 puv = pv.xy * prevProj.xy / pv.z * 0.5 + 0.5;
++            float pt = prevProj.w < 1e-3 ? pv.z / prevProj.z
++                                         : log(1.0 + pv.z * (exp(prevProj.w) - 1.0) / prevProj.z) / prevProj.w;
++            if (puv.x >= 0.0 && puv.x <= 1.0 && puv.y >= 0.0 && puv.y <= 1.0 && pt <= 1.0)
++                cur = mix(texture(fogHistory, vec3(puv, pt)), cur, fogFrame.z);
++        }
++    }
++    return cur;
++}
++
++void main() {
++    vec2 ndc = (gl_FragCoord.xy + fogFrame.xy) / fogGrid.xy * 2.0 - 1.0;
++    vec3 dirZ = viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0); // per metre of view depth
++    vec3 d = normalize(dirZ);
++    g_dir = d;
++    // The air's light along this column: the colour the forward fog fades
++    // to, the sky's horizon in this azimuth (fogColorToward, and the sky
++    // table's aerial perspective while it draws), in linear light.
++    vec3 classic = fogColorToward(d);
++    vec3 disp = litAtmo.z > 0.0 ? atmoFogColor(d, classic) : classic;
++    g_air = toLinear(disp) * fogLightK.y;
++    // The sun's share of it: the sun's single scattering (Mie phase) against
++    // the sky's light (the rig's, a white surface under the sky).
++    float exposure = litZenith.w * litSunDir.w;
++    float sunLum = dot(litSun.rgb, kFogLuma) * exposure * smoothstep(-0.02, 0.03, litSunDir.y);
++    float skyLum = dot(0.5 * (litHorizon.rgb + litZenith.rgb), kFogLuma) * exposure;
++    float sunAir = kFogPi * fogMiePhase(dot(d, litSunDir.xyz)) * sunLum;
++    float k = max(fogLightK.x, 0.0);
++    // The air's light is mostly scattered sunlight under a clear sky (the
++    // horizon is bright because of it), more so toward the sun; under an
++    // overcast it is the sky's diffuse light: shadowed air darkens in clear
++    // weather (shafts and the shadows of ridges in the haze), barely under
++    // cloud.
++    float sunUp = smoothstep(-0.02, 0.03, litSunDir.y);
++    float physShare = sunAir / max(sunAir + skyLum, 1e-6);
++    g_sunShare = sunUp * mix(0.15, 1.0, clamp(fogWeather.z, 0.0, 1.0)) * mix(0.6, 0.95, physShare) * min(k, 1.0);
++    g_air *= 1.0 + max(k - 1.0, 0.0) * g_sunShare; // fogSun above 1: more of the sun in the air
++    g_sinSun = max(litSunDir.y, 0.03);
++    float cs = dot(d, litSunDir.xyz);
++    const float kIso = 1.0 / (4.0 * kFogPi);
++    g_sunL = litSun.rgb * (exposure * smoothstep(-0.02, 0.03, litSunDir.y));
++    g_sunFwd = kFogPi * max(fogMiePhase(cs) - kIso, 0.0) * min(k, 1.0);
++
++    float base = fogGrid.w;
++    fog0 = fogSlice(base + 0.0, dirZ);
++    fog1 = fogSlice(base + 1.0, dirZ);
++    fog2 = fogSlice(base + 2.0, dirZ);
++    fog3 = fogSlice(base + 3.0, dirZ);
++    fog4 = fogSlice(base + 4.0, dirZ);
++    fog5 = fogSlice(base + 5.0, dirZ);
++    fog6 = fogSlice(base + 6.0, dirZ);
++    fog7 = fogSlice(base + 7.0, dirZ);
++}
++)";
++
++// The integration: front to back along each column of the injected volume,
++// eight slices of the integrated volume per draw (every draw walks from the
++// eye: 36 reads per cell on average at 64 slices).
++const char kPostFogIntegrateGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler3D fogInject; // unit 0: rgb in-scatter, a extinction (per km)
++uniform vec4 fogGrid;        // xy cells, z slices, w the first slice of this draw
++uniform vec4 fogDepth;       // x far (m), y k, z 1 / (exp(k) - 1)
++uniform vec4 projInfo;       // z = 1/_11, w = 1/_22
++layout(location = 0) out vec4 fog0;
++layout(location = 1) out vec4 fog1;
++layout(location = 2) out vec4 fog2;
++layout(location = 3) out vec4 fog3;
++layout(location = 4) out vec4 fog4;
++layout(location = 5) out vec4 fog5;
++layout(location = 6) out vec4 fog6;
++layout(location = 7) out vec4 fog7;
++
++float fogSliceDepth(float t) {
++    return fogDepth.y < 1e-3 ? fogDepth.x * t : fogDepth.x * (exp(fogDepth.y * t) - 1.0) * fogDepth.z;
++}
++
++vec3 g_S = vec3(0.0); // light scattered toward the eye so far
++float g_T = 1.0;      // transmittance from the eye
++float g_len = 1.0;    // ray metres per metre of view depth on this column
++
++void fogStep(ivec2 cell, int s) {
++    float dt = (fogSliceDepth(float(s + 1) / fogGrid.z) - fogSliceDepth(float(s) / fogGrid.z)) * g_len;
++    vec4 v = texelFetch(fogInject, ivec3(cell, s), 0) * 0.001;
++    float st = max(v.a, 0.0);
++    float x = st * dt;
++    float tr = exp(-x);
++    // The slice's own scattering, attenuated inside it: (1 - e^-x) / sigma.
++    float through = x < 1e-3 ? dt * (1.0 - 0.5 * x) : (1.0 - tr) / st;
++    g_S += g_T * max(v.rgb, vec3(0.0)) * through;
++    g_T *= tr;
++}
++
++void main() {
++    ivec2 cell = ivec2(gl_FragCoord.xy);
++    vec2 ndc = (vec2(cell) + 0.5) / fogGrid.xy * 2.0 - 1.0;
++    g_len = length(vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0));
++    int base = int(fogGrid.w);
++    for (int s = 0; s < 128; ++s) {
++        if (s >= base) break;
++        fogStep(cell, s);
++    }
++    fogStep(cell, base + 0); fog0 = vec4(g_S, g_T);
++    fogStep(cell, base + 1); fog1 = vec4(g_S, g_T);
++    fogStep(cell, base + 2); fog2 = vec4(g_S, g_T);
++    fogStep(cell, base + 3); fog3 = vec4(g_S, g_T);
++    fogStep(cell, base + 4); fog4 = vec4(g_S, g_T);
++    fogStep(cell, base + 5); fog5 = vec4(g_S, g_T);
++    fogStep(cell, base + 6); fog6 = vec4(g_S, g_T);
++    fogStep(cell, base + 7); fog7 = vec4(g_S, g_T);
++}
++)";
++
++// The apply: full resolution, the frame after the occlusion pass's inputs.
++// Each pixel's view depth (the sky at the volume's far end) is looked up in
++// the integrated volume (texel s holds the light and transmittance up to the
++// far face of slice s, so the lookup sits half a texel back) and the pixel's
++// linear colour becomes C T + S, rolled off softly above 0.8 as the world's
++// tonemap does. Alpha keeps the sky-light share the composite's occlusion
++// reads, minus what the fog veils.
++const char kPostFogApplyGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D colorTex;  // unit 0: the resolved frame (display space; alpha 1 - sky light share)
++uniform sampler3D fogVolume; // unit 2: rgb light scattered toward the eye, a transmittance
++uniform sampler2D depthTex;  // unit 5: the world depth
++uniform vec4 projInfo;       // x = _33, y = _43 (viewZ = y / (ndcZ - x))
++uniform vec4 depthMap;       // ndcZ = depth * x + y
++uniform vec4 worldRect;      // the 3D viewport in uv
++uniform vec4 fogGrid;        // xy cells, z slices
++uniform vec4 fogDepth;       // x far (m), y k
++uniform vec4 fogApply;       // x 1 = dither, y 1 = show the fog's light alone (debug), z the sky's fade (sin of elevation)
++uniform vec4 fogBeams;       // x beam contrast gain, y the local mean's radius (cells)
++uniform mat3 viewToWorld;    // view-space direction to world (camera-relative)
++out vec4 fragColor;
++
++vec3 fogShoulder(vec3 c) {
++    float peak = max(c.r, max(c.g, c.b));
++    if (peak < 0.8) return c;
++    const float d = 0.2;
++    float newPeak = 1.0 - d * d / (peak + d - 0.8);
++    c *= newPeak / peak;
++    float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
++    return mix(c, vec3(newPeak), g);
++}
++
++void main() {
++    vec4 c = texture(colorTex, vUV);
++    float dz = textureLod(depthTex, vUV, 0.0).r;
++    float z = dz >= 0.999999 ? fogDepth.x : projInfo.y / ((dz * depthMap.x + depthMap.y) - projInfo.x);
++    vec2 cuv = (vUV - worldRect.xy) / worldRect.zw;
++    float t = fogDepth.y < 1e-3 ? z / fogDepth.x : log(1.0 + max(z, 0.0) * (exp(fogDepth.y) - 1.0) / fogDepth.x) / fogDepth.y;
++    float f = clamp(t, 0.0, 1.0) * fogGrid.z;
++    vec4 v = textureLod(fogVolume, vec3(cuv, (f - 0.5) / fogGrid.z), 0.0);
++    // Nearer than the first slice's far face: a share of it.
++    float k0 = clamp(f, 0.0, 1.0);
++    vec3 S = max(v.rgb, vec3(0.0)) * k0;
++    float T = mix(1.0, clamp(v.a, 0.0, 1.0), k0);
++    // Beams read against the air around them: what this pixel's air holds
++    // above the mean of the cells around it at the same depth (eight taps on
++    // a ring of fogBeams.y cells) is lifted, so a lit shaft between shadowed
++    // ones stands out; smooth glow and haze (equal to their mean) are left as
++    // they are, and nothing darkens.
++    if (fogBeams.x > 0.0) {
++        vec2 r = fogBeams.y / fogGrid.xy;
++        float w = (f - 0.5) / fogGrid.z;
++        vec3 m = vec3(0.0);
++        for (int i = 0; i < 8; ++i) {
++            float a = float(i) * 0.785398 + 0.39;
++            m += textureLod(fogVolume, vec3(cuv + vec2(cos(a), sin(a)) * r, w), 0.0).rgb;
++        }
++        S += max(S - m * (0.125 * k0), vec3(0.0)) * fogBeams.x;
++    }
++    // The sky (and the far horizon polygon) already holds the whole
++    // atmosphere's light above the horizon: it takes the volume's air only
++    // near the horizon, where the far hills melt into it, fading out above.
++    if (dz >= 0.999999 || z > 0.95 * fogDepth.x) {
++        vec2 ndc = cuv * 2.0 - 1.0;
++        vec3 dw = normalize(viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0));
++        float w = exp(-max(dw.y, 0.0) / fogApply.z);
++        S *= w;
++        T = mix(1.0, T, w);
++    }
++    vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2));
++    vec3 o = fogApply.y > 0.5 ? S : lin * T + S;
++    vec3 col = pow(fogShoulder(o), vec3(1.0 / 2.2));
++    if (fogApply.x > 0.5) {
++        float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++        float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
++        col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
++    }
++    fragColor = vec4(clamp(col, 0.0, 1.0), 1.0 - (1.0 - clamp(c.a, 0.0, 1.0)) * T);
++}
++)";
++
++} // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 23db52b..87a9a24 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -554,7 +554,7 @@ void main() {
+ struct PostShaderDef
+ {
+     const char* name; // override file stem
+-    const char* pieces[3];
++    const char* pieces[6];
+ };
+ const PostShaderDef kPostShaders[] = {
+     {"vsPost", {s_vsPostGLSL}},
+@@ -575,6 +575,12 @@ const PostShaderDef kPostShaders[] = {
+      {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyViewMeanMainGLSL}},
+     {"psPostLumaSharpen", {s_psPostLumaSharpenGLSL}},
+     {"psCanopySun", {Poseidon::gl33lighting::kPostCanopySunGLSL}},
++    {"psFogInject",
++     {Poseidon::gl33lighting::kPostFogInjectInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
++      Poseidon::gl33lighting::kRemasterTerrainCloudsGLSL, Poseidon::gl33lighting::kPostFogSkyInputsGLSL,
++      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostFogInjectMainGLSL}},
++    {"psFogIntegrate", {Poseidon::gl33lighting::kPostFogIntegrateGLSL}},
++    {"psFogApply", {Poseidon::gl33lighting::kPostFogApplyGLSL}},
+ };
+ constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
+ static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
+diff --git a/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py b/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py
+index 5825b54..b7509f4 100644
+--- a/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py
++++ b/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py
+@@ -199,6 +199,10 @@ def load_shaders(spec: str | os.PathLike | None = None, include_shadow_depth: bo
+ 
+ # Files whose shaders are assembled from pieces spread over the family's files.
+ _FAMILIES = ("EngineGL33_LightingShaders", "EngineGL33_Post")
++# Families whose tables also name pieces of another family: the volumetric fog
++# pastes the remastered prelude's LitConstants block and terrain and clouds
++# piece (kPostShaders row psFogInject).
++_FAMILY_ALSO = {"EngineGL33_Post": ("EngineGL33_LightingShaders",)}
+ _FRAGMENT_TABLE = re.compile(r"\bkFragmentPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
+ _SCREEN_VS_TABLE = re.compile(r"\bkScreenVertexPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
+ _POST_TABLE = re.compile(r"\bkPostShaders\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\n\};", re.S)
+@@ -220,6 +224,8 @@ def load_family(spec: str | os.PathLike | None = None, default_relpath: str = DE
+     if p.exists() and p.is_file():
+         fam = _family(p.name)
+         files = sorted(p.parent.glob(f"{fam}*.cpp")) if fam else [p]
++        for other in _FAMILY_ALSO.get(fam, ()):
++            files += sorted(p.parent.glob(f"{other}*.cpp"))
+         return [f.read_text(encoding="utf-8", errors="replace") for f in files]
+     s = str(spec)
+     rev, path = s.split(":", 1) if ":" in s and not os.path.isabs(s) else (s, default_relpath)
+@@ -230,6 +236,8 @@ def load_family(spec: str | os.PathLike | None = None, default_relpath: str = DE
+     names = subprocess.run(["git", "ls-tree", "--name-only", f"{rev}:{parent}"], cwd=root, capture_output=True,
+                            text=True).stdout.split()
+     files = sorted(n for n in names if n.startswith(fam) and n.endswith(".cpp"))
++    for other in _FAMILY_ALSO.get(fam, ()):
++        files += sorted(n for n in names if n.startswith(other) and n.endswith(".cpp"))
+     return [git_show(f"{rev}:{parent}/{n}", root) for n in files]
+ 
+ 
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index afafb85..7682563 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -176,6 +176,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_sea_waves.cpp
+     Graphics/test_sky_density.cpp
+     Graphics/test_canopy.cpp
++    Graphics/test_volumetric_fog.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index a88f0c1..b522377 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -113,7 +113,8 @@ TEST_CASE("Feature switches: each switch reads and writes its own FeatureSet mem
+     CHECK(set.drawGrouping == 2.0f);
+     CHECK(set.taa == 4.0f);
+     CHECK(set.combatLights == 14.0f);
+-    CHECK(set.sharpen == static_cast<float>(kFeatureCount + 1));
++    CHECK(set.sharpen == static_cast<float>(static_cast<int>(Feature::Sharpen) + 2));
++    CHECK(set.volFog == static_cast<float>(kFeatureCount + 1));
+ }
+ 
+ TEST_CASE("Feature switches: the table holds every knob once, with a usable range", "[remaster][FeatureSwitches]")
+@@ -314,7 +315,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+     // Every knob with a parent sits under a landed feature switch, in its
+     // track's group: TAA's three, the sky table's three (A7, test_atmosphere.cpp),
+     // texsharp's two (B11), the sun shadows' three (B1, below) and the sea's
+-    // three (B5).
++    // three (B5), and the volumetric fog's five (look-fog).
+     int children = 0;
+     int taaChildren = 0;
+     for (int i = 0; i < LightingKeyCount(); ++i)
+@@ -325,7 +326,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         INFO(k.key);
+         const std::string_view parent(k.parent);
+         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
+-               parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves"));
++               parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" || parent == "volFog"));
+         REQUIRE(FindFeature(k.parent) != nullptr);
+         CHECK(FindFeature(k.parent)->landed);
+         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
+@@ -333,7 +334,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         ++children;
+     }
+     CHECK(taaChildren == 3);
+-    CHECK(children == 14);
++    CHECK(children == 19);
+ }
+ 
+ TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
+@@ -742,8 +743,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+         const bool sea = info.id == Feature::SeaWaves;
+         const bool canopy = info.id == Feature::CanopyShadows;
+         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
+-        CHECK(info.landed ==
+-              (perf || taa || lightList || atmosphere || texsharp || shadows || shade || sea || canopy || clouds));
++        const bool fog = info.id == Feature::VolFog;
++        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || sea || canopy ||
++                              clouds || fog));
+         if (info.landed)
+         {
+             CHECK(std::string_view(info.step) == (perf         ? "A4"
+@@ -755,6 +757,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+                                                   : sea        ? "B5"
+                                                   : canopy     ? "B9"
+                                                   : clouds     ? "B10"
++                                                  : fog        ? "look-fog"
+                                                                : "B11"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+@@ -777,7 +780,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     CHECK(s.find(" lowSunRig=1:on:always ") != std::string::npos);
+     CHECK(s.find(" crownCanopy=1:on:always ") != std::string::npos);
+     CHECK(s.find(" seaWaves=1:on:per-sea-fragment ") != std::string::npos);
+-    CHECK(s.find("landed=15/26") != std::string::npos);
++    CHECK(s.find("landed=16/27") != std::string::npos);
++    // The volumetric fog runs on any drawn world: it replaces the distance fog.
++    CHECK(s.find(" volFog=1:on:world-drawn-(replaces-the-distance-fog)") != std::string::npos);
+     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
+     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
+     CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+index b681b81..684f208 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+@@ -110,10 +110,12 @@ TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and sec
+     // A3 lands the passes that existed (resolve, AO, bloom, shafts, composite)
+     // plus the linear depth and the debug view that shows it; A5 the TAA
+     // resolve and its sharpen.
+-    CHECK(landed == 9);
++    // The look lane's volumetric fog lands the Air stage.
++    CHECK(landed == 10);
+     CHECK(GetPostStageInfo(PostStage::Temporal).landed);
+     CHECK(GetPostStageInfo(PostStage::Sharpen).landed);
+-    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::Air, PostStage::CombatScatter})
++    CHECK(GetPostStageInfo(PostStage::Air).landed);
++    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::CombatScatter})
+     {
+         CAPTURE(GetPostStageInfo(s).name);
+         CHECK_FALSE(GetPostStageInfo(s).landed);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index bdc9b0d..2b929e5 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1094,8 +1094,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+     }
+     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
+     // and its debug view, the TAA resolve and its sharpen, the sky table's
+-    // two passes, the luma sharpen, and the canopy's sun-visibility pass
+-    CHECK(post == 15);
++    // two passes, the luma sharpen, the canopy's sun-visibility pass, and the
++    // volumetric fog's injection, integration and apply
++    CHECK(post == 18);
+ }
+ 
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+@@ -1217,7 +1218,11 @@ TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][
+     const size_t close = source.find("\n};", open);
+     REQUIRE(close != std::string::npos);
+     const std::string table = source.substr(open, close - open);
+-    const auto raw = RawStringsOf("EngineGL33_Post");
++    // The rows name post pieces and, for the fog's injection, the prelude's
++    // LitConstants block and terrain and clouds piece.
++    auto raw = RawStringsOf("EngineGL33_Post");
++    for (auto& [name, body] : RawStringsOf("EngineGL33_LightingShaders"))
++        raw.emplace(name, body);
+     static const std::regex row(R"re(\{\s*"(\w+)"\s*,\s*\{([^{}]*)\}\s*\})re");
+     int i = 0;
+     for (auto it = std::sregex_iterator(table.begin(), table.end(), row); it != std::sregex_iterator(); ++it, ++i)
+@@ -1444,6 +1449,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litWater1", LC::Water1, 1},
+         {"litCanopy", LC::Canopy, 1},
+         {"litDetail", LC::Detail, 1},
++        {"litHaze", LC::Haze, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+     auto checkBlock = [](const std::string& block)
+@@ -1527,7 +1533,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     CHECK(static_cast<int>(LC::Canopy) == 76);
+     CHECK(static_cast<int>(LC::Canopy) == static_cast<int>(LC::Water1) + 1);
+     CHECK(static_cast<int>(LC::Detail) == 77);
+-    CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
++    // The volumetric fog landed the haze slot at 78, the last planned one.
++    CHECK(static_cast<int>(LC::Haze) == 78);
++    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.
+     std::ostringstream range;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+new file mode 100644
+index 0000000..be40aab
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -0,0 +1,369 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/PostStages.hpp>
++#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <cmath>
++#include <string>
++#include <vector>
++
++// The volumetric fog and atmosphere (the look lane "fog";
++// Graphics/Remaster/VolumetricFog.hpp, EngineGL33_PostFog.cpp): the froxel
++// grid and its exponential slices, the medium's weather and time rules, the
++// classic fog's moved edge, the fog floor, the Air stage's plan and gate, and
++// the shaders' agreement with the C++ mirrors.
++
++using namespace Poseidon::remaster;
++namespace gl = Poseidon::gl33lighting;
++
++namespace
++{
++
++int CountOf(const std::string& text, const std::string& needle)
++{
++    int n = 0;
++    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size()))
++        ++n;
++    return n;
++}
++
++FogInputs ClearNoon()
++{
++    FogInputs in;
++    in.sunElevationDeg = 60.0f;
++    in.sunAzimuthDeg = 180.0f;
++    in.viewDistance = 3000.0f;
++    in.fogStart = 900.0f;
++    in.fogEnd = 2980.0f;
++    return in;
++}
++
++// The forward fog factor as finishFragment takes it: the classic linear
++// factor times the edge scale, clamped at 1.
++float ForwardFog(float d, float start, float end, float scale)
++{
++    const float classic = std::clamp(1.0f - (d - start) / (end - start), 0.0f, 1.0f);
++    return std::min(classic * scale, 1.0f);
++}
++
++} // namespace
++
++TEST_CASE("Volumetric fog: a 1080p grid of 12 px cells and 64 slices, coarser and finer by quality", "[remaster][fog]")
++{
++    const FogGrid g = FogGridFor(1920, 1080, 1.0f);
++    CHECK(g.cellsX == 160);
++    CHECK(g.cellsY == 90);
++    CHECK(g.slices == 64);
++    CHECK(g.cellPixels == 12);
++    const FogGrid lo = FogGridFor(1920, 1080, 0.0f);
++    CHECK(lo.cellPixels == 16);
++    CHECK(lo.slices == 48);
++    CHECK(lo.cellsY == 68); // rounded up: the last row covers the bottom edge
++    const FogGrid hi = FogGridFor(1920, 1080, 2.0f);
++    CHECK(hi.cellPixels == 8);
++    CHECK(hi.slices == 96);
++    // Out-of-range knob values clamp to the ends; every grid writes whole
++    // eight-slice draws.
++    CHECK(FogGridFor(1920, 1080, 7.0f).slices == 96);
++    CHECK(FogGridFor(1920, 1080, -3.0f).slices == 48);
++    for (float q : {0.0f, 1.0f, 2.0f})
++        CHECK(FogGridFor(1280, 720, q).slices % kFogSlicesPerDraw == 0);
++    CHECK(FogGridFor(0, 1080, 1.0f).slices == 0);
++}
++
++TEST_CASE("Volumetric fog: the slices are exponential, about a metre deep at the eye, and invert", "[remaster][fog]")
++{
++    for (float zFar : {400.0f, 1500.0f, 4000.0f, 6000.0f})
++        for (int slices : {48, 64, 96})
++        {
++            CAPTURE(zFar, slices);
++            const float k = FogDepthK(zFar, slices);
++            const float first = FogSliceDepth(1.0f / static_cast<float>(slices), zFar, k);
++            CHECK(first == Catch::Approx(kFogFirstSliceMetres * 64.0f / static_cast<float>(slices)).epsilon(0.02));
++            CHECK(FogSliceDepth(0.0f, zFar, k) == Catch::Approx(0.0f).margin(1e-4));
++            CHECK(FogSliceDepth(1.0f, zFar, k) == Catch::Approx(zFar).epsilon(1e-4));
++            float last = -1.0f;
++            for (int i = 0; i <= 32; ++i)
++            {
++                const float t = static_cast<float>(i) / 32.0f;
++                const float z = FogSliceDepth(t, zFar, k);
++                CHECK(z > last); // deeper slice by slice
++                last = z;
++                CHECK(FogSliceCoord(z, zFar, k) == Catch::Approx(t).margin(1e-4));
++            }
++        }
++    // A short range is already finer than a metre per slice: even slices.
++    CHECK(FogDepthK(30.0f, 64) < 1e-2f);
++    CHECK(FogSliceDepth(0.5f, 30.0f, FogDepthK(30.0f, 64)) == Catch::Approx(15.0f).epsilon(1e-3));
++    CHECK(FogSliceCoord(1e6f, 1000.0f, 5.0f) == 1.0f);
++}
++
++TEST_CASE("Volumetric fog: the weather visibility is the classic engine's tactical range", "[remaster][fog]")
++{
++    // Landscape.cpp: no fog and no rain see the view distance; heavy rain
++    // 350 m; full fog 5 % of 900 m.
++    CHECK(WeatherVisibility(0.0f, 0.0f, 3000.0f) == Catch::Approx(3000.0f));
++    CHECK(WeatherVisibility(0.0f, 1.0f, 3000.0f) == Catch::Approx(350.0f));
++    CHECK(WeatherVisibility(1.0f, 0.0f, 3000.0f) == Catch::Approx(45.0f));
++    float last = 1e9f;
++    for (int i = 0; i <= 10; ++i)
++    {
++        const float v = WeatherVisibility(static_cast<float>(i) / 10.0f, 0.0f, 1500.0f);
++        CHECK(v <= last);
++        last = v;
++    }
++}
++
++TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opacity at sea level", "[remaster][fog]")
++{
++    // A level line of sight at the fog floor through setFog 0.3 with VD 1500:
++    // what is left of a surface at the classic fog's end is a small share, and
++    // under half at two thirds of it, where the classic linear fog is half.
++    FogInputs in = ClearNoon();
++    in.viewDistance = 1500.0f;
++    in.fog = 0.3f;
++    in.fogEnd = WeatherVisibility(in.fog, 0.0f, in.viewDistance);
++    in.fogStart = in.fogEnd * 0.4f;
++    const FogMedium m = ComputeFogMedium(in, LightingTuning{}, true);
++    CHECK(m.weatherSigma > 0.0f);
++    const float sigma = FogExtinctionAt(m, 0.0f, 0.0f);
++    const float left = std::exp(-sigma * in.fogEnd);
++    CHECK(left < 0.25f);
++    CHECK(left > 0.01f);
++    CHECK(std::exp(-sigma * 0.66f * in.fogEnd) < 0.5f);
++    // It thins upward from the fog floor: a hilltop 300 m up sees farther.
++    CHECK(FogExtinctionAt(m, 300.0f, 0.0f) < 0.6f * sigma);
++}
++
++TEST_CASE("Volumetric fog: clear noon is thin haze and blue air; grey sky, rain and fog thicken it", "[remaster][fog]")
++{
++    const LightingTuning t{};
++    const FogMedium noon = ComputeFogMedium(ClearNoon(), t, true);
++    CHECK(noon.hazeSigma == Catch::Approx(kHazeClear));
++    CHECK(noon.rayleigh == Catch::Approx(kRayleighScale));
++    CHECK(noon.weatherSigma == 0.0f);
++    CHECK(noon.mistSigma == 0.0f); // no morning, no night, a clear sky
++    // Far hills 3 km out at noon sit in visible air, not in a wash.
++    const float noonLeft = std::exp(-FogExtinctionAt(noon, 50.0f, 0.0f) * 3000.0f);
++    CHECK(noonLeft > 0.15f);
++    CHECK(noonLeft < 0.5f);
++
++    FogInputs grey = ClearNoon();
++    grey.skyThrough = 0.0f;
++    const FogMedium overcast = ComputeFogMedium(grey, t, true);
++    CHECK(overcast.hazeSigma > 2.0f * noon.hazeSigma);
++    CHECK(overcast.mistSigma > 0.0f);
++
++    FogInputs wet = grey;
++    wet.rain = 1.0f;
++    const FogMedium rain = ComputeFogMedium(wet, t, true);
++    CHECK(rain.weatherSigma > 0.0f);
++    CHECK(rain.hazeSigma > overcast.hazeSigma);
++    CHECK(rain.mistSigma > overcast.mistSigma);
++    CHECK(rain.weatherHeight == Catch::Approx(kRainHazeHeight));
++
++    // The knobs: density scales every part, 0 clears the air.
++    LightingTuning thick;
++    thick.fogDensity = 2.0f;
++    CHECK(ComputeFogMedium(wet, thick, true).hazeSigma == Catch::Approx(2.0f * rain.hazeSigma));
++    LightingTuning none;
++    none.fogDensity = 0.0f;
++    const FogMedium clear = ComputeFogMedium(wet, none, true);
++    CHECK(FogExtinctionAt(clear, 0.0f, 0.0f) == 0.0f);
++    LightingTuning noMist;
++    noMist.fogMist = 0.0f;
++    CHECK(ComputeFogMedium(wet, noMist, true).mistSigma == 0.0f);
++}
++
++TEST_CASE("Volumetric fog: the valley mist follows the morning sun, pools under its top and drops off above",
++          "[remaster][fog]")
++{
++    // An eastern sun from 6 degrees under the horizon, full around sunrise,
++    // gone by 24 degrees; a western sun gives no morning.
++    CHECK(FogMorningWeight(-10.0f, 70.0f) == 0.0f);
++    CHECK(FogMorningWeight(2.0f, 70.0f) == Catch::Approx(1.0f));
++    CHECK(FogMorningWeight(16.0f, 70.0f) > 0.0f);
++    CHECK(FogMorningWeight(16.0f, 70.0f) < 1.0f);
++    CHECK(FogMorningWeight(25.0f, 70.0f) == 0.0f);
++    CHECK(FogMorningWeight(2.0f, 290.0f) == 0.0f);
++
++    FogInputs dawn = ClearNoon();
++    dawn.sunElevationDeg = 1.0f;
++    dawn.sunAzimuthDeg = 65.0f;
++    const FogMedium m = ComputeFogMedium(dawn, LightingTuning{}, true);
++    CHECK(m.mistSigma == Catch::Approx(kMistSigma));
++    CHECK(m.morning == Catch::Approx(1.0f));
++    // Inside the layer the full density; above its top it falls off.
++    const float floorY = 40.0f;
++    const float inside = FogExtinctionAt(m, floorY + 10.0f, floorY);
++    const float ridge = FogExtinctionAt(m, floorY + 200.0f, floorY);
++    CHECK(inside > 8.0f * ridge);
++    CHECK(inside == Catch::Approx(FogExtinctionAt(m, floorY + m.mistDepth - 1.0f, floorY)).epsilon(0.05));
++    // The same hour in the evening light keeps a third of it.
++    FogInputs dusk = dawn;
++    dusk.sunAzimuthDeg = 295.0f;
++    const FogMedium e = ComputeFogMedium(dusk, LightingTuning{}, true);
++    CHECK(e.mistSigma > 0.2f * m.mistSigma);
++    CHECK(e.mistSigma < 0.5f * m.mistSigma);
++}
++
++TEST_CASE("Volumetric fog: off, the forward fog is the classic one; on, it keeps only the view-distance edge",
++          "[remaster][fog]")
++{
++    FogInputs in = ClearNoon();
++    in.fogStart = 600.0f;
++    in.fogEnd = 1500.0f;
++    const FogMedium off = ComputeFogMedium(in, LightingTuning{}, false);
++    CHECK(off.fogEdgeScale == 1.0f);
++    CHECK(FogExtinctionAt(off, 0.0f, 0.0f) == 0.0f);
++    CHECK(off.zFar == Catch::Approx(1500.0f));
++    const FogMedium on = ComputeFogMedium(in, LightingTuning{}, true);
++    CHECK(on.fogEdgeScale > 1.0f);
++    // The scaled factor is the classic linear fog from kFogEdgeStart of the
++    // end: no fog before it, the full fog at the end, a straight line between.
++    const float edge = kFogEdgeStart * in.fogEnd;
++    for (float d : {100.0f, 600.0f, 1000.0f, edge - 1.0f})
++        CHECK(ForwardFog(d, in.fogStart, in.fogEnd, on.fogEdgeScale) == Catch::Approx(1.0f));
++    CHECK(ForwardFog(in.fogEnd, in.fogStart, in.fogEnd, on.fogEdgeScale) == Catch::Approx(0.0f).margin(1e-5));
++    const float mid = 0.5f * (edge + in.fogEnd);
++    CHECK(ForwardFog(mid, in.fogStart, in.fogEnd, on.fogEdgeScale) == Catch::Approx(0.5f).epsilon(1e-3));
++    // An empty range keeps the classic factor.
++    CHECK(FogEdgeScale(500.0f, 500.0f) == 1.0f);
++    CHECK(FogEdgeScale(1400.0f, 1500.0f) == 1.0f);
++}
++
++TEST_CASE("Volumetric fog: the fog floor is the lowest ground nearby, smooth, and never below the sea",
++          "[remaster][fog]")
++{
++    // A valley along z at x = 32 (40 m deep per cell of slope), on 50 m cells,
++    // and a sea on the left edge.
++    const int n = 64;
++    const float cell = 50.0f;
++    std::vector<float> h(static_cast<size_t>(n) * n);
++    for (int z = 0; z < n; ++z)
++        for (int x = 0; x < n; ++x)
++            h[static_cast<size_t>(z) * n + x] = x < 4 ? -20.0f : 30.0f + 8.0f * std::fabs(static_cast<float>(x - 32));
++    const std::vector<float> floorY = BuildFogFloor(h.data(), n, cell);
++    REQUIRE(floorY.size() == h.size());
++    auto at = [&](int x, int z) { return floorY[static_cast<size_t>(z) * n + x]; };
++    // In and beside the valley the floor is the valley's bottom (30 m), on
++    // the slopes far up it stays low, so the mist pools along the valley.
++    CHECK(at(32, 32) == Catch::Approx(30.0f).margin(1.0f));
++    CHECK(at(36, 32) == Catch::Approx(30.0f).margin(2.0f));
++    CHECK(at(50, 32) < h[static_cast<size_t>(32) * n + 50] - 60.0f);
++    // The sea holds its mist at the water: never below 0.
++    for (float v : floorY)
++        CHECK(v >= 0.0f);
++    CHECK(at(2, 10) == Catch::Approx(0.0f).margin(1e-3));
++    // Nothing for an empty grid.
++    CHECK(BuildFogFloor(nullptr, n, cell).empty());
++    CHECK(BuildFogFloor(h.data(), 1, cell).empty());
++}
++
++TEST_CASE("Volumetric fog: the Air stage applies it with the world depth and replaces the legacy shafts",
++          "[remaster][fog][PostStages]")
++{
++    PostFrameInputs in;
++    in.fog = true;
++    in.sunShafts = 1.0f;
++    in.shaftWeight = 0.5f;
++    PostStagePlan plan = PlanPostStages(in);
++    CHECK(plan.Runs(PostStage::Resolve));
++    CHECK(plan.Runs(PostStage::Air));
++    CHECK_FALSE(plan.Runs(PostStage::Shafts));
++    CHECK(plan.Runs(PostStage::Composite));
++    // The fog alone asks for the pass.
++    PostFrameInputs alone;
++    alone.fog = true;
++    CHECK(PlanPostStages(alone).Runs(PostStage::Air));
++    CHECK(PlanPostStages(alone).Runs(PostStage::Composite));
++    // A vehicle interior or an optics overlay: no fog, the shafts as before.
++    for (bool depth : {false, true})
++        for (bool glow : {false, true})
++        {
++            PostFrameInputs f = in;
++            f.worldDepth = depth;
++            f.glow = glow;
++            const PostStagePlan p = PlanPostStages(f);
++            CHECK(p.Runs(PostStage::Air) == (depth && glow));
++        }
++    // Without the fog the shafts run as before.
++    in.fog = false;
++    plan = PlanPostStages(in);
++    CHECK_FALSE(plan.Runs(PostStage::Air));
++    CHECK(plan.Runs(PostStage::Shafts));
++}
++
++TEST_CASE("Volumetric fog: the switch has landed with its knobs; its gate needs the post pass and a drawn world",
++          "[remaster][fog][FeatureGates]")
++{
++    const FeatureInfo& info = GetFeatureInfo(Feature::VolFog);
++    CHECK(info.landed);
++    CHECK(std::string(info.key) == "volFog");
++    CHECK(std::string(info.gpuSection) == "air");
++    for (const char* knob : {"fogDensity", "fogQuality", "fogMist", "fogSun", "fogLights"})
++    {
++        CAPTURE(knob);
++        const LightingKey* k = FindLightingKey(knob);
++        REQUIRE(k != nullptr);
++        CHECK(std::string(k->parent) == "volFog");
++        CHECK(KeyDefault(*k) == 1.0f);
++    }
++    LightingTuning t{};
++    GateInputs in;
++    CHECK(ComputeFeatureGates(in, t)[Feature::VolFog].on);
++    GateInputs interior = in;
++    interior.interior = true;
++    CHECK_FALSE(ComputeFeatureGates(interior, t)[Feature::VolFog].on);
++    GateInputs optics = in;
++    optics.optics = true;
++    CHECK_FALSE(ComputeFeatureGates(optics, t)[Feature::VolFog].on);
++    GateInputs nv = in;
++    nv.nightVision = true;
++    CHECK_FALSE(ComputeFeatureGates(nv, t)[Feature::VolFog].on);
++    LightingTuning noPost = t;
++    noPost.postEffects = false;
++    CHECK_FALSE(ComputeFeatureGates(in, noPost)[Feature::VolFog].on);
++    LightingTuning off = t;
++    off.features.volFog = 0.0f;
++    CHECK_FALSE(ComputeFeatureGates(in, off)[Feature::VolFog].on);
++    // Night, rain, fog, noon: always on (it replaces the distance fog).
++    GateInputs night = in;
++    night.nightEffect = 1.0f;
++    night.sunElevationDeg = -30.0f;
++    night.fog = 0.5f;
++    night.rainDensity = 1.0f;
++    CHECK(ComputeFeatureGates(night, t)[Feature::VolFog].on);
++}
++
++TEST_CASE("Volumetric fog: the shaders read the slices and the medium the way VolumetricFog.cpp lays them out",
++          "[remaster][fog][Shaders]")
++{
++    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
++    const std::string integrate = gl::PostShaderSource(gl::PostShader::FogIntegrate);
++    const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
++    REQUIRE_FALSE(inject.empty());
++    // The injection reads the rig and the world's cloud and canopy terms from
++    // the pasted pieces, once each.
++    CHECK(CountOf(inject, gl::LitConstantsBlock()) == 1);
++    CHECK(CountOf(inject, gl::kRemasterTerrainCloudsGLSL) == 1);
++    // FogSliceDepth in the injection and the integration, FogSliceCoord in
++    // the apply and the reprojection.
++    const std::string depth = "fogDepth.x * (exp(fogDepth.y * t) - 1.0) * fogDepth.z";
++    CHECK(CountOf(inject, depth) == 1);
++    CHECK(CountOf(integrate, depth) == 1);
++    CHECK(CountOf(apply, "log(1.0 + max(z, 0.0) * (exp(fogDepth.y) - 1.0) / fogDepth.x) / fogDepth.y") == 1);
++    CHECK(CountOf(inject, "log(1.0 + pv.z * (exp(prevProj.w) - 1.0) / prevProj.z) / prevProj.w") == 1);
++    // Eight slices per draw, eight outputs.
++    for (const std::string* s : {&inject, &integrate})
++        for (int i = 0; i < kFogSlicesPerDraw; ++i)
++            CHECK(CountOf(*s, "layout(location = " + std::to_string(i) + ") out vec4 fog" + std::to_string(i) + ";") ==
++                  1);
++    // The physical Rayleigh air of Atmosphere.hpp, at sea level.
++    CHECK(CountOf(inject, "vec3(5.802e-6, 13.558e-6, 33.1e-6)") == 1);
++    // The forward fog keeps only the edge through litHaze.x.
++    CHECK(CountOf(gl::RemasterFragmentCommon(), "min(vFogTC * (1.0 + litHaze.x), 1.0)") == 1);
++}

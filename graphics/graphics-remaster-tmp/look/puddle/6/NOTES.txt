@@ -1,0 +1,117 @@
+Puddle swarm, approach 6 of 6: excellent puddles, everything else matte and damp
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-6 (fec1075 + fix4/base.patch = round 3, base tree d2f866e).
+Build build/look-puddle-6-rwdi, game dist/look-puddle-6-rwdi, junction RemasterUD-puddle-6.
+Nothing committed, no branch. fix.patch = 4 files (2 shader sources, ScreenReflections.hpp, test_wet_weather.cpp),
++275 / -52. The capture tests (look_shine*, look_probe_p6*) are left out as asked.
+
+LOOK FIRST
+- compare.png: rows town_night_rain, seam_b, seam_d, seam_day, rain_day; columns round 3 (shiny) | first rework
+  | this approach; then 2x crops of the tree base and the open street in town_night_rain.
+- final/<view>.png: the five views at native resolution, shot with the final build (shots_final).
+- shots_base: the same five views with this copy's unchanged build (round 3), for a same-build A/B.
+- shots_i1, shots_i2: shader-override iterations; work/compare_i2.png.
+
+WHAT I FOUND
+- In round 3 the reflections on non-puddle ground come from two places:
+  1. The reflections' trace (EngineGL33_PostSsrShaders.cpp) gave every wet ground pixel a mirror weight of
+     0.5 x wet (land) or 0.65 x wet (roads) at roughness 0.30 to 0.75, then stretched it vertically: those are
+     the long lamp, window and fire streaks and the "lacquered" square.
+  2. The forward pass's film (wetSurface) drew lamp streaks at roughness 0.12 on every wet ground pixel, and the
+     sun glint at 0.5 on half the film.
+- The puddles themselves read as DARK holes in round 3: at night they mirror a nearly black sky, and they were
+  only visible because the ground around them was shinier. My first iteration (shots_i1, only the sheen removed)
+  proved it: with a matte ground the night puddles all but vanished (lower frame mean luminance 0.159 -> 0.146,
+  but the puddles had no edge left). So making only puddles reflect needs the puddles to carry the look:
+  more of them on bare ground and roads, a darker water body (so their mirror image stands out), a dark rim.
+- The rain_day straight edge beside the jeep is not the puddle's shape: the puddle runs on under the jeep's
+  screen columns, but there the trace hits the jeep (a kind 1 hit, not a "behind" miss), so the puddle mirrors
+  the jeep's lit dark olive side, which looks like the grass. The edge is the jeep's silhouette.
+- Probe numbers (lower frame y 700..1080, the fire's columns x 1150..1550 left out; luminance 0..1):
+    view             base p99 -> final p99   column spread (vertical streak energy) base -> final
+    town_night_rain  0.360 -> 0.261          0.0370 -> 0.0239
+    seam_b           0.331 -> 0.236          0.0396 -> 0.0116
+    seam_d           0.301 -> 0.237          0.0339 -> 0.0299 (seam_d's remaining spread is its puddles)
+  Day views keep their level (seam_day mean 0.433 -> 0.408, rain_day 0.331 -> 0.321).
+- shots_probe_final / shots_probe_base: the trace's reflection-only view (debug=10, look_probe_p6). Note it shows
+  the normalised reflection everywhere, not its weight, so it shows how crisp the puddles' mirror is (sharp
+  facades, rings near the eye) rather than proving the ground's weight is zero; the weight is pinned by a test.
+
+THE CHANGE (shaders plus the puddle constants' C++ mirror; no binding or pass change)
+Non-puddle ground (land, roads, grass clutter):
+- Trace: with the wet weather on, the non-puddle sheen is multiplied by kSsrDampWeight = 0, so the ground
+  outside the water reflects nothing. B6's legacy path (wetWeather off) is unchanged.
+- Forward: the ground's film is never smoother than kWetGroundRough 0.55, and only kWetGroundGlint 0.35 of it
+  glints, so a lamp or the fire gives a dim, broad pool of glint near it and never a streak. The film's sky
+  term (when the trace is off) takes the same share.
+- Forward: bare ground soaks at least kWetGroundSeal 0.6 (grass keeps its own share), and the ground darkening
+  rises 0.35 -> 0.5: rain shows as darker, deeper colour (it also replaces the darkening the trace's mirror
+  share used to give).
+- Sun glint on bare ground: rougher (0.5 -> 0.6) on a smaller share (0.5 -> 0.3).
+Puddles:
+- Clear mirrors: weight 1, cone kSsrPuddleCone 0.008 (unchanged sharpness), Fresnel as before (Schlick, water
+  f0 0.02: weak at the feet, strong at grazing views).
+- Rain on the water: wetRainRings moved into the shared puddles piece, and puddleRings() adds a gentle chop (two
+  value noises over a third of a metre, moving with time). The forward pass (lamp and sun glints) and the trace
+  (the mirror) use the same function, so a ring moves both. Rings fade out by the pixel's footprint (full to
+  1 cm, none from 3.5 cm), the chop by its own (8 cm to 30 cm), so far puddles stay calm instead of
+  shimmering; the trace widens the cone a little (kSsrPuddleRainCone 0.006 x rain) where the rings are gone.
+  The old distance fade (kWetRingsFar 40 m) and the trace's vnoise ripple are gone on the wet path.
+- Darker water body: the ground under the water 0.55 -> 0.4 (forward and trace, kept equal by the test).
+- Darker wet rim: kWetDampDark 0.9 -> 0.6 over a shorter margin (kPuddleDamp 0.06 -> 0.05 in noise units,
+  roughly 10 cm), fading out from the water's edge.
+- More water: bare ground threshold 0.67 -> 0.6, roads 0.61 -> 0.56. Grass (0.74) is unchanged, so rain_day's
+  meadow keeps its puddles. Shapes are still the three-octave noise field (no straight edges of their own).
+- Where the trace finds nothing (a ray behind a vehicle, or level out of the frame), a puddle still mirrors
+  kSsrPuddleFill 0.4 of the sky's guess, so its water reads on there.
+
+CONSTANTS old -> new
+Puddles piece:   kPuddleRoad 0.61 -> 0.56; kPuddleGround 0.67 -> 0.6; kPuddleDamp 0.06 -> 0.05;
+                 new kPuddleRingScale 1.6 (was the literal 2.2 in wetSurface), kPuddleRingFootFull 0.01,
+                 kPuddleRingFootNone 0.035, kPuddleChopScale 3.0, kPuddleChop 0.3, kPuddleChopFootFull 0.08,
+                 kPuddleChopFootNone 0.3; wetRainRings moved here from the surface piece (body unchanged).
+Surface piece:   kWetGroundDarken 0.35 -> 0.5; kWetPuddleDark 0.55 -> 0.4; kWetDampDark 0.9 -> 0.6;
+                 kWetSunGroundRough 0.5 -> 0.6; kWetSunGroundFilm 0.5 -> 0.3; kWetRingsFar removed;
+                 new kWetGroundSeal 0.6, kWetGroundRough 0.55, kWetGroundGlint 0.35, kWetRingTilt 0.06 (was the
+                 literal 0.06).
+Trace:           kSsrPuddleDark 0.55 -> 0.4; kSsrPuddleRoad 0.61 -> 0.56; kSsrPuddleGround 0.67 -> 0.6;
+                 new kSsrDampWeight 0.0, kSsrPuddleCone 0.008 (was the literal), kSsrPuddleRainCone 0.006,
+                 kSsrRingTilt 0.04, kSsrPuddleFill 0.4.
+ScreenReflections.hpp: kSsrPuddleDark/Road/Ground mirror the trace's (tests pin them together).
+Round 3's no-seam pieces are untouched: groundFieldAt, wetVegetation, wetGroundPorosity, veg * veg in the
+threshold, and the trace's field class.
+
+TESTS (build/look-puddle-6-rwdi/tests/unit/engine/Poseidon/PoseidonTests.exe, run from D:)
+"[wet],[ssr],[Shaders],[TerrainHorizon],[remaster]": All tests passed (957262 assertions in 299 test cases),
+final build; glslang compiles every program. clang-format clean on the changed files.
+Round 3's seam tests are kept unchanged and pass. New in test_wet_weather.cpp:
+- "Wet weather ground: only the puddles mirror, the ground around them darkens and glints dimly": the trace's
+  damp weight <= 0.05 and its use, the puddle cone and rain cone, the fill; the forward pass's ground roughness
+  floor, glint share, soak floor, darker rim; and a C++ mirror of wetLobe: a street lamp 5 m up, 12 m ahead of
+  an eye 1.75 m up, where the ground would mirror it the ground's glint is under 5 % of a puddle's and not
+  zero, and half a metre to the side it keeps over a third of its peak (broad, no line toward the eye) while
+  the puddle's drops under a tenth.
+- "Wet weather puddles: one set of rain rings moves the mirror and the glints, calm below the pixel": the rings
+  live once in the shared piece (prelude and trace), the footprint fades, the chop's limits, dry = still, and
+  both passes call puddleRings.
+
+AI SIGHT AND FOG: untouched (Target.cpp and VolumetricFog.cpp are not in the patch).
+
+HONEST WEAK POINTS
+- Night read. With the sheen gone, the night views read as a dark, damp square with black-mirror puddles, not
+  as a glistening street. seam_b in particular has few puddles in its lower frame, and none of the five views
+  puts a puddle on the fire's mirror line, so the fire's reflection (the strongest "rain" cue in round 3) is
+  gone; its ground only gets the broad warm glint. The lamp's mirror image falls below the frame in all three
+  night views, so no view shows a crisp lamp-in-puddle reflection either. Whether this still "clearly reads as
+  a rainy night" is the owner's call; the rain_day and seam_day views read clearly.
+- The jeep edge in rain_day is not fixed: it is the jeep's silhouette mirrored, and the screen trace returns
+  the jeep's lit side colour, which matches the grass. kSsrPuddleFill only covers misses, not these hits.
+- Night puddles that mirror only dark sky are black shapes; at thumbnail size they read as wet patches more
+  than as mirrors. Puddles that face lit facades (left of town_night_rain, the road puddle on the right) read as
+  clear mirrors.
+- More water: the threshold drop roughly doubles the bare-ground and road puddle share (not measured with a
+  class probe this round). On seam_day the left of the square now holds a long chain of puddles.
+- Rings are only visible within a few metres (their crests are a few cm); the chop makes mirrored edges waver
+  slightly at mid range. Not checked in motion; cost not measured (one 3x3 ring loop and two value noises per
+  near puddle pixel in each pass, both skipped by the footprint fade and when dry).
+- The darker rim is subtle on grass and on dark night ground; it shows best on the bright day square.

@@ -1,0 +1,5 @@
+; Captured addAction request [target, caller, actionId]. Validate and enqueue
+; in ONE evaluation so parallel dispatch scripts cannot straddle a remount.
+; Stale IDs are never interpreted using another target or conversation state.
+if (GM_CI_READY) then {if (((count GM_CI_REQUEST) == 0) and ((_this select 2) >= 0)) then {if ((_this select 0) == gmCiMenuBody) then {if ((_this select 2) == gmCiMenuRead) then {GM_CI_REQUEST = [_this select 0, _this select 1, "INSPECT"]}; if ((_this select 2) == gmCiMenuAsk) then {gmCiDispatchVerb = "SOLICIT"; if (gmCiMenuState == "CONFIRM") then {gmCiDispatchVerb = "CANCEL"}; GM_CI_REQUEST = [_this select 0, _this select 1, gmCiDispatchVerb]}; if ((_this select 2) == gmCiMenuExtort) then {gmCiDispatchVerb = "PREVIEW"; if (gmCiMenuState == "CONFIRM") then {gmCiDispatchVerb = "EXTORT"}; GM_CI_REQUEST = [_this select 0, _this select 1, gmCiDispatchVerb]}}}}
+exit

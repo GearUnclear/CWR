@@ -1,0 +1,48 @@
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/CampaignEnd.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/CampaignEnd.hpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/CampaignEndCommands.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.hpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttackCommands.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttackOrders.hpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/GarrisonCache.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/GuerrillaBase.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/GuerrillaBase.hpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/GuerrillaBaseCommands.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/Traffic.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/Undercover.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/ZoneRegistry.cpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/ZoneRegistry.hpp
+ M arma_CWR/engine/Poseidon/Game/Guerrilla/ZoneRegistryCommands.cpp
+ M arma_CWR/engine/Poseidon/UI/Map/UIMapDialogs.cpp
+ M arma_CWR/engine/Poseidon/World/World.cpp
+ M arma_CWR/engine/Poseidon/World/WorldInit.cpp
+ M arma_CWR/guerrilla-mode/OFFSCREEN-CONTRACT.md
+ M arma_CWR/guerrilla-mode/core/scripts/capture.sqs
+ M arma_CWR/guerrilla-mode/core/scripts/market.sqs
+ M arma_CWR/guerrilla-mode/core/scripts/qrf.sqs
+ M arma_CWR/guerrilla-mode/core/scripts/recruit.sqs
+ M arma_CWR/guerrilla-mode/mission/Showcase.Abel/human/coverage.json
+ M arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+ M arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_campaign_end.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_counter_attack.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_guerrilla_base.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_zone_registry.cpp
+?? arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierAir.cpp
+?? arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierAir.hpp
+?? arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierAirCommands.cpp
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_base_retake.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_base_retake.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_hq_assault.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_hq_assault.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_refill_pushout.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_refill_pushout.test.toml
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_wave_base.test.sqf
+?? arma_CWR/tests/integration/scripting/guerrilla_forces_wave_base.test.toml
+?? arma_CWR/tests/integration/ui/remaster/remaster_ud_guerrilla_forces_lose.test.sqf
+?? arma_CWR/tests/integration/ui/remaster/remaster_ud_guerrilla_forces_lose.test.toml
+?? arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_air.cpp

@@ -1,0 +1,27 @@
+// the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+// padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
+// SkyShadow), B5 the water slots 74 and 75 and B11 the terrain detail at 77,
+// so 70 to 73 are the padding member litPlanned and 76 the padding member
+// litPlanned2.
+namespace LitConstPlanned
+{
+constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+// 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
+// 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
+// 70 is free: the light list (A6) needs only a tile size and a night factor,
+// which ride in litLightCount.yz (LitConst::LightCount).
+constexpr int Night = 71;        // night: flags, beam profile, moon key
+constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+// 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
+constexpr int Canopy = 76; // hfrt: canopy heightfield constants
+// 77: texsharp's terrain detail landed (LitConst::Detail, B11).
+constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
+constexpr int End = 79;  // one past the last planned slot
+static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+              "the planned slot below the sun shadows is the reserved padding");
+static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+              "the planned slots between the clouds and the water are the planned padding (70 free)");
+static_assert(Canopy == LitConst::Planned2 && LitConst::Planned2Count == 1 && Canopy == LitConst::Detail - 1,
+              "the planned slot between the water and the terrain detail is the second planned padding");
+static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");

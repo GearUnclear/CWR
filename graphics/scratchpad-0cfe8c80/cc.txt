@@ -1,0 +1,11 @@
+overcast 0.00 through 0.9586 cover 0.0414 shadowCover 0.0000 covered 0.0000 meanSun 0.9669 classic 0.9669 rel +0.0000 litgap 0.9669
+overcast 0.01 through 0.9534 cover 0.0466 shadowCover 0.0000 covered 0.0000 meanSun 0.9628 classic 0.9628 rel +0.0000 litgap 0.9628
+overcast 0.02 through 0.9483 cover 0.0517 shadowCover 0.0002 covered 0.0030 meanSun 0.9565 classic 0.9586 rel -0.0022 litgap 0.9588
+overcast 0.05 through 0.9328 cover 0.0672 shadowCover 0.0185 covered 0.0200 meanSun 0.9450 classic 0.9462 rel -0.0012 litgap 0.9604
+overcast 0.10 through 0.9069 cover 0.0931 shadowCover 0.0883 covered 0.0897 meanSun 0.9244 classic 0.9255 rel -0.0012 litgap 0.9958
+overcast 0.30 through 0.8034 cover 0.1966 shadowCover 0.1966 covered 0.1973 meanSun 0.8422 classic 0.8428 rel -0.0007 litgap 1.0000
+overcast 0.50 through 0.7000 cover 0.3000 shadowCover 0.3000 covered 0.3006 meanSun 0.7595 classic 0.7600 rel -0.0006 litgap 1.0000
+overcast 0.60 through 0.3250 cover 0.6750 shadowCover 0.6750 covered 0.6749 meanSun 0.4600 classic 0.4600 rel +0.0001 litgap 1.0000
+overcast 0.66 through 0.1000 cover 0.9000 shadowCover 0.9000 covered 0.8987 meanSun 0.2810 classic 0.2800 rel +0.0037 litgap 1.0000
+overcast 0.80 through 0.0588 cover 0.9412 shadowCover 0.9412 covered 0.9396 meanSun 0.2483 classic 0.2471 rel +0.0052 litgap 1.0000
+overcast 1.00 through 0.0000 cover 1.0000 shadowCover 1.0000 covered 1.0000 meanSun 0.2000 classic 0.2000 rel -0.0000 litgap 1.0000

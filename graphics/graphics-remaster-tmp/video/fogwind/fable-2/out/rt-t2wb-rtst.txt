@@ -1,0 +1,8 @@
+rt-t2wb-rtst: 190 frames (clip 10..200), camera |shift| mean 0.00 px/frame (x +0.00, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.057  0.023  0.053  0.194 |  +0.8 +17.9  +0.02  -0.20 | +14.1 +10.4  +0.01 | +0.02   0.001
+  valley   0.033  0.021  0.032  0.124 |  -7.4 +10.7  +0.02  -0.11 |  +3.3 -16.9  +0.02 | +0.02   0.001
+  farhill  0.032  0.016  0.029  0.128 | +14.3  +7.4  +0.01  -0.15 |  +5.2 +13.4  +0.01 | +0.01   0.000
+  haze     0.024  0.011  0.023  0.086 | +10.1  -9.0  +0.01  -0.16 |  -9.9 -13.3  +0.02 | +0.01   0.000
+  slope    0.051  0.029  0.048  0.235 |  -7.6 -15.7  +0.02  -0.16 |  -4.0 +19.5  +0.02 | +0.02   0.001
+  wrote amp_rt-t2wb-rtst.png, xt_rt-t2wb-rtst.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

@@ -1,0 +1,5 @@
+﻿H-classic  jeep+ground: mean 0.000 max 0 >2: 0.00% | near ground: mean 0.000 max 0 >2: 0.00% | forest: mean 0.000 max 0 >2: 0.00%
+H-rem      jeep+ground: mean 0.000 max 0 >2: 0.00% | near ground: mean 0.000 max 0 >2: 0.00% | forest: mean 1.070 max 29 >2: 11.26%
+H-lz       jeep+ground: mean 0.629 max 9 >2: 2.89% | near ground: mean 0.550 max 6 >2: 1.52% | forest: mean 1.901 max 32 >2: 18.99%
+D-classic  jeep+ground: mean 0.000 max 0 >2: 0.00% | near ground: mean 0.000 max 0 >2: 0.00% | forest: mean 0.000 max 0 >2: 0.00%
+D-rem      jeep+ground: mean 0.000 max 0 >2: 0.00% | near ground: mean 0.000 max 0 >2: 0.00% | forest: mean 3.857 max 34 >2: 27.28%

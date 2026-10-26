@@ -1,0 +1,92 @@
+graphics: every lighting feature has a switch, a gate and an A/B capture
+
+What the player sees: nothing yet. A1 builds the base the visible steps
+land on; every feature switch it adds is inert until its own step reads
+it, so no pixel changes. With --dev, the dev panel's Lighting tab now
+lists every planned feature by area with its switch, the step that lands
+it and its live frame gate ("active: sun above 4 deg", "gated: day").
+
+How it works: one registry (Graphics/Remaster/FeatureSwitches) holds
+every triSetLighting key: the existing knobs and the 26 feature switches
+of plan section 3.1, floats in LightingTuning::features, all 1 by
+default. The defaults stay the member initialisers; the table reads them
+from LightingTuning{}. Item parsing moved there from
+GameStateExtTestRender.cpp, so tests and the overlay share it. A new
+mode word "baseline" turns every switch off (the look of the branch
+cut); "remastered" turns them all on, "classic" is unchanged. The whole
+Lighting tab is generated from the table and its copy-back line is now a
+triSetLighting setting that round-trips. FeatureGates computes, once per
+frame at the world's first 3D pass, whether each enabled feature runs
+and at what resolution: from the sun and moon, the night effect, sky
+cover, rain, fog, the lamps lit at night, night vision and last frame's
+interior and optics flags (combat lights, wetness and the water share
+keep stated stand-ins until B4, B7 and B6). gates=0 forces every enabled
+feature on for debugging.
+
+The switch and its gates: the switches are those of plan 3.1; the gates
+follow 3.2, with the as-built differences recorded in the plan: night
+vision gates every shading feature (the intensifier draws through the
+classic programs), lamps count only at night (the light upload skips
+them by day), lit clouds and cloud shadows need the sun or the moon key,
+lamp streaks need wet weather, the combat shadow mask needs combat light.
+
+Capture tooling (tests/rendering/captures): features_ab.test.sqf shoots
+each feature's hero view with its keys off, then on, in one game, at
+1080p, scale 1.0, 4x MSAA, with a fixed sim clock per view;
+triFeatureState rides in every shot line as feat=; make_pairs.py builds
+off | on pairs; banddiff.py compares images, run folders or the pairs of
+one run per row band. triSetFixedStep fixes the World::Simulate step,
+and triPinCloudDrift holds the remastered cloud shadows and the sky dome
+clouds, which integrate per frame and so did not follow the pinned clock
+(plan 7.2 said they did). A0's timing rig moved in (run-timing.ps1,
+gpu_sampler.ps1, summarize_timing.py, gen_timing.py and the twenty
+views; capRain and capEyeAbs are now in capture_lib.sqf). The video
+skeleton: video/capture_motion.sqf (line and orbit paths, movers, clock
+and time-lapse), video/gen_video_tests.py (every row of plan 7.3, S and
+P modes, a paused-fire check) and video/make_video.py (side-by-side and
+wipe MP4s, montage). triDevPanelLighting shows the Features section for
+a screenshot.
+
+Kept, rewritten and dropped from the prototypes: the per-prototype knob
+rows, the moonlight=1.01 and saturation variant channels and the
+debug=100+flags channel have no place in the registry; each B step adds
+its own sub-knob rows under its switch.
+
+Measured cost (RTX 4060 Ti, 1920x1080, scale 1.0, 4x MSAA, 3 interleaved
+rounds, no other tri slot holder or PoseidonGame; an idle Arma 3 process
+quit 50 s into the run; an earlier run while it was busy read about 60%
+slower on Abel's long views and was set aside): the A0 views match A0 at P0
+(sunrise_ridge 17.31 against 17.41 ms, valley 05:15 23.76 against 23.30,
+Eden broken_high 24.65 against 24.31, overcast_broken 12.02 against
+11.85, bay_offshore 7.39 against 7.73; CPU frame within 0.7 ms). The
+gates read off at the noon references (14 of 26 at noon_fields and
+sea_noon).
+
+Tests: test_feature_switches.cpp (22 cases: every switch has a key, a
+label and a default of 1, baseline zeroes them and remastered restores
+them, the summary round-trips, one case per gate row of plan 3.2 and
+gates=0) and five new test_tri_capture_verbs.cpp cases
+(baseline/remastered, every key as <key>=0, triFeatureState,
+triSetFixedStep, triPinCloudDrift). Gate tags plus the new ones: 452/452.
+Breaking baseline, a sun shadow threshold, the fixed step or the cloud
+pin turns 8 cases red.
+
+In game (tmp/integration/A1 of the graphics-remaster worktree): smoke 3/3
+(KHR_debug ids 131169, 131154 and 131218 only); features_ab
+20261018-015544-ab-A1 against the A0 build's 20261018-012542-ab-A0build-
+fixedclock: horizon and ground bands within the same-config noise except
+clouds_coast_oc_up (its cloud shadows are held in A1 and drift on A0),
+sky band apart by the sky clouds' position (held at 0 in A1; two A1
+boots match to the pixel); capture set 20261018-015545-set against A0's
+gr-base: horizon and ground bands within A0's boot-to-boot noise apart
+from the sea and the overcast views, where Classic, which A1 does not
+touch, differs the same way; paused P-mode frames around a fire are
+pixel-identical, running ones are not; timing 20261018-014500-timing.
+
+Known risks: posed soldiers turn their heads between S-mode passes; the
+SSR gate stays on until B6 measures the water and wet share; a pre-A1
+build cannot hold the clouds, so its sky band never matches; every video
+frame writes a 6 MB BMP twin until run-captures deletes them (about 3 GB
+per 240-frame clip); no RTX 3060 was measured.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -1,0 +1,10 @@
+{
+  "id": "b25",
+  "bank": "kBio2Friendly",
+  "variant": 0,
+  "text": "{Name}, a radio repairer from {Place}, joined a resistance transmitter crew after fighting destroyed the shop. The repairer maintained equipment and hoped to host music programmes someday.",
+  "word_count": 27,
+  "self_review": "A radio repairer loses a shop in fighting, maintains a resistance transmitter, and hopes to host music programmes.",
+  "source_pattern": "The supplied Komski testimony describes existing artistic skill being used to produce underground information; Strobos also describes transporting a transmitter.",
+  "fictional_changes": "Radio repair, the destroyed shop, transmitter work, and music ambitions are fictional. The shared historical pattern is reuse of an existing skill."
+}

@@ -1,0 +1,43 @@
+USLU DUR! TRAILER, PART 1: GRAPHICS - text for your review (nothing recorded yet)
+
+ON-SCREEN TEXT
+Opening card:      USLU DUR!   /   TRAILER · PART 1: GRAPHICS
+Divider labels:    VANILLA  |  USLU DUR!
+Scene 1, typed:    MALDEN  18:15   /   UNDER OCCUPATION
+Scene titles (title / small line):
+   2  MOVING OUT AT DAWN       Malden, 05:45
+   3  THROUGH THE PINES        Malden, 06:00
+   4  COASTAL PATROL, DAWN     Malden, 06:30
+   5  OCCUPIER OUTPOST         Malden, 08:00
+   6  EVERON FROM THE AIR      Everon, 14:30
+   7  HIDDEN CAMP, SINAI       Sinai, 16:10
+   8  AMBUSH AT GOLDEN HOUR    Malden, 18:15
+   9  CONVOY AT SUNSET         Malden, 18:25
+  10  CHECKPOINT AT DUSK       Malden, 19:25
+  11  NIGHT PATROL IN TOWN     Malden, 22:00
+  12  TOWN IN THE RAIN         Malden, 22:00, rain
+  13  SUPPLY RUN AT NIGHT      Malden, 23:00
+  14  FIREFIGHT AFTER DARK     Malden, 23:00
+Closing card:      USLU DUR!   /   PART 2: GAMEPLAY · COMING SOON
+
+NARRATION (female voice, calm; one line per scene)
+Intro        Uslu dur is a total overhaul of Arma: Cold War Assault. This first video is about the light.
+1 Opening    Malden, under occupation. The models are the originals; the light is new.
+2 Dawn       A resistance squad moves out at first light, as the sun burns through the valley mist.
+3 Pines      In the pine woods, guerrillas keep to cover as morning sun falls through the mist in shafts.
+4 Bay        On the bay, an occupier patrol boat rides calm water that now mirrors the hills and sky.
+5 Outpost    At an occupier outpost, a low winter sun rims the armour and leaves the shade cool and deep.
+6 Everon     From the air, sunlit clouds drag their shadows slowly over the hills of Everon.
+7 Sinai      On modded islands like Sinai, a camp hides under its netting from a hard late-afternoon sun.
+8 Ambush     At golden hour, guerrillas wait at the forest edge as long shadows fall down the slope.
+9 Convoy     An occupier convoy rolls in at sunset, its long shadows reaching down the road.
+10 Checkpoint At dusk, checkpoint sentries gather by the fire as the last light fades.
+11 Patrol    At night, lamps and a fire light the occupied town as a patrol sweeps the street.
+12 Rain      When the rain comes, puddles catch the lamps, and the resistance slips past the patrol.
+13 Supply    Out in the country, a supply run drives through a moonless night by headlight and starlight.
+14 Firefight And when a firefight breaks out, every flare, fire and shell burst lights the field.
+Outro        Uslu dur. Part two covers the gameplay: Guerrilla Mode and the AI.
+
+KNOWN FIX BEFORE THE FINAL CUT
+Scene 11 (night patrol): the camera passes too close to a tree, so a blurry trunk fills half the frame
+for a moment (about 1:33). It gets a new camera path.

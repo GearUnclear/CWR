@@ -1,0 +1,21 @@
+﻿wrote sbs_a_optics_mist_hud.png
+wrote sbs_a_optics_mist_sight.png
+wrote sbs_b_specks.png
+wrote sbs_c_rain_day.png
+wrote sbs_c_overcast_heavy.png
+rain_day__1080         vanilla          sky mean [180.2 183.9 182.9] std 27.2
+rain_day__1080         landed           sky mean [163.6 168.2 174.3] std 22.0
+rain_day__1080         before (r3)      sky mean [196.3 199.9 207.5] std 10.8
+rain_day__1080         after (r4 mist)  sky mean [187.8 191.4 198.6] std 16.3
+overcast_heavy__1080   vanilla          sky mean [174.7 174.7 168.5] std 30.7
+overcast_heavy__1080   landed           sky mean [170.7 173.4 177.7] std 23.6
+overcast_heavy__1080   before (r3)      sky mean [200.7 202.9 209.1] std 10.4
+overcast_heavy__1080   after (r4 mist)  sky mean [190.7 192.9 198.9] std 17.4
+optics_mist_hud        vanilla          sky mean [178.3 178.5 171.1] std 11.0
+optics_mist_hud        landed           sky mean [178.6 182.6 188.6] std 12.5
+optics_mist_hud        before (r3)      sky mean [204.9 207.8 215.6] std 12.4
+optics_mist_hud        after (r4 mist)  sky mean [210.1 213.1 220.9] std 12.6
+optics_mist_sight      vanilla          sky mean [188.7 188.7 182.9] std 19.4
+optics_mist_sight      landed           sky mean [188.4 192.2 199.3] std 19.6
+optics_mist_sight      before (r3)      sky mean [196.5 199.  206. ] std 14.3
+optics_mist_sight      after (r4 mist)  sky mean [203.9 206.5 213.7] std 15.5

@@ -1,0 +1,141 @@
+{
+  "scope": "Standalone PoseidonTools JSON exports; source definition index and explicit references only. Not mounted load-order/inheritance resolution and not runtime/game validation.",
+  "repair_rule_sha256": "54a34c7b1144259b89d4c5522795f8b65f8ffc72b43a4dfddecb386e00f2c1fb",
+  "input_addon_exports": 114,
+  "preview_addon_exports": 114,
+  "unavailable_baseline_exports": [
+    {
+      "addon": "AGS_build",
+      "reason": "No successful original audit.json export"
+    },
+    {
+      "addon": "AGS_inds",
+      "reason": "No successful original audit.json export"
+    }
+  ],
+  "legacy_single_byte_json_exports": [
+    "bwm_bruecke",
+    "TMYK_Bridges"
+  ],
+  "known_definition_counts_before": {
+    "cfgweapons": 1116,
+    "cfgammo": 490,
+    "cfgvehicles": 3233
+  },
+  "known_definition_counts_after": {
+    "cfgweapons": 1116,
+    "cfgammo": 492,
+    "cfgvehicles": 3233
+  },
+  "checked_lobo_reference_occurrences_before": 7993,
+  "checked_lobo_reference_occurrences_after": 7993,
+  "unresolved_before": [
+    {
+      "addon": "loboammo",
+      "location": "cfgweapons/LoBo_105Sabot2/ammo",
+      "reference": "LoBo_105Sabot2",
+      "target_section": "cfgammo"
+    },
+    {
+      "addon": "loboweapons",
+      "location": "cfgweapons/LoBoMUZIbase/magazines",
+      "reference": "LoBoMUZIDDmag",
+      "target_section": "cfgweapons"
+    }
+  ],
+  "unresolved_after": [],
+  "checks": {
+    "m833_projectile_exists_in_cfgammo": true,
+    "m833_magazine_keeps_its_projectile_id": true,
+    "m833_distinct_baseline_hit_400": true,
+    "m833_no_splash": true,
+    "micro_uzi_lists_existing_hd_magazine": true,
+    "micro_uzi_missing_dd_spelling_absent": true,
+    "gbu12_mk82_warhead_equal": true,
+    "all_changed_configs_engine_exported": true,
+    "no_unresolved_lobo_references_in_exported_definition_index": true,
+    "preview_source_archives_unchanged": true
+  },
+  "changed_config_exports": [
+    {
+      "member": "coc_diver/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "6156066322f2fd34e6a69d2dedc5e3460cff4a071e33362736bc63dfe2063f9d",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\coc_diver\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\coc_diver\\audit.json"
+    },
+    {
+      "member": "lobo_airammo/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "2ca9340819645d51dc4d0196d5e32b283a394c7ed9df7570d7447904fb1818db",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobo_airammo\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobo_airammo\\audit.json"
+    },
+    {
+      "member": "lobo_m1/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "2cea3cc97ae6deacd7cfd92fd297c1471d5a5f333023dd1989023fb83cc89d60",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobo_m1\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobo_m1\\audit.json"
+    },
+    {
+      "member": "loboammo/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "2ece82738b8a6221f44c69d10c43e31f185400cd24b0c7271095acd35c436ee9",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboammo\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboammo\\audit.json"
+    },
+    {
+      "member": "lobojordan/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "3c1c635c594c3db743f33032ffb9ef59bf14889f652841f30410a121c72db599",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobojordan\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobojordan\\audit.json"
+    },
+    {
+      "member": "lobomerkava2/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "aa7b7ce0a4a5989ba30569df394721844e88024274c02c8ebf792d9caa628c47",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobomerkava2\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobomerkava2\\audit.json"
+    },
+    {
+      "member": "lobomerkava4/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "b676edd80d6088b0ea74356b782638507c1b6a3f371e788e3da4ae4431694e6f",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobomerkava4\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobomerkava4\\audit.json"
+    },
+    {
+      "member": "lobosa6/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "3ef4edccae977bee3b86b99d0616cb60aa83a7a995411f93fcd4f8c0719304c2",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobosa6\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\lobosa6\\audit.json"
+    },
+    {
+      "member": "loboter/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "09ab4fe3c818e5e6a0375ac6ff921c2f80d96554ca66d138eaf1fff733121c04",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboter\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboter\\audit.json"
+    },
+    {
+      "member": "loboweapat/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "15f5bb96fda1195af0301c61ed35feacceb3ee9ee807dd616a17348b25eb1710",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboweapat\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboweapat\\audit.json"
+    },
+    {
+      "member": "loboweapons/config.cpp",
+      "exit_code": 0,
+      "preview_sha256": "7cb9e3ca38126187490249ae1684688ed93f1fb8a95196525da8a9fc8f782919",
+      "output": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboweapons\\parse.log",
+      "json": "D:\\Arma_CWA\\tmp\\lobo-issue69-validation\\preview\\loboweapons\\audit.json"
+    }
+  ],
+  "all_checks_passed": true,
+  "game_launched": false,
+  "installed_files_written": false
+}

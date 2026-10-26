@@ -1,0 +1,2861 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 008d0c15..df95c6f4 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -32,6 +32,7 @@ using namespace Poseidon;
+ #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
+ #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+ #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
++#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+ #include <Poseidon/Dev/Diag/SceneSettle.hpp>
+ #include <Poseidon/Core/Game/GameLoop.hpp>
+ #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+@@ -452,7 +453,10 @@ GameValue TriTextInputActive(const GameState* /*state*/)
+ }
+ 
+ /// triPerfStats — frame-phase profiler rolling stats as a machine-readable
+-/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N".
++/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N",
++/// then " || " and the frame-cost counters averaged over the same window
++/// (Graphics/Core/PerfCounters.hpp: instanced runs, hill culling, the CPU of
++/// LOD selection and occlusion, uniform-buffer uploads).
+ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
+ {
+     Dev::FrameProfiler& perf = Dev::GFrameProfiler();
+@@ -460,7 +464,7 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
+         return GameValue("FAIL:no_frames");
+     const auto total = perf.TotalStats();
+     const auto draw = perf.DrawStats();
+-    char buf[768];
++    char buf[1400];
+     int off = snprintf(buf, sizeof(buf), "fps=%.1f frame=%.2f/%.2f/%.2f setup=%.2f/%.2f draw=%.2f/%.2f", perf.AvgFps(),
+                        total.avgMs, total.p95Ms, total.maxMs, perf.Stats(Dev::FrameProfiler::PhaseSetup).avgMs,
+                        perf.Stats(Dev::FrameProfiler::PhaseSetup).p95Ms, draw.avgMs, draw.p95Ms);
+@@ -477,14 +481,17 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
+         off +=
+             snprintf(buf + off, sizeof(buf) - off, " %s=%.2f/%.2f", Dev::FrameProfiler::PhaseName(p), s.avgMs, s.p95Ms);
+     }
++    snprintf(buf + off, sizeof(buf) - off, " || %s", Poseidon::perf::GPerfCounters().Summary().c_str());
+     LOG_INFO(Core, "[tri] triPerfStats {}", buf);
+     return GameValue(buf);
+ }
+ 
+-/// triPerfReset — clear the frame-profiler ring (start a fresh measurement window).
++/// triPerfReset — clear the frame-profiler ring (start a fresh measurement
++/// window) and the frame-cost counters' window with it.
+ GameValue TriPerfReset(const GameState* /*state*/, GameValuePar /*arg*/)
+ {
+     Dev::GFrameProfiler().Reset();
++    Poseidon::perf::GPerfCounters().ResetWindow();
+     return GameValue("OK");
+ }
+ 
+@@ -523,19 +530,22 @@ static const char* HorizonMapState()
+ 
+ /// triSceneStats: the last frame's scene state for capture logs, as fields
+ /// that splice into a "key=value;..." line: "draws=<GL draw calls>;objects=<
+-/// objects with a visible LOD>;lights=<light slots>;lod=<Scene LOD width>;
+-/// pin=<triPinObjectDetail factor, 0 = adaptive>;horizon=<off, pending or
+-/// ready>" (horizon: the remastered terrain horizon map build). The two
+-/// lighting models can issue slightly different draw calls for the same
+-/// objects; the object count is the one to compare across them. Any light
++/// objects with a visible LOD>;culled=<of those, hidden by the hill cull>;
++/// lights=<light slots>;lod=<Scene LOD width>;pin=<triPinObjectDetail factor,
++/// 0 = adaptive>;horizon=<off, pending or ready>" (horizon: the remastered
++/// terrain horizon map build). The two lighting models can issue slightly
++/// different draw calls for the same objects; the object count is the one to
++/// compare across them, and it counts the objects the hill cull hid (so it
++/// compares across the hillCull switch too). With drawGrouping off, any light
+ /// slot (a street lamp that has once been on keeps its slot) turns instancing
+ /// off for the whole scene (Pass1), which multiplies the draw calls for the
+ /// same objects.
+ GameValue TriSceneStats(const GameState* /*state*/)
+ {
+-    char buf[192];
+-    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
+-             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->NLights() : -1,
++    char buf[224];
++    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;culled=%d;lights=%d;lod=%g;pin=%g;horizon=%s",
++             LastFrameDrawCalls(), GScene ? GScene->DrawnObjectCount() : -1,
++             GScene ? GScene->HillHiddenObjectCount() : -1, GScene ? GScene->NLights() : -1,
+              GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+     return GameValue(buf);
+ }
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 18821ef8..efe812f1 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -850,6 +850,15 @@ class Engine : public IGraphicsEngine
+     /// its smoothed milliseconds, false while timing is off or the section has
+     /// not been measured. The Lighting tab shows each feature's own section.
+     virtual bool GpuTimingSectionMs(const char* /*name*/, float& /*ms*/) const { return false; }
++    /// Points inside the world pass for the GPU timings' ground / pass1 / rest
++    /// sections (Landscape::DrawRect calls them right after its own queue
++    /// flushes, so timing on or off issues the same draws).
++    enum class WorldPhase : int
++    {
++        GroundDrawn,  // sky, terrain, water and horizon
++        ObjectsDrawn, // the opaque objects (Scene::DrawObjectsAndShadowsPass1)
++    };
++    virtual void GpuMarkWorldPhase(WorldPhase /*phase*/) {}
+     /// True when the backend would use a terrain horizon map (remastered
+     /// lighting with terrain shadows or occlusion on); the world builds one only
+     /// then.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+index daba1510..4239de9d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+@@ -18,6 +18,9 @@ constexpr SectionDef kSections[kSectionCount] = {
+     {"frame", Mark::FrameBegin, Mark::FrameEnd},
+     {"world", Mark::WorldBegin, Mark::WorldEnd},
+     {"shadow", Mark::ShadowBegin, Mark::ShadowEnd},
++    {"ground", Mark::WorldBegin, Mark::GroundEnd},
++    {"pass1", Mark::GroundEnd, Mark::Pass1End},
++    {"rest", Mark::Pass1End, Mark::WorldEnd},
+     {"resolve", Mark::WorldEnd, Mark::ResolveEnd},
+     {"lindepth", Mark::ResolveEnd, Mark::LinearDepthEnd},
+     {"tags", Mark::LinearDepthEnd, Mark::TagReadoutEnd},
+@@ -107,6 +110,7 @@ void GpuTimings::Submit(const std::uint64_t stamps[kMarkCount], std::uint32_t re
+         const float ms = static_cast<float>(b - a) * 1e-6f;
+         _last[i] = ms;
+         _avg[i] = _count[i] == 0 ? ms : _avg[i] + (ms - _avg[i]) * kSmoothing;
++        _min[i] = _count[i] == 0 || ms < _min[i] ? ms : _min[i];
+         ++_count[i];
+     }
+ }
+@@ -120,6 +124,15 @@ bool GpuTimings::AverageMs(Section s, float& ms) const
+     return true;
+ }
+ 
++bool GpuTimings::MinMs(Section s, float& ms) const
++{
++    const int i = static_cast<int>(s);
++    if (_count[i] == 0)
++        return false;
++    ms = _min[i];
++    return true;
++}
++
+ std::string GpuTimings::Summary() const
+ {
+     if (_frames == 0)
+@@ -137,12 +150,34 @@ std::string GpuTimings::Summary() const
+     };
+     add(Section::Frame, "%s %.2f ms");
+     if (add(Section::World, " | %s %.2f"))
++    {
+         add(Section::Shadow, " (%s %.2f)");
++        float ms = 0.0f;
++        if (AverageMs(Section::Ground, ms) || AverageMs(Section::Pass1, ms) || AverageMs(Section::Rest, ms))
++        {
++            out += " [";
++            const size_t open = out.size();
++            for (Section s : {Section::Ground, Section::Pass1, Section::Rest})
++                add(s, out.size() == open ? "%s %.2f" : " %s %.2f");
++            out += "]";
++        }
++    }
+     if (add(Section::Post, " | %s %.2f:"))
+     {
+         for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)
+             add(static_cast<Section>(i), " %s %.2f");
+     }
++    // The best frame of the window for the frame, the world and its parts.
++    bool first = true;
++    for (Section s : {Section::Frame, Section::World, Section::Ground, Section::Pass1, Section::Rest})
++    {
++        float ms = 0.0f;
++        if (!MinMs(s, ms))
++            continue;
++        std::snprintf(buf, sizeof(buf), "%s%s=%.2f", first ? " | min " : " ", SectionName(s), ms);
++        out += buf;
++        first = false;
++    }
+     return out.empty() ? "gpu: no sections measured yet" : out;
+ }
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+index 4b6b200d..0e8e3237 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+@@ -21,7 +21,12 @@ namespace Poseidon::gpu
+ enum class Mark : int
+ {
+     FrameBegin,
+-    WorldBegin,  // first 3D pass of the world
++    WorldBegin, // first 3D pass of the world
++    // Inside the world pass (Landscape::DrawRect, at its existing queue
++    // flushes): the sky, terrain, water and horizon drawn; the opaque objects
++    // (Scene::DrawObjectsAndShadowsPass1) drawn.
++    GroundEnd,
++    Pass1End,
+     ShadowBegin, // shadow-map depth pass
+     ShadowEnd,
+     WorldEnd, // Engine::EndWorldScene, after the world's queued draws
+@@ -51,6 +56,12 @@ enum class Section : int
+     Frame,
+     World, // includes the shadow pass
+     Shadow,
++    // The world pass in three parts: WorldBegin to GroundEnd (sky, terrain,
++    // water, horizon), GroundEnd to Pass1End (the opaque objects), Pass1End to
++    // WorldEnd (the shadow-map pass, the alpha objects, the rest).
++    Ground,
++    Pass1,
++    Rest,
+     // One per post stage, in Mark order: from the end of the latest stage that
+     // ran before it (or WorldEnd) to its own end.
+     Resolve,
+@@ -107,14 +118,21 @@ class GpuTimings
+     bool AverageMs(Section s, float& ms) const;
+     // Last frame's duration, -1 when that frame did not measure it.
+     float LastMs(Section s) const { return _last[static_cast<int>(s)]; }
++    // The shortest frame since the last reset; false while never measured.
++    // Other processes on the GPU only ever add time, so on a shared GPU the
++    // minimum is closer to this program's own cost than the average.
++    bool MinMs(Section s, float& ms) const;
+     int Frames() const { return _frames; }
+ 
+-    // "frame 6.12 ms | world 4.80 (shadow 0.62) | post 0.71: resolve 0.04 ao 0.27 bloom 0.21 shafts 0.05
+-    // composite 0.14": the post stages in the order they run, each once it has been measured.
++    // "frame 6.12 ms | world 4.80 (shadow 0.62) [ground 1.10 pass1 2.40 rest 1.30] | post 0.71: resolve 0.04
++    // ao 0.27 bloom 0.21 shafts 0.05 composite 0.14 | min frame=5.80 world=4.55 ground=1.02 pass1=2.21
++    // rest=1.21": the post stages in the order they run, each once it has been measured; the minimum
++    // fields use '=' so a parser looking for "<section> <ms>" never reads them.
+     std::string Summary() const;
+ 
+   private:
+     std::array<float, kSectionCount> _avg{};
++    std::array<float, kSectionCount> _min{};
+     std::array<float, kSectionCount> _last = detail::Unmeasured();
+     std::array<int, kSectionCount> _count{};
+     int _frames = 0;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.cpp b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.cpp
+new file mode 100644
+index 00000000..ea3eef82
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.cpp
+@@ -0,0 +1,105 @@
++#include <Poseidon/Graphics/Core/PerfCounters.hpp>
++
++#include <cstdio>
++
++namespace Poseidon::perf
++{
++
++namespace
++{
++// Every FrameCounters member, int or float, in declaration order.
++struct Field
++{
++    int FrameCounters::* i;
++    float FrameCounters::* f;
++};
++using FC = FrameCounters;
++constexpr Field kFieldList[] = {
++    {&FC::lightSlots, nullptr},
++    {&FC::activeLights, nullptr},
++    {&FC::opaqueObjects, nullptr},
++    {&FC::runs, nullptr},
++    {&FC::runObjects, nullptr},
++    {&FC::litObjects, nullptr},
++    {&FC::hillRan, nullptr},
++    {&FC::hillIdle, nullptr},
++    {&FC::hillTested, nullptr},
++    {&FC::hillHidden, nullptr},
++    {&FC::hillBuilds, nullptr},
++    {&FC::hillWedges, nullptr},
++    {nullptr, &FC::hillMs},
++    {nullptr, &FC::lodMs},
++    {nullptr, &FC::occlusionMs},
++    {&FC::litUploads, nullptr},
++    {&FC::litSkips, nullptr},
++    {&FC::litBytes, nullptr},
++    {&FC::vsUploads, nullptr},
++    {&FC::vsSkips, nullptr},
++    {&FC::vsBytes, nullptr},
++};
++// The list holds every member (all are 4 bytes), and the header sized the sums
++// for it.
++constexpr int kListed = static_cast<int>(sizeof(kFieldList) / sizeof(kFieldList[0]));
++static_assert(kListed == Counters::kFields, "PerfCounters: one sum per listed field");
++static_assert(sizeof(FrameCounters) == static_cast<size_t>(kListed) * 4, "PerfCounters: list every member");
++
++double Value(const FrameCounters& c, const Field& f)
++{
++    return f.i ? static_cast<double>(c.*(f.i)) : static_cast<double>(c.*(f.f));
++}
++} // namespace
++
++Counters& GPerfCounters()
++{
++    static Counters s_counters;
++    return s_counters;
++}
++
++void Counters::EndFrame()
++{
++    for (int i = 0; i < kListed; ++i)
++        _sum[i] += Value(_frame, kFieldList[i]);
++    ++_frames;
++    _last = _frame;
++    _frame = FrameCounters();
++}
++
++void Counters::ResetWindow()
++{
++    for (double& s : _sum)
++        s = 0.0;
++    _frames = 0;
++}
++
++std::string Counters::Summary() const
++{
++    const double n = _frames > 0 ? static_cast<double>(_frames) : 1.0;
++    auto avg = [&](int FrameCounters::* m)
++    {
++        for (int i = 0; i < kListed; ++i)
++            if (kFieldList[i].i == m)
++                return _sum[i] / n;
++        return 0.0;
++    };
++    auto avgf = [&](float FrameCounters::* m)
++    {
++        for (int i = 0; i < kListed; ++i)
++            if (kFieldList[i].f == m)
++                return _sum[i] / n;
++        return 0.0;
++    };
++    char buf[512];
++    std::snprintf(buf, sizeof(buf),
++                  "objs opaque=%.0f runs=%.0f runobj=%.0f litobj=%.0f lights=%.0f/%.0f | hill ran=%.2f idle=%.2f "
++                  "tested=%.0f hidden=%.0f builds=%.2f wedges=%.0f hillcpu=%.3f | prep lod=%.3f occ=%.3f | ubo "
++                  "lit=%.0f/%.0f litKB=%.1f vs=%.0f/%.0f vsKB=%.1f",
++                  avg(&FC::opaqueObjects), avg(&FC::runs), avg(&FC::runObjects), avg(&FC::litObjects),
++                  avg(&FC::lightSlots), avg(&FC::activeLights), avg(&FC::hillRan), avg(&FC::hillIdle),
++                  avg(&FC::hillTested), avg(&FC::hillHidden), avg(&FC::hillBuilds), avg(&FC::hillWedges),
++                  avgf(&FC::hillMs), avgf(&FC::lodMs), avgf(&FC::occlusionMs), avg(&FC::litUploads),
++                  avg(&FC::litSkips), avg(&FC::litBytes) / 1024.0, avg(&FC::vsUploads), avg(&FC::vsSkips),
++                  avg(&FC::vsBytes) / 1024.0);
++    return buf;
++}
++
++} // namespace Poseidon::perf
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.hpp
+new file mode 100644
+index 00000000..f95c7b2a
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/PerfCounters.hpp
+@@ -0,0 +1,77 @@
++#pragma once
++
++#include <string>
++
++// Frame-cost counters of the object pass and the constant uploads (plan
++// section 5 A4): how many objects the instanced runs grouped, how many the
++// hill cull hid, what the horizon table cost, how many uniform-buffer uploads
++// the mirrors skipped. The scene and the GL33 backend count into the frame
++// being drawn; World::Simulate closes the frame next to the frame profiler.
++// triPerfStats prints the averages over the profiler's window, so they cover
++// the same frames as its CPU phases (triPerfReset restarts both). Pure
++// bookkeeping, no engine state.
++
++namespace Poseidon::perf
++{
++
++struct FrameCounters
++{
++    // Scene::DrawObjectsAndShadowsPass1
++    int lightSlots = 0;   // Scene::NLights: light slots (a lamp that was ever on keeps one)
++    int activeLights = 0; // lights on this frame
++    int opaqueObjects = 0; // objects through the opaque run loop
++    int runs = 0;         // instanced runs drawn (four objects or more)
++    int runObjects = 0;   // objects drawn in those runs
++    int litObjects = 0;   // objects kept out of runs because their own light list is not empty
++    // Hill culling (TerrainOcclusion.hpp)
++    int hillRan = 0;       // 1 when the cull ran this frame
++    int hillIdle = 0;      // 1 when the governor held it idle
++    int hillTested = 0;    // objects far enough to test
++    int hillHidden = 0;    // of those, hidden behind the terrain
++    int hillBuilds = 0;    // horizon tables started (the eye moved)
++    int hillWedges = 0;    // wedges built on demand
++    float hillMs = 0.0f;   // CPU: table and tests
++    float lodMs = 0.0f;    // CPU: Scene::AdjustComplexity (LOD selection)
++    float occlusionMs = 0.0f; // CPU: the object occlusion pass
++    // Uniform-buffer uploads (EngineGL33: LitConstants and VSConstants)
++    int litUploads = 0;
++    int litSkips = 0; // flushes the mirror found unchanged
++    int litBytes = 0;
++    int vsUploads = 0;
++    int vsSkips = 0;
++    int vsBytes = 0;
++};
++
++class Counters
++{
++  public:
++    // The frame being drawn: the scene and the backend add to it.
++    FrameCounters& Frame() { return _frame; }
++    // The last closed frame.
++    const FrameCounters& Last() const { return _last; }
++    // Closes the frame: it becomes Last() and joins the window's sums.
++    void EndFrame();
++    // Starts a new window (triPerfReset).
++    void ResetWindow();
++    int WindowFrames() const { return _frames; }
++    // Per-frame averages over the window, for triPerfStats:
++    // "objs opaque=<n> runs=<n> runobj=<n> litobj=<n> lights=<slots>/<on> | hill ran=<share> idle=<share>
++    //  tested=<n> hidden=<n> builds=<n> wedges=<n> hillcpu=<ms> | prep lod=<ms> occ=<ms> |
++    //  ubo lit=<uploads>/<skips> litKB=<kB> vs=<uploads>/<skips> vsKB=<kB>"
++    std::string Summary() const;
++
++    // One per FrameCounters member (PerfCounters.cpp lists them; a static_assert
++    // there keeps the count).
++    static constexpr int kFields = 21;
++
++  private:
++    FrameCounters _frame;
++    FrameCounters _last;
++    // Sums over the window, in double so a long window does not round.
++    double _sum[kFields] = {};
++    int _frames = 0;
++};
++
++Counters& GPerfCounters();
++
++} // namespace Poseidon::perf
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/UboMirror.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/UboMirror.hpp
+new file mode 100644
+index 00000000..ee44996b
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/UboMirror.hpp
+@@ -0,0 +1,91 @@
++#pragma once
++
++#include <cstring>
++#include <vector>
++
++// What a uniform buffer holds, kept on the CPU (plan section 5 A4).
++//
++// The GL33 backend keeps a CPU copy of each constant block and used to send
++// the whole block on every flush: the 928-byte LitConstants block once per
++// draw (a material and its lights), the 1,120-byte VSConstants block whenever
++// a material or the view changed. With thousands of draws a frame that was
++// about a megabyte of uploads, almost all of it unchanged. A mirror records
++// what the buffer holds after every upload, so a flush can send only the
++// slots that changed (or nothing).
++//
++// Every upload to the buffer must go through Store (whole or partial), and a
++// newly created buffer starts unknown (Reset): then the first flush sends the
++// whole block. Slots are vec4 (four floats). Pure, no GL.
++
++namespace Poseidon::gpu
++{
++
++class UboMirror
++{
++  public:
++    // A new buffer of `slots` vec4: its contents are not known yet.
++    void Reset(int slots)
++    {
++        _slots = slots;
++        _data.assign(static_cast<size_t>(slots) * 4, 0.0f);
++        _known = false;
++    }
++    int Slots() const { return _slots; }
++    bool Known() const { return _known; }
++
++    // The buffer now holds `count` slots of `src` from slot `first` on (an
++    // upload just made, partial or whole). Storing the whole block makes the
++    // mirror known.
++    void Store(const float* src, int first, int count)
++    {
++        if (first < 0 || count <= 0 || first + count > _slots)
++            return;
++        std::memcpy(&_data[static_cast<size_t>(first) * 4], src + static_cast<size_t>(first) * 4,
++                    static_cast<size_t>(count) * 16);
++        if (first == 0 && count == _slots)
++            _known = true;
++    }
++
++    // What a flush of `src` (the whole CPU block) must upload, as one slot
++    // range. With `dedupe` off, or while the buffer's contents are unknown,
++    // the whole block. With it on, the range from the first to the last slot
++    // that differs from the buffer, skipping slots in [ignoreFirst,
++    // ignoreFirst + ignoreCount) (slots no shader reads); false when nothing
++    // differs.
++    bool Plan(const float* src, bool dedupe, int& first, int& count, int ignoreFirst = 0, int ignoreCount = 0) const
++    {
++        if (!dedupe || !_known)
++        {
++            first = 0;
++            count = _slots;
++            return _slots > 0;
++        }
++        int lo = -1, hi = -1;
++        for (int i = 0; i < _slots; ++i)
++        {
++            if (i >= ignoreFirst && i < ignoreFirst + ignoreCount)
++                continue;
++            if (std::memcmp(&_data[static_cast<size_t>(i) * 4], src + static_cast<size_t>(i) * 4, 16) != 0)
++            {
++                if (lo < 0)
++                    lo = i;
++                hi = i;
++            }
++        }
++        if (lo < 0)
++            return false;
++        first = lo;
++        count = hi - lo + 1;
++        return true;
++    }
++
++    // The mirror's copy of one slot (tests).
++    const float* SlotData(int slot) const { return &_data[static_cast<size_t>(slot) * 4]; }
++
++  private:
++    int _slots = 0;
++    bool _known = false;
++    std::vector<float> _data;
++};
++
++} // namespace Poseidon::gpu
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 506b7555..1bccde69 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -17,8 +17,11 @@ using LT = LightingTuning;
+ // One row per Feature, in enum order (checked below). `landed` turns true in
+ // the step that makes the switch do something.
+ constexpr FeatureInfo kFeatures[] = {
+-    {Feature::DrawGrouping, "drawGrouping", "Draw grouping", "perf", "Frame cost", "A4", false, &FS::drawGrouping, ""},
+-    {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", false, &FS::hillCull, ""},
++    // A4 (perf): both pixel-exact; their GPU time shows in the opaque objects'
++    // section of the world pass.
++    {Feature::DrawGrouping, "drawGrouping", "Draw grouping", "perf", "Frame cost", "A4", true, &FS::drawGrouping,
++     "pass1"},
++    {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", true, &FS::hillCull, "pass1"},
+     {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", false, &FS::taa, ""},
+     {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", false,
+      &FS::lightTiles, ""},
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 715c27ea..8bf3413e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -65,7 +65,7 @@ Rgb TonemapNeutral(const Rgb& c);
+ // 4 of research/INTEGRATION-PLAN.md); until then nothing reads it.
+ struct FeatureSet
+ {
+-    float drawGrouping = 1.0f;    // A4 perf: one draw call for runs of the same shape
++    float drawGrouping = 1.0f;    // A4 perf: instanced runs at any light, unchanged constants not re-sent
+     float hillCull = 1.0f;        // A4 perf: objects behind hills are not drawn
+     float taa = 1.0f;             // A5 temporal anti-aliasing
+     float lightTiles = 1.0f;      // A6 one tiled light list for every local light
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp b/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
+index ef100522..a640cd1a 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
+@@ -11,6 +11,13 @@ namespace Poseidon::InstancedRun
+ // also right for it. These are the per-object rules; the caller adds the scene
+ // and routing gates (local lights, proxies, OnSurface, IsColored, the camera
+ // object).
++//
++// Local lights: the batched draw lights every member with the head's light
++// list. With drawGrouping off, any light slot in the scene keeps every object
++// out of runs (Scene::NLights() != 0; Abel's street lamps hold slots by day
++// too). With it on, the rule is per object: an object may head or join a run
++// only when the light list its own draw would select is empty (localLit
++// false), so the head's empty list is right for every member.
+ 
+ // What the grouping reads from one queued object.  POD; no engine dependencies.
+ struct RunEntry
+@@ -26,6 +33,10 @@ struct RunEntry
+     // points fitted to the terrain under it, damage, destruction, entity
+     // animation) and restores them afterwards.
+     bool ownVertices;
++    // Scene::SelectLights for the object's own draw returns a light: its draw
++    // would be lit by a local light (a lamp, a headlight, a fire). False when
++    // the scene has no light slot, or by day (SelectLights selects none then).
++    bool localLit = false;
+ };
+ 
+ // Members stay within this factor of the head's squared distance (about 5% in
+@@ -34,21 +45,24 @@ constexpr float kFogBandLo = 0.90f;
+ constexpr float kFogBandHi = 1.10f;
+ 
+ // May this object head a run?  Not when its draw rewrites its own vertices:
+-// the instanced draw would repeat that object's fit at every member.
++// the instanced draw would repeat that object's fit at every member.  Not
++// when a local light lights it: the run draws with the head's light list, and
++// only an empty one is right for every member.
+ constexpr bool CanHead(const RunEntry& head)
+ {
+-    return head.isStatic && !head.ownVertices;
++    return head.isStatic && !head.ownVertices && !head.localLit;
+ }
+ 
+ // May `member` join the run `head` leads?  Same shape, level, pass and render
+-// flags, inside the fog band, and drawn from the shape's own vertices.  A
+-// member whose draw rewrites them (a bush fitted to the slope it stands on)
+-// would otherwise be drawn with the head's fit instead of its own.
++// flags, inside the fog band, drawn from the shape's own vertices and lit by
++// no local light.  A member whose draw rewrites them (a bush fitted to the
++// slope it stands on) would otherwise be drawn with the head's fit instead of
++// its own; a lit member would lose its light (the head's list is empty).
+ constexpr bool CanJoin(const RunEntry& head, const RunEntry& member)
+ {
+     return member.shape == head.shape && member.drawLOD == head.drawLOD && member.passNum == head.passNum &&
+            member.isStatic && member.special == head.special && member.distance2 >= head.distance2 * kFogBandLo &&
+-           member.distance2 <= head.distance2 * kFogBandHi && !member.ownVertices;
++           member.distance2 <= head.distance2 * kFogBandHi && !member.ownVertices && !member.localLit;
+ }
+ 
+ } // namespace Poseidon::InstancedRun
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index eb6c9652..1c136ddb 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -830,6 +830,64 @@ void Object::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transfor
+     }
+ }
+ 
++// Object::Draw's texture hints for one LOD without the draw (the hill cull,
++// Scene::DrawObjectsAndShadowsPass1): the same fog skip, the same proxies at
++// the same LODs, the same distance and flags for Shape::PrepareTextures. A
++// hidden object's textures then get the mipmap a draw would have asked for:
++// the shadow-map pass loads its alpha-tested caster textures from that hint,
++// and a texture it shares with an object in view keeps the same mipmaps.
++void Object::PrepareDrawTextures(int level, const FrameBase& pos)
++{
++    if (!_shape || level == LOD_INVISIBLE)
++    {
++        return;
++    }
++    Shape* sShape = _shape->LevelOpaque(level);
++    if (!sShape || sShape->NFaces() <= 0)
++    {
++        return;
++    }
++    int special = sShape->Special() | GetObjSpecial();
++    const float dist2 = GScene->GetCamera()->Position().Distance2(pos.Position());
++    const render::LegacySpec specT = render::SplitLegacy(special);
++    if (!render::Has(specT.routing, render::Routing::FogDisabled))
++    {
++        const float radius = pos.Scale() * _shape->BoundingSphere();
++        if (NoFogNeeded(dist2, sShape, radius))
++        {
++            special |= FogDisabled;
++        }
++        else if (ConstFogUsed(dist2, sShape, radius) >= 0.99 && render::Has(specT.backend, render::Backend::IsAlphaFog))
++        {
++            return; // Draw skips a fully fogged alpha-fog object
++        }
++    }
++    const float z2 =
++        render::Has(render::SplitLegacy(special).routing, render::Routing::NoDropdown) ? 0 : dist2;
++    const Matrix4 transform = pos.Transform();
++    const Matrix4 invTransform = pos.GetInvTransform();
++    for (int i = 0; i < sShape->NProxies(); i++)
++    {
++        const ProxyObject& proxy = sShape->Proxy(i);
++        Matrix4Val pTransform = transform * proxy.obj->Transform();
++        Matrix4Val invPTransform = proxy.invTransform * invTransform;
++        LODShapeWithShadow* pshape = proxy.obj->GetShapeOnPos(pTransform.Position());
++        if (!pshape)
++        {
++            continue;
++        }
++        const int plevel = GScene->LevelFromDistance2(pshape, dist2, pTransform.Scale(), pTransform.Direction(),
++                                                      GScene->GetCamera()->Direction());
++        if (plevel == LOD_INVISIBLE)
++        {
++            continue;
++        }
++        FrameWithInverse pFrame(pTransform, invPTransform);
++        proxy.obj->PrepareDrawTextures(plevel, pFrame);
++    }
++    sShape->PrepareTextures(z2, special);
++}
++
+ // pos is used mainly for proper proxy object positioning. This is the main function
+ // used for object rendering. Default implementation performs Object::Animate before and
+ // Object::Deanimate after rendering, checks for fog optimization (early constant fog
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.hpp b/arma_CWR/engine/Poseidon/World/Scene/Object.hpp
+index 11c0bc67..2706f91b 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.hpp
+@@ -395,6 +395,10 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
+ 
+ 	// This is the main function used for object rendering.
+ 	virtual void Draw( int forceLOD, ClipFlags clipFlags, const FrameBase &pos );
++	// The texture mipmap hints Object::Draw gives for this LOD (its proxies
++	// included), without drawing: for an object the hill cull hides, so the
++	// textures it shares and casts its shadow with load as if it were drawn.
++	void PrepareDrawTextures( int level, const FrameBase &pos );
+ 
+ 	// Calculate (or estimate) complexity of given proxy
+ 	virtual int GetProxyComplexity
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+index f5e04084..d5b9a46a 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+@@ -933,6 +933,7 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
+     sObj->shadowLOD = LOD_INVISIBLE; // override with autodetection
+     sObj->drawLOD = LOD_INVISIBLE;   // override with autodetection
+ #endif
++    sObj->hillHidden = false; // the hill cull sets it again in Pass1
+     sObj->distance2 = dist2;
+     sObj->passNum = -1; // noninit
+ 
+@@ -996,6 +997,7 @@ void Scene::CloudletForDrawing(Object* obj)
+     sObj->drawLOD = 0;
+     sObj->forceDrawLOD = 0;
+     sObj->shadowLOD = LOD_INVISIBLE;
++    sObj->hillHidden = false;
+     sObj->distance2 = dist2;
+     sObj->zCoord = cPos.Z(); // alpha-pass sort key: centre camera-space depth (cPos computed above)
+     sObj->radius = radius;
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
+index 73a5a2fc..3ff5a28d 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
+@@ -47,6 +47,10 @@ class SortObject : public RefCount
+     signed char drawLOD, shadowLOD;
+     signed char passNum;
+     signed char forceDrawLOD; // forced draw LOD
++    // The hill cull hid the object this frame (Pass1): it keeps its draw LOD,
++    // so the sorts order the list as if it were drawn and the shadow-map pass
++    // casts its shadow from that LOD; only the draws skip it.
++    bool hillHidden = false;
+ 
+     unsigned char orClip; // or clip flags only - andClip would always be 0
+ 
+@@ -222,6 +226,7 @@ class Scene
+     float _objectLODBias = 1.0f;
+     float _lodPinFactor = 0.0f; // PinObjectDetail: 0 = adaptive
+     int _drawnObjects = 0;      // DrawnObjectCount
++    int _hillHiddenObjects = 0; // HillHiddenObjectCount
+     float _preferredTerrainGrid;
+     float _preferredViewDistance;
+ 
+@@ -265,6 +270,9 @@ class Scene
+     // Objects with a visible LOD in the last Pass1 draw list, before occlusion
+     // culling: the same for both lighting models on one view at one detail.
+     int DrawnObjectCount() const { return _drawnObjects; }
++    // Of those, the objects the hill cull hid behind the terrain in the same
++    // Pass1 (they still count in DrawnObjectCount, so capture tables compare).
++    int HillHiddenObjectCount() const { return _hillHiddenObjects; }
+ 
+     Camera* GetCamera() { return _camera; }
+     const Camera* GetCamera() const { return _camera; }
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 663e5b1d..0fd8ee34 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -17,6 +17,9 @@
+ #include <Poseidon/Foundation/Math/MathOpt.hpp>
+ #include <Poseidon/Foundation/Memory/CheckMem.hpp>
+ #include <algorithm>
++#include <chrono>
++#include <cstdint>
++#include <cstring>
+ #include <map>
+ #include <string>
+ #include <vector>
+@@ -36,6 +39,9 @@ using Poseidon::Foundation::Time;
+ #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
+ #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
+ #include <Poseidon/World/Scene/InstancedRunRules.hpp>
++#include <Poseidon/World/Scene/TerrainOcclusion.hpp>
++#include <Poseidon/Graphics/Core/PerfCounters.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
+ #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+@@ -774,6 +780,84 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
+     return false;
+ }
+ 
++// ---- Hill culling (TerrainOcclusion.hpp, the hillCull feature switch) ----
++
++namespace
++{
++struct HillCull
++{
++    TerrainOcclusion::HeightGrid terrain;
++    TerrainOcclusion::HorizonTable table;
++    TerrainOcclusion::CullGovernor governor;
++    // The landscape the terrain bounds were built from.
++    const Landscape* land = nullptr;
++    int range = 0;
++    float grid = 0.0f;
++    std::uint64_t sample = 0;
++};
++
++HillCull& GHillCull()
++{
++    static HillCull s_hillCull;
++    return s_hillCull;
++}
++
++// A strided sample of the heights: notices a new island or an editor
++// reshaping the ground without reading the whole grid every frame (the same
++// detector TerrainLighting uses for the horizon map).
++std::uint64_t SampleTerrain(const Landscape& land, int range, float grid)
++{
++    std::uint64_t h = 1469598103934665603ull;
++    auto mix = [&h](std::uint32_t v)
++    {
++        h ^= v;
++        h *= 1099511628211ull;
++    };
++    mix(static_cast<std::uint32_t>(range));
++    std::uint32_t bits = 0;
++    std::memcpy(&bits, &grid, sizeof(bits));
++    mix(bits);
++    const int step = range > 64 ? range / 64 : 1;
++    for (int z = 0; z < range; z += step)
++    {
++        for (int x = (z / step) % step; x < range; x += step)
++        {
++            const float v = land.ClippedData(z, x);
++            std::memcpy(&bits, &v, sizeof(bits));
++            mix(bits);
++        }
++    }
++    return h;
++}
++
++// The terrain as drawn, copied from `land` when the landscape changed. It is
++// the full-detail grid: LandCache asks for segment LOD 0 (Landscape.cpp), so
++// every segment draws every grid vertex. If distant segments ever draw
++// coarser, their triangles no longer follow this grid and the hill cull must
++// take the lowest vertex of each coarse cell instead.
++bool EnsureHillTerrain(HillCull& hc, const Landscape& land)
++{
++    const int range = land.GetTerrainRange();
++    const float grid = land.GetTerrainGrid();
++    if (range < 2 || !(grid > 0.0f))
++        return false;
++    const std::uint64_t sample = SampleTerrain(land, range, grid);
++    if (hc.terrain.Valid() && hc.land == &land && hc.range == range && hc.grid == grid && hc.sample == sample)
++        return true;
++    const auto t0 = std::chrono::steady_clock::now();
++    hc.terrain.Build(range, grid, YOutsideMap, [&land](int x, int z) { return land.ClippedData(z, x); });
++    hc.table.Invalidate();
++    hc.governor.Reset();
++    hc.land = &land;
++    hc.range = range;
++    hc.grid = grid;
++    hc.sample = sample;
++    LOG_INFO(Graphics, "Hill cull: terrain grid {}x{} at {} m copied in {:.1f} ms", range, range, grid,
++             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
++    return hc.terrain.Valid();
++}
++} // namespace
++
+ #if !DENSITY_LOD
+ 
+ void Scene::AdjustComplexity()
+@@ -1295,10 +1379,13 @@ static void DrawSortObject(SortObject* oi)
+ // The instanced-run facts of one queued object (InstancedRunRules.hpp).
+ // `headLevel` is the head's draw level: an object joins a run only with the
+ // head's shape and LOD, so that level is its own whenever the answer matters.
+-// IsAnimated indexes the object's shape by its draw LOD, which for a later
+-// object may be LOD_INVISIBLE, so it is asked only for the head's shape and LOD.
++// IsAnimated and SelectLights index the object's shape by its draw LOD, which
++// for a later object may be LOD_INVISIBLE, so they are asked only for the
++// head's shape and LOD. `scene` is set when drawGrouping decides per object
++// (some light slot exists): the object's own light list, as its draw would
++// select it (Object::Draw), then sets localLit.
+ static InstancedRun::RunEntry InstancedRunEntry(const SortObject* so, const LODShape* headShape, int headLOD,
+-                                                const Shape* headLevel)
++                                                const Shape* headLevel, Scene* scene)
+ {
+     const Object* obj = so->object;
+     InstancedRun::RunEntry entry;
+@@ -1308,7 +1395,13 @@ static InstancedRun::RunEntry InstancedRunEntry(const SortObject* so, const LODS
+     entry.special = headLevel->Special() | obj->GetObjSpecial();
+     entry.distance2 = so->distance2;
+     entry.isStatic = obj->Static();
+-    entry.ownVertices = obj->GetShape() == headShape && so->drawLOD == headLOD && obj->IsAnimated(so->drawLOD);
++    const bool headLevelToo = obj->GetShape() == headShape && so->drawLOD == headLOD;
++    entry.ownVertices = headLevelToo && obj->IsAnimated(so->drawLOD);
++    if (scene && headLevelToo)
++    {
++        LightList work;
++        entry.localLit = scene->SelectLights(obj->Transform(), obj, so->drawLOD, work).Size() > 0;
++    }
+     return entry;
+ }
+ 
+@@ -1343,7 +1436,21 @@ void Scene::DrawObjectsAndShadowsPass1()
+ 
+     // remove all objects that should not be used
+ 
++    using Clock = std::chrono::steady_clock;
++    auto msSince = [](Clock::time_point t0)
++    { return std::chrono::duration<float, std::milli>(Clock::now() - t0).count(); };
++    perf::FrameCounters& counters = perf::GPerfCounters().Frame();
++    // The frame-cost switches (plan section 5 A4), as this frame's gates hold
++    // them (computed at the world's first 3D pass; off with the classic
++    // lighting, so Classic draws as it always did).
++    remaster::FeatureGates gates;
++    const bool haveGates = GEngine && GEngine->GetFeatureGates(gates) && gates.computed;
++    const bool drawGrouping = haveGates && gates[remaster::Feature::DrawGrouping].on;
++    const bool hillCull = haveGates && gates[remaster::Feature::HillCull].on;
++
++    const Clock::time_point lodT0 = Clock::now();
+     AdjustComplexity();
++    counters.lodMs += msSince(lodT0);
+ 
+     // copy objects to working list (mergers)
+     // do not copy objects that are not drawn
+@@ -1419,6 +1526,7 @@ void Scene::DrawObjectsAndShadowsPass1()
+     }
+ #endif
+ 
++    const Clock::time_point occT0 = Clock::now();
+     if (EnableObjOcc)
+     {
+         // sort only what needs to checked/drawn for occlusion
+@@ -1548,6 +1656,76 @@ void Scene::DrawObjectsAndShadowsPass1()
+             }
+         }
+     }
++    counters.occlusionMs += msSince(occT0);
++
++    // Hill culling: objects the terrain hides from the camera are not drawn.
++    // After the object occlusion pass, so its buffer and its results are the
++    // same with the cull on or off. A hidden object is only flagged
++    // (hillHidden): it keeps its draw LOD, so the sorts below and in Pass2
++    // order the list exactly as with the cull off (the shadow-map pass emits
++    // its casters in that order, and overlapping leaf cards resolve equal
++    // depths by it), the shadow-map pass casts its shadow from its draw LOD as
++    // before (behind a ridge from the camera, its shadow can still reach
++    // ground in view), and the draw loops skip it. Its draw's texture mipmap
++    // hints are given without the draw (PrepareDrawTextures): the shadow pass
++    // loads the alpha-tested caster textures from them, and a texture it
++    // shares with an object in view keeps its mipmaps. Only static objects are
++    // tested: their draw is Object::Draw's, which PrepareDrawTextures mirrors
++    // (vehicles and men draw through their own overrides).
++    _hillHiddenObjects = 0;
++    if (hillCull && _camera && GetLandscape())
++    {
++        HillCull& hc = GHillCull();
++        if (!hc.governor.ShouldRun())
++        {
++            counters.hillIdle = 1;
++        }
++        else if (EnsureHillTerrain(hc, *GetLandscape()))
++        {
++            const Clock::time_point hillT0 = Clock::now();
++            const Vector3 eye = _camera->Position();
++            const float range = GetFogMaxRange();
++            if (!hc.table.Matches(eye.X(), eye.Y(), eye.Z(), range))
++            {
++                hc.table.Build(hc.terrain, eye.X(), eye.Y(), eye.Z(), range, TerrainOcclusion::Params());
++                ++counters.hillBuilds;
++            }
++            const int wedgesBefore = hc.table.WedgesBuilt();
++            const Object* cameraOn = GWorld ? GWorld->CameraOn() : nullptr;
++            int tested = 0;
++            for (int i = 0; i < _drawMergers.Size(); i++)
++            {
++                SortObject* oi = _drawMergers[i];
++                Object* obj = oi->object;
++                if (oi->drawLOD == LOD_INVISIBLE || !obj || !obj->Static() || obj == cameraOn || oi->passNum == 3)
++                {
++                    continue;
++                }
++                const Vector3 pos = obj->Position();
++                const TerrainOcclusion::Result r = hc.table.Test(pos.X(), pos.Y(), pos.Z(), obj->GetRadius());
++                if (r == TerrainOcclusion::Result::NotTested)
++                {
++                    continue;
++                }
++                ++tested;
++                if (r == TerrainOcclusion::Result::Hidden)
++                {
++                    oi->hillHidden = true;
++                    obj->PrepareDrawTextures(oi->drawLOD, *obj);
++                    static const int s_diagA4 = getenv("CWR_A4_DIAG") ? atoi(getenv("CWR_A4_DIAG")) : 0; // A4DIAG
++                    if (s_diagA4 == 1) { obj->Animate(oi->drawLOD); obj->Deanimate(oi->drawLOD); } // A4DIAG
++                    if (s_diagA4 == 2) { oi->hillHidden = false; } // A4DIAG: test but draw
++                    ++_hillHiddenObjects;
++                }
++            }
++            hc.governor.Report(tested, _hillHiddenObjects);
++            counters.hillRan = 1;
++            counters.hillTested = tested;
++            counters.hillHidden = _hillHiddenObjects;
++            counters.hillWedges += hc.table.WedgesBuilt() - wedgesBefore;
++            counters.hillMs += msSince(hillT0);
++        }
++    }
+ 
+     QSort(_drawMergers.Data(), _drawMergers.Size(), CmpShapeObj);
+     // first of all draw non-alpha objects
+@@ -1559,18 +1737,25 @@ void Scene::DrawObjectsAndShadowsPass1()
+         // the head once inside Begin/EndInstancedRun, and every TL section then
+         // renders all K instances from the WorldInstances matrix array. The
+         // predicate keeps per-object state out of batches: static, proxy-free,
+-        // not OnSurface/IsColored, equal obj-special, no local lights in the
+-        // scene, a tight distance band so the head's constant-fog value is
+-        // representative for the whole batch, and no object whose draw rewrites
+-        // its own vertices (a land-following bush fitted to its own patch of
+-        // slope, a damaged house): the run draws every member from the head's
+-        // vertex buffer (InstancedRunRules.hpp).
++        // not OnSurface/IsColored, equal obj-special, no local light, a tight
++        // distance band so the head's constant-fog value is representative for
++        // the whole batch, and no object whose draw rewrites its own vertices
++        // (a land-following bush fitted to its own patch of slope, a damaged
++        // house): the run draws every member from the head's vertex buffer
++        // (InstancedRunRules.hpp). Local lights: with drawGrouping off, any
++        // light slot in the scene turns runs off for every object (Abel's
++        // street lamps hold slots by day too); with it on, an object is kept
++        // out only when its own light list is not empty.
+         const bool noLocalLights = NLights() == 0;
++        const bool runsAllowed = noLocalLights || drawGrouping;
++        Scene* lightsPerObject = drawGrouping && !noLocalLights ? this : nullptr;
++        counters.lightSlots = NLights();
++        counters.activeLights = _aLights.Size();
+         for (int i = 0; i < _drawMergers.Size();)
+         {
+             SortObject* oi = _drawMergers[i];
+             LODShape* shape = oi->object->GetShape();
+-            if (oi->drawLOD == LOD_INVISIBLE)
++            if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden)
+             {
+                 i++;
+                 continue;
+@@ -1589,12 +1774,16 @@ void Scene::DrawObjectsAndShadowsPass1()
+             }
+ 
+             int runEnd = i + 1;
+-            const InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape);
++            const InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape, lightsPerObject);
+             const render::LegacySpec headSpec = render::SplitLegacy(head.special);
+-            const bool headBatchable = noLocalLights && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
++            const bool headBatchable = runsAllowed && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
+                                        !render::Has(headSpec.routing, render::Routing::OnSurface) &&
+                                        !render::Has(headSpec.routing, render::Routing::IsColored) &&
+                                        oi->object != GWorld->CameraOn();
++            if (head.localLit)
++            {
++                ++counters.litObjects;
++            }
+             if (headBatchable)
+             {
+                 GEngine->InstancedRunReset();
+@@ -1603,7 +1792,13 @@ void Scene::DrawObjectsAndShadowsPass1()
+                     while (runEnd < _drawMergers.Size())
+                     {
+                         SortObject* oj = _drawMergers[runEnd];
+-                        if (!InstancedRun::CanJoin(head, InstancedRunEntry(oj, shape, oi->drawLOD, sShape)))
++                        if (oj->hillHidden)
++                        {
++                            runEnd++; // in the run's span, never drawn
++                            continue;
++                        }
++                        if (!InstancedRun::CanJoin(head,
++                                                   InstancedRunEntry(oj, shape, oi->drawLOD, sShape, lightsPerObject)))
+                         {
+                             break;
+                         }
+@@ -1616,10 +1811,19 @@ void Scene::DrawObjectsAndShadowsPass1()
+                 }
+             }
+ 
+-            const int runLen = runEnd - i;
++            // The run's span may hold hidden objects (hillHidden): they joined no
++            // instance list and are never drawn.
++            int runLen = 0;
++            for (int k = i; k < runEnd; k++)
++            {
++                runLen += _drawMergers[k]->hillHidden ? 0 : 1;
++            }
+             GSectionFilter = SectionClassFilter::OpaqueAndCutout;
++            counters.opaqueObjects += runLen;
+             if (headBatchable && runLen >= 4)
+             {
++                ++counters.runs;
++                counters.runObjects += runLen;
+                 GEngine->BeginInstancedRunUpload();
+                 DrawSortObject(oi);
+                 if (!GEngine->EndInstancedRun())
+@@ -1628,7 +1832,10 @@ void Scene::DrawObjectsAndShadowsPass1()
+                     // head; redraw the rest scalar (TL overdraw is z-equal opaque).
+                     for (int k = i + 1; k < runEnd; k++)
+                     {
+-                        DrawSortObject(_drawMergers[k]);
++                        if (!_drawMergers[k]->hillHidden)
++                        {
++                            DrawSortObject(_drawMergers[k]);
++                        }
+                     }
+                 }
+             }
+@@ -1636,7 +1843,10 @@ void Scene::DrawObjectsAndShadowsPass1()
+             {
+                 for (int k = i; k < runEnd; k++)
+                 {
+-                    DrawSortObject(_drawMergers[k]);
++                    if (!_drawMergers[k]->hillHidden)
++                    {
++                        DrawSortObject(_drawMergers[k]);
++                    }
+                 }
+             }
+             GSectionFilter = SectionClassFilter::All;
+@@ -1708,7 +1918,7 @@ void Scene::DrawObjectsAndShadowsPass2()
+         for (int i = 0; i < nDraw; i++)
+         {
+             SortObject* oi = _drawMergers[i];
+-            if (oi->drawLOD == LOD_INVISIBLE)
++            if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden)
+                 continue;
+             // Mirror exactly the post-shadow blend branch that skips these
+             // objects (passNum<=1 && HasBlendSections && surface).  With grass
+@@ -1794,7 +2004,7 @@ void Scene::DrawObjectsAndShadowsPass2()
+     {
+         SortObject* oi = _drawMergers[i];
+         LODShape* shape = oi->object->GetShape();
+-        if (oi->drawLOD == LOD_INVISIBLE)
++        if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden)
+         {
+             continue;
+         }
+@@ -1848,7 +2058,7 @@ void Scene::DrawObjectsAndShadowsPass3()
+     {
+         SortObject* oi = _drawMergers[i];
+         LODShape* shape = oi->object->GetShape();
+-        if (oi->drawLOD != LOD_INVISIBLE)
++        if (oi->drawLOD != LOD_INVISIBLE && !oi->hillHidden)
+         {
+             PoseidonAssert(oi->drawLOD >= 0);
+             Shape* sShape = shape->LevelOpaque(oi->drawLOD);
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/TerrainOcclusion.cpp b/arma_CWR/engine/Poseidon/World/Scene/TerrainOcclusion.cpp
+new file mode 100644
+index 00000000..adb5e539
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/World/Scene/TerrainOcclusion.cpp
+@@ -0,0 +1,270 @@
++#include <Poseidon/World/Scene/TerrainOcclusion.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::TerrainOcclusion
++{
++
++namespace
++{
++constexpr float kTwoPi = 6.2831853f;
++// Rounding slack on a sphere's angular span (radians), so a sphere that ends
++// exactly on a wedge edge also asks the wedge beyond it.
++constexpr float kSpanSlack = 1e-4f;
++} // namespace
++
++// ---- HeightGrid ----
++
++void HeightGrid::Clear()
++{
++    _size = 0;
++    _v.clear();
++}
++
++void HeightGrid::BuildFromVertices(int size, float cellSize, float outside, std::vector<float> vertices)
++{
++    Clear();
++    if (size < 2 || !(cellSize > 0.0f) || vertices.size() != static_cast<size_t>(size) * size)
++        return;
++    _size = size;
++    _cellSize = cellSize;
++    _invCellSize = 1.0f / cellSize;
++    _outside = outside;
++    _v = std::move(vertices);
++}
++
++float HeightGrid::SurfaceCells(float xr, float zr) const
++{
++    // Landscape::SurfaceY's triangles, over the vertices as the renderer
++    // draws them (an off-grid vertex at the outside height).
++    const int xi = static_cast<int>(std::floor(xr));
++    const int zi = static_cast<int>(std::floor(zr));
++    const float xIn = xr - static_cast<float>(xi);
++    const float zIn = zr - static_cast<float>(zi);
++    const float y00 = Vertex(xi, zi);
++    const float y01 = Vertex(xi + 1, zi);
++    const float y10 = Vertex(xi, zi + 1);
++    const float y11 = Vertex(xi + 1, zi + 1);
++    if (xIn <= 1.0f - zIn)
++        return y00 + (y10 - y00) * zIn + (y01 - y00) * xIn;
++    return y10 + (y01 - y11) - (y10 - y11) * xIn - (y01 - y11) * zIn;
++}
++
++float HeightGrid::SegmentMin(float x0, float z0, float x1, float z1) const
++{
++    if (_size <= 0)
++        return -1e30f;
++    const float ax = x0 * _invCellSize, az = z0 * _invCellSize;
++    const float bx = x1 * _invCellSize, bz = z1 * _invCellSize;
++    float m = std::min(SurfaceCells(ax, az), SurfaceCells(bx, bz));
++    // The surface is linear inside each triangle, so along the segment its
++    // corners are where the segment crosses a line x = i, z = j or a cell
++    // diagonal x + z = k (cell units): the lowest point is one of those or an
++    // end. A segment many cells long (never a chord of the table) falls back
++    // to the lowest vertex of the cells it may touch.
++    constexpr int kMaxCrossings = 256;
++    if (std::fabs(bx - ax) + std::fabs(bz - az) > kMaxCrossings / 2)
++    {
++        const int gx0 = static_cast<int>(std::floor(std::min(ax, bx))), gx1 = static_cast<int>(std::floor(std::max(ax, bx))) + 1;
++        const int gz0 = static_cast<int>(std::floor(std::min(az, bz))), gz1 = static_cast<int>(std::floor(std::max(az, bz))) + 1;
++        for (int z = gz0; z <= gz1; ++z)
++            for (int x = gx0; x <= gx1; ++x)
++                m = std::min(m, Vertex(x, z));
++        return m;
++    }
++    auto crossings = [&](float a, float b)
++    {
++        if (a == b)
++            return;
++        const float lo = std::min(a, b), hi = std::max(a, b);
++        const float inv = 1.0f / (b - a);
++        for (float k = std::floor(lo) + 1.0f; k <= hi; k += 1.0f)
++        {
++            const float t = (k - a) * inv;
++            m = std::min(m, SurfaceCells(ax + (bx - ax) * t, az + (bz - az) * t));
++        }
++    };
++    crossings(ax, bx);
++    crossings(az, bz);
++    crossings(ax + az, bx + bz);
++    return m;
++}
++
++// ---- HorizonTable ----
++
++void HorizonTable::Build(const HeightGrid& terrain, float eyeX, float eyeY, float eyeZ, float range,
++                         const Params& params)
++{
++    _valid = false;
++    _terrain = &terrain;
++    _p = params;
++    if (!terrain.Valid() || _p.rays < 8 || !(range > 0.0f) || !(_p.nearStep > 0.0f) || !(_p.midStep > 0.0f) ||
++        !(_p.farStep > 0.0f))
++        return;
++    _ex = eyeX;
++    _ey = eyeY;
++    _ez = eyeZ;
++    _range = range;
++    _wedge = kTwoPi / static_cast<float>(_p.rays);
++    _cosHalf = std::cos(0.5f * _wedge);
++
++    _dist.clear();
++    for (float d = _p.nearStep; d <= range;)
++    {
++        _dist.push_back(d);
++        d += d < _p.nearEnd ? _p.nearStep : (d < _p.midEnd ? _p.midStep : _p.farStep);
++    }
++    if (_sin.size() != static_cast<size_t>(_p.rays) + 1)
++    {
++        _sin.resize(static_cast<size_t>(_p.rays) + 1);
++        _cos.resize(static_cast<size_t>(_p.rays) + 1);
++        for (int b = 0; b <= _p.rays; ++b)
++        {
++            const float a = static_cast<float>(b) * _wedge;
++            _sin[static_cast<size_t>(b)] = std::sin(a);
++            _cos[static_cast<size_t>(b)] = std::cos(a);
++        }
++    }
++    _slope.resize(static_cast<size_t>(_p.rays) * _dist.size());
++    if (_gen.size() != static_cast<size_t>(_p.rays))
++    {
++        _gen.assign(static_cast<size_t>(_p.rays), 0u);
++        _buildGen = 0;
++    }
++    if (++_buildGen == 0)
++    {
++        // The counter wrapped: forget every wedge.
++        std::fill(_gen.begin(), _gen.end(), 0u);
++        _buildGen = 1;
++    }
++    _wedgesBuilt = 0;
++    _valid = !_dist.empty();
++}
++
++bool HorizonTable::Matches(float eyeX, float eyeY, float eyeZ, float range) const
++{
++    return _valid && eyeX == _ex && eyeY == _ey && eyeZ == _ez && range == _range;
++}
++
++void HorizonTable::BuildWedge(int b)
++{
++    const size_t k = _dist.size();
++    float* row = &_slope[static_cast<size_t>(b) * k];
++    const float s0 = _sin[static_cast<size_t>(b)], c0 = _cos[static_cast<size_t>(b)];
++    const float s1 = _sin[static_cast<size_t>(b) + 1], c1 = _cos[static_cast<size_t>(b) + 1];
++    float steepest = -1e30f;
++    for (size_t j = 0; j < k; ++j)
++    {
++        const float d = _dist[j];
++        // The chord between the wedge's edge rays at distance d.
++        const float ax = _ex + d * s0, az = _ez + d * c0;
++        const float bx = _ex + d * s1, bz = _ez + d * c1;
++        const float low = _terrain->SegmentMin(ax, az, bx, bz) - _p.terrainMargin;
++        // Sight lines cross the chord between d cos(half wedge) and d: the
++        // slope the chord blocks for all of them.
++        const float rise = low - _ey;
++        const float slope = rise >= 0.0f ? rise / d : rise / (d * _cosHalf);
++        steepest = std::max(steepest, slope);
++        row[j] = steepest;
++    }
++    _gen[static_cast<size_t>(b)] = _buildGen;
++    ++_wedgesBuilt;
++}
++
++Result HorizonTable::Test(float cx, float cy, float cz, float radius)
++{
++    if (!_valid)
++        return Result::NotTested;
++    const float r = radius * _p.radiusScale + _p.radiusMargin;
++    const float dx = cx - _ex, dz = cz - _ez;
++    const float dc = std::sqrt(dx * dx + dz * dz);
++    const float nearD = dc - r;
++    if (!(nearD >= _p.minTestDistance))
++        return Result::NotTested;
++    // The last chord wholly in front of the sphere's nearest point.
++    const auto it = std::upper_bound(_dist.begin(), _dist.end(), nearD);
++    if (it == _dist.begin())
++        return Result::Visible;
++    const size_t k = static_cast<size_t>(it - _dist.begin()) - 1;
++    // The steepest slope from the eye to any point of the sphere: its top over
++    // the nearest distance when the top is above the eye, over the farthest
++    // when below.
++    const float top = cy + r - _ey;
++    const float objSlope = top >= 0.0f ? top / nearD : top / (dc + r);
++    float azimuth = std::atan2(dx, dz);
++    if (azimuth < 0.0f)
++        azimuth += kTwoPi;
++    const float half = std::asin(std::min(1.0f, r / dc)) + kSpanSlack;
++    const float inv = 1.0f / _wedge;
++    const int b0 = static_cast<int>(std::floor((azimuth - half) * inv));
++    const int b1 = static_cast<int>(std::floor((azimuth + half) * inv));
++    if (b1 - b0 + 1 >= _p.rays)
++        return Result::Visible;
++    const size_t chords = _dist.size();
++    for (int b = b0; b <= b1; ++b)
++    {
++        const int w = ((b % _p.rays) + _p.rays) % _p.rays;
++        if (_gen[static_cast<size_t>(w)] != _buildGen)
++            BuildWedge(w);
++        if (!(_slope[static_cast<size_t>(w) * chords + k] > objSlope))
++            return Result::Visible;
++    }
++    return Result::Hidden;
++}
++
++// ---- CullGovernor ----
++
++void CullGovernor::Reset()
++{
++    *this = CullGovernor();
++}
++
++bool CullGovernor::ShouldRun()
++{
++    if (!_idle)
++        return true;
++    if (++_framesIdle >= kWindow)
++    {
++        _framesIdle = 0;
++        return true; // a probe
++    }
++    return false;
++}
++
++void CullGovernor::Report(int tested, int hidden)
++{
++    if (_idle)
++    {
++        // A probe: a view worth culling starts the cull again.
++        if (tested >= kMinTested && static_cast<float>(hidden) >= kMinShare * static_cast<float>(tested))
++        {
++            _idle = false;
++            _reports = 0;
++            _next = 0;
++        }
++        return;
++    }
++    _tested[_next] = tested;
++    _hidden[_next] = hidden;
++    _next = (_next + 1) % kWindow;
++    if (_reports < kWindow)
++        ++_reports;
++    if (_reports < kWindow)
++        return;
++    long long sumTested = 0, sumHidden = 0;
++    for (int i = 0; i < kWindow; ++i)
++    {
++        sumTested += _tested[i];
++        sumHidden += _hidden[i];
++    }
++    const bool crowded = sumTested >= static_cast<long long>(kMinTested) * kWindow;
++    const bool pays = static_cast<float>(sumHidden) >= kMinShare * static_cast<float>(sumTested);
++    if (!crowded || !pays)
++    {
++        _idle = true;
++        _framesIdle = 0;
++    }
++}
++
++} // namespace Poseidon::TerrainOcclusion
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/TerrainOcclusion.hpp b/arma_CWR/engine/Poseidon/World/Scene/TerrainOcclusion.hpp
+new file mode 100644
+index 00000000..2ba67234
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/World/Scene/TerrainOcclusion.hpp
+@@ -0,0 +1,180 @@
++#pragma once
++
++#include <cstdint>
++#include <utility>
++#include <vector>
++
++// Hill culling: objects that a ridge hides from the camera are not drawn.
++// Pure, no engine state; Scene::DrawObjectsAndShadowsPass1 builds the table
++// from the landscape and asks it about every queued object (the hillCull
++// feature switch, plan section 5 A4).
++//
++// The test is conservative by construction: an object is reported hidden only
++// when the terrain as the renderer draws it blocks every sight line from the
++// eye to every point of the object's (enlarged) bounding sphere.
++//
++//   - The terrain is a triangulated height grid (HeightGrid: the vertices of
++//     Landscape::ClippedData, split into triangles as Landscape::SurfaceY and
++//     the terrain segments split them, drawn at full detail: LandCache asks
++//     for segment LOD 0). Along a straight segment that surface is piecewise
++//     linear, with its corners where the segment crosses a grid line or a
++//     cell diagonal, so its lowest point is the lowest of those crossings and
++//     the two ends (HeightGrid::SegmentMin, exact).
++//   - From the eye, `rays` azimuth wedges cover the circle. In plan view a
++//     sight line keeps its azimuth, so every sight line inside wedge b crosses
++//     the chord that joins the wedge's two edge rays at distance d (at a
++//     distance between d cos(half wedge) and d). The lowest terrain along that
++//     chord blocks every such sight line that passes below it; the table
++//     keeps, per wedge and chord, the steepest such blocking slope met so far
++//     (a running maximum).
++//   - An object is hidden when, in every wedge its sphere spans, a chord in
++//     front of the sphere's nearest point blocks a slope steeper than the
++//     steepest one from the eye to any point of the sphere.
++//
++// A notch between two rays cannot hide anything: the chord takes the lowest
++// terrain across the whole width of the wedge, not the terrain under one ray. The prototype (research
++// perf track) marched single rays and compared the sphere's top over its
++// near-edge distance, which let narrow notches and objects below the eye
++// through; both are cases in test_terrain_occlusion.cpp.
++
++namespace Poseidon::TerrainOcclusion
++{
++
++struct Params
++{
++    int rays = 512; // azimuth wedges (0.70 degrees each)
++    // Chord distances: nearStep apart up to nearEnd, then midStep up to midEnd,
++    // then farStep up to the range.
++    float nearStep = 25.0f;
++    float nearEnd = 500.0f;
++    float midStep = 50.0f;
++    float midEnd = 1500.0f;
++    float farStep = 100.0f;
++    // Objects whose (enlarged) sphere comes closer than this are never hidden.
++    float minTestDistance = 75.0f;
++    // The sphere tested is the object's bounding sphere times radiusScale plus
++    // radiusMargin metres (animated parts, proxies, rounding).
++    float radiusScale = 1.25f;
++    float radiusMargin = 1.0f;
++    // Metres taken off every terrain bound (depth precision at a ridge line).
++    float terrainMargin = 0.5f;
++};
++
++// The terrain surface as the renderer draws it: a height grid split into
++// triangles along the (x + 1, z)-(x, z + 1) diagonal of every cell.
++class HeightGrid
++{
++  public:
++    // `size` vertices per side, `cellSize` metres apart; heightAt(x, z) is the
++    // height of vertex (x, z) for 0 <= x, z < size. Vertices outside the grid
++    // sit at `outside` (the engine's YOutsideMap), as the renderer draws them.
++    template <class HeightAt> void Build(int size, float cellSize, float outside, HeightAt&& heightAt)
++    {
++        std::vector<float> v(static_cast<size_t>(size) * size);
++        for (int z = 0; z < size; ++z)
++            for (int x = 0; x < size; ++x)
++                v[static_cast<size_t>(z) * size + x] = heightAt(x, z);
++        BuildFromVertices(size, cellSize, outside, std::move(v));
++    }
++    void BuildFromVertices(int size, float cellSize, float outside, std::vector<float> vertices);
++    void Clear();
++    bool Valid() const { return _size > 0; }
++    int Size() const { return _size; }
++    float CellSize() const { return _cellSize; }
++
++    float Vertex(int x, int z) const
++    {
++        if (x < 0 || z < 0 || x >= _size || z >= _size)
++            return _outside;
++        return _v[static_cast<size_t>(z) * _size + x];
++    }
++    // The drawn surface at (x, z) metres.
++    float SurfaceY(float x, float z) const { return SurfaceCells(x * _invCellSize, z * _invCellSize); }
++    // The lowest point of the drawn surface along the segment from (x0, z0)
++    // to (x1, z1), metres.
++    float SegmentMin(float x0, float z0, float x1, float z1) const;
++
++  private:
++    float SurfaceCells(float xr, float zr) const; // position in cells
++
++    int _size = 0;
++    float _cellSize = 0.0f;
++    float _invCellSize = 0.0f;
++    float _outside = 0.0f;
++    std::vector<float> _v;
++};
++
++enum class Result : std::uint8_t
++{
++    NotTested, // too close to the eye, or no table
++    Visible,
++    Hidden,
++};
++
++// The horizon from one eye: per wedge and chord, the steepest slope the
++// terrain blocks so far. Wedges are built when an object first asks about
++// them, so a rebuild costs only the wedges in view.
++class HorizonTable
++{
++  public:
++    void Build(const HeightGrid& terrain, float eyeX, float eyeY, float eyeZ, float range, const Params& params);
++    void Invalidate() { _valid = false; }
++    bool Valid() const { return _valid; }
++    // The table was built for exactly this eye and range.
++    bool Matches(float eyeX, float eyeY, float eyeZ, float range) const;
++
++    // Is the sphere (centre, radius: the object's bounding sphere; the
++    // margins of Params are added here) hidden by the terrain?
++    Result Test(float cx, float cy, float cz, float radius);
++
++    int Chords() const { return static_cast<int>(_dist.size()); }
++    float ChordDistance(int k) const { return _dist[static_cast<size_t>(k)]; }
++    int WedgesBuilt() const { return _wedgesBuilt; }
++    const Params& GetParams() const { return _p; }
++
++  private:
++    void BuildWedge(int b);
++
++    const HeightGrid* _terrain = nullptr;
++    Params _p;
++    bool _valid = false;
++    float _ex = 0.0f, _ey = 0.0f, _ez = 0.0f, _range = 0.0f;
++    float _wedge = 0.0f;    // wedge angle, radians
++    float _cosHalf = 1.0f;  // cos(wedge / 2)
++    std::vector<float> _dist;        // chord distances, ascending
++    std::vector<float> _sin, _cos;   // edge ray b (0..rays): sin and cos of b * wedge
++    std::vector<float> _slope;       // [b * chords + k]: steepest blocked slope over chords 0..k
++    std::vector<std::uint32_t> _gen; // wedge b is built when _gen[b] == _buildGen
++    std::uint32_t _buildGen = 0;
++    int _wedgesBuilt = 0;
++};
++
++// The adaptive rule: hill culling pays for itself only where hills hide a
++// good share of a crowded view. After a full window of frames that tested
++// fewer than kMinTested objects on average or hid less than kMinShare of
++// them, the cull idles and runs once every kWindow frames as a probe; a probe
++// that finds a view worth culling starts it again.
++class CullGovernor
++{
++  public:
++    static constexpr int kWindow = 30;
++    static constexpr int kMinTested = 200;
++    static constexpr float kMinShare = 0.10f;
++
++    // Called once per frame: run the cull this frame?
++    bool ShouldRun();
++    // The counts of a frame that ran.
++    void Report(int tested, int hidden);
++    void Reset();
++    bool Idle() const { return _idle; }
++
++  private:
++    bool _idle = false;
++    int _framesIdle = 0;
++    int _reports = 0;
++    int _next = 0;
++    int _tested[kWindow] = {};
++    int _hidden[kWindow] = {};
++};
++
++} // namespace Poseidon::TerrainOcclusion
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+index 1c70b8ed..d523a0a8 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+@@ -1534,6 +1534,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
+ #endif
+ 
+     GEngine->FlushQueues();
++    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::GroundDrawn);
+     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
+     GEngine->EnableReorderQueues(true);
+     // draw non-alpha objects
+@@ -1581,6 +1582,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
+ #endif
+ #endif
+     GEngine->FlushQueues();
++    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::ObjectsDrawn);
+ 
+     // draw alpha objects and shadows
+     scene.DrawObjectsAndShadowsPass2();
+diff --git a/arma_CWR/engine/Poseidon/World/World.cpp b/arma_CWR/engine/Poseidon/World/World.cpp
+index 8e8a1c9e..3f14bd30 100644
+--- a/arma_CWR/engine/Poseidon/World/World.cpp
++++ b/arma_CWR/engine/Poseidon/World/World.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include <Poseidon/Core/Application.hpp>
+ #include <Poseidon/Core/Config/EngineConfig.hpp>
++#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+ #include <Poseidon/Core/Config/UserConfig.hpp>
+ #include <Poseidon/World/World.hpp>
+ #include <Poseidon/World/WorldChatInput.hpp>
+@@ -1796,6 +1797,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
+     perf.Mark(Dev::FrameProfiler::PhaseSwap);
+     perf.EndFrame(Poseidon::gPerfDrawCalls);
+     Poseidon::gPerfDrawCalls = 0;
++    Poseidon::perf::GPerfCounters().EndFrame(); // same frames as the profiler (triPerfStats)
+ 
+ #if _ENABLE_CHEATS
+     static bool disableVis = false;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 96f42ff5..17acf5f5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -713,6 +713,7 @@ class EngineGL33 : public Engine
+     bool GpuTimingEnabled() const override { return _gpuTiming; }
+     std::string GpuTimingSummary() const override;
+     bool GpuTimingSectionMs(const char* name, float& ms) const override;
++    void GpuMarkWorldPhase(WorldPhase phase) override;
+     bool WantsTerrainHorizonMap() const override;
+     void SetTerrainHorizonMap(std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> map) override;
+     void EndWorldScene() override;
+@@ -796,6 +797,10 @@ class EngineGL33 : public Engine
+     void UploadLitShadowDelta();
+     void UploadLitLights(const LightList& lights, float nightEffect);
+     void SetLitOpaque(bool opaque);
++    // Writes slots [first, first + count) of the CPU LitConstants block to its
++    // buffer and records them in the buffer's mirror: every upload of the
++    // block, whole or partial, goes through here (plan section 5 A4).
++    void UploadLitSlots(int first, int count);
+     // Binds units 2..5 for the remastered shaders (compare sampler on 2).
+     void BindLightingTextures();
+     void FlushLitConstants();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp
+index 96be72be..1368c509 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_GpuTimer.cpp
+@@ -41,6 +41,14 @@ bool EngineGL33::GpuTimingSectionMs(const char* name, float& ms) const
+     return false;
+ }
+ 
++void EngineGL33::GpuMarkWorldPhase(WorldPhase phase)
++{
++    // Only inside the world's own pass (not a portrait or a 3D preview).
++    if (!_worldPassOpen)
++        return;
++    GpuMark(phase == WorldPhase::GroundDrawn ? Mark::GroundEnd : Mark::Pass1End);
++}
++
+ void EngineGL33::DestroyGpuQueries()
+ {
+     if (_gpuQueries[0][0] && _glContext)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 873a600b..22acd2a2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -10,6 +10,8 @@
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ #include <PoseidonGL33/GL33BindCache.hpp>
++#include <Poseidon/Graphics/Core/PerfCounters.hpp>
++#include <Poseidon/Graphics/Core/UboMirror.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+@@ -26,6 +28,8 @@ namespace
+ {
+ float s_lit[LitConst::Count * 4] = {};
+ GLuint s_litUBO = 0;
++// What s_litUBO holds (UploadLitSlots keeps it; a new buffer starts unknown).
++Poseidon::gpu::UboMirror s_litMirror;
+ // Cloud drift integrated from the wind, so a wind change bends the drift
+ // instead of jumping the whole field. Integrated per frame, so re-pinning the
+ // sim clock (triSetSimTime) does not put it back; captures pin it instead
+@@ -68,12 +72,34 @@ GLuint MakeDummyTexture(GLenum target, GLenum internalFormat, GLenum format, GLe
+ }
+ } // namespace
+ 
++// The one place the LitConstants buffer is written: `count` slots of s_lit
++// from `first` on, recorded in the mirror.
++void EngineGL33::UploadLitSlots(int first, int count)
++{
++    if (!s_litUBO || count <= 0)
++        return;
++    glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
++    glBufferSubData(GL_UNIFORM_BUFFER, first * 16, count * 16, s_lit + first * 4);
++    s_litMirror.Store(s_lit, first, count);
++    Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Frame();
++    ++c.litUploads;
++    c.litBytes += count * 16;
++}
++
+ void EngineGL33::FlushLitConstants()
+ {
+     if (!s_litUBO)
+         return;
+-    glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
+-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_lit), s_lit);
++    // drawGrouping: send only the slots that changed since the last upload
++    // (a draw's material and lights, mostly); off, the whole block as before.
++    const bool dedupe = _featureGates[rm::Feature::DrawGrouping].on;
++    int first = 0, count = 0;
++    if (!s_litMirror.Plan(s_lit, dedupe, first, count))
++    {
++        ++Poseidon::perf::GPerfCounters().Frame().litSkips;
++        return;
++    }
++    UploadLitSlots(first, count);
+ }
+ 
+ void EngineGL33::InitLightingResources()
+@@ -82,6 +108,7 @@ void EngineGL33::InitLightingResources()
+     glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
+     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_lit), nullptr, GL_DYNAMIC_DRAW);
+     glBindBufferBase(GL_UNIFORM_BUFFER, kLitBinding, s_litUBO);
++    s_litMirror.Reset(LitConst::Count); // a new buffer holds nothing known yet
+ 
+     // Stand-ins so every sampler of the remastered shaders always has a complete
+     // texture of the right kind, map or no map. Created on the upload unit; the
+@@ -165,6 +192,7 @@ void EngineGL33::DeinitLightingResources()
+         glDeleteBuffers(1, &s_litUBO);
+         s_litUBO = 0;
+     }
++    s_litMirror.Reset(LitConst::Count);
+ }
+ 
+ void EngineGL33::SetLightingTuning(const rm::LightingTuning& tuning)
+@@ -300,11 +328,7 @@ void EngineGL33::SetLitOpaque(bool opaque)
+     _litOpaque = opaque;
+     s_lit[LitConst::Flags * 4 + 0] = opaque ? 1.0f : 0.0f;
+     // Blend modes switch per draw group: upload just the flags slot.
+-    if (s_litUBO)
+-    {
+-        glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
+-        glBufferSubData(GL_UNIFORM_BUFFER, LitConst::Flags * 16, 16, s_lit + LitConst::Flags * 4);
+-    }
++    UploadLitSlots(LitConst::Flags, 1);
+ }
+ 
+ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index 52631645..534efccf 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -8,6 +8,8 @@
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+ #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
+ #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
++#include <Poseidon/Graphics/Core/PerfCounters.hpp>
++#include <Poseidon/Graphics/Core/UboMirror.hpp>
+ #include <Poseidon/Foundation/Common/GamePaths.hpp>
+ 
+ #include <SDL3/SDL.h>
+@@ -794,15 +796,41 @@ static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24
+ static GLuint s_vsUBO = 0;
+ static GLuint s_worldUBO = 0;
+ static GLuint s_psUBO = 0;
++// What s_vsUBO holds: every write below records itself here (a new buffer
++// starts unknown, InitVertexShaders).
++static Poseidon::gpu::UboMirror s_vsMirror;
++static constexpr int kVsSlots = static_cast<int>(sizeof(s_vsShadow) / 16);
++
++// Writes slots [first, first + count) of s_vsShadow to the VS buffer and
++// records them in its mirror.
++static void UploadVSSlots(int first, int count)
++{
++    // glBindBufferBase is sticky — done once at UBO creation in
++    // InitVertexShaders.  Per-upload we only update buffer contents.
++    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
++    glBufferSubData(GL_UNIFORM_BUFFER, first * 16, count * 16, s_vsShadow + first * 4);
++    s_vsMirror.Store(s_vsShadow, first, count);
++    Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Frame();
++    ++c.vsUploads;
++    c.vsBytes += count * 16;
++}
+ 
+ void EngineGL33::FlushVSConstants()
+ {
+     if (!s_vsUBO)
+         return;
+-    // glBindBufferBase is sticky — done once at UBO creation in
+-    // InitVertexShaders.  Per-flush we only update buffer contents.
+-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_vsShadow), s_vsShadow);
++    // drawGrouping: send only the slots that changed since the last upload.
++    // With the WorldInstances buffer the VSConstants world slots are std140
++    // padding no shader reads (every VS takes the world matrix from
++    // WorldInstances), so they never count as a change.
++    const bool dedupe = _featureGates[Poseidon::remaster::Feature::DrawGrouping].on;
++    int first = 0, count = 0;
++    if (!s_vsMirror.Plan(s_vsShadow, dedupe, first, count, s_worldUBO ? VSConst::SlotWorld : 0, s_worldUBO ? 4 : 0))
++    {
++        ++Poseidon::perf::GPerfCounters().Frame().vsSkips;
++        return;
++    }
++    UploadVSSlots(first, count);
+ }
+ 
+ void EngineGL33::FlushPSConstants()
+@@ -863,6 +891,7 @@ void EngineGL33::InitVertexShaders()
+     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_vsShadow), s_vsShadow, GL_DYNAMIC_DRAW);
+     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_vsUBO);
++    s_vsMirror.Reset(kVsSlots); // the next flush sends the whole block
+ 
+     // WorldInstances array UBO (binding 2) — 256 mat4 = 16 KB, the GL 3.3
+     // minimum guaranteed UBO size. Slot 0 = the classic per-draw world
+@@ -903,6 +932,7 @@ void EngineGL33::DeinitVertexShaders()
+         glDeleteBuffers(1, &s_vsUBO);
+         s_vsUBO = 0;
+     }
++    s_vsMirror.Reset(kVsSlots);
+     if (s_worldUBO)
+     {
+         glDeleteBuffers(1, &s_worldUBO);
+@@ -1185,9 +1215,7 @@ void EngineGL33::UploadVSCrown(const float center[3], const float invHalf[3])
+     memcpy(s_vsShadow + VSConst::SlotCrown * 4, v, sizeof(v));
+     if (!s_vsUBO)
+         return;
+-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+-    glBufferSubData(GL_UNIFORM_BUFFER, VSConst::SlotCrown * 4 * sizeof(float), sizeof(v),
+-                    s_vsShadow + VSConst::SlotCrown * 4);
++    UploadVSSlots(VSConst::SlotCrown, 2);
+ }
+ 
+ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
+@@ -1207,8 +1235,7 @@ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
+     // writers (materials, lights, cascade VPs) still flush the full block.
+     if (!s_vsUBO)
+         return;
+-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+-    glBufferSubData(GL_UNIFORM_BUFFER, VSConst::SlotWorld * 4 * sizeof(float), 64, s_vsShadow + VSConst::SlotWorld * 4);
++    UploadVSSlots(VSConst::SlotWorld, 4);
+ }
+ 
+ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnabled)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+index 1cc0bedf..cf587e82 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+@@ -7,6 +7,7 @@
+ #include <Poseidon/Graphics/Core/GLClear.hpp>
+ #include <Poseidon/Graphics/Core/GLCullState.hpp>
+ #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
++#include <Poseidon/Graphics/Core/GLSampler.hpp>
+ #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
+ #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+@@ -332,9 +333,16 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
+ // `depthClamp` (remastered lighting): casters beyond the light's near plane are
+ // flattened onto it instead of clipped. A sun a few degrees up throws shadows
+ // hundreds of metres long, from casters far outside a cascade's depth range.
++// `casterSampler`: the sampler the alpha-cutout batches sample their caster
++// textures with on unit 0 (the lit draws' linear wrap one). Without it they
++// sampled with whatever sampler the last lit draw before the shadow pass left
++// on unit 0 (per draw: clamped or wrapped, point or linear), so a leaf card's
++// cutout, and the shadow it casts, changed with which object happened to draw
++// last (plan section 5 A4: hiding a road behind a ridge changed the shadows of
++// the trees in view). The previous binding is restored afterwards.
+ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades, int res, const float* solidXYZ,
+                         int solidVertCount, const float* alphaXYZUV, int alphaVertCount,
+-                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp)
++                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp, GLuint casterSampler)
+ {
+     const bool haveSolid = solidXYZ && solidVertCount >= 3;
+     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
+@@ -388,6 +396,14 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
+                      GL_DYNAMIC_DRAW);
+     }
+ 
++    GLint prevSampler = 0;
++    if (haveAlpha)
++    {
++        GL33Bind::ActiveUnit(0);
++        glGetIntegerv(GL_SAMPLER_BINDING, &prevSampler);
++        Poseidon::render::sampler::BindSlot0(casterSampler);
++    }
++
+     glClearDepth(1.0);
+     for (int i = 0; i < numCascades; i++)
+     {
+@@ -425,6 +441,8 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
+         }
+     }
+ 
++    if (haveAlpha)
++        Poseidon::render::sampler::BindSlot0(static_cast<GLuint>(prevSampler));
+     if (depthClamp)
+         Poseidon::render::pipeline::DisableDepthClamp(); // the 3D pass runs without it
+     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
+@@ -473,7 +491,8 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
+     const bool rendered = numCascades >= 1 &&
+                           RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ,
+                                              casters.solidVertexCount, casters.alphaXYZUV, casters.alphaVertexCount,
+-                                             resolved.data(), static_cast<int>(resolved.size()), _lightingActive);
++                                             resolved.data(), static_cast<int>(resolved.size()), _lightingActive,
++                                             _samplerObjects[0]);
+     GpuMark(Poseidon::gpu::Mark::ShadowEnd);
+     if (numCascades >= 1)
+     {
+diff --git a/arma_CWR/tests/rendering/captures/make_pairs.py b/arma_CWR/tests/rendering/captures/make_pairs.py
+index 623ef89c..fa1200ac 100644
+--- a/arma_CWR/tests/rendering/captures/make_pairs.py
++++ b/arma_CWR/tests/rendering/captures/make_pairs.py
+@@ -40,14 +40,20 @@ MODES = tuple(m for pair in PAIR_MODES for m in pair)
+ SHOT_RE = re.compile(r"^(\d{3})_(.+)__(classic|remastered|off|on)\.png$")
+ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+ UDCAP_RE = re.compile(r"UDCAP;(.*)$")
+-# triGpuTimes sections: the frame, the world (with its shadow pass) and the post
++# triGpuTimes sections: the frame, the world (with its shadow pass, and its
++# three parts from A4 on: ground, the opaque objects, the rest) and the post
+ # pass, then the post stages that run today, in their order (GpuTimings.hpp; a
+-# stage that did not run leaves its cell empty).
+-GPU_FIELDS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
++# stage that did not run leaves its cell empty). frame_min is the best frame
++# of the timer window (the "| min frame=" field, A4 on).
++GPU_FIELDS = ("frame", "world", "shadow", "ground", "pass1", "rest", "post", "resolve", "lindepth", "ao", "bloom",
++              "shafts", "composite", "frame_min")
+ GPU_RES = {
+     "frame": re.compile(r"\bframe ([\d.]+) ms"),
+     "world": re.compile(r"\bworld ([\d.]+)"),
+     "shadow": re.compile(r"\(shadow ([\d.]+)\)"),
++    "ground": re.compile(r"\bground ([\d.]+)"),
++    "pass1": re.compile(r"\bpass1 ([\d.]+)"),
++    "rest": re.compile(r"\brest ([\d.]+)"),
+     "post": re.compile(r"\bpost ([\d.]+):"),
+     "resolve": re.compile(r"\bresolve ([\d.]+)"),
+     "lindepth": re.compile(r"\blindepth ([\d.]+)"),
+@@ -55,6 +61,18 @@ GPU_RES = {
+     "bloom": re.compile(r"\bbloom ([\d.]+)"),
+     "shafts": re.compile(r"\bshafts ([\d.]+)"),
+     "composite": re.compile(r"\bcomposite ([\d.]+)"),
++    "frame_min": re.compile(r"\| min frame=([\d.]+)"),
++}
++# triPerfStats' frame-cost counters (after " || ", A4 on): window averages.
++COUNTER_RES = {
++    "runs": re.compile(r"\bruns=([\d.]+)"),
++    "runobj": re.compile(r"\brunobj=([\d.]+)"),
++    "hill_tested": re.compile(r"\btested=([\d.]+)"),
++    "hill_hidden": re.compile(r"\bhidden=([\d.]+)"),
++    "hill_cpu_ms": re.compile(r"\bhillcpu=([\d.]+)"),
++    "lod_ms": re.compile(r"\bprep lod=([\d.]+)"),
++    "lit_kb": re.compile(r"\blitKB=([\d.]+)"),
++    "vs_kb": re.compile(r"\bvsKB=([\d.]+)"),
+ }
+ PERF_RE = re.compile(r"\bfps=([\d.]+) frame=([\d.]+)/([\d.]+)/([\d.]+)")
+ CALLS_RE = re.compile(r"\bcalls=([\d.]+)")
+@@ -148,6 +166,7 @@ def shot_rows(lines):
+         # (triSettleScene); empty in runs from before these fields existed.
+         row["draws"] = to_int(kv.get("draws"))
+         row["objects"] = to_int(kv.get("objects"))
++        row["culled"] = to_int(kv.get("culled"))
+         row["lights"] = to_int(kv.get("lights"))
+         row["lod"] = kv.get("lod", "")
+         row["pin"] = kv.get("pin", "")
+@@ -164,6 +183,10 @@ def shot_rows(lines):
+         row["cpu_frame_p95_ms"] = float(m.group(3)) if m else None
+         m = CALLS_RE.search(row["perf_raw"])
+         row["calls_avg"] = float(m.group(1)) if m else None
++        counters = row["perf_raw"].split(" || ", 1)[1] if " || " in row["perf_raw"] else ""
++        for f, rx in COUNTER_RES.items():
++            m = rx.search(counters)
++            row[f] = float(m.group(1)) if m else None
+         # a later line for the same label (a retry) replaces the earlier one;
+         # dict order keeps the run order of the first appearance
+         rows[(view, mode)] = row
+@@ -285,8 +308,9 @@ def share_delta(a, b, key):
+ 
+ def write_tables(rows, out_dir: Path):
+     cols = ["view", "mode", "lit", "cam"] + [f"gpu_{f}_ms" for f in GPU_FIELDS] + \
+-           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "draws", "objects", "lights", "calls_avg", "lod",
+-            "pin", "horizon", "settle", "settle_draws", "setting", "gpu_raw", "perf_raw", "feat"]
++           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "draws", "objects", "culled", "lights",
++            "calls_avg"] + list(COUNTER_RES) + \
++           ["lod", "pin", "horizon", "settle", "settle_draws", "setting", "gpu_raw", "perf_raw", "feat"]
+     with open(out_dir / "timings.csv", "w", newline="", encoding="utf-8") as f:
+         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+         w.writeheader()
+diff --git a/arma_CWR/tests/rendering/captures/summarize_timing.py b/arma_CWR/tests/rendering/captures/summarize_timing.py
+index 7b0bebaf..f0a16cb8 100644
+--- a/arma_CWR/tests/rendering/captures/summarize_timing.py
++++ b/arma_CWR/tests/rendering/captures/summarize_timing.py
+@@ -31,7 +31,10 @@ from pathlib import Path
+ import numpy as np
+ from PIL import Image
+ 
+-SECTIONS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
++# ground, pass1 and rest split the world pass and frame_min is the best frame of
++# a shot's timer window (GpuTimings, A4 on); empty for runs before A4.
++SECTIONS = ("frame", "world", "shadow", "ground", "pass1", "rest", "post", "resolve", "lindepth", "ao", "bloom",
++            "shafts", "composite", "frame_min")
+ ROUND_RE = re.compile(r"^(.+)_r(\d+)$")
+ # banddiff.py's 640-row bands (0-250 sky, 250-350 horizon, 350-640 ground) at 1080 rows
+ BANDS = ((0, 422), (422, 591), (591, 1080))
+@@ -168,6 +171,7 @@ def main():
+         draws = med([r.get("draws") for r in g])
+         objs = med([r.get("objects") for r in g])
+         rec["draws_median"], rec["objects_median"] = draws, objs
++        rec["culled_median"] = med([r.get("culled") for r in g])
+         settles = ",".join(str(r.get("settle", "")) for r in g)
+         rec["settle"] = settles
+         mhz = med([r.get("gpu_mhz") for r in g])
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 49ce8b79..b2ae4f04 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -165,6 +165,8 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_remaster_lighting.cpp
+     Graphics/test_feature_switches.cpp
+     Graphics/test_gpu_timings.cpp
++    Graphics/test_perf_counters.cpp
++    Graphics/test_ubo_mirror.cpp
+     Graphics/test_post_stages.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+@@ -476,6 +478,7 @@ list(APPEND POSEIDON_TEST_SOURCES
+     World/Scene/test_surface_draw_order.cpp
+     World/Scene/test_alpha_sort_order.cpp
+     World/Scene/test_instanced_run_rules.cpp
++    World/Scene/test_terrain_occlusion.cpp
+     World/Scene/test_streetlamp_casting.cpp
+ 
+     # Core subsystem tests
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 02b3fa2b..c273bfaf 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -1,4 +1,5 @@
+ #include <catch2/catch_test_macros.hpp>
++#include <Poseidon/Graphics/Core/GpuTimings.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+ 
+@@ -537,3 +538,41 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+         landed += GetFeatureInfo(static_cast<Feature>(i)).landed ? 1 : 0;
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
++
++TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after A4 has", "[remaster][FeatureSwitches]")
++{
++    // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
++    // classic): triFeatureState no longer marks them inert, and the overlay
++    // shows the opaque objects' GPU section for them.
++    std::set<std::string> sections;
++    for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
++        sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
++    for (int i = 0; i < kFeatureCount; ++i)
++    {
++        const FeatureInfo& info = GetFeatureInfo(static_cast<Feature>(i));
++        INFO(info.key);
++        const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
++        CHECK(info.landed == perf);
++        if (info.landed)
++        {
++            CHECK(std::string_view(info.step) == "A4");
++            CHECK(sections.count(info.gpuSection) == 1);
++        }
++    }
++    const LightingTuning t = Apply("remastered");
++    FeatureGates g = ComputeFeatureGates(GateInputs{}, t);
++    const std::string s = FeatureStateString(t, g);
++    INFO(s);
++    CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
++    CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
++    CHECK(s.find("landed=2/26") != std::string::npos);
++    // Classic keeps its own draw path: the gates hold them off.
++    const LightingTuning classic = Apply("classic");
++    const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
++    CHECK_FALSE(gc[Feature::DrawGrouping].on);
++    CHECK_FALSE(gc[Feature::HillCull].on);
++    // Night vision keeps them (they change no pixel).
++    GateInputs nv;
++    nv.nightVision = true;
++    CHECK(ComputeFeatureGates(nv, t)[Feature::HillCull].on);
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
+index 010152a3..faca3dc2 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
+@@ -69,7 +69,7 @@ TEST_CASE("GpuTimings: sections from one full frame", "[Graphics][gpu]")
+     REQUIRE(t.AverageMs(Section::Frame, ms));
+     CHECK(ms == Catch::Approx(6.0).margin(1e-3));
+     CHECK(t.Summary() == "frame 6.00 ms | world 4.80 (shadow 0.60) | post 0.70: resolve 0.05 ao 0.25 bloom 0.20 "
+-                         "shafts 0.05 composite 0.15");
++                         "shafts 0.05 composite 0.15 | min frame=6.00 world=4.80");
+ }
+ 
+ TEST_CASE("GpuTimings: a skipped post step folds into the next one", "[Graphics][gpu]")
+@@ -194,3 +194,49 @@ TEST_CASE("GpuTimings: missing or out-of-order stamps are dropped, averages smoo
+     CHECK_FALSE(t.AverageMs(Section::Frame, ms));
+     CHECK(t.LastMs(Section::Frame) < 0.0f);
+ }
++
++TEST_CASE("GpuTimings: the world pass splits into ground, opaque objects and the rest", "[Graphics][gpu]")
++{
++    // A4: Landscape::DrawRect marks the end of the ground (sky, terrain, water,
++    // horizon) and of the opaque objects (Pass1); the rest is the shadow-map
++    // pass, the alpha objects and what follows.
++    Frame f = FullFrame();
++    f.Set(Mark::GroundEnd, 0.9);
++    f.Set(Mark::Pass1End, 3.1);
++    GpuTimings t;
++    t.Submit(f.stamps, f.recorded);
++    CHECK(t.LastMs(Section::Ground) == Catch::Approx(0.7).margin(1e-3));
++    CHECK(t.LastMs(Section::Pass1) == Catch::Approx(2.2).margin(1e-3));
++    CHECK(t.LastMs(Section::Rest) == Catch::Approx(1.9).margin(1e-3));
++    CHECK(t.LastMs(Section::Ground) + t.LastMs(Section::Pass1) + t.LastMs(Section::Rest) ==
++          Catch::Approx(t.LastMs(Section::World)).margin(1e-3));
++    const std::string s = t.Summary();
++    INFO(s);
++    CHECK(s.find("world 4.80 (shadow 0.60) [ground 0.70 pass1 2.20 rest 1.90] | post 0.70:") != std::string::npos);
++    // make_pairs.py reads "<section> <ms>"; the minimum fields use '=' so
++    // they never shadow the averages.
++    CHECK(s.find(" | min frame=6.00 world=4.80 ground=0.70 pass1=2.20 rest=1.90") != std::string::npos);
++    // The two marks are world marks: never post stage marks.
++    CHECK(PostStageSection(Mark::GroundEnd) == Section::Count);
++    CHECK(PostStageSection(Mark::Pass1End) == Section::Count);
++}
++
++TEST_CASE("GpuTimings: the minimum is the shortest frame since the reset", "[Graphics][gpu]")
++{
++    GpuTimings t;
++    float ms = 0.0f;
++    CHECK_FALSE(t.MinMs(Section::Frame, ms));
++    for (double frame : {9.0, 6.0, 12.0, 7.0})
++    {
++        Frame f;
++        f.Set(Mark::FrameBegin, 0.0);
++        f.Set(Mark::FrameEnd, frame);
++        t.Submit(f.stamps, f.recorded);
++    }
++    REQUIRE(t.MinMs(Section::Frame, ms));
++    CHECK(ms == Catch::Approx(6.0).margin(1e-3));
++    REQUIRE(t.AverageMs(Section::Frame, ms));
++    CHECK(ms > 6.5f); // the average is not the minimum
++    t.Reset();
++    CHECK_FALSE(t.MinMs(Section::Frame, ms));
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_perf_counters.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_perf_counters.cpp
+new file mode 100644
+index 00000000..99ad4fe6
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_perf_counters.cpp
+@@ -0,0 +1,50 @@
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Graphics/Core/PerfCounters.hpp>
++
++#include <string>
++
++// The frame-cost counters triPerfStats prints (plan section 5 A4): the scene
++// and the backend add to the frame being drawn, World::Simulate closes it,
++// and the summary averages over the profiler's window.
++
++using Poseidon::perf::Counters;
++
++TEST_CASE("PerfCounters: frames close into per-frame averages over the window", "[gpu][PerfCounters]")
++{
++    Counters c;
++    c.Frame().runs = 10;
++    c.Frame().runObjects = 400;
++    c.Frame().hillTested = 7000;
++    c.Frame().hillHidden = 6000;
++    c.Frame().hillMs = 0.5f;
++    c.Frame().litBytes = 2048;
++    c.EndFrame();
++    CHECK(c.Last().runs == 10);
++    CHECK(c.Frame().runs == 0); // a new frame starts empty
++    c.Frame().runs = 20;
++    c.Frame().runObjects = 600;
++    c.Frame().hillTested = 5000;
++    c.Frame().hillHidden = 4000;
++    c.Frame().hillMs = 1.5f;
++    c.Frame().litBytes = 4096;
++    c.EndFrame();
++    CHECK(c.WindowFrames() == 2);
++    const std::string s = c.Summary();
++    INFO(s);
++    CHECK(s.find("runs=15 runobj=500") != std::string::npos);
++    CHECK(s.find("tested=6000 hidden=5000") != std::string::npos);
++    CHECK(s.find("hillcpu=1.000") != std::string::npos);
++    CHECK(s.find("litKB=3.0") != std::string::npos);
++    // It rides in UDCAP lines after triPerfStats' own fields: no ';', and none
++    // of the names the capture parser reads there (fps=, frame=, calls=).
++    CHECK(s.find(';') == std::string::npos);
++    CHECK(s.find("fps=") == std::string::npos);
++    CHECK(s.find("frame=") == std::string::npos);
++    CHECK(s.find("calls=") == std::string::npos);
++
++    c.ResetWindow();
++    CHECK(c.WindowFrames() == 0);
++    CHECK(c.Summary().find("runs=0 ") != std::string::npos);
++    CHECK(c.Last().runs == 20); // the last frame stays readable
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_ubo_mirror.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_ubo_mirror.cpp
+new file mode 100644
+index 00000000..1cd8964a
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_ubo_mirror.cpp
+@@ -0,0 +1,200 @@
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Graphics/Core/UboMirror.hpp>
++
++#include <cstring>
++#include <random>
++#include <vector>
++
++// The GL33 backend's constant blocks (LitConstants, VSConstants) are written
++// through a mirror of what the buffer holds (plan section 5 A4): a flush sends
++// only the slots that changed. The rule that keeps that exact: after every
++// upload, whole or partial, the buffer equals the CPU block in every slot a
++// shader reads. These tests drive the mirror the way EngineGL33 does (Plan,
++// upload, Store) against a recording fake buffer.
++
++using Poseidon::gpu::UboMirror;
++
++namespace
++{
++// A uniform buffer that only records what was written to it.
++struct FakeBuffer
++{
++    std::vector<float> data;
++    int uploads = 0;
++    int slotsSent = 0;
++    explicit FakeBuffer(int slots) : data(static_cast<size_t>(slots) * 4, -12345.0f) {}
++    void Write(const float* src, int first, int count)
++    {
++        std::memcpy(&data[static_cast<size_t>(first) * 4], src + static_cast<size_t>(first) * 4,
++                    static_cast<size_t>(count) * 16);
++        ++uploads;
++        slotsSent += count;
++    }
++};
++
++// EngineGL33::FlushLitConstants / FlushVSConstants.
++void Flush(UboMirror& m, FakeBuffer& gpu, const float* cpu, bool dedupe, int ignoreFirst = 0, int ignoreCount = 0)
++{
++    int first = 0, count = 0;
++    if (!m.Plan(cpu, dedupe, first, count, ignoreFirst, ignoreCount))
++        return;
++    gpu.Write(cpu, first, count);
++    m.Store(cpu, first, count);
++}
++
++// EngineGL33::SetLitOpaque / UploadVSCrown / UploadVSWorldMatrix: a partial
++// upload of a few slots.
++void Partial(UboMirror& m, FakeBuffer& gpu, const float* cpu, int first, int count)
++{
++    gpu.Write(cpu, first, count);
++    m.Store(cpu, first, count);
++}
++
++bool SameOutside(const FakeBuffer& gpu, const std::vector<float>& cpu, int ignoreFirst, int ignoreCount)
++{
++    const int slots = static_cast<int>(cpu.size() / 4);
++    for (int i = 0; i < slots; ++i)
++    {
++        if (i >= ignoreFirst && i < ignoreFirst + ignoreCount)
++            continue;
++        if (std::memcmp(&gpu.data[static_cast<size_t>(i) * 4], &cpu[static_cast<size_t>(i) * 4], 16) != 0)
++            return false;
++    }
++    return true;
++}
++} // namespace
++
++TEST_CASE("UboMirror: the buffer equals the CPU block after every flush and partial upload", "[gpu][UboMirror]")
++{
++    constexpr int kSlots = 58; // LitConstants
++    for (const bool dedupe : {true, false})
++    {
++        UboMirror m;
++        m.Reset(kSlots);
++        FakeBuffer gpu(kSlots);
++        std::vector<float> cpu(static_cast<size_t>(kSlots) * 4, 0.0f);
++        std::mt19937 rng(dedupe ? 3 : 4);
++        std::uniform_int_distribution<int> slot(0, kSlots - 1), op(0, 9);
++        std::uniform_real_distribution<float> val(-2.0f, 2.0f);
++        // A new buffer holds garbage until its first flush, which sends the
++        // whole block (the mirror does not know it yet).
++        Flush(m, gpu, cpu.data(), dedupe);
++        REQUIRE(gpu.slotsSent == kSlots);
++        bool pending = false; // a CPU write no flush has carried yet
++        for (int step = 0; step < 4000; ++step)
++        {
++            const int o = op(rng);
++            if (o < 5)
++            {
++                // A draw changes a few slots (its material and lights).
++                const int n = 1 + o;
++                for (int k = 0; k < n; ++k)
++                    cpu[static_cast<size_t>(slot(rng)) * 4 + static_cast<size_t>(k % 4)] = val(rng);
++                Flush(m, gpu, cpu.data(), dedupe);
++                pending = false;
++            }
++            else if (o < 7)
++            {
++                // A partial upload of one slot (the flags), changed or not.
++                const int s = slot(rng);
++                if (o == 5)
++                    cpu[static_cast<size_t>(s) * 4] = val(rng);
++                Partial(m, gpu, cpu.data(), s, 1);
++            }
++            else if (o == 7)
++            {
++                // A CPU write with no flush yet: the next flush must carry it.
++                cpu[static_cast<size_t>(slot(rng)) * 4 + 2] = val(rng);
++                pending = true;
++                continue;
++            }
++            else if (o == 8)
++            {
++                Flush(m, gpu, cpu.data(), dedupe); // nothing changed since the last write
++                pending = false;
++            }
++            else
++            {
++                // The buffer is recreated (a context reset, a shader reload):
++                // it holds garbage until the next flush.
++                gpu = FakeBuffer(kSlots);
++                m.Reset(kSlots);
++                Flush(m, gpu, cpu.data(), dedupe);
++                pending = false;
++            }
++            if (pending)
++                continue; // only a flush promises the whole block
++            INFO("step " << step << " op " << o);
++            REQUIRE(SameOutside(gpu, cpu, 0, 0));
++        }
++    }
++}
++
++TEST_CASE("UboMirror: dedupe sends only the changed range, or nothing", "[gpu][UboMirror]")
++{
++    constexpr int kSlots = 58;
++    UboMirror m;
++    m.Reset(kSlots);
++    CHECK_FALSE(m.Known());
++    FakeBuffer gpu(kSlots);
++    std::vector<float> cpu(static_cast<size_t>(kSlots) * 4, 1.0f);
++
++    Flush(m, gpu, cpu.data(), true); // unknown buffer: the whole block
++    CHECK(gpu.slotsSent == kSlots);
++    CHECK(m.Known());
++
++    Flush(m, gpu, cpu.data(), true); // unchanged: no upload
++    CHECK(gpu.uploads == 1);
++
++    cpu[20 * 4] = 3.0f; // one material slot
++    cpu[24 * 4 + 1] = 4.0f;
++    Flush(m, gpu, cpu.data(), true);
++    CHECK(gpu.uploads == 2);
++    CHECK(gpu.slotsSent == kSlots + 5); // slots 20..24
++
++    Flush(m, gpu, cpu.data(), false); // dedupe off: the whole block, as before A4
++    CHECK(gpu.slotsSent == kSlots + 5 + kSlots);
++}
++
++TEST_CASE("UboMirror: slots no shader reads never count as a change", "[gpu][UboMirror]")
++{
++    // VSConstants with the WorldInstances buffer: its world slots (8..11) are
++    // std140 padding, written on every draw but read by no shader.
++    constexpr int kSlots = 70;
++    UboMirror m;
++    m.Reset(kSlots);
++    FakeBuffer gpu(kSlots);
++    std::vector<float> cpu(static_cast<size_t>(kSlots) * 4, 0.5f);
++    Flush(m, gpu, cpu.data(), true, 8, 4);
++    const int before = gpu.uploads;
++    for (int i = 0; i < 16; ++i)
++        cpu[8 * 4 + static_cast<size_t>(i)] = static_cast<float>(i);
++    Flush(m, gpu, cpu.data(), true, 8, 4);
++    CHECK(gpu.uploads == before);
++    CHECK(SameOutside(gpu, cpu, 8, 4));
++    cpu[30 * 4] = 9.0f;
++    Flush(m, gpu, cpu.data(), true, 8, 4);
++    CHECK(gpu.uploads == before + 1);
++    CHECK(SameOutside(gpu, cpu, 8, 4));
++}
++
++TEST_CASE("UboMirror: a partial upload is recorded, so setting the slot back is sent", "[gpu][UboMirror]")
++{
++    // SetLitOpaque flips the flags slot by a partial upload between draws; a
++    // later flush that sets it back must reach the buffer.
++    constexpr int kSlots = 58, kFlags = 57;
++    UboMirror m;
++    m.Reset(kSlots);
++    FakeBuffer gpu(kSlots);
++    std::vector<float> cpu(static_cast<size_t>(kSlots) * 4, 0.0f);
++    cpu[kFlags * 4] = 1.0f;
++    Flush(m, gpu, cpu.data(), true);
++    cpu[kFlags * 4] = 0.0f; // blend draw: partial upload
++    Partial(m, gpu, cpu.data(), kFlags, 1);
++    CHECK(gpu.data[kFlags * 4] == 0.0f);
++    cpu[kFlags * 4] = 1.0f; // opaque again, carried by the next flush
++    Flush(m, gpu, cpu.data(), true);
++    CHECK(gpu.data[kFlags * 4] == 1.0f);
++    CHECK(SameOutside(gpu, cpu, 0, 0));
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_instanced_run_rules.cpp b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_instanced_run_rules.cpp
+index d41696c5..d18fec02 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_instanced_run_rules.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_instanced_run_rules.cpp
+@@ -130,3 +130,26 @@ TEST_CASE("InstancedRun: members stay inside the fog band", "[scene][instancing]
+     CHECK_FALSE(CanJoin(head, Plain(8999.0f)));
+     CHECK_FALSE(CanJoin(head, Plain(11001.0f)));
+ }
++
++TEST_CASE("InstancedRun: an object lit by a local light neither heads nor joins a run", "[scene][instancing]")
++{
++    // drawGrouping (plan section 5 A4): with light slots in the scene, an
++    // object takes part in runs when the light list its own draw would select
++    // is empty. The run is drawn with the head's list, so a lit object would
++    // either light its unlit twins (as head) or lose its own light (as member).
++    RunEntry lit = Plain(10010.0f);
++    lit.localLit = true;
++    CHECK_FALSE(CanHead(lit));
++    CHECK_FALSE(CanJoin(Plain(), lit));
++    CHECK(CanJoin(Plain(), Plain(10010.0f)));
++
++    // Five twins along a street, the third under a lamp: it is drawn alone,
++    // the two before it and the two after it are each too short for a run.
++    const std::vector<RunEntry> street{Plain(10000.0f), Plain(10010.0f), lit, Plain(10030.0f), Plain(10040.0f)};
++    CHECK(RunLengths(street) == std::vector<int>{2, 1, 2});
++
++    // A wood far from any lamp keeps its runs.
++    const std::vector<RunEntry> wood{Plain(10000.0f), Plain(10010.0f), Plain(10020.0f), Plain(10030.0f),
++                                     Plain(10040.0f)};
++    CHECK(RunLengths(wood) == std::vector<int>{5});
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_terrain_occlusion.cpp b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_terrain_occlusion.cpp
+new file mode 100644
+index 00000000..78090b0b
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_terrain_occlusion.cpp
+@@ -0,0 +1,395 @@
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/World/Scene/TerrainOcclusion.hpp>
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <functional>
++#include <random>
++#include <vector>
++
++// Hill culling (plan section 5 A4): the horizon table may call an object
++// hidden only when the terrain as the renderer draws it blocks every sight
++// line from the eye to every point of the object's enlarged sphere. These
++// tests march sight lines over the triangulated grid by brute force and hold
++// the table to that, on hilly synthetic terrain, on a notch narrower than one
++// wedge and on an object below the eye (two cases the research prototype got
++// wrong; its single-ray test is kept here to show that).
++
++using namespace Poseidon::TerrainOcclusion;
++
++namespace
++{
++constexpr float kOutside = -100.0f; // the engine's YOutsideMap
++constexpr float kPi = 3.14159265f;
++
++// A height grid and its triangulated surface, as Landscape::SurfaceY and the
++// terrain segments draw it: cells split along the (x+1, z)-(x, z+1) diagonal.
++struct Terrain
++{
++    int size = 0;
++    float cell = 0.0f;
++    std::vector<float> v;
++
++    Terrain(int n, float cellSize, const std::function<float(float, float)>& height) : size(n), cell(cellSize)
++    {
++        v.resize(static_cast<size_t>(n) * n);
++        for (int z = 0; z < n; ++z)
++            for (int x = 0; x < n; ++x)
++                v[static_cast<size_t>(z) * n + x] = height(x * cellSize, z * cellSize);
++    }
++    float Vertex(int x, int z) const
++    {
++        if (x < 0 || z < 0 || x >= size || z >= size)
++            return kOutside;
++        return v[static_cast<size_t>(z) * size + x];
++    }
++    float SurfaceY(float x, float z) const
++    {
++        const float xr = x / cell, zr = z / cell;
++        const int xi = static_cast<int>(std::floor(xr)), zi = static_cast<int>(std::floor(zr));
++        const float xin = xr - xi, zin = zr - zi;
++        const float y00 = Vertex(xi, zi), y01 = Vertex(xi + 1, zi), y10 = Vertex(xi, zi + 1),
++                    y11 = Vertex(xi + 1, zi + 1);
++        if (xin <= 1.0f - zin)
++            return y00 + (y10 - y00) * zin + (y01 - y00) * xin;
++        return y10 + (y01 - y11) - (y10 - y11) * xin - (y01 - y11) * zin;
++    }
++    HeightGrid Grid() const
++    {
++        HeightGrid g;
++        g.BuildFromVertices(size, cell, kOutside, v);
++        return g;
++    }
++};
++
++// Can the eye see any point of the sphere? Points on the sphere's surface
++// (and its centre), each sight line marched at a quarter cell over the
++// drawn surface. Conservative the right way round for the check: it may miss
++// a sliver of visibility, never invent one.
++bool BruteVisible(const Terrain& t, float ex, float ey, float ez, float cx, float cy, float cz, float r)
++{
++    std::vector<std::array<float, 3>> pts{{cx, cy, cz}};
++    for (int i = 0; i <= 12; ++i)
++    {
++        const float lat = -0.5f * kPi + kPi * i / 12.0f;
++        for (int j = 0; j < 24; ++j)
++        {
++            const float lon = 2.0f * kPi * j / 24.0f;
++            pts.push_back({cx + r * std::cos(lat) * std::sin(lon), cy + r * std::sin(lat),
++                           cz + r * std::cos(lat) * std::cos(lon)});
++        }
++    }
++    for (const auto& q : pts)
++    {
++        const float dx = q[0] - ex, dz = q[2] - ez;
++        const float len = std::sqrt(dx * dx + dz * dz);
++        const int steps = std::max(1, static_cast<int>(len / (0.25f * t.cell)));
++        bool clear = true;
++        for (int s = 1; s < steps && clear; ++s)
++        {
++            const float f = static_cast<float>(s) / steps;
++            const float lineY = ey + (q[1] - ey) * f;
++            if (t.SurfaceY(ex + dx * f, ez + dz * f) >= lineY)
++                clear = false;
++        }
++        if (clear)
++            return true;
++    }
++    return false;
++}
++
++// The research prototype's test (tmp/research/perf/prototype.patch): one ray
++// per bin marched in 25 m steps with the terrain lowered 2 m, the sphere's top
++// over its near-edge distance, one extra ray each side.
++bool PrototypeHidden(const Terrain& t, float ex, float ey, float ez, float range, float px, float py, float pz,
++                     float radius)
++{
++    constexpr int kAz = 1024;
++    constexpr float kStep = 25.0f;
++    const int steps = static_cast<int>(range / kStep) + 1;
++    auto maxTan = [&](int a, int k)
++    {
++        const float ang = a * (2.0f * kPi / kAz);
++        float m = -1e30f;
++        for (int i = 0; i <= k; ++i)
++        {
++            const float d = (i + 1) * kStep;
++            m = std::max(m, (t.SurfaceY(ex + std::sin(ang) * d, ez + std::cos(ang) * d) - 2.0f - ey) / d);
++        }
++        return m;
++    };
++    const float r = radius * 1.25f + 1.0f;
++    const float ox = px - ex, oz = pz - ez;
++    const float d = std::sqrt(ox * ox + oz * oz);
++    const float dn = d - r;
++    if (dn < 3.0f * kStep)
++        return false;
++    const int k = std::min(static_cast<int>(dn / kStep) - 1, steps - 1);
++    const float tObj = (py + r - ey) / dn;
++    float ang = std::atan2(ox, oz);
++    if (ang < 0)
++        ang += 2.0f * kPi;
++    const float halfBins = std::asin(std::min(1.0f, r / d)) * (kAz / (2.0f * kPi)) + 1.0f;
++    const int b0 = static_cast<int>(std::floor(ang * (kAz / (2.0f * kPi)) - halfBins));
++    const int b1 = static_cast<int>(std::ceil(ang * (kAz / (2.0f * kPi)) + halfBins));
++    for (int b = b0; b <= b1; ++b)
++        if (!(tObj < maxTan(((b % kAz) + kAz) % kAz, k)))
++            return false;
++    return true;
++}
++
++// The enlarged sphere the table tests (Params defaults).
++float Enlarged(float radius)
++{
++    const Params p;
++    return radius * p.radiusScale + p.radiusMargin;
++}
++
++float Hills(float x, float z)
++{
++    return 40.0f + 30.0f * std::sin(x * 0.004f) * std::cos(z * 0.0031f) + 18.0f * std::sin(x * 0.011f + 1.3f) +
++           12.0f * std::cos(z * 0.013f - 0.4f) + 5.0f * std::sin((x + z) * 0.03f);
++}
++} // namespace
++
++TEST_CASE("TerrainOcclusion: the grid draws Landscape::SurfaceY's triangles and finds a segment's lowest point",
++          "[scene][occlusion]")
++{
++    const Terrain t(128, 12.5f, Hills);
++    const HeightGrid g = t.Grid();
++    REQUIRE(g.Valid());
++    std::mt19937 rng(7);
++    std::uniform_real_distribution<float> pos(-100.0f, 1700.0f), len(0.0f, 80.0f), dir(0.0f, 2.0f * kPi);
++    for (int i = 0; i < 400; ++i)
++    {
++        const float x0 = pos(rng), z0 = pos(rng);
++        CHECK(std::fabs(g.SurfaceY(x0, z0) - t.SurfaceY(x0, z0)) < 1e-2f); // x / cell against x * (1 / cell)
++        const float a = dir(rng), l = len(rng) * (i % 4 == 0 ? 0.05f : 1.0f);
++        const float x1 = x0 + std::sin(a) * l, z1 = z0 + std::cos(a) * l;
++        const float low = g.SegmentMin(x0, z0, x1, z1);
++        // Never above the surface anywhere along the segment, and reached by
++        // it (within float rounding) at some point: the exact minimum.
++        float brute = 1e30f;
++        for (int s = 0; s <= 2000; ++s)
++        {
++            const float f = s / 2000.0f;
++            const float y = t.SurfaceY(x0 + (x1 - x0) * f, z0 + (z1 - z0) * f);
++            CAPTURE(x0, z0, x1, z1, f);
++            CHECK(low <= y + 1e-2f);
++            brute = std::min(brute, y);
++        }
++        CHECK(low >= brute - 0.05f);
++    }
++    // Off the grid the drawn terrain sinks to the outside height.
++    CHECK(g.SegmentMin(-50.0f, 100.0f, -40.0f, 110.0f) == kOutside);
++}
++
++TEST_CASE("TerrainOcclusion: nothing the table hides can be seen", "[scene][occlusion]")
++{
++    // Hilly ground, many eyes and objects: every Hidden answer is checked
++    // against brute-force sight lines to the enlarged sphere.
++    const Terrain t(512, 12.5f, Hills);
++    const HeightGrid p = t.Grid();
++    std::mt19937 rng(11);
++    std::uniform_real_distribution<float> where(800.0f, 5600.0f), unit(0.0f, 1.0f);
++    int hidden = 0, visible = 0, tested = 0;
++    for (int e = 0; e < 12; ++e)
++    {
++        const float ex = where(rng), ez = where(rng);
++        const float ey = t.SurfaceY(ex, ez) + (e % 3 == 0 ? 40.0f : 1.75f);
++        HorizonTable table;
++        table.Build(p, ex, ey, ez, 2500.0f, Params());
++        REQUIRE(table.Valid());
++        for (int o = 0; o < 150; ++o)
++        {
++            const float ang = unit(rng) * 2.0f * kPi;
++            const float dist = 60.0f + unit(rng) * 2300.0f;
++            const float px = ex + std::sin(ang) * dist, pz = ez + std::cos(ang) * dist;
++            const float radius = 0.5f + unit(rng) * 12.0f;
++            const float py = t.SurfaceY(px, pz) + radius * (0.2f + unit(rng));
++            const Result r = table.Test(px, py, pz, radius);
++            if (r == Result::NotTested)
++                continue;
++            ++tested;
++            if (r == Result::Hidden)
++            {
++                ++hidden;
++                INFO("eye " << ex << "," << ey << "," << ez << " object " << px << "," << py << "," << pz << " r "
++                            << radius);
++                CHECK_FALSE(BruteVisible(t, ex, ey, ez, px, py, pz, Enlarged(radius)));
++            }
++            else
++            {
++                ++visible;
++            }
++        }
++    }
++    INFO("tested " << tested << " hidden " << hidden << " visible " << visible);
++    CHECK(tested > 1500);
++    CHECK(hidden > 200); // the hills hide a good share: the test is not empty
++    CHECK(visible > 200);
++}
++
++TEST_CASE("TerrainOcclusion: a notch narrower than a wedge shows what is behind it", "[scene][occlusion]")
++{
++    // A 30 m wall 3 km north of the eye, three vertex rows deep, with one
++    // vertex column cut to the ground: a V notch 25 m wide at the top. A
++    // tower 4.5 km out stands in line with the notch. At 3 km the notch is
++    // narrower than one of the table's wedges (37 m) and sits between two of
++    // the prototype's rays (18 m apart), which pass it 6 m and 12.5 m off its
++    // centre line, where the V is 14 m and 30 m high.
++    const float ex = 3200.0f, ez = 500.0f, ey = 1.75f;
++    const float notchX = 3212.5f; // a vertex column
++    auto wall = [&](float x, float z, bool notch)
++    {
++        const bool onWall = z >= ez + 3000.0f - 0.1f && z <= ez + 3025.0f + 0.1f;
++        const bool inNotch = notch && std::fabs(x - notchX) < 1.0f;
++        return onWall && !inNotch ? 30.0f : 0.0f;
++    };
++    const Terrain t(512, 12.5f, [&](float x, float z) { return wall(x, z, true); });
++    const HeightGrid g = t.Grid();
++    const float tx = ex + 4500.0f * (notchX - ex) / 3000.0f, tz = ez + 4500.0f;
++    const float tr = 3.0f, ty = 4.0f;
++    REQUIRE(BruteVisible(t, ex, ey, ez, tx, ty, tz, tr));
++    HorizonTable table;
++    table.Build(g, ex, ey, ez, 5000.0f, Params());
++    CHECK(table.Test(tx, ty, tz, tr) == Result::Visible);
++    // The prototype's rays straddle the notch: it called the tower hidden.
++    CHECK(PrototypeHidden(t, ex, ey, ez, 5000.0f, tx, ty, tz, tr));
++
++    // Without the notch the same tower is hidden.
++    const Terrain solid(512, 12.5f, [&](float x, float z) { return wall(x, z, false); });
++    const HeightGrid gs = solid.Grid();
++    HorizonTable table2;
++    table2.Build(gs, ex, ey, ez, 5000.0f, Params());
++    CHECK(table2.Test(tx, ty, tz, tr) == Result::Hidden);
++    CHECK_FALSE(BruteVisible(solid, ex, ey, ez, tx, ty, tz, Enlarged(tr)));
++}
++
++TEST_CASE("TerrainOcclusion: an object below the eye is judged by its far side", "[scene][occlusion]")
++{
++    // The eye on a knoll 100 m up looks north, down over a 63 m terrace from
++    // 150 m to 200 m, into a valley. A sphere 330 m out, its top 40 m up (60 m
++    // under the eye), shows its top over the terrace's far edge by about half
++    // a metre. For a sphere below the eye the prototype took the top over the
++    // NEAR distance, the steepest-looking slope only for a sphere above the
++    // eye, and hid it.
++    auto profile = [](float, float z)
++    {
++        const float d = z - 1000.0f;
++        if (std::fabs(d) < 1.0f)
++            return 98.25f;
++        if (d >= 149.0f && d <= 201.0f)
++            return 63.0f;
++        return 0.0f;
++    };
++    const Terrain t(256, 12.5f, profile);
++    const HeightGrid g = t.Grid();
++    const float ex = 1600.0f, ey = 100.0f, ez = 1000.0f;
++    const float radius = (30.0f - 1.0f) / 1.25f; // enlarged to 30 m
++    const float px = ex, pz = ez + 330.0f, py = 40.0f - 30.0f;
++    REQUIRE(BruteVisible(t, ex, ey, ez, px, py, pz, Enlarged(radius)));
++    CHECK(PrototypeHidden(t, ex, ey, ez, 1500.0f, px, py, pz, radius));
++    HorizonTable table;
++    table.Build(g, ex, ey, ez, 1500.0f, Params());
++    CHECK(table.Test(px, py, pz, radius) == Result::Visible);
++    // Lower it 10 m and the terrace hides it from every point.
++    CHECK(table.Test(px, py - 10.0f, pz, radius) == Result::Hidden);
++    CHECK_FALSE(BruteVisible(t, ex, ey, ez, px, py - 10.0f, pz, Enlarged(radius)));
++}
++
++TEST_CASE("TerrainOcclusion: ridges hide what is below their line, never what is near", "[scene][occlusion]")
++{
++    // A 50 m ridge 400 m east of the eye.
++    const Terrain t(512, 12.5f, [](float x, float) { return x >= 2400.0f && x <= 2450.0f ? 50.0f : 0.0f; });
++    const HeightGrid p = t.Grid();
++    const float ex = 2000.0f, ey = 1.75f, ez = 3000.0f;
++    HorizonTable table;
++    table.Build(p, ex, ey, ez, 4000.0f, Params());
++    CHECK(table.Test(3200.0f, 10.0f, ez, 8.0f) == Result::Hidden);   // a tree 1.2 km out, far below the ridge line
++    CHECK(table.Test(3200.0f, 150.0f, ez, 8.0f) == Result::Visible); // a hill top above it
++    CHECK(table.Test(2300.0f, 10.0f, ez, 8.0f) == Result::Visible);  // in front of the ridge
++    CHECK(table.Test(2060.0f, 2.0f, ez, 2.0f) == Result::NotTested); // closer than 75 m
++    CHECK(table.Test(ex, 2.0f, ez - 1200.0f, 8.0f) == Result::Visible); // the other way: open ground
++    // The table answers only for the eye it was built for.
++    CHECK(table.Matches(ex, ey, ez, 4000.0f));
++    CHECK_FALSE(table.Matches(ex + 0.01f, ey, ez, 4000.0f));
++    CHECK_FALSE(table.Matches(ex, ey, ez, 3000.0f));
++    // Only the wedges asked about were built.
++    CHECK(table.WedgesBuilt() > 0);
++    CHECK(table.WedgesBuilt() < 40);
++}
++
++TEST_CASE("TerrainOcclusion: chords grow from 25 m to 100 m apart", "[scene][occlusion]")
++{
++    const Terrain t(64, 12.5f, [](float, float) { return 0.0f; });
++    const HeightGrid p = t.Grid();
++    HorizonTable table;
++    table.Build(p, 400.0f, 1.75f, 400.0f, 4000.0f, Params());
++    REQUIRE(table.Chords() > 2);
++    CHECK(table.ChordDistance(0) == 25.0f);
++    CHECK(table.ChordDistance(1) == 50.0f);
++    CHECK(table.ChordDistance(table.Chords() - 1) <= 4000.0f);
++    // 20 near chords to 500 m, 20 to 1,500 m, 25 to 4,000 m.
++    CHECK(table.Chords() == 65);
++    float last = 0.0f;
++    for (int k = 0; k < table.Chords(); ++k)
++    {
++        const float d = table.ChordDistance(k);
++        const float step = d - last;
++        CAPTURE(k, d);
++        CHECK(step <= (d <= 500.0f ? 25.0f : (d <= 1500.0f ? 50.0f : 100.0f)) + 1e-3f);
++        last = d;
++    }
++}
++
++TEST_CASE("TerrainOcclusion: the governor idles on views the cull does not pay for", "[scene][occlusion]")
++{
++    CullGovernor g;
++    // A crowded view with a good share behind hills: it keeps running.
++    for (int i = 0; i < 100; ++i)
++    {
++        REQUIRE(g.ShouldRun());
++        g.Report(7000, 6000);
++    }
++    CHECK_FALSE(g.Idle());
++
++    // An open view: after a full window it idles, then probes once every
++    // window.
++    CullGovernor open;
++    for (int i = 0; i < CullGovernor::kWindow; ++i)
++    {
++        REQUIRE(open.ShouldRun());
++        open.Report(800, 5);
++    }
++    CHECK(open.Idle());
++    int runs = 0;
++    for (int i = 0; i < 3 * CullGovernor::kWindow; ++i)
++    {
++        if (open.ShouldRun())
++        {
++            ++runs;
++            open.Report(800, 5);
++        }
++    }
++    CHECK(runs == 3);
++    CHECK(open.Idle());
++    // A probe that finds a ridge in view starts it again.
++    while (!open.ShouldRun())
++    {
++    }
++    open.Report(5000, 2500);
++    CHECK_FALSE(open.Idle());
++    CHECK(open.ShouldRun());
++
++    // Too few objects to bother, however many are hidden.
++    CullGovernor sparse;
++    for (int i = 0; i < CullGovernor::kWindow; ++i)
++    {
++        sparse.ShouldRun();
++        sparse.Report(150, 150);
++    }
++    CHECK(sparse.Idle());
++}

@@ -1,0 +1,279 @@
+HEAD FIX RECIPE for the v2 comparison video (both builds)
+=========================================================
+Lead: agent 8, 2026-10-19 07:45, from the head board (tmp/video/heads/BOARD.txt,
+agents 1 to 8). Capture staging and capture settings only: no engine, config or
+game change. Apply it to EVERY clip on BOTH sides (van_* and ud_*, and pv_*).
+Verified on the shared repro and on two real clips (opening, town_patrol) on
+both builds; numbers and crop sheets at the end.
+
+
+1. THE CAUSE IN PLAIN WORDS
+---------------------------
+The men look left and right in quick snaps because the capture fast-forwards
+their AI.
+
+Every posed soldier and civilian runs the stock AI "look around" routine
+(Soldier::AIFire). It turns his head toward his group's formation direction
+for a few seconds, then back to straight ahead for a few seconds, and so on.
+In real time that is a slow, natural glance every 4 to 12 s.
+
+The clips do not run in real time. Between two shots the game's main loop keeps
+ticking, and every tick simulates the REAL wall time that has passed (up to
+0.3 s per tick). A shot (screenshot write, script statements, file polls)
+takes 0.3 to 1 s of wall time. So each 1/60 s video frame gave the AI 0.31 to
+0.47 s of game time on vanilla and 0.44 to 0.97 s on the overhaul: a 20x to
+60x fast-forward. Each look phase then lasted a few to 20 frames, and each
+turn finished inside one frame. The head snapped out and back, over and over.
+triSetSimTime only pins the clock that water and clouds read; it never limited
+this. The same fast-forward also ran fires, smoke, flares, shells and idle
+body sway 20x to 60x too fast, and at a different speed on each half (the
+overhaul spends more wall time per shot).
+
+Ruled out on the board:
+  - per-frame setPos/setDir pinning (agent 2)
+  - TAA, MSAA, LOD and mip sampling (agent 5)
+  - idle animations (agent 6)
+  - any overhaul-only engine change (agent 4: identical head code in both builds)
+  - an oscillating head-turn controller (MoveHead is a rate limiter and cannot
+    overshoot; agent 4)
+
+
+2. THE FIX: TWO PARTS, BOTH NEEDED
+-----------------------------------
+A. EXACT TIME STEP. Each video frame advances the world by exactly 1/60 s,
+   whatever the wall time. Freeze the world between shots (setAccTime 0), then
+   step it once inside ONE harness statement (a single call { } block, so that
+   no main-loop tick can slip in at full speed).
+B. GAZE HOLD. Every posed man doWatches a point 300 m straight ahead of his own
+   facing, at his own eye level. Give the order in the STAGING block (after the
+   props, BEFORE the settle frames). The look-around then has nothing to
+   alternate between, and both halves hold the same gaze. Without the hold the
+   look-around still runs at natural speed, but its random timers differ per
+   build, so the two halves would turn heads at different moments.
+A alone already removes the snaps (repro: 0 snaps, 0 flips on both builds), and
+B alone removes the flips even under the old fast-forward (agents 1 and 7). Use
+both: A makes everything else (fire, smoke, shells, sway) play at the same real
+speed on both halves, and B keeps the two halves' gazes identical.
+
+
+3. COPY-PASTE INTO gen_video_v2.py
+----------------------------------
+(a) A module constant, next to HELPERS (the same text for every side):
+
+GAZE_HOLD = ('call { { if (("Man" countType [_x select 0]) == 1) then { '
+             'capWg0 = [_x select 1, _x select 2] call capGround; '
+             'capWx1 = (_x select 1) + 300 * (sin (_x select 3)); '
+             'capWz1 = (_x select 2) + 300 * (cos (_x select 3)); '
+             'capWg1 = [capWx1, capWz1] call capGround; '
+             '(_x select 0) doWatch [capWx1, capWz1, 1.6 + capWg0 - capWg1] } } forEach capProps }')
+
+(b) stage_block(): right after
+        out.append("[] call capStageSave")
+    add
+        out.append(GAZE_HOLD)
+
+(c) frames_block(): in BOTH branches, right after
+        out += [f'"{mode}" call capMode', "[] call capPin"]
+    add the clock freeze for that side:
+        fork (ud, pv):   out.append("call { capStepRes = triSetFixedStep (1/60); setAccTime 0 }")
+        vanilla:         out.append("call { setAccTime 0 }")
+
+(d) frames_block(): in the frame loop, replace the line
+        out += ["triSimFrames 2", f'triScreenshot "{lab}"', f'["{lab}", {k}] call capFrameLog']
+    with
+        step = ("call { setAccTime 1; triSimFrames 1; setAccTime 0 }" if fork
+                else "call { triWaitFrames 60; setAccTime (1/18); triSimFrames 1; setAccTime 0 }")
+        out += [step, f'triScreenshot "{lab}"', f'["{lab}", {k}] call capFrameLog']
+
+Everything else in the loop stays as it is: events, capClockAt, capPathAt,
+capPropsAt, the refresh line, capPinProps, triPinCloudDrift, triScreenshot and
+capFrameLog. vanillaize() passes this unchanged (no fork-only verb on the
+vanilla side). No clock restore is needed after the loop, because each clip
+is its own game run.
+
+The resulting SQF in a generated test, as one line each:
+  after [] call capStageSave (both sides):
+    call { { if (("Man" countType [_x select 0]) == 1) then { capWg0 = [_x select 1, _x select 2] call capGround; capWx1 = (_x select 1) + 300 * (sin (_x select 3)); capWz1 = (_x select 2) + 300 * (cos (_x select 3)); capWg1 = [capWx1, capWz1] call capGround; (_x select 0) doWatch [capWx1, capWz1, 1.6 + capWg0 - capWg1] } } forEach capProps }
+  after "remastered" call capMode / [] call capPin (overhaul):
+    call { capStepRes = triSetFixedStep (1/60); setAccTime 0 }
+  after "vanilla" call capMode / [] call capPin (vanilla):
+    call { setAccTime 0 }
+  each frame, in place of  triSimFrames 2  (overhaul):
+    call { setAccTime 1; triSimFrames 1; setAccTime 0 }
+  each frame, in place of  triSimFrames 2  (vanilla):
+    call { triWaitFrames 60; setAccTime (1/18); triSimFrames 1; setAccTime 0 }
+
+Worked examples (generated tests, all shot and checked):
+  D:\Arma_CWA_worktrees\video-work\arma_CWR\tests\rendering\captures\video\look_probe_head8_opening_combo2.test.sqf
+  D:\Arma_CWA_worktrees\video-work\arma_CWR\tests\rendering\captures\video\look_probe_head8_town_patrol_combo2.test.sqf
+  D:\Arma_CWA_worktrees\vanilla-upstream\tests\rendering\captures\video\van_probe_head8_opening_combo2.test.sqf
+  D:\Arma_CWA_worktrees\vanilla-upstream\tests\rendering\captures\video\van_probe_head8_town_patrol_combo2.test.sqf
+  These are the real ud_/van_ opening and town_patrol tests cut to their first
+  120 frames, with exactly the lines above
+  (tmp/video/heads/repro/apply_fix.py made them).
+
+Why the vanilla step is exact: vanilla has no triSetFixedStep. triWaitFrames 60
+pumps 60 render-only frames (no simulation, about 0.3 s of wall time or more).
+The single tick that follows then sees more than 0.3 s, so the engine's own cap
+makes it exactly 0.3 s, and 0.3 s x 1/18 = 1/60 s. Measured by agent 3: 240 of
+240 shots advanced exactly 17 ms (1/60 s after the clock's millisecond
+rounding), heads/3/van-fixdt60 and heads/3/van-turn60. 30 pump frames is NOT
+enough (14 ms steps). Keep 60.
+
+
+4. WHICH UNITS
+--------------
+Every man in capProps. That covers all the posed "man" props of opening,
+valley_mist, pine_shafts, outpost, sinai_camp (LoBo units too: countType "Man"
+matches them, agent 7), ambush, checkpoint, town_patrol, rain_town and the six
+firefight men. GAZE_HOLD finds them itself and skips vehicles, fires and
+bunkers.
+Drivers (made by driven(), not in capProps) need no gaze hold: car crews never
+get a head-look target, because Car AI never calls AimObserver (agent 6). The
+exact step alone turns their driving idle into its natural 4 s loop. If a
+driver's head is ever seen turning, give him the same doWatch in the staging
+block.
+bay_reflections and cloud_shadows have no men. Apply the step anyway: it is
+part of the recipe for every clip, and it also stops the clouds racing.
+
+
+5. CAPTURE SETTINGS
+-------------------
+Overhaul: keep everything as it is (TAA on, MSAA 4, triPinObjectDetail 1,
+  triCaptureAtPresent, render scale 1.0).
+Vanilla: keep the frameRate=3 user seed and the gamma 1.2 collection.
+Wall time: on vanilla each shot takes about 0.8 s (agent 3), so a 540-frame
+  clip takes about 7 to 8 minutes and the 990-frame opening about 14 minutes.
+  On the overhaul the cost is about the same as before (2.3 to 3.9 minutes for
+  120 shots including the boot and the queue).
+
+
+6. WHAT NOT TO DO
+-----------------
+- Do not give doWatch (or setFormDir, or any other AI order) after
+  capMode/capPin, or per frame. The clips pin the clock BACK after the settle,
+  so no AI group "thinks" again during the clip and a late doWatch is silently
+  ignored. Agent 4 measured this on vanilla: the late-watched man still
+  snapped.
+- Do not split the step block into separate top-level statements
+  (setAccTime 1 / triSimFrames 1 / setAccTime 0 on three lines). The main loop
+  ticks between statements at full speed, so the step is no longer exact
+  (agent 4).
+- Do not use triSetFixedStep alone on the overhaul. Without setAccTime 0
+  between shots the main-loop ticks still run, now 1/60 s each, and how many
+  run per shot depends on harness latency.
+- No triWaitFrames on the overhaul: the render-only pump breaks the TAA history
+  and the whole image shimmers (0.36 px RMS jitter vs 0.03 px, agent 5). On
+  vanilla, never use fewer than 60 pump frames.
+- Do not try to fix it with per-frame setDir/setPos, switchMove or stance
+  changes. None of them stops the look-around (agents 2 and 6).
+- setAccTime 0 is safe in these clips: the cutscene camera is committed, not
+  "manual" (agent 3). If a clip ever drives a manual camera, use
+  setAccTime 0.000001 instead (agent 4: CameraHold divides by the time
+  acceleration in its manual branch). The overhaul block with 0.000001 was
+  also verified (agents 4 and 7).
+
+
+7. SIDE EFFECTS TO EXPECT (re-check these clips by eye)
+-------------------------------------------------------
+Everything now plays at real speed instead of 20x to 60x, and at the same
+speed on both halves (agent 2: heads/2/van-fxacc/r_sheet.png and
+shell_strip.png with the step, heads/2/van-fxbase/r_sheet.png and
+flare_strip.png without it):
+- Burning wrecks and fires keep their dense black smoke column for the whole
+  clip, so firefight, checkpoint and town_patrol look smokier and calmer. In
+  town_patrol the smoke that used to billow behind the man at the fire has not
+  risen yet in the first 120 frames (heads/8/cmp_ud_town_patrol.png).
+- firefight: the frame-0 flare now lights about 150 to 210 frames after it is
+  fired and then burns for many seconds. Fire it that much earlier (or in the
+  staging block) to keep its look. Each Shell120 now flies about 10 frames
+  before it bursts, and the burst and its smoke last about 1 s: fire each
+  shell event about 10 frames before the burst frame you want.
+- Clouds no longer race, and the sun no longer drifts during a clip.
+- opening (16.5 s) and any clip longer than its settle (about 7 to 14 s of
+  game time): in the last seconds the AI's own timers may resume (agent 6), so
+  expect at most a slow, natural change there, never a flick. Check the end
+  of opening by eye.
+- Vanilla fire light flickers frame to frame on the men and the ground
+  (town_patrol background change 7.6/255 per frame). That was there before the
+  fix too, unchanged; it is not head motion.
+Heads may still move a little and slowly (idle breathing on its real 7 to 10 s
+cycle). That is the natural look the owner asked for.
+
+Optional, looks only (NOT part of the head fix; agent 6, heads/6/van-still,
+heads/6/van-kneel):
+- setUnitPos "MIDDLE" does nothing on either build, so the "MIDDLE" poses in
+  valley_mist, pine_shafts, ambush and rain_town never kneel; those men stand
+  in the hunched rifle-up squat. To kneel: keep "UP" and give
+  switchMove "Crouch" after capPin. Prone: "DOWN" works.
+- capSpawn's setUnitPos "UP" puts every "SAFE" man in the same hunched squat.
+  For a relaxed sentry with the rifle on his back: setUnitPos "AUTO" in the
+  staging block plus switchMove "EffectStandStill" after capPin.
+
+
+8. QA FOR A CLIP (optional)
+---------------------------
+Exact step: add this line right after the step line
+  call { format ["view=%1;event=dt;tms=%2;pinned=%3;acc=%4", capView, (time - capSimT) * 1000, capSimRes, accTime] call capLog }
+and run
+  python D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\heads\3\tools\dtcheck.py <game_stdout.log> <capSimT>
+Every shot should read 17 ms.
+Heads:
+  python D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\heads\repro\metric.py <clip>.mkv --boxes "x,y,w,h;..." --track --count 120 --out DIR
+  python D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\heads\repro\summarize.py DIR\metric_*.json
+(see repro\README.txt). Then look at the crops_*.png it writes. The yaw proxy
+reads face-skin colour, so on backlit faces or next to orange fire light it
+is noisy: trust the crops there.
+
+
+9. BEFORE / AFTER
+-----------------
+Metric (tmp/video/heads/repro/metric.py):
+  snaps = frame pairs where the head changes by more than 5/255 on average
+          (more than 6.5 on a moving camera, where the tracked box re-snaps
+          by 1 px now and then)
+  flips = yaw proxy turns out and back within 20 frames (yaw proxy = the
+          face-skin position inside the head, 3-frame median, turn >= 0.8 px)
+
+Shared repro (fixed camera, 120 frames; men A SoldierEB 7 m, B SoldierEB AWARE
+9 m, C civilian 8 m, D SoldierEB 22 m), snaps A/B/C/D, flips A/B/C/D:
+  overhaul before (clips' loop)       snaps 13/9/11/14   flips 0/7/0/0   heads/8/m-ud-base
+  overhaul exact step only            snaps 0/0/0/0      flips 0/0/0/0   heads/8/m-ud-combo
+  overhaul FULL FIX                   snaps 0/0/0/0      flips 0/0/0/0   heads/8/m-ud-combo2
+  vanilla before (clips' loop)        snaps 5/4/11/6     flips 0/2/0/0   heads/8/m-van-base
+  vanilla exact step only (agent 3)   snaps 0/0/0/0      flips 0/0/0/0   heads/3/van-fixdt60
+  vanilla FULL FIX                    snaps 0/0/0/0      flips 0/0/0/0   heads/8/m-van-combo
+                                      (bit-steady: head shift max 0.065 px, torso 0.0)
+  On the overhaul the remaining head change (1-2/255) equals the TAA noise
+  floor of the static scene (agent 5).
+
+Real clips, first 120 frames, moving camera, men 1/2 (before = the shot v2
+mkvs; after = the same tests with the recipe, heads/8/after):
+  opening, overhaul    flips 7/12 -> 0/0     snaps 11/12 -> 0/0
+  opening, vanilla     flips 10/10 -> 3/7 *  snaps 4/4 -> 1/0 *
+  town_patrol, overhaul  flips 4/4 -> 11 */0   snaps 86/48 -> 0/38 *
+  town_patrol, vanilla   flips 0/1 -> 0/0      snaps 53/99 -> 52/99 *
+  * Read the crops for these, not the numbers. They are metric artefacts,
+    each checked by eye:
+    - vanilla opening: the backlit purple faces barely pass the skin test, so
+      the yaw proxy is noise. Its one snap (frame 96) is a box re-snap on the
+      moving camera; frames 93 to 100 are steady (heads/8/van_open_after_f93_100.png).
+    - town_patrol: the orange fire glow reads as "skin", and the fire light
+      flickers on the men every frame (background change 3.0/255 per frame on
+      the overhaul, 7.6/255 on vanilla). The crops show steady heads on both
+      builds.
+
+Crop sheets (rows = consecutive frames, before above after):
+  heads/8/cmp_ud_repro.png         overhaul repro, man B and the civilian (frames 1-20)
+  heads/8/cmp_van_repro.png        vanilla repro, the civilian and man B (frames 1-20)
+  heads/8/cmp_van_repro_stepA3.png vanilla repro, the civilian, exact step only
+  heads/8/cmp_ud_opening.png       overhaul opening, both men (frames 1-30)
+  heads/8/cmp_van_opening.png      vanilla opening, both men (frames 1-30)
+  heads/8/cmp_ud_town_patrol.png   overhaul town_patrol, both men (frames 1-30)
+  heads/8/cmp_van_town_patrol.png  vanilla town_patrol, both men (frames 1-30)
+  What they show:
+  - Before: heads snap between two gazes from one frame to the next. The
+    civilian looks at the camera, then sideways, then back. On opening, the
+    face appears and vanishes as the head snaps round.
+  - After: one steady gaze for every frame, and the same gaze on both builds
+    (the civilian looks straight at the camera on both halves).

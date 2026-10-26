@@ -1,0 +1,120 @@
+Rain and puddles, approach 2 of 6: put puddles where the ground's shape collects water
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-2 (fec1075 + fix4/base.patch = round 3, base tree d2f866e).
+Build build/look-puddle-2-rwdi, game dist/look-puddle-2-rwdi, junction RemasterUD-puddle-2.
+Nothing committed, no branch. fix.patch = 3 files (two shader sources and test_wet_weather.cpp),
++382 / -38. The look_shine* tests and my look_probe_p2_* probe tests are left out of the patch.
+The first rework (fix4/shine) is NOT in this patch; this builds on round 3 directly.
+
+LOOK FIRST
+- compare.png: rows = town_night_rain, seam_b, seam_d, seam_day, rain_day; columns = round 3 (shiny) |
+  first rework | this approach; then 2x crops of the tree base and the open street in town_night_rain.
+- final/<view>.png: the five views from the final build (shots_final, no shader override).
+
+APPROACH
+1. Only standing water mirrors. Outside puddles the ground gets no screen-space reflection at all (the
+   trace gives it weight 0 and skips the march there), its forward film is thin and rough (a dim broad
+   glow near a lamp or the fire, no streak), and it shows the rain as darker, deeper colour instead.
+2. Puddles are placed by the terrain's shape. The height map (12.5 m grid on Abel and Eden, read with
+   the smoothed interpolation the shaders already use, so no crease at its cells) gives:
+   - a basin term: the hollow against the 4 neighbours one cell away plus a quarter of the hollow
+     against 4 diagonal points 2.5 cells away (a wider basin). Hollows raise the puddle field by up to
+     kPuddleBasin, crests lower it by at most kPuddleCrest of that.
+   - the slope: the puddle threshold rises with it (gentle ground holds a little more, steeper less) and
+     puddles fade out between a 14 % and a 25 % slope (none on steep ground).
+3. Natural outlines below the map's cells: the micro relief is the old three value-noise octaves, but
+   over a warped position and with each octave turned off the world's axes, so no water line runs
+   straight along a grid line. Its finer octaves still fade below the pixel's footprint.
+4. Soft damp rim and murky water: the damp margin is wider (0.06 -> 0.1 of the field) and darker
+   (0.9 -> 0.8); under a puddle the ground's texture grain fades 60 % toward the land's own colour (the
+   ground field), so a puddle reads as water even where it mirrors something as dark as the ground (the
+   jeep problem below).
+The forward pass and the trace share wetPuddle as before, so their puddles agree pixel for pixel.
+
+WHAT I FOUND (probe evidence)
+- Probe override (work/mkprobe1.py, mkprobe2.py; shots_probe1, shots_probe2; test look_probe_p2_*)
+  wrote the height map's slope and hollow into the albedo debug view (debug=7). The values pass
+  through the post chain, so they are rough (two encodings of the same slope disagreed by about 20 %),
+  but the picture is clear:
+  - The town square in town_night_rain, seam_b, seam_d, seam_day sits on a gentle convex rise: slope
+    about 3 to 6 %, hollow -0.12 to -0.19 m (a crest) in the foreground; the ground behind the tree and
+    toward the left houses is flatter and level or slightly hollow.
+  - The Eden rain_day meadow is a slope of roughly 10 to 14 % with a hollow of about +0.2 m left of
+    the jeep.
+  - Round 3's puddle field barely used the shape: kPuddleHollow 0.1 per metre meant a 0.15 m crest
+    moved the field by 0.015 (noise range about 0.25 to 0.75), and the flatness gate kept puddles up
+    to about 20 % slope.
+- shots_probe2 (first version of this change, before tuning): with only shape, the crest square lost
+  almost all its puddles; the matte ground killed every non-puddle streak (no wall or lamp streaks left).
+- The rain_day "hard straight edge" by the jeep: the probe shows the puddle runs on under the jeep; the
+  trace's rays there go behind the jeep's hull and take its dark underside, which matched the grass, so
+  the visible puddle stopped at the mirror image of the jeep's front (a vertical line). With the shape
+  placement the meadow slope holds only small puddles in its left hollow, none under the jeep in this
+  view; the murky water also keeps a puddle visible where it mirrors something dark.
+
+THE CHANGE (fix.patch)
+engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+- Puddles piece: new puddleBasin(xz, out slope), puddleRelief(xz, footT); wetPuddle rewritten to
+  field = relief + kPuddleBasin * clamp(basin / kPuddleBasinDepth, -kPuddleCrest, 1),
+  th = class threshold + level shift + kPuddleSlope * (slope - kPuddleSlopeFree),
+  keep = (1 - smoothstep(kPuddleSlopeStart, kPuddleSlopeEnd, slope)) * level * distance fade.
+- wetSurface: ground soak at least kWetGroundSeal (not grass); murky water under puddles on the land;
+  ground film * kWetGroundFilm at roughness kWetGroundRough; puddles keep their own mirror lobe
+  (kWetPuddleRough) for the lamps, the fire and the sun.
+engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+- weight = wetWeather ? puddle : (B6's old weight); an early out with no march where weight is 0.
+  B6's own path (rain with wetWeather off) is unchanged.
+
+CONSTANTS old -> new
+- kPuddleEdge 0.035 -> 0.03; kPuddleDamp 0.06 -> 0.1
+- kPuddleHollow 0.1 and kPuddleCrest 0.3 (old meaning) -> replaced by kPuddleBasin 0.1,
+  kPuddleBasinDepth 0.15 m, kPuddleCrest 0.2 (share of the hollow rise a crest may take away)
+- flatness smoothstep(0.85, 0.98, cos) -> kPuddleSlope 0.5, kPuddleSlopeFree 0.08,
+  kPuddleSlopeStart 0.14, kPuddleSlopeEnd 0.25
+- kWetGroundDarken 0.35 -> 0.42; new kWetGroundSeal 0.6
+- kWetDampDark 0.9 -> 0.8; new kWetPuddleMurk 0.6
+- new kWetGroundFilm 0.25, kWetGroundRough 0.65 (ground film was the full film at kWetFilmRough 0.12 /
+  kWetGrassRough 0.4); kWetGrassRough removed (unused)
+- SSR wet ground weight with wetWeather: 0.65 wet (road) / 0.5 wet (1 - 0.85 grass) -> 0 outside puddles
+- Unchanged: kPuddleRoad 0.61, kPuddleGround 0.67, kPuddleGrass 0.74, veg * veg lean, kWetPuddleDark
+  0.55, kWetPuddleRough 0.05, the ground field and wetVegetation / wetGroundPorosity.
+Tuning path: shots_3 (slope free 0.03, crest 0.35, basin 0.08: the crest square nearly dry, a streak
+under the fire at film 0.35 rough 0.5), shots_4 (free 0.06, crest 0.2, basin 0.1, film 0.25 rough 0.65),
+final (free 0.08).
+
+TESTS
+build/look-puddle-2-rwdi/tests/unit/engine/Poseidon/PoseidonTests.exe "[wet],[ssr],[Shaders],[TerrainHorizon],[remaster]"
+run from D:: All tests passed (957261 assertions in 300 test cases). glslang compiles every program.
+clang-format clean on the three changed files. Round 3's seam tests are kept (one string updated for
+the new threshold line).
+New in test_wet_weather.cpp:
+- "Wet weather puddles: water stands where the ground's shape collects it": C++ mirrors of puddleHash,
+  puddleNoise, puddleRelief, puddleHeight and puddleBasin on synthetic 12.5 m grids. Water share over a
+  60 m patch: bowl 0.307, level 0.138, crest 0.101, 3 % slope 0.118, 8 % 0.092, 15 % 0.065, 25 % 0.
+  Checks: bowl > 1.5 level, crest < 0.85 level, falling with slope, none at 25 %.
+- "Wet weather puddles: their water lines run along no grid line": share of water lines within 5 degrees
+  of the world's axes 0.095 (even spread 0.111) against 0.127 for the same octaves on the axes; puddle
+  share 0.12 at the bare-ground threshold.
+- "Wet weather shaders: only standing water mirrors, the wet ground around it is matte": the trace's
+  weight and early out, the ground film and roughness, the puddle lobe, the soak floor, damp and murk.
+
+HONEST WEAK POINTS
+- The night views read darker and less obviously rainy than round 3. With the ground matte, the rain
+  shows as darker ground, a few puddles and the rain streaks in the air; puddles at night mirror a dark
+  sky unless a lit wall, the lamp or the fire lines up behind them, and the town square is a crest, so
+  this approach puts few puddles in its foreground. At thumbnail size nothing but puddles reflects, but
+  the night frames may look "damp" more than "pouring". A larger puddle share (lower kPuddleSlopeFree
+  bonus threshold or a smaller kPuddleCrest) is the knob if the owner wants more water.
+- rain_day: the meadow is a 10 to 14 % slope, so it now holds only small puddles in its left hollow;
+  the old puddle beside the jeep is gone (by design of this approach), not fixed in place.
+- No road ruts or wheel tracks: neither pass knows a road's direction (the trace only has the world
+  position and a road tag), so ruts would need a per-pixel direction or mask from the forward pass.
+- The height map is 12.5 m per texel: it says which areas collect water, not where each puddle sits;
+  the outline still comes from noise.
+- The trace's "behind a hull" fallback (dark underside) still draws a mirror-image edge where a puddle
+  runs under a vehicle; the murky water makes the puddle itself visible but the reflection edge stays.
+- Probe numbers pass through the post chain and are approximate; puddle share in the final frames and
+  the cost were not measured (4 more height reads and 2 more noise reads per wet ground pixel per pass,
+  minus the skipped march on non-puddle ground in the trace, which should be a net saving).
+- Until the terrain map is built (under a second after load) puddles fall back to the relief alone.
+AI sight and fog link: untouched (Target.cpp and VolumetricFog.cpp have no diff against the base tree).

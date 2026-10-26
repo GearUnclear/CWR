@@ -1,0 +1,10 @@
+{
+  "id": "b33",
+  "bank": "kBio2Hostile",
+  "variant": 2,
+  "text": "Officer {Name} lost a younger sibling in fighting. During a posting near {Place}, the bereaved officer repeatedly gave one young recruit safer kitchen duties while other recruits went on patrol.",
+  "word_count": 30,
+  "self_review": "A bereaved officer repeatedly favored one young recruit with safer duties after losing a younger sibling in fighting.",
+  "source_pattern": "Plausible invention; the supplied research does not establish bereavement producing this kind of favoritism.",
+  "fictional_changes": "The sibling's death, recruit, assignment choices, and connection between them are entirely fictional."
+}

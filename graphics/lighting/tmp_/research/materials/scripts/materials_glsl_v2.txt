@@ -1,0 +1,362 @@
+
+// ===========================================================================
+// RESEARCH (materials track): runtime material reconstruction and wetness.
+// Active only when litResearch.x > 0.5 (triSetLighting "materials=1"); with it
+// off every fragment takes the unchanged shadeRemastered path above.
+//
+// Inputs that need no new art:
+//   litMatClass  per draw: x surface class from the texture name, the object
+//                kind (vehicle / man / static) and the texture's alpha class
+//                (EngineGL33_Lighting.cpp ClassifySurface), w a per-texture hash
+//   tex0 / tex1  the existing textures: local contrast against a coarser mip
+//                drives roughness and specular occlusion, and the luminance is
+//                read as a height for a derived bump
+//   terrain      per-pixel class from the ground texture's colour
+//   litWeather   wetness, rain density, puddle amount, time
+//   cloudNoise   the equalised noise reused for puddle shapes and rain streaks
+//   terrainHeight the horizon map's height grid: puddles collect in low spots
+// ===========================================================================
+
+int g_surface = 0;          // 0 object (PSNormal), 1 terrain (PSDetail), 2 grass
+vec4 g_detailTex = vec4(0.5);
+float g_envF = 0.0;         // environment Fresnel of the last fragment (glass alpha)
+const float kPi = 3.14159265;
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+vec2 hash22(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+struct Surf {
+    float rough;    // perceptual roughness
+    float metal;    // metalness
+    float porosity; // how much water darkens it and how little it glosses
+    float sheen;    // grazing-angle fabric / grass sheen
+    float f0;       // dielectric reflectance at normal incidence
+    float puddles;  // 1 = holds puddles (terrain, roads)
+    float bump;     // derived bump height, metres per unit of luminance
+};
+
+// Must match SurfClass in EngineGL33_Lighting.cpp.
+Surf surfFor(int cls) {
+    if (cls == 1)  return Surf(0.40, 0.00, 0.05, 0.00, 0.050, 0.0, 0.004); // vehicle paint
+    if (cls == 2)  return Surf(0.34, 0.60, 0.00, 0.00, 0.040, 0.0, 0.003); // metal
+    if (cls == 3)  return Surf(0.04, 0.00, 0.00, 0.00, 0.045, 0.0, 0.000); // glass
+    if (cls == 4)  return Surf(0.70, 0.00, 0.10, 0.00, 0.035, 0.0, 0.005); // rubber, tracks, wheels
+    if (cls == 5)  return Surf(0.90, 0.00, 0.85, 1.00, 0.030, 0.0, 0.004); // fabric
+    if (cls == 6)  return Surf(0.50, 0.00, 0.30, 0.30, 0.028, 0.0, 0.001); // skin
+    if (cls == 7)  return Surf(0.78, 0.00, 0.35, 0.00, 0.040, 1.0, 0.012); // road, concrete
+    if (cls == 8)  return Surf(0.88, 0.00, 0.60, 0.00, 0.040, 0.0, 0.012); // masonry
+    if (cls == 9)  return Surf(0.80, 0.00, 0.70, 0.00, 0.040, 0.0, 0.008); // wood
+    if (cls == 10) return Surf(0.50, 0.00, 0.40, 0.20, 0.040, 0.0, 0.002); // leather
+    if (cls == 11) return Surf(0.42, 0.40, 0.00, 0.00, 0.040, 0.0, 0.001); // weapon
+    if (cls == 12) return Surf(0.05, 0.00, 0.00, 0.00, 0.050, 0.0, 0.000); // lamp lens
+    if (cls == 13) return Surf(0.75, 0.00, 0.40, 0.00, 0.040, 0.0, 0.010); // roof
+    return Surf(0.70, 0.00, 0.50, 0.00, 0.040, 0.0, 0.005);                // unknown
+}
+
+// Ground texture colour -> grass / sand and soil / rock and gravel blend.
+Surf terrainSurf(vec3 c) {
+    float mx = max(c.r, max(c.g, c.b));
+    float mn = min(c.r, min(c.g, c.b));
+    float sat = (mx - mn) / max(mx, 1e-3);
+    float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);
+    float warm = clamp((c.r - c.b) * 5.0, 0.0, 1.0) * (1.0 - green);
+    float rock = clamp(1.0 - sat * 5.0, 0.0, 1.0) * (1.0 - green);
+    Surf s;
+    s.rough = 0.92 - 0.2 * rock;
+    s.metal = 0.0;
+    s.porosity = mix(mix(0.7, 0.9, warm), 0.3, rock);
+    s.sheen = 0.45 * green;
+    s.f0 = 0.04;
+    s.puddles = 1.0;
+    s.bump = 0.05;
+    return s;
+}
+
+// Bump mapping without tangents (Mikkelsen 2010): dB = height change toward
+// the neighbouring pixel in x and y, in metres.
+vec3 bumpFromHeight(vec3 n, vec2 dB) {
+    vec3 sx = dFdx(vWorldRel);
+    vec3 sy = dFdy(vWorldRel);
+    vec3 r1 = cross(sy, n);
+    vec3 r2 = cross(n, sx);
+    float det = dot(sx, r1);
+    vec3 grad = sign(det) * (dB.x * r1 + dB.y * r2);
+    vec3 nb = abs(det) * n - grad;
+    float len2 = dot(nb, nb);
+    return len2 > 1e-20 ? nb * inversesqrt(len2) : n;
+}
+
+// What the sky looks like on screen toward r (linear, display referred: not
+// exposed, the same convention as the remastered water). Below the horizon
+// the reflection sees the ground.
+vec3 skyRadiance(vec3 r) {
+    vec3 fogL = toLinear(fogColor.rgb);
+    vec3 horizon = toLinear(fogColorToward(vec3(r.x, 0.0, r.z)));
+    vec3 zenith = fogL * mix(vec3(0.70, 0.80, 0.98), vec3(0.92), clamp(litCloud.x, 0.0, 1.0));
+    if (r.y >= 0.0) return mix(horizon, zenith, smoothstep(0.0, 0.75, r.y));
+    vec3 ground = fogL * 0.22 * g_groundTint;
+    return mix(horizon * 0.7, ground, smoothstep(0.0, 0.2, -r.y));
+}
+
+// Split-sum environment BRDF, analytic fit (Karis 2014).
+vec2 envBRDF(float rough, float nv) {
+    const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+    const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+    vec4 r = rough * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
+    return vec2(-1.04, 1.04) * a004 + r.zw;
+}
+
+float D_GGX(float nh, float a) {
+    float a2 = a * a;
+    float d = nh * nh * (a2 - 1.0) + 1.0;
+    return a2 / (kPi * d * d);
+}
+float V_SmithGGX(float nv, float nl, float a) {
+    float a2 = a * a;
+    float gv = nl * sqrt(nv * nv * (1.0 - a2) + a2);
+    float gl = nv * sqrt(nl * nl * (1.0 - a2) + a2);
+    return 0.5 / max(gv + gl, 1e-5);
+}
+
+// Rain reaches up-facing surfaces fully; vertical ones carry run-down streaks;
+// undersides and surfaces under a canopy stay drier.
+float wetAmount(vec3 n, vec3 posAbs, float skyVis) {
+    float w = litWeather.x;
+    if (w <= 0.0) return 0.0;
+    float facing = smoothstep(-0.5, 0.2, n.y);
+    float streak = textureLod(cloudNoise, vec2(dot(posAbs.xz, vec2(1.9, 2.3)), posAbs.y * 0.11), 0.0).r;
+    float vertical = 1.0 - smoothstep(0.55, 0.9, n.y);
+    float s = mix(1.0, mix(0.35, 1.0, smoothstep(0.25, 0.75, streak)), vertical);
+    return w * facing * s * mix(0.45, 1.0, skyVis);
+}
+
+// Porous surfaces darken and saturate (water fills the pores); every wet
+// surface gets a smooth water film.
+void applyWet(inout vec3 a, inout Surf s, float w) {
+    if (w <= 0.0) return;
+    float por = s.porosity;
+    float l = dot(a, kLuma);
+    a = max(mix(vec3(l), a, 1.0 + 0.35 * w * por), vec3(0.0)) * mix(1.0, 1.0 - 0.6 * por, w);
+    s.rough = mix(s.rough, mix(0.07, 0.32, por), w);
+    s.metal *= 1.0 - 0.3 * w;
+    s.sheen *= 1.0 - w;
+}
+
+// Low spots of the heightfield (metres below the mean of the four neighbours).
+float terrainConcavity(vec3 posAbs) {
+    if (litTerrain.x < 0.5) return 0.0;
+    vec2 uv = (posAbs.xz * litTerrain.y + 0.5) * litTerrain.z;
+    float t = litTerrain.z;
+    float h = textureLod(terrainHeight, uv, 0.0).r;
+    float hn = textureLod(terrainHeight, uv + vec2(t, 0.0), 0.0).r + textureLod(terrainHeight, uv - vec2(t, 0.0), 0.0).r +
+               textureLod(terrainHeight, uv + vec2(0.0, t), 0.0).r + textureLod(terrainHeight, uv - vec2(0.0, t), 0.0).r;
+    return clamp((hn * 0.25 - h) / 1.5, -1.0, 1.0);
+}
+
+// Puddles: flat ground near the terrain surface, three octaves of the cloud
+// noise, more in heightfield hollows. The water mask is a pure function of the
+// world position so the post pass (psPostSsr) can recompute it exactly for its
+// reflections; the damp margin also follows the detail texture's crevices.
+// x = water, y = the damp margin around it.
+vec2 puddleMask(vec3 posAbs, vec3 nGeo, float detailH, float w) {
+    float amount = litWeather.z * w;
+    if (amount <= 0.0) return vec2(0.0);
+    float flatness = smoothstep(0.94, 0.99, nGeo.y);
+    float nearGround = 1.0;
+    if (litTerrain.x > 0.5) {
+        vec2 huv = (posAbs.xz * litTerrain.y + 0.5) * litTerrain.z;
+        nearGround = 1.0 - smoothstep(0.4, 0.8, posAbs.y - textureLod(terrainHeight, huv, 0.0).r);
+    }
+    float n1 = textureLod(cloudNoise, posAbs.xz / 29.0, 0.0).r;
+    float n2 = textureLod(cloudNoise, posAbs.xz / 7.3 + vec2(0.37, 0.71), 0.0).r;
+    float n3 = textureLod(cloudNoise, posAbs.xz / 1.7 + vec2(0.11, 0.53), 0.0).r;
+    float field = n1 * 0.55 + n2 * 0.3 + n3 * 0.15 + terrainConcavity(posAbs) * 0.25;
+    float level = mix(1.0, 0.64, clamp(amount, 0.0, 1.0));
+    float water = smoothstep(level, level + 0.035, field) * flatness * nearGround;
+    float damp = smoothstep(level - 0.1, level, field - (detailH - 0.5) * 0.2) * flatness * nearGround;
+    return vec2(water, damp);
+}
+
+// Falling-rain ring ripples on standing water: gradient of a field of
+// expanding rings, one drop per cell at a random phase.
+vec2 rainRipples(vec2 p, float t) {
+    vec2 cell = floor(p);
+    vec2 f = fract(p);
+    vec2 g = vec2(0.0);
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            vec2 o = vec2(float(i), float(j));
+            vec2 h = hash22(cell + o);
+            float ph = hash12(cell + o + 17.0);
+            float tt = fract(t * 0.9 + ph);
+            vec2 d = f - (o + h);
+            float r = length(d);
+            float x = (r - tt * 0.6) * 22.0;
+            float ring = sin(x * 2.4) * exp(-x * x * 0.35) * (1.0 - tt) * (1.0 - tt);
+            g += d / max(r, 1e-3) * ring;
+        }
+    }
+    return g;
+}
+
+vec3 shadeMaterials(vec3 albedo, bool terrain, out float ambientShare) {
+    vec3 n = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
+    vec3 posAbs = vWorldRel + litCamPos.xyz;
+    float dist = length(vWorldRel);
+    vec3 v = -vWorldRel / max(dist, 1e-6);
+    vec3 l = litSunDir.xyz;
+    float sunOn = litSunDir.w;
+    bool foliage = dot(litMatForced.rgb, kLuma) > 1e-4;
+
+    // Foliage keeps the crown lighting of shadeRemastered; rain only darkens it
+    // a little (leaves shed water) and gives it a faint wet sheen.
+    if (foliage) {
+        float w = litWeather.x;
+        vec3 c = shadeRemastered(albedo * mix(1.0, 0.85, w), terrain, ambientShare);
+        return c;
+    }
+
+    int cls = int(litMatClass.x + 0.5);
+    Surf s = (g_surface == 1 || g_surface == 2) ? terrainSurf(albedo) : surfFor(cls);
+
+    // Texture statistics: brighter than the coarse neighbourhood (worn edges,
+    // raised detail) reads smoother, darker (cavities, grime) rougher and
+    // with less reflection.
+    vec4 t0 = texture(tex0, vUV0);
+    vec2 tsize = vec2(textureSize(tex0, 0));
+    vec2 ddx = dFdx(vUV0) * tsize;
+    vec2 ddy = dFdy(vUV0) * tsize;
+    float lod = 0.5 * log2(max(max(dot(ddx, ddx), dot(ddy, ddy)), 1e-8));
+    vec3 coarse = textureLod(tex0, vUV0, max(lod, 0.0) + 3.0).rgb;
+    float cav = dot(t0.rgb - coarse, kLuma);
+    s.rough = clamp(s.rough - cav * 0.7, 0.03, 1.0);
+    float specOcc = clamp(1.0 + cav * 3.0, 0.3, 1.0);
+
+    // Specular-power materials from the model keep their gloss.
+    if (litMatSpecular.w > 0.0) s.rough = min(s.rough, clamp(sqrt(2.0 / (litMatSpecular.w + 2.0)), 0.05, 1.0));
+
+    // Albedo-derived bump.
+    vec3 nb = n;
+    float bumpK = litResearch.y * s.bump;
+    if (bumpK > 0.0) {
+        vec2 dx = dFdx(vUV0);
+        vec2 dy = dFdy(vUV0);
+        float h0 = dot(t0.rgb, kLuma);
+        float hx = dot(texture(tex0, vUV0 + dx).rgb, kLuma);
+        float hy = dot(texture(tex0, vUV0 + dy).rgb, kLuma);
+        vec2 dB = vec2(hx - h0, hy - h0) * bumpK;
+        if (g_surface == 1) {
+            vec2 d1x = dFdx(vUV1);
+            vec2 d1y = dFdy(vUV1);
+            float d0 = g_detailTex.a;
+            dB += vec2(texture(tex1, vUV1 + d1x).a - d0, texture(tex1, vUV1 + d1y).a - d0) * (0.04 * litResearch.y);
+        }
+        // Fade the bump out where a pixel covers more than a few centimetres
+        // of a far surface (it would only shimmer).
+        dB *= 1.0 - smoothstep(60.0, 160.0, dist);
+        nb = bumpFromHeight(n, dB);
+    }
+
+    vec3 nCast = n;
+    float nlGeo = dot(n, l);
+    float nlCast = max(nlGeo, 0.0);
+    float skyVisibility;
+    float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0) *
+                          terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+    g_sunVisibility = sunVisibility;
+
+    // Wetness and puddles.
+    vec3 a = toLinear(albedo);
+    float wet = wetAmount(n, posAbs, skyVisibility);
+    vec2 pud = vec2(0.0);
+    if (s.puddles > 0.5) pud = puddleMask(posAbs, n, g_detailTex.a, wet);
+    applyWet(a, s, clamp(max(wet, pud.y), 0.0, 1.0));
+    if (pud.x > 0.0) {
+        vec3 np = vec3(0.0, 1.0, 0.0);
+        float rain = clamp(litWeather.y, 0.0, 1.0);
+        if (rain > 0.02 && dist < 40.0) {
+            vec2 g = rainRipples(posAbs.xz * 2.2, litWeather.w) * rain * (1.0 - smoothstep(15.0, 40.0, dist));
+            np = normalize(vec3(-g.x * 0.25, 1.0, -g.y * 0.25));
+        }
+        nb = normalize(mix(nb, np, pud.x));
+        s.rough = mix(s.rough, 0.025, pud.x);
+        a *= mix(1.0, 0.6, pud.x);
+        s.sheen *= 1.0 - pud.x;
+        specOcc = mix(specOcc, 1.0, pud.x);
+    }
+
+    float rough = clamp(s.rough, 0.03, 1.0);
+    float alphaR = max(rough * rough, 0.0012);
+    vec3 f0 = mix(vec3(s.f0), a, s.metal);
+    float nv = clamp(dot(nb, v), 1e-3, 1.0);
+    vec2 ab = envBRDF(rough, nv);
+    vec3 fenv = f0 * ab.x + ab.y;
+    // Rough surfaces: the sky fill already carries their (diffuse-looking)
+    // reflection; adding it again would read as a haze.
+    float envFade = 1.0 - smoothstep(0.55, 0.92, rough);
+    float fenvL = dot(fenv, kLuma) * envFade;
+    float kdiff = (1.0 - s.metal) * (1.0 - fenvL);
+
+    vec3 kd = litMatDiffuse.rgb;
+    vec3 ka = litMatAmbient.rgb;
+    float kdL = dot(kd, kLuma);
+    // The bumped normal must not light faces that turn away from the sun.
+    float nlB = max(dot(nb, l), 0.0) * smoothstep(-0.02, 0.08, nlGeo);
+    float sunTerm = nlB;
+    if (cls == 6 && g_surface == 0) sunTerm = clamp((dot(nb, l) + 0.25) / 1.25, 0.0, 1.0) * smoothstep(-0.3, 0.05, nlGeo);
+    vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunVisibility * sunOn);
+    vec3 ambient = ka * skyIrradiance(nb) * (skyVisibility * sunOn);
+    vec3 moon = kd * litMoon.rgb * (max(dot(nb, litMoonDir.xyz), 0.0) * sunOn);
+    vec3 local = toLinear(min(localLights(nb, kd, ka) * litGround.w, vec3(1.5)));
+    vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
+
+    vec3 diffuseRad = a * (direct + ambient + moon + local + emissive) * kdiff;
+
+    // Sun specular (GGX).
+    vec3 h = normalize(l + v);
+    float nh = max(dot(nb, h), 0.0);
+    float vh = max(dot(v, h), 0.0);
+    vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+    vec3 sunSpec = min(kPi * D_GGX(nh, alphaR) * V_SmithGGX(nv, max(nlB, 1e-4), alphaR) * nlB, 400.0) * F *
+                   litSun.rgb * (kdL * sunVisibility * sunOn * litHorizon.w * specOcc);
+
+    // Sheen: fabric and grass catch light at grazing view.
+    float rim = pow(1.0 - nv, 4.0);
+    vec3 sheenRad = s.sheen * 0.5 * rim * (ambient + direct * 0.6) * sqrt(max(a, vec3(0.0)));
+
+    // Sky reflection, blurred toward the normal with roughness.
+    vec3 r = reflect(-v, nb);
+    vec3 rd = normalize(mix(r, nb, rough * rough));
+    vec3 envL = mix(skyRadiance(rd), skyRadiance(normalize(nb + vec3(0.0, 0.6, 0.0))), smoothstep(0.25, 0.85, rough));
+    vec3 envSpec = envL * fenv * (envFade * specOcc * mix(0.3, 1.0, skyVisibility) * sunOn * litHorizon.w);
+
+    float exposure = litZenith.w;
+    vec3 radiance = (diffuseRad + sunSpec + sheenRad) * exposure + envSpec;
+    float total = dot(radiance, kLuma);
+    ambientShare = clamp(dot(a * ambient * kdiff * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+    g_envF = fenvL;
+
+    // Research debug views (r2): 1 class, 2 roughness, 3 wet / puddle, 4 normal.
+    float dbg = litResearch.w;
+    if (dbg > 0.5) {
+        if (dbg < 1.5) {
+            float c = (g_surface == 1 || g_surface == 2) ? 14.0 : float(cls);
+            return vec3(fract(c * 0.37), fract(c * 0.61 + 0.2), fract(c * 0.13 + 0.5));
+        }
+        if (dbg < 2.5) return vec3(rough);
+        if (dbg < 3.5) return vec3(wet, pud.x, pud.y);
+        return nb * 0.5 + 0.5;
+    }
+    vec3 display = toDisplay(tonemapNeutral(radiance));
+    float grey = dot(display, kLuma);
+    return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+}

@@ -1,0 +1,8 @@
+    // The sky's own clouds: lit clouds, the dome's turn, the sky-matched shadows.
+    UploadLitClouds(in.skyThrough, clouds);
+    // Terrain detail (B11): zero while the switch or its gate is off, which
+    // leaves the terrain main the stock one. w (land or sea) is the draw's,
+    // set by SetLitTerrainDraw.
+    const std::array<float, 3> detail =
+        rm::terrain_detail::FrameConstants(_lighting, _featureGates[rm::Feature::TerrainDetail].on);
+    SetSlot(LitConst::Detail, detail[0], detail[1], detail[2], s_lit[LitConst::Detail * 4 + 3]);

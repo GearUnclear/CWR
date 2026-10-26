@@ -1,0 +1,128 @@
+AGENT 5 REPORT: sun shafts and shadows in the "Moving out at dawn" flicker
+=========================================================================
+Swarm: tmp/video/mist (board BOARD.txt). Shot: trailer scene 2, valley_mist.
+Angle: the froxel sun shafts (sampling, noise, temporal filter), the sun
+shadow maps (cascade splits, texel snap, cascade selection while the camera
+pans), and the shadowed mist (the fog reading the shadow maps, the canopy map
+and the terrain horizon map).
+
+VERDICT: RULED OUT. Neither the sun's light in the air (shafts, sun lobe,
+shadowed mist) nor any shadow (cascades, PCSS, canopy map, horizon map) is a
+source of the band flicker. Switching them off makes the flicker WORSE, not
+better: the sun's shading of the mist only damps a sheet that comes from
+elsewhere (agent 3: the froxel injection's frame-global jitter). Do not "fix"
+the shot by turning shafts or shadows off.
+
+
+1. MEASUREMENTS (all on agent 6's shared cut of ud_valley_mist: frames
+   240..389, exact head-recipe step, look-director build, measured with
+   tmp/video/mist/tools/bandmetric.py --from 30, i.e. the real clip's
+   frames 270-390; "coh" = RMS over time of the band-MEAN d2, the whole
+   sheet moving together, tools/cohere5.py)
+
+   probe        mode / change                                  band   band_max spikes coh    valley bay  spit
+   base (ag 6)  remastered                                     0.506  2.02     5568   0.391  0.63   0.44 0.68
+   nosun        remastered,fogSun=0                            0.794  3.17     7156   0.691  1.06   0.74 1.11
+   noshade      remastered,terrainShadows=0,canopyShadows=0     0.575  2.14     6208   0.468  0.70   0.47 0.75
+                + triShadowSetDistance 0.01 (shadow range 5 m)
+   fogvis1      remastered + psFogInject override vis = 1.0     0.583  2.06     6267   0.477  0.76   0.49 0.72
+                (the fog's sun visibility off: cascades, canopy,
+                terrain and cloud read by the froxels; the world's
+                own shadows kept)
+   For scale: vanilla same window 0.102; agent 6 noair 0.035 (all air
+   off, every shadow still on); agent 3 frozen fog jitter (static camera,
+   every sun and shadow term still on) 0.024 vs its base 0.468.
+
+   - fogSun=0 removes every sun term in the air at once: the froxels' sun
+     share (lit = 1 everywhere, so no sun visibility read and no tSun), the
+     sun's forward lobe and the near-field beam march (beamGain = 35 x
+     min(fogSun, 4) = 0). The flicker rose 57 % (coherent sheet +77 %),
+     with the same shape: diff sheet tmp/base_vs_nosun_diffs.png (frames
+     326-328, x20; rows 1-2 base, rows 3-4 nosun) shows the same whole-land
+     bright/dark pump, larger. Mean level unchanged (band crop 115 vs 116).
+   - noshade removes every shadow the frame and the fog read in the band.
+     The switches acted there (tmp/noshade_minus_base_f327.png, x4: the
+     men's long shadows gone, the canopy- and ridge-shaded valley floor and
+     the shaded air over the valley brighter). Flicker +14 % (coherent +20 %).
+   - fogvis1 removes only the fog's read of the shadows (the froxels'
+     vis = 1; the surfaces keep every shadow, the sun share, tSun, the
+     lobe and the beams stay). Game log: "shader override loaded ...
+     fogvis1/psFogInject.glsl", no compile error. Flicker +15 % (coherent
+     +22 %): the same result as noshade, so the shadowed mist is not a
+     source either.
+   - Run-to-run spread of the same base cut is about 5 % (agent 6 base
+     0.506, agent 4's frozen-exposure run 0.485), so the rises are real.
+
+   Why switching them off makes it worse: the flicker is an opacity /
+   in-scatter swing of the whole medium (agents 3 and 4). Its visible size
+   follows the contrast between the air's light and the land behind it. The
+   sun term shades the mist (lit = 0.35 + 0.65 x vis x tSun in fogCell;
+   tSun = exp(-tauUp / sin 11.9 deg) is small inside the mist), so in the
+   base the mist's light sits closer to the dark land. Remove the shade
+   (noshade) or the whole sun term (nosun, lit = 1) and the mist gets
+   brighter against the land, so the same swing shows bigger. Agent 4 saw
+   the same with the dawn ring phase gain off (0.672).
+
+2. SHADOW MAPS (code, graphics-remaster 907906c; logged triShadowTuning)
+   - Tuning logged in the probe: enabled, 4 cascades, omni 2 (0.08 / 0.20),
+     dist 1.0, split 0.90, fade 40 m, res 2048. View distance 4000 gives
+     shadowsZ 500 m (ViewDistanceResolver: 5/18 of the view, capped at 500).
+   - Tiers (ShadowMath BuildShadowCascadesTiered): omni spheres of 30.7 m and
+     61.4 m (capped by kOmniTexelBase), frustum tiers 61.4-185.8 m and
+     185.8-500 m (PSSM lambda 0.9), far fade 460-500 m into the canopy map.
+     Fits are bounding spheres (rotation invariant) snapped to a world texel
+     grid in double, so a pan cannot crawl them. The far valley, the bay and
+     the spit (kilometres out) lie beyond the last split: fogShadowMap returns
+     1 there, and the surface takes the canopy map, which is world-locked and
+     rebuilt only when the sun or the camera moves far (Canopy.hpp), and the
+     static terrain horizon map. Only the slope just below the ridge can sit
+     in the last tier and its fade.
+   - Agent 6's noair (band 0.035 on the moving cut with all of this on) shows
+     the cascades, PCSS (4 taps turned per TAA frame), texel snap and tier
+     selection add nothing visible in the band on their own.
+   - The fog's own read (psFogInject fogShadowMap: one 2x2 hardware compare
+     of the cascade at the cell's jittered point, no PCF; canopySunVisibility;
+     fogTerrainSun) is a jittered binary-ish sample too, but it only reaches
+     the first 500 m (cascades) or the air under 48 m above the ground
+     (canopy), and switching it off (noshade 0.575, fogvis1 0.583) did not
+     lower the flicker.
+
+3. SHAFTS (near-field pass psFogNear, EngineGL33_PostFog.cpp)
+   - Half resolution, march of the first 180 m (kFogBeamReach), 20 steps at
+     the shipped quality, start offset by interleaved-gradient noise turned
+     every rendered frame (seq % 64), lifted by pow(lit, 0.4), depth-aware
+     upsampled in the apply, averaged only by TAA. It marches only wet air
+     (c.wet: ground haze, weather fog, mist), which is near zero 300+ m above
+     the valley floor along the band's rays. Its noise is per pixel, so it
+     averages out over a 60 px block and cannot make a coherent sheet.
+   - Bounded by agent 3's frozen-jitter run: with the beams on and only the
+     froxel injection's jitter frozen, the band falls to 0.024. I dropped my
+     own beams-only probe (nobeams) as redundant to free a game slot; its
+     override is left in shaders/nobeams/psFogNear.glsl.
+
+4. WHAT THIS MEANS FOR THE FIX
+   - The cause sits in the froxel injection's sampling (agent 3: one jitter
+     (jx, jy, jz) shared by every cell per frame, blended 0.12 into the
+     history, EngineGL33_PostFog.cpp about line 689 and psFogInject
+     fogSlice/main). Sun, shafts and shadows are innocent.
+   - Any fix should be judged with the sun and shadows ON (the shipped look):
+     they lower the flicker, so a test with them off overstates it.
+   - The nosun and noshade numbers give the lead a stress case: a fix that
+     holds the band near vanilla on nosun (the brightest mist against the
+     land) has margin on the real shot.
+
+5. FILES (all under D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/mist/5/)
+   tools/mk_probe5.py, tools/run_probe5.ps1, tools/run_batch5.ps1,
+     tools/run_ovr5.ps1  (copies of agent 6's probe tools with my names;
+     run_probe5 also deletes tri's per-shot .bmp files)
+   tools/cohere5.py    coherent-sheet measure next to bandmetric
+   runs/nosun/, runs/noshade/, runs/fogvis1/ (<tag>.mkv, band.json, band.txt,
+     udcap.log, keep/ PNGs of f0271, f0326-f0330)
+   shaders/fogvis1/psFogInject.glsl  (vis = 1.0), shaders/tsun1/ (tSun = 1,
+     not run), shaders/nobeams/psFogNear.glsl (not run)
+   tmp/base_vs_nosun_f327.png, tmp/base_vs_nosun_diffs.png,
+     tmp/noshade_minus_base_f327.png, tmp/diffs.png and
+     tmp/sheet_324_331.png (the shot clip, frames 324-331, band crop x20)
+   Probe tests (video-work tests/rendering/captures/video/):
+     look_probe_mist5_nosun, look_probe_mist5_noshade, look_probe_mist5_fogvis1
+   Junction: video-work/arma_CWR/packages/RemasterUD-mist-5.

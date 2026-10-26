@@ -1,0 +1,30 @@
+graphics: switchLight on a map object that is not a lamp no longer crashes
+
+Calling switchLight on map objects (for example over nearestObjects in a
+town) crashed the game with an access violation in
+StreetLamp::SimulateSwitch -> EntityHit::GetHit, or corrupted the target
+object so it crashed later (Man::WoundsAnimation -> GetHitCont).
+
+Root cause (stock, unchanged since the public source and in upstream
+3.05): StreetLamp declared no casting id of its own, and neither does its
+parent EntityHit, so StreetLamp::_classId named Entity::_classId and
+dyn_cast<StreetLamp> accepted every Entity: houses, soldiers, vehicles.
+ObjSwitchLight and ObjLightSwitched then static_cast the object, wrote
+_lightState into the wrong object and read Type()->_bulbHit through the
+wrong layout.
+
+Fix: USE_CASTING(base) in class StreetLamp and DEFINE_CASTING(StreetLamp),
+the mechanism about forty other classes use. dyn_cast<StreetLamp> now
+matches only real lamps; switchLight on anything else is a no-op and
+lightIsOn returns "ERROR". No layout or serialization change.
+
+Not fixed here, same defect: Airplane, Car, Motorcycle, Tank,
+HelicopterAuto, Explosion, ObjectDestructed and SeaGullAuto (worst case:
+setDammage 0 calls Airplane::RepairGear on any Transport).
+
+Tests: test_streetlamp_casting.cpp [scene][streetlamp][casting] (2 cases;
+3 of 4 assertions fail without the fix). In game: switchLight OFF/ON over
+666 objects switches the 6 real lamps and nothing else; before, the same
+script crashed (tri exit -1073741819).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

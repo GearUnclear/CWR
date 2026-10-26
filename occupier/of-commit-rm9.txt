@@ -1,0 +1,3 @@
+roadmap: occupier-forces second close-out pass (K probe, three test fixes), final gate green
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

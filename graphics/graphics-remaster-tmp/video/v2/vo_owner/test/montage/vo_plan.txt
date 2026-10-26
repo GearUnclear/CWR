@@ -1,0 +1,19 @@
+Montage 133.40 s, 16 lines, each levelled to -18.0 LUFS, peak limiter at -1.8 dBFS. Loudness before -18.08 LUFS, after -16.00 LUFS (target -16.0), true peak after -2.57 dBTP, loudnorm linear.
+
+id                       start     end   len  window          over
+v2_00_intro               0.35    7.81  7.46    0.00-  9.00 -0.59  gain +6.9 dB
+v2_01_opening             9.95   16.23  6.28    9.60- 15.80 +1.03  RUNS LONG  gain +8.1 dB
+v2_02_valley_mist        16.53   22.82  6.29   15.80- 24.10 -0.68  gain +6.8 dB
+v2_03_pine_shafts        24.45   31.08  6.63   24.10- 32.60 -0.92  gain +7.5 dB
+v2_04_bay_reflections    32.95   39.57  6.62   32.60- 41.10 -0.93  gain +7.1 dB
+v2_05_outpost            41.45   48.36  6.91   41.10- 50.10 -1.14  gain +6.5 dB
+v2_06_cloud_shadows      50.45   56.65  6.20   50.10- 57.60 -0.35  gain +6.8 dB
+v2_07_sinai_camp         57.95   64.20  6.25   57.60- 65.60 -0.80  gain +7.1 dB
+v2_08_ambush             65.95   73.46  7.51   65.60- 74.10 -0.04  gain +7.2 dB
+v2_09_convoy             74.45   78.95  4.50   74.10- 81.90 -2.35  gain +6.6 dB
+v2_10_checkpoint         82.25   86.45  4.20   81.90- 89.50 -2.45  gain +6.7 dB
+v2_11_town_patrol        89.85   96.31  6.46   89.50- 97.80 -0.89  gain +7.5 dB
+v2_12_rain_town          98.15  104.17  6.02   97.80-106.10 -1.33  gain +6.8 dB
+v2_13_supply_run        106.45  112.66  6.21  106.10-114.80 -1.54  gain +7.6 dB
+v2_14_firefight         115.15  120.91  5.76  114.80-123.80 -2.29  gain +7.1 dB
+v2_99_outro             124.15  129.86  5.71  123.80-133.40 -2.94  gain +7.3 dB

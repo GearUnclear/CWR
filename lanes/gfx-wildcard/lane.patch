@@ -1,0 +1,988 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd2..8818ddd0 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,23 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        // wildcard research: sky visibility maps
++        {"skyOcc", &remaster::LightingTuning::skyOcc},
++        {"skyBounce", &remaster::LightingTuning::skyBounce},
++        {"skyCone", &remaster::LightingTuning::skyCone},
++        {"skyBleed", &remaster::LightingTuning::skyBleed},
++        {"skyRadius", &remaster::LightingTuning::skyRadius},
++        {"skyDirs", &remaster::LightingTuning::skyDirs},
++        {"skyDebug", &remaster::LightingTuning::skyDebug},
++        {"skyCrown", &remaster::LightingTuning::skyCrown},
++        {"skyAlbedo", &remaster::LightingTuning::skyAlbedo},
++        {"skyLeaf", &remaster::LightingTuning::skyLeaf},
++        {"skyShell", &remaster::LightingTuning::skyShell},
++        {"skyFloor", &remaster::LightingTuning::skyFloor},
++        {"skyTint", &remaster::LightingTuning::skyTint},
++        {"skyGain", &remaster::LightingTuning::skyGain},
++        {"skyGround", &remaster::LightingTuning::skyGround},
++        {"skyFaces", &remaster::LightingTuning::skyFaces},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0c..ad79eb75 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,24 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // wildcard research (sky visibility maps): object sky occlusion from K
++    // directional occluder maps rendered from the shadow-pass caster set.
++    float skyOcc = 0.0f;     // 0 off, 1 full occlusion of the sky fill by nearby objects
++    float skyBounce = 0.0f;  // occluded sky replaced by the occluder's own light (one bounce), scale
++    float skyCone = 1.0f;    // cone width multiplier (softness of the per-direction occlusion)
++    float skyBleed = 0.15f;  // occlusion fractions below this are dropped (thin-surface self-occlusion)
++    float skyRadius = 48.0f; // half width of each directional map (m)
++    float skyDirs = 16.0f;   // number of sky directions (1..24)
++    float skyDebug = 0.0f;   // 1 = show sky visibility, 2 = show bounce
++    float skyCrown = 1.0f;   // 1 = keep the crown-core sky dimming, 0 = let the maps do it
++    float skyAlbedo = 0.0f;  // 1 = occluder colour from the caster textures (v2), 0 = grey
++    float skyLeaf = 0.45f;   // share of the sky that foliage occluders let through (transmission + scattering)
++    float skyShell = 1.0f;   // leaf receivers look up from the crown's shell (1) or from the leaf (0)
++    float skyFloor = 0.0f;   // lower bound of the sky visibility
++    float skyTint = 0.0f;    // 0..1: light through foliage takes the leaf colour (needs skyAlbedo)
++    float skyFaces = 1.0f;   // 1 = the maps store front faces (what the sky sees), 0 = back faces
++    float skyGround = 0.0f;  // 0..1: the ground-bounce half of the fill is occluded as well
++    float skyGain = 1.0f;    // sky fill gain while the maps are on (open ground brighter, occluded darker)
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+index e5d46b7c..5c59eb1f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+@@ -308,6 +308,8 @@ class Shape: public Poseidon::VertexTable
+ 	bool _faceNormalsValid;
+ 	bool _loadWarning; // some warning during load - report filename
+ 	mutable signed char _hasBlendSections = -1; // cached: any section's texture is alpha-blend (-1 = not computed)
++	bool _lazyVBTried = false; // shade research: a vertex buffer was tried for a shape loaded after OptimizeAll
++	bool _lazyVB = false;      // shade research: _buffer was created on first draw (used only by the remastered lighting)
+ 
+ 	// proxy objects
+ 	RefArray<ProxyObject> _proxy;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+index 0c861888..99d4cc2d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+@@ -26,6 +26,7 @@
+ #include <Poseidon/World/MapTypes.hpp>
+ #include <stdio.h>
+ #include <cmath>
++#include <cstdlib>
+ #include <memory>
+ #include <string>
+ #include <Poseidon/Foundation/Containers/Array.hpp>
+@@ -86,7 +87,35 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags
+ 
+     bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+ 
+-    if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
++    // shade research prototype: a shape first loaded after the mission's
++    // Shapes.OptimizeAll() (a script-spawned vehicle whose class the mission
++    // did not place) never got a vertex buffer, so it fell back to the CPU T&L
++    // path: classic per-vertex lighting baked into pre-lit vertices, which the
++    // remastered shaders pass through untouched (no per-pixel light, no shadow
++    // maps received). Give it a buffer on first draw, with the exclusions of
++    // LODShape::OptimizeRendering plus any special per-vertex lighting (sun,
++    // moon, halo, sky, cloud, stars, lines: SpecLighting / ClipLight hints).
++    // The lazily made buffer is used only while the remastered lighting is
++    // active, so Classic keeps its CPU path bit for bit.
++    const bool remasterActive = engine->LightingRemasterActive();
++    if (!_buffer && !_lazyVBTried && remasterActive && ENGINE_CONFIG.enableHWTL && engine->GetTL() && EnableHWTLState &&
++        tlAble && std::getenv("CWR_NO_LAZY_VB") == nullptr)
++    {
++        _lazyVBTried = true;
++        const bool normalLighting = ((GetOrHints() | GetAndHints()) & ClipLightMask) == ClipLightNormal;
++        const bool plain = ((Special() | spec) & (IsLight | OnSurface | SpecLighting)) == 0;
++        if (NVertex() > 0 && NFaces() > 0 && normalLighting && plain)
++        {
++            ConvertToVBuffer(VBDynamic);
++            _lazyVB = _buffer != nullptr;
++            static int s_lazyCount = 0;
++            if (_lazyVB && ++s_lazyCount <= 64)
++                LOG_INFO(Graphics, "shade: lazy vertex buffer for a shape loaded after OptimizeAll ({} vertices)", NVertex());
++        }
++    }
++    const bool useBuffer = _buffer && (!_lazyVB || remasterActive);
++
++    if (engine->GetTL() && EnableHWTLState && tlAble && useBuffer)
+     {
+         if (BeginFaces() < EndFaces() && NSections() > 0)
+         {
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 866e7bb9..25ff0d33 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -1720,7 +1720,10 @@ void Scene::DrawObjectsAndShadowsPass2()
+             // degrees below the horizon: keep its shadows live that long (a
+             // skipped pass would leave a frozen map in view).
+             const bool remasterSunUp = GEngine->LightingRemasterActive() && _mainLight->SunDirection().Y() < 0.026f;
+-            if (sunFactor > 0.01f || remasterSunUp)
++            // wildcard research: the sky visibility maps ride on the caster set of
++            // this pass, and the sky (moon, twilight) still lights the night.
++            const bool skyMaps = GEngine->LightingRemasterActive() && GEngine->GetLightingTuning().skyOcc > 0.0f;
++            if (sunFactor > 0.01f || remasterSunUp || skyMaps)
+             {
+                 RenderShadowMapDepthPass(nDraw);
+             }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5f..7b54afbc 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -20,6 +20,10 @@
+ #include <cstring>
+ 
+ using namespace Poseidon::gl33lighting;
++
++// wildcard research: sky visibility maps (EngineGL33_ShadowDepth.cpp).
++void WildcardSkyUpload(bool active, const Poseidon::remaster::LightingTuning& t);
++void WildcardSkyBind();
+ namespace rm = Poseidon::remaster;
+ 
+ namespace
+@@ -273,6 +277,7 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    WildcardSkyBind();
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -418,6 +423,7 @@ void EngineGL33::UploadLitFrameConstants()
+         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+     FlushLitConstants();
++    WildcardSkyUpload(_worldEffectsOn, _lighting);
+     BindLightingTextures();
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e0..e026b913 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -285,6 +285,24 @@ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit uno
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
+ 
++// wildcard research: sky visibility maps. K orthographic occluder maps around
++// the camera, one per direction spread evenly over the sky; each texel holds
++// the nearest caster toward the sky as coverage-weighted depth moments
++// (c, c*z, c*z^2) with z = -dot(pos, dir) (m), and its colour with coverage in
++// alpha, both mip-mapped. Binding 4, units 6 and 8.
++layout(std140) uniform SkyVis {
++    mat4 skyVP[24];
++    vec4 skyDir[24];   // xyz toward the sky, w solid-angle weight
++    vec4 skyOff[24];   // xyz: this pass's camera minus the camera the layer was drawn from
++    vec4 skyCtl;       // x count (0 = off), y occlusion strength, z texel (m), w bounce scale
++    vec4 skyCtl2;      // x bleed cut, y cone tan, z min variance (m^2), w map half width (m)
++    vec4 skyCtl3;      // x debug, y crown keep, z occluder colour from the maps, w mip levels
++    vec4 skyCtl4;      // x foliage transmission, y crown shell offset, z visibility floor, w leaf tint
++    vec4 skyCtl5;      // x sky gain while the maps are on
++};
++uniform sampler2DArray skyMoments;         // unit 6
++uniform sampler2DArray skyAlbedo;          // unit 8
++
+ in vec4 vColor;
+ in vec4 vSpecColor;
+ in vec2 vUV0;
+@@ -444,6 +462,159 @@ vec3 skyIrradiance(vec3 n) {
+     return t >= 0.0 ? mix(horizon, litZenith.rgb, t) : mix(horizon, ground, -t);
+ }
+ 
++// ---- wildcard research: sky visibility maps --------------------------------
++// Sun visibility at an arbitrary camera-relative point (one hardware 2x2 PCF
++// tap in the tightest cascade that holds it); used to light the occluders the
++// sky maps find, for the one-bounce estimate.
++float shadowVisAt(vec3 rel) {
++    if (shadowCtl.x < 0.5) return 1.0;
++    int nC = int(cascadeCtl.x);
++    for (int c = 0; c < 4; ++c) {
++        if (c >= nC) break;
++        vec4 cp = cascadeVP[c] * vec4(rel, 1.0);
++        vec3 sc = cp.xyz / cp.w;
++        vec2 suv = sc.xy * 0.5 + 0.5;
++        if (suv.x > 0.01 && suv.x < 0.99 && suv.y > 0.01 && suv.y < 0.99 && sc.z > 0.0 && sc.z < 1.0) {
++            float bias = cascadeCtl.z * float(c + 1) * float(c + 1) + 0.0004;
++            return texture(shadowMap, vec4(suv, float(c), sc.z - bias));
++        }
++    }
++    return 1.0;
++}
++
++// Share of the last skyOccluded footprint that is foliage between the
++// receiver and the sky (before transmission).
++float g_occLeaf = 0.0;
++
++// Occluded fraction of a filtered footprint for a receiver at depth z: the
++// footprint's coverage times the Chebyshev estimate of the share of its
++// occluders that lie between the receiver and the sky.
++float skyOccluded(vec4 m, float z) {
++    float c = m.x;
++    if (c < 1e-4) return 0.0;
++    float mu = m.y / c;
++    float var = max(m.z / c - mu * mu, skyCtl2.z);
++    float d = z - mu;
++    float p = d > 0.0 ? d * d / (var + d * d) : var / (var + d * d);
++    // Foliage occluders (m.w: alpha-cut casters) let part of the sky through:
++    // gaps finer than the map, light through the leaves and between them.
++    float leaf = clamp(m.w / c, 0.0, 1.0);
++    g_occLeaf = clamp(c, 0.0, 1.0) * p * leaf;
++    return clamp(c, 0.0, 1.0) * p * (1.0 - skyCtl4.x * leaf);
++}
++
++vec3 g_skyBounce = vec3(0.0);
++bool g_skyTerrain = false;
++float skyGainU() { return skyCtl5.x > 0.0 ? skyCtl5.x : 1.0; }
++float g_skyVis = 1.0;
++
++// Sky light reaching a surface with normal n through the nearby objects, per
++// colour channel (each direction weighted by the rig's sky light from there and
++// by the cosine), and in g_skyBounce the light the occluders send back: their
++// colour, lit by the sun where the shadow maps say they are sunlit and by the
++// sky. Returns 1 outside the maps.
++vec3 skyVisibilityMaps(vec3 n, vec3 lookOffset) {
++    g_skyBounce = vec3(0.0);
++    g_skyVis = 1.0;
++    int count = int(skyCtl.x + 0.5);
++    if (count <= 0 || skyCtl.y <= 0.0 || litFlags.y < 0.5) return vec3(1.0);
++    vec3 rel = vWorldRel + litShadowDelta.xyz;
++    float R = skyCtl2.w;
++    float fade = 1.0 - smoothstep(0.7 * R, 0.92 * R, max(length(rel.xz), abs(rel.y)));
++    if (fade <= 0.0) return vec3(1.0);
++    float texel = skyCtl.z;
++    float lodMax = max(skyCtl3.w - 1.0, 0.0);
++    // Off the surface along its normal, so a surface does not occlude itself.
++    // The terrain never casts into the maps, so it needs no offset: lifting
++    // it would lose the contact occlusion under a vehicle's floor.
++    vec3 p = rel + n * (g_skyTerrain ? 0.05 : 1.5 * texel + 0.05) + lookOffset;
++    float searchLod = clamp(log2(6.0 / texel), 0.0, lodMax); // 6 m blocker search
++    float nearLod = clamp(log2(1.0 / texel), 0.0, lodMax);   // 1 m blocker search
++    vec3 sumW = vec3(0.0);
++    vec3 sumV = vec3(0.0);
++    vec3 sumB = vec3(0.0);
++    float sumC = 0.0;
++    for (int i = 0; i < 24; ++i) {
++        if (i >= count) break;
++        vec3 d = skyDir[i].xyz;
++        float cw = dot(n, d);
++        if (cw <= 0.0) continue;
++        vec3 w = max(skyIrradiance(d), vec3(1e-4)) * (cw * skyDir[i].w);
++        float vis = 1.0;
++        vec3 visTint = vec3(0.0);
++        vec3 pl = p + skyOff[i].xyz;
++        vec4 lp = skyVP[i] * vec4(pl, 1.0);
++        vec2 uv = lp.xy * 0.5 + 0.5;
++        if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
++            float z = -dot(pl, d);
++            // Cone march down the mip chain. Every point of the ray p + d * t
++            // projects to the same texel of this orthographic map, so tracing
++            // the direction's cone is a walk over footprints that grow with t:
++            // step k reads the footprint of the cone's radius at t_k and counts
++            // the occluders whose mean depth puts them near t_k, front to back.
++            float trans = 1.0;   // share of the cone still open
++            float leafAcc = 0.0; // share blocked by foliage (before transmission)
++            float tHit = -1.0;   // distance of the first real occluder
++            float lodHit = 0.0;
++            float tk = 0.25;
++            for (int k = 0; k < 6; ++k) {
++                float rk = max(tk * skyCtl2.y, 0.5 * texel);
++                float lodk = clamp(log2(2.0 * rk / texel), 0.0, lodMax);
++                vec4 m = textureLod(skyMoments, vec3(uv, float(i)), lodk);
++                if (m.x > 1e-3) {
++                    float dk = z - m.y / m.x;
++                    float win = smoothstep(0.03, 0.08 + 0.25 * tk, dk) * (1.0 - smoothstep(2.0 * tk, 4.0 * tk, dk));
++                    float a = clamp(m.x, 0.0, 1.0) * win;
++                    float leaf = clamp(m.w / m.x, 0.0, 1.0);
++                    if (tHit < 0.0 && a > 0.1) { tHit = dk; lodHit = lodk; }
++                    leafAcc += trans * a * leaf;
++                    trans *= 1.0 - a * (1.0 - skyCtl4.x * leaf);
++                }
++                tk *= 3.0;
++            }
++            float occ = clamp(((1.0 - trans) - skyCtl2.x) / (1.0 - skyCtl2.x), 0.0, 1.0);
++            vis = 1.0 - occ;
++            if (tHit >= 0.0) {
++                float lod = lodHit;
++                // The light foliage lets through takes the leaves' colour
++                // (skyCtl3.z: from the caster textures): green shade in woods.
++                if (skyCtl4.w > 0.0 && skyCtl3.z > 0.5 && leafAcc > 0.0) {
++                    vec4 la = textureLod(skyAlbedo, vec3(uv, float(i)), lod);
++                    if (la.a > 1e-3) {
++                        vec3 lc = toLinear(la.rgb / la.a);
++                        vec3 tn = lc / max(dot(lc, kLuma), 1e-4);
++                        float tr = min(skyCtl4.x * leafAcc, vis);
++                        visTint = tr * (mix(vec3(1.0), clamp(tn, vec3(0.0), vec3(3.0)), skyCtl4.w) - vec3(1.0));
++                    }
++                }
++                if (skyCtl.w > 0.0 && occ > 0.0) {
++                    vec3 q = p + d * max(tHit - 0.3, 0.0);
++                    float sv = shadowVisAt(q);
++                    vec3 nOcc = normalize(vec3(-d.x, -0.3 * d.y, -d.z));
++                    float sunCos = clamp((dot(nOcc, litSunDir.xyz) + 0.3) / 1.3, 0.0, 1.0);
++                    vec3 eOcc = litSun.rgb * (sunCos * sv * litSunDir.w) + skyIrradiance(nOcc);
++                    vec3 alb = vec3(0.16, 0.16, 0.14);
++                    if (skyCtl3.z > 0.5) {
++                        vec4 a = textureLod(skyAlbedo, vec3(uv, float(i)), lod);
++                        if (a.a > 1e-3) alb = toLinear(a.rgb / a.a);
++                    }
++                    sumB += alb * eOcc * (cw * occ);
++                }
++            }
++        }
++        sumW += w;
++        sumV += w * max(vec3(vis) + visTint, vec3(0.0));
++        sumC += cw;
++    }
++    if (sumC <= 0.0) return vec3(1.0);
++    vec3 V = max(sumV / max(sumW, vec3(1e-6)), vec3(skyCtl4.z));
++    float s = clamp(skyCtl.y, 0.0, 1.0) * fade;
++    V = mix(vec3(1.0), V, s);
++    g_skyBounce = sumB / sumC * (skyCtl.w * fade);
++    g_skyVis = dot(V, kLuma);
++    return V;
++}
++
+ // Fog toward the sun takes the sky dome's own sun glow (TLVertexTable::
+ // DoSkyLighting adds SunSkyColor * cos^6 to SkyColor, times the sky texture),
+ // so distant ground fades into the colour of the sky behind it instead of a
+@@ -557,7 +728,44 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         sunShadow = mix(0.45, 1.0, sunVisibility);
+     }
+     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
+-    vec3 ambient = ka * skyIrradiance(nLight) * (skyVisibility * crownSky * sunOn);
++    // wildcard research: nearby objects occlude the sky fill (sky visibility
++    // maps) and send part of it back (one bounce). Only the sky half of the
++    // ambient is affected; the ground-bounce half stays the rig's.
++    // A leaf looks at the sky from the crown's shell: its own crown's
++    // self-shading is the crown term (crownSky); the maps add the other
++    // trees, walls and vehicles around it.
++    vec3 lookOffset = vec3(0.0);
++    // Some crowns come with a degenerate ellipsoid (a zero extent: inf / NaN in
++    // vCrown), which leaves nLight NaN. The shipped path then quietly falls back
++    // to ground-only ambient through NaN-dropping min / max; the maps need a
++    // real normal and a finite crown frame.
++    bool crownOk = !(any(isnan(vCrown)) || any(isinf(vCrown)));
++    // Leaf cards with zero mesh normals give a NaN n (normalize(0)) as well.
++    vec3 nSky = nLight;
++    if (any(isnan(nSky)) || any(isinf(nSky))) {
++        float gc = crownOk ? length(vCrown.xyz) : 0.0;
++        bool nOk = !(any(isnan(n)) || any(isinf(n)));
++        nSky = gc > 1e-6 ? vCrown.xyz / gc : (nOk ? n : vec3(0.0, 1.0, 0.0));
++    }
++    if (foliage && crownOk && vCrown.w > 0.0 && skyCtl4.y > 0.0) {
++        float g = length(vCrown.xyz);
++        float h = vCrown.w / max(g, 1e-3);
++        lookOffset = vCrown.xyz / max(g, 1e-6) * ((max(1.0 - vCrown.w, 0.0) * h + 0.3) * skyCtl4.y);
++    }
++    g_skyTerrain = terrain;
++    // skyCrown >= 2: foliage receivers keep only their crown term. Leaf cards
++    // are most of the overdraw in woods (the maps cost ~4x there otherwise),
++    // and the crowns keep their shading; trunks, ground, walls, vehicles and
++    // men get the maps.
++    vec3 skyV = (foliage && skyCtl3.y > 1.5) ? vec3(1.0) : skyVisibilityMaps(nSky, lookOffset);
++    float upShare = clamp(0.5 + 0.5 * nSky.y, 0.0, 1.0);
++    if (skyCtl.x > 0.5 && skyCtl3.y < 0.5) crownSky = 1.0;
++    float skyGain = skyCtl.x > 0.5 ? skyGainU() : 1.0;
++    // skyCtl5.y: the ground-bounce half follows the visibility too (the ground
++    // around an occluded point is itself in shade).
++    float occShare = mix(upShare, 1.0, clamp(skyCtl5.y, 0.0, 1.0));
++    vec3 ambient = ka * (skyIrradiance(nLight) * mix(vec3(1.0), skyV, occShare) * skyGain + g_skyBounce * upShare) *
++                   (skyVisibility * crownSky * sunOn);
+     vec3 moon = kd * litMoon.rgb * (max(dot(nLight, litMoonDir.xyz), 0.0) * sunOn);
+     // Classic adds local lights in display space before texturing; taking that
+     // sum to linear keeps the authored size and falloff of headlight and lamp
+@@ -572,6 +780,11 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+     if (foliage) ambientShare *= 0.5;
+ 
++    if (skyCtl3.x > 0.5 && skyCtl.x > 0.5) {
++        // wildcard debug: 1 = sky visibility through the objects, 2 = bounce.
++        if (skyCtl3.x < 1.5) return vec3(g_skyVis);
++        return toDisplay(g_skyBounce * 2.0);
++    }
+     if (litFlags.z > 0.5) {
+         // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
+         if (litFlags.z < 1.5) return vec3(sunVisibility);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc4..1223334c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1686,6 +1686,16 @@ void EngineGL33::InitPixelShaders()
+         GLuint litBlock = glGetUniformBlockIndex(prog, "LitConstants");
+         if (litBlock != GL_INVALID_INDEX)
+             glUniformBlockBinding(prog, litBlock, Poseidon::gl33lighting::kLitBinding);
++        // wildcard research: sky visibility maps (binding 4, units 6 and 8).
++        GLuint skyBlock = glGetUniformBlockIndex(prog, "SkyVis");
++        if (skyBlock != GL_INVALID_INDEX)
++            glUniformBlockBinding(prog, skyBlock, 4);
++        GLint locSkyMom = glGetUniformLocation(prog, "skyMoments");
++        if (locSkyMom >= 0)
++            glUniform1i(locSkyMom, 6);
++        GLint locSkyAlb = glGetUniformLocation(prog, "skyAlbedo");
++        if (locSkyAlb >= 0)
++            glUniform1i(locSkyAlb, 8);
+         const struct
+         {
+             const char* name;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+index d637af7d..0dd303bd 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+@@ -12,7 +12,13 @@
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <PoseidonGL33/TextureGL33.hpp>
+ 
++#include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
++
++#include <algorithm>
++#include <cmath>
+ #include <cstdint>
++#include <cstdlib>
++#include <cstring>
+ #include <vector>
+ 
+ // Self-contained offscreen depth render used to validate the GL shadow-depth
+@@ -259,6 +265,240 @@ bool EnsureAlphaMesh()
+     GL33Bind::Vao(0);
+     return true;
+ }
++
++// ---------------------------------------------------------------------------
++// wildcard research prototype: SKY VISIBILITY MAPS.
++// K orthographic occluder maps around the camera, one per direction spread
++// evenly (equal solid angle) over the sky hemisphere, rendered every frame
++// from the same caster set as the sun cascades (opaque shapes plus alpha-cut
++// foliage). A texel stores the nearest occluder toward the sky as
++// coverage-weighted depth moments (c, c*z, c*z^2) with z = -dot(pos, dir) in
++// metres, and the caster colour with coverage in alpha. Mip levels then hold the
++// occluded fraction, the depth distribution and the mean colour of any
++// footprint, so the lit shader cone-traces each direction with two filtered
++// fetches (blocker search, then a footprint sized to the cone at the blocker
++// distance): soft, contact-hardening sky occlusion plus a one-bounce estimate.
++// ---------------------------------------------------------------------------
++constexpr int kSkyMaxDirs = 24;
++constexpr unsigned int kSkyBinding = 4; // UBO binding (VS 0, PS 1, instances 2, lit 3)
++constexpr int kSkyMomentsUnit = 6;
++constexpr int kSkyAlbedoUnit = 8;
++GLuint s_skyFbo = 0;
++GLuint s_skyTex = 0;
++GLuint s_skyAlbTex = 0;
++GLuint s_skyDepthRb = 0;
++GLuint s_skyDummyMom = 0;
++GLuint s_skyDummyAlb = 0;
++int s_skyRes = 0;
++int s_skyLayers = 0;
++int s_skyLevels = 1;
++GLuint s_skyProg = 0;
++GLint s_skyLocVP = -1, s_skyLocDir = -1, s_skyLocAlb = -1;
++GLuint s_skyAlphaProg = 0;
++GLint s_skyAlphaLocVP = -1, s_skyAlphaLocDir = -1, s_skyAlphaLocTex = -1;
++GLuint s_skyUBO = 0;
++struct SkyBlock
++{
++    float vp[kSkyMaxDirs * 16];
++    float dir[kSkyMaxDirs * 4];
++    float off[kSkyMaxDirs * 4]; // this pass's camera minus the camera the layer was drawn from
++    float ctl[4];  // x count, y occlusion strength, z texel (m, level 0), w bounce scale
++    float ctl2[4]; // x bleed cut, y cone tan, z min variance (m^2), w map half width (m)
++    float ctl3[4]; // x debug, y crown keep, z albedo from maps, w mip levels
++    float ctl4[4]; // x leaf transmission, y crown shell offset scale, z visibility floor, w leaf tint
++    float ctl5[4]; // x sky gain while the maps are on
++};
++SkyBlock s_sky = {};
++bool s_skyRendered = false;
++bool s_skyEverRendered = false;
++
++const char* kSkyVS = R"(#version 330 core
++layout(location = 0) in vec3 pos;
++uniform mat4 uLightVP;
++uniform vec4 uDir;
++out float vZ;
++void main() { gl_Position = uLightVP * vec4(pos, 1.0); vZ = -dot(pos, uDir.xyz); }
++)";
++
++const char* kSkyFS = R"(#version 330 core
++in float vZ;
++uniform vec4 uAlbedo;
++layout(location = 0) out vec4 oMom;
++layout(location = 1) out vec4 oAlb;
++void main() {
++    float dx = dFdx(vZ), dy = dFdy(vZ);
++    oMom = vec4(1.0, vZ, vZ * vZ + 0.25 * (dx * dx + dy * dy), 0.0);
++    oAlb = vec4(uAlbedo.rgb, 1.0);
++}
++)";
++
++const char* kSkyAlphaVS = R"(#version 330 core
++layout(location = 0) in vec3 pos;
++layout(location = 1) in vec2 uv;
++uniform mat4 uLightVP;
++uniform vec4 uDir;
++out float vZ;
++out vec2 vUV;
++void main() { vUV = uv; gl_Position = uLightVP * vec4(pos, 1.0); vZ = -dot(pos, uDir.xyz); }
++)";
++
++const char* kSkyAlphaFS = R"(#version 330 core
++in float vZ;
++in vec2 vUV;
++uniform sampler2D uTex;
++layout(location = 0) out vec4 oMom;
++layout(location = 1) out vec4 oAlb;
++void main() {
++    float dx = dFdx(vZ), dy = dFdy(vZ);
++    vec4 t = texture(uTex, vUV);
++    if (t.a < 0.5) discard;
++    // w = 1: an alpha-cut (foliage) caster, which lets part of the sky through.
++    oMom = vec4(1.0, vZ, vZ * vZ + 0.25 * (dx * dx + dy * dy), 1.0);
++    oAlb = vec4(t.rgb, 1.0);
++}
++)";
++
++GLuint LinkSky(const char* vsSrc, const char* fsSrc)
++{
++    GLuint vs = CompileOne(GL_VERTEX_SHADER, vsSrc);
++    GLuint fs = CompileOne(GL_FRAGMENT_SHADER, fsSrc);
++    if (!vs || !fs)
++        return 0;
++    GLuint prog = glCreateProgram();
++    glAttachShader(prog, vs);
++    glAttachShader(prog, fs);
++    glLinkProgram(prog);
++    glDeleteShader(vs);
++    glDeleteShader(fs);
++    GLint ok = 0;
++    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
++    if (!ok)
++    {
++        char log[512];
++        glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
++        LOG_ERROR(Graphics, "wildcard sky maps: link failed: {}", log);
++        glDeleteProgram(prog);
++        return 0;
++    }
++    return prog;
++}
++
++bool EnsureSkyPrograms()
++{
++    if (s_skyProg && s_skyAlphaProg)
++        return true;
++    if (!s_skyProg)
++    {
++        s_skyProg = LinkSky(kSkyVS, kSkyFS);
++        if (s_skyProg)
++        {
++            s_skyLocVP = glGetUniformLocation(s_skyProg, "uLightVP");
++            s_skyLocDir = glGetUniformLocation(s_skyProg, "uDir");
++            s_skyLocAlb = glGetUniformLocation(s_skyProg, "uAlbedo");
++        }
++    }
++    if (!s_skyAlphaProg)
++    {
++        s_skyAlphaProg = LinkSky(kSkyAlphaVS, kSkyAlphaFS);
++        if (s_skyAlphaProg)
++        {
++            s_skyAlphaLocVP = glGetUniformLocation(s_skyAlphaProg, "uLightVP");
++            s_skyAlphaLocDir = glGetUniformLocation(s_skyAlphaProg, "uDir");
++            s_skyAlphaLocTex = glGetUniformLocation(s_skyAlphaProg, "uTex");
++        }
++    }
++    return s_skyProg && s_skyAlphaProg;
++}
++
++GLuint MakeSkyArray(GLenum internalFormat, GLenum type, int res, int layers, int levels)
++{
++    GLuint t = 0;
++    glGenTextures(1, &t);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, t);
++    for (int l = 0; l < levels; ++l)
++    {
++        const int s = (res >> l) > 0 ? (res >> l) : 1;
++        glTexImage3D(GL_TEXTURE_2D_ARRAY, l, internalFormat, s, s, layers, 0, GL_RGBA, type, nullptr);
++    }
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, levels - 1);
++    return t;
++}
++
++bool EnsureSkyTarget(int res, int layers)
++{
++    if (s_skyFbo && s_skyRes == res && s_skyLayers == layers)
++        return true;
++    if (s_skyTex)
++        glDeleteTextures(1, &s_skyTex);
++    if (s_skyAlbTex)
++        glDeleteTextures(1, &s_skyAlbTex);
++    if (s_skyDepthRb)
++        glDeleteRenderbuffers(1, &s_skyDepthRb);
++    if (s_skyFbo)
++        glDeleteFramebuffers(1, &s_skyFbo);
++    s_skyTex = s_skyAlbTex = s_skyDepthRb = s_skyFbo = 0;
++
++    int levels = 1;
++    while ((res >> levels) > 0)
++        levels++;
++    GL33Bind::ActiveUnit(kSkyMomentsUnit);
++    s_skyTex = MakeSkyArray(GL_RGBA32F, GL_FLOAT, res, layers, levels);
++    s_skyAlbTex = MakeSkyArray(GL_RGBA8, GL_UNSIGNED_BYTE, res, layers, levels);
++    glGenRenderbuffers(1, &s_skyDepthRb);
++    glBindRenderbuffer(GL_RENDERBUFFER, s_skyDepthRb);
++    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, res, res);
++    glGenFramebuffers(1, &s_skyFbo);
++    glBindFramebuffer(GL_FRAMEBUFFER, s_skyFbo);
++    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s_skyTex, 0, 0);
++    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, s_skyAlbTex, 0, 0);
++    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, s_skyDepthRb);
++    const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
++    glDrawBuffers(2, bufs);
++    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    GL33Bind::Invalidate();
++    if (status != GL_FRAMEBUFFER_COMPLETE)
++    {
++        LOG_ERROR(Graphics, "wildcard sky maps: FBO incomplete: {}", static_cast<unsigned>(status));
++        return false;
++    }
++    s_skyRes = res;
++    s_skyLayers = layers;
++    s_skyLevels = levels;
++    LOG_INFO(Graphics, "wildcard sky maps: {} directions at {}x{} ({} mips)", layers, res, res, levels);
++    return true;
++}
++
++void EnsureSkyUbo()
++{
++    if (s_skyUBO)
++        return;
++    glGenBuffers(1, &s_skyUBO);
++    glBindBuffer(GL_UNIFORM_BUFFER, s_skyUBO);
++    glBufferData(GL_UNIFORM_BUFFER, sizeof(SkyBlock), nullptr, GL_DYNAMIC_DRAW);
++    glBindBufferBase(GL_UNIFORM_BUFFER, kSkyBinding, s_skyUBO);
++}
++
++// Equal-solid-angle directions over the sky above `minSinEl`, golden-angle spiral.
++void SkyDirections(int k, float* out4)
++{
++    const float minSin = 0.104f; // 6 degrees: below it the terrain horizon map rules
++    for (int i = 0; i < k; ++i)
++    {
++        const float s = minSin + (1.0f - minSin) * (static_cast<float>(i) + 0.5f) / static_cast<float>(k);
++        const float c = std::sqrt(std::max(0.0f, 1.0f - s * s));
++        const float phi = 2.39996323f * static_cast<float>(i) + 0.4f;
++        out4[i * 4 + 0] = c * std::sin(phi);
++        out4[i * 4 + 1] = s;
++        out4[i * 4 + 2] = c * std::cos(phi);
++        out4[i * 4 + 3] = 1.0f; // equal solid angle
++    }
++}
+ } // namespace
+ 
+ namespace
+@@ -427,8 +667,200 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
+     GL33Bind::Vao(static_cast<GLuint>(prevVAO));
+     return true;
+ }
++
++// wildcard research: render the caster set (already uploaded into s_vbo /
++// s_alphaVbo by RenderCascadeArray this frame) into the sky-map layers flagged
++// in `update`, then rebuild those layers' mip chains with box-filter blits.
++// `vps` and `dirs` hold K camera-relative view-projections and direction vec4s.
++GLuint s_skyReadFbo = 0;
++GLuint s_skyDrawFbo = 0;
++bool RenderSkyMaps(const float* vps, const float* dirs, const bool* update, int k, int res, bool haveSolid,
++                   int solidVertCount, bool haveAlpha, const ResolvedAlphaBatch* batches, int batchCount,
++                   const float* solidAlbedo, bool albedo, bool frontFaces)
++{
++    if (k < 1 || res <= 0 || (!haveSolid && !haveAlpha))
++        return false;
++    GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0, prevRead = 0, prevDraw = 0;
++    GLint prevVP[4] = {0, 0, 0, 0};
++    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
++    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw);
++    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
++    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
++    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
++    glGetIntegerv(GL_VIEWPORT, prevVP);
++    GLboolean prevMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
++    glGetBooleanv(GL_COLOR_WRITEMASK, prevMask);
++    const GLboolean prevBlend = glIsEnabled(GL_BLEND);
++    const GLboolean prevScissor = glIsEnabled(GL_SCISSOR_TEST);
++    const GLboolean prevA2C = glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE);
++    auto restore = [&]()
++    {
++        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
++        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevRead));
++        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(prevDraw));
++        glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
++        glUseProgram(static_cast<GLuint>(prevProg));
++        glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArrayBuf));
++        GL33Bind::Vao(static_cast<GLuint>(prevVAO));
++        glColorMask(prevMask[0], prevMask[1], prevMask[2], prevMask[3]);
++        if (prevBlend)
++            glEnable(GL_BLEND);
++        if (prevScissor)
++            glEnable(GL_SCISSOR_TEST);
++        if (prevA2C)
++            glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
++    };
++    if (!EnsureSkyPrograms() || !EnsureSkyTarget(res, k))
++    {
++        restore();
++        return false;
++    }
++    if (!s_skyReadFbo)
++        glGenFramebuffers(1, &s_skyReadFbo);
++    if (!s_skyDrawFbo)
++        glGenFramebuffers(1, &s_skyDrawFbo);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    glDisable(GL_BLEND);
++    glDisable(GL_SCISSOR_TEST);
++    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
++    glBindFramebuffer(GL_FRAMEBUFFER, s_skyFbo);
++    const GLenum bufs2[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
++    glDrawBuffers(albedo ? 2 : 1, bufs2);
++    glViewport(0, 0, res, res);
++    Poseidon::render::depthstencil::Normal(/*hasStencil*/ false);
++    Poseidon::render::pipeline::EnableDepthClamp();
++    const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    for (int i = 0; i < k; ++i)
++    {
++        if (!update[i])
++            continue;
++        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s_skyTex, 0, i);
++        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, s_skyAlbTex, 0, i);
++        glClearBufferfv(GL_COLOR, 0, zero);
++        if (albedo)
++            glClearBufferfv(GL_COLOR, 1, zero);
++        glClearDepth(1.0);
++        Poseidon::render::clear::WithMask(GL_DEPTH_BUFFER_BIT);
++        if (haveSolid)
++        {
++            // Front faces (default): what the sky itself sees, so the inside
++            // of a building or hull never mixes into a footprint's depth and a
++            // receiver on a surface (offset along its normal) is in front of
++            // its own stored depth. Back faces (skyFaces=0) as the cascades.
++            if (frontFaces)
++                Poseidon::render::cull::Back();
++            else
++                Poseidon::render::cull::Front();
++            glUseProgram(s_skyProg);
++            glUniformMatrix4fv(s_skyLocVP, 1, GL_FALSE, vps + i * 16);
++            glUniform4fv(s_skyLocDir, 1, dirs + i * 4);
++            glUniform4fv(s_skyLocAlb, 1, solidAlbedo);
++            GL33Bind::Vao(s_vao);
++            glDrawArrays(GL_TRIANGLES, 0, solidVertCount);
++        }
++        if (haveAlpha)
++        {
++            Poseidon::render::cull::None();
++            glUseProgram(s_skyAlphaProg);
++            glUniformMatrix4fv(s_skyAlphaLocVP, 1, GL_FALSE, vps + i * 16);
++            glUniform4fv(s_skyAlphaLocDir, 1, dirs + i * 4);
++            glUniform1i(s_skyAlphaLocTex, 0);
++            GL33Bind::ActiveUnit(0);
++            GL33Bind::Vao(s_alphaVao);
++            for (int b = 0; b < batchCount; b++)
++            {
++                if (batches[b].vertexCount < 3)
++                    continue;
++                GL33Bind::Tex2D(0, batches[b].handle);
++                glDrawArrays(GL_TRIANGLES, batches[b].firstVertex, batches[b].vertexCount);
++            }
++        }
++    }
++    Poseidon::render::pipeline::DisableDepthClamp();
++    // Mip chains of the updated layers: occluded fraction, depth moments and
++    // colour of every footprint (2x2 box filter per level).
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, s_skyReadFbo);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_skyDrawFbo);
++    for (int i = 0; i < k; ++i)
++    {
++        if (!update[i])
++            continue;
++        for (int pass = 0; pass < (albedo ? 2 : 1); ++pass)
++        {
++            const GLuint tex = pass == 0 ? s_skyTex : s_skyAlbTex;
++            for (int l = 1; l < s_skyLevels; ++l)
++            {
++                const int src = std::max(res >> (l - 1), 1);
++                const int dst = std::max(res >> l, 1);
++                glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, l - 1, i);
++                glFramebufferTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, l, i);
++                glReadBuffer(GL_COLOR_ATTACHMENT0);
++                glDrawBuffer(GL_COLOR_ATTACHMENT0);
++                glBlitFramebuffer(0, 0, src, src, 0, 0, dst, dst, GL_COLOR_BUFFER_BIT, GL_LINEAR);
++            }
++        }
++    }
++    restore();
++    return true;
++}
+ } // namespace
+ 
++// wildcard research: the lit pass reads the sky maps through the SkyVis block
++// (binding 4) and units 6 (moments) and 8 (colour). Called every lit pass.
++void WildcardSkyUpload(bool active, const Poseidon::remaster::LightingTuning& t)
++{
++    EnsureSkyUbo();
++    const bool on = active && s_skyRendered && t.skyOcc > 0.0f && s_skyTex;
++    s_sky.ctl[0] = on ? static_cast<float>(s_skyLayers) : 0.0f;
++    s_sky.ctl[1] = t.skyOcc;
++    s_sky.ctl[3] = t.skyBounce;
++    s_sky.ctl2[0] = std::min(std::max(t.skyBleed, 0.0f), 0.95f);
++    s_sky.ctl2[1] = 0.36f * t.skyCone; // tan of the half angle of 1/16 of the sky
++    s_sky.ctl2[2] = 0.0025f;           // (5 cm)^2
++    s_sky.ctl3[0] = t.skyDebug;
++    s_sky.ctl3[1] = t.skyCrown;
++    s_sky.ctl3[2] = t.skyAlbedo;
++    s_sky.ctl3[3] = static_cast<float>(s_skyLevels);
++    s_sky.ctl4[0] = t.skyLeaf;
++    s_sky.ctl4[1] = t.skyShell;
++    s_sky.ctl4[2] = t.skyFloor;
++    s_sky.ctl4[3] = t.skyTint;
++    s_sky.ctl5[0] = t.skyGain;
++    s_sky.ctl5[1] = t.skyGround;
++    glBindBuffer(GL_UNIFORM_BUFFER, s_skyUBO);
++    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(SkyBlock), &s_sky);
++    glBindBufferBase(GL_UNIFORM_BUFFER, kSkyBinding, s_skyUBO);
++}
++
++void WildcardSkyBind()
++{
++    if (!s_skyDummyMom)
++    {
++        GL33Bind::ActiveUnit(kSkyMomentsUnit);
++        const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++        glGenTextures(1, &s_skyDummyMom);
++        glBindTexture(GL_TEXTURE_2D_ARRAY, s_skyDummyMom);
++        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA32F, 1, 1, 1, 0, GL_RGBA, GL_FLOAT, zero);
++        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
++        const unsigned char black[4] = {0, 0, 0, 0};
++        glGenTextures(1, &s_skyDummyAlb);
++        glBindTexture(GL_TEXTURE_2D_ARRAY, s_skyDummyAlb);
++        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, black);
++        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
++    }
++    const bool have = s_skyRendered && s_skyTex;
++    GL33Bind::ActiveUnit(kSkyMomentsUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, have ? s_skyTex : s_skyDummyMom);
++    GL33Bind::ActiveUnit(kSkyAlbedoUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, have ? s_skyAlbTex : s_skyDummyAlb);
++    GL33Bind::ActiveUnit(0);
++}
++
+ bool EngineGL33::ShadowDepthProbe(const float* lightVP16, const float* triXYZ, int vertCount, int res, float* outDepth)
+ {
+     if (!outDepth)
+@@ -467,6 +899,84 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
+                           RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ,
+                                              casters.solidVertexCount, casters.alphaXYZUV, casters.alphaVertexCount,
+                                              resolved.data(), static_cast<int>(resolved.size()), _lightingActive);
++    // wildcard research: sky visibility maps from the same casters, inside the
++    // shadow timer so the "shadow" GPU column carries their cost.
++    if (rendered && _lightingActive && _lighting.skyOcc > 0.0f && GScene && GScene->GetCamera())
++    {
++        namespace sm = Poseidon::shadow;
++        const int k = std::max(1, std::min(kSkyMaxDirs, static_cast<int>(_lighting.skyDirs + 0.5f)));
++        static int s_envRes = -1;
++        static int s_envStride = -1;
++        if (s_envRes < 0)
++        {
++            const char* e = std::getenv("CWR_SKYVIS_RES");
++            s_envRes = e ? std::max(64, std::min(2048, std::atoi(e))) : 512;
++            const char* st = std::getenv("CWR_SKYVIS_STRIDE");
++            s_envStride = st ? std::max(1, std::min(16, std::atoi(st))) : 4;
++            LOG_INFO(Graphics, "wildcard sky maps: res {} stride {}", s_envRes, s_envStride);
++        }
++        const int skyRes = s_envRes;
++        const float radius = std::max(4.0f, _lighting.skyRadius);
++        const bool albedo = _lighting.skyAlbedo > 0.0f;
++        const bool frontFaces = _lighting.skyFaces > 0.5f;
++        static bool s_lastFront = true;
++        // Round robin: 1/stride of the directions per frame; a change of the
++        // direction set, map size, radius or the colour layer redoes them all.
++        static int s_phase = 0;
++        static int s_lastK = -1, s_lastRes = -1;
++        static float s_lastRadius = -1.0f;
++        static bool s_lastAlbedo = false;
++        static float s_layerCam[kSkyMaxDirs * 3] = {};
++        const bool all = !s_skyEverRendered || k != s_lastK || skyRes != s_lastRes || radius != s_lastRadius ||
++                         albedo != s_lastAlbedo || frontFaces != s_lastFront;
++        s_lastFront = frontFaces;
++        s_lastK = k;
++        s_lastRes = skyRes;
++        s_lastRadius = radius;
++        s_lastAlbedo = albedo;
++        SkyDirections(k, s_sky.dir);
++        const Vector3 cam = GScene->GetCamera()->Position();
++        const sm::Vec3 camW{cam.X(), cam.Y(), cam.Z()};
++        bool update[kSkyMaxDirs] = {};
++        for (int i = 0; i < k; ++i)
++        {
++            update[i] = all || (i % s_envStride) == s_phase;
++            if (!update[i])
++                continue;
++            const sm::Vec3 travel{-s_sky.dir[i * 4 + 0], -s_sky.dir[i * 4 + 1], -s_sky.dir[i * 4 + 2]};
++            const sm::Vec3 up = std::fabs(travel.y) > 0.95f ? sm::Vec3{0.0f, 0.0f, 1.0f} : sm::Vec3{0.0f, 1.0f, 0.0f};
++            const sm::Mat4 vp = sm::OmniSphereLightVP(camW, radius, travel, up, skyRes, 60.0f);
++            memcpy(s_sky.vp + i * 16, vp.m.data(), sizeof(float) * 16);
++            s_layerCam[i * 3 + 0] = cam.X();
++            s_layerCam[i * 3 + 1] = cam.Y();
++            s_layerCam[i * 3 + 2] = cam.Z();
++        }
++        s_phase = (s_phase + 1) % s_envStride;
++        // Each layer is anchored where the camera was when it was drawn; the lit
++        // shader works relative to this pass's camera.
++        for (int i = 0; i < k; ++i)
++        {
++            s_sky.off[i * 4 + 0] = cam.X() - s_layerCam[i * 3 + 0];
++            s_sky.off[i * 4 + 1] = cam.Y() - s_layerCam[i * 3 + 1];
++            s_sky.off[i * 4 + 2] = cam.Z() - s_layerCam[i * 3 + 2];
++            s_sky.off[i * 4 + 3] = 0.0f;
++        }
++        s_sky.ctl[2] = (2.0f * radius) / static_cast<float>(skyRes);
++        s_sky.ctl2[3] = radius;
++        const float grey[4] = {0.45f, 0.45f, 0.42f, 1.0f}; // display-space stand-in for untextured casters
++        const bool haveSolid = casters.solidXYZ && casters.solidVertexCount >= 3;
++        const bool haveAlpha = casters.alphaXYZUV && casters.alphaVertexCount >= 3 && !resolved.empty();
++        const bool ok = RenderSkyMaps(s_sky.vp, s_sky.dir, update, k, skyRes, haveSolid, casters.solidVertexCount,
++                                      haveAlpha, resolved.data(), static_cast<int>(resolved.size()), grey, albedo,
++                                      frontFaces);
++        s_skyRendered = ok;
++        s_skyEverRendered = s_skyEverRendered || ok;
++    }
++    else
++    {
++        s_skyRendered = false;
++        s_skyEverRendered = false;
++    }
+     GpuMark(Poseidon::gpu::Mark::ShadowEnd);
+     if (numCascades >= 1)
+     {
+@@ -513,6 +1023,8 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
+         // map: hand them its matrices and a zero camera delta now.
+         UpdateShadowMapLitState();
+         UploadLitShadowDelta();
++        WildcardSkyUpload(_worldEffectsOn, _lighting);
++        WildcardSkyBind();
+     }
+ }
+ 

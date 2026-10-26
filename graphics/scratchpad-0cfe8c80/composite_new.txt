@@ -1,0 +1,150 @@
+static const char s_psPostCompositeHead[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D colorTex;
+uniform sampler2D aoTex;
+uniform sampler2D bloomTex;
+uniform sampler2D shaftTex;
+uniform sampler2D depthTex;
+uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+uniform vec4 shaftColor; // rgb sun tint
+uniform vec4 projInfo;   // as psPostAo
+uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
+uniform vec4 worldRect;  // as psPostAo
+uniform vec4 debugView;  // x: 1 = show occlusion
+// The photoreal camera (photoLight; Graphics/Remaster/PhotoCamera.hpp):
+uniform vec4 camParams;  // x 1 = on, y exposure (linear), z curve (0 hue-keeping, 1 per channel, 2 ACES, 3 Neutral), w vignette
+uniform vec4 camCurve;   // the filmic curve y = x^a / (x^(a d) b + c): a, d, b, c
+uniform vec4 camColor0;  // rows of the white balance times the scene saturation
+uniform vec4 camColor1;
+uniform vec4 camColor2;
+uniform vec4 camGlow;    // x bloom gain, y shaft gain, z aspect (w / h)
+out vec4 fragColor;
+)";
+
+static const char s_psPostCompositeMain[] = R"(
+// The shaft pass gathers the sky toward the sun, which is the light the air
+// scatters toward the eye along an endless ray. A surface ends the ray: only
+// the air in front of it scatters, 1 - exp(-distance / length) of the sky's
+// share (LightRig ShaftInscatter). Without this a backlit vehicle 10 m away
+// took the full sky glow and turned into a grey cut-out.
+float shaftInscatter() {
+    float d = textureLod(depthTex, vUV, 0.0).r;
+    if (d >= 0.999999) return 1.0; // sky, as the shaft pass sees it
+    float z = projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
+    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+    float dist = z * length(vec3(ndc * projInfo.zw, 1.0));
+    return 1.0 - exp(-max(dist, 0.0) * depthMap.z);
+}
+
+// The camera's tone curve (camParams.z): the filmic curve on the peak channel
+// with the channel ratios kept until the output nears white (hue-keeping), the
+// same curve per channel, the ACES fit (Narkowicz) or Khronos PBR Neutral.
+float camCurveY(float x) {
+    x = max(x, 0.0);
+    return clamp(pow(x, camCurve.x) / (pow(x, camCurve.x * camCurve.y) * camCurve.z + camCurve.w), 0.0, 1.0);
+}
+vec3 camTone(vec3 x) {
+    int kind = int(camParams.z + 0.5);
+    if (kind == 1) return vec3(camCurveY(x.r), camCurveY(x.g), camCurveY(x.b));
+    if (kind == 2) {
+        x *= 0.6;
+        return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+    }
+    if (kind == 3) {
+        float lo = min(x.r, min(x.g, x.b));
+        x -= lo < 0.08 ? lo - 6.25 * lo * lo : 0.04;
+        float pk = max(x.r, max(x.g, x.b));
+        if (pk < 0.76) return x;
+        float newPeak = 1.0 - 0.0576 / (pk - 0.52);
+        x *= newPeak / pk;
+        return mix(x, vec3(newPeak), 1.0 - 1.0 / (0.15 * (pk - newPeak) + 1.0));
+    }
+    float peak = max(x.r, max(x.g, x.b));
+    if (peak <= 0.0) return vec3(0.0);
+    float y = camCurveY(peak);
+    vec3 ratio = x / peak;
+    return mix(ratio, vec3(1.0), pow(y, 4.0)) * y; // kCrosstalk
+}
+
+void main() {
+    vec4 c = texture(colorTex, vUV);
+    float ao = texture(aoTex, vUV).r;
+    if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
+    // Take the occluded part of the sky light out of the radiance. c.a is one
+    // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+    float share = 1.0 - clamp(c.a, 0.0, 1.0);
+    float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+    vec3 shaft = texture(shaftTex, vUV).rgb;
+    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
+    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+    if (camParams.x > 0.5) {
+        // The camera: the stored scene light, its occlusion, the glare of
+        // light past the shoulder and the shafts, at the metered exposure;
+        // white balance and saturation; the curve; the lens's vignette; a
+        // dither everywhere (the curve moves every value).
+        vec3 x = camDecode(c.rgb) * keep * camParams.y;
+        x += texture(bloomTex, vUV).rgb * camGlow.x;
+        x += shaft * shaftColor.rgb * (camGlow.y * camParams.y);
+        x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
+        vec3 y = camTone(x);
+        vec2 q = (vUV - 0.5) * vec2(camGlow.z, 1.0);
+        y *= 1.0 - camParams.w * smoothstep(0.1, 1.1, dot(q, q) * 2.2);
+        vec3 col = pow(clamp(y, 0.0, 1.0), vec3(1.0 / 2.2));
+        col += (n + m - 1.0) / 255.0;
+        fragColor = vec4(col, 1.0);
+        return;
+    }
+    vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
+    // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+    // glow's own energy rolled off. Identity where there is no glow, never
+    // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft * shaftColor.rgb * compParams.z;
+    lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
+    vec3 col = pow(lin, vec3(1.0 / 2.2));
+    // Dither only what the composite changed: elsewhere the frame passes
+    // through exactly (the 2.2 round trip is exact on 8-bit values).
+    if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5)) {
+        col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
+    }
+    fragColor = vec4(col, 1.0);
+}
+)";
+
+// The photoreal camera's meter (photoLight; PhotoCamera.hpp Meter): the
+// resolved frame into kMeterWidth x kMeterHeight texels, each the weighted
+// mean log2 luminance of the scene light (camDecode) over a 4 x 4 grid of
+// bilinear taps across its block, its weight (centre weighted, sky taps
+// counting meterParams.x) and the block's brightest and darkest tap. Read
+// back by the CPU, which builds the histogram.
+static const char s_psPostMeterHead[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D colorTex;
+uniform sampler2D depthTex;
+uniform vec4 meterParams; // x the sky's weight, y 1 = the frame holds scene light, zw meter size
+out vec4 fragColor;
+)";
+
+static const char s_psPostMeterMain[] = R"(
+void main() {
+    vec2 cell = floor(gl_FragCoord.xy);
+    float sum = 0.0, wsum = 0.0, hi = -32.0, lo = 32.0;
+    for (int j = 0; j < 4; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            vec2 uv = (cell + (vec2(float(i), float(j)) + 0.5) / 4.0) / meterParams.zw;
+            vec3 t = textureLod(colorTex, uv, 0.0).rgb;
+            vec3 lin = meterParams.y > 0.5 ? camDecode(t) : pow(t, vec3(2.2));
+            float l = log2(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-5));
+            float w = textureLod(depthTex, uv, 0.0).r >= 0.999999 ? meterParams.x : 1.0;
+            sum += l * w;
+            wsum += w;
+            hi = max(hi, l);
+            lo = min(lo, l);
+        }
+    }
+    vec2 q = (gl_FragCoord.xy / meterParams.zw - 0.5) * vec2(1.0, 0.8);
+    float centre = 0.3 + 0.7 * exp(-dot(q, q) / (2.0 * 0.3 * 0.3));
+    fragColor = vec4(sum / max(wsum, 1e-6), wsum / 16.0 * centre, hi, lo);
+}
+)";
+

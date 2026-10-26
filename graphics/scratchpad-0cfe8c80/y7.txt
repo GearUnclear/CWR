@@ -1,0 +1,9 @@
+    CHECK(s.find(" ssr=1:on@0.5:screen-share-not-measured ") != std::string::npos);
+    // Combat light holds off with no combat light near, its shadows by day.
+    CHECK(s.find(" combatLights=1:off:") != std::string::npos);
+    CHECK(s.find(" combatShadows=1:off") != std::string::npos);
+    CHECK(s.find("landed=29/29") != std::string::npos);
+    CHECK(std::string_view(GetFeatureInfo(Feature::Ssr).gpuSection) == "ssr");
+    // The volumetric fog runs on any drawn world: it replaces the distance fog,
+    // and B8's air pass, which it supersedes, holds off.
+    CHECK(s.find(" volFog=1:on:world-drawn-(replaces-the-distance-fog)") != std::string::npos);

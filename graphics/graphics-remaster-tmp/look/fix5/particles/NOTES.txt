@@ -1,0 +1,137 @@
+Round 5 particles fixer: smoke and dust lit by the photoreal rig; firefight shells timing-pinned
+==============================================================================================
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-horizon (fec1075 + fix5/base.patch, base tree 12117cf9).
+Build build/look-fix-horizon-rwdi, game dist/look-fix-horizon-rwdi, junction RemasterUD-r5-particles.
+Nothing committed, no branch. Patch: fix.patch (8 files, +167 / -1; only my delta over the base tree,
+the look_r5* capture tests excluded). It applies with git apply --cached --check on a fresh index of
+the base tree. Target.cpp, VolumetricFog.cpp and SimulateFogSight are not in the diff: the AI fog
+link is untouched.
+
+Look first
+----------
+- a_dust_foot_firefight_3.png: vanilla | landed | before (director/final) | after, 2x crop of the
+  middle burst's foot. The salmon foot is gone.
+- b_burst_firefight_2.png: the same for firefight_2, now timing-pinned: the young fireball.
+- c_plume_town_night.png: the town_night 1080 plume (vanilla | landed | before | after).
+- probe_ab_classic_vs_rig.png: the cause, same build and pinned staging, classic sun on particles
+  (left, probe switch) against the rig's light (right): firefight_2, firefight_3, town_night, ffh by
+  night, ffh_day.
+- d_day_fire_smoke_ffh_day.png and e_night_fire_smoke_ffh.png: camp fire smoke by day (15:00) and
+  by night, classic-lit probe | rig at key share 0.375 (probe) | final (0.6). No reference shots exist
+  for these two views (my own staging of views.py "ffh", by night and at 15:00).
+
+(a) The salmon dust foot: cause, proven
+---------------------------------------
+Object::DrawDecal lit every lit particle (smoke, dust, a fireball's soot) with the classic sun:
+sun->FullResult(0.5) (0.375 of LightSun::Diffuse plus the full Ambient) times the accommodation
+(the 1.6 user brightness). Under the photoreal camera pre-lit draws are stored as they are (the lit
+shaders' finishFragment: camFold, no pre-exposure), so the puff showed the classic light's colour
+and level, while the world around it is lit by the rig and white-balanced to the rig's illuminant.
+Probe (probe_log.txt; a temporary log in UploadLitFrameConstants, removed): at firefight_3 (19:35,
+sun -1.73 deg) the classic sun diffuse is still (0.639, 0.240, 0.184), a red-pink sunset sun (the
+classic model keeps it until 5 deg under), the classic ambient (0.028, 0.030, 0.040). The puff light
+was (0.375 x dif + amb) x 1.6 = (0.43, 0.19, 0.17) in display terms: salmon. The rig's sun is 0 (set),
+its sky fill a dim neutral blue-grey (zenith 0.0015), and the camera balances that blue air to white,
+which made the classic pink even pinker. A/B in one build (a probe switch forcing the classic path,
+same pinned staging, probe_ab_classic_vs_rig.png): classic-lit middle foot (89.5, 54.0, 50.5) over a
+sky of (82.6, 55.1, 49.5), pinker and lighter than the sky; rig-lit (57.4, 41.8, 41.3). By day the
+same path gave white smoke a blue cast: the classic ambient (0.55, 0.60, 0.80) x 1.6 clipped to
+(1, 1, 1) and the camera's warm white balance turned it blue-white (ffh_day, left panel of d_).
+
+The change (the root: lit particles take the rig, not the classic sun):
+- LightRig.hpp/.cpp: ParticleRigIrradiance(rig, key, shade): kParticleKeyShare of the key light (the
+  sun, dimmed by the cloud field's mean; or the moon under the moon key) and of the moon's
+  shadowless rest, plus the sky's irradiance averaged over every direction (the lit shaders'
+  skyIrradiance: a quarter zenith, a quarter each horizon side, a quarter ground bounce) times the
+  world's shade share (SurfaceShadeFactor, 1 without the surfaces lane).
+- EngineGL33 (UploadLitFrameConstants): while the camera writes scene light, the frame's particle
+  light = that irradiance x the rig's exposure (with the burst flash gain, as litZenith.w) x the
+  frame's pre-exposure (litCamera.w), i.e. exactly how the world's passes store their light.
+  New Engine virtual ParticleRigLight() hands it out for the frame it was set (false otherwise:
+  classic programs and other backends keep the classic sun).
+- Object::DrawDecal: under the camera the classic sun term is dropped; the puff takes the rig light
+  at the material's brightness (the accommodation, as the lit shaders' materials) in linear light,
+  added to the classic local lights (lamps, unchanged) and the physical night lights (unchanged);
+  the combat lights (fires, bursts) and the fireball glow follow as before.
+Result: firefight_3 middle foot (vanilla | landed | before | after) (69.8, 38.4, 35.9) |
+(82.0, 55.6, 48.2) | (104.8, 61.1, 57.9) | (61.4, 40.7, 37.7) over the sky (82.1, 54.8, 49.2): the foot
+now has the dusk sky's hue (R/G 1.51 against the sky's 1.50, before 1.72) and is darker than the
+sky, a dust silhouette against the twilight. Left foot (82.1, 52.8, 44.2) -> (76.2, 52.0, 44.7).
+No pink smudge at thumbnail.
+
+Other particle kinds checked:
+- firefight smoke (bursts and the burning Ural): dark grey-brown, unchanged in character; the
+  wreck's column is lit by its own fire at its base as before.
+- town_night plume (c_plume_town_night.png): bright plume pixels by height, before -> after:
+  1 to 2 m (195,150,103) -> (190,148,102), mid (158,134,106) -> (160,137,110), high
+  (103,96,87) -> (101,96,89). The base light at night (the moon key) was not what made it peach:
+  the classic night ambient and the rig's moon are both small. The peach on the lower and middle
+  plume is the fire's own combat light (CombatLitParticle, CombatSmokeTransmittance) and the lamp.
+  Not changed (open item 1).
+- ffh by night: no visible change; the upper plume a touch cooler under the moon.
+- Fire smoke by day (ffh_day, 15:00): classic-lit it was a blue-white clipped column; at the classic
+  decal's 0.375 key share the rig-lit smoke went dimmer than the sand under it (smoke region mean
+  (149.5,150.5,148.1) over ground (139.6,136.6,124.5); nearly invisible at thumbnail). A thick puff
+  scatters the sun from its whole lit half, about a sunlit wall's share, so the key share is 0.6:
+  a light warm-grey translucent column, readable at thumbnail (d_ right panel).
+
+(b) Firefight timing pinned
+---------------------------
+abel_lighting.test.sqf view 7 (both halves, classic and remastered): from just before the first
+shell to just after the third shot the world steps a fixed 1/30 s a frame (new capFixStep =
+triSetFixedStep, logged as event=fixstep), real time again after firefight_3. The camera, the
+staging, the 200 real-time frames of the fight before the shells and the shell drops are unchanged,
+so the vanilla reference staging's camera is the same. firefight_2 = 6 frames (0.20 s) after the
+second shell's drop: a young yellow-white fireball (the shell falls 40 m in about 5 frames);
+firefight_3 = 26 frames (0.87 s) after it: the smoke column with its dust foot. Verified in three
+runs (shots_1, shots_2a/2b, shots_3): the same burst age every time. The merger's overhaul-only cuts
+(look_r3_960_abel, look_r4_960_abel in look-director) are cut from abel_lighting view 7; I did not
+edit look-director. The next cut (look_r5_*) picks the pin up if it is cut from the patched
+abel_lighting.test.sqf (my tools/gen_r5_particles.py shows how: the head plus view 7's remastered
+half).
+
+Constants (name: old -> new)
+----------------------------
+- New LightRig.hpp kParticleKeyShare 0.6 (tried 0.375, the classic decal material's share, first:
+  white smoke by day went duller than the sand).
+- The particle's sky term: the mean over directions of the rig's zenith, both horizon sides and
+  ground (weights 0.25 each), times SurfaceShadeFactor (0.65 at a clear high sun, 1 at dusk).
+- Firefight shells: real-time step -> fixed 1/30 s (0.0333333) from the first shell to the third shot.
+
+Tests
+-----
+- New case "PhotoCamera: look fix particles: smoke and dust take the rig's light, not the classic
+  sun" ([Remaster][PhotoCamera], 17 assertions): the formula; a noon puff between 0.6 and 1 of a
+  sunlit up-facing white surface and dominated by the sun; the shade share scales the sky only; the
+  cloud field dims the sun's part; at -1.7 deg the key is 0, the puff is under a tenth of noon and
+  not warmer than its sky (R/B under 1.1); the moon key's share and rest.
+- Gate tags [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],
+  [AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],
+  [TerrainHorizon],[StateOwnership],[atmosphere],[Remaster],[NightLights]: 330 cases, 957,974
+  assertions, all pass on the final build (unit_gate.txt).
+- clang-format clean on every line I changed (the one EngineGL33.hpp delta at PostAir is
+  pre-existing).
+
+Open items
+----------
+1. town_night plume: the lower and middle plume is still peach (R/B 1.46 at 2 to 3 m). That is the
+   camp fire's combat light crossing its own smoke (CombatSmokeTransmittance reach by albedo) and
+   the lamp, not the scene light. A shorter reach for a fire's light up its column would cool it;
+   I left it (a combat-light tuning, beyond this root fix).
+2. By day a camp fire's light still glows orange on its smoke base at full night power (round 4:
+   "their flames and smoke keep it all"); against the dimmer rig-lit day smoke the orange base is
+   relatively stronger (d_ right panel). CombatTwilight could apply to the smoke share too.
+3. firefight_2's young fireball (round 4's black-body glow at 6 frames) is a fairly even lemon
+   yellow; now that the shot always catches it, the critics will see it every round.
+4. Particles are not shadowed: a puff in a building's or a hill's shadow still takes the key share.
+   The CPU has the terrain horizon map; a per-puff sun visibility would be the next step.
+5. ffh_day's burning Ural did not smoke in the pinned runs (it did in shots_1); staging only.
+
+Files
+-----
+fix.patch, NOTES.txt, a_*.png, b_*.png, c_*.png, d_*.png, e_*.png, probe_ab_classic_vs_rig.png,
+probe_log.txt, unit_gate.txt; shots_1 (first build, key share 0.375, probe log on, unpinned views),
+shots_2a / shots_2b (probe build, classic-forced / rig, pinned views and firefight), shots_3 (final
+build, key share 0.6, probe code removed); b1 to b4 .log (builds); tools/ (gen_r5_particles.py writes
+look_r5_<tag>_ff and look_r5_<tag>_views; sbs.py the side-by-sides).

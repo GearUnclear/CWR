@@ -1,0 +1,9 @@
+== runs/moving-t4wb/moving-t4wb.mkv  frames 105  band 0.072  sky 0.049
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       153.7 [-1.12, -0.06]  0.067  0.197  0.026 -0.297  [6, 15]   0.026  [6, 15]  0.005  0.869 -0.454    nan    nan -0.190             -
+   valley    128.4 [-0.93, 0.01]  0.067  0.120  0.037 -0.431 [2, -16]   0.037 [2, -16]  0.004  0.703 -0.501    nan    nan -0.295             -
+   farhill   117.0 [-0.89, 0.07]  0.051  0.108  0.023 -0.326 [-16, -8]   0.023 [-16, -8]  0.002  0.726 -0.413    nan    nan -0.187             -
+   haze      181.0 [-0.75, 0.02]  0.040  0.105  0.036 -0.223 [-15, -1]   0.036 [-15, -1]  0.004  0.605 -0.295    nan    nan -0.129             -
+   slope      54.3 [-0.94, 0.08]  0.060  0.140  0.024 -0.391 [-13, 14]   0.024 [-13, 14]  0.003  1.002 -0.403    nan    nan -0.246             -
+runs/moving-t4wb: n=12 air median 3.62 min 2.20 ms; air/(ao+ssr+taa) median 1.94; frame median 139.6
+   final: frame 138.65 ms | world 128.65 (shadow 0.35) [ground 11.13 pass1 108.61 rest 8.91] | sky 0.19 (skytable 0.06) | canopy 1.95 | post 8.11: resolve 0.21 lindepth 0.01 tags 0.06 ao 1.39 ssr 0.28 air 3.63 bloom 0.66 composite 0.90 taa 0.20 sharpen 0.77 | min frame=30.98 world=28.40 ground=2.68 pass1=23.46 rest=1.94

@@ -1,0 +1,18 @@
+Write one short character story for a game dossier. Use only your assigned story beat.
+
+Use everyday words. Tell us what the person did and what happened next. We should understand it the first time we read it. If a sentence needs explaining, rewrite it. Do not finish with a saying about life, history, power or justice. Stop when the story is told.
+
+Aim for 30-36 words. Use {Name} once and {Place} once. Use two to four sentences. They/them/their is fine; make clear who each pronoun means. Avoid he/she/his/her/him/hers because the game chooses the character's appearance separately. Spell out numbers. Use ordinary ASCII punctuation.
+
+This happened before the player's campaign. Do not invent the character's current rank, XP, promotions, kills or captured zones. Do not use faction-name placeholders. Do not suggest the game has a special ability or mission that it does not have.
+
+The shared history has three kinds of event:
+- Near {Place}, families lost access to land or places they needed for work.
+- Near {Place}, an agreement was followed by new restrictions.
+- There was fighting at {Place}, and local people suffered losses.
+Your story must fit any version of its event. Do not require a particular battle day, burning, ridge, well or relief column.
+
+You may leave out a minor detail from the beat if it makes the story crowded. A person's work, one decision and what happened afterwards can be enough. People can be tired, selfish, friendly or worried. They do not all need to be brave or cruel.
+
+Read the story aloud once and fix anything awkward. Save JSON with id, bank, variant, text, word_count, self_review to your assigned draft file. Count words with each placeholder as one word. For self_review, use one plain sentence about what happens in the story. Avoid editing jargon such as 'local consequence', 'moral verdict', 'causal link', 'emotional register' or 'narrative engine'. Do not edit source or other drafts. Return the story and its file path.
+

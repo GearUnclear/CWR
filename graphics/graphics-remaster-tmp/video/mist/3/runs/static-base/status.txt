@@ -1,0 +1,3 @@
+﻿start 01:52:11 test=tests/rendering/captures/video/look_probe_mist3_static.test.sqf override= junction=RemasterUD-mist-3
+run exit=0 frames=120 minutes=0 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\3\runs\static-base
+done 01:52:16

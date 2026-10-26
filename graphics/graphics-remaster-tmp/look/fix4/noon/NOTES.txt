@@ -1,0 +1,108 @@
+NOON FIXER, ROUND 4: clear-day sky colour and brightness
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-fire (fec1075 + fix4/base.patch, base tree
+d2f866e4d02278023d36c79f08a4b693fe0c6c1d). Build build/look-fix-fire-rwdi, game dist/look-fix-fire-rwdi,
+junction RemasterUD-r4-noon. Nothing committed, no branch.
+Patch: fix.patch (5 files, +137 / -1, only my delta over the base, no capture tests). It applies with
+git apply --cached --check on a fresh index of the base tree.
+
+IMAGES (all opened and checked by eye)
+- a_noon_sky.png: (a) vanilla | landed | before (director/final) | after, noon_fields and sinai_desert_noon
+  at 1920x1080, then a 2x crop of the noon_fields sky (x720..960, y0..135).
+- b_bright_ground.png: (b) the same four panels for sinai_desert_noon, noon_fields, jeep_close_noon, then
+  a 2x crop of the Sinai sand (x1180..1420, y820..955).
+- c_other_noon_views.png: town_noon and noon_vista, four panels each, 2x crop of the noon_vista sky.
+- d_checks_ab.png: forest_edge_golden, woods_pine2_evening, town_night, overcast_broken. Strict A/B at the
+  same sim clock: the base game (look-director) against my build, the same test.
+Shots: shots_2/ (final build, the 9 views), shots_base/ (base game, same tests, for the A/B),
+shots_1/ (first build, sky strength 0.8). Probes: probe1/, probe2/, probe3/.
+
+(a) NOON SKY WAS SLATE: CAUSE
+Numbers are my numpy means, top box = rows 2..10%, x 30..70%.
+- Probe 1 (probe1/, knobs on my base build, noon_fields and sinai_desert_noon):
+  base (91,114,148); volFog=0 (89,112,145); camWb=0 (93,114,146); camHaze=1 (85,111,147);
+  camSat=1.4 (81,114,156); camEv +0.5 (100,126,164). Fog, white balance and haze are not it.
+- The overhaul's zenith has the SAME chromaticity as landed's: linear ratios (0.34,0.56,1) against
+  landed's (0.36,0.59,1). That is also the real clear sky's chromaticity (zenith near x 0.25, y 0.27
+  gives (0.33,0.61,1) in linear sRGB). The sky table is right.
+- The difference is light and rendition. Landed's sky is drawn at the original's brightness, about
+  2.8x the overhaul's linear light. The overhaul draws the sky at the physical scale, and over a
+  bright plain the camera then exposed 0.63 EV under the average scene (kBrightKeep -0.45 times the
+  meter's 0.84 EV, plus kCameraHighSunEv -0.25; readout ev=-0.35 in noon_fields). The hue-keeping
+  curve keeps the linear ratios exactly. A real camera's per-channel film curve deepens a mid-tone
+  blue; without that, a sky at a third of landed's light with the same ratios reads as slate.
+- Probe 2 (probe2/, shader override in camSkyLook, chroma raised on the clear sky only): the sky
+  reads as clear blue at thumbnail size, at the same luminance. With camEv +0.35 the ground and sky
+  both lift. That proved the two parts of the fix.
+
+(b) BRIGHT GROUND WAS DARK: CAUSE
+The same exposure term. A bright plain metered 0.84 EV above the average scene (noon_fields mean
+-2.16, Sinai -2.26) and kBrightKeep -0.45 took 0.38 EV off on top of the high sun's 0.25 EV.
+
+THE CHANGE
+1. Exposure (PhotoCamera.hpp): kBrightKeep -0.45 -> -0.05. Only scenes brighter than the average
+   scene change (dark scenes use kDarkKeep). With kCameraHighSunEv a bright plain at noon is still
+   about 0.3 EV under the average scene, which keeps the shade and texture. Readout:
+   noon_fields ev -0.35 -> -0.01, sinai_desert_noon 0.03 -> 0.33, jeep_close_noon +0.2 EV.
+   forest_edge_golden, woods_pine2_evening, town_noon, noon_vista, overcast_broken and town_night
+   keep their exposure to 0.02 EV.
+2. Clear-sky colour (EngineGL33_LightingShadersSky.cpp, camSkyLook, new camSkyDeepen; C++ mirror
+   PhotoCamera.cpp DaySkyDeepen and DaySkyDeepWeight): the clear sky's chroma about its luminance,
+   in linear light, is scaled by 1 + kCameraDaySkyDeep * w. Same luminance, same dominant hue (the
+   chroma vector is scaled, not turned), no channel under kCameraDaySkyFloor of the luminance. The
+   weight w: by day only (none under 8 degrees of sun, all from 25), above the horizon band (sine of
+   the view elevation 0.03 to 0.4, so the horizon stays pale), out of the sun's glow (cosine to the
+   sun 0.86 to 0.985), none under the weather's veil. It runs on the dome, the aerial-perspective
+   colour and the sky the sea mirrors, all through camSkyLook. Clouds keep their own colour.
+   I tried 0.8 first (shots_1); 0.65 keeps noon_fields clearly blue and stops noon_vista and
+   town_noon from turning vivid azure.
+No change to the sun core, the sky roll-off cap (the SUN fixer's area), the fog or the AI link.
+
+CONSTANTS TOUCHED (name: old -> new)
+- PhotoCamera.hpp kBrightKeep: -0.45 -> -0.05
+- PhotoCamera.hpp kCameraDaySkyDeep: new, 0.65 (shader kCamSkyDeep, pinned by a test)
+- PhotoCamera.hpp kCameraDaySkyFloor: new, 0.25 (shader kCamSkyDeepFloor, pinned by a test)
+- Weight ramps (new, inline in DaySkyDeepWeight and the shader): sun 8..25 deg, view sine 0.03..0.4,
+  sun cosine 0.86..0.985 (the low-sun term's own ramp), times 1 - veil.
+- kCameraHighSunEv, white balance, camSat, camHaze, the sky roll-off: unchanged.
+
+RESULTS (before = director/final 1080 shot, after = shots_2, 1920x1080)
+- noon_fields sky top (91,114,148) -> (74,121,173); mid band (100,125,158) -> (93,132,179);
+  horizon (116,139,166) -> (120,148,180). Darker, deeper blue at the top, paler toward the horizon.
+  Ground (140,138,127) -> (152,149,137) (vanilla 165, landed 163).
+- sinai_desert_noon sky top (86,109,144) -> (66,115,168); horizon (114,138,168) -> (113,145,183).
+  Sand (149,131,111) -> (158,139,118) (vanilla 187, landed 181).
+- jeep_close_noon ground 160 -> 168 (vanilla 169); its sky (114,140,175) -> (108,144,189).
+- noon_vista sky top (118,152,201) -> (89,146,212); ground unchanged (75,85,75).
+- town_noon: ground unchanged (164,156,98); its sky slightly deeper (R -10 in the top half).
+- A/B at the same clock (d_checks_ab.png): forest_edge_golden and woods_pine2_evening within 1.1
+  levels anywhere (sky only); town_night differs only in the fire's smoke puffs (particle timing,
+  mean shift under 1 level, my code is off at night); overcast_broken's blue gaps are a little
+  deeper, clouds and land unchanged.
+- At full size: no banding, no seam at the horizon band or round the sun's glow (2x crops).
+
+TESTS
+- New: "PhotoCamera: look fix noon: a bright plain at a high sun is exposed a little under, not
+  dull" and "PhotoCamera: look fix noon: the clear day sky deepens toward a camera's blue, the
+  horizon stays pale" (test_photo_camera.cpp). The shader-constant test in test_remaster_lighting.cpp
+  now pins kCamSkyDeep, kCamSkyDeepFloor and the camSkyDeepen call in camSkyLook.
+- Unit tags [PhotoCamera],[Shaders],[remaster],[atmosphere],[fog],[SurfaceLight],[PostStages],
+  [FeatureSwitches],[FeatureGates],[AirMedium],[ssr],[wet],[CombatLights],[StateCacheAudit],
+  [TerrainHorizon],[StateOwnership] on the final build, run from D:\: all pass, 321 cases,
+  957,499 assertions (glslang compiles every program). Full suite not run.
+- clang-format clean on all five files.
+
+AI SIGHT AND FOG LINK
+Intact. Target.cpp lines 639 to 645 still multiply vis by FogSightTransmittance while
+FogSightActive(); VolumetricFog.cpp (FogSightExtinctionAt, SetFogSight) is not in my diff.
+
+STILL OPEN
+- The Sinai sand is still about 29 levels under the original (158 against 187). Its sun is low for
+  a July noon: the camera readout gives sunLum 0.33 against Abel's 0.58, and the high-sun step does
+  not engage there, so the LoBo Sinai world's sun is near 35 to 40 degrees. Lifting it further
+  would push jeep_close_noon toward white paper; I left the balance at -0.05.
+- The deeper blue makes the noon cirrus streaks stand out more against the sky (white on blue).
+  They read as real cirrus to me, but a critic may want them fainter.
+- The deepening is the same at every exposure. If a bright-sky scene ever reads vivid, the next
+  step is to scale it down with the exposed luminance (a film curve deepens mid tones most).
+- Only my own games were stopped (scoped by my junction); other agents' games were left alone.

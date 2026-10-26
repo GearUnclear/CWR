@@ -1,0 +1,1158 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..6ef43c4 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,16 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"atmosphere", &remaster::LightingTuning::atmosphere},
++        {"atmoFog", &remaster::LightingTuning::atmoFog},
++        {"atmoLight", &remaster::LightingTuning::atmoLight},
++        {"atmoSun", &remaster::LightingTuning::atmoSun},
++        {"atmoHaze", &remaster::LightingTuning::atmoHaze},
++        {"atmoExposure", &remaster::LightingTuning::atmoExposure},
++        {"atmoClouds", &remaster::LightingTuning::atmoClouds},
++        {"atmoDebug", &remaster::LightingTuning::atmoDebug},
++        {"atmoHue", &remaster::LightingTuning::atmoHue},
++        {"atmoSat", &remaster::LightingTuning::atmoSat},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.cpp
+new file mode 100644
+index 0000000..39d025c
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.cpp
+@@ -0,0 +1,456 @@
++﻿// RESEARCH PROTOTYPE (track "atmosphere"): physically based clear-sky
++// atmosphere for the remastered lighting. See Atmosphere.hpp.
++
++#include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++constexpr float kPi = 3.14159265358979323846f;
++
++// Earth, Bruneton 2017 / Hillaire 2020 defaults (metres).
++constexpr float kRg = 6360000.0f;
++constexpr float kRt = 6460000.0f;
++constexpr float kRayleighH = 8000.0f;
++constexpr float kMieH = 1200.0f;
++constexpr float kRayleigh[3] = {5.802e-6f, 13.558e-6f, 33.1e-6f};
++constexpr float kMieScat = 3.996e-6f;
++constexpr float kMieExt = 4.40e-6f;
++constexpr float kOzone[3] = {0.650e-6f, 1.881e-6f, 0.085e-6f};
++constexpr float kOzoneCentre = 25000.0f;
++constexpr float kOzoneHalfWidth = 15000.0f;
++constexpr float kGroundAlbedo = 0.3f;
++constexpr float kMieG = 0.8f;
++
++constexpr int kTW = 256; // transmittance: mu
++constexpr int kTH = 64;  // transmittance: r
++constexpr int kMW = 32;  // multiple scattering: mu_s
++constexpr int kMH = 32;  // multiple scattering: height
++
++struct V3
++{
++    float x, y, z;
++};
++inline V3 Add(V3 a, V3 b)
++{
++    return {a.x + b.x, a.y + b.y, a.z + b.z};
++}
++inline V3 Mul(V3 a, float s)
++{
++    return {a.x * s, a.y * s, a.z * s};
++}
++inline float Dot(V3 a, V3 b)
++{
++    return a.x * b.x + a.y * b.y + a.z * b.z;
++}
++inline float Len(V3 a)
++{
++    return std::sqrt(Dot(a, a));
++}
++
++float Clamp(float v, float lo, float hi)
++{
++    return std::min(hi, std::max(lo, v));
++}
++
++float DistanceToTop(float r, float mu)
++{
++    const float disc = r * r * (mu * mu - 1.0f) + kRt * kRt;
++    return std::max(0.0f, -r * mu + std::sqrt(std::max(disc, 0.0f)));
++}
++
++float DistanceToBottom(float r, float mu)
++{
++    const float disc = r * r * (mu * mu - 1.0f) + kRg * kRg;
++    return std::max(0.0f, -r * mu - std::sqrt(std::max(disc, 0.0f)));
++}
++
++bool HitsGround(float r, float mu)
++{
++    return mu < 0.0f && r * r * (mu * mu - 1.0f) + kRg * kRg >= 0.0f;
++}
++
++struct Medium
++{
++    float scatR[3];
++    float scatM;
++    float ext[3];
++};
++
++Medium SampleMedium(float h, float haze)
++{
++    const float rr = std::exp(-std::max(h, 0.0f) / kRayleighH);
++    const float rm = std::exp(-std::max(h, 0.0f) / kMieH) * haze;
++    const float ro = std::max(0.0f, 1.0f - std::fabs(h - kOzoneCentre) / kOzoneHalfWidth);
++    Medium m;
++    m.scatM = kMieScat * rm;
++    for (int c = 0; c < 3; ++c)
++    {
++        m.scatR[c] = kRayleigh[c] * rr;
++        m.ext[c] = m.scatR[c] + kMieExt * rm + kOzone[c] * ro;
++    }
++    return m;
++}
++
++float RayleighPhase(float c)
++{
++    return 3.0f / (16.0f * kPi) * (1.0f + c * c);
++}
++
++} // namespace
++
++float Atmosphere::MiePhase(float c)
++{
++    const float g = kMieG;
++    const float k = 3.0f / (8.0f * kPi) * (1.0f - g * g) / (2.0f + g * g);
++    return k * (1.0f + c * c) / std::pow(std::max(1.0f + g * g - 2.0f * g * c, 1e-6f), 1.5f);
++}
++
++struct Atmosphere::Impl
++{
++    static void Transmittance(const std::vector<float>& lut, float r, float mu, float out[3])
++    {
++        if (HitsGround(r, mu))
++        {
++            out[0] = out[1] = out[2] = 0.0f;
++            return;
++        }
++        const float H = std::sqrt(kRt * kRt - kRg * kRg);
++        const float rho = std::sqrt(std::max(r * r - kRg * kRg, 0.0f));
++        const float d = DistanceToTop(r, mu);
++        const float dMin = kRt - r;
++        const float dMax = rho + H;
++        const float xMu = dMax > dMin ? (d - dMin) / (dMax - dMin) : 0.0f;
++        const float xR = rho / H;
++        const float fx = Clamp(xMu, 0.0f, 1.0f) * (kTW - 1);
++        const float fy = Clamp(xR, 0.0f, 1.0f) * (kTH - 1);
++        const int x0 = std::min(static_cast<int>(fx), kTW - 2);
++        const int y0 = std::min(static_cast<int>(fy), kTH - 2);
++        const float tx = fx - x0, ty = fy - y0;
++        for (int c = 0; c < 3; ++c)
++        {
++            const float a = lut[(y0 * kTW + x0) * 3 + c], b = lut[(y0 * kTW + x0 + 1) * 3 + c];
++            const float e = lut[((y0 + 1) * kTW + x0) * 3 + c], f = lut[((y0 + 1) * kTW + x0 + 1) * 3 + c];
++            out[c] = (a + (b - a) * tx) * (1.0f - ty) + (e + (f - e) * tx) * ty;
++        }
++    }
++
++    static void MultiScatter(const std::vector<float>& lut, float h, float muS, float out[3])
++    {
++        const float fx = Clamp((muS * 0.5f + 0.5f), 0.0f, 1.0f) * (kMW - 1);
++        const float fy = Clamp(h / (kRt - kRg), 0.0f, 1.0f) * (kMH - 1);
++        const int x0 = std::min(static_cast<int>(fx), kMW - 2);
++        const int y0 = std::min(static_cast<int>(fy), kMH - 2);
++        const float tx = fx - x0, ty = fy - y0;
++        for (int c = 0; c < 3; ++c)
++        {
++            const float a = lut[(y0 * kMW + x0) * 3 + c], b = lut[(y0 * kMW + x0 + 1) * 3 + c];
++            const float e = lut[((y0 + 1) * kMW + x0) * 3 + c], f = lut[((y0 + 1) * kMW + x0 + 1) * 3 + c];
++            out[c] = (a + (b - a) * tx) * (1.0f - ty) + (e + (f - e) * tx) * ty;
++        }
++    }
++
++    static void BuildTransmittance(std::vector<float>& lut, float haze)
++    {
++        lut.assign(kTW * kTH * 3, 0.0f);
++        const float H = std::sqrt(kRt * kRt - kRg * kRg);
++        for (int j = 0; j < kTH; ++j)
++        {
++            const float xR = static_cast<float>(j) / (kTH - 1);
++            const float rho = H * xR;
++            const float r = std::sqrt(rho * rho + kRg * kRg);
++            for (int i = 0; i < kTW; ++i)
++            {
++                const float xMu = static_cast<float>(i) / (kTW - 1);
++                const float dMin = kRt - r;
++                const float dMax = rho + H;
++                const float d = dMin + xMu * (dMax - dMin);
++                float mu = d == 0.0f ? 1.0f : (H * H - rho * rho - d * d) / (2.0f * r * d);
++                mu = Clamp(mu, -1.0f, 1.0f);
++                const float len = DistanceToTop(r, mu);
++                constexpr int kSteps = 64;
++                const float dt = len / kSteps;
++                double od[3] = {0, 0, 0};
++                for (int s = 0; s < kSteps; ++s)
++                {
++                    const float t = (s + 0.5f) * dt;
++                    const float rs = std::sqrt(r * r + t * t + 2.0f * r * mu * t);
++                    const Medium m = SampleMedium(rs - kRg, haze);
++                    for (int c = 0; c < 3; ++c)
++                        od[c] += m.ext[c] * dt;
++                }
++                for (int c = 0; c < 3; ++c)
++                    lut[(j * kTW + i) * 3 + c] = static_cast<float>(std::exp(-od[c]));
++            }
++        }
++    }
++
++    static void BuildMultiScatter(std::vector<float>& lut, const std::vector<float>& trans, float haze)
++    {
++        lut.assign(kMW * kMH * 3, 0.0f);
++        constexpr int kDirs = 64;
++        constexpr int kSteps = 20;
++        V3 dirs[kDirs];
++        const float golden = kPi * (3.0f - std::sqrt(5.0f));
++        for (int k = 0; k < kDirs; ++k)
++        {
++            const float y = 1.0f - 2.0f * (k + 0.5f) / kDirs;
++            const float rad = std::sqrt(std::max(0.0f, 1.0f - y * y));
++            const float th = golden * k;
++            dirs[k] = {rad * std::cos(th), y, rad * std::sin(th)};
++        }
++        const float pu = 1.0f / (4.0f * kPi);
++        for (int j = 0; j < kMH; ++j)
++        {
++            const float h = std::max(10.0f, (kRt - kRg) * j / (kMH - 1));
++            const float r = kRg + std::min(h, kRt - kRg - 10.0f);
++            for (int i = 0; i < kMW; ++i)
++            {
++                const float muS = -1.0f + 2.0f * i / (kMW - 1);
++                const V3 sun = {std::sqrt(std::max(0.0f, 1.0f - muS * muS)), muS, 0.0f};
++                const V3 origin = {0.0f, r, 0.0f};
++                double L2[3] = {0, 0, 0}, fms[3] = {0, 0, 0};
++                for (int k = 0; k < kDirs; ++k)
++                {
++                    const V3 dir = dirs[k];
++                    const float mu = dir.y;
++                    const bool ground = HitsGround(r, mu);
++                    const float tMax = ground ? DistanceToBottom(r, mu) : DistanceToTop(r, mu);
++                    const float dt = tMax / kSteps;
++                    float T[3] = {1, 1, 1};
++                    float Lp[3] = {0, 0, 0}, Lf[3] = {0, 0, 0};
++                    for (int s = 0; s < kSteps; ++s)
++                    {
++                        const float t = (s + 0.3f) * dt;
++                        const V3 P = Add(origin, Mul(dir, t));
++                        const float rp = Len(P);
++                        const Medium m = SampleMedium(rp - kRg, haze);
++                        const float muSp = Dot(Mul(P, 1.0f / rp), sun);
++                        float ts[3];
++                        Transmittance(trans, rp, muSp, ts);
++                        for (int c = 0; c < 3; ++c)
++                        {
++                            const float sig = m.scatR[c] + m.scatM;
++                            const float ext = std::max(m.ext[c], 1e-12f);
++                            const float stepT = std::exp(-ext * dt);
++                            const float S = sig * pu * ts[c];
++                            Lp[c] += T[c] * (S - S * stepT) / ext;
++                            Lf[c] += T[c] * (sig - sig * stepT) / ext;
++                            T[c] *= stepT;
++                        }
++                    }
++                    if (ground)
++                    {
++                        const V3 G = Add(origin, Mul(dir, tMax));
++                        const float rg = Len(G);
++                        const float muG = Dot(Mul(G, 1.0f / rg), sun);
++                        float tg[3];
++                        Transmittance(trans, rg, muG, tg);
++                        for (int c = 0; c < 3; ++c)
++                            Lp[c] += T[c] * tg[c] * std::max(muG, 0.0f) * kGroundAlbedo / kPi;
++                    }
++                    for (int c = 0; c < 3; ++c)
++                    {
++                        L2[c] += Lp[c];
++                        fms[c] += Lf[c];
++                    }
++                }
++                for (int c = 0; c < 3; ++c)
++                {
++                    const double l2 = L2[c] / kDirs;
++                    const double f = std::min(fms[c] / kDirs, 0.99);
++                    lut[(j * kMW + i) * 3 + c] = static_cast<float>(l2 / (1.0 - f));
++                }
++            }
++        }
++    }
++};
++
++Atmosphere::Atmosphere() = default;
++
++namespace
++{
++float s_tableHaze = -1.0f;
++}
++
++void Atmosphere::BuildSkyView(float sunElevationRad, const AtmosphereSettings& s, SkyViewLut& out) const
++{
++    auto& self = const_cast<Atmosphere&>(*this);
++    if (_transmittance.empty() || std::fabs(s_tableHaze - s.haze) > 1e-4f)
++    {
++        Impl::BuildTransmittance(self._transmittance, s.haze);
++        Impl::BuildMultiScatter(self._multiScatter, self._transmittance, s.haze);
++        s_tableHaze = s.haze;
++    }
++
++    constexpr int W = SkyViewLut::kWidth;
++    constexpr int H = SkyViewLut::kHeight;
++    out.rgba.assign(3 * W * H * 4, 0.0f);
++    out.sunElevationRad = sunElevationRad;
++    out.haze = s.haze;
++
++    const float r0 = kRg + std::max(s.viewerHeight, 1.0f);
++    const V3 origin = {0.0f, r0, 0.0f};
++    const V3 sun = {std::cos(sunElevationRad), std::sin(sunElevationRad), 0.0f};
++    constexpr int kSteps = 40;
++
++    for (int j = 0; j < H; ++j)
++    {
++        const float v = (j + 0.5f) / H;
++        const float x = 2.0f * v - 1.0f;
++        const float l = (x < 0.0f ? -1.0f : 1.0f) * x * x * (kPi * 0.5f);
++        for (int i = 0; i < W; ++i)
++        {
++            const float u = (i + 0.5f) / W;
++            const float phi = kPi * u * u;
++            const V3 dir = {std::cos(l) * std::cos(phi), std::sin(l), std::cos(l) * std::sin(phi)};
++            const float mu = dir.y;
++            const bool ground = HitsGround(r0, mu);
++            const float tMax = ground ? DistanceToBottom(r0, mu) : DistanceToTop(r0, mu);
++            const float cosT = Dot(dir, sun);
++            const float pR = RayleighPhase(cosT);
++            float T[3] = {1, 1, 1};
++            float LR[3] = {0, 0, 0}, LM[3] = {0, 0, 0};
++            float tPrev = 0.0f;
++            for (int k = 0; k < kSteps; ++k)
++            {
++                const float f1 = static_cast<float>(k + 1) / kSteps;
++                const float tNext = tMax * f1 * f1;
++                const float dt = tNext - tPrev;
++                const float t = tPrev + 0.3f * dt;
++                tPrev = tNext;
++                const V3 P = Add(origin, Mul(dir, t));
++                const float rp = Len(P);
++                const Medium m = SampleMedium(rp - kRg, s.haze);
++                const float muSp = Dot(Mul(P, 1.0f / rp), sun);
++                float ts[3], ms[3];
++                Impl::Transmittance(_transmittance, rp, muSp, ts);
++                Impl::MultiScatter(_multiScatter, rp - kRg, muSp, ms);
++                for (int c = 0; c < 3; ++c)
++                {
++                    const float ext = std::max(m.ext[c], 1e-12f);
++                    const float stepT = std::exp(-ext * dt);
++                    const float SR = m.scatR[c] * pR * ts[c] + (m.scatR[c] + m.scatM) * ms[c];
++                    const float SM = m.scatM * ts[c];
++                    LR[c] += T[c] * (SR - SR * stepT) / ext;
++                    LM[c] += T[c] * (SM - SM * stepT) / ext;
++                    T[c] *= stepT;
++                }
++            }
++            float* pr = &out.rgba[(j * 3 * W + i) * 4];
++            float* pm = &out.rgba[(j * 3 * W + W + i) * 4];
++            for (int c = 0; c < 3; ++c)
++            {
++                pr[c] = LR[c];
++                pm[c] = LM[c];
++            }
++            pr[3] = 1.0f;
++            pm[3] = 1.0f;
++        }
++    }
++
++    // Third region: the azimuthal mean of the full radiance (Mie phase
++    // applied) per elevation row, so the shader can relate a direction to the
++    // average of its elevation in one tap.
++    for (int j = 0; j < H; ++j)
++    {
++        const float v = (j + 0.5f) / H;
++        const float x = 2.0f * v - 1.0f;
++        const float l = (x < 0.0f ? -1.0f : 1.0f) * x * x * (kPi * 0.5f);
++        Rgb sum;
++        constexpr int kN = 96;
++        for (int a = 0; a < kN; ++a)
++        {
++            const float phi = (a + 0.5f) / kN * kPi;
++            const V3 dir = {std::cos(l) * std::cos(phi), std::sin(l), std::cos(l) * std::sin(phi)};
++            sum = sum + Sample(out, l, phi, Dot(dir, sun));
++        }
++        sum = sum * (1.0f / kN);
++        for (int i = 0; i < W; ++i)
++        {
++            float* pa = &out.rgba[(j * 3 * W + 2 * W + i) * 4];
++            pa[0] = sum.r;
++            pa[1] = sum.g;
++            pa[2] = sum.b;
++            pa[3] = 1.0f;
++        }
++    }
++
++    // ---- summary -----------------------------------------------------------
++    float t[3];
++    Impl::Transmittance(_transmittance, r0, std::sin(sunElevationRad), t);
++    out.sunTransmittance = Rgb(t[0], t[1], t[2]);
++    Impl::Transmittance(_transmittance, kRg + 2500.0f, std::sin(sunElevationRad), t);
++    out.sunAtClouds = Rgb(t[0], t[1], t[2]);
++
++    Rgb up, sunward, anti, low, upper;
++    double wLow = 0.0, wUpper = 0.0;
++    constexpr int kEl = 24, kAz = 48;
++    for (int e = 0; e < kEl; ++e)
++    {
++        const float l = (e + 0.5f) / kEl * (kPi * 0.5f);
++        const float dl = (kPi * 0.5f) / kEl;
++        for (int a = 0; a < kAz; ++a)
++        {
++            const float phi = -kPi + (a + 0.5f) / kAz * (2.0f * kPi);
++            const float dphi = 2.0f * kPi / kAz;
++            const float dw = std::cos(l) * dl * dphi;
++            const V3 dir = {std::cos(l) * std::cos(phi), std::sin(l), std::cos(l) * std::sin(phi)};
++            const Rgb L = Sample(out, l, std::fabs(phi), Dot(dir, sun));
++            up = up + L * (std::sin(l) * dw);
++            sunward = sunward + L * (std::max(0.0f, dir.x) * dw);
++            anti = anti + L * (std::max(0.0f, -dir.x) * dw);
++            upper = upper + L * dw;
++            wUpper += dw;
++            const float deg = l * 180.0f / kPi;
++            if (deg >= 2.0f && deg <= 25.0f)
++            {
++                low = low + L * dw;
++                wLow += dw;
++            }
++        }
++    }
++    out.irrUp = up;
++    out.irrSunward = sunward;
++    out.irrAntiSun = anti;
++    out.meanLowBand = wLow > 0 ? low * static_cast<float>(1.0 / wLow) : Rgb();
++    out.meanUpper = wUpper > 0 ? upper * static_cast<float>(1.0 / wUpper) : Rgb();
++}
++
++Rgb Atmosphere::Sample(const SkyViewLut& lut, float elevationRad, float azimuthFromSunRad, float cosToSun)
++{
++    constexpr int W = SkyViewLut::kWidth;
++    constexpr int H = SkyViewLut::kHeight;
++    if (lut.rgba.empty())
++        return Rgb();
++    const float phi = Clamp(azimuthFromSunRad, 0.0f, kPi);
++    float u = std::sqrt(phi / kPi);
++    const float l = Clamp(elevationRad, -kPi * 0.5f, kPi * 0.5f);
++    float v = 0.5f + 0.5f * (l < 0.0f ? -1.0f : 1.0f) * std::sqrt(std::fabs(l) / (kPi * 0.5f));
++    const float fx = Clamp(u * W - 0.5f, 0.0f, W - 1.0f);
++    const float fy = Clamp(v * H - 0.5f, 0.0f, H - 1.0f);
++    const int x0 = std::min(static_cast<int>(fx), W - 2);
++    const int y0 = std::min(static_cast<int>(fy), H - 2);
++    const float tx = fx - x0, ty = fy - y0;
++    auto fetch = [&](int half, int x, int y, int c) { return lut.rgba[(y * 3 * W + half * W + x) * 4 + c]; };
++    float R[3], M[3];
++    for (int c = 0; c < 3; ++c)
++    {
++        for (int half = 0; half < 2; ++half)
++        {
++            const float a = fetch(half, x0, y0, c), b = fetch(half, x0 + 1, y0, c);
++            const float e = fetch(half, x0, y0 + 1, c), f = fetch(half, x0 + 1, y0 + 1, c);
++            const float val = (a + (b - a) * tx) * (1.0f - ty) + (e + (f - e) * tx) * ty;
++            (half == 0 ? R : M)[c] = val;
++        }
++    }
++    const float pm = MiePhase(cosToSun);
++    return Rgb(R[0] + M[0] * pm, R[1] + M[1] * pm, R[2] + M[2] * pm);
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.hpp
+new file mode 100644
+index 0000000..7bb56ef
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Atmosphere.hpp
+@@ -0,0 +1,69 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++
++#include <vector>
++
++// Physically based clear-sky atmosphere for the remastered lighting, in the
++// spirit of Hillaire 2020 ("A Scalable and Production Ready Sky and Atmosphere
++// Rendering Technique"): Rayleigh + Mie + ozone, a transmittance table, a
++// multiple-scattering table (the isotropic Psi_ms approximation) and a
++// sky-view table re-integrated on the CPU whenever the sun or the haze moves.
++// Pure math, no GL. RESEARCH PROTOTYPE (track "atmosphere").
++//
++// Sky-view table: two halves side by side, each kWidth x kHeight.
++//   left  half: Rayleigh single scattering with its phase + multiple scattering
++//   right half: Mie single scattering WITHOUT its phase (the shader applies the
++//               phase per pixel, so the aureole around the sun stays sharp)
++//   u = sqrt(phi / pi), phi = azimuth from the sun in [0, pi]
++//   v = 0.5 + 0.5 * sign(l) * sqrt(|l| / (pi / 2)), l = elevation
++// Radiance is per unit of solar irradiance at the top of the atmosphere.
++
++namespace Poseidon::remaster
++{
++
++struct AtmosphereSettings
++{
++    float haze = 1.0f;            // Mie density multiplier (turbidity)
++    float viewerHeight = 150.0f;  // metres above the planet surface
++};
++
++struct SkyViewLut
++{
++    static constexpr int kWidth = 64;  // per half (azimuth)
++    static constexpr int kHeight = 64; // elevation
++    std::vector<float> rgba;           // (3 * kWidth) x kHeight x 4: Rayleigh+MS | Mie | azimuthal mean
++    float sunElevationRad = 0.0f;
++    float haze = 1.0f;
++
++    // Summary used by the light rig and the calibration (same units).
++    Rgb sunTransmittance;  // sun colour at the viewer relative to the top of the atmosphere
++    Rgb sunAtClouds;       // sun transmittance at ~2.5 km
++    Rgb irrUp;             // sky irradiance on an up-facing surface
++    Rgb irrSunward;        // ... on a vertical surface facing the sun
++    Rgb irrAntiSun;        // ... on a vertical surface facing away from the sun
++    Rgb meanLowBand;       // mean radiance over elevations 2..25 deg, all azimuths
++    Rgb meanUpper;         // mean radiance over the upper hemisphere (solid angle)
++};
++
++class Atmosphere
++{
++  public:
++    Atmosphere();
++    // Sky-view table for a sun at this elevation (radians, may be negative).
++    void BuildSkyView(float sunElevationRad, const AtmosphereSettings& s, SkyViewLut& out) const;
++
++    // Sky radiance (Rayleigh + MS + Mie with phase) from a built table, for a
++    // direction given by elevation and azimuth from the sun (radians). CPU
++    // reference of the shader lookup.
++    static Rgb Sample(const SkyViewLut& lut, float elevationRad, float azimuthFromSunRad, float cosToSun);
++
++    static float MiePhase(float cosTheta);
++
++  private:
++    struct Impl;
++    std::vector<float> _transmittance; // kTW x kTH x 3
++    std::vector<float> _multiScatter;  // kMW x kMH x 3
++};
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..c594a94 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,17 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // RESEARCH PROTOTYPE (atmosphere track): physically based sky.
++    float atmosphere = 0.0f;   // sky dome from the atmosphere tables (0 = classic dome, 1 = full)
++    float atmoFog = 0.0f;      // aerial perspective: fog takes the atmosphere's horizon colour
++    float atmoLight = 0.0f;    // sky light chroma (zenith / horizon) from the atmosphere irradiance
++    float atmoSun = 0.0f;      // sun chroma from the atmosphere transmittance
++    float atmoHaze = 1.0f;     // Mie density multiplier
++    float atmoExposure = 1.0f; // sky brightness relative to the classic dome
++    float atmoClouds = 1.0f;   // gain of the cloud mask taken from the sky texture
++    float atmoDebug = 0.0f;    // 1 = cloud mask, 2 = raw atmosphere, 3 = direction
++    float atmoHue = 1.0f;      // 0 = classic hue relit by the atmosphere's directional ratio, 1 = physical hue
++    float atmoSat = 1.0f;      // display-space saturation of the sky dome and the aerial perspective
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/TransLight.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/TransLight.cpp
+index 00b6751..ca587b6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/TransLight.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/TransLight.cpp
+@@ -698,6 +698,21 @@ void TLVertexTable::DoSkyLighting(const VertexTable& mesh, int spec)
+         v.color = PackedColorRGB(colorI * accom, 255);
+         v.specular = PackedBlack;
+         v.t0 = tex[i];
++        // RESEARCH PROTOTYPE (atmosphere): mark sky-dome vertices for the
++        // remastered screen vertex shader (no classic shader reads t1 here).
++        v.t1.u = 4096.0f;
++        v.t1.v = 4096.0f;
++    }
++    static bool s_loggedSkyMesh = false;
++    if (!s_loggedSkyMesh)
++    {
++        s_loggedSkyMesh = true;
++        for (i = 0; i < size; i++)
++        {
++            Vector3Val d = mesh.Norm(i);
++            LOG_INFO(Graphics, "ATMO skymesh {} dir {:.3f} {:.3f} {:.3f} uv {:.3f} {:.3f}", i, d.X(), d.Y(), d.Z(),
++                     tex[i].u, tex[i].v);
++        }
+     }
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..adda16d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -11,13 +11,16 @@
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ #include <PoseidonGL33/GL33BindCache.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
++#include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
++#include <chrono>
+ #include <cmath>
+ #include <cstring>
++#include <memory>
+ 
+ using namespace Poseidon::gl33lighting;
+ namespace rm = Poseidon::remaster;
+@@ -26,6 +29,18 @@ namespace
+ {
+ float s_lit[LitConst::Count * 4] = {};
+ GLuint s_litUBO = 0;
++
++// RESEARCH PROTOTYPE (atmosphere): CPU-integrated sky-view table on unit 6.
++std::unique_ptr<rm::Atmosphere> s_atmo;
++rm::SkyViewLut s_skyLut;
++bool s_skyLutValid = false;
++GLuint s_skyLutTex = 0;
++
++rm::Rgb NormLum(const rm::Rgb& c)
++{
++    const float l = rm::Luminance(c);
++    return l > 1e-9f ? c * (1.0f / l) : rm::Rgb(1.0f, 1.0f, 1.0f);
++}
+ // Cloud drift integrated from the wind, so a wind change bends the drift
+ // instead of jumping the whole field.
+ float s_cloudDrift[2] = {1830.0f, 970.0f};
+@@ -107,6 +122,13 @@ void EngineGL33::InitLightingResources()
+     const unsigned char black[4] = {0, 0, 0, 0};
+     _post.whiteTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, white);
+     _post.blackTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, black);
++
++    // RESEARCH PROTOTYPE (atmosphere): the sky-view table (filled on first use).
++    {
++        const float zero[4] = {0.0f, 0.0f, 0.0f, 1.0f};
++        s_skyLutTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA32F, GL_RGBA, GL_FLOAT, zero);
++        s_skyLutValid = false;
++    }
+     GL33Bind::Invalidate();
+ 
+     glGenSamplers(1, &_shadowCompareSampler);
+@@ -143,6 +165,8 @@ void EngineGL33::DeinitLightingResources()
+     delTex(_dummyHeightTex);
+     delTex(_post.whiteTex);
+     delTex(_post.blackTex);
++    delTex(s_skyLutTex);
++    s_skyLutValid = false;
+     _post.unavailable = false;
+     if (_shadowCompareSampler)
+     {
+@@ -273,6 +297,7 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    GL33Bind::Tex2D(kSkyLutUnit, s_skyLutTex);
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -328,7 +353,80 @@ void EngineGL33::UploadLitFrameConstants()
+     in.skyThrough = land ? land->SkyThrough() : 1.0f;
+     in.nightEffect = sun->NightEffect();
+     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
+-    const rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
++    rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
++
++    // ---- RESEARCH PROTOTYPE (atmosphere) -------------------------------------
++    // A clear-sky atmosphere integrated on the CPU (Atmosphere.cpp) whenever the
++    // sun or the haze moves; the shaders read it on unit 6 for the sky dome and
++    // the aerial perspective, and its irradiance tints the rig's sky light.
++    const float sunElevRad = std::asin(std::max(-1.0f, std::min(1.0f, toSun.Y())));
++    const bool atmoWanted = _worldEffectsOn && (_lighting.atmosphere > 0.0f || _lighting.atmoFog > 0.0f ||
++                                                _lighting.atmoLight > 0.0f || _lighting.atmoSun > 0.0f);
++    if (atmoWanted && s_skyLutTex)
++    {
++        const float haze = std::max(0.05f, _lighting.atmoHaze);
++        if (!s_skyLutValid || std::fabs(s_skyLut.sunElevationRad - sunElevRad) > 0.0004f ||
++            std::fabs(s_skyLut.haze - haze) > 1e-4f)
++        {
++            const auto t0 = std::chrono::steady_clock::now();
++            if (!s_atmo)
++                s_atmo = std::make_unique<rm::Atmosphere>();
++            rm::AtmosphereSettings as;
++            as.haze = haze;
++            s_atmo->BuildSkyView(sunElevRad, as, s_skyLut);
++            GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++            glBindTexture(GL_TEXTURE_2D, s_skyLutTex);
++            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
++            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 3 * rm::SkyViewLut::kWidth, rm::SkyViewLut::kHeight, 0, GL_RGBA,
++                         GL_FLOAT, s_skyLut.rgba.data());
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++            glBindTexture(GL_TEXTURE_2D, 0);
++            GL33Bind::Invalidate();
++            s_skyLutValid = true;
++            const double ms =
++                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
++            const rm::Rgb& tr = s_skyLut.sunTransmittance;
++            const rm::Rgb& lb = s_skyLut.meanLowBand;
++            LOG_INFO(Graphics,
++                     "ATMO lut sunElev {:.2f} deg haze {:.2f} built in {:.1f} ms; sunT {:.3f} {:.3f} {:.3f}; lowBand "
++                     "{:.5f} {:.5f} {:.5f}; irrUp {:.4f} {:.4f} {:.4f}; irrSun {:.4f} {:.4f} {:.4f}; irrAnti {:.4f} "
++                     "{:.4f} {:.4f}",
++                     sunElevRad * 57.29578f, haze, ms, tr.r, tr.g, tr.b, lb.r, lb.g, lb.b, s_skyLut.irrUp.r,
++                     s_skyLut.irrUp.g, s_skyLut.irrUp.b, s_skyLut.irrSunward.r, s_skyLut.irrSunward.g,
++                     s_skyLut.irrSunward.b, s_skyLut.irrAntiSun.r, s_skyLut.irrAntiSun.g, s_skyLut.irrAntiSun.b);
++        }
++    }
++    const bool atmoLive = atmoWanted && s_skyLutValid;
++    // Clear-sky share of the rig's chroma: overcast light is neutral, and the
++    // atmosphere fades out below the horizon (night keeps the classic look).
++    const float elevDeg = sunElevRad * 57.29578f;
++    auto smooth = [](float e0, float e1, float x)
++    {
++        float t = (x - e0) / (e1 - e0);
++        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
++        return t * t * (3.0f - 2.0f * t);
++    };
++    const float dayAtmo = smooth(-9.0f, -3.0f, elevDeg);
++    if (atmoLive)
++    {
++        const float clear = in.skyThrough < 0.0f ? 0.0f : (in.skyThrough > 1.0f ? 1.0f : in.skyThrough);
++        const float a = std::min(1.0f, _lighting.atmoLight) * clear * dayAtmo;
++        if (a > 0.0f)
++        {
++            const rm::Rgb half = rig.skyGround * 0.5f;
++            const rm::Rgb skyHS = rig.skyHorizonSun + half * -1.0f;
++            const rm::Rgb skyH = rig.skyHorizon + half * -1.0f;
++            rig.skyZenith = rm::Mix(rig.skyZenith, NormLum(s_skyLut.irrUp) * rm::Luminance(rig.skyZenith), a);
++            rig.skyHorizonSun = rm::Mix(skyHS, NormLum(s_skyLut.irrSunward) * rm::Luminance(skyHS), a) + half;
++            rig.skyHorizon = rm::Mix(skyH, NormLum(s_skyLut.irrAntiSun) * rm::Luminance(skyH), a) + half;
++        }
++        const float as = std::min(1.0f, _lighting.atmoSun) * dayAtmo;
++        if (as > 0.0f && rm::Luminance(s_skyLut.sunTransmittance) > 1e-6f)
++            rig.sun = rm::Mix(rig.sun, NormLum(s_skyLut.sunTransmittance) * rm::Luminance(rig.sun), as);
++    }
+     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+ 
+     SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
+@@ -417,6 +515,57 @@ void EngineGL33::UploadLitFrameConstants()
+     const float debug =
+         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
++
++    // ---- RESEARCH PROTOTYPE (atmosphere): camera basis and sky calibration ----
++    if (camera)
++    {
++        Vector3 r = camera->DirectionAside();
++        Vector3 u = camera->DirectionUp();
++        Vector3 f = camera->Direction();
++        r.Normalize();
++        u.Normalize();
++        f.Normalize();
++        const float l = camera->Left(), t = camera->Top();
++        SetSlot(LitConst::SkyRight, r.X() * l, r.Y() * l, r.Z() * l, 0.0f);
++        SetSlot(LitConst::SkyUp, u.X() * t, u.Y() * t, u.Z() * t, 0.0f);
++        SetSlot(LitConst::SkyFwd, f.X(), f.Y(), f.Z(),
++                atmoLive ? std::min(1.0f, _lighting.atmosphere) * dayAtmo : 0.0f);
++    }
++    if (atmoLive)
++    {
++        // Brightness reference: the classic dome light (display, as the dome
++        // vertex colour without its sun glow). The shader scales the
++        // atmosphere per elevation so that each row of the sky keeps the
++        // classic brightness (texture row times this light) on average across
++        // azimuths; only the direction-dependent part and (atmoHue) the hue
++        // come from the atmosphere.
++        Color dome = sun->SkyColor() * _accomodateEye;
++        dome.SaturateMinMax();
++        const rm::Rgb domeLin = rm::ToLinear(rm::Rgb(dome.R(), dome.G(), dome.B()));
++        SetSlot(LitConst::AtmoDome, domeLin.r, domeLin.g, domeLin.b,
++                std::max(0.0f, std::min(1.0f, _lighting.atmoHue)));
++        const float k = _lighting.atmoExposure;
++        // Overcast: the share of the overcast texture (zatazeno.pac) in the
++        // interpolated sky texture is cloud everywhere.
++        // (Weather basics: sky-through 0.7 at overcast 0.5 = oblacno.pac, 0.1 at
++        // 0.66 = zatazeno.pac, linear in between.)
++        float floorCloud = (0.7f - in.skyThrough) / 0.6f;
++        floorCloud = floorCloud < 0.0f ? 0.0f : (floorCloud > 1.0f ? 1.0f : floorCloud);
++        SetSlot(LitConst::Atmo, k, floorCloud, std::min(1.0f, _lighting.atmoFog) * dayAtmo, _lighting.atmoClouds);
++        // Cloud light: the classic dome light's luminance, split into the sun
++        // seen from the cloud deck (transmittance at 2.5 km) and the sky.
++        const float lumC = rm::Luminance(domeLin);
++        const float sunShare = 0.7f * smooth(-3.0f, 2.0f, elevDeg);
++        const rm::Rgb cs = NormLum(s_skyLut.sunAtClouds) * (lumC * sunShare);
++        const rm::Rgb ca = NormLum(s_skyLut.irrUp) * (lumC * (1.0f - sunShare));
++        SetSlot(LitConst::AtmoCloudSun, cs.r, cs.g, cs.b, _lighting.atmoDebug);
++        SetSlot(LitConst::AtmoCloudAmb, ca.r, ca.g, ca.b, _lighting.atmoSat);
++    }
++    else
++    {
++        SetSlot(LitConst::Atmo, 0.0f, 0.0f, 0.0f, 0.0f);
++        SetSlot(LitConst::AtmoCloudSun, 0.0f, 0.0f, 0.0f, 0.0f);
++    }
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e..b3db7c0 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -23,6 +23,7 @@ constexpr unsigned int kLitBinding = 3;
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++constexpr int kSkyLutUnit = 6; // RESEARCH PROTOTYPE (atmosphere): sky-view table
+ 
+ // LitConstants vec4 slots; must match the GLSL block in s_psRemasterCommon.
+ namespace LitConst
+@@ -59,14 +60,23 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    // RESEARCH PROTOTYPE (atmosphere)
++    SkyRight = 58,     // xyz camera right * tan(half fov x)
++    SkyUp = 59,        // xyz camera up * tan(half fov y)
++    SkyFwd = 60,       // xyz camera forward, w = sky dome from the atmosphere (blend)
++    Atmo = 61,         // x radiance scale, y overcast cloud floor, z aerial perspective blend, w cloud mask gain
++    AtmoCloudSun = 62, // rgb sun light on the clouds (linear), w debug view
++    AtmoCloudAmb = 63, // rgb ambient light on the clouds (linear), w sun share fade
++    AtmoDome = 64,     // rgb classic dome light (linear), w hue blend (0 classic hue relit, 1 physical)
++    Count = 65,
+ };
+ constexpr int MaxLights = 8;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(SkyRight == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e..ebd98f5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -59,6 +59,48 @@ layout(std140) uniform VSConstants {
+     vec4 vpScale;       // 21 — {2/width, 2/height, 0, 0}
+ };
+ 
++// Same block as s_psRemasterCommon (atmosphere prototype: the sky dome needs
++// the camera basis to rebuild its view direction).
++layout(std140) uniform LitConstants {
++    vec4 litSunDir;
++    vec4 litSun;
++    vec4 litZenith;
++    vec4 litHorizon;
++    vec4 litGround;
++    vec4 litMoonDir;
++    vec4 litMoon;
++    vec4 litCamPos;
++    vec4 litMatDiffuse;
++    vec4 litMatAmbient;
++    vec4 litMatForced;
++    vec4 litMatEmissive;
++    vec4 litMatSpecular;
++    vec4 litTerrain;
++    vec4 litTerrainSel0;
++    vec4 litTerrainSel1;
++    vec4 litTerrainSun;
++    vec4 litTerrainLift;
++    vec4 litCloud;
++    vec4 litCloudOffset;
++    vec4 litShadowDelta;
++    vec4 litFlags;
++    vec4 litLightCount;
++    vec4 litHorizonSun;
++    vec4 litFogSun;
++    vec4 litFogCap;
++    vec4 litLightPos[8];
++    vec4 litLightColor[8];
++    vec4 litLightAmb[8];
++    vec4 litLightDir[8];
++    vec4 litSkyRight;
++    vec4 litSkyUp;
++    vec4 litSkyFwd;
++    vec4 litAtmo;
++    vec4 litAtmoCloudSun;
++    vec4 litAtmoCloudAmb;
++    vec4 litAtmoDome;
++};
++
+ layout(location = 0) in vec3 aPos;
+ layout(location = 1) in float aRhw;
+ layout(location = 2) in vec4 aColor;
+@@ -91,6 +133,23 @@ void main() {
+     vNormalW = vec3(0.0, 1.0, 0.0);
+     vCrown = vec4(0.0);
+     vLitMode = 0.0; // pre-lit colour: the fragment shader passes it through
++    if (litSkyFwd.w > 0.0 || litAtmo.z > 0.0) {
++        // Atmosphere prototype: the camera-relative point on the view ray,
++        // perspective-interpolated, so the fragment shader gets an exact view
++        // direction. The sky dome (TLVertexTable::DoSkyLighting marks it in t1)
++        // is shaded from the atmosphere; other pre-lit draws of the world
++        // (the far horizon polygon, clouds, particles) keep their colour and
++        // take the atmosphere's aerial perspective as their fog (mode -1).
++        vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);
++        vec3 rel = (litSkyFwd.xyz + ndc.x * litSkyRight.xyz + ndc.y * litSkyUp.xyz) * w;
++        if (aUV1.x > 4000.0 && litSkyFwd.w > 0.0) {
++            vWorldRel = rel;
++            vLitMode = 2.0;
++        } else if (litAtmo.z > 0.0) {
++            vWorldRel = rel;
++            vLitMode = -1.0;
++        }
++    }
+ }
+ )";
+ 
+@@ -276,6 +335,13 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
++    vec4 litSkyRight;     // 58: camera right * tan(half fov x)        (atmosphere prototype)
++    vec4 litSkyUp;        // 59: camera up * tan(half fov y)
++    vec4 litSkyFwd;       // 60: camera forward, w = sky dome blend
++    vec4 litAtmo;         // 61: x radiance scale, y overcast floor, z aerial perspective blend, w cloud mask gain
++    vec4 litAtmoCloudSun; // 62: rgb sun light on clouds (linear), w debug view
++    vec4 litAtmoCloudAmb; // 63: rgb sky light on clouds (linear)
++    vec4 litAtmoDome;     // 64: rgb classic dome light (linear), w hue blend (0 classic relit, 1 physical)
+ };
+ 
+ uniform sampler2D tex0;
+@@ -284,6 +350,7 @@ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound i
+ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
++uniform sampler2D skyLut;                  // unit 6: sky-view table (atmosphere prototype)
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -583,6 +650,107 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+ }
+ 
++// ---- RESEARCH PROTOTYPE (atmosphere) ---------------------------------------
++// Sky-view table integrated on the CPU (Graphics/Remaster/Atmosphere.cpp), three
++// regions side by side: Rayleigh + multiple scattering with the phase applied,
++// Mie single scattering without its phase (applied here, per pixel), and the
++// azimuthal mean of the full radiance per elevation.
++// u = sqrt(azimuth from the sun / pi), v = 0.5 + 0.5 sign(l) sqrt(|l| / (pi/2)).
++const float kPiA = 3.14159265;
++float atmoMiePhase(float c) {
++    const float g = 0.8;
++    const float k = 3.0 / (8.0 * kPiA) * (1.0 - g * g) / (2.0 + g * g);
++    return k * (1.0 + c * c) / pow(max(1.0 + g * g - 2.0 * g * c, 1e-6), 1.5);
++}
++// Unscaled sky radiance along a unit direction (per unit solar irradiance) and
++// the mean radiance of its elevation.
++vec3 atmoRadiance(vec3 d, out vec3 mean) {
++    float l = asin(clamp(d.y, -1.0, 1.0));
++    vec2 sh = litSunDir.xz;
++    float sl = length(sh);
++    float dl = length(d.xz);
++    float cphi = (sl > 1e-4 && dl > 1e-4) ? dot(d.xz / dl, sh / sl) : 1.0;
++    float phi = acos(clamp(cphi, -1.0, 1.0));
++    const float W = 64.0;
++    float u = clamp(sqrt(phi / kPiA), 0.5 / W, 1.0 - 0.5 / W);
++    float v = 0.5 + 0.5 * sign(l) * sqrt(abs(l) / (0.5 * kPiA));
++    vec3 R = texture(skyLut, vec2(u / 3.0, v)).rgb;
++    vec3 M = texture(skyLut, vec2((1.0 + u) / 3.0, v)).rgb;
++    mean = texture(skyLut, vec2(2.5 / 3.0, v)).rgb;
++    return R + M * atmoMiePhase(dot(d, litSunDir.xyz));
++}
++// Clear sky along d, given the classic clear-sky radiance of that elevation
++// (linear). The atmosphere supplies how this direction differs from the mean
++// of its elevation (the sun's glow and aureole, the darker anti-sun side);
++// litAtmoDome.w picks the hue: 0 keeps the classic hue (relit per channel),
++// 1 takes the atmosphere's own hue at the classic brightness.
++vec3 atmoClear(vec3 d, vec3 classicLin, out vec3 phys) {
++    vec3 mean;
++    vec3 A = atmoRadiance(d, mean);
++    vec3 m = max(mean, vec3(1e-8));
++    vec3 relit = classicLin * (A / m);
++    phys = A * (dot(classicLin, kLuma) / max(dot(m, kLuma), 1e-8));
++    return mix(relit, phys, litAtmoDome.w) * litAtmo.x;
++}
++// Aerial perspective: distant geometry fades into the sky just above the
++// horizon in its own azimuth (display space, as the classic fog). Under an
++// overcast deck it keeps the classic fog colour.
++vec3 atmoFogColor(vec3 rel, vec3 classicFog) {
++    vec3 d = rel * inversesqrt(max(dot(rel, rel), 1e-12));
++    vec3 h = normalize(vec3(d.x, clamp(d.y, 0.0, 0.25) * 0.5 + 0.015, d.z));
++    vec3 phys;
++    vec3 disp = toDisplay(tonemapNeutral(atmoClear(h, toLinear(fogColor.rgb), phys)));
++    disp = max(mix(vec3(dot(disp, kLuma)), disp, litAtmoCloudAmb.w), vec3(0.0));
++    disp = mix(disp, classicFog, litAtmo.y);
++    return mix(classicFog, disp, litAtmo.z);
++}
++// The sky dome under the original sky texture's clouds. The clear part of the
++// texture (a painted gradient) becomes the atmosphere at the brightness of the
++// texture's clearest texel in the same row; its clouds are kept as a mask
++// (brighter than that texel, or the overcast deck) and lit by the sun seen
++// from the cloud deck plus the sky, with forward scattering toward the sun.
++vec3 shadeSkyDome(vec4 t0, vec3 classic) {
++    vec3 d = normalize(vWorldRel);
++    float lumT = dot(t0.rgb, kLuma);
++    float bg = lumT;
++    vec3 bgC = t0.rgb;
++    for (int k = 1; k < 12; ++k) {
++        vec3 s = texture(tex0, vec2(vUV0.x + float(k) / 12.0, vUV0.y)).rgb;
++        float ls = dot(s, kLuma);
++        if (ls < bg) {
++            bg = ls;
++            bgC = s;
++        }
++    }
++    // (A small dead zone keeps the palette steps of the P8 sky textures from
++    // reading as clouds.)
++    float local = clamp((lumT - bg - 0.015) / max(0.92 - bg, 0.08) * litAtmo.w, 0.0, 1.0);
++    float cloud = max(local, litAtmo.y);
++    vec3 phys;
++    vec3 A = atmoClear(d, toLinear(bgC) * litAtmoDome.rgb, phys);
++    float c = dot(d, litSunDir.xyz);
++    const float g = 0.6;
++    float hg = (1.0 - g * g) / (4.0 * kPiA * pow(max(1.0 + g * g - 2.0 * g * c, 1e-4), 1.5));
++    float dirTerm = mix((0.3 + 2.0 * hg) / 0.46, 1.0, 0.8 * litAtmo.y);
++    vec3 light = litAtmoCloudSun.rgb * dirTerm + litAtmoCloudAmb.rgb;
++    vec3 texLin = toLinear(t0.rgb);
++    float lumC = max(dot(litAtmoDome.rgb, kLuma), 1e-5);
++    // Thin clouds: the mask assumes white cloud over the row's clear colour,
++    // so their own colour is white; the overcast deck keeps the texture's grey.
++    vec3 cPhys = mix(vec3(0.8), vec3(dot(texLin, kLuma)) * 1.25, litAtmo.y) * light;
++    vec3 cRelit = texLin * litAtmoDome.rgb * (dot(light, kLuma) / lumC);
++    vec3 C = mix(cRelit, cPhys, litAtmoDome.w);
++    vec3 L = mix(A, C, cloud);
++    vec3 disp = toDisplay(tonemapNeutral(L));
++    disp = max(mix(vec3(dot(disp, kLuma)), disp, litAtmoCloudAmb.w), vec3(0.0));
++    if (litAtmoCloudSun.w > 0.5) {
++        if (litAtmoCloudSun.w < 1.5) return vec3(cloud);
++        if (litAtmoCloudSun.w < 2.5) return toDisplay(tonemapNeutral(phys * litAtmo.x));
++        return d * 0.5 + 0.5;
++    }
++    return mix(classic, disp, litSkyFwd.w);
++}
++
+ // Classic night-eye desaturation, fog and alpha handling, shared tail.
+ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     if (alphaRef.z > 0.5) {
+@@ -606,7 +774,16 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+         float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
+         r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
+     }
+-    r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
++    vec3 fogC = fogColor.rgb;
++    if (vLitMode > 0.5 && vLitMode < 1.5) {
++        fogC = fogColorToward(vWorldRel);
++        if (litAtmo.z > 0.0) fogC = atmoFogColor(vWorldRel, fogC);
++    } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 0.999) {
++        // Pre-lit world draws (far horizon polygon, clouds, particles):
++        // the same aerial perspective as the lit geometry.
++        fogC = atmoFogColor(vWorldRel, fogColor.rgb);
++    }
++    r0.rgb = mix(fogC, r0.rgb, vFogTC);
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+ }
+ )";
+@@ -616,7 +793,13 @@ void main() {
+     vec4 t0 = texture(tex0, vUV0);
+     vec4 r0;
+     float ambientShare = 0.0;
+-    if (vLitMode > 0.5) {
++    if (vLitMode > 1.5) {
++        // Sky dome (atmosphere prototype): pre-lit classic colour under it.
++        vec4 classic = vColor * t0;
++        classic *= constColor;
++        r0.rgb = shadeSkyDome(t0, classic.rgb);
++        r0.a = classic.a;
++    } else if (vLitMode > 0.5) {
+         r0.rgb = shadeRemastered(t0.rgb * constColor.rgb, false, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+@@ -686,6 +869,12 @@ void main() {
+         float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
+         vec3 r = reflect(-v, vec3(0.0, 1.0, 0.0));
+         vec3 sky = toLinear(fogColorToward(vec3(r.x, 0.0, r.z)));
++        if (litAtmo.z > 0.0) {
++            // Atmosphere prototype: reflect the sky at the reflected elevation.
++            vec3 phys;
++            vec3 atmoSky = mix(atmoClear(normalize(vec3(r.x, max(r.y, 0.01), r.z)), toLinear(fogColor.rgb), phys), sky, litAtmo.y);
++            sky = mix(sky, atmoSky, litAtmo.z);
++        }
+         vec3 sparkle = litSun.rgb * pow(glint, 12.0) * 6.0 * (litSunDir.w * g_sunVisibility);
+         vec3 radiance = mix(toLinear(base), sky, fresnel * 0.6) + sparkle * litZenith.w;
+         r0 = vec4(toDisplay(tonemapNeutral(radiance)), vColor.a * t0.a);
+@@ -693,7 +882,12 @@ void main() {
+         r0 = vColor * t0;
+         r0.rgb += glint;
+     }
+-    r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
++    vec3 fogC = fogColor.rgb;
++    if (vLitMode > 0.5) {
++        fogC = fogColorToward(vWorldRel);
++        if (litAtmo.z > 0.0) fogC = atmoFogColor(vWorldRel, fogC);
++    }
++    r0.rgb = mix(fogC, r0.rgb, vFogTC);
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+ }
+ )";
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp
+index 02410ee..6776187 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp
+@@ -14,6 +14,17 @@ void EngineGL33::PrepareMesh(const Poseidon::render::LegacySpec& /*spec*/)
+ void EngineGL33::BeginMesh(TLVertexTable& mesh, const Poseidon::render::LegacySpec& /*spec*/)
+ {
+     BeginScreenPass();
++    // RESEARCH PROTOTYPE (atmosphere): the sky dome is the first draw of the
++    // frame, a software-T&L mesh before the world's first 3D pass, so it would
++    // draw through the classic programs. Open the world's remastered programs
++    // (and the frame constants) for it when the sky dome is to be shaded.
++    if (_lightingActive && _lighting.atmosphere > 0.0f && !_worldEffectsOn && !_worldSceneEnded &&
++        !_portraitTargetSize && !_nightVision && GScene && GScene->GetCamera())
++    {
++        _worldEffectsOn = true;
++        UpdateRemasterPrograms();
++        UploadLitFrameConstants();
++    }
+     _mesh = &mesh;
+ 
+     AddVertices(mesh.VertexData(), mesh.NVertex());
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..31dcc36 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1692,7 +1692,8 @@ void EngineGL33::InitPixelShaders()
+             int unit;
+         } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+                            {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
++                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit},
++                           {"skyLut", Poseidon::gl33lighting::kSkyLutUnit}};
+         for (const auto& ls : litSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);

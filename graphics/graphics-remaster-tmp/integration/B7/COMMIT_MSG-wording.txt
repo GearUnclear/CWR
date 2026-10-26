@@ -1,0 +1,11 @@
+docs: the B7 cost line carries the final +1.36 ms night reading
+
+The plan's B7 cost line stopped at the first reading (+0.57 ms frame
+minimum at the wet night town). The final reading after the glint rework,
+with other lanes' games running, is GPU frame on minus off +1.36 ms at the
+wet night town (minimum +1.30) and +0.78 at the low sun wet (minimum
++0.51). The night figure is above the 0.8 ms budget of section 3 until a
+quiet-GPU timing settles it. This was the one wording fix of the B7 lane
+review; the lane landed as cb3dd0d without it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -1,0 +1,8 @@
+static-base|mist/3/runs/static-base/static-base.mkv|--static --from 15 --amp
+static-percell|mist/3/runs/static-percell/static-percell.mkv|--static --from 15 --amp
+static-frozen|mist/3/runs/static-frozen/static-frozen.mkv|--static --from 15 --amp
+moving-percell|mist/3/runs/moving-percell/moving-percell.mkv|--from 15 --amp
+moving-base|mist/3/runs/moving-base/moving-base.mkv|--from 15 --amp
+clip-vanilla|v2/vanilla/valley_mist/valley_mist__vanilla.mkv|--from 285 --to 390 --amp
+clip-d91|v2/ud/valley_mist/valley_mist__ud.mkv|--from 285 --to 390 --amp
+clip-original|mist/backup_ud/valley_mist_before_mistfix/valley_mist__ud.mkv|--from 285 --to 390 --amp

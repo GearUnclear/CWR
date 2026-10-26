@@ -1,0 +1,29 @@
+graphics: the fog's jitter turns per cell, so the dawn valley's haze no longer pumps
+
+The froxel fog sampled every cell of the volume at the same sub-cell offset
+each frame (one golden-ratio jitter for the whole frame, jx/jy/jz in
+EngineGL33_PostFog.cpp) and kept 0.88 of the last frame. The history's
+leftover of that jitter then had the same sign over whole regions, so the far
+haze and the valley mist over the dawn valley brightened and darkened as one
+sheet from frame to frame. It showed in play at 60 fps (3x vanilla), and the
+trailer's stepped capture made it about twice as strong ("Moving out at dawn").
+
+psFogInject now turns the frame's offset per cell with an interleaved-gradient
+offset of the cell, and in depth also per slice, so neighbouring cells'
+residuals are independent and average out in the apply and the TAA. The
+frame's sequence, the history share and every uniform stay as they were; no
+C++ change beyond a comment.
+
+Measured on the trailer build with the clip's own staging (frames 270-389,
+bandmetric): band 0.506 -> 0.064, spikes 5568 -> 1 (vanilla 0.102, 0). At
+the froxel cell scale the frame-to-frame change is below vanilla's. The look
+is unchanged apart from a hair more mist (+1.6/255 in the band).
+
+New test: [remaster][fog][Shaders] pins the per-cell jitter in the shader and
+checks with a C++ mirror that a 5 x 5 cell block's history residual drops
+from 0.031 to under a quarter of that. Unit gate 347/347.
+
+Docs: ITERATIONS.md F1 and a roadmap log line. The trailer's dawn shot was
+reshot on the fixed build (valley band 0.567 -> 0.103, vanilla 0.112).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

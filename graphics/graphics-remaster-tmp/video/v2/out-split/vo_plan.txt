@@ -1,0 +1,19 @@
+PLAN ONLY (no audio): line lengths estimated at 2.3 words a second. Montage 133.40 s, 16 lines, target -16.0 LUFS.
+
+id                       start     end   len  window          over
+v2_00_intro               0.35    8.61  8.26    0.00-  9.00 +0.21  RUNS LONG
+v2_01_opening             9.95   16.91  6.96    9.60- 15.80 +1.71  RUNS LONG
+v2_02_valley_mist        17.21   24.16  6.96   15.80- 24.10 +0.66  RUNS LONG
+v2_03_pine_shafts        24.46   30.98  6.52   24.10- 32.60 -1.01
+v2_04_bay_reflections    32.95   38.17  5.22   32.60- 41.10 -2.33
+v2_05_outpost            41.45   50.15  8.70   41.10- 50.10 +0.65  RUNS LONG
+v2_06_cloud_shadows      50.45   55.67  5.22   50.10- 57.60 -1.33
+v2_07_sinai_camp         57.95   64.47  6.52   57.60- 65.60 -0.53
+v2_08_ambush             65.95   72.91  6.96   65.60- 74.10 -0.59
+v2_09_convoy             74.45   80.97  6.52   74.10- 81.90 -0.33
+v2_10_checkpoint         82.25   87.03  4.78   81.90- 89.50 -1.87
+v2_11_town_patrol        89.85   95.50  5.65   89.50- 97.80 -1.70
+v2_12_rain_town          98.15  104.24  6.09   97.80-106.10 -1.26
+v2_13_supply_run        106.45  112.97  6.52  106.10-114.80 -1.23
+v2_14_firefight         115.15  122.54  7.39  114.80-123.80 -0.66
+v2_99_outro             124.15  128.93  4.78  123.80-133.40 -3.87

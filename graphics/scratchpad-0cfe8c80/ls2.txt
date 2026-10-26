@@ -1,0 +1,7 @@
+    if (litFlags.z > 10.5) {
+        // Debug view 11: the combat shadow mask's first channel as this surface
+        // reads it, red where it falls outside last frame's mask.
+        float vis = combatShadowVis(1);
+        return g_combatMaskInside ? vec3(vis) : vec3(1.0, 0.0, 0.0);
+    }
+    vec3 display = litDisplay(radiance);

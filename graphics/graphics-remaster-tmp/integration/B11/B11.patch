@@ -1,0 +1,1743 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 91e2b0f..84849c6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -58,10 +58,12 @@ constexpr FeatureInfo kFeatures[] = {
+     {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", false, &FS::litClouds, ""},
+     {Feature::SkyCloudShadows, "skyCloudShadows", "Sky-matched cloud shadows", "clouds", "Sky and air", "B10", false,
+      &FS::skyCloudShadows, ""},
+-    {Feature::TerrainDetail, "terrainDetail", "Terrain detail", "texsharp", "Light and shadow", "B11", false,
+-     &FS::terrainDetail, ""},
+-    {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", false, &FS::sharpen,
+-     ""},
++    // B11 (texsharp): the terrain detail runs inside the ground draw, the luma
++    // sharpen in the post pass's sharpen stage (TAA's own sharpen when TAA runs).
++    {Feature::TerrainDetail, "terrainDetail", "Terrain detail", "texsharp", "Light and shadow", "B11", true,
++     &FS::terrainDetail, "ground"},
++    {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
++     "sharpen"},
+ };
+ static_assert(sizeof(kFeatures) / sizeof(kFeatures[0]) == kFeatureCount, "one FeatureInfo per Feature");
+ 
+@@ -166,6 +168,10 @@ struct KeyTable
+                         "world textures while TAA runs; negative = sharper", &LT::taaMipBias, -1.5f, 0.5f),
+             MakeSubKnob(Feature::Taa, "taaAlpha", "TAA current frame weight", "lower = steadier and softer",
+                         &LT::taaAlpha, 0.02f, 1.0f),
++            MakeSubKnob(Feature::TerrainDetail, "detailStrength", "Terrain grain strength",
++                        "grain from the square's own texture; 2 starts to look scaly", &LT::detailStrength, 0.0f, 3.0f),
++            MakeSubKnob(Feature::Sharpen, "sharpenStrength", "Luma sharpen strength",
++                        "contrast-adaptive, brightness only; runs only with TAA off", &LT::sharpenStrength, 0.0f, 1.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index b714467..ac5f954 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -122,6 +122,11 @@ struct LightingTuning
+     float taaSharpen = 0.5f;
+     float taaMipBias = -0.5f;
+     float taaAlpha = 0.1f;
++    // Terrain detail (features.terrainDetail, TerrainDetail.hpp): the strength
++    // of the grain the land takes from its own texture. The luma sharpen
++    // (features.sharpen, with TAA off): its contrast-adaptive strength, 0..1.
++    float detailStrength = 1.5f;
++    float sharpenStrength = 0.3f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+index 1d8b610..5414f5d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+@@ -24,7 +24,7 @@ constexpr PostStageInfo kStages[] = {
+     {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
+     {PostStage::Composite, "composite", "A3", true, false, Mark::CompositeEnd, Section::Composite},
+     {PostStage::Temporal, "taa", "A5", true, false, Mark::TemporalEnd, Section::Temporal},
+-    // A5 lands TAA's sharpen; B11's luma sharpen (with TAA off) joins it.
++    // A5 landed TAA's sharpen; B11's luma sharpen (with TAA off) joined it.
+     {PostStage::Sharpen, "sharpen", "A5", true, false, Mark::SharpenEnd, Section::Sharpen},
+     {PostStage::DebugView, "debugview", "A3", true, true, Mark::DebugViewEnd, Section::DebugView},
+ };
+@@ -78,8 +78,8 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+     const bool debugDepth = in.debugView == kDebugViewLinearDepth;
+     // The stages that can ask for the pass ask by their knob, switch or debug
+     // view, whatever this frame's conditions then decide for them.
+-    const bool asked =
+-        in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth || in.temporal;
++    const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
++                       in.temporal || in.lumaSharpen;
+     if (!asked)
+         return plan;
+ 
+@@ -101,6 +101,9 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+     // world: such a frame goes out as drawn and the history starts again.
+     if (in.temporal && in.worldDepth && in.glow)
+         plan.runs |= Bit(PostStage::Temporal) | Bit(PostStage::Sharpen);
++    // With TAA off, the luma sharpen: the same stage, alone.
++    else if (in.lumaSharpen)
++        plan.runs |= Bit(PostStage::Sharpen);
+     if (debugDepth)
+         plan.runs |= Bit(PostStage::DebugView);
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+index e235ed0..672984f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+@@ -86,6 +86,10 @@ struct PostFrameInputs
+     // (TemporalAA.hpp). The resolve and its sharpen then run unless this frame
+     // turned out to be a vehicle interior or to carry a screen overlay.
+     bool temporal = false;
++    // The luma sharpen (B11): the sharpen switch and its frame gate are on (so
++    // TAA is not running this frame) and its strength is above 0. The Sharpen
++    // stage then runs alone, on the composited frame.
++    bool lumaSharpen = false;
+ };
+ 
+ // A frame's stages: which run and the strengths the composite uses.
+@@ -108,7 +112,9 @@ struct PostStagePlan
+ // composite, which copies the resolved frame back as it always has. Each other
+ // stage runs when its own gate says so. Temporal and Sharpen run together: the
+ // composite then draws into the TAA input instead of the frame target, and
+-// the sharpen writes the resolved frame back into every sample of it.
++// the sharpen writes the resolved frame back into every sample of it. With TAA
++// off the luma sharpen asks for the pass and runs the Sharpen stage alone, on
++// the composite's output in the same TAA input; never both sharpens.
+ PostStagePlan PlanPostStages(const PostFrameInputs& in);
+ 
+ } // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index 53de77d..debd202 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -37,6 +37,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. The sum is clamped where classic clamps it, so where pools overlap a lamp-lit wall is never brighter than the original's. Glossy materials get normalised Blinn-Phong and a sky reflection. |
+ | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
+ | Temporal anti-aliasing | `TemporalAA.cpp`, `EngineGL33_PostTemporal.cpp` | The world is drawn with a sub-pixel jitter (Halton 2, 3 over 16 frames) and each frame is blended into a history of the frames before it (switch `taa`): the history is moved with the camera motion and the depth, clipped to the colours around each pixel and mixed in at 0.1, then sharpened back into the frame target (bounded, no halos). Alpha-tested leaves and wires stop crawling, sub-pixel wire stays continuous, and the AO and shaft sample patterns turn every frame so the history averages them. Smoke, fire, muzzle flashes, glass and rain take most of their own frame (a particle mask from a copy of the frame made between the opaque and the translucent objects), so they do not smear. MSAA stays under it; a texture LOD bias of -0.5 wins back texture detail. |
++| Terrain detail | `TerrainDetail.cpp`, the terrain main `s_psDetailRemasterMain` | Every terrain square is one 128 px texture over 50 m, so slopes at 10 to 150 m were a bilinear smear (switch `terrainDetail`). Each land fragment takes the luminance high-pass of its own square's texture, zoomed six times and read within a few metres (grass grain from grass, rock grain from rock), in 78 cm cells, each cell's patch turned by its own random angle and the four cells blended so the grain keeps its contrast, through a soft limiter. The authored detail texture keeps its grain as its mips average it out (at most 2x) with a rotated second sample against tiling. Brightness only, relative to the local mean: hue and average brightness stay as authored. It fades in past the near ground (the detail texture's pebbles stay as authored within about 10 m) and out by 300 m, and the sea, drawn by the same shader, is left alone (the backend flags the land's draws). With TAA off, a contrast-adaptive sharpen of brightness only (switch `sharpen`, strength 0.3) takes the place of TAA's sharpen. |
+ 
+ Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged
+ (inside the world pass they take the TAA jitter with the rest of the world).
+@@ -111,7 +112,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+   enabled feature on, for debugging. Every switch carries the step that makes
+   it do something; until then it is inert and its on and off look the same.
+   A feature's sub-knobs sit under its switch: TAA's `taaSharpen` (0.5),
+-  `taaMipBias` (-0.5) and `taaAlpha` (0.1).
++  `taaMipBias` (-0.5) and `taaAlpha` (0.1), the terrain detail's
++  `detailStrength` (1.5) and the luma sharpen's `sharpenStrength` (0.3).
+ - Dev overlay, **Lighting** tab, generated from the same registry: sliders for
+   exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
+   moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
+@@ -160,15 +162,17 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
+ | `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
+ | `Graphics/Remaster/TemporalAA.{hpp,cpp}` | TAA's math: the Halton jitter and the rule that gives a pass its jitter, the camera reprojection built in double precision (the C++ mirror of the resolve's), the cut and history-chain rules, the particle mask thresholds. Pure. |
++| `Graphics/Remaster/TerrainDetail.{hpp,cpp}` | The terrain detail's constants and the C++ mirror of the terrain main's math: the cell hash, rotation and patch position, the variance-preserving blend, the soft limiter, the near and far fades, the detail-kept boost and the anti-tiling weight, and the frame constants (zero when the switch or its gate is off). Pure. |
+ | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
+ | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
+ | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
+ | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+-| `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages; the GL helpers the post stages share. |
++| `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages (with TAA off the Sharpen stage is the luma sharpen); the GL helpers the post stages share. |
+ | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
+ | `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
+ | `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, the TAA stages running together and only on a jittered frame, and the backend running and marking every landed stage. |
+ | `tests/unit/.../Graphics/test_temporal_aa.cpp` | The jitter sequence and range, the jitter of a pass, the reprojection against hand values and camera pairs, cuts and the history chain, the jitter in the remastered vertex shaders only, the resolve and sharpen contracts, and source audits that the jitter and LOD bias never reach the HUD and that the opaque copy sits between the opaque and the translucent objects. |
++| `tests/unit/.../Graphics/test_terrain_detail.cpp` | The terrain detail's mirror (limiter, blend variance, rotation spread, locality and zoom of a cell's patch, the near fade on flat ground at 1080p, the 300 m fade, the 2x cap), its frame constants and gate, the shader's constants against the mirror's, and source audits that only the land's draws and only the terrain main take it. |
+ | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
+ | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainDetail.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainDetail.cpp
+new file mode 100644
+index 0000000..00fffa8
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainDetail.cpp
+@@ -0,0 +1,134 @@
++#include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
++
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::remaster::terrain_detail
++{
++
++namespace
++{
++
++constexpr float kTwoPi = 6.2831853f;
++
++float Fract(float x)
++{
++    return x - std::floor(x);
++}
++
++float Smoothstep(float a, float b, float x)
++{
++    const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++} // namespace
++
++std::array<float, 2> Hash2(float x, float y)
++{
++    // fract(p.xyx * (0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33);
++    // fract((p3.xx + p3.yz) * p3.zy)
++    float p0 = Fract(x * 0.1031f);
++    float p1 = Fract(y * 0.1030f);
++    float p2 = Fract(x * 0.0973f);
++    const float d = p0 * (p1 + 33.33f) + p1 * (p2 + 33.33f) + p2 * (p0 + 33.33f);
++    p0 += d;
++    p1 += d;
++    p2 += d;
++    return {Fract((p0 + p1) * p2), Fract((p0 + p2) * p1)};
++}
++
++float CellAngle(float cellX, float cellY)
++{
++    return kTwoPi * Hash2(cellX + 17.0f + kZoom, cellY + 17.0f + kZoom)[0];
++}
++
++std::array<float, 2> CellJitter(float cellX, float cellY)
++{
++    const std::array<float, 2> h = Hash2(cellX + kZoom, cellY + kZoom);
++    return {(h[0] - 0.5f) * kJitterTexels, (h[1] - 0.5f) * kJitterTexels};
++}
++
++std::array<float, 2> CellSample(float px, float py, float cellX, float cellY)
++{
++    const float cx = (cellX + 0.5f) * kCellTexels;
++    const float cy = (cellY + 0.5f) * kCellTexels;
++    const float rx = (px - cx) * kZoom;
++    const float ry = (py - cy) * kZoom;
++    const float a = CellAngle(cellX, cellY);
++    const float ca = std::cos(a);
++    const float sa = std::sin(a);
++    const std::array<float, 2> jit = CellJitter(cellX, cellY);
++    // GLSL mat2(cos, sin, -sin, cos) * rel: columns (cos, sin) and (-sin, cos).
++    return {cx + ca * rx - sa * ry + jit[0], cy + sa * rx + ca * ry + jit[1]};
++}
++
++CellBlend CellsAround(float px, float py)
++{
++    CellBlend b;
++    const float gx = px / kCellTexels - 0.5f;
++    const float gy = py / kCellTexels - 0.5f;
++    b.i0 = std::floor(gx);
++    b.j0 = std::floor(gy);
++    const float fx = gx - b.i0;
++    const float fy = gy - b.j0;
++    b.w = {(1.0f - fx) * (1.0f - fy), fx * (1.0f - fy), (1.0f - fx) * fy, fx * fy};
++    return b;
++}
++
++float VariancePreservingBlend(const std::array<float, 4>& w, const std::array<float, 4>& h)
++{
++    float acc = 0.0f;
++    float w2 = 0.0f;
++    for (int k = 0; k < 4; ++k)
++    {
++        acc += w[k] * h[k];
++        w2 += w[k] * w[k];
++    }
++    return acc / std::sqrt(std::max(w2, 1e-4f));
++}
++
++float SoftLimit(float m)
++{
++    return m / std::sqrt(1.0f + m * m / (kLimit * kLimit));
++}
++
++float DistanceFade(float distance)
++{
++    return 1.0f - Smoothstep(kFadeStart, kMaxDistance, distance);
++}
++
++float FootprintLod(float l1, float l2)
++{
++    const float pmax = std::max(l1, l2);
++    const float pmin = std::max(std::min(l1, l2), 1e-6f);
++    return std::log2(std::max(pmax / std::min(kMaxAniso, pmax / pmin), 1e-6f));
++}
++
++float NearFade(float baseLod)
++{
++    return Smoothstep(kNearFromLod, kNearToLod, baseLod + std::log2(kZoom));
++}
++
++float AntiTileWeight(float lod, float distance)
++{
++    return kAntiTile * std::clamp(lod, 0.0f, 1.0f) * DistanceFade(distance);
++}
++
++float KeptBoost(float lod, float distance)
++{
++    const float boost = std::clamp(std::exp2(lod * 0.5f * kKeptRate), 1.0f, kKeptCap);
++    const float t = Smoothstep(kKeptFadeStart, kMaxDistance, distance);
++    return boost + (1.0f - boost) * t;
++}
++
++std::array<float, 3> FrameConstants(const LightingTuning& tuning, bool gateOn)
++{
++    if (!gateOn || !FeatureOn(tuning.features, Feature::TerrainDetail))
++        return {0.0f, 0.0f, 0.0f};
++    return {std::max(tuning.detailStrength, 0.0f), kKeptRate, kAntiTile};
++}
++
++} // namespace Poseidon::remaster::terrain_detail
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainDetail.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainDetail.hpp
+new file mode 100644
+index 0000000..62250b2
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainDetail.hpp
+@@ -0,0 +1,136 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++
++#include <array>
++
++// Terrain detail for the remastered lighting (INTEGRATION-PLAN.md step B11,
++// research track texsharp): the shape constants and the math of the terrain
++// detail main (s_psDetailRemasterMain in EngineGL33_LightingShaders.cpp), as a
++// C++ mirror the tests check. Pure, no GL, no engine state.
++//
++// Why: every terrain square is one 128x128 texture over 50 m (39 cm per
++// texel), so from about 10 m to 150 m one texel covers 5 to 15 pixels and the
++// slope is a bilinear smear; the 128 px detail texture has averaged itself
++// flat by 20 m. Filtering is not the cause (16x anisotropy, full residency and
++// the stored mip chains were all ruled out by the research).
++//
++// What: three layers on the land's albedo, all luminance-only and relative to
++// the local mean, so hue and average brightness stay as authored:
++//   - self-detail: each fragment gets the luminance high-pass of its own
++//     square's texture, zoomed kZoom times, read near the fragment (grass
++//     from grass, rock from rock). Cells of kCellTexels base texels each show
++//     the patch around their own centre, rotated by a per-cell random angle
++//     (no parallel "mowing stripes") and offset by a per-cell jitter; the four
++//     cells around a fragment are blended so the blend keeps the grain's
++//     variance (sum w h / sqrt(sum w^2)), and the result goes through a soft
++//     limiter at +-kLimit. The zoomed sample takes the true zoomed
++//     derivatives, so it mip-maps away by itself once the base texture is no
++//     longer magnified (150 to 300 m). Near the eye the zoomed patch is itself
++//     magnified into soft blobs over the authored detail texture's pebbles
++//     (the first in-game look: blotches on the path at 2 to 8 m), so it fades
++//     in as its own mip level rises from kNearFromLod to kNearToLod (8 to 16 m
++//     on flat ground from a standing eye at 1080p);
++//   - detail kept: the detail texture's deviation from its mean is scaled up
++//     as the GPU picks coarser mips of it (2^(lod * kKeptRate / 2), capped at
++//     kKeptCap: the research's 4x painted dark blotches on paths), faded back
++//     to 1 by kMaxDistance;
++//   - anti-tiling: a second detail sample on a rotated, rescaled grid is
++//     mixed in (deviation rescaled by 1 / sqrt 2) where the detail texture is
++//     minified and its grain is boosted, so the kept grain does not print as a
++//     grid; the magnified detail near the eye stays as authored.
++// Everything fades out between kFadeStart and kMaxDistance and nothing is
++// evaluated beyond (the frame gate's "terrain within 300 m").
++//
++// Only the land gets it: the sea is drawn by the same pixel shader (the
++// landscape's water faces carry SpecularTexture, the land DetailTexture), so
++// the backend flags each draw (LitConstants litDetail.w).
++
++namespace Poseidon::remaster
++{
++
++namespace terrain_detail
++{
++
++constexpr float kZoom = 6.0f;                       // the zoomed patch is this many times finer than the base texture
++constexpr float kPatchTexels = 12.0f;               // span of one cell's patch in base texels (4.7 m)
++constexpr float kCellTexels = kPatchTexels / kZoom; // cell size in base texels (2 texels, 78 cm)
++constexpr float kJitterTexels = 6.0f;               // per-cell offset range of the patch (decorrelates neighbours)
++constexpr float kLimit = 0.4f;                      // soft limit of the self-detail modulation
++constexpr float kMinLocalMean = 0.04f;              // floor of the local mean the high-pass is relative to
++constexpr float kFadeStart = 220.0f;                // metres: everything starts to fade out here
++constexpr float kMaxDistance = 300.0f;              // metres: nothing beyond (the frame gate's range)
++constexpr float kKeptRate = 2.0f;                   // detail kept: boost exponent per mip level (research K2)
++constexpr float kKeptCap = 2.0f;                    // detail kept: largest boost of the detail grain
++constexpr float kKeptFadeStart = 150.0f;            // metres: the boost fades back to 1 from here to kMaxDistance
++constexpr float kAntiTile = 1.0f;                   // weight of the rotated second detail sample (research K1)
++constexpr float kNearFromLod = -3.5f;               // self-detail fades in from this mip level of the zoomed patch
++constexpr float kNearToLod = -2.5f;                 // ... to full at this one (a zoomed texel 11 to 6 pixels)
++constexpr float kMaxAniso = 16.0f;                  // the samplers' anisotropy, for the GPU's mip level estimate
++constexpr float kDefaultStrength = 1.5f;            // self-detail strength (LightingTuning::detailStrength)
++
++// The research's hash (Dave Hoskins' hash22): a cell index to two values in
++// [0, 1). Float arithmetic as in the shader.
++std::array<float, 2> Hash2(float x, float y);
++
++// Rotation of a cell's patch, radians in [0, 2 pi).
++float CellAngle(float cellX, float cellY);
++
++// The patch offset of a cell in base texels, each axis in
++// [-kJitterTexels / 2, kJitterTexels / 2).
++std::array<float, 2> CellJitter(float cellX, float cellY);
++
++// Where cell (cellX, cellY) reads the base texture for a fragment at base
++// texel position (px, py): its patch around its own centre, rotated and
++// zoomed kZoom times, plus its jitter. Base texels.
++std::array<float, 2> CellSample(float px, float py, float cellX, float cellY);
++
++// The four cells around a fragment and their bilinear weights (sum 1): cell
++// (i0 + (k & 1), j0 + (k >> 1)) has weight w[k].
++struct CellBlend
++{
++    float i0 = 0.0f, j0 = 0.0f;
++    std::array<float, 4> w{};
++};
++CellBlend CellsAround(float px, float py);
++
++// The blend of four cell values h that keeps their variance:
++// sum w h / sqrt(sum w^2).
++float VariancePreservingBlend(const std::array<float, 4>& w, const std::array<float, 4>& h);
++
++// m / sqrt(1 + (m / kLimit)^2): about m for small m, never beyond +-kLimit.
++float SoftLimit(float m);
++
++// 1 up to kFadeStart, 0 from kMaxDistance on (smoothstep in between).
++float DistanceFade(float distance);
++
++// The mip level the GPU picks with kMaxAniso anisotropy for a footprint whose
++// two screen axes cover l1 and l2 texels per pixel: log2 of the major axis
++// over min(kMaxAniso, major / minor).
++float FootprintLod(float l1, float l2);
++
++// Self-detail weight near the eye from the base texture's mip level `baseLod`
++// (FootprintLod of the base texture): the zoomed patch's level is baseLod +
++// log2(kZoom); 0 below kNearFromLod, 1 from kNearToLod on.
++float NearFade(float baseLod);
++
++// Weight of the anti-tiling sample at a mip level `lod` of the detail texture
++// and a distance: 0 while the detail is magnified, kAntiTile from one level
++// of minification on, faded out with DistanceFade.
++float AntiTileWeight(float lod, float distance);
++
++// Detail kept: the factor on the detail texture's deviation from its mean at
++// a mip level `lod` of the detail texture and a distance: 1 when magnified,
++// 2^(lod * kKeptRate / 2) beyond, at most kKeptCap, back to 1 by
++// kMaxDistance.
++float KeptBoost(float lod, float distance);
++
++// The terrain detail's frame constants (LitConstants litDetail.xyz): the
++// self-detail strength, the detail-kept rate and the anti-tiling weight. All
++// zero when the switch or its frame gate is off: the terrain main is then the
++// stock one exactly. litDetail.w (land or sea) is per draw.
++std::array<float, 3> FrameConstants(const LightingTuning& tuning, bool gateOn);
++
++} // namespace terrain_detail
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 2325e71..17fa63e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -146,7 +146,9 @@ As built in A1 (corrections to the bullets above):
+   own rows with `parent` set to its switch, so `triSetLighting` never accepts a knob that does
+   nothing. A5 added the first (`MakeSubKnob` in `FeatureSwitches.cpp`): `taaSharpen` 0.5,
+   `taaMipBias` -0.5 and `taaAlpha` 0.1, floats of `LightingTuning`, grouped under the track
+-  (`temporal`) with `parent` `taa`.
++  (`temporal`) with `parent` `taa`. B11 added `detailStrength` 1.5 under `terrainDetail` and
++  `sharpenStrength` 0.3 (the luma sharpen's CAS strength, not in the table above) under
++  `sharpen`, both in the `texsharp` group.
+ - `triFeatureState` answers `mode=.. gates=.. computed=.. frame=.. sun=.. night=.. sky=.. rain=..
+   fog=.. lights=.. landed=n/26 | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...` (spaces,
+   never `;`, so it rides in the UDCAP lines as `feat=`).
+@@ -273,6 +275,17 @@ slot nothing reads would change every remastered program for nothing. Its first
+ stochastic PCSS, which lands slot 59 (with 58 as padding) and fills it from the backend's TAA
+ sequence (`EngineGL33::_taa.sequence`, the jitter index that advances once per resolve).
+ 
++As built in B11 (a parallel lane on 193c735): `Detail` landed at 77 as planned. `LitConst` gained
++`Planned` = 58 (`PlannedCount` = 19 slots, declared in the block as one padding array
++`vec4 litPlanned[19]`), `Detail` = 77 and `Count` = 78; `LitConstPlanned` keeps the rows that
++have not landed (`Haze` 78 is now at `Count`). A lane that lands a lower slot splits the padding
++array around it. `litDetail.xyz` is per frame (self-detail strength, detail-kept rate,
++anti-tiling weight; zero while the switch or its gate is off) and `litDetail.w` per draw (1 for
++the land, 0 for the sea: both are drawn by PSDetail until B5 moves the sea out). The w flag is set
++in `ApplyPassState` from the draw's multitexture stage (`SelectTerrainDetailLayer` in
++`EngineGL33_State.cpp`, the land's faces carry `DetailTexture`, the sea's `SpecularTexture`) and
++uploads one slot only when it changes, a few times a frame.
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -471,6 +484,13 @@ particle mask's copy of the frame target between the opaque and the translucent
+ (`Engine::BeginTranslucentObjects`, called from `Scene::DrawObjectsAndShadowsPass2`), which lands
+ in the `world` section.
+ 
++As built in B11: the luma sharpen is the `Sharpen` stage run alone. `PostFrameInputs::lumaSharpen`
++(the `sharpen` switch and gate on this frame, `sharpenStrength` above 0, no TAA frame) asks for
++the pass by itself; the composite then draws into `taaInTex` (whenever `Sharpen` runs, not only
++under `Temporal`), and `PostSharpen` runs `psPostLumaSharpen` (CAS 3x3 on brightness only) from it
++into every sample of the frame target when the resolve did not run. Following A1's gate contract
++the luma sharpen also takes over where TAA holds off (a vehicle interior, an optics overlay).
++
+ ### 3.7 Porting method
+ 
+ No prototype is applied blind. Observed with `git apply --check --ignore-whitespace` against the
+@@ -1523,6 +1543,61 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+ - **Tests**: glslang; a C++ mirror of the cell rotation and limiter.
+ - **Effort**: 1.5 days.
+ 
++**Result (2026-10-18, uncommitted change on 193c735 in the scratch copy `gr-B11`, a parallel lane;
++evidence in `tmp/integration/B11/` of the graphics-remaster worktree, gitignored; light gate).**
++
++- Built: `Graphics/Remaster/TerrainDetail.{hpp,cpp}` (pure: the shape constants and the C++ mirror
++  of the terrain main's math: cell hash, rotation and patch position, variance-preserving blend,
++  soft limiter, near and far fades, detail-kept boost, anti-tiling weight, frame constants); the
++  glsl7 self-detail ported into `s_psDetailRemasterMain` (zoom 6, 2-texel cells, 4 rotated cells,
++  limiter 0.4, strength 1.5) with detail kept (`K2` rate 2, capped at 2x) and the anti-tiling
++  sample (`K1` 1); the `Detail` slot and the per-draw land flag (3.3); the luma CAS 0.3 as the
++  `Sharpen` stage with TAA off (`psPostLumaSharpen`, 3.6); `terrainDetail` and `sharpen` landed
++  with `detailStrength` and `sharpenStrength` (3.1). Gate: as A1 wrote it (terrain detail
++  "always", the luma sharpen only when TAA does not run); the 300 m range is in the shader.
++- Corrections to the bullets above. The first in-game look showed the self-detail painting soft
++  blotches over the near path (2 to 8 m: the zoomed patch is itself magnified there) and the
++  anti-tiling sample smearing the authored pebbles. The self-detail now fades in with the zoomed
++  patch's mip level (-3.5 to -2.5, 8 to 16 m on flat ground from a standing eye at 1080p) and the
++  anti-tiling sample enters only as the detail texture minifies (mip 0 to 1); the near path keeps
++  its authored look. Everything fades out between 220 and 300 m (the boost from 150 m: the
++  research's 400 m would step at the 300 m skip). The sea is drawn by PSDetail too (no `IsWater`):
++  the backend flags the land's draws (3.3), and the sea band of `coastline_sunset` is unchanged
++  (1.5% of its pixels over 2 levels, the TAA repeat noise; mean within 0.01 levels). Roads are
++  objects (PSNormal), never PSDetail, so they are skipped by construction; paths painted into
++  terrain textures cannot be told apart before B7's terrain classes and are not skipped. Not
++  ported: the optional 3-cell hex grid (the 4-cell look is the approved one) and `StreamFix`
++  (identity at the target render scale 1.0, no visible change in the research at 1.5, and a
++  residency change outside the switch registry; a follow-up for supersampled profiles).
++  Strength 1.5 stays: the low-frequency contrast of the ground band (luma std after a 10 px blur)
++  moved +0.7% on the Eden meadow, 0.0% on the hero view and +0.1% at noon, so the step adds grain,
++  not olive mottling (1.2 was the plan's fallback).
++- Off equals before (item 5): with TAA off a shot repeats to the pixel, and
++  `remastered,taa=0,terrainDetail=0,sharpen=0` on the B11 build against `remastered,taa=0` on the
++  base build at the hero view differs in 0 pixels in every band. With TAA on a shot is not
++  repeatable (the jitter phase at the shot): the base build's inert off and on at the hero view
++  differ in 81,069 pixels over 2 levels; the B11 build's off against the base build's shots in
++  57,490 and 73,568; `noon_fields` in 48.
++- On against off (TAA on, 1080p, 4x MSAA): ground band (rows 591 to 1080) mean luma +0.3% on the
++  hero view, +0.4% at noon, +0.1% on the meadow, +0.04% at `lowsun_fp`, +0.3% on the beach; R/G
++  and G/B unchanged to three decimals; sharpness (mean absolute Laplacian of the luma) +38.7%,
++  +17.0%, +5.9%, +0.5% (near gravel, faded) and +15.8%. With TAA off the terrain detail gives
++  +37% at the hero view and the luma sharpen a further +89%.
++- Motion (the walk of 7.3, 0.25 m per frame, 40 frames, TAA on): frame-to-frame change over
++  spatial detail 1.09 to 1.11x of off per band, second temporal difference over spatial detail
++  1.13 to 1.17x; the difference images show the grain moving with the ground in cell-sized blobs,
++  no single-pixel sparkle (`video/b11walk/b11walk__sbs.mp4`).
++- Cost (single readings, not a quiet machine): the `ground` section +0.29 ms (hero) and +0.37 ms
++  (noon) as medians of 3 interleaved rounds, +0.27 to +0.31 ms with TAA off at the hero view; the
++  luma sharpen 0.05 ms. The base build's inert off and on frame medians differed by +1.7 and
++  +3.3 ms in the same kind of rounds, so frame totals are noise here.
++- Gate: build 0 warnings; touched files clang-format clean (`EngineGL33_Queue.cpp` and
++  `EngineGL33_State.cpp`, not clean at the base, by `clang-format-diff.py` on the changed lines);
++  unit gate tags plus `[FeatureSwitches],[FeatureGates],[PostStages],[TemporalAA],[TerrainDetail],
++  [LumaSharpen]` 505/505; full suite the 6 known localisation failures only; smoke_abel 1/1 with
++  KHR_debug ids 131169, 131154 and 131218 only. 12 of 13 mutations turn their cases red (the 13th,
++  the luma sharpen also asked on a TAA frame, plans the same stages).
++
+ ---
+ 
+ ## 6. Conflict hot spots and how to sequence them
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index a0a7cd0..119e4f0 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -798,6 +798,13 @@ class EngineGL33 : public Engine
+     void UploadLitShadowDelta();
+     void UploadLitLights(const LightList& lights, float nightEffect);
+     void SetLitOpaque(bool opaque);
++    // The terrain detail (B11) runs on the land only: the land and the sea are
++    // both drawn by PSDetail, the land with the DetailTexture bit, the sea with
++    // SpecularTexture. Sets litDetail.w for the draw ApplyPassState prepares.
++    void SetLitTerrainDraw(bool land);
++    // ApplyPassState, for a PSDetail draw: the land or the sea, from the
++    // draw's multitexture stage (EngineGL33_State.cpp, next to SetTexture's).
++    void SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec);
+     // Writes slots [first, first + count) of the CPU LitConstants block to its
+     // buffer and records them in the buffer's mirror: every upload of the
+     // block, whole or partial, goes through here (plan section 5 A4).
+@@ -823,13 +830,14 @@ class EngineGL33 : public Engine
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
+         unsigned int progLinearDepth = 0, progDebugDepth = 0;
+         // TAA (EngineGL33_PostTemporal.cpp): the composite's output when the
+-        // resolve runs (RGBA8), the history ping-pong (RGBA16F: rgb colour, a
++        // Sharpen stage runs, after the resolve or alone (RGBA8), the history ping-pong (RGBA16F: rgb colour, a
+         // view depth in metres) and the opaque world copied before the
+         // translucent objects (RGBA8, the particle mask).
+         unsigned int taaInTex = 0, taaInFbo = 0;
+         unsigned int histTex[2] = {}, histFbo[2] = {};
+         unsigned int opaqueTex = 0, opaqueFbo = 0;
+         unsigned int progTaa = 0, progTaaSharpen = 0;
++        unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off (B11)
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 22acd2a..3ac1bcd 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -13,11 +13,13 @@
+ #include <Poseidon/Graphics/Core/PerfCounters.hpp>
+ #include <Poseidon/Graphics/Core/UboMirror.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
++#include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
++#include <array>
+ #include <cmath>
+ #include <cstring>
+ 
+@@ -509,10 +511,30 @@ void EngineGL33::UploadLitFrameConstants()
+     const float debug =
+         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
++    // Terrain detail (B11): zero while the switch or its gate is off, which
++    // leaves the terrain main the stock one. w (land or sea) is the draw's,
++    // set by SetLitTerrainDraw.
++    const std::array<float, 3> detail =
++        rm::terrain_detail::FrameConstants(_lighting, _featureGates[rm::Feature::TerrainDetail].on);
++    SetSlot(LitConst::Detail, detail[0], detail[1], detail[2], s_lit[LitConst::Detail * 4 + 3]);
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+ 
++void EngineGL33::SetLitTerrainDraw(bool land)
++{
++    // Per draw, but it changes only between the land and the sea (both drawn
++    // by PSDetail), a few times a frame: upload the one slot when it does.
++    if (!_lightingActive)
++        return;
++    float& w = s_lit[LitConst::Detail * 4 + 3];
++    const float value = land ? 1.0f : 0.0f;
++    if (w == value)
++        return;
++    w = value;
++    UploadLitSlots(LitConst::Detail, 1);
++}
++
+ void EngineGL33::PinCloudDrift(bool pinned, float x, float z)
+ {
+     s_cloudDriftPinned = pinned;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 25735cf..1b40ab4 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -61,6 +61,7 @@ enum class PostShader : int
+     DebugDepth,  // that depth drawn over the frame (the DebugView stage, debug view 5)
+     Taa,         // the TAA resolve into the history (the Temporal stage)
+     TaaSharpen,  // the resolved frame back into the frame target (the Sharpen stage)
++    LumaSharpen, // the composited frame, sharpened in brightness only, into the frame target (Sharpen, TAA off)
+     Count,
+ };
+ // The override file stem (vsPost, psPostAo, ...) and the assembled source.
+@@ -191,14 +192,20 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    // Slots 58 to 76 belong to features still to land (LitConstPlanned); the
++    // block declares them as one padding array (litPlanned) until they do.
++    Planned = 58, // PlannedCount vec4
++    Detail = 77,  // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
++    Count = 78,
+ };
+ constexpr int MaxLights = 8;
++constexpr int PlannedCount = Detail - Planned;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Planned == LightDir + MaxLights, "the planned padding follows the light slots");
++static_assert(Count == Detail + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ // The slots allocated to the features still to land (INTEGRATION-PLAN.md
+@@ -228,10 +235,12 @@ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+ constexpr int Water0 = 74;       // water: wave, swell, ripple, sky weight
+ constexpr int Water1 = 75;       // water: sheen, glint, sparkle
+ constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
+-constexpr int Detail = 77;       // texsharp: terrain detail constants
+-constexpr int Haze = 78;         // haze: the analytic fallback for blended surfaces
+-constexpr int End = 79;          // one past the last planned slot
+-static_assert(MatClass == LitConst::Count, "the planned slots follow the declared ones");
++// 77: texsharp's terrain detail landed (LitConst::Detail, B11).
++constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
++constexpr int End = 79;  // one past the last planned slot
++static_assert(MatClass == LitConst::Planned, "the planned slots start at the padding");
++static_assert(Canopy < LitConst::Detail && Haze >= LitConst::Count,
++              "a planned slot is in the padding (below the landed Detail) or after the declared ones");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+ } // namespace LitConstPlanned
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 9ad3e93..fc43b21 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -304,6 +304,8 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
++    vec4 litPlanned[19];  // 58-76: slots of the features still to land (padding)
++    vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
+ };
+ )";
+ 
+@@ -608,7 +610,95 @@ void main() {
+ }
+ )";
+ 
++// The terrain main (PSDetail: the land and, until the sea gets its own shader,
++// the sea). Terrain detail (B11, research track texsharp; the C++ mirror of
++// this math and its constants is Graphics/Remaster/TerrainDetail.hpp): every
++// terrain square is one 128 px texture over 50 m, so from about 10 m to 150 m
++// a texel covers 5 to 15 pixels and the slope is a bilinear smear. The land
++// takes three luminance-only layers, each relative to the local mean, so hue
++// and average brightness stay as authored:
++//   - self-detail: the luminance high-pass of the square's own texture, zoomed
++//     kTdZoom times and read near the fragment (grass from grass, rock from
++//     rock), in cells of kTdCellTexels texels, each cell's patch rotated by
++//     its own random angle; the four cells around the fragment are blended
++//     keeping the grain's variance, then softly limited at +-kTdLimit. The
++//     zoomed sample takes the zoomed derivatives, so it mip-maps away by itself
++//     once the base texture is no longer magnified. Near the eye, where the
++//     zoomed patch is itself magnified into soft blobs, it fades in with the
++//     patch's mip level (kTdNearFromLod to kTdNearToLod) and leaves the
++//     authored detail texture alone;
++//   - detail kept: the detail texture's deviation from its mean, scaled up as
++//     its mips average it out (at most kTdKeptCap);
++//   - anti-tiling: a rotated, rescaled second detail sample mixed in where the
++//     detail texture is minified.
++// litDetail.xyz is zero while the switch or its gate is off, and litDetail.w
++// is zero for the sea: then this is the stock terrain main. Nothing is
++// evaluated beyond kTdMaxDistance (the frame gate's "terrain within 300 m").
+ static const char s_psDetailRemasterMain[] = R"(
++// Terrain detail constants (Graphics/Remaster/TerrainDetail.hpp holds the same).
++const float kTdZoom = 6.0;
++const float kTdCellTexels = 2.0;
++const float kTdJitterTexels = 6.0;
++const float kTdLimit = 0.4;
++const float kTdMinLocalMean = 0.04;
++const float kTdFadeStart = 220.0;
++const float kTdMaxDistance = 300.0;
++const float kTdKeptCap = 2.0;
++const float kTdKeptFadeStart = 150.0;
++const float kTdNearFromLod = -3.5;
++const float kTdNearToLod = -2.5;
++const float kTdMaxAniso = 16.0;
++
++float tdLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
++
++// The mip level the GPU picks (kTdMaxAniso anisotropy) for uv derivatives dx,
++// dy on a texture of size ts.
++float tdLod(vec2 dx, vec2 dy, vec2 ts) {
++    float l1 = length(dx * ts);
++    float l2 = length(dy * ts);
++    float pmax = max(l1, l2);
++    float pmin = max(min(l1, l2), 1e-6);
++    return log2(max(pmax / min(kTdMaxAniso, pmax / pmin), 1e-6));
++}
++
++// Two values in [0, 1) from a cell index (Hoskins' hash22).
++vec2 tdHash2(vec2 p) {
++    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
++    p3 += dot(p3, p3.yzx + 33.33);
++    return fract((p3.xx + p3.yz) * p3.zy);
++}
++
++// Self-detail at base uv `uv` (texture size ts, uv derivatives dx, dy): the
++// variance-preserving blend of the four cells' relative luminance high-pass,
++// zero mean, about -1..1.
++float tdSelfDetail(vec2 uv, vec2 ts, vec2 dx, vec2 dy) {
++    vec2 p = uv * ts; // base texel space
++    vec2 g = p / kTdCellTexels - 0.5;
++    vec2 i0 = floor(g);
++    vec2 f = g - i0;
++    vec2 gx = dx * kTdZoom;
++    vec2 gy = dy * kTdZoom;
++    float lpLod = log2(kTdZoom);
++    float acc = 0.0;
++    float w2 = 0.0;
++    for (int k = 0; k < 4; ++k) {
++        vec2 o = vec2(float(k & 1), float(k >> 1));
++        vec2 cell = i0 + o;
++        vec2 c = (cell + 0.5) * kTdCellTexels;
++        vec2 jit = (tdHash2(cell + kTdZoom) - 0.5) * kTdJitterTexels;
++        float a = 6.2831853 * tdHash2(cell + 17.0 + kTdZoom).x;
++        mat2 R = mat2(cos(a), sin(a), -sin(a), cos(a));
++        vec2 q = (c + R * ((p - c) * kTdZoom) + jit) / ts;
++        float hf = tdLum(textureGrad(tex0, q, R * gx, R * gy).rgb);
++        float lp = tdLum(textureLod(tex0, q, lpLod).rgb);
++        vec2 ww = mix(1.0 - f, f, o);
++        float w = ww.x * ww.y;
++        acc += w * (hf - lp) / max(lp, kTdMinLocalMean);
++        w2 += w * w;
++    }
++    return acc * inversesqrt(max(w2, 1e-4));
++}
++
+ void main() {
+     vec4 t0 = texture(tex0, vUV0);
+     vec4 t1 = texture(tex1, vUV1);
+@@ -617,7 +707,41 @@ void main() {
+     if (vLitMode > 0.5) {
+         // Detail modulation stays in display space, as in the classic shader,
+         // so the terrain keeps its authored micro-contrast.
+-        vec3 albedo = t0.rgb * constColor.rgb * (t1.a * 2.0);
++        float detail = t1.a * 2.0;
++        float selfMod = 1.0;
++        if (litDetail.w > 0.5 && (litDetail.x > 0.0 || litDetail.y > 0.0 || litDetail.z > 0.0)) {
++            // Derivatives before the distance branch (non-uniform control flow).
++            vec2 d0x = dFdx(vUV0);
++            vec2 d0y = dFdy(vUV0);
++            vec2 d1x = dFdx(vUV1);
++            vec2 d1y = dFdy(vUV1);
++            float dist = length(vWorldRel);
++            if (dist < kTdMaxDistance) {
++                float fade = 1.0 - smoothstep(kTdFadeStart, kTdMaxDistance, dist);
++                vec2 ts0 = vec2(textureSize(tex0, 0));
++                float selfW = litDetail.x * fade *
++                             smoothstep(kTdNearFromLod, kTdNearToLod, tdLod(d0x, d0y, ts0) + log2(kTdZoom));
++                if (selfW > 0.0) {
++                    float m = selfW * tdSelfDetail(vUV0, ts0, d0x, d0y);
++                    selfMod = 1.0 + m * inversesqrt(1.0 + m * m / (kTdLimit * kTdLimit));
++                }
++                float lod1 = tdLod(d1x, d1y, vec2(textureSize(tex1, 0)));
++                float dMean = textureLod(tex1, vUV1, 16.0).a * 2.0; // the 1x1 mip: the texture's mean
++                float dev = detail - dMean;
++                float antiTile = litDetail.z * clamp(lod1, 0.0, 1.0) * fade;
++                if (antiTile > 0.0) {
++                    mat2 M = mat2(0.6, -0.8, 0.8, 0.6) * 0.87;
++                    float dB = textureGrad(tex1, M * vUV1 + vec2(0.31, 0.57), M * d1x, M * d1y).a * 2.0 - dMean;
++                    dev = mix(dev, (dev + dB) * 0.70710678, antiTile);
++                }
++                if (litDetail.y > 0.0) {
++                    float boost = clamp(exp2(lod1 * 0.5 * litDetail.y), 1.0, kTdKeptCap);
++                    dev *= mix(boost, 1.0, smoothstep(kTdKeptFadeStart, kTdMaxDistance, dist));
++                }
++                detail = max(dMean + dev, 0.0);
++            }
++        }
++        vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
+         r0.rgb = shadeRemastered(albedo, true, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index cd303bb..620e0b1 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -28,8 +28,9 @@
+ //     hides banding;
+ //   - Temporal and Sharpen (EngineGL33_PostTemporal.cpp): the TAA resolve of
+ //     the jittered frame with its history, then a bounded sharpen back into
+-//     the frame target. When they run the composite draws into the TAA input
+-//     instead of the frame target;
++//     the frame target; with TAA off, Sharpen alone is the luma sharpen
++//     (contrast-adaptive, brightness only, B11). When Sharpen runs the
++//     composite draws into the TAA input instead of the frame target;
+ //   - DebugView: a diagnostic view of a post buffer over the frame.
+ // The other stages of the list (tag readout, reflections, air, combat scatter)
+ // land with their features. The HUD then draws on top, untouched.
+@@ -195,8 +196,9 @@ void EngineGL33::DestroyPostTargets()
+ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+-    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
+-                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen})
++    for (unsigned int* prog :
++         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
++          &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -233,11 +235,12 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progDebugDepth = link(PostShader::DebugDepth);
+         p.progTaa = link(PostShader::Taa);
+         p.progTaaSharpen = link(PostShader::TaaSharpen);
++        p.progLumaSharpen = link(PostShader::LumaSharpen);
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+         if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite ||
+-            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen)
++            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen || !p.progLumaSharpen)
+         {
+             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
+             p.unavailable = true;
+@@ -419,6 +422,9 @@ void EngineGL33::EndWorldScene()
+     in.shaftWeight = f.shaftWeight;
+     // The world's passes were drawn with the TAA jitter (TaaWantedThisFrame).
+     in.temporal = taaFrame;
++    // With TAA off this frame, the luma sharpen when its switch and gate are on.
++    in.lumaSharpen = !taaFrame && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
++                     _featureGates[rm::Feature::Sharpen].on && _lighting.sharpenStrength > 0.0f;
+     f.plan = rm::PlanPostStages(in);
+     if (f.plan.Empty())
+         return; // nothing to add: leave the frame as drawn
+@@ -596,8 +602,9 @@ void EngineGL33::PostShafts(const PostFrame& f)
+ void EngineGL33::PostComposite(const PostFrame& f)
+ {
+     // Into the frame target (every sample gets the resolved value), or into
+-    // the TAA input when the resolve runs (its sharpen then writes the frame
+-    // target). A stage that did not run this frame reads as its 1x1 stand-in.
++    // the TAA input when the Sharpen stage runs (after the resolve, or alone as
++    // the luma sharpen), which then writes the frame target. A stage that did
++    // not run this frame reads as its 1x1 stand-in.
+     const PostTargets& p = _post;
+     const rm::PostStagePlan& plan = f.plan;
+     glUseProgram(p.progComposite);
+@@ -622,7 +629,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
+     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+-    DrawTo(plan.Runs(rm::PostStage::Temporal) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
++    DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
+ }
+ 
+ void EngineGL33::PostDebugView(const PostFrame& f)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index d7777d2..a9e0f5b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -509,6 +509,45 @@ void main() {
+ }
+ )";
+ 
++// Luma sharpen (the Sharpen stage with TAA off, step B11, the sharpen switch):
++// contrast-adaptive sharpening (AMD FidelityFX CAS, 3x3 form) of the
++// composited frame, applied to brightness only (the research's full-colour CAS
++// turned the coloured texel noise of pale ground into speckle), into every
++// sample of the frame target. Strength 0 to 1 sets the CAS peak from -1/8 to
++// -1/5; the backend skips the stage at strength 0.
++static const char s_psPostLumaSharpenGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D srcTex; // the composited frame
++uniform vec4 sharpen;     // x strength 0..1, yz size (pixels)
++out vec4 fragColor;
++vec3 tap(ivec2 ip, ivec2 o, ivec2 lim) { return texelFetch(srcTex, clamp(ip + o, ivec2(0), lim), 0).rgb; }
++void main() {
++    ivec2 ip = ivec2(gl_FragCoord.xy);
++    ivec2 lim = ivec2(sharpen.yz) - 1;
++    vec3 a = tap(ip, ivec2(-1, -1), lim);
++    vec3 b = tap(ip, ivec2(0, -1), lim);
++    vec3 c = tap(ip, ivec2(1, -1), lim);
++    vec3 d = tap(ip, ivec2(-1, 0), lim);
++    vec3 e = texelFetch(srcTex, ip, 0).rgb;
++    vec3 f = tap(ip, ivec2(1, 0), lim);
++    vec3 g = tap(ip, ivec2(-1, 1), lim);
++    vec3 h = tap(ip, ivec2(0, 1), lim);
++    vec3 i = tap(ip, ivec2(1, 1), lim);
++    // Soft minimum and maximum of the cross plus the corners.
++    vec3 mn = min(min(min(d, e), min(f, b)), h);
++    mn += min(mn, min(min(a, c), min(g, i)));
++    vec3 mx = max(max(max(d, e), max(f, b)), h);
++    mx += max(mx, max(max(a, c), max(g, i)));
++    // Less sharpening where the neighbourhood is near black or white.
++    vec3 amp = sqrt(clamp(min(mn, 2.0 - mx) / max(mx, vec3(1e-5)), 0.0, 1.0));
++    vec3 w = amp * (-1.0 / mix(8.0, 5.0, clamp(sharpen.x, 0.0, 1.0)));
++    vec3 sh = clamp((b * w + d * w + f * w + h * w + e) / (1.0 + 4.0 * w), 0.0, 1.0);
++    // Brightness only: the sharpened luma onto the pixel's own colour.
++    const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
++    fragColor = vec4(clamp(e + (dot(sh, kLuma) - dot(e, kLuma)), 0.0, 1.0), 1.0);
++}
++)";
++
+ // Every post shader, assembled from the raw strings above: these pieces in this
+ // order, in PostShader order. The lighting lab's glsl_extract.py reads this
+ // table to assemble the same sources.
+@@ -529,6 +568,7 @@ const PostShaderDef kPostShaders[] = {
+     {"psPostDebugDepth", {s_psPostDebugDepthGLSL}},
+     {"psPostTaa", {s_psPostTaaInputs, s_psPostTaaMain}},
+     {"psPostTaaSharpen", {s_psPostTaaSharpenGLSL}},
++    {"psPostLumaSharpen", {s_psPostLumaSharpenGLSL}},
+ };
+ constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
+ static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostTemporal.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostTemporal.cpp
+index e8f7258..51ca63c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostTemporal.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostTemporal.cpp
+@@ -16,6 +16,8 @@
+ //     mask;
+ //   - the post pass runs the Temporal stage (the resolve into the history)
+ //     and the Sharpen stage (the history back into the frame target).
++// With TAA off the Sharpen stage can run alone: the luma sharpen of step B11
++// (the sharpen switch), on the composited frame.
+ // Any frame without a resolve breaks the history chain (TaaHistoryUsable): the
+ // next resolve starts from its own frame, as does a camera cut or a new
+ // target size. The shadow-map depth pass has its own shaders and is never
+@@ -28,6 +30,8 @@
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ 
++#include <algorithm>
++
+ namespace rm = Poseidon::remaster;
+ using namespace Poseidon::gl33post;
+ 
+@@ -165,9 +169,21 @@ void EngineGL33::PostTemporal(const PostFrame& f)
+ 
+ void EngineGL33::PostSharpen(const PostFrame& f)
+ {
++    const PostTargets& p = _post;
++    if (!f.plan.Runs(rm::PostStage::Temporal))
++    {
++        // TAA off: the luma sharpen (B11) of the composited frame into every
++        // sample of the frame target.
++        glUseProgram(p.progLumaSharpen);
++        SetInt(p.progLumaSharpen, "srcTex", 0);
++        BindTex(0, p.taaInTex);
++        const float strength = std::clamp(_lighting.sharpenStrength, 0.0f, 1.0f);
++        Set4(p.progLumaSharpen, "sharpen", strength, static_cast<float>(f.w), static_cast<float>(f.h), 0.0f);
++        DrawTo(_ssaaFbo, f.w, f.h);
++        return;
++    }
+     // The resolved frame (the history the resolve just wrote) into every
+     // sample of the frame target.
+-    const PostTargets& p = _post;
+     glUseProgram(p.progTaaSharpen);
+     SetInt(p.progTaaSharpen, "srcTex", 0);
+     BindTex(0, p.histTex[_taa.historyIdx]);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 1359dd5..18bcd26 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -265,6 +265,12 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
+     {
+         SetTexture(tex, spec);
+     }
++
++    // PSDetail draws the land and the sea: the terrain detail runs on the land
++    // only. Other draws leave the flag as it is, so it changes only between
++    // land and sea.
++    if (d.shader == Poseidon::render::ShaderFamily::Detail)
++        SelectTerrainDetailLayer(spec);
+ }
+ 
+ void EngineGL33::QueuePrepareTriangle(const MipInfo& absMip, int specFlags)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+index a1e1ca4..2c33c3d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+@@ -701,6 +701,15 @@ void EngineGL33::SetTexture(const TextureGL33* tex, const Poseidon::render::Lega
+     SetMultiTexturing(format);
+ }
+ 
++void EngineGL33::SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec)
++{
++    // The multitexture stage of a PSDetail draw tells the land from the sea:
++    // the land's faces carry DetailTexture (the detail texture on slot 1), the
++    // sea's SpecularTexture (Landscape WaterFlags). The terrain detail (B11)
++    // runs on the land only.
++    SetLitTerrainDraw(Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture));
++}
++
+ void EngineGL33::SetMultiTexturing(VFormatSet format)
+ {
+     if (_formatSet == format)
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index ed6cc29..4fbf1ba 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -169,6 +169,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_ubo_mirror.cpp
+     Graphics/test_post_stages.cpp
+     Graphics/test_temporal_aa.cpp
++    Graphics/test_terrain_detail.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 411c31c..d3d3222 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -311,7 +311,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         CHECK(GetKeyValue(t, *k) == 0.3f);
+         CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.3,baseline"), *k) == sub.value);
+     }
+-    // No other switch has sub-knobs yet: every knob with a parent is TAA's.
++    // Every knob with a parent sits under a feature switch; TAA has three.
+     int children = 0;
+     for (int i = 0; i < LightingKeyCount(); ++i)
+     {
+@@ -319,13 +319,63 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         if (!k.parent)
+             continue;
+         INFO(k.key);
+-        CHECK(std::string_view(k.parent) == "taa");
+-        CHECK(FindFeature(k.parent) != nullptr);
+-        ++children;
++        REQUIRE(FindFeature(k.parent) != nullptr);
++        CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
++        if (std::string_view(k.parent) == "taa")
++            ++children;
+     }
+     CHECK(children == 3);
+ }
+ 
++TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
++          "[remaster][FeatureSwitches][TerrainDetail]")
++{
++    // B11 makes terrainDetail and sharpen do something: they are no longer
++    // inert, and the overlay shows where their GPU time goes (the ground draw,
++    // the post pass's sharpen stage).
++    const FeatureInfo& detail = GetFeatureInfo(Feature::TerrainDetail);
++    const FeatureInfo& sharpen = GetFeatureInfo(Feature::Sharpen);
++    CHECK(detail.landed);
++    CHECK(sharpen.landed);
++    CHECK(std::string_view(detail.step) == "B11");
++    CHECK(std::string_view(sharpen.step) == "B11");
++    CHECK(std::string_view(detail.gpuSection) == "ground");
++    CHECK(std::string_view(sharpen.gpuSection) == "sharpen");
++
++    // Plan 3.1's sub-knob detailStrength 1.5 under terrainDetail, and the luma
++    // sharpen's strength 0.3 (the research's CAS 0.3) under sharpen, both in
++    // the texsharp group.
++    struct Sub
++    {
++        const char* key;
++        const char* parent;
++        float value;
++    };
++    for (const Sub& sub : {Sub{"detailStrength", "terrainDetail", 1.5f}, Sub{"sharpenStrength", "sharpen", 0.3f}})
++    {
++        INFO(sub.key);
++        const LightingKey* k = FindLightingKey(sub.key);
++        REQUIRE(k != nullptr);
++        CHECK(k->kind == KeyKind::Knob);
++        REQUIRE(k->parent != nullptr);
++        CHECK(std::string_view(k->parent) == sub.parent);
++        CHECK(std::string_view(k->group) == "texsharp");
++        CHECK(KeyDefault(*k) == sub.value);
++        const LightingTuning t = Apply(std::string("remastered,") + sub.key + "=0.7");
++        CHECK(GetKeyValue(t, *k) == 0.7f);
++        CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.7,baseline"), *k) == sub.value);
++    }
++
++    // triFeatureState: the terrain detail runs by day and is not inert.
++    const LightingTuning t = Apply("remastered");
++    const FeatureGates g = ComputeFeatureGates(Noon(), t);
++    const std::string s = FeatureStateString(t, g);
++    INFO(s);
++    CHECK(s.find(" terrainDetail=1:on:per-terrain-fragment-within-300-m ") != std::string::npos);
++    CHECK(s.find(" sharpen=1:off:TAA-sharpens") != std::string::npos);
++    CHECK(s.find("sharpen=1:off:TAA-sharpens:inert") == std::string::npos);
++}
++
+ TEST_CASE("Feature gates: the light list runs with a lamp at night or a combat light", "[remaster][FeatureGates]")
+ {
+     GateInputs in = Night();
+@@ -592,12 +642,13 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
+-TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothing else has",
++TEST_CASE("Feature switches: the frame-cost switches, TAA and texsharp have landed, nothing else has",
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+     // classic): triFeatureState no longer marks them inert, and the overlay
+-    // shows the opaque objects' GPU section for them. A5 lands taa.
++    // shows the opaque objects' GPU section for them. A5 lands taa, B11
++    // terrainDetail and sharpen.
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -607,10 +658,11 @@ TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothin
+         INFO(info.key);
+         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
+         const bool taa = info.id == Feature::Taa;
+-        CHECK(info.landed == (perf || taa));
++        const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
++        CHECK(info.landed == (perf || taa || texsharp));
+         if (info.landed)
+         {
+-            CHECK(std::string_view(info.step) == (perf ? "A4" : "A5"));
++            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : "B11"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+     }
+@@ -620,7 +672,7 @@ TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothin
+     INFO(s);
+     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
+     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+-    CHECK(s.find("landed=3/26") != std::string::npos);
++    CHECK(s.find("landed=5/26") != std::string::npos);
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+index 501028c..a291fc1 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+@@ -257,6 +257,63 @@ TEST_CASE("Post stages: the TAA resolve and its sharpen run together on a jitter
+     CHECK(static_cast<int>(PostStage::Temporal) > static_cast<int>(PostStage::Composite));
+ }
+ 
++TEST_CASE("Post stages: with TAA off the luma sharpen runs the Sharpen stage alone",
++          "[Graphics][remaster][PostStages][LumaSharpen]")
++{
++    // Off (the sharpen switch, its gate or its strength): the plan of before.
++    PostFrameInputs in = Shipped();
++    const std::uint32_t before = PlanPostStages(in).runs;
++    in.lumaSharpen = true;
++    PostStagePlan plan = PlanPostStages(in);
++    CHECK(plan.runs == (before | Mask({PostStage::Sharpen})));
++    CHECK_FALSE(plan.Runs(PostStage::Temporal));
++    CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
++    CHECK(plan.bloomStrength == LightingTuning{}.bloom);
++
++    // It asks for the pass on its own.
++    PostFrameInputs bare;
++    bare.lumaSharpen = true;
++    CHECK(PlanPostStages(bare).runs == Mask({PostStage::Resolve, PostStage::Composite, PostStage::Sharpen}));
++
++    // One sharpen: a jittered frame gets TAA's (the backend never asks for both).
++    in.temporal = true;
++    plan = PlanPostStages(in);
++    CHECK(plan.Runs(PostStage::Temporal));
++    CHECK(plan.Runs(PostStage::Sharpen));
++
++    // Where TAA holds off (a vehicle interior, an optics overlay), the luma
++    // sharpen takes over (FeatureGates: "TAA gated off in an interior").
++    in.temporal = false;
++    in.worldDepth = false;
++    CHECK(PlanPostStages(in).Runs(PostStage::Sharpen));
++    in.worldDepth = true;
++    in.glow = false;
++    CHECK(PlanPostStages(in).Runs(PostStage::Sharpen));
++}
++
++TEST_CASE("Post stages: the luma sharpen reads the composite and writes the frame target",
++          "[Graphics][remaster][PostStages][LumaSharpen][GL33]")
++{
++    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
++    const std::string temporal = ReadTextFile(Gl33Dir() / "EngineGL33_PostTemporal.cpp");
++    REQUIRE_FALSE(post.empty());
++    REQUIRE_FALSE(temporal.empty());
++    // The composite goes to the TAA input whenever the Sharpen stage runs.
++    CHECK(CountOf(post, "DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);") == 1);
++    // The luma sharpen asks only on a frame without TAA, with its gate on.
++    CHECK(CountOf(post, "in.lumaSharpen = !taaFrame && _featureGates.computed") == 1);
++    CHECK(CountOf(post, "_featureGates[rm::Feature::Sharpen].on && _lighting.sharpenStrength > 0.0f;") == 1);
++    // The stage picks the luma sharpen when the resolve did not run, reading
++    // the composite's output.
++    const size_t at = temporal.find("void EngineGL33::PostSharpen(const PostFrame& f)");
++    REQUIRE(at != std::string::npos);
++    const std::string body = temporal.substr(at, temporal.find("\n}\n", at) - at);
++    CHECK(body.find("if (!f.plan.Runs(rm::PostStage::Temporal))") != std::string::npos);
++    CHECK(body.find("glUseProgram(p.progLumaSharpen);") != std::string::npos);
++    CHECK(body.find("BindTex(0, p.taaInTex);") != std::string::npos);
++    CHECK(body.find("glUseProgram(p.progTaaSharpen);") != std::string::npos);
++}
++
+ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[Graphics][remaster][PostStages]")
+ {
+     // Today the debug view is its only reader; the stages that land with a
+@@ -308,31 +365,39 @@ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][rem
+                         for (bool glow : {false, true})
+                             for (float weight : {0.0f, 0.5f})
+                                 for (bool temporal : {false, true})
+-                                {
+-                                    PostFrameInputs in;
+-                                    in.ambientOcclusion = ao;
+-                                    in.bloom = bloom;
+-                                    in.sunShafts = shafts;
+-                                    in.debugView = view;
+-                                    in.worldDepth = depth;
+-                                    in.glow = glow;
+-                                    in.shaftWeight = weight;
+-                                    in.temporal = temporal;
+-                                    const PostStagePlan plan = PlanPostStages(in);
+-                                    CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal);
+-                                    CHECK((plan.runs & ~landed) == 0u);
+-                                    // A pass that runs resolves first and composites.
+-                                    if (!plan.Empty())
++                                    for (bool luma : {false, true})
+                                     {
+-                                        CHECK(plan.Runs(PostStage::Resolve));
+-                                        CHECK(plan.Runs(PostStage::Composite));
++                                        PostFrameInputs in;
++                                        in.ambientOcclusion = ao;
++                                        in.bloom = bloom;
++                                        in.sunShafts = shafts;
++                                        in.debugView = view;
++                                        in.worldDepth = depth;
++                                        in.glow = glow;
++                                        in.shaftWeight = weight;
++                                        in.temporal = temporal;
++                                        in.lumaSharpen = luma;
++                                        const PostStagePlan plan = PlanPostStages(in);
++                                        CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal, luma);
++                                        CHECK((plan.runs & ~landed) == 0u);
++                                        // A pass that runs resolves first and composites.
++                                        if (!plan.Empty())
++                                        {
++                                            CHECK(plan.Runs(PostStage::Resolve));
++                                            CHECK(plan.Runs(PostStage::Composite));
++                                        }
++                                        // The resolve brings its sharpen, and never runs on a
++                                        // frame drawn without the jitter. The sharpen runs
++                                        // alone only as the luma sharpen.
++                                        if (plan.Runs(PostStage::Temporal))
++                                            CHECK(plan.Runs(PostStage::Sharpen));
++                                        if (!temporal)
++                                            CHECK_FALSE(plan.Runs(PostStage::Temporal));
++                                        if (plan.Runs(PostStage::Sharpen) && !plan.Runs(PostStage::Temporal))
++                                            CHECK(luma);
++                                        if (!luma)
++                                            CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
+                                     }
+-                                    // The resolve and its sharpen: both or neither,
+-                                    // and never on a frame drawn without the jitter.
+-                                    CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
+-                                    if (!temporal)
+-                                        CHECK_FALSE(plan.Runs(PostStage::Temporal));
+-                                }
+ }
+ 
+ TEST_CASE("Post stages: the backend runs every landed stage and marks it from the table",
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 4f058c2..4035e5e 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -825,8 +825,8 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+         ++post;
+     }
+     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
+-    // and its debug view, the TAA resolve and its sharpen
+-    CHECK(post == 11);
++    // and its debug view, the TAA resolve and its sharpen, the luma sharpen
++    CHECK(post == 12);
+ }
+ 
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+@@ -1085,6 +1085,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litLightColor", LC::LightColor, LC::MaxLights},
+         {"litLightAmb", LC::LightAmb, LC::MaxLights},
+         {"litLightDir", LC::LightDir, LC::MaxLights},
++        {"litPlanned", LC::Planned, LC::PlannedCount},
++        {"litDetail", LC::Detail, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+     auto checkBlock = [](const std::string& block)
+@@ -1144,8 +1146,11 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+             CHECK(CountOf(program, shared) == 1);
+     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
+ 
+-    // The planned slots continue the declared ones.
+-    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Count));
++    // The planned slots fill the padding below the landed Detail slot (B11), or
++    // continue after the declared ones.
++    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Planned));
++    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Detail) - 1);
++    CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.
+     std::ostringstream range;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_spec_bit_backend_boundary.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_spec_bit_backend_boundary.cpp
+index 262bc66..7624926 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_spec_bit_backend_boundary.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_spec_bit_backend_boundary.cpp
+@@ -56,7 +56,8 @@ TEST_CASE("Spec-bit boundary: typed spec reads in the backend match the whitelis
+         // PrepareMeshTL time.
+         {"EngineGL33_Mesh.cpp", {"Material::DisableSun", "Routing::IsColored"}},
+         // Multitexture stage selection in SetTexture — slot-1 binding
+-        // decision, upstream of the descriptor.
++        // decision, upstream of the descriptor. SelectTerrainDetailLayer reads
++        // the same stage to tell the land from the sea (terrain detail, B11).
+         {"EngineGL33_State.cpp", {"Backend::DetailTexture", "Backend::SpecularTexture", "Backend::GrassTexture"}},
+     };
+ 
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_terrain_detail.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_terrain_detail.cpp
+new file mode 100644
+index 0000000..7abee8a
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_terrain_detail.cpp
+@@ -0,0 +1,383 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <filesystem>
++#include <fstream>
++#include <regex>
++#include <sstream>
++#include <string>
++
++// Terrain detail (INTEGRATION-PLAN.md step B11, research track texsharp;
++// Graphics/Remaster/TerrainDetail.hpp): the C++ mirror of the terrain main's
++// self-detail (the cell rotation, the locality of each cell's patch, the
++// variance-preserving blend, the soft limiter), the detail-kept boost and the
++// distance fade, the frame constants that switch it off, and the contracts
++// between the mirror, the shader and the backend: the shader's constants are
++// the mirror's, and only the land's draws get it.
++
++using namespace Poseidon::remaster;
++namespace td = Poseidon::remaster::terrain_detail;
++namespace gl = Poseidon::gl33lighting;
++
++namespace
++{
++
++constexpr int kPSDetail = 1; // PixelShaderID PSDetail (EngineGL33.hpp): the terrain main
++
++std::string ReadTextFile(const std::filesystem::path& p)
++{
++    std::ifstream f(p);
++    if (!f.is_open())
++        return {};
++    std::stringstream ss;
++    ss << f.rdbuf();
++    return ss.str();
++}
++
++std::filesystem::path Gl33Dir()
++{
++    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33";
++}
++
++LightingTuning Apply(const std::string& setting)
++{
++    LightingTuning t{};
++    bool modeSet = false;
++    const std::string why = ApplyLightingSetting(t, setting, modeSet);
++    INFO(setting << ": " << why);
++    REQUIRE(why.empty());
++    return t;
++}
++
++// A small deterministic generator of unit-variance values (uniform in
++// [-sqrt 3, sqrt 3]).
++struct UnitNoise
++{
++    std::uint32_t state = 12345u;
++    float operator()()
++    {
++        state = state * 1664525u + 1013904223u;
++        const float u = static_cast<float>(state >> 8) / static_cast<float>(1u << 24);
++        return (u * 2.0f - 1.0f) * 1.7320508f;
++    }
++};
++
++} // namespace
++
++TEST_CASE("Terrain detail: the soft limiter keeps small grain and never passes 0.4", "[remaster][TerrainDetail]")
++{
++    CHECK(td::SoftLimit(0.0f) == 0.0f);
++    CHECK(td::SoftLimit(0.05f) == Catch::Approx(0.05f).epsilon(0.01));
++    float last = -1.0f;
++    for (float m = -100.0f; m <= 100.0f; m += 0.25f)
++    {
++        CAPTURE(m);
++        const float v = td::SoftLimit(m);
++        CHECK(std::fabs(v) < td::kLimit);
++        CHECK(td::SoftLimit(-m) == Catch::Approx(-v)); // odd: no brightness bias
++        CHECK(v >= last);                              // monotone (flat only where float runs out of precision)
++        if (std::fabs(m) <= 4.0f)
++            CHECK(v > last);
++        last = v;
++    }
++    CHECK(td::kLimit == 0.4f);
++}
++
++TEST_CASE("Terrain detail: four cells blend with bilinear weights that keep the grain's variance",
++          "[remaster][TerrainDetail]")
++{
++    // Across a cell, the four weights stay a bilinear partition of one.
++    for (float px = 0.0f; px < 8.0f; px += 0.37f)
++        for (float py = 0.0f; py < 8.0f; py += 0.41f)
++        {
++            CAPTURE(px, py);
++            const td::CellBlend b = td::CellsAround(px, py);
++            float sum = 0.0f;
++            for (float w : b.w)
++            {
++                CHECK(w >= 0.0f);
++                CHECK(w <= 1.0f);
++                sum += w;
++            }
++            CHECK(sum == Catch::Approx(1.0f));
++            // The fragment lies between the four cell centres.
++            CHECK((b.i0 + 0.5f) * td::kCellTexels <= px + 1e-4f);
++            CHECK((b.i0 + 1.5f) * td::kCellTexels >= px - 1e-4f);
++        }
++
++    // Independent unit-variance cells: the blend keeps variance 1 anywhere in
++    // the cell, where a plain weighted mean drops to 1/4 at the cell corner
++    // shared by four (the grain would wash out between cell centres).
++    for (const std::array<float, 4>& w :
++         {std::array<float, 4>{1.0f, 0.0f, 0.0f, 0.0f}, std::array<float, 4>{0.25f, 0.25f, 0.25f, 0.25f},
++          std::array<float, 4>{0.42f, 0.18f, 0.28f, 0.12f}})
++    {
++        UnitNoise noise;
++        double sumBlend = 0.0, sumBlend2 = 0.0, sumMean2 = 0.0;
++        constexpr int kSamples = 40000;
++        for (int i = 0; i < kSamples; ++i)
++        {
++            const std::array<float, 4> h = {noise(), noise(), noise(), noise()};
++            const float blend = td::VariancePreservingBlend(w, h);
++            const float mean = w[0] * h[0] + w[1] * h[1] + w[2] * h[2] + w[3] * h[3];
++            sumBlend += blend;
++            sumBlend2 += blend * blend;
++            sumMean2 += mean * mean;
++        }
++        const double var = sumBlend2 / kSamples - (sumBlend / kSamples) * (sumBlend / kSamples);
++        CAPTURE(w[0], w[1], w[2], w[3], var);
++        CHECK(var == Catch::Approx(1.0).epsilon(0.05));
++        if (w[0] == 0.25f)
++            CHECK(sumMean2 / kSamples == Catch::Approx(0.25).epsilon(0.05));
++    }
++}
++
++TEST_CASE("Terrain detail: every cell turns its patch by its own angle, from a well spread hash",
++          "[remaster][TerrainDetail]")
++{
++    // Deterministic, in range, and spread evenly over the turn: the unrotated
++    // research cells printed parallel "mowing stripes" on the Eden meadow.
++    constexpr int kBins = 8;
++    int bins[kBins] = {};
++    int sameAsLeft = 0;
++    constexpr int kN = 64;
++    for (int j = 0; j < kN; ++j)
++        for (int i = 0; i < kN; ++i)
++        {
++            const float a = td::CellAngle(static_cast<float>(i), static_cast<float>(j));
++            CHECK(a == td::CellAngle(static_cast<float>(i), static_cast<float>(j)));
++            REQUIRE(a >= 0.0f);
++            REQUIRE(a < 6.2831853f);
++            ++bins[static_cast<int>(a / 6.2831853f * kBins)];
++            if (i > 0 && std::fabs(a - td::CellAngle(static_cast<float>(i - 1), static_cast<float>(j))) < 1e-3f)
++                ++sameAsLeft;
++            const std::array<float, 2> jit = td::CellJitter(static_cast<float>(i), static_cast<float>(j));
++            CHECK(std::fabs(jit[0]) <= td::kJitterTexels * 0.5f);
++            CHECK(std::fabs(jit[1]) <= td::kJitterTexels * 0.5f);
++        }
++    const float expected = static_cast<float>(kN * kN) / kBins;
++    for (int b = 0; b < kBins; ++b)
++    {
++        CAPTURE(b, bins[b]);
++        CHECK(bins[b] > expected * 0.75f);
++        CHECK(bins[b] < expected * 1.25f);
++    }
++    CHECK(sameAsLeft < 4);
++}
++
++TEST_CASE("Terrain detail: a cell reads its own neighbourhood, six times finer", "[remaster][TerrainDetail]")
++{
++    // While the fragment is inside a cell's own area, that cell reads the
++    // texture within half a patch (plus its jitter) of its centre: grass from
++    // grass, rock from rock, a few metres at most (39 cm per base texel).
++    const float reach = (td::kPatchTexels * 0.5f + td::kJitterTexels * 0.5f) * std::sqrt(2.0f);
++    CHECK(reach * 0.39f < 5.0f);
++    for (int cell = 0; cell < 50; ++cell)
++    {
++        const float ci = static_cast<float>(cell * 7 % 23);
++        const float cj = static_cast<float>(cell * 5 % 19);
++        const float cx = (ci + 0.5f) * td::kCellTexels;
++        const float cy = (cj + 0.5f) * td::kCellTexels;
++        for (float dx : {-0.5f, -0.2f, 0.0f, 0.3f, 0.5f})
++            for (float dy : {-0.5f, 0.1f, 0.5f})
++            {
++                const float px = cx + dx * td::kCellTexels;
++                const float py = cy + dy * td::kCellTexels;
++                const std::array<float, 2> q = td::CellSample(px, py, ci, cj);
++                CAPTURE(ci, cj, dx, dy, q[0], q[1]);
++                CHECK(std::hypot(q[0] - cx, q[1] - cy) <= reach + 1e-3f);
++                // One base texel of fragment motion moves the sample kZoom
++                // texels: the patch is the texture zoomed, turned, not stretched.
++                const std::array<float, 2> qx = td::CellSample(px + 0.25f, py, ci, cj);
++                const std::array<float, 2> qy = td::CellSample(px, py + 0.25f, ci, cj);
++                CHECK(std::hypot(qx[0] - q[0], qx[1] - q[1]) == Catch::Approx(0.25f * td::kZoom).epsilon(1e-3));
++                CHECK(std::hypot(qy[0] - q[0], qy[1] - q[1]) == Catch::Approx(0.25f * td::kZoom).epsilon(1e-3));
++            }
++    }
++    CHECK(td::kZoom == 6.0f);
++    CHECK(td::kCellTexels == 2.0f);
++}
++
++TEST_CASE("Terrain detail: everything fades out by 300 m, where the frame gate ends", "[remaster][TerrainDetail]")
++{
++    CHECK(td::kMaxDistance == 300.0f);
++    CHECK(td::DistanceFade(0.0f) == 1.0f);
++    CHECK(td::DistanceFade(td::kFadeStart) == 1.0f);
++    CHECK(td::DistanceFade(td::kMaxDistance) == 0.0f);
++    float last = 1.0f;
++    for (float d = td::kFadeStart; d <= td::kMaxDistance; d += 5.0f)
++    {
++        const float f = td::DistanceFade(d);
++        CHECK(f <= last);
++        last = f;
++    }
++    // The gate's reason names the same range.
++    const LightingTuning t = Apply("remastered");
++    const std::string s = FeatureStateString(t, ComputeFeatureGates(GateInputs{}, t));
++    CHECK(s.find("terrainDetail=1:on:per-terrain-fragment-within-300-m") != std::string::npos);
++
++    // Detail kept: no boost where the detail texture is magnified, 2^lod
++    // beyond, never above 2x (the research's 4x painted dark blotches on
++    // paths), and back to 1 by the end of the range, so nothing steps there.
++    CHECK(td::KeptBoost(-2.0f, 10.0f) == 1.0f);
++    CHECK(td::KeptBoost(0.0f, 10.0f) == 1.0f);
++    CHECK(td::KeptBoost(0.5f, 10.0f) == Catch::Approx(std::sqrt(2.0f)));
++    for (float lod = 0.0f; lod < 10.0f; lod += 0.5f)
++    {
++        CAPTURE(lod);
++        CHECK(td::KeptBoost(lod, 10.0f) <= 2.0f);
++        CHECK(td::KeptBoost(lod, td::kMaxDistance) == 1.0f);
++        CHECK(td::KeptBoost(lod, td::kMaxDistance - 1.0f) < 1.01f);
++    }
++    CHECK(td::KeptBoost(4.0f, 10.0f) == 2.0f);
++    CHECK(td::kKeptCap == 2.0f);
++}
++
++TEST_CASE("Terrain detail: the grain fades in past the near ground, which keeps its authored pebbles",
++          "[remaster][TerrainDetail]")
++{
++    // The GPU's mip level with 16x anisotropy: log2 of the footprint's major
++    // axis over min(16, major / minor).
++    CHECK(td::FootprintLod(4.0f, 4.0f) == Catch::Approx(2.0f));
++    CHECK(td::FootprintLod(0.5f, 0.5f) == Catch::Approx(-1.0f));
++    CHECK(td::FootprintLod(1.0f, 32.0f) == Catch::Approx(1.0f));
++    CHECK(td::FootprintLod(2.0f, 8.0f) == Catch::Approx(1.0f));
++
++    // A standing eye (1.75 m) over flat ground at 1080p with the capture
++    // camera (1920 px across at fov 0.7: focal length 960 / 0.7 px), base
++    // texels of 50 m / 128: the zoomed patch's blobs are too coarse near the
++    // eye, so the self-detail is off at 5 m and full from 20 m.
++    constexpr float kFocal = 960.0f / 0.7f;
++    constexpr float kTexel = 50.0f / 128.0f;
++    constexpr float kEye = 1.75f;
++    auto flatGround = [&](float d)
++    {
++        const float across = d / (kFocal * kTexel);
++        const float along = across * (d * d + kEye * kEye) / (kEye * d);
++        return td::NearFade(td::FootprintLod(across, along));
++    };
++    CHECK(flatGround(3.0f) == 0.0f);
++    CHECK(flatGround(5.0f) == 0.0f);
++    CHECK(flatGround(20.0f) == 1.0f);
++    CHECK(flatGround(100.0f) == 1.0f);
++    float last = 0.0f;
++    for (float d = 2.0f; d < 40.0f; d += 0.5f)
++    {
++        const float w = flatGround(d);
++        CHECK(w >= last);
++        last = w;
++    }
++    // A slope facing the eye 30 m out (the hero view's hillside): full.
++    CHECK(td::NearFade(td::FootprintLod(30.0f / (kFocal * kTexel), 30.0f / (kFocal * kTexel))) == 1.0f);
++    CHECK(td::NearFade(td::kNearToLod - std::log2(td::kZoom)) == 1.0f);
++    CHECK(td::NearFade(td::kNearFromLod - std::log2(td::kZoom)) == 0.0f);
++
++    // The second detail sample only where the detail texture is minified: the
++    // magnified detail near the eye stays exactly as authored.
++    CHECK(td::AntiTileWeight(-2.0f, 5.0f) == 0.0f);
++    CHECK(td::AntiTileWeight(0.0f, 5.0f) == 0.0f);
++    CHECK(td::AntiTileWeight(0.5f, 5.0f) == Catch::Approx(0.5f * td::kAntiTile));
++    CHECK(td::AntiTileWeight(3.0f, 5.0f) == td::kAntiTile);
++    CHECK(td::AntiTileWeight(3.0f, td::kMaxDistance) == 0.0f);
++}
++
++TEST_CASE("Terrain detail: its frame constants are zero when the switch or its gate is off",
++          "[remaster][TerrainDetail][FeatureGates]")
++{
++    const LightingTuning on = Apply("remastered");
++    CHECK(td::FrameConstants(on, true) == std::array<float, 3>{1.5f, td::kKeptRate, td::kAntiTile});
++    CHECK(td::FrameConstants(on, false) == std::array<float, 3>{0.0f, 0.0f, 0.0f});
++    CHECK(td::FrameConstants(Apply("remastered,terrainDetail=0"), true) == std::array<float, 3>{0.0f, 0.0f, 0.0f});
++    CHECK(td::FrameConstants(Apply("baseline"), true) == std::array<float, 3>{0.0f, 0.0f, 0.0f});
++    CHECK(td::FrameConstants(Apply("remastered,detailStrength=0.7"), true)[0] == 0.7f);
++    CHECK(td::FrameConstants(Apply("remastered,detailStrength=-1"), true)[0] == 0.0f);
++
++    // The gate: on by day and night in the remastered world, off in classic
++    // and under night vision (the world then draws through the classic programs).
++    GateInputs in;
++    CHECK(ComputeFeatureGates(in, on)[Feature::TerrainDetail].on);
++    CHECK_FALSE(ComputeFeatureGates(in, Apply("classic"))[Feature::TerrainDetail].on);
++    CHECK_FALSE(ComputeFeatureGates(in, Apply("remastered,terrainDetail=0"))[Feature::TerrainDetail].on);
++    in.nightVision = true;
++    CHECK_FALSE(ComputeFeatureGates(in, on)[Feature::TerrainDetail].on);
++}
++
++TEST_CASE("Terrain detail: the terrain main takes the mirror's constants and runs on the land only",
++          "[Graphics][Shaders][remaster][TerrainDetail]")
++{
++    const std::string main = gl::RemasterFragmentMain(kPSDetail);
++    REQUIRE(main.find("tdSelfDetail(") != std::string::npos);
++
++    // Every shape constant of the shader is the mirror's.
++    struct Constant
++    {
++        const char* glsl;
++        float value;
++    };
++    const Constant constants[] = {
++        {"kTdZoom", td::kZoom},
++        {"kTdCellTexels", td::kCellTexels},
++        {"kTdJitterTexels", td::kJitterTexels},
++        {"kTdLimit", td::kLimit},
++        {"kTdMinLocalMean", td::kMinLocalMean},
++        {"kTdFadeStart", td::kFadeStart},
++        {"kTdMaxDistance", td::kMaxDistance},
++        {"kTdKeptCap", td::kKeptCap},
++        {"kTdKeptFadeStart", td::kKeptFadeStart},
++        {"kTdNearFromLod", td::kNearFromLod},
++        {"kTdNearToLod", td::kNearToLod},
++        {"kTdMaxAniso", td::kMaxAniso},
++    };
++    for (const Constant& c : constants)
++    {
++        CAPTURE(c.glsl);
++        std::smatch m;
++        const std::regex re(std::string("const float ") + c.glsl + R"( = (-?[0-9.]+);)");
++        REQUIRE(std::regex_search(main, m, re));
++        CHECK(std::stof(m[1].str()) == c.value);
++    }
++
++    // Off (litDetail.xyz zero) or the sea (litDetail.w zero): the stock terrain.
++    CHECK(main.find("if (litDetail.w > 0.5 && (litDetail.x > 0.0 || litDetail.y > 0.0 || litDetail.z > 0.0))") !=
++          std::string::npos);
++    CHECK(main.find("float detail = t1.a * 2.0;") != std::string::npos);
++    CHECK(main.find("vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);") != std::string::npos);
++    // Nothing beyond the gate's range; derivatives taken before that branch.
++    const size_t branch = main.find("if (dist < kTdMaxDistance)");
++    REQUIRE(branch != std::string::npos);
++    CHECK(main.find("dFdx(vUV0)") < branch);
++    CHECK(main.find("dFdx(vUV1)") < branch);
++    CHECK(main.find("texture(", branch) == std::string::npos); // only explicit-gradient or -LOD reads inside
++    // The other mains do not read it.
++    for (int ps : {0, 2, 3})
++    {
++        CAPTURE(ps);
++        const char* other = gl::RemasterFragmentMain(ps);
++        REQUIRE(other != nullptr);
++        CHECK(std::string(other).find("litDetail") == std::string::npos);
++    }
++
++    // The backend: the frame constants from the mirror and the gate, and the
++    // land flag from the draw's multitexture stage for every PSDetail draw.
++    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
++    const std::string queue = ReadTextFile(Gl33Dir() / "EngineGL33_Queue.cpp");
++    const std::string state = ReadTextFile(Gl33Dir() / "EngineGL33_State.cpp");
++    REQUIRE_FALSE(lighting.empty());
++    CHECK(
++        lighting.find("rm::terrain_detail::FrameConstants(_lighting, _featureGates[rm::Feature::TerrainDetail].on)") !=
++        std::string::npos);
++    CHECK(queue.find(
++              "if (d.shader == Poseidon::render::ShaderFamily::Detail)\n        SelectTerrainDetailLayer(spec);") !=
++          std::string::npos);
++    CHECK(state.find(
++              "SetLitTerrainDraw(Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture));") !=
++          std::string::npos);
++}

@@ -1,0 +1,1557 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+index a2294f9..daba151 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+@@ -18,18 +18,42 @@ constexpr SectionDef kSections[kSectionCount] = {
+     {"frame", Mark::FrameBegin, Mark::FrameEnd},
+     {"world", Mark::WorldBegin, Mark::WorldEnd},
+     {"shadow", Mark::ShadowBegin, Mark::ShadowEnd},
+-    {"ao", Mark::WorldEnd, Mark::AoEnd},
+-    {"bloom", Mark::AoEnd, Mark::BloomEnd},
++    {"resolve", Mark::WorldEnd, Mark::ResolveEnd},
++    {"lindepth", Mark::ResolveEnd, Mark::LinearDepthEnd},
++    {"tags", Mark::LinearDepthEnd, Mark::TagReadoutEnd},
++    {"ao", Mark::TagReadoutEnd, Mark::AoEnd},
++    {"ssr", Mark::AoEnd, Mark::SsrEnd},
++    {"air", Mark::SsrEnd, Mark::AirEnd},
++    {"bloom", Mark::AirEnd, Mark::BloomEnd},
+     {"shafts", Mark::BloomEnd, Mark::ShaftsEnd},
+-    {"composite", Mark::ShaftsEnd, Mark::CompositeEnd},
+-    {"post", Mark::WorldEnd, Mark::CompositeEnd},
++    {"scatter", Mark::ShaftsEnd, Mark::CombatScatterEnd},
++    {"composite", Mark::CombatScatterEnd, Mark::CompositeEnd},
++    {"taa", Mark::CompositeEnd, Mark::TemporalEnd},
++    {"sharpen", Mark::TemporalEnd, Mark::SharpenEnd},
++    {"debugview", Mark::SharpenEnd, Mark::DebugViewEnd},
++    {"post", Mark::WorldEnd, Mark::PostEnd},
+ };
+ 
+-// Sections whose start may fall back to an earlier recorded mark: the post
+-// pass runs its steps in order and skips the ones that are off.
+-bool StartFallsBack(Section s)
++constexpr bool PostStageSectionsChain()
+ {
+-    return s == Section::Bloom || s == Section::Shafts || s == Section::Composite;
++    // Each post stage section ends at its own mark and starts at the mark of
++    // the stage before it, the first one at WorldEnd.
++    for (int i = 0; i < kPostStageMarks; ++i)
++    {
++        const SectionDef& d = kSections[static_cast<int>(Section::Resolve) + i];
++        if (static_cast<int>(d.to) != static_cast<int>(Mark::ResolveEnd) + i)
++            return false;
++        if (static_cast<int>(d.from) != static_cast<int>(Mark::WorldEnd) + i)
++            return false;
++    }
++    return true;
++}
++static_assert(PostStageSectionsChain(), "post stage sections run from the previous stage mark to their own");
++
++bool IsPostStage(Section s)
++{
++    return static_cast<int>(s) >= static_cast<int>(Section::Resolve) &&
++           static_cast<int>(s) <= static_cast<int>(Section::DebugView);
+ }
+ 
+ constexpr float kSmoothing = 0.1f; // weight of the newest frame
+@@ -40,6 +64,14 @@ const char* SectionName(Section s)
+     return kSections[static_cast<int>(s)].name;
+ }
+ 
++Section PostStageSection(Mark m)
++{
++    const int i = static_cast<int>(m) - static_cast<int>(Mark::ResolveEnd);
++    if (i < 0 || i >= kPostStageMarks)
++        return Section::Count;
++    return static_cast<Section>(static_cast<int>(Section::Resolve) + i);
++}
++
+ void GpuTimings::Reset()
+ {
+     *this = GpuTimings();
+@@ -59,7 +91,9 @@ void GpuTimings::Submit(const std::uint64_t stamps[kMarkCount], std::uint32_t re
+         int from = static_cast<int>(d.from);
+         if (!has(d.from))
+         {
+-            if (!StartFallsBack(s))
++            // A post stage that did not run leaves no mark: the next stage
++            // starts at the latest one that did, at the latest at WorldEnd.
++            if (!IsPostStage(s))
+                 continue;
+             while (from > static_cast<int>(Mark::WorldEnd) && !has(static_cast<Mark>(from)))
+                 --from;
+@@ -106,10 +140,8 @@ std::string GpuTimings::Summary() const
+         add(Section::Shadow, " (%s %.2f)");
+     if (add(Section::Post, " | %s %.2f:"))
+     {
+-        add(Section::Ao, " %s %.2f");
+-        add(Section::Bloom, " %s %.2f");
+-        add(Section::Shafts, " %s %.2f");
+-        add(Section::Composite, " %s %.2f");
++        for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)
++            add(static_cast<Section>(i), " %s %.2f");
+     }
+     return out.empty() ? "gpu: no sections measured yet" : out;
+ }
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+index 98f8aaf..4b6b200 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <array>
+ #include <cstdint>
+ #include <string>
+ 
+@@ -9,9 +10,10 @@
+ // the results back a few frames later, when the GPU has finished them, so the
+ // CPU never waits. Each finished frame hands its stamps to Submit, which turns
+ // them into per-section durations and keeps a smoothed average per section.
+-// Marks a frame did not reach (a pass that was off) are skipped: a section
+-// starts at the latest mark before its own start that the frame did record,
+-// so the post-pass sections still add up to the post pass when AO is off.
++// Marks a frame did not reach (a pass that was off) are skipped: a post stage's
++// section starts at the latest stage mark before its own start that the frame
++// did record, so the stage sections still add up to the post pass when a stage
++// is off.
+ 
+ namespace Poseidon::gpu
+ {
+@@ -22,12 +24,25 @@ enum class Mark : int
+     WorldBegin,  // first 3D pass of the world
+     ShadowBegin, // shadow-map depth pass
+     ShadowEnd,
+-    WorldEnd,     // Engine::EndWorldScene, after the world's queued draws
+-    AoEnd,        // post: ambient occlusion and its blur
+-    BloomEnd,     // post: bloom chain
+-    ShaftsEnd,    // post: sun shafts
+-    CompositeEnd, // post: composite into the frame
+-    FrameEnd,     // before the swap
++    WorldEnd, // Engine::EndWorldScene, after the world's queued draws
++    // The post pass: the end of each stage, in the order the stages run
++    // (Poseidon::remaster::PostStage, Graphics/Remaster/PostStages.hpp, which
++    // checks the order). A stage that does not run in a frame records none.
++    ResolveEnd,       // resolve of the multisampled frame target
++    LinearDepthEnd,   // half-resolution view depth
++    TagReadoutEnd,    // SSR stencil tags (B6)
++    AoEnd,            // ambient occlusion and its blur
++    SsrEnd,           // screen-space reflections (B6)
++    AirEnd,           // beams and haze (B8)
++    BloomEnd,         // bloom chain
++    ShaftsEnd,        // legacy sun shafts
++    CombatScatterEnd, // combat light in smoke (B4)
++    CompositeEnd,     // composite into the frame
++    TemporalEnd,      // TAA resolve (A5)
++    SharpenEnd,       // TAA sharpen or the luma sharpen (A5, B11)
++    DebugViewEnd,     // a diagnostic view of a post buffer
++    PostEnd,          // after the last stage that ran
++    FrameEnd,         // before the swap
+     Count
+ };
+ 
+@@ -36,18 +51,48 @@ enum class Section : int
+     Frame,
+     World, // includes the shadow pass
+     Shadow,
++    // One per post stage, in Mark order: from the end of the latest stage that
++    // ran before it (or WorldEnd) to its own end.
++    Resolve,
++    LinearDepth,
++    TagReadout,
+     Ao,
++    Ssr,
++    Air,
+     Bloom,
+     Shafts,
++    CombatScatter,
+     Composite,
+-    Post, // Ao + Bloom + Shafts + Composite
++    Temporal,
++    Sharpen,
++    DebugView,
++    Post, // WorldEnd to PostEnd: every stage
+     Count
+ };
+ 
+ constexpr int kMarkCount = static_cast<int>(Mark::Count);
+ constexpr int kSectionCount = static_cast<int>(Section::Count);
++// The backend records a frame's marks in a 32-bit mask.
++static_assert(kMarkCount <= 32, "GpuTimings records the marks of a frame in a 32-bit mask");
++// One post stage section per post stage mark, in the same order.
++constexpr int kPostStageMarks = static_cast<int>(Mark::DebugViewEnd) - static_cast<int>(Mark::ResolveEnd) + 1;
++static_assert(static_cast<int>(Section::DebugView) - static_cast<int>(Section::Resolve) + 1 == kPostStageMarks,
++              "one post stage section per post stage mark");
+ 
+ const char* SectionName(Section s);
++// The post stage section that ends at `m`; Section::Count for any other mark.
++Section PostStageSection(Mark m);
++
++namespace detail
++{
++constexpr std::array<float, kSectionCount> Unmeasured()
++{
++    std::array<float, kSectionCount> a{};
++    for (float& v : a)
++        v = -1.0f;
++    return a;
++}
++} // namespace detail
+ 
+ class GpuTimings
+ {
+@@ -64,13 +109,14 @@ class GpuTimings
+     float LastMs(Section s) const { return _last[static_cast<int>(s)]; }
+     int Frames() const { return _frames; }
+ 
+-    // "frame 6.12 ms | world 4.80 (shadow 0.62) | post 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15"
++    // "frame 6.12 ms | world 4.80 (shadow 0.62) | post 0.71: resolve 0.04 ao 0.27 bloom 0.21 shafts 0.05
++    // composite 0.14": the post stages in the order they run, each once it has been measured.
+     std::string Summary() const;
+ 
+   private:
+-    float _avg[kSectionCount] = {};
+-    float _last[kSectionCount] = {-1, -1, -1, -1, -1, -1, -1, -1};
+-    int _count[kSectionCount] = {};
++    std::array<float, kSectionCount> _avg{};
++    std::array<float, kSectionCount> _last = detail::Unmeasured();
++    std::array<int, kSectionCount> _count{};
+     int _frames = 0;
+ };
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 9edb267..506b755 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -136,8 +136,9 @@ struct KeyTable
+             MakeKnob("bloom", "Bloom", "Post effects", "", &LT::bloom, 0.0f, 2.0f),
+             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
+             MakeChoice("debug", "View", "Diagnostics",
+-                       "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0", &LT::debugView, 0,
+-                       4),
++                       "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
++                       "Linear depth (half res)\0",
++                       &LT::debugView, 0, 5),
+             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
+                        &LT::gates),
+         };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index eaeffc0..715c27e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -121,7 +121,8 @@ struct LightingTuning
+     bool gates = true;
+     FeatureSet features;
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+-    // 3 normals, 4 ambient occlusion.
++    // 3 normals, 4 ambient occlusion, 5 the post pass's half-resolution
++    // linear depth (PostStages.hpp kDebugViewLinearDepth).
+     int debugView = 0;
+ };
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index 7962396..bbb0083 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -107,7 +107,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ - Dev overlay, **Lighting** tab, generated from the same registry: sliders for
+   exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
+   moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
+-  bloom and shafts, debug views (sun visibility, sky visibility, normals, AO),
++  bloom and shafts, debug views (sun visibility, sky visibility, normals, AO,
++  the post pass's half-resolution linear depth),
+   a **Features** section (per area, one checkbox per switch with its live gate,
+   "active" or "gated: <reason>", and its GPU section once it has one) and a
+   summary line that is a `triSetLighting` setting, to copy back.
+@@ -123,7 +124,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+   (`tests/rendering/captures/README.md`).
+ - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
+   `triGpuTimes true`, turns on timestamp queries around the frame, the world
+-  (with the shadow pass inside it) and each post step
++  (with the shadow pass inside it) and each post stage that ran (resolve,
++  linear depth, AO, bloom, shafts, composite, in the order of the stage list)
+   (`EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings`). Results trail the
+   frame by a few frames and are smoothed; nothing waits on the GPU. Toggle
+   Remastered off for the same view's Classic numbers.
+@@ -147,12 +149,14 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `Graphics/Remaster/CloudNoise.{hpp,cpp}` | Tileable, histogram-equalised cloud noise. Pure math. |
+ | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
+ | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
++| `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
+ | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
+ | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
+ | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
+-| `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass, and its GLSL (no GL code there, so the unit tests compile the sources the engine builds), assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
++| `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+ | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
+ | `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
++| `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, and the backend running and marking every landed stage. |
+ | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
+ | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 6ad0c5c..66122c7 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -295,8 +295,8 @@ classic and remastered programs alike; it took the `shadowMap` row, which was a
+ are `kShadowMapUnit` now, and the two F3 audits in `test_gl_state_cache_audit.cpp` look for
+ `GL33Bind::ActiveUnit(kShadowMapUnit);`. Not in the table: `BindLightingTextures` still binds units 2
+ to 5 by name (each unit has its own stand-in and texture target), and the post pass keeps its own
+-units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's. `GL33Bind` caches units 0 to 7 only
+-(`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
++units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's (named `kPostUnits` in A3, 3.6).
++`GL33Bind` caches units 0 to 7 only (`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
+ for unit 6 belongs to the step that first samples it (A5 or B1).
+ 
+ ### 3.5 Shader sources: split by concern, test through the accessors
+@@ -396,6 +396,51 @@ so the count must stay at 32 or fewer) and restores what it binds. The early ret
+ stage's gate. Combat's shadow mask and hfrt's visibility buffer are not post stages: they run at
+ the start of the next world pass (B4, B9).
+ 
++As built in A3 (corrections to the list and the paragraph above):
++
++- The list is `PostStage` in `Graphics/Remaster/PostStages.{hpp,cpp}` (pure, no GL): thirteen
++  stages, the ten entries above with their pairs split (`Resolve`, `LinearDepth`; `Temporal`,
++  `Sharpen`) and a `DebugView` stage at the end that draws a post buffer over the frame
++  (`debug=5`: the linear depth). Every planned stage is in the list from A3 on, with its step,
++  `landed` (A3 lands Resolve, LinearDepth, Ao, Bloom, Shafts, Composite and DebugView) and
++  `readsLinearDepth`. A later step lands its stage by writing its pass, adding its `case` to
++  `EngineGL33::RunPostStage` and setting `landed` (a test checks that every landed stage has a case
++  and no other does); it never reorders the list. A stage that has not landed never runs.
++- `PlanPostStages(PostFrameInputs)` gives the frame's `PostStagePlan` (a bit per stage, the AO and
++  bloom strengths). The early return keeps its old meaning: the pass runs when a stage's knob asks
++  for it (`ao`, `bloom` or `shafts` above 0, or `debug=5`), even when the frame then holds that
++  stage off (AO in a vehicle interior, glow under gunner optics); Resolve and Composite then run as
++  before. Asking the frame-gated stages instead would skip the composite on such frames, and the
++  composite writes the resolved value into every MSAA sample, so the HUD's antialiased edges drawn
++  after it would change: a pixel change.
++- `PostFrame` (`EngineGL33.hpp`) holds the frame and half size, `projInfo`, the 3D rect, the depth
++  scale and bias, the sun's screen position, weight and tint, and the plan. "Gates" became the
++  plan: none of the landed stages has a feature switch, so the feature gates of 3.2 join
++  `PostFrameInputs` with the first post stage that reads one (A5, B4, B6, B8).
++- The resolve blits under the state the world left, as before (the blit honours the scissor
++  test); the fullscreen stages share one state set after it and torn down after the last stage
++  (`BeginPostFullscreen`, `EndPostFullscreen`). The stages bind their inputs to `kPostUnits`
++  {0, 2, 3, 4, 5} (`EngineGL33_Lighting.hpp`, with a `static_assert`: never unit 1 or 7), which the
++  teardown unbinds; "restores what it binds" applies to anything else a stage changes (bloom's
++  additive blend goes back to opaque; a stage that binds another unit restores it).
++- GPU marks: one per stage, contiguous after `WorldEnd` in list order (`ResolveEnd` ..
++  `DebugViewEnd`), then `PostEnd`; 20 of the 32. The `post` section runs from `WorldEnd` to
++  `PostEnd` (it ended at `CompositeEnd`), so stages after the composite count. Every stage section
++  starts at the latest stage mark the frame recorded before it. Section names: `resolve`,
++  `lindepth`, `tags`, `ao`, `ssr`, `air`, `bloom`, `shafts`, `scatter`, `composite`, `taa`,
++  `sharpen`, `debugview`. The `ao` section no longer holds the resolve blits (now `resolve`), so
++  `ao` in the A0 to A2 tables is resolve plus AO. `make_pairs.py` and `summarize_timing.py` carry
++  `resolve` and `lindepth` columns.
++- `PostLinearDepth`: R32F at `(w + 1) / 2` by `(h + 1) / 2`, the view depth in metres from
++  `s_glslPostCommon`'s `viewZ` at the four full-resolution texel centres under each texel, the sky
++  at 1e6 (AO's sentinel, same threshold). Even texels (`(x + y)` even) keep the nearest of the four,
++  odd texels the farthest, so along a silhouette a depth-aware upsample finds a tap at either depth
++  (volumetric's probe 8 had a speckled rim on thin foliage where no half-resolution tap matched).
++  No mip chain: SSR's Hi-Z and SAO-style mip taps belong to the steps that read them. It feeds
++  nothing yet: AO still reads the full-resolution depth (moving AO onto it changes AO's pixels, so
++  it is a step of its own, A4 or later), and its gate is "a running stage reads it", so on the
++  shipped frame it does not run and costs nothing; only `debug=5` runs it.
++
+ ### 3.7 Porting method
+ 
+ No prototype is applied blind. Observed with `git apply --check --ignore-whitespace` against the
+@@ -700,6 +745,43 @@ graphics-remaster worktree, gitignored).**
+ As 3.6. Pixel-exact against A2 (capture A/B, `banddiff.py` from `tmp/research/perf/scripts`).
+ `PostLinearDepth` is new work but feeds nothing yet. Effort 2 days.
+ 
++**Result (2026-10-18, uncommitted change on af5b999; evidence in `tmp/integration/A3/` of the
++graphics-remaster worktree, gitignored).**
++
++- Built as 3.6 with the as-built notes there: `PostStages.{hpp,cpp}` (the list, `PlanPostStages`),
++  `PostFrame` and one member function per landed stage in `EngineGL33_PostFX.cpp`, one GPU mark and
++  section per stage plus `PostEnd`, `kPostUnits`, the half-resolution linear depth
++  (`psPostLinearDepth`) and the debug view that shows it (`psPostDebugDepth`, `debug=5`, "Linear
++  depth (half res)" in the overlay's View list).
++- No pixel changes: `glsl_extract.py --dump` of af5b999 and of the change give the same 30 programs
++  (md5 lists equal) plus the two new post programs. `features_ab` on the A3 build against the A2
++  build, both this session (`20261018-040749-ab-A3`, `20261018-040811-ab-A2build`): the five views
++  that repeat to the pixel between boots are pixel-identical, off and on; the others differ by the
++  same kinds and sizes as each build's own off against on (fire, smoke and lamps at night, the sea,
++  the posed soldier). The three-island set (`20261018-041416-set` against
++  `20261018-040948-set-A2build`): within boot-to-boot noise, Classic included. A first A3 set shot
++  while three other games loaded (`20261018-040811-set`) differed in the sky band of the daytime
++  views by the sky clouds' position, in Classic as much as in Remastered (the capture set does not
++  hold the clouds); the rerun on a quiet machine matched.
++- Timing (item 7, 0 of 4 slots, no foreign game in 241 sampler rows, `20261018-035421-timing`):
++  where both runs read P0 the Remastered frame medians are within -0.22 to +0.27 ms of A2's run
++  (sunrise_ridge 17.67 against 17.49, valley 05:15 23.97 against 23.82, Eden broken_high 24.58
++  against 24.74); Classic, which A3 does not touch, moved by -0.35 to +0.34 ms between the same two
++  runs. The new sections split the old `ao` one: the resolve blits take 0.22 to 0.65 ms at P0 (0.46
++  on sunrise_ridge, 0.65 in the valley, 0.62 on Eden's broken_high, 0.60 on Sinai at noon) and AO
++  with its blur 0.06 to 0.20 ms. Correction to 3.6: the MSAA resolve, not AO's full-resolution depth
++  reads, is the largest fixed post cost on this card (the sun shafts take 0.27 to 0.49 ms at P0
++  where the sun is in view). The linear depth does not run on the shipped frame (no `lindepth`
++  section in any of the 60 Remastered shots); under `debug=5` (`20261018-040520-lindepth-timing`,
++  five Abel views, 3 rounds) it takes 0.01 ms at P0 and 0.03 ms at P3 (coastline_sunset).
++- Build 0 warnings, clang-format clean on every touched C++ file, smoke 3/3 with KHR_debug ids
++  131169, 131154 and 131218 only. Unit gate tags plus `[PostStages]`: 466/466 (10 new cases);
++  `[Graphics]` has the known DDS fixture failure only, the full suite the 6 known localisation
++  failures only. Seven mutations (the linear depth on every pass, an early return that asks the
++  frame-gated strengths, `post` ending at the composite, no fall-back of a stage section, a landed
++  stage without its `case`, the linear depth keeping the nearest sample everywhere, the debug view
++  not reading the linear depth) each turn their cases red.
++
+ ### A4. perf (draw grouping and hill culling)
+ 
+ - **Prototype touched**: `Graphics/Core/Engine.{hpp,cpp}` (research globals), `GpuTimings.{hpp,cpp}`
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 61b898f..96f42ff 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -38,6 +38,7 @@ enum PixelShaderSpecular
+ #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
++#include <Poseidon/Graphics/Remaster/PostStages.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ 
+ #include <memory>
+@@ -808,17 +809,55 @@ class EngineGL33 : public Engine
+         unsigned int depthTex = 0, depthFbo = 0;
+         unsigned int aoTex[2] = {}, aoFbo[2] = {};
+         unsigned int shaftTex = 0, shaftFbo = 0;
++        unsigned int linDepthTex = 0, linDepthFbo = 0; // R32F half res: view depth in metres
+         unsigned int bloomTex[kBloomLevels] = {}, bloomFbo[kBloomLevels] = {};
+         int bloomW[kBloomLevels] = {}, bloomH[kBloomLevels] = {};
+         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
++        unsigned int progLinearDepth = 0, progDebugDepth = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+     void DestroyPostTargets();
+     void DestroyPostPrograms();
+     bool EnsurePostResources(int w, int h);
++
++    // One post pass (INTEGRATION-PLAN.md section 3.6): what every stage reads.
++    // EndWorldScene fills it, then runs the stages its plan names in
++    // PostStage order (Graphics/Remaster/PostStages.hpp).
++    struct PostFrame
++    {
++        int w = 0, h = 0;   // frame target
++        int hw = 0, hh = 0; // half resolution: AO, shafts, linear depth
++        // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
++        float projInfo[4] = {};
++        // The 3D viewport in uv (x, y, w, h): the scene may fill only a
++        // sub-rectangle (aspect pillarbox).
++        float rect[4] = {0.0f, 0.0f, 1.0f, 1.0f};
++        float depthScale = 1.0f, depthBias = 0.0f; // ndcZ = depth * scale + bias
++        // The sun on screen, for the shafts.
++        float sunU = 0.5f, sunV = 0.5f, shaftWeight = 0.0f;
++        Color shaftTint = Color(1, 1, 1, 1);
++        // Which stages run this frame and the strengths the composite uses.
++        Poseidon::remaster::PostStagePlan plan;
++    };
++    void PostFrameGeometry(PostFrame& f) const;
++    void PostFrameSun(PostFrame& f) const;
++    void RunPostStage(Poseidon::remaster::PostStage stage, const PostFrame& f);
++    // The fullscreen stages' shared state, set after the resolve; and its
++    // teardown, after the last stage.
++    void BeginPostFullscreen();
++    void EndPostFullscreen();
++    // The stages (EngineGL33_PostFX.cpp). Each leaves the shared state as it
++    // found it, apart from the program and the kPostUnits bindings.
++    void PostResolve(const PostFrame& f);
++    void PostLinearDepth(const PostFrame& f);
++    void PostAo(const PostFrame& f);
++    void PostBloom(const PostFrame& f);
++    void PostShafts(const PostFrame& f);
++    void PostComposite(const PostFrame& f);
++    void PostDebugView(const PostFrame& f);
+     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
+     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
+     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 415446b..61e6cda 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -57,6 +57,8 @@ enum class PostShader : int
+     BloomUp,
+     Shafts,
+     Composite,
++    LinearDepth, // half-resolution view depth (the LinearDepth post stage)
++    DebugDepth,  // that depth drawn over the frame (the DebugView stage, debug view 5)
+     Count,
+ };
+ // The override file stem (vsPost, psPostAo, ...) and the assembled source.
+@@ -109,6 +111,31 @@ constexpr bool RemasterUnitsValid()
+ static_assert(detail::RemasterUnitsValid(),
+               "remastered texture units: 2 to 15, never the material units 0 and 1 or the upload unit 7, all distinct");
+ 
++// Texture units the post stages bind their inputs to (EngineGL33_PostFX.cpp).
++// The post pass sets their samplers to none before the first fullscreen stage
++// and unbinds all of them at its end; a stage that binds any other unit
++// restores that unit itself. Never unit 1 (its sampler object belongs to
++// ApplyPipeline) or the upload unit 7.
++constexpr int kPostUnits[] = {0, 2, 3, 4, 5};
++namespace detail
++{
++constexpr bool PostUnitsValid()
++{
++    constexpr int n = static_cast<int>(sizeof(kPostUnits) / sizeof(kPostUnits[0]));
++    for (int i = 0; i < n; ++i)
++    {
++        const int unit = kPostUnits[i];
++        if (unit < 0 || unit == 1 || unit == 7 || unit > 15)
++            return false;
++        for (int j = 0; j < i; ++j)
++            if (kPostUnits[j] == unit)
++                return false;
++    }
++    return true;
++}
++} // namespace detail
++static_assert(detail::PostUnitsValid(), "post texture units: 0 to 15, never unit 1 or the upload unit 7, all distinct");
++
+ // Sampler uniform -> texture unit for every lit program, classic and
+ // remastered; InitPixelShaders binds them from this table and skips a name the
+ // program lacks. A shader that adds a sampler adds its row here: a sampler
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index 62f1b0b..63b1202 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -2,30 +2,42 @@
+ //
+ // World::Draw calls Engine::EndWorldScene() after the 3D scene and before the
+ // map, HUD and dialogs. When the remastered lighting and its post effects are
+-// on, this resolves the frame target (colour + depth), then:
+-//   1. ambient occlusion (Alchemy/SAO style) at half resolution from the depth
+-//      buffer, blurred with a depth-aware separable filter;
+-//   2. a five-level bloom chain from the bright parts of the image;
+-//   3. sun shafts: a radial blur of the visible sky toward the sun;
+-//   4. a composite back into the frame target. Occlusion darkens only the sky
+-//      light: the remastered shaders store one minus each opaque pixel's sky
+-//      light share in the colour alpha (blended draws keep the destination
+-//      alpha), so a sunlit wall next to a corner keeps its sunlight and pre-lit
+-//      or alpha-to-coverage pixels (alpha 1) are left alone. Bloom and shafts
+-//      add in linear light with a soft screen-style add that can never clip,
+-//      and leave the frame exactly as it was where they are zero (the frame is
+-//      already tonemapped: no second curve). The shafts are light scattered
+-//      by the air in front of each pixel, so they grow with its distance
+-//      (LightRig ShaftInscatter): a nearby vehicle is not veiled. A dither
+-//      hides banding.
+-// The HUD then draws on top, untouched.
++// on, it runs a fixed list of stages (Poseidon::remaster::PostStage,
++// Graphics/Remaster/PostStages.hpp) on one PostFrame. PlanPostStages decides
++// from the knobs and the frame which stages run; each stage that runs ends
++// with its own GPU mark. The stages with a pass today, in order:
++//   - Resolve: the multisampled frame target (colour with the ambient share
++//     in alpha, depth and stencil) into single-sample textures;
++//   - LinearDepth: half-resolution view depth in metres, for the stages that
++//     trace or upsample at half resolution. Only the linear depth debug view
++//     (debug=5) reads it so far, so it runs only then;
++//   - Ao: ambient occlusion (Alchemy/SAO style) at half resolution from the
++//     depth buffer, blurred with a depth-aware separable filter;
++//   - Bloom: a five-level bloom chain from the bright parts of the image;
++//   - Shafts: a radial blur of the visible sky toward the sun;
++//   - Composite: back into the frame target. Occlusion darkens only the sky
++//     light: the remastered shaders store one minus each opaque pixel's sky
++//     light share in the colour alpha (blended draws keep the destination
++//     alpha), so a sunlit wall next to a corner keeps its sunlight and pre-lit
++//     or alpha-to-coverage pixels (alpha 1) are left alone. Bloom and shafts
++//     add in linear light with a soft screen-style add that can never clip,
++//     and leave the frame exactly as it was where they are zero (the frame is
++//     already tonemapped: no second curve). The shafts are light scattered
++//     by the air in front of each pixel, so they grow with its distance
++//     (LightRig ShaftInscatter): a nearby vehicle is not veiled. A dither
++//     hides banding;
++//   - DebugView: a diagnostic view of a post buffer over the frame.
++// The other stages of the list (tag readout, reflections, air, combat scatter,
++// TAA resolve and sharpen) land with their features. The HUD then draws on
++// top, untouched.
+ //
+ // The shaders live in EngineGL33_PostShaders.cpp, which has no GL code, so the
+ // unit tests compile the sources the engine builds (PostShaderSource in
+ // EngineGL33_Lighting.hpp).
+ //
+-// All GL state the passes touch is restored or the bind caches invalidated;
+-// texture unit 1 is never used (its sampler object belongs to ApplyPipeline).
++// All GL state the stages touch is restored or the bind caches invalidated;
++// the stages bind their inputs to kPostUnits (EngineGL33_Lighting.hpp), never
++// to texture unit 1 (its sampler object belongs to ApplyPipeline).
+ 
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+@@ -123,8 +135,45 @@ GLuint MakeFbo(GLenum attachment, GLuint tex)
+     return f;
+ }
+ 
++// Helpers of the fullscreen stages.
++void BindTex(int unit, GLuint tex)
++{
++    glActiveTexture(GL_TEXTURE0 + unit);
++    glBindTexture(GL_TEXTURE_2D, tex);
++}
++
++void DrawTo(GLuint fbo, int vw, int vh)
++{
++    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
++    glViewport(0, 0, vw, vh);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++}
++
++void SetInt(GLuint prog, const char* name, int v)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform1i(loc, v);
++}
++
++void Set4(GLuint prog, const char* name, float a, float b, float c, float d)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform4f(loc, a, b, c, d);
++}
++
++void Set2(GLuint prog, const char* name, float a, float b)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform2f(loc, a, b);
++}
++
+ } // namespace
+ 
++namespace rm = Poseidon::remaster;
++
+ void EngineGL33::DestroyPostTargets()
+ {
+     auto delTex = [](unsigned int& t)
+@@ -148,6 +197,7 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.aoFbo[0]);
+     delFbo(p.aoFbo[1]);
+     delFbo(p.shaftFbo);
++    delFbo(p.linDepthFbo);
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -158,14 +208,15 @@ void EngineGL33::DestroyPostTargets()
+     delTex(p.aoTex[0]);
+     delTex(p.aoTex[1]);
+     delTex(p.shaftTex);
++    delTex(p.linDepthTex);
+     p.w = p.h = 0;
+ }
+ 
+ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+-    for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
++                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -198,10 +249,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = link(PostShader::BloomUp);
+         p.progShafts = link(PostShader::Shafts);
+         p.progComposite = link(PostShader::Composite);
++        p.progLinearDepth = link(PostShader::LinearDepth);
++        p.progDebugDepth = link(PostShader::DebugDepth);
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+-        if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite)
++        if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite ||
++            !p.progLinearDepth || !p.progDebugDepth)
+         {
+             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
+             p.unavailable = true;
+@@ -221,6 +275,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.aoTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    p.linDepthTex = MakeTexture(GL_R32F, GL_RED, GL_FLOAT, hw, hh, false);
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -252,6 +307,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.shaftFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.shaftTex);
+     check();
++    p.linDepthFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.linDepthTex);
++    check();
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -267,10 +324,57 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.w = w;
+     p.h = h;
+-    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO/shafts {}x{})", w, h, hw, hh);
++    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts and linear depth {}x{})", w, h, hw, hh);
+     return true;
+ }
+ 
++void EngineGL33::PostFrameGeometry(PostFrame& f) const
++{
++    const GfxMatrix& proj = _frameState.projection;
++    f.projInfo[0] = proj._33;
++    f.projInfo[1] = proj._43;
++    f.projInfo[2] = 1.0f / proj._11;
++    f.projInfo[3] = 1.0f / proj._22;
++    // The 3D scene may fill only a sub-rectangle (aspect pillarbox); uv <-> NDC
++    // goes through that rectangle.
++    const Poseidon::AspectSettings& as = _aspectSettings;
++    const bool fullRect =
++        as.worldLeft <= 0.0f && as.worldTop <= 0.0f && as.worldRight >= 1.0f && as.worldBottom >= 1.0f;
++    f.rect[0] = fullRect ? 0.0f : as.worldLeft;
++    f.rect[1] = fullRect ? 0.0f : 1.0f - as.worldBottom;
++    f.rect[2] = fullRect ? 1.0f : as.worldRight - as.worldLeft;
++    f.rect[3] = fullRect ? 1.0f : as.worldBottom - as.worldTop;
++    f.depthScale = GLAD_GL_ARB_clip_control ? 1.0f : 2.0f;
++    f.depthBias = GLAD_GL_ARB_clip_control ? 0.0f : -1.0f;
++}
++
++void EngineGL33::PostFrameSun(PostFrame& f) const
++{
++    // The sun's place and weight on screen for the shafts, when it is in front
++    // of the camera and above the horizon.
++    LightSun* sun = GScene->MainLight();
++    Camera* cam = GScene->GetCamera();
++    const Vector3 toSun = -sun->SunDirection();
++    // Camera space: InverseScaled maps world directions into view space.
++    const Vector3 v = cam->InverseScaled().Rotate(toSun);
++    if (v.Z() > 0.05f && toSun.Y() > -0.02f)
++    {
++        const GfxMatrix& proj = _frameState.projection;
++        const float ndcX = proj._11 * v.X() / v.Z();
++        const float ndcY = proj._22 * v.Y() / v.Z();
++        f.sunU = f.rect[0] + (ndcX * 0.5f + 0.5f) * f.rect[2];
++        f.sunV = f.rect[1] + (ndcY * 0.5f + 0.5f) * f.rect[3];
++        const float offX = std::fabs(ndcX) > 1.0f ? std::fabs(ndcX) - 1.0f : 0.0f;
++        const float offY = std::fabs(ndcY) > 1.0f ? std::fabs(ndcY) - 1.0f : 0.0f;
++        const float onScreen = std::exp(-3.0f * (offX + offY));
++        const float lowSun = 0.55f + 0.45f * (1.0f - std::min(1.0f, toSun.Y() / 0.6f));
++        Landscape* land = GScene->GetLandscape();
++        const float clear = land ? land->SkyThrough() : 1.0f;
++        f.shaftWeight = onScreen * lowSun * clear * (1.0f - sun->NightEffect());
++        f.shaftTint = _lightRigSun;
++    }
++}
++
+ void EngineGL33::EndWorldScene()
+ {
+     // Only the frame that actually drew the world through the remastered
+@@ -292,208 +396,232 @@ void EngineGL33::EndWorldScene()
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
+         return;
+-    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
++
++    // This frame's stages. A vehicle interior clears the world's depth and
++    // draws itself with its own near plane (Transport::Draw): no world depth to
++    // reconstruct from, so no occlusion and no depth-tested shafts this frame.
++    // A screen overlay drawn inside the world pass (gunner optics mask) is in
++    // the frame already: glow would grey its black surround.
++    PostFrame f;
++    PostFrameGeometry(f);
++    rm::PostFrameInputs in;
++    in.ambientOcclusion = _lighting.ambientOcclusion;
++    in.bloom = _lighting.bloom;
++    in.sunShafts = _lighting.sunShafts;
++    in.debugView = _lighting.debugView;
++    in.worldDepth = !_worldDepthCleared;
++    in.glow = !_worldOverlayDrawn;
++    if (in.worldDepth && in.glow && in.sunShafts > 0.0f && GScene)
++        PostFrameSun(f);
++    in.shaftWeight = f.shaftWeight;
++    f.plan = rm::PlanPostStages(in);
++    if (f.plan.Empty())
+         return; // nothing to add: leave the frame as drawn
+ 
+     FlushAndFreeAllQueues(_queueNo);
+-    int w = 0, h = 0;
+-    RenderTargetSize(w, h);
+-    if (w <= 0 || h <= 0 || !EnsurePostResources(w, h))
++    RenderTargetSize(f.w, f.h);
++    if (f.w <= 0 || f.h <= 0 || !EnsurePostResources(f.w, f.h))
+         return;
+-    PostTargets& p = _post;
++    f.hw = (f.w + 1) / 2;
++    f.hh = (f.h + 1) / 2;
++
++    // The stages in list order, each followed by its GPU mark. The resolve
++    // blits under the state the world left, as it always has; the fullscreen
++    // stages after it share one state.
++    for (int i = 0; i < rm::kPostStageCount; ++i)
++    {
++        const auto stage = static_cast<rm::PostStage>(i);
++        if (!f.plan.Runs(stage))
++            continue;
++        RunPostStage(stage, f);
++        GpuMark(rm::GetPostStageInfo(stage).endMark);
++        if (stage == rm::PostStage::Resolve)
++            BeginPostFullscreen();
++    }
++    GpuMark(Poseidon::gpu::Mark::PostEnd);
++    EndPostFullscreen();
++}
++
++void EngineGL33::RunPostStage(rm::PostStage stage, const PostFrame& f)
++{
++    switch (stage)
++    {
++        case rm::PostStage::Resolve:
++            PostResolve(f);
++            break;
++        case rm::PostStage::LinearDepth:
++            PostLinearDepth(f);
++            break;
++        case rm::PostStage::Ao:
++            PostAo(f);
++            break;
++        case rm::PostStage::Bloom:
++            PostBloom(f);
++            break;
++        case rm::PostStage::Shafts:
++            PostShafts(f);
++            break;
++        case rm::PostStage::Composite:
++            PostComposite(f);
++            break;
++        case rm::PostStage::DebugView:
++            PostDebugView(f);
++            break;
++        default:
++            break; // a stage that has not landed is never planned
++    }
++}
+ 
+-    // Resolve the multisampled frame target: colour (with the ambient share in
+-    // alpha) and depth.
++void EngineGL33::PostResolve(const PostFrame& f)
++{
++    // The multisampled frame target: colour (with the ambient share in alpha),
++    // depth and stencil.
++    const PostTargets& p = _post;
+     glBindFramebuffer(GL_READ_FRAMEBUFFER, _ssaaFbo);
+     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.colorFbo);
+-    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.depthFbo);
+-    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
++    glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
++}
+ 
+-    // Common state for the fullscreen passes.
++void EngineGL33::BeginPostFullscreen()
++{
+     Poseidon::render::depthstencil::Disabled(/*hasStencil*/ false);
+     glDisable(GL_STENCIL_TEST);
+     Poseidon::render::blend::Opaque();
+     glDisable(GL_CULL_FACE);
+     glDisable(GL_SCISSOR_TEST);
+     Poseidon::render::pipeline::DisableDepthClamp();
+-    glBindVertexArray(p.vao);
+-    for (int unit : {0, 2, 3, 4, 5})
++    glBindVertexArray(_post.vao);
++    for (int unit : Poseidon::gl33lighting::kPostUnits)
+         glBindSampler(static_cast<GLuint>(unit), 0);
++}
+ 
+-    auto bindTex = [](int unit, GLuint tex)
+-    {
+-        glActiveTexture(GL_TEXTURE0 + unit);
+-        glBindTexture(GL_TEXTURE_2D, tex);
+-    };
+-    auto drawTo = [](GLuint fbo, int vw, int vh)
+-    {
+-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+-        glViewport(0, 0, vw, vh);
+-        glDrawArrays(GL_TRIANGLES, 0, 3);
+-    };
+-    auto u1i = [](GLuint prog, const char* name, int v)
+-    {
+-        const GLint loc = glGetUniformLocation(prog, name);
+-        if (loc >= 0)
+-            glUniform1i(loc, v);
+-    };
+-    auto u4f = [](GLuint prog, const char* name, float a, float b, float c, float d)
+-    {
+-        const GLint loc = glGetUniformLocation(prog, name);
+-        if (loc >= 0)
+-            glUniform4f(loc, a, b, c, d);
+-    };
+-    auto u2f = [](GLuint prog, const char* name, float a, float b)
+-    {
+-        const GLint loc = glGetUniformLocation(prog, name);
+-        if (loc >= 0)
+-            glUniform2f(loc, a, b);
+-    };
++void EngineGL33::PostLinearDepth(const PostFrame& f)
++{
++    // Half-resolution view depth (psPostLinearDepth), for the stages that trace
++    // or upsample at half resolution.
++    const PostTargets& p = _post;
++    glUseProgram(p.progLinearDepth);
++    SetInt(p.progLinearDepth, "depthTex", 0);
++    Set4(p.progLinearDepth, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++    Set4(p.progLinearDepth, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
++    Set4(p.progLinearDepth, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
++    Set4(p.progLinearDepth, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++    BindTex(0, p.depthTex);
++    DrawTo(p.linDepthFbo, f.hw, f.hh);
++}
+ 
+-    const int hw = (w + 1) / 2;
+-    const int hh = (h + 1) / 2;
+-    // A vehicle interior clears the world's depth and draws itself with its own
+-    // near plane (Transport::Draw): no world depth to reconstruct from, so no
+-    // occlusion and no depth-tested shafts this frame. Bloom does not need it.
+-    const bool worldDepth = !_worldDepthCleared;
+-    const float aoStrength = worldDepth ? _lighting.ambientOcclusion : 0.0f;
+-    // A screen overlay drawn inside the world pass (gunner optics mask) is in
+-    // the frame already: glow would grey its black surround.
+-    const bool glow = !_worldOverlayDrawn;
+-    const float bloomStrength = glow ? _lighting.bloom : 0.0f;
++void EngineGL33::PostAo(const PostFrame& f)
++{
++    // Ambient occlusion at half resolution, then the depth-aware blur across
++    // and down.
++    const PostTargets& p = _post;
++    glUseProgram(p.progAo);
++    SetInt(p.progAo, "depthTex", 0);
++    Set4(p.progAo, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++    Set4(p.progAo, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
++    Set4(p.progAo, "aoParams", kAoRadius, 1.0f, kAoFadeStart, kAoFadeEnd);
++    Set4(p.progAo, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
++    Set4(p.progAo, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++    BindTex(0, p.depthTex);
++    DrawTo(p.aoFbo[0], f.hw, f.hh);
++    glUseProgram(p.progAoBlur);
++    SetInt(p.progAoBlur, "aoTex", 0);
++    BindTex(0, p.aoTex[0]);
++    Set2(p.progAoBlur, "stepUV", 1.0f / f.hw, 0.0f);
++    DrawTo(p.aoFbo[1], f.hw, f.hh);
++    BindTex(0, p.aoTex[1]);
++    Set2(p.progAoBlur, "stepUV", 0.0f, 1.0f / f.hh);
++    DrawTo(p.aoFbo[0], f.hw, f.hh);
++}
+ 
+-    // 1. Ambient occlusion + blur.
+-    const GfxMatrix& proj = _frameState.projection;
+-    // The 3D scene may fill only a sub-rectangle (aspect pillarbox); uv <-> NDC
+-    // goes through that rectangle.
+-    const Poseidon::AspectSettings& as = _aspectSettings;
+-    const bool fullRect =
+-        as.worldLeft <= 0.0f && as.worldTop <= 0.0f && as.worldRight >= 1.0f && as.worldBottom >= 1.0f;
+-    const float rectX = fullRect ? 0.0f : as.worldLeft;
+-    const float rectY = fullRect ? 0.0f : 1.0f - as.worldBottom;
+-    const float rectW = fullRect ? 1.0f : as.worldRight - as.worldLeft;
+-    const float rectH = fullRect ? 1.0f : as.worldBottom - as.worldTop;
+-    const float depthScale = GLAD_GL_ARB_clip_control ? 1.0f : 2.0f;
+-    const float depthBias = GLAD_GL_ARB_clip_control ? 0.0f : -1.0f;
+-    if (aoStrength > 0.0f)
++void EngineGL33::PostBloom(const PostFrame& f)
++{
++    const PostTargets& p = _post;
++    glUseProgram(p.progBloomDown);
++    SetInt(p.progBloomDown, "srcTex", 0);
++    for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+-        glUseProgram(p.progAo);
+-        u1i(p.progAo, "depthTex", 0);
+-        u4f(p.progAo, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
+-        u4f(p.progAo, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
+-        u4f(p.progAo, "aoParams", kAoRadius, 1.0f, kAoFadeStart, kAoFadeEnd);
+-        u4f(p.progAo, "screen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
+-        u4f(p.progAo, "worldRect", rectX, rectY, rectW, rectH);
+-        bindTex(0, p.depthTex);
+-        drawTo(p.aoFbo[0], hw, hh);
+-        glUseProgram(p.progAoBlur);
+-        u1i(p.progAoBlur, "aoTex", 0);
+-        bindTex(0, p.aoTex[0]);
+-        u2f(p.progAoBlur, "stepUV", 1.0f / hw, 0.0f);
+-        drawTo(p.aoFbo[1], hw, hh);
+-        bindTex(0, p.aoTex[1]);
+-        u2f(p.progAoBlur, "stepUV", 0.0f, 1.0f / hh);
+-        drawTo(p.aoFbo[0], hw, hh);
+-        GpuMark(Poseidon::gpu::Mark::AoEnd);
++        const bool first = i == 0;
++        const GLuint src = first ? p.colorTex : p.bloomTex[i - 1];
++        const int sw = first ? f.w : p.bloomW[i - 1];
++        const int sh = first ? f.h : p.bloomH[i - 1];
++        BindTex(0, src);
++        Set2(p.progBloomDown, "srcTexel", 1.0f / sw, 1.0f / sh);
++        Set4(p.progBloomDown, "bloomParams", kBloomThreshold, kBloomKnee, first ? 1.0f : 0.0f, 0.0f);
++        DrawTo(p.bloomFbo[i], p.bloomW[i], p.bloomH[i]);
+     }
+-
+-    // 2. Bloom chain.
+-    if (bloomStrength > 0.0f)
++    glUseProgram(p.progBloomUp);
++    SetInt(p.progBloomUp, "srcTex", 0);
++    Poseidon::render::blend::Additive(); // (SRC_ALPHA, ONE) with alpha 1 = add
++    for (int i = PostTargets::kBloomLevels - 1; i > 0; --i)
+     {
+-        glUseProgram(p.progBloomDown);
+-        u1i(p.progBloomDown, "srcTex", 0);
+-        for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+-        {
+-            const bool first = i == 0;
+-            const GLuint src = first ? p.colorTex : p.bloomTex[i - 1];
+-            const int sw = first ? w : p.bloomW[i - 1];
+-            const int sh = first ? h : p.bloomH[i - 1];
+-            bindTex(0, src);
+-            u2f(p.progBloomDown, "srcTexel", 1.0f / sw, 1.0f / sh);
+-            u4f(p.progBloomDown, "bloomParams", kBloomThreshold, kBloomKnee, first ? 1.0f : 0.0f, 0.0f);
+-            drawTo(p.bloomFbo[i], p.bloomW[i], p.bloomH[i]);
+-        }
+-        glUseProgram(p.progBloomUp);
+-        u1i(p.progBloomUp, "srcTex", 0);
+-        Poseidon::render::blend::Additive(); // (SRC_ALPHA, ONE) with alpha 1 = add
+-        for (int i = PostTargets::kBloomLevels - 1; i > 0; --i)
+-        {
+-            bindTex(0, p.bloomTex[i]);
+-            u2f(p.progBloomUp, "srcTexel", 1.0f / p.bloomW[i], 1.0f / p.bloomH[i]);
+-            drawTo(p.bloomFbo[i - 1], p.bloomW[i - 1], p.bloomH[i - 1]);
+-        }
+-        Poseidon::render::blend::Opaque();
+-        GpuMark(Poseidon::gpu::Mark::BloomEnd);
++        BindTex(0, p.bloomTex[i]);
++        Set2(p.progBloomUp, "srcTexel", 1.0f / p.bloomW[i], 1.0f / p.bloomH[i]);
++        DrawTo(p.bloomFbo[i - 1], p.bloomW[i - 1], p.bloomH[i - 1]);
+     }
++    Poseidon::render::blend::Opaque();
++}
+ 
+-    // 3. Sun shafts, when the sun is in front of the camera and above the horizon.
+-    float shaftWeight = 0.0f;
+-    float sunU = 0.5f, sunV = 0.5f;
+-    Color shaftTint(1, 1, 1, 1);
+-    if (worldDepth && glow && _lighting.sunShafts > 0.0f && GScene)
+-    {
+-        LightSun* sun = GScene->MainLight();
+-        Camera* cam = GScene->GetCamera();
+-        const Vector3 toSun = -sun->SunDirection();
+-        // Camera space: InverseScaled maps world directions into view space.
+-        const Vector3 v = cam->InverseScaled().Rotate(toSun);
+-        if (v.Z() > 0.05f && toSun.Y() > -0.02f)
+-        {
+-            const float ndcX = proj._11 * v.X() / v.Z();
+-            const float ndcY = proj._22 * v.Y() / v.Z();
+-            sunU = rectX + (ndcX * 0.5f + 0.5f) * rectW;
+-            sunV = rectY + (ndcY * 0.5f + 0.5f) * rectH;
+-            const float offX = std::fabs(ndcX) > 1.0f ? std::fabs(ndcX) - 1.0f : 0.0f;
+-            const float offY = std::fabs(ndcY) > 1.0f ? std::fabs(ndcY) - 1.0f : 0.0f;
+-            const float onScreen = std::exp(-3.0f * (offX + offY));
+-            const float lowSun = 0.55f + 0.45f * (1.0f - std::min(1.0f, toSun.Y() / 0.6f));
+-            Landscape* land = GScene->GetLandscape();
+-            const float clear = land ? land->SkyThrough() : 1.0f;
+-            shaftWeight = onScreen * lowSun * clear * (1.0f - sun->NightEffect());
+-            shaftTint = _lightRigSun;
+-        }
+-    }
+-    if (shaftWeight > 0.001f)
+-    {
+-        glUseProgram(p.progShafts);
+-        u1i(p.progShafts, "depthTex", 0);
+-        u1i(p.progShafts, "colorTex", 2);
+-        bindTex(0, p.depthTex);
+-        bindTex(2, p.colorTex);
+-        u4f(p.progShafts, "sunScreen", sunU, sunV, shaftWeight, static_cast<float>(w) / static_cast<float>(h));
+-        drawTo(p.shaftFbo, hw, hh);
+-        GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
+-    }
++void EngineGL33::PostShafts(const PostFrame& f)
++{
++    const PostTargets& p = _post;
++    glUseProgram(p.progShafts);
++    SetInt(p.progShafts, "depthTex", 0);
++    SetInt(p.progShafts, "colorTex", 2);
++    BindTex(0, p.depthTex);
++    BindTex(2, p.colorTex);
++    Set4(p.progShafts, "sunScreen", f.sunU, f.sunV, f.shaftWeight, static_cast<float>(f.w) / static_cast<float>(f.h));
++    DrawTo(p.shaftFbo, f.hw, f.hh);
++}
+ 
+-    // 4. Composite into the frame target (every sample gets the resolved value).
++void EngineGL33::PostComposite(const PostFrame& f)
++{
++    // Into the frame target (every sample gets the resolved value). A stage
++    // that did not run this frame reads as its 1x1 stand-in.
++    const PostTargets& p = _post;
++    const rm::PostStagePlan& plan = f.plan;
+     glUseProgram(p.progComposite);
+-    u1i(p.progComposite, "colorTex", 0);
+-    u1i(p.progComposite, "aoTex", 2);
+-    u1i(p.progComposite, "bloomTex", 3);
+-    u1i(p.progComposite, "shaftTex", 4);
+-    bindTex(0, p.colorTex);
+-    bindTex(2, aoStrength > 0.0f ? p.aoTex[0] : p.whiteTex);
+-    bindTex(3, bloomStrength > 0.0f ? p.bloomTex[0] : p.blackTex);
+-    bindTex(4, shaftWeight > 0.001f ? p.shaftTex : p.blackTex);
+-    u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
+-    const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+-    u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
++    SetInt(p.progComposite, "colorTex", 0);
++    SetInt(p.progComposite, "aoTex", 2);
++    SetInt(p.progComposite, "bloomTex", 3);
++    SetInt(p.progComposite, "shaftTex", 4);
++    BindTex(0, p.colorTex);
++    BindTex(2, plan.Runs(rm::PostStage::Ao) ? p.aoTex[0] : p.whiteTex);
++    BindTex(3, plan.Runs(rm::PostStage::Bloom) ? p.bloomTex[0] : p.blackTex);
++    BindTex(4, plan.Runs(rm::PostStage::Shafts) ? p.shaftTex : p.blackTex);
++    Set4(p.progComposite, "compParams", plan.aoStrength, plan.bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
++    const Color& tint = f.shaftTint;
++    const float lum = std::max(1e-4f, 0.2126f * tint.R() + 0.7152f * tint.G() + 0.0722f * tint.B());
++    Set4(p.progComposite, "shaftColor", tint.R() / lum, tint.G() / lum, tint.B() / lum, 1.0f);
+     // The shafts keep only what the air in front of each pixel scatters; the
+     // depth is read only where there is a shaft term.
+-    u1i(p.progComposite, "depthTex", 5);
+-    bindTex(5, p.depthTex);
+-    u4f(p.progComposite, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++    SetInt(p.progComposite, "depthTex", 5);
++    BindTex(5, p.depthTex);
++    Set4(p.progComposite, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
+     const float scatterLength = Poseidon::remaster::ShaftScatterLength(GScene ? GScene->GetFogMaxRange() : 0.0f);
+-    u4f(p.progComposite, "depthMap", depthScale, depthBias, 1.0f / scatterLength, 0.0f);
+-    u4f(p.progComposite, "worldRect", rectX, rectY, rectW, rectH);
+-    u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+-    drawTo(_ssaaFbo, w, h);
+-    GpuMark(Poseidon::gpu::Mark::CompositeEnd);
++    Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
++    Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++    Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    DrawTo(_ssaaFbo, f.w, f.h);
++}
++
++void EngineGL33::PostDebugView(const PostFrame& f)
++{
++    // Debug view 5: the linear depth over the whole frame target.
++    const PostTargets& p = _post;
++    glUseProgram(p.progDebugDepth);
++    SetInt(p.progDebugDepth, "linDepthTex", 0);
++    BindTex(0, p.linDepthTex);
++    DrawTo(_ssaaFbo, f.w, f.h);
++}
+ 
++void EngineGL33::EndPostFullscreen()
++{
+     // Hand the GL state back: frame target bound with its full viewport, unit 0
+     // sampler restored, caches invalidated so the next draw re-applies state.
+-    for (int unit : {0, 2, 3, 4, 5})
++    for (int unit : Poseidon::gl33lighting::kPostUnits)
+     {
+         glActiveTexture(GL_TEXTURE0 + unit);
+         glBindTexture(GL_TEXTURE_2D, 0);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 019c8ca..1d764d5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -29,7 +29,8 @@ void main() {
+ // view-space depth in metres at a uv and the view-space position of a uv at a
+ // depth. The pass declares the inputs these read, under these names: depthTex,
+ // projInfo (x = _33, y = _43, z = 1/_11, w = 1/_22), depthMap (ndcZ = depth *
+-// x + y) and worldRect (the 3D viewport in uv), as psPostAo does.
++// x + y) and worldRect (the 3D viewport in uv), as psPostAo and
++// psPostLinearDepth do.
+ static const char s_glslPostCommon[] = R"(
+ float viewZ(vec2 uv) {
+     float d = texture(depthTex, uv).r;
+@@ -251,6 +252,58 @@ void main() {
+ }
+ )";
+ 
++// Half-resolution linear depth (the LinearDepth stage), for the stages that
++// trace or upsample at half resolution. Output r = view depth in metres of one
++// of the four full-resolution pixels under the texel, 1e6 for the sky. Its
++// inputs, then s_glslPostCommon, then its main.
++static const char s_psPostLinearDepthInputs[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D depthTex;
++uniform vec4 projInfo;  // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
++uniform vec4 depthMap;  // ndcZ = depth * x + y
++uniform vec4 screen;    // xy full-res size, zw 1/size
++uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv (read by viewPos)
++out vec4 fragColor;
++)";
++
++// On a checkerboard, even texels keep the nearest of their four pixels and odd
++// texels the farthest, so along a silhouette the half-resolution buffer holds
++// both the edge and what lies behind it, and a depth-aware upsample finds a tap
++// at either depth (a thin branch against the sky keeps its own). The four reads
++// land on exact full-resolution texel centres; on an odd frame size the last
++// row or column repeats the edge pixel (clamp to edge).
++static const char s_psPostLinearDepthMain[] = R"(
++void main() {
++    ivec2 ij = ivec2(gl_FragCoord.xy);
++    float zNear = 1e6;
++    float zFar = 0.0;
++    for (int k = 0; k < 4; ++k) {
++        vec2 uv = (vec2(ij * 2 + ivec2(k & 1, k >> 1)) + 0.5) * screen.zw;
++        float d = texture(depthTex, uv).r;
++        float z = d >= 0.999999 ? 1e6 : viewZ(uv); // sky as psPostAo sees it
++        zNear = min(zNear, z);
++        zFar = max(zFar, z);
++    }
++    fragColor = vec4(((ij.x + ij.y) & 1) == 0 ? zNear : zFar, 0.0, 0.0, 1.0);
++}
++)";
++
++// Debug view 5 (the DebugView stage): the half-resolution linear depth over the
++// frame, on a log scale from white at 1 m to black at 8 km, the sky blue. The
++// texels stay square (nearest filtering) and the checkerboard of nearest and
++// farthest samples shows along silhouettes.
++static const char s_psPostDebugDepthGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D linDepthTex; // r = view depth in metres, 1e6 = sky
++out vec4 fragColor;
++void main() {
++    float z = texture(linDepthTex, vUV).r;
++    if (z >= 1e5) { fragColor = vec4(0.25, 0.45, 0.85, 1.0); return; }
++    float g = 1.0 - clamp(log2(max(z, 1.0)) / 13.0, 0.0, 1.0);
++    fragColor = vec4(vec3(g), 1.0);
++}
++)";
++
+ // Every post shader, assembled from the raw strings above: these pieces in this
+ // order, in PostShader order. The lighting lab's glsl_extract.py reads this
+ // table to assemble the same sources.
+@@ -267,6 +320,8 @@ const PostShaderDef kPostShaders[] = {
+     {"psPostBloomUp", {s_psPostBloomUpGLSL}},
+     {"psPostShafts", {s_psPostShaftsGLSL}},
+     {"psPostComposite", {s_psPostCompositeGLSL}},
++    {"psPostLinearDepth", {s_psPostLinearDepthInputs, s_glslPostCommon, s_psPostLinearDepthMain}},
++    {"psPostDebugDepth", {s_psPostDebugDepthGLSL}},
+ };
+ constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
+ static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
+diff --git a/arma_CWR/tests/rendering/captures/README.md b/arma_CWR/tests/rendering/captures/README.md
+index 8cbcb73..e6a2f85 100644
+--- a/arma_CWR/tests/rendering/captures/README.md
++++ b/arma_CWR/tests/rendering/captures/README.md
+@@ -73,7 +73,7 @@ Everything lands in `D:\Arma_CWA_worktrees\lighting\tmp\captures\<yyyyMMdd-HHmms
+ | `<view>__classic.png`, `<view>__remastered.png` | The two captures, 960x640 |
+ | `<view>__pair.png` | Classic left, Remastered right, labelled, GPU frame time and the shot frame's draw calls and drawn objects in the corner |
+ | `contact_sheet.png` | Every pair on one page |
+-| `timings.csv`, `timings.json` | One row per shot: GPU frame / world / shadow / post / ao / bloom / shafts / composite (ms), CPU fps and frame ms, `triSetLighting` answer, active camera, the shot frame's draw calls, drawn objects and light slots (`draws`, `objects`, `lights`), the timing window's mean draw calls (`calls_avg`), the object LOD width and pin (`lod`, `pin`), the horizon map state, and the mode's load wait (`settle`, `settle_draws`) |
++| `timings.csv`, `timings.json` | One row per shot: GPU frame / world / shadow / post and the post stages resolve / lindepth / ao / bloom / shafts / composite (ms; a stage that did not run is empty), CPU fps and frame ms, `triSetLighting` answer, active camera, the shot frame's draw calls, drawn objects and light slots (`draws`, `objects`, `lights`), the timing window's mean draw calls (`calls_avg`), the object LOD width and pin (`lod`, `pin`), the horizon map state, and the mode's load wait (`settle`, `settle_draws`) |
+ | `timings.md` | The same as a table, with a Remastered minus Classic row per view (draws and objects as a share of the larger); `make_pairs.py` also prints the pairs whose drawn objects differ by more than 5% and the modes whose load wait ran out |
+ | `udcap.log` | Every raw `UDCAP;...` log line and the horizon-map build line |
+ | `tri.log`, `tri\` | tri's console output and its own output tree (game logs, raw captures; the BMP twins are deleted) |
+diff --git a/arma_CWR/tests/rendering/captures/make_pairs.py b/arma_CWR/tests/rendering/captures/make_pairs.py
+index f6ebd9b..623ef89 100644
+--- a/arma_CWR/tests/rendering/captures/make_pairs.py
++++ b/arma_CWR/tests/rendering/captures/make_pairs.py
+@@ -40,12 +40,17 @@ MODES = tuple(m for pair in PAIR_MODES for m in pair)
+ SHOT_RE = re.compile(r"^(\d{3})_(.+)__(classic|remastered|off|on)\.png$")
+ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+ UDCAP_RE = re.compile(r"UDCAP;(.*)$")
+-GPU_FIELDS = ("frame", "world", "shadow", "post", "ao", "bloom", "shafts", "composite")
++# triGpuTimes sections: the frame, the world (with its shadow pass) and the post
++# pass, then the post stages that run today, in their order (GpuTimings.hpp; a
++# stage that did not run leaves its cell empty).
++GPU_FIELDS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
+ GPU_RES = {
+     "frame": re.compile(r"\bframe ([\d.]+) ms"),
+     "world": re.compile(r"\bworld ([\d.]+)"),
+     "shadow": re.compile(r"\(shadow ([\d.]+)\)"),
+     "post": re.compile(r"\bpost ([\d.]+):"),
++    "resolve": re.compile(r"\bresolve ([\d.]+)"),
++    "lindepth": re.compile(r"\blindepth ([\d.]+)"),
+     "ao": re.compile(r"\bao ([\d.]+)"),
+     "bloom": re.compile(r"\bbloom ([\d.]+)"),
+     "shafts": re.compile(r"\bshafts ([\d.]+)"),
+@@ -298,15 +303,14 @@ def write_tables(rows, out_dir: Path):
+           "are empty. Draws = GL draw calls and objects = objects with a visible LOD, both of the shot frame",
+           "(`triSceneStats`); load = the `triSettleScene` answer before the mode's timers (frames run). Delta =",
+           "Remastered minus Classic, or on minus off (draws and objects: share of the larger).", "",
+-          "| view | mode | frame | world | shadow | post | ao | bloom | shafts | composite | CPU fps | draws | objects | "
+-          "load | lighting |",
+-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
++          "| view | mode | " + " | ".join(GPU_FIELDS) + " | CPU fps | draws | objects | load | lighting |",
++          "|---|---|" + "---|" * (len(GPU_FIELDS) + 5)]
+     for v in views:
+         left, right = pair_modes(v, out_dir, by)
+         for mode in (left, right):
+             r = by.get((v, mode))
+             if not r:
+-                md.append(f"| {v} | {mode} | missing |  |  |  |  |  |  |  |  |  |  |  |  |")
++                md.append(f"| {v} | {mode} | missing |" + "  |" * (len(GPU_FIELDS) + 4))
+                 continue
+             counts = ["" if r.get(k) is None else f"{r[k]:,}" for k in ("draws", "objects")]
+             md.append("| " + " | ".join([v, mode] + [fmt(r[f"gpu_{f}_ms"]) for f in GPU_FIELDS] +
+diff --git a/arma_CWR/tests/rendering/captures/summarize_timing.py b/arma_CWR/tests/rendering/captures/summarize_timing.py
+index b7e1543..7b0beba 100644
+--- a/arma_CWR/tests/rendering/captures/summarize_timing.py
++++ b/arma_CWR/tests/rendering/captures/summarize_timing.py
+@@ -31,7 +31,7 @@ from pathlib import Path
+ import numpy as np
+ from PIL import Image
+ 
+-SECTIONS = ("frame", "world", "shadow", "post", "ao", "bloom", "shafts", "composite")
++SECTIONS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
+ ROUND_RE = re.compile(r"^(.+)_r(\d+)$")
+ # banddiff.py's 640-row bands (0-250 sky, 250-350 horizon, 350-640 ground) at 1080 rows
+ BANDS = ((0, 422), (422, 591), (591, 1080))
+@@ -151,8 +151,8 @@ def main():
+           "from the load, so light views run at lower clocks than heavy ones). gpu_sampler.ps1 stamps",
+           "its rows in whole seconds and writes one every 2 to 3 s, so the window edges are good to",
+           "about a second: the row stamped in the shot's own second may have been read just after it.", "",
+-          "| view | mode | n | frame | world | shadow | post | ao | bloom | shafts | composite | CPU frame | draws | objects | GPU MHz | P-states | settle |",
+-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
++          "| view | mode | n | " + " | ".join(SECTIONS) + " | CPU frame | draws | objects | GPU MHz | P-states | settle |",
++          "|---|---|---|" + "---|" * (len(SECTIONS) + 6)]
+     summary = []
+     for key in order:
+         g = sorted(groups[key], key=lambda r: r["round"])
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index f587a48..49ce8b7 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -165,6 +165,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_remaster_lighting.cpp
+     Graphics/test_feature_switches.cpp
+     Graphics/test_gpu_timings.cpp
++    Graphics/test_post_stages.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
+index 5517cc6..010152a 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gpu_timings.cpp
+@@ -4,6 +4,8 @@
+ #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+ 
+ #include <cstdint>
++#include <set>
++#include <string>
+ 
+ // GpuTimings turns a frame's GPU timestamps into per-section durations
+ // (EngineGL33_GpuTimer.cpp feeds it the query results).
+@@ -22,8 +24,10 @@ struct Frame
+         stamps[static_cast<int>(m)] = static_cast<std::uint64_t>(static_cast<std::int64_t>(1e9 + ms * 1e6));
+         recorded |= 1u << static_cast<int>(m);
+     }
++    void Drop(Mark m) { recorded &= ~(1u << static_cast<int>(m)); }
+ };
+ 
++// A frame of today's post pass: resolve, AO, bloom, shafts, composite.
+ Frame FullFrame()
+ {
+     Frame f;
+@@ -32,10 +36,12 @@ Frame FullFrame()
+     f.Set(Mark::ShadowBegin, 1.0);
+     f.Set(Mark::ShadowEnd, 1.6);
+     f.Set(Mark::WorldEnd, 5.0);
++    f.Set(Mark::ResolveEnd, 5.05);
+     f.Set(Mark::AoEnd, 5.3);
+     f.Set(Mark::BloomEnd, 5.5);
+     f.Set(Mark::ShaftsEnd, 5.55);
+     f.Set(Mark::CompositeEnd, 5.7);
++    f.Set(Mark::PostEnd, 5.7);
+     f.Set(Mark::FrameEnd, 6.0);
+     return f;
+ }
+@@ -52,30 +58,108 @@ TEST_CASE("GpuTimings: sections from one full frame", "[Graphics][gpu]")
+     CHECK(t.LastMs(Section::Frame) == Catch::Approx(6.0).margin(1e-3));
+     CHECK(t.LastMs(Section::World) == Catch::Approx(4.8).margin(1e-3));
+     CHECK(t.LastMs(Section::Shadow) == Catch::Approx(0.6).margin(1e-3));
+-    CHECK(t.LastMs(Section::Ao) == Catch::Approx(0.3).margin(1e-3));
++    CHECK(t.LastMs(Section::Resolve) == Catch::Approx(0.05).margin(1e-3));
++    CHECK(t.LastMs(Section::Ao) == Catch::Approx(0.25).margin(1e-3)); // from the resolve, not WorldEnd
+     CHECK(t.LastMs(Section::Bloom) == Catch::Approx(0.2).margin(1e-3));
+     CHECK(t.LastMs(Section::Shafts) == Catch::Approx(0.05).margin(1e-3));
+     CHECK(t.LastMs(Section::Composite) == Catch::Approx(0.15).margin(1e-3));
+     CHECK(t.LastMs(Section::Post) == Catch::Approx(0.7).margin(1e-3));
++    CHECK(t.LastMs(Section::LinearDepth) < 0.0f); // did not run
++    CHECK(t.LastMs(Section::DebugView) < 0.0f);
+     REQUIRE(t.AverageMs(Section::Frame, ms));
+     CHECK(ms == Catch::Approx(6.0).margin(1e-3));
+-    CHECK(t.Summary().rfind("frame 6.00 ms", 0) == 0);
++    CHECK(t.Summary() == "frame 6.00 ms | world 4.80 (shadow 0.60) | post 0.70: resolve 0.05 ao 0.25 bloom 0.20 "
++                         "shafts 0.05 composite 0.15");
+ }
+ 
+ TEST_CASE("GpuTimings: a skipped post step folds into the next one", "[Graphics][gpu]")
+ {
+     Frame f = FullFrame();
+-    f.recorded &= ~(1u << static_cast<int>(Mark::AoEnd));     // AO off
+-    f.recorded &= ~(1u << static_cast<int>(Mark::ShaftsEnd)); // sun behind the camera
++    f.Drop(Mark::AoEnd);     // AO off
++    f.Drop(Mark::ShaftsEnd); // sun behind the camera
+     GpuTimings t;
+     t.Submit(f.stamps, f.recorded);
+     CHECK(t.LastMs(Section::Ao) < 0.0f);
+-    CHECK(t.LastMs(Section::Bloom) == Catch::Approx(0.5).margin(1e-3)); // from WorldEnd
++    CHECK(t.LastMs(Section::Bloom) == Catch::Approx(0.45).margin(1e-3)); // from ResolveEnd
+     CHECK(t.LastMs(Section::Shafts) < 0.0f);
+     CHECK(t.LastMs(Section::Composite) == Catch::Approx(0.2).margin(1e-3)); // from BloomEnd
+     CHECK(t.LastMs(Section::Post) == Catch::Approx(0.7).margin(1e-3));
+ }
+ 
++TEST_CASE("GpuTimings: every post stage has its mark and section, in run order", "[Graphics][gpu][PostStages]")
++{
++    // The stage marks are contiguous after WorldEnd and the stage sections
++    // follow them one for one, so each section runs from the stage before it.
++    CHECK(kMarkCount <= 32);
++    CHECK(static_cast<int>(Mark::ResolveEnd) == static_cast<int>(Mark::WorldEnd) + 1);
++    CHECK(static_cast<int>(Mark::PostEnd) == static_cast<int>(Mark::DebugViewEnd) + 1);
++    std::set<std::string> names;
++    for (int i = 0; i < kSectionCount; ++i)
++        names.insert(SectionName(static_cast<Section>(i)));
++    CHECK(names.size() == static_cast<size_t>(kSectionCount)); // unique: GpuTimingSectionMs looks them up by name
++    for (int i = 0; i < kPostStageMarks; ++i)
++    {
++        const auto m = static_cast<Mark>(static_cast<int>(Mark::ResolveEnd) + i);
++        CAPTURE(i);
++        CHECK(PostStageSection(m) == static_cast<Section>(static_cast<int>(Section::Resolve) + i));
++    }
++    CHECK(PostStageSection(Mark::WorldEnd) == Section::Count);
++    CHECK(PostStageSection(Mark::PostEnd) == Section::Count);
++
++    // Every stage runs: each section measures its own stage, and together they
++    // make the post pass.
++    Frame f;
++    f.Set(Mark::FrameBegin, 0.0);
++    f.Set(Mark::WorldBegin, 0.1);
++    f.Set(Mark::WorldEnd, 4.0);
++    double t0 = 4.0;
++    for (int i = 0; i < kPostStageMarks; ++i)
++    {
++        t0 += 0.01 * (i + 1);
++        f.Set(static_cast<Mark>(static_cast<int>(Mark::ResolveEnd) + i), t0);
++    }
++    f.Set(Mark::PostEnd, t0);
++    f.Set(Mark::FrameEnd, t0 + 0.5);
++    GpuTimings t;
++    t.Submit(f.stamps, f.recorded);
++    double sum = 0.0;
++    for (int i = 0; i < kPostStageMarks; ++i)
++    {
++        const auto s = static_cast<Section>(static_cast<int>(Section::Resolve) + i);
++        CAPTURE(SectionName(s));
++        CHECK(t.LastMs(s) == Catch::Approx(0.01 * (i + 1)).margin(1e-4));
++        sum += t.LastMs(s);
++    }
++    CHECK(t.LastMs(Section::Post) == Catch::Approx(sum).margin(1e-3));
++    // The summary lists them in run order.
++    const std::string summary = t.Summary();
++    size_t at = 0;
++    for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)
++    {
++        const std::string name = std::string(" ") + SectionName(static_cast<Section>(i)) + " ";
++        CAPTURE(name, summary);
++        const size_t found = summary.find(name, at);
++        REQUIRE(found != std::string::npos);
++        at = found;
++    }
++}
++
++TEST_CASE("GpuTimings: a stage after the composite counts in the post pass", "[Graphics][gpu][PostStages]")
++{
++    // The post section ends at PostEnd, after whichever stage ran last (the
++    // debug view here; the TAA resolve and sharpen once they land).
++    Frame f = FullFrame();
++    f.Set(Mark::LinearDepthEnd, 5.1);
++    f.Set(Mark::DebugViewEnd, 5.9);
++    f.Set(Mark::PostEnd, 5.9);
++    GpuTimings t;
++    t.Submit(f.stamps, f.recorded);
++    CHECK(t.LastMs(Section::LinearDepth) == Catch::Approx(0.05).margin(1e-3));
++    CHECK(t.LastMs(Section::Ao) == Catch::Approx(0.2).margin(1e-3)); // from LinearDepthEnd
++    CHECK(t.LastMs(Section::DebugView) == Catch::Approx(0.2).margin(1e-3));
++    CHECK(t.LastMs(Section::Post) == Catch::Approx(0.9).margin(1e-3));
++}
++
+ TEST_CASE("GpuTimings: missing or out-of-order stamps are dropped, averages smooth", "[Graphics][gpu]")
+ {
+     GpuTimings t;
+@@ -88,6 +172,7 @@ TEST_CASE("GpuTimings: missing or out-of-order stamps are dropped, averages smoo
+     float ms = 0.0f;
+     CHECK_FALSE(t.AverageMs(Section::Shadow, ms));
+     CHECK_FALSE(t.AverageMs(Section::Post, ms));
++    CHECK_FALSE(t.AverageMs(Section::Resolve, ms));
+     CHECK(t.LastMs(Section::World) == Catch::Approx(2.9).margin(1e-3));
+ 
+     Frame bad = classic;
+@@ -107,4 +192,5 @@ TEST_CASE("GpuTimings: missing or out-of-order stamps are dropped, averages smoo
+     t.Reset();
+     CHECK(t.Frames() == 0);
+     CHECK_FALSE(t.AverageMs(Section::Frame, ms));
++    CHECK(t.LastMs(Section::Frame) < 0.0f);
+ }
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index f411dc2..1915fef 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -824,7 +824,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+         CHECK(ok);
+         ++post;
+     }
+-    CHECK(post == 7); // vsPost, AO, AO blur, bloom down and up, shafts, composite
++    // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
++    // and its debug view
++    CHECK(post == 9);
+ }
+ 
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+@@ -850,7 +852,7 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
+                 CHECK(reached);
+                 ++strings;
+             }
+-    CHECK(strings >= 26); // today 3 VS, 10 prelude pieces and 4 mains; 9 post strings
++    CHECK(strings >= 29); // today 3 VS, 10 prelude pieces and 4 mains; 12 post strings
+ }
+ 
+ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")
+@@ -938,10 +940,38 @@ TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][
+     CHECK(i == static_cast<int>(gl::PostShader::Count));
+     CHECK(gl::PostShaderName(gl::PostShader::Count) == nullptr);
+ 
+-    // psPostAo reads the shared depth reconstruction.
++    // psPostAo and psPostLinearDepth read the shared depth reconstruction.
+     const std::string ao = gl::PostShaderSource(gl::PostShader::Ao);
+     CHECK(CountOf(ao, "float viewZ(vec2 uv) {") == 1);
+     CHECK(CountOf(ao, "vec3 viewPos(vec2 uv, float z) {") == 1);
++    const std::string linear = gl::PostShaderSource(gl::PostShader::LinearDepth);
++    CHECK(CountOf(linear, "float viewZ(vec2 uv) {") == 1);
++    CHECK(CountOf(linear, "vec3 viewPos(vec2 uv, float z) {") == 1);
++    CHECK(CountOf(linear, "viewZ(uv)") == 1);
++}
++
++TEST_CASE("Post linear depth: half resolution, nearest and farthest on a checkerboard, the sky at 1e6",
++          "[Graphics][Shaders][remaster][PostStages]")
++{
++    // The contract its readers rely on (the stages that trace or upsample at
++    // half resolution): one texel per 2x2 full-resolution pixels, read at their
++    // exact texel centres; even texels keep the nearest view depth and odd
++    // texels the farthest; the sky is 1e6, by the threshold psPostAo uses.
++    const std::string linear = gl::PostShaderSource(gl::PostShader::LinearDepth);
++    REQUIRE_FALSE(linear.empty());
++    CHECK(linear.find("vec2 uv = (vec2(ij * 2 + ivec2(k & 1, k >> 1)) + 0.5) * screen.zw;") != std::string::npos);
++    CHECK(linear.find("float z = d >= 0.999999 ? 1e6 : viewZ(uv);") != std::string::npos);
++    CHECK(linear.find("((ij.x + ij.y) & 1) == 0 ? zNear : zFar") != std::string::npos);
++    const std::string ao = gl::PostShaderSource(gl::PostShader::Ao);
++    CHECK(ao.find("if (d0 >= 0.999999) { fragColor = vec4(1.0, 1e6, 0.0, 1.0); return; } // sky") != std::string::npos);
++    // The debug view reads it and nothing else.
++    const std::string debug = gl::PostShaderSource(gl::PostShader::DebugDepth);
++    CHECK(debug.find("uniform sampler2D linDepthTex;") != std::string::npos);
++    CHECK(CountOf(debug, "uniform sampler2D") == 1);
++    // The target is one float channel at half resolution, sampled nearest.
++    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
++    CHECK(post.find("p.linDepthTex = MakeTexture(GL_R32F, GL_RED, GL_FLOAT, hw, hh, false);") != std::string::npos);
++    CHECK(post.find("DrawTo(p.linDepthFbo, f.hw, f.hh);") != std::string::npos);
+ }
+ 
+ TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Graphics][Shaders][remaster]")
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index e8f0802..59a9253 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -2203,3 +2203,4 @@ items:
+       - "2026-10-18: graphics-remaster step A0 (cut and baseline, plan section 5 A0): the branch is cut at 026133b with the integration plan on top (0779350). F10 and F11 are in their narrowed form in code and in game (a fresh user dir boots to 4x MSAA at render scale 1; with no spawned unit the shadow depth map holds the trees and bushes). Gate tags 425/425 ([graphics] 378/379, the known DDS fixture case), smoke 3/3 with KHR_debug ids 131169, 131154 and 131218 only. New look baseline 20261017-233303-gr-base; a second boot of the same build shows the Sinai ground band, the crew views and the fire and smoke views are not repeatable between boots, so pixel-exact checks use the other views. Quiet-GPU timing at 1080p, render scale 1.0, 4x MSAA on the RTX 4060 Ti (20 hero views, 3 interleaved rounds): Remastered takes 2.0 to 11.9 ms of GPU time on 17 views and 17.4 to 24.3 ms on the long views (sunrise_ridge, valley 05:15, Eden broken_high, 10,800 to 12,900 draws). There the GPU span is set by draw submission rather than shading (the 26 to 31 ms CPU frame is longer than the GPU span; 54 to 73% GPU utilisation at P0; Classic costs the same on sunrise_ridge, 18.10 against 17.41 ms), and MENU's 2.5 to 7.5 ms base frame was measured after the frame-cost fixes (step A4), so the B steps judge headroom on those views only after A4. Sky and sea views run mostly at P3 or P5 clocks, so the timing gate now logs the GPU clock with every shot. No engine change."
+       - "2026-10-18: graphics-remaster step A1 (switches, gates, tooling, plan section 5 A1): one registry (Graphics/Remaster/FeatureSwitches) holds every triSetLighting key, the 26 feature switches of plan 3.1 (all on, all inert until their step lands) and the new mode word baseline (every switch off); FeatureGates decides per frame whether an enabled feature can show (low sun, night, wet, local or combat light, clouds; gates=0 forces them on); the dev overlay's Lighting tab is generated from the registry with a Features section showing each gate; triFeatureState logs switches and gates with every capture shot; triSetFixedStep fixes the simulation step and P-mode pairs hold (two paused renders of a fire are pixel-identical); triPinCloudDrift holds the cloud shadows and sky clouds, which do not follow the pinned clock. Capture tooling in the repo: features_ab (16 hero views, off then on, fixed clocks), banddiff.py, the A0 timing rig (run-timing.ps1, gpu_sampler.ps1, summarize_timing.py, gen_timing.py) and the video skeleton (capture_motion.sqf, gen_video_tests.py with every 7.3 row, make_video.py). No pixel changes: horizon and ground bands match the A0 build within noise; timing on the long views matches A0 at P0 (sunrise_ridge 17.31 against 17.41 ms). Unit gate 452/452 (27 new), smoke 3/3."
+       - "2026-10-18: graphics-remaster step A2 (shader split and shared tables, plan section 5 A2): the remastered fragment prelude is ten pieces by concern (header, LitConstants, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish; sky, lights and surface in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp) joined by one table; the LitConstants block is one string with no copies; the post GLSL moved to EngineGL33_PostShaders.cpp (no GL code, so the unit tests link it) with a kPostShaders table and s_glslPostCommon (AO's depth reconstruction); the slots planned for later features (LitConstPlanned 58 to 78) and the texture unit table (units 6, 8 to 15 allocated, one static_assert, kLitSamplers binds every lit sampler, shadow unit named kShadowMapUnit) are fixed. No pixel changes: every assembled program (8 remastered, 7 post, 15 classic) is byte for byte the tip's, checked with glsl_extract.py --dump and with the engine's own accessors; features_ab on the A2 build is pixel-identical to the A1 build on the five repeatable views and within the same-config noise on the others; timing at P0 within -0.27 to +0.18 ms of A1. Tests go through the accessors (4 new cases: every raw GLSL string reaches a program, the assembly tables the lab reads, the concern of each piece, the unit table); five contract mutations each turn their case red. Unit gate 456/456, smoke 3/3. The lighting lab assembles the same programs (glsl_extract load_programs) and decodes git output as UTF-8."
++      - "2026-10-18: graphics-remaster step A3 (post stages, plan section 5 A3): the post pass is a fixed list of thirteen stages (Graphics/Remaster/PostStages: resolve, linear depth, tag readout, AO, reflections, air, bloom, shafts, combat scatter, composite, TAA resolve, sharpen, debug view), every planned stage holding its place and GPU mark, seven landed; PlanPostStages decides per frame which stages run (the early return asks every stage, with the old meaning: a knob that is on keeps the pass) and EndWorldScene runs them on one PostFrame, each followed by its own timestamp. New PostLinearDepth: half-resolution R32F view depth, nearest and farthest of each 2x2 on a checkerboard, the sky at 1e6; it feeds nothing yet, so it runs only for the new linear depth debug view (debug=5), 0.01 ms at P0. No pixel changes: the 30 existing programs are byte-identical, features_ab is pixel-identical to the A2 build on the five repeatable views and the three-island set within boot noise. The new GPU sections show the MSAA resolve (0.22 to 0.65 ms at P0), not AO (0.06 to 0.20 ms), is the largest fixed post cost; frame medians at P0 within -0.22 to +0.27 ms of A2. Unit gate 466/466 (10 new), seven contract mutations red, smoke 3/3."

@@ -1,0 +1,25 @@
+{
+ "src": "rec/fixed_rt60.raw",
+ "w": 1920,
+ "h": 1080,
+ "frames": 300,
+ "mode": "0",
+ "half": "0",
+ "wall_ms": 11927.5,
+ "fps": 25.07,
+ "dwall_ms": {
+  "min": 38.04,
+  "med": 39.83,
+  "max": 45.47
+ },
+ "dpan_ms": {
+  "min": 16.66,
+  "med": 16.67,
+  "max": 16.67
+ },
+ "zero_sim_frames": 0,
+ "shots": 0,
+ "pan_first": -0.4833,
+ "pan_last": 4.5,
+ "mkv": "rec/fixed_rt60.mkv"
+}

@@ -1,0 +1,2 @@
+﻿run exit=post-only frames=150 minutes=0 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\6\runs\base
+done 01:47:52

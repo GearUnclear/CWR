@@ -1,0 +1,135 @@
+Round 5 DAWN fixer: low-sun haze shape (dawn_valley's cream veil, sunrise_ridge's warm dome)
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-veil (base tree 12117cf9 = fec1075 + fix5/base.patch).
+Build build/look-fix-veil-rwdi, game dist/look-fix-veil-rwdi, junction RemasterUD-r5-dawn.
+Nothing committed, no branch. Patch: fix.patch (10 files, +208 / -13), made with
+git diff --cached --binary <base tree>; it applies with git apply --cached --check on a fresh
+index of the base tree. Probe capture tests look_r5dawn* are not in the patch.
+The exposure meter (PhotoCamera's metering) is not touched.
+
+Status: (a) fixed (the bay and the far shore read; a natural glow stays on the sun side),
+(b) fixed (the warm glow is a band along the horizon). They are two causes, not one.
+
+IMAGES (each: vanilla | landed | before (director/final, 1080) | after, then the problem's
+region at twice the panels' scale; red box = the crop)
+- a_dawn_valley_bay.png: (a) dawn_valley, the bay quadrant.
+- b_sunrise_ridge_glow.png: (b) sunrise_ridge, the sky round the sun.
+- c_checks_lowsun_forest_coast.png: before | after for lowsun_fp, forest_edge_golden and
+  coastline_sunset (1080).
+- final/<view>__overhaul.png: the five after shots (1920x1080), from shots_1.
+- Shots: shots_1 (the fixed build, five views), shots_p1 (probe: base and fogDensity=0),
+  shots_p2 (probe: the fixed build with the ring's elevation row ignored, override
+  work/ovNoEl/psFogInject.glsl). Working sheets in work/ (p1.png, thumbs1.png, s1_*.png).
+
+(a) DAWN_VALLEY: THE CREAM VEIL OVER THE BAY
+Cause. The volumetric fog's air light along a column is the horizon ring's colour for that
+azimuth (psFogInject, g_air). The ring (psFogRing) measures the sky from 2 degrees above the
+land, the darker half of six samples 0.6 to 5.6 degrees above that. Toward a low sun that is
+the aureole's flank: in dawn_valley (sun 11.9 degrees up) the ring's samples under the sun are
+4 to 9 degrees from it, while the haze over the bay (rays 3 to 8 degrees under the horizon) is
+15 to 20 degrees from it. Every column in the sun's azimuth took the ring's colour whatever
+its own angle to the sun, so the haze over the bay was lit as if it looked almost at the sun.
+The haze is thick enough there to converge to that light (round 4: fogDensity 0.5 barely
+changed it), so the bay and the far shore sank into a cream column under the sun.
+Probe evidence (dawn_valley 1080, bay box x 60-98%, y 45-75%, luma std / mean):
+- shots_p1 base: 32.8 / 153.8; fogDensity=0: 57.1 / 98.4. The veil is the volume's light.
+- shots_p1 sunrise_ridge with fogDensity=0: the warm dome is unchanged, so (b) is NOT the
+  fog (see below).
+- Phase per column (the fix): 37.7 / 128.0; far shore 16.4 / 147.4 (was 13.8 / 172.1).
+- shots_p2, the same build with the ring's elevation row ignored (every tap taken as
+  measured at the horizon): bay mean 134.1, far shore 156.0. So the measured elevation is
+  read and matters (the gain is the phase between the column and where the ring really
+  looked).
+Change.
+- psFogRing writes a second row: r = the sine of the mean elevation of the samples it kept
+  (the same darker half, or all of them under a grey sky), a = how sure, blended over frames
+  like the colour. EngineGL33_PostFog.cpp: the ring targets are kFogRingBins x kFogRingRows (2).
+- psFogInject, per ring tap: the tap's direction from its azimuth and that elevation; from the
+  sky table's own two parts there (new fogSkyParts: r the Rayleigh and multiple scattering,
+  m the haze's single scattering without its phase) the gain per channel is
+  (r + m P(column)) / (r + m P(tap)), P the sky's own skyMiePhase, clamped to 0..kFogRingPhaseMax.
+  A column at the ring's own direction keeps the ring's colour exactly (far ground still
+  melts into the sky behind it); under the horizon toward a low sun the haze takes less of
+  the sun's forward light; away from the sun the phase is flat and nothing changes. Only with
+  the sky table on (litAtmo.z), faded out under a grey sky (fogWeather.z, the table is the
+  clear sky's) and at night. The forward lobe (g_lobe) reads the corrected light.
+- VolumetricFog.hpp/.cpp: kFogRingPhaseMax and the C++ mirror FogRingPhaseGain.
+Result: the bay and the far shore read at thumbnail and full size (a_dawn_valley_bay.png),
+the sun side keeps a warm glow in the sky and a lighter haze toward the horizon. Still
+hazier than landed (bay std 37.7 against landed 53.3): what remains is the sky part (r) of the
+air's light, which is physical for a backlit morning haze.
+
+(b) SUNRISE_RIDGE: THE WARM DOME
+Cause (not the fog: fogDensity=0 leaves it unchanged). The camera look of the clear sky
+(camSkyLook, EngineGL33_LightingShadersSky.cpp) turns a low sun's sky toward the zenith's blue
+"away from the sun's glow": none within 10 degrees of the sun, all from 30, by the plain
+angle to the sun. That mask is a disc round the sun, so the golden colour filled a disc of
+about 20 degrees radius: with the sun at 5 degrees it reached 20 to 25 degrees up, more than
+half the frame's sky. Measured before (R-B warmth 20 px boxes from the glow's brightest point
+at the horizon): 82 at 200 px up, 47 at 300 px up; 77 at 400 px to the side, 51 at 600 px.
+A round dome.
+Change. The mask's angle counts the height above the sun kLowSunGlowFlat (3) times and the
+sky under the sun's height as at it (new camLowSunGlowCos; C++ mirror PhotoCamera
+LowSunGlowCos). The warm glow is a band hugging the horizon round the sun's bearing,
+brightest near the sun.
+Result: warmth 41 at 200 px up, 1 at 300 px up; 74 at 400 px to the side, 49 at 600 px.
+The band is about twice as wide as it is tall (b_sunrise_ridge_glow.png). The upper sky over
+the sun is the zenith's blue at the same brightness (the mask moves hue only).
+
+CHECK VIEWS (c_checks_lowsun_forest_coast.png, 1080)
+- lowsun_fp: the cream haze band under the sun is lighter, the far land under the sun is
+  crisper; the warm sky is a band at the horizon, the sky above the sun bluer. Better.
+- coastline_sunset: the glow lies along the horizon over the sea, the sky above the sun
+  bluer; disc, glitter and sea unchanged. Better.
+- forest_edge_golden (sun out of frame): unchanged.
+- No banding, seam or halo seen at full size in any of the five.
+
+CONSTANTS (name: old -> new)
+- VolumetricFog.hpp kFogRingPhaseMax: new, 1.5 (GLSL kFogRingPhaseMax in psFogInject)
+- PhotoCamera.hpp kLowSunGlowFlat: new, 3.0 (GLSL kCamGlowFlat in the sky piece)
+- EngineGL33_PostFog.cpp kFogRingRows: new, 2 (the ring was 1 row)
+- Unchanged: kFogRingBins 256, kFogRingShare 0.3, kFogRingDecay 0.995, the ring's sample
+  heights and its 5 degree exclusion round the sun, kFogLobeGain 0.2, the haze densities, the
+  sky roll-off caps, the meter.
+
+TESTS
+PoseidonTests.exe with "[remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],
+[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],
+[TerrainHorizon],[StateOwnership],[atmosphere]" run from D:\ on the final sources: all pass,
+331 cases, 958,000 assertions (glslang compiles every program, the ring and injection included).
+New or changed:
+- test_volumetric_fog.cpp "Volumetric fog: the air's light takes the sun's phase at each
+  column's own angle to the sun": FogRingPhaseGain is 1 at the ring's own direction, under
+  0.5 (above 0.2) for a bay column, about 1 away from the sun, capped at kFogRingPhaseMax; the
+  ring writes its elevation row; the injection reads rows 0.25 and 0.75 and the GLSL constant
+  matches.
+- test_photo_camera.cpp "PhotoCamera: a low sun's warm glow is a band along the horizon, not a
+  disc round the sun": LowSunGlowCos at the sun and under it, 15 degrees to the side stays in
+  the glow while 15 degrees straight up leaves it, side always closer than up from 4 to 30
+  degrees, kLowSunGlowFlat range.
+- test_remaster_lighting.cpp: kCamGlowFlat matches kLowSunGlowFlat; the mask uses
+  camLowSunGlowCos.
+clang-format: clean on the changed lines (VolumetricFog.hpp has one older violation at
+FogSightTransmittanceThrough, not mine, left alone).
+
+AI SIGHT AND FOG
+Intact. The patch does not touch Target.cpp, WorldSetup.cpp, SimulateFogSight,
+ComputeFogMedium, FogSightExtinctionAt or SetFogSight. Both changes are render-only light
+terms (the air's colour in the injection and the sky's hue); the medium's extinction, which AI
+reads, is unchanged.
+
+OPEN ITEMS
+- dawn_valley stays hazier than landed on the sun side; the rest is the sky part of the air's
+  light and the haze's thickness. A lighter clear haze toward a low sun would be a density
+  question, not this one.
+- sunrise_ridge: the hue is now a band, but the sky round the sun is still a bright pale disc
+  (the sky table's aureole under the roll-off). It reads as an aureole, not a warm dome.
+- The forward lobe (kFogLobeGain 0.2) now sits on light that already carries the phase per
+  column; round 4 found it small (fogSun=0 no visible change). Could go lower later.
+- Shot at 1080 only; the 960x640 cuts (abel_lighting) were not reshot. Night and grey views
+  were not reshot: the ring gain is off at night and fades out under a grey sky, and the sky
+  mask acts only with a low sun (litCameraLook.w).
+- The five shots were taken before a comment-only edit of PhotoCamera.hpp; the final build
+  (work/b4.log) compiles the same code.
+- Only my games were run (junction RemasterUD-r5-dawn); run-captures' scoped cleanup stopped
+  them.

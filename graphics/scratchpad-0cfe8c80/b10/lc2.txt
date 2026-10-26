@@ -1,0 +1,5 @@
+    InitSkyClouds();
+    // So does the sea's next-frame unit (EngineGL33_Sea.cpp binds an animation
+    // frame there only inside the sea's draws).
+    GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
+    GL33Bind::ActiveUnit(0);

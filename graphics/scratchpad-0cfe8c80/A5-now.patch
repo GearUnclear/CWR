@@ -1,0 +1,2334 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 18821ef..827ad8e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -859,6 +859,11 @@ class Engine : public IGraphicsEngine
+     /// World/HUD boundary: called once per frame after the 3D world and before
+     /// the map, HUD and dialogs; runs the remastered post effects.
+     virtual void EndWorldScene() {}
++    /// Inside the world pass: the opaque world is drawn, and the translucent
++    /// objects (smoke and fire particles, muzzle flashes, glass), the cockpit
++    /// pass, rain and flares follow. The remastered TAA copies the frame here
++    /// for its particle mask (Graphics/Remaster/TemporalAA.hpp).
++    virtual void BeginTranslucentObjects() {}
+ 
+     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
+     /// Default base returns an all-default set; only the GL33 backend stores it.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index 0802888..c024cf1 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -105,6 +105,10 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
+             return On("beyond 150 m", scale);
+ 
+         case Feature::Taa:
++            // The resolve is a post stage: no post pass, no resolve (and an
++            // unresolved jitter would shake the frame).
++            if (!t.postEffects)
++                return Off("post effects off");
+             if (!WorldVisible(in, why))
+                 return Off(why);
+             return On("world drawn");
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 506b755..d76e9f2 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -19,7 +19,7 @@ using LT = LightingTuning;
+ constexpr FeatureInfo kFeatures[] = {
+     {Feature::DrawGrouping, "drawGrouping", "Draw grouping", "perf", "Frame cost", "A4", false, &FS::drawGrouping, ""},
+     {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", false, &FS::hillCull, ""},
+-    {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", false, &FS::taa, ""},
++    {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", true, &FS::taa, "taa"},
+     {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", false,
+      &FS::lightTiles, ""},
+     {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", false,
+@@ -104,6 +104,17 @@ LightingKey MakeSwitch(const FeatureInfo& f)
+     return k;
+ }
+ 
++// A knob that tunes one feature: the overlay shows it under the feature's
++// switch, in the switch's track.
++LightingKey MakeSubKnob(Feature parent, const char* key, const char* label, const char* hint, float LT::* field,
++                        float lo, float hi)
++{
++    const FeatureInfo& f = kFeatures[static_cast<int>(parent)];
++    LightingKey k = MakeKnob(key, label, f.track, hint, field, lo, hi);
++    k.parent = f.key;
++    return k;
++}
++
+ struct KeyTable
+ {
+     std::vector<LightingKey> rows;
+@@ -145,6 +156,15 @@ struct KeyTable
+         rows.assign(std::begin(knobs), std::end(knobs));
+         for (const FeatureInfo& f : kFeatures)
+             rows.push_back(MakeSwitch(f));
++        const LightingKey subKnobs[] = {
++            MakeSubKnob(Feature::Taa, "taaSharpen", "TAA sharpen", "0 = soft; the overshoot stays bounded (no halos)",
++                        &LT::taaSharpen, 0.0f, 1.5f),
++            MakeSubKnob(Feature::Taa, "taaMipBias", "TAA texture LOD bias",
++                        "world textures while TAA runs; negative = sharper", &LT::taaMipBias, -1.5f, 0.5f),
++            MakeSubKnob(Feature::Taa, "taaAlpha", "TAA current frame weight", "lower = steadier and softer",
++                        &LT::taaAlpha, 0.02f, 1.0f),
++        };
++        rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+     }
+ };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 715c27e..3dfa8eb 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -115,6 +115,13 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // Temporal anti-aliasing (features.taa, TemporalAA.hpp): the sharpen after
++    // the resolve undoes the softening of the accumulation, the texture LOD
++    // bias of the world's passes wins back the texture detail it averages, and
++    // alpha is this frame's share in the blend with the history.
++    float taaSharpen = 0.5f;
++    float taaMipBias = -0.5f;
++    float taaAlpha = 0.1f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+index fff6ebf..1d8b610 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+@@ -23,8 +23,9 @@ constexpr PostStageInfo kStages[] = {
+     {PostStage::Shafts, "shafts", "A3", true, false, Mark::ShaftsEnd, Section::Shafts},
+     {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
+     {PostStage::Composite, "composite", "A3", true, false, Mark::CompositeEnd, Section::Composite},
+-    {PostStage::Temporal, "taa", "A5", false, false, Mark::TemporalEnd, Section::Temporal},
+-    {PostStage::Sharpen, "sharpen", "A5", false, false, Mark::SharpenEnd, Section::Sharpen},
++    {PostStage::Temporal, "taa", "A5", true, false, Mark::TemporalEnd, Section::Temporal},
++    // A5 lands TAA's sharpen; B11's luma sharpen (with TAA off) joins it.
++    {PostStage::Sharpen, "sharpen", "A5", true, false, Mark::SharpenEnd, Section::Sharpen},
+     {PostStage::DebugView, "debugview", "A3", true, true, Mark::DebugViewEnd, Section::DebugView},
+ };
+ static_assert(sizeof(kStages) / sizeof(kStages[0]) == kPostStageCount, "one PostStageInfo per PostStage");
+@@ -75,9 +76,10 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+ {
+     PostStagePlan plan;
+     const bool debugDepth = in.debugView == kDebugViewLinearDepth;
+-    // The stages that can ask for the pass ask by their knob (or debug view),
+-    // whatever this frame's conditions then decide for them.
+-    const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth;
++    // The stages that can ask for the pass ask by their knob, switch or debug
++    // view, whatever this frame's conditions then decide for them.
++    const bool asked =
++        in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth || in.temporal;
+     if (!asked)
+         return plan;
+ 
+@@ -94,6 +96,11 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
+     if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight)
+         plan.runs |= Bit(PostStage::Shafts);
+     plan.runs |= Bit(PostStage::Composite);
++    // The resolve reprojects with the world depth (a vehicle interior cleared
++    // it), and a screen overlay in the world pass was drawn jittered over the
++    // world: such a frame goes out as drawn and the history starts again.
++    if (in.temporal && in.worldDepth && in.glow)
++        plan.runs |= Bit(PostStage::Temporal) | Bit(PostStage::Sharpen);
+     if (debugDepth)
+         plan.runs |= Bit(PostStage::DebugView);
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+index 42244ff..e235ed0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+@@ -81,6 +81,11 @@ struct PostFrameInputs
+     // The sun's weight on screen for the shafts: 0 when it is behind the
+     // camera or under the horizon, scaled down by cloud and night.
+     float shaftWeight = 0.0f;
++    // Temporal anti-aliasing: the taa switch and its frame gate were on when
++    // the world's passes began, so they were drawn with the sub-pixel jitter
++    // (TemporalAA.hpp). The resolve and its sharpen then run unless this frame
++    // turned out to be a vehicle interior or to carry a screen overlay.
++    bool temporal = false;
+ };
+ 
+ // A frame's stages: which run and the strengths the composite uses.
+@@ -97,10 +102,13 @@ struct PostStagePlan
+ };
+ 
+ // The early return asks every stage: the pass runs when a landed stage asks
+-// for it (its knob is on, or its debug view is selected), and then Resolve and
+-// Composite always run, so a stage that is on but held off this frame (AO in a
+-// vehicle interior) still gets the composite, which copies the resolved frame
+-// back as it always has. Each other stage runs when its own gate says so.
++// for it (its knob is on, its switch and frame gate are on, or its debug view
++// is selected), and then Resolve and Composite always run, so a stage that is
++// on but held off this frame (AO in a vehicle interior) still gets the
++// composite, which copies the resolved frame back as it always has. Each other
++// stage runs when its own gate says so. Temporal and Sharpen run together: the
++// composite then draws into the TAA input instead of the frame target, and
++// the sharpen writes the resolved frame back into every sample of it.
+ PostStagePlan PlanPostStages(const PostFrameInputs& in);
+ 
+ } // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index bbb0083..53de77d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -36,8 +36,10 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
+ | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. The sum is clamped where classic clamps it, so where pools overlap a lamp-lit wall is never brighter than the original's. Glossy materials get normalised Blinn-Phong and a sky reflection. |
+ | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
++| Temporal anti-aliasing | `TemporalAA.cpp`, `EngineGL33_PostTemporal.cpp` | The world is drawn with a sub-pixel jitter (Halton 2, 3 over 16 frames) and each frame is blended into a history of the frames before it (switch `taa`): the history is moved with the camera motion and the depth, clipped to the colours around each pixel and mixed in at 0.1, then sharpened back into the frame target (bounded, no halos). Alpha-tested leaves and wires stop crawling, sub-pixel wire stays continuous, and the AO and shaft sample patterns turn every frame so the history averages them. Smoke, fire, muzzle flashes, glass and rain take most of their own frame (a particle mask from a copy of the frame made between the opaque and the translucent objects), so they do not smear. MSAA stays under it; a texture LOD bias of -0.5 wins back texture detail. |
+ 
+-Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged.
++Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged
++(inside the world pass they take the TAA jitter with the rest of the world).
+ Only shapes with a vertex buffer take the per-fragment path. A shape first
+ loaded after the mission starts (`createVehicle` of a class the mission does not
+ place, as Guerrilla Mode does for nearly every vehicle) gets its buffers from
+@@ -60,7 +62,11 @@ world pass (gunner optics, pillarbox bars) turns bloom and shafts off for the
+ frame so its black surround stays black; camera effects (cinema borders) draw
+ after the post pass. Shadow-map casters beyond a cascade's light near plane
+ are depth-clamped rather than clipped, so the long shadows of a 4-degree sun
+-are not cut off.
++are not cut off. TAA runs only in the world's own passes: the HUD, dialogs,
++portraits, 3D previews and the shadow-map depth pass are never jittered; a
++vehicle interior, a screen overlay (optics) or night vision gates it off, and
++any frame without a resolve, a camera cut (over 50 m or 60 degrees in a frame)
++or a new frame size starts the history again.
+ 
+ ## Calibration
+ 
+@@ -104,6 +110,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+   on; the thresholds are named in `FeatureGates.hpp`). `gates=0` forces every
+   enabled feature on, for debugging. Every switch carries the step that makes
+   it do something; until then it is inert and its on and off look the same.
++  A feature's sub-knobs sit under its switch: TAA's `taaSharpen` (0.5),
++  `taaMipBias` (-0.5) and `taaAlpha` (0.1).
+ - Dev overlay, **Lighting** tab, generated from the same registry: sliders for
+   exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
+   moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
+@@ -125,7 +133,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
+   `triGpuTimes true`, turns on timestamp queries around the frame, the world
+   (with the shadow pass inside it) and each post stage that ran (resolve,
+-  linear depth, AO, bloom, shafts, composite, in the order of the stage list)
++  linear depth, AO, bloom, shafts, composite, taa, sharpen, in the order of the
++  stage list; TAA's copy for its particle mask lands in the world section)
+   (`EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings`). Results trail the
+   frame by a few frames and are smoothed; nothing waits on the GPU. Toggle
+   Remastered off for the same view's Classic numbers.
+@@ -150,13 +159,16 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
+ | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
+ | `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
++| `Graphics/Remaster/TemporalAA.{hpp,cpp}` | TAA's math: the Halton jitter and the rule that gives a pass its jitter, the camera reprojection built in double precision (the C++ mirror of the resolve's), the cut and history-chain rules, the particle mask thresholds. Pure. |
+ | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
+ | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
+ | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
+ | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
++| `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages; the GL helpers the post stages share. |
+ | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
+ | `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
+-| `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, and the backend running and marking every landed stage. |
++| `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, the TAA stages running together and only on a jittered frame, and the backend running and marking every landed stage. |
++| `tests/unit/.../Graphics/test_temporal_aa.cpp` | The jitter sequence and range, the jitter of a pass, the reprojection against hand values and camera pairs, cuts and the history chain, the jitter in the remastered vertex shaders only, the resolve and sharpen contracts, and source audits that the jitter and LOD bias never reach the HUD and that the opaque copy sits between the opaque and the translucent objects. |
+ | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
+ | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TemporalAA.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TemporalAA.cpp
+new file mode 100644
+index 0000000..cfbaef8
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TemporalAA.cpp
+@@ -0,0 +1,132 @@
++#include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
++
++#include <cmath>
++
++namespace Poseidon::remaster
++{
++
++float Halton(std::uint32_t index, std::uint32_t base)
++{
++    if (base < 2)
++        return 0.0f;
++    double f = 1.0;
++    double r = 0.0;
++    while (index > 0)
++    {
++        f /= static_cast<double>(base);
++        r += f * static_cast<double>(index % base);
++        index /= base;
++    }
++    return static_cast<float>(r);
++}
++
++TaaOffset TaaJitterPixels(std::uint32_t frame)
++{
++    const std::uint32_t k = frame % kTaaJitterCycle + 1u;
++    return {Halton(k, 2) - 0.5f, Halton(k, 3) - 0.5f};
++}
++
++TaaOffset TaaJitterNdc(TaaOffset pixels, int viewportW, int viewportH)
++{
++    if (viewportW <= 0 || viewportH <= 0)
++        return {};
++    return {2.0f * pixels.x / static_cast<float>(viewportW), 2.0f * pixels.y / static_cast<float>(viewportH)};
++}
++
++TaaOffset TaaPassJitterNdc(bool worldPass, bool taaThisFrame, TaaOffset framePixels, int viewportW, int viewportH)
++{
++    if (!worldPass || !taaThisFrame)
++        return {};
++    return TaaJitterNdc(framePixels, viewportW, viewportH);
++}
++
++namespace
++{
++
++// 3x3 inverse of a row-major matrix; false when singular.
++bool Invert3(const double m[9], double out[9])
++{
++    const double det =
++        m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
++    if (!(std::fabs(det) > 1e-12))
++        return false;
++    const double id = 1.0 / det;
++    out[0] = (m[4] * m[8] - m[5] * m[7]) * id;
++    out[1] = -(m[1] * m[8] - m[2] * m[7]) * id;
++    out[2] = (m[1] * m[5] - m[2] * m[4]) * id;
++    out[3] = -(m[3] * m[8] - m[5] * m[6]) * id;
++    out[4] = (m[0] * m[8] - m[2] * m[6]) * id;
++    out[5] = -(m[0] * m[5] - m[2] * m[3]) * id;
++    out[6] = (m[3] * m[7] - m[4] * m[6]) * id;
++    out[7] = -(m[0] * m[7] - m[1] * m[6]) * id;
++    out[8] = (m[0] * m[4] - m[1] * m[3]) * id;
++    return true;
++}
++
++// The view direction in world space: the third column of R (p_view.z is
++// p_rel dotted with it), normalised.
++void Forward(const double r[9], double f[3])
++{
++    f[0] = r[2];
++    f[1] = r[5];
++    f[2] = r[8];
++    const double len = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
++    for (int i = 0; i < 3; ++i)
++        f[i] = len > 0.0 ? f[i] / len : 0.0;
++}
++
++} // namespace
++
++TaaReprojection BuildTaaReprojection(const TaaCamera& prev, const TaaCamera& cur)
++{
++    TaaReprojection out;
++    out.prevP11 = static_cast<float>(prev.p11);
++    out.prevP22 = static_cast<float>(prev.p22);
++    double inv[9];
++    if (!Invert3(cur.rot, inv))
++        return out;
++    const double* rp = prev.rot;
++    double m[9];
++    for (int r = 0; r < 3; ++r)
++        for (int c = 0; c < 3; ++c)
++            m[r * 3 + c] =
++                inv[r * 3 + 0] * rp[0 * 3 + c] + inv[r * 3 + 1] * rp[1 * 3 + c] + inv[r * 3 + 2] * rp[2 * 3 + c];
++    const double d[3] = {cur.pos[0] - prev.pos[0], cur.pos[1] - prev.pos[1], cur.pos[2] - prev.pos[2]};
++    double t[3];
++    for (int c = 0; c < 3; ++c)
++        t[c] = d[0] * rp[0 * 3 + c] + d[1] * rp[1 * 3 + c] + d[2] * rp[2 * 3 + c];
++    // Column-vector rows: p_prev[c] = sum_r p[r] * m[r][c] + t[c].
++    for (int c = 0; c < 3; ++c)
++    {
++        out.rows[c][0] = static_cast<float>(m[0 * 3 + c]);
++        out.rows[c][1] = static_cast<float>(m[1 * 3 + c]);
++        out.rows[c][2] = static_cast<float>(m[2 * 3 + c]);
++        out.rows[c][3] = static_cast<float>(t[c]);
++    }
++    out.move = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
++    double fc[3], fp[3];
++    Forward(cur.rot, fc);
++    Forward(prev.rot, fp);
++    out.forwardCos = fc[0] * fp[0] + fc[1] * fp[1] + fc[2] * fp[2];
++    out.valid = out.move <= kTaaCutDistance && out.forwardCos >= kTaaCutMinCos;
++    return out;
++}
++
++bool TaaReprojectNdc(const TaaReprojection& r, const double p[3], double ndc[2])
++{
++    double q[3];
++    for (int c = 0; c < 3; ++c)
++        q[c] = r.rows[c][0] * p[0] + r.rows[c][1] * p[1] + r.rows[c][2] * p[2] + r.rows[c][3];
++    if (!(q[2] > 0.0))
++        return false;
++    ndc[0] = q[0] * r.prevP11 / q[2];
++    ndc[1] = q[1] * r.prevP22 / q[2];
++    return true;
++}
++
++bool TaaHistoryUsable(const TaaHistory& history, std::uint32_t frame, int w, int h, bool reprojectionValid)
++{
++    return history.exists && history.frame + 1u == frame && history.w == w && history.h == h && reprojectionValid;
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TemporalAA.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TemporalAA.hpp
+new file mode 100644
+index 0000000..abd6748
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TemporalAA.hpp
+@@ -0,0 +1,110 @@
++#pragma once
++
++#include <cstdint>
++
++// Temporal anti-aliasing for the remastered lighting (INTEGRATION-PLAN.md step
++// A5): the math the GL backend and the resolve shader share. Pure, no GL, no
++// engine state.
++//
++// Every frame the world is drawn shifted by a sub-pixel offset (the jitter, a
++// Halton(2, 3) sequence over 16 frames). The post pass then blends this frame
++// into a history of the frames before it: the history is moved to where each
++// pixel's surface was one frame ago (reprojection with the camera motion and
++// the depth), clipped to the colours around the pixel in this frame, and
++// mixed in at 1 - alpha. Over a few frames each pixel gathers many sample
++// positions, so alpha-tested leaf edges and wire stop crawling, and effects
++// that change their pattern every frame average into a smooth result.
++//
++// The camera convention is the one the backend uploads: a camera-relative
++// world position p_rel maps to view space as p_view = p_rel * R (row vector,
++// R the 3x3 rotation rows _11.._33 of FrameState::view), and the projection
++// maps view space to NDC as x * p11 / z, y * p22 / z.
++
++namespace Poseidon::remaster
++{
++
++// Frames before the jitter sequence repeats.
++constexpr std::uint32_t kTaaJitterCycle = 16;
++// A camera that moved further than this in one frame (a teleport, a cut to
++// another camera) starts a fresh history.
++constexpr double kTaaCutDistance = 50.0; // metres
++// ... and so does one that turned by more than 60 degrees: the cosine between
++// this frame's and the last frame's view direction must stay above this.
++constexpr double kTaaCutMinCos = 0.5;
++// The particle mask (the resolve's reactive term): a pixel that the
++// translucent objects drawn after the opaque world changed by more than the
++// low threshold (display levels / 255) starts to take more of this frame, all
++// of kTaaReactiveMaxAlpha above the high one.
++constexpr float kTaaReactiveLow = 2.0f / 255.0f;
++constexpr float kTaaReactiveHigh = 24.0f / 255.0f;
++constexpr float kTaaReactiveMaxAlpha = 0.8f;
++
++// The radical inverse of `index` in `base` (Halton sequence), in [0, 1).
++float Halton(std::uint32_t index, std::uint32_t base);
++
++struct TaaOffset
++{
++    float x = 0.0f, y = 0.0f;
++};
++
++// Sub-pixel offset of TAA frame `frame` in render-target pixels, each axis in
++// [-0.5, 0.5): Halton(2, 3) at index 1 + frame % kTaaJitterCycle, minus 0.5.
++// Index 0 is skipped: it is the pixel centre on both axes, while the cycle
++// should average to it.
++TaaOffset TaaJitterPixels(std::uint32_t frame);
++
++// The offset as the clip-space shift the remastered vertex shaders add
++// (vpScale.zw, times w): 2 * pixels / size of the 3D viewport in pixels.
++// Zero for an empty viewport.
++TaaOffset TaaJitterNdc(TaaOffset pixels, int viewportW, int viewportH);
++
++// The jitter a vertex shader gets in a pass: the frame's offset inside the
++// world passes of a frame that the resolve will run on, zero everywhere else
++// (the HUD, dialogs, portraits, 3D previews after the world, the shadow-map
++// depth pass, frames without TAA). One function so the rule has one place.
++TaaOffset TaaPassJitterNdc(bool worldPass, bool taaThisFrame, TaaOffset framePixels, int viewportW, int viewportH);
++
++// One frame's camera as the resolve needs it.
++struct TaaCamera
++{
++    double rot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // R, rows _11.._33
++    double pos[3] = {0, 0, 0};                   // camera position (world, metres)
++    double p11 = 1.0, p22 = 1.0;                 // projection _11 and _22
++};
++
++// The previous frame's view position of a point given in this frame's view
++// space: p_prev = rows * (p, 1), as the resolve shader computes it.
++struct TaaReprojection
++{
++    // False: no usable history this frame (a singular rotation, a cut).
++    bool valid = false;
++    float rows[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
++    float prevP11 = 1.0f, prevP22 = 1.0f;
++    double move = 0.0;       // metres the camera moved since the last frame
++    double forwardCos = 1.0; // cosine between the two view directions
++};
++
++// Built in double precision: p_prev = p * (R^-1 * R_prev) + (C - C_prev) * R_prev
++// (row vectors), handed over as the rows of the column-vector form. Invalid
++// after a cut (kTaaCutDistance, kTaaCutMinCos) or for a singular rotation.
++TaaReprojection BuildTaaReprojection(const TaaCamera& prev, const TaaCamera& cur);
++
++// The resolve's mapping for one point, in double precision: this frame's view
++// position `p` to the previous frame's NDC. False when the point lies behind
++// the previous camera.
++bool TaaReprojectNdc(const TaaReprojection& r, const double p[3], double ndc[2]);
++
++// Whether the history written by the last resolve may be read by this one:
++// it exists, it was written in the frame just before this one (a frame
++// without a resolve, such as a vehicle interior, optics, night vision, the
++// switch or the post effects off, breaks the chain), the targets kept their
++// size, and the camera did not cut.
++struct TaaHistory
++{
++    bool exists = false;
++    std::uint32_t frame = 0; // engine frame counter of the resolve that wrote it
++    int w = 0, h = 0;        // its size
++};
++bool TaaHistoryUsable(const TaaHistory& history, std::uint32_t frame, int w, int h, bool reprojectionValid);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 66122c7..fbfe2a6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -144,7 +144,9 @@ As built in A1 (corrections to the bullets above):
+   the new `Engine::GpuTimingSectionMs(name)`; no feature has a section yet.
+ - Sub-knobs (the right column of the table above) are not registered yet: each step adds its
+   own rows with `parent` set to its switch, so `triSetLighting` never accepts a knob that does
+-  nothing.
++  nothing. A5 added the first (`MakeSubKnob` in `FeatureSwitches.cpp`): `taaSharpen` 0.5,
++  `taaMipBias` -0.5 and `taaAlpha` 0.1, floats of `LightingTuning`, grouped under the track
++  (`temporal`) with `parent` `taa`.
+ - `triFeatureState` answers `mode=.. gates=.. computed=.. frame=.. sun=.. night=.. sky=.. rain=..
+   fog=.. lights=.. landed=n/26 | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...` (spaces,
+   never `;`, so it rides in the UDCAP lines as `feat=`).
+@@ -203,6 +205,10 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
+   cloud shadows a cloud cover above 0 (F4 fades it in from 0.05) and the sun up or the moon key.
+   "Morning" for the valley mist is an eastern sun between -4 and 38 deg (the haze notes' morning
+   weight), not a clock hour. The thresholds are named constants in `FeatureGates.hpp`.
++- As built in A5: the TAA gate also needs the post effects on (`post=0` reads "post effects off"):
++  the resolve is a post stage, and a jittered frame that nothing resolves would shake. The
++  backend jitters a frame only when the gate is on and the frame gets a post pass (an offscreen
++  frame target, the post programs built; `TaaWantedThisFrame`).
+ 
+ Worst cases from MENU section 4 (a low sun over water and woods: about 20 ms) do not fit; the
+ gates above keep the beams, hfrt and SSR from all being at full cost together only if the
+@@ -261,6 +267,12 @@ step that lands a feature moves its row into `LitConst`, declares it in `LitCons
+ lower planned one (A5's `Taa` at 59 before B7's `MatClass` at 58) declares the lower ones as padding
+ members.
+ 
++As built in A5: the `Taa` slot did not land. No world shader reads a TAA value in A5 (the jitter
++rides in the VS constants' `vpScale.zw`, the resolve is a post pass with its own uniforms), and a
++slot nothing reads would change every remastered program for nothing. Its first reader is B1's
++stochastic PCSS, which lands slot 59 (with 58 as padding) and fills it from the backend's TAA
++sequence (`EngineGL33::_taa.sequence`, the jitter index that advances once per resolve).
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -297,7 +309,9 @@ are `kShadowMapUnit` now, and the two F3 audits in `test_gl_state_cache_audit.cp
+ to 5 by name (each unit has its own stand-in and texture target), and the post pass keeps its own
+ units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's (named `kPostUnits` in A3, 3.6).
+ `GL33Bind` caches units 0 to 7 only (`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
+-for unit 6 belongs to the step that first samples it (A5 or B1).
++for unit 6 belongs to the step that first samples it (A5 or B1). As built in A5: A5 samples no
++world unit (its stochastic consumers, the PCSS, are B1's), so unit 6 and its `[ShadowSampler]` case
++go to B1. TAA's own inputs are post inputs on `kPostUnits` (3.6).
+ 
+ ### 3.5 Shader sources: split by concern, test through the accessors
+ 
+@@ -441,6 +455,22 @@ As built in A3 (corrections to the list and the paragraph above):
+   it is a step of its own, A4 or later), and its gate is "a running stage reads it", so on the
+   shipped frame it does not run and costs nothing; only `debug=5` runs it.
+ 
++As built in A5: `Temporal` and `Sharpen` landed, as one pair (`PostFrameInputs::temporal`: the
++switch and its frame gate were on when the world's passes began, so they were drawn jittered).
++TAA asks for the pass by itself, like a knob; the two stages run only when the frame also kept its
++world depth and drew no overlay (an interior or optics frame goes out as drawn and the history
++restarts). When they run the composite draws into the TAA input (`taaInTex`) instead of the frame
++target, and the sharpen writes every sample of the frame target; the debug view still draws
++last. Their pass code is `EngineGL33_PostTemporal.cpp`, their GLSL `psPostTaa` and
++`psPostTaaSharpen` in `EngineGL33_PostShaders.cpp` (two `kPostShaders` rows); the GL helpers the
++stages share (`BindTex`, `DrawTo`, `SetInt`, `SetFloat`, `Set2`, `Set4`) moved from
++`EngineGL33_PostFX.cpp`'s anonymous namespace to `EngineGL33_PostPass.hpp`, so a stage file needs
++no copy. The resolve binds its five inputs to `kPostUnits` (the composite's output 0, depth 2,
++history 3, the world as drawn 4, the opaque copy 5). The only cost outside the post sections is the
++particle mask's copy of the frame target between the opaque and the translucent objects
++(`Engine::BeginTranslucentObjects`, called from `Scene::DrawObjectsAndShadowsPass2`), which lands
++in the `world` section.
++
+ ### 3.7 Porting method
+ 
+ No prototype is applied blind. Observed with `git apply --check --ignore-whitespace` against the
+@@ -875,6 +905,75 @@ graphics-remaster worktree, gitignored).**
+   for both new post shaders; a GL state audit that the jitter is zero for the HUD.
+ - **Effort**: 5 days.
+ 
++**Result (2026-10-18, uncommitted change on ced77ae in the scratch copy `gr-A5`, a parallel lane;
++evidence in `tmp/integration/A5/` of the graphics-remaster worktree, gitignored; light gate).**
++
++- Built: `Graphics/Remaster/TemporalAA.{hpp,cpp}` (pure: Halton(2, 3) jitter over 16 frames,
++  `TaaPassJitterNdc`, the one rule that gives a pass its jitter, the reprojection built in double
++  precision with its cut rule (over 50 m or 60 deg in a frame), the history chain on the engine
++  frame counter, the particle mask thresholds); `EngineGL33_PostTemporal.cpp` (`ApplyTaaJitter` at
++  every world pass after the gates, `SetTaaJitterState` with the texture LOD bias,
++  `BeginTranslucentObjects`, `PostTemporal`, `PostSharpen`); `psPostTaa` and `psPostTaaSharpen`;
++  the guarded jitter in the three remastered vertex shaders; `Temporal` and `Sharpen` landed
++  (3.6); the `taa` switch landed with its three sub-knobs (3.1) and the post-effects condition on
++  its gate (3.2). Not built: the `Taa` slot and unit 6 (3.3, 3.4: B1's), per-object motion
++  vectors and an HDR resolve (below).
++- Corrections to the bullets above. The reconstruction kernel is exp(-4 d^2), not the
++  prototype's exp(-2.29 d^2): a sweep on the hero view gave 15.5% less sharpness (mean neighbour
++  difference, the prototype's metric) with 2.29, 5.0% with 4 and 2.8% with 8, and 8.5% less, 2.3%
++  and 4.1% more on `lowsun_fp`; 4 keeps the wires continuous where 8 starts to dash them
++  (`images/sweep_lowsun_off_k229_k4_k8.png`). The history keeps the view depth in its alpha
++  (RGBA16F), not in two extra R32F targets with MRT. "Per-object motion where the plan says" and
++  "resolved before the tone curve" stay documented, not built: the remastered shaders tonemap per
++  fragment and the frame target is RGBA8 display space, so a resolve before the tone curve needs an
++  HDR frame target; the resolve works on the tonemapped display values (the space Karis resolves an
++  HDR frame in) with luma weights. The particle mask was built after all (it was "documented"
++  above): a colour copy of the frame target between the opaque world and the translucent objects
++  (`Engine::BeginTranslucentObjects`, one call in `Scene::DrawObjectsAndShadowsPass2` before the
++  back-to-front alpha loop); where the translucent objects (smoke, fire, muzzle flashes, glass),
++  the cockpit pass, rain and flares changed a pixel by more than 2 levels the resolve takes up to
++  0.8 of this frame (all of it above 24 levels) and drops the luma weights. The prototype's
++  stochastic AO (4 taps, no blur) is not ported; instead the AO and shaft sample patterns turn per
++  frame (golden-ratio steps of the TAA sequence) while TAA runs, blur kept, so the history averages
++  them. "Soft-ended soldier shadow" in the A5 look check (section 8) is B1's PCSS; A5's visible part
++  is steadier foliage and wire.
++- Off equals before (item 5; `lane/20261018-060047-before` on the base build, `lane/20261018-063134-final-new`
++  on the A5 build, the features_ab hero block with its clock and cloud pin): `taa=0` on the A5 build
++  against the base build at `temporal_forest_edge_golden` is at most 2 levels, 0 pixels over 2 (the
++  base build's own repeat: 1 level, 0 pixels). `lowsun_fp`: 1,008 pixels over 2, all inside the
++  posed soldier's head (x 1046 to 1082, y 521 to 560; the base build's repeat moved 30 there);
++  `town_night`: fire and smoke, as the base build's repeat.
++- On against off: sharpness -6.7% on the hero view (-9.6% in its crown crop), +2.4% on `lowsun_fp`,
++  -1.1% on `town_night`, +1.0% on `sinai_lowsun_fp` (the sharpen check view); mean colour within
++  0.3 levels and the 5th and 95th brightness percentiles within 0.4 on the forest and `lowsun_fp`
++  views (`town_night` within 1 level, its fire differs shot to shot): no darkening, no grade. The M113,
++  Jeep and Zelda antennas and the tent ropes are continuous where 4x MSAA alone dashes them. Motion
++  (`lane/20261018-062248-v2-motion`, S mode, 40 frames per pass): a yaw pan of 2 px per step
++  leaves 22.6% less frame-to-frame residual in a central crown crop (steadier crowns) and is 13.9%
++  less sharp there (9.5 to 10.7% over the whole frame); a Jeep crossing at 25 m at 0.12 and then
++  0.5 m per step leaves no trail (difference images show outlines only); the town Fire at 9 m keeps
++  its flicker (frame-to-frame change in the flame and smoke region -1%, temporal deviation -7%,
++  peak and mean luma within 0.006); still pixels change by 0.0026 luma from frame to frame (0.0007
++  without TAA: the jitter's residual, under one level).
++- Cost (RTX 4060 Ti, 1080p, scale 1.0, 4x MSAA, one game, 3 interleaved rounds, not a quiet-machine
++  run: `lane/20261018-062609-cost`): the `taa` section 0.16 to 0.22 ms and `sharpen` 0.05 to 0.10 ms;
++  the GPU frame median rises by 0.71 to 0.81 ms (forest 5.55 to 6.30, `lowsun_fp` 5.39 to 6.20,
++  `town_night` 6.21 to 6.92), most of it the -0.5 texture LOD bias in the world pass: with
++  `taaMipBias=0` the rise is 0.08 to 0.34 ms (and the hero view 11.2% less sharp instead of 6.7%);
++  without the opaque copy (a temporary knob of the cost build) the frame is within the round-to-round
++  noise of the shipped one. The 0.3 ms of 3.2 covers the resolve and sharpen; it did not count the
++  LOD bias.
++- Gate: build 0 warnings; touched files clang-format clean (`EngineGL33_Queue.cpp` and
++  `EngineGL33_State.cpp`, not clean at ced77ae, by `clang-format-diff.py` on the changed lines);
++  unit gate tags plus `[PostStages],[TemporalAA]` 478/478 (12 new cases); `[Graphics]` has the known
++  DDS fixture failure only, the full suite the 6 known localisation failures only; smoke_abel 1/1
++  with KHR_debug ids 131169, 131154 and 131218 only. Twelve mutations turn their cases red: the
++  jitter cleared after `EndWorldScene`'s early return, the translucent hook after the alpha sort,
++  the jitter applied before the gates, the opaque copy creating targets mid-world, a pass jitter
++  that ignores the world pass, a reprojection without the camera translation, a history chain
++  without the frame check, the TAA stages on an interior frame, no post-effects gate, `taa` not
++  landed, the 2.29 kernel, an unguarded jitter add.
++
+ ### A6. Shared light list
+ 
+ Not a research track of its own; MENU phase 2 asks for it, and combat, night and materials each
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 663e5b1..84fecf6 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -1787,6 +1787,9 @@ void Scene::DrawObjectsAndShadowsPass2()
+ #endif
+     // draw alpha parts of roads
+     GEngine->FlushQueues();
++    // The opaque world is complete: the remastered TAA keeps a copy for its
++    // particle mask before the translucent objects go on top.
++    GEngine->BeginTranslucentObjects();
+     GEngine->EnableReorderQueues(false);
+     QSort(_drawMergers.Data(), _drawMergers.Size(), CmpRevAlphaSortObj);
+     // last draw alpha objects (not roads - they are already drawn)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 96f42ff..e7b99b1 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -39,6 +39,7 @@ enum PixelShaderSpecular
+ #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+ #include <Poseidon/Graphics/Remaster/PostStages.hpp>
++#include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ 
+ #include <memory>
+@@ -816,9 +817,49 @@ class EngineGL33 : public Engine
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
+         unsigned int progLinearDepth = 0, progDebugDepth = 0;
++        // TAA (EngineGL33_PostTemporal.cpp): the composite's output when the
++        // resolve runs (RGBA8), the history ping-pong (RGBA16F: rgb colour, a
++        // view depth in metres) and the opaque world copied before the
++        // translucent objects (RGBA8, the particle mask).
++        unsigned int taaInTex = 0, taaInFbo = 0;
++        unsigned int histTex[2] = {}, histFbo[2] = {};
++        unsigned int opaqueTex = 0, opaqueFbo = 0;
++        unsigned int progTaa = 0, progTaaSharpen = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
++    // TAA frame state (EngineGL33_PostTemporal.cpp, Graphics/Remaster/TemporalAA.hpp).
++    struct TaaState
++    {
++        std::uint32_t sequence = 0; // jitter index: advances once per resolved frame
++        // The frame whose world passes are jittered (engine frame counter), its
++        // offset in render-target pixels and its camera; set at its first world
++        // pass, when the frame gates are known.
++        bool frameOn = false;
++        std::uint32_t frame = 0;
++        Poseidon::remaster::TaaOffset jitterPx;
++        Poseidon::remaster::TaaCamera camera;
++        // The offset the vertex shaders hold now (vpScale.zw, NDC).
++        Poseidon::remaster::TaaOffset ndcApplied;
++        float mipBiasApplied = 0.0f;
++        // The opaque world was copied this frame (BeginTranslucentObjects).
++        bool opaqueCopied = false;
++        // The last resolve: its history, target and camera.
++        Poseidon::remaster::TaaHistory history;
++        int historyIdx = 0;
++        Poseidon::remaster::TaaCamera prevCamera;
++    } _taa;
++    // TAA runs this frame: the switch and its frame gate are on, the frame
++    // gets a post pass, and the world's passes are this frame's.
++    bool TaaWantedThisFrame() const;
++    // At each world pass: fixes the frame's jitter and camera on its first
++    // pass, then hands the jitter to the vertex shaders and the texture LOD
++    // bias to the material samplers (zero and none outside a TAA frame).
++    void ApplyTaaJitter();
++    // Writes `ndc` into vpScale.zw (and flushes) and `bias` into the material
++    // samplers, each only when it changes.
++    void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
++    void BeginTranslucentObjects() override;
+     void DestroyPostTargets();
+     void DestroyPostPrograms();
+     bool EnsurePostResources(int w, int h);
+@@ -839,6 +880,9 @@ class EngineGL33 : public Engine
+         // The sun on screen, for the shafts.
+         float sunU = 0.5f, sunV = 0.5f, shaftWeight = 0.0f;
+         Color shaftTint = Color(1, 1, 1, 1);
++        // TAA: this frame's shift of the AO and shaft sample patterns (0 when
++        // the resolve does not run: the fixed patterns of before).
++        float noiseShift = 0.0f;
+         // Which stages run this frame and the strengths the composite uses.
+         Poseidon::remaster::PostStagePlan plan;
+     };
+@@ -857,6 +901,8 @@ class EngineGL33 : public Engine
+     void PostBloom(const PostFrame& f);
+     void PostShafts(const PostFrame& f);
+     void PostComposite(const PostFrame& f);
++    void PostTemporal(const PostFrame& f);
++    void PostSharpen(const PostFrame& f);
+     void PostDebugView(const PostFrame& f);
+     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
+     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
+@@ -1117,6 +1163,8 @@ class EngineGL33 : public Engine
+     void DeinitVertexShaders();
+     void SelectVertexShader(VertexShaderID vs);
+     void UploadVSScreenConstants();
++    // vpScale.zw: the TAA jitter the remastered vertex shaders add (NDC).
++    void UploadVSJitter(float x, float y);
+     void UploadVSProjection(const FrameState& frame);
+     void UploadVSViewConstants(const FrameState& frame);
+     FrameState BuildFrameState(Camera* camera, LightSun* sun, int bias, const Color& fogColor, bool sunEnabled);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
+index 3e5f08c..5fa465b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
+@@ -185,6 +185,11 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
+     _worldDepthCleared = false;
+     _worldOverlayDrawn = false;
+     UpdateRemasterPrograms();
++    // No TAA jitter or LOD bias until this frame's world pass asks for them
++    // (EndWorldScene takes them off too; a frame that never reached it must
++    // not hand them to the next frame's menus).
++    _taa.frameOn = false;
++    SetTaaJitterState({}, 0.0f);
+ 
+     TLMaterial invalidMat;
+     invalidMat.diffuse = Color(-1, -1, -1, -1);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 61e6cda..25735cf 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -59,6 +59,8 @@ enum class PostShader : int
+     Composite,
+     LinearDepth, // half-resolution view depth (the LinearDepth post stage)
+     DebugDepth,  // that depth drawn over the frame (the DebugView stage, debug view 5)
++    Taa,         // the TAA resolve into the history (the Temporal stage)
++    TaaSharpen,  // the resolved frame back into the frame target (the Sharpen stage)
+     Count,
+ };
+ // The override file stem (vsPost, psPostAo, ...) and the assembled source.
+@@ -111,7 +113,8 @@ constexpr bool RemasterUnitsValid()
+ static_assert(detail::RemasterUnitsValid(),
+               "remastered texture units: 2 to 15, never the material units 0 and 1 or the upload unit 7, all distinct");
+ 
+-// Texture units the post stages bind their inputs to (EngineGL33_PostFX.cpp).
++// Texture units the post stages bind their inputs to (EngineGL33_PostFX.cpp,
++// EngineGL33_PostTemporal.cpp).
+ // The post pass sets their samplers to none before the first fullscreen stage
+ // and unbinds all of them at its end; a stage that binds any other unit
+ // restores that unit itself. Never unit 1 (its sampler object belongs to
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index a54d9c1..9ad3e93 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -66,7 +66,7 @@ layout(std140) uniform VSConstants {
+     vec4 _pad_spec;
+     vec4 _pad_specEn;
+     vec4 _pad_sunEn;
+-    vec4 vpScale;       // 21 — {2/width, 2/height, 0, 0}
++    vec4 vpScale;       // 21: {2/width, 2/height, TAA jitter x, y (NDC)}
+ };
+ 
+ layout(location = 0) in vec3 aPos;
+@@ -92,6 +92,9 @@ void main() {
+     gl_Position.y = (1.0 - aPos.y * vpScale.y) * w;
+     gl_Position.z = aPos.z * w;
+     gl_Position.w = w;
++    // TAA sub-pixel jitter: zero outside a jittered world pass, and then the
++    // position is left exactly as computed.
++    if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;
+     vColor = aColor;
+     vSpecColor = aSpecular;
+     vUV0 = aUV0;
+@@ -118,7 +121,7 @@ layout(std140) uniform VSConstants {
+     vec4 specular;      // c18: rgb + power(w)
+     vec4 specEn;        // c19
+     vec4 sunEn;         // c20
+-    vec4 vpScale;       // c21
++    vec4 vpScale;       // c21: zw TAA jitter (NDC)
+     vec4 crownCenter;   // c22: xyz shape crown centre (model space), w = valid
+     vec4 crownScale;    // c23: xyz 1 / crown half extents
+     mat4 texMat0;       // c24-c27
+@@ -153,6 +156,8 @@ void main() {
+     worldNormal     *= inversesqrt(max(dot(worldNormal, worldNormal), 1e-12));
+     vec4 viewPos     = view * worldPos;
+     gl_Position      = proj * viewPos;
++    // TAA sub-pixel jitter (see vsScreenRemaster).
++    if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;
+     vWorldRel        = worldPos.xyz; // camera-relative world position
+     vNormalW         = worldNormal;
+     vLitMode         = 1.0;
+@@ -199,7 +204,7 @@ layout(std140) uniform VSConstants {
+     vec4 specular;      // c18
+     vec4 specEn;        // c19
+     vec4 sunEn;         // c20
+-    vec4 vpScale;       // c21
++    vec4 vpScale;       // c21: zw TAA jitter (NDC)
+     vec4 _pad22;
+     vec4 _pad23;
+     mat4 texMat0;       // c24-c27
+@@ -228,6 +233,8 @@ flat out float vLitMode;
+ void main() {
+     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
+     gl_Position   = proj * view * worldPos;
++    // TAA sub-pixel jitter (see vsScreenRemaster).
++    if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;
+     vColor        = diffuse;
+     vSpecColor    = vec4(0.0);
+     vUV0          = (texCtrl.x > 0.5) ? (texMat0 * vec4(uv, 0, 1)).xy : uv;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index 63b1202..cd303bb 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -26,10 +26,13 @@
+ //     by the air in front of each pixel, so they grow with its distance
+ //     (LightRig ShaftInscatter): a nearby vehicle is not veiled. A dither
+ //     hides banding;
++//   - Temporal and Sharpen (EngineGL33_PostTemporal.cpp): the TAA resolve of
++//     the jittered frame with its history, then a bounded sharpen back into
++//     the frame target. When they run the composite draws into the TAA input
++//     instead of the frame target;
+ //   - DebugView: a diagnostic view of a post buffer over the frame.
+-// The other stages of the list (tag readout, reflections, air, combat scatter,
+-// TAA resolve and sharpen) land with their features. The HUD then draws on
+-// top, untouched.
++// The other stages of the list (tag readout, reflections, air, combat scatter)
++// land with their features. The HUD then draws on top, untouched.
+ //
+ // The shaders live in EngineGL33_PostShaders.cpp, which has no GL code, so the
+ // unit tests compile the sources the engine builds (PostShaderSource in
+@@ -41,6 +44,7 @@
+ 
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <PoseidonGL33/EngineGL33_PostPass.hpp>
+ #include <PoseidonGL33/GL33BindCache.hpp>
+ #include <Poseidon/Graphics/Core/GLBlendState.hpp>
+ #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
+@@ -135,44 +139,11 @@ GLuint MakeFbo(GLenum attachment, GLuint tex)
+     return f;
+ }
+ 
+-// Helpers of the fullscreen stages.
+-void BindTex(int unit, GLuint tex)
+-{
+-    glActiveTexture(GL_TEXTURE0 + unit);
+-    glBindTexture(GL_TEXTURE_2D, tex);
+-}
+-
+-void DrawTo(GLuint fbo, int vw, int vh)
+-{
+-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+-    glViewport(0, 0, vw, vh);
+-    glDrawArrays(GL_TRIANGLES, 0, 3);
+-}
+-
+-void SetInt(GLuint prog, const char* name, int v)
+-{
+-    const GLint loc = glGetUniformLocation(prog, name);
+-    if (loc >= 0)
+-        glUniform1i(loc, v);
+-}
+-
+-void Set4(GLuint prog, const char* name, float a, float b, float c, float d)
+-{
+-    const GLint loc = glGetUniformLocation(prog, name);
+-    if (loc >= 0)
+-        glUniform4f(loc, a, b, c, d);
+-}
+-
+-void Set2(GLuint prog, const char* name, float a, float b)
+-{
+-    const GLint loc = glGetUniformLocation(prog, name);
+-    if (loc >= 0)
+-        glUniform2f(loc, a, b);
+-}
+-
+ } // namespace
+ 
+ namespace rm = Poseidon::remaster;
++// The helpers of the fullscreen stages (EngineGL33_PostPass.hpp).
++using namespace Poseidon::gl33post;
+ 
+ void EngineGL33::DestroyPostTargets()
+ {
+@@ -198,6 +169,10 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.aoFbo[1]);
+     delFbo(p.shaftFbo);
+     delFbo(p.linDepthFbo);
++    delFbo(p.taaInFbo);
++    delFbo(p.histFbo[0]);
++    delFbo(p.histFbo[1]);
++    delFbo(p.opaqueFbo);
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -209,14 +184,19 @@ void EngineGL33::DestroyPostTargets()
+     delTex(p.aoTex[1]);
+     delTex(p.shaftTex);
+     delTex(p.linDepthTex);
++    delTex(p.taaInTex);
++    delTex(p.histTex[0]);
++    delTex(p.histTex[1]);
++    delTex(p.opaqueTex);
+     p.w = p.h = 0;
++    _taa.history.exists = false; // the TAA history went with its targets
+ }
+ 
+ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+     for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
+-                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth})
++                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -251,11 +231,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progComposite = link(PostShader::Composite);
+         p.progLinearDepth = link(PostShader::LinearDepth);
+         p.progDebugDepth = link(PostShader::DebugDepth);
++        p.progTaa = link(PostShader::Taa);
++        p.progTaaSharpen = link(PostShader::TaaSharpen);
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+         if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite ||
+-            !p.progLinearDepth || !p.progDebugDepth)
++            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen)
+         {
+             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
+             p.unavailable = true;
+@@ -276,6 +258,12 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
+     p.linDepthTex = MakeTexture(GL_R32F, GL_RED, GL_FLOAT, hw, hh, false);
++    // TAA: the composite's output and the opaque world copy are read texel by
++    // texel; the history is read through bilinear taps (Catmull-Rom).
++    p.taaInTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
++    p.histTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
++    p.histTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
++    p.opaqueTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -309,6 +297,15 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     check();
+     p.linDepthFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.linDepthTex);
+     check();
++    p.taaInFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.taaInTex);
++    check();
++    for (int i = 0; i < 2; ++i)
++    {
++        p.histFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.histTex[i]);
++        check();
++    }
++    p.opaqueFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.opaqueTex);
++    check();
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -324,7 +321,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.w = w;
+     p.h = h;
+-    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts and linear depth {}x{})", w, h, hw, hh);
++    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts and linear depth {}x{}; TAA history half float)", w, h, hw,
++             hh);
+     return true;
+ }
+ 
+@@ -393,6 +391,11 @@ void EngineGL33::EndWorldScene()
+     UpdateRemasterPrograms();
+     if (_lightingActive)
+         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
++    // The HUD, dialogs and everything else after the world draw without the
++    // TAA jitter and texture LOD bias (EngineGL33_PostTemporal.cpp).
++    const bool taaFrame = _taa.frameOn && _taa.frame == GetFrameCounter();
++    _taa.frameOn = false;
++    SetTaaJitterState({}, 0.0f);
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
+         return;
+@@ -414,9 +417,15 @@ void EngineGL33::EndWorldScene()
+     if (in.worldDepth && in.glow && in.sunShafts > 0.0f && GScene)
+         PostFrameSun(f);
+     in.shaftWeight = f.shaftWeight;
++    // The world's passes were drawn with the TAA jitter (TaaWantedThisFrame).
++    in.temporal = taaFrame;
+     f.plan = rm::PlanPostStages(in);
+     if (f.plan.Empty())
+         return; // nothing to add: leave the frame as drawn
++    // Under TAA the AO and shaft patterns turn every frame (golden-ratio
++    // steps) and the history averages them; without it they stay fixed.
++    if (f.plan.Runs(rm::PostStage::Temporal))
++        f.noiseShift = static_cast<float>(std::fmod(0.6180339887 * static_cast<double>(_taa.sequence), 1.0));
+ 
+     FlushAndFreeAllQueues(_queueNo);
+     RenderTargetSize(f.w, f.h);
+@@ -464,6 +473,12 @@ void EngineGL33::RunPostStage(rm::PostStage stage, const PostFrame& f)
+         case rm::PostStage::Composite:
+             PostComposite(f);
+             break;
++        case rm::PostStage::Temporal:
++            PostTemporal(f);
++            break;
++        case rm::PostStage::Sharpen:
++            PostSharpen(f);
++            break;
+         case rm::PostStage::DebugView:
+             PostDebugView(f);
+             break;
+@@ -524,6 +539,7 @@ void EngineGL33::PostAo(const PostFrame& f)
+     Set4(p.progAo, "aoParams", kAoRadius, 1.0f, kAoFadeStart, kAoFadeEnd);
+     Set4(p.progAo, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
+     Set4(p.progAo, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++    SetFloat(p.progAo, "noiseShift", f.noiseShift);
+     BindTex(0, p.depthTex);
+     DrawTo(p.aoFbo[0], f.hw, f.hh);
+     glUseProgram(p.progAoBlur);
+@@ -573,13 +589,15 @@ void EngineGL33::PostShafts(const PostFrame& f)
+     BindTex(0, p.depthTex);
+     BindTex(2, p.colorTex);
+     Set4(p.progShafts, "sunScreen", f.sunU, f.sunV, f.shaftWeight, static_cast<float>(f.w) / static_cast<float>(f.h));
++    SetFloat(p.progShafts, "noiseShift", f.noiseShift);
+     DrawTo(p.shaftFbo, f.hw, f.hh);
+ }
+ 
+ void EngineGL33::PostComposite(const PostFrame& f)
+ {
+-    // Into the frame target (every sample gets the resolved value). A stage
+-    // that did not run this frame reads as its 1x1 stand-in.
++    // Into the frame target (every sample gets the resolved value), or into
++    // the TAA input when the resolve runs (its sharpen then writes the frame
++    // target). A stage that did not run this frame reads as its 1x1 stand-in.
+     const PostTargets& p = _post;
+     const rm::PostStagePlan& plan = f.plan;
+     glUseProgram(p.progComposite);
+@@ -604,7 +622,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
+     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+-    DrawTo(_ssaaFbo, f.w, f.h);
++    DrawTo(plan.Runs(rm::PostStage::Temporal) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
+ }
+ 
+ void EngineGL33::PostDebugView(const PostFrame& f)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostPass.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostPass.hpp
+new file mode 100644
+index 0000000..c3db46b
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostPass.hpp
+@@ -0,0 +1,54 @@
++#pragma once
++
++// Small GL helpers the post stages share (EngineGL33_PostFX.cpp and the stage
++// files EngineGL33_Post<Name>.cpp). Every fullscreen stage binds its inputs to
++// kPostUnits (EngineGL33_Lighting.hpp), draws the fullscreen triangle of the
++// post vertex shader into one target and sets its uniforms by name.
++
++#include <glad/gl.h>
++
++namespace Poseidon::gl33post
++{
++
++inline void BindTex(int unit, GLuint tex)
++{
++    glActiveTexture(GL_TEXTURE0 + unit);
++    glBindTexture(GL_TEXTURE_2D, tex);
++}
++
++inline void DrawTo(GLuint fbo, int vw, int vh)
++{
++    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
++    glViewport(0, 0, vw, vh);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++}
++
++inline void SetInt(GLuint prog, const char* name, int v)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform1i(loc, v);
++}
++
++inline void SetFloat(GLuint prog, const char* name, float v)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform1f(loc, v);
++}
++
++inline void Set2(GLuint prog, const char* name, float a, float b)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform2f(loc, a, b);
++}
++
++inline void Set4(GLuint prog, const char* name, float a, float b, float c, float d)
++{
++    const GLint loc = glGetUniformLocation(prog, name);
++    if (loc >= 0)
++        glUniform4f(loc, a, b, c, d);
++}
++
++} // namespace Poseidon::gl33post
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 1d764d5..d7777d2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -54,6 +54,7 @@ uniform vec4 depthMap;  // ndcZ = depth * x + y
+ uniform vec4 aoParams;  // x radius (m), y strength, z fade start (m), w fade end (m)
+ uniform vec4 screen;    // xy full-res size, zw 1/size
+ uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv (pillarbox crop)
++uniform float noiseShift; // TAA: this frame's shift of the sample pattern (0 = the fixed pattern)
+ out vec4 fragColor;
+ )";
+ 
+@@ -79,7 +80,9 @@ void main() {
+ 
+     float radius = aoParams.x;
+     vec2 radiusUV = vec2(radius / projInfo.z, radius / projInfo.w) * (0.5 / z) * worldRect.zw;
+-    float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    // Interleaved gradient noise turns the spiral per pixel; under TAA it also
++    // turns per frame, and the history averages the patterns.
++    float noise = fract(fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) + noiseShift);
+     const int kTaps = 12;
+     float occlusion = 0.0;
+     for (int i = 0; i < kTaps; ++i) {
+@@ -171,13 +174,14 @@ in vec2 vUV;
+ uniform sampler2D depthTex;
+ uniform sampler2D colorTex;
+ uniform vec4 sunScreen; // xy sun position (uv), z on-screen weight, w aspect (width/height)
++uniform float noiseShift; // TAA: this frame's shift of the march start (0 = the fixed pattern)
+ out vec4 fragColor;
+ void main() {
+     if (sunScreen.z <= 0.0) { fragColor = vec4(0.0); return; }
+     const int kSteps = 40;
+     vec2 toSun = sunScreen.xy - vUV;
+     vec2 stepUV = toSun / float(kSteps) * 0.85;
+-    float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    float noise = fract(fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) + noiseShift);
+     vec2 uv = vUV + stepUV * noise;
+     float decay = 1.0;
+     vec3 sum = vec3(0.0);
+@@ -304,6 +308,207 @@ void main() {
+ }
+ )";
+ 
++// TAA resolve (the Temporal stage, step A5; Graphics/Remaster/TemporalAA.hpp).
++// This frame was drawn with a sub-pixel jitter; the history is the resolved
++// frame before it, with each pixel's view depth in alpha. Per pixel:
++//   - rebuild this frame at the pixel centre without the jitter: Gaussian
++//     weights exp(-4 d^2) (sigma 0.35 px) over the 3x3 neighbourhood centred
++//     on the jitter offset. The converged image is the scene filtered by this
++//     kernel: Karis's wider exp(-2.29 d^2) left the hero view 15% softer than
++//     without TAA, this one 5% (A5 sweep);
++//   - reproject: the nearest depth of the 3x3 (a moving silhouette keeps the
++//     motion of the surface in front), unjittered to the view position, moved
++//     into the previous view with the camera motion (reproj rows, built in
++//     double precision on the CPU) and projected with the previous projection;
++//   - drop the history where the surface it holds is not the one reprojected
++//     (its stored depth range around that spot misses the reprojected depth by
++//     more than 3% + 0.15 m: a disocclusion, a vehicle that moved) or where it
++//     falls outside the 3D viewport;
++//   - read the history with a 9-tap Catmull-Rom (keeps detail under motion)
++//     and clip it into the box of this frame's 3x3 colours in YCoCg (mean +-
++//     one standard deviation, inside the min and max), so a colour the pixel
++//     no longer has cannot trail behind;
++//   - blend at alpha (this frame's share), raised with fast motion, and with
++//     luma weights against single bright samples;
++//   - the particle mask: where the translucent objects drawn after the opaque
++//     world (smoke, fire, muzzle flashes, glass, rain) changed the pixel, this
++//     frame takes up to reactive.z of the blend and the luma weights step
++//     aside, so a flash keeps its brightness and smoke does not smear.
++// The frame is display space (the remastered shaders tonemap per fragment),
++// which is the tonemapped space a resolve wants; the history is half float.
++static const char s_psPostTaaInputs[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D curTex;    // this frame after the composite (display space)
++uniform sampler2D depthTex;  // this frame's world depth
++uniform sampler2D histTex;   // rgb the resolved frame before, a its view depth (m)
++uniform sampler2D worldTex;  // this frame's world as drawn (before the post effects)
++uniform sampler2D opaqueTex; // the same before the translucent objects
++uniform vec4 projInfo;  // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
++uniform vec4 depthMap;  // ndcZ = depth * x + y
++uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv
++uniform vec4 screen;    // xy size, zw 1/size
++uniform vec4 jitter;    // xy this frame's jitter (pixels), z 1 = the history is usable, w alpha
++uniform vec4 reproj0;   // previous view position = (dot(row.xyz, p) + row.w) per row
++uniform vec4 reproj1;
++uniform vec4 reproj2;
++uniform vec4 prevProj;  // xy _11 and _22 of the previous frame
++uniform vec4 reactive;  // x low, y high threshold, z most alpha, w 1 = opaqueTex holds this frame
++out vec4 fragColor;
++)";
++
++static const char s_psPostTaaMain[] = R"(
++vec3 toYCoCg(vec3 c) { return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b); }
++vec3 fromYCoCg(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
++
++vec3 clipToBox(vec3 bmin, vec3 bmax, vec3 q) {
++    vec3 c = 0.5 * (bmax + bmin);
++    vec3 e = 0.5 * (bmax - bmin) + 1e-4;
++    vec3 v = q - c;
++    vec3 a = abs(v / e);
++    float m = max(a.x, max(a.y, a.z));
++    return m > 1.0 ? c + v / m : q;
++}
++
++// Catmull-Rom from nine bilinear taps.
++vec3 sampleHistory(vec2 uv) {
++    vec2 sp = uv * screen.xy;
++    vec2 t1 = floor(sp - 0.5) + 0.5;
++    vec2 f = sp - t1;
++    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
++    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
++    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
++    vec2 w3 = f * f * (-0.5 + 0.5 * f);
++    vec2 w12 = w1 + w2;
++    vec2 t0 = (t1 - 1.0) * screen.zw;
++    vec2 t3 = (t1 + 2.0) * screen.zw;
++    vec2 t12 = (t1 + w2 / w12) * screen.zw;
++    vec3 r = texture(histTex, vec2(t0.x, t0.y)).rgb * w0.x * w0.y;
++    r += texture(histTex, vec2(t12.x, t0.y)).rgb * w12.x * w0.y;
++    r += texture(histTex, vec2(t3.x, t0.y)).rgb * w3.x * w0.y;
++    r += texture(histTex, vec2(t0.x, t12.y)).rgb * w0.x * w12.y;
++    r += texture(histTex, vec2(t12.x, t12.y)).rgb * w12.x * w12.y;
++    r += texture(histTex, vec2(t3.x, t12.y)).rgb * w3.x * w12.y;
++    r += texture(histTex, vec2(t0.x, t3.y)).rgb * w0.x * w3.y;
++    r += texture(histTex, vec2(t12.x, t3.y)).rgb * w12.x * w3.y;
++    r += texture(histTex, vec2(t3.x, t3.y)).rgb * w3.x * w3.y;
++    return max(r, vec3(0.0));
++}
++
++float viewDepth(float d) { return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x); }
++
++void main() {
++    ivec2 ip = ivec2(gl_FragCoord.xy);
++    ivec2 lim = ivec2(screen.xy) - 1;
++    vec3 m1 = vec3(0.0), m2 = vec3(0.0);
++    vec3 cmin = vec3(1e9), cmax = vec3(-1e9);
++    vec3 cur = vec3(0.0);
++    float wsum = 0.0;
++    float closest = 2.0;
++    ivec2 closestOff = ivec2(0);
++    for (int y = -1; y <= 1; ++y) {
++        for (int x = -1; x <= 1; ++x) {
++            ivec2 q = clamp(ip + ivec2(x, y), ivec2(0), lim);
++            vec3 c = texelFetch(curTex, q, 0).rgb;
++            vec3 yc = toYCoCg(c);
++            m1 += yc;
++            m2 += yc * yc;
++            cmin = min(cmin, yc);
++            cmax = max(cmax, yc);
++            vec2 d = vec2(float(x), float(y)) - jitter.xy;
++            float w = exp(-4.0 * dot(d, d));
++            cur += c * w;
++            wsum += w;
++            float dz = texelFetch(depthTex, q, 0).r;
++            if (dz < closest) { closest = dz; closestOff = ivec2(x, y); }
++        }
++    }
++    cur /= wsum;
++
++    // Where the surface at the nearest neighbour was one frame ago.
++    vec2 uvU = (vec2(ip + closestOff) + 0.5 - jitter.xy) * screen.zw; // that surface without the jitter
++    vec2 ndc = (uvU - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    float z = viewDepth(closest);
++    vec3 p = vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++    vec3 pp = vec3(dot(reproj0.xyz, p) + reproj0.w, dot(reproj1.xyz, p) + reproj1.w, dot(reproj2.xyz, p) + reproj2.w);
++    vec2 prevNdc = pp.xy * prevProj.xy / max(pp.z, 1e-6);
++    vec2 motion = worldRect.xy + (prevNdc * 0.5 + 0.5) * worldRect.zw - uvU;
++    vec2 histUV = (vec2(ip) + 0.5) * screen.zw + motion;
++    bool valid = jitter.z > 0.5 && pp.z > 0.0 && all(greaterThanEqual(histUV, worldRect.xy)) &&
++                 all(lessThanEqual(histUV, worldRect.xy + worldRect.zw));
++
++    // The history held another surface there: start again from this frame.
++    // The 3x3 range keeps the jitter on leaf edges from tripping it; the sky
++    // (no depth to compare) relies on the colour clip.
++    if (valid && closest < 0.999999) {
++        ivec2 hq = ivec2(floor(histUV * screen.xy));
++        float zmin = 1e9, zmax = 0.0;
++        for (int y = -1; y <= 1; ++y) {
++            for (int x = -1; x <= 1; ++x) {
++                float zq = texelFetch(histTex, clamp(hq + ivec2(x, y), ivec2(0), lim), 0).a;
++                zmin = min(zmin, zq);
++                zmax = max(zmax, zq);
++            }
++        }
++        float tol = 0.03 * pp.z + 0.15;
++        valid = pp.z >= zmin - tol && pp.z <= zmax + tol;
++    }
++
++    vec3 mu = m1 / 9.0;
++    vec3 sigma = sqrt(max(m2 / 9.0 - mu * mu, vec3(0.0)));
++    vec3 hist = valid ? sampleHistory(histUV) : cur;
++    hist = fromYCoCg(clipToBox(max(mu - sigma, cmin), min(mu + sigma, cmax), toYCoCg(hist)));
++
++    float alpha = valid ? jitter.w : 1.0;
++    // Fast motion leans on this frame a little more (less smear).
++    alpha = min(alpha + 0.1 * clamp(length(motion * screen.xy) / 8.0, 0.0, 1.0), 1.0);
++    // The particle mask.
++    float r = 0.0;
++    if (reactive.w > 0.5) {
++        vec3 dw = abs(texelFetch(worldTex, ip, 0).rgb - texelFetch(opaqueTex, ip, 0).rgb);
++        r = smoothstep(reactive.x, reactive.y, max(dw.r, max(dw.g, dw.b)));
++        alpha = max(alpha, r * reactive.z);
++    }
++    // Luma weights: an isolated bright sample cannot flicker the result.
++    float lc = dot(cur, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - r);
++    float lh = dot(hist, vec3(0.2126, 0.7152, 0.0722)) * (1.0 - r);
++    float wc = alpha / (1.0 + lc);
++    float wh = (1.0 - alpha) / (1.0 + lh);
++    vec3 res = (cur * wc + hist * wh) / max(wc + wh, 1e-5);
++    // This pixel's own view depth for the next frame's test (half float).
++    float d0 = texelFetch(depthTex, ip, 0).r;
++    fragColor = vec4(max(res, vec3(0.0)), min(viewDepth(d0), 65000.0));
++}
++)";
++
++// TAA sharpen (the Sharpen stage): the resolved frame back into the frame
++// target, every sample, with a bounded unsharp mask against the softness of
++// the accumulation (its overshoot stays within a quarter of the local cross's
++// range beyond it: crisper than a hard clamp, no halos) and a +-1 LSB
++// triangular dither, since the history is half float and the target 8 bits.
++static const char s_psPostTaaSharpenGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D srcTex;  // the resolved frame
++uniform vec4 sharpen;      // x strength, yz size (pixels)
++out vec4 fragColor;
++void main() {
++    ivec2 ip = ivec2(gl_FragCoord.xy);
++    ivec2 lim = ivec2(sharpen.yz) - 1;
++    vec3 c = texelFetch(srcTex, ip, 0).rgb;
++    vec3 n = texelFetch(srcTex, clamp(ip + ivec2(0, 1), ivec2(0), lim), 0).rgb;
++    vec3 s = texelFetch(srcTex, clamp(ip - ivec2(0, 1), ivec2(0), lim), 0).rgb;
++    vec3 e = texelFetch(srcTex, clamp(ip + ivec2(1, 0), ivec2(0), lim), 0).rgb;
++    vec3 w = texelFetch(srcTex, clamp(ip - ivec2(1, 0), ivec2(0), lim), 0).rgb;
++    vec3 mn = min(c, min(min(n, s), min(e, w)));
++    vec3 mx = max(c, max(max(n, s), max(e, w)));
++    vec3 margin = 0.25 * (mx - mn);
++    vec3 o = clamp(c + sharpen.x * (c - 0.25 * (n + s + e + w)), mn - margin, mx + margin);
++    float a = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    float b = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
++    o += (a + b - 1.0) / 255.0;
++    fragColor = vec4(clamp(o, 0.0, 1.0), 1.0);
++}
++)";
++
+ // Every post shader, assembled from the raw strings above: these pieces in this
+ // order, in PostShader order. The lighting lab's glsl_extract.py reads this
+ // table to assemble the same sources.
+@@ -322,6 +527,8 @@ const PostShaderDef kPostShaders[] = {
+     {"psPostComposite", {s_psPostCompositeGLSL}},
+     {"psPostLinearDepth", {s_psPostLinearDepthInputs, s_glslPostCommon, s_psPostLinearDepthMain}},
+     {"psPostDebugDepth", {s_psPostDebugDepthGLSL}},
++    {"psPostTaa", {s_psPostTaaInputs, s_psPostTaaMain}},
++    {"psPostTaaSharpen", {s_psPostTaaSharpenGLSL}},
+ };
+ constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
+ static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostTemporal.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostTemporal.cpp
+new file mode 100644
+index 0000000..e8f7258
+--- /dev/null
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostTemporal.cpp
+@@ -0,0 +1,176 @@
++// Remastered lighting: temporal anti-aliasing (TAA, INTEGRATION-PLAN.md step
++// A5; the math is Graphics/Remaster/TemporalAA.hpp, the shaders psPostTaa and
++// psPostTaaSharpen in EngineGL33_PostShaders.cpp).
++//
++// A frame runs TAA when the taa switch and its frame gate are on and the frame
++// gets a post pass (TaaWantedThisFrame). Then:
++//   - the world's passes are drawn with a sub-pixel jitter: ApplyTaaJitter
++//     fixes the frame's offset (Halton(2, 3), 16 frames) and camera at its
++//     first world pass and hands the offset to the remastered vertex shaders
++//     through vpScale.zw (UploadVSScreenConstants keeps it for the world's
++//     screen-space draws), with a negative texture LOD bias on the material
++//     samplers; EndWorldScene takes both away before the HUD, and so does the
++//     next frame's InitDraw;
++//   - BeginTranslucentObjects, called by the scene between the opaque world
++//     and the translucent objects, copies the frame target for the particle
++//     mask;
++//   - the post pass runs the Temporal stage (the resolve into the history)
++//     and the Sharpen stage (the history back into the frame target).
++// Any frame without a resolve breaks the history chain (TaaHistoryUsable): the
++// next resolve starts from its own frame, as does a camera cut or a new
++// target size. The shadow-map depth pass has its own shaders and is never
++// jittered.
++
++#include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++#include <PoseidonGL33/EngineGL33_PostPass.hpp>
++#include <Poseidon/Core/Global.hpp>
++#include <Poseidon/World/Scene/Scene.hpp>
++#include <Poseidon/World/Scene/Camera/Camera.hpp>
++
++namespace rm = Poseidon::remaster;
++using namespace Poseidon::gl33post;
++
++bool EngineGL33::TaaWantedThisFrame() const
++{
++    // _worldEffectsOn: a world pass of this frame (not a portrait, a 3D
++    // preview after the world or the night-vision intensifier). The gates are
++    // this frame's (UpdateFeatureGates runs at the world's first pass).
++    return _glContext && _worldEffectsOn && _remasterPrograms && _lighting.postEffects && SSAAActive() &&
++           !_post.unavailable && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
++           _featureGates[rm::Feature::Taa].on;
++}
++
++void EngineGL33::ApplyTaaJitter()
++{
++    const std::uint32_t frame = GetFrameCounter();
++    if (!(_taa.frameOn && _taa.frame == frame) && TaaWantedThisFrame())
++    {
++        // The frame's first world pass: its offset and its camera.
++        _taa.frameOn = true;
++        _taa.frame = frame;
++        _taa.opaqueCopied = false;
++        _taa.jitterPx = rm::TaaJitterPixels(_taa.sequence);
++        rm::TaaCamera& cam = _taa.camera;
++        const GfxMatrix& v = _frameState.view;
++        const double rot[9] = {v._11, v._12, v._13, v._21, v._22, v._23, v._31, v._32, v._33};
++        for (int i = 0; i < 9; ++i)
++            cam.rot[i] = rot[i];
++        for (int i = 0; i < 3; ++i)
++            cam.pos[i] = _frameState.cameraPos[i];
++        cam.p11 = _frameState.projection._11;
++        cam.p22 = _frameState.projection._22;
++    }
++    // The 3D viewport: the pillarbox rect when the scene is cropped.
++    int w = 0, h = 0;
++    RenderTargetSize(w, h);
++    const Poseidon::AspectSettings& as = _aspectSettings;
++    if (!(as.worldLeft <= 0.0f && as.worldTop <= 0.0f && as.worldRight >= 1.0f && as.worldBottom >= 1.0f))
++    {
++        w = static_cast<int>(as.worldRight * w + 0.5f) - static_cast<int>(as.worldLeft * w + 0.5f);
++        h = static_cast<int>(as.worldBottom * h + 0.5f) - static_cast<int>(as.worldTop * h + 0.5f);
++    }
++    const bool worldPass = _worldEffectsOn && !_portraitTargetSize;
++    const bool taaFrame = _taa.frameOn && _taa.frame == frame;
++    SetTaaJitterState(rm::TaaPassJitterNdc(worldPass, taaFrame, _taa.jitterPx, w, h),
++                      worldPass && taaFrame ? _lighting.taaMipBias : 0.0f);
++}
++
++void EngineGL33::SetTaaJitterState(rm::TaaOffset ndc, float bias)
++{
++    if (ndc.x != _taa.ndcApplied.x || ndc.y != _taa.ndcApplied.y)
++    {
++        _taa.ndcApplied = ndc;
++        UploadVSJitter(ndc.x, ndc.y);
++    }
++    if (bias != _taa.mipBiasApplied && _samplerObjects[0])
++    {
++        // The material samplers (units 0 and 1), shared with the HUD: the
++        // bias is set for the world's passes and taken off after them.
++        for (unsigned int s : _samplerObjects)
++            glSamplerParameterf(s, GL_TEXTURE_LOD_BIAS, bias);
++        _taa.mipBiasApplied = bias;
++    }
++}
++
++void EngineGL33::BeginTranslucentObjects()
++{
++    // Once, in a TAA frame's world pass, and only into targets that already
++    // exist at this size (creating them here would reset the viewport of a
++    // cropped world pass; the post pass creates them at the end of the frame).
++    if (!_taa.frameOn || _taa.frame != GetFrameCounter() || !_worldEffectsOn || _taa.opaqueCopied || !SSAAActive())
++        return;
++    int w = 0, h = 0;
++    RenderTargetSize(w, h);
++    if (_post.w != w || _post.h != h || !_post.opaqueFbo)
++        return;
++    FlushAndFreeAllQueues(_queueNo);
++    // The multisample resolve of the frame target into the opaque copy. A blit
++    // honours the scissor test; the copy must hold the whole frame.
++    const bool scissor = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE;
++    if (scissor)
++        glDisable(GL_SCISSOR_TEST);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, _ssaaFbo);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, _post.opaqueFbo);
++    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    glBindFramebuffer(GL_FRAMEBUFFER, _ssaaFbo); // the viewport is not framebuffer state: it stays
++    if (scissor)
++        glEnable(GL_SCISSOR_TEST);
++    _taa.opaqueCopied = true;
++}
++
++void EngineGL33::PostTemporal(const PostFrame& f)
++{
++    const PostTargets& p = _post;
++    const std::uint32_t frame = GetFrameCounter();
++    const rm::TaaReprojection reproj = rm::BuildTaaReprojection(_taa.prevCamera, _taa.camera);
++    const bool usable = rm::TaaHistoryUsable(_taa.history, frame, f.w, f.h, reproj.valid);
++    const int src = _taa.historyIdx;
++    const int dst = 1 - src;
++
++    glUseProgram(p.progTaa);
++    SetInt(p.progTaa, "curTex", 0);
++    SetInt(p.progTaa, "depthTex", 2);
++    SetInt(p.progTaa, "histTex", 3);
++    SetInt(p.progTaa, "worldTex", 4);
++    SetInt(p.progTaa, "opaqueTex", 5);
++    BindTex(0, p.taaInTex);
++    BindTex(2, p.depthTex);
++    BindTex(3, p.histTex[src]);
++    BindTex(4, p.colorTex);
++    BindTex(5, p.opaqueTex);
++    Set4(p.progTaa, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
++    Set4(p.progTaa, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
++    Set4(p.progTaa, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
++    Set4(p.progTaa, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
++    const float alpha = _lighting.taaAlpha < 0.01f ? 0.01f : (_lighting.taaAlpha > 1.0f ? 1.0f : _lighting.taaAlpha);
++    Set4(p.progTaa, "jitter", _taa.jitterPx.x, _taa.jitterPx.y, usable ? 1.0f : 0.0f, alpha);
++    const char* rows[3] = {"reproj0", "reproj1", "reproj2"};
++    for (int r = 0; r < 3; ++r)
++        Set4(p.progTaa, rows[r], reproj.rows[r][0], reproj.rows[r][1], reproj.rows[r][2], reproj.rows[r][3]);
++    Set4(p.progTaa, "prevProj", reproj.prevP11, reproj.prevP22, 0.0f, 0.0f);
++    Set4(p.progTaa, "reactive", rm::kTaaReactiveLow, rm::kTaaReactiveHigh, rm::kTaaReactiveMaxAlpha,
++         _taa.opaqueCopied ? 1.0f : 0.0f);
++    DrawTo(p.histFbo[dst], f.w, f.h);
++
++    // This frame is the next one's history.
++    _taa.historyIdx = dst;
++    _taa.history.exists = true;
++    _taa.history.frame = frame;
++    _taa.history.w = f.w;
++    _taa.history.h = f.h;
++    _taa.prevCamera = _taa.camera;
++    ++_taa.sequence;
++}
++
++void EngineGL33::PostSharpen(const PostFrame& f)
++{
++    // The resolved frame (the history the resolve just wrote) into every
++    // sample of the frame target.
++    const PostTargets& p = _post;
++    glUseProgram(p.progTaaSharpen);
++    SetInt(p.progTaaSharpen, "srcTex", 0);
++    BindTex(0, p.histTex[_taa.historyIdx]);
++    Set4(p.progTaaSharpen, "sharpen", _lighting.taaSharpen, static_cast<float>(f.w), static_cast<float>(f.h), 0.0f);
++    DrawTo(_ssaaFbo, f.w, f.h);
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 02f6162..1359dd5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -356,6 +356,9 @@ void EngineGL33::BeginPass(PassId passId)
+         // shaders.  No-op until a depth pass has run with shadow maps enabled.
+         UpdateShadowMapLitState();
+         UploadLitFrameConstants();
++        // The TAA jitter and texture LOD bias of this pass (the frame gates are
++        // known now); zero for any pass that is not a TAA frame's world pass.
++        ApplyTaaJitter();
+     }
+ 
+     // Crop the 3D scene to the AspectSettings world rect (pillarbox /
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index 5263164..0064994 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -959,11 +959,20 @@ void EngineGL33::SelectVertexShader(VertexShaderID vs)
+ 
+ void EngineGL33::UploadVSScreenConstants()
+ {
+-    float vpScale[4] = {2.0f / _w, 2.0f / _h, 0, 0};
++    // zw: the TAA jitter the world's passes hold (the world's own screen-space
++    // draws, smoke and rain, move with it); zero everywhere else.
++    float vpScale[4] = {2.0f / _w, 2.0f / _h, _taa.ndcApplied.x, _taa.ndcApplied.y};
+     memcpy(s_vsShadow + VSConst::SlotVpScale * 4, vpScale, 16);
+     FlushVSConstants();
+ }
+ 
++void EngineGL33::UploadVSJitter(float x, float y)
++{
++    s_vsShadow[VSConst::SlotVpScale * 4 + 2] = x;
++    s_vsShadow[VSConst::SlotVpScale * 4 + 3] = y;
++    FlushVSConstants();
++}
++
+ FrameState EngineGL33::BuildFrameState(Camera* camera, LightSun* sun, int bias, const Color& fogColor, bool sunEnabled)
+ {
+     FrameState frame = {};
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+index da2b229..a1e1ca4 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+@@ -43,6 +43,7 @@ void EngineGL33::CreateSamplerStates()
+     // Bind default sampler (linear, wrap) to both texture units
+     glBindSampler(0, _samplerObjects[0]);
+     glBindSampler(1, _samplerObjects[0]);
++    _taa.mipBiasApplied = 0.0f; // new samplers carry no TAA texture LOD bias
+ }
+ 
+ void EngineGL33::DestroySamplerStates()
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 49ce8b7..2541167 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -166,6 +166,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_feature_switches.cpp
+     Graphics/test_gpu_timings.cpp
+     Graphics/test_post_stages.cpp
++    Graphics/test_temporal_aa.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 02b3fa2..ad84819 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -271,6 +271,58 @@ TEST_CASE("Feature gates: TAA runs on a drawn world, not in interiors, optics or
+     in = Noon();
+     in.worldDrawn = false;
+     CHECK_FALSE(G(in, Feature::Taa).on);
++    // The resolve is a post stage: with the post effects off nothing would
++    // resolve the jittered frame.
++    in = Noon();
++    CHECK_FALSE(G(in, Feature::Taa, Apply("remastered,post=0")).on);
++    CHECK(std::string_view(G(in, Feature::Taa, Apply("remastered,post=0")).reason) == "post effects off");
++    CHECK(G(in, Feature::Taa, Apply("remastered,post=0,gates=0")).on); // the debugging override still wins
++}
++
++TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch", "[remaster][FeatureSwitches]")
++{
++    // A5 makes taa do something: it is no longer inert, and the overlay shows
++    // its GPU section (the Temporal post stage's).
++    const FeatureInfo& taa = GetFeatureInfo(Feature::Taa);
++    CHECK(taa.landed);
++    CHECK(std::string_view(taa.step) == "A5");
++    CHECK(std::string_view(taa.gpuSection) == "taa");
++
++    // Plan 3.1's sub-knobs: sharpen 0.5, texture LOD bias -0.5, alpha 0.1, each
++    // under the taa switch, in its track's group.
++    struct Sub
++    {
++        const char* key;
++        float value;
++    };
++    for (const Sub& sub : {Sub{"taaSharpen", 0.5f}, Sub{"taaMipBias", -0.5f}, Sub{"taaAlpha", 0.1f}})
++    {
++        INFO(sub.key);
++        const LightingKey* k = FindLightingKey(sub.key);
++        REQUIRE(k != nullptr);
++        CHECK(k->kind == KeyKind::Knob);
++        REQUIRE(k->parent != nullptr);
++        CHECK(std::string_view(k->parent) == "taa");
++        CHECK(std::string_view(k->group) == "temporal");
++        CHECK(KeyDefault(*k) == sub.value);
++        // triSetLighting takes it, and baseline / remastered put it back.
++        const LightingTuning t = Apply(std::string("remastered,") + sub.key + "=0.3");
++        CHECK(GetKeyValue(t, *k) == 0.3f);
++        CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.3,baseline"), *k) == sub.value);
++    }
++    // No other switch has sub-knobs yet: every knob with a parent is TAA's.
++    int children = 0;
++    for (int i = 0; i < LightingKeyCount(); ++i)
++    {
++        const LightingKey& k = LightingKeyAt(i);
++        if (!k.parent)
++            continue;
++        INFO(k.key);
++        CHECK(std::string_view(k.parent) == "taa");
++        CHECK(FindFeature(k.parent) != nullptr);
++        ++children;
++    }
++    CHECK(children == 3);
+ }
+ 
+ TEST_CASE("Feature gates: the light list runs with a lamp at night or a combat light", "[remaster][FeatureGates]")
+@@ -528,7 +580,8 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+         INFO(info.key);
+         CHECK(s.find(std::string(" ") + info.key + "=") != std::string::npos);
+     }
+-    // Nothing reads a switch yet in A1: every one is marked inert.
++    // Every switch that has not landed is marked inert; taa has landed (A5).
++    CHECK(s.find(" taa=1:on:world-drawn:inert") == std::string::npos);
+     size_t inert = 0;
+     for (size_t p = s.find(":inert"); p != std::string::npos; p = s.find(":inert", p + 1))
+         ++inert;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+index 2964ef8..501028c 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+@@ -108,10 +108,12 @@ TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and sec
+     CHECK(marks.size() == static_cast<size_t>(kPostStageCount));
+     CHECK(gpu::kMarkCount <= 32);
+     // A3 lands the passes that existed (resolve, AO, bloom, shafts, composite)
+-    // plus the linear depth and the debug view that shows it.
+-    CHECK(landed == 7);
+-    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::Air, PostStage::CombatScatter,
+-                        PostStage::Temporal, PostStage::Sharpen})
++    // plus the linear depth and the debug view that shows it; A5 the TAA
++    // resolve and its sharpen.
++    CHECK(landed == 9);
++    CHECK(GetPostStageInfo(PostStage::Temporal).landed);
++    CHECK(GetPostStageInfo(PostStage::Sharpen).landed);
++    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::Air, PostStage::CombatScatter})
+     {
+         CAPTURE(GetPostStageInfo(s).name);
+         CHECK_FALSE(GetPostStageInfo(s).landed);
+@@ -209,6 +211,52 @@ TEST_CASE("Post stages: interior and optics frames hold their stages off", "[Gra
+     CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
+ }
+ 
++TEST_CASE("Post stages: the TAA resolve and its sharpen run together on a jittered frame",
++          "[Graphics][remaster][PostStages][TemporalAA]")
++{
++    // Without the jitter (taa switch or gate off) nothing changes: the plan of
++    // before, which is what makes the switch's "off" the look before A5.
++    PostFrameInputs in = Shipped();
++    const std::uint32_t before = PlanPostStages(in).runs;
++    CHECK(before ==
++          Mask({PostStage::Resolve, PostStage::Ao, PostStage::Bloom, PostStage::Shafts, PostStage::Composite}));
++
++    in.temporal = true;
++    PostStagePlan plan = PlanPostStages(in);
++    CHECK(plan.runs == (before | Mask({PostStage::Temporal, PostStage::Sharpen})));
++    // The other stages and their strengths are untouched.
++    CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
++    CHECK(plan.bloomStrength == LightingTuning{}.bloom);
++    CHECK_FALSE(plan.Runs(PostStage::LinearDepth));
++
++    // TAA asks for the pass on its own: with every knob off the frame still
++    // gets the resolve, the composite and the two TAA stages.
++    PostFrameInputs bare;
++    bare.temporal = true;
++    CHECK(PlanPostStages(bare).runs ==
++          Mask({PostStage::Resolve, PostStage::Composite, PostStage::Temporal, PostStage::Sharpen}));
++
++    // A vehicle interior (no world depth to reproject with) or a screen
++    // overlay drawn over the jittered world: the frame goes out as drawn.
++    in.worldDepth = false;
++    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Temporal));
++    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Sharpen));
++    in.worldDepth = true;
++    in.glow = false;
++    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Temporal));
++    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Sharpen));
++    CHECK(PlanPostStages(in).Runs(PostStage::Composite));
++
++    // The debug view still draws last, over the resolved frame.
++    in.glow = true;
++    in.debugView = kDebugViewLinearDepth;
++    plan = PlanPostStages(in);
++    CHECK(plan.Runs(PostStage::Temporal));
++    CHECK(plan.Runs(PostStage::DebugView));
++    CHECK(static_cast<int>(PostStage::DebugView) > static_cast<int>(PostStage::Sharpen));
++    CHECK(static_cast<int>(PostStage::Temporal) > static_cast<int>(PostStage::Composite));
++}
++
+ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[Graphics][remaster][PostStages]")
+ {
+     // Today the debug view is its only reader; the stages that land with a
+@@ -259,25 +307,32 @@ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][rem
+                     for (bool depth : {false, true})
+                         for (bool glow : {false, true})
+                             for (float weight : {0.0f, 0.5f})
+-                            {
+-                                PostFrameInputs in;
+-                                in.ambientOcclusion = ao;
+-                                in.bloom = bloom;
+-                                in.sunShafts = shafts;
+-                                in.debugView = view;
+-                                in.worldDepth = depth;
+-                                in.glow = glow;
+-                                in.shaftWeight = weight;
+-                                const PostStagePlan plan = PlanPostStages(in);
+-                                CAPTURE(ao, bloom, shafts, view, depth, glow, weight);
+-                                CHECK((plan.runs & ~landed) == 0u);
+-                                // A pass that runs resolves first and composites.
+-                                if (!plan.Empty())
++                                for (bool temporal : {false, true})
+                                 {
+-                                    CHECK(plan.Runs(PostStage::Resolve));
+-                                    CHECK(plan.Runs(PostStage::Composite));
++                                    PostFrameInputs in;
++                                    in.ambientOcclusion = ao;
++                                    in.bloom = bloom;
++                                    in.sunShafts = shafts;
++                                    in.debugView = view;
++                                    in.worldDepth = depth;
++                                    in.glow = glow;
++                                    in.shaftWeight = weight;
++                                    in.temporal = temporal;
++                                    const PostStagePlan plan = PlanPostStages(in);
++                                    CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal);
++                                    CHECK((plan.runs & ~landed) == 0u);
++                                    // A pass that runs resolves first and composites.
++                                    if (!plan.Empty())
++                                    {
++                                        CHECK(plan.Runs(PostStage::Resolve));
++                                        CHECK(plan.Runs(PostStage::Composite));
++                                    }
++                                    // The resolve and its sharpen: both or neither,
++                                    // and never on a frame drawn without the jitter.
++                                    CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
++                                    if (!temporal)
++                                        CHECK_FALSE(plan.Runs(PostStage::Temporal));
+                                 }
+-                            }
+ }
+ 
+ TEST_CASE("Post stages: the backend runs every landed stage and marks it from the table",
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 1915fef..4f058c2 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -825,8 +825,8 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+         ++post;
+     }
+     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
+-    // and its debug view
+-    CHECK(post == 9);
++    // and its debug view, the TAA resolve and its sharpen
++    CHECK(post == 11);
+ }
+ 
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+@@ -852,7 +852,7 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
+                 CHECK(reached);
+                 ++strings;
+             }
+-    CHECK(strings >= 29); // today 3 VS, 10 prelude pieces and 4 mains; 12 post strings
++    CHECK(strings >= 32); // today 3 VS, 10 prelude pieces and 4 mains; 15 post strings
+ }
+ 
+ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_temporal_aa.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_temporal_aa.cpp
+new file mode 100644
+index 0000000..135a4c9
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_temporal_aa.cpp
+@@ -0,0 +1,455 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <cmath>
++#include <filesystem>
++#include <fstream>
++#include <set>
++#include <sstream>
++#include <string>
++#include <utility>
++
++// Temporal anti-aliasing (INTEGRATION-PLAN.md step A5,
++// Graphics/Remaster/TemporalAA.hpp): the jitter sequence and its range, the
++// reprojection the resolve shader applies (its C++ mirror against hand values
++// and against the camera transforms it stands for), the history chain, and
++// the backend contracts that keep the jitter off the HUD and the shadow-map
++// pass.
++
++using namespace Poseidon::remaster;
++namespace gl = Poseidon::gl33lighting;
++
++namespace
++{
++
++std::string ReadTextFile(const std::filesystem::path& p)
++{
++    std::ifstream f(p);
++    if (!f.is_open())
++        return {};
++    std::stringstream ss;
++    ss << f.rdbuf();
++    return ss.str();
++}
++
++std::filesystem::path EngineDir()
++{
++    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine";
++}
++
++std::filesystem::path Gl33Dir()
++{
++    return EngineDir() / "PoseidonGL33";
++}
++
++std::string FunctionBody(const std::string& source, const std::string& signature)
++{
++    const size_t start = source.find(signature);
++    if (start == std::string::npos)
++        return {};
++    const size_t end = source.find("\n}\n", start);
++    return source.substr(start, end == std::string::npos ? std::string::npos : end - start);
++}
++
++int CountOf(const std::string& text, const std::string& needle)
++{
++    int n = 0;
++    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size()))
++        ++n;
++    return n;
++}
++
++// Row-vector view rotation (p_view = p_rel * R) of a camera turned by `yawDeg`
++// about the vertical and pitched by `pitchDeg`, rows _11.._33.
++void ViewRotation(double yawDeg, double pitchDeg, double r[9])
++{
++    const double y = yawDeg * 3.14159265358979 / 180.0;
++    const double p = pitchDeg * 3.14159265358979 / 180.0;
++    // Camera axes in world space (x right, y up, z forward).
++    const double fwd[3] = {std::sin(y) * std::cos(p), std::sin(p), std::cos(y) * std::cos(p)};
++    const double right[3] = {std::cos(y), 0.0, -std::sin(y)};
++    const double up[3] = {fwd[1] * right[2] - fwd[2] * right[1], fwd[2] * right[0] - fwd[0] * right[2],
++                          fwd[0] * right[1] - fwd[1] * right[0]};
++    // p_view.c = p_rel . axis_c: the axes are the columns of R.
++    for (int row = 0; row < 3; ++row)
++    {
++        r[row * 3 + 0] = right[row];
++        r[row * 3 + 1] = up[row];
++        r[row * 3 + 2] = fwd[row];
++    }
++}
++
++TaaCamera MakeCamera(double yawDeg, double pitchDeg, double x, double y, double z, double p11 = 1.43, double p22 = 2.54)
++{
++    TaaCamera c;
++    ViewRotation(yawDeg, pitchDeg, c.rot);
++    c.pos[0] = x;
++    c.pos[1] = y;
++    c.pos[2] = z;
++    c.p11 = p11;
++    c.p22 = p22;
++    return c;
++}
++
++// p_view of world point w for camera c.
++void ToView(const TaaCamera& c, const double w[3], double out[3])
++{
++    const double rel[3] = {w[0] - c.pos[0], w[1] - c.pos[1], w[2] - c.pos[2]};
++    for (int col = 0; col < 3; ++col)
++        out[col] = rel[0] * c.rot[0 * 3 + col] + rel[1] * c.rot[1 * 3 + col] + rel[2] * c.rot[2 * 3 + col];
++}
++
++// The shader's rows applied to p (float rows, double arithmetic).
++void Apply(const TaaReprojection& r, const double p[3], double out[3])
++{
++    for (int c = 0; c < 3; ++c)
++        out[c] = r.rows[c][0] * p[0] + r.rows[c][1] * p[1] + r.rows[c][2] * p[2] + r.rows[c][3];
++}
++
++} // namespace
++
++TEST_CASE("TAA jitter: Halton(2, 3) over 16 frames, inside the pixel", "[remaster][TemporalAA]")
++{
++    CHECK(Halton(1, 2) == 0.5f);
++    CHECK(Halton(2, 2) == 0.25f);
++    CHECK(Halton(3, 2) == 0.75f);
++    CHECK(Halton(1, 3) == Catch::Approx(1.0 / 3.0));
++    CHECK(Halton(2, 3) == Catch::Approx(2.0 / 3.0));
++    CHECK(Halton(4, 3) == Catch::Approx(4.0 / 9.0));
++    CHECK(Halton(0, 2) == 0.0f);
++
++    std::set<std::pair<float, float>> seen;
++    double sx = 0.0, sy = 0.0;
++    for (std::uint32_t f = 0; f < kTaaJitterCycle; ++f)
++    {
++        const TaaOffset j = TaaJitterPixels(f);
++        CAPTURE(f, j.x, j.y);
++        CHECK(j.x >= -0.5f);
++        CHECK(j.x < 0.5f);
++        CHECK(j.y >= -0.5f);
++        CHECK(j.y < 0.5f);
++        CHECK(seen.insert({j.x, j.y}).second); // 16 distinct positions
++        sx += j.x;
++        sy += j.y;
++        // The cycle repeats.
++        const TaaOffset again = TaaJitterPixels(f + kTaaJitterCycle);
++        CHECK(again.x == j.x);
++        CHECK(again.y == j.y);
++    }
++    // Over a cycle the offsets centre on the pixel (no net shift of the image).
++    CHECK(std::fabs(sx / kTaaJitterCycle) < 0.04);
++    CHECK(std::fabs(sy / kTaaJitterCycle) < 0.04);
++    // Index 0 of the sequence (the pixel corner, 0 - 0.5 on both axes) is not used.
++    const TaaOffset first = TaaJitterPixels(0);
++    CHECK(first.x == 0.0f);
++    CHECK(first.y == Catch::Approx(1.0 / 3.0 - 0.5));
++}
++
++TEST_CASE("TAA jitter: an NDC offset of the 3D viewport, only in a TAA frame's world pass", "[remaster][TemporalAA]")
++{
++    const TaaOffset px{0.25f, -0.5f};
++    const TaaOffset ndc = TaaJitterNdc(px, 1920, 1080);
++    CHECK(ndc.x == Catch::Approx(0.5 / 1920.0));
++    CHECK(ndc.y == Catch::Approx(-1.0 / 1080.0));
++    CHECK(TaaJitterNdc(px, 0, 1080).x == 0.0f);
++    CHECK(TaaJitterNdc(px, 1920, 0).y == 0.0f);
++
++    // The HUD, dialogs, portraits and 3D previews (no world pass) and every
++    // pass of a frame without TAA get exactly zero, which leaves the vertex
++    // shaders' positions as they were (the shaders skip the add at zero).
++    for (bool world : {false, true})
++        for (bool taa : {false, true})
++        {
++            CAPTURE(world, taa);
++            const TaaOffset j = TaaPassJitterNdc(world, taa, px, 1920, 1080);
++            if (world && taa)
++            {
++                CHECK(j.x == ndc.x);
++                CHECK(j.y == ndc.y);
++            }
++            else
++            {
++                CHECK(j.x == 0.0f);
++                CHECK(j.y == 0.0f);
++            }
++        }
++}
++
++TEST_CASE("TAA reprojection: hand values", "[remaster][TemporalAA]")
++{
++    // A camera that did not move maps every point to itself.
++    const TaaCamera still = MakeCamera(30.0, -5.0, 4674.0, 61.0, 10156.0);
++    TaaReprojection r = BuildTaaReprojection(still, still);
++    CHECK(r.valid);
++    for (int i = 0; i < 3; ++i)
++        for (int j = 0; j < 4; ++j)
++            CHECK(r.rows[i][j] == Catch::Approx(i == j ? 1.0 : 0.0).margin(1e-6));
++
++    // The camera stepped 1 m right (identity rotation): a point is 1 m further
++    // right in the previous view, where the camera stood 1 m to the left.
++    TaaCamera prev;
++    TaaCamera cur;
++    cur.pos[0] = 1.0;
++    r = BuildTaaReprojection(prev, cur);
++    CHECK(r.valid);
++    CHECK(r.move == Catch::Approx(1.0));
++    CHECK(r.rows[0][3] == Catch::Approx(1.0));
++    CHECK(r.rows[1][3] == Catch::Approx(0.0).margin(1e-9));
++    CHECK(r.rows[2][3] == Catch::Approx(0.0).margin(1e-9));
++
++    // The camera turned 45 degrees right on the spot: a point straight ahead
++    // now was 45 degrees right of the old view direction, at the same distance.
++    const TaaCamera ahead = MakeCamera(0.0, 0.0, 0, 0, 0);
++    const TaaCamera turned = MakeCamera(45.0, 0.0, 0, 0, 0);
++    r = BuildTaaReprojection(ahead, turned);
++    CHECK(r.valid);
++    CHECK(r.forwardCos == Catch::Approx(std::sqrt(0.5)));
++    const double p[3] = {0.0, 0.0, 10.0};
++    double q[3];
++    Apply(r, p, q);
++    CHECK(q[0] == Catch::Approx(10.0 * std::sqrt(0.5)));
++    CHECK(q[1] == Catch::Approx(0.0).margin(1e-6));
++    CHECK(q[2] == Catch::Approx(10.0 * std::sqrt(0.5)));
++    // Projected with the previous projection: x * p11 / z.
++    double ndc[2];
++    REQUIRE(TaaReprojectNdc(r, p, ndc));
++    CHECK(ndc[0] == Catch::Approx(turned.p11 * 1.0)); // the previous camera's p11 (same lens)
++    CHECK(ndc[1] == Catch::Approx(0.0).margin(1e-6));
++    // A point behind the previous camera has no history.
++    const double behind[3] = {0.0, 0.0, -10.0};
++    CHECK_FALSE(TaaReprojectNdc(r, behind, ndc));
++}
++
++TEST_CASE("TAA reprojection: the shader's rows take this frame's view position to the previous one's",
++          "[remaster][TemporalAA]")
++{
++    // Camera pairs as a frame sees them: a walk, a strafe with a pan, a jeep
++    // ride far from the map origin (float positions at 12 km), a zoom.
++    struct Pair
++    {
++        TaaCamera prev, cur;
++    };
++    const Pair pairs[] = {
++        {MakeCamera(75.0, 3.0, 4674.0, 61.75, 10156.0), MakeCamera(75.0, 3.0, 4674.03, 61.75, 10156.0)},
++        {MakeCamera(338.8, -3.0, 8350.0, 20.0, 2950.0), MakeCamera(338.9, -3.0, 8350.0, 20.0, 2950.0)},
++        {MakeCamera(120.0, -2.0, 12000.0, 80.0, 9000.0), MakeCamera(121.5, -1.0, 12000.4, 80.05, 9000.3)},
++        {MakeCamera(200.0, 10.0, 600.0, 15.0, 700.0, 1.43, 2.54),
++         MakeCamera(200.0, 10.0, 600.0, 15.0, 700.0, 4.0, 7.1)},
++    };
++    const double points[][3] = {{0, 0, 0}, {25, 1, 40}, {-300, 50, 900}, {5, -2, 3}};
++    for (const Pair& pr : pairs)
++    {
++        const TaaReprojection r = BuildTaaReprojection(pr.prev, pr.cur);
++        CHECK(r.valid);
++        for (const auto& offset : points)
++        {
++            // A world point some way in front of the current camera.
++            double fwd[3];
++            for (int i = 0; i < 3; ++i)
++                fwd[i] = pr.cur.rot[i * 3 + 2];
++            const double w[3] = {pr.cur.pos[0] + fwd[0] * 60.0 + offset[0], pr.cur.pos[1] + fwd[1] * 60.0 + offset[1],
++                                 pr.cur.pos[2] + fwd[2] * 60.0 + offset[2]};
++            double pc[3], pp[3], got[3];
++            ToView(pr.cur, w, pc);
++            ToView(pr.prev, w, pp);
++            Apply(r, pc, got);
++            const double size = std::sqrt(pc[0] * pc[0] + pc[1] * pc[1] + pc[2] * pc[2]);
++            CAPTURE(pc[0], pc[1], pc[2], pp[0], pp[1], pp[2], got[0], got[1], got[2]);
++            for (int i = 0; i < 3; ++i)
++                CHECK(std::fabs(got[i] - pp[i]) < 2e-6 * size + 1e-4);
++            // On screen, the previous frame's position is right to well under a
++            // hundredth of a pixel at 1080p.
++            double ndc[2];
++            if (pp[2] > 1.0 && TaaReprojectNdc(r, pc, ndc))
++            {
++                CHECK(std::fabs(ndc[0] - pp[0] * pr.prev.p11 / pp[2]) * 960.0 < 0.01);
++                CHECK(std::fabs(ndc[1] - pp[1] * pr.prev.p22 / pp[2]) * 540.0 < 0.01);
++            }
++        }
++    }
++}
++
++TEST_CASE("TAA reprojection: a cut or a singular view drops the history", "[remaster][TemporalAA]")
++{
++    const TaaCamera a = MakeCamera(10.0, 0.0, 100.0, 5.0, 100.0);
++    TaaCamera b = a;
++    b.pos[0] += kTaaCutDistance - 1.0;
++    CHECK(BuildTaaReprojection(a, b).valid);
++    b.pos[0] = a.pos[0] + kTaaCutDistance + 0.1; // a teleport
++    CHECK_FALSE(BuildTaaReprojection(a, b).valid);
++    CHECK(BuildTaaReprojection(a, MakeCamera(10.0 + 59.0, 0.0, 100.0, 5.0, 100.0)).valid);
++    CHECK_FALSE(
++        BuildTaaReprojection(a, MakeCamera(10.0 + 61.0, 0.0, 100.0, 5.0, 100.0)).valid); // a cut to another view
++    TaaCamera flat = a;
++    for (double& v : flat.rot)
++        v = 0.0;
++    CHECK_FALSE(BuildTaaReprojection(a, flat).valid);
++}
++
++TEST_CASE("TAA history: only the last frame's, at this size, without a cut", "[remaster][TemporalAA]")
++{
++    TaaHistory h;
++    CHECK_FALSE(TaaHistoryUsable(h, 101, 1920, 1080, true)); // none written yet
++    h.exists = true;
++    h.frame = 100;
++    h.w = 1920;
++    h.h = 1080;
++    CHECK(TaaHistoryUsable(h, 101, 1920, 1080, true));
++    // A frame without a resolve in between (an interior, optics, night vision,
++    // the switch or the post effects off): stale.
++    CHECK_FALSE(TaaHistoryUsable(h, 102, 1920, 1080, true));
++    CHECK_FALSE(TaaHistoryUsable(h, 100, 1920, 1080, true));
++    CHECK_FALSE(TaaHistoryUsable(h, 101, 1600, 900, true));   // resized
++    CHECK_FALSE(TaaHistoryUsable(h, 101, 1920, 1080, false)); // camera cut
++    h.frame = 0xffffffffu;
++    CHECK(TaaHistoryUsable(h, 0, 1920, 1080, true)); // the counter wraps
++}
++
++TEST_CASE("TAA shaders: the jitter only in the remastered world programs, and only when set",
++          "[remaster][TemporalAA][Shaders]")
++{
++    // Every remastered vertex shader adds the jitter once, guarded so a zero
++    // jitter leaves the position exactly as computed (the switch's "off" is
++    // the look before A5).
++    const std::string add = "if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;";
++    int vertex = 0;
++    for (int vs = 0; vs < 16; ++vs)
++    {
++        const char* src = gl::RemasterVertexSource(vs);
++        if (!src)
++            continue;
++        CAPTURE(vs);
++        CHECK(CountOf(src, add) == 1);
++        CHECK(CountOf(src, "vpScale.zw") == 1);
++        ++vertex;
++    }
++    CHECK(vertex == 3);
++    // Classic programs, the shadow-map depth pass and the post pass never
++    // read it: Classic stays the original look and the shadow map unjittered.
++    for (const char* file : {"EngineGL33_Shaders.cpp", "EngineGL33_ShadowDepth.cpp", "EngineGL33_PostShaders.cpp"})
++    {
++        CAPTURE(file);
++        const std::string text = ReadTextFile(Gl33Dir() / file);
++        REQUIRE_FALSE(text.empty());
++        CHECK(text.find("vpScale.zw") == std::string::npos);
++    }
++    CHECK(ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp").find("vpScale") == std::string::npos);
++}
++
++TEST_CASE("TAA shaders: the resolve and sharpen contracts", "[remaster][TemporalAA][Shaders]")
++{
++    const std::string taa = gl::PostShaderSource(gl::PostShader::Taa);
++    const std::string sharpen = gl::PostShaderSource(gl::PostShader::TaaSharpen);
++    REQUIRE_FALSE(taa.empty());
++    REQUIRE_FALSE(sharpen.empty());
++    CHECK(std::string(gl::PostShaderName(gl::PostShader::Taa)) == "psPostTaa");
++    CHECK(std::string(gl::PostShaderName(gl::PostShader::TaaSharpen)) == "psPostTaaSharpen");
++    // Its five inputs, on the post units EngineGL33_PostTemporal.cpp binds.
++    for (const char* sampler : {"curTex", "depthTex", "histTex", "worldTex", "opaqueTex"})
++    {
++        CAPTURE(sampler);
++        CHECK(taa.find(std::string("uniform sampler2D ") + sampler + ";") != std::string::npos);
++    }
++    CHECK(CountOf(taa, "uniform sampler2D") == 5);
++    // The nearest depth of the 3x3 drives the reprojection, the history is a
++    // Catmull-Rom read clipped into this frame's YCoCg box, the depth test
++    // uses the stored view depth with 3% + 0.15 m, and the view depth goes
++    // out with the colour.
++    CHECK(taa.find("if (dz < closest) { closest = dz; closestOff = ivec2(x, y); }") != std::string::npos);
++    // The reconstruction kernel sets how soft the converged frame is: exp(-4 d^2)
++    // (the A5 sweep: 5% softer on the hero view against 15% with exp(-2.29 d^2)).
++    CHECK(taa.find("float w = exp(-4.0 * dot(d, d));") != std::string::npos);
++    CHECK(taa.find("vec3 sampleHistory(vec2 uv)") != std::string::npos);
++    CHECK(taa.find("clipToBox(max(mu - sigma, cmin), min(mu + sigma, cmax), toYCoCg(hist))") != std::string::npos);
++    CHECK(taa.find("float tol = 0.03 * pp.z + 0.15;") != std::string::npos);
++    CHECK(taa.find("fragColor = vec4(max(res, vec3(0.0)), min(viewDepth(d0), 65000.0));") != std::string::npos);
++    // The particle mask: the translucent objects' change to the world, by the
++    // thresholds of TemporalAA.hpp (passed as uniforms).
++    CHECK(taa.find("abs(texelFetch(worldTex, ip, 0).rgb - texelFetch(opaqueTex, ip, 0).rgb)") != std::string::npos);
++    CHECK(taa.find("alpha = max(alpha, r * reactive.z);") != std::string::npos);
++    CHECK(kTaaReactiveLow < kTaaReactiveHigh);
++    CHECK(kTaaReactiveMaxAlpha > 0.5f);
++    CHECK(kTaaReactiveMaxAlpha <= 1.0f);
++    // The sharpen cannot overshoot the local cross by more than a quarter of
++    // its range (no halos) and dithers back into 8 bits.
++    CHECK(sharpen.find("vec3 margin = 0.25 * (mx - mn);") != std::string::npos);
++    CHECK(sharpen.find("clamp(c + sharpen.x * (c - 0.25 * (n + s + e + w)), mn - margin, mx + margin)") !=
++          std::string::npos);
++    CHECK(sharpen.find("(a + b - 1.0) / 255.0") != std::string::npos);
++}
++
++TEST_CASE("TAA backend: the jitter and the texture LOD bias never reach the HUD",
++          "[remaster][TemporalAA][GL33][StateCacheAudit]")
++{
++    // EndWorldScene takes both off before anything can return early, so the
++    // map, HUD and dialogs drawn after it are never jittered; the next frame's
++    // InitDraw does it again for a frame that never reached EndWorldScene.
++    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
++    const std::string end = FunctionBody(post, "void EngineGL33::EndWorldScene()");
++    REQUIRE_FALSE(end.empty());
++    const size_t clear = end.find("SetTaaJitterState({}, 0.0f);");
++    REQUIRE(clear != std::string::npos);
++    const size_t firstReturn = end.find("return");
++    REQUIRE(firstReturn != std::string::npos);
++    CHECK(clear < firstReturn);
++    const std::string life = ReadTextFile(Gl33Dir() / "EngineGL33_Lifecycle.cpp");
++    CHECK(FunctionBody(life, "void EngineGL33::InitDraw(").find("SetTaaJitterState({}, 0.0f);") != std::string::npos);
++
++    // The world's screen-space draws (smoke, rain) take the jitter the world
++    // passes hold, and nothing else writes vpScale.zw.
++    const std::string shaders = ReadTextFile(Gl33Dir() / "EngineGL33_Shaders.cpp");
++    const std::string screen = FunctionBody(shaders, "void EngineGL33::UploadVSScreenConstants()");
++    CHECK(screen.find("_taa.ndcApplied.x, _taa.ndcApplied.y") != std::string::npos);
++    CHECK(CountOf(shaders, "VSConst::SlotVpScale * 4 + 2") == 1);
++
++    // One rule decides a pass's jitter (TaaPassJitterNdc), applied at every
++    // world pass once the frame gates are known.
++    const std::string temporal = ReadTextFile(Gl33Dir() / "EngineGL33_PostTemporal.cpp");
++    REQUIRE_FALSE(temporal.empty());
++    CHECK(FunctionBody(temporal, "void EngineGL33::ApplyTaaJitter()").find("rm::TaaPassJitterNdc(") !=
++          std::string::npos);
++    const std::string queue = ReadTextFile(Gl33Dir() / "EngineGL33_Queue.cpp");
++    const std::string begin = FunctionBody(queue, "void EngineGL33::BeginPass(PassId passId)");
++    const size_t gates = begin.find("UploadLitFrameConstants();");
++    const size_t jitter = begin.find("ApplyTaaJitter();");
++    REQUIRE(gates != std::string::npos);
++    REQUIRE(jitter != std::string::npos);
++    CHECK(gates < jitter);
++
++    // The LOD bias has one writer, which also takes it off.
++    int biasWriters = 0;
++    for (const auto& entry : std::filesystem::directory_iterator(Gl33Dir()))
++        if (entry.path().extension() == ".cpp")
++            biasWriters += CountOf(ReadTextFile(entry.path()), "GL_TEXTURE_LOD_BIAS");
++    CHECK(biasWriters == 1);
++    CHECK(FunctionBody(temporal, "void EngineGL33::SetTaaJitterState(").find("GL_TEXTURE_LOD_BIAS") !=
++          std::string::npos);
++}
++
++TEST_CASE("TAA backend: the opaque world is copied between the opaque and the translucent objects",
++          "[remaster][TemporalAA][GL33]")
++{
++    // The particle mask compares the world as drawn with the world before the
++    // translucent objects: the scene calls the hook once, after the opaque
++    // objects, the surface overlays and the shadows, right before the
++    // back-to-front loop of the alpha objects.
++    const std::string scene = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "SceneDraw.cpp");
++    REQUIRE_FALSE(scene.empty());
++    CHECK(CountOf(scene, "GEngine->BeginTranslucentObjects();") == 1);
++    const std::string pass2 = FunctionBody(scene, "void Scene::DrawObjectsAndShadowsPass2()");
++    const size_t hook = pass2.find("GEngine->BeginTranslucentObjects();");
++    REQUIRE(hook != std::string::npos);
++    CHECK(hook > pass2.find("RenderShadowMapDepthPass(nDraw);"));
++    CHECK(hook < pass2.find("QSort(_drawMergers.Data(), _drawMergers.Size(), CmpRevAlphaSortObj);"));
++    // The copy needs no new target mid-frame (that would reset a cropped
++    // world's viewport) and keeps the world's viewport.
++    const std::string temporal = ReadTextFile(Gl33Dir() / "EngineGL33_PostTemporal.cpp");
++    const std::string copy = FunctionBody(temporal, "void EngineGL33::BeginTranslucentObjects()");
++    REQUIRE_FALSE(copy.empty());
++    CHECK(copy.find("EnsurePostResources") == std::string::npos);
++    CHECK(copy.find("glViewport") == std::string::npos);
++    CHECK(copy.find("BindFrameRenderTarget") == std::string::npos);
++}
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index 59a9253..ae6333e 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -2204,3 +2204,4 @@ items:
+       - "2026-10-18: graphics-remaster step A1 (switches, gates, tooling, plan section 5 A1): one registry (Graphics/Remaster/FeatureSwitches) holds every triSetLighting key, the 26 feature switches of plan 3.1 (all on, all inert until their step lands) and the new mode word baseline (every switch off); FeatureGates decides per frame whether an enabled feature can show (low sun, night, wet, local or combat light, clouds; gates=0 forces them on); the dev overlay's Lighting tab is generated from the registry with a Features section showing each gate; triFeatureState logs switches and gates with every capture shot; triSetFixedStep fixes the simulation step and P-mode pairs hold (two paused renders of a fire are pixel-identical); triPinCloudDrift holds the cloud shadows and sky clouds, which do not follow the pinned clock. Capture tooling in the repo: features_ab (16 hero views, off then on, fixed clocks), banddiff.py, the A0 timing rig (run-timing.ps1, gpu_sampler.ps1, summarize_timing.py, gen_timing.py) and the video skeleton (capture_motion.sqf, gen_video_tests.py with every 7.3 row, make_video.py). No pixel changes: horizon and ground bands match the A0 build within noise; timing on the long views matches A0 at P0 (sunrise_ridge 17.31 against 17.41 ms). Unit gate 452/452 (27 new), smoke 3/3."
+       - "2026-10-18: graphics-remaster step A2 (shader split and shared tables, plan section 5 A2): the remastered fragment prelude is ten pieces by concern (header, LitConstants, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish; sky, lights and surface in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp) joined by one table; the LitConstants block is one string with no copies; the post GLSL moved to EngineGL33_PostShaders.cpp (no GL code, so the unit tests link it) with a kPostShaders table and s_glslPostCommon (AO's depth reconstruction); the slots planned for later features (LitConstPlanned 58 to 78) and the texture unit table (units 6, 8 to 15 allocated, one static_assert, kLitSamplers binds every lit sampler, shadow unit named kShadowMapUnit) are fixed. No pixel changes: every assembled program (8 remastered, 7 post, 15 classic) is byte for byte the tip's, checked with glsl_extract.py --dump and with the engine's own accessors; features_ab on the A2 build is pixel-identical to the A1 build on the five repeatable views and within the same-config noise on the others; timing at P0 within -0.27 to +0.18 ms of A1. Tests go through the accessors (4 new cases: every raw GLSL string reaches a program, the assembly tables the lab reads, the concern of each piece, the unit table); five contract mutations each turn their case red. Unit gate 456/456, smoke 3/3. The lighting lab assembles the same programs (glsl_extract load_programs) and decodes git output as UTF-8."
+       - "2026-10-18: graphics-remaster step A3 (post stages, plan section 5 A3): the post pass is a fixed list of thirteen stages (Graphics/Remaster/PostStages: resolve, linear depth, tag readout, AO, reflections, air, bloom, shafts, combat scatter, composite, TAA resolve, sharpen, debug view), every planned stage holding its place and GPU mark, seven landed; PlanPostStages decides per frame which stages run (the early return asks every stage, with the old meaning: a knob that is on keeps the pass) and EndWorldScene runs them on one PostFrame, each followed by its own timestamp. New PostLinearDepth: half-resolution R32F view depth, nearest and farthest of each 2x2 on a checkerboard, the sky at 1e6; it feeds nothing yet, so it runs only for the new linear depth debug view (debug=5), 0.01 ms at P0. No pixel changes: the 30 existing programs are byte-identical, features_ab is pixel-identical to the A2 build on the five repeatable views and the three-island set within boot noise. The new GPU sections show the MSAA resolve (0.22 to 0.65 ms at P0), not AO (0.06 to 0.20 ms), is the largest fixed post cost; frame medians at P0 within -0.22 to +0.27 ms of A2. Unit gate 466/466 (10 new), seven contract mutations red, smoke 3/3."
++      - "2026-10-18: graphics-remaster step A5 (temporal anti-aliasing, plan section 5 A5; a parallel lane on ced77ae): the taa switch lands. The world is drawn with a Halton(2, 3) sub-pixel jitter (remastered vertex shaders only, guarded so a zero jitter leaves positions exact; never the HUD, dialogs, portraits or the shadow-map pass) and the new Temporal and Sharpen post stages blend it into a half-float history: camera reprojection built in double precision from the nearest depth, depth rejection with the view depth stored in the history alpha, a YCoCg variance clip, alpha 0.1, a bounded sharpen 0.5, a -0.5 texture LOD bias. A particle mask from a copy of the frame between the opaque and the translucent objects (Engine::BeginTranslucentObjects) lets smoke, fire, muzzle flashes, glass and rain take most of their own frame; AO and shaft patterns turn per frame under TAA. Sub-knobs taaSharpen, taaMipBias, taaAlpha; the gate also needs the post effects. The reconstruction kernel is exp(-4 d^2) (the prototype's exp(-2.29 d^2) left the hero view 15.5% softer; now 6.7%). Off equals the base build at the hero view (0 pixels over 2 levels). On: antennas and ropes continuous, crowns 22.6% steadier under a pan, no trail behind a Jeep at 0.5 m per step, the Fire keeps its flicker; 9.5 to 10.7% softer under the pan. Cost on the 4060 Ti at 1080p: taa 0.16 to 0.22 ms, sharpen 0.05 to 0.10 ms, frame +0.7 to 0.8 ms of which most is the LOD bias. Not built: the Taa LitConstants slot and unit 6 (B1), per-object motion vectors, an HDR resolve (the frame target is display space). Unit gate 478/478 (12 new), twelve mutations red, smoke 1/1."

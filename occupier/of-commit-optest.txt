@@ -1,0 +1,19 @@
+tests: Options pointer-click safety walk on the main-menu lane (crash 2026-10-14)
+
+Walks every scroll-list page under Options and Controls on the Remaster
+shadow: wheel and PageDown, scrollbar press and hold, a click past the
+last row with Close focused (the owner's path into
+OptionsScrollList::PollPointerActionClick), Close by the row text and by
+its overlay, Esc while the button is held, a press in the same frame as a
+page switch. Complements e267e54's Remaster-lane click-through; the
+deterministic red-to-green proof for c7dc8c7 is the pair of unit cases
+"OptionsShell keeps*" (the page is freed inside its own handler on HEAD
+before the fix), since the one-byte write into freed memory only faults
+when mimalloc has just decommitted the span.
+
+Verified on dist/agent-rwdi + remaster-shadow-of1: 3 of 3 at --retries 0
+(--focus, -j1); options_shell + ui/options 23/24 (the red,
+options_controls_arma3_preset, looks for a "Close" row the Remaster
+labels "Back", pre-existing); ui/remaster 13/13; human suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

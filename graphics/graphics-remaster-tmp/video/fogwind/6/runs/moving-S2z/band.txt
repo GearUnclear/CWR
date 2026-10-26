@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\6\\runs\\moving-S2z\\frames", "frames": 105, "band": 0.039, "band_max": 0.091, "sky": 0.034, "spikes": 0, "worst": [[108, 0.36], [51, 0.34], [25, 0.32], [79, 0.28], [17, 0.25], [81, 0.24], [53, 0.22], [27, 0.22]]}

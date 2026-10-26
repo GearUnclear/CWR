@@ -1,0 +1,6 @@
+# REVIEW (spawned-vehicles fix), not committed. Boots to the main menu.
+binary = "PoseidonGame"
+tags = ["ui", "headful", "exclusive"]
+timeout = 400
+assert_timeout = 180
+extra_args = ["--dev", "--no-strict", "--log-level", "debug", "--display-mode", "windowed", "--width", "960", "--height", "640"]

@@ -1,0 +1,200 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index e81d4c35..68f7ef50 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -142,8 +142,18 @@ void CrownEllipsoid(const float boxMin[3], const float boxMax[3], float center[3
+     constexpr float kMinHalf = 0.05f;
+     for (int i = 0; i < 3; ++i)
+     {
+-        const float size = std::max(boxMax[i] - boxMin[i], 0.0f);
+-        center[i] = boxMin[i] + size * (i == 1 ? 0.6f : 0.5f);
++        // The constants reach every vertex of the draw, so an axis with NaN or
++        // infinite bounds (or an extent that overflows) falls back to the
++        // smallest crown at the origin instead of lighting the shape with NaN.
++        float lo = boxMin[i];
++        float size = boxMax[i] - boxMin[i];
++        if (!std::isfinite(lo) || !std::isfinite(size))
++        {
++            lo = 0.0f;
++            size = 0.0f;
++        }
++        size = std::max(size, 0.0f);
++        center[i] = lo + size * (i == 1 ? 0.6f : 0.5f);
+         invHalf[i] = 1.0f / std::max(0.5f * size, kMinHalf);
+     }
+ }
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0c..425b614d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -128,6 +128,8 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
+ // model's bounding box (min, max; y up). Trunks make the box taller than the
+ // crown, so the centre sits at 60% of the height. Writes the centre and the
+ // inverse half extents; the shader lights a leaf with the ellipsoid's normal.
++// Always finite: an axis with NaN or infinite bounds gets a 5 cm half extent
++// centred on the origin.
+ void CrownEllipsoid(const float boxMin[3], const float boxMax[3], float center[3], float invHalf[3]);
+ 
+ } // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index f994cd09..5ed1f5ee 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -31,7 +31,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Hill shadows and valley sky | `TerrainHorizon.cpp`, `World/Terrain/TerrainLighting.cpp` | A 16-azimuth horizon map built off-thread from the heightfield when an island loads. Ridges shadow the valleys behind them at any range (the shadow maps cover objects near the camera only) and valley floors see less sky. |
+ | Ground-coloured bounce | `GroundTint`, `TerrainLighting.cpp` `GroundColors` | The light bounced off the ground takes the colour of the landscape texture under each point (its average colour, baked with the horizon map): warm on sand, green over grass. The tint is luminance-neutral, so it changes the colour of the shade, never its brightness. |
+ | Cloud shadows | `CloudNoise.cpp`, shader `cloudSunVisibility` | Under broken cloud, the classic uniform sun dimming moves into drifting cloud shadows whose mean transmission equals the classic dimming, so the average frame brightness is unchanged. |
+-| Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. |
++| Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. Leaf cards authored without normals (zero mesh normals, common in CWA crowns) take the ellipsoid's normal outright. |
+ | Fog toward the sun | shader `fogColorToward` | Fog takes the sky dome's own sun glow (`SunSkyColor * cos^6`, as `TLVertexTable::DoSkyLighting` shades the dome). Distant ground fades into the colour of the sky behind it, which removes the flat band along the horizon at sunrise and sunset. Away from the sun it is exactly the classic fog. |
+ | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
+ | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. Glossy materials get normalised Blinn-Phong and a sky reflection. |
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e0..590e7db3 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -136,7 +136,11 @@ flat out float vLitMode;
+ 
+ void main() {
+     vec4 worldPos    = worldArr[gl_InstanceID] * vec4(pos, 1.0);
+-    vec3 worldNormal = normalize(mat3(worldArr[gl_InstanceID]) * normal);
++    // Many tree crowns have leaf cards with zero mesh normals: keep them zero
++    // (normalizing a zero vector gives NaN); the fragment shader gives them the
++    // crown's normal.
++    vec3 worldNormal = mat3(worldArr[gl_InstanceID]) * normal;
++    worldNormal     *= inversesqrt(max(dot(worldNormal, worldNormal), 1e-12));
+     vec4 viewPos     = view * worldPos;
+     gl_Position      = proj * viewPos;
+     vWorldRel        = worldPos.xyz; // camera-relative world position
+@@ -527,18 +531,21 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     // leaves), keep some sun inside the crown's own shadow and dim the sky fill
+     // toward the crown's core.
+     bool foliage = dot(litMatForced.rgb, kLuma) > 1e-4;
++    bool crown = foliage && vCrown.w > 0.0;
++    vec3 cn = crown ? vCrown.xyz * inversesqrt(max(dot(vCrown.xyz, vCrown.xyz), 1e-12)) : vec3(0.0);
++    // A leaf card without a mesh normal (zero, see VSTransform) takes the
++    // crown's normal for its sun, sky and shadow lookup.
++    if (foliage && dot(n, n) < 0.25) n = cn;
+     vec3 nCast = (foliage && dot(n, l) < 0.0) ? -n : n;
+     vec3 nLight = n;
+     float crownSky = 1.0;
+-    if (foliage) {
+-        if (vCrown.w > 0.0) {
+-            vec3 cn = vCrown.xyz * inversesqrt(max(dot(vCrown.xyz, vCrown.xyz), 1e-12));
+-            vec3 card = dot(n, cn) < 0.0 ? -n : n;
+-            nLight = normalize(card * 0.3 + cn * 0.7);
+-            crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
+-        } else {
+-            nLight = nCast;
+-        }
++    if (crown) {
++        vec3 card = dot(n, cn) < 0.0 ? -n : n;
++        vec3 blend = card * 0.3 + cn * 0.7;
++        nLight = blend * inversesqrt(max(dot(blend, blend), 1e-12));
++        crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
++    } else if (foliage) {
++        nLight = nCast;
+     }
+ 
+     float nl = max(dot(n, l), 0.0);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 68e8c017..8eade7b7 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -14,6 +14,7 @@
+ #include <cmath>
+ #include <filesystem>
+ #include <fstream>
++#include <limits>
+ #include <map>
+ #include <regex>
+ #include <set>
+@@ -231,6 +232,53 @@ TEST_CASE("Remaster crown ellipsoid sits on the upper part of the shape", "[Grap
+     CHECK(std::isfinite(ih[1]));
+ }
+ 
++TEST_CASE("Remaster crown ellipsoid stays finite for degenerate boxes", "[Graphics][remaster]")
++{
++    // The constants reach every vertex of the draw (VS slots 22-23): a NaN or
++    // infinite one turns the whole crown's lighting normal into NaN.
++    const float nan = std::numeric_limits<float>::quiet_NaN();
++    const float inf = std::numeric_limits<float>::infinity();
++    const float big = std::numeric_limits<float>::max();
++    struct Box
++    {
++        const char* what;
++        float mn[3];
++        float mx[3];
++    };
++    const Box boxes[] = {
++        {"NaN min", {nan, 0.0f, -2.0f}, {3.0f, 10.0f, 2.0f}},
++        {"NaN max", {-3.0f, 0.0f, -2.0f}, {3.0f, nan, 2.0f}},
++        {"infinite max", {-3.0f, 0.0f, -2.0f}, {inf, 10.0f, 2.0f}},
++        {"infinite both ways", {-inf, -inf, -inf}, {inf, inf, inf}},
++        {"extent overflows", {-big, 0.0f, -2.0f}, {big, 10.0f, 2.0f}},
++        {"inverted (empty)", {1e10f, 1e10f, 1e10f}, {-1e10f, -1e10f, -1e10f}},
++        {"point", {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f}},
++    };
++    for (const Box& b : boxes)
++    {
++        CAPTURE(b.what);
++        float c[3], ih[3];
++        CrownEllipsoid(b.mn, b.mx, c, ih);
++        for (int i = 0; i < 3; ++i)
++        {
++            CAPTURE(i);
++            CHECK(std::isfinite(c[i]));
++            CHECK(std::isfinite(ih[i]));
++            CHECK(ih[i] > 0.0f);
++            CHECK(ih[i] <= 20.0f); // half extent never below 5 cm
++        }
++    }
++    // The broken axis is the only one replaced: the others keep their fit.
++    const float mn[3] = {nan, 0.0f, -2.0f};
++    const float mx[3] = {3.0f, 10.0f, 2.0f};
++    float c[3], ih[3];
++    CrownEllipsoid(mn, mx, c, ih);
++    CHECK(c[1] == Catch::Approx(6.0f));
++    CHECK(ih[1] == Catch::Approx(1.0f / 5.0f));
++    CHECK(c[2] == Catch::Approx(0.0f));
++    CHECK(ih[2] == Catch::Approx(1.0f / 2.0f));
++}
++
+ TEST_CASE("Remaster terrain horizon: a ridge shadows the valley behind it from a low sun", "[Graphics][remaster]")
+ {
+     // 128 x 128 at 25 m; a 120 m north-south ridge along x = 40.
+@@ -484,6 +532,34 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+     CHECK(postCount == 7);
+ }
+ 
++TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Graphics][Shaders][remaster]")
++{
++    // Many CWA tree crowns (the town birch on Malden, several pines and
++    // broadleaves) have leaf cards whose mesh normals are zero. normalize() of a
++    // zero vector is undefined (NaN on NVIDIA), and a NaN lighting normal makes
++    // the crown fall back to ground-only sky light with no sun shadow. The
++    // vertex shaders and the per-fragment normal setup must use the guarded
++    // form, x * inversesqrt(max(dot(x, x), eps)), which keeps a zero vector zero.
++    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_LightingShaders.cpp");
++    REQUIRE_FALSE(lighting.empty());
++    for (const std::string& sym : Symbols(lighting))
++    {
++        if (sym.rfind("s_vs", 0) != 0)
++            continue;
++        CAPTURE(sym);
++        CHECK(RawString(lighting, sym).find("normalize(") == std::string::npos);
++    }
++    const std::string common = RawString(lighting, "s_psRemasterCommon");
++    const size_t start = common.find("vec3 shadeRemastered(");
++    REQUIRE(start != std::string::npos);
++    const size_t end = common.find("\n}\n", start);
++    REQUIRE(end != std::string::npos);
++    const std::string shade = common.substr(start, end - start);
++    CHECK(shade.find("normalize(") == std::string::npos);
++    // A foliage fragment without a normal of its own lights with the crown's.
++    CHECK(std::regex_search(shade, std::regex(R"(if\s*\(\s*foliage\s*&&\s*dot\(n,\s*n\)\s*<[^)]*\)\s*n\s*=\s*cn;)")));
++}
++
+ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "[Graphics][Shaders][remaster]")
+ {
+     namespace LC = Poseidon::gl33lighting::LitConst;

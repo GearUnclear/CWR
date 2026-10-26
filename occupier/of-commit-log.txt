@@ -1,0 +1,27 @@
+guerrilla: director INFO lines are dev-only behind forcesLog (D12 messaging stays deferred, journal integration is #98); owner decisions recorded
+
+Every per-action INFO line of OccupierForces, CounterAttack,
+CounterAttackAir and OccupierAir (and the catalogue line in ForcePackages
+and the HQ-destroyed line in GuerrillaBase) goes through GM_DIRECTOR_INFO
+(DirectorLog.hpp): INFO under --dev or when the mission authors
+forcesLog = 1 (OccupierForcesTuning::log, default 0, gmForcesTune "log"),
+DEBUG otherwise, so --log-level debug still shows them and a player's log
+stays quiet. WARN and ERROR lines unchanged. No tri test reads these lines
+and every forces / counter-attack toml already passes --dev.
+
+Owner decisions of 2026-10-14 recorded in OCCUPIER-FORCES.md 0.2 (D12
+parenthesis), 6.6, 16, 17 and 18 and in the contract instruments: alarm
+answers stay born at their base (3.1 step 1 as built); the director's
+messaging is silenced outside dev runs and test missions, journal
+integration tracked as #98 with the how left open; the Southeast Compound
+stays an air-only base until the vehicle system work.
+
+Verified on build/agent-rwdi: the guerrilla / counterattack /
+occupierforces / air / save tags 680 cases (new forcesLog case); boot
+probes on remaster-shadow-of1: 0 director lines without --dev, 26 with,
+11 after gmForcesTune ["log", 1], 26 as DBUG under --log-level debug; tri
+10/10 (pool_on, motorized, air_op, town_strike, alarm_answer, both_towns,
+counter_attack_offscreen, showcase_smoke, human_suite, the probe); human
+suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

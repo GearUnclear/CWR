@@ -1,0 +1,3 @@
+roadmap: occupier-forces close-out commits logged, final gate green
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

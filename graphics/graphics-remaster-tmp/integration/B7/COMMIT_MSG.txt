@@ -1,0 +1,114 @@
+graphics: rain wets cloth and stone, fills puddles and streaks lamp light
+
+What the player sees: rain now wets the world, not only the ground. Cloth,
+tents, plaster, brick and wood darken as they soak; paint, glass, metal and
+asphalt take a thin water film. In the sun the film shows a soft warm sheen
+toward the sun (even at a low sun it does not clip to white, and the gravel
+shows through it); at night it throws every street lamp, fire and headlight
+across the wet ground as a long warm streak toward the eye. Puddles stand in
+level hollows as dark water with rain rings and keep mirroring the houses
+(B6's reflections). After the rain the world stays wet and dries over
+minutes, faster in sun and wind, and the puddles linger longest. Dry weather
+looks exactly as before.
+
+How it works:
+- Graphics/Remaster/Wetness.{hpp,cpp} (pure): the world's surface wetness and
+  puddle level, stepped with the weather (Weather::MoveClouds). Rain wets with a
+  90 s time constant at full rain, puddles fill over 600 s; surfaces dry over
+  1200 s divided by a drying factor of sun height, clear sky and wind, puddles
+  over 3600 s. A SetRain change made at once (a mission's or a capture's
+  `0 setRain x`) snaps the state to what that rain settles at, on the first
+  step that moves the clock (a change made while paused waits for its rain).
+- Graphics/Remaster/SurfaceMaterials.{hpp,cpp} (pure): 14 surface classes from
+  a table of texture-name rules per object kind (the stock Czech and English
+  tokens of the research prototype) that mods extend or override with
+  CfgSurfaceMaterials (surface, any[], none[], kinds[]); each kind's default
+  class; the porosity table the shader mirrors. The object kind rides on the
+  draw descriptor (render::DrawObjectKind, set by Shape::Draw from the
+  object's simulation and class, cached on its EntityType); each texture
+  classifies itself once per kind (TextureGL33::SurfaceClassFor).
+- LitConstants: MatClass (58) per draw, the class and kind, uploaded only
+  when they change while the wet gate is on, plus the frame's streak and
+  reflection flags; Weather (73): wetness, rain, puddle level, time. Both zero
+  while the gate is off.
+- Shaders: a new prelude piece, Puddles (wetPuddle), is pasted by the
+  reflections' trace too, so the forward pass's puddles and the trace's
+  mirrors are the same puddles; it adds the height map's hollows to B6's noise
+  and reads the height map with smoothed interpolation, so no puddle edge
+  follows the terrain's triangles. wetSurface in the surface piece darkens by
+  porosity (the land tells grass from bare ground by its albedo; matte paint
+  and rubber darken a little too, so wet paint reads deeper, not greyer), lays
+  the film (sun glint, sky reflection on objects at half weight and capped,
+  lamp streaks over A6's tiled lights with B3's physical lamps), run-down
+  streaks on walls and hulls near the eye, rain rings on puddles near the eye.
+  With the wet weather on, B6's trace leaves the ground's darkening to the
+  forward pass and takes its puddles from wetPuddle.
+- The sun glint is the film's lobe and the puddle's, blended by the water's
+  share as the lamp streaks are, under its own peak cap (kWetSunCap 3; the
+  lamps keep 80). A low sun's lobe on a 0.3 rough film peaks at well over a
+  hundred times the sun, so under the lamps' cap it clipped a white column
+  from the horizon to the eye. Bare ground breaks the film: its glint is 0.5
+  rough on half the film's share. The pixel's footprint widens the lobe's
+  alpha by 0.25 per metre, so far wet ground draws no white dashes.
+
+Switches and gates: wetWeather (sub-knobs wetness, -1 = the weather, 0..1
+forces it, and puddles, 1) and lampStreaks. Gates as A1 built them: wetness
+above 0.02 (the larger of surfaces and puddles), the streaks also a lamp lit
+at night. With wetWeather off the reflections' ground follows the rain as
+before. triFeatureState reports wet=.
+
+From the prototype (research track materials, override_v9): kept the
+porosity response, the water film, run-down streaks, sheltered ground drier,
+puddles in hollows with rain rings, the v9 split of a dry base and a water
+film lobe for the light reflections. Rewritten: classes from a rule table
+with an object-kind field on the descriptor (no global), terrain per pixel
+from its albedo, wetness as world state, puddle mirrors through B6's pass,
+streaks over A6's tiles, one lobe per roughness blended at puddle edges, the
+sun glint under its own cap, rougher on bare ground and widened by the pixel
+footprint. Dropped: vbfix (F8), the dry satin rim, the albedo bump, dry glass
+reflection, the research knobs and logs.
+
+Cost (4060 Ti, 1080p, scale 1.0, 4x MSAA, other lanes' games running; one
+reading per run): GPU frame minimum on minus off +0.57 ms at the wet night
+town, the wet street and after the rain, +0.14 ms in rain on the fields, none
+at dry noon (gated off). After the glint rework, one more reading: +1.30 ms at
+the wet night town and +0.51 ms after the rain. The spread between runs is of
+that size. Not measured on a quiet GPU or a 3060.
+
+Tests: test_wet_weather.cpp (15 cases: the integrator wets, dries faster in
+sun and wind, puddles lag, snaps, the knobs; the classes on the research log's
+stock names, kind defaults, a mod's rules, object kinds, the shader's porosity
+table; the descriptor's kind outside its equality; the switches, sub-knobs and
+gates; the shaders' and backend's off contract and the shared puddles; the
+sun glint's own cap far below the lamps', its rougher, smaller lobe on bare
+ground and the footprint term), the LitConstants layout and piece table
+cases, the landed-switch cases. Six mutations turn their cases red (the
+sixth puts the sun back under the lamps' cap of 80). Gate tags 642/642; the
+full suite has only the 6 known localisation failures; smoke_abel 1/1
+(KHR_debug 131154, 131169, 131218 only).
+
+In game: tmp/integration/B7/ (lane captures b7lane: the wet night town hero,
+the low sun after the rain, the wet street by day, rain on the fields, dry
+noon; off against the base build within its own repeat noise). The low sun
+and the night town were shot again after the glint rework (b7glint). In the
+low sun's ground band (the lower 45 % of the frame), 1.39 % of pixels are
+over 200 levels and 0.15 % over 240. Before the rework the figures were
+12.0 % and 9.0 %; with the switch off they are 0.02 % and 0 %. The glare
+column's core reads 143 levels, and the gravel's texture there measures 3.7
+(5.4 off, 0.9 when it clipped). B6's mirror of the Jeep stays in the
+puddle. The night town's lamp streaks and puddles are as before (0.08 % of
+its ground over 240 levels).
+
+Known risks: a puddle in the low sun's path still glows warm and bright (up
+to 234 levels on its sun side), though it keeps its mirror; by day in rain
+cloth and walls darken only a few levels; terrain classes come from the
+albedo, so a grey lawn under warm lamps may still pool water in the trace
+while the forward pass keeps it dry (a reflection without the puddle's
+darkening); dry glass has no sky reflection, which departs from the plan's
+Keep list (it needs a dry-weather switch, a follow-up); the trace's road
+test on land reads the class the terrain draw left set (harmless while no
+island texture code matches a road token); no persistence of the wetness
+across a save; motion not checked (rain rings animate, streaks follow the
+camera); cost unmeasured on a quiet GPU.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

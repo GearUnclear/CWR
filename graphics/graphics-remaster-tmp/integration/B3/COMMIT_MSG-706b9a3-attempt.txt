@@ -1,0 +1,164 @@
+graphics: low-beam headlights, moon shadows and stars at night
+
+What the player sees: a moonless country road is dark, under a field of
+stars, and the Jeep's low beams lay their own light on it: the hot spot
+20 to 30 m ahead is the brightest part of the road (218 levels against
+128 at the bumper and 143 at 40 m; before, 113 at the hot spot and 142
+at the bumper, a flat disc), the verges take the wide spill and the
+light stops at a top edge. The far field away from any lamp goes from
+20 to 14 levels. Under a moon the moon casts shadows: a parked Jeep, the
+bushes and the town's trees lay moon shadows on the road and the lawn.
+Street lamps fall off from the bulb instead of lighting everything
+within 50 m at full strength and reaching 500 m: the town square at 22:00
+loses its flat khaki wash (lawn saturation 0.11 to 0.03) and its mean
+brightness halves (98 to 56 levels), with lamp-lit facades and crowns
+near the lamps (the birch around a lamp 61 levels, not black), and the
+camp fire's smoke is fire-lit instead of white. Stars are small soft
+splats with a faint colour each (mean peak over the sky 33 to 76
+levels). By day, in Classic and under night vision nothing changes.
+
+How it works:
+- Moon key (moonShadows): ComputeKeyLight (LightRig) chooses what the
+  shader's sun slots carry. Under the moon key it moves a share of F9's
+  moon (kMoonFull 0.02, its chroma and sky fill unchanged) out of the
+  shadowless litMoon term into litSun/litSunDir, so the shadow map, the
+  terrain horizon (the key's azimuth and elevation), the cloud field and
+  the glossy highlight follow the moon. MoonKeyShare (NightLights) is 0
+  unless the gate is on (sun 3 deg under, moon above 3 deg, phase above
+  0.25, no night vision) and fades in over 3 deg above the sun and moon
+  edges and 0.1 of phase, so the shadows fade in. The scene renders the
+  shadow pass at night when Engine::RemasterMoonKey() says so (the
+  frame's gate) and RenderShadowMapDepthPass takes the moon's direction.
+  Under the moon key the sun shadow constants select B1's stock 12-tap
+  filter, not the soft one (a fiftieth of the noon sun shows no
+  penumbra); the leaf lift stays.
+- Physical lamps and low beams (nightLights), a model of the tiled light
+  list (the gate needs lightTiles). With LitConstants slot 71 (Night: x
+  on, y lamp intensity per start metre, z low-beam peak) on, street lamps
+  and headlights leave the classic model and its budget of 7 (which now
+  ranks the classic kinds among themselves) for physicalLight: intensity
+  over d^2 + 0.25 (lamps 1.9 * start * nightLamp, headlights 800 *
+  nightSpot * the low-beam pattern), the configured colour taken to
+  linear, no warming; the low beam has a hot band 1.7 deg under its axis,
+  a top edge closing from 0.3 to 1.4 deg above it, a +-14 deg core and a
+  +-34 deg spill, a faint floor to 34 deg under, nothing behind the lamp;
+  it is aimed from the vehicle's body (the lamp's heading, the body's
+  pitch along it, 1% down; LowBeamAim in UpdateLightTiles), not from the
+  model's beam axis. A physical reach (PhysicalReach: where the strongest
+  irradiance falls to 0.002, at most the classic 10 start distances; 218
+  m for a 50 m-start lamp) ends each light in a smooth window, and the
+  tiles bin physical lights by it. Rough diffuse (Oren-Nayar, sigma 0.5),
+  leaves wrapped with the crown normal and the forced diffuse as for the
+  sun, a lamp's classic ambient capped, a gleam on glossy materials, the
+  sum linear outside the classic 1.0 clamp, times the draw's night
+  factor. A near fade from 1.0 to 0.25 m off the bulb and the back plane
+  keep a lamp off its own housing and vehicle (a draw in an instanced run
+  has no single object to exclude by id). F9's night eye is unchanged.
+- Smoke and dust (Object::DrawDecal) take the same lamps and headlights
+  through Engine::ParticleNightLight and FrameLights::ParticleLight,
+  summed in linear light; the classic loop skips those two kinds then.
+- Stars: DrawPoints draws each star as a 5-vertex fan (MakeStarSplat:
+  centre 1.8 times the star's alpha, 0 at a 1.6 px square's corners, a
+  cool-to-warm tint per star at unit luminance) while the stars gate is
+  on, the 2 px bilinear dot otherwise.
+- New Graphics/Remaster/NightLights.{hpp,cpp} (the moon key share, the
+  Night slot, the star splat); the physical model, the aim, the reach and
+  ParticleLight are in Graphics/Rendering/Lighting/FrameLights. The
+  planned padding 68-76 split around slot 71 (litPlanned 68-70,
+  litPlannedLate 72-76).
+
+The switches and their gates: nightLights, moonShadows and stars
+(night track, Night and combat), landed (12/26). nightLights and stars
+run with the night effect above 0.01, nightLights also needs the light
+list switch; moonShadows runs under the moon key (above), and its gate
+also opens the sun shadow gates. Sub-knobs nightLamp 1.0 and nightSpot
+1.0 under nightLights. GPU sections: world (nightLights, stars), shadow
+(moonShadows). Off is the look before this step.
+
+Kept, rewritten and dropped from the prototype (tmp/research/night,
+ovr_v9): kept the moon as the key through the sun slots, the low-beam
+pattern, inverse square from the bulb, Oren-Nayar for local lights, the
+capped lamp ambient and no headlight ambient (v9), star splats, linear
+smoke lighting. Rewritten: the moon key as a pure function on F9's
+calibration (not the prototype's 0.05 and its own chroma), with a fade;
+the camera list replaced by A6's tiles; lamps and spots as kinds of the
+tiled list with a physical reach; the aim from the body with a 1% tilt
+and a softer cut-off (critic fix for hill roads) instead of the ground
+25 m ahead; leaves wrapped as for the sun (critic fix for black crowns);
+no warming of headlights (critic fix for mustard verges); owner
+exclusion by the near fade and the back plane; intensities retuned at
+1080p, scale 1.0 (lamps 1.9 per start metre: the research's 1.2 was
+tuned on lamps the engine read as white before F9b, and the authored
+(0.9, 0.8, 0.6) is 0.63 as bright in linear light; headlights 800: the
+research's 1800 saturated the hot spot and lit the close verge brighter
+than the noon lawn). Dropped: nightHaze and its post pass, nightBounce,
+nightLampWarm, nightCamLights, the debug views, the NIGHT: logs, the
+Purkinje model (F9's night eye is the one model; an exemption of the
+lamps' light from it was tried and turned the town lawn and the verges
+khaki, hue 43 deg, saturation 0.44), the moon/sky fill on particles.
+
+Measured cost (RTX 4060 Ti, 1920x1080, scale 1.0, 4x MSAA, one game,
+three interleaved rounds, 2,790 MHz P0 median, a foreign game in 7 of 38
+sampler rows; GPU frame on minus off by the minimum): moonless road
++0.01 ms (median -0.19), moonlit road +0.28 (moon shadow pass 0.14),
+town lamps +0.19 (median +0.31), town night with fire and moon +0.55
+(median +0.59, shadow pass 0.20). By day the gates hold everything off
+(noon town 6.23 against 6.27 ms). A dev run before the physical reach
+read +1.1 ms on the moonless road with two other games running.
+
+Tests: new test_night_lights.cpp [NightLights], 15 cases: the moon key
+carries the moon only with the sun 3 deg under and a bright moon up and
+fades in; the key light is the sun bit for bit otherwise; the moon key
+moves F9's moon and nothing more; the backend's sun slots, hill azimuth
+and shadow pass follow the key; the moon key takes the stock filter; the
+physical reach and the tiles' binning by it; the low-beam pattern (hot
+band, top edge, spill, back plane); the aim on flat and +-14 deg roads,
+independent of the model's axis; inverse-square falloff, linear colour,
+the near fade, the reach window, other kinds untouched; smoke takes the
+same lights; the Night slot only with its gate and the tiled list; the
+shaders' constants and model are FrameLights.hpp's; the backend aims only
+with the model on; the star splat; the switches and sub-knobs landed.
+test_feature_switches (night gates need the light list, 12/26 landed,
+13 sub-knobs), test_frame_lights (the budget counts the classic kinds),
+test_remaster_lighting (the Night slot at 71, the two paddings). Twenty
+one mutations each turn their case red (the moon key without its sun
+edge or its fade, the moon left in the shadowless term, the moon by day,
+the aim along the model's axis or without the tilt, light behind the
+lamp, the flat disc, the colour not linear, no near fade, the slot on
+without the tiles, the gate without the light list, a drifted shader
+cut-off, Lambert-only leaves, the physical sum inside the clamp, the
+shadow pass from the sun or skipped, no star gain, smoke lit twice, the
+switches not landed, the slot moved). The gate tags of plan section 8
+item 3 plus [NightLights], [FrameLights], [FeatureSwitches],
+[FeatureGates], [PostStages], [TemporalAA], [atmosphere], [SunShadows],
+[TerrainDetail] and [PerfCounters]: 549/549; the full suite has the 6
+known localisation failures only. Build: no new warnings; every touched
+C++ file clang-format clean.
+
+In game (tmp/integration/B3 of the graphics-remaster worktree):
+20261018-082435-before (the base build 706b9a3), 20261018-085655-each
+(this change: eight views, each switch alone on two), timing-test,
+smoke (smoke_abel 1/1; KHR_debug ids 131154, 131169 and 131218 only, no
+shader error, as in the night runs). Off against the base build is
+within the base build's own off-to-on repeat on every view (moonless
+road 22,499 against 22,458 pixels over 2 levels, night vision 0, noon
+town 70,278 against 72,244) except the town with its fire, whose
+difference is all smoke plume, flame and leaf sway (438,162 against
+313,111). Day and night vision: on equals off within the same noise.
+
+Known risks: towns at night are about half as bright as before (the
+lever is nightLamp); moonless country away from the beam is very dark
+(the open night-exposure question); the closest verge in a headlight is
+yellow-beige (hue 41 deg, saturation 0.33, value 196: the grass
+texture's own colour at its noon saturation; the moonless road's verges
+are neutral, saturation 0.05); F9's night eye greys medium-lit lamp
+light, so pools read grey-warm, not amber; the beam is the configured
+rosy white (0.9, 0.8, 0.8); hill roads were checked by unit test only,
+not in game; physical lights skip the classic budget, so a tile with
+many lamps evaluates all of them; lamp light still passes through walls;
+moon glitter on the sea (the water sparkle reads litSun) is untested;
+the first frame of a moon key may sample the previous map with the
+moon's direction (the key fades in from 0 there). NightLights.{hpp,cpp}
+and test_night_lights.cpp are new files to add with the commit.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -1,0 +1,115 @@
+diff --git a/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md b/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md
+index beaf8d4..06021e7 100644
+--- a/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md
++++ b/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md
+@@ -19,6 +19,7 @@ phases marked landed below.
+ | 6 | Landed | Commit bcca80e; gate phase 6 green 2026-10-14 (663 unit cases, 45/45 tri on shadow-67 incl. the slow_air tests, human suite OK). Also in it: the landmass rule (3.1: a ground force never comes from, and a Traffic vehicle never drives to, a base on another landmass; Malden's Southeast Compound is an island and an air-only source). 6A: air in CounterAttack on disk, not committed (CounterAttackAir.cpp; contract in CounterAttackOrders.hpp: CAKStrike, CAKAlarm, `airOrigin`, `strikeZone` / `strikePos`, `alarmZone` / `alarmPos`, CAOpAirborne / CAOpLanded / CAOpStruck / CAOpAlarmAnswered with `zone` and `pos`). Air packages join `DefaultPackages`, offered only where the descriptor authors `forcesTransportHeli` / `forcesAttackHeli` / `forcesJet` (EAST Mi17 / Mi24 / Su25, WEST UH60 / Cobra / A10, @LoBo IDF, Egypt, Syria, Jordan; FIA and the irregulars none); prices 10 / 18 / 22, x1.5 off map; the strike airframes carry nobody. Insertions: abstract on the straight line from `airFrom` (the airfield, else the `forcesOffMapEdge` edge, 1500 m out), born airborne at the first point the altitude gate hides, LZ 300..500 m away from the reported fighters, unload, the cargo becomes the live squad, the airframe home through `AirHome` and refunded once OccupierAir removed it crew first; a landing over 100 m off the LZ re-plans once, then cancels unseen; no LZ or airframe goes on foot. Birth chain step 4: a funded ground operation with no unseen birth point after the next base back is re-planned as an insertion bought from the pool (refunded directly, `airReplanned`). Strikes: abstract on their clock, live as an OccupierAir sortie only while the target is in the bubble, `forcesSortieTime`, limited reveal every 10 s of sightings under 60 s (resistance AI, accuracy 0.5); CAOpStruck once. Alarm answers travel to `alarmPos`, answer once, hold until below RED with no contact for 60 s, then join the garrison. Owner decision applied: aircraft are unseen past the band in 3D even in the view cone (`departTimeout` the backstop). Fixed in OccupierAir: crew leave their seats before deletion, the pad goes after the hull. CounterAttack's vanish and top-up removals now wait for the dead too (`BodiesUnseen`). Air records, `AirHomes` and OccupierAir's records are saved in the CounterAttack block. Tri green: `guerrilla_forces_air_op`, `guerrilla_forces_air_save_reload.seq`. Deviations: no attack helicopter escort for insertions; a live alarm answer adopts its whole squad (no garrisonMax cap on the live path); the descriptor lint checks the `forces*` classes since phase 7A. 6B: director side on disk, not committed. Air buying: the transport helicopter joins every package choice when the catalogue offers it (`airOrigin` = the occupier-held AIRFIELD nearest the target, else -1 and the off-map price through `PackageRequest::airOffMap`). Strikes (7.3): bought only while STRONG, as an add-on right after a director ground launch on an URGENT held town with 3+ reported fighters outside its strike window, or on a base retake / HQ assault (the opener; launched just after the ground order, the jet arrives first), or alone on such a town when no ground package can go; jet or attack helicopter, the cheapest the pool pays, the fastest within `forcesUrgentCostShare` (always urgent); `strikePos` the centroid of the zone's reported positions (D9). Effects on every `CAOpStruck` (`ZoneRegistry::ApplyStrike`): -40 support / -40 standing / +15 heat / `struckUntil` = mission time + 1200 s in a struck CITY, -10 / -10 in every other CITY within 2 km of it (a strike on a base or a position: the ring only), `townStruck` queued (civilians.sqs panics through `GM_fnPanicStart`), `gmZoneStruck` halves the town's income and stops its manpower (economy.sqs). Alarm answers (8.2): any zone the resistance does not hold at RED, one CAKAlarm at a time at the 5 s scan cadence, sources every occupier base but the alarm zone, minimum 4, urgent unless THIN, none when SPENT ("Starved" once), `alarmPos` the latest report. qrf.sqs launches only while `gmLegacyQrf` (key off, sized off, or `legacySave`); the block saves `format` 6, an older block loads as `legacySave`. Deviations: alarm answers take no token and run while DORMANT (8.2 sets their limits; otherwise a key-on campaign has no answer before the second town); wave strikes buy no air opener; the HQ strike aims at `HqPos` when nothing was reported there. |
+ | Rate | On disk, not committed | 2026-10-15, the owner's "a more playable rate" (6.3, 6.5, 7.2, 16). Cadence: `forcesTokenInterval[]` {600, 1050, 1800, 0} (was {1800, 2700, 3600, 0}) and `forcesOpsMaxStrong` 3 (the born cap while STRONG; 2 otherwise), the arithmetic against the pool in 6.3. The base retake minimum: the spare cap (`forcesSpareCap` 1, floor `forcesSpareCapFloor` 6) instead of two-source launches, which CounterAttack's one-record-per-target model does not allow (7.2); the refusal line names the shortfall. The arrival rule: `forcesSlowEta` 900 s, `forcesSlowCostShare` 3.0, `forcesAirEta` 1500 s (6.5). Every old value stays reachable through its key (16). Unit: the `[occupierforces]`, `[packages]`, `[counterattack]` and `[air]` cases; tri: `guerrilla_forces_cadence`, `guerrilla_forces_spare_cap`, `guerrilla_forces_arrival_rule`. Section 5.6's band table and section 10's pacing rows still quote the old cadence; the "cadence at a glance" table in 6.3 supersedes them. |
+ | 7 | Landed | Commit fff2c0b; gate phase 7 green 2026-10-14 (664 unit cases; tri 75/80 on shadow-67 where the five reds are the main-menu lane's --mods-dir .. spawn failures on a tmp shadow and the pre-existing mp_wizard_template_overview, every forces / off-screen / reference / remaster test green; human suite OK). Defaults on (7A: `occupierForces` defaults to 1 in the engine, `OccupierForcesTuning::KeyDefault`; `campaignEnd = 0` missions author 0; the descriptor lint checks the `forces*` keys), the contract rewrite (7B: OFFSCREEN-CONTRACT.md replaced by the reconciled draft with phase 6 folded in; these docs), the fork issue, the roadmap, the PR. |
++| Bases 1 | On disk, not committed | 2026-10-16, round 4 phase 1 E: generated bases step 0 and step 1, zones only (5.7). `BaseGenerate` (the density rule, the scorer, the stored `GeneratedBases` rows), `generateBases` on in Abel and Eden, the detected OUTPOSTs as preferred sites, `countsForWin` and the minor kinds in `CampaignEnd`, `gmGeneratedBases`. Abel gains two OUTPOSTs and closes all seven gaps; Eden gains two and leaves Regina open. Conservation is the interim zero-R stand-in until `OccupierForces::Size` subtracts the generated garrisons from poolStart. Unit `[basegenerate]`; tri `guerrilla_bases_generate_{abel,eden}`, `guerrilla_bases_generate_save.seq`. Props are step 2. |
+ 
+ **Reading guide.**
+ - Section 16 is the internal knob reference.
+@@ -763,6 +764,102 @@ assert it, banked and dropped.
+ 
+ All shares are of poolStart.
+ 
++### 5.7 Generated bases
++
++Step 1 of the generated occupier bases (owner decisions of 2026-10-16; zones
++only, no props: the layouts are step 2). A template opts in with
++`generateBases = 1` in `CfgGuerrillaZones` (engine default 0); Abel and Eden
++do, Sinai waits for its `playRegion[]` (#75), Lebanon80 stays off by design.
++The pure core is `BaseGenerate.{hpp,cpp}` (`GenerateBases`, unit-tested on
++synthetic cell grids); the seeding entry is `ZoneRegistry::GenerateBaseZones`,
++run inside `LoadFromParams` after `SeedCityZones`, so it sees every town and
++the 300 m city dedup never deletes a town a base stands near.
++
++**The density rule** (binding). K is the CITY zones (a seeded label with no
++settlement under it does not count when `seedCities = 1` seeds every label).
++- Coverage: every town has a ground base on its own landmass within 2.5 km,
++  straight line.
++- Redundancy: every landmass that carries towns has at least three ground
++  bases.
++- Total: the occupier's military zones number between ceil(K / 3) and
++  ceil(K / 2), never more than 10. Generation only adds, until coverage,
++  redundancy and the floor hold; the ceiling (and the 64-zone cap) stops it.
++- Spacing: 1.6 km from every occupier base, the Camp, the HQ (the START TOWN
++  pick, `gmSelStartTown`) and the player's start; 300 m from any zone; 500 m
++  from any town.
++- Road: the centre 60 to 250 m from a road that joins the island network (a
++  road component with at least a quarter of the largest one's links), never
++  on a road; a third of the generated bases (rounded up) on a track 400 m or
++  more from the trunk road (a dirt-track model, `RoadModelIsTrack`).
++- Bearing: each town's two nearest sources 60 degrees apart as seen from the
++  town. A scoring term (100 per town fixed or broken, capped at 200 either
++  way); it shapes the choice and never adds a base.
++- Terrain: per 50 m geography cell over the 150 m (3 x 3) footprint: no water,
++  no forest, no `full` cell, slope band under 2 (below 0.10 rise over run);
++  at the centre no road, no hard object, at most one object, 2 m above sea
++  level, and the spawn square's corners (+-25 m) 0.5 m up; inside the play
++  region and 200 m clear of the map edge.
++
++**The choice.** Greedy, one base at a time, against the most urgent open need
++(coverage, then redundancy, then the floor): 1000 per town the site newly
++covers, plus the bearing term, plus up to 300 of quality (flat ground, the
++middle of the road band, spread from the other bases, a seeded jitter of up to
++50), plus 600 for a detected outpost and 600 for a track site while the track
++share is short. The bonuses stay below one town, so they never cost an extra
++base. The #76 detector's OUTPOST candidates (real props on the map) are the
++preferred sites, which reverses the #76 rule that they are never seeded; they
++pass the same rules except the terrain-cell tests, which their props would
++fail. Every generated base is an OUTPOST (garrison and reserve 6, spare 5,
++enough for a town retake); the catalogue's minor kinds (CHECKPOINT and COASTAL
++5, HELIPAD 6) exist for step 3 and are never placed yet. Names follow
++"<nearest town within 2.5 km> Outpost", else "Hill <elevation> Outpost", made
++unique with a number; a detected outpost keeps its detector name. The marker
++is `gmZoneGen_<n>`; the zone is revealed by proximity like an authored one.
++
++**Stored, never re-derived.** The picks come from one seed (the
++`generateBasesSeed` key, else one `GRandGen` draw) at new game and are saved in
++the zone block (`generatedBasesVersion` 1 and the `GeneratedBases` rows: name,
++type, position, garrisonMax, reserve, countsForWin, heading, detected, track,
++the step 2 layout seed). A load re-injects the stored rows before the dynamic
++zone rows overlay them, whatever the key or the scorer say now; a save without
++the marker predates the feature and generates nothing (one INFO line). Within
++one session the decision is also kept across every `LoadFromParams` until
++`Clear`.
++
++**What works with no further code.** A generated base is a zone row like a
++seeded base: `ownerConfig` OCCUPIER, the `seeded` flag, plus `generated` and
++`countsForWin`. GarrisonCache spawns its garrison on hidden points, the
++director sources from it (`CounterAttack::Spare`), a wave may hub at it as
++the strongest base, capture and `occCapture` work by type and owner, Traffic
++counts it as an endpoint. `gmGeneratedBases` lists the rows.
++
++**The win roster.** `CampaignEnd::TakeRoster` takes every authored occupier
++military zone and every generated one whose `countsForWin` holds and whose type
++is not a minor kind (`IsMinorPostType`: CHECKPOINT, COASTAL, HELIPAD, RADAR).
++The minor posts capture, source and alarm like any base but are left out of
++the win (owner decision).
++
++**Conservation (interim).** The owner's rule is that generated garrisons are
++subtracted from poolStart (presence, not strength). Until the pool sizes
++generated bases itself (phase 1 A, `OccupierForces::Size`),
++`CampaignEnd::IsAuthoredOccupier` answers false for a `generated` zone, so the
++pool gives it no share of R: poolStart, waves and the refill stay what the
++authored and seeded bases make them (Abel 60, R 32, K 14), and the generated
++garrisons (12 bodies on Abel) are on top. Side effects until then: the pool's
++roster leaves the generated bases out of control M, the final-stand count and
++the `gmOccupierForces` roster count.
++
++**Step 1 on the shipped templates** (2026-10-16, random seeds). Abel: two
++OUTPOSTs, La Riviere Outpost about [3975, 4775] (south-west, covers six towns)
++and Vigny Outpost about [4175, 7025] (west, on a track); every town within
++2.5 km of a base afterwards, six military zones, the win roster six. Eden:
++two, Le Moule Outpost about [3525, 4925] and Tyrone Outpost about [5425, 9375];
++Regina stays open (no dry, flat, object-free 150 m square in reach: the
++"Regina is open" INFO line counts the refusals), the detected Levie Post
++stands within 60 m of its road, and neither pick is on a track (the share is
++reported short). Tests: `test_base_generate.cpp` (`[basegenerate]`),
++`guerrilla_bases_generate_{abel,eden}`, `guerrilla_bases_generate_save.seq`.
++
+ ## 6. The director
+ 
+ ### 6.1 Intel (D9)

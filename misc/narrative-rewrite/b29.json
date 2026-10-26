@@ -1,0 +1,10 @@
+{
+  "id": "b29",
+  "bank": "kBio2Friendly",
+  "variant": 4,
+  "text": "{Name} worked the family ferry near {Place} until fighting destroyed the boat. Living with their mother afterward, they began learning the recipes the family used for celebrations.",
+  "word_count": 27,
+  "self_review": "A ferry worker loses the family boat in fighting, lives with their mother, and learns to cook for family celebrations.",
+  "source_pattern": "The supplied research documents destroyed or lost livelihoods and survival with family; it does not document this cooking relationship.",
+  "fictional_changes": "The ferry, boat loss, living arrangement, and recipes are plausible inventions. No historical person is claimed as their source."
+}

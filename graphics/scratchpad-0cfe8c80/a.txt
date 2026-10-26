@@ -1,0 +1,2 @@
+constexpr float kShaftFogLengths
+constexpr float kShaftScatterLength

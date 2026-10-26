@@ -1,0 +1,3121 @@
+diff --git a/.github/workflows/lobo-repair.yml b/.github/workflows/lobo-repair.yml
+new file mode 100644
+index 00000000..008f4a30
+--- /dev/null
++++ b/.github/workflows/lobo-repair.yml
+@@ -0,0 +1,36 @@
++name: Lobo offline repairs
++
++on:
++  pull_request:
++    paths:
++      - 'arma_CWR/tools/lobo/repair/**'
++      - 'arma_CWR/tools/lobo/*_lobo.py'
++      - 'arma_CWR/tests/ci/test_lobo_*.py'
++      - '.github/workflows/lobo-repair.yml'
++  push:
++    branches: [main, guerrilla-mode, 'codex/lobo-*']
++    paths:
++      - 'arma_CWR/tools/lobo/repair/**'
++      - 'arma_CWR/tools/lobo/*_lobo.py'
++      - 'arma_CWR/tests/ci/test_lobo_*.py'
++      - '.github/workflows/lobo-repair.yml'
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  synthetic:
++    name: Synthetic repairs (${{ matrix.os }})
++    strategy:
++      matrix:
++        os: [ubuntu-24.04, windows-latest]
++    runs-on: ${{ matrix.os }}
++    timeout-minutes: 5
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++      - name: Verify repairs and transactions without game data
++        run: python -m unittest discover -s arma_CWR/tests/ci -p 'test_lobo_*.py' -v
+diff --git a/arma_CWR/tests/ci/test_lobo_ammo.py b/arma_CWR/tests/ci/test_lobo_ammo.py
+new file mode 100644
+index 00000000..fb703e2b
+--- /dev/null
++++ b/arma_CWR/tests/ci/test_lobo_ammo.py
+@@ -0,0 +1,232 @@
++#!/usr/bin/env python3
++"""Offline behavioral checks for issue #69; fixtures are synthetic, not mod data."""
++from pathlib import Path
++import copy
++import sys
++import unittest
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lobo"))
++from repair import ammo
++from repair.config import class_block, scalar
++
++
++def config(ammunition, weapons=""):
++    return f"class CfgAmmo {{\n{ammunition}\n}};\nclass CfgWeapons {{\n{weapons}\n}};\n"
++
++
++def originals():
++    # Deliberately different formatting and unrelated nested members establish
++    # that the repair follows class/property structure, not global substitutions.
++    bullets = """
++class LoBo_M240Coax { hit=6; };
++class LoBo_50cal { hit=19; };
++class loBo_DTMCoax { hit=7; indirectHit=2; indirectHitRange=1; };
++class loBo_PKCoax { hit=8; indirectHit=2; indirectHitRange=1; };
++class loBo_DShK { hit=19; indirectHit=5; indirectHitRange=1; };
++class loBo_KPVT { hit=20; indirectHit=5; indirectHitRange=1; };
++class LoBo_25AP { hit=75; indirectHit=5; indirectHitRange=1; };
++class LoBo_BMP2_30APFSDS { hit=70; indirectHit=0; indirectHitRange=1; };
++class LoBo_zpu4Bullet { hit=9; indirectHit=2; indirectHitRange=0.2; explosive=0; };
++class LoBo_M61V_20mm { hit=60; indirectHit=30; indirectHitRange=2; };
++class LoBo_M40A1_AIM { explosive=true; };
++class LoBo_105Sabot1 { hit=450; };
++class LoBo_60HVMSHE { hit=255; indirectHit=15; indirectHitRange=30;
++    class Unrelated { indirectHitRange=900; }; };
++class LoBo_C4 { hit=1000; indirectHit=900; indirectHitRange=50; };
++"""
++    ammo_weapons = '''
++class LoBo_105Sabot2 { ammo="LoBo_105Sabot2"; count=30; };
++class lobo_122D25AP { shortNameMagazine="1225mm AP"; displayName="122mm AP"; };
++'''
++    ranges = "minRange=1; minRangeProbab=.8; midRange=50; midRangeProbab=.35; maxRange=109; maxRangeProbab=.08;"
++    weapon_ammo = "\n".join(
++        f"class {name} {{ {ranges} hit=7; audibleFire={noise}; }};"
++        for name, noise in (("LoBo762Bullet", 20), ("LoBo556Bullet", 15), ("LoBo556Bullet_SD", .001))
++    )
++    weapon_classes = '''
++class LoBoM249Mag { ammo="LoBo556Bullet"; };
++class LoBoNegevMag { ammo="LoBo556Bullet"; };
++class LoBoNegevSDMag { ammo="LoBo556Bullet"; };
++class RifleExample { class Single { ammo="LoBo556Bullet"; }; };
++class LoBoMUZIbase { magazines[]={LoBoMUZImag, LoBoMUZIDDmag}; };
++class LoBoMUZIHDmag { count=20; };
++class LoBo_m590base { displayNameMagazine="12 Guage Shells"; shortNameMagazine="12 Guage Shells"; };
++class LoBo_SPAS12base { displayNameMagazine="12 Guage Shells"; shortNameMagazine="12 Guage Shells"; };
++class LoBo_r870base { displayNameMagazine="12 Guage Shells"; shortNameMagazine="12 Guage Shells"; };
++// Intentional historical identifier; not a display-string typo.
++class LoBo12GuageShell { keep=109; };
++'''
++    return {
++        "loboammo/config.cpp": config(bullets, ammo_weapons),
++        "loboweapons/config.cpp": config(weapon_ammo, weapon_classes),
++        "lobo_airammo/config.cpp": config('''
++class LoBo_MK82 { hit=1000; indirectHit=500; indirectHitRange=15; };
++class LoBo_MK82_LDGB { hit=1000; indirectHit=500; indirectHitRange=15; };
++class LoBo_GBU12 { hit=500; indirectHit=150; indirectHitRange=10; laserLock=true; cost=2000; };
++'''),
++        "loboter/config.cpp": config('''
++class LoBo_Carbomb { hit=1000; indirectHit=500; indirectHitRange=50; };
++class loBo_DShK_Ter { hit=19; indirectHit=5; indirectHitRange=1; };
++'''),
++        "loboart/config.cpp": config('''
++class LoBo_120MortarShellHE { hit=230; indirectHit=45; indirectHitRange=8; };
++class LoBo_M160MortarShell { hit=260; indirectHit=45; indirectHitRange=8; };
++'''),
++    }
++
++
++def number(document, name, key):
++    return float(scalar(document, ("CfgAmmo", name), key))
++
++
++def probability(document, name, distance):
++    points = [(number(document, name, key), number(document, name, key+"Probab"))
++              for key in ("minRange", "midRange", "maxRange")]
++    if distance < points[0][0] or distance > points[-1][0]:
++        return 0
++    left, right = points[:2] if distance < points[1][0] else points[1:]
++    fraction = (distance-left[0])/(right[0]-left[0])
++    return left[1] + fraction*(right[1]-left[1])
++
++
++class AmmoRepairTests(unittest.TestCase):
++    def setUp(self):
++        self.original = originals()
++        self.updated = self.original | ammo.repair(self.original)
++
++    def test_missing_m833_projectile_resolves_without_m900_alias(self):
++        doc = self.updated["loboammo/config.cpp"]
++        link = scalar(doc, ("CfgWeapons", "LoBo_105Sabot2"), "ammo").strip('"')
++        class_block(doc, ("CfgAmmo", link))
++        self.assertEqual(number(doc, link, "hit"), 400)
++        self.assertLess(number(doc, link, "hit"), number(doc, "LoBo_105Sabot1", "hit"))
++        self.assertEqual(number(doc, link, "indirectHit"), 0)
++        self.assertIn("class LoBo_105Sabot2: Shell105", doc)
++
++    def test_mg_ranges_and_rifle_roles_diverge_intentionally(self):
++        old, new = (d["loboweapons/config.cpp"] for d in (self.original, self.updated))
++        self.assertEqual(probability(old, "LoBo762Bullet", 300), 0)
++        self.assertAlmostEqual(probability(new, "LoBo762Bullet", 300), .24285714285714288)
++        self.assertAlmostEqual(probability(new, "LoBo556MGBullet", 300), .24285714285714288)
++        self.assertEqual(probability(new, "LoBo556MGBullet", 451), 0)
++        self.assertEqual(probability(new, "LoBo556Bullet", 300), 0)
++        self.assertEqual(number(new, "LoBo556Bullet", "maxRange"), 250)
++        self.assertEqual(number(new, "LoBo556Bullet_SD", "maxRange"), 250)
++        self.assertEqual(number(new, "LoBo556Bullet_SD", "audibleFire"), .001)
++        for name in ("LoBoM249Mag", "LoBoNegevMag"):
++            self.assertEqual(scalar(new, ("CfgWeapons", name), "ammo"), '"LoBo556MGBullet"')
++        self.assertEqual(scalar(new, ("CfgWeapons", "LoBoNegevSDMag"), "ammo"), '"LoBo556Bullet_SD"')
++        self.assertEqual(scalar(new, ("CfgWeapons", "RifleExample", "Single"), "ammo"), '"LoBo556Bullet"')
++
++    def test_ball_ap_bullets_have_no_splash_but_he_keeps_it(self):
++        doc = self.updated["loboammo/config.cpp"]
++        for name in ("LoBo_M240Coax", "LoBo_50cal", "loBo_DTMCoax", "loBo_PKCoax",
++                     "loBo_DShK", "loBo_KPVT", "LoBo_25AP", "LoBo_BMP2_30APFSDS", "LoBo_zpu4Bullet"):
++            for key in ("indirectHit", "indirectHitRange"):
++                self.assertEqual(number(doc, name, key), 0, (name, key))
++        self.assertEqual(number(doc, "LoBo_M61V_20mm", "indirectHit"), 30)
++        self.assertEqual(scalar(doc, ("CfgAmmo", "LoBo_M40A1_AIM"), "explosive"), "true")
++        self.assertEqual(number(doc, "loBo_KPVT", "hit"), 20)
++        self.assertEqual(number(self.updated["loboter/config.cpp"], "loBo_DShK_Ter", "indirectHit"), 0)
++
++    def test_blast_policy_preserves_contact_strength_and_mortar_baseline(self):
++        doc = self.updated["loboammo/config.cpp"]
++        self.assertEqual(number(doc, "LoBo_60HVMSHE", "indirectHitRange"), 4)
++        self.assertEqual(number(doc, "LoBo_60HVMSHE", "hit"), 255)
++        self.assertEqual(number(doc, "LoBo_60HVMSHE", "indirectHit"), 15)
++        self.assertEqual(scalar(doc, ("CfgAmmo", "LoBo_60HVMSHE", "Unrelated"), "indirectHitRange"), "900")
++        self.assertEqual(number(doc, "LoBo_C4", "indirectHitRange"), 10)
++        self.assertEqual(number(doc, "LoBo_C4", "indirectHit"), 900)
++        self.assertEqual(self.updated["loboart/config.cpp"], self.original["loboart/config.cpp"])
++        self.assertEqual(number(self.updated["loboter/config.cpp"], "LoBo_Carbomb", "indirectHitRange"), 10)
++
++    def test_mk82_warhead_equivalence_preserves_guidance(self):
++        doc = self.updated["lobo_airammo/config.cpp"]
++        for key in ("hit", "indirectHit", "indirectHitRange"):
++            self.assertEqual(number(doc, "LoBo_GBU12", key), number(doc, "LoBo_MK82", key))
++            self.assertEqual(number(doc, "LoBo_MK82_LDGB", key), number(doc, "LoBo_MK82", key))
++        self.assertEqual(scalar(doc, ("CfgAmmo", "LoBo_GBU12"), "laserLock"), "true")
++        self.assertEqual(number(doc, "LoBo_GBU12", "cost"), 2000)
++
++    def test_magazine_and_display_typos_preserve_stable_identifiers(self):
++        doc = self.updated["loboweapons/config.cpp"]
++        self.assertNotIn("LoBoMUZIDDmag", doc)
++        self.assertEqual(doc.count('"12 Gauge Shells"'), 6)
++        class_block(doc, ("CfgWeapons", "LoBo12GuageShell"))
++        self.assertEqual(scalar(self.updated["loboammo/config.cpp"],
++                               ("CfgWeapons", "lobo_122D25AP"), "shortNameMagazine"), '"122mm AP"')
++
++    def test_idempotence_and_input_immutability(self):
++        self.assertEqual(self.original, originals())
++        self.assertEqual(ammo.repair(self.updated), {})
++        crlf = {k: v.replace("\n", "\r\n") for k, v in self.original.items()}
++        repaired = crlf | ammo.repair(crlf)
++        self.assertEqual(ammo.repair(repaired), {})
++        for doc in repaired.values():
++            self.assertNotIn("\n", doc.replace("\r\n", ""))
++
++    def test_unknown_modified_values_fail_before_any_mutation(self):
++        cases = [
++            ("loboammo/config.cpp", "indirectHitRange=30", "indirectHitRange=31"),
++            ("loboweapons/config.cpp", "maxRange=109", "maxRange=110"),
++            ("lobo_airammo/config.cpp", "hit=1000", "hit=999"),
++            ("loboart/config.cpp", "indirectHit=45", "indirectHit=46"),
++        ]
++        for key, old, new in cases:
++            documents = copy.deepcopy(self.original)
++            documents[key] = documents[key].replace(old, new, 1)
++            before = copy.deepcopy(documents)
++            with self.assertRaises(ValueError):
++                ammo.repair(documents)
++            self.assertEqual(documents, before)
++        documents = self.updated.copy()
++        documents["loboammo/config.cpp"] = documents["loboammo/config.cpp"].replace("hit=400", "hit=401")
++        with self.assertRaises(ValueError):
++            ammo.repair(documents)
++
++    def test_missing_sources_and_duplicate_classes_fail_closed(self):
++        documents = self.original.copy()
++        del documents["loboart/config.cpp"]
++        with self.assertRaises(ValueError):
++            ammo.repair(documents)
++        documents = self.original.copy()
++        documents["loboammo/config.cpp"] = documents["loboammo/config.cpp"].replace(
++            "class LoBo_C4", "class LoBo_C4 {}; class LoBo_C4", 1)
++        with self.assertRaises(ValueError):
++            ammo.repair(documents)
++
++
++class BlastPolicyTests(unittest.TestCase):
++    def test_plateau_inverse_fourth_curve_cover_and_armor(self):
++        self.assertEqual(ammo.blast_sample(15, 4, 4), 15)
++        self.assertAlmostEqual(ammo.blast_sample(15, 4, 8), 15/16)
++        self.assertAlmostEqual(ammo.blast_sample(15, 4, 10), .384)
++        self.assertAlmostEqual(ammo.blast_sample(900, 10, 20), 56.25)
++        self.assertAlmostEqual(ammo.blast_sample(900, 10, 20, unshielded=.25, armor=10), 1.40625)
++        self.assertEqual(ammo.blast_sample(900, 10, 1, unshielded=0), 0)
++        self.assertEqual(ammo.blast_sample(0, 0, 1), 0)
++
++    def test_comparisons_are_bounded_reductions_and_keep_mortars(self):
++        rows = ammo.blast_comparisons()
++        self.assertEqual(len(rows), 144)
++        for row in rows:
++            self.assertGreaterEqual(row["after"], 0)
++            self.assertLessEqual(row["after"], row["before"])
++            self.assertLessEqual(row["search_radius_after"], 40)
++            if "mortar" in row["family"]:
++                self.assertEqual(row["before"], row["after"])
++            if row["distance"] == 0:
++                self.assertEqual(row["before"], row["after"])
++
++    def test_invalid_scenarios_fail(self):
++        for args in ((1, 1, -1), (1, -1, 1), (-1, 1, 1), (1, 1, float("nan"))):
++            with self.assertRaises(ValueError):
++                ammo.blast_sample(*args)
++        with self.assertRaises(ValueError):
++            ammo.blast_sample(1, 1, 1, armor=0)
++        with self.assertRaises(ValueError):
++            ammo.blast_sample(1, 1, 1, unshielded=1.01)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/arma_CWR/tests/ci/test_lobo_archives.py b/arma_CWR/tests/ci/test_lobo_archives.py
+new file mode 100644
+index 00000000..c907da29
+--- /dev/null
++++ b/arma_CWR/tests/ci/test_lobo_archives.py
+@@ -0,0 +1,303 @@
++"""Archive transaction tests using generated data only; never opens installed LoBo."""
++
++import hashlib
++import json
++from pathlib import Path
++import struct
++import sys
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import patch
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lobo"))
++from repair.pbo import Archive, CPRS, VERS, normalize  # noqa: E402
++import repair_lobo as runner  # noqa: E402
++
++
++def make_pbo(entries, *, properties=(), trailer=None):
++    """Entries are (name, stored bytes, packing, original size, reserved, time)."""
++    header = []
++    if properties:
++        header += [b"\0", struct.pack("<5I", VERS, 0, 0, 0, 0)]
++        for key, value in properties:
++            header += [key + b"\0", value + b"\0"]
++        header.append(b"\0")
++    for name, stored, packing, original, reserved, timestamp in entries:
++        header += [name + b"\0", struct.pack("<5I", packing, original, reserved, timestamp, len(stored))]
++    body = b"".join(header) + bytes(21) + b"".join(entry[1] for entry in entries)
++    return body + (b"\0" + hashlib.sha1(body).digest() if trailer is None else trailer)
++
++
++def sample_pbo(value=b"before"):
++    return make_pbo([
++        (b"Config.cpp", value, 0, 0, 37, 123456),
++        (b"Models\\Compressed.p3d", b"FAKE-COMPRESSED-PAYLOAD", CPRS, 512, 42, 654321),
++        (b"README.txt", b"unmodified asset notes\r\n", 0, 0, 3, 33),
++    ], properties=((b"prefix", b"SyntheticAddon"), (b"author", b"test")))
++
++
++def rule(stems=("first", "second"), *, bad=False):
++    def repair(documents):
++        edits = {}
++        for stem in stems:
++            key = stem + "/config.cpp"
++            if documents[key] not in ("before", "after"):
++                raise ValueError("Unexpected synthetic source")
++            if documents[key] == "before":
++                edits[key] = "after"
++        if bad:
++            edits[stems[0] + "/unknown.sqs"] = "exit"
++        return edits
++    return SimpleNamespace(ADDONS=stems, repair=repair, __name__="synthetic-rule")
++
++
++class ArchivePreservationTests(unittest.TestCase):
++    def test_replacement_preserves_metadata_opaque_payloads_and_properties(self):
++        original = sample_pbo()
++        archive = Archive(original)
++        changed = archive.replace({"config.cpp": b"longer replacement config\r\n"})
++        reread = Archive(changed)
++        self.assertEqual(archive.prefix, reread.prefix)
++        self.assertEqual(archive.terminator, reread.terminator)
++        self.assertEqual([e.name for e in archive.entries], [e.name for e in reread.entries])
++        for key in ("models/compressed.p3d", "readme.txt"):
++            before, after = archive.by_key[key], reread.by_key[key]
++            self.assertEqual(before.fields, after.fields)
++            self.assertEqual(bytes(archive.stored(before)), bytes(reread.stored(after)))
++        patched = reread.by_key["config.cpp"]
++        self.assertEqual((0, 0, 37, 123456, 27), patched.fields)
++        self.assertEqual(b"longer replacement config\r\n", reread.read("Config.cpp"))
++        self.assertEqual(hashlib.sha1(changed[:-21]).digest(), changed[-20:])
++
++    def test_noop_rebuild_is_byte_identical(self):
++        data = sample_pbo()
++        self.assertEqual(data, Archive(data).replace({}))
++
++    def test_opaque_trailer_is_preserved_exactly(self):
++        data = make_pbo([(b"config.cpp", b"before", 0, 0, 1, 2)], trailer=b"Synthetic old packer signature\n")
++        changed = Archive(data).replace({"config.cpp": b"after"})
++        self.assertEqual(Archive(data).trailer, Archive(changed).trailer)
++
++    def test_stuffpbo_tail_is_readable_but_modification_is_rejected(self):
++        # Observed legacy format: unknown two-byte checksum + packer signature.
++        # Do not pretend its checksum is valid after changing a payload.
++        tail = b"\x00\xff\x01StuffPBO V1.0b"
++        self.assertEqual(17, len(tail))
++        data = make_pbo([(b"config.cpp", b"before", 0, 0, 1, 2)], trailer=tail)
++        archive = Archive(data)
++        self.assertTrue(archive.stuffpbo)
++        self.assertEqual(b"before", archive.read("config.cpp"))
++        self.assertEqual(data, archive.replace({}))
++        with self.assertRaisesRegex(ValueError, "StuffPBO checksum rewriting is unsupported"):
++            archive.replace({"config.cpp": b"after"})
++
++    def test_corrupt_sha1_tail_is_rejected(self):
++        data = bytearray(sample_pbo())
++        data[-1] ^= 0x80
++        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
++            Archive(bytes(data))
++
++    def test_empty_property_values_are_valid_and_preserved(self):
++        data = make_pbo([(b"config.cpp", b"before", 0, 0, 1, 2)],
++                        properties=((b"author", b""), (b"prefix", b"Synthetic")))
++        archive = Archive(data)
++        changed = Archive(archive.replace({"config.cpp": b"after"}))
++        self.assertEqual(archive.prefix, changed.prefix)
++        self.assertEqual(b"after", changed.read("config.cpp"))
++
++    def test_modified_compressed_member_becomes_uncompressed_without_other_changes(self):
++        archive = Archive(sample_pbo())
++        changed = Archive(archive.replace({"models/compressed.p3d": b"decoded model"}))
++        entry = changed.by_key["models/compressed.p3d"]
++        self.assertEqual((0, 0, 42, 654321, 13), entry.fields)
++        self.assertEqual(b"decoded model", changed.read("models/compressed.p3d"))
++        self.assertEqual(archive.read("config.cpp"), changed.read("config.cpp"))
++
++    def test_compressed_read_requires_decoder_and_matching_size(self):
++        archive = Archive(sample_pbo())
++        temporary = tempfile.TemporaryDirectory(prefix="lobo-compressed-test-")
++        self.addCleanup(temporary.cleanup)
++        path = Path(temporary.name) / "fake.pbo"
++        path.write_bytes(archive.data)
++        with self.assertRaisesRegex(ValueError, "needs PoseidonTools"):
++            archive.read("models/compressed.p3d")
++        fake = SimpleNamespace(returncode=0, stdout=b"x" * 512, stderr=b"")
++        with patch("repair.pbo.subprocess.run", return_value=fake) as run:
++            self.assertEqual(b"x" * 512, archive.read("models/compressed.p3d", path, Path("tool.exe")))
++            self.assertEqual("pbo", run.call_args.args[0][1])
++            self.assertNotIn("shell", run.call_args.kwargs)
++        with patch("repair.pbo.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=b"short", stderr=b"")):
++            with self.assertRaisesRegex(ValueError, "size mismatch"):
++                archive.read("models/compressed.p3d", path, Path("tool.exe"))
++        with patch("repair.pbo.subprocess.run", return_value=SimpleNamespace(returncode=3, stdout=b"", stderr=b"bad stream")):
++            with self.assertRaisesRegex(ValueError, "Cannot decode"):
++                archive.read("models/compressed.p3d", path, Path("tool.exe"))
++
++    def test_compressed_read_rejects_concurrent_archive_edit(self):
++        temporary = tempfile.TemporaryDirectory(prefix="lobo-compressed-test-")
++        self.addCleanup(temporary.cleanup)
++        path = Path(temporary.name) / "fake.pbo"
++        original = sample_pbo()
++        path.write_bytes(original)
++        def concurrent_decoder(*args, **kwargs):
++            path.write_bytes(sample_pbo(b"concurrent config"))
++            return SimpleNamespace(returncode=0, stdout=b"x" * 512, stderr=b"")
++        with patch("repair.pbo.subprocess.run", side_effect=concurrent_decoder):
++            with self.assertRaisesRegex(ValueError, "changed during compressed read"):
++                Archive(original).read("models/compressed.p3d", path, Path("tool.exe"))
++
++    def test_short_checksum_trailer_rejected(self):
++        data = sample_pbo()
++        with self.assertRaises(ValueError):
++            Archive(data[:-1])
++
++    def test_unknown_or_nonbyte_replacements_rejected(self):
++        archive = Archive(sample_pbo())
++        with self.assertRaises(ValueError):
++            archive.replace({"missing.cpp": b"data"})
++        with self.assertRaises(TypeError):
++            archive.replace({"config.cpp": "not bytes"})
++
++    def test_duplicate_replacement_aliases_rejected(self):
++        with self.assertRaises(ValueError):
++            Archive(sample_pbo()).replace({"Config.cpp": b"one", "config.cpp": b"two"})
++
++    def test_duplicate_archive_entries_rejected(self):
++        for names in ((b"config.cpp", b"CONFIG.CPP"), (b"a\\b.txt", b"a/b.txt")):
++            data = make_pbo([(name, b"x", 0, 0, 0, 0) for name in names])
++            with self.subTest(names=names), self.assertRaisesRegex(ValueError, "Duplicate"):
++                Archive(data)
++
++    def test_unsafe_and_ambiguous_paths_rejected(self):
++        for name in ("../config.cpp", "/config.cpp", "C:/config.cpp", "a/./b", "a/../b", "a//b", "a/"):
++            with self.subTest(name=name), self.assertRaises(ValueError):
++                Archive(make_pbo([(name.encode(), b"x", 0, 0, 0, 0)]))
++        self.assertEqual("a/b.txt", normalize("A\\B.TXT"))
++
++    def test_truncated_headers_properties_and_payloads_rejected(self):
++        malformed = [b"no nul", b"name\0" + bytes(19), b"\0" + struct.pack("<5I", VERS, 0, 0, 0, 0) + b"prefix\0unterminated"]
++        data = make_pbo([(b"config.cpp", b"payload", 0, 0, 0, 0)], trailer=b"")
++        malformed.append(data[:-1])
++        for data in malformed:
++            with self.subTest(data=data[:30]), self.assertRaises(ValueError):
++                Archive(data)
++
++
++class RepairTransactionTests(unittest.TestCase):
++    def setUp(self):
++        self.temporary = tempfile.TemporaryDirectory(prefix="lobo-archive-test-")
++        self.addCleanup(self.temporary.cleanup)
++        self.mod = Path(self.temporary.name) / "synthetic-mod"
++        self.addons = self.mod / "addons"
++        self.addons.mkdir(parents=True)
++        self.original = {}
++        for stem in ("first", "second"):
++            raw = sample_pbo()
++            (self.addons / (stem + ".pbo")).write_bytes(raw)
++            self.original[stem] = raw
++        self.rules = patch.object(runner, "modules", return_value=[rule()])
++        self.rules.start()
++        self.addCleanup(self.rules.stop)
++
++    def plan(self):
++        return runner.plan(self.mod, None)
++
++    def installed(self):
++        return {stem: (self.addons / (stem + ".pbo")).read_bytes() for stem in self.original}
++
++    def test_plan_does_not_write_and_apply_has_verified_original_backups(self):
++        paths, hashes, changed, records, documents = self.plan()
++        self.assertEqual(self.original, self.installed())
++        self.assertFalse((self.mod / ".ud-backups").exists())
++        self.assertEqual(2, len(changed))
++        manifest_path = runner.apply(self.mod, paths, hashes, changed, records)
++        manifest = json.loads(manifest_path.read_text())
++        self.assertEqual("applied", manifest["state"])
++        self.assertEqual(2, len(manifest["archives"]))
++        for stem, raw in self.original.items():
++            self.assertEqual(raw, (manifest_path.parent / (stem + ".pbo")).read_bytes())
++            self.assertEqual(b"after", Archive(self.installed()[stem]).read("config.cpp"))
++        next_plan = self.plan()
++        self.assertEqual({}, next_plan[2])
++        self.assertIsNone(runner.apply(self.mod, *next_plan[:4]))
++
++    def test_unknown_source_fails_before_any_archive_write(self):
++        (self.addons / "second.pbo").write_bytes(sample_pbo(b"unrecognized"))
++        before = self.installed()
++        with self.assertRaisesRegex(ValueError, "Unexpected synthetic source"):
++            self.plan()
++        self.assertEqual(before, self.installed())
++        self.assertFalse((self.mod / ".ud-backups").exists())
++
++    def test_unknown_rule_member_and_nonidempotent_rule_rejected(self):
++        with patch.object(runner, "modules", return_value=[rule(bad=True)]):
++            with self.assertRaisesRegex(ValueError, "unknown text member"):
++                self.plan()
++        toggle = SimpleNamespace(ADDONS=("first",), __name__="toggle", repair=lambda docs: {"first/config.cpp": "after" if docs["first/config.cpp"] == "before" else "before"})
++        with patch.object(runner, "modules", return_value=[toggle]):
++            with self.assertRaisesRegex(ValueError, "Non-idempotent"):
++                self.plan()
++        self.assertEqual(self.original, self.installed())
++
++    def test_requested_profile_reaches_initial_and_fixed_point_script_pass(self):
++        observed = []
++        def repair(documents, compatibility="ud"):
++            observed.append(compatibility)
++            key = "first/config.cpp"
++            return {key: compatibility} if documents[key] != compatibility else {}
++        module = SimpleNamespace(ADDONS=("first",), __name__="repair.scripts", repair=repair)
++        with patch.object(runner, "modules", return_value=[module]):
++            plan = runner.plan(self.mod, None, compatibility="classic")
++        self.assertEqual(["classic", "classic"], observed)
++        self.assertEqual({"first/config.cpp": b"classic"}, plan[2])
++        manifest_path = runner.apply(self.mod, *plan[:4], compatibility="classic")
++        self.assertEqual("classic", json.loads(manifest_path.read_text())["compatibility"])
++
++    def test_archive_changed_after_preflight_is_rejected(self):
++        paths, hashes, changed, records, _ = self.plan()
++        external = sample_pbo(b"external change")
++        (self.addons / "second.pbo").write_bytes(external)
++        with self.assertRaisesRegex(ValueError, "changed since preflight"):
++            runner.apply(self.mod, paths, hashes, changed, records)
++        self.assertEqual(self.original["first"], self.installed()["first"])
++        self.assertEqual(external, self.installed()["second"])
++        self.assertFalse((self.mod / ".ud-backups").exists())
++
++    def test_failure_during_second_replacement_rolls_back_first(self):
++        paths, hashes, changed, records, _ = self.plan()
++        original_replace = Path.replace
++        def fail_second(source, target):
++            if source.name == "second.pbo" and source.parent != self.addons:
++                raise OSError("simulated replace failure")
++            return original_replace(source, target)
++        with patch.object(Path, "replace", fail_second):
++            with self.assertRaisesRegex(OSError, "simulated replace failure"):
++                runner.apply(self.mod, paths, hashes, changed, records)
++        self.assertEqual(self.original, self.installed())
++        manifests = list((self.mod / ".ud-backups").rglob("manifest.json"))
++        self.assertEqual(1, len(manifests))
++        self.assertEqual("rolled-back", json.loads(manifests[0].read_text())["state"])
++
++    def test_rollback_never_overwrites_a_later_concurrent_edit(self):
++        paths, hashes, changed, records, _ = self.plan()
++        original_replace = Path.replace
++        external = sample_pbo(b"external edit after first replacement")
++        def fail_with_concurrent_edit(source, target):
++            if source.name == "second.pbo" and source.parent != self.addons:
++                (self.addons / "first.pbo").write_bytes(external)
++                raise OSError("second replacement blocked")
++            return original_replace(source, target)
++        with patch.object(Path, "replace", fail_with_concurrent_edit):
++            with self.assertRaises((OSError, ValueError)):
++                runner.apply(self.mod, paths, hashes, changed, records)
++        self.assertEqual(external, self.installed()["first"])
++        self.assertEqual(self.original["second"], self.installed()["second"])
++        manifests = list((self.mod / ".ud-backups").rglob("manifest.json"))
++        self.assertEqual(1, len(manifests))
++        self.assertNotEqual("rolled-back", json.loads(manifests[0].read_text())["state"])
++        self.assertEqual(self.original["first"], (manifests[0].parent / "first.pbo").read_bytes())
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/arma_CWR/tests/ci/test_lobo_config_audit.py b/arma_CWR/tests/ci/test_lobo_config_audit.py
+new file mode 100644
+index 00000000..29aef4c7
+--- /dev/null
++++ b/arma_CWR/tests/ci/test_lobo_config_audit.py
+@@ -0,0 +1,186 @@
++#!/usr/bin/env python3
++"""Config repair/audit regressions using original synthetic legacy source."""
++from pathlib import Path
++import sys
++import unittest
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools' / 'lobo'))
++from repair.config import class_block, class_spans, scalar, set_scalar
++from repair.audit import assignments, audit, config_references, script_candidates
++
++
++class ConfigStructureTests(unittest.TestCase):
++    def test_comments_strings_and_array_braces_cannot_create_classes(self):
++        source = '''
++// class FakeLine { bad={}; };
++/* class FakeBlock { } }; */
++class Root {
++    description="a } class FakeString { ""quoted"" // text";
++    values[]={{1,2},{"}","class ArrayFake {"}};
++    class Actual: Parent { name="C:\\models\\thing"; };
++};
++'''
++        self.assertEqual([n for n, _, _ in class_spans(source)], ['Root'])
++        a, b = class_block(source, ('root',))
++        self.assertEqual([n for n, _, _ in class_spans(source[a:b])], ['Actual'])
++        self.assertEqual(scalar(source, ('ROOT', 'actual'), 'name'), '"C:\\models\\thing"')
++        self.assertEqual(scalar(source, ('Root',), 'description'),
++                         '"a } class FakeString { ""quoted"" // text"')
++
++    def test_scoped_edits_preserve_nested_arrays_comments_and_strings(self):
++        source = '''class Root {
++    hit=1; // hit=900;
++    message="hit=800; { }";
++    matrix[]={{1,2},{3,4}};
++    class Inner { hit=2; };
++}; class Other { hit=3; };'''
++        result = set_scalar(source, ('Root',), 'hit', '7')
++        self.assertEqual(result, source.replace('hit=1;', 'hit=7;', 1))
++        self.assertEqual(scalar(result, ('Root', 'Inner'), 'hit'), '2')
++        self.assertEqual(scalar(result, ('Other',), 'hit'), '3')
++        nested = set_scalar(result, ('Root', 'Inner'), 'hit', '8')
++        self.assertEqual(scalar(nested, ('Root',), 'hit'), '7')
++        self.assertEqual(scalar(nested, ('Root', 'Inner'), 'hit'), '8')
++
++    def test_appended_property_is_direct_and_retains_crlf(self):
++        source = 'class Root {\r\n class Inner { added=1; };\r\n};\r\n'
++        result = set_scalar(source, ('Root',), 'added', '2')
++        self.assertEqual(scalar(result, ('Root',), 'added'), '2')
++        self.assertEqual(scalar(result, ('Root', 'Inner'), 'added'), '1')
++        self.assertNotIn('\n', result.replace('\r\n', ''))
++        self.assertEqual(set_scalar(result, ('Root',), 'added', '2'), result)
++
++    def test_forward_declarations_do_not_shadow_complete_definitions(self):
++        source = 'class Root; class Root { class Child; class Child { hit=1; }; };'
++        self.assertEqual(scalar(source, ('Root', 'Child'), 'hit'), '1')
++
++    def test_case_insensitive_duplicate_classes_are_ambiguous(self):
++        source = 'class Root {class Child {hit=1;}; class child {hit=2;};};'
++        with self.assertRaises(ValueError):
++            class_block(source, ('Root', 'Child'))
++        with self.assertRaises(ValueError):
++            set_scalar(source, ('Root', 'Child'), 'hit', '3')
++
++    def test_duplicate_direct_properties_fail_with_or_without_semicolons(self):
++        for separator in (';', '\n', '\r\n'):
++            source = 'class Root { hit=1' + separator + 'hit=2\n};'
++            with self.subTest(separator=separator), self.assertRaises(ValueError):
++                scalar(source, ('Root',), 'hit')
++        self.assertEqual(scalar('class R {hit=1;class N {hit=2;};};', ('R',), 'hit'), '1')
++
++    def test_legacy_newline_assignments_remain_independent(self):
++        source = 'class Root {\n hit=1\n range=2\n radius=3\n};'
++        for key, expected in [('hit', '1'), ('range', '2'), ('radius', '3')]:
++            self.assertEqual(scalar(source, ('Root',), key), expected)
++        result = set_scalar(source, ('Root',), 'range', '9')
++        self.assertEqual(result, source.replace('range=2', 'range=9'))
++
++    def test_multiline_expression_is_not_truncated_to_first_literal(self):
++        for expression in ('1 /* continued\ncomment */ + 2', '(1 +\n2)', '1 +\n2'):
++            source = 'class Root { hit=' + expression + '; other=9; };'
++            self.assertEqual(scalar(source, ('Root',), 'hit'), expression)
++            changed = set_scalar(source, ('Root',), 'hit', '4')
++            self.assertEqual(changed, 'class Root { hit=4; other=9; };')
++
++    def test_malformed_structure_or_lexical_state_is_rejected(self):
++        for source in ('class Root {', 'class Root {}; };',
++                       'class Root { name="unfinished; };',
++                       'class Root {}; /* unfinished class Ghost {}'):
++            with self.subTest(source=source), self.assertRaises(ValueError):
++                class_spans(source)
++
++
++class ReferenceAuditTests(unittest.TestCase):
++    def test_newline_assignments_do_not_skip_alternating_references(self):
++        body = ('ammo=LoBo_MissingAmmo\ncrew=LoBo_MissingCrew\n'
++                'magazines[]={LoBo_MissingMagazine}\nweapons[]={LoBo_MissingWeapon}')
++        self.assertEqual([key for key, _ in assignments(body)],
++                         ['ammo', 'crew', 'magazines', 'weapons'])
++        documents = {'sample/config.cpp': 'class CfgWeapons { class LoBo_Test {' + body + '};};'}
++        problems = config_references(documents)
++        self.assertEqual({p['reference'] for p in problems}, {
++            'LoBo_MissingAmmo', 'LoBo_MissingCrew', 'LoBo_MissingMagazine', 'LoBo_MissingWeapon'})
++
++    def test_multiline_nested_arrays_preserve_every_member(self):
++        body = '''weapons[]={
++            LoBo_A,
++            {LoBo_B, LoBo_C},
++            "LoBo_D"
++        };
++        magazines[]={LoBo_E};'''
++        self.assertEqual(list(assignments(body)), [
++            ('weapons', ['LoBo_A', 'LoBo_B', 'LoBo_C', 'LoBo_D']),
++            ('magazines', ['LoBo_E']),
++        ])
++
++    def test_cross_file_case_insensitive_resolution_and_nested_fire_modes(self):
++        documents = {
++            'ammo/config.cpp': 'class CfgAmmo { class LoBo_Round {}; };',
++            'weapons/config.cpp': '''class CfgWeapons {
++                class LoBo_Mag { ammo="lObO_rOuNd"; };
++                class LoBo_Rifle {
++                    magazines[]={LoBo_Mag};
++                    class Single { ammo=LOBO_ROUND; };
++                };
++            };''',
++            'units/config.cpp': '''class CfgVehicles {
++                class LoBo_Crew {};
++                class LoBo_Vehicle {crew=LoBo_Crew;weapons[]={LoBo_Rifle};magazines[]={LoBo_Mag};};
++            };''',
++        }
++        self.assertEqual(config_references(documents), [])
++        self.assertTrue(audit(documents)['coverage_complete'])
++        documents['weapons/config.cpp'] = documents['weapons/config.cpp'].replace(
++            'ammo=LOBO_ROUND;', 'ammo=LoBo_MissingMode;')
++        result = config_references(documents)
++        self.assertEqual(len(result), 1)
++        self.assertEqual(result[0]['reference'], 'LoBo_MissingMode')
++
++    def test_comments_and_event_text_are_not_references(self):
++        documents = {'sample/config.cpp': '''class CfgWeapons {
++            class LoBo_Test {
++                // ammo=LoBo_Comment;
++                /* magazines[]={LoBo_OtherComment}; */
++                event="ammo=LoBo_String; weapons[]={LoBo_Fake};";
++                class Mode { ammo=LoBo_RealMissing; };
++            };
++        };'''}
++        result = config_references(documents)
++        self.assertEqual([p['reference'] for p in result], ['LoBo_RealMissing'])
++
++    def test_scope_namespace_matters_and_external_base_names_are_not_flagged(self):
++        documents = {'sample/config.cpp': '''class CfgVehicles { class LoBo_Round {}; };
++            class CfgWeapons { class LoBo_Test {ammo=LoBo_Round;weapons[]={M16};};};'''}
++        result = config_references(documents)
++        self.assertEqual(len(result), 1)
++        self.assertEqual(result[0]['property'], 'ammo')
++        self.assertEqual(result[0]['reference'], 'LoBo_Round')
++
++    def test_truncated_addon_reports_incomplete_coverage_without_aborting_others(self):
++        # Same defect family as two installed configs that omit their final
++        # CfgVehicles close. Never invent source braces during an audit.
++        documents = {
++            'broken/config.cpp': 'class CfgVehicles { class LoBo_Unit {};',
++            'good/config.cpp': 'class CfgWeapons {class LoBo_Test {ammo=LoBo_Missing;};};',
++        }
++        result = audit(documents)
++        self.assertFalse(result['coverage_complete'])
++        self.assertIn('broken/config.cpp', result['unparsed_configs'])
++        candidates = [p for p in result['candidates'] if p['kind'] == 'unsupported_parse']
++        self.assertEqual([p['file'] for p in candidates], ['broken/config.cpp'])
++        records = result['errors'] + result['candidates']
++        self.assertTrue(any(p.get('reference') == 'LoBo_Missing' for p in records))
++        self.assertIn('coverage', result['note'].lower())
++
++    def test_script_candidates_are_labeled_as_heuristics(self):
++        text = '; goto "commented"\n#launch\ngoto "launch"\ngoto "Exit"\ncall _AI\n'
++        result = script_candidates('a/test.sqs', text)
++        self.assertFalse(any(p.get('label') == 'commented' for p in result))
++        self.assertFalse(any(p.get('label') == 'launch' for p in result))
++        terminal = next(p for p in result if p.get('label') == 'Exit')
++        self.assertTrue(terminal['terminal_spelling'])
++        self.assertTrue(any(p['kind'] == 'uninitialized_local_call_candidate' for p in result))
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/arma_CWR/tests/ci/test_lobo_models.py b/arma_CWR/tests/ci/test_lobo_models.py
+new file mode 100644
+index 00000000..7eb4bc38
+--- /dev/null
++++ b/arma_CWR/tests/ci/test_lobo_models.py
+@@ -0,0 +1,187 @@
++"""No-game tests for LoBo model repair, using only synthetic redistributable data."""
++from pathlib import Path
++import struct
++import sys
++import unittest
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools' / 'lobo'))
++from repair import models
++from repair.config import class_block, class_spans, scalar
++
++
++def tag(name, payload):
++    return struct.pack('<64sI', name.encode('ascii'), len(payload)) + payload
++
++
++def lod(resolution, selections, *, points=4, faces=1):
++    # The intentionally opaque geometry is never decoded or altered by repairs.
++    geometry = bytes(range(16)) * points + b'F' * (104 * faces)
++    return (struct.pack('<4s6i', b'SP3X', 28, 153, points, 0, faces, 0) + geometry + b'TAGG'
++            + b''.join(tag(name, payload) for name, payload in selections)
++            + tag('#Property#', b'opaque property bytes') + tag('#EndOfFile#', b'')
++            + struct.pack('<f', resolution))
++
++
++def model(*lods):
++    return struct.pack('<4sII', b'MLOD', 257, len(lods)) + b''.join(lods)
++
++
++def part(name, armor, material, selection):
++    return f'class {name} {{armor={armor};material={material};name={selection};passThrough=1;}};'
++
++
++def m1_config():
++    standard = [part('HitEngine', '.8', 60, 'engine'), part('HitHull', '.8', 50, 'hull'),
++                part('HitTurret', '.8', 51, 'turet'), part('HitGun', '6', 52, 'gun'),
++                part('HitLTrack', '.6', 53, 'pasL'), part('HitRTrack', '.6', 54, 'pasP')]
++    zones = [(side + 'Hull', armor, 50, side + 'hull')
++             for side, armor in [('F', '1.6'), ('B', '0.6'), ('R', '1.25'), ('L', '1.25')]]
++    zones += [(side + 'Turret', armor, 51, side + 'turet')
++              for side, armor in [('F', '1.5'), ('B', '0.7'), ('L', '1.25'), ('R', '1.25'), ('T', '0.5')]]
++    body = ['armor=900;', 'armorStructural=15;'] + standard
++    body += [part('Hit' + name, armor, material, selection) for name, armor, material, selection in zones]
++    body += [f'armor{name}={armor};' for name, armor, _, _ in zones]
++    body += ['weapons[]={testgun};']
++    return 'class CfgVehicles {class LoBo_M1 {\n' + '\n'.join(body) + '\n};};'
++
++
++def merkava_class(name, front, properties):
++    body = []
++    if front is not None:
++        body = [part('HitHull', '0.80', 50, 'hull'),
++                part('HitTurretFront', '1.25', 51, 'turetf'),
++                part('HitFHull', front, 50, 'fhull'),
++                part('HitTurretTop', '1', 51, 'turett'),
++                part('HitTurretBack', '0.80', 51, 'turetb')]
++    body += [f'{key}={value};' for key, value in zip(
++        ['armorFHull', 'armorTurretTop', 'armorTurretBack', 'armorTurretFront'], properties)]
++    return f'class {name} {{\n' + '\n'.join(body) + '\n};'
++
++
++class SelectionUnionTests(unittest.TestCase):
++    def setUp(self):
++        self.sources = [('front', b'\x01\x80\x00\x00\x01'), ('back', b'\x00\x01\x01\x00\x00')]
++        self.original = model(lod(1, self.sources), lod(5e15, self.sources), lod(7e15, self.sources))
++        self.unions = {'ud_turret': ('front', 'back')}
++
++    def test_union_is_unique_and_only_hitpoint_lod_changes(self):
++        fixed = models.add_hitpoint_unions(self.original, self.unions)
++        before, after = models._lods(self.original), models._lods(fixed)
++        self.assertEqual(after[1].selections['ud_turret'], b'\x01\x80\x01\x00\x01')
++        self.assertEqual(len(after[1].selections), len(before[1].selections) + 1)
++        for i in [0, 2]:
++            self.assertEqual(self.original[before[i].start:before[i].end], fixed[after[i].start:after[i].end])
++        # Removing precisely the appended tag recovers every original byte.
++        insertion = len(fixed) - len(self.original)
++        self.assertEqual(fixed[:before[1].end_tag] + fixed[before[1].end_tag+insertion:], self.original)
++        self.assertEqual(models.add_hitpoint_unions(fixed, self.unions), fixed)
++
++    def test_preserves_verified_legacy_trailer(self):
++        trailer = b'data\\\0' + bytes(range(26))
++        fixed = models.add_hitpoint_unions(self.original + trailer, self.unions)
++        self.assertEqual(fixed[-32:], trailer)
++
++    def test_existing_hull_name_and_all_other_bytes_survive_union(self):
++        original = model(lod(5e15, [('Hull', self.sources[0][1]), ('FHull', self.sources[1][1])]))
++        fixed = models.add_hitpoint_unions(original, {'hull': ('Hull', 'FHull')})
++        old, new = models._lods(original)[0], models._lods(fixed)[0]
++        self.assertEqual(list(old.selections), list(new.selections))
++        self.assertEqual(new.selections['hull'], b'\x01\x80\x01\x00\x01')
++        offset = old.payload_offsets['hull']
++        self.assertEqual(original[:offset], fixed[:offset])
++        self.assertEqual(original[offset+5:], fixed[offset+5:])
++        self.assertEqual(models.add_hitpoint_unions(fixed, {'hull': ('Hull', 'FHull')}), fixed)
++
++    def test_missing_empty_duplicate_and_conflicting_selections_fail(self):
++        for sources in [self.sources[:1], [('front', b'\0'*5), self.sources[1]],
++                        self.sources + [('Front', self.sources[0][1])],
++                        self.sources + [('ud_turret', b'\1'*5)]]:
++            with self.subTest(sources=sources), self.assertRaises(ValueError):
++                models.add_hitpoint_unions(model(lod(5e15, sources)), self.unions)
++
++    def test_wrong_lod_cannot_satisfy_selection_reference(self):
++        source = model(lod(1, self.sources), lod(5e15, self.sources[:1]))
++        with self.assertRaises(ValueError):
++            models.add_hitpoint_unions(source, self.unions)
++
++    def test_malformed_inputs_fail_closed(self):
++        cases = [b'ODOL' + self.original[4:], self.original[:25], self.original[:-1],
++                 self.original + b'unknown trailer', model(lod(1, self.sources)),
++                 model(lod(5e15, self.sources), lod(5e15, self.sources))]
++        # A hostile count must not drive allocations or skip beyond input.
++        hostile = bytearray(self.original)
++        struct.pack_into('<i', hostile, 24, 2_000_000_000)
++        cases.append(bytes(hostile))
++        for data in cases:
++            with self.subTest(size=len(data)), self.assertRaises(ValueError):
++                models.add_hitpoint_unions(data, self.unions)
++
++    def test_does_not_touch_unlisted_model_members(self):
++        self.assertEqual(models.repair_models({'other/model.p3d': self.original}), {})
++
++
++class ConfigTests(unittest.TestCase):
++    def test_diver_roles_identifiers_and_loadouts_survive(self):
++        source = r'''class CfgVehicles {
++            class CoC_Diverdes {model="\seals\KMMwood.p3d";displayName="CQB";weapons[]={CQB};};
++            class CoC_DiverSaboteurj {model="\seals\KMMwood1.p3d";displayName="Jungle Demolition";magazines[]={pipebomb};};
++        };'''
++        key = 'coc_diver/config.cpp'
++        fixed = models.repair({key: source})[key]
++        for name in ['CoC_Diverdes', 'CoC_DiverSaboteurj']:
++            self.assertEqual(scalar(fixed, ('CfgVehicles', name), 'model'), r'"\CoC_Diver\CoC_Diver.p3d"')
++        self.assertIn('displayName="Jungle Demolition";magazines[]={pipebomb}', fixed)
++        self.assertIn('displayName="CQB";weapons[]={CQB}', fixed)
++        self.assertEqual(models.repair({key: fixed}), {})
++        with self.assertRaises(ValueError):
++            models.repair({key: source.replace('KMMwood.p3d', 'unexpected.p3d')})
++
++    def test_m1_uses_six_registered_counters_and_verified_bindings(self):
++        key = 'lobo_m1/config.cpp'
++        source = m1_config()
++        fixed = models.repair({key: source})[key]
++        a, b = class_block(fixed, ('CfgVehicles', 'LoBo_M1'))
++        self.assertEqual({n.lower() for n, _, _ in class_spans(fixed[a:b])}, models._SUPPORTED)
++        for component, expected in [('HitHull', 'hull'), ('HitTurret', 'turet'),
++                                    ('HitLTrack', 'pasL'), ('HitRTrack', 'pasP')]:
++            self.assertEqual(scalar(fixed, ('CfgVehicles', 'LoBo_M1', component), 'name'), expected)
++        for preserved in ['armor=900;', 'armorStructural=15;', 'weapons[]={testgun};', 'armor=.6;', 'armor=.8;']:
++            self.assertIn(preserved, fixed)
++        self.assertNotIn('armorFHull', fixed)
++        self.assertEqual(models.repair({key: fixed}), {})
++
++    def test_unknown_authoring_and_mixed_state_fail(self):
++        key = 'lobo_m1/config.cpp'
++        source = m1_config()
++        cases = [source.replace('armorFHull=1.6;', 'armorFHull=3;'),
++                 source.replace('name=Fhull;', 'name=other;'),
++                 source.replace('class HitFHull', 'class OtherHit'),
++                 source.replace('class HitFHull', 'class HitFHullExtra'),
++                 source.replace('armor=1.6;', 'armor=1.6; customProtection=1;')]
++        for text in cases:
++            with self.subTest(source=text[:50]), self.assertRaises(ValueError):
++                models.repair({key: text})
++
++    def test_merkava_inheritance_uses_each_models_actual_selections(self):
++        docs = {
++            'lobomerkava2/config.cpp': 'class CfgVehicles {' +
++                merkava_class('LoBoMerkava1', '1.0', ['1.0', '0.7', '0.75', '1.0']) +
++                merkava_class('LoBoMerkava2', '1.25', ['1.5', '0.7', '0.75', '1.5']) +
++                merkava_class('LoBoMerkava2C', None, ['1.5', '2', '0.75', '1.5']) + '};',
++            'lobomerkava4/config.cpp': 'class CfgVehicles {' +
++                merkava_class('LoBoMerkava4DT', '1.25', ['1.5', '1.5', '1.5', '1.5']) + '};',
++        }
++        fixed = models.repair(docs)
++        for key, name, selection in [('lobomerkava2/config.cpp', 'LoBoMerkava1', 'turet'),
++                                      ('lobomerkava2/config.cpp', 'LoBoMerkava2', 'turet'),
++                                      ('lobomerkava4/config.cpp', 'LoBoMerkava4DT', 'turet')]:
++            path = ('CfgVehicles', name, 'HitTurret')
++            self.assertEqual(scalar(fixed[key], path, 'name'), selection)
++            self.assertEqual(scalar(fixed[key], path, 'armor'), '1')
++            self.assertNotIn('class HitTurretFront', fixed[key])
++            self.assertNotIn('armorTurretFront=', fixed[key])
++        self.assertEqual(models.repair(fixed), {})
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/arma_CWR/tests/ci/test_lobo_scripts.py b/arma_CWR/tests/ci/test_lobo_scripts.py
+new file mode 100644
+index 00000000..0212fada
+--- /dev/null
++++ b/arma_CWR/tests/ci/test_lobo_scripts.py
+@@ -0,0 +1,225 @@
++"""No-game regression tests; fixtures are synthetic, not distributed mod data."""
++
++from pathlib import Path
++import re
++import sys
++import unittest
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lobo"))
++from repair import scripts  # noqa: E402
++
++
++def missile_fixture(path=""):
++    branches = ""
++    if path in ("lobomig/scripts/firemissiles_ic1.sqs", "lobomig/scripts/firemissiles_ic2.sqs"):
++        branches = '? true: goto "sp4away"\n#sw4away\n'
++    elif path in ("lobof5/scripts/firemissiles2.sqs", "lobof5/scripts/firemissiles3.sqs"):
++        branches = '? true: goto "aa2way"\n#aa2away\n'
++    elif path == "lobomig/mig25/sqs/firemissiles_cap1.sqs":
++        branches = (
++            'goto "R60_3away"\ngoto "R60_4away"\n'
++            '#R60_1away\n_plane setobjecttexture[3, ""]\n'
++            '#R60_2away\n_plane setobjecttexture[4, ""]\n'
++            '#R60_1away\n_plane setobjecttexture[5, ""]\n'
++            '#R60_2away\n_plane setobjecttexture[6, ""]\n'
++        )
++    return (
++        '_plane = _this select 0\n_ammoname = "TestProjectile"\n'
++        + branches
++        + '_missobj = nearestobject[_plane, _ammoname]\n'
++        '_sensor = "EmptyDetector" createVehicle [0,0,0]\n'
++        '; retain terrain coordinate behavior\n'
++        '_sensor setpos [getpos _plane select 0, getpos _plane select 1];\n'
++        '_result = getpos _sensor select 2;\n'
++        '_missobj setpos [1, 2, _result]\ngoto "Exit"\n'
++    )
++
++
++def number_fixture():
++    parts = ['_plane = _this select 0', '_number = _this select 1']
++    for digit in range(1, 4):
++        parts += [f"#Num{digit}", f"_num{digit} = random 100"]
++        target = f"n{digit + 1}" if digit < 3 else "exit"
++        for value in range(10):
++            parts.append(f'? _num{digit} >= {value}: _unit setObjectTexture [{digit + 1}, "digit{value}.paa"], goto "{target}"')
++    return "\n".join(parts) + "\nexit\n"
++
++
++def fire_fixture():
++    return (
++        '_object = _this select 0\n_ouch = 0\n_ouchAI = 0\n'
++        '?! (local _object):goto "sound"\n'
++        '_glow = "TestGlow" createvehicle [0,0,0]\n'
++        '_glow setpos [getpos _object select 0, getpos _object select 1,1]\n'
++        '#sound\n_soundloop = 0\n'
++        '_glow setpos [getpos _object select 0, getpos _object select 1,1]\n'
++        '#client\n? player != (vehicle player): goTo "fire"\n'
++        '? player distance _glow < 10 && _ouch != 1: player setDammage (damage player + 0.02); goTo "scream"\n'
++        '#here\n_unitsAI = [getPos _object, 10] call _AI\n'
++        '"_x setDammage (damage _x + 0.02)" forEach _unitsAI\n'
++        '#fire\n~0.25\ndeletevehicle _glow\nexit\n'
++        '#scream\n_ouch = 1\ngoto "here"\n'
++    )
++
++
++class ScriptRepairTests(unittest.TestCase):
++    def test_all_shot_targets_resolve_uniquely(self):
++        paths = [
++            "lobomig/scripts/firemissiles_ic1.sqs",
++            "lobomig/scripts/firemissiles_ic2.sqs",
++            "lobof5/scripts/firemissiles2.sqs",
++            "lobof5/scripts/firemissiles3.sqs",
++            "lobomig/mig25/sqs/firemissiles_cap1.sqs",
++        ]
++        for path in paths:
++            with self.subTest(path=path):
++                fixed = scripts._missile(missile_fixture(path), path)
++                self.assertEqual([], scripts.script_findings(fixed))
++                self.assertEqual(fixed, scripts._missile(fixed, path))
++        fixed = scripts._missile(missile_fixture(paths[-1]), paths[-1])
++        for label, slot in zip(range(1, 5), range(3, 7)):
++            self.assertIn(f'#R60_{label}away\n_plane setobjecttexture[{slot}, ""]', fixed)
++
++    def test_helper_is_deleted_immediately_after_last_read(self):
++        original = missile_fixture()
++        fixed = scripts._missile(original, "lobof15/scr/fire_e.sqs")
++        self.assertIn("_result = getpos _sensor select 2;\ndeleteVehicle _sensor", fixed)
++        lines = fixed.splitlines()
++        read = lines.index("_result = getpos _sensor select 2;")
++        self.assertFalse(any("_sensor" in line for line in lines[read + 2:]))
++        self.assertLess(fixed.index("? isNull _missobj"), fixed.index('"EmptyDetector"'))
++        self.assertLess(fixed.index("? !(local _missobj)"), fixed.index('"EmptyDetector"'))
++        self.assertEqual(1, fixed.count("deleteVehicle _sensor"))
++
++    def test_cluster_second_helper_keeps_existing_cleanup(self):
++        source = missile_fixture() + (
++            '_bpos = [1,2,3]\n_sensor = "EmptyDetector" createVehicle [0,0,0]\n'
++            '_sensor setpos [_bpos select 0, _bpos select 1];\n'
++            '_result = getpos _sensor select 2;\n; existing cleanup\ndeleteVehicle _sensor\n'
++        )
++        path = "lobo_a4/scripts/firemissiles_a2.sqs"
++        fixed = scripts._missile(source, path)
++        self.assertEqual(2, fixed.count("deleteVehicle _sensor"))
++        self.assertEqual(fixed, scripts._missile(fixed, path))
++
++    def test_unexpected_helper_lifetime_is_rejected(self):
++        for extra in ('? true: goto "Exit"\n', '~0.1\n', '_other = _sensor\n'):
++            source = missile_fixture().replace("_result =", extra + "_result =")
++            with self.subTest(extra=extra), self.assertRaises(ValueError):
++                scripts._missile(source, "lobof15/scr/fire_e.sqs")
++        with self.assertRaises(ValueError):
++            scripts._missile(missile_fixture() + "_later = _sensor\n", "lobof15/scr/fire_e.sqs")
++
++    def test_numbering_has_defined_vehicle_and_reachable_digits(self):
++        fixed = scripts._number(number_fixture())
++        self.assertEqual([], scripts.script_findings(fixed))
++        self.assertNotIn("_unit ", fixed)
++        self.assertNotIn("_this select 1", fixed)
++        self.assertNotIn("], goto", fixed)
++        for digit in (2, 3, 4):
++            self.assertEqual(10, fixed.count(f"setObjectTexture [{digit},"))
++        self.assertEqual(fixed, scripts._number(fixed))
++
++    def test_nonowner_fire_path_has_valid_anchor_without_moving_wreck(self):
++        fixed = scripts._fire(fire_fixture())
++        self.assertLess(fixed.index("_glow = _object"), fixed.index('?! (local _object):goto "sound"'))
++        after_sound = fixed.split("#sound\n", 1)[1]
++        for line in after_sound.splitlines():
++            if "_glow setpos" in line or "deletevehicle _glow" in line:
++                self.assertTrue(line.startswith("? _glow != _object && local _glow:"))
++        self.assertIn('#client\n? !(local _object): goto "fire"', fixed)
++        self.assertEqual([], scripts.script_findings(fixed))
++        self.assertEqual(fixed, scripts._fire(fixed))
++
++    def test_burn_query_covers_remote_victims_without_double_hitting_player(self):
++        fixed = scripts._fire(fire_fixture())
++        self.assertLess(fixed.index("_AI ="), fixed.index("call _AI"))
++        self.assertIn('nearestObjects [_this select 0, ["Man"], _this select 1]', fixed)
++        self.assertIn("alive _x && vehicle _x == _x && _x != player", fixed)
++        self.assertNotIn("local _x", fixed)
++        self.assertIn('? player != (vehicle player): goTo "here"', fixed)
++        self.assertIn("? local player && alive player && player distance _object", fixed)
++        self.assertIn('#here\n? _ouchAI == 1: goto "fire"', fixed)
++
++    def test_classic_profile_is_explicit_bounded_and_switchable(self):
++        original = fire_fixture()
++        classic = scripts._fire(original, "classic")
++        ud = scripts._fire(original, "ud")
++        self.assertNotIn("nearestObjects", classic)
++        self.assertNotIn("createTrigger", classic)
++        self.assertIn("(units group player) + (units group _object)", classic)
++        self.assertIn("_x distance (_this select 0) < (_this select 1)", classic)
++        self.assertIn("!(_x in _units)", classic)
++        self.assertEqual([], scripts.script_findings(classic))
++        self.assertEqual(classic, scripts._fire(classic, "classic"))
++        self.assertEqual(classic, scripts._fire(ud, "classic"))
++        self.assertEqual(ud, scripts._fire(classic, "ud"))
++        with self.assertRaises(ValueError):
++            scripts._fire(original, "unknown")
++        with self.assertRaises(ValueError):
++            scripts._fire(ud + "\n" + scripts.AI_QUERY_CLASSIC, "classic")
++
++    def test_display_repair_preserves_asset_identifiers(self):
++        source = 'model="LoBo_SA9missle_F.p3d";\ndisplayNameMagazine="Hawk Missle";'
++        fixed = scripts._display(source, "lobosa6/config.cpp")
++        self.assertIn('model="LoBo_SA9missle_F.p3d";', fixed)
++        self.assertIn('displayNameMagazine="Hawk Missile";', fixed)
++        self.assertEqual(fixed, scripts._display(fixed, "lobosa6/config.cpp"))
++
++    def test_unknown_and_ambiguous_source_is_rejected(self):
++        with self.assertRaises(ValueError):
++            scripts._number(number_fixture().replace("_unit setObjectTexture", "_other setObjectTexture", 1))
++        with self.assertRaises(ValueError):
++            scripts._fire(fire_fixture().replace("call _AI", "call _custom").replace("_object = _this select 0", "_object = objNull"))
++        with self.assertRaisesRegex(ValueError, "Missing required"):
++            scripts.repair({})
++        with self.assertRaises(ValueError):
++            scripts._display('displayNameMagazine="Hawk Missle";\ndisplayNameMagazine="Hawk Missle";', "lobosa6/config.cpp")
++
++    def test_linter_catches_labels_and_unassigned_locals_without_comment_noise(self):
++        findings = scripts.script_findings(
++            '; goto "ignored" _comment\n_one = _this select 0\n'
++            'goto "missing"\n#same\n#SAME\n_bad setpos [0,0,0]\n'
++            '_asset = "folder/_not_a_variable.paa"\n'
++        )
++        self.assertEqual([
++            "missing label: missing",
++            "duplicate label: same",
++            "never-assigned local: _bad",
++        ], findings)
++        self.assertEqual([], scripts.script_findings('goto "END"\n#end\nexit\n'))
++
++    def test_repair_preserves_windows_newlines_and_returns_changes_only(self):
++        source = number_fixture().replace("\n", "\r\n")
++        # Exercise the dispatch and newline preservation without requiring actual
++        # third-party assets: provide a synthetic member for each manifest path.
++        documents = {}
++        for path in scripts.MISSILE_PATHS:
++            text = missile_fixture(path)
++            if path in ("lobo_a4/scripts/firemissiles_a2.sqs", "lobo_a4/scripts/firemissiles_a3.sqs"):
++                text += ('_sensor = "EmptyDetector" createVehicle [0,0,0]\n'
++                         '_sensor setpos [0,0];\n_result = getpos _sensor select 2;\ndeleteVehicle _sensor\n')
++            documents[path] = text
++        documents.update({path: fire_fixture() for path in scripts.FIRE_PATHS})
++        documents.update({path: source for path in scripts.NUMBER_PATHS})
++        documents["lobojordan/config.cpp"] = "\n".join(
++            f'displayName="Jordanian Security Assualt {role}";'
++            for role in ("Operator", "Team Leader", "Radioman", "Medic", "Breacher", "Sniper")
++        )
++        documents["lobosa6/config.cpp"] = 'displayNameMagazine="Hawk Missle";'
++        documents["loboweapat/config.cpp"] = 'displayNameMagazine="Dragon Missle";'
++        documents["loboter/unrelated.sqs"] = "exit\n"
++        fixed = scripts.repair(documents)
++        self.assertNotIn("loboter/unrelated.sqs", fixed)
++        self.assertEqual(62, len(fixed))
++        self.assertFalse(re.search(r"(?<!\r)\n", fixed[scripts.NUMBER_PATHS[0]]))
++        self.assertEqual({}, scripts.repair(documents | fixed))
++        classic = scripts.repair(documents | fixed, compatibility="classic")
++        self.assertEqual(set(scripts.FIRE_PATHS), set(classic))
++        self.assertEqual({}, scripts.repair(documents | fixed | classic, compatibility="classic"))
++        switched_back = scripts.repair(documents | fixed | classic)
++        self.assertEqual({key: fixed[key] for key in scripts.FIRE_PATHS}, switched_back)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/arma_CWR/tests/ci/test_lobo_transaction.py b/arma_CWR/tests/ci/test_lobo_transaction.py
+new file mode 100644
+index 00000000..3be0af2d
+--- /dev/null
++++ b/arma_CWR/tests/ci/test_lobo_transaction.py
+@@ -0,0 +1,158 @@
++"""Fault-injection tests for offline LoBo installation; synthetic temporary PBOs only."""
++import contextlib
++import io
++import json
++from pathlib import Path
++import shutil
++import struct
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools' / 'lobo'))
++import repair_lobo as runner
++from repair.pbo import Archive
++
++
++def archive(config):
++    entries = [(b'config.cpp', config), (b'unchanged.txt', b'unrelated original data')]
++    return (b''.join(name + b'\0' + struct.pack('<5I', 0, 0, 7, 42, len(data)) for name, data in entries)
++            + bytes(21) + b''.join(data for _, data in entries))
++
++
++class TransactionTests(unittest.TestCase):
++    def setUp(self):
++        temporary = tempfile.TemporaryDirectory(prefix='lobo-transaction-test-')
++        self.addCleanup(temporary.cleanup)
++        self.mod = Path(temporary.name)
++        addons = self.mod / 'addons'
++        addons.mkdir()
++        self.paths = {name: addons / (name + '.pbo') for name in ('first', 'second', 'third')}
++        self.originals = {name: archive(name.encode() + b' original') for name in self.paths}
++        for name, path in self.paths.items():
++            path.write_bytes(self.originals[name])
++        self.hashes = {name: runner.digest(data) for name, data in self.originals.items()}
++        self.changes = {name + '/config.cpp': name.encode() + b' repaired' for name in self.paths}
++        self.records = [dict(member=key, after_sha256=runner.digest(value)) for key, value in self.changes.items()]
++
++    def apply(self, changed=None):
++        return runner.apply(self.mod, self.paths, self.hashes,
++                            self.changes if changed is None else changed, self.records)
++
++    def installed(self):
++        return {name: path.read_bytes() for name, path in self.paths.items()}
++
++    def manifest(self):
++        files = list(self.mod.glob('.ud-backups/issue-69/*/manifest.json'))
++        self.assertEqual(len(files), 1)
++        return files[0], json.loads(files[0].read_text())
++
++    def test_success_has_verified_backups_and_hashes_for_every_archive(self):
++        manifest_path = self.apply()
++        path, manifest = self.manifest()
++        self.assertEqual(manifest_path, path)
++        self.assertEqual(manifest['state'], 'applied')
++        self.assertEqual(len(manifest['archives']), 3)
++        for item in manifest['archives']:
++            name = Path(item['file']).stem
++            backup = (path.parent / item['file']).read_bytes()
++            installed = self.paths[name].read_bytes()
++            self.assertEqual(backup, self.originals[name])
++            self.assertEqual(item['before_sha256'], runner.digest(backup))
++            self.assertEqual(item['after_sha256'], runner.digest(installed))
++            self.assertEqual(Archive(installed).read('config.cpp'), self.changes[name + '/config.cpp'])
++            self.assertEqual(Archive(installed).read('unchanged.txt'), b'unrelated original data')
++        self.assertFalse(list(self.mod.glob('lobo-repair-*')))
++
++    def test_empty_change_set_creates_no_backup_or_staging(self):
++        self.assertIsNone(self.apply({}))
++        self.assertEqual(self.installed(), self.originals)
++        self.assertEqual({p.name for p in self.mod.iterdir()}, {'addons'})
++
++    def test_corrupt_backup_prevents_all_replacements(self):
++        real_copy = shutil.copy2
++        def corrupt(source, target, *args, **kwargs):
++            result = real_copy(source, target, *args, **kwargs)
++            if Path(target).name == 'second.pbo':
++                Path(target).write_bytes(b'corrupt backup')
++            return result
++        with patch.object(runner.shutil, 'copy2', corrupt), self.assertRaisesRegex(ValueError, 'Backup verification'):
++            self.apply()
++        self.assertEqual(self.installed(), self.originals)
++        self.assertFalse(list(self.mod.glob('lobo-repair-*')))
++
++    def test_concurrent_change_after_planning_is_preserved(self):
++        external = archive(b'concurrent original edit')
++        self.paths['second'].write_bytes(external)
++        with self.assertRaisesRegex(ValueError, 'changed since preflight'):
++            self.apply()
++        self.assertEqual(self.installed(), self.originals | {'second': external})
++        self.assertFalse((self.mod / '.ud-backups').exists())
++
++    def test_concurrent_change_after_backups_rolls_back_prior_replacement(self):
++        real_replace = Path.replace
++        external = archive(b'concurrent edit between archive installs')
++        def inject(source, target):
++            result = real_replace(source, target)
++            if source.name == 'first.pbo':
++                self.paths['second'].write_bytes(external)
++            return result
++        with patch.object(Path, 'replace', inject), self.assertRaisesRegex(ValueError, 'Concurrent edit'):
++            self.apply()
++        self.assertEqual(self.installed(), self.originals | {'second': external})
++        _, manifest = self.manifest()
++        self.assertEqual(manifest['state'], 'rolled-back')
++
++    def test_last_replacement_failure_rolls_back_every_prior_archive(self):
++        real_replace = Path.replace
++        def fail(source, target):
++            if source.name == 'third.pbo':
++                raise OSError('injected staged replacement failure')
++            return real_replace(source, target)
++        with patch.object(Path, 'replace', fail), self.assertRaisesRegex(OSError, 'injected staged'):
++            self.apply()
++        self.assertEqual(self.installed(), self.originals)
++        _, manifest = self.manifest()
++        self.assertEqual(manifest['state'], 'rolled-back')
++
++    def test_rollback_preserves_later_edit_and_restores_other_archives(self):
++        real_replace = Path.replace
++        external = archive(b'concurrent edit of already repaired first archive')
++        def fail(source, target):
++            if source.name == 'third.pbo':
++                self.paths['first'].write_bytes(external)
++                raise OSError('injected staged replacement failure')
++            return real_replace(source, target)
++        with contextlib.redirect_stderr(io.StringIO()), patch.object(Path, 'replace', fail):
++            with self.assertRaisesRegex(OSError, 'injected staged'):
++                self.apply()
++        self.assertEqual(self.installed(), self.originals | {'first': external})
++        path, manifest = self.manifest()
++        self.assertEqual(manifest['state'], 'rollback-conflict')
++        self.assertEqual(manifest['rollback_conflicts'], [str(self.paths['first'])])
++        self.assertEqual((path.parent / 'first.pbo').read_bytes(), self.originals['first'])
++
++    def test_one_restore_failure_does_not_abandon_remaining_archives(self):
++        real_replace = Path.replace
++        def fail(source, target):
++            if source.name == 'third.pbo':
++                raise OSError('injected staged replacement failure')
++            if source.name == 'second.pbo.restore':
++                raise OSError('injected rollback replacement failure')
++            return real_replace(source, target)
++        with contextlib.redirect_stderr(io.StringIO()), patch.object(Path, 'replace', fail):
++            with self.assertRaises(OSError):
++                self.apply()
++        installed = self.installed()
++        self.assertEqual(installed['first'], self.originals['first'])
++        self.assertEqual(installed['third'], self.originals['third'])
++        self.assertEqual(Archive(installed['second']).read('config.cpp'), b'second repaired')
++        path, manifest = self.manifest()
++        self.assertEqual(manifest['state'], 'rollback-failed')
++        self.assertTrue(manifest['rollback_errors'])
++        self.assertEqual((path.parent / 'second.pbo').read_bytes(), self.originals['second'])
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/arma_CWR/tools/lobo/AMMUNITION-POLICY.md b/arma_CWR/tools/lobo/AMMUNITION-POLICY.md
+new file mode 100644
+index 00000000..2ee87b4a
+--- /dev/null
++++ b/arma_CWR/tools/lobo/AMMUNITION-POLICY.md
+@@ -0,0 +1,167 @@
++# Lobo ammunition policy for issue #69
++
++This is a reproducible Uslu dur! gameplay baseline, implemented by
++`repair/ammo.py`. It fixes broken references and inconsistent engine inputs; it
++is not a claim that legacy damage points measure real penetration, explosive
++mass or lethal distance. The repair preserves existing public class identifiers,
++magazine capacity, muzzle velocity, dispersion, reload time, cost and unrelated
++values, except for the explicitly listed changes below. Review unknown locally
++modified values instead of silently replacing them.
++
++## Missing M833 projectile
++
++The existing `CfgWeapons/LoBo_105Sabot2` magazine continues to select
++`CfgAmmo/LoBo_105Sabot2`. The repair defines that previously absent class directly
++under `Shell105`, with hit 400, indirect hit/range 0/0, explosive 0, cost 300, and
++AI distance/probability points (10/.5, 1000/.85, 2000/.65). No model or sound
++payload is copied into the repository; normal Shell105 inheritance supplies the
++projectile's base behavior.
++
++The 400-point choice is an explicit conservative balance baseline below the
++pack's existing M900 projectile at 450. The AI envelope follows that existing
++105 mm family. This is neither an alias to the M900 projectile nor a conversion
++of an asserted historical penetration measurement. The existing M900 and other
++tank ammunition values remain unchanged; balancing the entire armor/penetration
++ladder is outside this repair. Compare the two rounds against identical tanks
++and impact locations before claiming a shots-to-kill result.
++
++## AI engagement profiles by role
++
++Each tuple below is distance in metres / authored AI hit probability. These are
++weapon evaluation inputs, not ballistic range limits. `HitProbability` in
++`engine/Poseidon/World/Detection/TargetFire.cpp` interpolates between these points
++and returns zero beyond the maximum.
++
++| Projectile / use | Minimum | Midpoint | Maximum | Bundled JAM comparator |
++| --- | ---: | ---: | ---: | --- |
++| Original affected Lobo bullets | 1/.80 | 50/.35 | 109/.08 | None; pistol-like profile |
++| `LoBo762Bullet`, FN MAG | 1/.90 | 100/.50 | 450/.05 | `JAM_Large_Mgun_Bullet` |
++| New `LoBo556MGBullet`, Minimi/Negev | 1/.90 | 100/.50 | 450/.05 | `JAM_Medium_Mgun_Bullet` |
++| `LoBo556Bullet`, CAR-15/M16/Galil rifle uses | .5/.10 | 50/.38 | 250/.04 | `JAM_Medium_Rifle_Single_Bullet` |
++| `LoBo556Bullet_SD`, suppressed Negev | .5/.25 | 70/.50 | 250/.08 | `JAM_Medium_Silenced_Rifle_Burst_Bullet` (also inherited by Auto) |
++
++The bundled `JAM_West_762x51_Mgun_Bullet` and
++`JAM_West_556x45_MGun_Bullet` inherit the respective MG profiles. JAM's suppressed
++200-round 5.56 magazine selects `JAM_West_556x45_Silenced_Auto_Bullet`, which
++inherits the suppressed profile above. This deliberately retains that shorter
++250 m envelope for the suppressed magazine.
++
++`LoBo556Bullet` also serves ordinary rifles, so changing it globally to the MG
++profile would erase a useful role distinction. A new derived MG class overrides
++only the six range/probability keys and is selected by `LoBoM249Mag` and
++`LoBoNegevMag`. Existing rifle references and their stable class names remain.
++Their shared projectile cannot represent JAM's separate per-fire-mode profiles;
++the rifle single-shot baseline is the conservative common profile. Lobo's
++existing hit, noise, flash and cartridge values are preserved.
++
++`LoBoNegevSDMag` previously selected the unsuppressed projectile. It now selects
++the existing `LoBo556Bullet_SD`, preserving that class's authored suppressed
++noise/visibility. At 300 m, the portable MG curve changes from zero to about
++0.242857; at 451 m it is still zero. Rifle and suppressed curves remain zero at
++300 m. These tests do not claim actual accuracy or that AI always chooses to fire.
++
++## Ordinary projectiles and explosive projectiles
++
++Both indirect hit and radius become zero on these ordinary ball/AP classes:
++
++- M240 coax (including its inheriting M240C variant), .50 cal, DTM, PK, DShK, KPVT;
++- the duplicated `loBo_DShK_Ter` projectile;
++- ZPU-4 14.5 mm, 25 mm AP and 30 mm APFSDS.
++
++The last 30 mm class already had zero indirect damage; zeroing its residual
++radius makes the intent explicit. M240 and .50 cal gain explicit zero overrides
++so inherited parent settings cannot reintroduce splash. Direct `hit` values,
++tracer colors, ammunition IDs and AI ranges in this group remain unchanged.
++
++Selection is by the authored ammunition role, not merely by a `Bullet` base class
++or `explosive=0`. The engine's indirect damage path does not require the explosive
++flag. Actual HE/HEI cannon ammunition, the M40 spotting round's intended flash,
++and shotgun pellet approximations keep their authored effects. JAM itself uses
++small indirect effects for bullets; matching its AI profile does not import those
++effects. Existing tank AP shell splash/spall approximations were not swept into
++this targeted ordinary-MG fix.
++
++## Blast policy and numerical comparisons
++
++`indirectHitRange` is the full-strength plateau input. `CalcDammage` in
++`engine/Poseidon/World/Entities/Weapons/Dammage.cpp` is flat within that range and
++falls as `(range / distance)^4` beyond it. `ExplosionDammage` in
++`engine/Poseidon/World/Simulation/Collisions.cpp` obtains candidate objects using
++four times that range, scales by an unshielded fraction, and dispatches damage.
++Finite object bounds, hitpoints, armor and structural damage subsequently matter.
++The spatial search is not a promised lethal radius; a curve sample is not the
++result for a whole vehicle or human target.
++
++| Family | Direct hit retained | Indirect strength retained | Plateau before -> after | Search input before -> after |
++| --- | ---: | ---: | ---: | ---: |
++| 60 mm HVMS HE/HEAT | 255 | 15 | 30 -> 4 m | 120 -> 16 m |
++| 120 mm mortar | 230 | 45 | 8 -> 8 m | 32 -> 32 m |
++| 160 mm mortar | 260 | 45 | 8 -> 8 m | 32 -> 32 m |
++| `LoBo_C4` vehicle bomb | 1000 | 900 | 50 -> 10 m | 200 -> 40 m |
++| `LoBo_Carbomb` vehicle bomb | 1000 | 500 | 50 -> 10 m | 200 -> 40 m |
++
++**`LoBo_C4` is fired by `LoBo_C4Gun`, whose displayed role is Car Bomb. It is not
++a handheld demolition charge.** The policy retains its strong contact damage,
++uses a bounded 10 m plateau for both vehicle-bomb implementations, and leaves
++their differently authored strengths intact. No explosive mass is given in the
++source, so this is a gameplay bound, not a physical equivalence claim.
++
++The 60 mm round has a smaller blast envelope and lower indirect strength than the
++existing heavy mortars; its separately authored direct-hit/HEAT role is retained.
++The original 120/160 mm mortar settings are deliberately retained as the reference
++family, with validation that they still match 45/8. Changing them solely to make
++numbers look different by caliber would add another unmeasured balance change.
++Other tank/artillery HE families retain their authored profiles pending a separate
++pack-wide study; issue #69's four named comparison rounds and the duplicated
++vehicle-bomb implementation define this repair's blast scope.
++
++For a mathematical point sample with armor 1 and no cover:
++
++| Scenario | Before | After |
++| --- | ---: | ---: |
++| 60 mm at 0 m | 15 | 15 |
++| 60 mm at 5 m | 15 | 6.144 |
++| 60 mm at 10 m | 15 | .384 |
++| Mortar at 10 m | 18.432 | 18.432 |
++| C4 vehicle bomb at 20 m | 900 | 56.25 |
++| Other vehicle bomb at 20 m | 500 | 31.25 |
++
++`blast_comparisons()` produces 144 reproducible rows across distances
++0/5/10/20/40/50 m, unshielded factors 1/.25/0, and armor factors 1/10. For example,
++the C4 point sample at 20 m with .25 unshielded and armor 10 changes from 22.5 to
++1.40625. Fully shielded samples return zero. The pure mathematical curve is also
++reported beyond the search input for inspection; those rows do **not** imply
++that the engine will visit a point-sized object there. Candidate search radii are
++separate fields. No game process is used to generate these comparisons.
++
++The module and tests deliberately avoid claiming a structural-damage result from
++`hit / armor` alone. `armorStructural`, component geometry, impact placement and
++cover are not encoded in these point samples. Later in-game testing should use
++identical infantry, soft vehicles and tanks at fixed distances, both exposed and
++behind the same cover, with identical impact points. That is a validation task,
++not a prerequisite for reproducing this explicitly documented baseline.
++
++## Mk82 / GBU-12 family
++
++The GBU-12's warhead changes from 500/150/10 (direct/indirect/range) to
++1000/500/15, matching both `LoBo_MK82` and `LoBo_MK82_LDGB`. These three values
++come from one policy mapping in the repair; both reference variants are checked
++before transforming the GBU-12. Guidance, accuracy/cost controls, flight behavior,
++models and magazine counts remain unchanged. The shared Mk82 bomb-body rationale
++was documented in issue #69 using the [USAF description](https://www.holloman.af.mil/News/Features/Display/Article/663837/quarterly-load-comp-april-10-2015/).
++
++## Compatibility and verification
++
++The Micro Uzi compatibility array names the existing `LoBoMUZIHDmag` instead of
++the nonexistent `LoBoMUZIDDmag`. Display-only `12 Guage Shells` and `1225mm AP`
++become `12 Gauge Shells` and `122mm AP`. Historical identifiers such as
++`LoBo12GuageShell` are not renamed.
++
++Run `python arma_CWR/tests/ci/test_lobo_ammo.py` from the repository root. It tests
++reference resolution, role-specific AI behavior, non-explosive versus explosive
++families, sibling warhead equivalence, bounded blast curves under cover/armor
++factors, unchanged unrelated content, rejection of unknown values, and a no-op
++second repair pass with LF and CRLF input. The full repair runner additionally
++validates extracted real configs. Do not commit extracted addon configs or PBOs;
++only the original transformation code, synthetic tests and documentation belong
++in this repository.
+diff --git a/arma_CWR/tools/lobo/ARMOR-MODELS.md b/arma_CWR/tools/lobo/ARMOR-MODELS.md
+new file mode 100644
+index 00000000..725cf698
+--- /dev/null
++++ b/arma_CWR/tools/lobo/ARMOR-MODELS.md
+@@ -0,0 +1,106 @@
++# LoBo component armor and bundled diver repairs
++
++The issue 69 repair chooses the issue's supported-component option. It repairs
++real model bindings and makes the existing damage controls explicit. It does
++**not** add a directional penetration simulator or independently persistent
++front, rear, side, or roof armor states.
++
++## Why registering the old classes would not suffice
++
++`TankType::InitShape` registers hull, turret, gun and two tracks;
++`TankOrCarType::InitShape` registers the engine. `EntityAI::LocalHit` looks up
++their named selections in the Hitpoints LOD and accumulates component damage
++from its points. `HitPoint` multiplies component armor by selection point count;
++`LocalHit` still returns the existing structural damage coefficient. Merely
++registering more classes would change the saved/networked damage-array layout,
++would not automatically route their damage to operational tank components, and
++would not provide directional structural protection.
++
++Inspection of the actual bundled P3Ds found problems beyond the original audit:
++
++| Model family | Verified Hitpoints selections | Old content problem |
++| --- | --- | --- |
++| Four Egyptian M1 variants | `Hull`, directional hull sets, `Turret`, directional turret sets, `LTrack`, `RTrack` | Config used `turet`, `pasL`, `pasP`; all three bindings were missing. Directional classes were ignored. |
++| Merkava Mk1 and all three Mk4 models | `hull`, `turet`, `pasL`, `pasP` | None of the configured `fhull`, `turetf`, `turett`, `turetb` selections exists. |
++| Merkava Mk2 and Mk3 | `hull`, `fhull`, `turetf`, `turett`, `turetb`, `pasL`, `pasP` | No whole-turret `turet` selection exists, and the directional classes were ignored. |
++
++The configured front/top/rear armor classes and their redundant scalar fields
++are removed from the repaired source. The inherited Mk1/Mk2/Mk2C definitions
++are repaired too, so the Mk4 cannot inherit misleading unused settings.
++
++## Supported baseline and region coverage
++
++The repair preserves each vehicle's overall `armor`, `armorStructural`, engine,
++gun and track component coefficients. It preserves the M1's existing hull and
++turret coefficients, both **0.8**, and its track coefficients of **0.6**. It
++supplies both missing track selection aliases. Merkava hull armor remains **0.80**, while all
++Merkava variants receive an explicit registered `HitTurret` coefficient of
++**1.0**. This is a documented gameplay baseline within the old authored turret
++range (rear **0.8**, top **1.0**, front **1.25**), not a measured armor thickness
++or a promise to reproduce those three directional values. The actual model
++geometry and the original spatial damage falloff still affect impacts.
++
++For M1 and Mk2/Mk3 models, the regeneration script repairs selections in the
++**Hitpoints LOD only**, retaining the configured legacy component names:
++
++- Existing `Hull`/`hull` membership becomes the union of the existing whole-hull
++  and directional hull sets; its original tag name and index do not change.
++- A `turet` alias is appended containing the union of the existing whole-turret
++  set, when present, and all authored directional turret sets.
++- M1 additionally gains `pasL`/`pasP` aliases of its `LTrack`/`RTrack` selections.
++
++Shared vertices are selected once, never duplicated. The M1 union contains
++30 raw hull points and 41 turret points. Mk2/Mk3 contain 17 raw hull points and
++12 turret points; the standalone asset reader expands the hull to 24 mesh
++points because of its face-vertex representation. These counts are evidence of
++region coverage, not independent hitpoint-state counts.
++
++All old selection names and order stay intact. The only existing bytes changed
++are the intended hull selection's membership payload; missing aliases are
++appended. The script preserves all other original bytes, including vertex
++positions, normals, faces, materials, original directional/turret/track
++selections, animation tags, collision LODs, resolution values, and the legacy
++32-byte texture-path trailer.
++Existing turret animations transform the same original point coordinates.
++The other LODs need no new names: `LocalHit` consumes the Hitpoints LOD, while
++collision and rendering retain their original material and animation bindings.
++
++There are still the same six registered tank components in the same order.
++The configured script-facing labels (`hull`, `turet`, `pasL`, `pasP`) are
++preserved: `HitpointName` exposes the model selection name to `setHit` and
++`Dammaged` scripts, so new prefixed names would have broken external scripts.
++No engine source, save format, network messages, class identifiers, loadouts,
++or persistent damage-array shape changes. The intended behavior change is that
++previously ignored hull/turret regions now feed real component damage, and M1
++turret/track damage binds to real selections. Existing saved damage values keep
++their component meaning. All multiplayer peers should install the same content
++repair because damage response depends on these local models/configs.
++
++## CoC combat swimmers
++
++`CoC_Diverdes` and `CoC_DiverSaboteurj` now use the parent swimmer's bundled
++`\CoC_Diver\CoC_Diver.p3d`, replacing unavailable `\seals\KMMwood*.p3d` assets.
++The replacement is verified to contain the infantry body/injury selections,
++`divemask`, and the two-point `divemask_axis` in its Memory LOD. Both retain
++their class identities, displayed role names, movement configuration, swim
++handlers, weapons and magazines; the demolition variant keeps its pipe bomb.
++They share the parent swimmer appearance. Missing external woodland outfits
++are not recreated or silently claimed to be present.
++
++## Offline validation and remaining limits
++
++`python tests/ci/test_lobo_models.py` uses synthetic MLOD/config data to verify
++union membership, shared-point de-duplication, preservation of non-target bytes,
++unchanged non-Hitpoints LODs/trailer, idempotence, and rejection of missing,
++duplicate, conflicting, malformed or unsupported model data. It also verifies
++correct component names, unchanged identities/loadouts, removal of unsupported
++armor definitions, and Mk1/Mk2/Mk4-specific bindings.
++
++During development, all six repaired models were separately read by
++`PoseidonTools model inspect --selections` and the four configs were repaired
++and reprocessed without a second change. All four repaired configs also parsed
++successfully with `PoseidonTools config tojson`. This tool does not launch the game.
++The installer must validate that config and paired model repairs are present
++together. Runtime combat, animated impacts, save loading and multiplayer tests
++have not been run; no game was launched for this work. The preserved layout is
++a compatibility argument, not a claim of runtime verification.
+diff --git a/arma_CWR/tools/lobo/CONTENT-REPAIRS.md b/arma_CWR/tools/lobo/CONTENT-REPAIRS.md
+new file mode 100644
+index 00000000..21bd3224
+--- /dev/null
++++ b/arma_CWR/tools/lobo/CONTENT-REPAIRS.md
+@@ -0,0 +1,139 @@
++# Reproducible Lobo content repairs
++
++`repair_lobo.py` implements the static audit originally filed as CWR #69, now
++tracked internally at [Lobo #1](https://github.com/GearUnclear/lobo/issues/1).
++It changes installed addon members only after every repair has passed preflight.
++No game is launched. Only transformation code, synthetic tests and documentation
++belong in this source repository; addon data and backups stay local.
++
++## Use
++
++Run from the CWR repository root with Python 3.10 or newer:
++
++```powershell
++# Preview only; writes the optional report, not addon files.
++python arma_CWR/tools/lobo/repair_lobo.py --mod '@LoBo' --compatibility ud --report tmp/lobo-preview.json
++
++# Apply to the UD installation, with verified original backups.
++python arma_CWR/tools/lobo/repair_lobo.py --mod '@LoBo' --compatibility ud --apply --report tmp/lobo-applied.json
++
++# A second pass must report zero changed members and exit 0.
++python arma_CWR/tools/lobo/repair_lobo.py --mod '@LoBo' --compatibility ud --check
++
++# Broad diagnostics; candidates require review, not automatic repair.
++python arma_CWR/tools/lobo/audit_lobo.py --mod '@LoBo' --report tmp/lobo-audit.json
++
++# Synthetic offline regression suite, no installed data required.
++python -m unittest discover -s arma_CWR/tests/ci -p 'test_lobo_*.py'
++```
++
++Pass `--tools PATH` for another standalone PoseidonTools build. The Windows
++default is `arma_CWR/dist/x64-win-rwdi/PoseidonTools.exe`. Compressed members
++are decoded through its `pbo show` command, with archive snapshot checks around
++the read. The selected repair archives in the audited installation need no
++compressed-member decoding.
++
++The repair exits 2 on incompatible input or I/O failure. `--check` exits 1
++when repairs would change data, 0 when already repaired. The default preview
++exits 0 for a valid plan. The audit's `--strict` exits 1 for unresolved references
++**or incomplete source-parser coverage**; ordinary candidate warnings alone do
++not make it fail.
++
++Reinstalling original Lobo data requires rerunning the repair. Run the existing
++`PoseidonTools mod doctor <mod> --fix` maintenance separately for scope keywords,
++malformed floats and buried wreck origins. This new repair does not replace it.
++
++## Compatibility profiles
++
++Use **`--compatibility ud`** (default) for Uslu dur!: wreck fires use the engine's
++`nearestObjects` command to discover all nearby on-foot infantry, including
++remote victims. One scheduler on the wreck owner applies damage through the
++engine's network-aware `setDammage` path. The local player is excluded from that
++query and handled once separately. This is verified against source behavior;
++multiplayer execution has not been tested.
++
++Use **`--compatibility classic` on a separate Classic mod copy before packaging**.
++Classic fire scripts discover the player's and wreck's groups, de-duplicate them
++and filter for distance, living units and on-foot state. This fixes the undefined
++function and invalid glow state using older commands, but cannot discover every
++unrelated group. It is a deliberately limited compatibility fallback, not full
++nearby-infantry parity. Neither profile creates a trigger to perform this query.
++
++Do not redistribute the UD profile as a Classic-compatible repair: Classic 1.99
++does not provide `nearestObjects`. The newer `createTrigger`/`setTriggerArea`
++commands are also unsuitable as an assumed Classic PC fallback. Official remaster
++versions need their own API/runtime verification. Existing package tooling does
++not automatically select this repair profile; prepare its source copy explicitly.
++Switching the two profiles updates only the 16 wreck-fire queries and creates a
++new backup batch; switching back is reproducible.
++
++## Repair scope and policy
++
++| Audit item | Implemented change |
++| --- | --- |
++| Missing M833 projectile | Defines the existing magazine's projectile at an explicit 400-point baseline below M900; no alias or identifier rename. |
++| MG engagement | JAM-derived role profiles; separates MG and rifle 5.56 use and corrects the suppressed Negev magazine. |
++| Unsupported armor | Uses the six supported tank components; repairs missing model bindings and hull/turret membership. |
++| Aircraft labels | Corrects MiG-21, MiG-25 and F-5 targets; preserves pylon slots. |
++| Micro Uzi | Corrects the HD magazine reference. |
++| Landing craft | Repairs vehicle variable, digit labels and unused parameter access in both numbering scripts. |
++| Wreck fires | Initializes the query; valid sound anchor on every path, guarded glow lifetime and one damage scheduler. |
++| Divers | Uses the verified bundled swimmer model for both missing outfits, retaining roles/loadouts. |
++| MG splash | Explicitly removes indirect damage from ordinary ball/AP rounds and preserves explosive families. |
++| Blast policy | Bounds the 60 mm and vehicle-bomb plateaus while retaining contact strength and heavy-mortar baselines. |
++| Mk82 family | Shares the existing Mk82 warhead values with GBU-12, retaining guidance controls. |
++| Missile helpers | Deletes 41 launch terrain helpers immediately after their final read; guards projectile ownership. |
++| Display text | Repairs Assault, Missile, Gauge and 122 mm strings without renaming classes. |
++| Offline checks | Reference, label, local-call and custom-hitpoint diagnostics; explicit incomplete-coverage reporting. |
++
++See [AMMUNITION-POLICY.md](AMMUNITION-POLICY.md) for all tuning choices and the
++144 mathematical blast scenarios; these are not measured lethal radii or
++shots-to-kill results. See [ARMOR-MODELS.md](ARMOR-MODELS.md) for actual model
++selections and preserved script-facing names. The repair implements supported
++component coverage, not a new directional penetration simulator.
++
++## Backups, integrity and recovery
++
++Every apply batch stores complete original archives and `manifest.json` under
++`<mod>/.ud-backups/issue-69/<UTC-time>-<unique-id>/`. The historical directory
++name remains stable after the issue transfer. The manifest records repair
++version, source-rule SHA-256, profile and before/after archive/member hashes.
++Reports can be stored under the checkout's ignored `tmp/` directory.
++
++All new archives are staged and validated before originals are backed up or
++replaced. Non-target member bytes, ordering, packing and metadata are preserved.
++SHA-1 trailers are verified/recomputed; legacy textual signatures are retained.
++Old StuffPBO trailers can be inspected, but rewriting their unsupported checksum
++format is rejected. Unknown source values, duplicate/unsafe members, incomplete
++inputs and conflicting edits fail before installation.
++
++An interrupted multi-archive install attempts to restore every file it changed.
++Rollback preserves any later concurrent edit, records conflicts/failures and
++keeps the originals. Replacing a whole mod directory is not one filesystem
++transaction; inspect the manifest if power loss interrupts the process.
++
++For deliberate recovery, stop using that mod copy, verify each current archive
++matches the manifest's `after_sha256` and each backup matches `before_sha256`,
++then restore that batch's originals. If a hash differs, review the later change
++instead of overwriting it. Restore batches in reverse order when reverting
++multiple repairs. Keep backups out of both GitHub repositories.
++
++## Validation limits
++
++The lightweight source linter intentionally fails closed on malformed legacy
++syntax. The audited pack has five configs it cannot fully parse (`LoBo_FAB`,
++`LoBo_IAk47Iraqi`, `LoBoChallen`, `LoBoEgypt`, `W_CombatStatics`). It reports them
++and downgrades unresolved references to uncertain candidates because skipped
++files may contain those definitions. PoseidonTools' legacy config exports and
++the mounted static probe are separate evidence; a successful export can recover
++old syntax and is not proof the source was well formed. No braces are invented
++by the repair to silence this report.
++
++Label/local-variable scans also cannot prove reachability or general dataflow.
++The broad candidate list is not a list of confirmed gameplay defects. The
++targeted repair validates all changed script labels and known variable state,
++model selection structure, expected ammunition values and repeatability.
++
++No game was launched for this work. Runtime combat, all missile shots, AI weapon
++selection, animated hit locations, saves and multiplayer still need a separately
++authorized play test. All peers should use the same repaired content.
+diff --git a/arma_CWR/tools/lobo/audit_lobo.py b/arma_CWR/tools/lobo/audit_lobo.py
+new file mode 100644
+index 00000000..f54fe7b2
+--- /dev/null
++++ b/arma_CWR/tools/lobo/audit_lobo.py
+@@ -0,0 +1,26 @@
++#!/usr/bin/env python3
++"""Offline Lobo reference/label/hitpoint diagnostics; never starts the game."""
++import argparse
++import json
++from pathlib import Path
++from repair.pbo import Archive
++from repair.audit import audit
++
++def main():
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--mod',type=Path,required=True)
++    p.add_argument('--tools',type=Path,default=Path(__file__).resolve().parents[2]/'dist/x64-win-rwdi/PoseidonTools.exe')
++    p.add_argument('--report',type=Path,required=True);p.add_argument('--strict',action='store_true')
++    args=p.parse_args();documents={};scanned=0
++    for archive_path in sorted((args.mod/'addons').glob('*.pbo')):
++        a=Archive(archive_path.read_bytes());stem=archive_path.stem.lower();scanned+=1
++        for key in a.by_key:
++            if key=='config.cpp' or (stem.startswith('lobo') and key.endswith('.sqs')):
++                documents[stem+'/'+key]=a.read(key,archive_path,args.tools.resolve()).decode('latin1')
++    result=audit(documents);result['archives_scanned']=scanned;result['text_members']=len(documents)
++    args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(json.dumps(result,indent=2)+'\n',encoding='utf8')
++    print(json.dumps({'archives_scanned':scanned,'unresolved_lobo_references':len(result['errors']),
++                      'coverage_complete':result['coverage_complete'],'unparsed_configs':result['unparsed_configs'],
++                      'review_candidates':len(result['candidates']),'report':str(args.report)},indent=2))
++    return 1 if args.strict and (result['errors'] or not result['coverage_complete']) else 0
++
++if __name__=='__main__':raise SystemExit(main())
+diff --git a/arma_CWR/tools/lobo/repair/__init__.py b/arma_CWR/tools/lobo/repair/__init__.py
+new file mode 100644
+index 00000000..a0a96bb8
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair/__init__.py
+@@ -0,0 +1 @@
++"""Reproducible, source-preserving Lost Brothers content repairs (issue #69)."""
+diff --git a/arma_CWR/tools/lobo/repair/ammo.py b/arma_CWR/tools/lobo/repair/ammo.py
+new file mode 100644
+index 00000000..13fef9ed
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair/ammo.py
+@@ -0,0 +1,229 @@
++"""Issue #69 ammunition repair rules; no third-party config payloads.
++
++All input validation is completed in memory. Unknown tuning is an error rather
++than an invitation to overwrite a user's balance changes. See AMMUNITION-POLICY.md.
++"""
++from __future__ import annotations
++
++import math
++import re
++
++from .config import class_block, class_spans, replace_exact, scalar, set_scalar
++
++ADDONS = ("loboammo", "loboweapons", "lobo_airammo", "loboter", "loboart")
++
++# min distance/probability, preferred distance/probability, max distance/probability.
++MG_PROFILE = (1, 0.90, 100, 0.50, 450, 0.05)
++RIFLE_PROFILE = (0.5, 0.10, 50, 0.38, 250, 0.04)
++SUPPRESSED_PROFILE = (0.5, 0.25, 70, 0.50, 250, 0.08)
++LEGACY_PROFILE = (1, 0.80, 50, 0.35, 109, 0.08)
++RANGE_KEYS = ("minRange", "minRangeProbab", "midRange", "midRangeProbab",
++              "maxRange", "maxRangeProbab")
++
++
++def _number(text, path, key):
++    value = scalar(text, path, key)
++    if value is None:
++        return None
++    try:
++        number = float(value)
++    except ValueError as exc:
++        raise ValueError(f"Expected literal number at {'/'.join(path)}/{key}: {value}") from exc
++    if not math.isfinite(number):
++        raise ValueError(f"Non-finite value at {'/'.join(path)}/{key}")
++    return number
++
++
++def _change(text, path, key, original, repaired):
++    current = _number(text, path, key)
++    if current not in (original, repaired):
++        raise ValueError(f"Unexpected {'/'.join(path)}/{key}: {current}; "
++                         f"expected {original} or repaired {repaired}")
++    if current == repaired:
++        return text
++    return set_scalar(text, path, key, f"{repaired:g}")
++
++
++def _profile(text, name, desired):
++    path = ("CfgAmmo", name)
++    for key, old, new in zip(RANGE_KEYS, LEGACY_PROFILE, desired):
++        text = _change(text, path, key, old, new)
++    return text
++
++
++def _literal_in_class(text, path, old, new, expected=1):
++    start, end = class_block(text, path)
++    body = replace_exact(text[start:end], old, new, expected=expected)
++    return text[:start] + body + text[end:]
++
++
++def _new_class(text, name, parent, properties):
++    """Append original project-authored data; reject a conflicting local class."""
++    start, end = class_block(text, ("CfgAmmo",))
++    matches = [(n, a, b) for n, a, b in class_spans(text[start:end])
++               if n.lower() == name.lower()]
++    body = "\n".join(f"\t\t{key}={value};" for key, value in properties.items())
++    if matches:
++        if len(matches) != 1:
++            raise ValueError(f"Duplicate generated CfgAmmo/{name}")
++        _, a, b = matches[0]
++        if re.sub(r"\s+", "", text[start+a:start+b]) != re.sub(r"\s+", "", body):
++            raise ValueError(f"Conflicting CfgAmmo/{name}; generated repair was modified")
++        # Verify inheritance, not merely the values, for idempotent reapplication.
++        header = re.search(r"\bclass\s+" + re.escape(name) + r"\s*:\s*" +
++                           re.escape(parent) + r"\s*\{$", text[start:start+a], re.I)
++        if not header:
++            raise ValueError(f"Unexpected parent for generated CfgAmmo/{name}")
++        return text
++    nl = "\r\n" if "\r\n" in text else "\n"
++    addition = f"\n\tclass {name}: {parent}\n\t{{\n{body}\n\t}};\n"
++    return text[:end] + addition.replace("\n", nl) + text[end:]
++
++
++def _ammo(text):
++    # Keep the existing magazine/projectile identifier, introducing an explicit
++    # M833 baseline rather than redirecting the magazine to the M900 projectile.
++    if scalar(text, ("CfgWeapons", "LoBo_105Sabot2"), "ammo") != '"LoBo_105Sabot2"':
++        raise ValueError("Unexpected M833 magazine projectile reference")
++    if _number(text, ("CfgAmmo", "LoBo_105Sabot1"), "hit") != 450:
++        raise ValueError("M900 reference baseline changed; review M833 policy")
++    text = _new_class(text, "LoBo_105Sabot2", "Shell105", {
++        "hit": "400", "indirectHit": "0", "indirectHitRange": "0",
++        "explosive": "0", "cost": "300", "minRange": "10",
++        "minRangeProbab": "0.5", "midRange": "1000", "midRangeProbab": "0.85",
++        "maxRange": "2000", "maxRangeProbab": "0.65",
++    })
++    # Explicit ball/AP families only. HE/HEI cannon rounds and the M40 spotting
++    # bullet intentionally retain their effects; inheritance alone is not proof
++    # that a projectile is non-explosive.
++    ordinary = {
++        "LoBo_M240Coax": (None, None), "LoBo_50cal": (None, None),
++        "loBo_DTMCoax": (2, 1), "loBo_PKCoax": (2, 1),
++        "loBo_DShK": (5, 1), "loBo_KPVT": (5, 1),
++        "LoBo_25AP": (5, 1), "LoBo_BMP2_30APFSDS": (0, 1),
++        "LoBo_zpu4Bullet": (2, 0.2),
++    }
++    for name, (hit, radius) in ordinary.items():
++        text = _change(text, ("CfgAmmo", name), "indirectHit", hit, 0)
++        text = _change(text, ("CfgAmmo", name), "indirectHitRange", radius, 0)
++    # Keep authored impact/strength values; repair the two documented oversized
++    # plateaus. Heavy mortars remain the existing comparison baseline.
++    text = _change(text, ("CfgAmmo", "LoBo_60HVMSHE"), "indirectHitRange", 30, 4)
++    text = _change(text, ("CfgAmmo", "LoBo_C4"), "indirectHitRange", 50, 10)
++    path = ("CfgWeapons", "lobo_122D25AP")
++    value = scalar(text, path, "shortNameMagazine")
++    if value not in ('"1225mm AP"', '"122mm AP"'):
++        raise ValueError("Unexpected 122mm AP magazine label")
++    return set_scalar(text, path, "shortNameMagazine", '"122mm AP"')
++
++
++def _weapons(text):
++    text = _profile(text, "LoBo762Bullet", MG_PROFILE)
++    # LoBo556Bullet also serves rifles. Give MG magazines a separate derived
++    # projectile so correcting the Minimi/Negev does not turn rifles into MGs.
++    text = _profile(text, "LoBo556Bullet", RIFLE_PROFILE)
++    text = _profile(text, "LoBo556Bullet_SD", SUPPRESSED_PROFILE)
++    text = _new_class(text, "LoBo556MGBullet", "LoBo556Bullet", {
++        key: f"{value:g}" for key, value in zip(RANGE_KEYS, MG_PROFILE)
++    })
++    for magazine in ("LoBoM249Mag", "LoBoNegevMag"):
++        path = ("CfgWeapons", magazine)
++        value = scalar(text, path, "ammo")
++        if value not in ('"LoBo556Bullet"', '"LoBo556MGBullet"'):
++            raise ValueError(f"Unexpected {magazine} projectile: {value}")
++        text = set_scalar(text, path, "ammo", '"LoBo556MGBullet"')
++    path = ("CfgWeapons", "LoBoNegevSDMag")
++    value = scalar(text, path, "ammo")
++    if value not in ('"LoBo556Bullet"', '"LoBo556Bullet_SD"'):
++        raise ValueError(f"Unexpected suppressed Negev projectile: {value}")
++    text = set_scalar(text, path, "ammo", '"LoBo556Bullet_SD"')
++    # Verify the intended high-dispersion magazine exists before repairing the
++    # compatibility array. Preserve every stable identifier, including Guage.
++    class_block(text, ("CfgWeapons", "LoBoMUZIHDmag"))
++    text = _literal_in_class(text, ("CfgWeapons", "LoBoMUZIbase"),
++                             "LoBoMUZIDDmag", "LoBoMUZIHDmag")
++    for name in ("LoBo_m590base", "LoBo_spas12base", "LoBo_r870base"):
++        text = _literal_in_class(text, ("CfgWeapons", name),
++                                 '"12 Guage Shells"', '"12 Gauge Shells"', expected=2)
++    return text
++
++
++def _airammo(text):
++    # One warhead policy, keeping guidance, cost, model and magazine data intact.
++    desired = {"hit": 1000, "indirectHit": 500, "indirectHitRange": 15}
++    for name in ("LoBo_MK82", "LoBo_MK82_LDGB"):
++        for key, value in desired.items():
++            if _number(text, ("CfgAmmo", name), key) != value:
++                raise ValueError(f"Mk82 family reference changed: {name}/{key}")
++    for key, old in (("hit", 500), ("indirectHit", 150), ("indirectHitRange", 10)):
++        text = _change(text, ("CfgAmmo", "LoBo_GBU12"), key, old, desired[key])
++    return text
++
++
++def _terror(text):
++    text = _change(text, ("CfgAmmo", "LoBo_Carbomb"), "indirectHitRange", 50, 10)
++    for key, old in (("indirectHit", 5), ("indirectHitRange", 1)):
++        text = _change(text, ("CfgAmmo", "loBo_DShK_Ter"), key, old, 0)
++    return text
++
++
++def _mortars(text):
++    for name in ("LoBo_120MortarShellHE", "LoBo_M160MortarShell"):
++        for key, value in (("indirectHit", 45), ("indirectHitRange", 8)):
++            if _number(text, ("CfgAmmo", name), key) != value:
++                raise ValueError(f"Mortar comparison baseline changed: {name}/{key}")
++    return text
++
++
++def repair(documents: dict[str, str]) -> dict[str, str]:
++    """Return changed config members only, raising before callers write anything."""
++    transforms = {"loboammo": _ammo, "loboweapons": _weapons,
++                  "lobo_airammo": _airammo, "loboter": _terror, "loboart": _mortars}
++    changed = {}
++    for addon, transform in transforms.items():
++        key = f"{addon}/config.cpp"
++        if key not in documents:
++            raise ValueError(f"Missing required repair source {key}")
++        updated = transform(documents[key])
++        if updated != documents[key]:
++            changed[key] = updated
++    return changed
++
++
++def blast_sample(strength, radius, distance, *, unshielded=1.0, armor=1.0):
++    """Offline point-sample of CalcDammage, not a target lethality simulation.
++
++    The four-radius spatial search/finite object bounds are reported separately;
++    do not treat this pure attenuation curve as a radial gameplay cutoff.
++    """
++    values = (strength, radius, distance, unshielded, armor)
++    if not all(math.isfinite(v) for v in values):
++        raise ValueError("Non-finite blast scenario")
++    if strength < 0 or radius < 0 or distance < 0 or not 0 <= unshielded <= 1 or armor <= 0:
++        raise ValueError("Invalid blast scenario")
++    if strength == 0 or radius == 0:
++        return 0.0
++    attenuation = 1 if distance <= radius else (radius / distance) ** 4
++    return strength * attenuation * unshielded / armor
++
++
++def blast_comparisons():
++    """Reproducible numeric comparison rows for the no-game balance report."""
++    families = (
++        ("60mm HVMS", 15, 30, 4), ("120/160mm mortar baseline", 45, 8, 8),
++        ("C4 car bomb", 900, 50, 10), ("Ter car bomb", 500, 50, 10),
++    )
++    rows = []
++    for name, strength, old_radius, new_radius in families:
++        for distance in (0, 5, 10, 20, 40, 50):
++            for cover in (1.0, 0.25, 0.0):
++                for armor in (1.0, 10.0):
++                    rows.append({"family": name, "distance": distance,
++                                 "unshielded": cover, "armor": armor,
++                                 "before": blast_sample(strength, old_radius, distance,
++                                                       unshielded=cover, armor=armor),
++                                 "after": blast_sample(strength, new_radius, distance,
++                                                      unshielded=cover, armor=armor),
++                                 "search_radius_before": old_radius * 4,
++                                 "search_radius_after": new_radius * 4})
++    return rows
+diff --git a/arma_CWR/tools/lobo/repair/audit.py b/arma_CWR/tools/lobo/repair/audit.py
+new file mode 100644
+index 00000000..e190836a
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair/audit.py
+@@ -0,0 +1,91 @@
++"""Conservative offline diagnostics: structural facts, never gameplay claims."""
++from collections import Counter
++import re
++from .config import assignment_at, class_spans, tokens, value_end
++
++SECTIONS={'cfgammo','cfgweapons','cfgvehicles'}
++REFERENCE_KEYS={'ammo':'cfgammo','weapons':'cfgweapons','magazines':'cfgweapons','crew':'cfgvehicles'}
++STANDARD_HITS={'hitengine','hithull','hitturret','hitgun','hitltrack','hitrtrack',
++               'hitbody','hithead','hithands','hitlegs','hitfuel','hitrglass','hitlglass'}
++
++def assignments(text):
++    ts=tokens(text);i=0
++    while i<len(ts)-1:
++        key=ts[i].text.lower();start=assignment_at(ts,i)
++        if start is None:i+=1;continue
++        j=value_end(text,ts,start)
++        yield key,[t.text.strip('"') for t in ts[start:j] if t.text not in ('{','}',',')]
++        i=max(i+1,j)
++
++def config_references(documents):
++    known={s:set() for s in SECTIONS};refs=[]
++    for file,text in documents.items():
++        if not file.endswith('/config.cpp'):continue
++        for section,a,b in class_spans(text):
++            if section.lower() not in SECTIONS:continue
++            body=text[a:b]
++            for name,c,d in class_spans(body):
++                known[section.lower()].add(name.lower())
++                for key,values in assignments(body[c:d]):
++                    if key not in REFERENCE_KEYS:continue
++                    for value in values:
++                        if value.lower().startswith('lobo'):
++                            refs.append((file,section,name,key,value))
++    return [{'kind':'unresolved_lobo_class','file':f,'class':s+'/'+n,'property':k,'reference':v}
++            for f,s,n,k,v in refs if v.lower() not in known[REFERENCE_KEYS[k]]]
++
++def script_candidates(file,text):
++    # SQS semicolon comments and case-insensitive labels. Unreachable code and
++    # dynamically supplied locals cannot be proven by this heuristic.
++    lines=[(i,l) for i,l in enumerate(text.splitlines(),1) if not l.lstrip().startswith(';')]
++    labels=[(i,m.group(1).lower()) for i,l in lines if (m:=re.match(r'\s*#\s*(\S+)',l))]
++    counts=Counter(n for i,n in labels);out=[]
++    for i,n in labels:
++        if counts[n]>1:out.append({'kind':'duplicate_label','file':file,'line':i,'label':n})
++    for i,l in lines:
++        for label in re.findall(r'\bgoto\s+"([^"\n]+)"',l,re.I):
++            if label.lower() not in counts:
++                out.append({'kind':'missing_label','file':file,'line':i,'label':label,
++                            'terminal_spelling':label.lower() in ('exit','end','ende','done')})
++    code='\n'.join(l for _,l in lines)
++    declared={m.group(1).lower() for m in re.finditer(r'\b(_\w+)\s*=(?!=)',code)}|{'_this','_x','_exception'}
++    # Focus on callable locals: missing function initialization is the defect
++    # family from issue #69. General variable dataflow needs a real interpreter.
++    for i,l in lines:
++        for name in re.findall(r'\bcall\s+(_\w+)\b',l,re.I):
++            if name.lower() not in declared:out.append({'kind':'uninitialized_local_call_candidate','file':file,'line':i,'variable':name})
++    return out
++
++def hitpoint_candidates(documents):
++    out=[]
++    for file,text in documents.items():
++        if not file.endswith('/config.cpp'):continue
++        for section,a,b in class_spans(text):
++            if section.lower()!='cfgvehicles':continue
++            body=text[a:b]
++            for name,c,d in class_spans(body):
++                for child,_,_ in class_spans(body[c:d]):
++                    if child.lower().startswith('hit') and child.lower() not in STANDARD_HITS:
++                        out.append({'kind':'custom_hitpoint_candidate','file':file,'class':name,'hitpoint':child})
++    return out
++
++def audit(documents):
++    parsed={};unparsed=[];candidates=[]
++    for file,text in documents.items():
++        if not file.endswith('/config.cpp'):continue
++        try:class_spans(text)
++        except ValueError as exc:
++            unparsed.append(file)
++            candidates.append({'kind':'unsupported_parse','file':file,'reason':str(exc)})
++        else:parsed[file]=text
++    errors=config_references(parsed)
++    if unparsed:
++        # Omitted source can contain definitions for apparent missing references.
++        for finding in errors:finding['uncertain_due_to_unparsed_configs']=True
++        candidates.extend(errors);errors=[]
++    candidates.extend(hitpoint_candidates(parsed))
++    for file,text in documents.items():
++        if file.endswith('.sqs'):candidates.extend(script_candidates(file,text))
++    return {'errors':errors,'candidates':candidates,'unparsed_configs':unparsed,
++            'coverage_complete':not unparsed,'note':
++            'Unresolved LoBo references are strict errors only with complete config coverage. Unparsed configs make reference findings uncertain. Script/dataflow/custom-hitpoint candidates require reachability and engine review; they are not confirmed gameplay defects.'}
+diff --git a/arma_CWR/tools/lobo/repair/config.py b/arma_CWR/tools/lobo/repair/config.py
+new file mode 100644
+index 00000000..df0bd07e
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair/config.py
+@@ -0,0 +1,112 @@
++"""Small source-preserving helpers for legacy OFP config repairs.
++
++Only class/property structure is parsed; macro evaluation is left to PoseidonTools.
++Strings, doubled quotes, comments and array braces cannot create fake classes.
++"""
++from dataclasses import dataclass
++import re
++
++_TOKEN = re.compile(r'//[^\r\n]*|/\*[\s\S]*?\*/|"(?:""|[^"\r\n])*"|[A-Za-z_][\w]*|[^\s]', re.MULTILINE)
++
++@dataclass(frozen=True)
++class Token:
++    text: str
++    start: int
++    end: int
++
++def tokens(text):
++    out=[]
++    for m in _TOKEN.finditer(text):
++        value=m.group()
++        if value=='"' or (value=='/' and text[m.start():].startswith('/*')):
++            raise ValueError('Unterminated config string or block comment')
++        if not value.startswith(('//','/*')):out.append(Token(value,m.start(),m.end()))
++    return out
++
++def assignment_at(ts, i):
++    """Return the value start for an identifier[optional []]= assignment."""
++    if i>=len(ts) or not re.fullmatch(r'[A-Za-z_]\w*',ts[i].text):return None
++    j=i+1
++    if j+1<len(ts) and ts[j].text=='[' and ts[j+1].text==']':j+=2
++    return j+1 if j<len(ts) and ts[j].text=='=' else None
++
++def value_end(text, ts, start):
++    """Legacy newline termination, without truncating continued expressions."""
++    j=start;depth=0
++    while j<len(ts):
++        value=ts[j].text
++        if depth==0:
++            if value in (';', '}'):break
++            if j>start and '\n' in text[ts[j-1].end:ts[j].start]:
++                if value.lower()=='class' or assignment_at(ts,j) is not None:break
++        if value=='{':depth+=1
++        elif value=='}':depth-=1
++        j+=1
++    if depth:raise ValueError('Unbalanced config array braces')
++    return j
++
++def _matching(ts, at, opening='{', closing='}'):
++    depth=0
++    for i in range(at,len(ts)):
++        if ts[i].text==opening: depth+=1
++        elif ts[i].text==closing:
++            depth-=1
++            if depth==0:return i
++    raise ValueError('Unbalanced config braces')
++
++def class_spans(text):
++    """Return direct named class spans (name, inner start, closing brace offset)."""
++    ts=tokens(text); out=[]; i=0
++    while i<len(ts):
++        if ts[i].text.lower()=='class' and i+1<len(ts):
++            name=ts[i+1].text; j=i+2
++            while j<len(ts) and ts[j].text not in ('{',';'):j+=1
++            if j<len(ts) and ts[j].text=='{':
++                end=_matching(ts,j); out.append((name,ts[j].end,ts[end].start)); i=end+1; continue
++            i=j+1;continue
++        if ts[i].text=='{':i=_matching(ts,i)+1
++        elif ts[i].text=='}':raise ValueError('Unmatched config closing brace')
++        else:i+=1
++    return out
++
++def class_block(text, path):
++    """Return (inner_start, closing_brace_offset) for one case-insensitive path."""
++    start,end=0,len(text)
++    for part in path:
++        matches=[(a,b) for n,a,b in class_spans(text[start:end]) if n.lower()==part.lower()]
++        if len(matches)!=1:raise ValueError(f'Expected exactly one class {"/".join(path)}; found {len(matches)} at {part}')
++        a,b=matches[0];end=start+b;start+=a
++    return start,end
++
++def property_span(text,path,key):
++    """Locate direct scalar value; accepts legacy newline-terminated assignments."""
++    start,end=class_block(text,path);ts=tokens(text[start:end]); found=[];i=0
++    while i<len(ts):
++        if ts[i].text=='{':i=_matching(ts,i)+1;continue
++        if ts[i].text.lower()==key.lower() and i+1<len(ts) and ts[i+1].text=='=':
++            a=i+2;j=value_end(text[start:end],ts,a)
++            if j==a:raise ValueError(f'Empty value {path}/{key}')
++            found.append((start+ts[a].start,start+ts[j-1].end));i=j;continue
++        i+=1
++    if len(found)>1:raise ValueError(f'Duplicate property {path}/{key}')
++    return found[0] if found else None
++
++def scalar(text,path,key):
++    span=property_span(text,path,key)
++    return text[slice(*span)] if span else None
++
++def set_scalar(text,path,key,value):
++    value=str(value);span=property_span(text,path,key)
++    if span:return text[:span[0]]+value+text[span[1]:]
++    _,end=class_block(text,path);nl='\r\n' if '\r\n' in text else '\n'
++    return text[:end]+f'{nl}\t\t{key}={value};{nl}\t'+text[end:]
++
++def replace_exact(text,old,new,expected=1):
++    """Idempotent substitution, rejecting unexpected occurrences or mixed states."""
++    if old==new:return text
++    count=text.count(old)
++    if count==0:
++        if text.count(new)!=expected:raise ValueError(f'Expected {expected} repaired occurrence(s): {new[:80]}')
++        return text
++    if count!=expected or new in text:raise ValueError(f'Unexpected source occurrences: {old[:80]}')
++    return text.replace(old,new)
+diff --git a/arma_CWR/tools/lobo/repair/models.py b/arma_CWR/tools/lobo/repair/models.py
+new file mode 100644
+index 00000000..1847667c
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair/models.py
+@@ -0,0 +1,292 @@
++"""Verified component/model repairs; no new damage counters or engine protocol.
++
++Only Hitpoints memberships change: existing hull coverage is expanded, missing
++legacy-name aliases are appended. Geometry, animation and collision stay intact.
++"""
++from dataclasses import dataclass
++import math
++import re
++import struct
++
++from .config import class_block, class_spans, scalar, set_scalar, tokens
++
++ADDONS = ("coc_diver", "lobo_m1", "lobomerkava2", "lobomerkava4")
++_MARKER = "// UD supported component armor; see tools/lobo/ARMOR-MODELS.md."
++_SUPPORTED = {"hitengine", "hithull", "hitturret", "hitgun", "hitltrack", "hitrtrack"}
++_M1 = ("lobo_m1a1e", "lobo_m1a1e_r", "lobo_m1a2e", "lobo_m1a2e_r")
++MODEL_MEMBERS = tuple(f"lobo_m1/{name}.p3d" for name in _M1) + (
++    "lobomerkava2/lobomerkava2.p3d", "lobomerkava2/lobomerkava3.p3d",
++)
++_M1_UNIONS = {
++    "hull": ("Hull", "FHull", "BHull", "LHull", "RHull"),
++    "turet": ("Turret", "FTurret", "BTurret", "LTurret", "RTurret", "TTurret"),
++    "pasL": ("LTrack",),
++    "pasP": ("RTrack",),
++}
++_MERKAVA_UNIONS = {
++    "hull": ("hull", "fhull"),
++    "turet": ("turetf", "turett", "turetb"),
++}
++
++
++def _value(value):
++    return value.strip().strip('"').casefold() if value is not None else None
++
++
++def _checked(text, path, key, old, new):
++    value = _value(scalar(text, path, key))
++    if value not in {_value(str(old)), _value(str(new))}:
++        raise ValueError(f"Unexpected {path}/{key}: {value!r}")
++    return set_scalar(text, path, key, new)
++
++
++def _remove_class(text, path, name, expected, repaired):
++    a, b = class_block(text, path)
++    matches = [(n, x, y) for n, x, y in class_spans(text[a:b]) if n.casefold() == name.casefold()]
++    if not matches:
++        if repaired:
++            return text
++        raise ValueError(f"Missing original class {path}/{name}")
++    if len(matches) != 1 or repaired:
++        raise ValueError(f"Mixed or duplicate armor repair state: {path}/{name}")
++    _, x, y = matches[0]
++    child = path + (name,)
++    for key, value in expected.items():
++        if _value(scalar(text, child, key)) != _value(str(value)):
++            raise ValueError(f"Unexpected directional armor {child}/{key}")
++    ts = tokens(text[a+x:a+y])
++    keys = {ts[i].text.casefold() for i in range(len(ts)-1) if ts[i+1].text == '='}
++    if keys != {key.casefold() for key in expected}:
++        raise ValueError(f"Unknown properties in {child}")
++    # Match only the already parsed, direct class declaration.
++    head = text[a:a+x]
++    starts = list(re.finditer(r'\bclass\s+' + re.escape(name) + r'\s*\{\s*$', head, re.I))
++    if len(starts) != 1:
++        raise ValueError(f"Unexpected class declaration {child}")
++    start = a + starts[0].start()
++    end = a + y + 1
++    if text[end:end+1] != ';':
++        raise ValueError(f"Missing class terminator {child}")
++    return text[:start] + text[end+1:]
++
++
++def _remove_property(text, path, name, expected, repaired):
++    a, b = class_block(text, path)
++    actual = scalar(text, path, name)
++    if actual is None:
++        if repaired:
++            return text
++        raise ValueError(f"Missing original armor property {path}/{name}")
++    if repaired or _value(actual) != _value(str(expected)):
++        raise ValueError(f"Unexpected armor property {path}/{name}")
++    body = text[a:b]
++    pattern = r'(?m)^[ \t]*' + re.escape(name) + r'\s*=\s*' + re.escape(actual) + r'\s*;[ \t]*(?:\r?\n)?'
++    body, count = re.subn(pattern, '', body, flags=re.I)
++    if count != 1:
++        raise ValueError(f"Unexpected armor assignment {path}/{name}")
++    return text[:a] + body + text[b:]
++
++
++def _component(text, path, name, armor, material, selection):
++    a, b = class_block(text, path)
++    present = [n for n, _, _ in class_spans(text[a:b]) if n.casefold() == name.casefold()]
++    if present:
++        child = path + (name,)
++        expected = {"armor": str(armor), "material": str(material), "name": selection, "passThrough": "1"}
++        if any(_value(scalar(text, child, k)) != _value(v) for k, v in expected.items()):
++            raise ValueError(f"Unexpected supported component {child}")
++        return text
++    nl = '\r\n' if '\r\n' in text else '\n'
++    line = f'{nl}\t\tclass {name} {{armor={armor};material={material};name={selection};passThrough=1;}};{nl}\t'
++    return text[:b] + line + text[b:]
++
++
++def _armor(text, vehicle, directional, fields, *, hull, turret, add_turret=False):
++    path = ("CfgVehicles", vehicle)
++    a, b = class_block(text, path)
++    repaired = _MARKER in text[a:b]
++    for name, armor, material, selection in directional:
++        expected = {"armor": armor, "material": material, "name": selection, "passThrough": 1}
++        text = _remove_class(text, path, name, expected, repaired)
++    for name, value in fields.items():
++        text = _remove_property(text, path, name, value, repaired)
++    if hull:
++        text = _checked(text, path + ("HitHull",), "name", "hull", hull)
++    if add_turret:
++        text = _component(text, path, "HitTurret", 1, 51, turret)
++    elif turret:
++        text = _checked(text, path + ("HitTurret",), "name", "turet", turret)
++    a, b = class_block(text, path)
++    unsupported = [n for n, _, _ in class_spans(text[a:b]) if n.lower().startswith('hit') and n.lower() not in _SUPPORTED]
++    if unsupported:
++        raise ValueError(f"Unrecognized hitpoint definitions in {path}: {unsupported}")
++    if not repaired:
++        nl = '\r\n' if '\r\n' in text else '\n'
++        text = text[:a] + nl + '\t\t' + _MARKER + text[a:]
++    return text
++
++
++def repair(documents: dict[str, str]) -> dict[str, str]:
++    changed = {}
++    key = "coc_diver/config.cpp"
++    if key in documents:
++        text = documents[key]
++        for name, old in (("CoC_Diverdes", r'"\seals\KMMwood.p3d"'),
++                          ("CoC_DiverSaboteurj", r'"\seals\KMMwood1.p3d"')):
++            text = _checked(text, ("CfgVehicles", name), "model", old, r'"\CoC_Diver\CoC_Diver.p3d"')
++        if text != documents[key]:
++            changed[key] = text
++    key = "lobo_m1/config.cpp"
++    if key in documents:
++        directional = [("Hit" + side + "Hull", armor, 50, side + "hull")
++                       for side, armor in (("F", "1.6"), ("B", "0.6"), ("R", "1.25"), ("L", "1.25"))]
++        directional += [("Hit" + side + "Turret", armor, 51, side + "turet")
++                        for side, armor in (("F", "1.5"), ("B", "0.7"), ("L", "1.25"), ("R", "1.25"), ("T", "0.5"))]
++        fields = {"armor" + name[3:]: armor for name, armor, _, _ in directional}
++        text = _armor(documents[key], "LoBo_M1", directional, fields,
++                      hull="hull", turret="turet")
++        for component, selection in (("HitLTrack", "pasL"), ("HitRTrack", "pasP")):
++            text = _checked(text, ("CfgVehicles", "LoBo_M1", component), "name", selection, selection)
++        if text != documents[key]:
++            changed[key] = text
++    targets = {
++        "lobomerkava2/config.cpp": (("LoBoMerkava1", "1.0", ("1.0", "0.7", "0.75", "1.0"), "hull", "turet"),
++                                   ("LoBoMerkava2", "1.25", ("1.5", "0.7", "0.75", "1.5"), "hull", "turet"),
++                                   ("LoBoMerkava2C", None, ("1.5", "2", "0.75", "1.5"), None, None)),
++        "lobomerkava4/config.cpp": (("LoBoMerkava4DT", "1.25", ("1.5", "1.5", "1.5", "1.5"), "hull", "turet"),),
++    }
++    for key, vehicles in targets.items():
++        if key not in documents:
++            continue
++        text = documents[key]
++        for vehicle, front_hull, values, hull, turret in vehicles:
++            directional = [] if front_hull is None else [
++                ("HitTurretFront", "1.25", 51, "turetf"), ("HitFHull", front_hull, 50, "fhull"),
++                ("HitTurretTop", "1", 51, "turett"), ("HitTurretBack", "0.80", 51, "turetb"),
++            ]
++            fields = dict(zip(("armorFHull", "armorTurretTop", "armorTurretBack", "armorTurretFront"), values))
++            text = _armor(text, vehicle, directional, fields, hull=hull, turret=turret, add_turret=turret is not None)
++        if text != documents[key]:
++            changed[key] = text
++    return changed
++
++
++@dataclass(frozen=True)
++class _Lod:
++    start: int
++    end: int
++    point_count: int
++    face_count: int
++    resolution: float
++    end_tag: int
++    selections: dict[str, bytes | None]
++    payload_offsets: dict[str, int]
++
++
++def _lods(data: bytes) -> list[_Lod]:
++    """Bounded reader for the known MLOD 257 / SP3X v153 fixed-width format.
++
++    Layout matches MLODStructures.hpp. Writes replace verified selection payloads
++    or insert before the Hitpoints end tag, never binary substring guesses.
++    """
++    def need(offset, length):
++        if offset < 0 or length < 0 or offset + length > len(data):
++            raise ValueError("Truncated or invalid MLOD")
++
++    need(0, 12)
++    signature, version, count = struct.unpack_from('<4sII', data)
++    if signature != b'MLOD' or version != 257 or not 1 <= count <= 100:
++        raise ValueError("Expected supported MLOD 257; no ODOL rewriting")
++    pos = 12
++    lods = []
++    for _ in range(count):
++        start = pos
++        need(pos, 28)
++        signature, header, version, points, normals, faces, flags = struct.unpack_from('<4s6i', data, pos)
++        if signature != b'SP3X' or header < 28 or version != 153 or min(points, normals, faces) < 0:
++            raise ValueError("Unsupported MLOD SP3X layout")
++        amount = header + points * 16 + normals * 12 + faces * 104
++        need(pos, amount + 4)
++        pos += amount
++        if data[pos:pos+4] != b'TAGG':
++            raise ValueError("Expected MLOD TAGG section")
++        pos += 4
++        selections = {}
++        payload_offsets = {}
++        while True:
++            need(pos, 68)
++            tag_start = pos
++            raw, size = struct.unpack_from('<64si', data, pos)
++            name = raw.split(b'\0', 1)[0].decode('ascii')
++            pos += 68
++            need(pos, size)
++            if name == '#EndOfFile#':
++                if size != 0:
++                    raise ValueError("Invalid MLOD end tag")
++                break
++            if name and name[0] not in '#-.':
++                if size != points + faces:
++                    raise ValueError(f"Invalid named selection {name}")
++                folded = name.casefold()
++                if folded in selections:
++                    # Some unrelated source animation tags differ only in case.
++                    # Never choose between duplicates in a repair's own inputs.
++                    selections[folded] = None
++                else:
++                    selections[folded] = data[pos:pos+size]
++                    payload_offsets[folded] = pos
++            pos += size
++        need(pos, 4)
++        resolution = struct.unpack_from('<f', data, pos)[0]
++        if not math.isfinite(resolution):
++            raise ValueError("Invalid MLOD resolution")
++        pos += 4
++        lods.append(_Lod(start, pos, points, faces, resolution, tag_start, selections, payload_offsets))
++    # Oxygen's legacy default-texture-path trailer is present in the installed
++    # models. The engine reader ignores it; preserve all 32 bytes verbatim.
++    if pos != len(data) and not (len(data) - pos == 32 and data[pos:pos+6] == b'data\\\0'):
++        raise ValueError("Unexpected trailing MLOD data")
++    return lods
++
++
++def add_hitpoint_unions(data: bytes, unions: dict[str, tuple[str, ...]]) -> bytes:
++    lods = [lod for lod in _lods(data) if math.isclose(lod.resolution, 5e15, rel_tol=1e-6)]
++    if len(lods) != 1:
++        raise ValueError("Expected exactly one Hitpoints LOD")
++    lod = lods[0]
++    additions = []
++    fixed = bytearray(data)
++    for target, sources in unions.items():
++        arrays = []
++        for source in sources:
++            payload = lod.selections.get(source.casefold())
++            if payload is None or not any(payload[:lod.point_count]):
++                raise ValueError(f"Missing, duplicate, or empty Hitpoints selection {source}")
++            arrays.append(payload)
++        union = bytes(max(values) for values in zip(*arrays))
++        if target.casefold() in lod.selections:
++            if target.casefold() in {s.casefold() for s in sources}:
++                # Expand an existing component's membership without renaming it:
++                # setHit / Dammaged expose this model selection name to scripts.
++                offset = lod.payload_offsets[target.casefold()]
++                fixed[offset:offset+len(union)] = union
++            elif lod.selections[target.casefold()] != union:
++                raise ValueError(f"Existing {target} is not the expected Hitpoints union")
++            continue
++        name = target.encode('ascii')
++        if not name or len(name) > 63 or name[:1] in (b'#', b'-', b'.'):
++            raise ValueError("Invalid union name")
++        additions.append(struct.pack('<64sI', name, len(union)) + union)
++    return bytes(fixed[:lod.end_tag]) + b''.join(additions) + bytes(fixed[lod.end_tag:])
++
++
++def repair_models(documents: dict[str, bytes]) -> dict[str, bytes]:
++    changed = {}
++    for key in MODEL_MEMBERS:
++        if key not in documents:
++            continue
++        unions = _M1_UNIONS if key.startswith('lobo_m1/') else _MERKAVA_UNIONS
++        fixed = add_hitpoint_unions(documents[key], unions)
++        if fixed != documents[key]:
++            changed[key] = fixed
++    return changed
+diff --git a/arma_CWR/tools/lobo/repair/pbo.py b/arma_CWR/tools/lobo/repair/pbo.py
+new file mode 100644
+index 00000000..763788dc
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair/pbo.py
+@@ -0,0 +1,105 @@
++"""Preserve PBO member bytes/metadata while replacing explicitly selected members."""
++from dataclasses import dataclass
++import hashlib
++from pathlib import Path
++import struct
++import subprocess
++
++VERS=0x56657273
++CPRS=0x43707273
++@dataclass(frozen=True)
++class Entry:
++    name: bytes
++    fields: tuple
++    offset: int
++    @property
++    def key(self):return normalize(self.name.decode('latin1'))
++
++def normalize(name):
++    value=name.replace('\\','/').lower()
++    if value.startswith('/') or ':' in value or any(p in ('..','.', '') for p in value.split('/')):
++        raise ValueError(f'Unsafe PBO member: {name}')
++    return value
++
++class Archive:
++    def __init__(self,data):
++        self.data=data;self.entries=[];p=0;prefix_end=0;seen=set()
++        while True:
++            z=data.find(b'\0',p)
++            if z<0 or z+21>len(data):raise ValueError('Truncated PBO header')
++            name=data[p:z];p=z+1;fields=struct.unpack_from('<5I',data,p);p+=20
++            if not name:
++                if fields[0]==VERS and not self.entries and not prefix_end:
++                    while True:
++                        z=data.find(b'\0',p)
++                        if z<0:raise ValueError('Truncated PBO property key')
++                        empty=z==p;p=z+1
++                        if empty:break
++                        z=data.find(b'\0',p)
++                        if z<0:raise ValueError('Truncated PBO property value')
++                        p=z+1
++                    prefix_end=p;continue
++                self.terminator=data[p-21:p];break
++            key=normalize(name.decode('latin1'))
++            if key in seen:raise ValueError(f'Duplicate PBO member: {key}')
++            seen.add(key);self.entries.append(Entry(name,fields,0))
++        self.prefix=data[:prefix_end];self.header_end=p
++        for i,e in enumerate(self.entries):
++            self.entries[i]=Entry(e.name,e.fields,p);p+=e.fields[4]
++            if p>len(data):raise ValueError('PBO payload exceeds archive size')
++        self.trailer=data[p:];self.payload_end=p
++        self.by_key={e.key:e for e in self.entries}
++        self.checksummed=len(self.trailer)==21 and self.trailer[:1]==b'\0'
++        self.stuffpbo=len(self.trailer)==17 and self.trailer[2:]==b'\x01StuffPBO V1.0b'
++        if self.checksummed:
++            if hashlib.sha1(data[:p]).digest()!=self.trailer[1:]:raise ValueError('PBO checksum mismatch')
++        elif self.trailer:
++            # Original OFP textual packer signatures are valid. A binary tail,
++            # including a checksum with its delimiter consumed by truncated
++            # payload, cannot safely be treated as a signature.
++            if not self.stuffpbo and not all(32<=b<=126 or b in (9,10,13) for b in self.trailer):
++                raise ValueError('Malformed PBO checksum or unsupported binary trailer')
++        # Some original OFP packers append textual signatures. Keep these opaque.
++
++    def stored(self,entry):return memoryview(self.data)[entry.offset:entry.offset+entry.fields[4]]
++
++    def read(self,key,path=None,tools=None):
++        e=self.by_key[normalize(key)]
++        if e.fields[0]==0:return bytes(self.stored(e))
++        if tools is None or path is None:raise ValueError(f'Compressed member {key} needs PoseidonTools')
++        if Path(path).read_bytes()!=self.data:raise ValueError(f'Archive changed before compressed read: {path}')
++        result=subprocess.run([str(tools),'pbo','show',str(path),e.name.decode('latin1')],capture_output=True)
++        if Path(path).read_bytes()!=self.data:raise ValueError(f'Archive changed during compressed read: {path}')
++        if result.returncode:raise ValueError(f'Cannot decode {path}/{key}: {result.stderr.decode(errors="replace")}')
++        if len(result.stdout)!=e.fields[1]:raise ValueError(f'Decoded size mismatch: {path}/{key}')
++        return result.stdout
++
++    def replace(self,replacements):
++        if replacements and self.stuffpbo:raise ValueError('Legacy StuffPBO checksum rewriting is unsupported')
++        normalized={}
++        for key,value in replacements.items():
++            key=normalize(key)
++            if key in normalized:raise ValueError(f'Duplicate replacement member: {key}')
++            normalized[key]=value
++        replacements=normalized
++        unknown=set(replacements)-self.by_key.keys()
++        if unknown:raise ValueError(f'Cannot add unknown PBO members: {sorted(unknown)}')
++        headers=[self.prefix];payloads=[]
++        for e in self.entries:
++            if e.key in replacements:
++                payload=replacements[e.key]
++                if not isinstance(payload,bytes):raise TypeError('PBO replacement must be bytes')
++                # Converted members are uncompressed; other records remain exact.
++                fields=(0,0,e.fields[2],e.fields[3],len(payload))
++            else:payload=self.stored(e);fields=e.fields
++            headers.extend((e.name+b'\0',struct.pack('<5I',*fields)));payloads.append(payload)
++        body=b''.join(headers+[self.terminator]+payloads)
++        tail=b'\0'+hashlib.sha1(body).digest() if self.checksummed else self.trailer
++        result=body+tail
++        after=Archive(result)
++        if list(after.by_key)!=list(self.by_key):raise ValueError('PBO member order changed')
++        for e in self.entries:
++            if e.key not in replacements:
++                a=after.by_key[e.key]
++                if e.fields!=a.fields or self.stored(e)!=after.stored(a):raise ValueError(f'Untouched member changed: {e.key}')
++        return result
+diff --git a/arma_CWR/tools/lobo/repair/scripts.py b/arma_CWR/tools/lobo/repair/scripts.py
+new file mode 100644
+index 00000000..969e8a5a
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair/scripts.py
+@@ -0,0 +1,241 @@
++"""Small, fail-closed transformations for issue 69's original LoBo SQS files.
++
++No bundled script is redistributed here. The default wreck query uses UD's
++nearestObjects command. The explicit Classic profile uses only the player and
++wreck groups; it cannot discover unrelated nearby groups. Apply profiles to
++separate mod copies, rather than distributing the UD query as Classic compatible.
++"""
++
++from collections import Counter
++import re
++
++
++MISSILE_PATHS = tuple(
++    f"{addon}/{directory}/{name}.sqs"
++    for addon, directory, names in (
++        ("lobo_a4", "scripts", "firemissiles_a firemissiles_a2 firemissiles_a3"),
++        ("lobo_f4", "scripts", "firemissiles_air firemissiles_aire firemissiles_recc firemissiles_ww"),
++        ("lobo_kfir", "scripts", "firemissiles_cas1"),
++        ("lobof15", "scr", "fire_c_aa fire_e fire_e_a120 fire_e_aa fire_e_cbu fire_e_gbu fire_e_mav fire_e_mk84"),
++        ("lobof16", "scr", "firemissiles_aa firemissiles_ag firemissiles_f16i_aa firemissiles_f16i_bomber firemissiles_f16i_cas firemissiles_f16i_ps firemissiles_f16i_sead firemissiles_f16i_stand firemissiles_ps firemissiles_suw"),
++        ("lobof5", "scripts", "firemissiles firemissiles2 firemissiles3"),
++        ("lobomig", "mig23/scr", "firemissiles_ga firemissiles_ic"),
++        ("lobomig", "mig25/sqs", "firemissiles_cap1"),
++        ("lobomig", "mig29/scripts", "firemissiles_cap1"),
++        ("lobomig", "scripts", "firemissiles_cas1 firemissiles_cas2 firemissiles_ic1 firemissiles_ic2 firemissiles_mr1 firemissiles_mr2"),
++        ("lobomig", "scripts/syria", "firemissiles_cas1 firemissiles_ic1"),
++    )
++    for name in names.split()
++)
++
++FIRE_PATHS = tuple(
++    f"{addon}/{directory}/fire.sqs"
++    for addon, directory in (
++        ("lobo_airammo", "scripts/smoke"),
++        ("lobo_btr60", "scripts"),
++        ("lobo_fab", "lcm/scripts"),
++        ("lobo_fab", "saar5/scripts"),
++        ("lobo_fab", "scripts"),
++        ("lobo_zelda", "scripts"),
++        ("lobo_zu23", "scripts"),
++        ("lobocen", "scripts"),
++        ("loboegapc", "scripts"),
++        ("lobof15", "scr"),
++        ("lobof16", "scr"),
++        ("lobom60", "scripts"),
++        ("lobomerkava2", "scripts"),
++        ("lobomerkava4", "scripts"),
++        ("lobosa6", "scripts"),
++        ("loboter", "scripts"),
++    )
++)
++NUMBER_PATHS = ("lobo_fab/lcm/scripts/number.sqs", "lobo_fab/lcm/scripts/number2.sqs")
++DISPLAY_PATHS = ("lobojordan/config.cpp", "lobosa6/config.cpp", "loboweapat/config.cpp")
++ADDONS = tuple(sorted({p.split("/")[0] for p in MISSILE_PATHS + FIRE_PATHS + NUMBER_PATHS + DISPLAY_PATHS}))
++
++
++def _replace(text: str, before: str, after: str, count: int = 1) -> str:
++    """Accept original, repaired, or partially repaired known occurrences only."""
++    repaired = text.count(after)
++    remaining = text.replace(after, "").count(before)
++    if repaired + remaining != count:
++        raise ValueError(f"Unexpected script source: expected {count} occurrence(s) of {before!r}")
++    # A replacement may include the original anchor. Protect repaired occurrences.
++    return after.join(part.replace(before, after) for part in text.split(after))
++
++
++def _active_lines(text: str) -> list[str]:
++    return [line for line in text.splitlines() if not line.lstrip().startswith(";")]
++
++
++def script_findings(text: str) -> list[str]:
++    """Conservative static audit, not a full SQS parser or dataflow proof.
++
++    Labels are case-insensitive in Script::GoTo. Ignore full-line SQS comments,
++    and quoted asset paths when finding locals. String-based forEach code remains
++    opaque: the supported repaired files use _x as the engine-provided iterator.
++    A never-assigned local is actionable; an assignment alone does not prove every
++    branch initializes it. The repaired wreck branch is tested separately.
++    """
++    code = "\n".join(_active_lines(text))
++    labels = Counter(label.lower() for label in re.findall(r"^\s*#([^\s;]+)", code, re.M))
++    jumps = {label.lower() for label in re.findall(r'\bgoto\s+"([^"\n]+)"', code, re.I)}
++    findings = [f"missing label: {label}" for label in sorted(jumps - labels.keys())]
++    findings += [f"duplicate label: {label}" for label, n in sorted(labels.items()) if n > 1]
++    unquoted = re.sub(r'"(?:[^"\n]|"")*"', '""', code)
++    assigned = {name.lower() for name in re.findall(r"\b(_\w+)\s*=(?!=)", unquoted)}
++    references = {name.lower() for name in re.findall(r"\b_\w+\b", unquoted)}
++    findings += [f"never-assigned local: {name}" for name in sorted(references - assigned - {"_this", "_x", "_time"})]
++    return findings
++
++
++def _explicit_exit(text: str) -> str:
++    """Make old goto Exit termination explicit without changing its behavior."""
++    if not re.search(r"^\s*#exit\s*$", text, re.M | re.I):
++        text = text.rstrip() + "\n\n#Exit\nexit\n"
++    return text
++
++
++def _missile(text: str, path: str) -> str:
++    if path in ("lobomig/scripts/firemissiles_ic1.sqs", "lobomig/scripts/firemissiles_ic2.sqs"):
++        text = _replace(text, 'goto "sp4away"', 'goto "sw4away"')
++    if path in ("lobof5/scripts/firemissiles2.sqs", "lobof5/scripts/firemissiles3.sqs"):
++        text = _replace(text, 'goto "aa2way"', 'goto "aa2away"')
++    if path == "lobomig/mig25/sqs/firemissiles_cap1.sqs":
++        for old, new, slot in (("R60_1away", "R60_3away", 5), ("R60_2away", "R60_4away", 6)):
++            tail = f'\n_plane setobjecttexture[{slot}, ""]'
++            text = _replace(text, f"#{old}{tail}", f"#{new}{tail}")
++
++    # Keep texture changes on every event recipient, but move a projectile and
++    # create helpers only on its owner. Missing nearestObject results exit safely.
++    anchor = "_missobj = nearestobject[_plane, _ammoname]"
++    text = _replace(text, anchor, anchor + '\n? isNull _missobj: goto "Exit"\n? !(local _missobj): goto "Exit"')
++
++    # A4's two cluster-bomb scripts contain a second, already-cleaned helper.
++    # Repair just the launch helper: its unique plane-position anchor disambiguates it.
++    start = '_sensor = "EmptyDetector" createVehicle [0,0,0]'
++    read = "_result = getpos _sensor select 2;"
++    first = text.find(start)
++    end = text.find(read, first) + len(read)
++    if first < 0 or end < len(read):
++        raise ValueError(f"Missing missile terrain helper in {path}")
++    helper = text[first:end]
++    if helper.count(start) != 1 or "_sensor setpos [getpos _plane select 0, getpos _plane select 1]" not in helper:
++        raise ValueError(f"Ambiguous missile terrain helper in {path}")
++    # This helper has only three uses before the added delete. No branch/yield is
++    # allowed between creation and release, so every created launch helper dies.
++    if helper.lower().count("_sensor") != 3 or re.search(r"(?im)^\s*(?:[?~@#]|goto\b|exit\b)", helper):
++        raise ValueError(f"Unexpected missile terrain-helper lifetime in {path}")
++    cleanup = "\ndeleteVehicle _sensor"
++    if not text[end:].startswith(cleanup):
++        text = text[:end] + cleanup + text[end:]
++    # Reject unreviewed copies with an extra use after the first read. A4's second
++    # sensor owns its own three uses and delete; the expected counts cover both.
++    expected_helpers = 2 if path in ("lobo_a4/scripts/firemissiles_a2.sqs", "lobo_a4/scripts/firemissiles_a3.sqs") else 1
++    active = "\n".join(_active_lines(text)).lower()
++    if active.count(start.lower()) != expected_helpers or active.count("_sensor") != 4 * expected_helpers:
++        raise ValueError(f"Unexpected missile sensor references in {path}")
++    return _explicit_exit(text)
++
++
++# nearestObjects is registered by GameStateExt.cpp. setDammage calls
++# Object::SetDammageNetAware, which forwards remote requests to their owner.
++# Killed handlers themselves run on the wreck owner (EntityAI::Destroy).
++AI_QUERY = (
++    '_AI = {private ["_near", "_units"]; '
++    '_near = nearestObjects [_this select 0, ["Man"], _this select 1]; '
++    '_units = []; {if (alive _x && vehicle _x == _x && _x != player) then '
++    '{_units = _units + [_x]}} forEach _near; _units}'
++)
++AI_QUERY_CLASSIC = (
++    '_AI = {private ["_near", "_units"]; '
++    '_near = (units group player) + (units group _object); '
++    '_units = []; {if (alive _x && vehicle _x == _x && _x != player '
++    '&& _x distance (_this select 0) < (_this select 1) && !(_x in _units)) then '
++    '{_units = _units + [_x]}} forEach _near; _units}'
++)
++
++
++def _fire(text: str, compatibility: str = "ud") -> str:
++    if compatibility not in ("ud", "classic"):
++        raise ValueError(f"Unknown script compatibility profile: {compatibility}")
++    query = AI_QUERY if compatibility == "ud" else AI_QUERY_CLASSIC
++    existing = sum(text.count(candidate) for candidate in (AI_QUERY, AI_QUERY_CLASSIC))
++    if existing > 1:
++        raise ValueError("Ambiguous wreck-fire query definitions")
++    for candidate in (AI_QUERY, AI_QUERY_CLASSIC):
++        if candidate in text:
++            text = text.replace(candidate, query)
++    anchor = "_object = _this select 0"
++    text = _replace(text, anchor, anchor + "\n" + query)
++    anchor = '?! (local _object):goto "sound"'
++    text = _replace(text, anchor, "_glow = _object\n" + anchor)
++    # Non-owner clients use the wreck as their sound anchor. Never move or delete
++    # that fallback: only the creator's separate glow object has that lifetime.
++    anchor = '#sound\n_soundloop = 0\n_glow setpos [getpos _object select 0, getpos _object select 1,1]'
++    text = _replace(text, anchor, '#sound\n_soundloop = 0\n? _glow != _object && local _glow: _glow setpos [getpos _object select 0, getpos _object select 1,1]')
++    text = _replace(text, "deletevehicle _glow", "? _glow != _object && local _glow: deletevehicle _glow")
++    # One burn scheduler per wreck; setDammage forwards each remote victim's hit.
++    text = _replace(text, "#client\n", '#client\n? !(local _object): goto "fire"\n')
++    text = _replace(text, '? player != (vehicle player): goTo "fire"', '? player != (vehicle player): goTo "here"')
++    text = _replace(text, "? player distance _glow < 10 && _ouch != 1:", "? local player && alive player && player distance _object < 10 && _ouch != 1:")
++    text = _replace(text, "#here\n", '#here\n? _ouchAI == 1: goto "fire"\n')
++    return text
++
++
++def _number(text: str) -> str:
++    text = _replace(text, "_number = _this select 1", "; Init provides only the vehicle; an unused second argument is unnecessary.")
++    # Thirty texture assignments, ten for each digit. Keep stable model slots.
++    text = _replace(text, "_unit setObjectTexture", "_plane setObjectTexture", 30)
++    text = _replace(text, 'goto "n2"', 'goto "Num2"', 10)
++    text = _replace(text, 'goto "n3"', 'goto "Num3"', 10)
++    # Normalize legacy commas: EvaluateMultiple tolerates them at runtime, but
++    # rejects them in check-only parsing. This is compatibility polish, not a
++    # newly claimed runtime defect.
++    text = _replace(text, '], goto "', ']; goto "', 30)
++    return _explicit_exit(text)
++
++
++def _display(text: str, path: str) -> str:
++    if path == "lobojordan/config.cpp":
++        for role in ("Operator", "Team Leader", "Radioman", "Medic", "Breacher", "Sniper"):
++            text = _replace(text, f'"Jordanian Security Assualt {role}"', f'"Jordanian Security Assault {role}"')
++    elif path == "lobosa6/config.cpp":
++        text = _replace(text, 'displayNameMagazine="Hawk Missle";', 'displayNameMagazine="Hawk Missile";')
++    elif path == "loboweapat/config.cpp":
++        text = _replace(text, 'displayNameMagazine="Dragon Missle";', 'displayNameMagazine="Dragon Missile";')
++    return text
++
++
++def repair(documents: dict[str, str], compatibility: str = "ud") -> dict[str, str]:
++    """Validate the entire known script set, returning only changed members."""
++    if compatibility not in ("ud", "classic"):
++        raise ValueError(f"Unknown script compatibility profile: {compatibility}")
++    required = MISSILE_PATHS + FIRE_PATHS + NUMBER_PATHS + DISPLAY_PATHS
++    missing = sorted(set(required) - documents.keys())
++    if missing:
++        raise ValueError("Missing required LoBo scripts/configs: " + ", ".join(missing))
++    changed = {}
++    for path in required:
++        source = documents[path]
++        newline = "\r\n" if "\r\n" in source else "\n"
++        normalized = source.replace("\r\n", "\n")
++        try:
++            if path in MISSILE_PATHS:
++                updated = _missile(normalized, path)
++            elif path in FIRE_PATHS:
++                updated = _fire(normalized, compatibility)
++            elif path in NUMBER_PATHS:
++                updated = _number(normalized)
++            else:
++                updated = _display(normalized, path)
++            if path.endswith(".sqs"):
++                findings = script_findings(updated)
++                if findings:
++                    raise ValueError("; ".join(findings))
++        except ValueError as exc:
++            raise ValueError(f"{path}: {exc}") from exc
++        updated = updated.replace("\n", newline)
++        if updated != source:
++            changed[path] = updated
++    return changed
+diff --git a/arma_CWR/tools/lobo/repair_lobo.py b/arma_CWR/tools/lobo/repair_lobo.py
+new file mode 100644
+index 00000000..4ceaeec6
+--- /dev/null
++++ b/arma_CWR/tools/lobo/repair_lobo.py
+@@ -0,0 +1,143 @@
++#!/usr/bin/env python3
++"""Report/apply reproducible issue-69 LoBo repairs without running the game."""
++import argparse
++import datetime
++import hashlib
++import importlib
++import json
++from pathlib import Path
++import shutil
++import sys
++import tempfile
++import uuid
++from repair.pbo import Archive
++
++REPAIR_MODULES=('ammo','scripts','models')
++REPAIR_VERSION='2026-10-11.1'
++
++def rule_fingerprint():
++    base=Path(__file__).resolve().parent
++    files=[Path(__file__).resolve()]+sorted((base/'repair').glob('*.py'))
++    return digest(b''.join(p.relative_to(base).as_posix().encode()+b'\0'+p.read_bytes() for p in files))
++
++def digest(data):return hashlib.sha256(data).hexdigest()
++
++def modules():return [importlib.import_module('repair.'+name) for name in REPAIR_MODULES]
++
++def plan(mod,tool,compatibility='ud'):
++    rules=modules();wanted=set().union(*(set(m.ADDONS) for m in rules))
++    model_keys=set().union(*(set(getattr(m,'MODEL_MEMBERS',())) for m in rules))
++    paths={p.stem.lower():p for p in (mod/'addons').glob('*.pbo')}
++    missing=wanted-paths.keys()
++    if missing:raise ValueError(f'Required addons missing: {sorted(missing)}')
++    docs={};binary={};hashes={};original={}
++    # Read original archive bytes once per addon; no full-mod binary extraction.
++    for stem in sorted(wanted):
++        path=paths[stem];raw=path.read_bytes();hashes[stem]=digest(raw);archive=Archive(raw)
++        for key,entry in archive.by_key.items():
++            full=stem+'/'+key
++            if key=='config.cpp' or key.endswith(('.sqs','.sqf')):
++                data=archive.read(key,path,tool);docs[full]=data.decode('latin1');original[full]=data
++            elif full in model_keys:
++                data=archive.read(key,path,tool);binary[full]=data;original[full]=data
++    missing_models=model_keys-binary.keys()
++    if missing_models:raise ValueError(f'Required models missing: {sorted(missing_models)}')
++    for module in rules:
++        options={'compatibility':compatibility} if module.__name__=='repair.scripts' else {}
++        edits=module.repair(dict(docs),**options)
++        if set(edits)-docs.keys():raise ValueError(f'{module.__name__} tried to add an unknown text member')
++        docs.update(edits)
++        if hasattr(module,'repair_models'):
++            edits=module.repair_models(dict(binary))
++            if set(edits)-binary.keys():raise ValueError('Unknown model replacement')
++            binary.update(edits)
++    # Require a stable fixed point across all rules, including overlapping addons.
++    for module in rules:
++        options={'compatibility':compatibility} if module.__name__=='repair.scripts' else {}
++        edits=module.repair(dict(docs),**options)
++        if any(docs.get(k)!=v for k,v in edits.items()):raise ValueError(f'Non-idempotent rules: {module.__name__}')
++        if hasattr(module,'repair_models'):
++            edits=module.repair_models(dict(binary))
++            if any(binary.get(k)!=v for k,v in edits.items()):raise ValueError('Non-idempotent model rules')
++    changed={k:v.encode('latin1') for k,v in docs.items() if v.encode('latin1')!=original[k]}
++    changed.update({k:v for k,v in binary.items() if v!=original[k]})
++    records=[{'member':k,'before_sha256':digest(original[k]),'after_sha256':digest(v),
++              'before_bytes':len(original[k]),'after_bytes':len(v)} for k,v in sorted(changed.items())]
++    return paths,hashes,changed,records,docs
++
++def apply(mod,paths,hashes,changed,records,compatibility='ud'):
++    grouped={}
++    for full,data in changed.items():
++        stem,key=full.split('/',1);grouped.setdefault(stem,{})[key]=data
++    if not grouped:return None
++    # Stage and verify EVERY replacement before creating backups or replacing files.
++    with tempfile.TemporaryDirectory(prefix='lobo-repair-',dir=mod) as stage_dir:
++        stage=Path(stage_dir);new_hashes={}
++        for stem,edits in grouped.items():
++            raw=paths[stem].read_bytes()
++            if digest(raw)!=hashes[stem]:raise ValueError(f'Archive changed since preflight: {paths[stem]}')
++            result=Archive(raw).replace(edits)
++            (stage/paths[stem].name).write_bytes(result);new_hashes[stem]=digest(result)
++        stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
++        backup=mod/'.ud-backups'/'issue-69'/stamp;backup.mkdir(parents=True)
++        manifest={'schema':1,'issue':'https://github.com/GearUnclear/lobo/issues/1','state':'prepared',
++                  'repair_version':REPAIR_VERSION,'rule_sha256':rule_fingerprint(),'compatibility':compatibility,
++                  'created_utc':stamp,'archives':[],'members':records}
++        for stem in grouped:
++            if digest(paths[stem].read_bytes())!=hashes[stem]:raise ValueError(f'Concurrent edit: {paths[stem]}')
++            target=backup/paths[stem].name;shutil.copy2(paths[stem],target)
++            if digest(target.read_bytes())!=hashes[stem]:raise ValueError('Backup verification failed')
++            manifest['archives'].append({'file':paths[stem].name,'before_sha256':hashes[stem],
++                                         'after_sha256':new_hashes[stem]})
++        manifest_path=backup/'manifest.json'
++        manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
++        replaced=[]
++        try:
++            for stem in grouped:
++                target=paths[stem]
++                if digest(target.read_bytes())!=hashes[stem]:raise ValueError(f'Concurrent edit: {target}')
++                (stage/target.name).replace(target);replaced.append(stem)
++            manifest['state']='applied'
++            manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
++        except BaseException:
++            conflicts=[];restore_errors=[]
++            for stem in reversed(replaced):
++                try:
++                    if not paths[stem].exists() or digest(paths[stem].read_bytes())!=new_hashes[stem]:
++                        conflicts.append(str(paths[stem]));continue
++                    restore=stage/(paths[stem].name+'.restore');shutil.copy2(backup/paths[stem].name,restore);restore.replace(paths[stem])
++                except OSError as exc:restore_errors.append({'file':str(paths[stem]),'error':str(exc)})
++            manifest['state']='rollback-failed' if restore_errors else 'rollback-conflict' if conflicts else 'rolled-back'
++            manifest['rollback_conflicts']=conflicts
++            manifest['rollback_errors']=restore_errors
++            if conflicts:print(f'Concurrent edits preserved during rollback; originals remain at {backup}: {conflicts}',file=sys.stderr)
++            if restore_errors:print(f'Rollback incomplete; verified originals remain at {backup}: {restore_errors}',file=sys.stderr)
++            try:manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
++            except OSError as exc:print(f'Cannot update rollback manifest {manifest_path}: {exc}',file=sys.stderr)
++            raise
++        return manifest_path
++
++def main(argv=None):
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--mod',type=Path,required=True)
++    parser.add_argument('--tools',type=Path,default=Path(__file__).resolve().parents[2]/'dist/x64-win-rwdi/PoseidonTools.exe')
++    mode=parser.add_mutually_exclusive_group();mode.add_argument('--apply',action='store_true');mode.add_argument('--check',action='store_true')
++    parser.add_argument('--report',type=Path)
++    parser.add_argument('--compatibility',choices=('ud','classic'),default='ud',
++                        help='UD uses full nearby-unit queries; Classic uses a limited group-only wreck-fire query')
++    args=parser.parse_args(argv);mod=args.mod.resolve()
++    if not (mod/'addons').is_dir():parser.error('--mod must contain addons/')
++    try:
++        paths,hashes,changed,records,docs=plan(mod,args.tools.resolve(),args.compatibility)
++        result={'repair_version':REPAIR_VERSION,'rule_sha256':rule_fingerprint(),'issue':'https://github.com/GearUnclear/lobo/issues/1','mode':'apply' if args.apply else 'check',
++                'compatibility':args.compatibility,'changed_members':len(changed),'archives':sorted({k.split('/')[0] for k in changed}),'members':records}
++        if args.apply:
++            result['backup_manifest']=str(apply(mod,paths,hashes,changed,records,args.compatibility)) if changed else None
++        if args.report:
++            args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(json.dumps(result,indent=2)+'\n',encoding='utf8')
++        print(json.dumps({k:v for k,v in result.items() if k!='members'},indent=2))
++        return 1 if args.check and changed else 0
++    except (OSError,ValueError,KeyError,UnicodeError) as exc:
++        print(f'LoBo repair aborted before completion: {exc}',file=sys.stderr);return 2
++
++if __name__=='__main__':raise SystemExit(main())
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index d32f10cc..8d796645 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -37,6 +37,23 @@ phases:
+     goal: "Tracker hygiene, deferred cleanups, known-edge decisions."
+ 
+ items:
++  - id: lobo-content-repairs
++    title: "Reproducible Lobo audit repairs and private change tracking"
++    phase: housekeeping
++    status: in-progress
++    gh_issues: []
++    depends_on: []
++    commits: []
++    summary: >
++      Repair ammunition, AI ranges, copied scripts, supported armor components,
++      model bindings and display text with versioned transformations and verified
++      archive backups. Internal audit moved from CWR #69 to
++      https://github.com/GearUnclear/lobo/issues/1; that private repository holds
++      reference notes only. Runtime validation remains outside the no-game audit.
++    log:
++      - "2026-10-11: swarm implemented content repairs, synthetic offline tests and source coverage diagnostics. Armor uses existing six-component layout and preserved script labels. UD fire query has full nearby-unit coverage; explicit Classic fallback is group-limited. No game launched."
++      - "2026-10-11: applied repair 2026-10-11.1 to 76 members in 25 archives with verified backups; second pass changes zero. 81 synthetic tests pass, 11 changed configs export, 7993 explicit Lobo references resolve in 114-export index, and standalone Man/Land probe improves from 1747/1749 to 1749/1749. Runtime acceptance remains pending."
++
+   - id: native-infantry-leaning
+     title: "Native infantry leaning with consistent camera, weapon and hit geometry"
+     phase: phase-2

@@ -1,0 +1,602 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.cpp b/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.cpp
+index a567c4a..9340db5 100644
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.cpp
+@@ -189,6 +189,9 @@ bool AssailantSystem::Register(Person* body, AssailantMode mode, EntityAI* extor
+     Ref<AIGroup> old = unit->GetGroup();
+     unit->ForceRemoveFromGroup();
+     group->AddUnit(unit);
++    // Group membership and the entity's actual side are independent. Keep
++    // the latter in step so other observers can identify and fight back.
++    body->SetTargetSide((TargetSide)_side);
+     group->GetCenter()->SelectLeader(group);
+     group->AddFirstWaypoint(body->Position());
+     group->AllowFleeing(0);
+@@ -200,13 +203,32 @@ bool AssailantSystem::Register(Person* body, AssailantMode mode, EntityAI* extor
+     body->AddWeapon(weapon, true);
+     return true;
+ }
++
++static void ReleaseAssailantGroup(Person* body, AIGroup* group)
++{
++    Ref<AIGroup> keepGroup = group;
++    if (body && body->IsDammageDestroyed())
++    {
++        // The normal casualty report can take 30 seconds to detach a dead
++        // brain. Once its record is gone nobody would reap that empty group.
++        // Preserve the corpse, but retire its AI and private group together.
++        Ref<AIUnit> unit = body->Brain();
++        if (unit && unit->GetGroup() == group)
++        {
++            unit->ForceRemoveFromGroup();
++            body->SetBrain(nullptr);
++        }
++    }
++    if (group && !group->NUnits()) group->RemoveFromCenter();
++}
++
+ bool AssailantSystem::Remove(EntityAI* body)
+ {
+     for (int i = 0; i < _records.Size(); ++i) if (_records[i].body.GetLink() == body && body)
+     {
+         Ref<AIGroup> group = _records[i].group.GetLink();
+         if (!body->IsDammageDestroyed()) ::DeleteVehicle(body);
+-        if (group && !group->NUnits()) group->RemoveFromCenter();
++        ReleaseAssailantGroup(_records[i].body.GetLink(), group);
+         _records.Delete(i);
+         return true;
+     }
+@@ -218,7 +240,7 @@ void AssailantSystem::Prune()
+     {
+         auto& r = _records[i];
+         if (r.body && !r.body->IsDammageDestroyed()) continue;
+-        if (r.group && !r.group->NUnits()) r.group->RemoveFromCenter();
++        ReleaseAssailantGroup(r.body.GetLink(), r.group.GetLink());
+         _records.Delete(i); // deaths already ran killed EH synchronously
+     }
+ }
+@@ -249,7 +271,12 @@ bool AssailantSystem::IsHostile(const AIUnit* observer, const EntityAI* target,
+         // Only living perceived people/crewed vehicles, never empty scenery.
+         if (!target->CommanderUnit()) return false;
+         const bool combatant = side == TEast || side == TWest || side == TGuerrila;
+-        return Hostile((AssailantMode)r.mode, r.extorter.GetLink() == target, combatant, Classify(target) == ASRogue);
++        const EntityAI* extorter = r.extorter.GetLink();
++        // A dead passenger's brain can remain attached until the ordinary
++        // casualty report; that corpse must not implicate the living driver.
++        const AIUnit* extorterUnit = extorter && !extorter->IsDammageDestroyed() ? extorter->CommanderUnit() : nullptr;
++        const bool personal = extorter == target || (extorterUnit && extorterUnit->GetVehicle() == target);
++        return Hostile((AssailantMode)r.mode, personal, combatant, Classify(target) == ASRogue);
+     }
+     return center && center->IsEnemy((TargetSide)side);
+ }
+@@ -268,7 +295,20 @@ LSError AssailantSystem::Record::Serialize(ParamArchive& ar)
+ LSError AssailantSystem::Serialize(ParamArchive& ar)
+ {
+     PARAM_CHECK(ar.Serialize("Records", _records, 1))
+-    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond) { Configure(); Prune(); }
+     return LSOK;
+ }
++void AssailantSystem::AfterLoad()
++{
++    Configure();
++    Prune();
++    // The unfinished implementation saved converted bodies with their
++    // original civilian side. World invokes this after the AI centers load:
++    // their group/brain links have not resolved during our own second pass.
++    for (int i = 0; i < _records.Size(); ++i)
++    {
++        const auto& r = _records[i];
++        if (r.body && r.group && r.group->GetCenter())
++            r.body->SetTargetSide(r.group->GetCenter()->GetSide());
++    }
++}
+ }
+diff --git a/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.hpp b/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.hpp
+index b4d676b..8045117 100644
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.hpp
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/AssailantSystem.hpp
+@@ -32,7 +32,8 @@ public:
+     static float Advance(float remaining, float dt, bool eligible);
+     void Clear();
+     void InitMission();
+-    void Configure(); // final campaign sides; also called after the second load pass
++    void Configure(); // final campaign sides
++    void AfterLoad(); // after every world/AI reference has resolved
+     bool IsActive() const { return _side >= 0; }
+     RString SideName() const;
+     RString Diagnostic(AssailantMode mode) const;
+diff --git a/arma_CWR/engine/Poseidon/World/WorldImpl.cpp b/arma_CWR/engine/Poseidon/World/WorldImpl.cpp
+index cea5376..8eccc26 100644
+--- a/arma_CWR/engine/Poseidon/World/WorldImpl.cpp
++++ b/arma_CWR/engine/Poseidon/World/WorldImpl.cpp
+@@ -2022,10 +2022,6 @@ LSError World::Serialize(ParamArchive& ar, int message)
+     {
+         PARAM_CHECK(ar.Serialize("GuerrillaAssailants", Guerrilla::AssailantSystem::Instance(), 14))
+     }
+-    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+-    {
+-        Guerrilla::AssailantSystem::Instance().Configure();
+-    }
+ 
+     // Guerrilla garrison cache: spawned-zone bookkeeping (group refs by
+     // name-matched zone).  Same missing-subclass tolerance as above; the
+@@ -2327,6 +2323,7 @@ LSError World::Serialize(ParamArchive& ar, int message)
+         _scene.MainLightChanged();
+ 
+         RepairUnitsWithoutBodyAfterLoad(this, playerOnUnit, playerOnPos, playerOnType);
++        Guerrilla::AssailantSystem::Instance().AfterLoad();
+ 
+         AIUnit* player = _playerOn ? _playerOn->Brain() : nullptr;
+         AIGroup* grp = player ? player->GetGroup() : nullptr;
+diff --git a/arma_CWR/guerrilla-mode/ARCHITECTURE.md b/arma_CWR/guerrilla-mode/ARCHITECTURE.md
+index 9c0f89d..d7a04bf 100644
+--- a/arma_CWR/guerrilla-mode/ARCHITECTURE.md
++++ b/arma_CWR/guerrilla-mode/ARCHITECTURE.md
+@@ -421,6 +421,23 @@ enum words (`"SAFE"`, `"MOVE"`, `"SENTRY"`, `"Flag"`, `"RoadSegment"`,
+ `assailants.sqs` owns the single global eligible-time incident clock and installs
+ the admission callback after the civilian interaction library is ready.
+ 
++The native `AssailantSystem` admits at most eight live assailants, including
++at most two spontaneous rogues. Each uses a private group on the computed
++spare war side; conversion updates both group membership and the body's
++stored target side while preserving its civilian class. Observer-specific
++hostility distinguishes retaliation (including the living extorter's current
++vehicle) from indiscriminate rogue attacks without changing civilian diplomacy.
++A dead extorter passenger does not make an innocent vehicle driver hostile.
++Death handlers capture classification synchronously. Retirement then detaches
++the dead brain and releases its group slot while retaining the corpse.
++
++Save restoration reconciles assailants in the final world-load phase, after
++AI centers and group links resolve. This also repairs the civilian target side
++stored by the unfinished #42 checkpoint. Restoring a record does not re-equip
++its body or restart its incident clock. The focused tests cover transactions,
++candidate/clock policy, actual fire and counterfire, Classic/LoBo side pairings,
++cross-process persistence, and 70 deaths with immediate empty-group cleanup.
++
+ 
+ **One core, many missions (issue #54 step B1).** The island-agnostic script
+ layer exists exactly ONCE in the repo, at `guerrilla-mode/core/`. No mission
+diff --git a/arma_CWR/guerrilla-mode/HUMAN-TESTS.md b/arma_CWR/guerrilla-mode/HUMAN-TESTS.md
+index ec1ef7a..b83f26b 100644
+--- a/arma_CWR/guerrilla-mode/HUMAN-TESTS.md
++++ b/arma_CWR/guerrilla-mode/HUMAN-TESTS.md
+@@ -80,6 +80,8 @@ The fixture records its old/new ownership and spawned object in `HT_SETUP_HISTOR
+ | `market_arms` | Logistics | Arms dealer purchase and insufficient funds |
+ | `market_vehicle` | Logistics | Vehicle dealer and HQ delivery |
+ | `garage` | Logistics | Garage lock, release and persistence |
++| `legend_names` | Cell | Earned Legend names, faces and dossiers |
++| `legend_boss` | Cell | Enemy commanders: dossier, stand, defeat |
+ | `civilians` | Population | Ambient population, conversation and cache |
+ | `solicit` | Population | Assess, solicit, refuse and cooldown |
+ | `extortion` | Population | Extortion preview, cancel, commit and recovery |
+diff --git a/arma_CWR/guerrilla-mode/NAMING_ACCEPTANCE.md b/arma_CWR/guerrilla-mode/NAMING_ACCEPTANCE.md
+index e5a7d26..b4c760d 100644
+--- a/arma_CWR/guerrilla-mode/NAMING_ACCEPTANCE.md
++++ b/arma_CWR/guerrilla-mode/NAMING_ACCEPTANCE.md
+@@ -2,7 +2,7 @@
+ 
+ Audit date: 2026-09-24. Source requirement: [Naming System: Friendly and Enemy Legends](https://github.com/GearUnclear/CWR/issues/57).
+ 
+-**Status: implementation fixes verified by source tests; runtime acceptance pending.**
++**Status: source tests verified; local runtime acceptance failed on 2026-10-05.**
+ [PR #61](https://github.com/GearUnclear/CWR/pull/61) merged the original registry, dossier and enemy commander implementation.
+ The audit fixes are in [draft PR #64](https://github.com/GearUnclear/CWR/pull/64).
+ This audit checks that implementation against the original issue rather than
+@@ -14,16 +14,16 @@ treating the merge or the older design notes as proof of completion.
+ | --- | --- | --- |
+ | Prefix, regional first name, describer, regional surname, title in that order; optional nickname slots | `LegendNames` assembles all five slots and preserves the issue's quoted describer and title capitalization. Its unit cases verify formatting, all bank entries and deterministic selection. | None for string assembly. |
+ | Use the attached name bank | The downloaded `test.json` matches `tests/fixtures/legend-names/issue57-names.json` as parsed JSON. `gen_legend_names.py --check` verifies compiled tables against it. | None for the bank transcription. |
+-| Regional personal names | New companion rows draw both personal names from the resistance region. The all-pools registry regression checks membership for both slots across all 33 pools. Script roster keys remain stable; loaded resolved identities stay unchanged. | Exercise Classic and LoBo resistance choices in game. |
+-| Earn one nickname at a level threshold; max level adds a different slot and Legend status | SERGEANT / 250 XP earns the first slot; COLONEL / 1900 XP earns the second. Tests cover both thresholds, a jump across both, repeat observations, and save/load award latches. | Run `scripting/guerrilla_legend_names` and `scripting/guerrilla_legend_save.seq`. |
++| Regional personal names | New companion rows draw both personal names from the resistance region. The all-pools registry regression checks membership for both slots across all 33 pools. Script roster keys remain stable; loaded resolved identities stay unchanged. | Classic naming lane passed; exercise additional resistance choices and LoBo in game. |
++| Earn one nickname at a level threshold; max level adds a different slot and Legend status | SERGEANT / 250 XP earns the first slot; COLONEL / 1900 XP earns the second. Tests cover both thresholds, a jump across both, repeat observations, and save/load award latches. | Classic live and save/load naming lanes passed on 2026-10-05. |
+ | Earning a name feels like an event | The native poll sends the resolved award text to the normal hint UI and writes an attributed journal entry. Tests verify both announcements, ordinary promotion announcements, and silence on repeated observations. The script no longer overwrites promotion/award hints. | Observe/capture both award hints at normal gameplay speed. |
+-| Names recur in game and persist after death in records/memorials | `BindRow` sets the live body's name; journal gathering and the persisted companion status line read the same registry display name. Registry tests cover awards, death, retained deeds, reload and correction of a stale startup roster without another character event; journal compose tests cover rosters, memorials and records keyed by character id. The naming integration lane now checks the real memorial and fallen dossier. | Run that lane and inspect labels, roster and memorial rendering. |
++| Names recur in game and persist after death in records/memorials | `BindRow` sets the live body's name; journal gathering and the persisted companion status line read the same registry display name. Registry tests cover awards, death, retained deeds, reload and correction of a stale startup roster without another character event; journal compose tests cover rosters, memorials and records keyed by character id. The naming integration lane now checks the real memorial and fallen dossier. | Classic content assertions passed; visual acceptance is blocked by the rendering defects recorded below. |
+ | Three dangerous enemy Legends each playthrough | Three distinct identities; sniper, elite commander and tank commander where faction assets permit. Skill is 0.9, with guards/crew. Placement now recovers a feasible triple when preferred stands block the other two. Failed creations with no surviving actors retry after 30 ticks at their original stand. Tests cover roles, feasible placement, pending spawn persistence and no duplicate defeat. | Run `scripting/guerrilla_legends_place` for supported Classic/LoBo campaigns; exercise temporary group exhaustion. |
+ | Enemy personal names come from the supplied modern Western male bank; hostile nicknames | Enemy rows use the attachment's `western_evil` regions: western, british or israeli. Other faction regions fall back to western. All-pools tests verify enemy personal-name and hostile-word membership. | None for selection; observe final labels in game. |
+-| Fixed positions, separate from reinforcement/QRF, identifiable and killable | Named bosses and tank crew have movement disabled while retaining targeting/fire. Their own groups are not registered with garrison or QRF state. Existing integration lanes check displacement under fire, group isolation, combat and defeat; source tests cover placement, persistent positions and defeat latches. | Run `scripting/guerrilla_legends_place`, `scripting/guerrilla_legends_defeat` and `scripting/guerrilla_legends_save_reload.seq`. |
++| Fixed positions, separate from reinforcement/QRF, identifiable and killable | Named bosses and tank crew have movement disabled while retaining targeting/fire. Their own groups are not registered with garrison or QRF state. Existing integration lanes check displacement under fire, group isolation, combat and defeat; source tests cover placement, persistent positions and defeat latches. | Classic placement and save/load passed; defeat lane failed the commander displacement check. LoBo remains pending. |
+ | Names and roles remain visible on the campaign map | Live labels contain name and role; defeated labels now retain both plus `(defeated)`. The marker regression exercises the actual defeat repaint and persisted identity/role. Integration expectations were updated. | Inspect live and defeated map markers before and after full game reload. |
+ 
+-## Verified in this checkout
++## Source verification: Linux audit, 2026-09-24
+ 
+ - Linux `PoseidonGame` and `PoseidonTests` build successfully with Clang.
+ - `PoseidonTests '[legends],[journal],[guerrilla]' --reporter compact`: **412 cases, 3,954,128 assertions passed**.
+@@ -38,14 +38,83 @@ were discarded by Trident. The affected naming/save lanes now collect failures
+ and assert their aggregate at the top level. Prior green runs of those lines
+ are not treated as acceptance evidence.
+ 
+-## Runtime gate
++## Local runtime verification: Windows, 2026-10-05
+ 
+-This Linux checkout contains no Classic 1.99 or LoBo game-data installation.
+-The SQF integration tests above have been updated but **have not been run on
+-this change**. Run them with the freshly built game and the updated `gmcore`
+-installed into a prepared Classic data directory; use a separate save/test
+-profile. Also inspect both nickname announcements, the roster, the memorial
+-and all three enemy labels at 800x600 and 1440x1080.
++The local checkout combined current main, PR #63, PR #64 and the civilian
++assailant completion fixes. It used a freshly built `PoseidonGame`, installed
++shared `gmcore`, Classic 1.99 data and the GL33 renderer on an NVIDIA RTX 4060 Ti.
++Trident used separate temporary profiles and no automatic retries. These
++results are from Classic; they do not establish LoBo naming acceptance.
++
++**Seven of eight naming/journal selectors passed.** A sequence counts as one
++selector and runs its save and reload phases in separate game processes.
++
++| Selector under `tests/integration/` | Result | Elapsed |
++| --- | --- | --- |
++| `scripting/guerrilla_legend_names.test.sqf` | PASS: regional identity, two awards, live name, attributed records and fallen dossier | 25.0 s |
++| `scripting/guerrilla_legend_save.seq` | PASS: names, award latches, history and portrait rows after save/load | 23.6 s |
++| `scripting/guerrilla_legends_place.test.sqf` | PASS: three commanders placed and spawned | 20.1 s |
++| `scripting/guerrilla_legends_defeat.test.sqf` | FAIL: pinned commander's displacement was 3.60759 m; required less than 3 m | 308.0 s |
++| `scripting/guerrilla_legends_save_reload.seq` | PASS: enemy identities, positions and defeat state after save/load | 79.1 s |
++| `scripting/guerrilla_journal_pages.test.sqf` | PASS: journal content and navigation assertions | 7.2 s |
++| `ui/guerrilla_journal_capture_800.test.sqf` | PASS: 800x600 layout assertions and ten captures | 8.6 s |
++| `ui/guerrilla_journal_capture_1440.test.sqf` | PASS: 1440x1080 layout assertions and ten captures | 9.1 s |
++
++The defeat failure was the first stationarity assertion after the 60-second
++combat window, `triAssertLt [glPinMoved, 3]`. That run used campaign seed
++`42205185`; its foot commander stood near Outpost at `[6777,5825]` with four
++guards. The subsequent tank-destruction and defeat-latch checks in that
++selector were not reached. No retry or threshold change was used to turn this
++result green.
++
++A separate 60-second diagnostic kept the commander's movement-disabled flag
++(`DAMove`) set while recording abrupt displacement at more than 19 km/h.
++Combat collision impulses can still move a stationary, invulnerable body:
++the collision and soldier-force code applies those impulses independently of
++damage and the AI movement flag. This narrows the failure to physical
++stationarity under combat; it does not establish that the AI flag was lost or
++that the commander deliberately walked away. The diagnostic ended after its
++measurement window and is not a replacement passing run. Its log is
++`tmp/acceptance-20261005-pin-probe/legend_pin_probe/game_stdout.log`.
++
++All twenty journal captures were also inspected visually. Their passing
++layout assertions do **not** establish a usable rendered journal:
++
++- At both resolutions, the notebook's opaque page background is absent.
++  Map contours, grid lines and marker labels remain visible through the
++  prose, making the pages difficult to read.
++- Both dossier captures contain a pale, untextured character figure rather
++  than a textured face and outfit. A ready portrait row alone does not verify
++  the rendered appearance.
++- The separate `ui/guerrilla_human_visual` lane passed its UI assertions, but
++  all four inspected captures also show pale, translucent or untextured scene
++  geometry and weapon models. The visible problem therefore extends beyond
++  the journal portrait. This combined-checkout run does not isolate which
++  change introduced it.
++
++Local evidence, relative to `arma_CWR/` (generated artifacts, not tracked):
++
++- `tmp/acceptance-20261005-naming-rendered/guerrilla_legend_names/runner.log`
++- `tmp/acceptance-20261005-naming-rendered-rest/results.json` and each selector's
++  `runner.log`, `game_stdout.log` and `game_stderr.log`
++- `tmp/acceptance-20261005-naming-rendered-rest/guerrilla_journal_capture_800/000_c800_contents.png`
++- `tmp/acceptance-20261005-naming-rendered-rest/guerrilla_journal_capture_1440/007_c1440_dossier.png`
++- `tmp/acceptance-20261005-acceptance-rendered/guerrilla_human_visual/002_03_human_step.png`
++
++The first naming test passed before sandbox permissions prevented the runner's
++process-inspection cleanup. The remaining seven selectors ran with that
++permission under the separate `naming-rendered-rest` output directory; the
++successful first test was not rerun.
++
++## Remaining runtime gate
++
++The original Linux audit had no Classic 1.99 or LoBo game-data installation;
++the Windows results above now supply partial runtime evidence. Acceptance
++still requires resolving and rerunning the commander displacement failure,
++correcting and visually verifying normal rendering, and exercising the naming
++lanes on supported LoBo campaigns. Both nickname notices still need captures
++at normal gameplay speed. Recheck roster, memorial and all three enemy labels
++at 800x600 and 1440x1080 once the rendering defect is resolved.
+ 
+ Keep issue #57 and the roadmap item open until those results are recorded.
+ Do not infer gameplay acceptance from the source-test totals.
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_civilian.test.sqf b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_civilian.test.sqf
+index aa2a2b1..ab3fd73 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_civilian.test.sqf
++++ b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_civilian.test.sqf
+@@ -15,7 +15,6 @@ asShooter = leader asG
+ asShooter setPos [7480, 5700, 0]
+ asShooter setDir 90
+ asShooter disableAI "MOVE"
+-asShooter stop true
+ asShooter allowDammage false
+ asShots = 0
+ asShooter addEventHandler ["fired", {asShots = asShots + 1}]
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_covered.test.sqf b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_covered.test.sqf
+index 3ec75f8..2e12269 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_covered.test.sqf
++++ b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_covered.test.sqf
+@@ -15,7 +15,6 @@ asShooter = leader asG
+ asShooter setPos [7480, 5700, 0]
+ asShooter setDir 90
+ asShooter disableAI "MOVE"
+-asShooter stop true
+ asShooter allowDammage false
+ asShots = 0
+ asShooter addEventHandler ["fired", {asShots = asShots + 1}]
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_occupier.test.sqf b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_occupier.test.sqf
+index 8217816..379d61b 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_occupier.test.sqf
++++ b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_occupier.test.sqf
+@@ -15,7 +15,6 @@ asShooter = leader asG
+ asShooter setPos [7480, 5700, 0]
+ asShooter setDir 90
+ asShooter disableAI "MOVE"
+-asShooter stop true
+ asShooter allowDammage false
+ asShots = 0
+ asShooter addEventHandler ["fired", {asShots = asShots + 1}]
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_resistance.test.sqf b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_resistance.test.sqf
+index 108ba39..b45de84 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_resistance.test.sqf
++++ b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_resistance.test.sqf
+@@ -15,7 +15,6 @@ asShooter = leader asG
+ asShooter setPos [7480, 5700, 0]
+ asShooter setDir 90
+ asShooter disableAI "MOVE"
+-asShooter stop true
+ asShooter allowDammage false
+ asShots = 0
+ asShooter addEventHandler ["fired", {asShots = asShots + 1}]
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_retaliation.test.sqf b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_retaliation.test.sqf
+index 10f7404..3778ea0 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_retaliation.test.sqf
++++ b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_retaliation.test.sqf
+@@ -15,7 +15,6 @@ asShooter = leader asG
+ asShooter setPos [7480, 5700, 0]
+ asShooter setDir 90
+ asShooter disableAI "MOVE"
+-asShooter stop true
+ asShooter allowDammage false
+ asShots = 0
+ asShooter addEventHandler ["fired", {asShots = asShots + 1}]
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_rogue.test.sqf b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_rogue.test.sqf
+index 2d6944f..0f78e13 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_rogue.test.sqf
++++ b/arma_CWR/tests/integration/scripting/guerrilla_assailant_fire_rogue.test.sqf
+@@ -15,7 +15,6 @@ asShooter = leader asG
+ asShooter setPos [7480, 5700, 0]
+ asShooter setDir 90
+ asShooter disableAI "MOVE"
+-asShooter stop true
+ asShooter allowDammage false
+ asShots = 0
+ asShooter addEventHandler ["fired", {asShots = asShots + 1}]
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_assailants.test.sqf b/arma_CWR/tests/integration/scripting/guerrilla_assailants.test.sqf
+index 7bd63cd..0c5e0c2 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_assailants.test.sqf
++++ b/arma_CWR/tests/integration/scripting/guerrilla_assailants.test.sqf
+@@ -60,10 +60,19 @@ GM_PANIC_UNTIL = []
+ GM_CIV_PER_TOWN = 8
+ GM_CIV_MAX_GROUPS = 8
+ asBodies = []
++asGroups = []
++asAdmitted = 0
++asIndependent = true
+ asI = 0
+-while {asI < 8} do {asG = [asZone] call GM_fnCivSpawnTown; asU = leader asG; asU disableAI "TARGET"; asU disableAI "MOVE"; asM = "RESISTER"; if (asI < 2) then {asM = "ROGUE"}; triAssert [gmAssailantRegister [asU, asM, player, "Village"]]; asBodies = asBodies + [asU]; asI = asI + 1}
++while {asI < 8} do {asG = [asZone] call GM_fnCivSpawnTown; asU = leader asG; asU disableAI "TARGET"; asU disableAI "MOVE"; asM = "RESISTER"; if (asI < 2) then {asM = "ROGUE"}; if (gmAssailantRegister [asU, asM, player, "Village"]) then {asAdmitted = asAdmitted + 1}; asIndependent = asIndependent and (not ((group asU) in asGroups)) and ((count (units (group asU))) == 1); asGroups = asGroups + [group asU]; asBodies = asBodies + [asU]; asI = asI + 1}
++// Surface aggregate results at top level; ignored nested assertion returns
++// do not fail the Trident scenario.
++triAssertEq [asAdmitted, 8]
++triAssert [asIndependent]
+ triAssertEq [gmAssailantCount "ALL", 8]
+ triAssertEq [gmAssailantCount "ROGUE", 2]
++triAssert [not (gmAssailantRegister [asBodies select 0, "ROGUE", objNull, "Village"])]
++triAssertEq [count (magazines (asBodies select 0)), 3]
+ asG = [asZone] call GM_fnCivSpawnTown
+ asU = leader asG
+ asU setPos asPos
+@@ -77,6 +86,89 @@ triAssertEq [([asU, player] call GM_CI_fnInspect) select 0, "READY"]
+ triAssert [not (gmAssailantRegister [asU, "ROGUE", objNull, "Village"])]
+ triAssertEq [gmAssailantAdvance [10, 100, false], 10]
+ triAssertEq [gmAssailantAdvance [10, 100, true], 0]
+-{triAssert [gmAssailantRemove _x]} forEach asBodies
++asRemoved = 0
++{if (gmAssailantRemove _x) then {asRemoved = asRemoved + 1}} forEach asBodies
++triAssertEq [asRemoved, 8]
+ triAssertEq [gmAssailantCount "ALL", 0]
++asEmpty = true
++{asEmpty = asEmpty and ((count (units _x)) == 0)} forEach asGroups
++triAssert [asEmpty]
++
++// Exercise the production candidate collector with one real ambient resident.
++// Duplicate town rows must neither duplicate the body nor allocate profiles.
++while {(count GM_CIV_GROUPS) > 0} do {[0] call GM_fnCivDespawnAt}
++GM_CIV_PER_TOWN = 0
++GM_CIV_GROUP_SIZE = 1
++asG = [asZone] call GM_fnCivSpawnTown
++asRogue = leader asG
++asRogue disableAI "TARGET"
++asRogue disableAI "AUTOTARGET"
++asRogue disableAI "MOVE"
++asRogue allowDammage false
++asRogue setPos [(asPos select 0) + 30, asPos select 1, 0]
++gmCiMenuBody = objNull
++gmCiConfirmBody = objNull
++GM_CI_REQUEST = []
++[] call GM_CI_fnPrune
++asProfiles = count GM_CI_PROFILES
++GM_CIV_GROUPS = [asG, asG]
++GM_CIV_GROUP_ZONE = ["Village", "Village"]
++triAssertEq [count ([] call GM_AS_fnCandidates), 1]
++triAssertEq [count GM_CI_PROFILES, asProfiles]
++GM_CIV_GROUPS = [asG]
++GM_CIV_GROUP_ZONE = ["Village"]
++gmCiMenuBody = asRogue
++triAssertEq [count ([] call GM_AS_fnCandidates), 0]
++gmCiMenuBody = objNull
++gmCiConfirmBody = asRogue
++triAssertEq [count ([] call GM_AS_fnCandidates), 0]
++gmCiConfirmBody = objNull
++GM_CI_REQUEST = [asRogue, player, "PREVIEW"]
++triAssertEq [count ([] call GM_AS_fnCandidates), 0]
++GM_CI_REQUEST = []
++GM_SHK_ACTIVE = true
++GM_SHK_VICTIM = asRogue
++triAssertEq [count ([] call GM_AS_fnCandidates), 0]
++GM_SHK_ACTIVE = false
++GM_SHK_VICTIM = objNull
++GM_PANIC_ZONES = ["Village"]
++GM_PANIC_UNTIL = [time + 1000]
++triAssertEq [count ([] call GM_AS_fnCandidates), 0]
++
++// The real manager pauses without eligible residents, then spends eligible
++// simulation time and fires once. A reset leaves no overdue incident debt.
++GM_AS_REMAINING = 20
++asTick = GM_AS_TICKS
++triSimUntil { GM_AS_TICKS > (asTick + 2) }
++triAssertEq [GM_AS_REMAINING, 20]
++GM_PANIC_ZONES = []
++GM_PANIC_UNTIL = []
++asTick = GM_AS_TICKS
++triSimUntil { GM_AS_TICKS > (asTick + 2) }
++triAssert [GM_AS_REMAINING < 20]
++GM_AS_ROLL = {0.5}
++GM_AS_REMAINING = 0
++triSimUntil { (gmAssailantCount "ROGUE") == 1 }
++triSimUntil { GM_AS_REMAINING > 0 }
++triAssertEq [gmAssailantClass asRogue, "ROGUE"]
++triAssertEq [GM_AS_REMAINING, gmAssailantInterval 0.5]
++triAssert ["Village" in GM_PANIC_ZONES]
++triAssert [not ((group asRogue) in GM_CIV_GROUPS)]
++
++// Panic reaps the old population group, never its converted resident.
++GM_PANIC_UNTIL = [time + GM_PANIC_EMPTY_T - 1]
++asTick = gmCivTicks
++triSimUntil { gmCivTicks > asTick }
++triAssert [alive asRogue]
++triAssertEq [gmAssailantCount "ROGUE", 1]
++triAssertEq [count GM_CIV_GROUPS, 0]
++triAssertEq [GM_AS_REMAINING, gmAssailantInterval 0.5]
++
++// Native departure cleanup reaps the isolated assailant group as well.
++asRogueGroup = group asRogue
++player setPos [500, 500, 0]
++triSimUntil { (gmAssailantCount "ALL") == 0 }
++triAssert [isNull asRogue]
++triAssertEq [count (units asRogueGroup), 0]
++triAssertEq [GM_AS_REMAINING, gmAssailantInterval 0.5]
+ triEndTest
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/01_save.test.toml b/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/01_save.test.toml
+index 58b5b59..c9cf826 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/01_save.test.toml
++++ b/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/01_save.test.toml
+@@ -1,4 +1,5 @@
+-tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
++tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headful"]
++# Requires graphics to prepare Ready portraits; the dummy renderer cannot satisfy this contract.
+ binary = "PoseidonGame"
+ mission = "tests/integration/missions/guerrilla_native.abel"
+ timeout = 300
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/02_reload.test.toml b/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/02_reload.test.toml
+index 58b5b59..c9cf826 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/02_reload.test.toml
++++ b/arma_CWR/tests/integration/scripting/guerrilla_legend_save.seq/02_reload.test.toml
+@@ -1,4 +1,5 @@
+-tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
++tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headful"]
++# Requires graphics to prepare Ready portraits; the dummy renderer cannot satisfy this contract.
+ binary = "PoseidonGame"
+ mission = "tests/integration/missions/guerrilla_native.abel"
+ timeout = 300
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/01_mutate_save.test.toml b/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/01_mutate_save.test.toml
+index 25e56b5..6b7790b 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/01_mutate_save.test.toml
++++ b/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/01_mutate_save.test.toml
+@@ -1,4 +1,5 @@
+-tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
++tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headful"]
++# Requires graphics to prepare Ready portraits; the dummy renderer cannot satisfy this contract.
+ binary = "PoseidonGame"
+ mission = "tests/integration/missions/guerrilla_native.abel"
+ timeout = 420
+diff --git a/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/02_reload.test.toml b/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/02_reload.test.toml
+index 25e56b5..6b7790b 100644
+--- a/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/02_reload.test.toml
++++ b/arma_CWR/tests/integration/scripting/guerrilla_legends_save_reload.seq/02_reload.test.toml
+@@ -1,4 +1,5 @@
+-tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
++tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headful"]
++# Requires graphics to prepare Ready portraits; the dummy renderer cannot satisfy this contract.
+ binary = "PoseidonGame"
+ mission = "tests/integration/missions/guerrilla_native.abel"
+ timeout = 420
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index 5f605a3..438178b 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -367,6 +367,7 @@ items:
+       budget, and global state round-trips a saveGame. Everything Phase 2 waits on
+       this signal.
+     log:
++      - "2026-10-05: refreshed the local Classic/LoBo runtime and recorded campaign acceptance at arma_CWR/guerrilla-mode/acceptance/2026-10-05-campaign.md. All four automated human-suite selectors passed (action/ledger plumbing, native road fixture, two-process save/load and rendered menu captures). These harness confirmations do not constitute human acceptance: all 43 human cases / 104 steps and the island/faction/outfit matrix remain UNTESTED. Gate-Zero stays in progress."
+       - "run-game.ps1 log capture + Guerrilla.Abel template + world-gated installer are all groundwork for exactly this."
+       - "STATUS.md acceptance play-through script: boot, clear the Outpost, watch the flip + hold garrison, income tick, recruit, loot toward the AK unlock, promote a companion, trip a QRF, then save/load and confirm the campaign resumes."
+ 
+@@ -1333,23 +1334,29 @@ items:
+   - id: unassociated-assailants
+     title: "Unassociated assailants: civilians who fight back + rogue civilians hostile to both sides (issue #42)"
+     phase: phase-2
+-    status: in-progress
++    status: done
+     priority: 3
+     depends_on: [extort-solicit]
+     gh_issues: [42]
+     summary: >
+-      Split out of #41 at its own request. Two behaviors: a civilian extorted
++      Local implementation and automated Classic/LoBo validation complete.
++      Two behaviors: a civilian extorted
+       while his fear score is under 20 always fights back rather than paying,
+       and, sparingly and at random, civilians go rogue on their own and
+       attack the player's side AND the occupier's side. They are not a
+       faction - hostile to everyone, loyal to nobody - and exist to carry the
+-      chaos real insurgencies have.
++      chaos real insurgencies have. Individual hostility, bounded private
++      groups, incident timing, casualty attribution and current/legacy save
++      continuity are covered. Human campaign acceptance remains a separate
++      open gate; see arma_CWR/guerrilla-mode/acceptance/2026-10-05-campaign.md.
+     log:
++      - "2026-10-05 final review: reproduced and fixed a dead extorter passenger keeping an innocent driver's vehicle personally hostile (30 shots before the guard). The expanded living/dead vehicle retaliation selector passes in 19.0 s; current-save sequence and verified legacy-save reload pass in 8.5 s and 7.1 s on the final rebuilt binary. All 901 focused native cases pass again."
++      - "2026-10-05: finished the interrupted implementation locally on codex/campaign-acceptance. Repaired the side-transfer failure, completed individual hostility and lifecycle/save handling, and surfaced previously ignored nested assertion failures. Thirteen assailant scenario types have positive Classic/LoBo results, covering transactions/candidates/countdown, combat targets and responses, covered and vehicle extorters, bounded death/group cleanup, and current save/reload. Legacy-save migration also passes, including a save carrying a dead assailant record. The final retaliation and complete current-save selectors passed in 7.9 s and 8.5 s respectively. Focused native validation passed 901 cases / 3,964,735 assertions. Detailed run history, limitations and artifact paths are recorded in arma_CWR/guerrilla-mode/acceptance/2026-10-05-campaign.md; no landing commit is claimed before the local changes are committed."
+       - "2026-09-06: implementing #42: native individual hostility, eight private group slots, CIV handgun admission, shared eligible-time rogue clock, transactional extortion, death classification and optional persistence. Focused unit suite passes; Classic and LoBo game validation in progress."
+       - "2026-08-05: filed. The blocking fact is that ZoneRegistry::ApplyCampaignFriendship (ZoneRegistry.cpp:455-503) welds the civilian center friendly to BOTH war sides and re-applies on every load, under the comment 'the population is nobody's enemy; the ambience layer's civilians are not a third army' - the exact assumption this feature breaks. Friendship is per-CENTER (setFriend / AICenter::SetFriendship), so dropping it would turn every civilian on the island hostile at once, the opposite of 'sparingly'."
+       - "Mechanism that does work: unit side comes from the receiving group's AI center on all three creation paths (verified in the #26 pass), so a rogue moves into a group on another center while keeping his civilian class and model - the same class-vs-center split the undercover system already relies on."
+       - "The spare side slot must be COMPUTED, not hardcoded to WEST as issue #2 assumes: on vanilla Abel (occupier EAST, resistance GUER) WEST is free, but on Guerrilla.Lebanon80 the IDF occupier IS WEST and Hizballah is EAST, leaving GUER as the only free slot. ResolveSideCollisions already pins both campaign sides and is the natural place to derive the leftover one."
+-      - "Trap to respect: #24 was caused by exactly this class of change - the three exposure hand-back sites in AICenterImplPreview.cpp re-derive enemy-vs-unknown from the CURRENT side + friendship matrix, so runtime diplomacy strands bookkeeping. Also budget-bound: an AI center carries roughly 63 groups, so rogues must be pooled and reaped, never one group per assailant."
++      - "Trap to respect: #24 was caused by exactly this class of change - the three exposure hand-back sites in AICenterImplPreview.cpp re-derive enemy-vs-unknown from the CURRENT side + friendship matrix, so runtime diplomacy strands bookkeeping. CreateSideGroup respects the center's configured MaxGroups budget (group-name letters times colors, not a universal 63). Assailants additionally enforce their own eight-live budget, use isolated groups and reap empty groups."
+ 
+   - id: nearest-roads-command
+     title: "Evaluator commands: nearestRoads + worldLocations"
+@@ -1556,6 +1563,7 @@ items:
+       still equals the v3 default exactly (gamepad codes in the same array
+       preserved in order); anything else is left alone.
+     log:
++      - "2026-10-05: validated PR 63's local candidate with the Classic RMB integration lane under both dummy and GL33 rendering; automated checks pass. Human assessment of the tap-window/zoom feel and controller behavior remains unobserved, so this item stays in progress. Evidence and remaining acceptance are recorded in arma_CWR/guerrilla-mode/acceptance/2026-10-05-campaign.md."
+       - "2026-09-07: landed on branch controls/rmb-zoom-ads. Unit coverage: flag helpers, mouse/keyboard tap edges (strict window, 0 = off, TestSetButton never taps, buttonsReversed, clamp regression), tap-binding resolution, defaults, categories, reset, conflict scan, Tap key-name prefix, KbmPage cell, labels, v3->v4 migration (full fixture, customised rows, modifier/empty-slot rows). Integration lane ingame/controls/rmb_zoom_ads green on Classic (tap toggles both ways, hold zooms and eases back without toggling, V still toggles). v3 fixture captured from the pre-change build."
+       - "2026-09-07 gotcha: the real %APPDATA%\\CWR\\contextControls.cfg on the dev machine read contextControlsVersion=5 with a v3 layout (an uncommitted experimental build wrote it on 2026-09-02, with ChatHistory/chat-channel actions no committed code knows). A strict version-less-than gate would never have migrated it, so Load() treats a version above the build's as unknown layout: seed, apply the same equality-gated rewrite, re-save at 4 (WARN logged). Verified on the real file: LockTarget T, Watch O, ZoomTemp RMB, the customised Infantry Optics row (V, mouse 4, LT) untouched. Profile backed up as contextControls.cfg.bak-v5-20260907."
+       - "Labels: STR_USRACT_LOCK_TARGET already exists in the Classic STRINGTABLE.CSV; STR_USRACT_ZOOM_TEMP added to the Classic package's local bin/STRINGTABLE_OPTIONS.utf8.csv (gitignored, re-add after a reinstall) and the tracked test fixture; ControlActionLabel carries an English fallback and never localizes a negative id."
+@@ -1684,12 +1692,15 @@ items:
+       visible award announcements, stale roster status, defeated marker roles, placement completeness
+       and retry after a fully rolled-back spawn. Fixes and regression tests are
+       in draft PR 64 (fix/issue-57-naming-completion). Existing saved identities are preserved.
+-      Source tests and the Linux game build pass; full acceptance remains open
+-      pending Classic 1.99 runtime checks (awards, memorials, map labels, combat
+-      pinning, all three commanders and campaign save/reload). See
++      Source tests and builds pass. Local Classic GL33 validation on 2026-10-05
++      passed seven of eight automated selectors, but the commander displacement
++      check and broader notebook/portrait visual defects keep full acceptance
++      open. These observations are not attributed to PR 64 without a baseline
++      comparison. See
+       arma_CWR/guerrilla-mode/NAMING_ACCEPTANCE.md for requirement-level evidence.
+ 
+     log:
++      - "2026-10-05: validated the PR 64 candidate on Classic with GL33: seven of eight automated selectors passed. guerrilla_legends_defeat failed the unchanged 3 m stationarity limit at 3.60759 m; a separate trace kept DAMove=2 throughout and showed a sharp physical displacement while lying, so the failure does not establish AI walking or a lost movement flag. No physics change or threshold relaxation was made. Rendered review also found a missing opaque notebook background and white/untextured portraits. These broader render defects have not been attributed to PR 64. Corrected four portrait-dependent save/load TOMLs to headful after an incompatible dummy-renderer run. This item stays in progress; see arma_CWR/guerrilla-mode/acceptance/2026-10-05-campaign.md for exact runs, failed evidence and untested human cases."
+       - "2026-09-24: Issue 57 completion audit: the attached JSON exactly matches the checked-in name bank. Replaced template first names in new companion rows with regional first names; confined enemy personal names to the supplied western_evil regions; added one-shot native promotion/award hints and canonical roster status, including rows bound before their first poll; kept roles on defeated markers; recovered feasible placement triples rejected by the greedy picker; retained pending commanders after temporary spawn failures. Fixed silent assertions in naming/portrait save lanes. Linux PoseidonGame and PoseidonTests build; 412 affected cases and nine source-contract cases pass. Classic runtime acceptance is still pending because this checkout has no game assets. Earlier log entries describe the implementation at their dates; this audit supersedes their completed-behavior claims where noted."
+       - "2026-09-17: Local dossier portraits implemented from player-owned assets on codex/local-dossier-portraits (renderer 61921a0, cache/loading 5e9e97e). Selected-faction and saved-appearance rosters, isolated Man rendering, native print treatment, dependency cache, responsive loading gate, opaque journal textures, reset recovery and cache-clear setting replace the fixed catalogue. Windows cold/warm Classic and PLO/IDF, gamma/resolution equality, override/corruption/concurrency, buffered-Escape cancellation, GPU texture recreation and headless checks pass; 2920 Windows source tests, 407 Linux affected tests and both platform builds pass. Generated images remain local and excluded from installation/source packages. Full-roster RNG/registry/AI/network isolation, weather/time pixel equality, late recruits, placeholder refresh, actual settings clearing and all seven strengthened save/outfit integration lanes pass. See guerrilla-mode/PORTRAIT_IMPLEMENTATION.md for measurements and PORTRAIT_ACCEPTANCE.md for every plan requirement. This supersedes the earlier claim that vanilla portraits were committed."
+       - "2026-09-08: Change 4 (portrait photographs) task B landed the assets and the loop that reads them, on the same branch. 128 portraits shot in game, post-processed and encoded: the 36 vanilla ones are committed under guerrilla-mode/core/portraits (9 classes x the four kPortraitFaces tokens), the 92 @LoBo ones are generated but gitignored by one added line, /guerrilla-mode/core/portraits/lobo*.paa, because every @LoBo Legend class lowercases to a lobo prefix and those frames are APL-SA-derived art in a GPL repo; the tracked regeneration artifact is tools/screenshots/portraits/portrait_lobo.test.{sqf,toml}, which is the pattern the repo already uses for @LoBo, and the call is reversible by deleting that line. Nothing in the journal renderer, Compose or Gather was touched: the loop was already closed on the code side and the only thing missing was the file at the name. tools/screenshots/portrait_roster.py parses the two descriptor .hpp files with the engine rule (companionClass, companionClassCiv, officer else the top rung of tiers[], the top rung of tiersSniper[]) and EMITS the shoot .test.sqf, so 128 near-identical blocks are generated rather than typed; tests/contracts/test_portrait_catalogue.py imports that same parser, so the shoot and the contract can never drift, and it is the test that goes red when somebody adds a faction. The parser reproduces the expected 9 and 23 classes exactly, with ONE correction to the brief: only EgyptFrontier and Hizballah name companionClassCiv = LoBo_Terror_01E; IDF has no companionClassCiv at all. Four calibration passes, each of which changed something. (1) camSetFov is INERT until the camera has a target - CameraVehicle::CamEffectFOV only reaches the saturate() that applies _minFov/_maxFov when _lastTgtPos.SquareSize() > 0.5 (CameraHold.cpp:262-277) - so the first pass swept five lenses and got five identical frames; the shoot now camSetTargets before it camSetFovs. (2) With the player parked 180 m away every subject HEAD tracked him and every frame came back in hard profile; the player is now sent 3 km off, with disableAI TARGET and a doWatch as the belt. (3) setSkill 0 stops the AI running at all and logs \"check failed: ability > 0\" once a second, so the pose uses 0.1. (4) The FIRST capture of a run comes back PRE-GAMMA even with triCaptureAtPresent on: patch mean 138.6 against 153.6 for every later frame, and 255*(138.6/255)^(1/1.2) = 152.8 on all three channels to within 0.2/255, so each shoot now burns one throwaway block labelled without a \"__\" and the post-process drops it. The lighting claim is MEASURED, not asserted: portrait_process.py takes the mean RGB of two fixed sky patches in every untouched capture and refuses the lane unless the four faces of a class agree within 2/255 per channel and the lane within 6/255. Shipped runs measure 0.08/0.09/0.11 (vanilla, 36 frames) and 1.63/1.19/0.52 (@LoBo, 92 frames); the check already caught two bad runs. It also reports how much the four faces of a class differ, which cleanly separates nine classes whose model covers the face (soldierwsniper, soldieresniper, lobo_sniper_jor, lobo_terror_01e/01r/03e/03r/svde/svdr, all at 1.0 to 1.8 mean pixel difference) from every other class (5.2 and up); all four keys still ship for them, since the registry rolls a face whether or not the model shows it. Frozen rig, in guerrilla-mode/core/portraits/README.md and never to be changed without reshooting everything: 1985-06-15 10:30, overcast 0.25, fog 0.05, setDir 120, distance 3.5 m, camSetFov 0.30, capture 1280x960, crop side 0.40 / dx +0.005 / top 0.345 of the capture height, 40 percent saturation, warm (1.06, 1.00, 0.92), levels 0..255 to 18..245, contrast 1.08, a 236 px portrait on a 256x256 card in paper (218, 214, 201) with a (194, 190, 177) rule, DXT1. The card tone was picked against the notepad paper measured off a real capture at (209, 210, 207): matching it exactly makes the border vanish and the photograph reads as a hole cut in the page. Tests: a Catch2 case over every shipped .paa (256x256, power of two, DXT1, 5 to 8 mips, key-shaped lowercase name), the Python contract above, a new headful lane scripting/guerrilla_portrait_dossier that builds the expected key in SQF from typeOf (GM_COMP_OBJ select 0) and gmLegendFace 0 and asserts through triBriefingImages that the dossier holds exactly one image field whose texture name IS that key (which is what makes \"a portrait can never depict another faction's uniform\" checked rather than promised), and a dossier page capture plus one-physical-page assertion added to both ui/guerrilla_journal_capture_800 and _1440. Green: 2900 unit cases with ~[external-data], 12 contract tests, and the five Trident lanes. In-game verdict at 800x600 and 1440x1080: the dossier shows a real chest-up photograph of the right body (gmcore/portraits/soldiergb__face10.paa, box 0.1384 x 0.1845 page units, square on screen) above the name, the rank caption and the biography, on one physical page. Two engine defects found in passing and NOT fixed here: substr is [string, FROM, TO] with 0-based indices, and passing a count crashes the game outright (StrSub returns RString(data + from, to - from), so a negative length reaches strncpy unguarded, GameStateExtUi.cpp:701-733); and the ctest case named \"--keep-zones splices an edited Zones block through a re-run\" fails under ctest only, because ctest hands the leading -- of the test NAME to the exe as a flag - the same case passes in a whole-suite run and predates this work."

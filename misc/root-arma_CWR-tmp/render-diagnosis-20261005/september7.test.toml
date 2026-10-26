@@ -1,0 +1,6 @@
+binary = "PoseidonGameDemo"
+mission = "tests/integration/missions/cam_set_dir.Abel"
+timeout = 90
+assert_timeout = 30
+extra_args = ["--dev", "--window", "--display-mode", "windowed", "--width", "800", "--height", "600"]
+

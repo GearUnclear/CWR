@@ -1,0 +1,6 @@
+; action: on-demand disguise report
+UC_qs = gmUndercoverStatus
+? UC_qs == 0 : hint "Disguise intact.\n\nNo occupier group holds anything on you."
+? UC_qs == 1 : hint "You are being watched.\n\nAn occupier group has you flagged as suspicious - it will investigate, not shoot."
+? UC_qs == 2 : hint format ["Your face is known.\n\n%1 occupier group(s) can identify you on sight. Groups that never witnessed anything still take you for a civilian.", gmUndercoverWitnesses]
+exit

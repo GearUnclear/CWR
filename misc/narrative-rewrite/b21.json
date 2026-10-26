@@ -1,0 +1,10 @@
+{
+  "id": "b21",
+  "bank": "kBio1Hostile",
+  "variant": 2,
+  "text": "{Name} commanded patrols near {Place}. After surviving an ambush that killed a close colleague, the commander ordered searches of uninvolved households, instructing soldiers to beat residents.",
+  "word_count": 26,
+  "self_review": "A patrol commander survived a fatal ambush and ordered soldiers to beat residents during searches of uninvolved households.",
+  "source_pattern": "The supplied Segalowicz account describes a partisan reprisal against a village; it establishes retaliatory violence as a historical pattern, not this officer's motive.",
+  "fictional_changes": "The officer, ambush, colleague's death, and searches are fictional. The actor and circumstances deliberately differ from the source."
+}

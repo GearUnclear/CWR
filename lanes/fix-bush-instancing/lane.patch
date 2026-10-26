@@ -1,0 +1,300 @@
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp b/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
+new file mode 100644
+index 00000000..ef100522
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/World/Scene/InstancedRunRules.hpp
+@@ -0,0 +1,54 @@
++#pragma once
++
++namespace Poseidon::InstancedRun
++{
++
++// The opaque pass (Scene::DrawObjectsAndShadowsPass1) draws a run of identical
++// static shapes as one instanced draw: the run's first object (the head) is
++// drawn once and every TL section repeats it with each member's world matrix.
++// Everything else in that draw (vertex buffer, textures, constant fog, light
++// list) is the head's, so an object may join only where the head's draw is
++// also right for it. These are the per-object rules; the caller adds the scene
++// and routing gates (local lights, proxies, OnSurface, IsColored, the camera
++// object).
++
++// What the grouping reads from one queued object.  POD; no engine dependencies.
++struct RunEntry
++{
++    const void* shape; // LODShape identity
++    int drawLOD;       // draw level
++    int passNum;       // Object::PassNum
++    int special;       // draw level Special() | object GetObjSpecial()
++    float distance2;   // squared camera distance
++    bool isStatic;     // Object::Static()
++    // Object::IsAnimated(drawLOD): the object's draw rewrites the shared level's
++    // vertices for this object alone (land-following ClipLandKeep / ClipLandOn
++    // points fitted to the terrain under it, damage, destruction, entity
++    // animation) and restores them afterwards.
++    bool ownVertices;
++};
++
++// Members stay within this factor of the head's squared distance (about 5% in
++// distance), so the head's per-object constant fog stands for all of them.
++constexpr float kFogBandLo = 0.90f;
++constexpr float kFogBandHi = 1.10f;
++
++// May this object head a run?  Not when its draw rewrites its own vertices:
++// the instanced draw would repeat that object's fit at every member.
++constexpr bool CanHead(const RunEntry& head)
++{
++    return head.isStatic && !head.ownVertices;
++}
++
++// May `member` join the run `head` leads?  Same shape, level, pass and render
++// flags, inside the fog band, and drawn from the shape's own vertices.  A
++// member whose draw rewrites them (a bush fitted to the slope it stands on)
++// would otherwise be drawn with the head's fit instead of its own.
++constexpr bool CanJoin(const RunEntry& head, const RunEntry& member)
++{
++    return member.shape == head.shape && member.drawLOD == head.drawLOD && member.passNum == head.passNum &&
++           member.isStatic && member.special == head.special && member.distance2 >= head.distance2 * kFogBandLo &&
++           member.distance2 <= head.distance2 * kFogBandHi && !member.ownVertices;
++}
++
++} // namespace Poseidon::InstancedRun
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 866e7bb9..45528754 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -35,6 +35,7 @@ using Poseidon::Foundation::Time;
+ #include <Poseidon/World/Scene/Object.hpp>
+ #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
+ #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
++#include <Poseidon/World/Scene/InstancedRunRules.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
+ #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+@@ -1281,6 +1282,26 @@ static void DrawSortObject(SortObject* oi)
+     GEngine->SetPassKindHint(savedHint);
+ }
+ 
++// The instanced-run facts of one queued object (InstancedRunRules.hpp).
++// `headLevel` is the head's draw level: an object joins a run only with the
++// head's shape and LOD, so that level is its own whenever the answer matters.
++// IsAnimated indexes the object's shape by its draw LOD, which for a later
++// object may be LOD_INVISIBLE, so it is asked only for the head's shape and LOD.
++static InstancedRun::RunEntry InstancedRunEntry(const SortObject* so, const LODShape* headShape, int headLOD,
++                                                const Shape* headLevel)
++{
++    const Object* obj = so->object;
++    InstancedRun::RunEntry entry;
++    entry.shape = obj->GetShape();
++    entry.drawLOD = so->drawLOD;
++    entry.passNum = so->passNum;
++    entry.special = headLevel->Special() | obj->GetObjSpecial();
++    entry.distance2 = so->distance2;
++    entry.isStatic = obj->Static();
++    entry.ownVertices = obj->GetShape() == headShape && so->drawLOD == headLOD && obj->IsAnimated(so->drawLOD);
++    return entry;
++}
++
+ void Scene::DrawObjectsAndShadowsPass1()
+ {
+     // select first objects - those with highest visual priority
+@@ -1520,12 +1541,15 @@ void Scene::DrawObjectsAndShadowsPass1()
+     {
+         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
+         // identical static shapes arrive contiguously. A batchable run draws
+-        // the head once inside Begin/EndInstancedRun — every TL section then
++        // the head once inside Begin/EndInstancedRun, and every TL section then
+         // renders all K instances from the WorldInstances matrix array. The
+         // predicate keeps per-object state out of batches: static, proxy-free,
+         // not OnSurface/IsColored, equal obj-special, no local lights in the
+-        // scene, and a tight distance band so the head's constant-fog value
+-        // is representative for the whole batch.
++        // scene, a tight distance band so the head's constant-fog value is
++        // representative for the whole batch, and no object whose draw rewrites
++        // its own vertices (a land-following bush fitted to its own patch of
++        // slope, a damaged house): the run draws every member from the head's
++        // vertex buffer (InstancedRunRules.hpp).
+         const bool noLocalLights = NLights() == 0;
+         for (int i = 0; i < _drawMergers.Size();)
+         {
+@@ -1550,9 +1574,9 @@ void Scene::DrawObjectsAndShadowsPass1()
+             }
+ 
+             int runEnd = i + 1;
+-            const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
+-            const render::LegacySpec headSpec = render::SplitLegacy(headSpecial);
+-            const bool headBatchable = noLocalLights && oi->object->Static() && sShape->NProxies() == 0 &&
++            const InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape);
++            const render::LegacySpec headSpec = render::SplitLegacy(head.special);
++            const bool headBatchable = noLocalLights && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
+                                        !render::Has(headSpec.routing, render::Routing::OnSurface) &&
+                                        !render::Has(headSpec.routing, render::Routing::IsColored) &&
+                                        oi->object != GWorld->CameraOn();
+@@ -1561,17 +1585,10 @@ void Scene::DrawObjectsAndShadowsPass1()
+                 GEngine->InstancedRunReset();
+                 if (GEngine->InstancedRunAdd(oi->object->Transform()))
+                 {
+-                    // Fog band: keep members within ~5% of the head's distance so
+-                    // the head's per-object constant fog approximates all of them.
+-                    const float d2lo = oi->distance2 * 0.90f;
+-                    const float d2hi = oi->distance2 * 1.10f;
+                     while (runEnd < _drawMergers.Size())
+                     {
+                         SortObject* oj = _drawMergers[runEnd];
+-                        if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
+-                            oj->passNum != oi->passNum || !oj->object->Static() ||
+-                            (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial || oj->distance2 < d2lo ||
+-                            oj->distance2 > d2hi)
++                        if (!InstancedRun::CanJoin(head, InstancedRunEntry(oj, shape, oi->drawLOD, sShape)))
+                         {
+                             break;
+                         }
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 4cb79cef..d5bc2d19 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -470,6 +470,7 @@ list(APPEND POSEIDON_TEST_SOURCES
+     World/Scene/test_scene_preloader.cpp
+     World/Scene/test_surface_draw_order.cpp
+     World/Scene/test_alpha_sort_order.cpp
++    World/Scene/test_instanced_run_rules.cpp
+ 
+     # Core subsystem tests
+     UI/Locale/test_stringtable_system.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_instanced_run_rules.cpp b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_instanced_run_rules.cpp
+new file mode 100644
+index 00000000..d41696c5
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/World/Scene/test_instanced_run_rules.cpp
+@@ -0,0 +1,132 @@
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/World/Scene/InstancedRunRules.hpp>
++
++#include <vector>
++
++// The opaque pass draws a run of identical static shapes as one instanced draw:
++// the head is drawn once and repeated at every member's world matrix, from the
++// head's vertex buffer.  A land-following bush (ClipLandKeep vertices) has its
++// vertices refitted to the terrain under it on every draw (Object::Animate), so
++// a run of bushes drew every member with the head's terrain fit: the members
++// floated over or sank into their own slopes and changed outline.  These tests
++// pin the grouping rules so an object that rewrites its own vertices never
++// shares the head's buffer, and keep the older rules from drifting.
++
++using Poseidon::InstancedRun::CanHead;
++using Poseidon::InstancedRun::CanJoin;
++using Poseidon::InstancedRun::RunEntry;
++
++namespace
++{
++int shapeA = 0;
++int shapeB = 0;
++const void* kShapeA = &shapeA;
++const void* kShapeB = &shapeB;
++
++// A static, undamaged object of shape A at 100 m (distance2 10000).
++RunEntry Plain(float distance2 = 10000.0f)
++{
++    return RunEntry{kShapeA,
++                    /*drawLOD=*/1,
++                    /*passNum=*/0,
++                    /*special=*/0,
++                    distance2,
++                    /*isStatic=*/true,
++                    /*ownVertices=*/false};
++}
++
++// The same shape, but its draw refits its vertices for itself: a bush whose
++// level has ClipLandKeep points, or a damaged object (Object::IsAnimated).
++RunEntry OwnVertices(float distance2 = 10000.0f)
++{
++    RunEntry e = Plain(distance2);
++    e.ownVertices = true;
++    return e;
++}
++
++// The pass-1 grouping loop over an already shape-sorted queue, without the
++// engine's scene gates and batch capacity: returns the length of each run.
++std::vector<int> RunLengths(const std::vector<RunEntry>& queue)
++{
++    std::vector<int> runs;
++    for (size_t i = 0; i < queue.size();)
++    {
++        size_t end = i + 1;
++        if (CanHead(queue[i]))
++        {
++            while (end < queue.size() && CanJoin(queue[i], queue[end]))
++            {
++                end++;
++            }
++        }
++        runs.push_back(static_cast<int>(end - i));
++        i = end;
++    }
++    return runs;
++}
++} // namespace
++
++TEST_CASE("InstancedRun: a land-following bush never heads a run", "[scene][instancing]")
++{
++    // Every bush of a ClipLandKeep shape refits its own vertices, so none of
++    // them may lead an instanced draw.
++    CHECK_FALSE(CanHead(OwnVertices()));
++    CHECK(CanHead(Plain()));
++
++    // Five bushes of one shape at almost the same distance: each is drawn on
++    // its own, with its own terrain fit, never as one run of five.
++    const std::vector<RunEntry> bushes{OwnVertices(10000.0f), OwnVertices(10050.0f), OwnVertices(10100.0f),
++                                       OwnVertices(10150.0f), OwnVertices(10200.0f)};
++    CHECK(RunLengths(bushes) == std::vector<int>{1, 1, 1, 1, 1});
++}
++
++TEST_CASE("InstancedRun: an object that rewrites its vertices never joins a run", "[scene][instancing]")
++{
++    // A damaged copy among undamaged twins: it would otherwise be drawn with the
++    // head's undamaged vertices.  It ends the run and is drawn alone; the twins
++    // after it start a run of their own.
++    CHECK_FALSE(CanJoin(Plain(), OwnVertices()));
++    CHECK(CanJoin(Plain(), Plain(10100.0f)));
++
++    const std::vector<RunEntry> queue{Plain(10000.0f), Plain(10010.0f), Plain(10020.0f), OwnVertices(10030.0f),
++                                      Plain(10040.0f), Plain(10050.0f), Plain(10060.0f), Plain(10070.0f)};
++    CHECK(RunLengths(queue) == std::vector<int>{3, 1, 4});
++}
++
++TEST_CASE("InstancedRun: the older grouping rules are unchanged", "[scene][instancing]")
++{
++    const RunEntry head = Plain();
++    REQUIRE(CanJoin(head, Plain()));
++
++    RunEntry other = Plain();
++    other.shape = kShapeB;
++    CHECK_FALSE(CanJoin(head, other));
++
++    other = Plain();
++    other.drawLOD = 2;
++    CHECK_FALSE(CanJoin(head, other));
++
++    other = Plain();
++    other.passNum = 1;
++    CHECK_FALSE(CanJoin(head, other));
++
++    other = Plain();
++    other.special = 0x100;
++    CHECK_FALSE(CanJoin(head, other));
++
++    other = Plain();
++    other.isStatic = false;
++    CHECK_FALSE(CanJoin(head, other));
++    CHECK_FALSE(CanHead(other));
++}
++
++TEST_CASE("InstancedRun: members stay inside the fog band", "[scene][instancing]")
++{
++    // 0.90x .. 1.10x of the head's squared distance.
++    const RunEntry head = Plain(10000.0f);
++    CHECK(CanJoin(head, Plain(9001.0f)));
++    CHECK(CanJoin(head, Plain(10999.0f)));
++    CHECK_FALSE(CanJoin(head, Plain(8999.0f)));
++    CHECK_FALSE(CanJoin(head, Plain(11001.0f)));
++}

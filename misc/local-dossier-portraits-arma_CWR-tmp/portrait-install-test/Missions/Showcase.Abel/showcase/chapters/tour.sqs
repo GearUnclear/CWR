@@ -1,0 +1,48 @@
+; ============================================================================
+;  chapters/tour.sqs  -  the island, its zones, fog-of-war and the map.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: ZoneRegistry (native) - zone table from config, marker
+;  paint, fog-of-war reveal, seeded CITY zones.
+;  Contract: showcase/README.md. No sanctioned-seam writes; teleports only.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+"Guerrilla Mode: you are one resistance fighter liberating this island zone by zone. This tour visits the three authored zones - every fact narrated here is read live off the native gm* engine surface." call SC_fnSay
+~SC_BEAT
+
+; ---- Camp ---------------------------------------------------------------------
+[(gmZone SC_CAMP) select GM_Z_POS, 15] call SC_fnTpGroup
+"THE CAMP - your base, resistance-owned from the start. Walk within 30 m and the recruit / specialist / train menu mounts. Open the map: every zone marker is painted natively, and zones reveal as you come within 1500 m." call SC_fnSay
+~SC_BEAT
+(SC_CAMP call SC_fnZoneBrief) call SC_fnSay
+~SC_BEAT
+
+; ---- Village ------------------------------------------------------------------
+[(gmZone SC_VILL) select GM_Z_POS, 25] call SC_fnTpGroup
+"THE VILLAGE - the real town of Houdan, neutral. Towns are not taken by force: SUPPORT accrues while you operate nearby, and at 60 the town joins you on its own. Towns pay income on goodwill regardless of who patrols them." call SC_fnSay
+~SC_BEAT
+(SC_VILL call SC_fnZoneBrief) call SC_fnSay
+~SC_BEAT
+
+; ---- Outpost (SOLO: cover is personal - armed squadmates would be engaged) -----
+SC_cOP = (gmZone SC_OUT) select GM_Z_POS
+[[(SC_cOP select 0) - 90, (SC_cOP select 1) - 90, 0], 10] call SC_fnTpSolo
+"THE OUTPOST - occupier-held, worth 25 R a tick once taken. You slipped up ALONE: your cover is personal - the disguise covers you, not armed guerrillas at your side. The garrison ahead spawned from the native distance cache: officer first, tier picked by War Level." call SC_fnSay
+~SC_BEAT
+(SC_OUT call SC_fnZoneBrief) call SC_fnSay
+~SC_BEAT
+
+; ---- the seeded island ----------------------------------------------------------
+(format ["Beyond these three: %1 more town zones were auto-seeded from Abel's named places (seedCities=1). Support, income and the War Level ladder all scale with the whole island - liberation means the map, not three flags.", gmZoneCount - 3]) call SC_fnSay
+~SC_BEAT
+
+; ---- home ------------------------------------------------------------------------
+[(gmZone SC_CAMP) select GM_Z_POS, 15] call SC_fnTpGroup
+"Back at the Camp. Chapters are self-contained - run them in any order from the action menu; the event ticker reports every system edge live as you play." call SC_fnSay
+
+; ---- outcome: anchors resolved and the teleports actually landed ------------------
+SC_cOk = ((SC_CAMP >= 0) and (SC_VILL >= 0)) and (SC_OUT >= 0)
+? SC_cOk : SC_cOk = ((getPos aP) distance ((gmZone SC_CAMP) select GM_Z_POS)) < 100
+? SC_cOk : ["PASS", "three authored zones visited and verified"] call SC_fnDone
+? not SC_cOk : ["FAIL", "zone anchors unresolved or teleport missed"] call SC_fnDone
+exit

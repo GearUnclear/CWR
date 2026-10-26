@@ -1,0 +1,6 @@
+083c2cacc21d65e80b2cac17237a0cac5f2fb4b1 *arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+cbac8785c760742808d7243aa20fdbdac2dbeac5 *arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+83b3a840b7ffafc3567499e4c8448526e3efaaf4 *arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+ca391a1384a85fcd957aed481b149f7abe4fbaba *arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+58a2a5999fdbced184c6c95f75be8d897ac47fd1 *arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+131f28d63765874eb1af99e24ddf2b465d469ccb *arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp

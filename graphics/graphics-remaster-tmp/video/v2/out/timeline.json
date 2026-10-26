@@ -1,0 +1,283 @@
+{
+ "fps": 60,
+ "layout": "sbs",
+ "size": [
+  3840,
+  1080
+ ],
+ "segments": [
+  {
+   "kind": "intro",
+   "clip": "",
+   "title": "",
+   "start": 0.0,
+   "end": 10.0,
+   "frames": 600,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "opening",
+   "title": "Malden, under occupation",
+   "start": 10.0,
+   "end": 12.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "opening",
+   "title": "Malden, under occupation",
+   "start": 12.0,
+   "end": 18.0,
+   "frames": 360,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "valley_mist",
+   "title": "Moving out at dawn",
+   "start": 18.0,
+   "end": 20.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "valley_mist",
+   "title": "Moving out at dawn",
+   "start": 20.0,
+   "end": 27.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "pine_shafts",
+   "title": "Through the pines",
+   "start": 27.0,
+   "end": 29.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "pine_shafts",
+   "title": "Through the pines",
+   "start": 29.0,
+   "end": 36.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "bay_reflections",
+   "title": "Coastal patrol, dawn",
+   "start": 36.0,
+   "end": 38.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "bay_reflections",
+   "title": "Coastal patrol, dawn",
+   "start": 38.0,
+   "end": 45.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "outpost",
+   "title": "The occupier's outpost",
+   "start": 45.0,
+   "end": 47.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "outpost",
+   "title": "The occupier's outpost",
+   "start": 47.0,
+   "end": 54.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "cloud_shadows",
+   "title": "Recon over Everon",
+   "start": 54.0,
+   "end": 56.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "cloud_shadows",
+   "title": "Recon over Everon",
+   "start": 56.0,
+   "end": 63.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "sinai_camp",
+   "title": "Hidden camp, Sinai",
+   "start": 63.0,
+   "end": 65.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "sinai_camp",
+   "title": "Hidden camp, Sinai",
+   "start": 65.0,
+   "end": 72.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "ambush",
+   "title": "Ambush at golden hour",
+   "start": 72.0,
+   "end": 74.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "ambush",
+   "title": "Ambush at golden hour",
+   "start": 74.0,
+   "end": 81.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "convoy",
+   "title": "Convoy at sunset",
+   "start": 81.0,
+   "end": 83.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "convoy",
+   "title": "Convoy at sunset",
+   "start": 83.0,
+   "end": 91.0,
+   "frames": 480,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "checkpoint",
+   "title": "Checkpoint at dusk",
+   "start": 91.0,
+   "end": 93.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "checkpoint",
+   "title": "Checkpoint at dusk",
+   "start": 93.0,
+   "end": 100.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "town_patrol",
+   "title": "Night patrol in town",
+   "start": 100.0,
+   "end": 102.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "town_patrol",
+   "title": "Night patrol in town",
+   "start": 102.0,
+   "end": 109.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "rain_town",
+   "title": "Slipping through the rain",
+   "start": 109.0,
+   "end": 111.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "rain_town",
+   "title": "Slipping through the rain",
+   "start": 111.0,
+   "end": 118.0,
+   "frames": 420,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "supply_run",
+   "title": "Supply run at night",
+   "start": 118.0,
+   "end": 120.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "supply_run",
+   "title": "Supply run at night",
+   "start": 120.0,
+   "end": 128.0,
+   "frames": 480,
+   "file": ""
+  },
+  {
+   "kind": "card",
+   "clip": "firefight",
+   "title": "Firefight after dark",
+   "start": 128.0,
+   "end": 130.0,
+   "frames": 120,
+   "file": ""
+  },
+  {
+   "kind": "clip",
+   "clip": "firefight",
+   "title": "Firefight after dark",
+   "start": 130.0,
+   "end": 138.0,
+   "frames": 480,
+   "file": ""
+  },
+  {
+   "kind": "outro",
+   "clip": "",
+   "title": "",
+   "start": 138.0,
+   "end": 148.0,
+   "frames": 600,
+   "file": ""
+  }
+ ],
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\out\\uslu_dur_v2.mp4",
+ "duration": 148.0,
+ "planned": true
+}

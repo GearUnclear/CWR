@@ -1,0 +1,25 @@
+OPTIONAL: SHORTER WORDINGS FOR THE LONGEST LINES
+================================================
+
+Only if a main line feels long or awkward to say. Read the main line first; if you
+like, add one take of the shorter one right after it. I use whichever you prefer.
+
+3   valley mist
+    main:    A resistance squad moves out at first light. The sun is still burning off the valley mist.
+    shorter: A resistance squad moves out at first light. The sun burns off the valley mist.
+
+4   pine shafts
+    main:    In the pine woods, morning sun falls through the haze in shafts. The guerrillas keep to cover.
+    shorter: Morning sun falls through the pines in shafts. The guerrillas keep to cover.
+
+5   bay
+    main:    On the bay, an occupier patrol boat crosses calm water that mirrors the hills and the sky.
+    shorter: On the bay, an occupier patrol boat crosses water that mirrors the hills and sky.
+
+7   cloud shadows
+    main:    Over Everon, the clouds catch the sun, and their shadows move slowly across the hills.
+    shorter: Over Everon, the clouds catch the sun. Their shadows drift across the hills.
+
+12  town patrol
+    main:    At night, street lamps and the fire light the occupied town. A patrol comes down the street.
+    shorter: At night, lamps and the fire light the occupied town. A patrol comes down the street.

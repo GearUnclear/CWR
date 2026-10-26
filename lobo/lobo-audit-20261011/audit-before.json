@@ -1,0 +1,3541 @@
+{
+  "errors": [],
+  "candidates": [
+    {
+      "kind": "unsupported_parse",
+      "file": "lobo_fab/config.cpp",
+      "reason": "Unmatched config closing brace"
+    },
+    {
+      "kind": "unsupported_parse",
+      "file": "lobo_iak47iraqi/config.cpp",
+      "reason": "Unbalanced config braces"
+    },
+    {
+      "kind": "unsupported_parse",
+      "file": "lobochallen/config.cpp",
+      "reason": "Unbalanced config braces"
+    },
+    {
+      "kind": "unsupported_parse",
+      "file": "loboegypt/config.cpp",
+      "reason": "Unmatched config closing brace"
+    },
+    {
+      "kind": "unsupported_parse",
+      "file": "w_combatstatics/config.cpp",
+      "reason": "Unbalanced config braces"
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_an12/config.cpp",
+      "class": "CfgVehicles/LoBo_AN12_Egy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_btr60/config.cpp",
+      "class": "CfgVehicles/LoBo_BTR60",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_m1/config.cpp",
+      "class": "CfgVehicles/LoBo_M1",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_m1/config.cpp",
+      "class": "CfgVehicles/LoBo_M1G",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGYG2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_m1/config.cpp",
+      "class": "CfgVehicles/LoBo_M1GMG_2",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGYG",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_m1/config.cpp",
+      "class": "CfgVehicles/LoBo_M1GMG2",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGYG",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_statwp/config.cpp",
+      "class": "CfgVehicles/LoBo_PKMS",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_statwp/config.cpp",
+      "class": "CfgVehicles/LoBo_TOWLauncherEgy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_t55/config.cpp",
+      "class": "CfgVehicles/LoBo_T55_EGY_1",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_t55/config.cpp",
+      "class": "CfgVehicles/LoBo_T55_EGY_G1",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGYG",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_t55/config.cpp",
+      "class": "CfgVehicles/LoBo_T54_EGY_1",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_t55/config.cpp",
+      "class": "CfgVehicles/LoBo_T54_EGY_G1",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGYG",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobo_zu23/config.cpp",
+      "class": "CfgVehicles/LoBo_ZU23",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboammo/config.cpp",
+      "class": "CfgWeapons/LoBo_105Sabot2",
+      "property": "ammo",
+      "reference": "LoBo_105Sabot2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboart/config.cpp",
+      "class": "CfgVehicles/LoBo_MLRS_Egy",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboart/config.cpp",
+      "class": "CfgVehicles/LoBo_M109A6_Egy",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboart/config.cpp",
+      "class": "CfgVehicles/LoBo_M46_Egy",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboart/config.cpp",
+      "class": "CfgVehicles/LoBo_M252MORTAR_Egy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboc130/config.cpp",
+      "class": "CfgVehicles/EgyptC130",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegapc/config.cpp",
+      "class": "CfgVehicles/LoBo_BMP_EGY",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegapc/config.cpp",
+      "class": "CfgVehicles/LoBo_BMP_EGY_GUARD",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegapc/config.cpp",
+      "class": "CfgVehicles/LoBo_M113_EGY",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegapc/config.cpp",
+      "class": "CfgVehicles/LoBo_M113_EGYG",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGYG2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegapc/config.cpp",
+      "class": "CfgVehicles/LoBo_ZSU_EGY",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegapc/config.cpp",
+      "class": "CfgVehicles/LoBo_YPR765",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegapc/config.cpp",
+      "class": "CfgVehicles/LoBo_YPR765Grd",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGYG2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegcar/config.cpp",
+      "class": "CfgVehicles/LoBo_UAZ_Egy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegcar/config.cpp",
+      "class": "CfgVehicles/LoBo_truck5ton_egy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboegcar/config.cpp",
+      "class": "CfgVehicles/LoBo_Ural_egy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboeghelo/config.cpp",
+      "class": "CfgVehicles/LoBo_APACHE_EGY",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboeghelo/config.cpp",
+      "class": "CfgVehicles/LoBo_CH47_EGY",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboeghelo/config.cpp",
+      "class": "CfgVehicles/LoBo_Mi8_egy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboeghelo/config.cpp",
+      "class": "CfgVehicles/LoBo_Gazelle_Guns",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboeghelo/config.cpp",
+      "class": "CfgVehicles/LoBo_Gazelle_HOT",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboeghelo/config.cpp",
+      "class": "CfgVehicles/LoBo_Commando_Mk2",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FLTCrew",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobofightpos/config.cpp",
+      "class": "CfgVehicles/LoBo_pillbox_01_PKM_egy",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobohmwv/config.cpp",
+      "class": "CfgVehicles/LoBoHMWV_Egy_M2",
+      "property": "crew",
+      "reference": "LoBo_Egypt_infantry",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobom60/config.cpp",
+      "class": "CfgVehicles/EgyptM60",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY2",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobosa6/config.cpp",
+      "class": "CfgVehicles/LoBo_SA6",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobosa6/config.cpp",
+      "class": "CfgVehicles/LoBo_SA6RAD",
+      "property": "crew",
+      "reference": "LoBo_CREW_EGY",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "lobotoy/config.cpp",
+      "class": "CfgVehicles/LoBo_EToymg",
+      "property": "crew",
+      "reference": "LoBo_Egypt_FrtCrp",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "unresolved_lobo_class",
+      "file": "loboweapons/config.cpp",
+      "class": "CfgWeapons/LoBoMUZIbase",
+      "property": "magazines",
+      "reference": "LoBoMUZIDDmag",
+      "uncertain_due_to_unparsed_configs": true
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "coc_arty/config.cpp",
+      "class": "CoC_M270MLRS",
+      "hitpoint": "HitRadar"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitFHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitBHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitRHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitLHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitFTurret"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitBTurret"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitLTurret"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitRTurret"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobo_m1/config.cpp",
+      "class": "LoBo_M1",
+      "hitpoint": "HitTTurret"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "loboachzrit/config.cpp",
+      "class": "LoBo_Achzarit",
+      "hitpoint": "HitTurretFront"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "loboachzrit/config.cpp",
+      "class": "LoBo_Achzarit",
+      "hitpoint": "HitFHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "loboachzrit/config.cpp",
+      "class": "LoBo_Achzarit",
+      "hitpoint": "HitTurretTop"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "loboachzrit/config.cpp",
+      "class": "LoBo_Achzarit",
+      "hitpoint": "HitTurretBack"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "loboart/config.cpp",
+      "class": "LoBo_M270MLRS_IDF",
+      "hitpoint": "HitRadar"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava1",
+      "hitpoint": "HitTurretFront"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava1",
+      "hitpoint": "HitFHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava1",
+      "hitpoint": "HitTurretTop"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava1",
+      "hitpoint": "HitTurretBack"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava2",
+      "hitpoint": "HitTurretFront"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava2",
+      "hitpoint": "HitFHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava2",
+      "hitpoint": "HitTurretTop"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava2/config.cpp",
+      "class": "LoBoMerkava2",
+      "hitpoint": "HitTurretBack"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava4/config.cpp",
+      "class": "LoBoMerkava4DT",
+      "hitpoint": "HitTurretFront"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava4/config.cpp",
+      "class": "LoBoMerkava4DT",
+      "hitpoint": "HitFHull"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava4/config.cpp",
+      "class": "LoBoMerkava4DT",
+      "hitpoint": "HitTurretTop"
+    },
+    {
+      "kind": "custom_hitpoint_candidate",
+      "file": "lobomerkava4/config.cpp",
+      "class": "LoBoMerkava4DT",
+      "hitpoint": "HitTurretBack"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_a4/scripts/autotanks_a.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_a4/scripts/autotanks_a2.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_a4/scripts/autotanks_a3.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_a4/scripts/firemissiles_a.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_a4/scripts/firemissiles_a.sqs",
+      "line": 9,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_a4/scripts/firemissiles_a.sqs",
+      "line": 121,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_airammo/scripts/duran/duranfired.sqs",
+      "line": 6,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobo_airammo/scripts/smoke/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobo_btr60/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_air.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_air.sqs",
+      "line": 135,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_aire.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_aire.sqs",
+      "line": 115,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_recc.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_recc.sqs",
+      "line": 61,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_ww.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/firemissiles_ww.sqs",
+      "line": 128,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_f4/scripts/number2.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobo_fab/lcm/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/lcm/scripts/number2.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobo_fab/saar5/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_fab/saar5/scripts/number2.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobo_fab/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_kfir/scripts/autotankscas1.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_kfir/scripts/event-gear.sqs",
+      "line": 8,
+      "label": "End",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_kfir/scripts/firemissiles_cas1.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_kfir/scripts/firemissiles_cas1.sqs",
+      "line": 9,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_kfir/scripts/firemissiles_cas1.sqs",
+      "line": 90,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobo_zelda/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobo_zelda/scripts/fx/dkmm_rsc_mapfinder.sqs",
+      "line": 2,
+      "label": "ende",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobo_zu23/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboachzrit/scripts/bmp11anim.sqs",
+      "line": 13,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboachzrit/scripts/bmp11anim.sqs",
+      "line": 17,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "duplicate_label",
+      "file": "loboart/scripts/m252start.sqs",
+      "line": 36,
+      "label": "precisionset"
+    },
+    {
+      "kind": "duplicate_label",
+      "file": "loboart/scripts/m252start.sqs",
+      "line": 37,
+      "label": "precisionset"
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboc130/script/halo.sqs",
+      "line": 41,
+      "label": "done",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboc130/script/haloe.sqs",
+      "line": 41,
+      "label": "done",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboc130/script/parasoldiers.sqs",
+      "line": 51,
+      "label": "done",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboc130/script/parasoldierse.sqs",
+      "line": 51,
+      "label": "done",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobocen/scripts/carpetfired.sqs",
+      "line": 6,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobocen/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "loboegapc/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 20,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 21,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 22,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 23,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 24,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 25,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 26,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboegapc/scripts/girls.sqs",
+      "line": 27,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobof15/scr/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_c_aa.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_c_aa.sqs",
+      "line": 111,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e.sqs",
+      "line": 143,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_a120.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_a120.sqs",
+      "line": 123,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_aa.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_aa.sqs",
+      "line": 135,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_cbu.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_cbu.sqs",
+      "line": 166,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_gbu.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_gbu.sqs",
+      "line": 143,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_mav.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_mav.sqs",
+      "line": 153,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_mk84.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/fire_e_mk84.sqs",
+      "line": 153,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof15/scr/number.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksaa.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksag.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksf16iaa.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksf16icas.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksf16ips.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksf16istand.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksps.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotankssuw.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/autotanksww.sqs",
+      "line": 10,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobof16/scr/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_ag.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_ag.sqs",
+      "line": 128,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_aa.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_aa.sqs",
+      "line": 127,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_bomber.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_bomber.sqs",
+      "line": 152,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_cas.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_cas.sqs",
+      "line": 156,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_ps.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_ps.sqs",
+      "line": 119,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_sead.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_sead.sqs",
+      "line": 156,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_stand.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_f16i_stand.sqs",
+      "line": 103,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_ps.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_ps.sqs",
+      "line": 91,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_suw.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/firemissiles_suw.sqs",
+      "line": 75,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof16/scr/number2.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof5/scripts/firemissiles2.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof5/scripts/firemissiles2.sqs",
+      "line": 20,
+      "label": "aa2way",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof5/scripts/firemissiles2.sqs",
+      "line": 93,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof5/scripts/firemissiles3.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof5/scripts/firemissiles3.sqs",
+      "line": 19,
+      "label": "aa2way",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobof5/scripts/firemissiles3.sqs",
+      "line": 87,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/autoecm.sqs",
+      "line": 18,
+      "label": "ECMON",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/autoecm.sqs",
+      "line": 21,
+      "label": "ECMOFF",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/fire_mk20.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/fire_mk20.sqs",
+      "line": 21,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 5,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 6,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 7,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 8,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 9,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 10,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 11,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 12,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 13,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 14,
+      "label": "n2",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 18,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 19,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 20,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 21,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 22,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 23,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 24,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 25,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 26,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 27,
+      "label": "n3",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 31,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 32,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 33,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 34,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 35,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 36,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 37,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 38,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 39,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "loboil28/script/number.sqs",
+      "line": 40,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobom60/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobom60/scripts/hit.sqs",
+      "line": 47,
+      "label": "firstloop",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobomerkava2/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomerkava2/scripts/smokefired.sqs",
+      "line": 6,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobomerkava4/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "duplicate_label",
+      "file": "lobomig/mig25/sqs/firemissiles_cap1.sqs",
+      "line": 19,
+      "label": "r60_1away"
+    },
+    {
+      "kind": "duplicate_label",
+      "file": "lobomig/mig25/sqs/firemissiles_cap1.sqs",
+      "line": 24,
+      "label": "r60_2away"
+    },
+    {
+      "kind": "duplicate_label",
+      "file": "lobomig/mig25/sqs/firemissiles_cap1.sqs",
+      "line": 29,
+      "label": "r60_1away"
+    },
+    {
+      "kind": "duplicate_label",
+      "file": "lobomig/mig25/sqs/firemissiles_cap1.sqs",
+      "line": 34,
+      "label": "r60_2away"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/mig25/sqs/firemissiles_cap1.sqs",
+      "line": 15,
+      "label": "R60_3away",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/mig25/sqs/firemissiles_cap1.sqs",
+      "line": 16,
+      "label": "R60_4away",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/mig25/sqs/mig25gear.sqs",
+      "line": 29,
+      "label": "CheckPosition",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/mig25/sqs/mig25turbo_off.sqs",
+      "line": 13,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_cas1.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_cas1.sqs",
+      "line": 9,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_cas1.sqs",
+      "line": 73,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_cas2.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_cas2.sqs",
+      "line": 9,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_cas2.sqs",
+      "line": 85,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_ic1.sqs",
+      "line": 20,
+      "label": "sp4away",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/firemissiles_ic2.sqs",
+      "line": 20,
+      "label": "sp4away",
+      "terminal_spelling": false
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/syria/firemissiles_cas1.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/syria/firemissiles_cas1.sqs",
+      "line": 9,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/syria/firemissiles_cas1.sqs",
+      "line": 78,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/syria/firemissiles_ic1.sqs",
+      "line": 8,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobomig/scripts/syria/firemissiles_ic1.sqs",
+      "line": 90,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "lobosa6/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobosyrapc/scripts/bmp11anim.sqs",
+      "line": 13,
+      "label": "exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "missing_label",
+      "file": "lobosyrapc/scripts/bmp11anim.sqs",
+      "line": 17,
+      "label": "Exit",
+      "terminal_spelling": true
+    },
+    {
+      "kind": "uninitialized_local_call_candidate",
+      "file": "loboter/scripts/fire.sqs",
+      "line": 67,
+      "variable": "_AI"
+    }
+  ],
+  "unparsed_configs": [
+    "lobo_fab/config.cpp",
+    "lobo_iak47iraqi/config.cpp",
+    "lobochallen/config.cpp",
+    "loboegypt/config.cpp",
+    "w_combatstatics/config.cpp"
+  ],
+  "coverage_complete": false,
+  "note": "Unresolved LoBo references are strict errors only with complete config coverage. Unparsed configs make reference findings uncertain. Script/dataflow/custom-hitpoint candidates require reachability and engine review; they are not confirmed gameplay defects.",
+  "archives_scanned": 124,
+  "text_members": 1020
+}

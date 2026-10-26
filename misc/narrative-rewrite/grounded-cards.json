@@ -1,0 +1,362 @@
+[
+  {
+    "id": "b01",
+    "bank": "kBio0Friendly",
+    "variant": 0,
+    "beat": "Farmhand from {Place}; family loses its rented fields; wants to publish poems.",
+    "direction": "Give {Name} a farming background and a continuing interest in writing. State the loss plainly; the poems need no joke, quotation, or symbolic meaning.",
+    "source_pattern": "The supplied oral history documents agricultural work before entering an armed movement and subsequent hardship.",
+    "source_url": "https://museumofbritishcolonialism.org/wp-content/uploads/2023/04/EmergencyStories_MuthoniWaKirima.pdf",
+    "fictional_changes": "Tenancy, eviction, and the ambition to publish poems are fictional. The source does not document a poet or this reason for losing land."
+  },
+  {
+    "id": "b02",
+    "bank": "kBio0Friendly",
+    "variant": 1,
+    "beat": "Furniture maker from {Place}; displacement separates the family; reopens a workshop with a younger sibling.",
+    "direction": "Let {Name}'s attachment to the sibling carry the warmth. Describe rebuilding a working life without staging a conversation.",
+    "source_pattern": "The supplied survivor biography documents family displacement, a lost home and business, and survival with relatives.",
+    "source_url": "https://www.jewishpartisans.org/partisans/rae-kushner",
+    "fictional_changes": "Furniture making, the sibling partnership, and reopening a workshop are invented. No historical escape sequence or persecution identity is transferred."
+  },
+  {
+    "id": "b03",
+    "bank": "kBio0Friendly",
+    "variant": 2,
+    "beat": "Survey assistant from {Place}; accepted money to falsify a boundary; the displaced family still knows who signed it.",
+    "direction": "Make {Name}'s earlier wrongdoing explicit. Keep the consequence personal and unresolved; do not add a rescue or redemption.",
+    "source_pattern": "Plausible invention; the supplied research does not document fraudulent land surveying.",
+    "source_url": null,
+    "fictional_changes": "The occupation, bribe, boundary fraud, and continuing relationship with its victims are entirely fictional."
+  },
+  {
+    "id": "b04",
+    "bank": "kBio0Friendly",
+    "variant": 3,
+    "beat": "Grocery owner from {Place}; joins a rebel band after soldiers confiscate the shop's stock; leaves when the leader orders theft from neighboring families.",
+    "direction": "Name {Name}'s business and both decisions plainly. The second theft is an order that causes departure; do not imply the grocery owner carried it out.",
+    "source_pattern": "The supplied partisan testimony describes armed fighters coercing rural households to shelter and protect fugitives.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/oral-history/alisa-lisa-nussbaum-derman-describes-partisan-activities",
+    "fictional_changes": "The grocery, confiscation by soldiers, recruitment, theft order, and departure are fictional. The source supports coercion within resistance activity, not this shopkeeper's life."
+  },
+  {
+    "id": "b05",
+    "bank": "kBio0Friendly",
+    "variant": 4,
+    "beat": "Shepherd from {Place}; guides displaced neighbors along familiar grazing routes; loses contact with the person tending the flock.",
+    "direction": "Give {Name} a useful skill and a specific cost of helping. Keep the missing person unresolved without inventing their death.",
+    "source_pattern": "The supplied forest-fighter interview describes reliance on village support and the hardship when that support was cut off.",
+    "source_url": "https://museumofbritishcolonialism.org/wp-content/uploads/2023/04/EmergencyStories_MuthoniWaKirima.pdf",
+    "fictional_changes": "The shepherd, guidance along grazing routes, and missing flock keeper are fictional extrapolations; these actions are not in the interview."
+  },
+  {
+    "id": "b06",
+    "bank": "kBio0Friendly",
+    "variant": 5,
+    "beat": "Municipal gardener from {Place}; escapes with an elderly parent; takes responsibility for a woodland shelter's water supply.",
+    "direction": "State {Name}'s former work, family responsibility, and present task. Do not add a raid or a dramatic act of sacrifice.",
+    "source_pattern": "The supplied camp testimony describes primitive shelters and a daily assignment to fetch water; another supplied biography documents escape with relatives.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/oral-history/frank-bleichman-describes-conditions-in-and-dangers-facing-a-partisan-camp-in-the-forests-of-poland",
+    "fictional_changes": "Gardening, the elderly parent, and this individual's responsibility for the water supply are invented combinations of separately documented patterns."
+  },
+  {
+    "id": "b07",
+    "bank": "kBio0Hostile",
+    "variant": 0,
+    "beat": "Warehouse clerk assigned near {Place}; rises to quartermaster; confiscates civilian carts to meet military transport demands.",
+    "direction": "Explain {Name}'s professional rise and present conduct. Keep responsibility visible without giving them an invented private justification.",
+    "source_pattern": "The supplied Taylor judgments support a pattern in which procurement and administrative experience contributes to later military and political power.",
+    "source_url": "https://www.rscsl.org/Documents/Decisions/Taylor/Appeal/1389/SCSL-03-01-A-1389.pdf",
+    "fictional_changes": "The clerk-to-quartermaster career and seizure of carts are fictional. They are not acts attributed to Taylor by this card."
+  },
+  {
+    "id": "b08",
+    "bank": "kBio0Hostile",
+    "variant": 1,
+    "beat": "Wedding musician posted near {Place}; enlists for regular wages; hopes to return to paid performances.",
+    "direction": "Let {Name} be an ordinary servicemember with a previous livelihood and an unfinished plan. Do not add secret resistance sympathies.",
+    "source_pattern": "The supplied Sierra Leone TRC findings describe recruits entering the army for monthly pay.",
+    "source_url": "https://hrc-sl.org/PDF/Media/TRCVolume3A.pdf",
+    "fictional_changes": "The music work, wedding performances, military posting, and hope of returning to that work are fictional. The wage motive is the documented general pattern."
+  },
+  {
+    "id": "b09",
+    "bank": "kBio0Hostile",
+    "variant": 2,
+    "beat": "Military engineer posted near {Place}; approved an unsafe bridge repair that killed two comrades; now personally checks every repair.",
+    "direction": "Name {Name}'s bad decision and its continuing effect on work. Avoid clinical labels or a suggestion that care now cancels the earlier mistake.",
+    "source_pattern": "Plausible invention; the supplied research does not document this accident or engineering habit.",
+    "source_url": null,
+    "fictional_changes": "The military career, fatal repair decision, and checking habit are fictional."
+  },
+  {
+    "id": "b10",
+    "bank": "kBio0Hostile",
+    "variant": 3,
+    "beat": "Permit administrator assigned near {Place}; sold travel approvals; kept the post by identifying the civilian partner who collected the bribes.",
+    "direction": "Make {Name}'s corruption and self-preservation understandable in one short sequence. No elaborate conspiracy is needed.",
+    "source_pattern": "The supplied research documents civilian office skills becoming administrative careers; it does not document permit bribery in these cases.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/article/adolf-eichmann",
+    "fictional_changes": "Permit sales, the civilian partner, exposure, and retention of the post are fictional. The historical administrative career is only a broad reference."
+  },
+  {
+    "id": "b11",
+    "bank": "kBio0Hostile",
+    "variant": 4,
+    "beat": "Former dock laborer serving near {Place}; enlisted during unemployment; now a sergeant who helps younger soldiers write home.",
+    "direction": "Give {Name} an ordinary route into service and a sustained useful habit. The kindness does not require a contrasting atrocity.",
+    "source_pattern": "The supplied Sierra Leone TRC findings link some army recruitment to unemployment and monthly wages.",
+    "source_url": "https://hrc-sl.org/PDF/Media/TRCVolume3A.pdf",
+    "fictional_changes": "Dock work, promotion to sergeant, and help with letters are plausible inventions, not details of a documented recruit."
+  },
+  {
+    "id": "b12",
+    "bank": "kBio0Hostile",
+    "variant": 5,
+    "beat": "Local official in {Place}; receives authority over evictions; denies a former rival's appeal despite knowing the claim is valid.",
+    "direction": "Show {Name}'s limited but real authority through the specific decision. Keep the grievance ordinary and the abuse unmistakable.",
+    "source_pattern": "The supplied Akayesu judgment documents a local civil office carrying police and public-order powers and consequential choices by its holder.",
+    "source_url": "https://unictr.irmct.org/files/case-documents/ictr-96-4/trial-judgements/en/980902.pdf",
+    "fictional_changes": "The eviction system, valid appeal, and private rivalry are invented. None is presented as an episode from the historical case."
+  },
+  {
+    "id": "b13",
+    "bank": "kBio1Friendly",
+    "variant": 0,
+    "beat": "Teacher from {Place}; school closes under new restrictions; continues lessons in pupils' homes.",
+    "direction": "State what {Name} taught and where the work continues, using only those facts. Warmth can come from commitment to pupils without a brave-child scene.",
+    "source_pattern": "The supplied Gobetti account documents teaching and later underground organizing; the other resistance research documents bans reshaping ordinary work.",
+    "source_url": null,
+    "fictional_changes": "School closure and home lessons are plausible inventions. The supplied research does not establish this exact teaching practice; no historical source is claimed for it."
+  },
+  {
+    "id": "b14",
+    "bank": "kBio1Friendly",
+    "variant": 1,
+    "beat": "Former postal worker from {Place}; became a resistance courier; stopped after police seized the courier's own address book and used it to arrest a friend.",
+    "direction": "Make the courier's task, ownership of the seized address book and the friend's arrest clear. State the decision to quit directly.",
+    "source_pattern": "The supplied Manning interview describes a police raid, exposure through a personal connection, detention, and later underground information work.",
+    "source_url": "https://omalley.nelsonmandela.org/cis/omalley/OMalleyWeb/03lv03445/04lv03833/05lv03858/06lv03878.htm",
+    "fictional_changes": "Postal work, ownership and seizure of the address book, the friend's arrest and the decision to quit are fictional."
+  },
+  {
+    "id": "b15",
+    "bank": "kBio1Friendly",
+    "variant": 2,
+    "beat": "Bicycle repairer from {Place}; repairs transport used by an underground medical network; police confiscate the workshop's spare parts.",
+    "direction": "Explain {Name}'s practical contribution and the effect of the search. Mechanical competence is sufficient personality; no talking bicycle is required.",
+    "source_pattern": "The supplied Strobos testimony describes underground transport work and the importance and vulnerability of a bicycle at checkpoints.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/oral-history/tina-strobos-describes-her-courier-duties-for-the-underground-in-the-netherlands",
+    "fictional_changes": "The repair shop, medical network, workshop search, and seized parts are invented extensions of the transport pattern."
+  },
+  {
+    "id": "b16",
+    "bank": "kBio1Friendly",
+    "variant": 3,
+    "beat": "Bookkeeper from {Place}; kept records for an earlier resistance cell; left after its leader ordered a friend's punishment without evidence.",
+    "direction": "Give {Name} a job within the cell and a definite reason for leaving. Specify wrongful accusation in the later prose; do not add a second betrayal.",
+    "source_pattern": "The supplied Manning interview describes underground analysis of possible informants; it does not establish this wrongful accusation.",
+    "source_url": "https://omalley.nelsonmandela.org/cis/omalley/OMalleyWeb/03lv03445/04lv03833/05lv03858/06lv03878.htm",
+    "fictional_changes": "The bookkeeper, cell records, falsely accused friend, punishment order, and departure are fictional. The source supports only the existence of suspicion and information work."
+  },
+  {
+    "id": "b17",
+    "bank": "kBio1Friendly",
+    "variant": 4,
+    "beat": "Tailor from {Place}; makes a sibling's wedding clothes; cannot obtain permission to travel to the wedding.",
+    "direction": "Let {Name}'s work and family occasion matter on their own. The denied journey supplies enough pressure without a resistance recruitment event.",
+    "source_pattern": "The supplied Strobos testimony documents curfews and checkpoints constraining ordinary journeys.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/oral-history/tina-strobos-describes-her-courier-duties-for-the-underground-in-the-netherlands",
+    "fictional_changes": "Tailoring, the sibling's wedding, clothes, and denied travel permission are fictional; the source does not document this family event."
+  },
+  {
+    "id": "b18",
+    "bank": "kBio1Friendly",
+    "variant": 5,
+    "beat": "Student near {Place}; skipped classes to print leaflets against rent increases but dreaded speaking at meetings; hid after their mother's arrest and wrote speeches for others.",
+    "direction": "Give the person strong opinions and discomfort with public speaking. Their contribution changes after hiding, but they keep writing. Use natural pronouns, no repeated job label and no moral explanation.",
+    "source_pattern": "The supplied Manning interview documents organizing around housing and other local issues, pamphlet distribution, a parent's detention, and hiding.",
+    "source_url": "https://omalley.nelsonmandela.org/cis/omalley/OMalleyWeb/03lv03445/04lv03833/05lv03858/06lv03878.htm",
+    "fictional_changes": "The missed classes, fear of public speaking, rent leaflets, speeches and exact personal chronology are invented. Research supplies broad patterns of student activism, family detention and hiding."
+  },
+  {
+    "id": "b19",
+    "bank": "kBio1Hostile",
+    "variant": 0,
+    "beat": "Former school inspector assigned to {Place}; becomes a police supervisor; orders the detention of residents who sought protection at the office.",
+    "direction": "State {Name}'s earlier profession and the abuse of present authority. Keep the residents' request and the officer's answer concrete.",
+    "source_pattern": "The supplied Akayesu judgment documents a school inspector becoming a local official with police authority and later participating in crimes.",
+    "source_url": "https://unictr.irmct.org/files/case-documents/ictr-96-4/trial-judgements/en/980902.pdf",
+    "fictional_changes": "The police-supervisor appointment and detention of petitioners are fictional. The card omits real communities, chronology, crimes, and political identities."
+  },
+  {
+    "id": "b20",
+    "bank": "kBio1Hostile",
+    "variant": 1,
+    "beat": "Checkpoint officer stationed near {Place}; accumulates gambling debts; allows a smuggler's wagons through to postpone repayment.",
+    "direction": "Give {Name} a comprehensible personal problem and corrupt choice. Avoid implying a future mission or a guaranteed betrayal.",
+    "source_pattern": "Plausible invention; the supplied research does not document gambling debts or this arrangement.",
+    "source_url": null,
+    "fictional_changes": "The gambling, smuggler, debt, and checkpoint favor are entirely fictional."
+  },
+  {
+    "id": "b21",
+    "bank": "kBio1Hostile",
+    "variant": 2,
+    "beat": "Patrol commander near {Place}; survives an ambush that kills a close colleague; subsequently orders violent searches of uninvolved households.",
+    "direction": "Describe {Name}'s loss and chosen response without treating bereavement as an excuse or medical explanation. Do not add interrogation and execution.",
+    "source_pattern": "The supplied Segalowicz account describes a partisan reprisal against a village; it establishes retaliatory violence as a historical pattern, not this officer's motive.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/gallery/armed-jewish-resistance-partisans-stories",
+    "fictional_changes": "The officer, ambush, colleague's death, and searches are fictional. The actor and circumstances deliberately differ from the source."
+  },
+  {
+    "id": "b22",
+    "bank": "kBio1Hostile",
+    "variant": 3,
+    "beat": "Former railway porter posted near {Place}; takes an army job to support a parent; asks for transfer closer to home.",
+    "direction": "Give {Name} a wage motive and family obligation. This officer can have an ordinary background without a concealed atrocity or unusual quirk.",
+    "source_pattern": "The supplied Sierra Leone TRC findings document regular wages as a reason some recruits enlisted.",
+    "source_url": "https://hrc-sl.org/PDF/Media/TRCVolume3A.pdf",
+    "fictional_changes": "Railway work, financial support for a parent, officer status, and transfer request are plausible inventions rather than documented details."
+  },
+  {
+    "id": "b23",
+    "bank": "kBio1Hostile",
+    "variant": 4,
+    "beat": "Amateur actor serving in {Place}; takes a military publicity post; helps announce a ban that closes the old theater group.",
+    "direction": "Make {Name}'s former interest and present employment clear. Describe the action without scripting a pompous speech or comic audience reaction.",
+    "source_pattern": "The supplied research documents civilian skills being put to work in coercive administrative institutions, but not an actor's publicity career.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/article/adolf-eichmann",
+    "fictional_changes": "Acting, military publicity, the ban, and the theater group are fictional. No source claim is made for the officer's feelings about the ban."
+  },
+  {
+    "id": "b24",
+    "bank": "kBio1Hostile",
+    "variant": 5,
+    "beat": "Officer posted to {Place}; misses the birth of a first child; sends home cheerful accounts while the posting grows more restrictive.",
+    "direction": "Use {Name}'s separation and deliberate omissions as the whole personal background. Do not infer kindness or secretly opposing the orders.",
+    "source_pattern": "Plausible invention; the supplied research does not document these letters or this family separation.",
+    "source_url": null,
+    "fictional_changes": "The parenthood, missed birth, letters, posting, and omissions are entirely fictional."
+  },
+  {
+    "id": "b25",
+    "bank": "kBio2Friendly",
+    "variant": 0,
+    "beat": "Radio repairer from {Place}; joins a resistance transmitter crew after the shop is destroyed in fighting; hopes to host a music program.",
+    "direction": "Connect {Name}'s trade to the new task and preserve music as an ordinary interest. Avoid a symbolic record collection or joke about taste.",
+    "source_pattern": "The supplied Komski testimony describes existing artistic skill being used to produce underground information; Strobos also describes transporting a transmitter.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/oral-history/john-komski-describes-resistance-activities-in-krakow-including-an-underground-newspaper",
+    "fictional_changes": "Radio repair, the destroyed shop, transmitter work, and music ambitions are fictional. The shared historical pattern is reuse of an existing skill."
+  },
+  {
+    "id": "b26",
+    "bank": "kBio2Friendly",
+    "variant": 1,
+    "beat": "Former quarry worker from {Place}; deserted a resistance position during an attack; learned afterward that a companion had stayed and died.",
+    "direction": "State {Name}'s earlier livelihood, desertion, and known loss. Do not reveal a secret rescue or resolve the guilt.",
+    "source_pattern": "The supplied Bleichman testimony describes flight during a camp attack, later return, and burial of dead companions.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/oral-history/frank-bleichman-describes-conditions-in-and-dangers-facing-a-partisan-camp-in-the-forests-of-poland",
+    "fictional_changes": "The quarry work, assigned position, desertion, and particular companion are invented. Historical escape is not being labeled desertion."
+  },
+  {
+    "id": "b27",
+    "bank": "kBio2Friendly",
+    "variant": 2,
+    "beat": "Orchard worker from {Place}; led relatives away from fighting using familiar farm roads; now entertains the displaced group with stories from the harvest crews.",
+    "direction": "Make {Name} sociable through a sustained part of working life. Keep the escape intelligible without an embarrassing twist or disputed anecdote.",
+    "source_pattern": "The supplied Rae Kushner biography documents fleeing with relatives and living among a larger group of displaced people.",
+    "source_url": "https://www.jewishpartisans.org/partisans/rae-kushner",
+    "fictional_changes": "The orchard, farm roads, guidance of relatives, and storytelling are invented. No historical escape route or family sequence is copied."
+  },
+  {
+    "id": "b28",
+    "bank": "kBio2Friendly",
+    "variant": 3,
+    "beat": "Photographer from {Place}; became an untrained medic after escaping to a resistance camp; secretly treated a wounded enemy despite the commander's ban and stayed in the group.",
+    "direction": "Explain the photographer's changed role and concrete decision to treat a wounded enemy. This person disobeys quietly and stays, rather than leaving after a leader's abuse.",
+    "source_pattern": "The supplied Schulman profile documents a photographer accepted into a partisan group for urgently needed medical help despite lacking medical training.",
+    "source_url": "https://encyclopedia.ushmm.org/content/en/article/faye-schulman",
+    "fictional_changes": "The location, commander, treatment ban, wounded enemy, secret treatment and continued membership are invented. The historical source supports a photographer becoming an untrained partisan medic."
+  },
+  {
+    "id": "b29",
+    "bank": "kBio2Friendly",
+    "variant": 4,
+    "beat": "Ferry worker from {Place}; loses the family boat in fighting; is living with a mother and learning the recipes used at family celebrations.",
+    "direction": "Give {Name} a lost livelihood and an ordinary family activity that continues afterward. Do not make the recipe a code or symbol.",
+    "source_pattern": "The supplied research documents destroyed or lost livelihoods and survival with family; it does not document this cooking relationship.",
+    "source_url": null,
+    "fictional_changes": "The ferry, boat loss, living arrangement, and recipes are plausible inventions. No historical person is claimed as their source."
+  },
+  {
+    "id": "b30",
+    "bank": "kBio2Friendly",
+    "variant": 5,
+    "beat": "Apprentice mason from {Place}; volunteers expecting an adventurous life; panics during a first attack and requests further training.",
+    "direction": "State {Name}'s expectation, failure, and unfinished response. Keep the person likable without completing a bravery arc.",
+    "source_pattern": "The supplied Sierra Leone TRC findings record bravado among some army recruits and a recruit encouraged by a radio advertisement.",
+    "source_url": "https://hrc-sl.org/PDF/Media/TRCVolume3A.pdf",
+    "fictional_changes": "The masonry apprenticeship, resistance enlistment, first attack, panic, and training request are fictional. The documented army recruitment pattern is being extrapolated to a fictional resistance volunteer."
+  },
+  {
+    "id": "b31",
+    "bank": "kBio2Hostile",
+    "variant": 0,
+    "beat": "Officer serving near {Place}; a friend killed a surrendering fighter; concealed that act in the unit report.",
+    "direction": "Make {Name}'s responsibility the deliberate cover-up. Keep the friendship and concrete act; no ominous letters or final moral are needed.",
+    "source_pattern": "The supplied court research documents unarmed prisoners being killed and culpable choices by military subordinates; it does not establish this particular concealment.",
+    "source_url": "https://www.icty.org/en/press/drazen-erdemovic-sentenced-5-years-imprisonment",
+    "fictional_changes": "The friendship, surrender, killing, and falsified unit report are invented. The source's coercion claim is not attributed to this fictional officer."
+  },
+  {
+    "id": "b32",
+    "bank": "kBio2Hostile",
+    "variant": 1,
+    "beat": "Officer near {Place}; wrote poetry before the war; now prepares notices for the families of soldiers killed under the command.",
+    "direction": "Give {Name} a longstanding interest and a present duty tied to losses. Do not quote a poem or claim that writing compensates for wartime conduct.",
+    "source_pattern": "Plausible invention; the supplied research does not document this officer's poetry or casualty-notice work.",
+    "source_url": null,
+    "fictional_changes": "The literary interest, command responsibility, casualties, and notices are fictional."
+  },
+  {
+    "id": "b33",
+    "bank": "kBio2Hostile",
+    "variant": 2,
+    "beat": "Officer posted near {Place}; lost a younger sibling in fighting; repeatedly assigns a young recruit to safer duties.",
+    "direction": "Make {Name}'s favoritism concrete and let grief be a personal background. Do not identify the recruit as a symbolic replacement sibling.",
+    "source_pattern": "Plausible invention; the supplied research does not establish bereavement producing this kind of favoritism.",
+    "source_url": null,
+    "fictional_changes": "The sibling's death, recruit, assignment choices, and connection between them are entirely fictional."
+  },
+  {
+    "id": "b34",
+    "bank": "kBio2Hostile",
+    "variant": 3,
+    "beat": "Former foundry worker serving near {Place}; obeyed a superior's threat and helped execute prisoners; later admitted the participation.",
+    "direction": "State {Name}'s coercion, act, and admission plainly. Avoid reproducing the real case's victims, numbers, dates, location, sentence, or exact threat.",
+    "source_pattern": "The supplied Erdemovic sentencing summary records participation in executions under a threat of death, a guilty plea, and treatment of duress as mitigation rather than exoneration.",
+    "source_url": "https://www.icty.org/en/press/drazen-erdemovic-sentenced-5-years-imprisonment",
+    "fictional_changes": "The foundry work, character, and conflict are invented; only the general pressure-choice-admission pattern is retained. No real victim, execution site, date, or sentence is copied."
+  },
+  {
+    "id": "b35",
+    "bank": "kBio2Hostile",
+    "variant": 4,
+    "beat": "Army payroll clerk posted near {Place}; promoted after heavy unit losses; continues collecting wages in dead soldiers' names.",
+    "direction": "Explain {Name}'s access to the records and the theft. The profile needs no medal, confrontation, or extra business scheme.",
+    "source_pattern": "The supplied Sierra Leone TRC chapter records evidence of officials pocketing pay and benefits through dead soldiers' roll numbers and ghost soldiers.",
+    "source_url": "https://www.sierraleonetrc.org/index.php/view-report-text-vol-3b/item/volume-three-b-chapter-four",
+    "fictional_changes": "The individual clerk, promotion, unit losses, and setting are invented. The payroll fraud mechanism is the documented pattern."
+  },
+  {
+    "id": "b36",
+    "bank": "kBio2Hostile",
+    "variant": 5,
+    "beat": "Former boxing trainer assigned to {Place}; becomes a military interrogator; trains new guards to beat prisoners until they sign confessions.",
+    "direction": "Make {Name}'s former work, new role, and chosen violence explicit without graphic detail. Do not add a theatrical joke or sentimental private hobby.",
+    "source_pattern": "The supplied Duch case records the deliberate training of security staff and administration of torture and forced confessions.",
+    "source_url": "https://eccc.gov.kh/en/cases/charged-profile/kaing-guek-eav",
+    "fictional_changes": "Boxing, the military post, training method, and local institution are fictional. No actual prisoner, prison name, real ideology, or historical sequence is used."
+  }
+]

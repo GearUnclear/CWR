@@ -1,0 +1,37 @@
+| view | label | gpu frame | world | post |
+|---|---|---|---|---|
+| forest_edge_golden | classic | 6.94 | 6.81 | None |
+| forest_edge_golden | dbgnormal | 15.95 | 15.46 | 0.35 |
+| forest_edge_golden | remastered | 13.17 | 12.76 | 0.27 |
+| forest_edge_golden | v1ss | 15.52 | 15.06 | 0.27 |
+| forest_edge_golden | v2tex | 16.55 | 16.14 | 0.27 |
+| forest_edge_golden | v3tex2x | 16.48 | 16.08 | 0.26 |
+| forest_edge_golden | v4nogate | 15.29 | 14.86 | 0.29 |
+| hull_close | classic | 12.55 | 12.45 | None |
+| hull_close | dbgnormal | 19.74 | 17.9 | 1.74 |
+| hull_close | remastered | 16.84 | 15.25 | 1.49 |
+| hull_close | v1ss | 19.45 | 17.59 | 1.77 |
+| hull_close | v2tex | 18.55 | 16.89 | 1.56 |
+| hull_close | v3tex2x | 20.74 | 18.93 | 1.7 |
+| hull_close | v4nogate | 21.72 | 19.87 | 1.74 |
+| lowsun_fp | classic | 4.64 | 4.53 | None |
+| lowsun_fp | dbgnormal | 17.34 | 15.37 | 1.87 |
+| lowsun_fp | remastered | 7.84 | 6.46 | 1.27 |
+| lowsun_fp | v1ss | 16.28 | 14.23 | 1.95 |
+| lowsun_fp | v2tex | 12.82 | 11.52 | 1.19 |
+| lowsun_fp | v3tex2x | 13.53 | 12.0 | 1.42 |
+| lowsun_fp | v4nogate | 16.3 | 14.41 | 1.79 |
+| noon_fields | classic | 9.18 | 9.08 | None |
+| noon_fields | dbgnormal | 32.35 | 31.99 | 0.25 |
+| noon_fields | remastered | 16.89 | 16.53 | 0.25 |
+| noon_fields | v1ss | 22.91 | 22.54 | 0.27 |
+| noon_fields | v2tex | 33.39 | 32.97 | 0.3 |
+| noon_fields | v3tex2x | 34.23 | 33.88 | 0.24 |
+| noon_fields | v4nogate | 33.47 | 33.12 | 0.24 |
+| tank_gunner_interior | classic | 15.41 | 13.74 | None |
+| tank_gunner_interior | dbgnormal | 6.66 | 5.63 | 0.57 |
+| tank_gunner_interior | remastered | 7.49 | 6.5 | 0.58 |
+| tank_gunner_interior | v1ss | 6.41 | 5.52 | 0.6 |
+| tank_gunner_interior | v2tex | 11.4 | 10.02 | 0.75 |
+| tank_gunner_interior | v3tex2x | 6.03 | 5.24 | 0.5 |
+| tank_gunner_interior | v4nogate | 7.11 | 6.21 | 0.65 |

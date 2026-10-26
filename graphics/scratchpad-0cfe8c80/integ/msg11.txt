@@ -1,0 +1,6 @@
+roadmap: remastered lighting bug fixes landed
+
+Log line for the ten bug-fix commits 874638c..72f32d4, the two fixes
+that were not landed and why, and the 20261018-bugfix capture comparison.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -1,0 +1,8 @@
+{
+  "id": "b03",
+  "bank": "kBio0Friendly",
+  "variant": 2,
+  "text": "An official boundary near {Place} cut farmers off from fields they still worked. {Name}, a survey assistant, refused to sign a survey calling the land unused. The office dismissed them.",
+  "word_count": 30,
+  "self_review": "The boundary removes access to working fields; the assistant refuses to sign the false survey and loses the job. Calling the land unused makes the falsification explicit without requiring a particular boundary or faction."
+}

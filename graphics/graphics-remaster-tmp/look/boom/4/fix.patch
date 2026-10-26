@@ -1,0 +1,723 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index fcf2076e..2cd32a9e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -879,6 +879,10 @@ class Engine : public IGraphicsEngine
+     /// a camp fire's column glows brighter than its colour can say. The draw
+     /// clears it. Without the camera (or on another backend) it is dropped.
+     virtual void SetDecalGlow(PackedColor /*glow*/) {}
++    /// The next decal's glow times this (look fix "boom": an incandescent
++    /// fireball's light far past white; 1 = the glow as packed), cleared with
++    /// the glow by the draw.
++    virtual void SetDecalGlowGain(float /*gain*/) {}
+     /// Captures: hold the remastered cloud-shadow field at a drift offset in
+     /// metres (pinned = false lets it drift with the wind again from where it
+     /// is). The field integrates the wind every frame, so re-pinning the sim
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+index fa89c752..898ab6f5 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+@@ -12,6 +12,7 @@
+ #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
+ #include <Poseidon/Network/Network.hpp>
+ #include <Poseidon/Game/Commands/GameStateExt.hpp>
++#include <algorithm>
+ #include <cmath>
+ #include <Poseidon/Foundation/Common/FltOpts.hpp>
+ #include <Poseidon/Foundation/Containers/BoolArray.hpp>
+@@ -191,6 +192,13 @@ SmokeSourceVehicle::SmokeSourceVehicle(LODShapeWithShadow* shape, float density,
+     Object::_type = TypeTempVehicle;
+     SetSimulationPrecision(_interval);
+     _fire.Load(Pars >> "CfgCloudlets" >> "Explosion");
++    // Look fix "boom": the fuel's fireball is a deflagration: sooty, cooler
++    // than a detonation (kFuelFireInitK), cooling slowly (kFuelFireCoolKps),
++    // its puffs living about a second and a half and rolling up as they grow.
++    _fire.SetTemperatureCurve(lighting::kFuelFireInitK, -lighting::kFuelFireCoolKps);
++    _fire.SetTimes(0.9f, 1.0f);
++    _fire.SetFades(0.35f, 0.05f, 0.7f);
++    _fire.SetClimbRate(2.5f, 0.0f, 4.0f);
+     _fire.SetSize(size);
+     _darkFire.SetSize(size);
+     _darkFire.SetColor(Color(0.15, 0.15, 0.10));
+@@ -276,7 +284,10 @@ void SmokeSourceVehicle::SimulateExplosion()
+             float fireTime = type.hit * 0.002;
+             saturate(fireSize, 0.25, 1.25);
+             saturate(fireTime, 0.25, 1.25);
+-            _fire.SetSize(fireSize);
++            // Look fix "boom": the deflagration's fireball is metres across
++            // (lighting::kFuelFireballSize times the classic size: a Jeep's
++            // 0.25 drew puffs of 0.1 to 1 m, lost in its own smoke).
++            _fire.SetSize(fireSize * lighting::kFuelFireballSize);
+             _darkFire.SetSize(fireSize);
+             _fire.Start(fireTime);
+             _darkFire.Start(fireTime);
+@@ -337,12 +348,32 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
+     // explosion is one burst, and the embers of a burning wreck glow under its
+     // smoke while it burns, 1.5 m up (the flames' centre, not the deck: rays
+     // from the ground to a light just above it graze it and shadow it).
++    // Look fix "boom": the fuel's fireball is a deflagration with no
++    // detonation flash: a fire's warm light that swells over 0.15 s, holds
++    // while the fireball rolls up and fades by 1.6 s (it was a shell burst's
++    // white flash, gone in a third of a second).
+     if (_fire.Active() && !_combatBurst && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+     {
+         _combatBurst = true;
+-        const Vector3 at = Position() + VUp * 0.8f;
++        _fireballAge = 0.0f;
++    }
++    if (_fireballAge >= 0.0f && _fireballAge < 1.6f && prec <= SimulateInvisibleNear)
++    {
++        _fireballAge += deltaT;
++        const float up = std::min(_fireballAge / 0.15f, 1.0f);
++        const float down = std::min(std::max((_fireballAge - 0.5f) / 1.1f, 0.0f), 1.0f);
++        const float env = up * up * (3.0f - 2.0f * up) * (1.0f - down * down * (3.0f - 2.0f * down));
++        const float size = _fire.GetSize();
++        const Vector3 at = Position() + VUp * (1.2f + 2.0f * size);
+         const float p[3] = {at.X(), at.Y(), at.Z()};
+-        lighting::GCombatLights().Spawn(lighting::CombatLightKind::Explosion, p, _fire.GetSize());
++        if (env > 0.01f)
++            _combatFireball.Set(lighting::CombatLightKind::Fire, p, 8.0f * size * env);
++        else
++            _combatFireball.Release();
++    }
++    else
++    {
++        _combatFireball.Release();
+     }
+     const float glow = canDelete || !GlowsAsWreck() ? 0.0f : _inOutDensity * _density;
+     if (glow > 0.01f && prec <= SimulateInvisibleNear)
+@@ -837,6 +868,10 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
+     {
+         _growSize = 1;
+     }
++    // Look fix "boom": a fireball's puff keeps the size it was born at
++    // (PrimeFireballBirth) while it grows on.
++    if (_cloudletTTable && lighting::FireballTable(HottestTemperature()))
++        _growSize = std::max(_growSize, lighting::kFireballBirthSize);
+     // simulate acceleration
+     _speed[1] += _accY * deltaT;
+     Friction(_speed[0], _xFriction, 0, deltaT);
+@@ -851,6 +886,17 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
+     Smoke::Simulate(deltaT, prec);
+ }
+ 
++void Cloudlet::PrimeFireballBirth()
++{
++    if (!_cloudletTTable || !lighting::FireballTable(HottestTemperature()))
++        return;
++    _growSize = std::max(_growSize, lighting::kFireballBirthSize);
++    SetOrientScaleOnly(_growSize * _size);
++    Color c = _cloudletColor * _cloudletTTable->GetColor(_t);
++    c.SetA(std::min(std::max(_alpha, 0.0f), 1.0f));
++    _constantColor = PackedColor(c);
++}
++
+ void Cloudlet::SetTemperature(float t, float dt, CloudletTTable* table)
+ {
+     _t = t;
+@@ -1192,6 +1238,8 @@ void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float densit
+ 
+         cloudlet->SetClimbRate(_cloudletAccY * density * 1.5, _cloudletMinYSpeed, _cloudletMaxYSpeed);
+         cloudlet->SetSideSpeed(0, 0, 1.5, 1.5);
++        // Look fix "boom": a burst's fireball is there on its flash frame.
++        cloudlet->PrimeFireballBirth();
+         GLOB_WORLD->AddCloudlet(cloudlet);
+     }
+ }
+@@ -1879,6 +1927,11 @@ Explosion::Explosion(LODShapeWithShadow* shape, Vehicle* owner, float duration)
+     float coef = (1.0 / 0.6) * _exSize;
+     float invCoef = 1.0 / coef;
+     _fire.Load(Pars >> "CfgCloudlets" >> "Explosion");
++    // Look fix "boom": a cased charge's fireball glows white for a frame or
++    // two and is soot within about 0.1 s, longer the larger the charge
++    // (lighting::BurstCoolingRate; the config's -4000 K/s kept it glowing
++    // orange for a fifth of a second whatever the charge).
++    _fire.SetTemperatureCurve(_fire.GetInitTemperature(), -lighting::BurstCoolingRate(_exSize));
+     _fire.SetSize(_fire.GetSize(), coef * _fire.GetSourceSize());
+     _fire.SetInterval(Square(invCoef) * _fire.GetInterval());
+     _fire.Start(duration * 0.05);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+index 9b262bd6..fb861f0d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+@@ -107,6 +107,14 @@ class Cloudlet: public Smoke
+ 	// Its temperature (K) and its table's hottest (the last entry's maxT; 0
+ 	// without a table): a fireball's puff glows (CombatLights FireballPuff).
+ 	float Temperature() const {return _t;}
++	// Its full size (m), the scale it grows to (look fix "boom": a fireball's
++	// puff is drawn near it from its birth).
++	float FullSize() const {return _size;}
++	// Look fix "boom": a fireball's puff is drawn on the frame it is born at
++	// its birth temperature, near its size and fully opaque (a new puff is
++	// otherwise drawn first after its first step: transparent and of size 0,
++	// so a burst's flash frame showed no fireball). No-op for other puffs.
++	void PrimeFireballBirth();
+ 	float HottestTemperature() const
+ 	{
+ 		return _cloudletTTable && _cloudletTTable->Size()>0 ? _cloudletTTable->Get(_cloudletTTable->Size()-1).maxT : 0.0f;
+@@ -212,6 +220,14 @@ class CloudletSource: public SerializeClass
+ 	}
+ 	Color GetColor() const {return _cloudletColor;}
+ 	void SetColor(ColorVal color) {_cloudletColor = color;}
++	// Look fix "boom": a burst's puffs' birth temperature (K) and cooling
++	// (K/s, negative), per munition (CombatLights.hpp kBurstCoolKps).
++	float GetInitTemperature() const {return _cloudletInitT;}
++	void SetTemperatureCurve( float initT, float deltaT )
++	{
++		_cloudletInitT=initT;
++		_cloudletDeltaT=deltaT;
++	}
+ 
+ 	Cloudlet *Drop( Vector3Par pos, Vector3Par speed );
+ 	void Simulate
+@@ -403,6 +419,11 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
+     // and the embers glowing under a burning wreck's smoke.
+     bool _combatBurst = false;
+     lighting::CombatLightHandle _combatEmbers;
++    // Look fix "boom": a fuel tank burns as a deflagration, a rolling orange
++    // fireball that lights its surroundings for about a second and a half
++    // (a fire's light with an envelope), not a detonation's flash.
++    lighting::CombatLightHandle _combatFireball;
++    float _fireballAge = -1.0f;
+     // A burning wreck's smoke (SmokeSourceOnVehicle): its embers glow.
+     virtual bool GlowsAsWreck() const { return false; }
+ };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+index aa1e7325..a7c14356 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+@@ -170,17 +170,22 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
+             // research's saturated orange (1.0, 0.40, 0.11), whose light
+             // turned the ground round a crater khaki (red over blue 1.55).
+             const float e = Clamp(strength, 0.2f, 1.5f);
+-            const float cool = std::min(age / 0.45f, 1.0f);
++            // Look fix "boom": the flash and the glow after it scale with the
++            // cube root of the charge (kBurstFlashTau, kBurstGlowTau).
++            const float scale = std::cbrt(e);
++            const float flashTau = kBurstFlashTau * scale;
++            const float glowTau = kBurstGlowTau * scale;
++            const float cool = std::min(age / (3.0f * glowTau), 1.0f);
+             const float c = cool * cool * (3.0f - 2.0f * cool);
+             SetColour(s, 1.0f, 0.90f + (kFireRgb[1] - 0.90f) * c, 0.74f + (kFireRgb[2] - 0.74f) * c);
+             const float flash = std::max(kFlashGain * tuning.flash, 0.0f);
+             const float peak = 0.65f * flash + 0.35f;
+             const float afterHold = std::max(age - std::max(tuning.flashHold, 0.0f), 0.0f);
+             const float flicker =
+-                1.0f + std::min(afterHold / 0.05f, 1.0f) *
++                1.0f + std::min(afterHold / flashTau, 1.0f) *
+                            (0.22f * Noise1(age * 14.0f, seed) + 0.1f * Noise1(age * 31.0f, seed ^ 0x51ed27U));
+-            const float flashEnv = std::exp(-afterHold / 0.05f);
+-            const float env = (0.65f * flash * flashEnv + 0.35f * std::exp(-age / 0.16f)) * flicker;
++            const float flashEnv = std::exp(-afterHold / flashTau);
++            const float env = (0.65f * flash * flashEnv + 0.35f * std::exp(-age / glowTau)) * flicker;
+             // The window is sized for the peak.
+             SetPower(s, 420.0f * e * e * jitter * peak, 0.8f + 1.8f * e, kCombatMaxRange);
+             s.intensity *= std::max(env, 0.0f) / peak;
+@@ -356,9 +361,14 @@ void BlackBodyRgb(float temperatureK, float out[3])
+     out[2] = 0.15f * std::pow(Clamp((t - 1900.0f) / 1100.0f, 0.0f, 1.0f), 1.5f);
+ }
+ 
++bool FireballTable(float hottestK)
++{
++    return hottestK >= kFireballTableK && hottestK <= kFireballTableMaxK;
++}
++
+ bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emit[3])
+ {
+-    if (!(hottestK >= kFireballTableK && hottestK <= kFireballTableMaxK))
++    if (!FireballTable(hottestK))
+         return false;
+     const float t = std::max(temperatureK, 0.0f);
+     const float fade = Clamp((t - kFireballGlowFromK) / (kFireballGlowFullK - kFireballGlowFromK), 0.0f, 1.0f);
+@@ -376,6 +386,11 @@ bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emi
+     return true;
+ }
+ 
++float BurstCoolingRate(float explosionSize)
++{
++    return kBurstCoolKps / std::cbrt(Clamp(explosionSize, 0.1f, 2.0f));
++}
++
+ float CombatTwilight(float sunElevationDeg)
+ {
+     const float above = std::max(sunElevationDeg - kTwilightNightDeg, 0.0f);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+index 649332b6..44770fa5 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+@@ -56,6 +56,15 @@ bool CombatLightIsBurst(CombatLightKind kind);
+ // the eye's flash response (FlashExposureGain), which only runs at night:
+ // CombatTuning::flashHold.
+ constexpr float kExplosionFlashHold = 0.15f;
++// Look fix "boom": a detonation's flash lasts tens of milliseconds and grows
++// with the cube root of the charge (strength): it falls with this time
++// constant (s) at strength 1, the fireball's glow after it with
++// kBurstGlowTau, as its puffs cool (kBurstCoolKps). The classic 0.05 s flash
++// and 0.16 s glow lit a dusk burst's cloud and the plain round it for a third
++// of a second. Under the photoreal camera the flash does not hold
++// (CombatTuning::flashHold 0).
++constexpr float kBurstFlashTau = 0.025f;
++constexpr float kBurstGlowTau = 0.07f;
+ 
+ // The combat sub-knobs (LightingTuning combatFlash, combatFire, combatSmoke,
+ // combatScatter): gains on the shipped look, 1 each. The research's round-9
+@@ -219,14 +228,44 @@ void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float
+ // so the hottest core goes white-yellow. What it scatters is soot
+ // (kFireballSoot, display): it cools from a white-hot core through orange to
+ // dark grey-brown smoke. Returns false (outputs untouched) for any other puff.
++// Look fix "boom" (round 6, fire and flash): an incandescent fireball is a
++// light source, hundreds to thousands of times the dusk ground's luminance, so
++// its glow is stored far past the display's white (the decal glow's HDR gain,
++// Engine::SetDecalGlowGain): the hottest puffs reach kFireballEmitCap (the
++// camera's encoding tops out at 16), whiten on the curve and bloom; a puff at
++// 1600 K still glows a bright orange (about 2, past a lit wall), at 1400 K a
++// dull red, and from 1300 K it is soot. kFireballEmission 8 and a cap of 2
++// (round 4) held the whole fireball under a sunlit wall's level: one flat
++// orange frame with no white core.
+ constexpr float kFireballTableK = 1500.0f;
+ constexpr float kFireballTableMaxK = 3000.0f;
+ constexpr float kFireballGlowFromK = 900.0f;
+ constexpr float kFireballGlowFullK = 1300.0f;
+ constexpr float kFireballRefK = 2200.0f;
+ constexpr float kFireballWienK = 24800.0f; // c2 / 580 nm
+-constexpr float kFireballEmission = 8.0f;
+-constexpr float kFireballEmitCap = 2.0f;
++constexpr float kFireballEmission = 137.0f;
++constexpr float kFireballEmitCap = 9.0f;
++// A fireball's puffs are drawn at this share of their full size from their
++// birth (the detonation's fireball reaches its size within milliseconds; the
++// classic growth over 0.05 s drew nothing at all on a burst's first frame),
++// and their centre at least kFireballLiftShare of their radius over the
++// ground, so the ground in front of them does not cut the fireball off along
++// a ruler-straight line: its round soft foot sits on the ground.
++constexpr float kFireballBirthSize = 0.7f;
++constexpr float kFireballLiftShare = 0.7f;
++// The cooling of a burst's puffs (K/s at the config's table), per munition at
++// its source (Smokes.cpp): a cased charge's fireball glows white for one or
++// two frames and is soot within about 0.1 s, longer the larger the charge
++// (the cube root of its size); a fuel tank's deflagration is a cooler,
++// sooty orange fireball that rolls up and glows for about a second.
++constexpr float kBurstCoolKps = 5000.0f;  // at explosion size 1
++constexpr float kFuelFireInitK = 1950.0f; // a deflagration's soot, not a detonation's 2500 K
++constexpr float kFuelFireCoolKps = 550.0f;
++constexpr float kFuelFireballSize = 4.0f; // its puffs' size over the classic fuel fire's
++float BurstCoolingRate(float explosionSize);
++// Whether a puff's temperature table (its hottest entry) is a fireball's
++// (kFireballTableK to kFireballTableMaxK, the test FireballPuff makes).
++bool FireballTable(float hottestK);
+ constexpr float kFireballSoot[3] = {0.24f, 0.21f, 0.18f};
+ // The linear colour of a black body at `temperatureK` (1000 to 3000 K, red
+ // channel 1): a fit to the sRGB black-body table (1500 K (1, 0.155, 0), 2000 K
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index eec4d168..c998a3ba 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -1183,8 +1183,40 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+ 
+     const Camera& camera = *GScene->GetCamera();
+ 
++    // A fireball's puff (look fix "burst", FireballPuff) glows as a hot
++    // body and scatters as soot; found here, before the puff is placed.
++    const Cloudlet* firePuff = nullptr;
++    float fireballEmit[3] = {0.0f, 0.0f, 0.0f};
++    float fireballSoot[3] = {0.0f, 0.0f, 0.0f};
++    if (GEngine->CombatLightsActive() && render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
++    {
++        if (const Cloudlet* puff = dynamic_cast<const Cloudlet*>(this))
++        {
++            if (lighting::FireballPuff(puff->Temperature(), puff->HottestTemperature(), fireballSoot, fireballEmit))
++                firePuff = puff;
++        }
++    }
++
++    float size = Scale();
++    Vector3 worldPos = pos.Position();
++    if (firePuff)
++    {
++        // Look fix "boom": the fireball is there at its size from the burst's
++        // first frame (kFireballBirthSize), and a puff low over the ground is
++        // drawn with its centre kFireballLiftShare of its radius up, so its
++        // round soft foot rests on the ground instead of the ground in front
++        // cutting it off along a straight line (the decal is one flat quad).
++        size = std::max(size, lighting::kFireballBirthSize * firePuff->FullSize());
++        if (GLandscape)
++        {
++            const float minY = GLandscape->SurfaceY(worldPos.X(), worldPos.Z()) + lighting::kFireballLiftShare * size;
++            if (worldPos.Y() < minY)
++                worldPos[1] = minY;
++        }
++    }
++
+     // following line is faster version
+-    Vector3 posp = GScene->ScaledInvTransform() * pos.Position();
++    Vector3 posp = GScene->ScaledInvTransform() * worldPos;
+ 
+     // camera plane clip test
+     // perform more distant clipping than normal
+@@ -1194,8 +1226,6 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+         return;
+     }
+ 
+-    float size = Scale();
+-
+     Animate(forceLOD);
+ 
+     // scale and 1/scale is kept in Frame
+@@ -1225,29 +1255,16 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+         Color colorI;
+         // The light a puff inside a fire's flames emits (linear; CombatLitParticle).
+         float flameEmit[3] = {0.0f, 0.0f, 0.0f};
+-        // A fireball's puff: its glow (linear) and its soot colour.
+-        float fireballEmit[3] = {0.0f, 0.0f, 0.0f};
+-        Color fireballOwn;
+-        bool fireball = false;
+-        // A fireball's puff (look fix "burst", FireballPuff) glows as a hot
+-        // body and scatters as soot. Its shape is self-lit (MSShining): its
+-        // table's colour times the eye's adaptation, which the photoreal
+-        // camera holds at 1, so a dusk burst showed its table's lemon and
+-        // mustard at a lit wall's level. Under the combat lights it takes the
+-        // scene's light on its soot and adds its glow.
+-        if (GEngine->CombatLightsActive() &&
+-            render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
+-        {
+-            if (const Cloudlet* puff = dynamic_cast<const Cloudlet*>(this))
+-            {
+-                float soot[3];
+-                if (lighting::FireballPuff(puff->Temperature(), puff->HottestTemperature(), soot, fireballEmit))
+-                {
+-                    fireballOwn = Color(soot[0], soot[1], soot[2], ((ColorVal)GetConstantColor()).A());
+-                    fireball = true;
+-                }
+-            }
+-        }
++        // A fireball's puff (look fix "burst", FireballPuff, found above)
++        // glows as a hot body and scatters as soot. Its shape is self-lit
++        // (MSShining): its table's colour times the eye's adaptation, which
++        // the photoreal camera holds at 1, so a dusk burst showed its table's
++        // lemon and mustard at a lit wall's level. Under the combat lights it
++        // takes the scene's light on its soot and adds its glow.
++        const bool fireball = firePuff != nullptr;
++        const Color fireballOwn =
++            fireball ? Color(fireballSoot[0], fireballSoot[1], fireballSoot[2], ((ColorVal)GetConstantColor()).A())
++                     : Color(0, 0, 0, 0);
+         int mat = (hints & ClipUserMask) / ClipUserStep;
+         if (mat != MSShining || fireball)
+         {
+@@ -1316,7 +1333,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+                     const Color own = fireball ? fireballOwn : (ColorVal)GetConstantColor();
+                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
+                 }
+-                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);
++                colorI = CombatLitParticle(colorI, worldPos, albedo, flameEmit);
+                 for (int i = 0; i < 3; ++i)
+                     flameEmit[i] += fireballEmit[i];
+             }
+@@ -1348,10 +1365,18 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+             lighting::KeepHueUnderOne(rgb);
+             for (int i = 0; i < 3; ++i)
+                 glow[i] -= rgb[i];
++            // Look fix "boom": a fireball's glow past white keeps its level
++            // as the glow's HDR gain (its peak), the packed glow its hue.
++            const float glowPeak = std::max(glow[0], std::max(glow[1], glow[2]));
++            const float glowGain = fireball && glowPeak > 1.0f ? glowPeak : 1.0f;
+             lighting::KeepHueUnderOne(glow);
+             colorI = Color(rgb[0], rgb[1], rgb[2], colorI.A());
+             if (glow[0] + glow[1] + glow[2] > 1.0f / 255.0f)
++            {
+                 GEngine->SetDecalGlow(PackedColor(Color(glow[0], glow[1], glow[2], 0.0f)));
++                if (glowGain > 1.0f)
++                    GEngine->SetDecalGlowGain(glowGain);
++            }
+         }
+         // check if there are not some unsupported lighting flags
+         float dist2 = Position().Distance2(camera.Position());
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 2f94de7f..197bf459 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -272,6 +272,9 @@ class EngineGL33 : public Engine
+     RString _pendingScreenshotPath;
+     // The next decal's light past its colour (SetDecalGlow), cleared by it.
+     PackedColor _decalGlow = PackedColor(0u);
++    // Its HDR gain (SetDecalGlowGain), carried to the shader in the decal's
++    // second texture coordinate (DrawDecal, kDecalGlowGainTag).
++    float _decalGlowGain = 1.0f;
+ 
+     void DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
+                    const Poseidon::MipInfo& mip, int specFlags) override;
+@@ -721,6 +724,7 @@ class EngineGL33 : public Engine
+     bool ParticleRigLight(float linear[3]) const override;
+     bool CombatLightsActive() const override { return _combat.active; }
+     void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
++    void SetDecalGlowGain(float gain) override { _decalGlowGain = gain; }
+     void RequestShaderReload() override { _shaderReloadPending = true; }
+     void MarkWorldOverlay() override
+     {
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+index da6cc7ff..d88f6e1c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+@@ -1,4 +1,5 @@
+ #include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ #include <Poseidon/Graphics/Remaster/NightLights.hpp>
+ #include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
+ #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
+@@ -26,6 +27,11 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
+     // night a lamp's halo (PhotoCamera.hpp kCameraFlareNight).
+     const DWORD glow = (_camera.frameOn && _camera.frame == GetFrameCounter()) ? static_cast<DWORD>(_decalGlow) : 0u;
+     _decalGlow = PackedColor(0u);
++    // Look fix "boom": the glow's HDR gain rides in the second texture
++    // coordinate, tagged (kDecalGlowGainTag; the pre-lit shader reads it only
++    // when tagged), so a fireball's core is stored far past white.
++    const float glowGain = glow != 0u && _decalGlowGain > 1.0f ? _decalGlowGain : 1.0f;
++    _decalGlowGain = 1.0f;
+     constexpr int kFlareBits =
+         static_cast<int>(Poseidon::render::Backend::IsLight) | static_cast<int>(Poseidon::render::Backend::NoZBuf);
+     if ((specFlags & kFlareBits) == kFlareBits && _camera.frameOn && _camera.frame == GetFrameCounter())
+@@ -137,6 +143,8 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
+         v[i].pos[2] = z;
+         v[i].color = v[0].color;
+         v[i].specular = v[0].specular;
++        v[i].t1.u = glowGain > 1.0f ? -(Poseidon::gl33lighting::kDecalGlowGainTag + glowGain) : 0.0f;
++        v[i].t1.v = 0.0f;
+     }
+ 
+     SwitchRenderMode(RMTris);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 4a2bbd42..ccbbd2ed 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -743,7 +743,10 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
+         {
+             const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
+             ct.smokeTint = 0.85f * camNight;
+-            ct.flashHold = fl::kExplosionFlashHold * _combat.night;
++            // Look fix "boom": a detonation's flash lasts tens of
++            // milliseconds (kBurstFlashTau); held 0.15 s at night it lit the
++            // burst's whole cloud cream and the plain round it for five frames.
++            ct.flashHold = 0.0f;
+             // Look fix "burst": a steady light's share on surfaces against
+             // the twilight's light on the ground (CombatTwilight).
+             ct.twilight = fl::CombatTwilight(in.sunElevationDeg);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 6d080444..1ebde83d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -8,6 +8,13 @@
+ namespace Poseidon::gl33lighting
+ {
+ 
++// Look fix "boom": a decal whose glow carries an HDR gain g (fireball puffs,
++// Engine::SetDecalGlowGain) has its second texture coordinate's u set to
++// -(kDecalGlowGainTag + g); the pre-lit shader multiplies the decal's glow by
++// g only when u is under -kDecalGlowGainTag (no real coordinate is), so every
++// other screen-space draw keeps its glow and its coordinates.
++constexpr float kDecalGlowGainTag = 1000.0f;
++
+ // Vertex shader of the remastered set for a VertexShaderID, or nullptr. The
+ // screen vertex shader is assembled from its pieces (kScreenVertexPieces: it
+ // pastes LitConstantsBlock() for the sky pass); the others are standalone.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 49ee8826..c9b333e8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -1277,7 +1277,10 @@ void main() {
+     } else {
+         r0 = vColor * t0;
+         r0 *= constColor;
+-        r0.rgb += vSpecColor.rgb;
++        // A decal's glow (the light past its colour) times its HDR gain when
++        // its second coordinate is tagged (look fix "boom", kDecalGlowGainTag
++        // 1000): an incandescent fireball's core is stored far past white.
++        r0.rgb += vSpecColor.rgb * (vUV1.x < -1000.0 ? -1000.0 - vUV1.x : 1.0);
+         // The sky clouds lit from their sun side (litClouds).
+         if (vLitMode < -1.5) r0.rgb = litCloudsOverClassic(r0.rgb, litCloudTermsSheet(t0.a));
+         // The sun disk behind a dome cloud (skyCloudShadows): its colour and
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+index 7e29d1e8..b74acada 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+@@ -133,6 +133,9 @@ constexpr float kFireSurfaceBody = 1.3f;
+ // (look fix "burst": 20 m lit the plain behind a burst into a band along the
+ // horizon); a heavy shell's 2.6 m ball lights the ground within about 8 m.
+ constexpr float kBurstSurfaceReachCores = 3.0f;
++// Look fix "boom": the share of the burst's light on surfaces (of the 0.3 a
++// cannon flash keeps), so the pool under a detonation stays under white.
++constexpr float kBurstSurfaceShare = 0.3f;
+ 
+ // How thick the lit smoke and dust around a light is (m): muzzle gas, the
+ // dust and smoke of a blast, the hot air round a fire's flames. A fire's own
+@@ -287,6 +290,12 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
+                     // kBurstSurfaceReachCores of its ball, under the cloud.
+                     f.range = std::min(
+                         f.range, r.kind == fl::CombatLightKind::Explosion ? kBurstSurfaceReachCores * f.start : 20.0f);
++                    // Look fix "boom": a detonation's flash on the ground is
++                    // a graded pool round the fireball's foot, not a white
++                    // lens: at 0.3 its centre clipped past white and the
++                    // whole pool read as one flat disc on the flash frame.
++                    if (r.kind == fl::CombatLightKind::Explosion)
++                        gain *= kBurstSurfaceShare;
+                     warmG = 0.8f;
+                     warmB = 0.56f;
+                     break;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+index dd920052..12efb8d0 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+@@ -197,27 +197,31 @@ TEST_CASE("Combat lights: a burst's flash lasts as long as Classic's whiteout an
+     // fps) after it: the flash holds through that frame (the research's 60 ms
+     // fall left it 14 to 24 levels under Classic at eye height), and a quarter
+     // of a second after the burst it has fallen well below its peak.
+-    // (The fireball under the flash fades from the start: within 6%.)
++    // (The fireball under the flash fades from the start, faster since look
++    // fix "boom": within 10%.)
+     const float e0 = At(CombatLightKind::Explosion, 0.0f).intensity;
+     for (int step = 1; step <= 4; ++step)
+     {
+         INFO("step " << step);
+-        CHECK(At(CombatLightKind::Explosion, step / 30.0f).intensity > 0.94f * e0);
++        CHECK(At(CombatLightKind::Explosion, step / 30.0f).intensity > 0.9f * e0);
+     }
+-    CHECK(At(CombatLightKind::Explosion, kExplosionFlashHold).intensity > 0.94f * e0);
++    CHECK(At(CombatLightKind::Explosion, kExplosionFlashHold).intensity > 0.9f * e0);
+     CHECK(At(CombatLightKind::Explosion, 8.0f / 30.0f).intensity < 0.3f * e0);
+-    // Where the flash response does not run (the photoreal camera's dusk:
+-    // CombatTuning::flashHold 0) the flash falls from its birth: the same
+-    // peak, about half of it a step later, and the frame 0.13 s after
+-    // the burst (firefight_2's) lit at under a fifth of the held flash.
++    // Under the photoreal camera (CombatTuning::flashHold 0) the flash falls
++    // from its birth: the same peak, a detonation's tens of milliseconds
++    // (look fix "boom", kBurstFlashTau): under 40% of it a step later, under
++    // a tenth two steps later, and the frame 0.13 s after the burst
++    // (firefight_2's) lit at under a fifth of the held flash.
+     CombatTuning noHold;
+     noHold.flashHold = 0.0f;
+     CHECK(CombatTuning{}.flashHold == kExplosionFlashHold);
+     const float n0 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 0.0f, 7, noHold).intensity;
+     CHECK(n0 == Approx(e0));
+     const float n1 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 1.0f / 30.0f, 7, noHold).intensity;
+-    CHECK(n1 < 0.7f * e0);
+-    CHECK(n1 > 0.35f * e0);
++    CHECK(n1 < 0.4f * e0);
++    CHECK(n1 > 0.1f * e0);
++    const float n2 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 2.0f / 30.0f, 7, noHold).intensity;
++    CHECK(n2 < 0.12f * e0);
+     const float n4 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 4.0f / 30.0f, 7, noHold).intensity;
+     CHECK(n4 < 0.2f * At(CombatLightKind::Explosion, 4.0f / 30.0f).intensity);
+     // Red over blue of the light: the fire's warmth (1 / 0.45) is what lit
+@@ -552,14 +556,25 @@ TEST_CASE("Combat lights: a fireball's puff glows from white-hot to orange and c
+     CHECK(hot[0] > 1.9f);
+     CHECK(hot[1] > 1.5f);
+     CHECK(hot[2] > 0.5f);
+-    // 2000 K: orange, red leading.
+-    CHECK(warm[0] > 0.4f);
+-    CHECK(warm[1] < 0.5f * warm[0]);
++    // Look fix "boom": the white-hot core is stored far past white (the
++    // camera's white is about 5.8, its bloom starts at 3): a light source.
++    CHECK(hot[0] > 8.0f);
++    CHECK(hot[1] > 7.0f);
++    // 2000 K: yellow-orange past white (its red saturating, as film's
++    // does), red leading, nearly no blue.
++    CHECK(warm[0] > 6.0f);
++    CHECK(warm[1] < 0.8f * warm[0]);
+     CHECK(warm[2] < 0.05f * warm[0]);
+-    // 1600 K: a dim red glow, far under the core.
+-    CHECK(cool[0] < 0.1f * hot[0]);
++    // 1600 K: an orange glow still brighter than a lit wall (1), far under
++    // the core.
++    CHECK(cool[0] > 1.0f);
++    CHECK(cool[0] < 0.25f * hot[0]);
+     CHECK(cool[1] < 0.3f * cool[0]);
+     CHECK(cool[2] < 0.1f * cool[0]);
++    // 1300 K: soot, a last dull red at most.
++    float a13[3], dull[3];
++    REQUIRE(FireballPuff(1300.0f, 2200.0f, a13, dull));
++    CHECK(dull[0] < 0.1f);
+     // The black body: red-orange at 1500 K, yellower and bluer hotter.
+     float b15[3], b25[3];
+     BlackBodyRgb(1500.0f, b15);
+@@ -1174,7 +1189,14 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
+     CHECK(decal.find("if (combat &&") != std::string::npos);
+     CHECK(decal.find("(kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire)") !=
+           std::string::npos);
+-    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);") != std::string::npos);
++    // (worldPos: the puff's place, lifted over the ground for a fireball's
++    // puff, look fix "boom".)
++    CHECK(decal.find("colorI = CombatLitParticle(colorI, worldPos, albedo, flameEmit);") != std::string::npos);
++    // Look fix "boom": a fireball's glow past white keeps its level as the
++    // glow's HDR gain, and its puffs stand on the ground at their size.
++    CHECK(decal.find("GEngine->SetDecalGlowGain(glowGain);") != std::string::npos);
++    CHECK(decal.find("lighting::kFireballBirthSize * firePuff->FullSize()") != std::string::npos);
++    CHECK(decal.find("lighting::kFireballLiftShare * size") != std::string::npos);
+     // Look fix "fire": a puff's colour comes under one by its peak (no
+     // clipped white column) and the light past it goes to the decal's glow.
+     CHECK(decal.find("lighting::KeepHueUnderOne(rgb);") != std::string::npos);
+@@ -1210,3 +1232,67 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
+     REQUIRE(tick != std::string::npos);
+     CHECK(doSim < tick);
+ }
++
++TEST_CASE("Combat lights: look fix boom: a burst cools by its charge, its flash scales with the cube root",
++          "[remaster][CombatLights]")
++{
++    // A cased charge's fireball is soot within about 0.1 s: a heavy shell's
++    // puffs cool kBurstCoolKps, a grenade's faster, by the cube root.
++    CHECK(BurstCoolingRate(1.0f) == Approx(kBurstCoolKps));
++    CHECK(BurstCoolingRate(0.25f) > 1.5f * BurstCoolingRate(1.0f));
++    CHECK(BurstCoolingRate(0.25f) < 1.6f * BurstCoolingRate(1.0f));
++    // From the config's 2500 K a heavy shell's puff is under 1600 K (a dull
++    // red glow at most) a fifth of a second after its birth, a 120 mm shell's
++    // (size 0.6) sooner; still yellow-white (over 2000 K) on the next frame.
++    CHECK(2500.0f - 0.2f * BurstCoolingRate(1.0f) < 1600.0f);
++    CHECK(2500.0f - 0.2f * BurstCoolingRate(0.6f) < 1400.0f);
++    CHECK(2500.0f - 1.0f / 30.0f * BurstCoolingRate(0.6f) > 2000.0f);
++    CHECK(FireballTable(2200.0f));
++    CHECK_FALSE(FireballTable(1000.0f));
++    CHECK_FALSE(FireballTable(4200.0f));
++    // A fuel tank's deflagration: cooler at its birth, glowing about a second.
++    CHECK(kFuelFireInitK < 2100.0f);
++    CHECK(kFuelFireInitK - 1.0f * kFuelFireCoolKps > 1300.0f);
++    float a[3], e[3];
++    REQUIRE(FireballPuff(kFuelFireInitK, 2200.0f, a, e));
++    CHECK(e[0] > 5.0f);        // a bright orange body
++    CHECK(e[1] < 0.7f * e[0]); // orange, not the detonation's white
++    // Under the photoreal camera (no hold) a grenade's flash is gone sooner
++    // than a heavy shell's.
++    CombatTuning noHold;
++    noHold.flashHold = 0.0f;
++    auto rel = [&](float strength, float age)
++    {
++        return EvaluateCombatLight(CombatLightKind::Explosion, strength, age, 7, noHold).intensity /
++               EvaluateCombatLight(CombatLightKind::Explosion, strength, 0.0f, 7, noHold).intensity;
++    };
++    CHECK(rel(0.25f, 1.0f / 30.0f) < rel(1.0f, 1.0f / 30.0f));
++    CHECK(rel(1.0f, 3.0f / 30.0f) < 0.05f);
++    // The fireball's puffs stand on the ground with their round foot.
++    CHECK(kFireballLiftShare > 0.5f);
++    CHECK(kFireballBirthSize > 0.5f);
++}
++
++TEST_CASE("Combat lights: look fix boom: the decal glow's HDR gain reaches the pre-lit shader, tagged",
++          "[remaster][CombatLights]")
++{
++    // The backend carries the gain in the decal's second coordinate, tagged
++    // past any real coordinate, and the pre-lit main reads it only then.
++    const std::string draw = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_DrawShared.cpp");
++    const std::string decal = FunctionBody(draw, "void EngineGL33::DrawDecal(");
++    REQUIRE_FALSE(decal.empty());
++    CHECK(decal.find("-(Poseidon::gl33lighting::kDecalGlowGainTag + glowGain)") != std::string::npos);
++    CHECK(decal.find("_decalGlowGain = 1.0f;") != std::string::npos);
++    CHECK(Poseidon::gl33lighting::kDecalGlowGainTag == 1000.0f);
++    const std::string shaders = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_LightingShaders.cpp");
++    CHECK(shaders.find("r0.rgb += vSpecColor.rgb * (vUV1.x < -1000.0 ? -1000.0 - vUV1.x : 1.0);") != std::string::npos);
++    // The fuel's fireball is a deflagration (a fire's light with an
++    // envelope), a shell's puffs cool by their charge.
++    const std::string smokes =
++        ReadTextFile(EngineDir() / "Poseidon" / "Graphics" / "Rendering" / "Effects" / "Smokes.cpp");
++    CHECK(smokes.find("_combatFireball.Set(lighting::CombatLightKind::Fire, p, 8.0f * size * env);") !=
++          std::string::npos);
++    CHECK(smokes.find("-lighting::BurstCoolingRate(_exSize)") != std::string::npos);
++    CHECK(smokes.find("_fire.SetTemperatureCurve(lighting::kFuelFireInitK, -lighting::kFuelFireCoolKps);") !=
++          std::string::npos);
++}

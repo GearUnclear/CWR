@@ -1,0 +1,1 @@
+INVALID: psFogInject compile error (g_visFix undeclared); the injection did not run. Use moving-far80n4b.

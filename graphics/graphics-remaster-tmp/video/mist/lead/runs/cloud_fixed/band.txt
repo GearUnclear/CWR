@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\mist\\lead\\runs\\cloud_fixed\\frames", "frames": 120, "band": 0.045, "band_max": 0.099, "sky": 0.022, "spikes": 0, "worst": [[88, 0.48], [45, 0.43], [128, 0.4], [47, 0.33], [130, 0.27], [31, 0.24], [32, 0.24], [73, 0.23]]}

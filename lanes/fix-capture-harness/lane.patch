@@ -1,0 +1,1072 @@
+diff --git a/arma_CWR/engine/Poseidon/Dev/Diag/SceneSettle.hpp b/arma_CWR/engine/Poseidon/Dev/Diag/SceneSettle.hpp
+new file mode 100644
+index 00000000..33843c5a
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Dev/Diag/SceneSettle.hpp
+@@ -0,0 +1,83 @@
++#pragma once
++
++#include <algorithm>
++#include <deque>
++
++namespace Poseidon
++{
++namespace Dev
++{
++
++// Decides when a freshly framed view has finished loading, for scripted
++// captures (triSettleScene). Fed once per frame with that frame's draw-call
++// count, the scene's object LOD width and whether anything is still being
++// built for the view (the remastered terrain horizon map, a frame that did not
++// render). The view counts as settled once the last `window` frames were all
++// idle, all had the same LOD width, and their draw counts spread by no more
++// than `tolerance` (a fraction of the largest; 0 = exactly equal).
++//
++// A steady draw count alone does not prove the view is loaded when the object
++// detail is adaptive: Scene::AdjustComplexity refuses to refine for five
++// seconds after it last coarsened, so a scene can sit at a coarse LOD with a
++// perfectly steady count for longer than any short window. Captures pin the
++// detail first (triPinObjectDetail), which leaves only real loading to wait
++// for.
++class SceneSettle
++{
++  public:
++    SceneSettle(int window, float tolerance) : _window(std::max(window, 1)), _tolerance(std::max(tolerance, 0.0f)) {}
++
++    void Add(int draws, float lodInvWidth, bool busy)
++    {
++        _samples.push_back({draws, lodInvWidth, busy});
++        if (static_cast<int>(_samples.size()) > _window)
++            _samples.pop_front();
++        ++_frames;
++    }
++
++    bool Settled() const
++    {
++        if (static_cast<int>(_samples.size()) < _window)
++            return false;
++        const float lod = _samples.back().lodInvWidth;
++        for (const Sample& s : _samples)
++        {
++            if (s.busy || s.lodInvWidth != lod)
++                return false;
++        }
++        const int hi = MaxDraws();
++        return static_cast<float>(hi - MinDraws()) <= _tolerance * static_cast<float>(hi);
++    }
++
++    int Frames() const { return _frames; }
++    // Draw-count range over the current window (0 before the first frame).
++    int MinDraws() const
++    {
++        int v = _samples.empty() ? 0 : _samples.front().draws;
++        for (const Sample& s : _samples)
++            v = std::min(v, s.draws);
++        return v;
++    }
++    int MaxDraws() const
++    {
++        int v = _samples.empty() ? 0 : _samples.front().draws;
++        for (const Sample& s : _samples)
++            v = std::max(v, s.draws);
++        return v;
++    }
++
++  private:
++    struct Sample
++    {
++        int draws;
++        float lodInvWidth;
++        bool busy;
++    };
++    int _window;
++    float _tolerance;
++    int _frames = 0;
++    std::deque<Sample> _samples;
++};
++
++} // namespace Dev
++} // namespace Poseidon
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+index 2fe5e17b..1096d507 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+@@ -181,6 +181,9 @@ GameValue TriSetVsync(const GameState*, GameValuePar);
+ GameValue TriTextInputActive(const GameState*);
+ GameValue TriPerfDumpShapes(const GameState*, GameValuePar);
+ GameValue TriPerfReset(const GameState*, GameValuePar);
++GameValue TriPinObjectDetail(const GameState*, GameValuePar);
++GameValue TriSceneStats(const GameState*);
++GameValue TriSettleScene(const GameState*, GameValuePar);
+ GameValue TriShadowSetDarkness(const GameState*, GameValuePar);
+ GameValue TriShadowSetBias(const GameState*, GameValuePar);
+ GameValue TriShadowSetCascades(const GameState*, GameValuePar);
+@@ -3256,6 +3259,9 @@ INIT_MODULE(GameStateExtTest, 3)
+     GGameState.NewFunction(GameFunction(GameString, "triSetVsync", TriSetVsync, GameScalar));
+     GGameState.NewFunction(GameFunction(GameString, "triPerfDumpShapes", TriPerfDumpShapes, GameScalar));
+     GGameState.NewFunction(GameFunction(GameString, "triPerfReset", TriPerfReset, GameScalar));
++    GGameState.NewFunction(GameFunction(GameString, "triPinObjectDetail", TriPinObjectDetail, GameScalar));
++    GGameState.NewNularOp(GameNular(GameString, "triSceneStats", TriSceneStats));
++    GGameState.NewFunction(GameFunction(GameString, "triSettleScene", TriSettleScene, GameArray));
+     GGameState.NewFunction(GameFunction(GameString, "triShadowSetDarkness", TriShadowSetDarkness, GameScalar));
+     GGameState.NewFunction(GameFunction(GameString, "triShadowSetBias", TriShadowSetBias, GameScalar));
+     GGameState.NewFunction(GameFunction(GameString, "triShadowSetCascades", TriShadowSetCascades, GameScalar));
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd2..035c432f 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -32,6 +32,10 @@ using namespace Poseidon;
+ #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
+ #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+ #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
++#include <Poseidon/Dev/Diag/SceneSettle.hpp>
++#include <Poseidon/Core/Game/GameLoop.hpp>
++#include <Poseidon/Graphics/Textures/TextureBank.hpp>
++#include <Poseidon/World/Terrain/TerrainLighting.hpp>
+ namespace Poseidon
+ {
+ extern bool gPerfDumpShapesOnce;
+@@ -480,6 +484,105 @@ GameValue TriPerfReset(const GameState* /*state*/, GameValuePar /*arg*/)
+     Dev::GFrameProfiler().Reset();
+     return GameValue("OK");
+ }
++
++/// triPinObjectDetail <factor>: hold the object detail (the Scene LOD width)
++/// for A/B captures. 0 = adaptive, the stock choice from the measured frame
++/// time, which refuses to refine for five seconds after it last coarsened
++/// (Scene::AdjustComplexity), so two shots of one view can differ by
++/// thousands of draws. >= 1 pins the width at that multiple of the finest the
++/// quality setting allows (1 = finest, 16 = coarsest). Returns "OK:<factor>"
++/// or "FAIL:no scene".
++GameValue TriPinObjectDetail(const GameState* /*state*/, GameValuePar arg)
++{
++    if (!GScene)
++        return GameValue("FAIL:no scene");
++    GScene->PinObjectDetail(static_cast<float>(static_cast<GameScalarType>(arg)));
++    char buf[32];
++    snprintf(buf, sizeof(buf), "OK:%g", GScene->GetObjectDetailPin());
++    LOG_INFO(Core, "[tri] triPinObjectDetail {}", buf + 3);
++    return GameValue(buf);
++}
++
++// Draw calls of the last finished frame (the counter World::Simulate hands the
++// frame profiler), or -1 before the first one.
++static int LastFrameDrawCalls()
++{
++    const Dev::FrameProfiler& perf = Dev::GFrameProfiler();
++    return perf.FrameCount() > 0 ? perf.Frame(0).drawCalls : -1;
++}
++
++static const char* HorizonMapState()
++{
++    if (!GEngine || !GEngine->WantsTerrainHorizonMap())
++        return "off";
++    return TerrainLightingPending() ? "pending" : "ready";
++}
++
++/// triSceneStats: the last frame's scene state for capture logs, as fields
++/// that splice into a "key=value;..." line: "draws=<GL draw calls>;objects=<
++/// objects with a visible LOD>;lights=<light slots>;lod=<Scene LOD width>;
++/// pin=<triPinObjectDetail factor, 0 = adaptive>;horizon=<off, pending or
++/// ready>" (horizon: the remastered terrain horizon map build). The two
++/// lighting models can issue slightly different draw calls for the same
++/// objects; the object count is the one to compare across them. Any light
++/// slot (a street lamp that has once been on keeps its slot) turns instancing
++/// off for the whole scene (Pass1), which multiplies the draw calls for the
++/// same objects.
++GameValue TriSceneStats(const GameState* /*state*/)
++{
++    char buf[192];
++    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
++             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->NLights() : -1,
++             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
++    return GameValue(buf);
++}
++
++/// triSettleScene [maxFrames, stableFrames, tolerancePct]: run frames, as
++/// triSimFrames does, until the view has finished loading: the last
++/// stableFrames frames (default 30) drew draw-call counts within tolerancePct
++/// percent of each other (default 2), at one object LOD width, with no terrain
++/// horizon map build in flight. The per-frame texture upload budget is lifted
++/// on these frames, so textures in view are not held back at a coarser mip and
++/// do not sharpen over the next second. At most maxFrames (default 300, up to 600).
++/// Pin the object detail first (triPinObjectDetail): an adaptive detail can
++/// hold a coarse LOD steady for five seconds. Returns "OK:<frames run>" or
++/// "UNSETTLED:<frames run>" (never FAIL, so a busy view still gets its shot);
++/// the details go to the log.
++GameValue TriSettleScene(const GameState* /*state*/, GameValuePar arg)
++{
++    if (arg.GetType() != GameArray)
++        return GameValue("FAIL:expected [maxFrames, stableFrames, tolerancePct]");
++    if (!GEngine)
++        return GameValue("FAIL:no engine");
++    const GameArrayType& a = arg;
++    auto num = [&a](int i, float fallback)
++    { return a.Size() > i ? static_cast<float>(static_cast<GameScalarType>(a[i])) : fallback; };
++    const int maxFrames = std::clamp(toInt(num(0, 300.0f)), 1, 600);
++    const int window = std::clamp(toInt(num(1, 30.0f)), 1, maxFrames);
++    Dev::SceneSettle settle(window, num(2, 2.0f) * 0.01f);
++    while (settle.Frames() < maxFrames && !settle.Settled())
++    {
++        // 2: TextBank StartFrame spends one, leaving the lift on for this frame only.
++        if (GEngine->TextBank())
++            GEngine->TextBank()->BoostLoadBudget(2);
++        const uint32_t frameBefore = GEngine->GetFrameCounter();
++        Poseidon::AppIdle();
++        if (!GEngine)
++            return GameValue("FAIL:no engine");
++        const bool rendered = GEngine->GetFrameCounter() != frameBefore;
++        const int draws = LastFrameDrawCalls();
++        settle.Add(draws, GScene ? GScene->GetLodInvWidth() : 0.0f, !rendered || draws < 0 || TerrainLightingPending());
++    }
++    const bool ok = settle.Settled();
++    LOG_INFO(Core,
++             "[tri] triSettleScene: {} after {} frames (draws {}..{} over the last {}, lod {}, pin {}, horizon {})",
++             ok ? "settled" : "NOT settled", settle.Frames(), settle.MinDraws(), settle.MaxDraws(), window,
++             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
++    char buf[48];
++    snprintf(buf, sizeof(buf), "%s:%d", ok ? "OK" : "UNSETTLED", settle.Frames());
++    return GameValue(buf);
++}
++
+ /// triSetMsaa <0|2|4|8> — MSAA sample count on the frame target (0 = off).
+ /// Applied at the next frame boundary. Returns "OK".
+ GameValue TriSetMsaa(const GameState* /*state*/, GameValuePar arg)
+@@ -502,33 +605,26 @@ GameValue TriSetRenderScale(const GameState* /*state*/, GameValuePar arg)
+     return GameValue("OK");
+ }
+ 
+-/// triSetLighting "<setting>" — remastered lighting for scripted A/B captures.
+-/// "classic" / "remastered" switch the lighting model (remastered also turns the
+-/// shadow maps on, as the Options row does); "key=value" sets one tuning knob:
+-/// exposure, sun, sky, bounce, warmth, saturation, specular, localLights,
+-/// moonlight, terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness,
+-/// ao, bloom, shafts, post (0/1), debug (0..4). Returns "OK" or "FAIL:<why>".
+-GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
++// One triSetLighting item applied to `t`: a mode word resets every knob to the
++// shipped default first. Returns an empty string, or why the item is refused.
++static std::string ApplyLightingItem(remaster::LightingTuning& t, const std::string& item, bool& modeSet)
+ {
+-    GameStringType text = static_cast<GameStringType>(arg);
+-    const std::string setting = (const char*)text ? (const char*)text : "";
+-    if (!GEngine)
+-        return GameValue("FAIL:no engine");
+-    remaster::LightingTuning t = GEngine->GetLightingTuning();
+-    if (setting == "classic" || setting == "remastered")
++    if (item == "classic" || item == "remastered")
+     {
+-        t.remastered = setting == "remastered";
+-        GEngine->SetLightingTuning(t);
+-        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
+-        LOG_INFO(Core, "[tri] triSetLighting {}", setting);
+-        return GameValue(t.remastered == GEngine->LightingRemasterActive() ? "OK"
+-                                                                           : "FAIL:remastered shaders unavailable");
++        t = remaster::LightingTuning{};
++        t.remastered = item == "remastered";
++        modeSet = true;
++        return {};
+     }
+-    const size_t eq = setting.find('=');
++    const size_t eq = item.find('=');
+     if (eq == std::string::npos)
+-        return GameValue("FAIL:expected classic, remastered or key=value");
+-    const std::string key = setting.substr(0, eq);
+-    const float v = static_cast<float>(std::atof(setting.c_str() + eq + 1));
++        return "expected classic, remastered or key=value";
++    const std::string key = item.substr(0, eq);
++    const char* valueText = item.c_str() + eq + 1;
++    char* valueEnd = nullptr;
++    const float v = std::strtof(valueText, &valueEnd);
++    if (valueEnd == valueText || *valueEnd != '\0')
++        return "bad value in " + item;
+     struct Knob
+     {
+         const char* name;
+@@ -572,9 +668,47 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         found = true;
+     }
+     if (!found)
+-        return GameValue(("FAIL:unknown knob " + key).c_str());
++        return "unknown knob " + key;
++    return {};
++}
++
++/// triSetLighting "<setting>": remastered lighting for scripted A/B captures.
++/// "classic" / "remastered" switch the lighting model and put every tuning knob
++/// back to its shipped default (LightingTuning{}), so the knobs of one variant
++/// never leak into the next; remastered also turns the shadow maps on, classic
++/// off, as the Options row does. "key=value" sets one tuning knob: exposure,
++/// sun, sky, bounce, warmth, saturation, specular, localLights, moonlight,
++/// terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness, ao, bloom,
++/// shafts, post (0/1), debug (0..4). Comma-separated items apply in order, all
++/// or none: "remastered,bounce=2.5" is the shipped look with one knob changed.
++/// Returns "OK", or "FAIL:<why>" with nothing applied.
++GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
++{
++    GameStringType text = static_cast<GameStringType>(arg);
++    const std::string setting = (const char*)text ? (const char*)text : "";
++    if (!GEngine)
++        return GameValue("FAIL:no engine");
++    remaster::LightingTuning t = GEngine->GetLightingTuning();
++    bool modeSet = false;
++    for (size_t start = 0;;)
++    {
++        const size_t comma = setting.find(',', start);
++        std::string item = setting.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
++        item.erase(0, item.find_first_not_of(' '));
++        item.erase(item.find_last_not_of(' ') + 1);
++        const std::string why = ApplyLightingItem(t, item, modeSet);
++        if (!why.empty())
++            return GameValue(("FAIL:" + why).c_str());
++        if (comma == std::string::npos)
++            break;
++        start = comma + 1;
++    }
+     GEngine->SetLightingTuning(t);
++    if (modeSet)
++        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
+     LOG_INFO(Core, "[tri] triSetLighting {}", setting);
++    if (modeSet && t.remastered != GEngine->LightingRemasterActive())
++        return GameValue("FAIL:remastered shaders unavailable");
+     return GameValue("OK");
+ }
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index f994cd09..c862f10b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -78,8 +78,12 @@ well above the ~0.42 of the shadow-map darkening that reviewers called crushed.
+   occlusion, cloud shadows, shadow softness, AO, bloom and shafts, plus debug
+   views (sun visibility, sky visibility, normals, AO) and a copyable summary
+   line.
+-- Trident / SQF: `triSetLighting "classic"`, `"remastered"`, or
+-  `"key=value,..."` with the same keys, for scripted A/B captures.
++- Trident / SQF: `triSetLighting "classic"` or `"remastered"` (each puts
++  every knob back to its default), `"key=value"` with the same keys, or a
++  comma list applied in order, all or none (`"remastered,bounce=2.5"`), for
++  scripted A/B captures. `triPinObjectDetail 1` holds the object detail at
++  its finest so both shots draw the same objects, and `triSettleScene` waits
++  until a view has finished loading (`tests/rendering/captures/README.md`).
+ - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
+   `triGpuTimes true`, turns on timestamp queries around the frame, the world
+   (with the shadow pass inside it) and each post step
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+index 59a312ed..45fd9c4d 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+@@ -572,6 +572,15 @@ void Scene::SetObjectLODBias(float bias)
+     // LODSelect compares against the per-LOD pixel-size thresholds.
+ }
+ 
++void Scene::PinObjectDetail(float factor)
++{
++    if (factor > 0.0f)
++        saturate(factor, 1.0f, 16.0f);
++    else
++        factor = 0.0f;
++    _lodPinFactor = factor;
++}
++
+ void Scene::SetQualitySettings(float val)
+ {
+     _qualitySettings = val;
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
+index 12e4338f..73a5a2fc 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.hpp
+@@ -220,6 +220,8 @@ class Scene
+ 
+     bool _objectShadows, _vehicleShadows, _cloudlets;
+     float _objectLODBias = 1.0f;
++    float _lodPinFactor = 0.0f; // PinObjectDetail: 0 = adaptive
++    int _drawnObjects = 0;      // DrawnObjectCount
+     float _preferredTerrainGrid;
+     float _preferredViewDistance;
+ 
+@@ -253,6 +255,17 @@ class Scene
+     void SetObjectLODBias(float bias);
+     float GetObjectLODBias() const { return _objectLODBias; }
+ 
++    // Object detail for scripted A/B captures (triPinObjectDetail). By default
++    // (0) AdjustComplexity picks the LOD width from the measured frame time,
++    // so two shots of one view can draw different objects. A factor >= 1
++    // holds the width at that multiple of the finest the quality setting
++    // allows (1 = finest, 16 = coarsest, the adaptive range).
++    void PinObjectDetail(float factor);
++    float GetObjectDetailPin() const { return _lodPinFactor; }
++    // Objects with a visible LOD in the last Pass1 draw list, before occlusion
++    // culling: the same for both lighting models on one view at one detail.
++    int DrawnObjectCount() const { return _drawnObjects; }
++
+     Camera* GetCamera() { return _camera; }
+     const Camera* GetCamera() const { return _camera; }
+     void SetCamera(const Camera& camera);
+@@ -386,4 +399,4 @@ extern Scene* GScene;
+ #define IS_SHADOW_VEHICLE (GScene ? GScene->GetVehicleShadows() : true)
+ #define IS_SHADOW_OBJECT (GScene ? GScene->GetObjectShadows() : true)
+ 
+-}  // namespace Poseidon
++} // namespace Poseidon
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 866e7bb9..7a1ec433 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -777,6 +777,16 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
+ 
+ void Scene::AdjustComplexity()
+ {
++    if (_lodPinFactor > 0.0f)
++    {
++        // Pinned (PinObjectDetail): the detail no longer follows the frame
++        // time, so A/B captures of one view draw the same objects.
++        _lodInvWidth = _minLodInvWidth * _lodPinFactor;
++        saturate(_lodInvWidth, _minLodInvWidth, _maxLodInvWidth);
++        AdjustComplexity(_drawObjects);
++        AdjustShadowComplexity(_drawObjects);
++        return;
++    }
+     float oldLodInvWidth = _lodInvWidth;
+ 
+     // adjust lodInvWidth so we are on the line given by points
+@@ -1330,6 +1340,7 @@ void Scene::DrawObjectsAndShadowsPass1()
+             _drawMergers.Realloc(objNeed);
+         }
+         _drawMergers.Resize(0);
++        _drawnObjects = 0;
+         for (int s = 0; s < _drawObjects.Size(); s++)
+         {
+             SortObject* sObj = _drawObjects[s];
+@@ -1342,6 +1353,10 @@ void Scene::DrawObjectsAndShadowsPass1()
+                 continue;
+             }
+             _drawMergers.Add(sObj);
++            if (sObj->drawLOD != LOD_INVISIBLE)
++            {
++                ++_drawnObjects;
++            }
+         }
+     }
+     // One-shot shape census (perf campaign): triPerfDumpShapes arms this;
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+index 6e50129f..61df03ee 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+@@ -272,4 +272,9 @@ void ShutdownTerrainLighting()
+     s_state.sample = 0;
+ }
+ 
++bool TerrainLightingPending()
++{
++    return GEngine && GEngine->WantsTerrainHorizonMap() && !s_state.handed;
++}
++
+ } // namespace Poseidon
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
+index 6ac7191a..b8ad3fe5 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
+@@ -15,5 +15,8 @@ void UpdateTerrainLighting(Landscape* land);
+ // Cancels and joins any build in flight. Called on world teardown, so no
+ // worker outlives the world (or runs on into static destruction).
+ void ShutdownTerrainLighting();
++// True while the backend wants a horizon map and the build for the current
++// landscape has not been handed over yet (triSettleScene waits for it).
++bool TerrainLightingPending();
+ 
+ } // namespace Poseidon
+diff --git a/arma_CWR/engine/Poseidon/World/WorldSetup.cpp b/arma_CWR/engine/Poseidon/World/WorldSetup.cpp
+index 86209420..a9047166 100644
+--- a/arma_CWR/engine/Poseidon/World/WorldSetup.cpp
++++ b/arma_CWR/engine/Poseidon/World/WorldSetup.cpp
+@@ -1372,6 +1372,12 @@ void World::SetDate(int year, int month, int day, int hour, int minute)
+     LightSun* sun = _scene.MainLight();
+     sun->Recalculate(this);
+     _scene.MainLightChanged();
++    // Auto street lamps switch for the new time now, as after skipTime, not at
++    // their next simulation tick (every 12 s): a scripted jump into the night
++    // stayed dark for up to 12 s, and two capture shots of one view could
++    // differ in which lamps were lit.
++    if (GLandscape)
++        GLandscape->OnTimeSkipped();
+ }
+ 
+ void World::ProcessNetwork()
+diff --git a/arma_CWR/tests/rendering/captures/README.md b/arma_CWR/tests/rendering/captures/README.md
+index 11930baf..44737266 100644
+--- a/arma_CWR/tests/rendering/captures/README.md
++++ b/arma_CWR/tests/rendering/captures/README.md
+@@ -64,25 +64,47 @@ Everything lands in `D:\Arma_CWA_worktrees\lighting\tmp\captures\<yyyyMMdd-HHmms
+ | File | Content |
+ |---|---|
+ | `<view>__classic.png`, `<view>__remastered.png` | The two captures, 960x640 |
+-| `<view>__pair.png` | Classic left, Remastered right, labelled, GPU frame time in the corner |
++| `<view>__pair.png` | Classic left, Remastered right, labelled, GPU frame time and the shot frame's draw calls and drawn objects in the corner |
+ | `contact_sheet.png` | Every pair on one page |
+-| `timings.csv`, `timings.json` | One row per shot: GPU frame / world / shadow / post / ao / bloom / shafts / composite (ms), CPU fps and frame ms, `triSetLighting` answer, active camera |
+-| `timings.md` | The same as a table, with a Remastered minus Classic row per view |
++| `timings.csv`, `timings.json` | One row per shot: GPU frame / world / shadow / post / ao / bloom / shafts / composite (ms), CPU fps and frame ms, `triSetLighting` answer, active camera, the shot frame's draw calls, drawn objects and light slots (`draws`, `objects`, `lights`), the timing window's mean draw calls (`calls_avg`), the object LOD width and pin (`lod`, `pin`), the horizon map state, and the mode's load wait (`settle`, `settle_draws`) |
++| `timings.md` | The same as a table, with a Remastered minus Classic row per view (draws and objects as a share of the larger); `make_pairs.py` also prints the pairs whose drawn objects differ by more than 5% and the modes whose load wait ran out |
+ | `udcap.log` | Every raw `UDCAP;...` log line and the horizon-map build line |
+ | `tri.log`, `tri\` | tri's console output and its own output tree (game logs, raw captures; the BMP twins are deleted) |
+ 
+ ## How a pair is shot
+ 
+ Per view (`capBegin`) the test sets the camera, date, weather and view
+-distance, spawns the props, and lets 150 frames pass so terrain and textures
+-stream in. Then, for Classic and again for Remastered:
+-
+-1. `capMode`: `triSetLighting "<mode>"` (Remastered also turns the shadow maps
+-   on, Classic turns them off, as the Options row does), then `triGpuTimes
+-   false` / `true` and `triPerfReset`, which restart the GPU and CPU averages.
+-2. `triSimFrames 90`: shaders, shadow maps and the timers settle. GPU results
+-   trail the frame by a few frames and are an exponential average with weight
+-   0.1, so 90 frames leave well under 1% of anything earlier in them.
++distance, spawns the props, and lets 150 frames pass. Then, for Classic and
++again for Remastered:
++
++1. `capMode`:
++   - `triPinObjectDetail capDetail` (1, the finest detail the quality setting
++     allows): the same object detail for both shots. Left adaptive,
++     `Scene::AdjustComplexity` picks the detail from the frame time and
++     refuses to refine for five seconds after it last coarsened, so a shot
++     soon after a camera jump drew a fraction of the scene. On sunrise_ridge
++     the adaptive detail drew 1,063 objects for about 3 s after the jump and
++     7,680 once it refined; the perf research track's replay of this rig
++     logged 1,465 draw calls for the Classic shot there against about 9,500
++     later. Whether a shot falls inside that window depends on the frame
++     time, so it varied with the machine's load from run to run.
++   - `triSetLighting "<mode>"`: the lighting model with every tuning knob back
++     at its shipped default, so knobs a variant set never reach the next one
++     (Remastered also turns the shadow maps on, Classic turns them off, as the
++     Options row does).
++   - `triSettleScene capSettleArgs` (`[300, 30, 2]`): frames until the view
++     has finished loading. Settled = the last 30 frames drew within 2% of the
++     same number of draw calls, at one LOD width, with no terrain horizon map
++     build in flight. The per-frame texture upload budget is lifted on these
++     frames, so textures in view are not held back at a coarser mip. It
++     answers `OK:<frames>`,
++     or `UNSETTLED:<frames>` after 300 (logged, and listed by `make_pairs.py`;
++     the shot is still taken).
++   - `triGpuTimes false` / `true` and `triPerfReset`, which restart the GPU
++     and CPU averages.
++2. `triSimFrames 90`: the timers settle. GPU results trail the frame by a few
++   frames and are an exponential average with weight 0.1, so 90 frames leave
++   well under 1% of anything earlier in them.
+ 3. `capReadTimers`: `triGpuTimes true` (the summary string, read while timing
+    is still on; `false` would answer "gpu: timing off") and `triPerfStats 0`.
+ 4. `capPin`: the same `setDate`, `triCheatWeather` + `setOvercast` / `setFog`
+@@ -99,7 +121,19 @@ Settings shared by every shot: 960x640 windowed (`--display-mode windowed
+ pass (the default `triScreenshot` reads the frame before gamma, darker than what
+ a player sees). The remastered exposure meter is a pure function of the sun
+ height (`LightRig.cpp`) and the classic eye accommodation is instant, so there
+-is no adaptation to wait for between the two modes.
++is no adaptation to wait for between the two modes. The pinned finest object
++detail is what a fast machine settles on, and the frame timings are measured
++on it, so on long views they come out higher than in older runs, which shot
++whatever the adaptive detail had reached.
++
++Street lamps: `setDate` (`capPinEnv`) now switches the auto street lamps for the
++new time at once, as `skipTime` does (`World::SetDate`). Before, they kept their
++old state until their next simulation tick (every 12 s), so a view whose date
++crossed dusk or dawn could change lamps between or during its two shots. Once a
++lamp has been lit its light slot stays, and any slot turns instancing off for
++the whole scene (`SceneDraw.cpp`, Pass1), so later views draw several times more
++calls for the same objects (sunrise_ridge: 2,797 draw calls with no slot, 11,172
++with 12, both 7,680 objects). Compare `objects=` between shots, not `draws=`.
+ 
+ Framing uses the `tools/screenshots` rig: a cutscene camera exists only to hide
+ the HUD and give `camSetFov` a target, and `triSetView [east, up, north, dir]`
+@@ -161,6 +195,18 @@ Notes on the choices:
+ Every helper writes `UDCAP;view=...;event=...` at INFO through `logInfo`, which
+ tri saves in the test's `game_stdout.log`. Events: `setup`, `begin` / `view`
+ (camera, date, weather, ground-probe and `triSetView` answers), `spawn`,
+-`skip_spawn`, `spawn_failed`, `mode` (the `triSetLighting` answer), `shot`
+-(one per image: label, mode, lighting answer, `triCamView`, `triFps`,
+-`triPerfStats`, and last the `triGpuTimes` summary), `squads`, `tank`, `done`.
++`skip_spawn`, `spawn_failed`, `mode` (the `triSetLighting` answer, the
++`triPinObjectDetail` answer as `detail=`, the `triSettleScene` answer as
++`settle=`, then the `triSceneStats` fields at the end of the wait), `shot` (one
++per image: label, mode, lighting answer, `triCamView`, `triFps`, the shot
++frame's `triSceneStats` fields `draws=` (GL draw calls), `objects=` (objects
++with a visible LOD, before occlusion; the number to compare between the two
++models, whose draw calls for the same objects can differ a little), `lights=`
++(light slots: once a street lamp has been lit its slot stays, and any slot
++turns instancing off for the whole scene, which multiplies the draw calls of
++the same objects), `lod=` (Scene LOD width), `pin=` (0 = adaptive) and
++`horizon=` (`off`, `pending` or `ready`), `triPerfStats` (its `calls=` is the
++timing window's mean), and last the
++`triGpuTimes` summary), `squads`, `tank`, `done`. The game log also carries a
++`[tri] triSettleScene:` line per mode with the draw-call range of the last
++window.
+diff --git a/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf b/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf
+index 80197159..7d5bbff4 100644
+--- a/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf
++++ b/arma_CWR/tests/rendering/captures/abel_lighting.test.sqf
+@@ -4,9 +4,11 @@
+ //  (see README.md beside this file for the view table and how to run it).
+ //
+ //  Every matched view runs the same block twice, Classic then Remastered:
+-//    switch the lighting model and restart the GPU / CPU timers  (capMode)
+-//    triSimFrames 90                    settle: shaders, shadow maps, streaming,
+-//                                       and enough frames for the smoothed timers
++//    capMode                            pin the object detail, switch the lighting
++//                                       model (every knob at its default), wait
++//                                       until the view has loaded, restart the
++//                                       GPU / CPU timers
++//    triSimFrames 90                    enough frames for the smoothed timers
+ //    capReadTimers                      keep the timings of this mode
+ //    capPin                             same date, weather, sim clock, props, view
+ //    triSimFrames 3
+diff --git a/arma_CWR/tests/rendering/captures/capture_lib.sqf b/arma_CWR/tests/rendering/captures/capture_lib.sqf
+index f5cdfbb2..b4c4daa2 100644
+--- a/arma_CWR/tests/rendering/captures/capture_lib.sqf
++++ b/arma_CWR/tests/rendering/captures/capture_lib.sqf
+@@ -35,6 +35,12 @@
+ 
+ capLog = { logInfo (format ["UDCAP;%1", _this]) }
+ 
++// Object detail for every shot (triPinObjectDetail: 1 = finest, 0 = adaptive)
++// and the load wait before each mode's timers ([maxFrames, stableFrames,
++// tolerancePct], triSettleScene). A test may change them after the #include.
++capDetail = 1
++capSettleArgs = [300, 30, 2]
++
+ // "Class" call capHas -> true when CfgVehicles >> Class exists in the merged
+ // config (mods included). triAssertConfigClass answers "OK" or "FAIL:...";
+ // the comparison turns that into a bool, so nothing FAIL-shaped escapes.
+@@ -184,17 +190,32 @@ capClear = {
+ }
+ 
+ // "classic" / "remastered" call capMode
+-// Switches the lighting model (triSetLighting also turns the shadow maps on for
+-// Remastered and off for Classic, as the Options row does), then restarts the
+-// GPU timer and the CPU frame profiler so their averages cover this mode only.
+-// triGpuTimes false -> true resets GpuTimings (EngineGL33::SetGpuTimingEnabled).
++//  1. triPinObjectDetail capDetail: the same object detail for every shot.
++//     Left adaptive, Scene::AdjustComplexity picks it from the frame time and
++//     refuses to refine for five seconds after it last coarsened, so a shot
++//     soon after a camera jump drew a fraction of the scene (sunrise_ridge:
++//     1,063 objects for about 3 s after the jump, 7,680 once it refined).
++//  2. triSetLighting <mode>: the lighting model with every tuning knob back at
++//     its shipped default, so knobs set for one variant never reach the next
++//     (it also turns the shadow maps on for Remastered and off for Classic, as
++//     the Options row does).
++//  3. triSettleScene capSettleArgs: frames until the view has finished loading
++//     (steady draw count and LOD, no horizon map build, textures at their
++//     wanted mip). "UNSETTLED:<n>" in the log means it ran out of frames.
++//  4. Restart the GPU timer and the CPU frame profiler so their averages cover
++//     this mode only. triGpuTimes false -> true resets GpuTimings
++//     (EngineGL33::SetGpuTimingEnabled). The scene stats are read before the
++//     reset, which also clears the frame the draw count comes from.
+ capMode = {
+     capModeName = _this;
+-    capLit = triSetLighting _this;
++    capPinRes = triPinObjectDetail capDetail;
++    capLit = triSetLighting capModeName;
++    capSettleRes = triSettleScene capSettleArgs;
++    capModeStats = triSceneStats;
+     capGpuOff = triGpuTimes false;
+     capGpuOn = triGpuTimes true;
+     capPerfRes = triPerfReset 0;
+-    format ["view=%1;event=mode;mode=%2;lit=%3", capView, _this, capLit] call capLog;
++    format ["view=%1;event=mode;mode=%2;lit=%3;detail=%4;settle=%5;%6", capView, capModeName, capLit, capPinRes, capSettleRes, capModeStats] call capLog;
+ }
+ 
+ // Read the timers after the settle frames. GPU results trail the frame by a
+@@ -205,7 +226,8 @@ capReadTimers = {
+     capPerf = triPerfStats 0;
+ }
+ 
+-// "<label>" call capRecord - one line per screenshot.
++// "<label>" call capRecord - one line per screenshot. triSceneStats adds the
++// shot frame's draws=, objects=, lights=, lod=, pin= and horizon= fields.
+ capRecord = {
+-    format ["view=%1;event=shot;label=%2;mode=%3;lit=%4;cam=%5;fps=%6;perf=%7;gpu=%8", capView, _this, capModeName, capLit, triCamView, triFps, capPerf, capGpu] call capLog;
++    format ["view=%1;event=shot;label=%2;mode=%3;lit=%4;cam=%5;fps=%6;%7;perf=%8;gpu=%9", capView, _this, capModeName, capLit, triCamView, triFps, triSceneStats, capPerf, capGpu] call capLog;
+ }
+diff --git a/arma_CWR/tests/rendering/captures/make_pairs.py b/arma_CWR/tests/rendering/captures/make_pairs.py
+index 35ac2bc0..4c196a86 100644
+--- a/arma_CWR/tests/rendering/captures/make_pairs.py
++++ b/arma_CWR/tests/rendering/captures/make_pairs.py
+@@ -11,7 +11,7 @@ Writes into <out_dir>:
+     <view>__classic.png, <view>__remastered.png   copied captures
+     <view>__pair.png                              Classic left, Remastered right
+     contact_sheet.png                             every pair on one page
+-    timings.csv, timings.json                     one row per shot (GPU + CPU)
++    timings.csv, timings.json                     one row per shot (GPU + CPU, draws, load wait)
+     timings.md                                    the same as a table, with deltas
+     udcap.log                                     every raw UDCAP line
+ 
+@@ -45,6 +45,12 @@ GPU_RES = {
+     "composite": re.compile(r"\bcomposite ([\d.]+)"),
+ }
+ PERF_RE = re.compile(r"\bfps=([\d.]+) frame=([\d.]+)/([\d.]+)/([\d.]+)")
++CALLS_RE = re.compile(r"\bcalls=([\d.]+)")
++# A pair whose shot frames differ by more than this share of drawn objects
++# did not see the same scene (a view still loading, a different object
++# detail). Objects, not draw calls: the two lighting models can issue a few
++# more or fewer draw calls for the same objects.
++OBJECTS_MISMATCH = 0.05
+ 
+ 
+ def collect_shots(tri_dir: Path, out_dir: Path):
+@@ -97,12 +103,23 @@ def read_udcap(tri_dir: Path):
+     return lines
+ 
+ 
++def to_int(text):
++    try:
++        return int(text)
++    except (TypeError, ValueError):
++        return None
++
++
+ def shot_rows(lines):
+     rows = {}
++    modes = {}  # (view, mode) -> the latest event=mode line: load wait and pin
+     for path, _line, body in lines:
+         if body is None:
+             continue
+         kv = parse_kv(body)
++        if kv.get("event") == "mode":
++            modes[(kv.get("view", ""), kv.get("mode", ""))] = kv
++            continue
+         if kv.get("event") != "shot":
+             continue
+         label = kv.get("label", "")
+@@ -112,6 +129,17 @@ def shot_rows(lines):
+         row = {"view": view, "mode": mode, "lit": kv.get("lit", ""), "cam": kv.get("cam", ""),
+                "fps_now": kv.get("fps", ""), "gpu_raw": kv.get("gpu", ""), "perf_raw": kv.get("perf", ""),
+                "log": str(path)}
++        # The shot frame's scene (triSceneStats) and the mode's load wait
++        # (triSettleScene); empty in runs from before these fields existed.
++        row["draws"] = to_int(kv.get("draws"))
++        row["objects"] = to_int(kv.get("objects"))
++        row["lights"] = to_int(kv.get("lights"))
++        row["lod"] = kv.get("lod", "")
++        row["pin"] = kv.get("pin", "")
++        row["horizon"] = kv.get("horizon", "")
++        mode_kv = modes.get((kv.get("view", ""), mode), {})
++        row["settle"] = mode_kv.get("settle", "")
++        row["settle_draws"] = to_int(mode_kv.get("draws"))
+         for f, rx in GPU_RES.items():
+             m = rx.search(row["gpu_raw"])
+             row[f"gpu_{f}_ms"] = float(m.group(1)) if m else None
+@@ -119,6 +147,8 @@ def shot_rows(lines):
+         row["cpu_fps"] = float(m.group(1)) if m else None
+         row["cpu_frame_ms"] = float(m.group(2)) if m else None
+         row["cpu_frame_p95_ms"] = float(m.group(3)) if m else None
++        m = CALLS_RE.search(row["perf_raw"])
++        row["calls_avg"] = float(m.group(1)) if m else None
+         # a later line for the same label (a retry) replaces the earlier one;
+         # dict order keeps the run order of the first appearance
+         rows[(view, mode)] = row
+@@ -167,8 +197,15 @@ def make_pair(view, out_dir: Path, rows_by_key):
+             d.text((x0 + 20, title_h + h // 2), "missing", font=big, fill=(255, 160, 160))
+         label_box(d, (x0 + 12, title_h + 10), mode.capitalize(), big)
+         row = rows_by_key.get((view, mode))
++        foot = []
+         if row and row.get("gpu_frame_ms") is not None:
+-            label_box(d, (x0 + 12, title_h + h - 30), f"GPU frame {row['gpu_frame_ms']:.2f} ms", small)
++            foot.append(f"GPU frame {row['gpu_frame_ms']:.2f} ms")
++        if row and row.get("draws") is not None:
++            foot.append(f"{row['draws']:,} draws")
++        if row and row.get("objects") is not None:
++            foot.append(f"{row['objects']:,} objects")
++        if foot:
++            label_box(d, (x0 + 12, title_h + h - 30), ", ".join(foot), small)
+         if row and row.get("lit") and row["lit"] != "OK":
+             label_box(d, (x0 + 12, title_h + 46), f"triSetLighting: {row['lit']}", small)
+     dst = out_dir / f"{view}__pair.png"
+@@ -203,9 +240,18 @@ def fmt(v):
+     return "" if v is None else f"{v:.2f}"
+ 
+ 
++def share_delta(a, b, key):
++    """Remastered minus Classic `key` (draws, objects) as a share of the larger, or None."""
++    x, y = (a or {}).get(key), (b or {}).get(key)
++    if x is None or y is None or max(x, y) <= 0:
++        return None
++    return (y - x) / max(x, y)
++
++
+ def write_tables(rows, out_dir: Path):
+     cols = ["view", "mode", "lit", "cam"] + [f"gpu_{f}_ms" for f in GPU_FIELDS] + \
+-           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "gpu_raw", "perf_raw"]
++           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "draws", "objects", "lights", "calls_avg", "lod",
++            "pin", "horizon", "settle", "settle_draws", "gpu_raw", "perf_raw"]
+     with open(out_dir / "timings.csv", "w", newline="", encoding="utf-8") as f:
+         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+         w.writeheader()
+@@ -219,24 +265,30 @@ def write_tables(rows, out_dir: Path):
+     md = ["# Lighting capture timings", "",
+           "GPU times are the smoothed `triGpuTimes` averages (EngineGL33 timestamp queries, ~90 frames on the view",
+           "before the shot); CPU is `triPerfStats` over the same frames. Classic has no post pass, so its post columns",
+-          "are empty. Delta = Remastered minus Classic.", "",
+-          "| view | mode | frame | world | shadow | post | ao | bloom | shafts | composite | CPU fps | lighting |",
+-          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
++          "are empty. Draws = GL draw calls and objects = objects with a visible LOD, both of the shot frame",
++          "(`triSceneStats`); load = the `triSettleScene` answer before the mode's timers (frames run). Delta =",
++          "Remastered minus Classic (draws and objects: share of the larger).", "",
++          "| view | mode | frame | world | shadow | post | ao | bloom | shafts | composite | CPU fps | draws | objects | "
++          "load | lighting |",
++          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+     for v in views:
+         for mode in MODES:
+             r = by.get((v, mode))
+             if not r:
+-                md.append(f"| {v} | {mode} | missing |  |  |  |  |  |  |  |  |  |")
++                md.append(f"| {v} | {mode} | missing |  |  |  |  |  |  |  |  |  |  |  |  |")
+                 continue
++            counts = ["" if r.get(k) is None else f"{r[k]:,}" for k in ("draws", "objects")]
+             md.append("| " + " | ".join([v, mode] + [fmt(r[f"gpu_{f}_ms"]) for f in GPU_FIELDS] +
+-                                        [fmt(r["cpu_fps"]), r["lit"]]) + " |")
++                                        [fmt(r["cpu_fps"])] + counts + [r.get("settle", ""), r["lit"]]) + " |")
+         a, b = by.get((v, "classic")), by.get((v, "remastered"))
+         if a and b:
+             cells = []
+             for f in GPU_FIELDS:
+                 x, y = a[f"gpu_{f}_ms"], b[f"gpu_{f}_ms"]
+                 cells.append("" if (x is None or y is None) else f"{y - x:+.2f}")
+-            md.append("| " + " | ".join([v, "delta"] + cells + ["", ""]) + " |")
++            shares = [share_delta(a, b, k) for k in ("draws", "objects")]
++            md.append("| " + " | ".join([v, "delta"] + cells + [""] +
++                                        ["" if d is None else f"{d:+.1%}" for d in shares] + ["", ""]) + " |")
+     (out_dir / "timings.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+ 
+ 
+@@ -281,6 +333,18 @@ def main(argv):
+     bad = [f"{r['view']}__{r['mode']}={r['lit']}" for r in rows if r.get("lit") not in ("OK", "")]
+     if bad:
+         print("triSetLighting did not answer OK for: " + ", ".join(bad))
++    unsettled = [f"{r['view']}__{r['mode']}={r['settle']}" for r in rows if r.get("settle", "").startswith("UNSETTLED")]
++    if unsettled:
++        print("view still loading when its timers started (triSettleScene ran out of frames): " + ", ".join(unsettled))
++    by = {(r["view"], r["mode"]): r for r in rows}
++    apart = []
++    for v in dict.fromkeys(r["view"] for r in rows):
++        dd = share_delta(by.get((v, "classic")), by.get((v, "remastered")), "objects")
++        if dd is not None and abs(dd) > OBJECTS_MISMATCH:
++            apart.append(f"{v} ({by[(v, 'classic')]['objects']:,} vs {by[(v, 'remastered')]['objects']:,})")
++    if apart:
++        print(f"pairs whose shot frames differ by more than {OBJECTS_MISMATCH:.0%} in drawn objects: " +
++              ", ".join(apart))
+     if sheet:
+         print(f"contact sheet: {sheet}")
+     return 0
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 4cb79cef..8bdb5eaf 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -419,6 +419,7 @@ list(APPEND POSEIDON_TEST_SOURCES
+     Game/test_titeffects_split.cpp
+     Game/test_tri_generic_asserts.cpp
+     Game/test_tri_value_getters.cpp
++    Game/test_tri_capture_verbs.cpp
+     Dev/Debug/test_dev_mode_gates.cpp
+ 
+     # Network tests
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Game/test_tri_capture_verbs.cpp b/arma_CWR/tests/unit/engine/Poseidon/Game/test_tri_capture_verbs.cpp
+new file mode 100644
+index 00000000..34abe2a1
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Game/test_tri_capture_verbs.cpp
+@@ -0,0 +1,198 @@
++#include <catch2/catch_test_macros.hpp>
++#include <Evaluator/express.hpp>
++#include <Poseidon/Dev/Diag/SceneSettle.hpp>
++#include <Poseidon/Graphics/Dummy/EngineDummy.hpp>
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++#include <string>
++
++// The verbs and helpers the lighting capture harness (tests/rendering/captures)
++// relies on for trustworthy A/B pictures: triSetLighting must put every knob
++// back to its default when it switches mode and must apply a comma list whole
++// or not at all, and SceneSettle must not call a still-loading view settled.
++
++using namespace Poseidon;
++
++GameValue TriSetLighting(const GameState*, GameValuePar);
++
++namespace
++{
++
++struct InitFixture
++{
++    InitFixture()
++    {
++        static bool done = false;
++        if (!done)
++        {
++            GGameState.Init();
++            done = true;
++        }
++    }
++};
++
++// Keeps the tuning the verb hands over, as the GL33 backend does, and reports
++// the remastered shaders as available.
++class LightingEngine : public EngineDummy
++{
++  public:
++    remaster::LightingTuning tuning;
++    bool shadowMaps = false;
++
++    void SetLightingTuning(const remaster::LightingTuning& t) override { tuning = t; }
++    remaster::LightingTuning GetLightingTuning() const override { return tuning; }
++    bool LightingRemasterActive() const override { return tuning.remastered; }
++    void SetShadowMapsEnabled(bool enabled) override { shadowMaps = enabled; }
++    bool ShadowMapsEnabled() const override { return shadowMaps; }
++};
++
++struct GEngineGuard
++{
++    Engine* prev;
++    explicit GEngineGuard(Engine* tmp) : prev(GEngine) { GEngine = tmp; }
++    ~GEngineGuard() { GEngine = prev; }
++};
++
++std::string Set(const char* setting)
++{
++    const GameValue v = TriSetLighting(nullptr, GameValue(setting));
++    return std::string(((RString)(GameStringType)v).Data());
++}
++
++// Every knob of `t` is at its shipped default (the mode flag aside).
++bool AllKnobsDefault(const remaster::LightingTuning& t)
++{
++    const remaster::LightingTuning d{};
++    return t.postEffects == d.postEffects && t.exposure == d.exposure && t.saturation == d.saturation &&
++           t.sun == d.sun && t.sky == d.sky && t.bounce == d.bounce && t.warmth == d.warmth &&
++           t.terrainShadows == d.terrainShadows && t.terrainOcclusion == d.terrainOcclusion &&
++           t.cloudShadows == d.cloudShadows && t.specular == d.specular && t.localLights == d.localLights &&
++           t.moonlight == d.moonlight && t.ambientOcclusion == d.ambientOcclusion && t.bloom == d.bloom &&
++           t.sunShafts == d.sunShafts && t.shadowSoftness == d.shadowSoftness && t.debugView == d.debugView;
++}
++
++} // namespace
++
++TEST_CASE("triSetLighting mode words reset every knob to its default", "[tri][triSetLighting][remaster]")
++{
++    InitFixture fix;
++    LightingEngine eng;
++    GEngineGuard guard(&eng);
++
++    REQUIRE(Set("remastered") == "OK");
++    REQUIRE(Set("bounce=2.5") == "OK");
++    REQUIRE(Set("saturation=1.4") == "OK");
++    REQUIRE(Set("post=0") == "OK");
++    REQUIRE(Set("debug=3") == "OK");
++    REQUIRE(eng.tuning.bounce == 2.5f);
++
++    SECTION("remastered")
++    {
++        REQUIRE(Set("remastered") == "OK");
++        CHECK(eng.tuning.remastered);
++        CHECK(eng.shadowMaps);
++        CHECK(AllKnobsDefault(eng.tuning));
++    }
++    SECTION("classic")
++    {
++        REQUIRE(Set("classic") == "OK");
++        CHECK_FALSE(eng.tuning.remastered);
++        CHECK_FALSE(eng.shadowMaps);
++        CHECK(AllKnobsDefault(eng.tuning));
++    }
++}
++
++TEST_CASE("triSetLighting applies every item of a comma list", "[tri][triSetLighting][remaster]")
++{
++    InitFixture fix;
++    LightingEngine eng;
++    GEngineGuard guard(&eng);
++
++    REQUIRE(Set("remastered") == "OK");
++    REQUIRE(Set("bounce=2.5, warmth=1.5") == "OK");
++    CHECK(eng.tuning.bounce == 2.5f);
++    CHECK(eng.tuning.warmth == 1.5f);
++
++    // A mode word inside the list resets what came before it.
++    REQUIRE(Set("sky=1.8,remastered,sun=1.2") == "OK");
++    CHECK(eng.tuning.sky == remaster::LightingTuning{}.sky);
++    CHECK(eng.tuning.bounce == remaster::LightingTuning{}.bounce);
++    CHECK(eng.tuning.sun == 1.2f);
++    CHECK(eng.tuning.remastered);
++}
++
++TEST_CASE("triSetLighting refuses a bad item and applies nothing", "[tri][triSetLighting][remaster]")
++{
++    InitFixture fix;
++    LightingEngine eng;
++    GEngineGuard guard(&eng);
++    REQUIRE(Set("remastered") == "OK");
++
++    CHECK(Set("bounce=2.0,nonsense=1").rfind("FAIL:unknown knob nonsense", 0) == 0);
++    CHECK(Set("bounce=abc").rfind("FAIL:bad value", 0) == 0);
++    CHECK(Set("bounce=2.0x").rfind("FAIL:bad value", 0) == 0);
++    CHECK(Set("bounce").rfind("FAIL:expected", 0) == 0);
++    CHECK(Set("").rfind("FAIL:expected", 0) == 0);
++    CHECK(eng.tuning.remastered);
++    CHECK(AllKnobsDefault(eng.tuning));
++}
++
++TEST_CASE("SceneSettle waits for a full window of steady frames", "[SceneSettle][tri]")
++{
++    Dev::SceneSettle s(5, 0.02f);
++    for (int i = 0; i < 4; ++i)
++        s.Add(1000, 0.5f, false);
++    CHECK_FALSE(s.Settled());
++    s.Add(1000, 0.5f, false);
++    CHECK(s.Settled());
++    CHECK(s.Frames() == 5);
++}
++
++TEST_CASE("SceneSettle does not settle while the draw count is still climbing", "[SceneSettle][tri]")
++{
++    // The research run's sunrise_ridge: the first shot drew 1,465 calls while
++    // the scene went on to draw about 9,500.
++    Dev::SceneSettle s(5, 0.02f);
++    for (int draws = 1465; draws < 9500; draws += 800)
++    {
++        s.Add(draws, 0.5f, false);
++        CHECK_FALSE(s.Settled());
++    }
++    for (int i = 0; i < 5; ++i)
++        s.Add(9500 + (i % 2) * 100, 0.5f, false); // 1% flicker, inside the 2% tolerance
++    CHECK(s.Settled());
++    CHECK(s.MinDraws() == 9500);
++    CHECK(s.MaxDraws() == 9600);
++}
++
++TEST_CASE("SceneSettle tolerance is a fraction of the largest count", "[SceneSettle][tri]")
++{
++    Dev::SceneSettle tight(3, 0.02f);
++    Dev::SceneSettle exact(3, 0.0f);
++    for (int draws : {1000, 1030, 1000})
++    {
++        tight.Add(draws, 0.5f, false);
++        exact.Add(draws, 0.5f, false);
++    }
++    CHECK_FALSE(tight.Settled()); // 30 of 1030 is 2.9%
++    CHECK_FALSE(exact.Settled());
++    for (int i = 0; i < 3; ++i)
++        exact.Add(0, 0.5f, false); // nothing drawn at all is steady too
++    CHECK(exact.Settled());
++}
++
++TEST_CASE("SceneSettle restarts on a LOD change or a busy frame", "[SceneSettle][tri]")
++{
++    Dev::SceneSettle s(3, 0.02f);
++    s.Add(1000, 0.5f, false);
++    s.Add(1000, 0.5f, false);
++    s.Add(1000, 0.4f, false); // the adaptive detail moved
++    CHECK_FALSE(s.Settled());
++    s.Add(1000, 0.4f, false);
++    s.Add(1000, 0.4f, true); // horizon map still building
++    CHECK_FALSE(s.Settled());
++    s.Add(1000, 0.4f, false);
++    s.Add(1000, 0.4f, false);
++    CHECK_FALSE(s.Settled());
++    s.Add(1000, 0.4f, false);
++    CHECK(s.Settled());
++}

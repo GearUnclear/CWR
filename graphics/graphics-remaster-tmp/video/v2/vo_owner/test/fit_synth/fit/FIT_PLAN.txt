@@ -1,0 +1,65 @@
+FIT PLAN: the picture follows the voice
+======================================
+
+montage: D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\out-split\timeline.json (8004 frames, 133.40 s)
+lines:   D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\test\fit_synth\lines (finished WAVs)
+rule: a line starts 0.35 s into its window and should end 0.6 s before it ends; up to 0.5 s over is accepted (it ends inside the transition); mix_vo.py --fit pushes a line back if the one before has not ended 0.3 s earlier. The voice is never sped up.
+
+NOW (the current montage):
+id                              window  room  take   start     end   over  verdict
+v2_00_intro              0.00-  9.00   8.05  8.90    0.35    9.25  +0.85  TOO LONG
+v2_01_opening            9.60- 15.80   5.25  5.30    9.95   15.25  +0.05  accepted: ends 0.05 s past the breath (0.55 s before the window ends)
+v2_02_valley_mist       15.80- 24.10   7.35  7.95   16.15   24.10  +0.60  TOO LONG
+v2_03_pine_shafts       24.10- 32.60   7.55  5.00   24.45   29.45  -2.55  fits
+v2_04_bay_reflections   32.60- 41.10   7.55  5.00   32.95   37.95  -2.55  fits
+v2_05_outpost           41.10- 50.10   8.05  5.00   41.45   46.45  -3.05  fits
+v2_06_cloud_shadows     50.10- 57.60   6.55  8.00   50.45   58.45  +1.45  TOO LONG
+v2_07_sinai_camp        57.60- 65.60   7.05  5.00   58.75   63.75  -1.25  fits; starts 0.80 s late (pushed)
+v2_08_ambush            65.60- 74.10   7.55  5.00   65.95   70.95  -2.55  fits
+v2_09_convoy            74.10- 81.90   6.85  5.00   74.45   79.45  -1.85  fits
+v2_10_checkpoint        81.90- 89.50   6.65  5.00   82.25   87.25  -1.65  fits
+v2_11_town_patrol       89.50- 97.80   7.35  5.00   89.85   94.85  -2.35  fits
+v2_12_rain_town         97.80-106.10   7.35  5.00   98.15  103.15  -2.35  fits
+v2_13_supply_run       106.10-114.80   7.75  5.00  106.45  111.45  -2.75  fits
+v2_14_firefight        114.80-123.80   8.05  5.00  115.15  120.15  -3.05  fits
+v2_99_outro            123.80-133.40   8.65 10.00  124.15  134.15  +1.35  TOO LONG
+
+REMEDIES (in order):
+  v2_00_intro: the intro runs 0.85 s over; hold the intro 0.90 s longer (intro_extra) and reshoot the opening 54 frames longer
+  v2_02_valley_mist: 0.60 s over; the dip after opening 1.40 -> 1.30 s (no reshoot)
+  v2_02_valley_mist: 0.60 s over; the fade after valley_mist 1.00 -> 0.90 s (no reshoot)
+  v2_06_cloud_shadows: 1.45 s over; reshoot cloud_shadows 90 frames longer (510 -> 600 at 60 fps, both sides)
+  v2_99_outro: the closing card holds 1.4 s longer (11.9 s; no reshoot)
+
+AFTER (trailer_v2.py --timing D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\test\fit_synth\fit\timing_owner.json): 8244 frames, 137.40 s (+240 frames)
+id                              window  room  take   start     end   over  verdict
+v2_00_intro              0.00-  9.90   8.95  8.90    0.35    9.25  -0.05  fits
+v2_01_opening           10.50- 16.75   5.30  5.30   10.85   16.15  +0.00  fits
+v2_02_valley_mist       16.75- 25.15   7.45  7.95   17.10   25.05  +0.50  accepted: ends 0.50 s past the breath (0.10 s before the window ends)
+v2_03_pine_shafts       25.15- 33.70   7.60  5.00   25.50   30.50  -2.60  fits
+v2_04_bay_reflections   33.70- 42.20   7.55  5.00   34.05   39.05  -2.55  fits
+v2_05_outpost           42.20- 51.20   8.05  5.00   42.55   47.55  -3.05  fits
+v2_06_cloud_shadows     51.20- 60.20   8.05  8.00   51.55   59.55  -0.05  fits
+v2_07_sinai_camp        60.20- 68.20   7.05  5.00   60.55   65.55  -2.05  fits
+v2_08_ambush            68.20- 76.70   7.55  5.00   68.55   73.55  -2.55  fits
+v2_09_convoy            76.70- 84.50   6.85  5.00   77.05   82.05  -1.85  fits
+v2_10_checkpoint        84.50- 92.10   6.65  5.00   84.85   89.85  -1.65  fits
+v2_11_town_patrol       92.10-100.40   7.35  5.00   92.45   97.45  -2.35  fits
+v2_12_rain_town        100.40-108.70   7.35  5.00  100.75  105.75  -2.35  fits
+v2_13_supply_run       108.70-117.40   7.75  5.00  109.05  114.05  -2.75  fits
+v2_14_firefight        117.40-126.40   8.05  5.00  117.75  122.75  -3.05  fits
+v2_99_outro            126.40-137.40  10.05 10.00  126.75  136.75  -0.05  fits
+
+WHAT TO DO (from D:\Arma_CWA_worktrees\video-work\arma_CWR\tests\rendering\captures\video):
+  1. reshoot opening with 1044 frames on both sides (the same camera path, slower):
+       python gen_video_v2.py --clip opening --frames 1044 --side both
+       powershell -NoProfile -File run_v2_lane.ps1 -Side vanilla -Clips opening -Expect 1044
+       powershell -NoProfile -File run_v2_lane.ps1 -Side ud -Clips opening -Expect 1044 -GameDir D:\Arma_CWA_worktrees\look-director\arma_CWR\dist\look-director-rwdi -DataJunction RemasterUD-video-reshoot
+  2. reshoot cloud_shadows with 600 frames on both sides (the same camera path, slower):
+       python gen_video_v2.py --clip cloud_shadows --frames 600 --side both
+       powershell -NoProfile -File run_v2_lane.ps1 -Side vanilla -Clips cloud_shadows -Expect 600
+       powershell -NoProfile -File run_v2_lane.ps1 -Side ud -Clips cloud_shadows -Expect 600 -GameDir D:\Arma_CWA_worktrees\look-director\arma_CWR\dist\look-director-rwdi -DataJunction RemasterUD-video-reshoot
+  3. re-render both montages with the timing file:
+       python trailer_v2.py --timing D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\test\fit_synth\fit\timing_owner.json
+       python trailer_v2.py --layout sbs --timing D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\test\fit_synth\fit\timing_owner.json
+  4. then: python owner_vo.py finish --work D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\v2\vo_owner\test\fit_synth

@@ -1,0 +1,164 @@
+Mist flicker swarm, agent 4: exposure, metering and the sun
+=============================================================
+Shot: trailer scene 2, valley_mist ("Moving out at dawn"), overhaul side.
+Angle: the camera meter (PhotoCamera, SkyMeterLight, the sun-ring and highlight
+guards, eye adaptation under the exact 1/60 s step with accTime 0 between
+shots), the round 5 dawn haze (the ring's haze at each ray's own phase angle),
+the white sun disc and its aureole, the sky roll-off toward the sun.
+
+VERDICT: ruled out. None of these parts causes the visible flicker. The flicker
+lives entirely in the air (agent 6's noair: band 0.035), it is one coherent
+opacity-like swing of the haze over the land, and the camera and sun parts
+either leave it unchanged (exposure) or damp it (the dawn phase gain, and the
+sun terms per agent 5).
+
+1. What the camera does per shot (read from the code, measured from the log)
+---------------------------------------------------------------------------
+- EngineGL33_Camera.cpp CameraAdapt: dt is WALL CLOCK (NowSeconds), clamped to
+  0.25 s per rendered frame. The capture renders 7 to 10 frames per shot
+  (frame= counter in the log, mean 8.2) in about 0.64 s of wall time, so each
+  captured frame moves the exposure about 47% of the way to the meter's target
+  (real-time play at 60 fps: 1.6% per frame). The capture therefore makes the
+  exposure follow the meter's noise more closely than in play.
+- The trailer clip's own capture log already records the meter per shot
+  (udcap.log, feat= ... "cam ev=... target=... ring=... ringw=..."; parsed into
+  mist/4/cam_ud_v2.csv by mist/4/parse_cam.py). Over the 570 shots: ev 0.39 to
+  0.14, a smooth drift; per-shot |d ev| <= 0.01 EV (the print resolution);
+  target 0.14..0.39; the sun-ring guard is fully on (ringw = 1.00, sun 11.9 deg),
+  ring 0.40..0.65, skytop 0.34..0.58.
+
+2. Exposure: ruled out (statistically and causally)
+---------------------------------------------------
+Offline, the trailer clip (mist/4/analyse.py on a 480x270 decode, 15 px blocks
+as bandmetric.py):
+- The band flicker is not a global gain. The coherent (block-mean) d2 of the
+  core band correlates with the bay +0.97 and the far haze +0.63, but with the
+  upper sky +0.06, the sky by the sun -0.01 and the near rock +0.18.
+- In log2 units (exposure is multiplicative): coherent d2 rms x1000 is band
+  5.9, bay 9.2, upper sky 0.41, sky by the sun 0.24. Any exposure jitter is
+  under about 1/15 of the band's swing.
+- corr(|band d2| per frame, |ev d2|) = 0.00; with |target d1| 0.05; with the
+  ring guard 0.03.
+Causal probe look_probe_mist4_frozen (agent 6's cut of frames 240..389, mode
+"remastered,camAdapt=100000"; mist/4/runs/frozen/):
+- The log shows ev = pre = 0.40 on all 120 measured shots while the target still
+  wandered 0.25..0.32 (agent 6's base probe: ev 0.19..0.23).
+- bandmetric --from 30: band 0.485, band_max 1.91, spikes 5308 (base 0.506,
+  2.02, 5568). Core coherent d2 rms 0.635 vs 0.648. The horizon sky still swings
+  against the mist (corr -0.55 vs -0.62). Unchanged within noise.
+- Secondary: bandmetric's sky value fell 0.034 to 0.022 (vanilla 0.025); the
+  coherent sky d2 0.039 to 0.032. The exposure's wall-clock tracking of the
+  meter adds a little of the sky's grain. The rest of the sky's common mode
+  moves with the rock (corr +0.94) and is on vanilla too (+0.83): most likely
+  the pan's step, not the camera.
+
+3. The sun disc, the aureole and the sky roll-off toward the sun: ruled out
+---------------------------------------------------------------------------
+On the trailer clip, the sun found per frame (centroid of the near-white pixels
+in the top 60%):
+- Aureole rings round the sun (4-8, 8-16, 16-32 and 32-64 px at 480 wide):
+  d2 rms 0.13 / 0.07 / 0.04 / 0.04 levels, steadier than vanilla's
+  0.22 / 0.15 / 0.03 / 0.02. The sky by the sun: block d2 rms 0.042 (vanilla
+  0.037).
+- The band does not follow them. corr(band coherent d2, aureole ring d2) is
+  +0.18 / +0.19 / +0.14 / -0.10; with the sun's screen-x d2 +0.09; |band d2|
+  against |sun x d2| +0.01.
+- nophoto probe (photoLight=0: the whole camera, the tone curve, the roll-off
+  and the white disc off): see section 6.
+
+4. The round 5 dawn haze (the ring's phase gain at each ray's own angle): ruled out, it damps
+-------------------------------------------------------------------------------------------
+Probe look_probe_mist4_nophase: base mode plus a psFogInject override with
+"float phaseOn = 0.0;" (built on agent 3's assembled base; the game log confirms
+"shader override loaded ... mist\4\shaders\nophase\psFogInject.glsl").
+- bandmetric --from 30: band 0.672, band_max 2.67, spikes 6469 (base 0.506,
+  2.02, 5568). Core coherent d2 rms 0.974 vs 0.648.
+- Core level 147 vs 131: without the gain the cream veil over the bay returns.
+- Same mode as the base, only bigger. This matches agent 5's fogSun=0 result
+  (band 0.794). The swing grows with how bright the air is against the land.
+- Code note: the gain's column angle is jittered (psFogInject:
+  ndc = (gl_FragCoord.xy + fogFrame.xy) / fogGrid.xy), so it takes the
+  frame-global jitter like every other term. Removing it does not remove the
+  swing.
+- Crop sheet mist/4/look_base_nophase.png. Rows: base, frozen exposure,
+  nophase. Columns: f0327, f0328, and their diff x8. The frozen row's diff shows
+  the coherent sheet over the valley clearly (a mean step of 2.6 levels in the
+  crop).
+
+5. The shape of the flicker (offline, for the lead)
+---------------------------------------------------
+mist/4/analyse2.py on the trailer clip:
+- It is ONE coherent mode, and it is continuous. The core (rows 9-12, cols
+  16-31) has a block-mean d2 with median 0.58 levels; 350 of 568 frames are
+  over 0.5. These are not isolated events.
+- Per-block slope onto the mode: terrain under the haze (rows 8-13, x > 40%)
+  +0.5 to +1.1. The sky JUST above the horizon on the sun's side (rows 6-8,
+  cols 18-31) moves the opposite way (-0.03 to -0.14). The upper sky is 0.00.
+  This is the signature of a swing in the haze's opacity (more air: the darker
+  land brightens and the brighter horizon sky dims toward the air's colour). An
+  exposure change or an in-scatter gain would move both the same way.
+- Spectrum: no dominant period (the largest peaks are near 11 and 9.3 frames,
+  8% of the power each). The autocorrelation of d2 at lag 1 is -0.63
+  (frame-to-frame alternation).
+- This fits agent 3's finding: one jitter (jx, jy, jz) shared by every froxel
+  cell (EngineGL33_PostFog.cpp ~700), blended at kFogHistoryShare 0.12, with
+  about 8 renders per shot.
+
+6. The whole photoreal camera off (photoLight=0): ruled out
+-----------------------------------------------------------
+Probe look_probe_mist4_nophoto (mode "remastered,photoLight=0"; the log's gate
+reads photoLight=0:off:switch-off with volFog still on; mist/4/runs/nophoto/).
+This turns off the meter, the guards, the tone curve, the sky roll-off toward
+the sun and the white sun disc.
+- bandmetric --from 30: band 0.511, band_max 2.01, spikes 5985 (base 0.506,
+  2.02, 5568).
+- Core coherent d2 rms 0.677 vs 0.648, at a brighter core level (158 vs 131).
+  The relative swing is 0.43% vs 0.49%.
+- The horizon sky still swings against the mist (corr -0.60).
+- Crops: mist/4/look_nophoto.png.
+Visual check of the sun at 2x on the trailer clip's worst frames 326-329
+(mist/4/look_sun_f326_329_2x.png): the disc and the aureole show only the pan's
+edge (mean steps -0.03, +0.04, +0.01 levels). Over the same frames the band
+crop (x1080-1440, y540-780) steps +2.31, -1.27, +3.16.
+
+7. Secondary: the sky's fine grain is the exposure (a capture artefact)
+-----------------------------------------------------------------------
+bandmetric's sky value is 0.034 on the base probe. It drops to 0.022 both with
+the exposure frozen and with photoLight=0 (vanilla 0.025). The sky's extra grain,
+2x to 3x vanilla in the orchestrator's baseline, is the exposure following the
+meter's frame-to-frame noise: CameraAdapt's dt is wall time, about 47% of the
+way to the target per captured shot. In real-time play (dt 1/60) it is 1.6%
+per frame. It is small, and it is a capture artefact: the game itself needs no
+change.
+Capture-only option, if the lead wants it: in the clip's capMode string, scale
+camAdapt so a shot's wall time counts as 1/60 s, i.e. camAdapt = 1.0 x (wall
+seconds per shot x 60), about 38 (0.64 s per shot). Expect the sky grain near
+vanilla's and the exposure drift close to real-time play. This is not
+measured; the frozen case (camAdapt=100000) is the measured bound. A fix with
+one render per sim step (agent 2's "rt" direction) would fix this as well.
+
+8. Conclusion for the lead
+--------------------------
+- capture_or_game for my angle: the camera, the meter and the sun parts are
+  not the cause, in the capture or in the game.
+- The band flicker is the fog. Agent 3 confirmed it causally: froxels sampled
+  at their cell centre give band 0.024 against 0.468 on the same static probe.
+  The cause is one jitter shared by every froxel cell (EngineGL33_PostFog.cpp
+  ~700: jx, jy, jz), blended at 0.12 into history and pumped by about 8 renders
+  per shot. Two things in my measurements point there:
+  - The anti-swing of the horizon sky is an opacity signature.
+  - The swing grows when the air is brighter against the land: nophase gave
+    0.974 and fogSun=0 (agent 5) 0.691 against a base of 0.648 / 0.391.
+- Do not change the exposure, the guards, the sun disc, the roll-off or the
+  round 5 phase gain to fix this shot. The phase gain and the sun terms damp
+  the swing.
+
+Files (all under D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/mist/4/):
+  parse_cam.py, cam_ud_v2.csv, cam_base6.csv, cam_frozen.csv   the per-shot meter from the logs
+  decode.py, analyse.py, analyse2.py, skycoh.py, compare.py    the offline analysis
+  crops.py, look_base_nophase.png, look_nophoto.png, look_sun_f326_329_2x.png
+  mk_probe4.py, run_probe4.ps1    copies of agent 6's probe tools (prefix mist4, junction RemasterUD-mist-4)
+  shaders/nophase/psFogInject.glsl
+  runs/frozen, runs/nophase, runs/nophoto   each with <tag>.mkv, band.json, udcap.log, keep/ PNGs
+Probe tests: D:/Arma_CWA_worktrees/video-work/arma_CWR/tests/rendering/captures/video/look_probe_mist4_{frozen,nophase,nophoto}.test.sqf/.toml
+Junction: D:/Arma_CWA_worktrees/video-work/arma_CWR/packages/RemasterUD-mist-4 (to the Remaster shadow; no game of mine left running)

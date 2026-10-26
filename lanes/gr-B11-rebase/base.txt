@@ -1,0 +1,8 @@
+lane: gr-B11-rebase
+source: D:/Arma_CWA_worktrees/gr-B11-rebase
+HEAD: 5d7e7aed6d9c433ff59b8301b100715ac6c151c1
+subject: graphics: a physically based sky table lights the dome and the fog colour
+commit date: 2026-10-18 07:10:14 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 23
+binary files changed (content not in patch): none

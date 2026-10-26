@@ -1,0 +1,135 @@
+Round 4 burst fixer: explosions and fire light at dusk and night
+=================================================================
+
+Scratch copy D:/Arma_CWA_worktrees/look-fix-horizon (fec1075 + fix4/base.patch, base tree
+d2f866e4). Build build/look-fix-horizon-rwdi, game dist/look-fix-horizon-rwdi, junction
+RemasterUD-r4-burst. Nothing committed, no branch.
+Patch: fix.patch (9 engine files + 2 unit test files, +274 / -16; only my delta
+over the base tree, no probe or capture tests in it). It applies with git apply --cached --check on
+a fresh index of the base tree.
+
+Look first
+----------
+- a_burst_ages.png: the same shell burst at fixed ages (fixed 1/30 s step, paused shots), round 3
+  (left) against round 4 (right), 6, 8, 10, 13 and 24 frames after the shell is dropped. This is
+  the fair comparison: the AI fight is not pinned, so the firefight views catch bursts at other ages.
+- a_burst_firefight_2.png, a_burst_firefight_3.png: vanilla | landed | before | after, 2x crop.
+- b_band_firefight_2.png and b_band_probe_f06.png (the band beside a 1 frame old burst, 2x).
+- c_wreck_firefight_1.png: the burning wreck's horizon.
+- d_town_night_fire.png, d_town_fog_night_fire.png: the fire at 1080p.
+
+(a) The burst cloud: cause, proven
+----------------------------------
+Probe 1 (probe_1/, round 3 code, paused frames at fixed ages, with and without combatSmoke=0):
+the cloud is white at 6 frames, lemon at 8, flat mustard (160,131,73) at 10, then pink-brown.
+combatSmoke=0 gives the same picture at every age, so the combat light on the cloud is not what
+colours it (the merger's and critics' guess). The cloud is exactly the colour of the config table
+of CfgCloudlets Explosion (a temperature table: 2500 K at birth, white at 2200, lemon 1900,
+mustard 1600, orange 1400).
+Why: the fireball puffs' shape is self-lit (MSShining). Object::DrawDecal draws a self-lit decal
+as its table colour times the eye's accommodation, and lights nothing on it. The photoreal camera
+holds the accommodation at 1, so the fireball shows its table colour at the level of a white wall,
+never past it: no hot core, and one flat colour because all puffs have about the same temperature.
+Classic and landed whitened it by clipping each channel. A first fix that went through the lit
+branch only did nothing (shots_1, shots_2): proof that the puffs take the self-lit branch.
+
+The change:
+- FireballPuff (CombatLights): a puff whose table tops out between 1500 and 3000 is a fireball's,
+  read in kelvin. It glows as a black body (BlackBodyRgb, a fit to the sRGB black-body table) at
+  kFireballEmission times exp(kFireballWienK (1/2200 - 1/T)), Wien's law at 580 nm, faded in from
+  900 K to 1300 K, each channel softly saturated at kFireballEmitCap (so the hottest core goes
+  white-yellow). What it scatters is soot (0.24, 0.21, 0.18). Camp fire smoke and smoke shells
+  (tables to 1000) and gun fire (its own scale to 4200) are not touched.
+- Object::DrawDecal: a fireball puff under the combat lights goes through the lit branch (scene
+  light on its soot, combat light, then its glow added in linear and carried past 1 as the decal
+  glow), whatever its shape's material. Cloudlet gets Temperature() and HottestTemperature().
+- CombatSmokeTransmittance: a shell burst's light now crosses its own cloud like a fire's, so it
+  lights the cloud's base and near side, not every puff alike.
+Result (a_burst_ages.png): 6 frames a yellow-white fireball; 8 frames an orange fireball with dark
+puffs in it; 10 frames dark grey-brown smoke with a few glowing bits; then dark smoke. In
+firefight_3 the burst is a dark cloud; firefight_2 in this run caught the burst at about 0.37 s,
+dark brown smoke with a lit base.
+
+(b) The band along the horizon
+------------------------------
+Cause: under the camera a burst's surface light reached 20 m. Seen from 2 m at 60 to 90 m a lit
+disc 40 m wide is a 9 px strip, so a young burst drew a ruler-straight line brighter than its own
+cloud (probe_1 f06, b_band_probe_f06.png top).
+Change (EngineGL33_PostCombat.cpp): a shell burst's surface light ends kBurstSurfaceReachCores (3)
+ball radii out (7.8 m for a heavy shell, under its cloud). Cannon flashes keep 20 m.
+Result: horizon rows 338 to 352 beside a 1 frame old burst, 99th percentile 60 -> 32 (ground 28);
+8 frames: 56 -> 33. The band is gone at full size; the fireball is now the brightest thing.
+
+(c) The wreck's warm line
+-------------------------
+Cause (round 3 horizon notes, confirmed): at 19:35 the camera meters the dusk plain about as dark
+as a night field, so the wreck's fire at the day scale 0.12 lit the plain behind it like a night
+fire. Change: CombatTwilight(sun elevation), under the camera only: a steady light (fire, flare,
+motor) takes 1 from 6 degrees under (the night as before), tenfold less per 2.5 degrees above
+that, floor 0.1. It scales only their light on surfaces and in the air (GatherCombatLights); their
+flames and smoke keep it all. At 1.7 degrees under the wreck's ground light is 0.1 of round 3's.
+Result: rows 338 to 352 at the wreck, 99th percentile 48 -> 31 (probe), and the line is gone in
+c_wreck_firefight_1.png. Night views are unchanged (town_night grass (68,55,35) -> (71,56,35)).
+
+(d) Cream flame core and stones
+-------------------------------
+Cause: the composite's hue-keeping curve mixes all three channels toward white by one amount, so a
+bright orange (1, 0.55, 0.16) went to (1, 0.68, 0.38), cream. Change: each channel whitens by the
+whitening to the power 1 + kHueRoll (1 - its share of the peak), kHueRoll 3, in the composite and
+in the C++ mirror (which now also has round 2's chroma keep). A white light is unchanged.
+town_night 1080 (before -> after): flame core (239,199,150) -> (239,188,108); stones
+(199,159,102) -> (204,159,87), top tenth (254,225,194) -> (254,206,130); fire box pixels with
+every channel at 200 or more 171 -> 0; plume 1 to 2 m up (173,135,101) -> (173,134,100).
+town_fog_night: core (222,184,130) -> (226,179,123), stones top tenth (246,209,158) ->
+(236,188,124), white pixels 597 -> 0.
+
+Constants touched (name: old -> new)
+------------------------------------
+- New CombatLights.hpp: kFireballTableK 1500, kFireballTableMaxK 3000, kFireballGlowFromK 900,
+  kFireballGlowFullK 1300, kFireballRefK 2200, kFireballWienK 24800, kFireballEmission 8,
+  kFireballEmitCap 2, kFireballSoot (0.24, 0.21, 0.18); kTwilightNightDeg -6, kTwilightDecadeDeg
+  2.5, kTwilightFloor 0.1; CombatTuning::twilight (1, camera: CombatTwilight).
+- CombatSmokeTransmittance: Explosion 1 -> exp(-(d - core) / reach) as for Fire.
+- EngineGL33_PostCombat.cpp: Explosion surface range 20 m -> kBurstSurfaceReachCores (3) x core.
+- PhotoCamera.hpp: new kHueRoll 3 (GLSL mirror in EngineGL33_PostShaders.cpp).
+- Fireball emission tried at 3 first: too dim, an orange birth with no white core (shots_3).
+
+Tests
+-----
+- [CombatLights],[PhotoCamera]: 46 cases, 1629 assertions, all pass. New cases: a fireball's puff
+  glows white-hot to orange and cools to soot (and camp fire, smoke shell, gun fire and crater
+  smoke are no fireball); a steady light reads against the twilight; a burst's light crosses its
+  cloud. Updated: the hue-keeping curve (far past white a white light is white, an orange rolls
+  off to yellow-orange; the old check that orange x 40 goes white was the mirror without the
+  chroma keep).
+- Gate tags ([remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],
+  [AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],
+  [TerrainHorizon],[StateOwnership],[atmosphere]): 321 cases, 957,683 assertions, all pass
+  (glslang compiles every program); the same after clang-format on the final build (unit_gate3.txt).
+- clang-format clean on every file I changed.
+
+AI sight and fog
+----------------
+Target.cpp (FogSightActive / FogSightTransmittance, lines 639 to 645) and VolumetricFog.cpp are not
+in my diff; the link is intact.
+
+Still open
+----------
+1. The burst's dust foot (CraterSmoke, a grey table) is still lit pink by the classic dusk sun
+   colour (sun FullResult times accommodation) and the burst's cooled light: a salmon foot under
+   the now dark cloud in firefight_3 and at 24 frames. Puffs are still lit by the classic sun, not
+   the photoreal rig; that is a separate root fix.
+2. The 8 frame fireball is a fairly even orange: its puffs are born together and cool together.
+   A spread of birth temperature in the config would give more variation.
+3. The firefight views are not timing-pinned, so they catch bursts at random ages; the fixed-age
+   probe (look_probe_r4b1, not in the patch, generator tools/gen_probe_burst.py) is the measure.
+4. firefight_1 in this run caught the Ural before it read as a wreck (lit olive body); staging.
+5. Steady lights by day now take 0.012 of their night power on surfaces (was 0.12); not checked in
+   a day view with a fire (none in my set).
+
+Files
+-----
+fix.patch, NOTES.txt, a_*.png, b_*.png, c_*.png, d_*.png; probe_1/ (round 3 code, fixed ages),
+shots_1/ to shots_4/ (my builds in turn; shots_3 holds the final town shots, taken before the
+fireball emission went from 3 to 8, which the town views do not use; shots_4 the final probe and
+firefights), tools/ (gen_probe_burst.py, sheet.py, sbs.py).

@@ -1,0 +1,361 @@
+8 GuerrillaBase: headquarters established in zone 'Camp' (edge of town) at [7598,5789], garage at [7598,5789]
+8 GuerrillaBase: campaign opens with its headquarters at the Camp 'Camp'
+8 CampaignEnd: 6 enemy military zone(s) to take
+8 sizing: pool 48, poolStart 48, band STRONG, K 14, control 1, ledger [48,0,0,0,0,0,0,[],[],false,48,false]; no director lever: forcesDifficulty Normal, the eight levers at their presets (cadence 600, strength 1, recovery 4, reach 1500, aggression 1, waves 1, minimums 4, concurrency 3)
+8 the player and 1 companion(s) wait in the hills at [4600,9600,0] (landmass 0)
+9 lever: Arudy garrison 0, support 55; 4 fighters take it and STAY as its garrison (invulnerable, held within 120 m of the centre, magazines topped up from the cell's cache every 300 s): ["SoldierGB","SoldierGMG","SoldierGB","SoldierGB"]
+9 OccupierForces: Arudy taken, 1 distinct town(s) so far
+9 CounterAttack: Arudy rose; the occupier does not answer (chance 0.40, 0 town(s) taken before)
+191 lever: Sainte Marie garrison 0, support 55; 6 fighters take it and STAY as its garrison (invulnerable, held within 120 m of the centre, magazines topped up from the cell's cache every 300 s): ["SoldierGB","SoldierGMG","SoldierGB","SoldierGLAW","SoldierGB","SoldierGMedic"]
+193 OccupierForces: Sainte Marie taken, 2 distinct town(s) so far
+193 OccupierForces: AWAKE after 2 distinct towns (Sainte Marie the latest), 2 token(s)
+193 CounterAttack: Sainte Marie rose; the occupier director takes it (1 town(s) taken before)
+195 awake: pool 48 of 48, band STRONG, tokens 2, operations 0, ledger [48,0,0,0,0,0,0,[],[],false,48,false]
+196 the hold begins: both towns held by their garrisons; no lever until the rising (at least 3000 s, until both are contained or 6600 s)
+241 CounterAttack: 4 of the La Riviere Outpost reserve leave for Sainte Marie; on the road 252s (reserve now 2)
+241 OccupierForces: [op 1] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 2243 s; TRUCK goes, road 252 s
+241 OccupierForces: [op 1] Motorized squad (4, Ural) from La Riviere Outpost to Sainte Marie (8 unit(s), the pool pays 4, lethality 5.00 of 0.00, 0 fighter(s) reported, road 252 s)
+241 OccupierForces: [op 1] candidate Sainte Marie, 1 of 2: a far town (weight 1), heat 39
+242 Sainte Marie: op 1 launched on it, operation number 1 on Sainte Marie; repels row []; massing ["",0,3]
+301 CounterAttack: 4 of the Vigny Outpost reserve leave for Arudy; on the road 147s (reserve now 2)
+301 OccupierForces: [op 2] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 1308 s; TRUCK goes, road 147 s
+301 OccupierForces: [op 2] Motorized squad (4, Ural) from Vigny Outpost to Arudy (8 unit(s), the pool pays 4, lethality 5.00 of 0.00, 0 fighter(s) reported, road 147 s)
+301 OccupierForces: [op 2] candidate Arudy, 1 of 1: a far town (weight 1), heat 33
+302 Arudy: op 2 launched on it, operation number 1 on Arudy; repels row []; massing ["",0,3]
+448 CounterAttack: 4 soldier(s) from Vigny Outpost appear at [5309, 6779], 2909 m from the player (reason: route point, 85% along 1962 m of road) in a hull; they march on Arudy
+448 CounterAttack: [op 2] born for Arudy (spawnReason route) at [5309, 6779], 2909 m from the player
+481 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+486 CounterAttack: the force on Arudy reached the town edge (247 m out) and dismounts; it moves in
+486 CounterAttack: [op 2] arrived live at Arudy (dismounts and moves in), 2874 m from the player
+493 CounterAttack: 4 soldier(s) from La Riviere Outpost appear at [5717, 3966], 5743 m from the player (reason: route point, 91% along 3365 m of road) in a hull; they march on Sainte Marie
+493 CounterAttack: [op 1] born for Sainte Marie (spawnReason route) at [5717, 3966], 5743 m from the player
+532 CounterAttack: the force on Sainte Marie reached the town edge (222 m out) and dismounts; it moves in
+532 CounterAttack: [op 1] arrived live at Sainte Marie (dismounts and moves in), 5687 m from the player
+541 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+601 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50) (other lines suppressed)
+615 CounterAttack: [op 2] Broken off at Arudy: 3 lost, 1 going home (born 4, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Vigny Outpost; the hulls wait for it to clear 250 m (at most 120 s), 2817 m from the player
+615 OccupierForces: [op 2] Repelled at Arudy: 3 lost, 1 going home; Arudy rests 1742 s, heat +15
+615 OccupierForces: Arudy: first repel (TRUCK from Vigny Outpost, 4 fighter(s) reported), next attack needs lethality x1.5 and at least 8 infantry
+615 CounterAttack: [op 2] the Ural holds for the infantry until it clears 250 m of Arudy (at most 120 s), then drives home to Vigny Outpost (1 crew)
+615 CounterAttack: 1 withdrawing soldier(s) home unseen at Vigny Outpost (0 lost on the way)
+616 Arudy: op 2 is over, the town is held by GUER; operations on Arudy ended with it held so far 1
+616 CounterAttack: [op 2] the hull at Arudy leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Vigny Outpost
+616 CounterAttack: [op 2] the hull is home unseen (1 crew back at Vigny Outpost)
+669 CounterAttack: [op 1] Broken off at Sainte Marie: 3 lost, 1 going home (born 4, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward La Riviere Outpost; the hulls wait for it to clear 250 m (at most 120 s), 5453 m from the player
+669 OccupierForces: [op 1] Repelled at Sainte Marie: 3 lost, 1 going home; Sainte Marie rests 2021 s, heat +15
+669 OccupierForces: Sainte Marie: first repel (TRUCK from La Riviere Outpost, 3 fighter(s) reported), next attack needs lethality x1.5 and at least 6 infantry
+669 CounterAttack: [op 1] the Ural holds for the infantry until it clears 250 m of Sainte Marie (at most 120 s), then drives home to La Riviere Outpost (1 crew)
+669 CounterAttack: 1 withdrawing soldier(s) home unseen at La Riviere Outpost (0 lost on the way)
+669 Sainte Marie: op 1 is over, the town is held by GUER; operations on Sainte Marie ended with it held so far 1
+670 CounterAttack: [op 1] the hull at Sainte Marie leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to La Riviere Outpost
+670 CounterAttack: [op 1] the hull is home unseen (1 crew back at La Riviere Outpost)
+670 OccupierForces: ledger: TRUCK over poolStart stored as a spare hull at La Riviere Outpost (2 unit(s); pool 48 of 48; back in the pool when it has room)
+841 OccupierForces: ledger: the spare TRUCK stored at La Riviere Outpost rejoins the pool (1 unit(s); pool 48 of 48)
+841 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50) (other lines suppressed)
+901 OccupierForces: ledger: the spare TRUCK stored at La Riviere Outpost rejoins the pool (1 unit(s); pool 48 of 48)
+1021 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+1081 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+1262 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+1502 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+1562 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+1622 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+1742 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+1922 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+2043 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50) (other lines suppressed)
+2223 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+2343 OccupierForces: Arudy rested with 4 fighter(s) reported: re-armed, heat held at 40 until an operation goes (forcesRearmHeat)
+2343 CounterAttack: 8 of the Airfield reserve leave for Arudy; on the road 562s (reserve now 4)
+2343 OccupierForces: [op 3] Motorized squad (8, Ural) with T72 from Airfield to Arudy (29 unit(s), the pool pays 21, lethality 22.00 of 21.60, 4 fighter(s) reported, road 562 s)
+2343 OccupierForces: [op 3] the repel ladder on Arudy (1 repel(s)): lethality 21.60 needed, at least 8 infantry
+2343 OccupierForces: [op 3] candidate Arudy, 1 of 1: a far town (weight 1), heat 40
+2343 OccupierForces: band STRONG -> STRETCHED (pool 27 of 48; strength 27: 0 committed in the air, 6 lost and 3 repaid in the last 1.0 h)
+2344 Arudy: op 3 launched on it, operation number 2 on Arudy; repels row ["Arudy",1,"TRUCK","Vigny Outpost",false]; massing ["",0,3]
+2403 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+2463 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+2703 OccupierForces: Sainte Marie rested with 6 fighter(s) reported: re-armed, heat held at 40 until an operation goes (forcesRearmHeat)
+2703 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+2703 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 6 (the token is held, tick 1 of 3)
+2763 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 6 (the token is held, tick 2 of 3)
+2823 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+2823 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 6 (the token is held, tick 3 of 3)
+2884 CounterAttack: 6 of the Le Port Harbour reserve leave for Sainte Marie; on the road 393s (reserve now 2)
+2884 OccupierForces: [op 4] APC (6, BMP) with T72 from Le Port Harbour to Sainte Marie (34 unit(s), the pool pays 28, lethality 25.50 of 32.40, 6 fighter(s) reported, short of the required lethality: the most lethal affordable package, road 393 s)
+2884 OccupierForces: [op 4] the repel ladder on Sainte Marie (1 repel(s)): lethality 32.40 needed, at least 12 infantry
+2884 OccupierForces: [op 4] candidate Sainte Marie, 1 of 1: a far town (weight 1), heat 40
+2884 OccupierForces: band STRETCHED -> THIN (pool 4 of 48; strength 4: 0 committed in the air, 6 lost and 6 repaid in the last 1.0 h)
+2884 Sainte Marie: op 4 launched on it, operation number 2 on Sainte Marie; repels row ["Sainte Marie",1,"TRUCK","La Riviere Outpost",false]; massing ["",0,3]
+2906 CounterAttack: 8 soldier(s) from Airfield appear at [5812, 7037], 2835 m from the player (reason: route point, 95% along 5621 m of road) in a hull; they march on Arudy
+2906 CounterAttack: [op 3] born for Arudy (spawnReason route) at [5812, 7037], 2835 m from the player
+2946 CounterAttack: the force on Arudy reached the town edge (228 m out) and dismounts; it moves in
+2946 CounterAttack: [op 3] arrived live at Arudy (dismounts and moves in), 2841 m from the player
+3178 CounterAttack: [op 3] Broken off at Arudy: 6 lost, 2 going home (born 8, alive 2; rule: living infantry below a third of the strength born, the target still held); on foot toward Airfield; the hulls wait for it to clear 250 m (at most 120 s), 2801 m from the player
+3178 OccupierForces: [op 3] Repelled at Arudy: 6 lost, 2 going home; Arudy rests 2137 s, heat +15
+3178 OccupierForces: Arudy: second repel (TRUCK from Airfield), next attack from a different source or by air; a strike may go with it if the pool stays STRETCHED
+3178 CounterAttack: [op 3] the T72 holds for the infantry until it clears 250 m of Arudy (at most 120 s), then drives home to Airfield (3 crew)
+3178 CounterAttack: [op 3] the Ural holds for the infantry until it clears 250 m of Arudy (at most 120 s), then drives home to Airfield (1 crew)
+3178 CounterAttack: 2 withdrawing soldier(s) home unseen at Airfield (0 lost on the way)
+3179 Arudy: op 3 is over, the town is held by GUER; operations on Arudy ended with it held so far 2
+3179 CounterAttack: [op 3] the hull at Arudy leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Airfield
+3179 CounterAttack: [op 3] the hull is home unseen (3 crew back at Airfield)
+3179 CounterAttack: [op 3] the hull at Arudy leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Airfield
+3179 CounterAttack: [op 3] the hull is home unseen (1 crew back at Airfield)
+3179 OccupierForces: band THIN -> STRETCHED (pool 23 of 48; strength 23: 0 committed in the air, 12 lost and 6 repaid in the last 1.0 h)
+3184 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+3277 CounterAttack: 6 soldier(s) from Le Port Harbour appear at [5717, 3966], 5743 m from the player (reason: route point, 93% along 3929 m of road) in a hull; they march on Sainte Marie
+3277 CounterAttack: [op 4] born for Sainte Marie (spawnReason route) at [5717, 3966], 5743 m from the player
+3304 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+3327 CounterAttack: the force on Sainte Marie reached the town edge (243 m out) and dismounts; it moves in
+3327 CounterAttack: [op 4] arrived live at Sainte Marie (dismounts and moves in), 5700 m from the player
+3364 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+3503 CounterAttack: [op 4] Broken off at Sainte Marie: 5 lost, 1 going home (born 6, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Le Port Harbour; the hulls wait for it to clear 250 m (at most 120 s), 5528 m from the player
+3503 OccupierForces: [op 4] Repelled at Sainte Marie: 5 lost, 1 going home; Sainte Marie rests 2049 s, heat +15
+3503 OccupierForces: Sainte Marie: second repel (APC from Le Port Harbour), next attack from a different source or by air; a strike may go with it if the pool stays STRETCHED
+3503 CounterAttack: [op 4] the T72 holds for the infantry until it clears 250 m of Sainte Marie (at most 120 s), then drives home to Le Port Harbour (3 crew)
+3503 CounterAttack: [op 4] the BMP holds for the infantry until it clears 250 m of Sainte Marie (at most 120 s), then drives home to Le Port Harbour (3 crew)
+3503 CounterAttack: 1 withdrawing soldier(s) home unseen at Le Port Harbour (0 lost on the way)
+3503 Sainte Marie: op 4 is over, the town is held by GUER; operations on Sainte Marie ended with it held so far 2
+3504 CounterAttack: [op 4] the hull at Sainte Marie leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Le Port Harbour
+3504 CounterAttack: [op 4] the hull is home unseen (3 crew back at Le Port Harbour)
+3504 CounterAttack: [op 4] the hull at Sainte Marie leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Le Port Harbour
+3504 CounterAttack: [op 4] the hull is home unseen (3 crew back at Le Port Harbour)
+3504 OccupierForces: ledger: APC over poolStart stored as a spare hull at Le Port Harbour (1 unit(s); pool 48 of 48; back in the pool when it has room)
+3504 OccupierForces: band STRETCHED -> STRONG (pool 48 of 48; strength 40: 0 committed in the air, 17 lost and 9 repaid in the last 1.0 h)
+3544 OccupierForces: ledger: the spare APC stored at Le Port Harbour rejoins the pool (1 unit(s); pool 48 of 48)
+3724 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+3844 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50)
+3904 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+3964 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4025 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4085 OccupierForces: a local in Arudy talked: 4 fighter(s) reported (standing 50) (other lines suppressed)
+4145 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4265 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4445 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4685 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4745 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4865 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50) (other lines suppressed)
+4925 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+4986 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+5226 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50) (other lines suppressed)
+5286 OccupierForces: Arudy rested with 4 fighter(s) reported: re-armed, heat held at 40 until an operation goes (forcesRearmHeat)
+5286 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50) (other lines suppressed)
+5466 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+5466 CounterAttack: 9 of the Airfield reserve leave for Arudy; on the road 108s (reserve now 3)
+5466 OccupierForces: [op 5] Helicopter insertion (9, Mi17) from Airfield (infantry of Airfield) to Arudy (21 unit(s), the pool pays 12, lethality 11.25 of 21.60, 4 fighter(s) reported, short of the required lethality: the most lethal affordable package, line 72 s)
+5466 OccupierForces: [op 5] the repel ladder on Arudy (2 repel(s)): lethality 21.60 needed, at least 8 infantry; a different approach: by air instead of TRUCK from Airfield
+5466 OccupierForces: [op 5] candidate Arudy, 1 of 1: a far town (weight 1), heat 40
+5466 CounterAttack: [op 6] strike by Mi24 on Arudy at [5429, 6882] from Airfield; 61s in the air
+5466 OccupierForces: [op 6] Attack helicopter strike over Arudy (town, Mi24) from Airfield (the pool pays 20, 4 fighter(s) reported, at the reported fighters), urgent
+5466 OccupierForces: [op 6] escalation strike: Arudy repelled 2 time(s), the pool stays STRETCHED (pool 16 of 48)
+5467 Arudy: op 5 launched on it, operation number 3 on Arudy; repels row ["Arudy",2,"TRUCK","Airfield",false]; massing ["",0,3]
+5467 Arudy: op 6 launched on it, operation number 4 on Arudy; repels row ["Arudy",2,"TRUCK","Airfield",false]; massing ["",0,3]
+5526 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+5527 CounterAttack: [op 6] the strike by Mi24 reaches Arudy (abstract)
+5527 OccupierForces: [op 6] Struck Arudy: support 60, standing 10 (-40 each), heat +15, half income until 6727; 4 town(s) within 2000 m -10 each
+5528 Arudy: op 6 is over, the town is held by GUER; operations on Arudy ended with it held so far 3
+5574 CounterAttack: 9 soldier(s) from Airfield appear at [5711, 7206], 2639 m from the player (reason: route point, 92% along 3855 m of road); they march on Arudy
+5574 CounterAttack: [op 5] born for Arudy (spawnReason route) at [5711, 7206], 2639 m from the player
+5586 OccupierForces: Sainte Marie rested with 6 fighter(s) reported: re-armed, heat held at 40 until an operation goes (forcesRearmHeat)
+5586 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 6 (the token is held, tick 1 of 3)
+5611 CounterAttack: the force on Arudy reached the town edge (250 m out); it moves in
+5611 CounterAttack: [op 5] arrived live at Arudy (moves in), 2649 m from the player
+5646 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 6 (the token is held, tick 2 of 3)
+5706 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50) (other lines suppressed)
+5706 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 6 (the token is held, tick 3 of 3)
+5766 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+5766 CounterAttack: 6 of the Le Port Harbour reserve leave for Sainte Marie; on the road 81s (reserve now 2)
+5766 OccupierForces: [op 7] Helicopter insertion (6, Mi17) from Airfield (infantry of Le Port Harbour) to Sainte Marie (18 unit(s), the pool pays 12, lethality 7.50 of 32.40, 6 fighter(s) reported, short of the required lethality: the most lethal affordable package, line 54 s)
+5766 OccupierForces: [op 7] the repel ladder on Sainte Marie (2 repel(s)): lethality 32.40 needed, at least 12 infantry; a different approach: by air instead of APC from Le Port Harbour
+5766 OccupierForces: [op 7] candidate Sainte Marie, 1 of 1: a far town (weight 1), heat 40
+5766 OccupierForces: no strike with the operation on Sainte Marie: a strike would take the pool below STRETCHED (pool 25 of 48)
+5767 Sainte Marie: op 7 launched on it, operation number 3 on Sainte Marie; repels row ["Sainte Marie",2,"APC","Le Port Harbour",false]; massing ["",0,3]
+5802 CounterAttack: [op 5] Broken off at Arudy: 7 lost, 2 going home (born 9, alive 2; rule: living infantry below a third of the strength born, the target still held); on foot toward Airfield, 2775 m from the player
+5802 OccupierForces: [op 5] Repelled at Arudy: 7 lost, 2 going home; Arudy rests 1742 s, heat +15
+5802 OccupierForces: Arudy: third repel (TRANSPORT_HELI from Airfield), contained: no more attacks on it; Vigny Outpost surged by 6 (the containment lifts when its reports decay, a wave fires or control changes band)
+5802 CounterAttack: 2 withdrawing soldier(s) home unseen at Airfield (0 lost on the way)
+5803 Arudy: op 5 is over, the town is held by GUER; operations on Arudy ended with it held so far 4
+5846 CounterAttack: 6 soldier(s) from Le Port Harbour appear at [5682, 4492], 5221 m from the player (reason: route point, 95% along 6200 m of road); they march on Sainte Marie
+5846 CounterAttack: [op 7] born for Sainte Marie (spawnReason route) at [5682, 4492], 5221 m from the player
+5876 CounterAttack: the force on Sainte Marie reached the town edge (249 m out); it moves in
+5876 CounterAttack: [op 7] arrived live at Sainte Marie (moves in), 5254 m from the player
+6025 CounterAttack: [op 7] Broken off at Sainte Marie: 5 lost, 1 going home (born 6, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Le Port Harbour, 5428 m from the player
+6025 OccupierForces: [op 7] Repelled at Sainte Marie: 5 lost, 1 going home; Sainte Marie rests 1814 s, heat +15
+6025 OccupierForces: Sainte Marie: third repel (TRANSPORT_HELI from Le Port Harbour), contained: no more attacks on it; La Riviere Outpost surged by 8 (the containment lifts when its reports decay, a wave fires or control changes band)
+6025 CounterAttack: 1 withdrawing soldier(s) home unseen at Le Port Harbour (0 lost on the way)
+6026 Sainte Marie: op 7 is over, the town is held by GUER; operations on Sainte Marie ended with it held so far 3
+6027 after the hold: repels [["Arudy",3,"TRANSPORT_HELI","Airfield",true],["Sainte Marie",3,"TRANSPORT_HELI","Le Port Harbour",true]], massing ["",0,3], ledger [33,0,23,8,0,0,0,[],[],false,48,false], pool 33 of 48, band STRONG, lost 29, magazines topped up 5
+6028 before the rising: control 0.942857, pool 33 of 48, band STRONG
+6028 the generated bases: ["La Riviere Outpost","Vigny Outpost"]
+6030 lever: La Riviere Outpost garrison 0 (a raid on its barracks; the capture script's own hold squad stays), 3 fighters take it (invulnerable) and move on once it falls
+6030 lever: Chapoi garrison 0, support 55, 2 fighters take it (invulnerable) and move on once it falls
+6030 lever: Cancon garrison 0, support 55, 2 fighters take it (invulnerable) and move on once it falls
+6032 OccupierForces: Chapoi taken, 3 distinct town(s) so far
+6032 CounterAttack: Chapoi rose; the occupier director takes it (2 town(s) taken before)
+6032 OccupierForces: Cancon taken, 4 distinct town(s) so far
+6032 CounterAttack: Cancon rose; the occupier director takes it (3 town(s) taken before)
+6033 the cell in Chapoi moves on: the point is left to its own (deleteGroup)
+6033 the cell in Cancon moves on: the point is left to its own (deleteGroup)
+6048 the cell in La Riviere Outpost moves on: the point is left to its own (deleteGroup)
+6067 OccupierForces: base retakes and HQ assaults take the spare cap: one source, at least the largest single-base spare, never below 6 (forcesSpareCap 1)
+6067 CounterAttack: 6 of the Vigny Outpost reserve leave for La Riviere Outpost; on the road 294s (reserve now 6)
+6067 OccupierForces: [op 8] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 2615 s; TRUCK goes, road 294 s
+6067 OccupierForces: [op 8] Base retake (motorized 6, Ural) from Vigny Outpost on La Riviere Outpost (10 unit(s), the pool pays 4, lethality 7.50 of 0.00, 0 fighter(s) reported, road 294 s)
+6067 OccupierForces: [op 8] candidate La Riviere Outpost, 1 of 3: a base (weight 3), heat 40
+6127 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+6201 control 0.803896 after the rising
+6201 lever: Vigny Outpost garrison 0 (a raid on its barracks; the capture script's own hold squad stays), 3 fighters take it (invulnerable) and move on once it falls
+6219 the cell in Vigny Outpost moves on: the point is left to its own (deleteGroup)
+6247 OccupierForces: Arudy: containment lifted: control 0.72 crossed a wave threshold (band 0 -> 1) (3 repel(s) remembered)
+6247 OccupierForces: Sainte Marie: containment lifted: control 0.72 crossed a wave threshold (band 0 -> 1) (3 repel(s) remembered)
+6307 OccupierForces: Wave 1 (30) inbound to Airfield, control 0.72 (control threshold; lands in 600 s)
+6360 CounterAttack: 6 soldier(s) from Vigny Outpost appear at [3656, 4947], 4748 m from the player (reason: route point, 92% along 3922 m of road) in a hull; they march on La Riviere Outpost
+6360 CounterAttack: [op 8] born for La Riviere Outpost (spawnReason route) at [3656, 4947], 4748 m from the player
+6371 control 0.722078 after the rising
+6399 CounterAttack: the force on La Riviere Outpost reached the town edge (233 m out) and dismounts; it moves in
+6399 CounterAttack: [op 8] arrived live at La Riviere Outpost (dismounts and moves in), 4787 m from the player
+6410 CounterAttack: [op 8] the Ural of the force on La Riviere Outpost is lost (abandoned; 0 of 1 crew alive)
+6522 control 0.722078 after the rising
+6667 CounterAttack: 6 of the Airfield reserve leave for Vigny Outpost; on the road 568s (reserve now 5)
+6667 OccupierForces: [op 9] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 5048 s; TRUCK goes, road 568 s
+6667 OccupierForces: [op 9] Base retake (motorized 6, Ural) from Airfield on Vigny Outpost (10 unit(s), the pool pays 4, lethality 7.50 of 0.00, 0 fighter(s) reported, road 568 s)
+6667 OccupierForces: [op 9] candidate Vigny Outpost, 1 of 2: a base (weight 3), heat 29
+6673 control 0.722078 after the rising
+6675 wave: fired 1, inbound true, clock 239.811, bodies 30, control 0.722078, repels [["Arudy",3,"TRANSPORT_HELI","Airfield",false],["Sainte Marie",3,"TRANSPORT_HELI","Le Port Harbour",false]]
+6678 CounterAttack: 2 soldier(s) stay in La Riviere Outpost as its garrison (2 taken off the refill; reserve 4, pending 0)
+6678 OccupierForces: [op 8] La Riviere Outpost retaken: 2 stay as its garrison
+6678 OccupierForces: band STRONG -> STRETCHED (pool 25 of 48; strength 25: 0 committed in the air, 31 lost and 15 repaid in the last 1.0 h)
+6847 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+6907 OccupierForces: wave of 30 landed, pool 57 of 48, 1 wave(s) landed
+6907 OccupierForces: band STRETCHED -> STRONG (pool 57 of 48; strength 43: 0 committed in the air, 25 lost and 11 repaid in the last 1.0 h)
+6907 OccupierForces: Wave 1: hub top-up 7 at Airfield
+6907 OccupierForces: Wave 1: strikes on the cluster around Arudy (1 target(s), up to 15)
+6907 CounterAttack: 9 of the Airfield reserve leave for Arudy; on the road 108s (reserve now 12)
+6907 OccupierForces: [op 10] arrival rule (air: fighters reported): the cheapest, FOOT, needs road 3747 s; TRANSPORT_HELI goes, line 72 s
+6907 CounterAttack: 2 of the Airfield reserve leave for Le Port Harbour; on the road 5080s (reserve now 12)
+6907 OccupierForces: [op 11] Wave 1: Reinforce column (foot 2) from Airfield on Le Port Harbour (2 unit(s), the pool pays 0 and stages the infantry, lethality 2.00 of 0.00, 0 fighter(s) reported, line 0 s)
+6907 OccupierForces: Wave 1: 0 stay in the pool (pool 27 of 48)
+6908 Arudy: op 10 launched on it, operation number 5 on Arudy; repels row ["Arudy",3,"TRANSPORT_HELI","Airfield",false]; massing ["",0,3]
+6910 wave landed: pool 27 of 48, band STRONG, operations 3, ledger [34,12,25,11,0,0,0,[],[],true,57,false]
+6910 free running from here: no levers; pool 27 of 48, band STRONG, tokens 0, operations 3
+7016 CounterAttack: 9 soldier(s) from Airfield appear at [5711, 7206], 2639 m from the player (reason: route point, 92% along 3855 m of road); they march on Arudy
+7016 CounterAttack: [op 10] born for Arudy (spawnReason route) at [5711, 7206], 2639 m from the player
+7048 CounterAttack: the force on Arudy reached the town edge (249 m out); it moves in
+7048 CounterAttack: [op 10] arrived live at Arudy (moves in), 2653 m from the player
+7208 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+7235 CounterAttack: 6 soldier(s) from Airfield appear at [4193, 6777], 2852 m from the player (reason: route point, 96% along 7572 m of road) in a hull; they march on Vigny Outpost
+7235 CounterAttack: [op 9] born for Vigny Outpost (spawnReason route) at [4193, 6777], 2852 m from the player
+7268 CounterAttack: 4 of the La Riviere Outpost reserve leave for Chapoi; on the road 183s (reserve now 2)
+7268 OccupierForces: [op 12] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 1626 s; TRUCK goes, road 183 s
+7268 OccupierForces: [op 12] Push-out: motorized squad (4, Ural) from La Riviere Outpost to Chapoi (8 unit(s), the pool pays 4, lethality 6.25 of 0.00, 0 fighter(s) reported, road 183 s)
+7270 CounterAttack: [op 10] Broken off at Arudy: 7 lost, 2 going home (born 9, alive 2; rule: living infantry below a third of the strength born, the target still held); on foot toward Airfield, 2762 m from the player
+7270 OccupierForces: [op 10] Repelled at Arudy: 7 lost, 2 going home; Arudy rests 1516 s, heat +15
+7270 OccupierForces: Arudy: further repel (TRANSPORT_HELI from Airfield), contained: no more attacks on it; Outpost surged by 4 (the containment lifts when its reports decay, a wave fires or control changes band)
+7270 CounterAttack: 2 withdrawing soldier(s) home unseen at Airfield (0 lost on the way)
+7271 Arudy: op 10 is over, the town is held by GUER; operations on Arudy ended with it held so far 5
+7281 CounterAttack: [op 9] the Ural carrying the force on Vigny Outpost made no progress for 45 s, 295 m out: the infantry gets out where it stands and assaults from there
+7282 CounterAttack: the force on Vigny Outpost reached the town edge (294 m out) and dismounts; it moves in
+7282 CounterAttack: [op 9] arrived live at Vigny Outpost (dismounts and moves in), 2846 m from the player
+7350 CounterAttack: 6 soldier(s) stay in Vigny Outpost as its garrison (6 taken off the refill; reserve 0, pending 0)
+7350 OccupierForces: [op 9] Vigny Outpost retaken: 6 stay as its garrison
+7350 CounterAttack: [op 9] the Ural drives home to Airfield (1 crew)
+7350 CounterAttack: [op 9] the hull is home unseen (1 crew back at Airfield)
+7451 CounterAttack: [op 12] arrived abstract at Chapoi (holds the empty target), 6199 m from the player
+7451 CounterAttack: 4 attacker(s) walk into empty Chapoi (support 60, occCapture 0)
+7472 CounterAttack: Chapoi retaken by the holding force
+7472 OccupierForces: [op 12] Chapoi retaken: 4 stay as its garrison
+7868 OccupierForces: Sainte Marie rested with 6 fighter(s) reported: re-armed, heat held at 40 until an operation goes (forcesRearmHeat)
+7868 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 9 (the token is held, tick 1 of 3)
+7928 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+7928 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 9 (the token is held, tick 2 of 3)
+7988 OccupierForces: massing for Sainte Marie: need 12 infantry, best source spares 9 (the token is held, tick 3 of 3)
+8048 CounterAttack: the road from Outpost to Sainte Marie is 7102 m for 2913 m straight; cross-country
+8048 CounterAttack: 9 of the Outpost reserve leave for Sainte Marie; on the road 437s (reserve now 1)
+8048 OccupierForces: [op 13] Motorized squad (9, Ural) with T72 from Outpost to Sainte Marie (30 unit(s), the pool pays 21, lethality 23.25 of 32.40, 6 fighter(s) reported, short of the required lethality: the most lethal affordable package, line x1.5 437 s)
+8048 OccupierForces: [op 13] the repel ladder on Sainte Marie (3 repel(s)): lethality 32.40 needed, at least 12 infantry; a different approach: TRUCK from Outpost instead of TRANSPORT_HELI from Le Port Harbour
+8048 OccupierForces: [op 13] candidate Sainte Marie, 1 of 1: a far town (weight 1), heat 40
+8048 OccupierForces: no strike with the operation on Sainte Marie: a strike would take the pool below STRETCHED (pool 27 of 48)
+8049 OccupierForces: band STRONG -> STRETCHED (pool 27 of 48; strength 27: 0 committed in the air, 27 lost and 17 repaid in the last 1.0 h)
+8049 Sainte Marie: op 13 launched on it, operation number 4 on Sainte Marie; repels row ["Sainte Marie",3,"TRANSPORT_HELI","Le Port Harbour",false]; massing ["",0,3]
+8108 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+8485 CounterAttack: 9 soldier(s) from Outpost appear at [5770, 4429], 5302 m from the player (reason: route point, 90% along 2913 m of road) in a hull; they march on Sainte Marie
+8485 CounterAttack: [op 13] born for Sainte Marie (spawnReason route) at [5770, 4429], 5302 m from the player
+8529 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+8531 CounterAttack: [op 13] the Ural carrying the force on Sainte Marie made no progress for 45 s, 297 m out: the infantry gets out where it stands and assaults from there
+8532 CounterAttack: the force on Sainte Marie reached the town edge (297 m out) and dismounts; it moves in
+8532 CounterAttack: [op 13] arrived live at Sainte Marie (dismounts and moves in), 5301 m from the player
+8694 CounterAttack: [op 13] the escort T72 of the force on Sainte Marie is lost (abandoned; 0 of 3 crew alive)
+8698 CounterAttack: [op 13] Broken off at Sainte Marie: 7 lost, 2 going home (born 9, alive 2; rule: living infantry below a third of the strength born, the target still held); on foot toward Outpost; the hulls wait for it to clear 250 m (at most 120 s), 5424 m from the player
+8698 OccupierForces: [op 13] Repelled at Sainte Marie: 7 lost, 2 going home; Sainte Marie rests 1725 s, heat +15
+8698 OccupierForces: Sainte Marie: further repel (TRUCK from Outpost), contained: no more attacks on it; La Riviere Outpost surged by 6 (the containment lifts when its reports decay, a wave fires or control changes band)
+8698 CounterAttack: [op 13] the Ural holds for the infantry until it clears 250 m of Sainte Marie (at most 120 s), then drives home to Outpost (1 crew)
+8698 CounterAttack: 2 withdrawing soldier(s) home unseen at Outpost (0 lost on the way)
+8699 Sainte Marie: op 13 is over, the town is held by GUER; operations on Sainte Marie ended with it held so far 4
+8699 CounterAttack: [op 13] the hull at Sainte Marie leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Outpost
+8699 CounterAttack: [op 13] the hull is home unseen (1 crew back at Outpost)
+8709 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+8769 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+9069 OccupierForces: Arudy: containment lifted: its reports decayed (4 repel(s) remembered)
+9550 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+9610 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+9670 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+9850 OccupierForces: band STRETCHED -> STRONG (pool 39 of 48; strength 32: 0 committed in the air, 39 lost and 23 repaid in the last 1.0 h)
+9910 CounterAttack: 4 of the Vigny Outpost reserve leave for Arudy; on the road 147s (reserve now 2)
+9910 OccupierForces: [op 14] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 1308 s; TRUCK goes, road 147 s
+9910 OccupierForces: [op 14] Push-out: motorized squad (4, Ural) from Vigny Outpost to Arudy (8 unit(s), the pool pays 4, lethality 5.00 of 0.00, 0 fighter(s) reported, road 147 s)
+9910 OccupierForces: [op 14] the repel ladder on Arudy (4 repel(s)): lethality 0.00 needed, at least 4 infantry; a different approach: TRUCK from Vigny Outpost instead of TRANSPORT_HELI from Airfield
+9910 Arudy: op 14 launched on it, operation number 6 on Arudy; repels row ["Arudy",4,"TRANSPORT_HELI","Airfield",false]; massing ["",0,3]
+9970 CounterAttack: 4 of the La Riviere Outpost reserve leave for Cancon; on the road 223s (reserve now 7)
+9970 OccupierForces: [op 15] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 1980 s; TRUCK goes, road 223 s
+9970 OccupierForces: [op 15] Push-out: motorized squad (4, Ural) from La Riviere Outpost to Cancon (8 unit(s), the pool pays 4, lethality 5.00 of 0.00, 0 fighter(s) reported, road 223 s)
+10057 CounterAttack: 4 soldier(s) from Vigny Outpost appear at [5309, 6779], 2909 m from the player (reason: route point, 85% along 1962 m of road) in a hull; they march on Arudy
+10057 CounterAttack: [op 14] born for Arudy (spawnReason route) at [5309, 6779], 2909 m from the player
+10097 CounterAttack: the force on Arudy reached the town edge (237 m out) and dismounts; it moves in
+10097 CounterAttack: [op 14] arrived live at Arudy (dismounts and moves in), 2868 m from the player
+10188 CounterAttack: [op 14] Broken off at Arudy: 3 lost, 1 going home (born 4, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Vigny Outpost; the hulls wait for it to clear 250 m (at most 120 s), 2824 m from the player
+10188 OccupierForces: [op 14] Repelled at Arudy: 3 lost, 1 going home; Arudy rests 1977 s, heat +15
+10188 OccupierForces: Arudy: further repel (TRUCK from Vigny Outpost), contained: no more attacks on it; Vigny Outpost surged by 6 (the containment lifts when its reports decay, a wave fires or control changes band)
+10188 CounterAttack: [op 14] the Ural holds for the infantry until it clears 250 m of Arudy (at most 120 s), then drives home to Vigny Outpost (1 crew)
+10188 CounterAttack: 1 withdrawing soldier(s) home unseen at Vigny Outpost (0 lost on the way)
+10188 Arudy: op 14 is over, the town is held by GUER; operations on Arudy ended with it held so far 6
+10189 CounterAttack: [op 14] the hull at Arudy leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Vigny Outpost
+10189 CounterAttack: [op 14] the hull is home unseen (1 crew back at Vigny Outpost)
+10193 CounterAttack: [op 15] arrived abstract at Cancon (holds the empty target), 6859 m from the player
+10193 CounterAttack: 4 attacker(s) walk into empty Cancon (support 60, occCapture 0)
+10211 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+10215 CounterAttack: Cancon retaken by the holding force
+10215 OccupierForces: [op 15] Cancon retaken: 4 stay as its garrison
+10391 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+10511 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+10631 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+10691 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+10811 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+10931 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+11171 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+11712 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+11772 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+11952 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+11987 CounterAttack: [op 11] arrived abstract at Le Port Harbour (tops up the garrison), 7032 m from the player
+11987 CounterAttack: [op 11] 0 of 2 soldier(s) top up Le Port Harbour (reserve 8, pending 0, of 8); 2 over its room go home to Airfield
+11987 CounterAttack: 0 of 2 survivor(s) back at Airfield (reserve 12, pending 0, of 12); 2 over its room to the pool (2 taken, 0 banked or dropped)
+11987 OccupierForces: [op 11] Le Port Harbour reinforced: 0 joined its garrison; 0 back at Airfield, 2 to the pool (pool 50 of 48, 2 over poolStart in the wave headroom)
+12012 OccupierForces: Arudy: containment lifted: its reports decayed (5 repel(s) remembered)
+12132 CounterAttack: 4 of the Outpost reserve leave for Arudy; on the road 224s (reserve now 2)
+12132 OccupierForces: [op 16] arrival rule (ground: cheapest under slowEta): the cheapest, FOOT, needs road 1994 s; TRUCK goes, road 224 s
+12132 OccupierForces: [op 16] Push-out: motorized squad (4, Ural) from Outpost to Arudy (8 unit(s), the pool pays 4, lethality 5.00 of 0.00, 0 fighter(s) reported, road 224 s)
+12132 OccupierForces: [op 16] the repel ladder on Arudy (5 repel(s)): lethality 0.00 needed, at least 4 infantry; a different approach: TRUCK from Outpost instead of TRUCK from Vigny Outpost
+12133 Arudy: op 16 launched on it, operation number 7 on Arudy; repels row ["Arudy",5,"TRUCK","Vigny Outpost",false]; massing ["",0,3]
+12357 CounterAttack: 4 soldier(s) from Outpost appear at [5812, 7037], 2835 m from the player (reason: route point, 90% along 2990 m of road) in a hull; they march on Arudy
+12357 CounterAttack: [op 16] born for Arudy (spawnReason route) at [5812, 7037], 2835 m from the player
+12397 CounterAttack: the force on Arudy reached the town edge (227 m out) and dismounts; it moves in
+12397 CounterAttack: [op 16] arrived live at Arudy (dismounts and moves in), 2841 m from the player
+12512 CounterAttack: [op 16] Broken off at Arudy: 3 lost, 1 going home (born 4, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Outpost; the hulls wait for it to clear 250 m (at most 120 s), 2773 m from the player
+12512 OccupierForces: [op 16] Repelled at Arudy: 3 lost, 1 going home; Arudy rests 1450 s, heat +15
+12512 OccupierForces: Arudy: further repel (TRUCK from Outpost), contained: no more attacks on it; Vigny Outpost surged by 6 (the containment lifts when its reports decay, a wave fires or control changes band)
+12512 CounterAttack: [op 16] the Ural holds for the infantry until it clears 250 m of Arudy (at most 120 s), then drives home to Outpost (1 crew)
+12512 CounterAttack: 1 withdrawing soldier(s) home unseen at Outpost (0 lost on the way)
+12512 Arudy: op 16 is over, the town is held by GUER; operations on Arudy ended with it held so far 7
+12513 CounterAttack: [op 16] the hull at Arudy leaves after its infantry (no infantry, held 2 s; 0 of it within 250 m); it drives home to Outpost
+12513 CounterAttack: [op 16] the hull is home unseen (1 crew back at Outpost)
+12733 OccupierForces: a local in Sainte Marie talked: 6 fighter(s) reported (standing 50)
+12902 end: pool 47 of 48, band STRONG, tokens 2, operation counter 16, waves fired 1, control 0.942857, lost 74, repels [["Arudy",6,"TRUCK","Outpost",true],["Sainte Marie",4,"TRUCK","Outpost",true]]
+12902 end: towns ["Arudy","Sainte Marie"], operations seen [[2,3,5,6,10,14,16],[1,4,7,13]], held after [7,4], defenders [["Arudy",4,35],["Sainte Marie",6,46]], magazines topped up 14, ledger [46,0,6,4,0,0,0,[],[],false,50,false]
+12902 end census: gmSimDiag [0,2,[10,12,13,35],[3,3,5,5],0,0,[3,0,0,0],[0.0364293,0.0517,4.7174],[5.22731,6.8268,11.7312],0,[0,0,0,0,0,0],[0,0]]

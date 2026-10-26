@@ -1,0 +1,11 @@
+    CHECK(s.find(" lightTiles=1:off:no-local-light ") != std::string::npos);
+    CHECK(s.find(" treeShadows=1:on:sun-above-4-deg ") != std::string::npos);
+    CHECK(s.find(" softShadows=1:on:sun-above-4-deg ") != std::string::npos);
+    // The low-sun rig is constants and the canopy a few terms on foliage:
+    // both run whenever they are on (their own math fades them by sun height).
+    CHECK(s.find(" lowSunRig=1:on:always ") != std::string::npos);
+    CHECK(s.find(" crownCanopy=1:on:always ") != std::string::npos);
+    CHECK(s.find(" seaWaves=1:on:per-sea-fragment ") != std::string::npos);
+    CHECK(s.find("landed=14/26") != std::string::npos);
+    CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
+    CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");

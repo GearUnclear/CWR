@@ -1,0 +1,131 @@
+// wildcard research: render the caster set (already uploaded into s_vbo /
+// s_alphaVbo by RenderCascadeArray this frame) into the sky-map layers flagged
+// in `update`, then rebuild those layers' mip chains with box-filter blits.
+// `vps` and `dirs` hold K camera-relative view-projections and direction vec4s.
+GLuint s_skyReadFbo = 0;
+GLuint s_skyDrawFbo = 0;
+bool RenderSkyMaps(const float* vps, const float* dirs, const bool* update, int k, int res, bool haveSolid,
+                   int solidVertCount, bool haveAlpha, const ResolvedAlphaBatch* batches, int batchCount,
+                   const float* solidAlbedo, bool albedo)
+{
+    if (k < 1 || res <= 0 || (!haveSolid && !haveAlpha))
+        return false;
+    GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0, prevRead = 0, prevDraw = 0;
+    GLint prevVP[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
+    glGetIntegerv(GL_VIEWPORT, prevVP);
+    GLboolean prevMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+    glGetBooleanv(GL_COLOR_WRITEMASK, prevMask);
+    const GLboolean prevBlend = glIsEnabled(GL_BLEND);
+    const GLboolean prevScissor = glIsEnabled(GL_SCISSOR_TEST);
+    const GLboolean prevA2C = glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    auto restore = [&]()
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevRead));
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(prevDraw));
+        glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
+        glUseProgram(static_cast<GLuint>(prevProg));
+        glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArrayBuf));
+        GL33Bind::Vao(static_cast<GLuint>(prevVAO));
+        glColorMask(prevMask[0], prevMask[1], prevMask[2], prevMask[3]);
+        if (prevBlend)
+            glEnable(GL_BLEND);
+        if (prevScissor)
+            glEnable(GL_SCISSOR_TEST);
+        if (prevA2C)
+            glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    };
+    if (!EnsureSkyPrograms() || !EnsureSkyTarget(res, k))
+    {
+        restore();
+        return false;
+    }
+    if (!s_skyReadFbo)
+        glGenFramebuffers(1, &s_skyReadFbo);
+    if (!s_skyDrawFbo)
+        glGenFramebuffers(1, &s_skyDrawFbo);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, s_skyFbo);
+    const GLenum bufs2[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(albedo ? 2 : 1, bufs2);
+    glViewport(0, 0, res, res);
+    Poseidon::render::depthstencil::Normal(/*hasStencil*/ false);
+    Poseidon::render::pipeline::EnableDepthClamp();
+    const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < k; ++i)
+    {
+        if (!update[i])
+            continue;
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s_skyTex, 0, i);
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, s_skyAlbTex, 0, i);
+        glClearBufferfv(GL_COLOR, 0, zero);
+        if (albedo)
+            glClearBufferfv(GL_COLOR, 1, zero);
+        glClearDepth(1.0);
+        Poseidon::render::clear::WithMask(GL_DEPTH_BUFFER_BIT);
+        if (haveSolid)
+        {
+            // Back faces, as the sun cascades store them: a receiver on a
+            // sky-facing surface is in front of its own object's stored depth.
+            Poseidon::render::cull::Front();
+            glUseProgram(s_skyProg);
+            glUniformMatrix4fv(s_skyLocVP, 1, GL_FALSE, vps + i * 16);
+            glUniform4fv(s_skyLocDir, 1, dirs + i * 4);
+            glUniform4fv(s_skyLocAlb, 1, solidAlbedo);
+            GL33Bind::Vao(s_vao);
+            glDrawArrays(GL_TRIANGLES, 0, solidVertCount);
+        }
+        if (haveAlpha)
+        {
+            Poseidon::render::cull::None();
+            glUseProgram(s_skyAlphaProg);
+            glUniformMatrix4fv(s_skyAlphaLocVP, 1, GL_FALSE, vps + i * 16);
+            glUniform4fv(s_skyAlphaLocDir, 1, dirs + i * 4);
+            glUniform1i(s_skyAlphaLocTex, 0);
+            GL33Bind::ActiveUnit(0);
+            GL33Bind::Vao(s_alphaVao);
+            for (int b = 0; b < batchCount; b++)
+            {
+                if (batches[b].vertexCount < 3)
+                    continue;
+                GL33Bind::Tex2D(0, batches[b].handle);
+                glDrawArrays(GL_TRIANGLES, batches[b].firstVertex, batches[b].vertexCount);
+            }
+        }
+    }
+    Poseidon::render::pipeline::DisableDepthClamp();
+    // Mip chains of the updated layers: occluded fraction, depth moments and
+    // colour of every footprint (2x2 box filter per level).
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s_skyReadFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_skyDrawFbo);
+    for (int i = 0; i < k; ++i)
+    {
+        if (!update[i])
+            continue;
+        for (int pass = 0; pass < (albedo ? 2 : 1); ++pass)
+        {
+            const GLuint tex = pass == 0 ? s_skyTex : s_skyAlbTex;
+            for (int l = 1; l < s_skyLevels; ++l)
+            {
+                const int src = std::max(res >> (l - 1), 1);
+                const int dst = std::max(res >> l, 1);
+                glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, l - 1, i);
+                glFramebufferTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, l, i);
+                glReadBuffer(GL_COLOR_ATTACHMENT0);
+                glDrawBuffer(GL_COLOR_ATTACHMENT0);
+                glBlitFramebuffer(0, 0, src, src, 0, 0, dst, dst, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            }
+        }
+    }
+    restore();
+    return true;
+}

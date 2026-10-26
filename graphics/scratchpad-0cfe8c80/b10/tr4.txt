@@ -1,0 +1,13 @@
+    CHECK(static_cast<int>(LC::Sky) == 68);
+    CHECK(static_cast<int>(LC::SkyShadow) == 69);
+    // 70 is free (the light list rides in slot 22), so the padding starts there.
+    CHECK(static_cast<int>(LC::Planned) == 70);
+    CHECK(gl::LitConstPlanned::Night == static_cast<int>(LC::Planned) + 1);
+    CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Planned) + LC::PlannedCount - 1);
+    CHECK(static_cast<int>(LC::Water0) == 74);
+    CHECK(static_cast<int>(LC::Water1) == 75);
+    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Planned2));
+    // B11 landed the terrain detail at 77; 76 is the second planned padding.
+    CHECK(static_cast<int>(LC::Detail) == 77);
+    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Detail) - 1);
+    CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));

@@ -1,0 +1,6 @@
+﻿bay      mean 155.93 d2rms 0.031 d2max 0.083 at 57
+valley   mean  83.47 d2rms 0.045 d2max 0.111 at 81
+farhill  mean 123.03 d2rms 0.026 d2max 0.073 at 82
+haze_r   mean 180.64 d2rms 0.019 d2max 0.041 at 26
+sky      mean 131.83 d2rms 0.019 d2max 0.038 at 57
+ground   mean  77.50 d2rms 0.067 d2max 0.128 at 85

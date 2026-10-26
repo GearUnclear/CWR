@@ -1,0 +1,6 @@
+tests: the picked trailer thumbnail with its VANILLA label over the water
+
+The owner moved the label of thumbnail 3i to the bottom of the vanilla
+side, over the dark water, for contrast (thumb3.py specs_3i_v2.json).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

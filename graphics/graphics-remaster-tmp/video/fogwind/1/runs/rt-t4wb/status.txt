@@ -1,0 +1,3 @@
+﻿start 04:53:06 override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\3\shaders\t4wb
+run exit=0 04:54:33
+done 04:54:39

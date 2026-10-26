@@ -1,0 +1,268 @@
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp
+@@ -4,6 +4,7 @@
+ #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+ #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>  // HqZone: the HQ's town is never a target (N4a)
+ #include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool seams (5.5), pass-through while inactive
++#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>      // the road route search (BuildRoute)
+ #include <Poseidon/Game/Guerrilla/Traffic.hpp>        // the shared perception gate (issue #53)
+ #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+ 
+@@ -2632,12 +2633,6 @@
+ 
+ // m from a zone centre a road link may be to anchor the route there
+ constexpr float RouteSnapRadius = 300.0f;
+-// road-graph search budget (links expanded); an island's whole net fits
+-constexpr int MaxRouteNodes = 60000;
+-// start links tried (nearest first) when the nearest road is cut off; links
+-// up to RouteStartWide from the base are candidates after the near ones
+-constexpr size_t MaxRouteStarts = 96;
+-constexpr float RouteStartWide = 900.0f;
+ // m above the ground the terrain ray aims (a standing man)
+ constexpr float InfantryLosHeight = 1.8f;
+ 
+@@ -2737,210 +2732,56 @@
+         return _cam.InFrustum(pos, Traffic::FrustumCosHalfAngle) ? CAExposeSeen : CAExposeConeOnly;
+     }
+ 
+-    // A* over the road links (RoadNet::SearchPath gives up after 100 nodes,
+-    // too short for a base-to-town road): link centres from a link near the
+-    // base to a link near the town, then the town centre.  The links within
+-    // RouteSnapRadius of either end are candidates, nearest first: a base
+-    // whose nearest road is an island of its own (a walled compound's yard
+-    // roads, not joined to the island's net) starts from the next link
+-    // outside it instead of falling back to a straight line through its
+-    // walls.  A search that exhausts a component marks it, so no later
+-    // candidate in the same component is searched again.
++    // the road route (RoadRoute.hpp): link centres from a link near the base
++    // to a link near the town, then the town centre.  A base whose nearest
++    // roads are a pocket of their own starts from the first link outside it;
++    // a base whose roads the island never joined to the town's network
++    // (Malden's Southeast Compound) leaves along its own road, crosses
++    // country to the town network's best link within
++    // RoadRouteServiceJoinRadius, and follows the road from there, instead
++    // of a straight line through its walls.
+     void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
+     {
+         route.Clear();
+-        std::vector<const RoadLink*> starts;
+-        std::vector<const RoadLink*> goals;
+-        RoadLinksNear(from, RouteSnapRadius, starts);
+-        if (!starts.empty())
++        RoadRouteParams params;
++        params.snapRadius = RouteSnapRadius;
++        params.joinRadius = RoadRouteServiceJoinRadius;
++        AutoArray<Vector3> centres;
++        RoadRouteStats st;
++        if (!RoadRoute::Search(from, to, params, centres, &st))
+         {
+-            // then the links farther out (RouteStartWide): a base whose whole
+-            // nearby road is a yard network reaches the island's net there
+-            std::vector<const RoadLink*> wide;
+-            RoadLinksNear(from, RouteStartWide, wide);
+-            std::unordered_map<const RoadLink*, bool> have;
+-            for (size_t i = 0; i < starts.size(); i++)
++            if (st.goalCandidates == 0)
+             {
+-                have[starts[i]] = true;
++                LOG_INFO(Core, "CounterAttack: no road within {:.0f} m of [{:.0f}, {:.0f}]; straight line",
++                         RouteSnapRadius, to.X(), to.Z());
+             }
+-            for (size_t i = 0; i < wide.size(); i++)
+-            {
+-                if (have.count(wide[i]) == 0)
+-                {
+-                    starts.push_back(wide[i]);
+-                }
+-            }
+-        }
+-        RoadLinksNear(to, RouteSnapRadius, goals);
+-        if (starts.empty() || goals.empty())
+-        {
+-            LOG_INFO(Core,
+-                     "CounterAttack: no road within {:.0f} m of [{:.0f}, {:.0f}] or [{:.0f}, {:.0f}]; straight line",
+-                     RouteSnapRadius, from.X(), from.Z(), to.X(), to.Z());
+-            return;
+-        }
+-        std::unordered_map<const RoadLink*, int> goalSet;
+-        for (size_t g = 0; g < goals.size(); g++)
+-        {
+-            goalSet[goals[g]] = (int)g;
+-        }
+-        const Vector3 goalC = goals[0]->GetCenter();
+-        std::unordered_map<const RoadLink*, bool> exhausted;
+-        int expandedAll = 0;
+-        for (size_t s = 0; s < starts.size() && s < MaxRouteStarts && expandedAll < MaxRouteNodes; s++)
+-        {
+-            const RoadLink* start = starts[s];
+-            if (exhausted.count(start) > 0)
+-            {
+-                continue;
+-            }
+-            struct Node
+-            {
+-                const RoadLink* link;
+-                int parent;
+-                float g;
+-                bool closed;
+-            };
+-            std::vector<Node> nodes;
+-            std::unordered_map<const RoadLink*, int> index;
+-            typedef std::pair<float, int> Entry;
+-            std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> open;
+-            nodes.push_back(Node{start, -1, 0.0f, false});
+-            index[start] = 0;
+-            open.push(Entry(Dist2D(start->GetCenter(), goalC), 0));
+-            int found = -1;
+-            while (!open.empty() && expandedAll < MaxRouteNodes)
+-            {
+-                const int cur = open.top().second;
+-                open.pop();
+-                if (nodes[cur].closed)
+-                {
+-                    continue;
+-                }
+-                nodes[cur].closed = true;
+-                expandedAll++;
+-                const RoadLink* link = nodes[cur].link;
+-                if (goalSet.count(link) > 0)
+-                {
+-                    found = cur;
+-                    break;
+-                }
+-                const Vector3 c = link->GetCenter();
+-                for (int k = 0; k < link->NConnections(); k++)
+-                {
+-                    const RoadLink* next = link->Connections()[k];
+-                    if (!next)
+-                    {
+-                        continue;
+-                    }
+-                    const Vector3 nc = next->GetCenter();
+-                    const float g = nodes[cur].g + Dist2D(c, nc);
+-                    int ni;
+-                    auto it = index.find(next);
+-                    if (it == index.end())
+-                    {
+-                        ni = (int)nodes.size();
+-                        nodes.push_back(Node{next, cur, g, false});
+-                        index[next] = ni;
+-                    }
+-                    else
+-                    {
+-                        ni = it->second;
+-                        if (nodes[ni].closed || g >= nodes[ni].g)
+-                        {
+-                            continue;
+-                        }
+-                        nodes[ni].g = g;
+-                        nodes[ni].parent = cur;
+-                    }
+-                    open.push(Entry(g + Dist2D(nc, goalC), ni));
+-                }
+-            }
+-            if (found < 0)
+-            {
+-                if (open.empty())
+-                {
+-                    // the whole component of this start is not joined to the
+-                    // town's roads: skip its other links
+-                    for (size_t i = 0; i < nodes.size(); i++)
+-                    {
+-                        exhausted[nodes[i].link] = true;
+-                    }
+-                }
+-                continue;
+-            }
+-            AutoArray<Vector3> back;
+-            for (int i = found; i >= 0; i = nodes[i].parent)
+-            {
+-                back.Add(nodes[i].link->GetCenter());
+-            }
+-            for (int i = back.Size() - 1; i >= 0; i--)
+-            {
+-                route.Add(Grounded(back[i].X(), back[i].Z(), back[i].Y()));
+-            }
+-            route.Add(Grounded(to.X(), to.Z(), to.Y()));
+-            if (s > 0)
++            else
+             {
+                 LOG_INFO(Core,
+-                         "CounterAttack: the road nearest [{:.0f}, {:.0f}] is not joined to the town's; the route "
+-                         "starts {:.0f} m from it",
+-                         from.X(), from.Z(), Dist2D(start->GetCenter(), from));
++                         "CounterAttack: no road route from [{:.0f}, {:.0f}] to [{:.0f}, {:.0f}] ({} links searched); "
++                         "straight line",
++                         from.X(), from.Z(), to.X(), to.Z(), st.linksSearched);
+             }
+             return;
+         }
+-        LOG_INFO(Core,
+-                 "CounterAttack: no road route from [{:.0f}, {:.0f}] to [{:.0f}, {:.0f}] ({} links searched); "
+-                 "straight line",
+-                 from.X(), from.Z(), to.X(), to.Z(), expandedAll);
+-    }
+-
+-    // the road links whose centres lie within radius of pos, nearest first
+-    // (the Traffic road survey idiom)
+-    static void RoadLinksNear(Vector3Par pos, float radius, std::vector<const RoadLink*>& out)
+-    {
+-        out.clear();
+-        if (!GRoadNet)
++        for (int i = 0; i < centres.Size(); i++)
+         {
+-            return;
++            route.Add(Grounded(centres[i].X(), centres[i].Z(), centres[i].Y()));
+         }
+-        std::vector<std::pair<float, const RoadLink*>> found;
+-        const float r2 = radius * radius;
+-        const int cells = toIntCeil(radius * InvLandGrid);
+-        const int cx = toIntFloor(pos.X() * InvLandGrid);
+-        const int cz = toIntFloor(pos.Z() * InvLandGrid);
+-        for (int zz = cz - cells; zz <= cz + cells; zz++)
++        route.Add(Grounded(to.X(), to.Z(), to.Y()));
++        if (st.joined)
+         {
+-            for (int xx = cx - cells; xx <= cx + cells; xx++)
+-            {
+-                if (!InRange(zz, xx))
+-                {
+-                    continue;
+-                }
+-                const RoadList& list = GRoadNet->GetRoadList(xx, zz);
+-                for (int i = 0; i < list.Size(); i++)
+-                {
+-                    const RoadLink* link = list[i];
+-                    if (!link)
+-                    {
+-                        continue;
+-                    }
+-                    const float d2 = Dist2DSq(link->GetCenter(), pos);
+-                    if (d2 < r2)
+-                    {
+-                        found.push_back(std::make_pair(d2, link));
+-                    }
+-                }
+-            }
++            LOG_INFO(Core,
++                     "CounterAttack: the roads at [{:.0f}, {:.0f}] are not joined to the town's; the route leaves "
++                     "them at [{:.0f}, {:.0f}] and crosses {:.0f} m of country to the road at [{:.0f}, {:.0f}]",
++                     from.X(), from.Z(), st.joinFrom.X(), st.joinFrom.Z(), st.joinGap, st.joinTo.X(), st.joinTo.Z());
+         }
+-        std::sort(found.begin(), found.end(),
+-                  [](const std::pair<float, const RoadLink*>& a, const std::pair<float, const RoadLink*>& b)
+-                  { return a.first < b.first; });
+-        for (size_t i = 0; i < found.size(); i++)
++        else if (st.startIndex > 0)
+         {
+-            if (out.empty() || out.back() != found[i].second)
+-            {
+-                out.push_back(found[i].second);
+-            }
++            LOG_INFO(Core,
++                     "CounterAttack: the road nearest [{:.0f}, {:.0f}] is not joined to the town's; the route "
++                     "starts {:.0f} m from it",
++                     from.X(), from.Z(), st.startOffset);
+         }
+     }
+ 

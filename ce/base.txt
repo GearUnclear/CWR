@@ -1,0 +1,31 @@
+ce-304-fix
+source: D:/Arma_CWA/tmp/ce-304-fix
+remote: https://github.com/ofpisnotdead-com/CWR-CE.git
+HEAD: aa522583b59025921340c68122692154902d0dbf Initialize terrain slopes outside the map (2026-10-07 03:23:59 +0200)
+ce-304-fix.patch = git diff HEAD (staged + unstaged, includes the 3 staged new files)
+status at archive time:
+ M engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+ M engine/Poseidon/Network/NetworkClientActions.cpp
+ M engine/Poseidon/Network/NetworkClientOnMessage.cpp
+ M engine/Poseidon/Network/NetworkIface.hpp
+ M engine/Poseidon/Network/NetworkImpl.hpp
+ M engine/Poseidon/Network/NetworkImplClient.hpp
+ M engine/Poseidon/Network/NetworkMessages.cpp
+ M engine/Poseidon/Network/NetworkMessages.hpp
+ M engine/Poseidon/Network/NetworkMisc.cpp
+ M engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp
+ M engine/Poseidon/World/Entities/Infantry/SoldierOldSimProxy.cpp
+ M engine/Poseidon/World/Entities/Weapons/Shots.cpp
+ M engine/Poseidon/World/Scene/Object.hpp
+ M engine/Poseidon/World/Scene/ObjectIntersect.cpp
+ M engine/Poseidon/World/Simulation/Animation/RtAnimation.cpp
+ M engine/Poseidon/World/Simulation/Animation/RtAnimation.hpp
+ M engine/Poseidon/World/Simulation/Collisions.cpp
+ M engine/Poseidon/World/Terrain/Landscape.hpp
+ A tests/integration/ingame/units/weapon_impacts.test.sqf
+ A tests/integration/ingame/units/weapon_impacts.test.toml
+ A tests/integration/missions/weapon_impacts.Abel/mission.sqm
+ M tests/unit/engine/Poseidon/Network/test_network.cpp
+ M tests/unit/engine/Poseidon/World/Simulation/test_animation.cpp
+ M tests/unit/engine/Poseidon/World/test_collision_nonfinite.cpp
+

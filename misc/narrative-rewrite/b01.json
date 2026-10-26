@@ -1,0 +1,10 @@
+{
+  "id": "b01",
+  "bank": "kBio0Friendly",
+  "variant": 0,
+  "text": "{Name} worked as a farmhand near {Place} until the landlord evicted the family from its rented fields. The farmhand kept writing poems and still hoped to publish a collection.",
+  "word_count": 29,
+  "self_review": "A farmhand loses the family tenancy when the landlord evicts them and continues writing poetry with hopes of publication.",
+  "source_pattern": "The supplied oral history documents agricultural work before entering an armed movement and subsequent hardship.",
+  "fictional_changes": "Tenancy, eviction, and the ambition to publish poems are fictional. The source does not document a poet or this reason for losing land."
+}

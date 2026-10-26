@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\5\runs\pine-c8\pine-c8.mkv  frames 90  band 0.093  sky 0.039
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay        45.6   [0.0, 0.0]  0.062  0.085  0.027 -0.388 [-1, 16]   0.027 [-1, 16]  0.002  0.472 -0.355    nan    nan -0.260             -
+   valley     45.6  [0.0, -0.0]  0.262  0.931  0.039 -0.457 [-12, 14]   0.039 [-12, 14]  0.036  2.290 -0.516    nan    nan -0.243             -
+   farhill    63.5  [0.0, 0.01]  0.182  1.934  0.036 -0.474 [-12, 8]   0.036 [-12, 8]  0.070  4.884 -0.504    nan    nan -0.262             -
+   haze       43.8   [0.0, 0.0]  0.049  0.403  0.044 -0.550  [16, 1]   0.044  [16, 1]  0.018  1.217 -0.559    nan    nan -0.249             -
+   slope      55.2 [-0.01, 0.01]  0.203  1.609  0.043 -0.491 [-10, 12]   0.043 [-10, 12]  0.070  3.690 -0.488    nan    nan -0.286             -

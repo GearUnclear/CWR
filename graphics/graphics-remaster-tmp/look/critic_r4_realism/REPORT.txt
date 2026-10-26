@@ -1,0 +1,142 @@
+Round 4 realism critic (thumbnail size, about 320 px a panel)
+================================================================
+
+Verdict: needs_another_round. Two blockers are visible at thumbnail size: one is new in round 4 (exposure) and one is left over from round 3 but smaller (the optics mist).
+
+What I did: I looked at THREEWAY.png at 320 px a panel and built my own four-way thumbnail sheets
+(Original | landed | overhaul R3 | overhaul R4, 320 px) for all 28 views. Then I cropped and measured
+the full-size shots in director/final, director/round3/final and ref/. I also read the exposure readout
+(cam ev / high) in the R3 and R4 capture logs, director/r3_shots and director/r4_shots.
+I ran no game and no build, edited no source and committed nothing. Every image below was opened and checked.
+
+Evidence (all in this folder):
+  thumb4_mist.png, thumb4_combat.png, thumb4_lowsun.png, thumb4_noon.png, thumb4_night_wins.png,
+  thumb4_forest_tank.png       four-way thumbnails, Original | landed | R3 | R4, 320 px
+  exposure_regression_r3_vs_r4.png   R3 vs R4 thumbnails of the six sun-in-frame views, labelled with the
+                                     logged ev and highlight meter
+  thumb_sun_meter_regression.png     the same four views four-way (Original | landed | R3 | R4)
+  woods_pine2_evening_4up_half.png, woods_soldier_jeep_4up.png
+  optics_mist_hud_right_4way.png, optics_mist_sight_right_4way.png, mist_hud_specks_r4_3x.png
+  firefight_1/2/3_horizon_4rows_2x.png, ff3_line_4x.png
+  seam_owner_r3_r4_plus_equalized.png (owner report | R3 | R4, plus an equalized row)
+  sun_disc_4way.png, dawn_valley_bay_4way.png, sunrise_ridge_4up.png, town_fires_4way.png,
+  rain_day_landed_vs_r4.png, overcast_heavy_landed_vs_r4.png, sinai_desert_noon_4up.png,
+  pine_rays_4up.png, noon_fields_4up.png
+
+BLOCKER 1 (new in round 4): views with the sun in frame lost 0.3 to 1.55 EV, which leaves woods_pine2_evening murky
+-------------------------------------------------------------------------------------------------------------
+woods_pine2_evening (sun 20 degrees, 17:30) is now the darkest day view in the set. The frame mean is 33/255
+(R3 50, landed 59, original 84), and the lower half is (35,33,22). That is darker than town_night (45).
+At thumbnail the soldier and the jeep sink into the shade and the forest floor reads muddy. In round 3
+this view was a clear win.
+The capture logs show the camera, not the scene, did this. The meter mean stayed the same (-7.73 vs -7.72),
+the highlight meter rose (-2.32 to -1.90), and the exposure fell from ev 1.82 to 0.27. The noon fixer's own
+shot of this view was ev 2.15, so the drop came in the merge.
+The same pattern shows in every sun-in-frame view (R3 ev to R4 ev, highlight meter):
+  woods_pine2_evening  1.82 -> 0.27  (high -2.32 -> -1.90)   frame mean 50 -> 33
+  sinai_lowsun_fp      0.70 -> -0.31 (high -0.08 -> 0.29)    frame mean 85 -> 67, ground (lower half) 53 -> 39
+  lowsun_fp            -0.02 -> -0.67 (high 0.64 -> 0.79)    frame mean 94 -> 82
+  pine_rays            1.25 -> 0.63  (high -1.04 -> -0.48)   ground (lower half) 44 -> 37
+  dawn_valley          0.03 -> -0.29 (high 0.48 -> 0.58)
+  sunrise_ridge        2.28 -> 1.78  (high -1.83 -> -1.55)
+Views without the sun in frame did not change (forest_edge_golden 2.06 -> 2.06, town_noon 1.82 -> 1.82,
+forest_morning 1.72 -> 1.72). The sun fixer's own build already shows it: lowsun_fp ev -0.70 and
+sinai_lowsun_fp ground 47 in fix4/sun/shots_2.
+Likely cause: the sun fix raised the sky's roll-off cap near the sun from 2.4 to kSkySunCap 10 (past white).
+The exposure guards in PhotoCamera (the highlight percentile toward kHighlightLimit, skyTop toward
+kSkyTopLimit, and the low sun's ring toward kSunRingLimit) were tuned against the old 2.4 cap. They now
+read the brighter glow and pull the whole frame down. A photographer lets the sun's own glow blow out and
+does not underexpose the forest for it. Suggested root fix: meter the sky at the old cap, or keep the disc
+and the glow inside a few degrees of the sun out of the guards. Then confirm woods_pine2_evening returns
+to about ev 1.8 to 2.1 and sinai_lowsun_fp to about 0.7, with the white disc and the glow kept.
+Severity at thumbnail: woods_pine2_evening reads as underexposed (blocker). sinai_lowsun_fp reads
+muddy brown. lowsun_fp, pine_rays, dawn_valley and sunrise_ridge are darker but still read well.
+
+BLOCKER 2 (left over from round 3, smaller): optics_mist_hud and optics_mist_sight are still the palest frames and lose the far terrain
+--------------------------------------------------------------------------------------------------
+This is much better than round 3. The near grass is green again: (98,105,95) against R3 (125,130,128)
+and the original (80,90,61). The hill silhouettes and the tree line show as ghosts, so it is no longer
+a white wall. But at thumbnail the top three quarters of the frame is still a flat near-white sheet,
+(214,217,225) against the original's grey (178,178,170), with a slight cool cast. The rock outcrop on
+the right is almost erased: in the right-hand block (x 1650-1900, y 700-950) the spread is 11 against
+31 in the original and 5 in R3. At a glance the original and landed read clearer and more like the
+"light mist" that fog 0.3 asks for. The overhaul reads like dense fog. The exposure went up this round
+(ev 0.71 -> 1.04 and 0.33 -> 0.85), which keeps the air bright even though the fog is now thinner.
+The specks over the tree line are unchanged at full size (mist_hud_specks_r4_3x.png). They are not
+visible at thumbnail.
+Likely next step (as the merger says): the air's brightness under the camera exposure. One option is
+for this scene to meter like a grey day, so the air sits near the original's 180 rather than 214. A
+little less mist at 200 to 400 m would keep the rock legible. Do not touch the AI fog link.
+
+ROUND 3 BLOCKERS AND ITEMS, BY NAME
+-----------------------------------
+- Owner seam (town_night_rain): gone in R4. The equalized crop of the tree-base region shows no
+  diagonal edge, only the soft vertical lamp reflection (seam_owner_r3_r4_plus_equalized.png).
+- firefight_2 mustard burst block: FIXED. The cloud at x400-540 y275-320 is (59,38,33) against R3's
+  (187,158,82). It reads as dark smoke with a warm lit base, which is realistic, not a cartoon sponge.
+- firefight_2 horizon line from the young burst at the left: MOSTLY FIXED. Pixels over 80 in rows
+  328-341 fell from about 200 a row to 66 in one row. The p99 is 131 against 196 and the max 177 against
+  223. It is a short faint line, barely visible at thumbnail.
+- optics_mist_hud/sight white wall: PARTLY FIXED (see blocker 2).
+- Low-sun disc (lowsun_fp, sinai_lowsun_fp, coastline_sunset, dawn_valley): IMPROVED. The disc is now
+  white, (255,255,253), and round, including the 960 lowsun_fp that was an oval in R3, with a soft glow
+  (sun_disc_4way.png). It is still a small dot at thumbnail. Landed's larger glare still reads as more
+  of a burning sun.
+- Grey-day skies (rain_day, overcast_heavy): IMPROVED. The cloud deck has visible structure at
+  thumbnail. rain_day's sky is still lighter than landed's dark deck and the rain is not legible. It reads
+  as a wet misty day, not rain.
+- firefight_3 salmon-pink burst foot: UNCHANGED. The foot is (97,58,55) against R3's (99,60,56), and it is
+  pinker than the mauve sky beside it (89,70,66). It shows at thumbnail as a pink smudge on the horizon.
+- Noon slate sky (noon_fields, sinai_desert_noon, jeep_close_noon): FIXED. The noon_fields top is
+  (73,119,171) against R3's (89,112,146), and sinai_desert_noon is (70,118,170). Both read as clean
+  deep blue with natural cirrus, not cartoon colour. Sinai sand is brighter (lower half 128 -> 136)
+  but still darker than the original (162).
+- town_night and town_fog_night cream flame core: FIXED. The core is yellow-orange and the stones are
+  no longer cream (town_fires_4way.png). The plume is peach-lit along its whole height, which is a little
+  strong but plausible.
+- firefight_1 warm horizon line at the wreck: gone at 2x.
+- tank_gunner_optics action menu: restored (Get out, Reload HEAT, seats), as in the original and landed.
+- tank_gunner_interior and tank_gunner_optics: still neutral (no visible change from the original).
+
+PER VIEW AT THUMBNAIL (is the overhaul clearly more realistic than the original at a glance?)
+--------------------------------------------------------------------------------------
+Clear wins:
+  town_night_rain (best; wet reflections, lit plume, no seam), town_night, town_fog_night,
+  blue_hour_coast, overcast_broken, noon_vista, noon_fields (now blue), town_noon, jeep_close_noon,
+  forest_morning, forest_edge_golden, pine_rays (shafts now beat landed's; warm but not a wash),
+  sinai_desert_noon (deep blue sky; sand still a bit dark), coastline_sunset (golden hazy sunset,
+  white disc, sun glitter), sunrise_ridge (orange-to-blue sky; the warm dome is broad but reads),
+  overcast_heavy (photographic; the 1 to 2 km hills are very hazed for a deck of 0.9 with no fog).
+Wins with a caveat:
+  lowsun_fp (golden backlit; 0.65 EV darker than R3), dawn_valley (cream haze still veils the bay on the
+  sun side; landed shows the bay), rain_day (structure is back; not legibly rain), firefight_1.
+  firefight_2 and firefight_3: the smoke is realistic, but no fireball is caught (the timing is not
+  pinned), and ff3 keeps the pink foot.
+Not better than the original:
+  woods_pine2_evening (blocker 1), sinai_lowsun_fp (muddy; blocker 1), optics_mist_hud and
+  optics_mist_sight (blocker 2).
+Neutral: tank_gunner_interior, tank_gunner_optics.
+
+No banding, halos, hard seams, blown areas or screen-edge strips are visible at thumbnail in any view.
+The fraction of clipped pixels is under 0.03% everywhere.
+
+WHERE LANDED STILL LOOKS BETTER THAN THE OVERHAUL
+----------------------------------------------
+- woods_pine2_evening: landed is legible, with the soldier and jeep clear. The overhaul is now underexposed (new in R4).
+- sinai_lowsun_fp: landed's lit ground and blue sky read clearer than the overhaul's dark brown ground.
+- optics_mist_hud and optics_mist_sight: landed keeps the rock and the tree line under a grey sky.
+- dawn_valley: landed shows the bay and the far shore. The overhaul's sun-side cream haze veils them.
+- Low-sun disc: landed's sun is a larger, radiant glare. The overhaul's is a small white dot.
+- rain_day: landed's darker deck says rain. The overhaul reads as a wet mist.
+- firefight_2 and firefight_3, for drama only: landed catches bright fireballs. The overhaul shows
+  dark smoke (realistic, but the shots are not timing-pinned).
+
+IMPROVED SINCE ROUND 3
+----------------------
+firefight_2's burst is now smoke, not a mustard block. The firefight_2 horizon line is mostly gone. The
+noon skies are blue, not slate. The sun disc is white and round. pine_rays shafts read at thumbnail.
+Grey-day skies have structure. The optics mist keeps green grass and ghosted terrain. The town fire
+cores are orange, not cream. The tank optic menu is back. The owner seam is still gone.
+
+Cost: not measured. I ran no game. The merger also did not re-time round 4 (round2/cost.md is the last
+measurement).

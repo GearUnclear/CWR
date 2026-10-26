@@ -1,0 +1,139 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/ScreenReflections.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/ScreenReflections.hpp
+index d943edff..7058f830 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/ScreenReflections.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/ScreenReflections.hpp
+@@ -330,8 +330,8 @@ constexpr float kSsrWetRoadDark = 0.80f;   // a wet road's colour times this
+ constexpr float kSsrWetGroundDark = 0.80f; // bare ground
+ constexpr float kSsrWetGrassDark = 0.92f;  // grass
+ constexpr float kSsrPuddleDark = 0.55f;    // a puddle's colour under its reflection
+-constexpr float kSsrPuddleRoad = 0.61f;    // puddle noise threshold on roads
+-constexpr float kSsrPuddleGround = 0.67f;  // on bare ground (none on grass)
++constexpr float kSsrPuddleRoad = 0.58f;    // puddle noise threshold on roads
++constexpr float kSsrPuddleGround = 0.63f;  // on bare ground (none on grass)
+ // Puddles fade out with distance, where they would shrink below a pixel: the far
+ // ground is one wet sheen (blotches on far hillsides otherwise).
+ constexpr float kSsrPuddleFadeStart = 150.0f;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+index b31b3203..019079f5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+@@ -92,11 +92,11 @@ vec4 groundFieldAt(vec2 xz) {
+ // hollows nor the slope crease along the terrain's cells and triangles (the
+ // depth buffer's normal is flat per triangle). Roads pool water readily, bare
+ // ground less, grass only in its deepest hollows.
+-const float kPuddleRoad = 0.61;       // noise threshold on roads
+-const float kPuddleGround = 0.67;     // on bare ground
++const float kPuddleRoad = 0.58;       // noise threshold on roads
++const float kPuddleGround = 0.63;     // on bare ground
+ const float kPuddleGrass = 0.74;      // on grass
+ const float kPuddleEdge = 0.035;      // the threshold's soft edge
+-const float kPuddleDamp = 0.06;       // the damp margin below the threshold
++const float kPuddleDamp = 0.1;        // the damp margin below the threshold
+ const float kPuddleHollow = 0.1;      // the field's rise per metre of hollow (capped at a metre) ...
+ const float kPuddleCrest = 0.3;       // ... and its fall per metre of crest (capped here: an open slope keeps some)
+ const float kPuddleLevelShift = 0.08; // a low puddle level raises the threshold this much
+@@ -191,11 +191,17 @@ const float kWetMatte[14] = float[](0.35, 0.35, 0.0, 0.0, 0.35, 0.0, 0.35, 0.0,
+ const float kWetGrassPorosity = 0.23; // grass darkens a little (0.92 of its albedo soaked)
+ const float kWetFoliageDark = 0.88; // leaves shed the water: soaked crowns keep this of their albedo
+ const float kWetPuddleDark = 0.55;  // the ground under a puddle's water
+-const float kWetDampDark = 0.9;     // the damp margin around a puddle
++const float kWetDampDark = 0.85;    // the damp margin around a puddle
+ const float kWetFilmRough = 0.12;   // the water film's roughness
+ const float kWetPuddleRough = 0.05; // a puddle's
+ const float kWetGrassFilm = 0.1;    // grass blades break the film up: this share of it ...
+ const float kWetGrassRough = 0.4;   // ... this rough
++// Only puddles mirror. On the ground outside them (land, roads, grass) the
++// rain shows as darker colour; its film is this share of the above ...
++const float kWetGroundFilm = 0.1;
++// ... and at least this rough: a dim, broad glint near a close light, no
++// streak and no image.
++const float kWetGroundFilmRough = 0.55;
+ const float kWetSunRough = 0.3;     // the film's sun glint is at least this rough (a sharp one burns white)
+ const float kWetSunGroundRough = 0.5; // bare ground's: grit and stones stand through the thin film ...
+ const float kWetSunGroundFilm = 0.5;  // ... and break up this share of it
+@@ -617,10 +623,10 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
+          mix(1.0, kWetPuddleDark, pud.x);
+     mirror = pud.x;
+     // The film: what the surface does not soak up; grass breaks it up.
+-    float film = w * (1.0 - 0.75 * porosity) * (1.0 - veg) + kWetGrassFilm * w * veg;
++    float film = (w * (1.0 - 0.75 * porosity) * (1.0 - veg) + kWetGrassFilm * w * veg) * (ground ? kWetGroundFilm : 1.0);
+     float filmW = max(film, pud.x);
+     if (filmW <= 0.0) return;
+-    float rough = mix(kWetFilmRough, kWetGrassRough, veg);
++    float rough = max(mix(kWetFilmRough, kWetGrassRough, veg), ground ? kWetGroundFilmRough : 0.0);
+     vec3 nf = n;
+     if (pud.x > 0.0) {
+         // A puddle is level; rain rings break it while it rains near the eye.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+index 29f4c75e..2b93de36 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+@@ -155,12 +155,15 @@ const float kSsrBlurMaxSpread = 24.0;
+ const float kSsrWaterRipple = 0.35; // the ripples' slope (ScreenReflections.hpp)
+ const int kSsrSkySearch = 4;        // steps up the frame to its open sky (skyEstimate)
+ // Wet ground.
++// Under the wet weather only puddles mirror: the wet ground outside them
++// reflects this share of B6's sheen (a faint lift, no image).
++const float kSsrWetSheen = 0.08;
+ const float kSsrWetRoadDark = 0.8;
+ const float kSsrWetGroundDark = 0.8;
+ const float kSsrWetGrassDark = 0.92;
+ const float kSsrPuddleDark = 0.55;
+-const float kSsrPuddleRoad = 0.61;
+-const float kSsrPuddleGround = 0.67;
++const float kSsrPuddleRoad = 0.58;
++const float kSsrPuddleGround = 0.63;
+ const float kSsrPuddleFadeStart = 150.0;
+ const float kSsrPuddleFadeEnd = 400.0;
+ // The sea program's mean sky weight (s_psWaterRemasterMain): its far fade.
+@@ -635,7 +638,8 @@ void main() {
+         nW = normalize(nW + vec3(rip, 0.0, -rip));
+         float rough = mix(road ? 0.30 : mix(0.45, 0.75, grass), 0.02, puddle);
+         float cone = mix(road ? 0.10 : 0.22, 0.008, puddle);
+-        float weight = mix(road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass), 1.0, puddle);
++        float sheen = (road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass)) * (wetWeather ? kSsrWetSheen : 1.0);
++        float weight = mix(sheen, 1.0, puddle);
+         vec3 rW = reflect(-vW, nW);
+         if (rW.y < 0.002) rW = normalize(vec3(rW.x, 0.002, rW.z));
+         float hidden;
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+index fb7a8ed6..97be1aff 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+@@ -512,6 +512,36 @@ TEST_CASE("Wet weather shaders: the sun's glint in the film is capped far below
+     CHECK(surface.find("min(3.14159265 * D * vis * nl * norm, cap) * F") != std::string::npos);
+ }
+ 
++TEST_CASE("Wet weather shaders: only puddles mirror; the ground outside them is darker, with a dim rough film",
++          "[remaster][wet][ssr][Shaders]")
++{
++    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
++    const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
++    const auto constant = [](const std::string& src, const char* name)
++    {
++        const std::regex re(std::string("const float ") + name + R"( = ([0-9.]+);)");
++        std::smatch m;
++        INFO(name);
++        REQUIRE(std::regex_search(src, m, re));
++        return std::stof(m[1].str());
++    };
++    // The owner: "too much reflection on non puddle surfaces". The ground's
++    // film outside the puddles (its lamp streaks, sun glint and sky) is a
++    // small share of an object's and rough: a dim, broad glint near a light.
++    CHECK(constant(surface, "kWetGroundFilm") <= 0.15f);
++    CHECK(constant(surface, "kWetGroundFilmRough") >= 0.5f);
++    CHECK(surface.find("kWetGrassFilm * w * veg) * (ground ? kWetGroundFilm : 1.0);") != std::string::npos);
++    CHECK(surface.find("mix(kWetFilmRough, kWetGrassRough, veg), ground ? kWetGroundFilmRough : 0.0);") !=
++          std::string::npos);
++    // The puddles keep their own mirror: their lamp lobe and darkening.
++    CHECK(surface.find("lit += wetLampStreaks(nf, v, kWetPuddleRough) * pud.x;") != std::string::npos);
++    // The reflections' pass: under the wet weather the ground outside the
++    // puddles keeps a few percent of B6's sheen; a puddle is a full mirror.
++    CHECK(constant(trace, "kSsrWetSheen") <= 0.1f);
++    CHECK(trace.find("(wetWeather ? kSsrWetSheen : 1.0);") != std::string::npos);
++    CHECK(trace.find("float weight = mix(sheen, 1.0, puddle);") != std::string::npos);
++}
++
+ TEST_CASE("Wet weather backend: the gate sets the Weather slot, the per-draw class uploads on change only",
+           "[remaster][wet]")
+ {

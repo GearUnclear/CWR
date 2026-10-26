@@ -1,0 +1,10 @@
+{
+  "id": "b31",
+  "bank": "kBio2Hostile",
+  "variant": 0,
+  "text": "{Name} served as an officer near {Place}. When a friend killed a surrendering fighter, the officer protected the friend by falsely stating in the unit report that the fighter had died in combat.",
+  "word_count": 33,
+  "self_review": "An officer concealed a friend killing a surrendering fighter by falsely recording a death in combat.",
+  "source_pattern": "The supplied court research documents unarmed prisoners being killed and culpable choices by military subordinates; it does not establish this particular concealment.",
+  "fictional_changes": "The friendship, surrender, killing, and falsified unit report are invented. The source's coercion claim is not attributed to this fictional officer."
+}

@@ -1,0 +1,102 @@
+; Single consumer; no timeout passes and no mutation of campaign rules.
+#loop
+~0.25
+? GM_pSaveAct != HT_SAVEACT : goto "loaded"
+? HT_REQUEST == "" : goto "loop"
+HT_cmd = HT_REQUEST
+HT_REQUEST = ""
+? HT_cmd == "open" : goto "open"
+? HT_cmd == "begin" : goto "begin"
+? HT_cmd == "roads" : [] exec "human/prepare_roads.sqs"
+? HT_cmd == "check" : goto "check"
+? HT_cmd == "repeat" : [] call HT_fnDescribe
+? HT_cmd == "fail" : "FAIL" call HT_fnRecord
+? HT_cmd == "blocked" : "BLOCKED" call HT_fnRecord
+? HT_cmd == "stop" : "INCOMPLETE" call HT_fnRecord
+? HT_cmd == "close" : goto "close"
+? HT_cmd == "report" : goto "report"
+? HT_cmd == "next" : HT_INDEX = (HT_INDEX + 1) mod (count HT_CASES)
+? HT_cmd == "previous" : HT_INDEX = (HT_INDEX + (count HT_CASES) - 1) mod (count HT_CASES)
+? HT_cmd == "unpassed" : goto "unpassed"
+? HT_cmd in ["next", "previous"] : [] call HT_fnDescribe
+goto "loop"
+#open
+? SC_STAGED : "This campaign has run staged demos. Restart Showcase before human acceptance testing so results come from normal play." call HT_fnSay
+? SC_STAGED : goto "loop"
+? SC_BUSY or ((count SC_QUEUE) > 0) : "Wait for the staged reel to finish before opening human tests. Restart Showcase for an uncontaminated campaign." call HT_fnSay
+? SC_BUSY or ((count SC_QUEUE) > 0) : goto "loop"
+HT_OPEN = true
+[] call SC_fnUnmount
+[] call HT_fnMount
+[] call HT_fnDescribe
+goto "loop"
+#begin
+? not HT_OPEN : goto "loop"
+? HT_ACTIVE : goto "loop"
+HT_ROW = HT_CASES select HT_INDEX
+? not ([] call (HT_ROW select 4)) : goto "prereq"
+HT_BASE = [] call HT_fnSnapshot
+HT_STARTLOAD = HT_LOADS
+[] call (HT_ROW select 5)
+HT_STEP = 0
+HT_ACTIVE = true
+HT_RESULTS set [HT_INDEX, "IN_PROGRESS"]
+HT_EVIDENCE set [HT_INDEX, []]
+[] call HT_fnMount
+[] call HT_fnDescribe
+goto "loop"
+#prereq
+HT_STEP = 0
+HT_EVIDENCE set [HT_INDEX, []]
+"BLOCKED" call HT_fnRecord
+(format ["Cannot begin: %1\n\nMeet the prerequisites through normal play and try again. No pass was recorded.", HT_ROW select 3]) call HT_fnSay
+goto "loop"
+#check
+? not HT_ACTIVE : goto "loop"
+HT_s = (HT_ROW select 6) select HT_STEP
+? not ([] call (HT_s select 2)) : goto "notyet"
+HT_receipt = [HT_STEP, HT_s select 1, [] call HT_fnSnapshot]
+HT_EVIDENCE set [HT_INDEX, (HT_EVIDENCE select HT_INDEX) + [HT_receipt]]
+aP sideChat format ["HUMAN CHECK: %1 step %2 confirmed. Evidence saved.", HT_ROW select 2, HT_STEP + 1]
+HT_STEP = HT_STEP + 1
+? HT_STEP >= count (HT_ROW select 6) : "PASS (HUMAN)" call HT_fnRecord
+? not HT_ACTIVE : goto "loop"
+[] call HT_fnDescribe
+goto "loop"
+#notyet
+"The observed game state does not satisfy this step yet. Continue playing and check again, or record FAIL/BLOCKED. The instructions remain available through Repeat." call HT_fnSay
+goto "loop"
+#unpassed
+HT_i = 0
+#seek
+HT_INDEX = (HT_INDEX + 1) mod (count HT_CASES)
+HT_i = HT_i + 1
+? (HT_RESULTS select HT_INDEX) != "PASS (HUMAN)" : goto "found"
+? HT_i < count HT_CASES : goto "seek"
+#found
+[] call HT_fnDescribe
+goto "loop"
+#report
+HT_i = 0
+#reportrow
+? HT_i >= count HT_CASES : goto "reportdone"
+aP sideChat format ["%1 | %2 | %3", (HT_CASES select HT_i) select 0, (HT_CASES select HT_i) select 2, HT_RESULTS select HT_i]
+HT_i = HT_i + 1
+~0.4
+goto "reportrow"
+#reportdone
+"Report printed in the radio log. UNTESTED, BLOCKED, INCOMPLETE and IN_PROGRESS are not passes. The campaign Save Game action preserves this ledger and its step evidence. Record visual defects with a screenshot and case/step ID." call HT_fnSay
+goto "loop"
+#close
+HT_OPEN = false
+[] call HT_fnMount
+[] call SC_fnMount
+goto "loop"
+#loaded
+HT_SAVEACT = GM_pSaveAct
+HT_LOADS = HT_LOADS + 1
+HT_REQUEST = ""
+[] call HT_fnMount
+? HT_OPEN : [] call SC_fnUnmount
+? HT_OPEN : [] call HT_fnDescribe
+goto "loop"

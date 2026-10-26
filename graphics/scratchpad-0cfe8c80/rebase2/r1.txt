@@ -1,0 +1,4 @@
+    // two passes, the luma sharpen, the canopy's sun-visibility pass, the air
+    // pass's march, blur, mean and apply, the reflections' tag readout,
+    // shares, trace, rough blur and composite, and the photoreal camera's meter
+    CHECK(post == 25);

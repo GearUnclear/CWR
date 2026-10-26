@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\6\\runs\\cloud-S2\\frames", "frames": 120, "band": 0.034, "band_max": 0.098, "sky": 0.02, "spikes": 1, "worst": [[45, 0.51], [88, 0.5], [128, 0.46], [47, 0.26], [90, 0.25], [130, 0.22], [89, 0.17], [60, 0.17]]}

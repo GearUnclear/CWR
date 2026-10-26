@@ -1,0 +1,1478 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index b0ded45..cde01cd 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -187,6 +187,7 @@ enum class RemasterSky : int
+ {
+     Dome = 1,   // the sky dome (Landscape::DrawSky)
+     Clouds = 2, // the sky clouds (Landscape::DrawClouds)
++    Sun = 3,    // the sun disk (Landscape::DrawSky): it dims behind a dome cloud
+ };
+ 
+ //@{
+@@ -882,15 +883,16 @@ class Engine : public IGraphicsEngine
+     /// pass, rain and flares follow. The remastered TAA copies the frame here
+     /// for its particle mask (Graphics/Remaster/TemporalAA.hpp).
+     virtual void BeginTranslucentObjects() {}
+-    /// The remastered sky pass (the sky table, Graphics/Remaster/Atmosphere.hpp):
++    /// The remastered sky pass (the sky table, Graphics/Remaster/Atmosphere.hpp,
++    /// and the sky's own clouds, Graphics/Remaster/SkyDensity.hpp):
+     /// Landscape::DrawSky and DrawClouds open it around the pre-world draws of
+-    /// the sky dome and the sky clouds, which then draw through the remastered
+-    /// programs. A backend without it, or the feature switched or gated off,
+-    /// leaves those draws classic.
++    /// the sky dome, the sun disk and the sky clouds, which then draw through
++    /// the remastered programs. A backend without it, or the features switched
++    /// or gated off, leaves those draws classic.
+     virtual void BeginRemasterSky(RemasterSky /*mode*/) {}
+     virtual void EndRemasterSky() {}
+-    /// Work the remastered sky has in flight (the atmosphere tables' worker
+-    /// build); triSettleScene waits for it.
++    /// Work the remastered sky has in flight (the atmosphere tables' and the
++    /// cloud-density map's worker builds); triSettleScene waits for it.
+     virtual bool RemasterSkyPending() const { return false; }
+     /// triSkyTableCheck: the GPU sky-view table read back against its CPU
+     /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index c3ea5e1..4d98429 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -221,14 +221,20 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
+                 return Off("clear sky");
+             if (in.sunElevationDeg <= kGateSkyTableMinSunDeg)
+                 return Off("sun below -9 deg");
++            if (!in.skyDensityReady)
++                return Off("sky density map building");
+             return On("clouds in the sky");
+ 
+         case Feature::SkyCloudShadows:
+             if (in.cloudCover <= 0.0f)
+                 return Off("clear sky (cover below 0.05)");
+             // Cloud shadows dim the key light: the sun, or the moon as B3's key.
+-            if (in.sunElevationDeg <= 0.0f && !(FeatureOn(t.features, Feature::MoonShadows) && MoonKey(in).on))
++            if (in.sunElevationDeg <= kGateSkyShadowsMinSunDeg &&
++                !(FeatureOn(t.features, Feature::MoonShadows) && MoonKey(in).on))
+                 return Off("no sun or moon key");
++            // Until the map exists the noise field casts them.
++            if (!in.skyDensityReady)
++                return Off("sky density map building");
+             return On("cloud cover");
+ 
+         case Feature::Sharpen:
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+index 8c8e92d..5387cc3 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+@@ -48,6 +48,10 @@ constexpr float kGateCanopyMinSunDeg = 2.0f;       // long canopy shadows: low s
+ constexpr float kGateCanopyMaxSunDeg = 25.0f;
+ constexpr float kGateCanopyMinSkyThrough = 0.5f; // long canopy shadows: mostly clear sky
+ constexpr float kGateLitCloudsMaxSkyThrough = 0.85f;
++// Sky-matched cloud shadows: down to where the rig's sun is gone (its horizon
++// fade starts at -1.5 deg, LightRig.cpp), so the hand-over to the noise field
++// below it never shows.
++constexpr float kGateSkyShadowsMinSunDeg = -1.5f;
+ 
+ // What a gate looks at. The backend fills what exists today; an input whose
+ // source lands with a later step keeps its "unknown" default, noted per field.
+@@ -82,6 +86,9 @@ struct GateInputs
+     // The sky table's transmittance and multiple-scattering tables are built
+     // (a worker thread builds them when the haze changes; Atmosphere.hpp).
+     bool skyTablesReady = true;
++    // The cloud-density map of the current weather sky is built (a worker
++    // thread builds it when the weather sky changes; SkyDensity.hpp).
++    bool skyDensityReady = true;
+ };
+ 
+ struct Gate
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index ff53770..ce7bc33 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -55,9 +55,11 @@ constexpr FeatureInfo kFeatures[] = {
+     {Feature::ValleyMist, "valleyMist", "Valley mist", "haze", "Sky and air", "B8", false, &FS::valleyMist, ""},
+     {Feature::CanopyShadows, "canopyShadows", "Long canopy shadows", "hfrt", "Light and shadow", "B9", false,
+      &FS::canopyShadows, ""},
+-    {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", false, &FS::litClouds, ""},
+-    {Feature::SkyCloudShadows, "skyCloudShadows", "Sky-matched cloud shadows", "clouds", "Sky and air", "B10", false,
+-     &FS::skyCloudShadows, ""},
++    // B10 (clouds): lit clouds cost in the sky pass (the dome and the sky
++    // clouds), the sky-matched shadows one density tap per lit world fragment.
++    {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", true, &FS::litClouds, "sky"},
++    {Feature::SkyCloudShadows, "skyCloudShadows", "Sky-matched cloud shadows", "clouds", "Sky and air", "B10", true,
++     &FS::skyCloudShadows, "world"},
+     {Feature::TerrainDetail, "terrainDetail", "Terrain detail", "texsharp", "Light and shadow", "B11", false,
+      &FS::terrainDetail, ""},
+     {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", false, &FS::sharpen,
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index 52a4193..00c91b8 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -209,7 +209,20 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && shadowCover > 0.0f;
+     rig.cloudCover = clouds ? shadowCover : 0.0f;
+     rig.cloudTransmit = clouds ? 1.0f - (1.0f - kCloudTransmit) * std::min(1.0f, tuning.cloudShadows) : 1.0f;
+-    const float fieldMean = 1.0f - rig.cloudCover * (1.0f - rig.cloudTransmit);
++    // Sky-matched shadows (B10) lie where the sky's own clouds are, over the
++    // share of the ground they cover, not the sky cover the noise field takes.
++    // They carry the field's mean dimming: over a larger share more light gets
++    // through under each cloud; over a smaller one the rest of the dimming
++    // stays uniform (overcastDim).
++    float fieldCover = rig.cloudCover;
++    if (clouds && in.skyShadowCoverage >= 0.0f)
++    {
++        const float carried = rig.cloudCover * (1.0f - rig.cloudTransmit);
++        fieldCover = Clamp01(in.skyShadowCoverage);
++        if (fieldCover * (1.0f - rig.cloudTransmit) > carried)
++            rig.cloudTransmit = 1.0f - carried / fieldCover;
++    }
++    const float fieldMean = 1.0f - fieldCover * (1.0f - rig.cloudTransmit);
+     const float overcastDim = std::min(1.0f, (skyThrough * 0.8f + 0.2f) / fieldMean);
+ 
+     const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 59c9d0b..6cda19b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -152,6 +152,10 @@ struct LightRigInputs
+     float skyThrough = 1.0f;                   // 1 clear .. 0 overcast
+     float nightEffect = 0.0f;                  // 0 day .. 1 night
+     bool cloudShadowsActive = false;           // the sun dimming by overcast moves into the cloud field
++    // The share of the ground the sky-matched cloud shadows cover (B10,
++    // SkyDensity.hpp SkyShadowCoverage); negative while the noise field casts
++    // them. The field then carries the same mean dimming over this share.
++    float skyShadowCoverage = -1.0f;
+ };
+ 
+ struct LightRig
+@@ -168,7 +172,9 @@ struct LightRig
+     float exposure = 1.0f;
+     // Broken-cloud field for the shader: fraction of the ground under cloud
+     // shadow (0 under a clear sky, the sky cover once it is clearly cloudy) and
+-    // the fraction of sunlight that survives under a cloud.
++    // the fraction of sunlight that survives under a cloud. With sky-matched
++    // shadows (skyShadowCoverage) the transmission is the one that keeps the
++    // field's mean dimming over the sky's own covered share.
+     float cloudCover = 0.0f;
+     float cloudTransmit = 1.0f;
+ };
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index 6b94e48..5f9f191 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -34,6 +34,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. Leaf cards authored without normals (zero mesh normals, common in CWA crowns) take the ellipsoid's normal outright. |
+ | Fog toward the sun | shader `fogColorToward` | Fog takes the sky dome's own sun glow (`SunSkyColor * cos^6`, as `TLVertexTable::DoSkyLighting` shades the dome). Distant ground fades into the colour of the sky behind it, which removes the flat band along the horizon at sunrise and sunset. Away from the sun it is exactly the classic fog. |
+ | Sky table (switch `atmosphere`) | `Atmosphere.cpp`, `PoseidonGL33/EngineGL33_SkyTable.cpp`, shaders `shadeSkyDome`, `atmoFogColor` | A physically based clear sky (Rayleigh, Mie, ozone and multiple scattering, after Hillaire 2020) shades the sky dome under the original sky texture's clouds and gives the fog of every world draw its colour (aerial perspective, the far horizon polygon included). A low sun gets a golden horizon band and an aureole, dusk an orange band under a mauve sky, sunrise keeps its pink with a coral glow at the sun, noon a graded blue with its cirrus. Each sky row keeps the original dome's brightness on average (its sun glow included); the table supplies how a direction differs from its row, and the hue is half way between the original's and the physical one (`atmoHue` 0.5, `atmoSat` 1.15). The clouds are the texture's own, masked against each row's clearest texel and lit by the sun seen from 2.5 km. The transmittance and multiple-scattering tables are built on a worker thread when the haze changes; the 192x64 sky-view table on the GPU, in two fullscreen passes, whenever the sun moves 0.02 degrees. It fades out between -3 and -9 degrees of sun (night keeps the classic sky); an overcast deck keeps the classic fog colour. |
++| Sky clouds (switches `litClouds`, `skyCloudShadows`) | `SkyDensity.cpp`, `PoseidonGL33/EngineGL33_SkyClouds.cpp`, shaders `litCloudTermsDome`, `litCloudTermsSheet`, `domeCloudCover` | The sky's own painted clouds become a density map (built from the weather sky texture on a worker thread when the weather sky changes: whiteness above the clearest sky of the same row, a grey row as an overcast deck, darkness as thickness; no new art). Lit clouds: a short march from each sky pixel toward the sun through the dome's own texture mapping gives mean-free relief, so at a low sun the sun-facing edges glow peach and the far sides go slate, with a silver lining on thin rims near the sun, darker thick cloud against the sun and deeper bellies under a deck; every one of these terms fades out between 25 and 45 degrees of sun, so a midday sky is the sky before (the relief embossed it, and the darkening against the sun on its own made it only darker; above 45 degrees the shaders skip the march), and they work on luminance tinted only by the sun's colour (no colour fringes). The sky's mean brightness is kept within about 1.5 %. Sky-matched shadows: a lit point is projected along the sun to a deck at 1800 m and that point is looked up in the map in the direction an anchor near the camera sees it, so the cloud in the sky is the cloud whose shadow lies on the ground (and the sun disk dims behind it); the anchor stays put until the camera is 1.5 km away, then steps and cross-fades, so shadows do not slide under a moving player. They keep the classic overcast dimming on average over the sky's own covered share (`LightRigInputs::skyShadowCoverage`). The dome turns about the zenith with the sky clouds' drift (`Landscape::CloudsPosition`, about 6 degrees a minute at overcast 0.5), its clouds, their light and their shadows together. |
+ | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
+ | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. The sum is clamped where classic clamps it, so where pools overlap a lamp-lit wall is never brighter than the original's. Glossy materials get normalised Blinn-Phong and a sky reflection. |
+ | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
+@@ -171,12 +172,14 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
+ | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
+ | `Graphics/Remaster/Atmosphere.{hpp,cpp}` | The sky table's atmosphere: its constants, the transmittance and multiple-scattering tables, the sky-view parametrisation and the CPU mirrors of the two GPU passes (`SkyViewTexel`, `SkyViewRowMean`, `SkyViewRowGlow`), the lookup the shaders make, and the frame rules (rebuild, night fade, overcast floor). Pure math. |
++| `Graphics/Remaster/SkyDensity.{hpp,cpp}` | The sky's own clouds: the dome's texture mapping, the cloud-density map of a weather sky and its shadow coverage, the constants the shaders mirror (deck, threshold, relief, silver lining, the low-sun fade), the sky's turn and the shadow anchor. Pure math. |
++| `PoseidonGL33/EngineGL33_SkyClouds.cpp` | The density map on unit 9 (read once per weather sky file, decoded, mixed and built on a worker thread, a stand-in until the first), the shadow anchor and the `Sky` and `SkyShadow` slots of `LitConstants`. |
+ | `PoseidonGL33/EngineGL33_SkyTable.cpp`, `EngineGL33_PostSkyTableShaders.cpp` | The sky table on the GPU: the worker build of the atmosphere tables, the two fullscreen passes that build the sky-view table (their GLSL in a GL-free file, rows of `kPostShaders`), the sky pass hook and its `LitConstants` slots, and `triSkyTableCheck`. |
+ | `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
+ | `Graphics/Remaster/TemporalAA.{hpp,cpp}` | TAA's math: the Halton jitter and the rule that gives a pass its jitter, the camera reprojection built in double precision (the C++ mirror of the resolve's), the cut and history-chain rules, the particle mask thresholds. Pure. |
+ | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
+ | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
+-| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 and 8 in use, 6 and 9-15 allocated) and the sampler table the programs are bound from, program-set selection. |
++| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5, 8 and 9 in use, 6 and 10-15 allocated) and the sampler table the programs are bound from, program-set selection. |
+ | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+ | `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages; the GL helpers the post stages share. |
+ | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
+@@ -184,6 +187,7 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, the TAA stages running together and only on a jittered frame, and the backend running and marking every landed stage. |
+ | `tests/unit/.../Graphics/test_temporal_aa.cpp` | The jitter sequence and range, the jitter of a pass, the reprojection against hand values and camera pairs, cuts and the history chain, the jitter in the remastered vertex shaders only, the resolve and sharpen contracts, and source audits that the jitter and LOD bias never reach the HUD and that the opaque copy sits between the opaque and the translucent objects. |
+ | `tests/unit/.../Graphics/test_atmosphere.cpp` | The atmosphere against an independent brute-force integration (the vertical optical depth in closed form, transmittance and sky-view texels at noon, sunset and 4 degrees under), the colours of a clear day, a sunset and a twilight, the table's lookups and row means, and the frame rules, switch, gate and sub-knobs of the sky table. |
++| `tests/unit/.../Graphics/test_sky_density.cpp` | The dome mapping, the density map on a clear, a broken and an overcast sky made like the shipped ones, the blur, shadow cover and coverage, the low-sun fade (the lit-cloud terms identity from 45 degrees of sun up, lighter as well as darker below), the sky's turn, the shadow anchor, and the rig keeping the overcast dimming over the sky's covered share; `test_remaster_lighting.cpp` pins the shaders' constants and mapping to it and the clouds' off contract. |
+ | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
+ | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index c8b4d31..7fd05c6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -209,6 +209,13 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
+   the resolve is a post stage, and a jittered frame that nothing resolves would shake. The
+   backend jitters a frame only when the gate is on and the frame gets a post pass (an offscreen
+   frame target, the post programs built; `TaaWantedThisFrame`).
++- As built in B10: the sky cloud shadows' "sun up" is the sun above -1.5 deg
++  (`kGateSkyShadowsMinSunDeg`, where the rig's sun has faded out), so the hand-over to the noise
++  field never shows; both clouds gates read "sky density map building" until the weather sky's map
++  exists (`GateInputs::skyDensityReady`). Lit clouds need no high-sun gate: every lit-cloud term
++  fades out between 25 and 45 deg (not "above 35 deg" as the table had it), and from 45 deg up
++  the shaders return the identity terms before the march, so the gate stays open at midday at
++  the cost of one uniform branch.
+ 
+ Worst cases from MENU section 4 (a low sun over water and woods: about 20 ms) do not fit; the
+ gates above keep the beams, hfrt and SSR from all being at full cost together only if the
+@@ -283,6 +290,13 @@ colour the shader takes from the table. `SkyFwd.w` is the sky mode of the draws
+ world, 1 the dome, 2 the sky clouds; `Poseidon::RemasterSky`), `SkyRight.w` the Mie asymmetry,
+ `SkyUp.w` free.
+ 
++As built in B10: slots 68 and 69 landed (`LitConst::Count` 70): `Sky` (x lit-cloud strength with
++the sky table's night fade, y sky-matched shadows on, z the dome's turn as a u offset, w sky-through)
++and `SkyShadow` (xy the shadow anchor minus the camera in metres, z the previous anchor's angle, w its
++fade weight). The planned `SkyVp` is gone: A7's view ray comes from the vertex position, so no
++viewport is needed. `LitConstPlanned` keeps `LightTiles` (70) onward (static_assert: `LightTiles ==
++LitConst::Count`).
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -329,6 +343,10 @@ built; `BindLightingTextures` binds the table or the stand-in on every world pas
+ that build the table read their inputs with `texelFetch` on unit 0 and, while the table itself is
+ not bound, unit 8, and rebind the table after them.
+ 
++As built in B10: `kSkyDensityUnit` (9) is in use, with its `kLitSamplers` row (`skyDensity`) and a
++1x1 RGBA8 no-cloud stand-in bound at `InitLightingResources` (`InitSkyClouds`); `BindLightingTextures`
++and the sky pass bind the map or the stand-in.
++
+ ### 3.5 Shader sources: split by concern, test through the accessors
+ 
+ `EngineGL33_LightingShaders.cpp` (757 lines) and `EngineGL33_PostFX.cpp` (725 lines) are the two
+@@ -1588,6 +1606,108 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+   zatazeno deck); dome UV mapping; layout (`Sky`, `SkyVp`); glslang.
+ - **Effort**: 4 days.
+ 
++**Result (2026-10-18, uncommitted change on 5d7e7ae in the scratch copy `gr-B10`; evidence in
++`tmp/integration/B10/` of the graphics-remaster worktree, gitignored; the shots of the build that
++lands are in `final4/`, after the review round).**
++
++- Built as the bullets above with these corrections. The pure module is
++  `Graphics/Remaster/SkyDensity.{hpp,cpp}` (dome mapping, density map, shadow cover and coverage,
++  the constants the shaders mirror, the sky's turn, the shadow anchor); the backend is
++  `EngineGL33_SkyClouds.cpp`. The weather sky files are read once each on the render thread; the
++  decode (`DecodePAABuffer`), the mix of two weather skies (as `TextureGL33::GetPixel` mixes them),
++  the map and its coverage table run on a worker (`std::async`); unit 9 holds a no-cloud stand-in
++  until the first map, the last map stays in use while the next weather sky builds, and
++  `triSettleScene` waits for a pending build (`RemasterSkyPending`). The game's own skies: oblacno
++  gives 256x256 with a shadowed share of 0, 0.163 and 0.287 at a sun of 10, 30 and 60 degrees;
++  zatazeno (overcast 0.9) 0.99 to 1.0 once the weather counts its deck; the jasno and oblacno mix
++  of overcast 0 none (a numpy mirror of the build on the research PNG of oblacno gives the same
++  0.227 the first build's whole-dome coverage logged).
++- The sky hook is A7's: `BeginRemasterSky` opens for the clouds switches too (the dome whenever
++  one is on, the sky clouds while lit clouds run), and a new `RemasterSky::Sun` pass around the sun
++  disk, which fades (colour and coverage) behind a dome cloud. A first build dimmed only its colour
++  and drew a dark disk over the sky.
++- `r0..r7` became GLSL constants mirrored in `SkyDensity.hpp` (deck 1800 m, threshold 0.55, edge
++  0.12, relief 1.8, silver 1.0, march step 1.2 deg), pinned by a contract test. The relief and the
++  silver lining work on luminance tinted only by the sun's chroma (critic fix); in the sky table's
++  path they apply to its sky and cloud colours in linear light before its display mapping (no
++  channel clipping), in the classic path a colour past white goes toward white.
++- Every lit-cloud term fades between 25 and 45 deg of sun: the relief, the silver lining, the
++  darkening of thick cloud seen against the sun and the bellies under a deck, all in one fade on
++  the way out of `litCloudTerms` (C++ mirror `LitCloudTerms` in `SkyDensity`); from 45 deg up the
++  dome and sheet marches return the identity terms before they sample. Review fix: a build that
++  faded only the relief and the lining (the critic's emboss) left the darkening against the sun
++  alone at midday, so the midday sky was only darker (`broken_up`: 35 % of the sky band darker by
++  more than 2 levels, none brighter, the white cumulus greyed). Lit clouds need no high-sun gate:
++  at midday they cost one uniform branch.
++- Correction: atmosphere does not take its cloud mask from this map. A7 tuned its own mask (the
++  12-tap row minimum, dead zone 0.004, noon cirrus kept) and the map's whiteness test was built to
++  find shadow-casting cloud; swapping them would change A7's look. The lit-cloud terms read the map.
++- Correction: the drift comes from the sky clouds' own integrator, `Landscape::CloudsPosition`
++  (`Weather::MoveClouds`, the third value `triPinCloudDrift` already pins), at 0.3 deg per unit
++  (about 6 deg a minute at overcast 0.5), not from the noise field's wind integrator: the visible
++  dome and the classic sheets then move from one clock and captures pin both. The dome turns
++  whenever a clouds switch is on, gated or not, so a gate opening never makes it jump.
++- The anchor (`SkyShadowAnchor`): it stays put until the camera is 1.5 km away, then steps 1.5 km
++  toward it and the old anchor's shadows fade out over 4 s of sim time (a second lookup only while
++  fading); a camera move of 500 m or more in one step snaps it; `triPinCloudDrift` snaps it to the
++  camera and holds it.
++- Rewritten: the shadows cover the sky's own share of the ground, not the noise field's cover. The
++  rig (`LightRigInputs::skyShadowCoverage`) keeps the classic overcast dimming on average: over a
++  larger share more light gets through under each cloud, over a smaller one the rest stays
++  uniform. The share is the shadowed part of the ground within 3 km of the anchor at the sun's
++  height (each point looks the dome up where its deck point is), because the painted skies have
++  no cloud the row test can find below about 15 deg (their horizon is haze): a sun below about 12
++  deg casts no sky-matched shadow, and a first build that took one share for the whole dome
++  (0.227 at overcast 0.5) left the sun on that unshadowed ground at 0.93 of the clear sun against
++  the classic mean of 0.76 (the coast view's ground read +36 % against off, +29 % after the fix,
++  where off has the noise field's shadow on the foreground).
++- The sky clouds (`DrawClouds`' sheets) are lit in their own texture (vLitMode -2; a debug override
++  showed they fill much of the low sky at the hero view). They cast no shadows (the plan's
++  `CollectCloudSheets` follow-up), so at a low sun the visible cloud near the sun is a sheet that
++  shadows nothing.
++- Gates (3.2): the sky shadows run down to -1.5 deg of sun (the rig's horizon fade), not 0, so the
++  hand-over to the noise field never shows; both clouds gates read "sky density map building"
++  until a map exists (`GateInputs::skyDensityReady`). Slots (3.3): 68 `Sky`, 69 `SkyShadow`; the
++  planned `SkyVp` is not needed (the view ray comes from the vertex position since A7), slot 69
++  holds the anchor. Unit 9 (3.4) is in use, with its `kLitSamplers` row and stand-in. Dropped as
++  planned; also the prototype's screen-derivative march on the dome (its seams).
++- Gate: build 0 warnings; clang-format clean on the 19 touched C++ files; unit gate tags plus
++  `[SkyDensity],[clouds],[FeatureSwitches],[FeatureGates],[atmosphere],[PostStages],
++  [triSetFixedStep],[triPinCloudDrift]` 519/519 (15 new cases); the full suite has the 6 known
++  localisation failures only. Twenty mutations each turn a case red: no blur, whiteness against
++  the whole sky, the rig ignoring the share, the share ignoring the sun's height, the shader
++  threshold, one dome ring, the dome turning with the switches off, relief at any sun height, the
++  shadows gated at the horizon, no cross-fade, the gates ignoring the map, the switch not landed, a
++  block member renamed, the sun disk dimmed by colour only, and from the review round the reviewed
++  `litCloudTerms` and its mirror (the darkening against the sun and the bellies not faded), the
++  gain not faded in either, and the dome or the sheet march running at a high sun. Smoke 1/1 on
++  the build that lands (KHR_debug ids 131169, 131154 and 131218 only).
++- Off equals before (`litClouds=0,skyCloudShadows=0` on the build that lands, `final4/`, against
++  the base build's on, nine views): the sky band within 2 levels on four views and one pixel at 3
++  on `coast_oc`; the other four views' sky and every view's horizon and ground bands differ by
++  about the base build's own repeat between its two shots (`noon_fields_oc` sky 2,938 against
++  2,351 pixels over 2, `overcast_heavy` 578 against 406, `overcast_broken` 334 against 524,
++  `broken_high` ground 37,820 against 37,888, `coast_oc_up` 12,358 against 12,987).
++- On against off (`final4/`): the sky band's mean luminance within -0.6 % (dawn) and +0.6 %
++  (`coast_oc`), and two-sided where the clouds are lit: at the hero `coast_oc_up` 36 % of the sky
++  band darker by more than 2 levels and 32 % brighter (mean +0.0007), the clouds' sun-facing edges
++  peach and their bellies slate (sky saturation 0.111 to 0.124, 6-pixel high-pass 0.0049 to
++  0.0054), at dawn the cloud bases pink (27 % darker, 21 % brighter; saturation 0.183 to 0.224);
++  at `broken_high` soft bands across the slopes match the sky and move with it (sky positions 25
++  and 50). From 45 deg of sun up the sky is the one before: `broken_up` (54 deg, looking up) no
++  sky-band pixel over 2 levels either way (the reviewed build: 35 % darker, none brighter),
++  `overcast_heavy` the same, and looking at the sun itself (the sweep's sun-up camera under each
++  switch combination) lit clouds alone change one pixel by more than 2 levels against 925,385 in
++  the reviewed build. Clear views are unchanged (gates off). A sweep of the sky through 180 deg on
++  Eden (14:30, overcast 0.5) shows the sun disk clear wherever the ground at the camera is lit and
++  faded, not dark, wherever it is shadowed; its ground values equal the reviewed build's.
++- Timing (single readings, other games running, not quiet-checked, clocks not sampled):
++  `coast_oc_up` on minus off, the sky section 0.14 to 0.17 ms against 0.22 to 0.28 (+0.08 median,
++  3 rounds) on the build that lands, +0.18 in a second run (2 rounds) and +0.26 on the reviewed
++  build (the same low-sun path); the frame +0.27, +0.66 and +0.76, against a gates-off control
++  (`noon_fields` clear, on equals off) that moved +0.80 and +0.15, so the frame figure is within
++  the noise. The plan's estimate was 0.5 to 1.5 ms.
++
+ ### B11. texsharp (terrain detail)
+ 
+ - **Prototype touched**: `GameStateExtTestRender.cpp` (tex knobs), `DrawPoly.cpp`
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+index 50055f7..227b7cd 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp
+@@ -1675,7 +1675,8 @@ void Landscape::DrawSky(Scene& scene)
+     float clipLevel = skyPosition.Y();
+     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
+ 
+-    // The remastered sky table shades the dome (a no-op when it is off).
++    // The remastered sky table shades the dome, and the clouds switches light
++    // its clouds and turn it with the sky's drift (a no-op when they are off).
+     GEngine->BeginRemasterSky(RemasterSky::Dome);
+     _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
+     GEngine->EndRemasterSky();
+@@ -1691,7 +1692,11 @@ void Landscape::DrawSky(Scene& scene)
+     }
+     scene.GetCamera()->CancelUserClip();
+ 
++    // With the sky-matched cloud shadows the sun disk dims behind a dome cloud
++    // (a no-op when they are off).
++    GEngine->BeginRemasterSky(RemasterSky::Sun);
+     _sunObject->Draw(0, ClipAll & ~ClipBack, *_sunObject);
++    GEngine->EndRemasterSky();
+     _moonObject->Draw(0, ClipAll & ~ClipBack, *_moonObject);
+ }
+ 
+@@ -1734,7 +1739,8 @@ void Landscape::DrawClouds(Scene& scene)
+     }
+     // scene.GetCamera()->SetUserClip(1);
+     // The remastered sky pass: with the sky table on, the clouds fade into its
+-    // horizon colour with their fog (a no-op when it is off).
++    // horizon colour with their fog; with lit clouds on, their sun-facing
++    // edges catch the sun (a no-op when both are off).
+     GEngine->BeginRemasterSky(RemasterSky::Clouds);
+     AUTO_STATIC_ARRAY(CloudInfo, clouds0, 1024);
+     AUTO_STATIC_ARRAY(CloudInfo, clouds1, 1024);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 2767d07..3971b22 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -807,7 +807,7 @@ class EngineGL33 : public Engine
+     // buffer and records them in the buffer's mirror: every upload of the
+     // block, whole or partial, goes through here (plan section 5 A4).
+     void UploadLitSlots(int first, int count);
+-    // Binds units 2..5 and 8 for the remastered shaders (compare sampler on 2).
++    // Binds units 2..5, 8 and 9 for the remastered shaders (compare sampler on 2).
+     void BindLightingTextures();
+     // The sky table (EngineGL33_SkyTable.cpp): the stand-in and GL objects, the
+     // worker build of the atmosphere tables (true once they exist for the
+@@ -820,6 +820,23 @@ class EngineGL33 : public Engine
+     bool BuildSkyViewTableGpu(float sunElevationRad);
+     void UploadLitSky(const Vector3& toSun, float skyThrough);
+     void BindSkyTable();
++    // The sky's own clouds (EngineGL33_SkyClouds.cpp): the cloud-density map
++    // on unit 9 (built on a worker thread when the weather sky changes, a
++    // stand-in until the first one), the shadow anchor and the clouds slots.
++    void InitSkyClouds();
++    void DeinitSkyClouds();
++    bool SkyCloudsWanted() const;   // remastered, and litClouds or skyCloudShadows switched on
++    bool SkyDensityReady() const;   // a map is built (the last one while a new weather sky builds)
++    bool SkyDensityPending() const; // a build runs, or the wanted weather sky has none yet
++    void PollSkyDensity();          // collects a finished build; starts one when the weather sky changed
++    // The shadowed share of the ground at this sky-through and sun elevation
++    // (SkyShadowCoverage), or negative without a map.
++    float SkyShadowCoverageAt(float skyThrough, float sunElevationDeg) const;
++    void BindSkyDensity();
++    // Captures: the anchor at the camera, held while the clouds are pinned.
++    void PinSkyShadowAnchor(bool pinned);
++    // The Sky and SkyShadow slots; `cloudField` = the rig casts cloud shadows.
++    void UploadLitClouds(float skyThrough, bool cloudField);
+     // One LitConstants slot (flushed with the next FlushLitConstants), and the
+     // sky mode (litSkyFwd.w, flushed at once).
+     void SetLitSlot(int slot, float x, float y, float z, float w);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 374868a..27da3d9 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -3,7 +3,8 @@
+ // The remastered program set (EngineGL33_LightingShaders.cpp) reads the light
+ // rig, the per-draw material and the local lights from the LitConstants block
+ // (binding 3), the shadow map through a comparison sampler on unit 2, the
+-// terrain horizon map on units 3 and 4 and the cloud noise on unit 5. Selection
++// terrain horizon map on units 3 and 4, the cloud noise on unit 5, the sky
++// table on unit 8 and the sky's cloud density on unit 9. Selection
+ // between the remastered and classic sets happens in DoSelectPixelShader via
+ // SelectProgram; Classic leaves every classic upload and program untouched.
+ 
+@@ -145,8 +146,10 @@ void EngineGL33::InitLightingResources()
+     GL33Bind::ActiveUnit(kShadowMapUnit);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+     GL33Bind::ActiveUnit(0);
+-    // The sky table's unit 8 gets its stand-in the same way.
++    // The sky table's unit 8 and the clouds' unit 9 get their stand-ins the
++    // same way.
+     InitSkyTable();
++    InitSkyClouds();
+ 
+     glGenSamplers(1, &_shadowCompareSampler);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+@@ -183,6 +186,7 @@ void EngineGL33::DeinitLightingResources()
+     delTex(_post.whiteTex);
+     delTex(_post.blackTex);
+     DeinitSkyTable();
++    DeinitSkyClouds();
+     _post.unavailable = false;
+     if (_shadowCompareSampler)
+     {
+@@ -315,6 +319,7 @@ void EngineGL33::BindLightingTextures()
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
+     BindSkyTable();
++    BindSkyDensity();
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -373,6 +378,7 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
+     in.optics = _prevWorldOverlayDrawn;
+     in.nightVision = _nightVision;
+     in.skyTablesReady = SkyTablesReady();
++    in.skyDensityReady = SkyDensityReady();
+     const LightList& lights = GScene->ActiveLights();
+     for (int i = 0; i < lights.Size(); i++)
+     {
+@@ -399,6 +405,9 @@ void EngineGL33::UploadLitFrameConstants()
+     }
+     if (_terrainMapDirty)
+         UploadTerrainHorizonMap();
++    // The sky's cloud-density map: collect a finished build, start one when the
++    // weather sky changed (while a clouds switch is on).
++    PollSkyDensity();
+ 
+     LightSun* sun = GScene->MainLight();
+     Camera* camera = GScene->GetCamera();
+@@ -424,9 +433,17 @@ void EngineGL33::UploadLitFrameConstants()
+     in.skyThrough = land ? land->SkyThrough() : 1.0f;
+     in.nightEffect = sun->NightEffect();
+     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
+-    const rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
+-    _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
++    rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
+     UpdateFeatureGates(&rig);
++    // Sky-matched cloud shadows lie over the sky's own covered share of the
++    // ground: the rig keeps the mean dimming over it (same cover, so the gates
++    // computed above stand).
++    if (_featureGates[rm::Feature::SkyCloudShadows].on && SkyDensityReady())
++    {
++        in.skyShadowCoverage = SkyShadowCoverageAt(in.skyThrough, rig.sunElevationDeg);
++        rig = rm::ComputeLightRig(in, _lighting);
++    }
++    _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+ 
+     SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
+     SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
+@@ -516,6 +533,8 @@ void EngineGL33::UploadLitFrameConstants()
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+     // The sky table: the camera basis, the dome and fog blends, the clouds' light.
+     UploadLitSky(toSun, in.skyThrough);
++    // The sky's own clouds: lit clouds, the dome's turn, the sky-matched shadows.
++    UploadLitClouds(in.skyThrough, clouds);
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+@@ -537,6 +556,7 @@ void EngineGL33::SetLitSkyMode(int mode)
+ void EngineGL33::PinCloudDrift(bool pinned, float x, float z)
+ {
+     s_cloudDriftPinned = pinned;
++    PinSkyShadowAnchor(pinned);
+     if (pinned)
+     {
+         s_cloudDrift[0] = x;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index af5f7c9..ab71514 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -27,8 +27,8 @@ enum class FragmentPiece : int
+     LitConstants,  // LitConstantsBlock()
+     Inputs,        // samplers, varyings, colour space and tonemap helpers
+     Shadows,       // shadowMapVisibility
+-    TerrainClouds, // terrainSunVisibility, cloudSunVisibility
+-    Sky,           // skyIrradiance, fogColorToward (EngineGL33_LightingShadersSky.cpp)
++    TerrainClouds, // terrainSunVisibility, cloudSunVisibility, the dome mapping and the sky-matched shadows
++    Sky,           // skyIrradiance, fogColorToward, the sky table, lit clouds (EngineGL33_LightingShadersSky.cpp)
+     Lights,        // localLights (EngineGL33_LightingShadersLights.cpp)
+     Surface,       // glossy (EngineGL33_LightingShadersSurface.cpp)
+     Shade,         // shadeRemastered
+@@ -89,10 +89,10 @@ constexpr int kShadowMapUnit = 2; // cascade array; a complete depth array from
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
+-constexpr int kSkyLutUnit = 8; // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
++constexpr int kSkyLutUnit = 8;     // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
++constexpr int kSkyDensityUnit = 9; // the weather sky's cloud density (EngineGL33_SkyClouds.cpp); a stand-in
+ // Allocated to the features still to land; no shader samples them yet.
+ constexpr int kShadowRawUnit = 6;     // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
+-constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
+ constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
+ constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
+ constexpr int kLightDataUnit = 12;    // light buffer, samplerBuffer (light list)
+@@ -165,6 +165,7 @@ constexpr LitSampler kLitSamplers[] = {
+     {"terrainHeight", kTerrainHeightUnit},
+     {"cloudNoise", kCloudNoiseUnit},
+     {"skyLut", kSkyLutUnit},
++    {"skyDensity", kSkyDensityUnit},
+ };
+ 
+ // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
+@@ -214,7 +215,10 @@ enum : int
+     AtmoCloudSun = 65, // rgb sun light on the sky clouds (linear), w sky light on them (linear; the table's colour)
+     AtmoGlow = 66,     // rgb classic dome sun glow (display, SunSkyColor), w sky saturation
+     AtmoDome = 67,     // rgb classic dome light (display, SkyColor), w hue (0 the original hue relit, 1 physical)
+-    Count = 68,
++    // The sky's own clouds (EngineGL33_SkyClouds.cpp, Graphics/Remaster/SkyDensity.hpp).
++    Sky = 68,       // x lit-cloud strength, y sky-matched shadows on (1), z the dome's turn (u offset), w sky-through
++    SkyShadow = 69, // xy shadow anchor - camera (m, east and north), z previous anchor's angle (rad), w its weight
++    Count = 70,
+ };
+ constexpr int MaxLights = 8;
+ constexpr int ReservedCount = 3;
+@@ -224,7 +228,8 @@ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+ static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
+ static_assert(SkyRight == Reserved + ReservedCount, "LitConst sky slots follow the reserved ones");
+-static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
++static_assert(Sky == AtmoDome + 1, "LitConst clouds slots follow the sky table's");
++static_assert(Count == SkyShadow + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ // The slots allocated to the features still to land (INTEGRATION-PLAN.md
+@@ -233,14 +238,13 @@ static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
+ // feature moves its rows into LitConst, declares them in LitConstantsBlock()
+ // (a slot below it that has not landed yet becomes a padding member there) and
+ // raises LitConst::Count, which the upload and the shaders follow. A7 landed
+-// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved.
++// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved; B10
++// landed the clouds slots 68 and 69 (Sky, SkyShadow).
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58;     // materials, per draw: class, object kind, blend, hash
+ constexpr int Taa = 59;          // temporal: frame index, stochastic flags, taps, penumbra per metre
+ constexpr int Pcss = 60;         // shadows: search radius, minimum texels
+-constexpr int Sky = 68;          // clouds: sky mode, lit-cloud strength, shadow source
+-constexpr int SkyVp = 69;        // clouds: viewport origin and 1 / size (pixels)
+ constexpr int LightTiles = 70;   // light list: tile size, tile counts, light count
+ constexpr int Night = 71;        // night: flags, beam profile, moon key
+ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+@@ -253,7 +257,7 @@ constexpr int Haze = 78;         // haze: the analytic fallback for blended surf
+ constexpr int End = 79;          // one past the last planned slot
+ static_assert(MatClass == LitConst::Reserved && Pcss == LitConst::Reserved + LitConst::ReservedCount - 1,
+               "the planned slots below the sky pass are the reserved padding");
+-static_assert(Sky == LitConst::Count, "the other planned slots follow the declared ones");
++static_assert(LightTiles == LitConst::Count, "the other planned slots follow the declared ones");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+ } // namespace LitConstPlanned
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index e174a1d..00f0f00 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -29,7 +29,10 @@
+ // exactly as in the classic shaders, except under the sky table (feature
+ // switch `atmosphere`): the sky dome is then shaded from the physically based
+ // sky table (vLitMode 2, shadeSkyDome) and pre-lit world draws fade into the
+-// table's horizon colour with their fog (vLitMode -1).
++// table's horizon colour with their fog (vLitMode -1); and under the clouds
++// switches (`litClouds`, `skyCloudShadows`): the dome turns with the sky's
++// drift, the dome's and the sky clouds' clouds are lit from their sun side
++// (vLitMode 2 and -2) and the sun disk dims behind a dome cloud.
+ //
+ // A fragment shader is the common prelude followed by one main body per pixel
+ // shader. The prelude is split by concern (FragmentPiece in
+@@ -113,19 +116,28 @@ void main() {
+     vNormalW = vec3(0.0, 1.0, 0.0);
+     vCrown = vec4(0.0);
+     vLitMode = 0.0; // pre-lit colour: the fragment shader passes it through
+-    // The sky table: the camera-relative point on the view ray, from the
+-    // vertex's screen position and the camera basis, perspective-interpolated
+-    // so the fragment shader gets an exact view direction. The sky dome (sky
+-    // mode 1) is shaded from the table (vLitMode 2); every other pre-lit draw of
+-    // the world (the far horizon polygon, the sky clouds, particles) keeps its
+-    // colour and fades into the table's horizon colour with its fog (-1).
+-    if (litAtmo.x > 0.0 || litAtmo.z > 0.0) {
++    // The sky's own clouds turn with the sky's drift (litSky.z, 0 unless a
++    // clouds switch is on): the dome's texture turns about the zenith.
++    bool dome = litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5;
++    if (dome && litSky.z != 0.0) vUV0.x += litSky.z;
++    // The sky table and the lit clouds: the camera-relative point on the view
++    // ray, from the vertex's screen position and the camera basis,
++    // perspective-interpolated so the fragment shader gets an exact view
++    // direction. The sky dome (sky mode 1) is shaded from the table and its
++    // clouds lit (vLitMode 2); the sky clouds (sky mode 2) are lit (-2) and,
++    // like every other pre-lit draw of the world (the far horizon polygon,
++    // particles), fade into the table's horizon colour with their fog (-1).
++    // The sun disk (sky mode 3) keeps its colour and its classic fog.
++    if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0) {
+         vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);
+         vec3 rel = (litSkyFwd.xyz + ndc.x * litSkyRight.xyz + ndc.y * litSkyUp.xyz) * w;
+-        if (litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5 && litAtmo.x > 0.0) {
++        if (dome && (litAtmo.x > 0.0 || litSky.x > 0.0 || litSky.z != 0.0)) {
+             vWorldRel = rel;
+             vLitMode = 2.0;
+-        } else if (litAtmo.z > 0.0) {
++        } else if (litSkyFwd.w > 1.5 && litSkyFwd.w < 2.5 && litSky.x > 0.0) {
++            vWorldRel = rel;
++            vLitMode = -2.0;
++        } else if (litAtmo.z > 0.0 && litSkyFwd.w < 2.5) {
+             vWorldRel = rel;
+             vLitMode = -1.0;
+         }
+@@ -338,6 +350,8 @@ layout(std140) uniform LitConstants {
+     vec4 litAtmoCloudSun; // 65: rgb sun light on the sky clouds (linear), w sky light on them (linear)
+     vec4 litAtmoGlow;     // 66: rgb classic dome sun glow (display), w sky saturation
+     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
++    vec4 litSky;          // 68: x lit-cloud strength, y sky-matched shadows on, z the dome's turn (u), w sky-through
++    vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
+ };
+ )";
+ 
+@@ -351,6 +365,7 @@ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit uno
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
+ uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
++uniform sampler2D skyDensity;              // unit 9: cloud density of the weather sky (SkyDensity.hpp)
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -485,14 +500,77 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
+     return mix(1.0, mix(vis, 1.0, lift), litTerrainLift.z);
+ }
+ 
++// ---- The sky's own clouds (feature switches litClouds and skyCloudShadows;
++// Graphics/Remaster/SkyDensity.hpp holds the CPU mirrors and the constants) --
++// The cloud-density map on unit 9, built from the weather sky texture: r broken
++// cloud (whiter than the clearest sky of its row), g the row is grey all round
++// (an overcast deck, counted as far as the weather is overcast), b darkness.
++const float kSkyShadowDeck = 1800.0;         // kSkyShadowDeckAltitude (m above sea level)
++const float kSkyShadowThreshold = 0.55;      // kSkyShadowThreshold
++const float kSkyShadowEdge = 0.12;           // kSkyShadowEdge
++const float kSkyShadowAnchorRadius = 1500.0; // kSkyShadowAnchorRadius (m)
++const float kSkySunBehindCloud = 0.12;       // kSkySunBehindCloud: the sun disk's light behind a dome cloud
++
++// SkyCloudDensity: broken cloud or the overcast deck, thicker where darker.
++float skyCloudDensity(vec4 m) {
++    float deck = m.g * (1.0 - smoothstep(0.35, 0.75, litSky.w));
++    return max(m.r, deck) * mix(0.75 + 0.25 * m.b, 0.5 + 0.5 * m.b, deck);
++}
++
++// SkyDomeUv: the dome's texture coordinate of a world direction, from
++// obloha.p3d's own mapping (u = azimuth / 180 deg, the texture wraps twice
++// around the horizon; v piecewise over the rings at -15, 0.87, 29.5, 59.5 and
++// 89 deg), turned with the sky (litSky.z).
++vec2 skyDomeUv(vec3 w) {
++    float az = atan(w.x, w.z) * 57.29578;
++    float e = asin(clamp(w.y * inversesqrt(max(dot(w, w), 1e-12)), -1.0, 1.0)) * 57.29578;
++    float v;
++    if (e < 0.87) v = mix(1.0, 0.9869, clamp((e + 15.0) / 15.87, 0.0, 1.0));
++    else if (e < 29.5) v = mix(0.9869, 0.5434, (e - 0.87) / 28.63);
++    else if (e < 59.5) v = mix(0.5434, 0.1736, (e - 29.5) / 30.0);
++    else v = mix(0.1736, 0.036, clamp((e - 59.5) / 29.5, 0.0, 1.0));
++    return vec2(az / 180.0 + litSky.z, v);
++}
++
++// SkyShadowCover of the dome's cloud in a direction (seen from the camera).
++float skyShadowCoverToward(vec3 w) {
++    float d = skyCloudDensity(textureLod(skyDensity, skyDomeUv(w), 0.0));
++    return smoothstep(kSkyShadowThreshold - kSkyShadowEdge, kSkyShadowThreshold + kSkyShadowEdge, d);
++}
++
++// The cloud shadow on a camera-relative point: projected along the sun to the
++// deck, the deck point is looked up in the dome in the direction an anchor
++// sees it (the camera's own view of the sky, from where the anchor stands,
++// litSkyShadow.xy), so the cloud the player sees in the sky is the one whose
++// shadow lies on the ground. While the anchor moves on, the old one's shadows
++// fade out (litSkyShadow.zw).
++float skyShadowCoverFrom(vec3 q, vec2 anchor) {
++    vec3 w = q - vec3(anchor.x, 0.0, anchor.y);
++    return w.y > 1.0 ? skyShadowCoverToward(w) : 0.0;
++}
++float domeCloudCover(vec3 rel) {
++    vec3 l = litSunDir.xyz;
++    float up = max(l.y, 0.06);
++    vec3 q = rel + l * (max(kSkyShadowDeck - (rel.y + litCamPos.y), 0.0) / up);
++    float c = skyShadowCoverFrom(q, litSkyShadow.xy);
++    if (litSkyShadow.w > 0.0) {
++        vec2 prev = litSkyShadow.xy + kSkyShadowAnchorRadius * vec2(cos(litSkyShadow.z), sin(litSkyShadow.z));
++        c = mix(c, skyShadowCoverFrom(q, prev), litSkyShadow.w);
++    }
++    return c;
++}
++
+ // Broken-cloud shadows: the ground point is projected along the sun ray up to
+ // the cloud deck and looked up in a drifting noise field whose covered fraction
+ // matches the overcast. The noise is histogram-equalised and read once, and
+ // the soft edge is symmetric about the threshold and narrows toward a clear or
+ // a fully covered sky, so the covered fraction is exactly the overcast (no sun
+-// patches under a full overcast, no stray shadows under a clear sky).
++// patches under a full overcast, no stray shadows under a clear sky). With the
++// sky-matched shadows (litSky.y) the dome's own clouds cast them instead, at
++// the transmission that keeps the field's mean (LightRig skyShadowCoverage).
+ float cloudSunVisibility(vec3 posAbs) {
+     if (litCloud.w < 0.5 || litFlags.y < 0.5) return 1.0;
++    if (litSky.y > 0.5) return mix(1.0, litCloud.y, domeCloudCover(posAbs - litCamPos.xyz));
+     float up = max(litSunDir.y, 0.12);
+     vec2 p = posAbs.xz + litSunDir.xz / up * (litCloudOffset.z - posAbs.y);
+     float n = texture(cloudNoise, (p + litCloudOffset.xy) * litCloud.z).r;
+@@ -646,11 +724,15 @@ void main() {
+     vec4 r0;
+     float ambientShare = 0.0;
+     if (vLitMode > 1.5) {
+-        // The sky dome (the sky table), over its pre-lit classic colour.
++        // The sky dome (the sky table and the lit clouds), over its pre-lit
++        // classic colour.
+         vec4 classic = vColor * t0;
+         classic *= constColor;
+         classic.rgb += vSpecColor.rgb;
+-        r0 = vec4(shadeSkyDome(t0, classic.rgb), classic.a);
++        vec3 rgb = classic.rgb;
++        if (litAtmo.x > 0.0) rgb = shadeSkyDome(t0, classic.rgb);
++        else if (litSky.x > 0.0) rgb = litCloudsOverClassic(rgb, litCloudTermsDome(vUV0));
++        r0 = vec4(rgb, classic.a);
+     } else if (vLitMode > 0.5) {
+         r0.rgb = shadeRemastered(t0.rgb * constColor.rgb, false, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+@@ -658,6 +740,13 @@ void main() {
+         r0 = vColor * t0;
+         r0 *= constColor;
+         r0.rgb += vSpecColor.rgb;
++        // The sky clouds lit from their sun side (litClouds).
++        if (vLitMode < -1.5) r0.rgb = litCloudsOverClassic(r0.rgb, litCloudTermsSheet(t0.a));
++        // The sun disk behind a dome cloud (skyCloudShadows): its colour and
++        // its coverage both, so it fades into the cloud whatever its blending
++        // (a dimmed colour alone drew a dark disk over the sky).
++        if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
++            r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(litSunDir.xyz));
+     }
+     finishFragment(r0, ambientShare, true);
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index 3f04c99..354dcf1 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -1,8 +1,9 @@
+ // Remastered lighting shaders: the sky piece of the fragment prelude
+ // (FragmentPiece::Sky, joined by RemasterFragmentCommon() in
+ // EngineGL33_LightingShaders.cpp): the sky light falling on a surface, the fog
+-// colour toward the sun, and the sky table's lookups for the dome and the fog
+-// colour (aerial perspective). Sky lookups for reflections belong here too.
++// colour toward the sun, the sky table's lookups for the dome and the fog
++// colour (aerial perspective) and the lit sky clouds. Sky lookups for
++// reflections belong here too.
+ 
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+@@ -122,14 +123,153 @@ vec3 atmoFogColor(vec3 rel, vec3 classicFog) {
+     return mix(classicFog, disp, litAtmo.z);
+ }
+ 
++// ---- Lit sky clouds (feature switch litClouds; SkyDensity.hpp) --------------
++// The sky's painted clouds read as a density field (the cloud-density map on
++// unit 9, skyCloudDensity). A short march from a sky pixel toward the sun gives
++// the cloud the sunlight crosses before it reaches the pixel; the difference to
++// the pixel's own density is relief, mean-free over a field (the sky keeps its
++// brightness): sun-facing edges lit and warm, the far side shaded. Thin rims
++// facing a nearby sun get a forward-scattered silver lining, thick cloud in
++// front of the sun goes dark, and under an overcast deck the dark lumps deepen
++// into bellies. Relief and lining are on luminance, tinted only by the sun's
++// colour. Every term is the low sun's: all of them fade out together between
++// kLitCloudFadeStartDeg and kLitCloudFadeEndDeg, so from there up the terms are
++// identity (SkyDensity.hpp LitCloudTerms). At midday the relief embossed the
++// painted sky with colour fringes, and the darkening against the sun left on
++// its own made the sky only darker.
++const float kLitCloudRelief = 1.8;        // kLitCloudRelief
++const float kLitCloudSilver = 1.0;        // kLitCloudSilver
++const float kLitCloudStepDeg = 1.2;       // kLitCloudStepDeg
++const float kLitCloudFadeStartDeg = 25.0; // kLitCloudFadeStartDeg
++const float kLitCloudFadeEndDeg = 45.0;   // kLitCloudFadeEndDeg
++const float kLitCloudSilverLight = 1.2;   // the lining's light, in the cloud's own luminance
++
++// The sun's light on a sky cloud seen along the unit direction v: x the
++// luminance gain, y how far its colour goes toward the sun's, z the silver
++// lining (in the cloud's own luminance), w where it applies (the map has cloud
++// there, times litSky.x). `d` is the density here, `tau` the mean density
++// toward the sun, `feature`, `dark` and `deck` the pixel's broken cloud,
++// darkness and deck weight.
++vec4 litCloudTerms(vec3 v, float d, float tau, float feature, float dark, float deck) {
++    vec3 l = litSunDir.xyz;
++    float cosT = dot(v, l);
++    // Overcast flattens the direct part: the light inside a deck is diffuse.
++    float direct = smoothstep(-0.06, 0.04, l.y) * mix(0.45, 1.0, clamp(litSky.w, 0.0, 1.0));
++    float relief = clamp((d - tau) * kLitCloudRelief, -0.35, 0.8);
++    float gain = 1.0 + relief * direct;
++    gain *= 1.0 + (0.55 - dark) * 0.7 * deck;
++    gain *= 1.0 - 0.35 * pow(max(cosT, 0.0), 6.0) * smoothstep(0.35, 0.9, feature) * direct;
++    float warm = clamp(relief, 0.0, 1.0) * direct;
++    // The rim is where the density falls off toward the sun; Henyey-Greenstein
++    // (g 0.8) relative to its peak toward the sun.
++    float rim = clamp((d - tau) * 3.0, 0.0, 1.0) * (1.0 - 0.5 * d);
++    float hg = 0.008 / pow(max(1.64 - 1.6 * cosT, 1e-4), 1.5); // 1 toward the sun
++    float silver = hg * rim * kLitCloudSilver * direct;
++    // All of it fades with the low sun, the darkening against the sun and the
++    // bellies included: identity from kLitCloudFadeEndDeg up.
++    float lowSun = 1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, litSun.w);
++    return vec4(mix(1.0, gain, lowSun), warm * lowSun, silver * lowSun, litSky.x * smoothstep(0.02, 0.25, d));
++}
++
++// A cloud's light (linear) under those terms.
++vec3 litCloudLight(vec3 lin, vec4 t) {
++    if (t.w <= 0.0) return lin;
++    float sl = dot(litSun.rgb, kLuma);
++    vec3 sunC = sl > 1e-5 ? litSun.rgb / sl : vec3(1.0); // unit luminance
++    vec3 lit = lin * (t.x * mix(vec3(1.0), sunC, 0.85 * t.y));
++    lit += sunC * (max(dot(lin, kLuma), 0.02) * t.z * kLitCloudSilverLight);
++    return mix(lin, lit, t.w);
++}
++
++// The same over a pre-lit colour (display), where the sky table does not shade
++// it: a colour pushed past white goes toward white rather than clipping
++// channel by channel (clipped channels made colour fringes).
++vec3 litCloudsOverClassic(vec3 disp, vec4 t) {
++    if (t.w <= 0.0) return disp;
++    vec3 c = toDisplay(litCloudLight(toLinear(disp), t));
++    float peak = max(c.r, max(c.g, c.b));
++    if (peak > 1.0) c = mix(c / peak, vec3(1.0), clamp((peak - 1.0) * 0.5, 0.0, 1.0));
++    return c;
++}
++
++// The terms for a dome pixel at its (turned) texture coordinate. The march
++// steps the view ray toward the sun and maps each step through the dome's own
++// mapping, relative to the pixel's mesh coordinate, so it is continuous across
++// the dome's coarse triangles (screen-space derivatives jump at their edges).
++vec4 litCloudTermsDome(vec2 uv) {
++    // Off, or a sun so high the terms are identity: no march.
++    if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);
++    vec4 m = textureLod(skyDensity, uv, 0.0);
++    float d = skyCloudDensity(m);
++    if (d <= 0.02) return vec4(1.0, 0.0, 0.0, 0.0);
++    vec3 v = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
++    vec3 l = litSunDir.xyz;
++    vec3 t = l - v * dot(v, l);
++    float tl = length(t);
++    t = tl > 1e-4 ? t / tl : vec3(0.0, 1.0, 0.0);
++    vec2 uvA = skyDomeUv(v);
++    float tau = 0.0;
++    float wsum = 0.0;
++    for (int k = 1; k <= 6; ++k) {
++        float fk = float(k);
++        float a = radians(kLitCloudStepDeg) * fk * (0.5 + 0.5 * fk);
++        vec2 duv = skyDomeUv(v * cos(a) + t * sin(a)) - uvA;
++        duv.x -= floor(duv.x + 0.5);
++        float wk = 1.0 / fk;
++        tau += wk * skyCloudDensity(textureLod(skyDensity, uv + duv, 0.0));
++        wsum += wk;
++    }
++    float deck = m.g * (1.0 - smoothstep(0.35, 0.75, litSky.w));
++    return litCloudTerms(v, d, tau / wsum, m.r * (0.75 + 0.25 * m.b), m.b, deck);
++}
++
++// The terms for a sky cloud sheet (DrawClouds' billboards), whose own texture
++// alpha is its density: the march runs in its texture toward the sun, whose
++// direction there comes from a small step of the view ray toward the sun on
++// the screen through the texture's screen-space derivatives (the sheets are
++// flat, so these are smooth).
++vec4 litCloudTermsSheet(float alpha) {
++    vec2 dUVdx = dFdx(vUV0);
++    vec2 dUVdy = dFdy(vUV0);
++    if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg || alpha <= 0.02) return vec4(1.0, 0.0, 0.0, 0.0);
++    vec3 v = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
++    vec3 l = litSunDir.xyz;
++    vec3 t = l - v * dot(v, l);
++    float tl = length(t);
++    vec2 dir = vec2(0.0);
++    if (tl > 1e-4) {
++        vec3 v2 = normalize(v + t * (0.01 / tl));
++        vec3 R = litSkyRight.xyz;
++        vec3 U = litSkyUp.xyz;
++        vec3 F = litSkyFwd.xyz;
++        vec2 n1 = vec2(dot(v, R) / max(dot(R, R), 1e-12), dot(v, U) / max(dot(U, U), 1e-12)) / max(dot(v, F), 1e-4);
++        vec2 n2 = vec2(dot(v2, R) / max(dot(R, R), 1e-12), dot(v2, U) / max(dot(U, U), 1e-12)) / max(dot(v2, F), 1e-4);
++        // Pixels per NDC unit go as tan(fov / 2) on each axis (square pixels).
++        vec2 dPix = (n2 - n1) * vec2(length(R), length(U));
++        vec2 duv = dUVdx * dPix.x + dUVdy * dPix.y;
++        float len = length(duv);
++        dir = len > 1e-9 ? duv / len : vec2(0.0);
++    }
++    float tau = 0.0;
++    float wsum = 0.0;
++    for (int k = 1; k <= 6; ++k) {
++        float fk = float(k);
++        float wk = 1.0 / fk;
++        tau += wk * textureGrad(tex0, vUV0 + dir * (0.025 * fk * (0.5 + 0.5 * fk)), dUVdx, dUVdy).a;
++        wsum += wk;
++    }
++    return litCloudTerms(v, alpha, tau / wsum, alpha, 0.0, 0.0);
++}
++
+ // The sky dome under the original sky texture's clouds. The clear part of the
+ // texture (a painted gradient) becomes the table's sky at the brightness of the
+ // texture's clearest texel in the same row under the original dome light and
+ // its sun glow; its clouds stay as a mask (brighter than that texel by more
+ // than the dead zone litAtmo.w, or the overcast deck) and are lit by the sun
+ // seen from the cloud deck plus the sky above, with forward scattering toward
+-// the sun. `classic` is the original dome colour, which the night fade
+-// (litAtmo.x) returns to.
++// the sun, and with lit clouds on (litSky.x) their relief and lining on top.
++// `classic` is the original dome colour, which the night fade (litAtmo.x)
++// returns to.
+ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+     vec3 d = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
+     float lumT = dot(t0.rgb, kLuma);
+@@ -175,6 +315,14 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+     vec3 cPhys = mix(vec3(shade * 0.8 / whiteLin), vec3(shade * 1.25), litAtmo.y) * light;
+     vec3 cRelit = cloudTex * rowLight * (dot(light, kLuma) / rowLum);
+     vec3 cloudLin = mix(cRelit, cPhys, litAtmoDome.w);
++    // Lit clouds: the relief and lining of the density map's clouds, on the
++    // cloud and on the sky behind it alike (the map also finds the faint bluish
++    // streaks the mask leaves as sky).
++    if (litSky.x > 0.0) {
++        vec4 lc = litCloudTermsDome(vUV0);
++        a = litCloudLight(a, lc);
++        cloudLin = litCloudLight(cloudLin, lc);
++    }
+     // Cover over clear sky in display space, where the mask measured it: a
+     // faint cloud keeps about the texture's own contrast (mixed in linear light
+     // the texture's faint blotches read 40 % stronger than in the original).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
+index c513a44..1997ed2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_SkyTable.cpp
+@@ -300,7 +300,7 @@ bool EngineGL33::PollSkyTables()
+ 
+ bool EngineGL33::RemasterSkyPending() const
+ {
+-    return s_sky.building;
++    return s_sky.building || SkyDensityPending();
+ }
+ 
+ void EngineGL33::BindSkyTable()
+@@ -417,16 +417,22 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
+ {
+     if (s_sky.open)
+         EndRemasterSky();
+-    // Classic lighting, the switch off, and the paths that stay classic (a
++    // Classic lighting, the switches off, and the paths that stay classic (a
+     // portrait, a 3D preview after the world, night vision) leave the sky
+-    // draws alone: off draws exactly the frame without the feature.
++    // draws alone: off draws exactly the frame without the features.
+     if (!_glContext || !_lightingActive || !GScene || !GScene->GetCamera() || !GScene->MainLight() ||
+-        _portraitTargetSize || _worldSceneEnded || _nightVision ||
+-        !rm::FeatureOn(_lighting.features, rm::Feature::Atmosphere))
++        _portraitTargetSize || _worldSceneEnded || _nightVision)
+         return;
+-    // Until the worker has the atmosphere tables the sky stays classic (the
++    const bool wantAtmosphere = rm::FeatureOn(_lighting.features, rm::Feature::Atmosphere);
++    const bool wantClouds = SkyCloudsWanted();
++    // The sun disk is the clouds' alone (it dims behind a dome cloud).
++    const bool sunDisk = mode == Poseidon::RemasterSky::Sun;
++    if (sunDisk ? !wantClouds : !wantAtmosphere && !wantClouds)
++        return;
++    // Until the worker has the atmosphere tables the sky table stays off (the
+     // gate reads "atmosphere tables building").
+-    if (!PollSkyTables())
++    const bool tables = !sunDisk && wantAtmosphere && PollSkyTables();
++    if (!tables && !wantClouds)
+         return;
+     // Draws queued so far keep their programs.
+     FlushQueues();
+@@ -441,7 +447,24 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
+     LightSun* sun = GScene->MainLight();
+     const float sunElevRad = SunElevationRad(sun);
+     const float haze = HazeOf(_lighting);
+-    if (!_featureGates[rm::Feature::Atmosphere].on)
++    const bool atmosphere = tables && _featureGates[rm::Feature::Atmosphere].on;
++    // What the clouds need of this draw: the dome turns with the sky's drift
++    // whenever a clouds switch is on, the sky clouds are lit while lit clouds
++    // run, and the sun disk dims while the sky-matched shadows run.
++    bool clouds = false;
++    switch (mode)
++    {
++        case Poseidon::RemasterSky::Dome:
++            clouds = wantClouds;
++            break;
++        case Poseidon::RemasterSky::Clouds:
++            clouds = _featureGates[rm::Feature::LitClouds].on;
++            break;
++        case Poseidon::RemasterSky::Sun:
++            clouds = _featureGates[rm::Feature::SkyCloudShadows].on;
++            break;
++    }
++    if (!(sunDisk ? clouds : atmosphere || clouds))
+     {
+         if (s_sky.forcedPrograms)
+         {
+@@ -454,7 +477,7 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
+     const bool dome = mode == Poseidon::RemasterSky::Dome;
+     if (dome)
+         GpuMark(Poseidon::gpu::Mark::SkyBegin);
+-    if (rm::SkyTableNeedsRebuild(s_sky.built, s_sky.builtSunElevRad, s_sky.builtHaze, sunElevRad, haze) &&
++    if (atmosphere && rm::SkyTableNeedsRebuild(s_sky.built, s_sky.builtSunElevRad, s_sky.builtHaze, sunElevRad, haze) &&
+         BuildSkyViewTableGpu(sunElevRad) && dome)
+         GpuMark(Poseidon::gpu::Mark::SkyTableEnd);
+     s_sky.open = true;
+@@ -463,6 +486,7 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
+     UploadLitSky(-sun->Direction(), land ? land->SkyThrough() : 1.0f);
+     FlushLitConstants();
+     BindSkyTable();
++    BindSkyDensity();
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -506,29 +530,41 @@ void EngineGL33::UploadLitSky(const Vector3& toSun, float skyThrough)
+                       camera && _worldEffectsOn;
+     const float sunElevRad = std::asin(std::max(-1.0f, std::min(1.0f, toSun.Y())));
+     const float day = live ? rm::SkyDayFade(sunElevRad * kDeg) : 0.0f;
++    // The camera basis that turns a screen position into a view ray: the sky
++    // table's dome and fog and the lit clouds read it.
++    auto cameraBasis = [&]
++    {
++        Vector3 r = camera->DirectionAside();
++        Vector3 u = camera->DirectionUp();
++        Vector3 f = camera->Direction();
++        r.Normalize();
++        u.Normalize();
++        f.Normalize();
++        const float l = camera->Left(), t = camera->Top();
++        SetLitSlot(LC::SkyRight, r.X() * l, r.Y() * l, r.Z() * l, rm::atmo::kMieG);
++        SetLitSlot(LC::SkyUp, u.X() * t, u.Y() * t, u.Z() * t, 0.0f);
++        SetLitSlot(LC::SkyFwd, f.X(), f.Y(), f.Z(), static_cast<float>(s_sky.mode));
++    };
+     if (day <= 0.0f)
+     {
+         // The vertex and fragment shaders test the two blends.
+-        SetLitSlot(LC::SkyRight, 0.0f, 0.0f, 0.0f, rm::atmo::kMieG);
+-        SetLitSlot(LC::SkyUp, 0.0f, 0.0f, 0.0f, 0.0f);
+-        SetLitSlot(LC::SkyFwd, 0.0f, 0.0f, 1.0f, static_cast<float>(s_sky.mode));
++        if (camera && _featureGates.computed && _featureGates[rm::Feature::LitClouds].on && _worldEffectsOn)
++        {
++            cameraBasis();
++        }
++        else
++        {
++            SetLitSlot(LC::SkyRight, 0.0f, 0.0f, 0.0f, rm::atmo::kMieG);
++            SetLitSlot(LC::SkyUp, 0.0f, 0.0f, 0.0f, 0.0f);
++            SetLitSlot(LC::SkyFwd, 0.0f, 0.0f, 1.0f, static_cast<float>(s_sky.mode));
++        }
+         SetLitSlot(LC::Atmo, 0.0f, 0.0f, 0.0f, rm::kSkyCloudMaskDeadZone);
+         SetLitSlot(LC::AtmoCloudSun, 0.0f, 0.0f, 0.0f, 0.0f);
+         SetLitSlot(LC::AtmoGlow, 0.0f, 0.0f, 0.0f, 1.0f);
+         SetLitSlot(LC::AtmoDome, 0.0f, 0.0f, 0.0f, 0.0f);
+         return;
+     }
+-    // The camera basis that turns a screen position into a view ray.
+-    Vector3 r = camera->DirectionAside();
+-    Vector3 u = camera->DirectionUp();
+-    Vector3 f = camera->Direction();
+-    r.Normalize();
+-    u.Normalize();
+-    f.Normalize();
+-    const float l = camera->Left(), t = camera->Top();
+-    SetLitSlot(LC::SkyRight, r.X() * l, r.Y() * l, r.Z() * l, rm::atmo::kMieG);
+-    SetLitSlot(LC::SkyUp, u.X() * t, u.Y() * t, u.Z() * t, 0.0f);
+-    SetLitSlot(LC::SkyFwd, f.X(), f.Y(), f.Z(), static_cast<float>(s_sky.mode));
++    cameraBasis();
+     SetLitSlot(LC::Atmo, day, rm::SkyOvercastCloudFloor(skyThrough), day, rm::kSkyCloudMaskDeadZone);
+ 
+     // Brightness reference: the classic dome's vertex colour (TLVertexTable::
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 5ffaebf..25bea2b 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -170,6 +170,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_post_stages.cpp
+     Graphics/test_temporal_aa.cpp
+     Graphics/test_atmosphere.cpp
++    Graphics/test_sky_density.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 3032355..8e2c6c1 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -530,6 +530,29 @@ TEST_CASE("Feature gates: lit clouds need clouds in the sky, sky cloud shadows a
+     night.moonPhase = 1.0f;
+     CHECK(G(night, Feature::SkyCloudShadows).on);
+     CHECK_FALSE(G(night, Feature::SkyCloudShadows, Apply("remastered,moonShadows=0")).on);
++
++    // B10: the shadows run down to where the rig's sun is gone (-1.5 deg), so
++    // the hand-over to the noise field below it never shows.
++    GateInputs dusk = Noon();
++    dusk.skyThrough = 0.5f;
++    dusk.cloudCover = 0.5f;
++    dusk.sunElevationDeg = -1.0f;
++    CHECK(G(dusk, Feature::SkyCloudShadows).on);
++    dusk.sunElevationDeg = -1.6f;
++    CHECK_FALSE(G(dusk, Feature::SkyCloudShadows).on);
++    CHECK(kGateSkyShadowsMinSunDeg == -1.5f);
++
++    // Until the weather sky's density map is built both stay off (the noise
++    // field keeps the shadows meanwhile).
++    in.skyDensityReady = false;
++    CHECK_FALSE(G(in, Feature::LitClouds).on);
++    CHECK(std::string_view(G(in, Feature::LitClouds).reason) == "sky density map building");
++    CHECK_FALSE(G(in, Feature::SkyCloudShadows).on);
++    CHECK(std::string_view(G(in, Feature::SkyCloudShadows).reason) == "sky density map building");
++    // A clear sky still says so first.
++    in.skyThrough = 1.0f;
++    in.cloudCover = 0.0f;
++    CHECK(std::string_view(G(in, Feature::LitClouds).reason) == "clear sky");
+ }
+ 
+ TEST_CASE("Feature gates: one sharpen pass, TAA's or the luma one", "[remaster][FeatureGates]")
+@@ -597,13 +620,14 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
+-TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have landed, nothing else has",
++TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table and the clouds have landed, nothing else has",
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+     // classic): triFeatureState no longer marks them inert, and the overlay
+     // shows the opaque objects' GPU section for them. A5 lands taa, A7
+-    // atmosphere.
++    // atmosphere, B10 litClouds (the sky section) and skyCloudShadows (the
++    // world section: one density tap per lit fragment).
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -614,10 +638,11 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have
+         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
+         const bool taa = info.id == Feature::Taa;
+         const bool atmosphere = info.id == Feature::Atmosphere;
+-        CHECK(info.landed == (perf || taa || atmosphere));
++        const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
++        CHECK(info.landed == (perf || taa || atmosphere || clouds));
+         if (info.landed)
+         {
+-            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : "A7"));
++            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : atmosphere ? "A7" : "B10"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+     }
+@@ -627,7 +652,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have
+     INFO(s);
+     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
+     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+-    CHECK(s.find("landed=4/26") != std::string::npos);
++    CHECK(s.find("landed=6/26") != std::string::npos);
++    CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
++    CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index fbfd2b7..32c197d 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -8,6 +8,7 @@
+ #include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
++#include <Poseidon/Graphics/Remaster/SkyDensity.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+@@ -1113,6 +1114,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litAtmoCloudSun", LC::AtmoCloudSun, 1},
+         {"litAtmoGlow", LC::AtmoGlow, 1},
+         {"litAtmoDome", LC::AtmoDome, 1},
++        {"litSky", LC::Sky, 1},
++        {"litSkyShadow", LC::SkyShadow, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+     auto checkBlock = [](const std::string& block)
+@@ -1174,12 +1177,14 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+ 
+     // The planned slots: the three below the sky pass are the reserved padding,
+     // the rest continue the declared ones (A7 landed the sky slots 61 to 67 of
+-    // plan section 3.3).
++    // plan section 3.3, B10 the clouds slots 68 and 69).
+     CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
+     CHECK(gl::LitConstPlanned::Pcss == static_cast<int>(LC::Reserved) + LC::ReservedCount - 1);
+     CHECK(static_cast<int>(LC::SkyRight) == 61);
+     CHECK(static_cast<int>(LC::AtmoDome) == 67);
+-    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Count));
++    CHECK(static_cast<int>(LC::Sky) == 68);
++    CHECK(static_cast<int>(LC::SkyShadow) == 69);
++    CHECK(gl::LitConstPlanned::LightTiles == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.
+     std::ostringstream range;
+@@ -1238,14 +1243,21 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
+     // their pre-existing paths and the fog keeps its classic colours: the
+     // feature's "off" is the frame before it.
+     const std::string screen = gl::RemasterVertexSource(0); // VSScreen
+-    const size_t gate = screen.find("if (litAtmo.x > 0.0 || litAtmo.z > 0.0) {");
++    // B10 widened the gate by the clouds' slots (litSky, zero while they are
++    // off: see the clouds' own off case).
++    const size_t gate = screen.find("if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0) {");
+     REQUIRE(gate != std::string::npos);
+-    // vLitMode is 0 before the gate, 2 (dome) or -1 (pre-lit world) inside it.
++    // vLitMode is 0 before the gate, 2 (dome), -2 (lit sky clouds) or -1
++    // (pre-lit world) inside it.
+     CHECK(screen.find("vLitMode = 0.0;") < gate);
+     CHECK(screen.find("vLitMode = 2.0;") > gate);
++    CHECK(screen.find("vLitMode = -2.0;") > gate);
+     CHECK(screen.find("vLitMode = -1.0;") > gate);
+-    CHECK(CountOf(screen, "vLitMode = ") == 3);
+-    CHECK(screen.find("if (litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5 && litAtmo.x > 0.0) {") != std::string::npos);
++    CHECK(CountOf(screen, "vLitMode = ") == 4);
++    CHECK(screen.find("bool dome = litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5;") != std::string::npos);
++    CHECK(screen.find("if (dome && (litAtmo.x > 0.0 || litSky.x > 0.0 || litSky.z != 0.0)) {") != std::string::npos);
++    // The pre-lit world (and not the sun disk, sky mode 3) takes the table's fog.
++    CHECK(screen.find("} else if (litAtmo.z > 0.0 && litSkyFwd.w < 2.5) {") != std::string::npos);
+     // The ray from the screen position: NDC from the pixel position the vertex
+     // shader itself projects with, times the perspective w.
+     CHECK(screen.find("vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);") != std::string::npos);
+@@ -1265,7 +1277,7 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
+     // The dome branch is PSNormal's; the other mains light only vLitMode 1.
+     const std::string normal = gl::RemasterFragmentMain(0); // PSNormal
+     CHECK(normal.find("if (vLitMode > 1.5) {") != std::string::npos);
+-    CHECK(normal.find("shadeSkyDome(t0, classic.rgb)") != std::string::npos);
++    CHECK(normal.find("if (litAtmo.x > 0.0) rgb = shadeSkyDome(t0, classic.rgb);") != std::string::npos);
+     for (int ps : {1, 2}) // PSDetail, PSGrass
+     {
+         CAPTURE(ps);
+@@ -1334,3 +1346,207 @@ TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp
+         CHECK(engine.find(use) != std::string::npos);
+     }
+ }
++
++namespace
++{
++// The value of `const float <name> = <value>;` in a GLSL source, or NaN.
++float GlslConst(const std::string& source, const std::string& name)
++{
++    const std::regex decl("const float " + name + R"(\s*=\s*(-?[0-9.]+)\s*;)");
++    std::smatch m;
++    if (!std::regex_search(source, m, decl))
++        return std::numeric_limits<float>::quiet_NaN();
++    return std::stof(m[1].str());
++}
++
++// A float as the shaders write it: the shortest of 1 to 4 decimals that reads
++// back exactly.
++std::string GlslNumber(float v)
++{
++    for (int digits = 1; digits <= 4; ++digits)
++    {
++        std::ostringstream s;
++        s << std::fixed;
++        s.precision(digits);
++        s << v;
++        if (std::abs(std::stof(s.str()) - v) < 1e-5f)
++            return s.str();
++    }
++    std::ostringstream s;
++    s << v;
++    return s.str();
++}
++} // namespace
++
++TEST_CASE("Remaster sky clouds: with their slots at zero every draw is the one before them",
++          "[Graphics][Shaders][remaster][clouds]")
++{
++    // The clouds switches are off (switch, gate, classic, night vision) exactly
++    // when the engine uploads litSky as zero (EngineGL33_SkyClouds.cpp
++    // UploadLitClouds). Then the dome keeps its texture coordinate and its
++    // draw, the sky clouds and the sun disk pass through, and the shadows come
++    // from the noise field: the frame before B10.
++    const std::string screen = gl::RemasterVertexSource(0); // VSScreen
++    CHECK(screen.find("if (dome && litSky.z != 0.0) vUV0.x += litSky.z;") != std::string::npos);
++    CHECK(CountOf(screen, "vUV0 ") == 1);      // set once ...
++    CHECK(CountOf(screen, "vUV0.x += ") == 1); // ... and turned once
++    const size_t sheets = screen.find("} else if (litSkyFwd.w > 1.5 && litSkyFwd.w < 2.5 && litSky.x > 0.0) {");
++    REQUIRE(sheets != std::string::npos);
++    CHECK(screen.find("vLitMode = -2.0;", sheets) != std::string::npos);
++
++    const std::string normal = gl::RemasterFragmentMain(0); // PSNormal
++    CHECK(normal.find("else if (litSky.x > 0.0) rgb = litCloudsOverClassic(rgb, litCloudTermsDome(vUV0));") !=
++          std::string::npos);
++    CHECK(normal.find("if (vLitMode < -1.5) r0.rgb = litCloudsOverClassic(r0.rgb, litCloudTermsSheet(t0.a));") !=
++          std::string::npos);
++    CHECK(normal.find("if (litSkyFwd.w > 2.5 && litSky.y > 0.5)") != std::string::npos);
++    // The sun disk fades (colour and coverage), it does not turn into a dark disk.
++    CHECK(normal.find("r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(litSunDir.xyz));") != std::string::npos);
++    // Only PSNormal draws the sky.
++    for (int ps : {1, 2, 3})
++    {
++        CAPTURE(ps);
++        CHECK(std::string(gl::RemasterFragmentMain(ps)).find("litSky") == std::string::npos);
++    }
++
++    // The shadows: the dome only behind litSky.y, before the noise lookup.
++    const std::string terrain = Piece(gl::FragmentPiece::TerrainClouds);
++    const size_t dome = terrain.find("if (litSky.y > 0.5) return mix(1.0, litCloud.y, domeCloudCover(");
++    REQUIRE(dome != std::string::npos);
++    CHECK(dome < terrain.find("texture(cloudNoise,"));
++    // The previous anchor's lookup only while it fades.
++    CHECK(terrain.find("if (litSkyShadow.w > 0.0) {") != std::string::npos);
++
++    // Lit clouds: on the dome only behind litSky.x, and the terms weigh
++    // nothing at zero strength.
++    const std::string sky = Piece(gl::FragmentPiece::Sky);
++    const size_t lit = sky.find("if (litSky.x > 0.0) {\n        vec4 lc = litCloudTermsDome(vUV0);");
++    REQUIRE(lit != std::string::npos);
++    CHECK(lit < sky.find("vec3 disp = mix(skyDisplay(a), skyDisplay(cloudLin), cloud);"));
++    CHECK(sky.find("if (t.w <= 0.0) return lin;") != std::string::npos);
++    CHECK(sky.find("if (t.w <= 0.0) return disp;") != std::string::npos);
++    CHECK(sky.find("if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);") !=
++          std::string::npos);
++}
++
++TEST_CASE("Remaster sky clouds: at a high sun the lit-cloud terms are identity, as SkyDensity's LitCloudTerms",
++          "[Graphics][Shaders][remaster][clouds]")
++{
++    // litCloudTerms computes the terms the C++ mirror computes (relief, bellies,
++    // darkening against the sun, lining) and fades every one of them with the
++    // low sun on its way out, so from kLitCloudFadeEndDeg up a cloud keeps its
++    // light: never only darker at midday (test_sky_density.cpp checks the
++    // mirror is identity there).
++    const std::string sky = Piece(gl::FragmentPiece::Sky);
++    const size_t begin =
++        sky.find("vec4 litCloudTerms(vec3 v, float d, float tau, float feature, float dark, float deck) {");
++    REQUIRE(begin != std::string::npos);
++    const size_t end = sky.find("\n}\n", begin);
++    REQUIRE(end != std::string::npos);
++    const std::string body = sky.substr(begin, end - begin);
++    for (const char* line : {
++             "float direct = smoothstep(-0.06, 0.04, l.y) * mix(0.45, 1.0, clamp(litSky.w, 0.0, 1.0));",
++             "float relief = clamp((d - tau) * kLitCloudRelief, -0.35, 0.8);",
++             "float gain = 1.0 + relief * direct;",
++             "gain *= 1.0 + (0.55 - dark) * 0.7 * deck;",
++             "gain *= 1.0 - 0.35 * pow(max(cosT, 0.0), 6.0) * smoothstep(0.35, 0.9, feature) * direct;",
++             "float warm = clamp(relief, 0.0, 1.0) * direct;",
++             "float rim = clamp((d - tau) * 3.0, 0.0, 1.0) * (1.0 - 0.5 * d);",
++             "float hg = 0.008 / pow(max(1.64 - 1.6 * cosT, 1e-4), 1.5);",
++             "float silver = hg * rim * kLitCloudSilver * direct;",
++             "float lowSun = 1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, litSun.w);",
++             "return vec4(mix(1.0, gain, lowSun), warm * lowSun, silver * lowSun, litSky.x * smoothstep(0.02, 0.25, "
++             "d));",
++         })
++    {
++        CAPTURE(line);
++        CHECK(body.find(line) != std::string::npos);
++    }
++    // The fade comes once, on the way out: no term is faded on its own.
++    CHECK(CountOf(body, "lowSun") == 4);
++    // From there up the shaders skip the march (the terms would be identity).
++    CHECK(sky.find("if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);") !=
++          std::string::npos);
++    CHECK(sky.find("if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg || alpha <= 0.02) return vec4(1.0, 0.0, "
++                   "0.0, 0.0);") != std::string::npos);
++    const LitCloudShade noon = LitCloudTerms(60.0f, 1.0f, 0.8f, 0.8f, 1.0f, 0.2f, 0.0f, 0.7f);
++    CHECK(noon.gain == 1.0f);
++    CHECK(noon.warm == 0.0f);
++    CHECK(noon.silver == 0.0f);
++}
++
++TEST_CASE("Remaster sky clouds: the shaders use SkyDensity.hpp's constants and dome mapping",
++          "[Graphics][Shaders][remaster][clouds]")
++{
++    const std::string terrain = Piece(gl::FragmentPiece::TerrainClouds);
++    const std::string sky = Piece(gl::FragmentPiece::Sky);
++    struct Const
++    {
++        const std::string* source;
++        const char* glsl;
++        float value;
++    };
++    const Const consts[] = {
++        {&terrain, "kSkyShadowDeck", kSkyShadowDeckAltitude},
++        {&terrain, "kSkyShadowThreshold", kSkyShadowThreshold},
++        {&terrain, "kSkyShadowEdge", kSkyShadowEdge},
++        {&terrain, "kSkyShadowAnchorRadius", kSkyShadowAnchorRadius},
++        {&terrain, "kSkySunBehindCloud", kSkySunBehindCloud},
++        {&sky, "kLitCloudRelief", kLitCloudRelief},
++        {&sky, "kLitCloudSilver", kLitCloudSilver},
++        {&sky, "kLitCloudStepDeg", kLitCloudStepDeg},
++        {&sky, "kLitCloudFadeStartDeg", kLitCloudFadeStartDeg},
++        {&sky, "kLitCloudFadeEndDeg", kLitCloudFadeEndDeg},
++    };
++    for (const Const& c : consts)
++    {
++        CAPTURE(c.glsl);
++        CHECK(GlslConst(*c.source, c.glsl) == Catch::Approx(c.value));
++    }
++
++    // skyDomeUv: the rings of SkyDomeV, segment by segment.
++    const float* e = kSkyDomeRingElevationDeg;
++    const float* v = kSkyDomeRingV;
++    REQUIRE(kSkyDomeRings == 5);
++    const std::string segments[] = {
++        "if (e < " + GlslNumber(e[1]) + ") v = mix(" + GlslNumber(v[0]) + ", " + GlslNumber(v[1]) + ", clamp((e + " +
++            GlslNumber(-e[0]) + ") / " + GlslNumber(e[1] - e[0]) + ", 0.0, 1.0));",
++        "else if (e < " + GlslNumber(e[2]) + ") v = mix(" + GlslNumber(v[1]) + ", " + GlslNumber(v[2]) + ", (e - " +
++            GlslNumber(e[1]) + ") / " + GlslNumber(e[2] - e[1]) + ");",
++        "else if (e < " + GlslNumber(e[3]) + ") v = mix(" + GlslNumber(v[2]) + ", " + GlslNumber(v[3]) + ", (e - " +
++            GlslNumber(e[2]) + ") / " + GlslNumber(e[3] - e[2]) + ");",
++        "else v = mix(" + GlslNumber(v[3]) + ", " + GlslNumber(v[4]) + ", clamp((e - " + GlslNumber(e[3]) + ") / " +
++            GlslNumber(e[4] - e[3]) + ", 0.0, 1.0));",
++    };
++    for (const std::string& seg : segments)
++    {
++        CAPTURE(seg);
++        CHECK(terrain.find(seg) != std::string::npos);
++    }
++    // u: azimuth from north toward east over 180 degrees, plus the turn.
++    CHECK(terrain.find("float az = atan(w.x, w.z) * 57.29578;") != std::string::npos);
++    CHECK(terrain.find("return vec2(az / 180.0 + litSky.z, v);") != std::string::npos);
++    // The density and the deck weight as SkyCloudDensity and SkyDeckWeight.
++    CHECK(terrain.find("float deck = m.g * (1.0 - smoothstep(0.35, 0.75, litSky.w));") != std::string::npos);
++    CHECK(terrain.find("return max(m.r, deck) * mix(0.75 + 0.25 * m.b, 0.5 + 0.5 * m.b, deck);") != std::string::npos);
++    const float w = SkyDeckWeight(0.5f);
++    CHECK(w == Catch::Approx(1.0f - 0.375f * 0.375f * (3.0f - 2.0f * 0.375f)));
++    CHECK(SkyCloudDensity(0.6f, 1.0f, 0.4f, w) ==
++          Catch::Approx(std::max(0.6f, w) * ((0.75f + 0.25f * 0.4f) * (1.0f - w) + (0.5f + 0.5f * 0.4f) * w)));
++    // The march steps as LitCloudStepAngleDeg, the low-sun fade as LitCloudLowSun.
++    CHECK(sky.find("for (int k = 1; k <= " + std::to_string(kLitCloudSteps) + "; ++k) {") != std::string::npos);
++    CHECK(sky.find("float a = radians(kLitCloudStepDeg) * fk * (0.5 + 0.5 * fk);") != std::string::npos);
++    CHECK(sky.find("1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, litSun.w)") != std::string::npos);
++    // The shadow edge as SkyShadowCover.
++    CHECK(terrain.find("smoothstep(kSkyShadowThreshold - kSkyShadowEdge, kSkyShadowThreshold + kSkyShadowEdge, d)") !=
++          std::string::npos);
++
++    // The engine builds the map, its coverage and the turn from SkyDensity.hpp.
++    const std::string engine = ReadTextFile(Gl33Dir() / "EngineGL33_SkyClouds.cpp");
++    for (const char* use : {"rm::BuildSkyDensityMap(", "rm::BuildSkyShadowCoverageTable(", "rm::SkyDomeTurnU(",
++                            "rm::MixSkyTexels(", "rm::SkyDeckWeight(", "s_clouds.anchor.Update("})
++    {
++        CAPTURE(use);
++        CHECK(engine.find(use) != std::string::npos);
++    }
++}

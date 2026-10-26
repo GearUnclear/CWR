@@ -1,0 +1,8 @@
+# Research-only capture run for the object-shadows fix, round 2 (not part of the patch).
+# Same rig as tests/rendering/captures/abel_lighting.test.toml.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_abel.Abel"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 900
+assert_timeout = 180
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "960", "--height", "640"]

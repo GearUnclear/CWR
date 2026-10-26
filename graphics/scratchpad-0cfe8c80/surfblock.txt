@@ -1,0 +1,25 @@
+    // c.a is one minus the pixel's sky light share (1 for pre-lit and coverage
+    // pixels); the camera's cool shade reads it in both paths.
+    float share = 1.0 - clamp(c.a, 0.0, 1.0);
+    float keep;
+    if (surfParams.x > 0.5) {
+        // The surface target's share, the occlusion upsampled by depth, its
+        // strength as a power and the multi-bounce correction by the albedo.
+        vec4 s = textureLod(surfTex, vUV, 0.0);
+        float zc = compositeViewZ(vUV);
+        ao = upsampleOcclusion(vUV, zc);
+        // The target's alpha: 0.5 the occlusion as set, 1 static architecture
+        // (eaves, door openings, the foot of a wall take it stronger).
+        float power = surfParams.y * mix(1.0, surfParams2.x, smoothstep(0.5, 1.0, s.a));
+        ao = pow(clamp(ao, 0.0, 1.0), power);
+        if (surfParams.w > 0.5) ao = occlusionMultiBounce(ao, s.g * s.g);
+        // The sun's share loses what a contact shadow hides.
+        float contact = (surfParams.z > 0.0 && s.b > 0.02) ? contactShadow(vUV, zc) : 1.0;
+        contact = mix(1.0, contact, clamp(surfParams.z, 0.0, 1.0));
+        if (debugView.x > 0.5) { fragColor = vec4(vec3(ao * contact), 1.0); return; }
+        keep = max(1.0 - clamp(s.r, 0.0, 1.0) * (1.0 - ao) - clamp(s.b, 0.0, 1.0) * (1.0 - contact), 0.0);
+    } else {
+        if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
+        // Take the occluded part of the sky light out of the radiance.
+        keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+    }

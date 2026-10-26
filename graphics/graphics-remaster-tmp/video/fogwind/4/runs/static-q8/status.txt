@@ -1,0 +1,3 @@
+﻿start 04:17:00 test=tests/rendering/captures/video/look_probe_fog4_static.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\4\shaders\q8 junction=RemasterUD-fog-4
+run exit=0 frames=120 minutes=4.9 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\4\runs\static-q8
+done 04:22:00

@@ -1,0 +1,58 @@
+guerrilla: auto-detect AIRFIELD and SEAPORT zones per island and seed them at load (#76 slice; seedBases, playRegion)
+
+BaseDetect (pure core): airfields from the world's ILS table (ilsPosition /
+ilsDirection / ilsTaxiIn / ilsTaxiOff and any SecondaryAirports; rejected
+at the map origin, off the map or with a wet runway; centred on the apron;
+an inherited ILS is never seeded) and from hangar / shelter / control-tower
+clusters (300 m, at least 3 objects, 2 of them hangars; strips within
+1500 m fold into one airfield, which keeps Sinai's Egyptian Airbase one
+zone); seaports from pier / quay / crane / dock clusters (150 m, score
+1.5 with one weight-1 structure, water within 30 m, the centre walked
+inland to dry ground; "jerabina" the rowan tree excluded); outposts from
+military clusters (120 m, at least 4) reported offline only. Authored
+zones win (covered within max(300 m, footprint) of an authored military
+zone or 150 m of any zone). Names: an airfield adopts an airfield-like
+Names label in reach (the city seed then drops that label, so no Egyptian
+Airbase CITY), else "<World> Airfield" / "<nearest settlement> Harbour"
+where a settlement is a dry label with 3 objects within 300 m, within
+4 km, numbered when duplicate.
+
+Runtime (ZoneRegistry): seedBases (absent = 1 when the template authors
+no AIRFIELD or SEAPORT) seeds the detected bases after LoadZones and
+before the city seed, occupier-owned, seeded, garrison 12 / 8, default
+income, rebuilt from config on load with dynamic state matched by name;
+playRegion[] (absent = the authored zones' bounding box padded 5 km)
+bounds the base seed, the city seed and CollectTownNames. gmZone slot 10
+is the seeded flag; gmSeededBases and gmDetectedBases (status, coveredBy,
+evidence). The roster R, the wave hub, the air origin and the sources see
+seeded bases by type and owner. Lebanon80 authors seedBases = 0 with its
+reason (no airfield or seaport in the theatre by design; Ramat David is
+7 km south, the Tyre quay wall is not a harbour).
+
+Tool and lint: guerrilla scaffold emits the candidates with evidence;
+guerrilla lint --bases reports COVERED / MISSING / SKIPPED per template.
+Docs: ISLAND-PACKS.md section 10, OFFSCREEN-CONTRACT.md section 5 (C1 to
+C8 per template), OCCUPIER-FORCES.md 7.1 / 16 / 17.
+
+Per world: Eden seeds Everon Airfield [4841, 11323] and Chotain Harbour
+[7358, 6803] (poolStart 74, R 38); Abel seeds nothing (its Airfield and
+Le Port Harbour cover the detections at 94 m and 58 m); Lebanon80 nothing;
+Sinai seeds 7 (Egyptian Airbase, Wadi Mandar Airfield, Egyptian Fire Base
+Airfield, Aqaba airport, El Tor, Sharm and Aqaba harbours; poolStart 112,
+R 86), the Israeli Airbase, Eilat, Suez and Taba falling outside the
+default region. Open: a hand-authored Sinai playRegion (#75) to drop the
+Jordanian and Egyptian-army bases; two names read badly (border and
+world-name fallbacks); old Eden / Sinai saves gain seeded bases outside
+the pool ledger; the Sinai budget soak no longer tours seeded bases.
+
+Tests: test_island_scaffold_bases (20 cases), test_zone_registry,
+test_island_scaffold, test_descriptor_lint, test_names_classify (fixtures
+get a whole-map playRegion); tri guerrilla_bases_detect_{abel, eden,
+sinai, lebanon80} and guerrilla_bases_detect_eden_save.seq (new),
+guerrilla_island_scaffold (24 zones). Verified on build/agent-rwdi: 706
+unit cases green over the guerrilla / scaffold / lint / occupierforces /
+save tags; scripting 13/13 and ui/remaster 11/11 on remaster-shadow-of1;
+human suite OK. Ground truth per world in the gitignored
+tmp/of-76-ground-truth.md.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

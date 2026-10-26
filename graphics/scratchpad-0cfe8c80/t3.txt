@@ -1,0 +1,2 @@
+               parent == "nightLights" || parent == "ssr" || parent == "wetWeather" || parent == "combatLights" ||
+               parent == "surfaces" || parent == "photoLight"));

@@ -1,0 +1,203 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 1fc9a7d..300e67f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -64,10 +64,11 @@ fixes that makes the eleven folders under `tmp/bugfix`. Every prototype was made
+ | F8 | 747ffc8 | spawned-vehicles | `Shape.hpp`, `ShapeDraw.cpp` (`ShapeBank::OptimizeLate`), `World.cpp` | Supersedes shade's lazy VB and materials' `vbfix`. Crew views of late shapes keep the CPU path. |
+ | F9 | 4515770 | night-bright | `LightRig.{hpp,cpp}` (`kMoonFull` 0.02, chroma (0.82, 0.90, 1.00), `kMoonSky` 0.25, moon in the bounce), `EngineGL33_LightingShaders.cpp` (local-light clamp 1.5 to 1.0; night-eye grey with blue raised) | Night's moon key and lamp model, combat's HDR lights and water variant C (still clamps local light at `vec3(1.5)`) must rebase on this. |
+ | F9b | 72f32d4 | night-bright | `IO/ParamFileExt.cpp` (`GetColor` reads `{r,g,b}`) | Lamps now carry their authored warm colour (0.9, 0.8, 0.6) and 0.1 ambient. Night's `nightLampWarm` was tuned on the white-lamp bug and is redundant. |
+-| F10 | pending | object-shadows | `UI/Settings/GraphicsApply.{hpp,cpp}` (`ApplyGraphicsConfigToScene`, `AppliedGraphicsConfig`), `Scene.cpp` (`LoadConfig`), `test_graphicsApply.cpp` | Not landed: the patch also applied the terrain grid tier at boot (roadmap line). Needed by shadows, volumetric beams and hfrt's near range. |
+-| F11 | pending | msaa-default | `GraphicsConfig.{hpp,cpp}` (`kDefaultMsaaSamples = 4`, `kVersion` 3, `Migrate`), `GameApplication.cpp`, tests | Not landed: the migration also added MSAA on top of chosen supersampling. TAA keeps MSAA under it. |
++| F10 | b4f14d6 | object-shadows | `UI/Settings/GraphicsApply.{hpp,cpp}` (`ApplyGraphicsShadowsToScene`, `ApplyGraphicsConfigToScene`, `AppliedGraphicsConfig`), `Scene.cpp` (`LoadConfig`), `GameStateExtTestViewer.cpp` (`triEnableShadows` comment), `test_graphicsApply.cpp` | Landed narrowed: `Scene::LoadConfig` applies only the draw-only tiers of the boot config (object and vehicle shadows from the shadow tier, cloudlets from the particles tier); the terrain grid and object LOD bias stay out of the construction path. Needed by shadows, volumetric beams and hfrt's near range. |
++| F11 | 0e85455 | msaa-default | `GraphicsConfig.{hpp,cpp}` (`kDefaultMsaaSamples = 4`, `kVersion` 3, `Migrate`), `GameApplication.cpp` (log line), `EngineGL33.cpp` and `EngineGL33_VertexBuffer.cpp` (comments), Remaster `README.md`, tests | Landed narrowed: `Migrate` lifts `msaaSamples` 0 to 4 only below v3 and only with `renderScale < 1.001`; a supersampled profile keeps its Off. TAA keeps MSAA under it. |
+ 
+-Step A0 (section 4) re-checks that F10 and F11 landed in their narrowed form before anything else.
++Step A0 (section 4) re-checked that F10 and F11 landed in their narrowed form before anything else
++(both did; the branch was cut at 026133b, with this plan on top as 0779350; results in 5 A0).
+ 
+ ---
+ 
+@@ -159,6 +160,18 @@ gates above keep the beams, hfrt and SSR from all being at full cost together on
+ timing step of every gate (section 8) is honoured. A later governor (drop hfrt and the air pass
+ to quarter resolution when the GPU frame stays above 14 ms) is listed as a follow-up.
+ 
++Measured base (A0, RTX 4060 Ti, 1080p, 4x MSAA, scale 1.0; table in 5 A0): the Remastered frame
++before any feature is 2.0 to 11.9 ms of GPU time on seventeen of the twenty views, but 17.4 ms
++on `sunrise_ridge`, 23.3 ms in the valley at 05:15 and 24.3 ms on Eden's `broken_high`, the long
++views with 10,800 to 12,900 draws. These are not a resolution scale-up of MENU's base frame: its
++2.5 to 7.5 ms at 1440x960 ("perhaps 4 to 12 ms at 1080p on a 3060", MENU.md line 483) was
++measured after the frame-cost fixes, which are the perf track, step A4, and A0 comes before A4.
++On the long views the cost follows the draw count rather than the shading: Classic costs the
++same as Remastered on `sunrise_ridge` (frame 18.10 against 17.41 ms, world 17.95 against
++16.26), the CPU frame (26 to 31 ms) is longer than the GPU span, and nvidia-smi reads 54 to 73%
++utilisation at 39 to 46 W, at P0, in the 3 s before those shots. So the B steps judge their
++headroom on these views only after A4 has landed.
++
+ ### 3.3 LitConstants slot allocation
+ 
+ Today `LitConst::Count = 58` (`EngineGL33_Lighting.hpp`). Six prototypes all start their new
+@@ -373,6 +386,97 @@ cheap); GPU gating; tests; effort.
+   `tri.log`), 1920x1080 windowed, render scale 1.0, 4x MSAA, `triGpuTimes` sections per view.
+   Without a 3060 on hand, record the 4060 Ti numbers and keep MENU's 1.5 to 2x rule.
+ 
++**Result (2026-10-17, build of 0779350; evidence in `tmp/integration/A0/` of the
++graphics-remaster worktree, gitignored).**
++
++- F10 and F11 are in their narrowed form. `Scene::LoadConfig` applies only
++  `ApplyGraphicsShadowsToScene` from the boot config (object and vehicle shadows, cloudlets);
++  `ApplyGraphicsConfigToScene` (terrain grid, object LOD bias, then the same helper) runs only on
++  the live Graphics page path. `GraphicsConfig::Migrate` lifts `msaaSamples` 0 to 4 only when
++  `version < 3 && renderScale < 1.001f`. In game, a fresh user dir writes `graphics.cfg` and the
++  frame target comes up at 4x MSAA, render scale 1 before the test sets anything, and
++  `triShadowSceneDump` at `sunrise_ridge` with no spawned unit answers OK with the trees and
++  bushes in the depth map.
++- Base capture set: `20261017-233303-gr-base` (3/3, 30 shots, all settled; 960x640 window at
++  render scale 1.5, so it is the look baseline, not the timing one). A second boot of the same
++  build (`20261017-235653-gr-base-repeat`, identical eye heights) gives the boot-to-boot noise:
++  `sunrise_ridge`, `lowsun_fp`, `noon_fields`, `forest_edge_golden`, `coastline_sunset` and the
++  Eden overcast views stay within 21 levels with at most 141 pixels over 2 levels (sunrise_ridge
++  and lowsun_fp within 8), except `overcast_broken` Remastered (6,830 pixels over 2, mostly in the
++  horizon band); the Sinai ground band is not repeatable (its blotch pattern changes between
++  boots: in the Remastered shots about 258,000 of the 278,400 ground-band pixels (rows 350-640),
++  322,000 of 614,400 in the whole frame, differ by over 2 levels in `sinai_desert_noon`, and
++  about 61,000 of 278,400 in `sinai_lowsun_fp`; Classic's counts are within 4,000), nor are the
++  crew views (`tank_gunner_*`, edge shifts), the firefights and `town_night` (fire and smoke).
++  Differences of the same kinds and sizes separate this set from `20261018-fixes2`, shot with
++  the lighting worktree's build of the same fixes.
++- KHR_debug ids in the smoke and base runs: 131169 (LOW), 131154 and 131218 (MEDIUM, pixel
++  transfer sync from screenshots and a VS recompile on GL state). No 131204 or 131222. These
++  three are the known set for gate item 4.
++- Timing: `20261017-234549-gr-timing`, RTX 4060 Ti (driver 610.88), no other PoseidonGame on
++  the machine for the whole run (sampled every 2 s), 0 of 4 tri slots held before and after.
++  Twenty views: the start view of each feature's first row in 7.3, the Eden and Sinai clips and
++  the noon references, with these deviations from 7.3: `forest_edge_golden` has its Jeep parked
++  at 25 m (the clip drives it across) and also stands in for texsharp's first row (p 0, no
++  props); `town_night` is the capture-set version, without the driven Jeeps;
++  `coastline_sunset` takes heading 278 (the water row; the sky row says 250) with the eye 3 m
++  above the beach probe (the sky row's convention, not the water row's 3 m ASL);
++  `woods_pine2_evening` takes its props from the shadows track (Jeep at 14 m and a soldier at
++  9 m, from `gen_r8.py`; 7.3 says a Jeep at 15 m); `lowsun_fp` is shot from the capture-set
++  camera, not the orbit start; `road_flat_drive_moonless` has the night track's Jeep standing
++  3.4 m behind the eye, not driven; `broken_high` does not step the sky drift; `ffh` is a static
++  stand-in. The NOTE field of each view in `gen_timing.py` records its deviation. 3 interleaved
++  rounds in one game per island. GPU ms, median of 3 (`triGpuTimes`, 90 frames before each
++  shot); Remastered also as median / minimum; GPU MHz is the graphics clock nvidia-smi read in
++  the 3 s before the shots:
++
++  | view | Classic frame | Remastered frame | world | shadow | post | CPU frame | draws | GPU MHz |
++  |---|---|---|---|---|---|---|---|---|
++  | sunrise_ridge | 18.10 | 17.41 / 17.34 | 16.26 | 0.09 | 1.01 | 26.57 | 12,910 | 2,790 (P0) |
++  | forest_edge_golden | 5.54 | 6.18 / 5.58 | 5.40 | 0.31 | 0.58 | 8.71 | 2,141 | 1,680 (P0/P3) |
++  | town_night | 6.56 | 6.53 / 5.42 | 5.64 | | 0.63 | 8.15 | 1,228 | 1,860 (P0/P3) |
++  | coastline_sunset | 2.14 | 3.81 / 1.88 | 1.60 | 0.00 | 1.95 | 4.10 | 178 | 622 (P3/P5) |
++  | woods_pine2_evening | 6.13 | 6.47 / 6.45 | 5.21 | 0.35 | 1.14 | 9.25 | 2,840 | 2,302 (P0) |
++  | lowsun_fp | 4.83 | 5.59 / 4.60 | 4.34 | 0.09 | 1.08 | 8.30 | 1,891 | 1,500 (P0/P3) |
++  | road_flat_drive_moonless | 5.22 | 5.27 / 4.52 | 4.46 | | 0.59 | 7.69 | 1,806 | 1,950 (P0/P3) |
++  | ffh (static stand-in) | 5.44 | 6.06 / 5.66 | 5.22 | | 0.69 | 7.73 | 796 | 1,905 (P0/P3) |
++  | bay_offshore | 6.05 | 7.73 / 7.72 | 7.11 | 0.03 | 0.49 | 12.44 | 4,557 | 2,775 (P0/P3) |
++  | town_night_rain | 5.01 | 5.23 / 5.13 | 4.32 | | 0.79 | 7.10 | 809 | 1,785 (P0/P3) |
++  | pinewood_morn | 6.03 | 5.84 / 5.46 | 4.67 | 0.57 | 0.95 | 8.58 | 2,844 | 1,852 (P0/P3) |
++  | valley 05:15 | 20.30 | 23.30 / 22.47 | 21.99 | 0.04 | 1.16 | 31.02 | 11,404 | 2,790 (P0) |
++  | hill_1730 | 2.44 | 1.99 / 1.58 | 1.49 | 0.05 | 0.38 | 3.51 | 1,663 | 1,815 (P0/P5) |
++  | coast_oc_up | 3.58 | 3.87 / 1.73 | 1.64 | 0.00 | 1.90 | 3.61 | 186 | 990 (P0/P3/P5) |
++  | sea_noon | 3.79 | 4.56 / 1.20 | 3.01 | 0.00 | 1.31 | 5.41 | 180 | 765 (P0/P3/P5) |
++  | noon_fields | 8.42 | 9.79 / 9.06 | 9.16 | 0.08 | 0.49 | 14.79 | 6,399 | 2,490 (P0) |
++  | overcast_broken (Eden) | 10.89 | 11.85 / 11.77 | 11.10 | 0.18 | 0.65 | 18.51 | 8,066 | 2,790 (P0) |
++  | broken_high (Eden) | 17.27 | 24.31 / 24.12 | 23.42 | 0.03 | 0.79 | 27.35 | 10,784 | 2,790 (P0) |
++  | sinai_lowsun_fp | 4.52 | 5.06 / 4.24 | 3.75 | 0.12 | 1.21 | 7.46 | 764 | 818 (P0/P3/P5) |
++  | sinai_desert_noon | 8.81 | 9.70 / 9.31 | 8.36 | 0.07 | 1.08 | 14.42 | 2,672 | 1,245 (P3/P5) |
++
++  What it says: the long views (sunrise_ridge, valley 05:15, Eden broken_high) take 17 to 24 ms
++  of GPU time before any feature, with 10,800 to 12,900 draws and a 26 to 31 ms CPU frame. That
++  cost follows the draw count rather than the shading: Classic costs the same as Remastered on
++  sunrise_ridge (frame 18.10 against 17.41 ms, world 17.95 against 16.26), the CPU frame is
++  longer than the GPU span on all three, and nvidia-smi reads 54 to 73% utilisation at 39 to
++  46 W, at P0, in the 3 s before those shots. Remastered still adds world time over Classic on
++  the other two (Eden from 250 m 23.42 against 17.17 ms, the valley 21.99 against 20.17). These
++  numbers are not a 1080p scale-up of MENU's 2.5 to 7.5 ms base frame, which was measured after
++  the frame-cost fixes (MENU.md line 483; the perf track, step A4), and A0 comes before A4, so
++  the B steps judge headroom on these views only after A4 has landed. Sky and sea views run the
++  GPU at P3 or P5 (medians of 0.6 to 1.0 GHz), so their milliseconds overstate the cost at full
++  clock and swing between rounds by up to about 4x in Remastered (median against minimum:
++  sea_noon 4.56 / 1.20 ms, coast_oc_up 3.87 / 1.73) and about 5x in Classic's coast_oc_up
++  (3.58 / 0.73, not in the table). The post pass is 0.4 to 2.0 ms, the sun shadow pass 0.00 to
++  0.57 ms, and the night views report no shadow section. `ffh` is a static stand-in (posed men,
++  burning Ural, Fire; no volleys or shells) and never reports settled within 300 frames. MENU's
++  1.5 to 2x rule combined the 1440x960 to 1080p pixel ratio (1.5x) with the slower card; these
++  numbers are already at 1080p, so applying the whole rule to them is conservative.
++- The rig is local, not in the repo: `tmp/integration/A0/timing/` (`gen_timing.py` writes the
++  three tests from one view table, `timing_lib.sqf` adds `capRain` and `capEyeAbs` to the repo
++  `capture_lib.sqf`, `gpu_sampler.ps1` logs clocks and foreign games, `summarize_timing.py`
++  reduces the rounds and joins the clocks). Gate item 7 reruns it until A1's capture tooling
++  carries the same views.
++
+ ### A1. Switches, gates, tooling
+ 
+ - New files: `Graphics/Remaster/FeatureSwitches.{hpp,cpp}`, `Graphics/Remaster/FeatureGates.{hpp,cpp}`.
+@@ -1030,7 +1134,8 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+ 
+ - 1920x1080 windowed (`extra_args = ["--no-strict", "--display-mode", "windowed", "--width",
+   "1920", "--height", "1080"]`); the first statement logs `triGetWindowSize` and the generator
+-  falls back to 1600x900 if the hidden desktop cannot hold 1080p.
++  falls back to 1600x900 if the hidden desktop cannot hold 1080p (A0 observed 1920x1080 on the
++  hidden desktop, so the fallback was not needed there).
+ - `triCaptureAtPresent true`, `triSetMsaa 4`, `triSetRenderScale 1.0` (the 3060 target),
+   `triPinObjectDetail 1`, `triSetViewDistance <vd>`, `triSettleScene [300, 30, 2]` before each
+   pass, `showCinemaBorder false`, `enableRadio false`, the capture camera from `capture_lib.sqf`
+@@ -1146,13 +1251,20 @@ Every step from A1 on passes all of these before its commit:
+    `triGetGLErrorCount` 0.
+ 5. **Off equals baseline**: `features_ab.test.sqf` with `<keys>=0` on the new build against
+    `remastered` on the previous step's build at the hero view: within the same-config repeat
+-   noise (`banddiff.py`, per band). This is what makes the video's "off" honest.
++   noise (`banddiff.py`, per band). This is what makes the video's "off" honest. A0 measured that
++   noise between two boots of one build (5 A0): the Sinai ground band, the crew views and the
++   fire and smoke views are not repeatable between boots, so a pixel-exact claim (A2, A3, A4) is
++   judged on the repeatable views or on off and on shot in the same game.
+ 6. **Capture pair**: the hero view off and on, plus the full three-island capture set with
+    everything on, through run-captures.
+ 7. **Timing**: on a quiet GPU (no other slot holders in `tri.log`), 1080p, scale 1.0, 4x MSAA:
+    the step's GPU section (median and minimum over 3 interleaved rounds) against its row in 3.2,
+    and the gate states logged where the gate should be off (noon for low-sun features, dry for
+-   wet ones) showing zero cost there.
++   wet ones) showing zero cost there. Log the GPU clock with every shot (A0's `gpu_sampler.ps1`):
++   the 4060 Ti picks its clock from the load (A0 saw P0 at 2.79 GHz on the long views and P3 or
++   P5 with medians of 0.6 to 1.0 GHz on sky and sea views), so a light view's milliseconds are
++   only comparable at a matching clock. Judge a feature's cost as on minus off in the same view
++   and round, and compare with the A0 table only where both runs read P0.
+ 8. **Look check** (open the images): against the track's `BEST_*` image and the step's critic
+    list in section 5, and against the owner's standing list (no blue haze or frame-wide wash,
+    not only darker, evenings at least as warm as Classic, no flattened crowns, no mustard
+@@ -1211,18 +1323,18 @@ Per-step extras for the look check:
+ 
+ ## 9. Owner decisions and open risks
+ 
+-- **Branch permission** for `graphics-remaster` (CLAUDE.md rule), and whether A0 waits for F10
+-  and F11 in narrowed form.
++- **Branch**: settled. `graphics-remaster` exists and was cut at 026133b, after F10 and F11
++  landed in narrowed form (5 A0).
+ - **Defaults**: every feature switch defaults to on, gated (the new lighting replaces the
+   original look). Confirm `atmoHue` 0.5 / `atmoSat` 1.15, the noon spawned-vehicle side level
+   (0.60, or `bounce=2.5`), whether golden crowns may be darker than the tip, the moonless night
+   brightness, warm lamp colour (now the authored 0.9, 0.8, 0.6), and texsharp's sharpening.
+ - **Gameplay**: valley mist and haze are visual only; AI sight ignoring them is unfair to the
+   player until `AirMedium` feeds AI visibility (follow-up issue, `gh -R GearUnclear/CWR`).
+-- **Not measured anywhere yet**: cost at 1080p on an RTX 3060 (A0 records the closest quiet
+-  numbers), motion behaviour of most features (the video is the first real test), TAA ghosting
+-  on fast vehicles and smoke, water popping, the hill cull's edge cases, crew-view interiors
+-  (F8 left late-loaded interiors on the CPU path).
++- **Not measured anywhere yet**: cost at 1080p on an RTX 3060 (no 3060 on hand; A0 measured the
++  RTX 4060 Ti at 1080p on a quiet machine, 5 A0), motion behaviour of most features (the video
++  is the first real test), TAA ghosting on fast vehicles and smoke, water popping, the hill
++  cull's edge cases, crew-view interiors (F8 left late-loaded interiors on the CPU path).
+ - **Out of scope here** (MENU tracks not in the worked list): gbuffer, foliage, tiling, normals,
+   aa beyond F11, exposure (its eye adaptation is a candidate for the night policy), ssgi,
+   wildcard, and MENU phase 4 (the bounce-light bet).
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index 8923cb5..3effbc3 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -2200,3 +2200,4 @@ items:
+       - "2026-10-17: owner feedback: evenings looked about 5600 K next to the original (the vehicle light most of all). Cause: the remastered sun chroma is linear, while Classic applies its art-directed sunset colour (LightSun colorFull) in display space, so Classic's 7-degree sun shows red/blue near 2.9 on screen against an effective ~1.5 here. Below 16 degrees (in full by about 7) the rig's sun now takes 0.65 of Classic's sunset hue, taken to linear (EveningSunChroma). The full hue overshot into copper, because Classic's blue ambient cools its own sunlit side. Lab golden hour: the sunlit APC hull went from red/blue 1.54 to 2.06 against Classic's 1.99 (testview) and 1.56 to 2.19 against 2.29 (closeup); 14 degrees and above are unchanged, so the olive textures do not go mustard."
+       - "2026-10-18: reviewed bug fixes landed on the branch (each red without its fix, green with it): capture rig pins object detail, settles each mode and resets lighting knobs, and setDate syncs street lamps like skipTime (874638c); NaN crown normals from zero leaf-card normals (d57b712); shadow-map unit 2 always holds a complete depth array, so NVIDIA 131204/131222 are gone (f102499); no cloud shadows under a clear sky, mean-preserving fade-in to overcast 0.11 (5cf85cf); sun shafts scaled by the air in front of each pixel, which removes the grey veil on near vehicles and also the warm near-ground beam (463506f); instanced runs keep each member's own terrain fit, a stock bug that shows once instancing runs (d80f868); switchLight on a non-lamp no longer crashes, StreetLamp had no casting id (ab61aa5); script-spawned vehicles get vertex buffers and the remastered lighting, crew views excepted (747ffc8); the night takes Classic's 1.0 local-light clamp and a real moon (4515770); three-entry config colours read as {r,g,b}, so lamps get their warm colour and 0.1 ambient, a data fix that also changes Classic and night vision near towns, committed alone (72f32d4). Not landed: object shadows at start-up (the patch also applied the terrain grid tier at boot, which changes physical terrain) and the 4x MSAA default (its migration also added MSAA on top of chosen supersampling). Full capture set 20261018-bugfix vs 20261017-final: all 26 modes settled, no GL warnings, town_night Remastered ground 157 -> 121 (Classic 120), lowsun_fp and sinai_lowsun_fp vehicles solid instead of veiled, coastline_sunset shore cloud shadow gone, Classic firefight ground darker near the Abel lamps (wash gone)."
+       - "2026-10-18: the two held-back fixes landed after a second review. Trees, bushes and buildings cast sun shadows from the first frame (b4f14d6): a Scene built after the boot apply takes only the shadow and smoke tiers of graphics.cfg; the terrain grid and object LOD bias stay out, because the grid subdivides the physical terrain heights, and their absence at boot is a follow-up. 4x MSAA by default (0e85455): graphics.cfg v3 lifts an untouched Off to 4x once, only without supersampling, and a v2 Unlimited fps cap survives. Unit suites: PoseidonTests 3100 cases with the 6 known failures (5 map and equipment localization, 1 MP version message), Core 823 of 827 with 4 skipped, Foundation 475 of 475; smoke 3/3. Capture set 20261018-fixes2 vs 20261018-bugfix (3/3, 30 shots, same warning set, identical eye heights, 12.5 m horizon map in all three games): forest_edge_golden Remastered trees now throw shadows across the slope (shadow pass 0.05 to 0.28 ms), faint ones in Classic; sinai_lowsun_fp scrub at the 12 degree sun throws long shadows over the foreground (shadow pass 0.05 to 0.37 ms), which in Classic merge into almost even shade, so the net, HMMWV and soldier shadow edges no longer show (right-hand ground luma 67 to 56; reproduced with an object-shadows-only build), worth an owner look; lowsun_fp Classic gains a tent shadow band behind the soldier; noon_fields far bushes and the tank_gunner_optics treeline pick up small shadows; the other views differ only by live smoke and explosion timing (firefight, town_night) or by cloud and Sinai ground variation that earlier runs show too. Classic draw calls rise by up to 18% where static casters are in view. The captures pin 4x MSAA at 1.5x, so they cannot show the new default; the game logs now show the 4x frame target at boot, before the test's own setting."
++      - "2026-10-18: graphics-remaster step A0 (cut and baseline, plan section 5 A0): the branch is cut at 026133b with the integration plan on top (0779350). F10 and F11 are in their narrowed form in code and in game (a fresh user dir boots to 4x MSAA at render scale 1; with no spawned unit the shadow depth map holds the trees and bushes). Gate tags 425/425 ([graphics] 378/379, the known DDS fixture case), smoke 3/3 with KHR_debug ids 131169, 131154 and 131218 only. New look baseline 20261017-233303-gr-base; a second boot of the same build shows the Sinai ground band, the crew views and the fire and smoke views are not repeatable between boots, so pixel-exact checks use the other views. Quiet-GPU timing at 1080p, render scale 1.0, 4x MSAA on the RTX 4060 Ti (20 hero views, 3 interleaved rounds): Remastered takes 2.0 to 11.9 ms of GPU time on 17 views and 17.4 to 24.3 ms on the long views (sunrise_ridge, valley 05:15, Eden broken_high), which spend the 60 fps budget before any feature; light views run at P3 or P5 clocks, so the timing gate now logs the GPU clock with every shot. No engine change."

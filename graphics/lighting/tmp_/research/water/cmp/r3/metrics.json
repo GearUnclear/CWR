@@ -1,0 +1,204 @@
+{
+  "classic_check": {
+    "coastline_sunset/A": 0.601,
+    "coastline_sunset/B": 0.952,
+    "coastline_sunset/C": 1.183,
+    "sea_noon/A": 2.811,
+    "sea_noon/B": 5.839,
+    "sea_noon/C": 6.061,
+    "sea_away_from_sun/A": 1.404,
+    "sea_away_from_sun/B": 3.227,
+    "sea_away_from_sun/C": 3.832,
+    "coast_shore_midsun/A": 2.412,
+    "coast_shore_midsun/B": 8.737,
+    "coast_shore_midsun/C": 8.783
+  },
+  "coastline_sunset": {
+    "Classic": {
+      "mean": 69.9,
+      "local_sd": 3.66,
+      "sd": 29.37,
+      "gpu": [
+        3.0,
+        2.79
+      ]
+    },
+    "Remastered now": {
+      "mean": 101.1,
+      "local_sd": 3.04,
+      "sd": 29.83,
+      "gpu": [
+        2.56,
+        1.19
+      ]
+    },
+    "Variant A": {
+      "mean": 91.2,
+      "local_sd": 10.87,
+      "sd": 21.6,
+      "gpu": [
+        2.25,
+        0.96
+      ]
+    },
+    "Variant B": {
+      "mean": 112.8,
+      "local_sd": 23.33,
+      "sd": 29.15,
+      "gpu": [
+        3.39,
+        2.06
+      ]
+    },
+    "Variant C": {
+      "mean": 112.0,
+      "local_sd": 25.4,
+      "sd": 28.81,
+      "gpu": [
+        5.18,
+        3.88
+      ]
+    }
+  },
+  "sea_noon": {
+    "Classic": {
+      "mean": 145.1,
+      "local_sd": 6.08,
+      "sd": 13.96,
+      "gpu": [
+        2.17,
+        1.91
+      ]
+    },
+    "Remastered now": {
+      "mean": 129.3,
+      "local_sd": 4.37,
+      "sd": 6.91,
+      "gpu": [
+        1.16,
+        0.57
+      ]
+    },
+    "Variant A": {
+      "mean": 129.7,
+      "local_sd": 7.93,
+      "sd": 7.43,
+      "gpu": [
+        3.55,
+        2.42
+      ]
+    },
+    "Variant B": {
+      "mean": 125.3,
+      "local_sd": 10.59,
+      "sd": 8.09,
+      "gpu": [
+        3.32,
+        2.1
+      ]
+    },
+    "Variant C": {
+      "mean": 126.4,
+      "local_sd": 11.59,
+      "sd": 8.6,
+      "gpu": [
+        6.21,
+        4.3
+      ]
+    }
+  },
+  "sea_away_from_sun": {
+    "Classic": {
+      "mean": 112.0,
+      "local_sd": 7.4,
+      "sd": 6.49,
+      "gpu": [
+        1.45,
+        1.22
+      ]
+    },
+    "Remastered now": {
+      "mean": 113.6,
+      "local_sd": 5.72,
+      "sd": 7.36,
+      "gpu": [
+        2.14,
+        1.19
+      ]
+    },
+    "Variant A": {
+      "mean": 114.9,
+      "local_sd": 5.07,
+      "sd": 6.29,
+      "gpu": [
+        2.25,
+        1.15
+      ]
+    },
+    "Variant B": {
+      "mean": 123.3,
+      "local_sd": 13.77,
+      "sd": 6.0,
+      "gpu": [
+        6.41,
+        5.13
+      ]
+    },
+    "Variant C": {
+      "mean": 124.3,
+      "local_sd": 15.5,
+      "sd": 6.82,
+      "gpu": [
+        5.78,
+        4.75
+      ]
+    }
+  },
+  "coast_shore_midsun": {
+    "Classic": {
+      "mean": 176.4,
+      "local_sd": 6.99,
+      "sd": 24.55,
+      "gpu": [
+        2.14,
+        2.04
+      ]
+    },
+    "Remastered now": {
+      "mean": 154.3,
+      "local_sd": 3.52,
+      "sd": 15.36,
+      "gpu": [
+        2.96,
+        1.65
+      ]
+    },
+    "Variant A": {
+      "mean": 151.5,
+      "local_sd": 7.47,
+      "sd": 14.68,
+      "gpu": [
+        3.19,
+        1.74
+      ]
+    },
+    "Variant B": {
+      "mean": 138.6,
+      "local_sd": 13.03,
+      "sd": 17.51,
+      "gpu": [
+        3.77,
+        2.41
+      ]
+    },
+    "Variant C": {
+      "mean": 139.4,
+      "local_sd": 14.28,
+      "sd": 18.47,
+      "gpu": [
+        8.19,
+        6.23
+      ]
+    }
+  }
+}

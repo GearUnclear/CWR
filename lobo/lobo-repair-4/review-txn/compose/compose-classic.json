@@ -1,0 +1,325 @@
+{
+ "compat": "classic",
+ "changed_members": 173,
+ "added": 7,
+ "skipped": [],
+ "archives": {
+  "bde_mir3": {
+   "source": "first-backup",
+   "rebuilt": "d21401b62ab0a6b993312f493044de90f428a4044905c260f14ad699cb7738e8",
+   "installed": "d21401b62ab0a6b993312f493044de90f428a4044905c260f14ad699cb7738e8",
+   "equal": true
+  },
+  "bwm_boot3": {
+   "source": "first-backup",
+   "rebuilt": "78f93996eb307ae1a33dec3d9c0be714ffc715409bcb2419cd78357dcdbef44e",
+   "installed": "78f93996eb307ae1a33dec3d9c0be714ffc715409bcb2419cd78357dcdbef44e",
+   "equal": true
+  },
+  "coc_arty": {
+   "source": "first-backup",
+   "rebuilt": "9fe6d11d5f3cc98cfe7634ec258c267ab7d2d1a7f3ee1599e55e6d63b1fe6851",
+   "installed": "9fe6d11d5f3cc98cfe7634ec258c267ab7d2d1a7f3ee1599e55e6d63b1fe6851",
+   "equal": true
+  },
+  "coc_diver": {
+   "source": "first-backup",
+   "rebuilt": "7cb460bcbdb9b3342b5e5781caf82c42a4fb0fbb17033e93d94f9b4176f26d83",
+   "installed": "7cb460bcbdb9b3342b5e5781caf82c42a4fb0fbb17033e93d94f9b4176f26d83",
+   "equal": true
+  },
+  "coc_torpedoes": {
+   "source": "first-backup",
+   "rebuilt": "e05b6e4a5a5eb5a2c1dac3bce9e606b29c92dbe4a37d147137efaac4294ae7e3",
+   "installed": "e05b6e4a5a5eb5a2c1dac3bce9e606b29c92dbe4a37d147137efaac4294ae7e3",
+   "equal": true
+  },
+  "csjairlines": {
+   "source": "first-backup",
+   "rebuilt": "0afebb84733fb09f1b7166ae154e684acfd890615e3d33d54633b2e9e9293e43",
+   "installed": "0afebb84733fb09f1b7166ae154e684acfd890615e3d33d54633b2e9e9293e43",
+   "equal": true
+  },
+  "csjcitation": {
+   "source": "first-backup",
+   "rebuilt": "357923ad409c9dd920fc8c38344fdc78a43924df19ce01e520a55b07fac389b2",
+   "installed": "357923ad409c9dd920fc8c38344fdc78a43924df19ce01e520a55b07fac389b2",
+   "equal": true
+  },
+  "csjils": {
+   "source": "first-backup",
+   "rebuilt": "3924d8ec9cf86a2e804832dca02e2569e88d77fce03520746bbc427500ace397",
+   "installed": "3924d8ec9cf86a2e804832dca02e2569e88d77fce03520746bbc427500ace397",
+   "equal": true
+  },
+  "jof_objects1": {
+   "source": "first-backup",
+   "rebuilt": "fd2e40af86db1171d8dc3d4d297f7f0ebbf16b4d310fb8f26dd2fab40a0b596d",
+   "installed": "fd2e40af86db1171d8dc3d4d297f7f0ebbf16b4d310fb8f26dd2fab40a0b596d",
+   "equal": true
+  },
+  "lobo_110": {
+   "source": "first-backup",
+   "rebuilt": "c087fc0ccdc306de4218819822d5b90eb299480141973e1ca0e1f416c5da0cc3",
+   "installed": "c087fc0ccdc306de4218819822d5b90eb299480141973e1ca0e1f416c5da0cc3",
+   "equal": true
+  },
+  "lobo_a4": {
+   "source": "first-backup",
+   "rebuilt": "25f03895dc7f66fb9472782fec32019900ed24da352c1d296e361318abc5ac74",
+   "installed": "25f03895dc7f66fb9472782fec32019900ed24da352c1d296e361318abc5ac74",
+   "equal": true
+  },
+  "lobo_airammo": {
+   "source": "first-backup",
+   "rebuilt": "06f577f251aea40cd5607d3278a64e7c36463edfb990c522f44e821298be98d8",
+   "installed": "e141bb0b56dc9bb51c57ba325710dc9bef36fb11ef8997ad510b43afdc26e6c3",
+   "equal": false
+  },
+  "lobo_btr60": {
+   "source": "first-backup",
+   "rebuilt": "b296432c3ed34c4cec2906ae88902c2d114a9072aaa5757d378d2dc9cd86a1f8",
+   "installed": "c2daf92e718ac717512970061b34d87bc8e3f4364874261ee836632540797f5e",
+   "equal": false
+  },
+  "lobo_f4": {
+   "source": "first-backup",
+   "rebuilt": "d266d9a125c2998fce70c9f6105cad5f38f93e31004b21144cb615faa5001396",
+   "installed": "d266d9a125c2998fce70c9f6105cad5f38f93e31004b21144cb615faa5001396",
+   "equal": true
+  },
+  "lobo_fab": {
+   "source": "first-backup",
+   "rebuilt": "c2e46e64e3b48a02656f13ef29e3aa06f746a4fb9c2c341cfd71ebd6166d6384",
+   "installed": "ab8b9f52abcde2308b4de6888d54fd43f33837df6a226e282ac1e156cc6aaa14",
+   "equal": false
+  },
+  "lobo_kfir": {
+   "source": "first-backup",
+   "rebuilt": "472988e12161a35c4ac18804d3d4ba6befd0c0b1cf2ba1c0715965fbe609474d",
+   "installed": "472988e12161a35c4ac18804d3d4ba6befd0c0b1cf2ba1c0715965fbe609474d",
+   "equal": true
+  },
+  "lobo_m1": {
+   "source": "first-backup",
+   "rebuilt": "4eb9ac28e0d5e256d9c01a10db8e8e4585ae2b1a86f19366f84b82a74bbe3809",
+   "installed": "4eb9ac28e0d5e256d9c01a10db8e8e4585ae2b1a86f19366f84b82a74bbe3809",
+   "equal": true
+  },
+  "lobo_mines": {
+   "source": "first-backup",
+   "rebuilt": "df16a682a62fa52cc108fdb5d5d8ff379ee0f168df22aae9e9fd9ec42210a47f",
+   "installed": "df16a682a62fa52cc108fdb5d5d8ff379ee0f168df22aae9e9fd9ec42210a47f",
+   "equal": true
+  },
+  "lobo_pilot": {
+   "source": "first-backup",
+   "rebuilt": "067b40c14c8383b2ad65f082f00ee6b2d32953b272a91591fd51df92bc7eaf35",
+   "installed": "067b40c14c8383b2ad65f082f00ee6b2d32953b272a91591fd51df92bc7eaf35",
+   "equal": true
+  },
+  "lobo_zelda": {
+   "source": "first-backup",
+   "rebuilt": "a3fb123bc5104550068edb7d0f025f40eaf04a5d92573eb1d238f4dba0b7b1bf",
+   "installed": "04b86d898777ebd77b29896eeddece9e749aa22e60866882e78b68a75eebcc4d",
+   "equal": false
+  },
+  "lobo_zu23": {
+   "source": "first-backup",
+   "rebuilt": "f981dce761531e51e9fd45ad82276dc78ccb5199d0fd49003188bf38f0ca9bd3",
+   "installed": "7f1425189c9aba377bab7b190803b2c28c262b74acc6930b859bc62887bd071f",
+   "equal": false
+  },
+  "loboammo": {
+   "source": "first-backup",
+   "rebuilt": "19a502734c08c132f92baaa9364bc70dac480469ad993b0b90a28a3f9589fb34",
+   "installed": "19a502734c08c132f92baaa9364bc70dac480469ad993b0b90a28a3f9589fb34",
+   "equal": true
+  },
+  "loboart": {
+   "source": "first-backup",
+   "rebuilt": "00b2ef31849e8914ca6eeb89e546a640b358e382922e98ec4ac4367032bff4a0",
+   "installed": "00b2ef31849e8914ca6eeb89e546a640b358e382922e98ec4ac4367032bff4a0",
+   "equal": true
+  },
+  "loboc130": {
+   "source": "first-backup",
+   "rebuilt": "5b88bf344940c79a1d6b3ef24a7f94a7b68ddb4f64b89f6168b0605ef4faa867",
+   "installed": "5b88bf344940c79a1d6b3ef24a7f94a7b68ddb4f64b89f6168b0605ef4faa867",
+   "equal": true
+  },
+  "lobocen": {
+   "source": "first-backup",
+   "rebuilt": "1669606d250e961a0add5357fefe7c53be9e9b241b5f737b1b804249fa9bb71d",
+   "installed": "94b17f998689c43d015d424bd328460f66fa098c764b09dd90b461d207812475",
+   "equal": false
+  },
+  "lobochallen": {
+   "source": "first-backup",
+   "rebuilt": "03a062a3ea6f3cd769093fba6a77bebfb673a640e51468d285514eb351186428",
+   "installed": "03a062a3ea6f3cd769093fba6a77bebfb673a640e51468d285514eb351186428",
+   "equal": true
+  },
+  "loboegapc": {
+   "source": "first-backup",
+   "rebuilt": "de4abdc0812b2bc7986c3d5c18d0292c06d8e516c2f133556698e59a1c925374",
+   "installed": "45c21ba836a708947df037e9c81b34660dddcf2d87c6410feebdb814179e1a2d",
+   "equal": false
+  },
+  "loboeghelo": {
+   "source": "first-backup",
+   "rebuilt": "22d5a45409af3fba75687f03022d71f2431cbfa0fca01482bda60d10968d3fe2",
+   "installed": "22d5a45409af3fba75687f03022d71f2431cbfa0fca01482bda60d10968d3fe2",
+   "equal": true
+  },
+  "lobof15": {
+   "source": "first-backup",
+   "rebuilt": "576b53a80da97167a4244ad5026d45ec0291e8a0cddfe5b6b7671141c01f7506",
+   "installed": "a357669e730e75e1e8800bed2381d77274d9c9d602b4e08548d5a68ce2ce5419",
+   "equal": false
+  },
+  "lobof16": {
+   "source": "first-backup",
+   "rebuilt": "2ff4010a87f4fd14534b4f41101eb4971df89146cc5c6619b2dd378a832177f2",
+   "installed": "f6a6de457b2e1ad4c3d36ab9cb57391406decc35a2bbbdf74b164d62f0368d58",
+   "equal": false
+  },
+  "lobof5": {
+   "source": "first-backup",
+   "rebuilt": "9d1c1b5ed3d7aa5eb32c9e8c88225814f91247afed6562f16dc3a29fca61384d",
+   "installed": "9d1c1b5ed3d7aa5eb32c9e8c88225814f91247afed6562f16dc3a29fca61384d",
+   "equal": true
+  },
+  "lobohizballcar": {
+   "source": "first-backup",
+   "rebuilt": "80b09f60de9cfbc7490ba1f767d7681936759baafdc297d252ef5bcefca4a335",
+   "installed": "80b09f60de9cfbc7490ba1f767d7681936759baafdc297d252ef5bcefca4a335",
+   "equal": true
+  },
+  "loboidfhelo": {
+   "source": "first-backup",
+   "rebuilt": "c7065ab3efffc70234a18c571dc07f713cb078e66933bf1637a10ad2824b110b",
+   "installed": "c7065ab3efffc70234a18c571dc07f713cb078e66933bf1637a10ad2824b110b",
+   "equal": true
+  },
+  "loboil28": {
+   "source": "first-backup",
+   "rebuilt": "cb4933c11d3d746800a3dc600b8fa631f7cbbb244305b638a27bd2b75cb5c830",
+   "installed": "cb4933c11d3d746800a3dc600b8fa631f7cbbb244305b638a27bd2b75cb5c830",
+   "equal": true
+  },
+  "lobois": {
+   "source": "first-backup",
+   "rebuilt": "796affe61b08bc20172d5d982893ff604bef3df139a5d4f43e1c724bd3cc0021",
+   "installed": "796affe61b08bc20172d5d982893ff604bef3df139a5d4f43e1c724bd3cc0021",
+   "equal": true
+  },
+  "lobojordan": {
+   "source": "first-backup",
+   "rebuilt": "8afa5888f69f7c0f1fa4b5db4ffedc063d0ea29124eda632293ba90acf0b60bd",
+   "installed": "8afa5888f69f7c0f1fa4b5db4ffedc063d0ea29124eda632293ba90acf0b60bd",
+   "equal": true
+  },
+  "lobojorhelo": {
+   "source": "first-backup",
+   "rebuilt": "13925c6e592e9511dd68fea83d4af9a22f6b69ab67530f27183a95ecfceb4401",
+   "installed": "13925c6e592e9511dd68fea83d4af9a22f6b69ab67530f27183a95ecfceb4401",
+   "equal": true
+  },
+  "lobom60": {
+   "source": "first-backup",
+   "rebuilt": "a2ce2dd378c4f307d5d63e11706bef67d713fd1e3546e004e057ed8fcdd84763",
+   "installed": "460473d42d5b648d6859eed1742bb4e8142728da0b218526e3d71449a348e069",
+   "equal": false
+  },
+  "lobomerkava2": {
+   "source": "first-backup",
+   "rebuilt": "5a3cf35d8925e17534f1cf900a6147dd4a5a0143e5cf2d21a66140e675998b93",
+   "installed": "6075c05276e57742c164cac1379994eb14806ecdcc996f3f400b7bf16fd3650a",
+   "equal": false
+  },
+  "lobomerkava4": {
+   "source": "first-backup",
+   "rebuilt": "bf0b3dc0edb98791a810821dcc84f0569f041ea26aff41ae077dd08dc219dd0d",
+   "installed": "1b0516726697db3e591f73247cafb8bedd7ec6b4e81dcb9cc9bb8f9e7259b3ef",
+   "equal": false
+  },
+  "lobomig": {
+   "source": "first-backup",
+   "rebuilt": "b4ca5fe19579aaa80f912f34278e0eb9c1d3e701ec98bf98ed00efdf042402c5",
+   "installed": "b4ca5fe19579aaa80f912f34278e0eb9c1d3e701ec98bf98ed00efdf042402c5",
+   "equal": true
+  },
+  "lobosa6": {
+   "source": "first-backup",
+   "rebuilt": "f6d6d5b67a6f4ca2668f56f4c43a945268b5b81325faa1821577e53ac9583423",
+   "installed": "1cdbe6758a45e7a020de62342f7042f0dbf32e43cc9c82b86b9d5a364d922953",
+   "equal": false
+  },
+  "lobosyrapc": {
+   "source": "first-backup",
+   "rebuilt": "331a1109371a82486e1c79bde13addcb80e93af992a28e30f46cfeb64b6f370f",
+   "installed": "331a1109371a82486e1c79bde13addcb80e93af992a28e30f46cfeb64b6f370f",
+   "equal": true
+  },
+  "lobosyria": {
+   "source": "first-backup",
+   "rebuilt": "a5261e32be94713856cf780aeba3ff4cd471f1e71be1feff69f6e2e8eeab3b8b",
+   "installed": "a5261e32be94713856cf780aeba3ff4cd471f1e71be1feff69f6e2e8eeab3b8b",
+   "equal": true
+  },
+  "loboter": {
+   "source": "first-backup",
+   "rebuilt": "a68b77b87a951c2de641d18b0bd5cafd5e2b20822bd92e08394d50f2c9293fe1",
+   "installed": "8cd559fe7b5da8d16db33f588f3a98526e463f855fab3977974e2f12b3af5c57",
+   "equal": false
+  },
+  "loboweapat": {
+   "source": "first-backup",
+   "rebuilt": "3c3c2ea07f2949c491a67b3428f0a190650ef7fd56e474f08329dc7e5fadfa1d",
+   "installed": "3c3c2ea07f2949c491a67b3428f0a190650ef7fd56e474f08329dc7e5fadfa1d",
+   "equal": true
+  },
+  "loboweapons": {
+   "source": "first-backup",
+   "rebuilt": "35f544c74e0a57cdc11429ef59b6ddc4e88f1f3ca10d7d79c5bd5885f216194d",
+   "installed": "35f544c74e0a57cdc11429ef59b6ddc4e88f1f3ca10d7d79c5bd5885f216194d",
+   "equal": true
+  },
+  "map_oiladdon_script": {
+   "source": "first-backup",
+   "rebuilt": "da709907895e2b3c59e90f7d70a50ec34ad69466d8cc9ef761caa9c30b508539",
+   "installed": "da709907895e2b3c59e90f7d70a50ec34ad69466d8cc9ef761caa9c30b508539",
+   "equal": true
+  },
+  "rksl-hangers": {
+   "source": "first-backup",
+   "rebuilt": "c89aa79520d1de4414e93af7af4e39acf9ab7e7791fd822150f47afeaf274859",
+   "installed": "c89aa79520d1de4414e93af7af4e39acf9ab7e7791fd822150f47afeaf274859",
+   "equal": true
+  },
+  "tmyk_bridges": {
+   "source": "first-backup",
+   "rebuilt": "7d118ca43f926e026bdd1632ecb5e3dc6d0563070d5ba945ddbae5300f9dcb45",
+   "installed": "7d118ca43f926e026bdd1632ecb5e3dc6d0563070d5ba945ddbae5300f9dcb45",
+   "equal": true
+  }
+ },
+ "mismatch": [
+  "lobo_airammo",
+  "lobo_btr60",
+  "lobo_fab",
+  "lobo_zelda",
+  "lobo_zu23",
+  "lobocen",
+  "loboegapc",
+  "lobof15",
+  "lobof16",
+  "lobom60",
+  "lobomerkava2",
+  "lobomerkava4",
+  "lobosa6",
+  "loboter"
+ ],
+ "rule_sha256": "f6e16ee80ec1c0698394d17ede66506c18a31bb443c9ef63f8cb12373374d1f9"
+}

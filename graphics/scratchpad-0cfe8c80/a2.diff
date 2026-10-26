@@ -1,0 +1,1917 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index caa047f..7962396 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -129,9 +129,11 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+   Remastered off for the same view's Classic numbers.
+ - **Shader iteration**: with `CWR_SHADER_OVERRIDE_DIR` set, every shader can be
+   replaced by `<dir>/<name>.glsl` (dump them with
+-  `tests/rendering/lighting_lab/glsl_extract.py --dump`). The remastered
+-  fragment shaders also take the pieces `psRemasterCommon.glsl` and
+-  `<ps>RemasterMain.glsl`, the post shaders their own names (`psPostAo`, ...).
++  `tests/rendering/lighting_lab/glsl_extract.py --dump`, which writes the
++  sources the engine assembles). The remastered fragment shaders also take the
++  pieces `psRemasterCommon.glsl` (the whole prelude, all its concern pieces
++  joined) and `<ps>RemasterMain.glsl`, the post shaders their own names
++  (`psPostAo`, ...).
+   The Lighting tab's *Reload shaders* rebuilds every program at the start of
+   the next frame, so edits show without a restart. The shader binary cache is
+   keyed on the override files too.
+@@ -146,11 +148,11 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
+ | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
+ | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
+-| `PoseidonGL33/EngineGL33_LightingShaders.cpp` | The remastered GLSL. |
+-| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, textures on units 2-5, program-set selection. |
+-| `PoseidonGL33/EngineGL33_PostFX.cpp` | The post pass. |
++| `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
++| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
++| `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass, and its GLSL (no GL code there, so the unit tests compile the sources the engine builds), assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+ | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
+-| `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block, glslang compile of every remastered and post shader. |
++| `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
+ | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
+ | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 3e65c39..6ad0c5c 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -252,6 +252,15 @@ dirty-range flush (A4) stays small:
+ 79 vec4 is 1,264 bytes, far below the GL minimum uniform block size. Combat's reprojection rows
+ (prototype slots 59-64) are not needed once its shadow becomes a mask pass (B4).
+ 
++As built in A2: `LitConst` itself is unchanged (`Count` 58): growing it would change the block's
++GLSL and the bytes of every remastered program, and A2 changes none. The rows above are a separate
++table, `LitConstPlanned` in `EngineGL33_Lighting.hpp` (`constexpr int`, comment per row; a
++`static_assert` that they start at `LitConst::Count` and that 79 slots fit the 16 KB GL minimum). The
++step that lands a feature moves its row into `LitConst`, declares it in `LitConstantsBlock()` and raises
++`Count`; the layout test then checks it. std140 members are contiguous, so a slot that lands before a
++lower planned one (A5's `Taa` at 59 before B7's `MatClass` at 58) declares the lower ones as padding
++members.
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -277,6 +286,19 @@ rows; every prototype appended a row). Every unit that can be sampled gets a com
+ texture at `InitLightingResources`, the same rule F3 applied to unit 2, and a new
+ `[ShadowSampler]` audit case covers unit 6.
+ 
++As built in A2: the constants are in `EngineGL33_Lighting.hpp`, with `kShadowMapUnit` 2 for the
++cascade array and the four units in use; one `static_assert` checks that every unit is within 2 to 15,
++not 7, and distinct. `kLitSamplers` (name, unit) is the one table `InitPixelShaders` binds from, for
++classic and remastered programs alike; it took the `shadowMap` row, which was a literal 2 in
++`EngineGL33_Shaders.cpp`. The other literal 2s for the shadow unit (`EngineGL33_Lighting.cpp`,
++`EngineGL33_ShadowDepth.cpp` `EnsureArrayTarget`, `EngineGL33_Shaders.cpp` `UploadPSShadowConstants`)
++are `kShadowMapUnit` now, and the two F3 audits in `test_gl_state_cache_audit.cpp` look for
++`GL33Bind::ActiveUnit(kShadowMapUnit);`. Not in the table: `BindLightingTextures` still binds units 2
++to 5 by name (each unit has its own stand-in and texture target), and the post pass keeps its own
++units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's. `GL33Bind` caches units 0 to 7 only
++(`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
++for unit 6 belongs to the step that first samples it (A5 or B1).
++
+ ### 3.5 Shader sources: split by concern, test through the accessors
+ 
+ `EngineGL33_LightingShaders.cpp` (757 lines) and `EngineGL33_PostFX.cpp` (725 lines) are the two
+@@ -308,6 +330,45 @@ files almost every prototype edits. Before any visible feature lands (step A2):
+   checks every declaration of `uniform LitConstants` in those files against `LitConst`, slot by
+   slot, so a stale copy fails.
+ 
++As built in A2 (corrections to the bullets above):
++
++- There is no single `s_psRemasterCommon` string any more: the LitConstants block sits between the
++  `PSConstants` header and the samplers, so the prelude is ten pieces (`FragmentPiece`: header,
++  LitConstants, inputs, shadows, terrain and clouds, sky, lights, surface, shade, finish), joined by
++  the table `kFragmentPieces`. `RemasterFragmentCommon()` returns the join and
++  `RemasterFragmentPiece()` one piece. The new files are `EngineGL33_LightingShadersSky.cpp`,
++  `EngineGL33_LightingShadersLights.cpp` and `EngineGL33_LightingShadersSurface.cpp`; every piece
++  after the header starts with the blank line before it, so the join is byte for byte the tip's
++  `s_psRemasterCommon`.
++- "PoseidonTests links PoseidonGL33" holds only for objects without engine code: the first A2 build
++  pulled `EngineGL33_PostFX.cpp.obj` in through the post accessors, which pulled
++  `EngineGL33_Lifecycle.cpp.obj`, whose `CreateEngineGL33` collides with the test stub
++  (`test_stubs.cpp:101`, lld-link duplicate symbol). So the post GLSL moved to
++  `EngineGL33_PostShaders.cpp` (no GL code, the `kPostShaders` table, `PostShaderName` and
++  `PostShaderSource`), and `EngineGL33_PostFX.cpp` keeps the pass code. A post pass added later puts
++  its GLSL in a GL-free file (`EngineGL33_PostShaders.cpp` or its own `EngineGL33_Post<Name>Shaders.cpp`)
++  and adds its row to `kPostShaders`; its pass code goes where 3.6 says.
++- `s_glslPostCommon` holds only the depth reconstruction AO uses (`viewZ(vec2)`, `viewPos`), and the
++  pass declares the four inputs it reads (`depthTex`, `projInfo`, `depthMap`, `worldRect`): AO declares
++  its own `aoParams` and `screen` between them, so a shared declaration block would reorder AO's
++  uniforms and change its bytes. Interleaved gradient noise, the cascade lookup and the projection
++  helpers join it with their first post consumer (A3's linear depth, A5, B6, B8); the noise is still
++  written inline in AO, the shafts and the composite. The terrain and cloud helpers need no rewrite:
++  the TerrainClouds piece takes positions, so a post pass pastes `LitConstantsBlock()`, the samplers
++  and `RemasterFragmentPiece(FragmentPiece::TerrainClouds)`.
++- `s_glslLitConstantsBlock` is pasted into the prelude only; no vertex or post shader reads the rig
++  yet (A7 is the first).
++- Tests: the compile case goes through `RemasterVertexSource`, `RemasterFragmentCommon` plus each
++  `RemasterFragmentMain`, and `PostShaderSource`; pieces do not compile alone, so "every `s_ps*` /
++  `s_vs*` symbol" became a separate case that every raw string of `EngineGL33_LightingShaders*.cpp`
++  and `EngineGL33_Post*.cpp` sits inside a compiled program. The layout case checks every
++  `uniform LitConstants {` in `engine/PoseidonGL33/*.{cpp,hpp}` member by member and that there is one.
++  Two more cases pin the assembly tables as the lighting lab reads them (`kFragmentPieces`,
++  `kPostShaders` parsed from the source give exactly what the accessors return) and the concern of each
++  piece; one checks the unit table. The lab's `glsl_extract.py` assembles the same way
++  (`load_programs`), so `--dump` writes `psRemasterCommon.glsl` whole, and it now decodes
++  `git show` output as UTF-8 (it used the console code page, which mangled the tip's comments).
++
+ ### 3.6 Post pipeline stages
+ 
+ `EngineGL33::EndWorldScene` is one function today: resolve, AO, bloom, shafts, composite. Eight
+@@ -602,6 +663,38 @@ graphics-remaster worktree, gitignored).**
+ As 3.3 to 3.5. Pixel-exact: the assembled GLSL strings must be byte-identical to the tip's
+ (compare `glsl_extract.py --dump` output before and after). Effort 2 days.
+ 
++**Result (2026-10-18, uncommitted change on 7e013c2; evidence in `tmp/integration/A2/` of the
++graphics-remaster worktree, gitignored).**
++
++- Built as 3.3 to 3.5 with the as-built notes there: the prelude in ten concern pieces joined by
++  `kFragmentPieces`, one `s_glslLitConstantsBlock`, the post GLSL in `EngineGL33_PostShaders.cpp`
++  with `kPostShaders` and `s_glslPostCommon`, `LitConstPlanned` for slots 58 to 78, the unit
++  constants with their `static_assert` and the `kLitSamplers` table, the tests through the accessors.
++- Byte identity: `glsl_extract.py --dump` of the tip (`HEAD:` sources) and of the working tree give the
++  same 30 files (8 remastered, 7 post, 15 classic and shadow-depth programs, md5 lists equal). The
++  engine side was checked apart from the Python parse: a scratch program linked against the A2
++  build's own shader objects wrote what `RemasterVertexSource`, `RemasterFragmentCommon`,
++  `RemasterFragmentMain` and `PostShaderSource` return, and all 15 sources and the 4 joined fragment
++  programs equal the tip's raw strings.
++- Off equals baseline (item 5): `features_ab` on the A2 build against the A1 build, both shot this
++  session: the five views that repeat to the pixel between two boots of one build (`perf_sunrise_ridge`,
++  `shadows_woods_pine2_evening`, `hfrt_hill_1730`, `airbeams_pinewood_morn`, `texsharp_forest_edge`)
++  are pixel-identical across the builds, off and on; the others differ by the same kinds and sizes as
++  the A1 build's own off against on and its boot-to-boot noise (fire, smoke and lamps at night, the
++  posed soldier's head, a 22-pixel moving detail on the night horizon, the sea). The three-island set against the A1 build's set of this session: within
++  the A1 build's boot-to-boot noise, in Classic too.
++- Timing (item 7, quiet: 0 of 4 slots, no foreign game in 235 sampler rows): at P0 in both runs the
++  Remastered frame medians are within -0.27 to +0.18 ms of A1's run (sunrise_ridge 17.49 against
++  17.31, valley 05:15 23.82 against 23.76, Eden broken_high 24.74 against 24.65); 14 of 26 gates off
++  at `noon_fields`, as in A1.
++- Build 0 warnings (the 11 touched translation units rebuilt), clang-format clean (`ShadowDepth.cpp`,
++  not clean at the tip, by `clang-format-diff.py` on the changed lines), smoke 3/3 with KHR_debug ids
++  131169, 131154 and 131218 only.
++- Tests: 456/456 on the gate tags (4 new cases); `[Graphics]` has the known DDS fixture failure only;
++  the full suite has the 6 known localisation failures only. Five mutations (a `kLitSamplers` row
++  dropped, a stale hand copy of the block, two pieces swapped in the table, `psPostAo` without the
++  shared string, two block members swapped) each turn their case red.
++
+ ### A3. Post stages
+ 
+ As 3.6. Pixel-exact against A2 (capture A/B, `banddiff.py` from `tmp/research/perf/scripts`).
+@@ -1217,7 +1310,7 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
+ | File / unit | Touched by | Rule |
+ |---|---|---|
+ | `EngineGL33_LightingShaders.cpp` | F2, F9, temporal, combat, atmosphere, shadows, clouds, night (override), materials (override), shade (override), hfrt (override), haze (override), texsharp (override), water | A2 splits it by concern first. After that one feature edits one piece; `shadeRemastered` (crown and ambient) and `finishFragment` stay single-owner per step: B2 then B7 then B9. The VS sources change only in A5 (jitter) and A7 (sky ray); haze's `vSkyClip` is not ported (A7 replaces it). |
+-| `EngineGL33_PostFX.cpp` | F5, combat, ssr, volumetric, materials, night, shadows, texsharp, temporal | A3 turns it into stages; every feature adds its own `EngineGL33_Post*.cpp`. Only A3 and A5 touch the stage list itself; later steps register a stage. |
++| `EngineGL33_PostFX.cpp` | F5, combat, ssr, volumetric, materials, night, shadows, texsharp, temporal | A3 turns it into stages; every feature adds its own `EngineGL33_Post*.cpp`, with its GLSL in a GL-free file and a `kPostShaders` row (A2, 3.5). Only A3 and A5 touch the stage list itself; later steps register a stage. |
+ | `EngineGL33_Lighting.{hpp,cpp}` | F3, perf, combat, ssr, materials, atmosphere, hfrt, haze, shadows, night, clouds, texsharp, temporal | `LitConst` and the unit table are fixed in A2 (3.3, 3.4). `UploadLitFrameConstants` is split into per-feature `UploadLit<Feature>()` calls made from it; `BindLightingTextures` binds from the unit table; all partial uploads go through A4's mirror helper. |
+ | `LightRig.{hpp,cpp}` | F2, F4, F5, F9, every prototype's `LightingTuning` fields, shade's rig terms, night's moon key | Feature switches leave `LightingTuning` for `FeatureSet` (A1). Rig math changes only in B2 (`lowSunRig`) and B3 (`KeyLight`), in that order, each with re-pinned tests. |
+ | `SceneDraw.cpp` | F1, F6, perf, night | A4 first (cull before LOD selection and sort; light gate via `RunEntry`). B3 then adds the moon shadow-pass condition in `DrawObjectsAndShadowsPass2`. |
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 3836a78..873a600 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -115,7 +115,7 @@ void EngineGL33::InitLightingResources()
+     // unit 2, and none may meet texture 0 there (an incomplete texture; under
+     // the comparison sampler, undefined behaviour). Park the stand-in on the
+     // unit until a shadow map replaces it.
+-    GL33Bind::ActiveUnit(2);
++    GL33Bind::ActiveUnit(kShadowMapUnit);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+     GL33Bind::ActiveUnit(0);
+ 
+@@ -156,7 +156,7 @@ void EngineGL33::DeinitLightingResources()
+     _post.unavailable = false;
+     if (_shadowCompareSampler)
+     {
+-        glBindSampler(2, 0);
++        glBindSampler(kShadowMapUnit, 0);
+         glDeleteSamplers(1, &_shadowCompareSampler);
+         _shadowCompareSampler = 0;
+     }
+@@ -194,7 +194,7 @@ void EngineGL33::UpdateRemasterPrograms()
+     // Unit 2 holds the shadow-map array for both sets; only the remastered
+     // shaders read it through a comparison sampler (the classic ones read raw
+     // depth, and compare mode on a plain sampler is undefined).
+-    glBindSampler(2, on ? _shadowCompareSampler : 0);
++    glBindSampler(kShadowMapUnit, on ? _shadowCompareSampler : 0);
+     InvalidatePipelineCache();
+     // Re-bind the current program from the other set (water reads the scene's
+     // sun when selected; without a scene, the next selection re-binds).
+@@ -275,10 +275,10 @@ void EngineGL33::BindLightingTextures()
+     if (!_remasterPrograms)
+         return;
+     const bool map = _terrainHorizonTex && _terrainHeightTex;
+-    GL33Bind::ActiveUnit(2);
++    GL33Bind::ActiveUnit(kShadowMapUnit);
+     if (!(ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0))
+         glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+-    glBindSampler(2, _shadowCompareSampler);
++    glBindSampler(kShadowMapUnit, _shadowCompareSampler);
+     GL33Bind::ActiveUnit(kTerrainHorizonUnit);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e..415446b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -1,8 +1,9 @@
+ #pragma once
+ 
+-// Remastered lighting: shader sources and the LitConstants uniform layout.
+-// See EngineGL33_LightingShaders.cpp for the shading model and
+-// Poseidon/Graphics/Remaster/LightRig.hpp for the light rig.
++// Remastered lighting: the shader sources, the LitConstants uniform layout and
++// the texture units of the remastered inputs. See EngineGL33_LightingShaders.cpp
++// for the shading model and Poseidon/Graphics/Remaster/LightRig.hpp for the
++// light rig.
+ 
+ namespace Poseidon::gl33lighting
+ {
+@@ -15,16 +16,117 @@ const char* RemasterVertexSource(int vs);
+ const char* RemasterFragmentCommon();
+ const char* RemasterFragmentMain(int ps);
+ 
++// The common prelude, split by concern (INTEGRATION-PLAN.md section 3.5):
++// RemasterFragmentCommon() is these pieces joined in this order. A feature
++// edits the piece of its concern. Overrides still replace the joined prelude
++// whole (psRemasterCommon.glsl).
++enum class FragmentPiece : int
++{
++    Header,        // #version and the classic PSConstants block
++    LitConstants,  // LitConstantsBlock()
++    Inputs,        // samplers, varyings, colour space and tonemap helpers
++    Shadows,       // shadowMapVisibility
++    TerrainClouds, // terrainSunVisibility, cloudSunVisibility
++    Sky,           // skyIrradiance, fogColorToward (EngineGL33_LightingShadersSky.cpp)
++    Lights,        // localLights (EngineGL33_LightingShadersLights.cpp)
++    Surface,       // glossy (EngineGL33_LightingShadersSurface.cpp)
++    Shade,         // shadeRemastered
++    Finish,        // finishFragment
++    Count,
++};
++const char* RemasterFragmentPiece(FragmentPiece piece);
++
++// The pieces kept in files of their own (read them through RemasterFragmentPiece).
++extern const char kRemasterSkyGLSL[];
++extern const char kRemasterLightsGLSL[];
++extern const char kRemasterSurfaceGLSL[];
++
++// The LitConstants block (binding 3): the one GLSL declaration of the LitConst
++// layout below. Every shader that reads the rig pastes this string instead of
++// a copy of its own (today the fragment prelude).
++const char* LitConstantsBlock();
++
++// The post-pass shaders (EngineGL33_PostShaders.cpp; EngineGL33_PostFX.cpp
++// runs the passes), each assembled from its pieces.
++enum class PostShader : int
++{
++    Vertex, // the fullscreen triangle every pass draws
++    Ao,
++    AoBlur,
++    BloomDown,
++    BloomUp,
++    Shafts,
++    Composite,
++    Count,
++};
++// The override file stem (vsPost, psPostAo, ...) and the assembled source.
++const char* PostShaderName(PostShader shader);
++const char* PostShaderSource(PostShader shader);
++
+ // Uniform-buffer binding point of LitConstants (VS = 0, PS = 1, WorldInstances = 2).
+ constexpr unsigned int kLitBinding = 3;
+ 
+-// Texture units of the remastered inputs (0/1 = material textures, 2 = shadow
+-// map array, 7 = the upload unit).
++// Texture units of the remastered inputs (INTEGRATION-PLAN.md section 3.4).
++// Units 0 and 1 hold the material textures and 7 is the upload unit
++// (EngineGL33::kUploadUnit); GL 3.3 guarantees 16 fragment units. GL33Bind
++// caches units 0 to 7 only, so units 8 and up bind on every call.
++constexpr int kShadowMapUnit = 2; // cascade array; a complete depth array from init on, never texture 0
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++// Allocated to the features still to land; no shader samples them yet.
++constexpr int kShadowRawUnit = 6;     // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
++constexpr int kSkyLutUnit = 8;        // sky-view table (sky table)
++constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
++constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
++constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
++constexpr int kLightDataUnit = 12;    // light buffer, samplerBuffer (light list)
++constexpr int kLightTileUnit = 13;    // per-tile light indices (light list)
++constexpr int kCombatMaskUnit = 14;   // combat shadow mask (combat)
++constexpr int kCanopyVisUnit = 15;    // canopy sun visibility (hfrt)
+ 
+-// LitConstants vec4 slots; must match the GLSL block in s_psRemasterCommon.
++namespace detail
++{
++constexpr int kRemasterUnits[] = {kShadowMapUnit,    kTerrainHorizonUnit, kTerrainHeightUnit, kCloudNoiseUnit,
++                                  kShadowRawUnit,    kSkyLutUnit,         kSkyDensityUnit,    kCanopyUnit,
++                                  kSeaNextFrameUnit, kLightDataUnit,      kLightTileUnit,     kCombatMaskUnit,
++                                  kCanopyVisUnit};
++constexpr bool RemasterUnitsValid()
++{
++    constexpr int n = static_cast<int>(sizeof(kRemasterUnits) / sizeof(kRemasterUnits[0]));
++    for (int i = 0; i < n; ++i)
++    {
++        const int unit = kRemasterUnits[i];
++        if (unit < 2 || unit == 7 || unit > 15)
++            return false;
++        for (int j = 0; j < i; ++j)
++            if (kRemasterUnits[j] == unit)
++                return false;
++    }
++    return true;
++}
++} // namespace detail
++static_assert(detail::RemasterUnitsValid(),
++              "remastered texture units: 2 to 15, never the material units 0 and 1 or the upload unit 7, all distinct");
++
++// Sampler uniform -> texture unit for every lit program, classic and
++// remastered; InitPixelShaders binds them from this table and skips a name the
++// program lacks. A shader that adds a sampler adds its row here: a sampler
++// left unbound reads unit 0, the material texture.
++struct LitSampler
++{
++    const char* name;
++    int unit;
++};
++constexpr LitSampler kLitSamplers[] = {
++    {"shadowMap", kShadowMapUnit},
++    {"terrainHorizon", kTerrainHorizonUnit},
++    {"terrainHeight", kTerrainHeightUnit},
++    {"cloudNoise", kCloudNoiseUnit},
++};
++
++// LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
++// checks it member by member).
+ namespace LitConst
+ {
+ enum : int
+@@ -69,4 +171,39 @@ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap")
+ static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
+ } // namespace LitConst
+ 
++// The slots allocated to the features still to land (INTEGRATION-PLAN.md
++// section 3.3), so no two steps take the same one. The per-draw slot comes
++// first, next to the per-draw material and light slots. A step that lands a
++// feature moves its rows into LitConst, declares them in LitConstantsBlock()
++// (a slot below it that has not landed yet becomes a padding member there) and
++// raises LitConst::Count, which the upload and the shaders follow.
++namespace LitConstPlanned
++{
++constexpr int MatClass = 58;     // materials, per draw: class, object kind, blend, hash
++constexpr int Taa = 59;          // temporal: frame index, stochastic flags, taps, penumbra per metre
++constexpr int Pcss = 60;         // shadows: search radius, minimum texels
++constexpr int SkyRight = 61;     // sky pass, shared by the sky table and clouds: camera right * tan(fov x / 2)
++constexpr int SkyUp = 62;        // sky pass: camera up * tan(fov y / 2)
++constexpr int SkyFwd = 63;       // sky pass: camera forward
++constexpr int Atmo = 64;         // sky table: radiance scale, overcast floor, aerial perspective, cloud mask
++constexpr int AtmoCloudSun = 65; // sky table: sun light on the clouds (linear)
++constexpr int AtmoCloudAmb = 66; // sky table: sky light on the clouds (linear)
++constexpr int AtmoDome = 67;     // sky table: classic dome light (linear), hue blend
++constexpr int Sky = 68;          // clouds: sky mode, lit-cloud strength, shadow source
++constexpr int SkyVp = 69;        // clouds: viewport origin and 1 / size (pixels)
++constexpr int LightTiles = 70;   // light list: tile size, tile counts, light count
++constexpr int Night = 71;        // night: flags, beam profile, moon key
++constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
++constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
++constexpr int Water0 = 74;       // water: wave, swell, ripple, sky weight
++constexpr int Water1 = 75;       // water: sheen, glint, sparkle
++constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
++constexpr int Detail = 77;       // texsharp: terrain detail constants
++constexpr int Haze = 78;         // haze: the analytic fallback for blended surfaces
++constexpr int End = 79;          // one past the last planned slot
++static_assert(MatClass == LitConst::Count, "the planned slots follow the declared ones");
++// std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
++static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
++} // namespace LitConstPlanned
++
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 08a271b..a54d9c1 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -28,13 +28,23 @@
+ // Pre-lit geometry (VSScreen: sky, clouds, particles, 2D) passes through
+ // exactly as in the classic shaders.
+ //
+-// The fragment shaders are built from two strings: s_psRemasterCommon (the
+-// #version line, blocks, samplers, varyings and the lighting functions) and one
+-// main body per pixel shader. The vertex shaders are standalone.
++// A fragment shader is the common prelude followed by one main body per pixel
++// shader. The prelude is split by concern (FragmentPiece in
++// EngineGL33_Lighting.hpp) and RemasterFragmentCommon() joins the pieces in a
++// fixed order: the header, the LitConstants block, the inputs and colour
++// helpers, shadows, terrain and clouds, sky (EngineGL33_LightingShadersSky.cpp),
++// local lights (EngineGL33_LightingShadersLights.cpp), surface
++// (EngineGL33_LightingShadersSurface.cpp), shadeRemastered and finishFragment.
++// A feature edits the piece of its concern. The LitConstants block is one
++// string (LitConstantsBlock()) that every shader reading the rig pastes. The
++// vertex shaders are standalone.
+ 
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
++#include <iterator>
++#include <string>
++
+ namespace
+ {
+ 
+@@ -230,8 +240,10 @@ void main() {
+ }
+ )";
+ 
+-// Everything the remastered fragment shaders share. Ends without main().
+-static const char s_psRemasterCommon[] = R"(#version 330 core
++// The fragment prelude by concern (FragmentPiece), joined in kFragmentPieces
++// order. Each piece after the header starts with the blank line that separates
++// it from the one before. Header: the version and the classic pixel constants.
++static const char s_psRemasterHeader[] = R"(#version 330 core
+ layout(std140) uniform PSConstants {
+     vec4 fogColor;     // c0
+     vec4 alphaRef;     // c1: {ref, enabled, alphaToCoverage, flatDebug}
+@@ -246,7 +258,12 @@ layout(std140) uniform PSConstants {
+     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
+     vec4 camFwd;       // c26
+ };
++)";
+ 
++// The LitConstants block (binding 3): the one GLSL declaration of the LitConst
++// layout in EngineGL33_Lighting.hpp. Every shader that reads the rig pastes this
++// string (LitConstantsBlock()); the layout test checks it slot by slot.
++static const char s_glslLitConstantsBlock[] = R"(
+ // Remastered light rig and per-draw material, binding 3. Layout mirrors
+ // LitConst in EngineGL33_Lighting.hpp.
+ layout(std140) uniform LitConstants {
+@@ -281,7 +298,11 @@ layout(std140) uniform LitConstants {
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
+ };
++)";
+ 
++// Inputs: samplers, varyings and the colour space and tonemap helpers the
++// later pieces use.
++static const char s_psRemasterInputs[] = R"(
+ uniform sampler2D tex0;
+ uniform sampler2D tex1;
+ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound in remastered mode
+@@ -317,7 +338,10 @@ vec3 tonemapNeutral(vec3 c) {
+     float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
+     return mix(c, vec3(newPeak), g);
+ }
++)";
+ 
++// Shadows: the sun's visibility from the cascaded shadow maps.
++static const char s_psRemasterShadows[] = R"(
+ // 12-tap Poisson disc; each tap is a hardware 2x2 comparison (bilinear PCF),
+ // so the penumbra is smooth without per-pixel noise.
+ const vec2 kPoisson[12] = vec2[](
+@@ -387,7 +411,11 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
+     float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+     return 1.0 - (1.0 - lit) * fade;
+ }
++)";
+ 
++// Terrain and clouds: the sun's visibility past the hills and under the broken
++// cloud field, the valley sky visibility and the ground-bounce tint.
++static const char s_psRemasterTerrainClouds[] = R"(
+ // Colour of the light the ground below bounces (luminance 1; white when there
+ // is no map). Set by terrainSunVisibility, read by skyIrradiance.
+ vec3 g_groundTint = vec3(1.0);
+@@ -431,85 +459,13 @@ float cloudSunVisibility(vec3 posAbs) {
+     float covered = edge > 1e-4 ? smoothstep(1.0 - cover - edge, 1.0 - cover + edge, n) : step(1.0 - cover, n);
+     return mix(1.0, litCloud.y, covered);
+ }
++)";
+ 
+-// Irradiance from the sky hemisphere (and the ground below it) onto a surface
+-// with normal n. The horizon band is brighter, and takes the sky's colour,
+-// toward the sun; opposite the sun it keeps the cool zenith colour, so a low
+-// sun gives warm light and cool shade.
+-vec3 skyIrradiance(vec3 n) {
+-    float h = length(n.xz);
+-    float sl = length(litSunDir.xz);
+-    float toward = (h > 1e-3 && sl > 1e-3) ? 0.5 + 0.5 * dot(n.xz / h, litSunDir.xz / sl) : 0.5;
+-    // The bounce takes the colour of the ground below: the rig's horizon holds
+-    // half the (neutral) ground bounce, so swap that half for the tinted one.
+-    vec3 ground = litGround.rgb * g_groundTint;
+-    vec3 horizon = mix(litHorizon.rgb, litHorizonSun.rgb, toward) + 0.5 * (ground - litGround.rgb);
+-    float t = clamp(n.y, -1.0, 1.0);
+-    return t >= 0.0 ? mix(horizon, litZenith.rgb, t) : mix(horizon, ground, -t);
+-}
+-
+-// Fog toward the sun takes the sky dome's own sun glow (TLVertexTable::
+-// DoSkyLighting adds SunSkyColor * cos^6 to SkyColor, times the sky texture),
+-// so distant ground fades into the colour of the sky behind it instead of a
+-// flat band. Away from the sun this is exactly the classic fog colour.
+-vec3 fogColorToward(vec3 rel) {
+-    if (litFogSun.w < 0.5) return fogColor.rgb;
+-    float c = max(dot(rel * inversesqrt(max(dot(rel, rel), 1e-12)), litSunDir.xyz), 0.0);
+-    float c2 = c * c;
+-    return min(fogColor.rgb + litFogSun.rgb * (c2 * c2 * c2), max(litFogCap.rgb, fogColor.rgb));
+-}
+-
+-// Point lights and spotlights per fragment: the classic quadratic falloff past
+-// the start distance, ending in a smooth window instead of a hard cut at 10x
+-// the start distance, and a smoothed spotlight cone.
+-vec3 localLights(vec3 n, vec3 kd, vec3 ka) {
+-    vec3 sum = vec3(0.0);
+-    int count = int(litLightCount.x);
+-    for (int i = 0; i < 8; ++i) {
+-        if (i >= count) break;
+-        vec3 toLight = litLightPos[i].xyz - vWorldRel;
+-        float d2 = dot(toLight, toLight);
+-        float start2 = litLightPos[i].w * litLightPos[i].w;
+-        float end2 = start2 * 100.0;
+-        if (d2 >= end2) continue;
+-        float cone = 1.0;
+-        if (litLightColor[i].w > 0.5) {
+-            float inside = -dot(toLight, litLightDir[i].xyz);
+-            if (inside <= 0.0) continue;
+-            float cos2 = inside * inside / max(d2, 1e-6);
+-            cone = smoothstep(0.9415, 0.9806, cos2); // 14 deg soft edge, full inside 8 deg
+-            if (cone <= 0.0) continue;
+-        }
+-        float atten = (d2 > start2) ? start2 / d2 : 1.0;
+-        atten *= 1.0 - smoothstep(0.5 * end2, end2, d2);
+-        float cosFi = max(dot(toLight, n), 0.0) * inversesqrt(max(d2, 1e-6));
+-        sum += (kd * litLightColor[i].rgb * cosFi + ka * litLightAmb[i].rgb) * (atten * cone);
+-    }
+-    return sum;
+-}
+-
+-// Sun highlight and sky reflection for glossy materials (specular power > 0).
+-vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
+-    float power = litMatSpecular.w;
+-    if (power <= 0.0) return vec3(0.0);
+-    vec3 l = litSunDir.xyz;
+-    float nl = dot(n, l);
+-    vec3 h = normalize(l + v);
+-    float nh = max(dot(n, h), 0.0);
+-    float vh = max(dot(v, h), 0.0);
+-    float p = max(power, 1.0);
+-    // Normalised Blinn-Phong (tighter lobes are brighter) with a Schlick-style
+-    // grazing boost.
+-    float norm = (p + 8.0) / 28.0;
+-    float fresnel = 1.0 + 2.0 * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0);
+-    vec3 sunSpec = litMatSpecular.rgb * litSun.rgb * (pow(nh, p) * norm * fresnel * smoothstep(0.0, 0.15, nl) * sunVisibility);
+-    vec3 r = reflect(-v, n);
+-    float fv = pow(clamp(1.0 - dot(n, v), 0.0, 1.0), 5.0);
+-    float gloss = clamp(dot(litMatSpecular.rgb, kLuma), 0.0, 1.0);
+-    vec3 skySpec = skyIrradiance(r) * (gloss * (0.04 + 0.96 * fv) * 0.6);
+-    return (sunSpec + skySpec) * litHorizon.w;
+-}
++// Sky, local lights and surface are in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp.
+ 
++// Shade: one fragment's light (sun, sky, moon, local lights, emissive, gloss),
++// tonemapped.
++static const char s_psRemasterShade[] = R"(
+ // Sun visibility of the last shaded fragment (water reuses it for its glint).
+ float g_sunVisibility = 1.0;
+ 
+@@ -591,7 +547,10 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     float grey = dot(display, kLuma);
+     return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+ }
++)";
+ 
++// Finish: alpha, the night eye and fog, the tail every main ends with.
++static const char s_psRemasterFinish[] = R"(
+ // Classic night-eye desaturation, fog and alpha handling, shared tail.
+ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     if (alphaRef.z > 0.5) {
+@@ -717,6 +676,25 @@ void main() {
+ namespace Poseidon::gl33lighting
+ {
+ 
++namespace
++{
++// The fragment prelude: these pieces in FragmentPiece order. The lighting lab's
++// glsl_extract.py reads this table to assemble the same source.
++const char* const kFragmentPieces[] = {
++    s_psRemasterHeader,        // Header
++    s_glslLitConstantsBlock,   // LitConstants
++    s_psRemasterInputs,        // Inputs
++    s_psRemasterShadows,       // Shadows
++    s_psRemasterTerrainClouds, // TerrainClouds
++    kRemasterSkyGLSL,          // Sky
++    kRemasterLightsGLSL,       // Lights
++    kRemasterSurfaceGLSL,      // Surface
++    s_psRemasterShade,         // Shade
++    s_psRemasterFinish,        // Finish
++};
++static_assert(std::size(kFragmentPieces) == static_cast<size_t>(FragmentPiece::Count), "one entry per FragmentPiece");
++} // namespace
++
+ const char* RemasterVertexSource(int vs)
+ {
+     switch (vs)
+@@ -734,7 +712,26 @@ const char* RemasterVertexSource(int vs)
+ 
+ const char* RemasterFragmentCommon()
+ {
+-    return s_psRemasterCommon;
++    // Joined once, on first use (thread-safe static).
++    static const std::string common = []
++    {
++        std::string joined;
++        for (const char* piece : kFragmentPieces)
++            joined += piece;
++        return joined;
++    }();
++    return common.c_str();
++}
++
++const char* RemasterFragmentPiece(FragmentPiece piece)
++{
++    const int i = static_cast<int>(piece);
++    return i >= 0 && i < static_cast<int>(FragmentPiece::Count) ? kFragmentPieces[i] : nullptr;
++}
++
++const char* LitConstantsBlock()
++{
++    return s_glslLitConstantsBlock;
+ }
+ 
+ const char* RemasterFragmentMain(int ps)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index edf49f1..62f1b0b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -20,6 +20,10 @@
+ //      hides banding.
+ // The HUD then draws on top, untouched.
+ //
++// The shaders live in EngineGL33_PostShaders.cpp, which has no GL code, so the
++// unit tests compile the sources the engine builds (PostShaderSource in
++// EngineGL33_Lighting.hpp).
++//
+ // All GL state the passes touch is restored or the bind caches invalidated;
+ // texture unit 1 is never used (its sampler object belongs to ApplyPipeline).
+ 
+@@ -36,236 +40,11 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <string>
+ 
+ namespace
+ {
+ 
+-static const char s_vsPostGLSL[] = R"(#version 330 core
+-out vec2 vUV;
+-void main() {
+-    // Fullscreen triangle from gl_VertexID; no vertex buffer needed.
+-    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+-    vUV = p;
+-    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+-}
+-)";
+-
+-// Half-resolution ambient occlusion. Output r = visibility (1 = open), g = view
+-// depth in metres for the bilateral blur.
+-static const char s_psPostAoGLSL[] = R"(#version 330 core
+-in vec2 vUV;
+-uniform sampler2D depthTex;
+-uniform vec4 projInfo;  // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
+-uniform vec4 depthMap;  // ndcZ = depth * x + y
+-uniform vec4 aoParams;  // x radius (m), y strength, z fade start (m), w fade end (m)
+-uniform vec4 screen;    // xy full-res size, zw 1/size
+-uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv (pillarbox crop)
+-out vec4 fragColor;
+-
+-float viewZ(vec2 uv) {
+-    float d = texture(depthTex, uv).r;
+-    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
+-}
+-
+-vec3 viewPos(vec2 uv, float z) {
+-    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+-    return vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
+-}
+-
+-void main() {
+-    float d0 = texture(depthTex, vUV).r;
+-    if (d0 >= 0.999999) { fragColor = vec4(1.0, 1e6, 0.0, 1.0); return; } // sky
+-    float z = viewZ(vUV);
+-    vec3 p = viewPos(vUV, z);
+-
+-    // Normal from depth: on each axis take the neighbour with the smaller step,
+-    // so silhouettes do not bend the normal.
+-    vec2 tx = vec2(screen.z, 0.0);
+-    vec2 ty = vec2(0.0, screen.w);
+-    vec3 pr = viewPos(vUV + tx, viewZ(vUV + tx));
+-    vec3 pl = viewPos(vUV - tx, viewZ(vUV - tx));
+-    vec3 pu = viewPos(vUV + ty, viewZ(vUV + ty));
+-    vec3 pd = viewPos(vUV - ty, viewZ(vUV - ty));
+-    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
+-    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+-    vec3 n = normalize(cross(dx, dy));
+-    if (dot(n, p) > 0.0) n = -n; // face the camera
+-
+-    float radius = aoParams.x;
+-    vec2 radiusUV = vec2(radius / projInfo.z, radius / projInfo.w) * (0.5 / z) * worldRect.zw;
+-    float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+-    const int kTaps = 12;
+-    float occlusion = 0.0;
+-    for (int i = 0; i < kTaps; ++i) {
+-        float t = (float(i) + 0.5 + noise * 0.5) / float(kTaps);
+-        float angle = (float(i) * 2.39996 + noise * 6.2831853); // golden-angle spiral
+-        vec2 suv = vUV + vec2(cos(angle), sin(angle)) * radiusUV * t;
+-        vec3 q = viewPos(suv, viewZ(suv));
+-        vec3 v = q - p;
+-        float vv = dot(v, v);
+-        float falloff = max(1.0 - vv / (radius * radius), 0.0);
+-        occlusion += max(dot(v, n) - 0.002 * z - 0.03, 0.0) / (vv + 0.05) * falloff;
+-    }
+-    float visibility = max(1.0 - aoParams.y * occlusion * (2.0 / float(kTaps)), 0.0);
+-    visibility = mix(visibility, 1.0, smoothstep(aoParams.z, aoParams.w, z));
+-    fragColor = vec4(visibility, z, 0.0, 1.0);
+-}
+-)";
+-
+-// Depth-aware separable blur of the occlusion (run horizontally, then vertically).
+-static const char s_psPostAoBlurGLSL[] = R"(#version 330 core
+-in vec2 vUV;
+-uniform sampler2D aoTex;
+-uniform vec2 stepUV;
+-out vec4 fragColor;
+-void main() {
+-    vec2 c = texture(aoTex, vUV).rg;
+-    float sum = c.r;
+-    float wsum = 1.0;
+-    for (int i = -4; i <= 4; ++i) {
+-        if (i == 0) continue;
+-        vec2 s = texture(aoTex, vUV + stepUV * float(i)).rg;
+-        float w = exp(-float(i * i) / 8.0) * max(0.0, 1.0 - abs(s.g - c.g) / (0.04 * c.g + 0.15));
+-        sum += s.r * w;
+-        wsum += w;
+-    }
+-    fragColor = vec4(sum / wsum, c.g, 0.0, 1.0);
+-}
+-)";
+-
+-// Bloom downsample: four bilinear taps (a 4x4 box). The first level linearises
+-// the display-space image and keeps only what is close to white, with a soft
+-// knee: the sky as a whole and sunlit walls stay out (no haze halo along the
+-// skyline), the sun, its halo, glints and sharp highlights bloom.
+-static const char s_psPostBloomDownGLSL[] = R"(#version 330 core
+-in vec2 vUV;
+-uniform sampler2D srcTex;
+-uniform vec2 srcTexel;
+-uniform vec4 bloomParams; // x threshold (linear), y knee, z 1 = first level
+-out vec4 fragColor;
+-void main() {
+-    vec3 c = texture(srcTex, vUV + srcTexel * vec2(-1.0, -1.0)).rgb;
+-    c += texture(srcTex, vUV + srcTexel * vec2(1.0, -1.0)).rgb;
+-    c += texture(srcTex, vUV + srcTexel * vec2(-1.0, 1.0)).rgb;
+-    c += texture(srcTex, vUV + srcTexel * vec2(1.0, 1.0)).rgb;
+-    c *= 0.25;
+-    if (bloomParams.z > 0.5) {
+-        c = pow(max(c, vec3(0.0)), vec3(2.2));
+-        float peak = max(c.r, max(c.g, c.b));
+-        float knee = bloomParams.y;
+-        float soft = clamp(peak - bloomParams.x + knee, 0.0, 2.0 * knee);
+-        soft = soft * soft / (4.0 * knee + 1e-4);
+-        c *= max(soft, peak - bloomParams.x) / max(peak, 1e-4);
+-    }
+-    fragColor = vec4(c, 1.0);
+-}
+-)";
+-
+-// Bloom upsample: 3x3 tent of the smaller level, added onto the larger one.
+-static const char s_psPostBloomUpGLSL[] = R"(#version 330 core
+-in vec2 vUV;
+-uniform sampler2D srcTex;
+-uniform vec2 srcTexel;
+-out vec4 fragColor;
+-void main() {
+-    vec3 c = texture(srcTex, vUV).rgb * 4.0;
+-    c += (texture(srcTex, vUV + vec2(srcTexel.x, 0.0)).rgb + texture(srcTex, vUV - vec2(srcTexel.x, 0.0)).rgb +
+-          texture(srcTex, vUV + vec2(0.0, srcTexel.y)).rgb + texture(srcTex, vUV - vec2(0.0, srcTexel.y)).rgb) * 2.0;
+-    c += texture(srcTex, vUV + srcTexel).rgb + texture(srcTex, vUV - srcTexel).rgb +
+-         texture(srcTex, vUV + vec2(srcTexel.x, -srcTexel.y)).rgb + texture(srcTex, vUV + vec2(-srcTexel.x, srcTexel.y)).rgb;
+-    fragColor = vec4(c / 16.0, 1.0);
+-}
+-)";
+-
+-// Sun shafts: march from each pixel toward the sun's screen position and gather
+-// the sky that is visible (depth at the far plane) along the way. Geometry in
+-// front of the sun - tree crowns, roofs, ridges - cuts the beams.
+-static const char s_psPostShaftsGLSL[] = R"(#version 330 core
+-in vec2 vUV;
+-uniform sampler2D depthTex;
+-uniform sampler2D colorTex;
+-uniform vec4 sunScreen; // xy sun position (uv), z on-screen weight, w aspect (width/height)
+-out vec4 fragColor;
+-void main() {
+-    if (sunScreen.z <= 0.0) { fragColor = vec4(0.0); return; }
+-    const int kSteps = 40;
+-    vec2 toSun = sunScreen.xy - vUV;
+-    vec2 stepUV = toSun / float(kSteps) * 0.85;
+-    float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+-    vec2 uv = vUV + stepUV * noise;
+-    float decay = 1.0;
+-    vec3 sum = vec3(0.0);
+-    for (int i = 0; i < kSteps; ++i) {
+-        uv += stepUV;
+-        vec2 c = clamp(uv, vec2(0.001), vec2(0.999));
+-        float sky = texture(depthTex, c).r >= 0.999999 ? 1.0 : 0.0;
+-        vec3 s = pow(texture(colorTex, c).rgb, vec3(2.2));
+-        sum += s * sky * decay;
+-        decay *= 0.965;
+-    }
+-    float d = length(toSun * vec2(sunScreen.w, 1.0));
+-    float radial = exp(-d * 2.2);
+-    fragColor = vec4(sum / float(kSteps) * radial * sunScreen.z, 1.0);
+-}
+-)";
+-
+-static const char s_psPostCompositeGLSL[] = R"(#version 330 core
+-in vec2 vUV;
+-uniform sampler2D colorTex;
+-uniform sampler2D aoTex;
+-uniform sampler2D bloomTex;
+-uniform sampler2D shaftTex;
+-uniform sampler2D depthTex;
+-uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+-uniform vec4 shaftColor; // rgb sun tint
+-uniform vec4 projInfo;   // as psPostAo
+-uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
+-uniform vec4 worldRect;  // as psPostAo
+-uniform vec4 debugView;  // x: 1 = show occlusion
+-out vec4 fragColor;
+-
+-// The shaft pass gathers the sky toward the sun, which is the light the air
+-// scatters toward the eye along an endless ray. A surface ends the ray: only
+-// the air in front of it scatters, 1 - exp(-distance / length) of the sky's
+-// share (LightRig ShaftInscatter). Without this a backlit vehicle 10 m away
+-// took the full sky glow and turned into a grey cut-out.
+-float shaftInscatter() {
+-    float d = textureLod(depthTex, vUV, 0.0).r;
+-    if (d >= 0.999999) return 1.0; // sky, as the shaft pass sees it
+-    float z = projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
+-    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+-    float dist = z * length(vec3(ndc * projInfo.zw, 1.0));
+-    return 1.0 - exp(-max(dist, 0.0) * depthMap.z);
+-}
+-
+-void main() {
+-    vec4 c = texture(colorTex, vUV);
+-    float ao = texture(aoTex, vUV).r;
+-    if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
+-    // Take the occluded part of the sky light out of the radiance. c.a is one
+-    // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+-    float share = 1.0 - clamp(c.a, 0.0, 1.0);
+-    float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+-    vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
+-    // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+-    // glow's own energy rolled off. Identity where there is no glow, never
+-    // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+-    vec3 shaft = texture(shaftTex, vUV).rgb;
+-    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
+-    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft * shaftColor.rgb * compParams.z;
+-    lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
+-    vec3 col = pow(lin, vec3(1.0 / 2.2));
+-    // Dither only what the composite changed: elsewhere the frame passes
+-    // through exactly (the 2.2 round trip is exact on 8-bit values).
+-    if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5)) {
+-        float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+-        float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+-        col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
+-    }
+-    fragColor = vec4(col, 1.0);
+-}
+-)";
+-
+ // Post constants shared with the lab (tests/rendering/lighting_lab/postfx.py).
+ constexpr float kAoRadius = 1.2f;      // metres
+ constexpr float kAoFadeStart = 120.0f; // metres: AO fades out with distance
+@@ -407,13 +186,18 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     if (!p.programsTried)
+     {
+         p.programsTried = true;
+-        GLuint vs = CompilePostShader(GL_VERTEX_SHADER, s_vsPostGLSL, "vsPost");
+-        p.progAo = LinkPostProgram(vs, s_psPostAoGLSL, "psPostAo");
+-        p.progAoBlur = LinkPostProgram(vs, s_psPostAoBlurGLSL, "psPostAoBlur");
+-        p.progBloomDown = LinkPostProgram(vs, s_psPostBloomDownGLSL, "psPostBloomDown");
+-        p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+-        p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+-        p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        using Poseidon::gl33lighting::PostShader;
++        using Poseidon::gl33lighting::PostShaderName;
++        using Poseidon::gl33lighting::PostShaderSource;
++        GLuint vs = CompilePostShader(GL_VERTEX_SHADER, PostShaderSource(PostShader::Vertex),
++                                      PostShaderName(PostShader::Vertex));
++        auto link = [vs](PostShader s) { return LinkPostProgram(vs, PostShaderSource(s), PostShaderName(s)); };
++        p.progAo = link(PostShader::Ao);
++        p.progAoBlur = link(PostShader::AoBlur);
++        p.progBloomDown = link(PostShader::BloomDown);
++        p.progBloomUp = link(PostShader::BloomUp);
++        p.progShafts = link(PostShader::Shafts);
++        p.progComposite = link(PostShader::Composite);
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..5263164 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1142,7 +1142,7 @@ void EngineGL33::UpdateShadowMapLitState()
+         camFwd[1] = _shadowCamFwd[1];
+         camFwd[2] = _shadowCamFwd[2];
+         memcpy(s_psShadow + 8 * 4, _shadowMapVP, sizeof(float) * 16 * _shadowCascades);
+-        GL33Bind::ActiveUnit(2);
++        GL33Bind::ActiveUnit(Poseidon::gl33lighting::kShadowMapUnit);
+         glBindTexture(GL_TEXTURE_2D_ARRAY, _shadowMapTex);
+         GL33Bind::ActiveUnit(0);
+     }
+@@ -1679,21 +1679,13 @@ void EngineGL33::InitPixelShaders()
+             glUniform1i(loc0, 0);
+         if (loc1 >= 0)
+             glUniform1i(loc1, 1);
+-        GLint locShadow = glGetUniformLocation(prog, "shadowMap");
+-        if (locShadow >= 0)
+-            glUniform1i(locShadow, 2); // shadow depth map on texture unit 2
+         // Remastered lighting inputs (absent from the classic programs).
+         GLuint litBlock = glGetUniformBlockIndex(prog, "LitConstants");
+         if (litBlock != GL_INVALID_INDEX)
+             glUniformBlockBinding(prog, litBlock, Poseidon::gl33lighting::kLitBinding);
+-        const struct
+-        {
+-            const char* name;
+-            int unit;
+-        } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+-                           {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
+-        for (const auto& ls : litSamplers)
++        // The lit samplers from the unit table, the shadow depth map of both
++        // sets (unit 2) among them.
++        for (const auto& ls : Poseidon::gl33lighting::kLitSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);
+             if (loc >= 0)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+index 725db8f..1cc0bed 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+@@ -1,4 +1,5 @@
+ #include <PoseidonGL33/EngineGL33.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ #include <PoseidonGL33/GL33BindCache.hpp>
+ 
+ #include <glad/gl.h>
+@@ -15,6 +16,8 @@
+ #include <cstdint>
+ #include <vector>
+ 
++using Poseidon::gl33lighting::kShadowMapUnit;
++
+ // Self-contained offscreen depth render used to validate the GL shadow-depth
+ // path against the CPU oracle. Renders
+ // triangle geometry from the light into a depth FBO and reads the depth back.
+@@ -166,7 +169,7 @@ bool EnsureArrayTarget(int res, int layers)
+     // The lit programs sample the map on unit 2, and deleting the old array
+     // above left texture 0 there if it was bound. Create the new one on unit 2,
+     // so the unit holds a complete depth array again even if the FBO fails.
+-    GL33Bind::ActiveUnit(2);
++    GL33Bind::ActiveUnit(kShadowMapUnit);
+     glGenTextures(1, &s_arrTex);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);
+     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, res, res, layers, 0, GL_DEPTH_COMPONENT, GL_FLOAT,
+diff --git a/arma_CWR/tests/rendering/lighting_lab/README.md b/arma_CWR/tests/rendering/lighting_lab/README.md
+index cdb1131..23a1f6e 100644
+--- a/arma_CWR/tests/rendering/lighting_lab/README.md
++++ b/arma_CWR/tests/rendering/lighting_lab/README.md
+@@ -27,7 +27,7 @@ any frame produced non-finite values.
+ 
+ | File | Role |
+ |---|---|
+-| `glsl_extract.py` | Pulls `R"(...)"` / `R"delim(...)delim"` shader strings out of C++ by variable name, from a path or `git show <rev>:<path>`. `--dump DIR` writes `vsTransform.glsl`, `psNormal.glsl`, ... in the engine's override naming. |
++| `glsl_extract.py` | Pulls `R"(...)"` / `R"delim(...)delim"` shader strings out of C++ by variable name, from a path or `git show <rev>:<path>`. `load_programs` assembles the remastered and post programs from their pieces (the files of a family, `EngineGL33_LightingShaders*.cpp` or `EngineGL33_Post*.cpp`, joined by the engine's `kFragmentPieces` and `kPostShaders` tables). `--dump DIR` writes the programs the engine compiles, `vsTransform.glsl`, `psNormal.glsl`, `psRemasterCommon.glsl`, `psPostAo.glsl`, ... in the engine's override naming. |
+ | `lighting.py` | Python port of `LightSun::Recalculate`, `Scene::MainLightChanged`, `Engine::InitDraw` (accom = brightness, default 1.6), `CreateMaterial*` + `TexMaterial::Combine`, `UploadVSMaterialConstants`, `DoSkyLighting`, the sun-object colours and the night-eye coefficients. Lighting presets live here. |
+ | `textures.py` | Deterministic, tileable numpy textures: grass, dirt, detail (grey, alpha 0.5 +- 0.15), plaster with window, roof tiles, olive paint, bark, foliage RGBA cutout, rock, crate, uniform, skin, rubber, sky (clear to overcast), sun disc/halo, horizon band. |
+ | `scene.py` | World-space geometry (X east, Y up, Z north, left-handed, metres): terrain, 2 houses, an APC, 26 trees, a soldier, rocks, crates, the sky dome, the sun billboards and the far-plane horizon polygon. Camera presets live here. |
+@@ -124,7 +124,8 @@ soldier and a jeep under a camouflage net (a half-lit cutout, like the trees).
+ `--shader-override-dir DIR` applies to the remastered and post shaders too,
+ with the engine's names: `psRemasterCommon.glsl` and `ps*RemasterMain.glsl`
+ pieces, `vs*Remaster.glsl`, `psPost*.glsl` (`glsl_extract.py --source
+-.../EngineGL33_LightingShaders.cpp --dump DIR` writes them). The same directory
++.../EngineGL33_LightingShaders.cpp --dump DIR` and `--source .../EngineGL33_PostFX.cpp
++--dump DIR` write them, assembled). The same directory
+ works as the game's `CWR_SHADER_OVERRIDE_DIR`, where the dev overlay's
+ *Reload shaders* picks up edits without a restart. The terrain horizon map covers a
+ 3.2 km window around the scene at 12.5 m.
+diff --git a/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py b/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py
+index 6cf0529..b8b34ec 100644
+--- a/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py
++++ b/arma_CWR/tests/rendering/lighting_lab/glsl_extract.py
+@@ -16,7 +16,17 @@ render the shaders of any commit:
+     load_source("HEAD~3")                   # git show HEAD~3:arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+     load_source("abc123:arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp")
+ 
++The remastered and post shaders are assembled from pieces kept in several
++files (EngineGL33_LightingShaders*.cpp, EngineGL33_Post*.cpp): the engine joins
++the raw strings its kFragmentPieces and kPostShaders tables name. `load_programs
++(spec)` reads the file at `spec` with its siblings of the same family, parses
++those tables and returns {engine override name: source}, the programs the
++engine compiles (psRemasterCommon, psNormalRemasterMain, vsTransformRemaster,
++vsPost, psPostAo, ...). A file without the tables (an older revision) gives
++the same names from its whole raw strings.
++
+ CLI:  python glsl_extract.py [--source PATH_OR_REV] [--list] [--dump DIR]
++      (--list and --dump show the assembled programs, under the override names)
+ """
+ 
+ from __future__ import annotations
+@@ -109,7 +119,10 @@ def repo_root() -> Path:
+ 
+ def git_show(rev_path: str, root: Path | None = None) -> str:
+     root = root or repo_root()
+-    res = subprocess.run(["git", "show", rev_path], cwd=root, capture_output=True, text=True)
++    # The sources are UTF-8 (comments carry dashes); decode them as such, not
++    # in the console's code page.
++    res = subprocess.run(["git", "show", rev_path], cwd=root, capture_output=True, encoding="utf-8",
++                         errors="replace")
+     if res.returncode != 0:
+         raise FileNotFoundError(f"git show {rev_path!r} failed: {res.stderr.strip()}")
+     return res.stdout
+@@ -184,6 +197,96 @@ def load_shaders(spec: str | os.PathLike | None = None, include_shadow_depth: bo
+     return shaders
+ 
+ 
++# Files whose shaders are assembled from pieces spread over the family's files.
++_FAMILIES = ("EngineGL33_LightingShaders", "EngineGL33_Post")
++_FRAGMENT_TABLE = re.compile(r"\bkFragmentPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
++_POST_TABLE = re.compile(r"\bkPostShaders\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\n\};", re.S)
++_POST_ROW = re.compile(r'\{\s*"(?P<name>\w+)"\s*,\s*\{(?P<pieces>[^{}]*)\}\s*\}')
++
++
++def _family(name: str) -> str | None:
++    return next((f for f in _FAMILIES if name.startswith(f)), None)
++
++
++def load_family(spec: str | os.PathLike | None = None, default_relpath: str = DEFAULT_SHADER_RELPATH) -> list[str]:
++    """The text of the C++ file at `spec` and of the other .cpp files of its
++    family in the same directory (EngineGL33_LightingShaders*.cpp,
++    EngineGL33_Post*.cpp), from disk or from the same git revision."""
++    root = repo_root()
++    if spec is None:
++        spec = root / default_relpath
++    p = Path(spec)
++    if p.exists() and p.is_file():
++        fam = _family(p.name)
++        files = sorted(p.parent.glob(f"{fam}*.cpp")) if fam else [p]
++        return [f.read_text(encoding="utf-8", errors="replace") for f in files]
++    s = str(spec)
++    rev, path = s.split(":", 1) if ":" in s and not os.path.isabs(s) else (s, default_relpath)
++    fam = _family(Path(path).name)
++    if not fam:
++        return [git_show(f"{rev}:{path}", root)]
++    parent = str(Path(path).parent).replace("\\", "/")
++    names = subprocess.run(["git", "ls-tree", "--name-only", f"{rev}:{parent}"], cwd=root, capture_output=True,
++                           text=True).stdout.split()
++    files = sorted(n for n in names if n.startswith(fam) and n.endswith(".cpp"))
++    return [git_show(f"{rev}:{parent}/{n}", root) for n in files]
++
++
++def _listed_names(body: str) -> list[str]:
++    body = re.sub(r"//[^\n]*", "", body)
++    return [n.split("::")[-1] for n in re.findall(r"[A-Za-z_][\w:]*", body)]
++
++
++def assemble_programs(raw: dict[str, str], text: str) -> dict[str, str]:
++    """{engine override name: source} from the raw strings of a file family and
++    its text: the kFragmentPieces prelude (psRemasterCommon), every kPostShaders
++    row, and every raw string no table uses under its own override name."""
++    out: dict[str, str] = {}
++    used: set[str] = set()
++    m = _FRAGMENT_TABLE.search(text)
++    if m:
++        names = _listed_names(m.group("body"))
++        out["psRemasterCommon"] = "".join(raw[n] for n in names)
++        used.update(names)
++    m = _POST_TABLE.search(text)
++    if m:
++        for row in _POST_ROW.finditer(m.group("body")):
++            names = _listed_names(row.group("pieces"))
++            out[row.group("name")] = "".join(raw[n] for n in names)
++            used.update(names)
++    for var, src in raw.items():
++        if var not in used:
++            out.setdefault(override_name(var), src)
++    return out
++
++
++def apply_override_names(programs: dict[str, str], override_dir: str | os.PathLike | None) -> list[str]:
++    """Replace programs by <dir>/<name>.glsl files, keyed by override name."""
++    if not override_dir:
++        return []
++    d = Path(override_dir)
++    used = []
++    for name in list(programs):
++        f = d / f"{name}.glsl"
++        if f.is_file():
++            programs[name] = f.read_text(encoding="utf-8")
++            used.append(name)
++    return used
++
++
++def load_programs(spec: str | os.PathLike | None = None, override_dir: str | os.PathLike | None = None,
++                  default_relpath: str = DEFAULT_SHADER_RELPATH) -> dict[str, str]:
++    """The programs the engine compiles from the file at `spec` (and its
++    family), by override name, with the override files applied."""
++    texts = load_family(spec, default_relpath)
++    raw: dict[str, str] = {}
++    for t in texts:
++        raw.update(extract_glsl(t))
++    programs = assemble_programs(raw, "\n".join(texts))
++    apply_override_names(programs, override_dir)
++    return programs
++
++
+ def describe_source(spec: str | os.PathLike | None) -> str:
+     if spec is None:
+         return f"worktree:{DEFAULT_SHADER_RELPATH}"
+@@ -200,7 +303,12 @@ def main(argv: list[str] | None = None) -> int:
+     ap.add_argument("--dump", default=None, help="write each shader to DIR/<name>.glsl")
+     args = ap.parse_args(argv)
+ 
+-    shaders = load_shaders(args.source, include_shadow_depth=args.shadow_depth)
++    # The programs the engine compiles, by override name: the remastered and
++    # post sets assembled from their pieces (load_programs).
++    shaders = load_programs(args.source)
++    if args.shadow_depth:
++        shaders.update({override_name(k): v for k, v in load_shaders(args.source, include_shadow_depth=True).items()
++                        if k.startswith("shadowDepth.")})
+     if args.list or not args.dump:
+         print(f"# {describe_source(args.source)}")
+         for name, src in shaders.items():
+@@ -208,12 +316,13 @@ def main(argv: list[str] | None = None) -> int:
+             print(f"{name:28s} {len(src):6d} bytes  {first}")
+     if args.dump:
+         # file names follow the engine's override convention (vsTransform.glsl,
+-        # psNormal.glsl, ...), so a dumped + edited directory works both as the
+-        # lab's --shader-override-dir and as the game's CWR_SHADER_OVERRIDE_DIR
++        # psNormal.glsl, psRemasterCommon.glsl, ...), so a dumped + edited
++        # directory works both as the lab's --shader-override-dir and as the
++        # game's CWR_SHADER_OVERRIDE_DIR
+         d = Path(args.dump)
+         d.mkdir(parents=True, exist_ok=True)
+         for name, src in shaders.items():
+-            (d / f"{override_name(name)}.glsl").write_text(src, encoding="utf-8")
++            (d / f"{name}.glsl").write_text(src, encoding="utf-8")
+         print(f"wrote {len(shaders)} shaders to {d}")
+     return 0
+ 
+diff --git a/arma_CWR/tests/rendering/lighting_lab/postfx.py b/arma_CWR/tests/rendering/lighting_lab/postfx.py
+index f93f4ca..cc1441f 100644
+--- a/arma_CWR/tests/rendering/lighting_lab/postfx.py
++++ b/arma_CWR/tests/rendering/lighting_lab/postfx.py
+@@ -1,7 +1,7 @@
+ """The remastered post pass (EngineGL33_PostFX.cpp) for the lab.
+ 
+-Runs the engine's own post GLSL (s_vsPostGLSL, s_psPost*GLSL), extracted from
+-the C++ source, over the lab's scene colour (display space, ambient share in
++Runs the engine's own post GLSL (vsPost, psPost*), assembled from the C++
++sources as the engine assembles it (glsl_extract.load_programs), over the lab's scene colour (display space, ambient share in
+ alpha) and depth texture, with the same pass order and uniforms as
+ EngineGL33::EndWorldScene: half-res AO + two blur passes, a five-level bloom
+ chain, sun shafts, composite with dither.
+@@ -31,22 +31,22 @@ class PostFX:
+     def __init__(self, ctx: moderngl.Context, source=None, override_dir=None):
+         self.ctx = ctx
+         path = source or (glsl_extract.ENGINE_DIR.parent / POST_FILE)
+-        sh = glsl_extract.load_shaders(path)
+-        glsl_extract.apply_override_dir(sh, override_dir)  # psPostAo.glsl, ... as in the engine
++        # EngineGL33_PostFX.cpp and its family (the GLSL is in EngineGL33_PostShaders.cpp)
++        sh = glsl_extract.load_programs(path, override_dir)  # psPostAo.glsl, ... as in the engine
+         self.k = _constants(path)
+         self.k.update(_constants(glsl_extract.ENGINE_DIR.parent / RIG_FILE))
+-        vs = sh["s_vsPostGLSL"]
++        vs = sh["vsPost"]
+ 
+         def prog(name):
+             p = ctx.program(vertex_shader=vs, fragment_shader=sh[name])
+             return p
+ 
+-        self.p_ao = prog("s_psPostAoGLSL")
+-        self.p_blur = prog("s_psPostAoBlurGLSL")
+-        self.p_down = prog("s_psPostBloomDownGLSL")
+-        self.p_up = prog("s_psPostBloomUpGLSL")
+-        self.p_shafts = prog("s_psPostShaftsGLSL")
+-        self.p_comp = prog("s_psPostCompositeGLSL")
++        self.p_ao = prog("psPostAo")
++        self.p_blur = prog("psPostAoBlur")
++        self.p_down = prog("psPostBloomDown")
++        self.p_up = prog("psPostBloomUp")
++        self.p_shafts = prog("psPostShafts")
++        self.p_comp = prog("psPostComposite")
+         self.vaos = {id(p): ctx.vertex_array(p, []) for p in
+                      (self.p_ao, self.p_blur, self.p_down, self.p_up, self.p_shafts, self.p_comp)}
+         self.size = None
+diff --git a/arma_CWR/tests/rendering/lighting_lab/remaster.py b/arma_CWR/tests/rendering/lighting_lab/remaster.py
+index a431d98..d5bfbc3 100644
+--- a/arma_CWR/tests/rendering/lighting_lab/remaster.py
++++ b/arma_CWR/tests/rendering/lighting_lab/remaster.py
+@@ -1,8 +1,9 @@
+ """Renderer for the REMASTERED lighting pipeline.
+ 
+ Same scene, passes and std140 VS/PS blocks as classic.py, plus:
+-  - the remastered program set from EngineGL33_LightingShaders.cpp
+-    (s_vs*RemasterGLSL, s_psRemasterCommon + s_ps*RemasterMain);
++  - the remastered program set from EngineGL33_LightingShaders*.cpp
++    (vs*Remaster, psRemasterCommon + ps*RemasterMain, assembled from their
++    pieces as the engine does, glsl_extract.load_programs);
+   - the LitConstants block (binding 3) filled like EngineGL33's remastered
+     uploads, with the light rig computed by the engine's own C++ (native.py);
+   - a sun shadow map (shadowpass.py) read through a comparison sampler;
+@@ -82,12 +83,11 @@ def configure(source=None, shader_override_dir=None, nan_check=True, tuning=None
+ 
+ 
+ def _remaster_shaders(source, override_dir=None):
+-    """The remastered GLSL, with the engine's override pieces applied
+-    (psRemasterCommon.glsl, psNormalRemasterMain.glsl, vsTransformRemaster.glsl...)."""
++    """The remastered GLSL by the engine's override names, assembled as the
++    engine assembles it, with the override files applied (psRemasterCommon.glsl,
++    psNormalRemasterMain.glsl, vsTransformRemaster.glsl...)."""
+     path = source if source is not None else glsl_extract.ENGINE_DIR.parent / REMASTER_FILE
+-    shaders = glsl_extract.load_shaders(path)
+-    glsl_extract.apply_override_dir(shaders, override_dir)
+-    return shaders
++    return glsl_extract.load_programs(path, override_dir)
+ 
+ 
+ class _Resources(C._Resources):
+@@ -95,12 +95,12 @@ class _Resources(C._Resources):
+         super().__init__(ctx, scene, _options["source"], _options["shader_override_dir"])
+         rs = _remaster_shaders(_options["remaster_source"], _options["shader_override_dir"])
+         self.rshaders = rs
+-        common = rs["s_psRemasterCommon"]
+-        vs = rs["s_vsTransformRemasterGLSL"]
++        common = rs["psRemasterCommon"]
++        vs = rs["vsTransformRemaster"]
+         self.rprog = {
+-            "normal": G.create_program(ctx, vs, common + rs["s_psNormalRemasterMain"], "vsTransformR+psNormalR"),
+-            "detail": G.create_program(ctx, vs, common + rs["s_psDetailRemasterMain"], "vsTransformR+psDetailR"),
+-            "prelit": G.create_program(ctx, PRELIT_VS, common + rs["s_psNormalRemasterMain"], "prelit+psNormalR"),
++            "normal": G.create_program(ctx, vs, common + rs["psNormalRemasterMain"], "vsTransformR+psNormalR"),
++            "detail": G.create_program(ctx, vs, common + rs["psDetailRemasterMain"], "vsTransformR+psDetailR"),
++            "prelit": G.create_program(ctx, PRELIT_VS, common + rs["psNormalRemasterMain"], "prelit+psNormalR"),
+         }
+         for p in self.rprog.values():
+             if "LitConstants" in p:
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
+index 34f2088..5531b0c 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
+@@ -254,7 +254,9 @@ TEST_CASE("I-04 T1: per-draw sampler routes through Poseidon::render::sampler::B
+ // programs and undefined behaviour under the comparison sampler (NVIDIA KHR_debug
+ // ids 131204 and 131222). The unit holds the 1x1 depth stand-in from init and a
+ // cascade array once one exists; the ways to lose that are deleting the bound
+-// array and unbinding the array target, so the audits below pin both.
++// array and unbinding the array target, so the audits below pin both. The
++// backend names the unit kShadowMapUnit (EngineGL33_Lighting.hpp, which
++// test_remaster_lighting.cpp pins to 2).
+ namespace
+ {
+ 
+@@ -280,7 +282,7 @@ TEST_CASE("Shadow-map unit 2 holds the depth stand-in from init on", "[Graphics]
+     // between that could land the bind elsewhere.
+     const size_t made = init.find("_dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT");
+     REQUIRE(made != std::string::npos);
+-    const std::string unitCall = "GL33Bind::ActiveUnit(2);";
++    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowMapUnit);";
+     const size_t unit2 = init.find(unitCall, made);
+     REQUIRE(unit2 != std::string::npos);
+     const size_t bind = init.find("glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);", unit2);
+@@ -303,7 +305,7 @@ TEST_CASE("A recreated cascade array takes unit 2, where the deleted one was sam
+     // to; the replacement must be bound on unit 2 straight away.
+     const size_t del = ensure.find("glDeleteTextures(1, &s_arrTex);");
+     REQUIRE(del != std::string::npos);
+-    const std::string unitCall = "GL33Bind::ActiveUnit(2);";
++    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowMapUnit);";
+     const size_t unit2 = ensure.find(unitCall, del);
+     REQUIRE(unit2 != std::string::npos);
+     const size_t bind = ensure.find("glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);", unit2);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 6c22251..f411dc2 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -10,16 +10,19 @@
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <cmath>
+ #include <filesystem>
+ #include <fstream>
++#include <iterator>
+ #include <limits>
+ #include <map>
+ #include <regex>
+ #include <set>
+ #include <sstream>
+ #include <string>
++#include <utility>
+ #include <vector>
+ 
+ // Remastered lighting (Graphics/Remaster + EngineGL33_Lighting*): the pure light
+@@ -603,9 +606,17 @@ TEST_CASE("Remaster cloud shadows cover the share of the ground the rig asks for
+ }
+ 
+ // --- GLSL contracts --------------------------------------------------------
++//
++// The tests read the shaders through the accessors of EngineGL33_Lighting.hpp
++// (the sources the engine compiles, assembled from their pieces). They read
++// the C++ sources only to check that every raw GLSL string reaches a program,
++// that the assembly tables the lighting lab parses are the ones the engine
++// uses and that the LitConstants block has no hand copy.
+ 
+ namespace
+ {
++namespace gl = Poseidon::gl33lighting;
++
+ std::string ReadTextFile(const std::filesystem::path& p)
+ {
+     std::ifstream f(p);
+@@ -619,26 +630,84 @@ std::filesystem::path Gl33Dir()
+     return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33";
+ }
+ 
+-std::string RawString(const std::string& src, const std::string& symbol)
++// The backend's .cpp files whose name starts with `prefix`, sorted.
++std::vector<std::filesystem::path> Gl33Sources(const std::string& prefix)
+ {
+-    const std::string header = "static const char " + symbol + "[] = R\"(";
+-    const size_t start = src.find(header);
+-    if (start == std::string::npos)
+-        return {};
+-    const size_t body = start + header.size();
+-    const size_t end = src.find(")\"", body);
+-    return end == std::string::npos ? std::string() : src.substr(body, end - body);
++    std::vector<std::filesystem::path> out;
++    for (const auto& entry : std::filesystem::directory_iterator(Gl33Dir()))
++    {
++        const std::string name = entry.path().filename().string();
++        if (entry.is_regular_file() && entry.path().extension() == ".cpp" && name.rfind(prefix, 0) == 0)
++            out.push_back(entry.path());
++    }
++    std::sort(out.begin(), out.end());
++    return out;
+ }
+ 
+-std::vector<std::string> Symbols(const std::string& src)
++// Every `char name[] = R"(...)"` raw string of a C++ source, by name.
++std::map<std::string, std::string> RawStrings(const std::string& src)
+ {
+-    std::vector<std::string> out;
+-    static const std::regex header(R"(static\s+const\s+char\s+(s_\w+)\[\]\s*=\s*R\"\()");
++    std::map<std::string, std::string> out;
++    static const std::regex header(R"(\bchar\s+(\w+)\s*\[\s*\]\s*=\s*R\"\()");
+     for (auto it = std::sregex_iterator(src.begin(), src.end(), header); it != std::sregex_iterator(); ++it)
+-        out.push_back((*it)[1].str());
++    {
++        const size_t body = static_cast<size_t>(it->position() + it->length());
++        const size_t end = src.find(")\"", body);
++        if (end != std::string::npos)
++            out[(*it)[1].str()] = src.substr(body, end - body);
++    }
++    return out;
++}
++
++// The raw strings of every backend file whose name starts with `prefix`.
++std::map<std::string, std::string> RawStringsOf(const std::string& prefix)
++{
++    std::map<std::string, std::string> out;
++    for (const auto& path : Gl33Sources(prefix))
++        for (auto& [name, body] : RawStrings(ReadTextFile(path)))
++            out[name] = body;
++    return out;
++}
++
++// The identifiers of a C++ brace-list body, `//` comments dropped and any
++// namespace qualification stripped.
++std::vector<std::string> ListedNames(const std::string& list)
++{
++    std::vector<std::string> out;
++    static const std::regex comment(R"(//[^\n]*)");
++    static const std::regex ident(R"(([A-Za-z_][\w:]*))");
++    const std::string clean = std::regex_replace(list, comment, "");
++    for (auto it = std::sregex_iterator(clean.begin(), clean.end(), ident); it != std::sregex_iterator(); ++it)
++    {
++        const std::string name = (*it)[1].str();
++        const size_t colon = name.rfind("::");
++        out.push_back(colon == std::string::npos ? name : name.substr(colon + 2));
++    }
++    return out;
++}
++
++// The raw strings named, joined in order.
++std::string Joined(const std::vector<std::string>& names, const std::map<std::string, std::string>& raw)
++{
++    std::string out;
++    for (const std::string& name : names)
++    {
++        const auto it = raw.find(name);
++        if (it == raw.end())
++            return "<no raw string " + name + ">";
++        out += it->second;
++    }
+     return out;
+ }
+ 
++int CountOf(const std::string& haystack, const std::string& needle)
++{
++    int n = 0;
++    for (size_t at = haystack.find(needle); at != std::string::npos; at = haystack.find(needle, at + needle.size()))
++        ++n;
++    return n;
++}
++
+ // Plain GLSL 3.30 core validation (glslangValidator's default). No SPIR-V
+ // client, unlike the I-28 harness: the post shaders use loose uniforms, which
+ // GL 3.3 allows and SPIR-V for OpenGL does not.
+@@ -671,56 +740,208 @@ std::set<std::string> Varyings(const std::string& glsl, const std::string& quali
+     }
+     return out;
+ }
++
++// Covers every VertexShaderID and PixelShaderID; the accessors return null
++// past the last one.
++constexpr int kShaderIds = 16;
++
++std::string Piece(gl::FragmentPiece piece)
++{
++    const char* text = gl::RemasterFragmentPiece(piece);
++    return text ? text : "";
++}
++
++// The remastered programs: each vertex shader and the prelude with each main.
++std::vector<std::string> RemasterPrograms()
++{
++    std::vector<std::string> out;
++    for (int vs = 0; vs < kShaderIds; ++vs)
++        if (const char* src = gl::RemasterVertexSource(vs))
++            out.emplace_back(src);
++    for (int ps = 0; ps < kShaderIds; ++ps)
++        if (const char* main = gl::RemasterFragmentMain(ps))
++            out.push_back(std::string(gl::RemasterFragmentCommon()) + main);
++    return out;
++}
++
++// Every program the remastered set and the post pass compile.
++std::vector<std::string> AssembledPrograms()
++{
++    std::vector<std::string> out = RemasterPrograms();
++    for (int i = 0; i < static_cast<int>(gl::PostShader::Count); ++i)
++        out.emplace_back(gl::PostShaderSource(static_cast<gl::PostShader>(i)));
++    return out;
++}
+ } // namespace
+ 
+ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[Graphics][Shaders][remaster]")
+ {
+     GlslangInit init;
+-    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_LightingShaders.cpp");
+-    REQUIRE_FALSE(lighting.empty());
+-    const std::string common = RawString(lighting, "s_psRemasterCommon");
++    const std::string common = gl::RemasterFragmentCommon();
+     REQUIRE_FALSE(common.empty());
+ 
+     int vertex = 0, fragment = 0;
+-    for (const std::string& sym : Symbols(lighting))
++    for (int vs = 0; vs < kShaderIds; ++vs)
+     {
+-        CAPTURE(sym);
+-        const std::string body = RawString(lighting, sym);
++        const char* src = gl::RemasterVertexSource(vs);
++        if (!src)
++            continue;
++        CAPTURE(vs);
+         std::string log;
+-        if (sym.rfind("s_vs", 0) == 0)
+-        {
+-            const bool ok = Compiles(body, EShLangVertex, log);
+-            CAPTURE(log);
+-            CHECK(ok);
+-            // Every remastered VS feeds the same varyings the common FS reads.
+-            CHECK(Varyings(body, "out") == Varyings(common, "in"));
+-            ++vertex;
+-        }
+-        else if (sym != "s_psRemasterCommon")
+-        {
+-            const bool ok = Compiles(common + body, EShLangFragment, log);
+-            CAPTURE(log);
+-            CHECK(ok);
+-            ++fragment;
+-        }
++        const bool ok = Compiles(src, EShLangVertex, log);
++        CAPTURE(log);
++        CHECK(ok);
++        // Every remastered VS feeds the same varyings the common FS reads.
++        CHECK(Varyings(src, "out") == Varyings(common, "in"));
++        ++vertex;
++    }
++    for (int ps = 0; ps < kShaderIds; ++ps)
++    {
++        const char* main = gl::RemasterFragmentMain(ps);
++        if (!main)
++            continue;
++        CAPTURE(ps);
++        std::string log;
++        const bool ok = Compiles(common + main, EShLangFragment, log);
++        CAPTURE(log);
++        CHECK(ok);
++        ++fragment;
+     }
+     CHECK(vertex == 3);   // VSScreen, VSTransform, VSShadow
+     CHECK(fragment == 4); // PSNormal, PSDetail, PSGrass, PSWater
+ 
+-    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+-    REQUIRE_FALSE(post.empty());
+-    int postCount = 0;
+-    for (const std::string& sym : Symbols(post))
++    int post = 0;
++    for (int i = 0; i < static_cast<int>(gl::PostShader::Count); ++i)
+     {
+-        CAPTURE(sym);
++        const auto shader = static_cast<gl::PostShader>(i);
++        const char* name = gl::PostShaderName(shader);
++        REQUIRE(name != nullptr);
++        CAPTURE(name);
+         std::string log;
+-        const bool ok =
+-            Compiles(RawString(post, sym), sym.rfind("s_vs", 0) == 0 ? EShLangVertex : EShLangFragment, log);
++        const bool ok = Compiles(gl::PostShaderSource(shader),
++                                 shader == gl::PostShader::Vertex ? EShLangVertex : EShLangFragment, log);
+         CAPTURE(log);
+         CHECK(ok);
+-        ++postCount;
++        ++post;
+     }
+-    CHECK(postCount == 7);
++    CHECK(post == 7); // vsPost, AO, AO blur, bloom down and up, shafts, composite
++}
++
++TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
++          "[Graphics][Shaders][remaster]")
++{
++    // A piece left out of its assembly table, or a shader in a new
++    // EngineGL33_Post*.cpp that no table names, would never be compiled or
++    // tested: every raw string must sit inside a program the engine builds.
++    const std::vector<std::string> programs = AssembledPrograms();
++    const auto lighting = Gl33Sources("EngineGL33_LightingShaders");
++    const auto post = Gl33Sources("EngineGL33_Post");
++    CHECK(lighting.size() == 4); // the main file, Sky, Lights, Surface
++    REQUIRE_FALSE(post.empty());
++    int strings = 0;
++    for (const auto& files : {lighting, post})
++        for (const auto& path : files)
++            for (const auto& [name, body] : RawStrings(ReadTextFile(path)))
++            {
++                CAPTURE(path.filename().string(), name);
++                const std::string& text = body;
++                const bool reached = std::any_of(programs.begin(), programs.end(), [&text](const std::string& p)
++                                                 { return p.find(text) != std::string::npos; });
++                CHECK(reached);
++                ++strings;
++            }
++    CHECK(strings >= 26); // today 3 VS, 10 prelude pieces and 4 mains; 9 post strings
++}
++
++TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")
++{
++    using P = gl::FragmentPiece;
++    std::string joined;
++    for (int i = 0; i < static_cast<int>(P::Count); ++i)
++    {
++        const std::string piece = Piece(static_cast<P>(i));
++        CAPTURE(i);
++        CHECK_FALSE(piece.empty());
++        joined += piece;
++    }
++    const std::string common = gl::RemasterFragmentCommon();
++    CHECK(joined == common);
++    CHECK(gl::RemasterFragmentPiece(P::Count) == nullptr);
++    CHECK(Piece(P::LitConstants) == gl::LitConstantsBlock());
++    CHECK(Piece(P::Header).rfind("#version 330 core\n", 0) == 0);
++
++    // Each concern's declarations sit in its own piece, once, in this order.
++    const std::pair<P, const char*> owners[] = {
++        {P::Header, "uniform PSConstants {"},
++        {P::LitConstants, "uniform LitConstants {"},
++        {P::Inputs, "uniform sampler2DArrayShadow shadowMap;"},
++        {P::Inputs, "vec3 tonemapNeutral("},
++        {P::Shadows, "float shadowMapVisibility("},
++        {P::TerrainClouds, "float terrainSunVisibility("},
++        {P::TerrainClouds, "float cloudSunVisibility("},
++        {P::Sky, "vec3 skyIrradiance("},
++        {P::Sky, "vec3 fogColorToward("},
++        {P::Lights, "vec3 localLights("},
++        {P::Surface, "vec3 glossy("},
++        {P::Shade, "vec3 shadeRemastered("},
++        {P::Finish, "void finishFragment("},
++    };
++    size_t last = 0;
++    for (const auto& [piece, decl] : owners)
++    {
++        CAPTURE(static_cast<int>(piece), decl);
++        CHECK(Piece(piece).find(decl) != std::string::npos);
++        CHECK(CountOf(common, decl) == 1);
++        const size_t at = common.find(decl);
++        CHECK(at >= last);
++        last = at;
++    }
++
++    // The lighting lab assembles the prelude from the kFragmentPieces table it
++    // parses out of EngineGL33_LightingShaders.cpp: that table, read the same
++    // way, gives the prelude the engine compiles.
++    const std::string source = ReadTextFile(Gl33Dir() / "EngineGL33_LightingShaders.cpp");
++    const std::string tableStart = "kFragmentPieces[] = {";
++    const size_t open = source.find(tableStart);
++    REQUIRE(open != std::string::npos);
++    const size_t close = source.find("};", open);
++    REQUIRE(close != std::string::npos);
++    const std::vector<std::string> names =
++        ListedNames(source.substr(open + tableStart.size(), close - open - tableStart.size()));
++    CHECK(names.size() == static_cast<size_t>(P::Count));
++    CHECK(Joined(names, RawStringsOf("EngineGL33_LightingShaders")) == common);
++}
++
++TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][remaster]")
++{
++    // The same contract for the post pass: kPostShaders in
++    // EngineGL33_PostShaders.cpp, read the way the lighting lab reads it, gives
++    // each program the engine compiles, under its override name.
++    const std::string source = ReadTextFile(Gl33Dir() / "EngineGL33_PostShaders.cpp");
++    const size_t open = source.find("kPostShaders[] = {");
++    REQUIRE(open != std::string::npos);
++    const size_t close = source.find("\n};", open);
++    REQUIRE(close != std::string::npos);
++    const std::string table = source.substr(open, close - open);
++    const auto raw = RawStringsOf("EngineGL33_Post");
++    static const std::regex row(R"re(\{\s*"(\w+)"\s*,\s*\{([^{}]*)\}\s*\})re");
++    int i = 0;
++    for (auto it = std::sregex_iterator(table.begin(), table.end(), row); it != std::sregex_iterator(); ++it, ++i)
++    {
++        REQUIRE(i < static_cast<int>(gl::PostShader::Count));
++        const auto shader = static_cast<gl::PostShader>(i);
++        const std::string name = (*it)[1].str();
++        CAPTURE(name);
++        CHECK(name == gl::PostShaderName(shader));
++        CHECK(Joined(ListedNames((*it)[2].str()), raw) == gl::PostShaderSource(shader));
++    }
++    CHECK(i == static_cast<int>(gl::PostShader::Count));
++    CHECK(gl::PostShaderName(gl::PostShader::Count) == nullptr);
++
++    // psPostAo reads the shared depth reconstruction.
++    const std::string ao = gl::PostShaderSource(gl::PostShader::Ao);
++    CHECK(CountOf(ao, "float viewZ(vec2 uv) {") == 1);
++    CHECK(CountOf(ao, "vec3 viewPos(vec2 uv, float z) {") == 1);
+ }
+ 
+ TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Graphics][Shaders][remaster]")
+@@ -731,21 +952,23 @@ TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Gr
+     // the crown fall back to ground-only sky light with no sun shadow. The
+     // vertex shaders and the per-fragment normal setup must use the guarded
+     // form, x * inversesqrt(max(dot(x, x), eps)), which keeps a zero vector zero.
+-    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_LightingShaders.cpp");
+-    REQUIRE_FALSE(lighting.empty());
+-    for (const std::string& sym : Symbols(lighting))
++    int vertex = 0;
++    for (int vs = 0; vs < kShaderIds; ++vs)
+     {
+-        if (sym.rfind("s_vs", 0) != 0)
++        const char* src = gl::RemasterVertexSource(vs);
++        if (!src)
+             continue;
+-        CAPTURE(sym);
+-        CHECK(RawString(lighting, sym).find("normalize(") == std::string::npos);
++        CAPTURE(vs);
++        CHECK(std::string(src).find("normalize(") == std::string::npos);
++        ++vertex;
+     }
+-    const std::string common = RawString(lighting, "s_psRemasterCommon");
+-    const size_t start = common.find("vec3 shadeRemastered(");
++    CHECK(vertex == 3);
++    const std::string piece = Piece(gl::FragmentPiece::Shade);
++    const size_t start = piece.find("vec3 shadeRemastered(");
+     REQUIRE(start != std::string::npos);
+-    const size_t end = common.find("\n}\n", start);
++    const size_t end = piece.find("\n}\n", start);
+     REQUIRE(end != std::string::npos);
+-    const std::string shade = common.substr(start, end - start);
++    const std::string shade = piece.substr(start, end - start);
+     CHECK(shade.find("normalize(") == std::string::npos);
+     // A foliage fragment without a normal of its own lights with the crown's.
+     CHECK(std::regex_search(shade, std::regex(R"(if\s*\(\s*foliage\s*&&\s*dot\(n,\s*n\)\s*<[^)]*\)\s*n\s*=\s*cn;)")));
+@@ -782,55 +1005,162 @@ TEST_CASE("Remaster sun shafts brighten the air, not the surfaces near the eye",
+ 
+     // The composite applies the same falloff to the shaft term, with the
+     // length the engine takes from ShaftScatterLength.
+-    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+-    const std::string composite = RawString(post, "s_psPostCompositeGLSL");
++    const std::string composite = gl::PostShaderSource(gl::PostShader::Composite);
+     REQUIRE_FALSE(composite.empty());
+     CHECK(composite.find("uniform sampler2D depthTex;") != std::string::npos);
+     CHECK(composite.find("1.0 - exp(-max(dist, 0.0) * depthMap.z)") != std::string::npos);
+     CHECK(composite.find("shaft *= shaftInscatter()") != std::string::npos);
++    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+     CHECK(post.find("1.0f / scatterLength") != std::string::npos);
+ }
+ 
+ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "[Graphics][Shaders][remaster]")
+ {
+-    namespace LC = Poseidon::gl33lighting::LitConst;
+-    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_LightingShaders.cpp");
+-    const size_t open = lighting.find("uniform LitConstants {");
+-    REQUIRE(open != std::string::npos);
+-    const size_t close = lighting.find("};", open);
+-    REQUIRE(close != std::string::npos);
+-    const std::string block = lighting.substr(open, close - open);
++    namespace LC = gl::LitConst;
++    // Every member of the block, in order, with its LitConst slot and size.
++    struct Member
++    {
++        const char* name;
++        int slot;
++        int count;
++    };
++    static const Member members[] = {
++        {"litSunDir", LC::SunDir, 1},
++        {"litSun", LC::Sun, 1},
++        {"litZenith", LC::Zenith, 1},
++        {"litHorizon", LC::Horizon, 1},
++        {"litGround", LC::Ground, 1},
++        {"litMoonDir", LC::MoonDir, 1},
++        {"litMoon", LC::Moon, 1},
++        {"litCamPos", LC::CamPos, 1},
++        {"litMatDiffuse", LC::MatDiffuse, 1},
++        {"litMatAmbient", LC::MatAmbient, 1},
++        {"litMatForced", LC::MatForced, 1},
++        {"litMatEmissive", LC::MatEmissive, 1},
++        {"litMatSpecular", LC::MatSpecular, 1},
++        {"litTerrain", LC::Terrain, 1},
++        {"litTerrainSel0", LC::TerrainSel0, 1},
++        {"litTerrainSel1", LC::TerrainSel1, 1},
++        {"litTerrainSun", LC::TerrainSun, 1},
++        {"litTerrainLift", LC::TerrainLift, 1},
++        {"litCloud", LC::Cloud, 1},
++        {"litCloudOffset", LC::CloudOffset, 1},
++        {"litShadowDelta", LC::ShadowDelta, 1},
++        {"litFlags", LC::Flags, 1},
++        {"litLightCount", LC::LightCount, 1},
++        {"litHorizonSun", LC::HorizonSun, 1},
++        {"litFogSun", LC::FogSun, 1},
++        {"litFogCap", LC::FogCap, 1},
++        {"litLightPos", LC::LightPos, LC::MaxLights},
++        {"litLightColor", LC::LightColor, LC::MaxLights},
++        {"litLightAmb", LC::LightAmb, LC::MaxLights},
++        {"litLightDir", LC::LightDir, LC::MaxLights},
++    };
++    // Walks the members of one declaration, slot by slot.
++    auto checkBlock = [](const std::string& block)
++    {
++        static const std::regex member(R"(vec4\s+(\w+)(?:\[(\d+)\])?\s*;)");
++        int at = 0;
++        size_t i = 0;
++        for (auto it = std::sregex_iterator(block.begin(), block.end(), member); it != std::sregex_iterator(); ++it)
++        {
++            const std::string name = (*it)[1].str();
++            const int count = (*it)[2].matched ? std::stoi((*it)[2].str()) : 1;
++            CAPTURE(name, at);
++            REQUIRE(i < std::size(members));
++            CHECK(name == members[i].name);
++            CHECK(at == members[i].slot);
++            CHECK(count == members[i].count);
++            at += count;
++            ++i;
++        }
++        CHECK(i == std::size(members));
++        CHECK(at == LC::Count);
++    };
++    auto blockAt = [](const std::string& text, size_t open)
++    {
++        const size_t close = text.find("};", open);
++        return close == std::string::npos ? std::string() : text.substr(open, close - open);
++    };
+ 
+-    // Walk the members in order, counting vec4 slots.
+-    std::map<std::string, int> slot;
+-    int at = 0;
+-    static const std::regex member(R"(vec4\s+(\w+)(?:\[(\d+)\])?\s*;)");
+-    for (auto it = std::sregex_iterator(block.begin(), block.end(), member); it != std::sregex_iterator(); ++it)
++    const std::string shared = gl::LitConstantsBlock();
++    const size_t sharedOpen = shared.find("uniform LitConstants {");
++    REQUIRE(sharedOpen != std::string::npos);
++    checkBlock(blockAt(shared, sharedOpen));
++
++    // Every declaration in the backend's sources, slot by slot, and there is
++    // only the one: a hand copy (four prototypes pasted their own into post
++    // and vertex shaders) would drift from the layout.
++    int declarations = 0;
++    for (const auto& entry : std::filesystem::directory_iterator(Gl33Dir()))
+     {
+-        slot[(*it)[1].str()] = at;
+-        at += (*it)[2].matched ? std::stoi((*it)[2].str()) : 1;
++        const auto ext = entry.path().extension().string();
++        if (!entry.is_regular_file() || (ext != ".cpp" && ext != ".hpp"))
++            continue;
++        const std::string text = ReadTextFile(entry.path());
++        for (size_t at = text.find("uniform LitConstants {"); at != std::string::npos;
++             at = text.find("uniform LitConstants {", at + 1))
++        {
++            CAPTURE(entry.path().filename().string());
++            checkBlock(blockAt(text, at));
++            ++declarations;
++        }
+     }
+-    CHECK(at == LC::Count);
+-    CHECK(slot["litSunDir"] == LC::SunDir);
+-    CHECK(slot["litZenith"] == LC::Zenith);
+-    CHECK(slot["litMatDiffuse"] == LC::MatDiffuse);
+-    CHECK(slot["litTerrain"] == LC::Terrain);
+-    CHECK(slot["litCloud"] == LC::Cloud);
+-    CHECK(slot["litShadowDelta"] == LC::ShadowDelta);
+-    CHECK(slot["litFlags"] == LC::Flags);
+-    CHECK(slot["litLightCount"] == LC::LightCount);
+-    CHECK(slot["litHorizonSun"] == LC::HorizonSun);
+-    CHECK(slot["litFogSun"] == LC::FogSun);
+-    CHECK(slot["litFogCap"] == LC::FogCap);
+-    CHECK(slot["litLightPos"] == LC::LightPos);
+-    CHECK(slot["litLightColor"] == LC::LightColor);
+-    CHECK(slot["litLightAmb"] == LC::LightAmb);
+-    CHECK(slot["litLightDir"] == LC::LightDir);
++    CHECK(declarations == 1);
++
++    // A program that reads the rig pastes the shared block whole, once.
++    for (const std::string& program : AssembledPrograms())
++        if (program.find("uniform LitConstants") != std::string::npos)
++            CHECK(CountOf(program, shared) == 1);
++    CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
++
++    // The planned slots continue the declared ones.
++    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.
+     std::ostringstream range;
+     range << "mix(" << std::fixed;
+     range.precision(1);
+     range << TerrainHorizonMap::kMinAngleDeg << ", " << TerrainHorizonMap::kMaxAngleDeg << ",";
+-    CHECK(lighting.find(range.str()) != std::string::npos);
++    CHECK(Piece(gl::FragmentPiece::TerrainClouds).find(range.str()) != std::string::npos);
++}
++
++TEST_CASE("Remaster texture units come from one table that binds every sampler", "[Graphics][Shaders][remaster]")
++{
++    // The table's units are distinct, clear of the material units 0 and 1 and
++    // the upload unit 7, and within the 16 units GL 3.3 guarantees.
++    std::set<int> units;
++    std::set<std::string> names;
++    for (const auto& s : gl::kLitSamplers)
++    {
++        CAPTURE(s.name, s.unit);
++        CHECK(s.unit >= 2);
++        CHECK(s.unit != 7);
++        CHECK(s.unit <= 15);
++        CHECK(units.insert(s.unit).second);
++        CHECK(names.insert(s.name).second);
++    }
++    // The shadow-map audits of test_gl_state_cache_audit.cpp pin binds to this
++    // constant; the shaders' comments and the classic programs say unit 2.
++    CHECK(gl::kShadowMapUnit == 2);
++
++    // Every sampler a remastered program declares has its unit in the table
++    // (tex0 and tex1 are the material units): an unbound sampler reads unit 0.
++    std::set<std::string> declared;
++    static const std::regex sampler(R"(uniform\s+sampler\w+\s+(\w+)\s*;)");
++    for (const std::string& program : RemasterPrograms())
++        for (auto it = std::sregex_iterator(program.begin(), program.end(), sampler); it != std::sregex_iterator();
++             ++it)
++            declared.insert((*it)[1].str());
++    for (const std::string& name : declared)
++    {
++        CAPTURE(name);
++        CHECK((name == "tex0" || name == "tex1" || names.count(name) == 1));
++    }
++    // And every row names a sampler the remastered programs declare.
++    for (const std::string& name : names)
++    {
++        CAPTURE(name);
++        CHECK(declared.count(name) == 1);
++    }
+ }
+diff --git a/roadmap/roadmap.yaml b/roadmap/roadmap.yaml
+index 34f7f40..e8f0802 100644
+--- a/roadmap/roadmap.yaml
++++ b/roadmap/roadmap.yaml
+@@ -2202,3 +2202,4 @@ items:
+       - "2026-10-18: the two held-back fixes landed after a second review. Trees, bushes and buildings cast sun shadows from the first frame (b4f14d6): a Scene built after the boot apply takes only the shadow and smoke tiers of graphics.cfg; the terrain grid and object LOD bias stay out, because the grid subdivides the physical terrain heights, and their absence at boot is a follow-up. 4x MSAA by default (0e85455): graphics.cfg v3 lifts an untouched Off to 4x once, only without supersampling, and a v2 Unlimited fps cap survives. Unit suites: PoseidonTests 3100 cases with the 6 known failures (5 map and equipment localization, 1 MP version message), Core 823 of 827 with 4 skipped, Foundation 475 of 475; smoke 3/3. Capture set 20261018-fixes2 vs 20261018-bugfix (3/3, 30 shots, same warning set, identical eye heights, 12.5 m horizon map in all three games): forest_edge_golden Remastered trees now throw shadows across the slope (shadow pass 0.05 to 0.28 ms), faint ones in Classic; sinai_lowsun_fp scrub at the 12 degree sun throws long shadows over the foreground (shadow pass 0.05 to 0.37 ms), which in Classic merge into almost even shade, so the net, HMMWV and soldier shadow edges no longer show (right-hand ground luma 67 to 56; reproduced with an object-shadows-only build), worth an owner look; lowsun_fp Classic gains a tent shadow band behind the soldier; noon_fields far bushes and the tank_gunner_optics treeline pick up small shadows; the other views differ only by live smoke and explosion timing (firefight, town_night) or by cloud and Sinai ground variation that earlier runs show too. Classic draw calls rise by up to 18% where static casters are in view. The captures pin 4x MSAA at 1.5x, so they cannot show the new default; the game logs now show the 4x frame target at boot, before the test's own setting."
+       - "2026-10-18: graphics-remaster step A0 (cut and baseline, plan section 5 A0): the branch is cut at 026133b with the integration plan on top (0779350). F10 and F11 are in their narrowed form in code and in game (a fresh user dir boots to 4x MSAA at render scale 1; with no spawned unit the shadow depth map holds the trees and bushes). Gate tags 425/425 ([graphics] 378/379, the known DDS fixture case), smoke 3/3 with KHR_debug ids 131169, 131154 and 131218 only. New look baseline 20261017-233303-gr-base; a second boot of the same build shows the Sinai ground band, the crew views and the fire and smoke views are not repeatable between boots, so pixel-exact checks use the other views. Quiet-GPU timing at 1080p, render scale 1.0, 4x MSAA on the RTX 4060 Ti (20 hero views, 3 interleaved rounds): Remastered takes 2.0 to 11.9 ms of GPU time on 17 views and 17.4 to 24.3 ms on the long views (sunrise_ridge, valley 05:15, Eden broken_high, 10,800 to 12,900 draws). There the GPU span is set by draw submission rather than shading (the 26 to 31 ms CPU frame is longer than the GPU span; 54 to 73% GPU utilisation at P0; Classic costs the same on sunrise_ridge, 18.10 against 17.41 ms), and MENU's 2.5 to 7.5 ms base frame was measured after the frame-cost fixes (step A4), so the B steps judge headroom on those views only after A4. Sky and sea views run mostly at P3 or P5 clocks, so the timing gate now logs the GPU clock with every shot. No engine change."
+       - "2026-10-18: graphics-remaster step A1 (switches, gates, tooling, plan section 5 A1): one registry (Graphics/Remaster/FeatureSwitches) holds every triSetLighting key, the 26 feature switches of plan 3.1 (all on, all inert until their step lands) and the new mode word baseline (every switch off); FeatureGates decides per frame whether an enabled feature can show (low sun, night, wet, local or combat light, clouds; gates=0 forces them on); the dev overlay's Lighting tab is generated from the registry with a Features section showing each gate; triFeatureState logs switches and gates with every capture shot; triSetFixedStep fixes the simulation step and P-mode pairs hold (two paused renders of a fire are pixel-identical); triPinCloudDrift holds the cloud shadows and sky clouds, which do not follow the pinned clock. Capture tooling in the repo: features_ab (16 hero views, off then on, fixed clocks), banddiff.py, the A0 timing rig (run-timing.ps1, gpu_sampler.ps1, summarize_timing.py, gen_timing.py) and the video skeleton (capture_motion.sqf, gen_video_tests.py with every 7.3 row, make_video.py). No pixel changes: horizon and ground bands match the A0 build within noise; timing on the long views matches A0 at P0 (sunrise_ridge 17.31 against 17.41 ms). Unit gate 452/452 (27 new), smoke 3/3."
++      - "2026-10-18: graphics-remaster step A2 (shader split and shared tables, plan section 5 A2): the remastered fragment prelude is ten pieces by concern (header, LitConstants, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish; sky, lights and surface in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp) joined by one table; the LitConstants block is one string with no copies; the post GLSL moved to EngineGL33_PostShaders.cpp (no GL code, so the unit tests link it) with a kPostShaders table and s_glslPostCommon (AO's depth reconstruction); the slots planned for later features (LitConstPlanned 58 to 78) and the texture unit table (units 6, 8 to 15 allocated, one static_assert, kLitSamplers binds every lit sampler, shadow unit named kShadowMapUnit) are fixed. No pixel changes: every assembled program (8 remastered, 7 post, 15 classic) is byte for byte the tip's, checked with glsl_extract.py --dump and with the engine's own accessors; features_ab on the A2 build is pixel-identical to the A1 build on the five repeatable views and within the same-config noise on the others; timing at P0 within -0.27 to +0.18 ms of A1. Tests go through the accessors (4 new cases: every raw GLSL string reaches a program, the assembly tables the lab reads, the concern of each piece, the unit table); five contract mutations each turn their case red. Unit gate 456/456, smoke 3/3. The lighting lab assembles the same programs (glsl_extract load_programs) and decodes git output as UTF-8."

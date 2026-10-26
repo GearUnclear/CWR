@@ -1,0 +1,8 @@
+{
+  "id": "b24",
+  "bank": "kBio1Hostile",
+  "variant": 5,
+  "text": "Posted near {Place} after the agreement failed, {Name} kept requesting a transfer closer to family. Every request was refused. They hated staying there, but still ordered guards to enforce the new restrictions.",
+  "word_count": 32,
+  "self_review": "An officer wants to serve closer to family but keeps enforcing restrictions after every transfer request is refused."
+}

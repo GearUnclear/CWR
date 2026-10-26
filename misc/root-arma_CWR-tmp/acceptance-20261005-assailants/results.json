@@ -1,0 +1,67 @@
+[
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailants.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailants"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_civilian.test.sqf",
+    "ExitCode": 1,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_civilian"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_covered.test.sqf",
+    "ExitCode": 1,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_covered"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_occupier.test.sqf",
+    "ExitCode": 1,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_occupier"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_resistance.test.sqf",
+    "ExitCode": 1,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_resistance"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_retaliation.test.sqf",
+    "ExitCode": 1,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_retaliation"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_rogue.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_rogue"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_retaliation_vehicle.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_retaliation_vehicle"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_response.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_fire_response"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_death_pool.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_death_pool"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_save_reload.seq",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_save_reload"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_lobo_fire_occupier.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_lobo_fire_occupier"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_lobo_fire_resistance.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants\\guerrilla_assailant_lobo_fire_resistance"
+  }
+]

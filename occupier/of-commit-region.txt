@@ -1,0 +1,35 @@
+guerrilla: the playRegion default bounds base seeding only; fixtures and reference slices pin seedBases off
+
+The default playRegion (the authored zones' bounding box padded 5 km,
+used when the template authors none) was also bounding the Auto city
+seed and the START TOWN list, which cut Sinai's K from 26 to 13 and the
+Lebanon80 names fixture from 14 zones to 12. Now an AUTHORED region
+bounds the base seed, the city seed and the START TOWN list; with none,
+the default box bounds the base seed only (ZoneTuning::PlayRegion::
+ContainsTown) and towns seed over the whole map as before 3946b5a. The
+base-detection INFO line says which applies. The whole-map playRegion
+that 3946b5a had put into the unit fixtures is reverted.
+
+Every fixture mission and reference slice that authors no AIRFIELD or
+SEAPORT pins seedBases = 0 (Market, Qrf, Undercover, UdIsland, the Demo
+fixtures, factionpack, interaction, names, native, offscreen): they author
+every zone they want, and the default-on seeding had materialised an
+Abel garrison in guerrilla_offscreen_idle and added two zones to
+guerrilla_names_classify. Shipped templates (Eden, Sinai, Demo) keep
+seeding. Docs: ISLAND-PACKS.md 10, OCCUPIER-FORCES.md 16 / 17,
+OFFSCREEN-CONTRACT.md 5.
+
+Sinai after this: poolStart 132 (R 86, K 23, G 92), 7 seeded bases; K is
+23 rather than 26 because three labels now name airfields (Egyptian
+Airbase, Aqaba Internation Airport, Egyptian Fire Base) and no longer
+count as towns, the designed effect. Eden 74 (R 38, K 18), Abel 60,
+Lebanon80 24 unchanged.
+
+Verified on build/agent-rwdi: 706 unit cases over the guerrilla /
+scaffold / lint / occupierforces / save / bases tags; tri 11/11 on
+remaster-shadow-of1 (names_classify 14 zones again, the four detect
+tests, eden_save.seq, island_scaffold, sinai_swap, lebanon80_boot,
+pool_on, pool_off); on the gate build the eleven pins gave 7/8 with only
+names_classify red before this fix; human suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

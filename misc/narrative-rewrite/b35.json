@@ -1,0 +1,10 @@
+{
+  "id": "b35",
+  "bank": "kBio2Hostile",
+  "variant": 4,
+  "text": "{Name}, an army payroll clerk near {Place}, took charge of the records after heavy losses in the unit. The clerk kept dead soldiers on the payroll and pocketed their wages.",
+  "word_count": 30,
+  "self_review": "An army clerk gained control of payroll records after unit losses and stole wages intended for dead soldiers.",
+  "source_pattern": "The supplied Sierra Leone TRC chapter records evidence of officials pocketing pay and benefits through dead soldiers' roll numbers and ghost soldiers.",
+  "fictional_changes": "The individual clerk, promotion, unit losses, and setting are invented. The payroll fraud mechanism is the documented pattern."
+}

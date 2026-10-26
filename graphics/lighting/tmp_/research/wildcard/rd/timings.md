@@ -1,0 +1,52 @@
+# timings (rd)
+
+| view | label | GPU frame ms | world | shadow (incl. sky maps) | post | raw |
+|---|---|---|---|---|---|---|
+| overcast_close | dolly_G | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_G_f01 | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_G_f02 | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_G_f03 | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_G_f04 | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_G_f05 | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_G_f06 | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_G_f07 | 7.83 | 7.28 | 1.59 | 0.46 | frame 7.83 ms | world 7.28 (shadow 1.59) | post 0.46: ao 0.38 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg_f01 | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg_f02 | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg_f03 | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg_f04 | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg_f05 | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg_f06 | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_dbg_f07 | 7.64 | 7.12 | 1.57 | 0.43 | frame 7.64 ms | world 7.12 (shadow 1.57) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| overcast_close | dolly_off | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| overcast_close | dolly_off_f01 | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| overcast_close | dolly_off_f02 | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| overcast_close | dolly_off_f03 | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| overcast_close | dolly_off_f04 | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| overcast_close | dolly_off_f05 | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| overcast_close | dolly_off_f06 | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| overcast_close | dolly_off_f07 | 4.97 | 4.22 | 0.21 | 0.58 | frame 4.97 ms | world 4.22 (shadow 0.21) | post 0.58: ao 0.41 bloom 0.10 composite 0.07 |
+| town_day | dolly_G | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_G_f01 | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_G_f02 | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_G_f03 | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_G_f04 | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_G_f05 | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_G_f06 | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_G_f07 | 9.12 | 8.57 | 1.44 | 0.43 | frame 9.12 ms | world 8.57 (shadow 1.44) | post 0.43: ao 0.35 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg_f01 | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg_f02 | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg_f03 | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg_f04 | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg_f05 | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg_f06 | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_dbg_f07 | 8.89 | 8.32 | 1.45 | 0.45 | frame 8.89 ms | world 8.32 (shadow 1.45) | post 0.45: ao 0.37 bloom 0.05 composite 0.03 |
+| town_day | dolly_off | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |
+| town_day | dolly_off_f01 | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |
+| town_day | dolly_off_f02 | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |
+| town_day | dolly_off_f03 | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |
+| town_day | dolly_off_f04 | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |
+| town_day | dolly_off_f05 | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |
+| town_day | dolly_off_f06 | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |
+| town_day | dolly_off_f07 | 4.89 | 3.29 | 0.28 | 1.22 | frame 4.89 ms | world 3.29 (shadow 0.28) | post 1.22: ao 0.97 bloom 0.13 composite 0.11 |

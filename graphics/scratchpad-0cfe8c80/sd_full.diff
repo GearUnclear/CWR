@@ -1,0 +1,128 @@
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 866e7bb..4cefece 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -35,6 +35,7 @@ using Poseidon::Foundation::Time;
+ #include <Poseidon/World/Scene/Object.hpp>
+ #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
+ #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
++#include <Poseidon/World/Scene/InstancedRunRules.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
+ #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+@@ -1281,6 +1282,41 @@ static void DrawSortObject(SortObject* oi)
+     GEngine->SetPassKindHint(savedHint);
+ }
+ 
++// The instanced-run facts of one queued object (InstancedRunRules.hpp).
++// `headLevel` is the head's draw level: an object joins a run only with the
++// head's shape and LOD, so that level is its own whenever the answer matters.
++// IsAnimated indexes the object's shape by its draw LOD, which for a later
++// object may be LOD_INVISIBLE, so it is asked only for the head's shape and LOD.
++static InstancedRun::RunEntry InstancedRunEntry(const SortObject* so, const LODShape* headShape, int headLOD,
++                                                const Shape* headLevel)
++{
++    const Object* obj = so->object;
++    InstancedRun::RunEntry entry;
++    entry.shape = obj->GetShape();
++    entry.drawLOD = so->drawLOD;
++    entry.passNum = so->passNum;
++    entry.special = headLevel->Special() | obj->GetObjSpecial();
++    entry.distance2 = so->distance2;
++    entry.isStatic = obj->Static();
++    entry.ownVertices = obj->GetShape() == headShape && so->drawLOD == headLOD && obj->IsAnimated(so->drawLOD);
++    return entry;
++}
++
++// RESEARCH ONLY (bush-instancing evidence build; not part of fix.patch).
++// UD_RESEARCH_INST bit 1: the perf track's per-object light gate (an object may
++// be instanced when the light list its own draw selects is empty, instead of
++// only when the scene has no light slot), so instancing runs on Abel.
++// Bit 2: the pre-fix grouping (objects that rewrite their own vertices batch).
++static int ResearchInstMode()
++{
++    static const int mode = []
++    {
++        const char* v = std::getenv("UD_RESEARCH_INST");
++        return v ? std::atoi(v) : 0;
++    }();
++    return mode;
++}
++
+ void Scene::DrawObjectsAndShadowsPass1()
+ {
+     // select first objects - those with highest visual priority
+@@ -1520,13 +1556,33 @@ void Scene::DrawObjectsAndShadowsPass1()
+     {
+         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
+         // identical static shapes arrive contiguously. A batchable run draws
+-        // the head once inside Begin/EndInstancedRun — every TL section then
++        // the head once inside Begin/EndInstancedRun, and every TL section then
+         // renders all K instances from the WorldInstances matrix array. The
+         // predicate keeps per-object state out of batches: static, proxy-free,
+         // not OnSurface/IsColored, equal obj-special, no local lights in the
+-        // scene, and a tight distance band so the head's constant-fog value
+-        // is representative for the whole batch.
++        // scene, a tight distance band so the head's constant-fog value is
++        // representative for the whole batch, and no object whose draw rewrites
++        // its own vertices (a land-following bush fitted to its own patch of
++        // slope, a damaged house): the run draws every member from the head's
++        // vertex buffer (InstancedRunRules.hpp).
+         const bool noLocalLights = NLights() == 0;
++        const int researchMode = ResearchInstMode();
++        auto researchUnlit = [&](SortObject* so) -> bool
++        {
++            if (noLocalLights)
++                return true;
++            if (!(researchMode & 1))
++                return false;
++            LightList work;
++            const LightList& l = SelectLights(so->object->Transform(), so->object, so->drawLOD, work);
++            return l.Size() == 0;
++        };
++        static bool researchLogged = false;
++        if (!researchLogged)
++        {
++            researchLogged = true;
++            LOG_INFO(Graphics, "RESEARCH bush-instancing: UD_RESEARCH_INST={} lights={}", researchMode, NLights());
++        }
+         for (int i = 0; i < _drawMergers.Size();)
+         {
+             SortObject* oi = _drawMergers[i];
+@@ -1550,9 +1606,11 @@ void Scene::DrawObjectsAndShadowsPass1()
+             }
+ 
+             int runEnd = i + 1;
+-            const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
+-            const render::LegacySpec headSpec = render::SplitLegacy(headSpecial);
+-            const bool headBatchable = noLocalLights && oi->object->Static() && sShape->NProxies() == 0 &&
++            InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape);
++            if (researchMode & 2)
++                head.ownVertices = false;
++            const render::LegacySpec headSpec = render::SplitLegacy(head.special);
++            const bool headBatchable = researchUnlit(oi) && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
+                                        !render::Has(headSpec.routing, render::Routing::OnSurface) &&
+                                        !render::Has(headSpec.routing, render::Routing::IsColored) &&
+                                        oi->object != GWorld->CameraOn();
+@@ -1561,17 +1619,13 @@ void Scene::DrawObjectsAndShadowsPass1()
+                 GEngine->InstancedRunReset();
+                 if (GEngine->InstancedRunAdd(oi->object->Transform()))
+                 {
+-                    // Fog band: keep members within ~5% of the head's distance so
+-                    // the head's per-object constant fog approximates all of them.
+-                    const float d2lo = oi->distance2 * 0.90f;
+-                    const float d2hi = oi->distance2 * 1.10f;
+                     while (runEnd < _drawMergers.Size())
+                     {
+                         SortObject* oj = _drawMergers[runEnd];
+-                        if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
+-                            oj->passNum != oi->passNum || !oj->object->Static() ||
+-                            (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial || oj->distance2 < d2lo ||
+-                            oj->distance2 > d2hi)
++                        InstancedRun::RunEntry member = InstancedRunEntry(oj, shape, oi->drawLOD, sShape);
++                        if (researchMode & 2)
++                            member.ownVertices = false;
++                        if (!InstancedRun::CanJoin(head, member) || !researchUnlit(oj))
+                         {
+                             break;
+                         }

@@ -1,0 +1,2 @@
+TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows, "
+          "shade, the sea and the clouds have landed, nothing else has",

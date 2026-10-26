@@ -1,0 +1,185 @@
+{
+  "repair_version": "2026-10-11.4",
+  "rule_sha256": "de63a7e05bb1973cc8cc1899ad148ca1a0d1473c2515b3c5318c8a3d51dcf3c5",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "ud",
+  "changed_members": 19,
+  "added_members": 18,
+  "archives": [
+    "lobo_pilot"
+  ],
+  "skipped": [],
+  "members": [
+    {
+      "member": "lobo_pilot/config.cpp",
+      "before_sha256": "47ac0111b99b0f9d088a4fa56b7426293d75cbed8433f925f4422196069f80d6",
+      "after_sha256": "e0f0ee8e7cdcc86010b0a65abbc829ba778119320de20515ea63c9d2a9017fae",
+      "before_bytes": 22148,
+      "after_bytes": 31348
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/back_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\back_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "b0b8755f263e53b6b6acb4018bcbd30e45b348645252a8486caabb7817f612d2",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/legsbk_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\legsbk_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "db4f12d3f2567df08a15fb6210c59a7217aaa311b8aafbb56e80f61673270738",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/front_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\front_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "0d4bd28e3cc77b8d2c39ad29d332ce4901485df6ddc51f0300ef8fa5f0bb01b3",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/armle_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\armle_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "7ca82bdc68a27ff473688b48c9600b68b8a333571d87c75a1c9f17919689ebe5",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/armri_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\armri_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "e6a79a59f5decb9adbcbc3672f72f05f84598764ba286279bf1afbb409bab5d3",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/legsfr_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\legsfr_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "062aa163eef49f1b9aee7ff62dec2b804fac00faf8feed80c900defd151aa7c3",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/legslft_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\legslft_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "b04fc759afa0fac8f432cd0bd0e73ef4904cd20f7ebae4307e4186ae3249e1af",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/eaf/tex/legsrgt_dr.paa",
+      "added": true,
+      "stored_name": "EAF\\tex\\legsrgt_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "866acec34cc4cea48034a0c895a66611861781d69bfbff1b39ad507bd3892ec3",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/back_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\back_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "91d78d6668418ab26dde4d5c5ed6c85993228ddfe2f2d0e65820844abfd65927",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/legsbk_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\legsbk_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "8ea5b3c0eb22a98a5c28d53cab2e5492c1aa1638bcfe0961ba8987c85b6c9bcb",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/front_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\front_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "9e91a5f62253ec66232ebfbbc5424f5c90c2333e7e087a21d818a4f73fdd3256",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/armle_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\armle_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "89a3ab4403f359b4ceef9849e6e213629538e0c34c5410d6d0628c7bbe968825",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/armri_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\armri_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "534af7848058990449fec06a84a4ab204d2d54523cc443bdda19df1221605dbd",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/legsfr_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\legsfr_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "1ebcf9467043768ef5a429e2b0fd88c6ab3f39cf16a3843e1ec67299baeb2f2b",
+      "after_bytes": 43839
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/legslft_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\legslft_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "2e04967572fe419976f098bec425403ac93b24014a203957c934a177a40251ce",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/iaf/tex2/legsrgt_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex2\\legsrgt_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "050fdafb4cea2c5cab163c25282f1683e9bd2a6f82a08a650d8c28179c168398",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/iaf/tex3/armle_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex3\\armle_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "be66a3841e8fef5196a0e0ae976b7fdd5adcd460586bfe685fb827cf100c004e",
+      "after_bytes": 11049
+    },
+    {
+      "member": "lobo_pilot/iaf/tex4/armle_dr.paa",
+      "added": true,
+      "stored_name": "IAF\\tex4\\armle_dr.paa",
+      "before_sha256": null,
+      "before_bytes": 0,
+      "after_sha256": "13ca9f1c1551d00155ac906a8db450424710b8866213462b9816c13ed5539589",
+      "after_bytes": 11049
+    }
+  ],
+  "asset_source_sha256": "79cdb0bb937e9e05d43781da0337af36f6d3cca93e4d09658e9847a4d70b3ff5"
+}

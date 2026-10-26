@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\mist\\3\\runs\\moving-percell\\frames", "frames": 105, "band": 0.063, "band_max": 0.175, "sky": 0.025, "spikes": 0, "worst": [[38, 0.5], [44, 0.49], [84, 0.44], [80, 0.42], [17, 0.41], [43, 0.4], [42, 0.39], [35, 0.38]]}

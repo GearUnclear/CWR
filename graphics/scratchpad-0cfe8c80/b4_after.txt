@@ -1,0 +1,57 @@
+ M arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Core/GpuTimings.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/PostStages.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+ M arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Rendering/Effects/Smokes.hpp
+ M arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp
+ M arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp
+ M arma_CWR/engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Vehicles/Air/AirplaneAI.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Vehicles/Air/HelicopterAI.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/Car.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/Motorcycle.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Vehicles/Ground/TankWithAI.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.cpp
+ M arma_CWR/engine/Poseidon/World/Entities/Weapons/Shots.hpp
+ M arma_CWR/engine/Poseidon/World/Scene/Fireplace.cpp
+ M arma_CWR/engine/Poseidon/World/Scene/Fireplace.hpp
+ M arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+ M arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+ M arma_CWR/engine/Poseidon/World/World.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+ M arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_post_stages.cpp
+ M arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+?? arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+?? arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+?? arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+?? arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombatShaders.cpp
+?? arma_CWR/tests/rendering/captures/combat_ab.test.sqf
+?? arma_CWR/tests/rendering/captures/combat_ab.test.toml
+?? arma_CWR/tests/rendering/captures/gen_combat_ab.py
+?? arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp
+908d8705d2250b09b633af252807b4c0c29cca09793cf3697de3579213d19bb0 *-
+3d378ccff50534251a0902d643913717c697384e40f5097c63e663904ad2988c *arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.cpp
+9d99c11ccda1aafae03e8d86854fbf21db0651ab8e187e6e64c64869dd2e530f *arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp
+aa44be69302afe218e734aad9edf1273a0ea743879484eecb27d8f8f4f1637fc *arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombat.cpp
+3903e6536dc621739293de789621d0097e061aec0f9fa6a4cb2c3a7bd55d11a6 *arma_CWR/engine/PoseidonGL33/EngineGL33_PostCombatShaders.cpp
+25666c735fa166a77f7e7021e98eef4f3a3c623d2f24fee5f566149fb78b9f4e *arma_CWR/tests/rendering/captures/combat_ab.test.sqf
+3ad4536e8899e57b4ffb196653bef761bf6a2ef5921b7e1b6d0913b9164957bc *arma_CWR/tests/rendering/captures/combat_ab.test.toml
+b69ffc75bed24cc11c40060287f0d9c1a7f6413887826c3727ef47fe35054dfa *arma_CWR/tests/rendering/captures/gen_combat_ab.py
+4a2260a4e2592b8abad5ca5ae89b6c1def6a58918248f90f472190228b04573e *arma_CWR/tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp

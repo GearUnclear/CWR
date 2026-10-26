@@ -1,0 +1,22 @@
+{
+ "status": "done",
+ "applied": [
+  "ailink",
+  "mist",
+  "sun",
+  "noon",
+  "burst",
+  "merge fix: tank_gunner_optics staging (100-frame wait after moveInGunner in abel_lighting.test.sqf and the round 4 cut; the action menu shows again)",
+  "merge fix: clang-format of one ailink statement in test_volumetric_fog.cpp (whitespace only)"
+ ],
+ "build_ok": true,
+ "unit_tests": "Gate tags [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],[TerrainHorizon],[StateOwnership],[atmosphere] on the merged build, run from D:\\: all pass, 329 cases, 957,957 assertions (round 3 had 319 cases). The fixers' new cases all run under these tags. glslang compiles every program. The full suite was not run. The whitespace-only clang-format fix in test_volumetric_fog.cpp came after the build and the unit run.",
+ "sheet_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/director/SHEET.png",
+ "threeway_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/director/THREEWAY.png",
+ "combined_patch": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/director/combined.patch",
+ "ai_fog_link_intact": true,
+ "problems": "1) The mist specks over the hidden tree line are not fixed. They come from the TAA path (mist fixer's next probe: a min/max MSAA depth resolve). 2) optics_mist_hud is still paler than vanilla at thumbnail size (the air under the camera is about 210 against vanilla's 178). The rock and tree line now show through. 3) dawn_valley's bay still has cream haze on the sun side (root fix: the ring's sample elevation in the fog injection). sunrise_ridge also has a broad warm glow on the sun side. 4) Merge interaction: burst's per-channel whitening (kHueRoll) also acts on sun's brighter sky near the sun. pine_rays' upper sky went warmer: (193,184,175) in round 3, (194,180,164) in the sun fixer's build, (202,183,158) merged. It reads as a warm morning sun with clear shafts, not a flat wash, but it is the warmest it has been. 5) The rain sky is still lighter than landed's dark deck. 6) The burst's crater dust foot is still lit salmon by the classic dusk sun. The firefights are not timing-pinned. A steady light by day is 0.012 of its night power, and no day view with a fire was checked. 7) Sinai sand is still about 29 levels under the original. 8) Capture wall time was 580 s, against 184 s in round 3, because other agents' games (look-puddle-1..4) ran at the same time and tri queued lanes b and d. 9) Cost was not re-timed. Nothing was committed and no branch was made. Only my games ran, and none are left (stop-owned-games found nothing on my four junctions). The scratch tests look_r3_*, look_r4_*, look_probe* and look_fix* are left unstaged, as in round 3.",
+ "capture_minutes": 9.67,
+ "conflicts": "Three textual conflicts. All were cases where both fixers appended to the same spot in a test file, and I kept both sides. (1) sun vs mist in test_remaster_lighting.cpp (sky constant contract test): mist's deck pins and sun's roll-off and disc checks. (2) sun vs mist in test_volumetric_fog.cpp: mist's setFog case and sun's kFogBeamGain case. (3) noon in test_remaster_lighting.cpp: noon's kCamSkyDeep pins appended after the two blocks above. noon's first apply was refused as a whole while sun's conflict was open. I resolved it and applied noon again, so in practice it went in after burst, and every file applied cleanly. No two fixers changed the same constant. Hand checks: in EngineGL33_LightingShadersSky.cpp every camSkyRolloff call uses sun's (lin, d) form, including the dome that carries mist's deck code, and noon's camSkyDeepen sits inside camSkyLook. In VolumetricFog.cpp, AI now takes ComputeFogMedium in the simulation (ailink), so mist's lower day mist weight reaches AI as well as the screen, which follows the owner's rule. FogSightExtinctionAt still holds only the ground air and the mist. Target.cpp is unchanged since round 3, WorldSetup.cpp calls SimulateFogSight, and the renderer no longer calls SetFogSight. combined.patch: 111 files, +17,848 / -276. It applies to a fresh index of fec1075 and gives the scratch index tree 12117cf9.",
+ "notes_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/director/NOTES.md"
+}

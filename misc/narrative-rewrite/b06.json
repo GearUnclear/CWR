@@ -1,0 +1,10 @@
+{
+  "id": "b06",
+  "bank": "kBio0Friendly",
+  "variant": 5,
+  "text": "{Name}, a municipal gardener from {Place}, escaped the fighting with an elderly parent. At the woodland shelter where both found refuge, the gardener took responsibility for fetching everyone's water.",
+  "word_count": 29,
+  "self_review": "A municipal gardener escaped fighting with an elderly parent and fetched water for the shelter that housed them.",
+  "source_pattern": "The supplied camp testimony describes primitive shelters and a daily assignment to fetch water; another supplied biography documents escape with relatives.",
+  "fictional_changes": "Gardening, the elderly parent, and this individual's responsibility for the water supply are invented combinations of separately documented patterns."
+}

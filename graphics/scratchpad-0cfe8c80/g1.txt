@@ -1,0 +1,2 @@
+// the post air and fog passes paste them, and the reflections' trace pastes the
+// block, the sky piece and the puddles piece (kPostShaders).

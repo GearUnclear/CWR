@@ -1,0 +1,6 @@
+Filters: [remaster],[FeatureSwitches],[FeatureGates],[PostStages],[fog],[SurfaceLight],[AirMedium],[ssr],[wet],[CombatLights],[Shaders],[StateCacheAudit],[PhotoCamera],[TerrainHorizon]
+Randomness seeded to: 1134155731
+===============================================================================
+All tests passed (956830 assertions in 303 test cases)
+
+exit=0

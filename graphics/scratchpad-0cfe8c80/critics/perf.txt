@@ -1,0 +1,50 @@
+## track
+perf
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No cited file is missing. Every image and artefact path exists. BEST_sunrise_ridge.png and BEST_noon_fields.png are byte-identical copies of run12_exact/threeway_*_exact.png (same SHA-256). The raw shot counts per run (12/18/5/31/10) and the game_stdout.log files match the claim.",
+ "The scratch build path is given as dist/gfx-perf-rwdi. It actually lives at D:\\Arma_CWA_worktrees\\gfx-perf\\arma_CWR\\dist\\gfx-perf-rwdi; tri is run with a relative --game-dir. This is a wording issue, not a fabrication.",
+ "The headline 'world pass 34 ms to 2 ms' is real logged data, but it overstates the GPU saving. The stock 'GPU world' bracket is mostly the GPU waiting on CPU submission; the explorer says so in NOTES. The best-frame GPU world goes 15.8 to 1.15 ms. The real win is CPU frame, 31.9 to 12.1 ms.",
+ "noon_fields: the exact set (debug 427, 1,500 draws) is NOT cheaper than the inexact gate-only config (debug 107, 1,340 draws) in run12. GPU frame median is 7.48 vs 5.72 ms, and in-window best GPU world is 4.00 vs 2.19 ms. Flag 64 gives back more than the terrain cull saves on that view. The claim 'noon 19.13 to 7.48' is true but hides this.",
+ "The claim that the terrain cull is 'conservative by construction except notches' is not quite true. tObj divides the sphere top height by the NEAR-edge distance dn. For objects below eye level this underestimates the angular elevation of the sphere's far side, and the cull uses Object::Position rather than the bounding-sphere centre. On the tested views it is absorbed by the 2 m margin and the 1.25x radius inflation, but it is not proven conservative.",
+ "Long-shadow safety is unverified, as the explorer admits. The run12 logs report 'shadow 0.00' ms at sunrise_ridge in every config, so the sunrise identity check never exercised shadow-map casters behind the ridge.",
+ "Not tested at the target resolution: shots and timings are 960x640 at 1.5x, with 3 to 4 other agents' games on the GPU. No 1080p numbers. The 13-view capture set was not rerun."
+]
+## visible_gain_vs_current_remastered
+none
+## visible_gain_vs_classic
+none
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[]
+## cost_ok
+true
+## score_0_to_10
+7
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\perf\BEST_sunrise_ridge.png
+## one_line
+Real, verified and pixel-exact cost work. It cuts sunrise_ridge from 11,172 to 1,728 draws and its CPU frame from 32 to 12 ms, and fixes a genuine instancing bug. It adds nothing a player would see; its value is the budget it frees for the RTX-style effects.
+## critique
+Verification. The folder holds everything the explorer cites. The run logs back the numbers. In run12, game_stdout.log shows triSetLighting debug=427 and 'calls=1728 ... tocc culled=6555 tested=7669 builds=1 buildms=5.54' against 'calls=11172 ... instruns=0' for stock Remastered. run10 reproduces the capture-order artifact exactly: 1,465 draws / 1.91 ms for Classic, 2,202 / 12.32 ms for Remastered, then 9.5k to 10.4k draws and ~42 to 47 ms for both once streaming settles. That explanation of the earlier '18.4 vs 7.2 ms' is solid. The override_cutout and override_lod shaders loaded with no compile or link errors. prototype.patch contains the flag 4/64/128/256 code exactly as described.
+
+Pixel identity. My own band diff of the run12 shots confirms the claims. Sunrise m0 vs m0+427: only the sky differs (max 5, cloud drift); horizon max 1, ground 0. A same-config repeat drifts more (sky max 7). Noon: horizon max 7 against a repeat-noise max of 15. Classic+427: horizon 0. The 57 ground pixels in Classic+tocc at noon all sit inside the soldier's box (x 260 to 311, y 376 to 495), which is idle-animation noise. The noon treeline zoom clearly shows the bush-silhouette bug under the gate alone, so the flag 64 fix is justified.
+
+Look. The three-way images show Remastered and Remastered+prototype as indistinguishable, by design. The prototype brings no visible gain toward the RTX-on goal: no bounce light, reflections, volumetrics or sky change. No taste rule is touched, because nothing about colour, shade, haze or crowns changes. Any taste problems in these frames, such as the pale grey-blue ground at noon_fields, belong to the existing Remastered shading, not to this track.
+
+Cost and value. This is the most useful kind of negative-space result. The world pass at long view distance is bound by CPU draw submission, and the remastered shading itself costs only about +0 to 1 ms in the world pass plus 0.3 to 1.8 ms of post. On an RTX 3060 at 1080p that means 10+ ms of GPU headroom is available for heavy effects once the draw count is fixed. That is directly relevant to the owner's 'heavy effects are acceptable' decision.
+
+Caveats.
+1. The 34 to 2 ms GPU headline mostly measures removed CPU stalls; the honest number is the CPU frame, 32 to 12 ms.
+2. The gains are concentrated on VD 4000 ridge views. On forest and lowsun views they are only about 1 to 2 ms, and at noon_fields the exact set is slower than gate-only in run12.
+3. The 12 ms CPU floor plus a 5.5 ms horizon rebuild per moved frame (walking CPU 14.3 ms) is still tight for 60 fps until the cull moves before LOD selection and the table build is made cheaper.
+4. The terrain cull is not strictly conservative: it uses near-edge distance for the top tangent and object position rather than the sphere centre. Culled shadow casters were never tested (the shadow pass is 0.00 ms at sunrise). All timings come from a GPU shared with 3 to 4 other games, at 960x640.
+
+The light gate and the IsAnimated instancing fix are cheap, exact and fix a real stock bug: build them. Terrain horizon occlusion is worth building but needs hardening. The shader-side LOD tweaks are noise-level and can be skipped.
+## artefacts_seen
+BEST_sunrise_ridge.png, BEST_noon_fields.png, run10_baseline_replay/capture_flow_replay.png, chart_run11_Q_prototypes.png, run8_quiet/noon_treeline_zoom_m0_top_m0all_bottom.png, run9_cutout/lowsun_blob_zoom_stock_left_gate64_right.png, run8_quiet/threeway_forest_edge_golden.png; NOTES.md, run12_exact/summary.md, prototype.patch (SceneDraw.cpp cull and gate code), game_stdout.log for run9/run10/run11/run12; PIL band diffs on the run12 and run11 raw shots
+## prototype_actually_loaded
+Yes. run12 game_stdout.log shows triSetLighting debug=427/107/555 switching per config, with draw calls 11172 -> 2797 -> 1728 -> 1549, tocc culled=6555/7669 and instruns=50. run9 and run11 log 'shader override loaded' from override_cutout and override_lod, with zero compile or link failures. run10 ran stock shaders with adaptive LOD as claimed.

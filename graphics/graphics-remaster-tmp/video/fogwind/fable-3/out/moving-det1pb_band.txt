@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\fable-3\\runs\\moving-det1pb\\moving-det1pb.mkv", "frames": 120, "band": 0.079, "band_max": 0.173, "sky": 0.049, "spikes": 0, "worst": [[108, 0.38], [120, 0.35], [25, 0.34], [119, 0.34], [80, 0.34], [112, 0.34], [81, 0.33], [17, 0.33]]}

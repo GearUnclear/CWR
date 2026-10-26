@@ -1,0 +1,9 @@
+    {"shadowMap", kShadowMapUnit},           // the cascade array (comparison sampler in remastered)
+    {"terrainHorizon", kTerrainHorizonUnit}, // horizon angles
+    {"terrainHeight", kTerrainHeightUnit},   // height, sky visibility, ground tint
+    {"cloudNoise", kCloudNoiseUnit},         // cloud-shadow noise
+    {"shadowDepth", kShadowRawUnit},         // the cascade array as raw depth (soft shadows)
+    {"skyLut", kSkyLutUnit},                 // sky-view table (the sky table)
+    {"skyDensity", kSkyDensityUnit},         // the weather sky's cloud density (the clouds)
+    {"seaNext", kSeaNextFrameUnit},          // next sea animation frame (the water program only)
+    {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)

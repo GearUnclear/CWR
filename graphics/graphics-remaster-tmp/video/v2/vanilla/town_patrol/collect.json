@@ -1,0 +1,16 @@
+{
+ "clip": "town_patrol",
+ "side": "vanilla",
+ "frames": 570,
+ "fps": 60,
+ "size": [
+  1920,
+  1080
+ ],
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vanilla\\town_patrol\\town_patrol__vanilla.mkv",
+ "game_dir": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+ "mode_line": "view=town_patrol;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+ "gamma": 1.2,
+ "run": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\runs\\van-town_patrol",
+ "mb": 381.2
+}

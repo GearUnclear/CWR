@@ -1,0 +1,224 @@
+diff --git a/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro.Abel/mission.sqm b/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro.Abel/mission.sqm
+new file mode 100644
+index 0000000..59dbc51
+--- /dev/null
++++ b/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro.Abel/mission.sqm
+@@ -0,0 +1,3 @@
++version=11;
++class Mission { class Intel {}; };
++class Intro { class Intel {}; };
+diff --git a/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro.Intro/mission.sqm b/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro.Intro/mission.sqm
+new file mode 100644
+index 0000000..5c6d70b
+--- /dev/null
++++ b/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro.Intro/mission.sqm
+@@ -0,0 +1,28 @@
++version=11;
++class Mission { class Intel {}; };
++class Intro
++{
++    addOns[]={"TriMenuAddonThatDoesNotExist"};
++    class Intel {};
++    class Groups
++    {
++        items=1;
++        class Item0
++        {
++            side="WEST";
++            class Vehicles
++            {
++                items=1;
++                class Item0
++                {
++                    position[]={7515,20,5790};
++                    id=0;
++                    side="WEST";
++                    vehicle="SoldierWB";
++                    player="PLAYER COMMANDER";
++                    leader=1;
++                };
++            };
++        };
++    };
++};
+diff --git a/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro1.Abel/mission.sqm b/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro1.Abel/mission.sqm
+new file mode 100644
+index 0000000..5c6d70b
+--- /dev/null
++++ b/tests/fixtures/mods-menu-return/@allinvalid/Anims/intro1.Abel/mission.sqm
+@@ -0,0 +1,28 @@
++version=11;
++class Mission { class Intel {}; };
++class Intro
++{
++    addOns[]={"TriMenuAddonThatDoesNotExist"};
++    class Intel {};
++    class Groups
++    {
++        items=1;
++        class Item0
++        {
++            side="WEST";
++            class Vehicles
++            {
++                items=1;
++                class Item0
++                {
++                    position[]={7515,20,5790};
++                    id=0;
++                    side="WEST";
++                    vehicle="SoldierWB";
++                    player="PLAYER COMMANDER";
++                    leader=1;
++                };
++            };
++        };
++    };
++};
+diff --git a/tests/fixtures/mods-menu-return/@retry/Anims/intro.Abel/mission.sqm b/tests/fixtures/mods-menu-return/@retry/Anims/intro.Abel/mission.sqm
+new file mode 100644
+index 0000000..59dbc51
+--- /dev/null
++++ b/tests/fixtures/mods-menu-return/@retry/Anims/intro.Abel/mission.sqm
+@@ -0,0 +1,3 @@
++version=11;
++class Mission { class Intel {}; };
++class Intro { class Intel {}; };
+diff --git a/tests/fixtures/mods-menu-return/@retry/Anims/intro1.Abel/mission.sqm b/tests/fixtures/mods-menu-return/@retry/Anims/intro1.Abel/mission.sqm
+new file mode 100644
+index 0000000..2b00e79
+--- /dev/null
++++ b/tests/fixtures/mods-menu-return/@retry/Anims/intro1.Abel/mission.sqm
+@@ -0,0 +1,28 @@
++version=11;
++class Mission { class Intel {}; };
++class Intro
++{
++    class Intel {};
++    class Groups
++    {
++        items=1;
++        class Item0
++        {
++            side="EAST";
++            class Vehicles
++            {
++                items=1;
++                class Item0
++                {
++                    position[]={7515,20,5790};
++                    id=0;
++                    side="EAST";
++                    vehicle="SoldierEB";
++                    player="PLAYER COMMANDER";
++                    leader=1;
++                    init="triMenuGoodIntro = true";
++                };
++            };
++        };
++    };
++};
+diff --git a/tests/integration/missions/menu_return.Abel/init.sqs b/tests/integration/missions/menu_return.Abel/init.sqs
+new file mode 100644
+index 0000000..f7d18be
+--- /dev/null
++++ b/tests/integration/missions/menu_return.Abel/init.sqs
+@@ -0,0 +1,5 @@
++triReturnMissionTicks = 0
++#loop
++triReturnMissionTicks = triReturnMissionTicks + 1
++~0.02
++goto "loop"
+diff --git a/tests/integration/missions/menu_return.Abel/mission.sqm b/tests/integration/missions/menu_return.Abel/mission.sqm
+new file mode 100644
+index 0000000..f81b759
+--- /dev/null
++++ b/tests/integration/missions/menu_return.Abel/mission.sqm
+@@ -0,0 +1,27 @@
++version=11;
++class Mission
++{
++    class Intel {};
++    class Groups
++    {
++        items=1;
++        class Item0
++        {
++            side="WEST";
++            class Vehicles
++            {
++                items=1;
++                class Item0
++                {
++                    position[]={7515,20,5790};
++                    id=0;
++                    side="WEST";
++                    vehicle="SoldierWB";
++                    player="PLAYER COMMANDER";
++                    leader=1;
++                };
++            };
++        };
++    };
++};
++class Intro { class Intel {}; };
+diff --git a/tests/integration/ui/main_menu/return_all_invalid_cutscenes.test.sqf b/tests/integration/ui/main_menu/return_all_invalid_cutscenes.test.sqf
+new file mode 100644
+index 0000000..5651249
+--- /dev/null
++++ b/tests/integration/ui/main_menu/return_all_invalid_cutscenes.test.sqf
+@@ -0,0 +1,11 @@
++// Empty groups and missing addons invalidate every island and default intro.
++triSimUntil { triReturnMissionTicks > 0 }
++triAssertEq [(typeOf player), "SoldierWB"]
++triAssertEq [(triStartRandomCutscene), "OK"]
++triAssertEq [(triGameMode), 2]
++triAssertEq [(isNull player), true]
++triReturnMissionTicks = 0
++triSimFrames 60
++triAssertEq [(triReturnMissionTicks), 0]
++triAssertEq [(isNull player), true]
++triEndTest
+diff --git a/tests/integration/ui/main_menu/return_all_invalid_cutscenes.test.toml b/tests/integration/ui/main_menu/return_all_invalid_cutscenes.test.toml
+new file mode 100644
+index 0000000..d17b651
+--- /dev/null
++++ b/tests/integration/ui/main_menu/return_all_invalid_cutscenes.test.toml
+@@ -0,0 +1,7 @@
++mission = "tests/integration/missions/menu_return.Abel"
++binary = "PoseidonGame"
++tags = ["ui", "full_cwa", "headless"]
++timeout = 90
++assert_timeout = 20
++# The rejected missing-addon scene emits expected archive diagnostics.
++extra_args = ["--no-strict", "--mods-dir", "../../tests/fixtures/mods-menu-return", "--mod", "@allinvalid"]
+diff --git a/tests/integration/ui/main_menu/return_retry_cutscenes.test.sqf b/tests/integration/ui/main_menu/return_retry_cutscenes.test.sqf
+new file mode 100644
+index 0000000..585dbc6
+--- /dev/null
++++ b/tests/integration/ui/main_menu/return_retry_cutscenes.test.sqf
+@@ -0,0 +1,11 @@
++// Preserve a valid island intro even when the other candidate has no groups.
++triSimUntil { triReturnMissionTicks > 0 }
++triAssertEq [(typeOf player), "SoldierWB"]
++triAssertEq [(triStartRandomCutscene), "OK"]
++triAssertEq [(triGameMode), 2]
++triAssertEq [(getWorld), "abel"]
++triSimUntil { triMenuGoodIntro }
++triReturnMissionTicks = 0
++triSimFrames 60
++triAssertEq [(triReturnMissionTicks), 0]
++triEndTest
+diff --git a/tests/integration/ui/main_menu/return_retry_cutscenes.test.toml b/tests/integration/ui/main_menu/return_retry_cutscenes.test.toml
+new file mode 100644
+index 0000000..85388b5
+--- /dev/null
++++ b/tests/integration/ui/main_menu/return_retry_cutscenes.test.toml
+@@ -0,0 +1,7 @@
++mission = "tests/integration/missions/menu_return.Abel"
++binary = "PoseidonGame"
++tags = ["ui", "full_cwa", "headless"]
++timeout = 90
++assert_timeout = 20
++# Full game data under packages/<name>, matching the standard fixture layout.
++extra_args = ["--mods-dir", "../../tests/fixtures/mods-menu-return", "--mod", "@retry"]

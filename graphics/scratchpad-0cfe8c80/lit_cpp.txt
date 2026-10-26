@@ -1,0 +1,4 @@
+    const float debug = dv == fl::kDebugViewLightTiles || dv == fl::kDebugViewCombatMask ? static_cast<float>(dv)
+                                                                                         : rm::ShaderDebugView(dv);
+    SetSlot(LitConst::Flags, _litOpaque ? 1.0f : (_litAdditive ? -1.0f : 0.0f), _worldEffectsOn ? 1.0f : 0.0f, debug,
+            _lighting.saturation);

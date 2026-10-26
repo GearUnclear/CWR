@@ -1,0 +1,69 @@
+fable-1 REPORT (integrator and designer of the Fable team; fogwind, 2026-10-23)
+===============================================================================
+Deliverables (all under tmp/video/fogwind/fable-1/):
+  CANDIDATE.txt   the Fable team's candidate q2z: cause of the wind, the fix, numbers, cost, risks, verdicts
+  fix.patch       git diff --binary on top of graphics-remaster HEAD d91a08e0 (5 files: the inject and
+                  integrate shaders, 2 lines of EngineGL33_PostFog.cpp, VolumetricFog.hpp mirror constants,
+                  the unit test, ITERATIONS.md F2); applies cleanly (git apply --check on graphics-remaster);
+                  builds in worktree D:/Arma_CWA_worktrees/fable-wt (build/fable-wt-rwdi, PoseidonTests
+                  target only); PoseidonTests "[fog]" green: 34 cases, 6484 assertions
+  fix-q2b.patch   the same in the q2b form the lead picked (tetra history read, no integrate tent); its
+                  shader + test state was green in the same worktree earlier (build3, 6480 assertions)
+  compare.mp4     1280x720 60 fps, the same 2x crop of the bay and far valley (box 1100,520,760,280), parts
+                  ORIGINAL (frame-wide jitter) / LAST FIX d91a08e0 (per-cell, the wind) / FABLE CANDIDATE q2z,
+                  5 s each at real speed (clip frames 240-539 of valley_mist; the candidate from the
+                  300-frame pan probe look_probe_fable1_move300 shot with the q2z overrides)
+  shaders/q2z/    the prototype overrides (psFogInject.glsl = agent 4's q2b injection with a plain centre
+                  history read; psFogIntegrate.glsl = agent 6's S2z 3x3x3 tent)
+  runs/           static-q2z, moving-q2z (fog1 probes, 135 shots each), move300-q2z, rt-q2z (real time)
+  look/           xt_static/xt.png (x-t slices ORIGINAL / D91 / Q2Z, held camera), compare frames
+  tools/          jittertest.py (the unit test's two metrics, prototyped in python), gen_probe_fable1.py,
+                  gen_rt_fable1.py, run_rt_fable1.ps1, compare_video.py
+
+What I did
+----------
+1. Read the brief, the board, the shader (EngineGL33_PostFogShaders.cpp psFogInject), the jitter source
+   (EngineGL33_PostFog.cpp) and the leading Opus overrides (Act25, q2b, S2z).
+2. Ceded the analytic depth integral to fable-3 (same first idea, posted the same minute).
+3. Designed and ran q2z = deterministic 2-tap injection (q2b's) + plain centre history read + the display tent
+   (S2z's integrate). Rationale: the two parents restore the approved look in different places; q2b through a
+   blur in the history (so the look depends on the history's age: sharper for ~10 frames after a cut or a
+   history reset, then settles), S2z through a display filter (the same held and moving, from frame 1). The
+   combination keeps q2b's determinism (nothing temporal to pump, travel or boil at any cadence) and S2z's
+   stateless look. Measured held and panning with agent 1's kit: floor on every motion metric, look within
+   0.3 codes (held) and +0.7 (pan) of the original, the closest of anything on the board.
+4. Wrote the regression test the board lacked: a C++ mirror of the per-cell offset over a 48x48 cell grid x
+   300 frames through the 0.12 EMA read at the centre, two metrics: PUMP (sd over frames of a 5x5 block mean)
+   and TRAVEL (best frame-to-frame correlation of the residual field at a nonzero cell lag, |lag| <= 3). The
+   test asserts the frame-wide scheme trips the pump bar (0.031 > 0.025, travel 0.10), d91's IGN scheme trips
+   the travel bar (0.98 at lag (0,2); pump 0.0036 passes, which is exactly how the old test missed it), and the
+   fixed taps leave 0 / 0. Bars for any future jittered scheme: pump < 0.01, travel < 0.2 (a white per-cell
+   hash gives 0.0054 / 0.014 and would pass). Plus string pins of the fixed taps, the centre read, the tent,
+   and the absence of fogDepth.w / fogFrame.xy / fogCellNoise / fract(fogDepth...) in the injection.
+5. Made the production patch (comments in the repo's voice, VolumetricFog.hpp mirror constants kFogTapZ /
+   kFogTapXY checked against the shader strings like the existing mirrors, ITERATIONS.md F2), verified the
+   patch's shader code equals the tested override ignoring comments (tools diff: only names and no-op guards).
+6. Assembled compare.mp4 and this report; verdicts on the Opus candidates in CANDIDATE.txt.
+
+Key numbers (see CANDIDATE.txt for the tables): held camera q2z band 0.033 (= floor), WIND <= 0.002, boil/slow
+valley 0.054/0.041 (floor 0.079/0.067, d91 0.416/0.173); pan q2z WIND 0.006/0.004/0.002/0.004 (vanilla
+0.017/0.007/0.002/0.007), rho_off <= 0.036, lowd2 valley 0.059 (vanilla 0.057, d91 0.117, original 1.62),
+look valley 128.6 (original 127.9, d91 130.3). REAL TIME 60 fps (one render per frame, camera held, 200
+frames): q2z boil/slow valley 0.059/0.048, farhill 0.048/0.040, haze 0.049/0.040, max rho_off 0.024, WIND
+<= 0.002 (q2b 0.058/0.047; d91 0.422/0.321 with rho_off 0.52 = the wind); pan rt60 max rho_off 0.028, bay
+lowd2 0.065 (q2b 0.062); look in play valley 127.1 (q2b 128.2, S2z 127.0; d91 130.0; every candidate reads
+about 0.8 lower in play than stepped, so this is the original's level).
+
+Gotchas for whoever lands it
+----------------------------
+- `_fog.sequence` must keep advancing: psFogNear's march reads seq % 64 (fogNearGrid.w); my first patch
+  removed it and broke the build. The jitter uniforms fogDepth.w / fogFrame.xy are set to 0 and no longer read.
+- The integrate reads the injected volume with texture() (trilinear) instead of texelFetch: the inject
+  textures already have linear filtering (the history read uses it), so no C++ sampler change is needed; the
+  S2z override proved it in-game.
+- fogmotion.py without --static reports boil/slow as nan on a held-camera clip; re-run with --static.
+- agent 1's run_probe_fog.ps1 defaults -GameDir to look-director-rwdi: pass the graphics-remaster-rwdi path
+  explicitly (as the brief requires).
+- The curtain metric (agent 4's) is a column-to-column measure; fable-3 showed the "frozen" streaks are
+  lateral aliasing of per-column terms, not the medium; the tent and the two xy taps keep q2z at the
+  original's level there (0.147 vs 0.152).

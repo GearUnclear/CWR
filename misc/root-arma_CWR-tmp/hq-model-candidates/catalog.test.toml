@@ -1,0 +1,5 @@
+mission = "tools/screenshots/missions/Stories.Noe"
+binary = "PoseidonGame"
+timeout = 240
+assert_timeout = 120
+extra_args = ["--dev", "--no-strict", "--no-sound", "--width", "1600", "--height", "1000"]

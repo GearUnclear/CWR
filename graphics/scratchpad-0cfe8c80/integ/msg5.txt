@@ -1,0 +1,29 @@
+graphics: sun shafts brighten the air, not the surfaces near the eye
+
+The post-pass sun-shaft composite laid a grey veil over nearby backlit
+vehicles and a warm streak over the near ground under a low sun.
+
+Root cause: s_psPostShaftsGLSL marches toward the sun and sums every
+sky sample, the light an endless view ray would scatter, without
+reading the depth of the pixel it shades. s_psPostCompositeGLSL then
+screen-adds that term to every pixel at full weight, so a Jeep 10 m
+away got the same glow as the sky beside it (lowsun_fp Jeep side 63.7
+with shafts, 27.8 without).
+
+Fix: the composite scales the shaft term by the share of light the air
+in front of each pixel scatters, 1 - exp(-distance / L), read from the
+full-resolution resolved depth (AO projInfo/depthMap/worldRect
+conventions, depth >= 0.999999 is sky). LightRig gains ShaftInscatter
+and ShaftScatterLength: L = 300 m in clear air, fogEnd/3 when fog or
+rain bring the fog end nearer. The lighting lab mirror passes the new
+uniforms. The shaft pass, bloom, AO and Classic are untouched.
+
+Trade-off: the warm beam over the near ground at a low sun is mostly
+gone too (sunrise_ridge beam 50.3 -> 44.1, shafts-off 43.5); it comes
+from the same term at the same distance.
+
+Tests: 'Remaster sun shafts brighten the air, not the surfaces near the
+eye' (149 assertions; the 4 GLSL contract checks fail without the fix).
+In game: near-vehicle veil +36 -> +4 luma, sky near the sun unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

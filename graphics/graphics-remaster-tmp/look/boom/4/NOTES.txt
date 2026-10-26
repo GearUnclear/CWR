@@ -1,0 +1,157 @@
+Explosions, approach 4 of 6: the rendering of fire and flash
+============================================================
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-4 (fec1075 + LOOK/boom/base.patch, base tree 43c4ff8f).
+Build build/look-puddle-4-rwdi, game dist/look-puddle-4-rwdi, junction RemasterUD-boom-4.
+Nothing committed, no branch. Patch: fix.patch (13 files, +331 / -54, the look_probe* tests excluded).
+
+Look first
+----------
+- final/*.mp4 and final/*_strip.png: the six shared clips from the final build.
+- final_run/z_dusk_he.png, final_run/z_night_he.png, final_run/z_dusk_fuel.png: frame by frame crops
+  (frame number and the clip's nominal ms) of the final build.
+- tools/before_dusk_he_zoom.png, tools/before_night_he_zoom.png, tools/before_dusk_fuel.png: the same
+  crops of the round 5 run (LOOK/boom/before/shots).
+- run1/, run2/: my two earlier builds (run1: cooling too fast, the fireball never caught; run2: the
+  birth fix, cap 14).
+
+0. A harness finding first (affects every agent's clips)
+--------------------------------------------------------
+Each captured frame of look_probe_mun_* is about 0.1 s of simulation, not 1/30 s. triScreenshot
+"at present" waits for the next present and Trident waits for the file, so several AppIdle frames
+run between shots, each at the fixed 1/30 s step (about 140 ms of wall time per shot in the log).
+Evidence: the 120 mm shell dropped from 40 m at 250 m/s (0.16 s of flight) bursts 2 captured frames
+after its spawn; CraterSmoke1's puffs live 3.6 s and are gone about 38 captured frames after the
+burst (3.6 s / 38 = 0.095 s a frame). So the mp4s play about 3 times too fast, the "+ms" labels
+are a third of the real time, and which phase of a 0.1 s fireball lands on a frame changes from run
+to run (in my final run the dusk HE shot caught the flash frame before the fireball, the night shot
+caught the fireball). A brief real event can only ever read as a blink in these clips. The fix is in
+the test (wait for the screenshot without stepping the world, or fixed step 1/90 with a shot every
+step); I did not change the shared tests.
+
+1. What each munition spawns today (probe evidence, round 5)
+------------------------------------------------------------
+Config (CONFIG.BIN debinarized with PoseidonTools, tools/cloudlets.txt):
+- CfgCloudlets Explosion (the fireball, shells, grenades and the fuel tank alike): cl_fired puffs,
+  0.2 s life plus 0.2 s fade, grow 0.05 s, born at 2500 K cooling 4000 K/s (x0.7 to 1.3 per puff),
+  colour table 1400 to 2200 K.
+- CraterSmoke1/2/3, CraterDustBig: the smoke and dust column (source 0.32 s, puffs 2.4 s + 1.2 s,
+  rising up to 6.25 m/s).
+- Explosion size: hit x 0.003 clamped 0.25..1, so Shell120 (hit 200) is 0.6 and Heat120 (hit 700)
+  is 1.0: the HEAT round gets a bigger fireball than the HE shell (config, not my lane).
+- Fuel: SmokeSourceVehicle: the same Explosion puffs at size hit x 0.001 (0.25 for the Jeep, puffs of
+  0.1 to 1 m), dark puffs, a shell burst's combat light (Explosion kind), then the wreck's smoke.
+Rendering, round 5:
+- A new puff is first drawn before its first step: alpha 0 and size 0, so the burst's flash frame
+  showed the combat light only (sparks, the lit ground lens at dusk, the soft scatter ball at
+  night) and no fireball.
+- Fireball puffs glow by their temperature (round 4 FireballPuff) but capped at 2 (linear) and
+  packed into an 8-bit glow of at most 1: never past a lit wall, so one flat orange frame, no white
+  core, nothing for the bloom.
+- The puff decal is one flat quad at the sphere's front depth: the ground in front cuts every low
+  puff off along one horizontal line (the flat bottom).
+- The flash held 0.15 s at night and its glow tail lasted 0.16 s: the cloud was lit cream for
+  several frames at night.
+
+2. The change
+-------------
+a) HDR glow for fireball puffs (the core brighter than anything round it). Object::DrawDecal keeps the
+   level of a fireball's glow past white as an HDR gain (Engine::SetDecalGlowGain); the GL33 backend
+   carries it in the decal's second texture coordinate, tagged (u = -(1000 + gain),
+   kDecalGlowGainTag), and the pre-lit shader multiplies the decal's glow by it only when tagged.
+   The camera stores it up to its encoding's 16, its curve whitens it and its bloom catches it.
+b) Temperature glow over age, per munition. FireballPuff now spans white-hot to soot in the visible
+   range: kFireballEmission 8 -> 137 at 2200 K (Wien at 580 nm), cap 2 -> 9 (linear). 2500 K white
+   (9, 9, 8), 2000 K yellow-orange past white, 1600 K orange (1.8), 1400 K dull red, 1300 K soot.
+   Cooling per munition at the source: a cased charge cools 5000 K/s / cbrt(size) (BurstCoolingRate;
+   120 mm HE 5930 K/s: white for one 1/30 frame, orange the next, soot by 0.2 s); the fuel tank's
+   puffs are a deflagration: born at 1950 K, cooling 550 K/s, living 0.9 s + 0.7 s fade, growing over
+   0.35 s and rising (climb 2.5, max 4 m/s), size x4.
+c) The fireball on its flash frame: Cloudlet::PrimeFireballBirth (called by WeaponCloudsSource) gives
+   a new fireball puff its colour, full alpha and kFireballBirthSize 0.7 of its size at birth, and the
+   puff keeps that size while it grows on.
+d) No flat cut-off bottom: a fireball puff is drawn with its centre at least kFireballLiftShare 0.7
+   of its radius above the ground (GLandscape SurfaceY), so its round soft foot rests on the ground.
+   (A real depth fade needs the scene depth bound in the world pass; at the grazing view of these
+   clips it softens the line by 2 to 3 px only, so I did not build it.)
+e) The flash: a detonation's flash lasts tens of milliseconds and scales with the cube root of the
+   charge: kBurstFlashTau 0.025 s and kBurstGlowTau 0.07 s x cbrt(strength) (were 0.05 and 0.16
+   fixed); no hold under the photoreal camera (was 0.15 s x night). Its light on the ground is a
+   graded pool: the Explosion kind's surface gain x kBurstSurfaceShare 0.3 (0.3 -> 0.09), so the pool
+   centre no longer clips into a white lens.
+f) Fuel: no detonation flash: the burst becomes a Fire-kind owned light (strength 8 x size), swelling
+   over 0.15 s, held to 0.5 s, gone by 1.6 s; it lights the smoke and puffs orange (hue kept) and its
+   flame emission.
+Not changed: the smoke and dust config (lifetime, colour), the exposure response (FlashExposureGain is
+untouched; with the flash now brief its night brightening lasts about 0.12 s), the AI sight and fog
+link (Target.cpp, VolumetricFog.cpp, SimulateFogSight are not in the diff).
+
+Constants (old -> new)
+----------------------
+- kFireballEmission 8 -> 137; kFireballEmitCap 2 -> 9.
+- New: kFireballBirthSize 0.7, kFireballLiftShare 0.7, kBurstCoolKps 5000, kFuelFireInitK 1950,
+  kFuelFireCoolKps 550, kFuelFireballSize 4, kBurstFlashTau 0.025, kBurstGlowTau 0.07,
+  kBurstSurfaceShare 0.3 (EngineGL33_PostCombat.cpp), kDecalGlowGainTag 1000.
+- Explosion envelope: flash 0.05 s -> 0.025 x cbrt(e) s; glow tail 0.16 s -> 0.07 x cbrt(e) s; colour
+  cooling 0.45 s -> 0.21 x cbrt(e) s. CombatTuning::flashHold under the camera 0.15 x night -> 0.
+- HE puffs: deltaT -4000 -> -5000 / cbrt(size) K/s. Fuel puffs: initT 2500 -> 1950, deltaT -4000 ->
+  -550, cloudletDuration 0.2 -> 0.9, growUp 0.05 -> 0.35, fadeIn 0.01 -> 0.05, fadeOut 0.2 -> 0.7,
+  climb (-0.2, 0, 6) -> (2.5, 0, 4), size x4. Fuel light: Explosion burst -> Fire, 8 x size x envelope.
+
+3. What it looks like now (final build; "frame" = one captured frame, about 0.1 s)
+---------------------------------------------------------------------------------
+- dusk HE (120 mm, size 0.6): flash frame: sparks and a dim graded pool at the impact (this run
+  caught the light before the puffs); next frame: a fireball about four riflemen wide and two high,
+  bright orange with yellow-white cores, dark soot already mottling it, a rounded foot on the ground
+  (round 5: a flat orange slab cut off along the horizon); next frame: dark grey-brown soot; the
+  column rises, its foot lingers; gone after about 38 frames (3.6 s, config). In game at 30 fps: one
+  white-hot frame, one or two orange, soot by 0.2 s.
+- night HE: a yellow-white fireball blooming in a large warm halo on the flash frame; next frame dark
+  smoke with glowing orange edges; then pale moonlit grey smoke (config colour) for about 3.5 s.
+- dusk grenade: a dim graded pool on the flash frame; its fireball (under 0.1 s) falls between
+  captured frames; a small dust and smoke column.
+- dusk HEAT (size 1.0): a wide, low orange-yellow fireball with hot cores for one frame, then a black
+  soot ball rising.
+- dusk fuel / night fuel: small cream puffs at the Jeep's hull for about 6 frames, then the black
+  wreck column. The intended large rolling orange deflagration did NOT show (see weak points).
+
+4. Tests
+--------
+[CombatLights],[PhotoCamera],[Shaders],[remaster],[fog] from D:\ on the final build: all pass, 322
+cases, 958,621 assertions (unit.txt). New cases: "look fix boom: a burst cools by its charge, its flash
+scales with the cube root" (cooling rates, fuel curve, grenade flash shorter than a heavy shell's,
+FireballTable) and "the decal glow's HDR gain reaches the pre-lit shader, tagged" (backend tag, shader
+line, fuel light and cooling hooks). Updated: the fireball glow case (white core past 8, 2000 K
+yellow-orange, 1600 K orange over 1, 1300 K soot), the flash envelope case (no hold: under 40% one
+step later, under 12% two steps later), the DrawDecal source contract (worldPos, glow gain, birth
+size, lift). clang-format clean on every file I touched (EngineGL33.hpp's one warning at PostAir is
+pre-existing; Smokes.* are legacy tab files, untouched style).
+
+5. Cost
+-------
+Per fireball puff and frame: one SurfaceY lookup and a few flops in DrawDecal; one compare and
+multiply in the pre-lit shader. No new lights (the fuel's Fire light replaces its burst light), no new
+passes. The capture logs carry no frame time readout; wall time per clip is dominated by screenshot
+I/O and was not slower than round 5's (HE clip 15.9 s here against 29.5 s in the before run, on a
+different machine load, so not a measurement).
+
+6. Weak points (honest)
+-----------------------
+1. Fuel: the deflagration fireball is still small cream puffs. The puff, cooling and light settings
+   are in, but the puffs that read on screen look like the dark puffs lit by the fire light; I ran out
+   of time to find why the fuel's fire puffs do not glow or grow (the SmokeSourceVehicle simulates at
+   its own coarse step; its fire puffs may be few or hidden). Needs a probe.
+2. Flash frame order: the combat light is drawn on the frame of the burst, the new puffs one frame
+   later when the burst happens in the frame's last simulation step (dusk run): a graded pool and
+   sparks without a fireball for one game frame.
+3. Night bloom: the white-hot core blooms into a large yellow halo at night (the night exposure and
+   white balance); a cap of 9 tamed it from 14, not enough. The night white balance turns 2500 K
+   yellow, not white.
+4. The ground pool at dusk still reads as a thin bright lens at grazing view on the flash frame
+   (dimmer than round 5). Smoke self-shadowing was not done (smoke is lit by the fire inside it via
+   round 4's CombatLitParticle only).
+5. Smoke lifetime and colour (pale grey at night, gone in about 3.6 s) are config and other lanes.
+6. LAW black lower half (LOOK/boom/rprobe/clips/both.png, +33 ms): sky and smoke draw, everything
+   below the horizon is black: a terrain or ground pass missing for one frame, not the particle or
+   flash path I touched. Not investigated.
+7. Clips: see section 0; the 3x time compression decides more of the look than any constant.

@@ -1,0 +1,8 @@
+// The volumetric fog's floor map (the lowest ground nearby, look-fog) takes the
+// free light-data unit: only the fog's injection pass samples it, and binds it
+// itself (no world program declares it).
+constexpr int kFogFloorUnit = kLightDataUnit;
+// The volumetric fog's horizon ring (EngineGL33_PostFog.cpp), read by its
+// injection in the post pass on the light list's tile unit, which the world
+// binds again at each frame's lighting upload (BindLightingTextures).
+constexpr int kFogRingUnit = kLightTileUnit;

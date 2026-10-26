@@ -1,0 +1,59 @@
+{
+ "verdict": "needs_another_round",
+ "owner_seam_gone": true,
+ "blockers": [
+  {
+   "view": "woods_pine2_evening (also sinai_lowsun_fp; milder in lowsun_fp, pine_rays, dawn_valley, sunrise_ridge)",
+   "problem": "New in round 4. Every view with the sun in frame lost 0.3 to 1.55 EV of exposure. woods_pine2_evening (sun 20 degrees, 17:30) is now the darkest day view in the set. Its frame mean is 33/255, against R3 50, landed 59 and the original 84, which is darker than town_night (45). At thumbnail the soldier and the jeep sink into the shade and the forest floor reads muddy. In round 3 this view was a clear win. sinai_lowsun_fp's ground goes dark brown: lower half 53 -> 39, frame 85 -> 67.",
+   "evidence": "Capture logs, R3 -> R4 (cam ev, high meter): woods_pine2_evening 1.82 -> 0.27 (high -2.32 -> -1.90, meter mean unchanged -7.73/-7.72); sinai_lowsun_fp 0.70 -> -0.31 (high -0.08 -> 0.29); lowsun_fp -0.02 -> -0.67 (0.64 -> 0.79); pine_rays 1.25 -> 0.63 (-1.04 -> -0.48); dawn_valley 0.03 -> -0.29; sunrise_ridge 2.28 -> 1.78. Views without the sun in frame are unchanged: forest_edge_golden 2.06, town_noon 1.82, forest_morning 1.72. The noon fixer's own woods shot was ev 2.15, and the sun fixer's build already shows lowsun_fp at -0.70. Images: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_realism/exposure_regression_r3_vs_r4.png (labelled R3 vs R4 thumbnails), thumb_sun_meter_regression.png, woods_soldier_jeep_4up.png, woods_pine2_evening_4up_half.png",
+   "likely_cause": "The sun fix raised the sky roll-off cap near the sun from 2.4 to kSkySunCap 10, past white. The PhotoCamera exposure guards (the highlight percentile toward kHighlightLimit, skyTop toward kSkyTopLimit, and the sun ring toward kSunRingLimit) were tuned against the old 2.4 cap. They now read the brighter glow and pull the whole frame down. Root fix: meter the sky at the old cap, or keep the disc and its few-degree glow out of the guards, and keep the white round disc for display. Target: woods back to about ev 1.8 to 2.1 and sinai_lowsun_fp to about 0.7."
+  },
+  {
+   "view": "optics_mist_hud, optics_mist_sight",
+   "problem": "Left over from round 3 but smaller. This is no longer a white wall: the near grass is green and the hill and tree line show as ghosts. At thumbnail the top three quarters is still a flat, near-white, slightly cool sheet, the palest frames in the set, and the rock outcrop is almost erased. The original and landed read clearer and match the light mist that fog 0.3 asks for. The overhaul reads as dense fog.",
+   "evidence": "optics_mist_hud: air (214,217,225) against the original (178,178,170). Near grass (98,105,95) against R3 (125,130,128) and the original (80,90,61). In the right-hand terrain block (x1650-1900, y700-950) the spread is 11, against the original's 31 and R3's 5. The exposure rose this round (ev 0.71 -> 1.04 and 0.33 -> 0.85). The specks over the tree line are unchanged at full size. Images: D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_realism/thumb4_mist.png, optics_mist_hud_right_4way.png, optics_mist_sight_right_4way.png, mist_hud_specks_r4_3x.png",
+   "likely_cause": "The camera keeps the misty air bright. The mist fixer did not touch the air's brightness under exposure, and the thinner fog lowered the meter mean, so the exposure went up. A grey-day metering for this scene would help, putting the air near 180 rather than 214, with slightly less mist at 200 to 400 m so the rock stays legible. Keep the AI fog link as it is."
+  }
+ ],
+ "minor": [
+  "firefight_3: the salmon-pink burst foot is unchanged: (97,58,55) against R3's (99,60,56), and pinker than the mauve sky beside it (89,70,66). It shows at thumbnail as a pink smudge on the horizon (thumb4_combat.png, firefight_3_horizon_4rows_2x.png).",
+  "firefight_2: the young burst at the left still draws a short faint horizon line, 66 px over 80 in one row (R3 about 200 px a row over 5 rows), p99 131 against 196. It is barely visible at thumbnail (firefight_2_horizon_4rows_2x.png).",
+  "firefight_3: a 1 px warm line runs along the horizon at full size only (row 338, about 57 against ground 45; ff3_line_4x.png).",
+  "Firefights are not timing-pinned. In R4 no fireball is caught: both bursts read as realistic dark smoke with a warm lit base. That is realistic, but less dramatic than landed's bright fireballs.",
+  "dawn_valley: the cream haze on the sun side still veils the bay and the far shore, the same as R3 (dawn_valley_bay_4way.png). It reads as forward-scatter haze, not a defect, but landed shows the bay.",
+  "The low-sun disc is now white (255,255,253) and round, including the 960 lowsun_fp that was an oval. At thumbnail it is still a small dot. Landed's larger glare reads as more of a burning sun (sun_disc_4way.png).",
+  "rain_day: the deck now has structure, but it is lighter than landed's and the rain is not legible. It reads as a wet misty day.",
+  "overcast_heavy: very photographic, but the hills at 1 to 2 km are near-white under a 0.9 deck with fog 0 (overcast_heavy_landed_vs_r4.png).",
+  "sunrise_ridge: the warm glow is a broad dome reaching more than half the sky's height. It is plausible, but more of a dome than the horizontal band a real sunrise shows.",
+  "town_night and town_fog_night: the flame core is orange now. The plume is peach-lit along its whole height, which is a little strong but plausible (town_fires_4way.png).",
+  "Sinai sand: the lower half is 136 against the original's 162. It is still darker, but it reads under a deep-blue sky.",
+  "pine_rays: the upper sky is the warmest it has been (merge note), but it reads as warm morning sun with clear shafts, not a wash.",
+  "Optics specks (green and black single pixels over the tree line) are unchanged at full size and not visible at thumbnail.",
+  "No banding, halos, hard seams, blown areas or screen-edge strips are visible at thumbnail. Clipped pixels are under 0.03% in every view.",
+  "The report is in D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_realism/REPORT.txt. I ran no game or build, edited no source and committed nothing."
+ ],
+ "report_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r4_realism/REPORT.txt",
+ "improved_since_r3": [
+  "firefight_2's mustard burst block is FIXED: the cloud went from (187,158,82) to (59,38,33), dark smoke with a warm lit base",
+  "The firefight_2 left horizon band is mostly fixed (p99 196 -> 131, about 200 px a row -> 66 px)",
+  "Noon slate sky is FIXED: the noon_fields top is (73,119,171), sinai_desert_noon (70,118,170), jeep_close_noon and town_noon are clean blue",
+  "Sun disc is white and round in every low-sun view (the 960 oval is gone), with a smooth glow",
+  "pine_rays: the shafts read clearly at thumbnail and now beat landed's",
+  "Grey-day skies (rain_day, overcast_heavy) have visible cloud structure at thumbnail",
+  "Optics mist: the near grass is green, and the hill and tree line show as ghosts (no longer a white wall)",
+  "Town fire cores are orange-yellow instead of cream; stones no longer cream-white",
+  "firefight_1 wreck horizon line is gone",
+  "The tank_gunner_optics action menu is restored",
+  "The owner seam in town_night_rain is still gone (equalized crop shows no diagonal edge)"
+ ],
+ "landed_beats_overhaul": [
+  "woods_pine2_evening: landed is legible with the soldier and jeep clear, while the overhaul is now underexposed (new in R4, exposure regression)",
+  "sinai_lowsun_fp: landed's lit ground reads clearer than the overhaul's dark brown ground",
+  "optics_mist_hud and optics_mist_sight: landed keeps the rock and the tree line under a grey sky",
+  "dawn_valley: landed shows the bay and far shore; the overhaul's sun-side cream haze veils them",
+  "Low-sun disc: landed's sun is a larger, radiant glare; the overhaul's is a small white dot",
+  "rain_day: landed's darker deck reads as rain",
+  "firefight_2 and firefight_3 (drama only): landed catches bright fireballs, while the overhaul's untimed shots show dark smoke"
+ ],
+ "cost_summary": "Not measured. I ran no game and no build; this was a review of the existing round 4 shots and capture logs. The merger did not re-time round 4 either, so round2/cost.md and critic_r3_artefacts/timing/cost_r3.md are the last measurements."
+}

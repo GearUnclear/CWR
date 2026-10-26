@@ -1,0 +1,49 @@
+{
+ "fps": 30,
+ "layout": "sbs",
+ "size": [
+  3840,
+  1080
+ ],
+ "segments": [
+  {
+   "kind": "intro",
+   "clip": "",
+   "title": "",
+   "start": 0.0,
+   "end": 4.5,
+   "frames": 135,
+   "file": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\pipeline-test\\cards\\intro.mp4"
+  },
+  {
+   "kind": "card",
+   "clip": "sunset_sea",
+   "title": "Sunset over the sea",
+   "start": 4.5,
+   "end": 6.5,
+   "frames": 60,
+   "file": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\pipeline-test\\cards\\sunset_sea__card.mp4"
+  },
+  {
+   "kind": "clip",
+   "clip": "sunset_sea",
+   "title": "Sunset over the sea",
+   "start": 6.5,
+   "end": 14.5,
+   "frames": 240,
+   "file": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\pipeline-test\\clips\\sunset_sea.mp4",
+   "right": "ud"
+  },
+  {
+   "kind": "outro",
+   "clip": "",
+   "title": "",
+   "start": 14.5,
+   "end": 22.5,
+   "frames": 240,
+   "file": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\pipeline-test\\cards\\outro.mp4"
+  }
+ ],
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\pipeline-test\\uslu_dur_v2.mp4",
+ "duration": 22.5
+}

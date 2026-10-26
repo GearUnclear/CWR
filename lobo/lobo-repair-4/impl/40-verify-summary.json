@@ -1,0 +1,206 @@
+{
+ "installed_count": 124,
+ "pristine_count": 124,
+ "installed_not_in_git": [],
+ "git_not_installed": [],
+ "batches": {
+  "20261011T105837Z-33d55270": {
+   "state": "applied",
+   "version": "2026-10-11.1",
+   "rule": "54a34c7b1144259b89d4c5522795f8b65f8ffc72b43a4dfddecb386e00f2c1fb",
+   "compat": "ud",
+   "n_archives": 25,
+   "n_members": 76,
+   "n_added": 0,
+   "extra_files": [],
+   "missing_files": [],
+   "backups_match_before": true,
+   "mismatches": [],
+   "attribute_warnings": null,
+   "rollback_conflicts": null,
+   "rollback_errors": null
+  },
+  "20261011T201747Z-5b12c00c": {
+   "state": "applied",
+   "version": "2026-10-11.2",
+   "rule": "1520e54c8b0c601887abcada96325a41ba4b0c361275d05090b684acaf0c0c53",
+   "compat": "ud",
+   "n_archives": 3,
+   "n_members": 3,
+   "n_added": 0,
+   "extra_files": [],
+   "missing_files": [],
+   "backups_match_before": true,
+   "mismatches": [],
+   "attribute_warnings": null,
+   "rollback_conflicts": null,
+   "rollback_errors": null
+  },
+  "20261012T034210Z-8eb814a2": {
+   "state": "rolled-back",
+   "version": "2026-10-11.3",
+   "rule": "9868339d6f8d320f336fb0cbc70ae072e1dfd395290d6d0f9d77c353d04d5385",
+   "compat": "ud",
+   "n_archives": 41,
+   "n_members": 91,
+   "n_added": 7,
+   "extra_files": [],
+   "missing_files": [],
+   "backups_match_before": true,
+   "mismatches": [],
+   "attribute_warnings": null,
+   "rollback_conflicts": [],
+   "rollback_errors": []
+  },
+  "20261012T034354Z-0532e837": {
+   "state": "applied",
+   "version": "2026-10-11.3",
+   "rule": "81bf8fe8cfccada323a7d872e06385e1088414f271851acbb9d9632be80745c4",
+   "compat": "ud",
+   "n_archives": 41,
+   "n_members": 91,
+   "n_added": 7,
+   "extra_files": [],
+   "missing_files": [],
+   "backups_match_before": true,
+   "mismatches": [],
+   "attribute_warnings": null,
+   "rollback_conflicts": null,
+   "rollback_errors": null
+  },
+  "20261012T042613Z-b68ba5de": {
+   "state": "applied",
+   "version": "2026-10-11.3",
+   "rule": "75c456dcab6fbece460edd479eedc296253255e709a3c58260f28072562a0427",
+   "compat": "ud",
+   "n_archives": 3,
+   "n_members": 6,
+   "n_added": 0,
+   "extra_files": [],
+   "missing_files": [],
+   "backups_match_before": true,
+   "mismatches": [],
+   "attribute_warnings": null,
+   "rollback_conflicts": null,
+   "rollback_errors": null
+  },
+  "20261012T085301Z-fdbc36a3": {
+   "state": "applied",
+   "version": "2026-10-11.4",
+   "rule": "f6e16ee80ec1c0698394d17ede66506c18a31bb443c9ef63f8cb12373374d1f9",
+   "compat": "ud",
+   "n_archives": 5,
+   "n_members": 7,
+   "n_added": 0,
+   "extra_files": [],
+   "missing_files": [],
+   "backups_match_before": true,
+   "mismatches": [],
+   "attribute_warnings": null,
+   "rollback_conflicts": null,
+   "rollback_errors": null
+  }
+ },
+ "applied_batches": [
+  "20261011T105837Z-33d55270",
+  "20261011T201747Z-5b12c00c",
+  "20261012T034354Z-0532e837",
+  "20261012T042613Z-b68ba5de",
+  "20261012T085301Z-fdbc36a3"
+ ],
+ "doctor_orig": {
+  "LoBoPalObj.pbo": {
+   "sha": "f16a43be9d538c50a61ea0e7de8a98d27759f7639ae2fc5f8924e9e1cce666a2",
+   "pristine": "68308a6a6c2bfc1b813cc8750cf2234e15b0a77e0e9ee4e55c47a19f63fb33c0",
+   "equal": false
+  },
+  "LoBoWreck.pbo": {
+   "sha": "2149febc43fd378b7aa361d8afe4d63738f11239688b5c7c46832715daf1abb2",
+   "pristine": "62b28e7cebc005401efad3b43c94171910c972fd0b11330a8c3e0ee9364bec68",
+   "equal": false
+  }
+ },
+ "chain_issues": [],
+ "archives_in_any_applied_batch": 50,
+ "latest_after_matches_installed": 50,
+ "dot3_batches": [
+  "20261012T085301Z-fdbc36a3"
+ ],
+ "dot3_archive_count": 5,
+ "untouched_by_dot3": 119,
+ "untouched_match": 117,
+ "untouched_mismatch": [],
+ "untouched_by_source": {
+  "pristine LFS oid": 72,
+  "after of 20261012T034354Z-0532e837": 35,
+  "after of 20261011T105837Z-33d55270": 7,
+  "after of 20261012T042613Z-b68ba5de": 3
+ },
+ "doctor_patched_installed": {
+  "LoBoPalObj.pbo": "68308a6a6c2bfc1b813cc8750cf2234e15b0a77e0e9ee4e55c47a19f63fb33c0",
+  "LoBoWreck.pbo": "62b28e7cebc005401efad3b43c94171910c972fd0b11330a8c3e0ee9364bec68"
+ },
+ "dot3_before_equals_pre3_state": [
+  5,
+  []
+ ],
+ "member_problems": [],
+ "member_totals": {
+  "archives": 5,
+  "changed": 7,
+  "added": 0,
+  "untouched_same": 1660,
+  "untouched_diff": 0,
+  "after_compressed": 0,
+  "before_compressed_skipped": 2
+ },
+ "non_applied_batches": {
+  "20261012T034210Z-8eb814a2": {
+   "state": "rolled-back",
+   "archives": 41,
+   "backups_equal_dot3_before": 0
+  }
+ },
+ "readonly_installed": [
+  "AGS_build.pbo",
+  "AGS_inds.pbo",
+  "AGS_port.pbo",
+  "AGS_port_example.pbo",
+  "BRG_N4.pbo",
+  "Baracken.pbo",
+  "F3WX_O1.pbo",
+  "GWbuild1.pbo",
+  "JOF_Objects1.pbo",
+  "LoBoCrop.pbo",
+  "LoBoLandtex.pbo",
+  "LoBoMusic.pbo",
+  "LoBoUSEmbassy.pbo",
+  "LoBo_Sounds.pbo",
+  "LoBobloc.pbo",
+  "LoBofightpos.pbo",
+  "MAP_Editorupgrad.pbo",
+  "MAP_Heaps.pbo",
+  "MAP_MilObj-Pack.pbo",
+  "MAP_Misc.pbo",
+  "MAP_OilAddon_3D.pbo",
+  "MAP_OilAddon_T.pbo",
+  "MAP_OilAddon_script.pbo",
+  "MAP_Shed.pbo",
+  "RKSL-HASN2.pbo",
+  "RKSL-Hangers.pbo",
+  "TMYK_Bridges.pbo",
+  "awmcams.pbo",
+  "barackenworld.pbo",
+  "chd_bloc.pbo",
+  "chd_ind.pbo",
+  "chd_oriental.pbo",
+  "erba.pbo",
+  "xobridge.pbo"
+ ],
+ "composition_totals": {
+  "archives": 50,
+  "archive_files": 50,
+  "changed": 166,
+  "added": 7
+ }
+}

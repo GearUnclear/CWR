@@ -1,0 +1,689 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.hpp
+index c6986a72..2dcf8c9f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.hpp
+@@ -34,7 +34,10 @@
+ //
+ // The terrain is not classified here: its squares are blends of four corner
+ // materials named by island-specific two-letter codes (abel\p4p4ttp4.pac), so
+-// the shader tells grass from bare ground per pixel from the albedo.
++// the shader tells grass from bare ground by the land's own colour: the ground
++// field (TerrainHorizonMap::groundColor), the textures' average colours blended
++// over the squares that share each vertex, so the class blends across a texture
++// edge instead of jumping at it.
+ 
+ namespace Poseidon::remaster
+ {
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
+index e7c687a7..edf052fc 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
+@@ -160,6 +160,40 @@ void GroundTint(float r, float g, float b, float strength, float& tintR, float&
+     tintB = cb;
+ }
+ 
++bool SampleGroundColor(const TerrainHorizonMap& map, float x, float z, float rgb[3])
++{
++    const int n = map.size;
++    if (!map.Valid() || map.groundColor.size() != static_cast<size_t>(n) * n * 3)
++        return false;
++    // Texel coordinates (vertex v at texel v), the fraction smoothstepped, as
++    // the shader's (i + f + 0.5) / n under the GPU's bilinear filter.
++    auto axis = [n](float t, int& i0, int& i1, float& f)
++    {
++        const float fl = std::floor(t);
++        f = t - fl;
++        f = f * f * (3.0f - 2.0f * f);
++        const int i = static_cast<int>(fl);
++        i0 = std::min(std::max(i, 0), n - 1);
++        i1 = std::min(std::max(i + 1, 0), n - 1);
++    };
++    int x0, x1, z0, z1;
++    float fx, fz;
++    axis(x / map.cellSize, x0, x1, fx);
++    axis(z / map.cellSize, z0, z1, fz);
++    auto at = [&map, n](int x, int z) { return map.groundColor.data() + (static_cast<size_t>(z) * n + x) * 3; };
++    const float* c00 = at(x0, z0);
++    const float* c10 = at(x1, z0);
++    const float* c01 = at(x0, z1);
++    const float* c11 = at(x1, z1);
++    for (int k = 0; k < 3; ++k)
++    {
++        const float a = c00[k] + (c10[k] - c00[k]) * fx;
++        const float b = c01[k] + (c11[k] - c01[k]) * fx;
++        rgb[k] = a + (b - a) * fz;
++    }
++    return true;
++}
++
+ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
+                             TerrainHorizonMap& out, const float* groundRgb)
+ {
+@@ -188,9 +222,14 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
+             Downsample(channel.data(), size, cellSize, std::max(2, options.maxSize), rgb[c], cn, cc);
+         }
+         out.groundTint.resize(static_cast<size_t>(n) * n * 2);
++        out.groundColor.resize(static_cast<size_t>(n) * n * 3);
+         for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
++        {
+             GroundTint(rgb[0][i], rgb[1][i], rgb[2][i], kGroundTintStrength, out.groundTint[i * 2],
+                        out.groundTint[i * 2 + 1]);
++            for (int c = 0; c < 3; ++c)
++                out.groundColor[i * 3 + c] = std::min(std::max(rgb[c][i], 0.0f), 1.0f);
++        }
+     }
+     out.horizon.assign(static_cast<size_t>(TerrainHorizonMap::kLayers) * n * n * 4, 0);
+     out.skyVisibility.assign(static_cast<size_t>(n) * n, 255);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
+index ae65ff84..828f2212 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
+@@ -50,6 +50,16 @@ struct TerrainHorizonMap
+     // the tint never changes how bright the bounce is, only its colour. Empty
+     // when no ground colours were given (the shader then uses a neutral tint).
+     std::vector<float> groundTint;
++    // The ground's own colour (display space 0..1): size * size rgb triples,
++    // the landscape textures' average colours blended over the squares that
++    // share each vertex (box-downsampled like the heights). The wet weather
++    // tells grass from bare ground and how porous the land is from this
++    // continuous field (SampleGroundColor, the shaders' groundFieldAt), not
++    // from each square's own texture: every square has its own texture, and a
++    // class read per pixel jumped at a square whose texture differed a little
++    // from its neighbour's (a straight seam in the wet sheen and the puddles).
++    // Empty when no ground colours were given.
++    std::vector<float> groundColor;
+ 
+     bool Valid() const { return size > 1 && cellSize > 0.0f; }
+     // Decoded horizon angle (degrees) of direction `dir` at texel (x, z).
+@@ -88,6 +98,13 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
+ // channel so a saturated texture cannot stain the shade.
+ void GroundTint(float r, float g, float b, float strength, float& tintR, float& tintB);
+ 
++// The ground colour at world (x, z) as the shaders read it (groundFieldAt in
++// EngineGL33_LightingShadersSurface.cpp): between the four texels around the
++// point with smoothstep weights, so the field and its slope are continuous
++// across every grid line (no edge and no crease), clamped at the map's edges.
++// False (rgb untouched) when the map has no ground colours.
++bool SampleGroundColor(const TerrainHorizonMap& map, float x, float z, float rgb[3]);
++
+ // Reference visibility the shader computes: horizon interpolated between the
+ // two directions around the sun azimuth, compared with the sun elevation over a
+ // penumbra of `softnessDeg`. `towardSun` need not be normalised (y up).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 4b7ba5fd..3593ceac 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -824,10 +824,12 @@ class EngineGL33 : public Engine
+     bool _terrainMapDirty = false;
+     unsigned int _terrainHorizonTex = 0; // GL_TEXTURE_2D_ARRAY RGBA16, 4 layers
+     unsigned int _terrainHeightTex = 0;  // GL_RG32F: height, sky visibility
++    unsigned int _groundFieldTex = 0;    // GL_RGBA16: the land's own colour per vertex, a = 1 (unit 12)
+     unsigned int _cloudNoiseTex = 0;     // GL_R8, tileable
+     unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: units 2 and 6 when no shadow map
+     unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
+     unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
++    unsigned int _dummyGroundTex = 0;    // 1x1 RGBA16 (0, 0, 0, 0): unit 12 without a ground field
+     unsigned int _shadowCompareSampler = 0;
+     unsigned int _shadowRawSampler = 0; // unit 6: the cascade array as raw depth (soft-shadow blocker search)
+     unsigned int _shaderProgramRemaster[NVertexShaders][NPixelShaderSpecular][NPixelShaderModes][NPixelShaders] = {};
+@@ -835,6 +837,9 @@ class EngineGL33 : public Engine
+     void InitLightingResources();
+     void DeinitLightingResources();
+     void UploadTerrainHorizonMap();
++    // The ground field's texture (unit 12) while a map with ground colours is
++    // uploaded, else its stand-in (a = 0: the shaders class the land as before).
++    unsigned int GroundFieldTexture() const;
+     // Per-frame rig, terrain, cloud and camera uniforms; at the start of a 3D pass.
+     void UploadLitFrameConstants();
+     // Fills the gate inputs from the scene and computes _featureGates, once per
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index f3bf1b98..55fbe45f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -28,6 +28,7 @@
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
++#include <algorithm>
+ #include <array>
+ #include <chrono>
+ #include <cmath>
+@@ -133,6 +134,8 @@ void EngineGL33::InitLightingResources()
+     _dummyHorizonTex = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_RGBA16, GL_RGBA, GL_UNSIGNED_SHORT, open);
+     const float heightSky[4] = {-1e6f, 1.0f, 1.0f, 1.0f}; // height, sky visibility, neutral ground tint
+     _dummyHeightTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA32F, GL_RGBA, GL_FLOAT, heightSky);
++    const unsigned short noGround[4] = {0, 0, 0, 0}; // a = 0: no ground field (the shaders fall back)
++    _dummyGroundTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA16, GL_RGBA, GL_UNSIGNED_SHORT, noGround);
+ 
+     const std::vector<std::uint8_t> noise = rm::BuildCloudNoise(256, 1);
+     glGenTextures(1, &_cloudNoiseTex);
+@@ -439,10 +442,12 @@ void EngineGL33::DeinitLightingResources()
+     };
+     delTex(_terrainHorizonTex);
+     delTex(_terrainHeightTex);
++    delTex(_groundFieldTex);
+     delTex(_cloudNoiseTex);
+     delTex(_dummyDepthArray);
+     delTex(_dummyHorizonTex);
+     delTex(_dummyHeightTex);
++    delTex(_dummyGroundTex);
+     delTex(_post.whiteTex);
+     delTex(_post.blackTex);
+     DeinitSkyTable();
+@@ -538,6 +543,7 @@ void EngineGL33::UploadTerrainHorizonMap()
+     };
+     delTex(_terrainHorizonTex);
+     delTex(_terrainHeightTex);
++    delTex(_groundFieldTex);
+     if (!_terrainMap || !_terrainMap->Valid())
+         return;
+     const rm::TerrainHorizonMap& m = *_terrainMap;
+@@ -575,8 +581,38 @@ void EngineGL33::UploadTerrainHorizonMap()
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+     glBindTexture(GL_TEXTURE_2D, 0);
++
++    // The ground field (the wet weather's land classes): the land's own colour
++    // per vertex, a = 1; 16 bits a channel, as the wet classes are steep in
++    // the colour. None without ground colours (the stand-in's a = 0).
++    if (m.groundColor.size() == static_cast<size_t>(n) * n * 3)
++    {
++        std::vector<unsigned short> gc(static_cast<size_t>(n) * n * 4);
++        for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
++        {
++            for (int c = 0; c < 3; ++c)
++                gc[i * 4 + c] = static_cast<unsigned short>(
++                    std::lround(std::clamp(m.groundColor[i * 3 + c], 0.0f, 1.0f) * 65535.0f));
++            gc[i * 4 + 3] = 65535;
++        }
++        glGenTextures(1, &_groundFieldTex);
++        glBindTexture(GL_TEXTURE_2D, _groundFieldTex);
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16, n, n, 0, GL_RGBA, GL_UNSIGNED_SHORT, gc.data());
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++        glBindTexture(GL_TEXTURE_2D, 0);
++    }
+     GL33Bind::Invalidate();
+-    LOG_INFO(Graphics, "GL33: terrain horizon map {}x{} at {} m uploaded", n, n, m.cellSize);
++    LOG_INFO(Graphics, "GL33: terrain horizon map {}x{} at {} m uploaded{}", n, n, m.cellSize,
++             _groundFieldTex ? " with its ground field" : "");
++}
++
++unsigned int EngineGL33::GroundFieldTexture() const
++{
++    return _groundFieldTex && _terrainHorizonTex && _terrainHeightTex ? _groundFieldTex : _dummyGroundTex;
+ }
+ 
+ void EngineGL33::BindLightingTextures()
+@@ -596,6 +632,9 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    // The ground field (the wet weather's land classes), or its stand-in (the
++    // fog's injection takes this unit for its floor in the post pass).
++    GL33Bind::Tex2D(kGroundFieldUnit, GroundFieldTexture());
+     BindSkyTable();
+     // The tiled light list's indices (read only while litLightCount.y is set,
+     // complete either way).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 16471583..2bd93bc9 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -211,14 +211,20 @@ constexpr int kCanopyVisUnit = 15;
+ // light per channel, in the previous frame's screen; a 1x1 white stand-in
+ // (nothing shadowed) until the first mask is built.
+ constexpr int kCombatMaskUnit = 14;
+-// Allocated to the features still to land; no shader samples them yet.
+-// kLightDataUnit is free: the light list keeps its lights in a uniform block
+-// (kLightListBinding), which the fragments of a tile read faster.
+-constexpr int kLightDataUnit = 12;
+-// The volumetric fog's floor map (the lowest ground nearby, look-fog) takes the
+-// free light-data unit: only the fog's injection pass samples it, and binds it
+-// itself (no world program declares it).
+-constexpr int kFogFloorUnit = kLightDataUnit;
++// The ground field (the wet weather's land classes; TerrainHorizonMap::
++// groundColor): RGBA16, the land's own colour per terrain vertex, a = 1 where
++// built; a transparent black stand-in (a = 0) until a map with ground colours
++// is uploaded. The world programs and the reflections' trace read it (the
++// trace binds it itself and unbinds it). It takes the unit the light list's
++// data was allocated (the list keeps its lights in a uniform block,
++// kLightListBinding, which the fragments of a tile read faster).
++constexpr int kGroundFieldUnit = 12;
++// The volumetric fog's floor map (the lowest ground nearby, look-fog) shares
++// the ground field's unit: only the fog's injection pass samples it, binds it
++// itself (no world program declares it) and unbinds it at its end; the world
++// binds the ground field again at each frame's lighting upload
++// (BindLightingTextures).
++constexpr int kFogFloorUnit = kGroundFieldUnit;
+ // The volumetric fog's horizon ring (EngineGL33_PostFog.cpp), read by its
+ // injection in the post pass on the light list's tile unit, which the world
+ // binds again at each frame's lighting upload (BindLightingTextures).
+@@ -228,7 +234,7 @@ namespace detail
+ {
+ constexpr int kRemasterUnits[] = {kShadowMapUnit,    kTerrainHorizonUnit, kTerrainHeightUnit, kCloudNoiseUnit,
+                                   kShadowRawUnit,    kSkyLutUnit,         kSkyDensityUnit,    kCanopyUnit,
+-                                  kSeaNextFrameUnit, kLightDataUnit,      kLightTileUnit,     kCombatMaskUnit,
++                                  kSeaNextFrameUnit, kGroundFieldUnit,    kLightTileUnit,     kCombatMaskUnit,
+                                   kCanopyVisUnit};
+ constexpr bool RemasterUnitsValid()
+ {
+@@ -296,6 +302,7 @@ constexpr LitSampler kLitSamplers[] = {
+     {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
+     {"combatMask", kCombatMaskUnit},         // the combat shadow mask (combat light)
+     {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surface lane)
++    {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
+ };
+ 
+ // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 8e77a420..f08aab97 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -438,6 +438,7 @@ uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky ta
+ uniform sampler2D skyDensity;              // unit 9: cloud density of the weather sky (SkyDensity.hpp)
+ uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
+ uniform sampler2D canopyHeight;            // unit 10: the canopy heightfield, r top, g density (Canopy.hpp)
++uniform sampler2D groundField;             // unit 12: the land's own colour per terrain vertex, a = built (wet weather)
+ // The surfaces lane's per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
+ // sets it on the bound program): x SurfaceClass, y DrawKind, z 1 = a blending
+ // texture (glass, a canvas window, a sign).
+@@ -1401,8 +1402,8 @@ void main() {
+             }
+         }
+         vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
+-        // The land takes the rain (puddles, the grass share from its albedo);
+-        // the sea on this program does not.
++        // The land takes the rain (puddles, the grass share from the ground
++        // field); the sea on this program does not.
+         g_wetDraw = litDetail.w > 0.5 ? 1 : 3;
+         // Relief (the surfaces lane): the detail texture's grain as a height
+         // (its alpha, times the square's luminance, as the albedo takes it),
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+index ddfcf8b0..b31b3203 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+@@ -13,8 +13,10 @@
+ //     while the gate is off, and then no fragment does any of this.
+ //   - Each lit draw carries its surface class (litMatClass.x, from its texture
+ //     name and object kind) and the main tells objects, the land and grass
+-//     clutter apart (g_wetDraw). The land tells grass from bare ground per
+-//     pixel from its albedo (wetVegetation).
++//     clutter apart (g_wetDraw). The land tells grass from bare ground, and
++//     how porous it is, from the ground field (groundFieldAt: the land's own
++//     colour, continuous across the landscape's squares), not per pixel from
++//     its square's texture, whose class jumped at every texture edge.
+ //   - Water fills the pores: a surface darkens by its porosity (cloth a lot,
+ //     plaster less, paint not at all). What it does not soak up forms a smooth
+ //     film (paint, glass, metal, asphalt), which reflects the sky (objects; the
+@@ -39,9 +41,49 @@ namespace Poseidon::gl33lighting
+ // The puddle field: a pure function of the world position, so the forward
+ // pass (the puddle's darkening and its water film) and the reflections' trace
+ // (its mirror, EngineGL33_PostSsrShaders.cpp) agree pixel for pixel without a
+-// buffer between them. It reads the LitConstants block and the terrain height
+-// map (terrainHeight, unit 4), which both declare.
++// buffer between them. It reads the LitConstants block, the terrain height
++// map (terrainHeight, unit 4) and the ground field (groundField, unit 12),
++// which both declare. The land's classes (grass, bare ground, its porosity)
++// are here too, from the ground field, so both passes class the land alike.
+ const char kRemasterPuddlesGLSL[] = R"(
++// ---- The land's wet classes (wetWeather; TerrainHorizon.hpp groundColor) ----
++// The grass share of a ground colour (display): green above red and blue,
++// or olive and yellow-green grass (green about equal to red, well above blue).
++float wetVegetation(vec3 c) {
++    float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);
++    float gr = c.g / max(c.r, 1e-3);
++    float gb = c.g / max(c.b, 1e-3);
++    return max(green, smoothstep(1.1, 1.3, gb) * smoothstep(0.9, 1.0, gr));
++}
++
++// The porosity of bare ground from its colour: soil and sand soak up a lot,
++// grey gravel and rock little.
++float wetGroundPorosity(vec3 c) {
++    float mx = max(c.r, max(c.g, c.b));
++    float sat = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-3);
++    float warm = clamp((c.r - c.b) * 5.0, 0.0, 1.0);
++    float rock = clamp(1.0 - sat * 5.0, 0.0, 1.0);
++    return mix(mix(0.7, 0.9, warm), 0.3, rock);
++}
++
++// The ground's own colour (display) at world xz: the landscape textures'
++// average colours blended over the squares that share each vertex
++// (SampleGroundColor mirrors this), read with smoothed interpolation between
++// the texels, so it has no edge and no crease at any square or grid line.
++// a = 1 where the field is built, 0 without a map or ground colours.
++// The land is classed from this, not from the pixel's own texture: each
++// square of the landscape has its own texture, and a class read per pixel
++// jumped at every square whose texture differed a little from its neighbour's
++// (a straight seam in the sheen and the puddles; the owner's wet seam).
++vec4 groundFieldAt(vec2 xz) {
++    if (litTerrain.x < 0.5) return vec4(0.0);
++    vec2 t = xz * litTerrain.y;
++    vec2 i = floor(t);
++    vec2 f = t - i;
++    f = f * f * (3.0 - 2.0 * f);
++    return textureLod(groundField, (i + f + 0.5) * litTerrain.z, 0.0);
++}
++
+ // ---- Puddles (wetWeather; Graphics/Remaster/Wetness.hpp) ----
+ // Level ground pools water: three octaves of value noise (the finer ones fade
+ // out below the pixel's footprint, so far puddles do not shimmer), raised in
+@@ -102,7 +144,11 @@ vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
+         vec2 g = vec2(hx1 - hx0, hz1 - hz0) * (0.5 / cell);
+         flatness = smoothstep(0.85, 0.98, inversesqrt(1.0 + dot(g, g)));
+     }
+-    float th = mix(mix(kPuddleGround, kPuddleRoad, road), kPuddleGrass, veg) + kPuddleLevelShift * (1.0 - level);
++    // The land's grass share is an average over mixed ground (the ground
++    // field), whose water stands in its bare patches: the threshold leans
++    // toward bare ground's (veg squared), so a mixed square holds about the
++    // puddles its bare and grassy parts would hold apart.
++    float th = mix(mix(kPuddleGround, kPuddleRoad, road), kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);
+     float keep = flatness * min(level * 4.0, 1.0) * (1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz)));
+     return vec2(smoothstep(th, th + kPuddleEdge, field), smoothstep(th - kPuddleDamp, th, field)) * keep;
+ }
+@@ -169,25 +215,6 @@ const float kWetRingsFar = 40.0;    // rain rings on puddles within this distanc
+ // land, 2 grass clutter, 3 the sea on the detail program (never wet).
+ int g_wetDraw = 0;
+ 
+-// The grass share of a ground albedo (display): green above red and blue,
+-// or olive and yellow-green grass (green about equal to red, well above blue).
+-float wetVegetation(vec3 c) {
+-    float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);
+-    float gr = c.g / max(c.r, 1e-3);
+-    float gb = c.g / max(c.b, 1e-3);
+-    return max(green, smoothstep(1.1, 1.3, gb) * smoothstep(0.9, 1.0, gr));
+-}
+-
+-// The porosity of bare ground from its albedo: soil and sand soak up a lot,
+-// grey gravel and rock little.
+-float wetGroundPorosity(vec3 c) {
+-    float mx = max(c.r, max(c.g, c.b));
+-    float sat = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-3);
+-    float warm = clamp((c.r - c.b) * 5.0, 0.0, 1.0);
+-    float rock = clamp(1.0 - sat * 5.0, 0.0, 1.0);
+-    return mix(mix(0.7, 0.9, warm), 0.3, rock);
+-}
+-
+ // How much rain a surface takes: up-facing fully, vertical with run-down
+ // streaks near the eye (low and soft: hulls must not stripe), undersides
+ // little; sheltered by the hills' sky visibility.
+@@ -557,14 +584,25 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
+     }
+     bool ground = g_wetDraw == 1 || g_wetDraw == 2 || litMatClass.y > 7.5;
+     int cls = int(clamp(litMatClass.x + 0.5, 0.0, 13.0));
+-    float veg = g_wetDraw == 2 ? 1.0 : (g_wetDraw == 1 ? wetVegetation(albedo) : 0.0);
+-    float porosity = g_wetDraw == 0 ? kWetPorosity[cls] : mix(wetGroundPorosity(albedo), kWetGrassPorosity, veg);
++    // The land's classes come from the ground field (groundFieldAt), the same
++    // continuous colour the reflections' trace reads, so the sheen, the
++    // darkening and the puddles blend across a texture edge instead of jumping
++    // at it; the albedo only while the field is not built yet.
++    vec3 groundC = albedo;
++    if (g_wetDraw == 1) {
++        vec4 field = groundFieldAt(posAbs.xz);
++        if (field.a > 0.5) groundC = field.rgb;
++    }
++    float veg = g_wetDraw == 2 ? 1.0 : (g_wetDraw == 1 ? wetVegetation(groundC) : 0.0);
++    float porosity = g_wetDraw == 0 ? kWetPorosity[cls] : mix(wetGroundPorosity(groundC), kWetGrassPorosity, veg);
+     float w = (ground ? mix(0.45, 1.0, skyVisibility) : wetCoverage(n, posAbs, skyVisibility, dist)) * wet;
+-    // Standing water on the land and on roads.
++    // Standing water on the land and on roads. The land pools as bare ground
++    // or grass by its field, never by its square's texture name (the trace
++    // never treats the land as a road either).
+     vec2 pud = vec2(0.0);
+     if (ground && g_wetDraw != 2) {
+         float footT = max(length(fwidth(posAbs.xz)), 1e-3);
+-        pud = wetPuddle(posAbs, footT, (g_wetDraw == 0 || cls == 7) ? 1.0 : 0.0, veg, litWeather.z);
++        pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, veg, litWeather.z);
+     }
+     w = max(w, pud.y);
+     if (w <= 0.0 && pud.x <= 0.0) return;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp
+index cb32c4f7..50f52a1e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp
+@@ -441,12 +441,16 @@ void EngineGL33::PostSsr(PostFrame& f)
+     SetInt(tr, "terrainHeight", 4);
+     SetInt(tr, "depthTex", 5);
+     SetInt(tr, "skyLut", Poseidon::gl33lighting::kSkyLutUnit);
++    SetInt(tr, "groundField", Poseidon::gl33lighting::kGroundFieldUnit);
+     SetInt(tr, "tex0", 0);
+     BindTex(0, p.linDepthTex);
+     BindTex(2, s.tagTex);
+     BindTex(3, s.mipTex);
+     BindTex(4, _terrainHeightTex ? _terrainHeightTex : _dummyHeightTex);
+     BindTex(5, p.depthTex);
++    // The ground field, the land's classes the forward pass used (the world's
++    // own binding of that unit, so it stays bound after the stage).
++    BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());
+     // (The raw binds above left the bind cache's active unit stale: without
+     // this the sky table could land on unit 5, the depth's; look director.)
+     GL33Bind::Invalidate();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+index a5261654..29f4c75e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+@@ -75,6 +75,7 @@ uniform sampler2D mipTex;        // unit 3: the resolved frame with mips (displa
+ uniform sampler2D terrainHeight; // unit 4: r = terrain height (m)
+ uniform sampler2D depthTex;      // unit 5: the resolved depth (the ray's origin and the surface normal)
+ uniform sampler2D skyLut;        // unit 8: the sky table (skyReflection)
++uniform sampler2D groundField;   // unit 12: the land's own colour per terrain vertex (the puddles piece's classes)
+ uniform vec4 projInfo;   // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
+ uniform vec4 depthMap;   // ndcZ = depth * x + y
+ uniform vec4 worldRect;  // the 3D viewport in uv
+@@ -606,16 +607,26 @@ void main() {
+         // Far away puddles shrink below the pixel and the ground is one wet sheen.
+         float near = 1.0 - smoothstep(kSsrPuddleFadeStart, kSsrPuddleFadeEnd, dist);
+         float flatness = smoothstep(0.85, 0.98, nD.y);
+-        float grass = road ? 0.0 : smoothstep(0.01, 0.05, c0.g - max(c0.r, c0.b) + 0.01);
++        // The land's grass share from the ground field (groundFieldAt, the
++        // forward pass's own classes): continuous across the landscape's
++        // squares, where the frame's colour jumped at every square whose
++        // texture differed a little from its neighbour's. The frame's colour
++        // only while the field is not built.
++        vec4 field = road ? vec4(0.0) : groundFieldAt(posW.xz);
++        bool fieldOn = field.a > 0.5;
++        float grass = road ? 0.0 : (fieldOn ? wetVegetation(field.rgb) : smoothstep(0.01, 0.05, c0.g - max(c0.r, c0.b) + 0.01));
+         float th = road ? kSsrPuddleRoad : kSsrPuddleGround;
+         float puddle = wet * flatness * smoothstep(th, th + 0.035, pn + 0.08 * (wet - 1.0)) * (1.0 - grass) * near;
+         if (wetWeather) {
+-            // The wet weather's puddles (wetPuddle, the forward pass's own),
+-            // and a grass test that holds under warm lamps, which turn lit
+-            // grass from green to amber: green near red and well above blue.
+-            float gr = c0.g / max(c0.r, 1e-3);
+-            float gb = c0.g / max(c0.b, 1e-3);
+-            grass = road ? 0.0 : max(grass, smoothstep(0.84, 0.92, gr) * smoothstep(1.1, 1.3, gb));
++            // The wet weather's puddles (wetPuddle, the forward pass's own).
++            // Without the field, a grass test that holds under warm lamps,
++            // which turn lit grass from green to amber: green near red and
++            // well above blue.
++            if (!road && !fieldOn) {
++                float gr = c0.g / max(c0.r, 1e-3);
++                float gb = c0.g / max(c0.b, 1e-3);
++                grass = max(grass, smoothstep(0.84, 0.92, gr) * smoothstep(1.1, 1.3, gb));
++            }
+             puddle = wetPuddle(posW, footT, road ? 1.0 : 0.0, grass, ssrWetMode.y).x;
+         }
+         vec3 nW = normalize(mix(nD, vec3(0.0, 1.0, 0.0), mix(0.6, 1.0, puddle)));
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+index 7a2fe691..fb7a8ed6 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+@@ -4,10 +4,12 @@
+ #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+ #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
+ #include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
++#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ #include <Poseidon/Graphics/Remaster/Wetness.hpp>
+ #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <filesystem>
+ #include <fstream>
+@@ -531,3 +533,163 @@ TEST_CASE("Wet weather backend: the gate sets the Weather slot, the per-draw cla
+         ssr.find("const float weatherWet = wetWeather ? _wetFrame.surface : (land ? land->GetRainDensity() : 0.0f);") !=
+         std::string::npos);
+ }
++
++// ---- The land's classes: one continuous field, no seam at a texture edge ------
++
++namespace
++{
++
++// The shaders' wetVegetation (the puddles piece), line for line; the test below
++// pins the shader's text to it.
++float WetVegetationMirror(float r, float g, float b)
++{
++    const float green = std::clamp((g - std::max(r, b)) * 10.0f + (g - b) * 1.5f, 0.0f, 1.0f);
++    const float gr = g / std::max(r, 1e-3f);
++    const float gb = g / std::max(b, 1e-3f);
++    auto smooth = [](float e0, float e1, float x)
++    {
++        const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
++        return t * t * (3.0f - 2.0f * t);
++    };
++    return std::max(green, smooth(1.1f, 1.3f, gb) * smooth(0.9f, 1.0f, gr));
++}
++
++} // namespace
++
++TEST_CASE("Wet weather land: the classes come from a field that blends across a texture edge",
++          "[remaster][wet][TerrainHorizon]")
++{
++    // Two neighbouring stretches of land whose textures differ a little in
++    // colour, as the owner's wet town square (a grey gravel texture beside an
++    // olive one). Classed per pixel from each square's own texture, the grass
++    // share jumped at their shared edge: the straight seam in the sheen and
++    // the puddles.
++    const float A[3] = {0.47f, 0.46f, 0.43f}; // grey gravel
++    const float B[3] = {0.44f, 0.45f, 0.36f}; // olive grass
++    const float vegA = WetVegetationMirror(A[0], A[1], A[2]);
++    const float vegB = WetVegetationMirror(B[0], B[1], B[2]);
++    REQUIRE(std::fabs(vegB - vegA) > 0.5f);
++
++    // The map's ground colours (per vertex, as the landscape hands them over)
++    // are kept as the ground field.
++    const int n = 16;
++    const float cell = 50.0f;
++    std::vector<float> h(static_cast<size_t>(n) * n, 0.0f);
++    std::vector<float> rgb(static_cast<size_t>(n) * n * 3);
++    for (int z = 0; z < n; ++z)
++        for (int x = 0; x < n; ++x)
++            for (int c = 0; c < 3; ++c)
++                rgb[(static_cast<size_t>(z) * n + x) * 3 + c] = x < 8 ? A[c] : B[c];
++    TerrainHorizonOptions opt;
++    opt.threads = 1;
++    TerrainHorizonMap map;
++    REQUIRE(BuildTerrainHorizonMap(h.data(), n, cell, opt, map, rgb.data()));
++    REQUIRE(map.groundColor.size() == rgb.size());
++    for (size_t i = 0; i < rgb.size(); ++i)
++        CHECK(map.groundColor[i] == Catch::Approx(rgb[i]));
++    TerrainHorizonMap plain;
++    REQUIRE(BuildTerrainHorizonMap(h.data(), n, cell, opt, plain));
++    CHECK(plain.groundColor.empty());
++    float none[3] = {-1.0f, -1.0f, -1.0f};
++    CHECK_FALSE(SampleGroundColor(plain, 100.0f, 100.0f, none));
++    CHECK(none[0] == -1.0f);
++
++    // Walking across the edge a quarter metre at a time, the class read from
++    // the field changes by a sliver per step (no step anywhere), and away from
++    // the edge each stretch keeps its own class.
++    float c[3];
++    float prev = -1.0f;
++    float biggest = 0.0f;
++    for (float x = 2.0f * cell; x <= 13.0f * cell; x += 0.25f)
++    {
++        REQUIRE(SampleGroundColor(map, x, 7.3f * cell, c));
++        const float veg = WetVegetationMirror(c[0], c[1], c[2]);
++        if (prev >= 0.0f)
++            biggest = std::max(biggest, std::fabs(veg - prev));
++        prev = veg;
++    }
++    CHECK(biggest < 0.03f);
++    REQUIRE(SampleGroundColor(map, 3.0f * cell, 7.3f * cell, c));
++    CHECK(WetVegetationMirror(c[0], c[1], c[2]) == Catch::Approx(vegA).margin(1e-4));
++    REQUIRE(SampleGroundColor(map, 12.0f * cell, 7.3f * cell, c));
++    CHECK(WetVegetationMirror(c[0], c[1], c[2]) == Catch::Approx(vegB).margin(1e-4));
++    // No crease either: at a grid line the field's slope is the same from
++    // both sides (zero, the smoothstep weights), so the sheen does not fold.
++    float l[3], m[3], r[3];
++    REQUIRE(SampleGroundColor(map, 7.0f * cell - 0.5f, 100.0f, l));
++    REQUIRE(SampleGroundColor(map, 7.0f * cell, 100.0f, m));
++    REQUIRE(SampleGroundColor(map, 7.0f * cell + 0.5f, 100.0f, r));
++    CHECK(std::fabs((m[2] - l[2]) - (r[2] - m[2])) < 1e-4f);
++    // Clamped at the map's edges.
++    REQUIRE(SampleGroundColor(map, -500.0f, -500.0f, c));
++    CHECK(c[2] == Catch::Approx(A[2]));
++    REQUIRE(SampleGroundColor(map, 1e5f, 1e5f, c));
++    CHECK(c[2] == Catch::Approx(B[2]));
++}
++
++TEST_CASE("Wet weather shaders: the forward pass and the trace class the land from the ground field",
++          "[remaster][wet][Shaders]")
++{
++    // The classes and the field live in the puddles piece, which the prelude
++    // and the trace each paste once: both class the land alike.
++    const std::string puddles = gl::RemasterFragmentPiece(gl::FragmentPiece::Puddles);
++    CHECK(puddles.find("vec4 groundFieldAt(vec2 xz) {") != std::string::npos);
++    CHECK(puddles.find("float wetVegetation(vec3 c) {") != std::string::npos);
++    CHECK(puddles.find("float wetGroundPorosity(vec3 c) {") != std::string::npos);
++    // The mirror above is the shader's grass share.
++    CHECK(puddles.find("float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);") !=
++          std::string::npos);
++    CHECK(puddles.find("return max(green, smoothstep(1.1, 1.3, gb) * smoothstep(0.9, 1.0, gr));") != std::string::npos);
++    // SampleGroundColor's smoothed interpolation; without a map, nothing.
++    const size_t at = puddles.find("vec4 groundFieldAt(vec2 xz) {");
++    REQUIRE(at != std::string::npos);
++    const std::string field = puddles.substr(at, puddles.find("\n}\n", at) - at);
++    CHECK(field.find("if (litTerrain.x < 0.5) return vec4(0.0);") != std::string::npos);
++    CHECK(field.find("f = f * f * (3.0 - 2.0 * f);") != std::string::npos);
++    CHECK(field.find("return textureLod(groundField, (i + f + 0.5) * litTerrain.z, 0.0);") != std::string::npos);
++    // The field's grass share is an average over mixed ground: its puddle
++    // threshold leans toward bare ground's, where such ground's water stands.
++    CHECK(puddles.find("kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);") != std::string::npos);
++    const std::string common = gl::RemasterFragmentCommon();
++    CHECK(CountOf(common, "float wetVegetation(vec3 c) {") == 1);
++    CHECK(common.find("uniform sampler2D groundField;") != std::string::npos);
++
++    // The forward pass: the land's grass share and porosity from the field
++    // (the albedo only while there is none), never per pixel from the
++    // square's own texture; the land pools water as bare ground or grass,
++    // never as a road by its texture's name.
++    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
++    CHECK(surface.find("vec4 field = groundFieldAt(posAbs.xz);") != std::string::npos);
++    CHECK(surface.find("if (field.a > 0.5) groundC = field.rgb;") != std::string::npos);
++    CHECK(surface.find("wetVegetation(groundC)") != std::string::npos);
++    CHECK(surface.find("wetGroundPorosity(groundC)") != std::string::npos);
++    CHECK(surface.find("wetVegetation(albedo)") == std::string::npos);
++    CHECK(surface.find("wetGroundPorosity(albedo)") == std::string::npos);
++    CHECK(surface.find("pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, veg, litWeather.z);") !=
++          std::string::npos);
++    CHECK(surface.find("cls == 7) ? 1.0 : 0.0, veg") == std::string::npos);
++
++    // The trace: the land's grass share from the same field, the frame's
++    // colour only without one.
++    const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
++    CHECK(trace.find("uniform sampler2D groundField;") != std::string::npos);
++    CHECK(trace.find("vec4 field = road ? vec4(0.0) : groundFieldAt(posW.xz);") != std::string::npos);
++    CHECK(trace.find("(fieldOn ? wetVegetation(field.rgb) : ") != std::string::npos);
++    CHECK(trace.find("if (!road && !fieldOn) {") != std::string::npos);
++
++    // Its unit: one row of the world programs' table, shared with the fog's
++    // floor (which only the fog's injection reads, binds and unbinds); the
++    // world binds the field at each lighting upload and the trace binds it too.
++    bool row = false;
++    for (const auto& s : gl::kLitSamplers)
++        row = row || (std::string(s.name) == "groundField" && s.unit == gl::kGroundFieldUnit);
++    CHECK(row);
++    CHECK(gl::kFogFloorUnit == gl::kGroundFieldUnit);
++    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
++    CHECK(lighting.find("GL33Bind::Tex2D(kGroundFieldUnit, GroundFieldTexture());") != std::string::npos);
++    CHECK(lighting.find("glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16, n, n, 0, GL_RGBA, GL_UNSIGNED_SHORT, gc.data());") !=
++          std::string::npos);
++    const std::string ssr = ReadTextFile(Gl33Dir() / "EngineGL33_PostSsr.cpp");
++    CHECK(ssr.find("SetInt(tr, \"groundField\", Poseidon::gl33lighting::kGroundFieldUnit);") != std::string::npos);
++    CHECK(ssr.find("BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());") != std::string::npos);
++}

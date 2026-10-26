@@ -1,0 +1,322 @@
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 866e7bb..8e3e8b3 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -8,6 +8,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <cmath>
++#include <cstdlib>
+ #include <Poseidon/Foundation/Common/FltOpts.hpp>
+ #include <Poseidon/Foundation/Containers/BankArray.hpp>
+ #include <Poseidon/Foundation/Containers/StaticArray.hpp>
+@@ -926,6 +927,23 @@ void Scene::AdjustComplexity()
+         _lastScaleWorseTime = Glob.uiTime;
+     }
+ 
++    // RESEARCH PROTOTYPE (track aa): pin the object LOD to the best quality the
++    // settings allow, so A/B captures are not perturbed by the frame-time LOD
++    // adaptation (other GPU load on the machine moved distant forest blocks
++    // between LODs from one shot to the next). UD_PIN_LOD=0 restores adaptation.
++    static const bool s_pinLod = []()
++    {
++        const char* e = std::getenv("UD_PIN_LOD");
++        return !(e && e[0] == '0');
++    }();
++    if (s_pinLod && _lodInvWidth != _minLodInvWidth)
++    {
++        _lodInvWidth = _minLodInvWidth;
++        complexity = AdjustComplexity(_drawObjects);
++        complexity += AdjustShadowComplexity(_drawObjects);
++        complexity += toLargeInt(Square(ENGINE_CONFIG.horizontZ * (1.0f / 50)));
++    }
++
+     // store complexity to complexity history
+     for (int i = 1; i < NStoreComplexities; i++)
+     {
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+index b3d955d..054d682 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+@@ -11,6 +11,11 @@
+ #include <Poseidon/Graphics/Rendering/Frame/Frame.hpp>
+ #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
+ #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
++#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
++
++#include <cmath>
++#include <cstdlib>
++#include <string>
+ 
+ using namespace Poseidon::Dev;
+ 
+@@ -497,6 +502,178 @@ void EngineGL33::ApplyPendingRenderScale()
+              static_cast<int>(samples), want, winW, winH);
+ }
+ 
++// ---------------------------------------------------------------------------
++// RESEARCH PROTOTYPE (track aa): remastered present pass. Replaces the
++// GL_LINEAR downsample blit with a shader downsample (Lanczos2 scaled to the
++// render-scale footprint) and an optional RCAS sharpening pass at window
++// resolution. Remastered only; Classic keeps the blit. The variant rides on
++// the AO knob: k = round((ao - 0.7) * 1000), present variant p = (k / 10) % 10:
++//   p = 0  shader bilinear (equals the stock blit)
++//   p = 1  Lanczos2 downsample
++//   p = 2  Lanczos2 + RCAS 0.5
++//   p = 3  bilinear + RCAS 0.5
++//   p = 4  Lanczos2 + RCAS 1.0
++//   p = 5  Lanczos2 + RCAS 0.25
++// Shaders are overridable as vsPresent / psPresentDown / psPresentSharpen.
++// UD_AA_PRESENT=0 turns the whole pass off.
++namespace
++{
++const char s_vsPresentGLSL[] = R"(#version 330 core
++out vec2 vUV;
++void main() {
++    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
++    vUV = p;
++    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
++}
++)";
++const char s_psPresentDownGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D src;
++uniform vec4 srcSize; // w, h, 1/w, 1/h
++uniform vec4 dstSize; // w, h, 1/w, 1/h
++uniform vec4 sel;     // x present variant p
++out vec4 fragColor;
++float sinc(float x) { x *= 3.14159265; return abs(x) < 1e-4 ? 1.0 : sin(x) / x; }
++float lanczos2(float x) { return abs(x) < 2.0 ? sinc(x) * sinc(x * 0.5) : 0.0; }
++void main() {
++    int p = int(sel.x + 0.5);
++    if (p == 0 || p == 3) { fragColor = vec4(texture(src, vUV).rgb, 1.0); return; }
++    vec2 scale = max(srcSize.xy * dstSize.zw, vec2(1.0));
++    vec2 c = vUV * srcSize.xy - 0.5;
++    vec2 r = 2.0 * scale;
++    ivec2 lo = ivec2(floor(c - r + 1.0));
++    ivec2 hi = ivec2(floor(c + r));
++    ivec2 mx = ivec2(srcSize.xy) - 1;
++    vec3 sum = vec3(0.0);
++    float wsum = 0.0;
++    for (int y = lo.y; y <= hi.y; ++y) {
++        float wy = lanczos2((float(y) - c.y) / scale.y);
++        for (int x = lo.x; x <= hi.x; ++x) {
++            float w = wy * lanczos2((float(x) - c.x) / scale.x);
++            sum += w * texelFetch(src, clamp(ivec2(x, y), ivec2(0), mx), 0).rgb;
++            wsum += w;
++        }
++    }
++    fragColor = vec4(clamp(sum / max(wsum, 1e-4), 0.0, 1.0), 1.0);
++}
++)";
++// FSR1 RCAS (robust contrast-adaptive sharpening), with its noise limiter.
++const char s_psPresentSharpenGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D src;
++uniform vec4 sel; // x present variant p, y sharpness (0..1)
++out vec4 fragColor;
++void main() {
++    ivec2 p = ivec2(gl_FragCoord.xy);
++    ivec2 mx = textureSize(src, 0) - 1;
++    vec3 b = texelFetch(src, clamp(p + ivec2(0, 1), ivec2(0), mx), 0).rgb;
++    vec3 d = texelFetch(src, clamp(p + ivec2(-1, 0), ivec2(0), mx), 0).rgb;
++    vec3 e = texelFetch(src, p, 0).rgb;
++    vec3 f = texelFetch(src, clamp(p + ivec2(1, 0), ivec2(0), mx), 0).rgb;
++    vec3 h = texelFetch(src, clamp(p + ivec2(0, -1), ivec2(0), mx), 0).rgb;
++    float bL = b.g * 0.5 + (b.r + b.b) * 0.25;
++    float dL = d.g * 0.5 + (d.r + d.b) * 0.25;
++    float eL = e.g * 0.5 + (e.r + e.b) * 0.25;
++    float fL = f.g * 0.5 + (f.r + f.b) * 0.25;
++    float hL = h.g * 0.5 + (h.r + h.b) * 0.25;
++    float nz = 0.25 * (bL + dL + fL + hL) - eL;
++    float lmax = max(max(max(bL, dL), max(fL, hL)), eL);
++    float lmin = min(min(min(bL, dL), min(fL, hL)), eL);
++    nz = clamp(abs(nz) / max(lmax - lmin, 1e-4), 0.0, 1.0);
++    nz = -0.5 * nz + 1.0;
++    vec3 mn4 = min(min(b, d), min(f, h));
++    vec3 mx4 = max(max(b, d), max(f, h));
++    vec3 hitMin = mn4 / max(4.0 * mx4, vec3(1e-4));
++    vec3 hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, vec3(-1e-4));
++    vec3 lobeRGB = max(-hitMin, hitMax);
++    float lobe = max(-(0.25 - 1.0 / 16.0), min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * sel.y;
++    lobe *= nz;
++    float rcpL = 1.0 / (4.0 * lobe + 1.0);
++    fragColor = vec4(clamp((lobe * (b + d + h + f) + e) * rcpL, 0.0, 1.0), 1.0);
++}
++)";
++
++struct PresentAA
++{
++    bool tried = false;
++    bool ok = false;
++    GLuint progDown = 0, progSharpen = 0, vao = 0;
++    GLuint resolveTex = 0, resolveFbo = 0;
++    GLuint downTex = 0, downFbo = 0;
++    int rw = 0, rh = 0, dw = 0, dh = 0;
++};
++PresentAA s_present;
++
++GLuint PresentCompile(GLenum type, const char* src, const char* name)
++{
++    std::string overrideSource;
++    if (LoadShaderOverride(name, overrideSource))
++        src = overrideSource.c_str();
++    GLuint s = glCreateShader(type);
++    glShaderSource(s, 1, &src, nullptr);
++    glCompileShader(s);
++    GLint ok = 0;
++    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
++    if (!ok)
++    {
++        char log[1024];
++        glGetShaderInfoLog(s, sizeof(log), nullptr, log);
++        LOG_ERROR(Graphics, "GL33 present (aa research): compile error [{}]: {}", name, log);
++        glDeleteShader(s);
++        return 0;
++    }
++    return s;
++}
++
++GLuint PresentLink(GLuint vs, const char* fsSrc, const char* name)
++{
++    GLuint fs = PresentCompile(GL_FRAGMENT_SHADER, fsSrc, name);
++    if (!vs || !fs)
++        return 0;
++    GLuint p = glCreateProgram();
++    glAttachShader(p, vs);
++    glAttachShader(p, fs);
++    glLinkProgram(p);
++    glDeleteShader(fs);
++    GLint ok = 0;
++    glGetProgramiv(p, GL_LINK_STATUS, &ok);
++    if (!ok)
++    {
++        LOG_ERROR(Graphics, "GL33 present (aa research): link error [{}]", name);
++        glDeleteProgram(p);
++        return 0;
++    }
++    return p;
++}
++
++void PresentTarget(GLuint& tex, GLuint& fbo, int& tw, int& th, int w, int h)
++{
++    if (tex && tw == w && th == h)
++        return;
++    if (fbo)
++        glDeleteFramebuffers(1, &fbo);
++    if (tex)
++    {
++        GL33Bind::OnTexDeleted(tex);
++        glDeleteTextures(1, &tex);
++    }
++    glGenTextures(1, &tex);
++    glActiveTexture(GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, tex);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++    glGenFramebuffers(1, &fbo);
++    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
++    tw = w;
++    th = h;
++}
++} // namespace
++
+ void EngineGL33::ResolveSSAAToDefault()
+ {
+     if (!SSAAActive())
+@@ -504,6 +681,90 @@ void EngineGL33::ResolveSSAAToDefault()
+     int winW = _w, winH = _h;
+     if (_sdlWindow)
+         SDL_GetWindowSizeInPixels(_sdlWindow, &winW, &winH);
++
++    // RESEARCH PROTOTYPE (track aa): remastered present pass, see above.
++    static const bool s_presentOn = []()
++    {
++        const char* e = std::getenv("UD_AA_PRESENT");
++        return !(e && e[0] == '0');
++    }();
++    if (s_presentOn && _lightingActive && _glContext)
++    {
++        PresentAA& pr = s_present;
++        if (!pr.tried)
++        {
++            pr.tried = true;
++            GLuint vs = PresentCompile(GL_VERTEX_SHADER, s_vsPresentGLSL, "vsPresent");
++            pr.progDown = PresentLink(vs, s_psPresentDownGLSL, "psPresentDown");
++            pr.progSharpen = PresentLink(vs, s_psPresentSharpenGLSL, "psPresentSharpen");
++            if (vs)
++                glDeleteShader(vs);
++            glGenVertexArrays(1, &pr.vao);
++            pr.ok = pr.progDown && pr.progSharpen && pr.vao;
++            LOG_INFO(Graphics, "GL33 present (aa research): {}", pr.ok ? "on" : "FAILED, stock blit");
++        }
++        if (pr.ok)
++        {
++            const int k = static_cast<int>(std::floor((_lighting.ambientOcclusion - 0.7f) * 1000.0f + 0.5f));
++            const int p = k >= 0 ? (k / 10) % 10 : 0;
++            const float sharp = p == 4 ? 1.0f : (p == 5 ? 0.25f : 0.5f);
++            const bool sharpen = p == 2 || p == 3 || p == 4 || p == 5;
++            PresentTarget(pr.resolveTex, pr.resolveFbo, pr.rw, pr.rh, _ssaaW, _ssaaH);
++            if (sharpen)
++                PresentTarget(pr.downTex, pr.downFbo, pr.dw, pr.dh, winW, winH);
++            // MSAA resolve into a sampleable texture.
++            glBindFramebuffer(GL_READ_FRAMEBUFFER, _ssaaFbo);
++            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pr.resolveFbo);
++            glBlitFramebuffer(0, 0, _ssaaW, _ssaaH, 0, 0, _ssaaW, _ssaaH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++
++            Poseidon::render::depthstencil::Disabled(/*hasStencil*/ false);
++            glDisable(GL_STENCIL_TEST);
++            glDisable(GL_BLEND);
++            glDisable(GL_CULL_FACE);
++            glDisable(GL_SCISSOR_TEST);
++            glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
++            glDisable(GL_SAMPLE_ALPHA_TO_ONE);
++            _a2cBound = false;
++            _a2oneBound = false;
++            glBindVertexArray(pr.vao);
++            glActiveTexture(GL_TEXTURE0);
++            glBindSampler(0, 0);
++
++            // Downsample (into the window, or into downTex for sharpening).
++            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sharpen ? pr.downFbo : 0);
++            glViewport(0, 0, winW, winH);
++            glUseProgram(pr.progDown);
++            glUniform1i(glGetUniformLocation(pr.progDown, "src"), 0);
++            glUniform4f(glGetUniformLocation(pr.progDown, "srcSize"), float(_ssaaW), float(_ssaaH), 1.0f / _ssaaW,
++                        1.0f / _ssaaH);
++            glUniform4f(glGetUniformLocation(pr.progDown, "dstSize"), float(winW), float(winH), 1.0f / winW,
++                        1.0f / winH);
++            glUniform4f(glGetUniformLocation(pr.progDown, "sel"), float(p), sharp, 0.0f, 0.0f);
++            glBindTexture(GL_TEXTURE_2D, pr.resolveTex);
++            glDrawArrays(GL_TRIANGLES, 0, 3);
++            if (sharpen)
++            {
++                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
++                glUseProgram(pr.progSharpen);
++                glUniform1i(glGetUniformLocation(pr.progSharpen, "src"), 0);
++                glUniform4f(glGetUniformLocation(pr.progSharpen, "sel"), float(p), sharp, 0.0f, 0.0f);
++                glBindTexture(GL_TEXTURE_2D, pr.downTex);
++                glDrawArrays(GL_TRIANGLES, 0, 3);
++            }
++            glBindTexture(GL_TEXTURE_2D, 0);
++            glBindSampler(0, _samplerObjects[0]);
++            glBindVertexArray(0);
++            glUseProgram(0);
++            _pixelShaderSel = PSNone;
++            GL33Bind::Invalidate();
++            InvalidatePipelineCache();
++            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
++            glViewport(0, 0, winW, winH);
++            return;
++        }
++    }
++
+     // Two blits: a multisample resolve needs equal dimensions, the
+     // downsample needs LINEAR filtering — one glBlitFramebuffer can't do both.
+     glBindFramebuffer(GL_READ_FRAMEBUFFER, _ssaaFbo);

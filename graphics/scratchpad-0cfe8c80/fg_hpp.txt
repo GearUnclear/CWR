@@ -1,0 +1,3 @@
+//   "mode=remastered gates=1 computed=1 frame=<n> sun=<deg> night=<0..1> sky=<0..1> rain=<0..1> wet=<0..1>
+//    fog=<0..1> lights=<n> landed=<n>/<n> | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...
+//    [| cam ev=.. target=.. mean=.. high=.. wb=.. sky=.. sun=.. skyup=.. reads=..]"

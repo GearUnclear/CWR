@@ -1,0 +1,15 @@
+[
+ ("town_night_rain", [("u", "remastered"), ("p0", "remastered,wetness=1"), ("p1", "remastered,wetness=0.999"),
+   ("p2", "remastered,wetness=0.998"), ("p3", "remastered,wetness=0.997"), ("p4", "remastered,wetness=0.996"),
+   ("p5", "remastered,wetness=0.995"), ("p6", "remastered,wetness=0.994"), ("p7", "remastered,wetness=0.993"),
+   ("bloom0", "remastered,wetness=1,camBloom=0"), ("foglights0", "remastered,wetness=1,fogLights=0"),
+   ("refl", "remastered,wetness=1,debug=10")]),
+ ("seam_b", [("u", "remastered"), ("p0", "remastered,wetness=1"), ("p1", "remastered,wetness=0.999"),
+   ("p2", "remastered,wetness=0.998"), ("p3", "remastered,wetness=0.997"), ("p4", "remastered,wetness=0.996"),
+   ("p5", "remastered,wetness=0.995"), ("p6", "remastered,wetness=0.994"), ("p7", "remastered,wetness=0.993"),
+   ("bloom0", "remastered,wetness=1,camBloom=0"), ("foglights0", "remastered,wetness=1,fogLights=0"),
+   ("refl", "remastered,wetness=1,debug=10")]),
+ ("seam_day", [("u", "remastered"), ("p0", "remastered,wetness=1"), ("p2", "remastered,wetness=0.998"),
+   ("p3", "remastered,wetness=0.997"), ("p4", "remastered,wetness=0.996"), ("p5", "remastered,wetness=0.995"),
+   ("p6", "remastered,wetness=0.994"), ("p7", "remastered,wetness=0.993"), ("refl", "remastered,wetness=1,debug=10")]),
+]

@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\lead\runs\cloud-fix\cloud-fix.mkv  frames 135  band 0.104  sky 0.029
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       103.9 [-0.81, -0.13]  0.105  0.220  0.026 -0.104  [3, 15]   0.026  [3, 15]  0.006  1.545 -0.147    nan    nan -0.066             -
+   valley    118.6 [-0.6, -0.04]  0.150  0.140  0.025 -0.405  [9, 15]   0.025  [9, 15]  0.004  0.842 -0.116    nan    nan -0.278             -
+   farhill   135.8 [-0.63, 0.03]  0.085  0.266  0.036 -0.384 [-13, -2]   0.036 [-13, -2]  0.010  1.880 -0.385    nan    nan -0.214             -
+   haze      150.1 [-0.71, -0.06]  0.078  0.163  0.018 -0.294 [-9, 15]   0.018 [-9, 15]  0.003  0.886 -0.328    nan    nan -0.181             -
+   slope     113.5 [-0.59, 0.03]  0.116  0.129  0.026 -0.391 [-7, 16]   0.026 [-7, 16]  0.003  0.730 -0.152    nan    nan -0.276             -

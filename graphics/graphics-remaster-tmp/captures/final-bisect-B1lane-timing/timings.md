@@ -1,0 +1,14 @@
+# Lighting capture timings
+
+GPU times are the smoothed `triGpuTimes` averages (EngineGL33 timestamp queries, ~90 frames on the view
+before the shot); CPU is `triPerfStats` over the same frames. Classic has no post pass, so its post columns
+are empty. Draws = GL draw calls and objects = objects with a visible LOD, both of the shot frame
+(`triSceneStats`); load = the `triSettleScene` answer before the mode's timers (frames run). Delta =
+Remastered minus Classic, or on minus off (draws and objects: share of the larger).
+
+| view | mode | frame | world | shadow | ground | pass1 | rest | sky | skytable | canopy | post | resolve | lindepth | ao | bloom | shafts | composite | frame_min | CPU fps | draws | objects | load | lighting |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| valley_0515_r1 | off | missing |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| valley_0515_r1 | on | 20.13 | 18.55 | 0.04 | 1.36 | 15.08 | 2.10 |  |  |  | 1.45 | 0.71 |  | 0.06 | 0.07 | 0.31 | 0.05 | 19.22 | 35.60 | 5,242 | 7,966 | OK:30 | OK |
+| valley_0515_r2 | off | missing |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| valley_0515_r2 | on | 18.50 | 16.97 | 0.04 | 1.30 | 14.05 | 1.62 |  |  |  | 1.40 | 0.64 |  | 0.06 | 0.07 | 0.31 | 0.06 | 17.91 | 37.80 | 5,242 | 7,966 | OK:30 | OK |

@@ -1,0 +1,518 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+index cd778630..a26815e8 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+@@ -164,6 +164,11 @@ float WeatherVisibility(float fog, float rain, float viewDistance)
+     return std::max(range, 0.1f);
+ }
+ 
++float FogGreySky(float skyThrough)
++{
++    return Clamp01((0.65f - skyThrough) / 0.5f);
++}
++
+ float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg)
+ {
+     const bool east = sunAzimuthDeg > 0.0f && sunAzimuthDeg < 180.0f;
+@@ -221,8 +226,10 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
+     // (Look director round 2: rain's own weather fog carries most of its
+     // air; once the air took the sky's real colour, a grey deck's haze times
+     // 1 + 2 rain on top erased a hill 300 m away.)
+-    m.hazeSigma =
+-        kHazeClear * density * (1.0f + 3.5f * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * rain)) * (1.0f + 0.5f * rain);
++    // (Look fix "plate": the grey gain 3.5 to kHazeGreyGain; a dry overcast
++    // erased every ridge past 1.5 km.)
++    m.hazeSigma = kHazeClear * density * (1.0f + kHazeGreyGain * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * rain)) *
++                  (1.0f + 0.5f * rain);
+     m.rayleigh = kRayleighScale * density;
+     // The humid air near the ground: a misty morning, the night, a grey sky,
+     // rain and fog (a foggy morning most: the light falls through it in
+@@ -243,6 +250,8 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
+                      (1.0f + kNightFogBoost * night * Smooth(0.0f, 0.15f, fog));
+     const float wFog = fog / std::max(fog + rain, 1e-4f);
+     m.weatherSigma *= 1.0f + (kSetFogBoost - 1.0f) * wFog * Smooth(0.0f, 0.15f, fog);
++    // Rain's part keeps kRainFogShare of it (setFog's all).
++    m.weatherSigma *= wFog + kRainFogShare * (1.0f - wFog);
+     m.weatherHeight = kWeatherFogHeight * wFog + kRainHazeHeight * (1.0f - wFog);
+ 
+     // Valley mist: the day's misty morning (and a little of it that evening
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+index bfc2f731..faa019b7 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+@@ -186,6 +186,17 @@ constexpr float kFogBeamReach = 180.0f;
+ constexpr float kFogBeamGain = 14.0f;
+ // The classic engine's visibility in rain at full density (Landscape.cpp: 350 m).
+ constexpr float kRainVisibility = 350.0f;
++// A grey deck thickens the clear haze by 1 + this (times the sky's greyness,
++// less in rain, whose own fog carries its air). (Look fix "plate": at 3.5 a
++// dry overcast was a 1.5 km wash, every ridge past it one flat plate; at 1.2
++// the ridges from 1 to 3 km fade one behind the other.)
++constexpr float kHazeGreyGain = 1.2f;
++// Rain's weather fog takes this share of the extinction that gives the
++// classic tactical visibility (setFog keeps all of it): about a fifth of a
++// surface is left at the classic fog end, where the AI's tactical sight
++// ends. (Look fix "plate": with the whole, rain 0.8 left a hill 300 m away a
++// third of its contrast and nothing past a kilometre.)
++constexpr float kRainFogShare = 0.5f;
+ // The weather fog's extinction times the visibility it takes away: what the
+ // weather leaves of a surface at the classic fog end is about e^-3.2.
+ constexpr float kWeatherExtinction = 3.2f;
+@@ -270,6 +281,18 @@ struct FogMedium
+ // `rain` and a view distance (Landscape.cpp, the night factor at 1): the
+ // distance at which its fog ends.
+ float WeatherVisibility(float fog, float rain, float viewDistance);
++// How grey the sky is for the air's colour: 0 at a sky-through of 0.65 and
++// over, 1 at 0.15 and under. Under a grey sky the horizon ring measures the
++// deck above the horizon fill, and the apply lays the air over that fill.
++float FogGreySky(float skyThrough);
++// The classic horizon polygon (Landscape::DrawHorizont) stands from under the
++// horizon up to this share of the far distance above the eye: the sine of its
++// top's elevation (3.4 degrees). It is drawn in the classic fog colour, not
++// the sky's, so under a grey sky the apply replaces it with the air.
++constexpr float kFogHorizonFillTop = 0.06f;
++// Under a grey sky the horizon ring samples from this elevation (degrees),
++// above the polygon's top: the deck over the land, not the fill.
++constexpr float kFogRingGreyFromDeg = 3.8f;
+ // The morning weight: an eastern sun from 6 degrees under the horizon (full
+ // from 2 under to 8 above), gone by 24 degrees.
+ float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 4b7ba5fd..c1912d2f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -1381,6 +1381,9 @@ class EngineGL33 : public Engine
+     // The colour the stages after the Air stage read: the fogged frame when
+     // the fog ran this frame, else the resolved frame.
+     unsigned int PostSceneTex(const PostFrame& f) const;
++    // The surface's share of each pixel's light after the fog
++    // (FogState::veilTex) when the fog ran this frame, else 0.
++    unsigned int PostFogVeilTex(const PostFrame& f) const;
+     // A screen overlay is about to be drawn into the world pass (a rifle's
+     // iron sight, a gunner's optic): the frame so far, resolved, for the fog.
+     void SnapshotWorldBeforeOverlay();
+@@ -1393,8 +1396,11 @@ class EngineGL33 : public Engine
+         unsigned int injectTex[2] = {}, integTex = 0;
+         std::vector<unsigned int> injectFbo[2], integFbo;
+         int current = 0;
+-        // The fogged frame (RGBA16F, full resolution).
+-        unsigned int outTex = 0, outFbo = 0;
++        // The fogged frame (RGBA16F, full resolution), and on the same FBO's
++        // second attachment the surface's share of each pixel's light after
++        // the fog (R8, veilTex): the composite's occlusion and contact
++        // shadows act on the surface's own light, not on the air in front.
++        unsigned int outTex = 0, outFbo = 0, veilTex = 0;
+         int outW = 0, outH = 0;
+         // The world before this frame's screen overlay (RGBA8, resolved;
+         // SnapshotWorldBeforeOverlay) and the frame it holds.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 16471583..9b2502dc 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -219,6 +219,10 @@ constexpr int kLightDataUnit = 12;
+ // free light-data unit: only the fog's injection pass samples it, and binds it
+ // itself (no world program declares it).
+ constexpr int kFogFloorUnit = kLightDataUnit;
++// The surface's share of each pixel's light after the fog (FogState::veilTex),
++// read by the post composite on the same free unit after the fog pass has
++// handed it back; the composite unbinds it again.
++constexpr int kFogVeilUnit = kLightDataUnit;
+ // The volumetric fog's horizon ring (EngineGL33_PostFog.cpp), read by its
+ // injection in the post pass on the light list's tile unit, which the world
+ // binds again at each frame's lighting upload (BindLightingTextures).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c7736d4f..6c4ee32b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -952,13 +952,22 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     SetInt(p.progComposite, "surfTex", 6);
+     Set4(p.progComposite, "surfParams", surf ? 1.0f : 0.0f, std::max(_lighting.surfAo, 0.0f),
+          sunUp && !f.surfaceInterior ? std::max(_lighting.surfContact, 0.0f) : 0.0f, 1.0f);
+-    Set4(p.progComposite, "surfParams2", rm::kSurfaceStaticAoBoost, 0.0f, 0.0f, 0.0f);
++    // The surface's share of each pixel's light after the volumetric fog,
++    // when it ran: the occlusion and the contact shadows act on that share.
++    const unsigned int fogVeil = surf ? PostFogVeilTex(f) : 0u;
++    SetInt(p.progComposite, "fogVeilTex", Poseidon::gl33lighting::kFogVeilUnit);
++    Set4(p.progComposite, "surfParams2", rm::kSurfaceStaticAoBoost, fogVeil ? 1.0f : 0.0f, 0.0f, 0.0f);
+     Set4(p.progComposite, "sunView", sunView[0], sunView[1], sunView[2], f.noiseShift);
+     Set4(p.progComposite, "aoSize", static_cast<float>(f.hw), static_cast<float>(f.hh), 1.0f / f.hw, 1.0f / f.hh);
+     if (surf)
+     {
+         glActiveTexture(GL_TEXTURE6);
+         glBindTexture(GL_TEXTURE_2D, p.surfTex);
++        if (fogVeil)
++        {
++            glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kFogVeilUnit);
++            glBindTexture(GL_TEXTURE_2D, fogVeil);
++        }
+         glActiveTexture(GL_TEXTURE0);
+     }
+     // The photoreal camera: exposure, curve, colour, glare and vignette.
+@@ -1001,6 +1010,11 @@ void EngineGL33::PostComposite(const PostFrame& f)
+     {
+         glActiveTexture(GL_TEXTURE6);
+         glBindTexture(GL_TEXTURE_2D, 0);
++        if (fogVeil)
++        {
++            glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kFogVeilUnit);
++            glBindTexture(GL_TEXTURE_2D, 0);
++        }
+         glActiveTexture(GL_TEXTURE0);
+         GL33Bind::Invalidate();
+     }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+index f5182ebf..b32362da 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+@@ -347,6 +347,7 @@ void EngineGL33::DestroyFogResources()
+     DeleteTex(_fog.integTex);
+     DeleteFbo(_fog.outFbo);
+     DeleteTex(_fog.outTex);
++    DeleteTex(_fog.veilTex);
+     DeleteFbo(_fog.snapFbo);
+     DeleteTex(_fog.snapTex);
+     _fog.snapW = _fog.snapH = 0;
+@@ -432,10 +433,11 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
+         LOG_INFO(Graphics, "GL33 fog: froxel volume {}x{}x{} ({} px cells)", grid.cellsX, grid.cellsY, grid.slices,
+                  grid.cellPixels);
+     }
+-    if (_fog.outW != w || _fog.outH != h || !_fog.outTex || !_fog.nearTex)
++    if (_fog.outW != w || _fog.outH != h || !_fog.outTex || !_fog.veilTex || !_fog.nearTex)
+     {
+         DeleteFbo(_fog.outFbo);
+         DeleteTex(_fog.outTex);
++        DeleteTex(_fog.veilTex);
+         DeleteFbo(_fog.nearFbo);
+         DeleteTex(_fog.nearTex);
+         for (int i = 0; i < 4; ++i)
+@@ -448,6 +450,7 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
+         // the fogged frame, and an 8-bit store needed a dither the curve then
+         // drew as a fine diagonal hatch in the sky's gradients.
+         _fog.outTex = Make2D(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h);
++        _fog.veilTex = Make2D(GL_R8, GL_RED, GL_UNSIGNED_BYTE, w, h);
+         _fog.glowW[0] = std::max(1, (w + 3) / 4);
+         _fog.glowH[0] = std::max(1, (h + 3) / 4);
+         _fog.glowW[1] = std::max(1, (_fog.glowW[0] + 3) / 4);
+@@ -459,6 +462,14 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
+         _fog.nearTex = Make2D(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, _fog.nearW, _fog.nearH);
+         GL33Bind::Invalidate();
+         complete = MakeFbo(_fog.outTex, _fog.outFbo) && complete;
++        {
++            // The apply's second output: the surface's share of the light.
++            static const GLenum kOutBufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
++            glBindFramebuffer(GL_FRAMEBUFFER, _fog.outFbo);
++            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, _fog.veilTex, 0);
++            glDrawBuffers(2, kOutBufs);
++            complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE && complete;
++        }
+         complete = MakeFbo(_fog.nearTex, _fog.nearFbo) && complete;
+         for (int i = 0; i < 4; ++i)
+             complete = MakeFbo(_fog.glowTex[i], _fog.glowFbo[i]) && complete;
+@@ -593,6 +604,14 @@ unsigned int EngineGL33::PostSceneTex(const PostFrame& f) const
+     return fogged ? _fog.outTex : f.frameColor;
+ }
+ 
++unsigned int EngineGL33::PostFogVeilTex(const PostFrame& f) const
++{
++    if (!f.plan.Runs(rm::PostStage::Air) || !f.plan.fog)
++        return 0;
++    const bool fogged = _fog.appliedFrame == GetFrameCounter() && _fog.outTex && _fog.veilTex;
++    return fogged ? _fog.veilTex : 0;
++}
++
+ void EngineGL33::PostFog(const PostFrame& f)
+ {
+     // Under the photoreal camera the frame holds scene light on its encoding
+@@ -765,9 +784,9 @@ void EngineGL33::PostFog(const PostFrame& f)
+         Set4(ring, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+         // z: how grey the sky is (no sun glare to avoid, and rain streaks over
+         // the horizon are dark: the ring takes the mean of its samples there
+-        // instead of the darker half, so far air in rain matches the sky).
+-        const float greySky = std::min(std::max((0.65f - m.skyThrough) / 0.5f, 0.0f), 1.0f);
+-        Set4(ring, "ringCtl", static_cast<float>(kFogRingBins), kFogRingDecay, greySky, 0.0f);
++        // instead of the darker half, so far air in rain matches the sky; and
++        // it samples the deck above the classic horizon fill, not the fill).
++        Set4(ring, "ringCtl", static_cast<float>(kFogRingBins), kFogRingDecay, rm::FogGreySky(m.skyThrough), 0.0f);
+         const Vector3 toSun = -sun->SunDirection();
+         Set4(ring, "ringSun", toSun.X(), toSun.Y(), toSun.Z(), 0.0f);
+         Set4(ring, "fogCam", cameraFrame ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+@@ -1080,7 +1099,8 @@ void EngineGL33::PostFog(const PostFrame& f)
+     Set4(apply, "fogNearSize", static_cast<float>(_fog.nearW), static_cast<float>(_fog.nearH),
+          _worldOverlayDrawn ? 1.0f : 0.0f, overlaySnap && cameraFrame ? 1.0f : 0.0f);
+     Set4(apply, "fogSkyEye", cam[1], floorEye, wetEye, wetDepth);
+-    Set4(apply, "fogSkyWeather", m.weatherSigma, m.weatherHeight, 0.0f, 0.0f);
++    // z: how grey the sky is (the air replaces the classic horizon fill).
++    Set4(apply, "fogSkyWeather", m.weatherSigma, m.weatherHeight, rm::FogGreySky(m.skyThrough), 0.0f);
+     Set4(apply, "fogSkyClear", m.hazeSigma, m.hazeHeight, m.rayleigh * 13.558e-6f, m.dustSigma * rm::kDustSkyShare);
+     Set4(apply, "fogSkyDust", m.dustHeight, cam[0], cam[2], groundEye);
+     Set4(apply, "fogGlow", glow ? glowGain : 0.0f, 0.0f, 0.0f, 0.0f);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+index 44773613..2aa15abc 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+@@ -679,6 +679,7 @@ out vec4 fragColor;
+ 
+ // The ring's main (after its inputs and the camera's codec).
+ const char kPostFogRingMainGLSL[] = R"(
++const float kRingGreyFromDeg = 3.8; // kFogRingGreyFromDeg
+ 
+ // The frame's uv of a world direction, w 0 when it is off screen.
+ vec3 ringProject(vec3 d) {
+@@ -714,12 +715,15 @@ void main() {
+         // height in every azimuth), none within five degrees of the sun, the
+         // mean of the darker half: the sky's colour, not the sun's disc and
+         // glare, a star or a bright gap between crowns.
+-        // Under a grey sky (ringCtl.z) the samples start just above the land
+-        // and stay low: the weather's fill along the horizon is the air's
+-        // colour, and the darker deck above it made the rain's air a dark
+-        // slate that far hills faded into (look director round 2).
+-        float base = mix(max(found, radians(2.0)), max(found, 0.0) + radians(0.3), ringCtl.z);
+-        float stepDeg = mix(1.0, 0.4, ringCtl.z);
++        // Under a grey sky (ringCtl.z) the samples start just above the
++        // classic horizon fill (the horizon polygon, drawn in the classic fog
++        // colour up to 3.4 degrees, kFogHorizonFillTop) or the land if it
++        // stands higher, and stay low: the deck over the horizon is the air's
++        // colour. (Look fix "plate": sampled just above the land they read
++        // the fill, a warm flat grey, and every far ridge and the fill itself
++        // took it: a painted plate under a cooler, brighter sky.)
++        float base = mix(max(found, radians(2.0)), max(found + radians(0.3), radians(kRingGreyFromDeg)), ringCtl.z);
++        float stepDeg = mix(1.0, 0.6, ringCtl.z);
+         vec4 s[3];
+         for (int k = 0; k < 3; ++k) s[k] = vec4(0.0, 0.0, 0.0, 1e9);
+         int nS = 0;
+@@ -853,13 +857,17 @@ uniform vec4 fogNearSize;    // xy the near target's size, z 1 = an optic overla
+                              // w 1 = worldTex holds the world before it
+ uniform sampler2D worldTex;  // unit 6: the world before this frame's screen overlay (SnapshotWorldBeforeOverlay)
+ uniform vec4 fogSkyEye;      // x the eye's height (m), y the fog floor under it (m), z the wet air at the eye (1/m), w its depth (m)
+-uniform vec4 fogSkyWeather;  // x weather fog (1/m at the floor), y its scale height (m)
++uniform vec4 fogSkyWeather;  // x weather fog (1/m at the floor), y its scale height (m), z how grey the sky is (FogGreySky)
+ uniform vec4 fogSkyClear;    // x haze (1/m at sea level), y its scale height, z Rayleigh (green, 1/m at sea level), w dust (1/m at 0 m)
+ uniform vec4 fogSkyDust;     // x dust's scale height (m), yz the eye's world x, z (m), w the ground under the eye (m)
+ uniform vec4 fogGlow;        // x the night glow's gain (0 = none)
+ uniform vec4 fogSkyLobe;     // x the sun's forward lobe in the clear air past the far end (0 = none)
+ uniform mat3 viewToWorld;    // view-space direction to world (camera-relative)
+-out vec4 fragColor;
++layout(location = 0) out vec4 fragColor;
++// The surface's share of the pixel's light after the fog (FogState::veilTex):
++// the composite's occlusion and contact shadows darken the surface's own
++// light, not the air in front of it.
++layout(location = 1) out vec4 fogVeil;
+ )";
+ 
+ // The apply's main (after its inputs and the LitConstants block: the sun's
+@@ -872,6 +880,8 @@ const float kApplyBeyond = 40000.0;
+ // The sun's glow past the far end fades above the horizon with
+ // exp(-sin(elevation) / this): 2.9 degrees.
+ const float kApplyLobeFade = 0.05;
++// The classic horizon polygon's top over the eye (kFogHorizonFillTop).
++const float kApplyFillTop = 0.06;
+ 
+ // The world's per-fragment shoulder above 0.8 (tonemapNeutral's peak curve,
+ // without its whitening, which the frame already holds) and its inverse: the
+@@ -980,6 +990,7 @@ void main() {
+     vec4 c = snap ? texture(worldTex, vUV) : cOver;
+     if (!snap && fogNearSize.z > 0.5 && max(c.r, max(c.g, c.b)) < 0.012) {
+         fragColor = c;
++        fogVeil = vec4(1.0);
+         return;
+     }
+     float zRaw = fogViewZ(vUV);
+@@ -1095,23 +1106,27 @@ void main() {
+             T *= 1.0 - rd;
+         }
+     }
+-    // In rain and weather fog the dome's own fill under and along the horizon
+-    // already is the weather's air (the engine draws it in the fog colour):
+-    // the volume's darker air laid over it read as a grey wall beyond the
+-    // land. The sky keeps its fill there; the land still fogs.
++    // In rain and weather fog the sky past the far end is the weather's air
++    // already: the volume's air is not laid over it again (that read as a
++    // grey wall beyond the land); the land still fogs.
++    float wetSky = clamp(fogSkyWeather.x * 2000.0, 0.0, 1.0);
+     if (sky) {
+-        float wetSky = clamp(fogSkyWeather.x * 2000.0, 0.0, 1.0);
+         S *= 1.0 - wetSky;
+         T = mix(T, 1.0, wetSky);
+-        // The deck above the fill sinks into the weather's air toward the
+-        // horizon (its height fade, about 5 degrees): the fill's flat band
+-        // ended in a hard edge under the clouds.
+-        if (wetSky > 0.0 && airValid) {
+-            vec2 ndcW = cuv * 2.0 - 1.0;
+-            float sW = normalize(viewToWorld * vec3(ndcW.x * projInfo.z, ndcW.y * projInfo.w, 1.0)).y;
+-            float hb = exp(-max(sW, 0.0) / 0.09);
+-            base = mix(base, airAt, 0.9 * hb * wetSky);
+-        }
++    }
++    // Under a grey sky and in rain, the classic horizon fill (the horizon
++    // polygon in the classic fog colour, up to kApplyFillTop over the eye's
++    // horizon, and the dome's flat band under it) is the air's colour, the
++    // deck over the horizon the ring measured, and the deck above the fill
++    // sinks into it over its height fade (about 5 degrees). (Look fix
++    // "plate": the fill kept the classic fog's warm grey, a painted plate
++    // between the hills with a hard seam at its top under a cooler sky.)
++    float greyFill = max(wetSky, clamp(fogSkyWeather.z, 0.0, 1.0));
++    if ((sky || z > 0.98 * fogDepth.x) && greyFill > 0.0 && airValid) {
++        vec2 ndcW = cuv * 2.0 - 1.0;
++        float sW = normalize(viewToWorld * vec3(ndcW.x * projInfo.z, ndcW.y * projInfo.w, 1.0)).y;
++        float hb = exp(-max(sW - kApplyFillTop, 0.0) / 0.09);
++        base = mix(base, airAt, hb * greyFill);
+     }
+     if (fogApply.w > 0.5) S += fogNear(sky ? 1e6 : z);
+     // The night glow: the blurred light of the frame, laid into the fog in
+@@ -1149,6 +1164,14 @@ void main() {
+         col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
+     }
+     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0 - (1.0 - clamp(c.a, 0.0, 1.0)) * T);
++    // The surface's share of the light this pixel ends with (its own light
++    // through the fog against the air's in front of it): the composite's
++    // occlusion darkens that share only, as if it had darkened the surface
++    // before the fog. (T alone left a pale fogged treeline its full
++    // occlusion: the air in front is several times the trees' own light.)
++    float surfL = dot(base * T, kApplyLuma);
++    float allL = surfL + dot(S, kApplyLuma);
++    fogVeil = vec4(allL > 1e-6 ? clamp(surfL / allL, 0.0, 1.0) : clamp(T, 0.0, 1.0));
+ }
+ )";
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 51ae32cd..8a2275e3 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -256,7 +256,9 @@ uniform sampler2D surfTex;
+ uniform vec4 surfParams; // x 1 = the surface target holds the shares, y occlusion power, z contact shadows, w multi-bounce
+ uniform vec4 aoSize;     // xy the occlusion's size, zw 1 / size
+ uniform vec4 sunView;    // xyz toward the sun in view space, w this frame's turn of the march (TAA)
+-uniform vec4 surfParams2; // x the occlusion power's multiple on static architecture (the target's alpha code 1)
++uniform vec4 surfParams2; // x the occlusion power's multiple on static architecture (the target's alpha code 1),
++                          // y 1 = fogVeilTex holds the surface's share of each pixel's light after the fog
++uniform sampler2D fogVeilTex; // r: the surface's share of the light after the fog (EngineGL33_PostFog.cpp, FogState::veilTex)
+ // The photoreal camera (photoLight; Graphics/Remaster/PhotoCamera.hpp):
+ uniform vec4 camParams;  // x 1 = on, y exposure (linear), z curve (0 hue-keeping, 1 per channel, 2 ACES,
+                          // 3 Neutral), w vignette
+@@ -448,6 +450,16 @@ void main() {
+         // The surface target's share, the occlusion upsampled by depth, its
+         // strength as a power and the multi-bounce correction by the albedo.
+         vec4 s = textureLod(surfTex, vUV, 0.0);
++        // The volumetric fog veils the surface: the occlusion and the contact
++        // shadow take the surface's share of the light after the fog (its
++        // own light through it), not the air's light in front of it (the
++        // world's shares hold only the classic fog's edge). (Look fix
++        // "plate": a fogged treeline 300 m out in rain kept its full
++        // occlusion over the fog's light: dark scalloped rims at the foot of
++        // every crown.)
++        float veil = surfParams2.y > 0.5 ? textureLod(fogVeilTex, vUV, 0.0).r : 1.0;
++        s.r *= veil;
++        s.b *= veil;
+         float zc = compositeViewZ(vUV);
+         ao = upsampleOcclusion(vUV, zc);
+         // The target's alpha: 0.5 the occlusion as set, 1 static architecture
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+index d364c6ae..8e8b275c 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -611,3 +611,105 @@ TEST_CASE("Volumetric fog: round 3 medium rules (clear near air, dust, hilltops,
+     CHECK(FogAridity({0.8f, 0.9f, 0.8f, 0.9f, 1.4f, 0.5f, 1.4f, 0.5f}, heights) == 0.0f);
+     CHECK(FogAridity({}, heights) == 0.0f);
+ }
++
++TEST_CASE("Volumetric fog: a grey day fades its ridges into the deck's air, with no horizon plate", "[remaster][fog]")
++{
++    // How grey the sky is for the air's colour: none under a broken sky's
++    // blue gaps, all under a full deck.
++    CHECK(FogGreySky(1.0f) == 0.0f);
++    CHECK(FogGreySky(0.65f) == 0.0f);
++    CHECK(FogGreySky(0.4f) == Catch::Approx(0.5f));
++    CHECK(FogGreySky(0.15f) == Catch::Approx(1.0f));
++    CHECK(FogGreySky(0.0f) == Catch::Approx(1.0f));
++    // The ring samples above the classic horizon polygon's top (3.4 degrees).
++    CHECK(std::sin(kFogRingGreyFromDeg * 3.14159265f / 180.0f) > kFogHorizonFillTop);
++
++    // A dry full deck thickens the clear haze by 1 + kHazeGreyGain: the
++    // ridges from 1 to 3 km fade one behind the other instead of one wash
++    // (look fix "plate": the gain was 3.5, everything past 1.5 km was gone).
++    const LightingTuning t{};
++    const FogMedium noon = ComputeFogMedium(ClearNoon(), t, true);
++    FogInputs grey = ClearNoon();
++    grey.skyThrough = 0.0f;
++    grey.viewDistance = 3500.0f;
++    const FogMedium overcast = ComputeFogMedium(grey, t, true);
++    CHECK(overcast.hazeSigma == Catch::Approx(noon.hazeSigma * (1.0f + kHazeGreyGain)));
++    const float sigmaGrey = FogExtinctionAt(overcast, 100.0f, 0.0f, 100.0f, 0.0f);
++    CHECK(std::exp(-sigmaGrey * 1000.0f) > 0.2f);  // a ridge 1 km out keeps a fifth or more
++    CHECK(std::exp(-sigmaGrey * 2000.0f) > 0.05f); // one at 2 km is still there
++    CHECK(std::exp(-sigmaGrey * 3000.0f) < 0.15f); // one at 3 km is mostly air
++
++    // Rain takes kRainFogShare of the classic tactical visibility's extinction;
++    // setFog keeps all of it.
++    FogInputs wet = grey;
++    wet.rain = 0.8f;
++    const FogMedium rain = ComputeFogMedium(wet, t, true);
++    const float vis = WeatherVisibility(0.0f, 0.8f, 3500.0f);
++    CHECK(vis == Catch::Approx(980.0f));
++    CHECK(rain.weatherSigma ==
++          Catch::Approx(kWeatherExtinction * (1.0f / vis - 1.0f / 3500.0f) * kRainFogShare).epsilon(1e-4));
++    // A hill 300 m away in rain 0.8 keeps over 40 % of its contrast (the
++    // shaders' near thinning leaves it more), the classic fog end (where the
++    // AI's tactical sight ends) under 15 %, 2 km nearly nothing.
++    const float sigmaRain = FogExtinctionAt(rain, 30.0f, 0.0f, 30.0f, 0.0f);
++    CHECK(std::exp(-sigmaRain * 300.0f) > 0.4f);
++    CHECK(std::exp(-sigmaRain * vis) < 0.15f);
++    CHECK(std::exp(-sigmaRain * 2000.0f) < 0.02f);
++    FogInputs foggy = grey;
++    foggy.fog = 0.3f;
++    const float visFog = WeatherVisibility(0.3f, 0.0f, 3500.0f);
++    CHECK(ComputeFogMedium(foggy, t, true).weatherSigma ==
++          Catch::Approx(kWeatherExtinction * (1.0f / visFog - 1.0f / 3500.0f) * kSetFogBoost).epsilon(1e-4));
++}
++
++TEST_CASE("Volumetric fog: the ring reads the deck over the horizon fill, the apply lays the air over the fill",
++          "[remaster][fog][Shaders]")
++{
++    const std::string ring = gl::PostShaderSource(gl::PostShader::FogRing);
++    const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
++    REQUIRE_FALSE(ring.empty());
++    REQUIRE_FALSE(apply.empty());
++    CHECK(kFogRingGreyFromDeg == 3.8f);
++    CHECK(CountOf(ring, "const float kRingGreyFromDeg = 3.8;") == 1);
++    CHECK(CountOf(ring, "max(found + radians(0.3), radians(kRingGreyFromDeg))") == 1);
++    CHECK(kFogHorizonFillTop == 0.06f);
++    CHECK(CountOf(apply, "const float kApplyFillTop = 0.06;") == 1);
++    // Grey (fogSkyWeather.z, FogGreySky) or wet, the fill below the polygon's
++    // top is the air entirely; the deck above sinks into it.
++    CHECK(CountOf(apply, "float greyFill = max(wetSky, clamp(fogSkyWeather.z, 0.0, 1.0));") == 1);
++    CHECK(CountOf(apply, "float hb = exp(-max(sW - kApplyFillTop, 0.0) / 0.09);") == 1);
++    CHECK(CountOf(apply, "base = mix(base, airAt, hb * greyFill);") == 1);
++}
++
++TEST_CASE("Volumetric fog: the composite's occlusion acts on the surface's light under the fog, not on the air",
++          "[remaster][fog][Shaders]")
++{
++    // The apply writes the surface's share of the pixel's light after the fog
++    // on a second target (an optic overlay's untouched mask: 1), and the
++    // composite scales the surface target's sky and sun shares by it before
++    // the occlusion and the contact shadow: darkening the whole pixel by that
++    // share of the occlusion is darkening the surface under the fog (look fix
++    // "plate": dark rims at the foot of fogged trees).
++    const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
++    CHECK(CountOf(apply, "layout(location = 0) out vec4 fragColor;") == 1);
++    CHECK(CountOf(apply, "layout(location = 1) out vec4 fogVeil;") == 1);
++    CHECK(CountOf(apply, "fogVeil = vec4(1.0);") == 1);
++    CHECK(CountOf(apply, "float surfL = dot(base * T, kApplyLuma);") == 1);
++    CHECK(CountOf(apply, "fogVeil = vec4(allL > 1e-6 ? clamp(surfL / allL, 0.0, 1.0) : clamp(T, 0.0, 1.0));") == 1);
++    const std::string composite = gl::PostShaderSource(gl::PostShader::Composite);
++    REQUIRE_FALSE(composite.empty());
++    CHECK(CountOf(composite, "uniform sampler2D fogVeilTex;") == 1);
++    CHECK(CountOf(composite, "float veil = surfParams2.y > 0.5 ? textureLod(fogVeilTex, vUV, 0.0).r : 1.0;") == 1);
++    const size_t veiled = composite.find("s.r *= veil;");
++    const size_t keep = composite.find("keep = max(1.0 - clamp(s.r, 0.0, 1.0) * (1.0 - ao)");
++    REQUIRE(veiled != std::string::npos);
++    REQUIRE(keep != std::string::npos);
++    CHECK(veiled < keep);
++    CHECK(CountOf(composite, "s.b *= veil;") == 1);
++    // A free unit: not a post unit, not a material or upload unit.
++    CHECK(gl::kFogVeilUnit == gl::kFogFloorUnit);
++    for (int u : gl::kPostUnits)
++        CHECK(u != gl::kFogVeilUnit);
++    CHECK(gl::kFogVeilUnit != 1);
++    CHECK(gl::kFogVeilUnit != 7);
++}

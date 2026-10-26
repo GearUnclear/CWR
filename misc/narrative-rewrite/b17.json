@@ -1,0 +1,10 @@
+{
+  "id": "b17",
+  "bank": "kBio1Friendly",
+  "variant": 4,
+  "text": "{Name}, a tailor from {Place}, made the clothes for a younger sibling's wedding. The authorities refused the tailor permission to travel, and the wedding went ahead without them.",
+  "word_count": 28,
+  "self_review": "A tailor made a sibling's wedding clothes but missed the wedding because the authorities refused travel permission.",
+  "source_pattern": "The supplied Strobos testimony documents curfews and checkpoints constraining ordinary journeys.",
+  "fictional_changes": "Tailoring, the sibling's wedding, clothes, and denied travel permission are fictional; the source does not document this family event."
+}

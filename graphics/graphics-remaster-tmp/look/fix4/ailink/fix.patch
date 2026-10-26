@@ -1,0 +1,833 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+index 88bfd510..e6a0c438 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+@@ -171,6 +171,7 @@ GameValue TriShadowDepthProbe(const GameState*, GameValuePar);
+ GameValue TriEnableShadowMaps(const GameState*);
+ GameValue TriSetLighting(const GameState*, GameValuePar);
+ GameValue TriFeatureState(const GameState*);
++GameValue TriFogSight(const GameState*, GameValuePar);
+ GameValue TriPinCloudDrift(const GameState*, GameValuePar);
+ GameValue TriSkyTableCheck(const GameState*, GameValuePar);
+ GameValue TriCanopyCheck(const GameState*, GameValuePar);
+@@ -3256,6 +3257,7 @@ INIT_MODULE(GameStateExtTest, 3)
+     GGameState.NewNularOp(GameNular(GameString, "triEnableShadowMaps", TriEnableShadowMaps));
+     GGameState.NewFunction(GameFunction(GameString, "triSetLighting", TriSetLighting, GameString));
+     GGameState.NewNularOp(GameNular(GameString, "triFeatureState", TriFeatureState));
++    GGameState.NewFunction(GameFunction(GameString, "triFogSight", TriFogSight, GameArray));
+     GGameState.NewFunction(GameFunction(GameString, "triPinCloudDrift", TriPinCloudDrift, GameArray));
+     GGameState.NewFunction(GameFunction(GameString, "triSkyTableCheck", TriSkyTableCheck, GameScalar));
+     GGameState.NewFunction(GameFunction(GameString, "triCanopyCheck", TriCanopyCheck, GameScalar));
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index bf4c796c..ece1a682 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -40,6 +40,7 @@ using namespace Poseidon;
+ #include <Poseidon/World/Terrain/TerrainLighting.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+ namespace Poseidon
+ {
+ extern bool gPerfDumpShapesOnce;
+@@ -671,6 +672,53 @@ GameValue TriFeatureState(const GameState* /*state*/)
+     return GameValue(remaster::FeatureStateString(GEngine->GetLightingTuning(), gates).c_str());
+ }
+ 
++/// triFogSight [[east, north, aboveGround], [east, north, aboveGround]]: AI
++/// sight's air between two points (Graphics/Remaster/VolumetricFog.hpp, AI
++/// sight) next to the air the renderer's fog drew this frame, for probes that
++/// check the two agree: "ai=<0|1> Tai=<transmittance> drawn=<0|1>
++/// Tdrawn=<the same through the drawn medium> classic=<the classic tactical
++/// fog's visibility> groundAi=.. mistAi=.. groundDrawn=.. mistDrawn=.. map=<n>".
++/// Never contains ';'.
++GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
++{
++    if (arg.GetType() != GameArray)
++        return GameValue("FAIL:expected [[e, n, agl], [e, n, agl]]");
++    const GameArrayType& a = arg;
++    if (a.Size() < 2 || a[0].GetType() != GameArray || a[1].GetType() != GameArray)
++        return GameValue("FAIL:expected [[e, n, agl], [e, n, agl]]");
++    float p[2][3];
++    for (int k = 0; k < 2; ++k)
++    {
++        const GameArrayType& v = a[k];
++        if (v.Size() < 3)
++            return GameValue("FAIL:a point needs [e, n, agl]");
++        const float e = static_cast<GameScalarType>(v[0]);
++        const float n = static_cast<GameScalarType>(v[1]);
++        const float agl = static_cast<GameScalarType>(v[2]);
++        const float ground = GLandscape ? GLandscape->SurfaceY(e, n) : 0.0f;
++        p[k][0] = e;
++        p[k][1] = ground + agl;
++        p[k][2] = n;
++    }
++    const float ai = remaster::FogSightTransmittance(p[0], p[1]);
++    const std::shared_ptr<const remaster::FogSightMap> map = remaster::FogSightMapInUse();
++    remaster::FogMedium drawnMedium;
++    const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
++    const float tDrawn =
++        drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, p[0], p[1]) : 1.0f;
++    const float dx = p[1][0] - p[0][0], dy = p[1][1] - p[0][1], dz = p[1][2] - p[0][2];
++    const float classic =
++        GScene ? 1.0f - GScene->TacticalFog8(dx * dx + dy * dy + dz * dz) * (1.0f / 255.0f) : 1.0f;
++    const remaster::FogMedium& m = remaster::FogSightMedium();
++    char buf[512];
++    snprintf(buf, sizeof(buf),
++             "ai=%d Tai=%.4f drawn=%d Tdrawn=%.4f classic=%.4f groundAi=%.3e mistAi=%.3e groundDrawn=%.3e "
++             "mistDrawn=%.3e map=%d",
++             remaster::FogSightActive() ? 1 : 0, ai, drawn ? 1 : 0, tDrawn, classic, m.groundSigma, m.mistSigma,
++             drawn ? drawnMedium.groundSigma : 0.0f, drawn ? drawnMedium.mistSigma : 0.0f, map ? map->size : 0);
++    return GameValue(buf);
++}
++
+ /// triSkyTableCheck <texels>: the remastered sky table (feature switch
+ /// atmosphere) read back from the GPU and compared with its CPU mirror
+ /// (Graphics/Remaster/Atmosphere.hpp): regions 0 and 1 against SkyViewTexel at
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
+index edf052fc..432f408b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.cpp
+@@ -194,6 +194,17 @@ bool SampleGroundColor(const TerrainHorizonMap& map, float x, float z, float rgb
+     return true;
+ }
+ 
++void DownsampleTerrainGrid(const float* src, int size, float cellSize, int maxSize, std::vector<float>& dst,
++                           int& dstSize, float& dstCell)
++{
++    dst.clear();
++    dstSize = 0;
++    dstCell = 0.0f;
++    if (!src || size < 2 || !(cellSize > 0.0f))
++        return;
++    Downsample(src, size, cellSize, std::max(2, maxSize), dst, dstSize, dstCell);
++}
++
+ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
+                             TerrainHorizonMap& out, const float* groundRgb)
+ {
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
+index 828f2212..23558d9d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/TerrainHorizon.hpp
+@@ -82,6 +82,13 @@ struct TerrainHorizonOptions
+     const std::atomic<bool>* cancel = nullptr;
+ };
+ 
++// The heights grid the map is built from: `src` (size x size, cellSize
++// metres apart) box-downsampled to at most maxSize texels per side, as
++// BuildTerrainHorizonMap samples its `height`. AI sight's map
++// (VolumetricFog.hpp BuildFogSightMap) takes the same grid.
++void DownsampleTerrainGrid(const float* src, int size, float cellSize, int maxSize, std::vector<float>& dst,
++                           int& dstSize, float& dstCell);
++
+ std::uint16_t EncodeHorizonDeg(float deg);
+ float DecodeHorizonDeg(std::uint16_t value);
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+index a24c803f..a52d68d4 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+@@ -1,5 +1,7 @@
+ #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+ 
++#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
++
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdint>
+@@ -436,26 +438,52 @@ float SampleGrid(const FogSightMap& map, const std::vector<float>& grid, float x
+ 
+ } // namespace
+ 
++std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize)
++{
++    auto sight = std::make_shared<FogSightMap>();
++    DownsampleTerrainGrid(heights, range, grid, maxSize, sight->ground, sight->size, sight->cellSize);
++    if (sight->size < 2)
++        return nullptr;
++    sight->floorY = BuildFogFloor(sight->ground.data(), sight->size, sight->cellSize);
++    sight->layer = BuildFogLayer(sight->ground.data(), sight->floorY, sight->size, sight->cellSize);
++    if (!sight->Valid())
++        return nullptr;
++    return sight;
++}
++
+ void SetFogSight(const FogMedium* m, std::shared_ptr<const FogSightMap> map)
+ {
+     FogSightState& s = Sight();
+     s.on = m != nullptr && map && map->Valid() && (m->mistSigma > 0.0f || m->groundSigma > 0.0f);
+-    if (m)
+-        s.medium = *m;
++    s.medium = m ? *m : FogMedium{};
+     s.map = std::move(map);
+ }
+ 
++void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::shared_ptr<const FogSightMap> map)
++{
++    const FogMedium m = ComputeFogMedium(in, t, true);
++    SetFogSight(&m, std::move(map));
++}
++
++const FogMedium& FogSightMedium()
++{
++    return Sight().medium;
++}
++
++std::shared_ptr<const FogSightMap> FogSightMapInUse()
++{
++    return Sight().map;
++}
++
+ bool FogSightActive()
+ {
+     return Sight().on;
+ }
+ 
+-float FogSightTransmittance(const float from[3], const float to[3])
++float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3])
+ {
+-    const FogSightState& s = Sight();
+-    if (!s.on || !s.map)
++    if (!map.Valid())
+         return 1.0f;
+-    const FogSightMap& map = *s.map;
+     const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+     const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+     if (len < 1e-3f)
+@@ -470,9 +498,46 @@ float FogSightTransmittance(const float from[3], const float to[3])
+         const float floorY = SampleGrid(map, map.floorY, x, z);
+         const float layer = SampleGrid(map, map.layer, x, z);
+         const float near = kMistNearKeep + (1.0f - kMistNearKeep) * Smooth(kMistNearFrom, kMistNearTo, len * t);
+-        tau += FogSightExtinctionAt(s.medium, y, floorY, y - ground, layer) * near;
++        tau += FogSightExtinctionAt(m, y, floorY, y - ground, layer) * near;
+     }
+     return std::exp(-tau * len / kSamples);
+ }
+ 
++float FogSightTransmittance(const float from[3], const float to[3])
++{
++    const FogSightState& s = Sight();
++    if (!s.on || !s.map)
++        return 1.0f;
++    return FogSightTransmittanceThrough(s.medium, *s.map, from, to);
++}
++
++namespace
++{
++struct DrawnFogState
++{
++    bool drawn = false;
++    FogMedium medium;
++};
++DrawnFogState& Drawn()
++{
++    static DrawnFogState s;
++    return s;
++}
++} // namespace
++
++void SetDrawnFogMedium(const FogMedium* m)
++{
++    DrawnFogState& d = Drawn();
++    d.drawn = m != nullptr;
++    d.medium = m ? *m : FogMedium{};
++}
++
++bool GetDrawnFogMedium(FogMedium& out)
++{
++    const DrawnFogState& d = Drawn();
++    if (d.drawn)
++        out = d.medium;
++    return d.drawn;
++}
++
+ } // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+index 6ad5866e..e734919d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+@@ -361,6 +361,18 @@ float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float abov
+ float FogGroundAirTop(const FogMedium& m, float y, float floorY, float layer);
+ 
+ // ---- AI sight ------------------------------------------------------------------
++//
++// AI sight is part of the simulation, not of the renderer: once per
++// simulation step (World::SimulateLandscape, Poseidon::SimulateFogSight in
++// World/Terrain/TerrainLighting.hpp) the world's weather, time of day and
++// knobs (FogInputs, LightingTuning) give the medium through ComputeFogMedium
++// with `applied` true, the very function and inputs the renderer's fog takes,
++// over a sight map built from the island's heights when it loads. No render
++// state enters it: post effects, the SSAA path, a vehicle interior view, the
++// fog's gates and quality, a missing renderer (a dedicated server, a headless
++// client) leave AI sight as it is, and every machine computes it from the same
++// synced weather and date. The renderer's fog floor reads the same map
++// (FogSightMapInUse).
+ 
+ // The terrain the sight test reads: ground, fog floor and mist layer on one
+ // grid (x east, z north, cell (0, 0) at the world origin).
+@@ -371,13 +383,33 @@ struct FogSightMap
+     std::vector<float> ground, floorY, layer;
+     bool Valid() const;
+ };
+-// The renderer hands the frame's medium and the map over each frame while the
+-// fog runs (nullptr: the fog is off, sight is classic).
++// The sight map of a landscape's heights grid (range x range, `grid` metres
++// apart, row-major by z then x): the grid box-downsampled as the terrain
++// horizon map samples it (DownsampleTerrainGrid, at most maxSize texels per
++// side), its fog floor (BuildFogFloor) and mist layer (BuildFogLayer). Null
++// for an invalid grid.
++std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize = 1024);
++// The simulation's step: AI sight takes ComputeFogMedium(in, t, true) over
++// `map` (null: no island, sight is classic).
++void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::shared_ptr<const FogSightMap> map);
++// The medium and the map AI sight uses now (the renderer's fog floor draws
++// from this map; null before an island loads).
++const FogMedium& FogSightMedium();
++std::shared_ptr<const FogSightMap> FogSightMapInUse();
++// Low level: set the medium and the map directly (nullptr: sight is classic).
+ void SetFogSight(const FogMedium* m, std::shared_ptr<const FogSightMap> map);
+ bool FogSightActive();
+ // Transmittance (0..1) of the mist and the humid ground air along the line
+-// between two world points (x east, y up, z north): 1 while the fog is off.
++// between two world points (x east, y up, z north): 1 while sight is classic.
+ // Eight samples along the line, with the eye's near thinning around `from`.
+ float FogSightTransmittance(const float from[3], const float to[3]);
++// The same through a given medium over a given map (pure).
++float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3],
++                                   const float to[3]);
++// The medium the renderer's fog drew this frame (nullptr: it did not draw),
++// for probes that compare the drawn air with AI sight (triFogSight); AI
++// sight never reads it.
++void SetDrawnFogMedium(const FogMedium* m);
++bool GetDrawnFogMedium(FogMedium& out);
+ 
+ } // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+index 55dcfde6..9a364b74 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.cpp
+@@ -3,6 +3,11 @@
+ #include <Poseidon/Graphics/Core/Engine.hpp>
+ #include <Poseidon/Graphics/Remaster/Canopy.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
++#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
++#include <Poseidon/Core/Config/EngineConfig.hpp>
++#include <Poseidon/Core/Global.hpp>
++#include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+ #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+ #include <Poseidon/World/Scene/Object.hpp>
+@@ -438,6 +443,91 @@ void UpdateTerrainLighting(Landscape* land)
+     s_state.pending = std::move(build);
+ }
+ 
++namespace
++{
++// AI sight's map and the landscape it was built for.
++struct FogSightBuilt
++{
++    const Landscape* land = nullptr;
++    int range = 0;
++    float grid = 0.0f;
++    std::uint64_t sample = 0;
++    std::shared_ptr<const remaster::FogSightMap> map;
++};
++FogSightBuilt s_sight;
++} // namespace
++
++remaster::FogInputs WorldFogInputs(const Landscape* land)
++{
++    remaster::FogInputs in;
++    constexpr float kDeg = 57.29578f;
++    auto clampUnit = [](float v) { return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v); };
++    const LightSun* sun = GScene ? GScene->MainLight() : nullptr;
++    if (sun)
++    {
++        const Vector3 toSun = -sun->Direction();
++        in.sunElevationDeg = std::asin(clampUnit(toSun.Y())) * kDeg;
++        const float azimuth = std::atan2(toSun.X(), toSun.Z()) * kDeg;
++        in.sunAzimuthDeg = azimuth < 0.0f ? azimuth + 360.0f : azimuth;
++        in.nightEffect = sun->NightEffect();
++    }
++    if (land)
++    {
++        in.skyThrough = land->SkyThrough();
++        in.fog = land->GetFog();
++        in.rain = land->GetRainDensity();
++    }
++    in.viewDistance = ENGINE_CONFIG.tacticalZ;
++    if (GScene)
++    {
++        in.fogStart = GScene->GetFogMinRange();
++        in.fogEnd = GScene->GetFogMaxRange();
++    }
++    in.year = Glob.clock.GetYear();
++    in.dayOfYear = std::clamp(static_cast<int>(std::floor(Glob.clock.GetTimeInYear() / OneDay)), 0, 365);
++    return in;
++}
++
++void SimulateFogSight(Landscape* land)
++{
++    const int range = land ? land->GetTerrainRange() : 0;
++    const float grid = land ? land->GetTerrainGrid() : 0.0f;
++    if (range < 2 || !(grid > 0.0f))
++    {
++        ShutdownFogSight();
++        return;
++    }
++    const std::uint64_t sample = SampleHeights(*land, range, grid);
++    if (land != s_sight.land || range != s_sight.range || grid != s_sight.grid || sample != s_sight.sample)
++    {
++        // A new island (or reshaped ground): the map is built here, at once,
++        // so AI sight never runs a step without it.
++        const auto t0 = std::chrono::steady_clock::now();
++        std::vector<float> heights(static_cast<size_t>(range) * range);
++        for (int z = 0; z < range; ++z)
++            for (int x = 0; x < range; ++x)
++                heights[static_cast<size_t>(z) * range + x] = land->ClippedData(z, x); // (z, x) order
++        s_sight.land = land;
++        s_sight.range = range;
++        s_sight.grid = grid;
++        s_sight.sample = sample;
++        s_sight.map = remaster::BuildFogSightMap(heights.data(), range, grid, remaster::TerrainHorizonOptions{}.maxSize);
++        if (s_sight.map)
++            LOG_INFO(Graphics, "AI fog sight: map {}x{} at {} m (from {}x{} at {} m) built in {} ms", s_sight.map->size,
++                     s_sight.map->size, s_sight.map->cellSize, range, range, grid,
++                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
++                         .count());
++    }
++    const remaster::LightingTuning tuning = GEngine ? GEngine->GetLightingTuning() : remaster::LightingTuning{};
++    remaster::UpdateFogSightMedium(WorldFogInputs(land), tuning, s_sight.map);
++}
++
++void ShutdownFogSight()
++{
++    s_sight = FogSightBuilt{};
++    remaster::SetFogSight(nullptr, nullptr);
++}
++
+ void ShutdownTerrainLighting()
+ {
+     s_state.Stop();
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
+index ec71f41f..400cf1bf 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/TerrainLighting.hpp
+@@ -10,6 +10,10 @@
+ namespace Poseidon
+ {
+ class Landscape;
++namespace remaster
++{
++struct FogInputs;
++}
+ 
+ void UpdateTerrainLighting(Landscape* land);
+ // Cancels and joins any build in flight. Called on world teardown, so no
+@@ -23,4 +27,21 @@ bool TerrainLightingPending();
+ // the next UpdateTerrainLighting, or as soon as the canopy is handed over.
+ void TerrainCanopyObjectDestroyed(int objectId);
+ 
++// AI sight's air (Graphics/Remaster/VolumetricFog.hpp, AI sight), a part of
++// the simulation: called once per simulation step after the weather and the
++// clock moved (World::SimulateLandscape). When the landscape's heights change
++// (an island loads) the sight map is built at once on the calling thread,
++// whatever the render settings; every step the medium is computed from
++// WorldFogInputs and the lighting knobs (the defaults without a renderer)
++// through ComputeFogMedium with `applied` true. Deterministic: on a server and
++// its clients it follows the same synced weather and date.
++void SimulateFogSight(Landscape* land);
++// Clears AI sight (classic) and drops the map. Called on world teardown.
++void ShutdownFogSight();
++// The fog's inputs from the world: the sun, the weather, the classic fog's
++// range, the view distance and the date (the aridity stays 0: it only sets the
++// dust, which AI sight does not take). The renderer's fog fills its medium
++// from the same function, so the drawn air and AI sight cannot drift apart.
++remaster::FogInputs WorldFogInputs(const Landscape* land);
++
+ } // namespace Poseidon
+diff --git a/arma_CWR/engine/Poseidon/World/WorldSetup.cpp b/arma_CWR/engine/Poseidon/World/WorldSetup.cpp
+index a9047166..f8558248 100644
+--- a/arma_CWR/engine/Poseidon/World/WorldSetup.cpp
++++ b/arma_CWR/engine/Poseidon/World/WorldSetup.cpp
+@@ -321,6 +321,7 @@ World::~World()
+     // No terrain-lighting worker may outlive the world (it reads nothing from
+     // it, but would otherwise be joined during static destruction).
+     ShutdownTerrainLighting();
++    ShutdownFogSight();
+ 
+     VehicleTypes.UnlockAllTypes();
+ 
+@@ -1320,6 +1321,9 @@ void World::SimulateLandscape(float deltaT)
+     }
+     GLOB_LAND->SetOvercast(_actualOvercast);
+     GLOB_LAND->SetFog(_actualFog);
++    // AI sight's air from this step's weather and time (the renderer's fog
++    // takes the same medium; TerrainLighting.hpp SimulateFogSight).
++    SimulateFogSight(GLOB_LAND);
+ }
+ 
+ void World::SetWeather(float overcast, float fog, float time)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 6ea1cffd..2464a934 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -1431,8 +1431,9 @@ class EngineGL33 : public Engine
+         // two at a sixteenth (psFogGlow's ping-pong).
+         unsigned int glowTex[4] = {}, glowFbo[4] = {};
+         int glowW[2] = {}, glowH[2] = {};
+-        // The fog floor and the mist layer (RG32F, the terrain map's grid), the
+-        // map they were built from, and the CPU copy AI sight reads.
++        // The fog floor and the mist layer (RG32F, AI sight's map's grid), the
++        // terrain map the dust's aridity was taken from, and AI sight's map
++        // (the simulation's, TerrainLighting.hpp SimulateFogSight) they show.
+         unsigned int floorTex = 0;
+         const Poseidon::remaster::TerrainHorizonMap* floorFor = nullptr;
+         float floorCell = 0.0f;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+index b32362da..da48333a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+@@ -24,8 +24,10 @@
+ //      before the feature.
+ // The legacy shafts hold off while it runs (PlanPostStages). The forward fog
+ // keeps only its view-distance edge (UpdateFogMedium sets litHaze.x;
+-// finishFragment). AI sight takes the mist and the humid ground air through
+-// SetFogSight.
++// finishFragment). AI sight is not set here: the simulation computes it from
++// the same inputs (WorldFogInputs) and knobs through the same ComputeFogMedium,
++// whether or not this stage runs (TerrainLighting.hpp SimulateFogSight); the
++// fog floor below is drawn from AI sight's own map.
+ //
+ // GL state: the stage binds its inputs to kPostUnits and unit 12 (the fog
+ // floor, kFogFloorUnit) and reads units 8 (the sky table, rebound here), 9 and
+@@ -46,6 +48,7 @@
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
++#include <Poseidon/World/Terrain/TerrainLighting.hpp>
+ 
+ #include <algorithm>
+ #include <cmath>
+@@ -275,6 +278,10 @@ float Smooth(float e0, float e1, float x)
+     return t * t * (3.0f - 2.0f * t);
+ }
+ 
++// The last frame that warned of a difference between the drawn air and AI
++// sight (UpdateFogMedium), so the warning comes at most every 600 frames.
++std::uint32_t s_sightWarnFrame = 0;
++
+ // A light in the air: its reach there (m) and its intensity (linear, I in
+ // E = I / r^2): the physical lamps and low beams (FrameLights.hpp), and a
+ // fire's or another light's classic colour at a strength of its kind.
+@@ -304,24 +311,31 @@ void EngineGL33::UpdateFogMedium()
+         const bool post =
+             _lighting.postEffects && SSAAActive() && !_post.unavailable && !_fog.unavailable && !_prevWorldDepthCleared;
+         const bool on = post && _featureGates[rm::Feature::VolFog].on;
+-        const rm::GateInputs& g = _featureGates.inputs;
+-        rm::FogInputs in;
+-        in.sunElevationDeg = g.sunElevationDeg;
+-        in.sunAzimuthDeg = g.sunAzimuthDeg;
+-        in.nightEffect = g.nightEffect;
+-        in.skyThrough = g.skyThrough;
+-        in.fog = g.fog;
+-        in.rain = g.rainDensity;
+-        in.viewDistance = ENGINE_CONFIG.tacticalZ;
+-        in.fogStart = GScene->GetFogMinRange();
+-        in.fogEnd = GScene->GetFogMaxRange();
+-        in.year = Glob.clock.GetYear();
+-        in.dayOfYear = std::clamp(static_cast<int>(std::floor(Glob.clock.GetTimeInYear() / OneDay)), 0, 365);
++        // The world's inputs, the same function AI sight's step takes them
++        // from (the aridity, for the dust, is the renderer's own).
++        rm::FogInputs in = Poseidon::WorldFogInputs(GScene->GetLandscape());
+         in.aridity = _fog.aridity;
+         _fog.medium = rm::ComputeFogMedium(in, _lighting, on);
+         _fog.on = on;
+-        // AI sight takes the same mist and humid air while the fog runs.
+-        rm::SetFogSight(on ? &_fog.medium : nullptr, _fog.sightMap);
++        rm::SetDrawnFogMedium(on ? &_fog.medium : nullptr);
++        // The drawn mist and humid air are AI sight's (the simulation step
++        // computed them from the same inputs and knobs this frame); a
++        // difference means a second source crept in.
++        if (on)
++        {
++            const rm::FogMedium& ai = rm::FogSightMedium();
++            auto differs = [](float a, float b) { return std::fabs(a - b) > 1e-4f * std::max(std::fabs(a), 1e-6f); };
++            if ((differs(ai.groundSigma, _fog.medium.groundSigma) || differs(ai.mistSigma, _fog.medium.mistSigma) ||
++                 differs(ai.mistLayer, _fog.medium.mistLayer) || differs(ai.groundHeight, _fog.medium.groundHeight)) &&
++                frame - s_sightWarnFrame > 600u)
++            {
++                s_sightWarnFrame = frame;
++                LOG_WARN(Graphics,
++                         "GL33 fog: drawn air and AI sight differ: ground {:.3e} vs {:.3e}, mist {:.3e} vs {:.3e} "
++                         "(a knob changed after the simulation step, or a second source of the medium)",
++                         _fog.medium.groundSigma, ai.groundSigma, _fog.medium.mistSigma, ai.mistSigma);
++            }
++        }
+         if (on && frame % 600u == 0u)
+             LOG_INFO(Graphics,
+                      "GL33 fog: medium haze={:.2e} ground={:.2e} weather={:.2e} mist={:.2e} dust={:.2e} event={:.2f} "
+@@ -377,7 +391,7 @@ void EngineGL33::DestroyFogResources()
+     _fog.nearW = _fog.nearH = 0;
+     _fog.floorFor = nullptr;
+     _fog.sightMap.reset();
+-    rm::SetFogSight(nullptr, nullptr);
++    rm::SetDrawnFogMedium(nullptr);
+     _fog.programsTried = false;
+     _fog.unavailable = false;
+     _fog.historyValid = false;
+@@ -503,26 +517,27 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
+ 
+ void EngineGL33::UpdateFogFloor()
+ {
+-    // The fog floor and the mist layer follow the terrain map: built once per
+-    // map on the CPU (VolumetricFog.hpp BuildFogFloor, BuildFogLayer), kept on
+-    // their own texture and, with the ground, for AI sight.
++    // The dust's aridity follows the terrain map's ground tints (render only).
+     const rm::TerrainHorizonMap* map = (_terrainMap && _terrainMap->Valid()) ? _terrainMap.get() : nullptr;
+-    if (map == _fog.floorFor)
++    if (map != _fog.floorFor)
++    {
++        _fog.floorFor = map;
++        if (map && map->height.size() == static_cast<size_t>(map->size) * static_cast<size_t>(map->size))
++            _fog.aridity = rm::FogAridity(map->groundTint, map->height);
++    }
++    // The fog floor and the mist layer are AI sight's own map (built by the
++    // simulation when the island loads, VolumetricFog.hpp BuildFogSightMap):
++    // the drawn mist lies where AI sight finds it, from the first frame and
++    // whatever the terrain lighting's settings.
++    std::shared_ptr<const rm::FogSightMap> sight = rm::FogSightMapInUse();
++    if (sight && !sight->Valid())
++        sight.reset();
++    if (sight == _fog.sightMap)
+         return;
+-    _fog.floorFor = map;
+     DeleteTex(_fog.floorTex);
+-    _fog.sightMap.reset();
+-    if (!map || map->height.size() < static_cast<size_t>(map->size) * static_cast<size_t>(map->size))
+-        return;
+-    auto sight = std::make_shared<rm::FogSightMap>();
+-    sight->size = map->size;
+-    sight->cellSize = map->cellSize;
+-    sight->ground.assign(map->height.begin(), map->height.begin() + static_cast<size_t>(map->size) * map->size);
+-    sight->floorY = rm::BuildFogFloor(sight->ground.data(), map->size, map->cellSize);
+-    sight->layer = rm::BuildFogLayer(sight->ground.data(), sight->floorY, map->size, map->cellSize);
+-    if (!sight->Valid())
++    _fog.sightMap = sight;
++    if (!sight)
+         return;
+-    _fog.aridity = rm::FogAridity(map->groundTint, sight->ground);
+     std::vector<float> packed(sight->floorY.size() * 2);
+     for (size_t i = 0; i < sight->floorY.size(); ++i)
+     {
+@@ -531,10 +546,10 @@ void EngineGL33::UpdateFogFloor()
+     }
+     GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
+     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+-    _fog.floorTex = Make2D(GL_RG32F, GL_RG, GL_FLOAT, map->size, map->size, packed.data());
++    _fog.floorTex = Make2D(GL_RG32F, GL_RG, GL_FLOAT, sight->size, sight->size, packed.data());
+     GL33Bind::Invalidate();
+-    _fog.floorCell = map->cellSize;
+-    _fog.floorSize = map->size;
++    _fog.floorCell = sight->cellSize;
++    _fog.floorSize = sight->size;
+     float layerMax = 0.0f;
+     size_t layerCells = 0;
+     for (float l : sight->layer)
+@@ -542,10 +557,10 @@ void EngineGL33::UpdateFogFloor()
+         layerMax = std::max(layerMax, l);
+         layerCells += l > 1.0f ? 1u : 0u;
+     }
+-    _fog.sightMap = std::move(sight);
+     LOG_INFO(Graphics,
+-             "GL33 fog: fog floor {}x{} at {} m; mist layer up to {:.1f} m over {:.1f}% of the map; aridity {:.2f}",
+-             map->size, map->size, map->cellSize, layerMax,
++             "GL33 fog: fog floor {}x{} at {} m (AI sight's map); mist layer up to {:.1f} m over {:.1f}% of the map; "
++             "aridity {:.2f}",
++             sight->size, sight->size, sight->cellSize, layerMax,
+              100.0 * static_cast<double>(layerCells) / static_cast<double>(_fog.sightMap->floorY.size()), _fog.aridity);
+ }
+ 
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+index dcff276b..4f517a78 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -3,6 +3,7 @@
+ #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+ #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+ #include <Poseidon/Graphics/Remaster/PostStages.hpp>
++#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+ #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+@@ -337,6 +338,168 @@ TEST_CASE("Volumetric fog: AI sight takes the mist and the humid air the player
+     SetFogSight(nullptr, nullptr);
+ }
+ 
++// ---- AI sight is the simulation's (round 4 "ailink") ----------------------------
++
++namespace
++{
++
++// A misty morning in fog: the weather and the time the simulation and the
++// renderer both read (WorldFogInputs).
++FogInputs MistyMorning()
++{
++    FogInputs in = ClearNoon();
++    in.sunElevationDeg = 3.0f;
++    in.sunAzimuthDeg = 80.0f;
++    in.skyThrough = 0.3f;
++    in.fog = 0.3f;
++    in.viewDistance = 1500.0f;
++    in.fogStart = 450.0f;
++    in.fogEnd = 1500.0f;
++    return in;
++}
++
++// A valley 64 x 64 cells of 50 m: walls at 90 m, a floor at 20 m between
++// x 20 and 44 (the mist pools there).
++std::vector<float> ValleyHeights(int n)
++{
++    std::vector<float> h(static_cast<size_t>(n) * n);
++    for (int z = 0; z < n; ++z)
++        for (int x = 0; x < n; ++x)
++            h[static_cast<size_t>(z) * n + x] = (x >= 20 && x <= 44) ? 20.0f : 90.0f;
++    return h;
++}
++
++} // namespace
++
++TEST_CASE("Volumetric fog: AI sight equals the drawn fog's air for the same inputs and knobs", "[remaster][fog]")
++{
++    const std::vector<float> h = ValleyHeights(64);
++    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
++    REQUIRE(map);
++    REQUIRE(map->Valid());
++    // Across the valley floor, 1.7 m over it, 500 m.
++    const float a[3] = {1100.0f, 21.7f, 1000.0f};
++    const float b[3] = {1100.0f, 21.7f, 1500.0f};
++    for (float density : {1.0f, 0.5f, 2.0f})
++        for (float mist : {1.0f, 0.5f, 0.0f})
++        {
++            LightingTuning t;
++            t.fogDensity = density;
++            t.fogMist = mist;
++            const FogInputs in = MistyMorning();
++            UpdateFogSightMedium(in, t, map);
++            // The renderer's medium while its fog draws.
++            const FogMedium drawn = ComputeFogMedium(in, t, true);
++            const FogMedium& ai = FogSightMedium();
++            CHECK(ai.groundSigma == drawn.groundSigma);
++            CHECK(ai.groundHeight == drawn.groundHeight);
++            CHECK(ai.mistSigma == drawn.mistSigma);
++            CHECK(ai.mistLayer == drawn.mistLayer);
++            CHECK(ai.mistFall == drawn.mistFall);
++            CHECK(FogSightActive());
++            CHECK(FogSightTransmittance(a, b) == FogSightTransmittanceThrough(drawn, *map, a, b));
++        }
++    // The knobs move AI sight as they move the drawn fog: thicker with
++    // fogDensity, thinner without the mist.
++    auto sightWith = [&](float density, float mist)
++    {
++        LightingTuning t;
++        t.fogDensity = density;
++        t.fogMist = mist;
++        UpdateFogSightMedium(MistyMorning(), t, map);
++        return FogSightTransmittance(a, b);
++    };
++    const float base = sightWith(1.0f, 1.0f);
++    CHECK(base < 0.9f); // the misty valley takes a real share
++    CHECK(sightWith(2.0f, 1.0f) < base);
++    CHECK(sightWith(1.0f, 0.0f) > base);
++    SetFogSight(nullptr, nullptr);
++}
++
++TEST_CASE("Volumetric fog: AI sight does not follow the render path", "[remaster][fog]")
++{
++    const std::vector<float> h = ValleyHeights(64);
++    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
++    REQUIRE(map);
++    const float a[3] = {1100.0f, 21.7f, 1000.0f};
++    const float b[3] = {1100.0f, 21.7f, 1500.0f};
++    const FogInputs in = MistyMorning();
++    UpdateFogSightMedium(in, LightingTuning{}, map);
++    const float normal = FogSightTransmittance(a, b);
++    REQUIRE(normal < 0.9f);
++
++    // Post effects off and a vehicle interior: the fog's gate is off, the
++    // renderer keeps the classic forward fog; AI sight is the same.
++    LightingTuning noPost;
++    noPost.postEffects = false;
++    GateInputs gi;
++    gi.fog = in.fog;
++    gi.skyThrough = in.skyThrough;
++    gi.sunElevationDeg = in.sunElevationDeg;
++    gi.sunAzimuthDeg = in.sunAzimuthDeg;
++    CHECK_FALSE(ComputeFeatureGates(gi, noPost)[Feature::VolFog].on);
++    UpdateFogSightMedium(in, noPost, map);
++    CHECK(FogSightActive());
++    CHECK(FogSightTransmittance(a, b) == normal);
++
++    GateInputs interior = gi;
++    interior.interior = true;
++    CHECK_FALSE(ComputeFeatureGates(interior, LightingTuning{})[Feature::VolFog].on);
++    UpdateFogSightMedium(in, LightingTuning{}, map);
++    CHECK(FogSightTransmittance(a, b) == normal);
++
++    // The fog's quality knob and the other render-only knobs change nothing.
++    LightingTuning coarse;
++    coarse.fogQuality = 0.0f;
++    coarse.fogSun = 0.3f;
++    coarse.fogLights = 0.0f;
++    UpdateFogSightMedium(in, coarse, map);
++    CHECK(FogSightTransmittance(a, b) == normal);
++    SetFogSight(nullptr, nullptr);
++}
++
++TEST_CASE("Volumetric fog: AI sight works without a renderer", "[remaster][fog]")
++{
++    // A dedicated server or a headless client: no GL, no terrain horizon map,
++    // the lighting tuning the base engine reports (classic, default knobs).
++    // The sight map comes straight from the heights, sampled as the horizon
++    // map samples them.
++    const int n = 40;
++    std::vector<float> h(static_cast<size_t>(n) * n);
++    for (int z = 0; z < n; ++z)
++        for (int x = 0; x < n; ++x)
++            h[static_cast<size_t>(z) * n + x] = 20.0f + 3.0f * std::fabs(static_cast<float>(x - 20)) +
++                                                0.5f * static_cast<float>(z % 7);
++    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), n, 25.0f, 16);
++    REQUIRE(map);
++    TerrainHorizonOptions options;
++    options.maxSize = 16;
++    options.threads = 1;
++    TerrainHorizonMap horizon;
++    REQUIRE(BuildTerrainHorizonMap(h.data(), n, 25.0f, options, horizon));
++    CHECK(map->size == horizon.size);
++    CHECK(map->cellSize == horizon.cellSize);
++    CHECK(map->ground == horizon.height);
++    CHECK(map->floorY == BuildFogFloor(horizon.height.data(), horizon.size, horizon.cellSize));
++    CHECK(BuildFogSightMap(nullptr, n, 25.0f) == nullptr);
++    CHECK(BuildFogSightMap(h.data(), 1, 25.0f) == nullptr);
++
++    LightingTuning headless;
++    headless.remastered = false;
++    UpdateFogSightMedium(MistyMorning(), headless, map);
++    CHECK(FogSightActive());
++    const float from[3] = {500.0f, 22.0f, 100.0f};
++    const float to[3] = {500.0f, 22.0f, 800.0f};
++    CHECK(FogSightTransmittance(from, to) < 1.0f);
++    CHECK(FogSightTransmittance(from, to) ==
++          FogSightTransmittanceThrough(ComputeFogMedium(MistyMorning(), LightingTuning{}, true), *map, from, to));
++    // No island: classic sight.
++    UpdateFogSightMedium(MistyMorning(), headless, nullptr);
++    CHECK_FALSE(FogSightActive());
++    CHECK(FogSightTransmittance(from, to) == 1.0f);
++    SetFogSight(nullptr, nullptr);
++}
++
+ TEST_CASE("Volumetric fog: off, the forward fog is the classic one; on, it keeps only the view-distance edge",
+           "[remaster][fog]")
+ {

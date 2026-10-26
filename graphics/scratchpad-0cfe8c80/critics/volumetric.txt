@@ -1,0 +1,52 @@
+## track
+volumetric
+## files_verified
+true
+## artefacts_seen
+All cited files exist: 12 BEST_*.png, cmp/probe1..9 (incl. pan strip PNG and both GIFs, hl_front_edge_zoom, hl_side_crop7, pinewood_cost_7, lowsun_glow_check, town_night_fog_8, pinewood_morn_crop8/crop9), cmp/best_probe5, glsl/ (4 shaders), prototype.patch (identical to `git diff` in D:\Arma_CWA_worktrees\gfx-volumetric, 4 files touched), NOTES.md, timings.md (265 rows), tests, scripts, and runs/probe1..9 with game_stdout.log. Every probe 6 to 9 log shows the RemasterUD-volumetric package, "GL33 post: volumetric programs ok ok", render target 1440x960 with a 720x480 march, every triSetLighting knob answered OK, and per-shot "volumetric fogMax ... shadow 1 casc 4" lines. In probe 9, mist 0.3 logs as mist 0.0012, which is what it should be. The pixel diffs are real. Run-to-run noise on identical shots is 0.3 to 1.3 mean-abs. Vol variants against Remastered are 5 to 15 mean-abs (pinewood_mist va +15.5, town_eve vg4e +9.6, hl_front vl4 +5.4, all lit-only at the misty settings). I looked at the BEST images, the 2x zooms I cropped from the raw shots (pine_eve, pine_eve_clear, town_eve, sunrise_ridge) and diff heatmaps (pinewood_morn and lowsun_fp at mist 0.3, forest_edge_golden).
+## prototype_actually_loaded
+Yes. The C++ prototype build (dist/gfx-volumetric-rwdi, package RemasterUD-volumetric) ran in every probe. The logs show "GL33 post: volumetric programs ok ok", and each frame logs the medium, the lights and the shadow-cascade state. The knobs are accepted (answer=OK), and variant shots differ from the vol=0 Remastered shot by far more than the run-to-run noise.
+## missing_or_false_claims
+[
+ "'It only adds light' / 'The final variants only add light' is false against current Remastered. The pass replaces the old screen-space shafts, so their lift is lost. G4EM3 (the clear-weather fix, BEST_lowsun_fp) darkens the backlit hulls by 15 to 19 percent: jeep L 74.6 to 63.3, tent 73.4 to 59.6, APC 44.4 to 35.2. The pinewood left crown goes from 77.0 to 66.7. 8.5 percent of lowsun pixels are more than 8 levels darker. G25E also darkens the APC (44.4 to 41.2) and the left crown (77.0 to 73.2).",
+ "'lowsun_fp looks like the current Remastered' with mist 0.3: at a glance yes, but measurably every vehicle, the tent and the soldier are darker (red across all objects in the diff heatmap). It is a darker variant, not a neutral one.",
+ "'gain 2.5 removes a blocky glow patch right of the right-hand cypress' (probe 6): the final BEST_pine_eve (probe 8 vg25e) and BEST_pine_eve_clear (probe 9 vg4em3) both still show rectangular beige glow patches with hard vertical edges and a flat bottom edge beside the right cypress. There are also vertical smear streaks down the left cypress group.",
+ "'With the sun behind the camera nothing visible changes' (forest_edge_golden_7) is overstated. vg25 lifts the sunlit crowns by about 7 levels (L 53 to 61, 59 to 67) and blue by about 20 percent (39.7 to 48.4), a mild desaturating veil over golden-hour foliage. 10 percent of pixels are more than 8 levels brighter.",
+ "BEST_pine_mist.png is from probe 5, not the current code. The notes disclose this, but it sits in the BEST set.",
+ "The 'Remastered (current)' panels have object shadows forced on with triEnableShadows, so they are not the committed 20261017-final baseline. This is disclosed and fair for isolating the effect, but the BEST pairs are not the same before picture the other tracks use.",
+ "Cost numbers are contended and measured at 1440x960, not 1080p. That is disclosed, but the 'uncontended ~0.4-0.5 ms' estimate is a guess from minimum readings, not a measurement."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+4
+## taste_violations
+[
+ "Wash or veil: G25E/G4E put a pale beige veil over backlit crowns and bushes. In town_eve (2x zoom) the trees on the right lose their shading and the roof detail is fogged. The pinewood top-right crowns get grey smoke-like puffs. lowsun_fp at mist 1.5 has a glowing horizon band.",
+ "Flattened tree crowns: in town_eve vg25e the crowns become flat beige silhouettes. In sunrise_ridge vg25e the far cypresses turn into translucent peach ghosts and the left hill is washed out.",
+ "Only darker: the clear-weather variant G4EM3 (the proposed fix for the wash) darkens backlit vehicles, the tent and crowns by 15 to 19 percent against current Remastered, because it removes the old shafts' lift without putting anything back in open terrain.",
+ "Blocky artefacts: rectangular glow patches with hard vertical edges beside the cypresses in pine_eve (both mist settings), half-res stair-stepped tree silhouettes and a flat 'shelf' inside the headlight beam, and a light block beside a trunk in hl_side.",
+ "Night: the point-light halos tint the whole sky brown. The explorer rejected this and it must not ship.",
+ "Mild desaturating lift on sunlit crowns with the sun behind the camera (blue +20 percent in forest_edge_golden), which cools golden-hour foliage slightly.",
+ "Headlight beams are pink-white (0.79 0.61 0.61) and read as a uniform bright wedge with a hard upper edge, not a soft beam."
+]
+## cost_ok
+true
+## score_0_to_10
+6
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\volumetric\BEST_pinewood_morn.png
+## one_line
+This is a real, working ray march occluded by the shadow map. It gives clearly visible god rays in woods at dawn and dusk and striking headlight cones at night. But the settings that show beams also veil the crowns, the clear-weather fix darkens backlit hulls, and blocky glow patches remain.
+## critique
+Verification: the evidence is genuine. The patch is identical to the scratch worktree diff, every probe log shows the volumetric programs compiling and the knobs accepted, and the pixel diffs are far above the run-to-run noise. Nothing is fabricated. The weaknesses are in a few over-generous self-assessments.
+
+What works: BEST_pinewood_morn (gain 4) and BEST_pinewood_mist have diagonal shafts slanting through the pine crowns onto the grass, with a glow behind the crowns. A player would notice this at once, and it is the strongest daytime step toward the RTX look in this track. BEST_pine_eve has a strong warm beam through the cypress gap that lights the ground stripe. BEST_hl_front (VL4) is the most 'different game' frame: the Jeep's cones glow in night mist, where Remastered shows only a ground pool. In sunrise_ridge, the cypress shadow volume running across the ground mist is dramatic. The technique is the right industry approach: shadow-map, horizon and cloud occluded single scattering with HG phase, the rig's own sun chroma (so evenings stay warm), and a scene-light hookup for spotlights. The cost (0.4 to 2.4 ms contended at 1440x960, maybe 1 to 3 ms at 1080p, plus the now-real shadow pass) fits an RTX 3060 at 60 fps.
+
+What does not: (1) The settings that show beams (mist 1.5) also lay a pale beige veil over backlit crowns. In town_eve the right-hand trees go flat and the roofs fog over. In sunrise_ridge the far cypresses become translucent ghosts and the hill washes out. In lowsun_fp the horizon band glows. These are close to the owner's 'wash' and 'flattened crowns' rejections. (2) The proposed cure, mist 0.3, loses most of the forest fans. It is also measurably darker than current Remastered on backlit hulls (15 to 19 percent), because the old screen-space shafts are removed. So the 'only adds light' claim fails exactly where it was meant to make things safe. (3) Blocky rectangular glow patches with hard vertical edges survive beside the cypresses in both final pine_eve images, contrary to the probe 6 claim. The headlight beam shows stair-stepped half-res silhouettes and a flat shelf. (4) Even with the sun behind the camera, the sunlit crowns get a mild desaturating lift. (5) Night point lights fail (brown sky). The beams are pink-white, and from the side they nearly vanish (mean-abs 0.87). (6) Fast motion and moving occluders are untested. The 0.3-degree-per-frame pan proves little.
+
+Against the RTX vision: volumetric light is one ingredient of that look, and this delivers it in narrow situations (low sun behind trees, headlights in mist). In stills it still reads like a good modern god-ray effect with a haze problem, not path-traced air. The veil and the blockiness give it away at full size. Rough rtx_vision is 4 out of 10.
+
+Worth building properly (6 out of 10): yes, as infrastructure. The march, the shadow-map binding and the spotlight path are the expensive groundwork, and headlights in mist are nearly shippable. Production needs: a medium driven by weather and time of day that does not darken against the old shafts (compensate, or keep a sun-glow term); a fix for the box artefacts (probably the depth-matched mean or the 250 m cap boundary); full-res or froxel edge handling; and a better answer for backlit crowns than a global mist knob, for example limiting in-scatter in front of near opaque geometry, or a height and density field that is thinner on hilltops. Object shadows must also be on by default, or nothing here works.

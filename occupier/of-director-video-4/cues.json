@@ -1,0 +1,214 @@
+{
+ "cards": [
+  {
+   "lines": [
+    [
+     "h",
+     "Operation Long Harvest"
+    ],
+    [
+     "s",
+     "the occupier director on Guerrilla.Abel, one engine run, 8298 s of game time (Day 1, 07:30 to 09:48)"
+    ],
+    [
+     "p",
+     "occupier-forces at b59db00 (df9457e plus the roadmap commit), built in build/agent2-rwdi, on the Remaster shadow of2, stock Guerrilla.Abel (poolStart 60). Every occupier decision is the engine's own; no director key was tuned."
+    ],
+    [
+     "d",
+     "Levers (resistance side only): companions off and the legacy script QRF parked; the player invulnerable and parked in the north-west hills; each captured point set to garrison 0 and support 55 and taken by two to four invulnerable fighters; the hold squads of the Outpost and the Airfield deleted; Le Port heat raised once to 60; time x8, x4 while a force is live. One tri run, --retries 0 -j1, strict mode, 1145 s wall."
+    ]
+   ],
+   "voice": "Operation Long Harvest: one engine run on the stock Abel campaign, the occupier director at its shipped settings. The script plays only the resistance. Every occupier move is the engine's own.",
+   "dur": 14
+  }
+ ],
+ "cues": [
+  {
+   "sim": 11.2,
+   "text": "A cell takes Houdan and moves on. The director is still dormant, so the old rule rolls a forty percent chance: no answer.",
+   "line": "[12 s] CounterAttack: Village rose; the occupier does not answer (chance 0.40, 0 town(s) taken before)",
+   "rate": 14
+  },
+  {
+   "sim": 194.99,
+   "text": "Four fighters take Le Port and stay. A second town wakes the director, with two tokens in hand.",
+   "line": "[196 s] OccupierForces: AWAKE after 2 distinct towns (Le Port the latest), 2 token(s)",
+   "rate": 5
+  },
+  {
+   "sim": 240.47,
+   "text": "A local reports the four. To out-gun them it buys a truck with a tank escort: twenty-five units, seventy-four seconds by road.",
+   "line": "[240 s] OccupierForces: [op 1] Motorized squad (4, Ural) from Le Port Harbour to Le Port (25 unit(s), the pool pays 21, lethality 17.00 of 14.40, 4 fighter(s) reported, road 74 s)",
+   "rate": 4
+  },
+  {
+   "sim": 300.59,
+   "text": "Empty Houdan gets four walkers. Its road winds past the detour rule, so the quote is the straight line times one and a half.",
+   "line": "[301 s] OccupierForces: [op 2] Foot squad (4) from Outpost to Village (4 unit(s), the pool pays 0, lethality 4.00 of 0.00, 0 fighter(s) reported, line x1.5 535 s)",
+   "rate": 3
+  },
+  {
+   "sim": 314.03,
+   "text": "The column arrives with defenders present and goes live, five point seven kilometres from the player. Only the riflemen are born; the armour stays abstract. Repelled.",
+   "line": "[315 s] CounterAttack: [op 1] born for Le Port (spawnReason route) at [8275, 3397], 5716 m from the player   [417 s] OccupierForces: [op 1] Repelled at Le Port: 4 lost, 0 going home; Le Port rests 1800 s, heat +15",
+   "rate": 9
+  },
+  {
+   "sim": 812.01,
+   "text": "A cell takes the Outpost and its hold squad is deleted: the base is empty. Walking takes fifty-five minutes by road, so a Mi17 brings six.",
+   "line": "[841 s] OccupierForces: [op 3] arrival rule (forcesSlowEta): the cheapest, FOOT, needs road 3324 s; TRANSPORT_HELI goes, line 51 s",
+   "rate": 3
+  },
+  {
+   "sim": 908.56,
+   "text": "They hold it abstractly. The census counts nobody, the meter fills in seventeen seconds, and the base is retaken with no soldier born.",
+   "line": "[909 s] CounterAttack: 6 attacker(s) walk into empty Outpost (support 0, occCapture 0)   [926 s] OccupierForces: [op 3] Outpost retaken: 6 stay as its garrison",
+   "rate": 2
+  },
+  {
+   "sim": 937.26,
+   "text": "Dourdan and Chapoi fall in one tick, and the count is exact: two towns before Chapoi, three before Dourdan.",
+   "line": "[938 s] CounterAttack: Chapoi rose; the occupier director takes it (2 town(s) taken before)   [938 s] CounterAttack: Dourdan rose; the occupier director takes it (3 town(s) taken before)",
+   "rate": 20
+  },
+  {
+   "sim": 1441.63,
+   "text": "Chapoi is seventy minutes away on foot, so it also gets a helicopter, and is retaken unseen.",
+   "line": "[1442 s] OccupierForces: [op 4] arrival rule (forcesAirEta): the cheapest, FOOT, needs road 4212 s; TRANSPORT_HELI goes, line 62 s",
+   "rate": 25
+  },
+  {
+   "sim": 2042.21,
+   "text": "Three fighters hold Arudy and a local reports them. The plan expected a helicopter; with three reported, the cheapest lethal package is a BMP, four minutes by road.",
+   "line": "[2042 s] OccupierForces: [op 5] APC (4, BMP) from Outpost to Arudy (15 unit(s), the pool pays 11, lethality 11.00 of 10.80, 3 fighter(s) reported, road 256 s)",
+   "rate": 20
+  },
+  {
+   "sim": 2457.05,
+   "text": "Raiders empty the Airfield and leave. Control drops to sixty-nine percent, and wave one, thirty strong, is called to the Harbour.",
+   "line": "[2523 s] OccupierForces: Wave 1 (30) inbound to Le Port Harbour, control 0.69 (control threshold; lands in 600 s)",
+   "rate": 8
+  },
+  {
+   "sim": 2642.68,
+   "text": "For eight minutes no base can spare six men for the Airfield. The refusal names the gap: short by one.",
+   "line": "[2643 s] OccupierForces: no operation on Airfield: no occupier base can spare the minimum (6 needed, the largest single-base spare is 5: short 1)",
+   "rate": 40
+  },
+  {
+   "sim": 3123.32,
+   "text": "The wave lands and lifts the pool to ninety. Its strikes go for the cluster around Dourdan: six men walk on the headquarters, forty minutes by road.",
+   "line": "[3123 s] OccupierForces: [op 6] Wave 1 strike: HQ assault (foot 6) from Le Port Harbour on Camp (6 unit(s), the pool pays 0 and stages the infantry, lethality 6.00 of 0.00, 0 fighter(s) reported, road 2450 s)",
+   "rate": 6
+  },
+  {
+   "sim": 3183.34,
+   "text": "Now the spare cap sends six from the Harbour to the Airfield by helicopter. Nobody is reported there, so no jet opener. Retaken in three minutes.",
+   "line": "[3183 s] OccupierForces: [op 9] spare cap: no base can spare the 12 bodies Airfield asks, 6 from Le Port Harbour (the largest single-base spare, floor 6)   [3352 s] CounterAttack: Airfield retaken by the holding force",
+   "rate": 12
+  },
+  {
+   "sim": 3847.54,
+   "text": "Le Port is made urgent, four fighters reported, the director strong.",
+   "line": "[3848 s] scenario note: lever: Le Port heat +60 (a loud ambush on the coast road: the town is URGENT); 4 fighter(s) reported there, pool 62 of 60, band STRONG",
+   "rate": 8,
+   "gapmax": 2.0
+  },
+  {
+   "sim": 3903.45,
+   "text": "It buys two BMPs and a jet: forty-five units at once. The pool falls to seventeen and the band from strong straight to thin.",
+   "line": "[3904 s] OccupierForces: [op 12] Jet strike over Le Port (town, Su25) from Airfield (the pool pays 23, 4 fighter(s) reported, at the reported fighters), urgent   [3904 s] OccupierForces: band STRONG -> THIN (pool 17 of 60)",
+   "rate": 1.2
+  },
+  {
+   "sim": 3941.26,
+   "text": "The abstract strike kills nobody, but Le Port loses forty support and forty standing for twenty minutes. The jet's refund restores strong thirty-eight seconds later.",
+   "line": "[3942 s] OccupierForces: [op 12] Struck Le Port: support 60, standing 10 (-40 each), heat +15, half income until 5142; 0 town(s) within 2000 m -10 each   [3942 s] OccupierForces: band THIN -> STRONG (pool 40 of 60)",
+   "rate": 3
+  },
+  {
+   "sim": 4264.06,
+   "text": "The cell rises again at the Outpost, Houdan and Dourdan. Control falls to seventy-seven percent, but wave one is spent; the next waits at fifty.",
+   "line": "[4264 s] scenario note: control 0.773214 after the rising",
+   "rate": 25
+  },
+  {
+   "sim": 5572.6,
+   "text": "The wave's walkers reach the headquarters unseen. Nobody defends it; its meter fills in fifteen seconds and it is destroyed.",
+   "line": "[5574 s] CounterAttack: [op 6] 6 attacker(s) stand at the undefended HQ   [5589 s] OccupierForces: HQ at Camp destroyed (epoch 1); cache emptied, 0 garaged vehicle(s) wrecked",
+   "rate": 1.5
+  },
+  {
+   "sim": 5590.06,
+   "text": "The six go back to the pool, five banked at the Airfield over the ceiling. In the same second the log claims they stay as the HQ's garrison.",
+   "line": "[5590 s] OccupierForces: ledger: 5 unit(s) over poolStart banked at Airfield (HQ assault done; pool 61 of 60; reserve 6, pending 5, of 12)   [5590 s] OccupierForces: [op 6] @HQ retaken: 6 stay as its garrison",
+   "rate": 2
+  },
+  {
+   "sim": 5645.83,
+   "text": "Then forty-five free minutes. A push-out walks forty-one minutes to Dourdan; a foot squad dies at Le Port.",
+   "line": "[5646 s] OccupierForces: [op 15] Push-out: foot squad (4) from Airfield to Dourdan (4 unit(s), the pool pays 0, lethality 5.00 of 0.00, 0 fighter(s) reported, road 2474 s)",
+   "rate": 60
+  },
+  {
+   "sim": 7010.43,
+   "text": "Then the strong director sits on two tokens for twenty-one minutes. Arudy's heat ran out during its rest, and tips keep it from ever being quiet, so nothing goes there.",
+   "line": "[8297 s] scenario note: end: pool 60 of 60, band STRONG, tokens 2, operation counter 16, waves fired 1, control 0.830357",
+   "rate": 100
+  }
+ ],
+ "table": [
+  [
+   "Operations launched",
+   "16 by kind: retake director 7, base director 2, retake pushout 2, hq_assault wave 1, retake wave 1, reinforce wave 1, strike director 1, base pushout 1"
+  ],
+  [
+   "By package at launch",
+   "foot 7, helicopter 4, truck 2, apc 2, jet 1; escorts: T72 (op 1), BMP (op 11); none re-planned"
+  ],
+  [
+   "Arrivals",
+   "13 at the target, all abstract first: 8 held an empty target abstractly, 5 found defenders and went live (all repelled)"
+  ],
+  [
+   "Births; deferred by the budget",
+   "5, all at route points 1520 to 5716 m from the player; deferred 0"
+  ],
+  [
+   "Cancelled unseen",
+   "0"
+  ],
+  [
+   "Most bodies and groups",
+   "live AI 41 of 130 (occupier 20, resistance 14, civilian 15); groups on one side 14 (resistance, empty groups of deleted squads counted); far live groups 1; traffic skippedBudget 0"
+  ],
+  [
+   "k after the double capture",
+   "Chapoi 2, Dourdan 3 (Houdan and Le Port before): right"
+  ],
+  [
+   "Pool against poolStart 60",
+   "never above 60 before the wave; 69 of 60 after the wave landed (headroom); low 17 of 60 after the strike"
+  ],
+  [
+   "Banked / dropped",
+   "5 banked at the Airfield (HQ assault survivors) / 0 dropped"
+  ],
+  [
+   "WARN / ERRR, strict checks",
+   "111 WARN (sound 102, texture 5, config 4), 0 ERRR; no check fired in strict mode"
+  ],
+  [
+   "Frame p95",
+   "median 11.2 ms, worst sample 12.4 ms"
+  ],
+  [
+   "Verdict",
+   "Contradicts 6.3: a defended town that repels one attack drops out of reach (its +15 heat decays inside the 30 min rest, tips keep it from being quiet), so the STRONG free 45 minutes saw 2 launches and 21 idle minutes on two tokens. The HQ fall logs '@HQ retaken: 6 stay as its garrison' after refunding them. The loop does not stop."
+  ]
+ ],
+ "table_title": "What the run counted",
+ "outro_voice": "No engine error and no strict check fired, and the census never passed forty-one of a hundred and thirty. But a defended town that repels one attack drops out of the director's reach. The loop goes on.",
+ "foot": "Scripts, trace and logs: tmp/of-director-video-4. Narration: OpenRouter gpt-audio-mini via arma_CWR/voice-lines/generate_voice.py."
+}

@@ -1,0 +1,16 @@
+﻿forest_edge_golden   H-classic  sky-through fraction 0.1830  mean luma 58.4
+forest_edge_golden   H-rem      sky-through fraction 0.1871  mean luma 72.9
+forest_edge_golden   H-cov2     sky-through fraction 0.1863  mean luma 72.7
+forest_edge_golden   H-cov3     sky-through fraction 0.1845  mean luma 72.3
+forest_edge_golden   D-classic  sky-through fraction 0.1887  mean luma 58.4
+forest_edge_golden   D-rem      sky-through fraction 0.1898  mean luma 72.5
+forest_edge_golden   D-cov1     sky-through fraction 0.1845  mean luma 71.2
+forest_edge_golden   D-cov3     sky-through fraction 0.1853  mean luma 71.4
+overcast_broken      H-classic  sky-through fraction 0.3168  mean luma 102.1
+overcast_broken      H-rem      sky-through fraction 0.3162  mean luma 92.8
+overcast_broken      H-cov2     sky-through fraction 0.3114  mean luma 91.8
+overcast_broken      H-cov3     sky-through fraction 0.3112  mean luma 92.6
+overcast_broken      D-classic  sky-through fraction 0.3182  mean luma 102.4
+overcast_broken      D-rem      sky-through fraction 0.3182  mean luma 96.0
+overcast_broken      D-cov1     sky-through fraction 0.3081  mean luma 91.4
+overcast_broken      D-cov3     sky-through fraction 0.3114  mean luma 91.9

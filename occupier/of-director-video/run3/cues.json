@@ -1,0 +1,186 @@
+[
+ {
+  "card": [
+   [
+    "h",
+    "Operation Low Tide"
+   ],
+   [
+    "s",
+    "the occupier director, decision by decision"
+   ],
+   [
+    "p",
+    "A fictional campaign on the shipped Guerrilla.Abel template, Remaster data. This is ENGINE OUTPUT: one tri test run of the real game. Every occupier choice, number and position on screen comes from the engine, sampled every 10 s of game time, and the green log lines are quoted from the game log."
+   ]
+  ],
+  "dur": 9.0
+ },
+ {
+  "card": [
+   [
+    "h",
+    "What the scenario script did"
+   ],
+   [
+    "p",
+    "It plays only the resistance: which cell takes which zone, and where the player stands. Test levers, each named on screen when used: director tick 10 s (60 in play), wave lead 120 s (600), birth give-up 60 s (600), time acceleration x4 to x8, garrison reserves set to 0 or 2 to stand in for raids, one heat raise to stand in for an ambush, and invulnerable resistance fighters so the held town stays held."
+   ],
+   [
+    "d",
+    "The occupier side was never scripted."
+   ]
+  ],
+  "dur": 10.0
+ },
+ {
+  "sim": 10.216,
+  "text": "Day one. A resistance cell takes Houdan, beside the player's camp. The director still sleeps.",
+  "line": "OccupierForces: Village taken, 1 distinct town(s) so far",
+  "rate": 4
+ },
+ {
+  "sim": 12.261922595231695,
+  "text": "A first town only gets the old forty percent roll. This time, no answer.",
+  "line": "CounterAttack: Village rose; the occupier does not answer (chance 0.40, 0 town(s) taken before)",
+  "rate": 4
+ },
+ {
+  "sim": 133.224,
+  "text": "A second cell takes Le Port on the south coast. Four fighters stay to hold it.",
+  "line": "OccupierForces: Le Port taken, 2 distinct town(s) so far",
+  "rate": 3
+ },
+ {
+  "sim": 136.23999979804552,
+  "text": "Two towns wake the director. It holds two command tokens and spends them on the hottest towns.",
+  "line": "OccupierForces: AWAKE after 2 distinct towns (Le Port the latest), 2 token(s)",
+  "rate": 3
+ },
+ {
+  "sim": 140.85115697021595,
+  "text": "Four men leave the harbour for Le Port. Nothing spawns: the force is a record with a clock.",
+  "line": "OccupierForces: [op 1] Foot squad (4) from Le Port Harbour to Le Port (4 unit(s), the pool pays 0, lethality 4.00 of 0.00, 0 fighter(s) reported, about 401 s)",
+  "rate": 6
+ },
+ {
+  "sim": 150.81599883854201,
+  "text": "Four more walk from the Outpost to Houdan. No fighters reported, so it buys the minimum.",
+  "line": "OccupierForces: [op 2] Foot squad (4) from Outpost to Village (4 unit(s), the pool pays 0, lethality 4.00 of 0.00, 0 fighter(s) reported, about 357 s)",
+  "rate": 10
+ },
+ {
+  "sim": 181.12682416167294,
+  "text": "Its intel comes only from its own men or from locals. A local in Le Port reports four fighters.",
+  "line": "OccupierForces: a local in Le Port talked: 4 fighter(s) reported (standing 50)",
+  "rate": 10
+ },
+ {
+  "sim": 614.7531548101283,
+  "text": "Houdan was left empty. The squad arrives without ever being born and drains the town.",
+  "line": "CounterAttack: [op 2] arrived abstract at Village (holds the empty target), 2758 m from the player",
+  "rate": 2
+ },
+ {
+  "sim": 633.2880004403886,
+  "text": "Le Port has defenders, so that fight must be real: the squad is born on its road, unseen, four kilometres away.",
+  "line": "CounterAttack: [op 1] born for Le Port (spawnReason route) at [8275, 3397], 4183 m from the player",
+  "rate": 3
+ },
+ {
+  "sim": 769.3532149388393,
+  "text": "Houdan has reverted, but Le Port holds. It rests for thirty minutes and its heat rises.",
+  "line": "OccupierForces: [op 1] Repelled at Le Port: 4 lost, 0 going home; Le Port rests 1800 s, heat +15",
+  "rate": 6
+ },
+ {
+  "sim": 770.372,
+  "text": "Another cell takes the Outpost, then leaves it empty.",
+  "line": "scenario note: lever: Outpost reserve 0 (an ambush on its relief)",
+  "rate": 6
+ },
+ {
+  "sim": 1943.2580019187099,
+  "text": "A token returns. With no hot target, a strong occupier pushes out: six men head for the quiet Outpost.",
+  "line": "OccupierForces: [op 3] Push-out: Base retake (foot 6) from Airfield on Outpost (6 unit(s), the pool pays 0, lethality 6.00 of 0.00, 0 fighter(s) reported, about 2420 s)",
+  "rate": 30
+ },
+ {
+  "sim": 3850.48,
+  "text": "Scripted: a raid leaves the Airfield two men in reserve, and an ambush makes Le Port urgent.",
+  "line": "scenario note: lever: Airfield reserve 2 (a raid on its barracks)",
+  "rate": 3
+ },
+ {
+  "sim": 3856.750000076294,
+  "text": "Four reported fighters call for lethality fourteen point four. Urgent, it buys the fastest fit: a truck.",
+  "line": "OccupierForces: [op 4] Motorized squad (4, Ural) from Le Port Harbour to Le Port (25 unit(s), the pool pays 21, lethality 17.00 of 14.40, 4 fighter(s) reported, about 60 s)",
+  "rate": 3
+ },
+ {
+  "sim": 3859.41,
+  "text": "But the player watches the harbour road. No point behind the truck is unseen, so it cannot be born.",
+  "line": "CounterAttack: force on Le Port from Le Port Harbour deferred: no point of its road (behind its progress point) is out of the player's perception; retrying every 30s, its clock stopped, the next base back or cancelled unseen after 60s",
+  "rate": 3
+ },
+ {
+  "sim": 3891.0914876996217,
+  "text": "The next base back? The Compound is on another island, and the Airfield cannot spare the men.",
+  "line": "CounterAttack: [op 4] Southeast Compound passed over for Le Port: it stands on another landmass",
+  "rate": 3
+ },
+ {
+  "sim": 3919.7179253964496,
+  "text": "So the operation is re-planned as a helicopter insertion.",
+  "line": "CounterAttack: [op 4] no road to Le Port passes the gate; re-planned as a Mi17 insertion from Airfield (12 units, 127s in the air, on the ledger row)",
+  "rate": 3
+ },
+ {
+  "sim": 3920.789418102309,
+  "text": "The Mi17 is born airborne, unseen, and lands four hundred metres out, away from the reported fighters.",
+  "line": "CounterAttack: [op 4] Mi17 with 4 soldier(s) born airborne at [8030, 9905] (100 m up) for Le Port; LZ [7825, 3275] 396 m out, away from the reported fighters",
+  "rate": 12
+ },
+ {
+  "sim": 4071.932095288521,
+  "text": "Four soldiers get out, the airframe goes home, and the cell repels them too.",
+  "line": "OccupierForces: [op 4] Repelled at Le Port: 4 lost, 0 going home; Le Port rests 1800 s, heat +15",
+  "rate": 6
+ },
+ {
+  "sim": 4439.83,
+  "text": "A raid takes the Airfield. Control, sixty percent bases, forty percent towns, drops below three quarters.",
+  "line": "OccupierForces: Wave 1 (30) inbound to Le Port Harbour, control 0.63 (control threshold; lands in 120 s)",
+  "rate": 4
+ },
+ {
+  "sim": 4469.7507239746565,
+  "text": "Wave one fires: thirty soldiers for the pool, landing at the harbour.",
+  "line": "OccupierForces: Wave 1 (30) inbound to Le Port Harbour, control 0.63 (control threshold; lands in 120 s)",
+  "rate": 6
+ },
+ {
+  "sim": 4590.5929690758085,
+  "text": "It strikes the densest cluster: the player's headquarters. Six men march on the camp, no token needed.",
+  "line": "OccupierForces: [op 5] Wave 1 strike: HQ assault (foot 6) from Le Port Harbour on Camp (6 unit(s), the pool pays 0 and stages the infantry, lethality 6.00 of 0.00, 0 fighter(s) reported, about 1500 s)",
+  "rate": 6
+ },
+ {
+  "sim": 5266.61901526284,
+  "text": "The push-out reaches the Outpost and retakes it.",
+  "line": "OccupierForces: [op 3] Outpost retaken: 4 stay as its garrison",
+  "rate": 8
+ },
+ {
+  "sim": 5546.471999824351,
+  "text": "The director wants the Airfield back, but no base can spare the men.",
+  "line": "OccupierForces: no operation on Airfield: no occupier base can spare the minimum",
+  "rate": 40
+ },
+ {
+  "sim": 7040.258878304946,
+  "text": "The assault finds the headquarters empty. Only a deliberate HQ assault fills this meter.",
+  "line": "CounterAttack: [op 5] 6 attacker(s) stand at the undefended HQ",
+  "rate": 6
+ }
+]

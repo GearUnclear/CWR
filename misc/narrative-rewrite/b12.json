@@ -1,0 +1,10 @@
+{
+  "id": "b12",
+  "bank": "kBio0Hostile",
+  "variant": 5,
+  "text": "{Name} was a local official near {Place}, authorized to stop evictions. When a former rival appealed, the official refused, knowing the rival had paid the rent and had the right to stay.",
+  "word_count": 32,
+  "self_review": "A local official knowingly denied a former rival protection from an eviction despite the rival having paid the rent.",
+  "source_pattern": "The supplied Akayesu judgment documents a local civil office carrying police and public-order powers and consequential choices by its holder.",
+  "fictional_changes": "The eviction system, valid appeal, and private rivalry are invented. None is presented as an episode from the historical case."
+}

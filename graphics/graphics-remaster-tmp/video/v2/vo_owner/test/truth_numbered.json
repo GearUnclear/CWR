@@ -1,0 +1,483 @@
+[
+ {
+  "kind": "number",
+  "start": 5.0,
+  "end": 5.58,
+  "said": "one"
+ },
+ {
+  "kind": "take",
+  "start": 6.58,
+  "end": 13.78,
+  "line": "v2_00_intro",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 7.2,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 15.78,
+  "end": 22.99,
+  "line": "v2_00_intro",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 7.21,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 24.99,
+  "end": 32.19,
+  "line": "v2_00_intro",
+  "take": 3,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 7.2,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 34.19,
+  "end": 34.58,
+  "said": "two"
+ },
+ {
+  "kind": "take",
+  "start": 35.58,
+  "end": 41.66,
+  "line": "v2_01_opening",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.08,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 43.66,
+  "end": 49.71,
+  "line": "v2_01_opening",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.05,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 51.71,
+  "end": 52.25,
+  "said": "three"
+ },
+ {
+  "kind": "take",
+  "start": 53.25,
+  "end": 59.18,
+  "line": "v2_02_valley_mist",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.93,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 61.18,
+  "end": 67.22,
+  "line": "v2_02_valley_mist",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.04,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 69.22,
+  "end": 69.87,
+  "said": "four"
+ },
+ {
+  "kind": "take",
+  "start": 70.87,
+  "end": 77.05,
+  "line": "v2_03_pine_shafts",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.18,
+  "restart": false
+ },
+ {
+  "kind": "fragment",
+  "start": 79.05,
+  "end": 82.565,
+  "line": "v2_03_pine_shafts",
+  "voice": "lily"
+ },
+ {
+  "kind": "take",
+  "start": 83.665,
+  "end": 90.055,
+  "line": "v2_03_pine_shafts",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.39,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 92.055,
+  "end": 92.865,
+  "said": "line five"
+ },
+ {
+  "kind": "take",
+  "start": 93.865,
+  "end": 100.255,
+  "line": "v2_04_bay_reflections",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.39,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 102.255,
+  "end": 108.595,
+  "line": "v2_04_bay_reflections",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.34,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 110.995,
+  "end": 111.765,
+  "said": "six"
+ },
+ {
+  "kind": "take",
+  "start": 111.885,
+  "end": 118.615,
+  "line": "v2_05_outpost",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.73,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 120.615,
+  "end": 127.545,
+  "line": "v2_05_outpost",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.93,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 129.545,
+  "end": 130.315,
+  "said": "seven"
+ },
+ {
+  "kind": "take",
+  "start": 131.315,
+  "end": 137.235,
+  "line": "v2_06_cloud_shadows",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.92,
+  "restart": false
+ },
+ {
+  "kind": "cough",
+  "start": 137.935,
+  "end": 138.515
+ },
+ {
+  "kind": "take",
+  "start": 141.235,
+  "end": 147.425,
+  "line": "v2_06_cloud_shadows",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.19,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 149.425,
+  "end": 155.265,
+  "line": "v2_07_sinai_camp",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.84,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 157.265,
+  "end": 163.275,
+  "line": "v2_07_sinai_camp",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.01,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 165.275,
+  "end": 165.845,
+  "said": "ten"
+ },
+ {
+  "kind": "cough",
+  "start": 167.245,
+  "end": 167.825
+ },
+ {
+  "kind": "take",
+  "start": 168.425,
+  "end": 172.645,
+  "line": "v2_09_convoy",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 4.22,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 174.645,
+  "end": 178.925,
+  "line": "v2_09_convoy",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 4.28,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 180.925,
+  "end": 181.505,
+  "said": "nine"
+ },
+ {
+  "kind": "take",
+  "start": 182.505,
+  "end": 189.715,
+  "line": "v2_08_ambush",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 7.21,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 191.715,
+  "end": 199.045,
+  "line": "v2_08_ambush",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 7.33,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 201.045,
+  "end": 201.715,
+  "said": "eleven"
+ },
+ {
+  "kind": "take",
+  "start": 202.715,
+  "end": 206.645,
+  "line": "v2_10_checkpoint",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 3.93,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 208.645,
+  "end": 212.495,
+  "line": "v2_10_checkpoint",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 3.85,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 214.495,
+  "end": 215.165,
+  "said": "twelve"
+ },
+ {
+  "kind": "take",
+  "start": 216.165,
+  "end": 222.255,
+  "line": "v2_11_town_patrol",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 6.09,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 224.255,
+  "end": 230.475,
+  "line": "v2_11_town_patrol",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 6.22,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 232.475,
+  "end": 237.962,
+  "line": "v2_11_town_patrol",
+  "take": 3,
+  "voice": "sarah",
+  "wording": "shorter",
+  "secs": 5.487,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 239.962,
+  "end": 240.712,
+  "said": "thirteen"
+ },
+ {
+  "kind": "take",
+  "start": 241.712,
+  "end": 247.432,
+  "line": "v2_12_rain_town",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.72,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 249.432,
+  "end": 257.626,
+  "line": "v2_12_rain_town",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 8.194,
+  "restart": true
+ },
+ {
+  "kind": "number",
+  "start": 259.626,
+  "end": 260.376,
+  "said": "thirteen (wrong: line 14 follows)"
+ },
+ {
+  "kind": "take",
+  "start": 261.376,
+  "end": 267.136,
+  "line": "v2_13_supply_run",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.76,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 269.136,
+  "end": 275.096,
+  "line": "v2_13_supply_run",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 5.96,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 277.096,
+  "end": 277.906,
+  "said": "fifteen"
+ },
+ {
+  "kind": "take",
+  "start": 278.906,
+  "end": 284.436,
+  "line": "v2_14_firefight",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.53,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 286.436,
+  "end": 292.386,
+  "line": "v2_14_firefight",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 5.95,
+  "restart": false
+ },
+ {
+  "kind": "number",
+  "start": 294.386,
+  "end": 295.416,
+  "said": "sixteen"
+ },
+ {
+  "kind": "take",
+  "start": 296.416,
+  "end": 301.836,
+  "line": "v2_99_outro",
+  "take": 1,
+  "voice": "sarah",
+  "wording": "main",
+  "secs": 5.42,
+  "restart": false
+ },
+ {
+  "kind": "take",
+  "start": 303.836,
+  "end": 309.306,
+  "line": "v2_99_outro",
+  "take": 2,
+  "voice": "lily",
+  "wording": "main",
+  "secs": 5.47,
+  "restart": false
+ }
+]

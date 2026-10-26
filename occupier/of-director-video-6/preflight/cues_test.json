@@ -1,0 +1,1 @@
+{"cards": [{"lines": [["h", "test"]], "dur": 1}], "cues": [{"sim": 600, "text": "Test caption at the first break-off.", "line": "CounterAttack: [op 2] Broken off at Arudy", "rate": 10}, {"sim": 2290, "text": "Test caption after op 3.", "line": "", "rate": 10}], "table": [["a", "b"]], "outro_voice": ""}

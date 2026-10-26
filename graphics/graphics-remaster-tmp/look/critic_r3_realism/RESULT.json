@@ -1,0 +1,44 @@
+{
+ "verdict": "needs_another_round",
+ "owner_seam_gone": true,
+ "blockers": [
+  {
+   "view": "firefight_2",
+   "problem": "At thumbnail size the shell burst is a flat mustard-yellow block with no hot core, no dark smoke and no shape. It reads as a cartoon sponge. Original and landed both show a white or white-yellow fireball. The same frame has a second fault. A fresh burst on the left shows only a faint pale dome, yet the ground behind the riflemen carries a bright cream line. That is light with no visible source.",
+   "evidence": "Cloud mean (187,158,82) over x400-540 y275-320 of final/firefight_2__overhaul.png, with a blue spread of only 5. The ground line at y336-340 runs about 260 px at 960 px wide, with values from 200 to 237. Crops in D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r3_realism/: thumb_combat_and_mist.png (row 1), ff2_burst_cloud_3way.png, ff2_horizon_strip_2x.png and ff2_left_glow_2x.png.",
+   "likely_cause": "I agree with the merger. The burst's light reaches every puff of its own cloud with no self-shadowing, and the non-fire path of CombatParticleMix spreads one cooled yellow colour evenly over the cloud. At dusk CombatNight and flashHold cut the burst's flash from its birth, so the fireball body is dim. The ground term (combatBallCosine) still lights a band of plain from the same light. Fix ideas: let the burst light cross its own cloud (as CombatSmokeTransmittance does for fire). Let it fall off faster on its smoke. Give the young burst an emissive core so the visible fireball is always brighter than the ground it lights."
+  },
+  {
+   "view": "optics_mist_hud, optics_mist_sight",
+   "problem": "A white wall. The test sets fog 0.3 (a morning mist). Original and landed show green grass, a rock outcrop and a tree line. The overhaul paints about 85% of the frame one flat pale grey with a slight cool cast. Grass 10 to 20 m away is already grey. The rock is gone and the trees are faint ghosts. At thumbnail it reads as washed out, not as more real. AI sight follows this fog, so a light-mist mission also becomes a short-range fight. This is unchanged since round 2; the plate fix only removed the warm band.",
+   "evidence": "In the HUD view the sky and mist are (206,208,217), against (176,176,169) in the original. Near grass at the bottom left is (123,128,126), against (79,90,61) in the original. The right-hand rock and trees are erased: mist_hud_treeline_3way.png, and thumb_combat_and_mist.png rows 3 and 4, in D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r3_realism/. Test setup: look_director_optics.test.sqf capBegin with overcast 0.7, fog 0.3, view distance 1500.",
+   "likely_cause": "Under a grey sky the volumetric medium for setFog 0.3, including the near-ground and valley mist, is far denser than the classic fog distance the mission asked for. The grey-sky apply then sinks everything into one air colour. Tune the mist density so that fog 0.3 keeps roughly the original's visible range, with the rock and tree line legible. Keep the Target.cpp fog-sight link as it is."
+  }
+ ],
+ "minor": [
+  "The harness refused to let me write REPORT.md, because subagents may not write report .md files. The report is in this output. The evidence crops are in D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r3_realism/.",
+  "Owner seam (town_night_rain): gone at 1080p and at thumbnail size. A contrast-equalized view of the whole ground shows no straight edge (seam_fullsize_owner_vs_r3.png, seam_zoom2x_r3.png, seam_ground_equalized_owner_top_r3_bottom.png). The 0.6 s flash after an island loads cannot be checked in stills.",
+  "Clear thumbnail wins: town_night_rain, town_night, town_fog_night (the best view), blue_hour_coast, firefight_1, noon_vista, town_noon, forest_morning, forest_edge_golden (teal cast gone), woods_pine2_evening, pine_rays, sunrise_ridge, overcast_broken, overcast_heavy (very photographic at 1080p).",
+  "Low-sun views (lowsun_fp, sinai_lowsun_fp, coastline_sunset, dawn_valley): the sun is a small pale disc that peaks at 231 to 242, inside a broad cream plateau. It looks like a moon in a dust storm, not a burning sun. Landed reaches 255 with a halo. dawn_valley's cream haze also hides the bay on the sun side. These are not blockers, but they are the weakest part of the clear-weather set (sun_disc_landed_vs_overhaul.png).",
+  "The 960x640 lowsun_fp sun disc is an oval. It is round at 1080p.",
+  "Grey-day skies (rain_day, overcast_heavy): pale and low in contrast at thumbnail size. The sky mean is about (200,203,209) with a spread of 10, against 26 to 31 in the original and landed. Nothing is blown. rain_day reads as dry mist; the rain is not legible.",
+  "firefight_3: the middle burst has a salmon-pink foot on the horizon, about (105,62,58), visible at thumbnail as a pink smear (ff3_pink_burst_foot.png). It probably shares blocker 1's cause.",
+  "Noon skies are slate rather than blue: about (89,112,146) at the zenith in noon_fields and sinai_desert_noon. sinai_desert_noon's sand is about 35 levels darker than the original, so the desert reads less sun-baked.",
+  "optics_mist_hud: single green and black pixels float in the fog over the hidden tree line. They look like stuck pixels at full size (mist_hud_specks_3x.png). Fragments of the alpha-tested foliage probably escape the fog apply.",
+  "firefight_1: a faint warm line on the horizon at the wreck is visible at full size only (ff1_wreck_horizon_2x.png).",
+  "town_night and town_fog_night: the flame core and stones read cream-white rather than flame and embers. The plume colour is now right (town_night_fire_3way.png).",
+  "tank_gunner_interior and tank_gunner_optics: no visible change from the original (neutral).",
+  "Thumbnail evidence sheets: thumb_combat_and_mist.png, thumb_grey_sky_and_sun.png and thumb_wins.png in the same folder."
+ ],
+ "report_path": "D:/Arma_CWA_worktrees/graphics-remaster/tmp/look/critic_r3_realism/ (evidence crops only; the harness refused the REPORT.md write, and the report text is this output)",
+ "landed_beats_overhaul": [
+  "Explosions in firefight_2 and firefight_3: landed bursts read as white-yellow fireballs with smoke. The overhaul's read as a mustard block or a pink smear.",
+  "The sun disc in lowsun_fp, sinai_lowsun_fp, coastline_sunset and dawn_valley: landed burns the sun white with a halo. The overhaul sun is a dim pale dot in a cream plateau.",
+  "Mist in optics_mist_hud and optics_mist_sight: landed keeps the green ground, the rock and the tree line.",
+  "Rain mood in rain_day: landed's dark cloud deck reads as rain.",
+  "God rays in pine_rays: landed's shafts are much more visible.",
+  "Noon sky in noon_fields, sinai_desert_noon and jeep_close_noon: landed's sky is a cleaner, sunnier blue than the overhaul's slate.",
+  "dawn_valley: landed shows the bay and the far shore; the overhaul's cream haze hides them."
+ ],
+ "cost_summary": "Not timed. I ran no game and no build. This was a review of the existing round 3 shots only. The merger also reports that round 3's cost was not re-timed."
+}

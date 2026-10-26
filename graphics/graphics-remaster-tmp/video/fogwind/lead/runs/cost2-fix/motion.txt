@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\lead\runs\cost2-fix\cost2-fix.mkv  frames 105  band 0.032  sky 0.018
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       154.5 [-0.0, -0.0]  0.028  0.116  0.023 -0.320  [12, 0]   0.023  [12, 0]  0.003  0.465 -0.459    nan    nan -0.190             -
+   valley    129.1  [0.0, -0.0]  0.028  0.042  0.028 -0.361 [-14, -14]   0.028 [-14, -14]  0.001  0.200 -0.337    nan    nan -0.238             -
+   farhill   116.5  [0.0, -0.0]  0.022  0.044  0.014 -0.444 [9, -16]   0.014 [9, -16]  0.001  0.206 -0.344    nan    nan -0.258             -
+   haze      181.3 [-0.0, -0.0]  0.015  0.043  0.021 -0.378 [-16, -11]   0.021 [-16, -11]  0.001  0.193 -0.298    nan    nan -0.245             -
+   slope      53.4  [0.0, -0.0]  0.024  0.092  0.054 -0.752 [-15, -4]   0.054 [-15, -4]  0.005  0.660 -0.841    nan    nan -0.450             -

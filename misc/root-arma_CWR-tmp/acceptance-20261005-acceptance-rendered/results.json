@@ -1,0 +1,12 @@
+[
+  {
+    "Case": "tests/integration/ui/guerrilla_human_visual.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-acceptance-rendered\\guerrilla_human_visual"
+  },
+  {
+    "Case": "tests/integration/ingame/controls/rmb_zoom_ads.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-acceptance-rendered\\rmb_zoom_ads"
+  }
+]

@@ -1,0 +1,7 @@
+; debug action: toggle player invulnerability
+MKT_god = not MKT_god
+aP allowDamage (not MKT_god)
+? MKT_god : aP setDamage 0
+? MKT_god : hint "DEBUG: GOD MODE on - invulnerable."
+? not MKT_god : hint "DEBUG: GOD MODE off."
+exit

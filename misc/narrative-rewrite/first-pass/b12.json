@@ -1,0 +1,8 @@
+{
+  "id": "b12",
+  "bank": "kBio0Hostile",
+  "variant": 5,
+  "text": "Officer {Name} hears land claims near {Place} by appointment. They refuse every family access to its fields without stamped ownership copies, which the registry will not issue unless applicants produce the missing originals.",
+  "word_count": 33,
+  "self_review": "The officer applies one documentary requirement to every family, treating uniform procedure as fairness. Families cannot regain their fields because the registry requires missing originals before issuing the stamped copies the officer demands. Appointments imply an orderly routine; the missing originals are a supporting personal circumstance."
+}

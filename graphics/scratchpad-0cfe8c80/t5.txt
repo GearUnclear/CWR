@@ -1,0 +1,6 @@
+        const bool surface = info.id == Feature::Surfaces;
+        // The look lane "light" (photoLight, step L1): the camera's meter and
+        // curve are in the composite's section.
+        const bool look = info.id == Feature::PhotoLight;
+        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || night ||
+                              combat || sea || ssr || wet || air || canopy || clouds || surface || look));

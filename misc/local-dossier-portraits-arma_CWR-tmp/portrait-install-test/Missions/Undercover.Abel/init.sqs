@@ -1,0 +1,148 @@
+; ============================================================================
+;  init.sqs  -  Undercover.Abel bootstrap (auto-loaded by RunInitScript)
+; ----------------------------------------------------------------------------
+;  A single-purpose sandbox for the deep-undercover layer. The native side
+;  (ZoneRegistry + AlertMachine + UndercoverSystem, activated by
+;  CfgGuerrillaZones in description.ext) does all perception work, and the
+;  campaign's OWN undercover.sqs, exec'd with its lib.sqs helper library
+;  out of the ONE shared core at <GameDir>\gmcore (no copy lives here),
+;  supplies
+;  the script-side cover policy: gmUndercover = true + setCaptive true at
+;  boot, the fired-EH -> gmBreakUndercover, and the advisory hint + diary
+;  line on the first compromise. This file only:
+;    1. seeds the script state undercover.sqs/lib.sqs read (GM_Z_* tuple
+;       constants, gmWarLevel, the gmEvtUcBroken queue + its one-line native
+;       handler) - the same names init.sqs of a Guerrilla campaign seeds -
+;       and strips the player's weapons (the campaign guerrilla stays armed;
+;       here you start as the unarmed civilian the rules are built around);
+;    2. props: an AK47 on the ground, a civilian Skoda, an East UAZ at a
+;       checkpoint (the stolen-vehicle policy demo);
+;    3. scripted occupier presence IN town (CITY zones are never natively
+;       garrisoned - the Checkpoint outpost garrison of 6 is native);
+;    4. execs \gmcore\scripts\lib.sqs then \gmcore\scripts\undercover.sqs
+;       out of the SHARED CORE installed at <GameDir>\gmcore (the leading
+;       backslash resolves against the game data root, not this mission
+;       folder) - and NOTHING else
+;       from the core, so the disguise layer is the only moving part;
+;    5. self-actions (sling/unsling, status check, debug reset) + the HUD
+;       status loop (hud.sqs).
+;  DIALECT: SQS. A mid-line ; is a STATEMENT SEPARATOR, not a comment.
+; ============================================================================
+
+? not (isNil "UC_BOOTED") : exit
+UC_BOOTED = true
+
+aP = player
+gmPlayer = player
+
+; ---- zone tuple index constants (the shape `gmZone <i>` returns; lib.sqs
+;      helpers read them) -------------------------------------------------------
+GM_Z_NAME    = 0
+GM_Z_TYPE    = 1
+GM_Z_OWNER   = 2
+GM_Z_GAR     = 3
+GM_Z_SUPPORT = 4
+GM_Z_INCOME  = 5
+GM_Z_HEAT    = 6
+GM_Z_MARKER  = 7
+GM_Z_POS     = 8
+GM_Z_CAPTURE = 9
+
+; script scalars the native undercover layer reads (warDetect = gmWarLevel/10);
+; gmUndercover itself is established by the core's undercover.sqs below
+gmWarLevel = 1
+; lib.sqs helpers reference these rosters; seeded empty so a stray call is safe
+GM_GEAR_THRESHOLD = 25
+GM_GEAR_ITEMS     = []
+GM_GEAR_COUNT     = []
+GM_GEAR_UNLOCKED  = []
+GM_RESENT_ZONES   = []
+GM_RESENT_DUE     = []
+GM_RESENT_AMT     = []
+GM_RESENT_MAXPEND = 3
+
+; ---- zone markers (the engine repaints only markers that already exist) -----
+UC_i = 0
+#mkmarkers
+? UC_i >= gmZoneCount : goto "mkdone"
+UC_rec = gmZone UC_i
+UC_m = createMarker [(UC_rec select 7), (UC_rec select 8)]
+(UC_rec select 7) setMarkerType "Flag"
+(UC_rec select 7) setMarkerSize [0.6, 0.6]
+UC_i = UC_i + 1
+goto "mkmarkers"
+#mkdone
+
+; ---- an unarmed guerrilla passing as a civilian: the cover itself (captive +
+;      gmUndercover + fired-EH) is established by the core undercover.sqs ----
+removeAllWeapons aP
+
+; native first-compromise event -> queue (handlers cannot ~sleep; the one
+; consumer is the core's undercover.sqs, exactly as in the campaign)
+gmEvtUcBroken = []
+gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]
+
+; ============================================================================
+;  PROPS
+; ============================================================================
+; the gun on the ground: an AK47 + 4 mags ~20 m north of the player start
+UC_wh = "WeaponHolder" createVehicle [7112, 6076, 0]
+UC_wh addWeaponCargo ["AK47", 1]
+UC_wh addMagazineCargo ["AK47", 4]
+
+; a civilian car (anonymous by policy) and the checkpoint's UAZ (an occupier
+; military hull: driving it is a disguise that fails at 20 m checkpoint range)
+UC_car = "Skoda" createVehicle [7095, 6045, 0]
+UC_uaz = "UAZ" createVehicle [7147, 6091, 0]
+
+; ============================================================================
+;  OCCUPIER PRESENCE IN TOWN (scripted; each group = an independent witness
+;  with its own compromise memory)
+; ============================================================================
+; the native Checkpoint garrison usually created the East center already;
+; createCenter is idempotent
+UC_c = createCenter east
+
+; 2-man foot patrol walking a loop through the streets
+UC_pgrp = createGroup east
+"SoldierEB" createUnit [[7117, 6100, 0], UC_pgrp, "UC_p1 = this", 0.3, "SERGEANT"]
+"SoldierEB" createUnit [[7121, 6100, 0], UC_pgrp, "", 0.3, "PRIVATE"]
+UC_pgrp setBehaviour "SAFE"
+UC_pgrp setSpeedMode "LIMITED"
+[UC_pgrp, [[7117,6069,0], [7075,6045,0], [7100,6110,0], [7155,6035,0]]] exec "patrol.sqs"
+
+; static checkpoint pair guarding the UAZ (no waypoints - they hold the spot)
+UC_ogrp = createGroup east
+"OfficerE" createUnit [[7151, 6094, 0], UC_ogrp, "UC_off = this", 0.4, "SERGEANT"]
+"SoldierEB" createUnit [[7154, 6089, 0], UC_ogrp, "", 0.3, "PRIVATE"]
+UC_ogrp setBehaviour "SAFE"
+
+; two locals going about their day (what you are pretending to be)
+UC_cc = createCenter civilian
+UC_cgrp = createGroup civilian
+"Civilian" createUnit [[7105, 6070, 0], UC_cgrp, "", 0.2, "PRIVATE"]
+"Civilian" createUnit [[7130, 6055, 0], UC_cgrp, "", 0.2, "PRIVATE"]
+UC_cgrp setBehaviour "CARELESS"
+UC_cgrp setSpeedMode "LIMITED"
+[UC_cgrp, [[7130,6055,0], [7095,6060,0], [7120,6095,0]]] exec "patrol.sqs"
+
+; ============================================================================
+;  SELF-ACTIONS + HUD
+; ============================================================================
+UC_a1 = aP addAction ["Sling weapon on back", "act_sling.sqs"]
+UC_a2 = aP addAction ["Take weapon in hands", "act_hands.sqs"]
+UC_a3 = aP addAction ["Check disguise", "act_status.sqs"]
+UC_a4 = aP addAction ["DEBUG: wipe compromise records", "act_forget.sqs"]
+UC_a5 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
+
+; ============================================================================
+;  LAUNCH: helpers first (undercover.sqs gates on @GM_LIB_READY), then THE
+;  campaign cover-policy script (establishes gmUndercover + captive, attaches
+;  the fired-EH, drains gmEvtUcBroken), then the readout
+; ============================================================================
+GM_LIB_READY = false
+[] exec "\gmcore\scripts\lib.sqs"
+@GM_LIB_READY
+[] exec "\gmcore\scripts\undercover.sqs"
+[] exec "hud.sqs"
+exit

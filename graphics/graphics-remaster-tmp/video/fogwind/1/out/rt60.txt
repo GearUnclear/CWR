@@ -1,0 +1,26 @@
+== mist/1/rec/all_rt60.mkv  frames 150  band None  sky None
+   region         camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0
+   bay      [-0.38, -0.02]  0.696  0.434  0.070 -0.332 [-16, 16]   0.070 [-16, 16]  0.030  0.680 -0.261
+   valley   [-0.29, -0.0]  0.362  0.243  0.024 -0.218 [-16, -3]   0.024 [-16, -3]  0.006  0.760 -0.124
+   farhill  [-0.3, 0.02]  0.398  0.256  0.018 -0.290 [16, -16]   0.018 [16, -16]  0.005  0.594 -0.219
+   haze      [-0.3, 0.0]  0.317  0.237  0.028 -0.301 [-2, -16]   0.028 [-2, -16]  0.007  0.510 -0.233
+   slope    [-0.29, 0.03]  0.129  0.111  0.021 -0.394 [15, -13]   0.021 [15, -13]  0.002  0.512 -0.143
+== mist/1/rec/pc_rt60.mkv  frames 150  band None  sky None
+   region         camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0
+   bay      [-0.38, -0.03]  0.063  0.213  0.356  0.027 [-10, -1]   0.356 [-10, -1]  0.076  0.542 -0.199
+   valley   [-0.29, -0.0]  0.122  0.161  0.090 -0.164 [-11, 0]   0.090 [-11, 0]  0.015  0.736 -0.123
+   farhill  [-0.31, 0.02]  0.093  0.213  0.524 -0.049 [-11, 0]   0.524 [-11, 0]  0.112  0.560 -0.178
+   haze      [-0.3, 0.0]  0.031  0.174  0.388 -0.064 [-11, 0]   0.388 [-11, 0]  0.067  0.459 -0.118
+   slope    [-0.29, 0.03]  0.121  0.108  0.023 -0.377  [4, 16]   0.023  [4, 16]  0.002  0.514 -0.151
+mist/1/rec/pc_rt60.mkv frames 300 region 249x672; D mid rms 0.878
+  spectral peak: k=(+0.0089,+0.0321) cyc/px (y down) period 30.0 px = 2.50 cells, wave-vector angle +74 deg (crests run at +164 deg), power share 0.0114
+  spectral peak: k=(+0.0283,-0.0120) cyc/px (y down) period 32.5 px = 2.71 cells, wave-vector angle -23 deg (crests run at +67 deg), power share 0.0110
+  spectral peak: k=(+0.0253,-0.0000) cyc/px (y down) period 39.5 px = 3.29 cells, wave-vector angle -0 deg (crests run at +90 deg), power share 0.0082
+  spectral peak: k=(+0.0372,+0.0241) cyc/px (y down) period 22.6 px = 1.88 cells, wave-vector angle +33 deg (crests run at +123 deg), power share 0.0062
+  spectral peak: k=(+0.0089,-0.0522) cyc/px (y down) period 18.9 px = 1.57 cells, wave-vector angle -80 deg (crests run at +10 deg), power share 0.0054
+  lag 1 frames: best shift (-1,+0) px  corr +0.706   corr at 0: +0.664  at (-12L,0): -0.014
+  lag 2 frames: best shift (-1,+0) px  corr +0.656   corr at 0: +0.538  at (-12L,0): +0.001
+  lag 3 frames: best shift (-2,+0) px  corr +0.615   corr at 0: +0.382  at (-12L,0): +0.022
+  lag 4 frames: best shift (-3,+0) px  corr +0.571   corr at 0: +0.267  at (-12L,0): +nan
+  lag 5 frames: best shift (-4,+0) px  corr +0.538   corr at 0: +0.198  at (-12L,0): +nan
+  lag 6 frames: best shift (-4,+0) px  corr +0.517   corr at 0: +0.145  at (-12L,0): +nan

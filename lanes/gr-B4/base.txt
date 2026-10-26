@@ -1,0 +1,8 @@
+lane: gr-B4
+source: D:/Arma_CWA_worktrees/gr-B4
+HEAD: 706b9a30b3dd0a99d57f105758b16f7495b88fca
+subject: graphics: one tiled light list feeds every local light
+commit date: 2026-10-18 08:15:31 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 48
+binary files changed (content not in patch): none

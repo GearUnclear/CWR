@@ -1,0 +1,16 @@
+{
+ "clip": "bay_reflections",
+ "side": "vanilla",
+ "frames": 570,
+ "fps": 60,
+ "size": [
+  1920,
+  1080
+ ],
+ "video": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\vanilla\\bay_reflections\\bay_reflections__vanilla.mkv",
+ "game_dir": "D:\\Arma_CWA_worktrees\\vanilla-upstream\\dist\\vanilla-upstream-rwdi",
+ "mode_line": "view=bay_reflections;event=mode;mode=vanilla;lit=vanilla;detail=adaptive;settle=OK:90",
+ "gamma": 1.2,
+ "run": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\v2\\runs\\van-bay_reflections",
+ "mb": 246.4
+}

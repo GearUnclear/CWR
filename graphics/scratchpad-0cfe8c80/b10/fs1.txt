@@ -1,0 +1,11 @@
+    // B10 (clouds): lit clouds cost in the sky pass (the dome and the sky
+    // clouds), the sky-matched shadows one density tap per lit world fragment.
+    {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", true, &FS::litClouds, "sky"},
+    {Feature::SkyCloudShadows, "skyCloudShadows", "Sky-matched cloud shadows", "clouds", "Sky and air", "B10", true,
+     &FS::skyCloudShadows, "world"},
+    // B11 (texsharp): the terrain detail runs inside the ground draw, the luma
+    // sharpen in the post pass's sharpen stage (TAA's own sharpen when TAA runs).
+    {Feature::TerrainDetail, "terrainDetail", "Terrain detail", "texsharp", "Light and shadow", "B11", true,
+     &FS::terrainDetail, "ground"},
+    {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
+     "sharpen"},

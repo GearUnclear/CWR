@@ -1,0 +1,263 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestViewer.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestViewer.cpp
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestViewer.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestViewer.cpp
+@@ -458,12 +458,11 @@ GameValue TriAssertCamMoved(const GameState* /*state*/, GameValuePar arg)
+ }
+ 
+ /// triEnableShadows — force GScene->SetObjectShadows(true) +
+-/// SetVehicleShadows(true) at runtime.  The default Scene state has
+-/// _objectShadows=false; only ApplyGraphicsConfigToEngine flips it to
+-/// true and that's gated on the user visiting the Options UI.  Tests
+-/// run in an ephemeral user dir that never sees the Options page, so
+-/// shadow draws never fire — this verb makes a regression test that
+-/// pins shadow pixel values actually testable.
++/// SetVehicleShadows(true) at runtime, whatever the Graphics options say.
++/// The scene takes both from the shadow tier of graphics.cfg, and a test's
++/// ephemeral user dir autodetects that file from the machine's RAM (the Low
++/// preset has shadows Off), so this verb keeps a regression test that pins
++/// shadow pixel values independent of the machine.
+ GameValue TriEnableShadows(const GameState* /*state*/)
+ {
+     if (!GScene)
+diff --git a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.cpp b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.cpp
+--- a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.cpp
++++ b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.cpp
+@@ -4,6 +4,8 @@
+ #include <Poseidon/Graphics/Core/Engine.hpp> // pulls Engine + extern GEngine
+ #include <Poseidon/World/Scene/Scene.hpp>
+ 
++#include <optional>
++
+ namespace Poseidon
+ {
+ 
+@@ -69,24 +71,37 @@ int VsyncToInterval(GraphicsConfig::VsyncMode v)
+     }
+     return 1;
+ }
++
++// The config last pushed by ApplyGraphicsConfigToEngine.
++std::optional<GraphicsConfig> s_appliedConfig;
+ } // namespace
+ 
++void ApplyGraphicsConfigToScene(const GraphicsConfig& cfg, Scene& scene)
++{
++    scene.SetPreferredTerrainGrid(TerrainGridForTier(cfg.terrainDetail));
++    scene.SetObjectLODBias(ObjectLodTierToBias(cfg.objectLod));
++    // Shadow tier: Off turns both off, Low and up turn both on.  Low/Med/High
++    // discrimination is UI-only until a shadow-distance bias hook
++    // lands.
++    const bool shadowsOn = cfg.shadowQuality != GraphicsConfig::TierOff;
++    scene.SetObjectShadows(shadowsOn);
++    scene.SetVehicleShadows(shadowsOn);
++    // Particles tier: Off turns cloudlets off, Low/High on.  Low vs
++    // High is UI-only until the cloudlet system grows tiered density.
++    scene.SetCloudlets(cfg.particlesQuality != GraphicsConfig::TierOff);
++}
++
++const GraphicsConfig* AppliedGraphicsConfig()
++{
++    return s_appliedConfig ? &*s_appliedConfig : nullptr;
++}
++
+ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
+ {
++    // Kept for a Scene built later: at boot this runs before the world exists.
++    s_appliedConfig = cfg;
+     if (GScene)
+-    {
+-        GScene->SetPreferredTerrainGrid(TerrainGridForTier(cfg.terrainDetail));
+-        GScene->SetObjectLODBias(ObjectLodTierToBias(cfg.objectLod));
+-        // Shadow tier — Off → both off; Low+ → both on.  Low/Med/High
+-        // discrimination is UI-only until a shadow-distance bias hook
+-        // lands.
+-        const bool shadowsOn = cfg.shadowQuality != GraphicsConfig::TierOff;
+-        GScene->SetObjectShadows(shadowsOn);
+-        GScene->SetVehicleShadows(shadowsOn);
+-        // Particles tier — Off → cloudlets off; Low/High → on.  Low vs
+-        // High is UI-only until the cloudlet system grows tiered density.
+-        GScene->SetCloudlets(cfg.particlesQuality != GraphicsConfig::TierOff);
+-    }
++        ApplyGraphicsConfigToScene(cfg, *GScene);
+     if (GEngine)
+     {
+         GEngine->SetSwapInterval(VsyncToInterval(cfg.vsync));
+diff --git a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.hpp b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.hpp
+--- a/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.hpp
++++ b/arma_CWR/engine/Poseidon/UI/Settings/GraphicsApply.hpp
+@@ -9,6 +9,9 @@
+ //   - GameApplication::LoadAndApplyGraphicsConfig at boot.
+ //   - GraphicsPage's row handlers on every live row change.
+ //
++// A Scene built after the boot apply takes its share of the last
++// applied config in Scene::LoadConfig (AppliedGraphicsConfig).
++//
+ // Tier→engine-value mappings live in this TU so both callers see the
+ // same translation table; changing a mapping touches one place.
+ 
+@@ -21,7 +24,19 @@
+ 
+ namespace Poseidon
+ {
++class Scene;
++
+ float TerrainGridForTier(GraphicsConfig::Tier tier);
+ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg);
+ 
++// The scene's share of cfg: terrain grid, object LOD bias, object and
++// vehicle shadows, smoke.
++void ApplyGraphicsConfigToScene(const GraphicsConfig& cfg, Scene& scene);
++
++// The config ApplyGraphicsConfigToEngine last pushed, or null before the
++// first push.  Boot applies graphics.cfg before the world and its Scene
++// exist, so a Scene takes its share from here when it loads its config:
++// at construction (boot, mod re-mount) and on a profile switch.
++const GraphicsConfig* AppliedGraphicsConfig();
++
+ } // namespace Poseidon
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+--- a/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Scene.cpp
+@@ -27,6 +27,7 @@ using Poseidon::Foundation::Time;
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+ #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
++#include <Poseidon/UI/Settings/GraphicsApply.hpp>
+ #include <Poseidon/Graphics/Core/Engine.hpp>
+ #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+@@ -674,6 +675,14 @@ void Scene::LoadConfig()
+         float value = cfg >> "terrainGrid";
+         SetPreferredTerrainGrid(value);
+     }
++    // The Graphics options (graphics.cfg) own the shadows, smoke and terrain
++    // grid; the profile keys above are their legacy copies. Boot applies the
++    // options before the world and this Scene exist, so take them on here: at
++    // construction (boot, mod re-mount) and on a profile switch.
++    if (const GraphicsConfig* graphics = AppliedGraphicsConfig())
++    {
++        ApplyGraphicsConfigToScene(*graphics, *this);
++    }
+ 
+     SetPreferredViewDistance(GetSelectedPreferredViewDistance());
+ }
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -333,6 +333,7 @@ list(APPEND POSEIDON_TEST_SOURCES
+     UI/Settings/test_displayConfig.cpp
+     UI/Settings/test_display_startup_overrides.cpp
+     UI/Settings/test_graphicsConfig.cpp
++    UI/Settings/test_graphicsApply.cpp
+     UI/Settings/test_gameSettingsConfig.cpp
+     UI/Settings/test_viewDistance.cpp
+     UI/Settings/test_contextControlsConfig.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/UI/Settings/test_graphicsApply.cpp b/arma_CWR/tests/unit/engine/Poseidon/UI/Settings/test_graphicsApply.cpp
+new file mode 100644
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/UI/Settings/test_graphicsApply.cpp
+@@ -0,0 +1,104 @@
++// GraphicsApply: the Graphics options reach a Scene that is built after they
++// were applied. Boot applies graphics.cfg before the world (and its Scene)
++// exists, so the shadow tier never reached the scene: trees and buildings cast
++// no sun shadows until the player opened the Graphics page.
++
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Core/Config/EngineConfig.hpp>
++#include <Poseidon/Core/Game/GameLoop.hpp>
++#include <Poseidon/Graphics/Core/Engine.hpp>
++#include <Poseidon/UI/Settings/GraphicsApply.hpp>
++#include <Poseidon/UI/Settings/GraphicsConfig.hpp>
++#include <Poseidon/World/Scene/Scene.hpp>
++
++#include <memory>
++
++using Poseidon::GraphicsConfig;
++using Poseidon::Scene;
++
++namespace
++{
++// Applies cfg the way boot does: no world, so no scene. The engine half is
++// left out (GEngine is the shared test dummy); this test is about the scene.
++struct BootApply
++{
++    explicit BootApply(const GraphicsConfig& cfg)
++    {
++        Poseidon::GScene = nullptr;
++        Poseidon::GEngine = nullptr;
++        Poseidon::ApplyGraphicsConfigToEngine(cfg);
++        Poseidon::GEngine = engine;
++        Poseidon::GScene = scene;
++    }
++    ~BootApply() { Poseidon::gUserFpsCap = fpsCap; }
++
++    Scene* scene = Poseidon::GScene;
++    Poseidon::Engine* engine = Poseidon::GEngine;
++    int fpsCap = Poseidon::gUserFpsCap;
++};
++
++// A Scene as World builds one. Its constructor and destructor touch the far
++// clip and the profile's legacy keys; the far clip is put back.
++struct TestScene
++{
++    TestScene() : scene(std::make_unique<Scene>()) {}
++    ~TestScene()
++    {
++        scene.reset();
++        ENGINE_CONFIG.horizontZ = horizontZ;
++    }
++
++    float horizontZ = ENGINE_CONFIG.horizontZ;
++    std::unique_ptr<Scene> scene;
++};
++} // namespace
++
++TEST_CASE("GraphicsApply: a Scene built after the boot apply takes the Graphics options",
++          "[Settings][GraphicsApply][graphics]")
++{
++    GraphicsConfig cfg;
++    cfg.LoadDefaults();
++    cfg.shadowQuality = GraphicsConfig::TierLow;
++    cfg.particlesQuality = GraphicsConfig::TierOff;
++    cfg.terrainDetail = GraphicsConfig::TierLow;
++    cfg.objectLod = GraphicsConfig::TierLow;
++    BootApply boot(cfg);
++
++    TestScene world;
++    CHECK(world.scene->GetObjectShadows()); // trees and buildings cast
++    CHECK(world.scene->GetVehicleShadows());
++    CHECK_FALSE(world.scene->GetCloudlets());
++    CHECK(world.scene->GetPreferredTerrainGrid() == Catch::Approx(Poseidon::TerrainGridForTier(cfg.terrainDetail)));
++    CHECK(world.scene->GetObjectLODBias() == Catch::Approx(0.5f));
++}
++
++TEST_CASE("GraphicsApply: shadow quality Off turns the scene's shadows off", "[Settings][GraphicsApply][graphics]")
++{
++    GraphicsConfig cfg;
++    cfg.LoadDefaults();
++    cfg.shadowQuality = GraphicsConfig::TierOff;
++    BootApply boot(cfg);
++
++    TestScene world;
++    CHECK_FALSE(world.scene->GetObjectShadows());
++    CHECK_FALSE(world.scene->GetVehicleShadows());
++}
++
++TEST_CASE("GraphicsApply: a profile switch keeps the Graphics options over the profile's legacy keys",
++          "[Settings][GraphicsApply][graphics]")
++{
++    GraphicsConfig cfg;
++    cfg.LoadDefaults();
++    cfg.shadowQuality = GraphicsConfig::TierHigh;
++    BootApply boot(cfg);
++
++    TestScene world;
++    // A profile last saved with object shadows off (every session before this
++    // fix saved them so), then read back as a profile switch does.
++    world.scene->SetObjectShadows(false);
++    world.scene->SaveConfig();
++    world.scene->LoadConfig();
++    CHECK(world.scene->GetObjectShadows());
++}

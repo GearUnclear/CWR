@@ -1,0 +1,25 @@
+{
+ "src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\1\\rec\\q2b_rtst.raw",
+ "w": 1920,
+ "h": 1080,
+ "frames": 200,
+ "mode": "0",
+ "half": "0",
+ "wall_ms": 16517.7,
+ "fps": 12.05,
+ "dwall_ms": {
+  "min": 39.45,
+  "med": 81.57,
+  "max": 119.22
+ },
+ "dpan_ms": {
+  "min": 16.66,
+  "med": 16.67,
+  "max": 16.67
+ },
+ "zero_sim_frames": 0,
+ "shots": 0,
+ "pan_first": 0.0167,
+ "pan_last": 3.3333,
+ "mkv": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\1\\rec\\q2b_rtst.mkv"
+}

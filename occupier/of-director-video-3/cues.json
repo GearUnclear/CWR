@@ -1,0 +1,217 @@
+{
+ "title": "Branch comparison: the occupier director",
+ "sub": {
+  "A": "origin/reviewable_forces  ba2aa5c  (fixes, old cadence)",
+  "B": "occupier-forces  fb9dde1  (retune, no fixes)"
+ },
+ "cards": [
+  {
+   "lines": [
+    [
+     "h",
+     "Two branches, one scenario"
+    ],
+    [
+     "s",
+     "the occupier director on Guerrilla.Abel, Remaster data, one tri run of the same script per branch"
+    ],
+    [
+     "A",
+     "origin/reviewable_forces at ba2aa5c: 197a7d3 plus five engine fixes (384b283 k in a capture batch, 93cd5c9 presence in the current bubble, b6901d6 births charged per step and the pool floor ratio, bad1530 and 44a8254 cleared bindings) and the Remaster-only setup guard (d773dd5). Old cadence: a token every 1800 / 2700 / 3600 s, two operations."
+    ],
+    [
+     "B",
+     "occupier-forces at fb9dde1: 197a7d3 plus acf2311, the retune: a token every 600 / 1050 / 1800 s, three operations while STRONG, the spare cap, the arrival rule. Without the five fixes."
+    ],
+    [
+     "d",
+     "Levers, identical on both: a scratch Guerrilla.Abel with forcesPoolMin 50 and forcesPoolPerTown 1 (poolStart 50); director tick 10 s, wave lead 120 s, birth give-up 60 s, first-town answer chances 0; pool forced to 15 at forcesPoolFloor 0.3 for four minutes; invulnerable resistance cells; 86 to 94 parked bodies against the 130-body budget; the player teleports; time x4 to x8; --no-strict. Only commands both branches have."
+    ]
+   ],
+   "voice": "Two builds of the same engine play the same scripted campaign. On the left, A: reviewable forces, five engine fixes without the retune. On the right, B: occupier forces, the retune without the fixes. The script plays only the resistance; every occupier decision is the engine's own.",
+   "dur": 20,
+   "y": 70
+  }
+ ],
+ "cues": [
+  {
+   "sim": 10.01,
+   "text": "Both runs force the pool to fifteen of fifty, with the floor at thirty percent. Fifteen sits exactly on the floor, where the plan still lets the director act.",
+   "lineA": "[11 s] OccupierForces: band STRONG -> THIN (pool 15 of 50)",
+   "lineB": "[10 s] OccupierForces: band STRONG -> THIN (pool 15 of 50)",
+   "rate": 0.4
+  },
+  {
+   "sim": 11.99,
+   "text": "Then Houdan and Dourdan fall in the same census tick. A counts zero towns taken before Houdan and one before Dourdan. B counts one and two: the second capture leaks into the first.",
+   "lineA": "CounterAttack: Village rose; the occupier does not answer (chance 0.00, 0 town(s) taken before) / CounterAttack: Dourdan rose; the occupier director takes it (1 town(s) taken before)",
+   "lineB": "CounterAttack: Village rose; the occupier does not answer (chance 0.00, 1 town(s) taken before) / CounterAttack: Dourdan rose; the occupier director takes it (2 town(s) taken before)",
+   "rate": 0.3
+  },
+  {
+   "sim": 20.34,
+   "text": "Two towns wake the director with two tokens, still at the floor. A spends both at once: two foot squads. B reads fifteen as below the floor and sits on its tokens for four minutes.",
+   "lineA": "[20 s] OccupierForces: [op 1] Foot squad (4) from Outpost to Village (4 unit(s), the pool pays 0, lethality 4.00 of 0.00, 0 fighter(s) reported, about 357 s)  [30 s] OccupierForces: [op 2] Foot squad (4) from Airfield to Dourdan (4 unit(s), the pool pays 0, lethality 4.00 of 0.00, 0 fighter(s) reported, about 1970 s)",
+   "lineB": "[254 s] scenario note: after 240 s at the floor: pool 15 of 50, band THIN, tokens 2, operations 0",
+   "rate": 4
+  },
+  {
+   "sim": 258.19,
+   "text": "Back at fifty, B moves. Its men now report three fighters per town, so it buys an APC and a truck. A's walkers are already halfway.",
+   "lineA": "[254 s] scenario note: lever: pool restored to 50, refill 4 h: band STRONG, tokens 0",
+   "lineB": "[261 s] OccupierForces: [op 1] APC (4, BMP) from Outpost to Village (15 unit(s), the pool pays 11, lethality 11.00 of 10.80, 3 fighter(s) reported, about 46 s)  [271 s] OccupierForces: [op 2] Motorized squad (9, Ural) from Airfield to Dourdan (13 unit(s), the pool pays 4, lethality 11.25 of 10.80, 3 fighter(s) reported, about 222 s)",
+   "rate": 1.5
+  },
+  {
+   "sim": 274.16,
+   "text": "Ninety parked bodies crowd the 130-body budget: one more force fits, two do not. The player steps between the towns, so both forces are due in one step.",
+   "lineA": "[257 s] scenario note: lever: 94 resistance bodies parked in the far hills stand in for a crowded map: live AI 30 -> 124 of the 130 budget; the forces on Houdan and Dourdan need about 4 and 4 bodies, one fits, two do not; 2 director op(s) travelling",
+   "lineB": "[275 s] scenario note: lever: 86 resistance bodies parked in the far hills stand in for a crowded map: live AI 29 -> 115 of the 130 budget; the forces on Houdan and Dourdan need about 7 and 12 bodies, one fits, two do not; 2 director op(s) travelling",
+   "rate": 0.15,
+   "inset": "births"
+  },
+  {
+   "sim": 277.16,
+   "text": "A charges the first birth before admitting the second: the Dourdan force waits. B checks both against the same census and births both: seventeen bodies in one step, one hundred fifteen to one hundred thirty-two.",
+   "lineA": "[258 s] CounterAttack: force on Dourdan deferred (live squads 1/2, live AI 128+4/130, occupier groups 4+1/40, born ops 1/2, live hulls 0/6); retrying every 30s",
+   "lineB": "[276 s] CounterAttack: [op 1] born for Village (spawnReason route) at [7491, 6248], 843 m from the player  [276 s] CounterAttack: [op 2] born for Dourdan (spawnReason route) at [8074, 9854], 3467 m from the player",
+   "rate": 0.3,
+   "inset": "births"
+  },
+  {
+   "sim": 289.16,
+   "text": "On both sides, roadside traffic then pushes the census past one hundred forty within seconds. The birth check holds the line; ambient traffic does not.",
+   "lineA": "[300 s] [gmsim] budget: 140 live AI bodies exceeds budgetLiveBodies 130",
+   "lineB": "[300 s] [gmsim] budget: 145 live AI bodies exceeds budgetLiveBodies 130",
+   "rate": 3,
+   "inset": "births"
+  },
+  {
+   "sim": 632.08,
+   "text": "The defended towns repel every attack. A's late Dourdan force goes back to abstract travel when the player leaves, and fights an hour later.",
+   "lineA": "[615 s] CounterAttack: the force on Dourdan (4 soldier(s)) leaves the player's world 11% along its road; abstract again, 2192s from the town",
+   "lineB": "[703 s] OccupierForces: [op 2] Repelled at Dourdan: 9 lost, 0 going home; Dourdan rests 1800 s, heat +15",
+   "rate": 30
+  },
+  {
+   "sim": 4126.75,
+   "text": "A cell takes the Outpost and leaves it empty. B's arrival rule sees a thirty-minute walk and buys a Mi17 insertion. A sends six men on foot. Both add a jet opener on an empty base.",
+   "lineA": "[4110 s] OccupierForces: [op 3] Base retake (foot 6) from Le Port Harbour on Outpost (6 unit(s), the pool pays 0, lethality 6.00 of 0.00, 0 fighter(s) reported, about 1822 s)",
+   "lineB": "[1626 s] OccupierForces: [op 3] arrival rule (forcesSlowEta): the cheapest, FOOT, needs about 1822 s; TRANSPORT_HELI goes, about 51 s  [1626 s] OccupierForces: [op 3] Base retake (package 6, Mi17) from Le Port Harbour on Outpost (18 unit(s), the pool pays 12, lethality 7.50 of 0.00, 0 fighter(s) reported, about 51 s)",
+   "rate": 6
+  },
+  {
+   "sim": 4195.42,
+   "text": "B holds the base two minutes after launch. A's walkers need almost an hour; the quote said thirty minutes, measured in a straight line.",
+   "lineA": "[7503 s] CounterAttack: [op 3] arrived abstract at Outpost (holds the empty target), 3454 m from the player",
+   "lineB": "[1693 s] CounterAttack: [op 3] arrived abstract at Outpost (holds the empty target), 3454 m from the player",
+   "rate": 40
+  },
+  {
+   "sim": 7532.26,
+   "text": "Now the bubble test, from a second short run per branch. The player steps into the bubble a fifth of a second before a census tick.",
+   "lineA": "",
+   "lineB": "",
+   "rate": 0.2,
+   "inset": "entry"
+  },
+  {
+   "sim": 7533.26,
+   "text": "On B the abstract force still counts at that tick: the meter fills and the base changes hands with the player seven hundred metres away. On A the force is already off the census: the meter only decays.",
+   "lineA": "bubble_entry run, A: entry at 3437.69 s with the meter at 72; next tick 3437.93 s: meter 70, owner GUER",
+   "lineB": "bubble_entry run, B: entry at 115.95 s with the meter at 90; next tick: CounterAttack: Outpost retaken by the holding force",
+   "rate": 0.2,
+   "inset": "entry"
+  },
+  {
+   "sim": 7540.76,
+   "text": "In the main runs the step came just after a tick, so neither side drained. The window is one second in three, which is why the fix matters only sometimes.",
+   "lineA": "[7546 s] scenario note: 30 s after the entry: Outpost meter 52, owner GUER",
+   "lineB": "[1737 s] scenario note: 30 s after the entry: Outpost meter 70, owner GUER",
+   "rate": 6
+  },
+  {
+   "sim": 7690.85,
+   "text": "Five more towns rise in one tick. The same leak: A counts two to six towns before, B six to ten.",
+   "lineA": "k: 2, 3, 4, 5, 6  (CounterAttack: Larche rose; the occupier director takes it (2 town(s) taken before))",
+   "lineB": "k: 6, 7, 8, 9, 10  (CounterAttack: Larche rose; the occupier director takes it (6 town(s) taken before))",
+   "rate": 3
+  },
+  {
+   "sim": 8065.25,
+   "text": "Then a free hour. B's tokens come every ten minutes: an APC to Larche, a helicopter that retakes Sainte Marie, then a push-out every ten minutes.",
+   "lineA": "[7714 s] OccupierForces: [op 7] Foot squad (4) from Airfield to Larche (4 unit(s), the pool pays 0, lethality 4.00 of 0.00, 0 fighter(s) reported, about 1590 s)",
+   "lineB": "[2230 s] OccupierForces: [op 6] Helicopter insertion (4, Mi17) from Airfield (infantry of Southeast Compound) to Sainte Marie (16 unit(s), the pool pays 12, lethality 6.25 of 0.00, 0 fighter(s) reported, about 78 s)",
+   "rate": 25
+  },
+  {
+   "sim": 9534.04,
+   "text": "A's tokens come every thirty: two operations in the hour, both on foot. Sainte Marie, Chapoi and Arudy are still the resistance's when the hour ends.",
+   "lineA": "[9517 s] OccupierForces: [op 8] Push-out: foot squad (4) from Outpost to La Trinite (4 unit(s), the pool pays 0, lethality 5.00 of 0.00, 0 fighter(s) reported, about 1118 s)",
+   "lineB": "[5229 s] OccupierForces: [op 11] Push-out: foot squad (4) from Le Port Harbour to Chapoi (4 unit(s), the pool pays 0, lethality 4.00 of 0.00, 0 fighter(s) reported, about 1716 s)",
+   "rate": 25
+  },
+  {
+   "sim": 10995.02,
+   "text": "Push-outs keep the cheapest package on both branches by design, so quiet towns always get walkers. A third run, B with the old cadence keys, launched 3 in that hour and kept B's floor, k and birth behaviour.",
+   "lineA": "[11277 s] scenario note: end: pool 50 of 50, band STRONG, tokens 0, operation counter 8, waves fired 0",
+   "lineB": "[5459 s] scenario note: end: pool 50 of 50, band STRONG, tokens 0, operation counter 11, waves fired 0",
+   "rate": 25
+  }
+ ],
+ "table": [
+  [
+   "Operations (by package at launch)",
+   "8: foot 7, jet 1",
+   "11: apc 2, foot 5, jet 1, heli 2, truck 1"
+  ],
+  [
+   "Launches in the free hour",
+   "2 (foot 1, push-out foot 1)",
+   "7 (apc 1, heli insertion 1, push-out foot 5)"
+  ],
+  [
+   "Arrivals",
+   "abstract 6, live 7",
+   "abstract 4, live 5"
+  ],
+  [
+   "Births refused by the body budget",
+   "1 (Dourdan, live AI 128+4 of 130)",
+   "0"
+  ],
+  [
+   "Live AI at the birth step / run peak (traffic included); max occupier groups",
+   "128 / 144; 7",
+   "138 / 150; 9"
+  ],
+  [
+   "k after the double capture / the five",
+   "0, 1 / 2, 3, 4, 5, 6",
+   "1, 2 / 6, 7, 8, 9, 10"
+  ],
+  [
+   "Pool 15 of 50 at floor 0.3",
+   "accepted: 2 operations at the floor",
+   "rejected: 0 operations in 240 s"
+  ],
+  [
+   "Bubble entry 0.2 s before a census tick",
+   "no drain (72 to 70)",
+   "drained: base retaken, player 720 m away"
+  ],
+  [
+   "Engine ERRR lines (AIUnitImpl.cpp 748)",
+   "1",
+   "0 (1 in the strict attempt that stopped)"
+  ],
+  [
+   "Third run: B with the legacy cadence keys",
+   "(not run)",
+   "free hour: 3 (apc 1, foot 1, push-out foot 1); floor, k, births as B"
+  ]
+ ],
+ "table_title": "What the two runs counted",
+ "outro_voice": "The fixes change what happens at the edges: a floor, a batch, a step, a tick. The retune changes the tempo. They do not overlap, and B wants both.",
+ "foot": "Scripts, traces and logs: tmp/of-director-video-3. Narration: OpenRouter gpt-audio-mini via arma_CWR/voice-lines/generate_voice.py."
+}

@@ -1,0 +1,2933 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 88617c7..8dcee72 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -312,7 +312,8 @@ class Engine : public IGraphicsEngine
+     float _avgBrightness; // average screen brightness
+     bool _nightVision;
+     bool _multitexturing;
+-    render::PassKindHint _passKindHint = render::PassKindHint::None; // explicit cockpit pass routing
++    render::PassKindHint _passKindHint = render::PassKindHint::None;          // explicit cockpit pass routing
++    render::DrawObjectKind _drawObjectKind = render::DrawObjectKind::Unknown; // the shape draw's object
+     int _showFps;
+     AspectSettings _aspectSettings;
+ 
+@@ -466,6 +467,13 @@ class Engine : public IGraphicsEngine
+     void SetPassKindHint(render::PassKindHint hint) { _passKindHint = hint; }
+     void ClearPassKindHint() { _passKindHint = render::PassKindHint::None; }
+ 
++    // The kind of object whose shape is being drawn (Shape::Draw sets it
++    // around a shape's sections and puts the previous one back), copied into
++    // each draw's descriptor for the remastered materials. Unknown outside a
++    // shape draw.
++    render::DrawObjectKind GetDrawObjectKind() const { return _drawObjectKind; }
++    void SetDrawObjectKind(render::DrawObjectKind kind) { _drawObjectKind = kind; }
++
+     // Typed form — callers split a legacy int via `render::SplitLegacy` at the
+     // boundary; backends read whichever category they care about.
+     virtual void PrepareTriangleTL(const MipInfo& mip, const render::LegacySpec& spec) {}
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index 9417ebe..0ce36e3 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -310,13 +310,14 @@ std::string FeatureStateString(const LightingTuning& tuning, const FeatureGates&
+     for (int i = 0; i < kFeatureCount; ++i)
+         landed += GetFeatureInfo(static_cast<Feature>(i)).landed ? 1 : 0;
+     char head[384];
+-    std::snprintf(head, sizeof(head),
+-                  "mode=%s gates=%d computed=%d frame=%u sun=%.1f night=%.2f sky=%.2f rain=%.2f fog=%.2f lights=%d "
+-                  "landed=%d/%d |",
+-                  tuning.remastered ? "remastered" : "classic", tuning.gates ? 1 : 0, gates.computed ? 1 : 0,
+-                  gates.frame, static_cast<double>(in.sunElevationDeg), static_cast<double>(in.nightEffect),
+-                  static_cast<double>(in.skyThrough), static_cast<double>(in.rainDensity), static_cast<double>(in.fog),
+-                  in.localLights, landed, kFeatureCount);
++    std::snprintf(
++        head, sizeof(head),
++        "mode=%s gates=%d computed=%d frame=%u sun=%.1f night=%.2f sky=%.2f rain=%.2f wet=%.2f fog=%.2f lights=%d "
++        "landed=%d/%d |",
++        tuning.remastered ? "remastered" : "classic", tuning.gates ? 1 : 0, gates.computed ? 1 : 0, gates.frame,
++        static_cast<double>(in.sunElevationDeg), static_cast<double>(in.nightEffect),
++        static_cast<double>(in.skyThrough), static_cast<double>(in.rainDensity), static_cast<double>(GateWetness(in)),
++        static_cast<double>(in.fog), in.localLights, landed, kFeatureCount);
+     std::string out = head;
+     for (int i = 0; i < kFeatureCount; ++i)
+     {
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+index e32dabb..02777bb 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.hpp
+@@ -118,7 +118,7 @@ FeatureGates ComputeFeatureGates(const GateInputs& in, const LightingTuning& tun
+ float GateWetness(const GateInputs& in);
+ 
+ // triFeatureState: the switches and their gates as one line, for capture logs.
+-//   "mode=remastered gates=1 computed=1 frame=<n> sun=<deg> night=<0..1> sky=<0..1> rain=<0..1>
++//   "mode=remastered gates=1 computed=1 frame=<n> sun=<deg> night=<0..1> sky=<0..1> rain=<0..1> wet=<0..1>
+ //    fog=<0..1> lights=<n> landed=<n>/<26> | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ..."
+ // Fields are separated by spaces, never ';' (the UDCAP log lines split on it);
+ // reasons have their spaces replaced by '-'. ":inert" marks a switch that
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index fa3ee47..966d51f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -61,10 +61,12 @@ constexpr FeatureInfo kFeatures[] = {
+     {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", true, &FS::seaWaves, "ground"},
+     // B6 (ssr): the tag readout and the reflections, two post stages.
+     {Feature::Ssr, "ssr", "Screen-space reflections", "ssr", "Water and shine", "B6", true, &FS::ssr, "ssr"},
+-    {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", false,
+-     &FS::wetWeather, ""},
+-    {Feature::LampStreaks, "lampStreaks", "Lamp streaks on wet ground", "materials", "Water and shine", "B7", false,
+-     &FS::lampStreaks, ""},
++    // B7 (materials): the wet surfaces, the puddles' darkening and the lamp
++    // streaks shade in the world pass; the puddles' reflections are B6's stage.
++    {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", true,
++     &FS::wetWeather, "world"},
++    {Feature::LampStreaks, "lampStreaks", "Lamp streaks on wet ground", "materials", "Water and shine", "B7", true,
++     &FS::lampStreaks, "world"},
+     // B8 (volumetric and haze): one post stage, the air pass, for all three.
+     {Feature::AirBeams, "airBeams", "Sun beams and headlight cones", "volumetric", "Sky and air", "B8", true,
+      &FS::airBeams, "air"},
+@@ -225,8 +227,14 @@ struct KeyTable
+             MakeSubKnob(Feature::Ssr, "ssrWater", "Water reflection",
+                         "the share of the sea's light a reflection takes, times the sky's estimated share",
+                         &LT::ssrWater, 0.0f, 2.0f),
+-            MakeSubKnob(Feature::Ssr, "ssrWet", "Ground wetness", "-1 = the weather (rain); 0..1 forces it",
++            MakeSubKnob(Feature::Ssr, "ssrWet", "Ground wetness",
++                        "-1 = the weather (the wetness state, the rain with wetWeather off); 0..1 forces it",
+                         &LT::ssrWet, -1.0f, 1.0f),
++            MakeSubKnob(Feature::WetWeather, "wetness", "Wetness",
++                        "-1 = the weather (rain wets, sun and wind dry); 0..1 forces it, also after the rain",
++                        &LT::wetness, -1.0f, 1.0f),
++            MakeSubKnob(Feature::WetWeather, "puddles", "Puddles", "the puddles' amount; 0 = none, 1 = the weather's",
++                        &LT::puddles, 0.0f, 2.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 2e65ab3..235ecf0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -168,10 +168,16 @@ struct LightingTuning
+     // sub-knobs: the share of the sea's light a reflection on water takes, as a
+     // multiple of the pass's estimate of the sky's share (its mean weight; 1.5
+     // also covers the share the sea program's waves add), and the ground's
+-    // wetness (-1 = the weather: the rain density until a wetness state exists;
+-    // 0..1 forces it).
++    // wetness (-1 = the weather: with wetWeather on the world's wetness state,
++    // Wetness.hpp, off the rain density; 0..1 forces it).
+     float ssrWater = 1.5f;
+     float ssrWet = -1.0f;
++    // Wet weather (features.wetWeather, Wetness.hpp) sub-knobs: the wetness
++    // (-1 = the world's state, which the rain wets and the sun and wind dry;
++    // 0..1 forces surfaces and puddles alike, "after the rain" in clear
++    // weather) and the puddles' amount (a multiple of the state's puddles).
++    float wetness = -1.0f;
++    float puddles = 1.0f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index 87829d6..b8e8a11 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -127,8 +127,11 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+   it do something; until then it is inert and its on and off look the same.
+   A feature's sub-knobs sit under its switch: TAA's `taaSharpen` (0.5),
+   `taaMipBias` (-0.5) and `taaAlpha` (0.1), the terrain detail's
+-  `detailStrength` (1.5), the luma sharpen's `sharpenStrength` (0.3) and the beams'
+-  `volGain` (-1: from the weather, 4 in clear air, 2.5 in mist).
++  `detailStrength` (1.5), the luma sharpen's `sharpenStrength` (0.3), the beams'
++  `volGain` (-1: from the weather, 4 in clear air, 2.5 in mist) and the wet
++  weather's `wetness` (-1: the world's state, which the rain wets and the sun
++  and wind dry; 0..1 forces it, also "after the rain" under a clear sky) and
++  `puddles` (1: the puddles' amount).
+ - Dev overlay, **Lighting** tab, generated from the same registry: sliders for
+   exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
+   moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
+@@ -195,7 +198,9 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map and the canopy in step with the landscape (async build, hand-over on the render thread); gathers the canopy's footprints from the landscape objects and takes a destroyed object's out (`TerrainCanopyObjectDestroyed`, from `Object::SetDestroyed`). |
+ | `Graphics/Remaster/Canopy.{hpp,cpp}` | The long tree shadows: the canopy raster and its mip rules, the removal of a destroyed object, the C++ mirrors of the GPU trace (`CanopySunAt`) and of the world's read (`CanopyReceiverVisibility`), the sun-visibility map's placement and rebuild rule, the strength over the gate's edges, the frame constants. Pure. |
+ | `PoseidonGL33/EngineGL33_Canopy.cpp`, `EngineGL33_PostCanopyShaders.cpp` | The canopy on the GPU: its upload (whole, or the rectangles a removal changed), the fullscreen pass that builds the sun-visibility map (its GLSL in a GL-free file, a row of `kPostShaders`), the `Canopy` slot of `LitConstants`, the stand-ins on units 10 and 15, and `triCanopyCheck`. |
+-| `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
++| `Graphics/Remaster/Wetness.{hpp,cpp}` | The world's wetness (surfaces and puddles): wets in rain, dries with sun and wind, puddles slower; a rain change made at once snaps it; the frame's wetness from the state or the knob. Pure. The landscape's weather keeps and steps it (`Weather::MoveClouds`). |
++| `Graphics/Remaster/SurfaceMaterials.{hpp,cpp}` | The wet weather's surface classes: the stock rules (Czech and English texture-name tokens per object kind), the mods' `CfgSurfaceMaterials` merged over them, each kind's default class, the porosity table the shader mirrors, the object kind from a config's simulation and class. Pure. |
++| `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, puddles, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes; the puddles piece is pasted by the reflections' trace too, so both draw the same puddles. |
+ | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-6, 8 to 11, 13 and 15 in use, 12 and 14 allocated) and the sampler table the programs are bound from, program-set selection. |
+ | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+ | `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages (with TAA off the Sharpen stage is the luma sharpen); the GL helpers the post stages share. |
+@@ -208,6 +213,7 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
+ | `tests/unit/.../Graphics/test_terrain_detail.cpp` | The terrain detail's mirror (limiter, blend variance, rotation spread, locality and zoom of a cell's patch, the near fade on flat ground at 1080p, the 300 m fade, the 2x cap), its frame constants and gate, the shader's constants against the mirror's, and source audits that only the land's draws and only the terrain main take it. |
+ | `tests/unit/.../Graphics/test_sky_density.cpp` | The dome mapping, the density map on a clear, a broken and an overcast sky made like the shipped ones, the blur, shadow cover and coverage, the low-sun fade (the lit-cloud terms identity from 45 degrees of sun up, lighter as well as darker below), the sky's turn, the shadow anchor, and the rig keeping the overcast dimming over the sky's covered share; `test_remaster_lighting.cpp` pins the shaders' constants and mapping to it and the clouds' off contract. |
+ | `tests/unit/.../Graphics/test_air_medium.cpp` | The air's closed forms against numeric integration, the valley floor on a synthetic valley, the morning and weather rules, the classic fog's moved edge, the shaders' constants and pieces against the medium's, "off" leaving every draw and stage as it was, unit 2 around the march. |
++| `tests/unit/.../Graphics/test_wet_weather.cpp` | The wetness integrator (wets, dries faster in sun and wind, puddles lag, snaps, the knobs), the surface classes on the research log's stock names, each kind's default, a mod's rules, the object kinds, the shader's porosity table, the descriptor's object kind, the switches, sub-knobs and gates, and the shaders' and backend's off contract and shared puddles. |
+ | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
+ | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.cpp
+new file mode 100644
+index 0000000..1348add
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.cpp
+@@ -0,0 +1,314 @@
++#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
++
++#include <algorithm>
++#include <cctype>
++#include <iterator>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++
++using K = render::DrawObjectKind;
++
++struct ClassRow
++{
++    SurfaceClass surface;
++    const char* name;
++    float porosity;
++};
++
++// In enum order (checked below). Porosity from the research prototype's
++// per-class response (materials/override_v9, surfFor).
++constexpr ClassRow kClasses[] = {
++    {SurfaceClass::Unknown, "unknown", 0.5f}, {SurfaceClass::Paint, "paint", 0.05f},
++    {SurfaceClass::Metal, "metal", 0.0f},     {SurfaceClass::Glass, "glass", 0.0f},
++    {SurfaceClass::Rubber, "rubber", 0.1f},   {SurfaceClass::Fabric, "fabric", 0.85f},
++    {SurfaceClass::Skin, "skin", 0.3f},       {SurfaceClass::Road, "road", 0.35f},
++    {SurfaceClass::Masonry, "masonry", 0.6f}, {SurfaceClass::Wood, "wood", 0.7f},
++    {SurfaceClass::Leather, "leather", 0.4f}, {SurfaceClass::Weapon, "weapon", 0.0f},
++    {SurfaceClass::Lens, "lens", 0.0f},       {SurfaceClass::Roof, "roof", 0.4f},
++};
++static_assert(sizeof(kClasses) / sizeof(kClasses[0]) == kSurfaceClassCount, "one row per SurfaceClass");
++
++constexpr bool ClassesInOrder()
++{
++    for (int i = 0; i < kSurfaceClassCount; ++i)
++    {
++        if (static_cast<int>(kClasses[i].surface) != i)
++            return false;
++    }
++    return true;
++}
++static_assert(ClassesInOrder(), "kClasses rows follow the SurfaceClass enum");
++
++bool EqualNoCase(std::string_view a, std::string_view b)
++{
++    if (a.size() != b.size())
++        return false;
++    for (size_t i = 0; i < a.size(); ++i)
++    {
++        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
++            return false;
++    }
++    return true;
++}
++
++std::string Lower(std::string_view s)
++{
++    std::string out(s);
++    for (char& c : out)
++        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++    return out;
++}
++
++bool Contains(const std::string& s, const std::string& token)
++{
++    return s.find(token) != std::string::npos;
++}
++
++bool Matches(const SurfaceRule& r, const std::string& lowerPath, K kind)
++{
++    if ((r.kinds & KindBit(kind)) == 0)
++        return false;
++    for (const std::string& t : r.none)
++    {
++        if (Contains(lowerPath, t))
++            return false;
++    }
++    if (r.any.empty())
++        return true;
++    for (const std::string& t : r.any)
++    {
++        if (Contains(lowerPath, t))
++            return true;
++    }
++    return false;
++}
++
++SurfaceRule Rule(const char* name, SurfaceClass surface, std::uint32_t kinds, std::vector<std::string> any,
++                 std::vector<std::string> none = {})
++{
++    SurfaceRule r;
++    r.name = name;
++    r.surface = surface;
++    r.kinds = kinds;
++    r.any = std::move(any);
++    r.none = std::move(none);
++    return r;
++}
++
++// The token lists of the research prototype (EngineGL33_Lighting.cpp
++// ClassifySurface, round 6; every texture of three islands in
++// classification_log_r6.txt).
++const std::vector<std::string> kGlass = {"sklo",       "skla",   "glass",  "window",   "windscreen",
++                                         "windshield", "armwin", "canopy", "cifernik", "budik"};
++const std::vector<std::string> kLens = {"reflekt", "svetl", "blink", "lamp", "light"};
++const std::vector<std::string> kRubber = {"pneu", "guma", "tyre", "tire", "wheel", "kolo", "pasy", "track"};
++const std::vector<std::string> kBarrel = {"hlaven", "hlavn", "delo", "kanon", "barrel", "lauf"};
++const std::vector<std::string> kMetal = {"hlaven",  "hlavn",  "delo",  "kulomet", "lauf",  "barrel", "kanon", "trub",
++                                         "roura",   "_rez",   "rez_",  "_kov",    "kov_",  "kovn",   "chrom", "vyfuk",
++                                         "exhaust", "antena", "plech", "zink",    "zelez", "metal",  "steel", "pipe"};
++const std::vector<std::string> kFabric = {"plachta", "sedl",   "sedad",    "taska",  "igelit", "lano",
++                                          "_sit",    "net",    "tarp",     "canvas", "seat",   "bench",
++                                          "cloth",   "camnet", "maskovac", "stan_",  "stan.",  "tent"};
++const std::vector<std::string> kSkin = {"xicht", "hlava", "head", "face", "hand", "ruce"};
++const std::vector<std::string> kRoad = {"silnic", "asfalt", "cesta", "road", "dlazb", "chodnik", "runway", "draha"};
++const std::vector<std::string> kWood = {"drev", "prkn", "plank", "wood", "bark", "kmen", "dreva", "bedna", "crate"};
++const std::vector<std::string> kWeapon = {"ak47", "ak74", "m16",    "m21",  "m60", "rpg", "law",    "carl",  "g36",
++                                          "fal",  "uzi",  "pistol", "m249", "pk",  "mag", "weapon", "zbran", "scope"};
++
++constexpr std::uint32_t kMan = KindBit(K::Man);
++
++} // namespace
++
++const char* SurfaceClassName(SurfaceClass c)
++{
++    const int i = static_cast<int>(c);
++    return i >= 0 && i < kSurfaceClassCount ? kClasses[i].name : "unknown";
++}
++
++bool ParseSurfaceClass(std::string_view name, SurfaceClass& out)
++{
++    for (const ClassRow& row : kClasses)
++    {
++        if (EqualNoCase(name, row.name))
++        {
++            out = row.surface;
++            return true;
++        }
++    }
++    return false;
++}
++
++float SurfacePorosity(SurfaceClass c)
++{
++    const int i = static_cast<int>(c);
++    return kClasses[i >= 0 && i < kSurfaceClassCount ? i : 0].porosity;
++}
++
++render::DrawObjectKind DrawObjectKindFromNames(std::string_view simulation, std::string_view className)
++{
++    const std::string cls = Lower(className);
++    if (Contains(cls, "camp") || Contains(cls, "tent") || Contains(cls, "camnet"))
++        return K::Fabric;
++    const std::string sim = Lower(simulation);
++    if (sim == "car" || sim == "tank" || sim == "motorcycle")
++        return K::LandVehicle;
++    if (sim == "soldier" || sim == "invisible")
++        return K::Man;
++    if (sim == "helicopter" || sim == "airplane" || sim == "parachute")
++        return K::Aircraft;
++    if (sim == "ship")
++        return K::Ship;
++    if (sim.rfind("proxy", 0) == 0 || sim == "weapon")
++        return K::Weapon;
++    return K::Static;
++}
++
++std::uint32_t ParseKindMask(std::string_view name)
++{
++    struct Row
++    {
++        const char* name;
++        std::uint32_t mask;
++    };
++    static const Row rows[] = {
++        {"vehicle", kVehicleKinds},     {"landvehicle", KindBit(K::LandVehicle)}, {"man", KindBit(K::Man)},
++        {"static", KindBit(K::Static)}, {"aircraft", KindBit(K::Aircraft)},       {"ship", KindBit(K::Ship)},
++        {"weapon", KindBit(K::Weapon)}, {"fabric", KindBit(K::Fabric)},           {"unknown", KindBit(K::Unknown)},
++    };
++    for (const Row& r : rows)
++    {
++        if (EqualNoCase(name, r.name))
++            return r.mask;
++    }
++    return 0;
++}
++
++SurfaceTable DefaultSurfaceTable()
++{
++    SurfaceTable t;
++    t.rules = {
++        // Glass by name on anything (the prototype's first test).
++        Rule("glass", SurfaceClass::Glass, kAllKinds, kGlass),
++        Rule("window", SurfaceClass::Glass, kAllKinds, {"okno"}, {"ram", "_in", "bez"}),
++        // Tents and camouflage nets: their textures are anonymous atlases.
++        Rule("tentObject", SurfaceClass::Fabric, KindBit(K::Fabric), {}),
++        // Vehicles: alpha-blended vehicle textures are mostly cutout details
++        // (wheel rims, tools), so glass comes from the name only.
++        Rule("vehicleGlass", SurfaceClass::Glass, kVehicleKinds, {"skl"}),
++        Rule("vehicleLens", SurfaceClass::Lens, kVehicleKinds, kLens),
++        Rule("vehicleRubber", SurfaceClass::Rubber, kVehicleKinds, kRubber),
++        // Gun barrels and cannons on military vehicles are painted steel.
++        Rule("vehicleBarrel", SurfaceClass::Paint, kVehicleKinds, kBarrel),
++        Rule("vehicleMetal", SurfaceClass::Metal, kVehicleKinds, kMetal, {"plech"}),
++        Rule("vehicleFabric", SurfaceClass::Fabric, kVehicleKinds, kFabric),
++        // Men: face and hands, boots, carried weapons; the rest is cloth.
++        Rule("manSkin", SurfaceClass::Skin, kMan, kSkin),
++        Rule("manHand", SurfaceClass::Skin, kMan, {"ruka"}, {"rukav"}),
++        Rule("manBoot", SurfaceClass::Leather, kMan, {"bota", "boot"}),
++        Rule("manWeapon", SurfaceClass::Weapon, kMan, kWeapon),
++        // Static objects and draws without an object (roads, decals).
++        Rule("road", SurfaceClass::Road, kStaticKinds, kRoad),
++        Rule("roof", SurfaceClass::Roof, kStaticKinds, {"strech", "roof"}, {"plech"}),
++        Rule("staticMetal", SurfaceClass::Metal, kStaticKinds, kMetal),
++        Rule("staticWood", SurfaceClass::Wood, kStaticKinds, kWood),
++        Rule("staticFabric", SurfaceClass::Fabric, kStaticKinds, kFabric),
++        Rule("staticLens", SurfaceClass::Lens, kStaticKinds, kLens),
++    };
++    return t;
++}
++
++void MergeSurfaceRules(SurfaceTable& table, const std::vector<SurfaceRule>& rules)
++{
++    std::vector<SurfaceRule> front;
++    for (const SurfaceRule& r : rules)
++    {
++        auto same = std::find_if(table.rules.begin(), table.rules.end(),
++                                 [&r](const SurfaceRule& x) { return EqualNoCase(x.name, r.name); });
++        if (same != table.rules.end())
++            *same = r;
++        else
++            front.push_back(r);
++    }
++    table.rules.insert(table.rules.begin(), front.begin(), front.end());
++}
++
++bool MakeSurfaceRule(const std::string& name, std::string_view surface, const std::vector<std::string>& any,
++                     const std::vector<std::string>& none, const std::vector<std::string>& kindNames, SurfaceRule& out,
++                     std::string* why)
++{
++    SurfaceRule r;
++    r.name = name;
++    if (!ParseSurfaceClass(surface, r.surface))
++    {
++        if (why)
++            *why = "unknown surface class '" + std::string(surface) + "'";
++        return false;
++    }
++    for (const std::string& t : any)
++    {
++        if (!t.empty())
++            r.any.push_back(Lower(t));
++    }
++    for (const std::string& t : none)
++    {
++        if (!t.empty())
++            r.none.push_back(Lower(t));
++    }
++    if (!kindNames.empty())
++    {
++        r.kinds = 0;
++        for (const std::string& k : kindNames)
++        {
++            const std::uint32_t mask = ParseKindMask(k);
++            if (mask == 0)
++            {
++                if (why)
++                    *why = "unknown object kind '" + k + "'";
++                return false;
++            }
++            r.kinds |= mask;
++        }
++    }
++    out = std::move(r);
++    return true;
++}
++
++SurfaceClass KindDefaultClass(render::DrawObjectKind kind, bool onSurface)
++{
++    switch (kind)
++    {
++        case K::LandVehicle:
++        case K::Aircraft:
++        case K::Ship:
++            return SurfaceClass::Paint;
++        case K::Man:
++        case K::Fabric:
++            return SurfaceClass::Fabric;
++        case K::Weapon:
++            return SurfaceClass::Weapon;
++        case K::Static:
++            return onSurface ? SurfaceClass::Road : SurfaceClass::Masonry;
++        case K::Unknown:
++        case K::Count:
++            break;
++    }
++    return onSurface ? SurfaceClass::Road : SurfaceClass::Unknown;
++}
++
++SurfaceClass ClassifySurface(const SurfaceTable& table, std::string_view texturePath, render::DrawObjectKind kind,
++                             bool onSurface)
++{
++    const std::string path = Lower(texturePath);
++    for (const SurfaceRule& r : table.rules)
++    {
++        if (Matches(r, path, kind))
++            return r.surface;
++    }
++    return KindDefaultClass(kind, onSurface);
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.hpp
+new file mode 100644
+index 0000000..c6986a7
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SurfaceMaterials.hpp
+@@ -0,0 +1,131 @@
++#pragma once
++
++#include <Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp>
++
++#include <cstdint>
++#include <string>
++#include <string_view>
++#include <vector>
++
++// Surface classes for the remastered wet weather (feature switch
++// `wetWeather`, research/INTEGRATION-PLAN.md section 5 B7, research track
++// materials). Pure, no GL, no engine state.
++//
++// CWA's models carry no material data beyond a texture, a colour set and
++// sometimes a specular power. What a section is made of (paint that sheds the
++// rain as a film, cloth that soaks it up and darkens, plaster in between)
++// comes from its texture's name and the kind of object drawing it: the stock
++// data names textures in Czech (sklo glass, okno window, kolo wheel, plachta
++// tarp, xicht face, silnice road), mods mostly in English.
++//
++//   - A table of rules (SurfaceTable): each names a class, the tokens one of
++//     which must be in the lower-case texture path, the tokens none of which may
++//     be, and the object kinds it applies to. The first rule that matches wins;
++//     no match falls back to the kind's own class (KindDefaultClass: paint on a
++//     vehicle, cloth on a man, plaster on a house, road under a road decal).
++//   - The stock table is DefaultSurfaceTable(); a mod extends or overrides it
++//     with CfgSurfaceMaterials in its config (MergeSurfaceRules: a class whose
++//     name is a stock rule's replaces that rule, any other goes before the
++//     stock rules, so a mod's tokens win).
++//   - The backend classifies each texture once per kind (TextureGL33) and hands
++//     the shader the class of each draw (LitConstants slot MatClass); the
++//     shader's table (kWetGLSL, EngineGL33_LightingShadersSurface.cpp) holds the
++//     porosity of each class, which SurfacePorosity mirrors.
++//
++// The terrain is not classified here: its squares are blends of four corner
++// materials named by island-specific two-letter codes (abel\p4p4ttp4.pac), so
++// the shader tells grass from bare ground per pixel from the albedo.
++
++namespace Poseidon::remaster
++{
++
++enum class SurfaceClass : std::uint8_t
++{
++    Unknown,
++    Paint,   // vehicle paint (matte military): sheds the rain as a film
++    Metal,   // bare metal, sheet metal, exhausts
++    Glass,   // windows, canopies, gauges
++    Rubber,  // tyres, wheels, tracks
++    Fabric,  // uniforms, tarps, canvas, tents, nets: soaks up the rain
++    Skin,    // faces and hands
++    Road,    // asphalt, tracks, paving: holds puddles
++    Masonry, // plaster, brick, concrete (a house's default)
++    Wood,    // planks, crates, bark
++    Leather, // boots
++    Weapon,  // rifles, launchers
++    Lens,    // lamp and headlight glass
++    Roof,    // tiled roofs
++    Count
++};
++constexpr int kSurfaceClassCount = static_cast<int>(SurfaceClass::Count);
++
++// "paint", "glass", ... (the names CfgSurfaceMaterials uses); "unknown" for
++// anything out of range.
++const char* SurfaceClassName(SurfaceClass c);
++bool ParseSurfaceClass(std::string_view name, SurfaceClass& out);
++
++// How much water a class soaks up (0 sealed: the rain forms a film; 1 cloth:
++// the rain darkens it and forms none). The shader's table, kept equal by a test.
++float SurfacePorosity(SurfaceClass c);
++
++// The kind of object from its config: simulation "car", "tank", "motorcycle"
++// are land vehicles, "soldier" and "invisible" men, "helicopter", "airplane"
++// and "parachute" aircraft, "ship" ships, "proxy..." and "weapon" weapons;
++// tents and camouflage nets by their class name (camp, tent, camnet), whatever
++// their simulation; anything else is Static.
++render::DrawObjectKind DrawObjectKindFromNames(std::string_view simulation, std::string_view className);
++// "vehicle" (land vehicles, aircraft and ships), "landvehicle", "man",
++// "static", "aircraft", "ship", "weapon", "fabric", "unknown" -> a mask of
++// KindBit()s; 0 for an unknown name.
++std::uint32_t ParseKindMask(std::string_view name);
++
++constexpr std::uint32_t KindBit(render::DrawObjectKind k)
++{
++    return 1u << static_cast<unsigned>(k);
++}
++constexpr std::uint32_t kAllKinds = (1u << render::kDrawObjectKindCount) - 1u;
++constexpr std::uint32_t kVehicleKinds = KindBit(render::DrawObjectKind::LandVehicle) |
++                                        KindBit(render::DrawObjectKind::Aircraft) |
++                                        KindBit(render::DrawObjectKind::Ship);
++// Static objects and draws without an object (roads and other decals the
++// landscape draws, things without a type).
++constexpr std::uint32_t kStaticKinds =
++    KindBit(render::DrawObjectKind::Static) | KindBit(render::DrawObjectKind::Unknown);
++
++struct SurfaceRule
++{
++    std::string name; // the rule's id (a CfgSurfaceMaterials class of this name replaces it)
++    SurfaceClass surface = SurfaceClass::Unknown;
++    std::vector<std::string> any;  // lower case; one must be in the texture path (none listed: any path)
++    std::vector<std::string> none; // lower case; none may be in it
++    std::uint32_t kinds = kAllKinds;
++};
++
++struct SurfaceTable
++{
++    std::vector<SurfaceRule> rules; // in order: the first rule that matches wins
++};
++
++// The stock rules (Czech and English tokens of the stock data, @LoBo's
++// English), in the order the research prototype tested them.
++SurfaceTable DefaultSurfaceTable();
++// A mod's rules (CfgSurfaceMaterials, in declaration order): one named like a
++// rule already in the table replaces it in place, the others go before the
++// table's rules.
++void MergeSurfaceRules(SurfaceTable& table, const std::vector<SurfaceRule>& rules);
++// One CfgSurfaceMaterials class as a rule. `kindNames` empty = every kind.
++// False (and why) for an unknown class or kind name.
++bool MakeSurfaceRule(const std::string& name, std::string_view surface, const std::vector<std::string>& any,
++                     const std::vector<std::string>& none, const std::vector<std::string>& kindNames, SurfaceRule& out,
++                     std::string* why = nullptr);
++
++// When no rule matches: paint on a vehicle, cloth on a man or a tent, a
++// weapon's own class, road under an on-surface draw (roads, tracks), plaster on
++// a static object, Unknown for a draw without an object.
++SurfaceClass KindDefaultClass(render::DrawObjectKind kind, bool onSurface);
++// The class of a section: its texture path (any case, any slashes), the kind
++// of object drawing it and whether the draw lies on the ground (a road decal).
++SurfaceClass ClassifySurface(const SurfaceTable& table, std::string_view texturePath, render::DrawObjectKind kind,
++                             bool onSurface);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Wetness.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Wetness.cpp
+new file mode 100644
+index 0000000..5fa5b25
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Wetness.cpp
+@@ -0,0 +1,90 @@
++#include <Poseidon/Graphics/Remaster/Wetness.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++
++float Clamp01(float v)
++{
++    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
++}
++
++float Smoothstep(float e0, float e1, float x)
++{
++    const float t = Clamp01((x - e0) / (e1 - e0));
++    return t * t * (3.0f - 2.0f * t);
++}
++
++// Moves `v` toward `target` over `dt` with time constant `tau` (exact for a
++// constant target, so a long frame never overshoots).
++float Approach(float v, float target, float dt, float tau)
++{
++    return target + (v - target) * std::exp(-dt / std::max(tau, 1e-3f));
++}
++
++} // namespace
++
++float WetSurfaceTarget(float rain)
++{
++    return Smoothstep(0.0f, kWetRainFull, rain);
++}
++
++float WetPuddleTarget(float rain)
++{
++    return Smoothstep(kPuddleRainFrom, kPuddleRainFull, rain);
++}
++
++float DryingFactor(const WetnessInputs& in)
++{
++    const float sunUp = Clamp01(std::sin(in.sunElevationDeg * 0.017453293f));
++    const float wind = std::min(std::max(in.windSpeed, 0.0f), kDryWindMax);
++    return 1.0f + kDrySun * sunUp * Clamp01(in.skyThrough) + kDryWindPerMs * wind;
++}
++
++WetnessState SettledWetness(float rain)
++{
++    return WetnessState{WetSurfaceTarget(rain), WetPuddleTarget(rain)};
++}
++
++void StepWetness(WetnessState& state, const WetnessInputs& in, float dt)
++{
++    if (!(dt > 0.0f))
++        return;
++    const float rain = Clamp01(in.rain);
++    // Light rain wets slower than heavy rain; drying follows the sun and wind.
++    const float rate = std::max(rain / kWetRainFull, kWetMinRainRate);
++    const float dry = DryingFactor(in);
++    const float surfaceTarget = WetSurfaceTarget(rain);
++    const float puddleTarget = WetPuddleTarget(rain);
++    const float surfaceTau = state.surface < surfaceTarget ? kWetUpSeconds / rate : kDryBaseSeconds / dry;
++    const float puddleTau = state.puddles < puddleTarget ? kPuddleUpSeconds / rate : kPuddleDryBaseSeconds / dry;
++    state.surface = Clamp01(Approach(state.surface, surfaceTarget, dt, surfaceTau));
++    state.puddles = Clamp01(Approach(state.puddles, puddleTarget, dt, puddleTau));
++}
++
++bool WetnessSnaps(float currentRain, float newRain, float seconds)
++{
++    return seconds < kWetSnapMaxSeconds && std::fabs(newRain - currentRain) >= kWetSnapMinChange;
++}
++
++WetnessFrame FrameWetness(const WetnessState& world, float wetnessKnob, float puddlesKnob)
++{
++    WetnessFrame f;
++    f.forced = wetnessKnob >= 0.0f;
++    f.surface = f.forced ? Clamp01(wetnessKnob) : Clamp01(world.surface);
++    const float puddles = f.forced ? Clamp01(wetnessKnob) : Clamp01(world.puddles);
++    f.puddles = Clamp01(puddles * std::max(puddlesKnob, 0.0f));
++    return f;
++}
++
++float FrameWetnessGate(const WetnessFrame& w)
++{
++    return std::max(w.surface, w.puddles);
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/Wetness.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/Wetness.hpp
+new file mode 100644
+index 0000000..2d292e0
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/Wetness.hpp
+@@ -0,0 +1,81 @@
++#pragma once
++
++// The world's wetness for the remastered wet weather (feature switch
++// `wetWeather`, research/INTEGRATION-PLAN.md section 5 B7). Pure, no GL, no
++// engine state: the landscape's weather keeps a WetnessState and steps it
++// with the simulation (Weather::MoveClouds), the renderer reads it once a
++// frame (FrameWetness).
++//
++// What the player sees: rain wets the world over a minute or two and the
++// puddles fill over ten; when it stops, surfaces dry over minutes, faster in
++// sun and wind, and the puddles linger long after them.
++//
++//   - surface: how wet surfaces are, 0 dry .. 1 soaked. Under rain it rises
++//     toward WetSurfaceTarget(rain) with a time constant of kWetUpSeconds at
++//     full rain (longer in light rain); above that target it dries toward it
++//     with kDryBaseSeconds over DryingFactor (sun, clear sky, wind).
++//   - puddles: how full the hollows are, 0 .. 1, toward WetPuddleTarget(rain),
++//     with the slower kPuddleUpSeconds and kPuddleDryBaseSeconds.
++//   - A scripted weather change made at once (`0 setRain x`: a mission start,
++//     a capture view) snaps the state to what that rain settles at
++//     (SettledWetness), so a mission that starts in rain starts wet.
++
++namespace Poseidon::remaster
++{
++
++constexpr float kWetRainFull = 0.35f;            // rain density that soaks surfaces fully
++constexpr float kPuddleRainFrom = 0.1f;          // puddles form above this rain ...
++constexpr float kPuddleRainFull = 0.8f;          // ... and are full at this one
++constexpr float kWetUpSeconds = 90.0f;           // surfaces wet with this time constant in full rain
++constexpr float kPuddleUpSeconds = 600.0f;       // puddles fill with this one
++constexpr float kDryBaseSeconds = 1200.0f;       // surfaces dry with this one in still, overcast air
++constexpr float kPuddleDryBaseSeconds = 3600.0f; // puddles drain with this one
++constexpr float kWetMinRainRate = 0.1f;          // light rain wets at least this share of full rain's speed
++constexpr float kDrySun = 2.0f;                  // DryingFactor: high clear sun adds this much
++constexpr float kDryWindPerMs = 0.12f;           // ... and every m/s of wind this much
++constexpr float kDryWindMax = 15.0f;             // wind beyond this (m/s) dries no faster
++constexpr float kWetSnapMinChange = 0.01f;       // a rain change this large made at once snaps the state
++constexpr float kWetSnapMaxSeconds = 1.0f;       // "at once": over less than this
++
++struct WetnessInputs
++{
++    float rain = 0.0f;              // the landscape's rain density, 0..1
++    float sunElevationDeg = -90.0f; // the sun's height
++    float skyThrough = 1.0f;        // 1 clear .. 0 overcast
++    float windSpeed = 0.0f;         // m/s
++};
++
++struct WetnessState
++{
++    float surface = 0.0f;
++    float puddles = 0.0f;
++};
++
++float WetSurfaceTarget(float rain);
++float WetPuddleTarget(float rain);
++// 1 in still, overcast air or at night; up to 1 + kDrySun under a high clear
++// sun, plus the wind's share.
++float DryingFactor(const WetnessInputs& in);
++// What a long spell of this rain (or of no rain) settles at.
++WetnessState SettledWetness(float rain);
++// One simulation step of `dt` seconds (0 or less changes nothing).
++void StepWetness(WetnessState& state, const WetnessInputs& in, float dt);
++// Whether a SetRain(density, time) call snaps the state: a change of at least
++// kWetSnapMinChange from the current density over less than kWetSnapMaxSeconds.
++bool WetnessSnaps(float currentRain, float newRain, float seconds);
++
++// What the renderer uses this frame: the world's state, or the `wetness` knob
++// (LightingTuning::wetness: 0..1 forces surfaces and puddles alike; below 0 =
++// the world's), and the puddles times the `puddles` knob (LightingTuning::puddles).
++struct WetnessFrame
++{
++    float surface = 0.0f;
++    float puddles = 0.0f;
++    bool forced = false;
++};
++WetnessFrame FrameWetness(const WetnessState& world, float wetnessKnob, float puddlesKnob);
++// The larger of the two: what the frame gates read (puddles keep the wet path
++// on after the surfaces have dried).
++float FrameWetnessGate(const WetnessFrame& w);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+index 859391a..97c82a0 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/research/INTEGRATION-PLAN.md
+@@ -164,6 +164,12 @@ more is used as given. `airHaze` and `valleyMist` have no sub-knob. The `debug`
+ 8, the air pass's in-scatter alone (`kDebugViewAir`; 6 on the lane, which sat before A6's light tiles
+ and B2's albedo took 6 and 7).
+ 
++As built in B7: `wetness` (-1, the world's wetness state; 0..1 forces surfaces and puddles alike, so
++`wetness=1` under a clear sky is "after the rain") and `puddles` (1, a multiple of the state's
++puddles) are `wetWeather`'s sub-knobs (group `materials`); `lampStreaks` has none. `ssrWet` keeps its
++meaning, but its -1 now reads the wetness state while `wetWeather` is on (the rain density while it is
++off, as before). `triFeatureState` gained `wet=` after `rain=` (the wetness the gates read).
++
+ ### 3.2 Frame gates and the GPU budget (RTX 3060, 1080p, 60 fps)
+ 
+ The owner's budget only holds if heavy features run only when they can show. New pure module
+@@ -241,6 +247,11 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
+   While the gate is off the readout runs every 8th frame only. The ground counts only while it is
+   wet (`ssrWet` when it forces a value, else the wetness stand-in), so a dry town or field gates
+   SSR off ("water below 1% of the screen, dry"); the scale stays 0.5.
++- As built in B7: the wetness input is the world's state (`Graphics/Remaster/Wetness.hpp`, stepped
++  by the landscape's weather) or the `wetness` knob, the larger of its surfaces and its puddles,
++  while the `wetWeather` switch is on; with the switch off it stays the rain stand-in, so the
++  reflections' gate and ground are as before. The wet gates keep A1's conditions (wetness above
++  0.02; the streaks also a lamp lit at night).
+ 
+ As built in B8: "morning" for the valley mist is an eastern sun between -4 and 10 deg
+ (`kGateMorningMaxSunDeg` 10, was 38), and the mist's density is full from 1 to 6 deg and gone by
+@@ -417,6 +428,18 @@ take 70 and 71, the padding `litPlanned[2]` covers 72 and 73, and `LitConstPlann
+ `CombatShadow` and `Weather` (static_asserts: `CombatShadow` is `Planned`, `End` equals
+ `LitConst::Count`).
+ 
++As built in B7 (a parallel lane on c36ee4b): `MatClass` landed at 58 and `Weather` at 73, as planned.
++`litReserved` became `litMatClass` (`LitConst::MatClass`; `Reserved` and `ReservedCount` are gone) and
++B3's `litPlanned[2]` became `vec4 litPlanned` for 72 (`LitConst::Planned`, `PlannedCount` 1; the
++combat shadow mask, `LitConstPlanned::CombatShadow`, static_assert) followed by `litWeather`;
++`Count` stays 79. `litMatClass` is not the class, kind, blend and hash the table names: xy are per draw
++(the surface class, and the object kind plus 8 on an on-surface draw), uploaded by `SetLitSurface` from
++`ApplyPassState` only when they change and only while the wet gate is on; zw are per frame (the lamp
++streaks on, the reflections' pass reflecting the wet ground), set by `UploadLitWeather` and kept by the
++per-draw updates. `litWeather` is x the surface wetness, y the rain density, z the puddle level, w the
++sim clock wrapped at 4096 s; all zero while the gate is off, which every wet term of the shaders tests
++first. B4 landing 72 replaces `litPlanned`.
++
+ ### 3.4 Texture units
+ 
+ Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
+@@ -595,6 +618,14 @@ names over both families, and `glsl_extract.py` loads the lighting family with t
+ (`kLuma`, `toLinear`, `toDisplay`, `tonemapNeutral`): the inputs piece declares the world's varyings
+ and cannot be pasted into a post pass.
+ 
++As built in B7: the prelude has eleven pieces. `FragmentPiece::Puddles` (`kRemasterPuddlesGLSL`, in
++`EngineGL33_LightingShadersSurface.cpp`) sits between the sky and the lights: the puddle field
++(`wetPuddle`), a pure function of the world position over the LitConstants block and the height map,
++which the reflections' trace pastes too (its `kPostShaders` row: inputs, block, sky, puddles, main), so
++the forward pass's puddles (their darkening, their water film) and the trace's mirrors are the same
++puddles. The wet response itself (`wetSurface`, the lamp streaks) is in the surface piece; it calls the
++lights piece's tile list and physical-light helpers, so it cannot be pasted into a post pass.
++
+ ### 3.6 Post pipeline stages
+ 
+ `EngineGL33::EndWorldScene` is one function today: resolve, AO, bloom, shafts, composite. Eight
+@@ -2035,6 +2066,81 @@ evidence in `tmp/integration/B6/` of the graphics-remaster worktree, gitignored;
+   glslang.
+ - **Effort**: 6 days.
+ 
++**Result (2026-10-18, uncommitted change on c36ee4b in the scratch copy `gr-B7`, a parallel lane;
++evidence in `tmp/integration/B7/` of the graphics-remaster worktree, gitignored; light gate).**
++
++- Built: `Graphics/Remaster/Wetness.{hpp,cpp}` (pure: the world's surfaces and puddles, wetting in rain
++  with a 90 s time constant at full rain, drying with 1200 s over a drying factor of sun, clear sky and
++  wind, puddles with 600 s and 3600 s; a `SetRain` change of at least 0.01 made over under a second
++  snaps the state to what that rain settles at, on the first step that moves the clock); `Weather`
++  keeps it and steps it in `MoveClouds`;
++  `Graphics/Remaster/SurfaceMaterials.{hpp,cpp}` (pure: 14 classes, the stock rules, `CfgSurfaceMaterials`
++  merged over them, each object kind's default class, the porosity table, the object kind from a
++  config's simulation and class); `render::DrawObjectKind` on the descriptor (`BuildContext::objectKind`
++  from `Engine::GetDrawObjectKind`, set by `Shape::Draw` from `IAnimator::GetDrawObjectKind`, cached on
++  the `EntityType`; not part of the descriptor's equality, as no GL state follows from it);
++  `TextureGL33::SurfaceClassFor` (each texture classified once per kind and table generation); the slots
++  of 3.3; the puddles piece (3.5) and the wet response in the surface piece (`wetSurface`,
++  `wetLampStreaks`); the mains say what they shade (`g_wetDraw`: object, land, grass clutter, sea).
++- Corrections to the bullets above: the stock tokens are a table of rules in `SurfaceMaterials.cpp`
++  (data, not code paths; a stock install has no UD config file the engine could rely on), and mods add
++  or replace rules with `CfgSurfaceMaterials` (`surface`, `any[]`, `none[]`, `kinds[]`). Terrain is not
++  classified by texture name: the island textures name four corner materials by island-specific codes
++  (`abel\p4p4ttp4.pac`) that no table describes, so the land tells grass from bare ground per pixel from
++  its albedo (the prototype's v7 test, which the forward pass can make: it has the albedo, unlike B6's
++  post pass). B6 already drew the wet ground and the puddles' mirrors; with `wetWeather` on the forward
++  pass darkens the ground (0.35 of the ground's porosity, grass 0.92 of its albedo, B6's 0.8 for soil
++  and roads), lays the puddles' darkening (B6's 0.55) and film, and the trace takes its puddles from the
++  same `wetPuddle` and darkens nothing; off, the trace is B6's own, bit for bit. The puddle field is B6's
++  value noise plus the height map's hollows (the field rises 0.1 per metre of hollow, falls at most 0.03 on
++  a crest) and its level, read with smoothed interpolation so neither the hollows nor the flatness
++  crease along the terrain's cells (the depth normal B6 used is flat per triangle); grass holds puddles
++  only in its deepest hollows (threshold 0.74). Puddles are not the prototype's 9-cell rain-ring field
++  of the post pass: the rings are in the forward film's normal (within 40 m, while it rains). Glass
++  reflects the sky only when wet (its film): dry glass needs a dry-weather switch, a follow-up. The
++  matte darkening of paint and rubber (0.35 as a porosity) is new: the film over matte paint takes away
++  its pale surface scatter, so wet paint reads darker and deeper instead of greyer (the critic's blue or
++  grey paint). Object films reflect the sky at half weight, at least 0.3 rough, capped at 0.12, tinted
++  halfway to the fog colour and not at all toward the ground. The lamp streaks loop over A6's tiles
++  (B3's physical lamps and headlights at their physical intensity, the classic kinds at their classic
++  value) or the draw's own lights, GGX at the film's 0.12 (puddles 0.05, grass blades 0.4 at 0.1 of the
++  film), a 0.15 m bulb, the lobe's peak capped at 80; the film's and the puddle's lobes are blended,
++  not one lobe at a blended roughness (that drew a bright ring at every puddle's edge). The sun's
++  glint is blended the same way under its own cap of 3 (under the lamps' 80, a low sun's lobe on the
++  0.3 rough film, which peaks at well over a hundred times the sun, clipped a white column from the
++  horizon to the eye, the review's block). On bare ground the glint is 0.5 rough on half the film's
++  share (grit stands through the film), and the pixel's footprint widens its alpha by 0.25 per metre
++  (the critic's far white dashes). Run-down streaks
++  on vertical faces read the cloud noise at 0.2 per metre along the face and 0.03 per metre up, 0.75 to
++  1 of the wetness, fading out from 12 to 20 m. Dropped as the bullets say: `vbfix`, the dry satin rim,
++  the albedo bump, the research knobs and logs.
++- Off equals before (5 views, 1080p, scale 1.0, 4x MSAA; `gate5-off-vs-before.md` against
++  `gate5-base-repeat.md`): every band within the base build's own off/on repeat or of its size (rain and
++  fire are not repeatable: the hero's ground 228,907 pixels over 2 levels against the repeat's 198,655;
++  the wet street's ground 18,716 against 7,835, 411 over 8 levels against 131; after-rain ground 17,874
++  against 14,865; dry noon 12,715 against 93,508).
++- On (`gate6-on-vs-off.md`): at night in rain every lamp and the fire draw warm streaks across the wet
++  square and road, puddles hold dark water with rain rings and B6's mirrored houses, the ground's mean
++  rises (51 to 62 levels), 0.10% of the ground above 200 levels (no white sheet). After the rain at a low
++  sun the wet gravel shows a soft warm sheen toward the sun (the column's core 115 to 143 levels, its
++  gravel texture kept; 1.39 % of the ground band over 200 levels and 0.15 % over 240, against 12.0 %
++  and 9.0 % before the review's cap; B6's mirror of the Jeep stays in the puddle), the tent darkens and
++  deepens (58, 65, 48 to 48, 53, 37, saturation 0.26 to 0.30), the Jeep's side keeps its olive
++  (saturation 0.12 to 0.14), the M113 shows no stripes. By day in rain cloth and walls darken a little
++  (a soldier's torso 63 to 58, plaster 79 to 76, brick 61 to 57). Dry noon: the gate holds the wet path
++  off (`wetWeather=1:off:dry`), the frame is the same.
++- Cost (one reading, other lanes' games running): GPU frame minimum on minus off +0.57 ms at the wet
++  night town, the wet street and after the rain, +0.14 in rain on the fields, -0.05 at dry noon (gated);
++  a second run with more foreign load spread -2.4 to +2.5 ms. Unmeasured on a quiet GPU.
++- Gate: build 0 new warnings; clang-format clean on every touched file (the tab-style `Vertex.hpp`,
++  `Vehicle.hpp`, `Object.hpp`, `Landscape.hpp` and `EngineGL33_Queue.cpp` on the added lines; the
++  checker still names the untouched tab-indented line after each addition); unit gate tags plus the
++  landed lanes' and `[wet]` 642/642 (15 new cases), the full suite with the 6 known localisation
++  failures only; six mutations (the shader's porosity table, the snap, the descriptor's kind, the
++  trace darkening wet ground again, drying without the sun, the sun glint under the lamps' cap) each
++  turn their case red; smoke_abel 1/1
++  (KHR_debug ids 131154, 131169 and 131218 only).
++
+ ### B8. air pass (volumetric beams and headlight cones + haze and valley mist)
+ 
+ - **Volumetric prototype touched**: `GameStateExtTestRender.cpp` (16 knobs), `LightRig.hpp`,
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp
+index 937d7e6..5977837 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp
+@@ -43,6 +43,11 @@ struct BuildContext
+     // Classic and the switch off leave it false, so the sea stays on the
+     // detail program (PSDetail) exactly as before.
+     bool remasteredSea = false;
++
++    // The kind of object the draw belongs to (Engine::GetDrawObjectKind, set
++    // by Shape::Draw around a shape's sections), copied to the descriptor for
++    // the remastered materials. It changes no GL state.
++    DrawObjectKind objectKind = DrawObjectKind::Unknown;
+ };
+ 
+ // Pure, header-implemented to keep the seam visible.  Inline so callers
+@@ -211,6 +216,7 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
+         d.pass = PassKind::SurfaceOverlay;
+     }
+ 
++    d.objectKind = ctx.objectKind;
+     return d;
+ }
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Primitives/Vertex.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Primitives/Vertex.hpp
+index bcb3b22..d7c1663 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Primitives/Vertex.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Primitives/Vertex.hpp
+@@ -3,6 +3,7 @@
+ 
+ #include <Poseidon/Core/Types.hpp>
+ #include <Poseidon/Foundation/Math/Math3D.hpp>
++#include <Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp>
+ 
+ namespace Poseidon
+ {
+@@ -39,6 +40,9 @@ public:
+ 	virtual void GetMaterial(TLMaterial &mat, int index) const = 0;
+ 	// check if given shape is animated
+ 	virtual bool GetAnimated(const Shape &src) const = 0;
++    // what kind of object draws the shape (the remastered materials read it
++    // through the draw descriptor); Unknown when the animator is no object
++    virtual render::DrawObjectKind GetDrawObjectKind() const { return render::DrawObjectKind::Unknown; }
+ };
+ 
+ // hints: different handling of object/surface relations
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp
+index c7c8d77..bbd909e 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp
+@@ -174,6 +174,26 @@ enum class ShaderFamily : std::uint8_t
+             //   binds VSScreen + PSFlat; not used in 3D pass.
+ };
+ 
++// What kind of object the draw belongs to, for the remastered materials
++// (Graphics/Remaster/SurfaceMaterials.hpp): one texture name means a
++// different surface on a vehicle (paint), a soldier (cloth) or a house
++// (plaster). Set by the scope that draws a shape (Shape::Draw, from the
++// object's simulation and class); anything drawn outside one is Unknown (the
++// terrain, the sky, particles, 2D).
++enum class DrawObjectKind : std::uint8_t
++{
++    Unknown,     // no object: terrain, sky, particles, or an object without a type
++    LandVehicle, // car, tank, motorcycle
++    Man,         // soldiers and civilians
++    Static,      // houses, walls, street furniture, things
++    Aircraft,    // helicopters, aeroplanes, parachutes
++    Ship,        // boats
++    Weapon,      // weapon proxies
++    Fabric,      // tents and camouflage nets (their textures are anonymous atlases)
++    Count
++};
++constexpr int kDrawObjectKindCount = static_cast<int>(DrawObjectKind::Count);
++
+ // The full per-draw render-pass contract.  Defaults are the most
+ // permissive / common state (opaque world geometry with fog, depth,
+ // back-face culling, CW winding).
+@@ -200,6 +220,11 @@ struct RenderPassDescriptor
+     // respect the stencil mask (EQUAL 0 / INCR per-poly within-caster).
+     bool stencilExclusion = false;
+ 
++    // The object the draw belongs to (BuildContext::objectKind), for the
++    // remastered materials. No GL state follows from it, so it is not part of
++    // the equality ApplyPipeline uses to skip an unchanged descriptor.
++    DrawObjectKind objectKind = DrawObjectKind::Unknown;
++
+     bool operator==(const RenderPassDescriptor& rhs) const
+     {
+         return pass == rhs.pass && depth == rhs.depth && blend == rhs.blend && fog == rhs.fog && cull == rhs.cull &&
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+index ea77abd..db31bdd 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+@@ -90,6 +90,20 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags
+     {
+         if (BeginFaces() < EndFaces() && NSections() > 0)
+         {
++            // The object kind every section's descriptor carries (the
++            // remastered materials); the previous one is back after the shape.
++            struct KindScope
++            {
++                Engine* engine;
++                render::DrawObjectKind previous;
++                KindScope(Engine* e, render::DrawObjectKind kind) : engine(e), previous(e->GetDrawObjectKind())
++                {
++                    e->SetDrawObjectKind(kind);
++                }
++                ~KindScope() { engine->SetDrawObjectKind(previous); }
++                KindScope(const KindScope&) = delete;
++                KindScope& operator=(const KindScope&) = delete;
++            } kindScope(engine, matSource ? matSource->GetDrawObjectKind() : render::DrawObjectKind::Unknown);
+             GEngine->PrepareMeshTL(lights, transform, render::SplitLegacy(spec));
+             if (spec & (OnSurface | IsOnSurface))
+             {
+diff --git a/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Vehicle.hpp b/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Vehicle.hpp
+index 5bd0b20..63e9f98 100644
+--- a/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Vehicle.hpp
++++ b/arma_CWR/engine/Poseidon/World/Entities/Vehicles/Vehicle.hpp
+@@ -89,6 +89,10 @@ class EntityType: public RefCount
+ 
+ 	// some types are created without vehicle and cannot be used as full type info
+ 	int _scopeLevel;
++    // the remastered materials' object kind (render::DrawObjectKind), from the
++    // simulation and class at the first draw (Object::GetDrawObjectKind); -1 =
++    // not yet
++    mutable signed char _drawObjectKind = -1;
+ 
+ 	AutoArray<AnimateTextureInfo> _animateTextures;
+ 	RefArray<AnimationType> _animations;
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index 9cfb65f..29dee5f 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -33,6 +33,8 @@
+ #include <Poseidon/Foundation/Framework/Log.hpp>
+ #include <Poseidon/Foundation/Math/MathDefs.hpp>
+ #include <Poseidon/Foundation/Math/MathOpt.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
++#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+ 
+ #if !_ENABLE_CHEATS
+ #define STARS 0
+@@ -1735,6 +1737,19 @@ bool Object::GetAnimated(const Shape& src) const
+     return _isDestroyed && _destroyPhase > 0 && GetDestructType() != DestructTree;
+ }
+ 
++render::DrawObjectKind Object::GetDrawObjectKind() const
++{
++    const EntityType* type = GetVehicleType();
++    if (!type)
++        return render::DrawObjectKind::Static;
++    if (type->_drawObjectKind < 0)
++    {
++        type->_drawObjectKind = static_cast<signed char>(remaster::DrawObjectKindFromNames(
++            static_cast<const char*>(type->_simName), static_cast<const char*>(type->_className)));
++    }
++    return static_cast<render::DrawObjectKind>(type->_drawObjectKind);
++}
++
+ #if SUPPORT_RANDOM_SHAPES
+ LODShapeWithShadow* Object::GetShapeOnPos(Vector3Val pos) const
+ {
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.hpp b/arma_CWR/engine/Poseidon/World/Scene/Object.hpp
+index 2706f91..b78af07 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.hpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.hpp
+@@ -515,6 +515,9 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
+ 		int spec, int material, int from, int to
+ 	) const override;
+ 	bool GetAnimated(const Shape &src) const override;
++    // From the entity type's simulation and class (cached on the type);
++    // Static for an object without one (map houses, walls)
++    render::DrawObjectKind GetDrawObjectKind() const override;
+ 
+ 	// Get/Set object shape
+ 	__forceinline LODShapeWithShadow *GetShape() const {return _shape;}
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/Landscape.cpp b/arma_CWR/engine/Poseidon/World/Terrain/Landscape.cpp
+index b42ffc6..9321f89 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/Landscape.cpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/Landscape.cpp
+@@ -446,6 +446,9 @@ void Weather::Init()
+     _rainDensity = 0;
+     _rainDensityWanted = 0;
+     _rainDensitySpeed = 1;
++    // A new weather starts at what its rain settles at (the first step snaps).
++    _wetness = Poseidon::remaster::WetnessState{};
++    _wetnessSnap = true;
+     _windSpeed = VZero;
+     _lastWindSpeedChange = Glob.time;
+     _gust = VZero;
+@@ -460,6 +463,13 @@ Weather::Weather()
+ void Weather::SetRain(float density, float time)
+ {
+     saturate(density, 0, 1);
++    // A change made at once (a mission's or a capture's `0 setRain x`) means
++    // "this is the weather now": the world takes the wetness that rain
++    // settles at instead of wetting or drying over minutes.
++    if (Poseidon::remaster::WetnessSnaps(_rainDensity, density, time))
++    {
++        _wetnessSnap = true;
++    }
+     saturateMax(time, 0.001);
+     _rainDensityWanted = density;
+     _rainDensitySpeed = fabs(_rainDensityWanted - _rainDensity) / time;
+@@ -653,6 +663,32 @@ void Weather::MoveClouds(float deltaT)
+         _rainDensitySpeed = 0.01;
+     }
+ 
++    // The world's wetness follows the rain: wets in it, dries after it, faster
++    // in sun and wind (the remastered wet weather; Wetness.hpp).
++    if (_wetnessSnap)
++    {
++        // Taken on the first step that moves the clock: a change made while
++        // the simulation is paused settles at the rain it asked for.
++        if (deltaT > 0)
++        {
++            _wetness = Poseidon::remaster::SettledWetness(_rainDensity);
++            _wetnessSnap = false;
++        }
++    }
++    else
++    {
++        Poseidon::remaster::WetnessInputs wet;
++        wet.rain = _rainDensity;
++        wet.skyThrough = _skyThrough;
++        wet.windSpeed = _windSpeed.Size();
++        if (const LightSun* light = GLOB_SCENE ? GLOB_SCENE->MainLight() : nullptr)
++        {
++            const float up = -light->Direction().Y();
++            wet.sunElevationDeg = std::asin(up < -1.0f ? -1.0f : (up > 1.0f ? 1.0f : up)) * 57.29578f;
++        }
++        Poseidon::remaster::StepWetness(_wetness, wet, deltaT);
++    }
++
+     {
+         // night and weather visibility
+         float rainVisibility = (1 - _rainDensity) * TACTICAL_VISIBILITY + 350 * _rainDensity;
+diff --git a/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp b/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp
+index a18410e..a3e7add 100644
+--- a/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp
++++ b/arma_CWR/engine/Poseidon/World/Terrain/Landscape.hpp
+@@ -5,6 +5,7 @@
+ #include <Poseidon/AI/Path/AITypes.hpp>
+ #include <Poseidon/Foundation/Containers/BankArray.hpp>
+ #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
++#include <Poseidon/Graphics/Remaster/Wetness.hpp>
+ 
+ namespace Poseidon { class TaskPool; }
+ namespace Poseidon
+@@ -301,6 +302,11 @@ class Weather
+ 	float _skyThrough;
+ 
+ 	float _rainDensity,_rainDensityWanted,_rainDensitySpeed;
++    // How wet the world is (the remastered wet weather, Wetness.hpp): stepped
++    // with the weather in MoveClouds; a rain change made at once (SetRain over
++    // under a second) snaps it to what that rain settles at on the next step.
++    Poseidon::remaster::WetnessState _wetness;
++    bool _wetnessSnap = true;
+ 
+ 	Poseidon::Foundation::Time _thunderBoltTime;
+ 	Vector3 _windSpeed;
+@@ -324,6 +330,8 @@ class Weather
+ 	void SetFog( Landscape *land, float fog );
+ 	float GetFog() const {return _fogSet;}
+ 
++    const Poseidon::remaster::WetnessState& GetWetness() const { return _wetness; }
++
+ 	Texture *SkyTexture() const {return _sky;}
+ };
+ 
+@@ -791,6 +799,8 @@ class Landscape: public SerializeClass
+ 
+ 	// control weather	
+ 	float GetRainDensity() const {return _weather._rainDensity;}
++    // The world's wetness (surfaces and puddles), for the remastered wet weather
++    const Poseidon::remaster::WetnessState& GetWetness() const { return _weather.GetWetness(); }
+ 	float GetOvercast() const {return _weather.GetOvercast();}
+ 	void SetOvercast( float overcast ) {_weather.SetOvercast(this,overcast);}
+ 	void SetFog( float fog ) {_weather.SetFog(this,fog);}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index b741a8f..9405869 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -42,8 +42,10 @@ enum PixelShaderSpecular
+ #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+ #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+ #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
+ #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
++#include <Poseidon/Graphics/Remaster/Wetness.hpp>
+ 
+ #include <memory>
+ 
+@@ -873,6 +875,23 @@ class EngineGL33 : public Engine
+     // x, the nightLights gate with the tiled list): particles take them too
+     // (ParticleNightLight). Decided with _lightTilesActive, cleared with it.
+     bool _nightLightsActive = false;
++    // Wet weather (B7, Graphics/Remaster/Wetness.hpp, SurfaceMaterials.hpp):
++    // this frame's wetness (the world's state or the knob), set with the gates;
++    // _wetShading while the wetWeather gate is on in the world's passes, which
++    // then hand each draw its surface class (LitConst::MatClass xy).
++    Poseidon::remaster::WetnessFrame _wetFrame;
++    bool _wetShading = false;
++    // The surface rules: the stock table and the config's CfgSurfaceMaterials,
++    // built at the first wet frame. Each texture classifies itself once per
++    // object kind against the table of its generation (TextureGL33).
++    Poseidon::remaster::SurfaceTable _surfaceTable;
++    int _surfaceTableGen = 0; // 0 = not built
++    void EnsureSurfaceTable();
++    // The Weather slot and the frame flags of the MatClass slot, from the gates.
++    void UploadLitWeather();
++    // The surface class of the draw ApplyPassState prepares (its texture and
++    // object kind) into LitConst::MatClass xy, uploaded only when it changes.
++    void SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);
+     void InitLightTiles();
+     void DeinitLightTiles();
+     // Builds, bins and uploads the list (once per frame).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 211ba21..5a05f0d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -14,6 +14,7 @@
+ #include <PoseidonGL33/EngineGL33.hpp>
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ #include <PoseidonGL33/GL33BindCache.hpp>
++#include <PoseidonGL33/TextureGL33.hpp>
+ #include <Poseidon/Graphics/Core/PerfCounters.hpp>
+ #include <Poseidon/Graphics/Core/UboMirror.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+@@ -21,6 +22,7 @@
+ #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
+ #include <Poseidon/Core/Global.hpp>
++#include <Poseidon/IO/ParamFileExt.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+@@ -628,6 +630,11 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
+     in.skyThrough = land ? land->SkyThrough() : 1.0f;
+     in.cloudCover = rig ? rig->cloudCover : 0.0f;
+     in.rainDensity = land ? land->GetRainDensity() : 0.0f;
++    // The world's wetness (B7): the wet weather's state, or its knob, while its
++    // switch is on; off, the rain stands in, as before the step.
++    _wetFrame = rm::FrameWetness(land ? land->GetWetness() : rm::WetnessState{}, _lighting.wetness, _lighting.puddles);
++    if (rm::FeatureOn(_lighting.features, rm::Feature::WetWeather))
++        in.wetness = rm::FrameWetnessGate(_wetFrame);
+     in.fog = land ? land->GetFog() : 0.0f;
+     in.worldDrawn = true; // only the world's passes get here
+     in.interior = _prevWorldDepthCleared;
+@@ -669,6 +676,7 @@ void EngineGL33::UploadLitFrameConstants()
+         // model.
+         _lightTilesActive = false;
+         _nightLightsActive = false;
++        _wetShading = false;
+         return;
+     }
+     if (_terrainMapDirty)
+@@ -873,10 +881,103 @@ void EngineGL33::UploadLitFrameConstants()
+         rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
+     SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
+     _nightLightsActive = night.night[0] > 0.5f;
++    // Wet weather (B7): the frame's wetness and its flags; zero while the gate
++    // is off, which leaves every fragment as before.
++    UploadLitWeather();
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+ 
++void EngineGL33::EnsureSurfaceTable()
++{
++    if (_surfaceTableGen != 0)
++        return;
++    // The stock rules, then the config's CfgSurfaceMaterials (a mod's classes
++    // go first; one named like a stock rule replaces it):
++    //   class CfgSurfaceMaterials { class MyGlass { surface = "glass";
++    //       any[] = {"_glass"}; none[] = {}; kinds[] = {"vehicle"}; }; };
++    _surfaceTable = rm::DefaultSurfaceTable();
++    std::vector<rm::SurfaceRule> rules;
++    auto strings = [](const ParamEntry& cls, const char* name)
++    {
++        std::vector<std::string> out;
++        const ParamEntry* arr = cls.FindEntry(name);
++        if (arr && arr->IsArray())
++        {
++            for (int i = 0; i < arr->GetSize(); i++)
++                out.emplace_back(static_cast<const char*>(static_cast<RStringB>((*arr)[i])));
++        }
++        return out;
++    };
++    if (const ParamEntry* cfg = Pars.FindEntry("CfgSurfaceMaterials"))
++    {
++        for (int i = 0; i < cfg->GetEntryCount(); i++)
++        {
++            const ParamEntry& cls = cfg->GetEntry(i);
++            if (!cls.IsClass())
++                continue;
++            const ParamEntry* surface = cls.FindEntry("surface");
++            const std::string name = static_cast<const char*>(cls.GetName());
++            const std::string surfaceName =
++                surface && surface->IsTextValue() ? static_cast<const char*>(static_cast<RStringB>(*surface)) : "";
++            rm::SurfaceRule rule;
++            std::string why;
++            if (rm::MakeSurfaceRule(name, surfaceName, strings(cls, "any"), strings(cls, "none"), strings(cls, "kinds"),
++                                    rule, &why))
++                rules.push_back(rule);
++            else
++                LOG_WARN(Graphics, "CfgSurfaceMaterials >> {}: {}; ignored", name, why);
++        }
++    }
++    rm::MergeSurfaceRules(_surfaceTable, rules);
++    _surfaceTableGen = 1;
++    LOG_INFO(Graphics, "GL33 wet weather: {} surface rules, {} from CfgSurfaceMaterials", _surfaceTable.rules.size(),
++             rules.size());
++}
++
++void EngineGL33::UploadLitWeather()
++{
++    const bool gatesNow = _featureGates.computed && _featureGates.frame == GetFrameCounter();
++    _wetShading = gatesNow && _featureGates[rm::Feature::WetWeather].on;
++    Landscape* land = GScene ? GScene->GetLandscape() : nullptr;
++    if (_wetShading)
++    {
++        EnsureSurfaceTable();
++        const float rain = land ? land->GetRainDensity() : 0.0f;
++        SetSlot(LitConst::Weather, _wetFrame.surface, rain, _wetFrame.puddles, std::fmod(Glob.time.toFloat(), 4096.0f));
++    }
++    else
++    {
++        SetSlot(LitConst::Weather, 0.0f, 0.0f, 0.0f, 0.0f);
++    }
++    // The frame's flags in the per-draw slot (SetLitSurface keeps them): the
++    // lamp streaks, and whether the reflections' pass reflects the wet ground
++    // (then the forward pass leaves the ground's sky reflection to it).
++    float* m = s_lit + LitConst::MatClass * 4;
++    m[2] = _wetShading && _featureGates[rm::Feature::LampStreaks].on ? 1.0f : 0.0f;
++    m[3] = _wetShading && _featureGates[rm::Feature::Ssr].on ? 1.0f : 0.0f;
++}
++
++void EngineGL33::SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d)
++{
++    // Per draw, but only while the wet weather shades the pass; the class
++    // changes between a shape's sections and objects, and only a change
++    // uploads the slot.
++    if (!_lightingActive || !_wetShading)
++        return;
++    const bool onSurface = d.surface == Poseidon::render::SurfaceMode::OnSurface;
++    const rm::SurfaceClass cls = tex ? tex->SurfaceClassFor(_surfaceTable, _surfaceTableGen, d.objectKind, onSurface)
++                                     : rm::KindDefaultClass(d.objectKind, onSurface);
++    float* m = s_lit + LitConst::MatClass * 4;
++    const float x = static_cast<float>(cls);
++    const float y = static_cast<float>(d.objectKind) + (onSurface ? 8.0f : 0.0f);
++    if (m[0] == x && m[1] == y)
++        return;
++    m[0] = x;
++    m[1] = y;
++    UploadLitSlots(LitConst::MatClass, 1);
++}
++
+ bool EngineGL33::RemasterMoonKey() const
+ {
+     // The frame's gate, so every caller of a frame agrees (the scene's shadow
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 5fe90f5..afd124d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -29,8 +29,9 @@ enum class FragmentPiece : int
+     Shadows,       // shadowMapVisibility
+     TerrainClouds, // terrainSunVisibility, cloudSunVisibility, the dome mapping and the sky-matched shadows
+     Sky,           // skyIrradiance, fogColorToward, the sky table, lit clouds (EngineGL33_LightingShadersSky.cpp)
++    Puddles,       // wetPuddle, where standing water collects (EngineGL33_LightingShadersSurface.cpp)
+     Lights,        // localLights (EngineGL33_LightingShadersLights.cpp)
+-    Surface,       // glossy (EngineGL33_LightingShadersSurface.cpp)
++    Surface,       // glossy, the wet weather's response (EngineGL33_LightingShadersSurface.cpp)
+     Shade,         // shadeRemastered
+     Finish,        // finishFragment
+     Count,
+@@ -39,11 +40,12 @@ const char* RemasterFragmentPiece(FragmentPiece piece);
+ 
+ // The pieces kept in files of their own (read them through RemasterFragmentPiece).
+ // The LitConstants block and the terrain and clouds piece are named here too:
+-// the post air pass pastes them, and the reflections' trace pastes the block
+-// and the sky piece (kPostShaders).
++// the post air pass pastes them, and the reflections' trace pastes the block,
++// the sky piece and the puddles piece (kPostShaders).
+ extern const char kLitConstantsBlockGLSL[];
+ extern const char kRemasterTerrainCloudsGLSL[];
+ extern const char kRemasterSkyGLSL[];
++extern const char kRemasterPuddlesGLSL[];
+ extern const char kRemasterLightsGLSL[];
+ extern const char kRemasterSurfaceGLSL[];
+ // The sky table's passes (EngineGL33_PostSkyTableShaders.cpp; read them through
+@@ -268,9 +270,11 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    // 58: allocated to the materials' per-draw class (LitConstPlanned
+-    // MatClass); one padding member in the block until it lands.
+-    Reserved = 58,
++    // Wet weather (B7, Graphics/Remaster/SurfaceMaterials.hpp): per draw x the
++    // surface class, y the object kind (SetLitSurface, only while the wet
++    // gate is on); per frame z 1 while the lamp streaks run, w 1 while the
++    // reflections' pass reflects the wet ground (UploadLitWeather).
++    MatClass = 58,
+     // Sun shadows (B1, Graphics/Remaster/SunShadows.hpp): x per-frame turn of
+     // the soft shadows' taps, y 1 in a TAA frame, z taps per frame there,
+     // w tan(sun angular radius) (0 = the stock filter).
+@@ -298,9 +302,13 @@ enum : int
+     // intensity per metre of start distance, z low-beam hot-spot intensity,
+     // w the moon key's share (0: the sun is the key).
+     Night = 71,
+-    // 72-73: allocated to features still to land (LitConstPlanned
+-    // CombatShadow and Weather); one padding member in the block until they do.
++    // 72: allocated to the combat shadow mask (LitConstPlanned CombatShadow);
++    // one padding member in the block until it lands.
+     Planned = 72,
++    // Wet weather (B7, Graphics/Remaster/Wetness.hpp): x surface wetness, y
++    // rain density, z puddle level, w time (s, wrapped); zero while the
++    // wetWeather gate is off, which leaves every fragment as before.
++    Weather = 73,
+     // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
+     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
+     Water1 =
+@@ -316,20 +324,19 @@ enum : int
+     Count = 79,
+ };
+ constexpr int MaxLights = 8;
+-constexpr int ReservedCount = 1;
+-constexpr int PlannedCount = Water0 - Planned;
++constexpr int PlannedCount = Weather - Planned;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
+-static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
++static_assert(MatClass == LightDir + MaxLights, "LitConst material class follows the lights");
++static_assert(Taa == MatClass + 1 && Pcss == Taa + 1, "LitConst sun shadow slots follow the material class");
+ static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
+ static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slots follow the sky table's");
+ static_assert(SkySun == SkyShadow + 1 && Night == SkySun + 1, "LitConst night slots follow the clouds slots");
+ static_assert(Planned == Night + 1, "the planned padding follows the night slots");
+-static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
+-              "LitConst water slots follow the planned padding");
++static_assert(Weather == Planned + PlannedCount, "the weather follows the planned padding");
++static_assert(Water0 == Weather + 1 && Water1 == Water0 + 1, "LitConst water slots follow the weather");
+ static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
+ static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
+ static_assert(Haze == Detail + 1, "LitConst haze slot follows the terrain detail");
+@@ -341,30 +348,28 @@ static_assert(Count == Haze + 1, "LitConst size out of sync");
+ // first, next to the per-draw material and light slots. A step that lands a
+ // feature moves its rows into LitConst, declares them in LitConstantsBlock()
+ // (a slot below it that has not landed yet becomes a padding member there) and
+-// raises LitConst::Count, which the upload and the shaders follow. A7 landed
+-// the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+-// padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
++// raises LitConst::Count, which the upload and the shaders follow. B7 landed
++// the material class at 58 and the weather at 73; A7 the sky slots 61 to 67
++// and B1 the sun shadow slots 59 and 60; B10 the clouds slots 68 and 69 (Sky,
+ // SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
+-// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 and 73
+-// are the padding member litPlanned; B8 landed the haze at 78.
++// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 is the
++// padding member litPlanned; B8 landed the haze at 78.
+ namespace LitConstPlanned
+ {
+-constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
++// 58: the wet weather's material class landed (LitConst::MatClass, B7).
+ // 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
+ // 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
+ // 70, 71: the night landed (LitConst::SkySun, LitConst::Night, B3); 70 was
+ // free (the light list, A6, rides in litLightCount.yz, LitConst::LightCount).
+ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+-constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
++// 73: the wet weather landed (LitConst::Weather, B7).
+ // 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
+ // 76: hfrt's canopy landed (LitConst::Canopy, B9); 77: texsharp's terrain
+ // detail landed (LitConst::Detail, B11); 78: the haze landed (LitConst::Haze,
+ // B8).
+ constexpr int End = 79; // one past the last planned slot
+-static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+-              "the planned slot below the sun shadows is the reserved padding");
+-static_assert(CombatShadow == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+-              "the planned slots between the night and the water are the planned padding");
++static_assert(CombatShadow == LitConst::Planned && LitConst::PlannedCount == 1,
++              "the planned slot between the night and the weather is the planned padding");
+ static_assert(End == LitConst::Count, "every planned slot above the padding has landed");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 4665bf4..afb10b8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -349,7 +349,7 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
+-    vec4 litReserved;     // 58: planned per-draw material class (padding until it lands)
++    vec4 litMatClass;     // 58: wet weather: x surface class, y object kind (per draw), z lamp streaks on, w post reflects the wet ground
+     vec4 litTaa;          // 59: x soft-shadow tap turn, y 1 = TAA frame, z taps per frame, w tan(sun radius)
+     vec4 litPcss;         // 60: x search reach (m), y min filter (texels), z soft strength, w leaf lift (texels)
+     vec4 litSkyRight;     // 61: xyz camera right * tan(fov x / 2), w Mie asymmetry g
+@@ -363,7 +363,8 @@ layout(std140) uniform LitConstants {
+     vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
+     vec4 litSkySun;       // 70: xyz toward the sun, w its elevation (degrees): the sun the sky reads (skySunDir)
+     vec4 litNight;        // 71: x physical lamps and low beams on, y lamp per start metre, z low-beam peak, w moon key share
+-    vec4 litPlanned[2];   // 72-73: allocated to features still to land (combat, materials)
++    vec4 litPlanned;      // 72: allocated to the combat shadow mask (padding until it lands)
++    vec4 litWeather;      // 73: wet weather: x surface wetness, y rain density, z puddle level, w time (s)
+     vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
+     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
+     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
+@@ -839,11 +840,21 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         vec3 p = pow(a, vec3(1.3));
+         a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
+     }
++    // Wet weather (wetWeather): the rain darkens what soaks it up, lays a film
++    // on what does not (its sky, sun and lamp reflections), and fills puddles.
++    // litWeather is zero while the gate is off: nothing changes then.
++    float wetKeep = 1.0;
++    vec3 wetLit = vec3(0.0);
++    vec3 wetEnv = vec3(0.0);
++    float wetMirror = 0.0;
++    if (litWeather.x > 0.0 || litWeather.z > 0.0)
++        wetSurface(albedo, n, v, posAbs, skyVisibility, sunVisibility * sunOn, foliage, a, wetKeep, wetLit, wetEnv,
++                   wetMirror);
+     float exposure = litZenith.w;
+-    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn +
+-                     g_physicalSpec * litGround.w) * exposure;
++    vec3 radiance = (a * (direct + ambient + moon + local + emissive) * wetKeep + glossy(n, v, sunVisibility) * sunOn +
++                     g_physicalSpec * litGround.w + wetLit) * exposure + wetEnv;
+     float total = dot(radiance, kLuma);
+-    ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
++    ambientShare = clamp(dot(a * ambient * wetKeep * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0) * (1.0 - wetMirror);
+     if (foliage) ambientShare *= 0.5;
+ 
+     if (litFlags.z > 0.5 && litFlags.z < 4.5) {
+@@ -1080,6 +1091,9 @@ void main() {
+             }
+         }
+         vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
++        // The land takes the rain (puddles, the grass share from its albedo);
++        // the sea on this program does not.
++        g_wetDraw = litDetail.w > 0.5 ? 1 : 3;
+         r0.rgb = shadeRemastered(albedo, true, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+@@ -1101,6 +1115,7 @@ void main() {
+     float ambientShare = 0.0;
+     r0.a = clamp((psC5.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
+     if (vLitMode > 0.5 && vLitMode < 1.5) {
++        g_wetDraw = 2; // grass clutter: wet blades, no puddles
+         r0.rgb = shadeRemastered(clamp(t0.rgb * t1.rgb * 2.0, 0.0, 1.0), true, ambientShare);
+     } else {
+         r0.rgb = clamp(vColor.rgb * t0.rgb * t1.rgb * 2.0, 0.0, 1.0);
+@@ -1308,6 +1323,7 @@ void main() {
+         // The debug views (sun visibility, sky visibility, normals) show the
+         // sea as the detail program does.
+         vec4 t0 = texture(tex0, vUV0);
++        g_wetDraw = 3; // the sea is never wet
+         r0.rgb = shadeRemastered(t0.rgb * constColor.rgb * (t1.a * 2.0), true, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+@@ -1337,6 +1353,7 @@ const char* const kFragmentPieces[] = {
+     s_psRemasterShadows,        // Shadows
+     kRemasterTerrainCloudsGLSL, // TerrainClouds
+     kRemasterSkyGLSL,           // Sky
++    kRemasterPuddlesGLSL,       // Puddles
+     kRemasterLightsGLSL,        // Lights
+     kRemasterSurfaceGLSL,       // Surface
+     s_psRemasterShade,          // Shade
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+index 816c554..6829fea 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+@@ -1,13 +1,109 @@
+-// Remastered lighting shaders: the surface piece of the fragment
+-// prelude (FragmentPiece::Surface, joined by RemasterFragmentCommon() in
+-// EngineGL33_LightingShaders.cpp): the sun highlight and sky reflection of
+-// glossy materials. Material and wet-surface responses belong here.
++// Remastered lighting shaders: the surface pieces of the fragment prelude
++// (FragmentPiece::Puddles and FragmentPiece::Surface, joined by
++// RemasterFragmentCommon() in EngineGL33_LightingShaders.cpp): where puddles
++// stand, the sun highlight and sky reflection of glossy materials, and the wet
++// weather's response of every surface. Material and wet-surface responses
++// belong here.
++//
++// Wet weather (feature switches wetWeather and lampStreaks, plan section 5 B7;
++// Graphics/Remaster/Wetness.hpp holds the world's wetness, SurfaceMaterials.hpp
++// the surface classes, and both mirror the constants below that a test pins):
++//
++//   - litWeather (x surface wetness, y rain, z puddle level, w time) is zero
++//     while the gate is off, and then no fragment does any of this.
++//   - Each lit draw carries its surface class (litMatClass.x, from its texture
++//     name and object kind) and the main tells objects, the land and grass
++//     clutter apart (g_wetDraw). The land tells grass from bare ground per
++//     pixel from its albedo (wetVegetation).
++//   - Water fills the pores: a surface darkens by its porosity (cloth a lot,
++//     plaster less, paint not at all). What it does not soak up forms a smooth
++//     film (paint, glass, metal, asphalt), which reflects the sky (objects; the
++//     ground's reflection is the reflections' pass while it runs, litMatClass.w),
++//     the sun and, at night, every lamp, fire and headlight as a streak toward
++//     the eye (lampStreaks, litMatClass.z). Grass blades break the film into a
++//     dull sheen.
++//   - Rain reaches up-facing surfaces fully, vertical ones with run-down
++//     streaks near the eye, undersides little; the hills' sky visibility shelters
++//     the ground. Puddles (wetPuddle, shared with the reflections' trace) are
++//     dark smooth water with rain rings while it rains.
+ 
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+ namespace Poseidon::gl33lighting
+ {
+ 
++// The puddle field: a pure function of the world position, so the forward
++// pass (the puddle's darkening and its water film) and the reflections' trace
++// (its mirror, EngineGL33_PostSsrShaders.cpp) agree pixel for pixel without a
++// buffer between them. It reads the LitConstants block and the terrain height
++// map (terrainHeight, unit 4), which both declare.
++const char kRemasterPuddlesGLSL[] = R"(
++// ---- Puddles (wetWeather; Graphics/Remaster/Wetness.hpp) ----
++// Level ground pools water: three octaves of value noise (the finer ones fade
++// out below the pixel's footprint, so far puddles do not shimmer), raised in
++// the hollows of the height map and held to its level stretches. The height
++// map is read with smoothed interpolation between its texels, so neither the
++// hollows nor the slope crease along the terrain's cells and triangles (the
++// depth buffer's normal is flat per triangle). Roads pool water readily, bare
++// ground less, grass only in its deepest hollows.
++const float kPuddleRoad = 0.61;       // noise threshold on roads
++const float kPuddleGround = 0.67;     // on bare ground
++const float kPuddleGrass = 0.74;      // on grass
++const float kPuddleEdge = 0.035;      // the threshold's soft edge
++const float kPuddleDamp = 0.06;       // the damp margin below the threshold
++const float kPuddleHollow = 0.1;      // the field's rise per metre of hollow (capped at a metre) ...
++const float kPuddleCrest = 0.3;       // ... and its fall per metre of crest (capped here: an open slope keeps some)
++const float kPuddleLevelShift = 0.08; // a low puddle level raises the threshold this much
++const float kPuddleFadeStart = 150.0; // puddles shrink below the pixel from here ...
++const float kPuddleFadeEnd = 400.0;   // ... and the far ground is one wet sheen
++
++float puddleHash(vec2 p) {
++    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
++    p3 += dot(p3, p3.yzx + 33.33);
++    return fract((p3.x + p3.y) * p3.z);
++}
++float puddleNoise(vec2 p) {
++    vec2 i = floor(p), f = fract(p);
++    vec2 u = f * f * (3.0 - 2.0 * f);
++    return mix(mix(puddleHash(i), puddleHash(i + vec2(1, 0)), u.x),
++               mix(puddleHash(i + vec2(0, 1)), puddleHash(i + vec2(1, 1)), u.x), u.y);
++}
++// The terrain's height at world xz, smoothly interpolated between the map's
++// texels (a smoothstep on the bilinear weights: no crease at the cell edges).
++float puddleHeight(vec2 xz) {
++    vec2 t = xz * litTerrain.y;
++    vec2 i = floor(t);
++    vec2 f = t - i;
++    f = f * f * (3.0 - 2.0 * f);
++    return textureLod(terrainHeight, (i + f + 0.5) * litTerrain.z, 0.0).r;
++}
++
++// x: standing water 0..1, y: the damp margin around it. posW the world
++// position, footT the pixel's footprint along the ground (m), road 1 on a road,
++// veg the grass share (0..1), level the puddle level (litWeather.z).
++vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
++    if (level <= 0.0) return vec2(0.0);
++    float o2 = mix(0.5, puddleNoise(posW.xz / 1.3 + 17.0), clamp(1.3 / (3.0 * footT), 0.0, 1.0));
++    float o3 = mix(0.5, puddleNoise(posW.xz / 0.45 + 41.0), clamp(0.45 / (3.0 * footT), 0.0, 1.0));
++    float field = puddleNoise(posW.xz / 3.5) * 0.55 + o2 * 0.3 + o3 * 0.15;
++    float flatness = 1.0;
++    if (litTerrain.x > 0.5) {
++        float cell = 1.0 / litTerrain.y;
++        float h0 = puddleHeight(posW.xz);
++        float hx0 = puddleHeight(posW.xz - vec2(cell, 0.0));
++        float hx1 = puddleHeight(posW.xz + vec2(cell, 0.0));
++        float hz0 = puddleHeight(posW.xz - vec2(0.0, cell));
++        float hz1 = puddleHeight(posW.xz + vec2(0.0, cell));
++        field += kPuddleHollow * clamp((hx0 + hx1 + hz0 + hz1) * 0.25 - h0, -kPuddleCrest, 1.0);
++        vec2 g = vec2(hx1 - hx0, hz1 - hz0) * (0.5 / cell);
++        flatness = smoothstep(0.85, 0.98, inversesqrt(1.0 + dot(g, g)));
++    }
++    float th = mix(mix(kPuddleGround, kPuddleRoad, road), kPuddleGrass, veg) + kPuddleLevelShift * (1.0 - level);
++    float keep = flatness * min(level * 4.0, 1.0) * (1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz)));
++    return vec2(smoothstep(th, th + kPuddleEdge, field), smoothstep(th - kPuddleDamp, th, field)) * keep;
++}
++)";
++
+ const char kRemasterSurfaceGLSL[] = R"(
+ // Sun highlight and sky reflection for glossy materials (specular power > 0).
+ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
+@@ -30,6 +126,304 @@ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
+     vec3 skySpec = skyIrradiance(r) * (gloss * (0.04 + 0.96 * fv) * 0.6);
+     return (sunSpec + skySpec) * litHorizon.w;
+ }
++
++// ---- Wet weather (wetWeather, lampStreaks) ----
++// The porosity of each surface class (SurfaceMaterials.hpp SurfacePorosity):
++// unknown, paint, metal, glass, rubber, fabric, skin, road, masonry, wood,
++// leather, weapon, lens, roof.
++const float kWetPorosity[14] = float[](0.5, 0.05, 0.0, 0.0, 0.1, 0.85, 0.3, 0.35, 0.6, 0.7, 0.4, 0.0, 0.0, 0.4);
++const float kWetDarken = 0.55;      // a soaked object keeps 1 - this times its porosity of its albedo ...
++const float kWetGroundDarken = 0.35; // ... the ground this (B6's wet ground kept 0.8 of its colour)
++const float kWetSaturate = 0.3;     // objects: saturation gain at porosity 1 (never the ground: no mustard)
++// How much a matte sealed surface darkens when wet, as a porosity (paint, rubber,
++// skin, leather, unknown); glass, metal, weapons and lenses keep their colour.
++const float kWetMatte[14] = float[](0.35, 0.35, 0.0, 0.0, 0.35, 0.0, 0.35, 0.0, 0.0, 0.0, 0.35, 0.0, 0.0, 0.0);
++const float kWetGrassPorosity = 0.23; // grass darkens a little (0.92 of its albedo soaked)
++const float kWetFoliageDark = 0.88; // leaves shed the water: soaked crowns keep this of their albedo
++const float kWetPuddleDark = 0.55;  // the ground under a puddle's water
++const float kWetDampDark = 0.9;     // the damp margin around a puddle
++const float kWetFilmRough = 0.12;   // the water film's roughness
++const float kWetPuddleRough = 0.05; // a puddle's
++const float kWetGrassFilm = 0.1;    // grass blades break the film up: this share of it ...
++const float kWetGrassRough = 0.4;   // ... this rough
++const float kWetSunRough = 0.3;     // the film's sun glint is at least this rough (a sharp one burns white)
++const float kWetSunGroundRough = 0.5; // bare ground's: grit and stones stand through the thin film ...
++const float kWetSunGroundFilm = 0.5;  // ... and break up this share of it
++const float kWetSunFoot = 0.25;     // a pixel's footprint (m) widens the glint's alpha by this per metre
++const float kWetSunCap = 3.0;       // the sun glint's peak (the low sun's lobe would clip a white column)
++const float kWetObjectSky = 0.5;    // objects: rain beads, so their film reflects this share of the sky ...
++const float kWetObjectSkyRough = 0.3; // ... at least this rough ...
++const float kWetSkyCap = 0.12;      // ... and at most this share of it ...
++const float kWetSkyFog = 0.5;       // ... of the sky tinted this far toward the fog colour (wet paint not blue)
++const float kWetSpecCap = 80.0;     // a lamp's lobe's peak
++const float kWetBulb = 0.15;        // a lamp's radius (m): widens the lobe near it
++const float kWetStreakNear = 12.0;  // run-down streaks on walls and hulls fade out from here ...
++const float kWetStreakFar = 20.0;   // ... to here (m)
++const float kWetRingsFar = 40.0;    // rain rings on puddles within this distance
++
++// What the main is shading: 0 an object (its class from litMatClass.x), 1 the
++// land, 2 grass clutter, 3 the sea on the detail program (never wet).
++int g_wetDraw = 0;
++
++// The grass share of a ground albedo (display): green above red and blue,
++// or olive and yellow-green grass (green about equal to red, well above blue).
++float wetVegetation(vec3 c) {
++    float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);
++    float gr = c.g / max(c.r, 1e-3);
++    float gb = c.g / max(c.b, 1e-3);
++    return max(green, smoothstep(1.1, 1.3, gb) * smoothstep(0.9, 1.0, gr));
++}
++
++// The porosity of bare ground from its albedo: soil and sand soak up a lot,
++// grey gravel and rock little.
++float wetGroundPorosity(vec3 c) {
++    float mx = max(c.r, max(c.g, c.b));
++    float sat = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-3);
++    float warm = clamp((c.r - c.b) * 5.0, 0.0, 1.0);
++    float rock = clamp(1.0 - sat * 5.0, 0.0, 1.0);
++    return mix(mix(0.7, 0.9, warm), 0.3, rock);
++}
++
++// How much rain a surface takes: up-facing fully, vertical with run-down
++// streaks near the eye (low and soft: hulls must not stripe), undersides
++// little; sheltered by the hills' sky visibility.
++float wetCoverage(vec3 n, vec3 posAbs, float skyVis, float dist) {
++    float facing = mix(0.3, 1.0, smoothstep(-0.6, 0.0, n.y));
++    float vertical = (1.0 - smoothstep(0.55, 0.9, n.y)) * (1.0 - smoothstep(kWetStreakNear, kWetStreakFar, dist));
++    if (vertical > 0.0) {
++        vec2 t = vec2(-n.z, n.x);
++        float u = dot(posAbs.xz, t) * inversesqrt(max(dot(t, t), 1e-6));
++        float streak = textureLod(cloudNoise, vec2(u * 0.2, posAbs.y * 0.03), 0.0).r;
++        facing *= mix(1.0, mix(0.75, 1.0, smoothstep(0.3, 0.7, streak)), vertical);
++    }
++    return facing * mix(0.45, 1.0, skyVis);
++}
++
++// Rain rings on standing water: the slope of expanding rings, one drop per
++// half-metre cell at a random phase.
++vec2 wetRainRings(vec2 p, float t) {
++    vec2 cell = floor(p);
++    vec2 f = fract(p);
++    vec2 g = vec2(0.0);
++    for (int j = -1; j <= 1; ++j) {
++        for (int i = -1; i <= 1; ++i) {
++            vec2 o = vec2(float(i), float(j));
++            vec2 h = vec2(puddleHash(cell + o), puddleHash(cell + o + 7.3));
++            float tt = fract(t * 0.9 + puddleHash(cell + o + 17.0));
++            vec2 d = f - (o + h);
++            float r = length(d);
++            float x = (r - tt * 0.6) * 22.0;
++            g += d / max(r, 1e-3) * (sin(x * 2.4) * exp(-x * x * 0.35) * (1.0 - tt) * (1.0 - tt));
++        }
++    }
++    return g;
++}
++
++// The GGX reflection of a light toward unit L at distance d on a surface of
++// unit normal n, seen from v: pi D V F (n.l), the light a small sphere
++// (Karis's representative-point widening), Fresnel of water, the peak at most
++// `cap`.
++float wetLobe(vec3 L, float d, vec3 n, vec3 v, float nv, float a, float cap) {
++    float nl = dot(n, L);
++    if (nl <= 0.0) return 0.0;
++    float aP = clamp(a + kWetBulb / (2.0 * max(d, 0.1)), 0.0, 1.0);
++    float norm = (a / aP) * (a / aP);
++    vec3 h = L + v;
++    h *= inversesqrt(max(dot(h, h), 1e-12));
++    float nh = max(dot(n, h), 0.0);
++    float vh = max(dot(v, h), 0.0);
++    float a2 = aP * aP;
++    float dd = nh * nh * (a2 - 1.0) + 1.0;
++    float D = a2 / (3.14159265 * dd * dd);
++    float vis = 0.5 / max(nl * sqrt(nv * nv * (1.0 - a2) + a2) + nv * sqrt(nl * nl * (1.0 - a2) + a2), 1e-5);
++    float F = 0.02 + 0.98 * pow(1.0 - vh, 5.0);
++    return min(3.14159265 * D * vis * nl * norm, cap) * F;
++}
++
++// The split-sum environment BRDF, analytic fit (Karis 2014): the film's
++// reflectance toward the sky is f0 * x + y.
++vec2 wetEnvBRDF(float rough, float nv) {
++    const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
++    const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
++    vec4 r = rough * c0 + c1;
++    float a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
++    return vec2(-1.04, 1.04) * a004 + r.zw;
++}
++
++// The local lights' streaks in the water film at this fragment (linear light,
++// before the exposure): the lights of the tiled list (the physical lamps and
++// low beams at their physical intensity, the other kinds at their classic
++// value), or the draw's own list.
++vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
++    vec3 sum = vec3(0.0);
++    float nv = clamp(dot(n, v), 1e-3, 1.0);
++    float a = max(rough * rough, 0.002);
++    if (litLightCount.y > 0.5) {
++        int count = loadTileList();
++        for (int k = 0; k < kMaxTileLights; ++k) {
++            if (k >= count) break;
++            int id = tileEntry(k);
++            int at = (id - 1) * kTexelsPerLight;
++            vec4 pos = frameLights[at];
++            vec4 color = frameLights[at + 1];
++            vec3 toLight = pos.xyz - vWorldRel;
++            float d2 = dot(toLight, toLight);
++            float d = sqrt(max(d2, 1e-12));
++            vec3 L = toLight / d;
++            bool spot = color.w > 0.5;
++            vec3 light;
++            if (physicalKind(id)) {
++                float peak = spot ? litNight.z : litNight.y * pos.w;
++                float end2 = min(kReachFactor * kReachFactor * pos.w * pos.w, peak / kNightMinIrradiance);
++                if (d2 >= end2) continue;
++                float I = spot ? peak * lowBeamPattern(-L, frameLights[at + 3].xyz) : peak;
++                I *= (1.0 - smoothstep(0.5 * end2, end2, d2)) * smoothstep(kNightNearStart, kNightNearEnd, d);
++                vec3 col = toLinear(color.rgb);
++                if (spot) col = vec3(dot(col, kLuma));
++                light = col * (I / (d2 + kNightSoftening));
++            } else {
++                float start2 = pos.w * pos.w;
++                float end2 = start2 * 100.0;
++                if (d2 >= end2) continue;
++                float cone = 1.0;
++                if (spot) {
++                    float inside = -dot(toLight, frameLights[at + 3].xyz);
++                    if (inside <= 0.0) continue;
++                    cone = smoothstep(0.9415, 0.9806, inside * inside / max(d2, 1e-6));
++                }
++                float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
++                light = toLinear(min(color.rgb * (atten * litGround.w), vec3(1.5)));
++            }
++            sum += light * wetLobe(L, d, n, v, nv, a, kWetSpecCap);
++        }
++        return sum * litLightCount.z;
++    }
++    int count = int(litLightCount.x);
++    for (int i = 0; i < 8; ++i) {
++        if (i >= count) break;
++        vec4 pos = litLightPos[i];
++        vec3 toLight = pos.xyz - vWorldRel;
++        float d2 = dot(toLight, toLight);
++        float start2 = pos.w * pos.w;
++        float end2 = start2 * 100.0;
++        if (d2 >= end2) continue;
++        float cone = 1.0;
++        if (litLightColor[i].w > 0.5) {
++            float inside = -dot(toLight, litLightDir[i].xyz);
++            if (inside <= 0.0) continue;
++            cone = smoothstep(0.9415, 0.9806, inside * inside / max(d2, 1e-6));
++        }
++        float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
++        float d = sqrt(max(d2, 1e-12));
++        sum += toLinear(min(litLightColor[i].rgb * (atten * litGround.w), vec3(1.5))) * wetLobe(toLight / d, d, n, v, nv, a, kWetSpecCap);
++    }
++    return sum;
++}
++
++// The wet response of one lit fragment, called by shadeRemastered while
++// litWeather is set. `a` (linear albedo) darkens and saturates; `keep` scales
++// the diffuse light (the film's reflection takes its share); `lit` is the film's
++// sun glint and lamp streaks (linear, before the exposure); `env` its sky
++// reflection (linear, after it, as the sea's); `mirror` the standing water's
++// share (no sky occlusion on a mirror).
++void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, float sunLight, bool foliage,
++                inout vec3 a, out float keep, out vec3 lit, out vec3 env, out float mirror) {
++    keep = 1.0;
++    lit = vec3(0.0);
++    env = vec3(0.0);
++    mirror = 0.0;
++    // The pixel's footprint (m) for the sun glint, taken before the first
++    // return that varies per pixel (a derivative needs the whole quad).
++    float sunFoot = kWetSunFoot * length(fwidth(posAbs));
++    if (g_wetDraw == 3) return;
++    float dist = length(vWorldRel);
++    float wet = clamp(litWeather.x, 0.0, 1.0);
++    if (foliage) {
++        a *= mix(1.0, kWetFoliageDark, wet * mix(0.45, 1.0, skyVisibility));
++        return;
++    }
++    bool ground = g_wetDraw == 1 || g_wetDraw == 2 || litMatClass.y > 7.5;
++    int cls = int(clamp(litMatClass.x + 0.5, 0.0, 13.0));
++    float veg = g_wetDraw == 2 ? 1.0 : (g_wetDraw == 1 ? wetVegetation(albedo) : 0.0);
++    float porosity = g_wetDraw == 0 ? kWetPorosity[cls] : mix(wetGroundPorosity(albedo), kWetGrassPorosity, veg);
++    float w = (ground ? mix(0.45, 1.0, skyVisibility) : wetCoverage(n, posAbs, skyVisibility, dist)) * wet;
++    // Standing water on the land and on roads.
++    vec2 pud = vec2(0.0);
++    if (ground && g_wetDraw != 2) {
++        float footT = max(length(fwidth(posAbs.xz)), 1e-3);
++        pud = wetPuddle(posAbs, footT, (g_wetDraw == 0 || cls == 7) ? 1.0 : 0.0, veg, litWeather.z);
++    }
++    w = max(w, pud.y);
++    if (w <= 0.0 && pud.x <= 0.0) return;
++    // Water fills the pores; on a matte sealed surface (paint, rubber) the film
++    // takes away the surface's own pale scatter: darker and deeper either way.
++    float soak = max(porosity, kWetMatte[cls] * float(g_wetDraw == 0));
++    if (!ground) {
++        float l = dot(a, kLuma);
++        a = max(mix(vec3(l), a, 1.0 + kWetSaturate * w * soak), vec3(0.0));
++    }
++    a *= (1.0 - (ground ? kWetGroundDarken : kWetDarken) * soak * w) * mix(1.0, kWetDampDark, pud.y * (1.0 - pud.x)) *
++         mix(1.0, kWetPuddleDark, pud.x);
++    mirror = pud.x;
++    // The film: what the surface does not soak up; grass breaks it up.
++    float film = w * (1.0 - 0.75 * porosity) * (1.0 - veg) + kWetGrassFilm * w * veg;
++    float filmW = max(film, pud.x);
++    if (filmW <= 0.0) return;
++    float rough = mix(kWetFilmRough, kWetGrassRough, veg);
++    vec3 nf = n;
++    if (pud.x > 0.0) {
++        // A puddle is level; rain rings break it while it rains near the eye.
++        nf = vec3(0.0, 1.0, 0.0);
++        float rain = clamp(litWeather.y, 0.0, 1.0);
++        if (rain > 0.02 && dist < kWetRingsFar) {
++            vec2 g = wetRainRings(posAbs.xz * 2.2, litWeather.w) * (rain * (1.0 - smoothstep(15.0, kWetRingsFar, dist)));
++            nf = vec3(-g.x * 0.06, 1.0, -g.y * 0.06);
++        }
++        nf = mix(n, nf, pud.x);
++        nf *= inversesqrt(max(dot(nf, nf), 1e-12));
++    }
++    float nv = clamp(dot(nf, v), 1e-3, 1.0);
++    // The sun's glint: the film's lobe and the puddle's, blended by the water's
++    // share as the lamps' streaks below, no sharper than kWetSunRough and its
++    // peak far below a lamp's. On bare ground grit and stones stand through the
++    // film, so its glint is rougher and smaller; a pixel that covers much
++    // ground averages many facets, so the footprint widens the lobe further
++    // (no clipped column and no white dashes on far wet ground).
++    float sun = 0.0;
++    if (pud.x < 1.0) {
++        float rs = max(rough, ground ? kWetSunGroundRough : kWetSunRough);
++        sun += wetLobe(litSunDir.xyz, 1e4, nf, v, nv, min(rs * rs + sunFoot, 1.0), kWetSunCap) *
++               (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));
++    }
++    if (pud.x > 0.0) {
++        float ap = min(kWetSunRough * kWetSunRough + sunFoot, 1.0);
++        sun += wetLobe(litSunDir.xyz, 1e4, nf, v, nv, ap, kWetSunCap) * pud.x;
++    }
++    lit = litSun.rgb * (sun * sunLight * litHorizon.w);
++    // The lamps' streaks: the film's lobe and the puddle's, each at its own
++    // roughness and blended by the water's share (a lobe of the blended
++    // roughness drew a bright ring at every puddle's edge).
++    if (litMatClass.z > 0.5) {
++        if (pud.x < 1.0) lit += wetLampStreaks(nf, v, rough) * (film * (1.0 - pud.x));
++        if (pud.x > 0.0) lit += wetLampStreaks(nf, v, kWetPuddleRough) * pud.x;
++    }
++    // The sky in the film: objects always (weaker: rain beads on them); the
++    // ground only while the reflections' pass does not reflect it (it then
++    // reflects the ground with what is on screen, sky included). A face that
++    // looks down reflects the ground, which its own light already shows.
++    if (!ground || litMatClass.w < 0.5) {
++        vec3 r = reflect(-v, nf);
++        float up = smoothstep(-0.1, 0.1, r.y);
++        r.y = max(r.y, 0.02);
++        r *= inversesqrt(dot(r, r));
++        vec3 sky = mix(toLinear(skyReflection(r)), toLinear(fogColorToward(r)), kWetSkyFog);
++        vec2 ab = wetEnvBRDF(ground ? mix(rough, kWetPuddleRough, pud.x) : max(rough, kWetObjectSkyRough), nv);
++        float F = (0.02 * ab.x + ab.y) * filmW * up;
++        F = ground ? F : min(F * kWetObjectSky, kWetSkyCap);
++        env = sky * (F * mix(0.3, 1.0, skyVisibility) * litSunDir.w);
++        keep = 1.0 - F;
++    }
++}
+ )";
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+index 23c15f7..9849eca 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostShaders.cpp
+@@ -589,12 +589,14 @@ const PostShaderDef kPostShaders[] = {
+       Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostAirCommonGLSL,
+       Poseidon::gl33lighting::kPostAirApplyMainGLSL}},
+     // The screen-space reflections (EngineGL33_PostSsrShaders.cpp). The trace
+-    // pastes the LitConstants block and the sky piece of the fragment prelude.
++    // pastes the LitConstants block, the sky piece and the puddles piece of the
++    // fragment prelude (the wet weather's puddles, the same as the forward pass's).
+     {"psPostSsrTag", {Poseidon::gl33lighting::kPostSsrTagGLSL}},
+     {"psPostSsrShare", {Poseidon::gl33lighting::kPostSsrShareGLSL}},
+     {"psPostSsrTrace",
+      {Poseidon::gl33lighting::kPostSsrTraceInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
+-      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostSsrTraceMainGLSL}},
++      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kRemasterPuddlesGLSL,
++      Poseidon::gl33lighting::kPostSsrTraceMainGLSL}},
+     {"psPostSsrBlur", {Poseidon::gl33lighting::kPostSsrBlurGLSL}},
+     {"psPostSsrComposite",
+      {Poseidon::gl33lighting::kPostSsrCompositeInputsGLSL, s_glslPostCommon,
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp
+index 5467779..e333db2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsr.cpp
+@@ -419,8 +419,14 @@ void EngineGL33::PostSsr(PostFrame& f)
+     float farZ = std::fabs(1.0f - proj._33) > 1e-6f ? proj._43 / (1.0f - proj._33) : 5000.0f;
+     if (!(farZ > 1.0f && farZ < 1e6f))
+         farZ = 5000.0f;
+-    // The ground's wetness: the knob when it forces one, else the rain.
+-    float wet = _lighting.ssrWet >= 0.0f ? _lighting.ssrWet : (land ? land->GetRainDensity() : 0.0f);
++    // The ground's wetness: the knob when it forces one, else the weather's
++    // (the wet weather's state while its gate is on, else the rain). With the
++    // wet weather on, the forward pass darkens the wet ground and its puddles
++    // (wetPuddle, which the trace shares) set where the mirrors are.
++    const bool wetWeather =
++        _featureGates.computed && _featureGates.frame == GetFrameCounter() && _featureGates[rm::Feature::WetWeather].on;
++    const float weatherWet = wetWeather ? _wetFrame.surface : (land ? land->GetRainDensity() : 0.0f);
++    float wet = _lighting.ssrWet >= 0.0f ? _lighting.ssrWet : weatherWet;
+     wet = std::clamp(wet, 0.0f, 1.0f);
+     // The sea's reflection replaces the sea program's sky term, so it runs
+     // only while that program draws the sea.
+@@ -461,6 +467,7 @@ void EngineGL33::PostSsr(PostFrame& f)
+     Set4(tr, "ssrParams", _lighting.ssrWater, wet, Glob.time.toFloat(), static_cast<float>(s.mipLevels));
+     Set4(tr, "ssrFrame", f.noiseShift, debug == rm::kDebugViewSsrReflection ? 1.0f : 0.0f, farZ,
+          seaProgram ? 1.0f : 0.0f);
++    Set4(tr, "ssrWetMode", wetWeather ? 1.0f : 0.0f, wetWeather ? _wetFrame.puddles : 0.0f, 0.0f, 0.0f);
+     DrawTo(s.traceFbo, f.hw, f.hh);
+ 
+     // 3. The rough blur: the trace gathered sideways over each texel's spread.
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+index df6f33a..8054937 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostSsrShaders.cpp
+@@ -86,6 +86,7 @@ uniform vec4 fogParam;   // x fog start (m), y 1 / fog range: the world's (Begin
+ uniform vec4 fogColor;   // the world's fog colour (display), as PSConstants.fogColor
+ uniform vec4 ssrParams;  // x ssrWater, y ground wetness 0..1, z sea clock (s), w mip levels of mipTex
+ uniform vec4 ssrFrame;   // x march start turn (per frame under TAA), y 1 = the reflections alone (debug view), z far plane (m), w 1 = the sea program draws the sea
++uniform vec4 ssrWetMode; // x 1 = the wet weather shades the wet ground (no darkening here; its puddles), y its puddle level
+ layout(location = 0) out vec4 fragColor;
+ layout(location = 1) out float fragSpread; // the rough blur's spread (half-resolution texels)
+ 
+@@ -491,8 +492,11 @@ void main() {
+         if (r > rank) { rank = r; surface = s; pick = q; }
+     }
+     float wet = clamp(ssrParams.y, 0.0, 1.0);
++    // The wet weather (wetWeather) shades the wet ground itself: its puddles
++    // can outlast the wet surfaces.
++    bool wetWeather = ssrWetMode.x > 0.5;
+     bool water = surface == 2 && ssrFrame.w > 0.5;
+-    bool ground = (surface == 1 || surface == 3) && wet > 0.0;
++    bool ground = (surface == 1 || surface == 3) && (wet > 0.0 || (wetWeather && ssrWetMode.y > 0.0));
+     // The ray starts on that pixel of the surface, at its full-resolution depth.
+     float z = fullZ(pick);
+     bool reflOnly = ssrFrame.y > 0.5;
+@@ -599,6 +603,15 @@ void main() {
+         float grass = road ? 0.0 : smoothstep(0.01, 0.05, c0.g - max(c0.r, c0.b) + 0.01);
+         float th = road ? kSsrPuddleRoad : kSsrPuddleGround;
+         float puddle = wet * flatness * smoothstep(th, th + 0.035, pn + 0.08 * (wet - 1.0)) * (1.0 - grass) * near;
++        if (wetWeather) {
++            // The wet weather's puddles (wetPuddle, the forward pass's own),
++            // and a grass test that holds under warm lamps, which turn lit
++            // grass from green to amber: green near red and well above blue.
++            float gr = c0.g / max(c0.r, 1e-3);
++            float gb = c0.g / max(c0.b, 1e-3);
++            grass = road ? 0.0 : max(grass, smoothstep(0.84, 0.92, gr) * smoothstep(1.1, 1.3, gb));
++            puddle = wetPuddle(posW, footT, road ? 1.0 : 0.0, grass, ssrWetMode.y).x;
++        }
+         vec3 nW = normalize(mix(nD, vec3(0.0, 1.0, 0.0), mix(0.6, 1.0, puddle)));
+         // Rain rings on the puddles.
+         float rip = 0.03 * puddle * (vnoise(posW.xz * 4.0 + ssrParams.z * 1.3) - 0.5);
+@@ -658,8 +671,9 @@ void main() {
+         float F = fresnelRough(dot(nW, vW), 0.02, rough);
+         float specW = F * weight;
+         // Wet ground darkens (water fills the pores); a puddle is a dark mirror.
++        // With the wet weather on the forward pass has darkened both already.
+         float darken = mix(1.0, road ? kSsrWetRoadDark : mix(kSsrWetGroundDark, kSsrWetGrassDark, grass), wet);
+-        float base = darken * mix(1.0, kSsrPuddleDark, puddle);
++        float base = wetWeather ? 1.0 : darken * mix(1.0, kSsrPuddleDark, puddle);
+         m = 1.0 - fogT + fogT * base * (1.0 - specW * use);
+         add = fogT * specW * Rmix;
+         refl = use > 0.0 ? Rmix / use : vec3(0.0);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 44e7cae..26fedc2 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -252,8 +252,11 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
+     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
+     ctx.passKindHint = GetPassKindHint();
+     ctx.remasteredSea = SeaRouted();
++    ctx.objectKind = GetDrawObjectKind();
+ 
+     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
++    // The wet weather's surface class of this draw (B7; nothing while dry).
++    SetLitSurface(tex, d);
+     // The screen-space reflections' surface tag of this draw (its stencil
+     // reference and masks; the state of before while the world writes no
+     // tags). The land and the sea's unrouted faces share the detail family:
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+index b8d222c..2762d7e 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+@@ -8,6 +8,7 @@
+ #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+ #include <Poseidon/Graphics/Rendering/Colors.hpp>
+ #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
+ 
+ class TextureGL33;
+ class EngineGL33;
+@@ -93,6 +94,10 @@ class TextureGL33 : public Texture
+     SurfaceInfoGL33 _smallSurface; // small GPU texture
+ 
+     signed char _alphaClass = -1; // cached GetAlphaClass() verdict (-1 = not computed)
++    // SurfaceClassFor's classes, per object kind and then on the ground, of
++    // table generation _surfaceGen (0 = none yet).
++    unsigned char _surfaceClass[Poseidon::render::kDrawObjectKindCount * 2] = {};
++    int _surfaceGen = 0;
+ 
+     signed char _largestUsed;
+     signed char _smallLoaded;
+@@ -216,6 +221,13 @@ class TextureGL33 : public Texture
+ 
+     Poseidon::AlphaStats::Kind GetAlphaClass() override;
+ 
++    // The remastered wet weather's surface class of this texture on an object
++    // of `kind` (on the ground: a road decal, when onSurface), from its name
++    // against `table` (Graphics/Remaster/SurfaceMaterials.hpp). Classified for
++    // every kind at once, the first time a table generation `gen` asks.
++    Poseidon::remaster::SurfaceClass SurfaceClassFor(const Poseidon::remaster::SurfaceTable& table, int gen,
++                                                     Poseidon::render::DrawObjectKind kind, bool onSurface);
++
+     Color GetPixel(int level, float u, float v) const override;
+     Color GetColor() override
+     {
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp b/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp
+index 9e45f24..1b03377 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33_Init.cpp
+@@ -361,6 +361,28 @@ Poseidon::AlphaStats::Kind TextureGL33::GetAlphaClass()
+     return kind;
+ }
+ 
++Poseidon::remaster::SurfaceClass TextureGL33::SurfaceClassFor(const Poseidon::remaster::SurfaceTable& table, int gen,
++                                                              Poseidon::render::DrawObjectKind kind, bool onSurface)
++{
++    constexpr int kKinds = Poseidon::render::kDrawObjectKindCount;
++    if (_surfaceGen != gen)
++    {
++        const char* name = static_cast<const char*>(GetName());
++        const std::string_view path = name ? std::string_view(name) : std::string_view();
++        for (int k = 0; k < kKinds; ++k)
++        {
++            const auto kd = static_cast<Poseidon::render::DrawObjectKind>(k);
++            _surfaceClass[k] = static_cast<unsigned char>(Poseidon::remaster::ClassifySurface(table, path, kd, false));
++            _surfaceClass[kKinds + k] =
++                static_cast<unsigned char>(Poseidon::remaster::ClassifySurface(table, path, kd, true));
++        }
++        _surfaceGen = gen;
++    }
++    const int k = static_cast<int>(kind);
++    return static_cast<Poseidon::remaster::SurfaceClass>(
++        _surfaceClass[(onSurface ? kKinds : 0) + (k >= 0 && k < kKinds ? k : 0)]);
++}
++
+ DEFINE_FAST_ALLOCATOR(TextureGL33);
+ 
+ TextureGL33::TextureGL33()
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index 1ae10d9..bef8c6b 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -179,6 +179,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_air_medium.cpp
+     Graphics/test_night_lights.cpp
+     Graphics/test_screen_reflections.cpp
++    Graphics/test_wet_weather.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 068774a..421e72c 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -315,7 +315,8 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+     // track's group: TAA's three, the sky table's three (A7, test_atmosphere.cpp),
+     // texsharp's two (B11), the sun shadows' three (B1, below), the sea's three
+     // (B5), the beams' contrast (B8, below), the night's lamp and headlight
+-    // strengths (B3, test_night_lights.cpp) and the reflections' two (B6).
++    // strengths (B3, test_night_lights.cpp), the reflections' two (B6) and the
++    // wet weather's two (B7, test_wet_weather.cpp).
+     int children = 0;
+     int taaChildren = 0;
+     for (int i = 0; i < LightingKeyCount(); ++i)
+@@ -327,7 +328,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         const std::string_view parent(k.parent);
+         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
+                parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" || parent == "airBeams" ||
+-               parent == "nightLights" || parent == "ssr"));
++               parent == "nightLights" || parent == "ssr" || parent == "wetWeather"));
+         REQUIRE(FindFeature(k.parent) != nullptr);
+         CHECK(FindFeature(k.parent)->landed);
+         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
+@@ -335,7 +336,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         ++children;
+     }
+     CHECK(taaChildren == 3);
+-    CHECK(children == 19);
++    CHECK(children == 21);
+ }
+ 
+ TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
+@@ -772,8 +773,8 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+ }
+ 
+ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows, "
+-          "shade, the night, the sea, the reflections, the air pass, the canopy shadows and the clouds have landed, "
+-          "nothing else has",
++          "shade, the night, the sea, the reflections, the wet weather, the air pass, the canopy shadows and the "
++          "clouds have landed, nothing else has",
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+@@ -785,6 +786,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     // crownCanopy (the world pass's lighting), B3 nightLights and stars (the
+     // world pass) and moonShadows (the shadow depth pass), B5 seaWaves (its
+     // draws are in the world pass's ground section), B6 ssr (its post stage),
++    // B7 wetWeather and lampStreaks (the world pass's shading),
+     // B8 the air pass's three (its post stage), B9 canopyShadows (the canopy's
+     // sun-visibility map build), B10 litClouds (the sky section) and
+     // skyCloudShadows (the world section: one density tap per lit fragment).
+@@ -806,11 +808,12 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+             info.id == Feature::NightLights || info.id == Feature::MoonShadows || info.id == Feature::Stars;
+         const bool sea = info.id == Feature::SeaWaves;
+         const bool ssr = info.id == Feature::Ssr;
++        const bool wet = info.id == Feature::WetWeather || info.id == Feature::LampStreaks;
+         const bool air = info.id == Feature::AirBeams || info.id == Feature::AirHaze || info.id == Feature::ValleyMist;
+         const bool canopy = info.id == Feature::CanopyShadows;
+         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
+         CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || night || sea ||
+-                              ssr || air || canopy || clouds));
++                              ssr || wet || air || canopy || clouds));
+         if (info.landed)
+         {
+             CHECK(std::string_view(info.step) == (perf         ? "A4"
+@@ -822,6 +825,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+                                                   : night      ? "B3"
+                                                   : sea        ? "B5"
+                                                   : ssr        ? "B6"
++                                                  : wet        ? "B7"
+                                                   : air        ? "B8"
+                                                   : canopy     ? "B9"
+                                                   : clouds     ? "B10"
+@@ -855,7 +859,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     CHECK(s.find(" moonShadows=1:off:day ") != std::string::npos);
+     CHECK(s.find(" stars=1:off:day ") != std::string::npos);
+     CHECK(s.find(" ssr=1:on@0.5:screen-share-not-measured ") != std::string::npos);
+-    CHECK(s.find("landed=22/26") != std::string::npos);
++    CHECK(s.find("landed=24/26") != std::string::npos);
+     CHECK(std::string_view(GetFeatureInfo(Feature::Ssr).gpuSection) == "ssr");
+     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
+     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 894b60e..284307d 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1158,12 +1158,14 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
+         {P::Sky, "vec3 atmoFogColor("},
+         {P::Sky, "vec3 shadeSkyDome("},
+         {P::Sky, "vec3 skyReflection("},
++        {P::Puddles, "vec2 wetPuddle("},
+         {P::Lights, "uniform FrameLights {"},
+         {P::Lights, "vec3 localLight("},
+         {P::Lights, "vec3 localLightsTiled("},
+         {P::Lights, "vec3 localLights("},
+         {P::Lights, "vec3 lightTileView("},
+         {P::Surface, "vec3 glossy("},
++        {P::Surface, "void wetSurface("},
+         {P::Shade, "vec3 shadeRemastered("},
+         {P::Finish, "void finishFragment("},
+     };
+@@ -1436,7 +1438,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litLightColor", LC::LightColor, LC::MaxLights},
+         {"litLightAmb", LC::LightAmb, LC::MaxLights},
+         {"litLightDir", LC::LightDir, LC::MaxLights},
+-        {"litReserved", LC::Reserved, LC::ReservedCount},
++        {"litMatClass", LC::MatClass, 1},
+         {"litTaa", LC::Taa, 1},
+         {"litPcss", LC::Pcss, 1},
+         {"litSkyRight", LC::SkyRight, 1},
+@@ -1451,6 +1453,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litSkySun", LC::SkySun, 1},
+         {"litNight", LC::Night, 1},
+         {"litPlanned", LC::Planned, LC::PlannedCount},
++        {"litWeather", LC::Weather, 1},
+         {"litWater0", LC::Water0, 1},
+         {"litWater1", LC::Water1, 1},
+         {"litCanopy", LC::Canopy, 1},
+@@ -1515,14 +1518,13 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+             CHECK(CountOf(program, shared) == 1);
+     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
+ 
+-    // The planned slots: the one below the sun shadows is the reserved padding,
+-    // the two between the night and the water are the planned padding, the
+-    // rest continue the declared ones (B1 landed the sun shadow slots 59 and
+-    // 60, A7 the sky slots 61 to 67 of plan section 3.3, B10 the clouds slots
+-    // 68 and 69, B3 the night slots 70 and 71, B5 the water slots 74 and 75,
+-    // B9 the canopy at 76).
+-    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
+-    CHECK(LC::ReservedCount == 1);
++    // The planned slots: the one between the night and the weather is the
++    // planned padding, the rest continue the declared ones (B7 landed the
++    // material class at 58 and the weather at 73, B1 the sun shadow slots 59
++    // and 60, A7 the sky slots 61 to 67 of plan section 3.3, B10 the clouds
++    // slots 68 and 69, B3 the night slots 70 and 71, B5 the water slots 74 and
++    // 75, B9 the canopy at 76).
++    CHECK(static_cast<int>(LC::MatClass) == 58);
+     CHECK(static_cast<int>(LC::Taa) == 59);
+     CHECK(static_cast<int>(LC::Pcss) == 60);
+     CHECK(static_cast<int>(LC::SkyRight) == 61);
+@@ -1534,9 +1536,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     CHECK(static_cast<int>(LC::SkySun) == 70);
+     CHECK(static_cast<int>(LC::Night) == 71);
+     CHECK(static_cast<int>(LC::Planned) == 72);
+-    CHECK(LC::PlannedCount == 2);
++    CHECK(LC::PlannedCount == 1);
+     CHECK(gl::LitConstPlanned::CombatShadow == static_cast<int>(LC::Planned));
+-    CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Planned) + LC::PlannedCount - 1);
++    CHECK(static_cast<int>(LC::Weather) == 73);
+     CHECK(static_cast<int>(LC::Water0) == 74);
+     CHECK(static_cast<int>(LC::Water1) == 75);
+     // B9 landed the canopy at 76 and B11 the terrain detail at 77.
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+new file mode 100644
+index 0000000..fe152db
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_wet_weather.cpp
+@@ -0,0 +1,532 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
++#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
++#include <Poseidon/Graphics/Remaster/Wetness.hpp>
++#include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <cmath>
++#include <filesystem>
++#include <fstream>
++#include <regex>
++#include <sstream>
++#include <string>
++#include <string_view>
++#include <vector>
++
++// The remastered wet weather (feature switches wetWeather and lampStreaks,
++// INTEGRATION-PLAN.md section 5 B7; Graphics/Remaster/Wetness.hpp and
++// SurfaceMaterials.hpp): the world's wetness that the rain wets and the sun and
++// wind dry, the surface classes from texture names and object kinds, and the
++// contracts that tie the shaders, the reflections' pass and the backend to
++// them.
++
++using namespace Poseidon::remaster;
++namespace render = Poseidon::render;
++namespace gl = Poseidon::gl33lighting;
++using K = render::DrawObjectKind;
++
++namespace
++{
++
++std::string ReadTextFile(const std::filesystem::path& p)
++{
++    std::ifstream f(p);
++    std::stringstream ss;
++    ss << f.rdbuf();
++    return ss.str();
++}
++
++std::filesystem::path Gl33Dir()
++{
++    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33";
++}
++
++int CountOf(const std::string& haystack, const std::string& needle)
++{
++    int n = 0;
++    for (size_t at = haystack.find(needle); at != std::string::npos; at = haystack.find(needle, at + needle.size()))
++        ++n;
++    return n;
++}
++
++LightingTuning Apply(const std::string& setting)
++{
++    LightingTuning t{};
++    bool modeSet = false;
++    const std::string why = ApplyLightingSetting(t, setting, modeSet);
++    INFO(setting << ": " << why);
++    REQUIRE(why.empty());
++    return t;
++}
++
++// Steps the state `seconds` long in steps of `dt`.
++void Run(WetnessState& s, const WetnessInputs& in, float seconds, float dt = 0.05f)
++{
++    for (float t = 0.0f; t < seconds; t += dt)
++        StepWetness(s, in, dt);
++}
++
++WetnessInputs Rain(float rain)
++{
++    WetnessInputs in;
++    in.rain = rain;
++    in.sunElevationDeg = 20.0f;
++    in.skyThrough = 0.1f;
++    in.windSpeed = 3.0f;
++    return in;
++}
++
++// A night after the rain: no sun, still air.
++WetnessInputs StillNight()
++{
++    WetnessInputs in;
++    in.rain = 0.0f;
++    in.sunElevationDeg = -30.0f;
++    in.skyThrough = 1.0f;
++    in.windSpeed = 0.0f;
++    return in;
++}
++
++SurfaceClass Classify(std::string_view path, K kind, bool onSurface = false)
++{
++    static const SurfaceTable table = DefaultSurfaceTable();
++    return ClassifySurface(table, path, kind, onSurface);
++}
++
++} // namespace
++
++// ---- The world's wetness ------------------------------------------------------
++
++TEST_CASE("Wetness: rain wets surfaces within minutes and fills puddles slower", "[remaster][wet]")
++{
++    WetnessState s;
++    const WetnessInputs heavy = Rain(1.0f);
++    Run(s, heavy, 60.0f);
++    // A minute of heavy rain: surfaces half wet or more, the puddles barely started.
++    CHECK(s.surface > 0.5f);
++    CHECK(s.puddles < 0.3f);
++    CHECK(s.puddles < s.surface);
++    Run(s, heavy, 540.0f);
++    // Ten minutes: surfaces soaked; the puddles fill on.
++    CHECK(s.surface == Catch::Approx(1.0f).margin(0.01));
++    CHECK(s.puddles > 0.5f);
++    Run(s, heavy, 3000.0f);
++    CHECK(s.puddles == Catch::Approx(WetPuddleTarget(1.0f)).margin(0.01));
++    // Light rain wets slower than heavy rain.
++    WetnessState light;
++    Run(light, Rain(0.1f), 60.0f);
++    WetnessState hard;
++    Run(hard, Rain(0.6f), 60.0f);
++    CHECK(light.surface < hard.surface);
++    // No rain wets nothing.
++    WetnessState dry;
++    Run(dry, StillNight(), 600.0f);
++    CHECK(dry.surface == 0.0f);
++    CHECK(dry.puddles == 0.0f);
++}
++
++TEST_CASE("Wetness: surfaces dry over minutes after the rain, faster in sun and wind; puddles outlast them",
++          "[remaster][wet]")
++{
++    const WetnessState soaked = SettledWetness(1.0f);
++    CHECK(soaked.surface == 1.0f);
++    CHECK(soaked.puddles == 1.0f);
++
++    // A still, overcast or dark place: still damp after ten minutes.
++    WetnessState night = soaked;
++    Run(night, StillNight(), 600.0f);
++    CHECK(night.surface > 0.5f);
++    CHECK(night.puddles > night.surface);
++
++    // A high clear sun and a breeze dry surfaces much faster.
++    WetnessInputs sunny;
++    sunny.rain = 0.0f;
++    sunny.sunElevationDeg = 60.0f;
++    sunny.skyThrough = 1.0f;
++    sunny.windSpeed = 6.0f;
++    CHECK(DryingFactor(sunny) > 2.5f * DryingFactor(StillNight()));
++    WetnessState noon = soaked;
++    Run(noon, sunny, 600.0f);
++    CHECK(noon.surface < 0.3f);
++    CHECK(noon.surface < night.surface);
++    // The puddles lag: still standing when the surfaces are nearly dry.
++    CHECK(noon.puddles > 0.5f);
++    Run(noon, sunny, 3600.0f);
++    CHECK(noon.surface < 0.01f);
++    CHECK(noon.puddles < 0.3f);
++
++    // A long frame never overshoots below dry (an exact step, not Euler).
++    WetnessState jump = soaked;
++    StepWetness(jump, sunny, 1e6f);
++    CHECK(jump.surface == Catch::Approx(0.0f).margin(1e-6));
++    CHECK(jump.puddles == Catch::Approx(0.0f).margin(1e-6));
++    // No step, no change.
++    WetnessState same = soaked;
++    StepWetness(same, sunny, 0.0f);
++    CHECK(same.surface == soaked.surface);
++}
++
++TEST_CASE("Wetness: a rain change made at once snaps the world to what that rain settles at", "[remaster][wet]")
++{
++    // `0 setRain 1` at a mission start: wet at once.
++    CHECK(WetnessSnaps(0.0f, 1.0f, 0.0f));
++    CHECK(WetnessSnaps(0.0f, 1.0f, 0.5f));
++    // Over a minute: the world wets with it instead.
++    CHECK_FALSE(WetnessSnaps(0.0f, 1.0f, 60.0f));
++    // The same rain again (a script re-applying its weather) changes nothing.
++    CHECK_FALSE(WetnessSnaps(0.5f, 0.5f, 0.0f));
++    CHECK_FALSE(WetnessSnaps(0.5f, 0.505f, 0.0f));
++    const WetnessState s = SettledWetness(0.5f);
++    CHECK(s.surface == Catch::Approx(WetSurfaceTarget(0.5f)));
++    CHECK(s.puddles == Catch::Approx(WetPuddleTarget(0.5f)));
++    // Drizzle soaks surfaces but fills few puddles; no rain, no wetness.
++    CHECK(WetSurfaceTarget(0.2f) > 0.5f);
++    CHECK(WetPuddleTarget(0.2f) < 0.1f);
++    CHECK(WetSurfaceTarget(0.0f) == 0.0f);
++    CHECK(WetPuddleTarget(0.0f) == 0.0f);
++}
++
++TEST_CASE("Wetness: the knob forces surfaces and puddles, the puddles knob scales them", "[remaster][wet]")
++{
++    const WetnessState world{0.4f, 0.2f};
++    const WetnessFrame weather = FrameWetness(world, -1.0f, 1.0f);
++    CHECK_FALSE(weather.forced);
++    CHECK(weather.surface == Catch::Approx(0.4f));
++    CHECK(weather.puddles == Catch::Approx(0.2f));
++    const WetnessFrame forced = FrameWetness(world, 1.0f, 1.0f);
++    CHECK(forced.forced);
++    CHECK(forced.surface == 1.0f);
++    CHECK(forced.puddles == 1.0f);
++    CHECK(FrameWetness(world, 1.0f, 0.0f).puddles == 0.0f);
++    CHECK(FrameWetness(world, -1.0f, 2.0f).puddles == Catch::Approx(0.4f));
++    // The gates see the wetter of the two: puddles keep the wet path on after
++    // the surfaces have dried.
++    CHECK(FrameWetnessGate(WetnessFrame{0.0f, 0.3f, false}) == Catch::Approx(0.3f));
++}
++
++// ---- Surface classes ----------------------------------------------------------
++
++TEST_CASE("Surface classes: the research log's stock textures classify as the prototype did", "[remaster][wet]")
++{
++    // Names and classes from the research prototype's log of every texture of
++    // three islands (materials/classification_log_r6.txt), by object kind.
++    struct Case
++    {
++        const char* path;
++        K kind;
++        SurfaceClass expected;
++    };
++    const Case cases[] = {
++        {"data\\00000mc_vojakg2.paa", K::Man, SurfaceClass::Fabric},
++        {"data\\m16_pmp_1.pac", K::Man, SurfaceClass::Weapon},
++        {"data\\m4_1.pac", K::Man, SurfaceClass::Fabric}, // a known miss of the token list
++        {"data\\abrams_roury_frt.pac", K::LandVehicle, SurfaceClass::Paint},
++        {"data\\jepp4x4_glass.paa", K::LandVehicle, SurfaceClass::Glass},
++        {"data\\m113_kolo2.pac", K::LandVehicle, SurfaceClass::Rubber},
++        {"data\\m60kolozub.paa", K::LandVehicle, SurfaceClass::Rubber},
++        {"data\\m113_svetla_front.pac", K::LandVehicle, SurfaceClass::Lens},
++        {"data\\m1a1_hlaven.pac", K::LandVehicle, SurfaceClass::Paint}, // painted gun barrels
++        {"data\\m60_lauf.pac", K::LandVehicle, SurfaceClass::Paint},
++        {"data\\m113panel.pac", K::LandVehicle, SurfaceClass::Paint},
++        {"data\\astan_side1.pac", K::Fabric, SurfaceClass::Fabric},
++        {"data\\drevo_dirkate.pac", K::Fabric, SurfaceClass::Fabric},
++        {"data\\asfaltka.paa", K::Static, SurfaceClass::Road},
++        {"data\\silnice.paa", K::Static, SurfaceClass::Road},
++        {"data\\cesta.paa", K::Static, SurfaceClass::Road},
++        {"data\\benzinka_stojan.pac", K::Static, SurfaceClass::Metal}, // "zink" in benzinka
++        {"data\\c_s_stecha_plech90.pac", K::Static, SurfaceClass::Metal},
++        {"data\\plechbud_back.pac", K::Static, SurfaceClass::Metal},
++        {"data\\blok_a_strecha.pac", K::Static, SurfaceClass::Roof},
++        {"data\\dum_05_strecha_01.pac", K::Static, SurfaceClass::Roof},
++        {"data\\kmen_borovice.pac", K::Static, SurfaceClass::Wood},
++        {"data\\maskovaci_sit_new.paa", K::Static, SurfaceClass::Fabric},
++        {"data\\stena_sklocihly.pac", K::Static, SurfaceClass::Glass},
++        {"baracken\\glass.paa", K::Static, SurfaceClass::Glass},
++        {"data\\abelpruchlod.pac", K::Static, SurfaceClass::Masonry},
++    };
++    for (const Case& c : cases)
++    {
++        INFO(c.path << " kind " << static_cast<int>(c.kind));
++        CHECK(Classify(c.path, c.kind) == c.expected);
++    }
++    // Case and slashes do not matter.
++    CHECK(Classify("DATA/JEPP4X4_GLASS.PAA", K::LandVehicle) == SurfaceClass::Glass);
++    // A window frame is not glass; a window is.
++    CHECK(Classify("data\\okno1.paa", K::Static) == SurfaceClass::Glass);
++    CHECK(Classify("data\\okno_ram.paa", K::Static) == SurfaceClass::Masonry);
++    // A hand is skin, a sleeve (rukav) cloth.
++    CHECK(Classify("data\\ruka.pac", K::Man) == SurfaceClass::Skin);
++    CHECK(Classify("data\\rukav.pac", K::Man) == SurfaceClass::Fabric);
++}
++
++TEST_CASE("Surface classes: each kind's default, roads under on-surface draws", "[remaster][wet]")
++{
++    CHECK(Classify("data\\anything.pac", K::LandVehicle) == SurfaceClass::Paint);
++    CHECK(Classify("data\\anything.pac", K::Aircraft) == SurfaceClass::Paint);
++    CHECK(Classify("data\\anything.pac", K::Ship) == SurfaceClass::Paint);
++    CHECK(Classify("data\\anything.pac", K::Man) == SurfaceClass::Fabric);
++    CHECK(Classify("data\\anything.pac", K::Fabric) == SurfaceClass::Fabric);
++    CHECK(Classify("data\\anything.pac", K::Weapon) == SurfaceClass::Weapon);
++    CHECK(Classify("data\\anything.pac", K::Static) == SurfaceClass::Masonry);
++    CHECK(Classify("data\\anything.pac", K::Unknown) == SurfaceClass::Unknown);
++    // A road or track decal on the ground with an anonymous texture.
++    CHECK(Classify("data\\anything.pac", K::Static, true) == SurfaceClass::Road);
++    CHECK(Classify("data\\anything.pac", K::Unknown, true) == SurfaceClass::Road);
++    // Names still win on the ground.
++    CHECK(Classify("data\\drevo.pac", K::Static, true) == SurfaceClass::Wood);
++    // Vehicle rules do not reach men or houses, and the other way round.
++    CHECK(Classify("data\\m113_kolo2.pac", K::Static) == SurfaceClass::Masonry);
++    CHECK(Classify("data\\xicht_a.paa", K::LandVehicle) == SurfaceClass::Paint);
++    CHECK(Classify("data\\xicht_a.paa", K::Man) == SurfaceClass::Skin);
++}
++
++TEST_CASE("Surface classes: a mod's CfgSurfaceMaterials rules go first or replace a stock rule by name",
++          "[remaster][wet]")
++{
++    SurfaceTable t = DefaultSurfaceTable();
++    const size_t stock = t.rules.size();
++    SurfaceRule lobo;
++    std::string why;
++    REQUIRE(MakeSurfaceRule("LoBo_Rubber", "rubber", {"_Tyres"}, {}, {"vehicle"}, lobo, &why));
++    CHECK(lobo.any == std::vector<std::string>{"_tyres"});
++    CHECK(lobo.kinds == kVehicleKinds);
++    SurfaceRule glass;
++    REQUIRE(MakeSurfaceRule("glass", "metal", {"sklo"}, {}, {}, glass, &why)); // replaces the stock "glass" rule
++    CHECK(glass.kinds == kAllKinds);
++    MergeSurfaceRules(t, {lobo, glass});
++    CHECK(t.rules.size() == stock + 1);
++    CHECK(t.rules.front().name == "LoBo_Rubber");
++    CHECK(ClassifySurface(t, "lobo\\hmmwv_TYRES.paa", K::LandVehicle, false) == SurfaceClass::Rubber);
++    CHECK(ClassifySurface(t, "lobo\\hmmwv_tyres.paa", K::Man, false) == SurfaceClass::Fabric);
++    CHECK(ClassifySurface(t, "data\\sklo.paa", K::Static, false) == SurfaceClass::Metal);
++    // Unknown class or kind names are refused with the reason.
++    SurfaceRule bad;
++    CHECK_FALSE(MakeSurfaceRule("Bad", "plastic", {"x"}, {}, {}, bad, &why));
++    CHECK(why.find("plastic") != std::string::npos);
++    CHECK_FALSE(MakeSurfaceRule("Bad", "glass", {"x"}, {}, {"submarine"}, bad, &why));
++    CHECK(why.find("submarine") != std::string::npos);
++}
++
++TEST_CASE("Surface classes: object kinds from the config's simulation and class", "[remaster][wet]")
++{
++    CHECK(DrawObjectKindFromNames("car", "Jeep") == K::LandVehicle);
++    CHECK(DrawObjectKindFromNames("Tank", "M113") == K::LandVehicle);
++    CHECK(DrawObjectKindFromNames("motorcycle", "Kolo") == K::LandVehicle);
++    CHECK(DrawObjectKindFromNames("soldier", "SoldierWB") == K::Man);
++    CHECK(DrawObjectKindFromNames("helicopter", "UH60") == K::Aircraft);
++    CHECK(DrawObjectKindFromNames("airplane", "A10") == K::Aircraft);
++    CHECK(DrawObjectKindFromNames("ship", "BoatW") == K::Ship);
++    CHECK(DrawObjectKindFromNames("proxyweapon", "") == K::Weapon);
++    CHECK(DrawObjectKindFromNames("house", "Housedum01") == K::Static);
++    CHECK(DrawObjectKindFromNames("StreetLamp", "StreetLampMetal") == K::Static);
++    // Tents and nets by their class, whatever their simulation.
++    CHECK(DrawObjectKindFromNames("thing", "CampEast") == K::Fabric);
++    CHECK(DrawObjectKindFromNames("house", "LoBo_camnet") == K::Fabric);
++    CHECK(ParseKindMask("vehicle") == kVehicleKinds);
++    CHECK(ParseKindMask("MAN") == KindBit(K::Man));
++    CHECK(ParseKindMask("nothing") == 0u);
++}
++
++TEST_CASE("Surface classes: the shader's porosity table is the C++ one, in class order", "[remaster][wet]")
++{
++    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
++    const std::regex table(R"(const float kWetPorosity\[(\d+)\] = float\[\]\(([^)]*)\);)");
++    std::smatch m;
++    REQUIRE(std::regex_search(surface, m, table));
++    CHECK(std::stoi(m[1].str()) == kSurfaceClassCount);
++    std::stringstream values(m[2].str());
++    std::string item;
++    int i = 0;
++    while (std::getline(values, item, ','))
++    {
++        REQUIRE(i < kSurfaceClassCount);
++        INFO(SurfaceClassName(static_cast<SurfaceClass>(i)));
++        CHECK(std::stof(item) == Catch::Approx(SurfacePorosity(static_cast<SurfaceClass>(i))));
++        ++i;
++    }
++    CHECK(i == kSurfaceClassCount);
++    // Sealed surfaces form a film, cloth soaks the rain up.
++    CHECK(SurfacePorosity(SurfaceClass::Paint) < 0.1f);
++    CHECK(SurfacePorosity(SurfaceClass::Glass) == 0.0f);
++    CHECK(SurfacePorosity(SurfaceClass::Fabric) > 0.8f);
++    SurfaceClass parsed;
++    CHECK(ParseSurfaceClass("Masonry", parsed));
++    CHECK(parsed == SurfaceClass::Masonry);
++    CHECK_FALSE(ParseSurfaceClass("plastic", parsed));
++}
++
++TEST_CASE("Draw descriptor: carries the object kind, which changes no pipeline state", "[remaster][wet]")
++{
++    render::LegacySpec spec;
++    render::BuildContext ctx;
++    const render::RenderPassDescriptor none = render::BuildRenderPassDescriptor(spec, ctx);
++    CHECK(none.objectKind == K::Unknown);
++    ctx.objectKind = K::LandVehicle;
++    const render::RenderPassDescriptor jeep = render::BuildRenderPassDescriptor(spec, ctx);
++    CHECK(jeep.objectKind == K::LandVehicle);
++    // ApplyPipeline skips an unchanged descriptor: a new object kind alone
++    // must not make it rebind the same state.
++    CHECK(jeep == none);
++}
++
++// ---- The switches and their gates ---------------------------------------------
++
++TEST_CASE("Wet weather switches: landed with the wetness and puddles sub-knobs", "[remaster][wet][FeatureSwitches]")
++{
++    for (Feature f : {Feature::WetWeather, Feature::LampStreaks})
++    {
++        const FeatureInfo& info = GetFeatureInfo(f);
++        INFO(info.key);
++        CHECK(info.landed);
++        CHECK(std::string_view(info.step) == "B7");
++        CHECK(std::string_view(info.gpuSection) == "world");
++    }
++    struct Sub
++    {
++        const char* key;
++        float value;
++    };
++    for (const Sub& s : {Sub{"wetness", -1.0f}, Sub{"puddles", 1.0f}})
++    {
++        const LightingKey* k = FindLightingKey(s.key);
++        REQUIRE(k != nullptr);
++        INFO(s.key);
++        CHECK(k->kind == KeyKind::Knob);
++        CHECK(std::string_view(k->parent) == "wetWeather");
++        CHECK(KeyDefault(*k) == s.value);
++    }
++    const LightingTuning t = Apply("remastered,wetness=1,puddles=0.5");
++    CHECK(t.wetness == 1.0f);
++    CHECK(t.puddles == 0.5f);
++    // A mode word puts them back.
++    CHECK(Apply("remastered,wetness=1,remastered").wetness == -1.0f);
++}
++
++TEST_CASE("Wet weather gates: the world's wetness drives them, puddles keep them on, dry holds them off",
++          "[remaster][wet]")
++{
++    GateInputs in;
++    in.sunElevationDeg = 30.0f;
++    in.rainDensity = 0.0f;
++    in.wetness = 0.0f;
++    const LightingTuning t = Apply("remastered");
++    CHECK_FALSE(ComputeFeatureGates(in, t)[Feature::WetWeather].on);
++    // After the rain: no rain, the world still wet.
++    in.wetness = FrameWetnessGate(WetnessFrame{0.0f, 0.4f, false});
++    CHECK(ComputeFeatureGates(in, t)[Feature::WetWeather].on);
++    // Lamps at night add the streaks.
++    in.nightEffect = 1.0f;
++    in.localLights = 3;
++    CHECK(ComputeFeatureGates(in, t)[Feature::LampStreaks].on);
++    CHECK_FALSE(ComputeFeatureGates(in, Apply("remastered,wetWeather=0"))[Feature::LampStreaks].on);
++    CHECK_FALSE(ComputeFeatureGates(in, Apply("remastered,lampStreaks=0"))[Feature::LampStreaks].on);
++    // The state line names the wetness.
++    const FeatureGates g = ComputeFeatureGates(in, t);
++    CHECK(FeatureStateString(t, g).find(" wet=0.40 ") != std::string::npos);
++}
++
++// ---- The shaders --------------------------------------------------------------
++
++TEST_CASE("Wet weather shaders: nothing changes while dry, one puddle field for the forward pass and the trace",
++          "[remaster][wet][Shaders]")
++{
++    const std::string shade = gl::RemasterFragmentPiece(gl::FragmentPiece::Shade);
++    // The wet response runs only while the Weather slot is set (the gate on).
++    CHECK(shade.find("if (litWeather.x > 0.0 || litWeather.z > 0.0)\n        wetSurface(") != std::string::npos);
++    // ... and its terms enter as identities while it does not.
++    CHECK(shade.find("float wetKeep = 1.0;") != std::string::npos);
++    CHECK(shade.find("vec3 wetLit = vec3(0.0);") != std::string::npos);
++    CHECK(shade.find("vec3 wetEnv = vec3(0.0);") != std::string::npos);
++    CHECK(shade.find("float wetMirror = 0.0;") != std::string::npos);
++
++    // The puddle field is its own piece, in the prelude once and pasted into
++    // the reflections' trace once, so both draw the same puddles.
++    const std::string puddles = gl::RemasterFragmentPiece(gl::FragmentPiece::Puddles);
++    CHECK(puddles.find("vec2 wetPuddle(") != std::string::npos);
++    CHECK(CountOf(gl::RemasterFragmentCommon(), puddles) == 1);
++    const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
++    CHECK(CountOf(trace, puddles) == 1);
++    // In the trace the wet weather's puddles replace B6's own only while it
++    // shades the ground, and the trace then leaves the darkening to it.
++    CHECK(trace.find("puddle = wetPuddle(posW, footT, road ? 1.0 : 0.0, grass, ssrWetMode.y).x;") != std::string::npos);
++    CHECK(trace.find("float base = wetWeather ? 1.0 : darken * mix(1.0, kSsrPuddleDark, puddle);") !=
++          std::string::npos);
++    // The forward puddle darkening is the trace's own (B6's) puddle colour.
++    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
++    std::ostringstream dark;
++    dark << "const float kWetPuddleDark = " << kSsrPuddleDark << ";";
++    CHECK(surface.find(dark.str()) != std::string::npos);
++    // The puddle thresholds on roads and bare ground are B6's.
++    std::ostringstream road, ground;
++    road << "const float kPuddleRoad = " << kSsrPuddleRoad << ";";
++    ground << "const float kPuddleGround = " << kSsrPuddleGround << ";";
++    CHECK(puddles.find(road.str()) != std::string::npos);
++    CHECK(puddles.find(ground.str()) != std::string::npos);
++
++    // Every main that shades the sea through shadeRemastered keeps it dry, and
++    // the land and the grass say what they are.
++    const std::string detail = gl::RemasterFragmentMain(1); // PSDetail
++    CHECK(detail.find("g_wetDraw = litDetail.w > 0.5 ? 1 : 3;") != std::string::npos);
++    const std::string water = gl::RemasterFragmentMain(3); // PSWater
++    CHECK(water.find("g_wetDraw = 3;") != std::string::npos);
++}
++
++TEST_CASE("Wet weather shaders: the sun's glint in the film is capped far below a lamp's and softened on bare ground",
++          "[remaster][wet][Shaders]")
++{
++    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
++    const auto constant = [&](const char* name)
++    {
++        const std::regex re(std::string("const float ") + name + R"( = ([0-9.]+);)");
++        std::smatch m;
++        INFO(name);
++        REQUIRE(std::regex_search(surface, m, re));
++        return std::stof(m[1].str());
++    };
++    // The low sun's lobe on a wet film peaks at well over a hundred times the
++    // sun (grazing light, grazing view): under the lamps' cap it clipped a
++    // white column from the horizon to the eye. Its own cap keeps the glint
++    // at a few times the sun at most, even in a puddle.
++    const float sunCap = constant("kWetSunCap");
++    const float lampCap = constant("kWetSpecCap");
++    CHECK(sunCap <= 4.0f);
++    CHECK(sunCap * 10.0f < lampCap);
++    // Bare ground breaks the film: a rougher lobe on a smaller share.
++    CHECK(constant("kWetSunGroundRough") > constant("kWetSunRough"));
++    CHECK(constant("kWetSunGroundFilm") <= 0.5f);
++    CHECK(sunCap * constant("kWetSunGroundFilm") <= 2.0f);
++    // A pixel's footprint widens the lobe (far wet ground: no white dashes).
++    CHECK(constant("kWetSunFoot") > 0.0f);
++    CHECK(surface.find("float sunFoot = kWetSunFoot * length(fwidth(posAbs));") != std::string::npos);
++    // Every sun lobe takes the sun's cap, every lamp lobe the lamps'.
++    CHECK(CountOf(surface, "wetLobe(litSunDir.xyz, 1e4, nf, v, nv, ") == 2);
++    CHECK(CountOf(surface, ", kWetSunCap)") == 2);
++    CHECK(CountOf(surface, ", kWetSpecCap)") == 2);
++    CHECK(surface.find("min(3.14159265 * D * vis * nl * norm, cap) * F") != std::string::npos);
++}
++
++TEST_CASE("Wet weather backend: the gate sets the Weather slot, the per-draw class uploads on change only",
++          "[remaster][wet]")
++{
++    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
++    // The gates read the wet weather's state only while its switch is on: off,
++    // the rain stands in, as before the step (the reflections' gate too).
++    CHECK(lighting.find("if (rm::FeatureOn(_lighting.features, rm::Feature::WetWeather))\n        in.wetness = "
++                        "rm::FrameWetnessGate(_wetFrame);") != std::string::npos);
++    // Dry: the slot is zero.
++    CHECK(lighting.find("SetSlot(LitConst::Weather, 0.0f, 0.0f, 0.0f, 0.0f);") != std::string::npos);
++    CHECK(lighting.find("if (m[0] == x && m[1] == y)\n        return;") != std::string::npos);
++    const std::string queue = ReadTextFile(Gl33Dir() / "EngineGL33_Queue.cpp");
++    CHECK(queue.find("ctx.objectKind = GetDrawObjectKind();") != std::string::npos);
++    CHECK(queue.find("SetLitSurface(tex, d);") != std::string::npos);
++    // The reflections' pass takes the ground's wetness from the wet weather
++    // while its gate is on, else the rain.
++    const std::string ssr = ReadTextFile(Gl33Dir() / "EngineGL33_PostSsr.cpp");
++    CHECK(
++        ssr.find("const float weatherWet = wetWeather ? _wetFrame.surface : (land ? land->GetRainDensity() : 0.0f);") !=
++        std::string::npos);
++}

@@ -1,0 +1,152 @@
+graphics: a physically based sky table lights the dome and the fog colour
+
+What the player sees: the sky comes from real air physics under the
+original sky textures' clouds. A low sun gets a golden band along the
+horizon and a glow around it (the aureole), dusk an orange band under a
+mauve sky, sunrise keeps its pink with a coral glow at the sun, noon a
+graded blue that keeps its cirrus. Distant ground, the far horizon polygon
+and the sea's distance fog fade into the same sky colour in their own
+direction (aerial perspective), so the flat band between land or sea and
+sky is gone. Each sky row keeps the original dome's brightness on average,
+sun glow included: the sky band's mean luminance is within -0.1 % and
++6 % of the original's on the five daytime views measured. Night keeps
+the classic sky (the table fades out between -3 and -9 degrees of sun),
+and an overcast deck keeps the classic fog colour. The lighting of lit
+geometry is unchanged; only its fog colour changes.
+
+How it works: Graphics/Remaster/Atmosphere (pure) holds the clear-sky
+model of the research prototype (Rayleigh, Mie, ozone and Hillaire's
+multiple scattering, Bruneton constants): a transmittance and a
+multiple-scattering table, built on a worker thread (std::async, as the
+terrain horizon map) the first time the feature runs and again when the
+haze changes, and the sky-view table, built on the GPU in two fullscreen
+passes (EngineGL33_SkyTable.cpp, GLSL in the GL-free
+EngineGL33_PostSkyTableShaders.cpp as two kPostShaders rows) whenever the
+sun has moved 0.02 degrees: regions of Rayleigh plus multiple scattering,
+Mie without its phase (applied per pixel, so the aureole stays sharp) and
+each row's mean, 192x64 RGBA32F on texture unit 8. The prototype rebuilt
+it on the CPU in 8 to 12 ms every few seconds of play; the GPU build takes
+0.06 ms. Atmosphere also holds the CPU mirrors of both passes
+(SkyViewTexel, SkyViewRowMean, SkyViewRowGlow), and the new tri verb
+triSkyTableCheck reads the GPU table back against them.
+Landscape::DrawSky and DrawClouds open the sky pass through one hook,
+Engine::BeginRemasterSky(RemasterSky::Dome or Clouds) / EndRemasterSky:
+the dome and the sky clouds come before the world's first 3D pass, so the
+hook opens the remastered programs for them as BeginPass does (the stars,
+sun and moon stay classic), computes the frame's gates there, builds the
+table and sets the sky mode (litSkyFwd.w) that tells the screen vertex
+shader which draws are the dome. That shader now pastes the LitConstants
+block (kScreenVertexPieces) and rebuilds each pixel's view ray from its
+screen position and the camera basis. The dome (shadeSkyDome) keeps the
+texture's clouds as a mask against each row's clearest texel and lights
+them from the sun at 2.5 km plus the sky above; the fog of lit and pre-lit
+world draws (atmoFogColor) reads the table only where fog shows. Slots 61
+to 67 of LitConstants land (58 to 60 become one padding member), and the
+GPU timings gain the sky and skytable sections.
+
+The switch and its gates: atmosphere (a FeatureSet member, landed), with
+the sub-knobs atmoHue 0.5, atmoSat 1.15 and atmoHaze 1.0. Its gate runs
+it while the sun is above -9 degrees and the atmosphere tables exist
+("atmosphere tables building" until then; triSettleScene waits for them).
+Off (the switch, the gate, classic lighting, a portrait, a 3D preview
+after the world, night vision) the hook returns at once and the sky slots
+stay zero, so every draw is the one before this change.
+
+Kept, rewritten and dropped from the prototype: kept the model, its
+constants and its 40-step march (the discriminants rewritten as (r mu)^2
+plus a difference of squares of nearby radii, precise in float near the
+ground), the per-row brightness reference, the per-pixel aureole, the
+night fade, the fog colour from the table for lit and pre-lit draws and
+the horizon polygon, and the critic's hue 0.5 and saturation 1.15.
+Rewritten: the table on the GPU, the tables on a worker thread, the hook
+in place of the BeginMesh hack and the t1 dome marker, the row reference
+with the original sun glow (the prototype read 9 % darker at sunrise), the
+hue blend relighting the original hue by the brightness ratio (the
+channel-by-channel relight turned the pink horizon opposite a low sun
+olive), the cloud mask's dead zone 0.004 instead of 0.015 and a cloud's
+colour taken out of the sky behind it (the noon cirrus survives), the
+cover mixed in display space. Dropped: atmoLight (blue ground), atmoSun,
+atmoExposure, atmoFog, atmoClouds, atmoDebug and the logs; the water's
+reflection term is left for the water step. Correction to the plan: the
+view ray needs no pillarbox rectangle (it starts from the vertex's own
+screen position; checked with a 4:3 world rect).
+
+Measured cost (a single reading: RTX 4060 Ti, 1920x1080, scale 1.0, 4x
+MSAA, off then on in 3 interleaved rounds, 0 of 4 tri slots held, no
+foreign game in the clock samples): at P0 the whole frame, on minus off,
+is +0.49 ms median / +0.48 minimum on sunrise_ridge and +0.53 / +0.55 on
+noon_fields, most of it the aerial perspective on fogged world fragments.
+The sky dome itself (the sky section) is 0.08 to 0.10 ms at P0; a table
+build (a one-minute-per-frame time-lapse at sunrise_ridge) 0.06 ms. A
+second run after the fog lookup was limited to fogged fragments read
++0.59 and +0.33 ms on the minimum, on a busier machine (CPU frame 2 to 6
+ms longer on the same views), so it does not separate that change from
+the noise. coastline_sunset runs at P3 (0.8 to 1.1 GHz), where the sky
+section reads 0.27 ms. Plan estimate about 0.5 ms; MENU's 1.5 to 2x rule
+gives about 0.5 to 1.2 ms on a 3060.
+
+Tests: new test_atmosphere.cpp [atmosphere]: the transmittance against
+the vertical optical depth in closed form and a direct integration,
+falling and reddening with the air mass; sky-view texels against a
+1500-step double-precision march at noon, sunset and 4 degrees under
+(Rayleigh within 4.5 %, Mie within 8.5 %: the prototype's march sampling
+0.3 into steps longer than the Mie scale height overstates the haze by up
+to 7.5 %, kept as the look was tuned on it); the colours of a clear day, a
+sunset and a twilight; lookups, row means and glow weights; rebuild, night
+fade, overcast floor, the switch, gate and sub-knobs.
+test_remaster_lighting.cpp: the slot layout with 61 to 67, the screen
+vertex shader's assembly table, the post programs (eleven on the lane,
+thirteen with A5's two), the off contract (blends at zero leave every
+draw as before) and the passes mirroring Atmosphere.cpp. Ten mutations
+each turn their cases red. On the lane (ced77ae) the gate tags pass
+476/476 (10 new cases); the full suite has only the 6 known localisation
+failures.
+
+Merged onto A5 (193c735; the lane was built on ced77ae) by a three-way
+apply: the GPU timings keep A4's ground, pass1 and rest sections and add
+sky and skytable after them (the sky marks come before WorldBegin); the
+registry keeps one MakeSubKnob taking the Feature, with TAA's three
+sub-knobs before the sky table's three; PostShader keeps Taa and
+TaaSharpen before SkyView and SkyViewMean; the screen vertex shader keeps
+A5's jitter and builds the view ray from the unjittered position; the
+sky slots reach the buffer through FlushLitConstants and A4's
+UploadLitSlots mirror. A4's and A5's case on the landed switches (now
+"the frame-cost switches, TAA and the sky table have landed") also
+expects atmosphere (step A7, GPU section sky) and landed=4/26, and A5's
+sub-knob case counts the sky table's three. On
+the merged tree the gate tags plus A4's, A5's and A7's new tags pass
+506/506, and smoke_abel passes 1/1 (tmp/integration/A7/land-smoke:
+KHR_debug ids 131154, 131169 and 131218 only; the feature line shows
+landed=4/26 with atmosphere on, the GPU line the pass1 split, the sky
+section and the taa and sharpen sections).
+
+In game (tmp/integration/A7 of the graphics-remaster worktree):
+triSkyTableCheck on six views, largest relative error 3.7e-4. Smoke 1/1,
+KHR_debug ids 131169, 131154 and 131218 only. Off equals before:
+atmosphere=0 against the base build (before-a7sky) is pixel-identical on
+four views and differs only in the sea of the two coast views, as one
+game's own repeat does. Hero pairs and the time and weather views:
+final/ (coastline_sunset, firefight_dusk, noon_fields, sunrise_ridge,
+coast_oc_up, town_night, the pillarbox view), the last binary's smoke and
+six views in final2/ (the same images, the sea aside); timing a7-timing
+and a7final-timing. The tables the shots measure: sky band luminance within
+-0.1 % and +6 % of the original's, sky detail (6-pixel high-pass) 1 to
+13 % above it (noon 2.54 against 2.52: the cirrus is kept).
+
+Known risks: the anti-sun horizon band at a low sun is a warm grey 9 %
+darker than the original's pink (the sun side is 34 % brighter, the row
+average kept); the sky's faint texture blotches read up to 13 % stronger
+than the original's at sunrise and sunset; noon is a more saturated blue
+than the original (the owner's 1.15); the 40-step march overstates the
+haze by up to 7.5 %; the table builds only while this switch is on
+(water, air and clouds widen that when they land); the haze is a fixed
+knob, not yet tied to fog or overcast; the 3D sky clouds only take the
+fog colour (the clouds step lights them); the pillarbox check had the sun
+just outside the 4:3 rect; the contract tests match shader source text;
+LitConstants slots 58 to 60 are one padding member that B1 splits when
+it lands (A5 landed no slot); RemasterSkyPending reads a flag only the
+sky pass clears, so switching atmosphere off during a table build leaves
+triSettleScene waiting to its maxFrames (test tooling only, a
+follow-up); no RTX 3060 was measured.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

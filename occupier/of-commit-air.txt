@@ -1,0 +1,35 @@
+guerrilla: occupier forces phase 6 air spike, OccupierAir and the GO verdict (OCCUPIER-FORCES.md 3.2, 14 "Air"; AIR-SPIKE.md)
+
+OccupierAir: airborne birth the mission loader's way (orient, SetFlyingHeight
+before MakeAirborne, AddVehicle), crew and cargo as two groups, an invisible
+HeliHEmpty pad added with AddBuilding as the LZ (snapped to the centre of an
+object-free terrain cell; FindStopPosition only sees pads within 500 m, so
+the landing order goes out at 450 m and is re-issued every 5 s until down),
+the pilots driven by Command::Move through IssueCommand, unload through the
+phase 3 dismount plus a per-unit UnassignVehicle (without it the helicopter
+landed again 110 to 285 m away), departure by LandFinished plus the pilot
+set to Wait (without it a 30 m hover over the LZ), a Move home re-issued
+while it stays down, removal only where the altitude-aware gate says unseen:
+crew first, the hull one step later, then the pad. Jet sortie: born
+airborne, never taxis, an 8-point orbit 900 m out in COMBAT / RED for
+sortieTime, reveal only for sightings younger than 60 s with accuracy
+below 1 (D9), removed crew first. gmOccupierAir with crew-group and
+landing-order columns. World hooks: Simulate and Clear. Nothing is wired
+into CounterAttack yet; births take an explicit point (the off-map edge
+and the airfield choice are phase 6 proper).
+
+Verdict GO (AIR-SPIKE.md): on the final build 18 of 18 insertions landed
+within 100 m of the LZ (worst 20 m, median 5.5 m), unloaded 8 of 8 alive
+and departed, every airframe deleted crew first; 44 of 45 across every
+build (the miss was a wave-off over the pad, fixed). guerrilla_forces_
+heli_insertion 5/5 and guerrilla_forces_jet_sortie 6/6 (tag slow_air:
+default runs pass --skip-tag slow_air; this lane runs --tag slow_air
+--retries 3). Open: an aircraft inside the view cone never reads unseen
+past the draw range (departTimeout 900 s is the only backstop; phase 6
+decides), touchdown is declared at a reported 3 m (the Mi17 origin), the
+5 s landing re-issue logs one INFO line each.
+
+Unit: [air] 8 cases, [guerrilla] 622 green on build/agent67-rwdi; human
+suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

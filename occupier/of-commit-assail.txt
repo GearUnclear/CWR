@@ -1,0 +1,23 @@
+tests: guerrilla_assailants deterministic (registered bodies no longer shoot the player; atomic exclusion checks); guideline on tri line splitting
+
+Three test-side defects. (1) The eight registered assailants are armed and
+hostile and had only TARGET and MOVE disabled, so they fired within seconds
+and killed the player; the autotest mission end then shut the game down
+(tri: "failed to read from harness"). They now get AUTOTARGET disabled and
+combat mode BLUE, the idiom of the fire_* tests. (2) A shot resident queued
+a kill record, civilians.sqs panicked the Village and GM_CI_fnEligible
+refused the civilian (INVALID); the test now expires the panic rows the
+manager's own way and asserts the preconditions of the EXTORT step (8
+assailants, the "too many armed assailants" diagnostic, no panic). (3) tri
+splits a line on every top-level semicolon, so the one-line exclusion
+checks were several harness commands and civilian_interaction.sqs cleared
+the exclusion in between; each set / measure / clear now runs in one
+if (true) then {} block. agent_guidelines/tri-splits-lines-on-semicolons.md
+records the trap.
+
+Verified on dist/agent71-rwdi + remaster-shadow-of4: guerrilla_assailants
+8 of 8 at --retries 0; the 12 guerrilla_assailant_* entries plus
+civilian_interaction, _ux and civ_shakedown 14/15 (shakedown flaked once,
+then 3 of 3 green alone); human suite OK.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

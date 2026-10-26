@@ -1,0 +1,184 @@
+Boom option 3: high explosive against fuel
+==========================================
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-3 (fec1075 + boom/base.patch, base tree 43c4ff8f).
+Build build/look-puddle-3-rwdi, game dist/look-puddle-3-rwdi, junction packages/RemasterUD-boom-3
+(created by me, pointing at D:/Arma_CWA/tmp/remaster-shadow-67). Nothing committed, no branch.
+Patch: fix.patch (5 files, +437 / -26, capture tests excluded); it applies with
+git apply --cached --check on a fresh index of the base tree.
+
+Look first
+----------
+- final/ALL_strips.png: the six strips stacked (dusk he, grenade, heat, fuel; night he, fuel).
+- final/<clip>.mp4 and final/<clip>_strip.png: the deliverable clips from the final build (run2).
+- clips1/: my first build (soot shot upward, see "Iterations"). run1/, run2/: the raw frames.
+Note the strips sample +33 and +100 ms; the HE flash is at +67 ms (frame 10), so it is only in the mp4.
+
+Approach
+--------
+Reason from the munition: a cased high explosive (shell, HEAT, grenade) is a blink of white-hot
+flash whose size and length go with the cube root of the charge, then thrown earth and a dark
+dust and smoke column that hangs and drifts; a vehicle's fuel deflagrates as a slower orange
+fireball of about a second that rolls up into black soot, then the wreck burns. Find what each
+munition spawns, fix the cause in the emitters, keep every number in one pure header
+(engine/Poseidon/Graphics/Rendering/Lighting/BlastLook.hpp) that the unit tests hold.
+
+What each munition spawns today (code reading + config dump + the before frames)
+--------------------------------------------------------------------------------
+Config (CfgAmmo, CfgCloudlets from the Remaster CONFIG.BIN):
+- Shell120 hit 200, indirectHit 150, range 8. Heat120 hit 700, indirectHit 300, range 1.
+  GrenadeHand (Grenade) hit 20, indirectHit 18, range 7. All explosive=1. FuelExplosion hit 100.
+- CfgCloudlets Explosion: puff born 2500 K, cooling 4000 K/s (x 0.7..1.3), 0.2 s life + 0.2 s fade,
+  grow 0.05 s, size 4, sourceSize 3, interval 1 ms.
+- CraterSmoke1/2/3: emission 0.32 / 0.8 / 1.6 s, puffs 2.4 / 2.0 / 2.4 s + 1.2 / 1.2 / 0.8 s fade,
+  colour table cooling grey toward white.
+Engine:
+- A shell or grenade hitting the ground (Shots.cpp) makes an Explosion (Smokes.cpp) of size
+  hit x 0.003 clamped 0.25..1: Shell120 0.6, Heat120 1.0 (the biggest of all, by direct hit),
+  grenade 0.25. The Explosion emits CfgCloudlets Explosion puffs for 0.05 x size s (1 to 2
+  frames) and spawns a CombatLights Explosion burst at its first step.
+- Landscape (Collisions.cpp) adds a Crater with smoke (CraterSmoke1-3), size about 1 for
+  Shell120, 0.6 to 0.8 for Heat120, 0.25 to 0.35 for the grenade, plus flying ground bits.
+- A destroyed vehicle (Dammage.cpp Destroy) gets a SmokeSourceOnVehicle that smokes for about
+  1 + 6 + 6 s; TankOrCar calls Explode 0.2 to 1.5 s later. SmokeSourceVehicle::SimulateExplosion
+  only burned the fireball (_fire, the Explosion puffs, and _darkFire) and kept the wreck burning
+  (32 to 48 s) when the vehicle's explosives x 0.5..1 passed hit > 50 (the damage gate).
+Before frames (boom/before, my sheets): HE: impact at frame 10 (+67 ms), one orange frame, then
+dark puffs; the crater smoke is a faint brown smear gone by frame 28 (0.6 s after impact); the
+dark cloud is the Explosion's own puffs, gone by 0.6 s. The puffs are drawn one step after their
+birth and start at size 0 (grow), so the white birth temperature is never seen. Jeep: a small glow
+for 3 to 4 frames, a dark cloud to about 2 s, no wreck fire (the burning Ural of the staging also
+stopped smoking a few seconds into the HE clip).
+
+The change
+----------
+1. BlastLook.hpp (new, header only): the explosion size from the charge, the HE flash, the fuel
+   fireball and soot, the crater's earth, column and haze, the wreck's burn times.
+2. Shots.cpp: every Explosion's size = BlastExplosionSize(indirectHit, indirectHitRange) =
+   0.6 x cbrt(charge / 1200), clamped 0.25..1 (was hit x 0.003, or hit x 0.001 on an object hit).
+   Shell120 keeps 0.6; Heat120 0.38 (was 1.0); hand grenade 0.28 (was 0.25); satchels stay at 1.
+3. Explosion (HE flash): puffs born at 3000 K, cooling (3000 - 1500) K over 0.1 s x the linear
+   scale; emitted 0.035 s x scale (min 1/60 s); grow 0.04 s x scale (was 0.25 effectively 0.05,
+   but now the first drawn frame is full size); births on the upper half of the ball only
+   (WeaponCloudsSource::SetUpperHalf), so the ground no longer cuts its bottom flat; outward speed
+   2 per metre of offset (classic 4, up to 25 m/s); soot that hangs: 0.7 s x (0.5 + 0.5 s) at full
+   alpha + 1.6 s x (0.5 + 0.5 s) fade, climb -3 m/s2 between 0.2 and 4 m/s (classic -0.2, 0..6).
+   Its combat light now spawns at its second step, with the first drawn puffs (it lit the ground
+   a frame before any fireball: the bare bright patch).
+4. Crater (HE dust and smoke), from the crater size c and life scale L = 0.35 + 0.65 c:
+   earth jet (CraterSmoke1): 0.2 s + 0.15 s thinning, rise 4 + 8c m/s, -9 m/s2, dark earth
+   (0.20, 0.17, 0.13), 2L s + 3L s fade; column (CraterSmoke2): 1.2L s + 3L s thinning, rise
+   2 + 2.5c m/s slowing at -2 m/s2 to 0.3, grey-brown (0.15, 0.14, 0.125), 5L s + 7L s fade, grows
+   over 5L s; haze skirt (CraterSmoke3): 0.5 s + 1.5L s, rise 0.6, (0.30, 0.27, 0.22), 4L + 6L s,
+   alpha 0.35. Colours held (no table walk toward white); each burst a shade of 0.85..1.15.
+5. SmokeSourceVehicle (fuel): the fireball always burns when the vehicle explodes (the damage,
+   sound and gate are unchanged): fire size max(hit x 0.001, 0.6) to 1.25; puffs born 2150 K
+   cooling 380 K/s (each glows orange about a second), emitted 0.9 s x cbrt(size / 0.6), puff size
+   5 x fire size and spread 2.5 x (classic: the fire size, a seventh of a shell's puffs), interval
+   15 ms (classic 1 ms), roll out at 1.2 per metre, climb +1 m/s2 to 2.5 m/s, grow 0.8 s; black
+   soot (0.05, 0.045, 0.04) with it for 1.6 x as long, 2.5 s + 5 s fade; the wreck then burns
+   45 s x 0.8..1.2 and fades over 30 s x 0.8..1.2 (it smoked about 13 s when under the gate).
+   Its embers' Fire light carries the fireball (strength + 6 x fire size while it burns, falling
+   over 0.5 s after), and its Explosion burst light is halved (a deflagration has no white flash).
+6. Smokes.hpp setters: CloudletSource::SetTemperature, SmokeSource::SetSourceSpeed / SetDensity,
+   WeaponCloudsSource::SetRadialGain / SetUpperHalf; Explosion::_steps; fuel fireball state.
+
+Constants old -> new (summary)
+------------------------------
+- Explosion size: hit x 0.003 (object hit x 0.001) -> 0.6 x cbrt(indirectHit x range / 1200).
+- HE puff: 2500 K, -4000 K/s, 0.2 + 0.2 s, grow 0.05, radial 4, climb (-0.2, 0, 6), emit 0.05 x size
+  -> 3000 K, -15000 K/s (120 mm), 0.7 + 1.6 s (120 mm), grow 0.04, radial 2, climb (-3, 0.2, 4),
+  emit 0.035 s (120 mm).
+- Crater smoke: config emission 0.32 / 0.8 / 1.6 s, life 3.6 / 3.2 / 3.2 s, table toward white
+  -> earth 0.35 s / 5 s, column 4.2 s / 12 s, haze 2 s / 10 s (120 mm), dark held colours.
+- Fuel: gate hit > 50, fire size hit x 0.001 clamped 0.25..1.25, fire time hit x 0.002, 2500 K
+  -> always, size >= 0.6, 0.9 s emission, 2150 K at -380 K/s, puffs 5 x bigger; wreck burn
+  40 s x rnd (gated) -> 45 s + 30 s fade (always).
+
+Per munition now (final build, run2, fixed 1/30 s)
+--------------------------------------------------
+- dusk he (Shell120): frame 10 one yellow-white fireball about 8 m wide sitting round on the
+  ground with the flash lighting the ground under it; frame 11 already dark; a dark grey-brown
+  cloud spreads to about 15 m by 0.3 s, settles at 3 to 6 m up as a dark mass with a dust skirt,
+  still clearly there at 3 s (the clip's end), fading. Flash: 1 bright frame + 1 dim.
+- dusk grenade: impact at frame 12; one frame of a pale grey-white soft puff about 4 m with a
+  thin bright line on the ground under it (not a hot flash), then a small dark puff that lingers
+  low past 2 s and is faint at 4 s.
+- dusk heat (Heat120): frame 10 a pale, soft whitish-peach ball about 6 m (dimmer than the HE's,
+  not intense) with a thin bright line at its base; from frame 11 a smaller dark cloud than the
+  HE's (size 0.38 against 0.6; it was the largest of all), hanging past 2 s.
+- dusk fuel (Jeep): a soft white glow at +100 ms (the halved burst light), then an orange
+  fireball rolling up from +200 to about +500 ms, turning to black soot that rises and drifts
+  (+600 ms to 2 s), then the wreck keeps a thin black column and its embers glow to the end of
+  the clip (5 s). The orange phase reads about 0.4 s, not a full second (see weak points).
+- night he: frame 10 a yellow-white ball with a warm halo; a pale lit cloud for 2 frames, then
+  the smoke is dark against the night (barely visible, as real smoke at night).
+- night fuel: a white-yellow glow ball at +200 ms (the burst's air scatter), an orange fireball
+  at +333 ms, a fire-lit grey cloud at +500 ms, then the wreck burns with a glowing base to 5 s.
+The burning Ural of the staging now keeps a thick black column through every clip (the wreck
+burn change; it is the big black cloud on the right of every dusk strip).
+
+Cost
+----
+No frame time is logged by the capture; the wall time per captured frame (png mtimes) is
+dominated by the capture and the other agents' games (before 146 to 251 ms, run1 145 to 151 ms,
+not comparable). By count: a 120 mm burst now leaves about 12 earth + 40 column + 25 haze puffs
+alive for up to 12 s (classic about 30 for 4 s), plus the Explosion's own puffs living 2.3 s
+instead of 0.4 s (their number is unchanged: interval 1 ms x generalization). The fuel fireball
+emits about 60 fire + 40 soot puffs (classic up to about 1250 fire puffs at 1 ms for 1.25 s, so
+fewer, bigger puffs); a wreck smokes for about 60 s instead of 13 s when under the gate. Expect
+more overdraw per burst in a heavy firefight; not measured.
+
+Tests
+-----
+- New cases in tests/unit/engine/Poseidon/Graphics/test_combat_lights.cpp ([remaster][CombatLights],
+  42 assertions): "blast look: a HE flash is a blink, a fuel fireball rolls for about a second"
+  (charge sizes: HE keeps 0.6, HEAT and grenade smaller, satchel capped; the flash white at birth,
+  over within 0.2 s, shorter for a grenade, still white-yellow one step after birth; soot hangs;
+  fuel orange, glowing after 1 s, soot after 2 s; wreck burn) and "a HE burst leaves a dark column
+  that lingers for many seconds" (column over 12 s for 120 mm, over 5 s for a grenade, dark colours,
+  earth thrown fast and falling, haze lowest).
+- PoseidonTests.exe "[CombatLights],[PhotoCamera],[Shaders],[remaster],[fog]" run from D:/:
+  All tests passed (958628 assertions in 322 test cases), final build.
+- Not run: clang-format (my edits follow the file style by hand).
+
+AI sight and fog
+----------------
+Target.cpp, VolumetricFog.cpp, SimulateFogSight are not in my diff.
+
+Iterations
+----------
+- run1: the HE soot, born on the upper half only and kept at radial gain 4, flew straight up at up
+  to 25 m/s and left the frame within a second; the crater column (riseMps 4.5, no deceleration)
+  also left the frame upward, so the burst looked gone again. The HE flash was invisible: its
+  puffs grew from size 0 over 0.25 s and were first drawn a step after birth. Fuel puffs were tiny
+  (the classic fire size, a seventh of a shell's) and shot up.
+- run2 (final): radial 2 and a decelerating climb for the soot, a decelerating column, growth by
+  the first drawn frame, slower cooling (3000 K to 1500 K over 0.1 s), bigger slower fuel puffs,
+  the combat light delayed a step.
+
+Weak points (honest)
+--------------------
+1. The HE smoke reads as a dark cloud hanging a few metres up rather than a column rooted in the
+   ground: the column puffs rise to 3 to 6 m and stall; the dust skirt under it is faint. A
+   continuous low emission at the crater for a few seconds would root it.
+2. The fuel fireball's orange phase reads about 0.4 s, not a full second: the puffs are first seen
+   white-ish (the halved Explosion burst light, white, still scatters into the air as a soft white
+   ball, worst at night at +200 ms), and the orange puffs darken under their soot within about
+   0.5 s at this exposure. Dropping the Explosion burst for fuel (Fire light only) and a slower
+   cooling (-250 K/s) are the next things to try.
+3. The grenade's and the HEAT round's flashes are pale and soft (one frame), not the intense
+   white-yellow blink the HE shell gets: their faster cooling (shorter flash for a smaller charge)
+   leaves the first drawn frame at about 1900 to 2100 K. Starting smaller charges hotter, or
+   holding the birth temperature for the first drawn step, would fix it. The bright thin line on
+   the ground under them is the burst's surface light.
+4. The flash's ground light is still the burst's disc light (kBurstSurfaceReachCores); it now
+   coincides with the fireball frame, but I did not change its shape.
+5. The column does not drift visibly within the 3 s HE clips (no wind in the staging); it lingers
+   in place and fades.
+6. The fuel fireball now burns for every destroyed car or tank whatever its explosives (the damage
+   gate is unchanged), and wrecks smoke about 60 s: more smoke on the map in a long battle.
+7. The LAW/RPG path (the black lower half seen in rprobe) was not touched or checked; rockets use
+   the same Explosion, so their flash and smoke follow this change.
+8. The Explosion's own puff count is unchanged (1 ms interval); they now live 2.3 s, so a barrage
+   costs more overdraw than before. Not profiled.

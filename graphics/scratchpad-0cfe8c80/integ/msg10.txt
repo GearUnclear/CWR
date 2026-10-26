@@ -1,0 +1,30 @@
+graphics: three-entry config colours read as {r,g,b} with alpha 1
+
+Street lamps lost their authored warm colour and lit at ten times their
+authored ambient, which washed the open country up to 500 m around every
+town a flat grey at night, moon or no moon.
+
+Root cause (stock, unchanged since the public source import): GetColor
+in ParamFileExt.cpp returned HWhite for any array that is not exactly 4
+entries long. CfgNonAIVehicles >> StreetLamp gives colorDiffuse[] =
+{0.9,0.8,0.6} and colorAmbient[] = {0.1,0.1,0.1}, both with 3 entries,
+so every lamp uploaded diffuse (1,1,1) and ambient (1,1,1). The ambient
+term has no direction and reaches 500 m, so six lamps 220-300 m away
+greyed the country (51 -> 15 without the lamp ambient).
+
+Fix: GetColor accepts {r,g,b} with alpha 1; every other size still reads
+as white. GetPackedColor (UI) is unchanged. These are the only 3-entry
+values among the GetColor keys in the base config; in @LoBo two lamp
+panels (AGS_Harbor_StreetLampPanel, f3wx_StreetLampPanel) are 3-entry
+and their ambient drops from 1.0 to the authored 0.7.
+
+Committed on its own so it can be reverted alone: this is a data fix,
+so it changes Classic and night vision near towns as well, not only
+Remastered. Classic open country near a town goes from 57 to 20 (the
+wash is gone), and night-vision ground there from green 106 to 79 in
+both modes. Town views and town night vision are unchanged.
+
+Tests: 'GetColor reads three-entry colours with alpha 1' (5 of 10
+assertions fail without the fix).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

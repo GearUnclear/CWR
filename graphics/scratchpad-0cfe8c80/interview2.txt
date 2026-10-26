@@ -1,0 +1,32 @@
+ASSIST 2026-10-17T21:12:22.327Z Agreed, and nothing here targets the old game. Every capture so far ran the Remaster engine built from this repo on the full Remaster data (the `remaster-shadow-67` shadow, plus @LoBo for Sinai). The Classic 1.99 install hasn't been touched.
+
+"Classic" in this work is confusing naming, and it's mine to fix. It means the Remaster engine's own stock lighting: the shaders in `EngineGL33_Shaders.cpp`, i.e. how the game renders today. The "Classic" panel in each comparison is therefore "the Remaster as it ships", used as the before shot. From here on I'll call it **Stock**.
+
+Your point does raise a real decision. The original brief said that lighting must stay bit-identical and keep its own toggle next to Remastered. If the project only cares about the new look, that constraint is dead weight:
+
+- **Keep Stock as a toggle:** every new effect needs a separate program set and a code path that leaves the stock renderer untouched. That roughly doubles the shader and state plumbing for the G-buffer, TAA and GI work.
+- **Let the new renderer replace Stock:** the bold pieces (G-buffer, TAA, SSGI, volumetrics) can rebuild the renderer directly. Stock survives only as a capture reference, for example the pinned upstream binary or a commit, not as a maintained mode.
+
+The 22 running prototypes are already free to ignore the bit-identical rule, so nothing needs restarting. The choice only matters when we build the winners properly.
+
+Do you want Stock dropped as a supported mode, with the new renderer replacing it?
+
+RES 2026-10-17T21:13:42.453Z "Your questions have been answered: \"Today the game can switch between the original look and the new lighting. Should the original look stay as an option in the game?\"=\"No, replace it\", \"What computer should the new look run well on?\"=\"Modern gaming PC\", \"Which improvements matter most to you? Pick any.\"=\"Light and shadow,Sky and air,Water and shine,Night and combat\", \"How do you want to judge the results?\"=\"Side-by-side pictures\". You can now continue with these answers in mind."
+
+ASSIST 2026-10-17T21:13:55.002Z Thanks, that settles it:
+
+- **The original look goes.** The new lighting becomes the only look in the game. The original stays only as the "before" picture in comparisons, so the rule that it must stay untouched no longer applies.
+- **Target is a modern gaming PC.** That's an RTX 3060-class card at 60 fps in 1080p, so the heavy effects are fair game.
+- **All four areas count:** light and shadow, sky and air, water and shine, night and combat.
+- **You judge from side-by-side pictures**, same spot and same time, before and after.
+
+None of this changes the research that's running: the 22 experiments are already free to change the original look, and they already cover all four areas. When the results come in, I'll rank them against these answers. The heaviest effects count as acceptable if they fit the RTX 3060 budget. Then I'll send you the best before/after pictures from each experiment, in plain language.
+
+ASSIST 2026-10-17T21:16:19.922Z That's a repeat of the capture agent's earlier report, which I've already acted on; nothing new in it. The editor errors in the `gfx-*` scratch checkouts are expected: those copies have no compile database, so the editor can't resolve the engine's headers. They are not build failures.
+
+The 22 experiments are still running, and the water agent is still redoing its work. I'll report when the ranked results arrive.
+
+ASSIST 2026-10-17T21:24:13.346Z Both notices are interim, not results. The capture agent's notice repeats work that is already finished and acted on. The water agent paused while waiting on its own background capture run, so its real report is still to come. The editor errors in the `gfx-*` scratch copies are the same missing-compile-database noise as before, not build failures.
+
+Still running: the 22 experiments and the water redo. I'll check every result on disk before showing you anything.
+

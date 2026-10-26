@@ -1,0 +1,3 @@
+﻿start 02:36:06 test=tests/rendering/captures/video/look_probe_mistlead_cloud_shadows.test.sqf game=D:\Arma_CWA_worktrees\look-director\arma_CWR\dist\look-director-rwdi override= junction=RemasterUD-mist-lead
+run exit=0 frames=150 minutes=1.9 out=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\mist\lead\runs\cloud_fixed
+done 02:38:06

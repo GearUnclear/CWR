@@ -1,0 +1,7 @@
+    vec4 litSky;          // 68: x lit-cloud strength, y sky-matched shadows on, z the dome's turn (u), w sky-through
+    vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
+    vec4 litPlanned[4];   // 70-73: allocated to features still to land (night, combat, materials; 70 free)
+    vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
+    vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
+    vec4 litPlanned2;     // 76: planned canopy heightfield (hfrt; padding until it lands)
+    vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw

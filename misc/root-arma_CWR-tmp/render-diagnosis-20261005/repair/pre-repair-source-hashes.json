@@ -1,0 +1,146 @@
+[
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\engine\\Poseidon\\Game\\Guerrilla\\AssailantSystem.cpp",
+    "Hash": "F67B228A65CE6E30CBC1493FD38B311C8365092D872869AD73450163BED0B27F"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\engine\\Poseidon\\Game\\Guerrilla\\AssailantSystem.hpp",
+    "Hash": "2A2D613A619F0A402EDD990DEE53E486DB0A85D29642A7BB15D9DA8F642C0EC7"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\engine\\Poseidon\\World\\WorldImpl.cpp",
+    "Hash": "27675F3AC47CBC6DB1C22ED7DB6906D669D93D5DFB0A431F114D19CCD4B09DFB"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\guerrilla-mode\\ARCHITECTURE.md",
+    "Hash": "2AF74FAB09A29F8279253C3E7145C1AA33D821B4E6B076365288EFBAF8B7C9C7"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\guerrilla-mode\\HUMAN-TESTS.md",
+    "Hash": "A935E5D5A6C9B71E686BA892EAB8415A9F96397D99BD8219FE735C40F63AB8CE"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\guerrilla-mode\\NAMING_ACCEPTANCE.md",
+    "Hash": "E26D65F69EC7A0E47DE8CC0C10251F570791013BD42A38D5CEE4BE321FD2986F"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_civilian.test.sqf",
+    "Hash": "626F36EAEEF39DAC1D76396CA9BB5F2B8CFCC090232AEBD7F5BFB47D20852725"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_covered.test.sqf",
+    "Hash": "812FC1E3779D46C610F54F753B68DE3CE64030D845A62C4AF4D02BCA5F8AFA97"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_occupier.test.sqf",
+    "Hash": "DC35E510D236050482360930CC749A2A7CBA848ED72277ECE5050D8CD3415030"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_resistance.test.sqf",
+    "Hash": "2EE5502880B4D716E7F9C2DF53C16D7725B5C855AB4DD9C4D92268DEE49E1FC5"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_retaliation.test.sqf",
+    "Hash": "1049EA5BCF06C3F9CED7EBF572E422EAAC05C37FD942092EBEE535255400101A"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_rogue.test.sqf",
+    "Hash": "EA452F69470925F36EE75AF8312649B8C1E175E986140DFFEC961752E4C115B8"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailants.test.sqf",
+    "Hash": "FC7408146109803A9FC0DB92C73B0CC200A7FE61BCEDFE816E69C24FFDA6D78E"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_legend_save.seq\\01_save.test.toml",
+    "Hash": "982108FE61D58FCDBFDED22909902544C887FD9679A53335866DBCB810435477"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_legend_save.seq\\02_reload.test.toml",
+    "Hash": "982108FE61D58FCDBFDED22909902544C887FD9679A53335866DBCB810435477"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_legends_save_reload.seq\\01_mutate_save.test.toml",
+    "Hash": "C2D8F89229571D235CEF8CF8F305CA9BC9BCB20680F4E188ADDC8ED6903DF612"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_legends_save_reload.seq\\02_reload.test.toml",
+    "Hash": "C2D8F89229571D235CEF8CF8F305CA9BC9BCB20680F4E188ADDC8ED6903DF612"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\roadmap\\roadmap.yaml",
+    "Hash": "ACE9C0A113644EE367F5C94F25CE575D0A595987C60E30A766AFEF483DB67879"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\ChatGPT Image Oct 5, 2026, 09_49_52 PM.png",
+    "Hash": "B7B310AC938BC38F8709E3266599229B3E2457D804D1A73E6B9CAEB131B530A8"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\guerrilla-mode\\acceptance\\2026-10-05-campaign.md",
+    "Hash": "D56A813ED907978548B126A85B0CD75F17EA8B315CF2109C51C873EFDEFC07B5"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\fixtures\\assailants\\New-LegacyAssailantSave.ps1",
+    "Hash": "EEE98A141F5723F13FBFBDE691C852546C77BF167DE44F72DAF0B1F7DA148ACC"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_death_pool.test.sqf",
+    "Hash": "BA80842A18F1E9C877A5530D33835C37A45E1117A1F0AD3097E5BEE61DEC3BDA"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_death_pool.test.toml",
+    "Hash": "AAC0D2078DD355D7227D54EC1F27D4595EA97F5F926B561FD4C92D58FF6A4325"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_response.test.sqf",
+    "Hash": "A5919BB73B8185A112D934FF6D4A0FBDE14FA9589A567E16AA43FF437C539978"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_response.test.toml",
+    "Hash": "21397311E02EC37D2920B81A3C42CB835FFE2FA618A8F0918F3CDC9F934E3F44"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_retaliation_vehicle.test.sqf",
+    "Hash": "912594F5916B4110AA971337CAB68036ADD29887414D581549AC5C706C62EDF9"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_fire_retaliation_vehicle.test.toml",
+    "Hash": "21397311E02EC37D2920B81A3C42CB835FFE2FA618A8F0918F3CDC9F934E3F44"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_lobo_fire_occupier.test.sqf",
+    "Hash": "59E6E406AA4C340BF3387D7A152908D221E025FD692BED246DA8149D9F6FCDF1"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_lobo_fire_occupier.test.toml",
+    "Hash": "DCCC544FE150DBC2FB4AC24712B916ADF389052AF24FD1883B60273B8B4F25C1"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_lobo_fire_resistance.test.sqf",
+    "Hash": "340FF9A7825244C74C67C1161158F1421962315084BA6245826C5B753912F0D2"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_lobo_fire_resistance.test.toml",
+    "Hash": "51403F08E1505BCF0F39D6BD7D987810ADA1FCE3C9622EE8318650E81B74C8C9"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_save_reload.seq.toml",
+    "Hash": "8ECD991A413D7A17CD9912373D64A7F60E6720EE0FEE7F11C26061286FAD6183"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_save_reload.seq\\01_save.test.sqf",
+    "Hash": "AAE62AC499DF5DB61DBBA8E8214C5C0FB738B2352B8E3677D33A1C5415834EDA"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_save_reload.seq\\01_save.test.toml",
+    "Hash": "4E300710154E54EFB4D551ACDA8B1B1E407ADE6D97E9A57069DF110973104D7C"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_save_reload.seq\\02_reload.test.sqf",
+    "Hash": "A0C52BA447F5400F028B164CB318F9B9AB6AA6244974DC86C37DD1780D0331CC"
+  },
+  {
+    "Path": "D:\\Arma_CWA\\arma_CWR\\tests\\integration\\scripting\\guerrilla_assailant_save_reload.seq\\02_reload.test.toml",
+    "Hash": "4E300710154E54EFB4D551ACDA8B1B1E407ADE6D97E9A57069DF110973104D7C"
+  }
+]

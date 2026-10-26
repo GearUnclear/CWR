@@ -1,0 +1,17 @@
+1 split1 vanilla   scale 0.6667 off (   0,   0)  bias RGB +0.00 +0.00 +0.00  median|d| 0.00  px>16:  0.00%
+1 split1 ud        scale 0.6667 off (   0,   0)  bias RGB +0.00 +0.00 +0.00  median|d| 0.00  px>16:  0.00%
+1 split2 vanilla   scale 0.9412 off ( 267, 188)  bias RGB +0.01 +0.01 +0.01  median|d| 0.00  px>16:  0.44%
+1 split2 ud        scale 0.9412 off ( 267, 188)  bias RGB -0.00 -0.00 -0.00  median|d| 0.00  px>16:  0.03%
+1 split3 vanilla   scale 0.6667 off (   0,   0)  bias RGB +0.00 +0.00 +0.00  median|d| 0.00  px>16:  0.00%
+1 split3 ud        scale 0.6667 off (   0,   0)  bias RGB +0.00 +0.00 +0.00  median|d| 0.00  px>16:  0.00%
+2a footage         scale 0.8000 off (  38,  32)  bias RGB -0.00 -0.00 +0.00  median|d| 0.00  px>16:  0.03%
+2b footage         scale 0.6667 off (   0,   0)  bias RGB +0.00 +0.00 +0.00  median|d| 0.00  px>16:  0.00%
+2c vanilla         scale 0.6253 off (  94, -22)  bias RGB +0.09 +0.11 +0.15  median|d| 1.00  px>16:  1.17%
+2c ud              scale 0.6191 off (  89, -25)  bias RGB +0.22 +0.18 +0.10  median|d| 1.00  px>16:  9.94%
+3 v1               scale 0.7619 off (  91,  31)  bias RGB +0.09 +0.09 +0.09  median|d| 1.00  px>16:  0.76%
+3 v2               scale 0.7901 off ( 237,   0)  bias RGB +0.08 +0.08 +0.06  median|d| 0.00  px>16:  0.51%
+3 v3               scale 0.6667 off (   0,   0)  bias RGB +0.00 +0.00 +0.00  median|d| 0.00  px>16:  0.00%
+4 v2               scale 0.6865 off (  46, -23)  bias RGB -0.03 -0.01 +0.00  median|d| 2.00  px>16:  1.14%
+4 v1               scale 0.7363 off ( 156,  29)  bias RGB -0.07 -0.06 -0.05  median|d| 1.00  px>16:  0.53%
+4 v3 vanilla       scale 0.7236 off ( -71,  21)  bias RGB +0.02 +0.02 +0.02  median|d| 0.00  px>16:  0.28%
+4 v3 ud            scale 0.7272 off ( -66,  23)  bias RGB +0.00 +0.01 +0.04  median|d| 1.00  px>16:  0.76%

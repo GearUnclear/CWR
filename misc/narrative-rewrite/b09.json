@@ -1,0 +1,10 @@
+{
+  "id": "b09",
+  "bank": "kBio0Hostile",
+  "variant": 2,
+  "text": "While posted near {Place}, military engineer {Name} approved an unsafe bridge repair. The bridge collapsed, killing two comrades. Since then, the engineer has personally checked every repair before allowing soldiers to cross.",
+  "word_count": 32,
+  "self_review": "A military engineer approved a fatal bridge repair and subsequently began checking every repair personally.",
+  "source_pattern": "Plausible invention; the supplied research does not document this accident or engineering habit.",
+  "fictional_changes": "The military career, fatal repair decision, and checking habit are fictional."
+}

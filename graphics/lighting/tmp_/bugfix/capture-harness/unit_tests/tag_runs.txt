@@ -1,0 +1,16 @@
+﻿
+[remaster] exit=0 :: All tests passed (244 assertions in 16 test cases)
+[graphics] exit=1 :: test cases:  352 |  351 passed | 1 failed assertions: 8422 | 8421 passed | 1 failed
+[gpu] exit=0 :: All tests passed (29 assertions in 3 test cases)
+[GL33] exit=0 :: All tests passed (554 assertions in 104 test cases)
+[DebugGroup] exit=0 :: All tests passed (67 assertions in 6 test cases)
+[ShutdownOrder] exit=0 :: All tests passed (36 assertions in 8 test cases)
+[UBORestoreGuard] exit=0 :: All tests passed (3 assertions in 1 test case)
+[StateOwnership] exit=0 :: All tests passed (40 assertions in 4 test cases)
+[StateCacheAudit] exit=0 :: All tests passed (48 assertions in 5 test cases)
+[BufferUsageAudit] exit=0 :: All tests passed (40 assertions in 4 test cases)
+[IboBindAudit] exit=0 :: All tests passed (31 assertions in 4 test cases)
+[Conventions] exit=0 :: All tests passed (25 assertions in 7 test cases)
+[tri] exit=0 :: All tests passed (216 assertions in 59 test cases)
+[SceneSettle] exit=0 :: All tests passed (24 assertions in 4 test cases)
+[triSetLighting] exit=0 :: All tests passed (37 assertions in 3 test cases)

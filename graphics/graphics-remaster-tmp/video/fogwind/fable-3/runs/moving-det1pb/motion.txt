@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\fable-3\runs\moving-det1pb\moving-det1pb.mkv  frames 120  band 0.079  sky 0.049
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       153.6 [-1.12, -0.06]  0.066  0.190  0.027 -0.280 [-8, -13]   0.027 [-8, -13]  0.005  0.861 -0.446    nan    nan -0.178             -
+   valley    130.3 [-0.92, 0.01]  0.074  0.121  0.040 -0.368 [3, -16]   0.040 [3, -16]  0.005  0.690 -0.493    nan    nan -0.233             -
+   farhill   118.0 [-0.86, 0.07]  0.054  0.108  0.021 -0.309 [-13, -7]   0.021 [-13, -7]  0.002  0.711 -0.393    nan    nan -0.177             -
+   haze      181.1 [-0.75, 0.02]  0.038  0.105  0.033 -0.228 [16, -1]   0.033 [16, -1]  0.004  0.604 -0.290    nan    nan -0.132             -
+   slope      55.2 [-0.92, 0.08]  0.065  0.141  0.020 -0.381 [-14, 15]   0.020 [-14, 15]  0.003  1.006 -0.385    nan    nan -0.238             -

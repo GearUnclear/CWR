@@ -1,0 +1,166 @@
+{
+  "forest_edge_golden": {
+    "sharpness": {
+      "crown": {
+        "remastered": 0.0991,
+        "taa15": 0.08415,
+        "taa10": 0.07597,
+        "noaa10": 0.12192,
+        "taa15msaa4": 0.08219
+      },
+      "birch": {
+        "remastered": 0.08649,
+        "taa15": 0.07414,
+        "taa10": 0.0668,
+        "noaa10": 0.10131,
+        "taa15msaa4": 0.07275
+      },
+      "shadow": {
+        "remastered": 0.0333,
+        "taa15": 0.02737,
+        "taa10": 0.02395,
+        "noaa10": 0.03302,
+        "taa15msaa4": 0.02722
+      }
+    },
+    "pan": {
+      "msaa": {
+        "mean_reg_residual": 0.00787,
+        "sharpness_centre": 0.05764
+      },
+      "taa": {
+        "mean_reg_residual": 0.00468,
+        "sharpness_centre": 0.04809
+      }
+    },
+    "strafe": {
+      "msaa": {
+        "mean_reg_residual": 0.02084,
+        "sharpness_centre": 0.05809
+      },
+      "taa": {
+        "mean_reg_residual": 0.01624,
+        "sharpness_centre": 0.04757
+      }
+    },
+    "static_taa_flicker_mean_abs": 0.00082
+  },
+  "sinai_lowsun_fp": {
+    "sharpness": {
+      "net": {
+        "remastered": 0.05316,
+        "taa15": 0.04269,
+        "taa10": 0.03897,
+        "noaa10": 0.0615,
+        "taa15msaa4": 0.0425
+      },
+      "hmmwv": {
+        "remastered": 0.02071,
+        "taa15": 0.0172,
+        "taa10": 0.01647,
+        "noaa10": 0.02289,
+        "taa15msaa4": 0.01708
+      },
+      "shadow": {
+        "remastered": 0.03078,
+        "taa15": 0.02572,
+        "taa10": 0.02363,
+        "noaa10": 0.03303,
+        "taa15msaa4": 0.02567
+      }
+    },
+    "pan": {
+      "msaa": {
+        "mean_reg_residual": 0.00419,
+        "sharpness_centre": 0.03177
+      },
+      "taa": {
+        "mean_reg_residual": 0.0028,
+        "sharpness_centre": 0.02561
+      }
+    },
+    "strafe": {
+      "msaa": {
+        "mean_reg_residual": 0.0149,
+        "sharpness_centre": 0.032
+      },
+      "taa": {
+        "mean_reg_residual": 0.01264,
+        "sharpness_centre": 0.02553
+      }
+    },
+    "static_taa_flicker_mean_abs": 0.00045
+  },
+  "town_night": {
+    "sharpness": {
+      "crown": {
+        "remastered": 0.12841,
+        "taa15": 0.11617,
+        "taa10": 0.10788,
+        "noaa10": 0.15343,
+        "taa15msaa4": 0.11304
+      },
+      "house": {
+        "remastered": 0.10397,
+        "taa15": 0.09693,
+        "taa10": 0.09297,
+        "noaa10": 0.11584,
+        "taa15msaa4": 0.09606
+      },
+      "street": {
+        "remastered": 0.04626,
+        "taa15": 0.03664,
+        "taa10": 0.0334,
+        "noaa10": 0.05099,
+        "taa15msaa4": 0.03577
+      }
+    },
+    "pan": {
+      "msaa": {
+        "mean_reg_residual": 0.02897,
+        "sharpness_centre": 0.07156
+      },
+      "taa": {
+        "mean_reg_residual": 0.02318,
+        "sharpness_centre": 0.06185
+      }
+    },
+    "static_taa_flicker_mean_abs": 0.00924
+  },
+  "overcast_broken": {
+    "sharpness": {
+      "treeline": {
+        "remastered": 0.03565,
+        "taa15": 0.02877,
+        "taa10": 0.0263,
+        "noaa10": 0.04252,
+        "taa15msaa4": 0.02867
+      },
+      "jeep": {
+        "remastered": 0.03366,
+        "taa15": 0.02805,
+        "taa10": 0.02577,
+        "noaa10": 0.03774,
+        "taa15msaa4": 0.02794
+      },
+      "ridge": {
+        "remastered": 0.03527,
+        "taa15": 0.03003,
+        "taa10": 0.02792,
+        "noaa10": 0.0396,
+        "taa15msaa4": 0.02951
+      }
+    },
+    "pan": {
+      "msaa": {
+        "mean_reg_residual": 0.00281,
+        "sharpness_centre": 0.02032
+      },
+      "taa": {
+        "mean_reg_residual": 0.00237,
+        "sharpness_centre": 0.01731
+      }
+    },
+    "static_taa_flicker_mean_abs": 0.00085
+  }
+}

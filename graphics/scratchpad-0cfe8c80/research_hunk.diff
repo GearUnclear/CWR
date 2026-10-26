@@ -1,0 +1,51 @@
+1304a1305,1319
+> // RESEARCH ONLY (bush-instancing evidence build; not part of fix.patch).
+> // UD_RESEARCH_INST bit 1: the perf track's per-object light gate (an object may
+> // be instanced when the light list its own draw selects is empty, instead of
+> // only when the scene has no light slot), so instancing runs on Abel.
+> // Bit 2: the pre-fix grouping (objects that rewrite their own vertices batch).
+> static int ResearchInstMode()
+> {
+>     static const int mode = []
+>     {
+>         const char* v = std::getenv("UD_RESEARCH_INST");
+>         return v ? std::atoi(v) : 0;
+>     }();
+>     return mode;
+> }
+> 
+1553a1569,1585
+>         const int researchMode = ResearchInstMode();
+>         auto researchUnlit = [&](SortObject* so) -> bool
+>         {
+>             if (noLocalLights)
+>                 return true;
+>             if (!(researchMode & 1))
+>                 return false;
+>             LightList work;
+>             const LightList& l = SelectLights(so->object->Transform(), so->object, so->drawLOD, work);
+>             return l.Size() == 0;
+>         };
+>         static bool researchLogged = false;
+>         if (!researchLogged)
+>         {
+>             researchLogged = true;
+>             LOG_INFO(Graphics, "RESEARCH bush-instancing: UD_RESEARCH_INST={} lights={}", researchMode, NLights());
+>         }
+1577c1609,1611
+<             const InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape);
+---
+>             InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape);
+>             if (researchMode & 2)
+>                 head.ownVertices = false;
+1579c1613
+<             const bool headBatchable = noLocalLights && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
+---
+>             const bool headBatchable = researchUnlit(oi) && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
+1591c1625,1628
+<                         if (!InstancedRun::CanJoin(head, InstancedRunEntry(oj, shape, oi->drawLOD, sShape)))
+---
+>                         InstancedRun::RunEntry member = InstancedRunEntry(oj, shape, oi->drawLOD, sShape);
+>                         if (researchMode & 2)
+>                             member.ownVertices = false;
+>                         if (!InstancedRun::CanJoin(head, member) || !researchUnlit(oj))

@@ -1,0 +1,6 @@
+{
+ "frames": {
+  "opening": 1056
+ },
+ "note": "owner_vo.py fit: the picture follows the owner's voice; frames = 60 fps clip lengths (a longer reshoot), transitions = a scene's out-transition [kind, seconds], intro_extra = seconds the intro holds longer, closing_s = the closing card"
+}

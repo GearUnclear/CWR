@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.25)
+project(DependencyProbe LANGUAGES C CXX)
+foreach(lang C CXX)
+set(CMAKE_DEPFILE_FLAGS_${lang} "/showIncludes")
+set(CMAKE_${lang}_DEPFILE_FORMAT msvc)
+endforeach()
+add_library(probe OBJECT probe.cpp probe.c)

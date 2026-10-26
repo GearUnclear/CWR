@@ -1,0 +1,2 @@
+    // air pass's march, blur, mean and apply, and the photoreal camera's meter
+    CHECK(post == 20);

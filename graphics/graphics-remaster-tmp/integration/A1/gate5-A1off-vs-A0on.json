@@ -1,0 +1,562 @@
+[
+  {
+    "view": "airbeams_pinewood_morn",
+    "a": "20261018-012542-ab-A1\\airbeams_pinewood_morn__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\airbeams_pinewood_morn__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 16,
+        "over2": 286353,
+        "over8": 27000,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 4,
+        "over2": 805,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 16,
+        "over2": 287158,
+        "over8": 27000,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "airhaze_valley_0515",
+    "a": "20261018-012542-ab-A1\\airhaze_valley_0515__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\airhaze_valley_0515__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 17,
+        "over2": 279482,
+        "over8": 26973,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 27,
+        "over2": 343,
+        "over8": 316,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 66,
+        "over2": 109,
+        "over8": 61,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 66,
+        "over2": 279934,
+        "over8": 27350,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "atmosphere_coastline_sunset",
+    "a": "20261018-012542-ab-A1\\atmosphere_coastline_sunset__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\atmosphere_coastline_sunset__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 13,
+        "over2": 166719,
+        "over8": 15129,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 1,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 13,
+        "over2": 166719,
+        "over8": 15129,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "clouds_coast_oc_up",
+    "a": "20261018-012542-ab-A1\\clouds_coast_oc_up__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\clouds_coast_oc_up__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 87,
+        "over2": 666183,
+        "over8": 485779,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 69,
+        "over2": 198796,
+        "over8": 150923,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 83,
+        "over2": 131357,
+        "over8": 62353,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 87,
+        "over2": 996336,
+        "over8": 699055,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_ffh",
+    "a": "20261018-012542-ab-A1\\combat_ffh__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\combat_ffh__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 111,
+        "over2": 210654,
+        "over8": 56350,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 123,
+        "over2": 21412,
+        "over8": 18172,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 57,
+        "over2": 433,
+        "over8": 300,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 123,
+        "over2": 232499,
+        "over8": 74822,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "hfrt_hill_1730",
+    "a": "20261018-012542-ab-A1\\hfrt_hill_1730__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\hfrt_hill_1730__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 9,
+        "over2": 101836,
+        "over8": 215,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 9,
+        "over2": 101836,
+        "over8": 215,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "lighttiles_town_night",
+    "a": "20261018-012542-ab-A1\\lighttiles_town_night__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\lighttiles_town_night__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 200,
+        "over2": 258927,
+        "over8": 213029,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 216,
+        "over2": 74576,
+        "over8": 72979,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 214,
+        "over2": 55664,
+        "over8": 33920,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 216,
+        "over2": 389167,
+        "over8": 319928,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "materials_town_night_rain",
+    "a": "20261018-012542-ab-A1\\materials_town_night_rain__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\materials_town_night_rain__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 203,
+        "over2": 353757,
+        "over8": 91237,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 219,
+        "over2": 83509,
+        "over8": 78697,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 217,
+        "over2": 53624,
+        "over8": 37521,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 219,
+        "over2": 490890,
+        "over8": 207455,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "night_road_flat_drive_moonless",
+    "a": "20261018-012542-ab-A1\\night_road_flat_drive_moonless__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\night_road_flat_drive_moonless__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 7,
+        "over2": 16976,
+        "over8": 0,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 72,
+        "over2": 16,
+        "over8": 15,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 72,
+        "over2": 16992,
+        "over8": 15,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "perf_sunrise_ridge",
+    "a": "20261018-012542-ab-A1\\perf_sunrise_ridge__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\perf_sunrise_ridge__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 15,
+        "over2": 237309,
+        "over8": 14207,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 15,
+        "over2": 237309,
+        "over8": 14207,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "shade_lowsun_fp",
+    "a": "20261018-012542-ab-A1\\shade_lowsun_fp__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\shade_lowsun_fp__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 11,
+        "over2": 161014,
+        "over8": 1948,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 38,
+        "over2": 21,
+        "over8": 9,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 38,
+        "over2": 161035,
+        "over8": 1957,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "shadows_woods_pine2_evening",
+    "a": "20261018-012542-ab-A1\\shadows_woods_pine2_evening__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\shadows_woods_pine2_evening__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 11,
+        "over2": 42463,
+        "over8": 694,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 11,
+        "over2": 42463,
+        "over8": 694,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "ssr_bay_offshore",
+    "a": "20261018-012542-ab-A1\\ssr_bay_offshore__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\ssr_bay_offshore__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 14,
+        "over2": 224156,
+        "over8": 14202,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 188,
+        "over2": 8582,
+        "over8": 6507,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 21,
+        "over2": 169401,
+        "over8": 1753,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 188,
+        "over2": 402139,
+        "over8": 22462,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "temporal_forest_edge_golden",
+    "a": "20261018-012542-ab-A1\\temporal_forest_edge_golden__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\temporal_forest_edge_golden__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 12,
+        "over2": 179054,
+        "over8": 3412,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 3,
+        "over2": 321,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 12,
+        "over2": 179375,
+        "over8": 3412,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "texsharp_forest_edge",
+    "a": "20261018-012542-ab-A1\\texsharp_forest_edge__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\texsharp_forest_edge__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 14,
+        "over2": 230719,
+        "over8": 22566,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 14,
+        "over2": 230719,
+        "over8": 22566,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "water_coastline_sunset",
+    "a": "20261018-012542-ab-A1\\water_coastline_sunset__off.png",
+    "b": "20261018-012542-ab-A0build-fixedclock\\water_coastline_sunset__on.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 9,
+        "over2": 125289,
+        "over8": 927,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 26,
+        "over2": 39,
+        "over8": 31,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 3,
+        "over2": 33,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 26,
+        "over2": 125361,
+        "over8": 958,
+        "pixels": 2073600
+      }
+    ]
+  }
+]

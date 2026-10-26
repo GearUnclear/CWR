@@ -1,0 +1,133 @@
+graphics: temporal anti-aliasing steadies foliage and cleans cheap soft effects
+
+What the player sees: alpha-tested leaves and wire stop crawling when the
+camera moves, and sub-pixel wire stays whole: the M113, Jeep and Zelda
+antennas, tent ropes and power lines that 4x MSAA alone draws as dashes
+are continuous lines. In a yaw pan over the forest edge the crowns change
+22.6% less from frame to frame. The ambient occlusion and sun shaft sample
+patterns turn every frame and the history averages them. Colour and
+brightness do not change (mean colour within 0.3 levels and the 5th and
+95th brightness percentiles within 0.4 on the forest and lowsun_fp views,
+within 1 level at town_night, whose fire differs shot to shot); the frame
+is 6.7% less sharp on the
+forest hero view by the mean neighbour difference, sharper on lowsun_fp
+(+2.4%) and on Sinai (+1.0%), and 9.5 to 10.7% less sharp during a pan.
+A Jeep crossing at 25 m leaves no trail at 0.12 or 0.5 m per step; fire
+and smoke keep their flicker and brightness.
+
+How it works: Graphics/Remaster/TemporalAA (pure) holds the math. The
+world is drawn shifted by a Halton(2, 3) sub-pixel offset over 16 frames:
+ApplyTaaJitter fixes the frame's offset and camera at its first world pass
+(after the frame gates) and hands the offset to the three remastered
+vertex shaders through vpScale.zw, guarded so a zero offset leaves every
+position exactly as computed; UploadVSScreenConstants keeps it for the
+world's own screen-space draws (smoke, rain), and EndWorldScene and the
+next InitDraw take it off, so the HUD, dialogs, portraits, 3D previews and
+the shadow-map depth pass are never jittered (TaaPassJitterNdc is the one
+rule). A -0.5 texture LOD bias on the material samplers rides with it. Two
+post stages land: Temporal (psPostTaa) rebuilds the frame at the pixel
+centre (Gaussian exp(-4 d^2) over the 3x3), reprojects from the nearest
+depth of the 3x3 with the camera motion (rows built in double precision,
+BuildTaaReprojection), reads the half-float history with a 9-tap
+Catmull-Rom, drops it where its stored view depth misses the reprojected
+one by 3% + 0.15 m or it falls outside the 3D viewport, clips it into this
+frame's YCoCg box and blends at alpha 0.1 with luma weights; Sharpen
+(psPostTaaSharpen) writes the result back into every sample of the frame
+target with a bounded unsharp mask (no halos) and a +-1 LSB dither. When
+they run the composite draws into the TAA input instead of the frame
+target. The particle mask: Engine::BeginTranslucentObjects, called once by
+Scene::DrawObjectsAndShadowsPass2 between the opaque world and the
+back-to-front translucent objects, copies the frame target; where smoke,
+fire, muzzle flashes, glass, the cockpit pass, rain or flares changed a
+pixel by more than 2 levels the resolve takes up to 0.8 of this frame
+(all of it above 24 levels) without luma weights. History is dropped by
+any frame without a resolve (the chain runs on the engine frame counter),
+a camera cut (over 50 m or 60 degrees in a frame) and a new target size.
+The post GL helpers moved to EngineGL33_PostPass.hpp for the stage files.
+
+The switch and its gates: taa (A1 registry, now landed, GPU section
+"taa"), with the sub-knobs taaSharpen 0.5, taaMipBias -0.5 and taaAlpha
+0.1 under it. The gate runs it on a drawn world with the post effects on,
+not in a vehicle interior, under optics or night vision; the stages also
+skip a frame that turned out to clear its depth or draw an overlay.
+taa=0 draws the frame of before: no jitter, no LOD bias, the same post
+plan and the same AO and shaft patterns.
+
+Kept, rewritten and dropped from the prototype (temporal track): kept the
+Halton jitter in vpScale.zw, the resolve (3x3 reconstruction, nearest
+depth, double-precision camera reprojection, Catmull-Rom history, depth
+rejection, YCoCg clip, alpha 0.1, motion-raised alpha, luma weights), the
+bounded sharpen 0.5 and the mip bias -0.5. Rewritten: the stages as
+PostTemporal and PostSharpen in EngineGL33_PostTemporal.cpp; the jitter in
+the remastered vertex shaders only, guarded; the view depth in the history
+alpha instead of two R32F targets; the reconstruction kernel exp(-4 d^2)
+instead of exp(-2.29 d^2) (a sweep: 15.5% against 5.0% less sharp on the
+hero view, wires still continuous); the per-frame AO and shaft pattern
+instead of the stochastic 4-tap AO without blur; the particle mask, which
+the plan listed as phase 2. Dropped: taaStochAlpha, taaGamma, taaJitter,
+taaDepthReject, the stochastic AO knobs (the stochastic PCSS is B1's), the
+TAA debug view. Not built: the Taa LitConstants slot and the raw shadow
+sampler on unit 6 (no A5 shader reads them; B1 lands both), per-object
+motion vectors and a resolve before the tone curve (the remastered shaders
+tonemap per fragment and the frame target is RGBA8 display space).
+
+Measured cost (RTX 4060 Ti, 1920x1080, render scale 1.0, 4x MSAA, one
+game, 3 interleaved rounds, not a quiet-machine run): the taa section
+0.16 to 0.22 ms and sharpen 0.05 to 0.10 ms; the GPU frame median rises by
+0.71 to 0.81 ms (forest_edge_golden 5.55 to 6.30, lowsun_fp 5.39 to 6.20,
+town_night 6.21 to 6.92), most of it the texture LOD bias in the world
+pass: with taaMipBias=0 the rise is 0.08 to 0.34 ms and the hero view 11.2%
+less sharp. The opaque copy is within the round-to-round noise.
+
+Tests: new test_temporal_aa.cpp [TemporalAA] (the Halton sequence and its
+range, the jitter of a pass, the reprojection against hand values and
+against camera pairs including one 12 km from the origin, cuts, the history
+chain, the jitter only in the remastered vertex shaders and guarded, the
+resolve and sharpen contracts, source audits that the jitter and LOD bias
+never reach the HUD and that the opaque copy sits between the opaque and
+the translucent objects); test_post_stages.cpp (the TAA stages run
+together, only on a jittered frame with world depth and no overlay);
+test_feature_switches.cpp (taa landed, its sub-knobs, the post-effects
+gate); test_remaster_lighting.cpp (eleven post programs compile). Unit
+gate tags plus [PostStages],[TemporalAA] 478/478 (12 new cases); [Graphics]
+has the known DDS fixture failure only, the full suite the 6 known
+localisation failures only. Twelve mutations turn their cases red (the
+jitter cleared after EndWorldScene's early return, the hook after the
+alpha sort, the jitter before the gates, the copy creating targets
+mid-world, a pass jitter ignoring the world pass, no camera translation,
+no frame check in the history chain, the TAA stages on an interior frame,
+no post-effects gate, taa not landed, the 2.29 kernel, an unguarded add).
+
+Merged onto A4 (c584185; the lane was built on ced77ae) by a three-way
+apply: the registry keeps A4's two landed perf rows and A5's taa row, and
+A4's case "the frame-cost switches have landed" now also expects taa
+(step A5, GPU section taa) and landed=3/26. On the merged tree the gate
+tags plus A4's and A5's new tags pass 496/496, and smoke_abel passes 1/1
+(tmp/captures/20261018-064944: KHR_debug ids 131154, 131169 and 131218
+only; the feature line shows landed=3/26 with the pass1 split and the taa
+and sharpen sections).
+
+In game (tmp/integration/A5/lane of the graphics-remaster worktree,
+gitignored): 20261018-060047-before (the base build), 20261018-063134-final-new
+(off and on at forest_edge_golden, lowsun_fp, town_night; off against the
+base build: 0 pixels over 2 levels at the hero view, the posed soldier's
+head elsewhere), 20261018-062248-v2-motion (strafe with the crossing Jeep,
+pan, Fire), 20261018-061749-sweep (kernel and sharpen), 20261018-062609-cost,
+20261018-063036-final-sinai, 20261018-063036-final-smoke (smoke_abel 1/1,
+KHR_debug ids 131169, 131154 and 131218 only).
+
+Known risks: during camera motion the frame is about 10% less sharp than
+without TAA (the look check's limit; taaSharpen 0.6 to 0.75 would buy it
+back, 0.75 gave +1.6% on the still hero view); the LOD bias costs 0.4 to
+0.7 ms of world time on these views (more than the 0.3 ms the plan
+estimated for TAA); moving soldiers and vehicles have camera motion only
+(no trail seen at 0.5 m per step, but rotors, first-person weapon sway and
+fast aircraft are untested); a still camera shows a frame-to-frame jitter
+residual of 0.0026 luma (0.0007 without TAA, under one level); glass edges
+and everything drawn after the opaque copy take most of their own frame,
+so they keep less anti-aliasing; vehicle interiors get no TAA and the
+first frame into an interior or optics goes out jittered and unresolved;
+no RTX 3060 was measured; the motion clips step the camera once per two
+rendered frames.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

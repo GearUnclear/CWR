@@ -1,0 +1,8 @@
+rt-orig-rtst: 140 frames (clip 10..150), camera |shift| mean 0.00 px/frame (x +0.00, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.308  0.805  0.619  0.624 |  -3.5 +18.0  +0.05  -0.31 | +13.2 -16.8  +0.02 | +0.05   0.015
+  valley   0.399  0.386  2.005  1.350 |  -0.6  -0.6  +0.30  +0.30 |  -1.0  -0.1  +0.34 | +0.01   0.003
+  farhill  0.208  0.417  0.595  0.854 | +22.1 -12.7  +0.05  -0.10 |  -1.2  +0.3  +0.07 | +0.05   0.010
+  haze     0.202  0.401  0.784  0.619 | +10.8 -14.4  +0.04  -0.29 |  +2.9 +16.2  +0.02 | +0.04   0.008
+  slope    0.142  0.072  0.630  0.792 |  -0.6  -0.4  +0.15  +0.14 |  -1.1  +0.2  +0.21 | +0.02   0.000
+  wrote amp_rt-orig-rtst.png, xt_rt-orig-rtst.png in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

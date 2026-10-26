@@ -1,0 +1,3 @@
+﻿start 04:40:07 test=tests/rendering/captures/video/look_probe_mist3_moving.test.sqf override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\5\shaders\c8h junction=RemasterUD-fog-5 game=D:\Arma_CWA_worktrees\look-director\arma_CWR\dist\look-director-rwdi
+run exit=0 frames=232 minutes=8
+done 04:49:09

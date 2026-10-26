@@ -1,0 +1,4 @@
+    // texsharp's two (B11), the sun shadows' three (B1, below), the sea's three
+    // (B5), the beams' contrast (B8, below), the night's lamp and headlight
+    // strengths (B3, test_night_lights.cpp) and the photoreal camera's
+    // (look lane "light", test_photo_camera.cpp).

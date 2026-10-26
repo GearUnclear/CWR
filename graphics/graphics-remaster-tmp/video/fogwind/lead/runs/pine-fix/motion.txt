@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\lead\runs\pine-fix\pine-fix.mkv  frames 105  band 0.105  sky 0.043
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay        45.6  [-0.0, 0.0]  0.066  0.088  0.023 -0.363 [9, -16]   0.023 [9, -16]  0.002  0.483 -0.327    nan    nan -0.247             -
+   valley     45.6 [-0.0, -0.0]  0.269  1.013  0.066 -0.600 [-9, 11]   0.066 [-9, 11]  0.067  2.362 -0.531    nan    nan -0.335             -
+   farhill    63.5  [0.01, 0.0]  0.198  2.001  0.044 -0.495  [-8, 5]   0.044  [-8, 5]  0.088  4.915 -0.497    nan    nan -0.278             -
+   haze       43.8   [0.0, 0.0]  0.053  0.416  0.062 -0.431  [15, 0]   0.062  [15, 0]  0.026  1.211 -0.490    nan    nan -0.160             -
+   slope      54.9 [0.01, 0.01]  0.209  1.689  0.040 -0.402 [-3, 10]   0.040 [-3, 10]  0.068  3.789 -0.462    nan    nan -0.251             -

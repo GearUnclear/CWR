@@ -1,0 +1,22 @@
+NARRATION INTERVIEW, shot by shot (started 2026-10-23)
+=====================================================
+
+Owner's direction: free-form; he speaks his own way; we work out together what he will say. Reuse the
+current lines where they are good; maybe the same 16 scenes with revised copy. The picture follows his voice
+(scenes may grow, shrink or swap). He says the brand "OOS-loo DOOR", two words.
+
+Format per shot: the current line, the questions asked, his answers verbatim, then the draft line we agree on.
+
+00 intro (title card over the blurred opening, 0:00 to 0:09)
+   current: Uslu dur is a total overhaul of Arma: Cold War Assault. This first video is about the light.
+   answers: on "the light": "graphics and rendering improvements".
+            On the opening line: "this sounds so ai how about you just propose a fresh script here".
+            "dont use the anti slop skill your inherent knowledge is better".
+            -> fresh script draft 1: 05_FRESH_SCRIPT_draft1.txt
+            On draft 1: "sans cringe ;)" -> draft 2: 06_FRESH_SCRIPT_draft2.txt
+   draft:
+
+01 opening (Malden 18:15, under occupation: cypress row, evening sun, a BMP and two sentries)
+   current: Malden, under occupation. The models are the originals. The light is new.
+   answers:
+   draft:

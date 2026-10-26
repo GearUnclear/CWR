@@ -1,0 +1,6 @@
+; debug action: teleport to the headquarters garage spot
+? not gmHqEstablished : hint "No headquarters yet - establish one first (action menu inside a town, or here at the Camp)."
+? not gmHqEstablished : exit
+aP setPos [(gmHqGaragePos select 0) + 3, (gmHqGaragePos select 1) + 3, 0]
+hint format ["DEBUG: at the HQ garage (%1). Vehicles within %2 m can be locked from the action menu.", gmHqZone, gmHqValue "garageRadius"]
+exit

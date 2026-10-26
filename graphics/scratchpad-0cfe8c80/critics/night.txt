@@ -1,0 +1,56 @@
+## track
+night
+## files_verified
+true
+## missing_or_false_claims
+[
+ "The recommended setting says bounce 0, but every v9 shot behind the BEST images (run10) was rendered with nightBounce=1 (run10 game_stdout.log line 177). The run_timing v8 lane also had bounce on. The visual impact is low because bounce is invisible, but the BEST images are not the recommended configuration.",
+ "NOTES says the jeep's pale rear 'is the same in Classic and shipped Remastered, so it is not introduced by the prototype'. That is false for the moonlit view. In road_flat_head the jeep-rear luminance is 43.1 in the prototype against 8.4 in Classic and 8.7 in Remastered (5x), and that rear face points away from both the moon and the headlights.",
+ "The v9 shader comment says dropping the per-light ambient fixed 'a jeep's own back as if it were floodlit'. The jeep crop measures 43.2 in v8 and 43.1 in v9, so it did not change.",
+ "Moon radiance is described as '0.05 x phase x height', but the NIGHT log reports 'up 1.00 key 0.0500' at 24, 36 and 69 deg elevation, so the height term has no effect.",
+ "Moon shadows and moon direction are not visible in the town. The v8 town_moonlow (24 deg) and town_night (69 deg) shots differ by a mean of 6.5/255. The two Classic shots, which differ only in smoke animation, differ by 6.6/255. The jeep moon shadow on the flat road is faint at best.",
+ "'Moonlit crowns silver' and 'silver-edged': in moon_sky the crowns are a flat, dim grey-green lit on the side facing away from the moon. They have no rim or silver edge.",
+ "'Warm lamp-lit facades' and lamp pools in town: the facades are lit evenly, including those far from any lamp (light leaks through walls, as the notes concede), and no ground pool under the lamps is visible."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+3
+## taste_violations
+[
+ "Mustard or khaki ground: the headlight pools turn the verges saturated yellow-olive in every road view. Verge RGB is about (100, 86, 61) against Classic's neutral (23, 23, 23). On the 14 deg hill road only these yellow verges are lit.",
+ "Flattened tree crowns: in town_lamps and town_night the birch crown becomes a near-black silhouette (crown luminance 48 against 105 in Classic, 7.3 percent pure-black pixels against 0.9) even though a lamp sits inside it. The leaf depth that Classic shows is lost.",
+ "Only darker in town: mean frame luminance halves (Classic 96 to 45, and 99 to 57). The facades are still lit flatly, lamp pools are not visible, and moving the moon from 69 to 24 deg changes nothing visible. The town's real gains are the stars and the fire-lit smoke.",
+ "Crushed shade: up to 7 percent of the town frame is pure black (luminance at or below 2), and the town ground sits at about half of Classic's brightness.",
+ "Light leak: in the moonlit flat-road view the jeep's rear face, which faces away from every light, is floodlit at 5x the Classic and Remastered brightness and is brighter than the moonlit road behind it."
+]
+## cost_ok
+true
+## score_0_to_10
+5
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\night\BEST_road_flat_drive_moonless.png
+## one_line
+A real, verified physical night rig. The moonless low-beam driving view is a large, player-visible win, but the town views are mostly just darker, with black tree crowns, mustard verges and a jeep light leak, and the RTX-style pieces (bounce, volumetrics, local shadows) failed or are missing.
+## critique
+Verification. Every cited image, override folder, prototype.patch (9 C++ files, 769 lines), the run_timing summary and the gfx-night-rwdi build (PoseidonGame.exe, 7:01 PM) exist. Each run's game_stdout.log shows 'shader override loaded' for the claimed ovr folder: run9 and run_timing use ovr_v8, run10 uses ovr_v9. No compile or link errors appear, and the triSetLighting night=1 knobs and NIGHT: lines are logged. The AFTER images genuinely differ from BEFORE: remastered against v9 mean absolute difference is 15 to 75/255 per view. Night vision is unchanged as claimed (1.7/255). No fabrication was found; the false claims are about interpretation (listed separately).
+
+The look. The moonless country road from the driver's eye is the strongest result and would be noticed at once. In Classic and Remastered the whole landscape at 23:00 is a bright grey, which is plainly wrong. The prototype shows a black field, a dense starfield and a warm low beam with a hot spot and a hard cut-off. Driving at night would feel like a different game. The moon_sky view is a modest gain: stars, and crowns readable against the sky instead of black on black.
+
+Problems:
+(1) The headlit verges turn saturated yellow-olive (RGB about 100/86/61), squarely in the owner's mustard/khaki rejection. Olive grass albedo under a warm 2700 K-leaning beam produces it.
+(2) The town views mostly halve the brightness. The facades stay evenly lit with no lamp pools, moon direction and shadows have no visible effect (moon at 24 deg against 69 deg differs no more than the smoke animation does), and the birch crown, which has a lamp inside it, becomes a black silhouette with 7 percent pure-black pixels. That fails both the 'only darker' and the 'flattened crowns' rules.
+(3) The jeep's rear is floodlit at 5x Classic in the moonlit view. The v9 'fix' did not change it (43.2 to 43.1), and the notes wrongly blame Classic.
+(4) The hill road, which is the common case on CWA islands, still lights only the yellow verges.
+
+RTX vision. This is physically motivated direct lighting: inverse-square lamps, a beam pattern, a moon directional light with a shadow map, and Purkinje. Every piece that would make it read as path traced failed or is absent. Lamp bounce had no visible effect, the volumetric haze made a brown wash, local lights have no shadows and leak through walls, and the fire lights only its own smoke, not the ground or the buildings. Score 3.
+
+Cost. In run10 single samples v9 adds 0.8 to 3.3 ms against Remastered at a 1.38 MP internal resolution with 4x MSAA. That is roughly 1.2 to 5 ms at 1080p if fragment bound, which fits a 3060 at 60 fps given 2 to 10 ms frames. The forward 8-light loop on every fragment is wasteful, though, and clustered culling is required. The measurements are noisy on a shared GPU.
+
+Worth building: yes for the moon-key, inverse-square and low-beam foundation plus stars, because Classic's grey nights are simply wrong. It is not ready as is. Production needs a neutral or cooler beam on vegetation (or a lower nightLampWarm), a fix for leaf transmission so crowns near lamps glow, a trace of the jeep-rear leak, local-light shadows and a hill-tolerant beam aim. Score 5.
+## artefacts_seen
+Jeep rear lit 5x brighter than Classic while facing away from all lights (light leak); near-black flattened tree crown in town views with a lamp inside it; evenly lit facades with no lamp pools (light through walls, inherited); yellow-olive verge saturation under the headlights; hard beam cut-off placed over the road on the 14 deg hill; inherited lamp glare stars. No noise, swimming, NaN or banding seen in stills. The rejected haze variant shows a brown sky wash, confirmed in run7.
+## prototype_actually_loaded
+Yes. run10/tri/night_v9/game_stdout.log line 26 reads 'GL33: shader override loaded, D:\Arma_CWA_worktrees\lighting\tmp\research\night\ovr_v9\psRemasterCommon.glsl (28062 bytes)'. The triSetLighting night=1, nightP1=0.3, nightP2=0.85, nightMoonSat=0.5, nightSpot=1.5, nightCamLights=1, nightLampWarm=0.7 lines follow, plus NIGHT: moon key and light-list lines. nightBounce=1 was also set. Runs 4 to 9 and run_timing load ovr_v4 to ovr_v8 as claimed, with no shader errors.

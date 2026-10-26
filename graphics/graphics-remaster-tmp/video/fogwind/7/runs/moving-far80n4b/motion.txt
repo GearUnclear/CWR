@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\7\runs\moving-far80n4b\moving-far80n4b.mkv  frames 120  band 0.098  sky 0.061
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       153.1 [-1.12, -0.06]  0.134  0.219  0.049 -0.240 [0, -13]   0.049 [0, -13]  0.011  0.883 -0.448    nan    nan -0.141             -
+   valley    127.8 [-0.92, 0.01]  0.091  0.143  0.050 -0.217 [2, -11]   0.050 [2, -11]  0.007  0.706 -0.498    nan    nan -0.103             -
+   farhill   116.7 [-0.85, 0.07]  0.065  0.125  0.024 -0.219  [6, -8]   0.024  [6, -8]  0.003  0.709 -0.384    nan    nan -0.107             -
+   haze      181.2 [-0.78, 0.02]  0.080  0.126  0.030 -0.211 [1, -15]   0.030 [1, -15]  0.004  0.607 -0.331    nan    nan -0.119             -
+   slope      54.3 [-0.92, 0.08]  0.065  0.144  0.023 -0.384 [-16, -10]   0.023 [-16, -10]  0.003  1.011 -0.390    nan    nan -0.239             -

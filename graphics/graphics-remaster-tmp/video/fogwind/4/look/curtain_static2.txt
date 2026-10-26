@@ -1,0 +1,6 @@
+curtain rms (code values) per box: 1150,540,250,80 | 1000,520,400,60
+original     0.152 (lvl 161.7) | 1.820 (lvl 159.1)
+percell      0.143 (lvl 162.8) | 1.847 (lvl 160.1)
+frozen       0.317 (lvl 160.7) | 1.803 (lvl 158.5)
+q4           0.189 (lvl 161.4) | 1.788 (lvl 158.8)
+q8           0.198 (lvl 160.8) | 1.775 (lvl 158.2)

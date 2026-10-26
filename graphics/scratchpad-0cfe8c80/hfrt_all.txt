@@ -1,0 +1,376 @@
+# HFRT: heightfield ray tracing of the terrain (research track `hfrt`)
+
+Short version: tracing the terrain heightfield itself (sun, sky visibility,
+one-bounce GI) is a near-negative result on CWA islands. Tracing a fine
+**canopy heightfield** built from the landscape objects is a clear positive
+one. At golden hour every tree, bush and forest block on the island casts a
+long, contact-hardening shadow, at any range, including the near range: the
+shipped shadow maps cast no tree shadows at all in any view captured here.
+The best images are `BEST_ground_b_1730.png`, `BEST_hill_1730.png` and
+`BEST_slope_tele_1730.png`.
+
+## Technique
+
+The terrain is a heightfield (1024x1024 at 12.5 m on the Remaster islands,
+already on texture unit 4 as `terrainHeight`), so the GPU can trace it exactly.
+The shipped Remastered path reads a baked 16-azimuth horizon map: sun
+visibility is the sun elevation against an interpolated horizon angle with a
+fixed 1.2 degree penumbra, and sky visibility is one baked, normal-independent
+number per texel.
+
+This track has two parts:
+
+1. **Terrain tracing** (override GLSL only): per-fragment march of the height
+   texture toward the sun (angular penumbra 0.8 deg, so contact hardening by
+   construction), a per-pixel normal-aware sky visibility (8 vertical slices,
+   horizon-based cosine integral) and one-bounce terrain GI (the radiance of
+   each slice sample that rises above the horizon seen so far, using the
+   baked ground tint as albedo).
+2. **Canopy heightfield** (scratch C++ + GLSL): every landscape object that can
+   shade the ground at a distance is rasterised top-down into a texture, which
+   the shader cone-traces toward the sun.
+   - Gather (main thread, `TerrainLighting.cpp` `GatherCanopy`): every Primary
+     landscape object whose map type is tree, small tree, bush, one of the
+     three forest block types, building, house, church, chapel, bunker,
+     fortress, tower, lighthouse, fuel station, hospital or rock. On Abel that
+     is 84,395 of 98,198 objects, gathered in 16-22 ms (game logs). Footprint:
+     an ellipse at 0.85 of the bounding box for crowns, the convex hull of the
+     geometry LOD for forest blocks and buildings. Opacity: tree 0.8, small
+     tree 0.65, bush 0.5, forest 0.95, building/rock 1.0.
+   - Rasterise (worker thread, `RasterizeCanopyFine`): 4x4 samples per texel,
+     r = height of the object top above the terrain (max), g = occluder density
+     (coverage x opacity, combined as 1 - product of transmissions). Then a mip
+     chain on the CPU: r = max of the covered children, g = mean. Uploaded as
+     RG16 with all levels on texture unit 8 (`terrainCanopyFine`). Resolution
+     is `CWR_HFRT_CANOPY_RES=k` texels per terrain cell: k = 4 gives 4096x4096
+     at 3.125 m (608,268 texels covered on Abel), k = 2 gives 2048x2048 at
+     6.25 m. The whole canopy plus horizon map is on the GPU about 1.2 s after
+     the island loads (log timestamps).
+   - Trace (`hfFineSun` in the override): from the receiver toward the sun,
+     step length max(texel, 0.15 t), mip level log2(step / texel), so far
+     occluders blur into a wider, lighter penumbra and near ones stay crisp.
+     A sample occludes when the ray is below the canopy top (soft over the
+     sun-disk cone width), transmission per step pow(1 - density, step /
+     texel). The trace stops at 45 m / tan(sun elevation) (nothing in the
+     canopy is taller than 45 m) or 900 m. Receivers more than 1.5 m above the
+     ground (crowns, roofs) skip the first 6 m and get no jitter (v5 stippled
+     the crowns; v6 fixed it). Ground facing away from the sun skips the trace.
+   - Canopy sky occlusion (`hfFineSky`): 8 azimuths x 4 distances (2..33 m)
+     around ground points, cos^2 of the steepest density-weighted canopy top.
+
+Shader modes (`triSetLighting terrainShadows=<mode>`, read from
+`litTerrainLift.z` by the override; modes <= 1.5 are the shipped path):
+
+| mode | what it does | where |
+|---|---|---|
+| 2 | traced terrain sun + per-pixel normal-aware sky visibility | override_v1/v2 |
+| 3 | 2 + one-bounce terrain GI | override_v2 |
+| 4 | 3 + 12.5 m canopy (sun beyond the shadow maps, sky occlusion) | override_v2 |
+| 5 / 6 | 4 at a lite budget / 4 with the bounce x3 | override_v2 |
+| 7 / 8 | traced terrain + 12.5 m canopy sun only, baked sky / 8 with a distance-scaled step budget | override_v3 |
+| 9 | 7 evaluated per vertex (vsTransformRemaster override) | override_v4 |
+| 10 / 11 / 12 | traced terrain (mode 8 budget) x 3.1 m canopy trace beyond the shadow maps / + canopy sky occlusion / canopy also inside the shadow-map range | override_v5 |
+| 13 | 12 + canopy sky occlusion everywhere, crown stipple fixed | override_v6 |
+| **15** | **baked horizon map for the terrain (as shipped) x 3.1 m canopy trace everywhere + canopy sky occlusion of the ground** | override_v7 |
+| 16 | 15 with half the canopy steps | override_v7 |
+| 17 | 15 without the canopy sky occlusion | override_v8 |
+| 18 / 19 | 15 + the alpha test moved before the lighting / + a 12-step trace for raised receivers | override_v9 |
+| **20** | **18 with the crossing density sqrt(coverage)** (the chance that a ray crossing a partly covered texel hits the crown) | override_v10 |
+
+`override_v10/` holds every mode; the C++ side is `prototype.patch` (applies
+to the graphics branch tip in the detached scratch worktree
+`D:\Arma_CWA_worktrees\gfx-hfrt`, built as `dist\gfx-hfrt2-rwdi`).
+
+## Why it suits CWA content
+
+CWA islands are smooth heightfields carrying tens of thousands of separately
+placed trees and forest blocks. The terrain itself is too gentle for terrain
+tracing to matter, but the trees are exactly the thing a top-down heightfield
+represents well, and the data to build it (positions, bounding boxes, geometry
+LODs, map types) already exists. No new art: the canopy is derived at island
+load.
+
+## What real data showed
+
+All comparisons are Classic | Remastered (current) | Remastered + HFRT, same
+view, same time, same run, 960x640 window at render scale 1.5 (1440x960) with
+4x MSAA.
+
+### Terrain tracing (runs smoke1, scout1, main_v2, timing_v2, v3, v4, p): mostly negative
+
+- **Sky visibility from the terrain is about 0.9-1.0 almost everywhere** in
+  these views (`DEBUG_*.png` bottom rows): the hills are gentle relative to
+  their spacing. A per-pixel, normal-aware version of a number that is already
+  near 1 changes nothing visible.
+- **One-bounce terrain GI is invisible**: even shown x4 the bounce irradiance is
+  dark (`runs/main_v2/overcast_broken__debug.png`), and with the bounce x3
+  (mode 6) the frames are still indistinguishable from mode 4
+  (`VARIANTS_hill_1730.png`, `VARIANTS_forest_edge_golden.png`). Terrain
+  albedo is low and the sky dominates the fill. Negative result.
+- **Traced terrain sun shadows** differ from the horizon map at shadow edges and
+  in small-scale self-shadowing at a low sun (`DEBUG_hill_0700.png`), and in
+  sunrise_ridge the shipped map puts the whole foreground in a grey half
+  penumbra where the trace says full sun (`DEBUG_sunrise_ridge.png`). In the
+  colour frames this barely shows, because the affected ground faces away from
+  a 5-10 degree sun (low N.L). Not worth the cost.
+- **12.5 m canopy** (modes 4/7/8): forest blocks shade at a distance, but single
+  trees turn into blobs and diamonds (`DEBUG_hill_0700.png`, traced panel).
+- **Per vertex** (mode 9, v4) is blobby and not cheaper: best GPU frame
+  hill_1730 19.86 ms (mode 9) vs 4.93 (mode 8), forest_edge_golden 23.10 vs
+  11.92 (`PERVERTEX_vs_PERPIXEL.png`). The trees' vertex counts make a
+  per-vertex trace expensive, and terrain vertices are 12.5 m apart.
+- **Variant P** (`CWR_HFRT_CANOPY_HORIZON=1`, canopy folded into the baked
+  horizon map, zero runtime cost): distant forest blocks get shadows, single
+  trees cannot (16 azimuths at 12.5 m).
+
+### Fine canopy cone trace (runs v5-v10): positive
+
+- **The shipped shadow maps show no tree shadows in any captured view.** In
+  forest_edge_golden the sun-visibility debug of the shipped path shows the
+  soldier's shadow and nothing from the trees 10-40 m away under a 12 degree
+  sun (`runs/v6/forest_edge_golden__v6_debug.png`); the hill views show no tree
+  shadows either (`runs/v5/hill_0700__dbgsun_rem.png`). Whatever the cause
+  (the casters are gated in `SceneShadowPass.cpp` on the shape's NoShadow flag
+  and `Object::CastShadow()`; I did not chase it), the canopy trace is the only
+  source of tree shadows in these frames. That is why mode 12 (canopy also
+  inside the shadow-map range) is identical to mode 10 in the hill views and
+  adds the tree shadows in forest_edge_golden, where mode 10 has none.
+- **Golden hour reads like a different game**: `BEST_hill_1730.png`,
+  `BEST_slope_tele_1730.png` (telephoto onto the slope), `BEST_ground_a_1730.png`
+  and `BEST_ground_b_1730.png` (eye 2.5 m among the summit trees). Every tree on
+  the sunlit slopes casts a long shadow away from a 9 degree sun, the trees
+  stand on the ground instead of floating, distant forest blocks get a lit and
+  a shaded side, and in ground_b the near trees put the whole foreground rock
+  slope in their shade. hill_0700 shows the same on the sunlit right slope.
+  forest_edge_golden shows soft diagonal tree-shadow bands on the slope.
+- **No visible change**: sunrise_ridge (the trees stand on the skyline; the sun
+  debug shows no canopy shadow on the visible field, probably because their
+  shadows fall behind the crest) and overcast_broken (14:30, half overcast,
+  high sun; the run has mode 12, no Eden run of mode 15).
+- **Shade level** (mean luminance, `runs/v7`, `runs/v10_*`): ground_b
+  foreground box 101.4 (Remastered) to 79.9 (mode 15, k = 4), per channel
+  shade/lit about 0.73 / 0.78 / 0.84 in display values. Not crushed; the shade
+  is a little cooler than the lit rock because it is lit by the existing
+  Remastered sky fill.
+- **Canopy resolution** (`K_*.png`, `SQRT_*.png`): at 6.25 m with the linear
+  density, thin crowns smear into texels and lose 40-55 % of the darkening
+  (ground_b box 88.5 vs 79.9 at 3.1 m). The sqrt crossing density (mode 20)
+  restores it: 6.25 m + sqrt gives 78.4 (ground_b), 74.6 (hill_1730 box, 3.1 m
+  linear 74.5), 54.1 (slope_tele box, 3.1 m linear 54.8). So **k = 2 with the
+  sqrt density matches k = 4** in strength with a quarter of the memory, a
+  little softer in shape.
+- **Canopy sky occlusion** (mode 17 vs 15): grey halos at tree bases in the
+  debug (`runs/v5/hill_1730__v5_debug.png`), but only 0.2-0.4 levels in the
+  measured boxes. Not worth keeping.
+- **Traced terrain vs baked map under the canopy** (mode 13 vs 15): visually
+  the same canopy shadows; the baked map is much cheaper. Mode 15 is the
+  candidate.
+- Mode 18 (alpha test before lighting) renders the same frame as mode 15 (mean
+  absolute difference 0.08-0.30 levels on four views), as it should.
+- Two views I guessed blind (forest_side_1815, forest_back_1815, run v6) had no
+  trees in frame and the ground in the slope's own shadow: no information.
+
+## GPU cost
+
+RTX 4060 Ti, 1440x960, 4x MSAA. The GPU was shared with up to three other
+agents' games for the whole session and GPU timestamps include that
+contention: in run p the unchanged shipped shader measured 12-33 ms where other
+runs measured 3-9 ms. Every number below is the minimum over interleaved rounds
+(remastered and the variants alternate in each round), taken across all runs
+(`timings_best_across_runs.md`, per run in `runs/*/timing_rounds.md`), so they
+are upper bounds and the deltas are rough (+/- a few ms).
+
+| view | Remastered | mode 8 (terrain + 12.5 m canopy) | mode 15/18/20 (production candidate) | mode 13 (traced terrain + 3.1 m canopy) | modes A/B/Can (terrain sky + GI) |
+|---|---|---|---|---|---|
+| forest_edge_golden | 3.69 | 11.92 | 5.98-7.12 (+2.3 to +3.4) | 13.79 | 26-34 |
+| hill_1730 | 3.30 | 4.93 | 8.41-9.91 (+5 to +6.6) | 11.40 | 15.8-18.5 |
+| ground_b_1730 (big trees near) | 6.32 | - | 15.32-16.78 (+9 to +10.5) | - | - |
+| slope_tele_1730 (telephoto, trees everywhere) | 6.76 | - | 19.66-22.20 (+13 to +15) | 29.50 | - |
+
+- The cost follows the number of lit pixels that run the trace, including
+  every alpha-tested leaf-card fragment (the remastered shader lights before
+  its alpha test). Moving the alpha test first (mode 18) did not give a
+  measurable win under this much contention. A 12-step trace for crowns
+  (mode 19) and half the steps (mode 16) did not either.
+- **Half resolution**: not measured. I tried timing rounds at render scale 0.75
+  in run v6, but `SetRenderScale` clamps below 1.0, so those `_q` rows are at
+  scale 1.0 (0.44 of the pixels), and the contention noise was larger than the
+  difference. The trace is per pixel and has no screen-space dependency, so a
+  half-resolution sun-visibility buffer is the obvious production route, but
+  this forward renderer would need a depth pre-pass for it.
+- **Per vertex is not enough** (mode 9): blobby on the 12.5 m terrain grid,
+  wrong for 3 m crowns, and slower on tree-heavy frames.
+- Memory: k = 4 is 64 MiB RG16 plus mips (about 85 MiB); k = 2 is 16 MiB plus
+  mips (about 21 MiB). CPU build about 1 s on the worker thread, 16-22 ms on
+  the main thread for the gather.
+
+## Verdict
+
+**Promising, for the canopy part.** The terrain-only parts (per-pixel sky
+visibility, one-bounce terrain GI, traced terrain sun) do not earn their cost
+on these islands: keep the baked horizon map. The canopy heightfield cone trace
+is the most "path traced" looking change this track found: low-sun frames gain
+long tree shadows across whole landscapes, near and far, from existing data,
+and it also fills the gap the shadow maps leave (no tree shadows at all in
+these captures). It costs several ms per frame on a mid-range GPU and needs a
+resolution-independent pass to be cheap.
+
+## What a production version needs
+
+1. Keep mode 20 at k = 2 (6.25 m, sqrt crossing density, baked horizon map for
+   the terrain, no canopy sky occlusion). A dedicated `LitConstants` slot and a
+   real option instead of the `terrainShadows` mode hack.
+2. Move the trace off the forward pass: a half or quarter resolution sun
+   visibility buffer from a depth pre-pass (or last frame's depth,
+   reprojected), bilateral upsample, or temporal accumulation of a jittered
+   quarter of the pixels per frame. Until then: early alpha test, skip
+   back-facing ground (done), cap steps for crowns.
+3. One fetch per step: pack the terrain height into the canopy texture (or
+   store absolute tops in a second channel) instead of sampling the RGBA32F
+   height texture at every step.
+4. Keep the canopy current: destroyed trees and buildings need a local
+   re-rasterise and a mip update of the affected texels (`glTexSubImage2D`), and
+   island or mod changes rebuild with the horizon map (the same async build).
+5. Crown base heights for broadleaf trees (shadow starts at the crown, not at
+   the trunk), and a thin trunk term, if the near shadows are to hold up next
+   to shadow-mapped objects.
+6. Decide the near range with whoever owns the shadow maps: either foliage
+   starts casting into the shadow maps and the canopy fades in beyond them, or
+   the canopy owns tree shadows everywhere (what modes 12-20 do) and buildings
+   stay in the shadow maps (today both shade buildings near the camera).
+7. Classic stays bit-identical: all new code is in the remastered programs and
+   one extra texture binding that the classic programs do not declare. Unit
+   tests for the rasteriser and the mip rules.
+8. Replace the static interleaved-gradient jitter on ground receivers with blue
+   noise plus TAA, or drop it: the soft edges show a faint static dither and
+   the cone steps show faint banding in the debug views
+   (`runs/v6/forest_edge_golden__v6_debug.png`).
+
+## Risks against the owner taste list
+
+- **"Only darker"**: the change adds shadows, so shaded areas get darker while
+  the sunlit ground keeps its level; where tree shadows are blurred by
+  distance it can read as darker ground rather than as shadows. Shown at full
+  size the structure is visible (BEST crops), but this is the main risk.
+- **Cool shade**: the canopy shade is the existing Remastered sky fill, which
+  is cooler than the lit ground; on the pink rock of ground_b the shade reads
+  blue-grey. It is local shade, not a wash over the frame, but a reviewer who
+  rejected blue haze may call it cold.
+- **Crushed shade**: no; measured shade/lit about 0.73-0.84 in display values.
+- **Tree crowns**: lit crowns are unchanged (raised receivers skip their own
+  crown), crowns standing in a neighbour's shadow get darker. That is correct,
+  but forests at a distance gain a darker shaded side.
+- **Evenings**: warmth is unchanged in lit areas (the sun colour is untouched).
+- Overcast and high-sun frames do not change, so the effect is specific to
+  golden hour and low sun.
+
+## Files
+
+- `NOTES.md` this file.
+- `BEST_<view>.png` Classic | Remastered (current) | Remastered + HFRT, full
+  frame and a zoomed crop, GPU frame ms where the view was timed: mode 15
+  (k = 4) from run v7 for sunrise_ridge, forest_edge_golden, hill_0700,
+  hill_1730, slope_tele_1730, ground_a_1730, ground_b_1730; mode 12 from run v5
+  for overcast_broken.
+- `K_<view>.png` canopy resolution 3.1 m vs 6.25 m, and without the canopy sky
+  occlusion (runs v7, v8_k2). `SQRT_<view>.png` linear vs sqrt crossing
+  density at both resolutions (runs v10_k4, v10_k2).
+- `OLD_mode8_BEST_<view>.png`, `DEBUG_<view>.png`, `VARIANTS_*.png`,
+  `PERVERTEX_vs_PERPIXEL.png`, `timings.md`, `timings_main_v2_per_shot.md`:
+  the earlier (pre-pause) results for the terrain tracing and the 12.5 m
+  canopy.
+- `timings_best_across_runs.md` the cross-run minimum table.
+- `prototype.patch` the scratch C++ (canopy gather, both rasterisers, mips,
+  units 6 and 8, the `CWR_HFRT_CANOPY_HORIZON` and `CWR_HFRT_CANOPY_RES`
+  switches).
+- `override_v1` ... `override_v10` the override GLSL per variant (v10 holds all
+  modes; v9 and v10 also override `psNormalRemasterMain.glsl`).
+- `runs/<run>/` each capture run: shots, `<view>__v5|v6|v7_*.png` sheets,
+  `timing_rounds.md`, the tri tree and logs. Run index: smoke1, scout1
+  (vantage scouting), main_v2, timing_v2, v3, v4, p (pre-pause); v5 (fine
+  canopy, modes 10-12, k = 4), v6 (crown fix, mode 13, new views), v7 (modes
+  15/16, ground-level views, k = 4), v8_k2 (k = 2, mode 17), v9 (modes 18/19,
+  k = 4), v10_k2 and v10_k4 (mode 20).
+- `scripts/` test generators (`gen_tests.py`, `gen_v5.py` ... `gen_v10.py`),
+  `collect.py`, `timing.py`, `timing_summary.py`, sheet builders
+  (`sheets_v5.py`, `best_v7.py`, `compare_k.py`, `compare_sqrt.py`).
+- Research test files (git-excluded) are in
+  `D:\Arma_CWA_worktrees\gfx-hfrt\arma_CWR\tests\rendering\research\hfrt\`.
+=========CRITIC
+## track
+hfrt
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabricated files: every cited image, override folder, prototype.patch, NOTES.md and debug sheet exists. The one path slip is cosmetic: the build is at D:\\Arma_CWA_worktrees\\gfx-hfrt\\arma_CWR\\dist\\gfx-hfrt2-rwdi, not gfx-hfrt\\dist. PoseidonGame.exe was built at 6:30:51 PM, after the last source edit at 6:30:29 PM.",
+ "The timing table in timings_best_across_runs.md takes each baseline minimum and each variant minimum from different runs (e.g. hill_1730 remastered 3.30 comes from v3, fine18 8.41 from v10_k2). The honest numbers are the paired deltas within a run. They are: slope_tele +12.8 to +15.9 ms in every run (v7, v8_k2, v9, v10_k2, v10_k4); ground_b +8.2 to +10.4; hill_1730 +2.9 to +7.2 (+15 in the contended v9); forest_edge +2.2 to +2.5 (+4 to +8 in v10).",
+ "'Mode 20 same cost as mode 15' and 'k=2 is the cheap config' are not shown. In v10_k2, fine20 is slower than fine18 at hill_1730 (12.20 vs 8.41 ms), and no run shows k=2 cheaper than k=4. Only the memory saving (21 vs 85 MiB) holds.",
+ "'A long shadow at any range' and 'contact-hardening' are overstated for the near field. At 3.1 to 6.25 m texels the shadows near the camera are soft wedges and slabs with no tree silhouette (ground_b rock, forest_edge streaks). They are not crisp shadows that harden at the contact point.",
+ "The captures are 960x640 window outputs (render scale 1.5 internally), so all visual judgements are at 960x640.",
+ "The views leave gaps. No town or building view, although buildings are rasterised into the canopy and get double-shadowed with the shadow maps near the camera. No clear-sky midday view of mode 15 (overcast_broken is mode 12 under broken cloud). No camera-motion test of the static screen-space IGN dither. No evening vehicle hull, so the warmth rule cannot be checked."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+3
+## taste_violations
+[
+ "The change only removes light. Under 0.4% of pixels get brighter by more than 8 levels, and 2-3% of the frame darkens in the hill views (12% in ground_b). It adds structured shadows rather than a dimmer frame, but it brings no bounce, no colour bleeding and no light added anywhere, so it borders on the 'only darker' rule.",
+ "The shade is cool. In the ground_b shadow box, per-channel shade/lit is R 0.68, G 0.73, B 0.79, and B/R rises from 0.53 to 0.63, so the pink rock goes blue-grey. It is local shade, not a wash over the frame, but it is the same cool cast the owner has pushed back on.",
+ "A static screen-space IGN dither and faint banding from the cone steps show on soft edges (debug views and the forest_edge slope). The dither stays fixed to the screen and will crawl when the camera moves (not tested).",
+ "Not caused by this prototype, but left alone: the mustard/khaki Remastered grass and the flat-lit crowns are unchanged. Trees get no self-shadowing, only shade from neighbouring trees."
+]
+## cost_ok
+false
+## score_0_to_10
+6
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\hfrt\BEST_hill_1730.png
+## one_line
+A real, verified find: a 3-6 m canopy heightfield cone-traced toward the sun gives every Abel tree a long, soft golden-hour shadow near and far, which the shipped shadow maps never draw. It is limited to low sun, it only darkens, it is cool in the shade, and as a forward per-pixel pass it costs too much (+13-16 ms in the telephoto view).
+## critique
+Verification. The folder matches the listing, and every cited image and artefact exists. The game logs for v5 through v10 show:
+- the override dir loaded (override_v10\psRemasterCommon.glsl, 36292 B, plus psNormalRemasterMain.glsl);
+- a shader-cache miss, a full recompile and 144 programs saved, with no compile or link errors;
+- the C++ path running: 84,395 of 98,198 objects gathered in 16-20 ms, then a 4096x4096 canopy with 13 levels (608,268 texels) at k=4, or 2048x2048 with 12 levels (208,177 texels) at k=2;
+- run.txt pointing at the rebuilt dist/gfx-hfrt2-rwdi.
+
+PIL diffs of Remastered vs mode 15 (v7): mean absolute difference 1.0-1.3 levels with 3.7-5.4% of pixels changed by more than 8 on hill_0700, hill_1730, slope_tele and ground_a. ground_b is 4.7 MAD and 12.4%, forest_edge 3.1 and 9.6%. sunrise_ridge is 0.26 MAD with nothing over 8, which confirms the claimed null result there. Mode 15 vs 17 (0.06-0.29 MAD) and 15 vs 18 (0.08-0.30) confirm that the canopy AO and the moved alpha test change nothing visible. The claims about the terrain-tracing negative and the 12.5 m blob/diamond canopy match DEBUG_hill_0700. The claim that the shipped shadow maps draw no tree shadows matches the forest_edge debug, where the soldier casts a shadow and the trees do not.
+
+Look. This is the first result in this research that adds something a player would point at. At 17:30 in hill_1730, slope_tele and ground_a, every tree on the sunlit slopes casts a long, consistently oriented shadow, the trees sit on the ground instead of floating, and far valleys gain shaded bands. In ground_b the near trees throw a big shadow band across the foreground rock. Shade/lit lands at about 0.6-0.84 per channel, so nothing is crushed.
+
+Limits:
+- It only shows at low sun. There is no change at sunrise_ridge, even though backlit cypresses should throw long shadows at the camera, and none under the 14:30 overcast.
+- Near shadows are soft slabs, not tree silhouettes. forest_edge gains only faint smeared streaks.
+- It is purely subtractive, and the shade picks up a blue-grey cast from the sky fill.
+- The static IGN dither will crawl in motion.
+- No town, midday or vehicle view was captured.
+
+RTX vision. It delivers one ingredient: soft sun shadows from every tree out to the horizon, the kind a path tracer gives. It has no bounce, colour bleeding, reflections, volumetrics or emissives, so it reads as a better-shadowed CWA, not a different game. Score 3/10.
+
+Cost. Paired in-run deltas on a shared 4060 Ti at 1440x960:
+- slope_tele: +13-16 ms in all five runs;
+- ground_b: +8-10 ms;
+- hill_1730: +3-7 ms;
+- forest_edge: about +2.5 ms.
+
+Scaled to 1080p on a 3060, the telephoto case alone would blow the 16.7 ms budget. The half-resolution visibility buffer the production plan depends on was never measured. So the cost is not OK as built, though plausibly fixable. Also worth checking first: shipped tree casters in the shadow maps may be a cheaper fix for near-field tree shadows, leaving the canopy trace to cover the far field.
+
+Worth building properly (6/10) as the far-field tree-shadow layer at k=2 with sqrt density. Conditions:
+- moved to a reduced-resolution pass;
+- blue noise plus TAA in place of IGN;
+- a warmer shade fill or some bounce so it is not only darker;
+- validated on towns, at midday and in motion.
+## artefacts_seen
+Faint static IGN dither and cone-step banding on soft shadow edges (forest_edge slope, v6 debug). Near-field shadows are blurry wedges with no tree silhouette or trunk gap, because footprints are 0.85-bounding-box ellipses from ground to top. The shade casts blue-grey on the pink rock in ground_b. No NaNs, halos, light leaks or embossing seen in the stills. Temporal swimming and crawl are untested.
+## prototype_actually_loaded
+Yes. game_stdout.log for v5, v6, v7, v8_k2, v9, v10_k2 and v10_k4 shows:
+- 'shader override dir = ...\hfrt\override_vN';
+- 'shader override loaded ... psRemasterCommon.glsl (36292 bytes)' for v10;
+- a cache miss with all programs recompiled and saved (144 entries), and no shader errors;
+- the HFRT lines: canopy gather of 84395/98198 objects, the fine canopy uploaded at 4096x4096 (13 levels) or 2048x2048 (12 levels).
+
+run.txt uses --game-dir dist/gfx-hfrt2-rwdi, whose exe is newer than every modified source file.

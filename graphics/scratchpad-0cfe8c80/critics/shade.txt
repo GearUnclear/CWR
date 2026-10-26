@@ -1,0 +1,50 @@
+## track
+shade
+## files_verified
+true
+## missing_or_false_claims
+[
+ "No fabrication found: every cited image, prototype.patch, ovr_final, ovr_v17, ovr_recommended, run10\\run8, NOTES.md, final\\measure_final.md and timings_final.md exist with the listed sizes; the gfx-shade worktree diff (LightRig.cpp, Shape.hpp, ShapeDraw.cpp, 76 insertions) matches prototype.patch and build4.log links PoseidonGame.exe at 7:04:47 PM.",
+ "BEST_forest_edge_noon.png and BEST_coastline_sunset.png put shipped (run13s) next to final (run13), which are different runs with different cloud fields. In run13 the prototype build with the C++ gate off (label 'remastered', no cloud floor) is already as sunny as final (forest luma 115.3 vs 116.7, coastline 133.8 vs 134.2), so most of the dramatic difference in those two BEST images comes from where the clouds happened to be. The same-run check (run14) backs the fix on forest_edge_noon (luma 100.0 to 116.8, +17%) but gives only +0.5% on coastline_sunset (133.7 to 134.4). The 'whole sun path on the sea lost' only happened in run13s's cloud position.",
+ "'Shipped hull pixels equal Classic exactly' is true for the Sinai boxes (identical F/g:r/r:b) but not for Abel: lowsun_box M113 lit F is 0.92 shipped vs 0.72 Classic, dawn_box 0.77 vs 0.58. The broader note that 'every hull judgement on earlier captures judged Classic CPU lighting' goes further than the evidence; on Abel the post stack also changes the pre-lit output.",
+ "The third panel of cmp_rootcause_prelit.png is captioned 'hulls now lit per pixel', but it is an albedo debug view and shows no lighting. The real evidence is the 'shade: lazy vertex buffer for a shape loaded after OptimizeAll' lines in the run13/run14 logs.",
+ "'Clearly better' is overstated for the side-lit box views. Final vs shipped mean absolute difference is only 1.5 to 2.4 of 255, about 3% of pixels change by more than 8 levels, and frame luma is the same (dawn_box 98.4 vs 98.3). The gain is clear only in the backlit views (lowsun_fp, sinai_lowsun_fp) and in the same-run cloud fix.",
+ "GPU cost is unmeasured (the explorer says so); the per-panel ms in the BEST images are noise from four games sharing the GPU (noon_fields Classic 20.95 ms vs 11.42 ms in the other run)."
+]
+## visible_gain_vs_current_remastered
+clear
+## visible_gain_vs_classic
+clear
+## rtx_vision_score_0_to_10
+2
+## taste_violations
+[
+ "Only-darker risk at noon: spawned vehicle sides drop from 0.97 (shipped, drawn with Classic light by accident) to 0.60, darker than Classic. The noon_fields Jeep visibly reads darker; bounce 2.5 is the stated lever.",
+ "Golden-hour crowns are darker than shipped (F 0.78 to 0.67) with no gain in volume (p10:p90 0.42, Classic 0.38). Level and hue improve, the flat crown stays flat.",
+ "At a 5 degree sun (sunrise_ridge) the in-scatter weighting removes the shaft streak over the near ground. That darkens the foreground compared with shipped and takes away one of the few volumetric cues the frame had.",
+ "Shaded hull faces are lifted by a uniform horizon multiplier (anti-sun sky x3.6 at a low sun), not by bounce or occlusion. Shade/lit hits 0.6, but the shaded side is still flat hemisphere-ambient times Lambert with no directional variation or contact darkening, which is close to the 'Lambert-only lame shading' the owner rejects."
+]
+## cost_ok
+true
+## score_0_to_10
+7
+## best_image
+D:\Arma_CWA_worktrees\lighting\tmp\research\shade\BEST_sinai_lowsun_fp.png
+## one_line
+Real, verified bug fixes (spawned vehicles skipped the remastered lighting; the sun-shaft composite left a grey veil on near objects; cloud shadows under a clear sky) plus a calibrated low-sun rig. A clear gain on backlit hulls and a foundation every other track needs, but close to zero movement toward RTX on.
+## critique
+Verification: the files are all real. run13 game_stdout.log shows the override dir ovr_final, psRemasterCommon.glsl (25453 B) and psPostComposite.glsl (2350 B) loaded, and the shader cache compiled with no errors. The lazy vertex buffer fired for spawned shapes (237 to 3438 vertices), and every __final shot was preceded by triSetLighting moonlight=1.01. run13s ran the untouched dist/lighting-rwdi with no override. The patch matches the scratch worktree diff, and the per-view measure tables exist and agree with the NOTES.
+
+What the pictures show: the strongest result is a bug fix, not a lighting model. In BEST_sinai_lowsun_fp and BEST_lowsun_fp the shipped HMMWV, Jeep and M113 are grey, hazy cut-outs. In the prototype they are solid painted vehicles with readable wheels, panels and markings, because the depth-weighted in-scatter (1-exp(-z/300 m)) removes the shaft veil and the lazy buffer puts runtime-spawned vehicles on the per-pixel path. At 2x crop this is obvious, not a squint. The same-run cloud-floor fix (run14, forest_edge_noon +17% luma, slope back to Classic's sunlight) also fixes a real defect that would randomly dim about 4% of any clear day. Elsewhere the change is small. In the side-lit boxes (dawn_box, dawn_box5, lowsun_box) the prototype and shipped frames are nearly identical (mean diff about 2/255, frame luma equal). The measured shade/lit gain from 0.38-0.46 to 0.58-0.62 is real but confined to hull rear faces, and it comes from a uniform fill multiplier rather than any bounce or occlusion. The crowns get a little greener and darker with no gain in volume. Two of the BEST panels (forest_edge_noon, coastline_sunset) oversell the work because shipped and final come from runs with different cloud positions; the run13 rig-off shot already looks like final.
+
+Artefacts: at 3x crop I found no halos at hull silhouettes from the depth lookup, no NaN, banding or noise. Watch for silhouette fringing if the AO target that carries depth is half resolution. In production, use a static buffer rather than VBDynamic for static spawned shapes.
+
+Owner taste: no blue wash (the veil removal is the opposite of a wash), no grading, no new art. Evening hull lit faces are as warm as Classic or warmer except a 3-6% red shortfall at 4.8 deg. Low-sun ground is pink-tan, not mustard. Shade reaches the 0.6 target. The risks are the only-darker items: noon spawned-vehicle sides at 0.60 (darker than Classic), golden crowns darker than shipped, and the sunrise foreground losing its shafts.
+
+RTX vision: nothing here adds bounce colour, reflections, contact-hardening shadows, sky occlusion on hulls or volumetrics. The fill term is a hand-tuned ambient boost, and the in-scatter change removes shaft light rather than adding volumetric depth. Score 2.
+
+Worth building: yes, 7. The lazy vertex buffer is a correctness prerequisite. Guerrilla Mode spawns nearly every vehicle at runtime, so without it every other lighting track's work never reaches those vehicles. The clear-sky cloud floor and the depth-weighted shafts are physically right and cheap. Cost analysis: uniforms computed once per frame, about 20 ALU per foliage fragment, one extra fetch per pixel. That fits an RTX 3060 1080p60 budget easily, but a clean timing pass on an idle machine is still owed. Ship the three fixes and the hue/fill calibration as the base layer, re-pin the unit tests as the explorer lists, and don't present this as the RTX-on step.
+## artefacts_seen
+None at 2x-3x crops of hull silhouettes against the sky (lowsun_fp M113, sinai_lowsun_fp HMMWV): no halo from the depth-weighted in-scatter, no banding, noise, NaN or embossing. The coastline sun path in final is a broad, uniform salmon band ending sharply at the shoreline (the existing water model, not this track).
+## prototype_actually_loaded
+Yes. The run13/run14 game_stdout.log files show the shader override dir ovr_final loaded (psRemasterCommon.glsl 25453 B, psPostComposite.glsl 2350 B, cache rebuilt with 144 entries, no compile errors). The game dir was dist/gfx-shade-rwdi (exe built 7:04:47 PM from the gfx-shade worktree whose diff matches prototype.patch). The log has 'shade: lazy vertex buffer for a shape loaded after OptimizeAll' lines for spawned shapes, and 'triSetLighting moonlight=1.01' before every __final shot. run13s used the shipped dist/lighting-rwdi with no override. Pixel diffs confirm final differs from shipped in every view (mean 1.5 to 15.8 of 255), with real hull gains in lowsun_fp and sinai_lowsun_fp.

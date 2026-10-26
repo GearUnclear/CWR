@@ -1,0 +1,318 @@
+diff --git a/arma_CWR/tests/rendering/captures/video/gen_video_tests.py b/arma_CWR/tests/rendering/captures/video/gen_video_tests.py
+index 78c39c8e..8894ea9e 100644
+--- a/arma_CWR/tests/rendering/captures/video/gen_video_tests.py
++++ b/arma_CWR/tests/rendering/captures/video/gen_video_tests.py
+@@ -126,6 +126,13 @@ LOWSUN_STAGE = dict(x=7300, z=10900, eye=1.75, h=152.5, p=-3)
+ SINAI_STAGE = dict(x=8350, z=2950, eye=1.75, h=338.8, p=-3)
+ 
+ CLIPS = [
++    # The video's opening: the Remaster's lighting as it was before this work
++    # ("baseline": every switch off) against the full new lighting.
++    dict(clip="opening_pine_eve", feature="original look vs new lighting", keys=[], off="baseline",
++         world="Abel", mode="S", frames=240, date=[1985, 7, 5, 18, 15], vd=1500, stage=stage_of(A_PINE_EVE),
++         path=line(A_PINE_EVE, strafe(A_PINE_EVE, -10, h=300, p=3)),
++         props=['[["SoldierWB"], 14, -3, 160, "man"] call capSpawn;', '[["Jeep"], 22, 4, 250, "veh"] call capSpawn;'],
++         note="opening: baseline (all 26 switches off) against remastered; strafe 10 m left with a 12 deg pan"),
+     dict(clip="perf_sunrise_ridge", feature="perf", keys=["drawGrouping", "hillCull"], world="Abel", mode="S",
+          frames=240, date=[1985, 7, 5, 5, 8], vd=4000, stage=stage_of(A_SUNRISE),
+          path=line(A_SUNRISE, [4426, 3315, 1.75, 75, 2])),
+@@ -155,14 +162,16 @@ CLIPS = [
+          path=line([4400, 3300, 1.75, 60, 4], [4400, 3300, 1.75, 60, 4]), lapse=12),
+     dict(clip="shadows_woods_pine2_evening", feature="shadows", keys=["treeShadows", "softShadows"], world="Abel",
+          mode="S", frames=240, date=[1985, 7, 5, 17, 30], vd=1500, stage=stage_of(A_WOODS),
+-         path=line(A_WOODS, along(A_WOODS, 20, h=225)), props=['[["Jeep"], 15, 2, 70, "veh"] call capSpawn;']),
++         path=line(A_WOODS, along(A_WOODS, 10, h=225)), props=['[["Jeep"], 15, 2, 70, "veh"] call capSpawn;'],
++         note="10 m along instead of 7.3's 20 m: at 20 m the camera is inside a pine crown"),
+     dict(clip="shadows_forest_edge_lapse", feature="shadows", keys=["treeShadows", "softShadows"], world="Abel",
+          mode="S", frames=240, date=[1985, 7, 5, 17, 30], vd=1500, stage=stage_of(A_FOREST),
+          path=line(A_FOREST, A_FOREST), lapse=4500 / 240, props=['[["SoldierWB"], 12, 2, 215, "man"] call capSpawn;']),
+     dict(clip="shade_lowsun_fp_orbit", feature="shade", keys=["lowSunRig", "crownCanopy"], world="Abel", mode="S",
+          frames=240, date=[1985, 3, 1, 8, 0], vd=1500, stage=LOWSUN_STAGE,
+-         path=orbit(LOWSUN_STAGE, [16, 5], 12, 1.75, 0, 120, -3), props=views.LOWSUN_FP_PROPS,
+-         note="orbit at 12 m around the M113 of the lowsun_fp set; eye 1.75 and pitch -3 assumed"),
++         path=orbit(LOWSUN_STAGE, [16, 5], 12, 1.75, 0, -110, -3), props=views.LOWSUN_FP_PROPS,
++         note="orbit at 12 m around the M113 of the lowsun_fp set, 0 to -110 deg (7.3's 0 to 120 runs the "
++              "camera into the tent at bearing 99 deg, 10 m from the M113); eye 1.75 and pitch -3 assumed"),
+     dict(clip="shade_sinai_orbit", feature="shade", keys=["lowSunRig", "crownCanopy"], world="Sinai", mode="S",
+          frames=180, date=[2005, 7, 21, 16, 10], vd=2000, stage=SINAI_STAGE,
+          path=orbit(SINAI_STAGE, [16, 5], 12, 1.75, 0, 90, -3), props=SINAI_SET,
+@@ -261,8 +270,14 @@ def stage_block(c, n):
+     return out
+ 
+ 
++def off_setting(c):
++    """The "off" pass's triSetLighting word: the clip's own (the opening's
++    "baseline") or the shipped defaults with the clip's switch keys at 0."""
++    return c.get("off") or "remastered," + ",".join(f"{k}=0" for k in c["keys"])
++
++
+ def s_mode(c, n):
+-    off = "remastered," + ",".join(f"{k}=0" for k in c["keys"])
++    off = off_setting(c)
+     out = ["triSimFrames 150"]
+     for pas, setting in (("off", off), ("on", "remastered")):
+         out += [f'"{setting}" call capMode', "[] call capPin"]
+@@ -278,7 +293,7 @@ def s_mode(c, n):
+ 
+ 
+ def p_mode(c, n):
+-    off = "remastered," + ",".join(f"{k}=0" for k in c["keys"])
++    off = off_setting(c)
+     out = ["triSimFrames 150", '"remastered" call capMode', "[] call capPin",
+            f"call {{ capFixRes = triSetFixedStep {capgen.num(1.0 / FPS)} }}"]
+     for k in range(n):
+diff --git a/arma_CWR/tests/rendering/captures/video/make_video.py b/arma_CWR/tests/rendering/captures/video/make_video.py
+index 3236975f..87f9c363 100644
+--- a/arma_CWR/tests/rendering/captures/video/make_video.py
++++ b/arma_CWR/tests/rendering/captures/video/make_video.py
+@@ -1,7 +1,7 @@
+ """Assemble the side-by-side feature videos from a motion-capture run
+ (INTEGRATION-PLAN.md section 7.4). Skeleton from step A1.
+ 
+-    python make_video.py <run folder> [--out <dir>] [--clip <clip> ...] [--montage] [--keep-frames]
++    python make_video.py <run folder> [--out <dir>] [--clip <clip> ...] [--montage] [--no-wipe]
+ 
+ <run folder> is a run-captures.ps1 output folder of gen_video_tests.py tests.
+ For every clip found in its tri tree (NNN_<clip>__off__f####.png and
+@@ -9,18 +9,19 @@ NNN_<clip>__on__f####.png; a retry's newer file wins) this script checks both
+ passes have the same frames, then writes into <out>/<clip>/ (default
+ <worktree>/tmp/video/<clip>/):
+ 
+-    <clip>__sbs.mp4    3840x1080: the "off" pass left, "on" right, labelled,
+-                       with the GPU frame time of every 10th frame when the
+-                       frame log has it
++    <clip>__sbs.mp4    3840x1080: the "off" pass left, "on" right, a banner with
++                       the feature in plain words ("Combat light:  off | on"),
++                       OFF and ON tags, the island and time of day, and the GPU
++                       frame time of every 10th frame when the frame log has it
+     <clip>__wipe.mp4   1920x1080: the left half off, the right half on, a divider
+     frames.txt         which frames went in, and the frame log's feat= line of
+                        the first frame of each pass (the switches and gates)
+ 
+ --montage also writes <out>/montage.mp4: every clip in the order of the clip
+ table (plan section 4 order), each after a two-second title card naming its
+-feature and switch keys. 30 fps, H.264 (libx264, CRF 18, yuv420p), through
+-ffmpeg (C:\\ffmpeg\\bin\\ffmpeg.exe or ffmpeg on PATH); frames are composed with
+-Pillow first.
++feature and switch keys (it needs the wipes, so not with --no-wipe). 30 fps,
++H.264 (libx264, CRF 20, yuv420p), through ffmpeg (C:\\ffmpeg\\bin\\ffmpeg.exe or
++ffmpeg on PATH); frames are composed with Pillow and piped into ffmpeg.
+ """
+ import argparse
+ import re
+@@ -43,6 +44,44 @@ UDCAP_RE = re.compile(r"UDCAP;(.*)$")
+ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+ GPU_FRAME_RE = re.compile(r"\bframe ([\d.]+) ms")
+ FPS = 30
++CRF = 20
++
++# Plain-word names for the panels and title cards (the owner reads these, not
++# the switch keys). A clip not listed falls back to its feature column.
++TITLES = {
++    "opening_pine_eve": "Original look vs new lighting",
++    "perf_sunrise_ridge": "Draw grouping and hill culling",
++    "temporal_forest_edge": "Temporal anti-aliasing",
++    "temporal_sinai_camp": "Temporal anti-aliasing",
++    "lighttiles_town_night": "Tiled light list",
++    "atmosphere_coastline_sunset": "Sky and fog colour",
++    "atmosphere_dawn_lapse": "Sky and fog colour",
++    "shadows_woods_pine2_evening": "Tree shadows and soft sun shadows",
++    "shadows_forest_edge_lapse": "Tree shadows and soft sun shadows",
++    "shade_lowsun_fp_orbit": "Low-sun light and tree crowns",
++    "shade_sinai_orbit": "Low-sun light and tree crowns",
++    "night_road_flat_drive": "Night: low beams, lamps and stars",
++    "night_moon_crane": "Night: moon shadows and stars",
++    "combat_ffh": "Combat light",
++    "water_coastline_sunset": "Sea waves",
++    "water_sea_noon": "Sea waves",
++    "ssr_bay_offshore": "Reflections on water",
++    "ssr_town_rain": "Reflections on wet streets",
++    "materials_town_night_rain": "Wet weather and lamp streaks",
++    "materials_after_rain": "Wet weather",
++    "airbeams_pinewood_morn": "Sun beams",
++    "airbeams_pine_eve": "Sun beams",
++    "airbeams_headlights": "Headlight beams in fog",
++    "airhaze_valley_lapse": "Aerial haze and valley mist",
++    "hfrt_hill_1730": "Long tree shadows",
++    "hfrt_slope_lapse": "Long tree shadows",
++    "clouds_coast_oc_up": "Lit clouds and cloud shadows",
++    "clouds_broken_high": "Lit clouds and cloud shadows",
++    "texsharp_forest_edge_walk": "Terrain detail and sharpening",
++    "texsharp_meadow": "Terrain detail and sharpening",
++}
++# The two panel tags: (left, right).
++TAGS = {"opening_pine_eve": ("ORIGINAL LOOK", "NEW LIGHTING")}
+ 
+ 
+ def ffmpeg_exe():
+@@ -113,44 +152,111 @@ def clip_info(clip):
+     return {"clip": clip, "feature": clip, "keys": []}
+ 
+ 
+-def compose(clip, frames, log, work: Path):
+-    """Pillow frames for the side-by-side and the wipe; returns the two folders."""
+-    sbs_dir, wipe_dir = work / "sbs", work / "wipe"
+-    sbs_dir.mkdir(parents=True, exist_ok=True)
+-    wipe_dir.mkdir(parents=True, exist_ok=True)
++def title_of(clip):
++    info = clip_info(clip)
++    return TITLES.get(clip, info.get("feature", clip))
++
++
++def when_of(clip):
++    """'Abel, 18:15' or 'Abel, 05:15 to 07:30' for a time-lapse."""
+     info = clip_info(clip)
+-    big, small = font(34), font(24)
+-    off_title = f"{info['feature']} off ({', '.join(info['keys'])} = 0)" if info.get("keys") else "off"
++    d = info.get("date")
++    if not d:
++        return ""
++    world = {"Abel": "Malden", "Eden": "Everon", "Sinai": "Sinai"}.get(info.get("world", ""), info.get("world", ""))
++    t0 = d[3] * 60 + d[4]
++    s = f"{world}, {t0 // 60:02d}:{t0 % 60:02d}"
++    lapse = info.get("lapse", 0)
++    if lapse:
++        t1 = t0 + round(lapse * (info.get("frames", 0) - 1) / 60)
++        s += f" to {t1 // 60 % 24:02d}:{t1 % 60:02d}"
++    if info.get("rain"):
++        s += ", rain"
++    elif info.get("overcast"):
++        s += ", cloudy"
++    elif info.get("fog"):
++        s += ", light fog"
++    return s
++
++
++def banner(draw, cx, y, text, fnt):
++    """Centred text on a black box at (cx, y)."""
++    box = draw.textbbox((0, 0), text, font=fnt)
++    w = box[2] - box[0]
++    label(draw, (cx - w // 2, y), text, fnt)
++
++
++class Pipe:
++    """An ffmpeg H.264 encoder fed raw RGB frames on stdin."""
++
++    def __init__(self, ff, dst: Path, size):
++        self.size = size
++        self.p = subprocess.Popen([ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s",
++                                   f"{size[0]}x{size[1]}", "-framerate", str(FPS), "-i", "-", "-c:v", "libx264",
++                                   "-crf", str(CRF), "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags",
++                                   "+faststart", str(dst)], stdin=subprocess.PIPE)
++
++    def save(self, img):
++        self.p.stdin.write(img.tobytes())
++
++    def close(self):
++        self.p.stdin.close()
++        if self.p.wait() != 0:
++            raise SystemExit(f"ffmpeg failed: {self.p.args[-1]}")
++
++
++def compose(clip, frames, log, ff, sbs_mp4: Path, wipe_mp4: Path, wipe_too=True, gpu=True):
++    """Pillow frames for the side-by-side and the wipe, piped into ffmpeg."""
++    sbs_pipe = wipe_pipe = None
++    big, mid, small = font(44), font(34), font(24)
++    title = title_of(clip)
++    left_tag, right_tag = TAGS.get(clip, ("OFF", "ON"))
++    head = f"{title}" if clip in TAGS else f"{title}:  off | on"
++    when = when_of(clip)
+     gpu_last = {"off": None, "on": None}
+     for i, f in enumerate(sorted(frames["off"])):
+         a = Image.open(frames["off"][f]).convert("RGB")
+         b = Image.open(frames["on"][f]).convert("RGB")
+         w, h = a.size
++        if sbs_pipe is None:
++            sbs_pipe = Pipe(ff, sbs_mp4, (w * 2, h))
++            wipe_pipe = Pipe(ff, wipe_mp4, (w, h)) if wipe_too else None
+         sbs = Image.new("RGB", (w * 2, h))
+         sbs.paste(a, (0, 0))
+         sbs.paste(b.resize((w, h)) if b.size != a.size else b, (w, 0))
+         d = ImageDraw.Draw(sbs)
+-        for pas, x0, title in (("off", 0, off_title), ("on", w, "on")):
+-            label(d, (x0 + 24, 20), title, big)
++        d.rectangle([w - 2, 0, w + 1, h], fill=(255, 255, 255))
++        banner(d, w, 22, head, big)
++        for pas, x0, tag in (("off", 0, left_tag), ("on", w, right_tag)):
++            label(d, (x0 + 28, 100), tag, mid)
++            if when:
++                label(d, (x0 + 28, h - 56), when, small)
+             row = log.get(f"{clip}__{pas}__f{f:04d}", {})
+             if row.get("gpu_ms") is not None:
+                 gpu_last[pas] = row["gpu_ms"]
+-            if gpu_last[pas] is not None:
+-                label(d, (x0 + 24, h - 52), f"GPU frame {gpu_last[pas]:.2f} ms", small)
+-        sbs.save(sbs_dir / f"{i + 1:05d}.png")
++            if gpu and gpu_last[pas] is not None:
++                txt = f"GPU {gpu_last[pas]:.1f} ms"
++                tb = d.textbbox((0, 0), txt, font=small)
++                label(d, (x0 + w - 28 - (tb[2] - tb[0]), h - 56), txt, small)
++        sbs_pipe.save(sbs)
++        if not wipe_too:
++            continue
+         wipe = a.copy()
+         wipe.paste(b.crop((w // 2, 0, w, h)), (w // 2, 0))
+         d = ImageDraw.Draw(wipe)
+         d.rectangle([w // 2 - 2, 0, w // 2 + 1, h], fill=(255, 255, 255))
+-        label(d, (24, 20), off_title, big)
+-        label(d, (w // 2 + 24, 20), "on", big)
+-        wipe.save(wipe_dir / f"{i + 1:05d}.png")
+-    return sbs_dir, wipe_dir
++        banner(d, w // 2, 22, head, mid)
++        label(d, (24, 90), left_tag, mid)
++        label(d, (w // 2 + 24, 90), right_tag, mid)
++        wipe_pipe.save(wipe)
++    for pipe in (sbs_pipe, wipe_pipe):
++        if pipe is not None:
++            pipe.close()
+ 
+ 
+ def encode(ff, src_dir: Path, dst: Path):
+     cmd = [ff, "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", str(src_dir / "%05d.png"), "-c:v", "libx264",
+-           "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst)]
++           "-crf", str(CRF), "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst)]
+     subprocess.run(cmd, check=True)
+ 
+ 
+@@ -159,7 +265,7 @@ def title_card(ff, clip, out: Path, size=(1920, 1080), seconds=2):
+     work = Path(tempfile.mkdtemp(prefix="card_"))
+     img = Image.new("RGB", size, (12, 12, 12))
+     d = ImageDraw.Draw(img)
+-    d.text((120, 420), info["feature"], font=font(72), fill=(240, 240, 240))
++    d.text((120, 420), title_of(clip), font=font(72), fill=(240, 240, 240))
+     d.text((120, 540), f"switch: {', '.join(info.get('keys', [])) or '-'}", font=font(40), fill=(200, 200, 200))
+     d.text((120, 610), f"clip {clip}: left off, right on", font=font(32), fill=(160, 160, 160))
+     for i in range(FPS * seconds):
+@@ -174,7 +280,9 @@ def main(argv):
+     ap.add_argument("--out", default=None)
+     ap.add_argument("--clip", action="append", default=[])
+     ap.add_argument("--montage", action="store_true")
+-    ap.add_argument("--keep-frames", action="store_true")
++    ap.add_argument("--no-wipe", action="store_true", help="side-by-side only")
++    ap.add_argument("--no-gpu", action="store_true",
++                    help="leave the GPU frame time off the panels (runs that shared the GPU with other games)")
+     a = ap.parse_args(argv)
+     run = Path(a.run).resolve()
+     tri = run / "tri" if (run / "tri").exists() else run
+@@ -200,10 +308,8 @@ def main(argv):
+             continue
+         cdir = out / clip
+         cdir.mkdir(parents=True, exist_ok=True)
+-        work = cdir / "_frames"
+-        sbs_dir, wipe_dir = compose(clip, passes, log, work)
+-        encode(ff, sbs_dir, cdir / f"{clip}__sbs.mp4")
+-        encode(ff, wipe_dir, cdir / f"{clip}__wipe.mp4")
++        compose(clip, passes, log, ff, cdir / f"{clip}__sbs.mp4", cdir / f"{clip}__wipe.mp4",
++                wipe_too=not a.no_wipe, gpu=not a.no_gpu)
+         first = {p: log.get(f"{clip}__{p}__f{min(off):04d}", {}) for p in ("off", "on")}
+         lines = [f"clip {clip}: {len(off)} frames, f{min(off):04d} to f{max(off):04d}"]
+         for p in ("off", "on"):
+@@ -211,8 +317,6 @@ def main(argv):
+             lines.append(f"{p} feat: {first[p].get('feat', '')}")
+         lines += [f"{f:04d} off={passes['off'][f]} on={passes['on'][f]}" for f in sorted(off)]
+         (cdir / "frames.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+-        if not a.keep_frames:
+-            shutil.rmtree(work, ignore_errors=True)
+         made.append(clip)
+         print(f"{clip}: {len(off)} frames -> {cdir}")
+     if a.montage and made:

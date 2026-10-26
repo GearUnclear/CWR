@@ -1,0 +1,173 @@
+AGENT 2 REPORT: capture-loop pacing and temporal history (mist swarm, valley_mist)
+==================================================================================
+Angle: what happens between two captured shots on the overhaul, how the temporal
+filters advance per rendered frame versus per sim step, and whether K render-only
+warm-up frames at the held pose (the handoff's candidate capture-only fix) converge
+the mist. Verdict: RULED OUT as a fix, and the flicker is a GAME bug that the clip's
+capture cadence roughly doubles. K warm-up makes it worse. Rendering exactly one
+frame per 1/60 s step (the cadence of real play at 60 fps) halves it. The cause is
+the fog's frame-global jitter (agent 3's finding, which I reproduced independently).
+Agent 3's per-cell jitter is the fix.
+
+
+1. WHAT HAPPENS BETWEEN TWO SHOTS (measured, not assumed)
+---------------------------------------------------------
+Each clip shot is 6 top-level harness statements (capClockAt, capPathAt,
+capPropsAt, the step block, triScreenshot, capFrameLog). Trident evaluates one
+statement per IPC round trip, and the game's main loop keeps ticking (AppIdle =
+World::Simulate at accTime 0 + a full world render + present) while it waits. For a
+top-level triScreenshot, Trident also polls for the PNG before it sends the next
+statement.
+capFrameLog logs the engine frame counter (frame= in the feat line), so the
+renders per shot can be read from the log:
+  the shot clip v2/runs/ud-valley_mist/udcap.log: 7 (79 shots), 8 (352), 9 (98), 10 (40)
+  agent 6's base probe:                          7-10 (mean 8.2)
+  wall per shot: 0.55-1.04 s (clip), 0.57 s median (base probe)
+One of the renders runs the 1/60 s step. The other 6-9 render the same sim state.
+From capPathAt onward they also hold the new pose (triSetView). So the "warm-up
+at the held pose" already happens, about 6-8 frames per shot. The varying count
+does not drive the flicker: corr(renders per shot, band |d2|) = +0.09 on the clip
+(agent 3: -0.03..0.04).
+
+What advances per rendered frame (all keyed on frame counters, none on sim time):
+  - froxel fog injection: one jitter per frame for ALL cells (EngineGL33_PostFog.cpp
+    PostFog, jz/jx/jy = Weyl sequences of _fog.sequence, ++ per PostFog call),
+    blended into the reprojected history at kFogHistoryShare = 0.12; history kept only
+    if appliedFrame + 1 == frame (consecutive frames).
+  - fog horizon ring: share 0.3 per frame, decay 0.995.
+  - near-field beams: interleaved-gradient start offset seq % 64 (per pixel, TAA-averaged).
+  - TAA: Halton(2,3) 16-frame cycle (TemporalAA.hpp kTaaJitterCycle); AO/SSR/shaft
+    noiseShift = golden ratio of _taa.sequence; GTAO accumulation kGtaoHistoryWeight;
+    soft-shadow rotation from _taa.sequence.
+  - camera exposure adaptation: WALL clock dt, clamped at 0.25 s per rendered frame
+    (EngineGL33_Camera.cpp:241-242).
+What advances per sim step only: the mist drift (Glob.time), AI, particles.
+triWaitFrames (the head team's warning) draws a CLEARED frame with no world
+(InitDraw + FinishDraw + NextFrame), so it breaks every history chain. A
+"triSimFrames K" at accTime 0 instead draws the full world K times with no sim
+advance. That is the warm-up form tested here.
+
+
+2. THE NUMBERS (bandmetric --from 30 on agent 6's cut: 0-based frames 240..389,
+   the measured 120 = clip frames 271..390; vanilla same window 0.102)
+-------------------------------------------------------------------------------
+variant                      band   band_max spikes  sky    renders/shot   wall/shot  GPU frame
+base (agent 6, clip loop)    0.506  2.02     5568    0.034  8.2 (7-10)     0.57 s     31 ms
+k0 (mine, same as base)      0.497  1.95     5372    0.039  8.5 (7-10)     0.90 s     68 ms
+K=1 warm-up                  0.577  2.38     5635    0.042  8.9 (8-11)     1.21 s    101 ms
+K=2 warm-up                  0.582  2.27     5629    0.057  9.9 (9-12)     1.48 s    122 ms
+K=4 warm-up                  0.570  2.17     5691    0.057  12.0 (11-14)   1.32 s     78 ms
+K=8 warm-up                  0.602  2.26     6071    0.088  15.8 (15-17)   2.25 s    121 ms
+rt10 (1 render per step)     0.268  1.20     2513    0.022  1.09 (1; 2 at joins) 0.42 s 126 ms
+rt10pc (rt10 + agent 3's     0.036  0.079       0    0.020  1.09           0.33 s     51 ms
+  percell psFogInject)
+for scale: vanilla same window 0.102; agent 6 noair 0.035; agent 3 percell at the
+clip cadence 0.063; agent 1 true real-time recording 0.282 (10.7 fps) and its 60 fps
+cadence 0.308, with percell 0.112.
+Base run-to-run spread on the board: 0.465-0.506 (agent 6 noao, agent 4 frozen, base, k0).
+"GPU frame" = the median frame time in the run's own log (gpu= every 10th shot): it
+shows how loaded the shared GPU was (other agents' games). A warm-up frame costs one
+GPU frame per K per shot (about 30-45 ms on a quiet machine, 120 ms with 4 games), plus
+a longer screenshot wait. K=4 at a light load (78 ms) is as bad as K=2 at 122 ms, so the
+K penalty is not the load.
+K warm-up: "triSimFrames K" added inside the step block,
+  call { setAccTime 1; triSimFrames 1; setAccTime 0; triSimFrames K }
+rt10: 10 shots per call statement, each shot
+  [k] call capClockAt; [k, 570] call capPathAt; [k] call capPropsAt;
+  triScreenshot "label"; setAccTime 1; triSimFrames 1; setAccTime 0; ["label", k] call capFrameLog
+  (the screenshot is pending before the tick, so the tick's own present is captured;
+  Trident does not wait on a triScreenshot inside a call, and none is needed: the
+  write is synchronous in BackToFront. 10 shots per call stays far under Trident's
+  10 s command timeout.)
+Every run on the overhaul build look-director-rwdi, junction RemasterUD-mist-2.
+
+
+3. WHY (model and fits)
+-----------------------
+- The band flicker is one coherent sheet: an SVD of the band blocks' d2 puts 62% of the
+  energy in the first component on the clip (91% of blocks share its sign), 81% on K=8
+  and 82% on rt10.
+- It follows the fog's frame-global jitter. Regressing the band residual on the EMA
+  (share 0.12) of the three Weyl jitters with seq = frame counter - lag (my
+  tools/jitfit.py): clip R2 0.36 at lag 29 (median over lags 0.05, p99 0.18); the share
+  is diagnostic (0.05: 0.39, 0.12: 0.36, 0.3: 0.20, 1.0: 0.04, so a slow history and not
+  the ring or TAA); K=8 R2 0.61 at lag 30; rt10 R2 0.62-0.66 at lag 28 and its Fibonacci
+  aliases (a 144-frame shift repeats the golden-ratio jitter). Agent 3 got 0.45-0.57 on the clip
+  and 0.83-0.91 with a static camera, and band 0.024 with the jitter frozen.
+- An EMA cannot converge below its floor. Its residual is a weighted sum of the last
+  ~15 jitters, so more renders at a held pose only re-draw the residual
+  (tools/simcad.py). That is why K never helps. The golden-ratio sequence changes the
+  linear residual by about its own size every frame, so the linear model alone predicts
+  little cadence effect (rt 0.9x). The measured 2x comes from the nonlinearity: a thin
+  mist layer inside a thick far slice makes the sampled density a step function of jz.
+  Its slow Fibonacci harmonics (2 phi mod 1 = 0.236, 5 phi mod 1 = 0.09 cycles per
+  frame) pass the 0.12 history. At one render per step they drift smoothly. At 7-17
+  renders per shot with a varying count they alias into shot-to-shot jumps.
+- The sky grain (bandmetric sky) follows the wall time per shot, not the fog: the
+  exposure adapts on the wall clock, clamped at 0.25 s per render, so the
+  longer a shot takes, the further the exposure chases the meter's noise (K=8 0.088,
+  base 0.034, rt10 0.022, vanilla 0.025). Agent 4 showed that freezing it leaves the band unchanged.
+
+Look (crops of the mist region x1, d2 amplified x20 around grey, clip frames 326-330):
+  look/orig_f326_330_d2x20.png   the shot clip: the far valley, shore and hill pump
+                                  bright/dark on alternate frames as one sheet; near
+                                  ridge and men do not
+  look/rt10_f326_330_d2x20.png   the same frames at the real-time cadence: the same
+                                  sheet, weaker
+  look/w8_f326_330_d2x20.png     K=8
+  look/crop2x_f328_orig_rt10_w8.png  frame 328 at 2x: clip / rt10 / K=8. rt10 is as
+                                  sharp as the clip (no TAA breakage); the mist
+                                  thickness differs between them by the residual
+  look/rt10pc_f326_330_d2x20.png  rt10 + percell: no sheet left, only faint cell-size
+                                  specks in the far haze
+  look/crop2x_f328_rt10_vs_rt10pc.png  frame 328 at 2x: rt10 / rt10 + percell; no grid
+                                  curtains, the mist is the steady average
+
+
+4. VERDICT AND RECOMMENDATION
+-----------------------------
+- Capture artefact or game bug: GAME BUG, amplified about 2x by the capture cadence.
+  At the cadence of real play (one render per 1/60 s step) the pump stays at band
+  0.268 (2.6x vanilla, 7.7x noair) with the same jitter signature. Agent 1's true
+  real-time recording gives 0.282.
+- Do NOT use K render-only warm-up frames: every K from 1 to 8 is worse (band 0.570 to
+  0.602 against 0.497/0.506 for the two baselines, +13 to +21%; sky grain up to x2.6
+  at K=8) and costs one GPU frame per K per shot.
+- Fix at the cause in the engine (graphics-remaster): agent 3's per-cell decorrelated
+  jitter in psFogInject (EngineGL33_PostFogShaders.cpp fogSlice/main), with a unit
+  test. Under the clip cadence it gives 0.063.
+  With it, the real-time cadence gives band 0.036, spikes 0 (rt10pc), the no-air
+  floor (noair 0.035) and under vanilla (0.102). Agent 1 found the same in real time:
+  percell 0.112 at a 60 fps cadence and 0.045 with the camera static.
+- Capture staging (vanilla unchanged: it has no temporal filters, and its step
+  needs the triWaitFrames 60 pump): for the overhaul side, use the one-render-per-step
+  form above (gen_video_v2.py frames_block: batch every 10 shots of clock, pose,
+  props, triScreenshot, step and log into one call statement). It matches what a
+  player sees at 60 fps. It also cuts the wall time per shot by about a quarter
+  (0.42 vs 0.57 s) and brings the sky grain to the vanilla level. The batch join
+  adds one extra accTime-0 render at the held pose every 10 shots (dframe 2 on
+  14 of 150 shots). Event lines of other clips (shells, movers) would have to go
+  inside the batch too.
+- Not recommended: a fixed Fibonacci number of renders per shot (13 or 21) would
+  hold the depth jitter's phase almost still from shot to shot (13 x 0.618 = 8.03)
+  and hide part of the pump in the capture only. That is a cosmetic capture trick over a real game bug. Averaging M
+  presented frames per shot reaches only 0.84x (M=4) / 0.71x (M=8) / 0.53x (M=16) in
+  the model.
+
+
+5. FILES
+--------
+tools/parse_framelog.py   renders per shot (frame=), wall per shot, camera meter fields from udcap.log
+tools/corr.py             band |d1|,|d2| per frame vs renders per shot and meter fields
+tools/modes.py            SVD of band d2 (how coherent the flicker is)
+tools/jitfit.py           band residual vs the modelled fog-jitter history, over lags and shares
+tools/simcad.py           EMA-of-Weyl-jitter model at different cadences / warm-ups / averaging
+tools/mk_probe2.py        probe generator (--warm K, --rt B) from ud_valley_mist (agent 6's cut)
+tools/run_probe2.ps1      runner (look-director build, junction RemasterUD-mist-2, mkv + band + pacing)
+tools/assemble_shader.py  rebuilds any post shader's full GLSL from the engine source pieces
+tools/mk_variants.py      my nojit / cellj overrides (NOT run: agent 3 owns them)
+runs/<tag>/               w1 w2 w4 w8 rt10 rt10pc: <tag>.mkv, band.json, band.txt, pacing.txt,
+                          frames.json, udcap.log, keep/ (f0271, f0326-f0330 PNG)
+probe tests: D:/Arma_CWA_worktrees/video-work/arma_CWR/tests/rendering/captures/video/
+             look_probe_mist2_{w1,w2,w4,w8,rt10,rt10pc}.test.sqf/.toml
+shaders/percell3/psFogInject.glsl  byte copy of agent 3's percell override (used for rt10pc)

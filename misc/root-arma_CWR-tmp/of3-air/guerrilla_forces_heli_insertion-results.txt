@@ -1,0 +1,15 @@
+trial 1 exit 1
+trial 2 exit 1 (game killed by me while an assert retried, not a crash)
+trial 3 exit 127 (all 93 steps OK; hung on missing triEndTest, killed)
+trial 4 killed by me: A landed 1 m OK; B landed 7 m, unloaded 8/8, then re-landed uncommanded 285 m away and stayed down (cargo still assigned to the hull; fix: per-unit UnassignVehicle)
+trial 5 exit 0
+trial 6 exit 0
+trial 7 exit 0
+trial 8 exit 1
+trial 9 exit 1
+trial 13 killed by me (CancelLand-only build): A 7 m, removed; B 3 m, unloaded, then held a 30 m hover over the LZ (pilot left in Stopping); fix: pilot SetState(Wait)
+trial 14 exit 0
+trial 15 exit 0
+trial 16 exit 0
+trial 17 exit 0
+trial 18 exit 0

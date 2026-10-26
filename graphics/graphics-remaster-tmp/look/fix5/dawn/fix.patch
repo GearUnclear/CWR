@@ -1,0 +1,399 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index b3cfd658..42c21b53 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -275,6 +275,12 @@ float SkySunGlow(float cosToSun)
+     return 1.0f / (1.0f + 2.0f * (1.0f - c) / (kSkySunGlowRad * kSkySunGlowRad));
+ }
+ 
++float LowSunGlowCos(float sunElevation, float elevation, float cosAzimuth)
++{
++    const float e = std::min(sunElevation + std::max(elevation - sunElevation, 0.0f) * kLowSunGlowFlat, 1.5707963f);
++    return std::sin(sunElevation) * std::sin(e) + std::cos(sunElevation) * std::cos(e) * cosAzimuth;
++}
++
+ float SkyRolloffCapToward(float cosToSun)
+ {
+     return kSkyRolloffCap + (kSkySunCap - kSkyRolloffCap) * SkySunGlow(cosToSun);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+index 794099a2..cb5cd736 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -430,6 +430,17 @@ float SkySunGlow(float cosToSun);
+ float SkyRolloffCapToward(float cosToSun);
+ // The roll-off of the sky along a direction with this cosine to the sun.
+ float SkyRolloffToward(float preExposedPeak, float cosToSun);
++// A low sun turns the sky away from its glow toward the zenith's blue (the
++// sky shader's camSkyLook: none within about 10 degrees of the sun, all from
++// 30). The angle from the sun counts the height above the sun kLowSunGlowFlat
++// times and the sky under the sun's height as at it (only the azimuth then),
++// so the warm glow is a band along the horizon round the sun's bearing,
++// brightest near the sun, not a disc round it (look fix "dawn": at
++// sunrise_ridge the golden disc reached more than half the sky's height).
++// LowSunGlowCos is that angle's cosine (elevations in radians, cosAzimuth the
++// cosine of the azimuth between the direction and the sun).
++constexpr float kLowSunGlowFlat = 3.0f;
++float LowSunGlowCos(float sunElevation, float elevation, float cosAzimuth);
+ 
+ // ---- The grey deck ------------------------------------------------------------
+ // Under the camera a full grey deck (the overcast cloud floor under the
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+index 8f12da42..24cc6de6 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+@@ -171,6 +171,12 @@ float FogGreySky(float skyThrough)
+     return Clamp01((0.65f - skyThrough) / 0.5f);
+ }
+ 
++float FogRingPhaseGain(float r, float m, float phaseColumn, float phaseRing)
++{
++    const float ring = std::max(r + m * phaseRing, 1e-9f);
++    return std::clamp((r + m * phaseColumn) / ring, 0.0f, kFogRingPhaseMax);
++}
++
+ float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg)
+ {
+     const bool east = sunAzimuthDeg > 0.0f && sunAzimuthDeg < 180.0f;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+index 547ed63c..7d5b777b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+@@ -321,6 +321,20 @@ constexpr float kFogHorizonFillTop = 0.06f;
+ // Under a grey sky the horizon ring samples from this elevation (degrees),
+ // above the polygon's top: the deck over the land, not the fill.
+ constexpr float kFogRingGreyFromDeg = 3.8f;
++// The ring's light along a column at the column's own angle to the sun. The
++// ring measures the sky a few degrees above the land (from 2 degrees up, the
++// darker half of six samples), so toward a low sun it holds the aureole's
++// flank; the haze over ground under the horizon is farther from the sun and
++// takes less of the sun's forward scattering (look fix "dawn": a cream veil
++// over dawn_valley's bay). Per channel, from the sky table's two parts at the
++// ring's sample direction (r the Rayleigh and multiple scattering, m the
++// haze's single scattering without its phase), the gain is
++// (r + m P(column)) / (r + m P(ring)), P the sky's own Mie phase, at most
++// kFogRingPhaseMax (haze in front of land right under the sun glows, but
++// never more than this over the sky just above the land), and none under a
++// grey sky (the sky table is the clear sky's).
++constexpr float kFogRingPhaseMax = 1.5f;
++float FogRingPhaseGain(float r, float m, float phaseColumn, float phaseRing);
+ // The morning weight: an eastern sun from 6 degrees under the horizon (full
+ // from 2 under to 8 above), gone by 24 degrees.
+ float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index eefdf3d1..1ade132f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -182,6 +182,19 @@ vec3 camSkyDeepen(vec3 a, float w) {
+     float s = max(1.0, min(1.0 + kCamSkyDeep * clamp(w, 0.0, 1.0), (1.0 - kCamSkyDeepFloor) * l / (l - lo)));
+     return vec3(l) + (a - vec3(l)) * s;
+ }
++// The cosine of the angle from the sun with the height above the sun counted
++// kCamGlowFlat times (PhotoCamera.hpp kLowSunGlowFlat, LowSunGlowCos): the
++// low sun's warm glow lies along the horizon.
++const float kCamGlowFlat = 3.0; // kLowSunGlowFlat
++float camLowSunGlowCos(vec3 d) {
++    vec3 s = skySunDir();
++    float es = asin(clamp(s.y, -1.0, 1.0));
++    float ed = asin(clamp(d.y, -1.0, 1.0));
++    float e = min(es + max(ed - es, 0.0) * kCamGlowFlat, 1.5707963);
++    vec2 sh = s.xz, dh = d.xz;
++    float cAz = (dot(sh, sh) > 1e-8 && dot(dh, dh) > 1e-8) ? dot(normalize(dh), normalize(sh)) : 1.0;
++    return sin(es) * sin(e) + cos(es) * cos(e) * cAz;
++}
+ vec3 camSkyLook(vec3 a, vec3 d) {
+     if (litCamera.x < 0.5) return a;
+     float e = max(d.y, 0.0);
+@@ -201,8 +214,12 @@ vec3 camSkyLook(vec3 a, vec3 d) {
+         vec3 zc = zen / max(dot(zen, kLuma), 1e-8);
+         float l = dot(a, kLuma);
+         // Away from the sun's glow (none within about 10 degrees of it, all
+-        // from 30, so the golden aureole stays golden).
+-        float away = 1.0 - smoothstep(0.86, 0.985, dot(d, skySunDir()));
++        // from 30, so the golden aureole stays golden). The height above the
++        // sun counts kCamGlowFlat times (PhotoCamera.hpp LowSunGlowCos): the
++        // warm glow is a band along the horizon round the sun's bearing, not
++        // a disc round the sun (look fix "dawn": at sunrise_ridge the golden
++        // disc reached more than half the sky's height).
++        float away = 1.0 - smoothstep(0.86, 0.985, camLowSunGlowCos(d));
+         // Over the lowest 30 degrees, so the warm horizon band fades into the
+         // blue above it without an upper edge (a 3 to 27 degree ramp read as
+         // a painted stripe at the blue hour).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+index da48333a..b432d00b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+@@ -82,6 +82,8 @@ constexpr float kFogNightAirShare = 0.35f;
+ // (the rest is the last frame's), and the decay of what a bin knows per frame
+ // out of view.
+ constexpr int kFogRingBins = 256;
++// Row 0 the sky's colour, row 1 the sine of the elevation it was measured at.
++constexpr int kFogRingRows = 2;
+ constexpr float kFogRingShare = 0.3f;
+ constexpr float kFogRingDecay = 0.995f;
+ // The night glow's gain (the blurred light laid into the fog), and the share
+@@ -490,10 +492,11 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
+         if (!_fog.ringTex[0])
+         {
+             GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
+-            const std::vector<float> zero(static_cast<size_t>(kFogRingBins) * 4, 0.0f);
++            // Two rows: the colour, and where it was measured (look fix "dawn").
++            const std::vector<float> zero(static_cast<size_t>(kFogRingBins) * kFogRingRows * 4, 0.0f);
+             for (int i = 0; i < 2; ++i)
+             {
+-                _fog.ringTex[i] = Make2D(GL_RGBA16F, GL_RGBA, GL_FLOAT, kFogRingBins, 1, zero.data());
++                _fog.ringTex[i] = Make2D(GL_RGBA16F, GL_RGBA, GL_FLOAT, kFogRingBins, kFogRingRows, zero.data());
+                 glBindTexture(GL_TEXTURE_2D, _fog.ringTex[i]);
+                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                 glBindTexture(GL_TEXTURE_2D, 0);
+@@ -805,7 +808,7 @@ void EngineGL33::PostFog(const PostFrame& f)
+         const Vector3 toSun = -sun->SunDirection();
+         Set4(ring, "ringSun", toSun.X(), toSun.Y(), toSun.Z(), 0.0f);
+         Set4(ring, "fogCam", cameraFrame ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+-        DrawTo(_fog.ringFbo[next], kFogRingBins, 1);
++        DrawTo(_fog.ringFbo[next], kFogRingBins, kFogRingRows);
+         _fog.ringCur = next;
+     }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+index 1522ebb5..c6ef2606 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+@@ -324,6 +324,24 @@ vec3 g_lobe = vec3(0.0);
+ 
+ // One cell's medium and light at a camera-relative point: rgb the light it
+ // scatters toward the eye per metre, a its extinction per metre, both per km.
++// The sky table's two parts along the unit direction d (skyRadiance without
++// the phase): r the Rayleigh and multiple scattering, m the haze's single
++// scattering without its phase.
++const float kFogRingPhaseMax = 1.5; // VolumetricFog.hpp kFogRingPhaseMax
++void fogSkyParts(vec3 d, out vec3 r, out vec3 m) {
++    float l = asin(clamp(d.y, -1.0, 1.0));
++    vec2 sh = skySunDir().xz;
++    float sl = length(sh);
++    float dl = length(d.xz);
++    float cphi = (sl > 1e-4 && dl > 1e-4) ? dot(d.xz / dl, sh / sl) : 1.0;
++    float phi = acos(clamp(cphi, -1.0, 1.0));
++    const float n = 64.0; // texels per region (kSkyViewSize)
++    float u = clamp(sqrt(phi / kSkyPi), 0.5 / n, 1.0 - 0.5 / n);
++    float v = skyRowV(l);
++    r = texture(skyLut, vec2(u / 3.0, v)).rgb;
++    m = texture(skyLut, vec2((1.0 + u) / 3.0, v)).rgb;
++}
++
+ vec4 fogCell(vec3 rel) {
+     FogMediumCell c = fogMediumAt(rel);
+     float sMie = c.haze + c.dust + c.wet;
+@@ -397,10 +415,32 @@ void main() {
+     // of a clear noon vista, look fix "veil". Azimuths out of view still fade
+     // to the model as their measurements age.)
+     float ringSure = 0.0;
++    // Each tap at this column's own angle to the sun (look fix "dawn"): the
++    // ring holds the sky a few degrees above the land, toward a low sun the
++    // aureole's flank; the haze over ground under the horizon is farther from
++    // the sun and takes less of its forward scattering (FogRingPhaseGain). The
++    // sky table's own parts at the tap's direction (row 1: where the ring
++    // measured it) say how much of that sky is the haze's phase. Only under a
++    // clear sky (the table is the clear sky's).
++    float phaseOn = litAtmo.z > 0.0 ? clamp(fogWeather.z, 0.0, 1.0) * (1.0 - fogNightAir.w) : 0.0;
++    float phaseCol = phaseOn > 0.0 ? skyMiePhase(dot(d, skySunDir())) : 0.0;
+     for (int k = -4; k <= 4; ++k) {
+         float w = 5.0 - abs(float(k));
+-        vec4 a = texture(fogRing, vec2(az + float(k) * (2.0 / 256.0), 0.5));
+-        ring += w * vec4(a.rgb * a.a, a.a);
++        float u = az + float(k) * (2.0 / 256.0);
++        vec4 a = texture(fogRing, vec2(u, 0.25));
++        vec3 gain = vec3(1.0);
++        if (phaseOn > 0.0 && a.a > 0.0) {
++            float se = clamp(texture(fogRing, vec2(u, 0.75)).r, -0.2, 0.5);
++            float ce = sqrt(1.0 - se * se);
++            float azk = u * 6.2831853;
++            vec3 dk = vec3(sin(azk) * ce, se, cos(azk) * ce);
++            vec3 pr, pm;
++            fogSkyParts(dk, pr, pm);
++            vec3 ringSky = pr + pm * skyMiePhase(dot(dk, skySunDir()));
++            vec3 colSky = pr + pm * phaseCol;
++            gain = mix(vec3(1.0), clamp(colSky / max(ringSky, vec3(1e-9)), vec3(0.0), vec3(kFogRingPhaseMax)), phaseOn);
++        }
++        ring += w * vec4(a.rgb * gain * a.a, a.a);
+         ringSure = max(ringSure, a.a * (1.0 - 0.1 * abs(float(k))));
+     }
+     ring /= 25.0;
+@@ -668,7 +708,10 @@ void main() {
+ // from north (clockwise) over a full turn: the sky a little above the
+ // silhouette (the lowest sky in that azimuth, the limit far ground melts
+ // into); rgb linear, a how sure (1 measured this frame, decaying while out of
+-// view; 0 never seen: the model's colour then).
++// view; 0 never seen: the model's colour then). A second row holds where that
++// colour was measured: r the sine of the samples' mean elevation, a as sure
++// (the injection takes the sun's phase at that direction back out, look fix
++// "dawn"; VolumetricFog.hpp FogRingPhaseGain).
+ const char kPostFogRingGLSL[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D colorTex;  // unit 0: the resolved frame (display)
+@@ -733,9 +776,14 @@ void main() {
+         float base = mix(max(found, radians(2.0)), max(found + radians(0.3), radians(kRingGreyFromDeg)), ringCtl.z);
+         float stepDeg = mix(1.0, 0.6, ringCtl.z);
+         vec4 s[3];
+-        for (int k = 0; k < 3; ++k) s[k] = vec4(0.0, 0.0, 0.0, 1e9);
++        float se[3]; // the sine of each kept sample's elevation
++        for (int k = 0; k < 3; ++k) {
++            s[k] = vec4(0.0, 0.0, 0.0, 1e9);
++            se[k] = 0.0;
++        }
+         int nS = 0;
+         vec3 sumAll = vec3(0.0);
++        float sumEl = 0.0;
+         for (int k = 0; k < 6; ++k) {
+             vec3 dd = ringDir(az, base + radians(0.6 * stepDeg + stepDeg * float(k)));
+             if (dot(dd, ringSun.xyz) > 0.9962) continue;
+@@ -744,23 +792,43 @@ void main() {
+             vec3 t = textureLod(colorTex, p.xy, 0.0).rgb;
+             vec3 c = fogCam.x > 0.5 ? camDecode(t) : pow(clamp(t, 0.0, 1.0), vec3(2.2));
+             vec4 v = vec4(c, dot(c, vec3(0.2126, 0.7152, 0.0722)));
++            float ve = dd.y;
+             sumAll += c;
++            sumEl += ve;
+             // Keep the three darkest, s[0] darkest.
+             for (int j = 0; j < 3; ++j) {
+-                if (v.a < s[j].a) { vec4 t = s[j]; s[j] = v; v = t; }
++                if (v.a < s[j].a) {
++                    vec4 t = s[j];
++                    s[j] = v;
++                    v = t;
++                    float te = se[j];
++                    se[j] = ve;
++                    ve = te;
++                }
+             }
+             ++nS;
+         }
+         vec3 best = vec3(-1.0);
++        float bestEl = 0.0;
+         if (nS > 0) {
+             int m = min(nS, 3);
+             vec3 sum = s[0].rgb;
+-            if (m > 1) sum += s[1].rgb;
+-            if (m > 2) sum += s[2].rgb;
++            float sumE = se[0];
++            if (m > 1) {
++                sum += s[1].rgb;
++                sumE += se[1];
++            }
++            if (m > 2) {
++                sum += s[2].rgb;
++                sumE += se[2];
++            }
+             best = mix(sum / float(m), sumAll / float(nS), ringCtl.z);
++            bestEl = mix(sumE / float(m), sumEl / float(nS), ringCtl.z);
+         }
++        // Row 0 the colour, row 1 where it was measured.
++        vec3 value = gl_FragCoord.y < 1.0 ? best : vec3(bestEl, 0.0, 0.0);
+         if (best.r >= 0.0)
+-            outc = vec4(prev.a > 0.0 ? mix(prev.rgb, best, ringProj.w) : best, 1.0);
++            outc = vec4(prev.a > 0.0 ? mix(prev.rgb, value, ringProj.w) : value, 1.0);
+     }
+     fragColor = outc;
+ }
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 5f8d5e0a..2b997687 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -237,6 +237,37 @@ TEST_CASE("PhotoCamera: the sky rolls off under white, and the guards' sky limit
+     CHECK(kSunDiscLevel > c.white);
+ }
+ 
++TEST_CASE("PhotoCamera: a low sun's warm glow is a band along the horizon, not a disc round the sun",
++          "[Remaster][PhotoCamera]")
++{
++    const float deg = 3.14159265f / 180.0f;
++    const float sunEl = 5.0f * deg;
++    // At the sun, and the horizon band under it is as close as the sun's own
++    // height (the glow hugs the horizon); off to the side, the azimuth.
++    CHECK(LowSunGlowCos(sunEl, sunEl, 1.0f) == Catch::Approx(1.0f).margin(1e-5));
++    CHECK(LowSunGlowCos(sunEl, 0.0f, 1.0f) == Catch::Approx(1.0f).margin(1e-5));
++    CHECK(LowSunGlowCos(sunEl, 0.0f, std::cos(20.0f * deg)) ==
++          Catch::Approx(LowSunGlowCos(sunEl, sunEl, std::cos(20.0f * deg))).margin(1e-5));
++    // The glow mask: none within about 10 degrees (cos 0.985), all from 30
++    // (cos 0.86). 15 degrees to the side at the sun's height stays warm; 15
++    // degrees straight above the sun is out of the glow (it was inside).
++    CHECK(LowSunGlowCos(sunEl, sunEl, std::cos(15.0f * deg)) > 0.95f);
++    CHECK(std::cos(15.0f * deg) > 0.95f);
++    CHECK(LowSunGlowCos(sunEl, 20.0f * deg, 1.0f) < 0.86f);
++    // Wider than it is tall: the same angle along the horizon keeps more glow.
++    for (float a = 4.0f; a <= 30.0f; a += 2.0f)
++    {
++        const float side = LowSunGlowCos(sunEl, sunEl, std::cos(a * deg));
++        const float up = LowSunGlowCos(sunEl, sunEl + a * deg, 1.0f);
++        INFO("angle " << a);
++        CHECK(side > up);
++    }
++    // Never past straight up.
++    CHECK(LowSunGlowCos(sunEl, 80.0f * deg, 1.0f) == Catch::Approx(std::sin(sunEl)).margin(1e-4));
++    CHECK(kLowSunGlowFlat >= 2.0f);
++    CHECK(kLowSunGlowFlat <= 4.0f);
++}
++
+ TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off smoothly to the sky's cap",
+           "[Remaster][PhotoCamera]")
+ {
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 5c87c692..2fcf7440 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1174,6 +1174,11 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
+     CHECK(kDeckFullSin > kDeckFromSin);
+     CHECK(constant(skyPiece, "kCamSkySunCap") == Catch::Approx(kSkySunCap));
+     CHECK(constant(skyPiece, "kCamSkyGlowRad") == Catch::Approx(kSkySunGlowRad));
++    // The low sun's warm glow is a band along the horizon (look fix "dawn"):
++    // the blue-turning mask measures the angle with the height above the sun
++    // stretched (LowSunGlowCos).
++    CHECK(constant(skyPiece, "kCamGlowFlat") == Catch::Approx(kLowSunGlowFlat));
++    CHECK(skyPiece.find("float away = 1.0 - smoothstep(0.86, 0.985, camLowSunGlowCos(d));") != std::string::npos);
+     // Every sky roll-off knows its direction to the sun (the glow round it),
+     // and the sun's disc is round on the screen (solved per pixel, not the
+     // angle's oval near the corners).
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+index f736bcfd..ab489809 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -827,6 +827,40 @@ TEST_CASE("Volumetric fog: a grey day fades its ridges into the deck's air, with
+           Catch::Approx(kWeatherExtinction * (1.0f / visFog - 1.0f / 3500.0f) * kSetFogBoost).epsilon(1e-4));
+ }
+ 
++TEST_CASE("Volumetric fog: the air's light takes the sun's phase at each column's own angle to the sun",
++          "[remaster][fog][Shaders]")
++{
++    // A column straight at the ring's sample: the ring's colour, unchanged
++    // (far ground still melts into the sky behind it).
++    CHECK(FogRingPhaseGain(0.4f, 0.6f, 3.0f, 3.0f) == Catch::Approx(1.0f));
++    // The haze over ground under the horizon toward a low sun is farther
++    // from the sun than the ring's sample above the land: less of the sun's
++    // forward light (dawn_valley's bay, look fix "dawn").
++    const float gBay = FogRingPhaseGain(0.2f, 0.8f, 0.7f, 3.2f);
++    CHECK(gBay < 0.5f);
++    CHECK(gBay > 0.2f); // the sky's own part stays
++    // Away from the sun the phase is flat: next to no change.
++    CHECK(FogRingPhaseGain(0.6f, 0.4f, 0.05f, 0.055f) == Catch::Approx(1.0f).margin(0.02));
++    // Haze in front of land right under the sun glows, capped.
++    CHECK(FogRingPhaseGain(0.2f, 0.8f, 50.0f, 3.0f) == Catch::Approx(kFogRingPhaseMax));
++    CHECK(kFogRingPhaseMax >= 1.0f);
++    CHECK(kFogRingPhaseMax <= 2.0f);
++    CHECK(FogRingPhaseGain(0.0f, 0.0f, 1.0f, 1.0f) >= 0.0f);
++
++    const std::string ring = gl::PostShaderSource(gl::PostShader::FogRing);
++    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
++    REQUIRE_FALSE(ring.empty());
++    REQUIRE_FALSE(inject.empty());
++    // The ring's second row holds where it measured the colour.
++    CHECK(CountOf(ring, "vec3 value = gl_FragCoord.y < 1.0 ? best : vec3(bestEl, 0.0, 0.0);") == 1);
++    CHECK(CountOf(inject, "texture(fogRing, vec2(u, 0.25))") == 1);
++    CHECK(CountOf(inject, "texture(fogRing, vec2(u, 0.75))") == 1);
++    CHECK(CountOf(inject, "const float kFogRingPhaseMax = 1.5;") == 1);
++    CHECK(kFogRingPhaseMax == 1.5f);
++    CHECK(CountOf(inject, "vec3 colSky = pr + pm * phaseCol;") == 1);
++    CHECK(CountOf(inject, "ring += w * vec4(a.rgb * gain * a.a, a.a);") == 1);
++}
++
+ TEST_CASE("Volumetric fog: the ring reads the deck over the horizon fill, the apply lays the air over the fill",
+           "[remaster][fog][Shaders]")
+ {

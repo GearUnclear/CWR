@@ -1,0 +1,17 @@
+    // Under the photoreal camera the clear sky (and with it the fog, which is
+    // the sky behind the far ground) takes its physical brightness against
+    // the sunlit world (litCamera.z, 1 under an overcast deck and at night).
+    if (litCamera.x > 0.5) fogC *= pow(max(litCamera.z, 0.0), 1.0 / 2.2);
+    // With the aerial haze on (litHaze.x above 0) the classic fog keeps only
+    // the view-distance edge: its start moves out (AirMedium.hpp FogEdgeScale)
+    // and the post pass's haze takes over the distance before it.
+    r0.rgb = mix(fogC, r0.rgb, min(vFogTC * (1.0 + litHaze.x), 1.0));
+    if (litCamera.x > 0.5) {
+        // Scene light for the camera. The sun disk (sky mode 3) is light far
+        // brighter than its pale sprite: its core (not the sprite's painted
+        // halo) takes the gain.
+        vec3 lin = toLinear(r0.rgb);
+        if (vLitMode < 0.5 && vLitMode > -0.5 && litSkyFwd.w > 2.5 && litSkyFwd.w < 3.5)
+            lin *= mix(1.0, litCamera.y, smoothstep(0.55, 0.95, max(lin.r, max(lin.g, lin.b))));
+        r0.rgb = camEncode(lin);
+    }

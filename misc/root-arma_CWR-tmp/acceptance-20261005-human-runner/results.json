@@ -1,0 +1,17 @@
+[
+  {
+    "Case": "tests/integration/scripting/guerrilla_human_suite.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-human-runner\\guerrilla_human_suite"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_human_roads.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-human-runner\\guerrilla_human_roads"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_human_save.seq",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-human-runner\\guerrilla_human_save"
+  }
+]

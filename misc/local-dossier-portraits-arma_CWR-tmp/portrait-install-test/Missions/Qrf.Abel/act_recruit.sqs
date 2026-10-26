@@ -1,0 +1,8 @@
+; debug action: three resistance fighters at the current War-Level tier join
+; your group (faction descriptor class, no literals) so the QRF has a real
+; fight to walk into
+QRF_rc = gmFactionTierClass [gmResistanceSide, gmWarLevel]
+QRF_rg = [(gmResistanceSide call GM_fnSideFromString), QRF_rc, 3, [((getPos aP) select 0) - 6, ((getPos aP) select 1) - 4, 0]] call GM_fnSpawnGroup
+(units QRF_rg) join (group aP)
+hint format ["DEBUG: 3 x %1 joined your group.", QRF_rc]
+exit

@@ -1,0 +1,10 @@
+{
+  "id": "b32",
+  "bank": "kBio2Hostile",
+  "variant": 1,
+  "text": "{Name} wrote poetry for years before the war. While serving as an officer near {Place}, they prepared notices for the families of soldiers killed under their command.",
+  "word_count": 27,
+  "self_review": "The officer wrote poetry before the war and later prepared notices for families of soldiers killed under their command.",
+  "source_pattern": "Plausible invention; the supplied research does not document this officer's poetry or casualty-notice work.",
+  "fictional_changes": "The literary interest, command responsibility, casualties, and notices are fictional."
+}

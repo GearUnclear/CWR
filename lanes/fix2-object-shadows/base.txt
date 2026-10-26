@@ -1,0 +1,8 @@
+lane: fix2-object-shadows
+source: D:/Arma_CWA_worktrees/fix2-object-shadows
+HEAD: 84408f849d17576184e281ad9f55dc874072eb3e
+subject: roadmap: remastered lighting bug fixes landed
+commit date: 2026-10-17 22:37:11 -0700
+origin branches containing HEAD: origin/claude/youthful-lovelace-8imbdh, origin/graphics-remaster
+files in lane.patch: 6
+binary files changed (content not in patch): none

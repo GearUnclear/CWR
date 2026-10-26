@@ -1,0 +1,3 @@
+    CHECK(s.find(" ssr=1:on@0.5:screen-share-not-measured ") != std::string::npos);
+    CHECK(s.find("landed=23/27") != std::string::npos);
+    CHECK(std::string_view(GetFeatureInfo(Feature::Ssr).gpuSection) == "ssr");

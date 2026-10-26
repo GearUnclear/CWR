@@ -1,0 +1,105 @@
+AILINK fixer, round 4: AI sight and the fog, made a part of the simulation
+==========================================================================
+
+Scratch copy: D:/Arma_CWA_worktrees/look-fix-seam (base tree d2f866e4, fec1075 + fix4/base.patch).
+Build build/look-fix-seam-rwdi, game dist/look-fix-seam-rwdi, junction RemasterUD-r4-ailink.
+Patch: fix.patch (12 files, no probe tests). Nothing committed.
+
+Cause
+-----
+AI sight followed the renderer. Only EngineGL33::UpdateFogMedium called SetFogSight, and it passed
+nullptr whenever this frame's fog did not draw (post effects off, SSAA off, fog unavailable, a vehicle
+interior view). A dedicated server or headless process never called it, so AI there ignored the mist.
+The sight map was also built inside the fog stage (UpdateFogFloor) from the terrain horizon map, so it
+only existed after the fog first drew and only while terrainShadows or terrainOcclusion was above 0.
+
+Probe (proof): look_probe_ailink.test.sqf, Eden 06:10, overcast 0.7, fog 0.3, new command triFogSight.
+Before the fix (probe_before/):
+  post effects on:  drawn=1 mist 1.950e-03 ground 7.268e-04, ai=1 with the same values.
+  post effects off: drawn=0, ai=0, mist 0, ground 0. The weather still holds the mist; AI ignored it.
+After the fix (probe_after/):
+  post effects off: drawn=0, ai=1, mist 1.952e-03 ground 7.277e-04, the same air as with the fog drawn.
+  fogMist=0.5: AI mist 9.770e-04 = drawn 9.770e-04. fogDensity=2: AI 3.903e-03 = drawn 3.903e-03.
+  Every drawn state: Tai equals Tdrawn to 4 digits.
+The probe eye stands on a hill at 273 m, so the 300 m line stays above most of the mist
+(T about 0.999). The flag and the medium values are the proof; the unit tests use a valley line
+where T is well under 0.9.
+The tank interior step did not trigger the interior gate in this probe (volFog stayed on), so the
+interior case is pinned by unit test only.
+
+Change
+------
+1. VolumetricFog.hpp/.cpp (pure):
+   BuildFogSightMap(heights, range, grid, maxSize=1024): the sight map straight from the island's
+   heights, downsampled exactly as the terrain horizon map samples them, plus BuildFogFloor and
+   BuildFogLayer. UpdateFogSightMedium(in, tuning, map): AI takes ComputeFogMedium(in, tuning, true).
+   FogSightTransmittanceThrough(medium, map, a, b): the pure march (FogSightTransmittance wraps it).
+   FogSightMedium(), FogSightMapInUse(): what AI uses now. SetDrawnFogMedium/GetDrawnFogMedium: the
+   renderer publishes what it drew, for probes only; AI never reads it.
+2. TerrainHorizon.hpp/.cpp: DownsampleTerrainGrid exposes the existing box downsample.
+3. World/Terrain/TerrainLighting.hpp/.cpp:
+   WorldFogInputs(land): the fog inputs from the world (sun from LightSun, night, skyThrough, setFog,
+   rain, view distance, classic fog range, date). The renderer and the simulation both call it.
+   SimulateFogSight(land): once per simulation step. When the heights change (island load) it builds
+   the sight map at once on the main thread (Eden 1024x1024: about 150 ms), whatever the render
+   settings. Each step it computes the medium from WorldFogInputs and GEngine->GetLightingTuning()
+   (the base Engine's defaults without a renderer). ShutdownFogSight() on world teardown.
+4. WorldSetup.cpp: SimulateFogSight(GLOB_LAND) at the end of World::SimulateLandscape (after the clock,
+   the sun and the weather moved, before PerformAI in the same frame). ShutdownFogSight in ~World.
+5. EngineGL33_PostFog.cpp: the renderer no longer calls SetFogSight. It fills its medium from
+   WorldFogInputs (plus its own aridity, which only sets the dust that AI does not take). The fog floor
+   texture is drawn from AI sight's own map (FogSightMapInUse), so the drawn mist lies where AI finds
+   it, from the first frame and with terrain shadows off. The aridity still comes from the terrain
+   horizon map's ground tints. A guard logs a warning (at most every 600 frames) if the drawn mist or
+   humid air ever differs from AI sight's, so a second source cannot creep in unnoticed.
+6. triFogSight [[e,n,agl],[e,n,agl]] (GameStateExtTestRender.cpp): AI sight's T and medium next to the
+   drawn one and the classic tactical fog, for probes.
+
+Target.cpp (the link itself) is unchanged: vis *= FogSightTransmittance while FogSightActive().
+
+Constants touched
+-----------------
+None. No fog look constant changed (MIST owns those). The drawn fog is unchanged: dawn_valley after vs
+round-3 final, mean abs difference 0.75 of 255, 99th percentile 7 (frame noise).
+
+Multiplayer
+-----------
+AI sight now reads only synced simulation state: weather (setFog, overcast, rain), the date and time,
+the sun, and the island's heights. A server and its clients compute the same medium. Two per-machine
+inputs remain: the tuning knobs fogDensity and fogMist (debug knobs, default 1; a server uses 1), and
+skyThrough if it ever drifts per machine. For strict MP parity the server's knob values would need to
+be synced or the knobs ignored for AI on clients.
+
+Owner call (open)
+-----------------
+AI keeps the mist in classic lighting mode or with the volFog switch off, where the mist is not drawn.
+This keeps every machine's AI the same. If the owner wants AI to drop the mist in classic mode, gate
+UpdateFogSightMedium on the lighting setting (not on per-frame render state).
+
+Images
+------
+ailink_dawn_valley_4way.png: vanilla | landed | before | after, dawn_valley, plus a 2x crop of the
+  valley mist. The mist is unchanged by moving the map to the simulation.
+ailink_probe_post_off.png: before fix with post effects on, before fix with post effects off (ai=0),
+  after fix with post effects off (ai=1, same air).
+shots_1/dawn_valley__overhaul.png: the after shot. probe_before/, probe_after/: the probe runs.
+
+Tests
+-----
+PoseidonTests "[fog]": all passed (6105 assertions in 24 test cases), "[remaster]" all passed.
+New cases in test_volumetric_fog.cpp:
+  - AI sight equals the drawn fog's air for the same inputs and knobs (fogDensity 0.5/1/2 x fogMist
+    0/0.5/1): AI medium fields equal ComputeFogMedium(in, t, true), FogSightTransmittance equals the
+    march through the renderer's medium; the knobs move AI the same way.
+  - AI sight does not follow the render path: post effects off and an interior view turn the volFog
+    gate off, AI sight stays bit-identical; fogQuality, fogSun, fogLights change nothing.
+  - AI sight works without a renderer: the map from raw heights equals the horizon map's heights
+    and fog floor, the base engine's classic tuning still gives active sight, no island gives classic.
+
+Still open
+----------
+- The optional ground field (TerrainHorizonMap groundColor, about 0.6 s late after load) was not
+  touched.
+- No in-game interior probe (the M1A1 driver view did not clear the world depth).
+- The 150 ms map build runs on the main thread at island load (the same work the renderer did on its
+  first fog frame before).

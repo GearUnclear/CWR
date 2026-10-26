@@ -1,0 +1,1219 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 91e2b0fe..0c43dbb8 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -27,10 +27,12 @@ constexpr FeatureInfo kFeatures[] = {
+      &FS::lightTiles, ""},
+     {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", false,
+      &FS::atmosphere, ""},
+-    {Feature::TreeShadows, "treeShadows", "Tree and building sun shadows", "shadows", "Light and shadow", "B1", false,
+-     &FS::treeShadows, ""},
+-    {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", false,
+-     &FS::softShadows, ""},
++    // B1 (shadows): the casters' cost shows in the shadow depth pass, the soft
++    // filter's in the world pass that samples it.
++    {Feature::TreeShadows, "treeShadows", "Tree and building sun shadows", "shadows", "Light and shadow", "B1", true,
++     &FS::treeShadows, "shadow"},
++    {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", true,
++     &FS::softShadows, "world"},
+     {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", false, &FS::lowSunRig, ""},
+     {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", false,
+      &FS::crownCanopy, ""},
+@@ -166,6 +168,14 @@ struct KeyTable
+                         "world textures while TAA runs; negative = sharper", &LT::taaMipBias, -1.5f, 0.5f),
+             MakeSubKnob(Feature::Taa, "taaAlpha", "TAA current frame weight", "lower = steadier and softer",
+                         &LT::taaAlpha, 0.02f, 1.0f),
++            MakeSubKnob(Feature::TreeShadows, "leafBias", "Leaf shadow bias",
++                        "shadow-map texels a leaf's own lookup moves toward the sun; 0 = striped crowns", &LT::leafBias,
++                        0.0f, 8.0f),
++            MakeSubKnob(Feature::SoftShadows, "sunSize", "Sun size",
++                        "apparent diameter (deg): 0.53 real, 1 shipped; wider = softer far shadow ends", &LT::sunSize,
++                        0.0f, 3.0f),
++            MakeSubKnob(Feature::SoftShadows, "shadowReach", "Soft shadow reach",
++                        "metres along the sun ray over which a shadow keeps softening", &LT::shadowReach, 2.0f, 80.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index b714467f..91f37c89 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -70,7 +70,7 @@ struct FeatureSet
+     float taa = 1.0f;             // A5 temporal anti-aliasing
+     float lightTiles = 1.0f;      // A6 one tiled light list for every local light
+     float atmosphere = 1.0f;      // A7 sky table for the dome and the fog colour
+-    float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map
++    float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map, leaves without self-shadow stripes
+     float softShadows = 1.0f;     // B1 contact-hardening (PCSS) sun shadows
+     float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides
+     float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy
+@@ -122,6 +122,15 @@ struct LightingTuning
+     float taaSharpen = 0.5f;
+     float taaMipBias = -0.5f;
+     float taaAlpha = 0.1f;
++    // Sun shadows (features.softShadows and features.treeShadows,
++    // SunShadows.hpp): the sun's apparent diameter in degrees for the soft
++    // shadows (0.53 is the real sun; 1 keeps contact sharp and long shadow
++    // ends soft), how far along the sun ray a blocker still softens its shadow
++    // more (metres; the penumbra stops growing there), and how many
++    // shadow-map texels a leaf's own shadow lookup moves toward the sun.
++    float sunSize = 1.0f;
++    float shadowReach = 40.0f;
++    float leafBias = 6.0f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.cpp
+new file mode 100644
+index 00000000..077d8948
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.cpp
+@@ -0,0 +1,89 @@
++#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
++
++#include <algorithm>
++#include <cmath>
++
++namespace Poseidon::remaster
++{
++
++float SunTanRadius(float sunSizeDeg)
++{
++    if (!(sunSizeDeg > 0.0f))
++        return 0.0f;
++    const double radius = 0.5 * static_cast<double>(sunSizeDeg) * 3.14159265358979323846 / 180.0;
++    return static_cast<float>(std::tan(radius));
++}
++
++float PcssSearchTexels(float tanRadius, float texelMetres, float reachMetres)
++{
++    const float t = std::max(reachMetres, kPcssMinReachMetres) * tanRadius / std::max(texelMetres, 1e-6f);
++    return std::clamp(t, kPcssMinSearchTexels, kPcssMaxSearchTexels);
++}
++
++float PcssBlockerMetres(float receiverDepth, float meanBlockerDepth, float depthPerMetre)
++{
++    return std::max(receiverDepth - meanBlockerDepth, 0.0f) / std::max(depthPerMetre, 1e-9f);
++}
++
++float PcssPenumbraTexels(float blockerMetres, float tanRadius, float texelMetres, float searchTexels)
++{
++    const float t = blockerMetres * tanRadius / std::max(texelMetres, 1e-6f);
++    return std::clamp(t, kPcssMinFilterTexels, std::max(searchTexels, kPcssMinFilterTexels));
++}
++
++int PcssSearchTaps(int tier, int omniTiers, bool temporal)
++{
++    if (temporal)
++        return kPcssTemporalTaps;
++    return tier < omniTiers ? kPcssSearchTapsNear : kPcssSearchTapsFar;
++}
++
++int PcssFilterTaps(float penumbraTexels, bool temporal)
++{
++    if (temporal)
++        return kPcssTemporalTaps;
++    return penumbraTexels < kPcssTaps24FromTexels ? 12 : (penumbraTexels < kPcssTaps32FromTexels ? 24 : 32);
++}
++
++float PcssStrength(float sunElevationDeg)
++{
++    const float t = std::clamp(
++        (sunElevationDeg - kGateSunShadowMinSunDeg) / (kPcssFullFromSunDeg - kGateSunShadowMinSunDeg), 0.0f, 1.0f);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++float PcssFrameTurn(std::uint32_t sequence)
++{
++    return static_cast<float>(std::fmod(kPcssFrameTurnStep * static_cast<double>(sequence), 1.0));
++}
++
++SunShadowConstants ComputeSunShadowConstants(const LightingTuning& tuning, const FeatureGates& gates, bool taaFrame,
++                                             std::uint32_t taaSequence)
++{
++    SunShadowConstants c;
++    const Gate& soft = gates[Feature::SoftShadows];
++    const float tanRadius = soft.on ? SunTanRadius(tuning.sunSize) : 0.0f;
++    if (tanRadius > 0.0f)
++    {
++        c.taa[0] = taaFrame ? PcssFrameTurn(taaSequence) : 0.0f;
++        c.taa[1] = taaFrame ? 1.0f : 0.0f;
++        c.taa[2] = static_cast<float>(kPcssTemporalTaps);
++        c.taa[3] = tanRadius;
++        c.pcss[0] = std::max(tuning.shadowReach, kPcssMinReachMetres);
++        c.pcss[1] = kPcssMinFilterTexels;
++        // The gate opens at 4 deg; the soft filter fades in over the next 2
++        // degrees. Forced on (gates=0) or opened by the moon key, it runs whole.
++        const float sun = gates.inputs.sunElevationDeg;
++        c.pcss[2] = (tuning.gates && sun > kGateSunShadowMinSunDeg) ? PcssStrength(sun) : 1.0f;
++    }
++    const Gate& trees = gates[Feature::TreeShadows];
++    c.pcss[3] = trees.on ? std::max(tuning.leafBias, 0.0f) : 0.0f;
++    return c;
++}
++
++bool CastsIntoSunShadowMap(bool castShadow, bool staticObject, bool treeShadowsOn)
++{
++    return castShadow || (staticObject && treeShadowsOn);
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.hpp
+new file mode 100644
+index 00000000..a1cac6b7
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.hpp
+@@ -0,0 +1,116 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++
++#include <cstdint>
++
++// Sun shadows of the remastered lighting (INTEGRATION-PLAN.md step B1): the
++// rules and the math the shadow pass, the GL backend and the shaders share.
++// Pure, no GL, no engine state.
++//
++// Two feature switches, each with the sun shadow gate (the sun above 4 deg, or
++// B3's moon key):
++//
++//   treeShadows  trees, bushes and buildings always cast into the remastered
++//                sun shadow map, whatever the legacy per-profile object shadow
++//                toggle says (the Graphics shadow tier still turns the maps
++//                off), and a leaf's own shadow lookup moves a few shadow-map
++//                texels toward the sun. Leaf cards are drawn two-sided into the
++//                map, so without that each card shadows itself in stripes; the
++//                move is in texels, so it grows with the tier and the crowns'
++//                self-shadow thins with distance, where it only flickers.
++//   softShadows  contact-hardening soft shadows (PCSS): the sun is a disk of
++//                sunSize degrees, a blocker search in the raw depth map gives
++//                how far above the receiver its blocker is, and the filter
++//                widens with that distance. Sharp where a caster meets the
++//                ground, soft at the far end of a long evening shadow. Without
++//                TAA the taps are a fixed per-pixel rotation of a 16-tap search
++//                (8 on the frustum tiers) and a 12, 24 or 32-tap filter; in a
++//                TAA frame 4 search and 4 filter taps turn every frame and the
++//                history averages them.
++//
++// The shader reads two LitConstants slots (EngineGL33_Lighting.hpp LitConst):
++//   Taa  x per-frame turn of the tap pattern (0 outside a TAA frame), y 1 in a
++//        TAA frame, z taps per frame there, w tan of the sun's angular radius
++//        (0 = the stock 12-tap filter)
++//   Pcss x blocker search reach (metres along the sun ray, shadowReach), y smallest filter
++//        radius (texels), z soft filter strength (fades in above the gate
++//        edge), w leaf lift toward the sun (texels; 0 = none)
++
++namespace Poseidon::remaster
++{
++
++// Blockers up to this far along the sun ray are found by the search (its
++// radius in the light plane is this times tan(sun angular radius)), and the
++// penumbra stops growing there: the default of LightingTuning::shadowReach.
++constexpr float kPcssSearchMetres = 40.0f;
++// The reach the shader gets is at least this (a reach of 0 would search
++// nothing).
++constexpr float kPcssMinReachMetres = 1.0f;
++// The search radius in shadow-map texels is clamped to this range.
++constexpr float kPcssMinSearchTexels = 2.0f;
++constexpr float kPcssMaxSearchTexels = 48.0f;
++// Smallest filter radius (texels): the contact end of a shadow.
++constexpr float kPcssMinFilterTexels = 0.6f;
++// Search taps without TAA: the omni (near) tiers search up to 48 texels, the
++// frustum tiers 2 to 4 (a texel there covers decimetres).
++constexpr int kPcssSearchTapsNear = 16;
++constexpr int kPcssSearchTapsFar = 8;
++// Search and filter taps per frame in a TAA frame.
++constexpr int kPcssTemporalTaps = 4;
++// Filter taps without TAA by the penumbra radius (texels): 12 below 3, 24
++// below 10, 32 above.
++constexpr float kPcssTaps24FromTexels = 3.0f;
++constexpr float kPcssTaps32FromTexels = 10.0f;
++// The soft filter fades in from the gate's edge (kGateSunShadowMinSunDeg) to
++// this sun height, so a sunset time-lapse sees no switch of filters.
++constexpr float kPcssFullFromSunDeg = 6.0f;
++// The golden ratio step of the per-frame turn (the post AO and shafts turn
++// their patterns by the same step, EngineGL33_PostFX.cpp).
++constexpr double kPcssFrameTurnStep = 0.6180339887;
++
++// tan of the sun's angular radius for an apparent diameter in degrees; 0 for
++// a size of 0 or less (the stock filter).
++float SunTanRadius(float sunSizeDeg);
++
++// The blocker search radius in texels of a tier whose texel covers
++// `texelMetres` in the light plane, for blockers up to `reachMetres` away.
++float PcssSearchTexels(float tanRadius, float texelMetres, float reachMetres = kPcssSearchMetres);
++
++// Metres along the sun ray from the receiver to its mean blocker, from their
++// shadow-map depths and the tier's depth per metre (the length of the
++// light view-projection's z row, as the shader takes it).
++float PcssBlockerMetres(float receiverDepth, float meanBlockerDepth, float depthPerMetre);
++
++// The filter radius in texels: the penumbra of a blocker `blockerMetres` away,
++// at least kPcssMinFilterTexels and at most the search radius.
++float PcssPenumbraTexels(float blockerMetres, float tanRadius, float texelMetres, float searchTexels);
++
++int PcssSearchTaps(int tier, int omniTiers, bool temporal);
++int PcssFilterTaps(float penumbraTexels, bool temporal);
++
++// The soft filter's share at a sun height: 0 at or below the gate's 4 deg, 1
++// from kPcssFullFromSunDeg (smoothstep between).
++float PcssStrength(float sunElevationDeg);
++
++// The pattern's turn (in turns, [0, 1)) for TAA frame `sequence`.
++float PcssFrameTurn(std::uint32_t sequence);
++
++struct SunShadowConstants
++{
++    float taa[4] = {0.0f, 0.0f, 0.0f, 0.0f};  // LitConst::Taa
++    float pcss[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // LitConst::Pcss
++};
++
++// The two slots for this frame: `taaFrame` when the frame's world passes are
++// drawn jittered and resolved (EngineGL33::TaaWantedThisFrame), `taaSequence`
++// the TAA frame index.
++SunShadowConstants ComputeSunShadowConstants(const LightingTuning& tuning, const FeatureGates& gates, bool taaFrame,
++                                             std::uint32_t taaSequence);
++
++// Whether an object goes into the sun shadow map: its own say (the legacy
++// object and vehicle shadow toggles, Object::CastShadow), or, with the
++// treeShadows gate on, any static object (trees, bushes, buildings).
++bool CastsIntoSunShadowMap(bool castShadow, bool staticObject, bool treeShadowsOn);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
+index e355f431..43dc4e14 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
+@@ -9,6 +9,7 @@
+ #include <Poseidon/World/Simulation/FrameInv.hpp>
+ #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
+ #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
++#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+ 
+ #include <algorithm>
+ #include <chrono>
+@@ -113,6 +114,12 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
+     const float smShadowsZ = ENGINE_CONFIG.shadowsZ;
+     const float smShadowFar = smCamNear + smCap.distanceCoef * (smShadowsZ - smCamNear);
+     const float smCasterMaxDist2 = Square(smShadowFar);
++    // Remastered sun shadows (Graphics/Remaster/SunShadows.hpp): with the
++    // treeShadows gate on, every static object casts whatever the legacy
++    // object-shadow toggle says.
++    remaster::FeatureGates smGates;
++    const bool smTreeShadows = GEngine->LightingRemasterActive() && GEngine->GetFeatureGates(smGates) &&
++                               smGates[remaster::Feature::TreeShadows].on;
+ 
+     // Walk one shape's faces in WORLD space, dispatching triangles to the emit
+     // callbacks. Used for live (camera-relative stream) and cache (world-space
+@@ -276,7 +283,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
+         // casters. Shadow maps want every real caster the camera can see, so gate
+         // only on "this never casts" (model NoShadow flag / CastShadow opt-out);
+         // per-face NoShadow / alpha is still handled by ClassifyShadowCaster below.
+-        if ((oi->shape->Special() & NoShadow) || !oi->object->CastShadow())
++        if ((oi->shape->Special() & NoShadow) ||
++            !remaster::CastsIntoSunShadowMap(oi->object->CastShadow(), oi->object->Static(), smTreeShadows))
+         {
+             continue;
+         }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index a0a7cd0a..fdad8b3f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -774,10 +774,11 @@ class EngineGL33 : public Engine
+     unsigned int _terrainHorizonTex = 0; // GL_TEXTURE_2D_ARRAY RGBA16, 4 layers
+     unsigned int _terrainHeightTex = 0;  // GL_RG32F: height, sky visibility
+     unsigned int _cloudNoiseTex = 0;     // GL_R8, tileable
+-    unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: unit 2 when no shadow map
++    unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: units 2 and 6 when no shadow map
+     unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
+     unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
+     unsigned int _shadowCompareSampler = 0;
++    unsigned int _shadowRawSampler = 0; // unit 6: the cascade array as raw depth (soft-shadow blocker search)
+     unsigned int _shaderProgramRemaster[NVertexShaders][NPixelShaderSpecular][NPixelShaderModes][NPixelShaders] = {};
+ 
+     void InitLightingResources();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 22acd2a2..d21ada0c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -2,8 +2,9 @@
+ //
+ // The remastered program set (EngineGL33_LightingShaders.cpp) reads the light
+ // rig, the per-draw material and the local lights from the LitConstants block
+-// (binding 3), the shadow map through a comparison sampler on unit 2, the
+-// terrain horizon map on units 3 and 4 and the cloud noise on unit 5. Selection
++// (binding 3), the shadow map through a comparison sampler on unit 2 (and as
++// raw depth on unit 6), the terrain horizon map on units 3 and 4 and the cloud
++// noise on unit 5. Selection
+ // between the remastered and classic sets happens in DoSelectPixelShader via
+ // SelectProgram; Classic leaves every classic upload and program untouched.
+ 
+@@ -13,6 +14,7 @@
+ #include <Poseidon/Graphics/Core/PerfCounters.hpp>
+ #include <Poseidon/Graphics/Core/UboMirror.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
++#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+ #include <Poseidon/Core/Global.hpp>
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+@@ -144,6 +146,10 @@ void EngineGL33::InitLightingResources()
+     // unit until a shadow map replaces it.
+     GL33Bind::ActiveUnit(kShadowMapUnit);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
++    // The same rule for unit 6, where the remastered programs read the array
++    // as raw depth (the soft shadows' blocker search).
++    GL33Bind::ActiveUnit(kShadowRawUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+     GL33Bind::ActiveUnit(0);
+ 
+     glGenSamplers(1, &_shadowCompareSampler);
+@@ -154,6 +160,16 @@ void EngineGL33::InitLightingResources()
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+ 
++    // Raw depth: nearest texel, no comparison. Unit 6 keeps it for good; no
++    // other program samples that unit.
++    glGenSamplers(1, &_shadowRawSampler);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
++    glBindSampler(kShadowRawUnit, _shadowRawSampler);
++
+     // The map (if any) belongs to the landscape, not the context: re-upload it.
+     _terrainMapDirty = _terrainMap != nullptr;
+ }
+@@ -187,6 +203,12 @@ void EngineGL33::DeinitLightingResources()
+         glDeleteSamplers(1, &_shadowCompareSampler);
+         _shadowCompareSampler = 0;
+     }
++    if (_shadowRawSampler)
++    {
++        glBindSampler(kShadowRawUnit, 0);
++        glDeleteSamplers(1, &_shadowRawSampler);
++        _shadowRawSampler = 0;
++    }
+     if (s_litUBO)
+     {
+         glDeleteBuffers(1, &s_litUBO);
+@@ -303,10 +325,14 @@ void EngineGL33::BindLightingTextures()
+     if (!_remasterPrograms)
+         return;
+     const bool map = _terrainHorizonTex && _terrainHeightTex;
++    const bool shadowMap = ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0;
+     GL33Bind::ActiveUnit(kShadowMapUnit);
+-    if (!(ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0))
++    if (!shadowMap)
+         glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+     glBindSampler(kShadowMapUnit, _shadowCompareSampler);
++    GL33Bind::ActiveUnit(kShadowRawUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, shadowMap ? _shadowMapTex : _dummyDepthArray);
++    glBindSampler(kShadowRawUnit, _shadowRawSampler);
+     GL33Bind::ActiveUnit(kTerrainHorizonUnit);
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+@@ -506,6 +532,12 @@ void EngineGL33::UploadLitFrameConstants()
+     // The shadow map was rendered from where the camera was then.
+     SetSlot(LitConst::ShadowDelta, cam.X() - _shadowCamPos[0], cam.Y() - _shadowCamPos[1], cam.Z() - _shadowCamPos[2],
+             kShadowFilterTexels * _lighting.shadowSoftness);
++    // Sun shadows (B1): the soft filter with its per-frame turn under TAA, and
++    // the leaves' lift toward the sun; zero while their gates are off.
++    const rm::SunShadowConstants sunShadows =
++        rm::ComputeSunShadowConstants(_lighting, _featureGates, TaaWantedThisFrame(), _taa.sequence);
++    SetSlot(LitConst::Taa, sunShadows.taa[0], sunShadows.taa[1], sunShadows.taa[2], sunShadows.taa[3]);
++    SetSlot(LitConst::Pcss, sunShadows.pcss[0], sunShadows.pcss[1], sunShadows.pcss[2], sunShadows.pcss[3]);
+     const float debug =
+         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 25735cf1..f2167fc8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -78,8 +78,11 @@ constexpr int kShadowMapUnit = 2; // cascade array; a complete depth array from
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++// The cascade array again under a non-compare NEAREST sampler (the soft
++// shadows' blocker search, B1): like unit 2, a complete depth array from init
++// on (the stand-in, then each cascade array as it is created).
++constexpr int kShadowRawUnit = 6;
+ // Allocated to the features still to land; no shader samples them yet.
+-constexpr int kShadowRawUnit = 6;     // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
+ constexpr int kSkyLutUnit = 8;        // sky-view table (sky table)
+ constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
+ constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
+@@ -149,10 +152,11 @@ struct LitSampler
+     int unit;
+ };
+ constexpr LitSampler kLitSamplers[] = {
+-    {"shadowMap", kShadowMapUnit},
+-    {"terrainHorizon", kTerrainHorizonUnit},
+-    {"terrainHeight", kTerrainHeightUnit},
+-    {"cloudNoise", kCloudNoiseUnit},
++    {"shadowMap", kShadowMapUnit},           // the cascade array (comparison sampler in remastered)
++    {"terrainHorizon", kTerrainHorizonUnit}, // horizon angles
++    {"terrainHeight", kTerrainHeightUnit},   // height, sky visibility, ground tint
++    {"cloudNoise", kCloudNoiseUnit},         // cloud-shadow noise
++    {"shadowDepth", kShadowRawUnit},         // the cascade array as raw depth (soft shadows)
+ };
+ 
+ // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
+@@ -191,14 +195,26 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    // Planned for the materials' per-draw class (LitConstPlanned::MatClass): a
++    // padding member of the block until it lands.
++    Reserved58 = 58,
++    // Sun shadows (B1, Graphics/Remaster/SunShadows.hpp): x per-frame turn of
++    // the soft shadows' taps, y 1 in a TAA frame, z taps per frame there,
++    // w tan(sun angular radius) (0 = the stock filter).
++    Taa = 59,
++    // x blocker search reach (m), y smallest filter radius (texels), z soft
++    // filter strength, w leaf lift toward the sun (texels).
++    Pcss = 60,
++    Count = 61,
+ };
+ constexpr int MaxLights = 8;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Reserved58 == LightDir + MaxLights, "LitConst slots out of order");
++static_assert(Taa == Reserved58 + 1 && Pcss == Taa + 1, "LitConst slots out of order");
++static_assert(Count == Pcss + 1, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ // The slots allocated to the features still to land (INTEGRATION-PLAN.md
+@@ -206,12 +222,11 @@ static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
+ // first, next to the per-draw material and light slots. A step that lands a
+ // feature moves its rows into LitConst, declares them in LitConstantsBlock()
+ // (a slot below it that has not landed yet becomes a padding member there) and
+-// raises LitConst::Count, which the upload and the shaders follow.
++// raises LitConst::Count, which the upload and the shaders follow. B1 landed
++// Taa (59) and Pcss (60), with MatClass as the padding member Reserved58.
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58;     // materials, per draw: class, object kind, blend, hash
+-constexpr int Taa = 59;          // temporal: frame index, stochastic flags, taps, penumbra per metre
+-constexpr int Pcss = 60;         // shadows: search radius, minimum texels
+ constexpr int SkyRight = 61;     // sky pass, shared by the sky table and clouds: camera right * tan(fov x / 2)
+ constexpr int SkyUp = 62;        // sky pass: camera up * tan(fov y / 2)
+ constexpr int SkyFwd = 63;       // sky pass: camera forward
+@@ -231,7 +246,8 @@ constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
+ constexpr int Detail = 77;       // texsharp: terrain detail constants
+ constexpr int Haze = 78;         // haze: the analytic fallback for blended surfaces
+ constexpr int End = 79;          // one past the last planned slot
+-static_assert(MatClass == LitConst::Count, "the planned slots follow the declared ones");
++static_assert(MatClass == LitConst::Reserved58, "a planned slot below the declared ones is a padding member");
++static_assert(SkyRight == LitConst::Count, "the planned slots follow the declared ones");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+ } // namespace LitConstPlanned
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 9ad3e93c..ea8f1abd 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -304,6 +304,9 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
++    vec4 litReserved58;   // 58: planned per-draw material class (padding until it lands)
++    vec4 litTaa;          // 59: x soft-shadow tap turn, y 1 = TAA frame, z taps per frame, w tan(sun radius)
++    vec4 litPcss;         // 60: x search reach (m), y min filter (texels), z soft strength, w leaf lift (texels)
+ };
+ )";
+ 
+@@ -316,6 +319,7 @@ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound i
+ uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
+ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
+ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
++uniform sampler2DArray shadowDepth;        // unit 6: the cascade array again, raw depth (soft-shadow blocker search)
+ 
+ in vec4 vColor;
+ in vec4 vSpecColor;
+@@ -356,6 +360,68 @@ const vec2 kPoisson[12] = vec2[](
+     vec2( 0.962, -0.195), vec2( 0.473, -0.480), vec2( 0.519,  0.767), vec2( 0.185, -0.893),
+     vec2( 0.507,  0.064), vec2( 0.896,  0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+ 
++// The stock filter: 12 hardware comparisons on the Poisson disc, `radius` in
++// light-plane uv.
++float pcfVisibility(vec2 suv, int c, float zRef, float radius) {
++    float lit = 0.0;
++    for (int k = 0; k < 12; ++k)
++        lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), zRef));
++    return lit / 12.0;
++}
++
++// Interleaved gradient noise: a value per pixel that differs from its
++// neighbours, here the turn of the soft filter's tap pattern.
++float shadowNoise(vec2 p) {
++    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
++}
++
++// Contact-hardening soft sun shadow (PCSS, softShadows; SunShadows.hpp). The
++// sun is a disk of angular radius atan(litTaa.w). A blocker search in the raw
++// depth map (shadowDepth) finds the mean depth of what shadows the receiver
++// within litPcss.x metres along the sun ray; the penumbra in the light plane is
++// that distance times the radius' tangent, so the shadow is sharp where a
++// caster meets the ground and soft at the far end of a long evening shadow.
++// Taps are golden-angle (Vogel) spirals turned per pixel; each filter tap is a
++// hardware 2x2 comparison. Without TAA the search takes 16 taps on the near
++// tiers (8 on the frustum tiers, where it spans a few texels) and the filter
++// 12, 24 or 32 by its width; in a TAA frame (litTaa.y) 4 of each, turned anew
++// every frame (litTaa.x), and the history averages them. `zRef` is the
++// receiver's biased depth, `ts` one texel in uv, `texelWorld` one texel in
++// metres, `tanSlope` the receiver's tilt against the light (its depth rises
++// across the kernel; terrain, which never casts, passes 0).
++float pcssVisibility(vec2 suv, int c, float zRef, float ts, float texelWorld, float tanSlope) {
++    float tanA = litTaa.w;
++    float depthPerM = max(length(vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2])), 1e-9);
++    bool temporal = litTaa.y > 0.5;
++    float turn = 6.2831853 * (shadowNoise(gl_FragCoord.xy) + litTaa.x);
++    float slopeDepth = tanSlope * texelWorld * depthPerM; // depth per texel of tap offset
++    float searchT = clamp(litPcss.x * tanA / texelWorld, 2.0, 48.0);
++    int nSearch = temporal ? int(litTaa.z) : (c < int(cascadeCtl.w) ? 16 : 8);
++    float z0 = texture(shadowDepth, vec3(suv, float(c))).r;
++    float bSum = 0.0;
++    float bN = 0.0;
++    if (z0 < zRef) { bSum += z0; bN += 1.0; }
++    for (int k = 0; k < 16; ++k) {
++        if (k >= nSearch) break;
++        float r = sqrt((float(k) + 0.5) / float(nSearch)) * searchT;
++        float a = float(k) * 2.39996323 + turn;
++        float zb = texture(shadowDepth, vec3(suv + vec2(cos(a), sin(a)) * (r * ts), float(c))).r;
++        if (zb < zRef - r * slopeDepth) { bSum += zb; bN += 1.0; }
++    }
++    if (bN < 0.5) return 1.0;
++    float dB = max(zRef - bSum / bN, 0.0) / depthPerM; // metres along the sun ray
++    float rT = clamp(dB * tanA / texelWorld, litPcss.y, searchT);
++    int nTaps = temporal ? int(litTaa.z) : (rT < 3.0 ? 12 : (rT < 10.0 ? 24 : 32));
++    float lit = 0.0;
++    for (int k = 0; k < 32; ++k) {
++        if (k >= nTaps) break;
++        float r = sqrt((float(k) + 0.5) / float(nTaps)) * rT;
++        float a = float(k) * 2.39996323 + turn + 1.3;
++        lit += texture(shadowMap, vec4(suv + vec2(cos(a), sin(a)) * (r * ts), float(c), zRef - r * slopeDepth));
++    }
++    return lit / float(nTaps);
++}
++
+ // Sun visibility from the cascaded shadow maps: 1 = lit. Same tier selection,
+ // cross-fade and far fade as the classic shaders, re-anchored to the camera
+ // position the depth pass used. Casters self-shadow, so their lookup point is
+@@ -363,8 +429,10 @@ const vec2 kPoisson[12] = vec2[](
+ // two texels at grazing sun (no stripes on walls and leaf cards). The terrain
+ // never casts into the map and passes offsetScale 0, and up-facing surfaces fade
+ // the offset out: an offset there would slide every shadow away from its caster
+-// by metres at a low sun.
+-float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
++// by metres at a low sun. Leaves (treeShadows) also move their lookup
++// `leafLift` texels toward the sun: their two-sided cards are in the map, and
++// no normal keeps a card at a grazing sun off its own depth.
++float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
+     if (shadowCtl.x < 0.5) return 1.0;
+     vec3 rel = vWorldRel + litShadowDelta.xyz;
+     int nC = int(cascadeCtl.x);
+@@ -397,7 +465,9 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
+         // themselves, and an offset would shift their shadow edges against the
+         // terrain beside them.
+         float offset = texelWorld * offsetScale * (0.4 + 1.6 * slope) * (1.0 - smoothstep(0.75, 0.97, n.y));
+-        vec4 cp = cascadeVP[c] * vec4(rel + n * offset, 1.0);
++        vec3 at = rel + n * offset;
++        if (leafLift > 0.0) at += litSunDir.xyz * (leafLift * texelWorld);
++        vec4 cp = cascadeVP[c] * vec4(at, 1.0);
+         vec3 sc = cp.xyz / cp.w;
+         vec2 suv = sc.xy * 0.5 + 0.5;
+         if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
+@@ -405,10 +475,16 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
+             // Looser tiers cover more ground per texel: shrink their radius so
+             // the penumbra width in metres stays comparable across tiers.
+             float radius = ts * litShadowDelta.w / float(c + 1);
+-            float lit = 0.0;
+-            for (int k = 0; k < 12; ++k)
+-                lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), sc.z - bias));
+-            litSum += w * (lit / 12.0);
++            // The soft filter (fading in over 2 degrees above the gate's edge)
++            // or the stock one.
++            float soft = litTaa.w > 0.0 ? litPcss.z : 0.0;
++            float lit = 1.0;
++            if (soft < 1.0) lit = pcfVisibility(suv, c, sc.z - bias, radius);
++            if (soft > 0.0) {
++                float tanSlope = offsetScale > 0.0 ? min(slope / max(nl, 0.25), 4.0) : 0.0;
++                lit = mix(lit, pcssVisibility(suv, c, sc.z - bias, ts, texelWorld, tanSlope), soft);
++            }
++            litSum += w * lit;
+             wSum += w;
+         }
+     }
+@@ -514,7 +590,10 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     float nl = max(dot(n, l), 0.0);
+     float nlCast = max(dot(nCast, l), 0.0);
+     float skyVisibility;
+-    float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0) *
++    // Leaves (not grass, which shades as terrain) lift their lookup toward the
++    // sun: treeShadows' cure for the stripes a two-sided card casts on itself.
++    float leafLift = (foliage && !terrain) ? litPcss.w : 0.0;
++    float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift) *
+                           terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+     g_sunVisibility = sunVisibility;
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+index 1cc0bedf..1a298493 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_ShadowDepth.cpp
+@@ -17,6 +17,7 @@
+ #include <vector>
+ 
+ using Poseidon::gl33lighting::kShadowMapUnit;
++using Poseidon::gl33lighting::kShadowRawUnit;
+ 
+ // Self-contained offscreen depth render used to validate the GL shadow-depth
+ // path against the CPU oracle. Renders
+@@ -178,6 +179,10 @@ bool EnsureArrayTarget(int res, int layers)
+     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    // Unit 6 reads the same array as raw depth (the remastered soft shadows)
++    // and held the deleted one too: give it the new array as well.
++    GL33Bind::ActiveUnit(kShadowRawUnit);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);
+ 
+     glGenFramebuffers(1, &s_arrFbo);
+     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index ed6cc29e..7f9ec248 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -169,6 +169,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_ubo_mirror.cpp
+     Graphics/test_post_stages.cpp
+     Graphics/test_temporal_aa.cpp
++    Graphics/test_sun_shadows.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index 411c31c0..2a735289 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -311,7 +311,8 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         CHECK(GetKeyValue(t, *k) == 0.3f);
+         CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.3,baseline"), *k) == sub.value);
+     }
+-    // No other switch has sub-knobs yet: every knob with a parent is TAA's.
++    // Every knob with a parent belongs to a landed switch: TAA's three and the
++    // sun shadows' three (below).
+     int children = 0;
+     for (int i = 0; i < LightingKeyCount(); ++i)
+     {
+@@ -319,11 +320,49 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         if (!k.parent)
+             continue;
+         INFO(k.key);
+-        CHECK(std::string_view(k.parent) == "taa");
+-        CHECK(FindFeature(k.parent) != nullptr);
++        const FeatureInfo* parent = FindFeature(k.parent);
++        REQUIRE(parent != nullptr);
++        CHECK(parent->landed);
++        CHECK(std::string_view(k.group) == parent->track);
+         ++children;
+     }
+-    CHECK(children == 3);
++    CHECK(children == 6);
++}
++
++TEST_CASE("Feature switches: the sun shadows have landed, with the sun size and the leaf bias",
++          "[remaster][FeatureSwitches]")
++{
++    // B1: plan 3.1's sub-knob sunSize (1 deg) and the reach of the softening
++    // (40 m) under softShadows, and the leaf bias (6 texels toward the sun)
++    // under treeShadows, all in the shadows track's group.
++    struct Sub
++    {
++        const char* key;
++        const char* parent;
++        float value;
++    };
++    for (const Sub& sub : {Sub{"sunSize", "softShadows", 1.0f}, Sub{"shadowReach", "softShadows", 40.0f},
++                           Sub{"leafBias", "treeShadows", 6.0f}})
++    {
++        INFO(sub.key);
++        const LightingKey* k = FindLightingKey(sub.key);
++        REQUIRE(k != nullptr);
++        CHECK(k->kind == KeyKind::Knob);
++        REQUIRE(k->parent != nullptr);
++        CHECK(std::string_view(k->parent) == sub.parent);
++        CHECK(std::string_view(k->group) == "shadows");
++        CHECK(KeyDefault(*k) == sub.value);
++        CHECK(GetKeyValue(Apply(std::string("remastered,") + sub.key + "=0.5"), *k) == 0.5f);
++        CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.5,baseline"), *k) == sub.value);
++    }
++    for (Feature f : {Feature::TreeShadows, Feature::SoftShadows})
++    {
++        const FeatureInfo& info = GetFeatureInfo(f);
++        INFO(info.key);
++        CHECK(info.landed);
++        CHECK(std::string_view(info.step) == "B1");
++        CHECK(std::string_view(info.track) == "shadows");
++    }
+ }
+ 
+ TEST_CASE("Feature gates: the light list runs with a lamp at night or a combat light", "[remaster][FeatureGates]")
+@@ -592,12 +631,13 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
+-TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothing else has",
++TEST_CASE("Feature switches: the frame-cost switches, TAA and the sun shadows have landed, nothing else has",
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+     // classic): triFeatureState no longer marks them inert, and the overlay
+-    // shows the opaque objects' GPU section for them. A5 lands taa.
++    // shows the opaque objects' GPU section for them. A5 lands taa, B1
++    // treeShadows (the shadow depth pass) and softShadows (the world pass).
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -607,20 +647,25 @@ TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothin
+         INFO(info.key);
+         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
+         const bool taa = info.id == Feature::Taa;
+-        CHECK(info.landed == (perf || taa));
++        const bool shadows = info.id == Feature::TreeShadows || info.id == Feature::SoftShadows;
++        CHECK(info.landed == (perf || taa || shadows));
+         if (info.landed)
+         {
+-            CHECK(std::string_view(info.step) == (perf ? "A4" : "A5"));
++            CHECK(std::string_view(info.step) == (perf ? "A4" : (taa ? "A5" : "B1")));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+     }
++    CHECK(std::string_view(GetFeatureInfo(Feature::TreeShadows).gpuSection) == "shadow");
++    CHECK(std::string_view(GetFeatureInfo(Feature::SoftShadows).gpuSection) == "world");
+     const LightingTuning t = Apply("remastered");
+     FeatureGates g = ComputeFeatureGates(GateInputs{}, t);
+     const std::string s = FeatureStateString(t, g);
+     INFO(s);
+     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
+     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+-    CHECK(s.find("landed=3/26") != std::string::npos);
++    CHECK(s.find(" treeShadows=1:on:sun-above-4-deg ") != std::string::npos);
++    CHECK(s.find(" softShadows=1:on:sun-above-4-deg ") != std::string::npos);
++    CHECK(s.find("landed=5/26") != std::string::npos);
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
+index 5531b0cd..50cd6578 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_gl_state_cache_audit.cpp
+@@ -316,6 +316,55 @@ TEST_CASE("A recreated cascade array takes unit 2, where the deleted one was sam
+     REQUIRE(between.find("glActiveTexture(") == std::string::npos);
+ }
+ 
++// Unit 6 (kShadowRawUnit, B1's soft shadows) holds the same cascade array under
++// a raw-depth sampler: the same two ways to lose a complete array there, and
++// the same cures.
++TEST_CASE("Shadow raw-depth unit 6 holds the stand-in from init and each new cascade array",
++          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
++{
++    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
++    REQUIRE_FALSE(lighting.empty());
++    const std::string init = FunctionBody(lighting, "void EngineGL33::InitLightingResources()");
++    REQUIRE_FALSE(init.empty());
++    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowRawUnit);";
++    const std::string bindDummy = "glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);";
++    const size_t made = init.find("_dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT");
++    REQUIRE(made != std::string::npos);
++    const size_t unit6 = init.find(unitCall, made);
++    REQUIRE(unit6 != std::string::npos);
++    const size_t bind = init.find(bindDummy, unit6);
++    REQUIRE(bind != std::string::npos);
++    std::string between = init.substr(unit6 + unitCall.size(), bind - unit6 - unitCall.size());
++    CAPTURE(between);
++    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
++    // Its sampler reads raw depth (no comparison) and stays on the unit.
++    CHECK(init.find("glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);") != std::string::npos);
++    CHECK(init.find("glBindSampler(kShadowRawUnit, _shadowRawSampler);") != std::string::npos);
++
++    // Every lit pass binds the live array there, or the stand-in.
++    const std::string bindTex = FunctionBody(lighting, "void EngineGL33::BindLightingTextures()");
++    const size_t unit6b = bindTex.find(unitCall);
++    REQUIRE(unit6b != std::string::npos);
++    CHECK(bindTex.find("glBindTexture(GL_TEXTURE_2D_ARRAY, shadowMap ? _shadowMapTex : _dummyDepthArray);", unit6b) !=
++          std::string::npos);
++
++    // A recreated array is bound on unit 6 too, straight after its creation,
++    // before anything can sample the deleted one's texture 0 there.
++    const std::string depth = ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp");
++    const std::string ensure = FunctionBody(depth, "bool EnsureArrayTarget(int res, int layers)");
++    REQUIRE_FALSE(ensure.empty());
++    const size_t created = ensure.find("glTexImage3D(GL_TEXTURE_2D_ARRAY");
++    REQUIRE(created != std::string::npos);
++    const size_t unit6e = ensure.find(unitCall, created);
++    REQUIRE(unit6e != std::string::npos);
++    const size_t bindNew = ensure.find("glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);", unit6e);
++    REQUIRE(bindNew != std::string::npos);
++    between = ensure.substr(unit6e + unitCall.size(), bindNew - unit6e - unitCall.size());
++    CAPTURE(between);
++    CHECK(between.find("ActiveUnit(") == std::string::npos);
++    CHECK(ensure.find("return false", created) > bindNew); // bound even if the FBO then fails
++}
++
+ TEST_CASE("The texture-array target is unbound only on the upload unit",
+           "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+ {
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 4f058c21..e58a35df 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1085,6 +1085,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litLightColor", LC::LightColor, LC::MaxLights},
+         {"litLightAmb", LC::LightAmb, LC::MaxLights},
+         {"litLightDir", LC::LightDir, LC::MaxLights},
++        {"litReserved58", LC::Reserved58, 1},
++        {"litTaa", LC::Taa, 1},
++        {"litPcss", LC::Pcss, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+     auto checkBlock = [](const std::string& block)
+@@ -1144,8 +1147,10 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+             CHECK(CountOf(program, shared) == 1);
+     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
+ 
+-    // The planned slots continue the declared ones.
+-    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Count));
++    // The planned slots continue the declared ones; one below them that has
++    // not landed is a padding member (B1 landed Taa and Pcss above MatClass).
++    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved58));
++    CHECK(gl::LitConstPlanned::SkyRight == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.
+     std::ostringstream range;
+@@ -1173,6 +1178,8 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
+     // The shadow-map audits of test_gl_state_cache_audit.cpp pin binds to this
+     // constant; the shaders' comments and the classic programs say unit 2.
+     CHECK(gl::kShadowMapUnit == 2);
++    // The soft shadows read the same array as raw depth on unit 6 (plan 3.4).
++    CHECK(gl::kShadowRawUnit == 6);
+ 
+     // Every sampler a remastered program declares has its unit in the table
+     // (tex0 and tex1 are the material units): an unbound sampler reads unit 0.
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_sun_shadows.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_sun_shadows.cpp
+new file mode 100644
+index 00000000..1df8616d
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_sun_shadows.cpp
+@@ -0,0 +1,307 @@
++#include <catch2/catch_approx.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
++#include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <cmath>
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <sstream>
++#include <string>
++
++// Sun shadows of the remastered lighting (INTEGRATION-PLAN.md step B1,
++// Graphics/Remaster/SunShadows.hpp): the soft filter's blocker-to-penumbra
++// conversion against the real cascade matrices, the frame constants the shader
++// reads, the caster rule of treeShadows, the near tiers of softShadows, and
++// the shader and shadow-pass contracts that keep both switches' "off" the look
++// before B1.
++
++using namespace Poseidon::remaster;
++namespace sm = Poseidon::shadow;
++namespace gl = Poseidon::gl33lighting;
++using Catch::Approx;
++
++namespace
++{
++
++std::string ReadTextFile(const std::filesystem::path& p)
++{
++    std::ifstream f(p);
++    if (!f.is_open())
++        return {};
++    std::stringstream ss;
++    ss << f.rdbuf();
++    return ss.str();
++}
++
++std::filesystem::path EngineDir()
++{
++    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine";
++}
++
++LightingTuning Apply(const std::string& setting)
++{
++    LightingTuning t{};
++    bool modeSet = false;
++    const std::string why = ApplyLightingSetting(t, setting, modeSet);
++    INFO(setting << ": " << why);
++    REQUIRE(why.empty());
++    return t;
++}
++
++GateInputs SunAt(float elevationDeg)
++{
++    GateInputs in;
++    in.sunElevationDeg = elevationDeg;
++    in.moonElevationDeg = -30.0f;
++    return in;
++}
++
++// The length of row `r` (xyz) of a light view-projection, as the shader reads
++// it from the column-major uniform (cascadeVP[c][0][r], [1][r], [2][r]).
++float RowLength(const sm::Mat4& m, int r)
++{
++    return std::sqrt(m.at(r, 0) * m.at(r, 0) + m.at(r, 1) * m.at(r, 1) + m.at(r, 2) * m.at(r, 2));
++}
++
++std::string Num(float v)
++{
++    char buf[32];
++    std::snprintf(buf, sizeof(buf), "%.1f", static_cast<double>(v));
++    return buf;
++}
++
++} // namespace
++
++TEST_CASE("Sun shadows: the soft filter's penumbra from a real cascade matrix", "[remaster][SunShadows]")
++{
++    // The first near tier as the shadow pass builds it: a camera-centred
++    // sphere of 30.7 m at 2048 texels (3 cm per texel), the sun 20 degrees up
++    // in the south-west.
++    const float elev = 20.0f * 3.14159265f / 180.0f;
++    const float az = 225.0f * 3.14159265f / 180.0f;
++    const sm::Vec3 toSun{std::cos(elev) * std::sin(az), std::sin(elev), std::cos(elev) * std::cos(az)};
++    const sm::Vec3 travel{-toSun.x, -toSun.y, -toSun.z};
++    const int res = 2048;
++    const float radius = 30.72f;
++    const sm::Mat4 vp = sm::OmniSphereLightVP(sm::Vec3{6940.0f, 120.0f, 9964.0f}, radius, travel,
++                                              sm::Vec3{0.0f, 1.0f, 0.0f}, res, 50.0f);
++
++    // One texel in metres, the shader's way (2 ts / |row 0|): the sphere's
++    // diameter plus the two snap texels over the resolution.
++    const float ts = 1.0f / static_cast<float>(res);
++    const float texelWorld = 2.0f * ts / RowLength(vp, 0);
++    CHECK(texelWorld == Approx((2.0f * radius) / res * (1.0f + 2.0f / res)).epsilon(1e-4));
++
++    // A blocker 10 m toward the sun from a receiver (camera-relative points):
++    // their depth difference over the z row's length is the 10 m.
++    const sm::Vec3 receiver{3.0f, -1.7f, 5.0f};
++    const float d = 10.0f;
++    const sm::Vec3 blocker{receiver.x + toSun.x * d, receiver.y + toSun.y * d, receiver.z + toSun.z * d};
++    const float zR = sm::TransformPoint(vp, receiver).z;
++    const float zB = sm::TransformPoint(vp, blocker).z;
++    CHECK(zB < zR); // nearer the light
++    const float depthPerMetre = RowLength(vp, 2);
++    CHECK(PcssBlockerMetres(zR, zB, depthPerMetre) == Approx(d).epsilon(1e-3));
++    // Both points fall on the same light-plane texel: the ray is the light's.
++    const sm::Vec3 pr = sm::TransformPoint(vp, receiver);
++    const sm::Vec3 pb = sm::TransformPoint(vp, blocker);
++    CHECK(pr.x == Approx(pb.x).margin(1e-5));
++    CHECK(pr.y == Approx(pb.y).margin(1e-5));
++    // A blocker behind the receiver never counts.
++    CHECK(PcssBlockerMetres(zB, zR, depthPerMetre) == 0.0f);
++
++    // The 1 deg sun: tan(0.5 deg). The penumbra radius of the 10 m blocker is
++    // 10 m * tan(0.5 deg) = 8.7 cm, about 3 texels of 3 cm.
++    const float tanA = SunTanRadius(1.0f);
++    CHECK(tanA == Approx(std::tan(0.5 * 3.14159265358979 / 180.0)).epsilon(1e-6));
++    CHECK(SunTanRadius(0.0f) == 0.0f);
++    CHECK(SunTanRadius(-1.0f) == 0.0f);
++    const float searchT = PcssSearchTexels(tanA, texelWorld);
++    CHECK(searchT == Approx(kPcssSearchMetres * tanA / texelWorld).epsilon(1e-5)); // 11.6 texels, inside the clamp
++    const float penumbra = PcssPenumbraTexels(d, tanA, texelWorld, searchT);
++    CHECK(penumbra == Approx(d * tanA / texelWorld).epsilon(1e-5));
++    CHECK(penumbra * texelWorld == Approx(0.0873f).epsilon(1e-2));
++    // At contact the filter keeps its smallest radius; far blockers stop at
++    // the search radius; a coarse far tier searches at least 2 texels.
++    CHECK(PcssPenumbraTexels(0.0f, tanA, texelWorld, searchT) == kPcssMinFilterTexels);
++    CHECK(PcssPenumbraTexels(500.0f, tanA, texelWorld, searchT) == searchT);
++    CHECK(PcssSearchTexels(tanA, 0.6f) == kPcssMinSearchTexels);
++    CHECK(PcssSearchTexels(tanA, 0.001f) == kPcssMaxSearchTexels);
++}
++
++TEST_CASE("Sun shadows: taps by tier, width and TAA", "[remaster][SunShadows]")
++{
++    // Without TAA: 16 search taps on the omni tiers, 8 on the frustum tiers;
++    // the filter 12, 24 or 32 by its radius. With TAA: 4 and 4, every frame.
++    CHECK(PcssSearchTaps(0, 2, false) == 16);
++    CHECK(PcssSearchTaps(1, 2, false) == 16);
++    CHECK(PcssSearchTaps(2, 2, false) == 8);
++    CHECK(PcssSearchTaps(3, 2, false) == 8);
++    CHECK(PcssSearchTaps(0, 2, true) == 4);
++    CHECK(PcssFilterTaps(0.6f, false) == 12);
++    CHECK(PcssFilterTaps(2.99f, false) == 12);
++    CHECK(PcssFilterTaps(3.0f, false) == 24);
++    CHECK(PcssFilterTaps(10.0f, false) == 32);
++    CHECK(PcssFilterTaps(30.0f, true) == 4);
++    // The turn is the post pass's golden-ratio step.
++    CHECK(PcssFrameTurn(0) == 0.0f);
++    CHECK(PcssFrameTurn(1) == Approx(0.618034f).epsilon(1e-5));
++    CHECK(PcssFrameTurn(2) == Approx(0.236068f).epsilon(1e-4));
++    for (std::uint32_t n : {3u, 100u, 65535u, 4000000000u})
++    {
++        CHECK(PcssFrameTurn(n) >= 0.0f);
++        CHECK(PcssFrameTurn(n) < 1.0f);
++    }
++}
++
++TEST_CASE("Sun shadows: the frame constants follow the gates, the switches and TAA", "[remaster][SunShadows]")
++{
++    const LightingTuning t = Apply("remastered");
++    const float tanA = SunTanRadius(1.0f);
++
++    // High sun, no TAA: the soft filter whole, fixed taps; leaves lifted.
++    SunShadowConstants c = ComputeSunShadowConstants(t, ComputeFeatureGates(SunAt(30.0f), t), false, 7);
++    CHECK(c.taa[0] == 0.0f);
++    CHECK(c.taa[1] == 0.0f);
++    CHECK(c.taa[2] == static_cast<float>(kPcssTemporalTaps));
++    CHECK(c.taa[3] == Approx(tanA));
++    CHECK(t.shadowReach == kPcssSearchMetres); // the knob's default is the header's
++    CHECK(c.pcss[0] == kPcssSearchMetres);
++    CHECK(c.pcss[1] == kPcssMinFilterTexels);
++    CHECK(c.pcss[2] == 1.0f);
++    CHECK(t.leafBias > 0.0f);
++    CHECK(c.pcss[3] == t.leafBias);
++
++    // A TAA frame turns the pattern by the frame's golden-ratio step.
++    c = ComputeSunShadowConstants(t, ComputeFeatureGates(SunAt(30.0f), t), true, 7);
++    CHECK(c.taa[0] == Approx(PcssFrameTurn(7)));
++    CHECK(c.taa[1] == 1.0f);
++
++    // The soft filter fades in above the gate's 4 deg; below it both are off.
++    CHECK(PcssStrength(4.0f) == 0.0f);
++    CHECK(PcssStrength(5.0f) == Approx(0.5f));
++    CHECK(PcssStrength(kPcssFullFromSunDeg) == 1.0f);
++    c = ComputeSunShadowConstants(t, ComputeFeatureGates(SunAt(5.0f), t), false, 0);
++    CHECK(c.taa[3] == Approx(tanA));
++    CHECK(c.pcss[2] == Approx(0.5f));
++    c = ComputeSunShadowConstants(t, ComputeFeatureGates(SunAt(3.0f), t), false, 0);
++    CHECK(c.taa[3] == 0.0f);
++    CHECK(c.pcss[2] == 0.0f);
++    CHECK(c.pcss[3] == 0.0f);
++    // Forced on (gates=0) the soft filter runs whole at any sun.
++    c = ComputeSunShadowConstants(t, ComputeFeatureGates(SunAt(3.0f), Apply("remastered,gates=0")), false, 0);
++    CHECK(c.taa[3] == Approx(tanA));
++    CHECK(c.pcss[2] == 1.0f);
++
++    // The switches: each zeroes its own part only, and both off is the stock
++    // filter without a lift (the look before B1), as are baseline and classic.
++    const GateInputs day = SunAt(30.0f);
++    auto with = [&](const std::string& s)
++    {
++        const LightingTuning tt = Apply(s);
++        return ComputeSunShadowConstants(tt, ComputeFeatureGates(day, tt), true, 5);
++    };
++    c = with("remastered,softShadows=0");
++    CHECK(c.taa[3] == 0.0f);
++    CHECK(c.taa[1] == 0.0f);
++    CHECK(c.pcss[3] == t.leafBias);
++    c = with("remastered,treeShadows=0");
++    CHECK(c.taa[3] == Approx(tanA));
++    CHECK(c.pcss[3] == 0.0f);
++    for (const char* off :
++         {"remastered,treeShadows=0,softShadows=0", "baseline", "classic", "remastered,sunSize=0,leafBias=0"})
++    {
++        INFO(off);
++        c = with(off);
++        for (float v : c.taa)
++            CHECK(v == 0.0f);
++        for (float v : c.pcss)
++            CHECK(v == 0.0f);
++    }
++    // The sun size sets the penumbra per metre, the reach where it stops
++    // growing (never below a metre: a reach of 0 would search nothing).
++    CHECK(with("remastered,sunSize=2").taa[3] == Approx(SunTanRadius(2.0f)));
++    CHECK(with("remastered,shadowReach=20").pcss[0] == 20.0f);
++    CHECK(with("remastered,shadowReach=0").pcss[0] == kPcssMinReachMetres);
++    CHECK(PcssSearchTexels(tanA, 0.0166f, 20.0f) == Approx(20.0f * tanA / 0.0166f));
++    CHECK(PcssSearchTexels(tanA, 0.0166f, 0.0f) == kPcssMinSearchTexels);
++}
++
++TEST_CASE("Sun shadows: static objects cast with treeShadows, the rest keep their own say", "[remaster][SunShadows]")
++{
++    CHECK(CastsIntoSunShadowMap(true, false, false));
++    CHECK(CastsIntoSunShadowMap(true, true, false));
++    CHECK_FALSE(CastsIntoSunShadowMap(false, true, false)); // the legacy toggle off, the switch off: as before
++    CHECK(CastsIntoSunShadowMap(false, true, true));        // trees and buildings, whatever the toggle
++    CHECK_FALSE(CastsIntoSunShadowMap(false, false, true)); // a vehicle or man keeps the vehicle toggle
++
++    // The shadow pass asks the rule with the treeShadows gate, never the
++    // object alone, and only in Remastered.
++    const std::string pass = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "SceneShadowPass.cpp");
++    REQUIRE_FALSE(pass.empty());
++    CHECK(pass.find("remaster::CastsIntoSunShadowMap(oi->object->CastShadow(), oi->object->Static(), smTreeShadows)") !=
++          std::string::npos);
++    CHECK(pass.find("!oi->object->CastShadow())") == std::string::npos);
++    CHECK(pass.find("smGates[remaster::Feature::TreeShadows].on") != std::string::npos);
++}
++
++TEST_CASE("Sun shadows: the soft filter runs on the stock near tiers", "[remaster][SunShadows]")
++{
++    // The plan's tighter first tier (0.04 of the shadow range instead of 0.08)
++    // drew a solid shadow over the Sinai camp's foreground with the stock filter
++    // as much as with the soft one; the cause was not found, so B1 keeps the
++    // tuned tiers whatever the switches say (5 B1 critic fix: gate the tight
++    // tiers off if not understood).
++    const std::string pass = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "SceneShadowPass.cpp");
++    REQUIRE_FALSE(pass.empty());
++    CHECK(pass.find("bp.omniCoef[0] = tune.omniCoef0;") != std::string::npos);
++    CHECK(pass.find("bp.omniCoef[1] = tune.omniCoef1;") != std::string::npos);
++    CHECK(pass.find("SoftShadows") == std::string::npos);
++}
++
++TEST_CASE("Sun shadows: the shader keeps the stock filter and mirrors the soft filter's rules",
++          "[remaster][SunShadows][Shaders]")
++{
++    const std::string shadows = gl::RemasterFragmentPiece(gl::FragmentPiece::Shadows);
++    const std::string shade = gl::RemasterFragmentPiece(gl::FragmentPiece::Shade);
++    const std::string inputs = gl::RemasterFragmentPiece(gl::FragmentPiece::Inputs);
++    REQUIRE_FALSE(shadows.empty());
++
++    // The stock filter is the one the look before B1 had: 12 comparisons on the
++    // Poisson disc, run alone while the soft strength is 0.
++    CHECK(shadows.find("lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), zRef));") !=
++          std::string::npos);
++    CHECK(shadows.find("float soft = litTaa.w > 0.0 ? litPcss.z : 0.0;") != std::string::npos);
++    CHECK(shadows.find("if (soft < 1.0) lit = pcfVisibility(suv, c, sc.z - bias, radius);") != std::string::npos);
++    CHECK(shadows.find("if (leafLift > 0.0) at += litSunDir.xyz * (leafLift * texelWorld);") != std::string::npos);
++
++    // The raw depth sampler on unit 6 feeds the search.
++    CHECK(inputs.find("uniform sampler2DArray shadowDepth;") != std::string::npos);
++    CHECK(shadows.find("texture(shadowDepth, vec3(suv, float(c))).r") != std::string::npos);
++
++    // SunShadows.hpp's rules in the shader: the search clamp, the tap ladders
++    // and the blocker-to-metres conversion through the z row.
++    CHECK(shadows.find("clamp(litPcss.x * tanA / texelWorld, " + Num(kPcssMinSearchTexels) + ", " +
++                       Num(kPcssMaxSearchTexels) + ")") != std::string::npos);
++    CHECK(shadows.find("int nSearch = temporal ? int(litTaa.z) : (c < int(cascadeCtl.w) ? " +
++                       std::to_string(kPcssSearchTapsNear) + " : " + std::to_string(kPcssSearchTapsFar) + ");") !=
++          std::string::npos);
++    CHECK(shadows.find("int nTaps = temporal ? int(litTaa.z) : (rT < " + Num(kPcssTaps24FromTexels) + " ? 12 : (rT < " +
++                       Num(kPcssTaps32FromTexels) + " ? 24 : 32));") != std::string::npos);
++    CHECK(
++        shadows.find("float depthPerM = max(length(vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2])), "
++                     "1e-9);") != std::string::npos);
++    CHECK(shadows.find("float dB = max(zRef - bSum / bN, 0.0) / depthPerM;") != std::string::npos);
++    CHECK(shadows.find("float rT = clamp(dB * tanA / texelWorld, litPcss.y, searchT);") != std::string::npos);
++    CHECK(shadows.find("float turn = 6.2831853 * (shadowNoise(gl_FragCoord.xy) + litTaa.x);") != std::string::npos);
++
++    // Leaves lift, grass (shaded as terrain) does not.
++    CHECK(shade.find("float leafLift = (foliage && !terrain) ? litPcss.w : 0.0;") != std::string::npos);
++    CHECK(shade.find("shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift)") != std::string::npos);
++}

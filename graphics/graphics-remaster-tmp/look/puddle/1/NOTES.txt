@@ -1,0 +1,124 @@
+Wet ground, approach 1 of 6: a physically based wet surface. Only puddles mirror.
+
+Scratch copy D:/Arma_CWA_worktrees/look-puddle-1 (fec1075 + fix4/base.patch, base tree d2f866e4).
+Build build/look-puddle-1-rwdi, game dist/look-puddle-1-rwdi, junction RemasterUD-puddle-1.
+Nothing committed, no branch. fix.patch: 3 files (the two shader sources and test_wet_weather.cpp);
+the look_shine and look_probe capture tests are left out.
+
+LOOK FIRST
+- compare.png: rows town_night_rain, seam_b, seam_d, seam_day, rain_day, then 2x crops of the tree
+  base and the open street of town_night_rain. Columns: round 3 (fix/seam/shots_4) | first rework
+  (fix4/shine/shots_3) | this (shots_b2, the final build).
+- final/<view>.png: the five views at native resolution, final build, no shader override.
+- work/probe_refl_before_after.png: the reflections pass alone (debug=10), round-3 base | this,
+  night on top, day below. Before: the whole square is a mirror. After: only the puddle shapes.
+
+APPROACH (the model, after Lagarde 2013 "Water drop 3a/3b" and Lekner and Dorf 1988)
+Rain on ground goes through stages: water fills the pores and the fine grain (the surface darkens,
+its lobe narrows a little), a film forms in the relief, and where the water is deeper than the
+relief it is a flat layer (a puddle). On a drained surface in rain the film is a few tenths of a
+millimetre (Gallaway 1979), thinner than the relief of asphalt (mean texture depth about 1 mm),
+gravel or soil, so the reflecting facets keep the relief's slopes: a broad lobe, no image. Only
+a puddle is optically flat. So:
+- Outside puddles: Lekner-Dorf darkening on the soaked share of the face, a water-Fresnel lobe at
+  the relief's roughness (a broad dim glint near a lamp or the fire, nothing recognisable), and
+  its sky as the sky light around the reflected direction (an irradiance, not an image). No
+  mirror term and no screen-space reflection.
+- Puddles: level water, F0 0.02, roughness 0.05 in the forward pass (lamp mirror) and 0.02 in the
+  trace, rain rings near the eye, the ground under the water darkened again by Lekner-Dorf.
+
+PROBE EVIDENCE (shots_probe0 = round-3 base, shots_probe_final = this; same views, modes
+ovh / debug=10 reflection-only / ssr=0 / ssr=0,lampStreaks=0; numbers from work/probe_stats.py over
+the ground band y 640..1080)
+- The base's reflections came from two places. (1) The trace weighted every wet ground pixel
+  (0.5 x wet on land, 0.65 on roads, roughness 0.30 to 0.75, cone 0.10 to 0.22), so the
+  reflection-only view showed the tree, the houses, the fire and the lamp across the whole square
+  (probe0 refl). (2) The forward pass's film lobe at roughness 0.12 (GGX a 0.014, peak capped at
+  80) drew the long lamp and fire streaks; with ssr=0 they stay, with lampStreaks=0 too they go.
+- Reflection-only view, share of ground pixels above luma 0.15: night 62% -> 17%, day 90% -> 22%
+  (what is left is the puddles). Median luma of that view on the ground: night 0.18 -> 0.07 (the
+  0.07 is the fog veil the debug view keeps), day 0.29 -> 0.04.
+- Forward lamp and fire glint (ssr=0 minus ssr=0,lampStreaks=0), night: mean 0.025 -> 0.010,
+  max 0.55 -> 0.38 (the max is now a lamp mirrored in a puddle).
+
+THE CHANGE (shaders only; no C++ engine, binding or uniform change)
+EngineGL33_LightingShadersSurface.cpp, wetSurface: the ground (land, grass clutter, roads) has its
+own branch; objects keep exactly their old maths (same film, roughness, sun, lamps, sky).
+- Darkening: a *= mix(1, wetLeknerDorf(a), soakG) * damp margin * mix(1, kWetPuddleDark, puddle),
+  wetLeknerDorf(A) = (1 - r_e)(1 - r_i) / (1 - r_i A) per channel (about 0.53 for the land's
+  albedos; brighter channels keep a little more, so the colour deepens without the old mustard).
+  soakG = mix(mix(kWetSoakDense, 1, porosity of bare ground), kWetSoakGrass, veg) * w.
+- Wet face lobe: water's Fresnel (wetLobe's 0.02) at roughG = mix(mix(kWetRoughBare,
+  kWetRoughRoad, road), kWetRoughGrass, veg), on filmG = w * mix(1, kWetSoakGrass, veg) *
+  (1 - puddle), for the sun and every lamp, fire and headlight.
+- Its sky: surfaceSkyIrradiance(rG) with rG the reflected direction drawn toward the normal by
+  roughG^2, times the split-sum Fresnel at roughG, in the forward pass whether SSR runs or not.
+- Puddle: its own level normal (rain rings), its own lamp and sun lobes, its sky only while SSR
+  is off (as before).
+- wetPuddle (shared by both passes, so they still agree pixel for pixel): saturated bare ground
+  ponds as a road does: th = mix(mix(kPuddleGround, kPuddleRoad, max(road, level)), kPuddleGrass,
+  veg * veg) + kPuddleLevelShift * (1 - level). Reason: once the rain has saturated it (puddle level
+  1) trodden soil infiltrates only at its saturated conductivity, a few mm/h, below a heavy rain's,
+  so it ponds like pavement; grass keeps its root channels and threshold. At level 0 nothing changes.
+  This is what makes the square read wet at night now that the sheen is gone (more mirrors).
+EngineGL33_PostSsrShaders.cpp, trace, only while wetWeather shades the ground (B6's own path with
+wetWeather off is untouched):
+- a pixel with no puddle returns at once (add 0, m 1: no reflection, and no march, so cheaper);
+- weight = puddle (the pixel's share of water), rough 0.02, cone 0.008, normal level plus ripples.
+
+CONSTANTS (old -> new), each from physical reasoning
+- kWaterRe 0.066 (new): water's diffuse external reflectance, Fresnel at n 1.333 integrated over
+  the hemisphere (computed: 0.0664). kWaterRi 0.475 (new): internal, 1 - (1 - r_e)/n^2 (0.4746).
+  F0 0.02 = ((n - 1)/(n + 1))^2, unchanged in wetLobe and the trace.
+- kWetGroundDarken 0.35 x porosity (soil kept 0.69, road 0.88) -> Lekner-Dorf on the soaked share:
+  soil keeps about 0.55, asphalt about 0.6, gravel about 0.62, grass about 0.93.
+- kWetSoakDense 0.75 (new): rock, gravel and asphalt are darkened on the share of their face the
+  water wets (the film in the relief; stone tops drain); porous soil goes to 1 by its porosity.
+- kWetSoakGrass 0.15 (new): waxy blades shed water as beads covering about a sixth of them (also
+  the grass's film share). Replaces kWetGrassPorosity 0.23 and kWetGrassFilm 0.1.
+- Wet face roughness, old kWetFilmRough 0.12 (GGX a 0.014) / kWetGrassRough 0.4 -> the relief's:
+  kWetRoughRoad 0.65 (asphalt aggregate, rms slope about 0.3, a 0.42), kWetRoughBare 0.8 (clods and
+  stones, slope about 0.45, a 0.64), kWetRoughGrass 0.95 (blades at all angles, a 0.9).
+  kWetFilmRough 0.12 stays for objects.
+- kWetSunGroundRough 0.5 and kWetSunGroundFilm 0.5: removed (the relief roughness is above both).
+- kWetPuddleDark 0.55 unchanged: it is Lekner-Dorf's ratio at albedo 0.2 (0.542), now tested so.
+- kWetPuddleRough 0.05 unchanged (still water; the rings carry the rain).
+- Trace with wetWeather: weight 0.5 x wet x (1 - 0.85 grass) / 0.65 x wet -> puddle; roughness
+  0.30..0.75 -> 0.02; cone 0.10..0.22 -> 0.008 (both water's).
+- Puddle threshold on bare land at full level: kPuddleGround 0.67 -> kPuddleRoad 0.61 (via level);
+  constants themselves unchanged (they still equal B6's, as the test pins).
+
+TESTS (build/look-puddle-1-rwdi/tests/unit/engine/Poseidon/PoseidonTests.exe, run from D:)
+"[wet],[ssr],[Shaders],[TerrainHorizon],[remaster]": All tests passed (957243 assertions in 298
+test cases; glslang compiles every program). clang-format clean on the three files.
+Round 3's no-seam tests are kept unchanged and pass. Changed: the sun-glint test counts the three
+sun lobes (wet face, puddle, object) and checks the relief roughness is above the sun's floor
+instead of the removed kWetSunGround constants. New test "Wet weather ground: only standing water
+mirrors; the wet face darkens and glints broadly": r_e and r_i from Fresnel's equations against
+the constants, Lekner-Dorf's ratio against kWetPuddleDark, the roughness order, and a C++ mirror of
+wetLobe walking the ground between an eye (1.75 m) and a lamp (5 m up, 12 m on): the asphalt
+face's brightest glint is under 5% of a puddle's and its half-width over ten times wider; plus
+the trace's early return and puddle-only weight.
+
+WEAK POINTS (honest)
+- Night readability: with the sheen gone the wet square reads by darker ground and by puddles,
+  and a puddle that mirrors only the dark sky or the fog horizon has little contrast against the
+  dark wet ground. seam_b in particular reads more "dark and damp" than "pouring" at thumbnail
+  size; round 3's look leaned on the sheen for that. The night sky itself is near black (a real
+  overcast town sky glows), which is outside this change.
+- More puddles: the saturation-ponding rule lowers the bare ground's threshold to the road's at
+  full puddle level; on the seam_day square the left puddles are now larger. The owner liked the
+  old puddles; if this is too much, drop max(road, level) back to road (one token) and the rest
+  of the model still holds.
+- Darker wet ground (Lekner-Dorf is stronger than the old 0.35 x porosity on roads and gravel):
+  physically right, but the night square is darker overall; not compared against a photo.
+- A broad glint remains near close lamps and the fire (by design), weakest on grass.
+- The wet face's sky uses the irradiance as a prefilter (accurate for a lobe this wide, cosine-
+  weighted); at grazing angles on roads it adds up to a few percent of the sky, which may read as
+  a faint lift on the far road in daylight.
+- Puddle mirrors keep the trace's existing limits (half resolution, horizontal blur; the mirrored
+  white house shows some vertical banding). Vertical straight lines inside puddles are mirrored
+  building edges, not seams.
+- Not measured: cost (the trace now skips non-puddle ground entirely, the forward pass adds one SH
+  sky lookup per wet ground pixel), motion, and the case before the ground field is built.
+- AI sight and fog link untouched (no change to Target.cpp, VolumetricFog.cpp or any C++).

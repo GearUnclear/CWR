@@ -1,0 +1,769 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd2..31649518 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,18 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"night", &remaster::LightingTuning::night},
++        {"nightP1", &remaster::LightingTuning::nightP1},
++        {"nightP2", &remaster::LightingTuning::nightP2},
++        {"nightHaze", &remaster::LightingTuning::nightHaze},
++        {"nightMoon", &remaster::LightingTuning::nightMoon},
++        {"nightBounce", &remaster::LightingTuning::nightBounce},
++        {"nightSkyFrac", &remaster::LightingTuning::nightSkyFrac},
++        {"nightMoonSat", &remaster::LightingTuning::nightMoonSat},
++        {"nightSpot", &remaster::LightingTuning::nightSpot},
++        {"nightCamLights", &remaster::LightingTuning::nightCamLights},
++        {"nightDebug", &remaster::LightingTuning::nightDebug},
++        {"nightLampWarm", &remaster::LightingTuning::nightLampWarm},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0c..5d40891b 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,23 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // NIGHT RESEARCH PROTOTYPE (gfx-night): 0 = shipped behaviour. >= 1 makes the
++    // moon the key light at night (shadow pass, terrain horizon, glossy and
++    // water glint follow the moon) and selects the night shader variant
++    // (litLightCount.y). nightP1/P2 are free shader parameters (litLightCount.zw);
++    // nightHaze is the strength of the post-pass local-light scattering.
++    float night = 0.0f;
++    float nightP1 = 1.0f;
++    float nightP2 = 1.0f;
++    float nightHaze = 0.0f;
++    float nightMoon = 1.0f; // moon key radiance multiplier
++    float nightBounce = 0.0f; // ground bounce of local lights (litMoon.w), 0 = off
++    float nightSkyFrac = 0.25f; // moonlit sky fill as a fraction of the moon key
++    float nightMoonSat = 1.0f;  // moon key chroma: 0 neutral white, 1 cool (0.80, 0.88, 1.0)
++    float nightSpot = 1.0f;     // headlight (spot) intensity multiplier (litHorizonSun.w)
++    float nightCamLights = 0.0f; // 1 = every draw gets the 8 lights strongest at the camera
++    float nightDebug = 0.0f;     // shader debug view (litFogCap.w): 1 = light count / local / terrain
++    float nightLampWarm = 0.0f;  // 0..1 blend of lamp colour toward ~2700 K (headlights half)
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.cpp
+index fed64f70..c88721e1 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/Lights.cpp
+@@ -404,6 +404,17 @@ float LightPoint::FlareIntensity(Vector3Par camPos, Vector3Par camDir) const
+     return atten * cosFi;
+ }
+ 
++// NIGHT RESEARCH PROTOTYPE: > 0 while a remastered world pass with the night
++// variant is drawing (set by EngineGL33::UploadLitFrameConstants, cleared at
++// EndWorldScene). CPU-lit draws (smoke and fire particles, decals) then use the
++// same inverse-square falloff as the night shader instead of a flat disc of
++// full light out to the start distance. Value = intensity scale (nightP1).
++float g_nightPhysicalLights = 0.0f;
++// Linear irradiance from the moon and the night sky on a smoke puff (decals),
++// set with g_nightPhysicalLights. Classic lights decals by the sun only, which is
++// black at night.
++float g_nightDecalFill[3] = {0.0f, 0.0f, 0.0f};
++
+ Color LightPoint::Apply(Vector3Par point, Vector3Par normal)
+ {
+     // normal and point is given in model space
+@@ -423,6 +434,12 @@ Color LightPoint::Apply(Vector3Par point, Vector3Par normal)
+     {
+         atten = startAtten * invSize * invSize;
+     }
++    if (g_nightPhysicalLights > 0.0f)
++    {
++        // linear E = I / d^2 with I = 4 start (start = 50 * config brightness,
++        // so I follows the configured brightness linearly), taken to display space
++        atten = std::pow(4.0f * _startAtten * g_nightPhysicalLights / (size2 + 0.25f), 1.0f / 2.2f);
++    }
+     // not cosFi is actualy cosFi*size
+     float cosFi = relPos * normal;
+     if (cosFi > 0)
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index eb6c9652..efc38d0f 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -47,9 +47,12 @@
+ #include <Poseidon/World/MapTypes.hpp>
+ #include <Poseidon/World/Scene/ObjLine.hpp>
+ #include <Poseidon/World/Terrain/Occlusion.hpp>
++#include <algorithm>
+ 
+ namespace Poseidon
+ {
++extern float g_nightPhysicalLights;  // NIGHT PROTOTYPE, Lights.cpp
++extern float g_nightDecalFill[3];    // NIGHT PROTOTYPE, Lights.cpp
+ template <>
+ const ::Poseidon::Foundation::EnumName* ::Poseidon::Foundation::GetEnumNames(TargetSide dummy)
+ {
+@@ -1087,7 +1090,29 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+             sun->SetMaterial(mat);
+             colorI = sun->FullResult(0.5);
+             float addLightsFactor = sun->NightEffect();
+-            if (addLightsFactor > 0.01)
++            if (g_nightPhysicalLights > 0.0f && addLightsFactor > 0.01)
++            {
++                // NIGHT PROTOTYPE: sum the lights in linear light (each Apply is
++                // a display-space colour) and add the moon / night-sky fill, so
++                // smoke far from a lamp is moonlit grey, not lamp-lit white.
++                auto lin = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
++                float r = lin(colorI.R()) + g_nightDecalFill[0];
++                float g = lin(colorI.G()) + g_nightDecalFill[1];
++                float b = lin(colorI.B()) + g_nightDecalFill[2];
++                const LightList& lights = GScene->ActiveLights();
++                Matrix4 worldToModel(MTranslation, -pos.Position());
++                for (int index = 0; index < lights.Size(); index++)
++                {
++                    lights[index]->Prepare(worldToModel);
++                    lights[index]->SetMaterial(mat);
++                    const Color c = lights[index]->Apply(VZero, VForward);
++                    r += lin(c.R());
++                    g += lin(c.G());
++                    b += lin(c.B());
++                }
++                colorI = Color(std::pow(r, 1.0f / 2.2f), std::pow(g, 1.0f / 2.2f), std::pow(b, 1.0f / 2.2f), 1.0f);
++            }
++            else if (addLightsFactor > 0.01)
+             {
+                 const LightList& lights = GScene->ActiveLights();
+                 if (lights.Size() > 0)
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 866e7bb9..255eb87c 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -1720,7 +1720,13 @@ void Scene::DrawObjectsAndShadowsPass2()
+             // degrees below the horizon: keep its shadows live that long (a
+             // skipped pass would leave a frozen map in view).
+             const bool remasterSunUp = GEngine->LightingRemasterActive() && _mainLight->SunDirection().Y() < 0.026f;
+-            if (sunFactor > 0.01f || remasterSunUp)
++            // NIGHT PROTOTYPE: the moon is the key light (EngineGL33_Lighting.cpp):
++            // render its shadow map (direction picked in SceneShadowPass.cpp).
++            const bool remasterMoonKey = GEngine->LightingRemasterActive() &&
++                                         GEngine->GetLightingTuning().night >= 1.0f && !GEngine->GetNightVision() &&
++                                         _mainLight->SunDirection().Y() > 0.0523f &&
++                                         _mainLight->MoonDirection().Y() < -0.0175f;
++            if (sunFactor > 0.01f || remasterSunUp || remasterMoonKey)
+             {
+                 RenderShadowMapDepthPass(nDraw);
+             }
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
+index e355f431..b4b2ab75 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
+@@ -403,6 +403,10 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
+     {
+         constexpr float kMinShadowSinElevation = 0.0698f; // sin(4 deg)
+         sd = _mainLight->SunDirection();
++        // NIGHT PROTOTYPE: moon shadows when the moon is the key light.
++        if (GEngine->GetLightingTuning().night >= 1.0f && !GEngine->GetNightVision() && sd.Y() > 0.0523f &&
++            _mainLight->MoonDirection().Y() < -0.0175f)
++            sd = _mainLight->MoonDirection();
+         if (sd.Y() > -kMinShadowSinElevation)
+         {
+             const float horiz = std::sqrt(std::max(sd.X() * sd.X() + sd.Z() * sd.Z(), 1e-8f));
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+index cdaaf4a1..cdc74041 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+@@ -243,6 +243,40 @@ void EngineGL33::DrawPoints(int beg, int end)
+ 
+         float a = color.A8();
+ 
++        // NIGHT RESEARCH PROTOTYPE: with the night variant on, a star is a soft
++        // round splat (a fan with a bright centre fading to zero at ~1.1 display
++        // pixels) instead of a 2x2 bilinear dot that the render-scale resolve
++        // smears to nothing, and takes a faint per-star colour temperature.
++        if (LightingRemasterActive() && _lighting.night >= 1.0f && !GetNightVision())
++        {
++            const float r = 1.6f;
++            const float h = static_cast<float>((i * 2654435761u) & 0xffff) / 65535.0f;
++            const Color cold(0.80f, 0.87f, 1.0f), warm(1.0f, 0.90f, 0.74f);
++            Color tint = cold + (warm - cold) * h;
++            Color base = Color(color.R8() / 255.0f, color.G8() / 255.0f, color.B8() / 255.0f) * tint;
++            base.SaturateMinMax();
++            TLVertex fan[5];
++            fan[0] = v;
++            fan[0].pos[0] = v.pos[0];
++            fan[0].pos[1] = v.pos[1];
++            fan[0].color = PackedColorRGB(PackedColor(base), FracAlpha(a * 1.8f));
++            fan[0].specular = PackedColor(0xff000000);
++            const float dx[4] = {-r, r, r, -r}, dy[4] = {-r, -r, r, r};
++            for (int c = 0; c < 4; c++)
++            {
++                fan[c + 1] = fan[0];
++                fan[c + 1].pos[0] = v.pos[0] + dx[c];
++                fan[c + 1].pos[1] = v.pos[1] + dy[c];
++                fan[c + 1].color = PackedColorRGB(PackedColor(base), 0);
++            }
++            if (fan[1].pos[0] < 0 || fan[1].pos[1] < 0 || fan[3].pos[0] > _w || fan[3].pos[1] > _h)
++                continue;
++            static const VertexIndex fanIdx[6] = {0, 1, 2, 3, 4, 1};
++            AddVertices(fan, 5);
++            QueueFan(fanIdx, 6);
++            continue;
++        }
++
+         TLVertex vs[4];
+         vs[0] = v; // TL
+         vs[0].pos[0] = xI + 0.5f;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5f..a92ab1c7 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -21,6 +21,11 @@
+ 
+ using namespace Poseidon::gl33lighting;
+ namespace rm = Poseidon::remaster;
++namespace Poseidon
++{
++extern float g_nightPhysicalLights; // NIGHT PROTOTYPE, Lights.cpp
++extern float g_nightDecalFill[3];
++}
+ 
+ namespace
+ {
+@@ -30,6 +35,22 @@ GLuint s_litUBO = 0;
+ // instead of jumping the whole field.
+ float s_cloudDrift[2] = {1830.0f, 970.0f};
+ float s_cloudDriftTime = -1.0f;
++bool s_nightMoonKey = false; // NIGHT PROTOTYPE: the sun slots carry the moon this frame
++// NIGHT PROTOTYPE: every local light a world draw used this frame, for the post
++// pass haze (Scene::ObjectsDrawn clears the active list before EndWorldScene).
++// Copies of the descriptions: the Light objects can be gone by EndWorldScene
++// (a deleted vehicle), the pointers are only compared, never dereferenced late.
++const void* s_frameLightIds[16] = {};
++LightDescription s_frameLightDesc[16];
++int s_frameLightCount = 0;
++int s_nightLogFrame = 0;
++// NIGHT PROTOTYPE: camera-centric light list (tuning.nightCamLights): the 8
++// lights strongest at the camera, built once per frame on the first upload.
++int s_litFrame = 0;
++int s_camListFrame = -1;
++const void* s_camListIds[8] = {};
++LightDescription s_camList[8];
++int s_camListCount = 0;
+ 
+ constexpr float kCloudDeckAltitude = 1500.0f; // metres
+ constexpr float kCloudScale = 1.0f / 6000.0f; // noise tile = 6 km
+@@ -328,14 +349,75 @@ void EngineGL33::UploadLitFrameConstants()
+     in.skyThrough = land ? land->SkyThrough() : 1.0f;
+     in.nightEffect = sun->NightEffect();
+     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
+-    const rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
++    rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
+     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+ 
+-    SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
+-    SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
++    // NIGHT RESEARCH PROTOTYPE: with tuning.night >= 1 the moon becomes the key
++    // light once the sun is 3 degrees under: the sun slots carry the moon, so
++    // its shadow map (SceneShadowPass), terrain horizon, cloud field, glossy
++    // highlight and water glint all follow the moon. The sky fill is tied to the
++    // moon (a moonlit sky is lit by the moon) and desaturated toward grey.
++    Vector3 keyDir = toSun;
++    float keyElevation = rig.sunElevationDeg;
++    const bool moonKey = _lighting.night >= 1.0f && !GetNightVision() && rig.sunElevationDeg < -3.0f &&
++                         toMoon.Y() > 0.0175f;
++    if (moonKey)
++    {
++        constexpr float kMoonKey = 0.05f;
++        const float mUp = std::min(1.0f, std::max(0.0f, (toMoon.Y() - 0.0175f) / (0.2f - 0.0175f)));
++        const float moonUp = mUp * mUp * (3.0f - 2.0f * mUp);
++        const float phase = in.moonPhaseLight < 1.0f ? (in.moonPhaseLight > 0.0f ? in.moonPhaseLight : 0.0f) : 1.0f;
++        const float power = kMoonKey * phase * moonUp * _lighting.moonlight * _lighting.nightMoon;
++        const rm::Rgb cool = rm::Mix(rm::Rgb(1.0f, 1.0f, 1.0f), rm::Rgb(0.80f, 0.88f, 1.0f), _lighting.nightMoonSat);
++        const rm::Rgb chroma = cool * (1.0f / rm::Luminance(cool));
++        rig.sun = chroma * power;
++        rig.moon = rm::Rgb(0.0f, 0.0f, 0.0f);
++        keyDir = toMoon;
++        keyElevation = std::asin(std::min(1.0f, toMoon.Y())) * 57.29578f;
++        if (_lighting.night >= 1.0f && (s_nightLogFrame++ % 240) == 0)
++            LOG_INFO(Graphics, "NIGHT: moon elev {:.1f} deg phase {:.2f} up {:.2f} key {:.4f} sun elev {:.1f} toMoon ({:.3f} {:.3f} {:.3f})",
++                     keyElevation, phase, moonUp, power, rig.sunElevationDeg, toMoon.X(), toMoon.Y(), toMoon.Z());
++        // Moonlit sky: a fraction of the moon on flat ground, desaturated.
++        const float zl = rm::Luminance(rig.skyZenith);
++        const float want = _lighting.nightSkyFrac * power * _lighting.sky;
++        if (zl > 1e-6f && want > zl)
++        {
++            const float s = want / zl;
++            auto desat = [](const rm::Rgb& c, float k)
++            {
++                const float l = rm::Luminance(c);
++                return rm::Mix(c, rm::Rgb(l, l, l), k);
++            };
++            rig.skyZenith = desat(rig.skyZenith * s, 0.5f);
++            rig.skyHorizon = desat(rig.skyHorizon * s, 0.5f);
++            rig.skyHorizonSun = desat(rig.skyHorizonSun * s, 0.5f);
++            rig.skyGround = desat(rig.skyGround * s, 0.5f);
++        }
++    }
++    else if (_lighting.night >= 1.0f && (s_nightLogFrame++ % 240) == 0)
++    {
++        LOG_INFO(Graphics, "NIGHT: no moon key: moon elev {:.1f} deg phase {:.2f} sun elev {:.1f} zenith {:.5f}",
++                 std::asin(std::max(-1.0f, std::min(1.0f, toMoon.Y()))) * 57.29578f, in.moonPhaseLight,
++                 rig.sunElevationDeg, rm::Luminance(rig.skyZenith));
++    }
++    s_nightMoonKey = moonKey;
++    s_frameLightCount = 0;
++    Poseidon::g_nightPhysicalLights = (_lighting.night >= 1.0f && !GetNightVision()) ? _lighting.nightP1 : 0.0f;
++    // Smoke puffs: half the key (forward scattering through a thin puff) plus the sky.
++    {
++        const float k = moonKey ? 0.5f : 0.0f;
++        Poseidon::g_nightDecalFill[0] = rig.sun.r * k + rig.skyZenith.r;
++        Poseidon::g_nightDecalFill[1] = rig.sun.g * k + rig.skyZenith.g;
++        Poseidon::g_nightDecalFill[2] = rig.sun.b * k + rig.skyZenith.b;
++    }
++
++    SetSlot(LitConst::SunDir, keyDir.X(), keyDir.Y(), keyDir.Z(), _sunEnabled ? 1.0f : 0.0f);
++    SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, keyElevation);
+     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, rig.exposure);
+     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
+-    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, 0.0f);
++    // NIGHT PROTOTYPE: w = headlight intensity multiplier.
++    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, _lighting.nightSpot);
++    s_litFrame++;
+ 
+     // Fog toward the sun: the sky dome adds SunSkyColor * cos^6 to SkyColor
+     // before modulating the sky texture (TLVertexTable::DoSkyLighting), while
+@@ -357,20 +439,24 @@ void EngineGL33::UploadLitFrameConstants()
+         }
+         const bool on = _worldEffectsOn;
+         SetSlot(LitConst::FogSun, tex[0] * glow.R(), tex[1] * glow.G(), tex[2] * glow.B(), on ? 1.0f : 0.0f);
+-        SetSlot(LitConst::FogCap, tex[0], tex[1], tex[2], 0.0f);
++        // NIGHT PROTOTYPE: w = shader debug view.
++        SetSlot(LitConst::FogCap, tex[0], tex[1], tex[2], _lighting.nightDebug);
+     }
+     SetSlot(LitConst::Ground, rig.skyGround.r, rig.skyGround.g, rig.skyGround.b, _lighting.localLights);
+-    SetSlot(LitConst::MoonDir, toMoon.X(), toMoon.Y(), toMoon.Z(), 0.0f);
+-    SetSlot(LitConst::Moon, rig.moon.r, rig.moon.g, rig.moon.b, 0.0f);
++    SetSlot(LitConst::MoonDir, toMoon.X(), toMoon.Y(), toMoon.Z(), moonKey ? 1.0f : 0.0f);
++    // NIGHT PROTOTYPE: w = ground bounce strength of the local lights.
++    SetSlot(LitConst::Moon, rig.moon.r, rig.moon.g, rig.moon.b,
++            (_lighting.night >= 1.0f && !GetNightVision()) ? _lighting.nightBounce : 0.0f);
+     const Vector3 cam = camera ? camera->Position() : VZero;
+-    SetSlot(LitConst::CamPos, cam.X(), cam.Y(), cam.Z(), 0.0f);
++    // NIGHT PROTOTYPE: w = NightEffect (0 day .. 1 night) for the night shader variant.
++    SetSlot(LitConst::CamPos, cam.X(), cam.Y(), cam.Z(), in.nightEffect);
+ 
+     // Terrain horizon: the two stored azimuths around the sun and the blend.
+     const bool terrain = _worldEffectsOn && _terrainHorizonTex && _terrainMap && _terrainMap->Valid() &&
+                          (_lighting.terrainShadows > 0.0f || _lighting.terrainOcclusion > 0.0f);
+     if (terrain)
+     {
+-        float azimuth = std::atan2(toSun.X(), toSun.Z()) / (2.0f * 3.14159265f);
++        float azimuth = std::atan2(keyDir.X(), keyDir.Z()) / (2.0f * 3.14159265f);
+         if (azimuth < 0.0f)
+             azimuth += 1.0f;
+         const float f = azimuth * static_cast<float>(rm::TerrainHorizonMap::kDirections);
+@@ -454,30 +540,171 @@ void EngineGL33::UploadLitLights(const LightList& lights, float nightEffect)
+     // camera-relative like vWorldRel.
+     const float* camPos = _frameState.cameraPos;
+     int n = 0;
+-    if (nightEffect > 0.0f)
++    LightDescription descs[LitConst::MaxLights];
++    const void* ids[LitConst::MaxLights] = {};
++    int m = 0;
++    const bool nightVariant = _lighting.night >= 1.0f && !GetNightVision();
++    if (nightEffect > 0.0f && nightVariant && _lighting.nightCamLights > 0.5f && GScene)
+     {
+-        for (int i = 0; i < lights.Size() && n < LitConst::MaxLights; i++)
++        // NIGHT PROTOTYPE: one camera-centric list for every draw this frame.
++        if (s_camListFrame != s_litFrame)
++        {
++            s_camListFrame = s_litFrame;
++            s_camListCount = 0;
++            float scores[8] = {};
++            const LightList& all = GScene->ActiveLights();
++            for (int i = 0; i < all.Size(); i++)
++            {
++                Light* light = all[i];
++                if (!light)
++                    continue;
++                LightDescription d;
++                light->GetDescription(d);
++                const bool spot = d.type == LTSpotLight;
++                if (d.type != LTPoint && !spot)
++                    continue;
++                const float dx = d.pos.X() - camPos[0], dy = d.pos.Y() - camPos[1], dz = d.pos.Z() - camPos[2];
++                const float d2 = dx * dx + dy * dy + dz * dz;
++                const float lum = 0.3f * d.diffuse.R() + 0.59f * d.diffuse.G() + 0.11f * d.diffuse.B();
++                const float inten = spot ? 4000.0f * _lighting.nightSpot : 4.0f * d.startAtten;
++                const float score = inten * lum / std::max(d2, 100.0f);
++                int at = s_camListCount;
++                while (at > 0 && scores[at - 1] < score)
++                    at--;
++                if (at >= 8)
++                    continue;
++                const int last = s_camListCount < 8 ? s_camListCount : 7;
++                for (int k = last; k > at; k--)
++                {
++                    scores[k] = scores[k - 1];
++                    s_camList[k] = s_camList[k - 1];
++                    s_camListIds[k] = s_camListIds[k - 1];
++                }
++                scores[at] = score;
++                s_camList[at] = d;
++                s_camListIds[at] = light;
++                if (s_camListCount < 8)
++                    s_camListCount++;
++            }
++            if ((s_nightLogFrame % 240) == 1)
++            {
++                LOG_INFO(Graphics, "NIGHT: active lights {} -> camera list {}", all.Size(), s_camListCount);
++                for (int k = 0; k < s_camListCount; k++)
++                {
++                    const LightDescription& d = s_camList[k];
++                    const float dx = d.pos.X() - camPos[0], dy = d.pos.Y() - camPos[1], dz = d.pos.Z() - camPos[2];
++                    LOG_INFO(Graphics, "NIGHT:   #{} {} start {:.0f} dist {:.1f} rel ({:.1f} {:.1f} {:.1f}) col ({:.2f} {:.2f} {:.2f}) score {:.4f}",
++                             k, d.type == LTSpotLight ? "spot" : "point", d.startAtten,
++                             std::sqrt(dx * dx + dy * dy + dz * dz), dx, dy, dz, d.diffuse.R(), d.diffuse.G(),
++                             d.diffuse.B(), scores[k]);
++                }
++            }
++        }
++        for (int k = 0; k < s_camListCount && m < LitConst::MaxLights; k++)
++        {
++            descs[m] = s_camList[k];
++            ids[m] = s_camListIds[k];
++            m++;
++        }
++    }
++    else if (nightEffect > 0.0f)
++    {
++        for (int i = 0; i < lights.Size() && m < LitConst::MaxLights; i++)
+         {
+             Light* light = lights[i];
+             if (!light)
+                 continue;
+-            LightDescription desc;
+-            light->GetDescription(desc);
+-            const bool isSpot = desc.type == LTSpotLight;
+-            if (desc.type != LTPoint && !isSpot)
++            light->GetDescription(descs[m]);
++            if (descs[m].type != LTPoint && descs[m].type != LTSpotLight)
+                 continue;
+-            SetSlot(LitConst::LightPos + n, desc.pos.X() - camPos[0], desc.pos.Y() - camPos[1],
+-                    desc.pos.Z() - camPos[2], desc.startAtten);
+-            Vector3 beam = desc.dir;
+-            beam.Normalize();
+-            SetSlot(LitConst::LightDir + n, beam.X(), beam.Y(), beam.Z(), 0.0f);
+-            const Color dif = desc.diffuse * nightEffect;
+-            const Color am = desc.ambient * nightEffect;
+-            SetSlot(LitConst::LightColor + n, dif.R(), dif.G(), dif.B(), isSpot ? 1.0f : 0.0f);
+-            SetSlot(LitConst::LightAmb + n, am.R(), am.G(), am.B(), 0.0f);
+-            n++;
++            ids[m] = light;
++            m++;
+         }
+     }
+-    SetSlot(LitConst::LightCount, static_cast<float>(n), 0.0f, 0.0f, 0.0f);
++    Landscape* nightLand = GScene ? GScene->GetLandscape() : nullptr;
++    for (int i = 0; i < m; i++)
++    {
++        LightDescription& desc = descs[i];
++        const bool isSpot = desc.type == LTSpotLight;
++        if (nightVariant)
++        {
++            // NIGHT PROTOTYPE: aim a headlight by the ground under the vehicle,
++            // not by the model's beam axis (its pitch is unreliable: the classic
++            // 12 degree cone hid it). Pitch = terrain slope along the heading
++            // over the wheelbase, minus the usual low-beam aim of about 1 %.
++            if (isSpot)
++            {
++                float hx = desc.dir.X(), hz = desc.dir.Z();
++                const float hl = std::sqrt(hx * hx + hz * hz);
++                if (hl > 1e-4f)
++                {
++                    hx /= hl;
++                    hz /= hl;
++                    // Self-levelling: aim so the hot band (1.7 deg under the
++                    // axis) lands on the ground 25 m ahead. A fixed aim along
++                    // the local slope overshoots the road on a hill (Abel's
++                    // test road climbs at 14 deg and the beam missed it).
++                    float pitch = -0.01f;
++                    if (nightLand)
++                    {
++                        const float yT = nightLand->SurfaceY(desc.pos.X() + 25.0f * hx, desc.pos.Z() + 25.0f * hz);
++                        pitch = (yT - desc.pos.Y()) / 25.0f + 0.03f;
++                        pitch = std::max(-0.3f, std::min(0.4f, pitch));
++                    }
++                    Vector3 aimed(hx, pitch, hz);
++                    aimed.Normalize();
++                    desc.dir = aimed;
++                }
++            }
++            // Warm lamps: blend the light colour toward a ~2700 K incandescent
++            // chroma (luminance kept); headlights take half.
++            const float w = _lighting.nightLampWarm * (isSpot ? 0.5f : 1.0f);
++            if (w > 0.0f)
++            {
++                const Color c = desc.diffuse;
++                const float lum = 0.2126f * c.R() + 0.7152f * c.G() + 0.0722f * c.B();
++                // display-space (1.0, 0.82, 0.58) has luminance 0.8395 there
++                const float s = lum / 0.8395f;
++                desc.diffuse = Color(c.R() + (1.0f * s - c.R()) * w, c.G() + (0.82f * s - c.G()) * w,
++                                     c.B() + (0.58f * s - c.B()) * w, c.A());
++            }
++        }
++        SetSlot(LitConst::LightPos + n, desc.pos.X() - camPos[0], desc.pos.Y() - camPos[1], desc.pos.Z() - camPos[2],
++                desc.startAtten);
++        Vector3 beam = desc.dir;
++        beam.Normalize();
++        SetSlot(LitConst::LightDir + n, beam.X(), beam.Y(), beam.Z(), 0.0f);
++        const Color dif = desc.diffuse * nightEffect;
++        const Color am = desc.ambient * nightEffect;
++        SetSlot(LitConst::LightColor + n, dif.R(), dif.G(), dif.B(), isSpot ? 1.0f : 0.0f);
++        SetSlot(LitConst::LightAmb + n, am.R(), am.G(), am.B(), 0.0f);
++        n++;
++        bool known = false;
++        for (int k = 0; k < s_frameLightCount; k++)
++            known = known || s_frameLightIds[k] == ids[i];
++        if (!known && s_frameLightCount < 16)
++        {
++            s_frameLightIds[s_frameLightCount] = ids[i];
++            s_frameLightDesc[s_frameLightCount] = desc;
++            s_frameLightCount++;
++            if (_lighting.night >= 1.0f && (s_nightLogFrame % 240) == 1)
++                LOG_INFO(Graphics, "NIGHT: drawn {} pos ({:.2f} {:.2f} {:.2f}) dir ({:.3f} {:.3f} {:.3f}) start {:.0f} col ({:.2f} {:.2f} {:.2f})",
++                         isSpot ? "spot" : "point", desc.pos.X(), desc.pos.Y(), desc.pos.Z(), desc.dir.X(),
++                         desc.dir.Y(), desc.dir.Z(), desc.startAtten, desc.diffuse.R(), desc.diffuse.G(),
++                         desc.diffuse.B());
++        }
++    }    // NIGHT PROTOTYPE: y = night shader variant, zw = free parameters.
++    SetSlot(LitConst::LightCount, static_cast<float>(n), _lighting.night, _lighting.nightP1, _lighting.nightP2);
+     FlushLitConstants();
+ }
++
++// NIGHT PROTOTYPE: the frame's local lights for the post-pass haze. Empties the
++// list: a frame that draws no world must not reuse the previous frame's lights.
++int NightFrameLights(LightDescription* out, int max)
++{
++    const int n = s_frameLightCount < max ? s_frameLightCount : max;
++    for (int i = 0; i < n; i++)
++        out[i] = s_frameLightDesc[i];
++    s_frameLightCount = 0;
++    return n;
++}
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094f..5bdd7a53 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -34,6 +34,12 @@
+ #include <algorithm>
+ #include <cmath>
+ 
++namespace Poseidon
++{
++extern float g_nightPhysicalLights; // NIGHT PROTOTYPE, Lights.cpp
++}
++int NightFrameLights(LightDescription* out, int max); // NIGHT PROTOTYPE, EngineGL33_Lighting.cpp
++
+ namespace
+ {
+ 
+@@ -243,6 +249,100 @@ void main() {
+ }
+ )";
+ 
++// NIGHT RESEARCH PROTOTYPE: single scattering of the local lights (street
++// lamps, fires, headlights) in a thin night haze. Half resolution, written into
++// the shaft target and composited with the shaft path. For every light the
++// camera ray segment [0, surface] is integrated with equiangular samples
++// (Kulla and Fajardo 2012): t - tc = h tan(theta) turns 1/d^2 into a uniform
++// measure, so 5-10 samples give a smooth glow around a bulb and a beam through
++// the air for a spotlight. Phase: half isotropic, half Henyey-Greenstein, so
++// halos are brighter looking toward the light. Headlights use a low-beam
++// pattern (wide, sharp upper cutoff, hot spot just below the horizon line).
++static const char s_psPostNightHazeGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D depthTex;
++uniform vec4 projInfo;
++uniform vec4 depthMap;
++uniform vec4 worldRect;
++uniform vec4 hazeCtl;  // x light count, y scattering (1/m), z extinction (1/m), w HG g
++uniform vec4 hzUp;     // xyz world up in view space, w spot scatter gain
++uniform vec4 hzPos[16]; // view space xyz, w unused
++uniform vec4 hzCol[16]; // linear rgb * intensity, w 1 = spot
++uniform vec4 hzDir[16]; // view space beam direction
++out vec4 fragColor;
++
++float viewZ(vec2 uv) {
++    float d = texture(depthTex, uv).r;
++    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++}
++float hg(float c, float g) {
++    float g2 = g * g;
++    return (1.0 - g2) / (12.566371 * pow(max(1.0 + g2 - 2.0 * g * c, 1e-4), 1.5));
++}
++// Low beam: wide horizontally, sharp cut-off just above the horizon line, a
++// hot spot 1.5 degrees below it. Relative to the hot-spot intensity.
++float lowBeam(vec3 L, vec3 beam, vec3 up) {
++    float c = dot(L, beam);
++    if (c <= 0.0) return 0.0;
++    vec3 right = normalize(cross(up, beam));
++    vec3 u = cross(beam, right);
++    float ah = atan(dot(L, right), c);
++    float av = atan(dot(L, u), c);
++    float cut = 1.0 - smoothstep(-0.004, 0.015, av);
++    float hv = (av + 0.03) / 0.05;
++    float vert = exp(-hv * hv) + 0.02 * smoothstep(-0.6, -0.1, av);
++    float h1 = ah / 0.25;
++    float h2 = ah / 0.6;
++    float horiz = exp(-h1 * h1) + 0.15 * exp(-h2 * h2);
++    return vert * horiz * cut;
++}
++void main() {
++    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    vec3 rd = normalize(vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0));
++    float d0 = texture(depthTex, vUV).r;
++    float tMax = 2000.0;
++    if (d0 < 0.999999) tMax = viewZ(vUV) / rd.z;
++    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    vec3 sum = vec3(0.0);
++    int n = int(hazeCtl.x);
++    float g = hazeCtl.w;
++    for (int i = 0; i < 16; ++i) {
++        if (i >= n) break;
++        vec3 p = hzPos[i].xyz;
++        float tc = dot(p, rd);
++        vec3 q = p - rd * tc;
++        float h = max(length(q), 0.2);
++        float thA = atan(-tc, h);
++        float thB = atan(tMax - tc, h);
++        if (thB <= thA + 1e-4) continue;
++        bool spot = hzCol[i].w > 0.5;
++        int N = spot ? 10 : 5;
++        float acc = 0.0;
++        for (int k = 0; k < 10; ++k) {
++            if (k >= N) break;
++            float th = mix(thA, thB, (float(k) + jitter) / float(N));
++            float t = tc + h * tan(th);
++            vec3 x = rd * t;
++            vec3 Lv = x - p;
++            float dist = max(length(Lv), 1e-3);
++            vec3 L = Lv / dist;
++            float cs = dot(L, -rd); // light travelling toward the camera = forward scattering
++            float phase = 0.5 * 0.0795775 + 0.5 * hg(cs, g);
++            float w = phase * exp(-hazeCtl.z * (t + dist));
++            if (spot) w *= lowBeam(L, hzDir[i].xyz, hzUp.xyz) * hzUp.w;
++            // A lamp's halo: moist air and insects close to the bulb, not a
++            // uniform fog (that turns the whole sky into a lamp-coloured wash).
++            else w *= hzPos[i].w * exp(-dist / 1.5);
++            acc += w;
++        }
++        sum += hzCol[i].rgb * (acc / float(N)) * (thB - thA) / h;
++    }
++    fragColor = vec4(sum * hazeCtl.y, 1.0);
++}
++)";
++GLuint s_progNightHaze = 0;
++bool s_progNightHazeTried = false;
++
+ // Post constants shared with the lab (tests/rendering/lighting_lab/postfx.py).
+ constexpr float kAoRadius = 1.2f;      // metres
+ constexpr float kAoFadeStart = 120.0f; // metres: AO fades out with distance
+@@ -479,6 +579,7 @@ void EngineGL33::EndWorldScene()
+     _worldPassOpen = false;
+     _worldEffectsOn = false;
+     _worldSceneEnded = true;
++    Poseidon::g_nightPhysicalLights = 0.0f; // NIGHT PROTOTYPE: CPU-lit draws after the world are classic
+     UpdateRemasterPrograms();
+     if (_lightingActive)
+         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
+@@ -659,6 +760,79 @@ void EngineGL33::EndWorldScene()
+         GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
+     }
+ 
++    // NIGHT PROTOTYPE: local lights scattering in a night haze, into the shaft
++    // target (the sun shafts are off at night).
++    bool hazeOn = false;
++    if (worldDepth && glow && _lighting.nightHaze > 0.0f && shaftWeight <= 0.001f && GScene && GScene->GetCamera() &&
++        GScene->MainLight()->NightEffect() > 0.01f)
++    {
++        if (!s_progNightHazeTried)
++        {
++            s_progNightHazeTried = true;
++            GLuint vs = CompilePostShader(GL_VERTEX_SHADER, s_vsPostGLSL, "vsPost");
++            s_progNightHaze = LinkPostProgram(vs, s_psPostNightHazeGLSL, "psPostNightHaze");
++            if (vs)
++                glDeleteShader(vs);
++        }
++        LightDescription lights[16];
++        const int lightCount = NightFrameLights(lights, 16);
++        Camera* cam = GScene->GetCamera();
++        const Matrix4 inv = cam->InverseScaled();
++        const float night = GScene->MainLight()->NightEffect();
++        float pos[16 * 4] = {}, col[16 * 4] = {}, dir[16 * 4] = {};
++        int n = 0;
++        for (int i = 0; i < lightCount && n < 16; i++)
++        {
++            const LightDescription& desc = lights[i];
++            const bool spot = desc.type == LTSpotLight;
++            if (desc.type != LTPoint && !spot)
++                continue;
++            const Vector3 pv = inv.FastTransform(desc.pos);
++            // The beam is already aimed by the ground (UploadLitLights, night variant).
++            Vector3 bw = desc.dir;
++            Vector3 dv = inv.Rotate(bw);
++            dv.Normalize();
++            // Same intensities as the night shader variant's localLights.
++            const float intensity = spot ? 4000.0f * _lighting.nightP1 * _lighting.nightSpot
++                                         : 4.0f * desc.startAtten * _lighting.nightP1;
++            const Color c = desc.diffuse * night;
++            auto lin = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
++            pos[n * 4 + 0] = pv.X();
++            pos[n * 4 + 1] = pv.Y();
++            pos[n * 4 + 2] = pv.Z();
++            pos[n * 4 + 3] = 8.0f; // point-light halo density gain near the bulb
++            col[n * 4 + 0] = lin(c.R()) * intensity;
++            col[n * 4 + 1] = lin(c.G()) * intensity;
++            col[n * 4 + 2] = lin(c.B()) * intensity;
++            col[n * 4 + 3] = spot ? 1.0f : 0.0f;
++            dir[n * 4 + 0] = dv.X();
++            dir[n * 4 + 1] = dv.Y();
++            dir[n * 4 + 2] = dv.Z();
++            n++;
++        }
++        if (s_progNightHaze && n > 0)
++        {
++            const Vector3 upV = inv.Rotate(VUp);
++            glUseProgram(s_progNightHaze);
++            u1i(s_progNightHaze, "depthTex", 0);
++            u4f(s_progNightHaze, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++            u4f(s_progNightHaze, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++            u4f(s_progNightHaze, "worldRect", rectX, rectY, rectW, rectH);
++            // nightHaze 1 = scattering 0.004 / m (about 1 km visibility haze).
++            u4f(s_progNightHaze, "hazeCtl", static_cast<float>(n), 0.004f * _lighting.nightHaze,
++                0.0015f * _lighting.nightHaze, 0.6f);
++            u4f(s_progNightHaze, "hzUp", upV.X(), upV.Y(), upV.Z(), 1.0f);
++            glUniform4fv(glGetUniformLocation(s_progNightHaze, "hzPos"), n, pos);
++            glUniform4fv(glGetUniformLocation(s_progNightHaze, "hzCol"), n, col);
++            glUniform4fv(glGetUniformLocation(s_progNightHaze, "hzDir"), n, dir);
++            bindTex(0, p.depthTex);
++            drawTo(p.shaftFbo, hw, hh);
++            GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
++            hazeOn = true;
++            shaftTint = Color(1, 1, 1, 1);
++        }
++    }
++
+     // 4. Composite into the frame target (every sample gets the resolved value).
+     glUseProgram(p.progComposite);
+     u1i(p.progComposite, "colorTex", 0);
+@@ -668,8 +842,9 @@ void EngineGL33::EndWorldScene()
+     bindTex(0, p.colorTex);
+     bindTex(2, aoStrength > 0.0f ? p.aoTex[0] : p.whiteTex);
+     bindTex(3, bloomStrength > 0.0f ? p.bloomTex[0] : p.blackTex);
+-    bindTex(4, shaftWeight > 0.001f ? p.shaftTex : p.blackTex);
+-    u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
++    bindTex(4, (shaftWeight > 0.001f || hazeOn) ? p.shaftTex : p.blackTex);
++    u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, hazeOn ? 1.0f : _lighting.sunShafts * 0.6f,
++        1.0f);
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);

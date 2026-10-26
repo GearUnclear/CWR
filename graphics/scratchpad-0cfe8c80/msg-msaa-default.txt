@@ -1,0 +1,36 @@
+graphics: 4x MSAA by default, lifted once on old profiles without supersampling
+
+Root cause: GraphicsConfig's factory default was msaaSamples = 0. First
+boot writes that into graphics.cfg and GraphicsApply hands it to
+EngineGL33::SetMsaaSamples, so ApplyPendingRenderScale built a
+single-sampled frame target and _msaaActive stayed false. That also turned
+off alpha-to-coverage: foliage and fence cutouts fell back to a hard discard
+and polygon edges had no anti-aliasing at all. GraphicsConfig::Save always
+writes msaaSamples, so every existing v2 profile held 0 unless the user had
+changed the row; a new default alone would never reach an existing install.
+On the way: Migrate lifted fpsCap == 0 to the refresh-rate cap with no
+version check, which any version bump would have turned into overwriting a
+v2 user's chosen Unlimited.
+
+Fix: new kDefaultMsaaSamples = 4 is the factory default and kVersion goes
+2 -> 3. Migrate takes msaaSamples == 0 below v3 as never chosen and lifts it
+to 4, but only without supersampling (renderScale < 1.001, the threshold
+ApplyPendingRenderScale uses): a supersampled profile already has
+anti-aliasing and keeps its Off. 2x, 4x and 8x are kept, and from v3 on 0 is
+the user's Off and survives. The fpsCap lift is now gated on version < 2.
+The boot log line also prints the MSAA count. Comments in EngineGL33.cpp and
+EngineGL33_VertexBuffer.cpp and the Remaster README describe the new
+default.
+
+Tests: test_graphicsConfig.cpp checks the 4x factory default (with
+alpha-to-coverage on and render scale 1), the v0/v1/v2 lift to 4x at render
+scale 1, Off kept on a v2 profile at render scale 1.5 and 2.0, a chosen 2x,
+4x or 8x kept, Off surviving once current, a v2 Unlimited cap surviving the
+v3 migration, and the boot path end to end (an old file gets 4x once and a
+later Off sticks). test_graphics_page.cpp expects the 4x row by default.
+[GraphicsConfig] 30/30, [GraphicsPage] 11/11, [GraphicsApply], [remaster],
+[gpu], [GL33], [Settings] and the GL audit tags pass; [graphics] has one
+failure, test_dds_converter.cpp:347, which fails the same way without this
+change.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

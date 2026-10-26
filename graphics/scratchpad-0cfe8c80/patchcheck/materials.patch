@@ -1,0 +1,759 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..be29a40 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,13 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"materials", &remaster::LightingTuning::materials},
++        {"wetness", &remaster::LightingTuning::wetness},
++        {"puddles", &remaster::LightingTuning::puddles},
++        {"matBump", &remaster::LightingTuning::matBump},
++        {"r1", &remaster::LightingTuning::research1},
++        {"r2", &remaster::LightingTuning::research2},
++        {"vbfix", &remaster::LightingTuning::vbfix},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 8827196..6052710 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -39,6 +39,10 @@ namespace Poseidon
+ // Per-frame draw-call counter — incremented at the GL emission seams,
+ // consumed + reset by World::Simulate's FrameProfiler EndFrame.
+ extern int gPerfDrawCalls;
++// RESEARCH (materials track): kind of the object whose shape is being drawn
++// (0 unknown, 1 land vehicle, 2 man, 3 static / thing, 4 aircraft, 5 ship,
++// 6 weapon or proxy). Set by Shape::Draw for the remastered material lookup.
++extern int GDrawObjectKind;
+ namespace render
+ {
+ namespace frame
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..8d8e0a3 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -77,6 +77,18 @@ struct LightingTuning
+     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
+     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
++    // RESEARCH (materials track): runtime material reconstruction and wetness.
++    float materials = 0.0f; // 0 off (current look), 1 = reconstructed materials
++    float wetness = -1.0f;  // <0 = from the engine rain density, else 0..1 override
++    float puddles = 1.0f;   // puddle amount on wet ground
++    float matBump = 1.0f;   // albedo-derived bump strength
++    float research1 = 0.0f; // free shader knobs (Research slot z, w)
++    float research2 = 0.0f;
++    // Shapes first loaded after the mission's Shapes.OptimizeAll() (every
++    // scripted createVehicle) have no vertex buffer and draw through CPU T&L,
++    // pre-lit, outside the remastered per-pixel lighting. 1 = give them a
++    // vertex buffer on first draw (Shape::Draw).
++    float vbfix = 0.0f;
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+index 0c86188..a4d4ada 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+@@ -24,6 +24,9 @@
+ #include <Poseidon/Core/Data3D.h>
+ 
+ #include <Poseidon/World/MapTypes.hpp>
++#include <Poseidon/World/Scene/Object.hpp>
++#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
++#include <set>
+ #include <stdio.h>
+ #include <cmath>
+ #include <memory>
+@@ -75,6 +78,47 @@ bool Shape::HasBlendSections() const
+ 
+ SectionClassFilter GSectionFilter = SectionClassFilter::All;
+ 
++// RESEARCH (materials track): object kind for the remastered material lookup.
++int GDrawObjectKind = 0;
++
++static int ClassifyDrawObject(IAnimator* matSource)
++{
++    const Object* obj = dynamic_cast<const Object*>(matSource);
++    if (!obj)
++        return 0;
++    const Entity* ent = dynamic_cast<const Entity*>(obj);
++    if (!ent || !ent->GetNonAIType())
++        return 3;
++    const char* sim = ent->GetNonAIType()->_simName;
++    if (!sim)
++        return 3;
++    // Tents and camouflage nets by their config class (their textures are
++    // anonymous atlases): 7 = fabric object.
++    if (const char* cls = ent->GetNonAIType()->_className)
++    {
++        std::string lc = cls;
++        for (char& c : lc)
++            c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
++        if (lc.find("camp") != std::string::npos || lc.find("tent") != std::string::npos ||
++            lc.find("camnet") != std::string::npos)
++            return 7;
++    }
++    static std::set<std::string> s_seen;
++    if (s_seen.insert(sim).second)
++        LOG_INFO(Graphics, "MATRESEARCH sim '{}' class '{}'", sim, (const char*)ent->GetNonAIType()->_className);
++    if (!_stricmp(sim, "car") || !_stricmp(sim, "tank") || !_stricmp(sim, "motorcycle"))
++        return 1;
++    if (!_stricmp(sim, "soldier") || !_stricmp(sim, "invisible"))
++        return 2;
++    if (!_stricmp(sim, "helicopter") || !_stricmp(sim, "airplane") || !_stricmp(sim, "parachute"))
++        return 4;
++    if (!_stricmp(sim, "ship"))
++        return 5;
++    if (_strnicmp(sim, "proxy", 5) == 0 || !_stricmp(sim, "weapon"))
++        return 6;
++    return 3;
++}
++
+ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags clip, int spec,
+                  const Matrix4& transform, const Matrix4& invTransform)
+ {
+@@ -86,10 +130,53 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags
+ 
+     bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+ 
+-    if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
++    {
++        // RESEARCH diagnostic: which branch each simulation type takes (once each).
++        const Object* dObj = dynamic_cast<const Object*>(matSource);
++        const Entity* dEnt = dObj ? dynamic_cast<const Entity*>(dObj) : nullptr;
++        const char* dSim = (dEnt && dEnt->GetNonAIType() && (const char*)dEnt->GetNonAIType()->_simName)
++                               ? (const char*)dEnt->GetNonAIType()->_simName
++                               : (dObj ? "static" : "none");
++        char key[96];
++        snprintf(key, sizeof(key), "%s|%d%d%d%d", dSim, engine->GetTL() ? 1 : 0, EnableHWTLState ? 1 : 0,
++                 tlAble ? 1 : 0, _buffer ? 1 : 0);
++        static std::set<std::string> s_diag;
++        if (s_diag.insert(key).second)
++            LOG_INFO(Graphics, "MATRESEARCH draw sim {} tl {} hw {} tlAble {} buffer {} faces {} sections {} spec 0x{:x} clip 0x{:x}",
++                     dSim, engine->GetTL() ? 1 : 0, EnableHWTLState ? 1 : 0, tlAble ? 1 : 0, _buffer ? 1 : 0,
++                     EndFaces() - BeginFaces(), NSections(), spec, static_cast<unsigned>(clip));
++    }
++
++    // RESEARCH (materials track): shapes first loaded after the mission's
++    // Shapes.OptimizeAll() never got a vertex buffer, so they drew through the
++    // CPU T&L path below, pre-lit and outside the remastered per-pixel shading.
++    // vbfix=1 gives them one on first draw; vbfix=0 hides the lazily made
++    // buffers again, so the shipped behaviour can still be captured.
++    static std::set<const Shape*> s_lazyVB;
++    const bool vbfix = engine->GetLightingTuning().vbfix > 0.5f;
++    if (vbfix && !_buffer && engine->GetTL() && EnableHWTLState && tlAble && NVertex() > 0 && NVertex() <= 65535 &&
++        (Special() & (IsLight | OnSurface)) == 0 && dynamic_cast<const Entity*>(dynamic_cast<const Object*>(matSource)))
++    {
++        ConvertToVBuffer(matSource->GetAnimated(*this) ? VBDynamic : VBStatic);
++        if (_buffer)
++        {
++            s_lazyVB.insert(this);
++            LOG_INFO(Graphics, "MATRESEARCH vbfix: vertex buffer for a late-loaded shape ({} vertices, {} sections)",
++                     NVertex(), NSections());
++        }
++    }
++    const bool useBuffer = _buffer && (vbfix || s_lazyVB.find(this) == s_lazyVB.end());
++
++    if (engine->GetTL() && EnableHWTLState && tlAble && useBuffer)
+     {
+         if (BeginFaces() < EndFaces() && NSections() > 0)
+         {
++            struct KindScope
++            {
++                int prev;
++                explicit KindScope(int k) : prev(GDrawObjectKind) { GDrawObjectKind = k; }
++                ~KindScope() { GDrawObjectKind = prev; }
++            } kindScope(ClassifyDrawObject(matSource));
+             GEngine->PrepareMeshTL(lights, transform, render::SplitLegacy(spec));
+             if (spec & (OnSurface | IsOnSurface))
+             {
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..f115d34 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -771,6 +771,9 @@ class EngineGL33 : public Engine
+     // program. Callers flush pending draws first.
+     void UpdateRemasterPrograms();
+     void UploadLitMaterial(const Poseidon::TLMaterial& mat);
++    // RESEARCH (materials track): per-section surface class from the texture
++    // name, the object kind and the texture's alpha class.
++    void UploadLitSurface(TextureGL33* tex);
+     void UploadLitShadowDelta();
+     void UploadLitLights(const LightList& lights, float nightEffect);
+     void SetLitOpaque(bool opaque);
+@@ -792,6 +795,8 @@ class EngineGL33 : public Engine
+         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
++        // RESEARCH (materials track): screen-space reflections in puddles.
++        unsigned int ssrTex = 0, ssrFbo = 0, progSsr = 0;
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..f428281 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -16,14 +16,149 @@
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
+ 
++#include <PoseidonGL33/TextureGL33.hpp>
++
++#include <cctype>
+ #include <cmath>
+ #include <cstring>
++#include <string>
++#include <unordered_map>
+ 
+ using namespace Poseidon::gl33lighting;
+ namespace rm = Poseidon::remaster;
+ 
+ namespace
+ {
++// ---------------------------------------------------------------------------
++// RESEARCH (materials track): surface classes. Must match the GLSL table in
++// the materials override (psRemasterCommon.glsl, matParams()).
++enum SurfClass : int
++{
++    SurfDefault = 0,
++    SurfPaint = 1,
++    SurfMetal = 2,
++    SurfGlass = 3,
++    SurfRubber = 4,
++    SurfFabric = 5,
++    SurfSkin = 6,
++    SurfRoad = 7,
++    SurfMasonry = 8,
++    SurfWood = 9,
++    SurfLeather = 10,
++    SurfWeapon = 11,
++    SurfLens = 12,
++    SurfRoof = 13,
++};
++
++bool Has(const std::string& s, const char* tok)
++{
++    return s.find(tok) != std::string::npos;
++}
++
++template <size_t N>
++bool HasAny(const std::string& s, const char* const (&toks)[N])
++{
++    for (const char* t : toks)
++        if (s.find(t) != std::string::npos)
++            return true;
++    return false;
++}
++
++// Texture name tokens: the stock data is Czech (sklo glass, okno window, kolo
++// wheel, pneu tyre, guma rubber, plech sheet metal, kov metal, hlaven barrel,
++// delo cannon, rez rust, xicht face, ruka hand, bota boot, plachta tarp,
++// silnice road, cesta track, beton concrete, cihla brick, strecha roof, drevo
++// wood); @LoBo and other mods are mostly English.
++int ClassifySurface(const std::string& n, int kind, bool blend)
++{
++    static const char* const glass[] = {"sklo", "skla", "glass", "window", "windscreen", "windshield", "armwin",
++                                        "canopy", "cifernik", "budik"};
++    static const char* const lens[] = {"reflekt", "svetl", "blink", "lamp", "light"};
++    static const char* const rubber[] = {"pneu", "guma", "tyre", "tire", "wheel", "kolo", "pasy", "track"};
++    static const char* const metal[] = {"hlaven", "hlavn", "delo", "kulomet", "lauf", "barrel", "kanon",
++                                        "trub",   "roura", "_rez",  "rez_",    "_kov",  "kov_",   "kovn",
++                                        "chrom",  "vyfuk", "exhaust",
++                                        "antena", "plech", "zink",  "zelez",   "metal", "steel",  "pipe"};
++    static const char* const fabric[] = {"plachta", "sedl", "sedad", "taska", "igelit", "lano", "_sit", "net",
++                                         "tarp",    "canvas", "seat", "bench", "cloth", "camnet", "maskovac",
++                                         "stan_",   "stan.",  "tent"};
++    static const char* const skin[] = {"xicht", "hlava", "head", "face", "hand", "ruce"};
++    static const char* const road[] = {"silnic", "asfalt", "cesta", "road", "dlazb", "chodnik", "runway", "draha"};
++    static const char* const wood[] = {"drev", "prkn", "plank", "wood", "bark", "kmen", "dreva", "bedna", "crate"};
++    static const char* const weapon[] = {"ak47", "ak74", "m16", "m21", "m60", "rpg", "law", "carl", "g36", "fal",
++                                         "uzi",  "pistol", "m249", "pk", "mag", "weapon", "zbran", "scope"};
++    const bool okno = Has(n, "okno") && !Has(n, "ram") && !Has(n, "_in") && !Has(n, "bez");
++    if (HasAny(n, glass) || okno)
++        return SurfGlass;
++    switch (kind)
++    {
++        case 7: // tents, camouflage nets (object class name)
++            return SurfFabric;
++        case 1: // land vehicle
++        case 4: // aircraft
++        case 5: // ship
++            // Alpha-blended vehicle textures are mostly cutout details (wheel
++            // rims, tools, handles), not glass: glass comes from the name only.
++            (void)blend;
++            if (Has(n, "skl"))
++                return SurfGlass;
++            if (HasAny(n, lens))
++                return SurfLens;
++            if (HasAny(n, rubber))
++                return SurfRubber;
++            // Gun barrels and cannons on military vehicles are painted steel.
++            if (Has(n, "hlaven") || Has(n, "hlavn") || Has(n, "delo") || Has(n, "kanon") || Has(n, "barrel") ||
++                Has(n, "lauf"))
++                return SurfPaint;
++            if (HasAny(n, metal) && !Has(n, "plech"))
++                return SurfMetal;
++            if (HasAny(n, fabric))
++                return SurfFabric;
++            return SurfPaint;
++        case 2: // man
++            if (HasAny(n, skin) || (Has(n, "ruka") && !Has(n, "rukav")))
++                return SurfSkin;
++            if (Has(n, "bota") || Has(n, "boot"))
++                return SurfLeather;
++            if (HasAny(n, weapon))
++                return SurfWeapon;
++            return SurfFabric;
++        case 6: // weapon proxy
++            return SurfWeapon;
++        default: // static objects, things, terrain decals
++            if (HasAny(n, road))
++                return SurfRoad;
++            if (Has(n, "strech") || Has(n, "roof"))
++                return Has(n, "plech") ? SurfMetal : SurfRoof;
++            if (HasAny(n, metal))
++                return SurfMetal;
++            if (HasAny(n, wood))
++                return SurfWood;
++            if (HasAny(n, fabric))
++                return SurfFabric;
++            if (HasAny(n, lens) && blend)
++                return SurfLens;
++            return kind == 3 ? SurfMasonry : SurfDefault;
++    }
++}
++
++struct SurfKey
++{
++    const void* tex;
++    int kind;
++    bool operator==(const SurfKey& o) const { return tex == o.tex && kind == o.kind; }
++};
++struct SurfKeyHash
++{
++    size_t operator()(const SurfKey& k) const { return std::hash<const void*>()(k.tex) * 31u + k.kind; }
++};
++struct SurfValue
++{
++    float cls, kind, blend, hash;
++};
++std::unordered_map<SurfKey, SurfValue, SurfKeyHash> s_surfCache;
++// ---------------------------------------------------------------------------
++
+ float s_lit[LitConst::Count * 4] = {};
+ GLuint s_litUBO = 0;
+ // Cloud drift integrated from the wind, so a wind change bends the drift
+@@ -417,10 +552,68 @@ void EngineGL33::UploadLitFrameConstants()
+     const float debug =
+         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
++
++    // RESEARCH (materials track): weather and knobs. Wetness follows the rain
++    // density directly here (production: integrate it, so surfaces dry slowly).
++    {
++        const float rain = land ? land->GetRainDensity() : 0.0f;
++        float wet = _lighting.wetness;
++        if (wet < 0.0f)
++        {
++            const float t = std::fmin(std::fmax((rain - 0.05f) / 0.5f, 0.0f), 1.0f);
++            wet = t * t * (3.0f - 2.0f * t);
++        }
++        SetSlot(LitConst::Weather, wet, rain, _lighting.puddles, std::fmod(now, 4096.0f));
++        SetSlot(LitConst::Research, _lighting.materials, _lighting.matBump, _lighting.research1, _lighting.research2);
++    }
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+ 
++void EngineGL33::UploadLitSurface(TextureGL33* tex)
++{
++    if (!_lightingActive)
++        return;
++    const int kind = Poseidon::GDrawObjectKind;
++    SurfValue v{0.0f, static_cast<float>(kind), 0.0f, 0.0f};
++    if (tex)
++    {
++        const SurfKey key{tex, kind};
++        const char* raw = tex->GetName();
++        const std::string name = raw ? raw : "";
++        const size_t h = std::hash<std::string>()(name);
++        auto it = s_surfCache.find(key);
++        if (it == s_surfCache.end() || it->second.hash != static_cast<float>(h % 997u) / 997.0f)
++        {
++            std::string lower = name;
++            for (char& c : lower)
++                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++            const bool blend = tex->GetAlphaClass() == Poseidon::AlphaStats::Blend;
++            const int cls = ClassifySurface(lower, kind, blend);
++            SurfValue nv{static_cast<float>(cls), static_cast<float>(kind), blend ? 1.0f : 0.0f,
++                         static_cast<float>(h % 997u) / 997.0f};
++            const bool fresh = it == s_surfCache.end();
++            s_surfCache[key] = nv;
++            if (fresh)
++                LOG_INFO(Graphics, "MATRESEARCH tex '{}' kind {} blend {} -> class {}", name, kind, blend ? 1 : 0, cls);
++            v = nv;
++        }
++        else
++        {
++            v = it->second;
++        }
++    }
++    float* p = s_lit + LitConst::MatClass * 4;
++    if (p[0] == v.cls && p[1] == v.kind && p[2] == v.blend && p[3] == v.hash)
++        return;
++    SetSlot(LitConst::MatClass, v.cls, v.kind, v.blend, v.hash);
++    if (s_litUBO)
++    {
++        glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
++        glBufferSubData(GL_UNIFORM_BUFFER, LitConst::MatClass * 16, 16, p);
++    }
++}
++
+ void EngineGL33::UploadLitShadowDelta()
+ {
+     if (!_remasterPrograms || !GScene || !GScene->GetCamera())
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e..cdb72a5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -59,14 +59,18 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    // RESEARCH (materials track)
++    MatClass = 58, // per draw: x surface class, y object kind, z blend texture, w per-texture hash
++    Weather = 59,  // x wetness, y rain density, z puddles, w time (s)
++    Research = 60, // x materials on, y albedo bump, z/w free knobs
++    Count = 61,
+ };
+ constexpr int MaxLights = 8;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(MatClass == LightDir + MaxLights, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..0217645 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -243,6 +243,177 @@ void main() {
+ }
+ )";
+ 
++// RESEARCH (materials track): screen-space reflections in rain puddles. The
++// puddle mask is a pure function of the world position (cloud noise + heightfield
++// hollows, flat ground near the terrain), recomputed here exactly as the forward
++// shader computes it, so no extra G-buffer channel is needed. Where the
++// reflected ray hits on-screen geometry, the forward pass's sky reflection is
++// swapped for the colour found there: delta = Fenv * mask * (hit - sky).
++static const char s_psPostSsrGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D colorTex;
++uniform sampler2D depthTex;
++uniform sampler2D terrainHeight;
++uniform sampler2D cloudNoise;
++uniform vec4 projInfo;  // x = _33, y = _43, z = 1/_11, w = 1/_22
++uniform vec4 depthMap;  // ndcZ = depth * x + y
++uniform vec4 screen;    // xy full-res size, zw 1/size
++uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv
++uniform mat4 viewM;     // camera-relative world -> view, as VSTransform applies it
++layout(std140) uniform PSConstants {
++    vec4 fogColor; vec4 alphaRef; vec4 shadowCtl; vec4 constColor; vec4 psC4; vec4 psC5; vec4 psC6; vec4 rgbEyeCoef;
++    mat4 cascadeVP[4]; vec4 cascadeSplits; vec4 cascadeCtl; vec4 camFwd;
++};
++layout(std140) uniform LitConstants {
++    vec4 litSunDir; vec4 litSun; vec4 litZenith; vec4 litHorizon; vec4 litGround; vec4 litMoonDir; vec4 litMoon;
++    vec4 litCamPos; vec4 litMatDiffuse; vec4 litMatAmbient; vec4 litMatForced; vec4 litMatEmissive; vec4 litMatSpecular;
++    vec4 litTerrain; vec4 litTerrainSel0; vec4 litTerrainSel1; vec4 litTerrainSun; vec4 litTerrainLift; vec4 litCloud;
++    vec4 litCloudOffset; vec4 litShadowDelta; vec4 litFlags; vec4 litLightCount; vec4 litHorizonSun; vec4 litFogSun;
++    vec4 litFogCap; vec4 litLightPos[8]; vec4 litLightColor[8]; vec4 litLightAmb[8]; vec4 litLightDir[8];
++    vec4 litMatClass; vec4 litWeather; vec4 litResearch;
++};
++out vec4 fragColor;
++
++vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
++vec3 toDisplay(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
++
++vec3 fogColorToward(vec3 rel) {
++    if (litFogSun.w < 0.5) return fogColor.rgb;
++    float c = max(dot(rel * inversesqrt(max(dot(rel, rel), 1e-12)), litSunDir.xyz), 0.0);
++    float c2 = c * c;
++    return min(fogColor.rgb + litFogSun.rgb * (c2 * c2 * c2), max(litFogCap.rgb, fogColor.rgb));
++}
++vec3 skyRadiance(vec3 r) {
++    vec3 fogL = toLinear(fogColor.rgb);
++    vec3 horizon = toLinear(fogColorToward(vec3(r.x, 0.0, r.z)));
++    vec3 zenith = fogL * mix(vec3(0.70, 0.80, 0.98), vec3(0.92), clamp(litCloud.x, 0.0, 1.0));
++    if (r.y >= 0.0) return mix(horizon, zenith, smoothstep(0.0, 0.75, r.y));
++    return mix(horizon * 0.7, fogL * 0.22, smoothstep(0.0, 0.2, -r.y));
++}
++vec2 envBRDF(float rough, float nv) {
++    const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
++    const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
++    vec4 r = rough * c0 + c1;
++    float a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
++    return vec2(-1.04, 1.04) * a004 + r.zw;
++}
++float terrainConcavity(vec3 posAbs) {
++    if (litTerrain.x < 0.5) return 0.0;
++    vec2 uv = (posAbs.xz * litTerrain.y + 0.5) * litTerrain.z;
++    float t = litTerrain.z;
++    float h = textureLod(terrainHeight, uv, 0.0).r;
++    float hn = textureLod(terrainHeight, uv + vec2(t, 0.0), 0.0).r + textureLod(terrainHeight, uv - vec2(t, 0.0), 0.0).r +
++               textureLod(terrainHeight, uv + vec2(0.0, t), 0.0).r + textureLod(terrainHeight, uv - vec2(0.0, t), 0.0).r;
++    return clamp((hn * 0.25 - h) / 1.5, -1.0, 1.0);
++}
++
++float viewZ(vec2 uv) {
++    float d = texture(depthTex, uv).r;
++    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++}
++vec3 viewPos(vec2 uv, float z) {
++    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    return vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++}
++vec2 projectUV(vec3 q) {
++    vec2 ndc = vec2(q.x / (q.z * projInfo.z), q.y / (q.z * projInfo.w));
++    return (ndc * 0.5 + 0.5) * worldRect.zw + worldRect.xy;
++}
++
++void main() {
++    vec4 c = texture(colorTex, vUV);
++    fragColor = c;
++    if (litResearch.x < 0.5 || litWeather.x <= 0.0 || litWeather.z <= 0.0) return;
++    float d0 = texture(depthTex, vUV).r;
++    if (d0 >= 0.999999) return;
++    float z = viewZ(vUV);
++    if (z > 150.0) return;
++    vec3 p = viewPos(vUV, z);
++    vec2 tx = vec2(screen.z, 0.0);
++    vec2 ty = vec2(0.0, screen.w);
++    vec3 pr = viewPos(vUV + tx, viewZ(vUV + tx));
++    vec3 pl = viewPos(vUV - tx, viewZ(vUV - tx));
++    vec3 pu = viewPos(vUV + ty, viewZ(vUV + ty));
++    vec3 pd = viewPos(vUV - ty, viewZ(vUV - ty));
++    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
++    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
++    vec3 n = normalize(cross(dx, dy));
++    if (dot(n, p) > 0.0) n = -n;
++    mat3 toView = mat3(viewM);
++    mat3 toWorld = transpose(toView);
++    vec3 nW = toWorld * n;
++    float flatness = smoothstep(0.94, 0.99, nW.y);
++    if (flatness <= 0.0) return;
++    vec3 rel = toWorld * p;
++    vec3 posAbs = rel + litCamPos.xyz;
++    // Same mask as the forward shader (psRemasterCommon.glsl puddleWater).
++    float skyVis = 1.0;
++    float nearGround = 1.0;
++    if (litTerrain.x > 0.5) {
++        vec2 huv = (posAbs.xz * litTerrain.y + 0.5) * litTerrain.z;
++        vec4 hs = textureLod(terrainHeight, huv, 0.0);
++        skyVis = mix(1.0, hs.g, litTerrain.w);
++        nearGround = 1.0 - smoothstep(0.4, 0.8, posAbs.y - hs.r);
++    }
++    float w = litWeather.x * mix(0.45, 1.0, skyVis);
++    float amount = litWeather.z * w;
++    float n1 = textureLod(cloudNoise, posAbs.xz / 29.0, 0.0).r;
++    float n2 = textureLod(cloudNoise, posAbs.xz / 7.3 + vec2(0.37, 0.71), 0.0).r;
++    float n3 = textureLod(cloudNoise, posAbs.xz / 1.7 + vec2(0.11, 0.53), 0.0).r;
++    float field = n1 * 0.55 + n2 * 0.3 + n3 * 0.15 + terrainConcavity(posAbs) * 0.25;
++    float level = mix(1.0, 0.64, clamp(amount, 0.0, 1.0));
++    float mask = smoothstep(level, level + 0.035, field) * flatness * nearGround;
++    if (mask <= 0.0) return;
++
++    // March the mirrored ray (flat water, world up) through the depth buffer.
++    vec3 upV = toView * vec3(0.0, 1.0, 0.0);
++    vec3 vdir = p / max(length(p), 1e-6);
++    vec3 rv = reflect(vdir, upV);
++    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
++    float t = 0.08 * (1.0 + jitter);
++    float prevT = 0.0;
++    vec3 ro = p + upV * 0.02;
++    bool hit = false;
++    vec2 huv2 = vec2(0.0);
++    for (int i = 0; i < 56; ++i) {
++        vec3 q = ro + rv * t;
++        if (q.z < 0.1) break;
++        vec2 uv = projectUV(q);
++        if (any(lessThan(uv, worldRect.xy)) || any(greaterThan(uv, worldRect.xy + worldRect.zw))) break;
++        float sd = texture(depthTex, uv).r;
++        float sz = viewZ(uv);
++        float dz = q.z - sz;
++        float thick = max(0.25, (t - prevT) * 2.0);
++        if (sd < 0.999999 && dz > 0.0 && dz < thick) {
++            float a = prevT, b = t;
++            for (int k = 0; k < 6; ++k) {
++                float m = 0.5 * (a + b);
++                vec3 qm = ro + rv * m;
++                vec2 um = projectUV(qm);
++                if (qm.z - viewZ(um) > 0.0) b = m; else a = m;
++            }
++            huv2 = projectUV(ro + rv * b);
++            hit = true;
++            break;
++        }
++        prevT = t;
++        t *= 1.14;
++        if (t > 120.0) break;
++    }
++    if (!hit) return;
++    vec2 e = min(huv2 - worldRect.xy, worldRect.xy + worldRect.zw - huv2) / worldRect.zw;
++    float edge = smoothstep(0.0, 0.08, min(e.x, e.y));
++    vec3 hitC = toLinear(texture(colorTex, huv2).rgb);
++    vec3 rW = toWorld * rv;
++    float nv = clamp(-dot(vdir, upV), 1e-3, 1.0);
++    vec2 ab = envBRDF(0.025, nv);
++    float fenv = 0.04 * ab.x + ab.y;
++    float k = fenv * mask * edge * mix(0.3, 1.0, skyVis) * litHorizon.w;
++    vec3 lin = toLinear(c.rgb) + k * (hitC - skyRadiance(rW));
++    fragColor = vec4(toDisplay(max(lin, vec3(0.0))), c.a);
++}
++)";
++
+ // Post constants shared with the lab (tests/rendering/lighting_lab/postfx.py).
+ constexpr float kAoRadius = 1.2f;      // metres
+ constexpr float kAoFadeStart = 120.0f; // metres: AO fades out with distance
+@@ -346,6 +517,8 @@ void EngineGL33::DestroyPostTargets()
+     delFbo(p.aoFbo[0]);
+     delFbo(p.aoFbo[1]);
+     delFbo(p.shaftFbo);
++    delFbo(p.ssrFbo);
++    delTex(p.ssrTex);
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         delFbo(p.bloomFbo[i]);
+@@ -363,7 +536,7 @@ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+     for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite, &p.progSsr})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -391,6 +564,21 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+         p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+         p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        p.progSsr = LinkPostProgram(vs, s_psPostSsrGLSL, "psPostSsr");
++        if (p.progSsr)
++        {
++            const GLuint psBlock = glGetUniformBlockIndex(p.progSsr, "PSConstants");
++            const GLuint litBlock = glGetUniformBlockIndex(p.progSsr, "LitConstants");
++            if (psBlock != GL_INVALID_INDEX)
++                glUniformBlockBinding(p.progSsr, psBlock, 1);
++            if (litBlock != GL_INVALID_INDEX)
++                glUniformBlockBinding(p.progSsr, litBlock, Poseidon::gl33lighting::kLitBinding);
++            LOG_INFO(Graphics, "MATRESEARCH GL33 post: SSR program built");
++        }
++        else
++        {
++            LOG_WARN(Graphics, "MATRESEARCH GL33 post: SSR program failed");
++        }
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+@@ -414,6 +602,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     p.aoTex[0] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
+     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
++    p.ssrTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, true);
+     int bw = hw, bh = hh;
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+@@ -445,6 +634,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     }
+     p.shaftFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.shaftTex);
+     check();
++    p.ssrFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.ssrTex);
++    check();
+     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+     {
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+@@ -569,6 +760,36 @@ void EngineGL33::EndWorldScene()
+     const float rectH = fullRect ? 1.0f : as.worldBottom - as.worldTop;
+     const float depthScale = GLAD_GL_ARB_clip_control ? 1.0f : 2.0f;
+     const float depthBias = GLAD_GL_ARB_clip_control ? 0.0f : -1.0f;
++
++    // RESEARCH (materials track): puddle reflections, before everything that
++    // reads the colour (bloom, shafts, composite). Its GPU time lands in the
++    // "ao" timer bucket (the first mark after the world).
++    GLuint colorSrc = p.colorTex;
++    if (p.progSsr && p.ssrFbo && worldDepth && _lighting.materials > 0.5f)
++    {
++        glUseProgram(p.progSsr);
++        u1i(p.progSsr, "depthTex", 0);
++        u1i(p.progSsr, "colorTex", 6);
++        u1i(p.progSsr, "terrainHeight", 4);
++        u1i(p.progSsr, "cloudNoise", 5);
++        u4f(p.progSsr, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(p.progSsr, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        u4f(p.progSsr, "screen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
++        u4f(p.progSsr, "worldRect", rectX, rectY, rectW, rectH);
++        const GLint locView = glGetUniformLocation(p.progSsr, "viewM");
++        if (locView >= 0)
++            glUniformMatrix4fv(locView, 1, GL_FALSE, reinterpret_cast<const float*>(&_frameState.view));
++        bindTex(0, p.depthTex);
++        glBindSampler(6, 0);
++        bindTex(6, p.colorTex);
++        bindTex(4, (_terrainHorizonTex && _terrainHeightTex) ? _terrainHeightTex : _dummyHeightTex);
++        bindTex(5, _cloudNoiseTex);
++        drawTo(p.ssrFbo, w, h);
++        glActiveTexture(GL_TEXTURE6);
++        glBindTexture(GL_TEXTURE_2D, 0);
++        colorSrc = p.ssrTex;
++    }
++
+     if (aoStrength > 0.0f)
+     {
+         glUseProgram(p.progAo);
+@@ -599,7 +820,7 @@ void EngineGL33::EndWorldScene()
+         for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+         {
+             const bool first = i == 0;
+-            const GLuint src = first ? p.colorTex : p.bloomTex[i - 1];
++            const GLuint src = first ? colorSrc : p.bloomTex[i - 1];
+             const int sw = first ? w : p.bloomW[i - 1];
+             const int sh = first ? h : p.bloomH[i - 1];
+             bindTex(0, src);
+@@ -653,7 +874,7 @@ void EngineGL33::EndWorldScene()
+         u1i(p.progShafts, "depthTex", 0);
+         u1i(p.progShafts, "colorTex", 2);
+         bindTex(0, p.depthTex);
+-        bindTex(2, p.colorTex);
++        bindTex(2, colorSrc);
+         u4f(p.progShafts, "sunScreen", sunU, sunV, shaftWeight, static_cast<float>(w) / static_cast<float>(h));
+         drawTo(p.shaftFbo, hw, hh);
+         GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
+@@ -665,7 +886,7 @@ void EngineGL33::EndWorldScene()
+     u1i(p.progComposite, "aoTex", 2);
+     u1i(p.progComposite, "bloomTex", 3);
+     u1i(p.progComposite, "shaftTex", 4);
+-    bindTex(0, p.colorTex);
++    bindTex(0, colorSrc);
+     bindTex(2, aoStrength > 0.0f ? p.aoTex[0] : p.whiteTex);
+     bindTex(3, bloomStrength > 0.0f ? p.bloomTex[0] : p.blackTex);
+     bindTex(4, shaftWeight > 0.001f ? p.shaftTex : p.blackTex);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 02f6162..6f9af1e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -297,6 +297,7 @@ void EngineGL33::PrepareTriangleTL(const MipInfo& mip, const Poseidon::render::L
+     LOG_DEBUG(Graphics, "GL33: PrepareTriangleTL spec=0x{:x} tex={} level={} passId={} vs={} in3D={}",
+               Poseidon::render::MergeLegacy(spec), tex ? tex->GetHandle() : 0, level, static_cast<int>(passId),
+               static_cast<int>(_vertexShaderSel), IsIn3DPass());
++    UploadLitSurface(tex);
+     ApplyPassState(tex, level, spec, passId, PipelineVertexInput::Mesh);
+ }
+ 

@@ -1,0 +1,344 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..7aa6720 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -551,6 +551,22 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        {"f0", &remaster::LightingTuning::fol0},
++        {"f1", &remaster::LightingTuning::fol1},
++        {"f2", &remaster::LightingTuning::fol2},
++        {"f3", &remaster::LightingTuning::fol3},
++        {"f4", &remaster::LightingTuning::fol4},
++        {"f5", &remaster::LightingTuning::fol5},
++        {"f6", &remaster::LightingTuning::fol6},
++        {"f7", &remaster::LightingTuning::fol7},
++        {"c0", &remaster::LightingTuning::can0},
++        {"c1", &remaster::LightingTuning::can1},
++        {"c2", &remaster::LightingTuning::can2},
++        {"c3", &remaster::LightingTuning::can3},
++        {"c4", &remaster::LightingTuning::can4},
++        {"c5", &remaster::LightingTuning::can5},
++        {"c6", &remaster::LightingTuning::can6},
++        {"c7", &remaster::LightingTuning::can7},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..bd366bb 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -80,6 +80,12 @@ struct LightingTuning
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
+     int debugView = 0;
++    // Foliage research knobs (prototype only), uploaded as litResearch0/1.
++    float fol0 = 0.0f, fol1 = 0.0f, fol2 = 0.0f, fol3 = 0.0f;
++    float fol4 = 0.0f, fol5 = 0.0f, fol6 = 0.0f, fol7 = 0.0f;
++    // Canopy-map research knobs, uploaded as litResearch2/3.
++    float can0 = 0.0f, can1 = 0.0f, can2 = 0.0f, can3 = 0.0f;
++    float can4 = 0.0f, can5 = 0.0f, can6 = 0.0f, can7 = 0.0f;
+ };
+ 
+ struct LightRigInputs
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..3a33e47 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -755,6 +755,9 @@ class EngineGL33 : public Engine
+     unsigned int _terrainHorizonTex = 0; // GL_TEXTURE_2D_ARRAY RGBA16, 4 layers
+     unsigned int _terrainHeightTex = 0;  // GL_RG32F: height, sky visibility
+     unsigned int _cloudNoiseTex = 0;     // GL_R8, tileable
++    unsigned int _canopyTex = 0;         // research: RGBA16F canopy cover / top / base, mipmapped
++    unsigned int _dummyCanopyTex = 0;    // research: 1x1 empty canopy
++    void BuildCanopyMap();               // research: rasterise trees and forests from GLandscape
+     unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: unit 2 when no shadow map
+     unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
+     unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..e4538ef 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -15,9 +15,15 @@
+ #include <Poseidon/World/Scene/Scene.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ #include <Poseidon/World/Terrain/Landscape.hpp>
++#include <Poseidon/World/Scene/Object.hpp>
++#include <Poseidon/World/MapTypes.hpp>
++#include <Poseidon/Foundation/Framework/Log.hpp>
+ 
++#include <algorithm>
++#include <chrono>
+ #include <cmath>
+ #include <cstring>
++#include <vector>
+ 
+ using namespace Poseidon::gl33lighting;
+ namespace rm = Poseidon::remaster;
+@@ -90,6 +96,8 @@ void EngineGL33::InitLightingResources()
+     _dummyHorizonTex = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_RGBA16, GL_RGBA, GL_UNSIGNED_SHORT, open);
+     const float heightSky[4] = {-1e6f, 1.0f, 1.0f, 1.0f}; // height, sky visibility, neutral ground tint
+     _dummyHeightTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA32F, GL_RGBA, GL_FLOAT, heightSky);
++    const float noCanopy[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    _dummyCanopyTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA16F, GL_RGBA, GL_FLOAT, noCanopy);
+ 
+     const std::vector<std::uint8_t> noise = rm::BuildCloudNoise(256, 1);
+     glGenTextures(1, &_cloudNoiseTex);
+@@ -138,6 +146,8 @@ void EngineGL33::DeinitLightingResources()
+     delTex(_terrainHorizonTex);
+     delTex(_terrainHeightTex);
+     delTex(_cloudNoiseTex);
++    delTex(_canopyTex);
++    delTex(_dummyCanopyTex);
+     delTex(_dummyDepthArray);
+     delTex(_dummyHorizonTex);
+     delTex(_dummyHeightTex);
+@@ -258,6 +268,166 @@ void EngineGL33::UploadTerrainHorizonMap()
+     glBindTexture(GL_TEXTURE_2D, 0);
+     GL33Bind::Invalidate();
+     LOG_INFO(Graphics, "GL33: terrain horizon map {}x{} at {} m uploaded", n, n, m.cellSize);
++    BuildCanopyMap();
++}
++
++// RESEARCH PROTOTYPE (foliage track): a top-down canopy map of the island,
++// rasterised from the landscape's tree, bush and forest-block objects when the
++// horizon map is uploaded. Texel-centred cells over the whole island square
++// (uv = world xz / island size); r = canopy cover 0..1, g = canopy top and
++// b = crown base, both in metres above the terrain and multiplied by the
++// cover; mipmapped so the shaders
++// can read the cover of wider neighbourhoods.
++void EngineGL33::BuildCanopyMap()
++{
++    if (_canopyTex)
++    {
++        GL33Bind::OnTexDeleted(_canopyTex);
++        glDeleteTextures(1, &_canopyTex);
++        _canopyTex = 0;
++    }
++    Poseidon::Landscape* land = Poseidon::GLandscape;
++    if (!land)
++        return;
++    const auto t0 = std::chrono::steady_clock::now();
++    const int lr = land->GetLandRange();
++    const float world = static_cast<float>(lr) * land->GetLandGrid();
++    if (lr < 2 || !(world > 0.0f))
++        return;
++    const int n = std::min(2048, static_cast<int>(std::ceil(world / 6.0f)));
++    const float cs = world / static_cast<float>(n);
++    std::vector<float> cover(static_cast<size_t>(n) * n, 0.0f);
++    std::vector<float> top(static_cast<size_t>(n) * n, 0.0f);
++    std::vector<float> base(static_cast<size_t>(n) * n, 1e9f);
++    int trees = 0;
++    int forests = 0;
++    auto splat = [&](int xi, int zi, float frac, float yTop, float yBase)
++    {
++        if (frac <= 0.0f || xi < 0 || zi < 0 || xi >= n || zi >= n)
++            return;
++        const size_t i = static_cast<size_t>(zi) * n + xi;
++        const float g = land->SurfaceY((xi + 0.5f) * cs, (zi + 0.5f) * cs);
++        cover[i] = 1.0f - (1.0f - cover[i]) * (1.0f - std::min(frac, 1.0f));
++        top[i] = std::max(top[i], yTop - g);
++        base[i] = std::min(base[i], std::max(yBase - g, 0.0f));
++    };
++    for (int z = 0; z < lr; ++z)
++    {
++        for (int x = 0; x < lr; ++x)
++        {
++            const Poseidon::ObjectList& ol = land->GetObjects(z, x);
++            for (int k = 0; k < ol.Size(); ++k)
++            {
++                Poseidon::Object* o = ol[k];
++                if (!o)
++                    continue;
++                Poseidon::LODShapeWithShadow* sh = o->GetShape();
++                if (!sh)
++                    continue;
++                const Poseidon::MapType t = sh->GetMapType();
++                const bool tree = t == Poseidon::MapTree || t == Poseidon::MapSmallTree || t == Poseidon::MapBush;
++                const bool forest = t == Poseidon::MapForestBorder || t == Poseidon::MapForestTriangle ||
++                                    t == Poseidon::MapForestSquare;
++                if (!tree && !forest)
++                    continue;
++                const Vector3 mn = sh->Min();
++                const Vector3 mx = sh->Max();
++                float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
++                for (int c = 0; c < 8; ++c)
++                {
++                    const Vector3 m((c & 1) ? mx.X() : mn.X(), (c & 2) ? mx.Y() : mn.Y(),
++                                              (c & 4) ? mx.Z() : mn.Z());
++                    const Vector3 w = o->PositionModelToWorld(m);
++                    x0 = std::min(x0, w.X());
++                    x1 = std::max(x1, w.X());
++                    y0 = std::min(y0, w.Y());
++                    y1 = std::max(y1, w.Y());
++                    z0 = std::min(z0, w.Z());
++                    z1 = std::max(z1, w.Z());
++                }
++                if (tree)
++                {
++                    const float cx = 0.5f * (x0 + x1);
++                    const float cz = 0.5f * (z0 + z1);
++                    const float r = 0.5f * std::min(x1 - x0, z1 - z0);
++                    // Grass tufts and low scrub (Abel has ~10k "ker trs travy"
++                    // tufts classed as bushes) are not a canopy.
++                    if (r < 0.4f || y1 - y0 < 2.5f)
++                        continue;
++                    ++trees;
++                    const float yBase = t == Poseidon::MapBush ? y0 : y0 + 0.35f * (y1 - y0);
++                    const int xa = static_cast<int>(std::floor((cx - r) / cs));
++                    const int xb = static_cast<int>(std::floor((cx + r) / cs));
++                    const int za = static_cast<int>(std::floor((cz - r) / cs));
++                    const int zb = static_cast<int>(std::floor((cz + r) / cs));
++                    for (int zi = za; zi <= zb; ++zi)
++                        for (int xi = xa; xi <= xb; ++xi)
++                        {
++                            float frac = 0.0f;
++                            for (int s = 0; s < 16; ++s)
++                            {
++                                const float sx = (xi + ((s & 3) + 0.5f) * 0.25f) * cs - cx;
++                                const float sz = (zi + ((s >> 2) + 0.5f) * 0.25f) * cs - cz;
++                                const float d = std::sqrt(sx * sx + sz * sz);
++                                const float edge = std::min(std::max((d - 0.75f * r) / (0.25f * r), 0.0f), 1.0f);
++                                frac += (1.0f - edge * edge * (3.0f - 2.0f * edge)) / 16.0f;
++                            }
++                            splat(xi, zi, frac, y1, yBase);
++                        }
++                }
++                else
++                {
++                    ++forests;
++                    const Matrix4 inv = o->CalcInvTransform();
++                    const float ym = 0.5f * (y0 + y1);
++                    const int xa = static_cast<int>(std::floor(x0 / cs));
++                    const int xb = static_cast<int>(std::floor(x1 / cs));
++                    const int za = static_cast<int>(std::floor(z0 / cs));
++                    const int zb = static_cast<int>(std::floor(z1 / cs));
++                    for (int zi = za; zi <= zb; ++zi)
++                        for (int xi = xa; xi <= xb; ++xi)
++                        {
++                            float frac = 0.0f;
++                            for (int s = 0; s < 16; ++s)
++                            {
++                                const Vector3 wp((xi + ((s & 3) + 0.5f) * 0.25f) * cs, ym,
++                                                           (zi + ((s >> 2) + 0.5f) * 0.25f) * cs);
++                                const Vector3 mp = inv.FastTransform(wp);
++                                if (mp.X() >= mn.X() && mp.X() <= mx.X() && mp.Z() >= mn.Z() && mp.Z() <= mx.Z())
++                                    frac += 1.0f / 16.0f;
++                            }
++                            splat(xi, zi, frac, y1, y0 + 0.3f * (y1 - y0));
++                        }
++                }
++            }
++        }
++    }
++    std::vector<float> texels(static_cast<size_t>(n) * n * 4);
++    for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
++    {
++        const bool any = cover[i] > 0.0f;
++        texels[i * 4 + 0] = cover[i];
++        // Heights premultiplied by cover, so g / r is the mean canopy top of
++        // any filtered or mipmapped neighbourhood.
++        texels[i * 4 + 1] = any ? top[i] * cover[i] : 0.0f;
++        texels[i * 4 + 2] = any ? std::min(base[i], top[i]) * cover[i] : 0.0f;
++        texels[i * 4 + 3] = 1.0f;
++    }
++    GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
++    glGenTextures(1, &_canopyTex);
++    glBindTexture(GL_TEXTURE_2D, _canopyTex);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, n, n, 0, GL_RGBA, GL_FLOAT, texels.data());
++    glGenerateMipmap(GL_TEXTURE_2D);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    GL33Bind::Invalidate();
++    const long long ms =
++        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
++    LOG_INFO(Graphics, "GL33: canopy map {}x{} at {} m: {} trees/bushes, {} forest blocks, {} ms (research)", n, n, cs,
++             trees, forests, ms);
+ }
+ 
+ void EngineGL33::BindLightingTextures()
+@@ -273,6 +443,7 @@ void EngineGL33::BindLightingTextures()
+     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
+     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
+     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
++    GL33Bind::Tex2D(kCanopyUnit, (map && _canopyTex) ? _canopyTex : _dummyCanopyTex);
+     GL33Bind::ActiveUnit(0);
+ }
+ 
+@@ -417,6 +588,10 @@ void EngineGL33::UploadLitFrameConstants()
+     const float debug =
+         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
+     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
++    SetSlot(LitConst::Research0, _lighting.fol0, _lighting.fol1, _lighting.fol2, _lighting.fol3);
++    SetSlot(LitConst::Research1, _lighting.fol4, _lighting.fol5, _lighting.fol6, _lighting.fol7);
++    SetSlot(LitConst::Research2, _lighting.can0, _lighting.can1, _lighting.can2, _lighting.can3);
++    SetSlot(LitConst::Research3, _lighting.can4, _lighting.can5, _lighting.can6, _lighting.can7);
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index 3643f9e..5a01f2a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -23,6 +23,7 @@ constexpr unsigned int kLitBinding = 3;
+ constexpr int kTerrainHorizonUnit = 3;
+ constexpr int kTerrainHeightUnit = 4;
+ constexpr int kCloudNoiseUnit = 5;
++constexpr int kCanopyUnit = 6; // research: canopy cover / height map
+ 
+ // LitConstants vec4 slots; must match the GLSL block in s_psRemasterCommon.
+ namespace LitConst
+@@ -59,14 +60,18 @@ enum : int
+     LightColor = 34, // MaxLights vec4
+     LightAmb = 42,   // MaxLights vec4
+     LightDir = 50,   // MaxLights vec4
+-    Count = 58,
++    Research0 = 58,  // foliage research knobs f0..f3
++    Research1 = 59,  // foliage research knobs f4..f7
++    Research2 = 60,  // canopy research knobs c0..c3
++    Research3 = 61,  // canopy research knobs c4..c7
++    Count = 62,
+ };
+ constexpr int MaxLights = 8;
+ static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
+ static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
+ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
+-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
++static_assert(Count == LightDir + MaxLights + 4, "LitConst size out of sync");
+ } // namespace LitConst
+ 
+ } // namespace Poseidon::gl33lighting
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e..0c26316 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -276,6 +276,10 @@ layout(std140) uniform LitConstants {
+     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
+     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
+     vec4 litLightDir[8];  // 50-57: xyz beam direction
++    vec4 litResearch0;    // 58: foliage research knobs f0..f3
++    vec4 litResearch1;    // 59: foliage research knobs f4..f7
++    vec4 litResearch2;    // 60: canopy research knobs c0..c3
++    vec4 litResearch3;    // 61: canopy research knobs c4..c7
+ };
+ 
+ uniform sampler2D tex0;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..c80667e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -1692,7 +1692,8 @@ void EngineGL33::InitPixelShaders()
+             int unit;
+         } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
+                            {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
+-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
++                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit},
++                           {"canopyMap", Poseidon::gl33lighting::kCanopyUnit}};
+         for (const auto& ls : litSamplers)
+         {
+             GLint loc = glGetUniformLocation(prog, ls.name);

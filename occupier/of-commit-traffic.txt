@@ -1,0 +1,28 @@
+guerrilla: Traffic deletes seated men by moving them out of the hull first (World::_outVehicles leak)
+
+::DeleteVehicle only flags a man sitting in a vehicle; he stays in
+World::_outVehicles, which never purges deleted entries, so every crewman,
+rider and seated corpse the ambient Traffic service deleted lived on as an
+invisible object and was written into saves (found by the phase 5 column
+work in CounterAttack, 37e24ba). Traffic now uses the same leave-then-
+delete idiom through four file-static helpers (SeatHull finds the hull of
+a man with or without a brain; LeaveSeat calls GetOutDriver / Gunner /
+Commander / Cargo at the hull, no sound; DeleteTrafficPerson; and
+DeleteTrafficHull, which empties every seat first: dead men, brainless
+men and traffic-group members are moved out and deleted, any other living
+man only steps out) on every seated-deletion path: DeleteCrew, the
+SpawnEntry teardowns, SeatOrDelete, the quiet far despawn, CleanupReleased
+(bodies may sit in another row of the convoy) and CleanupFleeing. Despawn
+timing and gating are unchanged. One behaviour change: an escort torn down
+at spawn for lack of a driver now deletes its seated gunner and riflemen
+instead of ejecting them as a stray group.
+
+Probe (six hulls, crews held by reference, despawned out of sight):
+before live 9 of 9 and dead 3 of 3 outlived their hulls, after 0 and 0.
+agent_guidelines/seated-man-deletion.md records the trap. Verified on
+build/agent-rwdi: every traffic unit case green; tri 17/17 on
+remaster-shadow-of1 (all guerrilla_traffic_* incl. the two .seq,
+civ_shakedown, qrf_reference_mission, offscreen_convoy,
+offscreen_save_reload.seq; roadblock recovered on retry 1).
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

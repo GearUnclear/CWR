@@ -1,0 +1,168 @@
+graphics: one tiled light list feeds every local light
+
+What the player sees: the town at night as before. In Saint Louis with
+its six street lamps and two parked Jeeps' headlights on, 1% of the
+frame changes, by about 5 levels where it does: a tree crown beside a
+lamp and a few far window frames now rank the lamps nearest to each
+pixel rather than the lamps nearest to their object's centre. By day
+nothing runs and nothing changes. The work is underneath: every
+remastered surface now takes its lamps, headlights and fires from one
+list of the frame's lights, binned into 32-pixel screen tiles, instead
+of the list each draw selected for itself, so the night, combat and
+wet-street steps (B3, B4, B7) shade from one place, and terrain, roads
+and objects draw from the same lights.
+
+How it works: Graphics/Rendering/Lighting/FrameLights (pure) takes the
+scene's active lights (on, within the horizon range plus 500 m, the 16
+strongest at the camera), ranks them as Light::Compare does and bins
+each by its reach, a sphere of 10 start distances, into tiles over the
+whole frame target from pixel (0, 0): the screen box of the projected
+sphere from the tangent planes per axis, nothing for a reach behind the
+eye or outside a side plane of the view, the whole viewport for one
+that crosses the eye plane. A tile lists up to 16 lights in rank order.
+EngineGL33::UpdateLightTiles builds the list once per frame at the
+world's first 3D pass while the gate is on and uploads the lights to a
+4 KB uniform block (FrameLights, binding 4) and the tile lists to an
+RGBA8UI texture on unit 13 (a light index plus one, 0 after the last),
+each only when it changed. The fragment finds its tile from
+gl_FragCoord (litLightCount.y holds the tile size) and shades with the
+one classic model both paths now share (localLight: full strength
+inside the start distance, the quadratic falloff, the smooth end at 10
+start distances, the smoothed 14 deg cone, the display-space sum and
+its 1.0 clamp), scaled by the draw's night factor (litLightCount.z, 1
+for a material without sun, as the per-draw upload gave it).
+
+The classic budget: Scene::SelectLights gives each object or terrain
+segment its 7 strongest lights by sort brightness over squared distance.
+The tiled path keeps 7 per fragment, ranked by the same rule at the
+fragment, faded out toward the edge of each light's reach (where a tile
+does not list a light it must not rank, or the set would change at a
+tile edge), with the 7th and 8th blended when they are within 25% of
+each other, so the set changes smoothly across a surface instead of at
+object edges. Without the budget, lamp-lit walls and crowns in Saint
+Louis came out 16 levels brighter over nearly a quarter of the frame: a
+street lamp's start distance is 50 m, so it reaches 500 m, and its
+ambient term lit every wall the cap of 7 had held back. Spotlights are
+binned by their whole reach for the same reason: the classic rule spends
+its slots on near headlights wherever they reach, and binning them by
+their cone brought the bright walls back.
+
+While the tiles light the pass, a draw's material upload sends only
+slot 22 (101.1 kB of LitConstants a frame at the lamps view become 5.8
+kB), and Pass1 lets lit objects join instanced runs
+(Engine::LocalLightsFromTiles; with drawGrouping=0 the pre-A4 rule
+stays). Lights carry a kind (Light::Kind: street lamps Lamp, camp fires
+Fire, weapon flashes, explosions, burning wrecks, flares and missile
+motors Combat, spotlights Spot) for the steps that give a kind its own
+model; at A6 every kind keeps the classic one. Debug view 6 (debug=6,
+"Light tiles") draws the lights per tile and the grid. triPerfStats
+gained "tiles lights= refs= tilecpu=" and make_pairs.py its columns.
+
+The switch and its gates: lightTiles (light list, Night and combat),
+landed; its GPU time shows in the world section. The gate (A1) is on
+with a local light lit at night (from B4 also a combat light within 60
+m). By day, in Classic, under night vision and in the passes after the
+world (portraits, 3D previews) every draw lights from its own list
+through the per-draw slots exactly as before, and lightTiles=0 is that
+path.
+
+Kept, rewritten and dropped: not a research track. It replaces the three
+lists the combat, night and materials prototypes each built (combat's
+HDR flag through the 8 per-draw slots, night's 8 strongest at the camera
+handed to every draw, materials' localSpec over the same 8). Corrections
+to plan section 5 A6, recorded in the plan: no slot 70 (the tile size
+and the night factor ride in litLightCount.yz); a uniform block instead
+of a texture buffer (a samplerBuffer build took 1.6 ms of world time
+over the per-draw path at the lamps view with another lane's game
+running, the block about 0.5); RGBA8UI with 16 entries per tile instead
+of RGBA16UI with 8 (8 would cut a lamp at a tile edge when more lights
+overlap); spotlights binned by their whole reach, not their cone; every
+kind keeps the clamp at A6 (moving Fire and Combat to linear HDR changes
+their look, which is B4's to tune); owner exclusion and ParticleLight
+left to B3 or B4 (the owner id is kept on the CPU).
+
+Measured cost (RTX 4060 Ti, 1920x1080, scale 1.0, 4x MSAA, the Saint
+Louis lamps views, where all 10 lights reach every tile): the world
+pass costs about 0.5 to 1.1 ms more with the tiles on. By the GPU
+minimum over 90 frames: +0.54 to 0.69 ms in three interleaved rounds at
+the timing view, the B5 lane's game running (Pass1 +0.41 to 0.53,
+ground +0.15 to 0.18); +0.47 to 0.63 in four pairs at the CPU view;
++0.50 to 1.23 in four pairs there with drawGrouping=0 (that pair +1.10
+by its 90-frame average). A quiet run of the build before the last
+change read +0.42 to 0.61. CPU frame within 0.2 ms; the tile build 0.03 ms; draw calls 877
+to 790 or 804. With the classic lamps' 500 m reach the tiles cull
+nothing in town; they will once B3's lamps have a physical reach. By
+day the gate holds it off: sunrise_ridge draws the same frame.
+
+Tests: new test_frame_lights.cpp [FrameLights], 11 cases: every tile a
+light can reach lists it, against brute-force samples of the lit region
+in 40 random views (one in four pillarboxed), and few others do; every
+kind is binned by its whole reach; a reach behind or beside the view is
+not binned, one round the eye covers the viewport; ranking keeps the
+strongest at the camera and drops dark lights; a full tile keeps the 16
+strongest in rank order; the buffer layout; a light ranks only inside
+its reach; the budget keeps the 7 strongest and blends continuously at
+its edge; the shaders read the list with these sizes, model and budget;
+the backend lights from the tiles only while they are on; the switch
+has landed. test_feature_switches (lightTiles landed; 9/26 with the
+lanes it was merged onto),
+test_post_stages (debug view 6 adds no post stage), test_perf_counters
+(the tile counters), test_remaster_lighting (the lights piece, integer
+samplers in the unit table). Eleven mutations each turn their own cases
+red (a screen box from the centre's projection, a spotlight binned by
+half its reach, no reach fade in the shader, none in the mirror, a full
+tile overwriting its last entry, ranking by brightness alone, no night
+factor, no budget, a hard-cut budget, the switch not landed, per-draw
+slots written in tile mode). The gate tags of plan section 8 item 3
+plus [FrameLights], [FeatureSwitches], [FeatureGates], [PerfCounters]
+and [PostStages]: 493/493; [Graphics] has the known DDS fixture failure
+only, the full suite the 6 known localisation failures only. Build: no
+new warnings; every touched C++ file clang-format clean (Lights.hpp, a
+tab-style header, by clang-format-diff on the touched lines).
+
+In game (tmp/integration/A6/captures of the graphics-remaster worktree):
+before2 (the base build c584185), after5 (this change, plus smoke_abel:
+KHR_debug ids 131154, 131169 and 131218 only, no GL error, no shader
+error; shot on the build before two edits to comments only), timing4 and
+cpu1 (timing), probe1 to probe4 (the budget experiments). lightTiles=0
+against the base build: pixel-identical at sunrise_ridge; at the two
+lamp views within the base build's own off-to-on repeat (283 and 266
+pixels over 2 levels against 279 and 290, the AI drivers' heads); the
+hero town_night with its fire is not repeatable (313,257 against the
+base's own 322,330). On against off: 22,111 and 22,115 pixels over 2
+levels at the lamp views, mean +4.8 levels where they differ, nothing by
+day.
+
+Merged onto 807ce4b (A5, A7, B11 and B1 landed after the lane's base
+c584185) by a three-way apply; eight files conflicted and keep both
+sides: unit 13 and its sampler row beside B1's unit 6 and A7's unit 8;
+InitLightTiles, DeinitLightTiles and the unit 13 bind beside the
+raw-depth sampler and the sky table's; the debug-view flag after B1's
+sun shadow slots; the lightTiles registry row among the landed ones
+(landed=9/26); the fragment-piece list with the sky and lights pieces;
+the test list; and the plan's slot 70 note (LitConst::Count stays 78,
+slot 70 stays inside B11's padding). Merged: build clean, no new
+warnings in touched files, clang-format clean; the gate tags of plan
+section 8 item 3 plus the landed lanes' tags and [FrameLights]:
+536/536; smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only,
+no shader error).
+
+Known risks: the world pass costs about 0.5 to 1.1 ms more where many
+lights cover the screen (more on an RTX 3060, not measured); each
+fragment ranks up to 16 lights. The tiles hold 16 lights and the active
+list 16 today; when B4 adds combat lights past 16 a full tile would
+drop one and could show a seam at a tile edge. The budget ranks at the
+fragment, not the object's centre, so large objects and terrain can take
+a different 7 than before (the 1% above). A spotlight takes a budget
+slot over its whole reach, as the classic rule did. One timing run (not
+the others) showed single CPU frames of 23 to 39 ms in the windows
+after switching the tiles on. Lit objects now join instanced runs at
+night; A4's kept-draw rule concerns Pass2's pre-shadow loop, not runs,
+and was not checked with B3's moon shadow pass. Seen for A4 at the
+lamps view: drawGrouping=1 costs CPU there (frame 9.2 to 10.2 ms against
+7.4 to 8.0 with it off). FrameLights.{hpp,cpp} and test_frame_lights.cpp
+are new files to add with the commit. Lights.hpp keeps its file's tab
+style; the added lines are in clang-format style and clang-format-diff
+clean.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

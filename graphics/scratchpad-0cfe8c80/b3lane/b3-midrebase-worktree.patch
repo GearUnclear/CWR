@@ -1,0 +1,2465 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+index 43f3f6d..88617c7 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Core/Engine.hpp
+@@ -842,6 +842,15 @@ class Engine : public IGraphicsEngine
+     /// instead of each draw's own light list: a draw's list then lights
+     /// nothing, so the scene may draw lit objects in instanced runs.
+     virtual bool LocalLightsFromTiles() const { return false; }
++    /// True when this frame's key light is the moon (the moonShadows feature,
++    /// Graphics/Remaster/NightLights.hpp): the scene then renders the sun
++    /// shadow map from the moon's direction, at night.
++    virtual bool RemasterMoonKey() const { return false; }
++    /// The physical lamps and low beams (the nightLights feature): the linear
++    /// light they put on a particle at world point `pos` this frame (no surface
++    /// term), and true. False when they are off: every light then lights the
++    /// particle by the classic model, as before.
++    virtual bool ParticleNightLight(Vector3Par /*pos*/, float /*linear*/[3]) const { return false; }
+     /// Captures: hold the remastered cloud-shadow field at a drift offset in
+     /// metres (pinned = false lets it drift with the wind again from where it
+     /// is). The field integrates the wind every frame, so re-pinning the sim
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+index 55655c3..ea77c0d 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureGates.cpp
+@@ -138,6 +138,14 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
+             return Off("sun below 4 deg");
+ 
+         case Feature::NightLights:
++            // The physical lamps and low beams are a model of the tiled light
++            // list (the per-draw path keeps the classic one).
++            if (in.nightEffect <= kGateNightMinEffect)
++                return Off("day");
++            if (!FeatureOn(t.features, Feature::LightTiles))
++                return Off("light list off");
++            return On("night");
++
+         case Feature::Stars:
+             if (in.nightEffect <= kGateNightMinEffect)
+                 return Off("day");
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+index 0a55d20..1c3648a 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/FeatureSwitches.cpp
+@@ -41,11 +41,14 @@ constexpr FeatureInfo kFeatures[] = {
+     {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", true, &FS::lowSunRig, "world"},
+     {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", true,
+      &FS::crownCanopy, "world"},
+-    {Feature::NightLights, "nightLights", "Lamps and low beams", "night", "Night and combat", "B3", false,
+-     &FS::nightLights, ""},
+-    {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", false, &FS::moonShadows,
+-     ""},
+-    {Feature::Stars, "stars", "Stars", "night", "Night and combat", "B3", false, &FS::stars, ""},
++    // B3 (night): the lamps and low beams shade in the world pass, the moon's
++    // shadow map renders in the shadow depth pass, the stars draw with the sky
++    // (part of the world section).
++    {Feature::NightLights, "nightLights", "Lamps and low beams", "night", "Night and combat", "B3", true,
++     &FS::nightLights, "world"},
++    {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", true, &FS::moonShadows,
++     "shadow"},
++    {Feature::Stars, "stars", "Stars", "night", "Night and combat", "B3", true, &FS::stars, "world"},
+     {Feature::CombatLights, "combatLights", "Combat light", "combat", "Night and combat", "B4", false,
+      &FS::combatLights, ""},
+     {Feature::CombatShadows, "combatShadows", "Combat light shadows", "combat", "Night and combat", "B4", false,
+@@ -206,6 +209,11 @@ struct KeyTable
+                         "the mean share of sky the sea reflects; the waves' share stays", &LT::seaSky, 0.0f, 2.0f),
+             MakeSubKnob(Feature::SeaWaves, "seaSheen", "Sea sheen",
+                         "the broad sheen toward the sun, in the original hue", &LT::seaSheen, 0.0f, 3.0f),
++            MakeSubKnob(Feature::NightLights, "nightLamp", "Street lamp strength",
++                        "the lamps' intensity; 0 = street lamps light nothing", &LT::nightLamp, 0.0f, 4.0f),
++            MakeSubKnob(Feature::NightLights, "nightSpot", "Headlight strength",
++                        "the low beam's hot spot; 0 = headlights light nothing", &LT::nightSpot, 0.0f,
++                        4.0f),
+         };
+         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
+         count = static_cast<int>(rows.size());
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index 5017aef..055a036 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -365,6 +365,31 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     return rig;
+ }
+ 
++KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShare)
++{
++    KeyLight key;
++    const float share = Clamp01(moonShare);
++    const float* toward = share > 0.0f ? in.towardMoon : in.towardSun;
++    for (int i = 0; i < 3; ++i)
++    {
++        key.toward[i] = toward[i];
++        key.skySunToward[i] = in.towardSun[i];
++    }
++    key.skySunElevationDeg = rig.sunElevationDeg;
++    if (share <= 0.0f)
++    {
++        key.radiance = rig.sun;
++        key.elevationDeg = rig.sunElevationDeg;
++        return key;
++    }
++    const float sinMoon = std::max(-1.0f, std::min(1.0f, in.towardMoon[1]));
++    key.elevationDeg = std::asin(sinMoon) * 180.0f / kPi;
++    key.radiance = rig.moon * share;
++    key.moonShare = share;
++    rig.moon = rig.moon * (1.0f - share);
++    return key;
++}
++
+ float ShaftScatterLength(float fogEnd)
+ {
+     if (!(fogEnd > 0.0f))
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 117b581..9dc1420 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -153,6 +153,12 @@ struct LightingTuning
+     float seaRelief = 1.0f;
+     float seaSky = 1.0f;
+     float seaSheen = 1.0f;
++    // Night lights (features.nightLights, NightLights.hpp): the street lamps'
++    // and the headlights' strength, times the lamp intensity per start metre
++    // and the low beam's hot-spot intensity (FrameLights.hpp
++    // kLampIntensityPerStart, kLowBeamPeak).
++    float nightLamp = 1.0f;
++    float nightSpot = 1.0f;
+     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+     // can show; off (gates=0) runs every enabled feature on every frame, for
+     // debugging.
+@@ -219,6 +225,39 @@ float ShaderDebugView(int debugView);
+ 
+ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning);
+ 
++// The key light: what the shader's sun slots carry and what the shadow map,
++// the terrain horizon, the cloud shadows and the glossy highlight follow. By
++// day and in twilight it is the sun. At night, with the moon key on (the
++// moonShadows switch and its gate, B3), it is the moon: `moonShare` (0..1,
++// NightLights.hpp MoonKeyShare) of the rig's moon moves out of the shadowless
++// moon term into the key, so the moon keeps F9's calibration (kMoonFull, its
++// chroma, its sky fill) and only gains shadows; the rest stays in rig.moon.
++// The sun is fully set where the share can be above 0 (the gate needs it 3
++// degrees under the horizon; the rig's sun is out by 1.5 degrees under).
++//
++// The sky does not follow the key: the sky table and its aureole, the fog
++// toward the sun, the warm side of the sky light on surfaces, the lit clouds
++// and the sun disk stay on the sun whatever the key (the sky table is still
++// near full strength 3 degrees under the horizon, SkyDayFade). The key carries
++// the sun's own direction and elevation for them (`skySunToward`,
++// `skySunElevationDeg`; the shaders' litSkySun), equal to `toward` and
++// `elevationDeg` whenever the sun is the key.
++struct KeyLight
++{
++    float toward[3] = {0.0f, 1.0f, 0.0f}; // unit, y up
++    Rgb radiance;                         // linear
++    float elevationDeg = 90.0f;
++    float moonShare = 0.0f; // 0: the sun is the key
++    float skySunToward[3] = {0.0f, 1.0f, 0.0f};
++    float skySunElevationDeg = 90.0f;
++    bool IsMoon() const { return moonShare > 0.0f; }
++};
++
++// The key light for the frame. Moves `moonShare` of rig.moon into the key when
++// it is above 0 (rig.moon keeps the rest); leaves the rig alone otherwise. The
++// sky's sun is the sun either way.
++KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShare);
++
+ // Sun chroma at an elevation (degrees), normalised to unit luminance.
+ Rgb SunChroma(float elevationDeg, float warmth);
+ 
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/NightLights.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/NightLights.cpp
+new file mode 100644
+index 0000000..ba84325
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/NightLights.cpp
+@@ -0,0 +1,74 @@
++#include <Poseidon/Graphics/Remaster/NightLights.hpp>
++
++#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
++
++#include <algorithm>
++
++namespace Poseidon::remaster
++{
++
++namespace
++{
++
++float Smooth01(float t)
++{
++    t = std::clamp(t, 0.0f, 1.0f);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++} // namespace
++
++float MoonKeyShare(const FeatureGates& gates)
++{
++    if (!gates[Feature::MoonShadows].on)
++        return 0.0f;
++    const GateInputs& in = gates.inputs;
++    const float sun = Smooth01((kGateMoonKeyMaxSunDeg - in.sunElevationDeg) / kMoonKeyFadeDeg);
++    const float moon = Smooth01((in.moonElevationDeg - kGateMoonKeyMinMoonDeg) / kMoonKeyFadeDeg);
++    const float phase = Smooth01((in.moonPhase - kGateMoonKeyMinPhase) / kMoonKeyFadePhase);
++    return sun * moon * phase;
++}
++
++NightConstants ComputeNightConstants(const LightingTuning& tuning, const FeatureGates& gates, bool tiledLights,
++                                     float moonShare)
++{
++    NightConstants c;
++    c.night[3] = std::clamp(moonShare, 0.0f, 1.0f);
++    if (!gates[Feature::NightLights].on || !tiledLights)
++        return c;
++    c.night[0] = 1.0f;
++    c.night[1] = lighting::kLampIntensityPerStart * std::max(tuning.nightLamp, 0.0f);
++    c.night[2] = lighting::kLowBeamPeak * std::max(tuning.nightSpot, 0.0f);
++    return c;
++}
++
++StarSplat MakeStarSplat(float x, float y, float alpha, std::uint32_t index)
++{
++    StarSplat s;
++    const float r = kStarSplatRadius;
++    const float dx[4] = {-r, r, r, -r};
++    const float dy[4] = {-r, -r, r, r};
++    s.x[0] = x;
++    s.y[0] = y;
++    s.alpha[0] = std::clamp(alpha * kStarCentreGain, 0.0f, 255.0f);
++    for (int c = 0; c < 4; ++c)
++    {
++        s.x[c + 1] = x + dx[c];
++        s.y[c + 1] = y + dy[c];
++        s.alpha[c + 1] = 0.0f;
++    }
++    // A faint colour temperature per star (Knuth's multiplicative hash of the
++    // index), from a cool white to a warm one, each at unit luminance.
++    const float h = static_cast<float>((index * 2654435761u) & 0xffffu) / 65535.0f;
++    const float cool[3] = {0.80f, 0.87f, 1.00f};
++    const float warm[3] = {1.00f, 0.90f, 0.74f};
++    float t[3];
++    for (int i = 0; i < 3; ++i)
++        t[i] = cool[i] + (warm[i] - cool[i]) * h;
++    const float lum = 0.2126f * t[0] + 0.7152f * t[1] + 0.0722f * t[2];
++    for (int i = 0; i < 3; ++i)
++        s.tint[i] = t[i] / lum;
++    return s;
++}
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/NightLights.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/NightLights.hpp
+new file mode 100644
+index 0000000..c327eb7
+--- /dev/null
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/NightLights.hpp
+@@ -0,0 +1,77 @@
++#pragma once
++
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++
++#include <cstdint>
++
++// The remastered night (INTEGRATION-PLAN.md step B3, research track night):
++// the rules the GL backend, the scene and the shaders share. Pure, no GL, no
++// engine state. Three feature switches, each with its frame gate
++// (FeatureGates.hpp):
++//
++//   moonShadows  the moon as the key light: once the sun is well under the
++//                horizon and a bright moon is up, the shader's sun slots carry
++//                the moon (LightRig.hpp KeyLight), so the shadow map, the
++//                terrain horizon, the cloud shadows and the glossy highlight
++//                follow it, and the scene renders the shadow map from the moon.
++//                The moon keeps F9's calibration; only its shadows are new. The
++//                sky stays on the sun (its table, aureole and fog glow).
++//   nightLights  street lamps and headlights as physical lights on the frame's
++//                tiled light list (FrameLights.hpp: inverse-square falloff from
++//                the bulb, a low-beam pattern aimed from the vehicle's body,
++//                rough diffuse, foliage wrapped as the sun wraps it), and the
++//                same lights on smoke and dust (ParticleLight).
++//   stars        stars as small soft splats with a faint colour each, instead
++//                of a two-pixel bilinear dot.
++//
++// The shaders read two LitConstants slots (EngineGL33_Lighting.hpp):
++// LitConst::Night, x 1 while the physical lamps and low beams light the frame
++// (the nightLights gate on and the tiled list lighting the pass), y the lamp
++// intensity per metre of start distance (times nightLamp), z the low beam's
++// hot-spot intensity (times nightSpot), w the moon key's share (0: the sun is
++// the key); and LitConst::SkySun, the sun's own direction and elevation, which
++// the sky reads whatever the key (LightRig.hpp KeyLight).
++
++namespace Poseidon::remaster
++{
++
++// The moon key fades in over this many degrees above each of its gate edges
++// (the sun kGateMoonKeyMaxSunDeg under the horizon, the moon
++// kGateMoonKeyMinMoonDeg up) and over this much of the phase above
++// kGateMoonKeyMinPhase, so the moon's shadows fade in instead of switching on.
++constexpr float kMoonKeyFadeDeg = 3.0f;
++constexpr float kMoonKeyFadePhase = 0.1f;
++
++// The share (0..1) of the rig's moon that the key carries this frame: 0 where
++// the moon key's gate is off, rising to 1 within kMoonKeyFadeDeg of the sun
++// and moon edges and kMoonKeyFadePhase of the phase edge.
++float MoonKeyShare(const FeatureGates& gates);
++
++// LitConst::Night for the frame. `tiledLights`: the frame's tiled light list
++// lights the pass (the physical model lives in the tiled path only).
++// `moonShare`: the frame's KeyLight::moonShare, which w carries whatever the
++// lamps do (the sky's sun radiance is 0 while it is above 0).
++struct NightConstants
++{
++    float night[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++};
++NightConstants ComputeNightConstants(const LightingTuning& tuning, const FeatureGates& gates, bool tiledLights,
++                                     float moonShare = 0.0f);
++
++// A star as a splat: a fan of four triangles around the star's screen point
++// (x, y in pixels), its centre kStarCentreGain times the star's alpha (0..255,
++// at most 255) falling to 0 at the corners of a square kStarSplatRadius pixels
++// out, and a colour tint between cool and warm picked from the star's index,
++// at about unit luminance. The bilinear dot it replaces spread the alpha over
++// two pixels; at 1080p and render scale 1 most stars were a faint pixel.
++constexpr float kStarSplatRadius = 1.6f;
++constexpr float kStarCentreGain = 1.8f;
++struct StarSplat
++{
++    float x[5] = {}, y[5] = {}; // 0 the centre, 1..4 the corners
++    float alpha[5] = {};        // 0..255
++    float tint[3] = {1.0f, 1.0f, 1.0f};
++};
++StarSplat MakeStarSplat(float x, float y, float alpha, std::uint32_t index);
++
++} // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.cpp
+index 077d894..dc46615 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/SunShadows.cpp
+@@ -1,5 +1,7 @@
+ #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+ 
++#include <Poseidon/Graphics/Remaster/NightLights.hpp>
++
+ #include <algorithm>
+ #include <cmath>
+ 
+@@ -72,9 +74,14 @@ SunShadowConstants ComputeSunShadowConstants(const LightingTuning& tuning, const
+         c.pcss[0] = std::max(tuning.shadowReach, kPcssMinReachMetres);
+         c.pcss[1] = kPcssMinFilterTexels;
+         // The gate opens at 4 deg; the soft filter fades in over the next 2
+-        // degrees. Forced on (gates=0) or opened by the moon key, it runs whole.
++        // degrees. Forced on (gates=0) it runs whole. Under the moon key
++        // (B3) the stock filter casts the moon's shadows: at a fiftieth of the
++        // noon sun no one sees a contact-hardening penumbra, and the soft
++        // filter's taps would cost the night's world pass for nothing.
+         const float sun = gates.inputs.sunElevationDeg;
+-        c.pcss[2] = (tuning.gates && sun > kGateSunShadowMinSunDeg) ? PcssStrength(sun) : 1.0f;
++        c.pcss[2] = MoonKeyShare(gates) > 0.0f                        ? 0.0f
++                    : (tuning.gates && sun > kGateSunShadowMinSunDeg) ? PcssStrength(sun)
++                                                                      : 1.0f;
+     }
+     const Gate& trees = gates[Feature::TreeShadows];
+     c.pcss[3] = trees.on ? std::max(tuning.leafBias, 0.0f) : 0.0f;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp
+index 8864788..8280a85 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.cpp
+@@ -56,9 +56,11 @@ bool LightIsDark(const FrameLight& light)
+     return true;
+ }
+ 
+-LightSphere LightBounds(const FrameLight& light)
++LightSphere LightBounds(const FrameLight& light, const PhysicalLightParams* physical)
+ {
+-    return LightSphere{{light.pos[0], light.pos[1], light.pos[2]}, kRangeFactor * std::fabs(light.start)};
++    const float r = physical && UsesPhysicalModel(light.kind) ? PhysicalReach(light, *physical)
++                                                              : kRangeFactor * std::fabs(light.start);
++    return LightSphere{{light.pos[0], light.pos[1], light.pos[2]}, r};
+ }
+ 
+ void RankFrameLights(std::vector<FrameLight>& lights, int capacity)
+@@ -81,13 +83,13 @@ void ResizeTileGrid(TileGrid& grid, int targetW, int targetH, int tileSize)
+     grid.litTiles = 0;
+ }
+ 
+-bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4])
++bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4], const PhysicalLightParams* physical)
+ {
+     const float vx0 = view.viewport[0], vy0 = view.viewport[1];
+     const float vw = view.viewport[2], vh = view.viewport[3];
+     if (vw <= 0.0f || vh <= 0.0f)
+         return false;
+-    const LightSphere s = LightBounds(light);
++    const LightSphere s = LightBounds(light, physical);
+     float v[3];
+     for (int r = 0; r < 3; ++r)
+         v[r] = view.rot[r][0] * s.c[0] + view.rot[r][1] * s.c[1] + view.rot[r][2] * s.c[2];
+@@ -135,7 +137,8 @@ bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4
+     return true;
+ }
+ 
+-void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid)
++void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid,
++                      const PhysicalLightParams* physical)
+ {
+     std::fill(grid.indices.begin(), grid.indices.end(), std::uint8_t{0});
+     grid.refs = 0;
+@@ -148,7 +151,7 @@ void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& vie
+     for (int i = 0; i < n; ++i)
+     {
+         float rect[4];
+-        if (!LightScreenRect(lights[static_cast<size_t>(i)], view, rect))
++        if (!LightScreenRect(lights[static_cast<size_t>(i)], view, rect, physical))
+             continue;
+         const int tx0 = std::clamp(static_cast<int>(std::floor(rect[0] / ts)), 0, grid.tilesX - 1);
+         const int ty0 = std::clamp(static_cast<int>(std::floor(rect[1] / ts)), 0, grid.tilesY - 1);
+@@ -263,4 +266,128 @@ void ClassicBudgetWeights(const float* importance, int n, float* weight)
+         weight[k] = n > budget ? std::clamp(0.5f + (importance[k] - mid) / band, 0.0f, 1.0f) : 1.0f;
+ }
+ 
++bool UsesPhysicalModel(FrameLightKind kind)
++{
++    return kind == FrameLightKind::Lamp || kind == FrameLightKind::Spot;
++}
++
++namespace
++{
++
++float Smoothstep(float e0, float e1, float x)
++{
++    const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++float Dot(const float a[3], const float b[3])
++{
++    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
++}
++
++} // namespace
++
++float LowBeamPattern(const float toPoint[3], const float beam[3])
++{
++    const float c = Dot(toPoint, beam);
++    if (c <= 0.0f)
++        return 0.0f;
++    // The beam's frame: right = up x beam, u = beam x right (y up).
++    float right[3] = {beam[2], 0.0f, -beam[0]};
++    const float rl = std::sqrt(std::max(right[0] * right[0] + right[2] * right[2], 1e-12f));
++    right[0] /= rl;
++    right[2] /= rl;
++    const float u[3] = {beam[1] * right[2] - beam[2] * right[1], beam[2] * right[0] - beam[0] * right[2],
++                        beam[0] * right[1] - beam[1] * right[0]};
++    const float ah = std::atan2(Dot(toPoint, right), c);
++    const float av = std::atan2(Dot(toPoint, u), c);
++    const float cut = 1.0f - Smoothstep(kLowBeamCutLow, kLowBeamCutHigh, av);
++    const float hv = (av - kLowBeamHotBand) / kLowBeamHotWidth;
++    const float vert = std::exp(-hv * hv) + kLowBeamFloor * Smoothstep(kLowBeamFloorEnd, kLowBeamFloorStart, av);
++    const float h1 = ah / kLowBeamCoreWidth;
++    const float h2 = ah / kLowBeamSpillWidth;
++    const float horiz = std::exp(-h1 * h1) + kLowBeamSpill * std::exp(-h2 * h2);
++    return vert * horiz * cut;
++}
++
++void LowBeamAim(const float lampDir[3], const float bodyForward[3], float out[3])
++{
++    float hx = lampDir[0], hz = lampDir[2];
++    float hl = std::sqrt(hx * hx + hz * hz);
++    const float fl = std::sqrt(bodyForward[0] * bodyForward[0] + bodyForward[2] * bodyForward[2]);
++    if (hl < 1e-4f)
++    {
++        // A lamp pointing straight up or down: take the body's heading.
++        hx = bodyForward[0];
++        hz = bodyForward[2];
++        hl = fl;
++    }
++    if (hl < 1e-4f || fl < 1e-4f)
++    {
++        // No heading at all (a body pointing straight up): keep the model's axis.
++        const float l = std::sqrt(std::max(Dot(lampDir, lampDir), 1e-12f));
++        for (int i = 0; i < 3; ++i)
++            out[i] = lampDir[i] / l;
++        return;
++    }
++    hx /= hl;
++    hz /= hl;
++    // The body's slope along the lamp's heading (its forward slope projected
++    // onto that heading), then the tilt under it.
++    const float along = (bodyForward[0] * hx + bodyForward[2] * hz) / fl;
++    const float slope = bodyForward[1] / fl * along - kLowBeamTilt;
++    const float l = std::sqrt(1.0f + slope * slope);
++    out[0] = hx / l;
++    out[1] = slope / l;
++    out[2] = hz / l;
++}
++
++float PhysicalReach(const FrameLight& light, const PhysicalLightParams& params)
++{
++    const float peak = light.IsSpot() ? params.spotPeak : params.lampPerStart * light.start;
++    const float classic2 = kRangeFactor * kRangeFactor * light.start * light.start;
++    return std::sqrt(std::min(classic2, std::max(peak, 0.0f) / kPhysicalMinIrradiance));
++}
++
++void PhysicalIrradiance(const FrameLight& light, const float p[3], const PhysicalLightParams& params, float out[3])
++{
++    out[0] = out[1] = out[2] = 0.0f;
++    if (!UsesPhysicalModel(light.kind))
++        return;
++    const float rel[3] = {p[0] - light.pos[0], p[1] - light.pos[1], p[2] - light.pos[2]};
++    const float d2 = Dot(rel, rel);
++    const float reach = PhysicalReach(light, params);
++    const float end2 = reach * reach;
++    if (d2 >= end2)
++        return;
++    const float d = std::sqrt(std::max(d2, 1e-12f));
++    float intensity = 0.0f;
++    if (light.IsSpot())
++    {
++        const float toPoint[3] = {rel[0] / d, rel[1] / d, rel[2] / d};
++        intensity = params.spotPeak * LowBeamPattern(toPoint, light.dir);
++    }
++    else
++    {
++        intensity = params.lampPerStart * light.start;
++    }
++    intensity *= (1.0f - Smoothstep(0.5f * end2, end2, d2)) * Smoothstep(kPhysicalNearStart, kPhysicalNearEnd, d);
++    const float e = intensity / (d2 + kPhysicalSoftening);
++    for (int i = 0; i < 3; ++i)
++        out[i] = std::pow(std::max(light.diffuse[i], 0.0f), 2.2f) * e;
++}
++
++void ParticleLight(const std::vector<FrameLight>& lights, const float p[3], const PhysicalLightParams& params,
++                   float out[3])
++{
++    out[0] = out[1] = out[2] = 0.0f;
++    for (const FrameLight& l : lights)
++    {
++        float e[3];
++        PhysicalIrradiance(l, p, params, e);
++        for (int i = 0; i < 3; ++i)
++            out[i] += e[i];
++    }
++}
++
+ } // namespace Poseidon::lighting
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp
+index 8ca1434..4b76212 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp
+@@ -17,12 +17,15 @@
+ // UpdateLightTiles); the shader side is localLightsTiled() in
+ // EngineGL33_LightingShadersLights.cpp.
+ //
+-// Every kind is shaded with the classic local-light model today (full strength
+-// inside the start distance, a quadratic falloff past it ending in a smooth
+-// window at kRangeFactor times it, a smoothed spotlight cone, the sum taken in
+-// display space and clamped at 1, as the per-draw path does). The kind travels
+-// with each light so the steps that give a kind its own model (B3 lamps and
+-// low beams, B4 fire and combat light) find it here.
++// The classic local-light model (full strength inside the start distance, a
++// quadratic falloff past it ending in a smooth window at kRangeFactor times
++// it, a smoothed spotlight cone, the sum taken in display space and clamped at
++// 1, as the per-draw path does) shades every kind, except that at night, with
++// the nightLights switch on (B3), street lamps and headlights take the
++// physical model below: light falling off with the squared distance from the
++// bulb, a low-beam pattern for headlights, summed in linear light. The kind
++// travels with each light so the steps that give a kind its own model (B4 fire
++// and combat light) find it here.
+ 
+ namespace Poseidon::lighting
+ {
+@@ -38,6 +41,8 @@ enum class FrameLightKind : std::uint8_t
+ 
+ const char* FrameLightKindName(FrameLightKind kind);
+ 
++struct PhysicalLightParams; // the physical model's intensities (below)
++
+ // The classic local-light model the shaders apply (EngineGL33_LightingShadersLights.cpp
+ // localLight; the test pins the shader's numbers to these).
+ constexpr float kRangeFactor = 10.0f;     // the reach ends at this many start distances (end2 = 100 * start2)
+@@ -80,8 +85,10 @@ struct FrameLight
+     float ambient[3] = {};             // display-space colour it adds whatever the surface faces
+     float dir[3] = {0.0f, 0.0f, 1.0f}; // unit beam direction (spotlights)
+     float sortBrightness = 0.0f;       // Light::SortBrightness: the ranking weight (Light::Compare)
+-    // The object the light is attached to (Object::ID, 0 = none), for the
+-    // self-exclusion the night lamps need (B3). The shaders do not read it yet.
++    // The object the light is attached to (Object::ID, 0 = none). The shaders
++    // do not read it: a draw in an instanced run has no single object, so the
++    // physical model keeps a light off its owner by geometry instead
++    // (kPhysicalNearEnd and the low beam's back plane).
+     std::uint32_t owner = 0;
+     int shadowSlot = -1; // combat shadow mask channel (B4); -1 = none
+ 
+@@ -97,14 +104,17 @@ bool LightIsDark(const FrameLight& light);
+ // (centred reach / (2 cos a) ahead of the lamp, radius the same, a the cone
+ // edge's angle) is about half as large; but the classic budget ranks a
+ // spotlight wherever it is in reach, cone or not (as Scene::SelectLights does),
+-// so every tile in reach must list it. The step that lifts the budget for
+-// headlights (B3) can bin them by the cone.
++// so every tile in reach must list it. With `physical` (the physical model
++// lights the frame, B3) a street lamp or headlight is binned by its physical
++// reach instead (PhysicalReach), still centred on the bulb: the low beam's
++// floor and spill light most of the half-space ahead, so its cone is no
++// tighter bound.
+ struct LightSphere
+ {
+     float c[3];
+     float r;
+ };
+-LightSphere LightBounds(const FrameLight& light);
++LightSphere LightBounds(const FrameLight& light, const PhysicalLightParams* physical = nullptr);
+ 
+ // Ranks the lights as Light::Compare ranks the scene's active lights: by sort
+ // brightness over the squared distance from the camera, strongest first
+@@ -147,11 +157,13 @@ void ResizeTileGrid(TileGrid& grid, int targetW, int targetH, int tileSize = kTi
+ // The light's reach on screen: the pixel rectangle x0, y0, x1, y1 (frame-target
+ // pixels, lower-left origin, inclusive) that holds every pixel it can light,
+ // clipped to the viewport. False when the reach is off screen.
+-bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4]);
++bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4],
++                     const PhysicalLightParams* physical = nullptr);
+ 
+ // Bins the ranked lights into the grid (sized beforehand): every tile lists
+ // the lights whose reach covers it, in rank order, up to kMaxLightsPerTile.
+-void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid);
++void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid,
++                      const PhysicalLightParams* physical = nullptr);
+ 
+ // The lights listed in the tile that holds frame-target pixel (px, py): their
+ // indices into the ranked list, in order. Returns how many.
+@@ -179,4 +191,105 @@ float ClassicImportance(const FrameLight& light, const float p[3]);
+ // importance; the weights change continuously with the importances.
+ void ClassicBudgetWeights(const float* importance, int n, float* weight);
+ 
++// ---- The physical lamps and low beams (B3, the nightLights switch) ----------
++//
++// A street lamp is a point source of intensity kLampIntensityPerStart times
++// its start distance (the start distance is 50 m times the configured
++// brightness, so the intensity follows the brightness linearly); a headlight
++// is a low beam of hot-spot intensity kLowBeamPeak times the nightSpot knob.
++// The irradiance at distance d is I / (d^2 + kPhysicalSoftening): no flat
++// disc of full light out to the start distance, so lamps lay pools and the
++// country away from them stays dark. A smooth window ends every light at its
++// physical reach (PhysicalReach, at most the classic reach), the sphere the
++// tiles bin it by. Colours are the configured ones taken to linear (no
++// warming: F9b gives lamps their authored warm colour, and a warmed headlight
++// turned verges mustard in the research). The shaders' copy is physicalLight
++// in EngineGL33_LightingShadersLights.cpp; the test pins its numbers to these.
++// The research tuned its lamps at 4 * 0.3 = 1.2 per start metre on lamps the
++// engine then read as white (the colour bug F9b fixed); the authored (0.9,
++// 0.8, 0.6) is 0.63 as bright in linear light, so the same pools take 1.9.
++constexpr float kLampIntensityPerStart = 1.9f; // street lamp: I = 1.9 * start
++// The research's low beams (4000 * 0.3 * nightSpot 1.5 = 1800) blew the hot
++// spot out at 1080p and lit the verges brighter than the noon lawn; 800 keeps
++// the hot spot under white and the verges at a night level.
++constexpr float kLowBeamPeak = 800.0f;      // headlight hot spot at nightSpot 1
++constexpr float kPhysicalSoftening = 0.25f; // m^2 added to d^2: a bulb is not a point
++// Light reaching a surface closer to the bulb than kNearEnd is the lamp's own
++// housing, post or vehicle (bumper, grille): it fades out from kNearEnd to
++// kNearStart. With the low beam's back plane (nothing behind the lamp) this is
++// the owner exclusion: the shaders cannot tell the draw's object in an
++// instanced run.
++constexpr float kPhysicalNearStart = 0.25f; // metres
++constexpr float kPhysicalNearEnd = 1.0f;
++// The low beam, in radians about its axis (vertical: up positive). Wide
++// horizontally (a core of kLowBeamCoreWidth and a spill of kLowBeamSpillWidth,
++// kLowBeamSpill strong), a hot band kLowBeamHotBand under the axis
++// (kLowBeamHotWidth wide), and a cut-off that closes between kLowBeamCutLow and
++// kLowBeamCutHigh above it (0.3 to 1.4 degrees: a hard top edge, a little
++// softer than the research's 0.2 to 0.9, which hill roads put right on the
++// road). Under the hot band a faint kLowBeamFloor reaches down to
++// kLowBeamFloorEnd (34 deg), so the road just ahead of the bumper is not black.
++constexpr float kLowBeamCutLow = -0.005f;
++constexpr float kLowBeamCutHigh = 0.025f;
++constexpr float kLowBeamHotBand = -0.03f; // 1.7 deg under the axis
++constexpr float kLowBeamHotWidth = 0.05f;
++constexpr float kLowBeamFloor = 0.02f;
++constexpr float kLowBeamFloorEnd = -0.6f;
++constexpr float kLowBeamFloorStart = -0.1f;
++constexpr float kLowBeamCoreWidth = 0.25f; // +-14 deg
++constexpr float kLowBeamSpill = 0.15f;
++constexpr float kLowBeamSpillWidth = 0.6f; // +-34 deg
++// A headlight is aimed as fixed to the body, this much (tan) under the body's
++// own pitch along the lamp's heading: 1%, the usual low-beam setting. On a
++// flat road a lamp 0.9 m up lays its hot band about 23 m ahead, and on any
++// steady slope the same distance up or down it.
++constexpr float kLowBeamTilt = 0.01f;
++
++// True for the kinds the physical model shades (street lamps and headlights).
++bool UsesPhysicalModel(FrameLightKind kind);
++
++// The low beam's relative intensity toward unit direction `toPoint` from the
++// lamp, for the unit axis `beam`: (1 + kLowBeamFloor)(1 + kLowBeamSpill) on
++// the hot band's centre line straight ahead, 0 behind the lamp's plane.
++float LowBeamPattern(const float toPoint[3], const float beam[3]);
++
++// The headlight's axis, unit: the horizontal heading of the model's beam axis
++// `lampDir` (its vertical part is ignored: a model's beam axis can point
++// degrees up or down), pitched as the body is along that heading
++// (`bodyForward`, the owner's forward axis) minus kLowBeamTilt.
++void LowBeamAim(const float lampDir[3], const float bodyForward[3], float out[3]);
++
++// The physical model's parameters for a frame (NightLights.hpp
++// ComputeNightConstants fills the shaders' copy).
++struct PhysicalLightParams
++{
++    float lampPerStart = kLampIntensityPerStart;
++    float spotPeak = kLowBeamPeak; // times the nightSpot knob
++};
++
++// A physical light reaches as far as its strongest irradiance (a lamp's
++// intensity, a low beam's hot spot) stays above kPhysicalMinIrradiance, and no
++// farther than the classic reach (kRangeFactor start distances); the window
++// that ends it starts at half its square, where the light is twice that. At
++// this level a light adds about one display level to the darkest night
++// ground, so a lamp 260 m off no longer lists itself in every tile of a
++// country road. The shaders compute the same reach.
++constexpr float kPhysicalMinIrradiance = 0.002f;
++float PhysicalReach(const FrameLight& light, const PhysicalLightParams& params);
++
++// Linear irradiance (per colour channel, before any surface term) that a
++// light of the physical model puts on camera-relative point `p`: its intensity
++// toward the point over the softened squared distance, the near fade, the
++// reach window and the light's configured colour taken to linear. 0 for a kind
++// the physical model does not shade.
++void PhysicalIrradiance(const FrameLight& light, const float p[3], const PhysicalLightParams& params, float out[3]);
++
++// The linear light the frame's physical lamps and headlights put on a particle
++// (a smoke or dust puff, drawn as a camera-facing decal lit on the CPU,
++// Object::DrawDecal) at camera-relative point `p`: the sum of
++// PhysicalIrradiance over `lights`. A puff scatters light every way, so there
++// is no surface term. The classic kinds keep lighting particles their own way.
++void ParticleLight(const std::vector<FrameLight>& lights, const float p[3], const PhysicalLightParams& params,
++                   float out[3]);
++
+ } // namespace Poseidon::lighting
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+index ac1e7e4..9cfb65f 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/Object.cpp
+@@ -27,6 +27,7 @@
+ #include <Poseidon/UI/Locale/StringtableExt.hpp>
+ #include <stdint.h>
+ #include <stdio.h>
++#include <algorithm>
+ #include <cmath>
+ #include <Poseidon/Foundation/Containers/StreamArray.hpp>
+ #include <Poseidon/Foundation/Framework/Log.hpp>
+@@ -1068,6 +1069,36 @@ int Object::GetComplexity(int level, const FrameBase& pos) const
+     return nFaces;
+ }
+ 
++namespace
++{
++// A light the remastered night's physical model shades (a street lamp or a
++// headlight, FrameLights.hpp UsesPhysicalModel), as the GL backend classifies
++// the frame's lights.
++bool IsPhysicalNightLight(Light& light)
++{
++    LightDescription desc;
++    light.GetDescription(desc);
++    if (desc.type != LTPoint && desc.type != LTSpotLight)
++        return false;
++    return lighting::UsesPhysicalModel(desc.type == LTSpotLight ? lighting::FrameLightKind::Spot : light.Kind());
++}
++
++// The classic decal light (display space) plus the physical lamps' and
++// headlights' linear light on the puff, scaled by the night as the shaders
++// scale them. The decal material takes half of a light's diffuse colour
++// (0.25 diffuse and 0.25 forced, DrawDecal), so the puff takes half of the
++// physical light too; the sum goes back to display space.
++Color AddParticleNightLight(ColorVal classic, const float physical[3], float night)
++{
++    constexpr float kDecalShare = 0.5f;
++    auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
++    auto toDisplay = [](float v) { return std::pow(std::max(v, 0.0f), 1.0f / 2.2f); };
++    const float s = kDecalShare * night;
++    return Color(toDisplay(toLinear(classic.R()) + s * physical[0]), toDisplay(toLinear(classic.G()) + s * physical[1]),
++                 toDisplay(toLinear(classic.B()) + s * physical[2]), classic.A());
++}
++} // namespace
++
+ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+ {
+     if (forceLOD == LOD_INVISIBLE)
+@@ -1146,6 +1177,11 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+             float addLightsFactor = sun->NightEffect();
+             if (addLightsFactor > 0.01)
+             {
++                // The remastered night (nightLights): street lamps and
++                // headlights light the puff by their physical model, summed in
++                // linear light with the rest; the other lights keep theirs.
++                float physical[3];
++                const bool night = GEngine->ParticleNightLight(pos.Position(), physical);
+                 const LightList& lights = GScene->ActiveLights();
+                 if (lights.Size() > 0)
+                 {
+@@ -1158,9 +1194,13 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
+ 
+                     for (int index = 0; index < lights.Size(); index++)
+                     {
++                        if (night && IsPhysicalNightLight(*lights[index]))
++                            continue;
+                         colorI += lights[index]->Apply(VZero, VForward);
+                     }
+                 }
++                if (night)
++                    colorI = AddParticleNightLight(colorI, physical, addLightsFactor);
+             }
+             ColorVal accom = GEngine->GetAccomodateEye();
+             colorI = colorI * accom;
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index fede823..c92af81 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -2014,7 +2014,9 @@ void Scene::DrawObjectsAndShadowsPass2()
+             // degrees below the horizon: keep its shadows live that long (a
+             // skipped pass would leave a frozen map in view).
+             const bool remasterSunUp = GEngine->LightingRemasterActive() && _mainLight->SunDirection().Y() < 0.026f;
+-            if (sunFactor > 0.01f || remasterSunUp)
++            // At night the remastered moon key (moonShadows) casts the shadows:
++            // the pass renders from the moon (SceneShadowPass.cpp).
++            if (sunFactor > 0.01f || remasterSunUp || GEngine->RemasterMoonKey())
+             {
+                 RenderShadowMapDepthPass(nDraw);
+             }
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
+index 43dc4e1..f619da8 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneShadowPass.cpp
+@@ -405,12 +405,13 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
+     // Classic keeps the shadow direction at least 11.5 degrees above the
+     // horizon (LightSun::Recalculate). The remastered lighting shades with the
+     // true sun, so its shadows follow it down to 4 degrees: full-length evening
+-    // shadows that line up with the lit and shaded sides of every object.
++    // shadows that line up with the lit and shaded sides of every object. At
++    // night the remastered moon key (moonShadows) casts them from the moon.
+     Vector3 sd = _mainLight->ShadowDirection();
+     if (GEngine->LightingRemasterActive())
+     {
+         constexpr float kMinShadowSinElevation = 0.0698f; // sin(4 deg)
+-        sd = _mainLight->SunDirection();
++        sd = GEngine->RemasterMoonKey() ? _mainLight->MoonDirection() : _mainLight->SunDirection();
+         if (sd.Y() > -kMinShadowSinElevation)
+         {
+             const float horiz = std::sqrt(std::max(sd.X() * sd.X() + sd.Z() * sd.Z(), 1e-8f));
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 7467949..513522b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -705,6 +705,8 @@ class EngineGL33 : public Engine
+         return true;
+     }
+     bool LocalLightsFromTiles() const override { return _lightTilesActive; }
++    bool RemasterMoonKey() const override;
++    bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
+     void RequestShaderReload() override { _shaderReloadPending = true; }
+     void MarkWorldOverlay() override
+     {
+@@ -851,6 +853,10 @@ class EngineGL33 : public Engine
+     // instanced runs (LocalLightsFromTiles). Decided at each world 3D pass from
+     // the frame's gate, cleared at EndWorldScene.
+     bool _lightTilesActive = false;
++    // The physical lamps and low beams light this world pass (LitConst::Night
++    // x, the nightLights gate with the tiled list): particles take them too
++    // (ParticleNightLight). Decided with _lightTilesActive, cleared with it.
++    bool _nightLightsActive = false;
+     void InitLightTiles();
+     void DeinitLightTiles();
+     // Builds, bins and uploads the list (once per frame).
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+index cdaaf4a..20d72ad 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_DrawShared.cpp
+@@ -1,7 +1,10 @@
+ #include <PoseidonGL33/EngineGL33.hpp>
++#include <Poseidon/Graphics/Remaster/NightLights.hpp>
+ #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+ #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
+ 
++#include <cstdint>
++
+ inline int FracAlpha(float a)
+ {
+     int ia = toInt(a);
+@@ -217,6 +220,14 @@ void EngineGL33::DrawPoints(int beg, int end)
+         return;
+     }
+ 
++    // The remastered stars (B3, the stars switch and its night gate; the
++    // frame's gate as last computed, so the sky drawn before the world's first
++    // pass may read the previous frame's): a soft splat with a faint colour
++    // per star (NightLights.hpp MakeStarSplat) instead of the two-pixel
++    // bilinear dot.
++    const bool splats = _lightingActive && !_nightVision && !_portraitTargetSize && _featureGates.computed &&
++                        _featureGates[Poseidon::remaster::Feature::Stars].on;
++
+     for (int i = beg; i < end; i++)
+     {
+         if (_mesh->Clip(i) & ClipAll)
+@@ -231,6 +242,33 @@ void EngineGL33::DrawPoints(int beg, int end)
+             continue; // do not draw stars that are not visible
+         }
+ 
++        if (splats)
++        {
++            const Poseidon::remaster::StarSplat s =
++                Poseidon::remaster::MakeStarSplat(v.pos[0], v.pos[1], color.A8(), static_cast<std::uint32_t>(i));
++            // The whole splat on screen, or none of it (as the dot below).
++            if (s.x[1] < 0.0f || s.y[1] < 0.0f || s.x[3] > _w || s.y[3] > _h)
++            {
++                continue;
++            }
++            Color base(color.R8() / 255.0f * s.tint[0], color.G8() / 255.0f * s.tint[1],
++                       color.B8() / 255.0f * s.tint[2]);
++            base.SaturateMinMax();
++            TLVertex fan[5];
++            for (int c = 0; c < 5; c++)
++            {
++                fan[c] = v;
++                fan[c].pos[0] = s.x[c];
++                fan[c].pos[1] = s.y[c];
++                fan[c].color = PackedColorRGB(PackedColor(base), FracAlpha(s.alpha[c]));
++                fan[c].specular = PackedColor(0xff000000); // no fog, as the dot
++            }
++            static const VertexIndex fanIndices[6] = {0, 1, 2, 3, 4, 1};
++            AddVertices(fan, 5);
++            QueueFan(fanIndices, 6);
++            continue;
++        }
++
+         // calculate alpha in TL, TR, BL, BR corners
+         // v is used as TL corner
+         // we have to simulate TR, BL, BR corners
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 3e68a2c..f035bfb 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -17,6 +17,7 @@
+ #include <Poseidon/Graphics/Core/PerfCounters.hpp>
+ #include <Poseidon/Graphics/Core/UboMirror.hpp>
+ #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
++#include <Poseidon/Graphics/Remaster/NightLights.hpp>
+ #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+ #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
+ #include <Poseidon/Core/Global.hpp>
+@@ -261,6 +262,11 @@ void EngineGL33::UpdateLightTiles()
+     // own list is chosen from. Positions camera-relative as in UploadLitLights;
+     // colours as authored, the draw's night factor scales them in the shader.
+     const float* camPos = _frameState.cameraPos;
++    // With the physical low beams on (nightLights, B3) a headlight is aimed
++    // from its vehicle's body (FrameLights.hpp LowBeamAim); off, every light
++    // keeps the model's beam axis.
++    const bool aimBeams =
++        _featureGates.computed && _featureGates.frame == frame && _featureGates[rm::Feature::NightLights].on;
+     t.lights.clear();
+     const LightList& active = GScene->ActiveLights();
+     for (int i = 0; i < active.Size(); i++)
+@@ -294,7 +300,16 @@ void EngineGL33::UpdateLightTiles()
+         if (auto* attached = dynamic_cast<AttachedOnVehicle*>(light))
+         {
+             if (const Object* owner = attached->AttachedOn())
++            {
+                 f.owner = static_cast<std::uint32_t>(owner->ID());
++                if (spot && aimBeams)
++                {
++                    const Vector3 body = owner->Direction();
++                    const float lampDir[3] = {f.dir[0], f.dir[1], f.dir[2]};
++                    const float bodyForward[3] = {body.X(), body.Y(), body.Z()};
++                    fl::LowBeamAim(lampDir, bodyForward, f.dir);
++                }
++            }
+         }
+         t.lights.push_back(f);
+     }
+@@ -339,7 +354,16 @@ void EngineGL33::UpdateLightTiles()
+     const int tilesY = (targetH + fl::kTileSize - 1) / fl::kTileSize;
+     if (t.grid.tilesX != tilesX || t.grid.tilesY != tilesY)
+         fl::ResizeTileGrid(t.grid, targetW, targetH);
+-    fl::BinLightsToTiles(t.lights, view, t.grid);
++    // With the physical model on, lamps and headlights are binned by their
++    // physical reach (the shaders end them there too).
++    fl::PhysicalLightParams physical;
++    if (aimBeams)
++    {
++        const rm::NightConstants night = rm::ComputeNightConstants(_lighting, _featureGates, true);
++        physical.lampPerStart = night.night[1];
++        physical.spotPeak = night.night[2];
++    }
++    fl::BinLightsToTiles(t.lights, view, t.grid, aimBeams ? &physical : nullptr);
+     fl::PackFrameLights(t.lights, t.texels);
+ 
+     // Upload what changed since the last build (a still camera sends nothing).
+@@ -633,8 +657,10 @@ void EngineGL33::UploadLitFrameConstants()
+     if (!_remasterPrograms || !GScene)
+     {
+         UpdateFeatureGates(nullptr);
+-        // Classic programs light each draw from its own list.
++        // Classic programs light each draw from its own list, by the classic
++        // model.
+         _lightTilesActive = false;
++        _nightLightsActive = false;
+         return;
+     }
+     if (_terrainMapDirty)
+@@ -678,6 +704,11 @@ void EngineGL33::UploadLitFrameConstants()
+         rig = rm::ComputeLightRig(in, _lighting);
+     }
+     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
++    // The key light (B3): the sun, or at night with the moon key the moon,
++    // which then also leaves the shadowless moon term. The scene renders the
++    // shadow map from the key (RemasterMoonKey).
++    const bool gatesNow = _featureGates.computed && _featureGates.frame == GetFrameCounter();
++    const rm::KeyLight key = rm::ComputeKeyLight(in, rig, gatesNow ? rm::MoonKeyShare(_featureGates) : 0.0f);
+ 
+     // The tiled light list: built once per frame while its gate is on, and
+     // then read by every draw of the world's passes instead of the draw's own
+@@ -704,8 +735,11 @@ void EngineGL33::UploadLitFrameConstants()
+         lightCount[2] = sun->NightEffect();
+     }
+ 
+-    SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
+-    SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
++    SetSlot(LitConst::SunDir, key.toward[0], key.toward[1], key.toward[2], _sunEnabled ? 1.0f : 0.0f);
++    SetSlot(LitConst::Sun, key.radiance.r, key.radiance.g, key.radiance.b, key.elevationDeg);
++    // The sky reads the sun whatever the key (the sky table, its aureole, the
++    // fog toward the sun, the warm side of the sky light, the lit clouds).
++    SetSlot(LitConst::SkySun, key.skySunToward[0], key.skySunToward[1], key.skySunToward[2], key.skySunElevationDeg);
+     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, rig.exposure);
+     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
+     // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
+@@ -746,7 +780,8 @@ void EngineGL33::UploadLitFrameConstants()
+                          (_lighting.terrainShadows > 0.0f || _lighting.terrainOcclusion > 0.0f);
+     if (terrain)
+     {
+-        float azimuth = std::atan2(toSun.X(), toSun.Z()) / (2.0f * 3.14159265f);
++        // The hills shadow the key light (the moon under the moon key).
++        float azimuth = std::atan2(key.toward[0], key.toward[2]) / (2.0f * 3.14159265f);
+         if (azimuth < 0.0f)
+             azimuth += 1.0f;
+         const float f = azimuth * static_cast<float>(rm::TerrainHorizonMap::kDirections);
+@@ -815,10 +850,42 @@ void EngineGL33::UploadLitFrameConstants()
+     // Long tree shadows (B9): the sun-visibility map, rebuilt when the sun or
+     // the camera moved enough; zero while the switch or its gate is off.
+     UploadLitCanopy(toSun, _featureGates.inputs.sunElevationDeg, _featureGates.inputs.skyThrough);
++    // The night (B3): the physical lamps and low beams, while their gate is on
++    // and the tiled list lighting the pass; zero otherwise, which leaves the
++    // classic model for every light. w: the moon key's share.
++    const rm::NightConstants night =
++        rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
++    SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
++    _nightLightsActive = night.night[0] > 0.5f;
+     FlushLitConstants();
+     BindLightingTextures();
+ }
+ 
++bool EngineGL33::RemasterMoonKey() const
++{
++    // The frame's gate, so every caller of a frame agrees (the scene's shadow
++    // pass asks after the passes that uploaded the key).
++    return _lightingActive && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
++           rm::MoonKeyShare(_featureGates) > 0.0f;
++}
++
++bool EngineGL33::ParticleNightLight(Vector3Par pos, float linear[3]) const
++{
++    linear[0] = linear[1] = linear[2] = 0.0f;
++    if (!_nightLightsActive || _lightTiles.frame != GetFrameCounter())
++        return false;
++    // The tiled list's lights are camera-relative to the frame's camera, as
++    // the particle is drawn from (the same world pass).
++    const float* camPos = _frameState.cameraPos;
++    const float p[3] = {pos.X() - camPos[0], pos.Y() - camPos[1], pos.Z() - camPos[2]};
++    fl::PhysicalLightParams params;
++    const rm::NightConstants night = rm::ComputeNightConstants(_lighting, _featureGates, true);
++    params.lampPerStart = night.night[1];
++    params.spotPeak = night.night[2];
++    fl::ParticleLight(_lightTiles.lights, p, params, linear);
++    return true;
++}
++
+ void EngineGL33::SetLitSlot(int slot, float x, float y, float z, float w)
+ {
+     SetSlot(slot, x, y, z, w);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+index aa784c1..3bb7173 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.hpp
+@@ -252,9 +252,18 @@ enum : int
+     // The sky's own clouds (EngineGL33_SkyClouds.cpp, Graphics/Remaster/SkyDensity.hpp).
+     Sky = 68,       // x lit-cloud strength, y sky-matched shadows on (1), z the dome's turn (u offset), w sky-through
+     SkyShadow = 69, // xy shadow anchor - camera (m, east and north), z previous anchor's angle (rad), w its weight
+-    // 70-73: allocated to features still to land (70 free, LitConstPlanned
+-    // Night to Weather); one padding member in the block until they do.
+-    Planned = 70,
++    // The night (B3, Graphics/Remaster/NightLights.hpp). SunDir and Sun carry
++    // the key light, which under the moon key is the moon; the sky reads the
++    // sun from SkySun: xyz toward the sun, w its elevation (degrees). Equal to
++    // SunDir.xyz and Sun.w whenever the sun is the key.
++    SkySun = 70,
++    // x 1 while the physical lamps and low beams light the frame, y lamp
++    // intensity per metre of start distance, z low-beam hot-spot intensity,
++    // w the moon key's share (0: the sun is the key).
++    Night = 71,
++    // 72-73: allocated to features still to land (LitConstPlanned
++    // CombatShadow and Weather); one padding member in the block until they do.
++    Planned = 72,
+     // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
+     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
+     Water1 =
+@@ -276,7 +285,8 @@ static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow
+ static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
+ static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
+ static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slots follow the sky table's");
+-static_assert(Planned == SkyShadow + 1, "the planned padding follows the clouds slots");
++static_assert(SkySun == SkyShadow + 1 && Night == SkySun + 1, "LitConst night slots follow the clouds slots");
++static_assert(Planned == Night + 1, "the planned padding follows the night slots");
+ static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
+               "LitConst water slots follow the planned padding");
+ static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
+@@ -292,16 +302,16 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
+ // raises LitConst::Count, which the upload and the shaders follow. A7 landed
+ // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+ // padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
+-// SkyShadow), B5 the water slots 74 and 75, B9 the canopy at 76 and B11 the
+-// terrain detail at 77, so 70 to 73 are the padding member litPlanned.
++// SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
++// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 and 73
++// are the padding member litPlanned.
+ namespace LitConstPlanned
+ {
+ constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+ // 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
+ // 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
+-// 70 is free: the light list (A6) needs only a tile size and a night factor,
+-// which ride in litLightCount.yz (LitConst::LightCount).
+-constexpr int Night = 71;        // night: flags, beam profile, moon key
++// 70, 71: the night landed (LitConst::SkySun, LitConst::Night, B3); 70 was
++// free (the light list, A6, rides in litLightCount.yz, LitConst::LightCount).
+ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
+ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
+ // 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
+@@ -311,8 +321,8 @@ constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
+ constexpr int End = 79;  // one past the last planned slot
+ static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+               "the planned slot below the sun shadows is the reserved padding");
+-static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+-              "the planned slots between the clouds and the water are the planned padding (70 free)");
++static_assert(CombatShadow == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
++              "the planned slots between the night and the water are the planned padding");
+ static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");
+ // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
+ static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index 0b91364..fe704ed 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -313,8 +313,8 @@ static const char s_glslLitConstantsBlock[] = R"(
+ // Remastered light rig and per-draw material, binding 3. Layout mirrors
+ // LitConst in EngineGL33_Lighting.hpp.
+ layout(std140) uniform LitConstants {
+-    vec4 litSunDir;       // 0: xyz toward the sun, w = sun enabled (sunEn)
+-    vec4 litSun;          // 1: rgb sun radiance, w = sun elevation (degrees)
++    vec4 litSunDir;       // 0: xyz toward the key light (the sun; the moon under the moon key), w = sun enabled (sunEn)
++    vec4 litSun;          // 1: rgb key light radiance, w = its elevation (degrees)
+     vec4 litZenith;       // 2: rgb sky irradiance on an up-facing surface, w = exposure
+     vec4 litHorizon;      // 3: rgb on a vertical surface facing away from the sun, w = specular scale
+     vec4 litGround;       // 4: rgb on a down-facing surface, w = local light scale
+@@ -355,7 +355,9 @@ layout(std140) uniform LitConstants {
+     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
+     vec4 litSky;          // 68: x lit-cloud strength, y sky-matched shadows on, z the dome's turn (u), w sky-through
+     vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
+-    vec4 litPlanned[4];   // 70-73: allocated to features still to land (night, combat, materials; 70 free)
++    vec4 litSkySun;       // 70: xyz toward the sun, w its elevation (degrees): the sun the sky reads (skySunDir)
++    vec4 litNight;        // 71: x physical lamps and low beams on, y lamp per start metre, z low-beam peak, w moon key share
++    vec4 litPlanned[2];   // 72-73: allocated to features still to land (combat, materials)
+     vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
+     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
+     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
+@@ -762,7 +764,9 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         nLight = nCast;
+     }
+     if (canopy) {
+-        float lowSun = 1.0 - smoothstep(12.0, 35.0, litSun.w);
++        // The low sun's crown factors follow the sun, not the moon key (B3):
++        // the night's crowns keep them under the moon.
++        float lowSun = 1.0 - smoothstep(12.0, 35.0, skySunElevation());
+         crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);
+         crownSky *= mix(1.0, 0.75, lowSun);
+     }
+@@ -795,7 +799,13 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     // falloff of headlight and lamp pools (a linear sum would make them about
+     // twice as wide). The same clamp keeps a lamp-lit surface from getting
+     // brighter than the original's, where overlapping pools sum past 1.
+-    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0)));
++    // The physical lamps and low beams (nightLights) add their own linear
++    // light outside that clamp; leaves take them through the crown, as the sun.
++    g_lightView = v;
++    g_lightLeafNormal = nLight;
++    g_lightLeaves = foliage;
++    g_lightForced = litMatForced.rgb;
++    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0))) + g_physicalLocal * litGround.w;
+     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
+ 
+     vec3 a = toLinear(albedo);
+@@ -807,7 +817,8 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+         a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
+     }
+     float exposure = litZenith.w;
+-    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn) * exposure;
++    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn +
++                     g_physicalSpec * litGround.w) * exposure;
+     float total = dot(radiance, kLuma);
+     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+     if (foliage) ambientShare *= 0.5;
+@@ -905,7 +916,7 @@ void main() {
+         // its coverage both, so it fades into the cloud whatever its blending
+         // (a dimmed colour alone drew a dark disk over the sky).
+         if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
+-            r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(litSunDir.xyz));
++            r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
+     }
+     finishFragment(r0, ambientShare, true);
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+index 13eca1a..dfd6ef5 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersLights.cpp
+@@ -11,6 +11,12 @@
+ // from the same lights, those whose reach covers its tile, within the classic
+ // budget of 7 per surface. litLightCount.y holds the tile size while the tiled
+ // list lights the pass and is 0 otherwise.
++//
++// At night, with the nightLights switch (B3, litNight.x), the tiled path gives
++// street lamps and headlights the physical model instead (physicalLight:
++// inverse-square light from the bulb, a low-beam pattern, rough diffuse,
++// leaves wrapped as for the sun), summed in linear light into g_physicalLocal
++// and g_physicalSpec outside the classic clamp and budget.
+ 
+ #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+ 
+@@ -106,6 +112,110 @@ vec3 tiledLight(int id, vec3 n, vec3 kd, vec3 ka) {
+     return localLight(frameLights[at], frameLights[at + 1], frameLights[at + 2].rgb, frameLights[at + 3].xyz, n, kd, ka);
+ }
+ 
++// ---- The physical lamps and low beams (B3, nightLights; litNight.x on) ------
++// Street lamps (kind 1) and headlights (kind 2) as physical lights: intensity
++// over the softened squared distance from the bulb, in linear light, summed
++// outside the classic budget and clamp. FrameLights.hpp holds the model and
++// these constants (the test pins them); NightLights.hpp the slot.
++const float kNightSoftening = 0.25;  // kPhysicalSoftening
++const float kNightMinIrradiance = 0.002; // kPhysicalMinIrradiance
++const float kNightNearStart = 0.25;  // kPhysicalNearStart
++const float kNightNearEnd = 1.0;     // kPhysicalNearEnd
++const float kBeamCutLow = -0.005;    // kLowBeamCutLow
++const float kBeamCutHigh = 0.025;    // kLowBeamCutHigh
++const float kBeamHotBand = -0.03;    // kLowBeamHotBand
++const float kBeamHotWidth = 0.05;    // kLowBeamHotWidth
++const float kBeamFloor = 0.02;       // kLowBeamFloor
++const float kBeamFloorEnd = -0.6;    // kLowBeamFloorEnd
++const float kBeamFloorStart = -0.1;  // kLowBeamFloorStart
++const float kBeamCoreWidth = 0.25;   // kLowBeamCoreWidth
++const float kBeamSpill = 0.15;       // kLowBeamSpill
++const float kBeamSpillWidth = 0.6;   // kLowBeamSpillWidth
++
++// What shadeRemastered hands the physical lights besides the normal: the view
++// direction, and for foliage the crown-blended normal and the forced diffuse
++// (leaves take a lamp as they take the sun: wrapped, through the crown).
++vec3 g_lightView = vec3(0.0, 1.0, 0.0);
++vec3 g_lightLeafNormal = vec3(0.0, 1.0, 0.0);
++vec3 g_lightForced = vec3(0.0);
++bool g_lightLeaves = false;
++// The physical lights' sums at this fragment, linear: the diffuse (times the
++// material) and the gleam on glossy materials.
++vec3 g_physicalLocal = vec3(0.0);
++vec3 g_physicalSpec = vec3(0.0);
++
++// The low beam's relative intensity toward unit direction L from the lamp, for
++// the unit axis `beam` (FrameLights.hpp LowBeamPattern): wide horizontally, a
++// hot band 1.7 degrees under the axis and a hard top edge just above it.
++float lowBeamPattern(vec3 L, vec3 beam) {
++    float c = dot(L, beam);
++    if (c <= 0.0) return 0.0;
++    vec3 right = vec3(beam.z, 0.0, -beam.x) * inversesqrt(max(beam.x * beam.x + beam.z * beam.z, 1e-12));
++    vec3 u = cross(beam, right);
++    float ah = atan(dot(L, right), c);
++    float av = atan(dot(L, u), c);
++    float cut = 1.0 - smoothstep(kBeamCutLow, kBeamCutHigh, av);
++    float hv = (av - kBeamHotBand) / kBeamHotWidth;
++    float vert = exp(-hv * hv) + kBeamFloor * smoothstep(kBeamFloorEnd, kBeamFloorStart, av);
++    float h1 = ah / kBeamCoreWidth;
++    float h2 = ah / kBeamSpillWidth;
++    float horiz = exp(-h1 * h1) + kBeamSpill * exp(-h2 * h2);
++    return vert * horiz * cut;
++}
++
++// One lamp or headlight at this fragment, added to g_physicalLocal and
++// g_physicalSpec. A rough diffuse (Oren-Nayar, sigma 0.5, Fujii's form,
++// normalised to 1 at normal incidence) lets gravel, asphalt and plaster scatter
++// a grazing low beam back toward the driver; leaves wrap their terminator as
++// they do for the sun. A lamp keeps a little of its classic ambient (capped);
++// a headlight none.
++void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
++    int at = (id - 1) * kTexelsPerLight;
++    vec4 pos = frameLights[at];
++    vec4 color = frameLights[at + 1];
++    vec3 toLight = pos.xyz - vWorldRel;
++    float d2 = dot(toLight, toLight);
++    bool spot = color.w > 0.5;
++    // The physical reach (FrameLights.hpp PhysicalReach), which the tiles bin by.
++    float peak = spot ? litNight.z : litNight.y * pos.w;
++    float end2 = min(kReachFactor * kReachFactor * pos.w * pos.w, peak / kNightMinIrradiance);
++    if (d2 >= end2) return;
++    float d = sqrt(max(d2, 1e-12));
++    vec3 L = toLight / d;
++    float I = spot ? peak * lowBeamPattern(-L, frameLights[at + 3].xyz) : peak;
++    if (I <= 0.0) return;
++    I *= (1.0 - smoothstep(0.5 * end2, end2, d2)) * smoothstep(kNightNearStart, kNightNearEnd, d);
++    float E = I / (d2 + kNightSoftening);
++    vec3 col = toLinear(color.rgb) * E;
++    if (g_lightLeaves) {
++        float wrap = clamp((dot(g_lightLeafNormal, L) + 0.35) / 1.35, 0.0, 1.0);
++        g_physicalLocal += col * (kd * wrap + g_lightForced);
++        return;
++    }
++    float nl = max(dot(n, L), 0.0);
++    if (nl > 0.0) {
++        float cosR = max(dot(n, g_lightView), 0.0);
++        float s = dot(L, g_lightView) - nl * cosR;
++        float t = s > 0.0 ? max(max(nl, cosR), 0.1) : 1.0;
++        nl *= max((0.72 + 0.33 * s / t) / 0.72, 0.0);
++    }
++    g_physicalLocal += kd * col * nl;
++    if (!spot) g_physicalLocal += ka * toLinear(frameLights[at + 2].rgb) * (0.3 * min(E, 0.3));
++    float power = litMatSpecular.w;
++    if (power > 0.0 && nl > 0.0) {
++        vec3 h = normalize(L + g_lightView);
++        float p = max(power, 1.0);
++        g_physicalSpec += litMatSpecular.rgb * col * (pow(max(dot(n, h), 0.0), p) * (p + 8.0) / 28.0 * nl);
++    }
++}
++
++// The kinds the physical model shades: a lamp (1) or a headlight (2), while
++// litNight.x is on.
++bool physicalKind(int id) {
++    float kind = frameLights[(id - 1) * kTexelsPerLight + 3].w;
++    return litNight.x > 0.5 && kind > 0.5 && kind < 2.5;
++}
++
+ // The frame's tiled list: the lights whose reach covers this fragment's tile
+ // (an empty tile costs one fetch), within the classic budget. The classic
+ // selection (Scene::SelectLights) ranks lights by their sort brightness over
+@@ -114,17 +224,34 @@ vec3 tiledLight(int id, vec3 n, vec3 kd, vec3 ka) {
+ // blend instead of a cut, so the set changes smoothly across a surface rather
+ // than at object edges. The buffer holds the lights' own colours; the draw's
+ // night factor (litLightCount.z, the factor the per-draw upload scales them
+-// by) applies to the sum.
++// by) applies to the sum. With the physical lamps and low beams on
++// (litNight.x), lamps and headlights leave the classic sum and its budget:
++// each adds its own light to g_physicalLocal (and gleam to g_physicalSpec),
++// linear and unclamped, and the budget ranks the other kinds among
++// themselves.
+ vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
+     int count = loadTileList();
++    int classic = count;
++    if (litNight.x > 0.5) {
++        classic = 0;
++        for (int k = 0; k < kMaxTileLights; ++k) {
++            if (k >= count) break;
++            int id = tileEntry(k);
++            if (physicalKind(id)) physicalLight(id, n, kd, ka);
++            else ++classic;
++        }
++        g_physicalLocal *= litLightCount.z;
++        g_physicalSpec *= litLightCount.z;
++    }
+     // The budget's edge: the importance of the 7th (edgeIn) and the 8th
+     // (edgeOut) strongest, from the eight strongest kept sorted in registers.
+     float edgeIn = 0.0;
+     float edgeOut = 0.0;
+-    if (count > kClassicBudget) {
++    if (classic > kClassicBudget) {
+         float t0 = 0.0, t1 = 0.0, t2 = 0.0, t3 = 0.0, t4 = 0.0, t5 = 0.0, t6 = 0.0, t7 = 0.0;
+         for (int k = 0; k < kMaxTileLights; ++k) {
+             if (k >= count) break;
++            if (physicalKind(tileEntry(k))) continue;
+             float v = lightImportance(tileEntry(k));
+             float m;
+             m = max(t0, v); v = min(t0, v); t0 = m;
+@@ -145,7 +272,8 @@ vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
+     for (int k = 0; k < kMaxTileLights; ++k) {
+         if (k >= count) break;
+         int id = tileEntry(k);
+-        float w = count > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : 1.0;
++        if (physicalKind(id)) continue;
++        float w = classic > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : 1.0;
+         if (w > 0.0) sum += w * tiledLight(id, n, kd, ka);
+     }
+     return sum * litLightCount.z;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index 2453240..efdb68a 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -11,14 +11,28 @@ namespace Poseidon::gl33lighting
+ {
+ 
+ const char kRemasterSkyGLSL[] = R"(
++// The sun as the sky sees it. litSunDir and litSun carry the key light: the
++// sun, or under the moon key (B3, moonShadows; litNight.w its share, above 0)
++// the moon, which the shadow map, the hills, the cloud shadows and the glossy
++// highlight follow. The sky stays on the sun: the sky table and its aureole,
++// the fog toward the sun, the warm side of the sky light on surfaces, the lit
++// clouds and the sun disk read its direction and elevation from litSkySun,
++// equal to the key slots' whenever the sun is the key. Its radiance is 0 under
++// the moon key (the key needs the sun 3 degrees under the horizon, where the
++// rig's sun is out).
++vec3 skySunDir() { return litSkySun.xyz; }
++float skySunElevation() { return litSkySun.w; }
++vec3 skySunRadiance() { return litNight.w > 0.0 ? vec3(0.0) : litSun.rgb; }
++
+ // Irradiance from the sky hemisphere (and the ground below it) onto a surface
+ // with normal n. The horizon band is brighter, and takes the sky's colour,
+ // toward the sun; opposite the sun it keeps the cool zenith colour, so a low
+ // sun gives warm light and cool shade.
+ vec3 skyIrradiance(vec3 n) {
+     float h = length(n.xz);
+-    float sl = length(litSunDir.xz);
+-    float toward = (h > 1e-3 && sl > 1e-3) ? 0.5 + 0.5 * dot(n.xz / h, litSunDir.xz / sl) : 0.5;
++    vec3 sun = skySunDir();
++    float sl = length(sun.xz);
++    float toward = (h > 1e-3 && sl > 1e-3) ? 0.5 + 0.5 * dot(n.xz / h, sun.xz / sl) : 0.5;
+     // The bounce takes the colour of the ground below: the rig's horizon holds
+     // half the (neutral) ground bounce, so swap that half for the tinted one.
+     vec3 ground = litGround.rgb * g_groundTint;
+@@ -33,7 +47,7 @@ vec3 skyIrradiance(vec3 n) {
+ // flat band. Away from the sun this is exactly the classic fog colour.
+ vec3 fogColorToward(vec3 rel) {
+     if (litFogSun.w < 0.5) return fogColor.rgb;
+-    float c = max(dot(rel * inversesqrt(max(dot(rel, rel), 1e-12)), litSunDir.xyz), 0.0);
++    float c = max(dot(rel * inversesqrt(max(dot(rel, rel), 1e-12)), skySunDir()), 0.0);
+     float c2 = c * c;
+     return min(fogColor.rgb + litFogSun.rgb * (c2 * c2 * c2), max(litFogCap.rgb, fogColor.rgb));
+ }
+@@ -68,7 +82,7 @@ float skyRowV(float l) {
+ // mean: rgb radiance, a the original dome's sun-glow weight.
+ vec3 skyRadiance(vec3 d, out vec4 mean) {
+     float l = asin(clamp(d.y, -1.0, 1.0));
+-    vec2 sh = litSunDir.xz;
++    vec2 sh = skySunDir().xz;
+     float sl = length(sh);
+     float dl = length(d.xz);
+     float cphi = (sl > 1e-4 && dl > 1e-4) ? dot(d.xz / dl, sh / sl) : 1.0;
+@@ -79,7 +93,7 @@ vec3 skyRadiance(vec3 d, out vec4 mean) {
+     vec3 r = texture(skyLut, vec2(u / 3.0, v)).rgb;
+     vec3 m = texture(skyLut, vec2((1.0 + u) / 3.0, v)).rgb;
+     mean = texture(skyLut, vec2(2.5 / 3.0, v));
+-    return r + m * skyMiePhase(dot(d, litSunDir.xyz));
++    return r + m * skyMiePhase(dot(d, skySunDir()));
+ }
+ 
+ // The clear sky along d at the original sky's brightness. The original sky of
+@@ -151,7 +165,7 @@ const float kLitCloudSilverLight = 1.2;   // the lining's light, in the cloud's
+ // toward the sun, `feature`, `dark` and `deck` the pixel's broken cloud,
+ // darkness and deck weight.
+ vec4 litCloudTerms(vec3 v, float d, float tau, float feature, float dark, float deck) {
+-    vec3 l = litSunDir.xyz;
++    vec3 l = skySunDir();
+     float cosT = dot(v, l);
+     // Overcast flattens the direct part: the light inside a deck is diffuse.
+     float direct = smoothstep(-0.06, 0.04, l.y) * mix(0.45, 1.0, clamp(litSky.w, 0.0, 1.0));
+@@ -167,15 +181,16 @@ vec4 litCloudTerms(vec3 v, float d, float tau, float feature, float dark, float
+     float silver = hg * rim * kLitCloudSilver * direct;
+     // All of it fades with the low sun, the darkening against the sun and the
+     // bellies included: identity from kLitCloudFadeEndDeg up.
+-    float lowSun = 1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, litSun.w);
++    float lowSun = 1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, skySunElevation());
+     return vec4(mix(1.0, gain, lowSun), warm * lowSun, silver * lowSun, litSky.x * smoothstep(0.02, 0.25, d));
+ }
+ 
+ // A cloud's light (linear) under those terms.
+ vec3 litCloudLight(vec3 lin, vec4 t) {
+     if (t.w <= 0.0) return lin;
+-    float sl = dot(litSun.rgb, kLuma);
+-    vec3 sunC = sl > 1e-5 ? litSun.rgb / sl : vec3(1.0); // unit luminance
++    vec3 sun = skySunRadiance();
++    float sl = dot(sun, kLuma);
++    vec3 sunC = sl > 1e-5 ? sun / sl : vec3(1.0); // unit luminance
+     vec3 lit = lin * (t.x * mix(vec3(1.0), sunC, 0.85 * t.y));
+     lit += sunC * (max(dot(lin, kLuma), 0.02) * t.z * kLitCloudSilverLight);
+     return mix(lin, lit, t.w);
+@@ -198,12 +213,12 @@ vec3 litCloudsOverClassic(vec3 disp, vec4 t) {
+ // the dome's coarse triangles (screen-space derivatives jump at their edges).
+ vec4 litCloudTermsDome(vec2 uv) {
+     // Off, or a sun so high the terms are identity: no march.
+-    if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);
++    if (litSky.x <= 0.0 || skySunElevation() >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);
+     vec4 m = textureLod(skyDensity, uv, 0.0);
+     float d = skyCloudDensity(m);
+     if (d <= 0.02) return vec4(1.0, 0.0, 0.0, 0.0);
+     vec3 v = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
+-    vec3 l = litSunDir.xyz;
++    vec3 l = skySunDir();
+     vec3 t = l - v * dot(v, l);
+     float tl = length(t);
+     t = tl > 1e-4 ? t / tl : vec3(0.0, 1.0, 0.0);
+@@ -231,9 +246,9 @@ vec4 litCloudTermsDome(vec2 uv) {
+ vec4 litCloudTermsSheet(float alpha) {
+     vec2 dUVdx = dFdx(vUV0);
+     vec2 dUVdy = dFdy(vUV0);
+-    if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg || alpha <= 0.02) return vec4(1.0, 0.0, 0.0, 0.0);
++    if (litSky.x <= 0.0 || skySunElevation() >= kLitCloudFadeEndDeg || alpha <= 0.02) return vec4(1.0, 0.0, 0.0, 0.0);
+     vec3 v = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
+-    vec3 l = litSunDir.xyz;
++    vec3 l = skySunDir();
+     vec3 t = l - v * dot(v, l);
+     float tl = length(t);
+     vec2 dir = vec2(0.0);
+@@ -286,7 +301,7 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+     float local = clamp((lumT - bg - litAtmo.w) / max(kSkyCloudWhite - bg, 0.08), 0.0, 1.0);
+     float cloud = max(local, litAtmo.y);
+     vec3 a = skyClear(d, bgC * litAtmoDome.rgb, bgC * litAtmoGlow.rgb, bgC);
+-    float c = dot(d, litSunDir.xyz);
++    float c = dot(d, skySunDir());
+     const float g = 0.6; // forward scattering of a thin cloud deck
+     float hg = (1.0 - g * g) / (4.0 * kSkyPi * pow(max(1.0 + g * g - 2.0 * g * c, 1e-4), 1.5));
+     float dirTerm = mix((0.3 + 2.0 * hg) / 0.46, 1.0, 0.8 * litAtmo.y);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index ad6c3eb..a7fd090 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -392,8 +392,9 @@ void EngineGL33::EndWorldScene()
+     _worldEffectsOn = false;
+     _worldSceneEnded = true;
+     // Passes after the world (portraits, 3D previews) light each draw from its
+-    // own list.
++    // own list, by the classic model.
+     _lightTilesActive = false;
++    _nightLightsActive = false;
+     UpdateRemasterPrograms();
+     if (_lightingActive)
+         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+index afafb85..04896ce 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
++++ b/arma_CWR/tests/unit/engine/Poseidon/CMakeLists.txt
+@@ -176,6 +176,7 @@ set(POSEIDON_TEST_SOURCES
+     Graphics/test_sea_waves.cpp
+     Graphics/test_sky_density.cpp
+     Graphics/test_canopy.cpp
++    Graphics/test_night_lights.cpp
+     Graphics/test_jpg_import.cpp
+     Graphics/test_custom_face_texture_cache.cpp
+     Graphics/test_window_metrics.cpp
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+index a88f0c1..4580ce1 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_feature_switches.cpp
+@@ -313,8 +313,13 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+     }
+     // Every knob with a parent sits under a landed feature switch, in its
+     // track's group: TAA's three, the sky table's three (A7, test_atmosphere.cpp),
++<<<<<<< ours
+     // texsharp's two (B11), the sun shadows' three (B1, below) and the sea's
+     // three (B5).
++=======
++    // texsharp's two (B11), the sun shadows' three (B1, below) and the night's
++    // lamp and headlight strengths (B3, test_night_lights.cpp).
++>>>>>>> theirs
+     int children = 0;
+     int taaChildren = 0;
+     for (int i = 0; i < LightingKeyCount(); ++i)
+@@ -325,7 +330,11 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         INFO(k.key);
+         const std::string_view parent(k.parent);
+         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
++<<<<<<< ours
+                parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves"));
++=======
++               parent == "softShadows" || parent == "treeShadows" || parent == "nightLights"));
++>>>>>>> theirs
+         REQUIRE(FindFeature(k.parent) != nullptr);
+         CHECK(FindFeature(k.parent)->landed);
+         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
+@@ -333,7 +342,11 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
+         ++children;
+     }
+     CHECK(taaChildren == 3);
++<<<<<<< ours
+     CHECK(children == 14);
++=======
++    CHECK(children == 13);
++>>>>>>> theirs
+ }
+ 
+ TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
+@@ -474,6 +487,11 @@ TEST_CASE("Feature gates: night features run only at night, the moon key only wi
+     }
+     CHECK(G(Night(), Feature::NightLights).on);
+     CHECK(G(Night(), Feature::Stars).on);
++    // The physical lamps and low beams are a model of the tiled light list (B3).
++    CHECK_FALSE(G(Night(), Feature::NightLights, Apply("remastered,lightTiles=0")).on);
++    CHECK(std::string_view(G(Night(), Feature::NightLights, Apply("remastered,lightTiles=0")).reason) ==
++          "light list off");
++    CHECK(G(Night(), Feature::Stars, Apply("remastered,lightTiles=0")).on);
+ 
+     GateInputs in = Night();
+     in.moonElevationDeg = 36.0f;
+@@ -711,8 +729,13 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
+     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+ }
+ 
++<<<<<<< ours
+ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows, "
+           "shade, the sea, the canopy shadows and the clouds have landed, nothing else has",
++=======
++TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows "
++          "and the night have landed, nothing else has",
++>>>>>>> theirs
+           "[remaster][FeatureSwitches]")
+ {
+     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+@@ -720,11 +743,16 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     // shows the opaque objects' GPU section for them. A5 lands taa, A6 the
+     // tiled light list (the world pass: it has no pass of its own), A7
+     // atmosphere, B11 terrainDetail and sharpen, B1 treeShadows (the shadow
++<<<<<<< ours
+     // depth pass) and softShadows (the world pass), B2 lowSunRig and
+     // crownCanopy (the world pass's lighting), B5 seaWaves (its draws are in
+     // the world pass's ground section), B9 canopyShadows (the canopy's
+     // sun-visibility map build), B10 litClouds (the sky section) and
+     // skyCloudShadows (the world section: one density tap per lit fragment).
++=======
++    // depth pass) and softShadows (the world pass), B3 nightLights and stars
++    // (the world pass) and moonShadows (the shadow depth pass).
++>>>>>>> theirs
+     std::set<std::string> sections;
+     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+@@ -738,12 +766,18 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+         const bool atmosphere = info.id == Feature::Atmosphere;
+         const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
+         const bool shadows = info.id == Feature::TreeShadows || info.id == Feature::SoftShadows;
++<<<<<<< ours
+         const bool shade = info.id == Feature::LowSunRig || info.id == Feature::CrownCanopy;
+         const bool sea = info.id == Feature::SeaWaves;
+         const bool canopy = info.id == Feature::CanopyShadows;
+         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
+         CHECK(info.landed ==
+               (perf || taa || lightList || atmosphere || texsharp || shadows || shade || sea || canopy || clouds));
++=======
++        const bool night =
++            info.id == Feature::NightLights || info.id == Feature::MoonShadows || info.id == Feature::Stars;
++        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || night));
++>>>>>>> theirs
+         if (info.landed)
+         {
+             CHECK(std::string_view(info.step) == (perf         ? "A4"
+@@ -751,18 +785,27 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+                                                   : lightList  ? "A6"
+                                                   : atmosphere ? "A7"
+                                                   : shadows    ? "B1"
++<<<<<<< ours
+                                                   : shade      ? "B2"
+                                                   : sea        ? "B5"
+                                                   : canopy     ? "B9"
+                                                   : clouds     ? "B10"
++=======
++                                                  : night      ? "B3"
++>>>>>>> theirs
+                                                                : "B11"));
+             CHECK(sections.count(info.gpuSection) == 1);
+         }
+     }
+     CHECK(std::string_view(GetFeatureInfo(Feature::TreeShadows).gpuSection) == "shadow");
+     CHECK(std::string_view(GetFeatureInfo(Feature::SoftShadows).gpuSection) == "world");
++<<<<<<< ours
+     CHECK(std::string_view(GetFeatureInfo(Feature::LowSunRig).gpuSection) == "world");
+     CHECK(std::string_view(GetFeatureInfo(Feature::CrownCanopy).gpuSection) == "world");
++=======
++    CHECK(std::string_view(GetFeatureInfo(Feature::MoonShadows).gpuSection) == "shadow");
++    CHECK(std::string_view(GetFeatureInfo(Feature::NightLights).gpuSection) == "world");
++>>>>>>> theirs
+     const LightingTuning t = Apply("remastered");
+     FeatureGates g = ComputeFeatureGates(GateInputs{}, t);
+     const std::string s = FeatureStateString(t, g);
+@@ -772,6 +815,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     CHECK(s.find(" lightTiles=1:off:no-local-light ") != std::string::npos);
+     CHECK(s.find(" treeShadows=1:on:sun-above-4-deg ") != std::string::npos);
+     CHECK(s.find(" softShadows=1:on:sun-above-4-deg ") != std::string::npos);
++<<<<<<< ours
+     // The low-sun rig is constants and the canopy a few terms on foliage:
+     // both run whenever they are on (their own math fades them by sun height).
+     CHECK(s.find(" lowSunRig=1:on:always ") != std::string::npos);
+@@ -781,6 +825,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
+     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
+     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
+     CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");
++=======
++    CHECK(s.find("landed=12/26") != std::string::npos);
++>>>>>>> theirs
+     // Classic keeps its own draw path: the gates hold them off.
+     const LightingTuning classic = Apply("classic");
+     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp
+index 5bb7756..2f6d0bd 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_frame_lights.cpp
+@@ -561,8 +561,10 @@ TEST_CASE("Frame lights: the shaders read the list with the model and sizes of F
+     char band[96];
+     std::snprintf(band, sizeof(band), "float band = max(edgeIn - edgeOut, %.2f * edgeIn);", kClassicBudgetSoftness);
+     CHECK(lights.find(band) != std::string::npos);
+-    CHECK(lights.find("float w = count > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : "
+-                      "1.0;") != std::string::npos);
++    // (B3: the budget counts the lights of the classic model; with the physical
++    // lamps and low beams on they leave it, test_night_lights.cpp.)
++    CHECK(lights.find("float w = classic > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) "
++                      ": 1.0;") != std::string::npos);
+     // The 7th and 8th strongest: the last two of the eight kept sorted.
+     CHECK(kClassicLightsPerSurface == 7);
+     CHECK(lights.find("edgeIn = t6;") != std::string::npos);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_night_lights.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_night_lights.cpp
+new file mode 100644
+index 0000000..4ce2ae3
+--- /dev/null
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_night_lights.cpp
+@@ -0,0 +1,698 @@
++#include <catch2/catch_test_macros.hpp>
++#include <catch2/catch_approx.hpp>
++#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
++#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
++#include <Poseidon/Graphics/Remaster/LightRig.hpp>
++#include <Poseidon/Graphics/Remaster/NightLights.hpp>
++#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
++#include <PoseidonGL33/EngineGL33_Lighting.hpp>
++
++#include <cmath>
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <set>
++#include <sstream>
++#include <string>
++#include <string_view>
++#include <vector>
++
++// The remastered night (INTEGRATION-PLAN.md section 5 B3, research track
++// night; Graphics/Remaster/NightLights.hpp): the moon as a shadow-casting key
++// light that keeps F9's calibration, street lamps and headlights as physical
++// lights on the tiled list (inverse square from the bulb, a low beam aimed
++// from the body), the same lights on smoke, and stars as soft splats. Each
++// case pins one contract the shaders, the backend or the scene rely on.
++
++using namespace Poseidon::remaster;
++namespace lt = Poseidon::lighting;
++
++namespace
++{
++
++constexpr float kPi = 3.14159265f;
++
++LightingTuning Apply(const std::string& setting)
++{
++    LightingTuning t{};
++    bool modeSet = false;
++    const std::string why = ApplyLightingSetting(t, setting, modeSet);
++    INFO(setting << ": " << why);
++    REQUIRE(why.empty());
++    return t;
++}
++
++// A clear night with a full moon `moonDeg` up and the sun `sunDeg` under.
++GateInputs MoonNight(float sunDeg = -30.0f, float moonDeg = 36.0f, float phase = 1.0f)
++{
++    GateInputs in;
++    in.sunElevationDeg = sunDeg;
++    in.moonElevationDeg = moonDeg;
++    in.moonPhase = phase;
++    in.nightEffect = 1.0f;
++    in.skyThrough = 1.0f;
++    return in;
++}
++
++float Share(const GateInputs& in, const LightingTuning& t = LightingTuning{})
++{
++    return MoonKeyShare(ComputeFeatureGates(in, t));
++}
++
++// The rig inputs of the same night: the sun and moon toward their elevations
++// (the moon in the south-east), the classic night light.
++LightRigInputs RigNight(float sunDeg, float moonDeg, float phase)
++{
++    LightRigInputs in;
++    const float s = sunDeg * kPi / 180.0f, m = moonDeg * kPi / 180.0f;
++    in.towardSun[0] = 0.0f;
++    in.towardSun[1] = std::sin(s);
++    in.towardSun[2] = -std::cos(s);
++    in.towardMoon[0] = 0.6f * std::cos(m);
++    in.towardMoon[1] = std::sin(m);
++    in.towardMoon[2] = -0.8f * std::cos(m);
++    in.moonPhaseLight = phase;
++    in.classicSunDiffuse = Rgb(0.0f, 0.0f, 0.0f);
++    in.classicAmbient = Rgb(0.03f, 0.03f, 0.04f);
++    in.fogColor = Rgb(0.02f, 0.02f, 0.03f);
++    in.skyThrough = 1.0f;
++    in.nightEffect = 1.0f;
++    return in;
++}
++
++bool SameRgb(const Rgb& a, const Rgb& b)
++{
++    return a.r == b.r && a.g == b.g && a.b == b.b;
++}
++
++lt::FrameLight Lamp(float x, float y, float z, float start = 50.0f)
++{
++    lt::FrameLight l;
++    l.kind = lt::FrameLightKind::Lamp;
++    l.pos[0] = x;
++    l.pos[1] = y;
++    l.pos[2] = z;
++    l.start = start;
++    l.diffuse[0] = 0.9f;
++    l.diffuse[1] = 0.8f;
++    l.diffuse[2] = 0.6f;
++    l.sortBrightness = 1.0f;
++    return l;
++}
++
++lt::FrameLight Headlight(float x, float y, float z, const float dir[3])
++{
++    lt::FrameLight l = Lamp(x, y, z, 110.0f);
++    l.kind = lt::FrameLightKind::Spot;
++    const float n = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
++    for (int i = 0; i < 3; ++i)
++        l.dir[i] = dir[i] / n;
++    return l;
++}
++
++float Luma(const float c[3])
++{
++    return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
++}
++
++// The direction at `pitch` radians and heading 0 (+z).
++void Dir(float pitch, float out[3])
++{
++    out[0] = 0.0f;
++    out[1] = std::sin(pitch);
++    out[2] = std::cos(pitch);
++}
++
++// Where the hot band's centre line of a lamp `h` metres above a road that
++// rises at `slopeDeg` meets the road, in metres along it, for the aimed axis.
++float HotBandReach(const float axis[3], float h, float slopeDeg)
++{
++    // The hot band: the axis turned kLowBeamHotBand down in its vertical plane.
++    const float pitch = std::atan2(axis[1], std::sqrt(axis[0] * axis[0] + axis[2] * axis[2])) + lt::kLowBeamHotBand;
++    // Road: y = tan(slope) * z; lamp at (0, h). Ray: y = h + tan(pitch) * z.
++    const float ts = std::tan(slopeDeg * kPi / 180.0f), tp = std::tan(pitch);
++    if (tp >= ts)
++        return 1e9f; // the band never meets the road
++    const float z = h / (ts - tp);
++    return z / std::cos(slopeDeg * kPi / 180.0f);
++}
++
++std::string ReadTextFile(const std::filesystem::path& p)
++{
++    std::ifstream f(p);
++    std::stringstream ss;
++    ss << f.rdbuf();
++    return ss.str();
++}
++
++std::filesystem::path EngineDir()
++{
++    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine";
++}
++
++std::string FunctionBody(const std::string& source, const std::string& signature)
++{
++    const size_t start = source.find(signature);
++    if (start == std::string::npos)
++        return {};
++    const size_t end = source.find("\n}\n", start);
++    return source.substr(start, end == std::string::npos ? std::string::npos : end - start);
++}
++
++std::string Fixed(float v, int digits)
++{
++    char buf[32];
++    std::snprintf(buf, sizeof(buf), "%.*f", digits, static_cast<double>(v));
++    std::string s = buf;
++    // Trailing zeros off, one digit after the point kept (GLSL float literal).
++    while (s.size() > 1 && s.back() == '0' && s[s.size() - 2] != '.')
++        s.pop_back();
++    return s;
++}
++
++} // namespace
++
++TEST_CASE("Night: the moon key carries the moon only with the sun 3 deg under and a bright moon up",
++          "[remaster][NightLights]")
++{
++    // Day, twilight, a low moon, a thin moon: the sun stays the key.
++    GateInputs day = MoonNight(40.0f);
++    day.nightEffect = 0.0f;
++    CHECK(Share(day) == 0.0f);
++    CHECK(Share(MoonNight(-2.0f)) == 0.0f);
++    CHECK(Share(MoonNight(-30.0f, 2.0f)) == 0.0f);
++    CHECK(Share(MoonNight(-30.0f, 36.0f, 0.2f)) == 0.0f);
++    // A full moon high in a dark sky: the whole moon is the key.
++    CHECK(Share(MoonNight()) == 1.0f);
++    // Not without its switch, nor under night vision.
++    CHECK(Share(MoonNight(), Apply("remastered,moonShadows=0")) == 0.0f);
++    GateInputs nv = MoonNight();
++    nv.nightVision = true;
++    CHECK(Share(nv) == 0.0f);
++    // It fades in over 3 degrees above each edge and over 0.1 of the phase, so
++    // the shadows do not switch on: monotone, continuous at the edges.
++    float prev = 0.0f;
++    for (float m = 3.0f; m <= 7.0f; m += 0.25f)
++    {
++        const float s = Share(MoonNight(-30.0f, m));
++        CHECK(s >= prev);
++        CHECK(s - prev < 0.2f);
++        prev = s;
++    }
++    CHECK(prev == 1.0f);
++    CHECK(Share(MoonNight(-30.0f, 3.1f)) < 0.01f);
++    CHECK(Share(MoonNight(-3.1f)) < 0.01f);
++    CHECK(Share(MoonNight(-4.5f)) == Catch::Approx(0.5f).margin(1e-4f));
++    CHECK(Share(MoonNight(-30.0f, 36.0f, 0.3f)) == Catch::Approx(0.5f).margin(1e-4f));
++}
++
++TEST_CASE("Night: the key light is the sun bit for bit unless the moon key is on", "[remaster][NightLights]")
++{
++    const LightingTuning t{};
++    for (const float sunDeg : {50.0f, 8.0f, -1.0f, -30.0f})
++    {
++        INFO(sunDeg);
++        const LightRigInputs in = RigNight(sunDeg, 36.0f, 1.0f);
++        const LightRig before = ComputeLightRig(in, t);
++        LightRig rig = before;
++        const KeyLight key = ComputeKeyLight(in, rig, 0.0f);
++        CHECK_FALSE(key.IsMoon());
++        CHECK(SameRgb(key.radiance, before.sun));
++        CHECK(key.elevationDeg == before.sunElevationDeg);
++        for (int i = 0; i < 3; ++i)
++            CHECK(key.toward[i] == in.towardSun[i]);
++        // The rig is left alone: the moon keeps its shadowless term.
++        CHECK(SameRgb(rig.moon, before.moon));
++        CHECK(SameRgb(rig.sun, before.sun));
++    }
++}
++
++TEST_CASE("Night: the moon key moves F9's moon into the key, nothing more", "[remaster][NightLights]")
++{
++    const LightingTuning t{};
++    const LightRigInputs in = RigNight(-30.0f, 36.0f, 1.0f);
++    const LightRig before = ComputeLightRig(in, t);
++    // F9's moon is there to move (kMoonFull 0.02 at a full moon high up).
++    REQUIRE(Luminance(before.moon) == Catch::Approx(0.02f).epsilon(0.02f));
++    CHECK(Luminance(before.sun) == 0.0f); // the sun is fully set 3 deg under
++    LightRig rig = before;
++    const KeyLight key = ComputeKeyLight(in, rig, 1.0f);
++    CHECK(key.IsMoon());
++    for (int i = 0; i < 3; ++i)
++        CHECK(key.toward[i] == in.towardMoon[i]);
++    CHECK(key.elevationDeg == Catch::Approx(36.0f).margin(1e-3f));
++    CHECK(SameRgb(key.radiance, before.moon));
++    CHECK(Luminance(rig.moon) == 0.0f);
++    // The moon's sky fill and everything else in the rig stay as F9 set them.
++    CHECK(SameRgb(rig.skyZenith, before.skyZenith));
++    CHECK(SameRgb(rig.skyHorizon, before.skyHorizon));
++    CHECK(SameRgb(rig.skyGround, before.skyGround));
++    // A partial share splits the moon between the key and the shadowless term.
++    LightRig half = before;
++    const KeyLight k2 = ComputeKeyLight(in, half, 0.25f);
++    CHECK(Luminance(k2.radiance) + Luminance(half.moon) == Catch::Approx(Luminance(before.moon)).epsilon(1e-5f));
++    CHECK(Luminance(k2.radiance) == Catch::Approx(0.25f * Luminance(before.moon)).epsilon(1e-5f));
++}
++
++TEST_CASE("Night: the backend's sun slots, hills and shadow pass follow the key light", "[remaster][NightLights]")
++{
++    const std::string lighting = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_Lighting.cpp");
++    const std::string frame = FunctionBody(lighting, "void EngineGL33::UploadLitFrameConstants()");
++    REQUIRE_FALSE(frame.empty());
++    CHECK(frame.find("rm::ComputeKeyLight(in, rig, gatesNow ? rm::MoonKeyShare(_featureGates) : 0.0f)") !=
++          std::string::npos);
++    CHECK(frame.find("SetSlot(LitConst::SunDir, key.toward[0], key.toward[1], key.toward[2]") != std::string::npos);
++    CHECK(frame.find("SetSlot(LitConst::Sun, key.radiance.r, key.radiance.g, key.radiance.b, key.elevationDeg);") !=
++          std::string::npos);
++    CHECK(frame.find("std::atan2(key.toward[0], key.toward[2])") != std::string::npos);
++    // The moon slot carries what the key left of the moon (after the key).
++    CHECK(frame.find("ComputeKeyLight") < frame.find("SetSlot(LitConst::Moon, rig.moon.r"));
++    // The scene renders the shadow map at night only for the moon key, from the moon.
++    const std::string draw = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "SceneDraw.cpp");
++    CHECK(draw.find("if (sunFactor > 0.01f || remasterSunUp || GEngine->RemasterMoonKey())") != std::string::npos);
++    const std::string pass = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "SceneShadowPass.cpp");
++    CHECK(pass.find("sd = GEngine->RemasterMoonKey() ? _mainLight->MoonDirection() : _mainLight->SunDirection();") !=
++          std::string::npos);
++    // ... and asks the frame's gate, not a value a later pass may reset.
++    const std::string key = FunctionBody(lighting, "bool EngineGL33::RemasterMoonKey() const");
++    CHECK(key.find("rm::MoonKeyShare(_featureGates) > 0.0f") != std::string::npos);
++    CHECK(key.find("_featureGates.frame == GetFrameCounter()") != std::string::npos);
++}
++
++TEST_CASE("Night: the moon's shadows take the stock filter, not the soft one", "[remaster][NightLights]")
++{
++    // The moon key opens the sun shadow gates; the soft filter (B1) stays off
++    // there (a fiftieth of the noon sun shows no penumbra, and the soft taps
++    // cost the night's world pass), the leaves keep their lift.
++    const LightingTuning t{};
++    const FeatureGates moon = ComputeFeatureGates(MoonNight(), t);
++    REQUIRE(moon[Feature::SoftShadows].on);
++    REQUIRE(std::string_view(moon[Feature::SoftShadows].reason) == "moon key");
++    const SunShadowConstants c = ComputeSunShadowConstants(t, moon, false, 0u);
++    CHECK(c.pcss[2] == 0.0f);
++    CHECK(c.pcss[3] == t.leafBias);
++    // By day the soft filter fades in from the gate's edge as before, and
++    // forced on (gates=0) below the edge it runs whole, unless the moon is the
++    // key.
++    GateInputs low = MoonNight(5.0f, -20.0f);
++    low.nightEffect = 0.0f;
++    CHECK(ComputeSunShadowConstants(t, ComputeFeatureGates(low, t), false, 0u).pcss[2] == PcssStrength(5.0f));
++    const LightingTuning forced = Apply("remastered,gates=0");
++    low.sunElevationDeg = 3.0f;
++    CHECK(ComputeSunShadowConstants(forced, ComputeFeatureGates(low, forced), false, 0u).pcss[2] == 1.0f);
++    CHECK(ComputeSunShadowConstants(forced, ComputeFeatureGates(MoonNight(), forced), false, 0u).pcss[2] == 0.0f);
++}
++
++TEST_CASE("Night: a physical light reaches as far as it lights the darkest ground", "[remaster][NightLights]")
++{
++    const lt::PhysicalLightParams params;
++    const lt::FrameLight lamp = Lamp(0.0f, 10.0f, 0.0f);
++    // Where the lamp's intensity falls to kPhysicalMinIrradiance, inside the
++    // classic reach of 10 start distances.
++    const float reach = lt::PhysicalReach(lamp, params);
++    CHECK(reach == Catch::Approx(std::sqrt(lt::kLampIntensityPerStart * 50.0f / lt::kPhysicalMinIrradiance)));
++    CHECK(reach < lt::kRangeFactor * lamp.start);
++    // A dim lamp keeps the classic reach as its limit.
++    const lt::FrameLight tiny = Lamp(0.0f, 10.0f, 0.0f, 0.5f);
++    CHECK(lt::PhysicalReach(tiny, params) == Catch::Approx(lt::kRangeFactor * 0.5f));
++    // The tiles bin a physical light by it, a classic one by its classic reach.
++    CHECK(lt::LightBounds(lamp, &params).r == Catch::Approx(reach));
++    CHECK(lt::LightBounds(lamp).r == Catch::Approx(lt::kRangeFactor * lamp.start));
++    lt::FrameLight fire = lamp;
++    fire.kind = lt::FrameLightKind::Fire;
++    CHECK(lt::LightBounds(fire, &params).r == Catch::Approx(lt::kRangeFactor * lamp.start));
++    // Light ends there: nothing at the reach, about kPhysicalMinIrradiance at
++    // half its square (the window's start), where the light is twice it.
++    const float colourLuma =
++        0.2126f * std::pow(0.9f, 2.2f) + 0.7152f * std::pow(0.8f, 2.2f) + 0.0722f * std::pow(0.6f, 2.2f);
++    float e[3];
++    const float atEnd[3] = {reach * 1.0001f, 10.0f, 0.0f};
++    lt::PhysicalIrradiance(lamp, atEnd, params, e);
++    CHECK(Luma(e) == 0.0f);
++    const float atHalf[3] = {reach / std::sqrt(2.0f), 10.0f, 0.0f};
++    lt::PhysicalIrradiance(lamp, atHalf, params, e);
++    CHECK(Luma(e) / colourLuma == Catch::Approx(2.0f * lt::kPhysicalMinIrradiance).epsilon(0.01f));
++    // A headlight reaches by its hot spot.
++    float flat[3];
++    Dir(0.0f, flat);
++    CHECK(lt::PhysicalReach(Headlight(0.0f, 0.9f, 0.0f, flat), params) ==
++          Catch::Approx(std::sqrt(lt::kLowBeamPeak / lt::kPhysicalMinIrradiance)));
++    // The shaders end the light at the same reach, and the backend bins by it
++    // with the physical model on.
++    namespace gl = Poseidon::gl33lighting;
++    const std::string lights = gl::RemasterFragmentPiece(gl::FragmentPiece::Lights);
++    CHECK(lights.find("const float kNightMinIrradiance = " + Fixed(lt::kPhysicalMinIrradiance, 3) + ";") !=
++          std::string::npos);
++    CHECK(lights.find("float end2 = min(kReachFactor * kReachFactor * pos.w * pos.w, peak / kNightMinIrradiance);") !=
++          std::string::npos);
++    const std::string lighting = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_Lighting.cpp");
++    CHECK(lighting.find("fl::BinLightsToTiles(t.lights, view, t.grid, aimBeams ? &physical : nullptr);") !=
++          std::string::npos);
++}
++
++TEST_CASE("Night: the low beam is wide, has a hot band 1.7 deg down and a hard top edge", "[remaster][NightLights]")
++{
++    float beam[3];
++    Dir(0.0f, beam);
++    auto at = [&](float horizontal, float vertical)
++    {
++        // A direction `horizontal` radians to the right and `vertical` up.
++        const float d[3] = {std::sin(horizontal) * std::cos(vertical), std::sin(vertical),
++                            std::cos(horizontal) * std::cos(vertical)};
++        return lt::LowBeamPattern(d, beam);
++    };
++    // The hot band's centre line straight ahead is the brightest point: the
++    // band, the floor under it, the core and the spill at full.
++    const float peak = at(0.0f, lt::kLowBeamHotBand);
++    CHECK(peak == Catch::Approx((1.0f + lt::kLowBeamFloor) * (1.0f + lt::kLowBeamSpill)).epsilon(1e-5f));
++    for (float v = -0.3f; v <= 0.1f; v += 0.005f)
++        CHECK(at(0.0f, v) <= peak + 1e-5f);
++    // The top edge: nothing above 1.43 deg (kLowBeamCutHigh), most of the light
++    // within 2 deg under the axis.
++    CHECK(at(0.0f, lt::kLowBeamCutHigh + 1e-4f) == 0.0f);
++    CHECK(at(0.0f, 0.04f) == 0.0f);
++    CHECK(at(0.0f, -0.035f) > 0.9f);
++    CHECK(at(0.0f, -0.004f) > 0.4f);
++    // From the axis to the cut the light falls by more than half within 1.7 deg.
++    CHECK(at(0.0f, 0.015f) < 0.5f * at(0.0f, -0.015f));
++    // Wide: the spill reaches 34 deg to either side, symmetric.
++    CHECK(at(0.6f, lt::kLowBeamHotBand) > 0.05f);
++    CHECK(at(0.6f, lt::kLowBeamHotBand) == Catch::Approx(at(-0.6f, lt::kLowBeamHotBand)).epsilon(1e-5f));
++    CHECK(at(0.25f, lt::kLowBeamHotBand) > at(0.6f, lt::kLowBeamHotBand));
++    // Nothing behind the lamp's plane (its own vehicle).
++    CHECK(at(1.6f, 0.0f) == 0.0f);
++    CHECK(at(3.0f, -0.3f) == 0.0f);
++    // A faint floor under the hot band down to 34 deg, none below.
++    CHECK(at(0.0f, -0.3f) > 0.0f);
++    CHECK(at(0.0f, -0.3f) < 0.03f);
++    CHECK(at(0.0f, -0.7f) < 1e-3f);
++}
++
++TEST_CASE("Night: a headlight is aimed from its body, 1% down, on flat and sloped roads", "[remaster][NightLights]")
++{
++    // Flat road, lamp 0.9 m up: the hot band reaches about 23 m.
++    float flat[3];
++    Dir(0.0f, flat);
++    float axis[3];
++    lt::LowBeamAim(flat, flat, axis);
++    CHECK(std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]) == Catch::Approx(1.0f));
++    CHECK(axis[1] / axis[2] == Catch::Approx(-lt::kLowBeamTilt).margin(1e-5f));
++    const float onFlat = HotBandReach(axis, 0.9f, 0.0f);
++    CHECK(onFlat > 18.0f);
++    CHECK(onFlat < 28.0f);
++    // The model's own beam axis can point degrees up or down (the research's
++    // Jeep: 4.7 deg up on a 14 deg slope): only its heading counts.
++    for (const float modelPitchDeg : {-9.0f, 4.7f, 20.0f})
++    {
++        float model[3];
++        Dir(modelPitchDeg * kPi / 180.0f, model);
++        float a[3];
++        lt::LowBeamAim(model, flat, a);
++        for (int i = 0; i < 3; ++i)
++            CHECK(a[i] == Catch::Approx(axis[i]).margin(1e-6f));
++    }
++    // A steady 14 deg climb (the research's hill road), the body pitched with
++    // it: the hot band lands the same distance up the road, not over it.
++    for (const float slopeDeg : {14.0f, -14.0f, 6.0f})
++    {
++        INFO(slopeDeg);
++        float body[3];
++        Dir(slopeDeg * kPi / 180.0f, body);
++        float a[3];
++        lt::LowBeamAim(flat, body, a);
++        const float reach = HotBandReach(a, 0.9f, slopeDeg);
++        CHECK(reach > 18.0f);
++        CHECK(reach < 28.0f);
++    }
++    // The heading is the lamp's: a reversing light points back, 1% down from
++    // the body seen from behind (on a climb, down the slope behind).
++    float back[3] = {0.0f, 0.0f, -1.0f};
++    float a[3];
++    lt::LowBeamAim(back, flat, a);
++    CHECK(a[2] < -0.99f);
++    CHECK(a[1] / -a[2] == Catch::Approx(-lt::kLowBeamTilt).margin(1e-5f));
++    float climb[3];
++    Dir(14.0f * kPi / 180.0f, climb);
++    lt::LowBeamAim(back, climb, a);
++    CHECK(a[1] / -a[2] == Catch::Approx(-std::tan(14.0f * kPi / 180.0f) - lt::kLowBeamTilt).margin(1e-5f));
++}
++
++TEST_CASE("Night: lamps and low beams fall off with the squared distance from the bulb", "[remaster][NightLights]")
++{
++    const lt::PhysicalLightParams params;
++    auto light = [&](const lt::FrameLight& l, float x, float y, float z)
++    {
++        const float p[3] = {x, y, z};
++        std::vector<float> out(3);
++        lt::PhysicalIrradiance(l, p, params, out.data());
++        return out;
++    };
++    const lt::FrameLight lamp = Lamp(0.0f, 10.0f, 0.0f);
++    // Inverse square, softened by kPhysicalSoftening: no flat disc of full
++    // light out to the 50 m start distance.
++    const std::vector<float> under = light(lamp, 0.0f, 0.0f, 0.0f);
++    const std::vector<float> twice = light(lamp, 0.0f, -10.0f, 0.0f);
++    const float colourLuma =
++        0.2126f * std::pow(0.9f, 2.2f) + 0.7152f * std::pow(0.8f, 2.2f) + 0.0722f * std::pow(0.6f, 2.2f);
++    const float intensity = lt::kLampIntensityPerStart * 50.0f;
++    CHECK(Luma(under.data()) ==
++          Catch::Approx(intensity / (100.0f + lt::kPhysicalSoftening) * colourLuma).epsilon(1e-4f));
++    CHECK(Luma(under.data()) / Luma(twice.data()) == Catch::Approx((400.0f + 0.25f) / (100.0f + 0.25f)).epsilon(1e-4f));
++    // The authored colour, taken to linear (no warming).
++    CHECK(under[0] / under[2] == Catch::Approx(std::pow(0.9f / 0.6f, 2.2f)).epsilon(1e-4f));
++    // The intensity follows the configured brightness (start distance) linearly.
++    CHECK(Luma(light(Lamp(0.0f, 10.0f, 0.0f, 100.0f), 0.0f, 0.0f, 0.0f).data()) ==
++          Catch::Approx(2.0f * Luma(under.data())).epsilon(1e-4f));
++    // Off its own housing and post, and gone at the classic reach.
++    CHECK(Luma(light(lamp, 0.0f, 9.8f, 0.0f).data()) == 0.0f);
++    CHECK(Luma(light(lamp, 0.0f, 10.0f, 10.0f * lamp.start).data()) == 0.0f);
++    CHECK(Luma(light(lamp, 0.0f, 9.0f, 0.0f).data()) > 0.0f);
++    // The other kinds keep their classic model: nothing here.
++    lt::FrameLight fire = lamp;
++    fire.kind = lt::FrameLightKind::Fire;
++    CHECK(Luma(light(fire, 0.0f, 0.0f, 0.0f).data()) == 0.0f);
++    CHECK(lt::UsesPhysicalModel(lt::FrameLightKind::Lamp));
++    CHECK(lt::UsesPhysicalModel(lt::FrameLightKind::Spot));
++    CHECK_FALSE(lt::UsesPhysicalModel(lt::FrameLightKind::Fire));
++    CHECK_FALSE(lt::UsesPhysicalModel(lt::FrameLightKind::Combat));
++    CHECK_FALSE(lt::UsesPhysicalModel(lt::FrameLightKind::Classic));
++
++    // A headlight 0.9 m up, aimed on a flat road: on the hot band 20 m out it
++    // gives the peak over the squared distance; nothing behind it.
++    float flat[3];
++    Dir(0.0f, flat);
++    float axis[3];
++    lt::LowBeamAim(flat, flat, axis);
++    const lt::FrameLight spot = Headlight(0.0f, 0.9f, 0.0f, axis);
++    const float bandPitch = std::atan2(axis[1], axis[2]) + lt::kLowBeamHotBand;
++    const float d = 20.0f;
++    const std::vector<float> onBand = light(spot, 0.0f, 0.9f + d * std::sin(bandPitch), d * std::cos(bandPitch));
++    const float pattern = (1.0f + lt::kLowBeamFloor) * (1.0f + lt::kLowBeamSpill); // the band's centre line
++    CHECK(Luma(onBand.data()) ==
++          Catch::Approx(params.spotPeak * pattern / (d * d + lt::kPhysicalSoftening) * colourLuma).epsilon(0.02f));
++    CHECK(Luma(light(spot, 0.0f, 0.5f, -3.0f).data()) == 0.0f);
++    // Above the cut-off, nothing (a wall 20 m out above the lamp's height).
++    CHECK(Luma(light(spot, 0.0f, 0.9f + d * std::tan(0.03f), d).data()) == 0.0f);
++}
++
++TEST_CASE("Night: smoke takes the same physical lamps and low beams", "[remaster][NightLights]")
++{
++    const lt::PhysicalLightParams params;
++    std::vector<lt::FrameLight> lights = {Lamp(0.0f, 10.0f, 0.0f), Lamp(20.0f, 8.0f, 0.0f)};
++    lt::FrameLight fire = Lamp(5.0f, 1.0f, 5.0f, 3.0f);
++    fire.kind = lt::FrameLightKind::Fire;
++    lights.push_back(fire);
++    const float p[3] = {4.0f, 3.0f, 2.0f};
++    float sum[3];
++    lt::ParticleLight(lights, p, params, sum);
++    float each[3] = {0.0f, 0.0f, 0.0f};
++    for (const lt::FrameLight& l : lights)
++    {
++        float e[3];
++        lt::PhysicalIrradiance(l, p, params, e);
++        for (int i = 0; i < 3; ++i)
++            each[i] += e[i];
++    }
++    for (int i = 0; i < 3; ++i)
++        CHECK(sum[i] == Catch::Approx(each[i]).epsilon(1e-6f));
++    CHECK(Luma(sum) > 0.0f);
++    // The classic loop skips exactly these kinds while the physical model runs.
++    const std::string object = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "Object.cpp");
++    const std::string decal = FunctionBody(object, "void Object::DrawDecal(");
++    REQUIRE_FALSE(decal.empty());
++    CHECK(decal.find("const bool night = GEngine->ParticleNightLight(pos.Position(), physical);") != std::string::npos);
++    CHECK(decal.find("if (night && IsPhysicalNightLight(*lights[index]))") != std::string::npos);
++    CHECK(decal.find("colorI = AddParticleNightLight(colorI, physical, addLightsFactor);") != std::string::npos);
++    CHECK(object.find("return lighting::UsesPhysicalModel(desc.type == LTSpotLight ? lighting::FrameLightKind::Spot "
++                      ": light.Kind());") != std::string::npos);
++}
++
++TEST_CASE("Night: the night slot is on only with its gate and the tiled list", "[remaster][NightLights]")
++{
++    GateInputs night = MoonNight(-30.0f, -10.0f);
++    night.localLights = 2;
++    const LightingTuning t{};
++    const FeatureGates g = ComputeFeatureGates(night, t);
++    REQUIRE(g[Feature::NightLights].on);
++    const NightConstants on = ComputeNightConstants(t, g, true);
++    CHECK(on.night[0] == 1.0f);
++    CHECK(on.night[1] == lt::kLampIntensityPerStart); // nightLamp 1 shipped
++    CHECK(on.night[2] == lt::kLowBeamPeak);           // nightSpot 1 shipped
++    CHECK(on.night[3] == 0.0f);
++    // Off: zero, which the shader reads as "every light classic".
++    GateInputs day = MoonNight(40.0f);
++    day.nightEffect = 0.0f;
++    const FeatureGates switchedOff = ComputeFeatureGates(night, Apply("remastered,nightLights=0"));
++    for (const NightConstants& off : {ComputeNightConstants(t, g, false), ComputeNightConstants(t, switchedOff, true),
++                                      ComputeNightConstants(t, ComputeFeatureGates(day, t), true)})
++    {
++        for (float v : off.night)
++            CHECK(v == 0.0f);
++    }
++    CHECK(ComputeNightConstants(Apply("remastered,nightSpot=0"), g, true).night[2] == 0.0f);
++    CHECK(ComputeNightConstants(Apply("remastered,nightLamp=0"), g, true).night[1] == 0.0f);
++    CHECK(ComputeNightConstants(Apply("remastered,nightLamp=2"), g, true).night[1] ==
++          2.0f * lt::kLampIntensityPerStart);
++    CHECK(ComputeNightConstants(Apply("remastered,nightSpot=3"), g, true).night[2] == lt::kLowBeamPeak * 3.0f);
++}
++
++TEST_CASE("Night: the shaders' physical model is FrameLights.hpp's", "[Graphics][Shaders][remaster][NightLights]")
++{
++    namespace gl = Poseidon::gl33lighting;
++    const std::string lights = gl::RemasterFragmentPiece(gl::FragmentPiece::Lights);
++    REQUIRE_FALSE(lights.empty());
++    struct Pin
++    {
++        const char* name;
++        float value;
++        int digits;
++    };
++    for (const Pin& p :
++         {Pin{"kNightSoftening", lt::kPhysicalSoftening, 2}, Pin{"kNightNearStart", lt::kPhysicalNearStart, 2},
++          Pin{"kNightNearEnd", lt::kPhysicalNearEnd, 1}, Pin{"kBeamCutLow", lt::kLowBeamCutLow, 3},
++          Pin{"kBeamCutHigh", lt::kLowBeamCutHigh, 3}, Pin{"kBeamHotBand", lt::kLowBeamHotBand, 2},
++          Pin{"kBeamHotWidth", lt::kLowBeamHotWidth, 2}, Pin{"kBeamFloor", lt::kLowBeamFloor, 2},
++          Pin{"kBeamFloorEnd", lt::kLowBeamFloorEnd, 1}, Pin{"kBeamFloorStart", lt::kLowBeamFloorStart, 1},
++          Pin{"kBeamCoreWidth", lt::kLowBeamCoreWidth, 2}, Pin{"kBeamSpill", lt::kLowBeamSpill, 2},
++          Pin{"kBeamSpillWidth", lt::kLowBeamSpillWidth, 1}})
++    {
++        const std::string decl = std::string("const float ") + p.name + " = " + Fixed(p.value, p.digits) + ";";
++        INFO(decl);
++        CHECK(lights.find(decl) != std::string::npos);
++    }
++    // The model: intensity over the softened squared distance, the near fade,
++    // the reach window, lamps by their start distance and headlights by the
++    // pattern times the slot's peak, the configured colour taken to linear.
++    CHECK(lights.find("float peak = spot ? litNight.z : litNight.y * pos.w;") != std::string::npos);
++    CHECK(lights.find("float I = spot ? peak * lowBeamPattern(-L, frameLights[at + 3].xyz) : peak;") !=
++          std::string::npos);
++    CHECK(lights.find("I *= (1.0 - smoothstep(0.5 * end2, end2, d2)) * smoothstep(kNightNearStart, kNightNearEnd, "
++                      "d);") != std::string::npos);
++    CHECK(lights.find("float E = I / (d2 + kNightSoftening);") != std::string::npos);
++    CHECK(lights.find("vec3 col = toLinear(color.rgb) * E;") != std::string::npos);
++    // Leaves wrap a lamp's light as the sun's (the black crowns by the lamps).
++    CHECK(lights.find("float wrap = clamp((dot(g_lightLeafNormal, L) + 0.35) / 1.35, 0.0, 1.0);") != std::string::npos);
++    // Lamps and headlights by kind (FrameLightKind Lamp 1, Spot 2), only while on.
++    CHECK(static_cast<int>(lt::FrameLightKind::Lamp) == 1);
++    CHECK(static_cast<int>(lt::FrameLightKind::Spot) == 2);
++    CHECK(lights.find("return litNight.x > 0.5 && kind > 0.5 && kind < 2.5;") != std::string::npos);
++    // They leave the classic budget, and their sum takes the night factor.
++    CHECK(lights.find("if (physicalKind(id)) physicalLight(id, n, kd, ka);") != std::string::npos);
++    CHECK(lights.find("g_physicalLocal *= litLightCount.z;") != std::string::npos);
++    // The shade adds them outside the classic clamp, and hands the leaves'
++    // normal over.
++    const std::string shade = gl::RemasterFragmentPiece(gl::FragmentPiece::Shade);
++    CHECK(shade.find("vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0))) + g_physicalLocal * "
++                     "litGround.w;") != std::string::npos);
++    CHECK(shade.find("g_lightLeafNormal = nLight;") != std::string::npos);
++    CHECK(shade.find("g_physicalSpec * litGround.w") != std::string::npos);
++}
++
++TEST_CASE("Night: the backend aims the low beams only with the physical model on", "[remaster][NightLights]")
++{
++    const std::string lighting = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_Lighting.cpp");
++    const std::string tiles = FunctionBody(lighting, "void EngineGL33::UpdateLightTiles()");
++    REQUIRE_FALSE(tiles.empty());
++    CHECK(tiles.find("_featureGates[rm::Feature::NightLights].on") != std::string::npos);
++    CHECK(tiles.find("if (spot && aimBeams)") != std::string::npos);
++    CHECK(tiles.find("fl::LowBeamAim(lampDir, bodyForward, f.dir);") != std::string::npos);
++    const std::string frame = FunctionBody(lighting, "void EngineGL33::UploadLitFrameConstants()");
++    CHECK(frame.find("rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive)") != std::string::npos);
++    CHECK(frame.find("SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);") !=
++          std::string::npos);
++    const std::string post = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_PostFX.cpp");
++    CHECK(FunctionBody(post, "void EngineGL33::EndWorldScene()").find("_nightLightsActive = false;") !=
++          std::string::npos);
++}
++
++TEST_CASE("Night: a star is a soft splat with a faint colour of its own", "[remaster][NightLights]")
++{
++    const StarSplat s = MakeStarSplat(100.25f, 50.5f, 100.0f, 7u);
++    CHECK(s.x[0] == 100.25f);
++    CHECK(s.y[0] == 50.5f);
++    CHECK(s.alpha[0] == Catch::Approx(100.0f * kStarCentreGain));
++    for (int c = 1; c < 5; ++c)
++    {
++        CHECK(s.alpha[c] == 0.0f);
++        CHECK(std::fabs(s.x[c] - s.x[0]) == Catch::Approx(kStarSplatRadius));
++        CHECK(std::fabs(s.y[c] - s.y[0]) == Catch::Approx(kStarSplatRadius));
++    }
++    // The four corners go round (a fan: 1, 2, 3, 4 and back to 1).
++    CHECK(s.x[1] < s.x[2]);
++    CHECK(s.y[2] < s.y[3]);
++    CHECK(s.x[3] > s.x[4]);
++    CHECK(s.y[4] > s.y[1]);
++    // A bright star's centre saturates instead of wrapping.
++    CHECK(MakeStarSplat(0.0f, 0.0f, 250.0f, 1u).alpha[0] == 255.0f);
++    // The tint: unit luminance, between a cool and a warm white, the same for
++    // the same star, different across stars.
++    std::set<float> reds;
++    for (std::uint32_t i = 0; i < 64; ++i)
++    {
++        const StarSplat t = MakeStarSplat(0.0f, 0.0f, 50.0f, i);
++        CHECK(Luma(t.tint) == Catch::Approx(1.0f).epsilon(1e-5f));
++        CHECK(t.tint[2] / t.tint[0] >= 0.74f - 1e-4f);
++        CHECK(t.tint[2] / t.tint[0] <= 1.25f + 1e-4f);
++        CHECK(MakeStarSplat(9.0f, 9.0f, 50.0f, i).tint[0] == t.tint[0]);
++        reds.insert(t.tint[0]);
++    }
++    CHECK(reds.size() > 32);
++    // The backend draws it only with the stars gate, and keeps the dot without.
++    const std::string shared = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_DrawShared.cpp");
++    const std::string points = FunctionBody(shared, "void EngineGL33::DrawPoints(int beg, int end)");
++    REQUIRE_FALSE(points.empty());
++    CHECK(points.find("_featureGates[Poseidon::remaster::Feature::Stars].on") != std::string::npos);
++    CHECK(points.find("if (splats)") < points.find("TLVertex vs[4];"));
++}
++
++TEST_CASE("Night: the three switches have landed, with the lamp and headlight strengths", "[remaster][NightLights]")
++{
++    for (Feature f : {Feature::NightLights, Feature::MoonShadows, Feature::Stars})
++    {
++        const FeatureInfo& info = GetFeatureInfo(f);
++        INFO(info.key);
++        CHECK(info.landed);
++        CHECK(std::string_view(info.step) == "B3");
++        CHECK(std::string_view(info.track) == "night");
++        CHECK(std::string_view(info.area) == "Night and combat");
++    }
++    struct Sub
++    {
++        const char* key;
++        float value;
++    };
++    for (const Sub& sub : {Sub{"nightSpot", 1.0f}, Sub{"nightLamp", 1.0f}})
++    {
++        INFO(sub.key);
++        const LightingKey* k = FindLightingKey(sub.key);
++        REQUIRE(k != nullptr);
++        CHECK(k->kind == KeyKind::Knob);
++        REQUIRE(k->parent != nullptr);
++        CHECK(std::string_view(k->parent) == "nightLights");
++        CHECK(std::string_view(k->group) == "night");
++        CHECK(KeyDefault(*k) == sub.value);
++        CHECK(GetKeyValue(Apply(std::string("remastered,") + sub.key + "=0.5"), *k) == 0.5f);
++        CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.5,baseline"), *k) == sub.value);
++    }
++}
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index bdc9b0d..3142721 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1440,9 +1440,14 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+         {"litSky", LC::Sky, 1},
+         {"litSkyShadow", LC::SkyShadow, 1},
+         {"litPlanned", LC::Planned, LC::PlannedCount},
++<<<<<<< ours
+         {"litWater0", LC::Water0, 1},
+         {"litWater1", LC::Water1, 1},
+         {"litCanopy", LC::Canopy, 1},
++=======
++        {"litNight", LC::Night, 1},
++        {"litPlannedLate", LC::PlannedLate, LC::PlannedLateCount},
++>>>>>>> theirs
+         {"litDetail", LC::Detail, 1},
+     };
+     // Walks the members of one declaration, slot by slot.
+@@ -1514,6 +1519,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     CHECK(static_cast<int>(LC::Pcss) == 60);
+     CHECK(static_cast<int>(LC::SkyRight) == 61);
+     CHECK(static_cast<int>(LC::AtmoDome) == 67);
++<<<<<<< ours
+     CHECK(static_cast<int>(LC::Sky) == 68);
+     CHECK(static_cast<int>(LC::SkyShadow) == 69);
+     // 70 is free (the light list rides in slot 22), so the padding starts there.
+@@ -1527,6 +1533,16 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
+     CHECK(static_cast<int>(LC::Canopy) == 76);
+     CHECK(static_cast<int>(LC::Canopy) == static_cast<int>(LC::Water1) + 1);
+     CHECK(static_cast<int>(LC::Detail) == 77);
++=======
++    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Planned));
++    // B11 landed the terrain detail at 77 and B3 the night at 71 (plan 3.3);
++    // 68 to 70 and 72 to 76 are the two planned paddings around it.
++    CHECK(static_cast<int>(LC::Detail) == 77);
++    CHECK(static_cast<int>(LC::Night) == 71);
++    CHECK(LC::PlannedCount == 3);
++    CHECK(gl::LitConstPlanned::CombatShadow == static_cast<int>(LC::PlannedLate));
++    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Detail) - 1);
++>>>>>>> theirs
+     CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
+ 
+     // The decoded horizon range in the shader is the encoder's.

@@ -1,0 +1,11 @@
+[
+ ("town_night_rain", [("u", "remastered"), ("v0", "remastered,wetness=1"), ("v8", "remastered,wetness=0.992"),
+   ("v11", "remastered,wetness=0.989"), ("v12", "remastered,wetness=0.988"), ("v13", "remastered,wetness=0.987"),
+   ("v14", "remastered,wetness=0.986")]),
+ ("seam_b", [("u", "remastered"), ("v0", "remastered,wetness=1"), ("v8", "remastered,wetness=0.992"),
+   ("v11", "remastered,wetness=0.989"), ("v12", "remastered,wetness=0.988"), ("v13", "remastered,wetness=0.987"),
+   ("v14", "remastered,wetness=0.986")]),
+ ("seam_d", [("u", "remastered"), ("v8", "remastered,wetness=0.992"), ("v12", "remastered,wetness=0.988")]),
+ ("seam_day", [("u", "remastered"), ("v8", "remastered,wetness=0.992"), ("v12", "remastered,wetness=0.988"),
+   ("v13", "remastered,wetness=0.987")]),
+]

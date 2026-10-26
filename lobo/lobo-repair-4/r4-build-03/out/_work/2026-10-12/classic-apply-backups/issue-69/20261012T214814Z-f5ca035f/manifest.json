@@ -1,0 +1,195 @@
+{
+  "schema": 1,
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "state": "applied",
+  "repair_version": "2026-10-11.4",
+  "rule_sha256": "98f07a96676496b149528e96450c63c27755341e9e47c87aa6f977049385aa48",
+  "compatibility": "classic",
+  "created_utc": "20261012T214814Z-f5ca035f",
+  "archives": [
+    {
+      "file": "LoBo_airammo.pbo",
+      "before_sha256": "d54dc5c4d33c54a581b8c602a5b4c37f24057625a484bc056b0f895731427d99",
+      "after_sha256": "e1954a6c48ac45d95c01fa820bdf52bad42842f95cd429816dd0ccc1ef7e75a3"
+    },
+    {
+      "file": "LoBo_BTR60.pbo",
+      "before_sha256": "c2daf92e718ac717512970061b34d87bc8e3f4364874261ee836632540797f5e",
+      "after_sha256": "59e3489b6c47be03191c0aa2d67ea952a0cbc442a53b207d2a0df5de52fc7393"
+    },
+    {
+      "file": "LoBo_FAB.pbo",
+      "before_sha256": "6f44009f57e1e3c1cb08b12a0966c59b0000a996afba67f497f2d954328732e7",
+      "after_sha256": "ec8f2bfbc7336d1c3e1b7fa67a8dea8bc5bd1704401acb3c934d4cb5d7474427"
+    },
+    {
+      "file": "LoBo_Zelda.pbo",
+      "before_sha256": "04b86d898777ebd77b29896eeddece9e749aa22e60866882e78b68a75eebcc4d",
+      "after_sha256": "e8b1b04497fa0ca222574559aac50e7e2d51c77a3d6ecd7859640481cc878b2f"
+    },
+    {
+      "file": "LoBo_ZU23.pbo",
+      "before_sha256": "7f1425189c9aba377bab7b190803b2c28c262b74acc6930b859bc62887bd071f",
+      "after_sha256": "bea32c0ad8967e6f2569ba1be9afd6c50b7f30c384a44589849327312e985621"
+    },
+    {
+      "file": "LoBoCen.pbo",
+      "before_sha256": "94b17f998689c43d015d424bd328460f66fa098c764b09dd90b461d207812475",
+      "after_sha256": "72eabce74adb36d527afe01b3153c48a23794b2839588dec57c497af90126576"
+    },
+    {
+      "file": "LoBoEgAPC.pbo",
+      "before_sha256": "45c21ba836a708947df037e9c81b34660dddcf2d87c6410feebdb814179e1a2d",
+      "after_sha256": "fe44e35261895459f574f5e054558cb0df45ecfcc5d4eb0ca01bdde8255e8680"
+    },
+    {
+      "file": "LoBoF15.pbo",
+      "before_sha256": "a357669e730e75e1e8800bed2381d77274d9c9d602b4e08548d5a68ce2ce5419",
+      "after_sha256": "9652dbd776c4de5978ab18d0faa8c4662fb2982271d75c6a888272f635e667de"
+    },
+    {
+      "file": "LoBoF16.pbo",
+      "before_sha256": "f6a6de457b2e1ad4c3d36ab9cb57391406decc35a2bbbdf74b164d62f0368d58",
+      "after_sha256": "cca793c7fceb964e991c5a28af1e1dbd963c1e051aad3b0f2b5344a09181a34f"
+    },
+    {
+      "file": "LoBoM60.pbo",
+      "before_sha256": "460473d42d5b648d6859eed1742bb4e8142728da0b218526e3d71449a348e069",
+      "after_sha256": "aa1b0618ed2fd81a835f76f35e7c0be4abbeaa01d600a97030c0cf02f53a417d"
+    },
+    {
+      "file": "LoBoMerkava2.pbo",
+      "before_sha256": "6075c05276e57742c164cac1379994eb14806ecdcc996f3f400b7bf16fd3650a",
+      "after_sha256": "09e2603413fb06d30dbcdc87972f2ad2f4bda6c3b0cd9ddb3c5e40e0c38dcd87"
+    },
+    {
+      "file": "LoBoMerkava4.pbo",
+      "before_sha256": "1b0516726697db3e591f73247cafb8bedd7ec6b4e81dcb9cc9bb8f9e7259b3ef",
+      "after_sha256": "769ff83d040a8297476df8b209762e7a1f0ce4a5dfc7574422e0f70c6cf1f6f2"
+    },
+    {
+      "file": "LoBoSA6.pbo",
+      "before_sha256": "1cdbe6758a45e7a020de62342f7042f0dbf32e43cc9c82b86b9d5a364d922953",
+      "after_sha256": "a4c79f524cdbb5f6ae80157a56eee83ad4246b159a1dc3cb98ccd65b5943a5d5"
+    },
+    {
+      "file": "LoBoTer.pbo",
+      "before_sha256": "8cd559fe7b5da8d16db33f588f3a98526e463f855fab3977974e2f12b3af5c57",
+      "after_sha256": "f8a4b0615ea0a68acf0c133edc78a9debac92045f67f95901de7ef47a55eaaf6"
+    }
+  ],
+  "members": [
+    {
+      "member": "lobo_airammo/scripts/smoke/fire.sqs",
+      "before_sha256": "7e5ef1d877736fe393f348c19f780891cf7165092e7b38bafb0934d3e2025511",
+      "after_sha256": "12ed6bcb54ac83dd2f4d1bcc6e28af8f4d85c8ac17ec420e12fd238732cf0c6f",
+      "before_bytes": 4782,
+      "after_bytes": 4831
+    },
+    {
+      "member": "lobo_btr60/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_fab/lcm/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_fab/saar5/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_fab/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_zelda/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobo_zu23/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobocen/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "loboegapc/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobof15/scr/fire.sqs",
+      "before_sha256": "61cf111084db28328f1865b9b09e5f36932b2e6e4386528418712c7cf1d0862d",
+      "after_sha256": "777dbda8fd97826b566b1a79ad98a1580fec362b3d00c593b699ad2706a3bef1",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobof16/scr/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "lobom60/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "lobomerkava2/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "lobomerkava4/scripts/fire.sqs",
+      "before_sha256": "0091b52f151013bda0320c7dedf54afe2e0defb12f8a3187ce02969743e9f0db",
+      "after_sha256": "7096c268ad4cf2ab7811fdbfd673c72cfb1d26ff7977135195cec38010f8177c",
+      "before_bytes": 4766,
+      "after_bytes": 4815
+    },
+    {
+      "member": "lobosa6/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    },
+    {
+      "member": "loboter/scripts/fire.sqs",
+      "before_sha256": "62aeada510f0640cb9db161f9d0ce5d412174f0ee629910e7b4f25905e502c1c",
+      "after_sha256": "46b2cd840227de9df331a6b2a45bcdc9d43258b54669e8786702fccd55b27744",
+      "before_bytes": 4765,
+      "after_bytes": 4814
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+    // two passes, the luma sharpen, the canopy's sun-visibility pass, the air
+    // pass's march, blur, mean and apply, the reflections' tag readout,
+    // shares, trace, rough blur and composite, and the combat shadow mask and
+    // its blur, the surfaces lane's horizon occlusion and its accumulation
+    // over frames, the photoreal camera's meter, and the volumetric fog's
+    // injection, integration, near field, apply, horizon ring and night glow
+    CHECK(post == 35);

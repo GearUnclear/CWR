@@ -1,0 +1,137 @@
+[
+ {
+  "src": "v2/vanilla/valley_mist/valley_mist__vanilla.mkv",
+  "frm": 285,
+  "to": 390,
+  "band": 0.102,
+  "sky": 0.024,
+  "regions": {
+   "bay": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 126.54,
+    "camera": [
+     -1.21,
+     -0.06
+    ],
+    "lowd2": 0.093,
+    "mid": 0.549,
+    "rho": 0.031,
+    "rho0": -0.459,
+    "vel": [
+     -1,
+     -10
+    ],
+    "rho_off": 0.031,
+    "vel_off": [
+     -1,
+     -10
+    ],
+    "wind": 0.017,
+    "fine": 1.613,
+    "fine0": -0.395
+   },
+   "valley": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 99.53,
+    "camera": [
+     -0.94,
+     0.0
+    ],
+    "lowd2": 0.057,
+    "mid": 0.294,
+    "rho": 0.024,
+    "rho0": -0.538,
+    "vel": [
+     3,
+     9
+    ],
+    "rho_off": 0.024,
+    "vel_off": [
+     3,
+     9
+    ],
+    "wind": 0.007,
+    "fine": 1.962,
+    "fine0": -0.604
+   },
+   "farhill": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 115.47,
+    "camera": [
+     -0.95,
+     0.06
+    ],
+    "lowd2": 0.046,
+    "mid": 0.126,
+    "rho": 0.02,
+    "rho0": -0.314,
+    "vel": [
+     -15,
+     -16
+    ],
+    "rho_off": 0.02,
+    "vel_off": [
+     -15,
+     -16
+    ],
+    "wind": 0.002,
+    "fine": 0.61,
+    "fine0": -0.196
+   },
+   "haze": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 148.61,
+    "camera": [
+     -0.76,
+     -0.03
+    ],
+    "lowd2": 0.008,
+    "mid": 0.14,
+    "rho": 0.048,
+    "rho0": -0.396,
+    "vel": [
+     16,
+     0
+    ],
+    "rho_off": 0.048,
+    "vel_off": [
+     16,
+     0
+    ],
+    "wind": 0.007,
+    "fine": 0.237,
+    "fine0": -0.419
+   },
+   "slope": {
+    "boil": NaN,
+    "slow": NaN,
+    "mean": 63.4,
+    "camera": [
+     -0.94,
+     0.08
+    ],
+    "lowd2": 0.098,
+    "mid": 0.506,
+    "rho": 0.024,
+    "rho0": -0.432,
+    "vel": [
+     -11,
+     -6
+    ],
+    "rho_off": 0.024,
+    "vel_off": [
+     -11,
+     -6
+    ],
+    "wind": 0.012,
+    "fine": 3.585,
+    "fine0": -0.436
+   }
+  },
+  "frames": 105
+ }
+]

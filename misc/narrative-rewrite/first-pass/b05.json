@@ -1,0 +1,8 @@
+{
+  "id": "b05",
+  "bank": "kBio0Friendly",
+  "variant": 4,
+  "text": "A new fence near {Place} kept {Name}'s sheep from their usual grazing. With winter feed already running low, the shepherd cut an opening and drove the flock through, knowing a fine could follow.",
+  "word_count": 33,
+  "self_review": "The fence removes access to grazing; dwindling feed makes cutting it a practical choice despite the possible fine. The shepherd remains the clear actor, and the ending reports the accepted risk without a political explanation."
+}

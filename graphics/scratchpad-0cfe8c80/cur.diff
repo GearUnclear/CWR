@@ -1,0 +1,797 @@
+﻿diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..975f6b2 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -32,9 +32,23 @@ using namespace Poseidon;
+ #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
+ #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+ #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
++#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+ namespace Poseidon
+ {
+ extern bool gPerfDumpShapesOnce;
++namespace texsharp
++{
++extern int g_streamFix;
++extern int g_mipBias;
++extern float g_lodBias;
++extern float g_aniso;
++extern int g_samplerDirty;
++extern float g_world[4];
++extern float g_post[4];
++extern int g_statsRequest;
++extern int g_remip;
++extern void (*g_releaseAllHook)();
++} // namespace texsharp
+ }
+ #include <SDL3/SDL_events.h>
+ #include <SDL3/SDL_keyboard.h>
+@@ -571,6 +585,70 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         t.debugView = static_cast<int>(v);
+         found = true;
+     }
++    // texsharp research knobs (texture residency and sampling).
++    else if (key == "texStreamFix")
++    {
++        texsharp::g_streamFix = static_cast<int>(v);
++        found = true;
++    }
++    else if (key == "texMipBias")
++    {
++        texsharp::g_mipBias = static_cast<int>(v);
++        found = true;
++    }
++    else if (key == "texLodBias")
++    {
++        texsharp::g_lodBias = v;
++        texsharp::g_samplerDirty = 1;
++        found = true;
++    }
++    else if (key == "texAniso")
++    {
++        texsharp::g_aniso = v;
++        texsharp::g_samplerDirty = 1;
++        found = true;
++    }
++    else if (key == "texK1" || key == "texK2" || key == "texK3" || key == "texK4")
++    {
++        texsharp::g_world[key[4] - '1'] = v;
++        found = true;
++    }
++    else if (key == "texSharpen" || key == "texPost2" || key == "texPost3" || key == "texPost4")
++    {
++        const int i = key == "texSharpen" ? 0 : key[7] - '1';
++        texsharp::g_post[i] = v;
++        found = true;
++    }
++    else if (key == "texRemip")
++    {
++        // Changes the upload format of every texture: drop all GPU copies
++        // (small surfaces included) so they re-upload with the new chain.
++        if (texsharp::g_remip != static_cast<int>(v) && GEngine->TextBank())
++        {
++            texsharp::g_remip = static_cast<int>(v);
++            if (texsharp::g_releaseAllHook)
++                texsharp::g_releaseAllHook();
++            GEngine->TextBank()->BoostLoadBudget(90);
++        }
++        found = true;
++    }
++    else if (key == "texStats")
++    {
++        texsharp::g_statsRequest = 1;
++        found = true;
++    }
++    else if (key == "texFlush")
++    {
++        // Drop every resident mip chain so the next frames re-stream at the
++        // levels the current knobs ask for (no finer level left over from an
++        // earlier shot).
++        if (GEngine->TextBank())
++        {
++            GEngine->TextBank()->ReleaseAllTextures();
++            GEngine->TextBank()->BoostLoadBudget(static_cast<int>(v > 0 ? v : 60));
++        }
++        found = true;
++    }
+     if (!found)
+         return GameValue(("FAIL:unknown knob " + key).c_str());
+     GEngine->SetLightingTuning(t);
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Draw/DrawPoly.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Draw/DrawPoly.cpp
+index f2042c7..d9191e9 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Draw/DrawPoly.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Draw/DrawPoly.cpp
+@@ -14,9 +14,54 @@
+ #include <Poseidon/Foundation/Math/Math3DP.hpp>
+ #include <Poseidon/Foundation/Math/MathOpt.hpp>
+ 
++#include <cstdlib>
++
+ namespace Poseidon
+ {
+ 
++// texsharp research knobs (env vars, read once).
++//   UD_TEX_STREAM_FIX=1  mip residency uses the render-target width (render
++//                        scale) and keeps one level finer than the isotropic
++//                        estimate, so trilinear + anisotropic filtering has
++//                        the level it wants.
++//   UD_TEX_MIPBIAS=N     keep N extra finer levels resident (99 = full res).
++// Also live: triSetLighting "texStreamFix=1" / "texMipBias=N" / "texLodBias=x"
++// / "texAniso=x" / "texFlush=1" (GameStateExtTestRender.cpp).
++namespace texsharp
++{
++static int EnvInt(const char* name, int def)
++{
++    const char* v = std::getenv(name);
++    return v && *v ? std::atoi(v) : def;
++}
++static float EnvFloat(const char* name, float def)
++{
++    const char* v = std::getenv(name);
++    return v && *v ? static_cast<float>(std::atof(v)) : def;
++}
++int g_streamFix = EnvInt("UD_TEX_STREAM_FIX", 0);
++int g_mipBias = EnvInt("UD_TEX_MIPBIAS", 0);
++float g_lodBias = EnvFloat("UD_TEX_LODBIAS", 0.0f);
++float g_aniso = EnvFloat("UD_TEX_ANISO", 16.0f);
++int g_samplerDirty = 0;
++int g_statsRequest = 0; // 1 = log the mip level of every texture drawn next frame
++int g_remip = EnvInt("UD_TEX_REMIP", 0); // rebuild mip chains at upload (TextureGL33_Loading.cpp)
++void (*g_releaseAllHook)() = nullptr;    // set by TextBankGL33: drop every GPU copy, keep headers
++// Free shader knobs for override GLSL: g_world -> LitConstants litLightCount.yzw
++// (remastered world shaders), g_world[3] -> litCamPos.w, g_post -> uniform udTexsharp (psPostComposite).
++float g_world[4] = {EnvFloat("UD_TEX_K1", 0.0f), EnvFloat("UD_TEX_K2", 0.0f), EnvFloat("UD_TEX_K3", 0.0f),
++                    EnvFloat("UD_TEX_K4", 0.0f)};
++float g_post[4] = {EnvFloat("UD_TEX_SHARPEN", 0.0f), 0.0f, 0.0f, 0.0f};
++int StreamFix()
++{
++    return g_streamFix;
++}
++int MipBias()
++{
++    return g_mipBias;
++}
++} // namespace texsharp
++
+ void PrepareTexture(Texture* texture, float z2, int special, float areaOTex)
+ {
+     if (!texture)
+@@ -56,6 +101,8 @@ void PrepareTexture(Texture* texture, float z2, int special, float areaOTex)
+             // select mipmaps based on areaOTex
+ 
+             float scrAreaOTex = areaOTex * Square(sizeMin);
++            if (texsharp::StreamFix())
++                scrAreaOTex *= Square(GEngine->GetRenderScale());
+             float hw = texH * texW;
+ 
+             // the higher scrAreaOTex, the better mipmap should be used
+@@ -66,6 +113,11 @@ void PrepareTexture(Texture* texture, float z2, int special, float areaOTex)
+                     break;
+                 }
+             }
++            if (texsharp::StreamFix())
++                level -= 1;
++            level -= texsharp::MipBias();
++            if (level < 0)
++                level = 0;
+         }
+     }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+index 23d79b5..f807094 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lighting.cpp
+@@ -22,6 +22,11 @@
+ using namespace Poseidon::gl33lighting;
+ namespace rm = Poseidon::remaster;
+ 
++namespace Poseidon::texsharp
++{
++extern float g_world[4];
++} // namespace Poseidon::texsharp
++
+ namespace
+ {
+ float s_lit[LitConst::Count * 4] = {};
+@@ -363,7 +368,7 @@ void EngineGL33::UploadLitFrameConstants()
+     SetSlot(LitConst::MoonDir, toMoon.X(), toMoon.Y(), toMoon.Z(), 0.0f);
+     SetSlot(LitConst::Moon, rig.moon.r, rig.moon.g, rig.moon.b, 0.0f);
+     const Vector3 cam = camera ? camera->Position() : VZero;
+-    SetSlot(LitConst::CamPos, cam.X(), cam.Y(), cam.Z(), 0.0f);
++    SetSlot(LitConst::CamPos, cam.X(), cam.Y(), cam.Z(), Poseidon::texsharp::g_world[3]); // texsharp K4
+ 
+     // Terrain horizon: the two stored azimuths around the sun and the blend.
+     const bool terrain = _worldEffectsOn && _terrainHorizonTex && _terrainMap && _terrainMap->Valid() &&
+@@ -478,6 +483,8 @@ void EngineGL33::UploadLitLights(const LightList& lights, float nightEffect)
+             n++;
+         }
+     }
+-    SetSlot(LitConst::LightCount, static_cast<float>(n), 0.0f, 0.0f, 0.0f);
++    // texsharp research: free shader knobs in the unused yzw of this slot.
++    SetSlot(LitConst::LightCount, static_cast<float>(n), Poseidon::texsharp::g_world[0], Poseidon::texsharp::g_world[1],
++            Poseidon::texsharp::g_world[2]);
+     FlushLitConstants();
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..42f1b0b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -34,6 +34,11 @@
+ #include <algorithm>
+ #include <cmath>
+ 
++namespace Poseidon::texsharp
++{
++extern float g_post[4];
++} // namespace Poseidon::texsharp
++
+ namespace
+ {
+ 
+@@ -673,6 +678,10 @@ void EngineGL33::EndWorldScene()
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    // texsharp research: free knobs for an override composite (sharpening).
++    u4f(p.progComposite, "udTexsharp", Poseidon::texsharp::g_post[0], Poseidon::texsharp::g_post[1],
++        Poseidon::texsharp::g_post[2], Poseidon::texsharp::g_post[3]);
++    u4f(p.progComposite, "udScreen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
+     drawTo(_ssaaFbo, w, h);
+     GpuMark(Poseidon::gpu::Mark::CompositeEnd);
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+index da2b229..5a3eb18 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+@@ -12,6 +12,39 @@
+ 
+ #include <glad/gl.h>
+ 
++#include <cstdlib>
++
++namespace Poseidon::texsharp
++{
++extern float g_lodBias;
++extern float g_aniso;
++extern int g_samplerDirty;
++} // namespace Poseidon::texsharp
++
++// texsharp research: (re)apply anisotropy and LOD bias to the non-point
++// samplers from the live knobs (env UD_TEX_ANISO / UD_TEX_LODBIAS, or
++// triSetLighting "texAniso=" / "texLodBias=").
++static void ApplyTexsharpSamplerParams(const unsigned int* samplers)
++{
++    float maxAniso = 1.0f;
++    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
++    float aniso = Poseidon::texsharp::g_aniso;
++    if (aniso < 1.0f)
++        aniso = 1.0f;
++    if (aniso > maxAniso)
++        aniso = maxAniso;
++    const float lodBias = Poseidon::texsharp::g_lodBias;
++    LOG_INFO(Graphics, "texsharp: samplers maxAniso={} aniso={} lodBias={}", maxAniso, aniso, lodBias);
++    for (int i = 0; i < 8; i++)
++    {
++        const bool point = (i & 4) != 0;
++        if (point)
++            continue;
++        glSamplerParameterf(samplers[i], GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
++        glSamplerParameterf(samplers[i], GL_TEXTURE_LOD_BIAS, lodBias);
++    }
++}
++
+ void EngineGL33::CreateSamplerStates()
+ {
+     glGenSamplers(8, _samplerObjects);
+@@ -19,9 +52,6 @@ void EngineGL33::CreateSamplerStates()
+     // the trilinear + anisotropic setup from TextureGL33_Init — mip-nearest with
+     // no anisotropy here made distant oblique textures (chain-link fences, fence
+     // tops) shimmer with bright pixel highlights as mip selection flipped.
+-    float maxAniso = 1.0f;
+-    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
+-    const float aniso = maxAniso < 16.0f ? maxAniso : 16.0f;
+     for (int i = 0; i < 8; i++)
+     {
+         bool point = (i & 4) != 0;
+@@ -35,11 +65,9 @@ void EngineGL33::CreateSamplerStates()
+         glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_MAG_FILTER, magFilter);
+         glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_WRAP_S, clampU ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+         glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_WRAP_T, clampV ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+-        if (!point && aniso > 1.0f)
+-        {
+-            glSamplerParameterf(_samplerObjects[i], GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+-        }
+     }
++    ApplyTexsharpSamplerParams(_samplerObjects);
++    Poseidon::texsharp::g_samplerDirty = 0;
+     // Bind default sampler (linear, wrap) to both texture units
+     glBindSampler(0, _samplerObjects[0]);
+     glBindSampler(1, _samplerObjects[0]);
+@@ -53,6 +81,11 @@ void EngineGL33::DestroySamplerStates()
+ 
+ void EngineGL33::ApplySamplerState()
+ {
++    if (Poseidon::texsharp::g_samplerDirty)
++    {
++        Poseidon::texsharp::g_samplerDirty = 0;
++        ApplyTexsharpSamplerParams(_samplerObjects);
++    }
+     int bits = (_pointSampling ? 4 : 0) | (_lastClampU ? 1 : 0) | (_lastClampV ? 2 : 0);
+     // Per-draw sampler routes through `BindSlot0` which physically
+     // can only bind slot 0 — slot 1 (detail/grass/specular) keeps
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp
+index c758903..b6e0314 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Cache.cpp
+@@ -13,6 +13,10 @@ extern ParamFile Remaster;
+ 
+ #include <Poseidon/Input/InputSubsystem.hpp>
+ 
++#include <cstdlib>
++#include <string>
++#include <unordered_map>
++
+ namespace
+ {
+ 
+@@ -38,8 +42,112 @@ bool HasGlExtension(const char* extensionName)
+ 
+ } // namespace
+ 
++// texsharp research instrumentation: UD_TEX_LOG=1 records, every 300th frame,
++// which mip level each distinct texture was drawn with and logs a summary.
++namespace Poseidon::texsharp
++{
++extern int g_statsRequest;
++extern void (*g_releaseAllHook)();
++} // namespace Poseidon::texsharp
++
++// texsharp research: drop every disk-backed texture's GPU copies (big and
++// small surface) but keep its headers and source, so the next use re-uploads
++// in the current upload format. Interpolated partners stay valid, unlike
++// ForceReloadAll.
++static TextBankGL33* s_texsharpBank = nullptr;
++static void TexsharpReleaseAll()
++{
++    if (!s_texsharpBank)
++        return;
++    s_texsharpBank->TexsharpReleaseAll();
++}
++
++void TextBankGL33::TexsharpReleaseAll()
++{
++    int n = 0;
++    for (int i = 0; i < _texture.Size(); i++)
++    {
++        TextureGL33* tex = _texture[i];
++        if (!tex || !tex->_src || tex->_inUse)
++            continue;
++        tex->ReleaseMemory(false);
++        tex->ReleaseSmall(false);
++        ++n;
++    }
++    while (_freeTextures.Size() > 0)
++        DeleteLastReleased();
++    _loadBoostFrames = 90;
++    LOG_INFO(Graphics, "texsharp: released GPU copies of {} textures", n);
++}
++
++void TexsharpInstallHook(TextBankGL33* bank)
++{
++    s_texsharpBank = bank;
++    Poseidon::texsharp::g_releaseAllHook = &TexsharpReleaseAll;
++}
++
++namespace texsharp_stats
++{
++struct Rec
++{
++    int w0, h0, level, small;
++    std::string name;
++};
++static bool g_enabled = std::getenv("UD_TEX_LOG") != nullptr;
++static int g_frame = 0;
++static bool g_collect = false;
++static std::unordered_map<const void*, Rec> g_recs;
++
++static void Record(const TextureGL33* tex, int w0, int h0, int level, bool small, const char* name)
++{
++    if (!g_collect)
++        return;
++    auto it = g_recs.find(tex);
++    if (it == g_recs.end())
++        g_recs.emplace(tex, Rec{w0, h0, level, small ? 1 : 0, name ? name : "?"});
++    else if (level < it->second.level)
++        it->second.level = level, it->second.small = small ? 1 : 0;
++}
++
++static void Dump()
++{
++    int hist[8] = {};
++    int histBig[8] = {};
++    for (auto& kv : g_recs)
++    {
++        const int l = kv.second.level < 7 ? kv.second.level : 7;
++        hist[l]++;
++        if (kv.second.w0 >= 256 || kv.second.h0 >= 256)
++            histBig[l]++;
++    }
++    LOG_INFO(Graphics,
++             "texsharp: frame {} textures={} level0={} l1={} l2={} l3={} l4={} l5+={} | >=256px: l0={} l1={} l2={} "
++             "l3={} l4+={}",
++             g_frame, g_recs.size(), hist[0], hist[1], hist[2], hist[3], hist[4], hist[5] + hist[6] + hist[7],
++             histBig[0], histBig[1], histBig[2], histBig[3], histBig[4] + histBig[5] + histBig[6] + histBig[7]);
++    int printed = 0;
++    for (auto& kv : g_recs)
++    {
++        if (printed >= 400)
++            break;
++        LOG_INFO(Graphics, "texsharp: tex {} {}x{} level={} small={}", kv.second.name,
++                 kv.second.w0, kv.second.h0, kv.second.level, kv.second.small);
++        ++printed;
++    }
++    g_recs.clear();
++}
++} // namespace texsharp_stats
++
+ void TextBankGL33::StartFrame()
+ {
++    {
++        if (texsharp_stats::g_collect)
++            texsharp_stats::Dump();
++        ++texsharp_stats::g_frame;
++        texsharp_stats::g_collect =
++            (texsharp_stats::g_enabled && (texsharp_stats::g_frame % 300) == 0) || Poseidon::texsharp::g_statsRequest;
++        Poseidon::texsharp::g_statsRequest = 0;
++    }
+     InitDetailTextures();
+     CheckTextureMemory();
+     _thisFrameCopied = 0;
+@@ -163,6 +271,8 @@ MipInfo TextBankGL33::UseMipmap(Texture* absTexture, int level, int top)
+     {
+         if (texture->LoadSmall() < 0)
+             return MipInfo(texture, -1);
++        texsharp_stats::Record(texture, texture->_mipmaps[0]._w, texture->_mipmaps[0]._h, texture->_smallLoaded, true,
++                               texture->Name());
+         return MipInfo(texture, texture->_smallLoaded);
+     }
+ 
+@@ -205,9 +315,12 @@ MipInfo TextBankGL33::UseMipmap(Texture* absTexture, int level, int top)
+     {
+         if (texture->LoadSmall() < 0)
+             return MipInfo(texture, -1);
++        texsharp_stats::Record(texture, texture->_mipmaps[0]._w, texture->_mipmaps[0]._h, texture->_smallLoaded, true,
++                               texture->Name());
+         return MipInfo(texture, texture->_smallLoaded);
+     }
+ 
++    texsharp_stats::Record(texture, texture->_mipmaps[0]._w, texture->_mipmaps[0]._h, level, false, texture->Name());
+     return MipInfo(texture, level);
+ }
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp
+index c5082f0..e146869 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureBankGL33_Core.cpp
+@@ -12,6 +12,8 @@
+ 
+ extern int MipmapSizeGL33(PacFormat format, int w, int h);
+ 
++void TexsharpInstallHook(TextBankGL33* bank); // texsharp research (TextureBankGL33_Cache.cpp)
++
+ static const char* FormatNameGL(PacFormat format)
+ {
+     switch (format)
+@@ -69,6 +71,7 @@ TextBankGL33::TextBankGL33(EngineGL33* engine) : _totalAllocated(0)
+     // Surface texture residency in the memory-budget panel. Textures are the
+     // largest consumer; _totalAllocated is live GPU bytes, _maxTextureMemory the
+     // detected VRAM budget. Observability only — no Free hook (see header).
++    TexsharpInstallHook(this); // texsharp research
+     _memProbe.Register(
+         "Textures", 0.5f, [this] { return (size_t)_totalAllocated; }, [this] { return (size_t)_maxTextureMemory; },
+         [this] { return (size_t)_texture.Size(); });
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+index b60d65a..d216365 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33.hpp
+@@ -119,6 +119,10 @@ class TextureGL33 : public Texture
+ 
+     int LoadLevels(int levelMin);
+     int UploadToGPU(SurfaceInfoGL33& surface, int levelMin);
++    bool UploadRemipped(int levelMin); // texsharp research: decode top mip, rebuild the chain
++    Poseidon::PacFormat UploadFormat(int levelMin) const; // texsharp: RGBA8 when the chain is rebuilt
++    bool RemipProbe() const;
++    mutable signed char _remipProbe = 0; // 0 unknown, 1 rebuildable, 2 not
+ 
+     unsigned int GetHandle() const
+     {
+@@ -298,6 +302,7 @@ class TextBankGL33 : public AbstractTextBank
+ 
+     void Preload() override;
+     void FlushTextures() override;
++    void TexsharpReleaseAll(); // texsharp research: drop all GPU copies, keep headers
+     void ForceReloadAll() override; // viewer F5 hot-reload — see TextBankGL33_Cache.cpp
+     void FlushBank(QFBank* bank) override;
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/TextureGL33_Loading.cpp b/arma_CWR/engine/PoseidonGL33/TextureGL33_Loading.cpp
+index e3f177c..e263ba3 100644
+--- a/arma_CWR/engine/PoseidonGL33/TextureGL33_Loading.cpp
++++ b/arma_CWR/engine/PoseidonGL33/TextureGL33_Loading.cpp
+@@ -9,6 +9,10 @@
+ #include <glad/gl.h>
+ 
+ #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
++#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
++
++#include <cstring>
++#include <vector>
+ 
+ extern int MipmapSizeGL33(PacFormat format, int w, int h);
+ extern void InitGLPixelFormat(TextureDescGL33& desc, PacFormat format, bool enableDXT);
+@@ -32,6 +36,11 @@ bool IsCompressedInterpolationFormat(PacFormat format)
+ 
+ } // namespace
+ 
++namespace Poseidon::texsharp
++{
++extern int g_remip;
++} // namespace Poseidon::texsharp
++
+ PacFormat UploadFormatForTextureGL33(PacFormat format, bool interpolate)
+ {
+     if (interpolate && IsCompressedInterpolationFormat(format))
+@@ -39,11 +48,205 @@ PacFormat UploadFormatForTextureGL33(PacFormat format, bool interpolate)
+     return format;
+ }
+ 
++// ---------------------------------------------------------------------------
++// texsharp research: rebuild the mip chain from the decoded top level.
++//   g_remip 1 = 2x2 box (control: same filter as the authoring tools, RGBA8)
++//   g_remip 2 = Lanczos-2 (8 taps per axis), sharper minified textures
++//   g_remip 3 = Lanczos-2 + alpha-coverage preservation for cutouts (ref 0xc0)
++// Gamma-space filtering, as the stored mips, so mean colours do not shift.
++namespace
++{
++struct RgbaImage
++{
++    int w = 0, h = 0;
++    std::vector<float> px; // 4 floats per texel, 0..255
++};
++
++RgbaImage DownsampleBox(const RgbaImage& s)
++{
++    RgbaImage d;
++    d.w = s.w > 1 ? s.w / 2 : 1;
++    d.h = s.h > 1 ? s.h / 2 : 1;
++    d.px.assign(static_cast<size_t>(d.w) * d.h * 4, 0.0f);
++    const int fx = s.w > 1 ? 2 : 1, fy = s.h > 1 ? 2 : 1;
++    for (int y = 0; y < d.h; ++y)
++        for (int x = 0; x < d.w; ++x)
++            for (int c = 0; c < 4; ++c)
++            {
++                float sum = 0.0f;
++                for (int j = 0; j < fy; ++j)
++                    for (int i = 0; i < fx; ++i)
++                        sum += s.px[(static_cast<size_t>(y * fy + j) * s.w + (x * fx + i)) * 4 + c];
++                d.px[(static_cast<size_t>(y) * d.w + x) * 4 + c] = sum / static_cast<float>(fx * fy);
++            }
++    return d;
++}
++
++// One axis of a 2x Lanczos-2 decimation (wrap addressing).
++RgbaImage DecimateAxis(const RgbaImage& s, bool horizontal)
++{
++    static const float kW[4] = {0.8774f, 0.2353f, -0.0847f, -0.0179f}; // taps at 0.5, 1.5, 2.5, 3.5 texels
++    const float norm = 1.0f / (2.0f * (kW[0] + kW[1] + kW[2] + kW[3]));
++    const int n = horizontal ? s.w : s.h;
++    if (n <= 1)
++        return s;
++    RgbaImage d;
++    d.w = horizontal ? s.w / 2 : s.w;
++    d.h = horizontal ? s.h : s.h / 2;
++    d.px.assign(static_cast<size_t>(d.w) * d.h * 4, 0.0f);
++    for (int y = 0; y < d.h; ++y)
++        for (int x = 0; x < d.w; ++x)
++        {
++            const int o = horizontal ? x : y; // output index on the axis
++            float acc[4] = {0, 0, 0, 0};
++            for (int k = 0; k < 4; ++k)
++            {
++                const int a = ((2 * o - k) % n + n) % n;     // left tap
++                const int b = ((2 * o + 1 + k) % n + n) % n; // right tap
++                const size_t ia = horizontal ? (static_cast<size_t>(y) * s.w + a) : (static_cast<size_t>(a) * s.w + x);
++                const size_t ib = horizontal ? (static_cast<size_t>(y) * s.w + b) : (static_cast<size_t>(b) * s.w + x);
++                for (int c = 0; c < 4; ++c)
++                    acc[c] += kW[k] * (s.px[ia * 4 + c] + s.px[ib * 4 + c]);
++            }
++            for (int c = 0; c < 4; ++c)
++            {
++                const float v = acc[c] * norm;
++                d.px[(static_cast<size_t>(y) * d.w + x) * 4 + c] = v < 0.0f ? 0.0f : (v > 255.0f ? 255.0f : v);
++            }
++        }
++    return d;
++}
++
++float AlphaCoverage(const RgbaImage& im, float ref, float scale)
++{
++    size_t n = 0;
++    const size_t total = static_cast<size_t>(im.w) * im.h;
++    for (size_t i = 0; i < total; ++i)
++        if (im.px[i * 4 + 3] * scale >= ref)
++            ++n;
++    return total ? static_cast<float>(n) / static_cast<float>(total) : 0.0f;
++}
++
++// Scale a level's alpha so its coverage at `ref` matches `target` (Castano).
++void PreserveCoverage(RgbaImage& im, float ref, float target)
++{
++    float lo = 0.0f, hi = 4.0f;
++    for (int it = 0; it < 12; ++it)
++    {
++        const float mid = 0.5f * (lo + hi);
++        if (AlphaCoverage(im, ref, mid) < target)
++            lo = mid;
++        else
++            hi = mid;
++    }
++    const size_t total = static_cast<size_t>(im.w) * im.h;
++    for (size_t i = 0; i < total; ++i)
++    {
++        float& a = im.px[i * 4 + 3];
++        a = a * hi > 255.0f ? 255.0f : a * hi;
++    }
++}
++} // namespace
++
++// texsharp: the upload format, RGBA8 when this texture's chain is rebuilt.
++PacFormat TextureGL33::UploadFormat(int levelMin) const
++{
++    const PacFormat f = UploadFormatForTextureGL33(_mipmaps[levelMin].DstFormat(), _interpolate);
++    if (Poseidon::texsharp::g_remip > 0 && !_interpolate && f != PacAI88 && f != PacP8 && RemipProbe())
++        return PacARGB8888;
++    return f;
++}
++
++// Decode the top level once to learn whether this texture can be rebuilt
++// (file readable through the file server, decoded size = header size).
++bool TextureGL33::RemipProbe() const
++{
++    if (_remipProbe != 0)
++        return _remipProbe == 1;
++    _remipProbe = 2;
++    QIFStream in;
++    GFileServer->Open(in, Name());
++    const int size = in.fail() ? 0 : in.rest();
++    if (size <= 0)
++        return false;
++    std::vector<char> file(static_cast<size_t>(size));
++    in.read(file.data(), size);
++    const char* name = Name();
++    const size_t len = name ? strlen(name) : 0;
++    const bool isPaa = len >= 4 && (name[len - 1] == 'a' || name[len - 1] == 'A');
++    const Poseidon::DecodedImage img = Poseidon::DecodePAABuffer(file.data(), file.size(), isPaa);
++    if (img.valid() && img.width == _mipmaps[0]._w && img.height == _mipmaps[0]._h)
++        _remipProbe = 1;
++    else
++        LOG_INFO(Graphics, "texsharp: remip skipped for {} (decode {}x{}, header {}x{})", name ? name : "?", img.width,
++                 img.height, _mipmaps[0]._w, _mipmaps[0]._h);
++    return _remipProbe == 1;
++}
++
++bool TextureGL33::UploadRemipped(int levelMin)
++{
++    const int mode = Poseidon::texsharp::g_remip;
++    QIFStream in;
++    GFileServer->Open(in, Name());
++    const int size = in.fail() ? 0 : in.rest();
++    if (size <= 0)
++        return false;
++    std::vector<char> file(static_cast<size_t>(size));
++    in.read(file.data(), size);
++    const char* name = Name();
++    const size_t len = name ? strlen(name) : 0;
++    const bool isPaa = len >= 4 && (name[len - 1] == 'a' || name[len - 1] == 'A');
++    const Poseidon::DecodedImage img = Poseidon::DecodePAABuffer(file.data(), file.size(), isPaa);
++    if (!img.valid() || img.width != _mipmaps[0]._w || img.height != _mipmaps[0]._h)
++    {
++        LOG_WARN(Graphics, "texsharp: remip decode mismatch for {} ({}x{} vs {}x{})", name ? name : "?", img.width,
++                 img.height, _mipmaps[0]._w, _mipmaps[0]._h);
++        return false;
++    }
++    RgbaImage cur;
++    cur.w = img.width;
++    cur.h = img.height;
++    cur.px.resize(img.rgba.size());
++    for (size_t i = 0; i < img.rgba.size(); ++i)
++        cur.px[i] = static_cast<float>(img.rgba[i]);
++
++    const bool cutout = mode >= 3 && GetAlphaClass() == Poseidon::AlphaStats::Cutout;
++    const float ref = 192.0f;
++    const float coverage0 = cutout ? AlphaCoverage(cur, ref, 1.0f) : 0.0f;
++
++    std::vector<uint8_t> bytes;
++    for (int i = 0; i < _nMipmaps; ++i)
++    {
++        if (i > 0)
++        {
++            cur = mode == 1 ? DownsampleBox(cur) : DecimateAxis(DecimateAxis(cur, true), false);
++            if (cutout)
++                PreserveCoverage(cur, ref, coverage0);
++        }
++        if (cur.w != _mipmaps[i]._w || cur.h != _mipmaps[i]._h)
++        {
++            LOG_WARN(Graphics, "texsharp: remip level {} size {}x{} vs {}x{} for {}", i, cur.w, cur.h, _mipmaps[i]._w,
++                     _mipmaps[i]._h, name ? name : "?");
++            return false;
++        }
++        if (i < levelMin)
++            continue;
++        bytes.resize(cur.px.size());
++        for (size_t k = 0; k < cur.px.size(); ++k)
++        {
++            const float v = cur.px[k] + 0.5f;
++            bytes[k] = static_cast<uint8_t>(v < 0.0f ? 0.0f : (v > 255.0f ? 255.0f : v));
++        }
++        glTexSubImage2D(GL_TEXTURE_2D, i - levelMin, 0, 0, cur.w, cur.h, GL_RGBA, GL_UNSIGNED_BYTE, bytes.data());
++    }
++    return true;
++}
++
+ void TextureGL33::InitDesc(TextureDescGL33& desc, int levelMin, bool enableDXT)
+ {
+     memset(&desc, 0, sizeof(desc));
+ 
+-    PacFormat format = UploadFormatForTextureGL33(_mipmaps[levelMin].DstFormat(), _interpolate);
++    PacFormat format = UploadFormat(levelMin);
+     InitGLPixelFormat(desc, format, enableDXT);
+ 
+     desc.w = _mipmaps[levelMin]._w;
+@@ -57,7 +260,7 @@ int TextureGL33::TotalSize(int levelMin) const
+     for (int i = levelMin; i < _nMipmaps; i++)
+     {
+         const PacLevelMem& mip = _mipmaps[i];
+-        totalSize += MipmapSizeGL33(UploadFormatForTextureGL33(_mipmaps[levelMin].DstFormat(), _interpolate), mip._w,
++        totalSize += MipmapSizeGL33(UploadFormat(levelMin), mip._w,
+                                     mip._h);
+     }
+     return totalSize;
+@@ -93,7 +296,19 @@ int TextureGL33::UploadToGPU(SurfaceInfoGL33& surface, int levelMin)
+     // compressed internalFormat trips GL_INVALID_OPERATION (0x0502).
+     // Treat level-min as authoritative; the data buffer for each mip
+     // is the right size for that format (size math below uses it).
+-    const PacFormat sharedFmt = UploadFormatForTextureGL33(_mipmaps[levelMin].DstFormat(), _interpolate);
++    const PacFormat sharedFmt = UploadFormat(levelMin);
++
++    if (Poseidon::texsharp::g_remip > 0 && !_interpolate && sharedFmt == PacARGB8888 &&
++        UploadFormatForTextureGL33(_mipmaps[levelMin].DstFormat(), _interpolate) != PacARGB8888)
++    {
++        // The surface was allocated as RGBA8 for a rebuilt chain; the source
++        // cannot convert into it, so never fall through to the source path.
++        if (!UploadRemipped(levelMin))
++            LOG_ERROR(Graphics, "texsharp: remip upload failed for {} (level {}), texture left blank", Name(),
++                      levelMin);
++        GL33Bind::ActiveUnit(0);
++        return 0;
++    }
+ 
+     for (int i = levelMin; i < _nMipmaps; i++)
+     {
+@@ -201,7 +416,7 @@ int TextureGL33::LoadLevels(int levelMin)
+         TextureDescGL33 desc;
+         InitDesc(desc, levelMin, true);
+ 
+-        PacFormat format = UploadFormatForTextureGL33(_mipmaps[levelMin].DstFormat(), _interpolate);
++        PacFormat format = UploadFormat(levelMin);
+         bank->UseReleased(_surface, desc, format);
+ 
+         if (!_surface.GetTexture())
+@@ -285,7 +500,7 @@ int TextureGL33::LoadSmall()
+     if (levelMin >= _nMipmaps)
+         levelMin = _nMipmaps - 1;
+ 
+-    PacFormat format = UploadFormatForTextureGL33(_mipmaps[levelMin].DstFormat(), _interpolate);
++    PacFormat format = UploadFormat(levelMin);
+     TextureDescGL33 desc;
+     InitDesc(desc, levelMin, false);
+ 

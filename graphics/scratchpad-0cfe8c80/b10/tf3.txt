@@ -1,0 +1,17 @@
+        const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
+        const bool shadows = info.id == Feature::TreeShadows || info.id == Feature::SoftShadows;
+        const bool shade = info.id == Feature::LowSunRig || info.id == Feature::CrownCanopy;
+        const bool sea = info.id == Feature::SeaWaves;
+        const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
+        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || sea || clouds));
+        if (info.landed)
+        {
+            CHECK(std::string_view(info.step) == (perf         ? "A4"
+                                                  : taa        ? "A5"
+                                                  : lightList  ? "A6"
+                                                  : atmosphere ? "A7"
+                                                  : shadows    ? "B1"
+                                                  : shade      ? "B2"
+                                                  : sea        ? "B5"
+                                                  : clouds     ? "B10"
+                                                               : "B11"));

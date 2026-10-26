@@ -1,0 +1,39 @@
+region: per clip mean MID/FINE/SHEET/B60 | FAR mean, max (lag, window) | FAR2 max (lag) | core C mean
+--- farhill
+  orig  MID 0.276 FINE 0.577 SHEET 0.898 B60 1.021 | FAR mean 0.020 max 0.033 at (-3, -5) (w240) | FAR2 max 0.034 at (-14, -4) (w480) | core -0.292
+  f1    MID 0.279 FINE 0.566 SHEET 0.063 B60 0.131 | FAR mean 0.262 max 0.348 at (-12, 0) (w0) | FAR2 max 0.097 at (12, -6) (w60) | core -0.214
+  new   MID 0.160 FINE 0.568 SHEET 0.062 B60 0.071 | FAR mean 0.032 max 0.051 at (-3, -4) (w240) | FAR2 max 0.020 at (8, -1) (w0) | core -0.099
+  van   MID 0.268 FINE 0.760 SHEET 0.063 B60 0.080 | FAR mean 0.020 max 0.033 at (-10, -5) (w120) | FAR2 max 0.027 at (-13, 1) (w300) | core -0.167
+--- farvalley
+  orig  MID 0.273 FINE 0.478 SHEET 0.595 B60 0.860 | FAR mean 0.034 max 0.061 at (-6, 6) (w0) | FAR2 max 0.040 at (1, -6) (w240) | core -0.237
+  f1    MID 0.229 FINE 0.489 SHEET 0.065 B60 0.101 | FAR mean 0.147 max 0.240 at (-12, -1) (w510) | FAR2 max 0.088 at (13, -6) (w480) | core -0.141
+  new   MID 0.137 FINE 0.489 SHEET 0.067 B60 0.075 | FAR mean 0.037 max 0.096 at (10, 4) (w510) | FAR2 max 0.039 at (7, 3) (w0) | core -0.063
+  van   MID 0.120 FINE 0.325 SHEET 0.026 B60 0.037 | FAR mean 0.044 max 0.088 at (6, 3) (w510) | FAR2 max 0.045 at (-5, 1) (w330) | core -0.139
+--- valley
+  orig  MID 0.496 FINE 0.736 SHEET 2.095 B60 2.234 | FAR mean 0.046 max 0.078 at (-7, 6) (w510) | FAR2 max 0.043 at (-14, 5) (w240) | core -0.297
+  f1    MID 0.420 FINE 0.596 SHEET 0.104 B60 0.200 | FAR mean 0.317 max 0.401 at (-11, 0) (w180) | FAR2 max 0.131 at (14, -6) (w30) | core -0.195
+  new   MID 0.192 FINE 0.564 SHEET 0.093 B60 0.105 | FAR mean 0.026 max 0.043 at (7, 6) (w300) | FAR2 max 0.033 at (-12, -1) (w0) | core -0.131
+  van   MID 0.810 FINE 2.496 SHEET 0.084 B60 0.117 | FAR mean 0.052 max 0.114 at (6, 1) (w270) | FAR2 max 0.038 at (-1, -4) (w510) | core -0.227
+--- bay
+  orig  MID 0.430 FINE 0.730 SHEET 0.405 B60 0.802 | FAR mean 0.023 max 0.037 at (-9, 6) (w330) | FAR2 max 0.025 at (-7, 4) (w30) | core -0.259
+  f1    MID 0.335 FINE 0.706 SHEET 0.073 B60 0.125 | FAR mean 0.049 max 0.060 at (-11, 1) (w240) | FAR2 max 0.049 at (14, 1) (w60) | core -0.224
+  new   MID 0.305 FINE 0.701 SHEET 0.071 B60 0.108 | FAR mean 0.029 max 0.050 at (-14, -1) (w180) | FAR2 max 0.075 at (14, 1) (w60) | core -0.197
+  van   MID 0.834 FINE 1.294 SHEET 0.065 B60 0.159 | FAR mean 0.057 max 0.094 at (-14, -3) (w540) | FAR2 max 0.095 at (-14, -2) (w270) | core -0.309
+--- haze
+  orig  MID 0.184 FINE 0.502 SHEET 0.276 B60 0.307 | FAR mean 0.061 max 0.091 at (5, 4) (w360) | FAR2 max 0.061 at (4, -5) (w0) | core -0.186
+  f1    MID 0.177 FINE 0.506 SHEET 0.054 B60 0.073 | FAR mean 0.187 max 0.215 at (-11, -1) (w0) | FAR2 max 0.075 at (10, -6) (w30) | core -0.135
+  new   MID 0.123 FINE 0.500 SHEET 0.048 B60 0.059 | FAR mean 0.006 max 0.085 at (-9, -2) (w60) | FAR2 max 0.024 at (-10, -3) (w30) | core +0.044
+  van   MID 0.026 FINE 0.056 SHEET 0.002 B60 0.000 | FAR mean 0.007 max 0.035 at (3, -5) (w90) | FAR2 max 0.058 at (-14, 0) (w90) | core -0.217
+--- lowmist
+  orig  MID 0.661 FINE 0.986 SHEET 1.657 B60 1.830 | FAR mean 0.038 max 0.058 at (5, -6) (w0) | FAR2 max 0.029 at (9, 6) (w360) | core -0.211
+  f1    MID 0.414 FINE 0.761 SHEET 0.109 B60 0.187 | FAR mean 0.164 max 0.273 at (-12, 0) (w540) | FAR2 max 0.120 at (-14, -4) (w60) | core -0.032
+  new   MID 0.276 FINE 0.709 SHEET 0.120 B60 0.137 | FAR mean -0.060 max 0.065 at (4, -2) (w360) | FAR2 max -0.041 at (0, -4) (w420) | core +0.165
+  van   MID 1.216 FINE 3.672 SHEET 0.130 B60 0.198 | FAR mean 0.024 max 0.100 at (-4, -1) (w90) | FAR2 max 0.037 at (-14, -2) (w450) | core -0.031
+
+Ratios NEW / VANILLA (MID, FINE, B60) and NEW / ORIGINAL B60 per region
+  farhill   MID 0.60  FINE 0.75  B60 0.88  | B60 new/orig 0.069  FARmax new 0.051 van 0.033 f1 0.348
+  farvalley MID 1.14  FINE 1.51  B60 2.03  | B60 new/orig 0.087  FARmax new 0.096 van 0.088 f1 0.240
+  valley    MID 0.24  FINE 0.23  B60 0.90  | B60 new/orig 0.047  FARmax new 0.043 van 0.114 f1 0.401
+  bay       MID 0.37  FINE 0.54  B60 0.68  | B60 new/orig 0.135  FARmax new 0.050 van 0.094 f1 0.060
+  haze      MID 4.78  FINE 8.91  B60 3878.01  | B60 new/orig 0.193  FARmax new 0.085 van 0.035 f1 0.215
+  lowmist   MID 0.23  FINE 0.19  B60 0.69  | B60 new/orig 0.075  FARmax new 0.065 van 0.100 f1 0.273

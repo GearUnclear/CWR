@@ -1,0 +1,37 @@
+graphics: instanced runs no longer share the head's terrain fit
+
+A pre-existing bug in the engine's instancing: in the opaque pass's
+instanced runs, a group of the same bush drew every member with the
+first bush's terrain fit, so members were sheared, floating or sunk on
+their own slope.
+
+Root cause: Scene::DrawObjectsAndShadowsPass1 draws a run of identical
+static shapes as one instanced draw from the head's vertex buffer. For
+land-following shapes Object::Animate refits each ClipLandKeep /
+ClipLandOn vertex onto the terrain under that one object, so every
+member got the head's fit. The grouping predicate never asked
+Object::IsAnimated, the engine's own flag for "Animate changes this
+object's vertices" (land fit, damage, destruction, and for entities
+their animations).
+
+Fix: new header-only InstancedRunRules.hpp holds the grouping rules
+over a POD RunEntry. CanHead = static and not ownVertices; CanJoin =
+the old member test and not ownVertices. SceneDraw fills a RunEntry
+per SortObject and asks IsAnimated(drawLOD) only when the object has
+the head's shape and LOD. Objects that rewrite their own vertices draw
+alone through the stock scalar path, exactly as with instancing off.
+Static shapes without per-object vertices, including skewed forest
+blocks, still batch. Buildings leave a run only when they have
+animations, damage, destruction or land hints (Building::IsAnimated
+goes through Entity::IsAnimated, not EntityAI's always-true override).
+
+No change on Abel today: its street lamps keep instancing off. With a
+research light gate that lets instancing run, the fixed instanced
+frame matches the non-instanced tip exactly on the bush slope (max 1
+level, 0 px > 2), at +430 draws there (823 -> 1,253, still about half
+the non-instanced count).
+
+Tests: test_instanced_run_rules.cpp [scene][instancing] (4 cases, 17
+assertions; 2 cases fail with the old predicate).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

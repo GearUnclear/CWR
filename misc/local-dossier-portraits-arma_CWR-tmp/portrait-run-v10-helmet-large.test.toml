@@ -1,0 +1,6 @@
+binary = "PoseidonGame"
+tags = ["guerrilla", "portrait", "lobo", "headful"]
+mission = "tmp/portrait-lobo.abel"
+timeout = 300
+assert_timeout = 120
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo;tmp/local-dossier-portraits/arma_CWR/tests/fixtures/mods-lobo/@lobofixup", "--width", "2560", "--height", "1440"]

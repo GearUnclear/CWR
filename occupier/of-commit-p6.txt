@@ -1,0 +1,82 @@
+guerrilla: occupier forces phase 6, air operations, town strikes, alarm answers and the landmass rule (OCCUPIER-FORCES.md 3.1, 3.2, 6.5, 7.3, 8.2, 14 "Air")
+
+Air in CounterAttack (CounterAttackOrders.hpp contract: kinds CAKStrike and
+CAKAlarm, air order fields airOrigin / strikeZone / strikePos / alarmZone /
+alarmPos, events CAOpAirborne / CAOpLanded / CAOpStruck / CAOpAlarmAnswered;
+new CounterAttackAir.cpp): a helicopter insertion flies the straight line
+from its airfield or the off-map edge (forcesOffMapEdge, 1500 m beyond
+the map), is born airborne 100 m up at the first point the altitude gate
+rates hidden (never within 250 m of the target, D20), lands on an LZ picked
+away from the reported sightings (D9), unloads into the record's live squad,
+and the airframe goes home to be removed crew first where unseen (for
+aircraft "unseen" also means beyond the perception band in 3D;
+departTimeout 900 s is the backstop); a touchdown over 100 m off re-plans
+once, then cancels unseen; no LZ or no airframe refunds and goes on foot.
+Birth chain step 4: a funded ground operation with no unseen birth point
+re-plans as an insertion when a transport helicopter is offered and paid.
+Strikes (D17): abstract by clock, live in the bubble as an OccupierAir
+sortie for forcesSortieTime with the limited reveal (sightings under 60 s,
+accuracy 0.5, never the player); CAOpStruck once. Alarm answers (D4, 8.2):
+the record travels to alarmPos, holds until the zone drops below RED for
+60 s, joins the garrison. ForcePackages offers an air package only when
+the faction authors its class (prices 10 / 18 / 22, x1.5 off map, 0.8 x
+maxSpeed; the transport carries min(12, transportSoldier), strike
+airframes carry nobody); descriptors authored for EAST, WEST, IDF, Egypt,
+Syria and Jordan. OccupierAir: seated crew leave before deletion, the pad
+goes with the hull. Persistence of the air fields, AirHomes and the
+OccupierAir records, with a mid-flight save resumed (air_save_reload.seq).
+
+Director (OccupierForces): ChooseWithAir offers the transport helicopter
+from the nearest occupier-held AIRFIELD, else off-map; a strike is bought
+only STRONG with a jet or attack helicopter offered, on an URGENT held
+town with knownFighters >= 3 outside its strike window, or as the opener
+of a base or HQ assault (7.3); AnswerAlarms answers a RED zone with a
+CAKAlarm order (minimum 4, one at a time, no token, also while DORMANT;
+cooldowns apply). Town strikes (D21): ZoneRegistry::ApplyStrike cuts
+support and standing by 40 in the struck town (heat +15, struckUntil =
+now + 1200 s) and by 10 in every town within 2 km, floors at 0; the
+townStruck event drives the civilians.sqs panic and economy.sqs pays half
+Roubles and no manpower while struck; D18 unchanged. Legacy QRF (D20):
+the block saves format 6; an older save sets legacySave and gmLegacyQrf
+is true, so qrf.sqs keeps fielding its script QRF there and nowhere else.
+gmOccupierForces slots 24..28, gmForcesForce "strike" / "strikeEffects" /
+"alarm" / "legacySave", gmZoneStruck, gmCounterAttackLaunchFunded air and
+alarm forms, gmCounterAttacks 24..28.
+
+Landmass (RoadRoute): Malden's Southeast Compound stands on its own
+island (about 800 m of deep sea to Le Port; the earlier join leg crossed
+the sea). RoadRoute::Landmass labels the 50 m geography cells joined over
+land (a road over water is a bridge); the join lands only on the source's
+landmass; gmLandmass and gmGeoGrid. A ground force never comes from, and
+a Traffic vehicle never drives to, a base on another landmass (PickSource,
+Resource with an INFO line, BuildSources, the wave fallback, Traffic
+PickDest); such a base is an air-only source (PackageSource::airOnly) and
+the birth chain re-plans as an insertion at once when no other base shares
+the target's landmass. The offscreen fixture's SEBase moves to the Le Port
+quay for that reason. The W and S Compound gates are closed wire gates.
+
+Showcase: chapter 6 and the human "alert" case accept a native ALARM
+operation as the answer (legacy GM_QRF_ACTIVE branch kept), narration and
+README updated.
+
+Accepted deviations: no attack-helicopter escort for insertions; a live
+alarm answer adopts its whole squad; strikes are live only in the bubble;
+wave strikes buy no air opener; an HQ strike with no report aims at HqPos;
+a base-opener strike cuts only the 2 km ring; the air re-plan's helicopter
+price bypasses the director ledger. Open: the ZoneRegistry lint does not
+check the forces* keys; the faction-key docs; a slow native answer could
+contest a later showcase capture chapter.
+
+Tests: test_counter_attack, test_occupier_air, test_force_packages,
+test_occupier_forces (10 cases), test_zone_registry (4 cases); tri
+guerrilla_forces_air_op, guerrilla_forces_air_save_reload.seq,
+guerrilla_forces_town_strike, guerrilla_forces_alarm_answer (new),
+guerrilla_forces_watched_route (landmasses, no road route, re-source to
+the Airfield), guerrilla_forces_pool_off (29 slots); contract rows 7, 8,
+13, 17, 18 and the two key rows. Verified per agent: 6A on agent67-rwdi
+(662 cases over the guerrilla / counterattack / occupierforces / packages
+/ save / air tags; 10/11 then 4/4 after the fixture move; 24/25 earlier),
+6B on agent2-rwdi ([guerrilla] 648; new tests 2/2; regression 23/23),
+showcase on of2 (showcase_smoke 1/1, human suite 1/1).
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

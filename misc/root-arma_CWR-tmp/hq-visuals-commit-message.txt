@@ -1,0 +1,34 @@
+Give headquarters visible stock scenery and campaign-owned caches
+
+HQ caches previously used an invisible WeaponHolder. Place a map desk and
+single ammunition crate inside suitable buildings, or an open tent and
+camouflaged crate stack outdoors. Reuse Classic models through dedicated
+empty cache classes so campaign scripts control supplies without stock
+ammo-box loadouts or automatic refills.
+
+Validate interior floor support, overhead cover, wall clearance and spacing
+before choosing desk/cache positions. Scan terrain buildings as well as the
+world building list so suitable houses remain discoverable after reload.
+
+Persist the scenery and layout, remove old props when moving headquarters,
+and transfer weapons and actual magazine objects when the cache class
+changes. Upgrade legacy invisible caches without increasing move count or
+losing partially used magazines. Expose the desk/tent through gmHqProp.
+
+Install guerrilla-hq.hpp idempotently alongside the faction library while
+preserving package config. Document behavior, acceptance evidence and the
+roadmap update. The small overlap by the radio is part of the stock desk
+model; no base-game model files are modified.
+
+Validation:
+- Clang RelWithDebInfo PoseidonGame and PoseidonTests builds passed.
+- Base unit tests: 67 assertions across 8 cases passed.
+- Runtime setup/installer regression passed.
+- HQ visuals save/move/reload sequence, market reference mission and native
+  save/reload integration suites passed together (3/3).
+- In-engine indoor/outdoor previews inspected; synthetic legacy-save
+  upgrade preserved two AK47s, three magazines and a seven-round magazine.
+- git diff --check passed.
+
+An earlier market run timed out opening the vehicle dealer menu; the final
+combined run passed. Multiplayer and LoBo placement were not exercised.

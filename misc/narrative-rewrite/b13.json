@@ -1,0 +1,10 @@
+{
+  "id": "b13",
+  "bank": "kBio1Friendly",
+  "variant": 0,
+  "text": "{Name} taught arithmetic at a school near {Place}. When new restrictions closed the school, the teacher visited pupils at home and continued the lessons from where each class had stopped.",
+  "word_count": 30,
+  "self_review": "An arithmetic teacher continued lessons in pupils' homes after restrictions closed the school.",
+  "source_pattern": "The supplied Gobetti account documents teaching and later underground organizing; the other resistance research documents bans reshaping ordinary work.",
+  "fictional_changes": "School closure and home lessons are plausible inventions. The supplied research does not establish this exact teaching practice; no historical source is claimed for it."
+}

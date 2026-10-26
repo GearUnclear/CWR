@@ -1,0 +1,226 @@
+graphics: calm water and wet streets reflect what is on screen
+
+What the player sees: a calm bay mirrors the boat under itself and the
+hill behind it, broken up by the sea's own waves and by small ripples
+that move with the sea clock. In the rain, roads and bare ground turn
+dark and wet and take a soft, streaked reflection of the vehicles,
+houses and sky; level hollows hold puddles that mirror the houses and
+lamp posts sharply; grass only darkens a little. Nothing changes where
+nothing is reflected: the open sunset sea keeps its colour (its mean
+over the water is the same to 0.1 level with the switch on and off),
+so there is no pale lilac wash, and a dry noon field is untouched (the
+gate holds the trace off). Far ground that the fog has swallowed stays
+the fog colour, so fogged trees and hills look as they did. A vehicle's
+reflection in a wet road is whole: its windows reflect as the window
+looks, not as a pale box of sky. At the bay hero the boat's reflection
+goes from (105, 116, 123) to (45, 48, 51) and the band where the hill
+is mirrored from (111, 123, 129) to (110, 108, 109); the wet ground's
+mean changes by -2 to -15 levels with puddles and sheen in it (the day
+street's road -2.3, the dusk street's road -14.9, the rain field -3.7).
+
+How it works: every world draw already writes the stencil (REPLACE 0)
+for Classic's projected-shadow exclusion, which counts in the low bits.
+While the switch is on, the remastered world pass writes a surface tag
+in the top bits instead (ApplyPassState asks SsrStencilForDraw of
+Graphics/Remaster/ScreenReflections, from the draw's descriptor): bits
+7 and 6 the surface (terrain 0x40 for the land's detail and grass
+layers, water 0x80 for the sea's water program, road 0xC0 for
+on-surface draws), bit 5 a cover flag for blended draws that write
+depth (a vehicle's windows, glass, signs, blended cards; alpha-tested
+bushes and trees are opaque and clear the tag). An opaque draw clears
+the tag, a draw without a depth write keeps it (it writes the low five
+bits only), and the projected shadows compare the low five bits
+(GLDepthStencilState StencilTag on every depth-stencil bundle; stencil
+clears write every bit first). Two post stages run before bloom, so
+reflected highlights bloom: TagReadout reads the tags out of the
+resolved stencil into an R8 texture and measures the screen share of
+water and wettable ground on a 32 x 18 grid, read back through a ring
+of three pixel-pack buffers a few frames later (never waited on) for
+the frame gate; Ssr blits the resolved frame into a mip chain (the
+cone's blur source), traces one ray per half-resolution texel over
+A3's half-resolution linear depth (48 steps at most, a
+perspective-correct overlap test with a distance-scaled thickness, a
+5-step refine; a ray that slips behind a surface within 3 m of its
+start sees that surface's unlit side; sky found after a stretch behind
+a surface is trusted less), gathers rough reflections sideways over the
+width of each ray's cone at what it reflects (a tap per half-resolution
+texel, up to 24 a side, same surface, similar depth, taps of a narrower
+spread weighted down so puddle edges stay sharp: no hard-edged box
+under a vehicle), and lays the result on the full-resolution frame with
+a depth- and surface-aware upsample into its own target, which bloom,
+the shafts and the composite then read. The reflection fades with the
+world's own distance fog: BeginPass copies the world pass's fog start
+and range, and the trace uses the world vertex shader's formula, so a
+fully fogged pixel is left as the fog colour. A ray from the ground
+ignores its own plane (a candidate within 0.03 m + 0.004 m per metre of
+depth of the start's plane): the half-resolution depth's nearest
+samples could put a road just in front of a grazing ray, a regular
+pattern of dark dots on wet roads. A ray that meets a covered panel
+goes on and lays the panel over what it finds beyond, as much as the
+panel hides: fully when the first uncovered texel after it stands in
+front of the ray (the panel is set in something solid, a window in a
+canvas: the ray would meet the vehicle's inside) or the march ends on
+it, otherwise by how far the panel's colour is from that texel, the
+background next to it, so a card's transparent parts let the ray
+through (no box under a bush). Reflections are read along the screen
+vertical (a streak toward the viewer) with taps no farther apart than
+the mip level's footprint, so no ladder of copies on water.
+On water the trace recomputes the sea program's sky in the reflected
+direction (skyReflection with its fog tint, the mean sky weight and its
+far fade), estimates that sky's share of the pixel's light from the
+blurred sea, and where a ray meets something swaps that share for the
+reflection per channel: lin * ((1 - x) + x R / S), x = the share times
+ssrWater, capped at 0.95. Rays that see sky or leave the frame leave
+the sea as the sea program drew it. Ripples (four octaves of drifting
+noise) move the mirror image by re-projecting the rippled direction at
+the traced distance, and the slope finer than a pixel stretches it
+vertically. On the ground: Fresnel with a roughness cap, wet roads and
+bare ground darken (0.8) and reflect with a 0.10 and 0.22 rad cone,
+puddles (footprint-filtered value noise, level ground only, roads at
+0.61, bare ground at 0.67, none on grass, faded out from 150 to 400 m)
+are dark mirrors with rain rings; only a ray going up falls back to
+the sky when the reflection is unknown, and that sky is the frame's
+own open sky above where it points, else the sky table's. Under TAA
+the march start turns every frame and A5's history averages it.
+
+Switch and gates: ssr (landed, step B6, GPU sections tags and ssr).
+Gated on while water or wet ground covers more than 1% of the screen
+(the ground counts only while it is wet: ssrWet when it forces a
+value, else the rain density, until B7's wetness state); a share older
+than 30 frames counts as not measured and leaves the gate on; while
+the gate is off the readout runs every 8th frame only. Off in Classic,
+night vision, portraits and 3D previews (no tags), in vehicle
+interiors (no world depth) and under optics (the trace). Water
+reflections need the sea program (seaWaves on and gated on). Sub-knobs
+ssrWater 1.5 (the share of the sea's sky light the reflection takes,
+as a multiple of the estimate) and ssrWet -1 (the weather; 0 to 1
+forces it). Debug views 7 (the tags) and 8 (the reflection alone).
+No LitConstants slot and no world texture unit: the stages use
+kPostUnits and the sky table on unit 8. Off (ssr=0) writes REPLACE 0
+into every stencil bit and plans the post stages of before.
+
+From the prototype: kept the stencil tags in the top bits with the
+shadow test on the low bits, the readout, the mip cone, the march and
+its miss handling (the hidden side under a vehicle, the fallback to
+sky only for rays going up), water as one mirror trace with ripple
+re-projection and vertical stretch, the footprint-filtered puddles on
+level roads and bare ground and none on grass, the rough Fresnel.
+Rewritten: the tag table (surface plus a cover bit instead of vehicle
+and glossy classes) from the draw descriptor, with no global class
+flag and no extra FlushQueues; the trace at half resolution with an
+upsample; frame edges fade the reflection over 6% instead of the
+edge-hit rules; the bush-card boxes are the covered panels' opacity
+rule (the plan's "treat low-coverage hits as misses", with the
+coverage read from the frame: no blended bush card is in the Abel or
+Eden views shot here, the research's clutter bush is alpha-tested in
+this build, so that case rests on the tests); the water composite
+replaces the sea's sky share instead of blending over the frame (the
+pale sunset sea); the ripples at 0.35 of the research's slopes (its
+calm setting: full slopes smeared the hero hill into a brown band);
+the rough blur, the frame-sky fallback, the own-plane test and the
+streak's tap spacing are new. Dropped: ssrGlossy paint reflections (a
+null result) and their classes, the debug logs in TransportCore, the
+queue and the vertex buffer, ssrDebug (now debug views), the ssrWave
+and ssrRough knobs.
+
+Cost (RTX 4060 Ti, 1080p, scale 1.0, 4x MSAA, a single reading with
+other lanes' games running): the post section on minus off +0.47 to
++0.57 ms at the bay and the wet street, +1.09 ms on the rain field;
+the ssr section 0.40 to 0.92 ms and the tags 0.22 to 0.25 ms (the
+round before the review fixes read 0.32 to 0.66 ms for the ssr section
+on the same views, 0.51 ms on the rain field: the per-texel blur on
+wide wet ground is the likely difference, within the noise of a
+contended GPU). The plan's row is 1 to 3 ms; no quiet-GPU reading and
+no RTX 3060.
+
+Tests: new test_screen_reflections.cpp (14 cases: the tag code table
+clear of the shadow counter, each draw's stencil state, a pixel's
+stencil through a world pass, the march's CPU mirror on a synthetic
+depth row with the covered panel it keeps and the window set in a
+solid body, a grazing ray that does not meet its own ground, the
+panels' opacity, the streak's tap spacing, the edge fade, the rough
+blur's CPU mirror and a texel-scale pattern it averages out, the water
+composite, the switch and its sub-knobs, the shaders' constants and
+lines against the C++ mirrors, the backend's tag, blur and fog wiring:
+the trace's fog is the world pass's copy, never the per-draw flag), a
+post-stage case (the readout runs on the tags, the trace on the gate
+and with the linear depth), the SSR gate case rewritten for the
+measured shares and wetness; the landed-switch, sub-knob, linear depth
+reader and post shader counts updated. Unit gate tags of plan section
+8 item 3 plus [ssr],[PostStages],[FeatureSwitches],[FeatureGates],
+[SeaWaves],[build-descriptor],[atmosphere],[TemporalAA],
+[TerrainDetail],[SpecSplit]: 594/594. Mutations turn their cases red:
+the twelve of the first round, and eleven of the review fixes (the
+trace's fog from the last draw's flag, BeginPass not copying the
+world's fog, the march mirror and the shader without the plane test,
+panels passed without being kept, panels always opaque, a window in a
+solid body counted as free-standing in the mirror and in the shader,
+the ground trace not laying the panel over, the blur back to 8 fixed
+taps, the streak's level from the horizontal spread only).
+
+In game (tmp/integration/B6 of the graphics-remaster worktree,
+gitignored; the images on E:\gr-lanes\gr-B6\evidence): the base
+build's 20261018-083927-before and 20261018-162922pin-base; the round
+before the review 20261018-163649r6-new; the review build
+20261018-173242rev2-new (the pinned prefix, the ssr hero and the sunset
+sea, the dusk and day town in rain, a rain field, a dry noon field:
+off, on, tags, reflection alone; 16 frames off and on at the wet
+street by day, the sim clock 1/30 s per frame, TAA on; one timing
+round) and its Eden view (a wet field with a jeep and a clutter bush);
+smoke_abel 20261018-173741rev2-smoke 1/1, KHR_debug ids 131154, 131169
+and 131218 only, as in the base runs. Off equals before (pinned clock
+and fixed step, the same place in the sequence): the hero 11,560 pixels
+over 2 levels against the previous round's off and 11,160 against the
+base build's, where the base build's own repeat differs in 184,007;
+the sunset sea identical to the previous round's off (max 1 level) and
+1,378 against the base shot of the same sea state; the dry low-sun set
+and dry noon 15,837 and 49,600 against their repeat of 30,095 and
+120,999. Fog: of the rain field's fog-coloured pixels 13,275 of 76,526
+change by more than 3 levels with the switch on, against 15,387 that
+differ between two runs' off shots (rain), mean change +0.01 level (it
+was 44,142 at -4.56 before the fix); the day street 1,568 of 7,713
+against 1,578, the dusk street 113 of 1,872 at -0.28 (1,403 at -8.54
+before). The jeep: where its rear window is mirrored (x 955 to 1035,
+y 690 to 725) the wet road reads 71, 72, 73, next to the streak above
+it at 67, 68, 69 (before the fix 87, 88, 89, a pale box; the dry road
+there 77, 78, 79). Dots: on the open road between the puddle and the
+jeep the reflection view's dark dots fell from 177 to 24, the on frame
+has 10 against the dry frame's own road texture at 20, and the 16
+motion frames show 6 to 17 a frame with the switch on, 16 to 26 off.
+Motion: the frame-to-frame change on the street's 99th percentile is
+3.8 levels on, 3.0 off (rain rings and puddles), median 1 level both.
+
+Known risks: the hero hill's reflection is a grey band (110, 108, 109
+where it was measured) on the blue-grey sea; in the round before the
+review ssrWater 2.5 showed the hill more clearly but warmer, toward
+khaki, so the owner should judge the default. Wet ground turns darker;
+the dusk town reads darker except for its puddles, which show the base
+build's crimson rain sky and read as red pools.
+Puddles take the rain rings' slope at a grazing angle, so their
+content changes with time (dark in one still, pale with dark flecks in
+the motion frames). The covered-panel rule judges a card's opacity from
+the colour of the background next to it: a card in front of a
+background of its own colour lets more through, and a free-standing
+card that differs from its background reflects whole; no blended card
+was in the views shot. Reflections of a vehicle's windows show the
+window as the camera sees it (what lies through it), not the vehicle's
+inside. The rough blur is horizontal only; at a vehicle's wheels the
+outline stays sharp by design and the shadow's own edge still shows
+under it; the own-plane test leaves the lowest few centimetres of an
+object standing on the wet ground (0.05 m at 5 m, 0.09 m at 15 m) to
+the under-vehicle handling. Puddles are
+value noise on level ground, may read procedural, and the wetness is
+the rain density (no drying) until B7. SSR shows only what is on
+screen and fades at the frame's edges; particles and rain drawn over
+wet ground get the reflection under them. Nights get nothing (lamp
+streaks are B7's). With TAA off the per-frame march turn is not
+averaged (not looked at). The Eden view's shots started while the view
+was still loading (UNSETTLED); Sinai with @LoBo, smoke_eden and
+smoke_sinai_lobo are unverified, and the cost was read under
+contention. The lane sits on e91b3f3; applied to 7b7e3e6 (B2, B9 and
+B10 landed since) ten files conflicted in the round before the review:
+the registry rows and sub-knobs, LightingTuning, UpdateFeatureGates,
+the post shader table and its declarations, the test list, the
+landed-switch, post-stage and shader count cases, and the plan notes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

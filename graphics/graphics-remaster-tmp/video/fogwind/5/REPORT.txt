@@ -1,0 +1,150 @@
+AGENT 5 REPORT (fogwind swarm): fix the fog's temporal accumulation
+=====================================================================
+2026-10-23, agent 5 of 8. Folder: graphics-remaster/tmp/video/fogwind/5/
+
+VERDICT
+-------
+MEETS THE BAR (stepped static, stepped moving, and real time at 60 fps through agent 1's recorder),
+at the cost of the shipped shader (one tap per cell).
+Candidate "c8b" (shaders/c8b/) = a STRICTLY PERIODIC 8-frame jitter cycle, interleaved so every
+2x2x2 block of cells (x, y, slice parity) holds every place of the cycle in every frame, with the
+history read at the cell CENTRE through a fixed tetrahedral blur (+-0.25 cell/slice; agent 2's
+Act25 kernel, the mean of what the old jittered read did at random).
+  (a) flicker: at the frozen-jitter floor. Static band 0.034 (frozen 0.033, d91 0.058, original
+      0.456); moving lowd2 valley 0.081 (vanilla 0.057, q4 0.080; original 1.621).
+  (b) motion: WIND 0.002-0.006 in every region, rho_off <= 0.034 (bar < 0.08), static and moving;
+      in play (agent 1, rt60 and held) max rho_off 0.026, TRAVEL 0.02 (fable-2's check). x-t RESID
+      strips flat. Nothing can travel by construction: no residual slower than 7.5 Hz, and a
+      2-periodic pattern can only stand.
+  (c) grain: static valley mid 0.050 = floor; in play held valley boil/slow 0.059/0.045 = the 4-tap
+      floor (q4 0.061/0.049; Act25 0.080/0.065; Ac 2x; d91 0.422/0.321). Agent 1's spectrum: c8b adds
+      a little at 1/8 cycle per frame (valley 4.2 vs q4 2.4, inside an engine-wide 8-frame cadence
+      every run shows) with a boil equal to q4's: no visible 7.5 Hz.
+  (d) look: = the original. In play held valley 128.0 / farhill 115.7 (original 128.1 / 115.9);
+      stepped moving (mist3) valley +0.3/+0.5/+0.6, whole-frame |d| 0.147, p99 0.93; stepped static
+      valley +0.5/+0.7/+0.8 (d91 +2.4/+2.7/+2.8).
+  AI link untouched: the medium (fogMediumAt, ComputeFogMedium, Target.cpp) is not changed; only
+  where the renderer samples each cell and how its history is read.
+Needs a small C++ change (pass seq & 7 as a uniform) plus the shader change. Reference patch:
+patch/c8_production.diff (NOT applied; its shader assembled = shaders/prodb, compile-checked on the
+trailer build). The probes used a shader-only prototype that keeps the frame counter in the sign
+bits of the injection volume (psFogIntegrate reads abs()); do not ship that hack.
+
+WHY THE TIME AXIS (the mechanism; tools/model5.py)
+-------------------------------------------------
+Every cell's offset followed the golden-ratio sequence j(t) = fract(0.618 t). Its sawtooth
+harmonics alias: harmonic m sits at |m*0.382 - round| cycles per frame, so the Fibonacci harmonics
+(5, 8, 13, 21, 34) land at 5.4, 3.3, 2.0, 1.3, 0.8 Hz at 60 fps, and the EMA history (share 0.12)
+passes those slow parts with gain 0.2-0.8. That slow residual is the whole problem:
+  - frame-wide offset: the slow parts have one phase over whole regions -> the sheet pumps;
+  - d91a08e0 adds an IGN offset per cell, and IGN is linear in the cell index (+0.556 phase per cell
+    to the right), so each slow harmonic becomes a plane wave with a slowly advancing phase -> it
+    travels, about a cell per render (agent 1, fable-2): the WIND;
+  - a white per-cell hash (agent 2's A/Ac) stops the travel but keeps the slow parts in place:
+    a slow in-place boil (Ac 2x the floor in play).
+Model (thin mist layer in 10% of a slice, EMA 0.12, centre read), share of the residual's power
+below 3 Hz: frame-wide 0.27, IGN 0.27, white hash 0.27, strict 8-cycle 0.000. A per-cell offset can
+only re-phase the slow parts of a quasi-periodic sequence; a periodic sequence has none. Agent 6's
+centre read (the shipped read at the jittered point is a leaky sum, 8.3x) shrinks whatever is left.
+
+THE CANDIDATE (tools/assemble5.py builds every variant from the engine's raw strings)
+-------------------------------------------------------------------------------------
+  depth: place = (cycle + (x&1) + 2(y&1) + 4(slice&1)) & 7, offset = (vdc[place] + sub) / 8,
+         vdc = 0 4 2 6 1 5 3 7 (van der Corput: little energy at the lowest harmonic),
+         sub = a static white hash of (cell, slice), so neighbouring cells use different 8-point
+         sets (static, cannot move).
+  xy:    placeXY = (cycle + 2((x&1) + 2(y&1))) & 7 on the 8-point lattice ((i+.5)/8, ((3i&7)+.5)/8).
+  history: reprojected at the cell centre, read through 4 fixed tetrahedral trilinear taps.
+  Variants run: c8 (centre read, no blur), c8b (+-0.25, RECOMMENDED), c8h (+-0.125), c8nh (no
+  history: debug proof that the counter advances), prod / prodb (the reference patch's
+  uniform-driven shader: compile checks). Built, not run: c8a (far share 0.05), c8z (no sub
+  offset), c8t / c8at (+ agent 6's display tent), gcr (d91 + centre read).
+
+NUMBERS (agent 1's kit fogmotion.py, regions bay/valley/farhill/haze; mkv; --from 15)
+-------------------------------------------------------------------------------------
+STATIC, camera held at the frame 328 pose (fog1_static; references: mist/3 static runs, same pose):
+                 band   WIND b/v/f/h              mid valley  fine valley  look valley vs original (R/G/B)
+  original       0.456  0.011/0.040/0.000/0.009   0.629       0.969        0 (128.1)
+  d91 per-cell   0.058  0.055/0.167/0.107/0.056   0.494       0.514        +2.4/+2.7/+2.8
+  frozen jitter  0.033  0.002/0.001/0.001/0.001   0.050       0.235        -2.7 (and curtains)
+  c8             0.033  0.003/0.001/0.001/0.001   0.048       0.237        -1.5/-2.1/-2.4
+  c8b            0.034  0.002/0.002/0.001/0.001   0.050       0.228        +0.5/+0.7/+0.8
+  Churn, mean |frame diff| in haze_l/bay/farhill boxes (tools/churn.py), frames 15-120:
+    c8 0.070/0.123/0.061 = frozen 0.066/0.120/0.057; d91 0.246/0.264/0.140; original 0.635/0.862/0.303.
+  Right after the cut (frames 1-15, the history starting at the teleport):
+    c8 0.43/0.38/0.29 = frozen 0.41/0.37/0.27; d91 0.52/0.45/0.34; original 0.84/1.02/0.49.
+  Counter proof: c8nh (no history) churns 0.26/0.39 vs frozen 0.074/0.126, so the cycle advances
+  every render; with the history the churn drops to the floor.
+MOVING, the clip's real pan, frames 285-389 (fog1_moving, clean single runs):
+                 WIND b/v/f/h/slope              max rho_off  lowd2 valley  mid valley  band(mkv)
+  vanilla        0.017/0.007/0.002/0.007/0.012   0.048        0.057         0.294       0.102
+  original       0.009/0.025/0.001/0.007/0.003   0.037        1.621         0.667       0.522
+  d91 per-cell   0.047/0.123/0.078/0.035/0.021   0.294        0.117         0.463       0.086
+  frozen (move)  0.012/0.023/0.007/0.005/0.003   0.146        0.072         0.159       0.076
+  c8             0.007/0.003/0.002/0.004/0.003   0.038        0.067         0.132       0.077
+  c8b            0.006/0.004/0.003/0.003/0.002   0.034        0.081         0.122       0.081
+  c8h            0.006/0.005/0.002/0.004/0.003   0.039        0.070         0.125       0.078
+  Curtains (agent 1 curtain.py, screen-locked time mean): c8 lat12 0.6-0.7 (no cell grid), streak
+  0.124-0.245 = frozen/q4 (original 0.102-0.223).
+LOOK in motion, like for like on mist3_moving (agent 2 lookdiff.py, time means vs the original):
+  c8b  valley +0.32/+0.49/+0.56, farhill +0.25..+0.43, bay +0.1..+0.2; whole-frame |d| 0.147, p99 0.93
+  c8h  valley -0.28/-0.37/-0.46, farhill -0.1..-0.2, bay 0.0;          whole-frame |d| 0.133, p99 0.87
+  Act25 (agent 2) +0.3..+0.5, |d| 0.16 / p99 1.11; d91 +2.1..+2.4, |d| 0.41 / p99 3.42.
+  (fog1_moving differs from the mist3 references by ~1 code whole-frame: exposure and soldiers, so
+  fog1 looks are compared only among themselves. Both mist3 runs of mine had a tri retry, see
+  RISKS: their means stand, their flicker numbers are not used.)
+REAL TIME 60 fps (agent 1, mist-1 recorder = d91 build + recorder, c8b override, rt_c8b.txt):
+  held camera valley boil/slow 0.059/0.045, farhill 0.050/0.039, max rho_off 0.026; pan max
+  rho_off 0.026, bay lowd2 0.063 (pre-d91 0.696); look in play valley 128.0 (original 128.1).
+  fable-2 (independent estimator): c8b held MID/LOW/SLOW 0.035/0.021/0.032 = frozen floor, TRAVEL
+  0.02; pan TRAVEL 0.02, WIND 0.002; by eye flat grey (fable-2/out/cmp_rtst_f100.png).
+PINE (agent 3's look_probe_fog3_pine_static, pinemotion.py regions): c8 = Act25 = d91 build within
+  0.01-0.03 in every region (foliage motion dominates; agent 3 ruled the probe out as a test bed).
+COST: one fogCell per cell as before; adds a hash, a table read, one centre reprojection and 3
+  extra trilinear history taps per cell and slice; 3 C++ lines. Contended GPU air-stage medians:
+  c8 moving 3.10 ms vs d91 3.10 ms (no measurable difference); idle-machine timing still due.
+
+BY EYE (look/)
+-------------
+  look/static_f50_full.png, static_f50_ridge.png, static_f50_zoom.png: d91 / c8 / frozen / original
+    at the same shot: the same haze, mist and sun; frozen shows vertical streaks in the haze at 2x,
+    c8 does not.
+  look/xt_static/xt_resid.png (time down, RESID x16): c8 and c8b flat grey (only the animated
+    soldiers' columns); d91 slanted streaks (the wind); original horizontal stripes (the pump).
+  look/xt_moving/xt_resid_zoom.png: c8 flat except the pan's own edge lines; d91 fine slanted
+    hatching; original stripes. look/xt_moving/resid_f40.png (camera-compensated diff, 2x):
+    c8 = encode salt only, d91 = cell-size blotches, original = the whole-land sheet.
+  look/xt_*/crop2x.mp4 and resid2x.mp4: 60 fps crops (c8 / d91 / original stacked) for the lead.
+  The far-shore dash under the sun every ~27 frames is in every centre-read candidate and in d91
+  (agents 6/7: a pan-phase / ring item), not from the cycle.
+
+RISKS AND OPEN POINTS
+---------------------
+  - Needs C++ (the cycle uniform) and so the lead's rebuild; the sign-bit counter is a prototype
+    only. The unit test [remaster][fog][Shaders] pins the d91 strings (fogCellNoise, g_cellJitter)
+    and must be updated with the shader; a C++ mirror test could assert that every 2x2x2 block
+    covers all 8 places in every frame and that the per-cell input repeats with period 8.
+  - Frame-rate dependence: at 60 fps the fundamental is 7.5 Hz; at 20 fps it is 2.5 Hz. The
+    pattern still stands (cannot travel) and is at the floor at 60 fps, but low-fps play is
+    untested.
+  - Same class as the other passing candidates (q2b, S2z, t4wb, Act25): on these probes they tie;
+    c8b's specific property is that no residual component below 7.5 Hz can exist at any cadence
+    (play or the 7-10 renders per captured shot), with one tap per cell. The shader-only rivals
+    avoid the C++ change.
+  - Process: a killed queue of mine kept running (TaskStop stopped only the parent shell), so for
+    about 12 minutes two of my games shared RemasterUD-fog-5. The runs m3moving-c8h, static-c8h and
+    m3moving-c8b each had a tri retry and mixed two attempts' frames: their region means stand,
+    their flicker numbers are not used in this report. Everything in the tables above is from clean
+    single runs (or agent 1's recorder).
+
+FILES (all under graphics-remaster/tmp/video/fogwind/5/)
+--------------------------------------------------------
+  shaders/c8b/psFogInject.glsl + psFogIntegrate.glsl  the recommended prototype (sign-bit counter)
+  patch/c8_production.diff  reference landing patch (EngineGL33_PostFog.cpp: seq & 7 in fogDepth.w,
+                            Fract removed; EngineGL33_PostFogShaders.cpp: the cycle, centre read,
+                            blur); patch/mkpatch.py regenerates it from patch/a copies.
+  shaders/prodb/            that patch's assembled psFogInject (compile check s40-prodb)
+  tools/assemble5.py, model5.py, churn.py, lookcmp.py, gen_probe_fog5.py
+  runs/<tag>/               mkv, motion.txt, status, game logs (static-c8, static-c8b, moving-c8,
+                            moving-c8b, moving-c8h, s40-c8nh, s40-prodcompile, pine-c8, ...)
+  look/                     the images and crops named above

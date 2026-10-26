@@ -1,0 +1,32 @@
+| view | mode | rounds | GPU frame min | frame median | world min | world median |
+|---|---|---|---|---|---|---|
+| forest_edge_golden | classic | 4 | 4.17 | 5.37 | 4.04 | 5.25 |
+| forest_edge_golden | fine10 | 4 | 21.14 | 26.71 | 20.74 | 26.20 |
+| forest_edge_golden | fine11 | 4 | 18.40 | 19.45 | 18.00 | 19.02 |
+| forest_edge_golden | fine12 | 4 | 16.29 | 22.28 | 15.89 | 21.86 |
+| forest_edge_golden | remastered | 4 | 7.05 | 7.45 | 6.57 | 6.92 |
+| forest_edge_golden | sun8 | 4 | 11.92 | 24.78 | 11.53 | 24.35 |
+| hill_0700 | classic | 4 | 3.94 | 4.51 | 3.86 | 4.43 |
+| hill_0700 | fine10 | 4 | 10.56 | 12.39 | 9.92 | 11.88 |
+| hill_0700 | fine11 | 4 | 14.14 | 23.86 | 13.44 | 23.00 |
+| hill_0700 | fine12 | 4 | 10.22 | 10.84 | 9.59 | 10.25 |
+| hill_0700 | remastered | 4 | 5.20 | 5.76 | 4.65 | 5.26 |
+| hill_0700 | sun8 | 4 | 10.79 | 11.61 | 10.19 | 10.98 |
+| hill_1730 | classic | 4 | 13.59 | 29.59 | 13.51 | 29.51 |
+| hill_1730 | fine10 | 4 | 21.65 | 22.83 | 21.06 | 22.02 |
+| hill_1730 | fine11 | 4 | 22.73 | 24.98 | 21.69 | 24.17 |
+| hill_1730 | fine12 | 4 | 18.46 | 34.36 | 17.75 | 33.41 |
+| hill_1730 | remastered | 4 | 19.49 | 41.53 | 18.76 | 40.38 |
+| hill_1730 | sun8 | 4 | 20.43 | 22.70 | 19.73 | 22.06 |
+| overcast_broken | classic | 4 | 17.80 | 23.83 | 17.69 | 23.73 |
+| overcast_broken | fine10 | 4 | 27.70 | 39.80 | 26.92 | 39.39 |
+| overcast_broken | fine11 | 4 | 35.65 | 46.95 | 35.25 | 46.38 |
+| overcast_broken | fine12 | 4 | 40.41 | 46.52 | 39.99 | 45.84 |
+| overcast_broken | remastered | 4 | 25.36 | 30.82 | 24.83 | 30.23 |
+| overcast_broken | sun8 | 4 | 31.99 | 42.25 | 31.43 | 41.58 |
+| sunrise_ridge | classic | 4 | 29.26 | 35.37 | 29.14 | 35.25 |
+| sunrise_ridge | fine10 | 4 | 29.05 | 33.32 | 28.22 | 32.48 |
+| sunrise_ridge | fine11 | 4 | 37.21 | 39.35 | 36.58 | 38.42 |
+| sunrise_ridge | fine12 | 4 | 33.32 | 41.14 | 32.35 | 40.47 |
+| sunrise_ridge | remastered | 4 | 27.19 | 36.11 | 26.39 | 35.40 |
+| sunrise_ridge | sun8 | 4 | 30.30 | 43.73 | 29.52 | 43.00 |

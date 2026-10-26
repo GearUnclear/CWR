@@ -1,0 +1,54 @@
+guerrilla: occupier forces phase 5, columns in CounterAttack, the road-route join and the phase 1 to 3 review fixes (OCCUPIER-FORCES.md 6.5, 3.1, 3.2, 5.5)
+
+Columns (6.5, phase 5): the director offers every ground package
+(DefaultPackages); a Record carries an escort hull (class, crew, price,
+LLink escort + escortCrewGroup, saved) born EscortGap behind the carrier
+under the same unseen rule, driven on the same legs, supporting at the
+town edge from the moment the carrier brakes while a truck holds back;
+CheckEscort / FinishEscort, crew-first deletion on a return to abstract
+travel, each hull refunded apart when home unseen, OwedUnits on a cancel.
+The column keeps together (the carrier waits past EscortSpread 150 m and
+drives on inside EscortRejoin 60 m: a T72 falls hundreds of metres behind
+a Ural over 3 km). Launch-time foot downgrade with the whole column
+refunded; the commander seat; gmCounterAttackLaunchFunded takes an escort
+class; gmCounterAttacks [22]/[23] and gmOccupierOps [11]/[12] show the
+hulls. forcesOpsMax has one source (OccupierForces tuning; OpsCap falls
+back to 2 when the service is inactive).
+
+Road routes (3.1): new RoadRoute module (stage 1 the multi-start road A*
+with exhausted starts no longer spending the start budget; stage 2 a join
+when the source's roads never reach the town's net: leave the pocket road
+at the link minimising road so far + 2 x cross-country gap + straight
+distance, cross to the nearest town-net link within 2 km; gmRoadRoute,
+gmRoadComponents). Malden's Southeast Compound is a genuine island data
+gap (its roads are pockets 1292 m from the net); the route now leaves by
+the west gate and crosses 1237 m to the Le Port road. The squad still
+stalls inside that gate (separate defect, in hand).
+
+Review fixes (tmp/of-review-phases-1-3.md): M1 funded orders are granted
+from the stored reserve the director quotes, re-planned on refusal; M2 an
+edge BirthHold counts toward birthGiveUp, then ArriveLive or cancel
+unseen; M3 lost crew groups, abandoned hulls and dead squad groups go to a
+saved Leftover list deleted only where unseen; M4 HullUnseen checks every
+crew member; M5 a live top-up squad whose town is lost withdraws and is
+removed unseen; M6 legacy repels guarded on mine; M7 old-save K from the
+authored owner; M8 a hull gate with night headlights and a roof-high ray;
+L1, L2 (room caps, surplus to the pool; whole-group adoption still
+declined), L3, L4, L5, L7, L9, L12. Open: L6, L8, L10, L11, L13, L14, L15.
+
+Engine: ::DeleteVehicle only flags a man sitting in a vehicle, who then
+lingers in World::_outVehicles and is written into saves; EngineOps moves
+a seated man out first. Traffic.cpp uses the same idiom and is not fixed
+here.
+
+Tests: test_counter_attack (column, leftover cleanup, edge hold, top-up
+withdrawal, REINFORCE room cap and refusal, OpsCap), test_occupier_forces;
+tri guerrilla_forces_armoured_column (new), guerrilla_forces_watched_route
+asserts the joined route and the birth. OFFSCREEN-CONTRACT rows B and 2c
+and the counterAttackBirthGiveUp knob; the phase 5 status row.
+
+Verified on build/agent-rwdi: [counterattack] 54, [occupierforces] 82,
+[packages] 26, [save] 58, [guerrilla] 622 cases green; human suite OK;
+tri 24/24 on remaster-shadow-of1 (native_capture one retry).
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

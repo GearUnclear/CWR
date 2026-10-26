@@ -1,0 +1,4 @@
+    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
+                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen,
+                               &p.progLumaSharpen, &p.progAirMarch, &p.progAirBlur, &p.progAirMean, &p.progAirApply,
+                               &p.progMeter})

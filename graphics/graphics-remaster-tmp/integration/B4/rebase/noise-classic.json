@@ -1,0 +1,714 @@
+[
+  {
+    "view": "combat_day_k00",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_day_k00__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_day_k00__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 190,
+        "over2": 221221,
+        "over8": 178200,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 182,
+        "over2": 61737,
+        "over8": 52358,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 42,
+        "over2": 74,
+        "over8": 69,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 190,
+        "over2": 283032,
+        "over8": 230627,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_day_k05",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_day_k05__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_day_k05__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 171,
+        "over2": 219351,
+        "over8": 174727,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 166,
+        "over2": 76697,
+        "over8": 64044,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 187,
+        "over2": 28853,
+        "over8": 28180,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 187,
+        "over2": 324901,
+        "over8": 266951,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_day_k06",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_day_k06__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_day_k06__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 198,
+        "over2": 276803,
+        "over8": 224607,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 216,
+        "over2": 105402,
+        "over8": 87383,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 196,
+        "over2": 52138,
+        "over8": 50088,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 216,
+        "over2": 434343,
+        "over8": 362078,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_eye_k00",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_eye_k00__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_eye_k00__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 85,
+        "over2": 201937,
+        "over8": 40416,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 108,
+        "over2": 44018,
+        "over8": 20194,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 3,
+        "over2": 1,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 108,
+        "over2": 245956,
+        "over8": 60610,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_eye_k05",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_eye_k05__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_eye_k05__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 157,
+        "over2": 259729,
+        "over8": 196839,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 232,
+        "over2": 69708,
+        "over8": 51218,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 95,
+        "over2": 6650,
+        "over8": 5473,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 232,
+        "over2": 336087,
+        "over8": 253530,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_eye_k06",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_eye_k06__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_eye_k06__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 177,
+        "over2": 263377,
+        "over8": 189454,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 244,
+        "over2": 92545,
+        "over8": 73391,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 99,
+        "over2": 8044,
+        "over8": 6755,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 244,
+        "over2": 363966,
+        "over8": 269600,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_eye_k08",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_eye_k08__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_eye_k08__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 221,
+        "over2": 227797,
+        "over8": 53379,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 255,
+        "over2": 112414,
+        "over8": 79012,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 51,
+        "over2": 8693,
+        "over8": 5546,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 255,
+        "over2": 348904,
+        "over8": 137937,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_eye_k11",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_eye_k11__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_eye_k11__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 180,
+        "over2": 245150,
+        "over8": 66519,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 208,
+        "over2": 125621,
+        "over8": 89566,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 56,
+        "over2": 10624,
+        "over8": 7241,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 208,
+        "over2": 381395,
+        "over8": 163326,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_fires",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_fires__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_fires__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 101,
+        "over2": 208899,
+        "over8": 67763,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 110,
+        "over2": 25774,
+        "over8": 16128,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 34,
+        "over2": 3189,
+        "over8": 193,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 110,
+        "over2": 237862,
+        "over8": 84084,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_flare_k240",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_flare_k240__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_flare_k240__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 170,
+        "over2": 140198,
+        "over8": 62159,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 191,
+        "over2": 316360,
+        "over8": 204037,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 19,
+        "over2": 930299,
+        "over8": 745639,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 191,
+        "over2": 1386857,
+        "over8": 1011835,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_flare_k90",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_flare_k90__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_flare_k90__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 151,
+        "over2": 272281,
+        "over8": 124923,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 169,
+        "over2": 198841,
+        "over8": 44664,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 162,
+        "over2": 669086,
+        "over8": 403,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 169,
+        "over2": 1140208,
+        "over8": 169990,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_muzzle_k04",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_muzzle_k04__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_muzzle_k04__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 9,
+        "over2": 38,
+        "over8": 2,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 9,
+        "over2": 38,
+        "over8": 2,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_muzzle_k05",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_muzzle_k05__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_muzzle_k05__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 7,
+        "over2": 78,
+        "over8": 0,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 0,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 7,
+        "over2": 78,
+        "over8": 0,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_muzzle_k06",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_muzzle_k06__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_muzzle_k06__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 5,
+        "over2": 1,
+        "over8": 0,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 12,
+        "over2": 735,
+        "over8": 10,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 12,
+        "over2": 736,
+        "over8": 10,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_muzzle_k08",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_muzzle_k08__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_muzzle_k08__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 32,
+        "over2": 5532,
+        "over8": 2686,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 20,
+        "over2": 619,
+        "over8": 49,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 2,
+        "over2": 0,
+        "over8": 0,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 32,
+        "over2": 6151,
+        "over8": 2735,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_shell_k05",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_shell_k05__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_shell_k05__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 182,
+        "over2": 214201,
+        "over8": 174041,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 142,
+        "over2": 51893,
+        "over8": 32362,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 174,
+        "over2": 20835,
+        "over8": 18832,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 182,
+        "over2": 286929,
+        "over8": 225235,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_shell_k06",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_shell_k06__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_shell_k06__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 223,
+        "over2": 261975,
+        "over8": 214215,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 189,
+        "over2": 70103,
+        "over8": 55711,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 143,
+        "over2": 38709,
+        "over8": 34148,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 223,
+        "over2": 370787,
+        "over8": 304074,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_shell_k08",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_shell_k08__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_shell_k08__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 237,
+        "over2": 295038,
+        "over8": 148564,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 233,
+        "over2": 98011,
+        "over8": 90210,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 196,
+        "over2": 52529,
+        "over8": 35995,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 237,
+        "over2": 445578,
+        "over8": 274769,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_shell_k11",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_shell_k11__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_shell_k11__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 133,
+        "over2": 326273,
+        "over8": 182754,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 156,
+        "over2": 115572,
+        "over8": 102547,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 111,
+        "over2": 55957,
+        "over8": 44896,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 156,
+        "over2": 497802,
+        "over8": 330197,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "combat_shell_k16",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\combat_shell_k16__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\combat_shell_k16__classic.png",
+    "bands": [
+      {
+        "rows": "0-422",
+        "max": 124,
+        "over2": 253699,
+        "over8": 66534,
+        "pixels": 810240
+      },
+      {
+        "rows": "422-591",
+        "max": 123,
+        "over2": 75314,
+        "over8": 42516,
+        "pixels": 324480
+      },
+      {
+        "rows": "591-1080",
+        "max": 35,
+        "over2": 14508,
+        "over8": 9021,
+        "pixels": 938880
+      },
+      {
+        "rows": "whole",
+        "max": 124,
+        "over2": 343521,
+        "over8": 118071,
+        "pixels": 2073600
+      }
+    ]
+  },
+  {
+    "view": "smoke_1",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\smoke_1__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\smoke_1__classic.png",
+    "error": "missing"
+  },
+  {
+    "view": "smoke_3",
+    "a": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\after-combat\\smoke_3__classic.png",
+    "b": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\integration\\B4\\rebase\\before-combat\\smoke_3__classic.png",
+    "error": "missing"
+  }
+]

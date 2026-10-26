@@ -1,0 +1,3 @@
+    CHECK(set.sharpen == static_cast<float>(kFeatureCount - 1));
+    CHECK(set.surfaces == static_cast<float>(kFeatureCount));
+    CHECK(set.photoLight == static_cast<float>(kFeatureCount + 1));

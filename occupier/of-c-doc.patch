@@ -1,0 +1,230 @@
+diff --git a/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md b/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md
+index 3660776..06021e7 100644
+--- a/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md
++++ b/arma_CWR/guerrilla-mode/OCCUPIER-FORCES.md
+@@ -958,6 +967,85 @@ is not checked): the final push. The operation is always an HQ_ASSAULT on
+   reported: re-armed, heat held at 40 until an operation goes"); the names
+   are saved ("Rearm") and listed by `gmOccupierForces` [30];
+   `forcesRearmHeat = 0` restores the old rule.
++- **The rest's jitter** (2026-10-16, video 5). Every rest, after a repel or
++  an unborn cancel, is `forcesTownCooldown x (1 + 0.2 x (2u - 1))`, u a
++  hashed roll of the zone and the operation id (salt 13,
++  `OccupierForces::JitteredRest`): 1440 to 2160 s by default, the same rests
++  on a replay, a different one for each operation. The re-arm comes at the
++  rest's end, so the re-arm launch carries the same jitter; no second delay
++  is added (the re-arm launch had none to jitter). In video 5 every answer
++  to Le Port came 1800 s plus a token's wait after the last repel (241,
++  2643, 4565, 6487, 8409 s) from the same birth point, which a player learns
++  to the minute. The share is the `restJitter` lever (0..0.5, 0 = the old
++  clockwork); the test lever `gmForcesForce ["cooldown", ...]` rests a zone
++  for exactly the seconds given.
++- **The repel ladder** (2026-10-16, video 5: Le Port got the same Ural and
++  T72 from the Harbour seven times, Arudy the same BMP from the Outpost five
++  times; 11 of 22 operations were repelled and nothing changed). Per zone
++  the director remembers the repels of its own operations (town and base
++  retakes, any origin: director, push-out or wave; never an HQ assault),
++  with the last repelled package and the base its infantry came from. The
++  memory is saved ("Repels") and forgotten when the zone changes hands
++  (either way). Each rung writes one INFO line naming the count and the
++  rule:
++  1. *One repel, fighters reported:* the next director or push-out plan on
++     the zone needs `L_req x 1.5` (`escalateLethality`) and at least
++     `2 x knownFighters` infantry (`escalateInfantry`, one group at most),
++     so the assault is infantry, not hulls alone ("Le Port: first repel
++     (TRUCK from Le Port Harbour, 4 fighter(s) reported), next attack needs
++     lethality x1.5 and at least 8 infantry"). With nobody reported the
++     rung waits for a report.
++  2. *Two repels* (`approachRepels`): a different approach. The plan
++     excludes the last source; if no other base can staff it, an insertion
++     (after a ground answer) or a ground answer (after an insertion) from
++     any base. If neither can go the plan masses (below). A strike may go
++     with this operation if the pool stays STRETCHED (7.3, the escalation
++     strike; decision 3 of the feel assessment). Line: "Arudy: second repel
++     (APC from Outpost), next attack from a different source or by air; a
++     strike may go with it if the pool stays STRETCHED". The launch adds
++     "[op N] the repel ladder on Arudy (2 repel(s)): lethality 16.20
++     needed, at least 6 infantry; a different approach: TRUCK from Le Port
++     Harbour instead of APC from Outpost".
++  3. *Three repels* (`containRepels`): CONTAIN, do not attack. The zone is
++     marked contained (saved): it is no heat candidate, no push-out target
++     and never re-armed, and the director spends nothing on it. Instead the
++     nearest occupier-held base on its landmass is surged by the bodies the
++     next operation would have needed (`max(retake minimum, 2 x fighters)`,
++     at most 12), a pool-funded deposit that may stand above garrisonMax
++     ("Arudy: third repel (...), contained: no more attacks on it; Outpost
++     surged by 6"). The containment lifts, with one line each, when the
++     zone's reports decay (it is then quiet, and push-out may reach it,
++     6.4), when a wave fires (7.1), or when control changes band (crosses a
++     `forcesWaveThresholds[]` entry either way). The count is kept, so a
++     further repel contains it again.
++  `gmOccupierRepels` lists the rows `[zone, repels, lastPackage,
++  lastSource, contained]`; the test lever `gmForcesForce ["repels", zone,
++  n]` sets a count (containment from `containRepels` on, no surge).
++- **Massing instead of trickling** (2026-10-16). When the ladder has shaped
++  a director candidate's plan and the plan is under strength (the escalated
++  infantry above every base's spare, the second rung blocked, or no package
++  meeting the escalated `L_req`), the director holds its token and launches
++  nothing that tick ("massing for Arudy: need 6 infantry, best source
++  spares 5 (the token is held, tick 1 of 3)"). The held target is weighed
++  first on every tick. The hold ends when a base can staff it (the full
++  plan goes, "massing for Arudy ends: Le Port Harbour can staff it"), when
++  a further token arrives during the hold, or after `forcesMassingMax` (3)
++  ticks: then the strongest package one base can bring goes (the minimum
++  lowered to the largest single-base spare, any different approach that
++  can go). A target that stops being a candidate drops the hold. A first
++  attempt never masses: until a repel the director has no reason to think
++  the minimum is not enough. `gmOccupierMassing` gives `[target, ticks,
++  forcesMassingMax]`; massing is not saved (re-weighed after a load).
++  - *Deviation from the brief.* "When two tokens are held" is read as a
++    second token arriving during the hold: the purse is full (2) after any
++    quiet spell, so the literal rule would end every hold at once.
++- **The ladder's numbers are constants**, not config keys: each has a
++  `gmForcesTune` lever of the same name for tests and a later fold into the
++  author levers (section 16): `escalateLethality` 1.5, `escalateInfantry`
++  2, `approachRepels` 2, `containRepels` 3, `massingMax` 3
++  (`forcesMassingMax`), `restJitter` 0.2, `adjacentTown` 1000 m; the value
++  weights 3 / 2 / 1 / 2 and the jitter salt 13 are `OccupierForces`
++  constants.
+   - *Why.* In video 4 Arudy (3 fighters) repelled op 5 at 2429 s and op 7
+     at 3749 s. The +15 decayed inside the 1800 s rest (heat 0 from 4717 s),
+     while 24 informant tips kept the town from ever being quiet, so from
+@@ -1043,7 +1131,10 @@ foot; a slower one may take a faster package within `forcesSlowCostShare`
+ insertion. Until 2026-10-16 the arrival rule did not apply to a push-out,
+ which crept back on the minimal package whatever the walk. A zone
+ re-armed after a rest (6.3) is a heat candidate, not a push-out target, so
+-push-out stays the creep onto zones with nobody reported. The spare cap
++push-out stays the creep onto zones with nobody reported. A contained zone
++(the repel ladder, 6.3) is never a push-out target; once its reports decay
++the containment lifts and push-out may reach it, under the ladder's rungs
++(a push-out plan escalates and changes approach like a director plan). The spare cap
+ (7.2) applies too. D2
+ regrowth refills posts at the same time, so a quiet player watches the
+ occupier creep back.
+@@ -1155,7 +1286,9 @@ as bodies on top of the hull price.
+ 1. **Required lethality.** `L_req = 1.2 * counterAttackDefenderWeight (3) * knownFighters`.
+ 2. **Minimum bodies.**
+    - town and base retakes: `max(4, garrisonMax(target))`, capped at 12
+-     for a base (`min(max(forcesRetakeMin, garrisonMax), 12)`);
++     for a base (`min(max(forcesRetakeMin, garrisonMax), 12)`); after a
++     repel with fighters reported, at least twice the fighters, and
++     `L_req x 1.5` (the repel ladder, 6.3);
+    - alarm answers: 4;
+    - HQ assaults: 6.
+    - A base retake or an HQ assault whose minimum no single base can spare
+@@ -1163,25 +1296,61 @@ as bodies on top of the hull price.
+ 3. **Pick.** The cheapest package meeting both. An URGENT target takes the
+    fastest package costing at most 1.5 x that. If none meets `L_req`, the
+    most lethal affordable package goes, and its line says so.
+-   - **The arrival rule** (owner, 2026-10-15). When the cheapest lethal
+-     package's arrival (`PackageQuote::seconds`: the road quote below, the
+-     "road N s" or "line x1.5 N s" of the INFO line) exceeds
+-     `forcesSlowEta` (900 s), any faster package costing at most
+-     `forcesSlowCostShare` (3.0) x the cheapest may go. When it exceeds
+-     `forcesAirEta` (1500 s), a transport helicopter insertion may go
+-     whatever its price (from the occupier-held airfield, else off-map at
+-     x 1.5). The fastest eligible package is chosen, as for URGENT; an
+-     URGENT target that is also slow takes the wider share. The rule needs
+-     the transport helicopter in the catalogue (the faction authors
+-     `forcesTransportHeli`) for the second clause, and it keeps `L_req`, the
+-     minimum, the pool's affordability and the stored-spare rule for hulls.
+-     It applies to the director's heat candidates, base retakes and HQ
+-     assaults (origin `CAODirector`), to push-outs (origin `CAOPushout`,
+-     since 2026-10-16, 6.4) and to alarm answers outside THIN; not to wave
+-     strikes (7.1), which keep the minimal package of their staged budget.
+-     One INFO line names it: "[op N] arrival rule
+-     (forcesSlowEta): the cheapest, FOOT, needs road 1139 s; TRUCK goes,
+-     road 128 s".
++   - **The arrival rule** (owner, 2026-10-15; reworked 2026-10-16, phase
++     1 C, after video 5, where all five insertions flew to targets with
++     "0 fighter(s) reported" while every defended target got the cheap
++     ground answer). A package's arrival is `PackageQuote::seconds` (the
++     road quote below, the "road N s" or "line x1.5 N s" of the INFO
++     line); T is `forcesSlowEta` (900 s). Ground first, air where it pays:
++     - **Air.** A transport helicopter insertion goes only when one of
++       these holds, and then at any price the pool pays (from the
++       occupier-held airfield, else off-map at x 1.5): *across water*, no
++       ground package can reach the target because every base that could
++       pay stands on another landmass (`PackageSource::airOnly`, Malden's
++       Southeast Compound); *past `forcesAirEta`* (1500 s), even the
++       fastest lethal ground package needs longer (or no ground package is
++       lethal); *fighters reported*, `knownFighters(target)` is at least
++       `ForcePackages::AirFightersMin` (1) and the target is out of walking
++       reach (the foot quote needs more than T). An empty target that a
++       ground package reaches under `forcesAirEta` never gets air.
++     - **Ground.** Otherwise the cheapest lethal ground package goes when it
++       arrives within T. When it is slower, the CHEAPEST lethal ground
++       package that arrives within T goes instead, never the fastest one
++       within a price share. `forcesSlowCostShare` (3.0, now the constant
++       `ForcePackages::SlowCostShare`; the key and
++       `PackageRequest::slowCostShare` are kept for tests) is only an upper
++       bound on what that package may cost against the cheapest one. In
++       videos 4 and 5 the share never decided a pick. When nothing within
++       the bound arrives within T, the fastest within it goes.
++     - **URGENT.** Within T an URGENT target takes the fastest ground
++       package costing at most `forcesUrgentCostShare` (1.5) x the cheapest
++       (for a 4-body retake that is still foot: a truck costs 2 x). Past T
++       it binds every time: the FASTEST lethal ground package that arrives
++       within T replaces the cheapest one that does. Urgency never buys air
++       on its own.
++     - **Sourcing.** A package's infantry comes from the base with the
++       shortest leg whose spare covers the bodies the package needs for
++       `L_req`; when no base can, the nearest whose spare covers the
++       minimum (the quote is then short). A defended Goisse thus flies the
++       Airfield's 9, not the nearer Outpost's 5.
++     The rule needs the transport helicopter in the catalogue (the faction
++     authors `forcesTransportHeli`) for the air cases, and it keeps
++     `L_req`, the minimum, the pool's affordability and the stored-spare
++     rule for hulls. It applies to the director's heat candidates, base
++     retakes and HQ assaults (origin `CAODirector`), to push-outs (origin
++     `CAOPushout`, since 2026-10-16, 6.4), to alarm answers outside THIN and,
++     since 2026-10-16 (phase 1 A; video 5: the wave's HQ assault walked 41
++     minutes, 2450 s by road, from the harbour that had just landed it), to
++     wave strikes (origin `CAOWave`, 7.1): chosen from the hub within the
++     strike's staged budget, the hull and crew paid by the pool like any
++     package. The INFO words for the pick
++     name the reason (`PackageChoice::reason`, `ForcePackages::ReasonWords`):
++     "air: across water", "air: past forcesAirEta", "air: fighters
++     reported", "ground: cheapest under slowEta", "ground: slow but no air
++     case", "urgent: fastest under slowEta", "urgent: fastest within
++     forcesUrgentCostShare". One INFO line names a changed pick: "[op N]
++     arrival rule (ground: cheapest under slowEta): the cheapest, FOOT,
++     needs road 1139 s; TRUCK goes, road 128 s".
+    - **The road quote** (2026-10-16, after the comparison video: a base
+      operation quoted at 1822 s straight arrived after 3393 s). A ground
+      package's seconds are the leg the counter-attack service marches (the
+@@ -1212,20 +1388,21 @@ as bodies on top of the hull price.
+      4-body retake: foot 4, truck 4 + 1 + 3 = 8, Mi17 4 + 2 + 10 = 16
+      units; road lengths from `gmRoadRoute` on Guerrilla.Abel, 2026-10-16,
+      to the ground base with the shortest leg, link to link: the quote adds
+-     the last link to the town centre, a few hundred metres more). Le Port (0.5 km of road
+-     from Le Port Harbour), Dourdan (0.7 km from the Outpost), the Village
+-     (the Outpost's road winds 1.5 km for 0.5 km straight, past the detour
+-     rule: line x1.5, 0.8 km) and Saint Louis (1.3 km from the Airfield,
+-     about 880 s) still get foot. La Trinite (1.7 km by road, about
+-     1140 s) gets a truck (2 x foot, about 2 minutes). Arudy is the town
+-     the road quote changes: 2.2 km straight from the Outpost (about
+-     1480 s, a truck by the straight line) but 2.7 km by road link to link
+-     and 3.0 km to the centre (the director's quote: "road 1994 s"), so it
+-     gets the insertion. Larche, Chapoi, Sainte Marie,
+-     Cancon, Goisse, La Pessagne, Vigny and La Riviere (by road from 2.9 km
+-     for Chapoi to 6.5 km for La Riviere, foot 32 to 72 minutes) get a
+-     helicopter insertion instead of the walk, when the pool can pay its 12
+-     units.
++     the last link to the town centre, a few hundred metres more). Le Port
++     (0.5 km of road from Le Port Harbour), Dourdan (0.7 km from the
++     Outpost), the Village (the Outpost's road winds 1.5 km for 0.5 km
++     straight, past the detour rule: line x1.5, 0.8 km) and Saint Louis
++     (1.3 km from the Airfield, about 880 s) get foot. Every other empty
++     town gets a truck: La Trinite (1.7 km by road, about 2 minutes), Arudy
++     (3.0 km by road to the centre, "road 1994 s" on foot, about 225 s by
++     truck), and Larche, Chapoi, Sainte Marie, Cancon, Goisse, La Pessagne,
++     Vigny and La Riviere (by road from 2.9 km for Chapoi to 6.5 km for La
++     Riviere: foot 32 to 72 minutes, a truck 4 to 8 minutes, all under
++     `forcesAirEta`). Until 2026-10-16 those ten flew. A town out of walking
++     reach with fighters reported gets the insertion: Goisse with three
++     (`L_req` 10.8) is a Mi17 with the Airfield's 9 (21 units) where the
++     Airfield's truck would need about 9 minutes. The Southeast Compound,
++     an island, is always an insertion.
+    - **The refusal names the shortfall.** With no source able to spare the
+      minimum, the line reads "no occupier base can spare the minimum (12
+      needed, the largest single-base spare is 6: short 6)".

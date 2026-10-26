@@ -1,0 +1,3 @@
+﻿start 04:51:23 override=D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\6\shaders\S2z
+run exit=0 04:52:57
+done 04:53:03

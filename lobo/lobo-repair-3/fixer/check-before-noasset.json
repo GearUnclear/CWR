@@ -1,0 +1,59 @@
+{
+  "repair_version": "2026-10-11.3",
+  "rule_sha256": "75c456dcab6fbece460edd479eedc296253255e709a3c58260f28072562a0427",
+  "issue": "https://github.com/GearUnclear/lobo/issues/1",
+  "mode": "check",
+  "compatibility": "ud",
+  "changed_members": 6,
+  "added_members": 0,
+  "archives": [
+    "lobo_zu23",
+    "loboeghelo",
+    "loboidfhelo"
+  ],
+  "skipped": [],
+  "members": [
+    {
+      "member": "lobo_zu23/config.cpp",
+      "before_sha256": "e58cea0beef30290ee3cd354e661eaf583f84db277e14bc0492a94c96af7c464",
+      "after_sha256": "b01eb354051836a43f775be4813d7f826b19aeaefba270e9b7dda2487aebf6aa",
+      "before_bytes": 8266,
+      "after_bytes": 8266
+    },
+    {
+      "member": "loboeghelo/engine/fire.sqs",
+      "before_sha256": "c711d5dbca8d96449eb107b52f1dd7481bc2dd9d464e05f4bfe246d3fdc70903",
+      "after_sha256": "19839678feff4af526938677db987102efb57e17eb4961d311a3fe2420c6691e",
+      "before_bytes": 2128,
+      "after_bytes": 2321
+    },
+    {
+      "member": "loboeghelo/engine2/fire.sqs",
+      "before_sha256": "c711d5dbca8d96449eb107b52f1dd7481bc2dd9d464e05f4bfe246d3fdc70903",
+      "after_sha256": "19839678feff4af526938677db987102efb57e17eb4961d311a3fe2420c6691e",
+      "before_bytes": 2128,
+      "after_bytes": 2321
+    },
+    {
+      "member": "loboeghelo/engine3/fire.sqs",
+      "before_sha256": "c711d5dbca8d96449eb107b52f1dd7481bc2dd9d464e05f4bfe246d3fdc70903",
+      "after_sha256": "19839678feff4af526938677db987102efb57e17eb4961d311a3fe2420c6691e",
+      "before_bytes": 2128,
+      "after_bytes": 2321
+    },
+    {
+      "member": "loboidfhelo/ch53/engine/fire.sqs",
+      "before_sha256": "c711d5dbca8d96449eb107b52f1dd7481bc2dd9d464e05f4bfe246d3fdc70903",
+      "after_sha256": "19839678feff4af526938677db987102efb57e17eb4961d311a3fe2420c6691e",
+      "before_bytes": 2128,
+      "after_bytes": 2321
+    },
+    {
+      "member": "loboidfhelo/uh1/engine/fire.sqs",
+      "before_sha256": "c711d5dbca8d96449eb107b52f1dd7481bc2dd9d464e05f4bfe246d3fdc70903",
+      "after_sha256": "19839678feff4af526938677db987102efb57e17eb4961d311a3fe2420c6691e",
+      "before_bytes": 2128,
+      "after_bytes": 2321
+    }
+  ]
+}

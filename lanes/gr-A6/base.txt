@@ -1,0 +1,8 @@
+lane: gr-A6
+source: D:/Arma_CWA_worktrees/gr-A6
+HEAD: c584185e8daeb183053ff14c4dbb6982a3921290
+subject: graphics: long views draw the same frame from a fraction of the draw calls
+commit date: 2026-10-18 06:35:39 -0700
+origin branches containing HEAD: origin/graphics-remaster
+files in lane.patch: 30
+binary files changed (content not in patch): none

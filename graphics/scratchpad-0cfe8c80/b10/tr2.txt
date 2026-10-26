@@ -1,0 +1,7 @@
+        {"litSky", LC::Sky, 1},
+        {"litSkyShadow", LC::SkyShadow, 1},
+        {"litPlanned", LC::Planned, LC::PlannedCount},
+        {"litWater0", LC::Water0, 1},
+        {"litWater1", LC::Water1, 1},
+        {"litPlanned2", LC::Planned2, LC::Planned2Count},
+        {"litDetail", LC::Detail, 1},

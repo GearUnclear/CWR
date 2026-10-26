@@ -1,0 +1,509 @@
+diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+index 598ac042..56cad897 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestAudio.cpp
+@@ -1216,6 +1216,94 @@ GameValue TriClearView(const GameState* /*state*/)
+     return GameValue("OK");
+ }
+ 
++// ---- mist-1 DIAGNOSTIC verbs (scratch build only, never for the product) ----
++extern char GMistRecPath[512];
++extern int GMistRecWant;
++extern int GMistRecMode;
++extern int GMistRecHalf;
++extern int GMistRecState;
++extern int GMistRecGot;
++extern int GMistRecStop;
++extern float GMistPanT;
++extern void World_SetMistPan(const float* v);
++extern void World_StopMistPan();
++
++// triMistPan [east, upASL, north, h0, p0, h1, p1, durationS, t0S] (degrees,
++// setDir convention) starts a smoothstep pan driven by the accumulated
++// accelerated sim step; [] stops it.  Returns "OK".
++GameValue TriMistPan(const GameState* /*state*/, GameValuePar arg)
++{
++    if (arg.GetType() != GameArray)
++        return GameValue("FAIL:expected_array");
++    const GameArrayType& a = arg;
++    if (a.Size() == 0)
++    {
++        World_StopMistPan();
++        return GameValue("OK");
++    }
++    if (a.Size() != 9)
++        return GameValue("FAIL:need 9 numbers");
++    float v[9];
++    for (int i = 0; i < 9; ++i)
++        v[i] = static_cast<float>(static_cast<GameScalarType>(a[i]));
++    World_SetMistPan(v);
++    return GameValue("OK");
++}
++
++// triMistRec [path, frames, mode, half] arms the in-memory recorder: the next
++// `frames` presented frames (mode 0) or the next `frames` triScreenshot frames
++// (mode 1) are read back at the capture point and written as raw RGB24
++// (bottom-up rows) to path, with path.txt (size, per-frame wall ms, pan time).
++GameValue TriMistRec(const GameState* /*state*/, GameValuePar arg)
++{
++    if (arg.GetType() != GameArray)
++        return GameValue("FAIL:expected_array");
++    const GameArrayType& a = arg;
++    if (a.Size() != 4)
++        return GameValue("FAIL:need [path, frames, mode, half]");
++    if (GMistRecState == 1)
++    {
++        // [.., 0, ..] while recording: stop and write what is recorded so far.
++        if (static_cast<int>(static_cast<GameScalarType>(a[1])) == 0)
++        {
++            GMistRecStop = 1;
++            return GameValue("OK:stopping");
++        }
++        return GameValue("FAIL:busy");
++    }
++    GMistRecStop = 0;
++    GameStringType p = static_cast<GameStringType>(a[0]);
++    snprintf(GMistRecPath, sizeof(GMistRecPath), "%s", (const char*)p);
++    GMistRecWant = static_cast<int>(static_cast<GameScalarType>(a[1]));
++    GMistRecMode = static_cast<int>(static_cast<GameScalarType>(a[2]));
++    GMistRecHalf = static_cast<int>(static_cast<GameScalarType>(a[3]));
++    GMistRecGot = 0;
++    GMistRecState = GMistRecWant > 0 ? 1 : 0;
++    LOG_INFO(Core, "[tri] triMistRec {} frames={} mode={} half={}", GMistRecPath, GMistRecWant, GMistRecMode,
++             GMistRecHalf);
++    return GameValue("OK");
++}
++
++// triMistRecState -> "state=<s>;got=<n>;want=<n>;panT=<s>" (never FAIL).
++GameValue TriMistRecState(const GameState* /*state*/)
++{
++    char buf[128];
++    snprintf(buf, sizeof(buf), "state=%d;got=%d;want=%d;panT=%.4f", GMistRecState, GMistRecGot, GMistRecWant,
++             static_cast<double>(GMistPanT));
++    return GameValue(buf);
++}
++
++// triMistRecWait -> "FAIL:recording" while recording (the runner retries a
++// top-level FAIL), else "OK:<state>".
++GameValue TriMistRecWait(const GameState* /*state*/)
++{
++    if (GMistRecState == 1)
++        return GameValue("FAIL:recording");
++    char buf[32];
++    snprintf(buf, sizeof(buf), "OK:%d", GMistRecState);
++    return GameValue(buf);
++}
++
+ // triRdcCapture "path" — trigger a RenderDoc capture of the next swap (no-op
+ // unless the game was launched under RenderDoc, i.e. librenderdoc loaded).  The
+ // optional string sets the capture-file path template.  Used to diagnose render
+@@ -3172,6 +3260,10 @@ INIT_MODULE(GameStateExtTest, 3)
+     GGameState.NewFunction(GameFunction(GameString, "triFaceTexture", TriFaceTexture, GameObject));
+     GGameState.NewNularOp(GameNular(GameArray, "triListFaces", TriListFaces));
+     GGameState.NewNularOp(GameNular(GameString, "triClearView", TriClearView));
++    GGameState.NewFunction(GameFunction(GameString, "triMistPan", TriMistPan, GameArray));
++    GGameState.NewFunction(GameFunction(GameString, "triMistRec", TriMistRec, GameArray));
++    GGameState.NewNularOp(GameNular(GameString, "triMistRecState", TriMistRecState));
++    GGameState.NewNularOp(GameNular(GameString, "triMistRecWait", TriMistRecWait));
+     GGameState.NewFunction(GameFunction(GameString, "triRdcCapture", TriRdcCapture, GameString));
+     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosX", TriPlayerPosX));
+     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosY", TriPlayerPosY));
+diff --git a/arma_CWR/engine/Poseidon/World/World.cpp b/arma_CWR/engine/Poseidon/World/World.cpp
+index d6277fb2..8ead816c 100644
+--- a/arma_CWR/engine/Poseidon/World/World.cpp
++++ b/arma_CWR/engine/Poseidon/World/World.cpp
+@@ -129,6 +129,54 @@ void World_ClearTriViewOverride()
+     s_triViewActive = false;
+ }
+ 
++// ---- mist-1 DIAGNOSTIC (scratch build only, never for the product) ----------
++// A camera pan driven by the accumulated accelerated sim step, so the same pan
++// plays at real speed (accTime 1, real-time steps) and stepped (accTime 0 between
++// shots, one fixed 1/60 s tick per shot).  Plus the control block of the
++// in-memory presented-frame recorder in EngineGL33_VertexBuffer.cpp.
++char GMistRecPath[512] = {0};
++int GMistRecWant = 0;
++int GMistRecMode = 0; // 0 every presented frame, 1 only frames a triScreenshot captured
++int GMistRecHalf = 0; // 1 = store a 2x2 box-downsampled copy
++int GMistRecState = 0; // 0 idle, 1 recording, 2 written, 3 failed
++int GMistRecGot = 0;
++int GMistRecStop = 0; // 1 = write what is recorded at the next presented frame
++float GMistPanT = 0.0f;
++static bool s_mistPanActive = false;
++static float s_mistPan[9] = {0};
++
++void World_SetMistPan(const float* v)
++{
++    for (int i = 0; i < 9; ++i)
++        s_mistPan[i] = v[i];
++    GMistPanT = v[8];
++    s_mistPanActive = true;
++}
++
++void World_StopMistPan()
++{
++    s_mistPanActive = false;
++}
++
++static void MistPanStep(float deltaT)
++{
++    if (!s_mistPanActive)
++        return;
++    GMistPanT += deltaT;
++    const float dur = s_mistPan[7];
++    float u = dur > 0.0f ? GMistPanT / dur : 1.0f;
++    if (u < 0.0f)
++        u = 0.0f;
++    if (u > 1.0f)
++        u = 1.0f;
++    const float s = u * u * (3.0f - 2.0f * u);
++    const float d2r = 3.14159265358979f / 180.0f;
++    const float h = (s_mistPan[3] + (s_mistPan[5] - s_mistPan[3]) * s) * d2r;
++    const float p = (s_mistPan[4] + (s_mistPan[6] - s_mistPan[4]) * s) * d2r;
++    const Vector3 dir(sinf(h) * cosf(p), sinf(p), cosf(h) * cosf(p));
++    World_SetTriViewOverride(Vector3(s_mistPan[0], s_mistPan[1], s_mistPan[2]), dir.Normalized(), VUp);
++}
++
+ void World::UpdateInputContext()
+ {
+     const InputContextResolution resolution = ResolveInputContextResolution();
+@@ -1255,6 +1303,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
+             }
+             transform.SetPosition(camPos);
+         }
++        MistPanStep(deltaT);
+         if (s_triViewActive)
+         {
+             transform = s_triViewTransform;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+index b432d00b..c18bfea8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFog.cpp
+@@ -686,6 +686,9 @@ void EngineGL33::PostFog(const PostFrame& f)
+         prevRow[r][2] = row[2];
+         prevRow[r][3] = row[0] * dx + row[1] * dy + row[2] * dz;
+     }
++    // The frame's jitter in a cell: psFogInject turns it per cell (and per
++    // slice in depth, fogCellNoise), so the history's residual of it does not
++    // swing whole regions of the volume together.
+     const std::uint32_t seq = _fog.sequence++;
+     const float jz = Fract(0.6180339887 * static_cast<double>(seq));
+     const float jx = Fract(0.7548776662 * static_cast<double>(seq)) - 0.5f;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+index 78ecdc73..3312ec1f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+@@ -21,7 +21,9 @@
+ //     cloud field (the shadows of ridges in the haze), and the mist and fog
+ //     above a cell take light out of its sun. Each frame samples a jittered
+ //     point of each cell and blends it with the last frame's volume
+-//     reprojected to that point, so the history averages the jitter;
++//     reprojected to that point, so the history averages the jitter (the
++//     frame's jitter turned per cell, and per slice in depth, so neighbouring
++//     cells' history residuals are independent, fogCellNoise);
+ //   - psFogIntegrate: front to back along each column, the light scattered
+ //     toward the eye and the transmittance from the eye to the far face of
+ //     each cell (energy-conserving per slice);
+@@ -367,10 +369,22 @@ vec4 fogCell(vec3 rel) {
+     return vec4(inscatter, sMie + sAir) * 1000.0;
+ }
+ 
++// The jitter of a cell: the frame's offset (one golden-ratio sequence for the
++// frame, fogFrame.xy and fogDepth.w) turned by an interleaved-gradient offset
++// of the cell, and in depth also by the slice. With the frame's offset alone
++// every cell sat at the same point of its cell, so the history's residual of
++// the jitter (it keeps 0.88 of the last frame) had the same sign over whole
++// regions each frame, and the far haze and the valley mist pumped as one
++// sheet, in play and in the captures (the dawn valley's flicker, 2026-10-23).
++// Turned per cell, the residuals are independent and average out in the
++// apply's lookup and the TAA.
++float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
++float g_cellJitter = 0.0; // this column's depth offset (main sets it)
++
+ // The cell of slice s on this column: this frame's jittered point, blended with
+ // the last frame's volume at the same point.
+ vec4 fogSlice(float s, vec3 dirZ) {
+-    float z = fogSliceDepth((s + fogDepth.w) / fogGrid.z);
++    float z = fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z);
+     vec3 rel = dirZ * z;
+     vec4 cur = fogCell(rel);
+     if (fogFrame.z < 1.0) {
+@@ -388,7 +402,10 @@ vec4 fogSlice(float s, vec3 dirZ) {
+ }
+ 
+ void main() {
+-    vec2 ndc = (gl_FragCoord.xy + fogFrame.xy) / fogGrid.xy * 2.0 - 1.0;
++    g_cellJitter = fogCellNoise(gl_FragCoord.xy);
++    vec2 cellJ = fract(fogFrame.xy + 0.5 + vec2(fogCellNoise(gl_FragCoord.xy + vec2(17.0, 59.0)),
++                                                fogCellNoise(gl_FragCoord.xy + vec2(83.0, 29.0)))) - 0.5;
++    vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;
+     vec3 dirZ = viewToWorld * vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0); // per metre of view depth
+     vec3 d = normalize(dirZ);
+     // The air's light along this column: the colour the forward fog fades
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+index 0e0a6114..4c480ac8 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+@@ -16,6 +16,11 @@
+ using namespace Poseidon::Dev;
+ 
+ #include <glad/gl.h>
++#include <chrono>
++#include <cstdlib>
++#include <cstdio>
++#include <string>
++#include <vector>
+ 
+ 
+ // Index range per mesh section.
+@@ -542,6 +547,170 @@ void EngineGL33::BindFrameRenderTarget()
+ }
+ void EngineGL33::WorkToBack() {}
+ 
++// ---- mist-1 DIAGNOSTIC (scratch build only, never for the product) ----------
++// In-memory recorder of presented frames: reads the default framebuffer at the
++// triScreenshot capture point (post gamma, pre swap) into a ring of pixel-pack
++// buffers, collects each one a few frames later (no GPU stall), and writes all
++// frames once at the end as raw RGB24 (bottom-up rows) plus a .txt sidecar.
++extern char GMistRecPath[512];
++extern int GMistRecWant;
++extern int GMistRecMode;
++extern int GMistRecHalf;
++extern int GMistRecState;
++extern int GMistRecGot;
++extern int GMistRecStop;
++extern float GMistPanT;
++
++namespace
++{
++constexpr int kMistRing = 4;
++struct MistRecorder
++{
++    GLuint pbo[kMistRing] = {0, 0, 0, 0};
++    int pboFrame[kMistRing] = {-1, -1, -1, -1};
++    int w = 0, h = 0, ow = 0, oh = 0, issued = 0;
++    uint8_t* data = nullptr; // CRT malloc: the engine heap refuses multi-GB blocks
++    std::vector<double> wallMs;
++    std::vector<float> panT;
++    std::vector<int> shot;
++    std::chrono::steady_clock::time_point t0;
++};
++MistRecorder gMistRec;
++
++void MistRecCollect(int slot)
++{
++    const int f = gMistRec.pboFrame[slot];
++    if (f < 0)
++        return;
++    glBindBuffer(GL_PIXEL_PACK_BUFFER, gMistRec.pbo[slot]);
++    const size_t w = static_cast<size_t>(gMistRec.w), h = static_cast<size_t>(gMistRec.h);
++    const auto* src = static_cast<const uint8_t*>(glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, w * h * 4, GL_MAP_READ_BIT));
++    if (src)
++    {
++        const size_t ow = static_cast<size_t>(gMistRec.ow), oh = static_cast<size_t>(gMistRec.oh);
++        uint8_t* dst = gMistRec.data + static_cast<size_t>(f) * ow * oh * 3;
++        if (!GMistRecHalf)
++        {
++            for (size_t i = 0; i < w * h; ++i)
++            {
++                dst[i * 3 + 0] = src[i * 4 + 0];
++                dst[i * 3 + 1] = src[i * 4 + 1];
++                dst[i * 3 + 2] = src[i * 4 + 2];
++            }
++        }
++        else
++        {
++            for (size_t y = 0; y < oh; ++y)
++                for (size_t x = 0; x < ow; ++x)
++                    for (int c = 0; c < 3; ++c)
++                    {
++                        const size_t a = ((2 * y) * w + 2 * x) * 4 + c, b = ((2 * y + 1) * w + 2 * x) * 4 + c;
++                        dst[(y * ow + x) * 3 + c] =
++                            static_cast<uint8_t>((src[a] + src[a + 4] + src[b] + src[b + 4] + 2) / 4);
++                    }
++        }
++        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
++    }
++    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
++    gMistRec.pboFrame[slot] = -1;
++}
++
++void MistRecFinish()
++{
++    for (int s = 0; s < kMistRing; ++s)
++        MistRecCollect(s);
++    bool ok = false;
++    if (FILE* fp = fopen(GMistRecPath, "wb"))
++    {
++        const size_t bytes = static_cast<size_t>(gMistRec.ow) * gMistRec.oh * 3 * gMistRec.issued;
++        ok = gMistRec.data && fwrite(gMistRec.data, 1, bytes, fp) == bytes;
++        fclose(fp);
++    }
++    std::string meta = std::string(GMistRecPath) + ".txt";
++    if (FILE* fp = fopen(meta.c_str(), "w"))
++    {
++        fprintf(fp, "w=%d h=%d frames=%d mode=%d half=%d\n", gMistRec.ow, gMistRec.oh, gMistRec.issued, GMistRecMode,
++                GMistRecHalf);
++        for (int i = 0; i < gMistRec.issued; ++i)
++            fprintf(fp, "%d %.3f %.5f %d\n", i, gMistRec.wallMs[i], static_cast<double>(gMistRec.panT[i]),
++                    gMistRec.shot[i]);
++        fclose(fp);
++    }
++    glDeleteBuffers(kMistRing, gMistRec.pbo);
++    std::free(gMistRec.data);
++    gMistRec = MistRecorder();
++    GMistRecState = ok ? 2 : 3;
++}
++
++void MistRecFrame(SDL_Window* win, int defW, int defH, bool shotFrame)
++{
++    if (GMistRecState != 1)
++        return;
++    if (GMistRecStop)
++    {
++        GMistRecStop = 0;
++        if (gMistRec.issued > 0)
++            MistRecFinish();
++        else
++            GMistRecState = 2;
++        return;
++    }
++    if (GMistRecMode == 1 && !shotFrame)
++        return;
++    int w = defW, h = defH;
++    if (win)
++        SDL_GetWindowSizeInPixels(win, &w, &h);
++    if (gMistRec.issued == 0)
++    {
++        gMistRec.w = w;
++        gMistRec.h = h;
++        gMistRec.ow = GMistRecHalf ? w / 2 : w;
++        gMistRec.oh = GMistRecHalf ? h / 2 : h;
++        gMistRec.data = static_cast<uint8_t*>(std::malloc(static_cast<size_t>(gMistRec.ow) * gMistRec.oh * 3 * GMistRecWant));
++        if (!gMistRec.data)
++        {
++            LOG_ERROR(Graphics, "[mist-1] recorder: malloc of {} frames failed", GMistRecWant);
++            GMistRecState = 3;
++            return;
++        }
++        gMistRec.wallMs.assign(GMistRecWant, 0.0);
++        gMistRec.panT.assign(GMistRecWant, 0.0f);
++        gMistRec.shot.assign(GMistRecWant, 0);
++        glGenBuffers(kMistRing, gMistRec.pbo);
++        for (int s = 0; s < kMistRing; ++s)
++        {
++            glBindBuffer(GL_PIXEL_PACK_BUFFER, gMistRec.pbo[s]);
++            glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(w) * h * 4, nullptr, GL_STREAM_READ);
++            gMistRec.pboFrame[s] = -1;
++        }
++        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
++        gMistRec.t0 = std::chrono::steady_clock::now();
++    }
++    if (w != gMistRec.w || h != gMistRec.h)
++    {
++        GMistRecState = 3;
++        return;
++    }
++    const int slot = gMistRec.issued % kMistRing;
++    MistRecCollect(slot);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++    glPixelStorei(GL_PACK_ALIGNMENT, 4);
++    glBindBuffer(GL_PIXEL_PACK_BUFFER, gMistRec.pbo[slot]);
++    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
++    const int i = gMistRec.issued;
++    gMistRec.pboFrame[slot] = i;
++    gMistRec.wallMs[i] =
++        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gMistRec.t0).count();
++    gMistRec.panT[i] = GMistPanT;
++    gMistRec.shot[i] = shotFrame ? 1 : 0;
++    gMistRec.issued = i + 1;
++    GMistRecGot = gMistRec.issued;
++    if (gMistRec.issued >= GMistRecWant)
++        MistRecFinish();
++}
++} // namespace
++
+ void EngineGL33::CaptureScreenshotIfPending()
+ {
+     if (_pendingScreenshotPath.GetLength() == 0)
+@@ -617,7 +786,9 @@ void EngineGL33::BackToFront()
+     // readback samples the same back buffer that's about to swap.
+     // Readback after SwapWindow on a double-buffered context is
+     // undefined, so the capture has to happen pre-swap.
++    const bool mistShot = _pendingScreenshotPath.GetLength() > 0;
+     CaptureScreenshotIfPending();
++    MistRecFrame(_sdlWindow, _w, _h, mistShot);
+ 
+     if (_glContext && _sdlWindow)
+         SDL_GL_SwapWindow(_sdlWindow);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+index 10fa2818..adb5358c 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -732,6 +732,65 @@ TEST_CASE("Volumetric fog: the shaders read the slices and the medium the way Vo
+           1);
+ }
+ 
++TEST_CASE("Volumetric fog: the injection's jitter is turned per cell, so its history leaves no frame-wide pump",
++          "[remaster][fog][Shaders]")
++{
++    // The dawn valley's flicker (2026-10-23): with one jitter for every cell
++    // the history's residual of the jitter had the same sign over whole
++    // regions each frame, and the far haze and the valley mist pumped as one
++    // sheet. The injection turns the frame's offset per cell (and per slice in
++    // depth) by an interleaved-gradient offset.
++    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
++    REQUIRE_FALSE(inject.empty());
++    CHECK(CountOf(inject, "float fogCellNoise(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, "
++                          "0.00583715)))); }") == 1);
++    CHECK(CountOf(inject, "fogSliceDepth((s + fract(fogDepth.w + g_cellJitter + 0.618034 * s)) / fogGrid.z)") == 1);
++    CHECK(CountOf(inject, "g_cellJitter = fogCellNoise(gl_FragCoord.xy);") == 1);
++    CHECK(CountOf(inject, "vec2 ndc = (gl_FragCoord.xy + cellJ) / fogGrid.xy * 2.0 - 1.0;") == 1);
++    // No cell takes the frame's offset alone any more.
++    CHECK(CountOf(inject, "(s + fogDepth.w)") == 0);
++    CHECK(CountOf(inject, "gl_FragCoord.xy + fogFrame.xy") == 0);
++
++    // The mirror: the frame's depth offset is the stage's golden-ratio
++    // sequence (EngineGL33_PostFog.cpp, jz), each cell keeps 0.88 of its last
++    // frame (kFogHistoryShare 0.12), and a block of 5 x 5 cells (about 60 px
++    // at 1080p) averages its cells' residuals, as the eye and the apply's
++    // lookup do.
++    auto fract = [](double x) { return x - std::floor(x); };
++    auto cellNoise = [&](double x, double y) { return fract(52.9829189 * fract(x * 0.06711056 + y * 0.00583715)); };
++    constexpr double kShare = 0.12;
++    double frameWide = 0.0;
++    double cell[25] = {};
++    double sumW = 0.0, sumW2 = 0.0, sumC = 0.0, sumC2 = 0.0;
++    int n = 0;
++    for (int frame = 0; frame < 2000; ++frame)
++    {
++        const double jz = fract(0.6180339887 * frame);
++        frameWide += kShare * ((jz - 0.5) - frameWide);
++        double block = 0.0;
++        for (int i = 0; i < 25; ++i)
++        {
++            const double offset = fract(jz + cellNoise(40.5 + i % 5, 20.5 + i / 5)) - 0.5;
++            cell[i] += kShare * (offset - cell[i]);
++            block += cell[i] / 25.0;
++        }
++        if (frame < 100)
++            continue;
++        ++n;
++        sumW += frameWide;
++        sumW2 += frameWide * frameWide;
++        sumC += block;
++        sumC2 += block * block;
++    }
++    const double sdFrameWide = std::sqrt(sumW2 / n - (sumW / n) * (sumW / n));
++    const double sdPerCell = std::sqrt(sumC2 / n - (sumC / n) * (sumC / n));
++    // The frame's offset alone: the block's residual swings by about 3% of a
++    // slice each frame (the far slices are hundreds of metres deep). Turned
++    // per cell: under a quarter of that (about a sixth).
++    CHECK(sdFrameWide > 0.025);
++    CHECK(sdPerCell < 0.25 * sdFrameWide);
++}
++
+ TEST_CASE("Volumetric fog: round 3 medium rules (clear near air, dust, hilltops, night fog, stars)", "[remaster][fog]")
+ {
+     LightingTuning t;

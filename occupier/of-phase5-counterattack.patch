@@ -1,0 +1,677 @@
+diff -ruN a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp	2026-10-13 21:44:40.769277200 -0700
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.cpp	2026-10-13 21:44:41.562541000 -0700
+@@ -706,6 +706,11 @@
+     return r.hull.GetLink() != nullptr ? 1 : 0;
+ }
+ 
++int CounterAttack::LiveEscortOf(const Record& r)
++{
++    return r.escort.GetLink() != nullptr ? 1 : 0;
++}
++
+ int CounterAttack::BornOps(bool includeWave) const
+ {
+     int n = 0;
+@@ -716,7 +721,7 @@
+         {
+             continue;
+         }
+-        n += r.funded && (r.phase == CALive || LiveHullOf(r) > 0) ? 1 : 0;
++        n += r.funded && (r.phase == CALive || LiveHullOf(r) + LiveEscortOf(r) > 0) ? 1 : 0;
+     }
+     return n;
+ }
+@@ -726,7 +731,7 @@
+     int n = 0;
+     for (int i = 0; i < _records.Size(); i++)
+     {
+-        n += LiveHullOf(_records[i]);
++        n += LiveHullOf(_records[i]) + LiveEscortOf(_records[i]);
+     }
+     for (int i = 0; i < _homeHulls.Size(); i++)
+     {
+@@ -1106,6 +1111,13 @@
+     r.priceUnits = order.priceUnits > 0 ? order.priceUnits : 0;
+     r.hullClass = order.package != FPFoot ? order.hullClass : RString();
+     r.crew = r.hullClass.GetLength() > 0 ? (order.crew > 0 ? order.crew : 1) : 0;
++    // a column's escort (6.5, phase 5): its share comes off the carrier's
++    // price, so each hull refunds its own
++    r.escortClass = r.hullClass.GetLength() > 0 ? order.escortClass : RString();
++    r.escortCrew = r.escortClass.GetLength() > 0 ? (order.escortCrew > 0 ? order.escortCrew : 1) : 0;
++    r.escortPriceUnits =
++        r.escortClass.GetLength() > 0 ? MinInt(order.escortPriceUnits > 0 ? order.escortPriceUnits : 0, r.priceUnits) : 0;
++    r.priceUnits -= r.escortPriceUnits;
+     r.urgent = order.urgent;
+     r.funded = order.funded;
+     r.abstractSpeed = order.abstractSpeed > 0 ? order.abstractSpeed : 0;
+@@ -1126,9 +1138,33 @@
+     // out; a hull package always leaves from the stored reserve (its hull is
+     // born unseen on the road, never in a watched motor pool)
+     const int opsCap = OpsCap() + (r.origin == CAOWave ? 1 : 0);
+-    const bool live = !r.HasHullPackage() && ops != nullptr && liveBodies > 0 &&
+-                      InBubbleAt(registry, view, DestOf(registry, r)) && RoomLive(registry, view) &&
+-                      (!r.funded || BornOps() < opsCap);
++    // phase 5 (6.5): a hull package whose stored reserve cannot pay its
++    // bodies goes on foot when the source can march them out live
++    // (ForcePackages::MustDowngrade); the pool price goes back once the
++    // record exists
++    const bool liveFoot = ops != nullptr && liveBodies > 0 && InBubbleAt(registry, view, DestOf(registry, r)) &&
++                          RoomLive(registry, view) && (!r.funded || BornOps() < opsCap);
++    int hullRefund = 0;
++    if (r.HasHullPackage())
++    {
++        const int stored = Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, false);
++        const int onFoot = liveFoot ? Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, true) : stored;
++        if (ForcePackages::MustDowngrade(r.package, size, stored, onFoot))
++        {
++            LOG_INFO(Core, "CounterAttack: [op {}] {} can spare {} stored of the {} bodies for the {}: on foot",
++                     r.opId, (const char*)src->name, stored, size, (const char*)r.hullClass);
++            hullRefund = r.priceUnits + r.escortPriceUnits; // the whole column: carrier and escort
++            r.package = FPFoot;
++            r.hullClass = RString();
++            r.crew = 0;
++            r.priceUnits = 0;
++            r.escortClass = RString();
++            r.escortCrew = 0;
++            r.escortPriceUnits = 0;
++            r.abstractSpeed = r.abstractSpeed > 0 ? FootSpeed : 0;
++        }
++    }
++    const bool live = !r.HasHullPackage() && liveFoot;
+     const int spare = Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, live);
+     const int n = MinInt(size, spare);
+     if (n < 1)
+@@ -1148,6 +1184,10 @@
+     _records.Add(r);
+     const Record& added = _records[_records.Size() - 1];
+     Emit(registry, added, CAOpLaunched, added.strength, added.priceUnits, live ? "live" : "abstract");
++    if (hullRefund > 0)
++    {
++        Emit(registry, added, CAOpHullRefund, 0, hullRefund, "no stored spare: on foot");
++    }
+     if (added.phase == CALive)
+     {
+         Emit(registry, added, CAOpBorn, added.strength, 0, SpawnReasonName(added.spawnReason));
+@@ -1267,6 +1307,16 @@
+     return Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) <= registry.Tuning().cacheRadius;
+ }
+ 
++// the town edge (zoneArea from dest) on the line from dest to pos: where an
++// armed hull supports (6.5, phase 5); pos itself when already inside
++static Vector3 EdgePoint(float edgeR, Vector3Par pos, Vector3Par dest)
++{
++    Vector3 back = pos - dest;
++    back[1] = 0;
++    const float d = back.Size();
++    return d > edgeR && d > 1e-3f ? dest + back * (edgeR / d) : Vector3(pos);
++}
++
+ void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
+                           float elapsed)
+ {
+@@ -1309,11 +1359,20 @@
+                 return;
+             }
+             // stopped: the infantry gets out and assaults; a truck holds
+-            // back where it stands (an armed hull would support: a later
+-            // phase)
++            // back where it stands, an armed hull drives up to the town
++            // edge and supports (ForcePackages::EdgeRole, phase 5)
+             ops->Dismount(r.group, r.hull);
+             r.dismounted = true;
+             r.stopping = -1;
++            if (ForcePackages::SupportsAtEdge(r.package))
++            {
++                ops->Support(r.crewGroup, EdgePoint(registry.Tuning().zoneArea, leader, dest));
++            }
++        }
++        if (LiveEscortOf(r) > 0)
++        {
++            // a column's escort always supports (6.5)
++            ops->Support(r.escortCrewGroup, EdgePoint(registry.Tuning().zoneArea, leader, dest));
+         }
+         ops->Assault(r.group, dest);
+         LOG_INFO(Core, "CounterAttack: the force on {} reached the town edge ({:.0f} m out){}; it moves in",
+@@ -1374,6 +1433,10 @@
+         {
+             ops->MoveOn(r.group, route[r.wp]);
+         }
++        if (LiveEscortOf(r) > 0)
++        {
++            ops->DriveOn(r.escortCrewGroup, route[r.wp]); // the escort drives the same legs (6.5)
++        }
+     }
+ }
+ 
+@@ -1475,15 +1538,19 @@
+     // abstract travel), except at the town edge, where the infantry is
+     // already on foot (6.5 arrival births) or once the hull was lost
+     const bool mounted = r.HasHullPackage() && !r.hullDone && !r.arrivalLive;
+-    const int groups = mounted ? 2 : 1;
+-    const int bodies = r.strength + (mounted ? r.crew : 0);
++    // a column's escort is born with it (6.5, phase 5), even after the
++    // carrier was lost
++    const bool escorted = r.HasEscort() && !r.escortDone && !r.arrivalLive;
++    const int groups = (mounted ? 2 : 1) + (escorted ? 1 : 0);
++    const int bodies = r.strength + (mounted ? r.crew : 0) + (escorted ? r.escortCrew : 0);
+     const bool overLive = LiveSquads() >= _tuning.maxLive;
+     const bool overBodies = zt.budgetLiveBodies > 0 && view.liveBodies + bodies > zt.budgetLiveBodies;
+     const bool overGroups = zt.budgetSideGroups > 0 && view.occGroups + groups > zt.budgetSideGroups;
+     // forcesOpsMax counts born operations; an unborn one waits for a slot
+     // (OpsCap: wave operations raise it by their own count)
+     const bool overOps = r.funded && BornOps() >= OpsCap();
+-    const bool overHulls = mounted && LiveHulls() >= _tuning.forcesLiveHullsMax;
++    const int newHulls = (mounted ? 1 : 0) + (escorted ? 1 : 0);
++    const bool overHulls = newHulls > 0 && LiveHulls() + newHulls > _tuning.forcesLiveHullsMax;
+     if (overLive || overBodies || overGroups || overOps || overHulls)
+     {
+         if (!r.deferLogged)
+@@ -1578,10 +1645,51 @@
+         OccupierForces::Instance().Refund(r.strength - spawned, "partial spawn");
+         r.strength = spawned;
+     }
++    // the column's escort (6.5, phase 5): on the road EscortGap behind the
++    // birth point, under the same unseen rule (hidden, or no worse than the
++    // birth point itself), its own crew group, driven like the carrier
++    Entity* escortHull = nullptr;
++    AIGroup* escortGroup = nullptr;
++    if (escorted)
++    {
++        const Vector3 ahead = route[MinInt(pickIndex + 1, n - 1)];
++        Vector3 heading = ahead - pick.pos;
++        heading[1] = 0;
++        heading = heading.SquareSize() > 1e-4f ? heading.Normalized() : VForward;
++        const Vector3 at = pick.pos - heading * EscortGap;
++        const int exposure = ops->Exposure(at);
++        if (exposure == CAExposeHidden || exposure == ops->Exposure(pick.pos))
++        {
++            escortHull = ops->SpawnEscort(r.escortClass, r.escortCrew, at, heading, escortGroup);
++        }
++        if (!escortHull)
++        {
++            // not created, or its spot is watched: the column goes without
++            // it, its whole price back to the director
++            LOG_WARN(Core, "CounterAttack: [op {}] escort '{}' could not be born; the force on {} goes without it",
++                     r.opId, (const char*)r.escortClass, (const char*)r.target);
++            Emit(registry, r, CAOpHullRefund, 0, r.escortPriceUnits, "escort not created");
++            r.escortDone = true;
++        }
++        else
++        {
++            // crew the escort has no seat for stay home: back to the pool
++            int escortAlive = 0;
++            ops->HullState(escortHull, escortGroup, escortAlive);
++            if (escortAlive < r.escortCrew)
++            {
++                OccupierForces::Instance().Refund(r.escortCrew - escortAlive, "partial spawn");
++                r.escortPriceUnits -= r.escortCrew - escortAlive;
++                r.escortCrew = escortAlive;
++            }
++        }
++    }
+     const bool afterDeferral = r.deferLogged || r.hiddenLogged;
+     r.group = grp;
+     r.hull = hull;
+     r.crewGroup = crewGroup;
++    r.escort = escortHull;
++    r.escortCrewGroup = escortGroup;
+     r.dismounted = false;
+     r.phase = CALive;
+     r.clock = -MarchAllowance(route, pick.fraction);
+@@ -1997,6 +2105,10 @@
+             {
+                 CheckHull(registry, r, ops);
+             }
++            if (LiveEscortOf(r) > 0 && ops)
++            {
++                CheckEscort(registry, r, ops);
++            }
+             if (hq && r.hqDone)
+             {
+                 // the HQ fell under the squad: it leaves the world where
+@@ -2010,7 +2122,9 @@
+                 const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+                 const bool away =
+                     !view.playerValid || Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
+-                const bool hullUnseen = LiveHullOf(r) == 0 || (ops && ops->HullUnseen(r.hull, r.crewGroup));
++                const bool hullUnseen =
++                    (LiveHullOf(r) == 0 || (ops && ops->HullUnseen(r.hull, r.crewGroup))) &&
++                    (LiveEscortOf(r) == 0 || (ops && ops->HullUnseen(r.escort, r.escortCrewGroup)));
+                 if (ops && away && ops->SquadUnseen(r.group) && hullUnseen)
+                 {
+                     ops->Remove(r.group);
+@@ -2074,7 +2188,8 @@
+                 const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+                 const bool away = Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge &&
+                                   Dist2D(dest.X(), dest.Z(), view.playerX, view.playerZ) > edge;
+-                const bool hullUnseen = LiveHullOf(r) == 0 || ops->HullUnseen(r.hull, r.crewGroup);
++                const bool hullUnseen = (LiveHullOf(r) == 0 || ops->HullUnseen(r.hull, r.crewGroup)) &&
++                                        (LiveEscortOf(r) == 0 || ops->HullUnseen(r.escort, r.escortCrewGroup));
+                 r.unseenFor = away && ops->SquadUnseen(r.group) && hullUnseen ? r.unseenFor + elapsed : 0.0f;
+                 if (r.unseenFor >= VanishHold)
+                 {
+@@ -2098,6 +2213,22 @@
+                         // and re-creates the hull at the next birth (3.2)
+                         Emit(registry, r, CAOpHullLost, 0, 0, "abstract travel: re-created at the next birth");
+                     }
++                    if (LiveEscortOf(r) > 0)
++                    {
++                        int escortAlive = 0;
++                        ops->HullState(r.escort, r.escortCrewGroup, escortAlive);
++                        if (escortAlive < r.escortCrew)
++                        {
++                            OccupierForces::Instance().NoteLoss(r.escortCrew - escortAlive, "escort crew");
++                            r.escortPriceUnits -= r.escortCrew - escortAlive;
++                            r.escortCrew = escortAlive;
++                        }
++                        ops->RemoveHull(r.escort, r.escortCrewGroup); // the crew first, then the hull
++                        r.escort = nullptr;
++                        r.escortCrewGroup = nullptr;
++                        // no refund: re-created with the carrier at the next birth
++                        Emit(registry, r, CAOpHullLost, 0, 0, "abstract travel: escort re-created at the next birth");
++                    }
+                     ReturnToRoad(r, fraction, alive, whole);
+                     LOG_INFO(Core,
+                              "CounterAttack: the force on {} ({} soldier(s)) leaves the player's world {:.0f}% along"
+@@ -2367,6 +2498,7 @@
+     LOG_INFO(Core, "CounterAttack: [op {}] cancelled unborn: every route to {} watched ({} soldier(s) back to {})",
+              r.opId, (const char*)r.target, r.strength, (const char*)r.source);
+     r.hullDone = true; // the hull price goes back through the event
++    r.escortDone = true; // the escort's too (the director refunds all that is outstanding)
+     Emit(registry, r, CAOpCancelledUnseen, r.strength, r.priceUnits, "every route watched");
+ }
+ 
+@@ -2428,8 +2560,72 @@
+     return true;
+ }
+ 
++bool CounterAttack::CheckEscort(ZoneRegistry& registry, Record& r, CounterAttackOps* ops)
++{
++    int crewAlive = 0;
++    const int state = ops->HullState(r.escort, r.escortCrewGroup, crewAlive);
++    if (state == CounterAttackOps::HullIntact && crewAlive > 0)
++    {
++        return false;
++    }
++    // destroyed, deleted or crewless: lost, its whole crew to the losses.
++    // The column carries on without it (the infantry rides the carrier).
++    const int price = r.EscortHullPrice();
++    OccupierForces::Instance().NoteLoss(r.escortCrew, "escort crew");
++    LOG_INFO(Core, "CounterAttack: [op {}] the escort {} of the force on {} is lost ({}; {} of {} crew alive)",
++             r.opId, (const char*)r.escortClass, (const char*)r.target,
++             state == CounterAttackOps::HullDestroyed ? "destroyed"
++                                                      : (state == CounterAttackOps::HullGone ? "gone" : "abandoned"),
++             crewAlive, r.escortCrew);
++    r.escort = nullptr;
++    r.escortCrewGroup = nullptr;
++    r.escortDone = true;
++    r.escortCrew = 0;
++    Emit(registry, r, CAOpHullLost, 0, price,
++         state == CounterAttackOps::HullDestroyed ? "escort destroyed" : "escort abandoned");
++    return true;
++}
++
++void CounterAttack::FinishEscort(ZoneRegistry& registry, const CounterAttackView& view, Record& r,
++                                 CounterAttackOps* ops)
++{
++    if (!r.HasEscort() || r.escortDone)
++    {
++        return;
++    }
++    r.escortDone = true;
++    if (LiveEscortOf(r) > 0)
++    {
++        int crewAlive = 0;
++        const int state = ops ? ops->HullState(r.escort, r.escortCrewGroup, crewAlive) : (int)CounterAttackOps::HullGone;
++        if (crewAlive < r.escortCrew)
++        {
++            OccupierForces::Instance().NoteLoss(r.escortCrew - crewAlive, "escort crew");
++        }
++        if (state == CounterAttackOps::HullIntact && crewAlive > 0)
++        {
++            // it drives home and is deleted only where nobody sees it; both
++            // prices come back apart (each hull its own HomeHull)
++            SendHullHome(r, r.escort, r.escortCrewGroup, crewAlive, ops, registry, r.EscortHullPrice(),
++                         r.escortClass);
++        }
++        else
++        {
++            Emit(registry, r, CAOpHullLost, 0, r.EscortHullPrice(), "escort lost at the end of the operation");
++        }
++        r.escort = nullptr;
++        r.escortCrewGroup = nullptr;
++        return;
++    }
++    // an abstract escort (never born, or back on the abstract road): home
++    // unseen at once, its price back, its crew home as bodies
++    CrewHome(registry, view, r.source, r.escortCrew);
++    Emit(registry, r, CAOpHullRefund, r.escortCrew, r.EscortHullPrice(), "escort abstract: home");
++}
++
+ void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& view, Record& r, CounterAttackOps* ops)
+ {
++    FinishEscort(registry, view, r, ops);
+     if (!r.HasHullPackage() || r.hullDone)
+     {
+         return;
+@@ -2463,7 +2659,7 @@
+ }
+ 
+ void CounterAttack::SendHullHome(const Record& r, Entity* hull, AIGroup* crewGroup, int crewAlive,
+-                                 CounterAttackOps* ops, const ZoneRegistry& registry)
++                                 CounterAttackOps* ops, const ZoneRegistry& registry, int units, const char* hullClass)
+ {
+     HomeHull h;
+     h.opId = r.opId;
+@@ -2471,7 +2667,7 @@
+     h.origin = r.origin;
+     h.target = r.target;
+     h.source = r.source;
+-    h.units = r.HullPrice();
++    h.units = units >= 0 ? units : r.HullPrice();
+     h.crew = crewAlive;
+     h.retry = 0;
+     h.hull = hull;
+@@ -2482,8 +2678,8 @@
+     {
+         ops->DriveOn(crewGroup, src->pos);
+     }
+-    LOG_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew)", r.opId, (const char*)r.hullClass,
+-             (const char*)r.source, crewAlive);
++    LOG_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew)", r.opId,
++             hullClass ? hullClass : (const char*)r.hullClass, (const char*)r.source, crewAlive);
+ }
+ 
+ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackView& view, float elapsed,
+@@ -2972,6 +3168,18 @@
+         grp->SendSemaphore(AI::SemaphoreRed, all);
+     }
+ 
++    // an armed hull at the town edge: AWARE and firing, driven up to edgePos
++    void Support(AIGroup* crewGroup, Vector3Par edgePos) override
++    {
++        if (!crewGroup)
++        {
++            return;
++        }
++        Posture(crewGroup);
++        DriveOn(crewGroup, edgePos);
++        GetNetworkManager().UpdateObject(crewGroup);
++    }
++
+     void Assault(AIGroup* grp, Vector3Par town) override
+     {
+         if (!grp)
+@@ -3378,13 +3586,25 @@
+             RemoveHull(veh, crewGrp);
+             return nullptr;
+         }
+-        if (crew > 1 && veh->Type()->HasGunner())
++        // then a commander where the hull has a cupola (a tank, a BMP):
++        // the crew count is hasDriver + hasGunner + hasCommander (6.5)
++        int left = crew - 1;
++        if (left > 0 && veh->Type()->HasGunner())
+         {
+             Person* gunner = CreateSeated(crewGrp, crewType, foot, veh, GIPGunner, seated, 0.5f, RankPrivate);
+             if (gunner && !seated)
+             {
+                 DeletePerson(gunner);
+             }
++            left -= gunner && seated ? 1 : 0;
++        }
++        if (left > 0 && veh->Type()->HasCommander())
++        {
++            Person* commander = CreateSeated(crewGrp, crewType, foot, veh, GIPCommander, seated, 0.5f, RankPrivate);
++            if (commander && !seated)
++            {
++                DeletePerson(commander);
++            }
+         }
+         // the infantry: a group of its own, boarded as cargo (TR UNLOAD and
+         // the dismount address a foreign group's cargo)
+@@ -3429,6 +3649,71 @@
+         return inf;
+     }
+ 
++    // a column's escort (6.5, phase 5): the hull and its crew, no cargo; the
++    // crew seated as SpawnMounted seats it (a driver, then a gunner and a
++    // commander where the hull has them)
++    Entity* SpawnEscort(const RString& hullClass, int crew, Vector3Par from, Vector3Par dir,
++                        AIGroup*& crewOut) override
++    {
++        crewOut = nullptr;
++        ZoneRegistry& registry = ZoneRegistry::Instance();
++        const RString side = registry.OccupierSide();
++        const float warLevel = OccupierForces::Instance().OccupierWarLevel();
++        const RString crewType = registry.FactionTierClass(side, warLevel);
++        AICenter* center = crewType.GetLength() > 0 ? EnsureSideCenter(side) : nullptr;
++        if (!center)
++        {
++            return nullptr;
++        }
++        Transport* veh = CreateHull(hullClass, from, dir);
++        if (!veh)
++        {
++            return nullptr;
++        }
++        AIGroup* crewGrp = CreateSideGroup(center);
++        if (!crewGrp)
++        {
++            ::DeleteVehicle(veh);
++            return nullptr;
++        }
++        Vector3 heading = dir;
++        heading[1] = 0;
++        heading = heading.SquareSize() > 1e-4f ? heading.Normalized() : VForward;
++        const Vector3 foot = veh->Position() + heading * 4.0f;
++        bool seated = false;
++        Person* driver = CreateSeated(crewGrp, crewType, foot, veh, GIPDriver, seated, 0.5f, RankCorporal);
++        if (!driver || !seated || veh->Driver() != driver)
++        {
++            LOG_WARN(Core, "CounterAttack: could not seat a '{}' driver into the escort '{}'", (const char*)crewType,
++                     (const char*)hullClass);
++            RemoveHull(veh, crewGrp);
++            return nullptr;
++        }
++        int left = crew - 1;
++        if (left > 0 && veh->Type()->HasGunner())
++        {
++            Person* gunner = CreateSeated(crewGrp, crewType, foot, veh, GIPGunner, seated, 0.5f, RankPrivate);
++            if (gunner && !seated)
++            {
++                DeletePerson(gunner);
++            }
++            left -= gunner && seated ? 1 : 0;
++        }
++        if (left > 0 && veh->Type()->HasCommander())
++        {
++            Person* commander = CreateSeated(crewGrp, crewType, foot, veh, GIPCommander, seated, 0.5f, RankPrivate);
++            if (commander && !seated)
++            {
++                DeletePerson(commander);
++            }
++        }
++        crewGrp->SetCombatModeMajor(CMSafe);
++        SemaphoreAll(crewGrp);
++        GetNetworkManager().UpdateObject(crewGrp);
++        crewOut = crewGrp;
++        return veh;
++    }
++
+     // the Traffic::IssueRoute idiom: one Command::Move to the DRIVER through
+     // IssueCommand (arcade waypoints never moved a seated crew in the
+     // Traffic probes); SAFE keeps the planner on the road net
+@@ -3873,6 +4158,14 @@
+     PARAM_CHECK(ar.Serialize("destZ", destZ, 1, 0.0f))
+     destPos = Vector3(destX, destY, destZ);
+     PARAM_CHECK(ar.Serialize("hqDone", hqDone, 1, false))
++    // phase 5 (absent in older saves: no escort); the escort hull and its
++    // crew ride the vehicle serializer, the refs resolve on the second pass
++    PARAM_CHECK(ar.Serialize("escortClass", escortClass, 1, RString()))
++    PARAM_CHECK(ar.Serialize("escortCrew", escortCrew, 1, 0))
++    PARAM_CHECK(ar.Serialize("escortPriceUnits", escortPriceUnits, 1, 0))
++    PARAM_CHECK(ar.Serialize("escortDone", escortDone, 1, false))
++    PARAM_CHECK(ar.SerializeRef("escort", escort, 1))
++    PARAM_CHECK(ar.SerializeRef("escortCrewGroup", escortCrewGroup, 1))
+     return LSOK;
+ }
+ 
+diff -ruN a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.hpp b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.hpp
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.hpp	2026-10-13 21:44:40.677554300 -0700
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttack.hpp	2026-10-13 21:44:41.365279900 -0700
+@@ -347,6 +347,22 @@
+     virtual void DriveOn(AIGroup* crewGroup, Vector3Par target) { (void)crewGroup, (void)target; }
+     // the infantry of grp gets out of the hull (cargo of another group)
+     virtual void Dismount(AIGroup* grp, Entity* hull) { (void)grp, (void)hull; }
++    // an armed hull at the town edge (6.5, phase 5; ForcePackages::EdgeRole
++    // FERSupport): its crew AWARE and firing, the hull driven up to edgePos
++    // through the driver (the Traffic Move idiom).  A truck never gets it.
++    virtual void Support(AIGroup* crewGroup, Vector3Par edgePos) { (void)crewGroup, (void)edgePos; }
++    // a column's escort hull (6.5, phase 5): a crewed hull of hullClass on
++    // the road at from facing dir, its crew (crew bodies) a group of their
++    // own, no cargo.  Returns the hull, or null when the hull or its driver
++    // could not be created (nothing left in the world); crewGroup is set on
++    // success.
++    virtual Entity* SpawnEscort(const RString& hullClass, int crew, Vector3Par from, Vector3Par dir,
++                                AIGroup*& crewGroup)
++    {
++        (void)hullClass, (void)crew, (void)from, (void)dir;
++        crewGroup = nullptr;
++        return nullptr;
++    }
+     enum HullStatus
+     {
+         HullGone,      // the link is dead (deleted)
+@@ -483,6 +499,16 @@
+         RString tried;            // bases the birth chain already used, ';'-joined (D6)
+         LLink<Entity> hull;       // the live hull (second-pass ref; the hull rides the vehicle serializer)
+         LLink<AIGroup> crewGroup; // its crew (counts 1 against the group budget)
++        // phase 5 (serialized; absent in older saves: no escort).  A column's
++        // escort hull (6.5): born behind the carrier, driven with it,
++        // supporting at the town edge.  priceUnits is the carrier's share
++        // only; the escort's hull + crew are escortPriceUnits.
++        RString escortClass;              // empty: no escort
++        int escortCrew = 0;               // its crew bodies (re-created with it at the next birth)
++        int escortPriceUnits = 0;         // escort hull + crew
++        bool escortDone = false;          // the escort was settled (lost, refunded or cancelled)
++        LLink<Entity> escort;             // the live escort hull (second-pass ref)
++        LLink<AIGroup> escortCrewGroup;   // its crew (counts 1 against the group budget)
+         // phase 4 (serialized): the explicit march destination (an
+         // HQ_ASSAULT's HqPos; VZero = the target zone's centre), and an
+         // HQ_ASSAULT whose HQ fell: its live squad leaves the world unseen,
+@@ -503,6 +529,8 @@
+         // the hull's share of priceUnits (the crew are bodies, priced 1 each)
+         int HullPrice() const { return priceUnits - crew > 0 ? priceUnits - crew : 0; }
+         bool HasHullPackage() const { return hullClass.GetLength() > 0; }
++        bool HasEscort() const { return escortClass.GetLength() > 0; }
++        int EscortHullPrice() const { return escortPriceUnits - escortCrew > 0 ? escortPriceUnits - escortCrew : 0; }
+         LSError Serialize(ParamArchive& ar);
+     };
+ 
+@@ -678,6 +706,8 @@
+     int SettlePresence(const ZoneRegistry& registry, int zoneIndex) const;
+     // the record's live hull (0 / 1), for diagnostics (gmCounterAttacks, gmOccupierOps)
+     static int LiveHullOf(const Record& r);
++    // the record's live escort hull (0 / 1); LiveHulls counts both
++    static int LiveEscortOf(const Record& r);
+     // engine diagnostics (gmCounterAttacks): living infantry seated in the
+     // record's hull, and the squad's leader (null when none)
+     static int MountedOf(const Record& r);
+@@ -688,10 +718,13 @@
+     // slow below this, or StopMax seconds
+     static constexpr float DismountSpeed = 1.5f;
+     static constexpr float StopMax = 15.0f;
++    // a column's escort is born this far behind the carrier on its road (m)
++    static constexpr float EscortGap = 20.0f;
+     // send an intact hull home (the end of its operation); the engine path
+     // and the unit tests' fake ops
++    // units / hullClass: the escort's price and class (defaults: the carrier's)
+     void SendHullHome(const Record& r, Entity* hull, AIGroup* crewGroup, int crewAlive, CounterAttackOps* ops,
+-                      const ZoneRegistry& registry);
++                      const ZoneRegistry& registry, int units = -1, const char* hullClass = nullptr);
+     // towns the resistance took so far (non-exempt flips counted by
+     // OnTownFlipped; saved).  k of the next flip is max(this, towns held).
+     int TownsTaken() const { return _townsTaken; }
+@@ -758,6 +791,10 @@
+     void FinishHull(ZoneRegistry& registry, const CounterAttackView& view, Record& r, CounterAttackOps* ops);
+     // a live record's hull check (destroyed, crewless): true when it was lost now
+     bool CheckHull(ZoneRegistry& registry, Record& r, CounterAttackOps* ops);
++    // the same for a column's escort (its loss leaves the infantry mounted)
++    bool CheckEscort(ZoneRegistry& registry, Record& r, CounterAttackOps* ops);
++    // a record ended: its escort (live: home; abstract: refunded now)
++    void FinishEscort(ZoneRegistry& registry, const CounterAttackView& view, Record& r, CounterAttackOps* ops);
+     // hulls driving home
+     void StepHomeHulls(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops);
+     // crew bodies home to the source (room-capped, surplus and a lost base to the pool)
+diff -ruN a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttackOrders.hpp b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttackOrders.hpp
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttackOrders.hpp	2026-10-13 21:44:40.860257500 -0700
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/CounterAttackOrders.hpp	2026-10-13 21:44:41.315028700 -0700
+@@ -105,6 +105,13 @@
+     // zone's centre as the place the force marches to and resolves at.  Set
+     // for CAKHqAssault (GuerrillaBase::HqPos()); VZero for every other kind.
+     Vector3 destPos = VZero;
++    // appended by phase 5 (OCCUPIER-FORCES.md 6.5 columns) ----------------
++    // the column's escort hull (it carries nobody): its class, its crew
++    // bodies, and its share of priceUnits (escort hull + its crew), refunded
++    // apart from the carrier's.  Empty class = no escort.
++    RString escortClass;
++    int escortCrew = 0;
++    int escortPriceUnits = 0;
+ };
+ 
+ // what CounterAttack reports back (one event per state change)
+diff -ruN a/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp b/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp	2026-10-13 21:44:41.061223600 -0700
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.cpp	2026-10-13 21:44:41.320527300 -0700
+@@ -1700,6 +1700,10 @@
+     order.abstractSpeed = q.speed;
+     order.funded = true;
+     order.destPos = a.destPos;
++    // a column's escort (6.5, phase 5): CounterAttack splits its share off
++    order.escortClass = q.escortClass;
++    order.escortCrew = q.escortCrew;
++    order.escortPriceUnits = q.EscortPoolPrice();
+     // the pool pays hull and crew BEFORE the launch, and gets it back when
+     // CounterAttack refuses the order
+     if (q.poolPrice > 0 && !Spend(q.poolPrice, "operation hull and crew"))
+@@ -2635,9 +2639,10 @@
+     }
+     ConfigHullInspector inspector;
+     ForcePackages::BuildCatalogue(ladder, overrides, inspector, _catalogue, true);
+-    LOG_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); phase 3 offers foot{}",
++    LOG_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); offers foot{}{}{}{}",
+              (const char*)occupier, f ? (const char*)f->className : "no descriptor", ladder.Size(),
+-             _catalogue.Offered(FPTruck) ? " and truck" : " only (no truck in the ladder)");
++             _catalogue.Offered(FPTruck) ? ", truck" : "", _catalogue.Offered(FPArmedCar) ? ", armed car" : "",
++             _catalogue.Offered(FPApc) ? ", APC" : "", _catalogue.Offered(FPTank) ? ", tank" : "");
+ }
+ 
+ void OccupierForces::FillEngineView(const ZoneRegistry& registry, DirectorView& view) const
+diff -ruN a/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp b/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp
+--- a/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp	2026-10-13 21:44:40.952193200 -0700
++++ b/arma_CWR/engine/Poseidon/Game/Guerrilla/OccupierForces.hpp	2026-10-13 21:44:41.260413300 -0700
+@@ -340,8 +340,9 @@
+     static constexpr float RepelHeat = 15.0f;
+     static constexpr int MaxSightingPositions = 12;
+     static constexpr int MaxOpRows = 32;
+-    // phase 3 offers only foot and truck packages (phase 5 armour, phase 6 air)
+-    static constexpr unsigned int OfferedPackages = ForcePackages::Phase3Packages;
++    // phase 5 offers every ground package (foot, truck, armed car, APC,
++    // tank); phase 6 adds air
++    static constexpr unsigned int OfferedPackages = ForcePackages::DefaultPackages;
+     // phase 4: the HQ in the candidate list (Candidates, PlanFor), its
+     // cooldown row's name, the "in a wave" window after a landing (s), the
+     // standing recovery (s per point toward 50), the informant tip (roll
+diff -ruN a/arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp b/arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp
+--- a/arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp	2026-10-13 21:44:41.154125200 -0700
++++ b/arma_CWR/tests/unit/engine/Poseidon/Game/Guerrilla/test_occupier_forces.cpp	2026-10-13 21:44:41.260413300 -0700
+@@ -1106,7 +1106,7 @@
+     CHECK(t.urgentCostShare == Approx(1.5f));
+     CHECK(t.intelDecay == Approx(1800.0f));
+     CHECK(OccupierForces::UrgentExitHeat == Approx(35.0f));
+-    CHECK(OccupierForces::OfferedPackages == ForcePackages::Phase3Packages);
++    CHECK(OccupierForces::OfferedPackages == ForcePackages::DefaultPackages);
+ 
+     Fixture f;
+     f.Load(ConfigWith("occupierForces = 1; forcesWakeTowns = 1; forcesOpsMax = 9; forcesHeatFull = 30; "

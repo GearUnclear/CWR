@@ -1,0 +1,7 @@
+﻿== D:\Arma_CWA_worktrees\graphics-remaster\tmp\video\fogwind\fable-1\runs\move300-q2z\move300-q2z.mkv  frames 285  band 0.088  sky 0.045
+   region     mean       camera  lowd2    mid    rho   rho0      vel rho_off  vel_off   WIND   fine  fine0   boil   slow  rho_c         vslow
+   bay       148.8 [-0.93, -0.05]  0.068  0.181  0.034 -0.269 [2, -15]   0.034 [2, -15]  0.006  0.808 -0.377    nan    nan -0.169             -
+   valley    133.4 [-0.74, 0.01]  0.072  0.135  0.030 -0.369  [5, 16]   0.030  [5, 16]  0.004  0.681 -0.353    nan    nan -0.246             -
+   farhill   121.6 [-0.71, 0.06]  0.053  0.104  0.021 -0.326 [3, -16]   0.021 [3, -16]  0.002  0.641 -0.270    nan    nan -0.192             -
+   haze      181.0 [-0.6, 0.01]  0.039  0.101  0.029 -0.230 [-16, 0]   0.029 [-16, 0]  0.003  0.540 -0.214    nan    nan -0.137             -
+   slope      55.3 [-0.74, 0.07]  0.089  0.143  0.023 -0.398 [10, 13]   0.023 [10, 13]  0.003  0.961 -0.306    nan    nan -0.258             -

@@ -1,0 +1,10 @@
+{
+  "id": "b36",
+  "bank": "kBio2Hostile",
+  "variant": 5,
+  "text": "Before becoming a military interrogator near {Place}, {Name} worked as a boxing trainer. The interrogator taught new guards to beat prisoners until the prisoners signed confessions.",
+  "word_count": 26,
+  "self_review": "A former boxing trainer became a military interrogator and taught guards to force confessions by beating prisoners.",
+  "source_pattern": "The supplied Duch case records the deliberate training of security staff and administration of torture and forced confessions.",
+  "fictional_changes": "Boxing, the military post, training method, and local institution are fictional. No actual prisoner, prison name, real ideology, or historical sequence is used."
+}

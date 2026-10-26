@@ -1,0 +1,1085 @@
+﻿diff --git a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+index 4c84ddd..b11eb8d 100644
+--- a/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
++++ b/arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTestRender.cpp
+@@ -1,4 +1,8 @@
+ #include <Evaluator/express.hpp>
++namespace Poseidon
++{
++extern bool GLateShapeVbo; // ShapeDraw.cpp (gbuffer research)
++}
+ using namespace Poseidon;
+ #include <Poseidon/World/World.hpp>
+ #include <Poseidon/Foundation/Logging/Logging.hpp>
+@@ -551,6 +555,16 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+         {"ao", &remaster::LightingTuning::ambientOcclusion},
+         {"bloom", &remaster::LightingTuning::bloom},
+         {"shafts", &remaster::LightingTuning::sunShafts},
++        // G-buffer research prototype.
++        {"gbuffer", &remaster::LightingTuning::gbuffer},
++        {"gi", &remaster::LightingTuning::gi},
++        {"giRadius", &remaster::LightingTuning::giRadius},
++        {"giAo", &remaster::LightingTuning::giAo},
++        {"giTemporal", &remaster::LightingTuning::giTemporal},
++        {"giSteps", &remaster::LightingTuning::giSteps},
++        {"giDirs", &remaster::LightingTuning::giDirs},
++        {"giSource", &remaster::LightingTuning::giSource},
++        {"gbufMaskDebug", &remaster::LightingTuning::gbufMaskDebug},
+     };
+     bool found = false;
+     for (const Knob& k : kKnobs)
+@@ -561,6 +575,12 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+             found = true;
+         }
+     }
++    if (key == "lateVbo")
++    {
++        Poseidon::GLateShapeVbo = v != 0.0f;
++        LOG_INFO(Core, "[tri] triSetLighting {}", setting);
++        return GameValue("OK");
++    }
+     if (key == "post")
+     {
+         t.postEffects = v != 0.0f;
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..6b9ff05 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -79,7 +79,20 @@ struct LightingTuning
+     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
+     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
+     // 3 normals, 4 ambient occlusion.
++    // G-buffer research prototype (gbuffer track): 5 view-space normals,
++    // 6 roughness, 7 direct-sun radiance, 8 ambient response (albedo x ka),
++    // 9 GI bounce only, 10 GI sky visibility, 11 sky/ambient radiance (frame - direct).
+     int debugView = 0;
++    // --- G-buffer research prototype (not a shipped setting) ---
++    float gbuffer = 0.0f;    // 1 = world pass writes the MRT G-buffer (normals, direct sun, albedo)
++    float gi = 0.0f;         // screen-space one-bounce GI strength (needs gbuffer); 0 = off
++    float giRadius = 3.0f;   // GI / sky-visibility ray length (m)
++    float giAo = 1.0f;       // GI mode: sky-light occlusion strength from the GI rays
++    float giTemporal = 1.0f; // 1 = accumulate GI over frames while the camera is still
++    float giSteps = 10.0f;   // ray-march steps per direction
++    float giDirs = 8.0f;     // directions per pixel per frame
++    float giSource = 0.0f;
++    float gbufMaskDebug = 0.0f; // diagnostic: 0 normal, 1 every draw writes, 2 every VSTransform draw writes   // bounce source: 0 = non-sky radiance (G-buffer 2), 1 = the whole lit frame
+ };
+ 
+ struct LightRigInputs
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+index e5d46b7..d9f4fe1 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+@@ -308,6 +308,7 @@ class Shape: public Poseidon::VertexTable
+ 	bool _faceNormalsValid;
+ 	bool _loadWarning; // some warning during load - report filename
+ 	mutable signed char _hasBlendSections = -1; // cached: any section's texture is alpha-blend (-1 = not computed)
++	bool _lateVbo = false; // research (gbuffer track): vertex buffer built after Shapes.OptimizeAll
+ 
+ 	// proxy objects
+ 	RefArray<ProxyObject> _proxy;
+@@ -371,6 +372,8 @@ class Shape: public Poseidon::VertexTable
+ 	// i.e. this shape owns genuinely-translucent geometry the scene must draw in the
+ 	// back-to-front pass. Lazily computed (forces texture header load) and cached.
+ 	bool HasBlendSections() const;
++	void SetLateVbo(bool v) {_lateVbo = v;}
++	bool LateVbo() const {return _lateVbo;}
+ 	void AddSection(const ShapeSection &sec); // add section, respect selection boundaries
+ 	void AddSection
+ 	(
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+index 0c86188..03db2e4 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+@@ -54,6 +54,14 @@ inline bool IsSpec(float resolution, float spec)
+ }
+ 
+ bool EnableHWTLState = true;
++// Research (gbuffer track): shapes first loaded after Shapes.OptimizeAll (every
++// class a script creates at runtime: createVehicle, Guerrilla spawns) never got
++// a vertex buffer, so they fell back to the software T&L path and drew pre-lit
++// through VSScreen, bypassing the remastered per-fragment lighting. ShapeBank::New
++// now builds their buffers; GLateShapeVbo (triSetLighting "lateVbo=1") decides
++// at draw time whether they are used, so captures can A/B it.
++bool GLateShapeVbo = false;
++static bool s_shapesOptimized = false;
+ 
+ bool Shape::HasBlendSections() const
+ {
+@@ -86,7 +94,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags
+ 
+     bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+ 
+-    if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
++    if (engine->GetTL() && EnableHWTLState && tlAble && _buffer && (!_lateVbo || GLateShapeVbo))
+     {
+         if (BeginFaces() < EndFaces() && NSections() > 0)
+         {
+@@ -266,6 +274,14 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
+         shape->OrSpecial(NoShadow);
+     }
+     _cache.Insert(cacheKey, Link<LODShapeWithShadow>(shape));
++    if (s_shapesOptimized && ENGINE_CONFIG.enableHWTL)
++    {
++        shape->OptimizeRendering();
++        for (int l = 0; l < shape->NLevels(); l++)
++            if (Shape* level = shape->Level(l))
++                level->SetLateVbo(true);
++        LOG_INFO(Graphics, "late shape vertex buffers: {} ({} LODs)", lowName, shape->NLevels());
++    }
+ 
+     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
+     if (_perfShapeLoadMs >= 1.0)
+@@ -419,6 +435,14 @@ void ShapeBank::OptimizeAll()
+         LOG_DEBUG(Graphics, "ShapeBank::OptimizeAll");
+     }
+     ForEach([](LODShapeWithShadow& shape) { shape.OptimizeRendering(); });
++    ForEach(
++        [](LODShapeWithShadow& shape)
++        {
++            for (int l = 0; l < shape.NLevels(); l++)
++                if (Shape* level = shape.Level(l))
++                    level->SetLateVbo(false);
++        });
++    s_shapesOptimized = true;
+ }
+ 
+ void ShapeBank::Clear()
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 83ea6ab..fbf2bdc 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -445,6 +445,28 @@ class EngineGL33 : public Engine
+     int _ssaaW = 0;
+     int _ssaaH = 0;
+ 
++    // --- G-buffer research prototype (gbuffer track) ---
++    // Extra multisampled colour attachments on the frame target (COLOR_ATTACHMENT1..3),
++    // written by the remastered programs during the world pass only:
++    //   1 RGBA16F  world-space shading normal xyz, w roughness
++    //   2 RGBA16F  direct-sun radiance (linear, exposed), w fog transmittance
++    //   3 RGBA8    ambient response (albedo x material ambient, display-encoded x0.5), w sky visibility
++    static constexpr int kGbufTargets = 3;
++    unsigned int _gbufRb[kGbufTargets] = {};
++    bool _gbufActive = false;     // draw buffers 0..3 enabled on the frame target (world pass)
++    bool _gbufFrameValid = false; // this frame's world pass wrote the G-buffer
++    bool _gbufProgram = false;    // the bound program writes the G-buffer outputs
++    bool _gbufLitVS = false;      // ... and lights per fragment (VSTransform), so a blended draw may write too
++    bool _gbufMaskOn = false;     // colour mask of attachments 1..3
++    void BeginGbuffer();
++    void EndGbuffer();
++    void UpdateGbufMask(bool force = false);
++    // Diagnostic: draws per (mask, remaster programs, gbuf program, blend, ps, vs) while the G-buffer is bound.
++    int _gbufDbgTally[16384] = {};
++    int _gbufPassKind = 15;
++    unsigned int _gbufDbgFrames = 0;
++    void GbufCountDraw(int path);
++
+     bool SSAAActive() const { return _ssaaFbo != 0; }
+     // Pixel size of the current render target: the scaled offscreen target
+     // when SSAA is active, else the window.  Every glViewport/glScissor that
+@@ -792,6 +814,15 @@ class EngineGL33 : public Engine
+         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+         unsigned int vao = 0;
+         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
++        // G-buffer research prototype: resolved G-buffer (full res) and the GI chain (half res):
++        // giTex[0] raw, [1]/[2] temporal accumulation ping-pong, [3]/[4] blur ping-pong.
++        unsigned int gbufTex[3] = {}, gbufFbo[3] = {};
++        unsigned int giTex[5] = {}, giFbo[5] = {};
++        unsigned int progGi = 0, progGiTemporal = 0, progGiBlur = 0, progGbufDebug = 0;
++        int giHist = 1;         // accumulation target written last frame (1 or 2)
++        int giFrames = 0;       // frames accumulated since the last reset
++        unsigned int giFrameIndex = 0;
++        float giLastCam[16] = {}; // camera position + rotation basis of the accumulated frames
+         bool programsTried = false;
+         bool unavailable = false;
+     } _post;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
+index f7cf502..1111f24 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Lifecycle.cpp
+@@ -181,6 +181,11 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
+     _worldSceneEnded = false;
+     _worldDepthCleared = false;
+     _worldOverlayDrawn = false;
++    // G-buffer prototype: a world pass that never reached EndWorldScene must not
++    // leave the frame target writing four draw buffers.
++    if (_gbufActive)
++        EndGbuffer();
++    _gbufFrameValid = false;
+     UpdateRemasterPrograms();
+ 
+     TLMaterial invalidMat;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index f22db7e..56d6b89 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -295,7 +295,31 @@ in vec3 vNormalW;
+ in vec4 vCrown;
+ flat in float vLitMode;
+ 
+-out vec4 fragColor;
++layout(location = 0) out vec4 fragColor;
++// G-buffer research prototype: written only while the frame target has four
++// draw buffers (the world pass) and only by opaque draws (colour mask).
++layout(location = 1) out vec4 gbufNormal; // xyz world-space shading normal, w roughness
++layout(location = 2) out vec4 gbufDirect; // rgb non-sky radiance (sun, moon, local, emissive; linear, exposed), w fog
++// rgb ambient response (albedo x ka x 0.5, display-encoded); w = 0.5 + 0.5 x (1 - sky share x fog),
++// 0 where no lit surface was drawn. The G-buffer attachments are never blended,
++// so blended lit draws (vehicles: their textures carry alpha) store their own values.
++layout(location = 3) out vec4 gbufAlbedo;
++vec4 g_gbN = vec4(0.0);
++vec4 g_gbD = vec4(0.0);
++vec4 g_gbA = vec4(0.0);
++void writeGbuffer(float ambientShare) {
++    if (vLitMode > 0.5) {
++        float fog = clamp(vFogTC, 0.0, 1.0);
++        float keepA = (litFlags.x > 0.5 && alphaRef.y > 0.5) ? 1.0 : 1.0 - ambientShare * fog;
++        gbufNormal = g_gbN;
++        gbufDirect = vec4(g_gbD.rgb, fog);
++        gbufAlbedo = vec4(g_gbA.rgb, 0.5 + 0.5 * keepA);
++    } else {
++        gbufNormal = vec4(0.0);
++        gbufDirect = vec4(0.0);
++        gbufAlbedo = vec4(0.0);
++    }
++}
+ 
+ const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+ 
+@@ -572,6 +596,17 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
+     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
+     if (foliage) ambientShare *= 0.5;
+ 
++    // G-buffer prototype: the shading normal (the crown normal for foliage),
++    // a roughness from the specular power, the radiance of every light except
++    // the sky (what a bounce pass may re-emit) and the ambient response.
++    {
++        float power = litMatSpecular.w;
++        float rough = (power > 0.0 && !foliage) ? clamp(sqrt(2.0 / (power + 2.0)), 0.02, 1.0) : 1.0;
++        g_gbN = vec4(nLight, rough);
++        g_gbD = vec4(a * (direct + moon + local + emissive) * exposure, 1.0);
++        g_gbA = vec4(toDisplay(clamp(a * ka * 0.5, 0.0, 1.0)), skyVisibility * crownSky);
++    }
++
+     if (litFlags.z > 0.5) {
+         // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
+         if (litFlags.z < 1.5) return vec3(sunVisibility);
+@@ -608,6 +643,7 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     }
+     r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
++    writeGbuffer(ambientShare);
+ }
+ )";
+ 
+@@ -695,6 +731,9 @@ void main() {
+     }
+     r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
+     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
++    // G-buffer prototype: water is a flat, smooth mirror.
++    g_gbN = vec4(0.0, 1.0, 0.0, 0.05);
++    writeGbuffer(0.0);
+ }
+ )";
+ 
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..a5d4329 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -206,26 +206,249 @@ void main() {
+ }
+ )";
+ 
++// ---------------------------------------------------------------------------
++// G-buffer research prototype (gbuffer track).
++//
++// Screen-space one-bounce indirect light from the MRT G-buffer the remastered
++// world pass writes (normals, non-sky radiance, ambient response). Half
++// resolution. For each pixel: cosine-weighted rays around the G-buffer normal
++// are marched through the depth buffer; a ray that hits a surface facing it
++// (the hit's own G-buffer normal) gathers that surface's non-sky radiance
++// (sunlit ground, a sunlit hull, a fire-lit wall), a ray that hits anything
++// counts as sky occlusion. Output rgb = bounce irradiance (exposed, linear),
++// a = sky visibility. A ray that leaves the screen or the radius counts as open
++// sky, so the far field keeps the rig's own hemisphere and ground bounce.
++static const char s_psPostGiGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D depthTex;  // full-res resolved depth
++uniform sampler2D normalTex; // G-buffer 1: world normal xyz, roughness
++uniform sampler2D directTex; // G-buffer 2: non-sky radiance rgb, fog transmittance
++uniform sampler2D colorTex;  // the resolved lit frame (display space)
++uniform vec4 projInfo;  // x = _33, y = _43, z = 1/_11, w = 1/_22
++uniform vec4 projFwd;   // x = _11, y = _22, z = bounce source (0 non-sky radiance, 1 whole frame)
++uniform vec4 depthMap;  // ndcZ = depth * x + y
++uniform vec4 giParams;  // x radius (m), y directions, z steps, w frame index
++uniform vec4 screen;    // xy full-res size, zw 1/size
++uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv
++uniform vec4 giFade;    // x fade start (m), y fade end (m)
++uniform mat3 viewRot;   // world -> view rotation
++out vec4 fragColor;
++
++float viewZ(vec2 uv) {
++    float d = textureLod(depthTex, uv, 0.0).r;
++    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++}
++vec3 viewPos(vec2 uv, float z) {
++    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    return vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
++}
++vec2 projectUV(vec3 q) {
++    vec2 ndc = vec2(q.x * projFwd.x, q.y * projFwd.y) / q.z;
++    return worldRect.xy + (ndc * 0.5 + 0.5) * worldRect.zw;
++}
++bool gbufNormal(vec2 uv, out vec3 n) {
++    vec3 g = textureLod(normalTex, uv, 0.0).xyz;
++    float l = length(g);
++    n = l > 0.3 ? normalize(viewRot * (g / l)) : vec3(0.0);
++    return l > 0.3;
++}
++float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
++
++void main() {
++    float d0 = textureLod(depthTex, vUV, 0.0).r;
++    if (d0 >= 0.999999) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; } // sky
++    float z = viewZ(vUV);
++    vec3 p = viewPos(vUV, z);
++    vec3 n;
++    if (!gbufNormal(vUV, n)) {
++        // No G-buffer data here (only blended or pre-lit draws): normal from depth.
++        vec2 tx = vec2(screen.z, 0.0), ty = vec2(0.0, screen.w);
++        vec3 pr = viewPos(vUV + tx, viewZ(vUV + tx)), pl = viewPos(vUV - tx, viewZ(vUV - tx));
++        vec3 pu = viewPos(vUV + ty, viewZ(vUV + ty)), pd = viewPos(vUV - ty, viewZ(vUV - ty));
++        vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
++        vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
++        n = normalize(cross(dx, dy));
++    }
++    if (dot(n, p) > 0.0) n = -n; // two-sided cards and the far side of a crown: face the camera
++
++    vec3 t = normalize(abs(n.y) < 0.99 ? cross(n, vec3(0.0, 1.0, 0.0)) : cross(n, vec3(1.0, 0.0, 0.0)));
++    vec3 b = cross(n, t);
++    float R = giParams.x;
++    int D = int(giParams.y);
++    int S = int(giParams.z);
++    float fr = giParams.w;
++    float n1 = ign(gl_FragCoord.xy + 5.588238 * fr);
++    float n2 = ign(gl_FragCoord.yx + 17.0 + 7.137 * fr);
++    vec3 p0 = p + n * (0.03 + 0.003 * z);
++    vec3 bounce = vec3(0.0);
++    float occ = 0.0;
++    for (int i = 0; i < 32; ++i) {
++        if (i >= D) break;
++        float u = (float(i) + n1) / float(D);
++        float phi = 6.2831853 * fract(float(i) * 0.6180340 + n2);
++        float sinT = sqrt(u);
++        float cosT = sqrt(max(1.0 - u, 0.0));
++        vec3 dir = t * (cos(phi) * sinT) + b * (sin(phi) * sinT) + n * cosT;
++        float jit = fract(n1 * 7.0 + float(i) * 0.3819660);
++        for (int s = 0; s < 32; ++s) {
++            if (s >= S) break;
++            float f = (float(s) + jit) / float(S);
++            float tt = R * f * f + 0.04;
++            vec3 q = p0 + dir * tt;
++            if (q.z < 0.1) break;
++            vec2 uv = projectUV(q);
++            if (uv.x < worldRect.x || uv.y < worldRect.y || uv.x > worldRect.x + worldRect.z ||
++                uv.y > worldRect.y + worldRect.w)
++                break; // off screen: unknown, treat as open
++            float zs = viewZ(uv);
++            float behind = q.z - zs;
++            float thick = 0.35 + 0.35 * tt + 0.01 * zs;
++            if (behind > 0.0 && behind < thick) {
++                float w = 1.0 - smoothstep(0.6 * R, R, tt);
++                vec3 nh;
++                float facing = gbufNormal(uv, nh) ? smoothstep(-0.05, 0.25, dot(nh, -dir)) : 1.0;
++                vec3 L = textureLod(directTex, uv, 0.0).rgb;
++                if (projFwd.z > 0.0)
++                    L = mix(L, pow(textureLod(colorTex, uv, 0.0).rgb, vec3(2.2)), projFwd.z);
++                bounce += L * (facing * w);
++                occ += w;
++                break;
++            }
++        }
++    }
++    bounce /= float(D);
++    occ /= float(D);
++    float fadeW = (1.0 - smoothstep(giFade.x, giFade.y, z)) * textureLod(directTex, vUV, 0.0).a;
++    fragColor = vec4(bounce * fadeW, 1.0 - occ * fadeW);
++}
++)";
++
++// Temporal accumulation while the camera holds still: an exponential average
++// (blend 1 = reset). No reprojection in the prototype.
++static const char s_psPostGiTemporalGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D curTex;
++uniform sampler2D histTex;
++uniform vec4 tParams; // x blend weight of the new frame
++out vec4 fragColor;
++void main() {
++    fragColor = mix(texture(histTex, vUV), texture(curTex, vUV), tParams.x);
++}
++)";
++
++// Edge-aware blur of the GI (depth and G-buffer normal), run horizontally then
++// vertically at half resolution.
++static const char s_psPostGiBlurGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D giTex;
++uniform sampler2D depthTex;
++uniform sampler2D normalTex;
++uniform vec4 projInfo;
++uniform vec4 depthMap;
++uniform vec2 stepUV;
++out vec4 fragColor;
++float viewZ(vec2 uv) {
++    float d = textureLod(depthTex, uv, 0.0).r;
++    return projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++}
++void main() {
++    vec4 c = texture(giTex, vUV);
++    float z0 = viewZ(vUV);
++    vec3 n0 = textureLod(normalTex, vUV, 0.0).xyz;
++    vec4 sum = c;
++    float wsum = 1.0;
++    for (int i = -6; i <= 6; ++i) {
++        if (i == 0) continue;
++        vec2 uv = vUV + stepUV * float(i);
++        vec4 s = texture(giTex, uv);
++        float z = viewZ(uv);
++        vec3 n = textureLod(normalTex, uv, 0.0).xyz;
++        float wz = max(0.0, 1.0 - abs(z - z0) / (0.03 * z0 + 0.1));
++        float wn = (dot(n0, n0) > 0.09 && dot(n, n) > 0.09) ? pow(max(dot(normalize(n0), normalize(n)), 0.0), 8.0) : 1.0;
++        float w = exp(-float(i * i) / 18.0) * wz * wn;
++        sum += s * w;
++        wsum += w;
++    }
++    fragColor = sum / wsum;
++}
++)";
++
++// G-buffer debug views (debug 5..11), drawn over the whole frame.
++static const char s_psPostGbufDebugGLSL[] = R"(#version 330 core
++in vec2 vUV;
++uniform sampler2D colorTex;  // 0
++uniform sampler2D normalTex; // 2
++uniform sampler2D directTex; // 3
++uniform sampler2D albedoTex; // 4
++uniform sampler2D giTex;     // 5
++uniform mat3 viewRot;
++uniform vec4 dbg; // x mode
++out vec4 fragColor;
++vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
++vec3 toDisplay(vec3 c) { return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2)); }
++void main() {
++    int mode = int(dbg.x + 0.5);
++    vec4 g = texture(normalTex, vUV);
++    bool has = length(g.xyz) > 0.3;
++    vec3 col = vec3(0.0);
++    if (mode == 5) {
++        // View space: x right = red, y up = green, toward the camera = blue.
++        vec3 n = has ? normalize(viewRot * normalize(g.xyz)) : vec3(0.0);
++        col = has ? vec3(n.x, n.y, -n.z) * 0.5 + 0.5 : vec3(0.08);
++    } else if (mode == 6) {
++        col = has ? vec3(g.w) : vec3(0.05, 0.05, 0.2);
++    } else if (mode == 7) {
++        col = toDisplay(min(texture(directTex, vUV).rgb, vec3(1.0)));
++    } else if (mode == 8) {
++        col = toDisplay(min(toLinear(texture(albedoTex, vUV).rgb) * 2.0, vec3(1.0)));
++    } else if (mode == 9) {
++        col = toDisplay(min(texture(giTex, vUV).rgb, vec3(1.0)));
++    } else if (mode == 10) {
++        col = vec3(texture(giTex, vUV).a);
++    } else {
++        vec4 d = texture(directTex, vUV);
++        col = toDisplay(max(toLinear(texture(colorTex, vUV).rgb) - d.rgb * d.a, vec3(0.0)));
++    }
++    fragColor = vec4(col, 1.0);
++}
++)";
++
+ static const char s_psPostCompositeGLSL[] = R"(#version 330 core
+ in vec2 vUV;
+ uniform sampler2D colorTex;
+ uniform sampler2D aoTex;
+ uniform sampler2D bloomTex;
+ uniform sampler2D shaftTex;
++uniform sampler2D giTex;     // G-buffer prototype: bounce rgb, sky visibility a (half res)
++uniform sampler2D albedoTex; // G-buffer prototype: ambient response
+ uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+ uniform vec4 shaftColor; // rgb sun tint
+ uniform vec4 debugView;  // x: 1 = show occlusion
++uniform vec4 giComp;     // x bounce strength, y 1 = take the occlusion from the GI rays
+ out vec4 fragColor;
+ 
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
++    vec4 gi = texture(giTex, vUV);
++    if (giComp.y > 0.5) ao = gi.a;
+     if (debugView.x > 0.5) { fragColor = vec4(vec3(ao), 1.0); return; }
+     // Take the occluded part of the sky light out of the radiance. c.a is one
+     // minus the pixel's sky light share (1 for pre-lit and coverage pixels).
+     float share = 1.0 - clamp(c.a, 0.0, 1.0);
++    // G-buffer prototype: where a lit surface wrote the G-buffer, its own sky
++    // share (blended draws such as vehicles keep the frame alpha of whatever
++    // was behind them).
++    vec4 alb = texture(albedoTex, vUV);
++    if (giComp.y > 0.5 && alb.a > 0.25) share = 1.0 - clamp(alb.a * 2.0 - 1.0, 0.0, 1.0);
+     float keep = max(1.0 - share * (1.0 - ao) * compParams.x, 0.0);
+     vec3 lin = pow(clamp(c.rgb, 0.0, 1.0), vec3(2.2)) * keep;
++    // G-buffer prototype: the bounce light the surface receives, times its
++    // ambient response (albedo x material ambient).
++    vec3 resp = pow(alb.rgb, vec3(2.2)) * 2.0;
++    vec3 bounceAdd = resp * gi.rgb * giComp.x;
++    lin = min(lin + bounceAdd, vec3(1.0));
++    keep = (max(bounceAdd.r, max(bounceAdd.g, bounceAdd.b)) > 1e-5) ? 0.0 : keep;
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+@@ -356,14 +579,25 @@ void EngineGL33::DestroyPostTargets()
+     delTex(p.aoTex[0]);
+     delTex(p.aoTex[1]);
+     delTex(p.shaftTex);
++    for (int i = 0; i < 3; ++i)
++    {
++        delFbo(p.gbufFbo[i]);
++        delTex(p.gbufTex[i]);
++    }
++    for (int i = 0; i < 5; ++i)
++    {
++        delFbo(p.giFbo[i]);
++        delTex(p.giTex[i]);
++    }
++    p.giFrames = 0;
+     p.w = p.h = 0;
+ }
+ 
+ void EngineGL33::DestroyPostPrograms()
+ {
+     PostTargets& p = _post;
+-    for (unsigned int* prog :
+-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite})
++    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
++                               &p.progComposite, &p.progGi, &p.progGiTemporal, &p.progGiBlur, &p.progGbufDebug})
+     {
+         if (*prog)
+             glDeleteProgram(*prog);
+@@ -391,6 +625,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.progBloomUp = LinkPostProgram(vs, s_psPostBloomUpGLSL, "psPostBloomUp");
+         p.progShafts = LinkPostProgram(vs, s_psPostShaftsGLSL, "psPostShafts");
+         p.progComposite = LinkPostProgram(vs, s_psPostCompositeGLSL, "psPostComposite");
++        // G-buffer research prototype (a failure only turns the GI off).
++        p.progGi = LinkPostProgram(vs, s_psPostGiGLSL, "psPostGi");
++        p.progGiTemporal = LinkPostProgram(vs, s_psPostGiTemporalGLSL, "psPostGiTemporal");
++        p.progGiBlur = LinkPostProgram(vs, s_psPostGiBlurGLSL, "psPostGiBlur");
++        p.progGbufDebug = LinkPostProgram(vs, s_psPostGbufDebugGLSL, "psPostGbufDebug");
++        LOG_INFO(Graphics, "GL33 post: gbuffer prototype programs gi={} temporal={} blur={} debug={}", p.progGi,
++                 p.progGiTemporal, p.progGiBlur, p.progGbufDebug);
+         if (vs)
+             glDeleteShader(vs);
+         glGenVertexArrays(1, &p.vao);
+@@ -423,6 +664,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         bw = (bw + 1) / 2;
+         bh = (bh + 1) / 2;
+     }
++    // G-buffer prototype: resolve targets in the frame target's own formats
++    // (a multisample resolve blit needs identical formats), nearest filtered.
++    p.gbufTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, false);
++    p.gbufTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, false);
++    p.gbufTex[2] = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
++    for (int i = 0; i < 5; ++i)
++        p.giTex[i] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
+     glBindTexture(GL_TEXTURE_2D, 0);
+     GL33Bind::Invalidate();
+ 
+@@ -450,6 +698,17 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
+         check();
+     }
++    for (int i = 0; i < 3; ++i)
++    {
++        p.gbufFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.gbufTex[i]);
++        check();
++    }
++    for (int i = 0; i < 5; ++i)
++    {
++        p.giFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.giTex[i]);
++        check();
++    }
++    p.giFrames = 0;
+     BindFrameRenderTarget();
+     if (!complete)
+     {
+@@ -464,6 +723,103 @@ bool EngineGL33::EnsurePostResources(int w, int h)
+     return true;
+ }
+ 
++// ---------------------------------------------------------------------------
++// G-buffer research prototype: the world pass of a remastered frame draws into
++// four colour attachments of the frame target. Only the remastered lit
++// programs declare outputs 1..3, and only opaque draws may write them (the
++// colour mask of attachments 1..3 follows the bound program and blend mode),
++// so blended decals, glass and particles leave the G-buffer of the surface
++// beneath them in place.
++void EngineGL33::BeginGbuffer()
++{
++    if (!SSAAActive() || !_gbufRb[0] || _gbufActive)
++        return;
++    GLint prevDraw = 0;
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, _ssaaFbo);
++    const GLenum bufs[4] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
++    glDrawBuffers(4, bufs);
++    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
++    if (scissor)
++        glDisable(GL_SCISSOR_TEST);
++    const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    for (int i = 1; i <= kGbufTargets; ++i)
++    {
++        glColorMaski(static_cast<GLuint>(i), GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++        glClearBufferfv(GL_COLOR, i, zero);
++    }
++    if (scissor)
++        glEnable(GL_SCISSOR_TEST);
++    for (GLuint i = 1; i <= static_cast<GLuint>(kGbufTargets); ++i)
++        glDisablei(GL_BLEND, i);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(prevDraw));
++    _gbufActive = true;
++    _gbufFrameValid = false;
++    UpdateGbufMask(true);
++}
++
++void EngineGL33::GbufCountDraw(int path)
++{
++    const int ps = static_cast<int>(_pixelShaderSel) > 15 ? 15 : static_cast<int>(_pixelShaderSel);
++    const int vs = static_cast<int>(_vertexShaderSel) > 3 ? 3 : static_cast<int>(_vertexShaderSel);
++    // act(1) mask(1) blend(2) path(1) ps(3) vs(2) pass(4)
++    const int key = (_gbufActive ? 1 << 13 : 0) | (_gbufMaskOn ? 1 << 12 : 0) |
++                    ((static_cast<int>(_currentBlendMode) & 3) << 10) | (path << 9) | ((ps & 7) << 6) | ((vs & 3) << 4) |
++                    (_gbufPassKind & 15);
++    _gbufDbgTally[key & 16383]++;
++}
++
++void EngineGL33::EndGbuffer()
++{
++    if (!_gbufActive)
++        return;
++    if ((++_gbufDbgFrames % 60u) == 1u)
++    {
++        std::string s;
++        for (int k = 0; k < 16384; ++k)
++        {
++            if (!_gbufDbgTally[k])
++                continue;
++            char buf[128];
++            snprintf(buf, sizeof(buf), " [act%d mask%d blend%d path%d ps%d vs%d pass%d]=%d", (k >> 13) & 1,
++                     (k >> 12) & 1, (k >> 10) & 3, (k >> 9) & 1, (k >> 6) & 7, (k >> 4) & 3, k & 15, _gbufDbgTally[k]);
++            s += buf;
++        }
++        LOG_INFO(Graphics, "GL33 gbuf draws (frame {}):{}", _gbufDbgFrames, s);
++    }
++    for (int& t : _gbufDbgTally)
++        t = 0;
++    GLint prevDraw = 0;
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, _ssaaFbo);
++    const GLenum buf0 = GL_COLOR_ATTACHMENT0;
++    glDrawBuffers(1, &buf0);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(prevDraw));
++    for (int i = 1; i <= kGbufTargets; ++i)
++        glColorMaski(static_cast<GLuint>(i), GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    _gbufMaskOn = true;
++    _gbufActive = false;
++    _gbufFrameValid = true;
++}
++
++void EngineGL33::UpdateGbufMask(bool force)
++{
++    // Opaque lit draws, and alpha-blended lit draws (vehicles and other models
++    // whose textures carry alpha are drawn blended, windows included); never
++    // pre-lit draws (sky, clouds, particles), additive lights or shadow quads.
++    bool want =
++        _gbufActive && _gbufProgram &&
++        (_currentBlendMode == BlendMode::Opaque || (_currentBlendMode == BlendMode::AlphaBlend && _gbufLitVS));
++    if (_lighting.gbufMaskDebug > 0.5f)
++        want = _gbufActive && (_lighting.gbufMaskDebug < 1.5f || _gbufLitVS);
++    if (!force && want == _gbufMaskOn)
++        return;
++    _gbufMaskOn = want;
++    const GLboolean m = want ? GL_TRUE : GL_FALSE;
++    for (int i = 1; i <= kGbufTargets; ++i)
++        glColorMaski(static_cast<GLuint>(i), m, m, m, m);
++}
++
+ void EngineGL33::EndWorldScene()
+ {
+     // Only the frame that actually drew the world through the remastered
+@@ -474,6 +830,10 @@ void EngineGL33::EndWorldScene()
+     // timestamp, so the world section holds all of them).
+     if (_remasterPrograms || (_gpuTiming && worldDrawn))
+         FlushAndFreeAllQueues(_queueNo);
++    // G-buffer prototype: every world draw is in; back to one draw buffer.
++    if (_gbufActive)
++        FlushAndFreeAllQueues(_queueNo);
++    EndGbuffer();
+     if (worldDrawn)
+         GpuMark(Poseidon::gpu::Mark::WorldEnd);
+     _worldPassOpen = false;
+@@ -484,7 +844,10 @@ void EngineGL33::EndWorldScene()
+         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
+     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
+         _portraitTargetSize)
++    {
++        _post.giFrames = 0;
+         return;
++    }
+     if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
+         return; // nothing to add: leave the frame as drawn
+ 
+@@ -502,6 +865,18 @@ void EngineGL33::EndWorldScene()
+     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.depthFbo);
+     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
++    // G-buffer prototype: resolve the three MRT attachments (sample average).
++    const bool gbuf = _gbufFrameValid && !_worldDepthCleared;
++    if (gbuf)
++    {
++        for (int i = 0; i < 3; ++i)
++        {
++            glReadBuffer(GL_COLOR_ATTACHMENT1 + i);
++            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.gbufFbo[i]);
++            glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        }
++        glReadBuffer(GL_COLOR_ATTACHMENT0);
++    }
+ 
+     // Common state for the fullscreen passes.
+     Poseidon::render::depthstencil::Disabled(/*hasStencil*/ false);
+@@ -511,7 +886,7 @@ void EngineGL33::EndWorldScene()
+     glDisable(GL_SCISSOR_TEST);
+     Poseidon::render::pipeline::DisableDepthClamp();
+     glBindVertexArray(p.vao);
+-    for (int unit : {0, 2, 3, 4, 5})
++    for (int unit : {0, 2, 3, 4, 5, 6})
+         glBindSampler(static_cast<GLuint>(unit), 0);
+ 
+     auto bindTex = [](int unit, GLuint tex)
+@@ -550,7 +925,12 @@ void EngineGL33::EndWorldScene()
+     // near plane (Transport::Draw): no world depth to reconstruct from, so no
+     // occlusion and no depth-tested shafts this frame. Bloom does not need it.
+     const bool worldDepth = !_worldDepthCleared;
+-    const float aoStrength = worldDepth ? _lighting.ambientOcclusion : 0.0f;
++    // G-buffer prototype: GI on (or one of its debug views) replaces the AO.
++    const int dbgView = _lighting.debugView;
++    const bool giOn = gbuf && p.progGi && p.progGiTemporal && p.progGiBlur && GScene && GScene->GetCamera() &&
++                      (_lighting.gi > 0.0f || dbgView == 9 || dbgView == 10);
++    const bool giAoMode = giOn && _lighting.giAo > 0.0f;
++    const float aoStrength = worldDepth ? (giAoMode ? _lighting.giAo : _lighting.ambientOcclusion) : 0.0f;
+     // A screen overlay drawn inside the world pass (gunner optics mask) is in
+     // the frame already: glow would grey its black surround.
+     const bool glow = !_worldOverlayDrawn;
+@@ -569,7 +949,146 @@ void EngineGL33::EndWorldScene()
+     const float rectH = fullRect ? 1.0f : as.worldBottom - as.worldTop;
+     const float depthScale = GLAD_GL_ARB_clip_control ? 1.0f : 2.0f;
+     const float depthBias = GLAD_GL_ARB_clip_control ? 0.0f : -1.0f;
+-    if (aoStrength > 0.0f)
++
++    // G-buffer prototype: world -> view rotation of this frame's camera (the
++    // G-buffer stores world-space normals; the consumers work in view space).
++    float viewRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
++    float camKey[16] = {};
++    if (GScene && GScene->GetCamera())
++    {
++        Camera* cam = GScene->GetCamera();
++        const Matrix4 inv = cam->InverseScaled();
++        const Vector3 cx = inv.Rotate(Vector3(1, 0, 0));
++        const Vector3 cy = inv.Rotate(Vector3(0, 1, 0));
++        const Vector3 cz = inv.Rotate(Vector3(0, 0, 1));
++        const float cols[9] = {cx.X(), cx.Y(), cx.Z(), cy.X(), cy.Y(), cy.Z(), cz.X(), cz.Y(), cz.Z()};
++        for (int i = 0; i < 9; ++i)
++            viewRot[i] = cols[i];
++        const Vector3 pos = cam->Position();
++        camKey[0] = pos.X();
++        camKey[1] = pos.Y();
++        camKey[2] = pos.Z();
++        for (int i = 0; i < 9; ++i)
++            camKey[3 + i] = cols[i];
++    }
++    auto uMat3 = [](GLuint prog, const char* name, const float* m)
++    {
++        const GLint loc = glGetUniformLocation(prog, name);
++        if (loc >= 0)
++            glUniformMatrix3fv(loc, 1, GL_FALSE, m);
++    };
++    int giOut = 0; // giTex index holding the final GI
++    if (giOn)
++    {
++        // Temporal reset when the camera moved (no reprojection in the prototype).
++        camKey[12] = _lighting.giRadius;
++        camKey[13] = _lighting.giSteps;
++        camKey[14] = _lighting.giDirs;
++        camKey[15] = _lighting.giSource;
++        bool still = p.giFrames > 0;
++        for (int i = 0; i < 16 && still; ++i)
++            still = std::fabs(camKey[i] - p.giLastCam[i]) < 1e-4f * (i < 3 ? 100.0f : 1.0f);
++        for (int i = 0; i < 16; ++i)
++            p.giLastCam[i] = camKey[i];
++        if (!still || _lighting.giTemporal <= 0.0f)
++        {
++            if (p.giFrames >= 10)
++                LOG_INFO(Graphics, "GL33 post: gi history reset after {} frames", p.giFrames);
++            p.giFrames = 0;
++        }
++        p.giFrameIndex++;
++
++        glUseProgram(p.progGi);
++        u1i(p.progGi, "depthTex", 0);
++        u1i(p.progGi, "normalTex", 2);
++        u1i(p.progGi, "directTex", 3);
++        u1i(p.progGi, "colorTex", 4);
++        u4f(p.progGi, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(p.progGi, "projFwd", proj._11, proj._22, std::max(0.0f, std::min(1.0f, _lighting.giSource)), 0.0f);
++        u4f(p.progGi, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        u4f(p.progGi, "giParams", _lighting.giRadius, std::max(1.0f, std::min(32.0f, _lighting.giDirs)),
++            std::max(1.0f, std::min(32.0f, _lighting.giSteps)),
++            _lighting.giTemporal > 0.0f ? static_cast<float>(p.giFrameIndex % 64u) : 0.0f);
++        u4f(p.progGi, "screen", static_cast<float>(w), static_cast<float>(h), 1.0f / w, 1.0f / h);
++        u4f(p.progGi, "worldRect", rectX, rectY, rectW, rectH);
++        u4f(p.progGi, "giFade", kAoFadeStart, kAoFadeEnd, 0.0f, 0.0f);
++        uMat3(p.progGi, "viewRot", viewRot);
++        bindTex(0, p.depthTex);
++        bindTex(2, p.gbufTex[0]);
++        bindTex(3, p.gbufTex[1]);
++        bindTex(4, p.colorTex);
++        drawTo(p.giFbo[0], hw, hh);
++
++        // Accumulate: new history = mix(old history, this frame).
++        const int cur = p.giHist == 1 ? 2 : 1;
++        const float blend = p.giFrames <= 0 ? 1.0f : std::max(1.0f / static_cast<float>(p.giFrames + 1), 1.0f / 24.0f);
++        glUseProgram(p.progGiTemporal);
++        u1i(p.progGiTemporal, "curTex", 0);
++        u1i(p.progGiTemporal, "histTex", 2);
++        u4f(p.progGiTemporal, "tParams", blend, 0.0f, 0.0f, 0.0f);
++        bindTex(0, p.giTex[0]);
++        bindTex(2, p.giTex[p.giHist]);
++        drawTo(p.giFbo[cur], hw, hh);
++        p.giHist = cur;
++        p.giFrames++;
++
++        glUseProgram(p.progGiBlur);
++        u1i(p.progGiBlur, "giTex", 0);
++        u1i(p.progGiBlur, "depthTex", 2);
++        u1i(p.progGiBlur, "normalTex", 3);
++        u4f(p.progGiBlur, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++        u4f(p.progGiBlur, "depthMap", depthScale, depthBias, 0.0f, 0.0f);
++        bindTex(0, p.giTex[cur]);
++        bindTex(2, p.depthTex);
++        bindTex(3, p.gbufTex[0]);
++        u2f(p.progGiBlur, "stepUV", 1.0f / hw, 0.0f);
++        drawTo(p.giFbo[3], hw, hh);
++        bindTex(0, p.giTex[3]);
++        u2f(p.progGiBlur, "stepUV", 0.0f, 1.0f / hh);
++        drawTo(p.giFbo[4], hw, hh);
++        giOut = 4;
++        GpuMark(Poseidon::gpu::Mark::AoEnd);
++    }
++    else
++    {
++        p.giFrames = 0;
++    }
++
++    // G-buffer prototype debug views 5..11: show a target and skip the rest.
++    if (gbuf && p.progGbufDebug && dbgView >= 5 && dbgView <= 11)
++    {
++        glUseProgram(p.progGbufDebug);
++        u1i(p.progGbufDebug, "colorTex", 0);
++        u1i(p.progGbufDebug, "normalTex", 2);
++        u1i(p.progGbufDebug, "directTex", 3);
++        u1i(p.progGbufDebug, "albedoTex", 4);
++        u1i(p.progGbufDebug, "giTex", 5);
++        uMat3(p.progGbufDebug, "viewRot", viewRot);
++        u4f(p.progGbufDebug, "dbg", static_cast<float>(dbgView), 0.0f, 0.0f, 0.0f);
++        bindTex(0, p.colorTex);
++        bindTex(2, p.gbufTex[0]);
++        bindTex(3, p.gbufTex[1]);
++        bindTex(4, p.gbufTex[2]);
++        bindTex(5, giOut ? p.giTex[giOut] : p.whiteTex);
++        drawTo(_ssaaFbo, w, h);
++        GpuMark(Poseidon::gpu::Mark::CompositeEnd);
++        for (int unit : {0, 2, 3, 4, 5, 6})
++        {
++            glActiveTexture(GL_TEXTURE0 + unit);
++            glBindTexture(GL_TEXTURE_2D, 0);
++        }
++        glActiveTexture(GL_TEXTURE0);
++        glBindSampler(0, _samplerObjects[0]);
++        glBindVertexArray(0);
++        glUseProgram(0);
++        BindFrameRenderTarget();
++        _pixelShaderSel = PSNone;
++        GL33Bind::Invalidate();
++        InvalidatePipelineCache();
++        return;
++    }
++
++    if (aoStrength > 0.0f && !giAoMode)
+     {
+         glUseProgram(p.progAo);
+         u1i(p.progAo, "depthTex", 0);
+@@ -673,12 +1192,18 @@ void EngineGL33::EndWorldScene()
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
++    // G-buffer prototype: bounce light and the GI rays' occlusion.
++    u1i(p.progComposite, "giTex", 5);
++    u1i(p.progComposite, "albedoTex", 6);
++    bindTex(5, giOn ? p.giTex[giOut] : p.blackTex);
++    bindTex(6, gbuf ? p.gbufTex[2] : p.blackTex);
++    u4f(p.progComposite, "giComp", giOn ? _lighting.gi : 0.0f, giAoMode ? 1.0f : 0.0f, 0.0f, 0.0f);
+     drawTo(_ssaaFbo, w, h);
+     GpuMark(Poseidon::gpu::Mark::CompositeEnd);
+ 
+     // Hand the GL state back: frame target bound with its full viewport, unit 0
+     // sampler restored, caches invalidated so the next draw re-applies state.
+-    for (int unit : {0, 2, 3, 4, 5})
++    for (int unit : {0, 2, 3, 4, 5, 6})
+     {
+         glActiveTexture(GL_TEXTURE0 + unit);
+         glBindTexture(GL_TEXTURE_2D, 0);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 02f6162..9a5541c 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -128,6 +128,8 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
+         FlushVSConstants();
+         FlushPSConstants();
+ 
++        if (_lighting.gbuffer > 0.0f)
++            GbufCountDraw(1);
+         glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+         ++Poseidon::gPerfDrawCalls;
+ 
+@@ -334,6 +336,9 @@ void EngineGL33::BeginPass(PassId passId)
+     // toggles the colour mask per draw (nothing disables it now), so assert
+     // it once here to keep the invariant load-bearing rather than implicit.
+     Poseidon::render::pipeline::SetColorMask(true);
++    // G-buffer prototype: glColorMask just reset every draw buffer's mask.
++    if (_gbufActive)
++        UpdateGbufMask(true);
+ 
+     if (GScene)
+     {
+@@ -352,6 +357,9 @@ void EngineGL33::BeginPass(PassId passId)
+         if (_worldEffectsOn)
+             _worldPassOpen = true;
+         UpdateRemasterPrograms();
++        // G-buffer prototype: the world pass of a remastered frame writes the MRT targets.
++        if (_worldPassOpen && _lightingActive && _lighting.gbuffer > 0.0f && !_gbufActive)
++            BeginGbuffer();
+         // Bind the (previous frame's) shadow depth map + light-VP for the lit
+         // shaders.  No-op until a depth pass has run with shadow maps enabled.
+         UpdateShadowMapLitState();
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index b0f15fc..90710ae 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -2008,6 +2008,13 @@ void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, Pix
+     _pixelShaderSel = ps;
+     _pixelShaderModeSel = mode;
+     _pixelShaderSpecularSel = spec;
++    // G-buffer prototype: only the remastered lit fragment shaders declare the
++    // MRT outputs; classic ones (PSFlat, PSShadow) would write undefined values.
++    _gbufProgram = _remasterPrograms && (ps == PSNormal || ps == PSDetail || ps == PSGrass || ps == PSWater) &&
++                   _shaderProgramRemaster[vs][spec][mode][ps] != 0;
++    _gbufLitVS = vs == VSTransform;
++    if (_gbufActive)
++        UpdateGbufMask();
+ }
+ 
+ void EngineGL33::EnableNightEye(float night)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+index da2b229..1c66042 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_State.cpp
+@@ -71,6 +71,7 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
+     // frame alpha and blended draws keep it (see EngineGL33_PostFX.cpp).
+     const bool keepAlpha = _lightingActive;
+     SetLitOpaque(mode == BlendMode::Opaque);
++    (void)0;
+     // Each Poseidon::render::blend helper sets enable + func atomically; partial
+     // state ("blend enabled but func not set") is unrepresentable.
+     switch (mode)
+@@ -97,6 +98,15 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
+                 Poseidon::render::blend::Shadow();
+             break;
+     }
++    // G-buffer prototype: the G-buffer attachments are never blended (glEnable
++    // above turned blending on for every draw buffer). Which draws may write
++    // them follows the blend mode and program (UpdateGbufMask).
++    if (_gbufActive)
++    {
++        for (GLuint i = 1; i <= static_cast<GLuint>(kGbufTargets); ++i)
++            glDisablei(GL_BLEND, i);
++        UpdateGbufMask();
++    }
+ }
+ 
+ void EngineGL33::ApplyDepthMode(DepthMode mode)
+@@ -223,6 +233,7 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
+     ApplyDepthMode(static_cast<DepthMode>(static_cast<int>(d.depth)));
+ 
+     // -- Blend ----------------------------------------------------------
++    _gbufPassKind = static_cast<int>(d.pass);
+     ApplyBlendMode(static_cast<BlendMode>(static_cast<int>(d.blend)));
+ 
+     // -- Fog ------------------------------------------------------------
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+index b3d955d..936eb16 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_VertexBuffer.cpp
+@@ -330,6 +330,8 @@ void EngineGL33::EmitDraw(const Poseidon::render::frame::Draw& d)
+     FlushPSConstants();
+ 
+     const std::intptr_t offsetBytes = Poseidon::render::frame::ComputeIndexByteOffset(d.indexBegin, sizeof(VertexIndex));
++    if (_lighting.gbuffer > 0.0f)
++        GbufCountDraw(0);
+     if (_instCount > 1)
+     {
+         // Instanced run: the WorldInstances UBO already holds the matrices;
+@@ -427,6 +429,14 @@ void EngineGL33::DestroySSAATarget()
+         glDeleteRenderbuffers(1, &_ssaaDepthRb);
+     if (_ssaaResolveRb)
+         glDeleteRenderbuffers(1, &_ssaaResolveRb);
++    for (unsigned int& rb : _gbufRb)
++    {
++        if (rb)
++            glDeleteRenderbuffers(1, &rb);
++        rb = 0;
++    }
++    _gbufActive = false;
++    _gbufFrameValid = false;
+     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
+     _ssaaW = _ssaaH = 0;
+ }
+@@ -463,6 +473,20 @@ void EngineGL33::ApplyPendingRenderScale()
+     glBindFramebuffer(GL_FRAMEBUFFER, _ssaaFbo);
+     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _ssaaColorRb);
+     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, _ssaaDepthRb);
++    // G-buffer research prototype: three more multisampled colour attachments.
++    // The FBO's draw buffers stay {COLOR_ATTACHMENT0} (the GL default) except
++    // inside the world pass (BeginGbuffer / EndGbuffer), so nothing else ever
++    // writes them.
++    {
++        const GLenum fmts[kGbufTargets] = {GL_RGBA16F, GL_RGBA16F, GL_RGBA8};
++        for (int i = 0; i < kGbufTargets; ++i)
++        {
++            glGenRenderbuffers(1, &_gbufRb[i]);
++            glBindRenderbuffer(GL_RENDERBUFFER, _gbufRb[i]);
++            glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, fmts[i], sw, sh);
++            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1 + i, GL_RENDERBUFFER, _gbufRb[i]);
++        }
++    }
+     const GLenum scaledStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+ 
+     glGenRenderbuffers(1, &_ssaaResolveRb);

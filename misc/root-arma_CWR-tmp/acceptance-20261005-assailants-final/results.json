@@ -1,0 +1,12 @@
+[
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_fire_retaliation.test.sqf",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants-final\\guerrilla_assailant_fire_retaliation"
+  },
+  {
+    "Case": "tests/integration/scripting/guerrilla_assailant_save_reload.seq",
+    "ExitCode": 0,
+    "Artifacts": "D:\\Arma_CWA\\arma_CWR\\tmp\\acceptance-20261005-assailants-final\\guerrilla_assailant_save_reload"
+  }
+]

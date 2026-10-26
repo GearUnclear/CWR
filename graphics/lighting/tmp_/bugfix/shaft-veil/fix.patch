@@ -1,0 +1,260 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+index e81d4c3..70dc7cc 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.cpp
+@@ -251,4 +251,16 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
+     return rig;
+ }
+ 
++float ShaftScatterLength(float fogEnd)
++{
++    if (!(fogEnd > 0.0f))
++        return kShaftScatterLength;
++    return std::max(1.0f, std::min(kShaftScatterLength, fogEnd / kShaftFogLengths));
++}
++
++float ShaftInscatter(float distance, float scatterLength)
++{
++    return 1.0f - std::exp(-std::max(distance, 0.0f) / std::max(scatterLength, 1.0f));
++}
++
+ } // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+index 0962be0..0d5cbfa 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp
+@@ -130,4 +130,21 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
+ // inverse half extents; the shader lights a leaf with the ellipsoid's normal.
+ void CrownEllipsoid(const float boxMin[3], const float boxMax[3], float center[3], float invHalf[3]);
+ 
++// Sun shafts are sunlight scattered toward the eye by the air in front of a
++// surface, so they grow with the amount of air on the view ray. The post
++// composite keeps ShaftInscatter(distance) of the shaft light it gathers from
++// the visible sky: all of it over the sky, most of it on distant ground, next
++// to none on a vehicle a few metres away. The scattering length is
++// kShaftScatterLength in clear air; fog or rain that brings the fog end nearer
++// than kShaftFogLengths of it shortens it, so thick haze carries its shafts
++// closer.
++constexpr float kShaftScatterLength = 300.0f; // metres
++constexpr float kShaftFogLengths = 3.0f;      // scattering lengths that fit in the fog range
++
++// Scattering length in metres for a scene whose fog ends at `fogEnd` metres.
++float ShaftScatterLength(float fogEnd);
++// Share of the gathered shaft light kept on a surface `distance` metres from
++// the eye: 1 - exp(-distance / scatterLength), the composite shader's formula.
++float ShaftInscatter(float distance, float scatterLength);
++
+ } // namespace Poseidon::remaster
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+index f994cd0..6247318 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/README.md
+@@ -35,7 +35,7 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
+ | Fog toward the sun | shader `fogColorToward` | Fog takes the sky dome's own sun glow (`SunSkyColor * cos^6`, as `TLVertexTable::DoSkyLighting` shades the dome). Distant ground fades into the colour of the sky behind it, which removes the flat band along the horizon at sunrise and sunset. Away from the sun it is exactly the classic fog. |
+ | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
+ | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. Glossy materials get normalised Blinn-Phong and a sky reflection. |
+-| Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun. A screen-style composite that is an exact identity where those are zero. |
++| Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
+ 
+ Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged.
+ The remastered programs are used only inside the world's 3D passes
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+index c3c4094..edf49f1 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp
+@@ -14,7 +14,10 @@
+ //      or alpha-to-coverage pixels (alpha 1) are left alone. Bloom and shafts
+ //      add in linear light with a soft screen-style add that can never clip,
+ //      and leave the frame exactly as it was where they are zero (the frame is
+-//      already tonemapped: no second curve). A dither hides banding.
++//      already tonemapped: no second curve). The shafts are light scattered
++//      by the air in front of each pixel, so they grow with its distance
++//      (LightRig ShaftInscatter): a nearby vehicle is not veiled. A dither
++//      hides banding.
+ // The HUD then draws on top, untouched.
+ //
+ // All GL state the passes touch is restored or the bind caches invalidated;
+@@ -212,11 +215,29 @@ uniform sampler2D colorTex;
+ uniform sampler2D aoTex;
+ uniform sampler2D bloomTex;
+ uniform sampler2D shaftTex;
++uniform sampler2D depthTex;
+ uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
+ uniform vec4 shaftColor; // rgb sun tint
++uniform vec4 projInfo;   // as psPostAo
++uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
++uniform vec4 worldRect;  // as psPostAo
+ uniform vec4 debugView;  // x: 1 = show occlusion
+ out vec4 fragColor;
+ 
++// The shaft pass gathers the sky toward the sun, which is the light the air
++// scatters toward the eye along an endless ray. A surface ends the ray: only
++// the air in front of it scatters, 1 - exp(-distance / length) of the sky's
++// share (LightRig ShaftInscatter). Without this a backlit vehicle 10 m away
++// took the full sky glow and turned into a grey cut-out.
++float shaftInscatter() {
++    float d = textureLod(depthTex, vUV, 0.0).r;
++    if (d >= 0.999999) return 1.0; // sky, as the shaft pass sees it
++    float z = projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
++    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
++    float dist = z * length(vec3(ndc * projInfo.zw, 1.0));
++    return 1.0 - exp(-max(dist, 0.0) * depthMap.z);
++}
++
+ void main() {
+     vec4 c = texture(colorTex, vUV);
+     float ao = texture(aoTex, vUV).r;
+@@ -229,7 +250,9 @@ void main() {
+     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
+     // glow's own energy rolled off. Identity where there is no glow, never
+     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
+-    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + texture(shaftTex, vUV).rgb * shaftColor.rgb * compParams.z;
++    vec3 shaft = texture(shaftTex, vUV).rgb;
++    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
++    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft * shaftColor.rgb * compParams.z;
+     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
+     vec3 col = pow(lin, vec3(1.0 / 2.2));
+     // Dither only what the composite changed: elsewhere the frame passes
+@@ -672,6 +695,14 @@ void EngineGL33::EndWorldScene()
+     u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
+     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
+     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
++    // The shafts keep only what the air in front of each pixel scatters; the
++    // depth is read only where there is a shaft term.
++    u1i(p.progComposite, "depthTex", 5);
++    bindTex(5, p.depthTex);
++    u4f(p.progComposite, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
++    const float scatterLength = Poseidon::remaster::ShaftScatterLength(GScene ? GScene->GetFogMaxRange() : 0.0f);
++    u4f(p.progComposite, "depthMap", depthScale, depthBias, 1.0f / scatterLength, 0.0f);
++    u4f(p.progComposite, "worldRect", rectX, rectY, rectW, rectH);
+     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+     drawTo(_ssaaFbo, w, h);
+     GpuMark(Poseidon::gpu::Mark::CompositeEnd);
+diff --git a/arma_CWR/tests/rendering/lighting_lab/postfx.py b/arma_CWR/tests/rendering/lighting_lab/postfx.py
+index 20b560d..f93f4ca 100644
+--- a/arma_CWR/tests/rendering/lighting_lab/postfx.py
++++ b/arma_CWR/tests/rendering/lighting_lab/postfx.py
+@@ -16,6 +16,7 @@ import moderngl
+ import glsl_extract
+ 
+ POST_FILE = "arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp"
++RIG_FILE = "arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp"  # the shafts' scattering length
+ BLOOM_LEVELS = 5
+ 
+ 
+@@ -33,6 +34,7 @@ class PostFX:
+         sh = glsl_extract.load_shaders(path)
+         glsl_extract.apply_override_dir(sh, override_dir)  # psPostAo.glsl, ... as in the engine
+         self.k = _constants(path)
++        self.k.update(_constants(glsl_extract.ENGINE_DIR.parent / RIG_FILE))
+         vs = sh["s_vsPostGLSL"]
+ 
+         def prog(name):
+@@ -83,14 +85,22 @@ class PostFX:
+         if name in prog:
+             prog[name].value = value
+ 
++    def scatter_length(self, fog_end):
++        """LightRig ShaftScatterLength: the sun shafts' scattering length (m) for a fog end (m)."""
++        k = self.k
++        if not fog_end > 0:
++            return k["kShaftScatterLength"]
++        return max(1.0, min(k["kShaftScatterLength"], fog_end / k["kShaftFogLengths"]))
++
+     def _draw(self, prog, fbo, size):
+         fbo.use()
+         self.ctx.viewport = (0, 0, *size)
+         self.vaos[id(prog)].render(moderngl.TRIANGLES, vertices=3)
+ 
+     def run(self, color_tex, depth_tex, out_fbo, w, h, proj16, tuning, sun_uv=None, shaft_weight=0.0,
+-            sun_rgb=(1.0, 1.0, 1.0), debug_ao=False):
+-        """proj16: GfxMatrix row-major (_11.._44). Writes the composite to out_fbo."""
++            sun_rgb=(1.0, 1.0, 1.0), debug_ao=False, fog_end=0.0):
++        """proj16: GfxMatrix row-major (_11.._44). fog_end: the scene's fog end (m), which can shorten the
++        shafts' scattering length. Writes the composite to out_fbo."""
+         ctx = self.ctx
+         self._targets(w, h)
+         hw, hh = (w + 1) // 2, (h + 1) // 2
+@@ -162,5 +172,10 @@ class PostFX:
+         self._set(p, "compParams", (ao_strength, bloom_strength * 0.25, tuning["sunShafts"] * 0.6, 1.0))
+         lum = max(1e-4, 0.2126 * sun_rgb[0] + 0.7152 * sun_rgb[1] + 0.0722 * sun_rgb[2])
+         self._set(p, "shaftColor", (sun_rgb[0] / lum, sun_rgb[1] / lum, sun_rgb[2] / lum, 1.0))
++        depth_tex.use(location=5)
++        self._set(p, "depthTex", 5)
++        self._set(p, "projInfo", (p33, p43, 1.0 / p11, 1.0 / p22))
++        self._set(p, "depthMap", (1.0, 0.0, 1.0 / self.scatter_length(fog_end), 0.0))
++        self._set(p, "worldRect", (0.0, 0.0, 1.0, 1.0))
+         self._set(p, "debugView", (1.0 if debug_ao else 0.0, 0.0, 0.0, 0.0))
+         self._draw(p, out_fbo, (w, h))
+diff --git a/arma_CWR/tests/rendering/lighting_lab/remaster.py b/arma_CWR/tests/rendering/lighting_lab/remaster.py
+index ab81214..a431d98 100644
+--- a/arma_CWR/tests/rendering/lighting_lab/remaster.py
++++ b/arma_CWR/tests/rendering/lighting_lab/remaster.py
+@@ -446,7 +446,7 @@ def render(ctx: moderngl.Context, scene, preset, width: int, height: int) -> Ima
+     if _options["post"] and tuning.get("postEffects", 1.0):
+         sun_uv, weight = _sun_screen(preset, sun, frame, lp)
+         R.post.run(color, depth, out_fbo, width, height, frame.projection, tuning, sun_uv, weight,
+-                   tuple(rig["sun"]), debug_ao=_options["debug_view"] == 4)
++                   tuple(rig["sun"]), debug_ao=_options["debug_view"] == 4, fog_end=lp.fog_end)
+         final = out_tex
+     img = C.apply_gamma(ctx, R, final, lp.gamma, width, height)
+     err = ctx.error
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 68e8c01..0512085 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -14,6 +14,7 @@
+ #include <cmath>
+ #include <filesystem>
+ #include <fstream>
++#include <limits>
+ #include <map>
+ #include <regex>
+ #include <set>
+@@ -484,6 +485,46 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+     CHECK(postCount == 7);
+ }
+ 
++TEST_CASE("Remaster sun shafts brighten the air, not the surfaces near the eye", "[Graphics][Shaders][remaster]")
++{
++    // Clear air: the fog end of any view distance from 900 m up.
++    for (float fogEnd : {880.0f, 1480.0f, 3980.0f})
++    {
++        CAPTURE(fogEnd);
++        const float length = ShaftScatterLength(fogEnd);
++        CHECK(length <= kShaftScatterLength);
++        CHECK(length > 0.9f * kShaftScatterLength);
++        // The acceptance props at a low sun: soldier 7 m, Jeep 10 m, M113 16 m.
++        // At full weight they were veiled grey.
++        CHECK(ShaftInscatter(7.0f, length) < 0.03f);
++        CHECK(ShaftInscatter(10.0f, length) < 0.04f);
++        CHECK(ShaftInscatter(16.0f, length) < 0.06f);
++        // Distant ground and the sky keep the shafts.
++        CHECK(ShaftInscatter(1000.0f, length) > 0.95f);
++        CHECK(ShaftInscatter(std::numeric_limits<float>::infinity(), length) == 1.0f);
++        float prev = -1.0f;
++        for (float d = 0.0f; d < 2000.0f; d += 50.0f)
++        {
++            CHECK(ShaftInscatter(d, length) > prev);
++            prev = ShaftInscatter(d, length);
++        }
++    }
++    CHECK(ShaftScatterLength(0.0f) == kShaftScatterLength); // no fog range yet
++    // Thick fog scatters closer to the eye.
++    CHECK(ShaftScatterLength(150.0f) == Catch::Approx(50.0f));
++    CHECK(ShaftInscatter(30.0f, ShaftScatterLength(150.0f)) > 2.0f * ShaftInscatter(30.0f, ShaftScatterLength(880.0f)));
++
++    // The composite applies the same falloff to the shaft term, with the
++    // length the engine takes from ShaftScatterLength.
++    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
++    const std::string composite = RawString(post, "s_psPostCompositeGLSL");
++    REQUIRE_FALSE(composite.empty());
++    CHECK(composite.find("uniform sampler2D depthTex;") != std::string::npos);
++    CHECK(composite.find("1.0 - exp(-max(dist, 0.0) * depthMap.z)") != std::string::npos);
++    CHECK(composite.find("shaft *= shaftInscatter()") != std::string::npos);
++    CHECK(post.find("1.0f / scatterLength") != std::string::npos);
++}
++
+ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "[Graphics][Shaders][remaster]")
+ {
+     namespace LC = Poseidon::gl33lighting::LitConst;

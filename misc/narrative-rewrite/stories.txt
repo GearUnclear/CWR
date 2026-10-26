@@ -1,0 +1,140 @@
+CHARACTER BACKGROUNDS
+Fiction informed by historical research. Names, places and specific game events are invented.
+Name and place placeholders are shown as written.
+
+b01 - kBio0Friendly / 1
+{Name} worked as a farmhand near {Place} until the landlord evicted the family from its rented fields. The farmhand kept writing poems and still hoped to publish a collection.
+
+b02 - kBio0Friendly / 2
+When fighting scattered the family, {Name}, a furniture maker from {Place}, fled with a younger sibling. The siblings later rented a shed and began making tables and chairs again.
+
+b03 - kBio0Friendly / 3
+{Name}, a survey assistant from {Place}, accepted a bribe to falsify a boundary, costing a family their home. The evicted family knew who had signed the false survey.
+
+b04 - kBio0Friendly / 4
+{Name} owned a grocery near {Place}. Soldiers confiscated its stock, ruining the business. The grocer joined a rebel band, then left after its leader ordered members to steal food from neighbouring families.
+
+b05 - kBio0Friendly / 5
+{Name}, a shepherd from {Place}, guided displaced neighbours along familiar grazing paths. A cousin stayed behind to tend the flock; the shepherd lost contact with that cousin during the journey.
+
+b06 - kBio0Friendly / 6
+{Name}, a municipal gardener from {Place}, escaped the fighting with an elderly parent. At the woodland shelter where both found refuge, the gardener took responsibility for fetching everyone's water.
+
+b07 - kBio0Hostile / 1
+Before becoming an army quartermaster near {Place}, {Name} worked as a warehouse clerk. When the army needed more transport, the quartermaster confiscated civilian carts and sent them to military supply depots.
+
+b08 - kBio0Hostile / 2
+{Name} earned a living playing at weddings before enlisting for regular wages. Posted near {Place}, the musician hoped to leave the army and earn money performing again.
+
+b09 - kBio0Hostile / 3
+While posted near {Place}, military engineer {Name} approved an unsafe bridge repair. The bridge collapsed, killing two comrades. Since then, the engineer has personally checked every repair before allowing soldiers to cross.
+
+b10 - kBio0Hostile / 4
+{Name} sold travel permits near {Place}, using a civilian partner to collect bribes. When investigators arrived, the administrator named the partner in exchange for keeping the post.
+
+b11 - kBio0Hostile / 5
+{Name} lost a dock job near {Place} and enlisted for regular wages. During years of army service, the former laborer regularly helped younger soldiers write letters to their families.
+
+b12 - kBio0Hostile / 6
+{Name} was a local official near {Place}, authorized to stop evictions. When a former rival appealed, the official refused, knowing the rival had paid the rent and had the right to stay.
+
+b13 - kBio1Friendly / 1
+{Name} taught arithmetic at a school near {Place}. When new restrictions closed the school, the teacher visited pupils at home and continued the lessons from where each class had stopped.
+
+b14 - kBio1Friendly / 2
+Former postal worker {Name} from {Place} became a resistance courier, then quit after police seized the courier's address book, found a friend's home address inside, and arrested the friend there.
+
+b15 - kBio1Friendly / 3
+{Name} repaired bicycles near {Place} for underground couriers delivering medicine to hidden clinics. Police searched the workshop and seized the spare parts, leaving several couriers without working bicycles.
+
+b16 - kBio1Friendly / 4
+{Name}, a bookkeeper from {Place}, kept records for a resistance cell but left after its leader ordered the bookkeeper's friend beaten as an informer. The leader had no evidence.
+
+b17 - kBio1Friendly / 5
+{Name}, a tailor from {Place}, made the clothes for a younger sibling's wedding. The authorities refused the tailor permission to travel, and the wedding went ahead without them.
+
+b18 - kBio1Friendly / 6
+{Name} skipped classes to print leaflets against rent increases near {Place}, but dreaded speaking at meetings. After their mother's arrest, they hid with friends and wrote speeches for others to read.
+
+b19 - kBio1Hostile / 1
+After working as a school inspector, {Name} supervised police near {Place}. When residents came to the police office seeking protection from soldiers, the former inspector ordered the visitors detained.
+
+b20 - kBio1Hostile / 2
+{Name} ran a checkpoint near {Place} and owed a smuggler money after gambling losses. In exchange for more time to repay the debt, the officer let the smuggler's wagons pass without inspection.
+
+b21 - kBio1Hostile / 3
+{Name} commanded patrols near {Place}. After surviving an ambush that killed a close colleague, the commander ordered searches of uninvolved households, instructing soldiers to beat residents.
+
+b22 - kBio1Hostile / 4
+A former railway porter, {Name} joined the army for regular wages to support an elderly parent. After being posted near {Place}, they requested a transfer closer to home.
+
+b23 - kBio1Hostile / 5
+{Name} acted with an amateur theatre group near {Place} before taking a military publicity job. The former actor later helped announce an army ban that forced the group to close.
+
+b24 - kBio1Hostile / 6
+Posted to {Place}, officer {Name} missed a first child's birth. Letters home described good meals and new friends, leaving out long shifts checking travel papers and orders barring leave.
+
+b25 - kBio2Friendly / 1
+{Name}, a radio repairer from {Place}, joined a resistance transmitter crew after fighting destroyed the shop. The repairer maintained equipment and hoped to host music programmes someday.
+
+b26 - kBio2Friendly / 2
+{Name}, a quarry worker from {Place}, deserted a resistance position during an attack. A surviving fighter later reported that a companion had stayed to defend the position and been killed.
+
+b27 - kBio2Friendly / 3
+An orchard worker from {Place}, {Name} led relatives away from fighting along familiar farm roads. Among displaced families, the sociable picker entertained new friends with stories from years on the harvest crews.
+
+b28 - kBio2Friendly / 4
+{Name}, a photographer from {Place}, escaped to a resistance camp and became a medic without medical training. Despite the commander's ban, the photographer secretly treated a wounded enemy and stayed with the group.
+
+b29 - kBio2Friendly / 5
+{Name} worked the family ferry near {Place} until fighting destroyed the boat. Living with their mother afterward, they began learning the recipes the family used for celebrations.
+
+b30 - kBio2Friendly / 6
+{Name}, an apprentice mason from {Place}, volunteered for the resistance expecting adventure. During the first attack, the recruit panicked and could not leave cover. Afterward, they asked for more training.
+
+b31 - kBio2Hostile / 1
+{Name} served as an officer near {Place}. When a friend killed a surrendering fighter, the officer protected the friend by falsely stating in the unit report that the fighter had died in combat.
+
+b32 - kBio2Hostile / 2
+{Name} wrote poetry for years before the war. While serving as an officer near {Place}, they prepared notices for the families of soldiers killed under their command.
+
+b33 - kBio2Hostile / 3
+Officer {Name} lost a younger sibling in fighting. During a posting near {Place}, the bereaved officer repeatedly gave one young recruit safer kitchen duties while other recruits went on patrol.
+
+b34 - kBio2Hostile / 4
+{Name}, a former foundry worker from {Place}, served in the army. After a superior threatened death for refusing, the soldier helped execute prisoners and later admitted taking part.
+
+b35 - kBio2Hostile / 5
+{Name}, an army payroll clerk near {Place}, took charge of the records after heavy losses in the unit. The clerk kept dead soldiers on the payroll and pocketed their wages.
+
+b36 - kBio2Hostile / 6
+Before becoming a military interrogator near {Place}, {Name} worked as a boxing trainer. The interrogator taught new guards to beat prisoners until the prisoners signed confessions.
+
+CAMPAIGN HISTORY EXAMPLES
+
+Campaign A
+The people of Malden still tell how families near Larche lost rights their grandparents had expected to leave to the children. Soviet Army troops arrived with orders to enforce obedience. A complaint could bring armed visitors to the same door where neighbours once gathered. People near Houdan accepted a settlement they could live with. When the authorities broke it, even patient neighbours talked of fighting. Fighting followed. FIA soldiers remember the dead through surviving friends, who can still describe their laughter as readily as their deaths.
+
+Families near Larche built terraces on the slopes and farmed them for generations. Surveyors later divided the land into plots and registered it under outside owners. The families who had built and maintained the terraces were left without a recognised claim to the ground that fed them.
+
+Representatives near Houdan agreed that the high ground would remain common and the roads open. Within a season, Soviet Army units fenced the ground and gated the roads. Families who had accepted the settlement now needed permission to reach land and routes the agreement had left open.
+
+Defenders near Chapoi stopped an advancing column for two days without relief. The column broke through on the third day, leaving local fighters dead and others missing. Survivors later gave FIA fighters an account of the positions held and the names of those who failed to return.
+
+Campaign B
+Near Ghajar, families in Lebanon inherited an old dispute along with their grandparents' belongings. Outsiders had claimed what kept those families fed. Hizballah units controlled the main roads. People learned which guards would listen, which would shout, and when to turn around without arguing. Representatives near Tyre came home with an agreement and promises. When the authorities broke it, neighbours demanded to know what happened. IDF fighters lost people in the fighting that followed. Some families still ask returning fighters for news nobody wants to give.
+
+Families near Ghajar dug and maintained four wells that supplied the valley. Water was shared under arrangements passed down through nine generations. An outside clerk later registered the wells as private property, giving an absent owner control over water the families had previously drawn by right.
+
+Witnesses from six villages signed an agreement near Tyre to share water and keep the coast road open. The terms also barred armed guards from the pumps. Hizballah troops seized the pumps and began checking road traffic twice a day, restricting the access the witnesses had secured.
+
+Fighting near Saida set homes alight, and the fires continued through the night. Families who returned found collapsed houses and neighbours missing. IDF soldiers collected names from survivors and recorded where each person had last been seen. Relatives used the list to search for people carried away during the evacuation.
+
+Campaign C
+For generations, families near Nuweiba in Sinai taught children where they belonged. Then outsiders arrived with papers saying the children had no claim. Under IDF forces, residents watched their words in public. Families argued behind closed doors about whether silence was keeping anyone safe anymore. Near El Tor, both sides agreed to a settlement. After the authorities broke it, residents brought copies to confront the guards. Later fighting left empty places at family tables. PLO East troops keep the names, including those neighbours still find difficult to discuss.
+
+Road builders near Nuweiba marked the rock beside each well to record who could draw water. Local families used those marks to settle access disputes. When officials produced the first regional map, the water rights were omitted. Officials then rejected claims based on the older markings.
+
+Elders marked a truce boundary with stones near El Tor and agreed which wells would remain available to local families. IDF soldiers later occupied those wells and shifted the markers. Families arriving for water found guards enforcing a boundary that no longer matched the one the elders had walked.
+
+Defenders with two machine guns held an advancing column near Ras Nasrani until dusk. The delay allowed families to leave the coastal route, but several defenders died before the survivors withdrew. The coast fell the next day. PLO East units preserved the survivors' account of the action and the losses.

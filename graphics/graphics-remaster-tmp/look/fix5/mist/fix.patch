@@ -1,0 +1,443 @@
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+index b3cfd658..09eb8d93 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.cpp
+@@ -296,7 +296,7 @@ float SunRingWeight(float sunElevationDeg)
+ // ---- Exposure -----------------------------------------------------------------
+ 
+ float TargetExposureLog2(const MeterResult& m, float nightEffect, const LightingTuning& t, float dusk, float duskKeep,
+-                         float timeEv)
++                         float timeEv, float veil)
+ {
+     if (!m.valid)
+         return 0.0f;
+@@ -311,7 +311,11 @@ float TargetExposureLog2(const MeterResult& m, float nightEffect, const Lighting
+     float e = std::log2(kMiddleGrey) + comp - m.mean;
+     // The highlight guard: the bright end of the frame stays below the
+     // curve's white (a sunset sky is not blown out to lift the dark ground).
+-    const float eHigh = std::log2(kHighlightLimit) - m.highlight;
++    // On a grey day the bright end is the deck or the mist: a light grey (by
++    // day: at night the bright end is a lamp).
++    const float grey = Clamp01(veil) * (1.0f - night);
++    const float limit = kHighlightLimit + (kGreyHighlightLimit - kHighlightLimit) * grey;
++    const float eHigh = std::log2(limit) - m.highlight;
+     if (e > eHigh)
+         e += (eHigh - e) * kHighlightGuard;
+     // The sky's bright end stays pale sky, not a white hole.
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+index 794099a2..c41a9cc3 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/PhotoCamera.hpp
+@@ -161,6 +161,15 @@ constexpr float kBrightKeep = -0.05f;
+ // their colour), pulled that far.
+ constexpr float kHighlightLimit = 1.3f;
+ constexpr float kHighlightGuard = 0.85f;
++// Under the weather's veil (CameraWeatherVeil: an overcast day, a morning
++// mist, rain) the frame's bright end is the grey deck or the mist itself, not
++// a sunlit highlight: it is held at kGreyHighlightLimit instead (a light grey
++// below the curve's shoulder, as a photograph of a grey day keeps its sky and
++// its mist grey). (Look fix round 5 "mist": held at 1.3 the mist sat in the
++// shoulder at about 214 of 255 against the original's 178, its contrast
++// pressed flat, so the rock 300 m out and the tree line behind it were nearly
++// erased; the grey decks of rain and overcast were a near-white sheet.)
++constexpr float kGreyHighlightLimit = 0.8f;
+ // The sky by a low sun in frame (MeterResult::sunRing) stays at this scene
+ // light after exposure (the curve shows it a little under white, golden, not
+ // blown); the foreground goes darker, as a photograph into the sun does.
+@@ -183,8 +192,10 @@ constexpr float kExposureNightMaxLog2 = -1.0f;
+ // sunset to a grey noon).
+ // `duskKeep` (CameraDuskKeep, 0..1) raises the dark keep toward kDuskDarkKeep.
+ // `timeEv` (CameraTimeOfDayEv) is added (EV).
++// `veil` (CameraWeatherVeil, 0..1) moves the highlight limit toward
++// kGreyHighlightLimit by day.
+ float TargetExposureLog2(const MeterResult& m, float nightEffect, const LightingTuning& t, float dusk = 0.0f,
+-                         float duskKeep = 0.0f, float timeEv = 0.0f);
++                         float duskKeep = 0.0f, float timeEv = 0.0f, float veil = 0.0f);
+ // The golden hour (look director round 2: a 12 degree sun read as a neutral
+ // mid-afternoon): the camera takes kCameraGoldenEv off (the low sun is a
+ // dimmer light, the picture a darker, warmer one) and balances a little warm
+@@ -446,6 +457,11 @@ constexpr float kDeckRelief = 2.4f;
+ constexpr float kDeckDark = 0.5f;
+ constexpr float kDeckFromSin = 0.12f;
+ constexpr float kDeckFullSin = 0.3f;
++// Under rain (its density, 0..1) the deck's light is a further
++// 1 - kDeckRainDark x rain: a rain deck is a thick nimbostratus, darker than a
++// dry overcast. (Look fix round 5 "mist": rain_day read as a wet misty day
++// against the original's and landed's darker rain deck.)
++constexpr float kDeckRainDark = 0.4f;
+ 
+ // ---- The sun disk -----------------------------------------------------------
+ // Under the camera the sun's sprite (its painted halo and star) is not drawn:
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+index 8f12da42..906f6577 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.cpp
+@@ -171,6 +171,11 @@ float FogGreySky(float skyThrough)
+     return Clamp01((0.65f - skyThrough) / 0.5f);
+ }
+ 
++float FogSnapRatio(float after, float before)
++{
++    return Clamp01((std::max(after, 0.0f) + kFogSnapRatioEps) / (std::max(before, 0.0f) + kFogSnapRatioEps));
++}
++
+ float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg)
+ {
+     const bool east = sunAzimuthDeg > 0.0f && sunAzimuthDeg < 180.0f;
+@@ -233,10 +238,12 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
+     // (Look fix round 4 "mist": setFog's own fog carries its air as rain's
+     // does; the grey haze on top of a setFog 0.3 mist under a deck erased a
+     // rock 300 m out.)
++    // (Look fix round 5 "mist": and the clear haze itself is cut under a
++    // day's setFog, kSetFogHazeCut: setFog's mist is that humid air.)
+     const float wetAir = std::max(rain, Smooth(0.0f, 0.3f, fog) * (1.0f - night));
+     m.hazeSigma = kHazeClear * density *
+                   (1.0f + kHazeGreyGain * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * wetAir)) *
+-                  (1.0f + 0.5f * rain);
++                  (1.0f + 0.5f * rain) * (1.0f - kSetFogHazeCut * Smooth(0.0f, 0.3f, fog) * (1.0f - night));
+     m.rayleigh = kRayleighScale * density;
+     // The humid air near the ground: a misty morning, the night, a grey sky,
+     // rain and fog (a foggy morning most: the light falls through it in
+diff --git a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+index 547ed63c..292a051f 100644
+--- a/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
++++ b/arma_CWR/engine/Poseidon/Graphics/Remaster/VolumetricFog.hpp
+@@ -220,7 +220,9 @@ constexpr float kWeatherExtinction = 3.2f;
+ // setFog keeps round 3's density, 2 x 2.8 = 5.6 times the classic
+ // extinction: the foggy night street is unchanged; only the day's mist
+ // thins.)
+-constexpr float kNightFogBoost = 2.0f * 2.8f / 0.75f - 1.0f;
++// (Look fix round 5 "mist": with kSetFogBoost 0.3 the same rule gives
++// 2 x 2.8 / 0.3 - 1 = 17.7: the night is still unchanged.)
++constexpr float kNightFogBoost = 2.0f * 2.8f / 0.3f - 1.0f;
+ // setFog's own fog (not rain's) is this much denser again (look director
+ // round 2: a hill 200 m out stood crisp in a setFog 0.3 morning mist the
+ // classic fog hid; the volume's fog thickens with distance like it, not as
+@@ -235,11 +237,26 @@ constexpr float kNightFogBoost = 2.0f * 2.8f / 0.75f - 1.0f;
+ // keeps the first 300 m crisp. At 0.75 that rock keeps about half and a
+ // fifth of a surface is left at the classic fog end, where the AI's
+ // tactical sight ends; the mist still thickens with distance.)
+-constexpr float kSetFogBoost = 0.75f;
++// (Look fix round 5 "mist": 0.75 -> 0.3. At 0.75, with the clear haze, the
++// valley mist and the humid air stacked on it, a rock 300 m out kept under
++// half of itself and read as a ghost even under the camera's grey-day
++// exposure: the setFog 0.3 morning read as dense fog, not the light mist it
++// is. With kSetFogHazeCut and kMistFogWeight 0.2 a level line at the fog
++// floor under a grey deck keeps about two thirds at 300 m, half at 500 m and
++// a third at the classic fog end: the rock and the tree line read through a
++// veil and the far hills fade.)
++constexpr float kSetFogBoost = 0.3f;
++// A day's setFog carries the humid air the clear haze stood for: the haze is
++// cut by this share at setFog 0.3 and over (by day; rain keeps its haze).
++// (Look fix round 5 "mist": the clear haze, about 6e-4 per metre, stood as
++// thick as setFog's own fog under it.)
++constexpr float kSetFogHazeCut = 0.5f;
+ // setFog's share of the valley mist's weight by day, rising to
+ // kMistFogWeightNight at night (look fix round 4: 1.2 -> 0.6 by day, the
+ // mist layer doubled the weather fog in every hollow; the night keeps 1.2).
+-constexpr float kMistFogWeight = 0.6f;
++// (Look fix round 5 "mist": 0.6 -> 0.2 by day; the mist layer in the
++// hollows before the rock thickened the light mist again.)
++constexpr float kMistFogWeight = 0.2f;
+ constexpr float kMistFogWeightNight = 1.2f;
+ // The forward fog keeps the view-distance edge: it starts at this share of
+ // the fog end.
+@@ -318,6 +335,18 @@ float FogGreySky(float skyThrough);
+ // top's elevation (3.4 degrees). It is drawn in the classic fog colour, not
+ // the sky's, so under a grey sky the apply replaces it with the air.
+ constexpr float kFogHorizonFillTop = 0.06f;
++// An optic overlay over the fogged world: the apply lays the overlay's
++// darkening back as (after + eps) / (before + eps) per channel (FogSnapRatio,
++// GLSL kSnapRatioEps), so a channel the overlay left alone keeps the fogged
++// light whole even at 0. eps is far under the frame's darkest nonzero code,
++// (1/255)^2.2 = 5e-6, so a black mask over the darkest world still darkens it
++// whole. (Look fix round 5 "mist": the old max(before, 1e-5) floor turned
++// world channels at code 0 or 1 into a ratio of 0 or 0.5 with no overlay
++// there: single black and green pixels over a fogged tree line, wherever its
++// needles were near black; TAA's sharper mips made more of them.)
++constexpr float kFogSnapRatioEps = 1e-7f;
++// The overlay's darkening of one channel: 1 where the overlay left it.
++float FogSnapRatio(float after, float before);
+ // Under a grey sky the horizon ring samples from this elevation (degrees),
+ // above the polygon's top: the deck over the land, not the fill.
+ constexpr float kFogRingGreyFromDeg = 3.8f;
+diff --git a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+index 3403fe0b..5d947a8e 100644
+--- a/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
++++ b/arma_CWR/engine/Poseidon/World/Scene/SceneDraw.cpp
+@@ -383,11 +383,13 @@ void Scene::DrawRain()
+         // Under the photoreal camera (photoLight) the overlay's streaks are
+         // stretched by the exposure and the curve: at full strength they
+         // smeared the whole sky with vertical lines (look director round 2).
++        // (Look fix round 5 "mist": 0.45 -> 0.9; under the grey day's
++        // exposure and drawn after the opaque copy, at 0.45 no streak read.)
+         if (GEngine && GEngine->LightingRemasterActive())
+         {
+             const remaster::LightingTuning tuning = GEngine->GetLightingTuning();
+             if (tuning.features.photoLight > 0.5f)
+-                density *= 0.45f;
++                density *= 0.9f;
+         }
+         DrawRainLevel(density, yDensity, xOffset, yOffset, 8);
+         DrawRainLevel(density, yDensity, xOffset, yOffset, 2);
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 2464a934..98f4bec1 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -1195,6 +1195,7 @@ class EngineGL33 : public Engine
+         float duskKeep = 0.0f;   // CameraDuskKeep: the dusk's dark keep share (look director round 2)
+         float golden = 0.0f;     // CameraGolden: the golden hour's warmth (look director round 2)
+         float timeEv = 0.0f;     // CameraTimeOfDayEv: the golden hour's and the high sun's EV (look director round 2)
++        float veil = 0.0f;       // CameraWeatherVeil: the grey day's highlight limit (look fix round 5)
+         // Colour: white balance times the scene saturation.
+         Poseidon::remaster::Mat3 color;
+         // The golden hour's warm gain (GoldenWarmGain), laid by the composite
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+index 72265a0d..8d65a676 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Camera.cpp
+@@ -133,6 +133,7 @@ void EngineGL33::UpdateCameraFrame(const rm::LightRig& rig, bool atmosphereOn)
+         _lighting.camSat - rm::kLowSunSaturationDrop * lowSun * (1.0f - c.nightEffect) - rm::kVeilSaturationDrop * veil;
+     c.color = rm::Multiply(rm::Saturation(sat), wb);
+     c.timeEv = rm::CameraTimeOfDayEv(rig.sunElevationDeg, veil);
++    c.veil = veil;
+     // The golden hour's warm balance (kCameraGoldenWarm, at unit luminance):
+     // the composite lays it on the light that is not blue (GoldenWarmShare),
+     // so the clear sky and the sky-lit shade keep their blue.
+@@ -241,7 +242,8 @@ void EngineGL33::CameraAdapt()
+     const float dt = c.lastStep < 0.0 ? 0.0f : static_cast<float>(std::min(std::max(now - c.lastStep, 0.0), 0.25));
+     c.lastStep = now;
+     if (c.meter.valid)
+-        c.targetLog2 = rm::TargetExposureLog2(c.meter, c.nightEffect, _lighting, c.duskEffect, c.duskKeep, c.timeEv);
++        c.targetLog2 =
++            rm::TargetExposureLog2(c.meter, c.nightEffect, _lighting, c.duskEffect, c.duskKeep, c.timeEv, c.veil);
+     if (c.snap)
+     {
+         if (fresh && freshFrame >= c.snapFrame)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+index eefdf3d1..e2bc1c2d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSky.cpp
+@@ -430,11 +430,12 @@ vec4 camCloudTexel(vec4 t0) {
+ }
+ 
+ // The grey deck's cloud base under the camera (PhotoCamera.hpp kDeckRelief,
+-// kDeckDark, kDeckFromSin, kDeckFullSin).
++// kDeckDark, kDeckFromSin, kDeckFullSin, kDeckRainDark).
+ const float kCamDeckRelief = 2.4;
+ const float kCamDeckDark = 0.5;
+ const float kCamDeckFromSin = 0.12;
+ const float kCamDeckFullSin = 0.3;
++const float kCamDeckRainDark = 0.4;
+ 
+ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+     t0 = camCloudTexel(t0);
+@@ -509,7 +510,10 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
+                      smoothstep(-6.0, 2.0, skySunElevation());
+         if (deck > 0.0) {
+             float rel = clamp(shade / max(pow(rowSum / 12.0, 2.2), 1e-4), 0.25, 3.0);
+-            cloudLin *= pow(rel, kCamDeckRelief * deck) * mix(1.0, kCamDeckDark, deck);
++            // Under rain the deck is a heavier, darker nimbostratus (litWeather.y,
++            // the rain's density while the wet weather runs).
++            float rainDeck = 1.0 - kCamDeckRainDark * clamp(litWeather.y, 0.0, 1.0);
++            cloudLin *= pow(rel, kCamDeckRelief * deck) * mix(1.0, kCamDeckDark * rainDeck, deck);
+         }
+     }
+     // Cover over clear sky in display space, where the mask measured it: a
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+index 1522ebb5..1974232f 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_PostFogShaders.cpp
+@@ -890,6 +890,10 @@ const float kApplyBeyond = 40000.0;
+ const float kApplyLobeFade = 0.05;
+ // The classic horizon polygon's top over the eye (kFogHorizonFillTop).
+ const float kApplyFillTop = 0.06;
++// The overlay's darkening ratio: added to the world before and after the
++// overlay, so a channel the overlay left alone keeps a ratio of 1 even at 0
++// (VolumetricFog.hpp kFogSnapRatioEps).
++const float kSnapRatioEps = 1e-7;
+ 
+ // The world's per-fragment shoulder above 0.8 (tonemapNeutral's peak curve,
+ // without its whitening, which the frame already holds) and its inverse: the
+@@ -1155,9 +1159,17 @@ void main() {
+         if (snap) {
+             // The overlay's darkening (its share of the world it left), and
+             // whatever it drew brighter than the world (a reticle, the
+-            // target brackets) added back as drawn.
++            // target brackets) added back as drawn. A channel the overlay
++            // left as it was keeps the fogged light whole, at any level: a
++            // near-black world channel (code 0 or 1, under the old 1e-5
++            // floor) gave a ratio of 0 or 0.5 with the overlay nowhere near,
++            // so dark needles in a fogged tree line came out as single black
++            // and green pixels (look fix round 5 "mist"; kSnapRatioEps is far
++            // under code 1, (1/255)^2.2 = 5e-6, so a black mask over the
++            // darkest world still darkens it whole).
+             vec3 over = camDecode(cOver.rgb);
+-            outLin = outLin * clamp(over / max(lin0, vec3(1e-5)), 0.0, 1.0) + max(over - lin0, vec3(0.0));
++            outLin = outLin * clamp((over + kSnapRatioEps) / (lin0 + kSnapRatioEps), 0.0, 1.0) +
++                     max(over - lin0, vec3(0.0));
+         }
+         col = camFold(outLin);
+     } else {
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+index 5f8d5e0a..2fea8e1e 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_photo_camera.cpp
+@@ -174,6 +174,43 @@ TEST_CASE("PhotoCamera: exposure keeps part of a scene's darkness, guards its hi
+     CHECK(TargetExposureLog2(day, 0.0f, plus) == Catch::Approx(TargetExposureLog2(day, 0.0f, t) + 1.0f));
+ }
+ 
++TEST_CASE("PhotoCamera: a grey day holds its bright end, the deck or the mist, at a light grey",
++          "[Remaster][PhotoCamera]")
++{
++    // Look fix round 5 "mist": the optics mist view metered mean -3.37 and
++    // high -0.58; held at kHighlightLimit the mist sat in the curve's shoulder.
++    LightingTuning t;
++    t.camEv = 0.0f;
++    MeterResult mist;
++    mist.valid = true;
++    mist.mean = -3.37f;
++    mist.highlight = -0.58f;
++    const float clear = TargetExposureLog2(mist, 0.0f, t);
++    const float grey = TargetExposureLog2(mist, 0.0f, t, 0.0f, 0.0f, 0.0f, 1.0f);
++    CHECK(kGreyHighlightLimit < kHighlightLimit);
++    CHECK(kGreyHighlightLimit > 0.5f); // a light grey, not a dark one
++    CHECK(grey < clear);
++    // The bright end lands near the grey limit (the guard's pull, not a clamp).
++    const float bright = grey + mist.highlight;
++    CHECK(bright < std::log2(kHighlightLimit));
++    CHECK(bright == Catch::Approx(std::log2(kGreyHighlightLimit)).margin(0.15));
++    // Half a veil, halfway; no veil, unchanged.
++    const float half = TargetExposureLog2(mist, 0.0f, t, 0.0f, 0.0f, 0.0f, 0.5f);
++    CHECK(half < clear);
++    CHECK(half > grey);
++    CHECK(TargetExposureLog2(mist, 0.0f, t, 0.0f, 0.0f, 0.0f, 0.0f) == Catch::Approx(clear));
++    // A scene whose bright end is under the grey limit is not touched.
++    MeterResult dim = mist;
++    dim.highlight = mist.mean + 0.3f;
++    CHECK(TargetExposureLog2(dim, 0.0f, t, 0.0f, 0.0f, 0.0f, 1.0f) == Catch::Approx(TargetExposureLog2(dim, 0.0f, t)));
++    // At night the bright end is a lamp: the veil leaves the night's guard alone.
++    MeterResult night = mist;
++    night.mean = -9.0f;
++    night.highlight = -2.0f;
++    CHECK(TargetExposureLog2(night, 1.0f, t, 0.0f, 0.0f, 0.0f, 1.0f) ==
++          Catch::Approx(TargetExposureLog2(night, 1.0f, t)));
++}
++
+ TEST_CASE("PhotoCamera: a low sun in frame holds the sky by it golden, not blown", "[Remaster][PhotoCamera]")
+ {
+     // A meter grid with the sun at uv (0.5, 0.6): its own block very bright
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 5c87c692..46175322 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1169,6 +1169,12 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
+     CHECK(constant(skyPiece, "kCamDeckDark") == Catch::Approx(kDeckDark));
+     CHECK(constant(skyPiece, "kCamDeckFromSin") == Catch::Approx(kDeckFromSin));
+     CHECK(constant(skyPiece, "kCamDeckFullSin") == Catch::Approx(kDeckFullSin));
++    // Under rain the deck darkens further (look fix round 5), read from the
++    // wet weather's rain density.
++    CHECK(constant(skyPiece, "kCamDeckRainDark") == Catch::Approx(kDeckRainDark));
++    CHECK(kDeckRainDark > 0.0f);
++    CHECK(kDeckRainDark < 0.6f);
++    CHECK(skyPiece.find("kCamDeckRainDark * clamp(litWeather.y, 0.0, 1.0)") != std::string::npos);
+     CHECK(kDeckDark < 1.0f);
+     CHECK(kDeckFromSin > 0.1f);
+     CHECK(kDeckFullSin > kDeckFromSin);
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+index f736bcfd..9c22b226 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp
+@@ -123,9 +123,10 @@ TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opac
+ {
+     // A level line of sight at the fog floor through setFog 0.3 with VD 1500:
+     // what is left of a surface at the classic fog's end is a small share, and
+-    // under half at two thirds of it, where the classic linear fog is half
++    // about half at two thirds of it, where the classic linear fog is half
+     // (look fix round 4: about half at a third of it, with the mist and the
+-    // humid air on top, and the first 150 m keep more than 60 %).
++    // humid air on top, and the first 150 m keep more than 60 %; look fix
++    // round 5: a light mist, about two thirds at a third of it).
+     FogInputs in = ClearNoon();
+     in.viewDistance = 1500.0f;
+     in.fog = 0.3f;
+@@ -135,11 +136,11 @@ TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opac
+     CHECK(m.weatherSigma > 0.0f);
+     const float sigma = FogExtinctionAt(m, 0.0f, 0.0f);
+     const float left = std::exp(-sigma * in.fogEnd);
+-    CHECK(left < 0.25f);
++    CHECK(left < 0.45f);
+     CHECK(left > 0.001f);
+-    CHECK(std::exp(-sigma * 0.66f * in.fogEnd) < 0.5f);
+-    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) < 0.6f);
+-    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) > 0.4f);
++    CHECK(std::exp(-sigma * 0.66f * in.fogEnd) < 0.6f);
++    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) < 0.8f);
++    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) > 0.55f);
+     CHECK(std::exp(-sigma * 150.0f) > 0.6f);
+     // It thins upward from the fog floor: a hilltop 600 m up sees farther.
+     CHECK(FogExtinctionAt(m, 600.0f, 0.0f) < 0.6f * sigma);
+@@ -846,6 +847,32 @@ TEST_CASE("Volumetric fog: the ring reads the deck over the horizon fill, the ap
+     CHECK(CountOf(apply, "base = mix(base, airAt, hb * greyFill);") == 1);
+ }
+ 
++TEST_CASE("Volumetric fog: an optic overlay's darkening leaves a near-black world channel alone",
++          "[remaster][fog][Shaders]")
++{
++    // Look fix round 5 "mist": world channels at code 0 or 1 gave a ratio of
++    // 0 or 0.5 under the old 1e-5 floor with no overlay there (black and green
++    // specks over a fogged tree line).
++    const float code1 = std::pow(1.0f / 255.0f, 2.2f);
++    CHECK(FogSnapRatio(0.0f, 0.0f) == Catch::Approx(1.0f));
++    CHECK(FogSnapRatio(code1, code1) == Catch::Approx(1.0f));
++    CHECK(FogSnapRatio(0.3f, 0.3f) == Catch::Approx(1.0f));
++    // A black mask over the darkest world still darkens it whole.
++    CHECK(kFogSnapRatioEps < 0.05f * code1);
++    CHECK(FogSnapRatio(0.0f, code1) < 0.05f);
++    CHECK(FogSnapRatio(0.0f, 0.2f) < 1e-5f);
++    // A half-dark mask, half; brighter than the world (a reticle) is 1 (the
++    // apply adds the difference back).
++    CHECK(FogSnapRatio(0.1f, 0.2f) == Catch::Approx(0.5f).epsilon(1e-4));
++    CHECK(FogSnapRatio(0.4f, 0.2f) == Catch::Approx(1.0f));
++    const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
++    REQUIRE_FALSE(apply.empty());
++    CHECK(CountOf(apply, "const float kSnapRatioEps = 1e-7;") == 1);
++    CHECK(kFogSnapRatioEps == 1e-7f);
++    CHECK(CountOf(apply, "clamp((over + kSnapRatioEps) / (lin0 + kSnapRatioEps), 0.0, 1.0)") == 1);
++    CHECK(CountOf(apply, "max(lin0, vec3(1e-5))") == 0);
++}
++
+ TEST_CASE("Volumetric fog: the composite's occlusion acts on the surface's light under the fog, not on the air",
+           "[remaster][fog][Shaders]")
+ {
+@@ -962,6 +989,30 @@ TEST_CASE("Volumetric fog: a day's setFog is a light mist, the foggy night keeps
+     CHECK(ComputeFogMedium(dryGrey, LightingTuning{}, true).hazeSigma > g.hazeSigma);
+     CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * 150.0f) > 0.6f);
+     CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * g.zFar) > 0.08f);
++    // Look fix round 5 "mist": a light mist, not dense fog. The rock 300 m out
++    // keeps about two thirds of itself and the tree line 500 m out half, at
++    // the fog floor, while the classic fog end (742 m) is still faded; the
++    // clear haze gives way to setFog's own mist by day.
++    const float sig = FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f);
++    CHECK(std::exp(-sig * 300.0f) > 0.6f);
++    CHECK(std::exp(-sig * 500.0f) > 0.45f);
++    CHECK(std::exp(-sig * day.fogEnd) < 0.45f);
++    CHECK(kSetFogBoost <= 0.5f);
++    CHECK(kMistFogWeight < kMistFogWeightNight);
++    FogInputs clearAir = grey;
++    clearAir.fog = 0.0f;
++    clearAir.skyThrough = 1.0f;
++    FogInputs mistAir = clearAir;
++    mistAir.fog = 0.3f;
++    CHECK(ComputeFogMedium(mistAir, LightingTuning{}, true).hazeSigma ==
++          Catch::Approx(ComputeFogMedium(clearAir, LightingTuning{}, true).hazeSigma * (1.0f - kSetFogHazeCut)));
++    FogInputs mistNight = mistAir;
++    mistNight.nightEffect = 1.0f;
++    mistNight.sunElevationDeg = -30.0f;
++    FogInputs clearNight = mistNight;
++    clearNight.fog = 0.0f;
++    CHECK(ComputeFogMedium(mistNight, LightingTuning{}, true).hazeSigma ==
++          Catch::Approx(ComputeFogMedium(clearNight, LightingTuning{}, true).hazeSigma));
+ }
+ 
+ TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough to read", "[fog][remaster]")

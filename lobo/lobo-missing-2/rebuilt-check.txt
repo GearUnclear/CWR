@@ -1,0 +1,61 @@
+{
+ "LoBo_FAB.pbo": {
+  "before_bytes": 78726459,
+  "after_bytes": 78726462,
+  "after_sha256": "6f44009f57e1e3c1cb08b12a0966c59b0000a996afba67f497f2d954328732e7",
+  "changed": 1,
+  "added": 0
+ },
+ "LoBo_Ob.pbo": {
+  "before_bytes": 71028973,
+  "after_bytes": 71028970,
+  "after_sha256": "a9e772c70c449b38e40182e13d0373f554c5fb2b7028fc947f37c7c5d18b3440",
+  "changed": 1,
+  "added": 0
+ },
+ "LoBoRadios.pbo": {
+  "before_bytes": 930069,
+  "after_bytes": 930071,
+  "after_sha256": "b44f3a01958f76a1f54f868539116249ad93e1da92de438faf7f16ab02307778",
+  "changed": 1,
+  "added": 0
+ },
+ "LoBo_F4.pbo": {
+  "before_bytes": 21130561,
+  "after_bytes": 21130561,
+  "after_sha256": "b6f1c711118dfd965bb293fa3a41138fe446175f41b9d7e175af5a09c38f3908",
+  "changed": 1,
+  "added": 0
+ },
+ "LoBo_M1.pbo": {
+  "before_bytes": 20663202,
+  "after_bytes": 20663202,
+  "after_sha256": "97f9100bd996ae3fbf1d92d66cebadb86b50a9fca92aba6d35286f741e54d98c",
+  "changed": 2,
+  "added": 0
+ },
+ "LoboF5.pbo": {
+  "before_bytes": 7267926,
+  "after_bytes": 7267926,
+  "after_sha256": "990917ae6940f65e9a2d2af3acfa38d78f41fe8b01d2b89d8c8c48f2b93518f0",
+  "changed": 3,
+  "added": 0
+ },
+ "LoBo_airammo.pbo": {
+  "before_bytes": 8721136,
+  "after_bytes": 8970861,
+  "after_sha256": "d54dc5c4d33c54a581b8c602a5b4c37f24057625a484bc056b0f895731427d99",
+  "changed": 0,
+  "added": 9
+ },
+ "LoBoEgypt.pbo": {
+  "before_bytes": 57468834,
+  "after_bytes": 57512711,
+  "after_sha256": "5693df3b80cfda5e59186a25da7fa3f4166425537c31ccc12c50f32cecea5eb0",
+  "changed": 0,
+  "added": 1
+ }
+}
+ud sources changed 0 non-fire [] skips 0
+ud no sources changed 0 non-fire [] skips 0
+classic no sources changed 16 non-fire [] skips 0

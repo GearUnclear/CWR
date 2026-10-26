@@ -1,0 +1,2412 @@
+{
+ "gate": {
+  "airbeams_pinewood_morn": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "airhaze_valley_0515": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 38,
+    "over2": 265,
+    "over8": 225,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 54,
+    "over2": 171,
+    "over8": 97,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 54,
+    "over2": 436,
+    "over8": 322,
+    "pixels": 2073600
+   }
+  ],
+  "atmosphere_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 5,
+    "over2": 9,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 21,
+    "over2": 33,
+    "over8": 25,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 21,
+    "over2": 42,
+    "over8": 25,
+    "pixels": 2073600
+   }
+  ],
+  "clouds_coast_oc_up": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 15,
+    "over2": 930,
+    "over8": 47,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 15,
+    "over2": 930,
+    "over8": 47,
+    "pixels": 2073600
+   }
+  ],
+  "combat_ffh": [
+   {
+    "rows": "0-422",
+    "max": 129,
+    "over2": 168201,
+    "over8": 46013,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 135,
+    "over2": 20482,
+    "over8": 16151,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 55,
+    "over2": 593,
+    "over8": 202,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 135,
+    "over2": 189276,
+    "over8": 62366,
+    "pixels": 2073600
+   }
+  ],
+  "hfrt_hill_1730": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "lighttiles_town_night": [
+   {
+    "rows": "0-422",
+    "max": 186,
+    "over2": 231665,
+    "over8": 208986,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 200,
+    "over2": 61528,
+    "over8": 56153,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 205,
+    "over2": 53157,
+    "over8": 30047,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 205,
+    "over2": 346350,
+    "over8": 295186,
+    "pixels": 2073600
+   }
+  ],
+  "materials_town_night_rain": [
+   {
+    "rows": "0-422",
+    "max": 194,
+    "over2": 178996,
+    "over8": 87414,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 199,
+    "over2": 126402,
+    "over8": 72783,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 218,
+    "over2": 207770,
+    "over8": 58815,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 218,
+    "over2": 513168,
+    "over8": 219012,
+    "pixels": 2073600
+   }
+  ],
+  "night_road_flat_drive_moonless": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 91,
+    "over2": 20,
+    "over8": 18,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 91,
+    "over2": 20,
+    "over8": 18,
+    "pixels": 2073600
+   }
+  ],
+  "perf_sunrise_ridge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "shade_lowsun_fp": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 104,
+    "over2": 1007,
+    "over8": 655,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 1,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 104,
+    "over2": 1007,
+    "over8": 655,
+    "pixels": 2073600
+   }
+  ],
+  "shadows_woods_pine2_evening": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "ssr_bay_offshore": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 188,
+    "over2": 61336,
+    "over8": 6326,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 42,
+    "over2": 735248,
+    "over8": 180700,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 188,
+    "over2": 796584,
+    "over8": 187026,
+    "pixels": 2073600
+   }
+  ],
+  "temporal_forest_edge_golden": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 174,
+    "over2": 543,
+    "over8": 497,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 174,
+    "over2": 543,
+    "over8": 497,
+    "pixels": 2073600
+   }
+  ],
+  "texsharp_forest_edge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "water_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 26,
+    "over2": 6,
+    "over8": 5,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 3,
+    "over2": 7,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 26,
+    "over2": 13,
+    "over8": 5,
+    "pixels": 2073600
+   }
+  ]
+ },
+ "onon": {
+  "airbeams_pinewood_morn": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "airhaze_valley_0515": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 39,
+    "over2": 279,
+    "over8": 238,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 47,
+    "over2": 167,
+    "over8": 92,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 47,
+    "over2": 446,
+    "over8": 330,
+    "pixels": 2073600
+   }
+  ],
+  "atmosphere_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 6,
+    "over2": 20,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 23,
+    "over2": 89,
+    "over8": 59,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 23,
+    "over2": 109,
+    "over8": 59,
+    "pixels": 2073600
+   }
+  ],
+  "clouds_coast_oc_up": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 12,
+    "over2": 78,
+    "over8": 9,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 12,
+    "over2": 78,
+    "over8": 9,
+    "pixels": 2073600
+   }
+  ],
+  "combat_ffh": [
+   {
+    "rows": "0-422",
+    "max": 129,
+    "over2": 70892,
+    "over8": 44757,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 132,
+    "over2": 26818,
+    "over8": 17618,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 57,
+    "over2": 1500,
+    "over8": 374,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 132,
+    "over2": 99210,
+    "over8": 62749,
+    "pixels": 2073600
+   }
+  ],
+  "hfrt_hill_1730": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "lighttiles_town_night": [
+   {
+    "rows": "0-422",
+    "max": 195,
+    "over2": 254258,
+    "over8": 233011,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 216,
+    "over2": 63583,
+    "over8": 58085,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 206,
+    "over2": 53516,
+    "over8": 30133,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 216,
+    "over2": 371357,
+    "over8": 321229,
+    "pixels": 2073600
+   }
+  ],
+  "materials_town_night_rain": [
+   {
+    "rows": "0-422",
+    "max": 191,
+    "over2": 81993,
+    "over8": 76552,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 204,
+    "over2": 64826,
+    "over8": 62130,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 203,
+    "over2": 64815,
+    "over8": 57344,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 204,
+    "over2": 211634,
+    "over8": 196026,
+    "pixels": 2073600
+   }
+  ],
+  "night_road_flat_drive_moonless": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 91,
+    "over2": 21,
+    "over8": 20,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 91,
+    "over2": 21,
+    "over8": 20,
+    "pixels": 2073600
+   }
+  ],
+  "perf_sunrise_ridge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "shade_lowsun_fp": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 24,
+    "over2": 7,
+    "over8": 1,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 24,
+    "over2": 7,
+    "over8": 1,
+    "pixels": 2073600
+   }
+  ],
+  "shadows_woods_pine2_evening": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "ssr_bay_offshore": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 186,
+    "over2": 62071,
+    "over8": 6220,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 43,
+    "over2": 739381,
+    "over8": 188512,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 186,
+    "over2": 801452,
+    "over8": 194732,
+    "pixels": 2073600
+   }
+  ],
+  "temporal_forest_edge_golden": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 174,
+    "over2": 542,
+    "over8": 496,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 174,
+    "over2": 542,
+    "over8": 496,
+    "pixels": 2073600
+   }
+  ],
+  "texsharp_forest_edge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "water_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ]
+ },
+ "a2": {
+  "airbeams_pinewood_morn": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "airhaze_valley_0515": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 27,
+    "over2": 377,
+    "over8": 325,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 69,
+    "over2": 164,
+    "over8": 85,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 69,
+    "over2": 541,
+    "over8": 410,
+    "pixels": 2073600
+   }
+  ],
+  "atmosphere_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 5,
+    "over2": 6,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 22,
+    "over2": 31,
+    "over8": 19,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 22,
+    "over2": 37,
+    "over8": 19,
+    "pixels": 2073600
+   }
+  ],
+  "clouds_coast_oc_up": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 14,
+    "over2": 802,
+    "over8": 45,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 14,
+    "over2": 802,
+    "over8": 45,
+    "pixels": 2073600
+   }
+  ],
+  "combat_ffh": [
+   {
+    "rows": "0-422",
+    "max": 102,
+    "over2": 167442,
+    "over8": 25663,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 105,
+    "over2": 19975,
+    "over8": 10427,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 20,
+    "over2": 857,
+    "over8": 71,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 105,
+    "over2": 188274,
+    "over8": 36161,
+    "pixels": 2073600
+   }
+  ],
+  "hfrt_hill_1730": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "lighttiles_town_night": [
+   {
+    "rows": "0-422",
+    "max": 128,
+    "over2": 85266,
+    "over8": 64429,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 151,
+    "over2": 41318,
+    "over8": 33814,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 132,
+    "over2": 20491,
+    "over8": 13711,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 151,
+    "over2": 147075,
+    "over8": 111954,
+    "pixels": 2073600
+   }
+  ],
+  "materials_town_night_rain": [
+   {
+    "rows": "0-422",
+    "max": 27,
+    "over2": 54448,
+    "over8": 533,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 101,
+    "over2": 49195,
+    "over8": 11220,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 148,
+    "over2": 119986,
+    "over8": 34646,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 148,
+    "over2": 223629,
+    "over8": 46399,
+    "pixels": 2073600
+   }
+  ],
+  "night_road_flat_drive_moonless": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 80,
+    "over2": 15,
+    "over8": 13,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 80,
+    "over2": 15,
+    "over8": 13,
+    "pixels": 2073600
+   }
+  ],
+  "perf_sunrise_ridge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "shade_lowsun_fp": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 104,
+    "over2": 1006,
+    "over8": 660,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 1,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 104,
+    "over2": 1006,
+    "over8": 660,
+    "pixels": 2073600
+   }
+  ],
+  "shadows_woods_pine2_evening": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "ssr_bay_offshore": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 87,
+    "over2": 2755,
+    "over8": 1013,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 27,
+    "over2": 333601,
+    "over8": 19315,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 87,
+    "over2": 336356,
+    "over8": 20328,
+    "pixels": 2073600
+   }
+  ],
+  "temporal_forest_edge_golden": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 174,
+    "over2": 543,
+    "over8": 497,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 174,
+    "over2": 543,
+    "over8": 497,
+    "pixels": 2073600
+   }
+  ],
+  "texsharp_forest_edge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "water_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 26,
+    "over2": 39,
+    "over8": 31,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 3,
+    "over2": 33,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 26,
+    "over2": 72,
+    "over8": 31,
+    "pixels": 2073600
+   }
+  ]
+ },
+ "a3": {
+  "airbeams_pinewood_morn": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "airhaze_valley_0515": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 26,
+    "over2": 58,
+    "over8": 53,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 54,
+    "over2": 35,
+    "over8": 22,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 54,
+    "over2": 93,
+    "over8": 75,
+    "pixels": 2073600
+   }
+  ],
+  "atmosphere_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 6,
+    "over2": 30,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 23,
+    "over2": 122,
+    "over8": 84,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 23,
+    "over2": 152,
+    "over8": 84,
+    "pixels": 2073600
+   }
+  ],
+  "clouds_coast_oc_up": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 16,
+    "over2": 1237,
+    "over8": 55,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 16,
+    "over2": 1237,
+    "over8": 55,
+    "pixels": 2073600
+   }
+  ],
+  "combat_ffh": [
+   {
+    "rows": "0-422",
+    "max": 116,
+    "over2": 153083,
+    "over8": 27965,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 92,
+    "over2": 16540,
+    "over8": 10255,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 57,
+    "over2": 1059,
+    "over8": 390,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 116,
+    "over2": 170682,
+    "over8": 38610,
+    "pixels": 2073600
+   }
+  ],
+  "hfrt_hill_1730": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "lighttiles_town_night": [
+   {
+    "rows": "0-422",
+    "max": 195,
+    "over2": 270878,
+    "over8": 237405,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 131,
+    "over2": 49383,
+    "over8": 40416,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 125,
+    "over2": 21646,
+    "over8": 14332,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 195,
+    "over2": 341907,
+    "over8": 292153,
+    "pixels": 2073600
+   }
+  ],
+  "materials_town_night_rain": [
+   {
+    "rows": "0-422",
+    "max": 170,
+    "over2": 179821,
+    "over8": 81227,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 199,
+    "over2": 125141,
+    "over8": 65859,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 158,
+    "over2": 192647,
+    "over8": 37239,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 199,
+    "over2": 497609,
+    "over8": 184325,
+    "pixels": 2073600
+   }
+  ],
+  "night_road_flat_drive_moonless": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 50,
+    "over2": 16,
+    "over8": 13,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 50,
+    "over2": 16,
+    "over8": 13,
+    "pixels": 2073600
+   }
+  ],
+  "perf_sunrise_ridge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "shade_lowsun_fp": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 104,
+    "over2": 1008,
+    "over8": 653,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 1,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 104,
+    "over2": 1008,
+    "over8": 653,
+    "pixels": 2073600
+   }
+  ],
+  "shadows_woods_pine2_evening": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "ssr_bay_offshore": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 183,
+    "over2": 8872,
+    "over8": 7057,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 6,
+    "over2": 2172,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 183,
+    "over2": 11044,
+    "over8": 7057,
+    "pixels": 2073600
+   }
+  ],
+  "temporal_forest_edge_golden": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 2,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 2,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "texsharp_forest_edge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "water_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 26,
+    "over2": 6,
+    "over8": 5,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 3,
+    "over2": 7,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 26,
+    "over2": 13,
+    "over8": 5,
+    "pixels": 2073600
+   }
+  ]
+ },
+ "boots": {
+  "airbeams_pinewood_morn": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "airhaze_valley_0515": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 26,
+    "over2": 344,
+    "over8": 277,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 68,
+    "over2": 357,
+    "over8": 112,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 68,
+    "over2": 701,
+    "over8": 389,
+    "pixels": 2073600
+   }
+  ],
+  "atmosphere_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 5,
+    "over2": 6,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 22,
+    "over2": 31,
+    "over8": 19,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 22,
+    "over2": 37,
+    "over8": 19,
+    "pixels": 2073600
+   }
+  ],
+  "clouds_coast_oc_up": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 12,
+    "over2": 144,
+    "over8": 14,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 12,
+    "over2": 144,
+    "over8": 14,
+    "pixels": 2073600
+   }
+  ],
+  "combat_ffh": [
+   {
+    "rows": "0-422",
+    "max": 98,
+    "over2": 48597,
+    "over8": 25241,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 98,
+    "over2": 15981,
+    "over8": 10234,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 57,
+    "over2": 684,
+    "over8": 375,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 98,
+    "over2": 65262,
+    "over8": 35850,
+    "pixels": 2073600
+   }
+  ],
+  "hfrt_hill_1730": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "lighttiles_town_night": [
+   {
+    "rows": "0-422",
+    "max": 159,
+    "over2": 90772,
+    "over8": 70155,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 202,
+    "over2": 47899,
+    "over8": 40897,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 182,
+    "over2": 43934,
+    "over8": 19317,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 202,
+    "over2": 182605,
+    "over8": 130369,
+    "pixels": 2073600
+   }
+  ],
+  "materials_town_night_rain": [
+   {
+    "rows": "0-422",
+    "max": 190,
+    "over2": 124741,
+    "over8": 70114,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 205,
+    "over2": 92543,
+    "over8": 57724,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 210,
+    "over2": 140104,
+    "over8": 60074,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 210,
+    "over2": 357388,
+    "over8": 187912,
+    "pixels": 2073600
+   }
+  ],
+  "night_road_flat_drive_moonless": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 119,
+    "over2": 20,
+    "over8": 20,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 119,
+    "over2": 20,
+    "over8": 20,
+    "pixels": 2073600
+   }
+  ],
+  "perf_sunrise_ridge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "shade_lowsun_fp": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 24,
+    "over2": 14,
+    "over8": 3,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 24,
+    "over2": 14,
+    "over8": 3,
+    "pixels": 2073600
+   }
+  ],
+  "shadows_woods_pine2_evening": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "ssr_bay_offshore": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 186,
+    "over2": 62056,
+    "over8": 6210,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 43,
+    "over2": 739381,
+    "over8": 188512,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 186,
+    "over2": 801437,
+    "over8": 194722,
+    "pixels": 2073600
+   }
+  ],
+  "temporal_forest_edge_golden": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 174,
+    "over2": 543,
+    "over8": 497,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 174,
+    "over2": 543,
+    "over8": 497,
+    "pixels": 2073600
+   }
+  ],
+  "texsharp_forest_edge": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 2073600
+   }
+  ],
+  "water_coastline_sunset": [
+   {
+    "rows": "0-422",
+    "max": 0,
+    "over2": 0,
+    "over8": 0,
+    "pixels": 810240
+   },
+   {
+    "rows": "422-591",
+    "max": 34,
+    "over2": 63,
+    "over8": 45,
+    "pixels": 324480
+   },
+   {
+    "rows": "591-1080",
+    "max": 3,
+    "over2": 51,
+    "over8": 0,
+    "pixels": 938880
+   },
+   {
+    "rows": "whole",
+    "max": 34,
+    "over2": 114,
+    "over8": 45,
+    "pixels": 2073600
+   }
+  ]
+ }
+}

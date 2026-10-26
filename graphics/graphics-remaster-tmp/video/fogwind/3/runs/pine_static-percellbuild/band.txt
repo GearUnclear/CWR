@@ -1,0 +1,1 @@
+﻿{"src": "D:\\Arma_CWA_worktrees\\graphics-remaster\\tmp\\video\\fogwind\\3\\runs\\pine_static-percellbuild\\frames", "frames": 105, "band": 0.077, "band_max": 0.452, "sky": 0.039, "spikes": 191, "worst": [[109, 1.19], [72, 1.01], [105, 0.99], [25, 0.89], [110, 0.88], [108, 0.85], [24, 0.83], [96, 0.83]]}

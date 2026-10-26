@@ -1,0 +1,8 @@
+rt-pc-rt60: 190 frames (clip 10..200), camera |shift| mean 0.26 px/frame (x -0.25, y +0.00)
+  region   MID    LOW    SLOW   FINE  | v1 (vx,vy)     p1     z1   | v2 (vx,vy)     p2   | TRAVEL  WIND
+  bay      0.147  0.049  0.434  0.389 |  -9.7  -1.3  +0.29  +0.04 | +28.4 +11.7  +0.16 | +0.26   0.038
+  valley   0.161  0.069  0.947  0.572 |  -0.4  -0.1  +0.18  +0.18 |  -0.7  -1.2  +0.15 | +0.00   0.000
+  farhill  0.130  0.057  0.340  0.415 | -11.0  -0.5  +0.54  +0.07 | -22.5  -0.9  +0.41 | +0.47   0.061
+  haze     0.115  0.034  0.345  0.298 | -11.1  -0.3  +0.32  -0.06 | -21.8  -0.7  +0.22 | +0.32   0.037
+  slope    0.086  0.064  0.308  0.371 | -10.9  -6.3  +0.02  -0.21 |  +2.1 -11.2  +0.02 | +0.02   0.002
+  wrote amp_rt-pc-rt60.png, xt_rt-pc-rt60.png, amp2x_rt-pc-rt60.mp4 in D:/Arma_CWA_worktrees/graphics-remaster/tmp/video/fogwind/fable-2/out

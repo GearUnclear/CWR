@@ -1,0 +1,2 @@
+    BindTex(0, PostSceneTex(f)); // the fogged (or aired) frame when the Air stage ran
+    BindTex(2, plan.Runs(rm::PostStage::Ao) ? (_surfAoOut ? _surfAoOut : p.aoTex[0]) : p.whiteTex);

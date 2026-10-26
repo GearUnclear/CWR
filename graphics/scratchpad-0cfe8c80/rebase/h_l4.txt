@@ -1,0 +1,4 @@
+// SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
+// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 and 73
+// are the padding member litPlanned; B8 landed the haze at 78 and the
+// photoreal camera (look lane "light") took 79.
