@@ -269,7 +269,7 @@ cmake --preset win-x64-clang-rwdi           # configure (Linux: linux-x64-clang-
 cmake --build build/win-x64-clang-rwdi      # build the engine + game + tools
 ```
 
-Compiled apps stage into `dist/win-x64-clang-rwdi/`.
+Compiled apps stage into `dist/x64-win-rwdi/`.
 
 ### Game data
 Game data is **not** in this repo. UD targets the full official Remaster
@@ -281,7 +281,8 @@ it through `Get-UDDefaultDataDir` in `tools/runtime/UDDataDir.psm1`:
 `$env:UD_DATA_DIR`, else the target of `packages\RemasterUD`, else
 `tmp\remaster-shadow-67` (the one on this machine) or `tmp\remaster-shadow`.
 The Classic 1.99 install `D:\Arma_CWA\ARMA Cold War Assault [Classic]` is
-legacy: it is only the last fallback, with a warning. The official remaster
+unsupported: setup and the launchers refuse it, and existing `.trident.env`
+files are not rewritten, so replace a Classic path explicitly. The official remaster
 Demo at `D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]` is not a gameplay
 target; it stays for the stock-menu and multiplayer test pins and as a
 reference binary (see the Tests section for why the Demo-world Guerrilla tests
@@ -293,7 +294,7 @@ don't run on it).
 
 **Unpacked (dev / testing — no packing needed).** The engine and the Trident
 harness both load a mission straight from its folder. Copy
-`guerrilla-mode/mission/Guerrilla.Demo` into your user `Missions/` directory
+`guerrilla-mode/mission/Guerrilla.Abel` into the prepared shadow's `Missions/` directory
 (or point the game's `--test-mission` at it) and launch it. It needs the
 shared core beside it: `guerrilla-mode/core` copied to `<GameDir>\gmcore`, or
 just run the installer below, which does both.
@@ -317,8 +318,8 @@ without the core boots into a mission with no managers, and without the
 library the cyclers offer only what that island declares itself):
 
 ```powershell
-guerrilla-mode\install-missions.ps1                 # default: the Remaster shadow (Get-UDDefaultDataDir)
-guerrilla-mode\install-missions.ps1 -GameDir <dir>  # any other install
+guerrilla-mode\install-missions.ps1                 # default: the prepared Remaster shadow (Get-UDDefaultDataDir)
+guerrilla-mode\install-missions.ps1 -GameDir <dir>  # another prepared full Remaster shadow
 ```
 
 Idempotent: re-run it after editing a template, the core **or the faction
@@ -436,7 +437,8 @@ ctest --test-dir build/win-x64-clang-rwdi -R PoseidonTests --output-on-failure
 
 The Trident integration suite is fully migrated to the `gm*` command surface
 (the retired `GM_ZONES`/`zones.sqs` spine survives only in comments). The
-`guerrilla_native_*` twins run against the full 1.99 install (`full_cwa`), and
+`guerrilla_native_*` twins retain the `full_cwa` tag and should use the prepared
+full Remaster shadow (execution on that data is still pending), and
 `guerrilla_sinai_swap` + `ui/guerrilla_new_game_e2e` additionally need @LoBo
 (`lobo`, repaired once with `PoseidonTools mod doctor <@LoBo> --fix`) and the
 `install-missions.ps1` install. `guerrilla_sinai_swap` mounts @LoBo alone and

@@ -25,7 +25,6 @@ on:
       - "arma_CWR/play-guerrilla.ps1"
       - "arma_CWR/tools/runtime/**"
       - "arma_CWR/tools/lobo/**"
-      - "arma_CWR/thirdparty/classic-ui/**"
       - "arma_CWR/thirdparty/guerrilla-fonts/**"
       - "arma_CWR/cmake/**"
       - "arma_CWR/CMakeLists.txt"

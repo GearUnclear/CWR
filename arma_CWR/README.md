@@ -18,9 +18,9 @@ The engine and game executables, licensed under GPL-3.0-or-later with additional
 **Game data (separate)**
 
 Base-game models, textures, sounds, missions, and voices are supplied separately.
-The small Options text resources in `thirdparty/classic-ui` are an explicit
-APL-SA exception, with their own notice; `thirdparty/guerrilla-fonts` is OFL.
-Neither is covered by the engine's GPL grant.
+UD's own Options strings (`guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv`)
+are GPL like the rest of the source. `thirdparty/guerrilla-fonts` is OFL and is
+not covered by the engine's GPL grant.
 
 In short: the code is free software, the name is not, and the game data comes separately. This license covers the source code only and grants no rights to the trademarks.
 
@@ -28,7 +28,7 @@ In short: the code is free software, the name is not, and the game data comes se
 ## Quick Start
 
 For Guerrilla development on a fresh machine, follow
-[Fresh Classic + LoBo setup](guerrilla-mode/FRESH-INSTALL.md). After building,
+[Full Remaster + LoBo setup](guerrilla-mode/FRESH-INSTALL.md). After building,
 `setup-guerrilla.ps1` installs the runtime overlays, missions, factions and LoBo
 repairs; `play-guerrilla.ps1` launches the prepared installation.
 
@@ -43,14 +43,16 @@ On GNU/Linux, use the matching `linux-x64-clang-rwdi` preset.
 
 ```powershell
 .\run-game.ps1                                      # build + launch to the main menu
-.\run-game.ps1 -Mission 'Missions\Guerrilla.Demo'   # build + jump straight into a mission
+.\run-game.ps1 -Mission 'Missions\Guerrilla.Abel'   # build + jump straight into a mission
 .\run-game.ps1 -SkipBuild                           # launch the existing build, no rebuild
 ```
 
 `run-game.ps1` wraps the toolchain-on-PATH setup, an incremental `PoseidonGame`-target
 build, and launching the exe windowed (`--window --no-splash`) with its working directory
-set to the game data dir (default `D:\Arma_CWA\ARMA Cold War Assault [Classic]`, override with
-`-DataDir`). From the main menu, hit **GUERRILLA** to pick an island/faction and start a
+set to a prepared full Remaster shadow (selected by `UD_DATA_DIR`,
+`packages/RemasterUD`, or the documented `tmp/remaster-shadow*` locations;
+override with `-DataDir`). Missing or unsupported data produces a setup diagnostic;
+there is no Classic fallback. From the main menu, hit **GUERRILLA** to pick an island/faction and start a
 Guerrilla Mode game. See [`guerrilla-mode/README.md`](guerrilla-mode/README.md#run-the-mode)
 for mission template details.
 
@@ -103,8 +105,9 @@ by Bohemia Interactive under the **Arma Public License Share Alike (APL-SA)**:
 
 ### Getting game data to run what you build
 
-The compiled binaries need game data to run. You can obtain the **free Demo game
-data** on Steam:
+UD gameplay requires the **full official Remaster** data in a separate shadow
+([setup guide](guerrilla-mode/FRESH-INSTALL.md)). The **free Demo game data**
+is only a reference and a data source for explicitly pinned engine tests:
 
 - *Arma: Cold War Assault Remastered* Demo on Steam: <https://store.steampowered.com/app/4819000>
 

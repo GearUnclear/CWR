@@ -2,7 +2,7 @@
   "remasterPolicies": {
     "install": "UD-owned file; installed and kept current in both modes",
     "keep-existing": "Bohemia may ship this file; installed only where absent, an existing file is never replaced",
-    "string-gap": "not copied; setup writes bin/STRINGTABLE_UD.utf8.csv with only the keys Bohemia's shards lack (and the notice beside it)",
+    "string-gap": "not copied; setup writes bin/STRINGTABLE_UD.utf8.csv with only the keys Bohemia's shards lack",
     "skip": "Classic-only shim; the Remaster ships its own"
   },
   "files": [
@@ -15,7 +15,7 @@
     {
       "destination": "bin/resource-extra.cpp",
       "source": "guerrilla-mode/runtime/classic/bin/resource-extra.cpp",
-      "sha256": "4d865290006ecb2783581c6a57dae3e5ddcf1f224c29605d93135568eaad0217",
+      "sha256": "5e5bcee40c85abfe095293355ec3fe2dc3f50c48e8a92c046a9d7a65803ba2a8",
       "remaster": "skip"
     },
     {
@@ -31,45 +31,9 @@
       "remaster": "install"
     },
     {
-      "destination": "bin/optionsShell.hpp",
-      "source": "thirdparty/classic-ui/optionsShell.hpp",
-      "sha256": "ce201502b9ff5f5b79876595a9d5e0e3e1e1ad936df0355ef76ec88265763644",
-      "remaster": "skip"
-    },
-    {
-      "destination": "bin/optionsTemplates.hpp",
-      "source": "thirdparty/classic-ui/optionsTemplates.hpp",
-      "sha256": "3c6e690dd557a1309eb1431c2bd8e509cdc534b40152c76d0646767abea2da8f",
-      "remaster": "skip"
-    },
-    {
-      "destination": "bin/optionsScrollList.hpp",
-      "source": "thirdparty/classic-ui/optionsScrollList.hpp",
-      "sha256": "faadbcb40fad5421e13ad8765f98a9400a45ab2b2712ecf6bbae41d85353881f",
-      "remaster": "skip"
-    },
-    {
-      "destination": "bin/optionsScrollListSlots.hpp",
-      "source": "thirdparty/classic-ui/optionsScrollListSlots.hpp",
-      "sha256": "c50601e29ccfae7ffa6eb3c191c1d2c1fc1f72f6130388622f31ac505ff74b6f",
-      "remaster": "skip"
-    },
-    {
-      "destination": "bin/optionsUI.hpp",
-      "source": "thirdparty/classic-ui/optionsUI.hpp",
-      "sha256": "bcdec0dd661aade0f9c6d1205a014112017206c940c7ebe01dfdbb257f92bbf8",
-      "remaster": "skip"
-    },
-    {
-      "destination": "bin/STRINGTABLE_OPTIONS.utf8.csv",
-      "source": "thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv",
-      "sha256": "671560ee5874a744ef2109ba154bc679ba84f613f0c32081b513d96bb00c6818",
-      "remaster": "string-gap"
-    },
-    {
-      "destination": "bin/UD_OPTIONS_APL-SA_NOTICE.txt",
-      "source": "thirdparty/classic-ui/APL-SA_NOTICE.txt",
-      "sha256": "87264654e7d82caccbefde1d49f2d4297f5057afb3ae7ceb8091c20a5d2774c1",
+      "destination": "bin/STRINGTABLE_UD.utf8.csv",
+      "source": "guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv",
+      "sha256": "fff49d4e8043c14d21e126684174b1433e1f5b207fa3cc1a63fc223670464b86",
       "remaster": "string-gap"
     },
     {

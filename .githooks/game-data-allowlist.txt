@@ -43,6 +43,7 @@ arma_CWR/guerrilla-mode/config/guerrilla-hq.hpp                          # HQ sc
 arma_CWR/guerrilla-mode/config/lobo-factions.hpp                         # our LoBo faction rosters (34 KB, written here)
 arma_CWR/guerrilla-mode/runtime/classic/bin/remaster.cpp                 # 2 KB Classic sky shim, written here (legacy)
 arma_CWR/guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_AIRCRAFT.utf8.csv # UD aircraft control labels (codex branch)
+arma_CWR/guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv  # UD-authored Options strings, GPL: the 14 keys Bohemia's shards lack (written here)
 arma_CWR/tools/screenshots/@udshowcase/bin/config.cpp                    # site screenshot support mod
 
 # ---------------------------------------------------------------------------
@@ -231,18 +232,3 @@ arma_CWR/thirdparty/guerrilla-fonts/cwr_hand.ttf
 arma_CWR/thirdparty/guerrilla-fonts/cwr_mono.ttf
 arma_CWR/thirdparty/guerrilla-fonts/cwr_serif.ttf
 arma_CWR/thirdparty/guerrilla-fonts/cwr_title.ttf
-
-# ---------------------------------------------------------------------------
-# TEMPORARY: removed by the retire-classic-ui follow-up (roadmap item
-# retire-classic-ui). APL-SA Options resources from the Remaster Demo, kept
-# under their own notice while Classic support is retired. Exact paths only;
-# do not add to this group.
-# ---------------------------------------------------------------------------
-arma_CWR/thirdparty/classic-ui/APL-SA_NOTICE.txt
-arma_CWR/thirdparty/classic-ui/README.md
-arma_CWR/thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv
-arma_CWR/thirdparty/classic-ui/optionsScrollList.hpp
-arma_CWR/thirdparty/classic-ui/optionsScrollListSlots.hpp
-arma_CWR/thirdparty/classic-ui/optionsShell.hpp
-arma_CWR/thirdparty/classic-ui/optionsTemplates.hpp
-arma_CWR/thirdparty/classic-ui/optionsUI.hpp

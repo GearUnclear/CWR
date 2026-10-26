@@ -1,10 +1,10 @@
 # Third-Party Notices
 
-The Classic runtime installer also distributes small, separately licensed
-resources: [Options UI text resources](thirdparty/classic-ui/README.md) under
-APL-SA (Bohemia Interactive), and [five fonts](thirdparty/guerrilla-fonts/README.md)
-under SIL OFL 1.1. Full licenses and attribution are included in those folders
-and installed with the resources. Neither is covered by the engine's GPL grant.
+The runtime installer also distributes separately licensed resources:
+[five fonts](thirdparty/guerrilla-fonts/README.md) under SIL OFL 1.1. The full
+license and attribution are included in that folder and installed with the
+fonts; they are not covered by the engine's GPL grant. UD's own Options strings
+(`guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv`) are GPL.
 
 The source code of this project is licensed under the **GNU General Public License
 v3.0 or later** (see [`LICENSE`](LICENSE)). This file reproduces all third-party components used by the project.

@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Prepare the official Remaster (or legacy Classic 1.99) data and a LoBo mod
+    Prepare the full official Remaster data and a LoBo mod
     for the built UD engine.
 .DESCRIPTION
     Requires PowerShell 7 on Windows or Linux. The install mode follows the
-    GameDir layout:
+    GameDir layout (Classic 1.99 is refused):
 
     Remaster  A folder with any official Remaster marker (root dtaExt, or
               Bohemia's bin/remaster.bin, bin/mainMenu.hpp or
@@ -21,10 +21,8 @@
               nothing. Setup snapshots every
               pre-existing package file first and fails if anything else
               changed. The Remaster Demo package is refused.
-    Classic   (legacy) No marker: copies the versioned Classic shims,
-              licensed Options resources and OFL fonts.
 
-    Both modes install missions and factions and run the built mod doctor.
+    Installs missions and factions and runs the built mod doctor.
     Files setup replaces or appends to are backed up beneath each data
     folder's .ud-backups directory first. Original PBO backups are managed by
     mod doctor under LoBo/_ud-orig. No base game PBO is copied. -CheckOnly
@@ -41,6 +39,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'tools/runtime/InstallTree.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'tools/runtime/UDDataDir.psm1') -Force
 
 function Resolve-Child {
     param([string]$Parent, [string]$Name)
@@ -104,27 +103,10 @@ foreach ($dir in @($GameDir, $LoBoDir)) {
     Assert-PlainPath $dir
 }
 if ($GameDir -eq $LoBoDir) { throw 'GameDir and LoBoDir must be separate folders.' }
-# Pick the install mode before any other check or write. These markers ship only
-# with official Remaster/Demo packages; nothing this repo installs creates a root
-# dtaExt or these BIN names (the UD menu is bin/ud-mainmenu.hpp for that reason),
-# and bin/remaster.cpp is no marker because Classic mode installs our shim there.
+# Reject Classic, Demo and incomplete packages before planning or writing files.
+$GameDir = Assert-UDRemasterDataDir -DataDir $GameDir
 $bin = Resolve-Child $GameDir 'bin'
-$markers = @((Resolve-Child $GameDir 'dtaExt'), (Resolve-Child $bin 'remaster.bin'),
-    (Resolve-Child $bin 'mainMenu.hpp'), (Resolve-Child $bin 'splashLogo.hpp'))
-$found = @(foreach ($path in $markers) { if (Test-Path -LiteralPath $path) { [IO.Path]::GetRelativePath($GameDir, $path) } })
-$mode = if ($found.Count -gt 0) { 'Remaster' } else { 'Classic' }
-if ($mode -eq 'Remaster') {
-    # The Demo is not a gameplay target (no Abel, no GUER roster); refuse it outright.
-    $demoSigns = @(foreach ($name in @('PoseidonGameDemo.exe', 'PoseidonGameDemo', 'demo')) {
-        if (Test-Path -LiteralPath (Resolve-Child $GameDir $name)) { $name } })
-    if ($demoSigns.Count -gt 0 -or -not (Test-Path -LiteralPath (Resolve-Relative $GameDir 'worlds/abel.wrp') -PathType Leaf)) {
-        throw "GameDir looks like the official Remaster Demo package (found $(@($found + $demoSigns) -join ', ') in $GameDir). Setup targets the full Remaster (or legacy Classic 1.99); the Demo is not a supported data set."
-    }
-    $resourceExtra = Resolve-Child $bin 'resource-extra.cpp'
-    if (-not (Test-Path -LiteralPath $resourceExtra -PathType Leaf)) {
-        throw "GameDir has official Remaster markers (found $($found -join ', ') in $GameDir) but no bin/resource-extra.cpp of its own. Setup will not create one over an incomplete package; verify or reinstall it first."
-    }
-}
+$resourceExtra = Resolve-Child $bin 'resource-extra.cpp'
 Require-File $Tools
 Require-File (Resolve-Child $bin 'config.bin')
 Require-File (Resolve-Child $bin 'resource.bin')
@@ -141,23 +123,22 @@ foreach ($item in Get-ChildItem -LiteralPath $LoBoDir -Recurse -Force) {
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'guerrilla-mode/runtime/manifest.json') -Raw | ConvertFrom-Json
 $plan = @()
 $stringSource = $null
-$noticeEntry = $null
 foreach ($entry in $manifest.files) {
     $source = Join-Path $PSScriptRoot $entry.source
     Require-File $source
     if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ine $entry.sha256) {
         throw "Runtime source hash mismatch: $source (update manifest after intentional edits)"
     }
-    # Classic installs every entry. Remaster: install = UD-owned, kept current;
+    # install = UD-owned, kept current;
     # keep-existing = Bohemia may ship it, so an existing file is never replaced;
     # string-gap = feeds the generated STRINGTABLE_UD shard; skip = Classic shim.
-    $policy = if ($mode -eq 'Classic') { 'install' } else { [string]$entry.remaster }
+    $policy = [string]$entry.remaster
     if ($policy -notin @('install', 'keep-existing', 'string-gap', 'skip')) {
         throw "Manifest entry $($entry.destination) has no valid remaster policy: '$policy'"
     }
     if ($policy -eq 'skip') { continue }
     if ($policy -eq 'string-gap') {
-        if ($entry.destination -like '*.csv') { $stringSource = $source } else { $noticeEntry = $entry }
+        $stringSource = $source
         continue
     }
     $target = Resolve-Relative $GameDir $entry.destination
@@ -165,6 +146,7 @@ foreach ($entry in $manifest.files) {
     if (Test-Path -LiteralPath $target -PathType Container) { throw "Expected a file: $target" }
     $plan += [pscustomobject]@{ Source=$source; Target=$target; Hash=$entry.sha256; Policy=$policy }
 }
+if ($null -eq $stringSource) { throw 'Manifest has no string-gap entry (the UD Options strings).' }
 foreach ($relative in @('bin/config-extra.cpp','bin/guerrilla-factions.hpp','bin/guerrilla-hq.hpp','gmcore','Missions')) {
     $path = Resolve-Relative $GameDir $relative
     Assert-PlainPath $path
@@ -175,31 +157,34 @@ foreach ($relative in @('bin/config-extra.cpp','bin/guerrilla-factions.hpp','bin
 
 # Remaster: the UD stringtable shard carries only keys Bohemia's shards lack. The
 # engine loads every STRINGTABLE_*.csv sibling in name order and a later shard
-# wins a duplicate key, so shipping our whole Options shard would overwrite
-# Bohemia's newer Options text with the Demo-era copy.
+# wins a duplicate key, so a key Bohemia later ships drops out of our shard
+# instead of overwriting their text. The source is UD's own GPL
+# STRINGTABLE_UD_OPTIONS.utf8.csv (guerrilla-mode/runtime/common/bin).
 $udStrings = $null
 $udStringsText = $null
-if ($mode -eq 'Remaster') {
-    $udStrings = Resolve-Child $bin 'STRINGTABLE_UD.utf8.csv'
-    Assert-PlainPath $udStrings
-    $theirKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($csv in Get-ChildItem -LiteralPath $bin -File -Force) {
-        if ($csv.Name -notmatch '^stringtable.*\.csv$' -or $csv.Name -ieq 'STRINGTABLE_UD.utf8.csv') { continue }
-        $theirKeys.UnionWith((Get-StringKeys $csv.FullName))
-    }
-    $sourceLines = [IO.File]::ReadAllLines($stringSource)
-    $gapLines = @(foreach ($line in $sourceLines | Select-Object -Skip 1) {
-        $key = $line.Split(',')[0].Trim().Trim('"')
-        if ($key -and -not $theirKeys.Contains($key)) { $line }
-    })
-    if ($gapLines.Count -gt 0) {
-        $udStringsText = (@($sourceLines[0].Trim([char]0xFEFF)) + $gapLines) -join "`n"
-        $udStringsText += "`n"
-        $gapKeys = @($gapLines | ForEach-Object { $_.Split(',')[0] })
-        Write-Output "Stringtable: Bohemia's shards lack $($gapLines.Count) UD key(s): $($gapKeys -join ', ')"
-    } else {
-        Write-Output "Stringtable: Bohemia's shards cover every UD Options key; no UD shard needed."
-    }
+$udStrings = Resolve-Child $bin 'STRINGTABLE_UD.utf8.csv'
+Assert-PlainPath $udStrings
+# Installs before 2026-10-26 put an APL-SA notice beside the shard. Nothing
+# Bohemia-owned is installed any more, so a leftover copy is retired below.
+$staleNotice = Resolve-Child $bin 'UD_OPTIONS_APL-SA_NOTICE.txt'
+Assert-PlainPath $staleNotice
+$theirKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($csv in Get-ChildItem -LiteralPath $bin -File -Force) {
+    if ($csv.Name -notmatch '^stringtable.*\.csv$' -or $csv.Name -ieq 'STRINGTABLE_UD.utf8.csv') { continue }
+    $theirKeys.UnionWith((Get-StringKeys $csv.FullName))
+}
+$sourceLines = [IO.File]::ReadAllLines($stringSource)
+$gapLines = @(foreach ($line in $sourceLines | Select-Object -Skip 1) {
+    $key = $line.Split(',')[0].Trim().Trim('"')
+    if ($key -and -not $theirKeys.Contains($key)) { $line }
+})
+if ($gapLines.Count -gt 0) {
+    $udStringsText = (@($sourceLines[0].Trim([char]0xFEFF)) + $gapLines) -join "`n"
+    $udStringsText += "`n"
+    $gapKeys = @($gapLines | ForEach-Object { $_.Split(',')[0] })
+    Write-Output "Stringtable: Bohemia's shards lack $($gapLines.Count) UD key(s): $($gapKeys -join ', ')"
+} else {
+    Write-Output "Stringtable: Bohemia's shards cover every UD Options key; no UD shard needed."
 }
 
 $loboConfig = Resolve-Relative $LoBoDir 'bin/config.cpp'
@@ -217,7 +202,7 @@ $deps = Join-Path $LoBoDir 'deps/@LoBo_Deps'
 $modDirs = @($LoBoDir)
 if (Test-Path -LiteralPath $deps -PathType Container) { $modDirs += $deps }
 else { Write-Warning 'LoBo has no deps/@LoBo_Deps. For the recovered dependency set, use the complete server LoBo folder.' }
-$dataName = if ($mode -eq 'Remaster') { 'official Remaster data (Bohemia files kept)' } else { 'Classic data (legacy)' }
+$dataName = 'official Remaster data (Bohemia files kept)'
 Write-Output "Validated: $dataName, LoBo, tools, and $($plan.Count) runtime files."
 if ($CheckOnly) { return }
 
@@ -228,38 +213,36 @@ $runId = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString
 # appended include lines. bin/ and fonts/ are hashed; the large data folders are
 # compared by length and timestamp.
 $snapshot = $null
-if ($mode -eq 'Remaster') {
-    $snapshot = @{}
-    # UD-owned paths (earlier runs' output, which a rerun may legitimately update)
-    # are not package files: LoBo, backups, gmcore, the mission templates, and the
-    # bin/ and fonts/ files only UD writes.
-    $skipRoots = @([IO.Path]::GetFullPath($LoBoDir).TrimEnd('\','/'), (Join-Path $GameDir '.ud-backups'),
-        (Resolve-Child $GameDir 'gmcore'))
-    $missionsDir = Resolve-Child $GameDir 'Missions'
-    foreach ($template in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'guerrilla-mode/mission') -Directory) {
-        $skipRoots += Resolve-Child $missionsDir $template.Name
-    }
-    $udBinFiles = @($plan | Where-Object Policy -EQ 'install' | ForEach-Object Target) +
-        @($udStrings, (Resolve-Relative $GameDir $noticeEntry.destination),
-          (Resolve-Child $bin 'guerrilla-factions.hpp'), (Resolve-Child $bin 'guerrilla-hq.hpp'))
-    $skipRoots += $udBinFiles
-    $skipRoots = @($skipRoots | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\','/') })
-    $pending = [Collections.Generic.Stack[string]]::new()
-    $pending.Push($GameDir)
-    while ($pending.Count -gt 0) {
-        $dir = $pending.Pop()
-        foreach ($item in Get-ChildItem -LiteralPath $dir -Force) {
-            $full = $item.FullName.TrimEnd('\','/')
-            if ($skipRoots | Where-Object { $_ -ieq $full }) { continue }
-            if ($item.PSIsContainer) { $pending.Push($item.FullName); continue }
-            $relative = [IO.Path]::GetRelativePath($GameDir, $item.FullName)
-            $top = $relative.Split([char[]]@('\','/'))[0]
-            $hashed = $top -ieq 'bin' -or $top -ieq 'fonts'
-            $snapshot[$relative] = [pscustomobject]@{
-                Path = $item.FullName; Length = $item.Length; Time = $item.LastWriteTimeUtc
-                Hash = if ($hashed) { Get-FileSha $item.FullName } else { $null }
-                Bytes = if ($item.Name -ieq 'resource-extra.cpp' -or $item.Name -ieq 'config-extra.cpp') { [IO.File]::ReadAllBytes($item.FullName) } else { $null }
-            }
+$snapshot = @{}
+# UD-owned paths (earlier runs' output, which a rerun may legitimately update)
+# are not package files: LoBo, backups, gmcore, the mission templates, and the
+# bin/ and fonts/ files only UD writes.
+$skipRoots = @([IO.Path]::GetFullPath($LoBoDir).TrimEnd('\','/'), (Join-Path $GameDir '.ud-backups'),
+    (Resolve-Child $GameDir 'gmcore'))
+$missionsDir = Resolve-Child $GameDir 'Missions'
+foreach ($template in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'guerrilla-mode/mission') -Directory) {
+    $skipRoots += Resolve-Child $missionsDir $template.Name
+}
+$udBinFiles = @($plan | Where-Object Policy -EQ 'install' | ForEach-Object Target) +
+    @($udStrings, $staleNotice,
+      (Resolve-Child $bin 'guerrilla-factions.hpp'), (Resolve-Child $bin 'guerrilla-hq.hpp'))
+$skipRoots += $udBinFiles
+$skipRoots = @($skipRoots | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\','/') })
+$pending = [Collections.Generic.Stack[string]]::new()
+$pending.Push($GameDir)
+while ($pending.Count -gt 0) {
+    $dir = $pending.Pop()
+    foreach ($item in Get-ChildItem -LiteralPath $dir -Force) {
+        $full = $item.FullName.TrimEnd('\','/')
+        if ($skipRoots | Where-Object { $_ -ieq $full }) { continue }
+        if ($item.PSIsContainer) { $pending.Push($item.FullName); continue }
+        $relative = [IO.Path]::GetRelativePath($GameDir, $item.FullName)
+        $top = $relative.Split([char[]]@('\','/'))[0]
+        $hashed = $top -ieq 'bin' -or $top -ieq 'fonts'
+        $snapshot[$relative] = [pscustomobject]@{
+            Path = $item.FullName; Length = $item.Length; Time = $item.LastWriteTimeUtc
+            Hash = if ($hashed) { Get-FileSha $item.FullName } else { $null }
+            Bytes = if ($item.Name -ieq 'resource-extra.cpp' -or $item.Name -ieq 'config-extra.cpp') { [IO.File]::ReadAllBytes($item.FullName) } else { $null }
         }
     }
 }
@@ -276,63 +259,57 @@ foreach ($entry in $plan) {
     [IO.File]::Copy($entry.Source, $entry.Target, $true)
     Write-Output "Installed: $($entry.Target)"
 }
-if ($mode -eq 'Remaster') {
-    if ($null -ne $udStringsText) {
-        $current = if (Test-Path -LiteralPath $udStrings) { [IO.File]::ReadAllText($udStrings) } else { $null }
-        if ($current -cne $udStringsText) {
-            Save-Existing $udStrings $GameDir
-            [IO.File]::WriteAllText($udStrings, $udStringsText, [Text.UTF8Encoding]::new($false))
-            Write-Output "Installed: $udStrings"
-        }
-        $notice = Resolve-Relative $GameDir $noticeEntry.destination
-        Assert-PlainPath $notice
-        if (-not (Test-Path -LiteralPath $notice) -or (Get-FileSha $notice) -ine $noticeEntry.sha256) {
-            Save-Existing $notice $GameDir
-            [IO.File]::Copy((Join-Path $PSScriptRoot $noticeEntry.source), $notice, $true)
-            Write-Output "Installed: $notice"
-        }
-    } elseif (Test-Path -LiteralPath $udStrings) {
-        # Bohemia now covers every key; retire our shard so it cannot shadow theirs.
+if ($null -ne $udStringsText) {
+    $current = if (Test-Path -LiteralPath $udStrings) { [IO.File]::ReadAllText($udStrings) } else { $null }
+    if ($current -cne $udStringsText) {
         Save-Existing $udStrings $GameDir
-        [IO.File]::Delete($udStrings)
-        Write-Output "Removed (now covered by Bohemia's shards): $udStrings"
+        [IO.File]::WriteAllText($udStrings, $udStringsText, [Text.UTF8Encoding]::new($false))
+        Write-Output "Installed: $udStrings"
     }
-    # The one edit to a Bohemia file: append the UD includes, each once. The
-    # menu (RscDisplayMainUD) and the Options additions (RscOptionsPageControlsUD,
-    # the Arma 3 controls row) each carry their own class name so they parse
-    # beside Bohemia's classes in that one file; the engine prefers them when
-    # present. An install from before ud-options.hpp existed gets only the
-    # missing line.
-    $udIncludes = @(
-        @{ Name = 'ud-mainmenu.hpp'; Comment = 'main menu' },
-        @{ Name = 'ud-options.hpp'; Comment = 'Options additions (Arma 3 controls row)' })
-    $backedUp = $false
-    foreach ($include in $udIncludes) {
-        $resourceText = [IO.File]::ReadAllText($resourceExtra)
-        if ($resourceText -match ('(?m)^\s*#include\s*"' + [regex]::Escape($include.Name) + '"')) {
-            Write-Output "Up to date: $resourceExtra includes $($include.Name)"
-            continue
+} elseif (Test-Path -LiteralPath $udStrings) {
+    # Bohemia now covers every key; retire our shard so it cannot shadow theirs.
+    Save-Existing $udStrings $GameDir
+    [IO.File]::Delete($udStrings)
+    Write-Output "Removed (now covered by Bohemia's shards): $udStrings"
+}
+if (Test-Path -LiteralPath $staleNotice) {
+    Save-Existing $staleNotice $GameDir
+    [IO.File]::Delete($staleNotice)
+    Write-Output "Removed (no longer installed): $staleNotice"
+}
+# The one edit to a Bohemia file: append the UD includes, each once. The
+# menu (RscDisplayMainUD) and the Options additions (RscOptionsPageControlsUD,
+# the Arma 3 controls row) each carry their own class name so they parse
+# beside Bohemia's classes in that one file; the engine prefers them when
+# present. An install from before ud-options.hpp existed gets only the
+# missing line.
+$udIncludes = @(
+    @{ Name = 'ud-mainmenu.hpp'; Comment = 'main menu' },
+    @{ Name = 'ud-options.hpp'; Comment = 'Options additions (Arma 3 controls row)' })
+$backedUp = $false
+foreach ($include in $udIncludes) {
+    $resourceText = [IO.File]::ReadAllText($resourceExtra)
+    if ($resourceText -match ('(?m)^\s*#include\s*"' + [regex]::Escape($include.Name) + '"')) {
+        Write-Output "Up to date: $resourceExtra includes $($include.Name)"
+        continue
+    }
+    if (-not $backedUp) { Save-Existing $resourceExtra $GameDir; $backedUp = $true }
+    $append = "`n// Uslu dur! $($include.Comment); appended by arma_CWR/setup-guerrilla.ps1 (Remaster mode).`n" +
+              "#include `"$($include.Name)`"`n"
+    [IO.File]::AppendAllText($resourceExtra, $append)
+    Write-Output "Appended: $($include.Name) include -> $resourceExtra"
+}
+# install-missions appends its two includes to Bohemia's config-extra.cpp;
+# back it up only when that append is still to come.
+$configExtra = Resolve-Child $bin 'config-extra.cpp'
+if (Test-Path -LiteralPath $configExtra) {
+    $configText = [IO.File]::ReadAllText($configExtra)
+    foreach ($library in @('guerrilla-factions.hpp', 'guerrilla-hq.hpp')) {
+        if ($configText -notmatch ('(?m)^\s*#include\s*"' + [regex]::Escape($library) + '"')) {
+            Save-Existing $configExtra $GameDir
+            break
         }
-        if (-not $backedUp) { Save-Existing $resourceExtra $GameDir; $backedUp = $true }
-        $append = "`n// Uslu dur! $($include.Comment); appended by arma_CWR/setup-guerrilla.ps1 (Remaster mode).`n" +
-                  "#include `"$($include.Name)`"`n"
-        [IO.File]::AppendAllText($resourceExtra, $append)
-        Write-Output "Appended: $($include.Name) include -> $resourceExtra"
     }
-    # install-missions appends its two includes to Bohemia's config-extra.cpp;
-    # back it up only when that append is still to come.
-    $configExtra = Resolve-Child $bin 'config-extra.cpp'
-    if (Test-Path -LiteralPath $configExtra) {
-        $configText = [IO.File]::ReadAllText($configExtra)
-        foreach ($library in @('guerrilla-factions.hpp', 'guerrilla-hq.hpp')) {
-            if ($configText -notmatch ('(?m)^\s*#include\s*"' + [regex]::Escape($library) + '"')) {
-                Save-Existing $configExtra $GameDir
-                break
-            }
-        }
-    }
-} else {
-    Save-Existing (Resolve-Relative $GameDir 'bin/config-extra.cpp') $GameDir
 }
 Save-Existing $loboConfig $LoBoDir
 # Invoke in-process child script scopes; their explicit exit 0 returns to the caller.
@@ -354,22 +331,20 @@ foreach ($entry in $plan) {
         throw "Installed file verification failed: $($entry.Target)"
     }
 }
-if ($mode -eq 'Remaster') {
-    foreach ($relative in $snapshot.Keys) {
-        $before = $snapshot[$relative]
-        if (-not (Test-Path -LiteralPath $before.Path -PathType Leaf)) { throw "Package file removed: $($before.Path)" }
-        if ($null -ne $before.Bytes) {
-            if (-not (Test-AppendOnlyTail $before.Bytes ([IO.File]::ReadAllBytes($before.Path)))) {
-                throw "Package file changed beyond appended #include lines: $($before.Path)"
-            }
-            continue
+foreach ($relative in $snapshot.Keys) {
+    $before = $snapshot[$relative]
+    if (-not (Test-Path -LiteralPath $before.Path -PathType Leaf)) { throw "Package file removed: $($before.Path)" }
+    if ($null -ne $before.Bytes) {
+        if (-not (Test-AppendOnlyTail $before.Bytes ([IO.File]::ReadAllBytes($before.Path)))) {
+            throw "Package file changed beyond appended #include lines: $($before.Path)"
         }
-        $item = Get-Item -LiteralPath $before.Path -Force
-        $same = if ($null -ne $before.Hash) { (Get-FileSha $before.Path) -ieq $before.Hash }
-                else { $item.Length -eq $before.Length -and $item.LastWriteTimeUtc -eq $before.Time }
-        if (-not $same) { throw "Package file changed: $($before.Path)" }
+        continue
     }
-    Write-Output "Verified: $($snapshot.Count) package files unchanged apart from appended #include lines."
+    $item = Get-Item -LiteralPath $before.Path -Force
+    $same = if ($null -ne $before.Hash) { (Get-FileSha $before.Path) -ieq $before.Hash }
+            else { $item.Length -eq $before.Length -and $item.LastWriteTimeUtc -eq $before.Time }
+    if (-not $same) { throw "Package file changed: $($before.Path)" }
 }
-Write-Output "Setup complete ($mode mode). Launch the rebuilt PoseidonGame with these game/mod folders."
+Write-Output "Verified: $($snapshot.Count) package files unchanged apart from appended #include lines."
+Write-Output "Setup complete (Remaster). Launch the rebuilt PoseidonGame with these game/mod folders."
 Write-Output ('Mods: ' + ($modDirs -join ';'))

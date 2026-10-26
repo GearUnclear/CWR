@@ -47,7 +47,7 @@ All paths below are under `arma_CWR/`. Links pin the inspected source rather tha
 | Reset paths | `BindingsPage::ResetCurrentCategoryToDefaults()` and `InputSubsystem::ResetCategoryDefaults()` rebuild global descriptor defaults, rather than the proposed aircraft layout. Reset-all loops categories, including Common. |
 | Saved profiles | `ContextControlsConfig::Load/Save` uses named per-context rows, modifier and scale arrays; the current version is 5. Loading an older version seeds defaults before overlaying stored rows. `Save()` skips fully empty rows. |
 | Existing aircraft operations | `HelicopterAuto::PerformAction(ATAutoHover)` and `AirplaneAuto::PerformAction(ATLandGear/ATFlapsUp/ATFlapsDown)` already implement menu commands. Their `GetActions()` methods enforce availability. These are `ActionType`s, not currently bindable `UserAction`s. |
-| Remaster localization | `setup-guerrilla.ps1` installs manifest-owned files and generates a missing-key `STRINGTABLE_UD` shard. Official Options resources are kept. Use UD-owned localization keys/files and update `guerrilla-mode/runtime/manifest.json`; do not replace Steam resources or extend the Classic shim. |
+| Remaster localization | `setup-guerrilla.ps1` installs manifest-owned files and generates a missing-key `STRINGTABLE_UD` shard. Official Options resources are kept. Add new keys to UD's own `guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_OPTIONS.utf8.csv` (GPL) and update its hash in `guerrilla-mode/runtime/manifest.json`; do not replace Steam resources or extend the Classic shim. |
 
 ## How to implement
 
