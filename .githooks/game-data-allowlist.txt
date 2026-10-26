@@ -1,0 +1,248 @@
+# Allowlist for .githooks/check_no_game_data.py (the game data and secrets guard).
+#
+# Format: one entry per line, # starts a comment.
+#   path/to/file.ext   exact path: bypasses every rule except the secret scan
+#   path/to/dir/       directory prefix (ends in /): bypasses the extension,
+#                      forbidden-folder and magic-byte rules only; the 5 MB
+#                      limit, the over-64 KB config/stringtable rule and the
+#                      secret scan still apply
+#
+# Every entry needs a comment saying why it belongs. Bohemia game data and
+# @LoBo data NEVER qualify, whatever the folder: no pbo, paa, p3d, wrp, sound,
+# de-binarized config or stringtable taken from a game or mod install. Secrets
+# are never allowlisted.
+#
+# Built 2026-10-26 from `check_no_game_data.py --tree <rev> --no-allowlist` over
+# every kept origin branch, then sorted by provenance.
+
+# ---------------------------------------------------------------------------
+# Synthetic test fixtures we generate or wrote by hand. No Bohemia or LoBo
+# bytes: the pbos are packed by the named generators, the configs are short
+# hand-written stand-ins (the @lobofixup one only names LoBo classes to patch
+# eleven malformed tracer colours and to preload the roster).
+# ---------------------------------------------------------------------------
+arma_CWR/tests/fixtures/mods-island/@udisland/addons/udisland.pbo       # generate_udisland.py
+arma_CWR/tests/fixtures/mods-lean/@udlean/addons/udlean.pbo             # generate_udlean.py
+arma_CWR/tests/fixtures/mods-unlisted/@udunlisted/addons/udunlisted.pbo # mods-unlisted/gen-pbo.py
+arma_CWR/tests/fixtures/mods-unlisted/@udunlisted/source/config.cpp     # gen-pbo.py source
+arma_CWR/tests/fixtures/mods-factionpack/@udbroken/bin/config.cpp       # mod-intake lane, #54
+arma_CWR/tests/fixtures/mods-factionpack/@udfaction/bin/config.cpp      # mod-intake lane, #54
+arma_CWR/tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp             # LoBo repair fixture, hand-written
+arma_CWR/tests/fixtures/mods-propsafety/@propsafety/bin/config.cpp      # preload roster fixture
+arma_CWR/tests/fixtures/packages/mini/bin/config.cpp                    # mod-intake stand-in package, written from scratch
+# Byte copies (blob f0e1600) of the upstream fixture tests/fixtures/p3d/flat_quad.p3d
+arma_CWR/tests/fixtures/packages/mini/mini/car.p3d
+arma_CWR/tests/fixtures/packages/mini/mini/man.p3d
+arma_CWR/tests/integration/missions/guerrilla_interaction.abel/description.ext # #41 test mission
+
+# ---------------------------------------------------------------------------
+# UD-authored configs and stringtables that ship with Guerrilla Mode or the
+# tools. Exact paths so a large dump cannot slip in beside them.
+# ---------------------------------------------------------------------------
+arma_CWR/guerrilla-mode/config/guerrilla-hq.hpp                          # HQ scenery and caches
+arma_CWR/guerrilla-mode/config/lobo-factions.hpp                         # our LoBo faction rosters (34 KB, written here)
+arma_CWR/guerrilla-mode/runtime/classic/bin/remaster.cpp                 # 2 KB Classic sky shim, written here (legacy)
+arma_CWR/guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_AIRCRAFT.utf8.csv # UD aircraft control labels (codex branch)
+arma_CWR/tools/screenshots/@udshowcase/bin/config.cpp                    # site screenshot support mod
+
+# ---------------------------------------------------------------------------
+# Fixtures inherited from Bohemia's GPL engine release. Each path exists in
+# upstream/main (without the arma_CWR/ prefix) with the identical blob, checked
+# 2026-10-26. STRINGTABLE_MAINMENU.utf8.csv is the upstream file plus five
+# rows UD added for its own options.
+# ---------------------------------------------------------------------------
+arma_CWR/apps/tools/Tools/fixtures/check.wav
+arma_CWR/tests/fixtures/audio/click.wss
+arma_CWR/tests/fixtures/audio/stream_loop.ogg
+arma_CWR/tests/fixtures/audio/tone.wav
+arma_CWR/tests/fixtures/audio/voice-lang-campaign/description.ext
+arma_CWR/tests/fixtures/audio/voice-lang-campaign/dtaExt/sound/test_campaign.Czech.ogg
+arma_CWR/tests/fixtures/audio/voice-lang-campaign/dtaExt/sound/test_campaign.ogg
+arma_CWR/tests/fixtures/audio/voice-lang-mission/voice_test.demo/description.ext
+arma_CWR/tests/fixtures/audio/voice-lang-mission/voice_test.demo/sound/test_voice.Czech.ogg
+arma_CWR/tests/fixtures/audio/voice-lang-mission/voice_test.demo/sound/test_voice.ogg
+arma_CWR/tests/fixtures/audio/wave-to-lip/voice_cz.wav
+arma_CWR/tests/fixtures/audio/wave-to-lip/voice_en.wav
+arma_CWR/tests/fixtures/cfg/binarized_config.bin
+arma_CWR/tests/fixtures/config-replace/bin/config-extra.cpp
+arma_CWR/tests/fixtures/config-replace/bin/config.cpp
+arma_CWR/tests/fixtures/config-replace/mod/bin/config.cpp
+arma_CWR/tests/fixtures/config/addon_config.txt
+arma_CWR/tests/fixtures/config/config_strings.txt
+arma_CWR/tests/fixtures/config/vehicle_config.txt
+arma_CWR/tests/fixtures/config/weapon_config.txt
+arma_CWR/tests/fixtures/font/dummy.ttf
+arma_CWR/tests/fixtures/font/legacy-01.paa
+arma_CWR/tests/fixtures/font/legacy.fxy
+arma_CWR/tests/fixtures/jpg/checker_32x32.jpg
+arma_CWR/tests/fixtures/jpg/gradient_128x64.jpg
+arma_CWR/tests/fixtures/jpg/gradient_64x64.jpg
+arma_CWR/tests/fixtures/jpg/nonpow2_33x33.jpg
+arma_CWR/tests/fixtures/mission_linter/unused-synthetic/sound/base.ogg
+arma_CWR/tests/fixtures/mission_linter/unused-synthetic/sound/radio.ogg
+arma_CWR/tests/fixtures/mission_linter/unused-synthetic/stringtable.utf8.csv
+arma_CWR/tests/fixtures/mission_linter/valid-mission/sound/base.ogg
+arma_CWR/tests/fixtures/mission_linter/valid-mission/sound/radio.ogg
+arma_CWR/tests/fixtures/mission_linter/valid-mission/stringtable.utf8.csv
+arma_CWR/tests/fixtures/mission_smoke/alpha_scenario.cain/overview.paa
+arma_CWR/tests/fixtures/mission_smoke/alpha_scenario.cain/sound/line01.Czech.ogg
+arma_CWR/tests/fixtures/mission_smoke/alpha_scenario.cain/sound/line01.ogg
+arma_CWR/tests/fixtures/mission_smoke/alpha_scenario.cain/stringtable.utf8.csv
+arma_CWR/tests/fixtures/mission_smoke/bravo_scenario.cain/stringtable.utf8.csv
+arma_CWR/tests/fixtures/mission_smoke/coop_scenario.abel/overview.paa
+arma_CWR/tests/fixtures/mission_smoke/coop_scenario.abel/sound/line01.Czech.ogg
+arma_CWR/tests/fixtures/mission_smoke/coop_scenario.abel/sound/line01.ogg
+arma_CWR/tests/fixtures/mission_smoke/coop_scenario.abel/stringtable.utf8.csv
+arma_CWR/tests/fixtures/mission_smoke/delta_scenario.cain/stringtable.utf8.csv
+arma_CWR/tests/fixtures/mission_smoke/echo_scenario.cain/stringtable.utf8.csv
+arma_CWR/tests/fixtures/mlod/animated_marker_mlod.p3d
+arma_CWR/tests/fixtures/mlod/camera_path_a.p3d
+arma_CWR/tests/fixtures/mlod/camera_path_b.p3d
+arma_CWR/tests/fixtures/mlod/camera_path_c.p3d
+arma_CWR/tests/fixtures/mlod/complex_vehicle_mlod.p3d
+arma_CWR/tests/fixtures/mlod/fuzz_shape_lod_oob.p3d
+arma_CWR/tests/fixtures/mlod/fuzz_shape_serializebin_oob.p3d
+arma_CWR/tests/fixtures/mlod/fuzz_tagg_oob.p3d
+arma_CWR/tests/fixtures/mods-badmodel/@badmodel/addons/badmodel.pbo
+arma_CWR/tests/fixtures/mods-badmodel/@badmodel/source/config.cpp
+arma_CWR/tests/fixtures/mods-campaigns/@tridebrief/Campaigns/tri_debrief.pbo
+arma_CWR/tests/fixtures/mods-handitem/@handitem/addons/handitem.pbo
+arma_CWR/tests/fixtures/mods-handitem/@handitem/source/config.cpp
+arma_CWR/tests/fixtures/mods-manymags/@manymags/addons/manymags.pbo
+arma_CWR/tests/fixtures/mods-manymags/@manymags/source/config.cpp
+arma_CWR/tests/fixtures/mods-mp-missions/@mpmissionbrowser/addons/fixture_core.pbo
+arma_CWR/tests/fixtures/mods-mp-missions/@mpmissionbrowser/mpmissions/addon mission from mod.demo.pbo
+arma_CWR/tests/fixtures/mods-mp-missions/@mpmissionbrowser/mpmissions/tri_under_score.demo.pbo
+arma_CWR/tests/fixtures/mods-nordicnames/@nordicnames/bin/config.cpp
+arma_CWR/tests/fixtures/mods-sp-missions/@trisp/Missions/tri_sp_gap1.eden.pbo
+arma_CWR/tests/fixtures/mods/@fixturemod/addons/fixture_core.pbo
+arma_CWR/tests/fixtures/p3d/animated_actor.p3d
+arma_CWR/tests/fixtures/p3d/animated_morph_odol.p3d
+arma_CWR/tests/fixtures/p3d/complex_vehicle.p3d
+arma_CWR/tests/fixtures/p3d/crew_proxy.p3d
+arma_CWR/tests/fixtures/p3d/empty_shape.p3d
+arma_CWR/tests/fixtures/p3d/flat_quad.p3d
+arma_CWR/tests/fixtures/p3d/light_disc.p3d
+arma_CWR/tests/fixtures/p3d/multi_lod_vehicle.p3d
+arma_CWR/tests/fixtures/p3d/proxy_structure.p3d
+arma_CWR/tests/fixtures/p3d/simple_proxy.p3d
+arma_CWR/tests/fixtures/p3d/simple_tree.p3d
+arma_CWR/tests/fixtures/p3d/sky_plane.p3d
+arma_CWR/tests/fixtures/paa/fuzz_argb8888_oob.paa
+arma_CWR/tests/fixtures/paa/fuzz_dxt_oob.paa
+arma_CWR/tests/fixtures/paa/fuzz_lzw_overflow.paa
+arma_CWR/tests/fixtures/paa/synthetic_ai88.paa
+arma_CWR/tests/fixtures/paa/synthetic_argb4444.paa
+arma_CWR/tests/fixtures/paa/synthetic_dxt1.paa
+arma_CWR/tests/fixtures/paa/synthetic_dxt3.paa
+arma_CWR/tests/fixtures/paa/synthetic_dxt5.paa
+arma_CWR/tests/fixtures/pac/synthetic_dark.pac
+arma_CWR/tests/fixtures/pac/synthetic_default.pac
+arma_CWR/tests/fixtures/pbo/addon_fixture.pbo
+arma_CWR/tests/fixtures/pbo/mission_fixture.Intro.pbo
+arma_CWR/tests/fixtures/pbo/triisl.pbo
+arma_CWR/tests/fixtures/pbo/xor1024_cfgpatches.bin
+arma_CWR/tests/fixtures/qstream/buffer_large.bin
+arma_CWR/tests/fixtures/qstream/buffer_medium.bin
+arma_CWR/tests/fixtures/qstream/test_large.bin
+arma_CWR/tests/fixtures/rtm/actor_motion.rtm
+arma_CWR/tests/fixtures/rtm/marker_motion.rtm
+arma_CWR/tests/fixtures/savegame/save.fps
+arma_CWR/tests/fixtures/stringtable/STRINGTABLE_BRIEFING_TITLE.utf8.csv
+arma_CWR/tests/fixtures/stringtable/STRINGTABLE_MAINMENU.utf8.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_campaign.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_cp1252.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_credits_cp1250.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_datefmt.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_mission.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_mp_version_malformed.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_package.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_package_mainmenu.utf8.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_ru_cp1251.csv
+arma_CWR/tests/fixtures/stringtable/stringtable_test.csv
+arma_CWR/tests/fixtures/studio/Addons/Vehicle.pbo
+arma_CWR/tests/fixtures/studio/Addons/addon_fixture.pbo
+arma_CWR/tests/fixtures/studio/Addons/font_fixture.pbo
+arma_CWR/tests/fixtures/studio/Addons/mission_fixture.Intro.pbo
+arma_CWR/tests/fixtures/studio/ambient.wav
+arma_CWR/tests/fixtures/studio/config.cpp
+arma_CWR/tests/fixtures/studio/data/synthetic_grid.paa
+arma_CWR/tests/fixtures/studio/vehicle.p3d
+arma_CWR/tests/fixtures/wrp/test_world.wrp
+arma_CWR/tests/integration/ingame/custom_profile_media.test/Sound/tri_profile_ping.wav
+arma_CWR/tests/integration/ingame/custom_profile_media.test/face.paa
+arma_CWR/tests/integration/missions/sound_preload.Demo/description.ext
+arma_CWR/tests/integration/missions/sound_preload.Demo/sound/say.wav
+arma_CWR/tests/integration/multiplayer/admin_restart.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/classic_lobby_second_join.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/custom_face_hosted_visual.test/face.jpg
+arma_CWR/tests/integration/multiplayer/custom_face_restart_respawn.test/face.paa
+arma_CWR/tests/integration/multiplayer/custom_face_restart_respawn.test/jip_stress.Demo.pbo
+arma_CWR/tests/integration/multiplayer/custom_face_visual.test/client1/face.jpg
+arma_CWR/tests/integration/multiplayer/custom_face_visual.test/client2/face.jpg
+arma_CWR/tests/integration/multiplayer/custom_media_jip.test/client1/Sound/tri_mp_ping.wav
+arma_CWR/tests/integration/multiplayer/custom_media_jip.test/client1/face.jpg
+arma_CWR/tests/integration/multiplayer/custom_media_jip.test/client2/Sound/tri_mp_ping.wav
+arma_CWR/tests/integration/multiplayer/custom_media_jip.test/client2/face.jpg
+arma_CWR/tests/integration/multiplayer/first_play_movement.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/first_play_state_diagnostic.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/full_stack_modded_media_join.test/client1/Sound/tri_mp_ping.wav
+arma_CWR/tests/integration/multiplayer/full_stack_modded_media_join.test/client1/face.jpg
+arma_CWR/tests/integration/multiplayer/late_joiner_media.test/early/Sound/tri_mp_ping.wav
+arma_CWR/tests/integration/multiplayer/late_joiner_media.test/early/face.jpg
+arma_CWR/tests/integration/multiplayer/late_joiner_media.test/late/Sound/tri_mp_ping.wav
+arma_CWR/tests/integration/multiplayer/late_joiner_media.test/late/face.jpg
+arma_CWR/tests/integration/multiplayer/mission_rotation.test/rot_one.Demo.pbo
+arma_CWR/tests/integration/multiplayer/mission_rotation.test/rot_two.Demo.pbo
+arma_CWR/tests/integration/multiplayer/mission_transfer_progress_ui.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/squad_insignia_https.test/fixtures/synthetic_grid.paa
+arma_CWR/tests/integration/multiplayer/von_bidirectional.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/von_dedicated.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/von_lobby.test/jip_basic.Demo.pbo
+arma_CWR/tests/integration/multiplayer/von_push_to_talk.test/jip_basic.Demo.pbo
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/campaign_briefing/Flashpoint.Eden/stringtable.utf8.csv
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/description.ext
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.Czech.ogg
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.Polish.ogg
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.ogg
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/stringtable.utf8.csv
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/description.ext
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.Czech.ogg
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.ogg
+arma_CWR/tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/HtmlStringtable.Noe/stringtable.utf8.csv
+
+# ---------------------------------------------------------------------------
+# Public web portal imagery: UD screenshots, icons and tiles, web-sized.
+# ---------------------------------------------------------------------------
+site/assets/img/
+
+# ---------------------------------------------------------------------------
+# TTS voice samples generated by arma_CWR/voice-lines/generate_voice.py
+# (OpenAI audio models via OpenRouter), not game sounds.
+# ---------------------------------------------------------------------------
+arma_CWR/voice-lines/samples/
+
+# ---------------------------------------------------------------------------
+# OFL 1.1 fonts (Roboto, Caveat, Courier Prime, Vollkorn, Oswald); license and
+# attribution in arma_CWR/thirdparty/guerrilla-fonts/OFL.txt and README.md.
+# ---------------------------------------------------------------------------
+arma_CWR/thirdparty/guerrilla-fonts/cwr_body.ttf
+arma_CWR/thirdparty/guerrilla-fonts/cwr_hand.ttf
+arma_CWR/thirdparty/guerrilla-fonts/cwr_mono.ttf
+arma_CWR/thirdparty/guerrilla-fonts/cwr_serif.ttf
+arma_CWR/thirdparty/guerrilla-fonts/cwr_title.ttf
+
+# ---------------------------------------------------------------------------
+# TEMPORARY: removed by the retire-classic-ui follow-up (roadmap item
+# retire-classic-ui). APL-SA Options resources from the Remaster Demo, kept
+# under their own notice while Classic support is retired. Exact paths only;
+# do not add to this group.
+# ---------------------------------------------------------------------------
+arma_CWR/thirdparty/classic-ui/APL-SA_NOTICE.txt
+arma_CWR/thirdparty/classic-ui/README.md
+arma_CWR/thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv
+arma_CWR/thirdparty/classic-ui/optionsScrollList.hpp
+arma_CWR/thirdparty/classic-ui/optionsScrollListSlots.hpp
+arma_CWR/thirdparty/classic-ui/optionsShell.hpp
+arma_CWR/thirdparty/classic-ui/optionsTemplates.hpp
+arma_CWR/thirdparty/classic-ui/optionsUI.hpp

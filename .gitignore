@@ -15,8 +15,31 @@
 PoseidonGame_*.png
 PoseidonGameDemo_*.png
 
-# API keys / secrets
+# API keys / secrets, at any depth
 /.env
+**/.env
+**/.trident.env
+
+# Game data and archive formats: Bohemia and @LoBo data are APL-SA and never belong
+# here. The pre-commit guard (.githooks/check_no_game_data.py) also blocks them;
+# synthetic test fixtures that need one of these are tracked already or force-added.
+*.pbo
+*.paa
+*.pac
+*.p3d
+*.wrp
+*.wss
+*.rtm
+*.fxy
+*.ebo
+# Archives and video: release bundles and recordings are built, not committed.
+*.7z
+*.rar
+*.mp4
+*.mkv
+# Stray images dropped at the repo root (site images live in site/assets/img/).
+/*.png
+/*.jpg
 
 # Local scratch output and temporary worktrees.
 /tmp/
