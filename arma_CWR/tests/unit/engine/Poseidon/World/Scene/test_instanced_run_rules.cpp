@@ -133,10 +133,10 @@ TEST_CASE("InstancedRun: members stay inside the fog band", "[scene][instancing]
 
 TEST_CASE("InstancedRun: an object lit by a local light neither heads nor joins a run", "[scene][instancing]")
 {
-    // drawGrouping (plan section 5 A4): with light slots in the scene, an
-    // object takes part in runs when the light list its own draw would select
-    // is empty. The run is drawn with the head's list, so a lit object would
-    // either light its unlit twins (as head) or lose its own light (as member).
+    // drawGrouping: with light slots in the scene, an object takes part in runs
+    // when the light list its own draw would select is empty. The run is drawn
+    // with the head's list, so a lit object would either light its unlit twins
+    // (as head) or lose its own light (as member).
     RunEntry lit = Plain(10010.0f);
     lit.localLit = true;
     CHECK_FALSE(CanHead(lit));

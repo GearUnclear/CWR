@@ -16,12 +16,12 @@
 #include <string>
 #include <vector>
 
-// Long tree shadows (INTEGRATION-PLAN.md step B9, Graphics/Remaster/Canopy.hpp):
-// the canopy raster and its mip rules on synthetic crowns, forests and slopes,
-// the removal of a destroyed object, the trace's shadow length and its sqrt
-// crossing density, what a receiver reads, the sun-visibility map's placement
-// and rebuild rule, the strength over the gate's edges, the frame constants,
-// and the contracts that tie the shaders to the C++ mirror.
+// Long tree shadows (Graphics/Remaster/Canopy.hpp): the canopy raster and its
+// mip rules on synthetic crowns, forests and slopes, the removal of a destroyed
+// object, the trace's shadow length and its sqrt crossing density, what a
+// receiver reads, the sun-visibility map's placement and rebuild rule, the
+// strength over the gate's edges, the frame constants, and the contracts that
+// tie the shaders to the C++ mirror.
 
 using namespace Poseidon::remaster;
 namespace gl = Poseidon::gl33lighting;

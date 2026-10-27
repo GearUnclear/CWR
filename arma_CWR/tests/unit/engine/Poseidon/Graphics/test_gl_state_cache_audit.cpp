@@ -316,7 +316,7 @@ TEST_CASE("A recreated cascade array takes unit 2, where the deleted one was sam
     REQUIRE(between.find("glActiveTexture(") == std::string::npos);
 }
 
-// Unit 6 (kShadowRawUnit, B1's soft shadows) holds the same cascade array under
+// Unit 6 (kShadowRawUnit, the soft shadows) holds the same cascade array under
 // a raw-depth sampler: the same two ways to lose a complete array there, and
 // the same cures.
 TEST_CASE("Shadow raw-depth unit 6 holds the stand-in from init and each new cascade array",

@@ -4,9 +4,9 @@
 
 #include <string>
 
-// The frame-cost counters triPerfStats prints (plan section 5 A4): the scene
-// and the backend add to the frame being drawn, World::Simulate closes it,
-// and the summary averages over the profiler's window.
+// The frame-cost counters triPerfStats prints: the scene and the backend add to
+// the frame being drawn, World::Simulate closes it, and the summary averages
+// over the profiler's window.
 
 using Poseidon::perf::Counters;
 

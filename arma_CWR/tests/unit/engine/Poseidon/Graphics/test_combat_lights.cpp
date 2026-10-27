@@ -261,7 +261,7 @@ TEST_CASE("Combat lights: under the photoreal camera they follow its night, so a
     CHECK(CombatNight(1.0f, true, dusk) == 0.0f);
     CHECK(CombatDayScale(CombatLightKind::Fire, CombatNight(1.0f, true, dusk)) == Approx(0.12f));
     CHECK(CombatDayScale(CombatLightKind::Muzzle, CombatNight(1.0f, true, dusk)) == Approx(0.2f));
-    // The night (town_night's sun 50 degrees under, any sun 12 or more under)
+    // The night (a sun 50 degrees under, any sun 12 or more under)
     // keeps the night power.
     CHECK(CombatNight(1.0f, true, rm::CameraNight(-50.0f)) == 1.0f);
     CHECK(CombatNight(1.0f, true, rm::CameraNight(-12.0f)) == 1.0f);

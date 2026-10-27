@@ -197,7 +197,7 @@ TEST_CASE("GpuTimings: missing or out-of-order stamps are dropped, averages smoo
 
 TEST_CASE("GpuTimings: the world pass splits into ground, opaque objects and the rest", "[Graphics][gpu]")
 {
-    // A4: Landscape::DrawRect marks the end of the ground (sky, terrain, water,
+    // Landscape::DrawRect marks the end of the ground (sky, terrain, water,
     // horizon) and of the opaque objects (Pass1); the rest is the shadow-map
     // pass, the alpha objects and what follows.
     Frame f = FullFrame();
