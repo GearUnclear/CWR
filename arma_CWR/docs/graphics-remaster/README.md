@@ -35,22 +35,45 @@ explosions that scale with their charge.
 
 AI never sees through fog the player cannot see through.
 
-- With **Remastered**, the AI's line of sight is cut by every part of the fog
-  the renderer draws: haze, dust, humid ground air, weather fog (night fog
-  included) and valley mist, up to the view-distance edge. The same fog is
-  drawn in vehicle interiors and through night vision, so the player sees what
-  the AI sees.
-- With **Classic**, the drawn fog is the classic fog, so AI sight follows the
-  classic fog only.
-- The fog the AI uses comes from simulation state (the synced weather and time
-  with default tuning), never from per-client debug settings, so machines in a
-  multiplayer game agree. The machine that simulates an AI decides; a
-  dedicated server uses the default, Remastered.
+- **What cuts AI sight.** With **Remastered**, the AI's line of sight is cut
+  by all the fog the renderer draws, in place of the classic fog: haze, dust,
+  humid ground air, weather fog (denser at night, as drawn) and valley mist,
+  up to the view-distance edge where the drawn world ends. For the valley
+  mist the AI takes the banks at their thickest wherever they drift, so it is
+  never in clear air where mist is drawn; it can be a little blinder than the
+  average drawn mist.
+- **Classic weather floor.** Heavy fog and rain are never drawn thinner than
+  the original game's fog at the same distance, and AI sight follows that. A
+  clear sky is unchanged: there the drawn air is clearer than the classic fog
+  was, and so is AI sight. In light or medium weather (for example fog 0.3 or
+  rain 0.5) the drawn air past about a third of the view distance can stay up
+  to about a tenth clearer than the classic fog.
+- **Both ends.** Haze, dust and mist thin out near an eye. That thinning is
+  taken at both ends of a line and the lesser view wins, so an AI inside a
+  mist bank sees a player on a ridge no better than that player sees the AI.
+- **Cockpits and night vision.** The fog is drawn in vehicle cockpit and
+  interior views, including the world seen through their glass, and with
+  night vision, so the player sees what the AI sees.
+- **Classic.** A machine that draws the classic fog gives its AI the classic
+  fog: the Lighting row is on Classic, the remastered shaders are not active
+  (they failed to build, or the engine's lighting switch is on Classic), or
+  the post effects are off.
+- **Who decides.** The fog the AI uses comes from simulation state (the synced
+  weather and time with default tuning), never from per-client fog settings,
+  so machines in a multiplayer game agree. The machine that simulates an AI
+  decides; a dedicated server or headless client applies no graphics options
+  and uses the default, Remastered.
 
 Code: `engine/Poseidon/Graphics/Remaster/VolumetricFog.{hpp,cpp}` (the fog
-medium and the sight queries) and `engine/Poseidon/World/Detection/Target.cpp`
-(where visibility takes the fog). Tests:
-`tests/unit/engine/Poseidon/World/test_fog_sight_link.cpp`.
+medium, the classic weather floor `FogClassicFloor`, the mist bound
+`FogSightMistBound` and the sight query `FogSightTransmittance`),
+`engine/Poseidon/World/Terrain/TerrainLighting.cpp` (`FogSightClassic`,
+`FogSightDrawsClassic`, the snapshot published each simulation step) and
+`engine/Poseidon/World/Detection/Target.cpp` (where visibility takes the fog).
+Tests: `tests/unit/engine/Poseidon/World/test_fog_sight_link.cpp` and
+`tests/unit/engine/Poseidon/Graphics/test_volumetric_fog.cpp` (tag
+`[aisight]`); in game, `tests/rendering/captures/cockpit_fog_abel` checks the
+fog through a helicopter canopy and a jeep windscreen.
 
 ## Build and test
 
