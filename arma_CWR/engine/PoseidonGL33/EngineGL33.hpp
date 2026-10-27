@@ -225,7 +225,7 @@ struct SVertex
     Poseidon::UVPair t0;
 };
 
-// Shader override directory — when set (CWR_SHADER_OVERRIDE_DIR, read in
+// Shader override directory: when set (CWR_SHADER_OVERRIDE_DIR, read in
 // Init3DState), GL33's CompileGLShader prefers `<dir>/<name>.glsl` over the
 // inline source.  Empty = inline only.
 void SetShaderOverrideDir(const std::string& dir);
