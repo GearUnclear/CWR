@@ -8,6 +8,7 @@
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
 
@@ -501,6 +502,8 @@ void Object::SetDestroyed(float anim)
                     GLandscape->OperationalCache()->RemoveField(x, z);
                 }
             }
+            // A fallen tree or a ruin no longer casts its long shadow.
+            TerrainCanopyObjectDestroyed(ID());
         }
     }
 }

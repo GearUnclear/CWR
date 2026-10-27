@@ -5,6 +5,7 @@
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Core/GLBufferMap.hpp>
 #include <Poseidon/Graphics/Core/GLClear.hpp>
+#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Core/GLIndexBuffer.hpp>
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <PoseidonGL33/GLVertexAttribLayouts.hpp>
@@ -361,9 +362,30 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
     }
     if (clearZ)
     {
+        // A depth clear inside the world's passes is a vehicle interior
+        // (Transport::Draw). While the fog draws this frame, the world's depth
+        // and colour are saved first: the fog is applied to the world seen
+        // out of the cockpit as anywhere else, so no view shows less air than
+        // AI sight is cut by (EngineGL33_PostFog.cpp).
+        if (_worldPassOpen || NightVisionFogOpen())
+            SaveWorldBeforeInterior();
+        if (_worldPassOpen)
+        {
+            _worldDepthCleared = true; // the post pass's other stages have no world depth this frame
+            // A vehicle interior follows: no sky above it to take light from
+            // or reflect (the surfaces switch).
+            SurfaceEnterInterior();
+        }
         mask |= GL_DEPTH_BUFFER_BIT;
         if (_hasStencilBuffer)
+        {
             mask |= GL_STENCIL_BUFFER_BIT;
+            // A stencil clear honours the write mask, which a draw that keeps
+            // the reflections' surface tags narrows: clear every bit, and let
+            // the next draw set its own stencil state again.
+            Poseidon::render::depthstencil::StencilFullWriteMask();
+            _ssrStencilValid = false;
+        }
     }
     Poseidon::render::clear::WithMask(mask);
 }
@@ -425,6 +447,8 @@ void EngineGL33::DestroySSAATarget()
         glDeleteRenderbuffers(1, &_ssaaDepthRb);
     if (_ssaaResolveRb)
         glDeleteRenderbuffers(1, &_ssaaResolveRb);
+    // The surfaces switch's target was attachment 1 of the frame target.
+    DestroySurfaceTarget();
     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
     _ssaaW = _ssaaH = 0;
 }
@@ -439,7 +463,9 @@ void EngineGL33::ApplyPendingRenderScale()
     // is single-sampled (scaling blits into a multisampled target are
     // illegal), so the frame target carries whatever AA is configured: the
     // MSAA sample count and the SSAA scale are both live knobs (dev panel
-    // Render tab / GraphicsConfig).  Both default OFF.
+    // Render tab / GraphicsConfig).  The engine starts with both off until
+    // GraphicsConfig applies the user's values at boot (4x MSAA, scale 1 by
+    // default).
     const float want = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
     const int sw = static_cast<int>(winW * want + 0.5f);
     const int sh = static_cast<int>(winH * want + 0.5f);

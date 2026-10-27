@@ -174,6 +174,26 @@ enum class ShaderFamily : std::uint8_t
             //   binds VSScreen + PSFlat; not used in 3D pass.
 };
 
+// What kind of object the draw belongs to, for the remastered materials
+// (Graphics/Remaster/SurfaceMaterials.hpp): one texture name means a
+// different surface on a vehicle (paint), a soldier (cloth) or a house
+// (plaster). Set by the scope that draws a shape (Shape::Draw, from the
+// object's simulation and class); anything drawn outside one is Unknown (the
+// terrain, the sky, particles, 2D).
+enum class DrawObjectKind : std::uint8_t
+{
+    Unknown,     // no object: terrain, sky, particles, or an object without a type
+    LandVehicle, // car, tank, motorcycle
+    Man,         // soldiers and civilians
+    Static,      // houses, walls, street furniture, things
+    Aircraft,    // helicopters, aeroplanes, parachutes
+    Ship,        // boats
+    Weapon,      // weapon proxies
+    Fabric,      // tents and camouflage nets (their textures are anonymous atlases)
+    Count
+};
+constexpr int kDrawObjectKindCount = static_cast<int>(DrawObjectKind::Count);
+
 // The full per-draw render-pass contract.  Defaults are the most
 // permissive / common state (opaque world geometry with fog, depth,
 // back-face culling, CW winding).
@@ -199,6 +219,11 @@ struct RenderPassDescriptor
     // Stencil exclusion (shadow path).  True for shadow draws that must
     // respect the stencil mask (EQUAL 0 / INCR per-poly within-caster).
     bool stencilExclusion = false;
+
+    // The object the draw belongs to (BuildContext::objectKind), for the
+    // remastered materials. No GL state follows from it, so it is not part of
+    // the equality ApplyPipeline uses to skip an unchanged descriptor.
+    DrawObjectKind objectKind = DrawObjectKind::Unknown;
 
     bool operator==(const RenderPassDescriptor& rhs) const
     {

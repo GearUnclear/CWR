@@ -241,15 +241,9 @@ void TextBankGL33::InitDetailTextures()
         _grass->SetMaxSize(1024);
         _grass->_isDetail = true;
     }
-
-    RStringB waterName = names >> "waterBump";
-    if (QIFStreamB::FileExist(waterName))
-    {
-        _waterBump = new TextureGL33;
-        _waterBump->Init(waterName);
-        _waterBump->SetMaxSize(1024);
-        _waterBump->_isDetail = true;
-    }
+    // CfgDetailTextures >> waterBump (misc\waveBumpMap.paa) is not read: the
+    // file is not in the Remaster data and nothing samples it. The remastered
+    // sea derives its waves from the sea texture (EngineGL33_Sea.cpp).
 }
 
 void TextBankGL33::FlushTextures()

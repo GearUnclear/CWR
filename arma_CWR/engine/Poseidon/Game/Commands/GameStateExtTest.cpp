@@ -2227,6 +2227,24 @@ GameValue TriSetSimTime(const GameState* /*state*/, GameValuePar arg)
     return GameValue(buf);
 }
 
+/// triSetFixedStep <seconds>: a fixed World::Simulate step while set, so each
+/// triSimFrames frame advances the world by exactly that much whatever the
+/// frame rate (paired captures of fires, smoke and rain: two shots taken a
+/// known number of frames apart see the same simulation). 0 returns to real
+/// time. Accepts 0 to 0.3 s (the longest real-time step AppIdle takes).
+/// Returns "OK:<seconds>" or "FAIL:<why>" with nothing changed.
+GameValue TriSetFixedStep(const GameState* /*state*/, GameValuePar arg)
+{
+    const float seconds = static_cast<float>(static_cast<GameScalarType>(arg));
+    if (!(seconds >= 0.0f && seconds <= Poseidon::kMaxSimStep))
+        return GameValue("FAIL:step must be 0 (real time) to 0.3 s");
+    Poseidon::SetFixedSimStep(seconds);
+    char buf[48];
+    snprintf(buf, sizeof(buf), "OK:%g", static_cast<double>(Poseidon::FixedSimStep()));
+    LOG_INFO(Core, "[tri] triSetFixedStep {}", buf + 3);
+    return GameValue(buf);
+}
+
 /// triSetBrightness <value> — set the engine user-brightness (eye
 /// accommodation). 1.0 = neutral. Returns "OK:<value>".
 GameValue TriSetBrightness(const GameState* /*state*/, GameValuePar arg)

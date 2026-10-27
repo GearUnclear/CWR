@@ -412,8 +412,8 @@ void LoadAndApplyGraphicsConfig()
     }
 
     if (cfg.Migrate(refreshHz) && cfg.Save(path))
-        LOG_INFO(Graphics, "LoadGraphicsConfig: migrated '{}' to version {} (fpsCap={}, display {} Hz)", path,
-                 GraphicsConfig::kVersion, cfg.fpsCap, refreshHz);
+        LOG_INFO(Graphics, "LoadGraphicsConfig: migrated '{}' to version {} (fpsCap={}, display {} Hz, msaa={})", path,
+                 GraphicsConfig::kVersion, cfg.fpsCap, refreshHz, cfg.msaaSamples);
 
     LiveGraphicsEnv env;
     if (cfg.Normalize(env))
