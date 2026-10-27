@@ -1,10 +1,19 @@
-# Remastered lighting
+# Remastered lighting: design and calibration
+
+The overview is `README.md` next to this file. This page was written alongside
+the code from 2026-10-17 and describes each piece in depth. It does not yet
+cover the volumetric fog (`Graphics/Remaster/VolumetricFog.{hpp,cpp}`, switch
+`volFog`), which replaced the classic fog and the air pass's haze and mist,
+the AI sight link to that fog, or the explosion work; for those see
+`ITERATIONS.md` (O1, F1, F2) and the header comments of those files.
 
 A second lighting model for the GL 3.3 backend, chosen by the **Lighting** row
-of the Graphics options (Classic / Remastered). It touches the lighting and
-rendering code only; it needs no new art, models or textures. Classic is the
-original lighting and is unchanged: the classic shader strings, uploads and
-program set are untouched, and the remastered programs are a separate set.
+of the Graphics options (Classic / Remastered, Remastered by default). It
+touches the lighting and rendering code only; it needs no new art, models or
+textures. The remastered programs are a separate set from the classic ones, and
+Classic keeps the original lighting, apart from a few fixes that apply to both
+(the 4x MSAA default, three-entry config colours, explosions scaled by their
+charge, AI sight following the drawn fog).
 
 ## Why Classic looks flat
 
@@ -227,8 +236,9 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 - Validated: every remastered and post shader compiles (glslang) and links and
   renders on Mesa llvmpipe in the lab, using the engine's own GLSL, light rig,
   horizon map and cloud noise; the unit tests above; the GL-state, debug-group,
-  buffer, IBO, shutdown and UBO source audits.
-- Not validated here: an in-game run on real data and a real GPU, the GPU
-  cost (the timers exist but have not run on the target hardware), MSAA with
-  alpha-to-coverage, cockpits, night vision, particles and the 3D UI previews. The lab's scene and textures are
-  procedural stand-ins, so absolute colours are not those of CWA.
+  buffer, IBO, shutdown and UBO source audits. In game on the Remaster data
+  (Abel, Eden, Sinai with `@LoBo`) on an RTX 4060 Ti through the capture rig,
+  with GPU timings per view (`ITERATIONS.md`).
+- Open: the cost of the long views (issue #216); a timing run on the target
+  class of card (an RTX 3060). The lab's scene and textures are procedural
+  stand-ins, so its absolute colours are not those of CWA.
