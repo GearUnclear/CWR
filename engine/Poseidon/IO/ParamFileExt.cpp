@@ -60,11 +60,15 @@ PackedColor GetPackedColor(const ParamEntry& entry)
 
 Color GetColor(const ParamEntry& entry)
 {
-    if (entry.GetSize() != 4)
+    // {r, g, b, a}, or {r, g, b} with alpha 1. CfgNonAIVehicles >> StreetLamp writes
+    // its colorDiffuse and colorAmbient with three entries; read as white, every
+    // street lamp lit at ten times its authored ambient and lost its warm colour.
+    const int size = entry.GetSize();
+    if (size != 3 && size != 4)
     {
         return HWhite;
     }
-    return Color(entry[0].GetFloat(), entry[1].GetFloat(), entry[2].GetFloat(), entry[3].GetFloat());
+    return Color(entry[0].GetFloat(), entry[1].GetFloat(), entry[2].GetFloat(), size == 4 ? entry[3].GetFloat() : 1.0f);
 }
 
 bool GetValue(SoundPars& pars, const ParamEntry& entry)
