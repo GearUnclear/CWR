@@ -161,6 +161,12 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_vertex_color_byte_order.cpp
     Graphics/test_ubo_restore_guards.cpp
     Graphics/test_shader_named_outputs.cpp
+    Graphics/test_feature_switches.cpp
+    Graphics/test_perf_counters.cpp
+    Graphics/test_atmosphere.cpp
+    Graphics/test_sea_waves.cpp
+    Graphics/test_sky_density.cpp
+    Graphics/test_photo_camera.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp
@@ -432,6 +438,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_scene_preloader.cpp
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
+    World/Scene/test_instanced_run_rules.cpp
+    World/Scene/test_terrain_occlusion.cpp
     World/Scene/test_streetlamp_casting.cpp
 
     # Core subsystem tests
