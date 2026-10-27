@@ -180,6 +180,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_night_lights.cpp
     Graphics/test_screen_reflections.cpp
     Graphics/test_wet_weather.cpp
+    Graphics/test_combat_lights.cpp
     Graphics/test_surface_light.cpp
     Graphics/test_photo_camera.cpp
     Graphics/test_jpg_import.cpp

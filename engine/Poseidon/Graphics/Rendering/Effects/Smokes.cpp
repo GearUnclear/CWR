@@ -269,6 +269,39 @@ void SmokeSourceVehicle::SimulateExplosion()
             type.hit = hit;
             type.indirectHit = indirectRatio * hit;
         }
+        // The fuel's fireball (a deflagration, CombatLights.hpp
+        // Detonation) from the fuel that burns in it, whether or not the blast
+        // is big enough to damage (the gate below, unchanged). A jeep's tank
+        // (explosives about 5, so hit about 3) made no fireball at all.
+        const float fuelKg = lighting::kFuelKgPerHit * type.hit;
+        if (fuelKg >= lighting::kMinFuelKg)
+        {
+            const lighting::Detonation d = lighting::DeflagrationFromFuel(fuelKg);
+            _deflagration = d;
+            _deflagrating = true;
+            _deflagrationAge = 0.0f;
+            const float r = d.radius;
+            // The rolling ball: big slow puffs of burning fuel, buoyant.
+            _fire.SetSize(0.9f * r, 0.45f * r);
+            _fire.SetBurstSpeed(1.2f);
+            _fire.SetInterval(0.5f * d.burnTime / 30.0f);
+            _fire.SetTemperatureRange(d.peakK, lighting::DetonationPuffCooling(d, d.peakK));
+            _fire.SetTimes(0.6f * d.burnTime, 1.0f);
+            _fire.SetFades(0.25f * d.burnTime, 0.05f, 0.8f + 0.4f * d.burnTime);
+            _fire.SetClimbRate(1.5f, 0.5f, 3.0f);
+            _fire.Start(0.5f * d.burnTime);
+            // Thick black soot round it and over it, lingering.
+            _darkFire.SetSize(1.0f * r, 0.5f * r);
+            _darkFire.SetBurstSpeed(1.0f);
+            _darkFire.SetInterval(d.burnTime / 25.0f);
+            _darkFire.SetTimes(3.0f + 2.0f * d.burnTime, 1.0f);
+            _darkFire.SetFades(0.6f * d.burnTime, 0.15f, 4.0f + 2.0f * d.burnTime);
+            _darkFire.SetClimbRate(0.8f, 0.6f, 2.0f);
+            _darkFire.Start(1.5f * d.burnTime);
+            // The wreck burns and smokes on (as the damaging blast's does).
+            const float burnOn = GRandGen.RandomValue() * 0.4f + 0.8f;
+            SetSourceTimes(0, 40 * burnOn, 40 * burnOn);
+        }
         if (type.hit > 50)
         {
             // change fire and darkFire parameters based on type.hit value
@@ -276,10 +309,13 @@ void SmokeSourceVehicle::SimulateExplosion()
             float fireTime = type.hit * 0.002;
             saturate(fireSize, 0.25, 1.25);
             saturate(fireTime, 0.25, 1.25);
-            _fire.SetSize(fireSize);
-            _darkFire.SetSize(fireSize);
-            _fire.Start(fireTime);
-            _darkFire.Start(fireTime);
+            if (!_deflagrating)
+            {
+                _fire.SetSize(fireSize);
+                _darkFire.SetSize(fireSize);
+                _fire.Start(fireTime);
+                _darkFire.Start(fireTime);
+            }
             float rndTime = GRandGen.RandomValue() * 0.4 + 0.8;
             SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
             // sound of explosion
@@ -313,8 +349,21 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
     }
     if (_fire.Active() || _darkFire.Active())
     {
-        _fire.Simulate(Position(), Speed(), 0.8, deltaT);
-        _darkFire.Simulate(Position(), Speed(), 0.8, deltaT);
+        Vector3 firePos = Position();
+        if (_deflagrating)
+        {
+            // Each puff is born at the burning ball's temperature now, the
+            // ball's centre 0.4 of its radius up.
+            const float bornK = lighting::DetonationTemperature(_deflagration, _deflagrationAge);
+            _fire.SetTemperatureRange(bornK, lighting::DetonationPuffCooling(_deflagration, bornK));
+            firePos += VUp * (0.4f * _deflagration.radius);
+            _deflagrationAge += deltaT;
+        }
+        _fire.Simulate(firePos, Speed(), 0.8, deltaT);
+        // The soot comes off the burning ball's top and edges, not in front
+        // of its fire.
+        const Vector3 sootPos = _deflagrating ? firePos + VUp * (0.6f * _deflagration.radius) : firePos;
+        _darkFire.Simulate(sootPos, Speed(), 0.8, deltaT);
     }
     else if (_exploded)
     {
@@ -329,9 +378,36 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
         if (!_light)
         {
             _light = new LightPoint(HBlack, HBlack);
+            _light->SetKind(lighting::FrameLightKind::Combat);
             GLOB_SCENE->AddLight(_light);
         }
     }
+    // Combat light (CombatLights.hpp), whatever the lighting setting: the fuel
+    // explosion is one burst, and the embers of a burning wreck glow under its
+    // smoke while it burns, 1.5 m up (the flames' centre, not the deck: rays
+    // from the ground to a light just above it graze it and shadow it).
+    if (_fire.Active() && !_combatBurst && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+    {
+        _combatBurst = true;
+        const Vector3 at = Position() + VUp * (_deflagrating ? 0.5f * _deflagration.radius : 0.8f);
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        if (_deflagrating)
+            lighting::GCombatLights().SpawnDetonation(p, _deflagration);
+        else
+            lighting::GCombatLights().Spawn(lighting::CombatLightKind::Explosion, p, _fire.GetSize());
+    }
+    const float glow = canDelete || !GlowsAsWreck() ? 0.0f : _inOutDensity * _density;
+    if (glow > 0.01f && prec <= SimulateInvisibleNear)
+    {
+        const Vector3 at = Position() + VUp * 1.5f;
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        _combatEmbers.Set(lighting::CombatLightKind::Fire, p, 0.9f * glow * _size);
+    }
+    else
+    {
+        _combatEmbers.Release();
+    }
+
     if (_light)
     {
         _lightTime += deltaT * 1.0;
@@ -1160,7 +1236,7 @@ void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float densit
         Vector3 dir = cloudlet->Position() - pos;
         saturateMax(dir[1], 0);
 
-        float speed2 = 4.0 * dir.Size();
+        float speed2 = _burstSpeed * dir.Size();
         saturateMin(speed2, 25);
         dir.Normalize();
 
@@ -1169,6 +1245,10 @@ void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float densit
         cloudlet->SetClimbRate(_cloudletAccY * density * 1.5, _cloudletMinYSpeed, _cloudletMaxYSpeed);
         cloudlet->SetSideSpeed(0, 0, 1.5, 1.5);
         GLOB_WORLD->AddCloudlet(cloudlet);
+        if (_showAtBirth)
+        {
+            cloudlet->Simulate(0.0f, SimulateVisibleFar);
+        }
     }
 }
 
@@ -1191,11 +1271,19 @@ void WeaponLightSource::Init()
 
 void WeaponLightSource::Start(float time, float intensity, bool mGun)
 {
+    Start(time, intensity, mGun, -1.0f);
+}
+
+void WeaponLightSource::Start(float time, float intensity, bool mGun, float ammoHit)
+{
     float lightTime = time * 3;
     _timeToLight = lightTime;
     _invTotalTimeToLight = 1 / lightTime;
     _lightIntensity = intensity;
     _lightMGun = mGun;
+    // The combat light's burst, sized by the round (CombatLights.hpp).
+    _combatPending = true;
+    _combatStrength = lighting::CombatMuzzleStrength(ammoHit, mGun, intensity);
 }
 
 bool WeaponLightSource::Active() const
@@ -1212,12 +1300,21 @@ void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
     else
     {
         _timeToLight -= deltaT;
+        // The combat light: one burst per shot, fire and forget.
+        if (_combatPending && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+        {
+            const float p[3] = {pos.X(), pos.Y(), pos.Z()};
+            lighting::GCombatLights().Spawn(
+                _lightMGun ? lighting::CombatLightKind::Muzzle : lighting::CombatLightKind::Cannon, p, _combatStrength);
+        }
+        _combatPending = false;
         // simulate light
         if (ENGINE_CONFIG.lights & LIGHT_EXPLO)
         {
             if (!_light)
             {
                 _light = new LightPoint(FireColor, FireAmbient);
+                _light->SetKind(lighting::FrameLightKind::Combat);
                 GLOB_SCENE->AddLight(_light);
             }
             if (_light)
@@ -1286,7 +1383,12 @@ void WeaponFireSource::Simulate(Vector3Par pos, Vector3Par speed, float density,
 
 void WeaponFireSource::Start(float time, float intensity, bool lightMGun)
 {
-    base2::Start(time, intensity, lightMGun);
+    Start(time, intensity, lightMGun, -1.0f);
+}
+
+void WeaponFireSource::Start(float time, float intensity, bool lightMGun, float ammoHit)
+{
+    base2::Start(time, intensity, lightMGun, ammoHit);
     base::Start(time);
 }
 
@@ -1374,6 +1476,58 @@ void Crater::Init(float timeToLive, float size, bool smoke, bool blood, bool wat
     }
 }
 
+void Crater::SetDetonation(const lighting::Detonation& d)
+{
+    // A blast throws a dark column of earth and soot that
+    // rises to about its column height in two seconds, billows, lingers its
+    // column life and drifts with the wind (SmokeSource adds half the wind);
+    // a low dust skirt spreads round its foot; a fan of earth is thrown up
+    // and falls back. Classic's column (CraterSmoke1-3) was the same for
+    // every blast and gone in about three seconds.
+    if (!_isSmoke)
+    {
+        return;
+    }
+    const float s = floatMax(d.scale, 0.2f);
+    const float h = floatMax(d.columnHeight, 1.0f);
+    const float life = floatMax(d.columnLife, 2.0f);
+    const float rise = 0.5f * h;
+    // The column's own colour (display): earth and soot. CraterSmoke1's
+    // table holds 0.5 grey at its 500 K, so its colour is twice this.
+    static const Color kColumnEarth(0.30f, 0.27f, 0.22f);
+    static const Color kSkirtDust(0.44f, 0.40f, 0.32f);
+    const float shade = 0.8f + 0.2f * GRandGen.RandomValue();
+    _smoke1.SetSize(0.15f * h, 0.15f * h);
+    _smoke1.SetInterval(0.1f);
+    _smoke1.SetSourceTimes(0.0f, 0.12f * life, 0.15f * life);
+    _smoke1.SetRise(rise);
+    _smoke1.SetClimbRate(-0.35f * rise, 0.15f, rise);
+    _smoke1.SetTimes(0.45f * life, 1.0f);
+    _smoke1.SetFades(1.2f * s, 0.1f, 0.45f * life);
+    _smoke1.SetTemperatureRange(500.0f, 0.0f);
+    _smoke1.SetColor(kColumnEarth * (2.0f * shade));
+    _smoke2.SetSize(0.2f * h, 0.3f * h);
+    _smoke2.SetInterval(0.15f);
+    _smoke2.SetSourceTimes(0.0f, 0.08f * life, 0.1f * life);
+    _smoke2.SetRise(0.15f * rise);
+    _smoke2.SetClimbRate(-0.3f, 0.0f, 0.3f * rise);
+    _smoke2.SetTimes(0.5f * life, 1.0f);
+    _smoke2.SetFades(0.8f * s, 0.1f, 0.4f * life);
+    _smoke2.SetColor(kSkirtDust * shade);
+    _smoke3.SetSize(0.15f * h, 0.2f * h);
+    _smoke3.SetSourceTimes(0.1f, 0.2f * life, 0.1f * life);
+    _smoke3.SetRise(0.6f * rise);
+    _smoke3.SetClimbRate(-0.2f * rise, 0.2f, 0.6f * rise);
+    _smoke3.SetTimes(0.4f * life, 1.0f);
+    _smoke3.SetFades(1.5f * s, 0.4f, 0.4f * life);
+    _smoke3.SetColor(kColumnEarth * shade);
+    // Thrown earth (CraterDustBig: dark earth falling at 8 m/s^2): launched
+    // fast enough to reach the column's height, for a moment.
+    _dust.SetSize(0.1f * h, 0.05f * h);
+    _throwSpeed = floatMin(std::sqrt(2.0f * 9.81f * h), 10.0f);
+    _dustTimeToLive = 0.12f * s;
+}
+
 void Crater::Simulate(float deltaT, SimulationImportance prec)
 {
     // consider: server-side simulation?
@@ -1398,6 +1552,13 @@ void Crater::Simulate(float deltaT, SimulationImportance prec)
         if (!_isSmoke)
         {
             _dust.Simulate(Position(), Speed() + up, density, deltaT);
+        }
+        else if (_throwSpeed > 0)
+        {
+            // The blast's thrown earth.
+            const float v = _throwSpeed;
+            Vector3 th((GRandGen.RandomValue() - 0.5f) * 0.8f * v, v, (GRandGen.RandomValue() - 0.5f) * 0.8f * v);
+            _dust.Simulate(Position(), Speed() + th, 0.34f, deltaT);
         }
     }
     Smoke::Simulate(deltaT, prec);
@@ -1837,9 +1998,40 @@ Explosion::Explosion(LODShapeWithShadow* shape, Vehicle* owner, float duration)
     _fire.SetInterval(Square(invCoef) * _fire.GetInterval());
     _fire.Start(duration * 0.05);
     _minLightTime = 0.2;
+    // Without its round (a network copy, a scripted blast) the classic size
+    // stands for the charge; Shots.cpp gives the round's own (SetDetonation).
+    SetDetonation(lighting::DetonationFromBlastSize(duration));
 }
 
 Explosion::~Explosion() = default;
+
+void Explosion::SetDetonation(const lighting::Detonation& d)
+{
+    // The fireball is the detonation products, about the
+    // fireball's radius across, glowing at the gas's temperature as it falls
+    // from the white-hot flash to the afterburn and to soot (Simulate gives
+    // each puff the temperature of its birth), born while the flash and the
+    // afterburn last, about ten puffs plus ten per cube-root kilogram. A puff
+    // glows while it cools, then thins out as soot. The ball's centre sits
+    // half its radius over the burst point, so it no longer sinks half into
+    // the ground.
+    _det = d;
+    const float r = floatMax(d.radius, 0.3f);
+    const float emit = floatMax(d.flashTime + d.burnTime, 0.034f);
+    const float puffs = 10.0f + 10.0f * d.scale;
+    _fire.SetSize(1.1f * r, 0.5f * r);
+    _fire.SetInterval(emit / puffs);
+    _fire.SetBurstSpeed(3.0f);
+    _fire.SetTemperatureRange(d.peakK, lighting::DetonationPuffCooling(d, d.peakK));
+    _fire.SetTimes(emit + 0.1f, 0.5f);
+    // The products are out at full size within a millisecond: no grow-up or
+    // fade-in, and each puff drawn in the frame it is born.
+    _fire.SetFades(0.0f, 0.0f, 0.4f + 0.3f * d.scale);
+    _fire.SetShowAtBirth(true);
+    _fire.Start(emit);
+    _fireLift = 0.5f * r;
+    _minLightTime = emit;
+}
 
 void Explosion::Simulate(float deltaT, SimulationImportance prec)
 {
@@ -1853,8 +2045,16 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
     {
         if (_fire.Active())
         {
-            _fire.Simulate(Position(), Speed(), _exSize * 0.7, deltaT);
+            // Each puff is born at the gas's temperature now.
+            const float bornK = lighting::DetonationTemperature(_det, _age);
+            _fire.SetTemperatureRange(bornK, lighting::DetonationPuffCooling(_det, bornK));
+            // Half the puffs in the flash (the products' first expansion),
+            // half through the afterburn.
+            const float half = 0.5f * (10.0f + 10.0f * _det.scale);
+            _fire.SetInterval(_age < _det.flashTime ? _det.flashTime / half : floatMax(_det.burnTime, 0.017f) / half);
+            _fire.Simulate(Position() + VUp * _fireLift, Speed(), 0.7f, deltaT);
         }
+        _age += deltaT;
         if (!_fire.Active() && _minLightTime <= 0)
         {
             _delete = true;
@@ -1869,11 +2069,24 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
         }
     }
 
+    // The combat light: one burst per explosion, at the fireball's centre (a
+    // few metres up for a shell, so it reaches the ground at a usable angle).
+    if (!_combatSpawned && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+    {
+        _combatSpawned = true;
+        // The light of the detonation itself, at the
+        // fireball's centre, as long and as bright as its gas glows.
+        const Vector3 at = Position() + VUp * floatMax(0.6f * _det.radius, 0.5f);
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        lighting::GCombatLights().SpawnDetonation(p, _det);
+    }
+
     if ((_fire.Active() || _minLightTime > 0) && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
     {
         if (!_light)
         {
             _light = new LightPoint(HBlack, HBlack);
+            _light->SetKind(lighting::FrameLightKind::Combat);
             GLOB_SCENE->AddLight(_light);
         }
         if (_light)

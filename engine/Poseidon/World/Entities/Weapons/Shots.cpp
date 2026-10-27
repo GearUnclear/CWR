@@ -22,6 +22,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <float.h>
 #include <stdint.h>
+#include <algorithm>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
@@ -349,6 +350,8 @@ void PipeBomb::Simulate(float deltaT, SimulationImportance prec)
             float size = Type()->hit * 0.003;
             saturate(size, MinExplosion, MaxExplosion);
             Explosion* explosion = new Explosion(nullptr, _parent, size);
+            explosion->SetDetonation(
+                lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
             explosion->SetPosition(Position());
             GLOB_WORLD->AddAnimal(explosion);
             GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -376,6 +379,8 @@ void TimeBomb::Simulate(float deltaT, SimulationImportance prec)
             float size = Type()->hit * 0.003;
             saturate(size, MinExplosion, MaxExplosion);
             Explosion* explosion = new Explosion(nullptr, _parent, size);
+            explosion->SetDetonation(
+                lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
             explosion->SetPosition(Position());
             GLOB_WORLD->AddAnimal(explosion);
             GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -475,6 +480,8 @@ void Mine::Simulate(float deltaT, SimulationImportance prec)
                 float size = Type()->hit * 0.003;
                 saturate(size, MinExplosion, MaxExplosion);
                 Explosion* explosion = new Explosion(nullptr, _parent, size);
+                explosion->SetDetonation(
+                    lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                 explosion->SetPosition(Position());
                 GLOB_WORLD->AddAnimal(explosion);
                 GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -737,6 +744,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                             ePos[1] = minY;
                         }
                         Explosion* explosion = new Explosion(nullptr, _parent, size);
+                        explosion->SetDetonation(
+                            lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                         explosion->SetPosition(ePos);
                         GLOB_WORLD->AddAnimal(explosion);
                         GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -770,6 +779,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                         saturate(size, MinExplosion, MaxExplosion);
                         exploPos[1] += 0.5 * size;
                         Explosion* explosion = new Explosion(nullptr, _parent, size);
+                        explosion->SetDetonation(
+                            lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                         explosion->SetPosition(exploPos);
                         GLOB_WORLD->AddAnimal(explosion);
                         GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -794,6 +805,19 @@ void ShotBullet::Simulate(float deltaT, SimulationImportance prec)
 {
     base::Simulate(deltaT, prec);
     SetEnd(Position());
+    // A visible tracer carries a small combat light along its path
+    // (CombatLights.hpp), whatever the lighting setting.
+    const int a8 = GetConstantColor().A8();
+    if (a8 >= 4 && !_delete)
+    {
+        const Vector3 at = Position();
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        _tracerLight.Set(lighting::CombatLightKind::Tracer, p, std::min(a8 / 255.0f * 4.0f, 1.5f));
+    }
+    else
+    {
+        _tracerLight.Release();
+    }
 }
 
 void ShotBullet::Sound(bool inside, float deltaT)
@@ -1010,17 +1034,23 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
                 {
                     _light = new LightPointOnVehicle(GLOB_SCENE->Preloaded(SphereLight), _lightColor, Color(HBlack),
                                                      this, Vector3(0, 0, -0.5));
+                    _light->SetKind(lighting::FrameLightKind::Combat);
                     GLOB_SCENE->AddLight(_light);
                 }
                 if (_light)
                 {
                     _light->SetDiffuse(_lightColor * fade);
                 }
+                // The motor's combat light (CombatLights.hpp).
+                const float p[3] = {backPos.X(), backPos.Y(), backPos.Z()};
+                _motorLight.Set(lighting::CombatLightKind::Motor, p, fade);
+                _motorLight.SetTint(_lightColor.R(), _lightColor.G(), _lightColor.B());
             }
         }
         break;
         case Fly:
             _light.Free();
+            _motorLight.Release();
             break;
     }
 
@@ -1180,6 +1210,8 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
                 float size = Type()->hit * 0.003;
                 saturate(size, MinExplosion, MaxExplosion);
                 Explosion* explosion = new Explosion(nullptr, _parent, size);
+                explosion->SetDetonation(
+                    lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                 pos -= Direction() * 2 * size;
                 float minY = GLandscape->RoadSurfaceY(position[0], position[2]) + 3 * size;
                 if (pos[1] < minY)
@@ -1231,6 +1263,8 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
             float size = Type()->hit * 0.003;
             saturate(size, MinExplosion, MaxExplosion);
             Explosion* explosion = new Explosion(nullptr, _parent, size);
+            explosion->SetDetonation(
+                lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
             explosion->SetPosition(lPos);
             GLOB_WORLD->AddAnimal(explosion);
             GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -1306,6 +1340,7 @@ void IlluminatingShell::Simulate(float deltaT, SimulationImportance prec)
     {
         _light = new LightPointOnVehicle(GLOB_SCENE->Preloaded(SphereLight), _lightColor, Color(HBlack), this,
                                          Vector3(0, 0, -0.5));
+        _light->SetKind(lighting::FrameLightKind::Combat);
         _light->SetBrightness(2);
         GLOB_SCENE->AddLight(_light);
 
@@ -1331,6 +1366,12 @@ void IlluminatingShell::Simulate(float deltaT, SimulationImportance prec)
     if (_light)
     {
         _light->SetDiffuse(_lightColor * fade);
+        // The flare's combat light (CombatLights.hpp), tinted by the ammo's
+        // light colour, with a flicker of its own.
+        const Vector3 at = Position();
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        _flareLight.Set(lighting::CombatLightKind::Flare, p, 1.0f);
+        _flareLight.SetTint(_lightColor.R(), _lightColor.G(), _lightColor.B());
     }
 }
 
