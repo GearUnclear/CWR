@@ -21,10 +21,8 @@
 //
 // Mode words reset the whole tuning (TuningForMode): "classic" is the original
 // look bit for bit, "remastered" the shipped defaults (every feature on) and
-// "baseline" the remastered look with every feature switch off, which is the
-// look of the graphics-remaster branch cut. A feature's "off" in the
-// side-by-side video is "remastered,<its keys>=0", and the A/B capture checks
-// that it matches "remastered" on the build before the feature landed.
+// "baseline" the remastered look with every feature switch off. A single
+// feature's "off" is "remastered,<its keys>=0".
 //
 // Defaults live in one place, the member initialisers of LightingTuning and
 // FeatureSet; the table reads them from a default-constructed tuning.
@@ -75,12 +73,11 @@ struct FeatureInfo
     Feature id;
     const char* key;   // triSetLighting key, also the FeatureSet member name
     const char* label; // overlay checkbox
-    const char* track; // research track (tmp/research/<track>, research/<track>.md)
-    const char* area;  // the owner's four areas, plus "Frame cost" for perf
-    const char* step;  // integration step that makes the switch do something
+    const char* track; // short topic name; the overlay groups the feature's sub-knobs under it
+    const char* area;  // overlay heading, one of kFeatureAreas
+    const char* step;  // tag the overlay shows while the switch is inert (`landed` false)
     // False while nothing reads the switch: it exists (keys, gates, captures)
-    // but on and off draw the same frame. The step that lands the feature sets
-    // it to true.
+    // but on and off draw the same frame.
     bool landed;
     float FeatureSet::* member;
     // GpuTimings section name of the feature's own GPU pass ("" = none yet).
@@ -134,8 +131,8 @@ const LightingKey& LightingKeyAt(int i);
 const LightingKey* FindLightingKey(std::string_view key);
 float GetKeyValue(const LightingTuning& t, const LightingKey& k);
 // Stores `value` as the key's type (a toggle is on for any value but 0, a
-// choice is truncated). No clamping: research values outside the overlay
-// range stay possible from triSetLighting.
+// choice is truncated). No clamping: values outside the overlay range stay
+// possible from triSetLighting.
 void SetKeyValue(LightingTuning& t, const LightingKey& k, float value);
 // The key's value in a default-constructed LightingTuning.
 float KeyDefault(const LightingKey& k);

@@ -18,94 +18,94 @@ namespace
 using FS = FeatureSet;
 using LT = LightingTuning;
 
-// One row per Feature, in enum order (checked below). `landed` turns true in
-// the step that makes the switch do something.
+// One row per Feature, in enum order (checked below). `landed` is true once
+// the switch has an effect. The last field is the GpuTimings section the
+// feature's cost shows in.
 constexpr FeatureInfo kFeatures[] = {
-    // A4 (perf): both pixel-exact; their GPU time shows in the opaque objects'
-    // section of the world pass.
+    // Both pixel-exact; their GPU time shows in the opaque objects' section of
+    // the world pass.
     {Feature::DrawGrouping, "drawGrouping", "Draw grouping", "perf", "Frame cost", "A4", true, &FS::drawGrouping,
      "pass1"},
     {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", true, &FS::hillCull, "pass1"},
     {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", true, &FS::taa, "taa"},
-    // A6: no pass of its own; the per-fragment light loop is part of the
-    // world pass's shading.
+    // No pass of its own; the per-fragment light loop is part of the world
+    // pass's shading.
     {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", true,
      &FS::lightTiles, "world"},
     {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", true,
      &FS::atmosphere, "sky"},
-    // B1 (shadows): the casters' cost shows in the shadow depth pass, the soft
-    // filter's in the world pass that samples it.
+    // The casters' cost shows in the shadow depth pass, the soft filter's in
+    // the world pass that samples it.
     {Feature::TreeShadows, "treeShadows", "Tree and building sun shadows", "shadows", "Light and shadow", "B1", true,
      &FS::treeShadows, "shadow"},
     {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", true,
      &FS::softShadows, "world"},
-    // B2 (shade): the low-sun rig is constants computed once a frame (no GPU
-    // cost of its own; the world pass is what it lights); the crown canopy is
-    // a few terms on the world pass's foliage.
+    // The low-sun rig is constants computed once a frame (no GPU cost of its
+    // own; the world pass is what it lights); the crown canopy is a few terms
+    // on the world pass's foliage.
     {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", true, &FS::lowSunRig, "world"},
     {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", true,
      &FS::crownCanopy, "world"},
-    // B3 (night): the lamps and low beams shade in the world pass, the moon's
-    // shadow map renders in the shadow depth pass, the stars draw with the sky
-    // (part of the world section).
+    // The lamps and low beams shade in the world pass, the moon's shadow map
+    // renders in the shadow depth pass, the stars draw with the sky (part of
+    // the world section).
     {Feature::NightLights, "nightLights", "Lamps and low beams", "night", "Night and combat", "B3", true,
      &FS::nightLights, "world"},
     {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", true, &FS::moonShadows,
      "shadow"},
     {Feature::Stars, "stars", "Stars", "night", "Night and combat", "B3", true, &FS::stars, "world"},
-    // B4 (combat): the combat lights shade in the world pass (their scattering
-    // in the air adds to the composite); their shadow mask has its own pass at
-    // the start of the world (combatmask).
+    // The combat lights shade in the world pass (their scattering in the air
+    // adds to the composite); their shadow mask has its own pass at the start
+    // of the world (combatmask).
     {Feature::CombatLights, "combatLights", "Combat light", "combat", "Night and combat", "B4", true, &FS::combatLights,
      "world"},
     {Feature::CombatShadows, "combatShadows", "Combat light shadows", "combat", "Night and combat", "B4", true,
      &FS::combatShadows, "combatmask"},
-    // B5 (water): the sea's draws, in the ground section of the world pass
-    // (sky, terrain, water, horizon).
+    // The sea's draws, in the ground section of the world pass (sky, terrain,
+    // water, horizon).
     {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", true, &FS::seaWaves, "ground"},
-    // B6 (ssr): the tag readout and the reflections, two post stages.
+    // The tag readout and the reflections, two post stages.
     {Feature::Ssr, "ssr", "Screen-space reflections", "ssr", "Water and shine", "B6", true, &FS::ssr, "ssr"},
-    // B7 (materials): the wet surfaces, the puddles' darkening and the lamp
-    // streaks shade in the world pass; the puddles' reflections are B6's stage.
+    // The wet surfaces, the puddles' darkening and the lamp streaks shade in
+    // the world pass; the puddles' reflections are the ssr stage's.
     {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", true,
      &FS::wetWeather, "world"},
     {Feature::LampStreaks, "lampStreaks", "Lamp streaks on wet ground", "materials", "Water and shine", "B7", true,
      &FS::lampStreaks, "world"},
-    // B8 (volumetric and haze): one post stage, the air pass, for all three.
+    // One post stage, the air pass, for all three.
     {Feature::AirBeams, "airBeams", "Sun beams and headlight cones", "volumetric", "Sky and air", "B8", true,
      &FS::airBeams, "air"},
     {Feature::AirHaze, "airHaze", "Aerial haze", "haze", "Sky and air", "B8", true, &FS::airHaze, "air"},
     {Feature::ValleyMist, "valleyMist", "Valley mist", "haze", "Sky and air", "B8", true, &FS::valleyMist, "air"},
-    // B9 (hfrt): the sun-visibility map's build shows in its own section on
-    // the frames that rebuild it; the one read per fragment is in the world pass.
+    // The sun-visibility map's build shows in its own section on the frames
+    // that rebuild it; the one read per fragment is in the world pass.
     {Feature::CanopyShadows, "canopyShadows", "Long canopy shadows", "hfrt", "Light and shadow", "B9", true,
      &FS::canopyShadows, "canopy"},
-    // B10 (clouds): lit clouds cost in the sky pass (the dome and the sky
-    // clouds), the sky-matched shadows one density tap per lit world fragment.
+    // Lit clouds cost in the sky pass (the dome and the sky clouds), the
+    // sky-matched shadows one density tap per lit world fragment.
     {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", true, &FS::litClouds, "sky"},
     {Feature::SkyCloudShadows, "skyCloudShadows", "Sky-matched cloud shadows", "clouds", "Sky and air", "B10", true,
      &FS::skyCloudShadows, "world"},
-    // B11 (texsharp): the terrain detail runs inside the ground draw, the luma
-    // sharpen in the post pass's sharpen stage (TAA's own sharpen when TAA runs).
+    // The terrain detail runs inside the ground draw, the luma sharpen in the
+    // post pass's sharpen stage (TAA's own sharpen when TAA runs).
     {Feature::TerrainDetail, "terrainDetail", "Terrain detail", "texsharp", "Light and shadow", "B11", true,
      &FS::terrainDetail, "ground"},
     {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
      "sharpen"},
-    // Look lane "surface": the horizon occlusion is the post pass's ao stage;
-    // the sky light, canopy occlusion and specular are terms of the world
-    // pass's shading.
+    // The horizon occlusion is the post pass's ao stage; the sky light, canopy
+    // occlusion and specular are terms of the world pass's shading.
     {Feature::Surfaces, "surfaces", "Surfaces and ambient light", "surface", "Light and shadow", "look", true,
      &FS::surfaces, "ao"},
-    // Look lane "light" (PhotoCamera.hpp): the physical rig is constants once a
-    // frame (plus the sky integral when the sun has moved), the camera is the
-    // meter pass and a few terms of the composite.
+    // PhotoCamera.hpp: the physical rig is constants once a frame (plus the sky
+    // integral when the sun has moved), the camera is the meter pass and a few
+    // terms of the composite.
     {Feature::PhotoLight, "photoLight", "Photoreal light and camera", "look-light", "Light and shadow", "L1", true,
      &FS::photoLight, "composite"},
-    // The look lane's volumetric fog (VolumetricFog.hpp): a froxel volume of
-    // haze, weather fog and valley mist lit by the sun, the sky and the local
-    // lights, applied in the post pass's Air stage in place of the flat
-    // distance fog (which keeps only the view-distance edge). It supersedes
-    // B8's air pass (airBeams, airHaze, valleyMist) on the same stage.
+    // The volumetric fog (VolumetricFog.hpp): a froxel volume of haze, weather
+    // fog and valley mist lit by the sun, the sky and the local lights,
+    // applied in the post pass's Air stage in place of the flat distance fog
+    // (which keeps only the view-distance edge). It supersedes the plain air
+    // pass (airBeams, airHaze, valleyMist) on the same stage.
     {Feature::VolFog, "volFog", "Volumetric fog and atmosphere", "fog", "Sky and air", "look-fog", true, &FS::volFog,
      "air"},
 };
@@ -207,7 +207,7 @@ struct KeyTable
         rows.assign(std::begin(knobs), std::end(knobs));
         for (const FeatureInfo& f : kFeatures)
             rows.push_back(MakeSwitch(f));
-        // Sub-knobs, in the order their features land.
+        // Sub-knobs, grouped by feature.
         const LightingKey subKnobs[] = {
             MakeSubKnob(Feature::Taa, "taaSharpen", "TAA sharpen", "0 = soft; the overshoot stays bounded (no halos)",
                         &LT::taaSharpen, 0.0f, 1.5f),
