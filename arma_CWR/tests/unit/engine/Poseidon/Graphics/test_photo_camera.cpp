@@ -13,11 +13,11 @@
 #include <cstdio>
 #include <vector>
 
-// The photoreal light and camera (look lane "light", feature switch
-// photoLight; Graphics/Remaster/PhotoCamera.hpp): the world pass's encoding,
-// the meter, the exposure and its adaptation, the tone curve, the white
-// balance, the physical sun and sky from the atmosphere and the rig built on
-// them, the gate and the post plan.
+// The photoreal light and camera (feature switch photoLight;
+// Graphics/Remaster/PhotoCamera.hpp): the world pass's encoding, the meter, the
+// exposure and its adaptation, the tone curve, the white balance, the physical
+// sun and sky from the atmosphere and the rig built on them, the gate and the
+// post plan.
 
 using namespace Poseidon::remaster;
 
@@ -177,8 +177,8 @@ TEST_CASE("PhotoCamera: exposure keeps part of a scene's darkness, guards its hi
 TEST_CASE("PhotoCamera: a grey day holds its bright end, the deck or the mist, at a light grey",
           "[Remaster][PhotoCamera]")
 {
-    // Look fix round 5 "mist": the optics mist view metered mean -3.37 and
-    // high -0.58; held at kHighlightLimit the mist sat in the curve's shoulder.
+    // A view through optics into mist metered mean -3.37 and high -0.58; held
+    // at kHighlightLimit the mist sat in the curve's shoulder.
     LightingTuning t;
     t.camEv = 0.0f;
     MeterResult mist;
@@ -385,7 +385,7 @@ TEST_CASE("PhotoCamera: look fix exposure: the meter reads the sky round the sun
     // the sky by the sun sets the next exposure. Reading the dome's own
     // stored light, the burn's higher cap held the guard's tap past its limit
     // and the camera closed down; read through SkyMeterLight it settles where
-    // the plain roll-off (round 3) settled.
+    // the plain roll-off settled.
     LightingTuning t;
     auto settle = [&](auto stored, auto read)
     {
@@ -478,8 +478,8 @@ TEST_CASE("PhotoCamera: the filmic curve passes middle grey, reaches white and k
     const Rgb mid = ApplyToneCurveHueKeeping(c, orange);
     CHECK(mid.g / mid.r == Catch::Approx(0.5f).margin(0.03));
     // Far past white a white light is white; a saturated orange rolls off to a
-    // yellow-orange, its blue following last (kChromaKeep, kHueRoll; look fix
-    // "burst": one mix for all three channels turned a flame's core cream).
+    // yellow-orange, its blue following last (kChromaKeep, kHueRoll; one
+    // mix for all three channels turned a flame's core cream).
     const Rgb white(0.18f, 0.18f, 0.17f);
     const Rgb whiteHot = ApplyToneCurveHueKeeping(c, white * 40.0f);
     CHECK(whiteHot.b == Catch::Approx(1.0f).margin(0.01));
@@ -698,8 +698,7 @@ TEST_CASE("PhotoCamera: critic round 2: the histogram meter, the low sun's balan
     CHECK(WhiteBalanceShare(5.0f) == Catch::Approx(kWhiteBalanceShareLowSun));
     CHECK(WhiteBalanceShare(60.0f) == Catch::Approx(kWhiteBalanceShareHighSun));
     // The veil: none under the clearest sky the engine has nor under the
-    // broken cloud of setOvercast 0.5 (its blue gaps and its sun stay; look
-    // director round 2), part of it under a thickening deck, all of it under
+    // broken cloud of setOvercast 0.5 (its blue gaps and its sun stay), part of it under a thickening deck, all of it under
     // a full one.
     CHECK(CameraWeatherVeil(0.959f) == 0.0f);
     CHECK(CameraWeatherVeil(0.7f) == 0.0f);
@@ -734,10 +733,10 @@ TEST_CASE("PhotoCamera: critic round 2: the histogram meter, the low sun's balan
 TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and leaves the blue sky blue",
           "[Remaster][PhotoCamera]")
 {
-    // Look fix "fire": the warm balance over the whole frame turned the clear
-    // sky and its clouds teal-grey on forest_edge_golden ((129, 148, 163)).
-    // The gain: none out of the golden hour, kCameraGoldenWarm at unit
-    // luminance in it.
+    // The warm balance over the whole frame turned the clear sky and its clouds
+    // teal-grey ((129, 148, 163) over a forest edge at the golden hour). The
+    // gain: none out of the golden hour, kCameraGoldenWarm at unit luminance in
+    // it.
     const Rgb none = GoldenWarmGain(0.0f);
     CHECK(none.r == 1.0f);
     CHECK(none.g == 1.0f);
@@ -762,10 +761,10 @@ TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and le
 TEST_CASE("PhotoCamera: look fix noon: a bright plain at a high sun is exposed a little under, not dull",
           "[Remaster][PhotoCamera]")
 {
-    // Round 2 put a bright plain 0.38 EV under on top of the high sun's
+    // An earlier tuning put a bright plain 0.38 EV under on top of the high sun's
     // step: the Sinai sand sat 35 levels under the original and the clear
     // sky over it went slate. Now a plain that meters about 0.84 EV above the
-    // average scene (noon_fields) sits between a quarter and under half a
+    // average scene sits between a quarter and under half a
     // stop under the average scene's grey, the high sun's step included.
     LightingTuning t;
     t.camEv = 0.0f;
@@ -784,7 +783,7 @@ TEST_CASE("PhotoCamera: look fix noon: a bright plain at a high sun is exposed a
 TEST_CASE("PhotoCamera: look fix noon: the clear day sky deepens toward a camera's blue, the horizon stays pale",
           "[Remaster][PhotoCamera]")
 {
-    // The table's noon zenith (linear, the slate (91, 114, 148) of round 3).
+    // The table's noon zenith (linear, the slate (91, 114, 148) of an earlier tuning).
     const Rgb zenith(0.104f, 0.170f, 0.302f);
     const float w = DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.0f);
     CHECK(w == Catch::Approx(1.0f));

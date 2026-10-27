@@ -14,8 +14,8 @@
 #include <string_view>
 #include <vector>
 
-// Screen-space reflections (feature switch ssr, INTEGRATION-PLAN.md section 5
-// B6; Graphics/Remaster/ScreenReflections.hpp): the stencil tag code table and
+// Screen-space reflections (feature switch ssr;
+// Graphics/Remaster/ScreenReflections.hpp): the stencil tag code table and
 // the per-draw stencil state, the march's hit logic as a CPU mirror of the
 // shader on a synthetic depth row, the water composite that swaps the sea's
 // sky share for the reflection, and the contracts that tie the shaders and the
@@ -679,8 +679,8 @@ TEST_CASE("Reflection switch: landed with its two sub-knobs and its post stages"
         CHECK(std::string_view(k->group) == "ssr");
         CHECK(KeyDefault(*k) == s.def);
     }
-    // The diagnostic views are in the overlay's list, after B2's albedo (7)
-    // and B8's air (8) views (B4's combat mask follows them).
+    // The diagnostic views are in the overlay's list, after the albedo (7)
+    // and air (8) views (the combat mask follows them).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
     CHECK(debug->maxValue >= static_cast<float>(kDebugViewSsrReflection));
@@ -845,7 +845,7 @@ TEST_CASE("Reflection shaders: the march, the constants and the sea's sky are th
     // Only a surface hit (or the dark under a hull) changes the sea; sky and
     // frame exits leave the sea program's own sky.
     CHECK(trace.find("if (kind == 1) {") != std::string::npos);
-    // The ripples at the calm share of the research's slopes.
+    // The ripples at the calm share of their full slopes.
     CHECK(CountOf(trace, "float s = S[i] * kSsrWaterRipple;") == 1);
     // A ray that leaves the frame takes the frame's own open sky where there is
     // some above where it points (a hill in the way), as a ray that ends on
@@ -983,7 +983,7 @@ TEST_CASE("Reflection backend: the tags ride on the depth state, off is the stat
     CHECK(CountOf(ssr.substr(blurDraw, compositeDraw - blurDraw), "BindTex(3, s.blurTex);") == 1);
     CHECK(CountOf(ssr, "BindTex(3, s.traceTex);") == 0);
     CHECK(CountOf(post, "f.frameColor = _post.colorTex;") == 1);
-    // The air pass (B8) or the volumetric fog applies over that frame, the
+    // The air pass or the volumetric fog applies over that frame, the
     // bloom and the composite read the Air stage's output when it ran and that
     // frame otherwise (PostSceneTex), and the shafts read that frame.
     CHECK(CountOf(post, "PostSceneTex(f)") == 2);

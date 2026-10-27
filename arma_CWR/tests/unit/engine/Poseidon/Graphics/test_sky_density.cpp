@@ -10,12 +10,12 @@
 #include <cstdint>
 #include <vector>
 
-// The sky's own clouds (INTEGRATION-PLAN.md section 5 B10, Graphics/Remaster/
-// SkyDensity.hpp): the dome's texture mapping, the cloud-density map on three
-// weather skies made like the shipped ones (a clear gradient, white streaks on
-// blue, a grey deck), the shadow cover and coverage, the low-sun fade, the
-// sky's turn, the shadow anchor, and the light rig keeping the classic
-// overcast dimming over the sky's own covered share.
+// The sky's own clouds (Graphics/Remaster/SkyDensity.hpp): the dome's texture
+// mapping, the cloud-density map on three weather skies made like the shipped
+// ones (a clear gradient, white streaks on blue, a grey deck), the shadow cover
+// and coverage, the low-sun fade, the sky's turn, the shadow anchor, and the
+// light rig keeping the classic overcast dimming over the sky's own covered
+// share.
 
 using namespace Poseidon::remaster;
 
@@ -303,7 +303,7 @@ TEST_CASE("Sky density: shadow cover, density and the weather mix", "[remaster][
 
 TEST_CASE("Sky density: relief and silver lining only at a low sun", "[remaster][SkyDensity]")
 {
-    // The critic's midday emboss: gone above 45 degrees, full below 25.
+    // The midday emboss: gone above 45 degrees, full below 25.
     CHECK(LitCloudLowSun(5.0f) == 1.0f);
     CHECK(LitCloudLowSun(kLitCloudFadeStartDeg) == 1.0f);
     CHECK(LitCloudLowSun(35.0f) == Catch::Approx(0.5f));
@@ -318,7 +318,7 @@ TEST_CASE("Sky density: relief and silver lining only at a low sun", "[remaster]
 TEST_CASE("Sky density: the lit-cloud terms are identity at a high sun and light as well as shade at a low one",
           "[remaster][SkyDensity]")
 {
-    // The owner's never-ship list has "anything only darker". A first build
+    // No term may only darken the sky. A first build
     // faded the relief and the lining but not the darkening of thick cloud
     // against the sun, which then was the only term left at midday and greyed
     // the white cumulus near a high sun. Every term fades now: at 45 degrees and
@@ -347,7 +347,7 @@ TEST_CASE("Sky density: the lit-cloud terms are identity at a high sun and light
                                     }
                                 }
     CHECK(changed == 0);
-    // The reviewer's case: thick white cloud right against a 60 degree sun.
+    // Thick white cloud right against a 60 degree sun.
     const LitCloudShade noon = LitCloudTerms(60.0f, 1.0f, 0.8f, 0.8f, 1.0f, 0.2f, 0.0f, 0.7f);
     CHECK(noon.gain == 1.0f);
 
@@ -479,7 +479,7 @@ TEST_CASE("Sky density: the rig keeps the classic overcast dimming over the sky'
         CHECK(back.cloudTransmit == noise.cloudTransmit);
         CHECK(Luminance(back.sun) == Luminance(noise.sun));
     }
-    // A clear sky casts no shadow whatever the map says (F4).
+    // A clear sky casts no shadow whatever the map says.
     LightRigInputs clear = Sun45(0.959f);
     clear.skyShadowCoverage = 0.4f;
     const LightRig rig = ComputeLightRig(clear, tuning);

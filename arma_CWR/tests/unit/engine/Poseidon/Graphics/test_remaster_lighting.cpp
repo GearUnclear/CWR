@@ -100,7 +100,7 @@ TEST_CASE("Remaster light rig: sunlit ground keeps its classic brightness throug
         // Classic clamps lit ground to the bare texture (1.0 on screen).
         CHECK(Shown(lit, rig.exposure) > 0.9f);
         CHECK(Shown(lit, rig.exposure) < 1.06f);
-        // Cast shadow: bold but not crushed (reviewers rejected ~0.42).
+        // Cast shadow: bold but not crushed (~0.42 read as crushed).
         const float ratio = Shown(shade, rig.exposure) / Shown(lit, rig.exposure);
         CHECK(ratio > 0.5f);
         CHECK(ratio < 0.75f);
@@ -206,7 +206,7 @@ LightingTuning WithLowSunRig(bool on)
 // Light (rig units, linear) on a vertical face whose normal is `offDeg` from
 // the sun's azimuth: the sun times N.L and the horizon band between its
 // anti-sun and sunward halves, as the shader's skyIrradiance gives it for a
-// horizontal normal. The shade track's calibration boxes turn a hull 45
+// horizontal normal. The calibration boxes turn a hull 45
 // degrees from the sun (lit) and 135 (shaded).
 Rgb VerticalFace(const LightRig& rig, float elevationDeg, float offDeg)
 {
@@ -224,10 +224,9 @@ bool SameRgb(const Rgb& a, const Rgb& b)
 
 TEST_CASE("Remaster light rig: the low-sun rig keeps the shaded side of a hull readable", "[Graphics][remaster]")
 {
-    // Plan step B2 (research track shade): the face of a hull turned away from
-    // a low sun was crushed (0.32 to 0.42 of its sunlit side on screen in the
-    // research's calibration boxes; the target is about 0.6, and 0.42 was
-    // rejected). The sideways fill lifts it into a readable range without
+    // The face of a hull turned away from a low sun was crushed (0.32 to 0.42
+    // of its sunlit side on screen in the calibration boxes; the target is
+    // about 0.6, and 0.42 still read as crushed). The sideways fill lifts it into a readable range without
     // flattening the hull. The game measures 0.02 to 0.07 above this model
     // (AO, ground tint and the measured faces' exact angles).
     for (float e : {4.8f, 7.5f, 9.0f, 12.7f, 14.0f})
@@ -331,9 +330,9 @@ TEST_CASE("Remaster light rig: the low-sun rig warms the evening sun from 25 deg
 
 TEST_CASE("Remaster light rig: with lowSunRig off the rig is the one before the low-sun step", "[Graphics][remaster]")
 {
-    // The video's "off" is honest only if the switch restores the earlier rig:
-    // values of ComputeLightRig at the branch tip before B2 (807ce4b), the
-    // ClearSky inputs with classic's sun colour.
+    // The switch's "off" must restore the earlier rig exactly: values of
+    // ComputeLightRig before the low-sun rig, the ClearSky inputs with
+    // classic's sun colour.
     struct Golden
     {
         float e;
@@ -395,7 +394,7 @@ TEST_CASE("Remaster light rig: the low-sun fill never lights a wall above the vi
     // The twilight cap of the sky fill holds for walls with the fill on: a
     // vertical face goes at most to the visible sky, and never below what it
     // had without the fill. A clear sky's fog colour caps far above the fill,
-    // so by day the fill is the research's to the bit (the case above).
+    // so by day the fill is unchanged to the bit (the case above).
     for (float e : {-1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 5.0f})
     {
         CAPTURE(e);
@@ -423,8 +422,8 @@ TEST_CASE("Remaster light rig: the low-sun fill never lights a wall above the vi
 
 TEST_CASE("Remaster debug views: the albedo view is drawn by the lit shaders", "[Graphics][remaster]")
 {
-    // debug=7 shows each lit surface's albedo (display space), the shade
-    // track's calibration view: with post=0 a shot of it divides a lit shot
+    // debug=7 shows each lit surface's albedo (display space), a
+    // calibration view: with post=0 a shot of it divides a lit shot
     // into the light on every surface. The lit shaders see it as 4; the post
     // pass's views (4 ambient occlusion, 5 linear depth) leave them alone, and
     // the light tiles' view (6) the backend passes through itself.
@@ -1186,13 +1185,13 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
     const std::string skyPiece = Piece(gl::FragmentPiece::Sky);
     CHECK(constant(skyPiece, "kCamSkyKnee") == Catch::Approx(kSkyRolloffKnee));
     CHECK(constant(skyPiece, "kCamSkyCap") == Catch::Approx(kSkyRolloffCap));
-    // The grey deck's cloud base (look fix round 4), faded in above the band
+    // The grey deck's cloud base, faded in above the band
     // the grey-sky horizon ring measures (3.8 degrees up, sine 0.066).
     CHECK(constant(skyPiece, "kCamDeckRelief") == Catch::Approx(kDeckRelief));
     CHECK(constant(skyPiece, "kCamDeckDark") == Catch::Approx(kDeckDark));
     CHECK(constant(skyPiece, "kCamDeckFromSin") == Catch::Approx(kDeckFromSin));
     CHECK(constant(skyPiece, "kCamDeckFullSin") == Catch::Approx(kDeckFullSin));
-    // Under rain the deck darkens further (look fix round 5), read from the
+    // Under rain the deck darkens further, read from the
     // wet weather's rain density.
     CHECK(constant(skyPiece, "kCamDeckRainDark") == Catch::Approx(kDeckRainDark));
     CHECK(kDeckRainDark > 0.0f);
@@ -1203,7 +1202,7 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
     CHECK(kDeckFullSin > kDeckFromSin);
     CHECK(constant(skyPiece, "kCamSkySunCap") == Catch::Approx(kSkySunCap));
     CHECK(constant(skyPiece, "kCamSkyGlowRad") == Catch::Approx(kSkySunGlowRad));
-    // The low sun's warm glow is a band along the horizon (look fix "dawn"):
+    // The low sun's warm glow is a band along the horizon:
     // the blue-turning mask measures the angle with the height above the sun
     // stretched (LowSunGlowCos).
     CHECK(constant(skyPiece, "kCamGlowFlat") == Catch::Approx(kLowSunGlowFlat));
@@ -1219,7 +1218,7 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
     const std::string discBody = common.substr(disc, common.find("\n}\n", disc) - disc);
     CHECK(discBody.find("dFdx(d)") != std::string::npos);
     CHECK(discBody.find("kCamSunWhite") != std::string::npos);
-    // Look fix "noon": the clear day's blue (DaySkyDeepen) is the dome's, with
+    // The clear day's blue (DaySkyDeepen) is the dome's, with
     // DaySkyDeepWeight's ramps, inside the camera's look of the clear sky.
     CHECK(constant(skyPiece, "kCamSkyDeep") == Catch::Approx(kCameraDaySkyDeep));
     CHECK(constant(skyPiece, "kCamSkyDeepFloor") == Catch::Approx(kCameraDaySkyFloor));
@@ -1410,7 +1409,7 @@ TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Gr
 TEST_CASE("Remaster tree crowns as a canopy: the shader's switch, its terms and its off path",
           "[Graphics][Shaders][remaster]")
 {
-    // crownCanopy (plan step B2, research track shade crown V18): the backend
+    // crownCanopy: the backend
     // sets litHorizonSun.w from the switch's frame gate, and shadeRemastered
     // lights a crown (not grass, which shades as terrain) as a canopy only
     // while it is 1. Off, every term is the stock one.
@@ -1435,7 +1434,7 @@ TEST_CASE("Remaster tree crowns as a canopy: the shader's switch, its terms and 
     CHECK(shade.find("crownSky = mix(canopy ? 0.45 : 0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));") !=
           std::string::npos);
     CHECK(shade.find("sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;") != std::string::npos);
-    // The low sun is the sun (B3: under the moon key litSun carries the moon).
+    // The low sun is the sun (under the moon key litSun carries the moon).
     CHECK(shade.find("float lowSun = 1.0 - smoothstep(12.0, 35.0, skySunElevation());") != std::string::npos);
     CHECK(shade.find("crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);") !=
           std::string::npos);
@@ -1602,7 +1601,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     checkBlock(blockAt(shared, sharedOpen));
 
     // Every declaration in the backend's sources, slot by slot, and there is
-    // only the one: a hand copy (four prototypes pasted their own into post
+    // only the one: a hand copy (earlier versions pasted their own into post
     // and vertex shaders) would drift from the layout.
     int declarations = 0;
     for (const auto& entry : std::filesystem::directory_iterator(Gl33Dir()))
@@ -1628,11 +1627,10 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
 
     // The planned slots: the one between the night and the weather is the
-    // planned padding, the rest continue the declared ones (B7 landed the
-    // material class at 58 and the weather at 73, B1 the sun shadow slots 59
-    // and 60, A7 the sky slots 61 to 67 of plan section 3.3, B10 the clouds
-    // slots 68 and 69, B3 the night slots 70 and 71, B5 the water slots 74 and
-    // 75, B9 the canopy at 76).
+    // planned padding, the rest continue the declared ones (the material class
+    // at 58, the sun shadow slots 59 and 60, the sky slots 61 to 67, the clouds
+    // slots 68 and 69, the night slots 70 and 71, the weather at 73, the water
+    // slots 74 and 75, the canopy at 76).
     CHECK(static_cast<int>(LC::MatClass) == 58);
     CHECK(static_cast<int>(LC::Taa) == 59);
     CHECK(static_cast<int>(LC::Pcss) == 60);
@@ -1640,8 +1638,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::AtmoDome) == 67);
     CHECK(static_cast<int>(LC::Sky) == 68);
     CHECK(static_cast<int>(LC::SkyShadow) == 69);
-    // B3 landed the night at 71 (plan 3.3) and the sky's own sun at 70, which
-    // A6 left free (the light list rides in slot 22).
+    // The night sits at 71 and the sky's own sun at 70, which the tiled light
+    // list left free (it rides in slot 22).
     CHECK(static_cast<int>(LC::SkySun) == 70);
     CHECK(static_cast<int>(LC::Night) == 71);
     CHECK(static_cast<int>(LC::Planned) == 72);
@@ -1650,12 +1648,12 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::Weather) == 73);
     CHECK(static_cast<int>(LC::Water0) == 74);
     CHECK(static_cast<int>(LC::Water1) == 75);
-    // B9 landed the canopy at 76 and B11 the terrain detail at 77.
+    // The canopy at 76 and the terrain detail at 77.
     CHECK(static_cast<int>(LC::Canopy) == 76);
     CHECK(static_cast<int>(LC::Canopy) == static_cast<int>(LC::Water1) + 1);
     CHECK(static_cast<int>(LC::Detail) == 77);
-    // B8 landed the haze at 78, the last planned slot; the surfaces lane's
-    // slots follow it (79 to 88).
+    // The haze at 78, the last planned slot; the surface slots follow it (79
+    // to 88).
     CHECK(static_cast<int>(LC::Haze) == 78);
     CHECK(static_cast<int>(LC::Haze) == static_cast<int>(LC::Detail) + 1);
     CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Haze) + 1);
@@ -1691,7 +1689,7 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
     // The shadow-map audits of test_gl_state_cache_audit.cpp pin binds to this
     // constant; the shaders' comments and the classic programs say unit 2.
     CHECK(gl::kShadowMapUnit == 2);
-    // The soft shadows read the same array as raw depth on unit 6 (plan 3.4).
+    // The soft shadows read the same array as raw depth on unit 6.
     CHECK(gl::kShadowRawUnit == 6);
 
     // Every sampler a remastered program declares has its unit in the table
@@ -1725,7 +1723,7 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
     // their pre-existing paths and the fog keeps its classic colours: the
     // feature's "off" is the frame before it.
     const std::string screen = gl::RemasterVertexSource(0); // VSScreen
-    // B10 widened the gate by the clouds' slots (litSky, zero while they are
+    // The sky clouds widened the gate by their slots (litSky, zero while they are
     // off: see the clouds' own off case), the photoreal camera by its own
     // (litCamera.x, zero while it is off), which only gives the sun disk its
     // view ray (vLitMode stays 0).
@@ -1755,7 +1753,7 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
     CHECK(finish.find("if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);") !=
           std::string::npos);
     CHECK(finish.find("} else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {") != std::string::npos);
-    // The sea (B5) fogs through finishFragment like the detail program it
+    // The sea fogs through finishFragment like the detail program it
     // replaces, and its sky reflection is the classic one while litAtmo.x is 0.
     const std::string water = gl::RemasterFragmentMain(3); // PSWater
     CHECK(CountOf(water, "atmoFogColor(") == 0);
@@ -1879,10 +1877,10 @@ TEST_CASE("Remaster sea: the water program is the variant C model on the shared 
     CHECK(CountOf(water, "skyReflection(r)") == 1);
     CHECK(CountOf(gl::RemasterFragmentCommon(), "vec3 skyReflection(vec3 r) {") == 1);
     // Local light through the shared lights piece with the shaded surfaces'
-    // clamp (F9: 1.0), not the prototype's 1.5.
+    // clamp (1.0), not an earlier 1.5.
     CHECK(CountOf(water, "localLights(n, kd, ka) * litGround.w, vec3(1.0))") == 1);
     CHECK(water.find("litGround.w, vec3(1.5)") == std::string::npos);
-    // No sea detection by material any more (the prototype's isSea()), and the
+    // No sea detection by material any more (an earlier isSea()), and the
     // previous main's constant bump normal (the detail texture read as one) is
     // gone.
     CHECK(water.find("isSea(") == std::string::npos);
@@ -1976,7 +1974,7 @@ TEST_CASE("Remaster sky clouds: with their slots at zero every draw is the one b
     // when the engine uploads litSky as zero (EngineGL33_SkyClouds.cpp
     // UploadLitClouds). Then the dome keeps its texture coordinate and its
     // draw, the sky clouds and the sun disk pass through, and the shadows come
-    // from the noise field: the frame before B10.
+    // from the noise field: the frame before the sky clouds.
     const std::string screen = gl::RemasterVertexSource(0); // VSScreen
     CHECK(screen.find("if (dome && litSky.z != 0.0) vUV0.x += litSky.z;") != std::string::npos);
     CHECK(CountOf(screen, "vUV0 ") == 1);      // set once ...

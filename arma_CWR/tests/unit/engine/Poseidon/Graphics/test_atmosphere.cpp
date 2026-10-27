@@ -10,10 +10,10 @@
 #include <cstring>
 #include <string_view>
 
-// The sky table (INTEGRATION-PLAN.md section 5 A7, Graphics/Remaster/
-// Atmosphere.hpp): the atmosphere model against an independent brute-force
-// integration, the sky-view table's lookups, and the frame rules (rebuild,
-// night fade, overcast floor, gate, switch and sub-knobs).
+// The sky table (Graphics/Remaster/Atmosphere.hpp): the atmosphere model
+// against an independent brute-force integration, the sky-view table's lookups,
+// and the frame rules (rebuild, night fade, overcast floor, gate, switch and
+// sub-knobs).
 
 using namespace Poseidon::remaster;
 
@@ -212,8 +212,8 @@ TEST_CASE("Sky table: sky-view texels match a brute-force march at noon, sunset 
     // Region 0 (Rayleigh plus multiple scattering) and region 1 (Mie) of the
     // 40-step quadratic march against a 1500-step double-precision march with
     // the transmittance integrated directly (no table). The multiple
-    // scattering term reads the model's table on both sides. The research
-    // prototype's march (kept: the shipped look was tuned on it) samples each
+    // scattering term reads the model's table on both sides. The
+    // original march (kept: the shipped look was tuned on it) samples each
     // step's source 0.3 into the step; with steps longer than the 1.2 km Mie
     // scale height that overstates the haze by up to 8 % (measured: 7.5 % on
     // the noon sky, 4 to 6.5 % at sunset), while Rayleigh, on an 8 km scale,
@@ -332,7 +332,7 @@ TEST_CASE("Sky table: lookups return the texels and the row mean averages its ro
 
 TEST_CASE("Sky table: the haze's phase has the sun's aureole and conserves the light", "[remaster][atmosphere]")
 {
-    // Look fix "veil": a broad lobe plus the aureole's narrow peak.
+    // A broad lobe plus the aureole's narrow peak.
     auto at = [](double deg)
     { return static_cast<double>(AtmosphereMiePhase(static_cast<float>(std::cos(deg * kPi / 180.0)))); };
     // Over the sphere it integrates to 1 (the scattered light is the same).
@@ -409,7 +409,7 @@ TEST_CASE("Sky table: the switch has landed with its gate, GPU section and sub-k
     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
         found |= std::strcmp(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)), info.gpuSection) == 0;
     CHECK(found);
-    // The shipped hue and saturation (plan section 3.1, the critic's values).
+    // The shipped hue and saturation.
     const LightingTuning t{};
     CHECK(t.atmoHue == kSkyHueDefault);
     CHECK(t.atmoSat == kSkySaturationDefault);
@@ -425,8 +425,8 @@ TEST_CASE("Sky table: the switch has landed with its gate, GPU section and sub-k
         REQUIRE(k->parent);
         CHECK(std::string_view(k->parent) == "atmosphere");
     }
-    // The noon cirrus survives: the cloud mask's dead zone is well under the
-    // research prototype's 0.015.
+    // The noon cirrus survives: the cloud mask's dead zone is well under an
+    // earlier 0.015.
     CHECK(kSkyCloudMaskDeadZone <= 0.005f);
 
     // The gate: above -9 degrees, once the atmosphere tables exist.

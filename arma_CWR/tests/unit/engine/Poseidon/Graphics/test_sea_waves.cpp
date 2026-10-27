@@ -9,10 +9,10 @@
 #include <string_view>
 #include <vector>
 
-// The remastered sea's plain math (INTEGRATION-PLAN.md section 5 B5,
-// Graphics/Remaster/SeaWaves.hpp): the cross-fade of the sea texture's
-// animation frames, the relief gain that keeps a mix of two frames as strong
-// as one, the per-frame constants of the water program and the sheen's light.
+// The remastered sea's plain math (Graphics/Remaster/SeaWaves.hpp): the
+// cross-fade of the sea texture's animation frames, the relief gain that keeps
+// a mix of two frames as strong as one, the per-frame constants of the water
+// program and the sheen's light.
 
 using namespace Poseidon::remaster;
 
