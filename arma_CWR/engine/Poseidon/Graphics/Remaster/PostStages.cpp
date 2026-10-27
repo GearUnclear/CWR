@@ -2,6 +2,8 @@
 
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 
+#include <algorithm>
+
 namespace Poseidon::remaster
 {
 
@@ -110,14 +112,16 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     if (plan.bloomStrength > 0.0f)
         plan.runs |= Bit(PostStage::Bloom);
     // The air pass needs the world depth, and over a screen overlay its haze
-    // would grey the overlay's black surround. The volumetric fog has the same
-    // needs and takes the stage in its place.
+    // would grey the overlay's black surround. The volumetric fog takes the
+    // stage in its place.
     // The volumetric fog also runs under a screen overlay (a rifle's iron
     // sight, a gunner's optic): its apply leaves the overlay's black mask as
     // drawn, and switching the mist off whenever the player aimed made it pop
-    // away and let him see through it (look director round 2).
-    plan.fog = in.fog && in.worldDepth;
-    const bool air = ((in.air && in.glow) || in.fog) && in.worldDepth;
+    // away and let him see through it. In a vehicle interior it runs on the
+    // world depth saved before the interior cleared it (fogWorldDepth), so
+    // the air is drawn in every view AI sight is cut by it.
+    plan.fog = in.fog && (in.worldDepth || in.fogWorldDepth);
+    const bool air = (in.air && in.glow && in.worldDepth) || plan.fog;
     if (air)
         plan.runs |= Bit(PostStage::Air);
     // The shafts are depth tested glow toward a sun on screen; the air pass's
@@ -149,6 +153,24 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     if (in.combatMask && in.worldDepth)
         plan.runs |= Bit(PostStage::LinearDepth);
     return plan;
+}
+
+float ForwardFogFactor(float distance, float start, float invRange)
+{
+    return std::clamp(1.0f - (distance - start) * invRange, 0.0f, 1.0f);
+}
+
+ForwardFogRange ScaleForwardFogRange(float start, float invRange, float scale)
+{
+    ForwardFogRange r{start, invRange};
+    if (!(invRange > 0.0f) || !(scale > 1.0f))
+        return r;
+    // 1 - (d - start') * inv' = scale * (1 - (d - start) * inv), with
+    // inv' = inv * scale: start' = end - (end - start) / scale.
+    const float end = start + 1.0f / invRange;
+    r.invRange = invRange * scale;
+    r.start = end - 1.0f / r.invRange;
+    return r;
 }
 
 } // namespace Poseidon::remaster

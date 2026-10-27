@@ -724,7 +724,7 @@ class EngineGL33 : public Engine
     void RequestShaderReload() override { _shaderReloadPending = true; }
     void MarkWorldOverlay() override
     {
-        if (_worldPassOpen)
+        if (_worldPassOpen || NightVisionFogOpen())
         {
             // The world as it was before the first overlay of the frame: the
             // fog applies to it, and the overlay's darkening is laid back
@@ -1411,6 +1411,25 @@ class EngineGL33 : public Engine
     // A screen overlay is about to be drawn into the world pass (a rifle's
     // iron sight, a gunner's optic): the frame so far, resolved, for the fog.
     void SnapshotWorldBeforeOverlay();
+    // The fog in every view (EngineGL33_PostFogViews.cpp). The fog draws this
+    // frame: in the world's post pass (_fog.on) or over the night-vision
+    // frame (_fog.nvg).
+    bool FogDrawsThisFrame() const;
+    // Night vision's world passes are being drawn and the fog draws over them.
+    bool NightVisionFogOpen() const;
+    // A vehicle interior is about to clear the world's depth: the world's
+    // depth and colour so far, saved for the fog (once a frame).
+    void SaveWorldBeforeInterior();
+    void DestroyInteriorSave();
+    // The depth the fog stages read: the world's (saved before a vehicle
+    // interior cleared it), else the resolved frame's.
+    unsigned int PostFogDepthTex() const;
+    // Night vision (the classic programs, no world post pass): the frame's
+    // medium, and the forward fog range rescaled to the remastered edge, at
+    // each of its world passes; the fog over the intensified frame at the end
+    // of the world.
+    void UpdateFogMediumNightVision();
+    void PostFogNightVision();
     struct FogState
     {
         // The volumes: the injection (ping-pong, last frame's is the history)
@@ -1462,6 +1481,22 @@ class EngineGL33 : public Engine
         Poseidon::remaster::FogMedium medium;
         std::uint32_t mediumFrame = 0;
         bool on = false;
+        // Night vision this frame (UpdateFogMediumNightVision): the fog is
+        // laid over the intensified frame, and the forward fog range it set
+        // on the frame state (start, 1 / range).
+        bool nvg = false;
+        float nvgFog[2] = {0.0f, 0.0f};
+        // The volume's history was made under night vision (a switch starts
+        // the history again).
+        bool historyNvg = false;
+        // The world before a vehicle interior cleared its depth
+        // (SaveWorldBeforeInterior): its colour (RGBA8) and depth (DEPTH24
+        // STENCIL8, as the post pass's), and the frame they hold. A failed
+        // save keeps the interior views on the classic fog after one frame.
+        unsigned int intColorTex = 0, intColorFbo = 0, intDepthTex = 0, intDepthFbo = 0;
+        int intW = 0, intH = 0;
+        std::uint32_t intFrame = 0xffffffffu;
+        bool intFailed = false;
         // The last applied frame (PostSceneTex) and its camera and volume, for
         // the next frame's reprojection.
         std::uint32_t appliedFrame = 0xffffffffu;

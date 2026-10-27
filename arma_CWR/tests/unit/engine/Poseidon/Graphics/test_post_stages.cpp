@@ -1,9 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
+#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+
+#include <algorithm>
+#include <cmath>
 
 #include <filesystem>
 #include <fstream>
@@ -215,6 +220,121 @@ TEST_CASE("Post stages: interior and optics frames hold their stages off", "[Gra
     CHECK(plan.runs == Mask({PostStage::Resolve, PostStage::Ao, PostStage::Composite}));
     CHECK(plan.bloomStrength == 0.0f);
     CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
+}
+
+TEST_CASE("Post stages: the fog runs in a vehicle interior on the world depth saved before it",
+          "[Graphics][remaster][PostStages][fog]")
+{
+    // The interior cleared the world depth after the world's depth and colour
+    // were saved (EngineGL33::Clear): the fog still runs (the Air stage and
+    // the linear depth it reads, made from the saved depth), and every other
+    // stage that needs the world depth keeps holding off.
+    PostFrameInputs in = Shipped();
+    in.fog = true;
+    in.worldDepth = false;
+    in.fogWorldDepth = true;
+    in.temporal = true;
+    in.ssrTags = true;
+    in.ssr = true;
+    in.sunShafts = 1.0f;
+    in.shaftWeight = 1.0f;
+    PostStagePlan plan = PlanPostStages(in);
+    CHECK(plan.fog);
+    CHECK(plan.Runs(PostStage::Air));
+    CHECK(plan.Runs(PostStage::LinearDepth));
+    CHECK(plan.Runs(PostStage::Composite));
+    CHECK_FALSE(plan.Runs(PostStage::Ao));
+    CHECK(plan.aoStrength == 0.0f);
+    CHECK_FALSE(plan.Runs(PostStage::Temporal));
+    CHECK_FALSE(plan.Runs(PostStage::TagReadout));
+    CHECK_FALSE(plan.Runs(PostStage::Ssr));
+    CHECK_FALSE(plan.Runs(PostStage::Shafts));
+    // An optic overlay over the interior keeps it too.
+    in.glow = false;
+    CHECK(PlanPostStages(in).fog);
+    // No saved depth (the save failed): no fog, and B8's air pass never runs
+    // without the world depth either.
+    in.glow = true;
+    in.fogWorldDepth = false;
+    in.air = true;
+    plan = PlanPostStages(in);
+    CHECK_FALSE(plan.fog);
+    CHECK_FALSE(plan.Runs(PostStage::Air));
+    // The saved depth alone asks for nothing: the air pass needs the real one.
+    in.fog = false;
+    in.fogWorldDepth = true;
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Air));
+}
+
+TEST_CASE("Post stages: the fog's gate stays on in every view the player can take",
+          "[Graphics][remaster][FeatureGates][fog]")
+{
+    // AI sight is cut by the whole medium in every view, so the drawn fog
+    // must not switch off when the player sits in a cockpit, raises an optic
+    // or turns on night vision (each a pop and a see-through before).
+    const LightingTuning t{};
+    GateInputs in;
+    in.sunElevationDeg = 5.0f;
+    in.sunAzimuthDeg = 90.0f;
+    in.fog = 0.4f;
+    for (int view = 0; view < 8; ++view)
+    {
+        GateInputs v = in;
+        v.interior = (view & 1) != 0;
+        v.optics = (view & 2) != 0;
+        v.nightVision = (view & 4) != 0;
+        CAPTURE(v.interior, v.optics, v.nightVision);
+        CHECK(ComputeFeatureGates(v, t)[Feature::VolFog].on);
+        // The Lighting row on Classic: no overhaul fog in any view.
+        LightingTuning classic = t;
+        classic.remastered = false;
+        CHECK_FALSE(ComputeFeatureGates(v, classic)[Feature::VolFog].on);
+        // Post effects off: the forward fog's classic edge, in every view.
+        LightingTuning noPost = t;
+        noPost.postEffects = false;
+        CHECK_FALSE(ComputeFeatureGates(v, noPost)[Feature::VolFog].on);
+    }
+    // Under night vision every other feature keeps holding off.
+    GateInputs nv = in;
+    nv.nightVision = true;
+    const FeatureGates g = ComputeFeatureGates(nv, t);
+    for (Feature f : {Feature::Taa, Feature::Ssr, Feature::PhotoLight, Feature::AirHaze, Feature::ValleyMist})
+    {
+        CAPTURE(GetFeatureInfo(f).key);
+        CHECK_FALSE(g[f].on);
+    }
+}
+
+TEST_CASE("Post stages: night vision's forward fog keeps the same edge as the remastered programs and AI sight",
+          "[Graphics][remaster][PostStages][fog]")
+{
+    // The classic programs (night vision) get the forward fog range that
+    // gives min(factor * fogEdgeScale, 1): the remastered programs' litHaze.x
+    // edge, and AI sight's forward edge, clamp((end - d) / ((1 -
+    // kFogEdgeStart) end)). The weather fog itself is the volume's.
+    for (float start : {10.0f, 300.0f, 900.0f})
+        for (float end : {1000.0f, 2500.0f})
+        {
+            const float inv = 1.0f / (end - start);
+            const float scale = VolFogEdgeScale(start, end);
+            const ForwardFogRange r = ScaleForwardFogRange(start, inv, scale);
+            CAPTURE(start, end, scale);
+            for (float d = 0.0f; d <= end * 1.2f; d += end / 64.0f)
+            {
+                CAPTURE(d);
+                const float remastered = std::min(ForwardFogFactor(d, start, inv) * scale, 1.0f);
+                const float edge = std::clamp((end - d) / ((1.0f - kFogEdgeStart) * end), 0.0f, 1.0f);
+                CHECK(std::fabs(ForwardFogFactor(d, r.start, r.invRange) - remastered) < 1e-4f);
+                CHECK(std::fabs(ForwardFogFactor(d, r.start, r.invRange) - edge) < 1e-4f);
+            }
+        }
+    // No scale or no range: the classic fog as it was.
+    const ForwardFogRange same = ScaleForwardFogRange(100.0f, 1.0f / 900.0f, 1.0f);
+    CHECK(same.start == 100.0f);
+    CHECK(same.invRange == 1.0f / 900.0f);
+    const ForwardFogRange empty = ScaleForwardFogRange(100.0f, 0.0f, 5.0f);
+    CHECK(empty.start == 100.0f);
+    CHECK(empty.invRange == 0.0f);
 }
 
 TEST_CASE("Post stages: the TAA resolve and its sharpen run together on a jittered frame",

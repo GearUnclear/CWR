@@ -125,9 +125,16 @@ struct PostFrameInputs
     // the Air stage applies the fog volume to every pixel by its world depth
     // in place of B8's air pass (whose gates are off while it runs) and
     // replaces the legacy shafts (its sun light in the air is the beams). It
-    // needs the world depth and no screen overlay; held off, the frame keeps
-    // the forward fog's classic edge (VolumetricFog.hpp).
+    // needs the world depth (or fogWorldDepth); a screen overlay keeps it
+    // (the apply leaves the overlay's mask as drawn). Held off, the frame
+    // keeps the forward fog's classic edge (VolumetricFog.hpp).
     bool fog = false;
+    // A vehicle interior cleared the world depth, and the world's depth and
+    // colour were saved just before (EngineGL33::Clear): the fog runs on
+    // them and leaves the interior as drawn, so the air does not vanish when
+    // the player looks out of a cockpit. Only the fog reads the saved depth;
+    // the other stages keep holding off as with no world depth.
+    bool fogWorldDepth = false;
 };
 
 // A frame's stages: which run and the strengths the composite uses.
@@ -161,5 +168,24 @@ struct PostStagePlan
 // only on a frame that kept its world depth and drew no screen overlay, unless
 // one of its diagnostic views is selected.
 PostStagePlan PlanPostStages(const PostFrameInputs& in);
+
+// The forward fog's linear factor, (end - d) * invRange clamped to 0..1, as
+// the classic programs compute it from its start and 1 / (end - start).
+float ForwardFogFactor(float distance, float start, float invRange);
+
+// The forward fog under night vision. The intensified frame is drawn by the
+// classic programs, which have no litHaze.x; while the volumetric fog draws,
+// the remastered programs keep only the forward fog's edge by scaling its
+// factor (min(factor * scale, 1), scale = FogMedium::fogEdgeScale). The same
+// edge in the classic programs' terms is the linear factor with the same end
+// and a range `scale` times shorter, so the intensified frame and AI sight
+// both get the volume's air plus that one edge, and the weather fog is not
+// counted twice. scale <= 1 or an empty range returns the inputs.
+struct ForwardFogRange
+{
+    float start = 0.0f;
+    float invRange = 0.0f;
+};
+ForwardFogRange ScaleForwardFogRange(float start, float invRange, float scale);
 
 } // namespace Poseidon::remaster

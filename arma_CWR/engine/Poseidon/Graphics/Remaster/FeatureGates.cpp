@@ -280,17 +280,21 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
             return On("world drawn");
         case Feature::VolFog:
             // The fog is applied in the post pass (the Air stage) with the
-            // world depth: no post pass or no depth (a vehicle interior), and
-            // the forward fog keeps its classic edge. Otherwise it always
-            // runs: it replaces the distance fog. A gunner's optic overlay
-            // keeps it (the apply leaves the overlay's black mask alone), so
-            // raising a sight in mist does not clear the air.
+            // world depth: no post pass, and the forward fog keeps its classic
+            // edge. Otherwise it always runs, in every view the player can
+            // take, because AI sight is cut by the same air: it replaces the
+            // distance fog. A vehicle interior keeps it (the world's depth is
+            // saved before the interior clears it, and the apply leaves the
+            // interior as drawn), a gunner's optic overlay keeps it (the apply
+            // leaves the overlay's black mask alone), and under night vision
+            // the whole medium is laid over the intensified frame (the
+            // forward fog there keeps only its edge, as everywhere).
             if (!t.postEffects)
                 return Off("post effects off");
             if (!in.worldDrawn)
                 return Off("no world pass");
-            if (in.interior)
-                return Off("vehicle interior");
+            if (in.nightVision)
+                return On("night vision (the fog over the intensified frame)");
             return On("world drawn (replaces the distance fog)");
 
         case Feature::Sharpen:
@@ -337,7 +341,7 @@ FeatureGates ComputeFeatureGates(const GateInputs& in, const LightingTuning& tun
             out = Off("classic lighting", scale);
         else if (!FeatureOn(tuning.features, f))
             out = Off("switch off", scale);
-        else if (in.nightVision && !FrameCostFeature(f))
+        else if (in.nightVision && !FrameCostFeature(f) && f != Feature::VolFog)
             out = Off("night vision", scale);
         else if (!tuning.gates)
             out = On("forced (gates off)", scale);

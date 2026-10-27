@@ -533,6 +533,10 @@ void EngineGL33::EndWorldScene()
     _ssrStencil = {};
     if (_glContext && _ssrStencilValid && _ssrStencilApplied != _ssrStencil)
         ApplyDepthMode(_currentDepthMode);
+    // Night vision draws the world through the classic programs, with no
+    // world pass to end: the fog is laid over its frame on its own.
+    if (!worldDrawn && _fog.nvg)
+        PostFogNightVision();
     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
         _portraitTargetSize)
         return;
@@ -553,6 +557,8 @@ void EngineGL33::EndWorldScene()
     in.sunShafts = _lighting.sunShafts;
     in.debugView = _lighting.debugView;
     in.worldDepth = !_worldDepthCleared;
+    // The world's depth saved before the interior cleared it: the fog's own.
+    in.fogWorldDepth = _worldDepthCleared && PostFogDepthTex() != _post.depthTex;
     in.glow = !_worldOverlayDrawn;
     // The sun's place is also the photoreal camera's (its guard on the sky by
     // a low sun in frame).
@@ -738,7 +744,9 @@ void EngineGL33::PostLinearDepth(const PostFrame& f)
     Set4(p.progLinearDepth, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
     Set4(p.progLinearDepth, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
     Set4(p.progLinearDepth, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
-    BindTex(0, p.depthTex);
+    // The world's depth: in a vehicle interior the one saved before it
+    // cleared it (only the fog and its near field read this then).
+    BindTex(0, PostFogDepthTex());
     DrawTo(p.linDepthFbo, f.hw, f.hh);
 }
 

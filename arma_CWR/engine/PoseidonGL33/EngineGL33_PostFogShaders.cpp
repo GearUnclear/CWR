@@ -965,7 +965,7 @@ void main() {
 const char kPostFogApplyGLSL[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D colorTex;  // unit 0: the resolved frame (display space; alpha 1 - sky light share)
-uniform sampler2D glowTex;   // unit 1: the night glow (psFogGlow; linear rgb, a = luminance x depth)
+uniform sampler2D glowTex;   // unit 13 (kFogGlowUnit): the night glow (psFogGlow; linear rgb, a = luminance x depth)
 uniform sampler3D fogVolume; // unit 2: rgb light scattered toward the eye, a transmittance
 uniform sampler2D nearTex;   // unit 3: the near-field light (half resolution, linear)
 uniform sampler2D linDepth;  // unit 4: half-resolution view depth (m; the sky 1e6)
@@ -986,6 +986,14 @@ uniform vec4 fogSkyDust;     // x dust's scale height (m), yz the eye's world x,
 uniform vec4 fogGlow;        // x the night glow's gain (0 = none)
 uniform vec4 fogSkyLobe;     // x the sun's forward lobe in the clear air past the far end (0 = none)
 uniform mat3 viewToWorld;    // view-space direction to world (camera-relative)
+// A vehicle interior drawn over the world this frame: depthTex is the world's
+// depth saved before the interior cleared it, interiorDepth the interior's
+// own (1 where the world shows through).
+uniform sampler2D interiorDepth; // unit 12 (the fog floor's, free in the apply)
+uniform vec4 fogInterior;    // x 1 = interiorDepth holds a vehicle interior, y 1 = night vision (the frame is the
+                             // classic programs' intensified one), z 1 = worldTex holds the world before an overlay
+                             // under night vision
+uniform vec4 fogNvgColor;    // rgb the forward fog's colour under night vision (display space, the intensifier's)
 layout(location = 0) out vec4 fragColor;
 // The surface's share of the pixel's light after the fog (FogState::veilTex):
 // the composite's occlusion and contact shadows darken the surface's own
@@ -1106,8 +1114,46 @@ float fogNoise(vec2 p) {
                mix(fogHash(i + vec2(0.0, 1.0)), fogHash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
+// A pixel the fog leaves as drawn (an interior, an overlay's mask, the
+// intensified sky): its colour, and the whole of its light its surface's.
+void fogKeep(vec4 c) {
+    fragColor = c;
+    fogVeil = vec4(1.0);
+}
+
 void main() {
     vec4 cOver = texture(colorTex, vUV);
+    // A vehicle interior: where it wrote its own depth the interior stays as
+    // drawn (the air inside the cabin is not the world's); where the world
+    // shows through it, the world is fogged by its saved depth below, so the
+    // mist AI sight is cut by is drawn out of a cockpit too.
+    if (fogInterior.x > 0.5 && textureLod(interiorDepth, vUV, 0.0).r < 0.999999) {
+        fogKeep(cOver);
+        return;
+    }
+    // Night vision: the frame is the intensifier's, drawn by the classic
+    // programs whose forward fog keeps only its edge (its range rescaled as
+    // litHaze.x scales the remastered programs'). The whole medium's
+    // transmittance fades the land toward the forward fog's colour, the
+    // intensifier's, as the classic fog does; the sky keeps the classic sky
+    // fog it was drawn with. An overlay is laid back over the result as in
+    // the camera's path below, or its black mask is left as drawn.
+    if (fogInterior.y > 0.5) {
+        bool snapN = fogInterior.z > 0.5;
+        vec4 w = snapN ? texture(worldTex, vUV) : cOver;
+        float zn = fogGapZ(fogViewZ(vUV));
+        if (zn >= 1e5 || (!snapN && fogNearSize.z > 0.5 && max(w.r, max(w.g, w.b)) < 0.012)) {
+            fogKeep(cOver);
+            return;
+        }
+        vec2 cuvN = (vUV - worldRect.xy) / worldRect.zw;
+        float tn = fogAt(cuvN, zn).a;
+        vec3 o = mix(fogNvgColor.rgb, w.rgb, tn);
+        if (snapN)
+            o = o * clamp((cOver.rgb + 1e-3) / (w.rgb + 1e-3), 0.0, 1.0) + max(cOver.rgb - w.rgb, vec3(0.0));
+        fogKeep(vec4(clamp(o, 0.0, 1.0), cOver.a));
+        return;
+    }
     // An optic overlay (drawn over the world without depth): with the world
     // as it was before it (worldTex), the fog applies to that world and the
     // overlay's darkening is laid back over the result (a rifle's blurred
@@ -1116,8 +1162,7 @@ void main() {
     bool snap = fogNearSize.w > 0.5;
     vec4 c = snap ? texture(worldTex, vUV) : cOver;
     if (!snap && fogNearSize.z > 0.5 && max(c.r, max(c.g, c.b)) < 0.012) {
-        fragColor = c;
-        fogVeil = vec4(1.0);
+        fogKeep(c);
         return;
     }
     float zRaw = fogViewZ(vUV);

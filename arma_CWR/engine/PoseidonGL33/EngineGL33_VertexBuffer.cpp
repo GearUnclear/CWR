@@ -362,9 +362,16 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
     }
     if (clearZ)
     {
+        // A depth clear inside the world's passes is a vehicle interior
+        // (Transport::Draw). While the fog draws this frame, the world's depth
+        // and colour are saved first: the fog is applied to the world seen
+        // out of the cockpit as anywhere else, so no view shows less air than
+        // AI sight is cut by (EngineGL33_PostFog.cpp).
+        if (_worldPassOpen || NightVisionFogOpen())
+            SaveWorldBeforeInterior();
         if (_worldPassOpen)
         {
-            _worldDepthCleared = true; // the post pass has no world depth this frame
+            _worldDepthCleared = true; // the post pass's other stages have no world depth this frame
             // A vehicle interior follows: no sky above it to take light from
             // or reflect (the surfaces lane).
             SurfaceEnterInterior();

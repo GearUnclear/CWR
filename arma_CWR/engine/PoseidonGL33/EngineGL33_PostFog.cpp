@@ -28,9 +28,12 @@
 // the same inputs (WorldFogInputs) and knobs through the same ComputeFogMedium,
 // whether or not this stage runs (TerrainLighting.hpp SimulateFogSight); the
 // fog floor below is drawn from AI sight's own map.
+// The stage runs in every view: a vehicle interior and night vision are
+// EngineGL33_PostFogViews.cpp's.
 //
 // GL state: the stage binds its inputs to kPostUnits, unit 6 (the overlay
-// snapshot), unit 12 (the fog floor, kFogFloorUnit) and unit 13 (the horizon
+// snapshot), unit 12 (the fog floor, kFogFloorUnit; in the apply a vehicle
+// interior's own depth) and unit 13 (the horizon
 // ring and the night glow, kFogRingUnit and kFogGlowUnit), never to unit 1 (its
 // sampler object belongs to ApplyPipeline), and reads units 8 (the sky table,
 // rebound here), 9 and 15 as the world bound them. Unit 2 takes the cascade
@@ -310,10 +313,9 @@ void EngineGL33::UpdateFogMedium()
     if (_featureGates.computed && _featureGates.frame == frame && _fog.mediumFrame != frame && GScene)
     {
         _fog.mediumFrame = frame;
-        // The fog is applied where the post effects run and, as the previous
-        // frame showed, on a world with its depth (the gate; a gunner's optic
-        // overlay keeps it, its mask left alone by the apply); anywhere else
-        // the forward fog keeps its classic edge.
+        // The fog is applied where the post effects run, in every view the
+        // gate allows (a gunner's optic overlay keeps it, its mask left alone
+        // by the apply); anywhere else the forward fog keeps its classic edge.
         // Targets that failed at another frame size are tried again
         // (programsTried false: EnsureFogResources' target failure).
         if (_fog.unavailable && !_fog.programsTried)
@@ -323,8 +325,13 @@ void EngineGL33::UpdateFogMedium()
             if (w != s_fogFailedW || h != s_fogFailedH)
                 _fog.unavailable = false;
         }
-        const bool post =
-            _lighting.postEffects && SSAAActive() && !_post.unavailable && !_fog.unavailable && !_prevWorldDepthCleared;
+        // Every view keeps the fog: a vehicle interior too (the world's depth
+        // is saved before the interior clears it, SaveWorldBeforeInterior),
+        // unless that save failed. Deciding this before the frame draws keeps
+        // the forward fog's edge and the fog together on the frame a view
+        // changes.
+        const bool post = _lighting.postEffects && SSAAActive() && !_post.unavailable && !_fog.unavailable &&
+                          !(_prevWorldDepthCleared && _fog.intFailed);
         const bool on = post && _featureGates[rm::Feature::VolFog].on;
         // The world's inputs, the same function AI sight's step takes them
         // from (the aridity, for the dust, is the renderer's own).
@@ -332,6 +339,7 @@ void EngineGL33::UpdateFogMedium()
         in.aridity = _fog.aridity;
         _fog.medium = rm::ComputeFogMedium(in, _lighting, on);
         _fog.on = on;
+        _fog.nvg = false; // night vision has its own (UpdateFogMediumNightVision)
         rm::SetDrawnFogMedium(on ? &_fog.medium : nullptr);
         // The drawn mist and humid air are AI sight's (the simulation step
         // computed them from the same inputs and knobs this frame); a
@@ -380,6 +388,9 @@ void EngineGL33::DestroyFogResources()
     DeleteFbo(_fog.snapFbo);
     DeleteTex(_fog.snapTex);
     _fog.snapW = _fog.snapH = 0;
+    DestroyInteriorSave();
+    _fog.intFailed = false;
+    _fog.nvg = false;
     _fog.snapFrame = 0xffffffffu;
     DeleteFbo(_fog.nearFbo);
     DeleteTex(_fog.nearTex);
@@ -587,9 +598,9 @@ void EngineGL33::UpdateFogFloor()
 
 void EngineGL33::SnapshotWorldBeforeOverlay()
 {
-    // Only while the fog runs this frame (its medium is set before the world
-    // pass draws) and the frame target is the scaled one.
-    if (!_glContext || !_fog.on || _fog.mediumFrame != GetFrameCounter() || !SSAAActive() || !_ssaaFbo)
+    // Only while the fog draws this frame (its medium is set before the world
+    // pass draws; night vision's too) and the frame target is the scaled one.
+    if (!_glContext || !FogDrawsThisFrame() || !SSAAActive() || !_ssaaFbo)
         return;
     int w = 0, h = 0;
     RenderTargetSize(w, h);
@@ -658,10 +669,24 @@ void EngineGL33::PostFog(const PostFrame& f)
     // mask is not the sky nor a light), and the apply lays the overlay back.
     const bool overlaySnap = _worldOverlayDrawn && _fog.snapTex && _fog.snapFrame == GetFrameCounter() &&
                              _fog.snapW == f.w && _fog.snapH == f.h;
-    const GLuint sceneIn = overlaySnap && cameraFrame ? _fog.snapTex : f.frameColor;
+    // A vehicle interior drawn over the world: the world's depth and colour
+    // as they were before it (SaveWorldBeforeInterior). The ring, the glow
+    // and the apply read the world's depth; the ring and the glow its colour
+    // (the cockpit is neither the sky nor a light out there); the apply
+    // leaves the pixels the interior drew as drawn.
+    const bool interior = _fog.intFrame == GetFrameCounter() && _fog.intColorTex && _fog.intW == f.w &&
+                          _fog.intH == f.h;
+    const GLuint worldDepth = interior ? PostFogDepthTex() : _post.depthTex;
+    // Night vision (PostFogNightVision): the classic programs' intensified
+    // frame. Only the volume's transmittance is used; the apply fades the
+    // land toward the forward fog's colour and writes the frame target.
+    const bool nvg = _fog.nvg;
+    const GLuint sceneIn = interior                      ? _fog.intColorTex
+                           : overlaySnap && cameraFrame ? _fog.snapTex
+                                                        : f.frameColor;
     Camera* camera = GScene ? GScene->GetCamera() : nullptr;
     LightSun* sun = GScene ? GScene->MainLight() : nullptr;
-    if (!camera || !sun || _fog.mediumFrame != GetFrameCounter() || !_fog.on)
+    if (!camera || !sun || !FogDrawsThisFrame())
         return;
     const int vw = std::max(1, static_cast<int>(f.rect[2] * static_cast<float>(f.w) + 0.5f));
     const int vh = std::max(1, static_cast<int>(f.rect[3] * static_cast<float>(f.h) + 0.5f));
@@ -691,7 +716,7 @@ void EngineGL33::PostFog(const PostFrame& f)
     const float* cam = _frameState.cameraPos;
     const float p11 = _frameState.projection._11, p22 = _frameState.projection._22;
     const float dx = cam[0] - _fog.prevPos[0], dy = cam[1] - _fog.prevPos[1], dz = cam[2] - _fog.prevPos[2];
-    const bool history = _fog.historyValid && _fog.appliedFrame + 1 == frame &&
+    const bool history = _fog.historyValid && _fog.appliedFrame + 1 == frame && _fog.historyNvg == nvg &&
                          dx * dx + dy * dy + dz * dz < kFogHistoryCut * kFogHistoryCut;
     // The previous view of a point given camera-relative now:
     // R_prev (rel + cam - cam_prev).
@@ -804,7 +829,9 @@ void EngineGL33::PostFog(const PostFrame& f)
     // ---- 0. The horizon ring ----------------------------------------------------
     // The sky's colour just above the land in every azimuth in view, from the
     // resolved frame (before the fog); out of view the last frame's, fading.
-    // A camera jump starts it again.
+    // A camera jump starts it again. Under night vision it keeps the last
+    // day frame's (the intensified frame is not the sky's colour).
+    if (!nvg)
     {
         const int next = 1 - _fog.ringCur;
         const GLuint ring = _fog.progRing;
@@ -814,7 +841,7 @@ void EngineGL33::PostFog(const PostFrame& f)
         SetInt(ring, "depthTex", 5);
         BindTex(0, sceneIn);
         BindTex(3, _fog.ringTex[_fog.ringCur]);
-        BindTex(5, p.depthTex);
+        BindTex(5, worldDepth);
         Set4(ring, "ringView0", rot[0], rot[1], rot[2], 0.0f);
         Set4(ring, "ringView1", rot[3], rot[4], rot[5], 0.0f);
         Set4(ring, "ringView2", rot[6], rot[7], rot[8], 0.0f);
@@ -878,7 +905,7 @@ void EngineGL33::PostFog(const PostFrame& f)
     // the ground (mist, fog, humid air) to scatter it.
     const rm::GateInputs& gi = _featureGates.inputs;
     const float sunUp = Smooth(-1.0f, 2.0f, gi.sunElevationDeg) * (1.0f - sun->NightEffect());
-    const bool beams = m.sun > 0.0f && sunUp > 0.0f && gi.sunViewAngleDeg < kFogBeamViewAngle &&
+    const bool beams = !nvg && m.sun > 0.0f && sunUp > 0.0f && gi.sunViewAngleDeg < kFogBeamViewAngle &&
                        m.groundSigma + m.weatherSigma + m.mistSigma > 1e-5f && _sunEnabled;
     // Lamps, headlights and fires at night: the nearest kFogMaxLights within
     // kFogLightRange. The scene's active list is cleared by now: walk its
@@ -892,7 +919,7 @@ void EngineGL33::PostFog(const PostFrame& f)
     const float classicNight = sun->NightEffect();
     const float night =
         cameraFrame ? std::min(classicNight, std::clamp(_camera.nightEffect, 0.0f, 1.0f)) : classicNight;
-    if (night > rm::kGateNightMinEffect && m.lights > 0.0f)
+    if (!nvg && night > rm::kGateNightMinEffect && m.lights > 0.0f)
     {
         struct Near
         {
@@ -1060,7 +1087,7 @@ void EngineGL33::PostFog(const PostFrame& f)
     // At night in wet air: the frame's light blurred at a quarter and a
     // sixteenth of the resolution, combined into glowTex[1].
     const float glowGain = kFogGlowGain * nightW * std::min(m.lights, 4.0f);
-    const bool glow = glowGain > 1e-3f && m.weatherSigma + m.mistSigma + m.groundSigma > 1e-5f;
+    const bool glow = !nvg && glowGain > 1e-3f && m.weatherSigma + m.mistSigma + m.groundSigma > 1e-5f;
     if (glow)
     {
         const GLuint gp = _fog.progGlow;
@@ -1081,7 +1108,7 @@ void EngineGL33::PostFog(const PostFrame& f)
             const int lvl = dst / 2;
             DrawTo(_fog.glowFbo[dst], _fog.glowW[lvl], _fog.glowH[lvl]);
         };
-        BindTex(5, p.depthTex);
+        BindTex(5, worldDepth);
         // The frame to a quarter (texel steps of a full-resolution pixel).
         pass(0, sceneIn, 1.0f / static_cast<float>(f.w), 1.0f / static_cast<float>(f.h), 0.0f, 0.0f, 0);
         pass(2, _fog.glowTex[0], 0.0f, 0.0f, 2.0f / qw, 0.0f, 1);
@@ -1122,7 +1149,16 @@ void EngineGL33::PostFog(const PostFrame& f)
     glBindTexture(GL_TEXTURE_3D, _fog.integTex);
     BindTex(3, nearOn ? _fog.nearTex : p.blackTex);
     BindTex(4, p.linDepthTex);
-    BindTex(5, p.depthTex);
+    BindTex(5, worldDepth);
+    // The interior's own depth on the fog floor's unit (the apply reads no
+    // floor; the hand-back below unbinds the unit).
+    SetInt(apply, "interiorDepth", kFogFloorUnit);
+    glActiveTexture(GL_TEXTURE0 + kFogFloorUnit);
+    glBindTexture(GL_TEXTURE_2D, interior ? p.depthTex : p.whiteTex);
+    glActiveTexture(GL_TEXTURE0);
+    GL33Bind::Invalidate();
+    Set4(apply, "fogInterior", interior ? 1.0f : 0.0f, nvg ? 1.0f : 0.0f, nvg && overlaySnap ? 1.0f : 0.0f, 0.0f);
+    Set4(apply, "fogNvgColor", _fogColor.R(), _fogColor.G(), _fogColor.B(), 0.0f);
     Set4(apply, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
     Set4(apply, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
     Set4(apply, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
@@ -1148,7 +1184,8 @@ void EngineGL33::PostFog(const PostFrame& f)
                           (1.0f - nightW) * sunUp;
     Set4(apply, "fogSkyLobe", lobeSky, 0.0f, 0.0f, 0.0f);
     SetMat3(apply, "viewToWorld", viewToWorld);
-    DrawTo(_fog.outFbo, f.w, f.h);
+    // Under night vision straight into the frame target (no composite follows).
+    DrawTo(nvg ? _ssaaFbo : _fog.outFbo, f.w, f.h);
 
     // Hand the units back: no glow, 3D volume or floor left bound.
     glActiveTexture(GL_TEXTURE0 + kFogGlowUnit);
@@ -1163,6 +1200,7 @@ void EngineGL33::PostFog(const PostFrame& f)
     // The next frame's history: this frame's volume and camera.
     _fog.appliedFrame = frame;
     _fog.historyValid = true;
+    _fog.historyNvg = nvg;
     _fog.current = prev;
     for (int i = 0; i < 9; ++i)
         _fog.prevRot[i] = rot[i];

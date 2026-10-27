@@ -794,6 +794,9 @@ void EngineGL33::UploadLitFrameConstants()
         // (fix5 aitest: triFogSight reported drawn=1 with a stale medium
         // after a switch to classic lighting).
         Poseidon::remaster::SetDrawnFogMedium(nullptr);
+        // Night vision's world passes: the fog still draws, over the
+        // intensified frame (EngineGL33_PostFogViews.cpp).
+        UpdateFogMediumNightVision();
         return;
     }
     if (_terrainMapDirty)
