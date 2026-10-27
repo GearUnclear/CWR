@@ -1024,6 +1024,9 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
                     new Crater(shape, VehicleTypes.New("crater"), timeToLive, scale * 0.5, true, false, water);
                 crater->SetTransform(transform);
                 crater->SetAlpha(alpha);
+                // Its column from the round's charge.
+                crater->SetDetonation(
+                    lighting::DetonationFromAmmo(type->hit, type->indirectHit, type->indirectHitRange));
                 GLOB_WORLD->AddAnimal(crater);
 
 #if 1

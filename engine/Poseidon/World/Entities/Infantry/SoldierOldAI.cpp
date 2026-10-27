@@ -1008,7 +1008,7 @@ void Soldier::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* 
         {
             _mGunFireWeapon = slot._weapon;
             _mGunClouds.Start(0.1f);
-            _mGunFire.Start(0.05f, 0.004f, true);
+            _mGunFire.Start(0.05f, 0.004f, true, mode->_ammo->hit);
             _mGunFireFrames = 1;
             _mGunFireTime = Glob.uiTime;
             int newPhase;

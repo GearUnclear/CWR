@@ -178,6 +178,9 @@ class ShotBullet: public ShotShell
 
 	USE_CASTING(base)
 	USE_FAST_ALLOCATOR
+
+  private:
+    lighting::CombatLightHandle _tracerLight; // a visible tracer's combat light (CombatLights.hpp)
 };
 
 class Missile: public Shot
@@ -230,6 +233,9 @@ private:
 
 	USE_CASTING(base)
 	USE_FAST_ALLOCATOR
+
+  private:
+    lighting::CombatLightHandle _motorLight; // the motor's combat light while it thrusts
 };
 
 class IlluminatingShell: public ShotShell
@@ -252,6 +258,9 @@ public:
 
 	USE_CASTING(base)
 	USE_FAST_ALLOCATOR
+
+  protected:
+    lighting::CombatLightHandle _flareLight; // the flare's combat light (CombatLights.hpp)
 };
 
 class SmokeShell: public ShotShell
