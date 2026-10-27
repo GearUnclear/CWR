@@ -32,6 +32,16 @@ using namespace Poseidon;
 #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/Dev/Diag/SceneSettle.hpp>
+#include <Poseidon/Core/Game/GameLoop.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+#include <Poseidon/AI/EntityAI.hpp>
 namespace Poseidon
 {
 extern bool gPerfDumpShapesOnce;
@@ -411,7 +421,10 @@ GameValue TriTextInputActive(const GameState* /*state*/)
 }
 
 /// triPerfStats — frame-phase profiler rolling stats as a machine-readable
-/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N".
+/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N",
+/// then " || " and the frame-cost counters averaged over the same window
+/// (Graphics/Core/PerfCounters.hpp: instanced runs, hill culling, the CPU of
+/// LOD selection and occlusion, uniform-buffer uploads).
 GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
 {
     Dev::FrameProfiler& perf = Dev::GFrameProfiler();
@@ -419,7 +432,7 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
         return GameValue("FAIL:no_frames");
     const auto total = perf.TotalStats();
     const auto draw = perf.DrawStats();
-    char buf[768];
+    char buf[1400];
     int off = snprintf(buf, sizeof(buf), "fps=%.1f frame=%.2f/%.2f/%.2f setup=%.2f/%.2f draw=%.2f/%.2f", perf.AvgFps(),
                        total.avgMs, total.p95Ms, total.maxMs, perf.Stats(Dev::FrameProfiler::PhaseSetup).avgMs,
                        perf.Stats(Dev::FrameProfiler::PhaseSetup).p95Ms, draw.avgMs, draw.p95Ms);
@@ -436,16 +449,123 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
         off +=
             snprintf(buf + off, sizeof(buf) - off, " %s=%.2f/%.2f", Dev::FrameProfiler::PhaseName(p), s.avgMs, s.p95Ms);
     }
+    snprintf(buf + off, sizeof(buf) - off, " || %s", Poseidon::perf::GPerfCounters().Summary().c_str());
     LOG_INFO(Core, "[tri] triPerfStats {}", buf);
     return GameValue(buf);
 }
 
-/// triPerfReset — clear the frame-profiler ring (start a fresh measurement window).
+/// triPerfReset: clear the frame-profiler ring (start a fresh measurement
+/// window) and the frame-cost counters' window with it.
 GameValue TriPerfReset(const GameState* /*state*/, GameValuePar /*arg*/)
 {
     Dev::GFrameProfiler().Reset();
+    Poseidon::perf::GPerfCounters().ResetWindow();
     return GameValue("OK");
 }
+
+/// triPinObjectDetail <factor>: hold the object detail (the Scene LOD width)
+/// for A/B captures. 0 = adaptive, the stock choice from the measured frame
+/// time, which refuses to refine for five seconds after it last coarsened
+/// (Scene::AdjustComplexity), so two shots of one view can differ by
+/// thousands of draws. >= 1 pins the width at that multiple of the finest the
+/// quality setting allows (1 = finest, 16 = coarsest). Returns "OK:<factor>"
+/// or "FAIL:no scene".
+GameValue TriPinObjectDetail(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GScene)
+        return GameValue("FAIL:no scene");
+    GScene->PinObjectDetail(static_cast<float>(static_cast<GameScalarType>(arg)));
+    char buf[32];
+    snprintf(buf, sizeof(buf), "OK:%g", GScene->GetObjectDetailPin());
+    LOG_INFO(Core, "[tri] triPinObjectDetail {}", buf + 3);
+    return GameValue(buf);
+}
+
+// Draw calls of the last finished frame (the counter World::Simulate hands the
+// frame profiler), or -1 before the first one.
+static int LastFrameDrawCalls()
+{
+    const Dev::FrameProfiler& perf = Dev::GFrameProfiler();
+    return perf.FrameCount() > 0 ? perf.Frame(0).drawCalls : -1;
+}
+
+static const char* HorizonMapState()
+{
+    if (!GEngine || !GEngine->WantsTerrainHorizonMap())
+        return "off";
+    return TerrainLightingPending() ? "pending" : "ready";
+}
+
+/// triSceneStats: the last frame's scene state for capture logs, as fields
+/// that splice into a "key=value;..." line: "draws=<GL draw calls>;objects=<
+/// objects with a visible LOD>;culled=<of those, hidden by the hill cull>;
+/// lights=<light slots>;lod=<Scene LOD width>;pin=<triPinObjectDetail factor,
+/// 0 = adaptive>;horizon=<off, pending or ready>" (horizon: the remastered
+/// terrain horizon map build). The two lighting models can issue slightly
+/// different draw calls for the same objects; the object count is the one to
+/// compare across them, and it counts the objects the hill cull hid (so it
+/// compares across the hillCull switch too). With drawGrouping off, any light
+/// slot (a street lamp that has once been on keeps its slot) turns instancing
+/// off for the whole scene (Pass1), which multiplies the draw calls for the
+/// same objects.
+GameValue TriSceneStats(const GameState* /*state*/)
+{
+    char buf[224];
+    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;culled=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
+             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->HillHiddenObjectCount() : -1,
+             GScene ? GScene->NLights() : -1, GScene ? GScene->GetLodInvWidth() : 0.0f,
+             GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+    return GameValue(buf);
+}
+
+/// triSettleScene [maxFrames, stableFrames, tolerancePct]: run frames, as
+/// triSimFrames does, until the view has finished loading: the last
+/// stableFrames frames (default 30) drew draw-call counts within tolerancePct
+/// percent of each other (default 2), at one object LOD width, with no terrain
+/// horizon map build and no sky table build (the atmosphere tables) in flight.
+/// The per-frame texture upload budget is lifted
+/// on these frames, so textures in view are not held back at a coarser mip and
+/// do not sharpen over the next second. At most maxFrames (default 300, up to 600).
+/// Pin the object detail first (triPinObjectDetail): an adaptive detail can
+/// hold a coarse LOD steady for five seconds. Returns "OK:<frames run>" or
+/// "UNSETTLED:<frames run>" (never FAIL, so a busy view still gets its shot);
+/// the details go to the log.
+GameValue TriSettleScene(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [maxFrames, stableFrames, tolerancePct]");
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const GameArrayType& a = arg;
+    auto num = [&a](int i, float fallback)
+    { return a.Size() > i ? static_cast<float>(static_cast<GameScalarType>(a[i])) : fallback; };
+    const int maxFrames = std::clamp(toInt(num(0, 300.0f)), 1, 600);
+    const int window = std::clamp(toInt(num(1, 30.0f)), 1, maxFrames);
+    Dev::SceneSettle settle(window, num(2, 2.0f) * 0.01f);
+    while (settle.Frames() < maxFrames && !settle.Settled())
+    {
+        // 2: TextBank StartFrame spends one, leaving the lift on for this frame only.
+        if (GEngine->TextBank())
+            GEngine->TextBank()->BoostLoadBudget(2);
+        const uint32_t frameBefore = GEngine->GetFrameCounter();
+        Poseidon::AppIdle();
+        if (!GEngine)
+            return GameValue("FAIL:no engine");
+        const bool rendered = GEngine->GetFrameCounter() != frameBefore;
+        const int draws = LastFrameDrawCalls();
+        settle.Add(draws, GScene ? GScene->GetLodInvWidth() : 0.0f,
+                   !rendered || draws < 0 || TerrainLightingPending() || GEngine->RemasterSkyPending());
+    }
+    const bool ok = settle.Settled();
+    LOG_INFO(Core,
+             "[tri] triSettleScene: {} after {} frames (draws {}..{} over the last {}, lod {}, pin {}, horizon {})",
+             ok ? "settled" : "NOT settled", settle.Frames(), settle.MinDraws(), settle.MaxDraws(), window,
+             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s:%d", ok ? "OK" : "UNSETTLED", settle.Frames());
+    return GameValue(buf);
+}
+
 /// triSetMsaa <0|2|4|8> — MSAA sample count on the frame target (0 = off).
 /// Applied at the next frame boundary. Returns "OK".
 GameValue TriSetMsaa(const GameState* /*state*/, GameValuePar arg)
@@ -466,6 +586,254 @@ GameValue TriSetRenderScale(const GameState* /*state*/, GameValuePar arg)
         GEngine->SetRenderScale(scale);
     LOG_INFO(Core, "[tri] triSetRenderScale {}", scale);
     return GameValue("OK");
+}
+
+/// triSetLighting "<setting>": remastered lighting for scripted A/B captures.
+/// Mode words put the whole tuning back to a known state, so the knobs of one
+/// variant never leak into the next: "classic" is the original look,
+/// "remastered" the shipped defaults with every feature switch on, and
+/// "baseline" the remastered look with every feature switch off. Remastered
+/// and baseline also turn the
+/// shadow maps on, classic off, as the Options row does. "key=value" sets one
+/// key of the registry (Graphics/Remaster/FeatureSwitches.hpp): the knobs
+/// exposure, sun, sky, bounce, warmth, saturation, specular, localLights,
+/// moonlight, terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness,
+/// ao, bloom, shafts, post (0/1), debug (0..5), gates (0/1), every feature
+/// switch (taa, combatLights, ...; 0 off, 1 on) and the sub-knobs of the
+/// features that have landed (taaSharpen, taaMipBias, taaAlpha, atmoHue,
+/// atmoSat, atmoHaze). Comma-separated items apply in order, all or none:
+/// "remastered,taa=0" is the shipped look with one feature off. Returns "OK",
+/// or "FAIL:<why>" with nothing applied.
+GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+{
+    GameStringType text = static_cast<GameStringType>(arg);
+    const std::string setting = (const char*)text ? (const char*)text : "";
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    remaster::LightingTuning t = GEngine->GetLightingTuning();
+    bool modeSet = false;
+    const std::string why = remaster::ApplyLightingSetting(t, setting, modeSet);
+    if (!why.empty())
+        return GameValue(("FAIL:" + why).c_str());
+    GEngine->SetLightingTuning(t);
+    if (modeSet)
+        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
+    LOG_INFO(Core, "[tri] triSetLighting {}", setting);
+    if (modeSet && t.remastered != GEngine->LightingRemasterActive())
+        return GameValue("FAIL:remastered shaders unavailable");
+    return GameValue("OK");
+}
+
+/// triFeatureState: the feature switches and their frame gates as one line for
+/// capture logs (remaster::FeatureStateString): "mode=.. gates=.. computed=..
+/// frame=.. sun=.. night=.. sky=.. rain=.. fog=.. lights=.. landed=n/26 |
+/// <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...". The gates are the
+/// ones the backend computed at the last world pass; computed=0 means no world
+/// pass has run (or the backend has no gates). Never contains ';'.
+GameValue TriFeatureState(const GameState* /*state*/)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    remaster::FeatureGates gates;
+    GEngine->GetFeatureGates(gates);
+    return GameValue(remaster::FeatureStateString(GEngine->GetLightingTuning(), gates).c_str());
+}
+
+/// triFogSight [[east, north, aboveGround], [east, north, aboveGround]]: AI
+/// sight's air between two points (Graphics/Remaster/VolumetricFog.hpp, AI
+/// sight) next to the air the renderer's fog drew this frame, for probes that
+/// check the two agree part for part: "ai=<0|1, the medium replaces the
+/// classic fog> Tai=<AI's transmittance, 1 when ai=0> drawn=<0|1>
+/// Tdrawn=<the same line through the drawn medium> Tview=<the drawn view
+/// from the first point> classic=<the classic tactical fog's visibility>
+/// aiVis=<the fog share CalcVisibility takes: Tai, or classic when ai=0>",
+/// then each part of AI's and of the drawn medium (haze, weather, dust,
+/// ground, mist; 1/m) and map=<n>. Never contains ';'.
+GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [[e, n, agl], [e, n, agl]]");
+    const GameArrayType& a = arg;
+    if (a.Size() < 2 || a[0].GetType() != GameArray || a[1].GetType() != GameArray)
+        return GameValue("FAIL:expected [[e, n, agl], [e, n, agl]]");
+    float p[2][3];
+    for (int k = 0; k < 2; ++k)
+    {
+        const GameArrayType& v = a[k];
+        if (v.Size() < 3)
+            return GameValue("FAIL:a point needs [e, n, agl]");
+        const float e = static_cast<GameScalarType>(v[0]);
+        const float n = static_cast<GameScalarType>(v[1]);
+        const float agl = static_cast<GameScalarType>(v[2]);
+        const float ground = GLandscape ? GLandscape->SurfaceY(e, n) : 0.0f;
+        p[k][0] = e;
+        p[k][1] = ground + agl;
+        p[k][2] = n;
+    }
+    const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
+    const bool volumetric = sight && sight->volumetric;
+    const float ai = sight ? remaster::FogSightTransmittance(*sight, p[0], p[1]) : 1.0f;
+    const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
+    remaster::FogMedium drawnMedium;
+    const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
+    const float tDrawn = drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, p[0], p[1]) : 1.0f;
+    const float tView = drawn && map ? remaster::FogSeenTransmittanceFrom(drawnMedium, *map, p[0], p[1]) : 1.0f;
+    const float dx = p[1][0] - p[0][0], dy = p[1][1] - p[0][1], dz = p[1][2] - p[0][2];
+    const float classic = GScene ? 1.0f - GScene->TacticalFog8(dx * dx + dy * dy + dz * dz) * (1.0f / 255.0f) : 1.0f;
+    const remaster::FogMedium m = sight ? sight->medium : remaster::FogMedium{};
+    const remaster::FogMedium d = drawn ? drawnMedium : remaster::FogMedium{};
+    char buf[768];
+    snprintf(buf, sizeof(buf),
+             "ai=%d Tai=%.4f drawn=%d Tdrawn=%.4f Tview=%.4f classic=%.4f aiVis=%.4f hazeAi=%.3e weatherAi=%.3e "
+             "dustAi=%.3e groundAi=%.3e mistAi=%.3e hazeDrawn=%.3e weatherDrawn=%.3e dustDrawn=%.3e "
+             "groundDrawn=%.3e mistDrawn=%.3e map=%d",
+             volumetric ? 1 : 0, ai, drawn ? 1 : 0, tDrawn, tView, classic, volumetric ? ai : classic, m.hazeSigma,
+             m.weatherSigma, m.dustSigma, m.groundSigma, m.mistSigma, d.hazeSigma, d.weatherSigma, d.dustSigma,
+             d.groundSigma, d.mistSigma, map ? map->size : 0);
+    return GameValue(buf);
+}
+
+/// triAiSight [observer, target]: the observer's real AI visibility of the
+/// target (EntityAI::CalcVisibility with line of sight assumed, the call
+/// target tracking makes) next to its parts: the classic tactical fog's
+/// visibility, the size term, AI sight's air between the observer's eye and
+/// the target's aim (FogSightTransmittance; it replaces the classic fog when
+/// ai=1) and the same line through the medium the renderer's fog drew this
+/// frame. "vis=<CalcVisibility> ai=<0|1> classic=<..> size=<..> Tai=<..>
+/// drawn=<0|1> Tdrawn=<..> dist=<m> fogAi=<vis / size, the fog share AI
+/// took>". Never contains ';'.
+GameValue TriAiSight(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [observer, target]");
+    const GameArrayType& a = arg;
+    if (a.Size() < 2)
+        return GameValue("FAIL:expected [observer, target]");
+    EntityAI* observer = dyn_cast<EntityAI>(GetObject(a[0]));
+    EntityAI* target = dyn_cast<EntityAI>(GetObject(a[1]));
+    if (!observer || !target)
+        return GameValue("FAIL:both must be vehicles or men");
+    const Vector3 eye = observer->CameraPosition();
+    const Vector3 aim = target->AimingPosition();
+    const float dist2 = (aim - eye).SquareSize();
+    const float vis = observer->CalcVisibility(target, dist2, nullptr, true);
+    const float classic = GScene ? 1.0f - GScene->TacticalFog8(dist2) * (1.0f / 255.0f) : 1.0f;
+    float size = dist2 > 0.0f ? target->GetRadius() * 5000.0f / dist2 : 100.0f;
+    size = std::min(size, 40.0f);
+    const float from[3] = {eye.X(), eye.Y(), eye.Z()};
+    const float to[3] = {aim.X(), aim.Y(), aim.Z()};
+    const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
+    const bool volumetric = sight && sight->volumetric;
+    const float tAi = sight ? remaster::FogSightTransmittance(*sight, from, to) : 1.0f;
+    const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
+    remaster::FogMedium drawnMedium;
+    const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
+    const float tDrawn = drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, from, to) : 1.0f;
+    char buf[320];
+    snprintf(buf, sizeof(buf),
+             "vis=%.5f ai=%d classic=%.4f size=%.4f Tai=%.4f drawn=%d Tdrawn=%.4f dist=%.0f fogAi=%.4f", vis,
+             volumetric ? 1 : 0, classic, size, tAi, drawn ? 1 : 0, tDrawn, std::sqrt(dist2),
+             size > 0.0f ? vis / size : 0.0f);
+    return GameValue(buf);
+}
+
+/// triSkyTableCheck <texels>: the remastered sky table (feature switch
+/// atmosphere) read back from the GPU and compared with its CPU mirror
+/// (Graphics/Remaster/Atmosphere.hpp): regions 0 and 1 against SkyViewTexel at
+/// about <texels> texels each, region 2 against SkyViewRowMean of the GPU's
+/// own regions 0 and 1 on every row. Returns "OK:..." or "FAIL:..." with the
+/// largest relative error of each region and where it is; "FAIL:no sky-view
+/// table ..." before the first build (the switch off, the gate off, or no sky
+/// drawn yet).
+GameValue TriSkyTableCheck(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const int texels = std::max(16, toInt(static_cast<float>(arg)));
+    const std::string res = GEngine->RemasterSkyCheck(texels);
+    LOG_INFO(Core, "[tri] triSkyTableCheck {}", res);
+    return GameValue(res.c_str());
+}
+
+/// triCanopyCheck <texels>: the canopy's sun-visibility map (feature switch
+/// canopyShadows, the long tree shadows) read back from the GPU and compared
+/// with its CPU mirror (Graphics/Remaster/Canopy.hpp CanopySunAt) at about
+/// <texels> texels spread over the map. Returns "OK:..." or "FAIL:..." with the
+/// largest error of each stored channel and of what a receiver reads; "FAIL:no
+/// sun-visibility map ..." before the first build (the switch or its gate off,
+/// or no canopy yet).
+GameValue TriCanopyCheck(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const int texels = std::max(16, toInt(static_cast<float>(arg)));
+    const std::string res = GEngine->RemasterCanopyCheck(texels);
+    LOG_INFO(Core, "[tri] triCanopyCheck {}", res);
+    return GameValue(res.c_str());
+}
+
+/// triPinCloudDrift [x, z] or [x, z, sky]: hold the clouds still for captures
+/// until released: the remastered cloud-shadow field at drift offset x, z
+/// (metres) and the sky dome clouds at `sky` (Landscape::CloudsPosition; where
+/// they are when left out). [] releases both, and they move on from where they
+/// are. Both move by integration (the shadow field with the wind every frame,
+/// the sky clouds with the simulation step), so re-pinning the sim clock
+/// (triSetSimTime) alone does not put them back: A/B pairs and paired off
+/// and on passes pin them to see the same clouds and cloud shadows. Returns
+/// "OK:pinned <x> <z> sky <pos>", "OK:released <x> <z> sky <pos>" or
+/// "FAIL:<why>".
+GameValue TriPinCloudDrift(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [x, z], [x, z, sky] or []");
+    const GameArrayType& a = arg;
+    if (a.Size() != 0 && a.Size() != 2 && a.Size() != 3)
+        return GameValue("FAIL:expected [x, z], [x, z, sky] or []");
+    const bool pin = a.Size() >= 2;
+    float x = 0.0f, z = 0.0f;
+    if (pin)
+    {
+        x = static_cast<float>(static_cast<GameScalarType>(a[0]));
+        z = static_cast<float>(static_cast<GameScalarType>(a[1]));
+    }
+    else
+    {
+        GEngine->GetCloudDrift(x, z);
+    }
+    float nowX = 0.0f, nowZ = 0.0f;
+    if (!GEngine->GetCloudDrift(nowX, nowZ))
+        return GameValue("FAIL:no cloud field in this backend");
+    GEngine->PinCloudDrift(pin, x, z);
+    GEngine->GetCloudDrift(nowX, nowZ);
+    float sky = -1.0f;
+    if (Landscape* land = GScene ? GScene->GetLandscape() : nullptr)
+    {
+        const float skyPos =
+            a.Size() == 3 ? static_cast<float>(static_cast<GameScalarType>(a[2])) : land->CloudsPosition();
+        land->HoldClouds(pin, skyPos);
+        sky = land->CloudsPosition();
+    }
+    char buf[128];
+    snprintf(buf, sizeof(buf), "OK:%s %.2f %.2f sky %.3f", pin ? "pinned" : "released", nowX, nowZ, sky);
+    LOG_INFO(Core, "[tri] triPinCloudDrift {}", buf + 3);
+    return GameValue(buf);
+}
+
+/// triGpuTimes <on>: GPU timestamp timing for cost checks. true turns it on
+/// (and resets the averages), false turns it off; either way it returns the
+/// current summary, e.g. "frame 6.12 ms | world 4.80 (shadow 0.62) | post
+/// 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15". Results trail the
+/// frame by a few frames: enable, wait a second, then read.
+GameValue TriGpuTimes(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const bool on = static_cast<bool>(arg);
+    if (on != GEngine->GpuTimingEnabled())
+        GEngine->SetGpuTimingEnabled(on);
+    return GameValue(GEngine->GpuTimingSummary().c_str());
 }
 
 /// triEnableShadowMaps — turn on the durable shadow-map (depth-buffer) path. Off

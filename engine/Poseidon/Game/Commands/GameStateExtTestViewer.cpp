@@ -387,12 +387,11 @@ GameValue TriAssertCamMoved(const GameState* /*state*/, GameValuePar arg)
 }
 
 /// triEnableShadows — force GScene->SetObjectShadows(true) +
-/// SetVehicleShadows(true) at runtime.  The default Scene state has
-/// _objectShadows=false; only ApplyGraphicsConfigToEngine flips it to
-/// true and that's gated on the user visiting the Options UI.  Tests
-/// run in an ephemeral user dir that never sees the Options page, so
-/// shadow draws never fire — this verb makes a regression test that
-/// pins shadow pixel values actually testable.
+/// SetVehicleShadows(true) at runtime, whatever the Graphics options say.
+/// The scene takes both from the shadow tier of graphics.cfg, and a test's
+/// ephemeral user dir autodetects that file from the machine's RAM (the Low
+/// preset has shadows Off), so this verb keeps a regression test that pins
+/// shadow pixel values independent of the machine.
 GameValue TriEnableShadows(const GameState* /*state*/)
 {
     if (!GScene)
