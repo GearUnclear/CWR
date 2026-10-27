@@ -13,7 +13,7 @@
 #include <cmath>
 #include <string>
 
-// Surfaces and ambient light (the look lane "surface",
+// Surfaces and ambient light (the surfaces switch,
 // Graphics/Remaster/SurfaceLight.hpp): the sky light's spherical harmonics on
 // skies whose irradiance is known in closed form, the frame constants against
 // the rig, the surface classes of known textures, and the contracts that tie
@@ -154,7 +154,7 @@ TEST_CASE("Surfaces: the switch is registered with its knobs and lands", "[Surfa
         REQUIRE(k != nullptr);
         CHECK(std::string(k->parent) == "surfaces");
     }
-    // The lane's debug views reach the shaders as 1 to 3.
+    // The surfaces' debug views reach the shaders as 1 to 3.
     CHECK(SurfaceDebugView(kDebugViewSkyLight) == 1.0f);
     CHECK(SurfaceDebugView(kDebugViewSurfaceSpecular) == 3.0f);
     CHECK(SurfaceDebugView(kDebugViewAlbedo) == 0.0f);

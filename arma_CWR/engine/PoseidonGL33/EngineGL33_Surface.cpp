@@ -1,5 +1,5 @@
-// Surfaces and ambient light (feature switch `surfaces`, the look lane
-// "surface"; Graphics/Remaster/SurfaceLight.hpp).
+// Surfaces and ambient light (feature switch `surfaces`;
+// Graphics/Remaster/SurfaceLight.hpp).
 //
 // Three parts here:
 //   - the surface target: a second multisampled RGBA8 colour attachment of the

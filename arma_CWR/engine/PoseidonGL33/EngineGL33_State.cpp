@@ -98,7 +98,7 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
                 Poseidon::render::blend::Shadow();
             break;
     }
-    // The surfaces lane: opaque and alpha-blended lit draws write the surface
+    // Surface light: opaque and alpha-blended lit draws write the surface
     // target (blended by their own alpha), additive glows and shadow quads not.
     UpdateSurfaceMask();
 }

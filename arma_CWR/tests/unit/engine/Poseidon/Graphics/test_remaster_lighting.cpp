@@ -1097,7 +1097,7 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     // two passes, the luma sharpen, the canopy's sun-visibility pass, the air
     // pass's march, blur, mean and apply, the reflections' tag readout,
     // shares, trace, rough blur and composite, and the combat shadow mask and
-    // its blur, the surfaces lane's horizon occlusion and its accumulation
+    // its blur, the surfaces' horizon occlusion and its accumulation
     // over frames, the photoreal camera's meter, and the volumetric fog's
     // injection, integration, near field, apply, horizon ring and night glow
     CHECK(post == 35);
@@ -1659,7 +1659,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Haze) + 1);
     CHECK(static_cast<int>(LC::Surface) == 79);
     CHECK(static_cast<int>(LC::Surface3) == 88);
-    // The photoreal camera (look lane "light") follows the surface slots.
+    // The photoreal camera follows the surface slots.
     CHECK(static_cast<int>(LC::Camera) == 89);
     CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::CameraLook) + 1);
 

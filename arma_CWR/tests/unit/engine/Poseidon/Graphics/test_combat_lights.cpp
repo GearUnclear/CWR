@@ -1065,7 +1065,7 @@ TEST_CASE("Combat lights: the switches have landed with their sub-knobs and thei
     CHECK(kDebugViewCombatMask == kDebugViewSsrReflection + 1);
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
-    CHECK(debug->maxValue >= static_cast<float>(kDebugViewCombatMask)); // the surfaces lane's views follow
+    CHECK(debug->maxValue >= static_cast<float>(kDebugViewCombatMask)); // the surfaces' views follow
     // The lit shaders draw it from its own number (rm::ShaderDebugView leaves
     // it to the backend, as it does the light tiles).
     CHECK(ShaderDebugView(kDebugViewCombatMask) == 0.0f);
