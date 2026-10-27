@@ -469,7 +469,7 @@ TEST_CASE("Canopy: the frame constants are zero while the switch, its gate or th
     CHECK(c.canopy[3] == Approx(1.0f / (kCanopySunSize * 2.0f)));
     // No map yet.
     CHECK(ComputeCanopyFrameConstants(on, g, false, 9.0f, 1.0f, 100.0f, 200.0f, 2.0f).canopy[0] == 0.0f);
-    // The switch off: the look before this step.
+    // The switch off: the look before the long tree shadows.
     const LightingTuning off = Apply("remastered,canopyShadows=0");
     const FeatureGates go = ComputeFeatureGates(low, off);
     CHECK_FALSE(go[Feature::CanopyShadows].on);

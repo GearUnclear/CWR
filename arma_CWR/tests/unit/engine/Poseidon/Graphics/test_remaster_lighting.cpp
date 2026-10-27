@@ -305,12 +305,12 @@ TEST_CASE("Remaster light rig: the low-sun rig warms the evening sun from 25 deg
         const LightRigInputs in = ClearSkyClassicSun(e);
         const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
         const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
-        // The sun itself: redder and less green than before the step.
+        // The sun itself: redder and less green than with the switch off.
         CHECK(RedOverBlue(on.sun) > RedOverBlue(off.sun));
         CHECK(on.sun.g / on.sun.r < off.sun.g / off.sun.r);
         // The sunlit face of a hull (45 degrees from the sun) is at least as
-        // warm as before the step, though the fill adds cool sky to it: owner
-        // rule, evenings no less warm than the original look on hulls.
+        // warm as with the switch off, though the fill adds cool sky to it:
+        // evenings stay no less warm than the original look on hulls.
         const Rgb litOn = VerticalFace(on, e, 45.0f);
         const Rgb litOff = VerticalFace(off, e, 45.0f);
         CAPTURE(RedOverBlue(litOn), RedOverBlue(litOff));

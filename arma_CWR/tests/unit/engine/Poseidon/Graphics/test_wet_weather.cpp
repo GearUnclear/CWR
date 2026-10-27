@@ -516,7 +516,7 @@ TEST_CASE("Wet weather backend: the gate sets the Weather slot, the per-draw cla
 {
     const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
     // The gates read the wet weather's state only while its switch is on: off,
-    // the rain stands in, as before the step (the reflections' gate too).
+    // the rain stands in, as before the wet weather (the reflections' gate too).
     CHECK(lighting.find("if (rm::FeatureOn(_lighting.features, rm::Feature::WetWeather))\n        in.wetness = "
                         "rm::FrameWetnessGate(_wetFrame);") != std::string::npos);
     // Dry: the slot is zero.
