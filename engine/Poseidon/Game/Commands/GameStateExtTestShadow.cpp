@@ -217,6 +217,19 @@ GameValue TriDevPanelSelectShadows(const GameState* /*state*/)
     return GameValue("OK");
 }
 
+/// triDevPanelLighting <bool>: true shows the dev panel on its "Lighting" tab,
+/// scrolled to the Features section (every feature switch with its live gate),
+/// so a triScreenshot at present captures it; false hides the panel. Returns
+/// "OK".
+GameValue TriDevPanelLighting(const GameState* /*state*/, GameValuePar arg)
+{
+    const bool show = static_cast<bool>(static_cast<GameBoolType>(arg));
+    DebugOverlay::SetVisible(show);
+    if (show)
+        DebugOverlay::SelectLightingFeatures();
+    return GameValue("OK");
+}
+
 /// triDevPanelSelectMemory — force the dev panel's "Memory" tab to the front so a
 /// screenshot captures the process-heap + per-subsystem residency view. Returns "OK".
 GameValue TriDevPanelSelectMemory(const GameState* /*state*/)
