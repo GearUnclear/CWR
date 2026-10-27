@@ -204,7 +204,7 @@ def set_alpha_test(ps: ConstantBlock, enable: bool, ref_byte: int, a2c: bool = F
 
 
 def init_ps_defaults(ps: ConstantBlock) -> None:
-    """InitPixelShaders: PSConstants{} defaults — constColor white (else black
+    """InitPixelShaders: PSConstants{} defaults: constColor white (else black
     output), rgbEyeCoef {0,0,0,1}."""
     ps.set(PSConst.CONST_COLOR, [1, 1, 1, 1])
     ps.set(PSConst.RGB_EYE_COEF, [0, 0, 0, 1])

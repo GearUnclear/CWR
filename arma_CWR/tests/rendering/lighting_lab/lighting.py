@@ -255,7 +255,7 @@ def compute_lighting(preset: LightingPreset, sky_texture_color: np.ndarray) -> S
 
 
 # --------------------------------------------------------------------------
-# Materials (TLMaterial) — TransLight.cpp CreateMaterial* + Material.cpp Combine
+# Materials (TLMaterial): TransLight.cpp CreateMaterial* + Material.cpp Combine
 # --------------------------------------------------------------------------
 
 
