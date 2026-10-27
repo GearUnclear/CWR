@@ -2,9 +2,8 @@
 
 #include <cstdint>
 
-// Temporal anti-aliasing for the remastered lighting (INTEGRATION-PLAN.md step
-// A5): the math the GL backend and the resolve shader share. Pure, no GL, no
-// engine state.
+// Temporal anti-aliasing for the remastered lighting: the math the GL backend
+// and the resolve shader share. Pure, no GL, no engine state.
 //
 // Every frame the world is drawn shifted by a sub-pixel offset (the jitter, a
 // Halton(2, 3) sequence over 16 frames). The post pass then blends this frame

@@ -1,8 +1,7 @@
 #pragma once
 
 // The world's wetness for the remastered wet weather (feature switch
-// `wetWeather`, research/INTEGRATION-PLAN.md section 5 B7). Pure, no GL, no
-// engine state: the landscape's weather keeps a WetnessState and steps it
+// `wetWeather`). Pure, no GL, no engine state: the landscape's weather keeps a WetnessState and steps it
 // with the simulation (Weather::MoveClouds), the renderer reads it once a
 // frame (FrameWetness).
 //

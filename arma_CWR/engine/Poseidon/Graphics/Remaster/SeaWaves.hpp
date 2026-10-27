@@ -2,9 +2,8 @@
 
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 
-// Remastered sea (feature switch `seaWaves`, research/INTEGRATION-PLAN.md
-// section 5 B5): the parts of the sea shading that are plain math, shared by
-// the backend (EngineGL33_Sea.cpp), the landscape and the tests. No GL, no
+// Remastered sea (feature switch `seaWaves`): the parts of the sea shading
+// that are plain math, shared by the backend (EngineGL33_Sea.cpp), the landscape and the tests. No GL, no
 // engine state.
 //
 // The landscape draws the sea as faces of its own (Landscape::DrawWater) with

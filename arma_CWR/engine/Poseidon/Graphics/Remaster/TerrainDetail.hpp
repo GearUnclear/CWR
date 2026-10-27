@@ -4,8 +4,8 @@
 
 #include <array>
 
-// Terrain detail for the remastered lighting (INTEGRATION-PLAN.md step B11,
-// research track texsharp): the shape constants and the math of the terrain
+// Terrain detail for the remastered lighting: the shape constants and the
+// math of the terrain
 // detail main (s_psDetailRemasterMain in EngineGL33_LightingShaders.cpp), as a
 // C++ mirror the tests check. Pure, no GL, no engine state.
 //
@@ -13,7 +13,7 @@
 // texel), so from about 10 m to 150 m one texel covers 5 to 15 pixels and the
 // slope is a bilinear smear; the 128 px detail texture has averaged itself
 // flat by 20 m. Filtering is not the cause (16x anisotropy, full residency and
-// the stored mip chains were all ruled out by the research).
+// the stored mip chains do not help).
 //
 // What: three layers on the land's albedo, all luminance-only and relative to
 // the local mean, so hue and average brightness stay as authored:
@@ -28,12 +28,12 @@
 //     derivatives, so it mip-maps away by itself once the base texture is no
 //     longer magnified (150 to 300 m). Near the eye the zoomed patch is itself
 //     magnified into soft blobs over the authored detail texture's pebbles
-//     (the first in-game look: blotches on the path at 2 to 8 m), so it fades
+//     (blotches on a path at 2 to 8 m), so it fades
 //     in as its own mip level rises from kNearFromLod to kNearToLod (8 to 16 m
 //     on flat ground from a standing eye at 1080p);
 //   - detail kept: the detail texture's deviation from its mean is scaled up
 //     as the GPU picks coarser mips of it (2^(lod * kKeptRate / 2), capped at
-//     kKeptCap: the research's 4x painted dark blotches on paths), faded back
+//     kKeptCap: a 4x boost paints dark blotches on paths), faded back
 //     to 1 by kMaxDistance;
 //   - anti-tiling: a second detail sample on a rotated, rescaled grid is
 //     mixed in (deviation rescaled by 1 / sqrt 2) where the detail texture is
@@ -60,16 +60,16 @@ constexpr float kLimit = 0.4f;                      // soft limit of the self-de
 constexpr float kMinLocalMean = 0.04f;              // floor of the local mean the high-pass is relative to
 constexpr float kFadeStart = 220.0f;                // metres: everything starts to fade out here
 constexpr float kMaxDistance = 300.0f;              // metres: nothing beyond (the frame gate's range)
-constexpr float kKeptRate = 2.0f;                   // detail kept: boost exponent per mip level (research K2)
+constexpr float kKeptRate = 2.0f;                   // detail kept: boost exponent per mip level
 constexpr float kKeptCap = 2.0f;                    // detail kept: largest boost of the detail grain
 constexpr float kKeptFadeStart = 150.0f;            // metres: the boost fades back to 1 from here to kMaxDistance
-constexpr float kAntiTile = 1.0f;                   // weight of the rotated second detail sample (research K1)
+constexpr float kAntiTile = 1.0f;                   // weight of the rotated second detail sample
 constexpr float kNearFromLod = -3.5f;               // self-detail fades in from this mip level of the zoomed patch
 constexpr float kNearToLod = -2.5f;                 // ... to full at this one (a zoomed texel 11 to 6 pixels)
 constexpr float kMaxAniso = 16.0f;                  // the samplers' anisotropy, for the GPU's mip level estimate
 constexpr float kDefaultStrength = 1.5f;            // self-detail strength (LightingTuning::detailStrength)
 
-// The research's hash (Dave Hoskins' hash22): a cell index to two values in
+// Dave Hoskins' hash22: a cell index to two values in
 // [0, 1). Float arithmetic as in the shader.
 std::array<float, 2> Hash2(float x, float y);
 
