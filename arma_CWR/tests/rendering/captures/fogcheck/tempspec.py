@@ -1,4 +1,4 @@
-"""Temporal spectrum of the in-place change on a held-camera clip (agent 1): python tempspec.py clip ... [--from 10]
+"""Temporal spectrum of the in-place change on a held-camera clip: python tempspec.py clip ... [--from 10]
 Per region: mean power of the mid band (DoG 2..16 px) over time frequency; prints the ratio of the power at
 1/8, 1/4, 3/8, 1/2 cycles/frame to the median of its neighbours (a cycle of 8 frames shows peaks there)."""
 import sys, os

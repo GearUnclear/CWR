@@ -10,7 +10,7 @@ Each row is one view at its own aspect, three panels of --panel px wide, each
 panel labelled. A view whose vanilla shot is missing falls back to
 FALLBACK/<view>__classic.png, labelled "Original (features off)". With --strips,
 one strip per view (--strip-panel px a panel) is written to STRIP_DIR/<view>.png.
-The default order puts the owner's view town_night_rain first.
+The default order puts the reference view town_night_rain first.
 """
 import argparse
 import json
@@ -18,8 +18,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-# The sheet's views: the lanes' 1080p views, the run-captures 960x640 set and the
-# rifle in morning mist (the 28 views of the look-director sheet), owner's view first.
+# The sheet's views: the 1080p look views, the run-captures 960x640 set and the
+# rifle in morning mist (the 28 views of the look-director sheet), reference view first.
 DEFAULT_VIEWS = [
     "town_night_rain", "town_night", "town_fog_night", "rain_day", "overcast_heavy", "overcast_broken",
     "noon_vista", "noon_fields", "town_noon", "jeep_close_noon", "forest_morning", "pine_rays",

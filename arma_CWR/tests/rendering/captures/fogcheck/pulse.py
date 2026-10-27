@@ -1,4 +1,4 @@
-"""Whole-region brightness pulse check (agent 1): python pulse.py clip[@first] ... [--n 105]
+"""Whole-region brightness pulse check: python pulse.py clip[@first] ... [--n 105]
 Per region: the region-mean series, detrended (quadratic), its rms and the strongest period (frames)."""
 import sys, os
 import numpy as np

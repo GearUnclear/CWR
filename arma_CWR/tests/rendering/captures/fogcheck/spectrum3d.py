@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""3D (y, x, t) power spectrum of the fog's fluctuation on a STATIC-camera clip (fogwind, agent 1).
+"""3D (y, x, t) power spectrum of the fog's fluctuation on a STATIC-camera clip.
 
 usage: python spectrum3d.py <static.mkv> [--from 15] [--to 0] [--region y0,y1,x0,x1 (fractions)] [--top 12] [--png out.png]
 

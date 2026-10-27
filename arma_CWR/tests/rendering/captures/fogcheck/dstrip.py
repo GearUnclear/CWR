@@ -1,4 +1,4 @@
-"""Consecutive frame-difference strip (agent 1, fogwind): python dstrip.py out.png clip:LABEL ... [--first 50] [--n 4] [--box x,y,w,h] [--gain 24]
+"""Consecutive frame-difference strip: python dstrip.py out.png clip:LABEL ... [--first 50] [--n 4] [--box x,y,w,h] [--gain 24]
 One row per clip: n consecutive (or --step k: k frames apart, for slow change) camera-compensated differences D_t (x gain around grey), crop at 1:1, then 2x."""
 import sys, os
 import numpy as np

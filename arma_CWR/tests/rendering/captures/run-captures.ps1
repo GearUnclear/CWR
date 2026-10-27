@@ -11,7 +11,7 @@
        pin no data_dir, this script passes `--data-dir <arma_CWR>\packages\<DataJunction>`,
        tri launches every game with `-C` set to it, and
        tools\stop-owned-games.ps1 -DataDir matches exactly that junction path.
-       Parallel runs (several research agents at once) each pass their own
+       Parallel runs (several at once) each pass their own
        -DataJunction, so one run's cleanup never stops another's games. Never
        a global Stop-Process.
     3. Runs make_pairs.py: copies <view>__classic.png / <view>__remastered.png

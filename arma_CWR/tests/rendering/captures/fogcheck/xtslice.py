@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""x-t / y-t slices and 2x crop videos of the fog (fogwind swarm, agent 1).
+"""x-t / y-t slices and 2x crop videos of the fog.
 
 usage:
   python xtslice.py <outdir> <clip.mkv>:<label>[@first] [<clip2.mkv>:<label2>[@first] ...]  (@first: this clip's own first frame; --to - --from frames) [--from N] [--to M]

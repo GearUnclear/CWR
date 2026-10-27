@@ -1,4 +1,4 @@
-"""kx-nu power image of a static-camera clip's fluctuation (agent 1, fogwind).
+"""kx-nu power image of a static-camera clip's fluctuation.
 usage: python kxnu.py out.png clip1.mkv:LABEL [clip2 ...] [--from 15] [--region y0,y1,x0,x1]
 Per clip a panel: horizontal axis kx (cycles/cell, -2..2, 12 px cells), vertical axis nu (cycles/frame,
 -0.5 top .. +0.5 bottom), log power summed over ky, the temporal mean removed. A pattern travelling at

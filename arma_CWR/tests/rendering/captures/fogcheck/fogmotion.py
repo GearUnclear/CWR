@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Fog motion check (fogwind swarm, agent 1): FLICKER, MOTION (wind) and GRAIN of the fog in a clip.
+"""Fog motion check: FLICKER, MOTION (wind) and GRAIN of the fog in a clip.
 
 usage:
   python fogmotion.py <clip.mkv | frames_dir> [more clips ...] [--from N] [--to M]

@@ -1,4 +1,4 @@
-"""Characterise a travelling residual on a STATIC-camera clip (agent 1, fogwind).
+"""Characterise a travelling residual on a STATIC-camera clip.
 usage: python windchar.py clip.mkv [--from 15] [--region y0,y1,x0,x1] [--ref frozen.mkv]
 D_t = I(t+1) - I(t), mid band (DoG 1.5..12 px). Prints:
   - the 2D power spectrum peak(s) of D (spatial period in px and cells, orientation), minus --ref's

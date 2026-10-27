@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Screen-locked pattern ("curtains", cell-column streaks) check on a MOVING clip (fogwind, agent 1).
+"""Screen-locked pattern ("curtains", cell-column streaks) check on a MOVING clip.
 
 usage: python curtain.py clip.mkv[@first] [more ...] [--n 105] [--png out.png]
 

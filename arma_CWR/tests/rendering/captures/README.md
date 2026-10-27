@@ -178,7 +178,7 @@ Headings: 0 = north, clockwise. Origins are `[east, north]` in map metres.
 
 Notes on the choices:
 
-- **Acceptance stand-in.** The owner's `LightingLowSun.Demo` was on the `demo`
+- **Acceptance stand-in.** The `LightingLowSun.Demo` test view was on the `demo`
   world, which the Remaster shadow does not have. `lowsun_fp` rebuilds it on
   Abel. The Remaster's vanilla data ships no camouflage-net class (CONFIG.BIN,
   AddOns and DTA searched), so the net's candidate list is `LoBo_camnet`

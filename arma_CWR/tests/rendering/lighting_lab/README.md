@@ -117,8 +117,8 @@ python compare.py CLASSIC_OUT OUT --out CMP --labels CLASSIC REMASTERED
 
 Extra presets for it: `lowsun` (14 degrees, azimuth 195), `broken`
 (40 degrees, skyThrough 0.6, cloud shadows) and `morning` (32 degrees from the
-east, a stand-in for the owner's clear 08:00). The `testview` camera is a
-first-person stand-in for the owner's LightingLowSun.Demo view: the APC, the
+east, a clear 08:00). The `testview` camera is a
+first-person stand-in for the LightingLowSun.Demo test view: the APC, the
 soldier and a jeep under a camouflage net (a half-lit cutout, like the trees).
 
 `--shader-override-dir DIR` applies to the remastered and post shaders too,

@@ -911,7 +911,7 @@ def build_scene(seed: int = 1) -> Scene:
     house2 = at(52.0, 15.0)
     vehicle = at(14.0, 5.0)
     soldier = at(10.5, 1.2)
-    net_site = at(12.0, -6.5)  # jeep under a camouflage net (the owner's test view)
+    net_site = at(12.0, -6.5)  # jeep under a camouflage net (the reference test view)
 
     # 50 m texture squares that get the dirt texture: the village yard and
     # the valley floor
@@ -971,7 +971,7 @@ def build_scene(seed: int = 1) -> Scene:
     close_pos[1] = gy(close_pos[0], close_pos[2]) + 2.0
     close_fwd = veh3 - close_pos
 
-    # first-person view in the spirit of the owner's LightingLowSun.Demo test
+    # first-person view in the spirit of the LightingLowSun.Demo test
     # view: the APC, the soldier and a jeep under a camouflage net, 1.8 m eye
     tv_xz = at(2.0, -1.0)
     tv_pos = np.array([tv_xz[0], gy(*tv_xz) + eye, tv_xz[1]])

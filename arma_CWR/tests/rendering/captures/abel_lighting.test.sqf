@@ -58,7 +58,7 @@ triSimFrames 240
 call { "view=setup;event=setup;world=Abel;msaa=4;scale=1.5;window=960x640;capture=present" call capLog }
 
 // ----------------------------------------------------------------------------
-//  1. lowsun_fp - ACCEPTANCE stand-in for the owner's LightingLowSun.Demo
+//  1. lowsun_fp - ACCEPTANCE stand-in for the LightingLowSun.Demo view
 //  (that mission was on the `demo` world, which the Remaster shadow does not
 //  have). Open flat ground on north Malden [7300, 10900] (32 m, slope ~1 deg,
 //  nothing within 20 m), first-person eye height, clear sky, 08:00 on 1 March:
