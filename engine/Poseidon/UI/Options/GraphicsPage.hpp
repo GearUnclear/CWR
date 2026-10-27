@@ -70,7 +70,8 @@ private:
 			kRowAntiAliasing   = 10,
 			kRowSupersampling  = 11,
 			kRowMultitexturing = 12,
-			kRowCount          = 13,
+			kRowLighting       = 13,
+			kRowCount          = 14,
 		};
 
 		void SetPage(class GraphicsPage* page) { m_page = page; }
@@ -113,6 +114,8 @@ private:
 	std::array<const char*, 3>      m_vsyncCStrs{};
 	std::array<std::string, 7>      m_fpsCapLabels;
 	std::array<const char*, 7>      m_fpsCapCStrs{};
+    std::array<std::string, 2> m_lightingLabels;
+    std::array<const char*, 2> m_lightingCStrs{};
 
 	void RefreshLocalizedChoices();
 
