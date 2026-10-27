@@ -205,6 +205,8 @@ void StreetLampType::DeinitShape()
     base::DeinitShape();
 }
 
+DEFINE_CASTING(StreetLamp)
+
 StreetLamp::StreetLamp(LODShapeWithShadow* shape, StreetLampType* type, int id)
     : base(shape, type, id), _pilotLight(true), _lightPos(shape->MemoryPoint("light"))
 {

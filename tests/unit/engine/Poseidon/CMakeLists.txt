@@ -337,6 +337,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/Settings/test_displayConfig.cpp
     UI/Settings/test_display_startup_overrides.cpp
     UI/Settings/test_graphicsConfig.cpp
+    UI/Settings/test_graphicsApply.cpp
     UI/Settings/test_gameSettingsConfig.cpp
     UI/Settings/test_viewDistance.cpp
     UI/Settings/test_contextControlsConfig.cpp
@@ -442,6 +443,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_scene_preloader.cpp
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
+    World/Scene/test_streetlamp_casting.cpp
 
     # Core subsystem tests
     UI/Locale/test_stringtable_system.cpp
