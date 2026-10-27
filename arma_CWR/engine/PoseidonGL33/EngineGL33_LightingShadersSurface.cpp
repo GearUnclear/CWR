@@ -276,7 +276,7 @@ float wetLobe(vec3 L, float d, vec3 n, vec3 v, float nv, float a, float cap) {
     float dd = nh * nh * (a2 - 1.0) + 1.0;
     float D = a2 / (3.14159265 * dd * dd);
     float vis = 0.5 / max(nl * sqrt(nv * nv * (1.0 - a2) + a2) + nv * sqrt(nl * nl * (1.0 - a2) + a2), 1e-5);
-    float F = 0.02 + 0.98 * pow(1.0 - vh, 5.0);
+    float F = 0.02 + 0.98 * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0);
     return min(3.14159265 * D * vis * nl * norm, cap) * F;
 }
 
@@ -743,7 +743,7 @@ SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool te
         float D = a2 / (kSurfPi * dd * dd);
         float k = al * 0.5;
         float vis = 0.25 / ((nl * (1.0 - k) + k) * (nv * (1.0 - k) + k));
-        vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+        vec3 F = f0 + (1.0 - f0) * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0);
         // Rough natural surfaces (soil, grass, cloth, plaster, brick) shadow
         // their own microfacets: GGX's broad lobe on them reads as an even
         // grey sheen that takes the warmth out of a sunlit facade and lifts

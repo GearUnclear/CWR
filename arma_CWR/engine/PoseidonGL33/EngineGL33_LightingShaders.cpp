@@ -1657,7 +1657,7 @@ void main() {
         // beyond 1 km), the waves' share at full weight. At a high sun the
         // reflected sky also takes litWater0.w of the original fog colour.
         float nv = max(dot(n, v), 0.0);
-        float F = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
+        float F = 0.02 + 0.98 * pow(clamp(1.0 - nv, 0.0, 1.0), 5.0);
         float Ff = 0.02 + 0.98 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
         vec3 r = reflect(-v, n);
         r.y = max(r.y, 0.01);
@@ -1674,7 +1674,7 @@ void main() {
         vec3 h = normalize(l + v);
         float nh = max(dot(n, h), 0.0);
         float vh = max(dot(v, h), 0.0);
-        float Fh = 0.02 + 0.98 * pow(1.0 - vh, 5.0);
+        float Fh = 0.02 + 0.98 * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0);
         float pT = kSeaTightPow / (1.0 + kSeaTightPow * 0.004 * foot);
         const float kInv8Pi = 0.0397887;
         float lobes = kSeaBroadW * (kSeaBroadPow + 8.0) * kInv8Pi * pow(nh, kSeaBroadPow) +
@@ -1682,7 +1682,7 @@ void main() {
         vec3 nS = normalize(mix(n, vec3(0.0, 1.0, 0.0), litWater1.w));
         float nhS = max(dot(nS, h), 0.0);
         float pM = max(litMatSpecular.w, 1.0);
-        float sheen = pow(nhS, pM) * (pM + 8.0) / 28.0 * (1.0 + 2.0 * pow(1.0 - vh, 5.0)) *
+        float sheen = pow(nhS, pM) * (pM + 8.0) / 28.0 * (1.0 + 2.0 * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0)) *
                       smoothstep(0.0, 0.15, dot(nS, l));
         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
                    (sunVis * sunOn * litHorizon.w);
