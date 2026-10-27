@@ -274,7 +274,7 @@ TEST_CASE("Terrain detail: the grain fades in past the near ground, which keeps 
         CHECK(w >= last);
         last = w;
     }
-    // A slope facing the eye 30 m out (the hero view's hillside): full.
+    // A slope facing the eye 30 m out (a test view's hillside): full.
     CHECK(td::NearFade(td::FootprintLod(30.0f / (kFocal * kTexel), 30.0f / (kFocal * kTexel))) == 1.0f);
     CHECK(td::NearFade(td::kNearToLod - std::log2(td::kZoom)) == 1.0f);
     CHECK(td::NearFade(td::kNearFromLod - std::log2(td::kZoom)) == 0.0f);
