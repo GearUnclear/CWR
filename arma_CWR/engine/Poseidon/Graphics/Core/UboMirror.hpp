@@ -3,7 +3,7 @@
 #include <cstring>
 #include <vector>
 
-// What a uniform buffer holds, kept on the CPU (plan section 5 A4).
+// What a uniform buffer holds, kept on the CPU.
 //
 // The GL33 backend keeps a CPU copy of each constant block and used to send
 // the whole block on every flush: the 928-byte LitConstants block once per

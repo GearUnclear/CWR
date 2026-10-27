@@ -11,8 +11,8 @@ namespace
 
 constexpr float kTwoPi = 6.28318530718f;
 
-// The shipped look: the research's round-9 knob values, baked (CombatTuning).
-constexpr float kFlashGain = 6.0f;  // white-hot first flash of a burst, x the research's first envelope
+// The shipped look: the tuned knob values, baked (CombatTuning).
+constexpr float kFlashGain = 6.0f;  // white-hot first flash of a burst, x the base envelope
 constexpr float kFireGain = 2.5f;   // fire and ember power
 constexpr float kSmokeGain = 0.35f; // combat light on smoke particles
 // Material brightness the remastered shaders give a white surface: a particle
@@ -20,10 +20,10 @@ constexpr float kSmokeGain = 0.35f; // combat light on smoke particles
 constexpr float kParticleBrightness = 1.6f;
 // The fire's light deepens toward its own hue in the smoke it lights
 // (CombatTuning::smokeTint): each channel's share of the peak to this power,
-// reached as the light's luminance on the particle grows at this rate (look
-// fix "fire": 1.6 left the lit column peach, 3 turned it salmon red).
+// reached as the light's luminance on the particle grows at this rate (1.6
+// left the lit column peach, 3 turned it salmon red).
 constexpr float kSmokeTintPower = 2.2f;
-// The flame's body (look fix "fire"): a fire's flames are its own smoke
+// The flame's body: a fire's flames are its own smoke
 // glowing, incandescent soot in a volume round the light. The classic fire's
 // light lit the puffs there past white, and that yellow column was the
 // flame; the combat light on smoke only scatters, so under the camera the
@@ -137,7 +137,7 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
         case CombatLightKind::Muzzle:
         {
             // There the frame the round leaves, gone in a few frames. A small
-            // pool: the research's (1.6 at 1 m, (1.0, 0.50, 0.16), 45 m) lit
+            // pool: an earlier (1.6 at 1 m, (1.0, 0.50, 0.16), 45 m) lit
             // the whole foreground of two riflemen orange, and (1.0, 0.70,
             // 0.42) still turned the lit ground khaki (red over blue 1.50).
             // A step whiter than the fire, as the fire moved a step.
@@ -167,7 +167,7 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
             // flickering from its birth left that frame 14 to 24 levels under
             // Classic), then falls in 50 ms while the flicker fades in. The
             // fireball cools to the fire's warmth (kFireRgb), not to the
-            // research's saturated orange (1.0, 0.40, 0.11), whose light
+            // saturated orange (1.0, 0.40, 0.11) tried first, whose light
             // turned the ground round a crater khaki (red over blue 1.55).
             const float e = Clamp(strength, 0.2f, 1.5f);
             const float cool = std::min(age / 0.45f, 1.0f);
@@ -190,8 +190,8 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
         case CombatLightKind::Fire:
         {
             // A slow breathing, faster licks and a crackle, never a new random
-            // brightness every frame. Warm but far less saturated than the
-            // research's (1.0, 0.46, 0.14), whose light turned lit ground
+            // brightness every frame. Warm but far less saturated than an
+            // earlier (1.0, 0.46, 0.14), whose light turned lit ground
             // khaki (red over blue 1.4 to 1.7 on the lit ground).
             const float st = std::max(strength, 0.0f);
             SetColour(s, kFireRgb[0], kFireRgb[1], kFireRgb[2]);

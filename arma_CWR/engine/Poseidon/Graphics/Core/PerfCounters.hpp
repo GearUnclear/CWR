@@ -2,10 +2,9 @@
 
 #include <string>
 
-// Frame-cost counters of the object pass and the constant uploads (plan
-// section 5 A4): how many objects the instanced runs grouped, how many the
-// hill cull hid, what the horizon table cost, how many uniform-buffer uploads
-// the mirrors skipped. The scene and the GL33 backend count into the frame
+// Frame-cost counters of the object pass and the constant uploads: how many
+// objects the instanced runs grouped, how many the hill cull hid, what the
+// horizon table cost, how many uniform-buffer uploads the mirrors skipped. The scene and the GL33 backend count into the frame
 // being drawn; World::Simulate closes the frame next to the frame profiler.
 // triPerfStats prints the averages over the profiler's window, so they cover
 // the same frames as its CPU phases (triPerfReset restarts both). Pure

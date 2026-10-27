@@ -27,14 +27,14 @@ enum class Mark : int
     SkyBegin,
     SkyTableEnd,
     SkyEnd,
-    // The canopy's sun-visibility map (the long tree shadows, B9), in the
+    // The canopy's sun-visibility map (the long tree shadows), in the
     // frames that rebuild it, at the frame's first upload of the lit
     // constants: in the remastered sky's hook before SkyBegin when the sky
     // pass runs, otherwise at the world's first 3D pass just after
     // WorldBegin (the world and ground sections then include it too).
     CanopyBegin,
     CanopyEnd,
-    // The combat shadow mask (B4): its trace and blur, at the start of the
+    // The combat shadow mask: its trace and blur, at the start of the
     // world's first pass of a frame that shadows a combat light.
     CombatMaskBegin,
     CombatMaskEnd,
@@ -52,16 +52,16 @@ enum class Mark : int
     // checks the order). A stage that does not run in a frame records none.
     ResolveEnd,       // resolve of the multisampled frame target
     LinearDepthEnd,   // half-resolution view depth
-    TagReadoutEnd,    // SSR stencil tags (B6)
+    TagReadoutEnd,    // SSR stencil tags
     AoEnd,            // ambient occlusion and its blur
-    SsrEnd,           // screen-space reflections (B6)
-    AirEnd,           // beams and haze (B8)
+    SsrEnd,           // screen-space reflections
+    AirEnd,           // beams and haze
     BloomEnd,         // bloom chain
     ShaftsEnd,        // legacy sun shafts
-    CombatScatterEnd, // combat light in smoke (B4)
+    CombatScatterEnd, // combat light in smoke
     CompositeEnd,     // composite into the frame
-    TemporalEnd,      // TAA resolve (A5)
-    SharpenEnd,       // TAA sharpen or the luma sharpen (A5, B11)
+    TemporalEnd,      // TAA resolve
+    SharpenEnd,       // TAA sharpen or the luma sharpen
     DebugViewEnd,     // a diagnostic view of a post buffer
     PostEnd,          // after the last stage that ran
     FrameEnd,         // before the swap

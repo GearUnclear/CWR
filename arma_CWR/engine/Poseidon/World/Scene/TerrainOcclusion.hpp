@@ -7,7 +7,7 @@
 // Hill culling: objects that a ridge hides from the camera are not drawn.
 // Pure, no engine state; Scene::DrawObjectsAndShadowsPass1 builds the table
 // from the landscape and asks it about every queued object (the hillCull
-// feature switch, plan section 5 A4).
+// feature switch).
 //
 // The test is conservative by construction: an object is reported hidden only
 // when the terrain as the renderer draws it blocks every sight line from the
@@ -32,8 +32,8 @@
 //     steepest one from the eye to any point of the sphere.
 //
 // A notch between two rays cannot hide anything: the chord takes the lowest
-// terrain across the whole width of the wedge, not the terrain under one ray. The prototype (research
-// perf track) marched single rays and compared the sphere's top over its
+// terrain across the whole width of the wedge, not the terrain under one ray. An earlier
+// version marched single rays and compared the sphere's top over its
 // near-edge distance, which let narrow notches and objects below the eye
 // through; both are cases in test_terrain_occlusion.cpp.
 

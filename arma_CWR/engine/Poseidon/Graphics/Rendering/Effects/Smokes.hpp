@@ -288,7 +288,7 @@ class WeaponCloudsSource: public DustSource
 	float _timeToLive;
 	// A puff's outward speed per metre of its offset from the source (m/s).
 	float _burstSpeed = 4.0f;
-	// Look fix "boom": a new puff is simulated once at its birth, so it is
+	// A new puff is simulated once at its birth, so it is
 	// drawn in the frame it is born (a fireball's first frame) instead of one
 	// or two frames later, cooled and faded in.
 	bool _showAtBirth = false;
@@ -415,7 +415,7 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
     // and the embers glowing under a burning wreck's smoke.
     bool _combatBurst = false;
     lighting::CombatLightHandle _combatEmbers;
-    // Look fix "boom": the fuel's deflagration (CombatLights.hpp Detonation).
+    // The fuel's deflagration (CombatLights.hpp Detonation).
     bool _deflagrating = false;
     float _deflagrationAge = 0.0f;
     lighting::Detonation _deflagration;
@@ -464,7 +464,7 @@ class Explosion: public Vehicle
 		Vehicle *owner=nullptr, float duration=1
 	);
 	~Explosion() override;
-	// Look fix "boom": the fireball, flash and light from the round's charge
+	// The fireball, flash and light from the round's charge
 	// (CombatLights.hpp Detonation); before its first simulation step.
 	void SetDetonation(const lighting::Detonation& d);
 
@@ -501,7 +501,7 @@ class Crater: public Smoke
 	DustSource _dust;
 	float _dustTimeToLive;
 	float _size;
-	float _throwSpeed = 0.0f; // look fix "boom": the thrown earth's launch speed (m/s)
+	float _throwSpeed = 0.0f; // the thrown earth's launch speed (m/s)
 	bool _isSmoke;
 	bool _isBlood;
 	bool _isWater;
@@ -513,7 +513,7 @@ public:
 		bool smoke = true, bool blood = false, bool water = false
 	);
 	void Simulate( float deltaT, SimulationImportance prec ) override;
-	// Look fix "boom": a blast's dust and smoke column from its charge
+	// A blast's dust and smoke column from its charge
 	// (CombatLights.hpp Detonation): how high, how wide, how long it lingers.
 	void SetDetonation(const lighting::Detonation& d);
 

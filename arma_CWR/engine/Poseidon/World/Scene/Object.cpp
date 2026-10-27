@@ -1133,7 +1133,7 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[
     emit[0] = emit[1] = emit[2] = 0.0f;
     for (const lighting::CombatLightRecord& r : set.Records())
     {
-        // A fireball's glowing puff is the blast's light (look fix "boom"): a
+        // A fireball's glowing puff is the blast's light: a
         // detonation's light on it added the flash's white over its own glow,
         // and by night washed the fireball out to pale grey.
         if (ownGlow && r.detonation)
@@ -1145,7 +1145,7 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[
             continue;
         const float d = std::sqrt(d2);
         irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);
-        // A detonation's light (look fix "boom") keeps its hue on its smoke as a
+        // A detonation's light keeps its hue on its smoke as a
         // fire's does: its afterburn lit the dust round it khaki, not orange.
         float* acc = r.kind == lighting::CombatLightKind::Fire || r.detonation ? e : o;
         for (int i = 0; i < 3; ++i)
@@ -1236,7 +1236,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         float fireballEmit[3] = {0.0f, 0.0f, 0.0f};
         Color fireballOwn;
         bool fireball = false;
-        // A fireball's puff (look fix "burst", FireballPuff) glows as a hot
+        // A fireball's puff (FireballPuff) glows as a hot
         // body and scatters as soot. Its shape is self-lit (MSShining): its
         // table's colour times the eye's adaptation, which the photoreal
         // camera holds at 1, so a dusk burst showed its table's lemon and
@@ -1250,7 +1250,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
                 float soot[3];
                 if (lighting::FireballPuff(puff->Temperature(), puff->HottestTemperature(), soot, fireballEmit))
                 {
-                    // Look fix "boom": the glow keeps its ratio to the combat
+                    // The glow keeps its ratio to the combat
                     // light it gives (the bursts' day scale, 0.2 by day);
                     // by night its own light on its smoke outshone it, a pale
                     // grey cloud round a fuel fireball.

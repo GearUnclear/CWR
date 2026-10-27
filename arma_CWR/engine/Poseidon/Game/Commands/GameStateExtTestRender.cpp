@@ -801,7 +801,7 @@ GameValue TriCanopyCheck(const GameState* /*state*/, GameValuePar arg)
 /// they are when left out). [] releases both, and they move on from where they
 /// are. Both move by integration (the shadow field with the wind every frame,
 /// the sky clouds with the simulation step), so re-pinning the sim clock
-/// (triSetSimTime) alone does not put them back: A/B pairs and the video's off
+/// (triSetSimTime) alone does not put them back: A/B pairs and paired off
 /// and on passes pin them to see the same clouds and cloud shadows. Returns
 /// "OK:pinned <x> <z> sky <pos>", "OK:released <x> <z> sky <pos>" or
 /// "FAIL:<why>".

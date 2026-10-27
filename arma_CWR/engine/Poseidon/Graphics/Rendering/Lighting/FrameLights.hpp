@@ -3,8 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-// The frame's light list (INTEGRATION-PLAN.md section 5 A6, the lightTiles
-// switch): every local light the remastered shaders shade, in one block,
+// The frame's light list (the lightTiles switch): every local light the remastered shaders shade, in one block,
 // binned into screen tiles so a fragment loops over only the lights whose
 // reach covers its tile. One list for every surface: terrain, roads and
 // objects see the same lights, instead of the list each draw selected for
@@ -21,11 +20,11 @@
 // quadratic falloff past it ending in a smooth window at kRangeFactor times
 // it, a smoothed spotlight cone, the sum taken in display space and clamped at
 // 1, as the per-draw path does) shades every kind, except that at night, with
-// the nightLights switch on (B3), street lamps and headlights take the
+// the nightLights switch on, street lamps and headlights take the
 // physical model below: light falling off with the squared distance from the
 // bulb, a low-beam pattern for headlights, summed in linear light. The kind
-// travels with each light so the steps that give a kind its own model (B4 fire
-// and combat light) find it here.
+// travels with each light so the kinds with a model of their own (fires and
+// combat lights) are found here.
 
 namespace Poseidon::lighting
 {
@@ -90,8 +89,8 @@ struct FrameLight
     // physical model keeps a light off its owner by geometry instead
     // (kPhysicalNearEnd and the low beam's back plane).
     std::uint32_t owner = 0;
-    int shadowSlot = -1; // combat shadow mask channel (B4); -1 = none
-    // A combat light (B4, CombatLights.hpp): linear HDR, outside the classic
+    int shadowSlot = -1; // combat shadow mask channel; -1 = none
+    // A combat light (CombatLights.hpp): linear HDR, outside the classic
     // model and its budget. `start` is then the ball radius r0, `diffuse` the
     // linear radiance at the core (intensity times the unit-luminance colour),
     // `range` the window end; `ambient` and `sortBrightness` are unused.
@@ -112,7 +111,7 @@ bool LightIsDark(const FrameLight& light);
 // edge's angle) is about half as large; but the classic budget ranks a
 // spotlight wherever it is in reach, cone or not (as Scene::SelectLights does),
 // so every tile in reach must list it. With `physical` (the physical model
-// lights the frame, B3) a street lamp or headlight is binned by its physical
+// lights the frame) a street lamp or headlight is binned by its physical
 // reach instead (PhysicalReach), still centred on the bulb: the low beam's
 // floor and spill light most of the half-space ahead, so its cone is no
 // tighter bound.
@@ -212,7 +211,7 @@ float ClassicImportance(const FrameLight& light, const float p[3]);
 // importance; the weights change continuously with the importances.
 void ClassicBudgetWeights(const float* importance, int n, float* weight);
 
-// ---- The physical lamps and low beams (B3, the nightLights switch) ----------
+// ---- The physical lamps and low beams (the nightLights switch) --------------
 //
 // A street lamp is a point source of intensity kLampIntensityPerStart times
 // its start distance (the start distance is 50 m times the configured
@@ -223,21 +222,21 @@ void ClassicBudgetWeights(const float* importance, int n, float* weight);
 // country away from them stays dark. A smooth window ends every light at its
 // physical reach (PhysicalReach, at most the classic reach), the sphere the
 // tiles bin it by. Colours (PhysicalColour): a street lamp takes its
-// configured colour to linear (F9b gives lamps their authored warm colour); a
+// configured colour to linear (lamps keep their authored warm colour); a
 // headlight is white at its configured colour's linear luminance. No warming:
-// a warmed headlight turned verges mustard in the research, and the configured
+// a warmed headlight turned verges mustard, and the configured
 // rosy beam (0.9, 0.8, 0.8) still turned the khaki grass of a verge orange-tan
-// in the beam (hue 39 deg, saturation 0.29, at b3_jeep_side). The shaders'
+// in the beam (hue 39 deg, saturation 0.29). The shaders'
 // copy is physicalLight in EngineGL33_LightingShadersLights.cpp; the test pins
 // its numbers to these.
-// The research tuned its lamps at 4 * 0.3 = 1.2 per start metre on lamps the
-// engine then read as white (the colour bug F9b fixed); the authored (0.9,
+// The lamps were first tuned at 4 * 0.3 = 1.2 per start metre while the engine
+// still read their colour as white (a colour bug since fixed); the authored (0.9,
 // 0.8, 0.6) is 0.63 as bright in linear light, so the same pools take 1.9.
 constexpr float kLampIntensityPerStart = 1.9f; // street lamp: I = 1.9 * start
-// The research's low beams (4000 * 0.3 * nightSpot 1.5 = 1800) blew the hot
+// Earlier low beams (4000 * 0.3 * nightSpot 1.5 = 1800) blew the hot
 // spot out at 1080p; 800 keeps the hot spot under white (about 193 levels on
 // the moonless road) and the far verges at a night level. A verge in the beam
-// core 10 to 20 m out still reads brighter than the noon lawn (b3_jeep_side).
+// core 10 to 20 m out still reads brighter than a lawn at noon.
 constexpr float kLowBeamPeak = 800.0f;      // headlight hot spot at nightSpot 1
 constexpr float kPhysicalSoftening = 0.25f; // m^2 added to d^2: a bulb is not a point
 // Light reaching a surface closer to the bulb than kNearEnd is the lamp's own
@@ -252,7 +251,7 @@ constexpr float kPhysicalNearEnd = 1.0f;
 // kLowBeamSpill strong), a hot band kLowBeamHotBand under the axis
 // (kLowBeamHotWidth wide), and a cut-off that closes between kLowBeamCutLow and
 // kLowBeamCutHigh above it (0.3 to 1.4 degrees: a hard top edge, a little
-// softer than the research's 0.2 to 0.9, which hill roads put right on the
+// softer than an earlier 0.2 to 0.9, which hill roads put right on the
 // road). Under the hot band a faint kLowBeamFloor reaches down to
 // kLowBeamFloorEnd (34 deg), so the road just ahead of the bumper is not black.
 constexpr float kLowBeamCutLow = -0.005f;

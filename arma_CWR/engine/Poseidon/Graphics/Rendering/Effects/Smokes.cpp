@@ -269,7 +269,7 @@ void SmokeSourceVehicle::SimulateExplosion()
             type.hit = hit;
             type.indirectHit = indirectRatio * hit;
         }
-        // Look fix "boom": the fuel's fireball (a deflagration, CombatLights.hpp
+        // The fuel's fireball (a deflagration, CombatLights.hpp
         // Detonation) from the fuel that burns in it, whether or not the blast
         // is big enough to damage (the gate below, unchanged). A jeep's tank
         // (explosives about 5, so hit about 3) made no fireball at all.
@@ -1478,7 +1478,7 @@ void Crater::Init(float timeToLive, float size, bool smoke, bool blood, bool wat
 
 void Crater::SetDetonation(const lighting::Detonation& d)
 {
-    // Look fix "boom": a blast throws a dark column of earth and soot that
+    // A blast throws a dark column of earth and soot that
     // rises to about its column height in two seconds, billows, lingers its
     // column life and drifts with the wind (SmokeSource adds half the wind);
     // a low dust skirt spreads round its foot; a fan of earth is thrown up
@@ -1555,7 +1555,7 @@ void Crater::Simulate(float deltaT, SimulationImportance prec)
         }
         else if (_throwSpeed > 0)
         {
-            // Look fix "boom": the blast's thrown earth.
+            // The blast's thrown earth.
             const float v = _throwSpeed;
             Vector3 th((GRandGen.RandomValue() - 0.5f) * 0.8f * v, v, (GRandGen.RandomValue() - 0.5f) * 0.8f * v);
             _dust.Simulate(Position(), Speed() + th, 0.34f, deltaT);
@@ -2007,7 +2007,7 @@ Explosion::~Explosion() = default;
 
 void Explosion::SetDetonation(const lighting::Detonation& d)
 {
-    // Look fix "boom": the fireball is the detonation products, about the
+    // The fireball is the detonation products, about the
     // fireball's radius across, glowing at the gas's temperature as it falls
     // from the white-hot flash to the afterburn and to soot (Simulate gives
     // each puff the temperature of its birth), born while the flash and the
@@ -2045,7 +2045,7 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
     {
         if (_fire.Active())
         {
-            // Each puff is born at the gas's temperature now (look fix "boom").
+            // Each puff is born at the gas's temperature now.
             const float bornK = lighting::DetonationTemperature(_det, _age);
             _fire.SetTemperatureRange(bornK, lighting::DetonationPuffCooling(_det, bornK));
             // Half the puffs in the flash (the products' first expansion),
@@ -2074,7 +2074,7 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
     if (!_combatSpawned && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
     {
         _combatSpawned = true;
-        // Look fix "boom": the light of the detonation itself, at the
+        // The light of the detonation itself, at the
         // fireball's centre, as long and as bright as its gas glows.
         const Vector3 at = Position() + VUp * floatMax(0.6f * _det.radius, 0.5f);
         const float p[3] = {at.X(), at.Y(), at.Z()};
