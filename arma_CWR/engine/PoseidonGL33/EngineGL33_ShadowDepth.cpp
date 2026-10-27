@@ -49,6 +49,12 @@ GLint s_alphaLocVP = -1;
 GLint s_alphaLocTex = -1;
 GLuint s_alphaVao = 0;
 GLuint s_alphaVbo = 0;
+// The caster textures' own sampler: trilinear, repeat, anisotropic as the
+// material sampler, and no LOD bias. Without it the pass inherited unit 0's
+// sampler from the last world draw (its filter, wrap and, in a TAA frame,
+// the -0.5 texture LOD bias), so each leaf card's shadow cutout followed the
+// draw order.
+GLuint s_alphaSampler = 0;
 
 struct ResolvedAlphaBatch
 {
@@ -271,6 +277,26 @@ bool EnsureAlphaMesh()
     GL33Bind::Vao(0);
     return true;
 }
+
+bool EnsureAlphaSampler()
+{
+    if (s_alphaSampler)
+        return true;
+    glGenSamplers(1, &s_alphaSampler);
+    if (!s_alphaSampler)
+        return false;
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    // A new sampler's LOD bias is 0, and only SetTaaJitterState writes the
+    // material samplers' bias, never this one.
+    float maxAniso = 1.0f;
+    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
+    if (maxAniso > 1.0f)
+        glSamplerParameterf(s_alphaSampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAniso < 16.0f ? maxAniso : 16.0f);
+    return true;
+}
 } // namespace
 
 namespace
@@ -364,10 +390,17 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         GL33Bind::Vao(static_cast<GLuint>(prevVAO));
     };
     if (!EnsureProgram() || !EnsureArrayTarget(res, numCascades) || !EnsureMesh() ||
-        (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh())))
+        (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh() || !EnsureAlphaSampler())))
     {
         restore();
         return false;
+    }
+    // Unit 0's sampler, handed back after the alpha batches.
+    GLint prevSampler0 = 0;
+    if (haveAlpha)
+    {
+        GL33Bind::ActiveUnit(0);
+        glGetIntegerv(GL_SAMPLER_BINDING, &prevSampler0);
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);
@@ -419,6 +452,7 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
             glUniformMatrix4fv(s_alphaLocVP, 1, GL_FALSE, lightVPs + i * 16);
             glUniform1i(s_alphaLocTex, 0);
             GL33Bind::ActiveUnit(0);
+            glBindSampler(0, s_alphaSampler);
             GL33Bind::Vao(s_alphaVao);
             for (int b = 0; b < batchCount; b++)
             {
@@ -432,6 +466,8 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
 
     if (depthClamp)
         Poseidon::render::pipeline::DisableDepthClamp(); // the 3D pass runs without it
+    if (haveAlpha)
+        glBindSampler(0, static_cast<GLuint>(prevSampler0));
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
     glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
     glUseProgram(static_cast<GLuint>(prevProg));

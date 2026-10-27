@@ -1704,14 +1704,16 @@ void Scene::DrawObjectsAndShadowsPass1()
     // tested: their draw is Object::Draw's, which PrepareDrawTextures mirrors
     // (vehicles and men draw through their own overrides).
     //
-    // The last draw before the shadow-map pass is never hidden: the pass's
-    // alpha-tested casters sample their textures with whatever sampler that
-    // draw left on unit 0 (a leak older than A4), so hiding it changes the
-    // cutout of every leaf card's shadow. That draw is the last surface
-    // overlay's blend sections (Pass2: roads and decals, queued in list
-    // order), so the last overlay is drawn there even when hidden; in a view
-    // with no overlay it is the last object Pass1 draws (KeepLastPass1Draw,
-    // after its sort). Both count as kept.
+    // The last draw before the shadow-map pass is never hidden: the pass
+    // binds its own sampler for the alpha-tested casters, but it still
+    // inherits the polygon offset that draw leaves (ApplyPipeline enables the
+    // decal offset for on-surface draws and the shadow offset for shadow
+    // quads; the pass sets neither), so hiding it can shift the depth the
+    // casters store. That draw is the last surface overlay's blend sections
+    // (Pass2: roads and decals, queued in list order), so the last overlay is
+    // drawn there even when hidden; in a view with no overlay it is the last
+    // object Pass1 draws (KeepLastPass1Draw, after its sort). Both count as
+    // kept.
     _hillHiddenObjects = 0;
     if (hillCull && _camera && GetLandscape())
     {
@@ -1976,8 +1978,8 @@ void Scene::DrawObjectsAndShadowsPass2()
         QSort(_drawMergers.Data(), nDraw, CmpSurfaceObj);
         // Hill culling (Pass1): the last overlay draws here even when hidden,
         // so the last draw before the shadow-map pass is the one it is with
-        // the cull off (its sampler reaches the pass's alpha-tested casters;
-        // see the hill cull in Pass1).
+        // the cull off (its polygon offset reaches the pass's casters; see the
+        // hill cull in Pass1).
         int keep = -1;
         for (int i = nDraw - 1; i >= 0 && _hillHiddenObjects > 0; i--)
         {
