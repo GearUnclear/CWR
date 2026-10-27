@@ -234,6 +234,10 @@ constexpr int kFogVeilUnit = kGroundFieldUnit;
 // injection in the post pass on the light list's tile unit, which the world
 // binds again at each frame's lighting upload (BindLightingTextures).
 constexpr int kFogRingUnit = kLightTileUnit;
+// The fog's night glow, read by the fog apply on the same unit (the apply
+// reads no ring). It has no sampler object, so the glow keeps its own
+// clamped filtering; the apply unbinds it at its end.
+constexpr int kFogGlowUnit = kLightTileUnit;
 
 namespace detail
 {

@@ -29,12 +29,15 @@
 // whether or not this stage runs (TerrainLighting.hpp SimulateFogSight); the
 // fog floor below is drawn from AI sight's own map.
 //
-// GL state: the stage binds its inputs to kPostUnits and unit 12 (the fog
-// floor, kFogFloorUnit) and reads units 8 (the sky table, rebound here), 9 and
-// 15 as the world bound them. Unit 2 takes the cascade array (or the depth
-// stand-in, never texture 0: the F3 rule) under the comparison sampler for the
-// injection and the near field and gets the post pass's sampler 0 back after
-// them; the 3D volumes and the floor are unbound at the end of the stage.
+// GL state: the stage binds its inputs to kPostUnits, unit 6 (the overlay
+// snapshot), unit 12 (the fog floor, kFogFloorUnit) and unit 13 (the horizon
+// ring and the night glow, kFogRingUnit and kFogGlowUnit), never to unit 1 (its
+// sampler object belongs to ApplyPipeline), and reads units 8 (the sky table,
+// rebound here), 9 and 15 as the world bound them. Unit 2 takes the cascade
+// array (or the depth stand-in, never texture 0: the F3 rule) under the
+// comparison sampler for the injection and the near field and gets the post
+// pass's sampler 0 back after them; the 3D volumes, the floor and the glow are
+// unbound at the end of the stage.
 
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
@@ -1090,11 +1093,11 @@ void EngineGL33::PostFog(const PostFrame& f)
     SetInt(apply, "nearTex", 3);
     SetInt(apply, "linDepth", 4);
     SetInt(apply, "depthTex", 5);
-    SetInt(apply, "glowTex", 1);
+    SetInt(apply, "glowTex", kFogGlowUnit);
     BindTex(0, f.frameColor);
     SetInt(apply, "worldTex", 6);
     BindTex(6, overlaySnap ? _fog.snapTex : p.blackTex);
-    BindTex(1, glow ? _fog.glowTex[1] : p.blackTex);
+    BindTex(kFogGlowUnit, glow ? _fog.glowTex[1] : p.blackTex);
     glActiveTexture(GL_TEXTURE0 + 2);
     glBindTexture(GL_TEXTURE_3D, _fog.integTex);
     BindTex(3, nearOn ? _fog.nearTex : p.blackTex);
@@ -1127,8 +1130,8 @@ void EngineGL33::PostFog(const PostFrame& f)
     SetMat3(apply, "viewToWorld", viewToWorld);
     DrawTo(_fog.outFbo, f.w, f.h);
 
-    // Hand the units back: no 3D volume or floor left bound, nothing on unit 1.
-    glActiveTexture(GL_TEXTURE0 + 1);
+    // Hand the units back: no glow, 3D volume or floor left bound.
+    glActiveTexture(GL_TEXTURE0 + kFogGlowUnit);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0 + 2);
     glBindTexture(GL_TEXTURE_3D, 0);
