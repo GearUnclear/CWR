@@ -1,4 +1,4 @@
-// Remastered lighting, the look lane "surface" (Graphics/Remaster/
+// Remastered lighting, surfaces and ambient light (Graphics/Remaster/
 // SurfaceLight.hpp): the post pass's horizon-based ambient occlusion. GLSL
 // only, no GL code (the unit tests compile it through PostShaderSource); the
 // pass runs in EngineGL33_PostFX.cpp (PostAo).

@@ -247,7 +247,7 @@ uniform vec4 scatterParams; // x light count (0 = none), y scattering per metre 
 uniform vec4 scatterPos[8]; // xyz view space (m), w core radius r0
 uniform vec4 scatterRgb[8]; // rgb linear radiance at the core, w window end (m)
 uniform vec4 scatterMed[8]; // x radius of the lit smoke and dust around the light (m)
-// Surfaces and ambient light (the look lane "surface", SurfaceLight.hpp): the
+// Surfaces and ambient light (the surfaces switch, SurfaceLight.hpp): the
 // surface target the world shaders wrote (unit 6: r the share the occlusion
 // may darken, g the square root of the albedo's luminance, b the sun's share)
 // replaces the frame alpha's share, the half-resolution horizon occlusion is

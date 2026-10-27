@@ -189,7 +189,7 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     _worldSceneEnded = false;
     _worldDepthCleared = false;
     _worldOverlayDrawn = false;
-    // The surfaces lane: a world pass that never reached EndWorldScene must not
+    // Surface light: a world pass that never reached EndWorldScene must not
     // leave the frame target drawing two buffers.
     EndSurfaceTarget();
     _surfFrameWritten = false;

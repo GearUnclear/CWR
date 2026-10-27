@@ -84,7 +84,7 @@ struct SkyTableState
     int mode = 0;                // Poseidon::RemasterSky of the draws; 0 = the world's
     bool forcedPrograms = false; // the pass opened the remastered programs
 
-    // The sky light's spherical harmonics (the surfaces lane, SurfaceLight.hpp),
+    // The sky light's spherical harmonics (the surfaces switch, SurfaceLight.hpp),
     // projected from the CPU atmosphere tables on a worker thread whenever the
     // sun moved kSkyLightRebuildRad or the haze changed.
     std::future<rm::SkyLightSH> shPending;

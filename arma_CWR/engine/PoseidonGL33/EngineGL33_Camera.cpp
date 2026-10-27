@@ -1,4 +1,4 @@
-// The photoreal camera (look lane "light", feature switch photoLight;
+// The photoreal camera (feature switch photoLight;
 // Graphics/Remaster/PhotoCamera.hpp holds the math).
 //
 // Per frame:

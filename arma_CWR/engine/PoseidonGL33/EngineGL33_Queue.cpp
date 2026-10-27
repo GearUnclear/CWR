@@ -285,7 +285,7 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     // between land and sea.
     if (d.shader == Poseidon::render::ShaderFamily::Detail)
         SelectTerrainDetailLayer(spec);
-    // The surfaces lane: the section's surface class (its texture, the drawn
+    // Surface light: the section's surface class (its texture, the drawn
     // object's kind) for the specular every lit surface gets, on the program
     // ApplyPipeline bound. Only the object program reads it, and not for
     // leaves (a forced diffuse): the land, grass, sea and crowns skip it.
@@ -392,7 +392,7 @@ void EngineGL33::BeginPass(PassId passId)
         // The TAA jitter and texture LOD bias of this pass (the frame gates are
         // known now); zero for any pass that is not a TAA frame's world pass.
         ApplyTaaJitter();
-        // The surface target (the surfaces lane): bound from the world's first
+        // The surface target (the surfaces switch): bound from the world's first
         // pass to EndWorldScene. SetColorMask above reset its write mask.
         BeginSurfaceTarget();
         UpdateSurfaceMask(true);
