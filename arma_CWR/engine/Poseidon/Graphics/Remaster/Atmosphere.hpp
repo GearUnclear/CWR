@@ -52,13 +52,12 @@ constexpr float kGroundAlbedo = 0.3f;
 // The haze's phase (AtmosphereMiePhase): a broad Cornette-Shanks lobe of
 // asymmetry kMieG plus the narrow forward peak of real haze (the solar
 // aureole), a Henyey-Greenstein lobe of kMieAureoleG with kMieAureoleShare of
-// the light. One broad lobe of 0.8 was nearly flat over the first 5 degrees
-// (1 degree from the sun only twice as bright as 10), so a low sun's glow was
-// a wide flat wash that the camera's sky roll-off pressed into a column from
-// the sun down to the horizon (look fix "veil": the smear on
-// coastline_sunset). With the peak the glow gathers round the disc (about 9
-// times the old phase at 1 degree, 2 at 3, 0.7 at 10) and the broad lobe keeps
-// the warm horizon under it.
+// the light. One broad lobe of 0.8 is nearly flat over the first 5 degrees
+// (1 degree from the sun only twice as bright as 10), so a low sun's glow
+// becomes a wide flat wash that the camera's sky roll-off presses into a
+// column from the sun down to the horizon. With the peak the glow gathers
+// round the disc (about 9 times a single 0.8 lobe at 1 degree, 2 at 3, 0.7 at
+// 10) and the broad lobe keeps the warm horizon under it.
 constexpr float kMieG = 0.75f;
 constexpr float kMieAureoleG = 0.97f;
 constexpr float kMieAureoleShare = 0.3f;
@@ -86,9 +85,9 @@ constexpr float kSkyNightFadeEndDeg = -9.0f; // gone below this (the gate turns 
 // Sky texels this much brighter (display luminance) than the clearest texel of
 // their row count as cloud. Small: the classic sky textures are 8-bit
 // palettised, and the faint noon cirrus of oblacno.pac sits only a few levels
-// above its row (a 0.015 dead zone erased most of it).
+// above its row (a 0.015 dead zone erases most of it).
 constexpr float kSkyCloudMaskDeadZone = 0.004f;
-// The hue and saturation the sky ships with (plan section 3.1): half way
+// The hue and saturation the sky ships with: half way
 // between the original sky's hue relit by the atmosphere and the physical hue,
 // and a display-space saturation of 1.15 on the dome and the fog colour only.
 constexpr float kSkyHueDefault = 0.5f;

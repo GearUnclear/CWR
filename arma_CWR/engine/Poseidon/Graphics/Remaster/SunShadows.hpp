@@ -4,12 +4,11 @@
 
 #include <cstdint>
 
-// Sun shadows of the remastered lighting (INTEGRATION-PLAN.md step B1): the
-// rules and the math the shadow pass, the GL backend and the shaders share.
-// Pure, no GL, no engine state.
+// Sun shadows of the remastered lighting: the rules and the math the shadow
+// pass, the GL backend and the shaders share. Pure, no GL, no engine state.
 //
 // Two feature switches, each with the sun shadow gate (the sun above 4 deg, or
-// B3's moon key):
+// the moon key, NightLights.hpp):
 //
 //   treeShadows  trees, bushes and buildings always cast into the remastered
 //                sun shadow map, whatever the legacy per-profile object shadow

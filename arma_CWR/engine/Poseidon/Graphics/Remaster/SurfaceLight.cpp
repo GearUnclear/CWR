@@ -130,10 +130,9 @@ SurfaceFrameConstants ComputeSurfaceFrameConstants(const LightingTuning& tuning,
     c.surface[2] = std::max(tuning.surfCanopyAo, 0.0f);
     // The texture relief and cavities read the sun's grain: by night (lamps
     // only) they show nothing and cost their texture reads, so they fade out
-    // with the sun (look director: the night pays no world-pass cost for them).
-    // Under a low sun (look director round 2) they keep kSurfLowSunGrain: a
-    // grazing sun lit every grain of the land into frosty speckles on the
-    // backlit foreground of a sunrise.
+    // with the sun and the night pays no world-pass cost for them. Under a low
+    // sun they keep kSurfLowSunGrain: a grazing sun would light every grain of
+    // the land into frosty speckles on the backlit foreground of a sunrise.
     const float sunGrain =
         Smoothstep(-6.0f, 0.0f, rig.sunElevationDeg) *
         (kSurfLowSunGrain + (1.0f - kSurfLowSunGrain) * Smoothstep(4.0f, 14.0f, rig.sunElevationDeg));

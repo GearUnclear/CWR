@@ -5,8 +5,8 @@
 
 #include <functional>
 
-// Surfaces and ambient light (feature switch `surfaces`, the look lane
-// "surface"). Pure, no GL, no engine state.
+// Surfaces and ambient light (feature switch `surfaces`). Pure, no GL, no
+// engine state.
 //
 // What the player sees: surfaces sit in the world as they do in photographs.
 //   - Contact darkening: a horizon-based ambient occlusion (GTAO) at half
@@ -32,10 +32,10 @@
 //     night.
 //   - Specular on every surface: GGX sun highlights and a split-sum sky
 //     reflection with Fresnel, roughness and F0 per surface class
-//     (the materials step's SurfaceClass: paint, metal, glass, rubber, cloth,
+//     (SurfaceMaterials.hpp SurfaceClass: paint, metal, glass, rubber, cloth,
 //     skin, road, masonry, wood, leather, weapon, lens, roof; terrain and
-//     foliage in the shader), so
-//     edges catch the light and a painted hull reads as painted metal.
+//     foliage in the shader), so edges catch the light and a painted hull
+//     reads as painted metal.
 
 namespace Poseidon::remaster
 {
@@ -82,15 +82,15 @@ Rgb EvalSkyLight(const SkyLightSH& sh, float x, float y, float z);
 // LitConstants slots Surface .. SurfaceSh5 (EngineGL33_Lighting.hpp).
 struct SurfaceFrameConstants
 {
-    // x 1 while the switch and its gate are on (0 = the world shaders as
-    // before), y the specular strength, z the canopy occlusion strength, w the
+    // x 1 while the switch and its gate are on (0 = the world shaders without
+    // it), y the specular strength, z the canopy occlusion strength, w the
     // weight of the spherical-harmonics sky light against the rig's hemisphere.
     float surface[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     // rgb: the sky light's coefficients in the rig's units, the physical
     // sky's colour.
     float sh[kSkyShCoeffs][4] = {};
-    // x the relief strength (surfRelief; 0 while off), y the lane's debug view
-    // the lit shaders draw (1 sky light, 2 canopy sky visibility, 3 specular,
+    // x the relief strength (surfRelief; 0 while off), y the surfaces' debug
+    // view the lit shaders draw (1 sky light, 2 canopy sky visibility, 3 specular,
     // 0 none; LightRig.hpp kDebugViewSkyLight..), z the share of the physical
     // sky's colour in the sky light (surfSkyTint; the rest is the rig's own
     // colour toward the normal), w the share of the sky fill a non-leaf
@@ -103,7 +103,7 @@ struct SurfaceFrameConstants
 };
 
 // litSurface2.y for a debug view (LightingTuning::debugView): 1 to 3 for the
-// surfaces lane's views 12 to 14, 0 otherwise.
+// surfaces' views 12 to 14, 0 otherwise.
 float SurfaceDebugView(int debugView);
 
 // `rig` is the frame's light rig, `sh` the clear sky of the sky table (or not
@@ -165,8 +165,8 @@ constexpr float kSurfLowSunGrain = 0.3f;
 constexpr float kSurfaceInteriorShare = 0.9f;
 // ---- Surface classes -----------------------------------------------------------
 //
-// The per-draw class is the materials step's (SurfaceMaterials.hpp, B7: the
-// texture's name and the drawing object's kind); the shader's table
+// The per-draw class comes from SurfaceMaterials.hpp (the texture's name and
+// the drawing object's kind); the shader's table
 // (surfaceClassParams, surfaceClassRelief, surfaceClassCavity in the surface
 // piece) indexes its SurfaceClass values: 1 paint, 2 metal, 3 glass, 4 rubber,
 // 5 fabric, 6 skin, 7 road, 8 masonry, 9 wood, 10 leather, 11 weapon, 12 lens,

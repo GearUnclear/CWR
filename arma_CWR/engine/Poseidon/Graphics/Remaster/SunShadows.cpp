@@ -75,7 +75,7 @@ SunShadowConstants ComputeSunShadowConstants(const LightingTuning& tuning, const
         c.pcss[1] = kPcssMinFilterTexels;
         // The gate opens at 4 deg; the soft filter fades in over the next 2
         // degrees. Forced on (gates=0) it runs whole. Under the moon key
-        // (B3) the stock filter casts the moon's shadows: at a fiftieth of the
+        // the stock filter casts the moon's shadows: at a fiftieth of the
         // noon sun no one sees a contact-hardening penumbra, and the soft
         // filter's taps would cost the night's world pass for nothing.
         const float sun = gates.inputs.sunElevationDeg;
