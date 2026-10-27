@@ -84,12 +84,22 @@ bool Project(const TileView& v, const Vec3& p, float& px, float& py)
            py < v.viewport[1] + v.viewport[3];
 }
 
+// A float in [lo, hi) from one raw draw of the random engine. The output of
+// std::mt19937 is fixed by the standard, but std::uniform_real_distribution is
+// not: libstdc++ and the MSVC library build different scenes from the same
+// seed. The tests below draw their floats here and see one scene everywhere.
+float Uniform(std::mt19937& rng, float lo, float hi)
+{
+    const float u01 = static_cast<float>(rng() >> 8) * (1.0f / 16777216.0f); // 24 bits, [0, 1)
+    return lo + (hi - lo) * u01;
+}
+
 // Points the shaders light (localLight): inside the reach, and for a
 // spotlight in front of the lamp and inside the cone edge. Half of them on the
 // reach's boundary, where a missed tile would show first.
 std::vector<Vec3> LitPoints(const FrameLight& l, int n, std::mt19937& rng)
 {
-    std::uniform_real_distribution<float> u01(0.0f, 1.0f);
+    const auto u01 = [](std::mt19937& r) { return Uniform(r, 0.0f, 1.0f); };
     const float reach = kRangeFactor * l.start * 0.9995f;
     std::vector<Vec3> out;
     const Vec3 d = Normalized({l.dir[0], l.dir[1], l.dir[2]});
@@ -186,24 +196,29 @@ int CountOf(const std::string& haystack, const std::string& needle)
 
 TEST_CASE("Frame lights: every tile a light can reach lists it, and few others do", "[Graphics][remaster][FrameLights]")
 {
+    // One draw per statement: a call's arguments are evaluated in an
+    // unspecified order, so draws made inside one call could reach other
+    // parameters under another compiler.
     std::mt19937 rng(20261018);
-    std::uniform_real_distribution<float> pos(-120.0f, 120.0f);
-    std::uniform_real_distribution<float> height(-3.0f, 12.0f);
-    std::uniform_real_distribution<float> start(0.5f, 8.0f);
-    std::uniform_real_distribution<float> angle(0.0f, 360.0f);
-    std::uniform_real_distribution<float> pitch(-25.0f, 25.0f);
     const float pillarbox[4] = {240.0f, 0.0f, 1440.0f, 1080.0f};
     int checked = 0, fullScreen = 0, tight = 0;
     for (int round = 0; round < 40; ++round)
     {
-        const TileView view = MakeView(angle(rng), pitch(rng), round % 4 == 3 ? pillarbox : nullptr);
+        const float heading = Uniform(rng, 0.0f, 360.0f);
+        const float viewPitch = Uniform(rng, -25.0f, 25.0f);
+        const TileView view = MakeView(heading, viewPitch, round % 4 == 3 ? pillarbox : nullptr);
         std::vector<FrameLight> lights;
         for (int i = 0; i < 12; ++i)
         {
-            const float a = angle(rng) * kPi / 180.0f;
+            const float a = Uniform(rng, 0.0f, 360.0f) * kPi / 180.0f;
             const Vec3 beam{std::sin(a), -0.15f, std::cos(a)};
-            lights.push_back(i % 3 == 0 ? Spot(pos(rng), height(rng), pos(rng), start(rng), beam)
-                                        : Point(pos(rng), height(rng), pos(rng), start(rng)));
+            const float lx = Uniform(rng, -120.0f, 120.0f);
+            const float ly = Uniform(rng, -3.0f, 12.0f);
+            const float lz = Uniform(rng, -120.0f, 120.0f);
+            // Every third lamp is small, so that enough lamps sit at least two
+            // reaches in front of the eye for the tightness check below.
+            const float lightStart = Uniform(rng, 0.5f, i % 3 == 2 ? 2.0f : 8.0f);
+            lights.push_back(i % 3 == 0 ? Spot(lx, ly, lz, lightStart, beam) : Point(lx, ly, lz, lightStart));
         }
         TileGrid grid;
         ResizeTileGrid(grid, 1920, 1080);
@@ -278,10 +293,11 @@ TEST_CASE("Frame lights: every tile a light can reach lists it, and few others d
                 }
             }
     }
+    INFO("checked samples: " << checked << ", full-screen reaches: " << fullScreen
+                             << ", tight-checked lights: " << tight);
     CHECK(checked > 100000);
     CHECK(fullScreen > 0); // some reaches cross the eye plane
     CHECK(tight > 10);     // and the tightness was checked on enough of them
-    INFO("tight-checked lights: " << tight);
 }
 
 TEST_CASE("Frame lights: every kind is binned by its whole reach, a spotlight too", "[Graphics][remaster][FrameLights]")
