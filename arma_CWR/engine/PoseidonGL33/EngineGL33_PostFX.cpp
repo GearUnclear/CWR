@@ -227,19 +227,16 @@ void EngineGL33::DestroyPostTargets()
 void EngineGL33::DestroyPostPrograms()
 {
     PostTargets& p = _post;
+    // One list: every program PostTargets owns.
     for (unsigned int* prog :
          {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
           &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen, &p.progAirMarch,
-          &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progGtao, &p.progGtaoAccum})
-        for (unsigned int* prog :
-             {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
-              &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen, &p.progAirMarch,
-              &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progMeter})
-        {
-            if (*prog)
-                glDeleteProgram(*prog);
-            *prog = 0;
-        }
+          &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progGtao, &p.progGtaoAccum, &p.progMeter})
+    {
+        if (*prog)
+            glDeleteProgram(*prog);
+        *prog = 0;
+    }
     if (p.vao)
     {
         GL33Bind::OnVaoDeleted(p.vao);
