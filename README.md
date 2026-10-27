@@ -71,6 +71,11 @@ default) and **Classic**, the original lighting. The choice is stored in
 three-entry config colours read correctly (street lamps), and explosions
 that scale with their charge.
 
+AI soldiers' sight is cut by the same fog the renderer draws, so they never see
+through fog the player cannot see through. With Classic lighting, or with post
+effects off (a developer switch, not an Options setting), that is the classic
+fog. A dedicated server uses the Remastered fog.
+
 ## Layout
 
 - [Apps](apps/README.md) - executable targets
