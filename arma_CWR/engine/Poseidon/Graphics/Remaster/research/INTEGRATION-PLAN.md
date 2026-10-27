@@ -800,7 +800,7 @@ track's final override directory, not from the patch:
 | clouds | `clouds/glsl_final/` |
 | texsharp | `texsharp/glsl7/` (rotated self-detail, `rfinalr`) |
 | temporal | in the patch |
-| water | `git show 935cb5e:arma_CWR/tests/rendering/water_research/shaders_C/psDetailRemasterMain.glsl` (branch `claude/remaster-water-research`, read without checkout) |
+| water | `git show 935cb5e:arma_CWR/tests/rendering/water_research/shaders_C/psDetailRemasterMain.glsl` (tag `research/remaster-water-2026-10-17`, read without checkout) |
 | perf | no shader change kept |
 
 The clouds patch also rewrites the `vpScale` comment line with a mis-encoded character; that hunk
@@ -1882,7 +1882,7 @@ As built in B4 (corrections to the bullets above):
 ### B5. water (sea waves, variant C)
 
 - **Prototype**: shader-only override of `psDetailRemasterMain` (`isSea()` by material
-  specular), on branch `claude/remaster-water-research` commit 935cb5e
+  specular), in tag `research/remaster-water-2026-10-17` (commit 935cb5e)
   (`tests/rendering/water_research/shaders_C/`).
 - **Keep**: the wave normal from the sea texture's luminance with the per-pixel UV-to-world
   Jacobian; Fresnel sky reflection with the low mean weight and full wave-driven variation;

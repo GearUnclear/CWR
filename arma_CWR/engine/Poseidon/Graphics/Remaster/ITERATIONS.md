@@ -18,7 +18,7 @@ Earlier history: the first lighting attempt (Codex, branch `origin/graphics/ligh
 | R6 | 2026-10-17 | 29ceed5 | clang-format only | none |
 | V1 | 2026-10-17 | bf69b6b, 3c53141 | Scripted capture run; **first in-game validation** | "marginally better, at most"; water "so much less defined" |
 | D1 | 2026-10-17 | none | Owner direction: "RTX on"; interview decisions | (owner's own direction) |
-| W1 | 2026-10-17 | 935cb5e (branch `claude/remaster-water-research`) | Sea wave study | not yet judged |
+| W1 | 2026-10-17 | 935cb5e (tag `research/remaster-water-2026-10-17`) | Sea wave study | not yet judged |
 | X1 | 2026-10-17 | none (research only) | 22-track research run with critics | not yet judged; owner asked for bug fixes first, then this documentation |
 | B1 to B10 | 2026-10-17 | 874638c to 72f32d4, 84408f8 | Bug fixes found by the research | not yet judged |
 | B11, B12 | 2026-10-17 | none | Tree shadows at start-up, MSAA by default: built, **not landed** | none |
@@ -121,7 +121,7 @@ Not a change; it set the bar for everything after.
 - "'classic' engine code is no longer used in this project, we target the remaster engine exclusively".
 - Interview answers: the new lighting **replaces** the original look (no switch; the original stays only as the before picture); target **an RTX 3060 class card at 60 fps in 1080p**; **all four areas** matter (light and shadow, sky and air, water and shine, night and combat); results are judged on **side-by-side pictures**.
 
-## W1. Sea waves (935cb5e, branch `claude/remaster-water-research`)
+## W1. Sea waves (935cb5e, tag `research/remaster-water-2026-10-17`)
 
 **What changed.** Research only: shader overrides that derive a wave normal from the shipped sea texture and add a Fresnel sky reflection and sun glints (variants A, B, C; C is the pick). The study found the sea is drawn by the terrain detail shader, not the water shader. Full write-up: `arma_CWR/tests/rendering/water_research/README.md` on that branch; summary in `research/water.md`.
 

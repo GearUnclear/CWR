@@ -1,12 +1,12 @@
 # Sea waves (track: water)
 
-Not ranked by a critic: **no critic has reviewed this track.** Area: water and shine. The full write-up lives on its own branch; this page is a pointer and a short summary.
+Not ranked by a critic: **no critic has reviewed this track.** Area: water and shine. The full write-up lives in its own tag; this page is a pointer and a short summary.
 
 ## Where the full document is
 
-- Branch `claude/remaster-water-research` (pushed to `origin`), commit 935cb5e "research: remastered water prototype (wave normals from the sea texture)", 2026-10-17. It was cut from the lighting branch `claude/youthful-lovelace-8imbdh` at 3c53141, as the owner asked ("put the water stuff on its own branch with good docs to review later").
-- The document: `arma_CWR/tests/rendering/water_research/README.md` on that branch. Local checkout: `D:\Arma_CWA_worktrees\water-research`.
-- Measurements on the branch: `arma_CWR/tests/rendering/water_research/measurements/metrics.md` and `cost.md`. Shaders: `shaders_A`, `shaders_B`, `shaders_C` (`psDetailRemasterMain.glsl` plus `params.txt`), generated from `src/water_template.glsl` by `src/make_variants.py`.
+- Tag `research/remaster-water-2026-10-17` on `origin` (formerly branch `claude/remaster-water-research`, retired 2026-10-27), commit 935cb5e "research: remastered water prototype (wave normals from the sea texture)", 2026-10-17. It was cut from the lighting branch `claude/youthful-lovelace-8imbdh` at 3c53141, as the owner asked ("put the water stuff on its own branch with good docs to review later").
+- The document: `arma_CWR/tests/rendering/water_research/README.md` in that tag; read it with `git show research/remaster-water-2026-10-17:arma_CWR/tests/rendering/water_research/README.md`.
+- Measurements in the tag: `arma_CWR/tests/rendering/water_research/measurements/metrics.md` and `cost.md`. Shaders: `shaders_A`, `shaders_B`, `shaders_C` (`psDetailRemasterMain.glsl` plus `params.txt`), generated from `src/water_template.glsl` by `src/make_variants.py`.
 - Research notes on the dev machine: `D:\Arma_CWA_worktrees\lighting\tmp\research\water\NOTES.md`.
 
 ## The owner's complaint
@@ -63,4 +63,4 @@ Estimated under 0.1 ms (2 extra texture reads for A and B, 7 for C, about 60 to 
 
 ## Images
 
-Renders of game data, never committed. On the dev machine: `D:\Arma_CWA\tmp\water-research-images\` (named in the branch README) and `D:\Arma_CWA_worktrees\lighting\tmp\research\water\images\`: `overview_all.png` (original look, current Remastered, A, B, C per view), `triptych_<view>__C.png` (original look, current Remastered, Remastered plus C), and the same for A and B. In the image labels, "Classic" means the original look.
+Renders of game data, never committed. On the dev machine: `D:\Arma_CWA\tmp\water-research-images\` (named in the tag's README) and `D:\Arma_CWA_worktrees\lighting\tmp\research\water\images\`: `overview_all.png` (original look, current Remastered, A, B, C per view), `triptych_<view>__C.png` (original look, current Remastered, Remastered plus C), and the same for A and B. In the image labels, "Classic" means the original look.
