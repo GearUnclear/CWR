@@ -63,47 +63,45 @@ Rgb TonemapNeutral(const Rgb& c);
 // 1 on (the shipped default). A switch counts as on above 0. Each member is a
 // triSetLighting key of the same name; the registry that names, labels and
 // groups them, and the gate that decides each frame whether an enabled feature
-// runs, are in FeatureSwitches.hpp and FeatureGates.hpp. The comment after each
-// member names the integration step that makes it do something (plan section
-// 4 of research/INTEGRATION-PLAN.md); until then nothing reads it.
+// runs, are in FeatureSwitches.hpp and FeatureGates.hpp.
 struct FeatureSet
 {
-    float drawGrouping = 1.0f;    // A4 perf: instanced runs at any light, unchanged constants not re-sent
-    float hillCull = 1.0f;        // A4 perf: objects behind hills are not drawn
-    float taa = 1.0f;             // A5 temporal anti-aliasing
-    float lightTiles = 1.0f;      // A6 one tiled light list for every local light
-    float atmosphere = 1.0f;      // A7 sky table for the dome and the fog colour
-    float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map, leaves without self-shadow stripes
-    float softShadows = 1.0f;     // B1 contact-hardening (PCSS) sun shadows
-    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides (ComputeLightRig)
-    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy (shader shadeRemastered)
-    float nightLights = 1.0f;     // B3 physical lamps and low-beam headlights
-    float moonShadows = 1.0f;     // B3 the moon as a shadow-casting key light
-    float stars = 1.0f;           // B3 stars in a dark sky
-    float combatLights = 1.0f;    // B4 fires, flashes and flares light the scene
-    float combatShadows = 1.0f;   // B4 combat lights cast shadows
-    float seaWaves = 1.0f;        // B5 wave relief and a broken sun path on the sea
-    float ssr = 1.0f;             // B6 screen-space reflections on water and wet ground
-    float wetWeather = 1.0f;      // B7 rain wets surfaces and fills puddles
-    float lampStreaks = 1.0f;     // B7 lamp light streaks on wet ground
-    float airBeams = 1.0f;        // B8 sun beams and headlight cones in the air
-    float airHaze = 1.0f;         // B8 aerial haze with distance
-    float valleyMist = 1.0f;      // B8 morning mist pooled in the valleys
-    float canopyShadows = 1.0f;   // B9 long tree shadows beyond the shadow map
-    float litClouds = 1.0f;       // B10 sky clouds lit from their sun side
-    float skyCloudShadows = 1.0f; // B10 cloud shadows that match the sky
-    float terrainDetail = 1.0f;   // B11 grass and rock grain on terrain
-    float sharpen = 1.0f;         // B11 luma sharpening when TAA is off
-    // Look lane "surface" (SurfaceLight.hpp): horizon-based ambient occlusion
-    // with a multi-bounce correction, sky occlusion under the canopy, the sky
-    // light from the sky table as low-order spherical harmonics, and a Fresnel
+    float drawGrouping = 1.0f;    // perf: instanced runs at any light, unchanged constants not re-sent
+    float hillCull = 1.0f;        // perf: objects behind hills are not drawn
+    float taa = 1.0f;             // temporal anti-aliasing
+    float lightTiles = 1.0f;      // one tiled light list for every local light
+    float atmosphere = 1.0f;      // sky table for the dome and the fog colour
+    float treeShadows = 1.0f;     // trees and buildings in the sun shadow map, leaves without self-shadow stripes
+    float softShadows = 1.0f;     // contact-hardening (PCSS) sun shadows
+    float lowSunRig = 1.0f;       // low-sun hue and readable shaded sides (ComputeLightRig)
+    float crownCanopy = 1.0f;     // tree crowns lit as a canopy (shader shadeRemastered)
+    float nightLights = 1.0f;     // physical lamps and low-beam headlights
+    float moonShadows = 1.0f;     // the moon as a shadow-casting key light
+    float stars = 1.0f;           // stars in a dark sky
+    float combatLights = 1.0f;    // fires, flashes and flares light the scene
+    float combatShadows = 1.0f;   // combat lights cast shadows
+    float seaWaves = 1.0f;        // wave relief and a broken sun path on the sea
+    float ssr = 1.0f;             // screen-space reflections on water and wet ground
+    float wetWeather = 1.0f;      // rain wets surfaces and fills puddles
+    float lampStreaks = 1.0f;     // lamp light streaks on wet ground
+    float airBeams = 1.0f;        // sun beams and headlight cones in the air
+    float airHaze = 1.0f;         // aerial haze with distance
+    float valleyMist = 1.0f;      // morning mist pooled in the valleys
+    float canopyShadows = 1.0f;   // long tree shadows beyond the shadow map
+    float litClouds = 1.0f;       // sky clouds lit from their sun side
+    float skyCloudShadows = 1.0f; // cloud shadows that match the sky
+    float terrainDetail = 1.0f;   // grass and rock grain on terrain
+    float sharpen = 1.0f;         // luma sharpening when TAA is off
+    // Surfaces (SurfaceLight.hpp): horizon-based ambient occlusion with a
+    // multi-bounce correction, sky occlusion under the canopy, the sky light
+    // from the sky table as low-order spherical harmonics, and a Fresnel
     // specular on every surface.
     float surfaces = 1.0f;
-    // Look lane "light" (PhotoCamera.hpp): a physical sun and sky from the sky
+    // Photoreal light (PhotoCamera.hpp): a physical sun and sky from the sky
     // table's atmosphere, and a camera (metered exposure, eye adaptation, white
     // balance, filmic curve) in the post pass instead of the per-fragment tonemap.
     float photoLight = 1.0f;
-    float volFog = 1.0f; // look-fog: volumetric fog and atmosphere in place of the flat distance fog
+    float volFog = 1.0f; // volumetric fog and atmosphere in place of the flat distance fog
 };
 
 // Art-direction knobs, live-tunable from the dev overlay Lighting tab. The
@@ -212,14 +210,13 @@ struct LightingTuning
     // (metres), the sky occlusion under the canopy (forests, tree crowns,
     // building blocks), the share of the sky light taken from the sky table's
     // spherical harmonics (0 = the rig's hemisphere, the default: the table's
-    // shape added no direction the rig's sun-side horizon does not already
-    // give, and its brighter vertical sky turned olive hulls blue-grey), how
-    // much of the physical
-    // sky's colour that light keeps (0 = the rig's zenith colour), how bright
-    // it is (0 = the rig's sky on flat ground, the default: the rig's fill is
-    // calibrated, and a darker one dimmed the sunlit land at noon; 1 = the
-    // table's sky against the rig's sun, about half the rig's fill under a
-    // clear noon sky), the
+    // shape adds no direction the rig's sun-side horizon does not already
+    // give, and its brighter vertical sky turns olive hulls blue-grey), how
+    // much of the physical sky's colour that light keeps (0 = the rig's zenith
+    // colour), how bright it is (0 = the rig's sky on flat ground, the
+    // default: the rig's fill is calibrated, and a darker one dims the sunlit
+    // land at noon; 1 = the table's sky against the rig's sun, about half the
+    // rig's fill under a clear noon sky), the
     // strength of the specular every surface gets, the sun's screen-space
     // contact shadows, and the relief the albedo gives the land and the
     // objects (a multiplier of each surface's relief height); the shade: the
@@ -271,7 +268,7 @@ struct LightingTuning
     // (on top of atmoHaze). The table's own air is the very clean Bruneton
     // reference (aerosol optical depth about 0.005); 6 x (about 0.03) whitens
     // the horizon, spreads a golden glow around a low sun and reddens it,
-    // short of the white haze dome 10 x gave at a low sun.
+    // short of the white haze dome 10 x gives at a low sun.
     float camHaze = 6.0f;
     // The night's rod vision (PhotoCamera.hpp kScotopicShift): dim light goes
     // toward a cool grey of its brightness (1 = the full shift).
@@ -282,9 +279,9 @@ struct LightingTuning
     // dim it).
     float camAdditive = 1.0f;
     // Aerial perspective under the camera: the air pass's haze density times
-    // this (B8's haze is a 35 km visibility; 4 x is a summer day's 9 km, so
-    // ridges 1 to 3 km out go paler and bluer toward the horizon sky). The
-    // look-fog lane's volume, once it lands, owns the haze instead.
+    // this (the air pass's own haze is a 35 km visibility; 4 x is a summer
+    // day's 9 km, so ridges 1 to 3 km out go paler and bluer toward the
+    // horizon sky).
     float camAerial = 6.0f;
     // Lamps, fires and headlights under the camera at full night: their light
     // times this (the night's exposure sits about 2.5 EV under the day's, and a
@@ -306,8 +303,8 @@ struct LightingTuning
     // surface tags and 10 the reflections alone (ScreenReflections.hpp
     // kDebugViewSsrTags, kDebugViewSsrReflection), 11 the
     // combat shadow mask as each surface reads it (CombatLights.hpp
-    // kDebugViewCombatMask), 12 to 14 the surfaces lane's sky light, canopy
-    // sky visibility and specular.
+    // kDebugViewCombatMask), 12 to 14 the surfaces' sky light, canopy sky
+    // visibility and specular (SurfaceLight.hpp).
     int debugView = 0;
 };
 
@@ -345,13 +342,14 @@ struct LightRigInputs
     float skyThrough = 1.0f;                   // 1 clear .. 0 overcast
     float nightEffect = 0.0f;                  // 0 day .. 1 night
     bool cloudShadowsActive = false;           // the sun dimming by overcast moves into the cloud field
-    // The share of the ground the sky-matched cloud shadows cover (B10,
-    // SkyDensity.hpp SkyShadowCoverage); negative while the noise field casts
+    // The share of the ground the sky-matched cloud shadows cover
+    // (SkyDensity.hpp SkyShadowCoverage); negative while the noise field casts
     // them. The field then carries the same mean dimming over this share.
     float skyShadowCoverage = -1.0f;
     // The photoreal rig (FeatureSet::photoLight) runs when this is valid and
     // the camera that tonemaps it runs this frame (the backend leaves it
-    // invalid otherwise): the old rig and its exposure meter are then unused.
+    // invalid otherwise): the classic-calibrated rig and its exposure meter
+    // are then unused.
     PhysicalSky physical;
 };
 
@@ -390,7 +388,7 @@ struct LightRig
 // the same number).
 constexpr int kDebugViewAlbedo = 7;
 constexpr float kShaderDebugAlbedo = 4.0f;
-// The surfaces lane's views (SurfaceLight.hpp), drawn by the lit shaders
+// The surfaces' views (SurfaceLight.hpp), drawn by the lit shaders
 // through litSurface2.y (1, 2, 3): the sky light on each surface (12), the
 // sky the canopy leaves it (13) and its specular alone (14), all with the
 // post pass's occlusion off. After the combat shadow mask's view (11,
@@ -409,9 +407,9 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
 // The key light: what the shader's sun slots carry and what the shadow map,
 // the terrain horizon, the cloud shadows and the glossy highlight follow. By
 // day and in twilight it is the sun. At night, with the moon key on (the
-// moonShadows switch and its gate, B3), it is the moon: `moonShare` (0..1,
+// moonShadows switch and its gate), it is the moon: `moonShare` (0..1,
 // NightLights.hpp MoonKeyShare) of the rig's moon moves out of the shadowless
-// moon term into the key, so the moon keeps F9's calibration (kMoonFull, its
+// moon term into the key, so the moon keeps its calibration (kMoonFull, its
 // chroma, its sky fill) and only gains shadows; the rest stays in rig.moon.
 // The sun is fully set where the share can be above 0 (the gate needs it 3
 // degrees under the horizon; the rig's sun is out by 1.5 degrees under).
@@ -444,13 +442,13 @@ KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShar
 // face: it takes kParticleKeyShare of the key light (the sun, or the moon under
 // the moon key) and of the moon's shadowless rest (a thick puff scatters the
 // sun from its whole lit half: about what a sunlit wall gets; the classic
-// decal's 0.375 with the sky's weaker physical share left white smoke duller
+// decal's 0.375 with the sky's weaker physical share leaves white smoke duller
 // than the sand under it by day), the sun dimmed by the cloud
 // field's mean, plus the sky's irradiance averaged over every direction (the
 // lit shaders' skyIrradiance: a quarter of the zenith's, a quarter of each
 // horizon side's and a quarter of the ground's bounce) times `shade`, the
 // share of the sky fill the world's surfaces keep (SurfaceLight.hpp
-// SurfaceShadeFactor; 1 without the surfaces lane). Irradiance in the rig's
+// SurfaceShadeFactor; 1 with the surfaces switch off). Irradiance in the rig's
 // units, before the material's brightness and the exposure. A dusk burst's
 // dust then takes the dusk air's dim light, not the classic sunset's pink sun,
 // which the classic model keeps shining for 5 degrees after sunset.
@@ -475,10 +473,9 @@ float PhysicalRadianceToDisplay(float scale);
 // it kPhysicalSkyWhiten toward neutral grey (at equal luminance: the light
 // the haze and the ground send back into the shade) and kPhysicalSkyGain
 // times stronger. Toward grey, not toward the sun's colour: at a low sun the
-// shade keeps the sky's blue (golden shade turned pines mustard). A quarter
-// of the way (look director round 2): the pure table blue turned shaded
-// grass and soil frost grey (R - B of the shaded ground 2 against 26); half
-// of the way, as the shade's light is the sky's and the ground's bounce.
+// shade keeps the sky's blue (golden shade turns pines mustard). The pure
+// table blue turns shaded grass and soil frost grey; the shade's light is
+// the sky's and the ground's bounce mixed.
 constexpr float kPhysicalSkyWhiten = 0.75f;
 constexpr float kPhysicalSkyGain = 1.15f;
 Rgb PhysicalSkyFill(const Rgb& tableSky, const Rgb& sun);
@@ -496,24 +493,23 @@ constexpr float kPhysicalNightFill = 0.6f;
 // hangs over the painted clouds: at broken cloud most of the sun's direct
 // light goes into an even grey sky light, the sky greys and pales and the
 // camera sees less colour and contrast (an overcast day, not a blue one).
-// Look director round 2: from a sky-through of kVeilClearFrom (none) to
-// kVeilFullAt (all): a broken sky (0.7) keeps its blue gaps and its sun, a
-// full deck (0.1 and under) is the grey day.
+// From a sky-through of kVeilClearFrom (none) to kVeilFullAt (all): a broken
+// sky (0.7) keeps its blue gaps and its sun, a full deck (0.1 and under) is
+// the grey day.
 constexpr float kVeilClearFrom = 0.62f;
 constexpr float kVeilFullAt = 0.3f;
 float CameraWeatherVeil(float skyThrough);
 // The aerosol optical depth (550 nm) of a summer day on the photoreal rig's
 // sun beyond the sky table's own air; red takes 0.8 and blue 1.3 times it
-// (Angstrom 1.3 between 650 and 450 nm).
-// Look director round 2: a golden-hour sun (12 degrees) read as a neutral
-// mid-afternoon at 0.08; at 0.13 the sun is golden and dimmer under 15
-// degrees, orange at sunrise. The air mass past the zenith's counts up to
+// (Angstrom 1.3 between 650 and 450 nm). At 0.13 the sun is golden and dimmer
+// under 15 degrees and orange at sunrise; at 0.08 a golden-hour sun still
+// reads as a neutral mid-afternoon. The air mass past the zenith's counts up to
 // kSunAerosolMaxAirMass (the sun at the horizon is not put out).
 constexpr float kSunAerosolTau = 0.13f;
 constexpr float kSunAerosolMaxAirMass = 14.0f;
-// The twilight's sky fill (look director round 2): the materials show a
-// white surface 1.6 times its light, so a pale plain under a dusk sky came
-// out brighter than the sky at its horizon. From kDuskFillFromDeg of sun
+// The twilight's sky fill: the materials show a white surface 1.6 times its
+// light, so without a cut a pale plain under a dusk sky comes out brighter
+// than the sky at its horizon. From kDuskFillFromDeg of sun
 // down to kDuskFillFullDeg the sky's light on the ground keeps
 // 1 - kDuskFillCut of itself, handing back over to the night's floor by
 // kDuskFillNightDeg.
@@ -534,7 +530,7 @@ Rgb SunChroma(float elevationDeg, float warmth);
 // space, LightSun's colorFull or Diffuse) taken to linear, so evenings keep the
 // original's warm hue on screen. `warmth` 0 = neutral.
 Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
-// With the low-sun rig (FeatureSet::lowSunRig, plan step B2) the sun then
+// With the low-sun rig (FeatureSet::lowSunRig) the sun then
 // takes a further LowSunHueShare of the classic sunset hue: from 25 degrees
 // down (where classic's own sunset ramp starts; EveningSunChroma reaches only
 // 14% of it at 12.7 degrees) and more in the last 9, where classic's sun is
@@ -545,9 +541,9 @@ Rgb LowSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
 
 // The low-sun rig's sideways fill on vertical faces. At a low sun the light on
 // a wall comes mostly sideways, from the bright horizon band and the sunlit
-// ground in front of it, which the hemisphere split under-counts: the face of
-// a hull turned away from a 7 to 14 degree sun fell to 0.32 to 0.42 of its
-// sunlit side on screen (0.6 is the target; 0.42 was called crushed). The fill
+// ground in front of it, which the hemisphere split under-counts: without the
+// fill the face of a hull turned away from a 7 to 14 degree sun shows at 0.32
+// to 0.42 of its sunlit side on screen, where 0.6 is the target. The fill
 // weight is LowSunFill (full from 8 degrees down to the horizon, gone by 40,
 // and faded out under the horizon); the sky part of the anti-sun horizon takes
 // 1 + kLowSunFillAntiSun * fill, the sunward one 1 + kLowSunFillSunward * fill

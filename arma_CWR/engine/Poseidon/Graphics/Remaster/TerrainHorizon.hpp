@@ -22,8 +22,8 @@
 //     from +Z toward +X: dir = (sin a, cos a) in (x, z).
 //   - Horizon angles are smoothed with a 3x3 binomial filter and encoded to
 //     16-bit unorm over [kMinAngleDeg, kMaxAngleDeg]. Near sunset the sun
-//     visibility swings ~7% per 0.2 degree of horizon, so 8-bit storage drew
-//     the texel grid as contour lines on the ground; 16 bits are smooth.
+//     visibility swings ~7% per 0.2 degree of horizon, so 8-bit storage would
+//     draw the texel grid as contour lines on the ground; 16 bits are smooth.
 //   - Layout of `horizon`: kDirections / 4 layers, each size*size RGBA texels;
 //     direction i lives in layer i / 4, component i % 4. It uploads 1:1 to a
 //     GL_TEXTURE_2D_ARRAY of GL_RGBA16.
@@ -56,8 +56,9 @@ struct TerrainHorizonMap
     // tells grass from bare ground and how porous the land is from this
     // continuous field (SampleGroundColor, the shaders' groundFieldAt), not
     // from each square's own texture: every square has its own texture, and a
-    // class read per pixel jumped at a square whose texture differed a little
-    // from its neighbour's (a straight seam in the wet sheen and the puddles).
+    // class read per pixel would jump at a square whose texture differs a
+    // little from its neighbour's (a straight seam in the wet sheen and the
+    // puddles).
     // Empty when no ground colours were given.
     std::vector<float> groundColor;
 

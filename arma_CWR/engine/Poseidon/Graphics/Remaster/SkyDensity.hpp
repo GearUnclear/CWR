@@ -4,8 +4,7 @@
 #include <vector>
 
 // The sky's own clouds for the remastered sky (feature switches litClouds and
-// skyCloudShadows, INTEGRATION-PLAN.md section 5 B10). Pure math, no GL, no
-// engine state; the GL33 backend (EngineGL33_SkyClouds.cpp) builds the density
+// skyCloudShadows). Pure math, no GL, no engine state; the GL33 backend (EngineGL33_SkyClouds.cpp) builds the density
 // map on a worker thread and the shaders mirror the functions below
 // (EngineGL33_LightingShaders*.cpp; the tests check the constants match).
 //
@@ -30,9 +29,9 @@
 //     forward-scattered silver lining on the rim, darker thick cloud against
 //     the sun and deeper bellies under an overcast deck. All of it only at a
 //     low sun (every term fades between kLitCloudFadeStartDeg and
-//     kLitCloudFadeEndDeg, LitCloudTerms): at midday the relief embossed the
-//     painted sky, and the darkening against the sun on its own made the sky
-//     only darker.
+//     kLitCloudFadeEndDeg, LitCloudTerms): at midday the relief would emboss
+//     the painted sky, and the darkening against the sun alone would only
+//     darken it.
 //   - sky-matched cloud shadows: a lit point is projected along the sun to a
 //     deck at kSkyShadowDeckAltitude and the direction of that deck point is
 //     looked up in the density map: the cloud the player sees in the sky is
@@ -167,7 +166,7 @@ LitCloudShade LitCloudTerms(float sunElevationDeg, float cosViewSun, float densi
 // The dome turns this many degrees about the zenith per unit of the sky
 // clouds' position (Landscape::CloudsPosition, which grows by the weather's
 // cloud speed, 0.2 to 1.0 per second): about 6 degrees a minute at overcast
-// 0.5. Captures pin the position (triPinCloudDrift), so the turn with it.
+// 0.5. Pinning the position (triPinCloudDrift) pins the turn too.
 constexpr float kSkyTurnDegPerCloudsPos = 0.3f;
 // The dome's u offset at a clouds position, in [0, 1) (u wraps every 180
 // degrees of azimuth).

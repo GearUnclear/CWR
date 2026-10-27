@@ -287,10 +287,10 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth)
     // colorFull) and applies it in display space; taken to linear, that hue
     // shows on screen as classic's does. Classic's blue ambient then cools its
     // sunlit side, so the sun itself takes kClassicHueShare of that hue: a
-    // sunlit hull ends up with classic's hue (red/blue, green/red within a few
-    // percent in the lab's golden-hour views). The last hour (about 7 degrees
+    // sunlit hull ends up with classic's hue (red/blue and green/red within a
+    // few percent). The last hour (about 7 degrees
     // and below) takes it in full, fading to the near-neutral physical sun by
-    // 16 degrees: classic's yellow day sun is what turned the olive textures to
+    // 16 degrees: classic's yellow day sun is what turns the olive textures to
     // mustard, and above that classic's clamp hides its tint anyway.
     constexpr float kClassicHueShare = 0.65f;
     const Rgb classicLinear = ToLinear(classicSun);
@@ -304,8 +304,8 @@ float LowSunHueShare(float elevationDeg)
 {
     // Classic's sunset colour ramps in from 25 degrees (LightSun::Recalculate,
     // begSunset), so 0.4 of it from there down, and 0.3 more in the last 9
-    // degrees (shade research V20: the lit side of a hull at a 4.8 degree sun
-    // came out as red as classic's only with it).
+    // degrees (without it the lit side of a hull at a 4.8 degree sun is less
+    // red than classic's).
     return 0.4f * (1.0f - Smoothstep(6.0f, 25.0f, elevationDeg)) + 0.3f * (1.0f - Smoothstep(4.0f, 9.0f, elevationDeg));
 }
 
@@ -335,9 +335,9 @@ float ShaderDebugView(int debugView)
 
 LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
 {
-    // The low-sun rig (B2): the evening hue from 25 degrees and the sideways
-    // fill on vertical faces. Off, the rig is the one before that step to the
-    // bit (every term below multiplies by exactly 1 or keeps its chroma).
+    // The low-sun rig: the evening hue from 25 degrees and the sideways fill
+    // on vertical faces. Off, every term below multiplies by exactly 1 or
+    // keeps its chroma, so the rig is the plain one bit for bit.
     const bool lowSunRig = tuning.features.lowSunRig > 0.0f;
     LightRig rig;
     const float sinSun = std::max(-1.0f, std::min(1.0f, in.towardSun[1]));
@@ -359,7 +359,7 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && shadowCover > 0.0f;
     rig.cloudCover = clouds ? shadowCover : 0.0f;
     rig.cloudTransmit = clouds ? 1.0f - (1.0f - kCloudTransmit) * std::min(1.0f, tuning.cloudShadows) : 1.0f;
-    // Sky-matched shadows (B10) lie where the sky's own clouds are, over the
+    // Sky-matched shadows lie where the sky's own clouds are, over the
     // share of the ground they cover, not the sky cover the noise field takes.
     // They carry the field's mean dimming: over a larger share more light gets
     // through under each cloud; over a smaller one the rest of the dimming

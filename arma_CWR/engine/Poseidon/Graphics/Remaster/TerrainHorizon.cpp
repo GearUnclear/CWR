@@ -29,10 +29,10 @@ float SampleHeight(const std::vector<float>& h, int size, float fx, float fz)
     return a + (b - a) * tz;
 }
 
-// Box-downsample to at most maxSize texels per side.
 // How much of the ground's own colour the bounce takes (see GroundTint).
 constexpr float kGroundTintStrength = 0.75f;
 
+// Box-downsample to at most maxSize texels per side.
 void Downsample(const float* src, int size, float cellSize, int maxSize, std::vector<float>& dst, int& dstSize,
                 float& dstCell)
 {

@@ -19,8 +19,7 @@ struct ClassRow
     float porosity;
 };
 
-// In enum order (checked below). Porosity from the research prototype's
-// per-class response (materials/override_v9, surfFor).
+// In enum order (checked below).
 constexpr ClassRow kClasses[] = {
     {SurfaceClass::Unknown, "unknown", 0.5f}, {SurfaceClass::Paint, "paint", 0.05f},
     {SurfaceClass::Metal, "metal", 0.0f},     {SurfaceClass::Glass, "glass", 0.0f},
@@ -99,9 +98,8 @@ SurfaceRule Rule(const char* name, SurfaceClass surface, std::uint32_t kinds, st
     return r;
 }
 
-// The token lists of the research prototype (EngineGL33_Lighting.cpp
-// ClassifySurface, round 6; every texture of three islands in
-// classification_log_r6.txt).
+// Texture-name tokens per class, checked against every texture of three
+// islands.
 const std::vector<std::string> kGlass = {"sklo",       "skla",   "glass",  "window",   "windscreen",
                                          "windshield", "armwin", "canopy", "cifernik", "budik"};
 const std::vector<std::string> kLens = {"reflekt", "svetl", "blink", "lamp", "light"};
@@ -191,7 +189,7 @@ SurfaceTable DefaultSurfaceTable()
 {
     SurfaceTable t;
     t.rules = {
-        // Glass by name on anything (the prototype's first test).
+        // Glass by name on anything, first.
         Rule("glass", SurfaceClass::Glass, kAllKinds, kGlass),
         Rule("window", SurfaceClass::Glass, kAllKinds, {"okno"}, {"ram", "_in", "bez"}),
         // Tents and camouflage nets: their textures are anonymous atlases.

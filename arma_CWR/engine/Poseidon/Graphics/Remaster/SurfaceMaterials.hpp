@@ -8,8 +8,7 @@
 #include <vector>
 
 // Surface classes for the remastered wet weather (feature switch
-// `wetWeather`, research/INTEGRATION-PLAN.md section 5 B7, research track
-// materials). Pure, no GL, no engine state.
+// `wetWeather`). Pure, no GL, no engine state.
 //
 // CWA's models carry no material data beyond a texture, a colour set and
 // sometimes a specular power. What a section is made of (paint that sheds the
@@ -109,8 +108,8 @@ struct SurfaceTable
     std::vector<SurfaceRule> rules; // in order: the first rule that matches wins
 };
 
-// The stock rules (Czech and English tokens of the stock data, @LoBo's
-// English), in the order the research prototype tested them.
+// The stock rules (Czech and English tokens of the stock data, English tokens
+// of common mods), in match order.
 SurfaceTable DefaultSurfaceTable();
 // A mod's rules (CfgSurfaceMaterials, in declaration order): one named like a
 // rule already in the table replaces it in place, the others go before the
