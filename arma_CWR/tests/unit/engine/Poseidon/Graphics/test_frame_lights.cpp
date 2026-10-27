@@ -15,11 +15,11 @@
 #include <string>
 #include <vector>
 
-// The frame's tiled light list (INTEGRATION-PLAN.md section 5 A6,
-// Graphics/Rendering/Lighting/FrameLights.hpp): binning must list every light
-// whose reach can touch a tile (a missed tile is a hard seam in a lamp's pool),
-// ranking keeps the lights strongest at the camera, a full tile keeps the
-// strongest, and the buffer and the shaders agree on the layout and the model.
+// The frame's tiled light list (Graphics/Rendering/Lighting/FrameLights.hpp):
+// binning must list every light whose reach can touch a tile (a missed tile is
+// a hard seam in a lamp's pool), ranking keeps the lights strongest at the
+// camera, a full tile keeps the strongest, and the buffer and the shaders agree
+// on the layout and the model.
 
 using namespace Poseidon::lighting;
 
@@ -577,9 +577,9 @@ TEST_CASE("Frame lights: the shaders read the list with the model and sizes of F
     char band[96];
     std::snprintf(band, sizeof(band), "float band = max(edgeIn - edgeOut, %.2f * edgeIn);", kClassicBudgetSoftness);
     CHECK(lights.find(band) != std::string::npos);
-    // (B3: the budget counts the lights of the classic model; with the physical
-    // lamps and low beams on they leave it, test_night_lights.cpp. B4: the
-    // combat lights at the head of the tile leave it too.)
+    // (The budget counts the lights of the classic model; with the physical
+    // lamps and low beams on they leave it, test_night_lights.cpp. The combat
+    // lights at the head of the tile leave it too.)
     CHECK(lights.find("float w = classic > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) "
                       ": 1.0;") != std::string::npos);
     CHECK(lights.find("int classic = count - head;") != std::string::npos);
