@@ -280,7 +280,7 @@ void EngineGL33::PostCameraMeter(const PostFrame& f)
     SetInt(p.progMeter, "colorTex", 0);
     SetInt(p.progMeter, "depthTex", 2);
     // The frame the composite reads: with the air applied when it ran.
-    BindTex(0, PostSceneTex(f)); // the frame after the Air stage (the fog or B8's air)
+    BindTex(0, PostSceneTex(f)); // the frame after the Air stage (the fog or the air pass)
     BindTex(2, p.depthTex);
     // Scene light: the stored frame divided by its pre-exposure.
     Set4(p.progMeter, "meterParams", rm::kMeterSkyWeight, std::exp2(-c.preExposureLog2),

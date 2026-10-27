@@ -1,6 +1,6 @@
 // Remastered sky: the sky's own clouds (feature switches `litClouds` and
-// `skyCloudShadows`, INTEGRATION-PLAN.md section 5 B10; the math and its
-// constants are Graphics/Remaster/SkyDensity.hpp).
+// `skyCloudShadows`; the math and its constants are
+// Graphics/Remaster/SkyDensity.hpp).
 //
 //   - the cloud-density map on unit 9, built from the weather sky texture
 //     whenever the weather sky changes: the texture files are read here, once
@@ -174,8 +174,8 @@ void DeleteTexture(GLuint& t)
 
 void EngineGL33::InitSkyClouds()
 {
-    // Unit 9 always holds a complete texture (the F3 rule): no cloud until the
-    // first map is built.
+    // Unit 9 always holds a complete texture (a shader must never sample an
+    // incomplete texture): no cloud until the first map is built.
     GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
     const unsigned char none[4] = {0, 0, 0, 255};
     glGenTextures(1, &s_clouds.standIn);

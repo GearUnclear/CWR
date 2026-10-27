@@ -255,7 +255,7 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     ctx.objectKind = GetDrawObjectKind();
 
     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
-    // The wet weather's surface class of this draw (B7; nothing while dry).
+    // The wet weather's surface class of this draw (nothing while dry).
     SetLitSurface(tex, d);
     // The screen-space reflections' surface tag of this draw (its stencil
     // reference and masks; the state of before while the world writes no

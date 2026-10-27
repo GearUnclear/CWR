@@ -1,6 +1,5 @@
-// Remastered sea: the feature switch `seaWaves` (INTEGRATION-PLAN.md section
-// 5 B5; the shading model is in Graphics/Remaster/SeaWaves.hpp and the water
-// program s_psWaterRemasterMain).
+// Remastered sea: the feature switch `seaWaves` (the shading model is in
+// Graphics/Remaster/SeaWaves.hpp and the water program s_psWaterRemasterMain).
 //
 // The sea is the landscape's own faces (Landscape::DrawWater), which carry the
 // specular layer alone and so drew through the detail program (PSDetail) like

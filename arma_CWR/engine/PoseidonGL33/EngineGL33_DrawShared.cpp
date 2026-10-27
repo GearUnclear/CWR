@@ -248,7 +248,7 @@ void EngineGL33::DrawPoints(int beg, int end)
         return;
     }
 
-    // The remastered stars (B3, the stars switch and its night gate; the
+    // The remastered stars (the stars switch and its night gate; the
     // frame's gate as last computed, so the sky drawn before the world's first
     // pass may read the previous frame's): a soft splat with a faint colour
     // per star (NightLights.hpp MakeStarSplat) instead of the two-pixel

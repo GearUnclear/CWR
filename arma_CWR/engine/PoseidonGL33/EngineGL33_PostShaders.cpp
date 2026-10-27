@@ -241,7 +241,7 @@ uniform vec4 projInfo;   // as psPostAo
 uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
 uniform vec4 worldRect;  // as psPostAo
 uniform vec4 debugView;  // x: 1 = show occlusion
-// Combat light scattered in the air (B4, the combatLights switch;
+// Combat light scattered in the air (the combatLights switch;
 // CombatLights.hpp): the strongest combat lights, in view space.
 uniform vec4 scatterParams; // x light count (0 = none), y scattering per metre times the exposure, z sky distance (m)
 uniform vec4 scatterPos[8]; // xyz view space (m), w core radius r0
@@ -455,12 +455,11 @@ void main() {
         // strength as a power and the multi-bounce correction by the albedo.
         vec4 s = textureLod(surfTex, vUV, 0.0);
         // The volumetric fog veils the surface: the occlusion and the contact
-        // shadow take the surface's share of the light after the fog (its
-        // own light through it), not the air's light in front of it (the
-        // world's shares hold only the classic fog's edge). (Look fix
-        // "plate": a fogged treeline 300 m out in rain kept its full
-        // occlusion over the fog's light: dark scalloped rims at the foot of
-        // every crown.)
+        // shadow take the surface's share of the light after the fog (its own
+        // light through it), not the air's light in front of it (the world's
+        // shares hold only the classic fog's edge). (Without it a fogged
+        // treeline 300 m out in rain kept its full occlusion over the fog's
+        // light: dark scalloped rims at the foot of every crown.)
         float veil = surfParams2.y > 0.5 ? textureLod(fogVeilTex, vUV, 0.0).r : 1.0;
         s.r *= veil;
         s.b *= veil;
@@ -508,7 +507,7 @@ void main() {
         vec3 x = camDecode(c.rgb) * keep * camParams.y;
         x += texture(bloomTex, vUV).rgb * camGlow.x;
         x += shaft * shaftColor.rgb * (camGlow.y * camParams.y);
-        // Combat light scattered in the air (B4), as light at the exposure.
+        // Combat light scattered in the air, as light at the exposure.
         x += combatScatter();
         x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
         // The golden hour's warm balance (camGolden) is the low sun's light:
@@ -599,13 +598,13 @@ void main() {
 // the histogram.
 // The meter reads the sky at its plain roll-off (PhotoCamera.hpp
 // SkyMeterLight): toward the sun the dome's roll-off rises past white
-// (camSkyRolloff, kSkySunCap) so the sun's glow burns, and the guards that
-// keep the sky under white closed the camera down for that burn (look fix
-// round 5 "exposure"). Each sky tap's peak is taken back through the roll-off
-// toward the sun along its own view ray (meterProj, meterRect, meterSun) and
-// rolled off with the plain cap (meterSky: knee, cap, the cap toward the sun,
-// the glow's radius), so the meter sees the sky round the sun as it sees the
-// rest of the sky, and the frame keeps its burn.
+// (camSkyRolloff, kSkySunCap) so the sun's glow burns, and the guards that keep
+// the sky under white closed the camera down for that burn. Each sky tap's peak
+// is taken back through the roll-off toward the sun along its own view ray
+// (meterProj, meterRect, meterSun) and rolled off with the plain cap (meterSky:
+// knee, cap, the cap toward the sun, the glow's radius), so the meter sees the
+// sky round the sun as it sees the rest of the sky, and the frame keeps its
+// burn.
 static const char s_psPostMeterHead[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D colorTex;
@@ -718,14 +717,14 @@ void main() {
 }
 )";
 
-// TAA resolve (the Temporal stage, step A5; Graphics/Remaster/TemporalAA.hpp).
+// TAA resolve (the Temporal stage; Graphics/Remaster/TemporalAA.hpp).
 // This frame was drawn with a sub-pixel jitter; the history is the resolved
 // frame before it, with each pixel's view depth in alpha. Per pixel:
 //   - rebuild this frame at the pixel centre without the jitter: Gaussian
 //     weights exp(-4 d^2) (sigma 0.35 px) over the 3x3 neighbourhood centred
 //     on the jitter offset. The converged image is the scene filtered by this
-//     kernel: Karis's wider exp(-2.29 d^2) left the hero view 15% softer than
-//     without TAA, this one 5% (A5 sweep);
+//     kernel: Karis's wider exp(-2.29 d^2) left a test view 15% softer than
+//     without TAA, this one 5%;
 //   - reproject: the nearest depth of the 3x3 (a moving silhouette keeps the
 //     motion of the surface in front), unjittered to the view position, moved
 //     into the previous view with the camera motion (reproj rows, built in
@@ -919,9 +918,9 @@ void main() {
 }
 )";
 
-// Luma sharpen (the Sharpen stage with TAA off, step B11, the sharpen switch):
+// Luma sharpen (the Sharpen stage with TAA off, the sharpen switch):
 // contrast-adaptive sharpening (AMD FidelityFX CAS, 3x3 form) of the
-// composited frame, applied to brightness only (the research's full-colour CAS
+// composited frame, applied to brightness only (a full-colour CAS
 // turned the coloured texel noise of pale ground into speckle), into every
 // sample of the frame target. Strength 0 to 1 sets the CAS peak from -1/8 to
 // -1/5; the backend skips the stage at strength 0.
