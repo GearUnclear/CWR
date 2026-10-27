@@ -1,6 +1,6 @@
-// Remastered lighting: temporal anti-aliasing (TAA, INTEGRATION-PLAN.md step
-// A5; the math is Graphics/Remaster/TemporalAA.hpp, the shaders psPostTaa and
-// psPostTaaSharpen in EngineGL33_PostShaders.cpp).
+// Remastered lighting: temporal anti-aliasing (TAA; the math is
+// Graphics/Remaster/TemporalAA.hpp, the shaders psPostTaa and psPostTaaSharpen
+// in EngineGL33_PostShaders.cpp).
 //
 // A frame runs TAA when the taa switch and its frame gate are on and the frame
 // gets a post pass (TaaWantedThisFrame). Then:
@@ -16,7 +16,7 @@
 //     mask;
 //   - the post pass runs the Temporal stage (the resolve into the history)
 //     and the Sharpen stage (the history back into the frame target).
-// With TAA off the Sharpen stage can run alone: the luma sharpen of step B11
+// With TAA off the Sharpen stage can run alone: the luma sharpen
 // (the sharpen switch), on the composited frame.
 // Any frame without a resolve breaks the history chain (TaaHistoryUsable): the
 // next resolve starts from its own frame, as does a camera cut or a new
@@ -172,7 +172,7 @@ void EngineGL33::PostSharpen(const PostFrame& f)
     const PostTargets& p = _post;
     if (!f.plan.Runs(rm::PostStage::Temporal))
     {
-        // TAA off: the luma sharpen (B11) of the composited frame into every
+        // TAA off: the luma sharpen of the composited frame into every
         // sample of the frame target.
         glUseProgram(p.progLumaSharpen);
         SetInt(p.progLumaSharpen, "srcTex", 0);

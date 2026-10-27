@@ -1,4 +1,4 @@
-// Remastered lighting: the combat shadow mask's GLSL (step B4, the
+// Remastered lighting: the combat shadow mask's GLSL (the
 // combatShadows switch; Graphics/Rendering/Lighting/CombatLights.hpp). No GL
 // code: the unit tests compile these through PostShaderSource
 // (EngineGL33_PostShaders.cpp kPostShaders, rows CombatMask and

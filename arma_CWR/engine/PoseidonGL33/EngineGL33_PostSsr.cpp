@@ -1,6 +1,6 @@
-// Remastered lighting: screen-space reflections (feature switch ssr,
-// INTEGRATION-PLAN.md step B6; the math is Graphics/Remaster/ScreenReflections.hpp,
-// the shaders EngineGL33_PostSsrShaders.cpp).
+// Remastered lighting: screen-space reflections (feature switch ssr; the math
+// is Graphics/Remaster/ScreenReflections.hpp, the shaders
+// EngineGL33_PostSsrShaders.cpp).
 //
 // While the switch is on, the world's passes write each draw's surface tag into
 // the top bits of the stencil (ApplyPassState, ApplyDepthMode; the projected
@@ -452,7 +452,7 @@ void EngineGL33::PostSsr(PostFrame& f)
     // own binding of that unit, so it stays bound after the stage).
     BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());
     // (The raw binds above left the bind cache's active unit stale: without
-    // this the sky table could land on unit 5, the depth's; look director.)
+    // this the sky table could land on unit 5, the depth's.)
     GL33Bind::Invalidate();
     BindSkyTable();
     Set4(tr, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);

@@ -1,5 +1,4 @@
-// Long tree shadows (feature switch `canopyShadows`, INTEGRATION-PLAN.md
-// section 5 B9, research track hfrt).
+// Long tree shadows (feature switch `canopyShadows`).
 //
 // At a low sun every tree, bush, forest block and building casts its long
 // shadow, also beyond the sun shadow maps' few hundred metres
@@ -175,8 +174,9 @@ void SetSampler(GLuint prog, const char* name, int unit)
 
 void EngineGL33::InitCanopy()
 {
-    // Units 10 and 15 always hold a complete texture of the right kind (the F3
-    // rule): stand-ins until the first canopy and the first map.
+    // Units 10 and 15 always hold a complete texture of the right kind (a
+    // shader must never sample an incomplete texture): stand-ins until the
+    // first canopy and the first map.
     GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     const unsigned short none[2] = {0, 0};

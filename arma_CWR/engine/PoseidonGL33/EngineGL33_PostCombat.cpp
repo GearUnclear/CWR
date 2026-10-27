@@ -1,4 +1,4 @@
-// Remastered lighting: combat light (INTEGRATION-PLAN.md section 5 B4; the
+// Remastered lighting: combat light (the
 // combatLights and combatShadows switches; Graphics/Rendering/Lighting/
 // CombatLights.hpp).
 //
@@ -49,7 +49,7 @@ namespace fl = Poseidon::lighting;
 namespace
 {
 
-// The mask's march (CombatLights.hpp; the research's round 9): steps per
+// The mask's march (CombatLights.hpp): steps per
 // shadowed light, the thickness an occluder is taken to have, and how far
 // toward the light the march goes (a flare 80 m up would spread the steps too
 // thin to catch a man beside the receiver).
@@ -126,19 +126,18 @@ void DeleteTex(unsigned int& t)
 
 // A fire's light on surfaces under the photoreal camera comes from a body of
 // flames this wide (m), not from the 0.45 m ball the smoke reach is measured
-// in (look fix "fire": the stones round a camp fire went past white to a
+// in (from that ball the stones round a camp fire went past white to a
 // cream slab).
 constexpr float kFireSurfaceBody = 1.3f;
 // A shell burst's light on surfaces ends this many of its ball's radii out
-// (look fix "burst": 20 m lit the plain behind a burst into a band along the
-// horizon). Look fix "boom": the ball is now half the fireball's radius (a
-// 120 mm HE shell's 1.1 m), and three of them lit a flat bright disc with an
-// edge; the light falls off as the inverse square from a ball 1.3 m up and
-// fades out smoothly by 10 balls (5 fireball radii, 11 m for the shell), and
-// lasts only as long as the gas glows.
+// (20 m lit the plain behind a burst into a band along the horizon). The ball
+// is half the fireball's radius (a 120 mm HE shell's 1.1 m), and three of them
+// lit a flat bright disc with an edge; the light falls off as the inverse
+// square from a ball 1.3 m up and fades out smoothly by 10 balls (5 fireball
+// radii, 11 m for the shell), and lasts only as long as the gas glows.
 constexpr float kBurstSurfaceReachCores = 10.0f;
 // ... and never past this (m): a fuel fireball's 3.2 m ball lit a 32 m strip
-// along the horizon. Its surface gain under the camera (round 2's 0.3 left
+// along the horizon. Its surface gain under the camera (0.3 left
 // the ground within a grenade's reach one flat, saturated ellipse).
 constexpr float kBurstSurfaceReachMax = 10.0f;
 constexpr float kBurstSurfaceGain = 0.12f;
@@ -164,7 +163,7 @@ float ScatterMedium(fl::CombatLightKind kind, float core)
         case fl::CombatLightKind::Motor:
             return 0.0f;
         case fl::CombatLightKind::Explosion:
-            // Look fix "boom": the lit air of a detonation is its own fireball
+            // The lit air of a detonation is its own fireball
             // (no dust has risen within its few frames of flash); a 2 core +
             // 1.5 m ball drew a soft globe of light by night; half its ball.
             return 0.5f * core;
@@ -178,7 +177,8 @@ float ScatterMedium(fl::CombatLightKind kind, float core)
 void EngineGL33::InitCombatResources()
 {
     CombatState& c = _combat;
-    // Unit 14 always holds a complete texture (the F3 rule): white, nothing
+    // Unit 14 always holds a complete texture (a shader must never
+    // sample an incomplete texture): white, nothing
     // shadowed, until the first mask is built.
     GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
     const unsigned char white[4] = {255, 255, 255, 255};
@@ -271,7 +271,7 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
         }
         f.start = s.core;
         f.range = s.range;
-        // Under the photoreal camera (look director round 2) the dusk and
+        // Under the photoreal camera the dusk and
         // night exposure lifts every combat light several stops over the
         // classic frame's: a rifleman's flash left a flat yellow-white
         // ellipse on the ground under every man, and a shell lit a white
@@ -301,7 +301,7 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                     gain = r.kind != fl::CombatLightKind::Explosion ? 0.3f
                            : r.detonation && r.det.deflagration     ? kFuelSurfaceGain
                                                                     : kBurstSurfaceGain;
-                    // Look fix "burst": a young burst still lit the plain 20 m
+                    // A young burst lit the plain 20 m
                     // round into a ruler-straight band along the horizon,
                     // brighter than its own fireball. Its light ends within
                     // kBurstSurfaceReachCores of its ball, under the cloud.
@@ -314,7 +314,7 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                 case fl::CombatLightKind::Fire:
                     // (A burning wreck's fire at its roof lit the plain behind
                     // it out to 120 m: a strip along the horizon at dusk.)
-                    // Look fix "fire": a wood fire's light is near 2000 K;
+                    // A wood fire's light is near 2000 K;
                     // at (0.74, 0.48) the stones round a camp fire went to a
                     // cream slab past white and the lit grass stayed
                     // grey-green (red over green 5.8 levels).
@@ -333,7 +333,7 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                 default:
                     break;
             }
-            // Look fix "burst": a steady light reads against the twilight
+            // A steady light reads against the twilight
             // (CombatTwilight): the burning wreck's fire drew a warm line
             // along the dusk horizon behind it.
             if (fl::CombatLightIsSteady(r.kind))

@@ -1,5 +1,5 @@
 // Remastered lighting: the screen-space reflections' post shaders (feature
-// switch ssr, INTEGRATION-PLAN.md step B6; the math they share with the
+// switch ssr; the math they share with the
 // engine and the tests is Graphics/Remaster/ScreenReflections.hpp, the passes
 // EngineGL33_PostSsr.cpp). No GL code: the unit tests compile these sources,
 // assembled by the kPostShaders table of EngineGL33_PostShaders.cpp.
@@ -97,7 +97,7 @@ uniform sampler2D skyDensity;
 vec2 vUV0 = vec2(0.0);
 vec3 vWorldRel = vec3(0.0);
 vec3 g_groundTint = vec3(1.0);
-// The lit sky clouds' density lookups (B10) live in the terrain and clouds
+// The lit sky clouds' density lookups live in the terrain and clouds
 // piece, which the trace does not paste; the dome shading that calls them is
 // unused here.
 float skyCloudDensity(vec4 m) { return 0.0; }
@@ -324,8 +324,9 @@ float gnoise(vec2 p) {
 }
 
 // Wind ripples on the reflection: four octaves of drifting gradient noise, each
-// rotated so no grid shows, their slope kSsrWaterRipple of the research's
-// (its calm sea: the sea program's own waves already break the reflection up).
+// rotated so no grid shows, their slope kSsrWaterRipple of the
+// full slope (a calm sea: the sea program's own waves already break the
+// reflection up).
 // Octaves shorter than the pixel's footprint leave the normal and blur the
 // reflection instead (lostVar).
 vec3 rippleNormal(vec2 xz, float t, float foot, out float lostVar) {
