@@ -21,7 +21,7 @@ Writes into <outdir>:
   resid2x.mp4   the camera-compensated difference of the same crop, x gain, 2x, clips stacked.
 Run with plain `python`.
 """
-import argparse, os, subprocess, sys
+import argparse, os, shutil, subprocess, sys
 import numpy as np
 from scipy import ndimage
 from PIL import Image, ImageDraw
@@ -29,7 +29,8 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fogmotion as fm
 
-FF = "C:/ffmpeg/bin/ffmpeg.exe"
+# ffmpeg: the FFMPEG environment variable, else the one on PATH.
+FF = os.environ.get("FFMPEG") or shutil.which("ffmpeg") or "ffmpeg"
 
 
 def decode_box(src, a, b, x, y, w, h):

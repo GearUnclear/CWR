@@ -6,4 +6,7 @@ mission = "tests/rendering/captures/missions/udcap_sinai.Sinai"
 tags = ["lighting_capture", "lobo", "headful", "exclusive"]
 timeout = 5400
 assert_timeout = 240
-extra_args = ["--no-strict", "--mods-dir", "D:/Arma_CWA_worktrees/vanilla-upstream/tmp/lobo-mods", "--mod", "@LoBo", "--display-mode", "windowed", "--width", "1920", "--height", "1080"]
+# --mods-dir ../../tmp/lobo-mods: relative to the game's working directory, the data
+# junction <vanilla checkout>/packages/<DataJunction>, so it is <vanilla checkout>/tmp/lobo-mods
+# (an @LoBo with addons and dta only: the vanilla engine cannot boot the shadow's @LoBo Bin).
+extra_args = ["--no-strict", "--mods-dir", "../../tmp/lobo-mods", "--mod", "@LoBo", "--display-mode", "windowed", "--width", "1920", "--height", "1080"]

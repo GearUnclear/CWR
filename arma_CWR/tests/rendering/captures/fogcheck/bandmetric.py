@@ -20,11 +20,12 @@ Reference values, full 570-frame clips as shot on 2026-10-19:
   Goal after the fix: the ud band close to vanilla (under about 0.15) with no spikes cluster.
 Run with plain `python` (numpy is in the user site; `-I` hides it).
 """
-import argparse, glob, json, os, subprocess, sys
+import argparse, glob, json, os, shutil, subprocess, sys
 import numpy as np
 
 W, H, B = 480, 270, 15
-FF = "C:/ffmpeg/bin/ffmpeg.exe"
+# ffmpeg: the FFMPEG environment variable, else the one on PATH.
+FF = os.environ.get("FFMPEG") or shutil.which("ffmpeg") or "ffmpeg"
 
 
 def load(src, a, b):

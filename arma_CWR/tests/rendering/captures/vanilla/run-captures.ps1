@@ -8,8 +8,8 @@
 
 .DESCRIPTION
     1. Runs tri on the capture tests in this folder (all three by default)
-       through the hidden-desktop wrapper, so no game window reaches the
-       owner's desktop (D:\Arma_CWA\tmp\tri-hidden-desktop.ps1).
+       through the hidden-desktop wrapper (tmp\tri-hidden-desktop.ps1, a
+       local untracked script), so no game window reaches the desktop.
     2. Always stops the games this run started, scoped by data dir: the tests
        pin no data_dir, this script passes `--data-dir <arma_CWR>\packages\<DataJunction>`,
        tri launches every game with `-C` set to it, and
@@ -28,15 +28,23 @@
     Test files to run, relative to arma_CWR. Default: the three capture tests.
 .PARAMETER GameDir
     Build/dist dir with PoseidonGame.exe, relative to arma_CWR or absolute.
+    Default dist/x64-win-rwdi (the win-x64-clang-rwdi preset).
 .PARAMETER Tri
-    tri.exe to use. The runner is unchanged on the lighting branch, so the main
-    checkout's build is the default.
+    tri.exe to use. Default: target\debug\tri.exe of this tree, else of the
+    main checkout.
+.PARAMETER HiddenDesktop
+    The hidden-desktop wrapper. Default: tmp\tri-hidden-desktop.ps1 of this
+    tree, else of the main checkout. Not needed with -Visible.
+.PARAMETER StopGames
+    The scoped game cleanup script. Default: tools\stop-owned-games.ps1 of
+    this tree, else of the main checkout.
 .PARAMETER DataJunction
     Name of the junction under arma_CWR\packages that the games use as their
     data dir. Default RemasterUD. Any other name is created on demand as a
     junction to -ShadowDir; give every parallel run its own name.
 .PARAMETER ShadowDir
-    The setup-prepared Remaster shadow a new junction points at.
+    The setup-prepared Remaster shadow a new junction points at. Default:
+    tmp\remaster-shadow-67 of this tree, else of the main checkout.
 .PARAMETER ShaderOverrideDir
     Sets CWR_SHADER_OVERRIDE_DIR for the games of this run (absolute path):
     every <name>.glsl there replaces the built-in shader of that name.
@@ -58,17 +66,17 @@ param(
         'tests/rendering/captures/eden_lighting.test.sqf',
         'tests/rendering/captures/sinai_lobo_lighting.test.sqf'
     ),
-    [string]$GameDir = 'dist/lighting-rwdi',
-    [string]$Tri = 'D:\Arma_CWA\arma_CWR\target\debug\tri.exe',
-    [string]$HiddenDesktop = 'D:\Arma_CWA\tmp\tri-hidden-desktop.ps1',
-    [string]$StopGames = 'D:\Arma_CWA\arma_CWR\tools\stop-owned-games.ps1',
+    [string]$GameDir = 'dist/x64-win-rwdi',
+    [string]$Tri = '',
+    [string]$HiddenDesktop = '',
+    [string]$StopGames = '',
     [string]$OutRoot = '',
     [string]$OutDir = '',
     [int]$Retries = 1,
     [int]$TimeoutSec = 5400,
     [string]$Python = 'python',
     [string]$DataJunction = 'RemasterUD',
-    [string]$ShadowDir = 'D:\Arma_CWA\tmp\remaster-shadow-67',
+    [string]$ShadowDir = '',
     [string]$ShaderOverrideDir = '',
     [switch]$Visible,
     [switch]$CollectOnly
@@ -79,7 +87,26 @@ $ErrorActionPreference = 'Stop'
 $Tests = @($Tests | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $engineRoot = (Resolve-Path (Join-Path $here '..\..\..')).Path          # arma_CWR
-$gitRoot = (Resolve-Path (Join-Path $engineRoot '..')).Path             # worktree root
+$gitRoot = $engineRoot                                                  # the vanilla checkout is its own root
+
+# Defaults that were machine paths are resolved here, relative to this tree.
+# A linked worktree has no tmp\ of its own and may lack a tri build, so each
+# default falls back to the same path in the main checkout (the git common
+# dir's parent). Pass the parameter to use anything else.
+# The main checkout may be the fork's (arma_CWR\ level) or upstream's (none).
+$mainRoot = $gitRoot
+try {
+    $common = & git -C $engineRoot rev-parse --path-format=absolute --git-common-dir 2>$null
+    if ($LASTEXITCODE -eq 0 -and $common) { $mainRoot = Split-Path -Parent ($common | Select-Object -First 1).Trim() }
+} catch { }
+function Get-FirstExisting([string[]]$Candidates) {
+    foreach ($c in $Candidates) { if ($c -and (Test-Path -LiteralPath $c)) { return $c } }
+    return $Candidates[0]
+}
+if (-not $Tri) { $Tri = Get-FirstExisting @((Join-Path $engineRoot 'target\debug\tri.exe'), (Join-Path $mainRoot 'target\debug\tri.exe'), (Join-Path $mainRoot 'arma_CWR\target\debug\tri.exe')) }
+if (-not $HiddenDesktop) { $HiddenDesktop = Get-FirstExisting @((Join-Path $gitRoot 'tmp\tri-hidden-desktop.ps1'), (Join-Path $mainRoot 'tmp\tri-hidden-desktop.ps1')) }
+if (-not $StopGames) { $StopGames = Get-FirstExisting @((Join-Path $engineRoot 'tools\stop-owned-games.ps1'), (Join-Path $mainRoot 'tools\stop-owned-games.ps1'), (Join-Path $mainRoot 'arma_CWR\tools\stop-owned-games.ps1')) }
+if (-not $ShadowDir) { $ShadowDir = Get-FirstExisting @((Join-Path $gitRoot 'tmp\remaster-shadow-67'), (Join-Path $mainRoot 'tmp\remaster-shadow-67')) }
 if (-not $OutRoot) { $OutRoot = Join-Path $gitRoot 'tmp\captures' }
 if (-not $OutDir) { $OutDir = Join-Path $OutRoot (Get-Date -Format 'yyyyMMdd-HHmmss') }
 $triOut = Join-Path $OutDir 'tri'

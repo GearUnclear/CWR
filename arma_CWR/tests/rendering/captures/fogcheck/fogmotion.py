@@ -46,11 +46,12 @@ Per clip, frames decoded full-res grey (Y). For each region (fractions of the 19
   --surf PREFIX writes PREFIX_<region>.png: the mean mid-band correlation surface (+-16 px, x8
   enlarged, red = positive, blue = negative, the scene's zero at the centre cross).
 """
-import argparse, glob, json, os, subprocess, sys
+import argparse, glob, json, os, shutil, subprocess, sys
 import numpy as np
 from scipy import ndimage
 
-FF = "C:/ffmpeg/bin/ffmpeg.exe"
+# ffmpeg: the FFMPEG environment variable, else the one on PATH.
+FF = os.environ.get("FFMPEG") or shutil.which("ffmpeg") or "ffmpeg"
 FW, FH = 1920, 1080
 # y0, y1, x0, x1 as fractions of the frame (valley_mist at the frame 328 pose; soldiers excluded)
 REGIONS = {

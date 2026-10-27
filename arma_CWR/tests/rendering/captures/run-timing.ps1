@@ -11,11 +11,11 @@
     the run-captures tree, gpu_samples.csv, timing.md and timing.json.
 
 .EXAMPLE
-    powershell -NoProfile -File tests\rendering\captures\run-timing.ps1 -GameDir dist/graphics-remaster-rwdi -DataJunction RemasterUD-gr-A1
+    powershell -NoProfile -File tests\rendering\captures\run-timing.ps1 -GameDir dist/x64-win-rwdi -DataJunction RemasterUD-timing
 #>
 [CmdletBinding()]
 param(
-    [string]$GameDir = 'dist/graphics-remaster-rwdi',
+    [string]$GameDir = 'dist/x64-win-rwdi',
     [string]$DataJunction = 'RemasterUD-gr-timing',
     [string]$OutRoot = '',
     [string]$Stamp = (Get-Date -Format 'yyyyMMdd-HHmmss'),
@@ -24,7 +24,7 @@ param(
         'tests/rendering/captures/timing_eden.test.sqf',
         'tests/rendering/captures/timing_sinai.test.sqf'
     ),
-    [string]$Tri = 'D:\Arma_CWA\arma_CWR\target\debug\tri.exe',
+    [string]$Tri = '',
     [string]$Python = 'python',
     [int]$Seconds = 7200
 )
@@ -32,6 +32,16 @@ $ErrorActionPreference = 'Continue'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $engineRoot = (Resolve-Path (Join-Path $here '..\..\..')).Path
 $gitRoot = (Resolve-Path (Join-Path $engineRoot '..')).Path
+if (-not $Tri) {
+    # this tree's tri build, else the main checkout's (the git common dir's parent)
+    $Tri = Join-Path $engineRoot 'target\debug\tri.exe'
+    if (-not (Test-Path -LiteralPath $Tri)) {
+        $common = & git -C $engineRoot rev-parse --path-format=absolute --git-common-dir 2>$null
+        if ($LASTEXITCODE -eq 0 -and $common) {
+            $Tri = Join-Path (Split-Path -Parent ($common | Select-Object -First 1).Trim()) 'arma_CWR\target\debug\tri.exe'
+        }
+    }
+}
 if (-not $OutRoot) { $OutRoot = Join-Path $gitRoot 'tmp\captures' }
 $out = Join-Path $OutRoot "$Stamp-timing"
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -40,7 +50,7 @@ $samples = Join-Path $out 'gpu_samples.csv'
 $sampler = Start-Process powershell -ArgumentList @('-NoProfile', '-File', (Join-Path $here 'gpu_sampler.ps1'), '-Out', $samples,
     '-Seconds', "$Seconds", '-Every', '2', '-Junction', $DataJunction) -WindowStyle Hidden -PassThru
 "sampler pid $($sampler.Id)"
-& powershell -NoProfile -File (Join-Path $here 'run-captures.ps1') -GameDir $GameDir -DataJunction $DataJunction -OutDir $out -Tests ($Tests -join ',')
+& powershell -NoProfile -File (Join-Path $here 'run-captures.ps1') -GameDir $GameDir -DataJunction $DataJunction -OutDir $out -Tri $Tri -Tests ($Tests -join ',')
 $runExit = $LASTEXITCODE
 New-Item -ItemType File -Force "$samples.stop" | Out-Null
 "slots after: " + ((& $Tri slots) -join ' | ') | Tee-Object -FilePath (Join-Path $out 'quiet.txt') -Append

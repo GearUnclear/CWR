@@ -1,10 +1,11 @@
 """Low-frequency flicker: block-mean luminance, signed temporal 2nd difference, RMS per block."""
-import subprocess, sys
+import os, shutil, subprocess, sys
 import numpy as np
 from PIL import Image
 
 W, H, B = 480, 270, 15  # 32 x 18 blocks
-FF = "C:/ffmpeg/bin/ffmpeg.exe"
+# ffmpeg: the FFMPEG environment variable, else the one on PATH.
+FF = os.environ.get("FFMPEG") or shutil.which("ffmpeg") or "ffmpeg"
 
 
 def frames(path):

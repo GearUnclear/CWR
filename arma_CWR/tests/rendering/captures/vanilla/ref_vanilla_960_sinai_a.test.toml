@@ -16,4 +16,7 @@ timeout = 900
 assert_timeout = 240
 # --no-strict: @LoBo's legacy pbos log ERROR-level noise that is fatal under
 # the runner's default --strict.
-extra_args = ["--no-strict", "--mods-dir", "D:/Arma_CWA_worktrees/vanilla-upstream/tmp/lobo-mods", "--mod", "@LoBo", "--display-mode", "windowed", "--width", "960", "--height", "640"]
+# --mods-dir ../../tmp/lobo-mods: relative to the game's working directory, the data
+# junction <vanilla checkout>/packages/<DataJunction>, so it is <vanilla checkout>/tmp/lobo-mods
+# (an @LoBo with addons and dta only: the vanilla engine cannot boot the shadow's @LoBo Bin).
+extra_args = ["--no-strict", "--mods-dir", "../../tmp/lobo-mods", "--mod", "@LoBo", "--display-mode", "windowed", "--width", "960", "--height", "640"]
