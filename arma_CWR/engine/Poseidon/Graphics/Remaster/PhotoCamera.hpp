@@ -4,23 +4,16 @@
 
 #include <cstdint>
 
-// Photoreal light and camera (look lane "light", feature switch photoLight).
-// Pure math, no GL, no engine state; the GL33 backend runs it
-// (EngineGL33_Camera.cpp) and the shaders mirror the constants below.
-//
-// The remastered world used to tonemap every fragment (Khronos Neutral without
-// its toe, identity below 0.8) after an exposure meter that held sunlit ground
-// at the classic brightness: the frame stayed as flat as the original. With
-// the switch on:
+// Photoreal light and camera (feature switch photoLight). Pure math, no GL,
+// no engine state; the GL33 backend runs it (EngineGL33_Camera.cpp) and the
+// shaders mirror the constants below. With the switch on:
 //
 //   - the light rig is physical (LightRig.cpp ComputePhysicalRig): the sun and
 //     the sky fill come from the sky table's atmosphere (Atmosphere.hpp; under
 //     the camera with a summer haze, camHaze) in their real ratio and colours
 //     (ComputePhysicalSky integrates the clear sky over the hemisphere for an
 //     up-facing and two vertical surfaces), so a noon sun out-lights the blue
-//     sky fill several times, a low sun is golden and much dimmer, and the
-//     clear sky dome, the fog and the sky clouds are the table's own sky at the
-//     rig's scale (a deep zenith over a pale bright horizon);
+//     sky fill several times and a low sun is golden and much dimmer;
 //   - the world's passes write scene light, not a tonemapped colour, at the
 //     camera's current exposure (pre-exposure, so the stored frame is near
 //     display level and the passes that blend into it or read it keep their
@@ -28,20 +21,16 @@
 //     into the codes above it on a near-logarithmic scale (Encode), so the
 //     post composite can unfold it (Decode). Pre-lit draws (particles, fire,
 //     the far horizon) carry the original game's display colour and are
-//     stored as they are, not exposed again (a fire keeps its hue); the sun's
-//     sprite is replaced by a small disc in the sunlight's colour;
+//     stored as they are, not exposed again; the sun's sprite is replaced by a
+//     small disc in the sunlight's colour;
 //   - a camera in the post composite: a metered exposure from a log-luminance
-//     histogram of the frame (Meter: the darkest kMeterLowCut and the
-//     brightest kMeterHighCut of the weighted samples ignored, the centre
-//     weighted, the sky counted less) with guards on the highlights, the sky's
+//     histogram of the frame (Meter) with guards on the highlights, the sky's
 //     bright end and the sky by a low sun in frame, eye adaptation over about
 //     a second (AdaptExposure), a white balance that adapts to the light the
-//     way a camera does (neutral at noon, golden hour kept warm, blue hour
-//     blue; WhiteBalanceShare), a scene saturation, the night's rod shift,
-//     and a filmic tone curve with a real shoulder that keeps hue and
-//     saturation up to the highlights and then goes to white (Lottes 2016;
-//     ToneCurve), so the sun, the sky near it and glints read as bright light
-//     and the shade keeps its colour.
+//     way a camera does (WhiteBalanceShare), a scene saturation, the night's
+//     rod shift, and a filmic tone curve with a real shoulder that keeps hue
+//     and saturation up to the highlights and then goes to white (Lottes 2016;
+//     ToneCurve).
 
 namespace Poseidon::remaster
 {
@@ -52,9 +41,8 @@ namespace Poseidon::remaster
 // as it is (display gamma 2.2). Above it the peak channel's code follows
 // cK + (1 - cK) (1 - (knee / m)^p) / (1 - (knee / max)^p), cK the knee's
 // code: the code steps grow smoothly with the light (about 16 codes from 1 to
-// 2, 10 from 2 to 4, 10 from 4 to the top), where the old fold t / (1 + t)
-// left the top five codes for 4.9 to 64 and an edge or a blend across them
-// jumped by 1.5 to 3.4 x (a ragged white sun, white fire). Hue kept (the
+// 2, 10 from 2 to 4, 10 from 4 to the top), so an edge or a blend across
+// bright light does not jump between widely spaced codes. Hue is kept (the
 // other channels keep their linear ratio to the peak). Exactly invertible;
 // light above kDecodeMax stores as the top code.
 constexpr float kEncodeKnee = 0.6f;
@@ -139,21 +127,14 @@ constexpr float kMiddleGrey = 0.18f;
 constexpr float kDaylightMeanLog2 = -3.0f;
 constexpr float kDarkKeep = 0.4f;
 // Around sunset (CameraDuskKeep) a dark scene keeps up to kDuskDarkKeep of
-// how much darker it is (look director round 2: a firefight 2 degrees after
-// sunset read as a pale salt flat at kDarkKeep, its ground brighter than the
-// sky at the horizon; the ground under a dusk sky is far darker than the
-// sky, and the camera exposes for the sky).
+// how much darker it is: the ground under a dusk sky is far darker than the
+// sky, and the camera exposes for the sky.
 constexpr float kDuskDarkKeep = 0.62f;
-// A scene brighter than that keeps this much of how much brighter it is:
-// negative, it is exposed under the average scene's grey (look director
-// round 2: the pale Abel fields and the Sinai sand at noon stayed near-white
-// paper at +0.15; a photographer exposes a bright plain for its highlights,
-// so the ground gets its tonal range and texture, about 0.3 to 0.4 EV under).
-// Look fix "noon" (round 4): at -0.45 a bright plain went 0.38 EV under on
-// top of the high sun's kCameraHighSunEv, 0.63 EV in all: the Sinai sand sat
-// 35 levels under the original (149 against 186) and read dull rather than
-// sun-baked, and the clear sky over it went slate with it. With the high
-// sun's step a bright plain is still about 0.3 EV under the average scene.
+// A scene brighter than that keeps this much of how much brighter it is.
+// Slightly negative: a bright plain is exposed a little under the average
+// scene's grey, as a photographer exposes it for its highlights, so the ground
+// keeps its tonal range. Together with the high sun's kCameraHighSunEv a
+// bright plain at noon ends up about 0.3 EV under the average scene.
 constexpr float kBrightKeep = -0.05f;
 // The guard: the kMeterHighlight percentile of the blocks' brightest taps
 // stays at this scene light after exposure (the curve shows 1.3 at about 0.8
@@ -165,10 +146,8 @@ constexpr float kHighlightGuard = 0.85f;
 // mist, rain) the frame's bright end is the grey deck or the mist itself, not
 // a sunlit highlight: it is held at kGreyHighlightLimit instead (a light grey
 // below the curve's shoulder, as a photograph of a grey day keeps its sky and
-// its mist grey). (Look fix round 5 "mist": held at 1.3 the mist sat in the
-// shoulder at about 214 of 255 against the original's 178, its contrast
-// pressed flat, so the rock 300 m out and the tree line behind it were nearly
-// erased; the grey decks of rain and overcast were a near-white sheet.)
+// its mist grey). Held at kHighlightLimit, mist would sit in the shoulder with
+// its contrast pressed flat and erase what stands in it.
 constexpr float kGreyHighlightLimit = 0.8f;
 // The sky by a low sun in frame (MeterResult::sunRing) stays at this scene
 // light after exposure (the curve shows it a little under white, golden, not
@@ -188,16 +167,14 @@ constexpr float kExposureMaxLog2 = 5.0f;
 // and the lamps and fires (camLocal) stand out of it.
 constexpr float kExposureNightMaxLog2 = -1.0f;
 // `dusk` (CameraDusk, 0..1) takes kCameraDuskEv off: a dusk or a dawn before
-// the sun is up stays a dim picture (the meter alone lifted a firefight at
-// sunset to a grey noon).
+// the sun is up stays a dim picture.
 // `duskKeep` (CameraDuskKeep, 0..1) raises the dark keep toward kDuskDarkKeep.
 // `timeEv` (CameraTimeOfDayEv) is added (EV).
 // `veil` (CameraWeatherVeil, 0..1) moves the highlight limit toward
 // kGreyHighlightLimit by day.
 float TargetExposureLog2(const MeterResult& m, float nightEffect, const LightingTuning& t, float dusk = 0.0f,
                          float duskKeep = 0.0f, float timeEv = 0.0f, float veil = 0.0f);
-// The golden hour (look director round 2: a 12 degree sun read as a neutral
-// mid-afternoon): the camera takes kCameraGoldenEv off (the low sun is a
+// The golden hour: the camera takes kCameraGoldenEv off (the low sun is a
 // dimmer light, the picture a darker, warmer one) and balances a little warm
 // (kCameraGoldenWarm, a photographer's "shade" setting on a daylight film),
 // full from 5 to 16 degrees of sun, none from 32 or under 1.
@@ -208,19 +185,17 @@ float CameraGolden(float sunElevationDeg);
 // kCameraGoldenWarm at unit luminance, that far.
 Rgb GoldenWarmGain(float golden);
 // The golden hour's warmth is the low sun's light: the composite lays it on
-// what that light shows and leaves the blue alone (look fix "fire": over the
-// whole frame it turned the clear sky and the clouds teal-grey, (129, 148,
-// 163) on forest_edge_golden, and the picture read as a dull afternoon).
+// what that light shows and leaves the blue alone (over the whole frame it
+// would turn the clear sky and the clouds teal-grey).
 // The share a colour takes: none at a warmth (r - b) / peak of
 // kGoldenShareFrom (a blue sky), all from kGoldenShareTo (a sunlit field; a
-// grey cloud takes most of it). A wide ramp: from -0.25 to 0.1 the sunrise
-// sky drew an edge round the sun's glow where it met the blue.
+// grey cloud takes most of it). The ramp is wide so the sunrise sky shows no
+// edge round the sun's glow where it meets the blue.
 constexpr float kGoldenShareFrom = -0.7f;
 constexpr float kGoldenShareTo = 0.4f;
 float GoldenWarmShare(const Rgb& c);
-// A high sun under a clear sky (look director round 2: the noon ground stayed
-// near-white paper): kCameraHighSunEv from 35 degrees, full from 55, gone
-// under the weather's veil.
+// A high sun under a clear sky: kCameraHighSunEv from 35 degrees, full from
+// 55, gone under the weather's veil.
 constexpr float kCameraHighSunEv = -0.25f;
 // The time of day's EV: the golden hour's and the high sun's.
 float CameraTimeOfDayEv(float sunElevationDeg, float veil);
@@ -237,10 +212,10 @@ float CameraDuskKeep(float sunElevationDeg);
 constexpr float kCameraNightStartDeg = -4.5f;
 constexpr float kCameraNightFullDeg = -12.0f;
 float CameraNight(float sunElevationDeg);
-// The dusk's exposure (look director): EV taken off as the sun goes from
-// kCameraDuskStartDeg down to kCameraDuskFullDeg, ahead of the night's own
-// compensation (CameraNight), so the light visibly fails at sunset and the
-// blue hour reads as evening, not as an overcast noon.
+// The dusk's exposure: EV taken off as the sun goes from kCameraDuskStartDeg
+// down to kCameraDuskFullDeg, ahead of the night's own compensation
+// (CameraNight), so the light visibly fails at sunset and the blue hour reads
+// as evening, not as an overcast noon.
 constexpr float kCameraDuskStartDeg = 4.0f;
 constexpr float kCameraDuskFullDeg = -4.0f;
 constexpr float kCameraDuskEv = -1.25f;
@@ -255,26 +230,23 @@ float AdaptExposureLog2(float current, float target, float dt, float seconds);
 // y = x^a / (x^(a d) b + c), through (midIn, midOut) and (white, 1); a > 1 is
 // the toe (deeper, richer shadows), d < 1 the shoulder. The hue-keeping form
 // applies it to the peak channel and keeps the channel ratios. They go to
-// white late: as the output nears 1 (y^kCrosstalk) and with the light past
-// the curve's white (kWhiteExcessStops stops past it is white), so a bright
+// white late: as the output nears 1 (y^kCrosstalk) and with the light past the
+// curve's white (kWhiteExcessStops stops past it is white), so a bright
 // sky stays blue, a flame orange and a low sun orange-gold around a white
 // core.
 constexpr float kCurveMidOut = 0.18f;
 constexpr float kCrosstalk = 8.0f;
 constexpr float kWhiteExcessStops = 2.5f;
-// Saturated light goes to white less (look director round 2: a fire's flame,
-// its codes saturated by the additive stack, read as a white slab): the
-// whitening above is scaled by 1 - kChromaKeep * chroma^2, chroma = 1 - the
-// smallest channel over the peak (a white sun 0, a flame about 0.9), so a
-// flame rolls off in hue to a yellow-orange core and the noon sun still clips
-// white.
+// Saturated light goes to white less, so a flame (its codes saturated by the
+// additive stack) does not read as a white slab: the whitening above is scaled
+// by 1 - kChromaKeep * chroma^2, chroma = 1 - the smallest channel over the
+// peak (a white sun 0, a flame about 0.9), so a flame rolls off in hue to a
+// yellow-orange core and the noon sun still clips white.
 constexpr float kChromaKeep = 0.8f;
 // Each channel goes to white by the whitening to the power 1 + kHueRoll * (1 -
-// its share of the peak) (look fix "burst"): the channels the light holds
-// less of follow later, as film's dyes do, so a flame's core and the stones in
-// its light roll off to yellow-orange and orange instead of cream (one mix for
-// all three turned (1, 0.55, 0.16) into (1, 0.68, 0.38)); a white light is
-// unchanged.
+// its share of the peak): the channels the light holds less of follow later,
+// as film's dyes do, so a flame's core and the stones in its light roll off to
+// yellow-orange and orange instead of cream; a white light is unchanged.
 constexpr float kHueRoll = 3.0f;
 struct ToneCurve
 {
@@ -312,7 +284,7 @@ constexpr float kWhiteBalanceShareLowSun = 0.08f;
 constexpr float kWhiteBalanceShareHighSun = 0.35f;
 float WhiteBalanceShare(float sunElevationDeg);
 // The scene saturation falls toward the low sun by this much (the golden
-// light already saturates every warm surface; pines went mustard).
+// light already saturates every warm surface).
 constexpr float kLowSunSaturationDrop = 0.1f;
 // The night's rod vision (the composite, scaled by the camera's night): dim
 // light below kScotopicLum (scene light after exposure) goes toward a cool
@@ -341,11 +313,9 @@ constexpr float kCameraLampGain = 2.0f;
 // The light flares (Scene::DrawFlare, drawn without the depth test) keep this
 // share of their alpha under the camera at full night: a lamp's halo between
 // the full starburst and a bare bulb. By day none: the sun's disc and the
-// camera's glare carry the sun, and its flare's rays were the starburst round
-// a low sun.
+// camera's glare carry the sun.
 constexpr float kCameraFlareNight = 0.25f;
-// The air pass under the camera (B8's apply; the look-fog lane's volume owns
-// this once it lands): the haze's density times camAerial (aerial
+// The air pass under the camera: the haze's density times camAerial (aerial
 // perspective); within 500 m the haze's light toward a low sun is capped at
 // kCameraNearHazeCap times the horizon sky's light in the sun's side azimuth
 // (rising to 8 x by 4 km: near silhouettes stay dark, far ridges glow); the
@@ -359,14 +329,12 @@ constexpr float kCameraBeamFullDistance = 1500.0f;
 // light share in the frame's alpha, from 0.2 to full at 0.6) leans toward the
 // sky's blue by kCameraShadeCool (the composite's camShade): the shade a
 // daylight-balanced camera sees, against the sun's amber on what it lights.
-// The pines' self-shaded crowns read green-dark instead of mustard.
 constexpr float kCameraShadeCool = 0.04f;
 inline const Rgb kCameraShadeTint{0.84f, 1.0f, 1.3f};
 // By day the dark tones keep kCameraDarkSaturation of their colour (relative,
 // on top of the scene saturation), rising to all of it from kCameraDarkFrom
 // to kCameraDarkTo of scene light after exposure (middle grey is 0.18): a
-// real camera's shadows carry less chroma than its mid tones, and a pine
-// crown's olive shade read mustard (g/b 1.87) without it.
+// real camera's shadows carry less chroma than its mid tones.
 constexpr float kCameraDarkSaturation = 0.97f;
 constexpr float kCameraDarkFrom = 0.02f;
 constexpr float kCameraDarkTo = 0.2f;
@@ -375,18 +343,17 @@ constexpr float kCameraDarkTo = 0.2f;
 constexpr float kVeilSaturationDrop = 0.15f;
 // How far a low sun (under 5 degrees, none from 25) deepens the blue of the
 // upper clear sky and of the sky the sea mirrors (the dome's chroma times 1 +
-// this at 30 degrees up and above): the haze's grey otherwise washed the
-// sunset's upper sky (133, 131, 133) and the sea with it.
+// this at 30 degrees up and above): the haze's grey otherwise washes out the
+// sunset's upper sky and the sea with it.
 constexpr float kCameraLowSunSkyBlue = 0.6f;
-// A clear day's sky as a camera renders it (look fix "noon", round 4; the
-// dome's camSkyLook and camSkyDeepen, EngineGL33_LightingShadersSky.cpp). The
-// table's clear sky has the real sky's chromaticity (zenith near x 0.25,
-// y 0.27) and the hue-keeping curve keeps it exactly, where a camera's colour
-// rendition (its per-channel film curve) deepens that blue. Without it the
-// noon sky over a bright plain read as slate, (89, 112, 146): the original's
-// and landed's hue at a third of their light. The clear sky's chroma about
-// its luminance (linear light: same luminance, same dominant hue) is scaled
-// by 1 + kCameraDaySkyDeep times DaySkyDeepWeight: by day only (none under 8
+// A clear day's sky as a camera renders it (the dome's camSkyLook and
+// camSkyDeepen, EngineGL33_LightingShadersSky.cpp). The table's clear sky has
+// the real sky's chromaticity (zenith near x 0.25, y 0.27) and the
+// hue-keeping curve keeps it exactly, where a camera's colour rendition (its
+// per-channel film curve) deepens that blue; without this the noon sky over a
+// bright plain reads as slate. The clear sky's chroma about its luminance
+// (linear light: same luminance, same dominant hue) is scaled by
+// 1 + kCameraDaySkyDeep times DaySkyDeepWeight: by day only (none under 8
 // degrees of sun, all from 25), above the horizon band (from a view
 // elevation's sine of 0.03 to 0.4, so the horizon stays pale), not in the
 // sun's glow (none within about 10 degrees of the sun, all from 30), not
@@ -431,9 +398,9 @@ constexpr float kSkyRolloffCap = 2.4f;
 float SkyRolloff(float preExposedPeak);
 // Toward the sun the cap rises to kSkySunCap (past the curve's white): a real
 // camera burns the sky round the sun white and its glare falls off smoothly.
-// With one cap everywhere the aureole round a low sun was a flat cream
-// plateau (0.85 of white) out to about 2 degrees, a pale disc inside it. The
-// rise is SkySunGlow, 1 / (1 + 2 (1 - cos) / kSkySunGlowRad^2), about
+// With one cap everywhere the aureole round a low sun would be a flat cream
+// plateau with a pale disc inside it. The rise is SkySunGlow,
+// 1 / (1 + 2 (1 - cos) / kSkySunGlowRad^2), about
 // 1 / (1 + (angle / kSkySunGlowRad)^2): half at kSkySunGlowRad from the sun.
 constexpr float kSkySunCap = 10.0f;
 constexpr float kSkySunGlowRad = 0.021f; // 1.2 degrees
@@ -447,19 +414,15 @@ float SkyRolloffToward(float preExposedPeak, float cosToSun);
 // meter and its guards see the sky round the sun as they see the rest of the
 // sky and the sun's glow burns white without closing the camera down. Light
 // at or past the cap toward the sun (the disc, the air's glow over it) reads
-// as the plain cap. (Look fix round 5 "exposure": the meter read the burn;
-// with the sun in or just out of frame the guards on the sky's bright end and
-// on the sky by a low sun took 0.3 to 1.5 EV off, woods_pine2_evening went
-// from ev 1.82 to 0.27, its frame mean from 50 to 33 of 255, darker than
-// town_night.)
+// as the plain cap. If the meter read the burn itself, a sun in or just out of
+// frame would pull the exposure down by up to 1.5 EV.
 float SkyMeterLight(float storedPeak, float cosToSun);
 // A low sun turns the sky away from its glow toward the zenith's blue (the
 // sky shader's camSkyLook: none within about 10 degrees of the sun, all from
 // 30). The angle from the sun counts the height above the sun kLowSunGlowFlat
 // times and the sky under the sun's height as at it (only the azimuth then),
 // so the warm glow is a band along the horizon round the sun's bearing,
-// brightest near the sun, not a disc round it (look fix "dawn": at
-// sunrise_ridge the golden disc reached more than half the sky's height).
+// brightest near the sun, not a disc round it.
 // LowSunGlowCos is that angle's cosine (elevations in radians, cosAzimuth the
 // cosine of the azimuth between the direction and the sun).
 constexpr float kLowSunGlowFlat = 3.0f;
@@ -473,17 +436,15 @@ float LowSunGlowCos(float sunElevation, float elevation, float cosAzimuth);
 // faded in from kDeckFromSin to kDeckFullSin of elevation (the deck over the
 // horizon, where the horizon ring measures the far air, keeps its light and
 // stays smooth), by day (a night deck is unchanged, the sun from 6 degrees
-// under the horizon to 2 above). (Look fix round 4 "mist": at its full light the deck sat in
-// the curve's shoulder as a near-white sheet, (200, 203, 209) with a spread
-// of 10 against 22 to 31 in the original; a rain day read as dry mist.)
+// under the horizon to 2 above). At its full light the deck would sit in the
+// curve's shoulder as a flat near-white sheet.
 constexpr float kDeckRelief = 2.4f;
 constexpr float kDeckDark = 0.5f;
 constexpr float kDeckFromSin = 0.12f;
 constexpr float kDeckFullSin = 0.3f;
 // Under rain (its density, 0..1) the deck's light is a further
 // 1 - kDeckRainDark x rain: a rain deck is a thick nimbostratus, darker than a
-// dry overcast. (Look fix round 5 "mist": rain_day read as a wet misty day
-// against the original's and landed's darker rain deck.)
+// dry overcast.
 constexpr float kDeckRainDark = 0.4f;
 
 // ---- The sun disk -----------------------------------------------------------
@@ -492,11 +453,11 @@ constexpr float kDeckRainDark = 0.4f;
 // direction, anti-aliased over its rim, at kSunDiscLevel (pre-exposed light:
 // past the curve's white at any exposure, so the sun is the frame's one
 // clipped white point) in the colour of the sunlight through the air taken
-// kSunDiscWhite of the way to white (a sensor clips every channel of the sun:
-// in the sunlight's own colour the hue-keeping curve held a low sun's disc at
-// a pale peach, 255, 238, 219), all of it from 4 degrees up, none at the
-// horizon, where the reddened sun keeps its colour. The disc is round on the
-// screen (an equal-area circle, not the lens's oval near the frame's corners).
+// kSunDiscWhite of the way to white (a sensor clips every channel of the sun;
+// in the sunlight's own colour the hue-keeping curve would hold a low sun's
+// disc at a pale peach), all of it from 4 degrees up, none at the horizon,
+// where the reddened sun keeps its colour. The disc is round on the screen
+// (an equal-area circle, not the lens's oval near the frame's corners).
 // Its glow is the sky's roll-off toward the sun (kSkySunCap), the sky table's
 // aureole and the camera's bloom.
 constexpr float kSunDiscRadiusDeg = 0.45f;

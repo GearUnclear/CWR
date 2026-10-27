@@ -458,7 +458,7 @@ Rgb ApplyToneCurveHueKeeping(const ToneCurve& curve, const Rgb& in)
     // curve's white (kWhiteExcessStops stops past it is white).
     const float excess = Clamp01(std::log2(std::max(peak / curve.white, 1.0f)) / kWhiteExcessStops);
     const Rgb ratio = c * (1.0f / peak);
-    // Saturated light less (kChromaKeep, the composite's since round 2), and
+    // Saturated light whitens less (kChromaKeep, as in the composite), and
     // each channel by its share of the peak (kHueRoll).
     const float chroma = 1.0f - std::min(ratio.r, std::min(ratio.g, ratio.b));
     const float toWhite =
