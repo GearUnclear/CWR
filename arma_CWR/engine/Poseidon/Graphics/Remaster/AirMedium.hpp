@@ -2,8 +2,7 @@
 
 #include <functional>
 
-// The air of the remastered lighting (INTEGRATION-PLAN.md step B8; research
-// tracks volumetric and haze): pure math, no GL, no engine state.
+// The air of the remastered lighting: pure math, no GL, no engine state.
 //
 // Three parts of one medium, each behind its own feature switch:
 //
@@ -36,12 +35,12 @@
 // The shaders (EngineGL33_PostAirShaders.cpp) mirror the optical-depth math
 // below; the weather and time rules live only here and reach them as numbers
 // (ComputeAirMedium). AirOpticalDepth gives the same optical depth for a line
-// of sight, so AI visibility can later read the medium the player sees.
+// of sight.
 
 namespace Poseidon::remaster
 {
 
-// Haze (the haze track's variant 43).
+// Haze.
 constexpr float kHazeSigma = 1.1e-4f;         // extinction at sea level, green (1/m): 35 km visibility
 constexpr float kHazeChromaR = 0.85f;         // per-channel extinction relative to green
 constexpr float kHazeChromaB = 1.2f;          // (red thins out last, blue first)
@@ -90,7 +89,7 @@ constexpr float kBeamRainFull = 0.5f;
 constexpr float kBeamLowSunDeg = 6.0f;   // sun elevation below which the mist thickens (sunrise, sunset)
 constexpr int kAirMaxSpots = 4;          // headlight cones per frame
 constexpr float kAirSpotRange = 150.0f;  // m from the camera
-constexpr float kAirSpotStrength = 3.0f; // the research's volLocal (2 soft .. 4 strong)
+constexpr float kAirSpotStrength = 3.0f; // cone scattering gain (2 soft .. 4 strong)
 constexpr int kAirSpotSteps = 24;        // march steps through a cone
 
 float SmoothStep(float edge0, float edge1, float x);
@@ -131,7 +130,7 @@ struct AirMedium
 };
 
 // Morning weight of the valley mist: an eastern sun from just below the
-// horizon until it burns off (the haze track's hzMorning).
+// horizon until it burns off.
 float MorningWeight(float sunElevationDeg, float sunEast);
 // 0 in clear air .. 1 misty: setFog, rain and a sun at the horizon.
 float BeamMistWeight(const AirInputs& in);

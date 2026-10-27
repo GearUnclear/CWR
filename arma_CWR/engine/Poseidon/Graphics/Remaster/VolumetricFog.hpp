@@ -5,8 +5,8 @@
 #include <memory>
 #include <vector>
 
-// Volumetric fog and atmosphere (feature switch volFog, the look lane "fog";
-// the GL side is EngineGL33_PostFog.cpp and EngineGL33_PostFogShaders.cpp).
+// Volumetric fog and atmosphere (feature switch volFog; the GL side is
+// EngineGL33_PostFog.cpp and EngineGL33_PostFogShaders.cpp).
 //
 // The flat distance fog of the original (a linear blend toward one colour
 // between two distances) is replaced by a medium that fills a froxel volume,
@@ -73,13 +73,12 @@ constexpr int kFogSlicesPerDraw = 8;
 // the metres of its half of the slice), on the two diagonal quarter points of
 // the cell's footprint (in cells from its centre). The history keeps 0.88 of
 // the last frame, read at the cell's centre through a fixed tetrahedral blur
-// of kFogHistoryBlur cells and slices per axis (the mean of the blur the old
-// read at a jittered point gave the stored volume: the mist's softness in the
-// approved look). Nothing in the sampling changes from frame to frame, so the
+// of kFogHistoryBlur cells and slices per axis, which gives the mist its
+// softness. Nothing in the sampling changes from frame to frame, so the
 // history only smooths the light's own changes and has no residual to pump
-// (one offset for the whole frame, the dawn valley's flicker) or to slide
-// through the fog (an offset pattern per cell plus the frame's step, the wind
-// of the first fix). The shader's constants mirror these.
+// (one jitter offset for the whole frame makes the volume flicker) or to slide
+// through the fog (a per-cell offset pattern stepped every frame reads as
+// wind). The shader's constants mirror these.
 constexpr float kFogTapZ[2] = {0.25f, 0.75f};
 constexpr float kFogTapXY[2][2] = {{-0.25f, -0.25f}, {0.25f, 0.25f}};
 constexpr float kFogHistoryBlur = 0.25f;
@@ -125,9 +124,9 @@ constexpr float kMistReliefFrom = 12.0f;
 constexpr float kMistReliefFull = 45.0f;
 constexpr float kMistLayerFall = 18.0f;
 // Haze extinction at sea level on a clear day (1/m), reached from
-// kHazeNearTo out: a summer day's 8 km visibility (the look director: the
-// owner's "deep atmosphere over distance"), ridges 1 to 2 km away pale a
-// little, 3 to 5 km away sit in the air and fade toward the sky.
+// kHazeNearTo out: a summer day's 8 km visibility, so ridges 1 to 2 km away
+// pale a little and ridges 3 to 5 km away sit in the air and fade toward the
+// sky.
 constexpr float kHazeClear = 6.0e-4f;
 // Rayleigh scattering of air at sea level (1/m, red, green, blue;
 // Atmosphere.hpp's kRayleighScattering) times this: a little more than the
@@ -151,7 +150,6 @@ constexpr float kDustSkyShare = 0.2f;
 // The sun's forward lobe in the clear haze and the dust (the glow toward a
 // low sun over the sea and the plain): its share of the sun's single
 // scattering in the volume (the sky ring already holds the dome's own glow).
-// (Look director round 2: 0.2, once the air took the sky's real colour.)
 constexpr float kFogLobeGain = 0.2f;
 // The sky's horizon band past the far end takes this share of it (the dome
 // glows toward the sun already).
@@ -159,9 +157,8 @@ constexpr float kFogLobeSkyShare = 0.35f;
 // The humid air near the ground at full weight (1/m at the ground).
 constexpr float kGroundHaze = 8.0e-4f;
 // Valley mist extinction inside the layer at full weight (1/m): about a
-// kilometre of visibility in the layer.
-// (Look director round 2: 2e-3, once the air took the sky's real colour by
-// the sun: at 3e-3 a misty dawn erased the bay and the spit in one wash.)
+// kilometre of visibility in the layer (denser mist erases a whole misty bay
+// in one wash at dawn).
 constexpr float kMistSigma = 2.0e-3f;
 // Inside the mist and the humid ground air the eye's own surroundings stay
 // legible: their density near the eye is kMistNearKeep of it, rising to the
@@ -175,14 +172,13 @@ constexpr float kMistBankPeak = 1.7f;
 constexpr float kMistBankTopMax = 1.35f + 0.5f * 0.35f;
 // The clear haze and air keep this share near the eye, the whole from
 // kHazeNearFrom to kHazeNearTo away: the depth is in the distance (blue from
-// about 3 km), the first kilometre keeps its colour and contrast.
-// (Look fix "veil": 0.06 and 3 km, were 0.35 and 2.5 km. The air's light is
-// the bright horizon sky, many times a dark wood, so the old optical depth of
-// 0.05 to 0.1 over the first 300 to 600 m laid a milky blue veil over every
-// wood below a clear noon vista. Now 0.015 at 500 m, 0.05 at 1 km, 0.27 at
-// 2 km and 0.67 at 3 km, against 0.08, 0.18, 0.51 and 0.96: the near field is
-// nearly clear, the far ridges keep most of their air. Dust keeps its own
-// near share, kDustNearKeep.)
+// about 3 km), the first kilometre keeps its colour and contrast. The air's
+// light is the bright horizon sky, many times a dark wood, so an optical depth
+// of even 0.05 to 0.1 over the first 300 to 600 m lays a milky blue veil over
+// every wood below a clear noon vista. With these values the optical depth is
+// about 0.015 at 500 m, 0.05 at 1 km, 0.27 at 2 km and 0.67 at 3 km: the near
+// field is nearly clear, the far ridges keep most of their air. Dust keeps
+// its own near share, kDustNearKeep.
 constexpr float kHazeNearKeep = 0.06f;
 constexpr float kHazeNearFrom = 200.0f;
 constexpr float kHazeNearTo = 3000.0f;
@@ -209,74 +205,52 @@ constexpr float kFogMieG = 0.78f;
 constexpr float kFogBackShare = 0.12f;
 // The near-field pass marches the sun's forward lobe this far (m), times
 // this gain: the morning aerosols' lobe is narrower and stronger than the
-// haze's g (the shafts between crowns).
-// (Look fix round 4 "sun": 35, was 14. At 14 the shafts between the crowns of
-// a morning wood were too faint to read at a thumbnail. The pass's soft cap
-// (0.45) is not what held them: taking it before the lit share changed
-// nothing, the beams are linear in this gain, and 2.5 times it draws clear
-// shafts on the dark crowns while the open sky round them stays as it was.)
+// haze's g (the shafts between crowns). The beams are linear in the gain (the
+// pass's soft cap of 0.45 does not limit them); at this gain the shafts on the
+// dark crowns of a morning wood read clearly while the open sky round them is
+// unchanged.
 constexpr float kFogBeamReach = 180.0f;
 constexpr float kFogBeamGain = 35.0f;
 // The classic engine's visibility in rain at full density (Landscape.cpp: 350 m).
 constexpr float kRainVisibility = 350.0f;
 // A grey deck thickens the clear haze by 1 + this (times the sky's greyness,
-// less in rain, whose own fog carries its air). (Look fix "plate": at 3.5 a
-// dry overcast was a 1.5 km wash, every ridge past it one flat plate; at 1.2
-// the ridges from 1 to 3 km fade one behind the other.)
+// less in rain, whose own fog carries its air). At 1.2 the ridges from 1 to
+// 3 km fade one behind the other; much more turns a dry overcast into a
+// 1.5 km wash with every ridge past it one flat plate.
 constexpr float kHazeGreyGain = 1.2f;
 // Rain's weather fog takes this share of the extinction that gives the
 // classic tactical visibility (setFog keeps all of it): about a fifth of a
 // surface is left at the classic fog end, where the AI's tactical sight
-// ends. (Look fix "plate": with the whole, rain 0.8 left a hill 300 m away a
-// third of its contrast and nothing past a kilometre.)
+// ends. With the whole of it, rain 0.8 leaves a hill 300 m away a third of
+// its contrast and nothing past a kilometre.
 constexpr float kRainFogShare = 0.5f;
 // The weather fog's extinction times the visibility it takes away: what the
 // weather leaves of a surface at the classic fog end is about e^-3.2.
 constexpr float kWeatherExtinction = 3.2f;
 // setFog at night is this much denser at the floor (the classic engine's
-// night visibility is shorter still; look director round 2: with
-// kSetFogBoost a house 60 to 120 m up a foggy street at setFog 0.35 loses
-// half to three quarters of its contrast).
-// (Look fix round 4 "mist": 1 -> 6.47 with kSetFogBoost 0.75, so the night's
-// setFog keeps round 3's density, 2 x 2.8 = 5.6 times the classic
-// extinction: the foggy night street is unchanged; only the day's mist
-// thins.)
-// (Look fix round 5 "mist": with kSetFogBoost 0.3 the same rule gives
-// 2 x 2.8 / 0.3 - 1 = 17.7: the night is still unchanged.)
+// night visibility is shorter still). It holds the night's setFog at
+// (1 + kNightFogBoost) x kSetFogBoost = 2 x 2.8 = 5.6 times the classic
+// extinction, so the day's mist can be tuned through kSetFogBoost without
+// changing the night: a house 60 to 120 m up a foggy street at setFog 0.35
+// loses half to three quarters of its contrast.
 constexpr float kNightFogBoost = 2.0f * 2.8f / 0.3f - 1.0f;
-// setFog's own fog (not rain's) is this much denser again (look director
-// round 2: a hill 200 m out stood crisp in a setFog 0.3 morning mist the
-// classic fog hid; the volume's fog thickens with distance like it, not as
-// a flat wall).
-// (The player's mist is then thicker than the classic tactical fog the AI
-// sees through: AI sight keeps the classic visibility plus the mist and the
-// humid air, FogSightTransmittance.)
-// (Look fix round 4 "mist": 2.8 -> 0.75, the share of the classic
-// extinction setFog's own fog takes, as kRainFogShare is rain's. With the
-// valley mist and the humid air on top, 2.8 left a rock 300 m out under a
-// tenth of its contrast at setFog 0.3: a white wall where the classic fog
-// keeps the first 300 m crisp. At 0.75 that rock keeps about half and a
-// fifth of a surface is left at the classic fog end, where the AI's
-// tactical sight ends; the mist still thickens with distance.)
-// (Look fix round 5 "mist": 0.75 -> 0.3. At 0.75, with the clear haze, the
-// valley mist and the humid air stacked on it, a rock 300 m out kept under
-// half of itself and read as a ghost even under the camera's grey-day
-// exposure: the setFog 0.3 morning read as dense fog, not the light mist it
-// is. With kSetFogHazeCut and kMistFogWeight 0.2 a level line at the fog
-// floor under a grey deck keeps about two thirds at 300 m, half at 500 m and
-// a third at the classic fog end: the rock and the tree line read through a
-// veil and the far hills fade.)
+// setFog's own fog (not rain's) takes this share of the classic extinction,
+// as kRainFogShare is rain's; like the classic fog it thickens with distance,
+// not as a flat wall. The clear haze, the valley mist and the humid air stack
+// on it, so the share is small: with kSetFogHazeCut and kMistFogWeight a level
+// line at the fog floor under a grey deck at setFog 0.3 keeps about two
+// thirds at 300 m, half at 500 m and a third at the classic fog end (a rock
+// and a tree line read through a veil, the far hills fade). A larger share
+// turns the light mist into a white wall where the classic fog keeps the
+// first 300 m crisp.
 constexpr float kSetFogBoost = 0.3f;
 // A day's setFog carries the humid air the clear haze stood for: the haze is
-// cut by this share at setFog 0.3 and over (by day; rain keeps its haze).
-// (Look fix round 5 "mist": the clear haze, about 6e-4 per metre, stood as
-// thick as setFog's own fog under it.)
+// cut by this share at setFog 0.3 and over (by day; rain keeps its haze). The
+// clear haze, about 6e-4 per metre, is otherwise as thick as setFog's own fog.
 constexpr float kSetFogHazeCut = 0.5f;
 // setFog's share of the valley mist's weight by day, rising to
-// kMistFogWeightNight at night (look fix round 4: 1.2 -> 0.6 by day, the
-// mist layer doubled the weather fog in every hollow; the night keeps 1.2).
-// (Look fix round 5 "mist": 0.6 -> 0.2 by day; the mist layer in the
-// hollows before the rock thickened the light mist again.)
+// kMistFogWeightNight at night. By day a heavier layer doubles the weather
+// fog in every hollow and thickens a light mist into fog.
 constexpr float kMistFogWeight = 0.2f;
 constexpr float kMistFogWeightNight = 1.2f;
 // The forward fog keeps the view-distance edge: it starts at this share of
@@ -388,10 +362,10 @@ constexpr float kFogHorizonFillTop = 0.06f;
 // GLSL kSnapRatioEps), so a channel the overlay left alone keeps the fogged
 // light whole even at 0. eps is far under the frame's darkest nonzero code,
 // (1/255)^2.2 = 5e-6, so a black mask over the darkest world still darkens it
-// whole. (Look fix round 5 "mist": the old max(before, 1e-5) floor turned
-// world channels at code 0 or 1 into a ratio of 0 or 0.5 with no overlay
-// there: single black and green pixels over a fogged tree line, wherever its
-// needles were near black; TAA's sharper mips made more of them.)
+// whole. A plain floor such as max(before, 1e-5) would turn world channels at
+// code 0 or 1 into a ratio of 0 or 0.5 with no overlay there: single black
+// and green pixels over a fogged tree line, wherever its needles are near
+// black.
 constexpr float kFogSnapRatioEps = 1e-7f;
 // The overlay's darkening of one channel: 1 where the overlay left it.
 float FogSnapRatio(float after, float before);
@@ -402,8 +376,8 @@ constexpr float kFogRingGreyFromDeg = 3.8f;
 // ring measures the sky a few degrees above the land (from 2 degrees up, the
 // darker half of six samples), so toward a low sun it holds the aureole's
 // flank; the haze over ground under the horizon is farther from the sun and
-// takes less of the sun's forward scattering (look fix "dawn": a cream veil
-// over dawn_valley's bay). Per channel, from the sky table's two parts at the
+// takes less of the sun's forward scattering (without the gain a dawn bay
+// wears a cream veil). Per channel, from the sky table's two parts at the
 // ring's sample direction (r the Rayleigh and multiple scattering, m the
 // haze's single scattering without its phase), the gain is
 // (r + m P(column)) / (r + m P(ring)), P the sky's own Mie phase, at most

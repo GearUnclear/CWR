@@ -4,9 +4,9 @@
 
 #include <cstdint>
 
-// The remastered night (INTEGRATION-PLAN.md step B3, research track night):
-// the rules the GL backend, the scene and the shaders share. Pure, no GL, no
-// engine state. Three feature switches, each with its frame gate
+// The remastered night: the rules the GL backend, the scene and the shaders
+// share. Pure, no GL, no engine state. Three feature switches, each with its
+// frame gate
 // (FeatureGates.hpp):
 //
 //   moonShadows  the moon as the key light: once the sun is well under the
@@ -14,7 +14,7 @@
 //                the moon (LightRig.hpp KeyLight), so the shadow map, the
 //                terrain horizon, the cloud shadows and the glossy highlight
 //                follow it, and the scene renders the shadow map from the moon.
-//                The moon keeps F9's calibration; only its shadows are new. The
+//                The moon keeps its calibration; only its shadows are new. The
 //                sky stays on the sun (its table, aureole and fog glow).
 //   nightLights  street lamps and headlights as physical lights on the frame's
 //                tiled light list (FrameLights.hpp: inverse-square falloff from

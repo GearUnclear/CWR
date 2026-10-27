@@ -277,17 +277,11 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
     m.night = night;
 
     // Haze: thin under a broken sky (the blue sky and its white cumulus keep
-    // their clear air), thick under a grey deck and in rain.
-    // (Look director round 2: rain's own weather fog carries most of its
-    // air; once the air took the sky's real colour, a grey deck's haze times
-    // 1 + 2 rain on top erased a hill 300 m away.)
-    // (Look fix "plate": the grey gain 3.5 to kHazeGreyGain; a dry overcast
-    // erased every ridge past 1.5 km.)
-    // (Look fix round 4 "mist": setFog's own fog carries its air as rain's
-    // does; the grey haze on top of a setFog 0.3 mist under a deck erased a
-    // rock 300 m out.)
-    // (Look fix round 5 "mist": and the clear haze itself is cut under a
-    // day's setFog, kSetFogHazeCut: setFog's mist is that humid air.)
+    // their clear air), thick under a grey deck and in rain. Rain's and
+    // setFog's own weather fog carry most of their air, so the grey gain
+    // shrinks with them (a full grey haze on top erases a hill 300 m away),
+    // and a day's setFog cuts the clear haze itself (kSetFogHazeCut): setFog's
+    // mist is that humid air.
     const float wetAir = std::max(rain, Smooth(0.0f, 0.3f, fog) * (1.0f - night));
     m.hazeSigma = kHazeClear * density *
                   (1.0f + kHazeGreyGain * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * wetAir)) *
@@ -295,8 +289,8 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
     m.rayleigh = kRayleighScale * density;
     // The humid air near the ground: a misty morning, the night, a grey sky,
     // rain and fog (a foggy morning most: the light falls through it in
-    // shafts); never the clear air of a dry day (the veil it laid over near
-    // vehicles toward a low sun).
+    // shafts); never the clear air of a dry day (it would lay a veil over
+    // near vehicles toward a low sun).
     const float groundWeight = std::min(std::max(morning * std::max(event, Smooth(0.0f, 0.15f, fog)), 0.35f * night) +
                                             0.3f * Smooth(0.5f, 1.0f, overcast) + 0.5f * rain + 0.5f * fog,
                                         1.5f);

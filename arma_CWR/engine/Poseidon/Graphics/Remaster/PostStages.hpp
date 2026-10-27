@@ -4,18 +4,17 @@
 
 #include <cstdint>
 
-// The remastered post pass as a fixed list of stages (INTEGRATION-PLAN.md
-// section 3.6). EngineGL33::EndWorldScene runs the stages that a frame's plan
+// The remastered post pass as a fixed list of stages.
+// EngineGL33::EndWorldScene runs the stages that a frame's plan
 // names, in this order, on one PostFrame (EngineGL33_PostFX.cpp); each stage
 // has its own GPU mark and section (Graphics/Core/GpuTimings.hpp). Pure, no
 // GL: which stages run in a frame, and at what strength, is a function of the
 // inputs below, so the early return and every stage's gate can be tested.
 //
-// The list is fixed. A later step lands its stage by giving it a pass and
-// setting `landed` (A5 the TAA resolve and sharpen, B4 the combat scatter, B6
-// the tag readout and the reflections, B8 the air pass), never by reordering
-// the list. A stage that has not landed holds its place, mark and section and
-// never runs. A stage that samples PostLinearDepth's output sets
+// The list is fixed. A new stage gets its place, mark and section first and
+// runs once it has a pass and `landed` is set; stages are never reordered. A
+// stage that has not landed holds its place, mark and section and never runs.
+// A stage that samples PostLinearDepth's output sets
 // readsLinearDepth, and the planner then runs LinearDepth before it.
 
 namespace Poseidon::remaster
@@ -25,16 +24,16 @@ enum class PostStage : std::uint8_t
 {
     Resolve,       // colour, depth and stencil out of the multisampled frame target
     LinearDepth,   // half-resolution view depth, for the stages that read it
-    TagReadout,    // SSR stencil tags (B6, only with ssr gated on)
+    TagReadout,    // SSR stencil tags (only with ssr gated on)
     Ao,            // ambient occlusion and its blur
-    Ssr,           // screen-space reflections (B6; before bloom, so reflected highlights bloom)
-    Air,           // the volumetric fog and atmosphere (look-fog, superseding B8's air pass; replaces Shafts when on)
+    Ssr,           // screen-space reflections (before bloom, so reflected highlights bloom)
+    Air,           // the volumetric fog and atmosphere, or the plain air pass; replaces Shafts when on
     Bloom,         // bloom chain
     Shafts,        // the legacy sun shafts
-    CombatScatter, // combat light scattered in smoke and dust (B4)
+    CombatScatter, // combat light scattered in smoke and dust
     Composite,     // occlusion, bloom and shafts into the frame target
-    Temporal,      // TAA resolve (A5)
-    Sharpen,       // TAA sharpen or, with TAA off, the luma sharpen (A5, B11); never both
+    Temporal,      // TAA resolve
+    Sharpen,       // TAA sharpen or, with TAA off, the luma sharpen; never both
     DebugView,     // a diagnostic view of a post buffer over the frame (debug=5: the linear depth)
     Count
 };
@@ -44,9 +43,8 @@ struct PostStageInfo
 {
     PostStage id;
     const char* name; // its GPU section's name (GpuTimings), also its name in logs
-    const char* step; // integration step that gives the stage its pass
-    // False while the stage has no pass: it never runs. The step that lands it
-    // sets it to true.
+    const char* step; // tag shown in logs while the stage has no pass
+    // False while the stage has no pass: it never runs.
     bool landed;
     // The stage samples the half-resolution linear depth: LinearDepth runs
     // whenever it does.
@@ -61,7 +59,7 @@ const PostStageInfo& GetPostStageInfo(PostStage s);
 // frame: the half-resolution linear depth (0 is the final image, 1 to 3 views
 // of the remastered shaders, 4 the occlusion in the composite).
 constexpr int kDebugViewLinearDepth = 5;
-// The air pass's in-scatter alone over black (haze, mist and beams; B8). Its
+// The air pass's in-scatter alone over black (haze, mist and beams). Its
 // own stage draws it: the view shows only where the air pass runs. After the
 // light tiles (6, FrameLights.hpp) and the albedo (7, LightRig.hpp).
 constexpr int kDebugViewAir = 8;
@@ -90,11 +88,11 @@ struct PostFrameInputs
     // (TemporalAA.hpp). The resolve and its sharpen then run unless this frame
     // turned out to be a vehicle interior or to carry a screen overlay.
     bool temporal = false;
-    // The luma sharpen (B11): the sharpen switch and its frame gate are on (so
+    // The luma sharpen: the sharpen switch and its frame gate are on (so
     // TAA is not running this frame) and its strength is above 0. The Sharpen
     // stage then runs alone, on the composited frame.
     bool lumaSharpen = false;
-    // The air pass (B8): one of airHaze, valleyMist or airBeams and its frame
+    // The air pass: one of airHaze, valleyMist or airBeams and its frame
     // gate are on. It asks for the pass by itself and runs where the world
     // depth is there and no screen overlay was drawn (the haze would grey an
     // optics mask's black surround).
@@ -102,17 +100,17 @@ struct PostFrameInputs
     // The air pass draws sun beams this frame (airBeams and its gate on):
     // they replace the legacy shafts.
     bool airBeams = false;
-    // Screen-space reflections (B6, ScreenReflections.hpp): the world's passes
+    // Screen-space reflections (ScreenReflections.hpp): the world's passes
     // wrote the surface tags into the stencil (the ssr switch is on), and the
     // switch's frame gate is on (water or wet ground on screen).
     bool ssrTags = false;
     bool ssr = false;
-    // The combat shadow mask (B4): its switch and frame gate are on and combat
+    // The combat shadow mask: its switch and frame gate are on and combat
     // light lit this frame. The next frame's mask traces through this frame's
     // half-resolution linear depth, so LinearDepth runs (it is not a stage of
     // its own: the mask pass runs at the start of the next world).
     bool combatMask = false;
-    // The surfaces lane (SurfaceLight.hpp) wrote a vehicle interior's shares
+    // The surfaces (SurfaceLight.hpp) wrote a vehicle interior's shares
     // into its surface target: the interior's own depth (its own near plane)
     // is what the occlusion reads there, so the Ao stage runs without the
     // world depth (the corners and the breech of a crew compartment darken).
@@ -121,9 +119,9 @@ struct PostFrameInputs
     // as scene light this frame, and the composite is the camera that turns
     // it into the picture, so it asks for the pass by itself.
     bool camera = false;
-    // The volumetric fog (FeatureSet::volFog and its frame gate, look-fog):
+    // The volumetric fog (FeatureSet::volFog and its frame gate):
     // the Air stage applies the fog volume to every pixel by its world depth
-    // in place of B8's air pass (whose gates are off while it runs) and
+    // in place of the plain air pass (whose gates are off while it runs) and
     // replaces the legacy shafts (its sun light in the air is the beams). It
     // needs the world depth (or fogWorldDepth); a screen overlay keeps it
     // (the apply leaves the overlay's mask as drawn). Held off, the frame
@@ -145,7 +143,7 @@ struct PostStagePlan
     // frame holds the stage off (no world depth, a screen overlay).
     float aoStrength = 0.0f;
     float bloomStrength = 0.0f;
-    // The Air stage runs the volumetric fog (look-fog), not B8's air pass.
+    // The Air stage runs the volumetric fog, not the plain air pass.
     bool fog = false;
     bool Runs(PostStage s) const { return ((runs >> static_cast<int>(s)) & 1u) != 0; }
     // No stage asked for the pass: the frame stays as drawn.

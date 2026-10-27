@@ -13,8 +13,8 @@
 //
 // The budget (RTX 3060 class, 1080p, 60 fps) only holds if the heavy features
 // run only where they can show: beams at a low sun in view, wet shading in the
-// wet, canopy shadows at a low clear sun, and so on (INTEGRATION-PLAN.md
-// section 3.2). Every gate is a pure function of the inputs below, so a
+// wet, canopy shadows at a low clear sun, and so on. Every gate is a pure
+// function of the inputs below, so a
 // gate's off state can be tested and logged (triFeatureState) and its cost
 // checked at zero there.
 //
@@ -53,8 +53,8 @@ constexpr float kGateLitCloudsMaxSkyThrough = 0.85f;
 // below it never shows.
 constexpr float kGateSkyShadowsMinSunDeg = -1.5f;
 
-// What a gate looks at. The backend fills what exists today; an input whose
-// source lands with a later step keeps its "unknown" default, noted per field.
+// What a gate looks at, filled by the backend once per frame. An input the
+// backend has no source for keeps its "unknown" default, noted per field.
 struct GateInputs
 {
     float sunElevationDeg = 90.0f;
@@ -65,10 +65,10 @@ struct GateInputs
     float moonPhase = 0.0f;   // 0 new .. 1 full (the light the rig takes from it)
     float nightEffect = 0.0f; // LightSun::NightEffect: 0 day .. 1 night
     float skyThrough = 1.0f;  // 1 clear .. 0 overcast
-    float cloudCover = 0.0f;  // the rig's cloud-shadow cover (0 under a clear sky, F4)
+    float cloudCover = 0.0f;  // the rig's cloud-shadow cover (0 under a clear sky)
     float rainDensity = 0.0f;
     float fog = 0.0f; // setFog value, 0..1
-    // World wetness 0..1 (B7's integrator). Negative = no wetness state yet:
+    // World wetness 0..1 (Wetness.hpp). Negative = no wetness state yet:
     // the rain density stands in.
     float wetness = -1.0f;
     bool worldDrawn = true;
@@ -77,11 +77,11 @@ struct GateInputs
     bool nightVision = false; // the intensifier is on
     int localLights = 0;      // point and spot lights on, within reach of the camera
     int spotLights = 0;       // of those, spot lights (headlights)
-    // Combat lights (B4, CombatLights.hpp) lit this frame whose reach comes
+    // Combat lights (CombatLights.hpp) lit this frame whose reach comes
     // within kGateCombatRange of the camera (a flare 100 m up counts).
     int combatLightsNear = 0;
     // A recent frame's screen share of water and of the ground the rain wets
-    // (terrain and roads), from the reflections' tag readout (B6, read back a
+    // (terrain and roads), from the reflections' tag readout (read back a
     // few frames later). The ground counts only while it is wet (the wetness
     // below, or the ssrWet knob). Negative = not measured (no tags written).
     float waterShare = -1.0f;

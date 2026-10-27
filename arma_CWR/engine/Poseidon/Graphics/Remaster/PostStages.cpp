@@ -18,21 +18,20 @@ constexpr PostStageInfo kStages[] = {
     {PostStage::Resolve, "resolve", "A3", true, false, Mark::ResolveEnd, Section::Resolve},
     {PostStage::LinearDepth, "lindepth", "A3", true, false, Mark::LinearDepthEnd, Section::LinearDepth},
     {PostStage::TagReadout, "tags", "B6", true, false, Mark::TagReadoutEnd, Section::TagReadout},
-    // AO still reads the full-resolution depth; it moves onto the linear depth
-    // in its own step (a pixel change).
+    // AO reads the full-resolution depth.
     {PostStage::Ao, "ao", "A3", true, false, Mark::AoEnd, Section::Ao},
     // The reflections march the half-resolution linear depth.
     {PostStage::Ssr, "ssr", "B6", true, true, Mark::SsrEnd, Section::Ssr},
-    // B8: the air pass marches at half resolution, on the linear depth; the
-    // look lane's volumetric fog (EngineGL33_PostFog.cpp) runs on the same
-    // stage in its place.
+    // The air pass marches at half resolution, on the linear depth; the
+    // volumetric fog (EngineGL33_PostFog.cpp) runs on the same stage in its
+    // place.
     {PostStage::Air, "air", "B8", true, true, Mark::AirEnd, Section::Air},
     {PostStage::Bloom, "bloom", "A3", true, false, Mark::BloomEnd, Section::Bloom},
     {PostStage::Shafts, "shafts", "A3", true, false, Mark::ShaftsEnd, Section::Shafts},
     {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
     {PostStage::Composite, "composite", "A3", true, false, Mark::CompositeEnd, Section::Composite},
     {PostStage::Temporal, "taa", "A5", true, false, Mark::TemporalEnd, Section::Temporal},
-    // A5 landed TAA's sharpen; B11's luma sharpen (with TAA off) joined it.
+    // TAA's sharpen, or with TAA off the luma sharpen.
     {PostStage::Sharpen, "sharpen", "A5", true, false, Mark::SharpenEnd, Section::Sharpen},
     {PostStage::DebugView, "debugview", "A3", true, true, Mark::DebugViewEnd, Section::DebugView},
 };
@@ -103,7 +102,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
         if ((in.ssr && in.glow) || debugSsr)
             plan.runs |= Bit(PostStage::Ssr);
     }
-    // Occlusion needs the world depth, or the surfaces lane's interior.
+    // Occlusion needs the world depth, or the surfaces' interior shares.
     plan.aoStrength = (in.worldDepth || in.surfaceInterior) ? in.ambientOcclusion : 0.0f;
     if (plan.aoStrength > 0.0f)
         plan.runs |= Bit(PostStage::Ao);
@@ -116,8 +115,8 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     // stage in its place.
     // The volumetric fog also runs under a screen overlay (a rifle's iron
     // sight, a gunner's optic): its apply leaves the overlay's black mask as
-    // drawn, and switching the mist off whenever the player aimed made it pop
-    // away and let him see through it. In a vehicle interior it runs on the
+    // drawn; switching the mist off whenever the player aims would make it pop
+    // away and let the player see through it. In a vehicle interior it runs on the
     // world depth saved before the interior cleared it (fogWorldDepth), so
     // the air is drawn in every view AI sight is cut by it.
     plan.fog = in.fog && (in.worldDepth || in.fogWorldDepth);
@@ -126,7 +125,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
         plan.runs |= Bit(PostStage::Air);
     // The shafts are depth tested glow toward a sun on screen; the air pass's
     // beams and the fog's own sun light in the air replace them, and so does
-    // the photoreal camera (its composite adds none: their radial march drew
+    // the photoreal camera (its composite adds none: their radial march draws
     // a fan of streaks round a low sun).
     if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight &&
         !(air && (in.airBeams || plan.fog)) && !in.camera)

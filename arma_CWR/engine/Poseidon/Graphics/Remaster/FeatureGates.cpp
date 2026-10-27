@@ -18,7 +18,7 @@ Gate Off(const char* reason, float scale = 1.0f)
     return Gate{false, scale, reason};
 }
 
-// The pass resolution of each feature (plan section 3.2): the air pass, the
+// The pass resolution of each feature: the air pass, the
 // SSR trace and the combat shadow mask run at half resolution; everything else
 // at full or has no screen pass of its own (the canopy's sun-visibility map is
 // a world-space map around the camera, Canopy.hpp, not a screen buffer).
@@ -48,9 +48,9 @@ bool Morning(const GateInputs& in)
     return east && in.sunElevationDeg > kGateMorningMinSunDeg && in.sunElevationDeg < kGateMorningMaxSunDeg;
 }
 
-// The moon as the key light: B3 routes it through the sun slots and the shadow
-// map only when the sun is well under the horizon and the moon is up and
-// bright enough.
+// The moon as the key light: it goes through the sun slots and the shadow map
+// only when the sun is well under the horizon and the moon is up and bright
+// enough.
 Gate MoonKey(const GateInputs& in)
 {
     if (in.nightEffect <= kGateNightMinEffect)
@@ -114,7 +114,7 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
             return On("world drawn");
 
         case Feature::LightTiles:
-            // The combat lights shade from the tiled list (B4).
+            // The combat lights shade from the tiled list.
             if (in.combatLightsNear > 0 && FeatureOn(t.features, Feature::CombatLights))
                 return On("combat light within 60 m");
             if (in.localLights <= 0)
@@ -250,7 +250,7 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
         case Feature::SkyCloudShadows:
             if (in.cloudCover <= 0.0f)
                 return Off("clear sky (cover below 0.05)");
-            // Cloud shadows dim the key light: the sun, or the moon as B3's key.
+            // Cloud shadows dim the key light: the sun, or the moon as the key.
             if (in.sunElevationDeg <= kGateSkyShadowsMinSunDeg &&
                 !(FeatureOn(t.features, Feature::MoonShadows) && MoonKey(in).on))
                 return Off("no sun or moon key");
@@ -348,7 +348,7 @@ FeatureGates ComputeFeatureGates(const GateInputs& in, const LightingTuning& tun
         else
             out = Condition(f, in, tuning);
     }
-    // The volumetric fog supersedes B8's air pass on the same stage: while it
+    // The volumetric fog supersedes the plain air pass on the same stage: while it
     // runs, the beams, the haze and the valley mist are its own.
     if (g.gate[static_cast<int>(Feature::VolFog)].on)
         for (Feature f : {Feature::AirBeams, Feature::AirHaze, Feature::ValleyMist})
