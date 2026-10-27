@@ -9,13 +9,13 @@
 #include <random>
 #include <vector>
 
-// Hill culling (plan section 5 A4): the horizon table may call an object
-// hidden only when the terrain as the renderer draws it blocks every sight
-// line from the eye to every point of the object's enlarged sphere. These
-// tests march sight lines over the triangulated grid by brute force and hold
-// the table to that, on hilly synthetic terrain, on a notch narrower than one
-// wedge and on an object below the eye (two cases the research prototype got
-// wrong; its single-ray test is kept here to show that).
+// Hill culling: the horizon table may call an object hidden only when the
+// terrain as the renderer draws it blocks every sight line from the eye to
+// every point of the object's enlarged sphere. These tests march sight lines
+// over the triangulated grid by brute force and hold the table to that, on
+// hilly synthetic terrain, on a notch narrower than one wedge and on an object
+// below the eye (two cases an earlier single-ray prototype got wrong; its
+// single-ray test is kept here to show that).
 
 using namespace Poseidon::TerrainOcclusion;
 
@@ -100,9 +100,9 @@ bool BruteVisible(const Terrain& t, float ex, float ey, float ez, float cx, floa
     return false;
 }
 
-// The research prototype's test (tmp/research/perf/prototype.patch): one ray
-// per bin marched in 25 m steps with the terrain lowered 2 m, the sphere's top
-// over its near-edge distance, one extra ray each side.
+// The earlier prototype's test: one ray per bin marched in 25 m steps with the
+// terrain lowered 2 m, the sphere's top over its near-edge distance, one extra
+// ray each side.
 bool PrototypeHidden(const Terrain& t, float ex, float ey, float ez, float range, float px, float py, float pz,
                      float radius)
 {

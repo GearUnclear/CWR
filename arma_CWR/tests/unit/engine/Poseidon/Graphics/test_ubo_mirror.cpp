@@ -7,11 +7,11 @@
 #include <vector>
 
 // The GL33 backend's constant blocks (LitConstants, VSConstants) are written
-// through a mirror of what the buffer holds (plan section 5 A4): a flush sends
-// only the slots that changed. The rule that keeps that exact: after every
-// upload, whole or partial, the buffer equals the CPU block in every slot a
-// shader reads. These tests drive the mirror the way EngineGL33 does (Plan,
-// upload, Store) against a recording fake buffer.
+// through a mirror of what the buffer holds: a flush sends only the slots that
+// changed. The rule that keeps that exact: after every upload, whole or
+// partial, the buffer equals the CPU block in every slot a shader reads. These
+// tests drive the mirror the way EngineGL33 does (Plan, upload, Store) against
+// a recording fake buffer.
 
 using Poseidon::gpu::UboMirror;
 
@@ -153,7 +153,7 @@ TEST_CASE("UboMirror: dedupe sends only the changed range, or nothing", "[gpu][U
     CHECK(gpu.uploads == 2);
     CHECK(gpu.slotsSent == kSlots + 5); // slots 20..24
 
-    Flush(m, gpu, cpu.data(), false); // dedupe off: the whole block, as before A4
+    Flush(m, gpu, cpu.data(), false); // dedupe off: the whole block, as before the mirror
     CHECK(gpu.slotsSent == kSlots + 5 + kSlots);
 }
 

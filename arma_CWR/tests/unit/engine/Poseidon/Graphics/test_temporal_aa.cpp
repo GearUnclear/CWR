@@ -12,12 +12,11 @@
 #include <string>
 #include <utility>
 
-// Temporal anti-aliasing (INTEGRATION-PLAN.md step A5,
-// Graphics/Remaster/TemporalAA.hpp): the jitter sequence and its range, the
-// reprojection the resolve shader applies (its C++ mirror against hand values
-// and against the camera transforms it stands for), the history chain, and
-// the backend contracts that keep the jitter off the HUD and the shadow-map
-// pass.
+// Temporal anti-aliasing (Graphics/Remaster/TemporalAA.hpp): the jitter
+// sequence and its range, the reprojection the resolve shader applies (its C++
+// mirror against hand values and against the camera transforms it stands for),
+// the history chain, and the backend contracts that keep the jitter off the HUD
+// and the shadow-map pass.
 
 using namespace Poseidon::remaster;
 namespace gl = Poseidon::gl33lighting;
@@ -313,7 +312,7 @@ TEST_CASE("TAA shaders: the jitter only in the remastered world programs, and on
 {
     // Every remastered vertex shader adds the jitter once, guarded so a zero
     // jitter leaves the position exactly as computed (the switch's "off" is
-    // the look before A5).
+    // the look before TAA).
     const std::string add = "if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;";
     int vertex = 0;
     for (int vs = 0; vs < 16; ++vs)
@@ -360,7 +359,7 @@ TEST_CASE("TAA shaders: the resolve and sharpen contracts", "[remaster][Temporal
     // out with the colour.
     CHECK(taa.find("if (dz < closest) { closest = dz; closestOff = ivec2(x, y); }") != std::string::npos);
     // The reconstruction kernel sets how soft the converged frame is: exp(-4 d^2)
-    // (the A5 sweep: 5% softer on the hero view against 15% with exp(-2.29 d^2)).
+    // (5% softer on a test view against 15% with exp(-2.29 d^2)).
     CHECK(taa.find("float w = exp(-4.0 * dot(d, d));") != std::string::npos);
     CHECK(taa.find("vec3 sampleHistory(vec2 uv)") != std::string::npos);
     CHECK(taa.find("clipToBox(max(mu - sigma, cmin), min(mu + sigma, cmax), toYCoCg(hist))") != std::string::npos);

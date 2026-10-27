@@ -10,8 +10,8 @@
 // The verbs and helpers the lighting capture harness (tests/rendering/captures)
 // relies on for trustworthy A/B pictures: triSetLighting must put every knob
 // back to its default when it switches mode and must apply a comma list whole
-// or not at all, "baseline" must turn every feature switch off (the honest
-// "off" of the feature videos), triSetFixedStep must hold the simulation step,
+// or not at all, "baseline" must turn every feature switch off (an honest
+// "off" for before and after pictures), triSetFixedStep must hold the simulation step,
 // and SceneSettle must not call a still-loading view settled.
 
 using namespace Poseidon;
@@ -300,7 +300,7 @@ TEST_CASE("SceneSettle waits for a full window of steady frames", "[SceneSettle]
 
 TEST_CASE("SceneSettle does not settle while the draw count is still climbing", "[SceneSettle][tri]")
 {
-    // The research run's sunrise_ridge: the first shot drew 1,465 calls while
+    // A sunrise view over a ridge: the first shot drew 1,465 calls while
     // the scene went on to draw about 9,500.
     Dev::SceneSettle s(5, 0.02f);
     for (int draws = 1465; draws < 9500; draws += 800)

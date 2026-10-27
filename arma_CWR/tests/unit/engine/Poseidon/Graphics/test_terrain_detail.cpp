@@ -15,13 +15,12 @@
 #include <sstream>
 #include <string>
 
-// Terrain detail (INTEGRATION-PLAN.md step B11, research track texsharp;
-// Graphics/Remaster/TerrainDetail.hpp): the C++ mirror of the terrain main's
-// self-detail (the cell rotation, the locality of each cell's patch, the
-// variance-preserving blend, the soft limiter), the detail-kept boost and the
-// distance fade, the frame constants that switch it off, and the contracts
-// between the mirror, the shader and the backend: the shader's constants are
-// the mirror's, and only the land's draws get it.
+// Terrain detail (Graphics/Remaster/TerrainDetail.hpp): the C++ mirror of the
+// terrain main's self-detail (the cell rotation, the locality of each cell's
+// patch, the variance-preserving blend, the soft limiter), the detail-kept
+// boost and the distance fade, the frame constants that switch it off, and the
+// contracts between the mirror, the shader and the backend: the shader's
+// constants are the mirror's, and only the land's draws get it.
 
 using namespace Poseidon::remaster;
 namespace td = Poseidon::remaster::terrain_detail;
@@ -144,7 +143,7 @@ TEST_CASE("Terrain detail: every cell turns its patch by its own angle, from a w
           "[remaster][TerrainDetail]")
 {
     // Deterministic, in range, and spread evenly over the turn: the unrotated
-    // research cells printed parallel "mowing stripes" on the Eden meadow.
+    // cells of an earlier version printed parallel "mowing stripes" on the Eden meadow.
     constexpr int kBins = 8;
     int bins[kBins] = {};
     int sameAsLeft = 0;
@@ -225,7 +224,7 @@ TEST_CASE("Terrain detail: everything fades out by 300 m, where the frame gate e
     CHECK(s.find("terrainDetail=1:on:per-terrain-fragment-within-300-m") != std::string::npos);
 
     // Detail kept: no boost where the detail texture is magnified, 2^lod
-    // beyond, never above 2x (the research's 4x painted dark blotches on
+    // beyond, never above 2x (an earlier 4x painted dark blotches on
     // paths), and back to 1 by the end of the range, so nothing steps there.
     CHECK(td::KeptBoost(-2.0f, 10.0f) == 1.0f);
     CHECK(td::KeptBoost(0.0f, 10.0f) == 1.0f);
