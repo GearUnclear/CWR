@@ -1,5 +1,4 @@
-// Remastered sky: the sky table (feature switch `atmosphere`,
-// INTEGRATION-PLAN.md section 5 A7).
+// Remastered sky: the sky table (feature switch `atmosphere`).
 //
 // A physically based clear sky (Graphics/Remaster/Atmosphere.hpp) lights the
 // sky dome under the original sky texture's clouds and gives the fog of the
@@ -241,8 +240,8 @@ void SetModelUniforms(GLuint prog, float sunElevationRad, float haze)
 
 void EngineGL33::InitSkyTable()
 {
-    // Unit 8 always holds a complete texture of the right kind (the F3 rule):
-    // a stand-in until the first sky-view table is built.
+    // Unit 8 always holds a complete texture of the right kind (a shader must
+    // never sample an incomplete texture): a stand-in until the first sky-view table is built.
     GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
     const float zero[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     s_sky.standIn = MakeFloatTexture(GL_RGBA32F, GL_RGBA, 1, 1, zero, false);

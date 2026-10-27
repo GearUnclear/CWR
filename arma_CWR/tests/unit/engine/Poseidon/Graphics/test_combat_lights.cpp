@@ -19,12 +19,11 @@
 #include <string>
 #include <vector>
 
-// Combat light (INTEGRATION-PLAN.md step B4, Graphics/Rendering/Lighting/
-// CombatLights.hpp): the envelopes and their finish times, the day scaling,
+// Combat light (Graphics/Rendering/Lighting/CombatLights.hpp): the envelopes and their finish times, the day scaling,
 // the strength from the ammo, the shadowed lights picked with hysteresis (no
 // flip between two fires), the set aged by the simulation (a paused game holds
-// it), the shadow mask's mapping at the screen centre and edges (the research
-// prototype's seam down the centre column), the frame list's combat entries,
+// it), the shadow mask's mapping at the screen centre and edges (an earlier
+// version's seam down the centre column), the frame list's combat entries,
 // the flash's exposure response, the gates and the backend contracts that keep
 // the switch off equal to the frame before it.
 
@@ -180,10 +179,9 @@ TEST_CASE("Combat lights: a fire breathes smoothly, never a new brightness every
     }
     CHECK(sum / 900.0f < 0.06f);
     CHECK(worst < 0.25f);
-    // The fire's light is less saturated than the research's beige-making one,
-    // and one step under the first B4 build's (1.0, 0.66, 0.39), whose light
-    // read red over blue 1.43 to 1.53 on the ground round a camp fire, over
-    // the plan's 1.4.
+    // The fire's light is less saturated than an earlier beige-making one,
+    // and one step under (1.0, 0.66, 0.39), whose light read red over blue
+    // 1.43 to 1.53 on the ground round a camp fire, over the 1.4 aimed for.
     const CombatLightSample f = At(CombatLightKind::Fire, 1.0f);
     CHECK(f.rgb[0] / f.rgb[2] < 1.0f / 0.14f);
     CHECK(f.rgb[0] / f.rgb[2] <= 1.0f / 0.45f + 1e-3f);
@@ -194,7 +192,7 @@ TEST_CASE("Combat lights: a burst's flash lasts as long as Classic's whiteout an
           "[remaster][CombatLights]")
 {
     // A classic shell burst still whitens the frame 0.13 s (four steps at 30
-    // fps) after it: the flash holds through that frame (the research's 60 ms
+    // fps) after it: the flash holds through that frame (a 60 ms
     // fall left it 14 to 24 levels under Classic at eye height), and a quarter
     // of a second after the burst it has fallen well below its peak.
     // (The fireball under the flash fades from the start: within 6%.)
@@ -222,8 +220,8 @@ TEST_CASE("Combat lights: a burst's flash lasts as long as Classic's whiteout an
     CHECK(n4 < 0.2f * At(CombatLightKind::Explosion, 4.0f / 30.0f).intensity);
     // Red over blue of the light: the fire's warmth (1 / 0.45) is what lit
     // ground takes at about 1.4 on screen; a burst stays at or under it at every
-    // age, and the white-hot flash well under it (the research's orange
-    // fireball, 1 / 0.11, and its muzzle, 1 / 0.42, turned the ground khaki).
+    // age, and the white-hot flash well under it (an earlier orange
+    // fireball, 1 / 0.11, and muzzle, 1 / 0.42, turned the ground khaki).
     const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
     const float fireRb = fire.rgb[0] / fire.rgb[2];
     for (CombatLightKind k : {CombatLightKind::Muzzle, CombatLightKind::Cannon, CombatLightKind::Explosion})
@@ -371,9 +369,8 @@ TEST_CASE("Combat lights: smoke takes the light softly; no light leaves it as it
 TEST_CASE("Combat lights: a fire lights its smoke in its own colour however close, brighter at the foot",
           "[remaster][CombatLights]")
 {
-    // Look fix "fire": the channels saturated one by one toward the same
-    // value, so the foot of a camp fire's column went white (town_night
-    // plume (179, 166, 151)), and the 8-bit colour clipped each channel. The
+    // Saturated one by one, the channels went toward the same value, so the
+    // foot of a camp fire's column went white (a plume at (179, 166, 151)), and the 8-bit colour clipped each channel. The
     // colour version saturates on the peak and keeps the light's hue.
     const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
     const float ambient[3] = {0.08f, 0.08f, 0.09f}; // a puff under the night's light
@@ -429,8 +426,7 @@ TEST_CASE("Combat lights: a fire lights its smoke in its own colour however clos
 TEST_CASE("Combat lights: a burst's cloud whitens at its core, a fire's smoke keeps the fire's colour",
           "[remaster][CombatLights]")
 {
-    // Look director round 3 (the "fire" and "horizon" fixes merged): with
-    // every combat light kept in its hue, a dusk shell burst's cloud went one
+    // With every combat light kept in its hue, a dusk shell burst's cloud went one
     // flat mustard yellow. A fire's light keeps its hue; a burst's light
     // saturates channel by channel toward white, as an incandescent core does.
     const float ambient[3] = {0.08f, 0.08f, 0.09f};
@@ -465,7 +461,7 @@ TEST_CASE("Combat lights: a burst's cloud whitens at its core, a fire's smoke ke
 
 TEST_CASE("Combat lights: the smoke inside a fire's flames glows as the flame", "[remaster][CombatLights]")
 {
-    // Look fix "fire": the classic fire's light lit the puffs round it past
+    // The classic fire's light lit the puffs round it past
     // white, and that yellow column was the flame; the combat light on smoke
     // only scatters, so under the camera a camp fire had no flame. A puff in
     // the flames' body emits a yellow-orange light, strongest at the light,
@@ -495,11 +491,11 @@ TEST_CASE("Combat lights: the smoke inside a fire's flames glows as the flame", 
 TEST_CASE("Combat lights: a burning wreck's black smoke glows at its base and its column stays dark",
           "[remaster][CombatLights]")
 {
-    // The review of the first B4 build: the embers lit every particle of the
-    // wreck's column at full strength however dark or high it was, and at
-    // night the black plume read at sky level (combat_eye_k00: Classic 4.2,
-    // on 10.3, the sky 10.0). A fire's light crosses its own smoke: black soot
-    // lets it reach the column's foot only, pale smoke carries it higher.
+    // In an earlier version the embers lit every particle of the wreck's column
+    // at full strength however dark or high it was, and at night the black
+    // plume read at sky level (Classic 4.2, on 10.3, the sky 10.0). A fire's
+    // light crosses its own smoke: black soot lets it reach the column's foot
+    // only, pale smoke carries it higher.
     const CombatLightSample embers = At(CombatLightKind::Fire, 1.0f, 2.5f); // a Ural's: 0.9 x density x size
     const CombatLightSample camp = At(CombatLightKind::Fire, 1.0f, 1.0f);
     const float soot = 0.075f; // the wreck's (0.15, 0.15, 0.10) x a random 0..1 (Object::Destroy)
@@ -522,7 +518,7 @@ TEST_CASE("Combat lights: a burning wreck's black smoke glows at its base and it
     CHECK(CombatSmokeTransmittance(CombatLightKind::Fire, embers, 3.0f, soot) <
           CombatSmokeTransmittance(CombatLightKind::Fire, embers, 2.0f, soot));
     CHECK(CombatSmokeReach(embers.core, pale) > 4.0f * CombatSmokeReach(embers.core, soot));
-    // A shell burst's light crosses its own cloud too (look fix "burst"): the
+    // A shell burst's light crosses its own cloud too: the
     // base round its ball is lit, the far side of its cloud less.
     const CombatLightSample burst = At(CombatLightKind::Explosion, 0.3f);
     CHECK(CombatSmokeTransmittance(CombatLightKind::Explosion, burst, burst.core * 0.5f, soot) == 1.0f);
@@ -685,7 +681,7 @@ TEST_CASE("Combat lights: a flash at the camera opens the exposure, at night onl
 
 TEST_CASE("Combat lights: two flickering fires keep their shadow channels", "[remaster][CombatLights]")
 {
-    // The research prototype picked the strongest light every frame: the
+    // An earlier version picked the strongest light every frame: the
     // shadow flipped between the campfire and the burning truck whenever their
     // flicker crossed. With one channel, the shadowed fire keeps it unless the
     // other exceeds it 1.5x for 0.3 s.
@@ -858,7 +854,7 @@ TEST_CASE("Combat lights: an owner's handle creates, moves and removes one light
 
 TEST_CASE("Combat lights: the shadow mask maps the screen centre and edges without a seam", "[remaster][CombatLights]")
 {
-    // The research prototype showed a 3 to 4.5 level seam down the exact
+    // An earlier version showed a 3 to 4.5 level seam down the exact
     // screen-centre column. The mask is half resolution: texel i holds the
     // 2x2 block of frame-target pixels from 2i, so pixel coordinate x must map
     // to mask coordinate x / 2 exactly, at the centre (NDC 0) as at the edges,
@@ -1061,11 +1057,11 @@ TEST_CASE("Combat lights: the switches have landed with their sub-knobs and thei
         const LightingKey* k = FindLightingKey(key);
         REQUIRE(k != nullptr);
         CHECK(std::string(k->parent) == "combatLights");
-        // The look director lowered the burst flash under the photoreal
+        // The burst flash is lower under the photoreal
         // camera (a shell at dusk lit the plain white to the horizon).
         CHECK(KeyDefault(*k) == (std::string(key) == "combatFlash" ? 0.6f : 1.0f));
     }
-    // The last debug view, after the reflections' two (B6).
+    // The last debug view, after the reflections' two.
     CHECK(kDebugViewCombatMask == kDebugViewSsrReflection + 1);
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
@@ -1091,7 +1087,7 @@ TEST_CASE("Combat lights: the shaders read the combat entries, the mask and the 
     CHECK(lights.find("vec4 combatPrevU;") < lights.find("vec4 combatPrevV;"));
     CHECK(lights.find("vec4 combatPrevV;") < lights.find("vec4 combatPrevZ;"));
     CHECK(lights.find("uniform sampler2D combatMask;") != std::string::npos);
-    // The classic budget and the physical lamps (B3) see only the lights after
+    // The classic budget and the physical lamps see only the lights after
     // the combat head.
     CHECK(lights.find("while (head < count && tileEntry(head) <= nCombat) ++head;") != std::string::npos);
     CHECK(lights.find("int classic = count - head;") != std::string::npos);
@@ -1117,7 +1113,7 @@ TEST_CASE("Combat lights: the shaders read the combat entries, the mask and the 
     // Shade: combat light in linear light, outside the classic clamp.
     const std::string shade = gl::RemasterFragmentPiece(gl::FragmentPiece::Shade);
     CHECK(shade.find("vec3 combat = kd * combatLights(n, nLight, foliage, v);") != std::string::npos);
-    // The research's seam down the screen centre: the capture camera stood on
+    // A seam down the screen centre: a test camera stood on
     // the terrain segment line x = 7600, and one segment's material is specular,
     // the other not; a low flash's glint drew the line. No flash glint on terrain.
     CHECK(shade.find("vec3 combatGloss = terrain ? vec3(0.0) : litMatSpecular.rgb * g_combatSpec * litHorizon.w;") !=
@@ -1125,7 +1121,7 @@ TEST_CASE("Combat lights: the shaders read the combat entries, the mask and the 
     CHECK(shade.find("local + emissive + combat)") != std::string::npos);
     CHECK(shade.find("litFlags.z > 10.5") != std::string::npos); // debug view 11
     CHECK(shade.find("litFlags.z > 5.5 ? lightTileView(display) : display") != std::string::npos);
-    // The wet weather's lamp streaks (B7) read the same list: a combat entry
+    // The wet weather's lamp streaks read the same list: a combat entry
     // streaks by its own model at its own linear light, not as a classic spot
     // light (its w is 2) scaled by the night factor.
     const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
@@ -1174,10 +1170,10 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(decal.find("if (combat &&") != std::string::npos);
     CHECK(decal.find("(kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire)") !=
           std::string::npos);
-    // Look fix "boom": a fireball's glowing puff takes no detonation light.
+    // A fireball's glowing puff takes no detonation light.
     CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);") !=
           std::string::npos);
-    // Look fix "fire": a puff's colour comes under one by its peak (no
+    // A puff's colour comes under one by its peak (no
     // clipped white column) and the light past it goes to the decal's glow.
     CHECK(decal.find("lighting::KeepHueUnderOne(rgb);") != std::string::npos);
     CHECK(decal.find("GEngine->SetDecalGlow(") != std::string::npos);
@@ -1186,7 +1182,7 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(litParticle.find("irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);") !=
           std::string::npos);
     CHECK(litParticle.find("lighting::CombatParticleMix(base, e, o,") != std::string::npos);
-    // Look fix "boom": a detonation's light keeps its hue on smoke as a fire's.
+    // A detonation's light keeps its hue on smoke as a fire's.
     CHECK(litParticle.find("r.kind == lighting::CombatLightKind::Fire || r.detonation ? e : o") != std::string::npos);
     CHECK(litParticle.find("if (ownGlow && r.detonation)") != std::string::npos);
     CHECK(litParticle.find("lighting::CombatFlameEmission(r.kind, r.sample, d, flame);") != std::string::npos);

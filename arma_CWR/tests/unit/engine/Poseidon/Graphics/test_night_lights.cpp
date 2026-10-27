@@ -18,12 +18,12 @@
 #include <string_view>
 #include <vector>
 
-// The remastered night (INTEGRATION-PLAN.md section 5 B3, research track
-// night; Graphics/Remaster/NightLights.hpp): the moon as a shadow-casting key
-// light that keeps F9's calibration, street lamps and headlights as physical
-// lights on the tiled list (inverse square from the bulb, a low beam aimed
-// from the body), the same lights on smoke, and stars as soft splats. Each
-// case pins one contract the shaders, the backend or the scene rely on.
+// The remastered night (Graphics/Remaster/NightLights.hpp): the moon as a
+// shadow-casting key light that keeps the rig's moon calibration, street lamps
+// and headlights as physical lights on the tiled list (inverse square from the
+// bulb, a low beam aimed from the body), the same lights on smoke, and stars as
+// soft splats. Each case pins one contract the shaders, the backend or the
+// scene rely on.
 
 using namespace Poseidon::remaster;
 namespace lt = Poseidon::lighting;
@@ -233,7 +233,7 @@ TEST_CASE("Night: the moon key moves F9's moon into the key, nothing more", "[re
     const LightingTuning t{};
     const LightRigInputs in = RigNight(-30.0f, 36.0f, 1.0f);
     const LightRig before = ComputeLightRig(in, t);
-    // F9's moon is there to move (kMoonFull 0.02 at a full moon high up).
+    // The rig's moon is there to move (kMoonFull 0.02 at a full moon high up).
     REQUIRE(Luminance(before.moon) == Catch::Approx(0.02f).epsilon(0.02f));
     CHECK(Luminance(before.sun) == 0.0f); // the sun is fully set 3 deg under
     LightRig rig = before;
@@ -244,7 +244,7 @@ TEST_CASE("Night: the moon key moves F9's moon into the key, nothing more", "[re
     CHECK(key.elevationDeg == Catch::Approx(36.0f).margin(1e-3f));
     CHECK(SameRgb(key.radiance, before.moon));
     CHECK(Luminance(rig.moon) == 0.0f);
-    // The moon's sky fill and everything else in the rig stay as F9 set them.
+    // The moon's sky fill and everything else in the rig stay as the rig set them.
     CHECK(SameRgb(rig.skyZenith, before.skyZenith));
     CHECK(SameRgb(rig.skyHorizon, before.skyHorizon));
     CHECK(SameRgb(rig.skyGround, before.skyGround));
@@ -356,7 +356,7 @@ TEST_CASE("Night: the backend's sun slots, hills and shadow pass follow the key 
 
 TEST_CASE("Night: the moon's shadows take the stock filter, not the soft one", "[remaster][NightLights]")
 {
-    // The moon key opens the sun shadow gates; the soft filter (B1) stays off
+    // The moon key opens the sun shadow gates; the soft filter stays off
     // there (a fiftieth of the noon sun shows no penumbra, and the soft taps
     // cost the night's world pass), the leaves keep their lift.
     const LightingTuning t{};
@@ -475,7 +475,7 @@ TEST_CASE("Night: a headlight is aimed from its body, 1% down, on flat and slope
     const float onFlat = HotBandReach(axis, 0.9f, 0.0f);
     CHECK(onFlat > 18.0f);
     CHECK(onFlat < 28.0f);
-    // The model's own beam axis can point degrees up or down (the research's
+    // The model's own beam axis can point degrees up or down (a
     // Jeep: 4.7 deg up on a 14 deg slope): only its heading counts.
     for (const float modelPitchDeg : {-9.0f, 4.7f, 20.0f})
     {
@@ -486,7 +486,7 @@ TEST_CASE("Night: a headlight is aimed from its body, 1% down, on flat and slope
         for (int i = 0; i < 3; ++i)
             CHECK(a[i] == Catch::Approx(axis[i]).margin(1e-6f));
     }
-    // A steady 14 deg climb (the research's hill road), the body pitched with
+    // A steady 14 deg climb (a hill road), the body pitched with
     // it: the hot band lands the same distance up the road, not over it.
     for (const float slopeDeg : {14.0f, -14.0f, 6.0f})
     {
@@ -568,7 +568,7 @@ TEST_CASE("Night: lamps and low beams fall off with the squared distance from th
     CHECK(Luma(light(spot, 0.0f, 0.5f, -3.0f).data()) == 0.0f);
     // A headlight is white at its colour's linear luminance: the configured
     // rosy beam turned the khaki grass of a verge orange-tan. A lamp keeps its
-    // authored colour (F9b).
+    // authored colour.
     CHECK(onBand[0] == onBand[1]);
     CHECK(onBand[1] == onBand[2]);
     float beamColour[3], lampColour[3];
@@ -706,7 +706,7 @@ TEST_CASE("Night: the sea takes the physical lamps and low beams", "[Graphics][S
     // While the model is on, localLights() hands lamps and headlights to
     // physicalLight() and leaves them out of its classic sum, so a caller that
     // drops g_physicalLocal loses them: with nightLights on, a harbour lamp or
-    // a headlight would light the B5 sea not at all, where the classic model
+    // a headlight would light the remastered sea not at all, where the classic model
     // lit it with the switch off.
     namespace gl = Poseidon::gl33lighting;
     const std::string water = gl::RemasterFragmentMain(3); // PSWater

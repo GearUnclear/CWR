@@ -14,12 +14,11 @@
 #include <sstream>
 #include <string>
 
-// Sun shadows of the remastered lighting (INTEGRATION-PLAN.md step B1,
-// Graphics/Remaster/SunShadows.hpp): the soft filter's blocker-to-penumbra
-// conversion against the real cascade matrices, the frame constants the shader
-// reads, the caster rule of treeShadows, the near tiers of softShadows, and
-// the shader and shadow-pass contracts that keep both switches' "off" the look
-// before B1.
+// Sun shadows of the remastered lighting (Graphics/Remaster/SunShadows.hpp):
+// the soft filter's blocker-to-penumbra conversion against the real cascade
+// matrices, the frame constants the shader reads, the caster rule of
+// treeShadows, the near tiers of softShadows, and the shader and shadow-pass
+// contracts that keep both switches' "off" the look before the soft shadows.
 
 using namespace Poseidon::remaster;
 namespace sm = Poseidon::shadow;
@@ -200,7 +199,7 @@ TEST_CASE("Sun shadows: the frame constants follow the gates, the switches and T
     CHECK(c.pcss[2] == 1.0f);
 
     // The switches: each zeroes its own part only, and both off is the stock
-    // filter without a lift (the look before B1), as are baseline and classic.
+    // filter without a lift (the look before the soft shadows), as are baseline and classic.
     const GateInputs day = SunAt(30.0f);
     auto with = [&](const std::string& s)
     {
@@ -253,11 +252,10 @@ TEST_CASE("Sun shadows: static objects cast with treeShadows, the rest keep thei
 
 TEST_CASE("Sun shadows: the soft filter runs on the stock near tiers", "[remaster][SunShadows]")
 {
-    // The plan's tighter first tier (0.04 of the shadow range instead of 0.08)
-    // drew a solid shadow over the Sinai camp's foreground with the stock filter
-    // as much as with the soft one; the cause was not found, so B1 keeps the
-    // tuned tiers whatever the switches say (5 B1 critic fix: gate the tight
-    // tiers off if not understood).
+    // A tighter first tier (0.04 of the shadow range instead of 0.08) drew a
+    // solid shadow over a Sinai camp's foreground with the stock filter as much
+    // as with the soft one; the cause was not found, so the soft shadows keep
+    // the tuned tiers whatever the switches say.
     const std::string pass = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Scene" / "SceneShadowPass.cpp");
     REQUIRE_FALSE(pass.empty());
     CHECK(pass.find("bp.omniCoef[0] = tune.omniCoef0;") != std::string::npos);
@@ -273,8 +271,8 @@ TEST_CASE("Sun shadows: the shader keeps the stock filter and mirrors the soft f
     const std::string inputs = gl::RemasterFragmentPiece(gl::FragmentPiece::Inputs);
     REQUIRE_FALSE(shadows.empty());
 
-    // The stock filter is the one the look before B1 had: 12 comparisons on the
-    // Poisson disc, run alone while the soft strength is 0.
+    // The stock filter is the one the look before the soft shadows had: 12
+    // comparisons on the Poisson disc, run alone while the soft strength is 0.
     CHECK(shadows.find("lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), zRef));") !=
           std::string::npos);
     CHECK(shadows.find("float soft = litTaa.w > 0.0 ? litPcss.z : 0.0;") != std::string::npos);

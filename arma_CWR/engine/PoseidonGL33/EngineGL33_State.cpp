@@ -723,7 +723,7 @@ bool EngineGL33::IsLandLayer(const Poseidon::render::LegacySpec& spec)
 
 void EngineGL33::SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec)
 {
-    // The terrain detail (B11) runs on the land only.
+    // The terrain detail runs on the land only.
     SetLitTerrainDraw(IsLandLayer(spec));
 }
 

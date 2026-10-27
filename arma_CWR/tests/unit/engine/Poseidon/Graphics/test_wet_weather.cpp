@@ -19,9 +19,8 @@
 #include <string_view>
 #include <vector>
 
-// The remastered wet weather (feature switches wetWeather and lampStreaks,
-// INTEGRATION-PLAN.md section 5 B7; Graphics/Remaster/Wetness.hpp and
-// SurfaceMaterials.hpp): the world's wetness that the rain wets and the sun and
+// The remastered wet weather (feature switches wetWeather and lampStreaks;
+// Graphics/Remaster/Wetness.hpp and SurfaceMaterials.hpp): the world's wetness that the rain wets and the sun and
 // wind dry, the surface classes from texture names and object kinds, and the
 // contracts that tie the shaders, the reflections' pass and the backend to
 // them.
@@ -214,8 +213,8 @@ TEST_CASE("Wetness: the knob forces surfaces and puddles, the puddles knob scale
 
 TEST_CASE("Surface classes: the research log's stock textures classify as the prototype did", "[remaster][wet]")
 {
-    // Names and classes from the research prototype's log of every texture of
-    // three islands (materials/classification_log_r6.txt), by object kind.
+    // Names and classes from a log of every texture of three islands, by
+    // object kind, as an earlier classifier sorted them.
     struct Case
     {
         const char* path;
@@ -452,17 +451,17 @@ TEST_CASE("Wet weather shaders: nothing changes while dry, one puddle field for 
     CHECK(CountOf(gl::RemasterFragmentCommon(), puddles) == 1);
     const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
     CHECK(CountOf(trace, puddles) == 1);
-    // In the trace the wet weather's puddles replace B6's own only while it
+    // In the trace the wet weather's puddles replace the reflections' own only while it
     // shades the ground, and the trace then leaves the darkening to it.
     CHECK(trace.find("puddle = wetPuddle(posW, footT, road ? 1.0 : 0.0, grass, ssrWetMode.y).x;") != std::string::npos);
     CHECK(trace.find("float base = wetWeather ? 1.0 : darken * mix(1.0, kSsrPuddleDark, puddle);") !=
           std::string::npos);
-    // The forward puddle darkening is the trace's own (B6's) puddle colour.
+    // The forward puddle darkening is the trace's own puddle colour.
     const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
     std::ostringstream dark;
     dark << "const float kWetPuddleDark = " << kSsrPuddleDark << ";";
     CHECK(surface.find(dark.str()) != std::string::npos);
-    // The puddle thresholds on roads and bare ground are B6's.
+    // The puddle thresholds on roads and bare ground are the reflections'.
     std::ostringstream road, ground;
     road << "const float kPuddleRoad = " << kSsrPuddleRoad << ";";
     ground << "const float kPuddleGround = " << kSsrPuddleGround << ";";
@@ -505,7 +504,7 @@ TEST_CASE("Wet weather shaders: the sun's glint in the film is capped far below 
     CHECK(constant("kWetSunFoot") > 0.0f);
     CHECK(surface.find("float sunFoot = kWetSunFoot * length(fwidth(posAbs));") != std::string::npos);
     // Every sun lobe takes the sun's cap, every lamp lobe the lamps' (the tiled
-    // list's, the draw's own list's, and the combat lights' of B4).
+    // list's, the draw's own list's, and the combat lights').
     CHECK(CountOf(surface, "wetLobe(litSunDir.xyz, 1e4, nf, v, nv, ") == 2);
     CHECK(CountOf(surface, ", kWetSunCap)") == 2);
     CHECK(CountOf(surface, ", kWetSpecCap)") == 3);
@@ -560,7 +559,7 @@ TEST_CASE("Wet weather land: the classes come from a field that blends across a 
           "[remaster][wet][TerrainHorizon]")
 {
     // Two neighbouring stretches of land whose textures differ a little in
-    // colour, as the owner's wet town square (a grey gravel texture beside an
+    // colour, as in a wet town square (a grey gravel texture beside an
     // olive one). Classed per pixel from each square's own texture, the grass
     // share jumped at their shared edge: the straight seam in the sheen and
     // the puddles.
@@ -793,9 +792,9 @@ TEST_CASE("Wet weather shaders: only the puddles mirror; the ground around them 
     };
 
     // The trace: with the wet weather on, the reflection's weight is the
-    // puddle's alone (the owner: too much reflection on non-puddle ground), so
+    // puddle's alone (more read as too much reflection on dry ground), so
     // a road or a square outside its standing water reflects no lamp, wall or
-    // sky. B6 alone (wet weather off) keeps its own wet ground.
+    // sky. The reflections alone (wet weather off) keep its own wet ground.
     const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
     CHECK(trace.find("float weight = wetWeather ? puddle : mix(road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass), "
                      "1.0, puddle);") != std::string::npos);
@@ -841,7 +840,7 @@ TEST_CASE("Wet weather shaders: only the puddles mirror; the ground around them 
     CHECK(constant("kWetSunGroundFilm") <= 0.35f);
 
     // The puddles carry the rain's look now: roads and bare ground hold a
-    // little more water than B6's thresholds (pinned to them above), grass
+    // little more water than the reflections' thresholds (pinned to them above), grass
     // no more, in the one field both passes read.
     const std::string puddles = gl::RemasterFragmentPiece(gl::FragmentPiece::Puddles);
     CHECK(puddles.find("float th = mix(mix(kPuddleGround, kPuddleRoad, road) - kPuddleMore, kPuddleGrass, veg * veg) + "
