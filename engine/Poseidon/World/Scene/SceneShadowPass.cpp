@@ -9,8 +9,11 @@
 #include <Poseidon/World/Simulation/FrameInv.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -111,6 +114,12 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     const float smShadowsZ = ENGINE_CONFIG.shadowsZ;
     const float smShadowFar = smCamNear + smCap.distanceCoef * (smShadowsZ - smCamNear);
     const float smCasterMaxDist2 = Square(smShadowFar);
+    // Remastered sun shadows (Graphics/Remaster/SunShadows.hpp): with the
+    // treeShadows gate on, every static object casts whatever the legacy
+    // object-shadow toggle says.
+    remaster::FeatureGates smGates;
+    const bool smTreeShadows = GEngine->LightingRemasterActive() && GEngine->GetFeatureGates(smGates) &&
+                               smGates[remaster::Feature::TreeShadows].on;
 
     // Walk one shape's faces in WORLD space, dispatching triangles to the emit
     // callbacks. Used for live (camera-relative stream) and cache (world-space
@@ -274,7 +283,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         // casters. Shadow maps want every real caster the camera can see, so gate
         // only on "this never casts" (model NoShadow flag / CastShadow opt-out);
         // per-face NoShadow / alpha is still handled by ClassifyShadowCaster below.
-        if ((oi->shape->Special() & NoShadow) || !oi->object->CastShadow())
+        if ((oi->shape->Special() & NoShadow) ||
+            !remaster::CastsIntoSunShadowMap(oi->object->CastShadow(), oi->object->Static(), smTreeShadows))
         {
             continue;
         }
@@ -392,7 +402,23 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     Vector3Val cF = cam->Direction();
     Vector3Val cR = cam->DirectionAside();
     Vector3Val cU = cam->DirectionUp();
-    Vector3Val sd = _mainLight->ShadowDirection();
+    // Classic keeps the shadow direction at least 11.5 degrees above the
+    // horizon (LightSun::Recalculate). The remastered lighting shades with the
+    // true sun, so its shadows follow it down to 4 degrees: full-length evening
+    // shadows that line up with the lit and shaded sides of every object. At
+    // night the remastered moon key (moonShadows) casts them from the moon.
+    Vector3 sd = _mainLight->ShadowDirection();
+    if (GEngine->LightingRemasterActive())
+    {
+        constexpr float kMinShadowSinElevation = 0.0698f; // sin(4 deg)
+        sd = GEngine->RemasterMoonKey() ? _mainLight->MoonDirection() : _mainLight->SunDirection();
+        if (sd.Y() > -kMinShadowSinElevation)
+        {
+            const float horiz = std::sqrt(std::max(sd.X() * sd.X() + sd.Z() * sd.Z(), 1e-8f));
+            const float cosE = std::sqrt(1.0f - kMinShadowSinElevation * kMinShadowSinElevation);
+            sd = Vector3(sd.X() / horiz * cosE, -kMinShadowSinElevation, sd.Z() / horiz * cosE);
+        }
+    }
 
     sm::CascadeBuildParams bp;
     bp.camPos = {camPos.X(), camPos.Y(), camPos.Z()};

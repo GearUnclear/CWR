@@ -385,6 +385,10 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	// This is the main function used for object rendering.
 	virtual void Draw( int forceLOD, ClipFlags clipFlags, const FrameBase &pos );
+    // The texture mipmap hints Object::Draw gives for this LOD (its proxies
+    // included), without drawing: for an object the hill cull hides, so the
+    // textures it shares and casts its shadow with load as if it were drawn.
+    void PrepareDrawTextures(int level, const FrameBase& pos);
 
 	// Calculate (or estimate) complexity of given proxy
 	virtual int GetProxyComplexity
@@ -501,6 +505,9 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 		int spec, int material, int from, int to
 	) const override;
 	bool GetAnimated(const Shape &src) const override;
+    // From the entity type's simulation and class (cached on the type);
+    // Static for an object without one (map houses, walls)
+    render::DrawObjectKind GetDrawObjectKind() const override;
 
 	// Get/Set object shape
 	__forceinline LODShapeWithShadow *GetShape() const {return _shape;}

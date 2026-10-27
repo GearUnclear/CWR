@@ -161,11 +161,26 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_vertex_color_byte_order.cpp
     Graphics/test_ubo_restore_guards.cpp
     Graphics/test_shader_named_outputs.cpp
+    Graphics/test_remaster_lighting.cpp
     Graphics/test_feature_switches.cpp
+    Graphics/test_gpu_timings.cpp
     Graphics/test_perf_counters.cpp
+    Graphics/test_ubo_mirror.cpp
+    Graphics/test_post_stages.cpp
+    Graphics/test_temporal_aa.cpp
     Graphics/test_atmosphere.cpp
+    Graphics/test_terrain_detail.cpp
+    Graphics/test_sun_shadows.cpp
+    Graphics/test_frame_lights.cpp
     Graphics/test_sea_waves.cpp
     Graphics/test_sky_density.cpp
+    Graphics/test_canopy.cpp
+    Graphics/test_volumetric_fog.cpp
+    Graphics/test_air_medium.cpp
+    Graphics/test_night_lights.cpp
+    Graphics/test_screen_reflections.cpp
+    Graphics/test_wet_weather.cpp
+    Graphics/test_surface_light.cpp
     Graphics/test_photo_camera.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
@@ -250,6 +265,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Rendering tests (batch-06)
     Graphics/Rendering/test_shape.cpp
     Graphics/Rendering/test_shape_section_inheritance.cpp
+    Graphics/Rendering/test_shape_late_vertex_buffers.cpp
     Graphics/Rendering/test_render_flags.cpp
     Graphics/Rendering/test_render_pass_descriptor.cpp
     Graphics/Rendering/test_build_render_pass_descriptor.cpp

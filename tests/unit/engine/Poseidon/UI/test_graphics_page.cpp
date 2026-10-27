@@ -119,11 +119,11 @@ TEST_CASE("GraphicsPage anti-aliasing rows round-trip through the provider", "[U
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    CHECK(p.RowValue(10) == 0);
+    CHECK(p.RowValue(10) == 2); // 4x MSAA by default
     CHECK(p.RowValue(11) == 0);
 
-    p.SetRowValue(10, 2);
-    CHECK(p.RowValue(10) == 2);
+    p.SetRowValue(10, 0);
+    CHECK(p.RowValue(10) == 0);
     p.SetRowValue(11, 4);
     CHECK(p.RowValue(11) == 4);
 }

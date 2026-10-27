@@ -2,6 +2,7 @@
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Graphics/Core/GLClear.hpp>
 #include <Poseidon/Graphics/Core/GLCullState.hpp>
+#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -153,6 +154,10 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     GLbitfield clearMask = GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
     if (clear)
         clearMask |= GL_COLOR_BUFFER_BIT;
+    // The stencil clear honours the write mask: every bit (the reflections'
+    // tags narrow it inside the world pass), and the next draw sets its own.
+    Poseidon::render::depthstencil::StencilFullWriteMask();
+    _ssrStencilValid = false;
     Poseidon::render::clear::WithMask(clearMask);
 
     if (_textBank)
@@ -170,7 +175,29 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     base::InitDraw();
 
     _frameOpen = true;
+    if (_shaderReloadPending)
+        ReloadShadersNow();
+    GpuFrameBegin();
     _drawItems.clear();
+    // Remastered lighting: a new frame has no world pass yet. The feature
+    // gates read the last frame's interior and optics flags.
+    _prevWorldDepthCleared = _worldDepthCleared;
+    _prevWorldOverlayDrawn = _worldOverlayDrawn;
+    _worldPassOpen = false;
+    _worldEffectsOn = false;
+    _worldSceneEnded = false;
+    _worldDepthCleared = false;
+    _worldOverlayDrawn = false;
+    // Surface light: a world pass that never reached EndWorldScene must not
+    // leave the frame target drawing two buffers.
+    EndSurfaceTarget();
+    _surfFrameWritten = false;
+    UpdateRemasterPrograms();
+    // No TAA jitter or LOD bias until this frame's world pass asks for them
+    // (EndWorldScene takes them off too; a frame that never reached it must
+    // not hand them to the next frame's menus).
+    _taa.frameOn = false;
+    SetTaaJitterState({}, 0.0f);
 
     TLMaterial invalidMat;
     invalidMat.diffuse = Color(-1, -1, -1, -1);
@@ -196,6 +223,7 @@ void EngineGL33::FinishDraw()
         base::DrawFinishTexts();
 
         CloseAllQueues(_queueNo);
+        GpuMark(Poseidon::gpu::Mark::FrameEnd);
 
         LOG_DEBUG(
             Graphics,

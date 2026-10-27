@@ -251,12 +251,30 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     ctx.isMultitexturing = IsMultitexturing();
     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
     ctx.passKindHint = GetPassKindHint();
+    ctx.remasteredSea = SeaRouted();
+    ctx.objectKind = GetDrawObjectKind();
 
     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
+    // The wet weather's surface class of this draw (nothing while dry).
+    SetLitSurface(tex, d);
+    // The screen-space reflections' surface tag of this draw (its stencil
+    // reference and masks; the state of before while the world writes no
+    // tags). The land and the sea's unrouted faces share the detail family:
+    // the land carries the detail texture.
+    _ssrStencil = Poseidon::remaster::SsrStencilForDraw(d, IsLandLayer(spec), SsrTagging());
+    // A vehicle interior over the world the fog saved: its glass and solid
+    // parts mark the stencil instead (no interior frame reads the
+    // reflections' tags).
+    if (FogInteriorOpen())
+        _ssrStencil = InteriorGlassStencil(tex, d);
     const PipelineVertexInput previousVertexInput = _pipelineVertexInput;
     _pipelineVertexInput = vertexInput;
     ApplyPipeline(d);
     _pipelineVertexInput = previousVertexInput;
+    // ApplyPipeline skips an unchanged descriptor; the tag can change without
+    // it (land and sea, a road after the terrain).
+    if (!_ssrStencilValid || _ssrStencilApplied != _ssrStencil)
+        ApplyDepthMode(_currentDepthMode);
 
     // IsTexBound is the sole gate: it reflects OnTexDeleted, so deleted handles
     // that the driver recycles for new textures are never silently skipped.
@@ -265,6 +283,20 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     {
         SetTexture(tex, spec);
     }
+
+    // PSDetail draws the land and, unless the sea is routed to the water
+    // program (seaWaves, EngineGL33_Sea.cpp), the sea: the terrain detail runs
+    // on the land only. Other draws leave the flag as it is, so it changes only
+    // between land and sea.
+    if (d.shader == Poseidon::render::ShaderFamily::Detail)
+        SelectTerrainDetailLayer(spec);
+    // Surface light: the section's surface class (its texture, the drawn
+    // object's kind) for the specular every lit surface gets, on the program
+    // ApplyPipeline bound. Only the object program reads it, and not for
+    // leaves (a forced diffuse): the land, grass, sea and crowns skip it.
+    if (vertexInput == PipelineVertexInput::Mesh && d.shader == Poseidon::render::ShaderFamily::Normal &&
+        _materialSet.forcedDiffuse.R() + _materialSet.forcedDiffuse.G() + _materialSet.forcedDiffuse.B() <= 0.0f)
+        ApplySurfaceClass(tex, d);
 }
 
 void EngineGL33::QueuePrepareTriangle(const MipInfo& absMip, int specFlags)
@@ -342,9 +374,33 @@ void EngineGL33::BeginPass(PassId passId)
         _currentDrawItem = DrawItem{};
 
         UploadFrameConstants(_frameState);
+        // Remastered lighting: the world's 3D passes (not a
+        // 3D preview drawn in a dialog after the world, or the night-vision
+        // intensifier) draw through the remastered programs, get the terrain
+        // and cloud lookups and end in the post pass.
+        _worldEffectsOn = !_worldSceneEnded && !_nightVision;
+        if (_worldEffectsOn && !_worldPassOpen)
+            GpuMark(Poseidon::gpu::Mark::WorldBegin);
+        if (_worldEffectsOn)
+        {
+            _worldPassOpen = true;
+            // The world's fog for the reflections' trace (PostSsr): from here on
+            // the frame state's fog flag follows each draw.
+            _ssrWorldFog[0] = _frameState.fogParams[0];
+            _ssrWorldFog[1] = _frameState.fogParams[1];
+        }
+        UpdateRemasterPrograms();
         // Bind the (previous frame's) shadow depth map + light-VP for the lit
         // shaders.  No-op until a depth pass has run with shadow maps enabled.
         UpdateShadowMapLitState();
+        UploadLitFrameConstants();
+        // The TAA jitter and texture LOD bias of this pass (the frame gates are
+        // known now); zero for any pass that is not a TAA frame's world pass.
+        ApplyTaaJitter();
+        // The surface target (the surfaces switch): bound from the world's first
+        // pass to EndWorldScene. SetColorMask above reset its write mask.
+        BeginSurfaceTarget();
+        UpdateSurfaceMask(true);
     }
 
     // Crop the 3D scene to the AspectSettings world rect (pillarbox /

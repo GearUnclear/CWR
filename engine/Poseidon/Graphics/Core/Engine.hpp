@@ -20,7 +20,16 @@
 #include <string>
 #include <vector>
 
-#include <Poseidon/Graphics/Core/RenderState.hpp> // DrawItem (for GetRecordedDraws())
+#include <Poseidon/Graphics/Core/RenderState.hpp>  // DrawItem (for GetRecordedDraws())
+#include <Poseidon/Graphics/Remaster/LightRig.hpp> // remaster::LightingTuning
+
+namespace Poseidon::remaster
+{
+struct TerrainHorizonMap;
+struct FeatureGates;
+struct CanopyField;
+struct CanopyRect;
+} // namespace Poseidon::remaster
 
 // Forward-decl for `EmitDraw` — the frame layer's `Draw` value (full param-pack
 // for `glDrawElements`).  Keeps the frame-layer header out of the Core
@@ -172,6 +181,16 @@ struct AspectSettings
     //@}
 };
 
+//! What the draws of the remastered sky pass are (Engine::BeginRemasterSky).
+//! The values are the sky mode the shaders read (LitConstants litSkyFwd.w); 0
+//! is the world's own draws.
+enum class RemasterSky : int
+{
+    Dome = 1,   // the sky dome (Landscape::DrawSky)
+    Clouds = 2, // the sky clouds (Landscape::DrawClouds)
+    Sun = 3,    // the sun disk (Landscape::DrawSky): it dims behind a dome cloud
+};
+
 //@{
 /*!\name 2D coordinate system
 Various systems of 2D coordinates.
@@ -292,7 +311,8 @@ class Engine : public IGraphicsEngine
     float _avgBrightness; // average screen brightness
     bool _nightVision;
     bool _multitexturing;
-    render::PassKindHint _passKindHint = render::PassKindHint::None; // explicit cockpit pass routing
+    render::PassKindHint _passKindHint = render::PassKindHint::None;          // explicit cockpit pass routing
+    render::DrawObjectKind _drawObjectKind = render::DrawObjectKind::Unknown; // the shape draw's object
     int _showFps;
     AspectSettings _aspectSettings;
 
@@ -443,6 +463,13 @@ class Engine : public IGraphicsEngine
     render::PassKindHint GetPassKindHint() const { return _passKindHint; }
     void SetPassKindHint(render::PassKindHint hint) { _passKindHint = hint; }
     void ClearPassKindHint() { _passKindHint = render::PassKindHint::None; }
+
+    // The kind of object whose shape is being drawn (Shape::Draw sets it
+    // around a shape's sections and puts the previous one back), copied into
+    // each draw's descriptor for the remastered materials. Unknown outside a
+    // shape draw.
+    render::DrawObjectKind GetDrawObjectKind() const { return _drawObjectKind; }
+    void SetDrawObjectKind(render::DrawObjectKind kind) { _drawObjectKind = kind; }
 
     // Typed form — callers split a legacy int via `render::SplitLegacy` at the
     // boundary; backends read whichever category they care about.
@@ -795,6 +822,139 @@ class Engine : public IGraphicsEngine
     /// scene render a depth pass from the sun and the lit shaders sample it.
     virtual void SetShadowMapsEnabled(bool /*enabled*/) {}
     virtual bool ShadowMapsEnabled() const { return false; }
+
+    /// Remastered lighting (per-pixel HDR lighting, terrain and cloud shadows,
+    /// ambient occlusion, bloom; see Graphics/Remaster/LightRig.hpp). Only the
+    /// GL33 backend implements it; `remastered = false` selects the classic
+    /// shaders bit for bit.
+    virtual void SetLightingTuning(const remaster::LightingTuning& /*tuning*/) {}
+    virtual remaster::LightingTuning GetLightingTuning() const
+    {
+        remaster::LightingTuning t;
+        t.remastered = false;
+        return t;
+    }
+    /// True when the remastered shaders are built and selected.
+    virtual bool LightingRemasterActive() const { return false; }
+    /// The remastered features' frame gates as last computed (at the world's
+    /// first 3D pass of a frame; Graphics/Remaster/FeatureGates.hpp). False
+    /// when this backend computes none.
+    virtual bool GetFeatureGates(remaster::FeatureGates& /*out*/) const { return false; }
+    /// True while the world's draws are lit from the frame's tiled light list
+    /// (the lightTiles feature, Graphics/Rendering/Lighting/FrameLights.hpp)
+    /// instead of each draw's own light list: a draw's list then lights
+    /// nothing, so the scene may draw lit objects in instanced runs.
+    virtual bool LocalLightsFromTiles() const { return false; }
+    /// True when this frame's key light is the moon (the moonShadows feature,
+    /// Graphics/Remaster/NightLights.hpp): the scene then renders the sun
+    /// shadow map from the moon's direction, at night.
+    virtual bool RemasterMoonKey() const { return false; }
+    /// The physical lamps and low beams (the nightLights feature): the linear
+    /// light they put on a particle at world point `pos` this frame (no surface
+    /// term), and true. False when they are off: every light then lights the
+    /// particle by the classic model, as before.
+    virtual bool ParticleNightLight(Vector3Par /*pos*/, float /*linear*/[3]) const { return false; }
+    /// The photoreal camera (photoLight): the frame's light rig on a lit
+    /// particle (smoke, dust, a fireball's soot; LightRig.hpp
+    /// ParticleRigIrradiance), linear, at the rig's exposure and the frame's
+    /// pre-exposure, as the world's passes store scene light; before the
+    /// material's brightness and the particle's own colour. True while the
+    /// camera writes this frame's scene light: the particle then takes it in
+    /// place of the classic sun and ambient. False otherwise (classic light).
+    virtual bool ParticleRigLight(float /*linear*/[3]) const { return false; }
+    /// True while the frame's combat lights (the combatLights feature,
+    /// Graphics/Rendering/Lighting/CombatLights.hpp) light the world: the
+    /// classic light of a muzzle flash, an explosion, a wreck, a fire, a flare
+    /// or a missile (Light::Kind Combat or Fire) then draws its glow but lights
+    /// nothing, and smoke takes the combat lights instead.
+    virtual bool CombatLightsActive() const { return false; }
+    /// Light past the 8-bit colour of the next DrawDecal (display space,
+    /// rgb): the backend adds it to the decal's colour under the photoreal
+    /// camera, which stores light above white, so a smoke puff at the foot of
+    /// a camp fire's column glows brighter than its colour can say. The draw
+    /// clears it. Without the camera (or on another backend) it is dropped.
+    virtual void SetDecalGlow(PackedColor /*glow*/) {}
+    /// Captures: hold the remastered cloud-shadow field at a drift offset in
+    /// metres (pinned = false lets it drift with the wind again from where it
+    /// is). The field integrates the wind every frame, so re-pinning the sim
+    /// clock alone does not put it back; a pinned field makes the two shots of
+    /// an A/B pair, and two builds, see the same cloud shadows.
+    virtual void PinCloudDrift(bool /*pinned*/, float /*x*/, float /*z*/) {}
+    virtual bool GetCloudDrift(float& /*x*/, float& /*z*/) const { return false; }
+    /// GPU timestamp queries around the frame, the world, the shadow pass and
+    /// the post pass (dev tool; off by default). The summary is the smoothed
+    /// per-section time in milliseconds, a few frames behind.
+    /// A screen overlay (gunner optics, binoculars, cinema border, pillarbox bars)
+    /// is being drawn inside the world pass: the remastered post pass then adds
+    /// no glow this frame, so the overlay's black surround stays black.
+    virtual void MarkWorldOverlay() {}
+    /// Dev: rebuild every shader program at the start of the next frame, picking
+    /// up edits in the shader override directory (CWR_SHADER_OVERRIDE_DIR).
+    virtual void RequestShaderReload() {}
+    virtual std::string ShaderOverrideDirectory() const { return {}; }
+    virtual void SetGpuTimingEnabled(bool /*enabled*/) {}
+    virtual bool GpuTimingEnabled() const { return false; }
+    virtual std::string GpuTimingSummary() const { return "gpu: timing not supported by this backend"; }
+    /// One section of the GPU timings by its summary name ("ao", "post", ...):
+    /// its smoothed milliseconds, false while timing is off or the section has
+    /// not been measured. The Lighting tab shows each feature's own section.
+    virtual bool GpuTimingSectionMs(const char* /*name*/, float& /*ms*/) const { return false; }
+    /// Points inside the world pass for the GPU timings' ground / pass1 / rest
+    /// sections (Landscape::DrawRect calls them right after its own queue
+    /// flushes, so timing on or off issues the same draws).
+    enum class WorldPhase : int
+    {
+        GroundDrawn,  // sky, terrain, water and horizon
+        ObjectsDrawn, // the opaque objects (Scene::DrawObjectsAndShadowsPass1)
+    };
+    virtual void GpuMarkWorldPhase(WorldPhase /*phase*/) {}
+    /// True when the backend would use a terrain horizon map (remastered
+    /// lighting with terrain shadows or occlusion on); the world builds one only
+    /// then.
+    virtual bool WantsTerrainHorizonMap() const { return false; }
+    /// Hands over the horizon map for the current landscape (nullptr clears it).
+    virtual void SetTerrainHorizonMap(std::shared_ptr<const remaster::TerrainHorizonMap> /*map*/) {}
+    /// Hands over the canopy of the current landscape's objects (the long tree
+    /// shadows, Graphics/Remaster/Canopy.hpp), built with the horizon map;
+    /// nullptr clears it. The field stays the world's: it changes in place.
+    virtual void SetTerrainCanopy(std::shared_ptr<const remaster::CanopyField> /*canopy*/) {}
+    /// Texel rectangles of the canopy that changed in place since it was handed
+    /// over (a destroyed tree or building).
+    virtual void TerrainCanopyChanged(const remaster::CanopyRect* /*rects*/, int /*count*/) {}
+    /// triCanopyCheck: the GPU sun-visibility map read back against its CPU
+    /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
+    virtual std::string RemasterCanopyCheck(int /*texels*/) { return "FAIL:no canopy in this backend"; }
+    /// World/HUD boundary: called once per frame after the 3D world and before
+    /// the map, HUD and dialogs; runs the remastered post effects.
+    virtual void EndWorldScene() {}
+    /// Inside the world pass: the opaque world is drawn, and the translucent
+    /// objects (smoke and fire particles, muzzle flashes, glass), the cockpit
+    /// pass, rain and flares follow. The remastered TAA copies the frame here
+    /// for its particle mask (Graphics/Remaster/TemporalAA.hpp).
+    virtual void BeginTranslucentObjects() {}
+    /// The remastered sky pass (the sky table, Graphics/Remaster/Atmosphere.hpp,
+    /// and the sky's own clouds, Graphics/Remaster/SkyDensity.hpp):
+    /// Landscape::DrawSky and DrawClouds open it around the pre-world draws of
+    /// the sky dome, the sun disk and the sky clouds, which then draw through
+    /// the remastered programs. A backend without it, or the features switched
+    /// or gated off, leaves those draws classic.
+    virtual void BeginRemasterSky(RemasterSky /*mode*/) {}
+    virtual void EndRemasterSky() {}
+    /// Work the remastered sky has in flight (the atmosphere tables' and the
+    /// cloud-density map's worker builds); triSettleScene waits for it.
+    virtual bool RemasterSkyPending() const { return false; }
+    /// triSkyTableCheck: the GPU sky-view table read back against its CPU
+    /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
+    virtual std::string RemasterSkyCheck(int /*texels*/) { return "FAIL:no sky table in this backend"; }
+    /// The remastered sea (feature switch `seaWaves`, Graphics/Remaster/
+    /// SeaWaves.hpp): Landscape::DrawWater opens it around its sea draws with
+    /// the animation frame its faces do not carry (`otherFrame`, may be null)
+    /// and that frame's share of the cross-fade. The backend draws the sea
+    /// faces in between with the remastered water program. A backend without
+    /// it, Classic, or the feature switched or gated off, leaves them on the
+    /// detail program as before.
+    virtual void BeginSea(Texture* /*otherFrame*/, float /*otherWeight*/) {}
+    virtual void EndSea() {}
 
     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
     /// Default base returns an all-default set; only the GL33 backend stores it.
