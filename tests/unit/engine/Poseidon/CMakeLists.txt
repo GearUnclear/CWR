@@ -299,6 +299,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_collision_nonfinite.cpp
     World/test_object_animated_bounds.cpp
     World/test_landscape_object_ids.cpp
+    World/test_fog_sight_link.cpp
     World/test_occlusion_contour.cpp
     World/test_occlusion_sphere_edge.cpp
     World/test_landscape_layout.cpp
