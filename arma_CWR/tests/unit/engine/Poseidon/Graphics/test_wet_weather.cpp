@@ -211,7 +211,7 @@ TEST_CASE("Wetness: the knob forces surfaces and puddles, the puddles knob scale
 
 // ---- Surface classes ----------------------------------------------------------
 
-TEST_CASE("Surface classes: the research log's stock textures classify as the prototype did", "[remaster][wet]")
+TEST_CASE("Surface classes: logged stock textures keep their recorded classes", "[remaster][wet]")
 {
     // Names and classes from a log of every texture of three islands, by
     // object kind, as an earlier classifier sorted them.

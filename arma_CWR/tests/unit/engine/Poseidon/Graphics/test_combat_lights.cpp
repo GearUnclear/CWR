@@ -1211,7 +1211,7 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(doSim < tick);
 }
 
-TEST_CASE("Combat lights: look fix boom: a munition's charge sets its flash, fireball and column by the cube root",
+TEST_CASE("Combat lights: a munition's charge sets its flash, fireball and column by the cube root",
           "[remaster][CombatLights]")
 {
     // CfgAmmo of the Remaster: Shell120 (hit 200, indirectHit 150, range 8),
@@ -1246,7 +1246,7 @@ TEST_CASE("Combat lights: look fix boom: a munition's charge sets its flash, fir
     CHECK(DetonationFromBlastSize(0.25f).radius < DetonationFromBlastSize(1.0f).radius);
 }
 
-TEST_CASE("Combat lights: look fix boom: the gas cools from the white-hot flash through the afterburn to soot",
+TEST_CASE("Combat lights: the gas cools from the white-hot flash through the afterburn to soot",
           "[remaster][CombatLights]")
 {
     const Detonation he = DetonationFromAmmo(200.0f, 150.0f, 8.0f);
@@ -1294,7 +1294,7 @@ TEST_CASE("Combat lights: look fix boom: the gas cools from the white-hot flash 
     CHECK(set.BurstDayScale() == Approx(1.0f));
 }
 
-TEST_CASE("Combat lights: look fix boom: a vehicle's fuel burns as a slow, cooler, rolling fireball",
+TEST_CASE("Combat lights: a vehicle's fuel burns as a slow, cooler, rolling fireball",
           "[remaster][CombatLights]")
 {
     // A jeep: explosives = 50 l x 0.1 = 5, times 0.5 .. 0.75: hit about 3.
@@ -1320,7 +1320,7 @@ TEST_CASE("Combat lights: look fix boom: a vehicle's fuel burns as a slow, coole
     CHECK(DeflagrationFromFuel(1e5f).chargeKg == Approx(kMaxFuelKg));
 }
 
-TEST_CASE("Combat lights: look fix boom: blasts take their round's charge, craters their column, the set its light",
+TEST_CASE("Combat lights: blasts take their round's charge, craters their column, the set its light",
           "[remaster][CombatLights]")
 {
     const std::string shots = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Entities" / "Weapons" / "Shots.cpp");

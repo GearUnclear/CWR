@@ -347,7 +347,7 @@ TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off 
     CHECK(kSunDiscWhite <= 1.0f);
 }
 
-TEST_CASE("PhotoCamera: look fix exposure: the meter reads the sky round the sun at the plain roll-off",
+TEST_CASE("PhotoCamera: the meter reads the sky round the sun at the plain roll-off",
           "[Remaster][PhotoCamera]")
 {
     const float deg = 3.14159265f / 180.0f;
@@ -679,7 +679,7 @@ TEST_CASE("PhotoCamera: the camera's haze brightens and whitens the noon horizon
     CHECK(RedOverBlue(hz) > RedOverBlue(hz1));
 }
 
-TEST_CASE("PhotoCamera: critic round 2: the histogram meter, the low sun's balance, the weather's veil and the night",
+TEST_CASE("PhotoCamera: the histogram meter, the low sun's balance, the weather's veil and the night",
           "[Remaster][PhotoCamera]")
 {
     // The meter is a histogram of 1/32 EV bins (no sort on the render thread):
@@ -758,7 +758,7 @@ TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and le
     CHECK(GoldenWarmShare(Rgb(0.0f, 0.0f, 0.0f)) > 0.0f);
 }
 
-TEST_CASE("PhotoCamera: look fix noon: a bright plain at a high sun is exposed a little under, not dull",
+TEST_CASE("PhotoCamera: a bright plain at a high sun is exposed a little under, not dull",
           "[Remaster][PhotoCamera]")
 {
     // An earlier tuning put a bright plain 0.38 EV under on top of the high sun's
@@ -780,7 +780,7 @@ TEST_CASE("PhotoCamera: look fix noon: a bright plain at a high sun is exposed a
     CHECK(kBrightKeep <= 0.0f);
 }
 
-TEST_CASE("PhotoCamera: look fix noon: the clear day sky deepens toward a camera's blue, the horizon stays pale",
+TEST_CASE("PhotoCamera: the clear day sky deepens toward a camera's blue, the horizon stays pale",
           "[Remaster][PhotoCamera]")
 {
     // The table's noon zenith (linear, the slate (91, 114, 148) of an earlier tuning).
@@ -824,7 +824,7 @@ TEST_CASE("PhotoCamera: look fix noon: the clear day sky deepens toward a camera
     CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.5f) == Catch::Approx(0.5f));
 }
 
-TEST_CASE("PhotoCamera: look fix particles: smoke and dust take the rig's light, not the classic sun",
+TEST_CASE("PhotoCamera: smoke and dust take the rig's light, not the classic sun",
           "[Remaster][PhotoCamera]")
 {
     // A lit particle (Object::DrawDecal) under the camera: kParticleKeyShare of

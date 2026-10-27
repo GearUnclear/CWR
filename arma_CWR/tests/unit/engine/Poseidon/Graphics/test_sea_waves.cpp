@@ -130,7 +130,7 @@ TEST_CASE("Sea animation: a mix of two frames keeps the relief of one", "[remast
     CHECK(kSeaFrameCorrelation <= 0.82f);
 }
 
-TEST_CASE("Sea constants: a low sun keeps the research look, a high sun keeps more of the sea's own colour",
+TEST_CASE("Sea constants: a low sun keeps the tuned look, a high sun keeps more of the sea's own colour",
           "[remaster][SeaWaves]")
 {
     const LightingTuning t{};
