@@ -65,7 +65,7 @@ The night lift is a flat grey, a mild local wash. Daylight mode 6 lifts running 
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\ssgi\NOTES.md`, `prototype.patch` (5 files, +542 lines), shaders `glsl_final\`, `override_v2` to `override_v9`, statistics `timings_and_deltas.txt`, `regions_noon_fixed.txt`, timings `timings.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-ssgi`, build `dist\gfx-ssgi-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\ssgi\BEST_headlights_bounce_crop.png`, `BEST_headlights_bounce.png`, `BEST_lowsun_fp.png` (mode 6 upper bound), `BEST_town_dark_fire.png`, `motion_headlights_v8.gif`. The `cmp\abel1` images were shot with a units bug and must not be quoted.
+- Notes and patch: `tmp\research\ssgi\NOTES.md`, `prototype.patch` (5 files, +542 lines), shaders `glsl_final\`, `override_v2` to `override_v9`, statistics `timings_and_deltas.txt`, `regions_noon_fixed.txt`, timings `timings.md`.
+- Scratch worktree: `gfx-ssgi`, build `dist\gfx-ssgi-rwdi`.
+- Best images (not committed): `tmp\research\ssgi\BEST_headlights_bounce_crop.png`, `BEST_headlights_bounce.png`, `BEST_lowsun_fp.png` (mode 6 upper bound), `BEST_town_dark_fire.png`, `motion_headlights_v8.gif`. The `cmp\abel1` images were shot with a units bug and must not be quoted.
 - Integration: not recommended for daylight. A local-light bounce could come later on top of the G-buffer. If anything is taken to the new branch `graphics-remaster` the owner asked for on 2026-10-17, it would be the night-only path. That branch did not exist yet when this page was written.

@@ -64,7 +64,7 @@ Recolours authored foliage (blue-grey leaves to yellow-green, backlit trees lime
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\foliage\NOTES.md`, `prototype.patch` (18 KB, knobs and `EngineGL33::BuildCanopyMap`), final shaders `ov8\`, `ov8_vs_shipped.diff`, timings `work\t2_summary.txt`, `work\t3_summary.txt`, crown statistics `work\r9_regstats.txt`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-foliage`, build `arma_CWR\dist\gfx-foliage-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\foliage\BEST_backlit_hornbeam.png`, `BEST_backlit_birch.png`, `BEST_forest_edge_golden.png`, `BEST_pine_stand_noon.png` (the negative), `r9\backlit_hornbeam__dbgsunvis.png` (the missing shadows), `work\r9_ob_flower.png`.
+- Notes and patch: `tmp\research\foliage\NOTES.md`, `prototype.patch` (18 KB, knobs and `EngineGL33::BuildCanopyMap`), final shaders `ov8\`, `ov8_vs_shipped.diff`, timings `work\t2_summary.txt`, `work\t3_summary.txt`, crown statistics `work\r9_regstats.txt`.
+- Scratch worktree: `gfx-foliage`, build `arma_CWR\dist\gfx-foliage-rwdi`.
+- Best images (not committed): `tmp\research\foliage\BEST_backlit_hornbeam.png`, `BEST_backlit_birch.png`, `BEST_forest_edge_golden.png`, `BEST_pine_stand_noon.png` (the negative), `r9\backlit_hornbeam__dbgsunvis.png` (the missing shadows), `work\r9_ob_flower.png`.
 - Integration: a reduced crown model (no green lean) is a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written.

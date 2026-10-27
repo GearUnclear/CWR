@@ -1,8 +1,8 @@
 # Remastered lighting: change log
 
-One entry per change to the Remastered lighting, oldest first: an id, what changed, the captures that show it, the GPU cost, and the owner's verdict where the owner gave one. The design is in `README.md` next to this file; the October 2026 research run is in `research/README.md`.
+One entry per change to the Remastered lighting, oldest first: an id, what changed, the captures that show it, the GPU cost, and the owner's verdict where the owner gave one. The overview is `README.md` next to this file, the design and calibration `DESIGN.md`; the October 2026 research run is in `research/README.md`.
 
-"The original look" means the Remaster engine's stock lighting (the "Classic" option of the Lighting row, labelled "Classic" in every comparison picture). Pictures are renders of game data and are never committed; they are referenced by their path on the development machine. GPU costs were measured on one RTX 4060 Ti at 1440x960 internal (960x640 window at 150% render scale) with 4x MSAA, often shared with other test games, so treat them as rough.
+"The original look" means the Remaster engine's stock lighting (the "Classic" option of the Lighting row, labelled "Classic" in every comparison picture). Pictures are renders of game data and are never committed. They are named by their path on the development machine: a `tmp\` path in R1 to B12 is the untracked `tmp` folder of the old `lighting` worktree, and in O1 to F2 the `tmp` folder of the `graphics-remaster` worktree. Both worktrees' text notes and patches are kept on the archive branch `archive/local-work-2026-10` (`graphics/lighting/tmp_/` and `graphics/graphics-remaster-tmp/`); most pictures were deleted in the 2026-10-26 cleanup and can be re-shot with `tests/rendering/captures/`. GPU costs were measured on one RTX 4060 Ti at 1440x960 internal (960x640 window at 150% render scale) with 4x MSAA, often shared with other test games, so treat them as rough.
 
 Earlier history: the first lighting attempt (Codex, branch `origin/graphics/lighting-improvements`, draft PR #210) kept its own log, `arma_CWR/tests/rendering/ITERATIONS.md` on that branch (entries A to W). This work started from `main` instead and used that log as the list of looks the owner had already rejected: blue haze or a wash, mustard or khaki ground, crushed shade on vehicles and soldiers, flattened tree crowns, results that are only darker, and shadow-map darkening that crushed the shade.
 
@@ -21,8 +21,13 @@ Earlier history: the first lighting attempt (Codex, branch `origin/graphics/ligh
 | W1 | 2026-10-17 | 935cb5e (tag `research/remaster-water-2026-10-17`) | Sea wave study | not yet judged |
 | X1 | 2026-10-17 | none (research only) | 22-track research run with critics | not yet judged; owner asked for bug fixes first, then this documentation |
 | B1 to B10 | 2026-10-17 | 874638c to 72f32d4, 84408f8 | Bug fixes found by the research | not yet judged |
-| B11, B12 | 2026-10-17 | none | Tree shadows at start-up, MSAA by default: built, **not landed** | none |
-| P1 | pending | none | New branch `graphics-remaster` with the ideas that worked; a side-by-side video in motion | requested by the owner |
+| B11, B12 | 2026-10-17 | b4f14d6, 0e85455 | Tree shadows at start-up, MSAA by default (held back, then landed after a second attempt) | none |
+| A0 to A7, B1 to B11 (plan) | 2026-10-18 | 7e013c2 to fec1075 | The integration plan's steps on `graphics-remaster` (`research/INTEGRATION-PLAN.md`) | "nearly no difference" |
+| O1 | 2026-10-19 | 8476b9b to f4d57cb | The photoreal overhaul | the final look |
+| V2 | 2026-10-19 | none here (`video-production` branch) | Trailer part 1 (graphics), finished 2026-10-23 | finished with the owner's own narration |
+| F1 | 2026-10-23 | d91a08e | Dawn haze flicker: per-cell fog jitter | rejected: the fog moved like wind |
+| F2 | 2026-10-23 | 026f8b7 | The fog wind: fixed taps per fog cell, no jitter | accepted |
+| P1 | open | none | Cost on long views (issue #216) | none |
 
 Dates are as git records them: R1 to R5 were committed in UTC, everything after in local time (UTC-7). Owner quotes are verbatim except for one corrected typo ("marginally").
 
@@ -93,7 +98,7 @@ clang-format on five files. No logic change.
 
 **What changed.** `tests/rendering/captures/` shoots matched original-look and Remastered pairs on the Remaster data (Abel, Eden, Sinai with @LoBo) at 960x640, 4x MSAA, 150% render scale, records `triGpuTimes` per mode, and builds pairs, a contact sheet and a timings table. `smoke_*` tests toggle the lighting both ways. 3c53141 lets each run take its own data junction and a shader override directory. The views: `lowsun_fp` (the owner's acceptance view stand-in: Jeep, M113, soldier, camouflage net, 08:00 clear), `sunrise_ridge`, `noon_fields`, `forest_edge_golden`, `coastline_sunset`, `town_night`, `firefight_1` to `_3`, `tank_gunner_interior`, `tank_gunner_optics`, `overcast_broken`, `overcast_heavy`, `sinai_lowsun_fp`, `sinai_desert_noon`.
 
-**Captures.** `D:\Arma_CWA_worktrees\lighting\tmp\captures\20261017-final\` (`<view>__pair.png`, `contact_sheet.png`, `timings.md`); earlier attempts in `smoke-1`, `run-1`, `run-2-abel`, `zoom`. Both modes worked on all three islands with no shader build failures. The terrain horizon map built in 607 to 639 ms per island. One low-severity GL message (131204, texture 0 on unit 2) per island, later fixed in B3.
+**Captures.** `tmp\captures\20261017-final\` (`<view>__pair.png`, `contact_sheet.png`, `timings.md`); earlier attempts in `smoke-1`, `run-1`, `run-2-abel`, `zoom`. Both modes worked on all three islands with no shader build failures. The terrain horizon map built in 607 to 639 ms per island. One low-severity GL message (131204, texture 0 on unit 2) per island, later fixed in B3.
 
 **GPU cost** (one run, frame ms, original look against Remastered, from `timings.md`):
 
@@ -109,7 +114,7 @@ clang-format on five files. No logic change.
 
 The `sunrise_ridge` gap is a measurement artefact: the original-look shot was taken while the adaptive object detail was still held coarse after the camera jump (found by the perf track, root-caused and fixed in B1).
 
-**What the pictures were later found to show wrongly.** Every vehicle in these pairs was spawned by script and so drew with the original look's lighting (fixed in B8); trees and buildings cast no sun shadows (B11, not landed); a clear sky could still drop a cloud shadow (B4); the first shot of a view could be at coarser detail (B1).
+**What the pictures were later found to show wrongly.** Every vehicle in these pairs was spawned by script and so drew with the original look's lighting (fixed in B8); trees and buildings cast no sun shadows (B11, landed later as b4f14d6); a clear sky could still drop a cloud shadow (B4); the first shot of a view could be at coarser detail (B1).
 
 **Owner verdict** (2026-10-17): "these are marginally better, at most?" and, about the sea, "the water is so much less defined looks so smooth".
 
@@ -125,7 +130,7 @@ Not a change; it set the bar for everything after.
 
 **What changed.** Research only: shader overrides that derive a wave normal from the shipped sea texture and add a Fresnel sky reflection and sun glints (variants A, B, C; C is the pick). The study found the sea is drawn by the terrain detail shader, not the water shader. Full write-up: `arma_CWR/tests/rendering/water_research/README.md` on that branch; summary in `research/water.md`.
 
-**Captures.** `D:\Arma_CWA\tmp\water-research-images\` and `D:\Arma_CWA_worktrees\lighting\tmp\research\water\images\` (`overview_all.png`, `triptych_<view>__C.png`). Wave detail at sunset 3.0 today against 23.7 with C (original look 3.7).
+**Captures.** `tmp\water-research-images\` and `tmp\research\water\images\` (`overview_all.png`, `triptych_<view>__C.png`). Wave detail at sunset 3.0 today against 23.7 with C (original look 3.7).
 
 **GPU cost.** Estimated under 0.1 ms; not measurable on the shared GPU.
 
@@ -135,7 +140,7 @@ Not a change; it set the bar for everything after.
 
 **What changed.** No production code. 22 tracks each built a prototype in a scratch worktree on the real Remaster data; an independent critic verified every claim and scored each track for "worth building" and "RTX-on". Paused once at the owner's request ("pause all verifiers") and resumed ("gogo").
 
-**Captures.** Per track in `D:\Arma_CWA_worktrees\lighting\tmp\research\<track>\`; one picture per track in `research\gallery\` and all of them in `research\gallery\SHEET.png`.
+**Captures.** Per track in `tmp\research\<track>\`; one picture per track in `research\gallery\` and all of them in `research\gallery\SHEET.png`.
 
 **Results.** The ranked table, the failures and the road to RTX-on are in `research/README.md`. Top three: combat light (7 and 6), low-sun shade fixes (7 and 2), frame cost (7 and 2). Bounce light failed in four tracks. Four bugs made every current picture wrong.
 
@@ -160,18 +165,20 @@ Each bug got a fix agent in a scratch worktree, an independent reviewer and an i
 | B9 | 4515770 | The night takes the original look's local-light clamp and a real moon | Night town at the original look's brightness, the yellow-green gone, moonlit country a readable cool grey |
 | B10 | 72f32d4 | Three-entry config colours read as `{r,g,b}` | Street lamps warm, their wash over the country near towns gone (also in the original look and night vision) |
 
-**Captures.** Per bug in `D:\Arma_CWA_worktrees\lighting\tmp\bugfix\<bug>\`. The full set after all fixes: `D:\Arma_CWA_worktrees\lighting\tmp\captures\20261018-bugfix\` (pairs, `contact_sheet.png`, `timings.md`, `cmp_vs_20261017-final.txt`, `vs_20261017-final\<view>__stack.png`). Every mode settled; 131204 and 131222 no longer appear (only GL performance and info messages remain); `town_night` Remastered lower-frame brightness 157.5 to 121.4 (original look 120.4).
+**Captures.** Per bug in `tmp\bugfix\<bug>\`. The full set after all fixes: `tmp\captures\20261018-bugfix\` (pairs, `contact_sheet.png`, `timings.md`, `cmp_vs_20261017-final.txt`, `vs_20261017-final\<view>__stack.png`). Every mode settled; 131204 and 131222 no longer appear (only GL performance and info messages remain); `town_night` Remastered lower-frame brightness 157.5 to 121.4 (original look 120.4).
 
 **GPU cost.** B2, B5 and B9 measured no change beyond the shared-GPU noise (a few shader instructions). B3, B4, B7 and B10 add no per-pixel work (a bind at init, a per-frame constant, or CPU-side logic). B6 adds one virtual call per object (not measured). B1 makes captures pin the finest object detail, so long-view timings are higher than in older runs. B8 costs about 1.2 to 1.4 ms once, on the frame after a burst of 8 new vehicle classes, and afterwards spawned vehicles cost what placed ones cost. After all fixes, for example: `lowsun_fp` Remastered frame 3.77 ms, post 0.71 ms; `noon_fields` 7.66 ms, post 0.40 ms (single run, finest object detail now pinned, so not comparable with V1).
 
 **Owner verdict.** Not yet judged.
 
-## B11, B12. Tree shadows at start-up, MSAA by default (built, not landed)
+## B11, B12. Tree shadows at start-up, MSAA by default (b4f14d6, 0e85455)
 
-- **B11:** trees, bushes and buildings cast no sun shadows in any fresh profile, because the graphics settings are applied before the world exists. A fix was built and tested (scratch worktree `fix-object-shadows`) but not landed: it also applied the terrain grid tier at boot, which changes physical terrain.
-- **B12:** the Remastered default ships with no anti-aliasing (`msaaSamples = 0`). A fix (default 4x, a config migration) was built and tested (`fix-msaa-default`) but not landed: its migration also added MSAA on top of a supersampling scale the user had chosen.
+Both fixes were held back at first and landed late on 2026-10-17 (local time) after a second attempt and a second review. Details of the first attempts: `research/bugs.md`, items 10 and 11.
 
-Second attempts were in progress in `D:\Arma_CWA_worktrees\fix2-object-shadows` and `fix2-msaa-default` (uncommitted) when this log was written. Details: `research/bugs.md`, items 10 and 11.
+- **B11 (b4f14d6):** trees, bushes and buildings cast no sun shadows in any fresh profile, because the graphics settings are applied before the world exists. The first fix also applied the terrain grid tier at boot, which changes physical terrain. The landed fix gives a scene built after the boot apply only the shadow and smoke tiers of `graphics.cfg`; the terrain grid and the object LOD bias stay out.
+- **B12 (0e85455):** the Remastered default shipped with no anti-aliasing (`msaaSamples = 0`). The first fix's migration also added MSAA on top of a supersampling scale the user had chosen. The landed fix makes 4x MSAA the default; `graphics.cfg` v3 lifts an untouched Off to 4x once, only without supersampling, and keeps a v2 Unlimited frame cap.
+
+**Captures.** Capture set `20261018-fixes2` against `20261018-bugfix`: at `forest_edge_golden` the trees now throw shadows across the slope (shadow pass 0.05 to 0.28 ms); at `sinai_lowsun_fp` the scrub at a 12 degree sun throws long shadows over the foreground (shadow pass 0.05 to 0.37 ms).
 
 ## O1. The photoreal overhaul (8476b9b to f4d57cb, 2026-10-19)
 
@@ -193,9 +200,9 @@ The owner found the integrated features (A0 to A7, B1 to B11 on `graphics-remast
 
 **Where the evidence is (not in git).** `graphics-remaster\tmp\look\`: `director\` (sheets and notes per round, `round2` to `round4`), `fix`, `fix4`, `fix5` (fixer notes and patches), `puddle\1..6` and `boom\1..6` (the two six-way studies), `critic_r3_*` to `critic_r5_*`, `ref\vanilla` and `ref\landed` (the reference shots), `owner\` (everything shown to the owner).
 
-## V2. The trailer (2026-10-19)
+## V2. The trailer (2026-10-19 to 2026-10-23)
 
-"Uslu dur! trailer, part 1: graphics": 14 scenes from the Uslu dur world (resistance, occupiers, checkpoints, convoys, the occupied town), each shot twice at 60 fps from one camera path, on a vanilla upstream build and on the O1 build, and composited full size behind a moving divider that sweeps the whole frame; calm dissolves and wipes, Oswald and Roboto text with the HUD green as the only accent, a typed opening line, and a calm female narration (local Breeze TTS, every line checked by transcription). 2:13.4, 1080p60, -16 LUFS. Tooling 111e563; the files are in `graphics-remaster/tmp/video/v2/final/` (not in git). The NPC head flicker in early takes was the AI look-around fast-forwarded by the capture's real time per frame; the fix is capture-only (an exact 1/60 s step and a held gaze).
+"Uslu dur! trailer, part 1: graphics" was shot from the O1 build against a vanilla upstream build at 60 fps. Its tooling and notes live on the `video-production` branch, not here. Its dawn shot found F1 and F2 below. The NPC head flicker in early takes was the AI look-around fast-forwarded by the capture's real time per frame; the fix is capture-only (an exact 1/60 s step and a held gaze).
 
 ## F1. The dawn haze flicker (2026-10-23)
 
@@ -216,7 +223,7 @@ The F1 fix stopped the pump, but the owner saw "motion in the fog that makes it 
 - **Result.** The dawn shot reshot on the fixed build (agent 1's kit on the clip, frames 240 to 390, against vanilla's and F1's shots of the same path): wind over bay / valley / far hill / haze 0.005 / 0.004 / 0.002 / 0.004 (vanilla 0.017 / 0.011 / 0.002 / 0.003, F1 0.061 / 0.162 / 0.104 / 0.060), the residual's travel correlation at most 0.04 (F1 0.22 to 0.38 at 12 px a frame), band 0.077 (vanilla 0.103, F1 0.093, the original 0.516), valley block flicker 0.074 (vanilla 0.062, F1 0.121, the original 1.63). With the camera held: travel 0.47 to 0.03, in-place change 0.42 to 0.05 code values (the jitter-frozen floor 0.08), valley block flicker 0.11 to 0.02. In play at 60 fps (the same shader as a live override on the recorder build): held-camera boil 0.42 to 0.06, travel under the pan at most 0.03. The look stays within about one code value of the approved one (valley mean +0.6 in motion, 128.2 against 128.1 in play). Cost: one more medium and light sample per cell and three more history fetches, +0.09 ms on the air stage at 1080p (two uncontended pairs of the held-camera probe: 0.70 and 0.70 ms before, 0.79 and 0.78 after).
 - **Ruled out.** A white per-cell hash alone (boils like F1); white in time (boils 1.8x more); blue-ish per-cell phases (no gain); a history-free far field (2x the block flicker under a pan: the column light steps as horizon-ring bins enter and leave view); 8 taps (no gain over 2); taps spread to tent quantiles (no look gain). Equal on every instrument but not chosen: a strictly periodic 8-frame cycle (needs a new uniform, keeps a 7.5 Hz pattern at 60 fps, slower at low frame rates), a 2x2 antithetic pattern with a display tent, and 2 to 4 jittered taps; the fixed taps leave nothing temporal at any frame rate or capture cadence.
 
-## P1. Pending
+## P1. Open
 
+- Cost: the long views (the dawn valley, the Eden long view) run at 27 to 34 ms per frame on an RTX 4060 Ti, against a target of 60 fps at 1080p on an RTX 3060 class card. Most of the extra cost is CPU time per draw call in the new draw path. Tracked in issue #216.
 - A clean timing run on an idle machine at 1080p, ideally on an RTX 3060.
-- Re-shoot every before picture once B11 and B12 land.

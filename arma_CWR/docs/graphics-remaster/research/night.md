@@ -72,7 +72,7 @@ Headlit verges turn saturated yellow-olive (mustard). Town frames halve in brigh
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\night\NOTES.md`, `prototype.patch` (9 files, 769 lines), shader `ovr_v9\` (earlier `ovr_v4` to `ovr_v8`), timings `run_timing\timing_summary.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-night`, build `dist\gfx-night-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\night\BEST_road_flat_drive_moonless.png`, `BEST_road_flat_head.png`, `BEST_town_night.png`, `BEST_moon_sky.png`, `BEST_road_head.png` (the hill case), `run7\cmp_town_lamps_haze.png` (the rejected brown wash).
+- Notes and patch: `tmp\research\night\NOTES.md`, `prototype.patch` (9 files, 769 lines), shader `ovr_v9\` (earlier `ovr_v4` to `ovr_v8`), timings `run_timing\timing_summary.md`.
+- Scratch worktree: `gfx-night`, build `dist\gfx-night-rwdi`.
+- Best images (not committed): `tmp\research\night\BEST_road_flat_drive_moonless.png`, `BEST_road_flat_head.png`, `BEST_town_night.png`, `BEST_moon_sky.png`, `BEST_road_head.png` (the hill case), `run7\cmp_town_lamps_haze.png` (the rejected brown wash).
 - Integration: the moonless low beam, the falloff and the stars are candidates for the new branch `graphics-remaster` the owner asked for on 2026-10-17, built on top of the night fixes already landed. That branch did not exist yet when this page was written.

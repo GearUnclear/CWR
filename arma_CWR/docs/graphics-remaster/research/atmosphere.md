@@ -67,7 +67,7 @@ A muddy olive band in the sunset sky away from the sun. The physical hue cools s
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\atmosphere\NOTES.md`, `prototype.patch` (10 files, about 930 lines), shaders `glsl_final\`, standalone model `offline\`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-atmosphere`, build `dist\gfx-atmosphere-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\atmosphere\BEST_lowsun_fp.png`, `BEST_coastline_sunset.png`, `ALT4_sunrise_ridge.png`, `REJECTED_run2_overcast_broken_globalK.png`, `VARIANTS_run4_lowsun_fp.png`, `OFFLINE_sky_panoramas.png`.
+- Notes and patch: `tmp\research\atmosphere\NOTES.md`, `prototype.patch` (10 files, about 930 lines), shaders `glsl_final\`, standalone model `offline\`.
+- Scratch worktree: `gfx-atmosphere`, build `dist\gfx-atmosphere-rwdi`.
+- Best images (not committed): `tmp\research\atmosphere\BEST_lowsun_fp.png`, `BEST_coastline_sunset.png`, `ALT4_sunrise_ridge.png`, `REJECTED_run2_overcast_broken_globalK.png`, `VARIANTS_run4_lowsun_fp.png`, `OFFLINE_sky_panoramas.png`.
 - Integration: a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17, as the base for haze, clouds and water. That branch did not exist yet when this page was written.

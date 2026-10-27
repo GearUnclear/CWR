@@ -3,7 +3,7 @@
 The research tracks (see `README.md`) found engine bugs on the way. On 2026-10-17 the owner asked to fix them before anything else: "Fix bugs with opus agents first". Each bug got one agent working in a scratch worktree detached at the branch tip 3c53141, an independent reviewer, and then one integrator who committed the accepted fixes to `claude/youthful-lovelace-8imbdh`.
 
 - Commits: 874638c to 72f32d4, plus the roadmap log line 84408f8 (all on 2026-10-17, local time).
-- Fix notes, before and after captures and unit-test logs: `D:\Arma_CWA_worktrees\lighting\tmp\bugfix\<bug>\NOTES.md` and `fix.patch` (dev machine only).
+- Fix notes, before and after captures and unit-test logs: `tmp\bugfix\<bug>\NOTES.md` and `fix.patch` (dev machine only).
 - Every fix has a unit test that fails without the fix and passes with it, as the per-bug notes record.
 - The one remaining failure in the `[graphics]` tag in every run is the hidden fixture test `DDSConverter: generate DDS fixture from synthetic_dxt5 DXT5` (`test_dds_converter.cpp:347`, expects width 64, the fixture is 32x32). It fails the same way without these fixes.
 
@@ -20,8 +20,8 @@ The research tracks (see `README.md`) found engine bugs on the way. On 2026-10-1
 | `switchLight` on a non-lamp crashes the game | ssgi | ab61aa5 | landed |
 | Script-spawned vehicles skip the new lighting | shade, gbuffer, materials, normals | 747ffc8 | landed |
 | The Remastered night is over-bright and yellow-green | exposure, materials, night | 4515770 and 72f32d4 | landed |
-| Tree and building shadows off at start-up | shadows, volumetric, foliage, hfrt | none | **not landed**, second attempt in progress |
-| Remastered ships with no anti-aliasing | aa | none | **not landed**, second attempt in progress |
+| Tree and building shadows off at start-up | shadows, volumetric, foliage, hfrt | b4f14d6 | landed (second attempt) |
+| Remastered ships with no anti-aliasing | aa | 0e85455 | landed (second attempt) |
 
 ## 1. Capture rig (874638c)
 
@@ -142,7 +142,7 @@ The research tracks (see `README.md`) found engine bugs on the way. On 2026-10-1
 
 **Side effects.** The data fix also changes the original look and night vision near towns (open country 57 to 20; night-vision ground green 106 to 79), and @LoBo's two 3-entry lamp panels drop from 1.0 to their authored 0.7 ambient. All night local lights, fires, headlights and muzzle flashes included, now peak at 1.0. Untested: with a waxing moon up at sunset, the moon lifts twilight by up to 1.3 EV. Lamp-lit town ground still meters like sunset ground, because the original look's 50 m flat lamp discs overlap; that needs the night track's falloff rework.
 
-## 10. Tree and building shadows off at start-up (not landed)
+## 10. Tree and building shadows off at start-up (landed later as b4f14d6)
 
 **Symptom.** Trees, bushes, walls and buildings cast no sun shadows in any fresh profile or capture run. The foliage track's "shadow maps vanish when facing the sun" is the same bug (with no static casters, a frame without spawned units has no casters at all).
 
@@ -150,28 +150,28 @@ The research tracks (see `README.md`) found engine bugs on the way. On 2026-10-1
 
 **Fix built** (scratch worktree `fix-object-shadows`): the scene half moved into `ApplyGraphicsConfigToScene`, applied from `Scene::LoadConfig`. Tests: `test_graphicsApply.cpp` (3 cases fail without, pass with). In game: long tree shadows from the first frame; the shadow pass 0.15 to 0.8 ms.
 
-**Why it was not landed.** The roadmap log (84408f8): the patch also applied the terrain grid tier at boot, which changes physical terrain (on a 16 GB+ machine the autodetected Ultra preset sets a 6.25 m grid and LOD bias 2.0). A second attempt was in progress in `D:\Arma_CWA_worktrees\fix2-object-shadows` (uncommitted) when this page was written.
+**Why it was not landed.** The roadmap log (84408f8): the patch also applied the terrain grid tier at boot, which changes physical terrain (on a 16 GB+ machine the autodetected Ultra preset sets a 6.25 m grid and LOD bias 2.0). A second attempt (scratch worktree `fix2-object-shadows`) landed as b4f14d6: a scene built after the boot apply takes only the shadow and smoke tiers; the terrain grid and the object LOD bias stay out.
 
 **Risk.** Frames full of trees or houses at low sun get darker (forest edge -4%, town at 17:00 -5%, into-the-sun grove -9%). See `shadows.md`.
 
-## 11. No anti-aliasing in the Remastered default (not landed)
+## 11. No anti-aliasing in the Remastered default (landed later as 0e85455)
 
 **Symptom.** A fresh profile runs with no MSAA (`GraphicsConfig.hpp:89`, `msaaSamples = 0`), so alpha-to-coverage is off and polygon edges are not anti-aliased. Every existing profile also holds `msaaSamples=0`, because `Save` always writes it.
 
 **Fix built** (scratch worktree `fix-msaa-default`): default 4x, config version 2 to 3, a migration that turns an untouched 0 into 4 once (and keeps 2x, 4x, 8x), and a guard so a later version bump cannot overwrite a user's Unlimited frame cap. Tests: 6 cases fail without, pass with. In game: `frame target 960x640 (4x MSAA, render scale 1)` on first boot; light unchanged.
 
-**Why it was not landed.** The roadmap log (84408f8): its migration also added MSAA on top of a supersampling scale the user had chosen. A second attempt was in progress in `D:\Arma_CWA_worktrees\fix2-msaa-default` (uncommitted) when this page was written.
+**Why it was not landed.** The roadmap log (84408f8): its migration also added MSAA on top of a supersampling scale the user had chosen. A second attempt (scratch worktree `fix2-msaa-default`) landed as 0e85455: the untouched Off is lifted to 4x once, only without supersampling.
 
 ## Other findings, not fixed
 
 - **Dead water shader path:** `misc\waveBumpMap.paa` (named in `remaster.cpp`) does not exist, `GetWaterBumpMap()` has no callers, and the README's Water row describes a shader the sea does not use. See `water.md`.
-- **Mist is visual only:** AI spotting ignores the haze track's valley mist. See `haze.md`.
+- **Mist is visual only:** AI spotting ignores the haze track's valley mist. See `haze.md`. (Later: since the photoreal overhaul AI sight is cut by the fog the renderer draws.)
 - **The shipped Remastered AO never darkens vehicles, soldiers or tree crowns:** under 4x MSAA those draws store alpha 1 (the "sky share" the AO reads). See `ssgi.md`.
 - **The capture harness's per-frame pixel readback** under `--autotest` serialises CPU and GPU (3 to 16 ms of CPU frame). See `perf.md`.
 
 ## After all fixes: the full capture set
 
-`D:\Arma_CWA_worktrees\lighting\tmp\captures\20261018-bugfix\` (run on the integrated build, data junction `RemasterUD-integ`; comparison against `20261017-final` in `cmp_vs_20261017-final.txt` and `vs_20261017-final\<view>__stack.png`):
+`tmp\captures\20261018-bugfix\` (run on the integrated build, data junction `RemasterUD-integ`; comparison against `20261017-final` in `cmp_vs_20261017-final.txt` and `vs_20261017-final\<view>__stack.png`):
 
 - Every mode settled (`OK:30` to `OK:279` in the load column); no 131204 or 131222 in any game log (the remaining GL messages, 131169, 131154 and 131218, are performance and info notes that were there before too).
 - `town_night` Remastered lower-frame brightness 157.5 to 121.4 (original look 120.4).

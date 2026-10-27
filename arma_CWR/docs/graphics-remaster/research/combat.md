@@ -63,8 +63,8 @@ The flash frame is darker than the original look. Ground under fire light turns 
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\combat\NOTES.md` and `prototype.patch` (round 9, 76 KB, 20 changed files plus the new `CombatLights` files). Earlier states: `prototype_r3.patch`, `prototype_r4.patch`, `prototype_r5.patch`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-combat`, build `dist\gfx-combat-rwdi`.
-- Best images (renders of game data, not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\combat\BEST_ffh.png`, `BEST_flr.png`, `BEST_ffn_fires.png`, `zoom_shadow_stipple.png`, `zoom_r8_grid_vs_r9.png`.
+- Notes and patch: `tmp\research\combat\NOTES.md` and `prototype.patch` (round 9, 76 KB, 20 changed files plus the new `CombatLights` files). Earlier states: `prototype_r3.patch`, `prototype_r4.patch`, `prototype_r5.patch`.
+- Scratch worktree: `gfx-combat`, build `dist\gfx-combat-rwdi`.
+- Best images (renders of game data, not committed): `tmp\research\combat\BEST_ffh.png`, `BEST_flr.png`, `BEST_ffn_fires.png`, `zoom_shadow_stipple.png`, `zoom_r8_grid_vs_r9.png`.
 - Integration: the owner asked on 2026-10-17 for the ideas that worked to be compiled on a new branch, `graphics-remaster`. This patch is a candidate for it. That branch did not exist yet when this page was written; check it for the production state.
 - Note: the bug fix 4515770 lowered the night local-light cap from 1.5 to 1.0 (the original look's clamp). A combat-light rework that wants bright HDR flashes must take that into account.

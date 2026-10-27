@@ -62,7 +62,7 @@ The whole frame gets 6 to 18% softer, close to the rejected "wash over the frame
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\temporal\NOTES.md`, `prototype.patch` (9 files, about 535 added lines), metrics `final\pan_metrics.json`, `final\r4_noise.json`, timings `final\timings_run12.md` to `timings_run14.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-temporal`, build `arma_CWR\dist\gfx-temporal-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\temporal\final\forest_edge_golden__strafefx_motion.png`, `final\forest_edge_golden__convergence.png`, `final\thin_features_antennas.png`, `final\sinai_lowsun_fp__ghosting_grid.png`, `final\sinai_lowsun_fp__sharpen_sweep.png`.
+- Notes and patch: `tmp\research\temporal\NOTES.md`, `prototype.patch` (9 files, about 535 added lines), metrics `final\pan_metrics.json`, `final\r4_noise.json`, timings `final\timings_run12.md` to `timings_run14.md`.
+- Scratch worktree: `gfx-temporal`, build `arma_CWR\dist\gfx-temporal-rwdi`.
+- Best images (not committed): `tmp\research\temporal\final\forest_edge_golden__strafefx_motion.png`, `final\forest_edge_golden__convergence.png`, `final\thin_features_antennas.png`, `final\sinai_lowsun_fp__ghosting_grid.png`, `final\sinai_lowsun_fp__sharpen_sweep.png`.
 - Integration: a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17, as shared groundwork for other effects. That branch did not exist yet when this page was written.

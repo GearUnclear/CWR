@@ -78,7 +78,7 @@ Critic: real, verified bug fixes plus a calibrated low-sun rig. "A clear gain on
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\shade\NOTES.md`, `prototype.patch` (lazy buffer plus the C++ rig, 3 engine files, 76 lines), shader half in `ovr_final\`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-shade`, build `dist\gfx-shade-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\shade\BEST_sinai_lowsun_fp.png`, `BEST_lowsun_fp.png`, `BEST_dawn_box5.png`, `BEST_crowns_golden_crop.png`, `cmp_rootcause_prelit.png`.
+- Notes and patch: `tmp\research\shade\NOTES.md`, `prototype.patch` (lazy buffer plus the C++ rig, 3 engine files, 76 lines), shader half in `ovr_final\`.
+- Scratch worktree: `gfx-shade`, build `dist\gfx-shade-rwdi`.
+- Best images (not committed): `tmp\research\shade\BEST_sinai_lowsun_fp.png`, `BEST_lowsun_fp.png`, `BEST_dawn_box5.png`, `BEST_crowns_golden_crop.png`, `cmp_rootcause_prelit.png`.
 - Integration: the three bugs are already fixed on `claude/youthful-lovelace-8imbdh` (747ffc8, 463506f, 5cf85cf). The calibration (hue, fill, crown term) is a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written.

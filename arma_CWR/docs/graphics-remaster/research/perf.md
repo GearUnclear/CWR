@@ -69,7 +69,7 @@ Critic: "Real, verified and pixel-exact cost work." It adds nothing a player wou
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\perf\NOTES.md`, `prototype.patch` (31 KB, mostly `SceneDraw.cpp`).
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-perf`, build `arma_CWR\dist\gfx-perf-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\perf\BEST_sunrise_ridge.png`, `BEST_noon_fields.png`, `run8_quiet\noon_treeline_zoom_m0_top_m0all_bottom.png` (the bush bug).
+- Notes and patch: `tmp\research\perf\NOTES.md`, `prototype.patch` (31 KB, mostly `SceneDraw.cpp`).
+- Scratch worktree: `gfx-perf`, build `arma_CWR\dist\gfx-perf-rwdi`.
+- Best images (not committed): `tmp\research\perf\BEST_sunrise_ridge.png`, `BEST_noon_fields.png`, `run8_quiet\noon_treeline_zoom_m0_top_m0all_bottom.png` (the bush bug).
 - Integration: the bush fix is on `claude/youthful-lovelace-8imbdh` (d80f868). The light gate and terrain occlusion are candidates for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written.

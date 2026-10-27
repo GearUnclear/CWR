@@ -1,10 +1,16 @@
 # graphics-remaster: integration plan for the Remastered lighting research
 
+Status (2026-10-27): historical. Every step of this plan (A0 to A7, B1 to B11) landed on
+2026-10-18, and the photoreal overhaul of 2026-10-19 then replaced much of the look and the
+rule that every feature needs a switch (see `../ITERATIONS.md`, O1). The current design is in
+`../DESIGN.md`. This page is kept as the record of the plan and is not updated.
+
 Written 2026-10-17 from the files on disk. Nothing in this plan has been built or run; every
 statement about the code, the prototypes or the fixes comes from reading them (the 15 prototype
 patches and shader overrides, every track's NOTES.md, `tmp/research/MENU.md`, the 11 bug-fix
 folders under `tmp/bugfix`, `git log 3c53141..HEAD`, and the current sources at 84408f8). Paths
-are relative to the worktree root `D:\Arma_CWA_worktrees\lighting` unless they start with a drive.
+are relative to the root of the lighting worktree the research ran in (removed 2026-10-26; its
+notes are on the archive branch `archive/local-work-2026-10` under `graphics/lighting/`).
 
 Short names used below:
 
@@ -20,25 +26,24 @@ Short names used below:
 - **Branch.** `graphics-remaster` is cut from the tip only after F10 (object shadows at start-up)
   and F11 (4x MSAA default) have landed. This plan creates no branch and switches nothing.
   Creating the branch needs the owner's OK in chat (CLAUDE.md: no new branches without
-  permission). Integration agents work only in the worktree made for that branch (suggested
-  `D:\Arma_CWA_worktrees\graphics-remaster`), never in `D:\Arma_CWA`.
+  permission). Integration agents work only in that branch's own worktree, never in the main
+  checkout.
 - **Parallel work** (pure-math modules, shader drafts) happens in detached scratch worktrees,
   exactly as the research tracks did, and comes back as patches. No side branches.
 - **Toolchain** (every build shell):
   ```powershell
-  $env:VCPKG_ROOT='C:\dev\vcpkg'
-  $env:Path='C:\Program Files\LLVM\bin;C:\Program Files\CMake\bin;C:\Users\Dane\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\Users\Dane\AppData\Local\Microsoft\WinGet\Packages\Ccache.Ccache_Microsoft.Winget.Source_8wekyb3d8bbwe\ccache-4.13.6-windows-x86_64;'+$env:Path
+  # toolchain on PATH and VCPKG_ROOT set as in arma_CWR/CLAUDE.md
   cmake --preset win-x64-clang-rwdi -B build/graphics-remaster-rwdi   # once; stages to dist/graphics-remaster-rwdi
   cmake --build build/graphics-remaster-rwdi -j 6
   ```
-  Unit tests run from `D:\` (the `/tmp` gotcha in `arma_CWR/CLAUDE.md`):
+  Unit tests run from a drive root (the `/tmp` gotcha in `arma_CWR/CLAUDE.md`):
   `arma_CWR\build\graphics-remaster-rwdi\tests\unit\engine\Poseidon\PoseidonTests.exe "<tags>"`.
   Known pre-existing failures: `DDSConverter: generate DDS fixture ...` (`test_dds_converter.cpp:347`)
   and the localisation cases that need a `packages\Remaster` junction.
 - **Games** only through `arma_CWR\tests\rendering\captures\run-captures.ps1 -GameDir
   dist/graphics-remaster-rwdi -DataJunction RemasterUD-graphics-remaster` (each parallel lane its
   own `RemasterUD-gr-<feature>`). Cleanup only through
-  `D:\Arma_CWA\arma_CWR\tools\stop-owned-games.ps1 -DataDir <that junction>` (run-captures
+  `arma_CWR\tools\stop-owned-games.ps1 -DataDir <that junction>` (run-captures
   already calls it). No global `Stop-Process` on PoseidonGame.
 - **Prose and comments** without em dashes. Commits end with the Co-Authored-By trailer.
   Every landing adds a log line to the lighting item in `roadmap/roadmap.yaml`.
@@ -2882,8 +2887,7 @@ frame, writes `tmp/video/<clip>/<clip>__sbs.mp4` (one folder per clip of 7.3, se
 feature; two 1920x1080 panels side by side,
 3840x1080, labels "<feature> off" and "on", optional GPU ms from the frame log) and
 `<feature>__wipe.mp4` (1920x1080, left half off, right half on, divider line) with
-`C:\ffmpeg\bin\ffmpeg.exe` and Pillow (both present on this machine: ffmpeg on PATH, Pillow
-12.1.0). A final `montage.mp4` concatenates the features in section 4 order with a title card
+ffmpeg (on PATH) and Pillow. A final `montage.mp4` concatenates the features in section 4 order with a title card
 per feature naming the switch.
 
 ---
@@ -2897,7 +2901,7 @@ Every step from A1 on passes all of these before its commit:
 2. **Format**: `clang-format --dry-run --Werror` on every touched C++ file (whole-file targets
    fail on pre-existing tab-style headers such as `GraphicsConfig.hpp`; check touched lines
    there with `clang-format-diff.py`).
-3. **Unit tests** from `D:\`: `PoseidonTests.exe "[remaster],[Shaders],[tri],[triSetLighting],[GL33],[gpu],[ShadowSampler],[DebugGroup],[ShutdownOrder],[UBORestoreGuard],[StateOwnership],[StateCacheAudit],[BufferUsageAudit],[IboBindAudit],[Conventions],[Settings],[GraphicsConfig],[GraphicsApply],[scene],[Shape]"`
+3. **Unit tests** from a drive root: `PoseidonTests.exe "[remaster],[Shaders],[tri],[triSetLighting],[GL33],[gpu],[ShadowSampler],[DebugGroup],[ShutdownOrder],[UBORestoreGuard],[StateOwnership],[StateCacheAudit],[BufferUsageAudit],[IboBindAudit],[Conventions],[Settings],[GraphicsConfig],[GraphicsApply],[scene],[Shape]"`
    plus the step's new tags; the new cases must fail with the feature's code reverted where they
    test a contract (registry, layout, gates, math).
 4. **Smoke**: run-captures with `smoke_abel`, `smoke_eden`, `smoke_sinai_lobo`; the game logs show

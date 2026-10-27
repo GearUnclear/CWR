@@ -77,7 +77,7 @@ Woods darker and greyer (the bright floor patches compressed). Blotchy streaks o
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\wildcard\NOTES.md`, `prototype.patch` (988 lines), shaders `glsl_final\`, `ovr_cone\`, `ovr_nofol\`, measurements `r16\measure_remastered.md`, timings `rt7\timing_summary.md`, `rt6\timing_summary.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-wildcard`, build `dist\gfx-wildcard-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\wildcard\BEST_overcast_close.png`, `BEST_town_street.png` (the wall blotches), `BEST_woods_overcast.png`, `cmp_debug_final.png`, `r14\crop_church_faces.png`, `rd\dolly_overcast_close.png`.
+- Notes and patch: `tmp\research\wildcard\NOTES.md`, `prototype.patch` (988 lines), shaders `glsl_final\`, `ovr_cone\`, `ovr_nofol\`, measurements `r16\measure_remastered.md`, timings `rt7\timing_summary.md`, `rt6\timing_summary.md`.
+- Scratch worktree: `gfx-wildcard`, build `dist\gfx-wildcard-rwdi`.
+- Best images (not committed): `tmp\research\wildcard\BEST_overcast_close.png`, `BEST_town_street.png` (the wall blotches), `BEST_woods_overcast.png`, `cmp_debug_final.png`, `r14\crop_church_faces.png`, `rd\dolly_overcast_close.png`.
 - Integration: not as a look. Keep the idea for the bounce-light bet; if it goes to the new branch `graphics-remaster` the owner asked for on 2026-10-17, it goes as groundwork behind a switch. That branch did not exist yet when this page was written.

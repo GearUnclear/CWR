@@ -64,7 +64,7 @@ Blue cast on wet paint (the rejected blue direction). Wet low-sun hulls colder t
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\materials\NOTES.md`, `prototype.patch` (36 KB), final shaders `override_v9\`, every texture's class in `classification_log_r6.txt`, timings in `timings.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-materials`, build `arma_CWR\dist\gfx-materials-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\materials\BEST_town_night_rain.png`, `BEST_crop_town_night_wet.png`, `BEST_lowsun_fp_wet.png`, `BEST_overcast_heavy_rain.png`, `BEST_crop_noon_jeep.png`, `FAIL_v8_night_white_sheets.png`.
+- Notes and patch: `tmp\research\materials\NOTES.md`, `prototype.patch` (36 KB), final shaders `override_v9\`, every texture's class in `classification_log_r6.txt`, timings in `timings.md`.
+- Scratch worktree: `gfx-materials`, build `arma_CWR\dist\gfx-materials-rwdi`.
+- Best images (not committed): `tmp\research\materials\BEST_town_night_rain.png`, `BEST_crop_town_night_wet.png`, `BEST_lowsun_fp_wet.png`, `BEST_overcast_heavy_rain.png`, `BEST_crop_noon_jeep.png`, `FAIL_v8_night_white_sheets.png`.
 - Integration: the wet path is a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written. Note that the night is now darker (bug fix 4515770), so the lamp streaks were never judged in a real night.

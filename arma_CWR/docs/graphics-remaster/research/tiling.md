@@ -62,7 +62,7 @@ Pale fields get paler (a mild wash). Sinai near sand 11% brighter. The forest ed
 
 ## Where the work lives
 
-- Notes: `D:\Arma_CWA_worktrees\lighting\tmp\research\tiling\NOTES.md`. This track has no `prototype.patch` (it is shader-only). The work is the shader overrides: final `ovr_final2\` (`psRemasterCommon.glsl`, `psDetailRemasterMain.glsl`, `psGrassRemasterMain.glsl`), earlier `ovr_v1` to `ovr_v5` and `ovr_final`. Statistics `stats_run5.txt`, `stats_run6.txt`.
+- Notes: `tmp\research\tiling\NOTES.md`. This track has no `prototype.patch` (it is shader-only). The work is the shader overrides: final `ovr_final2\` (`psRemasterCommon.glsl`, `psDetailRemasterMain.glsl`, `psGrassRemasterMain.glsl`), earlier `ovr_v1` to `ovr_v5` and `ovr_final`. Statistics `stats_run5.txt`, `stats_run6.txt`.
 - No scratch worktree (runs used the shared `dist\lighting-rwdi` build).
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\tiling\BEST_high_sinai_noon.png`, `BEST_sinai_desert_noon.png`, `BEST_lowsun_fp.png`, `cmp_hex_land_texture_sinai.png`, `rejected_warp_forest.png`, `rejected_bold_lush_noon_fields.png`.
+- Best images (not committed): `tmp\research\tiling\BEST_high_sinai_noon.png`, `BEST_sinai_desert_noon.png`, `BEST_lowsun_fp.png`, `cmp_hex_land_texture_sinai.png`, `rejected_warp_forest.png`, `rejected_bold_lush_noon_fields.png`.
 - Integration: anti-tiling and relief are candidates for the new branch `graphics-remaster` the owner asked for on 2026-10-17; the macro per island only. That branch did not exist yet when this page was written.

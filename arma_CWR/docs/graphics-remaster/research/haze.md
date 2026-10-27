@@ -68,7 +68,7 @@ A cool lift and about 9% less contrast at 06:00 to 06:30 (a wash). Far hills blu
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\haze\NOTES.md`, `prototype.patch` (5 files, 93 lines of C++: the sky backdrop), haze code `src\haze_block.glsl`, final shaders `shaders_r8\`, timings `timings_r6.md`, `timings_r7.md`, `timings_r9.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-haze`, build `arma_CWR\dist\gfx-haze-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\haze\BEST_valley_sunrise_mist.png`, `BEST_valley_morning.png`, `BEST_valley_mist_timeofday.png`, `BEST_sunrise_ridge.png`, `BEST_overcast_broken.png`, `cmp_vol_sunrise.png`, `view\t0515_zoom.png` (the crosshatch).
+- Notes and patch: `tmp\research\haze\NOTES.md`, `prototype.patch` (5 files, 93 lines of C++: the sky backdrop), haze code `src\haze_block.glsl`, final shaders `shaders_r8\`, timings `timings_r6.md`, `timings_r7.md`, `timings_r9.md`.
+- Scratch worktree: `gfx-haze`, build `arma_CWR\dist\gfx-haze-rwdi`.
+- Best images (not committed): `tmp\research\haze\BEST_valley_sunrise_mist.png`, `BEST_valley_morning.png`, `BEST_valley_mist_timeofday.png`, `BEST_sunrise_ridge.png`, `BEST_overcast_broken.png`, `cmp_vol_sunrise.png`, `view\t0515_zoom.png` (the crosshatch).
 - Integration: a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17, as part of a deferred air pass. That branch did not exist yet when this page was written.

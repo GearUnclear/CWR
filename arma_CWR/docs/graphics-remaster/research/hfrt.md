@@ -65,7 +65,7 @@ It only removes light (no bounce, no colour bleeding), which borders on "only da
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\hfrt\NOTES.md`, `prototype.patch` (33 KB, canopy gather, rasterisers, mips), shaders `override_v1` to `override_v10` (v10 holds every mode), `timings_best_across_runs.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-hfrt`, build `arma_CWR\dist\gfx-hfrt2-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\hfrt\BEST_hill_1730.png`, `BEST_slope_tele_1730.png`, `BEST_ground_b_1730.png`, `SQRT_*.png`, `DEBUG_hill_0700.png`, `PERVERTEX_vs_PERPIXEL.png`.
+- Notes and patch: `tmp\research\hfrt\NOTES.md`, `prototype.patch` (33 KB, canopy gather, rasterisers, mips), shaders `override_v1` to `override_v10` (v10 holds every mode), `timings_best_across_runs.md`.
+- Scratch worktree: `gfx-hfrt`, build `arma_CWR\dist\gfx-hfrt2-rwdi`.
+- Best images (not committed): `tmp\research\hfrt\BEST_hill_1730.png`, `BEST_slope_tele_1730.png`, `BEST_ground_b_1730.png`, `SQRT_*.png`, `DEBUG_hill_0700.png`, `PERVERTEX_vs_PERPIXEL.png`.
 - Integration: the canopy part is a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17, at reduced resolution. The terrain-tracing parts should not be integrated. That branch did not exist yet when this page was written.

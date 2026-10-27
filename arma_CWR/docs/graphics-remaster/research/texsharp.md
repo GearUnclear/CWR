@@ -66,7 +66,7 @@ A golden slope reads more like dry straw (khaki). Olive and brown mottling on me
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\texsharp\NOTES.md`, `prototype.patch` (31 KB, research knobs), final shaders `glsl7\`, offline mip analysis `offline\`, shimmer `run13\shimmer.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-texsharp`, build `arma_CWR\dist\gfx-texsharp-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\texsharp\BEST_forest_edge_golden.png`, `ALT_selfdetail_only_forest_edge_golden.png` (no sharpening), `run8\BEST_unrotated_*.png`, `run13\forest_edge_golden__motion_diff.png`.
+- Notes and patch: `tmp\research\texsharp\NOTES.md`, `prototype.patch` (31 KB, research knobs), final shaders `glsl7\`, offline mip analysis `offline\`, shimmer `run13\shimmer.md`.
+- Scratch worktree: `gfx-texsharp`, build `arma_CWR\dist\gfx-texsharp-rwdi`.
+- Best images (not committed): `tmp\research\texsharp\BEST_forest_edge_golden.png`, `ALT_selfdetail_only_forest_edge_golden.png` (no sharpening), `run8\BEST_unrotated_*.png`, `run13\forest_edge_golden__motion_diff.png`.
 - Integration: a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17 (shader only). That branch did not exist yet when this page was written.

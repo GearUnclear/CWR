@@ -62,7 +62,7 @@ The sunrise foreground washes out to a flat grey-green and loses its warm sun st
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\exposure\NOTES.md`, `prototype.patch` (7 files, 43 KB; the final look also needs `override_r5\psPostComposite.glsl`), `cost_summary.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-exposure`, build `arma_CWR\dist\gfx-exposure-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\exposure\BEST_lowsun_fp_crop.png`, `BEST_sunrise_ridge.png`, `HUE_sunrise_ridge.png`, `adapt_sequence.gif`, `NEG_hdr_frame_town_night.png`, `NEG_agx_coastline.png`, `NEG_ungated_lift_coastline.png`, `NEG_adapt_key_sunrise.png`.
+- Notes and patch: `tmp\research\exposure\NOTES.md`, `prototype.patch` (7 files, 43 KB; the final look also needs `override_r5\psPostComposite.glsl`), `cost_summary.md`.
+- Scratch worktree: `gfx-exposure`, build `arma_CWR\dist\gfx-exposure-rwdi`.
+- Best images (not committed): `tmp\research\exposure\BEST_lowsun_fp_crop.png`, `BEST_sunrise_ridge.png`, `HUE_sunrise_ridge.png`, `adapt_sequence.gif`, `NEG_hdr_frame_town_night.png`, `NEG_agx_coastline.png`, `NEG_ungated_lift_coastline.png`, `NEG_adapt_key_sunrise.png`.
 - Integration: the hue-keeping curve and the adaptation loop are candidates for the new branch `graphics-remaster` the owner asked for on 2026-10-17; the local exposure post pass should wait for a light buffer. That branch did not exist yet when this page was written.

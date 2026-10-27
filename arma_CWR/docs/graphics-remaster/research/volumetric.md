@@ -69,7 +69,7 @@ A pale veil over backlit crowns and bushes (flattened crowns, a wash). A glowing
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\volumetric\NOTES.md`, `prototype.patch` (44 KB, 4 files), shaders in `glsl\`, probe 5 state in `prototype_probe5.patch` and `glsl_probe5\`, timings in `timings.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-volumetric`, build `dist\gfx-volumetric-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\volumetric\BEST_pinewood_morn.png`, `BEST_pinewood_mist.png`, `BEST_pine_eve.png`, `BEST_hl_front.png`, `BEST_lowsun_fp.png`, `cmp\probe8\lowsun_glow_check.png`, `cmp\probe8\town_night_fog_8.png` (the rejected brown sky).
+- Notes and patch: `tmp\research\volumetric\NOTES.md`, `prototype.patch` (44 KB, 4 files), shaders in `glsl\`, probe 5 state in `prototype_probe5.patch` and `glsl_probe5\`, timings in `timings.md`.
+- Scratch worktree: `gfx-volumetric`, build `dist\gfx-volumetric-rwdi`.
+- Best images (not committed): `tmp\research\volumetric\BEST_pinewood_morn.png`, `BEST_pinewood_mist.png`, `BEST_pine_eve.png`, `BEST_hl_front.png`, `BEST_lowsun_fp.png`, `cmp\probe8\lowsun_glow_check.png`, `cmp\probe8\town_night_fog_8.png` (the rejected brown sky).
 - Integration: a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17 (the sun and headlight parts, not the lamp halos). That branch did not exist yet when this page was written.

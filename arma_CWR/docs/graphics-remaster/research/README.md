@@ -2,7 +2,9 @@
 
 This folder documents the research run that tried to give Uslu dur! an "RTX on" look from the models and textures the game already ships. It covers what was tried, what real game data showed, what an independent critic said about each idea, the bugs found on the way and how they were fixed, the GPU budget, and the road from here.
 
-In this folder "the original look" means the stock CWA lighting of the Remaster engine (the "Classic" option of the Lighting row, labelled "Classic" in every comparison picture). "Current Remastered" means the new lighting as it stood on branch `claude/youthful-lovelace-8imbdh` at 3c53141 when the research ran. The design of that lighting is in `../README.md`; the change history is in `../ITERATIONS.md`.
+In this folder "the original look" means the stock CWA lighting of the Remaster engine (the "Classic" option of the Lighting row, labelled "Classic" in every comparison picture). "Current Remastered" means the new lighting as it stood on branch `claude/youthful-lovelace-8imbdh` at 3c53141 when the research ran. The current design is in `../DESIGN.md`; the change history is in `../ITERATIONS.md`.
+
+These pages are a snapshot of 2026-10-17 and 2026-10-18 and are not updated. Since then the integration plan landed in full and the photoreal overhaul replaced much of the look (`../ITERATIONS.md`, O1), so statements such as "not landed", "candidate for the new branch" or "AI ignores the mist" describe that date, not the code today.
 
 ## Pages in this folder
 
@@ -15,15 +17,15 @@ In this folder "the original look" means the stock CWA lighting of the Remaster 
 
 ## Images are not in the repository
 
-Every picture named in these pages is a render of game data, so none is committed. They live on the development machine:
+Every picture named in these pages is a render of game data, so none is committed. A `tmp\` path below and in the track pages is the untracked `tmp` folder of the `lighting` worktree the research ran in. That worktree and the scratch worktrees (`gfx-<track>`, `fix-*`, `fix2-*`) were removed on 2026-10-26; their text notes, patches and diffs are kept on the archive branch `archive/local-work-2026-10` (`graphics/lighting/tmp_/` and `lanes/<worktree>/`), and most pictures were deleted. The layout was:
 
-- `D:\Arma_CWA_worktrees\lighting\tmp\research\<track>\` holds each track's notes, `prototype.patch`, `BEST_*.png` comparison sheets and raw runs.
-- `D:\Arma_CWA_worktrees\lighting\tmp\research\gallery\` holds one picture per track named by rank (`01_combat.png` to `22_wildcard.png`, `W_water.png`) and `SHEET.png` with all of them on one sheet.
-- `D:\Arma_CWA_worktrees\lighting\tmp\research\MENU.md` is the ranked menu the research produced; these pages are built from it, from each track's `NOTES.md` and from the critic verdicts.
-- `D:\Arma_CWA_worktrees\lighting\tmp\bugfix\<bug>\` holds the bug-fix notes and their before and after pictures.
-- `D:\Arma_CWA_worktrees\lighting\tmp\captures\` holds the full capture sets: `20261017-final` (the first in-game run) and `20261018-bugfix` (after the bug fixes).
+- `tmp\research\<track>\` holds each track's notes, `prototype.patch`, `BEST_*.png` comparison sheets and raw runs.
+- `tmp\research\gallery\` holds one picture per track named by rank (`01_combat.png` to `22_wildcard.png`, `W_water.png`) and `SHEET.png` with all of them on one sheet.
+- `tmp\research\MENU.md` is the ranked menu the research produced; these pages are built from it, from each track's `NOTES.md` and from the critic verdicts.
+- `tmp\bugfix\<bug>\` holds the bug-fix notes and their before and after pictures.
+- `tmp\captures\` holds the full capture sets: `20261017-final` (the first in-game run) and `20261018-bugfix` (after the bug fixes).
 
-If those folders are gone, the pictures can be re-shot with `tests/rendering/captures/run-captures.ps1` and the research tests each track lists.
+The pictures can be re-shot with `tests/rendering/captures/run-captures.ps1` and the research tests each track lists.
 
 ## 1. What the research was
 
@@ -52,7 +54,7 @@ Looks the owner had already rejected before this work (the owner's taste list in
 
 ## 2. How it was run
 
-- **22 research tracks**, each one technique. Each track got an agent that built a working prototype in its own scratch worktree (`D:\Arma_CWA_worktrees\gfx-<track>`, detached at 3c53141, no branch) or as shader overrides (`CWR_SHADER_OVERRIDE_DIR`), and saved its engine change as `prototype.patch` (the shader-only tiling track kept only its override shaders).
+- **22 research tracks**, each one technique. Each track got an agent that built a working prototype in its own scratch worktree (`gfx-<track>`, detached at 3c53141, no branch) or as shader overrides (`CWR_SHADER_OVERRIDE_DIR`), and saved its engine change as `prototype.patch` (the shader-only tiling track kept only its override shaders).
 - **Real captures on the Remaster data**, never stand-ins: Abel, Eden, and Sinai with @LoBo, through `tests/rendering/captures/run-captures.ps1` with the track's own data junction (so cleanup only stopped that track's games), on a hidden desktop. 960x640 window at 150% render scale (1440x960 internal) with 4x MSAA. Every comparison shows the original look, current Remastered and the prototype at the same spot and time.
 - **An independent critic per track.** A second agent checked every claim against the files on disk: that each cited image exists, that the game logs show the prototype loaded and compiled, that the before and after pictures differ in pixels where claimed. It then looked at the pictures itself and gave two scores out of 10: **worth building** (overall) and **RTX-on** (how far the result moves toward the path-traced look). It also listed overclaims and taste violations.
 - **A synthesis** ranked the tracks and wrote `MENU.md`.

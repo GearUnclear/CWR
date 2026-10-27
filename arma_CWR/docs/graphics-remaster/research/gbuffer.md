@@ -73,7 +73,7 @@ Its own occlusion makes frames darker. Strong multipliers would tint shaded face
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\gbuffer\NOTES.md`, `prototype.patch` (12 files, about 720 lines), bounce shader `override_v2\psPostGi.glsl`, `timings.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-gbuffer`, build `dist\gfx-gbuffer-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\gbuffer\BEST_lowsun_shadow.png` (the vehicle bug), `BEST_forest_edge_golden.png` (the targets on real scenes), `BEST_town_day_crop.png`, `run06_v2\wedge_forest_edge_golden.png`, `run10_night\cmp_town_night.png` (the broken night).
+- Notes and patch: `tmp\research\gbuffer\NOTES.md`, `prototype.patch` (12 files, about 720 lines), bounce shader `override_v2\psPostGi.glsl`, `timings.md`.
+- Scratch worktree: `gfx-gbuffer`, build `dist\gfx-gbuffer-rwdi`.
+- Best images (not committed): `tmp\research\gbuffer\BEST_lowsun_shadow.png` (the vehicle bug), `BEST_forest_edge_golden.png` (the targets on real scenes), `BEST_town_day_crop.png`, `run06_v2\wedge_forest_edge_golden.png`, `run10_night\cmp_town_night.png` (the broken night).
 - Integration: the G-buffer plumbing is a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17, as groundwork. Its late-VBO version must not ship. That branch did not exist yet when this page was written.

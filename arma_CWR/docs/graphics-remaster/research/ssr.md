@@ -62,7 +62,7 @@ The sunset sea becomes pale lilac-grey (a wash). Lamp-lit wet asphalt becomes a 
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\ssr\NOTES.md`, `prototype.patch` (44 KB, 10 of the 11 changed files), shaders `glsl_v1` to `glsl_v12\psPostSsr.glsl`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-ssr` (holds the missing knob registration), build `dist\gfx-ssr-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\ssr\BEST_bay_offshore.png`, `BEST_town_rain.png`, `BEST_coastline_sunset.png`, `ALT_town_wet_dusk_lampsoff_r10.png`, `bay_offshore_sequence.gif`, `detail_overcast_bush.png`.
+- Notes and patch: `tmp\research\ssr\NOTES.md`, `prototype.patch` (44 KB, 10 of the 11 changed files), shaders `glsl_v1` to `glsl_v12\psPostSsr.glsl`.
+- Scratch worktree: `gfx-ssr` (holds the missing knob registration), build `dist\gfx-ssr-rwdi`.
+- Best images (not committed): `tmp\research\ssr\BEST_bay_offshore.png`, `BEST_town_rain.png`, `BEST_coastline_sunset.png`, `ALT_town_wet_dusk_lampsoff_r10.png`, `bay_offshore_sequence.gif`, `detail_overcast_bush.png`.
 - Integration: a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written; check it for the production state.

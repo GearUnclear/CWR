@@ -64,7 +64,7 @@ Woodland frames 14 to 21% darker than the original look. The evening woods read 
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\shadows\NOTES.md`, `prototype.patch` (22 KB), cost tables `run4\cost_paired.md`, `run5cost\cost_paired.md`, brightness `run8prod\frame_brightness.md`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-shadows`, build `dist\gfx-shadows-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\shadows\BEST_woods_mixed_noon.png`, `BEST_woods_pine2_evening.png`, `BEST_forest_edge_golden.png`, `breakdown_forest_edge_golden.png`, `scratch\r6_soldier_feet_zoom.png`, `run4\shots\sinai_lowsun_fp__dbgsunvisbest.png` (the Sinai artefact).
+- Notes and patch: `tmp\research\shadows\NOTES.md`, `prototype.patch` (22 KB), cost tables `run4\cost_paired.md`, `run5cost\cost_paired.md`, brightness `run8prod\frame_brightness.md`.
+- Scratch worktree: `gfx-shadows`, build `dist\gfx-shadows-rwdi`.
+- Best images (not committed): `tmp\research\shadows\BEST_woods_mixed_noon.png`, `BEST_woods_pine2_evening.png`, `BEST_forest_edge_golden.png`, `breakdown_forest_edge_golden.png`, `scratch\r6_soldier_feet_zoom.png`, `run4\shots\sinai_lowsun_fp__dbgsunvisbest.png` (the Sinai artefact).
 - Integration: the start-up fix is the priority (see `bugs.md`). PCSS is a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written.

@@ -68,7 +68,7 @@ None to the light. RCAS 1.0 looks processed; sharpening adds a little shimmer on
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\aa\NOTES.md`, `prototype.patch` (present pass, separable variants, present timer, LOD pin; 19 KB), `prototype_v3.patch` (earlier state), shaders `overrides\v3\`, shimmer `shimmer_v4v6.txt`, present cost `run_v5\present_cost.md`, texture study `tree_texture_mip_coverage_summary.txt`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-aa`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\aa\figures\SETTINGS_town_night_crop.png`, `figures\PLAYER_DEFAULT_forest_edge_golden_crop.png`, `figures\BEST_forest_edge_golden_1080p_present_1to1.png`, `figures\forest_edge_golden_1080p_present_zoom2.png`, `figures\PAN_DMH_town_night.gif`, `figures\BUG_v2_net_vanishes.png`.
+- Notes and patch: `tmp\research\aa\NOTES.md`, `prototype.patch` (present pass, separable variants, present timer, LOD pin; 19 KB), `prototype_v3.patch` (earlier state), shaders `overrides\v3\`, shimmer `shimmer_v4v6.txt`, present cost `run_v5\present_cost.md`, texture study `tree_texture_mip_coverage_summary.txt`.
+- Scratch worktree: `gfx-aa`.
+- Best images (not committed): `tmp\research\aa\figures\SETTINGS_town_night_crop.png`, `figures\PLAYER_DEFAULT_forest_edge_golden_crop.png`, `figures\BEST_forest_edge_golden_1080p_present_1to1.png`, `figures\forest_edge_golden_1080p_present_zoom2.png`, `figures\PAN_DMH_town_night.gif`, `figures\BUG_v2_net_vanishes.png`.
 - Integration: the MSAA default is a bug fix (second attempt in progress, see `bugs.md`). The present pass and j3 are candidates for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written.

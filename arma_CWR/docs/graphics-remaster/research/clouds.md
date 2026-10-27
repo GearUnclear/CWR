@@ -66,7 +66,7 @@ In a still under a cloud, the frame just looks darker (the jeep loses its sun sh
 
 ## Where the work lives
 
-- Notes and patch: `D:\Arma_CWA_worktrees\lighting\tmp\research\clouds\NOTES.md`, `prototype.patch` (851 lines over 12 files), shaders `glsl_final\`, `luminance_check.txt`.
-- Scratch worktree: `D:\Arma_CWA_worktrees\gfx-clouds`, build `dist\gfx-clouds-rwdi`.
-- Best images (not committed): `D:\Arma_CWA_worktrees\lighting\tmp\research\clouds\BEST_sunrise_oc.png`, `BEST_coast_oc_up.png`, `BEST_broken_up.png`, `BEST_overcast_broken.png`, `SEQ_broken_high_drift.gif`, `cmp_clear_sanity.png`. The `assets\` folder holds extracted game textures; never commit it.
+- Notes and patch: `tmp\research\clouds\NOTES.md`, `prototype.patch` (851 lines over 12 files), shaders `glsl_final\`, `luminance_check.txt`.
+- Scratch worktree: `gfx-clouds`, build `dist\gfx-clouds-rwdi`.
+- Best images (not committed): `tmp\research\clouds\BEST_sunrise_oc.png`, `BEST_coast_oc_up.png`, `BEST_broken_up.png`, `BEST_overcast_broken.png`, `SEQ_broken_high_drift.gif`, `cmp_clear_sanity.png`. The `assets\` folder holds extracted game textures; never commit it.
 - Integration: the low-sun lit clouds are a candidate for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written.
