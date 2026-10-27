@@ -357,8 +357,8 @@ float CombatSmokeReach(float core, float albedo);
 // The share of a light's irradiance that reaches a smoke or dust particle `d`
 // metres from it: for a fire or a shell burst 1 within its core, then
 // exp(-(d - core) / reach) (lit alike, every puff of a burst's own cloud
-// showed one flat colour; it now lights the cloud's base and near side); a muzzle or cannon flash, a tracer, a flare or a motor lights
-// the smoke around it from the air, 1.
+// showed one flat colour; it now lights the cloud's base and near side); a muzzle or cannon flash, a tracer, a flare or
+// a motor lights the smoke around it from the air, 1.
 float CombatSmokeTransmittance(CombatLightKind kind, const CombatLightSample& s, float d, float albedo);
 
 // The steady lights that have a classic light behind them: fires, flares and

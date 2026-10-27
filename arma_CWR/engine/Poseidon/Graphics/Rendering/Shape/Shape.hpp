@@ -876,9 +876,9 @@ class LODShape: public RefCountWithLinks
 	void AllowAnimation( bool allow=true ) {_allowAnimation=allow;} // non static usage detected
 	bool GetAllowAnimation() const {return _allowAnimation;} // non static usage detected
 
-	// keepInsideViews: leave the crew views (gunner, driver, commander, cargo
-	// interiors) without a vertex buffer, on the CPU T&L path.
-	void OptimizeRendering( bool keepInsideViews=false );
+    // keepInsideViews: leave the crew views (gunner, driver, commander, cargo
+    // interiors) without a vertex buffer, on the CPU T&L path.
+    void OptimizeRendering(bool keepInsideViews = false);
 	void CalculateBoundingSphere();
 	void CalculateBoundingSphereRadius();
 	void CalculateMinMax( bool recalcLevels=false );
@@ -1059,10 +1059,10 @@ class ShapeBank
 	LODShapeWithShadow *NewUnique(const char *name, bool reversed, bool shadow);
 
 	void OptimizeAll();
-	// Gives the shapes New loaded since the last call the vertex buffers
-	// OptimizeAll gives a mission's own shapes, crew views excepted. Called
-	// once per drawn frame, before any object is drawn.
-	void OptimizeLate();
+    // Gives the shapes New loaded since the last call the vertex buffers
+    // OptimizeAll gives a mission's own shapes, crew views excepted. Called
+    // once per drawn frame, before any object is drawn.
+    void OptimizeLate();
 	void OptimizeOneShape(LODShape *shape);
 	void ReleaseAllVBuffers();
 
@@ -1079,11 +1079,11 @@ class ShapeBank
 	private:
 	::Poseidon::AssetCache<LODShapeWithShadow, Link<LODShapeWithShadow>> _cache;
 	Foundation::MemoryDomainProbe _memProbe;
-	// Set by OptimizeAll. From then on New queues each shape it loads (a
-	// class created at run time, e.g. by createVehicle) for OptimizeLate.
-	bool _optimizedAll = false;
-	// Weak links: a shape released before the next frame drops out by itself.
-	LinkArray<LODShapeWithShadow> _late;
+    // Set by OptimizeAll. From then on New queues each shape it loads (a
+    // class created at run time, e.g. by createVehicle) for OptimizeLate.
+    bool _optimizedAll = false;
+    // Weak links: a shape released before the next frame drops out by itself.
+    LinkArray<LODShapeWithShadow> _late;
 };
 
 extern ShapeBank Shapes;

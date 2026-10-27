@@ -710,12 +710,10 @@ GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
     const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
     remaster::FogMedium drawnMedium;
     const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
-    const float tDrawn =
-        drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, p[0], p[1]) : 1.0f;
+    const float tDrawn = drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, p[0], p[1]) : 1.0f;
     const float tView = drawn && map ? remaster::FogSeenTransmittanceFrom(drawnMedium, *map, p[0], p[1]) : 1.0f;
     const float dx = p[1][0] - p[0][0], dy = p[1][1] - p[0][1], dz = p[1][2] - p[0][2];
-    const float classic =
-        GScene ? 1.0f - GScene->TacticalFog8(dx * dx + dy * dy + dz * dz) * (1.0f / 255.0f) : 1.0f;
+    const float classic = GScene ? 1.0f - GScene->TacticalFog8(dx * dx + dy * dy + dz * dz) * (1.0f / 255.0f) : 1.0f;
     const remaster::FogMedium m = sight ? sight->medium : remaster::FogMedium{};
     const remaster::FogMedium d = drawn ? drawnMedium : remaster::FogMedium{};
     char buf[768];

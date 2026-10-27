@@ -74,7 +74,7 @@ namespace
 int s_fogFailedW = 0;
 int s_fogFailedH = 0;
 
-constexpr int kFogMaxLights = 16;        // lights in the near field's uniform arrays
+constexpr int kFogMaxLights = 16;         // lights in the near field's uniform arrays
 constexpr float kFogLightRange = 300.0f;  // lights farther than this from the eye add nothing
 constexpr float kFogHistoryShare = 0.12f; // this frame's share in the blend with the reprojected history
 constexpr float kFogHistoryCut = 60.0f;   // a camera jump longer than this (m) starts the history again
@@ -672,16 +672,14 @@ void EngineGL33::PostFog(const PostFrame& f)
     // and the apply read the world's depth; the ring and the glow its colour
     // (the cockpit is neither the sky nor a light out there); the apply
     // leaves the pixels the interior drew as drawn.
-    const bool interior = _fog.intFrame == GetFrameCounter() && _fog.intColorTex && _fog.intW == f.w &&
-                          _fog.intH == f.h;
+    const bool interior =
+        _fog.intFrame == GetFrameCounter() && _fog.intColorTex && _fog.intW == f.w && _fog.intH == f.h;
     const GLuint worldDepth = interior ? PostFogDepthTex() : _post.depthTex;
     // Night vision (PostFogNightVision): the classic programs' intensified
     // frame. Only the volume's transmittance is used; the apply fades the
     // land toward the forward fog's colour and writes the frame target.
     const bool nvg = _fog.nvg;
-    const GLuint sceneIn = interior                      ? _fog.intColorTex
-                           : overlaySnap && cameraFrame ? _fog.snapTex
-                                                        : f.frameColor;
+    const GLuint sceneIn = interior ? _fog.intColorTex : overlaySnap && cameraFrame ? _fog.snapTex : f.frameColor;
     Camera* camera = GScene ? GScene->GetCamera() : nullptr;
     LightSun* sun = GScene ? GScene->MainLight() : nullptr;
     if (!camera || !sun || !FogDrawsThisFrame())

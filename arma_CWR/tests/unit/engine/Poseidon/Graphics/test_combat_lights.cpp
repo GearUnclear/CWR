@@ -370,8 +370,8 @@ TEST_CASE("Combat lights: a fire lights its smoke in its own colour however clos
           "[remaster][CombatLights]")
 {
     // Saturated one by one, the channels went toward the same value, so the
-    // foot of a camp fire's column went white (a plume at (179, 166, 151)), and the 8-bit colour clipped each channel. The
-    // colour version saturates on the peak and keeps the light's hue.
+    // foot of a camp fire's column went white (a plume at (179, 166, 151)), and the 8-bit colour clipped each channel.
+    // The colour version saturates on the peak and keeps the light's hue.
     const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
     const float ambient[3] = {0.08f, 0.08f, 0.09f}; // a puff under the night's light
     auto lit = [&](float d, float tint, float out[3])
@@ -1294,8 +1294,7 @@ TEST_CASE("Combat lights: the gas cools from the white-hot flash through the aft
     CHECK(set.BurstDayScale() == Approx(1.0f));
 }
 
-TEST_CASE("Combat lights: a vehicle's fuel burns as a slow, cooler, rolling fireball",
-          "[remaster][CombatLights]")
+TEST_CASE("Combat lights: a vehicle's fuel burns as a slow, cooler, rolling fireball", "[remaster][CombatLights]")
 {
     // A jeep: explosives = 50 l x 0.1 = 5, times 0.5 .. 0.75: hit about 3.
     const Detonation fuel = DeflagrationFromFuel(kFuelKgPerHit * 3.0f);

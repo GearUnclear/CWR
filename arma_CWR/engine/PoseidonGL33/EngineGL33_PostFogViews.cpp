@@ -194,15 +194,15 @@ void EngineGL33::SaveWorldBeforeInterior()
         _fog.intColorTex = MakeSaveTex(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
         // As the post pass's depth (EnsurePostResources): a depth blit needs
         // the frame target's format.
-        _fog.intDepthTex =
-            MakeSaveTex(GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, w, h, GL_NEAREST);
+        _fog.intDepthTex = MakeSaveTex(GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, w, h, GL_NEAREST);
         GL33Bind::Invalidate();
         const bool complete = MakeSaveFbo(GL_COLOR_ATTACHMENT0, _fog.intColorTex, _fog.intColorFbo) &&
                               MakeSaveFbo(GL_DEPTH_STENCIL_ATTACHMENT, _fog.intDepthTex, _fog.intDepthFbo);
         if (!complete)
         {
-            LOG_ERROR(Graphics, "GL33 fog: the interior save {}x{} is incomplete; vehicle interiors keep the classic "
-                                "distance fog",
+            LOG_ERROR(Graphics,
+                      "GL33 fog: the interior save {}x{} is incomplete; vehicle interiors keep the classic "
+                      "distance fog",
                       w, h);
             DestroyInteriorSave();
             _fog.intFailed = true;

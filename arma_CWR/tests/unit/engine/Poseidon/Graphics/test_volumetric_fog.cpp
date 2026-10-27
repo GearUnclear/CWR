@@ -411,8 +411,7 @@ float DrawnAlong(const FogMedium& m, const FogSightMap& map, const float from[3]
                    mistKeep;
         }
     }
-    return FogEdgeKeep(m, len) *
-           std::min(static_cast<float>(std::exp(-tau * len / samples)), FogClassicFloor(m, len));
+    return FogEdgeKeep(m, len) * std::min(static_cast<float>(std::exp(-tau * len / samples)), FogClassicFloor(m, len));
 }
 
 // The old link's share (before AI sight followed the whole drawn air): the
@@ -1555,7 +1554,6 @@ TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough t
     CHECK(kFogBeamGain <= 40.0f);
     CHECK(kFogBeamReach == Catch::Approx(180.0f));
 }
-
 
 // ---- The classic weather floor ---------------------------------------------
 //

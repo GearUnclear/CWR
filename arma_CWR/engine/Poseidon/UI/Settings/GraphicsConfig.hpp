@@ -62,17 +62,17 @@ public:
 		VsyncOn       = 1,
 		VsyncAdaptive = 2,
 	};
-	// Lighting model.  Classic is the original per-vertex lighting, bit for
-	// bit; Remastered is per-pixel HDR lighting with shadow maps, terrain and
-	// cloud shadows, ambient occlusion and bloom (Graphics/Remaster).
-	enum LightingMode
-	{
-		LightingClassic    = 0,
-		LightingRemastered = 1,
-	};
+    // Lighting model.  Classic is the original per-vertex lighting, bit for
+    // bit; Remastered is per-pixel HDR lighting with shadow maps, terrain and
+    // cloud shadows, ambient occlusion and bloom (Graphics/Remaster).
+    enum LightingMode
+    {
+        LightingClassic = 0,
+        LightingRemastered = 1,
+    };
 
-	// Anti-aliasing out of the box: 4x MSAA, with alpha-to-coverage on cutouts.
-	static constexpr int kDefaultMsaaSamples = 4;
+    // Anti-aliasing out of the box: 4x MSAA, with alpha-to-coverage on cutouts.
+    static constexpr int kDefaultMsaaSamples = 4;
 
 	// Persistable fields.
 	Preset    qualityPreset    = PresetUltra;
@@ -89,16 +89,16 @@ public:
 	float     renderScale      = 1.0f;          // SSAA: render at scale x window and downsample.
 	                                             // 1.0 = off; up to 2.0.  The only general cure for
 	                                             // sub-pixel OPAQUE geometry sparkle (fence bars)
-	int       msaaSamples      = kDefaultMsaaSamples; // MSAA on the frame target: 0 (off) / 2 / 4 / 8
+    int msaaSamples = kDefaultMsaaSamples;      // MSAA on the frame target: 0 (off) / 2 / 4 / 8
 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
 	                                             // objects.  Off drops those draws to the base texture
-	LightingMode lighting      = LightingRemastered; // Classic = the original lighting, unchanged
+    LightingMode lighting = LightingRemastered; // Classic = the original lighting, unchanged
 	float     brightness       = 1.6f;          // 0.4..1.8
 	float     gamma            = 1.2f;          // 0.5..2.3
 
 	// Schema version of the persisted file.  Load resets this to 0 first, so a
 	// file written before versioning reads back as 0 and Migrate can act on it.
-	static constexpr int kVersion = 3;
+    static constexpr int kVersion = 3;
 	int       version          = kVersion;
 
 	// Bring a loaded config up to kVersion.  Returns true when the caller needs

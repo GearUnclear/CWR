@@ -432,7 +432,7 @@ TEST_CASE("The shadow depth pass pins its polygon offset and hands the previous 
     REQUIRE(firstDraw != std::string::npos);
     REQUIRE(restore != std::string::npos);
     CHECK(capture < set);
-    CHECK(set < firstDraw); // pinned before any caster draws
+    CHECK(set < firstDraw);                       // pinned before any caster draws
     CHECK(pass.rfind("glDrawArrays(") < restore); // handed back after the last one
     // Once, and nothing else in the pass changes the offset.
     CHECK(CountOccurrences(pass, "SetPolygonOffsetForShadowDepth()") == 1);

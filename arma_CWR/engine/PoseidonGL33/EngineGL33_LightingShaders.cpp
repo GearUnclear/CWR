@@ -1290,10 +1290,9 @@ void main() {
 )";
 
 // The terrain main (PSDetail: the land and, until the sea gets its own shader,
-// the sea). Terrain detail (the C++ mirror of this math and its constants is Graphics/Remaster/TerrainDetail.hpp): every
-// terrain square is one 128 px texture over 50 m, so from about 10 m to 150 m
-// a texel covers 5 to 15 pixels and the slope is a bilinear smear. The land
-// takes three luminance-only layers, each relative to the local mean, so hue
+// the sea). Terrain detail (the C++ mirror of this math and its constants is Graphics/Remaster/TerrainDetail.hpp):
+// every terrain square is one 128 px texture over 50 m, so from about 10 m to 150 m a texel covers 5 to 15 pixels and
+// the slope is a bilinear smear. The land takes three luminance-only layers, each relative to the local mean, so hue
 // and average brightness stay as authored:
 //   - self-detail: the luminance high-pass of the square's own texture, zoomed
 //     kTdZoom times and read near the fragment (grass from grass, rock from

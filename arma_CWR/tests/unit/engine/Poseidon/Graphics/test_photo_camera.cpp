@@ -347,8 +347,7 @@ TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off 
     CHECK(kSunDiscWhite <= 1.0f);
 }
 
-TEST_CASE("PhotoCamera: the meter reads the sky round the sun at the plain roll-off",
-          "[Remaster][PhotoCamera]")
+TEST_CASE("PhotoCamera: the meter reads the sky round the sun at the plain roll-off", "[Remaster][PhotoCamera]")
 {
     const float deg = 3.14159265f / 180.0f;
     // The sky's stored light toward the sun, read back, is the plain
@@ -698,8 +697,8 @@ TEST_CASE("PhotoCamera: the histogram meter, the low sun's balance, the weather'
     CHECK(WhiteBalanceShare(5.0f) == Catch::Approx(kWhiteBalanceShareLowSun));
     CHECK(WhiteBalanceShare(60.0f) == Catch::Approx(kWhiteBalanceShareHighSun));
     // The veil: none under the clearest sky the engine has nor under the
-    // broken cloud of setOvercast 0.5 (its blue gaps and its sun stay), part of it under a thickening deck, all of it under
-    // a full one.
+    // broken cloud of setOvercast 0.5 (its blue gaps and its sun stay), part of it under a thickening deck, all of it
+    // under a full one.
     CHECK(CameraWeatherVeil(0.959f) == 0.0f);
     CHECK(CameraWeatherVeil(0.7f) == 0.0f);
     CHECK(CameraWeatherVeil(0.45f) > 0.3f);
@@ -758,8 +757,7 @@ TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and le
     CHECK(GoldenWarmShare(Rgb(0.0f, 0.0f, 0.0f)) > 0.0f);
 }
 
-TEST_CASE("PhotoCamera: a bright plain at a high sun is exposed a little under, not dull",
-          "[Remaster][PhotoCamera]")
+TEST_CASE("PhotoCamera: a bright plain at a high sun is exposed a little under, not dull", "[Remaster][PhotoCamera]")
 {
     // An earlier tuning put a bright plain 0.38 EV under on top of the high sun's
     // step: the Sinai sand sat 35 levels under the original and the clear
@@ -824,8 +822,7 @@ TEST_CASE("PhotoCamera: the clear day sky deepens toward a camera's blue, the ho
     CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.5f) == Catch::Approx(0.5f));
 }
 
-TEST_CASE("PhotoCamera: smoke and dust take the rig's light, not the classic sun",
-          "[Remaster][PhotoCamera]")
+TEST_CASE("PhotoCamera: smoke and dust take the rig's light, not the classic sun", "[Remaster][PhotoCamera]")
 {
     // A lit particle (Object::DrawDecal) under the camera: kParticleKeyShare of
     // the key light (a thick puff's lit half, about a sunlit wall's share) plus

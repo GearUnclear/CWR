@@ -556,8 +556,7 @@ float FogSightTransmittance(const FogSightSnapshot& s, const float from[3], cons
 // The same for FogSightNow() (1 without one).
 float FogSightTransmittance(const float from[3], const float to[3]);
 // The same through a given medium over a given map (pure).
-float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3],
-                                   const float to[3]);
+float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3]);
 // The drawn view alone: a camera at `eye` looking at `to` (the near thinning
 // around the eye), on the same eight samples (pure; for the tests and the
 // probes).

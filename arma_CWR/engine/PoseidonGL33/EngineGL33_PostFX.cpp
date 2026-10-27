@@ -427,8 +427,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     BindFrameRenderTarget();
     if (!complete)
     {
-        LOG_WARN(Graphics, "GL33 post: targets {}x{} incomplete; remastered post effects off until the size changes",
-                 w, h);
+        LOG_WARN(Graphics, "GL33 post: targets {}x{} incomplete; remastered post effects off until the size changes", w,
+                 h);
         DestroyPostTargets();
         p.unavailable = true;
         p.failedW = w;

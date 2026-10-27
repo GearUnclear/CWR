@@ -1129,8 +1129,7 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
     CHECK(strings >= 32); // today 3 VS, 10 prelude pieces and 4 mains; 15 post strings
 }
 
-TEST_CASE("The camera's meter reads the sky round the sun at the plain roll-off",
-          "[Graphics][Shaders][remaster]")
+TEST_CASE("The camera's meter reads the sky round the sun at the plain roll-off", "[Graphics][Shaders][remaster]")
 {
     // The meter pass takes each sky tap through meterSkyLight (PhotoCamera.cpp
     // SkyMeterLight) before its luminance, so the mean, the blocks' brightest

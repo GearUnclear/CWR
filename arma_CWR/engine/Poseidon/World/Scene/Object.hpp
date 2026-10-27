@@ -395,10 +395,10 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	// This is the main function used for object rendering.
 	virtual void Draw( int forceLOD, ClipFlags clipFlags, const FrameBase &pos );
-	// The texture mipmap hints Object::Draw gives for this LOD (its proxies
-	// included), without drawing: for an object the hill cull hides, so the
-	// textures it shares and casts its shadow with load as if it were drawn.
-	void PrepareDrawTextures( int level, const FrameBase &pos );
+    // The texture mipmap hints Object::Draw gives for this LOD (its proxies
+    // included), without drawing: for an object the hill cull hides, so the
+    // textures it shares and casts its shadow with load as if it were drawn.
+    void PrepareDrawTextures(int level, const FrameBase& pos);
 
 	// Calculate (or estimate) complexity of given proxy
 	virtual int GetProxyComplexity

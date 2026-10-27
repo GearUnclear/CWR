@@ -104,13 +104,14 @@ class Cloudlet: public Smoke
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
 
-	// Its temperature (K) and its table's hottest (the last entry's maxT; 0
-	// without a table): a fireball's puff glows (CombatLights FireballPuff).
-	float Temperature() const {return _t;}
-	float HottestTemperature() const
-	{
-		return _cloudletTTable && _cloudletTTable->Size()>0 ? _cloudletTTable->Get(_cloudletTTable->Size()-1).maxT : 0.0f;
-	}
+    // Its temperature (K) and its table's hottest (the last entry's maxT; 0
+    // without a table): a fireball's puff glows (CombatLights FireballPuff).
+    float Temperature() const { return _t; }
+    float HottestTemperature() const
+    {
+        return _cloudletTTable && _cloudletTTable->Size() > 0 ? _cloudletTTable->Get(_cloudletTTable->Size() - 1).maxT
+                                                              : 0.0f;
+    }
 
 	void SetGrowUp( float growUp, float size )
 	{
@@ -212,8 +213,12 @@ class CloudletSource: public SerializeClass
 	}
 	Color GetColor() const {return _cloudletColor;}
 	void SetColor(ColorVal color) {_cloudletColor = color;}
-	// The temperature a puff is born at and how fast it cools (K, K/s).
-	void SetTemperatureRange(float initT, float deltaT) {_cloudletInitT = initT; _cloudletDeltaT = deltaT;}
+    // The temperature a puff is born at and how fast it cools (K, K/s).
+    void SetTemperatureRange(float initT, float deltaT)
+    {
+        _cloudletInitT = initT;
+        _cloudletDeltaT = deltaT;
+    }
 
 	Cloudlet *Drop( Vector3Par pos, Vector3Par speed );
 	void Simulate
@@ -286,12 +291,12 @@ class WeaponCloudsSource: public DustSource
 
 	protected:
 	float _timeToLive;
-	// A puff's outward speed per metre of its offset from the source (m/s).
-	float _burstSpeed = 4.0f;
-	// A new puff is simulated once at its birth, so it is
-	// drawn in the frame it is born (a fireball's first frame) instead of one
-	// or two frames later, cooled and faded in.
-	bool _showAtBirth = false;
+    // A puff's outward speed per metre of its offset from the source (m/s).
+    float _burstSpeed = 4.0f;
+    // A new puff is simulated once at its birth, so it is
+    // drawn in the frame it is born (a fireball's first frame) instead of one
+    // or two frames later, cooled and faded in.
+    bool _showAtBirth = false;
 
 	private:
 	void Init();
@@ -339,8 +344,8 @@ class SmokeSource: public CloudletSource
 	{
 		_sourceSize = sourceSize;
 	}
-	// The vertical speed a puff leaves the source with (m/s).
-	void SetRise(float speed) {_speed[1] = speed;}
+    // The vertical speed a puff leaves the source with (m/s).
+    void SetRise(float speed) { _speed[1] = speed; }
 	void SetSize(float size, float sourceSize)
 	{
 		_size = size;
@@ -464,9 +469,9 @@ class Explosion: public Vehicle
 		Vehicle *owner=nullptr, float duration=1
 	);
 	~Explosion() override;
-	// The fireball, flash and light from the round's charge
-	// (CombatLights.hpp Detonation); before its first simulation step.
-	void SetDetonation(const lighting::Detonation& d);
+    // The fireball, flash and light from the round's charge
+    // (CombatLights.hpp Detonation); before its first simulation step.
+    void SetDetonation(const lighting::Detonation& d);
 
 	void Simulate( float deltaT, SimulationImportance prec ) override;
 	void Sound( bool inside, float deltaT ) override;
@@ -501,7 +506,7 @@ class Crater: public Smoke
 	DustSource _dust;
 	float _dustTimeToLive;
 	float _size;
-	float _throwSpeed = 0.0f; // the thrown earth's launch speed (m/s)
+    float _throwSpeed = 0.0f; // the thrown earth's launch speed (m/s)
 	bool _isSmoke;
 	bool _isBlood;
 	bool _isWater;
@@ -513,9 +518,9 @@ public:
 		bool smoke = true, bool blood = false, bool water = false
 	);
 	void Simulate( float deltaT, SimulationImportance prec ) override;
-	// A blast's dust and smoke column from its charge
-	// (CombatLights.hpp Detonation): how high, how wide, how long it lingers.
-	void SetDetonation(const lighting::Detonation& d);
+    // A blast's dust and smoke column from its charge
+    // (CombatLights.hpp Detonation): how high, how wide, how long it lingers.
+    void SetDetonation(const lighting::Detonation& d);
 
 	bool IsAnimated( int level ) const override {return false;} // appearence changed with Animate
 	bool IsAnimatedShadow( int level ) const override {return false;} // shadow changed with Animate

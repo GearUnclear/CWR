@@ -114,8 +114,8 @@ private:
 	std::array<const char*, 3>      m_vsyncCStrs{};
 	std::array<std::string, 7>      m_fpsCapLabels;
 	std::array<const char*, 7>      m_fpsCapCStrs{};
-	std::array<std::string, 2>      m_lightingLabels;
-	std::array<const char*, 2>      m_lightingCStrs{};
+    std::array<std::string, 2> m_lightingLabels;
+    std::array<const char*, 2> m_lightingCStrs{};
 
 	void RefreshLocalizedChoices();
 

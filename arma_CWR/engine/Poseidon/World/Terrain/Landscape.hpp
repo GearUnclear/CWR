@@ -673,8 +673,8 @@ class Landscape: public SerializeClass
 	float ClippedData( int z, int x ) const;
 	Texture *ClippedTexture( int z, int x ) const;
 	int ClippedTextureIndex( int z, int x ) const;
-	// How many textures the land's cells index (an index at or past it has none).
-	int TextureCount() const {return _texture.Size();}
+    // How many textures the land's cells index (an index at or past it has none).
+    int TextureCount() const { return _texture.Size(); }
 
 	int ClampFlags( int txt ) const
 	{
