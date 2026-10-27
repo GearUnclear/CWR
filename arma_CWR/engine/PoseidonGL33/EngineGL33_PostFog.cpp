@@ -1181,6 +1181,10 @@ void EngineGL33::PostFog(const PostFrame& f)
     const float lobeSky = m.lobe * rm::kFogLobeSkyShare * (0.15f + 0.85f * std::clamp(m.skyThrough, 0.0f, 1.0f)) *
                           (1.0f - nightW) * sunUp;
     Set4(apply, "fogSkyLobe", lobeSky, 0.0f, 0.0f, 0.0f);
+    // The classic weather floor (rm::FogClassicFloor), as AI sight takes it.
+    Set4(apply, "fogClassicW", m.classicWeather.start, m.classicWeather.end, m.classicWeather.tactical,
+         m.classicFloor ? 1.0f : 0.0f);
+    Set4(apply, "fogClassicC", m.classicClear.start, m.classicClear.end, m.classicClear.tactical, 0.0f);
     SetMat3(apply, "viewToWorld", viewToWorld);
     // Under night vision straight into the frame target (no composite follows).
     DrawTo(nvg ? _ssaaFbo : _fog.outFbo, f.w, f.h);

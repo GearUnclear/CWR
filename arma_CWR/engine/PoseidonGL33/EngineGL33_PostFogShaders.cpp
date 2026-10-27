@@ -999,6 +999,11 @@ layout(location = 0) out vec4 fragColor;
 // the composite's occlusion and contact shadows darken the surface's own
 // light, not the air in front of it.
 layout(location = 1) out vec4 fogVeil;
+// The classic weather floor (VolumetricFog.hpp FogClassicFloor): the classic
+// fog of the weather (x start, y end, z tactical range, m; w 1 = on) and of a
+// clear sky at the same darkness.
+uniform vec4 fogClassicW;
+uniform vec4 fogClassicC;
 )";
 
 // The apply's main (after its inputs and the LitConstants block: the sun's
@@ -1116,6 +1121,26 @@ float fogNoise(vec2 p) {
 
 // A pixel the fog leaves as drawn (an interior, an overlay's mask, the
 // intensified sky): its colour, and the whole of its light its surface's.
+// VolumetricFog.cpp ClassicFogKeep and FogClassicFloor.
+float fogClassicKeep(vec4 r, float d) {
+    float range = r.y - r.x;
+    float lin = range > 1e-3 ? clamp(1.0 - (d - r.x) / range, 0.0, 1.0) : (d < r.y ? 1.0 : 0.0);
+    float dt = min(d, r.z);
+    float tac = dt <= r.x ? 1.0 : exp(2.9957323 * (r.x - dt) / max(r.z, 0.1));
+    return min(lin, tac);
+}
+float fogClassicFloor(float d) {
+    if (fogClassicW.w < 0.5) return 1.0;
+    float w = fogClassicKeep(fogClassicW, d);
+    float c = fogClassicKeep(fogClassicC, d);
+    return w >= c ? 1.0 : (c > 1e-6 ? w / c : 0.0);
+}
+// The distance from the eye to the point at view depth z under uv.
+float fogRadial(vec2 cuv, float z) {
+    vec2 ndc = cuv * 2.0 - 1.0;
+    return z * length(vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0));
+}
+
 void fogKeep(vec4 c) {
     fragColor = c;
     fogVeil = vec4(1.0);
@@ -1147,7 +1172,7 @@ void main() {
             return;
         }
         vec2 cuvN = (vUV - worldRect.xy) / worldRect.zw;
-        float tn = fogAt(cuvN, zn).a;
+        float tn = min(fogAt(cuvN, zn).a, fogClassicFloor(fogRadial(cuvN, zn)));
         vec3 o = mix(fogNvgColor.rgb, w.rgb, tn);
         if (snapN)
             o = o * clamp((cOver.rgb + 1e-3) / (w.rgb + 1e-3), 0.0, 1.0) + max(cOver.rgb - w.rgb, vec3(0.0));
@@ -1176,6 +1201,15 @@ void main() {
     // The air's own colour at this depth (what a long column of it shows).
     vec3 airAt = v.rgb / max(1.0 - v.a, 1e-3);
     bool airValid = 1.0 - v.a > 1e-3;
+    // Fog and rain never thinner than the classic fog drew them: past the
+    // weather's classic floor the air thickens in its own colour.
+    if (!sky && airValid) {
+        float floorT = fogClassicFloor(fogRadial(cuv, z));
+        if (floorT < T) {
+            S += (T - floorT) * airAt;
+            T = floorT;
+        }
+    }
     // Under the photoreal camera (litCamera.x) the frame holds pre-exposed
     // scene light on the camera's encoding: the fog works in that light (the
     // model's sky and sun, scene light, take the frame's pre-exposure
