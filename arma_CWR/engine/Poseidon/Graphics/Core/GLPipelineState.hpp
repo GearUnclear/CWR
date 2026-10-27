@@ -66,7 +66,7 @@ inline void SetPolygonOffsetForShadows(bool enabled)
 // pass sets its own offset so the depth its casters store does not depend
 // on the last world draw before it. The value is the decal offset (-1, -1):
 // it keeps the self-shadowing on thin, sun-grazing caster edges (a vehicle's
-// hood rim, a tree trunk's sunlit side) that the accepted look has.
+// hood rim, a tree trunk's sunlit side) the lighting is tuned with.
 inline void SetPolygonOffsetForShadowDepth()
 {
     glEnable(GL_POLYGON_OFFSET_FILL);
