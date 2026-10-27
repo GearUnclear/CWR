@@ -2174,24 +2174,29 @@ items:
       - "2026-10-13: filed #89 from the agent-guide audit."
 
   - id: remastered-lighting
-    title: "Remastered lighting: per-pixel HDR sun and sky, shadows, terrain and cloud shadows, post pass (proposal branch)"
+    title: "Remastered lighting: photoreal overhaul of the GL 3.3 renderer (Options > Graphics > Lighting)"
     phase: phase-2
-    status: in-progress
+    status: done
     priority: 2
     depends_on: []
-    gh_issues: []
+    gh_issues: [215, 216]
+    commits: [77ea85d, b4f14d6, 0e85455, 7e013c2, fec1075, 8476b9b, 2c957bb, 1fcc8a4, 46b47a0, f4d57cb, 026f8b7, 54e3a6d, c18ce49, 9a487c0, 4593b84, c1e483e, "5343929"]
     summary: >
-      A second lighting model for the GL 3.3 backend behind the Options
-      Lighting row (Classic stays bit-identical): per-fragment linear lighting
-      with a per-fragment tonemap instead of the classic clamp-before-texturing,
-      an elevation-aware sun and a sky hemisphere with a sunward/anti-sun
-      horizon split, an exposure meter that keeps sunlit ground at Classic
-      brightness by day, shadow maps that dim only direct sun, a terrain horizon
-      map (hill shadows at any range, valley sky occlusion), drifting cloud
-      shadows, foliage crown normals, sun-glow fog matching the sky dome, and a
-      post pass (sky-light-only AO, bloom, sun shafts). Design and calibration in
-      arma_CWR/engine/Poseidon/Graphics/Remaster/README.md; offline evidence from
-      tests/rendering/lighting_lab (--renderer remaster).
+      A photoreal look for the GL 3.3 renderer built only from the shipped
+      models and textures: per-pixel HDR light from a physically based sun and
+      sky, a metered camera with a filmic curve, soft sun shadows plus long
+      tree, building, hill and cloud shadows, froxel volumetric fog (haze, dust,
+      humid ground air, weather and night fog, valley mist), GTAO and surface
+      light, temporal AA and terrain detail, waves and screen-space reflections
+      on the sea, wet weather in which only puddles reflect, moonlight, lamps,
+      combat light and explosions scaled by their charge. The Options >
+      Graphics Lighting row (Classic | Remastered, Remastered by default) stays.
+      AI sight is cut by all the fog the renderer draws, from simulation state,
+      so AI never sees through fog the player cannot (with Classic lighting,
+      the classic fog only). The separate Codex lighting line (PR #210) is not
+      part of this item. Overview arma_CWR/docs/graphics-remaster/README.md,
+      design DESIGN.md, change log ITERATIONS.md. Open follow-up: cost on long
+      views (issue #216, item remastered-lighting-cost).
     log:
       - "2026-10-17: proposal on branch claude/youthful-lovelace-8imbdh, built from main rather than the Codex graphics/lighting-improvements branch (PR #210), whose ITERATIONS.md log was used as the list of looks the owner already rejected (S blue haze, U1 mustard ground and crushed APC/soldier shade and flattened crowns, C/G darker-only, depth-map shadow darkening that crushed the shade). Remastered keeps sunlit ground at Classic brightness and puts shade near 0.6 of lit on screen instead of darkening the frame."
       - "2026-10-17: critique and adversarial review workflows fed the calibration: the default 1.2 display gamma must be counted in every target; alpha-to-coverage cutouts write coverage into alpha, so the AO share is stored as 1 - share (coverage pixels are exempt); the post composite must not re-tonemap; the shadow-map normal offset slid shadows metres off their casters at a low sun until terrain receivers dropped it; Classic clamps the shadow direction to 11.5 degrees, so Remastered builds the cascades from the true sun (min 4 degrees); two-tap cloud noise broke the exact overcast coverage."
@@ -2223,3 +2228,23 @@ items:
       - "2026-10-19: trailer part 1 (graphics) made: 14 Uslu dur scenes shot at 60 fps on a vanilla upstream build and on the landed overhaul, composited as a full-frame split screen with full-width sweeps, narrated with the local Breeze TTS (each line checked by transcription), 2:13.4 at 1080p60 and -16 LUFS; tooling 111e563, video files in graphics-remaster tmp/video/v2/final (not in git). Problem hit: NPC heads flicked left and right because the capture fast-forwarded the AI look-around; fixed in the capture staging only (exact 1/60 s step, held gaze)."
       - "2026-10-23: the trailer's dawn shot (valley_mist) showed the far haze and the valley mist pumping as one sheet. Cause: the froxel fog injection used one frame-wide jitter for every cell, so the history residual (0.88 kept) had the same sign over whole regions; it showed in play at 60 fps (3x vanilla) and the stepped capture doubled it; warm-up renders per shot made it worse. psFogInject now turns the jitter per cell and per slice (new [remaster][fog][Shaders] test); valley band 0.567 to 0.103 against vanilla 0.112. The dawn shot was reshot on both sides, the other fog clips on the overhaul side."
       - "2026-10-23: the per-cell fog jitter of d91a08e0 stopped the pump but the owner saw wind in the dawn valley's mist: the interleaved-gradient offset is a ramp over the cells, so with the frame's golden-ratio step the history residual slid through the fog about one froxel cell (12 px) per frame, held camera or panning, in play and in the captures. An eight-agent Opus swarm with three Fable agents (board graphics-remaster tmp/video/fogwind, not in git) judged motion explicitly: x-t slices, residual travel, a held-camera probe, real-time 60 fps recordings. psFogInject now samples two fixed points of each cell and never jitters, and reads the history at the cell centre through a fixed quarter-cell blur that keeps the approved mist density; the [remaster][fog][Shaders] mirror test now catches both the pump and the travel. Dawn valley, real pan: wind 0.123 to 0.004 in the valley (vanilla 0.007), flicker at vanilla level; held camera at the jitter-frozen floor. The dawn shot was reshot on the overhaul side; the other fog clips still need it. Details: Graphics/Remaster/ITERATIONS.md F2."
+      - "2026-10-26: repo cleanup: the lighting worktree, the gfx-, fix- and fix2- scratch worktrees and branch claude/youthful-lovelace-8imbdh were removed; their notes, patches and diffs are on the archive branch archive/local-work-2026-10 (graphics/lighting/, lanes/). The vanilla capture rig is on the branch (b5c839b) and the sea study is tag research/remaster-water-2026-10-17 (at 935cb5e; noted in a5fb553)."
+      - "2026-10-27: readied for the fork's main in a 12-lane run on graphics-remaster (a5fb553..). AI sight is cut by all the fog the renderer draws (haze, dust, humid ground air, weather fog with its night boost, valley mist) plus the view-distance edge, in place of the classic tactical fog, from simulation state with default tuning, reciprocal at both ends (54e3a6d). Heavy fog and rain draw and cut sight at least as densely as the classic fog (classic weather floor), AI takes the mist banks at their thickest, and a machine drawing the classic fog (row Classic, remastered shaders not active, or post effects off) gives its AI the classic fog while a dedicated server keeps the default (c18ce49, 9a487c0). The fog is drawn in vehicle interiors and under night vision (4593b84); the world seen through cockpit glass is fogged again (c1e483e, problem hit: glass wrote depth and the interior's own near/far projection was used for the fog). Renderer fixes: post programs deleted on reset incl. the GTAO pair (2864582), post target completeness checked and retried (d7578b4, f1d2589, 4562859), fog apply night-glow unit (b680f98), Schlick clamp (52cf8c7), shadow pass alpha-caster sampler (4533549), cross-platform frame-light test (4599df6). The shadow depth pass pins its own polygon offset (5343929). Comments and test names lost plan-step and process phrasing; the docs moved to arma_CWR/docs/graphics-remaster/ with a short README (b5a3ee2, 60b75d4, 0dee3ab); trailer and voice tooling moved to the video-production branch (fc927e4); capture rig defaults are tree-relative (6a9599e). Derived branches in preparation: graphics-remaster-vanilla (Bohemia 3.05) and graphics-remaster-ce (CWR-CE main). Cost stays open as issue #216."
+
+  - id: remastered-lighting-cost
+    title: "Remastered lighting: long views at 60 fps on an RTX 3060 class card"
+    phase: phase-2
+    status: planned
+    priority: 1
+    depends_on: [remastered-lighting]
+    gh_issues: [216]
+    summary: >
+      The dawn valley and the Eden long view run at 27 to 34 ms per frame on an
+      RTX 4060 Ti (target 60 fps at 1080p on an RTX 3060 class card). Most of the
+      extra cost is CPU time per draw call in the new draw path and shows with
+      every feature off. Also: about 30 post shader programs compile on the
+      first world frame, uniforms are looked up by name every frame, the AI fog
+      sight query marches 8 samples per visibility test, and combat lights have
+      no cap.
+    log:
+      - "2026-10-27: filed as issue #216 (URGENT) from the 2026-10-27 review of graphics-remaster."
