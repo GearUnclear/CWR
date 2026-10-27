@@ -65,7 +65,13 @@ using namespace Poseidon::gl33lighting;
 namespace
 {
 
-constexpr int kFogMaxLights = 16;         // lights in the near field's uniform arrays
+// The frame size at which the fog's targets came back incomplete (0 x 0:
+// none). The fog stays off at that size and is tried again at another size
+// or after a reset; programs that fail to build keep it off until a reset.
+int s_fogFailedW = 0;
+int s_fogFailedH = 0;
+
+constexpr int kFogMaxLights = 16;        // lights in the near field's uniform arrays
 constexpr float kFogLightRange = 300.0f;  // lights farther than this from the eye add nothing
 constexpr float kFogHistoryShare = 0.12f; // this frame's share in the blend with the reprojected history
 constexpr float kFogHistoryCut = 60.0f;   // a camera jump longer than this (m) starts the history again
@@ -308,6 +314,15 @@ void EngineGL33::UpdateFogMedium()
         // frame showed, on a world with its depth (the gate; a gunner's optic
         // overlay keeps it, its mask left alone by the apply); anywhere else
         // the forward fog keeps its classic edge.
+        // Targets that failed at another frame size are tried again
+        // (programsTried false: EnsureFogResources' target failure).
+        if (_fog.unavailable && !_fog.programsTried)
+        {
+            int w = 0, h = 0;
+            RenderTargetSize(w, h);
+            if (w != s_fogFailedW || h != s_fogFailedH)
+                _fog.unavailable = false;
+        }
         const bool post =
             _lighting.postEffects && SSAAActive() && !_post.unavailable && !_fog.unavailable && !_prevWorldDepthCleared;
         const bool on = post && _featureGates[rm::Feature::VolFog].on;
@@ -395,6 +410,7 @@ void EngineGL33::DestroyFogResources()
     _fog.programsTried = false;
     _fog.unavailable = false;
     _fog.historyValid = false;
+    s_fogFailedW = s_fogFailedH = 0;
 }
 
 bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
@@ -507,10 +523,14 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
     }
     if (!complete)
     {
-        LOG_WARN(Graphics, "GL33 fog: targets incomplete; the classic distance fog stays");
+        LOG_WARN(Graphics, "GL33 fog: targets {}x{} incomplete; the classic distance fog stays until the size changes",
+                 w, h);
         DestroyFogResources();
-        _fog.programsTried = true;
+        // programsTried stays false: UpdateFogMedium tries again at another
+        // frame size, and the programs are built again then.
         _fog.unavailable = true;
+        s_fogFailedW = w;
+        s_fogFailedH = h;
         return false;
     }
     return true;
