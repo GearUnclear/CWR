@@ -643,6 +643,6 @@ TEST_CASE("Frame lights: the light list switch has landed", "[Graphics][remaster
 {
     const auto& info = Poseidon::remaster::GetFeatureInfo(Poseidon::remaster::Feature::LightTiles);
     CHECK(info.landed);
-    CHECK(std::string(info.step) == "A6");
+    CHECK(std::string(info.step) == "light list");
     CHECK(std::string(info.key) == "lightTiles");
 }

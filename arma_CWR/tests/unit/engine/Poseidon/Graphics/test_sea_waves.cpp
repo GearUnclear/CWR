@@ -196,7 +196,7 @@ TEST_CASE("Sea switch: landed, gated per sea fragment, with its sub-knobs under 
     const FeatureInfo& info = GetFeatureInfo(Feature::SeaWaves);
     CHECK(info.landed);
     CHECK(std::string_view(info.key) == "seaWaves");
-    CHECK(std::string_view(info.step) == "B5");
+    CHECK(std::string_view(info.step) == "sea");
     CHECK(std::string_view(info.gpuSection) == "ground");
     for (const char* key : {"seaRelief", "seaSky", "seaSheen"})
     {

@@ -15,25 +15,25 @@ using gpu::Section;
 
 // One row per PostStage, in list order (checked below).
 constexpr PostStageInfo kStages[] = {
-    {PostStage::Resolve, "resolve", "A3", true, false, Mark::ResolveEnd, Section::Resolve},
-    {PostStage::LinearDepth, "lindepth", "A3", true, false, Mark::LinearDepthEnd, Section::LinearDepth},
-    {PostStage::TagReadout, "tags", "B6", true, false, Mark::TagReadoutEnd, Section::TagReadout},
+    {PostStage::Resolve, "resolve", "post pass", true, false, Mark::ResolveEnd, Section::Resolve},
+    {PostStage::LinearDepth, "lindepth", "post pass", true, false, Mark::LinearDepthEnd, Section::LinearDepth},
+    {PostStage::TagReadout, "tags", "reflections", true, false, Mark::TagReadoutEnd, Section::TagReadout},
     // AO reads the full-resolution depth.
-    {PostStage::Ao, "ao", "A3", true, false, Mark::AoEnd, Section::Ao},
+    {PostStage::Ao, "ao", "post pass", true, false, Mark::AoEnd, Section::Ao},
     // The reflections march the half-resolution linear depth.
-    {PostStage::Ssr, "ssr", "B6", true, true, Mark::SsrEnd, Section::Ssr},
+    {PostStage::Ssr, "ssr", "reflections", true, true, Mark::SsrEnd, Section::Ssr},
     // The air pass marches at half resolution, on the linear depth; the
     // volumetric fog (EngineGL33_PostFog.cpp) runs on the same stage in its
     // place.
-    {PostStage::Air, "air", "B8", true, true, Mark::AirEnd, Section::Air},
-    {PostStage::Bloom, "bloom", "A3", true, false, Mark::BloomEnd, Section::Bloom},
-    {PostStage::Shafts, "shafts", "A3", true, false, Mark::ShaftsEnd, Section::Shafts},
-    {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
-    {PostStage::Composite, "composite", "A3", true, false, Mark::CompositeEnd, Section::Composite},
-    {PostStage::Temporal, "taa", "A5", true, false, Mark::TemporalEnd, Section::Temporal},
+    {PostStage::Air, "air", "air", true, true, Mark::AirEnd, Section::Air},
+    {PostStage::Bloom, "bloom", "post pass", true, false, Mark::BloomEnd, Section::Bloom},
+    {PostStage::Shafts, "shafts", "post pass", true, false, Mark::ShaftsEnd, Section::Shafts},
+    {PostStage::CombatScatter, "scatter", "combat light", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
+    {PostStage::Composite, "composite", "post pass", true, false, Mark::CompositeEnd, Section::Composite},
+    {PostStage::Temporal, "taa", "temporal AA", true, false, Mark::TemporalEnd, Section::Temporal},
     // TAA's sharpen, or with TAA off the luma sharpen.
-    {PostStage::Sharpen, "sharpen", "A5", true, false, Mark::SharpenEnd, Section::Sharpen},
-    {PostStage::DebugView, "debugview", "A3", true, true, Mark::DebugViewEnd, Section::DebugView},
+    {PostStage::Sharpen, "sharpen", "temporal AA", true, false, Mark::SharpenEnd, Section::Sharpen},
+    {PostStage::DebugView, "debugview", "post pass", true, true, Mark::DebugViewEnd, Section::DebugView},
 };
 static_assert(sizeof(kStages) / sizeof(kStages[0]) == kPostStageCount, "one PostStageInfo per PostStage");
 static_assert(kPostStageCount == gpu::kPostStageMarks, "one GPU mark per post stage");

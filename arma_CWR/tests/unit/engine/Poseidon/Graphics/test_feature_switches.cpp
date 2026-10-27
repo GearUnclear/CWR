@@ -300,7 +300,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
     // its GPU section (the Temporal post stage's).
     const FeatureInfo& taa = GetFeatureInfo(Feature::Taa);
     CHECK(taa.landed);
-    CHECK(std::string_view(taa.step) == "A5");
+    CHECK(std::string_view(taa.step) == "temporal AA");
     CHECK(std::string_view(taa.gpuSection) == "taa");
 
     // The sub-knobs: sharpen 0.5, texture LOD bias -0.5, alpha 0.1, each
@@ -368,8 +368,8 @@ TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed
     const FeatureInfo& sharpen = GetFeatureInfo(Feature::Sharpen);
     CHECK(detail.landed);
     CHECK(sharpen.landed);
-    CHECK(std::string_view(detail.step) == "B11");
-    CHECK(std::string_view(sharpen.step) == "B11");
+    CHECK(std::string_view(detail.step) == "detail and sharpen");
+    CHECK(std::string_view(sharpen.step) == "detail and sharpen");
     CHECK(std::string_view(detail.gpuSection) == "ground");
     CHECK(std::string_view(sharpen.gpuSection) == "sharpen");
 
@@ -438,7 +438,7 @@ TEST_CASE("Feature switches: the sun shadows have landed, with the sun size and 
         const FeatureInfo& info = GetFeatureInfo(f);
         INFO(info.key);
         CHECK(info.landed);
-        CHECK(std::string_view(info.step) == "B1");
+        CHECK(std::string_view(info.step) == "sun shadows");
         CHECK(std::string_view(info.track) == "shadows");
     }
 }
@@ -454,7 +454,7 @@ TEST_CASE("Feature switches: the air pass has landed, with the beams' contrast",
         const FeatureInfo& info = GetFeatureInfo(f);
         INFO(info.key);
         CHECK(info.landed);
-        CHECK(std::string_view(info.step) == "B8");
+        CHECK(std::string_view(info.step) == "air");
         CHECK(std::string_view(info.gpuSection) == "air");
     }
     const LightingKey* k = FindLightingKey("volGain");
@@ -843,24 +843,24 @@ TEST_CASE("Feature switches: every feature switch has landed: the frame-cost swi
                               combat || sea || ssr || wet || air || canopy || clouds || surface || look || fog));
         if (info.landed)
         {
-            CHECK(std::string_view(info.step) == (perf         ? "A4"
-                                                  : taa        ? "A5"
-                                                  : lightList  ? "A6"
-                                                  : atmosphere ? "A7"
-                                                  : shadows    ? "B1"
-                                                  : shade      ? "B2"
-                                                  : night      ? "B3"
-                                                  : combat     ? "B4"
-                                                  : sea        ? "B5"
-                                                  : ssr        ? "B6"
-                                                  : wet        ? "B7"
-                                                  : air        ? "B8"
-                                                  : canopy     ? "B9"
-                                                  : clouds     ? "B10"
-                                                  : surface    ? "look"
-                                                  : look       ? "L1"
-                                                  : fog        ? "look-fog"
-                                                               : "B11"));
+            CHECK(std::string_view(info.step) == (perf         ? "frame cost"
+                                                  : taa        ? "temporal AA"
+                                                  : lightList  ? "light list"
+                                                  : atmosphere ? "sky table"
+                                                  : shadows    ? "sun shadows"
+                                                  : shade      ? "low sun"
+                                                  : night      ? "night"
+                                                  : combat     ? "combat light"
+                                                  : sea        ? "sea"
+                                                  : ssr        ? "reflections"
+                                                  : wet        ? "wet weather"
+                                                  : air        ? "air"
+                                                  : canopy     ? "canopy shadows"
+                                                  : clouds     ? "lit clouds"
+                                                  : surface    ? "surfaces"
+                                                  : look       ? "photoreal camera"
+                                                  : fog        ? "volumetric fog"
+                                                               : "detail and sharpen"));
             CHECK(sections.count(info.gpuSection) == 1);
         }
     }

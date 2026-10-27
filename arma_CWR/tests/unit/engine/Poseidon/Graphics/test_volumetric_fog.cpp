@@ -845,7 +845,7 @@ TEST_CASE("Volumetric fog: the Air stage applies it with the world depth and rep
     CHECK(plan.Runs(PostStage::Shafts));
 }
 
-TEST_CASE("Volumetric fog: it supersedes B8's air pass, whose gates it turns off while it runs",
+TEST_CASE("Volumetric fog: it supersedes the air pass, whose gates it turns off while it runs",
           "[remaster][fog][FeatureGates]")
 {
     GateInputs in;
@@ -1224,7 +1224,7 @@ TEST_CASE("Volumetric fog: the injection samples fixed points of each cell, so i
     CHECK(fixedPan.travel < 0.05);
 }
 
-TEST_CASE("Volumetric fog: round 3 medium rules (clear near air, dust, hilltops, night fog, stars)", "[remaster][fog]")
+TEST_CASE("Volumetric fog: medium rules for clear near air, dust, hilltops, night fog and stars", "[remaster][fog]")
 {
     LightingTuning t;
     FogInputs clear;

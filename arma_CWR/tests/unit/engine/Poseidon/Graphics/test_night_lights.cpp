@@ -228,7 +228,7 @@ TEST_CASE("Night: the key light is the sun bit for bit unless the moon key is on
     }
 }
 
-TEST_CASE("Night: the moon key moves F9's moon into the key, nothing more", "[remaster][NightLights]")
+TEST_CASE("Night: the moon key moves the moon's light into the key, nothing more", "[remaster][NightLights]")
 {
     const LightingTuning t{};
     const LightRigInputs in = RigNight(-30.0f, 36.0f, 1.0f);
@@ -818,7 +818,7 @@ TEST_CASE("Night: the three switches have landed, with the lamp and headlight st
         const FeatureInfo& info = GetFeatureInfo(f);
         INFO(info.key);
         CHECK(info.landed);
-        CHECK(std::string_view(info.step) == "B3");
+        CHECK(std::string_view(info.step) == "night");
         CHECK(std::string_view(info.track) == "night");
         CHECK(std::string_view(info.area) == "Night and combat");
     }

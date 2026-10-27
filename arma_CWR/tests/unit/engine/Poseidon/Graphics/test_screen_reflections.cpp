@@ -661,7 +661,7 @@ TEST_CASE("Reflection switch: landed with its two sub-knobs and its post stages"
 {
     const FeatureInfo& info = GetFeatureInfo(Feature::Ssr);
     CHECK(info.landed);
-    CHECK(std::string_view(info.step) == "B6");
+    CHECK(std::string_view(info.step) == "reflections");
     CHECK(std::string_view(info.gpuSection) == "ssr");
     struct Sub
     {

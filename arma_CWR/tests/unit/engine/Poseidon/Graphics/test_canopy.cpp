@@ -495,7 +495,7 @@ TEST_CASE("Canopy: the switch has landed with its own GPU section", "[remaster][
 {
     const FeatureInfo& info = GetFeatureInfo(Feature::CanopyShadows);
     CHECK(info.landed);
-    CHECK(std::string(info.step) == "B9");
+    CHECK(std::string(info.step) == "canopy shadows");
     CHECK(std::string(info.gpuSection) == "canopy");
     CHECK(std::string(Poseidon::gpu::SectionName(Poseidon::gpu::Section::Canopy)) == "canopy");
     // The map is world-space: no frame-relative pass resolution.

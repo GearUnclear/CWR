@@ -1047,7 +1047,7 @@ TEST_CASE("Combat lights: the switches have landed with their sub-knobs and thei
     const FeatureInfo& shadows = GetFeatureInfo(Feature::CombatShadows);
     CHECK(lights.landed);
     CHECK(shadows.landed);
-    CHECK(std::string(lights.step) == "B4");
+    CHECK(std::string(lights.step) == "combat light");
     CHECK(std::string(lights.gpuSection) == "world");
     CHECK(std::string(shadows.gpuSection) == "combatmask");
     CHECK(std::string(Poseidon::gpu::SectionName(Poseidon::gpu::Section::CombatMask)) == "combatmask");

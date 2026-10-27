@@ -383,7 +383,7 @@ TEST_CASE("Wet weather switches: landed with the wetness and puddles sub-knobs",
         const FeatureInfo& info = GetFeatureInfo(f);
         INFO(info.key);
         CHECK(info.landed);
-        CHECK(std::string_view(info.step) == "B7");
+        CHECK(std::string_view(info.step) == "wet weather");
         CHECK(std::string_view(info.gpuSection) == "world");
     }
     struct Sub
