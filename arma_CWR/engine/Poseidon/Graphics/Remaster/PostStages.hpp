@@ -188,4 +188,20 @@ struct ForwardFogRange
 };
 ForwardFogRange ScaleForwardFogRange(float start, float invRange, float scale);
 
+// A vehicle interior is drawn over the world the fog saved; the fog's apply
+// leaves every pixel the interior wrote depth to as drawn. Its glass writes
+// depth too (the cockpit models rely on it to hide what lies behind the
+// canopy), so the world seen through a canopy or a windscreen would stay
+// unfogged while AI sight is cut by the air out there. A blended draw of glass
+// (by its surface class) sets the stencil bit kInteriorGlassStencil where it
+// is drawn; every other interior draw sets kInteriorSolidStencil and clears
+// the glass bit. After the resolve the pixels with the glass bit and no solid
+// bit (the world seen through glass, nothing of the vehicle behind it) get
+// the far depth, and the apply fogs them by the world's depth. The interior
+// cleared the stencil with its depth, the projected shadows keep the low
+// bits, and no interior frame reads the reflections' tags.
+constexpr unsigned kInteriorGlassStencil = 0x80u;
+constexpr unsigned kInteriorSolidStencil = 0x40u;
+bool InteriorGlassDraw(bool blended, bool glassClass);
+
 } // namespace Poseidon::remaster

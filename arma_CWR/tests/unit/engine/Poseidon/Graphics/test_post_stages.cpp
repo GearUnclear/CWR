@@ -222,6 +222,45 @@ TEST_CASE("Post stages: interior and optics frames hold their stages off", "[Gra
     CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
 }
 
+TEST_CASE("Post stages: the world seen through a vehicle interior's glass is fogged",
+          "[Graphics][remaster][PostStages][fog]")
+{
+    // Only a blended draw of glass marks the stencil as glass; an opaque
+    // glass texture hides the world, and a blended draw of anything else is
+    // a solid part of the cockpit.
+    CHECK(InteriorGlassDraw(true, true));
+    CHECK_FALSE(InteriorGlassDraw(false, true));
+    CHECK_FALSE(InteriorGlassDraw(true, false));
+    CHECK_FALSE(InteriorGlassDraw(false, false));
+    // The two marks are distinct bits above the projected shadows' count.
+    CHECK(kInteriorGlassStencil != kInteriorSolidStencil);
+    CHECK((kInteriorGlassStencil & kInteriorSolidStencil) == 0u);
+    CHECK((kInteriorGlassStencil & ssrtag::kShadowBits) == 0u);
+    CHECK((kInteriorSolidStencil & ssrtag::kShadowBits) == 0u);
+    CHECK((kInteriorGlassStencil | kInteriorSolidStencil) <= 0xFFu);
+
+    // The backend: every interior draw sets the marks while the interior is
+    // open, the resolve turns glass with nothing solid under it to the far
+    // depth (so the apply fogs it by the world's depth), and the fog's stages
+    // read the world's depth with the world's projection, not the interior's
+    // own near plane.
+    const std::string queue = ReadTextFile(Gl33Dir() / "EngineGL33_Queue.cpp");
+    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+    const std::string views = ReadTextFile(Gl33Dir() / "EngineGL33_PostFogViews.cpp");
+    const std::string mesh = ReadTextFile(Gl33Dir() / "EngineGL33_Mesh.cpp");
+    REQUIRE_FALSE(queue.empty());
+    REQUIRE_FALSE(post.empty());
+    REQUIRE_FALSE(views.empty());
+    REQUIRE_FALSE(mesh.empty());
+    CHECK(CountOf(queue, "_ssrStencil = InteriorGlassStencil(tex, d);") == 1);
+    CHECK(CountOf(post, "FarInteriorGlass(f);") == 1);
+    CHECK(CountOf(post, "PostLinearDepth(PostFogFrame(f));") == 1);
+    CHECK(CountOf(post, "PostFog(PostFogFrame(f));") == 1);
+    CHECK(CountOf(views, "f = PostFogFrame(f);") == 1);
+    CHECK(CountOf(views, "rm::kInteriorGlassStencil | rm::kInteriorSolidStencil") >= 2);
+    CHECK(CountOf(mesh, "_fog.worldProj = _frameState.projection;") == 1);
+}
+
 TEST_CASE("Post stages: the fog runs in a vehicle interior on the world depth saved before it",
           "[Graphics][remaster][PostStages][fog]")
 {

@@ -1308,6 +1308,10 @@ class EngineGL33 : public Engine
         float exposure = 1.0f;
     };
     void PostFrameGeometry(PostFrame& f) const;
+    // The frame as the fog's stages see it: in a vehicle interior, the
+    // projection the world was drawn with (the interior draws with its own
+    // near plane), to go with the world's saved depth (PostFogDepthTex).
+    PostFrame PostFogFrame(const PostFrame& f) const;
     void PostFrameSun(PostFrame& f) const;
     void RunPostStage(Poseidon::remaster::PostStage stage, PostFrame& f);
     // The fullscreen stages' shared state, set after the resolve; and its
@@ -1421,6 +1425,18 @@ class EngineGL33 : public Engine
     // depth and colour so far, saved for the fog (once a frame).
     void SaveWorldBeforeInterior();
     void DestroyInteriorSave();
+    // The world was saved this frame and the vehicle interior over it is
+    // being drawn.
+    bool FogInteriorOpen() const;
+    // The stencil of one draw of that interior: its glass marks the pixels it
+    // covers (rm::kInteriorGlassStencil), every other draw marks its solid
+    // parts (rm::kInteriorSolidStencil) and clears the glass mark.
+    Poseidon::remaster::SsrStencil InteriorGlassStencil(TextureGL33* tex,
+                                                        const Poseidon::render::RenderPassDescriptor& d);
+    // After the resolve of a frame with a vehicle interior: the pixels where
+    // its glass is the nearest surface get the far depth, so the fog's apply
+    // fogs the world seen through the glass and keeps the cockpit as drawn.
+    void FarInteriorGlass(const PostFrame& f);
     // The depth the fog stages read: the world's (saved before a vehicle
     // interior cleared it), else the resolved frame's.
     unsigned int PostFogDepthTex() const;
@@ -1494,6 +1510,12 @@ class EngineGL33 : public Engine
         int intW = 0, intH = 0;
         std::uint32_t intFrame = 0xffffffffu;
         bool intFailed = false;
+        // The world's projection at the save, as PostFrame::projInfo: the one
+        // before the interior's own near plane (UpdateProjection keeps it in
+        // worldProj, of the frame worldProjFrame).
+        float intProjInfo[4] = {};
+        GfxMatrix worldProj;
+        std::uint32_t worldProjFrame = 0xffffffffu;
         // The last applied frame (PostSceneTex) and its camera and volume, for
         // the next frame's reprojection.
         std::uint32_t appliedFrame = 0xffffffffu;

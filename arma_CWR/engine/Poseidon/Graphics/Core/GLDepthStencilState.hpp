@@ -102,6 +102,16 @@ inline void Shadow(bool hasStencil, const StencilTag& tag = {})
     }
 }
 
+// Depth test always passes and the depth is written: a fullscreen pass that
+// sets the depth itself (the far depth under a vehicle interior's glass,
+// EngineGL33::FarInteriorGlass). The stencil state is the caller's.
+inline void AlwaysWrite()
+{
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_ALWAYS);
+    glDepthMask(GL_TRUE);
+}
+
 // Stencil test only, nothing written: a fullscreen pass that draws where
 // (stencil & mask) == ref (the reflections' tag readout). The depth state is
 // the caller's.

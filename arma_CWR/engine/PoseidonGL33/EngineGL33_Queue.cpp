@@ -262,6 +262,11 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     // tags). The land and the sea's unrouted faces share the detail family:
     // the land carries the detail texture.
     _ssrStencil = Poseidon::remaster::SsrStencilForDraw(d, IsLandLayer(spec), SsrTagging());
+    // A vehicle interior over the world the fog saved: its glass and solid
+    // parts mark the stencil instead (no interior frame reads the
+    // reflections' tags).
+    if (FogInteriorOpen())
+        _ssrStencil = InteriorGlassStencil(tex, d);
     const PipelineVertexInput previousVertexInput = _pipelineVertexInput;
     _pipelineVertexInput = vertexInput;
     ApplyPipeline(d);

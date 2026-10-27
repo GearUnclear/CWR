@@ -23,12 +23,18 @@
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/EngineGL33_PostPass.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
+#include <PoseidonGL33/TextureGL33.hpp>
+#include <Poseidon/Graphics/Core/GLBlendState.hpp>
+#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
+#include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <algorithm>
+#include <iterator>
 #include <Poseidon/World/Terrain/TerrainLighting.hpp>
 
 namespace rm = Poseidon::remaster;
@@ -75,6 +81,68 @@ bool EngineGL33::NightVisionFogOpen() const
 {
     return _fog.nvg && _nightVision && _fog.mediumFrame == GetFrameCounter() && !_worldSceneEnded &&
            !_portraitTargetSize;
+}
+
+bool EngineGL33::FogInteriorOpen() const
+{
+    return _fog.intFrame == GetFrameCounter() && (_worldPassOpen || NightVisionFogOpen());
+}
+
+rm::SsrStencil EngineGL33::InteriorGlassStencil(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d)
+{
+    namespace pr = Poseidon::render;
+    rm::SsrStencil st;
+    // The projected shadows count in the low bits, under the marks.
+    if (d.depth == pr::DepthMode::Shadow)
+    {
+        st.shadowCompareMask = rm::ssrtag::kShadowBits;
+        return st;
+    }
+    const bool blended = d.blend == pr::BlendMode::AlphaBlend || d.blend == pr::BlendMode::Additive;
+    bool glass = false;
+    if (tex && blended)
+    {
+        EnsureSurfaceTable();
+        const rm::SurfaceClass cls = tex->SurfaceClassFor(_surfaceTable, _surfaceTableGen, d.objectKind,
+                                                          d.surface == pr::SurfaceMode::OnSurface);
+        glass = rm::InteriorGlassDraw(blended, cls == rm::SurfaceClass::Glass || cls == rm::SurfaceClass::Lens);
+    }
+    // Glass sets its mark and leaves the solid one; anything else sets the
+    // solid mark and clears the glass one.
+    st.ref = static_cast<std::uint8_t>(glass ? rm::kInteriorGlassStencil : rm::kInteriorSolidStencil);
+    st.writeMask = static_cast<std::uint8_t>(glass ? rm::kInteriorGlassStencil
+                                                   : rm::kInteriorGlassStencil | rm::kInteriorSolidStencil);
+    return st;
+}
+
+void EngineGL33::FarInteriorGlass(const PostFrame& f)
+{
+    if (!_hasStencilBuffer || _fog.intFrame != GetFrameCounter() || !_post.depthFbo)
+        return;
+    // A fullscreen triangle at the far depth (the depth range 1..1), written
+    // where the stencil holds the glass mark, into the resolved depth only.
+    glBindFramebuffer(GL_FRAMEBUFFER, _post.depthFbo);
+    glViewport(0, 0, f.w, f.h);
+    glUseProgram(_post.progLinearDepth); // its colour is not written
+    glBindVertexArray(_post.vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, _post.blackTex);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_CULL_FACE);
+    Poseidon::render::blend::Opaque();
+    Poseidon::render::pipeline::SetColorMask(false);
+    Poseidon::render::depthstencil::AlwaysWrite();
+    glDepthRange(1.0, 1.0);
+    // Glass and no solid part of the interior under it: the world shows there.
+    Poseidon::render::depthstencil::StencilTestEqual(static_cast<GLint>(rm::kInteriorGlassStencil),
+                                                     rm::kInteriorGlassStencil | rm::kInteriorSolidStencil);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDepthRange(0.0, 1.0);
+    Poseidon::render::depthstencil::StencilOffFullMask();
+    Poseidon::render::depthstencil::Disabled(/*hasStencil*/ false);
+    Poseidon::render::pipeline::SetColorMask(true);
+    GL33Bind::Invalidate();
+    InvalidatePipelineCache();
 }
 
 unsigned int EngineGL33::PostFogDepthTex() const
@@ -160,8 +228,23 @@ void EngineGL33::SaveWorldBeforeInterior()
     // buffers are its own).
     glBindFramebuffer(GL_FRAMEBUFFER, _ssaaFbo);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
+    // The world's projection: the interior has set its own near plane
+    // (Transport::Draw, UpdateProjection) before it clears the depth.
+    const GfxMatrix& proj = _fog.worldProjFrame == frame ? _fog.worldProj : _frameState.projection;
+    _fog.intProjInfo[0] = proj._33;
+    _fog.intProjInfo[1] = proj._43;
+    _fog.intProjInfo[2] = 1.0f / proj._11;
+    _fog.intProjInfo[3] = 1.0f / proj._22;
     _fog.intFrame = frame;
     _fog.intFailed = false;
+}
+
+EngineGL33::PostFrame EngineGL33::PostFogFrame(const PostFrame& f) const
+{
+    PostFrame g = f;
+    if (PostFogDepthTex() != _post.depthTex)
+        std::copy(std::begin(_fog.intProjInfo), std::end(_fog.intProjInfo), std::begin(g.projInfo));
+    return g;
 }
 
 void EngineGL33::UpdateFogMediumNightVision()
@@ -214,6 +297,7 @@ void EngineGL33::PostFogNightVision()
     FlushAndFreeAllQueues(_queueNo);
     PostFrame f;
     PostFrameGeometry(f);
+    f = PostFogFrame(f);
     RenderTargetSize(f.w, f.h);
     if (f.w <= 0 || f.h <= 0 || !EnsurePostResources(f.w, f.h))
         return;

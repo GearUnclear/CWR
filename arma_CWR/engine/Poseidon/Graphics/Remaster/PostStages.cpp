@@ -173,4 +173,9 @@ ForwardFogRange ScaleForwardFogRange(float start, float invRange, float scale)
     return r;
 }
 
+bool InteriorGlassDraw(bool blended, bool glassClass)
+{
+    return blended && glassClass;
+}
+
 } // namespace Poseidon::remaster

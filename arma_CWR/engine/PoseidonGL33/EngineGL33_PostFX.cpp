@@ -659,7 +659,7 @@ void EngineGL33::RunPostStage(rm::PostStage stage, PostFrame& f)
             PostResolve(f);
             break;
         case rm::PostStage::LinearDepth:
-            PostLinearDepth(f);
+            PostLinearDepth(PostFogFrame(f)); // the fog's depth, PostFogDepthTex
             break;
         case rm::PostStage::TagReadout:
             PostTagReadout(f);
@@ -672,7 +672,7 @@ void EngineGL33::RunPostStage(rm::PostStage stage, PostFrame& f)
             break;
         case rm::PostStage::Air:
             if (f.plan.fog)
-                PostFog(f); // the volumetric fog in place of the air pass, EngineGL33_PostFog.cpp
+                PostFog(PostFogFrame(f)); // the volumetric fog in place of the air pass, EngineGL33_PostFog.cpp
             else
                 PostAir(f);
             break;
@@ -718,6 +718,8 @@ void EngineGL33::PostResolve(const PostFrame& f)
         glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
     }
+    // A vehicle interior's glass: the world seen through it is fogged.
+    FarInteriorGlass(f);
 }
 
 void EngineGL33::BeginPostFullscreen()

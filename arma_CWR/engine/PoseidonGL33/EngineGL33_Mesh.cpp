@@ -33,6 +33,13 @@ void EngineGL33::UpdateProjection()
         // the flush appends to — not a pending-draw count — so it is legitimately
         // non-empty mid-pass.)
         FlushAndFreeAllQueues(_queueNo, true);
+        // The world's projection, before a vehicle interior sets its own near
+        // plane: the fog reads the world's depth with it (SaveWorldBeforeInterior).
+        if ((_worldPassOpen || NightVisionFogOpen()) && _fog.intFrame != GetFrameCounter())
+        {
+            _fog.worldProj = _frameState.projection;
+            _fog.worldProjFrame = GetFrameCounter();
+        }
         Camera* camera = GScene->GetCamera();
         int projBias = _canZBias ? 0 : _bias;
         ConvertProjectionMatrix(_frameState.projection, camera->ProjectionNormal(), projBias);
