@@ -74,7 +74,7 @@ gmJournalObjective ["firstUnlock", "Capture enough of one arms pattern to make i
 ; --- GM_fnLootItem( [classname, amount] ) -> newCount -------------------------
 ;   Tally through GM_fnBumpGear; toast the player once per fresh unlock and
 ;   record it (diary line + Unlocked-gear status line + objective).
-GM_fnLootItem = {GM_tmpLC = _this select 0; GM_tmpLN = [GM_tmpLC, _this select 1] call GM_fnBumpGear; [] call GM_fnLootStatus; if ((GM_tmpLC in GM_GEAR_UNLOCKED) and (not (GM_tmpLC in GM_LOOT_ANNOUNCED))) then {GM_LOOT_ANNOUNCED = GM_LOOT_ANNOUNCED + [GM_tmpLC]; hint format ["%1 is now standard issue for the cell.", gmDisplayName GM_tmpLC]; gmJournalNote [format ["%1 captured in quantity: standard issue for the cell from now on.", gmDisplayName GM_tmpLC], "", "good"]; gmJournalObjective ["firstUnlock", "", "DONE"]; [] call GM_fnLootStatus}; GM_tmpLN}
+GM_fnLootItem = {GM_tmpLC = _this select 0; GM_tmpLN = [GM_tmpLC, _this select 1] call GM_fnBumpGear; [] call GM_fnLootStatus; if ((GM_tmpLC in GM_GEAR_UNLOCKED) and (not (GM_tmpLC in GM_LOOT_ANNOUNCED))) then {GM_LOOT_ANNOUNCED = GM_LOOT_ANNOUNCED + [GM_tmpLC]; hint format ["%1 is now standard issue for the cell.", gmDisplayName GM_tmpLC]; gmJournalNote [format ["Took enough %1 to make it standard issue for the cell.", gmDisplayName GM_tmpLC], "", "good"]; gmJournalObjective ["firstUnlock", "", "DONE"]; [] call GM_fnLootStatus}; GM_tmpLN}
 
 ; --- GM_fnLootKilledEH : the "killed" event-handler body -----------------------
 ;   _this = [deadUnit, killer]. Tally weapons AND magazines, strip the corpse.

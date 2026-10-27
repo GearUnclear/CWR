@@ -874,15 +874,15 @@ TEST_CASE("Journal compose - the history hub and its three beats appear only onc
         // read "The compact at Le Port / Le Port." - a description that adds
         // nothing.  The place still rides the beat PAGE as its subtitle, which
         // is checked below.
-        CHECK(Has(hub, "The ancient grievance."));
-        CHECK(Has(hub, "The broken settlement."));
-        CHECK(Has(hub, "The stand remembered."));
+        CHECK(Has(hub, "The old grudge."));
+        CHECK(Has(hub, "The deal that fell apart."));
+        CHECK(Has(hub, "What they still remember."));
         CHECK_FALSE(Has(hub, "Le Port."));
         CheckDescriptionsAddSomething(Page(doc, "GM_HISTORY"));
         const std::vector<std::pair<std::string, std::string>> hubRows = LinkRows(Page(doc, "GM_HISTORY"));
         REQUIRE(hubRows.size() == 3);
         CHECK(hubRows[1].first == "The compact at Le Port");
-        CHECK(hubRows[1].second == "The broken settlement.");
+        CHECK(hubRows[1].second == "The deal that fell apart.");
 
         const std::string beat = Joined(Page(doc, "GM_HIST_EV2"));
         CHECK(Has(beat, "The stand at the ridge"));

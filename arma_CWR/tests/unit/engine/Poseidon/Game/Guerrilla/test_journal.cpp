@@ -735,8 +735,8 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as a dossier
     const std::string res = html.Text("GM_FACTION");
     CHECK(res.find("War level 2 of 10.") != std::string::npos);
     CHECK(res.find("Island held: 25%. Level 3 at 40%; the ladder runs 20, 40, 55, 70, 85.") != std::string::npos);
-    CHECK(res.find("The occupier steps up at WL 3, WL 5: better troops, heavier vehicles, sharper eyes.") !=
-          std::string::npos);
+    CHECK(res.find("The occupier steps up at WL 3, WL 5. Each time they bring better troops and heavier vehicles, and "
+                   "see through our cover sooner.") != std::string::npos);
     CHECK(res.find("Towns: 1 risen, 1 rising, 1 neutral, 1 occupied, 1 unscouted.") != std::string::npos);
     CHECK(res.find("Bases: 1 held, 1 contested, 1 occupied.") != std::string::npos);
     CHECK(res.find("Occupier under arms: 21 known. Airfield 9, Chapoi 2, Seaport 6, La Trinite 4.") !=
