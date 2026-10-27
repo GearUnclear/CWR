@@ -27,6 +27,50 @@ cmake --build build/win-x64-clang-rwdi
 
 On GNU/Linux, use the matching `linux-x64-clang-rwdi` preset.
 
+## Remastered lighting
+
+This tree adds a remastered look to the GL 3.3 renderer. It lights every
+pixel in high dynamic range and runs the frame through a metered camera,
+using only the models and textures the game already ships:
+
+- **Light and shadow:** a physically based sun and sky, soft sun shadows,
+  long tree and building shadows at a low sun, hill shadows, drifting cloud
+  shadows and ambient occlusion.
+- **Sky and air:** volumetric fog (haze, dust, weather and night fog, valley
+  mist at dawn) with sun beams through it.
+- **Water and rain:** waves and a sun path on the sea, reflections on calm
+  water, wet ground in rain where only puddles reflect.
+- **Night and combat:** moonlight, lamps, headlights and fires lit per pixel;
+  muzzle flashes, flares, fires and explosions light their surroundings, and
+  explosions scale with their charge.
+- **Image quality:** temporal anti-aliasing over 4x MSAA.
+
+To play it with your own copy of the game, build as in Quick Start, then
+start the new executable with your game folder as its working directory
+(`-C`). Nothing in the game folder is changed:
+
+```sh
+dist/x64-win-rwdi/PoseidonGame.exe -C "<your Arma: Cold War Assault folder>"
+```
+
+On GNU/Linux, after a build with the `linux-x64-clang-rwdi` preset:
+
+```sh
+dist/x64-linux-rwdi/PoseidonGame -C "<your Arma: Cold War Assault folder>"
+```
+
+The new executable keeps its settings, profiles and saves in the same user
+folder as the official one, so the two share `graphics.cfg`. When the
+official game saves its settings it drops the Lighting choice, which then
+reads as Remastered again. To keep them apart, set the `POSEIDON_USER_DIR`
+environment variable to another folder before you start the new executable.
+
+**Options > Graphics > Lighting** switches between **Remastered** (the
+default) and **Classic**, the original lighting. The choice is stored in
+`graphics.cfg`. A few changes also apply with Classic: 4x MSAA by default,
+three-entry config colours read correctly (street lamps), and explosions
+that scale with their charge.
+
 ## Layout
 
 - [Apps](apps/README.md) - executable targets
