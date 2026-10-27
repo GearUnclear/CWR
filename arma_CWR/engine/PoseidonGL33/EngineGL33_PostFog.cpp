@@ -1,8 +1,8 @@
 // Remastered lighting: the volumetric fog and atmosphere (the Air post stage;
-// feature switch volFog, the look lane "fog", superseding B8's air pass on the
-// same stage). The medium and its weather and time rules, the slice layout and
-// the fog floor are pure (Graphics/Remaster/VolumetricFog.hpp), the shaders
-// GL-free (EngineGL33_PostFogShaders.cpp).
+// feature switch volFog, superseding the air pass on the same stage). The
+// medium and its weather and time rules, the slice layout and the fog floor are
+// pure (Graphics/Remaster/VolumetricFog.hpp), the shaders GL-free
+// (EngineGL33_PostFogShaders.cpp).
 //
 // The stage runs after the occlusion and before the bloom, on the resolved
 // frame, whenever the switch and its gate are on (it replaces the distance
@@ -20,7 +20,7 @@
 //   4. psFogApply: full resolution, C' = C T + S by each pixel's depth plus
 //      the near field, into fog.outTex, which the bloom and the composite read
 //      in place of the resolved frame (PostSceneTex). With the stage off they
-//      read the resolved frame (or B8's air) as before, so "off" is the frame
+//      read the resolved frame (or the air pass's frame) as before, so "off" is the frame
 //      before the feature.
 // The legacy shafts hold off while it runs (PlanPostStages). The forward fog
 // keeps only its view-distance edge (UpdateFogMedium sets litHaze.x;
@@ -37,7 +37,7 @@
 // ring and the night glow, kFogRingUnit and kFogGlowUnit), never to unit 1 (its
 // sampler object belongs to ApplyPipeline), and reads units 8 (the sky table,
 // rebound here), 9 and 15 as the world bound them. Unit 2 takes the cascade
-// array (or the depth stand-in, never texture 0: the F3 rule) under the
+// array (or the depth stand-in, never texture 0: a shader must never sample an incomplete texture) under the
 // comparison sampler for the injection and the near field and gets the post
 // pass's sampler 0 back after them; the 3D volumes, the floor and the glow are
 // unbound at the end of the stage.
@@ -87,8 +87,8 @@ constexpr float kFogBeamViewAngle = 95.0f;
 // The night air's light: the night sky's own share of the classic fog colour
 // (the dome's horizon at night is far darker than the colour the classic fog
 // faded to), linear.
-// (Look director round 2: 0.35; at 0.18 a foggy street at night faded its
-// houses into black, so the fog read as a darker night, not as fog.)
+// (At 0.18 a foggy street at night faded its houses into black, so the fog read
+// as a darker night, not as fog.)
 constexpr float kFogNightAirShare = 0.35f;
 // The horizon ring: azimuth bins, the share of a new measurement in a bin
 // (the rest is the last frame's), and the decay of what a bin knows per frame
@@ -100,8 +100,8 @@ constexpr float kFogRingShare = 0.3f;
 constexpr float kFogRingDecay = 0.995f;
 // The night glow's gain (the blurred light laid into the fog), and the share
 // of the sixteenth-resolution blur in it (the broad part of the glow).
-// (Look director round 2: 2.6 and 0.7, the lit town's light spread through
-// its fog, so the fog itself reads at night.)
+// (At 2.6 and 0.7 the lit town's light spread through its fog, so the fog
+// itself reads at night.)
 constexpr float kFogGlowGain = 2.6f;
 constexpr float kFogGlowWide = 0.7f;
 // The share of a street lamp's colour its light in the fog keeps.
@@ -373,7 +373,7 @@ void EngineGL33::UpdateFogMedium()
                      _fog.medium.skyThrough, _fogColor.R(), _fogColor.G(), _fogColor.B(), _fog.medium.zFar,
                      _fog.starKeep);
     }
-    // While the fog runs it sets the classic fog's edge (B8's haze, whose
+    // While the fog runs it sets the classic fog's edge (the air pass's haze, whose
     // gates are off then, set it before this call otherwise).
     if (_fog.mediumFrame == frame && _fog.on)
         SetLitSlot(LitConst::Haze, _fog.medium.fogEdgeScale - 1.0f, 0.0f, 0.0f, 0.0f);
@@ -491,9 +491,9 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
             DeleteTex(_fog.glowTex[i]);
         }
         GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
-        // Half floats (look director round 2): the camera's curve stretches
-        // the fogged frame, and an 8-bit store needed a dither the curve then
-        // drew as a fine diagonal hatch in the sky's gradients.
+        // Half floats: the camera's curve stretches the fogged frame, and an
+        // 8-bit store needed a dither the curve then drew as a fine diagonal
+        // hatch in the sky's gradients.
         _fog.outTex = Make2D(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h);
         _fog.veilTex = Make2D(GL_R8, GL_RED, GL_UNSIGNED_BYTE, w, h);
         _fog.glowW[0] = std::max(1, (w + 3) / 4);
@@ -521,7 +521,7 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
         if (!_fog.ringTex[0])
         {
             GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
-            // Two rows: the colour, and where it was measured (look fix "dawn").
+            // Two rows: the colour, and where it was measured.
             const std::vector<float> zero(static_cast<size_t>(kFogRingBins) * kFogRingRows * 4, 0.0f);
             for (int i = 0; i < 2; ++i)
             {
@@ -640,7 +640,7 @@ void EngineGL33::SnapshotWorldBeforeOverlay()
 
 unsigned int EngineGL33::PostSceneTex(const PostFrame& f) const
 {
-    // The frame with the fog or B8's air applied when the Air stage ran.
+    // The frame with the fog or the air pass applied when the Air stage ran.
     if (!f.plan.Runs(rm::PostStage::Air))
         return f.frameColor;
     if (!f.plan.fog)
@@ -688,8 +688,7 @@ void EngineGL33::PostFog(const PostFrame& f)
         return;
     const int vw = std::max(1, static_cast<int>(f.rect[2] * static_cast<float>(f.w) + 0.5f));
     const int vh = std::max(1, static_cast<int>(f.rect[3] * static_cast<float>(f.h) + 0.5f));
-    // At night under the camera (look director round 2: the night town views
-    // cost the most) the volume and the near field run at the coarse
+    // At night under the camera (night town views cost the most) the volume and the near field run at the coarse
     // quality: the night's air is dark and its halos come from the near
     // field's closed-form lamp light, which the coarser march keeps.
     const float quality =
@@ -807,9 +806,9 @@ void EngineGL33::PostFog(const PostFrame& f)
         // The sky table first, through the bind cache, then the raw binds,
         // then the cache told: the raw glActiveTexture calls left the cache's
         // active unit stale, and BindSkyTable after them bound the sky table
-        // onto the last raw unit, the horizon ring's (look director round 2:
-        // the air's light was the table's texel, not the sky above the land,
-        // so rain and mist faded far hills to a dark slate).
+        // onto the last raw unit, the horizon ring's (then the air's light was
+        // the table's texel, not the sky above the land, so rain and mist faded
+        // far hills to a dark slate).
         GL33Bind::Invalidate();
         BindSkyTable(); // unit 8: the table the world read, or its stand-in
         glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
@@ -913,7 +912,7 @@ void EngineGL33::PostFog(const PostFrame& f)
     // Under the photoreal camera its own night (CameraNight, 0 until the sun
     // is 4.5 degrees under): the classic night effect is 1 at any sun under
     // the horizon, and a dusk firefight's muzzle flashes drew large yellow
-    // halos in the still bright air (look director round 2).
+    // halos in the still bright air.
     const float classicNight = sun->NightEffect();
     const float night =
         cameraFrame ? std::min(classicNight, std::clamp(_camera.nightEffect, 0.0f, 1.0f)) : classicNight;

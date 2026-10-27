@@ -12,7 +12,7 @@
 // budget of 7 per surface. litLightCount.y holds the tile size while the tiled
 // list lights the pass and is 0 otherwise.
 //
-// At night, with the nightLights switch (B3, litNight.x), the tiled path gives
+// At night, with the nightLights switch (litNight.x), the tiled path gives
 // street lamps and headlights the physical model instead (physicalLight:
 // inverse-square light from the bulb, a low-beam pattern, rough diffuse,
 // leaves wrapped as for the sun), summed in linear light into g_physicalLocal
@@ -30,7 +30,7 @@ const char kRemasterLightsGLSL[] = R"(
 // 10-light town view the block cost less GPU time than texel fetches.
 layout(std140) uniform FrameLights {
     vec4 frameLights[256]; // kMaxFrameLights * kTexelsPerLight
-    // Combat light (B4, CombatLights.hpp): x the combat lights at the head of
+    // Combat light (CombatLights.hpp): x the combat lights at the head of
     // the list (light indices 1 to x), y the shadow mask's strength (0 = no
     // mask this frame).
     vec4 combatFrame;
@@ -123,7 +123,7 @@ vec3 tiledLight(int id, vec3 n, vec3 kd, vec3 ka) {
     return localLight(frameLights[at], frameLights[at + 1], frameLights[at + 2].rgb, frameLights[at + 3].xyz, n, kd, ka);
 }
 
-// ---- The physical lamps and low beams (B3, nightLights; litNight.x on) ------
+// ---- The physical lamps and low beams (nightLights; litNight.x on) ----------
 // Street lamps (kind 1) and headlights (kind 2) as physical lights: intensity
 // over the softened squared distance from the bulb, in linear light, summed
 // outside the classic budget and clamp. FrameLights.hpp holds the model and
@@ -316,7 +316,7 @@ vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
     return sum * litLightCount.z;
 }
 
-// The combat shadow mask at this fragment (B4): last frame's mask, where this
+// The combat shadow mask at this fragment: last frame's mask, where this
 // point was on last frame's screen, read once per fragment (one bilinear tap
 // for all four channels). Outside that screen, or behind that camera, nothing
 // is shadowed. g_combatMaskInside tells debug view 11 where the tap missed.
@@ -361,7 +361,7 @@ float combatBallCosine(float c, float core, float d) {
     return max(e, 0.0) / (3.14159265 * s2);
 }
 
-// Combat light at this fragment (B4, CombatLights.hpp): the muzzle flashes,
+// Combat light at this fragment (CombatLights.hpp): the muzzle flashes,
 // bursts, fires, tracers, flares and missile motors at the head of the tile's
 // list, in linear HDR (outside the classic clamp): E = I * window / (1 + d^2 /
 // r0^2), a ball of radius r0 that lights a surface by the part of it above

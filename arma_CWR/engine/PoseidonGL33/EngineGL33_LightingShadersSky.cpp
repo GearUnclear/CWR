@@ -12,7 +12,7 @@ namespace Poseidon::gl33lighting
 
 const char kRemasterSkyGLSL[] = R"(
 // The sun as the sky sees it. litSunDir and litSun carry the key light: the
-// sun, or under the moon key (B3, moonShadows; litNight.w its share, above 0)
+// sun, or under the moon key (moonShadows; litNight.w its share, above 0)
 // the moon, which the shadow map, the hills, the cloud shadows and the glossy
 // highlight follow. The sky stays on the sun: the sky table and its aureole,
 // the fog toward the sun, the warm side of the sky light on surfaces, the lit
@@ -166,13 +166,12 @@ vec3 camSkyRolloff(vec3 lin, vec3 d) {
 //   - by day, above that band, the clear blue a camera renders (camSkyDeepen);
 //   - the weather's veil (litCameraLook.x): a pale grey layer over the blue,
 //     the broken cloud of an overcast day rather than a clear one.
-// The clear day's blue (look fix "noon"; PhotoCamera.hpp kCameraDaySkyDeep,
-// DaySkyDeepen): the clear sky's chroma about its luminance, in linear light
-// (same luminance, same dominant hue), times 1 + kCamSkyDeep * w, no channel
-// under kCamSkyDeepFloor of the luminance. The table's sky has the real
-// sky's chromaticity, which the hue-keeping curve keeps exactly; a camera's
-// per-channel film curve deepens it, and without that the noon zenith over a
-// bright plain read as slate.
+// The clear day's blue (PhotoCamera.hpp kCameraDaySkyDeep, DaySkyDeepen): the
+// clear sky's chroma about its luminance, in linear light (same luminance, same
+// dominant hue), times 1 + kCamSkyDeep * w, no channel under kCamSkyDeepFloor
+// of the luminance. The table's sky has the real sky's chromaticity, which the
+// hue-keeping curve keeps exactly; a camera's per-channel film curve deepens
+// it, and without that the noon zenith over a bright plain read as slate.
 const float kCamSkyDeep = 0.65;      // kCameraDaySkyDeep
 const float kCamSkyDeepFloor = 0.25; // kCameraDaySkyFloor
 vec3 camSkyDeepen(vec3 a, float w) {
@@ -217,7 +216,7 @@ vec3 camSkyLook(vec3 a, vec3 d) {
         // from 30, so the golden aureole stays golden). The height above the
         // sun counts kCamGlowFlat times (PhotoCamera.hpp LowSunGlowCos): the
         // warm glow is a band along the horizon round the sun's bearing, not
-        // a disc round the sun (look fix "dawn": at sunrise_ridge the golden
+        // a disc round the sun (at a sunrise over a ridge a golden
         // disc reached more than half the sky's height).
         float away = 1.0 - smoothstep(0.86, 0.985, camLowSunGlowCos(d));
         // Over the lowest 30 degrees, so the warm horizon band fades into the
@@ -520,9 +519,9 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
         cloudLin = mix(cloudLin, vec3(cl * 0.92), 0.5 * litCameraLook.x);
         // A full grey deck shows its cloud base: the painted deck's light
         // relative to its row's mean deepens (darker lumps, brighter thin
-        // parts) and the deck darkens, above the horizon's band only (look
-        // fix round 4: a near-white sheet, a rain day read as dry mist).
-        // By day only (a night deck keeps round 3's look).
+        // parts) and the deck darkens, above the horizon's band only (a
+        // near-white sheet made a rain day read as dry mist). By day only (a
+        // night deck keeps the earlier look).
         float deck = litAtmo.y * litCameraLook.x * smoothstep(kCamDeckFromSin, kCamDeckFullSin, d.y) *
                      smoothstep(-6.0, 2.0, skySunElevation());
         if (deck > 0.0) {

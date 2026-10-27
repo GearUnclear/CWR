@@ -271,7 +271,7 @@ void EngineGL33::UpdateLightTiles()
     // own list is chosen from. Positions camera-relative as in UploadLitLights;
     // colours as authored, the draw's night factor scales them in the shader.
     const float* camPos = _frameState.cameraPos;
-    // With the physical low beams on (nightLights, B3) a headlight is aimed
+    // With the physical low beams on (nightLights) a headlight is aimed
     // from its vehicle's body (FrameLights.hpp LowBeamAim); off, every light
     // keeps the model's beam axis.
     const bool aimBeams =
@@ -364,7 +364,7 @@ void EngineGL33::UpdateLightTiles()
     view.viewport[2] = static_cast<float>(x1 - x0);
     view.viewport[3] = static_cast<float>(yBottom - yTop);
 
-    // The combat lights (B4) lead the list, the classic ones follow ranked as
+    // The combat lights lead the list, the classic ones follow ranked as
     // before.
     _combat.count = 0;
     if (_combat.active)
@@ -698,8 +698,8 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
     in.skyThrough = land ? land->SkyThrough() : 1.0f;
     in.cloudCover = rig ? rig->cloudCover : 0.0f;
     in.rainDensity = land ? land->GetRainDensity() : 0.0f;
-    // The world's wetness (B7): the wet weather's state, or its knob, while its
-    // switch is on; off, the rain stands in, as before the step.
+    // The world's wetness: the wet weather's state, or its knob, while its
+    // switch is on; off, the rain stands in, as before the wet weather.
     _wetFrame = rm::FrameWetness(land ? land->GetWetness() : rm::WetnessState{}, _lighting.wetness, _lighting.puddles);
     if (rm::FeatureOn(_lighting.features, rm::Feature::WetWeather))
         in.wetness = rm::FrameWetnessGate(_wetFrame);
@@ -718,7 +718,7 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
         in.waterShare = _ssr.waterShare;
         in.wetShare = _ssr.groundShare;
     }
-    // The combat lights of this frame (B4): evaluated once, for the tiled
+    // The combat lights of this frame: evaluated once, for the tiled
     // list, the smoke and the gates; a light counts while its reach comes
     // within kGateCombatRange of the camera.
     {
@@ -731,12 +731,11 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
         // frame.
         _combat.night = fl::CombatNight(in.nightEffect, _camera.frameOn, _camera.nightEffect);
         // Under the photoreal camera at night the fire's light on its own
-        // smoke deepens toward its hue (look director round 2). Look fix
-        // "fire": the column read as white steam because the smoke's light
+        // smoke deepens toward its hue. The column read as white steam because the smoke's light
         // saturated channel by channel and clipped in the 8-bit colour, not
         // because it was too weak; with the hue kept and the light past white
-        // carried as the puff's glow (CombatParticleLight, SetDecalGlow) the
-        // round-2 boost of three times lit the column flat orange to 4 m up.
+        // carried as the puff's glow (CombatParticleLight, SetDecalGlow) an
+        // earlier boost of three times lit the column flat orange to 4 m up.
         // A burst's flash holds at its peak only where the flash response
         // runs (CombatTuning::flashHold).
         if (_camera.frameOn)
@@ -744,8 +743,8 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
             const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
             ct.smokeTint = 0.85f * camNight;
             ct.flashHold = fl::kExplosionFlashHold * _combat.night;
-            // Look fix "burst": a steady light's share on surfaces against
-            // the twilight's light on the ground (CombatTwilight).
+            // A steady light's share on surfaces against the twilight's light
+            // on the ground (CombatTwilight).
             ct.twilight = fl::CombatTwilight(in.sunElevationDeg);
         }
         ct.scatter = _lighting.combatScatter;
@@ -791,8 +790,8 @@ void EngineGL33::UploadLitFrameConstants()
         _combat.active = false;
         // No volumetric fog is drawn: the published drawn medium (for probes;
         // AI sight never reads it) must not keep the last remastered frame's
-        // (fix5 aitest: triFogSight reported drawn=1 with a stale medium
-        // after a switch to classic lighting).
+        // (else triFogSight would report drawn=1 with a stale medium after a
+        // switch to classic lighting).
         Poseidon::remaster::SetDrawnFogMedium(nullptr);
         // Night vision's world passes: the fog still draws, over the
         // intensified frame (EngineGL33_PostFogViews.cpp).
@@ -850,7 +849,7 @@ void EngineGL33::UploadLitFrameConstants()
     }
     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
     _lightRigSky = Color(rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, 1.0f);
-    // The key light (B3): the sun, or at night with the moon key the moon,
+    // The key light: the sun, or at night with the moon key the moon,
     // which then also leaves the shadowless moon term. The scene renders the
     // shadow map from the key (RemasterMoonKey).
     const bool gatesNow = _featureGates.computed && _featureGates.frame == GetFrameCounter();
@@ -872,8 +871,8 @@ void EngineGL33::UploadLitFrameConstants()
         localGain = 1.0f + (_lighting.camLocal - 1.0f) * night;
         const float additive = _lighting.camAdditive * (1.0f + (rm::kCameraAdditiveNight - 1.0f) * night);
         SetSlot(LitConst::Camera, 1.0f, additive, _camera.skyScale, std::exp2(_camera.preExposureLog2));
-        // Under 14 degrees only (look director round 2: at the golden hour's
-        // 12 degrees the deeper blue made the sky a mid-afternoon's).
+        // Under 14 degrees only (at the golden hour's 12 degrees the deeper blue made
+        // the sky a mid-afternoon's).
         const float lowSun = 1.0f - rm::SmoothStep(3.0f, 14.0f, rig.sunElevationDeg);
         SetSlot(LitConst::CameraLook, rm::CameraWeatherVeil(in.skyThrough), rm::kCameraLampAmbient, rm::kCameraLampGain,
                 rm::kCameraLowSunSkyBlue * lowSun * (1.0f - night));
@@ -889,7 +888,7 @@ void EngineGL33::UploadLitFrameConstants()
     // list. Off, the per-draw slots carry each draw's lights as before.
     const bool wasTiled = _lightTilesActive;
     _lightTilesActive = gatesNow && _featureGates[rm::Feature::LightTiles].on;
-    // Combat light (B4): the game's combat lights join the tiled list, so
+    // Combat light: the game's combat lights join the tiled list, so
     // only with it.
     _combat.active = _lightTilesActive && _featureGates[rm::Feature::CombatLights].on;
     if (_lightTilesActive)
@@ -927,7 +926,7 @@ void EngineGL33::UploadLitFrameConstants()
     // fog toward the sun, the warm side of the sky light, the lit clouds).
     SetSlot(LitConst::SkySun, key.skySunToward[0], key.skySunToward[1], key.skySunToward[2], key.skySunElevationDeg);
     // A burst's flash at the camera opens the exposure for as long as it lasts
-    // (B4; 1 without one).
+    // (1 without one).
     _combat.exposure = rig.exposure * _combat.flashGain;
     // Lit particles take the rig's light under the camera (ParticleRigLight):
     // the world's sky fill share and exposure, at the frame's pre-exposure.
@@ -945,7 +944,7 @@ void EngineGL33::UploadLitFrameConstants()
     }
     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, _combat.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
-    // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
+    // w: tree crowns lit as a canopy (crownCanopy), 1 while its switch and
     // gate are on; 0 leaves shadeRemastered's foliage as it was before.
     const float crownCanopy = _featureGates[rm::Feature::CrownCanopy].on ? 1.0f : 0.0f;
     SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, crownCanopy);
@@ -1028,7 +1027,7 @@ void EngineGL33::UploadLitFrameConstants()
     // The shadow map was rendered from where the camera was then.
     SetSlot(LitConst::ShadowDelta, cam.X() - _shadowCamPos[0], cam.Y() - _shadowCamPos[1], cam.Z() - _shadowCamPos[2],
             kShadowFilterTexels * _lighting.shadowSoftness);
-    // Sun shadows (B1): the soft filter with its per-frame turn under TAA, and
+    // Sun shadows: the soft filter with its per-frame turn under TAA, and
     // the leaves' lift toward the sun; zero while their gates are off.
     const rm::SunShadowConstants sunShadows =
         rm::ComputeSunShadowConstants(_lighting, _featureGates, TaaWantedThisFrame(), _taa.sequence);
@@ -1047,34 +1046,34 @@ void EngineGL33::UploadLitFrameConstants()
     UploadLitSky(toSun, in.skyThrough);
     // The sky's own clouds: lit clouds, the dome's turn, the sky-matched shadows.
     UploadLitClouds(in.skyThrough, clouds);
-    // Terrain detail (B11): zero while the switch or its gate is off, which
+    // Terrain detail: zero while the switch or its gate is off, which
     // leaves the terrain main the stock one. w (land or sea) is the draw's,
     // set by SetLitTerrainDraw.
     const std::array<float, 3> detail =
         rm::terrain_detail::FrameConstants(_lighting, _featureGates[rm::Feature::TerrainDetail].on);
     SetSlot(LitConst::Detail, detail[0], detail[1], detail[2], s_lit[LitConst::Detail * 4 + 3]);
-    // Long tree shadows (B9): the sun-visibility map, rebuilt when the sun or
+    // Long tree shadows: the sun-visibility map, rebuilt when the sun or
     // the camera moved enough; zero while the switch or its gate is off.
     UploadLitCanopy(toSun, _featureGates.inputs.sunElevationDeg, _featureGates.inputs.skyThrough);
-    // The air pass (B8): this frame's medium, and the classic fog's edge
+    // The air pass: this frame's medium, and the classic fog's edge
     // (litHaze.x) while the haze replaces the fog before it.
     _lightRigExposure = rig.exposure;
     UpdateAirMedium();
-    // The volumetric fog (look-fog): the frame's medium; while the fog volume
-    // is applied it sets the classic fog's edge in place of B8's haze (whose
+    // The volumetric fog: the frame's medium; while the fog volume
+    // is applied it sets the classic fog's edge in place of the air pass's haze (whose
     // gates are off then).
     UpdateFogMedium();
-    // The night (B3): the physical lamps and low beams, while their gate is on
+    // The night: the physical lamps and low beams, while their gate is on
     // and the tiled list lighting the pass; zero otherwise, which leaves the
     // classic model for every light. w: the moon key's share.
     const rm::NightConstants night =
         rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
     SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
     _nightLightsActive = night.night[0] > 0.5f;
-    // Wet weather (B7): the frame's wetness and its flags; zero while the gate
+    // Wet weather: the frame's wetness and its flags; zero while the gate
     // is off, which leaves every fragment as before.
     UploadLitWeather();
-    // Surfaces and ambient light (the surfaces lane): the sky light's
+    // Surfaces and ambient light (the surfaces switch): the sky light's
     // spherical harmonics, the canopy's sky occlusion and the specular; zero
     // while the switch or its gate is off.
     UploadLitSurface(rig, in.skyThrough);

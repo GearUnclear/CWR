@@ -17,7 +17,7 @@ const char* RemasterVertexSource(int vs);
 const char* RemasterFragmentCommon();
 const char* RemasterFragmentMain(int ps);
 
-// The common prelude, split by concern (INTEGRATION-PLAN.md section 3.5):
+// The common prelude, split by concern:
 // RemasterFragmentCommon() is these pieces joined in this order. A feature
 // edits the piece of its concern. Overrides still replace the joined prelude
 // whole (psRemasterCommon.glsl).
@@ -83,7 +83,7 @@ extern const char kPostSsrCompositeMainGLSL[];
 // through PostShaderSource).
 extern const char kPostCombatMaskGLSL[];
 extern const char kPostCombatMaskBlurGLSL[];
-// The surfaces lane's horizon occlusion (EngineGL33_PostSurfaceShaders.cpp;
+// The surfaces' horizon occlusion (EngineGL33_PostSurfaceShaders.cpp;
 // read it through PostShaderSource).
 extern const char kPostGtaoInputsGLSL[];
 extern const char kPostGtaoMainGLSL[];
@@ -130,10 +130,10 @@ enum class PostShader : int
     SkyView,     // regions 0 and 1 of the sky-view table
     SkyViewMean, // the whole table: those two copied and each row's mean
     LumaSharpen, // the composited frame, sharpened in brightness only, into the frame target (Sharpen, TAA off)
-    // The canopy's sun-visibility map (B9). Not a post stage: it runs before
+    // The canopy's sun-visibility map. Not a post stage: it runs before
     // the world when the sun or the camera moved (EngineGL33_Canopy.cpp).
     CanopySun,
-    // The Air stage (B8, EngineGL33_PostAir.cpp): the half-resolution march
+    // The Air stage (EngineGL33_PostAir.cpp): the half-resolution march
     // (beams, haze sun visibility, valley mist top), its depth-aware blur, the
     // beams' local mean, and the full-resolution apply (haze, mist, beams).
     AirMarch,
@@ -146,11 +146,11 @@ enum class PostShader : int
     SsrTrace,     // the half-resolution trace: the reflection as a multiply and an add, and its spread
     SsrBlur,      // the trace gathered sideways over its spread (rough reflections have no hard outline)
     SsrComposite, // the reflections laid on the full-resolution frame
-    // The combat shadow mask (B4). Not post stages: they run at the start of
+    // The combat shadow mask. Not post stages: they run at the start of
     // the world, from the previous frame's linear depth (EngineGL33_PostCombat.cpp).
     CombatMask,     // the trace toward each shadowed combat light, half resolution
     CombatMaskBlur, // its depth-aware blur, one axis per pass
-    // The horizon-based ambient occlusion of the surfaces lane (the Ao stage
+    // The horizon-based ambient occlusion of the surfaces switch (the Ao stage
     // with the switch on; EngineGL33_PostSurfaceShaders.cpp).
     Gtao,
     GtaoAccum, // its occlusion accumulated over TAA frames, reprojected by depth
@@ -180,7 +180,7 @@ constexpr unsigned int kLitBinding = 3;
 // (EngineGL33_LightingShadersLights.cpp, Graphics/Rendering/Lighting/FrameLights.hpp).
 constexpr unsigned int kLightListBinding = 4;
 
-// Texture units of the remastered inputs (INTEGRATION-PLAN.md section 3.4).
+// Texture units of the remastered inputs.
 // Units 0 and 1 hold the material textures and 7 is the upload unit
 // (EngineGL33::kUploadUnit); GL 3.3 guarantees 16 fragment units. GL33Bind
 // caches units 0 to 7 only, so units 8 and up bind on every call.
@@ -189,7 +189,7 @@ constexpr int kTerrainHorizonUnit = 3;
 constexpr int kTerrainHeightUnit = 4;
 constexpr int kCloudNoiseUnit = 5;
 // The cascade array again under a non-compare NEAREST sampler (the soft
-// shadows' blocker search, B1): like unit 2, a complete depth array from init
+// shadows' blocker search): like unit 2, a complete depth array from init
 // on (the stand-in, then each cascade array as it is created).
 constexpr int kShadowRawUnit = 6;
 constexpr int kSkyLutUnit = 8;     // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
@@ -198,16 +198,16 @@ constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI
 // The sea animation frame the water program cross-fades into (the sea,
 // EngineGL33_Sea.cpp); a white stand-in outside the sea's draws.
 constexpr int kSeaNextFrameUnit = 11;
-// The canopy heightfield (B9, EngineGL33_Canopy.cpp): sampled by the pass
-// that builds the sun-visibility map and, for the sky it hides (the look lane
-// "surface"), by the world programs; holds a stand-in until the first canopy
+// The canopy heightfield (EngineGL33_Canopy.cpp): sampled by the pass that
+// builds the sun-visibility map and, for the sky it hides (the surfaces
+// switch), by the world programs; holds a stand-in until the first canopy
 // is uploaded.
 constexpr int kCanopyUnit = 10;
-// The canopy's sun-visibility map (B9): a world-space map around the camera
+// The canopy's sun-visibility map: a world-space map around the camera
 // the world programs read beyond the shadow maps; a stand-in (all lit) until
 // the first map is built.
 constexpr int kCanopyVisUnit = 15;
-// The combat shadow mask (B4): RGBA8 at half resolution, one shadowed combat
+// The combat shadow mask: RGBA8 at half resolution, one shadowed combat
 // light per channel, in the previous frame's screen; a 1x1 white stand-in
 // (nothing shadowed) until the first mask is built.
 constexpr int kCombatMaskUnit = 14;
@@ -219,7 +219,7 @@ constexpr int kCombatMaskUnit = 14;
 // data was allocated (the list keeps its lights in a uniform block,
 // kLightListBinding, which the fragments of a tile read faster).
 constexpr int kGroundFieldUnit = 12;
-// The volumetric fog's floor map (the lowest ground nearby, look-fog) shares
+// The volumetric fog's floor map (the lowest ground nearby) shares
 // the ground field's unit: only the fog's injection pass samples it, binds it
 // itself (no world program declares it) and unbinds it at its end; the world
 // binds the ground field again at each frame's lighting upload
@@ -310,7 +310,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)
     {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
     {"combatMask", kCombatMaskUnit},         // the combat shadow mask (combat light)
-    {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surface lane)
+    {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surfaces)
     {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
 };
 
@@ -350,12 +350,12 @@ enum : int
     LightColor = 34, // MaxLights vec4
     LightAmb = 42,   // MaxLights vec4
     LightDir = 50,   // MaxLights vec4
-    // Wet weather (B7, Graphics/Remaster/SurfaceMaterials.hpp): per draw x the
+    // Wet weather (Graphics/Remaster/SurfaceMaterials.hpp): per draw x the
     // surface class, y the object kind (SetLitSurface, only while the wet
     // gate is on); per frame z 1 while the lamp streaks run, w 1 while the
     // reflections' pass reflects the wet ground (UploadLitWeather).
     MatClass = 58,
-    // Sun shadows (B1, Graphics/Remaster/SunShadows.hpp): x per-frame turn of
+    // Sun shadows (Graphics/Remaster/SunShadows.hpp): x per-frame turn of
     // the soft shadows' taps, y 1 in a TAA frame, z taps per frame there,
     // w tan(sun angular radius) (0 = the stock filter).
     Taa = 59,
@@ -373,7 +373,7 @@ enum : int
     // The sky's own clouds (EngineGL33_SkyClouds.cpp, Graphics/Remaster/SkyDensity.hpp).
     Sky = 68,       // x lit-cloud strength, y sky-matched shadows on (1), z the dome's turn (u offset), w sky-through
     SkyShadow = 69, // xy shadow anchor - camera (m, east and north), z previous anchor's angle (rad), w its weight
-    // The night (B3, Graphics/Remaster/NightLights.hpp). SunDir and Sun carry
+    // The night (Graphics/Remaster/NightLights.hpp). SunDir and Sun carry
     // the key light, which under the moon key is the moon; the sky reads the
     // sun from SkySun: xyz toward the sun, w its elevation (degrees). Equal to
     // SunDir.xyz and Sun.w whenever the sun is the key.
@@ -385,7 +385,7 @@ enum : int
     // 72: allocated to the combat shadow mask (LitConstPlanned CombatShadow);
     // one padding member in the block until it lands.
     Planned = 72,
-    // Wet weather (B7, Graphics/Remaster/Wetness.hpp): x surface wetness, y
+    // Wet weather (Graphics/Remaster/Wetness.hpp): x surface wetness, y
     // rain density, z puddle level, w time (s, wrapped); zero while the
     // wetWeather gate is off, which leaves every fragment as before.
     Weather = 73,
@@ -393,16 +393,16 @@ enum : int
     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
     Water1 =
         75, // rgb sheen light (linear: the sun in the original sun's hue, times the sheen), w sheen's flat-normal share
-    // Long tree shadows (B9, Graphics/Remaster/Canopy.hpp): x strength (0 =
+    // Long tree shadows (Graphics/Remaster/Canopy.hpp): x strength (0 =
     // off), yz the sun-visibility map's origin (m), w 1 / its extent (1/m).
     Canopy = 76,
-    Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
-    // Aerial haze (B8, Graphics/Remaster/AirMedium.hpp) or the volumetric fog
-    // (look-fog, Graphics/Remaster/VolumetricFog.hpp): x the classic fog
-    // factor's scale minus 1 (0 = the classic fog: the zero the block starts
-    // with leaves every fragment as before), yzw free.
+    Detail = 77, // terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
+    // Aerial haze (Graphics/Remaster/AirMedium.hpp) or the volumetric fog
+    // (Graphics/Remaster/VolumetricFog.hpp): x the classic fog factor's scale
+    // minus 1 (0 = the classic fog: the zero the block starts with leaves every
+    // fragment as before), yzw free.
     Haze = 78,
-    // Surfaces and ambient light (the look lane "surface", SurfaceLight.hpp):
+    // Surfaces and ambient light (the surfaces switch, SurfaceLight.hpp):
     // x on (the switch and its gate), y specular strength, z canopy occlusion
     // strength, w the spherical-harmonics sky light's weight.
     Surface = 79,
@@ -413,10 +413,10 @@ enum : int
     Surface2 = 81,  // surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
     SurfaceSh = 82, // kSkyShCoeffs vec4: the sky light's irradiance coefficients (rgb), the sun frame
     Surface3 = 88,  // surfaces: x cavity strength
-    // The photoreal camera (look lane "light", photoLight; Graphics/Remaster/
-    // PhotoCamera.hpp): x 1 = the world's passes write scene light for the
-    // camera (camEncode), y the additive pre-lit draws' code scale, z the
-    // clear sky's scale (LightRig::skyScale), w the frame's pre-exposure.
+    // The photoreal camera (photoLight; Graphics/Remaster/ PhotoCamera.hpp): x
+    // 1 = the world's passes write scene light for the camera (camEncode), y
+    // the additive pre-lit draws' code scale, z the clear sky's scale
+    // (LightRig::skyScale), w the frame's pre-exposure.
     Camera = 89,
     // The camera's look of the world (photoLight; zero while it is off): x the
     // weather's veil (0 clear .. 1 a grey sky over broken cloud), y a street
@@ -453,31 +453,29 @@ static_assert(CameraLook == Camera + 1, "the camera's look follows the camera sl
 static_assert(Count == CameraLook + 1, "LitConst size out of sync");
 } // namespace LitConst
 
-// The slots allocated to the features still to land (INTEGRATION-PLAN.md
-// section 3.3), so no two steps take the same one. The per-draw slot comes
-// first, next to the per-draw material and light slots. A step that lands a
-// feature moves its rows into LitConst, declares them in LitConstantsBlock()
-// (a slot below it that has not landed yet becomes a padding member there) and
-// raises LitConst::Count, which the upload and the shaders follow. B7 landed
-// the material class at 58 and the weather at 73; A7 the sky slots 61 to 67
-// and B1 the sun shadow slots 59 and 60; B10 the clouds slots 68 and 69 (Sky,
-// SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
-// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 is the
-// padding member litPlanned; B8 landed the haze at 78, the surface lane's slots follow it
-// (79 to 88) and the photoreal camera (look lane "light") takes 89 and 90.
+// The slots allocated to features not yet in the block, so no two features
+// take the same one. The per-draw slot comes first, next to the per-draw
+// material and light slots. A feature that lands moves its rows into LitConst,
+// declares them in LitConstantsBlock() (a slot below it that has not landed yet
+// becomes a padding member there) and raises LitConst::Count, which the upload
+// and the shaders follow. Landed so far: the material class at 58 and the
+// weather at 73, the sky slots 61 to 67, the sun shadow slots 59 and 60, the
+// clouds slots 68 and 69 (Sky, SkyShadow), the night slots 70 and 71 (SkySun,
+// Night), the water slots 74 and 75, the canopy at 76 and the terrain detail
+// at 77, so 72 is the padding member litPlanned; the haze at 78, the surface
+// slots after it (79 to 88) and the photoreal camera at 89 and 90.
 namespace LitConstPlanned
 {
-// 58: the wet weather's material class landed (LitConst::MatClass, B7).
-// 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
-// 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
-// 70, 71: the night landed (LitConst::SkySun, LitConst::Night, B3); 70 was
-// free (the light list, A6, rides in litLightCount.yz, LitConst::LightCount).
+// 58: the wet weather's material class landed (LitConst::MatClass).
+// 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss).
+// 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow).
+// 70, 71: the night landed (LitConst::SkySun, LitConst::Night); 70 was
+// free (the light list rides in litLightCount.yz, LitConst::LightCount).
 constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
-// 73: the wet weather landed (LitConst::Weather, B7).
-// 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
-// 76: hfrt's canopy landed (LitConst::Canopy, B9); 77: texsharp's terrain
-// detail landed (LitConst::Detail, B11); 78: the haze landed (LitConst::Haze,
-// B8).
+// 73: the wet weather landed (LitConst::Weather).
+// 74, 75: the sea landed (LitConst::Water0, LitConst::Water1).
+// 76: the canopy landed (LitConst::Canopy); 77: the terrain detail landed
+// (LitConst::Detail); 78: the haze landed (LitConst::Haze).
 constexpr int End = 79; // one past the last planned slot
 static_assert(CombatShadow == LitConst::Planned && LitConst::PlannedCount == 1,
               "the planned slot between the night and the weather is the planned padding");

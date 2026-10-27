@@ -811,7 +811,7 @@ class EngineGL33 : public Engine
     // clouds read it).
     Color _lightRigSky = Color(0, 0, 0, 1);
     float _lightRigExposure = 1.0f;
-    // The air pass (B8, EngineGL33_PostAir.cpp): this frame's medium and which
+    // The air pass (EngineGL33_PostAir.cpp): this frame's medium and which
     // of its parts run (their switches and gates), set with the gates at the
     // world's first pass; the forward fog's edge follows it (litHaze).
     Poseidon::remaster::AirMedium _airMedium;
@@ -861,7 +861,7 @@ class EngineGL33 : public Engine
     // list lights the pass, only the draw's night factor (litLightCount.z).
     void UploadLitLights(const LightList& lights, float nightEffect);
     void SetLitOpaque(bool opaque, bool additive = false);
-    // The terrain detail (B11) runs on the land only: the land and the sea are
+    // The terrain detail runs on the land only: the land and the sea are
     // both drawn by PSDetail, the land with the DetailTexture bit, the sea with
     // SpecularTexture. Sets litDetail.w for the draw ApplyPassState prepares.
     void SetLitTerrainDraw(bool land);
@@ -873,7 +873,7 @@ class EngineGL33 : public Engine
     // reflections' surface tag both ask (EngineGL33_State.cpp).
     static bool IsLandLayer(const Poseidon::render::LegacySpec& spec);
 
-    // The frame's tiled light list (the lightTiles switch, plan section 5 A6;
+    // The frame's tiled light list (the lightTiles switch;
     // Graphics/Rendering/Lighting/FrameLights.hpp). Built once per frame at the
     // world's first 3D pass when its gate is on: the scene's active lights,
     // ranked, binned into kTileSize tiles over the frame target and uploaded to
@@ -906,7 +906,7 @@ class EngineGL33 : public Engine
     // (UploadLitFrameConstants) for the frame it names.
     float _particleRigLight[3] = {0.0f, 0.0f, 0.0f};
     std::uint32_t _particleRigFrame = 0xffffffffu;
-    // Wet weather (B7, Graphics/Remaster/Wetness.hpp, SurfaceMaterials.hpp):
+    // Wet weather (Graphics/Remaster/Wetness.hpp, SurfaceMaterials.hpp):
     // this frame's wetness (the world's state or the knob), set with the gates;
     // _wetShading while the wetWeather gate is on in the world's passes, which
     // then hand each draw its surface class (LitConst::MatClass xy).
@@ -928,7 +928,7 @@ class EngineGL33 : public Engine
     // Builds, bins and uploads the list (once per frame).
     void UpdateLightTiles();
 
-    // Combat light (plan section 5 B4; Graphics/Rendering/Lighting/CombatLights.hpp,
+    // Combat light (Graphics/Rendering/Lighting/CombatLights.hpp,
     // EngineGL33_PostCombat.cpp). The game's combat lights join the tiled list
     // as HDR entries while their gate is on; up to four of them are shadowed
     // through a half-resolution mask traced at the start of the world from the
@@ -993,7 +993,7 @@ class EngineGL33 : public Engine
     void SetCombatScatterUniforms(unsigned int program, float exposure);
     // Writes slots [first, first + count) of the CPU LitConstants block to its
     // buffer and records them in the buffer's mirror: every upload of the
-    // block, whole or partial, goes through here (plan section 5 A4).
+    // block, whole or partial, goes through here.
     void UploadLitSlots(int first, int count);
     // Binds units 2..6, 8, 9, 13 and 15 for the remastered shaders (compare sampler on 2).
     void BindLightingTextures();
@@ -1036,11 +1036,11 @@ class EngineGL33 : public Engine
     void UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, float skyThrough);
     void BindCanopy();
     // The canopy heightfield as the world programs read it for the sky it
-    // hides (the surfaces lane): height base, range, 1 / extent, 1 when there
+    // hides (the surfaces switch): height base, range, 1 / extent, 1 when there
     // is an uploaded canopy (else all zero).
     void SurfaceCanopyConstants(float out[4]) const;
 
-    // Surfaces and ambient light (the look lane "surface",
+    // Surfaces and ambient light (the surfaces switch,
     // Graphics/Remaster/SurfaceLight.hpp; EngineGL33_Surface.cpp).
     //   - The surface target: a second multisampled colour attachment of the
     //     frame target (RGBA8), drawn only while a remastered world pass runs
@@ -1115,8 +1115,8 @@ class EngineGL33 : public Engine
         unsigned int histTex[2] = {}, histFbo[2] = {};
         unsigned int opaqueTex = 0, opaqueFbo = 0;
         unsigned int progTaa = 0, progTaaSharpen = 0;
-        unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off (B11)
-        // The air pass (B8, EngineGL33_PostAir.cpp), half resolution: the
+        unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off
+        // The air pass (EngineGL33_PostAir.cpp), half resolution: the
         // march's two targets (RGBA16F: beams, headlights, haze sun
         // visibility, view depth; RG16F: valley mist top and density), the
         // blur's ping-pong and the beams' local mean (RG16F); full resolution:
@@ -1126,7 +1126,7 @@ class EngineGL33 : public Engine
         unsigned int airMarchFbo = 0, airFbo[2] = {}, airMeanFbo = 0, airOutFbo = 0;
         unsigned int progAirMarch = 0, progAirBlur = 0, progAirMean = 0, progAirApply = 0;
         bool airUnavailable = false; // its programs failed: the air pass never runs, the rest does
-        // The surfaces lane: the surface target resolved (RGBA8, full res) and
+        // Surface light: the surface target resolved (RGBA8, full res) and
         // the horizon occlusion's program (writes aoTex like progAo).
         unsigned int surfTex = 0, surfFbo = 0;
         unsigned int progGtao = 0;
@@ -1176,7 +1176,7 @@ class EngineGL33 : public Engine
     // samplers, each only when it changes.
     void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
     void BeginTranslucentObjects() override;
-    // The photoreal camera (look lane "light", feature switch photoLight;
+    // The photoreal camera (feature switch photoLight;
     // EngineGL33_Camera.cpp, Graphics/Remaster/PhotoCamera.hpp): the physical
     // rig's inputs, the metered and adapted exposure, the white balance, and
     // the meter pass with its readback (a ring of pixel-pack buffers read a few
@@ -1202,11 +1202,11 @@ class EngineGL33 : public Engine
         bool haveCam = false;
         Poseidon::remaster::MeterResult meter;
         float nightEffect = 0.0f;
-        float duskEffect = 0.0f; // CameraDusk: the dusk's exposure share (look director)
-        float duskKeep = 0.0f;   // CameraDuskKeep: the dusk's dark keep share (look director round 2)
-        float golden = 0.0f;     // CameraGolden: the golden hour's warmth (look director round 2)
-        float timeEv = 0.0f;     // CameraTimeOfDayEv: the golden hour's and the high sun's EV (look director round 2)
-        float veil = 0.0f;       // CameraWeatherVeil: the grey day's highlight limit (look fix round 5)
+        float duskEffect = 0.0f; // CameraDusk: the dusk's exposure share
+        float duskKeep = 0.0f;   // CameraDuskKeep: the dusk's dark keep share
+        float golden = 0.0f;     // CameraGolden: the golden hour's warmth
+        float timeEv = 0.0f;     // CameraTimeOfDayEv: the golden hour's and the high sun's EV
+        float veil = 0.0f;       // CameraWeatherVeil: the grey day's highlight limit
         // Colour: white balance times the scene saturation.
         Poseidon::remaster::Mat3 color;
         // The golden hour's warm gain (GoldenWarmGain), laid by the composite
@@ -1266,7 +1266,7 @@ class EngineGL33 : public Engine
     void DestroyPostPrograms();
     bool EnsurePostResources(int w, int h);
 
-    // One post pass (INTEGRATION-PLAN.md section 3.6): what every stage reads.
+    // One post pass: what every stage reads.
     // EndWorldScene fills it, then runs the stages its plan names in
     // PostStage order (Graphics/Remaster/PostStages.hpp).
     struct PostFrame
@@ -1287,9 +1287,9 @@ class EngineGL33 : public Engine
         // the resolve does not run: the fixed patterns of before).
         float noiseShift = 0.0f;
         // This frame's world was lit by combat lights: the composite scatters
-        // them in the air (B4).
+        // them in the air.
         bool combatScatter = false;
-        // The surfaces lane: this frame's world wrote the surface target, so
+        // Surface light: this frame's world wrote the surface target, so
         // the resolve copies it, the Ao stage runs the horizon occlusion and
         // the composite reads its shares.
         bool surfaces = false;
@@ -1323,7 +1323,7 @@ class EngineGL33 : public Engine
     void PostResolve(const PostFrame& f);
     void PostLinearDepth(const PostFrame& f);
     void PostAo(const PostFrame& f);
-    void PostSurfaceAccumulate(const PostFrame& f); // the surfaces lane's occlusion over TAA frames
+    void PostSurfaceAccumulate(const PostFrame& f); // the surfaces' occlusion over TAA frames
     void PostAir(const PostFrame& f); // EngineGL33_PostAir.cpp
     void PostBloom(const PostFrame& f);
     void PostShafts(const PostFrame& f);

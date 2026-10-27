@@ -13,7 +13,7 @@
 #include <sstream>
 #include <string>
 
-// The air pass (INTEGRATION-PLAN.md step B8; Graphics/Remaster/AirMedium.hpp):
+// The air pass (Graphics/Remaster/AirMedium.hpp):
 // the medium's closed forms against numeric integration, the valley floor on a
 // synthetic valley, the weather and time rules, the classic fog's moved edge,
 // and the contracts between the C++ and the shaders (the same constants, the
@@ -226,8 +226,8 @@ TEST_CASE("Air medium: morning mist with an eastern sun, gone by 10 degrees", "[
 {
     // Full from sunrise to 6 degrees (the ridge at 05:08 in July has the sun
     // at 5.1 degrees, Abel's valley at 05:15 at 6.3), half way at 8, gone by
-    // 10 (about an hour after sunrise): a dawn feature. lowsun_fp (08:00 in
-    // March) has the sun at 12.7 degrees in game: no mist there.
+    // 10 (about an hour after sunrise): a dawn feature. A field at 08:00 in
+    // March has the sun at 12.7 degrees in game: no mist there.
     CHECK(MorningWeight(2.0f, 0.9f) == Catch::Approx(1.0f));
     CHECK(MorningWeight(5.1f, 0.6f) == Catch::Approx(1.0f));
     CHECK(MorningWeight(6.3f, 0.9f) > 0.95f);
@@ -235,7 +235,7 @@ TEST_CASE("Air medium: morning mist with an eastern sun, gone by 10 degrees", "[
     CHECK(MorningWeight(9.5f, 0.9f) > 0.0f);
     CHECK(MorningWeight(9.5f, 0.9f) < 0.05f);
     CHECK(MorningWeight(10.0f, 0.9f) == 0.0f);
-    CHECK(MorningWeight(12.7f, 0.9f) == 0.0f); // lowsun_fp
+    CHECK(MorningWeight(12.7f, 0.9f) == 0.0f); // 08:00 in March
     CHECK(MorningWeight(-5.0f, 0.9f) == 0.0f); // still night
     CHECK(MorningWeight(8.0f, -0.6f) == 0.0f); // evening: a western sun
     // The gates use the same window (FeatureGates.hpp).
@@ -268,7 +268,7 @@ TEST_CASE("Air medium: clear air keeps the beams narrow, fog and rain make them 
     // Under an overcast 40% of it.
     in.skyThrough = 0.0f;
     CHECK(ComputeAirMedium(in, All(), -1.0f).valleyMist == Catch::Approx(0.4f * kValleyMistSigma));
-    // A clear morning two hours after sunrise (lowsun_fp, 08:00 in March: the
+    // A clear morning two hours after sunrise (08:00 in March: the
     // sun at 12.7 degrees in game): the mist is gone and the beams stay clear.
     in.skyThrough = 1.0f;
     in.sunElevationDeg = 12.7f;
@@ -301,7 +301,7 @@ TEST_CASE("Air medium: clear air keeps the beams narrow, fog and rain make them 
     in = ClearNoon();
     in.sunElevationDeg = 0.0f;
     CHECK(ComputeAirMedium(in, All(), -1.0f).beamMistWeight == Catch::Approx(1.0f));
-    in.sunElevationDeg = 5.0f; // sunrise_ridge
+    in.sunElevationDeg = 5.0f; // a ridge at sunrise
     CHECK(ComputeAirMedium(in, All(), -1.0f).beamMistWeight == 0.0f);
     in.sunElevationDeg = -20.0f; // a clear night: headlights in clear air
     CHECK(ComputeAirMedium(in, All(), -1.0f).beamMistWeight == 0.0f);
@@ -421,14 +421,14 @@ TEST_CASE("Air medium: the beams' contrast works on the share of the scattering 
 {
     const float hp = kBeamHighpassClear;
     const float gain = kBeamGainClear;
-    // Open ground toward a low sun (lowsun_fp): every ray sees the sun, but a
+    // Open ground toward a low sun: every ray sees the sun, but a
     // ray to the far plain runs longer through the ground mist than its
     // depth-matched neighbours (the mean leans to the nearer ground), so its
     // scattering stands above the mean, 0.18 against 0.15. Its share does
     // not: no boost, (1 - high-pass) of it, as anywhere the sun reaches the
     // whole field. A contrast on the scattering itself gave this ray
     // 0.18 - 0.85 * 0.15 + 3 * 0.03 = 0.14, five times as much: the pale band
-    // along the plain of the first B8 review.
+    // along the plain in an early build.
     CHECK(BeamShaft(0.18f, 0.18f, 0.15f, 0.15f, 1.0f, hp, gain) == Catch::Approx((1.0f - hp) * 0.18f));
     CHECK(BeamShaft(0.05f, 0.05f, 0.15f, 0.15f, 1.0f, hp, gain) == Catch::Approx((1.0f - hp) * 0.05f));
     // A beam through a gap in the crowns: the ray sees the sun, its
@@ -486,7 +486,7 @@ TEST_CASE("Air pass: the march and the apply paste the remastered prelude's piec
     // The cloud field and the horizon map the shading reads.
     CHECK(CountOf(march, gl::RemasterFragmentPiece(gl::FragmentPiece::TerrainClouds)) == 1);
     CHECK(march.find("cloudSunVisibility(pa)") != std::string::npos);
-    // Its sky-matched cloud shadows (B10) read the sky's cloud density: the
+    // Its sky-matched cloud shadows read the sky's cloud density: the
     // march binds the world's map on the world's unit.
     const std::string air = ReadTextFile(Gl33Dir() / "EngineGL33_PostAir.cpp");
     CHECK(air.find("SetInt(prog, \"skyDensity\", kSkyDensityUnit);") != std::string::npos);
@@ -507,7 +507,7 @@ TEST_CASE("Air pass: off leaves every draw and the post pass as they were", "[re
     // zero block (before the first upload) means the classic fog too.
     const std::string finish = gl::RemasterFragmentPiece(gl::FragmentPiece::Finish);
     CHECK(finish.find("r0.rgb = mix(fogC, r0.rgb, min(vFogTC * (1.0 + litHaze.x), 1.0));") != std::string::npos);
-    // The sea ends in finishFragment too (B5), so it takes the same edge.
+    // The sea ends in finishFragment too, so it takes the same edge.
     const std::string water = gl::RemasterFragmentMain(3); // PSWater
     CHECK(water.find("finishFragment(r0, ambientShare, true);") != std::string::npos);
     CHECK(water.find("r0.rgb = mix(fogC, r0.rgb, vFogTC);") == std::string::npos);
@@ -553,7 +553,7 @@ TEST_CASE("Air pass: off leaves every draw and the post pass as they were", "[re
 TEST_CASE("Air pass: unit 2 keeps a complete depth array and gets its post sampler back",
           "[remaster][AirMedium][GL33][ShadowSampler]")
 {
-    // The F3 rule: unit 2 never holds texture 0 for a depth array, and the
+    // A shader must never sample an incomplete texture: unit 2 never holds texture 0 for a depth array, and the
     // comparison sampler the march reads it through goes away after the draw
     // (the post pass and the HUD after it run with sampler 0 there).
     const std::string air = ReadTextFile(Gl33Dir() / "EngineGL33_PostAir.cpp");

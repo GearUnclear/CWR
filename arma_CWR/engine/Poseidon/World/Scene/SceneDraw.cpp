@@ -382,9 +382,9 @@ void Scene::DrawRain()
         density *= 0.2f;
         // Under the photoreal camera (photoLight) the overlay's streaks are
         // stretched by the exposure and the curve: at full strength they
-        // smeared the whole sky with vertical lines (look director round 2).
-        // (Look fix round 5 "mist": 0.45 -> 0.9; under the grey day's
-        // exposure and drawn after the opaque copy, at 0.45 no streak read.)
+        // smeared the whole sky with vertical lines. (0.9, not 0.45: under the
+        // grey day's exposure and drawn after the opaque copy, at 0.45 no
+        // streak read.)
         if (GEngine && GEngine->LightingRemasterActive())
         {
             const remaster::LightingTuning tuning = GEngine->GetLightingTuning();
@@ -1451,9 +1451,9 @@ void Scene::DrawObjectsAndShadowsPass1()
     auto msSince = [](Clock::time_point t0)
     { return std::chrono::duration<float, std::milli>(Clock::now() - t0).count(); };
     perf::FrameCounters& counters = perf::GPerfCounters().Frame();
-    // The frame-cost switches (plan section 5 A4), as this frame's gates hold
-    // them (computed at the world's first 3D pass; off with the classic
-    // lighting, so Classic draws as it always did).
+    // The frame-cost switches, as this frame's gates hold them (computed at the
+    // world's first 3D pass; off with the classic lighting, so Classic draws as
+    // it always did).
     remaster::FeatureGates gates;
     const bool haveGates = GEngine && GEngine->GetFeatureGates(gates) && gates.computed;
     const bool drawGrouping = haveGates && gates[remaster::Feature::DrawGrouping].on;

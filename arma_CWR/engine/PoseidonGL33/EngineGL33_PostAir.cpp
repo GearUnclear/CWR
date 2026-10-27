@@ -1,5 +1,4 @@
-// Remastered lighting: the air pass (the Air post stage, INTEGRATION-PLAN.md
-// step B8; research tracks volumetric and haze). Feature switches airBeams,
+// Remastered lighting: the air pass (the Air post stage). Feature switches airBeams,
 // airHaze and valleyMist; the medium and its weather and time rules are pure
 // (Graphics/Remaster/AirMedium.hpp), the shaders GL-free
 // (EngineGL33_PostAirShaders.cpp).
@@ -14,7 +13,7 @@
 //      visibility (12 samples beyond 150 m), the valley mist's top at the
 //      surface each ray ends on and the view depth. Under TAA the march's start turns
 //      every frame (the golden-ratio step of the TAA sequence) and the history
-//      averages it, in place of the research's own temporal accumulation;
+//      averages it, in place of a temporal accumulation of its own;
 //   2. psPostAirBlur twice (across, down), depth-aware;
 //   3. psPostAirMean (beams only): the depth-matched local mean the beam
 //      contrast works against (for the sun, on the share of the scattering
@@ -33,7 +32,7 @@
 // unit 3.
 //
 // GL state: the stage binds its inputs to kPostUnits; unit 2 takes the cascade
-// array (or the depth stand-in, never texture 0: the F3 rule) under the
+// array (or the depth stand-in, never texture 0: a shader must never sample an incomplete texture) under the
 // comparison sampler for the march and gets the post pass's sampler 0 back
 // after it; unit 3 takes the horizon array (or its stand-in) the world passes
 // bind there. Unit 8 keeps the sky table the world bound, unit 9 the sky's

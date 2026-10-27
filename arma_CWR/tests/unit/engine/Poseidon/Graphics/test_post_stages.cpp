@@ -17,11 +17,10 @@
 #include <sstream>
 #include <string>
 
-// The post pass as a fixed list of stages (INTEGRATION-PLAN.md section 3.6,
-// Graphics/Remaster/PostStages.hpp): the list's order and GPU marks, and the
+// The post pass as a fixed list of stages (Graphics/Remaster/PostStages.hpp): the list's order and GPU marks, and the
 // plan of a frame, which decides the early return and every stage's gate. The
 // plan must reproduce the pass as it ran before the list (same stages, same
-// strengths), because A3 changes no pixel.
+// strengths), because the list alone changes no pixel.
 
 using namespace Poseidon::remaster;
 namespace gpu = Poseidon::gpu;
@@ -84,7 +83,7 @@ static_assert(sizeof(kStageEnumerators) / sizeof(kStageEnumerators[0]) == kPostS
 TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and section",
           "[Graphics][remaster][PostStages]")
 {
-    // The order the plan fixes; later steps land stages, never reorder them.
+    // The order the plan fixes; new stages land in it, never reorder it.
     const PostStage order[] = {PostStage::Resolve,   PostStage::LinearDepth, PostStage::TagReadout,
                                PostStage::Ao,        PostStage::Ssr,         PostStage::Air,
                                PostStage::Bloom,     PostStage::Shafts,      PostStage::CombatScatter,
@@ -114,10 +113,9 @@ TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and sec
     CHECK(names.size() == static_cast<size_t>(kPostStageCount));
     CHECK(marks.size() == static_cast<size_t>(kPostStageCount));
     CHECK(gpu::kMarkCount <= 32);
-    // A3 lands the passes that existed (resolve, AO, bloom, shafts, composite)
-    // plus the linear depth and the debug view that shows it; A5 the TAA
-    // resolve and its sharpen; B6 the tag readout and the reflections; B8 the
-    // air pass.
+    // Landed: the passes that existed (resolve, AO, bloom, shafts, composite)
+    // plus the linear depth and the debug view that shows it; the TAA resolve
+    // and its sharpen; the tag readout and the reflections; the air pass.
     CHECK(landed == 12);
     CHECK(GetPostStageInfo(PostStage::Temporal).landed);
     CHECK(GetPostStageInfo(PostStage::Sharpen).landed);
@@ -163,7 +161,7 @@ TEST_CASE("Post stages: the early return asks every stage", "[Graphics][remaster
     in.bloom = 0.0f;
     in.sunShafts = 0.0f;
     CHECK(PlanPostStages(in).Empty());
-    in.ambientOcclusion = -1.0f; // a research value from triSetLighting
+    in.ambientOcclusion = -1.0f; // a negative value from triSetLighting
     CHECK(PlanPostStages(in).Empty());
     in.ambientOcclusion = 0.0f;
 
@@ -291,7 +289,7 @@ TEST_CASE("Post stages: the fog runs in a vehicle interior on the world depth sa
     // An optic overlay over the interior keeps it too.
     in.glow = false;
     CHECK(PlanPostStages(in).fog);
-    // No saved depth (the save failed): no fog, and B8's air pass never runs
+    // No saved depth (the save failed): no fog, and the air pass never runs
     // without the world depth either.
     in.glow = true;
     in.fogWorldDepth = false;
@@ -380,7 +378,7 @@ TEST_CASE("Post stages: the TAA resolve and its sharpen run together on a jitter
           "[Graphics][remaster][PostStages][TemporalAA]")
 {
     // Without the jitter (taa switch or gate off) nothing changes: the plan of
-    // before, which is what makes the switch's "off" the look before A5.
+    // before, which is what makes the switch's "off" the look before TAA.
     PostFrameInputs in = Shipped();
     const std::uint32_t before = PlanPostStages(in).runs;
     CHECK(before ==
@@ -481,7 +479,7 @@ TEST_CASE("Post stages: the luma sharpen reads the composite and writes the fram
 
 TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[Graphics][remaster][PostStages]")
 {
-    // Its readers: the debug view, the reflections (B6) and the air pass (B8);
+    // Its readers: the debug view, the reflections and the air pass;
     // the stages that land with a half-resolution pass set readsLinearDepth.
     int readers = 0;
     for (int i = 0; i < kPostStageCount; ++i)
@@ -500,9 +498,9 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
     CHECK(GetPostStageInfo(PostStage::Air).readsLinearDepth);
 
     PostFrameInputs in = Shipped();
-    // 6 is the forward shaders' light-tile view (A6) and 7 their albedo view
-    // (B2): no post stage of their own; 8 is the air pass's (B8), which needs
-    // its switches, 9 and 10 the reflections' (B6), which need the tags.
+    // 6 is the forward shaders' light-tile view and 7 their albedo view: no
+    // post stage of their own; 8 is the air pass's, which needs its switches,
+    // 9 and 10 the reflections', which need the tags.
     for (int view = 0; view <= kDebugViewSsrReflection; ++view)
     {
         CAPTURE(view);
@@ -521,9 +519,9 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
     in.ssr = true;
     CHECK(PlanPostStages(in).Runs(PostStage::LinearDepth));
     // The registry offers the view (the overlay's combo, triSetLighting debug=5),
-    // the light tiles after it (debug=6), B2's albedo view (debug=7), the air
-    // pass's in-scatter (debug=8, B8) and the reflections' two last (debug=9
-    // and 10, B6), and the combat shadow mask after them (debug=11, B4), then the surfaces lane's three
+    // the light tiles after it (debug=6), the albedo view (debug=7), the air
+    // pass's in-scatter (debug=8) and the reflections' two (debug=9 and 10),
+    // the combat shadow mask after them (debug=11), then the surfaces' three
     // forward views (12 to 14).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
@@ -541,7 +539,7 @@ TEST_CASE("Post stages: the reflections read the tags out whenever they were wri
           "[Graphics][remaster][PostStages][ssr]")
 {
     // Off (the switch: no tags): the plan of before, which is what makes the
-    // switch's "off" the look before B6.
+    // switch's "off" the look before the reflections.
     PostFrameInputs in = Shipped();
     const std::uint32_t before = PlanPostStages(in).runs;
     in.ssr = true; // a gate without tags cannot run anything

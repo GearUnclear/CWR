@@ -1,4 +1,4 @@
-// Remastered lighting: the air pass's shaders (the Air post stage, step B8;
+// Remastered lighting: the air pass's shaders (the Air post stage;
 // EngineGL33_PostAir.cpp runs them, Graphics/Remaster/AirMedium.hpp holds the
 // medium and the C++ mirror of the optical-depth math). No GL code, so the
 // unit tests compile the sources the engine builds; kPostShaders
@@ -30,8 +30,8 @@ namespace Poseidon::gl33lighting
 
 // The march's inputs. The LitConstants block and the terrain and clouds piece
 // follow it; the piece reads terrainHorizon, terrainHeight, cloudNoise and,
-// for the sky-matched cloud shadows (B10), skyDensity. Its long tree shadows
-// (canopySunVisibility, B9) read the world's names below; the march never
+// for the sky-matched cloud shadows, skyDensity. Its long tree shadows
+// (canopySunVisibility) read the world's names below; the march never
 // calls them.
 const char kPostAirMarchInputsGLSL[] = R"(#version 330 core
 in vec2 vUV;
@@ -392,7 +392,7 @@ uniform sampler2D skyDensity;
 vec3 vWorldRel = vec3(0.0);
 vec2 vUV0 = vec2(0.0);
 vec3 g_groundTint = vec3(1.0);
-// The lit sky clouds' density lookups (B10) live in the terrain and clouds
+// The lit sky clouds' density lookups live in the terrain and clouds
 // piece, which the apply does not paste; the dome shading that calls them is
 // unused here.
 float skyCloudDensity(vec4 m) { return 0.0; }
@@ -504,7 +504,7 @@ void main() {
         vec3 tau = tauAir + vec3(mistTau);
         vec3 T = exp(-tau);
         float vis = clamp(air.b, 0.0, 1.0);
-        // The air, like the fog it replaces, stays on the sun (B3): under the
+        // The air, like the fog it replaces, stays on the sun: under the
         // moon key litSunDir and litSun carry the moon, the sky's sun is set.
         float sunOn = smoothstep(-0.035, 0.0175, skySunDir().y) * litSunDir.w;
         vec3 skyLim = toLinear(airSkyLimit(rel)) * pre;

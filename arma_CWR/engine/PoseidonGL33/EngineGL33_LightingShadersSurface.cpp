@@ -5,7 +5,7 @@
 // weather's response of every surface. Material and wet-surface responses
 // belong here.
 //
-// Wet weather (feature switches wetWeather and lampStreaks, plan section 5 B7;
+// Wet weather (feature switches wetWeather and lampStreaks;
 // Graphics/Remaster/Wetness.hpp holds the world's wetness, SurfaceMaterials.hpp
 // the surface classes, and both mirror the constants below that a test pins):
 //
@@ -30,7 +30,7 @@
 //     the ground. Puddles (wetPuddle, shared with the reflections' trace) are
 //     dark smooth water with rain rings while it rains.
 //
-// The look lane "surface" (Graphics/Remaster/SurfaceLight.hpp): the sky light
+// Surfaces and ambient light (Graphics/Remaster/SurfaceLight.hpp): the sky light
 // from the sky table's spherical harmonics, the sky hidden by the canopy, the
 // texture's relief and cavities, and a Fresnel specular on every surface.
 
@@ -75,7 +75,7 @@ float wetGroundPorosity(vec3 c) {
 // The land is classed from this, not from the pixel's own texture: each
 // square of the landscape has its own texture, and a class read per pixel
 // jumped at every square whose texture differed a little from its neighbour's
-// (a straight seam in the sheen and the puddles; the owner's wet seam).
+// (a straight seam in the sheen and the puddles).
 vec4 groundFieldAt(vec2 xz) {
     if (litTerrain.x < 0.5) return vec4(0.0);
     vec2 t = xz * litTerrain.y;
@@ -97,7 +97,7 @@ const float kPuddleRoad = 0.61;       // noise threshold on roads
 const float kPuddleGround = 0.67;     // on bare ground
 const float kPuddleGrass = 0.74;      // on grass
 // Only the puddles mirror (the wet ground around them does not), so they carry
-// the rain's look: roads and bare ground hold this much more water than B6's
+// the rain's look: roads and bare ground hold this much more water than the reflections'
 // thresholds above (lowered by it), grass no more.
 const float kPuddleMore = 0.04;
 const float kPuddleEdge = 0.035;      // the threshold's soft edge
@@ -188,7 +188,7 @@ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
 // leather, weapon, lens, roof.
 const float kWetPorosity[14] = float[](0.5, 0.05, 0.0, 0.0, 0.1, 0.85, 0.3, 0.35, 0.6, 0.7, 0.4, 0.0, 0.0, 0.4);
 const float kWetDarken = 0.55;      // a soaked object keeps 1 - this times its porosity of its albedo ...
-const float kWetGroundDarken = 0.35; // ... the ground this (B6's wet ground kept 0.8 of its colour)
+const float kWetGroundDarken = 0.35; // ... the ground this (the reflections' wet ground kept 0.8 of its colour)
 const float kWetSaturate = 0.3;     // objects: saturation gain at porosity 1 (never the ground: no mustard)
 // How much a matte sealed surface darkens when wet, as a porosity (paint, rubber,
 // skin, leather, unknown); glass, metal, weapons and lenses keep their colour.
@@ -300,7 +300,7 @@ const float kSurfLeafShare = 0.4;
 // The clear sky's irradiance onto n from the sky table's spherical harmonics:
 // n turned into the sun frame (x toward the sun's azimuth, y up, z across;
 // the sky is mirror-symmetric in z, so its sign does not matter). The frame
-// is the sky's own sun (litSkySun): under the moon key (B3) litSunDir is the
+// is the sky's own sun (litSkySun): under the moon key litSunDir is the
 // moon, but the table was projected for the sun.
 vec3 skyLightSH(vec3 n) {
     vec2 s = litSkySun.xz;
@@ -464,7 +464,7 @@ float surfaceClassCavity(float cls) {
     return 0.0;
 }
 
-// The cavity term (the surfaces lane, litSurface3.x): the texture's height
+// The cavity term (the surfaces switch, litSurface3.x): the texture's height
 // (2.5 pixels' footprint) below the mean of its neighbourhood (10 pixels'),
 // from alpha (the terrain's detail texture) or luminance.
 float g_surfCavity = 0.0;
@@ -490,7 +490,7 @@ vec2 surfaceEnvBrdf(float rough, float nv) {
 // The local lights' streaks in the water film at this fragment (linear light,
 // before the exposure): the lights of the tiled list (the physical lamps and
 // low beams at their physical intensity, the other kinds at their classic
-// value; the combat lights at the head of the list, B4, at their own linear
+// value; the combat lights at the head of the list at their own linear
 // light, which no night factor scales), or the draw's own list.
 vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
     vec3 sum = vec3(0.0);
@@ -627,7 +627,7 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
     a *= (1.0 - (ground ? kWetGroundDarken : kWetDarken) * soak * w) * mix(1.0, kWetDampDark, pud.y * (1.0 - pud.x)) *
          mix(1.0, kWetPuddleDark, pud.x);
     // Outside its puddles the ground's film shows as a deeper colour, not as a
-    // shine (the owner: only puddles reflect): asphalt and gravel, which soak
+    // shine (only puddles reflect): asphalt and gravel, which soak
     // up little, darken by their film instead.
     if (ground) a *= 1.0 - kWetGroundFilmDark * film * (1.0 - pud.x);
     mirror = pud.x;
@@ -747,8 +747,8 @@ SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool te
         // Rough natural surfaces (soil, grass, cloth, plaster, brick) shadow
         // their own microfacets: GGX's broad lobe on them reads as an even
         // grey sheen that takes the warmth out of a sunlit facade and lifts
-        // its dark windows (the materials track found the grazing glare), so
-        // it keeps 0.15 of itself from roughness 0.9 down from 0.55.
+        // its dark windows (a grazing glare), so it keeps 0.15 of itself from
+        // roughness 0.9 down from 0.55.
         float roughCut = mix(1.0, 0.15, smoothstep(0.55, 0.9, rough) * (1.0 - metal));
         o.sun = litSun.rgb * (D * vis * nl * kSurfPi * sunVisibility * roughCut) * F;
     }

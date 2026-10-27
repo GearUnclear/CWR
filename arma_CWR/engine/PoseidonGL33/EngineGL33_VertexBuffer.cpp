@@ -373,7 +373,7 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
         {
             _worldDepthCleared = true; // the post pass's other stages have no world depth this frame
             // A vehicle interior follows: no sky above it to take light from
-            // or reflect (the surfaces lane).
+            // or reflect (the surfaces switch).
             SurfaceEnterInterior();
         }
         mask |= GL_DEPTH_BUFFER_BIT;
@@ -447,7 +447,7 @@ void EngineGL33::DestroySSAATarget()
         glDeleteRenderbuffers(1, &_ssaaDepthRb);
     if (_ssaaResolveRb)
         glDeleteRenderbuffers(1, &_ssaaResolveRb);
-    // The surfaces lane's target was attachment 1 of the frame target.
+    // The surfaces switch's target was attachment 1 of the frame target.
     DestroySurfaceTarget();
     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
     _ssaaW = _ssaaH = 0;

@@ -17,7 +17,7 @@
 //     stages after them read that frame (PostFrame::frameColor);
 //   - Ao: ambient occlusion (Alchemy/SAO style) at half resolution from the
 //     depth buffer, blurred with a depth-aware separable filter;
-//   - Air (EngineGL33_PostAir.cpp, B8): sun beams, headlight cones, the aerial
+//   - Air (EngineGL33_PostAir.cpp): sun beams, headlight cones, the aerial
 //     haze and the valley mist, marched at half resolution on the linear depth
 //     and applied at full resolution over the frame the stages before it
 //     left (PostFrame::frameColor) into airOutTex, which the bloom and the
@@ -39,7 +39,7 @@
 //   - Temporal and Sharpen (EngineGL33_PostTemporal.cpp): the TAA resolve of
 //     the jittered frame with its history, then a bounded sharpen back into
 //     the frame target; with TAA off, Sharpen alone is the luma sharpen
-//     (contrast-adaptive, brightness only, B11). When Sharpen runs the
+//     (contrast-adaptive, brightness only). When Sharpen runs the
 //     composite draws into the TAA input instead of the frame target;
 //   - DebugView: a diagnostic view of a post buffer over the frame.
 // The other stage of the list (combat scatter) lands with its feature. The
@@ -279,7 +279,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         p.progAirBlur = link(PostShader::AirBlur);
         p.progAirMean = link(PostShader::AirMean);
         p.progAirApply = link(PostShader::AirApply);
-        // The surfaces lane's horizon occlusion; without it the Ao stage keeps
+        // The surfaces switch's horizon occlusion; without it the Ao stage keeps
         // the stock occlusion.
         p.progGtao = link(PostShader::Gtao);
         p.progGtaoAccum = link(PostShader::GtaoAccum);
@@ -346,7 +346,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     p.airMistTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
     p.airMeanTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, false);
     p.airOutTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, true);
-    // The surfaces lane's target, resolved (read texel by texel).
+    // The surfaces switch's target, resolved (read texel by texel).
     p.surfTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
     // Its occlusion accumulated over frames (ping-pong, half res: r the
     // occlusion, g the view depth it was found at).
@@ -502,7 +502,7 @@ void EngineGL33::EndWorldScene()
     // timestamp, so the world section holds all of them).
     if (_remasterPrograms || (_gpuTiming && worldDrawn))
         FlushAndFreeAllQueues(_queueNo);
-    // The surfaces lane: the world's draws are in; the HUD and the post pass
+    // Surface light: the world's draws are in; the HUD and the post pass
     // draw buffer 0 only.
     EndSurfaceTarget();
     const bool surfWritten = _surfFrameWritten;
@@ -550,7 +550,7 @@ void EngineGL33::EndWorldScene()
     PostFrameGeometry(f);
     rm::PostFrameInputs in;
     in.ambientOcclusion = _lighting.ambientOcclusion;
-    // The surfaces lane's debug views show the forward terms alone.
+    // The surfaces switch's debug views show the forward terms alone.
     if (rm::SurfaceDebugView(_lighting.debugView) > 0.0f)
         in.ambientOcclusion = 0.0f;
     in.bloom = _lighting.bloom;
@@ -589,11 +589,11 @@ void EngineGL33::EndWorldScene()
         in.ssrTags && (in.ssr || GetFrameCounter() % static_cast<std::uint32_t>(rm::kSsrShareProbeFrames) == 0 ||
                        in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
     // The combat shadow mask of the next frame traces through this frame's
-    // linear depth (B4).
+    // linear depth.
     in.combatMask = combatWasActive && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
                     _featureGates[rm::Feature::CombatShadows].on;
     f.combatScatter = combatWasActive;
-    // The surfaces lane: a vehicle interior drawn with the surface target on
+    // Surface light: a vehicle interior drawn with the surface target on
     // gets its own occlusion (its depth is all the frame has).
     const bool surfReady = surfWritten && _surfRb && _post.progGtao;
     in.surfaceInterior = surfReady && !in.worldDepth;
@@ -605,7 +605,7 @@ void EngineGL33::EndWorldScene()
     f.plan = rm::PlanPostStages(in);
     if (f.plan.Empty())
         return; // nothing to add: leave the frame as drawn
-    // The surfaces lane: the shares the world wrote replace the frame alpha's,
+    // Surface light: the shares the world wrote replace the frame alpha's,
     // and the Ao stage runs the horizon occlusion (when it runs at all).
     f.surfaces = surfReady;
     f.surfaceInterior = in.surfaceInterior;
@@ -711,7 +711,7 @@ void EngineGL33::PostResolve(const PostFrame& f)
     glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
     if (f.surfaces)
     {
-        // The surfaces lane's target (attachment 1): its samples averaged, as
+        // The surfaces switch's target (attachment 1): its samples averaged, as
         // the colour's.
         glReadBuffer(GL_COLOR_ATTACHMENT1);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.surfFbo);
@@ -759,7 +759,7 @@ void EngineGL33::PostAo(const PostFrame& f)
     const PostTargets& p = _post;
     if (f.surfaces)
     {
-        // The surfaces lane: the horizon-based occlusion (psPostGtao,
+        // Surface light: the horizon-based occlusion (psPostGtao,
         // SurfaceLight.hpp), into the same target as the stock one.
         const GLuint prog = p.progGtao;
         glUseProgram(prog);
@@ -778,8 +778,8 @@ void EngineGL33::PostAo(const PostFrame& f)
         // Under TAA the frames are accumulated (PostSurfaceAccumulate): fewer
         // slices a frame.
         const bool accumulate = f.plan.Runs(rm::PostStage::Temporal) && p.progGtaoAccum;
-        // At night under the camera one slice a frame (look director round 2:
-        // the night's fill is dim, and the TAA turn covers the directions).
+        // At night under the camera one slice a frame (the night's fill is dim, and the
+        // TAA turn covers the directions).
         const bool nightAo = f.camera && _camera.nightEffect > 0.5f;
         const int slices = accumulate ? (nightAo ? 1 : rm::kGtaoTemporalSlices) : rm::kGtaoSlices;
         Set4(prog, "gtaoSlices", static_cast<float>(slices), 0.0f, 0.0f, 0.0f);
@@ -829,7 +829,7 @@ void EngineGL33::PostAo(const PostFrame& f)
 
 void EngineGL33::PostSurfaceAccumulate(const PostFrame& f)
 {
-    // The surfaces lane's occlusion over frames: this frame's (blurred) laid
+    // The surfaces switch's occlusion over frames: this frame's (blurred) laid
     // over the last frames' as reprojected by its depth (the TAA resolve's
     // camera mapping), kGtaoHistoryWeight of the history kept where it held
     // the same surface. Under TAA only (the pattern turns only there); a frame
@@ -949,9 +949,9 @@ void EngineGL33::PostComposite(const PostFrame& f)
     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-    // The combat lights' scattering in the air (none without them; B4).
+    // The combat lights' scattering in the air (none without them).
     SetCombatScatterUniforms(p.progComposite, f.combatScatter ? _combat.exposure : 0.0f);
-    // The surfaces lane: the resolved surface target on unit 6's 2D target
+    // Surface light: the resolved surface target on unit 6's 2D target
     // (the world programs read unit 6's array target, which stays bound; the
     // unit's sampler object is nearest, clamped, which is what this read
     // wants), the occlusion's power and the multi-bounce correction.
@@ -1009,7 +1009,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
         Set4(p.progComposite, "camGolden", _camera.goldenGain.r, _camera.goldenGain.g, _camera.goldenGain.b, 0.0f);
         // No screen-space shafts under the camera: their 40-step radial march
         // drew a fan of streaks and a hatch round a low sun, in the frame's
-        // focal point; the air pass's beams (B8) are the camera's sun beams.
+        // focal point; the air pass's beams are the camera's sun beams.
         // w: the width of the rods' warmth fade (camRod.w its start).
         Set4(p.progComposite, "camGlow", plan.bloomStrength * _lighting.camBloom * 0.1f, 0.0f,
              static_cast<float>(f.w) / static_cast<float>(std::max(f.h, 1)),

@@ -1,12 +1,11 @@
-// Remastered lighting: the volumetric fog's shaders (the Air post stage, the
-// look lane "fog"; EngineGL33_PostFog.cpp runs them, and
-// Graphics/Remaster/VolumetricFog.hpp holds the medium, the slice layout and
-// the C++ mirrors). No GL code, so the unit tests compile the sources the
-// engine builds; kPostShaders (EngineGL33_PostShaders.cpp) assembles them from
-// these pieces and from three pieces of the remastered prelude: the
-// LitConstants block, the terrain and clouds piece and the sky piece, so the
-// air reads the same rig, cloud field, horizon map, canopy shadows and sky
-// table as the shading.
+// Remastered lighting: the volumetric fog's shaders (the Air post stage;
+// EngineGL33_PostFog.cpp runs them, and Graphics/Remaster/VolumetricFog.hpp
+// holds the medium, the slice layout and the C++ mirrors). No GL code, so the
+// unit tests compile the sources the engine builds; kPostShaders
+// (EngineGL33_PostShaders.cpp) assembles them from these pieces and from three
+// pieces of the remastered prelude: the LitConstants block, the terrain and
+// clouds piece and the sky piece, so the air reads the same rig, cloud field,
+// horizon map, canopy shadows and sky table as the shading.
 //
 // Four passes:
 //   - psFogInject: a froxel volume (cells of 8 to 16 pixels, 48 to 96
@@ -377,7 +376,7 @@ vec4 fogCell(vec3 rel) {
 // kFogTapZ, kFogTapXY). No sample moves between frames, so the history (it
 // keeps 0.88 of the last frame) only smooths the light's own changes (the
 // ring, the shadows, the camera's motion) and can neither pump nor travel.
-// (The dawn valley, 2026-10-23, twice: one jittered point per cell at the
+// (Two earlier samplings failed in a dawn valley: one jittered point per cell at the
 // frame's golden-ratio offset left the history a residual of the same sign
 // over whole regions, and the far haze and the valley mist pumped as one
 // sheet; that offset turned per cell by an interleaved-gradient pattern is a
@@ -415,7 +414,7 @@ vec4 fogSlice(float s, vec3 dirZ) {
                 // Through a fixed tetrahedral blur of a quarter cell and slice
                 // per axis ([1 6 1] / 8): the mean of the blur the old read at
                 // the jittered point gave the stored volume, which is the
-                // mist's softness in the approved look.
+                // mist's softness in the shipped look.
                 vec3 tq = vec3(puv, pt), te = vec3(kFogHistoryBlur) / fogGrid.xyz;
                 vec4 hist = 0.25 * (texture(fogHistory, tq + te * vec3(1.0, 1.0, 1.0)) +
                                     texture(fogHistory, tq + te * vec3(1.0, -1.0, -1.0)) +
@@ -459,16 +458,16 @@ void main() {
     // a little less for the outer ones. (The taps' mean read the azimuths past
     // the screen's edge, never seen, as doubt, so the columns along the edges
     // took up to half of the model's paler colour: a pale smear down the left
-    // of a clear noon vista, look fix "veil". Azimuths out of view still fade
-    // to the model as their measurements age.)
+    // of a clear noon vista. Azimuths out of view still fade to the model as
+    // their measurements age.)
     float ringSure = 0.0;
-    // Each tap at this column's own angle to the sun (look fix "dawn"): the
-    // ring holds the sky a few degrees above the land, toward a low sun the
-    // aureole's flank; the haze over ground under the horizon is farther from
-    // the sun and takes less of its forward scattering (FogRingPhaseGain). The
-    // sky table's own parts at the tap's direction (row 1: where the ring
-    // measured it) say how much of that sky is the haze's phase. Only under a
-    // clear sky (the table is the clear sky's).
+    // Each tap at this column's own angle to the sun: the ring holds the sky a
+    // few degrees above the land, toward a low sun the aureole's flank; the
+    // haze over ground under the horizon is farther from the sun and takes less
+    // of its forward scattering (FogRingPhaseGain). The sky table's own parts
+    // at the tap's direction (row 1: where the ring measured it) say how much
+    // of that sky is the haze's phase. Only under a clear sky (the table is the
+    // clear sky's).
     float phaseOn = litAtmo.z > 0.0 ? clamp(fogWeather.z, 0.0, 1.0) * (1.0 - fogNightAir.w) : 0.0;
     float phaseCol = phaseOn > 0.0 ? skyMiePhase(dot(d, skySunDir())) : 0.0;
     for (int k = -4; k <= 4; ++k) {
@@ -757,8 +756,8 @@ void main() {
 // into); rgb linear, a how sure (1 measured this frame, decaying while out of
 // view; 0 never seen: the model's colour then). A second row holds where that
 // colour was measured: r the sine of the samples' mean elevation, a as sure
-// (the injection takes the sun's phase at that direction back out, look fix
-// "dawn"; VolumetricFog.hpp FogRingPhaseGain).
+// (the injection takes the sun's phase at that direction back out;
+// VolumetricFog.hpp FogRingPhaseGain).
 const char kPostFogRingGLSL[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D colorTex;  // unit 0: the resolved frame (display)
@@ -817,9 +816,9 @@ void main() {
         // classic horizon fill (the horizon polygon, drawn in the classic fog
         // colour up to 3.4 degrees, kFogHorizonFillTop) or the land if it
         // stands higher, and stay low: the deck over the horizon is the air's
-        // colour. (Look fix "plate": sampled just above the land they read
-        // the fill, a warm flat grey, and every far ridge and the fill itself
-        // took it: a painted plate under a cooler, brighter sky.)
+        // colour. (Sampled just above the land they read the fill, a warm flat
+        // grey, and every far ridge and the fill itself took it: a painted
+        // plate under a cooler, brighter sky.)
         float base = mix(max(found, radians(2.0)), max(found + radians(0.3), radians(kRingGreyFromDeg)), ringCtl.z);
         float stepDeg = mix(1.0, 0.6, ringCtl.z);
         vec4 s[3];
@@ -1275,9 +1274,9 @@ void main() {
             // Only under a clear sky: in rain or fog the air past the far end
             // is the fill's own grey (a darker plate there read as a wall).
             float wetSky = clamp(fogSkyWeather.x * 2000.0, 0.0, 1.0);
-            // (look director round 2: a lighter surface and thicker air over
-            // it: the darker band read as a murky brown strip under a dawn
-            // sky; the far air at the horizon is as bright as the sky.)
+            // (A lighter surface and thicker air over it: the darker band read
+            // as a murky brown strip under a dawn sky; the far air at the
+            // horizon is as bright as the sky.)
             base = lin0 * mix(mix(vec3(0.62, 0.66, 0.72), vec3(0.80, 0.83, 0.88), n), vec3(1.0), max(rest, wetSky));
         }
         if (!(under)) {
@@ -1324,9 +1323,9 @@ void main() {
     // polygon in the classic fog colour, up to kApplyFillTop over the eye's
     // horizon, and the dome's flat band under it) is the air's colour, the
     // deck over the horizon the ring measured, and the deck above the fill
-    // sinks into it over its height fade (about 5 degrees). (Look fix
-    // "plate": the fill kept the classic fog's warm grey, a painted plate
-    // between the hills with a hard seam at its top under a cooler sky.)
+    // sinks into it over its height fade (about 5 degrees). (Otherwise
+    // the fill kept the classic fog's warm grey, a painted plate between the
+    // hills with a hard seam at its top under a cooler sky.)
     float greyFill = max(wetSky, clamp(fogSkyWeather.z, 0.0, 1.0));
     if ((sky || z > 0.98 * fogDepth.x) && greyFill > 0.0 && airValid) {
         vec2 ndcW = cuv * 2.0 - 1.0;
@@ -1358,9 +1357,9 @@ void main() {
             // near-black world channel (code 0 or 1, under the old 1e-5
             // floor) gave a ratio of 0 or 0.5 with the overlay nowhere near,
             // so dark needles in a fogged tree line came out as single black
-            // and green pixels (look fix round 5 "mist"; kSnapRatioEps is far
-            // under code 1, (1/255)^2.2 = 5e-6, so a black mask over the
-            // darkest world still darkens it whole).
+            // and green pixels (kSnapRatioEps is far under code 1, (1/255)^2.2
+            // = 5e-6, so a black mask over the darkest world still darkens it
+            // whole).
             vec3 over = camDecode(cOver.rgb);
             outLin = outLin * clamp((over + kSnapRatioEps) / (lin0 + kSnapRatioEps), 0.0, 1.0) +
                      max(over - lin0, vec3(0.0));

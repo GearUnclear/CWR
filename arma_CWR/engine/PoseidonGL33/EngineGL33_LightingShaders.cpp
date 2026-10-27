@@ -408,7 +408,7 @@ layout(std140) uniform LitConstants {
     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
-    vec4 litHaze;         // 78: aerial haze (B8) or volumetric fog: x classic fog factor scale minus 1 (0 = the classic fog)
+    vec4 litHaze;         // 78: aerial haze or volumetric fog: x classic fog factor scale minus 1 (0 = the classic fog)
     vec4 litSurface;      // 79: surfaces: x on, y specular strength, z canopy occlusion, w SH sky light weight
     vec4 litSurfCanopy;   // 80: the canopy heightfield: x height base (m), y height range (m), z 1 / extent, w valid
     vec4 litSurface2;     // 81: surfaces: x relief strength, y debug view (1 sky light, 2 canopy sky, 3 specular), z sky tint
@@ -439,7 +439,7 @@ uniform sampler2D skyDensity;              // unit 9: cloud density of the weath
 uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
 uniform sampler2D canopyHeight;            // unit 10: the canopy heightfield, r top, g density (Canopy.hpp)
 uniform sampler2D groundField;             // unit 12: the land's own colour per terrain vertex, a = built (wet weather)
-// The surfaces lane's per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
+// The surfaces' per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
 // sets it on the bound program): x SurfaceClass, y DrawKind, z 1 = a blending
 // texture (glass, a canvas window, a sign).
 uniform vec4 surfClass;
@@ -455,7 +455,7 @@ in vec4 vCrown;
 flat in float vLitMode;
 
 layout(location = 0) out vec4 fragColor;
-// The surface target (the look lane "surface", SurfaceLight.hpp): r the share
+// The surface target (the surfaces switch, SurfaceLight.hpp): r the share
 // of the pixel's light the post pass's horizon occlusion may darken (sky,
 // bounce and sky reflection, after the fog), g the square root of the albedo's
 // luminance (the multi-bounce correction), b the direct sun's share (the
@@ -855,13 +855,12 @@ namespace
 static const char s_psRemasterShade[] = R"(
 // Sun visibility of the last shaded fragment (water reuses it for its glint).
 float g_sunVisibility = 1.0;
-// Share of the fragment's radiance that comes from combat light (B4): the
+// Share of the fragment's radiance that comes from combat light: the
 // night-eye desaturation (finishFragment) is a model of dim moonlit vision; a
 // surface lit by a flash or a fire keeps its colour.
 float g_combatShare = 0.0;
 
-// Tree crowns lit as a canopy (crownCanopy, litHorizonSun.w; research track
-// shade, crown V18). The sun reaching a leaf crosses the crown in front of it:
+// Tree crowns lit as a canopy (crownCanopy, litHorizonSun.w). The sun reaching a leaf crosses the crown in front of it:
 // the path, in crown radii, from the leaf to the crown's surface toward the
 // sun, with the crown taken as a sphere around the ellipsoid's centre (the
 // leaf at |e| = vCrown.w along the gradient direction `cnDir`).
@@ -916,7 +915,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     } else if (foliage) {
         nLight = nCast;
     }
-    // The low sun's crown factors follow the sun, not the moon key (B3): the
+    // The low sun's crown factors follow the sun, not the moon key: the
     // night's crowns keep them under the moon.
     if (canopy) {
         float lowSun = 1.0 - smoothstep(12.0, 35.0, skySunElevation());
@@ -992,7 +991,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     g_lightForced = litMatForced.rgb;
     vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0))) + g_physicalLocal * litGround.w;
     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
-    // Combat light (B4): linear HDR, outside the classic clamp; none unless
+    // Combat light: linear HDR, outside the classic clamp; none unless
     // the frame's combat lights are in the tiled list. The flash highlight is
     // for vehicles, glass and gear: the terrain's segments differ in specular
     // material, and a low flash's glint drew their borders on the ground.
@@ -1025,7 +1024,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         SurfaceSpec sp = surfaceSpecular(foliage ? nLight : (relief ? g_surfBumpN : n), v, a,
                                          foliage ? sunShadow : sunVisibility, terrain,
                                          foliage, skyVisibility * canopyVis * crownSky * shade);
-        // Combat light (B4) shades as the local lights; its highlight adds.
+        // Combat light shades as the local lights; its highlight adds.
         vec3 diffuseLight = a * (sp.diffuse * (direct + ambient + moon + local + combat) + emissive) * wetKeep;
         vec3 specSun = sp.sun * sunOn;
         vec3 specSky = sp.sky * sunOn;
@@ -1054,7 +1053,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         g_surfSun =
             foliage ? 0.0 : clamp(dot((a * direct * sp.diffuse * wetKeep + specSun) * exposure, kLuma) / sum, 0.0, 1.0);
         g_surfAlbedo = sqrt(clamp(dot(a, kLuma), 0.0, 1.0));
-        // The lane's debug views (debug=12..14): the sky light a white surface
+        // The surfaces' debug views (debug=12..14): the sky light a white surface
         // takes, the canopy's sky visibility, the specular alone.
         if (litSurface2.y > 0.5) {
             ambientShare = 0.0;
@@ -1204,8 +1203,8 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
         if (litFlags.x < -0.5 && !camSun) r0.rgb *= litCamera.y;
         // The dome's smooth gradients (a sunset's glow) are stored in eight
         // bits and stretched by the camera's curve: half an LSB of white
-        // noise breaks the steps into grain the TAA averages (look director
-        // round 2: concentric arcs under a low sun).
+        // noise breaks the steps into grain the TAA averages (without it,
+        // concentric arcs under a low sun).
         if (vLitMode > 1.5 && vLitMode < 2.5) {
             uvec2 hp = uvec2(gl_FragCoord.xy);
             uint h = hp.x * 1973u + hp.y * 9277u + 26699u;
@@ -1251,7 +1250,7 @@ void main() {
         r0 = vec4(rgb, classic.a);
     } else if (vLitMode > 0.5) {
         vec3 albedo = t0.rgb * constColor.rgb;
-        // Relief and cavities (the surfaces lane): the texture's luminance as
+        // Relief and cavities (the surfaces switch): the texture's luminance as
         // a height, by the draw's surface class, fading out by 60 m; leaves,
         // glass and rubber take none.
         float reliefK = surfaceClassRelief(surfClass.x) * litSurface2.x;
@@ -1291,8 +1290,7 @@ void main() {
 )";
 
 // The terrain main (PSDetail: the land and, until the sea gets its own shader,
-// the sea). Terrain detail (B11, research track texsharp; the C++ mirror of
-// this math and its constants is Graphics/Remaster/TerrainDetail.hpp): every
+// the sea). Terrain detail (the C++ mirror of this math and its constants is Graphics/Remaster/TerrainDetail.hpp): every
 // terrain square is one 128 px texture over 50 m, so from about 10 m to 150 m
 // a texel covers 5 to 15 pixels and the slope is a bilinear smear. The land
 // takes three luminance-only layers, each relative to the local mean, so hue
@@ -1425,7 +1423,7 @@ void main() {
         // The land takes the rain (puddles, the grass share from the ground
         // field); the sea on this program does not.
         g_wetDraw = litDetail.w > 0.5 ? 1 : 3;
-        // Relief (the surfaces lane): the detail texture's grain as a height
+        // Relief (the surfaces switch): the detail texture's grain as a height
         // (its alpha, times the square's luminance, as the albedo takes it),
         // read from the texture around the fragment, fading out by 80 m.
         if (litSurface.x > 0.5 && (litSurface2.x > 0.0 || litSurface3.x > 0.0) && litDetail.w > 0.5) {
@@ -1462,7 +1460,7 @@ void main() {
                 float bf = dot(textureLod(tex0, vUV0, max(lodB, 0.5)).rgb, kLuma);
                 // Held to a few percent of light: deeper, the texture's
                 // metre-wide dark patches (colour, not pits) read as wet stains
-                // at noon (look director).
+                // at noon).
                 g_surfCavity += clamp((bf - bm) * (kSurfBaseCavity * litSurface3.x * fadeB), -0.035, 0.03);
             }
         }

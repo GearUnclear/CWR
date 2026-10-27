@@ -15,8 +15,7 @@
 #include <string>
 #include <vector>
 
-// The volumetric fog and atmosphere (the look lane "fog";
-// Graphics/Remaster/VolumetricFog.hpp, EngineGL33_PostFog.cpp): the froxel
+// The volumetric fog and atmosphere (Graphics/Remaster/VolumetricFog.hpp, EngineGL33_PostFog.cpp): the froxel
 // grid and its exponential slices, the medium's weather and time rules, the
 // classic fog's moved edge, the fog floor, the Air stage's plan and gate, and
 // the shaders' agreement with the C++ mirrors.
@@ -127,9 +126,8 @@ TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opac
     // A level line of sight at the fog floor through setFog 0.3 with VD 1500:
     // what is left of a surface at the classic fog's end is a small share, and
     // about half at two thirds of it, where the classic linear fog is half
-    // (look fix round 4: about half at a third of it, with the mist and the
-    // humid air on top, and the first 150 m keep more than 60 %; look fix
-    // round 5: a light mist, about two thirds at a third of it).
+    // (a light mist: about two thirds at a third of it; the first 150 m keep
+    // more than 60 %).
     FogInputs in = ClearNoon();
     in.viewDistance = 1500.0f;
     in.fog = 0.3f;
@@ -159,8 +157,7 @@ TEST_CASE("Volumetric fog: clear noon is thin haze and blue air; grey sky, rain 
     CHECK(noon.mistSigma == 0.0f);   // no morning, no night, a clear sky
     CHECK(noon.groundSigma == 0.0f); // and no humid ground air
     // Far hills 3 km out at noon sit in visible air, not in a wash (the full
-    // density; the near thinning leaves them more: the look director's 8 km
-    // summer visibility).
+    // density; the near thinning leaves them more: an 8 km summer visibility).
     const float noonLeft = std::exp(-FogExtinctionAt(noon, 50.0f, 0.0f) * 3000.0f);
     CHECK(noonLeft > 0.12f);
     CHECK(noonLeft < 0.45f);
@@ -181,8 +178,8 @@ TEST_CASE("Volumetric fog: clear noon is thin haze and blue air; grey sky, rain 
     wet.rain = 1.0f;
     const FogMedium rain = ComputeFogMedium(wet, t, true);
     CHECK(rain.weatherSigma > 0.0f);
-    // Rain's air is mostly its weather fog (look director round 2): the
-    // whole is thicker than the dry deck's haze.
+    // Rain's air is mostly its weather fog: the whole is thicker than the dry
+    // deck's haze.
     CHECK(rain.hazeSigma + rain.weatherSigma > overcast.hazeSigma);
     CHECK(rain.mistSigma > overcast.mistSigma);
     CHECK(rain.weatherHeight == Catch::Approx(kRainHazeHeight));
@@ -830,8 +827,8 @@ TEST_CASE("Volumetric fog: the Air stage applies it with the world depth and rep
     CHECK(PlanPostStages(alone).Runs(PostStage::Composite));
     // No world depth and none saved: no fog (a vehicle interior with the
     // world's depth saved runs it, test_post_stages.cpp). An optics overlay (glow off): the fog
-    // still runs, its apply leaves the overlay's mask as drawn (look director
-    // round 2: the mist popped away whenever the player aimed).
+    // still runs, its apply leaves the overlay's mask as drawn (else
+    // the mist popped away whenever the player aimed).
     for (bool depth : {false, true})
         for (bool glow : {false, true})
         {
@@ -853,7 +850,7 @@ TEST_CASE("Volumetric fog: it supersedes B8's air pass, whose gates it turns off
 {
     GateInputs in;
     in.sunElevationDeg = 8.0f;
-    in.sunAzimuthDeg = 90.0f; // a morning sun in view: B8's beams and mist would run
+    in.sunAzimuthDeg = 90.0f; // a morning sun in view: the air pass's beams and mist would run
     in.sunViewAngleDeg = 20.0f;
     LightingTuning t{};
     const FeatureGates on = ComputeFeatureGates(in, t);
@@ -978,8 +975,8 @@ TEST_CASE("Volumetric fog: the shaders read the slices and the medium the way Vo
     const std::string glow = gl::PostShaderSource(gl::PostShader::FogGlow);
     REQUIRE_FALSE(glow.empty());
     CHECK(CountOf(glow, "int mode = int(glowCtl.x + 0.5);") == 1);
-    // The forward fog keeps only the edge through litHaze.x (the surfaces
-    // lane's share reads the same factor).
+    // The forward fog keeps only the edge through litHaze.x (the surfaces'
+    // share reads the same factor).
     CHECK(CountOf(gl::RemasterFragmentCommon(), "r0.rgb = mix(fogC, r0.rgb, min(vFogTC * (1.0 + litHaze.x), 1.0));") ==
           1);
 }
@@ -1134,11 +1131,11 @@ FogSamplingResidual MeasureFogSampling(TapsOf tapsOf, double panCellsPerFrame)
 TEST_CASE("Volumetric fog: the injection samples fixed points of each cell, so its history can neither pump nor travel",
           "[remaster][fog][Shaders]")
 {
-    // The dawn valley (2026-10-23), twice. One jittered point per cell at the
+    // Two earlier samplings failed in a dawn valley. One jittered point per cell at the
     // frame's golden-ratio offset: the history's residual of the jitter had
     // the same sign over whole regions, and the far haze and the valley mist
     // pumped as one sheet. Then that offset turned per cell by an
-    // interleaved-gradient pattern (d91a08e0): the pump went, but the pattern
+    // interleaved-gradient pattern: the pump went, but the pattern
     // is a ramp over the cells, so with the frame's step the next frame's
     // field was this frame's read one cell over, and the residual slid
     // through the fog about a cell per frame: wind. Now each cell's two taps
@@ -1291,7 +1288,7 @@ TEST_CASE("Volumetric fog: a grey day fades its ridges into the deck's air, with
 
     // A dry full deck thickens the clear haze by 1 + kHazeGreyGain: the
     // ridges from 1 to 3 km fade one behind the other instead of one wash
-    // (look fix "plate": the gain was 3.5, everything past 1.5 km was gone).
+    // (at a gain of 3.5 everything past 1.5 km was gone).
     const LightingTuning t{};
     const FogMedium noon = ComputeFogMedium(ClearNoon(), t, true);
     FogInputs grey = ClearNoon();
@@ -1335,7 +1332,7 @@ TEST_CASE("Volumetric fog: the air's light takes the sun's phase at each column'
     CHECK(FogRingPhaseGain(0.4f, 0.6f, 3.0f, 3.0f) == Catch::Approx(1.0f));
     // The haze over ground under the horizon toward a low sun is farther
     // from the sun than the ring's sample above the land: less of the sun's
-    // forward light (dawn_valley's bay, look fix "dawn").
+    // forward light (a bay in a dawn valley).
     const float gBay = FogRingPhaseGain(0.2f, 0.8f, 0.7f, 3.2f);
     CHECK(gBay < 0.5f);
     CHECK(gBay > 0.2f); // the sky's own part stays
@@ -1383,9 +1380,9 @@ TEST_CASE("Volumetric fog: the ring reads the deck over the horizon fill, the ap
 TEST_CASE("Volumetric fog: an optic overlay's darkening leaves a near-black world channel alone",
           "[remaster][fog][Shaders]")
 {
-    // Look fix round 5 "mist": world channels at code 0 or 1 gave a ratio of
-    // 0 or 0.5 under the old 1e-5 floor with no overlay there (black and green
-    // specks over a fogged tree line).
+    // World channels at code 0 or 1 gave a ratio of 0 or 0.5 under the old 1e-5
+    // floor with no overlay there (black and green specks over a fogged tree
+    // line).
     const float code1 = std::pow(1.0f / 255.0f, 2.2f);
     CHECK(FogSnapRatio(0.0f, 0.0f) == Catch::Approx(1.0f));
     CHECK(FogSnapRatio(code1, code1) == Catch::Approx(1.0f));
@@ -1413,8 +1410,8 @@ TEST_CASE("Volumetric fog: the composite's occlusion acts on the surface's light
     // on a second target (an optic overlay's untouched mask: 1), and the
     // composite scales the surface target's sky and sun shares by it before
     // the occlusion and the contact shadow: darkening the whole pixel by that
-    // share of the occlusion is darkening the surface under the fog (look fix
-    // "plate": dark rims at the foot of fogged trees).
+    // share of the occlusion is darkening the surface under the fog (dark
+    // rims at the foot of fogged trees).
     const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
     CHECK(CountOf(apply, "layout(location = 0) out vec4 fragColor;") == 1);
     CHECK(CountOf(apply, "layout(location = 1) out vec4 fogVeil;") == 1);
@@ -1442,8 +1439,8 @@ TEST_CASE("Volumetric fog: the composite's occlusion acts on the surface's light
 TEST_CASE("Volumetric fog: clear noon air is nearly clear for the first kilometre, the far ridges keep theirs",
           "[remaster][fog]")
 {
-    // Look fix "veil": the clear haze's optical depth along a level ray 300 m
-    // up, with the eye's near thinning (the injection's hazeKeep).
+    // The clear haze's optical depth along a level ray 300 m up, with the eye's
+    // near thinning (the injection's hazeKeep).
     LightingTuning t;
     const FogMedium noon = ComputeFogMedium(ClearNoon(), t, true);
     auto tau = [](const FogMedium& m, float to)
@@ -1454,7 +1451,8 @@ TEST_CASE("Volumetric fog: clear noon air is nearly clear for the first kilometr
             sum += sigma * FogHazeNearKeep(m, s);
         return static_cast<float>(sum);
     };
-    // The round-2 thinning (0.35 at the eye, the whole at 2.5 km).
+    // A stronger near thinning to compare with (0.35 at the eye, the whole at
+    // 2.5 km).
     FogMedium before = noon;
     before.hazeNearKeep = 0.35f;
     before.hazeNearTo = 2500.0f;
@@ -1482,10 +1480,10 @@ TEST_CASE("Volumetric fog: clear noon air is nearly clear for the first kilometr
 TEST_CASE("Volumetric fog: the air's colour along the screen's edges is the ring's, not the model's",
           "[remaster][fog][Shaders]")
 {
-    // Look fix "veil": a column takes the ring's measured sky as surely as the
-    // freshest of its nine taps (the taps past the screen's edge, never seen,
-    // no longer count as doubt), and the model only where the ring's
-    // measurements in that azimuth have aged.
+    // A column takes the ring's measured sky as surely as the freshest of its
+    // nine taps (the taps past the screen's edge, never seen, no longer count
+    // as doubt), and the model only where the ring's measurements in that
+    // azimuth have aged.
     const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
     REQUIRE_FALSE(inject.empty());
     CHECK(CountOf(inject, "ringSure = max(ringSure, a.a * (1.0 - 0.1 * abs(float(k))));") == 1);
@@ -1496,8 +1494,8 @@ TEST_CASE("Volumetric fog: the air's colour along the screen's edges is the ring
 
 TEST_CASE("Volumetric fog: a day's setFog is a light mist, the foggy night keeps its density", "[remaster][fog]")
 {
-    // Look fix round 4 "mist": setFog's own fog by day is kSetFogBoost of the
-    // classic extinction (0.75), the night's is round 3's (2 x 2.8).
+    // setFog's own fog by day is kSetFogBoost of the classic extinction
+    // (0.75), the night's keeps the earlier 2 x 2.8.
     FogInputs day = ClearNoon();
     day.viewDistance = 1500.0f;
     day.fog = 0.3f;
@@ -1522,10 +1520,10 @@ TEST_CASE("Volumetric fog: a day's setFog is a light mist, the foggy night keeps
     CHECK(ComputeFogMedium(dryGrey, LightingTuning{}, true).hazeSigma > g.hazeSigma);
     CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * 150.0f) > 0.6f);
     CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * g.zFar) > 0.08f);
-    // Look fix round 5 "mist": a light mist, not dense fog. The rock 300 m out
-    // keeps about two thirds of itself and the tree line 500 m out half, at
-    // the fog floor, while the classic fog end (742 m) is still faded; the
-    // clear haze gives way to setFog's own mist by day.
+    // A light mist, not dense fog. The rock 300 m out keeps about two thirds of
+    // itself and the tree line 500 m out half, at the fog floor, while the classic
+    // fog end (742 m) is still faded; the clear haze gives way to setFog's own
+    // mist by day.
     const float sig = FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f);
     CHECK(std::exp(-sig * 300.0f) > 0.6f);
     CHECK(std::exp(-sig * 500.0f) > 0.45f);
@@ -1550,9 +1548,9 @@ TEST_CASE("Volumetric fog: a day's setFog is a light mist, the foggy night keeps
 
 TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough to read", "[fog][remaster]")
 {
-    // Look fix round 4 "sun": at 14 the shafts of pine_rays barely read; the
-    // near pass's soft cap was not the limit (the beams are linear in the
-    // gain there), so the gain itself rose. The beams' gain at fogSun 1.
+    // At 14 the morning shafts between pines barely read; the near pass's soft
+    // cap was not the limit (the beams are linear in the gain there), so the
+    // gain itself rose. The beams' gain at fogSun 1.
     CHECK(kFogBeamGain >= 30.0f);
     CHECK(kFogBeamGain <= 40.0f);
     CHECK(kFogBeamReach == Catch::Approx(180.0f));
@@ -1562,9 +1560,9 @@ TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough t
 // ---- The classic weather floor ---------------------------------------------
 //
 // Fog and rain must draw at least as dense as the classic fog drew them in
-// the same weather, at every distance up to the view distance (owner rule:
-// AI sight follows the drawn air, so the drawn air must be able to present
-// a dense fog). A clear sky keeps the clearer drawn air.
+// the same weather, at every distance up to the view distance (AI sight
+// follows the drawn air, so the drawn air must be able to present a dense
+// fog). A clear sky keeps the clearer drawn air.
 
 namespace
 {
@@ -1795,10 +1793,9 @@ TEST_CASE("Volumetric fog: AI sight takes the mist banks' upper bound", "[remast
     CHECK(ai < FogSeenTransmittanceFrom(m, *map, a, b));
 }
 
-// The table behind the floor (GR12 fogfollow report): per weather and
-// distance, the classic fog / the medium alone / the drawn air with the
-// floor, then the worst excess over classic before and after. Hidden; run
-// with "[fogtable]".
+// The table behind the floor: per weather and distance, the classic fog / the
+// medium alone / the drawn air with the floor, then the worst excess over
+// classic before and after. Hidden; run with "[fogtable]".
 TEST_CASE("Volumetric fog: classic and drawn fog by weather and distance (table)", "[.][fogtable]")
 {
     const std::shared_ptr<const FogSightMap> map = FlatSightMap();
