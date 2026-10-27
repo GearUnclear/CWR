@@ -244,6 +244,8 @@ void EngineGL33::DestroyPostPrograms()
     }
     p.vao = 0;
     p.programsTried = false;
+    p.programsFailed = false;
+    p.failedW = p.failedH = 0;
     p.airUnavailable = false;
     DestroySsrPrograms();
 }
@@ -302,6 +304,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
             !p.progMeter)
         {
             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
+            p.programsFailed = true;
             p.unavailable = true;
         }
         if (!p.progGtao)
@@ -309,10 +312,14 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         if (!p.progGtaoAccum)
             LOG_ERROR(Graphics, "GL33 post: the occlusion accumulation failed to build; each frame's stands alone");
     }
-    if (p.unavailable)
+    if (p.programsFailed)
         return false;
     if (p.w == w && p.h == h && p.colorTex)
         return true;
+    // Targets that came back incomplete are tried again only at another size
+    // (a resize, a render scale change) or after a reset, not every frame.
+    if (p.unavailable && w == p.failedW && h == p.failedH)
+        return false;
 
     DestroyPostTargets();
     const int hw = (w + 1) / 2;
@@ -420,11 +427,16 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     BindFrameRenderTarget();
     if (!complete)
     {
-        LOG_WARN(Graphics, "GL33 post: targets {}x{} incomplete; remastered post effects disabled", w, h);
+        LOG_WARN(Graphics, "GL33 post: targets {}x{} incomplete; remastered post effects off until the size changes",
+                 w, h);
         DestroyPostTargets();
         p.unavailable = true;
+        p.failedW = w;
+        p.failedH = h;
         return false;
     }
+    p.unavailable = false;
+    p.failedW = p.failedH = 0;
     p.w = w;
     p.h = h;
     LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts, air and linear depth {}x{}; TAA history half float)", w,

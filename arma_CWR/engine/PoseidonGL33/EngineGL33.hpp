@@ -1137,7 +1137,12 @@ class EngineGL33 : public Engine
         // kMeterHeight RGBA16F, read back through _camera's ring.
         unsigned int meterTex = 0, meterFbo = 0, progMeter = 0;
         bool programsTried = false;
+        // The post pass is off: its programs failed (until the next reset) or
+        // its targets came back incomplete at failedW x failedH (tried again
+        // when the size changes).
         bool unavailable = false;
+        bool programsFailed = false;
+        int failedW = 0, failedH = 0;
     } _post;
     // TAA frame state (EngineGL33_PostTemporal.cpp, Graphics/Remaster/TemporalAA.hpp).
     struct TaaState
