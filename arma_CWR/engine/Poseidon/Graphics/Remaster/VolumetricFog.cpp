@@ -167,6 +167,45 @@ float WeatherVisibility(float fog, float rain, float viewDistance)
     return std::max(range, 0.1f);
 }
 
+ClassicFogRange ClassicFogRangeFor(float fog, float rain, float viewDistance, float nightVisibility)
+{
+    // Landscape.cpp's tactical range, with its night factor.
+    const float fogVisibility = 1.0f - Clamp01(fog) * 0.95f;
+    const float r = Clamp01(rain);
+    const float vd = std::max(viewDistance, 1.0f);
+    const float noFog = ((1.0f - r) * vd + kRainVisibility * r) * std::clamp(nightVisibility, 0.75f, 1.0f);
+    const float defaultDistance = std::min(900.0f, noFog) * fogVisibility;
+    const float currentDistance = noFog * fogVisibility;
+    float tactical = defaultDistance;
+    constexpr float kThreshold = 0.6f;
+    if (fogVisibility > kThreshold)
+    {
+        const float i = (fogVisibility - kThreshold) / (1.0f - kThreshold);
+        tactical = i * currentDistance + (1.0f - i) * defaultDistance;
+    }
+    tactical = std::max(tactical, 0.1f);
+    // Scene::ResetFog: the horizon at the tactical range (20 m past it, at
+    // most the view distance), the drawn fog over 0.3 .. 1 of it.
+    const float horizon = std::min(tactical + 20.0f, vd) - 20.0f;
+    ClassicFogRange out;
+    out.end = std::max(std::min(horizon, tactical), 0.1f);
+    out.start = std::min(horizon * 0.3f, out.end * 0.4f);
+    out.tactical = tactical;
+    return out;
+}
+
+float ClassicFogKeep(const ClassicFogRange& r, float dist)
+{
+    const float range = r.end - r.start;
+    const float linear = range > 1e-3f ? Clamp01(1.0f - (dist - r.start) / range) : (dist < r.end ? 1.0f : 0.0f);
+    // Scene.cpp FogExponential (1 - exp(ln 20 (start - d) / end)), held at
+    // its end value past the end as its table is.
+    constexpr float kLn20 = 2.9957322736f;
+    const float d = std::min(dist, r.tactical);
+    const float tactical = d <= r.start ? 1.0f : std::exp(kLn20 * (r.start - d) / std::max(r.tactical, 0.1f));
+    return std::min(linear, tactical);
+}
+
 float FogGreySky(float skyThrough)
 {
     return Clamp01((0.65f - skyThrough) / 0.5f);
@@ -301,6 +340,10 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
     m.sky = 1.0f;
     m.lights = std::max(t.fogLights, 0.0f);
     m.fogEdgeScale = VolFogEdgeScale(in.fogStart, in.fogEnd);
+    // The classic weather floor: what the weather adds to the classic fog.
+    m.classicFloor = true;
+    m.classicWeather = ClassicFogRangeFor(fog, rain, vd, in.nightVisibility);
+    m.classicClear = ClassicFogRangeFor(0.0f, 0.0f, vd, in.nightVisibility);
     return m;
 }
 
@@ -380,6 +423,22 @@ float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float abov
     return sigma;
 }
 
+float FogSightMistBound(const FogMedium& m, float y, float floorY, float aboveGround, float layer)
+{
+    float sigma = m.groundSigma *
+                  std::exp(-std::max(aboveGround, 0.0f) / std::max(m.groundHeight, 1.0f) -
+                           std::max(y - floorY, 0.0f) / kGroundHazePool) *
+                  FogGroundAirTop(m, y, floorY, layer);
+    const float depth = layer * m.mistLayer;
+    if (depth > 0.5f)
+    {
+        const float above = y - (floorY + depth * kMistBankTopMax);
+        const float shape = above <= 0.0f ? 1.0f : std::exp(-above / std::max(m.mistFall, 1.0f));
+        sigma += m.mistSigma * (1.0f + (kMistBankPeak - 1.0f) * Clamp01(m.mistNoise)) * shape;
+    }
+    return sigma;
+}
+
 float FogSeenExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer, float dist)
 {
     // The injection's weights (EngineGL33_PostFogShaders.cpp fogMediumAt).
@@ -402,6 +461,17 @@ float FogEdgeKeep(const FogMedium& m, float dist)
         return dist < m.fogEnd ? 1.0f : 0.0f;
     const float classic = Clamp01(1.0f - (dist - m.fogStart) / range);
     return std::min(classic * std::max(m.fogEdgeScale, 1.0f), 1.0f);
+}
+
+float FogClassicFloor(const FogMedium& m, float dist)
+{
+    if (!m.classicFloor)
+        return 1.0f;
+    const float weather = ClassicFogKeep(m.classicWeather, dist);
+    const float clear = ClassicFogKeep(m.classicClear, dist);
+    if (weather >= clear)
+        return 1.0f;
+    return clear > 1e-6f ? weather / clear : 0.0f;
 }
 
 float FogExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer)
@@ -581,9 +651,10 @@ namespace
 // meets the same points). The parts that are zero are skipped; the clear haze
 // and air hang on the height alone, which steps evenly along the line, so
 // their exponentials step by a constant ratio. False for a line too short to
-// march (both 0).
+// march (both 0). With `banksBound` the valley mist takes its drifting
+// banks' upper bound (FogSightMistBound) in place of the even layer.
 bool MarchSight(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3], float len,
-                float& tauFrom, float& tauTo)
+                float& tauFrom, float& tauTo, bool banksBound)
 {
     tauFrom = tauTo = 0.0f;
     if (len < 1e-3f)
@@ -637,7 +708,8 @@ bool MarchSight(const FogMedium& m, const FogSightMap& map, const float from[3],
         if (wet)
         {
             const float layer = SampleGrid(map, map.layer, x, z);
-            const float s = FogSightExtinctionAt(m, y, floorY, y - ground, layer);
+            const float s = banksBound ? FogSightMistBound(m, y, floorY, y - ground, layer)
+                                       : FogSightExtinctionAt(m, y, floorY, y - ground, layer);
             tauFrom += s * mistKeep(dFrom);
             tauTo += s * mistKeep(dTo);
         }
@@ -662,8 +734,8 @@ float FogSeenTransmittanceFrom(const FogMedium& m, const FogSightMap& map, const
     if (edge <= 0.0f || !map.Valid())
         return std::max(edge, 0.0f);
     float tauEye = 0.0f, tauTo = 0.0f;
-    MarchSight(m, map, eye, to, len, tauEye, tauTo);
-    return edge * std::exp(-tauEye);
+    MarchSight(m, map, eye, to, len, tauEye, tauTo, false);
+    return edge * std::min(std::exp(-tauEye), FogClassicFloor(m, len));
 }
 
 float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3])
@@ -675,9 +747,11 @@ float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, c
     // The less of the two views: the eye's own surroundings stay legible in
     // the drawn air, so from inside a mist bank the way out looks clearer
     // than the way in; the AI takes the way in, as the player there sees it.
+    // The mist's banks drift with each machine's frames, so AI sight takes
+    // their upper bound: never in clear air where a bank may be drawn.
     float tauFrom = 0.0f, tauTo = 0.0f;
-    MarchSight(m, map, from, to, len, tauFrom, tauTo);
-    return edge * std::exp(-std::max(tauFrom, tauTo));
+    MarchSight(m, map, from, to, len, tauFrom, tauTo, true);
+    return edge * std::min(std::exp(-std::max(tauFrom, tauTo)), FogClassicFloor(m, len));
 }
 
 float FogSightTransmittance(const FogSightSnapshot& s, const float from[3], const float to[3])

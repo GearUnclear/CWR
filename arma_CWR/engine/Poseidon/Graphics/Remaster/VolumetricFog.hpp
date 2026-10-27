@@ -167,6 +167,12 @@ constexpr float kMistSigma = 2.0e-3f;
 // legible: their density near the eye is kMistNearKeep of it, rising to the
 // whole from kMistNearFrom to kMistNearTo metres away.
 constexpr float kMistNearKeep = 0.15f;
+// The drawn mist's banks (EngineGL33_PostFogShaders.cpp fogMediumAt): the
+// density times up to kMistBankPeak where they are thickest (at full
+// mistNoise), the layer's top up to kMistBankTopMax times its depth over the
+// fog floor (1.35 from the broad octave plus half of the fine one's 0.35).
+constexpr float kMistBankPeak = 1.7f;
+constexpr float kMistBankTopMax = 1.35f + 0.5f * 0.35f;
 // The clear haze and air keep this share near the eye, the whole from
 // kHazeNearFrom to kHazeNearTo away: the depth is in the distance (blue from
 // about 3 km), the first kilometre keeps its colour and contrast.
@@ -296,6 +302,20 @@ struct FogInputs
     int year = 1985;      // the date: it seeds the misty mornings
     int dayOfYear = 180;  // 0 = 1 January
     float aridity = 0.0f; // 0 green .. 1 desert (FogAridity of the map's ground colours)
+    // The classic engine's night factor on its tactical visibility
+    // (Landscape.cpp: the sun's diffuse red times 4, 0.75 .. 1; 1 by day).
+    float nightVisibility = 1.0f;
+};
+
+// The classic engine's fog for a weather (Landscape.cpp tactical range with
+// its night factor, Scene::ResetFog ranges): the drawn linear fog runs from
+// `start` to `end`, the AI's tactical fog (FogExponential) from `start` to
+// `tactical`.
+struct ClassicFogRange
+{
+    float start = 0.0f;
+    float end = 0.0f;
+    float tactical = 0.0f;
 };
 
 struct FogMedium
@@ -339,12 +359,21 @@ struct FogMedium
     // fogEdgeScale, the forward fog's edge (FogEdgeKeep).
     float fogStart = 0.0f;
     float fogEnd = 1500.0f;
+    // The classic weather floor (FogClassicFloor): the classic fog of this
+    // weather and of a clear sky at the same darkness.
+    bool classicFloor = false;
+    ClassicFogRange classicWeather;
+    ClassicFogRange classicClear;
 };
 
 // The classic engine's tactical visibility (m) for setFog `fog`, rain
 // `rain` and a view distance (Landscape.cpp, the night factor at 1): the
 // distance at which its fog ends.
 float WeatherVisibility(float fog, float rain, float viewDistance);
+ClassicFogRange ClassicFogRangeFor(float fog, float rain, float viewDistance, float nightVisibility);
+// What the classic fog leaves of a surface `dist` metres out: the denser of
+// its drawn linear fog and its tactical fog.
+float ClassicFogKeep(const ClassicFogRange& r, float dist);
 // How grey the sky is for the air's colour: 0 at a sky-through of 0.65 and
 // over, 1 at 0.15 and under. Under a grey sky the horizon ring measures the
 // deck above the horizon fill, and the apply lays the air over that fill.
@@ -445,11 +474,25 @@ float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float abov
 // kMistNearKeep, the weather fog none), without the mist's banks. What AI
 // sight integrates.
 float FogSeenExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer, float dist);
+// FogSightExtinctionAt with the mist's banks at their upper bound (the
+// density times 1 + (kMistBankPeak - 1) mistNoise, the layer's top at
+// kMistBankTopMax of its depth): the banks drift with each machine's own
+// frames, so AI sight takes the most mist any of them may draw there.
+float FogSightMistBound(const FogMedium& m, float y, float floorY, float aboveGround, float layer);
 // The forward fog's share left `dist` metres out: the classic linear fog over
 // fogStart..fogEnd times fogEdgeScale, at most 1 (with the volume on: 1 up to
 // kFogEdgeStart of the end, 0 at the end). AI sight ends where the drawn
 // world ends.
 float FogEdgeKeep(const FogMedium& m, float dist);
+// The most the drawn air may leave of a surface `dist` metres out: the part
+// of the classic fog the weather adds (the classic fog of the weather over
+// that of a clear sky at the same darkness, at most 1). The drawn air and AI
+// sight keep the lesser of the medium's transmittance and this, so fog and
+// rain are never thinner than the classic fog drew them, while a clear sky
+// keeps the clearer air (the floor is 1). Where the weather's classic range
+// is shorter than the clear sky's start (heavy fog, heavy rain) the floor is
+// the classic fog itself.
+float FogClassicFloor(const FogMedium& m, float dist);
 // The humid ground air's share at height y (1 in the low ground, 0 from
 // kGroundAirFade above the fog floor plus the mist layer plus kGroundAirTop).
 float FogGroundAirTop(const FogMedium& m, float y, float floorY, float layer);

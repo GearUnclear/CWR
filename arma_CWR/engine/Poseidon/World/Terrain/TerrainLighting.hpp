@@ -36,10 +36,17 @@ void TerrainCanopyObjectDestroyed(int objectId);
 // WorldFogInputs, the shipped knobs and FogSightClassic. Deterministic: every
 // machine follows the same synced weather and date and the same island.
 void SimulateFogSight(Landscape* land);
-// The simulating machine's Lighting row is Classic (the Options value last
-// applied): AI sight then takes the classic tactical fog only. False on a
-// machine that never applied one (a dedicated server, a headless client).
+// The simulating machine draws the classic fog: it applied the Options and
+// its Lighting row is Classic, or it draws the classic fog anyway
+// (FogSightDrawsClassic). AI sight then takes the classic tactical fog only.
+// False on a machine that never applied the Options (a dedicated server, a
+// headless client): the default, Remastered.
 bool FogSightClassic();
+// This machine's renderer draws the classic fog whatever the row says: the
+// remastered shaders are not active (they failed to build, or the engine's
+// Lighting switch) or the post effects switch (LightingTuning::postEffects,
+// which gates the volumetric fog) is off. False without an engine.
+bool FogSightDrawsClassic();
 // Clears AI sight (classic) and drops the map. Called on world teardown.
 void ShutdownFogSight();
 // The fog's inputs from the world: the sun, the weather, the classic fog's

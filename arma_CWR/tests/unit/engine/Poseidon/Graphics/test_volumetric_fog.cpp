@@ -8,6 +8,7 @@
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -387,7 +388,10 @@ float ClassicTactical(float d, float start, float end)
 // What the drawn air leaves along a line, integrated finely: the medium's
 // extinction with its near thinning around `from` (FogSeenExtinctionAt) and
 // the forward fog's edge. Independent of the eight-sample march.
-float DrawnAlong(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3], int samples = 2000)
+// With `banksBound` the mist takes its drifting banks' upper bound
+// (FogSightMistBound), as AI sight does.
+float DrawnAlong(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3],
+                 bool banksBound = false, int samples = 2000)
 {
     const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
     const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
@@ -400,8 +404,18 @@ float DrawnAlong(const FogMedium& m, const FogSightMap& map, const float from[3]
         const int gz = std::clamp(static_cast<int>(std::lround(z / map.cellSize)), 0, map.size - 1);
         const size_t c = static_cast<size_t>(gz) * map.size + gx;
         tau += FogSeenExtinctionAt(m, y, map.floorY[c], y - map.ground[c], map.layer[c], len * t);
+        if (banksBound)
+        {
+            const float d = len * t;
+            const float u = std::clamp((d - kMistNearFrom) / (kMistNearTo - kMistNearFrom), 0.0f, 1.0f);
+            const float mistKeep = kMistNearKeep + (1.0f - kMistNearKeep) * u * u * (3.0f - 2.0f * u);
+            tau += (FogSightMistBound(m, y, map.floorY[c], y - map.ground[c], map.layer[c]) -
+                    FogSightExtinctionAt(m, y, map.floorY[c], y - map.ground[c], map.layer[c])) *
+                   mistKeep;
+        }
     }
-    return FogEdgeKeep(m, len) * static_cast<float>(std::exp(-tau * len / samples));
+    return FogEdgeKeep(m, len) *
+           std::min(static_cast<float>(std::exp(-tau * len / samples)), FogClassicFloor(m, len));
 }
 
 // The old link's share (before AI sight followed the whole drawn air): the
@@ -529,11 +543,15 @@ TEST_CASE("Volumetric fog: AI sight is the drawn air along the same line, the ed
             INFO("line from " << line[0][0] << "," << line[0][2] << " to " << line[1][0] << "," << line[1][2]);
             const float ai = FogSightTransmittance(*s, line[0], line[1]);
             CHECK(ai == FogSightTransmittanceThrough(drawn, *map, line[0], line[1]));
-            // Eight samples come close to the finely integrated drawn air,
-            // the lesser of the views from either end.
-            const float fine =
-                std::min(DrawnAlong(drawn, *map, line[0], line[1]), DrawnAlong(drawn, *map, line[1], line[0]));
+            // Eight samples come close to the finely integrated drawn air
+            // with the mist's banks at their most, the lesser of the views
+            // from either end; never clearer than the even mist drawn.
+            const float fine = std::min(DrawnAlong(drawn, *map, line[0], line[1], true),
+                                        DrawnAlong(drawn, *map, line[1], line[0], true));
             CHECK(ai == Catch::Approx(fine).margin(0.03).epsilon(0.08));
+            const float even =
+                std::min(DrawnAlong(drawn, *map, line[0], line[1]), DrawnAlong(drawn, *map, line[1], line[0]));
+            CHECK(ai <= even + 0.03f);
             CHECK(ai == Catch::Approx(FogSightTransmittance(*s, line[1], line[0])).epsilon(1e-5)); // both ways
         }
     }
@@ -606,7 +624,10 @@ TEST_CASE("Volumetric fog: AI sight out of a mist bank is no clearer than the pl
     const std::vector<float> h = ValleyHeights(64);
     const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
     REQUIRE(map);
-    const std::shared_ptr<const FogSightSnapshot> s = MakeFogSightSnapshot(MistyMorning(), false, map);
+    // Without the classic weather floor, which caps both views alike here.
+    auto made = std::make_shared<FogSightSnapshot>(*MakeFogSightSnapshot(MistyMorning(), false, map));
+    made->medium.classicFloor = false;
+    const std::shared_ptr<const FogSightSnapshot> s = made;
     REQUIRE(s->medium.mistSigma > 0.0f);
     const float bank[3] = {1900.0f, 21.7f, 1000.0f};  // in the valley's mist
     const float ridge[3] = {2600.0f, 91.7f, 1000.0f}; // on the wall, over it
@@ -620,7 +641,9 @@ TEST_CASE("Volumetric fog: AI sight out of a mist bank is no clearer than the pl
     CHECK(aiInBank == Catch::Approx(aiOnRidge).epsilon(kUlp));
     CHECK(aiInBank <= in + kUlp);   // no clearer than the player on the ridge sees the AI
     CHECK(aiOnRidge <= out + kUlp); // nor than the player in the bank sees the AI
-    CHECK(aiInBank == Catch::Approx(in).epsilon(kUlp));
+    // The mist's banks at their most (FogSightMistBound) leave AI sight below
+    // the even mist's view in.
+    CHECK(aiInBank < in);
 }
 
 TEST_CASE("Volumetric fog: with the Lighting row on Classic, AI sight is the classic fog only",
@@ -1533,4 +1556,298 @@ TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough t
     CHECK(kFogBeamGain >= 30.0f);
     CHECK(kFogBeamGain <= 40.0f);
     CHECK(kFogBeamReach == Catch::Approx(180.0f));
+}
+
+
+// ---- The classic weather floor ---------------------------------------------
+//
+// Fog and rain must draw at least as dense as the classic fog drew them in
+// the same weather, at every distance up to the view distance (owner rule:
+// AI sight follows the drawn air, so the drawn air must be able to present
+// a dense fog). A clear sky keeps the clearer drawn air.
+
+namespace
+{
+// The classic engine's fog, written out from Landscape.cpp (the tactical
+// range with its night factor) and Scene::ResetFog (the drawn fog range) as
+// an independent reference for ClassicFogRangeFor.
+ClassicFogRange ClassicReference(float fog, float rain, float vd, float nightVis)
+{
+    const float rainVis = (1 - rain) * vd + 350 * rain;
+    const float fogVis = 1.0f - fog * 0.95f;
+    const float noFog = rainVis * nightVis;
+    const float def = std::min(900.0f, noFog) * fogVis;
+    const float cur = noFog * fogVis;
+    float tac = def;
+    if (fogVis > 0.6f)
+    {
+        const float i = (fogVis - 0.6f) / 0.4f;
+        tac = i * cur + (1 - i) * def;
+    }
+    tac = std::max(tac, 0.1f);
+    const float horizonZ = std::min(tac + 20, vd);
+    float maxR = horizonZ - 20, minR = (horizonZ - 20) * 0.3f;
+    maxR = std::min(maxR, tac);
+    minR = std::min(minR, maxR * 0.4f);
+    ClassicFogRange r;
+    r.start = minR;
+    r.end = maxR;
+    r.tactical = tac;
+    return r;
+}
+
+struct FloorWeather
+{
+    const char* name;
+    float fog, rain, sky, night, nightVis, elev, az, vd;
+};
+
+// Heavy fog and rain: high setFog, low visibility, a grey sky with rain, fog
+// at dawn and at night, other view distances.
+const FloorWeather kHeavy[] = {
+    {"setFog 0.5 under a grey sky", 0.5f, 0.0f, 0.3f, 0.0f, 1.0f, 40, 180, 1500},
+    {"setFog 0.6", 0.6f, 0.0f, 1.0f, 0.0f, 1.0f, 40, 180, 1500},
+    {"setFog 0.8", 0.8f, 0.0f, 1.0f, 0.0f, 1.0f, 40, 180, 1500},
+    {"setFog 1", 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 40, 180, 1500},
+    {"rain 1 under an overcast", 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 40, 180, 1500},
+    {"rain 0.8 under an overcast", 0.0f, 0.8f, 0.1f, 0.0f, 1.0f, 40, 180, 1500},
+    {"setFog 0.6 with rain 0.6", 0.6f, 0.6f, 0.0f, 0.0f, 1.0f, 40, 180, 1500},
+    {"setFog 0.6 at dawn", 0.6f, 0.0f, 1.0f, 0.0f, 1.0f, 2, 90, 1500},
+    {"setFog 0.8 at dawn", 0.8f, 0.0f, 0.6f, 0.0f, 1.0f, 2, 90, 1500},
+    {"setFog 0.6 at night", 0.6f, 0.0f, 1.0f, 1.0f, 0.75f, -30, 270, 1500},
+    {"rain 1 at night", 0.0f, 1.0f, 0.0f, 1.0f, 0.75f, -30, 270, 1500},
+    {"setFog 0.6 at view distance 3000", 0.6f, 0.0f, 1.0f, 0.0f, 1.0f, 40, 180, 3000},
+    {"setFog 0.5 at view distance 900", 0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 40, 180, 900},
+};
+
+FogInputs FloorInputs(const FloorWeather& w)
+{
+    const ClassicFogRange c = ClassicReference(w.fog, w.rain, w.vd, w.nightVis);
+    FogInputs in;
+    in.fog = w.fog;
+    in.rain = w.rain;
+    in.skyThrough = w.sky;
+    in.nightEffect = w.night;
+    in.nightVisibility = w.nightVis;
+    in.sunElevationDeg = w.elev;
+    in.sunAzimuthDeg = w.az;
+    in.viewDistance = w.vd;
+    in.fogStart = c.start; // the Scene's classic fog range, as WorldFogInputs reads it
+    in.fogEnd = c.end;
+    in.dayOfYear = 180;
+    return in;
+}
+
+std::shared_ptr<const FogSightMap> FlatSightMap()
+{
+    static const std::shared_ptr<const FogSightMap> map = []
+    {
+        std::vector<float> h(256 * 256, 0.0f);
+        return BuildFogSightMap(h.data(), 256, 50.0f);
+    }();
+    return map;
+}
+} // namespace
+
+TEST_CASE("Volumetric fog: the classic fog range is the classic engine's", "[remaster][fog][aisight]")
+{
+    for (float vd : {900.0f, 1500.0f, 3000.0f})
+        for (float nightVis : {1.0f, 0.85f, 0.75f})
+            for (float fog : {0.0f, 0.1f, 0.3f, 0.45f, 0.6f, 1.0f})
+                for (float rain : {0.0f, 0.4f, 1.0f})
+                {
+                    INFO("vd " << vd << " night " << nightVis << " fog " << fog << " rain " << rain);
+                    const ClassicFogRange a = ClassicFogRangeFor(fog, rain, vd, nightVis);
+                    const ClassicFogRange b = ClassicReference(fog, rain, vd, nightVis);
+                    CHECK(a.start == Catch::Approx(b.start).margin(1e-3));
+                    CHECK(a.end == Catch::Approx(b.end).margin(1e-3));
+                    CHECK(a.tactical == Catch::Approx(b.tactical).margin(1e-3));
+                }
+    // The keep: the denser of the linear drawn fog and the tactical fog.
+    const ClassicFogRange r = ClassicFogRangeFor(0.6f, 0.0f, 1500.0f, 1.0f);
+    CHECK(ClassicFogKeep(r, 0.5f * r.start) == 1.0f);
+    CHECK(ClassicFogKeep(r, r.end) == 0.0f);
+    const float mid = 0.5f * (r.start + r.end);
+    CHECK(ClassicFogKeep(r, mid) == Catch::Approx(std::exp(2.9957323f * (r.start - mid) / r.tactical)));
+}
+
+TEST_CASE("Volumetric fog: heavy fog and rain draw at least as dense as the classic fog", "[remaster][fog][aisight]")
+{
+    const std::shared_ptr<const FogSightMap> map = FlatSightMap();
+    REQUIRE(map);
+    for (const FloorWeather& w : kHeavy)
+    {
+        INFO(w.name);
+        const FogInputs in = FloorInputs(w);
+        const FogMedium m = ComputeFogMedium(in, LightingTuning{}, true);
+        REQUIRE(m.classicFloor);
+        FogMedium bare = m;
+        bare.classicFloor = false;
+        const ClassicFogRange classic = ClassicReference(w.fog, w.rain, w.vd, w.nightVis);
+        const ClassicFogRange clearSky = ClassicReference(0.0f, 0.0f, w.vd, w.nightVis);
+        bool floorBites = false;
+        for (float d = 5.0f; d <= w.vd; d += 5.0f)
+        {
+            INFO("at " << d << " m");
+            const float from[3] = {3000.0f, 1.7f, 6000.0f};
+            const float to[3] = {3000.0f + d, 1.7f, 6000.0f};
+            const float keep = ClassicFogKeep(classic, d);
+            const float ai = FogSightTransmittanceThrough(m, *map, from, to);
+            const float drawn = FogSeenTransmittanceFrom(m, *map, from, to);
+            // Where the weather's classic fog ends before the clear sky's
+            // begins, the drawn air is at least the classic fog; past the
+            // clear sky's start it may keep the clear sky's own share (the
+            // clearer air a clear day draws).
+            const float clearKeep = ClassicFogKeep(clearSky, d);
+            const float bound = classic.end <= clearSky.start || clearKeep <= 0.0f ? keep : keep / clearKeep;
+            CHECK(ai <= bound + 1e-5f);
+            CHECK(drawn <= bound + 1e-5f);
+            CHECK(ai <= drawn + 1e-6f);
+            if (FogSeenTransmittanceFrom(bare, *map, from, to) > keep + 1e-3f)
+                floorBites = true;
+        }
+        // By day the medium alone draws these thinner than classic somewhere:
+        // the floor is what holds them. (At night its fog is denser anyway.)
+        if (w.night == 0.0f)
+            CHECK(floorBites);
+    }
+}
+
+TEST_CASE("Volumetric fog: a clear sky keeps the clearer drawn air (the floor is 1)", "[remaster][fog][aisight]")
+{
+    const std::shared_ptr<const FogSightMap> map = FlatSightMap();
+    REQUIRE(map);
+    const FloorWeather clear[] = {
+        {"clear noon", 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 60, 180, 1500},
+        {"a dry grey day", 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 40, 180, 1500},
+        {"a clear dawn", 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 2, 90, 1500},
+        {"a clear night", 0.0f, 0.0f, 1.0f, 1.0f, 0.75f, -30, 270, 1500},
+        {"clear at view distance 3000", 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 60, 180, 3000},
+    };
+    for (const FloorWeather& w : clear)
+    {
+        INFO(w.name);
+        const FogMedium m = ComputeFogMedium(FloorInputs(w), LightingTuning{}, true);
+        FogMedium bare = m;
+        bare.classicFloor = false;
+        for (float d = 5.0f; d <= w.vd; d += 5.0f)
+        {
+            INFO("at " << d << " m");
+            CHECK(FogClassicFloor(m, d) == 1.0f);
+            const float from[3] = {3000.0f, 1.7f, 6000.0f};
+            const float to[3] = {3000.0f + d, 1.7f, 6000.0f};
+            CHECK(FogSeenTransmittanceFrom(m, *map, from, to) == FogSeenTransmittanceFrom(bare, *map, from, to));
+        }
+    }
+    // Light weather: the floor takes only what the weather adds, never the
+    // clear sky's own classic fog.
+    const FloorWeather light = {"setFog 0.1", 0.1f, 0.0f, 1.0f, 0.0f, 1.0f, 40, 180, 1500};
+    const FogMedium m = ComputeFogMedium(FloorInputs(light), LightingTuning{}, true);
+    const ClassicFogRange lightClassic = ClassicReference(0.1f, 0.0f, 1500.0f, 1.0f);
+    const ClassicFogRange clearSky = ClassicReference(0.0f, 0.0f, 1500.0f, 1.0f);
+    for (float d = 5.0f; d <= 1500.0f; d += 5.0f)
+        CHECK(FogClassicFloor(m, d) >= ClassicFogKeep(lightClassic, d) - 1e-6f);
+    CHECK(FogClassicFloor(m, 0.9f * lightClassic.start) == 1.0f);
+    CHECK(FogClassicFloor(m, 0.5f * (lightClassic.end + clearSky.start)) < 1.0f);
+    // Not applied (Classic lighting): no floor.
+    CHECK(FogClassicFloor(ComputeFogMedium(FloorInputs(kHeavy[1]), LightingTuning{}, false), 300.0f) == 1.0f);
+}
+
+TEST_CASE("Volumetric fog: AI sight takes the mist banks' upper bound", "[remaster][fog][aisight]")
+{
+    const FogMedium m = ComputeFogMedium(MistyMorning(), LightingTuning{}, true);
+    REQUIRE(m.mistSigma > 0.0f);
+    REQUIRE(m.mistNoise > 0.0f);
+    const float layer = 20.0f, floorY = 10.0f;
+    const float depth = layer * m.mistLayer;
+    // The drawn banks at their thickest (EngineGL33_PostFogShaders.cpp
+    // fogMediumAt: the bank's smoothstep at 1, the top at its highest).
+    auto drawnMax = [&](float y)
+    {
+        const float above = y - (floorY + depth * (1.35f + 0.5f * 0.35f));
+        const float shape = above <= 0.0f ? 1.0f : std::exp(-above / m.mistFall);
+        return m.mistSigma * (1.0f + 0.7f * m.mistNoise) * shape;
+    };
+    auto evenMist = [&](float y)
+    {
+        const float above = y - (floorY + depth);
+        return m.mistSigma * (above <= 0.0f ? 1.0f : std::exp(-above / m.mistFall));
+    };
+    for (float over : {1.0f, 0.5f * depth, 1.2f * depth, 1.5f * depth, 3.0f * depth})
+    {
+        INFO("height over the floor " << over);
+        const float y = floorY + over;
+        const float even = FogSightExtinctionAt(m, y, floorY, over, layer);
+        const float bound = FogSightMistBound(m, y, floorY, over, layer);
+        CHECK(bound >= even);
+        // The same humid ground air, the mist at the drawn banks' most.
+        CHECK(bound == Catch::Approx(even - evenMist(y) + drawnMax(y)).epsilon(1e-4));
+    }
+    // Along a line through the valley: AI sight is no clearer than the drawn
+    // view of the even layer, and darker than it where the mist lies.
+    const std::vector<float> h = ValleyHeights(64);
+    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
+    REQUIRE(map);
+    const float a[3] = {1100.0f, 21.7f, 500.0f};
+    const float b[3] = {1100.0f, 21.7f, 800.0f};
+    const float ai = FogSightTransmittanceThrough(m, *map, a, b);
+    REQUIRE(ai > 0.0f);
+    CHECK(ai < FogSeenTransmittanceFrom(m, *map, a, b));
+}
+
+// The table behind the floor (GR12 fogfollow report): per weather and
+// distance, the classic fog / the medium alone / the drawn air with the
+// floor, then the worst excess over classic before and after. Hidden; run
+// with "[fogtable]".
+TEST_CASE("Volumetric fog: classic and drawn fog by weather and distance (table)", "[.][fogtable]")
+{
+    const std::shared_ptr<const FogSightMap> map = FlatSightMap();
+    const FloorWeather ws[] = {
+        {"clear noon", 0, 0, 1, 0, 1, 60, 180, 1500},
+        {"overcast dry", 0, 0, 0, 0, 1, 40, 180, 1500},
+        {"setFog 0.3 day", 0.3f, 0, 1, 0, 1, 40, 180, 1500},
+        {"setFog 0.5 grey", 0.5f, 0, 0.3f, 0, 1, 40, 180, 1500},
+        {"setFog 0.6 day", 0.6f, 0, 1, 0, 1, 40, 180, 1500},
+        {"setFog 0.8 day", 0.8f, 0, 1, 0, 1, 40, 180, 1500},
+        {"setFog 1 day", 1.0f, 0, 1, 0, 1, 40, 180, 1500},
+        {"rain 0.5 overcast", 0, 0.5f, 0, 0, 1, 40, 180, 1500},
+        {"rain 1 overcast", 0, 1, 0, 0, 1, 40, 180, 1500},
+        {"setFog 0.6 + rain 0.6", 0.6f, 0.6f, 0, 0, 1, 40, 180, 1500},
+        {"dawn setFog 0.3", 0.3f, 0, 1, 0, 1, 2, 90, 1500},
+        {"dawn setFog 0.6", 0.6f, 0, 1, 0, 1, 2, 90, 1500},
+        {"night clear", 0, 0, 1, 1, 0.75f, -30, 270, 1500},
+        {"night setFog 0.3", 0.3f, 0, 1, 1, 0.75f, -30, 270, 1500},
+        {"night setFog 0.6", 0.6f, 0, 1, 1, 0.75f, -30, 270, 1500},
+        {"night rain 1", 0, 1, 0, 1, 0.75f, -30, 270, 1500},
+    };
+    const float ds[] = {50, 100, 200, 300, 400, 500, 700, 900, 1200};
+    for (const FloorWeather& w : ws)
+    {
+        const FogMedium m = ComputeFogMedium(FloorInputs(w), LightingTuning{}, true);
+        FogMedium bare = m;
+        bare.classicFloor = false;
+        const ClassicFogRange c = ClassicReference(w.fog, w.rain, w.vd, w.nightVis);
+        std::string line = std::string("| ") + w.name + " |";
+        float worstBefore = -1.0f, worstAfter = -1.0f;
+        for (float d = 5.0f; d <= w.vd; d += 5.0f)
+        {
+            const float from[3] = {3000.0f, 1.7f, 6000.0f};
+            const float to[3] = {3000.0f + d, 1.7f, 6000.0f};
+            const float k = ClassicFogKeep(c, d);
+            const float before = FogSeenTransmittanceFrom(bare, *map, from, to);
+            const float after = FogSeenTransmittanceFrom(m, *map, from, to);
+            worstBefore = std::max(worstBefore, before - k);
+            worstAfter = std::max(worstAfter, after - k);
+            for (float q : ds)
+                if (q == d)
+                {
+                    char cell[48];
+                    std::snprintf(cell, sizeof cell, " %.2f / %.2f / %.2f |", k, before, after);
+                    line += cell;
+                }
+        }
+        char tail[64];
+        std::snprintf(tail, sizeof tail, " %+.2f | %+.2f |", worstBefore, worstAfter);
+        std::printf("%s%s\n", line.c_str(), tail);
+    }
 }

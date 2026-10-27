@@ -4,11 +4,12 @@
 // SimulateFogSight(GLOB_LAND)) on a real Landscape, with an engine that
 // reports each render path state in turn. The pure helpers' cases live in
 // Graphics/test_volumetric_fog.cpp ([aisight]); these fail if any render path
-// state (post effects, the engine's shader switch, the fog's gates, an
-// interior view, the fog's dev and quality knobs, what the renderer drew, a
-// missing renderer) reaches AI sight, if AI sight stops being the whole drawn
-// medium, if the Lighting row's Classic setting stops reducing it to the
-// classic fog, or if the call order the link relies on breaks.
+// state (the fog's gates, an interior view, the fog's dev and quality knobs,
+// what the renderer drew, a missing renderer) reaches AI sight, if AI sight
+// stops being the whole drawn medium, if the Lighting row's Classic setting,
+// the classic shaders or the post effects off on a machine that applied the
+// Options stop reducing it to the classic fog, or if the call order the link
+// relies on breaks.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -180,7 +181,8 @@ std::string Body(const std::string& src, const std::string& signature)
 
 } // namespace
 
-TEST_CASE("AI fog sight: the simulation step ignores every render path state", "[remaster][fog][aisight]")
+TEST_CASE("AI fog sight: the simulation step ignores every render path state but what this machine draws",
+          "[remaster][fog][aisight]")
 {
     ShutdownFogSight();
     TestLand land;
@@ -202,13 +204,8 @@ TEST_CASE("AI fog sight: the simulation step ignores every render path state", "
         std::function<void()> set;
     };
     const std::vector<State> states = {
-        {"post effects off", [&] { engine.tuning.postEffects = false; }},
-        {"the engine's classic shaders (a dev switch; the Lighting row is the applied option)",
-         [&]
-         {
-             engine.tuning.remastered = false;
-             engine.remasterActive = false;
-         }},
+        {"the engine's Lighting switch alone (the remastered shaders still drawn)",
+         [&] { engine.tuning.remastered = false; }},
         {"volFog switch off", [&] { engine.tuning.features.volFog = 0.0f; }},
         {"the fog's dev knobs (density, mist)",
          [&]
@@ -335,6 +332,87 @@ TEST_CASE("AI fog sight: the Lighting row on Classic leaves the classic fog alon
     SimulateFogSight(&land);
     CHECK(rm::FogSightActive());
     CHECK(rm::FogSightTransmittance(kFrom, kTo) < 0.9f);
+    ShutdownFogSight();
+}
+
+TEST_CASE("AI fog sight: a machine drawing the classic fog leaves the classic fog alone, like the Classic row",
+          "[remaster][fog][aisight]")
+{
+    ShutdownFogSight();
+    TestLand land;
+    StageValley(land);
+    RenderStateEngine engine;
+    GEngineScope scope(&engine);
+    ApplyLightingRow(GraphicsConfig::LightingRemastered);
+
+    // The shipped switches: the whole medium.
+    CHECK_FALSE(FogSightDrawsClassic());
+    SimulateFogSight(&land);
+    REQUIRE(rm::FogSightActive());
+    const float medium = rm::FogSightTransmittance(kFrom, kTo);
+    CHECK(medium < 0.9f);
+
+    // Post effects off: this machine draws the classic fog (the volumetric
+    // fog is one of the post effects), so AI sight takes the classic tactical
+    // fog only, as with the Lighting row on Classic.
+    engine.tuning.postEffects = false;
+    CHECK(FogSightDrawsClassic());
+    CHECK(FogSightClassic());
+    SimulateFogSight(&land);
+    CHECK_FALSE(rm::FogSightActive());
+    CHECK(rm::FogSightTransmittance(kFrom, kTo) == 1.0f);
+    REQUIRE(rm::FogSightNow());
+    CHECK_FALSE(rm::FogSightNow()->volumetric);
+    CHECK(rm::FogSightMapInUse()); // the map stays for the renderer's fog floor
+    // The engine's Lighting switch does not bring the medium back.
+    engine.tuning.remastered = true;
+    SimulateFogSight(&land);
+    CHECK_FALSE(rm::FogSightActive());
+
+    // The classic shaders with the row on Remastered (the remastered ones
+    // failed to build, or the engine's Lighting switch): the classic fog is
+    // drawn, so AI sight takes it.
+    engine.tuning.postEffects = true;
+    engine.remasterActive = false;
+    CHECK(FogSightDrawsClassic());
+    SimulateFogSight(&land);
+    CHECK_FALSE(rm::FogSightActive());
+    engine.remasterActive = true;
+
+    // Back on: the medium again, the same as before.
+    CHECK_FALSE(FogSightClassic());
+    SimulateFogSight(&land);
+    CHECK(rm::FogSightActive());
+    CHECK(rm::FogSightTransmittance(kFrom, kTo) == medium);
+
+    // The fog's own knobs with post effects on still do not count.
+    engine.tuning.features.volFog = 0.0f;
+    engine.tuning.fogDensity = 2.5f;
+    SimulateFogSight(&land);
+    CHECK(rm::FogSightActive());
+    CHECK(rm::FogSightTransmittance(kFrom, kTo) == medium);
+
+    // No engine draws nothing: the default, Remastered.
+    GEngine = nullptr;
+    CHECK_FALSE(FogSightDrawsClassic());
+    CHECK_FALSE(FogSightClassic());
+    SimulateFogSight(&land);
+    CHECK(rm::FogSightActive());
+    GEngine = &engine;
+
+    // Both off together: classic, and the row alone keeps it classic when
+    // post effects come back.
+    engine.tuning = rm::LightingTuning{};
+    engine.tuning.postEffects = false;
+    ApplyLightingRow(GraphicsConfig::LightingClassic);
+    SimulateFogSight(&land);
+    CHECK_FALSE(rm::FogSightActive());
+    engine.tuning.postEffects = true;
+    SimulateFogSight(&land);
+    CHECK_FALSE(rm::FogSightActive());
+    ApplyLightingRow(GraphicsConfig::LightingRemastered);
+    SimulateFogSight(&land);
+    CHECK(rm::FogSightActive());
     ShutdownFogSight();
 }
 
@@ -471,8 +549,8 @@ TEST_CASE("AI fog sight: the engine's call path (source contract)", "[remaster][
     }
     CHECK(scanned > 500);
 
-    // The step reads the world, the island and the applied Lighting row,
-    // never a render path state or the machine's live knobs.
+    // The step reads the world, the island, the applied Lighting row and the
+    // post effects switch, never another render path state or live knob.
     const std::string lighting = ReadSource(engine / "Poseidon" / "World" / "Terrain" / "TerrainLighting.cpp");
     const std::string step = Body(lighting, "void SimulateFogSight(Landscape* land)");
     REQUIRE_FALSE(step.empty());
@@ -481,6 +559,20 @@ TEST_CASE("AI fog sight: the engine's call path (source contract)", "[remaster][
     const std::string classic = Body(lighting, "bool FogSightClassic()");
     REQUIRE_FALSE(classic.empty());
     CHECK(classic.find("AppliedGraphicsConfig()") != std::string::npos);
+    CHECK(classic.find("if (!cfg)\n        return false;") != std::string::npos);
+    CHECK(classic.find("FogSightDrawsClassic()") != std::string::npos);
+    // What this machine draws: the remastered shaders and the post effects
+    // switch, nothing else.
+    const std::string post = Body(lighting, "bool FogSightDrawsClassic()");
+    REQUIRE_FALSE(post.empty());
+    CHECK(post.find("!GEngine->LightingRemasterActive() || !GEngine->GetLightingTuning().postEffects") !=
+          std::string::npos);
+    for (const char* other : {"GetFeatureGates", "GetDrawnFogMedium", "SSAA", "nterior", "GetFrameCounter", "volFog",
+                              "fogQuality", "fogDensity", ".remastered"})
+    {
+        INFO("post effects switch reads " << other);
+        CHECK(post.find(other) == std::string::npos);
+    }
     const std::string inputs = Body(lighting, "remaster::FogInputs WorldFogInputs(const Landscape* land)");
     REQUIRE_FALSE(inputs.empty());
     for (const char* renderState :

@@ -472,6 +472,8 @@ remaster::FogInputs WorldFogInputs(const Landscape* land)
         const float azimuth = std::atan2(toSun.X(), toSun.Z()) * kDeg;
         in.sunAzimuthDeg = azimuth < 0.0f ? azimuth + 360.0f : azimuth;
         in.nightEffect = sun->NightEffect();
+        // Landscape.cpp's night factor on the classic tactical visibility.
+        in.nightVisibility = std::clamp(sun->GetDiffuse().R() * 4.0f, 0.75f, 1.0f);
     }
     if (land)
     {
@@ -535,9 +537,22 @@ bool FogSightClassic()
 {
     // The Lighting row as last applied (UI/Settings/GraphicsApply.hpp): a
     // dedicated server or a headless client never applies one and keeps the
-    // default, Remastered.
+    // default, Remastered. A machine that applied one follows what it draws.
     const GraphicsConfig* cfg = AppliedGraphicsConfig();
-    return cfg && cfg->lighting == GraphicsConfig::LightingClassic;
+    if (!cfg)
+        return false;
+    return cfg->lighting == GraphicsConfig::LightingClassic || FogSightDrawsClassic();
+}
+
+bool FogSightDrawsClassic()
+{
+    // The classic shaders (the remastered ones failed to build, or the
+    // engine's Lighting switch), or the post effects off: the volumetric fog
+    // is one of them (its pass runs only with them on). The fog's own knobs
+    // and quality do not move AI sight. No engine draws nothing.
+    if (!GEngine)
+        return false;
+    return !GEngine->LightingRemasterActive() || !GEngine->GetLightingTuning().postEffects;
 }
 
 void ShutdownFogSight()
