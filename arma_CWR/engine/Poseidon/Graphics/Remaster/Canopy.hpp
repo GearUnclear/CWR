@@ -8,9 +8,9 @@
 #include <unordered_map>
 #include <vector>
 
-// Long tree shadows at any distance (INTEGRATION-PLAN.md step B9, research
-// track hfrt): the canopy heightfield, its sun-visibility map and the rules
-// the GL backend and the shaders share. Pure, no GL, no engine state.
+// Long tree shadows at any distance: the canopy heightfield, its
+// sun-visibility map and the rules the GL backend and the shaders share. Pure,
+// no GL, no engine state.
 //
 // What the player sees: at a low sun every tree, bush, forest block and
 // building on the island casts its long shadow, also beyond the reach of the
@@ -48,10 +48,9 @@
 //     reach (cross-faded over their far fade) and multiply the sun visibility
 //     by it (CanopyReceiverVisibility is the mirror of that read).
 //
-// The plan asked for a half-resolution screen buffer built from last frame's
-// depth and accumulated over frames. A world-space map gives the same trace at
-// a fixed cost that does not grow with the screen, is paid only when the sun or
-// the camera moved enough, needs no reprojection or history, and cannot crawl.
+// A world-space map rather than a screen-space buffer: the trace has a fixed
+// cost that does not grow with the screen, is paid only when the sun or the
+// camera moved enough, needs no reprojection or history, and cannot crawl.
 //
 // Feature switch canopyShadows; gate: the sun between 2 and 25 deg and the sky
 // more than half clear (FeatureGates.cpp); the shadows fade in and out over the
@@ -259,7 +258,7 @@ constexpr float kCanopySunRecentre = 0.125f;          // the camera left the mid
 constexpr float kCanopySunEdgeFrom = 0.42f;
 constexpr float kCanopySunEdgeTo = 0.48f;
 // Without sun shadow maps the canopy starts this far out (fading in over the
-// fade before it), so the near range keeps no tree shadows, as before.
+// fade before it), so the near range has no canopy shadows.
 constexpr float kCanopyNoMapReach = 150.0f;
 constexpr float kCanopyNoMapFade = 50.0f;
 // The strength fades over the gate's edges (degrees of sun, sky-through).

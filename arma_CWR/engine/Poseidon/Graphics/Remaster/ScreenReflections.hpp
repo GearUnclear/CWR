@@ -4,8 +4,8 @@
 
 #include <cstdint>
 
-// Screen-space reflections (feature switch `ssr`, research/INTEGRATION-PLAN.md
-// section 5 B6): the parts that are plain math, shared by the backend
+// Screen-space reflections (feature switch `ssr`): the parts that are plain
+// math, shared by the backend
 // (EngineGL33_State.cpp, EngineGL33_Queue.cpp, EngineGL33_PostSsr.cpp), the
 // shaders (EngineGL33_PostSsrShaders.cpp) and the tests. No GL, no engine state.
 //
@@ -41,7 +41,7 @@
 //   4. Wet ground (the rain, or `ssrWet`): roads and bare ground darken and
 //      take a rough, streaked reflection; level hollows hold puddles, which are
 //      dark mirrors with rain rings; grass only darkens a little. With the wet
-//      weather (B7) on, only its puddles reflect: the ground around them
+//      weather (Wetness.hpp) on, only its puddles reflect: the ground around them
 //      darkens in the forward pass and reflects nothing here.
 
 namespace Poseidon::remaster
@@ -95,7 +95,7 @@ struct SsrStencil
 // land's detail texture (the sea's faces, when the water program does not draw
 // them, carry the specular layer alone). `tagging`: the world pass writes tags
 // (the switch on, the remastered world pass); without it every draw gets the
-// state of before (REPLACE 0, full masks), the frame of before bit for bit.
+// classic state (REPLACE 0, full masks), so the frame is unchanged bit for bit.
 //
 // While tagging:
 //   - the projected shadows compare the shadow bits only;
@@ -105,7 +105,7 @@ struct SsrStencil
 //     it now); blended (a bush card, glass), sets the cover bit and keeps the
 //     surface underneath;
 //   - a draw that writes no depth (a particle, a flare, the sky) resets only
-//     the shadow bits, as before, and keeps the tag.
+//     the shadow bits, as in the classic state, and keeps the tag.
 SsrStencil SsrStencilForDraw(const render::RenderPassDescriptor& d, bool landLayer, bool tagging);
 
 // GL's stencil update for a fragment that passes (REPLACE under the write
@@ -236,11 +236,11 @@ SsrRowHit SsrMarchRow(const float* sceneZ, const std::uint8_t* stencil, int n, f
 // read at the mip level of the horizontal spread pxH. The taps stand no farther
 // apart than that level's footprint: more taps where the footprint is small (on
 // water at a grazing angle the horizontal spread is a fraction of the vertical
-// one), up to kSsrStreakTaps a side, then a coarser level. With 3 taps a side
-// at the horizontal spread's level they stood up to 24 pixels apart, a ladder
-// of copies on water. On the ground (pxV = 2 px, pxH = 0.7 px) the footprint
-// already covered the spacing: there it stays 3 taps a side at the same level
-// until the streak reaches kSsrStreakMaxPx.
+// one), up to kSsrStreakTaps a side, then a coarser level; taps spaced wider
+// than the footprint show as a ladder of copies on water. On the ground
+// (pxV = 2 px, pxH = 0.7 px) the footprint already covers the spacing: there
+// it stays 3 taps a side at the same level until the streak reaches
+// kSsrStreakMaxPx.
 constexpr float kSsrStreakMaxPx = 72.0f;
 constexpr int kSsrStreakTaps = 12;
 struct SsrStreak
@@ -258,16 +258,16 @@ float SsrEdgeFade(float u, float v);
 // ---- The rough blur -----------------------------------------------------------
 //
 // One ray per texel decides hit or miss sharply, so a rough reflection (wet
-// asphalt, bare ground) drew the hard outline of what it mirrored: a box under
-// a vehicle, a seam at a tent's edge. Its cone already blurs the colour it
-// takes, not where the rays stop hitting. So the trace writes each texel's
+// asphalt, bare ground) would draw the hard outline of what it mirrors: a box
+// under a vehicle, a seam at a tent's edge. Its cone already blurs the colour
+// it takes, not where the rays stop hitting. So the trace writes each texel's
 // spread, the width of its cone at what it reflects in half-resolution texels
 // (SsrBlurSpread of the horizontal spread in full-resolution pixels), and a
 // horizontal gather (psPostSsrBlur, SsrBlurRow) over that spread, on the same
 // surface at a similar depth, softens those outlines. It takes a tap per texel
-// of the spread (SsrBlurTaps, kSsrBlurMaxTaps a side at most): with a fixed 8
-// taps over up to 24 texels it stepped over texels and copied a texel-scale
-// pattern of the trace at its stride. A puddle's or calm water's mirror (a
+// of the spread (SsrBlurTaps, kSsrBlurMaxTaps a side at most); fewer taps
+// would step over texels and copy the trace's texel-scale pattern at their
+// stride. A puddle's or calm water's mirror (a
 // spread under kSsrBlurMinSpread) stays sharp. The upward stretch of a
 // reflection already blurs it vertically.
 constexpr int kSsrBlurMaxTaps = 24;        // taps on each side at most
@@ -313,10 +313,9 @@ struct SsrWaterBlend
 constexpr float kSsrWaterSwapMax = 0.95f;
 constexpr float kSsrWaterRatioMax = 4.0f;
 // The ripples that move the mirror image on water (four octaves of drifting
-// noise, 11 m to 0.65 m) at this share of the research's slopes: its calm sea
-// (ssrWave 0.35), the setting its best bay picture used. The sea program's own
-// waves already break the reflection up; full slopes smeared a hill's
-// reflection into a brown band. Finer octaves than a pixel blur instead.
+// noise, 11 m to 0.65 m) at this share of their full slopes (a calm sea). The
+// sea program's own waves already break the reflection up; full slopes smear a
+// hill's reflection into a brown band. Finer octaves than a pixel blur instead.
 constexpr float kSsrWaterRipple = 0.35f;
 SsrWaterBlend SsrWaterComposite(float skyShare, float ssrWater, float fade);
 // R / S of one channel, capped (a sky that lacks a channel at dusk would blow
