@@ -47,6 +47,10 @@ class SortObject : public RefCount
     signed char drawLOD, shadowLOD;
     signed char passNum;
     signed char forceDrawLOD; // forced draw LOD
+    // The hill cull hid the object this frame (Pass1): it keeps its draw LOD,
+    // so the sorts order the list as if it were drawn and the shadow-map pass
+    // casts its shadow from that LOD; only the draws skip it.
+    bool hillHidden = false;
 
     unsigned char orClip; // or clip flags only - andClip would always be 0
 
@@ -228,6 +232,9 @@ class Scene
 
     bool _objectShadows, _vehicleShadows, _cloudlets;
     float _objectLODBias = 1.0f;
+    float _lodPinFactor = 0.0f; // PinObjectDetail: 0 = adaptive
+    int _drawnObjects = 0;      // DrawnObjectCount
+    int _hillHiddenObjects = 0; // HillHiddenObjectCount
     float _preferredTerrainGrid;
     float _preferredViewDistance;
 
@@ -260,6 +267,20 @@ class Scene
     // LODSelect path; default 1.0 (no bias).
     void SetObjectLODBias(float bias);
     float GetObjectLODBias() const { return _objectLODBias; }
+
+    // Object detail for scripted A/B captures (triPinObjectDetail). By default
+    // (0) AdjustComplexity picks the LOD width from the measured frame time,
+    // so two shots of one view can draw different objects. A factor >= 1
+    // holds the width at that multiple of the finest the quality setting
+    // allows (1 = finest, 16 = coarsest, the adaptive range).
+    void PinObjectDetail(float factor);
+    float GetObjectDetailPin() const { return _lodPinFactor; }
+    // Objects with a visible LOD in the last Pass1 draw list, before occlusion
+    // culling: the same for both lighting models on one view at one detail.
+    int DrawnObjectCount() const { return _drawnObjects; }
+    // Of those, the objects the hill cull hid behind the terrain in the same
+    // Pass1 (they still count in DrawnObjectCount, so capture tables compare).
+    int HillHiddenObjectCount() const { return _hillHiddenObjects; }
 
     Camera* GetCamera() { return _camera; }
     const Camera* GetCamera() const { return _camera; }
@@ -394,4 +415,4 @@ extern Scene* GScene;
 #define IS_SHADOW_VEHICLE (GScene ? GScene->GetVehicleShadows() : true)
 #define IS_SHADOW_OBJECT (GScene ? GScene->GetObjectShadows() : true)
 
-}  // namespace Poseidon
+} // namespace Poseidon

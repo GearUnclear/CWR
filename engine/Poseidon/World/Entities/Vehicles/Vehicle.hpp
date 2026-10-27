@@ -89,6 +89,10 @@ class EntityType: public RefCount
 
 	// some types are created without vehicle and cannot be used as full type info
 	int _scopeLevel;
+    // the remastered materials' object kind (render::DrawObjectKind), from the
+    // simulation and class at the first draw (Object::GetDrawObjectKind); -1 =
+    // not yet
+    mutable signed char _drawObjectKind = -1;
 
 	AutoArray<AnimateTextureInfo> _animateTextures;
 	RefArray<AnimationType> _animations;

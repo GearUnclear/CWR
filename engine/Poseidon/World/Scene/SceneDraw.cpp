@@ -19,6 +19,9 @@
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
 #include <cstdlib>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -37,6 +40,9 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
+#include <Poseidon/World/Scene/TerrainOcclusion.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
@@ -500,6 +506,17 @@ void Scene::DrawRain()
         saturate(yDensity, 0.1f, 1);
         // draw all levels
         density *= 0.2f;
+        // Under the photoreal camera (photoLight) the overlay's streaks are
+        // stretched by the exposure and the curve: at full strength they
+        // smeared the whole sky with vertical lines. (0.9, not 0.45: under the
+        // grey day's exposure and drawn after the opaque copy, at 0.45 no
+        // streak read.)
+        if (GEngine && GEngine->LightingRemasterActive())
+        {
+            const remaster::LightingTuning tuning = GEngine->GetLightingTuning();
+            if (tuning.features.photoLight > 0.5f)
+                density *= 0.9f;
+        }
         DrawRainLevel(density, yDensity, xOffset, yOffset, 8);
         DrawRainLevel(density, yDensity, xOffset, yOffset, 2);
     }
@@ -906,6 +923,84 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
     return false;
 }
 
+// ---- Hill culling (TerrainOcclusion.hpp, the hillCull feature switch) ----
+
+namespace
+{
+struct HillCull
+{
+    TerrainOcclusion::HeightGrid terrain;
+    TerrainOcclusion::HorizonTable table;
+    TerrainOcclusion::CullGovernor governor;
+    // The landscape the terrain bounds were built from.
+    const Landscape* land = nullptr;
+    int range = 0;
+    float grid = 0.0f;
+    std::uint64_t sample = 0;
+};
+
+HillCull& GHillCull()
+{
+    static HillCull s_hillCull;
+    return s_hillCull;
+}
+
+// A strided sample of the heights: notices a new island or an editor
+// reshaping the ground without reading the whole grid every frame (the same
+// detector TerrainLighting uses for the horizon map).
+std::uint64_t SampleTerrain(const Landscape& land, int range, float grid)
+{
+    std::uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](std::uint32_t v)
+    {
+        h ^= v;
+        h *= 1099511628211ull;
+    };
+    mix(static_cast<std::uint32_t>(range));
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &grid, sizeof(bits));
+    mix(bits);
+    const int step = range > 64 ? range / 64 : 1;
+    for (int z = 0; z < range; z += step)
+    {
+        for (int x = (z / step) % step; x < range; x += step)
+        {
+            const float v = land.ClippedData(z, x);
+            std::memcpy(&bits, &v, sizeof(bits));
+            mix(bits);
+        }
+    }
+    return h;
+}
+
+// The terrain as drawn, copied from `land` when the landscape changed. It is
+// the full-detail grid: LandCache asks for segment LOD 0 (Landscape.cpp), so
+// every segment draws every grid vertex. If distant segments ever draw
+// coarser, their triangles no longer follow this grid and the hill cull must
+// take the lowest vertex of each coarse cell instead.
+bool EnsureHillTerrain(HillCull& hc, const Landscape& land)
+{
+    const int range = land.GetTerrainRange();
+    const float grid = land.GetTerrainGrid();
+    if (range < 2 || !(grid > 0.0f))
+        return false;
+    const std::uint64_t sample = SampleTerrain(land, range, grid);
+    if (hc.terrain.Valid() && hc.land == &land && hc.range == range && hc.grid == grid && hc.sample == sample)
+        return true;
+    const auto t0 = std::chrono::steady_clock::now();
+    hc.terrain.Build(range, grid, YOutsideMap, [&land](int x, int z) { return land.ClippedData(z, x); });
+    hc.table.Invalidate();
+    hc.governor.Reset();
+    hc.land = &land;
+    hc.range = range;
+    hc.grid = grid;
+    hc.sample = sample;
+    LOG_INFO(Graphics, "Hill cull: terrain grid {}x{} at {} m copied in {:.1f} ms", range, range, grid,
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    return hc.terrain.Valid();
+}
+} // namespace
+
 #if !DENSITY_LOD
 
 void Scene::AdjustComplexity()
@@ -922,9 +1017,14 @@ void Scene::AdjustComplexity()
         const float v = static_cast<float>(std::atof(e));
         return v > 0.0f ? v : -1.0f; // -1 == pin to highest detail (_minLodInvWidth)
     }();
-    if (lodFix != 0.0f)
+    if (_lodPinFactor > 0.0f || lodFix != 0.0f)
     {
-        _lodInvWidth = lodFix > 0.0f ? lodFix : _minLodInvWidth;
+        // PinObjectDetail wins over the environment pin: A/B captures of one
+        // view draw the same objects.
+        if (_lodPinFactor > 0.0f)
+            _lodInvWidth = _minLodInvWidth * _lodPinFactor;
+        else
+            _lodInvWidth = lodFix > 0.0f ? lodFix : _minLodInvWidth;
         saturate(_lodInvWidth, _minLodInvWidth, _maxLodInvWidth);
         // Still assign each object's draw/shadow LOD at the pinned density; only the
         // frame-time-driven adjustment of _lodInvWidth below is skipped.
@@ -1468,7 +1568,20 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     // remove all objects that should not be used
 
+    using Clock = std::chrono::steady_clock;
+    auto msSince = [](Clock::time_point t0)
+    { return std::chrono::duration<float, std::milli>(Clock::now() - t0).count(); };
+    perf::FrameCounters& counters = perf::GPerfCounters().Frame();
+    // The frame-cost switches, as this frame's gates hold them (computed at the
+    // world's first 3D pass; off with the classic lighting, so Classic draws as
+    // it always did).
+    remaster::FeatureGates gates;
+    const bool haveGates = GEngine && GEngine->GetFeatureGates(gates) && gates.computed;
+    const bool hillCull = haveGates && gates[remaster::Feature::HillCull].on;
+
+    const Clock::time_point lodT0 = Clock::now();
     AdjustComplexity();
+    counters.lodMs += msSince(lodT0);
 
     // copy objects to working list (mergers)
     // do not copy objects that are not drawn
@@ -1486,6 +1599,7 @@ void Scene::DrawObjectsAndShadowsPass1()
             _drawMergers.Realloc(objNeed);
         }
         _drawMergers.Resize(0);
+        _drawnObjects = 0;
         for (int s = 0; s < _drawObjects.Size(); s++)
         {
             SortObject* sObj = _drawObjects[s];
@@ -1498,6 +1612,10 @@ void Scene::DrawObjectsAndShadowsPass1()
                 continue;
             }
             _drawMergers.Add(sObj);
+            if (sObj->drawLOD != LOD_INVISIBLE)
+            {
+                ++_drawnObjects;
+            }
         }
     }
     // One-shot shape census (perf campaign): triPerfDumpShapes arms this;
@@ -1539,6 +1657,7 @@ void Scene::DrawObjectsAndShadowsPass1()
     }
 #endif
 
+    const Clock::time_point occT0 = Clock::now();
     if (EnableObjOcc)
     {
         // sort only what needs to checked/drawn for occlusion
@@ -1668,6 +1787,77 @@ void Scene::DrawObjectsAndShadowsPass1()
             }
         }
     }
+    counters.occlusionMs += msSince(occT0);
+
+    // Hill culling: objects the terrain hides from the camera are not drawn.
+    // After the object occlusion pass, so its buffer and its results are the
+    // same with the cull on or off. A hidden object is only flagged
+    // (hillHidden): it keeps its draw LOD, so the sorts below and in Pass2
+    // order the list exactly as with the cull off (the shadow-map pass emits
+    // its casters in that order, and overlapping leaf cards resolve equal
+    // depths by it), the shadow-map pass casts its shadow from its draw LOD as
+    // before (behind a ridge from the camera, its shadow can still reach
+    // ground in view), and the draw loops skip it. Its draw's texture mipmap
+    // hints are given without the draw (PrepareDrawTextures): the shadow pass
+    // loads the alpha-tested caster textures from them, and a texture it
+    // shares with an object in view keeps its mipmaps. Only static objects are
+    // tested: their draw is Object::Draw's, which PrepareDrawTextures mirrors
+    // (vehicles and men draw through their own overrides).
+    //
+    // Hiding any draw is safe for the shadow-map pass: it sets its own
+    // sampler and polygon offset, so the depth its casters store does not
+    // depend on which draw came last before it.
+    _hillHiddenObjects = 0;
+    if (hillCull && _camera && GetLandscape())
+    {
+        HillCull& hc = GHillCull();
+        if (!hc.governor.ShouldRun())
+        {
+            counters.hillIdle = 1;
+        }
+        else if (EnsureHillTerrain(hc, *GetLandscape()))
+        {
+            const Clock::time_point hillT0 = Clock::now();
+            const Vector3 eye = _camera->Position();
+            const float range = GetFogMaxRange();
+            if (!hc.table.Matches(eye.X(), eye.Y(), eye.Z(), range))
+            {
+                hc.table.Build(hc.terrain, eye.X(), eye.Y(), eye.Z(), range, TerrainOcclusion::Params());
+                ++counters.hillBuilds;
+            }
+            const int wedgesBefore = hc.table.WedgesBuilt();
+            const Object* cameraOn = GWorld ? GWorld->CameraOn() : nullptr;
+            int tested = 0;
+            for (int i = 0; i < _drawMergers.Size(); i++)
+            {
+                SortObject* oi = _drawMergers[i];
+                Object* obj = oi->object;
+                if (oi->drawLOD == LOD_INVISIBLE || !obj || !obj->Static() || obj == cameraOn || oi->passNum == 3)
+                {
+                    continue;
+                }
+                const Vector3 pos = obj->Position();
+                const TerrainOcclusion::Result r = hc.table.Test(pos.X(), pos.Y(), pos.Z(), obj->GetRadius());
+                if (r == TerrainOcclusion::Result::NotTested)
+                {
+                    continue;
+                }
+                ++tested;
+                if (r == TerrainOcclusion::Result::Hidden)
+                {
+                    oi->hillHidden = true;
+                    obj->PrepareDrawTextures(oi->drawLOD, *obj);
+                    ++_hillHiddenObjects;
+                }
+            }
+            hc.governor.Report(tested, _hillHiddenObjects);
+            counters.hillRan = 1;
+            counters.hillTested = tested;
+            counters.hillHidden = _hillHiddenObjects;
+            counters.hillWedges += hc.table.WedgesBuilt() - wedgesBefore;
+            counters.hillMs += msSince(hillT0);
+        }
+    }
 
     Poseidon::SceneDraw::BucketDrawMergersByShape(_drawMergers);
     // first of all draw non-alpha objects
@@ -1687,12 +1877,18 @@ void Scene::DrawObjectsAndShadowsPass1()
             }
             return SelectLights(o->object->Transform(), o->object, o->drawLOD, lightProbe);
         };
+        // The remastered programs light a draw from its own light list unless the
+        // frame's tiled list lights every draw; a run would give every member the
+        // head's list, so there a lit object draws alone.
+        const bool perDrawLitLights = GEngine->LightingRemasterActive() && !GEngine->LocalLightsFromTiles();
         const int kMinInstanceRun = 2;
+        counters.lightSlots = NLights();
+        counters.activeLights = _aLights.Size();
         for (int i = 0; i < _drawMergers.Size();)
         {
             SortObject* oi = _drawMergers[i];
             LODShape* shape = oi->object->GetShape();
-            if (oi->drawLOD == LOD_INVISIBLE)
+            if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden)
             {
                 i++;
                 continue;
@@ -1720,7 +1916,12 @@ void Scene::DrawObjectsAndShadowsPass1()
                 !oi->object->DeformsSharedShape(oi->drawLOD) && (!cpuDeform || vsDeform) && oi->object->Static() &&
                 sShape->NProxies() == 0 && !render::Has(headSpec.routing, render::Routing::OnSurface) &&
                 !render::Has(headSpec.routing, render::Routing::IsColored) && oi->object != GWorld->CameraOn();
-            const bool headBatchable = cheapPass;
+            const bool headLit = perDrawLitLights && cheapPass && instanceLights(oi).Size() > 0;
+            if (headLit)
+            {
+                ++counters.litObjects;
+            }
+            const bool headBatchable = cheapPass && !headLit;
             if (headBatchable)
             {
                 GEngine->InstancedRunReset();
@@ -1729,10 +1930,16 @@ void Scene::DrawObjectsAndShadowsPass1()
                     while (runEnd < _drawMergers.Size())
                     {
                         SortObject* oj = _drawMergers[runEnd];
+                        if (oj->hillHidden)
+                        {
+                            runEnd++; // in the run's span, never drawn
+                            continue;
+                        }
                         if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
                             oj->passNum != oi->passNum || !oj->object->Static() ||
                             oj->object->DeformsSharedShape(oj->drawLOD) ||
-                            (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial)
+                            (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial ||
+                            (perDrawLitLights && instanceLights(oj).Size() > 0))
                         {
                             break;
                         }
@@ -1745,10 +1952,19 @@ void Scene::DrawObjectsAndShadowsPass1()
                 }
             }
 
-            const int runLen = runEnd - i;
+            // The run's span may hold hidden objects (hillHidden): they joined no
+            // instance list and are never drawn.
+            int runLen = 0;
+            for (int k = i; k < runEnd; k++)
+            {
+                runLen += _drawMergers[k]->hillHidden ? 0 : 1;
+            }
             GSectionFilter = SectionClassFilter::OpaqueAndCutout;
+            counters.opaqueObjects += runLen;
             if (headBatchable && runLen >= kMinInstanceRun)
             {
+                ++counters.runs;
+                counters.runObjects += runLen;
                 GEngine->BeginInstancedRunUpload();
                 DrawSortObject(oi);
                 if (!GEngine->EndInstancedRun())
@@ -1757,7 +1973,10 @@ void Scene::DrawObjectsAndShadowsPass1()
                     // head; redraw the rest scalar (TL overdraw is z-equal opaque).
                     for (int k = i + 1; k < runEnd; k++)
                     {
-                        DrawSortObject(_drawMergers[k]);
+                        if (!_drawMergers[k]->hillHidden)
+                        {
+                            DrawSortObject(_drawMergers[k]);
+                        }
                     }
                 }
             }
@@ -1765,7 +1984,10 @@ void Scene::DrawObjectsAndShadowsPass1()
             {
                 for (int k = i; k < runEnd; k++)
                 {
-                    DrawSortObject(_drawMergers[k]);
+                    if (!_drawMergers[k]->hillHidden)
+                    {
+                        DrawSortObject(_drawMergers[k]);
+                    }
                 }
             }
             GSectionFilter = SectionClassFilter::All;
@@ -1850,6 +2072,8 @@ void Scene::DrawObjectsAndShadowsPass2()
         SortListByCachedKey<SurfKey>(surfSort, surfExtract, surfCmp);
         for (int i = 0; i < surfSort.Size(); i++)
         {
+            if (surfSort[i]->hillHidden)
+                continue;
             GSectionFilter = SectionClassFilter::BlendOnly;
             DrawSortObject(surfSort[i]);
             GSectionFilter = SectionClassFilter::All;
@@ -1873,7 +2097,13 @@ void Scene::DrawObjectsAndShadowsPass2()
             float sunFactor = 1.0f - _mainLight->NightEffect();
             sunFactor = floatMax(0.0f, floatMin(1.0f, sunFactor));
             GEngine->SetShadowMapSunFactor(sunFactor);
-            if (sunFactor > 0.01f)
+            // The remastered sun keeps lighting the scene until it is about 1.5
+            // degrees below the horizon: keep its shadows live that long (a
+            // skipped pass would leave a frozen map in view).
+            const bool remasterSunUp = GEngine->LightingRemasterActive() && _mainLight->SunDirection().Y() < 0.026f;
+            // At night the remastered moon key (moonShadows) casts the shadows:
+            // the pass renders from the moon (SceneShadowPass.cpp).
+            if (sunFactor > 0.01f || remasterSunUp || GEngine->RemasterMoonKey())
             {
                 RenderShadowMapDepthPass(nDraw);
             }
@@ -1908,6 +2138,9 @@ void Scene::DrawObjectsAndShadowsPass2()
 #endif
     // draw alpha parts of roads
     GEngine->FlushQueues();
+    // The opaque world is complete: the remastered TAA keeps a copy for its
+    // particle mask before the translucent objects go on top.
+    GEngine->BeginTranslucentObjects();
     GEngine->EnableReorderQueues(false);
     // Back-to-front by camera-space depth (farthest first).
     RadixSortRefListByFloatDesc(_drawMergers, [](const SortObject* o) { return o->zCoord; });
@@ -1916,7 +2149,7 @@ void Scene::DrawObjectsAndShadowsPass2()
     {
         SortObject* oi = _drawMergers[i];
         LODShape* shape = oi->object->GetShape();
-        if (oi->drawLOD == LOD_INVISIBLE)
+        if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden)
         {
             continue;
         }
@@ -1970,7 +2203,7 @@ void Scene::DrawObjectsAndShadowsPass3()
     {
         SortObject* oi = _drawMergers[i];
         LODShape* shape = oi->object->GetShape();
-        if (oi->drawLOD != LOD_INVISIBLE)
+        if (oi->drawLOD != LOD_INVISIBLE && !oi->hillHidden)
         {
             PoseidonAssert(oi->drawLOD >= 0);
             Shape* sShape = shape->LevelOpaque(oi->drawLOD);

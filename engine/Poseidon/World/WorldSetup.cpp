@@ -33,6 +33,7 @@ extern void SDLGamepad_SetEngine(float mag);
 extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Graphics/Rendering/Primitives/ClipVert.hpp>
 
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Random/randomGen.hpp>
@@ -317,6 +318,10 @@ World::~World()
         ProgressStart(LocalizeString(IDS_SHUTDOWN));
     }
     DebugLog("World destruct");
+    // No terrain-lighting worker may outlive the world (it reads nothing from
+    // it, but would otherwise be joined during static destruction).
+    ShutdownTerrainLighting();
+    ShutdownFogSight();
 
     VehicleTypes.UnlockAllTypes();
 
@@ -1280,6 +1285,9 @@ void World::SimulateLandscape(float deltaT)
     }
     GLOB_LAND->SetOvercast(_actualOvercast);
     GLOB_LAND->SetFog(_actualFog);
+    // The fog medium of this step's weather and time, which the renderer's
+    // fog floor, mist and dust read (TerrainLighting.hpp SimulateFogSight).
+    SimulateFogSight(GLOB_LAND);
 }
 
 void World::SetWeather(float overcast, float fog, float time)
@@ -1332,6 +1340,12 @@ void World::SetDate(int year, int month, int day, int hour, int minute)
     LightSun* sun = _scene.MainLight();
     sun->Recalculate(this);
     _scene.MainLightChanged();
+    // Auto street lamps switch for the new time now, as after skipTime, not at
+    // their next simulation tick (every 12 s): a scripted jump into the night
+    // stayed dark for up to 12 s, and two capture shots of one view could
+    // differ in which lamps were lit.
+    if (GLandscape)
+        GLandscape->OnTimeSkipped();
 }
 
 void World::ProcessNetwork()

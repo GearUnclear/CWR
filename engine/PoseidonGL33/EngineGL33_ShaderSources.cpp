@@ -33,7 +33,9 @@ layout(std140) uniform VSConstants {
     vec4 texCtrl;       // c32: {genTex0, genTex1, 0, 0}
     vec4 matDiffuseRaw; // c33: raw material diffuse, for local lights
     vec4 matAmbientRaw; // c34: raw material ambient, for local lights
-    vec4 _padLights[31];// c35-c65: reserved
+    vec4 crownCenter;   // c35: remastered lighting, shape crown centre (model space), w = valid
+    vec4 crownScale;    // c36: remastered lighting, 1 / crown half extents
+    vec4 _padLights[29];// c37-c65: reserved
     mat4 lightVP;       // c66-c69: shadow-map light view-projection (sampled per fragment)
     vec4 landGrid;      // c70: {invLandGrid, heightmap texels per land square, 0, 0}
 };
@@ -65,6 +67,78 @@ out vec2 vUV0;
 out vec2 vUV1;
 out float vFogTC;
 out vec3 vWorldRel;
+)";
+
+// GPU land clipping for the mesh vertex shaders: the object's vertices follow the
+// terrain height map. Needs vs_constants, vs_world_instances, `pos`, the `landClip`
+// attribute and the `heightMap` sampler.
+static const char s_fnLandClip[] = R"(
+vec4 heightCorners(ivec2 base, int stride) {
+    ivec2 sz = textureSize(heightMap, 0);
+    ivec2 i0 = clamp(base,                 ivec2(0), sz - 1);
+    ivec2 i1 = clamp(base + ivec2(stride), ivec2(0), sz - 1);
+    return vec4(texelFetch(heightMap, ivec2(i0.x, i0.y), 0).r,
+                texelFetch(heightMap, ivec2(i1.x, i0.y), 0).r,
+                texelFetch(heightMap, ivec2(i0.x, i1.y), 0).r,
+                texelFetch(heightMap, ivec2(i1.x, i1.y), 0).r);
+}
+
+vec3 surfaceFromCorners(vec4 c, vec2 f, float invGrid) {
+    float h;
+    vec2 grad;
+    if (f.x <= 1.0 - f.y) {
+        h = c.x + (c.z - c.x) * f.y + (c.y - c.x) * f.x;
+        grad = vec2(c.y - c.x, c.z - c.x);
+    } else {
+        h = c.z + (c.y - c.w) - (c.z - c.w) * f.x - (c.y - c.w) * f.y;
+        grad = vec2(c.w - c.z, c.w - c.y);
+    }
+    return vec3(h, grad * invGrid);
+}
+
+vec3 landClipSurface(vec2 absXZ) {
+    vec2 rel = absXZ * hmParams0.x;
+    vec2 base = floor(rel);
+    return surfaceFromCorners(heightCorners(ivec2(base), 1), rel - base, hmParams0.x);
+}
+
+vec3 landPlaneSurface(vec2 absXZ, vec2 objAbsXZ) {
+    float invLandGrid = landGrid.x;
+    int stride = int(landGrid.y);
+    vec2 sq = floor(objAbsXZ * invLandGrid);
+    return surfaceFromCorners(heightCorners(ivec2(sq) * stride, stride), absXZ * invLandGrid - sq, invLandGrid);
+}
+
+vec3 landClipNormal(vec3 n, vec3 surf) {
+    return normalize(vec3(n.x - surf.y * n.y, n.y, n.z - surf.z * n.y));
+}
+
+// Moves worldPos onto the terrain as the draw's land clip mode asks. Returns true when the
+// vertex followed the land; `surf` then holds the surface sample (height, gradient in yz).
+bool landClipVertex(inout vec4 worldPos, out vec3 surf) {
+    surf = vec3(0.0);
+    int lcMode = int(hmParams1.w + 0.5);
+    if (lcMode == 2 && landGrid.y > 0.0) {
+        vec2 objAbsXZ = worldArr[gl_InstanceID][3].xz + hmParams0.yz;
+        surf = landPlaneSurface(worldPos.xz + hmParams0.yz, objAbsXZ);
+        worldPos.y = surf.x + pos.y + hmParams1.y - hmParams0.w;
+        return true;
+    }
+    if (lcMode == 1 && landClip != 0u && hmParams0.x > 0.0) {
+        surf = landClipSurface(worldPos.xz + hmParams0.yz);
+        if (landClip == 2u) {
+            worldPos.y = surf.x - hmParams0.w; // ClipLandOn: pin onto surface
+        } else {
+            // ClipLandKeep: keep the authored height above the terrain sampled at the object
+            // anchor (bounding centre), the reference Object::ApplyLandClip subtracts. worldArr
+            // is camera-relative, so re-add camXZ to get the absolute anchor.
+            vec2 anchorXZ = (worldArr[gl_InstanceID] * vec4(-hmParams1.xyz, 1.0)).xz + hmParams0.yz;
+            worldPos.y = worldPos.y + surf.x - landClipSurface(anchorXZ).x;
+        }
+        return true;
+    }
+    return false;
+}
 )";
 
 // Sun (directional) contribution to a vertex.
@@ -350,45 +424,7 @@ layout(location = 3) in uint landClip;
 
 //#include <vs_varyings_out>
 
-vec4 heightCorners(ivec2 base, int stride) {
-    ivec2 sz = textureSize(heightMap, 0);
-    ivec2 i0 = clamp(base,                 ivec2(0), sz - 1);
-    ivec2 i1 = clamp(base + ivec2(stride), ivec2(0), sz - 1);
-    return vec4(texelFetch(heightMap, ivec2(i0.x, i0.y), 0).r,
-                texelFetch(heightMap, ivec2(i1.x, i0.y), 0).r,
-                texelFetch(heightMap, ivec2(i0.x, i1.y), 0).r,
-                texelFetch(heightMap, ivec2(i1.x, i1.y), 0).r);
-}
-
-vec3 surfaceFromCorners(vec4 c, vec2 f, float invGrid) {
-    float h;
-    vec2 grad;
-    if (f.x <= 1.0 - f.y) {
-        h = c.x + (c.z - c.x) * f.y + (c.y - c.x) * f.x;
-        grad = vec2(c.y - c.x, c.z - c.x);
-    } else {
-        h = c.z + (c.y - c.w) - (c.z - c.w) * f.x - (c.y - c.w) * f.y;
-        grad = vec2(c.w - c.z, c.w - c.y);
-    }
-    return vec3(h, grad * invGrid);
-}
-
-vec3 landClipSurface(vec2 absXZ) {
-    vec2 rel = absXZ * hmParams0.x;
-    vec2 base = floor(rel);
-    return surfaceFromCorners(heightCorners(ivec2(base), 1), rel - base, hmParams0.x);
-}
-
-vec3 landPlaneSurface(vec2 absXZ, vec2 objAbsXZ) {
-    float invLandGrid = landGrid.x;
-    int stride = int(landGrid.y);
-    vec2 sq = floor(objAbsXZ * invLandGrid);
-    return surfaceFromCorners(heightCorners(ivec2(sq) * stride, stride), absXZ * invLandGrid - sq, invLandGrid);
-}
-
-vec3 landClipNormal(vec3 n, vec3 surf) {
-    return normalize(vec3(n.x - surf.y * n.y, n.y, n.z - surf.z * n.y));
-}
+//#include <fn_land_clip>
 
 //#include <fn_sun_light>
 //#include <fn_local_light>
@@ -398,25 +434,9 @@ vec3 landClipNormal(vec3 n, vec3 surf) {
 void main() {
     vec4 worldPos    = worldArr[gl_InstanceID] * vec4(pos, 1.0);
     vec3 worldNormal = normalize(mat3(worldArr[gl_InstanceID]) * normal);
-    int lcMode = int(hmParams1.w + 0.5);
-    if (lcMode == 2 && landGrid.y > 0.0) {
-        vec2 objAbsXZ = worldArr[gl_InstanceID][3].xz + hmParams0.yz;
-        vec3 surf = landPlaneSurface(worldPos.xz + hmParams0.yz, objAbsXZ);
-        worldPos.y = surf.x + pos.y + hmParams1.y - hmParams0.w;
+    vec3 surf;
+    if (landClipVertex(worldPos, surf))
         worldNormal = landClipNormal(worldNormal, surf);
-    } else if (lcMode == 1 && landClip != 0u && hmParams0.x > 0.0) {
-        vec3 surf = landClipSurface(worldPos.xz + hmParams0.yz);
-        if (landClip == 2u) {
-            worldPos.y = surf.x - hmParams0.w; // ClipLandOn: pin onto surface
-        } else {
-            // ClipLandKeep: keep the authored height above the terrain sampled at the object
-            // anchor (bounding centre), the reference Object::ApplyLandClip subtracts. worldArr
-            // is camera-relative, so re-add camXZ to get the absolute anchor.
-            vec2 anchorXZ = (worldArr[gl_InstanceID] * vec4(-hmParams1.xyz, 1.0)).xz + hmParams0.yz;
-            worldPos.y = worldPos.y + surf.x - landClipSurface(anchorXZ).x;
-        }
-        worldNormal = landClipNormal(worldNormal, surf);
-    }
     vec4 viewPos     = view * worldPos;
     gl_Position      = proj * viewPos;
     vWorldRel        = worldPos.xyz; // camera-relative world pos for cascade shadow lookup
@@ -843,6 +863,7 @@ static const GLSLChunk s_glslChunks[] = {
     {"vs_world_instances", s_chunkVSWorldInstances},
     {"vs_local_lights_ubo", s_chunkVSLocalLightsUBO},
     {"vs_varyings_out", s_chunkVSVaryingsOut},
+    {"fn_land_clip", s_fnLandClip},
     {"fn_sun_light", s_fnSunLight},
     {"fn_local_light", s_fnLocalLight},
     {"fn_sun_specular", s_fnSunSpecular},

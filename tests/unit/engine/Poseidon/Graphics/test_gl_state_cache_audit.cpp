@@ -247,3 +247,212 @@ TEST_CASE("I-04 T1: per-draw sampler routes through Poseidon::render::sampler::B
         REQUIRE(region.find("Poseidon::render::sampler::BindSlot0") != std::string::npos);
     }
 }
+
+// Shadow-map unit: every lit program, classic (sampler2DArray) and remastered
+// (sampler2DArrayShadow under a comparison sampler object), samples the cascade
+// array on unit 2. Texture 0 there is an incomplete texture to the classic
+// programs and undefined behaviour under the comparison sampler (NVIDIA KHR_debug
+// ids 131204 and 131222). The unit holds the 1x1 depth stand-in from init and a
+// cascade array once one exists; the ways to lose that are deleting the bound
+// array and unbinding the array target, so the audits below pin both. The
+// backend names the unit kShadowMapUnit (EngineGL33_Lighting.hpp, which
+// test_remaster_lighting.cpp pins to 2).
+namespace
+{
+
+std::string FunctionBody(const std::string& source, const std::string& signature)
+{
+    const size_t start = source.find(signature);
+    if (start == std::string::npos)
+        return {};
+    const size_t end = source.find("\n}\n", start);
+    return source.substr(start, end == std::string::npos ? std::string::npos : end - start);
+}
+
+} // namespace
+
+TEST_CASE("Shadow-map unit 2 holds the depth stand-in from init on", "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    REQUIRE_FALSE(lighting.empty());
+    const std::string init = FunctionBody(lighting, "void EngineGL33::InitLightingResources()");
+    REQUIRE_FALSE(init.empty());
+
+    // The stand-in is created first, then bound on unit 2 with no unit change in
+    // between that could land the bind elsewhere.
+    const size_t made = init.find("_dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT");
+    REQUIRE(made != std::string::npos);
+    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowMapUnit);";
+    const size_t unit2 = init.find(unitCall, made);
+    REQUIRE(unit2 != std::string::npos);
+    const size_t bind = init.find("glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);", unit2);
+    REQUIRE(bind != std::string::npos);
+    const std::string between = init.substr(unit2 + unitCall.size(), bind - unit2 - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    REQUIRE(between.find("Invalidate(") == std::string::npos);
+}
+
+TEST_CASE("A recreated cascade array takes unit 2, where the deleted one was sampled",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::string depth = ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp");
+    REQUIRE_FALSE(depth.empty());
+    const std::string ensure = FunctionBody(depth, "bool EnsureArrayTarget(int res, int layers)");
+    REQUIRE_FALSE(ensure.empty());
+
+    // glDeleteTextures leaves texture 0 on every unit the old array was bound
+    // to; the replacement must be bound on unit 2 straight away.
+    const size_t del = ensure.find("glDeleteTextures(1, &s_arrTex);");
+    REQUIRE(del != std::string::npos);
+    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowMapUnit);";
+    const size_t unit2 = ensure.find(unitCall, del);
+    REQUIRE(unit2 != std::string::npos);
+    const size_t bind = ensure.find("glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);", unit2);
+    REQUIRE(bind != std::string::npos);
+    const std::string between = ensure.substr(unit2 + unitCall.size(), bind - unit2 - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    REQUIRE(between.find("glActiveTexture(") == std::string::npos);
+}
+
+// Unit 19 (kShadowRawUnit, the soft shadows) holds the same cascade array under
+// a raw-depth sampler: the same two ways to lose a complete array there, and
+// the same cures.
+TEST_CASE("Shadow raw-depth unit 19 holds the stand-in from init and each new cascade array",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    REQUIRE_FALSE(lighting.empty());
+    const std::string init = FunctionBody(lighting, "void EngineGL33::InitLightingResources()");
+    REQUIRE_FALSE(init.empty());
+    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowRawUnit);";
+    const std::string bindDummy = "glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);";
+    const size_t made = init.find("_dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT");
+    REQUIRE(made != std::string::npos);
+    const size_t unit6 = init.find(unitCall, made);
+    REQUIRE(unit6 != std::string::npos);
+    const size_t bind = init.find(bindDummy, unit6);
+    REQUIRE(bind != std::string::npos);
+    std::string between = init.substr(unit6 + unitCall.size(), bind - unit6 - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    // Its sampler reads raw depth (no comparison) and stays on the unit.
+    CHECK(init.find("glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);") != std::string::npos);
+    CHECK(init.find("glBindSampler(kShadowRawUnit, _shadowRawSampler);") != std::string::npos);
+
+    // Every lit pass binds the live array there, or the stand-in.
+    const std::string bindTex = FunctionBody(lighting, "void EngineGL33::BindLightingTextures()");
+    const size_t unit6b = bindTex.find(unitCall);
+    REQUIRE(unit6b != std::string::npos);
+    CHECK(bindTex.find("glBindTexture(GL_TEXTURE_2D_ARRAY, shadowMap ? _shadowMapTex : _dummyDepthArray);", unit6b) !=
+          std::string::npos);
+
+    // A recreated array is bound on unit 19 too, straight after its creation,
+    // before anything can sample the deleted one's texture 0 there.
+    const std::string depth = ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp");
+    const std::string ensure = FunctionBody(depth, "bool EnsureArrayTarget(int res, int layers)");
+    REQUIRE_FALSE(ensure.empty());
+    const size_t created = ensure.find("glTexImage3D(GL_TEXTURE_2D_ARRAY");
+    REQUIRE(created != std::string::npos);
+    const size_t unit6e = ensure.find(unitCall, created);
+    REQUIRE(unit6e != std::string::npos);
+    const size_t bindNew = ensure.find("glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);", unit6e);
+    REQUIRE(bindNew != std::string::npos);
+    between = ensure.substr(unit6e + unitCall.size(), bindNew - unit6e - unitCall.size());
+    CAPTURE(between);
+    CHECK(between.find("ActiveUnit(") == std::string::npos);
+    CHECK(ensure.find("return false", created) > bindNew); // bound even if the FBO then fails
+}
+
+TEST_CASE("The texture-array target is unbound only on the upload unit",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    // An explicit unbind of GL_TEXTURE_2D_ARRAY elsewhere would put texture 0 on
+    // unit 2 if that unit were active. Today one follows the terrain horizon
+    // upload on the upload unit (unit 7), the other the instanced terrain's
+    // texture array upload on unit 0.
+    constexpr AllowedCallsite kAllowed[] = {
+        {"EngineGL33_Lighting.cpp", "UploadTerrainHorizonMap, on the upload unit", 1},
+        {"EngineGL33_Terrain.cpp", "CreateTerrainBatches, on unit 0", 1},
+    };
+    const std::string needle = "glBindTexture(GL_TEXTURE_2D_ARRAY, 0)";
+    auto corpus = ReadGL33Corpus();
+    REQUIRE_FALSE(corpus.files.empty());
+    for (const auto& [name, body] : corpus.files)
+    {
+        const int n = CountOccurrences(body, needle);
+        if (n == 0)
+            continue;
+        int expected = -1;
+        for (const auto& a : kAllowed)
+            if (name == a.relPath)
+                expected = a.expectedCount;
+        CAPTURE(name);
+        CAPTURE(n);
+        REQUIRE(n == expected);
+    }
+
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    const std::string upload = FunctionBody(lighting, "void EngineGL33::UploadTerrainHorizonMap()");
+    REQUIRE_FALSE(upload.empty());
+    const std::string unitCall = "GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);";
+    const size_t unit = upload.find(unitCall);
+    REQUIRE(unit != std::string::npos);
+    const size_t unbind = upload.find(needle, unit);
+    REQUIRE(unbind != std::string::npos);
+    const std::string between = upload.substr(unit + unitCall.size(), unbind - unit - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    REQUIRE(between.find("Tex2D(") == std::string::npos);
+}
+
+// The shadow-map depth pass sets its own polygon offset. Inheriting it from the
+// last world draw made thin, sun-grazing caster edges change their
+// self-shadowing with the camera heading (a road or decal in view left the
+// decal offset on, none left it off).
+TEST_CASE("The shadow depth pass pins its polygon offset and hands the previous one back",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::filesystem::path coreDir =
+        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" / "Graphics" / "Core";
+    const std::string helpers = ReadTextFile(coreDir / "GLPipelineState.hpp");
+    const std::string pin = FunctionBody(helpers, "inline void SetPolygonOffsetForShadowDepth()");
+    REQUIRE_FALSE(pin.empty());
+    CHECK(pin.find("glEnable(GL_POLYGON_OFFSET_FILL);") != std::string::npos);
+    CHECK(pin.find("glPolygonOffset(-1.0f, -1.0f);") != std::string::npos);
+
+    const std::string depth = ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp");
+    const std::string pass = FunctionBody(depth, "bool RenderCascadeArray(");
+    REQUIRE_FALSE(pass.empty());
+    const size_t capture = pass.find("CapturePolygonOffset()");
+    const size_t set = pass.find("SetPolygonOffsetForShadowDepth()");
+    const size_t firstDraw = pass.find("glDrawArrays(");
+    const size_t restore = pass.find("RestorePolygonOffset(");
+    REQUIRE(capture != std::string::npos);
+    REQUIRE(set != std::string::npos);
+    REQUIRE(firstDraw != std::string::npos);
+    REQUIRE(restore != std::string::npos);
+    CHECK(capture < set);
+    CHECK(set < firstDraw);                       // pinned before any caster draws
+    CHECK(pass.rfind("glDrawArrays(") < restore); // handed back after the last one
+    // Once, and nothing else in the pass changes the offset.
+    CHECK(CountOccurrences(pass, "SetPolygonOffsetForShadowDepth()") == 1);
+    CHECK(pass.find("SetPolygonOffsetForDecals(") == std::string::npos);
+    CHECK(pass.find("SetPolygonOffsetForShadows(") == std::string::npos);
+}
+
+// With the pass independent of the draw before it, the hill cull hides any
+// draw it finds hidden: no keep-last exceptions in the scene draw loops.
+TEST_CASE("The hill cull keeps no draw for the shadow depth pass", "[Graphics][StateCacheAudit][ShadowSampler]")
+{
+    const std::filesystem::path scenePath = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" /
+                                            "Poseidon" / "World" / "Scene" / "SceneDraw.cpp";
+    const std::string scene = ReadTextFile(scenePath);
+    REQUIRE_FALSE(scene.empty());
+    CHECK(scene.find("KeepLastPass1Draw") == std::string::npos);
+    CHECK(scene.find("hillKept") == std::string::npos);
+    const std::string pass2 = FunctionBody(scene, "void Scene::DrawObjectsAndShadowsPass2()");
+    REQUIRE_FALSE(pass2.empty());
+    CHECK(pass2.find("if (surfSort[i]->hillHidden)") != std::string::npos);
+}

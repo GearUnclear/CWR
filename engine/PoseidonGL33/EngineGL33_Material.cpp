@@ -73,6 +73,13 @@ void EngineGL33::DoSetMaterialAndLights(const TLMaterial& mat, const LightList& 
     int n = ResolveLocalLightIndices(lights, idx);
     SetLocalLightIndices(idx, n);
 
+    // The remastered programs light per pixel from the draw's own list when the
+    // frame's tiled list is off: at night, and always for DisableSun materials.
+    float night = GScene->MainLight()->NightEffect();
+    if (static_cast<std::uint32_t>(spec.material & render::Material::DisableSun) != 0)
+        night = 1.0f;
+    UploadLitLights(lights, night);
+
     if (mat.specularPower > 0)
         SelectPixelShaderSpecular(PSSSpecular);
     else

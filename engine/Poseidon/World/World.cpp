@@ -2,6 +2,7 @@
 
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
@@ -10,7 +11,9 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/Audio/Speaker.hpp>
 #include <stdint.h>
@@ -30,6 +33,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/Game/TitEffects.hpp>
@@ -1390,6 +1394,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     if (enableDraw)
     {
+        // Shapes loaded since the last frame (createVehicle and every other
+        // run-time spawn) get their vertex buffers before anything draws them.
+        Shapes.OptimizeLate();
         _scene.BeginObjects();
         DrawViewerSceneAddons();
     }
@@ -1540,6 +1547,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 }
 
                 perf.Mark(Dev::FrameProfiler::PhaseDrawObjPrep);
+                // Remastered lighting: terrain horizon map for this landscape
+                // (built off-thread, only while the backend wants one).
+                UpdateTerrainLighting(_scene.GetLandscape());
                 _scene.GetLandscape()->Draw(_scene);
                 perf.Mark(Dev::FrameProfiler::PhaseDrawLandscape);
 
@@ -1557,6 +1567,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 perf.Mark(Dev::FrameProfiler::PhaseDrawObjects);
                 GEngine->EnableNightEye(0);
 
+                // The remastered post pass runs on the world alone: camera
+                // effects (cinema borders, cutscene overlays) draw over it
+                // untouched. The call below is then a no-op.
+                GEngine->EndWorldScene();
                 if (_cameraEffect)
                 {
                     _cameraEffect->Draw();
@@ -1600,6 +1614,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     if (enableDraw)
     {
+        // World/HUD boundary: the remastered lighting's post pass (ambient
+        // occlusion, bloom, sun shafts) runs on the finished 3D frame before the
+        // map, HUD and dialogs draw over it (if the landscape branch above has
+        // not run it already).
+        GEngine->EndWorldScene();
+
         if (_map && (_showMap || _forceMap))
         {
             _map->DrawHUD(camAI, 1);
@@ -1701,6 +1721,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     if (doSim)
     {
+        // Combat lights age by the simulation step (a paused game holds them
+        // still); bursts fired during this step start at age 0, so the frame
+        // after a shot shows its flash at full strength.
+        lighting::GCombatLights().Tick(deltaT);
 #if BACKGROUND_AI
         _secThread->FinishSecondary();
 #else
@@ -1739,6 +1763,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
     perf.EndFrame(Poseidon::gPerfDrawCalls);
     Poseidon::gPerfDrawCalls = 0;
+    Poseidon::perf::GPerfCounters().EndFrame(); // same frames as the profiler (triPerfStats)
 
 #if _ENABLE_CHEATS
     static bool disableVis = false;

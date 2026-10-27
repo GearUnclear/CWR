@@ -44,6 +44,7 @@ void EngineGL33::CreateSamplerStates()
     // Bind default sampler (linear, wrap) to both texture units
     glBindSampler(0, _samplerObjects[0]);
     glBindSampler(1, _samplerObjects[0]);
+    _taa.mipBiasApplied = 0.0f; // new samplers carry no TAA texture LOD bias
 }
 
 void EngineGL33::DestroySamplerStates()
@@ -68,6 +69,10 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
     if (!_glContext)
         return;
     _currentBlendMode = mode;
+    // Remastered lighting: opaque draws write their ambient share into the
+    // frame alpha and blended draws keep it (see EngineGL33_PostFX.cpp).
+    const bool keepAlpha = _lightingActive;
+    SetLitOpaque(mode == BlendMode::Opaque, mode == BlendMode::Additive);
     // Each Poseidon::render::blend helper sets enable + func atomically; partial
     // state ("blend enabled but func not set") is unrepresentable.
     switch (mode)
@@ -76,15 +81,27 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
             Poseidon::render::blend::Opaque();
             break;
         case BlendMode::AlphaBlend:
-            Poseidon::render::blend::AlphaBlend();
+            if (keepAlpha)
+                Poseidon::render::blend::AlphaBlendKeepAlpha();
+            else
+                Poseidon::render::blend::AlphaBlend();
             break;
         case BlendMode::Additive:
-            Poseidon::render::blend::Additive();
+            if (keepAlpha)
+                Poseidon::render::blend::AdditiveKeepAlpha();
+            else
+                Poseidon::render::blend::Additive();
             break;
         case BlendMode::Shadow:
-            Poseidon::render::blend::Shadow();
+            if (keepAlpha)
+                Poseidon::render::blend::ShadowKeepAlpha();
+            else
+                Poseidon::render::blend::Shadow();
             break;
     }
+    // Surface light: opaque and alpha-blended lit draws write the surface
+    // target (blended by their own alpha), additive glows and shadow quads not.
+    UpdateSurfaceMask();
 }
 
 void EngineGL33::ApplyDepthMode(DepthMode mode)
@@ -100,21 +117,27 @@ void EngineGL33::ApplyDepthMode(DepthMode mode)
     // the stencil leg.  Matches D3D11's `D3D11_DEPTH_STENCIL_DESC`
     // which bundles depth + stencil at the API level.
     namespace ds = Poseidon::render::depthstencil;
+    // The stencil leg carries the draw's surface tag for the screen-space
+    // reflections (ApplyPassState sets _ssrStencil; the default is REPLACE 0
+    // into every bit, the state of before the tags).
+    const ds::StencilTag tag{_ssrStencil.ref, _ssrStencil.writeMask, _ssrStencil.shadowCompareMask};
     switch (mode)
     {
         case DepthMode::Normal:
-            ds::Normal(_hasStencilBuffer);
+            ds::Normal(_hasStencilBuffer, tag);
             break;
         case DepthMode::ReadOnly:
-            ds::ReadOnly(_hasStencilBuffer);
+            ds::ReadOnly(_hasStencilBuffer, tag);
             break;
         case DepthMode::Disabled:
-            ds::Disabled(_hasStencilBuffer);
+            ds::Disabled(_hasStencilBuffer, tag);
             break;
         case DepthMode::Shadow:
-            ds::Shadow(_hasStencilBuffer);
+            ds::Shadow(_hasStencilBuffer, tag);
             break;
     }
+    _ssrStencilApplied = _ssrStencil;
+    _ssrStencilValid = true;
 }
 
 void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
@@ -135,6 +158,18 @@ void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
         else
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         _a2cBound = alphaToCoverage;
+    }
+    // Remastered: the covered samples store alpha 1 (no sky-light share), so a
+    // cutout's resolved edge does not read as extra share in the post pass's
+    // occlusion. Classic never enables it.
+    const bool alphaToOne = alphaToCoverage && _remasterPrograms;
+    if (alphaToOne != _a2oneBound)
+    {
+        if (alphaToOne)
+            glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+        else
+            glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+        _a2oneBound = alphaToOne;
     }
 }
 
@@ -273,7 +308,10 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
         case Poseidon::render::ShaderFamily::Water:
             vs = meshVertexInput ? VSTransform : VSNone;
             ps = PSWater;
-            fmt = DetailTex;
+            // The landscape's sea (routed here in Remastered, BuildContext::
+            // remasteredSea) keeps the detail texgen and its specular layer:
+            // data\specular_dx.paa, whose alpha is the ripple pattern.
+            fmt = d.texGen == Poseidon::render::TexGenMode::Detail ? SpecularTex : DetailTex;
             break;
         case Poseidon::render::ShaderFamily::Detail:
             vs = meshVertexInput ? VSTransform : VSNone;
@@ -680,6 +718,20 @@ void EngineGL33::SetTexture(const TextureGL33* tex, const Poseidon::render::Lega
         }
     }
     SetMultiTexturing(format);
+}
+
+bool EngineGL33::IsLandLayer(const Poseidon::render::LegacySpec& spec)
+{
+    // The multitexture stage of a PSDetail draw tells the land from the sea:
+    // the land's faces carry DetailTexture (the detail texture on slot 1), the
+    // sea's SpecularTexture (Landscape WaterFlags).
+    return Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture);
+}
+
+void EngineGL33::SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec)
+{
+    // The terrain detail runs on the land only.
+    SetLitTerrainDraw(IsLandLayer(spec));
 }
 
 void EngineGL33::SetMultiTexturing(VFormatSet format)
