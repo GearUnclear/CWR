@@ -311,39 +311,7 @@ TEST_CASE("Volumetric fog: the mist layer follows the local relief: valleys hold
     CHECK(BuildFogLayer(h.data(), std::vector<float>(3), n, cell).empty());
 }
 
-TEST_CASE("Volumetric fog: AI sight takes the mist and the humid air the player sees", "[remaster][fog]")
-{
-    const float a[3] = {500.0f, 45.0f, 500.0f};
-    const float b[3] = {1100.0f, 45.0f, 500.0f};
-    SetFogSight(nullptr, nullptr);
-    CHECK_FALSE(FogSightActive());
-    CHECK(FogSightTransmittance(a, b) == 1.0f);
-    // A flat valley floor at 40 m under a 30 m layer, on a misty morning.
-    auto map = std::make_shared<FogSightMap>();
-    map->size = 64;
-    map->cellSize = 50.0f;
-    map->ground.assign(64 * 64, 40.0f);
-    map->floorY.assign(64 * 64, 40.0f);
-    map->layer.assign(64 * 64, 30.0f);
-    FogMedium m;
-    m.mistSigma = kMistSigma;
-    m.groundSigma = 0.0f;
-    SetFogSight(&m, map);
-    CHECK(FogSightActive());
-    // 600 m through the layer: over half of it gone (kMistSigma 2e-3); the
-    // same line 300 m up, clear.
-    CHECK(FogSightTransmittance(a, b) < 0.45f);
-    const float up[2][3] = {{500.0f, 340.0f, 500.0f}, {1100.0f, 340.0f, 500.0f}};
-    CHECK(FogSightTransmittance(up[0], up[1]) > 0.95f);
-    // A clear medium hands nothing over.
-    FogMedium dry;
-    SetFogSight(&dry, map);
-    CHECK_FALSE(FogSightActive());
-    CHECK(FogSightTransmittance(a, b) == 1.0f);
-    SetFogSight(nullptr, nullptr);
-}
-
-// ---- AI sight is the simulation's (round 4 "ailink") ----------------------------
+// ---- AI sight is the simulation's, and it is the drawn air -------------------
 
 namespace
 {
@@ -363,6 +331,24 @@ FogInputs MistyMorning()
     return in;
 }
 
+// A foggy night: setFog 0.3 at a 900 m view distance, the classic fog's range
+// as Landscape.cpp sets it at night (its tactical range 0.75 of the day's:
+// about 483 m, the start 0.4 of it).
+FogInputs FoggyNight()
+{
+    FogInputs in;
+    in.sunElevationDeg = -25.0f;
+    in.sunAzimuthDeg = 300.0f;
+    in.nightEffect = 1.0f;
+    in.skyThrough = 0.7f;
+    in.fog = 0.3f;
+    in.viewDistance = 900.0f;
+    in.fogStart = 193.0f;
+    in.fogEnd = 483.0f;
+    in.dayOfYear = 200;
+    return in;
+}
+
 // A valley 64 x 64 cells of 50 m: walls at 90 m, a floor at 20 m between
 // x 20 and 44 (the mist pools there).
 std::vector<float> ValleyHeights(int n)
@@ -374,139 +360,379 @@ std::vector<float> ValleyHeights(int n)
     return h;
 }
 
+// A plain at 20 m (no mist layer anywhere), 64 x 64 cells of 50 m.
+std::shared_ptr<const FogSightMap> PlainMap(float aridity = 0.0f)
+{
+    auto map = std::make_shared<FogSightMap>();
+    map->size = 64;
+    map->cellSize = 50.0f;
+    map->ground.assign(64 * 64, 20.0f);
+    map->floorY.assign(64 * 64, 20.0f);
+    map->layer.assign(64 * 64, 0.0f);
+    map->aridity = aridity;
+    return map;
+}
+
+// The classic tactical fog's visibility (Scene.cpp FogExponential over the
+// classic fog's range): what AI sight took before it followed the drawn air.
+float ClassicTactical(float d, float start, float end)
+{
+    if (d >= end)
+        return 0.0f;
+    if (d <= start)
+        return 1.0f;
+    return std::exp(-2.9957323f * (d - start) / end);
+}
+
+// What the drawn air leaves along a line, integrated finely: the medium's
+// extinction with its near thinning around `from` (FogSeenExtinctionAt) and
+// the forward fog's edge. Independent of the eight-sample march.
+float DrawnAlong(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3], int samples = 2000)
+{
+    const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+    const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    double tau = 0.0;
+    for (int i = 0; i < samples; ++i)
+    {
+        const float t = (static_cast<float>(i) + 0.5f) / static_cast<float>(samples);
+        const float x = from[0] + dx * t, y = from[1] + dy * t, z = from[2] + dz * t;
+        const int gx = std::clamp(static_cast<int>(std::lround(x / map.cellSize)), 0, map.size - 1);
+        const int gz = std::clamp(static_cast<int>(std::lround(z / map.cellSize)), 0, map.size - 1);
+        const size_t c = static_cast<size_t>(gz) * map.size + gx;
+        tau += FogSeenExtinctionAt(m, y, map.floorY[c], y - map.ground[c], map.layer[c], len * t);
+    }
+    return FogEdgeKeep(m, len) * static_cast<float>(std::exp(-tau * len / samples));
+}
+
+// The old link's share (before AI sight followed the whole drawn air): the
+// classic tactical fog times the humid ground air and the mist alone.
+float OldAiShare(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3])
+{
+    const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+    const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    double tau = 0.0;
+    constexpr int kN = 2000;
+    for (int i = 0; i < kN; ++i)
+    {
+        const float t = (static_cast<float>(i) + 0.5f) / kN;
+        const float x = from[0] + dx * t, y = from[1] + dy * t, z = from[2] + dz * t;
+        const int gx = std::clamp(static_cast<int>(std::lround(x / map.cellSize)), 0, map.size - 1);
+        const int gz = std::clamp(static_cast<int>(std::lround(z / map.cellSize)), 0, map.size - 1);
+        const size_t c = static_cast<size_t>(gz) * map.size + gx;
+        const float keep =
+            kMistNearKeep +
+            (1.0f - kMistNearKeep) * std::clamp((len * t - kMistNearFrom) / (kMistNearTo - kMistNearFrom), 0.0f, 1.0f);
+        tau += FogSightExtinctionAt(m, y, map.floorY[c], y - map.ground[c], map.layer[c]) * keep;
+    }
+    return ClassicTactical(len, m.fogStart, m.fogEnd) * static_cast<float>(std::exp(-tau * len / kN));
+}
+
 } // namespace
 
-TEST_CASE("Volumetric fog: AI sight equals the drawn fog's air for the same inputs and knobs", "[remaster][fog]")
+TEST_CASE("Volumetric fog: AI sight takes the whole medium the player sees", "[remaster][fog][aisight]")
+{
+    const float a[3] = {500.0f, 45.0f, 500.0f};
+    const float b[3] = {1100.0f, 45.0f, 500.0f};
+    PublishFogSight(nullptr);
+    CHECK_FALSE(FogSightActive());
+    CHECK(FogSightTransmittance(a, b) == 1.0f);
+    // A flat valley floor at 40 m under a 30 m layer, on a misty morning.
+    auto map = std::make_shared<FogSightMap>();
+    map->size = 64;
+    map->cellSize = 50.0f;
+    map->ground.assign(64 * 64, 40.0f);
+    map->floorY.assign(64 * 64, 40.0f);
+    map->layer.assign(64 * 64, 30.0f);
+    auto misty = std::make_shared<FogSightSnapshot>();
+    misty->volumetric = true;
+    misty->medium.mistSigma = kMistSigma;
+    misty->medium.fogEnd = 5000.0f;
+    misty->medium.fogEdgeScale = VolFogEdgeScale(0.0f, 5000.0f);
+    misty->map = map;
+    PublishFogSight(misty);
+    CHECK(FogSightActive());
+    // 600 m through the layer: over half of it gone (kMistSigma 2e-3); the
+    // same line 300 m up, clear.
+    CHECK(FogSightTransmittance(a, b) < 0.45f);
+    const float up[2][3] = {{500.0f, 340.0f, 500.0f}, {1100.0f, 340.0f, 500.0f}};
+    CHECK(FogSightTransmittance(up[0], up[1]) > 0.95f);
+    // The clear haze alone takes its share too (the old link took only the
+    // mist and the humid air, and handed a clear medium nothing).
+    auto hazy = std::make_shared<FogSightSnapshot>(*misty);
+    hazy->medium = FogMedium{};
+    hazy->medium.hazeSigma = 1.0e-3f;
+    hazy->medium.hazeNearKeep = 1.0f;
+    hazy->medium.fogEnd = 5000.0f;
+    hazy->medium.fogEdgeScale = VolFogEdgeScale(0.0f, 5000.0f);
+    PublishFogSight(hazy);
+    CHECK(FogSightActive());
+    CHECK(FogSightTransmittance(up[0], up[1]) < 0.75f);
+    // Past the classic fog's end the drawn world ends, and so does AI sight.
+    auto shortRange = std::make_shared<FogSightSnapshot>(*hazy);
+    shortRange->medium.fogStart = 100.0f;
+    shortRange->medium.fogEnd = 500.0f;
+    shortRange->medium.fogEdgeScale = VolFogEdgeScale(100.0f, 500.0f);
+    PublishFogSight(shortRange);
+    CHECK(FogSightTransmittance(a, b) == 0.0f);
+    // A snapshot already handed out stays whole when the next one lands.
+    const std::shared_ptr<const FogSightSnapshot> held = FogSightNow();
+    PublishFogSight(misty);
+    CHECK(held->medium.fogEnd == 500.0f);
+    CHECK(FogSightTransmittance(*held, a, b) == 0.0f);
+    PublishFogSight(nullptr);
+    CHECK_FALSE(FogSightActive());
+}
+
+TEST_CASE("Volumetric fog: AI sight is the drawn air along the same line, the edge included",
+          "[remaster][fog][aisight]")
 {
     const std::vector<float> h = ValleyHeights(64);
     const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
     REQUIRE(map);
     REQUIRE(map->Valid());
-    // Across the valley floor, 1.7 m over it, 500 m.
-    const float a[3] = {1100.0f, 21.7f, 1000.0f};
-    const float b[3] = {1100.0f, 21.7f, 1500.0f};
-    for (float density : {1.0f, 0.5f, 2.0f})
-        for (float mist : {1.0f, 0.5f, 0.0f})
-        {
-            LightingTuning t;
-            t.fogDensity = density;
-            t.fogMist = mist;
-            const FogInputs in = MistyMorning();
-            UpdateFogSightMedium(in, t, map);
-            // The renderer's medium while its fog draws.
-            const FogMedium drawn = ComputeFogMedium(in, t, true);
-            const FogMedium& ai = FogSightMedium();
-            CHECK(ai.groundSigma == drawn.groundSigma);
-            CHECK(ai.groundHeight == drawn.groundHeight);
-            CHECK(ai.mistSigma == drawn.mistSigma);
-            CHECK(ai.mistLayer == drawn.mistLayer);
-            CHECK(ai.mistFall == drawn.mistFall);
-            CHECK(FogSightActive());
-            CHECK(FogSightTransmittance(a, b) == FogSightTransmittanceThrough(drawn, *map, a, b));
-        }
-    // The knobs move AI sight as they move the drawn fog: thicker with
-    // fogDensity, thinner without the mist.
-    auto sightWith = [&](float density, float mist)
+    FogInputs dusty = ClearNoon();
+    dusty.aridity = 1.0f;
+    FogInputs grey = MistyMorning();
+    grey.skyThrough = 0.0f;
+    grey.rain = 0.4f;
+    struct Case
     {
-        LightingTuning t;
-        t.fogDensity = density;
-        t.fogMist = mist;
-        UpdateFogSightMedium(MistyMorning(), t, map);
-        return FogSightTransmittance(a, b);
+        const char* name;
+        FogInputs in;
     };
-    const float base = sightWith(1.0f, 1.0f);
-    CHECK(base < 0.9f); // the misty valley takes a real share
-    CHECK(sightWith(2.0f, 1.0f) < base);
-    CHECK(sightWith(1.0f, 0.0f) > base);
-    SetFogSight(nullptr, nullptr);
+    const Case cases[] = {{"clear noon", ClearNoon()},
+                          {"misty morning", MistyMorning()},
+                          {"foggy night", FoggyNight()},
+                          {"grey rain", grey}};
+    const float lines[][2][3] = {
+        {{1100.0f, 21.7f, 1000.0f}, {1100.0f, 21.7f, 1500.0f}}, // along the valley floor, 500 m
+        {{1100.0f, 21.7f, 400.0f}, {1100.0f, 21.7f, 1800.0f}},  // the same, 1400 m
+        {{600.0f, 92.0f, 600.0f}, {2600.0f, 92.0f, 1400.0f}},   // ridge to ridge over the valley
+        {{1100.0f, 21.7f, 1000.0f}, {1110.0f, 22.0f, 1120.0f}}, // 120 m, inside the near thinning
+    };
+    for (const Case& c : cases)
+    {
+        INFO("weather: " << c.name);
+        const std::shared_ptr<const FogSightSnapshot> s = MakeFogSightSnapshot(c.in, false, map);
+        REQUIRE(s->volumetric);
+        // The renderer's medium while its fog draws, with the shipped knobs.
+        const FogMedium drawn = ComputeFogMedium(c.in, LightingTuning{}, true);
+        CHECK(s->medium.hazeSigma == drawn.hazeSigma);
+        CHECK(s->medium.rayleigh == drawn.rayleigh);
+        CHECK(s->medium.weatherSigma == drawn.weatherSigma);
+        CHECK(s->medium.groundSigma == drawn.groundSigma);
+        CHECK(s->medium.mistSigma == drawn.mistSigma);
+        CHECK(s->medium.fogEnd == drawn.fogEnd);
+        CHECK(s->medium.fogEdgeScale == drawn.fogEdgeScale);
+        for (const auto& line : lines)
+        {
+            INFO("line from " << line[0][0] << "," << line[0][2] << " to " << line[1][0] << "," << line[1][2]);
+            const float ai = FogSightTransmittance(*s, line[0], line[1]);
+            CHECK(ai == FogSightTransmittanceThrough(drawn, *map, line[0], line[1]));
+            // Eight samples come close to the finely integrated drawn air,
+            // the lesser of the views from either end.
+            const float fine =
+                std::min(DrawnAlong(drawn, *map, line[0], line[1]), DrawnAlong(drawn, *map, line[1], line[0]));
+            CHECK(ai == Catch::Approx(fine).margin(0.03).epsilon(0.08));
+            CHECK(ai == Catch::Approx(FogSightTransmittance(*s, line[1], line[0])).epsilon(1e-5)); // both ways
+        }
+    }
+    // The dust of an arid island is the map's: the same weather over sand
+    // takes more than over grass.
+    const std::shared_ptr<const FogSightMap> green = PlainMap(0.0f), sand = PlainMap(1.0f);
+    const float from[3] = {500.0f, 21.7f, 500.0f};
+    const float to[3] = {1500.0f, 21.7f, 500.0f};
+    const float overGrass = FogSightTransmittance(*MakeFogSightSnapshot(ClearNoon(), false, green), from, to);
+    const float overSand = FogSightTransmittance(*MakeFogSightSnapshot(ClearNoon(), false, sand), from, to);
+    CHECK(overSand < 0.75f * overGrass);
+    CHECK(overSand == FogSightTransmittanceThrough(ComputeFogMedium(dusty, LightingTuning{}, true), *sand, from, to));
 }
 
-// The pure helper only: UpdateFogSightMedium never receives gate state, so
-// this case alone cannot catch a leak. The end-to-end pin (the simulation
-// step on a real landscape, an engine reporting each render path state, and
-// the engine's call order) is World/test_fog_sight_link.cpp ([aisight]).
-TEST_CASE("Volumetric fog: AI sight does not follow the render path", "[remaster][fog]")
+TEST_CASE("Volumetric fog: AI sight never sees through fog the old link let it", "[remaster][fog][aisight]")
 {
+    const std::shared_ptr<const FogSightMap> plain = PlainMap(0.0f);
+    // The foggy night: the drawn weather fog is about 5.6 times the classic
+    // fog's (kNightFogBoost). A man 200 and 300 m away.
+    const FogInputs night = FoggyNight();
+    const std::shared_ptr<const FogSightSnapshot> s = MakeFogSightSnapshot(night, false, plain);
+    for (float d : {200.0f, 300.0f})
+    {
+        INFO("foggy night, " << d << " m");
+        const float from[3] = {500.0f, 21.7f, 500.0f};
+        const float to[3] = {500.0f + d, 21.7f, 500.0f};
+        const float ai = FogSightTransmittance(*s, from, to);
+        const float old = OldAiShare(s->medium, *plain, from, to);
+        CHECK(ai ==
+              Catch::Approx(std::min(DrawnAlong(s->medium, *plain, from, to), DrawnAlong(s->medium, *plain, to, from)))
+                  .margin(0.02)
+                  .epsilon(0.08));
+        CHECK(ai < 0.3f);  // the drawn fog leaves under a third of a man
+        CHECK(old > 0.4f); // where the old link left about half or more
+        CHECK(ai < 0.5f * old);
+    }
+    // Desert dust at clear noon: the old link took nothing of it, the AI's
+    // share did not move with the island's sand.
+    FogInputs noon = ClearNoon();
+    noon.fogStart = 450.0f;
+    noon.fogEnd = 1500.0f;
+    noon.viewDistance = 1500.0f;
+    const float from[3] = {500.0f, 21.7f, 500.0f};
+    const float to[3] = {1300.0f, 21.7f, 500.0f};
+    const std::shared_ptr<const FogSightSnapshot> grass = MakeFogSightSnapshot(noon, false, PlainMap(0.0f));
+    const std::shared_ptr<const FogSightSnapshot> sand = MakeFogSightSnapshot(noon, false, PlainMap(1.0f));
+    CHECK(sand->medium.dustSigma > 0.0f);
+    CHECK(OldAiShare(sand->medium, *plain, from, to) == OldAiShare(grass->medium, *plain, from, to));
+    CHECK(FogSightTransmittance(*sand, from, to) < 0.75f * FogSightTransmittance(*grass, from, to));
+    // A grey day's haze over the hilltops (no ground air or mist up there):
+    // the old link's share was the clear day's, the drawn air is thicker.
+    FogInputs dull = noon;
+    dull.skyThrough = 0.0f;
+    const float high[2][3] = {{500.0f, 400.0f, 500.0f}, {1700.0f, 400.0f, 500.0f}};
+    const std::shared_ptr<const FogSightSnapshot> clear = MakeFogSightSnapshot(noon, false, plain);
+    const std::shared_ptr<const FogSightSnapshot> deck = MakeFogSightSnapshot(dull, false, plain);
+    CHECK(OldAiShare(deck->medium, *plain, high[0], high[1]) ==
+          Catch::Approx(OldAiShare(clear->medium, *plain, high[0], high[1])));
+    CHECK(FogSightTransmittance(*deck, high[0], high[1]) < 0.85f * FogSightTransmittance(*clear, high[0], high[1]));
+}
+
+TEST_CASE("Volumetric fog: AI sight out of a mist bank is no clearer than the player's view into it",
+          "[remaster][fog][aisight]")
+{
+    // The drawn air keeps the eye's own surroundings legible (the near
+    // thinning), so a camera inside a valley's mist sees out more clearly
+    // than a camera on the ridge sees in. An AI in the bank must not see the
+    // player on the ridge better than that player sees the AI, and the other
+    // way round.
+    const std::vector<float> h = ValleyHeights(64);
+    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
+    REQUIRE(map);
+    const std::shared_ptr<const FogSightSnapshot> s = MakeFogSightSnapshot(MistyMorning(), false, map);
+    REQUIRE(s->medium.mistSigma > 0.0f);
+    const float bank[3] = {1900.0f, 21.7f, 1000.0f};  // in the valley's mist
+    const float ridge[3] = {2600.0f, 91.7f, 1000.0f}; // on the wall, over it
+    const float out = FogSeenTransmittanceFrom(s->medium, *map, bank, ridge);
+    const float in = FogSeenTransmittanceFrom(s->medium, *map, ridge, bank);
+    INFO("seen from the bank " << out << ", from the ridge " << in);
+    REQUIRE(out > in + 0.02f); // the asymmetry is real
+    const float aiInBank = FogSightTransmittance(*s, bank, ridge);
+    const float aiOnRidge = FogSightTransmittance(*s, ridge, bank);
+    constexpr float kUlp = 1e-5f; // the two ends march the samples in opposite orders
+    CHECK(aiInBank == Catch::Approx(aiOnRidge).epsilon(kUlp));
+    CHECK(aiInBank <= in + kUlp);   // no clearer than the player on the ridge sees the AI
+    CHECK(aiOnRidge <= out + kUlp); // nor than the player in the bank sees the AI
+    CHECK(aiInBank == Catch::Approx(in).epsilon(kUlp));
+}
+
+TEST_CASE("Volumetric fog: with the Lighting row on Classic, AI sight is the classic fog only",
+          "[remaster][fog][aisight]")
+{
+    const std::vector<float> h = ValleyHeights(64);
+    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
+    REQUIRE(map);
+    const float a[3] = {1100.0f, 21.7f, 1000.0f};
+    const float b[3] = {1100.0f, 21.7f, 1500.0f};
+    for (const FogInputs& in : {MistyMorning(), FoggyNight(), ClearNoon()})
+    {
+        const std::shared_ptr<const FogSightSnapshot> classic = MakeFogSightSnapshot(in, true, map);
+        CHECK_FALSE(classic->volumetric);
+        CHECK(classic->map == map); // the renderer's fog floor keeps its map
+        CHECK(FogSightTransmittance(*classic, a, b) == 1.0f);
+        PublishFogSight(classic);
+        CHECK_FALSE(FogSightActive());
+        CHECK(FogSightMapInUse() == map);
+        CHECK(FogSightTransmittance(a, b) == 1.0f);
+        const std::shared_ptr<const FogSightSnapshot> remastered = MakeFogSightSnapshot(in, false, map);
+        CHECK(remastered->volumetric);
+        CHECK(FogSightTransmittance(*remastered, a, b) < 1.0f);
+    }
+    // No island: the classic fog, whatever the row.
+    CHECK_FALSE(MakeFogSightSnapshot(MistyMorning(), false, nullptr)->volumetric);
+    PublishFogSight(nullptr);
+}
+
+TEST_CASE("Volumetric fog: AI sight takes the shipped knobs, never the machine's", "[remaster][fog][aisight]")
+{
+    // MakeFogSightSnapshot takes no LightingTuning: the dev knobs (fogDensity,
+    // fogMist), the render path's switches and the fog's quality cannot reach
+    // it. Its medium is the shipped tuning's drawn medium.
     const std::vector<float> h = ValleyHeights(64);
     const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
     REQUIRE(map);
     const float a[3] = {1100.0f, 21.7f, 1000.0f};
     const float b[3] = {1100.0f, 21.7f, 1500.0f};
     const FogInputs in = MistyMorning();
-    UpdateFogSightMedium(in, LightingTuning{}, map);
-    const float normal = FogSightTransmittance(a, b);
-    REQUIRE(normal < 0.9f);
-
-    // Post effects off and a vehicle interior: the fog's gate is off, the
-    // renderer keeps the classic forward fog; AI sight is the same.
-    LightingTuning noPost;
-    noPost.postEffects = false;
-    GateInputs gi;
-    gi.fog = in.fog;
-    gi.skyThrough = in.skyThrough;
-    gi.sunElevationDeg = in.sunElevationDeg;
-    gi.sunAzimuthDeg = in.sunAzimuthDeg;
-    CHECK_FALSE(ComputeFeatureGates(gi, noPost)[Feature::VolFog].on);
-    UpdateFogSightMedium(in, noPost, map);
-    CHECK(FogSightActive());
-    CHECK(FogSightTransmittance(a, b) == normal);
-
-    GateInputs interior = gi;
-    interior.interior = true;
-    CHECK_FALSE(ComputeFeatureGates(interior, LightingTuning{})[Feature::VolFog].on);
-    UpdateFogSightMedium(in, LightingTuning{}, map);
-    CHECK(FogSightTransmittance(a, b) == normal);
-
-    // The fog's quality knob and the other render-only knobs change nothing.
-    LightingTuning coarse;
-    coarse.fogQuality = 0.0f;
-    coarse.fogSun = 0.3f;
-    coarse.fogLights = 0.0f;
-    UpdateFogSightMedium(in, coarse, map);
-    CHECK(FogSightTransmittance(a, b) == normal);
-    SetFogSight(nullptr, nullptr);
+    const std::shared_ptr<const FogSightSnapshot> s = MakeFogSightSnapshot(in, false, map);
+    const float shipped = FogSightTransmittanceThrough(ComputeFogMedium(in, LightingTuning{}, true), *map, a, b);
+    CHECK(FogSightTransmittance(*s, a, b) == shipped);
+    for (float density : {0.5f, 2.0f})
+        for (float mist : {0.0f, 3.0f})
+        {
+            LightingTuning dev;
+            dev.fogDensity = density;
+            dev.fogMist = mist;
+            dev.postEffects = false;
+            dev.remastered = false;
+            dev.fogQuality = 0.0f;
+            // The drawn air on that machine moves; AI sight does not.
+            CHECK(FogSightTransmittanceThrough(ComputeFogMedium(in, dev, true), *map, a, b) != shipped);
+            CHECK(FogSightTransmittance(*MakeFogSightSnapshot(in, false, map), a, b) == shipped);
+        }
+    // The render path's gates are not an input either (the engine-level pin
+    // is World/test_fog_sight_link.cpp).
+    // Deterministic: the same inputs give the same bits.
+    for (int i = 0; i < 3; ++i)
+        CHECK(FogSightTransmittance(*MakeFogSightSnapshot(FoggyNight(), false, map), a, b) ==
+              FogSightTransmittance(*MakeFogSightSnapshot(FoggyNight(), false, map), a, b));
 }
 
-TEST_CASE("Volumetric fog: AI sight works without a renderer", "[remaster][fog]")
+TEST_CASE("Volumetric fog: AI sight works without a renderer", "[remaster][fog][aisight]")
 {
-    // A dedicated server or a headless client: no GL, no terrain horizon map,
-    // the lighting tuning the base engine reports (classic, default knobs).
-    // The sight map comes straight from the heights, sampled as the horizon
-    // map samples them.
+    // A dedicated server or a headless client: no GL, no terrain horizon map.
+    // The sight map comes straight from the heights (and the ground colours),
+    // sampled as the horizon map samples them, so its fog floor and its
+    // aridity are the ones the renderer draws with.
     const int n = 40;
     std::vector<float> h(static_cast<size_t>(n) * n);
+    std::vector<float> rgb(static_cast<size_t>(n) * n * 3);
     for (int z = 0; z < n; ++z)
         for (int x = 0; x < n; ++x)
-            h[static_cast<size_t>(z) * n + x] =
-                20.0f + 3.0f * std::fabs(static_cast<float>(x - 20)) + 0.5f * static_cast<float>(z % 7);
-    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), n, 25.0f, 16);
+        {
+            const size_t i = static_cast<size_t>(z) * n + x;
+            h[i] = 20.0f + 3.0f * std::fabs(static_cast<float>(x - 20)) + 0.5f * static_cast<float>(z % 7);
+            // Sand on the east three quarters, grass on the west.
+            const bool east = x >= 10;
+            rgb[i * 3 + 0] = east ? 0.78f : 0.35f;
+            rgb[i * 3 + 1] = east ? 0.66f : 0.45f;
+            rgb[i * 3 + 2] = east ? 0.48f : 0.22f;
+        }
+    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), n, 25.0f, 16, rgb.data());
     REQUIRE(map);
     TerrainHorizonOptions options;
     options.maxSize = 16;
     options.threads = 1;
     TerrainHorizonMap horizon;
-    REQUIRE(BuildTerrainHorizonMap(h.data(), n, 25.0f, options, horizon));
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, 25.0f, options, horizon, rgb.data()));
     CHECK(map->size == horizon.size);
     CHECK(map->cellSize == horizon.cellSize);
     CHECK(map->ground == horizon.height);
     CHECK(map->floorY == BuildFogFloor(horizon.height.data(), horizon.size, horizon.cellSize));
+    CHECK(map->aridity == FogAridity(horizon.groundTint, horizon.height));
+    CHECK(map->aridity > 0.1f);
+    CHECK(map->aridity < 0.9f);
+    CHECK(BuildFogSightMap(h.data(), n, 25.0f, 16)->aridity == 0.0f);
     CHECK(BuildFogSightMap(nullptr, n, 25.0f) == nullptr);
     CHECK(BuildFogSightMap(h.data(), 1, 25.0f) == nullptr);
 
-    LightingTuning headless;
-    headless.remastered = false;
-    UpdateFogSightMedium(MistyMorning(), headless, map);
-    CHECK(FogSightActive());
+    const std::shared_ptr<const FogSightSnapshot> s = MakeFogSightSnapshot(MistyMorning(), false, map);
+    CHECK(s->volumetric);
+    CHECK(s->medium.dustSigma > 0.0f);
     const float from[3] = {500.0f, 22.0f, 100.0f};
     const float to[3] = {500.0f, 22.0f, 800.0f};
-    CHECK(FogSightTransmittance(from, to) < 1.0f);
-    CHECK(FogSightTransmittance(from, to) ==
-          FogSightTransmittanceThrough(ComputeFogMedium(MistyMorning(), LightingTuning{}, true), *map, from, to));
-    // No island: classic sight.
-    UpdateFogSightMedium(MistyMorning(), headless, nullptr);
-    CHECK_FALSE(FogSightActive());
-    CHECK(FogSightTransmittance(from, to) == 1.0f);
-    SetFogSight(nullptr, nullptr);
+    CHECK(FogSightTransmittance(*s, from, to) < 1.0f);
+    FogInputs withDust = MistyMorning();
+    withDust.aridity = map->aridity;
+    CHECK(FogSightTransmittance(*s, from, to) ==
+          FogSightTransmittanceThrough(ComputeFogMedium(withDust, LightingTuning{}, true), *map, from, to));
 }
 
 TEST_CASE("Volumetric fog: off, the forward fog is the classic one; on, it keeps only the view-distance edge",
@@ -579,7 +805,8 @@ TEST_CASE("Volumetric fog: the Air stage applies it with the world depth and rep
     alone.fog = true;
     CHECK(PlanPostStages(alone).Runs(PostStage::Air));
     CHECK(PlanPostStages(alone).Runs(PostStage::Composite));
-    // A vehicle interior: no fog. An optics overlay (glow off): the fog
+    // No world depth and none saved: no fog (a vehicle interior with the
+    // world's depth saved runs it, test_post_stages.cpp). An optics overlay (glow off): the fog
     // still runs, its apply leaves the overlay's mask as drawn (look director
     // round 2: the mist popped away whenever the player aimed).
     for (bool depth : {false, true})
@@ -645,14 +872,14 @@ TEST_CASE("Volumetric fog: the switch has landed with its knobs; its gate needs 
     CHECK(ComputeFeatureGates(in, t)[Feature::VolFog].on);
     GateInputs interior = in;
     interior.interior = true;
-    CHECK_FALSE(ComputeFeatureGates(interior, t)[Feature::VolFog].on);
+    CHECK(ComputeFeatureGates(interior, t)[Feature::VolFog].on); // drawn out of a cockpit too
     GateInputs optics = in;
     optics.optics = true;
     // A gunner's optic overlay keeps the fog (the apply leaves its mask alone).
     CHECK(ComputeFeatureGates(optics, t)[Feature::VolFog].on);
     GateInputs nv = in;
     nv.nightVision = true;
-    CHECK_FALSE(ComputeFeatureGates(nv, t)[Feature::VolFog].on);
+    CHECK(ComputeFeatureGates(nv, t)[Feature::VolFog].on); // drawn over the intensified frame
     LightingTuning noPost = t;
     noPost.postEffects = false;
     CHECK_FALSE(ComputeFeatureGates(in, noPost)[Feature::VolFog].on);

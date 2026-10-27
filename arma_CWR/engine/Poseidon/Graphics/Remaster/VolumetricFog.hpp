@@ -46,9 +46,9 @@
 //
 // The forward shaders keep the classic fog only for the view-distance edge
 // (VolFogEdgeScale): the world's end and object fade-in stay hidden,
-// everything before them is the volume's. AI sight takes the mist and the
-// humid ground air that the classic tactical fog does not hold
-// (FogSightTransmittance), so the player and the AI see through the same air.
+// everything before them is the volume's. AI sight takes the same medium and
+// the same edge in place of the classic tactical fog (FogSightTransmittance),
+// so the player and the AI see through the same air.
 //
 // Pure: no GL, no engine state, so the medium's rules, the slice layout and
 // the fog floor can be tested.
@@ -335,6 +335,10 @@ struct FogMedium
     float skyThrough = 1.0f;
     // The night (0..1): the air's light follows the night sky's.
     float night = 0.0f;
+    // The classic fog's range (m, FogInputs::fogStart and fogEnd): with
+    // fogEdgeScale, the forward fog's edge (FogEdgeKeep).
+    float fogStart = 0.0f;
+    float fogEnd = 1500.0f;
 };
 
 // The classic engine's tactical visibility (m) for setFog `fog`, rain
@@ -432,64 +436,115 @@ float FogExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGrou
 // `dist` metres from the eye (the injection's hazeKeep: hazeNearKeep at the
 // eye, the whole from kHazeNearFrom to hazeNearTo), for the tests.
 float FogHazeNearKeep(const FogMedium& m, float dist);
-// The share of it that the classic tactical fog does not hold (the mist and
-// the humid ground air): what AI sight takes on top of it.
+// The low wet air alone: the humid ground air and the valley mist (a part of
+// FogExtinctionAt; the stars' and the eye's own wet air read it).
 float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer);
+// The whole medium as the injection weighs it `dist` metres from the eye:
+// FogExtinctionAt with each part's near thinning (the clear haze and air
+// FogHazeNearKeep, the dust kDustNearKeep, the humid air and the mist
+// kMistNearKeep, the weather fog none), without the mist's banks. What AI
+// sight integrates.
+float FogSeenExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer, float dist);
+// The forward fog's share left `dist` metres out: the classic linear fog over
+// fogStart..fogEnd times fogEdgeScale, at most 1 (with the volume on: 1 up to
+// kFogEdgeStart of the end, 0 at the end). AI sight ends where the drawn
+// world ends.
+float FogEdgeKeep(const FogMedium& m, float dist);
 // The humid ground air's share at height y (1 in the low ground, 0 from
 // kGroundAirFade above the fog floor plus the mist layer plus kGroundAirTop).
 float FogGroundAirTop(const FogMedium& m, float y, float floorY, float layer);
 
 // ---- AI sight ------------------------------------------------------------------
 //
-// AI sight is part of the simulation, not of the renderer: once per
+// AI sight is part of the simulation, not of the renderer. Once per
 // simulation step (World::SimulateLandscape, Poseidon::SimulateFogSight in
-// World/Terrain/TerrainLighting.hpp) the world's weather, time of day and
-// knobs (FogInputs, LightingTuning) give the medium through ComputeFogMedium
-// with `applied` true, the very function and inputs the renderer's fog takes,
-// over a sight map built from the island's heights when it loads. No render
-// state enters it: post effects, the SSAA path, a vehicle interior view, the
-// fog's gates and quality, a missing renderer (a dedicated server, a headless
-// client) leave AI sight as it is, and every machine computes it from the same
-// synced weather and date. The renderer's fog floor reads the same map
-// (FogSightMapInUse).
+// World/Terrain/TerrainLighting.hpp) the world's weather and time of day
+// (FogInputs) and the island's sight map give one immutable snapshot
+// (MakeFogSightSnapshot): the medium through ComputeFogMedium with the
+// shipped knobs (LightingTuning{}, never a machine's dev knobs) and `applied`
+// true, the very function the renderer's fog takes. No render state enters
+// it: post effects, the SSAA path, a vehicle interior view, the fog's gates
+// and quality, a missing renderer (a dedicated server, a headless client)
+// leave AI sight as it is, and every machine computes it from the same synced
+// weather and date.
+//
+// With the Lighting row on Remastered the renderer draws this medium and only
+// the view-distance edge of the classic fog, so AI sight takes the medium's
+// transmittance times that edge IN PLACE OF the classic tactical fog: the
+// medium's weather fog is already the classic tactical visibility's share
+// (WeatherVisibility), so multiplying both would count the weather twice.
+// With the row on Classic the drawn fog is the classic fog, and AI sight
+// takes the classic tactical fog only (FogSightSnapshot::volumetric false).
+// The machine that simulates the AI decides; one that draws nothing takes
+// the default, Remastered.
 
 // The terrain the sight test reads: ground, fog floor and mist layer on one
-// grid (x east, z north, cell (0, 0) at the world origin).
+// grid (x east, z north, cell (0, 0) at the world origin), and the island's
+// aridity (FogAridity, for the dust).
 struct FogSightMap
 {
     int size = 0;
     float cellSize = 0.0f;
     std::vector<float> ground, floorY, layer;
+    float aridity = 0.0f;
     bool Valid() const;
 };
+// The ground tint strength the terrain horizon map's tints take
+// (TerrainHorizon.cpp kGroundTintStrength): the sight map's aridity takes
+// the same, so it equals FogAridity on the horizon map.
+constexpr float kFogAridityTintStrength = 0.75f;
 // The sight map of a landscape's heights grid (range x range, `grid` metres
 // apart, row-major by z then x): the grid box-downsampled as the terrain
 // horizon map samples it (DownsampleTerrainGrid, at most maxSize texels per
-// side), its fog floor (BuildFogFloor) and mist layer (BuildFogLayer). Null
-// for an invalid grid.
-std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize = 1024);
-// The simulation's step: AI sight takes ComputeFogMedium(in, t, true) over
-// `map` (null: no island, sight is classic).
-void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::shared_ptr<const FogSightMap> map);
-// The medium and the map AI sight uses now (the renderer's fog floor draws
-// from this map; null before an island loads). Both are handed out by value
-// (the map as a shared pointer to an immutable map), so no caller holds a
-// reference into the state the next simulation step rewrites. The state is
-// written once per simulation step on the main thread (SimulateFogSight),
-// where PerformAI and the renderer read it (BACKGROUND_AI is 0); a reader on
-// another thread would need a snapshot handed over, not these calls.
+// side), its fog floor (BuildFogFloor) and mist layer (BuildFogLayer). With
+// `groundRgb` (range x range x 3, the ground's display colour at each
+// vertex, as BuildTerrainHorizonMap takes it) its aridity is the one the
+// horizon map's tints give; without, 0. Null for an invalid grid.
+std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize = 1024,
+                                                    const float* groundRgb = nullptr);
+
+// One simulation step's AI sight. Immutable once published: a reader keeps
+// its own reference for as long as it reads.
+struct FogSightSnapshot
+{
+    // True: the medium and the edge replace the classic tactical fog. False
+    // (Classic lighting, no island): the classic tactical fog alone.
+    bool volumetric = false;
+    FogMedium medium;
+    std::shared_ptr<const FogSightMap> map; // also the renderer's fog floor
+};
+// The step's snapshot from the world's inputs (the aridity is the map's),
+// the shipped knobs and the simulating machine's Lighting row (pure).
+std::shared_ptr<const FogSightSnapshot> MakeFogSightSnapshot(const FogInputs& in, bool classicLighting,
+                                                             std::shared_ptr<const FogSightMap> map);
+// The simulation step publishes (null: no island); any thread may take the
+// current one. Publishing swaps a pointer under a lock: a reader holding the
+// previous snapshot keeps it whole.
+void PublishFogSight(std::shared_ptr<const FogSightSnapshot> s);
+std::shared_ptr<const FogSightSnapshot> FogSightNow();
+// Shorthands over FogSightNow(), handing out copies: whether AI sight takes
+// the medium in place of the classic fog, the medium, and the map (null
+// before an island loads).
+bool FogSightActive();
 FogMedium FogSightMedium();
 std::shared_ptr<const FogSightMap> FogSightMapInUse();
-// Low level: set the medium and the map directly (nullptr: sight is classic).
-void SetFogSight(const FogMedium* m, std::shared_ptr<const FogSightMap> map);
-bool FogSightActive();
-// Transmittance (0..1) of the mist and the humid ground air along the line
-// between two world points (x east, y up, z north): 1 while sight is classic.
-// Eight samples along the line, with the eye's near thinning around `from`.
+// Transmittance (0..1) along the line between two world points (x east, y
+// up, z north): the medium's times the edge (FogEdgeKeep) at the line's
+// length, the lesser of the drawn views from either end (FogSeenExtinctionAt
+// thins the air around the eye, so from inside a mist bank the way out looks
+// clearer than the way in: AI sight takes the way in, as a player there
+// sees it, and is the same both ways). Eight samples along the line; parts
+// that are zero cost nothing. 1 when the snapshot is not volumetric.
+float FogSightTransmittance(const FogSightSnapshot& s, const float from[3], const float to[3]);
+// The same for FogSightNow() (1 without one).
 float FogSightTransmittance(const float from[3], const float to[3]);
 // The same through a given medium over a given map (pure).
 float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3],
                                    const float to[3]);
+// The drawn view alone: a camera at `eye` looking at `to` (the near thinning
+// around the eye), on the same eight samples (pure; for the tests and the
+// probes).
+float FogSeenTransmittanceFrom(const FogMedium& m, const FogSightMap& map, const float eye[3], const float to[3]);
 // The medium the renderer's fog drew this frame (nullptr: it did not draw),
 // for probes that compare the drawn air with AI sight (triFogSight); AI
 // sight never reads it.

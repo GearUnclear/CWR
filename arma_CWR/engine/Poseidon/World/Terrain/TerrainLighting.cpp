@@ -12,6 +12,7 @@
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
 #include <algorithm>
@@ -147,6 +148,7 @@ GroundCells GroundColors(const Landscape& land)
     const int n = cells.landRange;
     cells.rgb.assign(static_cast<size_t>(n) * n * 3, 0.5f);
     std::unordered_map<int, Color> byIndex;
+    const int textures = land.TextureCount();
     for (int z = 0; z < n; ++z)
     {
         for (int x = 0; x < n; ++x)
@@ -155,7 +157,7 @@ GroundCells GroundColors(const Landscape& land)
             auto it = byIndex.find(index);
             if (it == byIndex.end())
             {
-                Texture* tex = land.ClippedTexture(z, x);
+                Texture* tex = index >= 0 && index < textures ? land.ClippedTexture(z, x) : nullptr;
                 it = byIndex.emplace(index, tex ? tex->GetColor() : Color(0.5f, 0.5f, 0.5f, 1.0f)).first;
             }
             float* o = cells.rgb.data() + (static_cast<size_t>(z) * n + x) * 3;
@@ -485,6 +487,10 @@ remaster::FogInputs WorldFogInputs(const Landscape* land)
     }
     in.year = Glob.clock.GetYear();
     in.dayOfYear = std::clamp(static_cast<int>(std::floor(Glob.clock.GetTimeInYear() / OneDay)), 0, 365);
+    // The island's aridity (the dust) from AI sight's map, so the renderer
+    // draws the dust AI sight takes.
+    if (const std::shared_ptr<const remaster::FogSightMap> map = remaster::FogSightMapInUse())
+        in.aridity = map->aridity;
     return in;
 }
 
@@ -507,25 +513,37 @@ void SimulateFogSight(Landscape* land)
         for (int z = 0; z < range; ++z)
             for (int x = 0; x < range; ++x)
                 heights[static_cast<size_t>(z) * range + x] = land->ClippedData(z, x); // (z, x) order
+        // The ground's colours give the island's aridity (the dust), as the
+        // terrain horizon map's tints give it to the renderer.
+        const std::vector<float> rgb = ExpandGroundColors(GroundColors(*land), range, grid);
         s_sight.land = land;
         s_sight.range = range;
         s_sight.grid = grid;
         s_sight.sample = sample;
-        s_sight.map = remaster::BuildFogSightMap(heights.data(), range, grid, remaster::TerrainHorizonOptions{}.maxSize);
+        s_sight.map = remaster::BuildFogSightMap(heights.data(), range, grid, remaster::TerrainHorizonOptions{}.maxSize,
+                                                 rgb.empty() ? nullptr : rgb.data());
         if (s_sight.map)
-            LOG_INFO(Graphics, "AI fog sight: map {}x{} at {} m (from {}x{} at {} m) built in {} ms", s_sight.map->size,
-                     s_sight.map->size, s_sight.map->cellSize, range, range, grid,
-                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
-                         .count());
+            LOG_INFO(
+                Graphics, "AI fog sight: map {}x{} at {} m (from {}x{} at {} m), aridity {:.2f}, built in {} ms",
+                s_sight.map->size, s_sight.map->size, s_sight.map->cellSize, range, range, grid, s_sight.map->aridity,
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
     }
-    const remaster::LightingTuning tuning = GEngine ? GEngine->GetLightingTuning() : remaster::LightingTuning{};
-    remaster::UpdateFogSightMedium(WorldFogInputs(land), tuning, s_sight.map);
+    remaster::PublishFogSight(remaster::MakeFogSightSnapshot(WorldFogInputs(land), FogSightClassic(), s_sight.map));
+}
+
+bool FogSightClassic()
+{
+    // The Lighting row as last applied (UI/Settings/GraphicsApply.hpp): a
+    // dedicated server or a headless client never applies one and keeps the
+    // default, Remastered.
+    const GraphicsConfig* cfg = AppliedGraphicsConfig();
+    return cfg && cfg->lighting == GraphicsConfig::LightingClassic;
 }
 
 void ShutdownFogSight()
 {
     s_sight = FogSightBuilt{};
-    remaster::SetFogSight(nullptr, nullptr);
+    remaster::PublishFogSight(nullptr);
 }
 
 void ShutdownTerrainLighting()

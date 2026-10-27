@@ -30,18 +30,22 @@ void TerrainCanopyObjectDestroyed(int objectId);
 // AI sight's air (Graphics/Remaster/VolumetricFog.hpp, AI sight), a part of
 // the simulation: called once per simulation step after the weather and the
 // clock moved (World::SimulateLandscape). When the landscape's heights change
-// (an island loads) the sight map is built at once on the calling thread,
-// whatever the render settings; every step the medium is computed from
-// WorldFogInputs and the lighting knobs (the defaults without a renderer)
-// through ComputeFogMedium with `applied` true. Deterministic: on a server and
-// its clients it follows the same synced weather and date.
+// (an island loads) the sight map, with the island's aridity from its ground
+// colours, is built at once on the calling thread, whatever the render
+// settings; every step publishes a snapshot (MakeFogSightSnapshot) from
+// WorldFogInputs, the shipped knobs and FogSightClassic. Deterministic: every
+// machine follows the same synced weather and date and the same island.
 void SimulateFogSight(Landscape* land);
+// The simulating machine's Lighting row is Classic (the Options value last
+// applied): AI sight then takes the classic tactical fog only. False on a
+// machine that never applied one (a dedicated server, a headless client).
+bool FogSightClassic();
 // Clears AI sight (classic) and drops the map. Called on world teardown.
 void ShutdownFogSight();
 // The fog's inputs from the world: the sun, the weather, the classic fog's
-// range, the view distance and the date (the aridity stays 0: it only sets the
-// dust, which AI sight does not take). The renderer's fog fills its medium
-// from the same function, so the drawn air and AI sight cannot drift apart.
+// range, the view distance, the date and the island's aridity (AI sight's
+// map's, 0 before one is built). The renderer's fog fills its medium from the
+// same function, so the drawn air and AI sight cannot drift apart.
 remaster::FogInputs WorldFogInputs(const Landscape* land);
 
 } // namespace Poseidon

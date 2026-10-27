@@ -1462,18 +1462,15 @@ class EngineGL33 : public Engine
         // two at a sixteenth (psFogGlow's ping-pong).
         unsigned int glowTex[4] = {}, glowFbo[4] = {};
         int glowW[2] = {}, glowH[2] = {};
-        // The fog floor and the mist layer (RG32F, AI sight's map's grid), the
-        // terrain map the dust's aridity was taken from, and AI sight's map
-        // (the simulation's, TerrainLighting.hpp SimulateFogSight) they show.
+        // The fog floor and the mist layer (RG32F, AI sight's map's grid) and
+        // AI sight's map (the simulation's, TerrainLighting.hpp
+        // SimulateFogSight) they show.
         unsigned int floorTex = 0;
-        const Poseidon::remaster::TerrainHorizonMap* floorFor = nullptr;
         float floorCell = 0.0f;
         int floorSize = 0;
         std::shared_ptr<const Poseidon::remaster::FogSightMap> sightMap;
         unsigned int progInject = 0, progIntegrate = 0, progNear = 0, progApply = 0, progRing = 0, progGlow = 0;
-        // The map's aridity (FogAridity, with the fog floor) and the share of
-        // the stars the wet air over the eye leaves (DrawPoints).
-        float aridity = 0.0f;
+        // The share of the stars the wet air over the eye leaves (DrawPoints).
         float starKeep = 1.0f;
         bool programsTried = false;
         bool unavailable = false;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <mutex>
 
 namespace Poseidon::remaster
 {
@@ -220,6 +221,8 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
 {
     FogMedium m;
     m.zFar = std::max(in.fogEnd, 50.0f);
+    m.fogStart = in.fogStart;
+    m.fogEnd = in.fogEnd;
     if (!applied)
         return m;
     const float density = std::max(t.fogDensity, 0.0f);
@@ -377,6 +380,30 @@ float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float abov
     return sigma;
 }
 
+float FogSeenExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer, float dist)
+{
+    // The injection's weights (EngineGL33_PostFogShaders.cpp fogMediumAt).
+    const float mistKeep = kMistNearKeep + (1.0f - kMistNearKeep) * Smooth(kMistNearFrom, kMistNearTo, dist);
+    const float dustKeep = kDustNearKeep + (1.0f - kDustNearKeep) * Smooth(kDustNearFrom, kDustNearTo, dist);
+    const float above = std::max(y - floorY, 0.0f);
+    float sigma = (m.hazeSigma * std::exp(-std::max(y, -50.0f) / m.hazeHeight) +
+                   m.rayleigh * kRayleighGreen * std::exp(-std::max(y, -50.0f) / kRayleighHeight)) *
+                  FogHazeNearKeep(m, dist);
+    sigma += m.dustSigma * std::exp(-std::max(aboveGround, 0.0f) / std::max(m.dustHeight, 1.0f)) * dustKeep;
+    sigma += m.weatherSigma * std::exp(-above / std::max(m.weatherHeight, 1.0f));
+    sigma += FogSightExtinctionAt(m, y, floorY, aboveGround, layer) * mistKeep;
+    return sigma;
+}
+
+float FogEdgeKeep(const FogMedium& m, float dist)
+{
+    const float range = m.fogEnd - m.fogStart;
+    if (!(range > 1e-3f))
+        return dist < m.fogEnd ? 1.0f : 0.0f;
+    const float classic = Clamp01(1.0f - (dist - m.fogStart) / range);
+    return std::min(classic * std::max(m.fogEdgeScale, 1.0f), 1.0f);
+}
+
 float FogExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer)
 {
     const float above = std::max(y - floorY, 0.0f);
@@ -429,16 +456,17 @@ bool FogSightMap::Valid() const
 namespace
 {
 
-struct FogSightState
+// The published snapshot: readers copy the pointer under the lock and read
+// the snapshot outside it, the simulation step swaps a new one in.
+struct FogSightSlot
 {
-    bool on = false;
-    FogMedium medium;
-    std::shared_ptr<const FogSightMap> map;
+    std::mutex lock;
+    std::shared_ptr<const FogSightSnapshot> now;
 };
 
-FogSightState& Sight()
+FogSightSlot& Slot()
 {
-    static FogSightState s;
+    static FogSightSlot s;
     return s;
 }
 
@@ -457,7 +485,8 @@ float SampleGrid(const FogSightMap& map, const std::vector<float>& grid, float x
 
 } // namespace
 
-std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize)
+std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize,
+                                                    const float* groundRgb)
 {
     auto sight = std::make_shared<FogSightMap>();
     DownsampleTerrainGrid(heights, range, grid, maxSize, sight->ground, sight->size, sight->cellSize);
@@ -467,67 +496,201 @@ std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int ra
     sight->layer = BuildFogLayer(sight->ground.data(), sight->floorY, sight->size, sight->cellSize);
     if (!sight->Valid())
         return nullptr;
+    if (groundRgb)
+    {
+        // The horizon map's tints (BuildTerrainHorizonMap): each channel
+        // box-downsampled like the heights, then the tint.
+        const size_t n = static_cast<size_t>(sight->size) * static_cast<size_t>(sight->size);
+        std::vector<float> channel(static_cast<size_t>(range) * static_cast<size_t>(range));
+        std::vector<float> down[3];
+        bool same = true;
+        for (int c = 0; c < 3 && same; ++c)
+        {
+            for (size_t i = 0; i < channel.size(); ++i)
+                channel[i] = groundRgb[i * 3 + c];
+            int size = 0;
+            float cell = 0.0f;
+            DownsampleTerrainGrid(channel.data(), range, grid, maxSize, down[c], size, cell);
+            same = size == sight->size && down[c].size() == n;
+        }
+        if (same)
+        {
+            std::vector<float> tint(n * 2);
+            for (size_t i = 0; i < n; ++i)
+                GroundTint(down[0][i], down[1][i], down[2][i], kFogAridityTintStrength, tint[i * 2], tint[i * 2 + 1]);
+            sight->aridity = FogAridity(tint, sight->ground);
+        }
+    }
     return sight;
 }
 
-void SetFogSight(const FogMedium* m, std::shared_ptr<const FogSightMap> map)
+std::shared_ptr<const FogSightSnapshot> MakeFogSightSnapshot(const FogInputs& in, bool classicLighting,
+                                                             std::shared_ptr<const FogSightMap> map)
 {
-    FogSightState& s = Sight();
-    s.on = m != nullptr && map && map->Valid() && (m->mistSigma > 0.0f || m->groundSigma > 0.0f);
-    s.medium = m ? *m : FogMedium{};
-    s.map = std::move(map);
+    auto s = std::make_shared<FogSightSnapshot>();
+    FogInputs world = in;
+    world.aridity = map ? map->aridity : 0.0f;
+    s->medium = ComputeFogMedium(world, LightingTuning{}, true);
+    s->volumetric = !classicLighting && map && map->Valid();
+    s->map = std::move(map);
+    return s;
 }
 
-void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::shared_ptr<const FogSightMap> map)
+void PublishFogSight(std::shared_ptr<const FogSightSnapshot> s)
 {
-    const FogMedium m = ComputeFogMedium(in, t, true);
-    SetFogSight(&m, std::move(map));
+    FogSightSlot& slot = Slot();
+    std::shared_ptr<const FogSightSnapshot> old; // released outside the lock
+    {
+        std::lock_guard<std::mutex> hold(slot.lock);
+        old = std::move(slot.now);
+        slot.now = std::move(s);
+    }
 }
 
-FogMedium FogSightMedium()
+std::shared_ptr<const FogSightSnapshot> FogSightNow()
 {
-    return Sight().medium;
-}
-
-std::shared_ptr<const FogSightMap> FogSightMapInUse()
-{
-    return Sight().map;
+    FogSightSlot& slot = Slot();
+    std::lock_guard<std::mutex> hold(slot.lock);
+    return slot.now;
 }
 
 bool FogSightActive()
 {
-    return Sight().on;
+    const std::shared_ptr<const FogSightSnapshot> s = FogSightNow();
+    return s && s->volumetric;
 }
 
-float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3])
+FogMedium FogSightMedium()
 {
-    if (!map.Valid())
-        return 1.0f;
-    const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
-    const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const std::shared_ptr<const FogSightSnapshot> s = FogSightNow();
+    return s ? s->medium : FogMedium{};
+}
+
+std::shared_ptr<const FogSightMap> FogSightMapInUse()
+{
+    const std::shared_ptr<const FogSightSnapshot> s = FogSightNow();
+    return s ? s->map : nullptr;
+}
+
+namespace
+{
+
+// The optical depth along a line through FogSeenExtinctionAt at eight points,
+// with the near thinning taken around each end: `tauFrom` around `from`,
+// `tauTo` around `to` (the samples sit symmetrically, so each end's thinning
+// meets the same points). The parts that are zero are skipped; the clear haze
+// and air hang on the height alone, which steps evenly along the line, so
+// their exponentials step by a constant ratio. False for a line too short to
+// march (both 0).
+bool MarchSight(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3], float len,
+                float& tauFrom, float& tauTo)
+{
+    tauFrom = tauTo = 0.0f;
     if (len < 1e-3f)
-        return 1.0f;
+        return false;
+    const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
     constexpr int kSamples = 8;
-    float tau = 0.0f;
+    const float yStep = dy / kSamples;
+    const float y0 = from[1] + 0.5f * yStep;
+    const bool stepAir = std::min(from[1], to[1]) >= -50.0f; // the -50 m floor never bites
+    float haze = m.hazeSigma * std::exp(-std::max(y0, -50.0f) / m.hazeHeight);
+    float ray = m.rayleigh * kRayleighGreen * std::exp(-std::max(y0, -50.0f) / kRayleighHeight);
+    const float hazeRatio = std::exp(-yStep / m.hazeHeight);
+    const float rayRatio = std::exp(-yStep / kRayleighHeight);
+    const bool dust = m.dustSigma > 0.0f, weather = m.weatherSigma > 0.0f;
+    const bool wet = m.groundSigma > 0.0f || m.mistSigma > 0.0f;
+    auto mistKeep = [](float d)
+    { return kMistNearKeep + (1.0f - kMistNearKeep) * Smooth(kMistNearFrom, kMistNearTo, d); };
+    auto dustKeep = [](float d)
+    { return kDustNearKeep + (1.0f - kDustNearKeep) * Smooth(kDustNearFrom, kDustNearTo, d); };
     for (int i = 0; i < kSamples; ++i)
     {
         const float t = (static_cast<float>(i) + 0.5f) / kSamples;
         const float x = from[0] + dx * t, y = from[1] + dy * t, z = from[2] + dz * t;
+        const float dFrom = len * t, dTo = len - dFrom;
+        if (!stepAir)
+        {
+            haze = m.hazeSigma * std::exp(-std::max(y, -50.0f) / m.hazeHeight);
+            ray = m.rayleigh * kRayleighGreen * std::exp(-std::max(y, -50.0f) / kRayleighHeight);
+        }
+        const float air = haze + ray;
+        tauFrom += air * FogHazeNearKeep(m, dFrom);
+        tauTo += air * FogHazeNearKeep(m, dTo);
+        haze *= hazeRatio;
+        ray *= rayRatio;
+        if (!(dust || weather || wet))
+            continue;
         const float ground = SampleGrid(map, map.ground, x, z);
         const float floorY = SampleGrid(map, map.floorY, x, z);
-        const float layer = SampleGrid(map, map.layer, x, z);
-        const float near = kMistNearKeep + (1.0f - kMistNearKeep) * Smooth(kMistNearFrom, kMistNearTo, len * t);
-        tau += FogSightExtinctionAt(m, y, floorY, y - ground, layer) * near;
+        if (dust)
+        {
+            const float s = m.dustSigma * std::exp(-std::max(y - ground, 0.0f) / std::max(m.dustHeight, 1.0f));
+            tauFrom += s * dustKeep(dFrom);
+            tauTo += s * dustKeep(dTo);
+        }
+        if (weather)
+        {
+            const float s = m.weatherSigma * std::exp(-std::max(y - floorY, 0.0f) / std::max(m.weatherHeight, 1.0f));
+            tauFrom += s;
+            tauTo += s;
+        }
+        if (wet)
+        {
+            const float layer = SampleGrid(map, map.layer, x, z);
+            const float s = FogSightExtinctionAt(m, y, floorY, y - ground, layer);
+            tauFrom += s * mistKeep(dFrom);
+            tauTo += s * mistKeep(dTo);
+        }
     }
-    return std::exp(-tau * len / kSamples);
+    tauFrom *= len / kSamples;
+    tauTo *= len / kSamples;
+    return true;
+}
+
+float LineLength(const float from[3], const float to[3])
+{
+    const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+} // namespace
+
+float FogSeenTransmittanceFrom(const FogMedium& m, const FogSightMap& map, const float eye[3], const float to[3])
+{
+    const float len = LineLength(eye, to);
+    const float edge = FogEdgeKeep(m, len);
+    if (edge <= 0.0f || !map.Valid())
+        return std::max(edge, 0.0f);
+    float tauEye = 0.0f, tauTo = 0.0f;
+    MarchSight(m, map, eye, to, len, tauEye, tauTo);
+    return edge * std::exp(-tauEye);
+}
+
+float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3])
+{
+    const float len = LineLength(from, to);
+    const float edge = FogEdgeKeep(m, len);
+    if (edge <= 0.0f || !map.Valid())
+        return std::max(edge, 0.0f);
+    // The less of the two views: the eye's own surroundings stay legible in
+    // the drawn air, so from inside a mist bank the way out looks clearer
+    // than the way in; the AI takes the way in, as the player there sees it.
+    float tauFrom = 0.0f, tauTo = 0.0f;
+    MarchSight(m, map, from, to, len, tauFrom, tauTo);
+    return edge * std::exp(-std::max(tauFrom, tauTo));
+}
+
+float FogSightTransmittance(const FogSightSnapshot& s, const float from[3], const float to[3])
+{
+    if (!s.volumetric || !s.map)
+        return 1.0f;
+    return FogSightTransmittanceThrough(s.medium, *s.map, from, to);
 }
 
 float FogSightTransmittance(const float from[3], const float to[3])
 {
-    const FogSightState& s = Sight();
-    if (!s.on || !s.map)
-        return 1.0f;
-    return FogSightTransmittanceThrough(s.medium, *s.map, from, to);
+    const std::shared_ptr<const FogSightSnapshot> s = FogSightNow();
+    return s ? FogSightTransmittance(*s, from, to) : 1.0f;
 }
 
 namespace

@@ -676,10 +676,13 @@ GameValue TriFeatureState(const GameState* /*state*/)
 /// triFogSight [[east, north, aboveGround], [east, north, aboveGround]]: AI
 /// sight's air between two points (Graphics/Remaster/VolumetricFog.hpp, AI
 /// sight) next to the air the renderer's fog drew this frame, for probes that
-/// check the two agree: "ai=<0|1> Tai=<transmittance> drawn=<0|1>
-/// Tdrawn=<the same through the drawn medium> classic=<the classic tactical
-/// fog's visibility> groundAi=.. mistAi=.. groundDrawn=.. mistDrawn=.. map=<n>".
-/// Never contains ';'.
+/// check the two agree part for part: "ai=<0|1, the medium replaces the
+/// classic fog> Tai=<AI's transmittance, 1 when ai=0> drawn=<0|1>
+/// Tdrawn=<the same line through the drawn medium> Tview=<the drawn view
+/// from the first point> classic=<the classic tactical fog's visibility>
+/// aiVis=<the fog share CalcVisibility takes: Tai, or classic when ai=0>",
+/// then each part of AI's and of the drawn medium (haze, weather, dust,
+/// ground, mist; 1/m) and map=<n>. Never contains ';'.
 GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
 {
     if (arg.GetType() != GameArray)
@@ -701,22 +704,28 @@ GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
         p[k][1] = ground + agl;
         p[k][2] = n;
     }
-    const float ai = remaster::FogSightTransmittance(p[0], p[1]);
-    const std::shared_ptr<const remaster::FogSightMap> map = remaster::FogSightMapInUse();
+    const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
+    const bool volumetric = sight && sight->volumetric;
+    const float ai = sight ? remaster::FogSightTransmittance(*sight, p[0], p[1]) : 1.0f;
+    const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
     remaster::FogMedium drawnMedium;
     const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
     const float tDrawn =
         drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, p[0], p[1]) : 1.0f;
+    const float tView = drawn && map ? remaster::FogSeenTransmittanceFrom(drawnMedium, *map, p[0], p[1]) : 1.0f;
     const float dx = p[1][0] - p[0][0], dy = p[1][1] - p[0][1], dz = p[1][2] - p[0][2];
     const float classic =
         GScene ? 1.0f - GScene->TacticalFog8(dx * dx + dy * dy + dz * dz) * (1.0f / 255.0f) : 1.0f;
-    const remaster::FogMedium& m = remaster::FogSightMedium();
-    char buf[512];
+    const remaster::FogMedium m = sight ? sight->medium : remaster::FogMedium{};
+    const remaster::FogMedium d = drawn ? drawnMedium : remaster::FogMedium{};
+    char buf[768];
     snprintf(buf, sizeof(buf),
-             "ai=%d Tai=%.4f drawn=%d Tdrawn=%.4f classic=%.4f groundAi=%.3e mistAi=%.3e groundDrawn=%.3e "
-             "mistDrawn=%.3e map=%d",
-             remaster::FogSightActive() ? 1 : 0, ai, drawn ? 1 : 0, tDrawn, classic, m.groundSigma, m.mistSigma,
-             drawn ? drawnMedium.groundSigma : 0.0f, drawn ? drawnMedium.mistSigma : 0.0f, map ? map->size : 0);
+             "ai=%d Tai=%.4f drawn=%d Tdrawn=%.4f Tview=%.4f classic=%.4f aiVis=%.4f hazeAi=%.3e weatherAi=%.3e "
+             "dustAi=%.3e groundAi=%.3e mistAi=%.3e hazeDrawn=%.3e weatherDrawn=%.3e dustDrawn=%.3e "
+             "groundDrawn=%.3e mistDrawn=%.3e map=%d",
+             volumetric ? 1 : 0, ai, drawn ? 1 : 0, tDrawn, tView, classic, volumetric ? ai : classic, m.hazeSigma,
+             m.weatherSigma, m.dustSigma, m.groundSigma, m.mistSigma, d.hazeSigma, d.weatherSigma, d.dustSigma,
+             d.groundSigma, d.mistSigma, map ? map->size : 0);
     return GameValue(buf);
 }
 
@@ -724,10 +733,11 @@ GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
 /// target (EntityAI::CalcVisibility with line of sight assumed, the call
 /// target tracking makes) next to its parts: the classic tactical fog's
 /// visibility, the size term, AI sight's air between the observer's eye and
-/// the target's aim (FogSightTransmittance) and the same line through the
-/// medium the renderer's fog drew this frame. "vis=<CalcVisibility>
-/// classic=<..> size=<..> Tai=<..> drawn=<0|1> Tdrawn=<..> dist=<m>
-/// fogAi=<vis / (classic size), the fog share AI took>". Never contains ';'.
+/// the target's aim (FogSightTransmittance; it replaces the classic fog when
+/// ai=1) and the same line through the medium the renderer's fog drew this
+/// frame. "vis=<CalcVisibility> ai=<0|1> classic=<..> size=<..> Tai=<..>
+/// drawn=<0|1> Tdrawn=<..> dist=<m> fogAi=<vis / size, the fog share AI
+/// took>". Never contains ';'.
 GameValue TriAiSight(const GameState* /*state*/, GameValuePar arg)
 {
     if (arg.GetType() != GameArray)
@@ -748,15 +758,18 @@ GameValue TriAiSight(const GameState* /*state*/, GameValuePar arg)
     size = std::min(size, 40.0f);
     const float from[3] = {eye.X(), eye.Y(), eye.Z()};
     const float to[3] = {aim.X(), aim.Y(), aim.Z()};
-    const float tAi = remaster::FogSightActive() ? remaster::FogSightTransmittance(from, to) : 1.0f;
-    const std::shared_ptr<const remaster::FogSightMap> map = remaster::FogSightMapInUse();
+    const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
+    const bool volumetric = sight && sight->volumetric;
+    const float tAi = sight ? remaster::FogSightTransmittance(*sight, from, to) : 1.0f;
+    const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
     remaster::FogMedium drawnMedium;
     const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
     const float tDrawn = drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, from, to) : 1.0f;
-    const float base = classic * size;
     char buf[320];
-    snprintf(buf, sizeof(buf), "vis=%.5f classic=%.4f size=%.4f Tai=%.4f drawn=%d Tdrawn=%.4f dist=%.0f fogAi=%.4f",
-             vis, classic, size, tAi, drawn ? 1 : 0, tDrawn, std::sqrt(dist2), base > 0.0f ? vis / base : 0.0f);
+    snprintf(buf, sizeof(buf),
+             "vis=%.5f ai=%d classic=%.4f size=%.4f Tai=%.4f drawn=%d Tdrawn=%.4f dist=%.0f fogAi=%.4f", vis,
+             volumetric ? 1 : 0, classic, size, tAi, drawn ? 1 : 0, tDrawn, std::sqrt(dist2),
+             size > 0.0f ? vis / size : 0.0f);
     return GameValue(buf);
 }
 
@@ -844,7 +857,7 @@ GameValue TriPinCloudDrift(const GameState* /*state*/, GameValuePar arg)
     return GameValue(buf);
 }
 
-/// triGpuTimes <on> — GPU timestamp timing for cost checks. true turns it on
+/// triGpuTimes <on>: GPU timestamp timing for cost checks. true turns it on
 /// (and resets the averages), false turns it off; either way it returns the
 /// current summary, e.g. "frame 6.12 ms | world 4.80 (shadow 0.62) | post
 /// 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15". Results trail the

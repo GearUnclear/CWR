@@ -632,17 +632,26 @@ float EntityAI::CalcVisibility(EntityAI* ai, float dist2, float* audibility, boo
         {
             vis = 0;
         }
-        vis = 1 - GLOB_SCENE->TacticalFog8(dist2) * (1.0f / 255);
-        // The volumetric fog's valley mist and humid ground air (volFog), which
-        // the classic tactical fog does not hold: the AI sees through the air
-        // the player sees (1 while the fog is off).
-        if (Poseidon::remaster::FogSightActive())
+        // The air between the eye and the target as the renderer draws it
+        // (Graphics/Remaster/VolumetricFog.hpp, AI sight). With remastered
+        // lighting: the whole medium (haze, air, dust, weather and night fog,
+        // valley mist, humid ground air) and the view-distance edge, in place
+        // of the classic tactical fog, whose weather it already holds. With
+        // the Lighting row on Classic: the classic tactical fog the classic
+        // renderer draws. The snapshot is the simulation's, never what this
+        // machine drew.
+        const std::shared_ptr<const Poseidon::remaster::FogSightSnapshot> sight = Poseidon::remaster::FogSightNow();
+        if (sight && sight->volumetric)
         {
             const Vector3 eye = CameraPosition();
             const Vector3 aim = ai->AimingPosition();
             const float from[3] = {eye.X(), eye.Y(), eye.Z()};
             const float to[3] = {aim.X(), aim.Y(), aim.Z()};
-            vis *= Poseidon::remaster::FogSightTransmittance(from, to);
+            vis = Poseidon::remaster::FogSightTransmittance(*sight, from, to);
+        }
+        else
+        {
+            vis = 1 - GLOB_SCENE->TacticalFog8(dist2) * (1.0f / 255);
         }
     }
     else

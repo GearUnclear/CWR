@@ -181,8 +181,7 @@ void EngineGL33::UpdateFogMediumNightVision()
                         !_fog.unavailable && !(_prevWorldDepthCleared && _fog.intFailed) &&
                         _featureGates[rm::Feature::VolFog].on;
         // The same inputs and function as the world's fog (UpdateFogMedium).
-        rm::FogInputs in = Poseidon::WorldFogInputs(GScene->GetLandscape());
-        in.aridity = _fog.aridity;
+        const rm::FogInputs in = Poseidon::WorldFogInputs(GScene->GetLandscape());
         _fog.medium = rm::ComputeFogMedium(in, _lighting, on);
         _fog.on = false; // no world post pass: the classic programs draw
         _fog.nvg = on;

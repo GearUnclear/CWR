@@ -334,29 +334,34 @@ void EngineGL33::UpdateFogMedium()
                           !(_prevWorldDepthCleared && _fog.intFailed);
         const bool on = post && _featureGates[rm::Feature::VolFog].on;
         // The world's inputs, the same function AI sight's step takes them
-        // from (the aridity, for the dust, is the renderer's own).
-        rm::FogInputs in = Poseidon::WorldFogInputs(GScene->GetLandscape());
-        in.aridity = _fog.aridity;
+        // from (the aridity, for the dust, is the island's on AI sight's map).
+        const rm::FogInputs in = Poseidon::WorldFogInputs(GScene->GetLandscape());
         _fog.medium = rm::ComputeFogMedium(in, _lighting, on);
         _fog.on = on;
         _fog.nvg = false; // night vision has its own (UpdateFogMediumNightVision)
         rm::SetDrawnFogMedium(on ? &_fog.medium : nullptr);
-        // The drawn mist and humid air are AI sight's (the simulation step
-        // computed them from the same inputs and knobs this frame); a
-        // difference means a second source crept in.
-        if (on)
+        // With the fog's knobs at their shipped values the drawn medium is AI
+        // sight's (the simulation step computed it from the same inputs this
+        // frame); a difference then means a second source crept in. (A
+        // developer's density and mist knobs move the drawn medium only.)
+        if (on && _lighting.fogDensity == 1.0f && _lighting.fogMist == 1.0f)
         {
-            const rm::FogMedium& ai = rm::FogSightMedium();
+            const rm::FogMedium ai = rm::FogSightMedium();
+            const rm::FogMedium& d = _fog.medium;
             auto differs = [](float a, float b) { return std::fabs(a - b) > 1e-4f * std::max(std::fabs(a), 1e-6f); };
-            if ((differs(ai.groundSigma, _fog.medium.groundSigma) || differs(ai.mistSigma, _fog.medium.mistSigma) ||
-                 differs(ai.mistLayer, _fog.medium.mistLayer) || differs(ai.groundHeight, _fog.medium.groundHeight)) &&
+            if ((differs(ai.hazeSigma, d.hazeSigma) || differs(ai.weatherSigma, d.weatherSigma) ||
+                 differs(ai.dustSigma, d.dustSigma) || differs(ai.groundSigma, d.groundSigma) ||
+                 differs(ai.mistSigma, d.mistSigma) || differs(ai.mistLayer, d.mistLayer) ||
+                 differs(ai.fogEnd, d.fogEnd)) &&
                 frame - s_sightWarnFrame > 600u)
             {
                 s_sightWarnFrame = frame;
                 LOG_WARN(Graphics,
-                         "GL33 fog: drawn air and AI sight differ: ground {:.3e} vs {:.3e}, mist {:.3e} vs {:.3e} "
-                         "(a knob changed after the simulation step, or a second source of the medium)",
-                         _fog.medium.groundSigma, ai.groundSigma, _fog.medium.mistSigma, ai.mistSigma);
+                         "GL33 fog: drawn air and AI sight differ: haze {:.3e} vs {:.3e}, weather {:.3e} vs {:.3e}, "
+                         "dust {:.3e} vs {:.3e}, ground {:.3e} vs {:.3e}, mist {:.3e} vs {:.3e}, end {:.0f} vs {:.0f} "
+                         "(a second source of the medium)",
+                         d.hazeSigma, ai.hazeSigma, d.weatherSigma, ai.weatherSigma, d.dustSigma, ai.dustSigma,
+                         d.groundSigma, ai.groundSigma, d.mistSigma, ai.mistSigma, d.fogEnd, ai.fogEnd);
             }
         }
         if (on && frame % 600u == 0u)
@@ -415,7 +420,6 @@ void EngineGL33::DestroyFogResources()
     _fog.grid = rm::FogGrid{};
     _fog.outW = _fog.outH = 0;
     _fog.nearW = _fog.nearH = 0;
-    _fog.floorFor = nullptr;
     _fog.sightMap.reset();
     rm::SetDrawnFogMedium(nullptr);
     _fog.programsTried = false;
@@ -549,17 +553,10 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
 
 void EngineGL33::UpdateFogFloor()
 {
-    // The dust's aridity follows the terrain map's ground tints (render only).
-    const rm::TerrainHorizonMap* map = (_terrainMap && _terrainMap->Valid()) ? _terrainMap.get() : nullptr;
-    if (map != _fog.floorFor)
-    {
-        _fog.floorFor = map;
-        if (map && map->height.size() == static_cast<size_t>(map->size) * static_cast<size_t>(map->size))
-            _fog.aridity = rm::FogAridity(map->groundTint, map->height);
-    }
-    // The fog floor and the mist layer are AI sight's own map (built by the
-    // simulation when the island loads, VolumetricFog.hpp BuildFogSightMap):
-    // the drawn mist lies where AI sight finds it, from the first frame and
+    // The fog floor, the mist layer and the dust's aridity are AI sight's own
+    // map (built by the simulation when the island loads, VolumetricFog.hpp
+    // BuildFogSightMap; WorldFogInputs hands its aridity to both): the drawn
+    // mist and dust lie where AI sight finds them, from the first frame and
     // whatever the terrain lighting's settings.
     std::shared_ptr<const rm::FogSightMap> sight = rm::FogSightMapInUse();
     if (sight && !sight->Valid())
@@ -593,7 +590,8 @@ void EngineGL33::UpdateFogFloor()
              "GL33 fog: fog floor {}x{} at {} m (AI sight's map); mist layer up to {:.1f} m over {:.1f}% of the map; "
              "aridity {:.2f}",
              sight->size, sight->size, sight->cellSize, layerMax,
-             100.0 * static_cast<double>(layerCells) / static_cast<double>(_fog.sightMap->floorY.size()), _fog.aridity);
+             100.0 * static_cast<double>(layerCells) / static_cast<double>(_fog.sightMap->floorY.size()),
+             sight->aridity);
 }
 
 void EngineGL33::SnapshotWorldBeforeOverlay()
