@@ -62,6 +62,44 @@ inline void SetPolygonOffsetForShadows(bool enabled)
     }
 }
 
+// Polygon-offset for the shadow-map depth pass (RenderCascadeArray). The
+// pass sets its own offset so the depth its casters store does not depend
+// on the last world draw before it. The value is the decal offset (-1, -1):
+// it keeps the self-shadowing on thin, sun-grazing caster edges (a vehicle's
+// hood rim, a tree trunk's sunlit side) that the accepted look has.
+inline void SetPolygonOffsetForShadowDepth()
+{
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(-1.0f, -1.0f);
+}
+
+// The polygon-offset state a pass found, so it can hand it back unchanged
+// to the draw after it.
+struct PolygonOffsetState
+{
+    GLboolean enabled = GL_FALSE;
+    GLfloat factor = 0.0f;
+    GLfloat units = 0.0f;
+};
+
+inline PolygonOffsetState CapturePolygonOffset()
+{
+    PolygonOffsetState s;
+    s.enabled = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+    glGetFloatv(GL_POLYGON_OFFSET_FACTOR, &s.factor);
+    glGetFloatv(GL_POLYGON_OFFSET_UNITS, &s.units);
+    return s;
+}
+
+inline void RestorePolygonOffset(const PolygonOffsetState& s)
+{
+    if (s.enabled)
+        glEnable(GL_POLYGON_OFFSET_FILL);
+    else
+        glDisable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(s.factor, s.units);
+}
+
 // Depth-test / depth-clamp toggles for BeginPass's FULL-INIT and
 // queue-flush transitions.  Pair them because both are reset at
 // pass boundaries.

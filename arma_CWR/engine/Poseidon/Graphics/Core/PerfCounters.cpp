@@ -18,12 +18,11 @@ constexpr Field kFieldList[] = {
     {&FC::lightSlots, nullptr},  {&FC::activeLights, nullptr}, {&FC::opaqueObjects, nullptr},
     {&FC::runs, nullptr},        {&FC::runObjects, nullptr},   {&FC::litObjects, nullptr},
     {&FC::hillRan, nullptr},     {&FC::hillIdle, nullptr},     {&FC::hillTested, nullptr},
-    {&FC::hillHidden, nullptr},  {&FC::hillKept, nullptr},     {&FC::hillBuilds, nullptr},
-    {&FC::hillWedges, nullptr},  {nullptr, &FC::hillMs},       {nullptr, &FC::lodMs},
-    {nullptr, &FC::occlusionMs}, {&FC::litUploads, nullptr},   {&FC::litSkips, nullptr},
-    {&FC::litBytes, nullptr},    {&FC::vsUploads, nullptr},    {&FC::vsSkips, nullptr},
-    {&FC::vsBytes, nullptr},     {&FC::tileLights, nullptr},   {&FC::tileRefs, nullptr},
-    {nullptr, &FC::tileMs},
+    {&FC::hillHidden, nullptr},  {&FC::hillBuilds, nullptr},   {&FC::hillWedges, nullptr},
+    {nullptr, &FC::hillMs},      {nullptr, &FC::lodMs},        {nullptr, &FC::occlusionMs},
+    {&FC::litUploads, nullptr},  {&FC::litSkips, nullptr},     {&FC::litBytes, nullptr},
+    {&FC::vsUploads, nullptr},   {&FC::vsSkips, nullptr},      {&FC::vsBytes, nullptr},
+    {&FC::tileLights, nullptr},  {&FC::tileRefs, nullptr},     {nullptr, &FC::tileMs},
 };
 // The list holds every member (all are 4 bytes), and the header sized the sums
 // for it.
@@ -79,11 +78,11 @@ std::string Counters::Summary() const
     char buf[640];
     std::snprintf(buf, sizeof(buf),
                   "objs opaque=%.0f runs=%.0f runobj=%.0f litobj=%.0f lights=%.0f/%.0f | hill ran=%.2f idle=%.2f "
-                  "tested=%.0f hidden=%.0f kept=%.1f builds=%.2f wedges=%.0f hillcpu=%.3f | prep lod=%.3f occ=%.3f | "
+                  "tested=%.0f hidden=%.0f builds=%.2f wedges=%.0f hillcpu=%.3f | prep lod=%.3f occ=%.3f | "
                   "ubo lit=%.0f/%.0f litKB=%.1f vs=%.0f/%.0f vsKB=%.1f | tiles lights=%.1f refs=%.0f tilecpu=%.3f",
                   avg(&FC::opaqueObjects), avg(&FC::runs), avg(&FC::runObjects), avg(&FC::litObjects),
                   avg(&FC::lightSlots), avg(&FC::activeLights), avg(&FC::hillRan), avg(&FC::hillIdle),
-                  avg(&FC::hillTested), avg(&FC::hillHidden), avg(&FC::hillKept), avg(&FC::hillBuilds),
+                  avg(&FC::hillTested), avg(&FC::hillHidden), avg(&FC::hillBuilds),
                   avg(&FC::hillWedges), avgf(&FC::hillMs), avgf(&FC::lodMs), avgf(&FC::occlusionMs),
                   avg(&FC::litUploads), avg(&FC::litSkips), avg(&FC::litBytes) / 1024.0, avg(&FC::vsUploads),
                   avg(&FC::vsSkips), avg(&FC::vsBytes) / 1024.0, avg(&FC::tileLights), avg(&FC::tileRefs),

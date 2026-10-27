@@ -75,7 +75,6 @@ COUNTER_RES = {
     "runobj": re.compile(r"\brunobj=([\d.]+)"),
     "hill_tested": re.compile(r"\btested=([\d.]+)"),
     "hill_hidden": re.compile(r"\bhidden=([\d.]+)"),
-    "hill_kept": re.compile(r"\bkept=([\d.]+)"),
     "hill_cpu_ms": re.compile(r"\bhillcpu=([\d.]+)"),
     "lod_ms": re.compile(r"\bprep lod=([\d.]+)"),
     "lit_kb": re.compile(r"\blitKB=([\d.]+)"),

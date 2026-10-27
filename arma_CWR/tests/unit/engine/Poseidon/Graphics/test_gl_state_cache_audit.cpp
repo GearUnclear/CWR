@@ -404,3 +404,53 @@ TEST_CASE("The texture-array target is unbound only on the upload unit",
     REQUIRE(between.find("ActiveUnit(") == std::string::npos);
     REQUIRE(between.find("Tex2D(") == std::string::npos);
 }
+
+// The shadow-map depth pass sets its own polygon offset. Inheriting it from the
+// last world draw made thin, sun-grazing caster edges change their
+// self-shadowing with the camera heading (a road or decal in view left the
+// decal offset on, none left it off).
+TEST_CASE("The shadow depth pass pins its polygon offset and hands the previous one back",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::filesystem::path coreDir =
+        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" / "Graphics" / "Core";
+    const std::string helpers = ReadTextFile(coreDir / "GLPipelineState.hpp");
+    const std::string pin = FunctionBody(helpers, "inline void SetPolygonOffsetForShadowDepth()");
+    REQUIRE_FALSE(pin.empty());
+    CHECK(pin.find("glEnable(GL_POLYGON_OFFSET_FILL);") != std::string::npos);
+    CHECK(pin.find("glPolygonOffset(-1.0f, -1.0f);") != std::string::npos);
+
+    const std::string depth = ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp");
+    const std::string pass = FunctionBody(depth, "bool RenderCascadeArray(");
+    REQUIRE_FALSE(pass.empty());
+    const size_t capture = pass.find("CapturePolygonOffset()");
+    const size_t set = pass.find("SetPolygonOffsetForShadowDepth()");
+    const size_t firstDraw = pass.find("glDrawArrays(");
+    const size_t restore = pass.find("RestorePolygonOffset(");
+    REQUIRE(capture != std::string::npos);
+    REQUIRE(set != std::string::npos);
+    REQUIRE(firstDraw != std::string::npos);
+    REQUIRE(restore != std::string::npos);
+    CHECK(capture < set);
+    CHECK(set < firstDraw); // pinned before any caster draws
+    CHECK(pass.rfind("glDrawArrays(") < restore); // handed back after the last one
+    // Once, and nothing else in the pass changes the offset.
+    CHECK(CountOccurrences(pass, "SetPolygonOffsetForShadowDepth()") == 1);
+    CHECK(pass.find("SetPolygonOffsetForDecals(") == std::string::npos);
+    CHECK(pass.find("SetPolygonOffsetForShadows(") == std::string::npos);
+}
+
+// With the pass independent of the draw before it, the hill cull hides any
+// draw it finds hidden: no keep-last exceptions in the scene draw loops.
+TEST_CASE("The hill cull keeps no draw for the shadow depth pass", "[Graphics][StateCacheAudit][ShadowSampler]")
+{
+    const std::filesystem::path scenePath = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" /
+                                            "Poseidon" / "World" / "Scene" / "SceneDraw.cpp";
+    const std::string scene = ReadTextFile(scenePath);
+    REQUIRE_FALSE(scene.empty());
+    CHECK(scene.find("KeepLastPass1Draw") == std::string::npos);
+    CHECK(scene.find("hillKept") == std::string::npos);
+    const std::string pass2 = FunctionBody(scene, "void Scene::DrawObjectsAndShadowsPass2()");
+    REQUIRE_FALSE(pass2.empty());
+    CHECK(pass2.find("if (!IsSurfaceBlendDraw(oi) || oi->hillHidden)") != std::string::npos);
+}

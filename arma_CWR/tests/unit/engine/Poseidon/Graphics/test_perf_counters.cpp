@@ -17,7 +17,6 @@ TEST_CASE("PerfCounters: frames close into per-frame averages over the window", 
     c.Frame().runObjects = 400;
     c.Frame().hillTested = 7000;
     c.Frame().hillHidden = 6000;
-    c.Frame().hillKept = 3;
     c.Frame().hillMs = 0.5f;
     c.Frame().litBytes = 2048;
     c.EndFrame();
@@ -37,7 +36,7 @@ TEST_CASE("PerfCounters: frames close into per-frame averages over the window", 
     const std::string s = c.Summary();
     INFO(s);
     CHECK(s.find("runs=15 runobj=500") != std::string::npos);
-    CHECK(s.find("tested=6000 hidden=5000 kept=1.5") != std::string::npos);
+    CHECK(s.find("tested=6000 hidden=5000 builds=") != std::string::npos);
     CHECK(s.find("hillcpu=1.000") != std::string::npos);
     CHECK(s.find("litKB=3.0") != std::string::npos);
     // The tiled light list: averaged over every frame of the window.

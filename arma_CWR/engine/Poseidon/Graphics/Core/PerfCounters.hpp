@@ -27,7 +27,6 @@ struct FrameCounters
     int hillIdle = 0;         // 1 when the governor held it idle
     int hillTested = 0;       // objects far enough to test
     int hillHidden = 0;       // of those, hidden behind the terrain
-    int hillKept = 0;         // of those, drawn anyway: the last draw before the shadow-map pass
     int hillBuilds = 0;       // horizon tables started (the eye moved)
     int hillWedges = 0;       // wedges built on demand
     float hillMs = 0.0f;      // CPU: table and tests
@@ -68,7 +67,7 @@ class Counters
 
     // One per FrameCounters member (PerfCounters.cpp lists them; a static_assert
     // there keeps the count).
-    static constexpr int kFields = 25;
+    static constexpr int kFields = 24;
 
   private:
     FrameCounters _frame;

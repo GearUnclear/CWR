@@ -360,6 +360,9 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 // the alpha-cutout batches with the texture-alpha-discard program (one bind per
 // caster texture). Depth/clear go through the Core bundles so the GL-state audits
 // stay green; ApplyPipeline re-owns depth/cull/texture on the next draw.
+// The pass sets its own polygon offset (SetPolygonOffsetForShadowDepth), so the
+// stored caster depth is the same whatever the last world draw left, and hands
+// the previous offset back afterwards.
 // `depthClamp` (remastered lighting): casters beyond the light's near plane are
 // flattened onto it instead of clipped. A sun a few degrees up throws shadows
 // hundreds of metres long, from casters far outside a cascade's depth range.
@@ -402,6 +405,9 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         GL33Bind::ActiveUnit(0);
         glGetIntegerv(GL_SAMPLER_BINDING, &prevSampler0);
     }
+    const Poseidon::render::pipeline::PolygonOffsetState prevOffset =
+        Poseidon::render::pipeline::CapturePolygonOffset();
+    Poseidon::render::pipeline::SetPolygonOffsetForShadowDepth();
 
     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);
     glViewport(0, 0, res, res);
@@ -466,6 +472,7 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
 
     if (depthClamp)
         Poseidon::render::pipeline::DisableDepthClamp(); // the 3D pass runs without it
+    Poseidon::render::pipeline::RestorePolygonOffset(prevOffset);
     if (haveAlpha)
         glBindSampler(0, static_cast<GLuint>(prevSampler0));
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));

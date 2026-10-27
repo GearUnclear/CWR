@@ -867,26 +867,6 @@ bool EnsureHillTerrain(HillCull& hc, const Landscape& land)
              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
     return hc.terrain.Valid();
 }
-
-// The last object the Pass1 loop draws (the shape-sorted list, its skips)
-// is drawn even when the hill cull hid it: in a view with no surface overlay
-// it is the last draw before the shadow-map pass (see the hill cull in
-// DrawObjectsAndShadowsPass1). True when it was hidden.
-bool KeepLastPass1Draw(SortObjectList& list)
-{
-    for (int i = list.Size() - 1; i >= 0; i--)
-    {
-        SortObject* oi = list[i];
-        if (oi->drawLOD == LOD_INVISIBLE || oi->passNum > 1 || !oi->object->GetShape()->LevelOpaque(oi->drawLOD))
-        {
-            continue;
-        }
-        const bool wasHidden = oi->hillHidden;
-        oi->hillHidden = false;
-        return wasHidden;
-    }
-    return false;
-}
 } // namespace
 
 #if !DENSITY_LOD
@@ -1704,16 +1684,9 @@ void Scene::DrawObjectsAndShadowsPass1()
     // tested: their draw is Object::Draw's, which PrepareDrawTextures mirrors
     // (vehicles and men draw through their own overrides).
     //
-    // The last draw before the shadow-map pass is never hidden: the pass
-    // binds its own sampler for the alpha-tested casters, but it still
-    // inherits the polygon offset that draw leaves (ApplyPipeline enables the
-    // decal offset for on-surface draws and the shadow offset for shadow
-    // quads; the pass sets neither), so hiding it can shift the depth the
-    // casters store. That draw is the last surface overlay's blend sections
-    // (Pass2: roads and decals, queued in list order), so the last overlay is
-    // drawn there even when hidden; in a view with no overlay it is the last
-    // object Pass1 draws (KeepLastPass1Draw, after its sort). Both count as
-    // kept.
+    // Hiding any draw is safe for the shadow-map pass: it sets its own
+    // sampler and polygon offset, so the depth its casters store does not
+    // depend on which draw came last before it.
     _hillHiddenObjects = 0;
     if (hillCull && _camera && GetLandscape())
     {
@@ -1767,10 +1740,6 @@ void Scene::DrawObjectsAndShadowsPass1()
     }
 
     QSort(_drawMergers.Data(), _drawMergers.Size(), CmpShapeObj);
-    if (_hillHiddenObjects > 0 && KeepLastPass1Draw(_drawMergers))
-    {
-        ++counters.hillKept;
-    }
     // first of all draw non-alpha objects
 
 #if DRAW_OBJS
@@ -1976,30 +1945,11 @@ void Scene::DrawObjectsAndShadowsPass2()
         // (SetAutoCenter(false)) and would tie the road tile under the vehicle,
         // letting the road repaint over it.  Re-sorted by distance below.
         QSort(_drawMergers.Data(), nDraw, CmpSurfaceObj);
-        // Hill culling (Pass1): the last overlay draws here even when hidden,
-        // so the last draw before the shadow-map pass is the one it is with
-        // the cull off (its polygon offset reaches the pass's casters; see the
-        // hill cull in Pass1).
-        int keep = -1;
-        for (int i = nDraw - 1; i >= 0 && _hillHiddenObjects > 0; i--)
-        {
-            if (IsSurfaceBlendDraw(_drawMergers[i]))
-            {
-                keep = i;
-                break;
-            }
-        }
         for (int i = 0; i < nDraw; i++)
         {
             SortObject* oi = _drawMergers[i];
-            if (!IsSurfaceBlendDraw(oi))
+            if (!IsSurfaceBlendDraw(oi) || oi->hillHidden)
                 continue;
-            if (oi->hillHidden)
-            {
-                if (i != keep)
-                    continue;
-                ++perf::GPerfCounters().Frame().hillKept;
-            }
             GSectionFilter = SectionClassFilter::BlendOnly;
             DrawSortObject(oi);
             GSectionFilter = SectionClassFilter::All;
