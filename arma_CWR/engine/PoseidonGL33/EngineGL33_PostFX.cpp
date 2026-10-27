@@ -402,9 +402,14 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     p.airMeanFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.airMeanTex);
     check();
     p.airOutFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.airOutTex);
+    check();
     p.surfFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.surfTex);
-    p.gtaoHistFbo[0] = MakeFbo(GL_COLOR_ATTACHMENT0, p.gtaoHistTex[0]);
-    p.gtaoHistFbo[1] = MakeFbo(GL_COLOR_ATTACHMENT0, p.gtaoHistTex[1]);
+    check();
+    for (int i = 0; i < 2; ++i)
+    {
+        p.gtaoHistFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.gtaoHistTex[i]);
+        check();
+    }
     p.meterFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.meterTex);
     check();
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
