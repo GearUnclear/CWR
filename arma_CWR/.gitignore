@@ -29,6 +29,11 @@ imgui.ini
 !/tests/integration/missions/sound_preload.Demo/sound/
 !/tests/integration/missions/sound_preload.Demo/sound/say.wav
 /tests/integration/missions/**/*.paa
+# Release staging output and local-only stress/mod fixtures (third-party pbos,
+# never tracked; the old Git LFS rules for these paths are gone).
+/release/
+/tests/fixtures/mods-stress/**/*.pbo
+/tests/fixtures/mods-faguss/
 # Generated dossier imagery is local player data. Runtime cache is outside the
 # installation; optional developer comparisons must never enter source packages.
 /guerrilla-mode/core/portraits/*.paa

@@ -2,3 +2,7 @@
 # Local portraits and developer captures are never release source assets.
 /arma_CWR/guerrilla-mode/core/portraits/** export-ignore
 /arma_CWR/tmp/** export-ignore
+
+# Hook scripts run under sh; keep them LF on every checkout.
+/.githooks/pre-commit text eol=lf
+/.githooks/pre-push text eol=lf

@@ -2172,6 +2172,7 @@ items:
       are tracked at the repo root. The root files need an owner decision.
     log:
       - "2026-10-13: filed #89 from the agent-guide audit."
+      - "2026-10-26: the tracked ChatGPT PNG at the root was removed by game-data-guard; temp_traffic_handoff.md still needs the owner call."
 
   - id: remastered-lighting
     title: "Remastered lighting: photoreal overhaul of the GL 3.3 renderer (Options > Graphics > Lighting)"
@@ -2248,3 +2249,42 @@ items:
       no cap.
     log:
       - "2026-10-27: filed as issue #216 (URGENT) from the 2026-10-27 review of graphics-remaster."
+
+  - id: game-data-guard
+    title: "Commit guard: no game data, LoBo data or secrets reach the public fork"
+    phase: foundation
+    status: done
+    depends_on: []
+    gh_issues: []
+    commits: []
+    summary: >
+      .githooks/check_no_game_data.py (stdlib Python) blocks game data and
+      secrets in three modes: --staged (pre-commit), --push (pre-push, every
+      new commit's added or modified blobs) and --tree (CI, guard.yml on every
+      push and PR with no filters). Rules: blocked extensions (pbo, paa, p3d,
+      wrp, sounds, archives, images, fonts), .env names, packages/ @LoBo/
+      install and tmp/ folders, files over 5 MB, PBO/model/world/raP/LFS magic
+      bytes at any name, de-binarized configs and stringtables by first line
+      (class Cfg / LANGUAGE,), and API key and token patterns. The allowlist
+      (.githooks/game-data-allowlist.txt) is read next to the hook, so it works
+      in every worktree once core.hooksPath carries the files.
+    log:
+      - "2026-10-26: landed on main. Built after three reviews found near-misses: a 755 KB Bohemia config.cpp dump (first line class CfgExperience) in several untracked scratch folders, and Git LFS rules in arma_CWR/.gitattributes that would have hidden blob contents from a content check (git lfs ls-files was empty on every branch, so the rules were dropped). The allowlist was built from --tree --no-allowlist over every kept origin branch: 158 upstream GPL fixtures verified blob-identical in upstream/main plus one upstream stringtable UD extended, our generated or hand-written fixtures and configs, site/assets/img/, TTS samples, the OFL fonts and a temporary classic-ui group. Root ignore now covers .env at any depth, game data and archive formats and stray root images; the root ChatGPT PNG is gone. --tree on main runs in well under a second."
+
+  - id: retire-classic-ui
+    title: "Retire arma_CWR/thirdparty/classic-ui and the guard's temporary allowlist group"
+    phase: housekeeping
+    status: planned
+    priority: 3
+    depends_on: [game-data-guard]
+    gh_issues: []
+    summary: >
+      Once #95 (occupier-forces) and #213 (remaster-only-runtime) merge, drop
+      arma_CWR/thirdparty/classic-ui going forward: the Remaster ships its own
+      Options resources, so the APL-SA headers and stringtable no longer need a
+      tracked copy. Keep only UD's own Options strings (lean actions, Arma 3
+      controls, STR_UD_GM_* and the rest) as a GPL file of our own, and remove
+      the "TEMPORARY: removed by the retire-classic-ui follow-up" group from
+      .githooks/game-data-allowlist.txt. No history rewrite.
+    log:
+      - "2026-10-26: planned with game-data-guard, which allowlists the classic-ui files only as a temporary exact-path group."
