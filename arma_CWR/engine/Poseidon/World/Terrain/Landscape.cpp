@@ -438,6 +438,7 @@ void Weather::Init()
     _overcastSetClouds = -1.0;
     _fogSet = 0.0f;
     _cloudsPos = 0;
+    _cloudsHeld = false;
     _cloudsAlpha = 0.0f;
     _cloudsBrightness = 1.0f;
     _cloudsSpeed = 0.2f;
@@ -445,6 +446,9 @@ void Weather::Init()
     _rainDensity = 0;
     _rainDensityWanted = 0;
     _rainDensitySpeed = 1;
+    // A new weather starts at what its rain settles at (the first step snaps).
+    _wetness = Poseidon::remaster::WetnessState{};
+    _wetnessSnap = true;
     _windSpeed = VZero;
     _lastWindSpeedChange = Glob.time;
     _gust = VZero;
@@ -459,6 +463,13 @@ Weather::Weather()
 void Weather::SetRain(float density, float time)
 {
     saturate(density, 0, 1);
+    // A change made at once (a mission's or a capture's `0 setRain x`) means
+    // "this is the weather now": the world takes the wetness that rain
+    // settles at instead of wetting or drying over minutes.
+    if (Poseidon::remaster::WetnessSnaps(_rainDensity, density, time))
+    {
+        _wetnessSnap = true;
+    }
     saturateMax(time, 0.001);
     _rainDensityWanted = density;
     _rainDensitySpeed = fabs(_rainDensityWanted - _rainDensity) / time;
@@ -557,7 +568,8 @@ void Weather::SetFog(Landscape* land, float fog)
 
 void Weather::MoveClouds(float deltaT)
 {
-    _cloudsPos += _cloudsSpeed * deltaT;
+    if (!_cloudsHeld)
+        _cloudsPos += _cloudsSpeed * deltaT;
 
     // simulate rain
     float maxRain = _overcastSetClouds * 1.5 - 1;
@@ -649,6 +661,32 @@ void Weather::MoveClouds(float deltaT)
         _rainDensityWanted = 0;
         _rainDensity = 0;
         _rainDensitySpeed = 0.01;
+    }
+
+    // The world's wetness follows the rain: wets in it, dries after it, faster
+    // in sun and wind (the remastered wet weather; Wetness.hpp).
+    if (_wetnessSnap)
+    {
+        // Taken on the first step that moves the clock: a change made while
+        // the simulation is paused settles at the rain it asked for.
+        if (deltaT > 0)
+        {
+            _wetness = Poseidon::remaster::SettledWetness(_rainDensity);
+            _wetnessSnap = false;
+        }
+    }
+    else
+    {
+        Poseidon::remaster::WetnessInputs wet;
+        wet.rain = _rainDensity;
+        wet.skyThrough = _skyThrough;
+        wet.windSpeed = _windSpeed.Size();
+        if (const LightSun* light = GLOB_SCENE ? GLOB_SCENE->MainLight() : nullptr)
+        {
+            const float up = -light->Direction().Y();
+            wet.sunElevationDeg = std::asin(up < -1.0f ? -1.0f : (up > 1.0f ? 1.0f : up)) * 57.29578f;
+        }
+        Poseidon::remaster::StepWetness(_wetness, wet, deltaT);
     }
 
     {

@@ -10,6 +10,8 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -27,11 +29,14 @@
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <stdint.h>
 #include <stdio.h>
+#include <algorithm>
 #include <cmath>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
+#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
+#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
 #if !_ENABLE_CHEATS
 #define STARS 0
@@ -830,6 +835,63 @@ void Object::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transfor
     }
 }
 
+// Object::Draw's texture hints for one LOD without the draw (the hill cull,
+// Scene::DrawObjectsAndShadowsPass1): the same fog skip, the same proxies at
+// the same LODs, the same distance and flags for Shape::PrepareTextures. A
+// hidden object's textures then get the mipmap a draw would have asked for:
+// the shadow-map pass loads its alpha-tested caster textures from that hint,
+// and a texture it shares with an object in view keeps the same mipmaps.
+void Object::PrepareDrawTextures(int level, const FrameBase& pos)
+{
+    if (!_shape || level == LOD_INVISIBLE)
+    {
+        return;
+    }
+    Shape* sShape = _shape->LevelOpaque(level);
+    if (!sShape || sShape->NFaces() <= 0)
+    {
+        return;
+    }
+    int special = sShape->Special() | GetObjSpecial();
+    const float dist2 = GScene->GetCamera()->Position().Distance2(pos.Position());
+    const render::LegacySpec specT = render::SplitLegacy(special);
+    if (!render::Has(specT.routing, render::Routing::FogDisabled))
+    {
+        const float radius = pos.Scale() * _shape->BoundingSphere();
+        if (NoFogNeeded(dist2, sShape, radius))
+        {
+            special |= FogDisabled;
+        }
+        else if (ConstFogUsed(dist2, sShape, radius) >= 0.99 && render::Has(specT.backend, render::Backend::IsAlphaFog))
+        {
+            return; // Draw skips a fully fogged alpha-fog object
+        }
+    }
+    const float z2 = render::Has(render::SplitLegacy(special).routing, render::Routing::NoDropdown) ? 0 : dist2;
+    const Matrix4 transform = pos.Transform();
+    const Matrix4 invTransform = pos.GetInvTransform();
+    for (int i = 0; i < sShape->NProxies(); i++)
+    {
+        const ProxyObject& proxy = sShape->Proxy(i);
+        Matrix4Val pTransform = transform * proxy.obj->Transform();
+        Matrix4Val invPTransform = proxy.invTransform * invTransform;
+        LODShapeWithShadow* pshape = proxy.obj->GetShapeOnPos(pTransform.Position());
+        if (!pshape)
+        {
+            continue;
+        }
+        const int plevel = GScene->LevelFromDistance2(pshape, dist2, pTransform.Scale(), pTransform.Direction(),
+                                                      GScene->GetCamera()->Direction());
+        if (plevel == LOD_INVISIBLE)
+        {
+            continue;
+        }
+        FrameWithInverse pFrame(pTransform, invPTransform);
+        proxy.obj->PrepareDrawTextures(plevel, pFrame);
+    }
+    sShape->PrepareTextures(z2, special);
+}
+
 // pos is used mainly for proper proxy object positioning. This is the main function
 // used for object rendering. Default implementation performs Object::Animate before and
 // Object::Deanimate after rendering, checks for fog optimization (early constant fog
@@ -1011,6 +1073,100 @@ int Object::GetComplexity(int level, const FrameBase& pos) const
     return nFaces;
 }
 
+namespace
+{
+// A light the remastered night's physical model shades (a street lamp or a
+// headlight, FrameLights.hpp UsesPhysicalModel), as the GL backend classifies
+// the frame's lights.
+bool IsPhysicalNightLight(Light& light)
+{
+    LightDescription desc;
+    light.GetDescription(desc);
+    if (desc.type != LTPoint && desc.type != LTSpotLight)
+        return false;
+    return lighting::UsesPhysicalModel(desc.type == LTSpotLight ? lighting::FrameLightKind::Spot : light.Kind());
+}
+
+// The classic decal light (display space) plus the physical lamps' and
+// headlights' linear light on the puff, scaled by the night as the shaders
+// scale them. The decal material takes half of a light's diffuse colour
+// (0.25 diffuse and 0.25 forced, DrawDecal), so the puff takes half of the
+// physical light too; the sum goes back to display space.
+Color AddParticleNightLight(ColorVal classic, const float physical[3], float night)
+{
+    constexpr float kDecalShare = 0.5f;
+    auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
+    auto toDisplay = [](float v) { return std::pow(std::max(v, 0.0f), 1.0f / 2.2f); };
+    const float s = kDecalShare * night;
+    return Color(toDisplay(toLinear(classic.R()) + s * physical[0]), toDisplay(toLinear(classic.G()) + s * physical[1]),
+                 toDisplay(toLinear(classic.B()) + s * physical[2]), classic.A());
+}
+
+// The photoreal rig's light on the puff (ParticleRigLight: linear, at the
+// frame's exposure and pre-exposure) at the material's brightness (the eye's
+// accommodation, which carries the user brightness as the lit shaders'
+// materials do), added in linear light to the display-space local lights.
+Color AddParticleRigLight(ColorVal display, const float rig[3], ColorVal accom)
+{
+    auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
+    auto toDisplay = [](float v) { return std::pow(std::max(v, 0.0f), 1.0f / 2.2f); };
+    return Color(toDisplay(toLinear(display.R()) + rig[0] * accom.R()),
+                 toDisplay(toLinear(display.G()) + rig[1] * accom.G()),
+                 toDisplay(toLinear(display.B()) + rig[2] * accom.B()), display.A());
+}
+
+// A smoke or dust particle lit from inside by the frame's combat lights
+// (CombatLights.hpp): their irradiance at the particle, isotropic, added to its
+// display-space colour in linear light. A fire's light crosses its own smoke
+// to reach the particle: the darker the particle (`albedo`, the luminance of
+// its own colour), the shorter the reach (CombatSmokeTransmittance), so a
+// burning wreck's black column glows at its base only. A puff inside a fire's
+// flames glows as part of them (CombatFlameEmission): that light, linear,
+// goes to `emit`, added after the particle's own colour.
+Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3], bool ownGlow = false)
+{
+    const lighting::CombatLightSet& set = lighting::GCombatLights();
+    // A fire's light (kept in its hue) and every other combat light (white
+    // hot at its core): CombatParticleMix.
+    float e[3] = {0.0f, 0.0f, 0.0f};
+    float o[3] = {0.0f, 0.0f, 0.0f};
+    emit[0] = emit[1] = emit[2] = 0.0f;
+    for (const lighting::CombatLightRecord& r : set.Records())
+    {
+        // A fireball's glowing puff is the blast's light: a
+        // detonation's light on it added the flash's white over its own glow,
+        // and by night washed the fireball out to pale grey.
+        if (ownGlow && r.detonation)
+            continue;
+        const float dx = r.pos[0] - at.X(), dy = r.pos[1] - at.Y(), dz = r.pos[2] - at.Z();
+        const float d2 = dx * dx + dy * dy + dz * dz;
+        float irr = lighting::CombatIrradiance(r.sample, d2);
+        if (irr <= 0.0f)
+            continue;
+        const float d = std::sqrt(d2);
+        irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);
+        // A detonation's light keeps its hue on its smoke as a
+        // fire's does: its afterburn lit the dust round it khaki, not orange.
+        float* acc = r.kind == lighting::CombatLightKind::Fire || r.detonation ? e : o;
+        for (int i = 0; i < 3; ++i)
+            acc[i] += r.sample.rgb[i] * irr;
+        float flame[3];
+        lighting::CombatFlameEmission(r.kind, r.sample, d, flame);
+        for (int i = 0; i < 3; ++i)
+            emit[i] += flame[i];
+    }
+    if (e[0] + e[1] + e[2] + o[0] + o[1] + o[2] <= 1e-5f)
+        return color;
+    // A fire's light keeps its hue on the puff, deepened toward it by the tint
+    // (CombatTuning::smokeTint); a burst's or a muzzle's light whitens as it
+    // grows. DrawDecal keeps the result's hue under one.
+    const float base[3] = {color.R(), color.G(), color.B()};
+    float lit[3];
+    lighting::CombatParticleMix(base, e, o, set.Tuning().smoke, set.Tuning().smokeTint, lit);
+    return Color(lit[0], lit[1], lit[2], color.A());
+}
+} // namespace
+
 void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 {
     if (forceLOD == LOD_INVISIBLE)
@@ -1074,8 +1230,40 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         // world space normal is opposite to camera direction
         ClipFlags hints = shape->GetOrHints();
         Color colorI;
+        // The light a puff inside a fire's flames emits (linear; CombatLitParticle).
+        float flameEmit[3] = {0.0f, 0.0f, 0.0f};
+        // A fireball's puff: its glow (linear) and its soot colour.
+        float fireballEmit[3] = {0.0f, 0.0f, 0.0f};
+        Color fireballOwn;
+        bool fireball = false;
+        // A fireball's puff (FireballPuff) glows as a hot
+        // body and scatters as soot. Its shape is self-lit (MSShining): its
+        // table's colour times the eye's adaptation, which the photoreal
+        // camera holds at 1, so a dusk burst showed its table's lemon and
+        // mustard at a lit wall's level. Under the combat lights it takes the
+        // scene's light on its soot and adds its glow.
+        if (GEngine->CombatLightsActive() &&
+            render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
+        {
+            if (const Cloudlet* puff = dynamic_cast<const Cloudlet*>(this))
+            {
+                float soot[3];
+                if (lighting::FireballPuff(puff->Temperature(), puff->HottestTemperature(), soot, fireballEmit))
+                {
+                    // The glow keeps its ratio to the combat
+                    // light it gives (the bursts' day scale, 0.2 by day);
+                    // by night its own light on its smoke outshone it, a pale
+                    // grey cloud round a fuel fireball.
+                    const float nightGlow = lighting::GCombatLights().BurstDayScale() / 0.2f;
+                    for (int i = 0; i < 3; ++i)
+                        fireballEmit[i] *= nightGlow;
+                    fireballOwn = Color(soot[0], soot[1], soot[2], ((ColorVal)GetConstantColor()).A());
+                    fireball = true;
+                }
+            }
+        }
         int mat = (hints & ClipUserMask) / ClipUserStep;
-        if (mat != MSShining)
+        if (mat != MSShining || fireball)
         {
             TLMaterial mat;
             mat.ambient = HWhite;
@@ -1085,10 +1273,26 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             mat.specFlags = 0;
             LightSun* sun = GScene->MainLight();
             sun->SetMaterial(mat);
-            colorI = sun->FullResult(0.5);
+            // Under the photoreal camera the frame's rig lights the puff
+            // (ParticleRigLight; added below, after the local lights), not the
+            // classic sun and ambient: the classic dusk sun is still a pink
+            // light 1.7 degrees after sunset, and the camera's white balance
+            // for the blue dusk air made it a salmon smudge on the horizon.
+            float rigLight[3];
+            const bool rigLit = GEngine->ParticleRigLight(rigLight);
+            colorI = rigLit ? Color(0, 0, 0, 1) : sun->FullResult(0.5);
+            // While the combat lights light the frame, the classic light of a
+            // flash, a fire or a flare draws its glow and lights nothing: the
+            // particle takes the combat lights below instead.
+            const bool combat = GEngine->CombatLightsActive();
             float addLightsFactor = sun->NightEffect();
             if (addLightsFactor > 0.01)
             {
+                // The remastered night (nightLights): street lamps and
+                // headlights light the puff by their physical model, summed in
+                // linear light with the rest; the other lights keep theirs.
+                float physical[3];
+                const bool night = GEngine->ParticleNightLight(pos.Position(), physical);
                 const LightList& lights = GScene->ActiveLights();
                 if (lights.Size() > 0)
                 {
@@ -1101,12 +1305,35 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
                     for (int index = 0; index < lights.Size(); index++)
                     {
+                        const lighting::FrameLightKind kind = lights[index]->Kind();
+                        if (combat &&
+                            (kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire))
+                            continue;
+                        if (night && IsPhysicalNightLight(*lights[index]))
+                            continue;
                         colorI += lights[index]->Apply(VZero, VForward);
                     }
                 }
+                if (night)
+                    colorI = AddParticleNightLight(colorI, physical, addLightsFactor);
             }
             ColorVal accom = GEngine->GetAccomodateEye();
             colorI = colorI * accom;
+            if (rigLit)
+                colorI = AddParticleRigLight(colorI, rigLight, accom);
+            if (combat)
+            {
+                // The particle's own colour (multiplied in below) is its albedo.
+                float albedo = 1.0f;
+                if (render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
+                {
+                    const Color own = fireball ? fireballOwn : (ColorVal)GetConstantColor();
+                    albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
+                }
+                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);
+                for (int i = 0; i < 3; ++i)
+                    flameEmit[i] += fireballEmit[i];
+            }
             colorI.SetA(1);
         }
         else
@@ -1116,7 +1343,29 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         const render::LegacySpec specT = render::SplitLegacy(special);
         if (render::Has(specT.routing, render::Routing::IsColored))
         {
-            colorI = colorI * (ColorVal)GetConstantColor();
+            colorI = colorI * (fireball ? fireballOwn : (ColorVal)GetConstantColor());
+        }
+        // A puff in a strong combat light (the foot of a camp fire's column)
+        // passes 1: brought under it by its peak, it keeps the light's hue
+        // instead of clipping to white in the 8-bit vertex colour, and the
+        // light past 1 goes to the backend as the decal's glow (SetDecalGlow),
+        // so the column's foot glows brighter than the smoke above it.
+        if ((mat != MSShining || fireball) && GEngine->CombatLightsActive())
+        {
+            // The flame's own light (not its colour's: it glows, it does not
+            // scatter) joins in linear light.
+            float rgb[3] = {colorI.R(), colorI.G(), colorI.B()};
+            for (int i = 0; i < 3; ++i)
+                if (flameEmit[i] > 0.0f)
+                    rgb[i] = std::pow(std::pow(std::max(rgb[i], 0.0f), 2.2f) + flameEmit[i], 1.0f / 2.2f);
+            float glow[3] = {rgb[0], rgb[1], rgb[2]};
+            lighting::KeepHueUnderOne(rgb);
+            for (int i = 0; i < 3; ++i)
+                glow[i] -= rgb[i];
+            lighting::KeepHueUnderOne(glow);
+            colorI = Color(rgb[0], rgb[1], rgb[2], colorI.A());
+            if (glow[0] + glow[1] + glow[2] > 1.0f / 255.0f)
+                GEngine->SetDecalGlow(PackedColor(Color(glow[0], glow[1], glow[2], 0.0f)));
         }
         // check if there are not some unsupported lighting flags
         float dist2 = Position().Distance2(camera.Position());
@@ -1144,6 +1393,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
 void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3)
 {
+    GEngine->MarkWorldOverlay();
     LightSun* sun = GScene->MainLight();
     TLMaterial mat;
     mat.ambient = HWhite;
@@ -1328,6 +1578,7 @@ void Object::DrawWidescreenPillarbox(bool requireGameplayActive, bool force)
     barPars.vTL = barPars.vTR = 0.0f;
     const float h = static_cast<float>(vh);
     const float w = static_cast<float>(vw);
+    GEngine->MarkWorldOverlay();
     GEngine->Draw2D(barPars, Rect2DAbs(0.0f, 0.0f, barW, h));
     GEngine->Draw2D(barPars, Rect2DAbs(w - barW, 0.0f, barW, h));
 }
@@ -1634,6 +1885,19 @@ void Object::DoLight(TLVertexTable& dst, const Shape& src, const Matrix4& worldT
 bool Object::GetAnimated(const Shape& src) const
 {
     return _isDestroyed && _destroyPhase > 0 && GetDestructType() != DestructTree;
+}
+
+render::DrawObjectKind Object::GetDrawObjectKind() const
+{
+    const EntityType* type = GetVehicleType();
+    if (!type)
+        return render::DrawObjectKind::Static;
+    if (type->_drawObjectKind < 0)
+    {
+        type->_drawObjectKind = static_cast<signed char>(remaster::DrawObjectKindFromNames(
+            static_cast<const char*>(type->_simName), static_cast<const char*>(type->_className)));
+    }
+    return static_cast<render::DrawObjectKind>(type->_drawObjectKind);
 }
 
 #if SUPPORT_RANDOM_SHAPES

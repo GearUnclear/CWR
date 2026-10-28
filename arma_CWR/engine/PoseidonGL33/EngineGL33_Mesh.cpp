@@ -1,4 +1,5 @@
 #include <PoseidonGL33/EngineGL33.hpp>
+#include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -32,6 +33,13 @@ void EngineGL33::UpdateProjection()
         // the flush appends to — not a pending-draw count — so it is legitimately
         // non-empty mid-pass.)
         FlushAndFreeAllQueues(_queueNo, true);
+        // The world's projection, before a vehicle interior sets its own near
+        // plane: the fog reads the world's depth with it (SaveWorldBeforeInterior).
+        if ((_worldPassOpen || NightVisionFogOpen()) && _fog.intFrame != GetFrameCounter())
+        {
+            _fog.worldProj = _frameState.projection;
+            _fog.worldProjFrame = GetFrameCounter();
+        }
         Camera* camera = GScene->GetCamera();
         int projBias = _canZBias ? 0 : _bias;
         ConvertProjectionMatrix(_frameState.projection, camera->ProjectionNormal(), projBias);
@@ -105,6 +113,20 @@ void EngineGL33::PrepareMeshTLImpl(const FrameState& frame, const Matrix4& model
 void EngineGL33::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
 {
     sMesh.GetVertexBuffer()->Update(sMesh, dynamic);
+    if (_remasterPrograms)
+    {
+        // Remastered foliage lights its leaves with the normal of an ellipsoid
+        // fitted to the shape (EngineGL33_LightingShaders.cpp). Every TL mesh
+        // draw passes here, so the slots always describe the current shape;
+        // the upload is skipped while the same shape repeats.
+        const Vector3 mn = sMesh.Min();
+        const Vector3 mx = sMesh.Max();
+        const float boxMin[3] = {mn.X(), mn.Y(), mn.Z()};
+        const float boxMax[3] = {mx.X(), mx.Y(), mx.Z()};
+        float center[3], invHalf[3];
+        Poseidon::remaster::CrownEllipsoid(boxMin, boxMax, center, invHalf);
+        UploadVSCrown(center, invHalf);
+    }
 }
 
 void EngineGL33::EndMeshTL(const Shape& sMesh)

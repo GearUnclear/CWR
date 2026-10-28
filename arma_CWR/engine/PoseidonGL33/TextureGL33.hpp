@@ -8,6 +8,7 @@
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Colors.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
+#include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
 
 class TextureGL33;
 class EngineGL33;
@@ -93,6 +94,10 @@ class TextureGL33 : public Texture
     SurfaceInfoGL33 _smallSurface; // small GPU texture
 
     signed char _alphaClass = -1; // cached GetAlphaClass() verdict (-1 = not computed)
+    // SurfaceClassFor's classes, per object kind and then on the ground, of
+    // table generation _surfaceGen (0 = none yet).
+    unsigned char _surfaceClass[Poseidon::render::kDrawObjectKindCount * 2] = {};
+    int _surfaceGen = 0;
 
     signed char _largestUsed;
     signed char _smallLoaded;
@@ -216,6 +221,13 @@ class TextureGL33 : public Texture
 
     Poseidon::AlphaStats::Kind GetAlphaClass() override;
 
+    // The remastered wet weather's surface class of this texture on an object
+    // of `kind` (on the ground: a road decal, when onSurface), from its name
+    // against `table` (Graphics/Remaster/SurfaceMaterials.hpp). Classified for
+    // every kind at once, the first time a table generation `gen` asks.
+    Poseidon::remaster::SurfaceClass SurfaceClassFor(const Poseidon::remaster::SurfaceTable& table, int gen,
+                                                     Poseidon::render::DrawObjectKind kind, bool onSurface);
+
     Color GetPixel(int level, float u, float v) const override;
     Color GetColor() override
     {
@@ -256,7 +268,6 @@ class TextBankGL33 : public AbstractTextBank
     Ref<TextureGL33> _detail;
     Ref<TextureGL33> _specular;
     Ref<TextureGL33> _grass;
-    Ref<TextureGL33> _waterBump;
 
     AutoArray<SurfaceInfoGL33> _freeTextures;
 
@@ -341,7 +352,6 @@ class TextBankGL33 : public AbstractTextBank
     TextureGL33* GetDetailTexture() const { return _detail; }
     TextureGL33* GetGrassTexture() const { return _grass; }
     TextureGL33* GetSpecularTexture() const { return _specular; }
-    TextureGL33* GetWaterBumpMap() const { return _waterBump; }
 
     bool VerifyChecksums() override;
     bool ReserveMemory(GL33MipCacheRoot& root, int limit);
