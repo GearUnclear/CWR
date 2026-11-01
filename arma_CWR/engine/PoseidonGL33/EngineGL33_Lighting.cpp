@@ -105,9 +105,11 @@ void EngineGL33::FlushLitConstants()
 {
     if (!s_litUBO)
         return;
-    // drawGrouping: send only the slots that changed since the last upload
-    // (a draw's material and lights, mostly); off, the whole block as before.
-    const bool dedupe = _featureGates[rm::Feature::DrawGrouping].on;
+    // Send only the slots that changed since the last upload (a draw's
+    // material and lights, mostly). Always on, whatever the drawGrouping gate
+    // says: the mirror keeps the buffer equal to s_lit, so the result is the
+    // same as sending the whole block (perf W1-3).
+    const bool dedupe = true;
     int first = 0, count = 0;
     if (!s_litMirror.Plan(s_lit, dedupe, first, count))
     {

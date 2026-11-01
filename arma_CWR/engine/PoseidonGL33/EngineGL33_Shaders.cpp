@@ -819,11 +819,13 @@ void EngineGL33::FlushVSConstants()
 {
     if (!s_vsUBO)
         return;
-    // drawGrouping: send only the slots that changed since the last upload.
-    // With the WorldInstances buffer the VSConstants world slots are std140
-    // padding no shader reads (every VS takes the world matrix from
+    // Send only the slots that changed since the last upload. Always on,
+    // whatever the drawGrouping gate says: the mirror keeps the buffer equal
+    // to s_vsShadow, so the result is the same as sending the whole block
+    // (perf W1-3). With the WorldInstances buffer the VSConstants world slots
+    // are std140 padding no shader reads (every VS takes the world matrix from
     // WorldInstances), so they never count as a change.
-    const bool dedupe = _featureGates[Poseidon::remaster::Feature::DrawGrouping].on;
+    const bool dedupe = true;
     int first = 0, count = 0;
     if (!s_vsMirror.Plan(s_vsShadow, dedupe, first, count, s_worldUBO ? VSConst::SlotWorld : 0, s_worldUBO ? 4 : 0))
     {
