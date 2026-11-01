@@ -62,6 +62,7 @@ using Poseidon::Foundation::Time;
 #include <time.h>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/World/Terrain/Occlusion.hpp>
+#include <Poseidon/World/Scene/OcclusionRange.hpp>
 
 using namespace Poseidon;
 
@@ -795,6 +796,62 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
     }
     return false;
 }
+
+// W3-1(b): the view geometry an object renders into the occlusion buffer when it
+// is not hidden, or null when it renders nothing (not an occluder, no view
+// geometry, or too small on screen). Pure: the occlusion pass asks it before the
+// test for objects beyond the test range (OcclusionRange.hpp) and after it as
+// before for the rest.
+static Shape* OccluderViewGeometry(const SortObject* oi, float invLeft)
+{
+    LODShape* shape = oi->shape;
+    if (!shape->CanOcclude() || !oi->object->OcclusionView())
+    {
+        return nullptr;
+    }
+    Shape* view = shape->ViewGeometryLevel();
+    if (!view)
+    {
+        return nullptr;
+    }
+    // test if object is near enough to make a some occlusion
+    float areaNom = Square(oi->radius * invLeft);
+    float areaDenom = oi->distance2;
+    return areaNom > 0.001 * areaDenom ? view : nullptr;
+}
+
+namespace
+{
+// POSEIDON_OCC_STATS=1: one event=occ log line per 256 occlusion passes.
+struct OcclusionStatsWindow
+{
+    double sums[4] = {};
+    int passes = 0;
+};
+
+void ReportOcclusionStats(const OcclusionRange::Stats& s, float range2)
+{
+    static const bool s_log = std::getenv("POSEIDON_OCC_STATS") != nullptr;
+    if (!s_log)
+    {
+        return;
+    }
+    static OcclusionStatsWindow w;
+    w.sums[0] += s.tested;
+    w.sums[1] += s.culled;
+    w.sums[2] += s.skipped;
+    w.sums[3] += s.farTested;
+    if (++w.passes < 256)
+    {
+        return;
+    }
+    const double n = w.passes;
+    LOG_INFO(Graphics, "event=occ passes={} range={:.0f} tested={:.1f} culled={:.1f} skipped={:.1f} farTested={:.1f}",
+             w.passes, range2 > 0.0f ? std::sqrt(range2) : 0.0f, w.sums[0] / n, w.sums[1] / n, w.sums[2] / n,
+             w.sums[3] / n);
+    w = OcclusionStatsWindow{};
+}
+} // namespace
 
 // ---- Hill culling (TerrainOcclusion.hpp, the hillCull feature switch) ----
 
@@ -1608,6 +1665,23 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
 #endif
 
+        // W3-1(b): objects beyond the test range that are not occluders are not
+        // tested (OcclusionRange.hpp). The range never falls short of the shadow
+        // caster reach (SceneShadowPass.cpp: near + distanceCoef * (shadowsZ -
+        // near); the projected shadows reach shadowsZ).
+        static const float s_occRange = OcclusionRange::ParseRange(std::getenv("POSEIDON_OCC_RANGE"));
+        float occRange2 = 0.0f;
+        float occInvLeft = 0.0f;
+        if (_camera)
+        {
+            const float occNear = _camera->ClipNear();
+            const float occShadowsZ = ENGINE_CONFIG.shadowsZ;
+            const float occCasterReach = occNear + GEngine->GetShadowMapTuning().distanceCoef * (occShadowsZ - occNear);
+            occRange2 = OcclusionRange::TestRange2(s_occRange, std::max(occShadowsZ, occCasterReach));
+            occInvLeft = _camera->InvLeft();
+        }
+        OcclusionRange::Stats occStats;
+
         // draw occlusions front to back
         for (int i = occSort.Size(); --i >= 0;)
         {
@@ -1635,34 +1709,35 @@ void Scene::DrawObjectsAndShadowsPass1()
                 // the test would be very slow and is very like to fail
                 if (FarEnoughForOcclusion(oi))
                 {
-                    Vector3 minMax[2];
-                    obj->AnimatedMinMax(oi->drawLOD, minMax);
-                    // check if object is occluded by objects
-                    if (!GetOcclusions()->TestBBox(*oi->object, minMax, oi->orClip))
+                    const bool beyond = occRange2 > 0.0f && oi->distance2 >= occRange2;
+                    if (beyond && OcclusionRange::SkipTest(oi->distance2, occRange2,
+                                                           OccluderViewGeometry(oi, occInvLeft) != nullptr))
                     {
-                        occluded = true;
+                        ++occStats.skipped;
+                    }
+                    else
+                    {
+                        Vector3 minMax[2];
+                        obj->AnimatedMinMax(oi->drawLOD, minMax);
+                        ++occStats.tested;
+                        occStats.farTested += beyond ? 1 : 0;
+                        // check if object is occluded by objects
+                        if (!GetOcclusions()->TestBBox(*oi->object, minMax, oi->orClip))
+                        {
+                            occluded = true;
+                            ++occStats.culled;
+                        }
                     }
                 }
             }
             if (!occluded)
             {
-                if (shape->CanOcclude() && obj->OcclusionView())
+                if (Shape* view = OccluderViewGeometry(oi, occInvLeft))
                 {
-                    Shape* view = shape->ViewGeometryLevel();
-                    if (!view)
-                    {
-                        continue;
-                    }
-                    // test if object is near enough to make a some occlusion
-                    float areaNom = Square(oi->radius * _camera->InvLeft());
-                    float areaDenom = oi->distance2;
-                    if (areaNom > 0.001 * areaDenom)
-                    {
-                        obj->AnimateViewGeometry();
-                        // if object can occlude something, render its components
-                        GetOcclusions()->RenderShape(*oi->object, view, shape->GetViewComponents(), oi->orClip);
-                        obj->DeanimateViewGeometry();
-                    }
+                    obj->AnimateViewGeometry();
+                    // if object can occlude something, render its components
+                    GetOcclusions()->RenderShape(*oi->object, view, shape->GetViewComponents(), oi->orClip);
+                    obj->DeanimateViewGeometry();
                 }
             }
             else
@@ -1671,6 +1746,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                 oi->drawLOD = LOD_INVISIBLE;
             }
         }
+        ReportOcclusionStats(occStats, occRange2);
     }
     counters.occlusionMs += msSince(occT0);
 

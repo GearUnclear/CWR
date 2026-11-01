@@ -502,6 +502,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_land_fit_cache.cpp
     World/Scene/test_terrain_occlusion.cpp
     World/Scene/test_streetlamp_casting.cpp
+    World/Scene/test_occlusion_range.cpp
 
     # Core subsystem tests
     UI/Locale/test_stringtable_system.cpp
