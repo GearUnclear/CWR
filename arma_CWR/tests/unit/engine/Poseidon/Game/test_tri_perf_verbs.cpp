@@ -6,6 +6,7 @@
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Dummy/EngineDummy.hpp>
+#include <Poseidon/Graphics/Shared/WindowMode.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -27,6 +28,12 @@ GameValue TriGpuRing(const GameState*, GameValuePar);
 GameValue TriGpuTimes(const GameState*, GameValuePar);
 GameValue TriBuildId(const GameState*);
 GameValue TriSetFpsCap(const GameState*, GameValuePar);
+GameValue TriResizeWindow(const GameState*, GameValuePar);
+GameValue TriSetWindowMode(const GameState*, GameValuePar);
+GameValue TriMinimize(const GameState*);
+GameValue TriRestore(const GameState*);
+GameValue TriGraphicsReset(const GameState*, GameValuePar);
+GameValue TriRetryMission(const GameState*);
 
 namespace
 {
@@ -356,4 +363,129 @@ TEST_CASE("triSetFpsCap pins the frame cap RenderFrame paces to", "[tri][perf][t
     CHECK(Text(TriSetFpsCap(nullptr, GameValue(-5.0f))) == "OK:0");
     CHECK(Text(TriSetFpsCap(nullptr, GameValue(5000.0f))) == "OK:1000");
     gUserFpsCap = before;
+}
+
+namespace
+{
+// Engine stand-in for the window and lifecycle verbs: records what they ask.
+class WindowEngine : public EngineDummy
+{
+  public:
+    int w = 1280, h = 720, bpp = 0;
+    int switchCalls = 0;
+    bool refuseSwitch = false;
+    std::vector<WindowMode> modes;
+    int hardResets = 0, contentResets = 0;
+    bool SwitchRes(int nw, int nh, int nbpp) override
+    {
+        ++switchCalls;
+        if (refuseSwitch)
+            return false;
+        w = nw;
+        h = nh;
+        bpp = nbpp;
+        return true;
+    }
+    int Width() const override { return w; }
+    int Height() const override { return h; }
+    int PixelSize() const override { return 32; }
+    bool SetWindowMode(WindowMode mode) override
+    {
+        modes.push_back(mode);
+        return true;
+    }
+    bool ResetHard() override
+    {
+        ++hardResets;
+        return true;
+    }
+    void ResetForRemount() override { ++contentResets; }
+};
+
+GameValue Size(float w, float h)
+{
+    GameValue arr = GGameState.CreateGameValue(GameArray);
+    GameArrayType& a = arr;
+    a.Resize(2);
+    a[0] = GameValue(w);
+    a[1] = GameValue(h);
+    return arr;
+}
+
+bool StartsWith(const std::string& s, const char* prefix)
+{
+    return s.rfind(prefix, 0) == 0;
+}
+} // namespace
+
+TEST_CASE("triResizeWindow goes through SwitchRes at the current pixel size", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    WindowEngine eng;
+    GEngineGuard guard(&eng);
+    CHECK(StartsWith(Text(TriResizeWindow(nullptr, Size(1600.0f, 900.0f))), "OK:1600x900:"));
+    CHECK(eng.bpp == 32);
+    CHECK(eng.switchCalls == 1);
+    // Out of range or malformed: refused before the engine is asked.
+    CHECK(StartsWith(Text(TriResizeWindow(nullptr, Size(32.0f, 900.0f))), "FAIL:"));
+    CHECK(StartsWith(Text(TriResizeWindow(nullptr, GameValue(5.0f))), "FAIL:"));
+    CHECK(eng.switchCalls == 1);
+    eng.refuseSwitch = true;
+    CHECK(Text(TriResizeWindow(nullptr, Size(800.0f, 600.0f))) == "FAIL:SwitchRes refused");
+}
+
+TEST_CASE("triSetWindowMode maps its words onto the engine's window modes", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    WindowEngine eng;
+    GEngineGuard guard(&eng);
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("borderless")))), "OK:borderless:"));
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("fullscreen")))), "OK:fullscreen:"));
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("windowed")))), "OK:windowed:"));
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("maximised")))), "FAIL:"));
+    CHECK(eng.modes == std::vector<WindowMode>{WindowMode::Borderless, WindowMode::Fullscreen, WindowMode::Windowed});
+}
+
+TEST_CASE("triGraphicsReset runs the hard or the content reset and times it", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    WindowEngine eng;
+    GEngineGuard guard(&eng);
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("")))), "OK:hard:"));
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("hard")))), "OK:hard:"));
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("content")))), "OK:content:"));
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("soft")))), "FAIL:"));
+    CHECK(eng.hardResets == 2);
+    CHECK(eng.contentResets == 1);
+}
+
+TEST_CASE("Window and lifecycle verbs fail cleanly without a window or a mission", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    // No video subsystem in the unit tests: no SDL window to act on.
+    CHECK(Text(TriMinimize(nullptr)) == "FAIL:no window");
+    CHECK(Text(TriRestore(nullptr)) == "FAIL:no window");
+    // No world, so no mission display.
+    CHECK(StartsWith(Text(TriRetryMission(nullptr)), "FAIL:not on the mission display"));
+    GEngineGuard noEngine(nullptr);
+    CHECK(Text(TriResizeWindow(nullptr, Size(800.0f, 600.0f))) == "FAIL:no engine");
+    CHECK(Text(TriGraphicsReset(nullptr, GameValue(RString("hard")))) == "FAIL:no engine");
+}
+
+TEST_CASE("tri hands TRI_POSEIDON_CACHE_DIR to the game as its cache dir", "[tri][perf][hitch]")
+{
+    // Trident (Rust) cannot run here; check the launch sites read the shared
+    // helper, so no launch path keeps the per-launch cache dir by itself.
+    const auto root = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Trident" / "src";
+    const std::string mod = ReadFile((root / "scenarios" / "mod.rs").string());
+    CHECK(mod.find("std::env::var(\"TRI_POSEIDON_CACHE_DIR\")") != std::string::npos);
+    for (const char* rel : {"main.rs", "scenarios/integration.rs", "scenarios/multi.rs", "scenarios/stress.rs"})
+    {
+        INFO(rel);
+        const std::string src = ReadFile((root / rel).string());
+        REQUIRE_FALSE(src.empty());
+        CHECK(src.find("poseidon_cache_dir(") != std::string::npos);
+        CHECK(src.find("(\"POSEIDON_CACHE_DIR\", user_dir") == std::string::npos);
+        CHECK(src.find(".env(\"POSEIDON_CACHE_DIR\", &user_dir)") == std::string::npos);
+    }
 }
