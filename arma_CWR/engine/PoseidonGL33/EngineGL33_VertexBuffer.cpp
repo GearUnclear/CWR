@@ -13,6 +13,11 @@
 #include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
+
+#include <algorithm>
+#include <cstring>
+#include <vector>
 
 using namespace Poseidon::Dev;
 
@@ -39,6 +44,12 @@ class VertexBufferGL33 : public VertexBuffer
     int _vertexCount = 0;
     int _indexCount = 0;
     AutoArray<VBSectionInfo> _sections;
+    // W1-9: a dynamic buffer keeps a CPU copy of what it last uploaded and
+    // uploads again only when the shape's vertices differ from it. The first
+    // Update always uploads (`_uploaded`): skipping it drew empty buffers in
+    // the measure2 stand-in (p1-dynonly-invalid).
+    bool _uploaded = false;
+    std::vector<SVertex> _shadow;
 
   public:
     VertexBufferGL33() = default;
@@ -49,6 +60,9 @@ class VertexBufferGL33 : public VertexBuffer
 
   private:
     void CopyVertices(const Shape& src);
+    bool UploadIfChanged(const Shape& src);
+    int UploadCount(const Shape& src) const { return std::min(src.NVertex(), _vertexCount); }
+    static void FillVertices(const Shape& src, SVertex* dst, int count);
     void SetupVertexAttribs();
 };
 
@@ -69,6 +83,64 @@ void VertexBufferGL33::SetupVertexAttribs()
     // Layout shared with the engine's `_vaoMesh` setup — see
     // `GLVertexAttribLayouts.hpp` for the single source of truth.
     Poseidon::render::vao::SetupSVertexLayout();
+}
+
+// The vertex stream of a shape as the buffer holds it.
+void VertexBufferGL33::FillVertices(const Shape& src, SVertex* sData, int count)
+{
+    const UVPair* uv = &src.UV(0);
+    const Vector3* pos = &src.Pos(0);
+    const Vector3* norm = &src.Norm(0);
+    for (int i = count; --i >= 0;)
+    {
+        sData->pos = Vector3P(pos->X(), pos->Y(), pos->Z());
+        // Normals are negated (matches D3D11 convention)
+        sData->norm = Vector3P(-norm->X(), -norm->Y(), -norm->Z());
+        pos++;
+        norm++;
+        sData->t0 = *uv;
+        uv++;
+        sData++;
+    }
+}
+
+// W1-9: a dynamic buffer (a shape that may animate) used to upload on every
+// draw, whether or not its vertices had changed: 3,100 uploads a frame at the
+// valley, each serialising the GPU behind it (measurements-2 1b). Its vertices
+// are compared with the copy last uploaded instead, and uploaded only when
+// they differ. Byte-equal vertices draw the same pixels, so this needs no
+// dirty mark to be right: shapes that move their vertices without one
+// (ForestPlain::Animate, flag cloth, AnimationUV) still upload when they change.
+bool VertexBufferGL33::UploadIfChanged(const Shape& src)
+{
+    const int count = UploadCount(src);
+    if (count <= 0)
+        return false;
+    static std::vector<SVertex> s_scratch;
+    s_scratch.resize(static_cast<size_t>(count));
+    FillVertices(src, s_scratch.data(), count);
+    const size_t bytes = static_cast<size_t>(count) * sizeof(SVertex);
+    if (_uploaded && _shadow.size() == static_cast<size_t>(count) &&
+        std::memcmp(_shadow.data(), s_scratch.data(), bytes) == 0)
+    {
+        Poseidon::LandFit::Stats().dynSkipped++;
+        return false;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+    void* mapped = Poseidon::render::buf::MapDynamicWriteInvalidate(GL_ARRAY_BUFFER, 0, _vertexCount * sizeof(SVertex));
+    if (!mapped)
+    {
+        LOG_ERROR(Graphics, "GL33: VBO map failed");
+        return false;
+    }
+    std::memcpy(mapped, s_scratch.data(), bytes);
+    glUnmapBuffer(GL_ARRAY_BUFFER);
+    _shadow.swap(s_scratch);
+    _uploaded = true;
+    Poseidon::LandFit::FrameStats& stats = Poseidon::LandFit::Stats();
+    stats.dynUploads++;
+    stats.dynUploadKB += static_cast<int>(bytes / 1024);
+    return true;
 }
 
 void VertexBufferGL33::CopyVertices(const Shape& src)
@@ -92,20 +164,8 @@ void VertexBufferGL33::CopyVertices(const Shape& src)
         return;
     }
 
-    const UVPair* uv = &src.UV(0);
-    const Vector3* pos = &src.Pos(0);
-    const Vector3* norm = &src.Norm(0);
-    for (int i = src.NVertex(); --i >= 0;)
-    {
-        sData->pos = Vector3P(pos->X(), pos->Y(), pos->Z());
-        // Normals are negated (matches D3D11 convention)
-        sData->norm = Vector3P(-norm->X(), -norm->Y(), -norm->Z());
-        pos++;
-        norm++;
-        sData->t0 = *uv;
-        uv++;
-        sData++;
-    }
+    // Never past the mapped range, should a level's vertex count change.
+    FillVertices(src, sData, UploadCount(src));
 
     glUnmapBuffer(GL_ARRAY_BUFFER);
 }
@@ -210,10 +270,19 @@ bool VertexBufferGL33::Init(const Shape& src, VBType type)
 
 void VertexBufferGL33::Update(const Shape& src, bool dynamic)
 {
-    if (_dynamic || dynamic || bufferDirty)
+    if (_dynamic)
+    {
+        // Compared, not trusted: a dirty mark or an animating material
+        // (`dynamic`) uploads only if the vertices really changed.
+        UploadIfChanged(src);
+        bufferDirty = false;
+        return;
+    }
+    if (dynamic || bufferDirty)
     {
         CopyVertices(src);
         bufferDirty = false;
+        Poseidon::LandFit::Stats().staticUploads++;
     }
 }
 

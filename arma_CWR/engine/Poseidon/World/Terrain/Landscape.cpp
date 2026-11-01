@@ -6,6 +6,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
@@ -945,6 +946,8 @@ void Landscape::HeightChange(int x, int z, float y)
 {
     PoseidonAssert(this_TerrainInRange(x, z));
     SetData(x, z, y);
+    // W1-9: objects fitted to the old ground refit
+    LandFit::NoteTerrainEdit();
     // FlushCache();
 }
 

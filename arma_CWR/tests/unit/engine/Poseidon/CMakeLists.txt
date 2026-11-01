@@ -499,6 +499,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
     World/Scene/test_instanced_run_rules.cpp
+    World/Scene/test_land_fit_cache.cpp
     World/Scene/test_terrain_occlusion.cpp
     World/Scene/test_streetlamp_casting.cpp
 

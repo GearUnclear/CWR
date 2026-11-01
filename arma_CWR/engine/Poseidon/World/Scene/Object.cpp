@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
 #include <Poseidon/World/Scene/ObjectScriptVars.hpp>
 #include <Poseidon/World/Scene/Object2DMapping.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -31,6 +32,9 @@
 #include <stdio.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <typeinfo>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -319,6 +323,236 @@ float Object::CloudletClippingCoef() const
     return 1;
 }
 
+// W1-9: per-object fitted geometry (LandFitCache.hpp).
+namespace LandFit
+{
+namespace
+{
+// What a fit leaves behind for later draws of the same (object, level).
+struct FitPayload
+{
+    Ref<VertexBuffer> buffer;           // the fitted vertices; null until the object is first drawn
+    Vector3 minMax[2] = {VZero, VZero}; // MinMaxDynamic of the fitted level (AnimatedMinMax)
+    Vector3 bCenter = VZero;            // BSphereDynamic of the fitted level (Draw's clip test)
+    float bRadius = 0.0f;
+};
+using Table = FitTable<FitPayload>;
+using FitEntry = Table::Entry;
+
+// Entries not drawn for this many frames are dropped (swept every 64 frames);
+// past the hard cap everything but the last two frames' entries goes.
+constexpr std::uint32_t kMaxAgeFrames = 600;
+constexpr std::size_t kHardCapEntries = 32768;
+// Fitted buffers built per frame at most; the rest of the frame's
+// land-following objects keep the per-draw fit, so a mission start or a fast
+// camera does not hitch on thousands of buffer creations in one frame.
+constexpr int kMaxBuildsPerFrame = 512;
+constexpr int kStatFields = 9;
+
+struct State
+{
+    Table table;
+    FrameStats frame;
+    double sums[kStatFields] = {};
+    int windowFrames = 0;
+    std::uint32_t frameNo = 1;
+    int bufferBuilds = 0; // fitted buffers made this frame (kMaxBuildsPerFrame)
+    std::uint64_t terrain = 0;
+    std::uint64_t edits = 0;
+};
+
+// Never destroyed: at exit the fitted buffers must not be freed after the GL
+// context has gone (ClearAll frees them with the scene).
+State& GState()
+{
+    static State* s_state = new State;
+    return *s_state;
+}
+
+// The classes whose Animate, Deanimate, AnimatedMinMax and AnimatedBSphere are
+// Object's own; any other class may move vertices its own way (ForestPlain
+// fits forests with its own code, vehicles animate, buildings open doors).
+bool PlainClass(const Object& obj)
+{
+    const std::type_info& t = typeid(obj);
+    return t == typeid(ObjectPlain) || t == typeid(Object);
+}
+
+// True when Object::Animate's land branch is the only change a draw of this
+// level makes to its vertices.
+bool Cacheable(const Object& obj, const Shape* shape)
+{
+    if (!shape || !GLOB_LAND || shape->NPos() <= 0)
+        return false;
+    if (!(shape->GetOrHints() & (ClipLandKeep | ClipLandOn)))
+        return false; // nothing to fit
+    if ((shape->GetAndHints() & ClipLandMask) == ClipLandOn)
+        return false; // every vertex on the surface: drawn through SurfaceSplit
+    if (obj.IsDestroyed() && obj.GetDestroyed() > 0)
+        return false; // destruction blends the vertices
+    return PlainClass(obj);
+}
+
+FitKey MakeKey(const Object& obj, int level, const Shape* shape)
+{
+    const Matrix4& m = obj.Transform();
+    const Vector3 rows[4] = {m.DirectionAside(), m.DirectionUp(), m.Direction(), m.Position()};
+    float matrix[12];
+    for (int r = 0; r < 4; r++)
+    {
+        matrix[r * 3 + 0] = rows[r].X();
+        matrix[r * 3 + 1] = rows[r].Y();
+        matrix[r * 3 + 2] = rows[r].Z();
+    }
+    return MakeFitKey(shape, level, shape->NPos(), matrix, GState().terrain, obj.GetTotalDammage());
+}
+
+// Runs the object's own fit once and keeps what it produced; with `withBuffer`
+// also a static vertex buffer of the fitted vertices. Null when that buffer
+// could not be made (the caller then fits per draw, as before).
+FitEntry* Build(Object& obj, int level, Shape* shape, const FitKey& key, bool withBuffer)
+{
+    State& st = GState();
+    FitPayload payload;
+    obj.Animate(level);
+    shape->MinMaxDynamic(payload.minMax);
+    shape->BSphereDynamic(payload.bCenter, payload.bRadius);
+    if (withBuffer)
+    {
+        payload.buffer = GEngine->CreateVertexBuffer(*shape, VBStatic);
+        st.bufferBuilds++;
+    }
+    obj.Deanimate(level);
+    if (withBuffer && !payload.buffer)
+    {
+        return nullptr;
+    }
+    st.frame.cacheBuilds++;
+    return &st.table.Store(&obj, key, std::move(payload), st.frameNo);
+}
+
+// The fitted entry a draw of (obj, level) can use, building it while the
+// frame's budget allows; null keeps the per-draw fit.
+const FitPayload* ForDraw(Object& obj, int level, Shape* shape)
+{
+    State& st = GState();
+    const FitKey key = MakeKey(obj, level, shape);
+    FitEntry* entry = st.table.Find(&obj, key, st.frameNo);
+    if (!entry || !entry->payload.buffer)
+    {
+        if (st.bufferBuilds >= kMaxBuildsPerFrame)
+            return nullptr;
+        entry = Build(obj, level, shape, key, true);
+        if (!entry)
+            return nullptr;
+    }
+    st.frame.cacheDraws++;
+    return &entry->payload;
+}
+
+// The fitted bounds of (obj, level), fitting once when there is no entry.
+const FitPayload* ForBounds(Object& obj, int level, Shape* shape)
+{
+    State& st = GState();
+    const FitKey key = MakeKey(obj, level, shape);
+    FitEntry* entry = st.table.Find(&obj, key, st.frameNo);
+    if (!entry)
+    {
+        entry = Build(obj, level, shape, key, false);
+    }
+    if (!entry)
+        return nullptr;
+    st.frame.cacheBounds++;
+    return &entry->payload;
+}
+
+// A strided sample of the heights (as the hill cull's SampleTerrain) notices a
+// new island; the edit count catches a single reshaped grid vertex.
+std::uint64_t SampleTerrainVersion(const Landscape* land, std::uint64_t edits)
+{
+    std::uint64_t h = 1469598103934665603ull;
+    h = MixVersion(h, static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(land)));
+    h = MixVersion(h, edits);
+    if (!land)
+        return h;
+    const int range = land->GetTerrainRange();
+    const float grid = land->GetTerrainGrid();
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &grid, sizeof(bits));
+    h = MixVersion(h, static_cast<std::uint64_t>(range));
+    h = MixVersion(h, bits);
+    const int step = range > 64 ? range / 64 : 1;
+    for (int z = 0; z < range; z += step)
+    {
+        for (int x = (z / step) % step; x < range; x += step)
+        {
+            const float v = land->ClippedData(z, x);
+            std::memcpy(&bits, &v, sizeof(bits));
+            h = MixVersion(h, bits);
+        }
+    }
+    return h;
+}
+} // namespace
+
+FrameStats& Stats()
+{
+    return GState().frame;
+}
+
+std::uint64_t TerrainVersion()
+{
+    return GState().terrain;
+}
+
+void NoteTerrainEdit()
+{
+    GState().edits++;
+}
+
+void ClearAll()
+{
+    GState().table.Clear();
+}
+
+void BeginFrame(const Landscape* land)
+{
+    State& st = GState();
+    // close the frame's counters
+    FrameStats& f = st.frame;
+    f.entries = static_cast<int>(st.table.Size());
+    const int values[kStatFields] = {f.fits,        f.cacheBuilds, f.cacheDraws,    f.cacheBounds, f.dynUploads,
+                                     f.dynUploadKB, f.dynSkipped,  f.staticUploads, f.entries};
+    for (int i = 0; i < kStatFields; i++)
+        st.sums[i] += values[i];
+    st.windowFrames++;
+    static const bool s_log = std::getenv("POSEIDON_LANDFIT_STATS") != nullptr;
+    if (st.windowFrames >= 256)
+    {
+        if (s_log)
+        {
+            const double n = st.windowFrames;
+            LOG_INFO(Graphics,
+                     "event=landfit frames={} fits={:.1f} builds={:.1f} cacheDraws={:.1f} cacheBounds={:.1f} "
+                     "dynUploads={:.1f} dynKB={:.1f} dynSkipped={:.1f} staticUploads={:.1f} entries={:.0f}",
+                     st.windowFrames, st.sums[0] / n, st.sums[1] / n, st.sums[2] / n, st.sums[3] / n, st.sums[4] / n,
+                     st.sums[5] / n, st.sums[6] / n, st.sums[7] / n, st.sums[8] / n);
+        }
+        for (double& v : st.sums)
+            v = 0.0;
+        st.windowFrames = 0;
+    }
+    st.frame = FrameStats{};
+    st.bufferBuilds = 0;
+    st.frameNo++;
+    st.terrain = SampleTerrainVersion(land, st.edits);
+    if (st.table.Size() > kHardCapEntries)
+        st.table.Sweep(st.frameNo, 2);
+    else if ((st.frameNo & 63) == 0)
+        st.table.Sweep(st.frameNo, kMaxAgeFrames);
+}
+} // namespace LandFit
+
 void Object::Animate(int level)
 {
     Shape* shape = _shape->Level(level);
@@ -382,6 +616,7 @@ void Object::Animate(int level)
     }
     else if ((shape->GetOrHints() & (ClipLandKeep | ClipLandOn)) && GLOB_LAND)
     {
+        LandFit::Stats().fits++;
         // save original position
         shape->SaveOriginalPos();
         Matrix4Val toWorld = Transform();
@@ -435,6 +670,19 @@ void Object::Animate(int level)
 
 void Object::AnimatedMinMax(int level, Vector3* minMax)
 {
+    // W1-9: a land-following plain object's fitted bounds are kept with its fit
+    {
+        Shape* shape = GetShape()->Level(level);
+        if (LandFit::Cacheable(*this, shape))
+        {
+            if (const LandFit::FitPayload* fit = LandFit::ForBounds(*this, level, shape))
+            {
+                minMax[0] = fit->minMax[0];
+                minMax[1] = fit->minMax[1];
+                return;
+            }
+        }
+    }
     // default implementation - slow, but robust
     Animate(level);
 
@@ -915,16 +1163,37 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         return;
     }
 
+    // W1-9: a land-following plain object drawn through the vertex buffer
+    // draws its own fitted copy, fitted once (LandFitCache.hpp), instead of
+    // refitting the shared level and re-uploading it on every draw.
+    const LandFit::FitPayload* fit = nullptr;
+    if (LandFit::Cacheable(*this, sShape) &&
+        LandFit::DrawsFromVertexBuffer(*sShape, clipFlags, sShape->Special() | GetObjSpecial()))
+    {
+        fit = LandFit::ForDraw(*this, forceLOD, sShape);
+    }
+
     // test if reference points to valid object
     // get object position in clipping coordinates
-    Animate(forceLOD);
+    if (!fit)
+    {
+        Animate(forceLOD);
+    }
 
     if (clipFlags)
     {
         // try to clip bounding sphere
         Vector3 bCenter;
         float bRadius;
-        AnimatedBSphere(forceLOD, bCenter, bRadius, true);
+        if (fit)
+        {
+            bCenter = fit->bCenter;
+            bRadius = fit->bRadius;
+        }
+        else
+        {
+            AnimatedBSphere(forceLOD, bCenter, bRadius, true);
+        }
 
         // note: this we may be inside of proxy object
         Vector3 bCenterW = pos.PositionModelToWorld(bCenter);
@@ -998,6 +1267,11 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             int specAdj = (special & ~OnSurface) | IsOnSurface;
             split->Draw(this, lights, clipFlags, specAdj, pos.Transform(), invTransform);
         }
+        else if (fit)
+        {
+            LandFit::ScopedDrawBuffer fitted(fit->buffer);
+            sShape->Draw(this, lights, clipFlags, special, pos.Transform(), invTransform);
+        }
         else
         {
             sShape->Draw(this, lights, clipFlags, special, pos.Transform(), invTransform);
@@ -1005,7 +1279,10 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
         GScene->SetConstantFog(-1);
     }
-    Deanimate(forceLOD);
+    if (!fit)
+    {
+        Deanimate(forceLOD);
+    }
 }
 
 int Object::GetProxyComplexity(int level, const FrameBase& pos, float dist2) const
