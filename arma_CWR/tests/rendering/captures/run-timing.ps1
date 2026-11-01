@@ -10,6 +10,12 @@
     a run that was not quiet shows it. Output: <OutRoot>\<stamp>-timing\ with
     the run-captures tree, gpu_samples.csv, timing.md and timing.json.
 
+    POSEIDON_OBSERVER_SAMPLE is set to 1 for the run by default (PERF-PLAN 2.5
+    and 3.3: the observer probe samples 1 frame in 16, as in every round-1 and M2
+    timing). The engine tests only that the variable is present
+    (WorldFrameObserver.cpp), so -NoObserverSample unsets it; it is never set to
+    0, which would still turn sampling on. The caller's value is restored after.
+
 .EXAMPLE
     powershell -NoProfile -File tests\rendering\captures\run-timing.ps1 -GameDir dist/x64-win-rwdi -DataJunction RemasterUD-timing
 #>
@@ -26,9 +32,14 @@ param(
     ),
     [string]$Tri = '',
     [string]$Python = 'python',
-    [int]$Seconds = 7200
+    [int]$Seconds = 7200,
+    [switch]$NoObserverSample
 )
 $ErrorActionPreference = 'Continue'
+$obsBefore = [Environment]::GetEnvironmentVariable('POSEIDON_OBSERVER_SAMPLE', 'Process')
+if ($NoObserverSample) { Remove-Item Env:\POSEIDON_OBSERVER_SAMPLE -ErrorAction SilentlyContinue }
+else { $env:POSEIDON_OBSERVER_SAMPLE = '1' }
+"observer sample: $(if ($NoObserverSample) { 'off (unset)' } else { 'on (POSEIDON_OBSERVER_SAMPLE=1)' })"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $engineRoot = (Resolve-Path (Join-Path $here '..\..\..')).Path
 $gitRoot = (Resolve-Path (Join-Path $engineRoot '..')).Path
@@ -56,4 +67,5 @@ New-Item -ItemType File -Force "$samples.stop" | Out-Null
 "slots after: " + ((& $Tri slots) -join ' | ') | Tee-Object -FilePath (Join-Path $out 'quiet.txt') -Append
 & $Python (Join-Path $here 'summarize_timing.py') $out --out (Join-Path $out 'timing.md') --json (Join-Path $out 'timing.json')
 "run-captures exit: $runExit; out: $out"
+[Environment]::SetEnvironmentVariable('POSEIDON_OBSERVER_SAMPLE', $obsBefore, 'Process')
 exit $runExit
