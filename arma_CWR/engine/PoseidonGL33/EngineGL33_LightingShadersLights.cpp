@@ -82,6 +82,9 @@ vec3 localLight(vec4 pos, vec4 color, vec3 amb, vec3 dir, vec3 n, vec3 kd, vec3 
 // This fragment's tile list, its kTileTexels (4) texels read once
 // (loadTileList), and entry k of it: a light index + 1, 0 past the last.
 uvec4 g_tileIds0 = uvec4(0u), g_tileIds1 = uvec4(0u), g_tileIds2 = uvec4(0u), g_tileIds3 = uvec4(0u);
+// The list's length as localLightsTiled read it (-1 before it has; the lamp
+// streaks reuse the list instead of reading it again).
+int g_tileCount = -1;
 
 int loadTileList() {
     ivec2 tile = ivec2(gl_FragCoord.xy) / int(litLightCount.y);
@@ -258,6 +261,7 @@ int g_combatHead = 0;
 
 vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
     int count = loadTileList();
+    g_tileCount = count;
     // The frame's combat lights lead its list and so every tile's
     // (FrameLights.hpp MergeCombatFrameLights): combatLights shades them, and
     // neither the classic budget nor the physical model sees them.

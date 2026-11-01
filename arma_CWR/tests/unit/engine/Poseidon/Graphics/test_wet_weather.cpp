@@ -504,10 +504,11 @@ TEST_CASE("Wet weather shaders: the sun's glint in the film is capped far below 
     CHECK(constant("kWetSunFoot") > 0.0f);
     CHECK(surface.find("float sunFoot = kWetSunFoot * length(fwidth(posAbs));") != std::string::npos);
     // Every sun lobe takes the sun's cap, every lamp lobe the lamps' (the tiled
-    // list's, the draw's own list's, and the combat lights').
+    // list's, the draw's own list's, and the combat lights', each at the film's
+    // and the puddle's roughness).
     CHECK(CountOf(surface, "wetLobe(litSunDir.xyz, 1e4, nf, v, nv, ") == 2);
     CHECK(CountOf(surface, ", kWetSunCap)") == 2);
-    CHECK(CountOf(surface, ", kWetSpecCap)") == 3);
+    CHECK(CountOf(surface, ", kWetSpecCap)") == 6);
     CHECK(surface.find("min(3.14159265 * D * vis * nl * norm, cap) * F") != std::string::npos);
 }
 
@@ -803,10 +804,13 @@ TEST_CASE("Wet weather shaders: only the puddles mirror; the ground around them 
     // and share (the sun's already did), a puddle keeps its sharp streak, and
     // the ground's sky reflection (while the trace does not run) is the
     // puddle's alone.
-    CHECK(surface.find("lit += wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough) *\n"
-                       "                   (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));") !=
+    // Both lobes come from one walk of the lights (wetLampStreaks' two sums).
+    CHECK(surface.find("wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough, pud.x < 1.0, "
+                       "kWetPuddleRough, pud.x > 0.0,") != std::string::npos);
+    CHECK(surface.find(
+              "if (pud.x < 1.0) lit += streakFilm * (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));") !=
           std::string::npos);
-    CHECK(surface.find("if (pud.x > 0.0) lit += wetLampStreaks(nf, v, kWetPuddleRough) * pud.x;") != std::string::npos);
+    CHECK(surface.find("if (pud.x > 0.0) lit += streakPuddle * pud.x;") != std::string::npos);
     CHECK(surface.find("vec2 ab = wetEnvBRDF(ground ? kWetPuddleRough : max(rough, kWetObjectSkyRough), nv);") !=
           std::string::npos);
     CHECK(surface.find("float F = (0.02 * ab.x + ab.y) * (ground ? pud.x : filmW) * up;") != std::string::npos);

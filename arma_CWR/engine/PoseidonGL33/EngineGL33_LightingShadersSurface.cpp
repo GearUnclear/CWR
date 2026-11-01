@@ -495,14 +495,25 @@ vec2 surfaceEnvBrdf(float rough, float nv) {
 // before the exposure): the lights of the tiled list (the physical lamps and
 // low beams at their physical intensity, the other kinds at their classic
 // value; the combat lights at the head of the list at their own linear
-// light, which no night factor scales), or the draw's own list.
-vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
-    vec3 sum = vec3(0.0);
-    vec3 combat = vec3(0.0);
+// light, which no night factor scales), or the draw's own list. Two lobes in
+// one walk of the lights: `streakA` at roughness `roughA` (the film's) when
+// `wantA`, `streakB` at `roughB` (the puddle's) when `wantB`; each light's
+// term is worked out once and each lobe sums into its own total in the order
+// one walk per lobe summed them. A light behind the surface (n.L <= 0, where
+// wetLobe is 0 for every roughness) adds nothing and is passed over before
+// its term. The tiled list is the one localLightsTiled read for this fragment
+// (g_tileCount; read again if it did not run).
+void wetLampStreaks(vec3 n, vec3 v, float roughA, bool wantA, float roughB, bool wantB, out vec3 streakA,
+                    out vec3 streakB) {
+    vec3 sumA = vec3(0.0);
+    vec3 sumB = vec3(0.0);
+    vec3 combatA = vec3(0.0);
+    vec3 combatB = vec3(0.0);
     float nv = clamp(dot(n, v), 1e-3, 1.0);
-    float a = max(rough * rough, 0.002);
+    float aA = max(roughA * roughA, 0.002);
+    float aB = max(roughB * roughB, 0.002);
     if (litLightCount.y > 0.5) {
-        int count = loadTileList();
+        int count = g_tileCount >= 0 ? g_tileCount : loadTileList();
         for (int k = 0; k < kMaxTileLights; ++k) {
             if (k >= count) break;
             int id = tileEntry(k);
@@ -513,14 +524,16 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
             float d2 = dot(toLight, toLight);
             float d = sqrt(max(d2, 1e-12));
             vec3 L = toLight / d;
+            if (dot(n, L) <= 0.0) continue;
             if (color.w > 1.5) {
                 // A combat light (combatLights' model, without its shadow).
                 float r2 = frameLights[at + 2].x * frameLights[at + 2].x;
                 if (d2 >= r2) continue;
                 float x = d2 / r2;
                 float win = (1.0 - x * x) * (1.0 - x * x);
-                combat += color.rgb * (win / (1.0 + d2 / max(pos.w * pos.w, 1e-4))) *
-                          wetLobe(L, d, n, v, nv, a, kWetSpecCap);
+                vec3 combat = color.rgb * (win / (1.0 + d2 / max(pos.w * pos.w, 1e-4)));
+                if (wantA) combatA += combat * wetLobe(L, d, n, v, nv, aA, kWetSpecCap);
+                if (wantB) combatB += combat * wetLobe(L, d, n, v, nv, aB, kWetSpecCap);
                 continue;
             }
             bool spot = color.w > 0.5;
@@ -547,9 +560,12 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
                 float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
                 light = toLinear(min(color.rgb * (atten * litGround.w), vec3(1.5)));
             }
-            sum += light * wetLobe(L, d, n, v, nv, a, kWetSpecCap);
+            if (wantA) sumA += light * wetLobe(L, d, n, v, nv, aA, kWetSpecCap);
+            if (wantB) sumB += light * wetLobe(L, d, n, v, nv, aB, kWetSpecCap);
         }
-        return sum * litLightCount.z + combat;
+        streakA = sumA * litLightCount.z + combatA;
+        streakB = sumB * litLightCount.z + combatB;
+        return;
     }
     int count = int(litLightCount.x);
     for (int i = 0; i < 8; ++i) {
@@ -566,11 +582,16 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
             if (inside <= 0.0) continue;
             cone = smoothstep(0.9415, 0.9806, inside * inside / max(d2, 1e-6));
         }
-        float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
         float d = sqrt(max(d2, 1e-12));
-        sum += toLinear(min(litLightColor[i].rgb * (atten * litGround.w), vec3(1.5))) * wetLobe(toLight / d, d, n, v, nv, a, kWetSpecCap);
+        vec3 L = toLight / d;
+        if (dot(n, L) <= 0.0) continue;
+        float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
+        vec3 light = toLinear(min(litLightColor[i].rgb * (atten * litGround.w), vec3(1.5)));
+        if (wantA) sumA += light * wetLobe(L, d, n, v, nv, aA, kWetSpecCap);
+        if (wantB) sumB += light * wetLobe(L, d, n, v, nv, aB, kWetSpecCap);
     }
-    return sum;
+    streakA = sumA;
+    streakB = sumB;
 }
 
 // The wet response of one lit fragment, called by shadeRemastered while
@@ -674,10 +695,11 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
     // a streak: the ground around it takes the broad, dim glint of its grit
     // (kWetSunGroundRough, kWetSunGroundFilm), as for the sun.
     if (litMatClass.z > 0.5) {
-        if (pud.x < 1.0)
-            lit += wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough) *
-                   (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));
-        if (pud.x > 0.0) lit += wetLampStreaks(nf, v, kWetPuddleRough) * pud.x;
+        vec3 streakFilm, streakPuddle;
+        wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough, pud.x < 1.0, kWetPuddleRough, pud.x > 0.0,
+                       streakFilm, streakPuddle);
+        if (pud.x < 1.0) lit += streakFilm * (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));
+        if (pud.x > 0.0) lit += streakPuddle * pud.x;
     }
     // The sky in the film: objects always (weaker: rain beads on them); the
     // ground only while the reflections' pass does not reflect it (it then
