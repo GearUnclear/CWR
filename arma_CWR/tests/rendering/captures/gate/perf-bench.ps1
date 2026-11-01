@@ -472,7 +472,9 @@ if ($recDumps.Count) {
         $bDir = ($plan.boots | Where-Object { $_.side -eq 'B' } | Select-Object -First 1).boot_dir
         $noise = if ($o.noise) { $o.noise } else { Join-Path $PSScriptRoot 'noise\m2-scratch-afdb4d6-p5-reset.json' }
         $va = @('-I', (Join-Path $PSScriptRoot 'vgate.py'), 'compare', $aDir, $bDir, '--claim', $o.claim, '--noise', $noise,
-            '--out', (Join-Path $o.out 'vgate'), '--seed', '1', '--expect-differ')
+            '--out', (Join-Path $o.out 'vgate'), '--seed', '1')
+        # A same-exe job (expect_differ false, e.g. one build with a switch on vs off) must not ask vgate to refuse equal hashes.
+        if ($null -eq $o.expectdiffer -or [bool]$o.expectdiffer) { $va += '--expect-differ' }
         if ($o.strictcounts) { $va += '--strict-counts' }
         $heavy = Join-Path $script:SquadRoot 'bin\squad-heavy.ps1'
         & powershell -NoProfile -ExecutionPolicy Bypass -File $heavy -Kind analysis -Id ($(if ($env:SQUAD_JOB_FILE) { Split-Path -Leaf $env:SQUAD_JOB_FILE } else { 'perf-bench' }) -replace '\.json$', '') -Agent perf-bench -- $tools.python @va 2>&1 |
