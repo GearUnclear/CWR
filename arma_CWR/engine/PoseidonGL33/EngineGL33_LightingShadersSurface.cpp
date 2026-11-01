@@ -134,6 +134,10 @@ float puddleHeight(vec2 xz) {
 // veg the grass share (0..1), level the puddle level (litWeather.z).
 vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
     if (level <= 0.0) return vec2(0.0);
+    // The far fade first: where it is 0 (from kPuddleFadeEnd on) the result is
+    // 0 whatever the noise and the height map say, so they are not read.
+    float fade = 1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz));
+    if (fade <= 0.0) return vec2(0.0);
     float o2 = mix(0.5, puddleNoise(posW.xz / 1.3 + 17.0), clamp(1.3 / (3.0 * footT), 0.0, 1.0));
     float o3 = mix(0.5, puddleNoise(posW.xz / 0.45 + 41.0), clamp(0.45 / (3.0 * footT), 0.0, 1.0));
     float field = puddleNoise(posW.xz / 3.5) * 0.55 + o2 * 0.3 + o3 * 0.15;
@@ -154,7 +158,7 @@ vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
     // toward bare ground's (veg squared), so a mixed square holds about the
     // puddles its bare and grassy parts would hold apart.
     float th = mix(mix(kPuddleGround, kPuddleRoad, road) - kPuddleMore, kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);
-    float keep = flatness * min(level * 4.0, 1.0) * (1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz)));
+    float keep = flatness * min(level * 4.0, 1.0) * fade;
     return vec2(smoothstep(th, th + kPuddleEdge, field), smoothstep(th - kPuddleDamp, th, field)) * keep;
 }
 )";
