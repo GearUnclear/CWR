@@ -929,8 +929,20 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     // Leaves (not grass, which shades as terrain) lift their lookup toward the
     // sun: treeShadows' cure for the stripes a two-sided card casts on itself.
     float leafLift = (foliage && !terrain) ? litPcss.w : 0.0;
-    float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift) *
-                          terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+    bool surf = litSurface.x > 0.5;
+    bool relief = surf && !foliage && dot(g_surfBumpN, g_surfBumpN) > 0.5;
+    // A receiver that faces away from the sun takes none of it on a dry frame
+    // (not a leaf, no forced diffuse, no relief normal turned toward the sun,
+    // not the sun-visibility debug view): every use of sunVisibility below is
+    // then times a term that is exactly 0 (sunTerm, the GGX and gloss lobes'
+    // n.l), so the shadow map's taps are skipped. Wet frames keep them (a
+    // puddle's level normal can face the sun on ground that does not).
+    bool sunHidden = !foliage && all(equal(litMatForced.rgb, vec3(0.0))) && dot(n, l) <= 0.0 &&
+                     !(relief && dot(g_surfBumpN, l) > 0.0) && litWeather.x <= 0.0 && litWeather.z <= 0.0 &&
+                     !(litFlags.z > 0.5 && litFlags.z < 1.5);
+    float shadowVis = 1.0;
+    if (!sunHidden) shadowVis = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift);
+    float sunVisibility = shadowVis * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
     // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
     sunVisibility *= canopySunVisibility(posAbs);
     g_sunVisibility = sunVisibility;
@@ -948,8 +960,6 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     // kSurfReliefSunLimit of it, faces turned from the sun stay unlit), the
     // sky light from the sky table's spherical harmonics and the sky the
     // canopy hides.
-    bool surf = litSurface.x > 0.5;
-    bool relief = surf && !foliage && dot(g_surfBumpN, g_surfBumpN) > 0.5;
     if (relief)
         sunTerm = nl + clamp(dot(g_surfBumpDelta, l), -kSurfReliefSunLimit * nl, kSurfReliefSunLimit * nl);
     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
