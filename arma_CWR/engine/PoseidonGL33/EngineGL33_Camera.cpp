@@ -28,6 +28,8 @@
 #include <PoseidonGL33/EngineGL33_PostPass.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
+#include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -93,6 +95,7 @@ bool EngineGL33::CameraWanted() const
 
 void EngineGL33::UpdateCameraFrame(const rm::LightRig& rig, bool atmosphereOn)
 {
+    ApplyTemporalReset(); // P0-6: a triResetTemporal request, once (no-op in play)
     CameraState& c = _camera;
     const bool on =
         rig.physical && _featureGates.computed && _featureGates[rm::Feature::PhotoLight].on && CameraWanted();
@@ -184,15 +187,28 @@ void EngineGL33::CameraAdapt()
     bool fresh = false;
     std::uint32_t freshFrame = 0;
     int newest = -1;
+    const bool deterministic = rm::TemporalDeterministic();
     for (int k = 0; k < CameraState::kRing; ++k)
     {
         const int i = (c.next + k) % CameraState::kRing;
         if (!c.fence[i])
             continue;
         GLsync sync = static_cast<GLsync>(c.fence[i]);
-        const GLenum st = glClientWaitSync(sync, 0, 0);
-        if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED)
-            break;
+        if (deterministic)
+        {
+            // P0-6 deterministic mode: every meter at least
+            // kDeterministicReadbackLag frames old, waited for when the GPU is
+            // behind; the younger ones stay in flight whether or not they
+            // have arrived, so the meter read never depends on GPU time.
+            if (!rm::DeterministicReadbackDue(c.pboFrame[i], GetFrameCounter()) || !WaitFenceDeterministic(sync))
+                break;
+        }
+        else
+        {
+            const GLenum st = glClientWaitSync(sync, 0, 0);
+            if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED)
+                break;
+        }
         glDeleteSync(sync);
         c.fence[i] = nullptr;
         newest = i;
@@ -239,8 +255,10 @@ void EngineGL33::CameraAdapt()
     const float ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
     c.cpuCollectMs += (ms - c.cpuCollectMs) * 0.05f;
     const double now = NowSeconds();
-    const float dt = c.lastStep < 0.0 ? 0.0f : static_cast<float>(std::min(std::max(now - c.lastStep, 0.0), 0.25));
+    float dt = c.lastStep < 0.0 ? 0.0f : static_cast<float>(std::min(std::max(now - c.lastStep, 0.0), 0.25));
     c.lastStep = now;
+    if (deterministic)
+        dt = rm::DeterministicAdaptStep(Poseidon::FixedSimStep()); // P0-6: the fixed step, not the wall clock
     if (c.meter.valid)
         c.targetLog2 =
             rm::TargetExposureLog2(c.meter, c.nightEffect, _lighting, c.duskEffect, c.duskKeep, c.timeEv, c.veil);
@@ -251,6 +269,13 @@ void EngineGL33::CameraAdapt()
             c.exposureLog2 = c.targetLog2;
             c.snap = false;
             c.adapted = true;
+            // P0-6: after a triResetTemporal the histories start again from
+            // this frame, the first one shown at the snapped exposure.
+            if (_temporalDet.redropOnSnap)
+            {
+                _temporalDet.redropOnSnap = false;
+                DropTemporalHistories();
+            }
         }
         return;
     }

@@ -299,14 +299,27 @@ void EngineGL33::ReadSsrShares()
     SsrTargets& s = _ssr;
     // Every measurement the GPU has finished, oldest first (never waited on):
     // the next slot to write holds the oldest.
+    const bool deterministic = rm::TemporalDeterministic();
     for (int k = 0; k < SsrTargets::kRing; ++k)
     {
         const int i = (s.ringNext + k) % SsrTargets::kRing;
         if (!s.fence[i])
             continue;
-        const GLenum r = glClientWaitSync(s.fence[i], 0, 0);
-        if (r != GL_ALREADY_SIGNALED && r != GL_CONDITION_SATISFIED)
-            continue;
+        if (deterministic)
+        {
+            // P0-6 deterministic mode: every measurement at least
+            // kDeterministicReadbackLag frames old, waited for when the GPU is
+            // behind; the younger ones stay in flight whether or not they
+            // have arrived, so the shares never depend on GPU time.
+            if (!rm::DeterministicReadbackDue(s.pboFrame[i], GetFrameCounter()) || !WaitFenceDeterministic(s.fence[i]))
+                break;
+        }
+        else
+        {
+            const GLenum r = glClientWaitSync(s.fence[i], 0, 0);
+            if (r != GL_ALREADY_SIGNALED && r != GL_CONDITION_SATISFIED)
+                continue;
+        }
         std::uint8_t cells[rm::kSsrShareW * rm::kSsrShareH * 4];
         glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo[i]);
         glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, sizeof(cells), cells);

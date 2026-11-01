@@ -47,6 +47,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <Poseidon/Graphics/Remaster/Wetness.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
@@ -1528,6 +1529,24 @@ class EngineGL33 : public Engine
         float drift[2] = {0.0f, 0.0f};
         float driftTime = -1.0f;
     } _fog;
+    // P0-6 temporal determinism (Graphics/Remaster/TemporalDeterminism.hpp,
+    // the tri verbs triResetTemporal and triDeterministic;
+    // EngineGL33_PostTemporal.cpp): the last reset request applied, the frame
+    // it applied at (the reflections' probe frames count from it in
+    // deterministic mode), and whether the histories are dropped once more
+    // when the camera's snap lands.
+    struct TemporalDetState
+    {
+        Poseidon::remaster::TemporalResetLatch latch;
+        std::uint32_t frameBase = 0;
+        bool redropOnSnap = false;
+    } _temporalDet;
+    // Applies a new reset request once, at the first of the frame's passes
+    // that reads temporal state (ApplyTaaJitter, UpdateCameraFrame,
+    // EndWorldScene); a no-op otherwise.
+    void ApplyTemporalReset();
+    // Drops the TAA, fog and surface-occlusion histories.
+    void DropTemporalHistories();
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }

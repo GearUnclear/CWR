@@ -740,7 +740,15 @@ void EngineGL33::PostFog(const PostFrame& f)
     float drift[2] = {_fog.drift[0], _fog.drift[1]};
     {
         const float now = Glob.time.toFloat();
-        if (_fog.driftTime >= 0.0f)
+        float held[2];
+        if (rm::TemporalMistHeld(held[0], held[1]))
+        {
+            // P0-6: held for captures (triResetTemporal [x, z]); a release
+            // drifts on from here.
+            drift[0] = held[0];
+            drift[1] = held[1];
+        }
+        else if (_fog.driftTime >= 0.0f)
         {
             const float dt = std::clamp(now - _fog.driftTime, 0.0f, 0.5f);
             Landscape* land = GScene->GetLandscape();

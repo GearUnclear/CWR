@@ -494,6 +494,7 @@ void EngineGL33::PostFrameSun(PostFrame& f) const
 
 void EngineGL33::EndWorldScene()
 {
+    ApplyTemporalReset(); // P0-6: a triResetTemporal request, once (no-op in play)
     // Only the frame that actually drew the world through the remastered
     // shaders has a sky light share in its alpha and a world depth buffer.
     const bool worldDrawn = _worldPassOpen;
@@ -585,9 +586,10 @@ void EngineGL33::EndWorldScene()
     in.ssrTags = _ssrTagFrame == GetFrameCounter() && rm::FeatureOn(_lighting.features, rm::Feature::Ssr);
     in.ssr = in.ssrTags && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
              _featureGates[rm::Feature::Ssr].on;
-    in.ssrTags =
-        in.ssrTags && (in.ssr || GetFrameCounter() % static_cast<std::uint32_t>(rm::kSsrShareProbeFrames) == 0 ||
-                       in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
+    in.ssrTags = in.ssrTags && (in.ssr ||
+                                rm::SsrShareProbeDue(GetFrameCounter(), _temporalDet.frameBase,
+                                                     rm::kSsrShareProbeFrames, rm::TemporalDeterministic()) ||
+                                in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
     // The combat shadow mask of the next frame traces through this frame's
     // linear depth.
     in.combatMask = combatWasActive && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&

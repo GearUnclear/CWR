@@ -339,6 +339,7 @@ GameValue TriAssertPixelDarkerThan(const GameState*, GameValuePar);
 // TriAssert*/TriGet* families directly.  Their own INIT_MODULEs register the verbs.
 void EnsureGameStateExtTestGenericLinked();
 void EnsureGameStateExtTestGettersLinked();
+void EnsureGameStateExtTestDeterminismLinked(); // P0-6: triResetTemporal, triSeedRandom, triDeterministic
 
 // Audio test surface — direct GSoundsys read/write so tests can verify
 // AudioPage's UI plumbing without scraping rendered text.
@@ -3491,4 +3492,5 @@ INIT_MODULE(GameStateExtTest, 3)
     // link graph; their own INIT_MODULEs register the actual verbs.
     EnsureGameStateExtTestGenericLinked();
     EnsureGameStateExtTestGettersLinked();
+    EnsureGameStateExtTestDeterminismLinked();
 };
