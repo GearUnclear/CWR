@@ -397,8 +397,17 @@ void EngineGL33::EndDebugGroup()
     }
 }
 
+// The pass groups only serve a capture tool, and with the synchronous debug
+// callback every push and pop is a callback round trip, several per frame. So
+// they are emitted only with RenderDoc attached or POSEIDON_GL_DEBUG_GROUPS set
+// (Nsight, apitrace); Init3DState decides (perf W1-6, S3-29a). No GL state a
+// draw reads depends on them.
+static bool s_passDebugGroups = false;
+
 void EngineGL33::SwitchPassDebugGroup(const char* name)
 {
+    if (!s_passDebugGroups)
+        return;
     if (_passDebugGroupOpen)
     {
         EndDebugGroup();
@@ -569,6 +578,7 @@ void EngineGL33::Init3DState()
     // its DLL preloaded).  No-op otherwise — capture entry points
     // become silent no-ops and the trigger CLI flag becomes inert.
     RdcCapture::Init();
+    s_passDebugGroups = RdcCapture::Available() || std::getenv("POSEIDON_GL_DEBUG_GROUPS") != nullptr;
 
     DoEnableDetailTexGen(IsIn3DPass() ? TGNone : TGFixed, false);
 

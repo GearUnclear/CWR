@@ -359,8 +359,15 @@ int TextBankGL33::FreeTextureMemory()
         return static_cast<int>(available);
     };
 
+    if (!_memInfoExtKnown)
+    {
+        _hasNvxMemInfo = HasGlExtension("GL_NVX_gpu_memory_info");
+        _hasAtiMemInfo = HasGlExtension("GL_ATI_meminfo");
+        _memInfoExtKnown = true;
+    }
+
     // Try GL_NVX_gpu_memory_info (NVIDIA)
-    if (HasGlExtension("GL_NVX_gpu_memory_info"))
+    if (_hasNvxMemInfo)
     {
         GLint totalMemKB = 0;
         glGetIntegerv(0x9048, &totalMemKB); // GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX
@@ -373,7 +380,7 @@ int TextBankGL33::FreeTextureMemory()
     }
 
     // Try GL_ATI_meminfo (AMD)
-    if (HasGlExtension("GL_ATI_meminfo"))
+    if (_hasAtiMemInfo)
     {
         GLint atiInfo[4] = {};
         glGetIntegerv(0x87FC, atiInfo); // TEXTURE_FREE_MEMORY_ATI

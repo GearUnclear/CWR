@@ -330,9 +330,11 @@ void EngineGL33::PrepareTriangleTL(const MipInfo& mip, const Poseidon::render::L
     TextureGL33* tex = reinterpret_cast<TextureGL33*>(mip._texture);
     int level = mip._level;
     PassId passId = SpecToPassId(spec);
-    LOG_DEBUG(Graphics, "GL33: PrepareTriangleTL spec=0x{:x} tex={} level={} passId={} vs={} in3D={}",
-              Poseidon::render::MergeLegacy(spec), tex ? tex->GetHandle() : 0, level, static_cast<int>(passId),
-              static_cast<int>(_vertexShaderSel), IsIn3DPass());
+    // Per draw: skip the argument work too unless debug logging is on (S3-29a).
+    if (LogDetail::Get(Poseidon::Foundation::LogCategory::Graphics)->should_log(spdlog::level::debug))
+        LOG_DEBUG(Graphics, "GL33: PrepareTriangleTL spec=0x{:x} tex={} level={} passId={} vs={} in3D={}",
+                  Poseidon::render::MergeLegacy(spec), tex ? tex->GetHandle() : 0, level, static_cast<int>(passId),
+                  static_cast<int>(_vertexShaderSel), IsIn3DPass());
     ApplyPassState(tex, level, spec, passId, PipelineVertexInput::Mesh);
 }
 

@@ -291,6 +291,13 @@ class TextBankGL33 : public AbstractTextBank
     int _loadBoostFrames = 0; // frames left with the mip-upload budget lifted
     int _thisFrameAlloc;
 
+    // The memory-info extensions, looked up once (perf W1-6, S9-10a): a GL
+    // context's extension list never changes, and the bank lives inside one
+    // context, so FreeTextureMemory no longer walks the list every frame.
+    bool _memInfoExtKnown = false;
+    bool _hasNvxMemInfo = false;
+    bool _hasAtiMemInfo = false;
+
   public:
     TextBankGL33(EngineGL33* engine);
     ~TextBankGL33() override;

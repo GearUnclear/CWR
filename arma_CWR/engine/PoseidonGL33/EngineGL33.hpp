@@ -1839,7 +1839,9 @@ class EngineGL33 : public Engine
     // Remastered foliage: crown ellipsoid of the shape about to draw. Writes VS
     // slots 22-23 only when the value changes.
     void UploadVSCrown(const float center[3], const float invHalf[3]);
-    void UploadVSMaterialConstants(const Poseidon::TLMaterial& mat, bool sunEnabled);
+    // flush false: the caller flushes the VS block itself before the next draw
+    // (DoSetMaterial, whose UploadVSLights always does; perf W1-6, S3-23).
+    void UploadVSMaterialConstants(const Poseidon::TLMaterial& mat, bool sunEnabled, bool flush = true);
     void UploadVSLights(const LightList& lights, const Poseidon::TLMaterial& mat, float nightEffect);
     void UploadVSTexGenConstants(TexGenMode mode);
     void SetShaderFogEnabled(bool enabled);

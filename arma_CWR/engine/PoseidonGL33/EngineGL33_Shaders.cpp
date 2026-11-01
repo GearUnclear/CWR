@@ -798,6 +798,12 @@ static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;
 static GLuint s_psUBO = 0;
+// What slot 0 of s_worldUBO holds (perf W1-6, S3-22): the world matrix goes
+// out once per object and again per section with the same bytes, so
+// UploadVSWorldMatrix skips an upload that would not change the buffer. Every
+// write to s_worldUBO records itself here; a new or deleted buffer is unknown.
+static float s_worldSlot0[16] = {};
+static bool s_worldSlot0Known = false;
 // What s_vsUBO holds: every write below records itself here (a new buffer
 // starts unknown, InitVertexShaders).
 static Poseidon::gpu::UboMirror s_vsMirror;
@@ -915,6 +921,7 @@ void EngineGL33::InitVertexShaders()
     glBindBuffer(GL_UNIFORM_BUFFER, s_worldUBO);
     glBufferData(GL_UNIFORM_BUFFER, 256 * 64, nullptr, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 2, s_worldUBO);
+    s_worldSlot0Known = false; // created without contents
 
     _vertexShaderSel = VSNone;
 }
@@ -954,6 +961,7 @@ void EngineGL33::DeinitVertexShaders()
         glDeleteBuffers(1, &s_worldUBO);
         s_worldUBO = 0;
     }
+    s_worldSlot0Known = false;
 }
 
 void EngineGL33::ReloadShadersNow()
@@ -1230,6 +1238,8 @@ void EngineGL33::UploadWorldInstances(const float* matrices, int count)
         count = 256;
     glBindBuffer(GL_UNIFORM_BUFFER, s_worldUBO);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, count * 64, matrices);
+    memcpy(s_worldSlot0, matrices, 64); // slot 0 is the first matrix
+    s_worldSlot0Known = true;
 }
 
 void EngineGL33::UploadVSCrown(const float center[3], const float invHalf[3])
@@ -1250,8 +1260,13 @@ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
     // the VSConstants world member stays as std140 padding.
     if (s_worldUBO)
     {
+        // Slot 0 already holds these bytes: the upload would change nothing.
+        if (s_worldSlot0Known && memcmp(s_worldSlot0, worldMatrix, 64) == 0)
+            return;
         glBindBuffer(GL_UNIFORM_BUFFER, s_worldUBO);
         glBufferSubData(GL_UNIFORM_BUFFER, 0, 64, worldMatrix);
+        memcpy(s_worldSlot0, worldMatrix, 64);
+        s_worldSlot0Known = true;
         return;
     }
     // Per-draw path: only the world matrix changed — upload its 64 bytes
@@ -1263,7 +1278,7 @@ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
     UploadVSSlots(VSConst::SlotWorld, 4);
 }
 
-void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnabled)
+void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnabled, bool flush)
 {
     LightSun* sun = GScene->MainLight();
 
@@ -1284,7 +1299,8 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
 
     memcpy(s_vsShadow + VSConst::SlotSpecular * 4, spec, 16);
     memcpy(s_vsShadow + VSConst::SlotSpecEn * 4, specEn, 16);
-    FlushVSConstants();
+    if (flush)
+        FlushVSConstants();
     UploadLitMaterial(mat);
 }
 

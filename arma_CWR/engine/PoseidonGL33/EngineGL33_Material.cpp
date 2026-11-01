@@ -65,7 +65,9 @@ void EngineGL33::DoSetMaterial(const TLMaterial& mat, const LightList& lights, c
 
     PROFILE_DX_SCOPE(3mat);
 
-    UploadVSMaterialConstants(mat, _sunEnabled);
+    // One VS flush for the material and its lights: UploadVSLights below
+    // always flushes, and nothing draws in between (perf W1-6, S3-23).
+    UploadVSMaterialConstants(mat, _sunEnabled, false);
 
     // Local lights illuminate geometry only at night; DisableSun materials
     // (which the legacy SetupLights forced to full night) always receive them.
