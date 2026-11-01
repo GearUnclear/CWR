@@ -51,12 +51,30 @@ CLIPS = {
     "valley_mist_hold": dict(view="valley_0515", keys=[(0, 0, 0, 0, 0, 0, 0)], hold=8.0),
     # a short walk toward the forest edge (LOD, foliage)
     "forest_edge_walk": dict(view="forest_edge_golden", keys=[(0, 0, 0, 0, 0, 0, 0), (12, 0, 0, 18, 0, 0, 1)], hold=0.5),
+    # particles (W4-1 decal batching): the night combat staging (burning Ural 36 m ahead and 13 m
+    # right, camp fire 21 m ahead and 12 m left, posed infantry), a slow pan left with a 2 degree
+    # lift so both smoke columns cross the frame and overlap; at the end the Ural sits about 36
+    # degrees right of centre, inside the 16:9 half width of about 43 at fov 0.7
+    "combat_smoke_pan": dict(view="combat_fires", keys=[(0, 0, 0, 0, 0, 0, 0), (10, 0, 0, 0, -16, 2.0, 1)], hold=0.5),
+    # particles in rain (W4-1): the wet town at night, the fire 9.5 m ahead (18 degrees right at
+    # the start) and the lamps' flares; a pan right with a 2 m step east for parallax through the
+    # smoke, ending with the fire about 6 degrees left of centre
+    "town_rain_smoke_pan": dict(view="town_night_rain", keys=[(0, 0, 0, 0, 0, 0, 0), (9.5, 2.0, 0, 0, 12, 0, 1)], hold=0.5),
 }
 DEFAULT_CLIPS = ["valley_foliage_pan"]
+# the burning-vehicle refresh of golden_views.COMBAT (gen_golden.LIB): written into a world file only
+# when one of its clips' views calls it
+LIB_BURN = ("capBurn = { if (not (isNull capFire)) then { capFire inflame true }; "
+            "if (not (isNull capBurnV)) then { capBurnV inflame true } }")
 
 
 def clip_frames(c):
     return int(round((c["keys"][-1][0] + c["hold"]) * FPS))
+
+
+def offset(v):
+    # "+ 4" or "- 16": a binary minus, never "+ -16" (no unary minus right after an operator in the test SQF)
+    return f"- {-v:g}" if v < 0 else f"+ {v:g}"
 
 
 def path_expr(c):
@@ -64,7 +82,7 @@ def path_expr(c):
     for k in c["keys"]:
         t, dx, dy, dz, dh, dp, ease = k
         # triCamPath keys: [t, east, upASL, north, heading, pitch, ease]; the view's own camera from capPin
-        ks.append(f"[{t:g}, capOX + {dx:g}, capEyeASL + {dy:g}, capOZ + {dz:g}, capH + {dh:g}, capP + {dp:g}, {ease}]")
+        ks.append(f"[{t:g}, capOX {offset(dx)}, capEyeASL {offset(dy)}, capOZ {offset(dz)}, capH {offset(dh)}, capP {offset(dp)}, {ease}]")
     return "[" + ", ".join(ks) + "]"
 
 
@@ -118,6 +136,9 @@ def main():
     by_world = {}
     for n in names:
         by_world.setdefault(gv.world_of(CLIPS[n]["view"]), []).append(n)
+    # dry clips first, rain clips last in each island session, as gen_golden orders its views (P0-17)
+    for w in by_world:
+        by_world[w].sort(key=lambda n: gv.is_rain(CLIPS[n]["view"]))
     plan = dict(set="motion", clips={n: dict(CLIPS[n], frames=clip_frames(CLIPS[n]), world=gv.world_of(CLIPS[n]["view"]))
                                      for n in names},
                 modes=modes, labels={n: {m: label_of(n, m) for m in modes} for n in names}, fps=FPS, step=STEP,
@@ -137,6 +158,8 @@ def main():
         lines = [capgen.header(world, v0, title),
                  f'call {{ capStepRes = triSetFixedStep {STEP:.7f}; setAccTime 1; '
                  'format ["view=setup;event=step;res=%1", capStepRes] call capLog }']
+        if any("capBurn" in (gv.view(CLIPS[n]["view"]).get("refresh") or "") for n in clips):
+            lines.append(LIB_BURN)
         if o.fixed_settle:
             lines.append('call { capDetOn = triDeterministic true; format ["view=setup;event=det;deterministic=%1", capDetOn] call capLog }')
             lines.append(gatelib.fixed_settle_setup(o.fixed_settle, o.settle_wait_ms))
