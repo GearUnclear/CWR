@@ -3,12 +3,16 @@
 golden_views.EXTRA_TESTS). Writes one .test.sqf/.toml per island into a caller folder.
 
     python -I gen_golden.py --tier T1|T2 --out <dir> [--views v1,v2] [--has-reset] [--has-seed]
-                            [--has-deterministic] [--fixed-step] [--list]
+                            [--has-deterministic] [--fixed-step]
+                            [--fixed-settle N [--settle-wait-ms MS]] [--list]
 
 Determinism recipe per shot (3.3), with the verbs this dist has:
   pin camera, date, weather, view distance, props (capBegin), a pinned sim time per view;
   triPinObjectDetail 1, triSetLighting remastered, triSettleScene [300,30,2] (capMode; the
   comparator refuses UNSETTLED, the runner reshoots);
+  [--fixed-settle N] (GATE-2, needs --has-deterministic) instead exactly N settle frames: N - 30,
+  `triWait MS` (default 1000; no frame runs under the capture hold) and 30 that must be idle
+  (capModeTail), so the frame count before each shot does not follow the draw count;
   [--fixed-step] triSetFixedStep 1/60; triPinCloudDrift (capgen.begin);
   [--has-reset] triResetTemporal 1 (P0-6; M2's scratch build has it);
   [--has-seed] triSeedRandom 1; [--has-deterministic] triDeterministic true;
@@ -35,7 +39,7 @@ capBurn = { if (not (isNull capFire)) then { capFire inflame true }; if (not (is
 
 
 def shot_block(v, label, o, mode="remastered"):
-    out = [f'"{mode}" call capMode', "triSimFrames 60", "[] call capPin"]
+    out = gatelib.mode_lines(mode, o.fixed_settle, o.settle_wait_ms) + ["triSimFrames 60", "[] call capPin"]
     if v.get("refresh"):
         out.append(v["refresh"])
     # only verbs this dist has: an unknown verb is a script error under --autotest
@@ -58,8 +62,14 @@ def main():
     ap.add_argument("--has-seed", action="store_true")
     ap.add_argument("--has-deterministic", action="store_true")
     ap.add_argument("--fixed-step", action="store_true")
+    ap.add_argument("--fixed-settle", type=int, default=0, help="GATE-2: exactly N settle frames per mode (0: draw-count settle)")
+    ap.add_argument("--settle-wait-ms", type=int, default=1000, help="with --fixed-settle: runner-side pause before the last 30 frames")
     ap.add_argument("--list", action="store_true")
     o = ap.parse_args()
+    err = gatelib.fixed_settle_error(o.fixed_settle, o.settle_wait_ms, o.has_deterministic)
+    if err:
+        print(f"gen_golden: {err}")
+        return 2
     names = [n for n in (o.views.split(",") if o.views else (gv.T1 if o.tier == "T1" else gv.T2)) if n]
     names = [gv.resolve(n) for n in names]
     by_world = {}
@@ -70,6 +80,8 @@ def main():
     plan = dict(tier=o.tier, label=o.label, modes=o.modes.split(","), worlds={w: [v["name"] for v in vs] for w, vs in by_world.items()},
                 has_reset=o.has_reset, has_seed=o.has_seed, has_deterministic=o.has_deterministic, fixed_step=o.fixed_step,
                 extra_tests=gv.EXTRA_TESTS if o.tier == "T2" else {})
+    if o.fixed_settle:
+        plan.update(fixed_settle=o.fixed_settle, settle_wait_ms=o.settle_wait_ms)
     if o.list or not o.out:
         print(json.dumps(plan, indent=1))
         return 0
@@ -83,6 +95,8 @@ def main():
             lines.append('call { capDetOn = triDeterministic true; format ["view=setup;event=det;deterministic=%1", capDetOn] call capLog }')
         if o.fixed_step:
             lines.append('call { capStepRes = triSetFixedStep (1/60); format ["view=setup;event=step;res=%1", capStepRes] call capLog }')
+        if o.fixed_settle:
+            lines.append(gatelib.fixed_settle_setup(o.fixed_settle, o.settle_wait_ms))
         t = 100
         for v in vs:
             lines.append(f"\n// ---- {v['name']}")

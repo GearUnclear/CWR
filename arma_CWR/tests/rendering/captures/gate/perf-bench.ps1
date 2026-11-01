@@ -11,6 +11,7 @@
                    [-Cycles n] [-Env K=V,...] [-CandidateEnv K=V,...] [-BaselineEnv K=V,...]
                    [-Read auto|meas|ring] [-Junction <name> | -DataDir <path>] [-NoObserverSample]
                    [-QuietSec 30] [-MaxPauseMin 120] [-TimeoutSec 5400] [-DryRun]
+                   [-Settle auto|draws|<frames>] [-SettleWaitMs 1000]
     perf-bench.ps1 -Job <job.json>          (the runner's form; same fields, see interface.md)
     GNU-style spellings (--set quick --out D:\x) are accepted too.
 
@@ -34,6 +35,14 @@
     then stop-owned-games.ps1 -DataDir <our junction>. Before every boot: 30 s of quiet
     (Deadlock pauses the job, re-checked every 2 min, up to -MaxPauseMin); after the last boot
     one more probe.
+    Settle (GATE-2): in stills, counts and motion jobs whose every dist has triDeterministic,
+    -Settle auto (the default) gives each lighting mode exactly 300 settle frames (270, a
+    -SettleWaitMs runner-side pause under the capture hold for the worker-thread builds, 30 that
+    must be idle) instead of triSettleScene's steady draw count, so both sides shoot at the same
+    simulated frame whatever their draw counts; counts then also run with triDeterministic on and
+    the sim stepped at 1/60. -Settle draws keeps the draw-count settle, -Settle <n> sets the frame
+    count. Every other job (timed sets, a dist without triDeterministic) keeps the draw-count
+    settle. Job fields: settle, settle_wait_ms.
     Reading: -Read auto picks ring when every dist has triPerfRing and triGpuRing (a byte scan
     of PoseidonGame.exe), else meas (event=meas lines + triGpuTimes, the only reading on
     afdb4d60). Both sides always use the same reading; EMA and ring numbers are never mixed.
@@ -55,7 +64,7 @@ $o = @{ set = ''; out = ''; candidate = ''; baseline = ''; views = ''; rounds = 
     quietsec = 30; maxpausemin = 120; timeoutsec = 5400; dryrun = $false; job = ''; candidatelabel = 'candidate';
     baselinelabel = 'baseline'; tri = ''; python = ''; expectdiffer = $null; jobfile = ''; outdir = ''; foreignlog = '';
     shaderoverride = ''; shaderoverridebaseline = ''; modes = ''; claim = 'pit'; scale2 = $false; strictcounts = $false;
-    noise = ''; tier = 'T1' }
+    noise = ''; tier = 'T1'; settle = 'auto'; settlewaitms = '' }
 $switches = @('noobserversample', 'dryrun', 'scale2', 'strictcounts')
 function Read-Args([object[]]$argv) {
     $i = 0
@@ -84,7 +93,8 @@ $script:capScript = ''
 if ($o.job) {
     $j = Get-Content -Raw -LiteralPath $o.job | ConvertFrom-Json
     $map = @{ set = 'set'; views = 'views'; boots = 'boots'; cycles = 'cycles'; read = 'read'; data_dir = 'datadir';
-        quiet_sec = 'quietsec'; max_pause_min = 'maxpausemin'; timeout_sec = 'timeoutsec'; dry_run = 'dryrun'; expect_differ = 'expectdiffer' }
+        quiet_sec = 'quietsec'; max_pause_min = 'maxpausemin'; timeout_sec = 'timeoutsec'; dry_run = 'dryrun'; expect_differ = 'expectdiffer';
+        settle = 'settle'; settle_wait_ms = 'settlewaitms' }
     foreach ($k in $map.Keys) { if ($j.PSObject.Properties[$k] -and $null -ne $j.$k -and "$($j.$k)" -ne '') { if (-not $o[$map[$k]] -or $o[$map[$k]] -eq 'auto' -or $o[$map[$k]] -eq 2 -or $o[$map[$k]] -eq 0) { $o[$map[$k]] = $j.$k } } }
     if (-not $o.out -and $j.PSObject.Properties['out'] -and $j.out) { $o.out = if ([IO.Path]::IsPathRooted($j.out)) { $j.out } else { Join-Path $script:SquadRoot $j.out } }
     if ($j.PSObject.Properties['junction'] -and $j.junction -and -not $o.datadir) {
@@ -180,6 +190,20 @@ if ($twoSided -and $null -ne $o.expectdiffer -and [bool]$o.expectdiffer -and $in
 }
 Write-GateLog $log "read=$read config=$config verbs(all dists): $(($has.Keys | Sort-Object | ForEach-Object { "$_=$($has[$_])" }) -join ' ')"
 if ($mode -eq 'motion' -and -not $has.triRecord) { Stop-Unsupported 'motion clips need the P0-10 recorder (triRecord) in every dist of the job; build them with items\P0-10\patch.diff' }
+# GATE-2 fixed settle: deterministic stills, counts and motion only (see .DESCRIPTION, Settle)
+$fixedSettle = 0
+$settleWaitMs = if ("$($o.settlewaitms)" -ne '') { [int]$o.settlewaitms } else { 1000 }
+$settleSpec = ([string]$o.settle).ToLowerInvariant()
+if ($settleSpec -notmatch '^(auto|draws|\d+)$') { Write-GateLog $log "bad -Settle '$($o.settle)': auto, draws or a frame count"; exit 2 }
+$settleCan = [bool]$has.triDeterministic -and (@('stills', 'counts', 'motion') -contains $mode) -and -not $script:jobCommand
+if ($settleSpec -ne 'draws') {
+    if ($settleCan) { $fixedSettle = if ($settleSpec -eq 'auto') { 300 } else { [int]$settleSpec } }
+    elseif ($settleSpec -ne 'auto') { Write-GateLog $log "-Settle $settleSpec ignored: fixed settle needs a stills, counts or motion set and triDeterministic in every dist" }
+}
+$settleArgs = @()
+if ($fixedSettle) { $settleArgs = @('--fixed-settle', "$fixedSettle", '--settle-wait-ms', "$settleWaitMs") }
+$settleNote = if ($fixedSettle) { "fixed:$fixedSettle wait_ms:$settleWaitMs" } else { 'draws' }
+Write-GateLog $log "settle=$settleNote"
 
 # ------------------------------------------------------------------ data dir
 try { $dataDir = Resolve-DataDir -Junction $o.junction -DataDir $o.datadir -Tools $tools -NoCreate:([bool]$o.dryrun) }
@@ -198,6 +222,7 @@ function New-SetTests([string]$Dir, [string[]]$Extra) {
     if ($o.modes) { $ga += @('--modes', $o.modes) }
     if ($o.scale2) { $ga += '--scale2' }
     if ($has.triSetFpsCap) { $ga += '--has-fpscap' }
+    if ($fixedSettle -and $mode -eq 'counts') { $ga += @('--has-deterministic', '--fixed-step') + $settleArgs }
     Invoke-Gen $ga
     $pl = Get-ChildItem -LiteralPath $Dir -Filter '*.plan.json' | Select-Object -First 1
     return @((Get-Content -Raw -LiteralPath $pl.FullName | ConvertFrom-Json).files)
@@ -229,6 +254,7 @@ switch ($mode) {
         # with triDeterministic the sim clock must step at 1/60 too, or the sea, clouds and rain phase
         # follow real frame time (P0-6)
         if ($has.triDeterministic) { $ga += @('--has-deterministic', '--fixed-step') }
+        $ga += $settleArgs
         Invoke-Gen $ga
         $gp = Get-Content -Raw -LiteralPath (Get-ChildItem -LiteralPath $testsDir -Filter '*.plan.json' | Select-Object -First 1).FullName | ConvertFrom-Json
         $mainTests = @($gp.files)
@@ -242,6 +268,7 @@ switch ($mode) {
         if ($has.triResetTemporal) { $ga += '--has-reset' }
         if ($has.triSeedRandom) { $ga += '--has-seed' }
         if ($has.triDeterministic) { $ga += '--has-deterministic' }
+        $ga += $settleArgs
         Invoke-Gen $ga
         $gp = Get-Content -Raw -LiteralPath (Join-Path $testsDir 'motion.plan.json') | ConvertFrom-Json
         $mainTests = @($gp.files)
@@ -355,7 +382,7 @@ function Invoke-CaptureCommandBoot([string]$BootDir, [hashtable]$EnvMap) {
 # ------------------------------------------------------------------ run
 $plan = [ordered]@{ set = $(if ($mode -eq 'bootcache') { 'bootcache' } else { $o.set }); job_set = $o.set; read = $read; config = $config;
     timed = $timed; out = $o.out; views = $o.views; modes = $o.modes; data_dir = $dataDir; sides = $sideInfo; exe = $info; tools = $tools;
-    foreign_runner = $o.foreignlog; expected_windows = $expected; generator = $gp; dry_run = [bool]$o.dryrun;
+    foreign_runner = $o.foreignlog; expected_windows = $expected; generator = $gp; dry_run = [bool]$o.dryrun; settle = $settleNote;
     started = (Get-Date).ToString('o'); boots = @() }
 $contended = $false
 $k = 0

@@ -4,7 +4,8 @@ per lighting mode. Writes one .test.sqf/.toml per island into a caller folder pl
 motion.plan.json. Both sides of a job run the same files.
 
     python -I gen_motion.py --out <dir> [--clips c1,c2] [--modes remastered,classic]
-                            [--has-reset] [--has-seed] [--has-deterministic] [--list]
+                            [--has-reset] [--has-seed] [--has-deterministic]
+                            [--fixed-settle N [--settle-wait-ms MS]] [--list]
 
 Recipe per clip and mode (3.3's determinism recipe, adapted to a moving camera): stage the
 view (capgen.begin: camera, date, weather, view distance, props, the sim clock pinned per clip,
@@ -17,6 +18,11 @@ waits until the dump is written. The whole run steps the simulation by 1/60 s
 frame k of a clip shows the same simulated instant in every build and boot, and the camera
 path advances by one fixed step per frame. Every mode of a clip starts from the same pinned
 sim clock (capPin re-pins it), as P0-6's det1/det2 shots do.
+
+[--fixed-settle N] (GATE-2, needs --has-deterministic): triDeterministic is turned on at setup
+too, so the capture hold covers every clip's staging and settle, and capMode settles for exactly
+N frames (gatelib.mode_lines) instead of until the draw count is steady: each clip starts at the
+same simulated frame in both builds whatever their draw counts.
 
 Labels: "remastered" is <clip>__today, any other mode <clip>__<mode> (classic: the
 "Classic lighting on today's engine" row of the owner's three-way clip; never call it
@@ -69,7 +75,7 @@ def label_of(clip, mode):
 def clip_block(name, c, v, mode, o):
     lab = label_of(name, mode)
     n = clip_frames(c)
-    out = [f"\n// ---- {lab}: {n} frames", f'"{mode}" call capMode', "triSimFrames 60", "[] call capPin"]
+    out = [f"\n// ---- {lab}: {n} frames"] + gatelib.mode_lines(mode, o.fixed_settle, o.settle_wait_ms) + ["triSimFrames 60", "[] call capPin"]
     if v.get("refresh"):
         out.append(v["refresh"])
     if o.has_deterministic:
@@ -95,8 +101,14 @@ def main():
     ap.add_argument("--has-reset", action="store_true")
     ap.add_argument("--has-seed", action="store_true")
     ap.add_argument("--has-deterministic", action="store_true")
+    ap.add_argument("--fixed-settle", type=int, default=0, help="GATE-2: exactly N settle frames per mode (0: draw-count settle)")
+    ap.add_argument("--settle-wait-ms", type=int, default=1000, help="with --fixed-settle: runner-side pause before the last 30 frames")
     ap.add_argument("--list", action="store_true")
     o = ap.parse_args()
+    err = gatelib.fixed_settle_error(o.fixed_settle, o.settle_wait_ms, o.has_deterministic)
+    if err:
+        print(f"gen_motion: {err}")
+        return 2
     names = [n for n in (o.clips.split(",") if o.clips else DEFAULT_CLIPS) if n]
     unknown = [n for n in names if n not in CLIPS]
     if unknown:
@@ -110,6 +122,8 @@ def main():
                                      for n in names},
                 modes=modes, labels={n: {m: label_of(n, m) for m in modes} for n in names}, fps=FPS, step=STEP,
                 has_reset=o.has_reset, has_seed=o.has_seed, has_deterministic=o.has_deterministic, worlds=by_world)
+    if o.fixed_settle:
+        plan.update(fixed_settle=o.fixed_settle, settle_wait_ms=o.settle_wait_ms)
     if o.list or not o.out:
         print(json.dumps(plan, indent=1))
         return 0
@@ -123,6 +137,9 @@ def main():
         lines = [capgen.header(world, v0, title),
                  f'call {{ capStepRes = triSetFixedStep {STEP:.7f}; setAccTime 1; '
                  'format ["view=setup;event=step;res=%1", capStepRes] call capLog }']
+        if o.fixed_settle:
+            lines.append('call { capDetOn = triDeterministic true; format ["view=setup;event=det;deterministic=%1", capDetOn] call capLog }')
+            lines.append(gatelib.fixed_settle_setup(o.fixed_settle, o.settle_wait_ms))
         frames = 0
         for name in clips:
             c = CLIPS[name]

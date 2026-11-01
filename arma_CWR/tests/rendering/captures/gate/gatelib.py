@@ -78,6 +78,51 @@ def shot_key(name):
     return re.sub(r"^\d+_", "", base)
 
 
+# ---------------------------------------------------------------------------- fixed settle (GATE-2)
+# The draw-count settle (triSettleScene [300, 30, 2]) stops once 30 frames drew within 2% of
+# each other, so a change that moves the draw count (decal batching: combat_fires UNSETTLED:300
+# off, OK:106 on) is shot 100 to 200 simulated frames later or earlier than its baseline and
+# fires and smoke differ for that reason alone. The generators' --fixed-settle N writes
+# capture_lib's fixed settle instead: exactly N frames (N - tail, a runner-side `triWait`
+# under the capture hold for the worker-thread builds, the last `tail` frames, which must be
+# idle). It needs triDeterministic on from the setup: without the capture hold the main loop
+# keeps running frames of its own during the wait.
+
+FIXED_SETTLE_TAIL = 30  # capture_lib.sqf capSettleTail
+FIXED_SETTLE_MAX_WAIT_MS = 10000  # the capture hold lets go after 15 s without a tri command
+
+
+def fixed_settle_error(frames, wait_ms, has_deterministic):
+    """'' when --fixed-settle frames / --settle-wait-ms wait_ms can be used, else why not."""
+    if not frames:
+        return ""
+    if not has_deterministic:
+        return "--fixed-settle needs --has-deterministic (the capture hold keeps the loop's own frames off)"
+    if not FIXED_SETTLE_TAIL < frames <= 600 + FIXED_SETTLE_TAIL:
+        return f"--fixed-settle must be {FIXED_SETTLE_TAIL + 1} to {600 + FIXED_SETTLE_TAIL} frames"
+    if not 0 <= wait_ms <= FIXED_SETTLE_MAX_WAIT_MS:
+        return f"--settle-wait-ms must be 0 to {FIXED_SETTLE_MAX_WAIT_MS}"
+    return ""
+
+
+def fixed_settle_setup(frames, wait_ms):
+    """The setup statement that turns capture_lib's fixed settle on."""
+    return (f"call {{ capFixedSettle = {int(frames)}; capSettleWaitMs = {int(wait_ms)}; "
+            'format ["view=setup;event=fixedframes;frames=%1;tail=%2;wait_ms=%3", capFixedSettle, capSettleTail, '
+            "capSettleWaitMs] call capLog }")
+
+
+def mode_lines(mode, frames=0, wait_ms=0):
+    """The statements that put the view in a lighting mode: capMode alone (draw-count settle),
+    or with frames > 0 capMode, the wall-clock pause and capModeTail (fixed settle)."""
+    out = [f'"{mode}" call capMode']
+    if frames:
+        if wait_ms:
+            out.append(f"triWait {int(wait_ms)}")
+        out.append("[] call capModeTail")
+    return out
+
+
 # ---------------------------------------------------------------------------- images
 
 

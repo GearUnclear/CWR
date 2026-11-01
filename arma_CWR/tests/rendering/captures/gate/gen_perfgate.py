@@ -4,7 +4,8 @@ files of one bench set into a caller folder, plus a copy of capture_lib.sqf they
     python -I gen_perfgate.py --set quick|full|abba|abba-scoped|obs|hitch|legacy --out <dir>
                               [--views v1,v2] [--read meas|ring] [--config fixed|legacy]
                               [--rounds N] [--windows N] [--frames 256] [--no-stills]
-                              [--has-fpscap] [--list]
+                              [--has-fpscap] [--has-deterministic] [--fixed-step]
+                              [--fixed-settle N [--settle-wait-ms MS]] [--list]
 
 Protocol per view and mode (3.3): capBegin, 150 frames, capMode (triPinObjectDetail,
 triSetLighting <mode> with every knob at its shipped default, triSettleScene [300,30,2]),
@@ -33,6 +34,12 @@ Sets (views default; --views overrides):
   legacy       round 1's corrected baseline exactly: valley, sunrise, wet town, combat_fires,
                noon (Abel) and Eden 250 m, Remastered and Classic, 1 window, 2 rounds, rounds
                outer as round 1 did; config legacy (vsync on; perf-bench seeds fpsCap 60).
+
+Deterministic counts (GATE-2; perf-bench passes these only for the untimed counts set when every
+dist has triDeterministic): --has-deterministic turns triDeterministic on at setup (the capture
+hold: frames run only through verbs), --fixed-step steps the sim at 1/60, and --fixed-settle N
+replaces the draw-count settle by exactly N frames (gatelib.mode_lines), so both sides count at
+the same simulated frame whatever their draw counts.
 
 Config fixed (every comparison): triSetVsync 0 in the test, fpsCap 0 seeded in graphics.cfg by
 perf-bench (triSetFpsCap does not exist on afdb4d60; --has-fpscap adds `triSetFpsCap 0` once
@@ -91,11 +98,11 @@ SETS = {
 }
 
 
-def meas_block(v, label, mode, windows, frames, read, pin=None):
+def meas_block(v, label, mode, windows, frames, read, pin=None, settle=(0, 0)):
     out = [f"// meas {label}"]
     if pin is not None:
         out.append(f"call {{ capDetail = {pin} }}")
-    out.append(f'"{mode}" call capMode')
+    out += gatelib.mode_lines(mode, *settle)
     if v.get("refresh"):
         out.append(v["refresh"])
     out.append("triSimFrames 60")
@@ -111,8 +118,8 @@ def meas_block(v, label, mode, windows, frames, read, pin=None):
     return out
 
 
-def still_block(v, label):
-    out = ['"remastered" call capMode', "triSimFrames 30", "[] call capPin"]
+def still_block(v, label, settle=(0, 0)):
+    out = gatelib.mode_lines("remastered", *settle) + ["triSimFrames 30", "[] call capPin"]
     if v.get("refresh"):
         out.append(v["refresh"])
     out += ["triSimFrames 3", f'triScreenshot "{label}"', f'"{label}" call capRecord']
@@ -147,14 +154,32 @@ def plan(o):
     for w in by_world:
         if o.set != "legacy":
             by_world[w].sort(key=lambda v: gv.is_rain(v["name"]))  # rain last (P0-17), stable otherwise
-    return dict(set=o.set, rounds=rounds, windows=windows, frames=o.frames, modes=modes, stills=stills, read=read,
-                config=config, pin0=s["pin0"] or o.pin0, scale2=o.scale2,
-                worlds={w: [v["name"] for v in vs] for w, vs in by_world.items()}), by_world
+    p = dict(set=o.set, rounds=rounds, windows=windows, frames=o.frames, modes=modes, stills=stills, read=read,
+             config=config, pin0=s["pin0"] or o.pin0, scale2=o.scale2,
+             worlds={w: [v["name"] for v in vs] for w, vs in by_world.items()})
+    if o.fixed_settle:
+        p.update(has_deterministic=o.has_deterministic, fixed_step=o.fixed_step, fixed_settle=o.fixed_settle,
+                 settle_wait_ms=o.settle_wait_ms)
+    return p, by_world
+
+
+def det_lines(p):
+    """Setup statements of the deterministic counts path (empty on the default path)."""
+    if not p.get("fixed_settle"):
+        return []
+    out = []
+    if p["has_deterministic"]:
+        out.append('call { capDetOn = triDeterministic true; format ["view=setup;event=det;deterministic=%1", capDetOn] call capLog }')
+    if p["fixed_step"]:
+        out.append('call { capStepRes = triSetFixedStep (1/60); format ["view=setup;event=step;res=%1", capStepRes] call capLog }')
+    out.append(gatelib.fixed_settle_setup(p["fixed_settle"], p["settle_wait_ms"]))
+    return out
 
 
 def body_for(p, vs):
     out = []
     frames, windows, read = p["frames"], p["windows"], p["read"]
+    st = (p.get("fixed_settle", 0), p.get("settle_wait_ms", 0))
     clock = [0]
 
     def next_time():
@@ -174,15 +199,15 @@ def body_for(p, vs):
             lines.append("triSimFrames 150")
             for m in p["modes"]:
                 tag = m if m in ("remastered", "classic") else m.replace(",", "_").replace("=", "")
-                lines += meas_block(v, f"{lab}__{tag}", m, windows, frames, read)
+                lines += meas_block(v, f"{lab}__{tag}", m, windows, frames, read, settle=st)
             if p.get("scale2"):
                 lines.append("call { capScRes = triSetRenderScale 2.0 }")
-                lines += meas_block(v, f"{lab}__rem_s2", "remastered", windows, frames, read)
+                lines += meas_block(v, f"{lab}__rem_s2", "remastered", windows, frames, read, settle=st)
                 lines.append("call { capScRes = triSetRenderScale 1.0 }")
             if p["pin0"] and v["name"] in gv.PIN0_VIEWS:
-                lines += meas_block(v, f"{lab}__rem_pin0", "remastered", windows, frames, read, pin=0)
+                lines += meas_block(v, f"{lab}__rem_pin0", "remastered", windows, frames, read, pin=0, settle=st)
             if p["stills"] and r == 1:
-                lines += still_block(v, f"{v['name']}__bench")
+                lines += still_block(v, f"{v['name']}__bench", settle=st)
             lines += capgen.end(v)
         return lines
 
@@ -212,9 +237,21 @@ def main():
     ap.add_argument("--scale2", action="store_true", help="add a render-scale-2 row per view (makes CPU-bound views GPU-bound)")
     ap.add_argument("--no-stills", action="store_true")
     ap.add_argument("--has-fpscap", action="store_true", help="the dist has triSetFpsCap (P0-7)")
+    ap.add_argument("--has-deterministic", action="store_true", help="GATE-2: triDeterministic true at setup (with --fixed-settle)")
+    ap.add_argument("--fixed-step", action="store_true", help="GATE-2: triSetFixedStep 1/60 at setup (with --fixed-settle)")
+    ap.add_argument("--fixed-settle", type=int, default=0, help="GATE-2: exactly N settle frames per mode (0: draw-count settle)")
+    ap.add_argument("--settle-wait-ms", type=int, default=1000, help="with --fixed-settle: runner-side pause before the last 30 frames")
     ap.add_argument("--prefix", default="", help="file name prefix (default pg_<set>)")
     ap.add_argument("--list", action="store_true")
     o = ap.parse_args()
+    err = gatelib.fixed_settle_error(o.fixed_settle, o.settle_wait_ms, o.has_deterministic)
+    if not err and (o.has_deterministic or o.fixed_step) and not o.fixed_settle:
+        err = "--has-deterministic and --fixed-step are part of the deterministic counts path: pass --fixed-settle too"
+    if not err and o.fixed_settle and o.set != "counts":
+        err = "--fixed-settle is for the untimed counts set (a timed set must not run under the capture hold)"
+    if err:
+        print(f"gen_perfgate: {err}")
+        return 2
     p, by_world = plan(o)
     if o.list or not o.out:
         print(json.dumps(p, indent=1))
@@ -225,7 +262,7 @@ def main():
     files = []
     for world, vs in by_world.items():
         title = f"perf gate {o.set} ({p['config']}, read {p['read']}): {world}"
-        lines = [capgen.header(world, vs[0], title), LIB] + config_lines(p["config"], o.has_fpscap) + body_for(p, vs)
+        lines = [capgen.header(world, vs[0], title), LIB] + config_lines(p["config"], o.has_fpscap) + det_lines(p) + body_for(p, vs)
         lines.append('\ncall { "view=done;event=done" call capLog }')
         lines.append("triEndTest")
         name = f"{prefix}_{world.lower()}"

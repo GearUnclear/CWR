@@ -41,6 +41,26 @@ capLog = { logInfo (format ["UDCAP;%1", _this]) }
 capDetail = 1
 capSettleArgs = [300, 30, 2]
 
+// Fixed settle (GATE-2; the bench's deterministic stills, counts and motion
+// tests set it, nothing else does). With capFixedSettle > 0, capMode runs
+// exactly that many frames instead of waiting for a steady draw count, so a
+// change that moves the draw count (decal batching) is shot at the same frame
+// as its baseline: capMode re-pins the sim clock (which arms the capture hold
+// under triDeterministic, so the loop runs no frame of its own) and runs
+// capFixedSettle - capSettleTail frames; the generator then writes a
+// top-level `triWait <capSettleWaitMs>` (a pause on the runner's side, no
+// frame runs) for the worker-thread builds (terrain horizon map and canopy,
+// sky tables, cloud density) to finish on wall-clock time, and
+// `[] call capModeTail` runs the last capSettleTail frames. Those must all be
+// idle (rendered, no horizon or sky build in flight, one LOD width; the draw
+// count is not looked at) for settle=FIXED:<n>, else settle=UNSETTLED:FIXED:<n>,
+// which vgate refuses. Every frame of both parts has the texture upload budget
+// lifted, as the draw-count settle does. 0 keeps the draw-count settle
+// (capSettleArgs), which every golden shot so far was taken with.
+capFixedSettle = 0
+capSettleTail = 30
+capSettleWaitMs = 0
+
 // Per-view settings a test may change before capBegin (the generated tests set
 // both for every view): capRain is the rain density pinned with the weather,
 // capEyeAbs true makes capEye metres above sea level instead of above the
@@ -217,11 +237,34 @@ capClear = {
 //  5. build= is triBuildId, the binary's build provenance (git describe of the
 //     source it was built from, "+<hash>" for local changes), on the mode and
 //     shot lines, so pictures and timings from two builds are never confused.
+//  With capFixedSettle > 0 step 3 is the fixed settle (see capFixedSettle):
+//  capMode runs its first part and the generator follows it with triWait and
+//  `[] call capModeTail`, which runs the rest and steps 4 and 5.
 capMode = {
     capModeName = _this;
     capPinRes = triPinObjectDetail capDetail;
     capLit = triSetLighting capModeName;
-    capSettleRes = triSettleScene capSettleArgs;
+    if (capFixedSettle > 0) then {
+        if (capPinTime) then { capSimRes = triSetSimTime capSimT };
+        capSettleBody = triSettleScene [capFixedSettle - capSettleTail, capFixedSettle - capSettleTail, 100];
+    } else {
+        capSettleRes = triSettleScene capSettleArgs;
+        [] call capModeLog;
+    };
+}
+
+// The fixed settle's last capSettleTail frames, then capModeLog (see
+// capFixedSettle). Only the generators' fixed-settle path calls it.
+capModeTail = {
+    capSettleTailRes = triSettleScene [capSettleTail, capSettleTail, 100];
+    capSettleRes = format ["FIXED:%1", capFixedSettle];
+    if (capSettleTailRes != format ["OK:%1", capSettleTail]) then { capSettleRes = format ["UNSETTLED:FIXED:%1", capFixedSettle] };
+    format ["view=%1;event=fixedframes;mode=%2;frames=%3;body=%4;tail=%5;wait_ms=%6", capView, capModeName, capFixedSettle, capSettleBody, capSettleTailRes, capSettleWaitMs] call capLog;
+    [] call capModeLog;
+}
+
+// Steps 4 and 5 of capMode: scene stats, timer reset, the event=mode line.
+capModeLog = {
     capModeStats = triSceneStats;
     capGpuOff = triGpuTimes false;
     capGpuOn = triGpuTimes true;
