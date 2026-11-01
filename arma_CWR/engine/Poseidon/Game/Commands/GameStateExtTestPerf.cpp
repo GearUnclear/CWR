@@ -1,9 +1,11 @@
 #include <Evaluator/express.hpp>
 #include <Poseidon/Core/BuildProvenance.hpp>
+#include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -12,7 +14,7 @@
 using namespace Poseidon;
 
 // Measurement verbs for the perf bench (tests/rendering/captures/gate): the
-// per-frame rings and the build id. GLOBAL scope like the rest of the tri verb surface
+// per-frame rings, the build id and the pinned configuration. GLOBAL scope like the rest of the tri verb surface
 // (registered, with forward decls, in GameStateExtTestAudio.cpp). Each verb
 // only reads or resets bookkeeping; with none of them called, play is
 // unchanged.
@@ -142,4 +144,19 @@ GameValue TriBuildId(const GameState* /*state*/)
     const char* id = BuildProvenance::BuildId();
     LOG_INFO(Core, "[tri] build_id={}", id);
     return GameValue(id);
+}
+
+/// triSetFpsCap <n>: the frame cap RenderFrame paces to (Poseidon::gUserFpsCap,
+/// the Graphics screen's fpsCap; 0 = unlimited), for benches that pin the
+/// configuration instead of inheriting the user's. Session-only: graphics.cfg
+/// is not written, and applying the Graphics screen sets it again. n is
+/// clamped to 0..1000. Returns "OK:<cap>"; read it back with triGetFpsCap.
+GameValue TriSetFpsCap(const GameState* /*state*/, GameValuePar arg)
+{
+    const int cap = std::clamp(toInt(static_cast<float>(static_cast<GameScalarType>(arg))), 0, 1000);
+    gUserFpsCap = cap;
+    LOG_INFO(Core, "[tri] triSetFpsCap {}", cap);
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "OK:%d", cap);
+    return GameValue(buf);
 }

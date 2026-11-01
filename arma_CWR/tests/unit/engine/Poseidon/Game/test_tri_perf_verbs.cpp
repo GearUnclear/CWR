@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Evaluator/express.hpp>
 #include <Poseidon/Core/BuildProvenance.hpp>
+#include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
@@ -25,6 +26,7 @@ GameValue TriPerfRing(const GameState*, GameValuePar);
 GameValue TriGpuRing(const GameState*, GameValuePar);
 GameValue TriGpuTimes(const GameState*, GameValuePar);
 GameValue TriBuildId(const GameState*);
+GameValue TriSetFpsCap(const GameState*, GameValuePar);
 
 namespace
 {
@@ -341,4 +343,17 @@ TEST_CASE("capture_lib logs build= on every mode and shot line", "[tri][perf][tr
     CHECK(lib.find("capBuild = triBuildId;") != std::string::npos);
     CHECK(lib.find("event=mode;mode=%2;lit=%3;detail=%4;settle=%5;%6;build=%7") != std::string::npos);
     CHECK(lib.find("\"%1;build=%2;perf=%3;gpu=%4\", _head, capBuild, capPerf, capGpu") != std::string::npos);
+}
+
+TEST_CASE("triSetFpsCap pins the frame cap RenderFrame paces to", "[tri][perf][triSetFpsCap]")
+{
+    InitFixture fix;
+    const int before = gUserFpsCap;
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(60.0f))) == "OK:60");
+    CHECK(gUserFpsCap == 60);
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(0.0f))) == "OK:0"); // unlimited
+    CHECK(gUserFpsCap == 0);
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(-5.0f))) == "OK:0");
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(5000.0f))) == "OK:1000");
+    gUserFpsCap = before;
 }
