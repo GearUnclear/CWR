@@ -365,7 +365,7 @@ void ThunderBolt::Simulate(float deltaT, SimulationImportance prec)
     {
         _soundDone = true;
         // sound of explosion
-        float rndFreq = GRandGen.RandomValue() * 0.1 + 0.95;
+        float rndFreq = GFxRandGen.RandomValue() * 0.1 + 0.95;
         IWave* sound =
             GSoundScene->OpenAndPlayOnce(_soundPars.name, Position(), VZero, _soundPars.vol, _soundPars.freq * rndFreq);
         if (sound)
@@ -459,6 +459,15 @@ void Weather::Init()
 Weather::Weather()
 {
     Init();
+}
+
+void Weather::RestartRandomWalks()
+{
+    _thunderBoltTime = Glob.time - 1;
+    _windSpeed = VZero;
+    _lastWindSpeedChange = Glob.time;
+    _gust = VZero;
+    _gustUntil = Glob.time;
 }
 
 void Weather::SetRain(float density, float time)
@@ -579,9 +588,9 @@ void Weather::MoveClouds(float deltaT)
         if (fabs(_rainDensityWanted - _rainDensity) < 1e-6)
         {
             saturate(maxRain, 0, 1);
-            _rainDensityWanted = _rainDensity + (GRandGen.RandomValue() - 0.5) * 0.5 * maxRain;
+            _rainDensityWanted = _rainDensity + (GFxRandGen.RandomValue() - 0.5) * 0.5 * maxRain;
             saturate(_rainDensityWanted, 0, maxRain);
-            _rainDensitySpeed = (GRandGen.RandomValue() + 0.1) * 0.01;
+            _rainDensitySpeed = (GFxRandGen.RandomValue() + 0.1) * 0.01;
         }
         float delta = _rainDensityWanted - _rainDensity;
         Limit(delta, -_rainDensitySpeed * deltaT, +_rainDensitySpeed * deltaT);
@@ -596,7 +605,7 @@ void Weather::MoveClouds(float deltaT)
             {
                 // do thunderbolt effect
                 const ParamEntry* cfg = nullptr;
-                if (GRandGen.RandomValue() < thunderBoltDensity)
+                if (GFxRandGen.RandomValue() < thunderBoltDensity)
                 {
                     cfg = &(Pars >> "CfgEffects" >> "ThunderboltHeavy");
                 }
@@ -621,8 +630,8 @@ void Weather::MoveClouds(float deltaT)
                 {
                     Vector3 pos;
                     pos.Init();
-                    pos[0] = (GRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.X();
-                    pos[2] = (GRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.Z();
+                    pos[0] = (GFxRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.X();
+                    pos[2] = (GFxRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.Z();
                     pos[1] = GLandscape->SurfaceY(pos[0], pos[2]);
                     if (pos[1] > best[1])
                     {
@@ -653,7 +662,7 @@ void Weather::MoveClouds(float deltaT)
                 bolt->SetScale(size);
                 bolt->SetPosition(best + shape->BoundingCenter() * size);
                 GWorld->AddCloudlet(bolt);
-                _thunderBoltTime = Glob.time + GRandGen.RandomValue() * 5 / (thunderBoltDensity + 0.001);
+                _thunderBoltTime = Glob.time + GFxRandGen.RandomValue() * 5 / (thunderBoltDensity + 0.001);
             }
         }
     }
@@ -724,17 +733,18 @@ void Weather::MoveClouds(float deltaT)
     if (Glob.time > _lastWindSpeedChange + 5)
     {
         _lastWindSpeedChange = Glob.time;
-        _windSpeed[0] += GRandGen.PlusMinus(0, 1);
-        _windSpeed[2] += GRandGen.PlusMinus(0, 1);
+        _windSpeed[0] += GFxRandGen.PlusMinus(0, 1);
+        _windSpeed[2] += GFxRandGen.PlusMinus(0, 1);
         float maxWind = _overcastSetClouds * 4 + 1;
         saturate(_windSpeed[0], -maxWind, +maxWind);
         saturate(_windSpeed[2], -maxWind, +maxWind);
 
         // simulate wind gusts
-        float gustTime = GRandGen.PlusMinus(0, 8 * _overcastSetClouds + 2);
+        float gustTime = GFxRandGen.PlusMinus(0, 8 * _overcastSetClouds + 2);
         _gustUntil = Glob.time + gustTime;
-        _gust = Vector3(GRandGen.PlusMinus(0, 4 * _overcastSetClouds), GRandGen.PlusMinus(0, 1 * _overcastSetClouds),
-                        GRandGen.PlusMinus(0, 4 * _overcastSetClouds));
+        _gust =
+            Vector3(GFxRandGen.PlusMinus(0, 4 * _overcastSetClouds), GFxRandGen.PlusMinus(0, 1 * _overcastSetClouds),
+                    GFxRandGen.PlusMinus(0, 4 * _overcastSetClouds));
     }
 }
 

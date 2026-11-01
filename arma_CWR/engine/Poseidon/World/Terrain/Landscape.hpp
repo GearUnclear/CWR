@@ -326,6 +326,11 @@ class Weather
 	void SetOvercast( Landscape *land, float overcast );
 	void SetRain (float density, float time);
 	float GetOvercast() const;
+    // Deterministic-world captures (DET-3, triSetSimTime): the wind and gust
+    // walks and the thunder clock start again at the pinned time, as at a new
+    // weather, so a view no longer sees the wind everything simulated since
+    // boot left behind. Play never calls it.
+    void RestartRandomWalks();
 
 	void SetFog( Landscape *land, float fog );
 	float GetFog() const {return _fogSet;}
@@ -808,6 +813,7 @@ class Landscape: public SerializeClass
 	void SetFog( float fog ) {_weather.SetFog(this,fog);}
     float GetFog() const { return _weather.GetFog(); }
 	void SetRain(float density, float time){_weather.SetRain(density,time);}
+    void RestartWeatherWalks() { _weather.RestartRandomWalks(); }
 	void Simulate( float deltaT );
 	float GetSeaLevel() const {return _seaLevelWave;}
 	void SetSeaWaveSpeed( float seaWaveSpeed ) {_seaWaveSpeed=seaWaveSpeed;}

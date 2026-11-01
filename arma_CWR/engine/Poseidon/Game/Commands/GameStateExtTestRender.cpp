@@ -29,6 +29,7 @@ using namespace Poseidon;
 #include <Poseidon/IO/ParamFileExt.hpp> // global Pars for triAssertConfigClass
 #include <sstream>
 #include <Poseidon/Network/MasterServerServiceClient.hpp> // catalog entry for triSeedWorkshopMods
+#include <Random/randomGen.hpp>                           // RandomDeterministicWorld for the capture hold
 #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
@@ -278,7 +279,11 @@ GameValue TriCaptureAtPresent(const GameState* /*state*/, GameValuePar arg)
 /// Under the capture hold (deterministic mode, Graphics/Remaster/
 /// TemporalDeterminism.hpp) the main loop runs no frame of its own, so a
 /// capture at present renders its one frame here, the frame right after the
-/// test's last triSimFrames frame; the hold ends with the shot.
+/// test's last triSimFrames frame; the hold ends with the shot, except with
+/// POSEIDON_DETERMINISTIC_WORLD set (DET-3): there it lasts until the next
+/// pin, triRecord, triDeterministic false or the idle limit, so no free loop
+/// frame simulates fires, smoke or vehicles on between a shot and the next
+/// mode or view.
 GameValue TriScreenshot(const GameState* state, GameValuePar arg)
 {
     GameStringType label = static_cast<GameStringType>(arg);
@@ -306,7 +311,8 @@ GameValue TriScreenshot(const GameState* state, GameValuePar arg)
         else if (Poseidon::remaster::CaptureHoldActive())
             Poseidon::AppIdle(); // the capture frame (see above)
     }
-    Poseidon::remaster::ReleaseCaptureHold();
+    if (!RandomDeterministicWorld())
+        Poseidon::remaster::ReleaseCaptureHold();
 
     return GameValue("OK");
 }

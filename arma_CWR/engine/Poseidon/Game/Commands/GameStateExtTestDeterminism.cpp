@@ -8,7 +8,8 @@
 //                                 releases a hold
 //   triResetTemporal n            M2's scratch form (gen_golden.py calls it):
 //                                 [0, 0], then triSeedRandom n
-//   triSeedRandom n               seed GRandGen and the C rand() stream
+//   triSeedRandom n               seed GRandGen, the effects' stream and the
+//                                 C rand() stream
 //   triTemporalState              "det=..;reset=..;applied=..@..;mist=..;seed=..;hold=.."
 //
 // Deterministic mode also holds the main loop's own frames from a reset (or a
@@ -21,6 +22,17 @@
 // triSeedRandom 1, then the same number of frames before every shot.
 // Play never calls these: with the flag off and no reset requested every
 // reader takes the path it took before.
+//
+// Deterministic world (POSEIDON_DETERMINISTIC_WORLD set, DET-3): with
+// triDeterministic on, every triSetSimTime also restarts the session's random
+// state at the pin (RestartDeterministicWorldStreams): GRandGen, the effects'
+// own stream (smoke, fire, cloudlets, wind; randomGen.hpp GFxRandGen) and
+// rand() are seeded from the pinned time, the weather's wind, gust and thunder
+// walks start again, and the next combat light's flicker seed is fixed. So a
+// view's fires and smoke repeat between two boots whatever the boots did
+// before the pin. The capture hold also outlives triScreenshot there
+// (GameStateExtTestRender.cpp), so no free loop frame runs between a shot and
+// the next mode's or view's pin.
 
 #include <Evaluator/express.hpp>
 using namespace Poseidon;
@@ -28,6 +40,8 @@ using namespace Poseidon;
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Random/randomGen.hpp>
 
 #include <cstdio>
@@ -41,6 +55,7 @@ namespace
 void SeedRandomStreams(int seed)
 {
     GRandGen.SetSeed(seed);
+    SeedEffectsRandom(seed); // the effects' own stream: unused in play
     std::srand(static_cast<unsigned>(seed));
     rm::NoteRandomSeed(seed);
 }
@@ -139,6 +154,23 @@ GameValue TriTemporalState(const GameState* /*state*/)
 }
 
 } // namespace
+
+/// DET-3 (see the header comment): called by triSetSimTime after it pins
+/// Glob.time. Only with POSEIDON_DETERMINISTIC_WORLD set and triDeterministic
+/// on; otherwise it does nothing and returns false. The seeds follow from the
+/// pinned milliseconds, so every pin of the same time starts the same streams.
+bool RestartDeterministicWorldStreams(int simMs)
+{
+    if (!RandomDeterministicWorld() || !rm::TemporalDeterministic())
+        return false;
+    GRandGen.SetSeed(simMs);
+    SeedEffectsRandom(simMs + 7919);
+    std::srand(static_cast<unsigned>(simMs));
+    if (GLandscape)
+        GLandscape->RestartWeatherWalks();
+    Poseidon::lighting::GCombatLights().SeedForCapture(0x9e3779b9u ^ static_cast<std::uint32_t>(simMs));
+    return true;
+}
 
 // Called from GameStateExtTestAudio.cpp's INIT_MODULE to force this TU into
 // the link (no other code references these verbs).

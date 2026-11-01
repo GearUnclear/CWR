@@ -87,4 +87,27 @@ inline RandomGenerator& GRandGen()
 // Let call sites spell the singleton as `GRandGen.Foo()`; expands to `GRandGen().Foo()`.
 #define GRandGen GRandGen()
 
+// The visual effects' stream: smoke, fire and cloudlet emission, wreck and
+// fuel fires, the weather's wind, gust, rain and thunder walks. In play (and
+// in any session without POSEIDON_DETERMINISTIC_WORLD) it IS GRandGen, so
+// every draw is the one it always was. In a deterministic-world capture
+// session it is a stream of its own, which the capture verbs reseed
+// (SeedEffectsRandom), so AI, sound or script draws whose count differs
+// between two boots no longer move where the effects' draws land.
+RandomGenerator& EffectsRandomStream();
+// The own stream of a deterministic-world session (unused in play).
+void SeedEffectsRandom(int seed);
+// True once per process when the effects use their own stream.
+bool EffectsRandomOwnStream();
+
+inline RandomGenerator& GFxRandGen()
+{
+    if (auto* local = RandomGeneratorOverride())
+        return *local;
+    return EffectsRandomOwnStream() ? EffectsRandomStream() : GRandGen;
+}
+
+// Call sites spell it `GFxRandGen.Foo()`, as GRandGen.
+#define GFxRandGen GFxRandGen()
+
 #endif

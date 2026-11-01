@@ -2213,12 +2213,17 @@ GameValue TriSimFrames(const GameState* /*state*/, GameValuePar arg)
     return GameValue(buf);
 }
 
+bool RestartDeterministicWorldStreams(int simMs); // GameStateExtTestDeterminism.cpp
+
 /// triSetSimTime <seconds> — set Glob.time to an exact value (in seconds).
 /// Makes time-dependent visuals (water waves, sky dome) deterministic
 /// across runs. Use after setAccTime 0 to normalize simulation state.
 /// In deterministic mode (triDeterministic) it also arms the capture hold
 /// (Graphics/Remaster/TemporalDeterminism.hpp), so the main loop's own frames
 /// do not move the clock again before the next triScreenshot or triRecord.
+/// With POSEIDON_DETERMINISTIC_WORLD set as well it restarts the random
+/// streams and the weather walks at the pin (DET-3,
+/// GameStateExtTestDeterminism.cpp), so fires and smoke repeat between boots.
 /// Returns "OK:<ms>" with the millisecond value set.
 GameValue TriSetSimTime(const GameState* /*state*/, GameValuePar arg)
 {
@@ -2226,6 +2231,8 @@ GameValue TriSetSimTime(const GameState* /*state*/, GameValuePar arg)
     int ms = static_cast<int>(seconds * 1000.0f);
     Glob.time = Time(ms);
     Poseidon::remaster::ArmCaptureHold(); // deterministic mode only
+    if (RestartDeterministicWorldStreams(ms))
+        LOG_INFO(Core, "[tri] triSetSimTime: deterministic world streams restarted at {} ms", ms);
     char buf[64];
     snprintf(buf, sizeof(buf), "OK:%d", ms);
     LOG_INFO(Core, "[tri] triSetSimTime: Glob.time set to {} ms ({:.3f} s)", ms, seconds);

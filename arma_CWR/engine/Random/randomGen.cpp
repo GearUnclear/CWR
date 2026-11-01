@@ -171,6 +171,25 @@ RandomGenerator::RandomGenerator()
 {
 }
 
+// The effects' own stream (randomGen.hpp GFxRandGen): fixed seeds, reseeded
+// by the capture verbs (triSetSimTime, triSeedRandom, triResetTemporal n).
+RandomGenerator& EffectsRandomStream()
+{
+    static RandomGenerator stream(1, 7919);
+    return stream;
+}
+
+void SeedEffectsRandom(int seed)
+{
+    EffectsRandomStream().SetSeed(seed);
+}
+
+bool EffectsRandomOwnStream()
+{
+    static const bool own = RandomDeterministicWorld();
+    return own;
+}
+
 float RandomGenerator::Gauss(float min, float mid, float max) const
 {
     float gauss = (RandomValue() + RandomValue() + RandomValue() + RandomValue()) * 0.25;

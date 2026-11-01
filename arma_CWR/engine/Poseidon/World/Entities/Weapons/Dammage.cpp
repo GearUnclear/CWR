@@ -553,9 +553,9 @@ void Object::Destroy(EntityAI* owner, float overkill, float minExp, float maxExp
     float size = objSize * (1.0 / 3);
     saturate(density, 0.25, 2.0);
     saturate(size, 0.25, 4.0);
-    size *= GRandGen.RandomValue() * 0.4 + 0.8;
-    density *= GRandGen.RandomValue() * 0.4 + 0.8;
-    float rndTime = GRandGen.RandomValue() * 0.4 + 0.8;
+    size *= GFxRandGen.RandomValue() * 0.4 + 0.8;
+    density *= GFxRandGen.RandomValue() * 0.4 + 0.8;
+    float rndTime = GFxRandGen.RandomValue() * 0.4 + 0.8;
     switch (GetDestructType())
     {
         case DestructTree:
@@ -599,7 +599,7 @@ void Object::Destroy(EntityAI* owner, float overkill, float minExp, float maxExp
                 float smokeSourceCoef = 0.2;
                 rndTime *= smokeSourceCoef;
                 smoke->SetSourceTimes(5 * rndTime, 30 * rndTime, 30 * rndTime);
-                float color = GRandGen.RandomValue();
+                float color = GFxRandGen.RandomValue();
                 smoke->SetColor(Color(0.15, 0.15, 0.10) * color);
                 smoke->SetPosition(PositionModelToWorld(com));
                 smoke->SetTimes(0.5, 3);

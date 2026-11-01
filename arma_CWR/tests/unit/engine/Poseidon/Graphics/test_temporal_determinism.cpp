@@ -675,3 +675,111 @@ TEST_CASE("Temporal determinism: the deterministic-world switch", "[remaster][Te
     CHECK(RandomDeterministicWorld());
     SetDetWorldEnv(hadValue ? saved.c_str() : nullptr);
 }
+
+TEST_CASE("Temporal determinism: the effects' own stream", "[remaster][TemporalDeterminism]")
+{
+    // DET-3: the effects' own stream (used only under
+    // POSEIDON_DETERMINISTIC_WORLD) repeats after a reseed and never moves
+    // GRandGen.
+    RandomGenerator probe(GRandGen);
+    SeedEffectsRandom(4242);
+    float first[16];
+    for (float& v : first)
+        v = EffectsRandomStream().RandomValue();
+    SeedEffectsRandom(4242);
+    bool repeats = true;
+    for (const float v : first)
+        repeats = repeats && EffectsRandomStream().RandomValue() == v;
+    CHECK(repeats);
+    bool untouched = true;
+    for (int i = 0; i < 16; ++i)
+        untouched = untouched && GRandGen.RandomValue() == probe.RandomValue();
+    CHECK(untouched);
+    // A scoped override wins for the effects too, as for GRandGen.
+    RandomGenerator ref(91, 19), local(91, 19);
+    {
+        ScopedRandomGenerator scope(local);
+        bool redirected = true;
+        for (int i = 0; i < 16; ++i)
+            redirected = redirected && GFxRandGen.RandomValue() == ref.RandomValue();
+        CHECK(redirected);
+    }
+}
+
+TEST_CASE("Temporal determinism audit: fires and smoke repeat between boots",
+          "[remaster][TemporalDeterminism][StateCacheAudit]")
+{
+    // The effects' stream is GRandGen itself unless the session asks for a
+    // deterministic world (play: every draw as before).
+    const std::string genH = ReadTextFile(EngineDir() / "Random" / "randomGen.hpp");
+    REQUIRE_FALSE(genH.empty());
+    CHECK(FindSq(genH, "return EffectsRandomOwnStream() ? EffectsRandomStream() : GRandGen;") != std::string::npos);
+    const std::string gen = ReadTextFile(EngineDir() / "Random" / "randomGen.cpp");
+    CHECK(FindSq(gen, "static const bool own = RandomDeterministicWorld();") != std::string::npos);
+
+    // Every smoke, fire and cloudlet draw, the wreck's fire and smoke, the
+    // fireplace flicker and the weather walks take the effects' stream.
+    const std::filesystem::path poseidon = EngineDir() / "Poseidon";
+    const std::string smokes = ReadTextFile(poseidon / "Graphics" / "Rendering" / "Effects" / "Smokes.cpp");
+    REQUIRE_FALSE(smokes.empty());
+    CHECK(CountOf(smokes, "GRandGen") == 0);
+    CHECK(CountOf(smokes, "GFxRandGen") >= 38);
+    const std::string fireplace = ReadTextFile(poseidon / "World" / "Scene" / "Fireplace.cpp");
+    CHECK(FindSq(fireplace, "float fade = GFxRandGen.PlusMinus(0.8, 0.2);") != std::string::npos);
+    const std::string car = ReadTextFile(poseidon / "World" / "Entities" / "Vehicles" / "TankOrCar.cpp");
+    CHECK(FindSq(car, "float explosionDelay = GFxRandGen.Gauss(0.2f, 0.5f, 1.5f);") != std::string::npos);
+    const std::string dammage = ReadTextFile(poseidon / "World" / "Entities" / "Weapons" / "Dammage.cpp");
+    CHECK(FindSq(dammage, "float rndTime = GFxRandGen.RandomValue() * 0.4 + 0.8;") != std::string::npos);
+    CHECK(FindSq(dammage, "float color = GFxRandGen.RandomValue();") != std::string::npos);
+    const std::string land = ReadTextFile(poseidon / "World" / "Terrain" / "Landscape.cpp");
+    const std::string walk = FunctionBody(land, "void Weather::MoveClouds(float deltaT)");
+    REQUIRE_FALSE(walk.empty());
+    CHECK(CountOf(walk, "GRandGen") == 0);
+    CHECK(CountOf(walk, "GFxRandGen") == 12);
+    const std::string restart = FunctionBody(land, "void Weather::RestartRandomWalks()");
+    REQUIRE_FALSE(restart.empty());
+    CHECK(FindSq(restart, "_windSpeed = VZero; _lastWindSpeedChange = Glob.time; _gust = VZero; "
+                          "_gustUntil = Glob.time;") != std::string::npos);
+
+    // triSetSimTime restarts the streams after its pin; the restart does
+    // nothing unless both the world switch and triDeterministic are on.
+    const std::filesystem::path commands = poseidon / "Game" / "Commands";
+    const std::string test = ReadTextFile(commands / "GameStateExtTest.cpp");
+    const std::string simTime =
+        FunctionBody(test, "GameValue TriSetSimTime(const GameState* /*state*/, GameValuePar arg)\n{");
+    REQUIRE_FALSE(simTime.empty());
+    const size_t pin = FindSq(simTime, "Glob.time = Time(ms);");
+    const size_t streams = FindSq(simTime, "if (RestartDeterministicWorldStreams(ms))");
+    REQUIRE(pin != std::string::npos);
+    REQUIRE(streams != std::string::npos);
+    CHECK(pin < streams);
+    const std::string verbs = ReadTextFile(commands / "GameStateExtTestDeterminism.cpp");
+    const std::string body = FunctionBody(verbs, "bool RestartDeterministicWorldStreams(int simMs)");
+    REQUIRE_FALSE(body.empty());
+    const size_t gate = FindSq(body, "if (!RandomDeterministicWorld() || !rm::TemporalDeterministic()) return false;");
+    REQUIRE(gate != std::string::npos);
+    for (const char* step : {"GRandGen.SetSeed(simMs);", "SeedEffectsRandom(simMs + 7919);",
+                             "GLandscape->RestartWeatherWalks();", "GCombatLights().SeedForCapture("})
+    {
+        INFO(step);
+        CHECK(FindSq(body, step) > gate);
+    }
+    CHECK(FindSq(FunctionBody(verbs, "void SeedRandomStreams(int seed)"), "SeedEffectsRandom(seed);") !=
+          std::string::npos);
+    int callers = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(poseidon))
+    {
+        const auto ext = entry.path().extension();
+        if (entry.is_regular_file() && (ext == ".cpp" || ext == ".hpp"))
+            callers += CountOf(ReadTextFile(entry.path()), "RestartDeterministicWorldStreams(");
+    }
+    CHECK(callers == 3); // the definition, the declaration and the one call
+
+    // The hold outlives the shot only in a deterministic world.
+    const std::string render = ReadTextFile(commands / "GameStateExtTestRender.cpp");
+    const std::string shot =
+        FunctionBody(render, "GameValue TriScreenshot(const GameState* state, GameValuePar arg)\n{");
+    REQUIRE_FALSE(shot.empty());
+    CHECK(FindSq(shot, "if (!RandomDeterministicWorld()) Poseidon::remaster::ReleaseCaptureHold();") !=
+          std::string::npos);
+}
