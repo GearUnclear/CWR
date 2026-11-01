@@ -86,6 +86,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 
 #include <Poseidon/World/WorldShared.hpp>
+#include <Poseidon/World/TriCamPath.hpp>
 AbstractOptionsUI* CreateChannelUI();
 
 namespace Poseidon
@@ -1254,6 +1255,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 camPos[1] = minCamY;
             }
             transform.SetPosition(camPos);
+        }
+        // P0-10 motion clips: a triCamPath camera path, stepped by the
+        // simulation step, drives the render-view override.
+        if (Poseidon::tricam::CamPose pathPose; Poseidon::tricam::StepCamPath(deltaT, pathPose))
+        {
+            const Vector3 dir(pathPose.dir[0], pathPose.dir[1], pathPose.dir[2]);
+            World_SetTriViewOverride(Vector3(pathPose.pos[0], pathPose.pos[1], pathPose.pos[2]), dir.Normalized(), VUp);
         }
         if (s_triViewActive)
         {

@@ -599,6 +599,10 @@ void EngineGL33::CaptureScreenshotIfPending()
         BindFrameRenderTarget();
 }
 
+// P0-10 recorder (EngineGL33_Recorder.cpp): reads the presented frame into its
+// pixel-pack ring while a triRecord is armed; returns at once otherwise.
+void GL33RecordPresentedFrame(SDL_Window* window, int fallbackW, int fallbackH, bool screenshotFrame);
+
 void EngineGL33::BackToFront()
 {
     // SSAA: the game frame (3D + HUD) is complete on the scaled target —
@@ -624,7 +628,10 @@ void EngineGL33::BackToFront()
     // readback samples the same back buffer that's about to swap.
     // Readback after SwapWindow on a double-buffered context is
     // undefined, so the capture has to happen pre-swap.
+    const bool screenshotFrame = _pendingScreenshotPath.GetLength() > 0;
     CaptureScreenshotIfPending();
+    // The triRecord recorder reads the same pixels at the same point.
+    GL33RecordPresentedFrame(_sdlWindow, _w, _h, screenshotFrame);
 
     if (_glContext && _sdlWindow)
         SDL_GL_SwapWindow(_sdlWindow);

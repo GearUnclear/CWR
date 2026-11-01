@@ -189,6 +189,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp
     Graphics/test_window_placement.cpp
+    Graphics/test_frame_recorder.cpp
 )
 
 if(WIN32)

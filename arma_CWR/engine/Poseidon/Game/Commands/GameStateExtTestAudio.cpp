@@ -340,6 +340,7 @@ GameValue TriAssertPixelDarkerThan(const GameState*, GameValuePar);
 void EnsureGameStateExtTestGenericLinked();
 void EnsureGameStateExtTestGettersLinked();
 void EnsureGameStateExtTestDeterminismLinked(); // P0-6: triResetTemporal, triSeedRandom, triDeterministic
+void EnsureGameStateExtTestRecordLinked();      // P0-10: triRecord, triRecordState, triCamPath
 
 // Audio test surface — direct GSoundsys read/write so tests can verify
 // AudioPage's UI plumbing without scraping rendered text.
@@ -3493,4 +3494,5 @@ INIT_MODULE(GameStateExtTest, 3)
     EnsureGameStateExtTestGenericLinked();
     EnsureGameStateExtTestGettersLinked();
     EnsureGameStateExtTestDeterminismLinked();
+    EnsureGameStateExtTestRecordLinked();
 };
