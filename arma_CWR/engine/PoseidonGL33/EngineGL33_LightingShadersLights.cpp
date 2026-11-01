@@ -196,6 +196,10 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
     if (d2 >= end2) return;
     float d = sqrt(max(d2, 1e-12));
     vec3 L = toLight / d;
+    // A low beam on a surface that faces away adds nothing: everything below
+    // is times nl for it (a headlight has no ambient line), so its pattern is
+    // not worked out. Leaves wrap past the terminator and take it all.
+    if (spot && !g_lightLeaves && dot(n, L) <= 0.0) return;
     float I = spot ? peak * lowBeamPattern(-L, frameLights[at + 3].xyz) : peak;
     if (I <= 0.0) return;
     I *= (1.0 - smoothstep(0.5 * end2, end2, d2)) * smoothstep(kNightNearStart, kNightNearEnd, d);
