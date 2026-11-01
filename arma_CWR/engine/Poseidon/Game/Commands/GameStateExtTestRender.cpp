@@ -855,19 +855,23 @@ GameValue TriPinCloudDrift(const GameState* /*state*/, GameValuePar arg)
     return GameValue(buf);
 }
 
-/// triGpuTimes <on>: GPU timestamp timing for cost checks. true turns it on
-/// (and resets the averages), false turns it off; either way it returns the
-/// current summary, e.g. "frame 6.12 ms | world 4.80 (shadow 0.62) | post
-/// 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15". Results trail the
-/// frame by a few frames: enable, wait a second, then read.
+/// triGpuTimes <on>: GPU timestamp timing for cost checks. It returns the
+/// summary of the window so far, e.g. "frame 6.12 ms | world 4.80 (shadow
+/// 0.62) | post 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15", then
+/// applies <on>: true turns timing on, or, when it is already on, starts a new
+/// window (the averages, the minimum and the triGpuRing records restart, and
+/// the frames still in flight are dropped); false turns it off. So one call
+/// both reads a window and starts the next, and "false then true" still
+/// restarts it as before. Results trail the frame by a few frames: enable,
+/// wait a second, then read (read triGpuRing before this call).
 GameValue TriGpuTimes(const GameState* /*state*/, GameValuePar arg)
 {
     if (!GEngine)
         return GameValue("FAIL:no engine");
     const bool on = static_cast<bool>(arg);
-    if (on != GEngine->GpuTimingEnabled())
-        GEngine->SetGpuTimingEnabled(on);
-    return GameValue(GEngine->GpuTimingSummary().c_str());
+    const std::string summary = GEngine->GpuTimingSummary();
+    GEngine->SetGpuTimingEnabled(on);
+    return GameValue(summary.c_str());
 }
 
 /// triEnableShadowMaps — turn on the durable shadow-map (depth-buffer) path. Off

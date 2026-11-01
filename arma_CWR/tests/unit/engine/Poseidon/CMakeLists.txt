@@ -443,6 +443,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/test_tri_generic_asserts.cpp
     Game/test_tri_value_getters.cpp
     Game/test_tri_capture_verbs.cpp
+    Game/test_tri_perf_verbs.cpp
     Dev/Debug/test_dev_mode_gates.cpp
 
     # Network tests

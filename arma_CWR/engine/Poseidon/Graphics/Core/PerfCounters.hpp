@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 
 // Frame-cost counters of the object pass and the constant uploads: how many
@@ -7,7 +8,8 @@
 // horizon table cost, how many uniform-buffer uploads the mirrors skipped. The scene and the GL33 backend count into
 // the frame being drawn; World::Simulate closes the frame next to the frame profiler. triPerfStats prints the averages
 // over the profiler's window, so they cover the same frames as its CPU phases (triPerfReset restarts both). Pure
-// bookkeeping, no engine state.
+// bookkeeping, no engine state. The window is the last kWindow closed frames, the frame profiler's ring
+// (Dev::FrameProfiler::kRingSize), so a long window still covers the same frames as its CPU phases.
 
 namespace Poseidon::perf
 {
@@ -48,15 +50,22 @@ struct FrameCounters
 class Counters
 {
   public:
+    // The window: as many frames as the frame profiler's ring holds.
+    static constexpr int kWindow = 256;
+
+    Counters();
     // The frame being drawn: the scene and the backend add to it.
     FrameCounters& Frame() { return _frame; }
     // The last closed frame.
     const FrameCounters& Last() const { return _last; }
-    // Closes the frame: it becomes Last() and joins the window's sums.
+    // Closes the frame: it becomes Last() and joins the window (the oldest
+    // frame leaves it once it holds kWindow frames).
     void EndFrame();
     // Starts a new window (triPerfReset).
     void ResetWindow();
-    int WindowFrames() const { return _frames; }
+    int WindowFrames() const { return _count; }
+    // The window's frames: newest = WindowFrame(0), oldest = WindowFrame(WindowFrames() - 1).
+    const FrameCounters& WindowFrame(int back) const { return _ring[(_head - 1 - back + 2 * kWindow) % kWindow]; }
     // Per-frame averages over the window, for triPerfStats:
     // "objs opaque=<n> runs=<n> runobj=<n> litobj=<n> lights=<slots>/<on> | hill ran=<share> idle=<share>
     //  tested=<n> hidden=<n> kept=<n> builds=<n> wedges=<n> hillcpu=<ms> | prep lod=<ms> occ=<ms> |
@@ -69,11 +78,14 @@ class Counters
     static constexpr int kFields = 24;
 
   private:
+    // Sums over the window, in double so a long window does not round.
+    void WindowSums(double (&sum)[kFields]) const;
+
     FrameCounters _frame;
     FrameCounters _last;
-    // Sums over the window, in double so a long window does not round.
-    double _sum[kFields] = {};
-    int _frames = 0;
+    std::unique_ptr<FrameCounters[]> _ring; // kWindow frames
+    int _head = 0;
+    int _count = 0;
 };
 
 Counters& GPerfCounters();

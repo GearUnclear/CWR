@@ -1,5 +1,7 @@
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 
+#include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+
 #include <cstdio>
 
 namespace Poseidon::perf
@@ -34,6 +36,11 @@ double Value(const FrameCounters& c, const Field& f)
 }
 } // namespace
 
+static_assert(Counters::kWindow == Dev::FrameProfiler::kRingSize,
+              "PerfCounters: the window covers the frames of the profiler's ring");
+
+Counters::Counters() : _ring(new FrameCounters[kWindow]()) {}
+
 Counters& GPerfCounters()
 {
     static Counters s_counters;
@@ -42,35 +49,49 @@ Counters& GPerfCounters()
 
 void Counters::EndFrame()
 {
-    for (int i = 0; i < kListed; ++i)
-        _sum[i] += Value(_frame, kFieldList[i]);
-    ++_frames;
+    _ring[_head] = _frame;
+    _head = (_head + 1) % kWindow;
+    if (_count < kWindow)
+        ++_count;
     _last = _frame;
     _frame = FrameCounters();
 }
 
 void Counters::ResetWindow()
 {
-    for (double& s : _sum)
-        s = 0.0;
-    _frames = 0;
+    _head = 0;
+    _count = 0;
+}
+
+void Counters::WindowSums(double (&sum)[kFields]) const
+{
+    for (double& v : sum)
+        v = 0.0;
+    for (int b = 0; b < _count; ++b)
+    {
+        const FrameCounters& c = WindowFrame(b);
+        for (int i = 0; i < kListed; ++i)
+            sum[i] += Value(c, kFieldList[i]);
+    }
 }
 
 std::string Counters::Summary() const
 {
-    const double n = _frames > 0 ? static_cast<double>(_frames) : 1.0;
+    double sum[kFields];
+    WindowSums(sum);
+    const double n = _count > 0 ? static_cast<double>(_count) : 1.0;
     auto avg = [&](int FrameCounters::* m)
     {
         for (int i = 0; i < kListed; ++i)
             if (kFieldList[i].i == m)
-                return _sum[i] / n;
+                return sum[i] / n;
         return 0.0;
     };
     auto avgf = [&](float FrameCounters::* m)
     {
         for (int i = 0; i < kListed; ++i)
             if (kFieldList[i].f == m)
-                return _sum[i] / n;
+                return sum[i] / n;
         return 0.0;
     };
     char buf[640];

@@ -159,4 +159,54 @@ class GpuTimings
     int _frames = 0;
 };
 
+// The last frames' GPU times, one record per frame the backend read back
+// (triGpuRing): frame, world, pass1, ground, rest and post, in that order, -1
+// where the frame did not measure the section. The records trail the CPU frame
+// by the read-back delay (a few frames), so they cover the same span of frames
+// as the CPU profiler's ring, not the same frames one for one. Reset with the
+// averages (Engine::SetGpuTimingEnabled).
+class GpuFrameRing
+{
+  public:
+    static constexpr int kSize = 256;
+    static constexpr int kSections = 6;
+    // The sections of a record, in column order.
+    static constexpr Section kColumns[kSections] = {Section::Frame,  Section::World, Section::Pass1,
+                                                    Section::Ground, Section::Rest,  Section::Post};
+    struct Record
+    {
+        std::array<float, kSections> ms{};
+    };
+
+    // Adds the last frame `t` measured (GpuTimings::LastMs of each column).
+    void Push(const GpuTimings& t);
+    void Reset();
+    int Count() const { return _count; }
+    // newest = Frame(0), oldest = Frame(Count() - 1)
+    const Record& Frame(int back) const { return _ring[(_head - 1 - back + 2 * kSize) % kSize]; }
+    // The last n records (n <= 0 or more than the ring holds: all), oldest
+    // first. LogText: "frame,world,pass1,ground,rest,post;" per record; CsvText: the
+    // header "i,frame,world,pass1,ground,rest,post", then one line per record
+    // (i = 0 for the oldest). Times in ms with three decimals; a section the
+    // frame did not measure is an empty field in both.
+    std::string LogText(int n) const;
+    std::string CsvText(int n) const;
+
+  private:
+    std::array<Record, kSize> _ring{};
+    int _head = 0;
+    int _count = 0;
+};
+
+GpuFrameRing& GGpuFrameRing();
+
+// GL_ARB_pipeline_statistics_query around the world pass's ground span
+// (WorldBegin to GroundEnd) and opaque-object span (GroundEnd to Pass1End),
+// while GPU timing is on and this is set (triPipeStats). The backend adds the
+// results to the frame-cost counters (PerfCounters.hpp, groundPrims ...
+// pass1Fs) of the frame that reads them back, a few frames after the GPU ran
+// them, and never waits for one. Off by default: no query is issued.
+void SetPipelineStatsWanted(bool on);
+bool PipelineStatsWanted();
+
 } // namespace Poseidon::gpu

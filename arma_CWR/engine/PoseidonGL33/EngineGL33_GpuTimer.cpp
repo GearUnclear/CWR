@@ -10,12 +10,35 @@
 using Poseidon::gpu::kMarkCount;
 using Poseidon::gpu::Mark;
 
+namespace
+{
+// Slots whose frame was being recorded when the window restarted: their stamps
+// straddle the restart, so the read-back drops them instead of submitting them.
+std::uint32_t s_gpuDropSlots = 0;
+} // namespace
+
 void EngineGL33::SetGpuTimingEnabled(bool enabled)
 {
     if (enabled == _gpuTiming)
+    {
+        if (!enabled)
+            return;
+        // Already on: start a new window. The frames still in flight were
+        // issued before it, so they are dropped too: the in-flight slots are
+        // forgotten and the frame being recorded is dropped at its read-back.
+        _gpuTimings.Reset();
+        Poseidon::gpu::GGpuFrameRing().Reset();
+        for (int i = 0; i < kGpuFrames; ++i)
+            if (i != _gpuSlot)
+                _gpuRecorded[i] = 0;
+        s_gpuDropSlots = _gpuRecorded[_gpuSlot] ? 1u << _gpuSlot : 0u;
+        LOG_DEBUG(Graphics, "GL33: GPU timing window restarted");
         return;
+    }
     _gpuTiming = enabled;
     _gpuTimings.Reset();
+    Poseidon::gpu::GGpuFrameRing().Reset();
+    s_gpuDropSlots = 0;
     if (!enabled)
         DestroyGpuQueries();
     LOG_INFO(Graphics, "GL33: GPU timing {}", enabled ? "on" : "off");
@@ -83,7 +106,13 @@ void EngineGL33::GpuFrameBegin()
             stamps[m] = value;
             read |= 1u << m;
         }
-        _gpuTimings.Submit(stamps, read);
+        if (s_gpuDropSlots & (1u << _gpuSlot))
+            s_gpuDropSlots &= ~(1u << _gpuSlot);
+        else
+        {
+            _gpuTimings.Submit(stamps, read);
+            Poseidon::gpu::GGpuFrameRing().Push(_gpuTimings);
+        }
     }
     _gpuRecorded[_gpuSlot] = 0;
     GpuMark(Mark::FrameBegin);
