@@ -297,4 +297,22 @@ Timing of the batch build against the tooling tip (ring mode, 4 ABBA pairs, 1080
 
 No regression on any of the 8 views (the wet town's frame is rain-noisy and its object count differs between the sides, so it is read on pass1 only). The tip's p95 sat on the probe frames (W1-2); the GPU and pass1 drop on the long views is W1-9's, as is most of the CPU drop. That build also carried W1-5 (b c d e f h g, exact shader gates), which is not landed yet; W1-5 is about 0.1 ms per long view. Every long view now meets 15 ms of CPU at p95 on this machine, and the valley meets 9 ms of GPU. Unit gate: 475/475, 823 of 827 (4 skipped), 3499 of 3509 (4 skipped, 6 that need game data the worktree has no junction for). Formatted with clang-format 22.1.8; 21.1.8 pending. Linux gate: not run.
 
-Still to do: W1-5, W1-1 and W1-7 (the last two wait for the owner's motion clip), the CPU items W3-1 and W3-11, Eden's GPU frame (12.7 ms, over 9), a timing run at 1080p on an RTX 3060 class card.
+**New budget (owner, 2026-11-01).** The bar is 60 fps at a realistic 4 to 5 km view distance on this machine's RTX 4060 Ti: GPU and CPU share the same 16.7 ms frame, about 15 ms at p95 for each. The 9 ms GPU budget, a stand-in for an RTX 3060, is retired. The full bench of the batch 1 tip (fb043ec, ring mode, 3 clean windows per view) meets it on all 8 standard views: the highest CPU work p95 is Eden at 13.9 ms and the valley at 13.6; the highest GPU frame p95 is Eden at 13.8 and the wet town at 11.2.
+
+**Wave 1, batch 2 (2026-11-01).** The occlusion range and the exact shader gates:
+
+- 9e5d74b (W3-1b): beyond max(600 m, the shadow casters' reach) an object that would render nothing into the occlusion buffer is no longer tested against it and is drawn; the depth test removes it where it is hidden. Occluders keep their test, so the buffer, the flares and the projected shadows are unchanged. `POSEIDON_OCC_RANGE=<m>` overrides the range (0 = the full test), `POSEIDON_OCC_STATS=1` logs the counts.
+- 3977916 (W1-5c): no sky reflection work where none of it shows (the land, rubber, matt surfaces seen face on).
+- 28eb4b0 (W1-5d): puddles return before the noise beyond the 400 m fade.
+- 1ef8a70 (W1-5e): one walk of the lamp lights for the wet film and the puddle, the tile list reused, lights behind the surface passed over.
+- a6d5db4 (W1-5f): low beams skip their pattern on surfaces facing away.
+- aa45d5f (W1-5h): receivers facing away from the sun skip the shadow taps on dry frames.
+- 2460b71 (W1-5g): keyless nights (sun more than 1.5 degrees under the horizon, no moon key) skip every sun lookup and read only the terrain's sky half.
+
+W1-5b (the fog colour gate) stays out: it moves every view by 1 to 2 levels, so it waits for the owner's sheet.
+
+Pictures: each item's build against the tip, deterministic on both sides, 8 T1 views. W1-5 c to g together: 7 byte-identical, sinai 1 px over 2 levels (a known sinai residue). W3-1: 6 byte-identical; broken_high 2 px over 2 levels and lowsun_fp 5 px (max 11 and 12 levels), each a speck in the far field, the same in every rebase, so W3-1's own rather than boot noise (far objects now drawn and sorted in their real place). Both pass the PI-T size rule.
+
+Timing of W3-1 alone against the tip (ring-mode quick, 2 rounds, one pair per row, contended on one row): CPU work at the valley -0.86 ms (12.38 to 11.52), sunrise_ridge -1.17 (10.18 to 9.02), Eden -1.23 (12.62 to 11.38), bay_offshore -0.50; every pair faster, no regression. With W3-11 and W1-7 on top (not landed) the valley falls 3.26 ms and sunrise 3.73. W1-5 c to g are not timed alone: they land as small exact work removals. Unit gate: 475/475, 823 of 827 (4 skipped), 3505 of 3515 (4 skipped, 6 that need game data). Formatted with clang-format 22.1.8; 21.1.8 pending. Linux gate: pending (pushed with this batch).
+
+Still to do: W3-11 sort cost and W2-2 wider runs (CPU), W1-1 and W1-7 (wait for the owner's motion clip), W1-5b (owner sheet), W4-1 batched cloudlets for the wet town and the fires, and the full bench of this tip as the next anchor.
