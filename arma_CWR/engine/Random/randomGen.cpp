@@ -3,6 +3,8 @@
 
 #include <Random/isaac.hpp>
 
+#include <cstdlib>
+
 // `DWORD` for the `GlobalTickCount` extern below: on Linux it's
 // typedef'd in `platform.hpp`'s Linux branch; on Windows it comes
 // from `<windows.h>` via `win.h` (which also undefs GDI macros
@@ -151,7 +153,23 @@ RandomTable::RandomTable(int seed)
 // Seeded construction yields a reproducible generator, e.g. for landscape bumps.
 RandomGenerator::RandomGenerator(int seed1, int seed2) : _seed(seed2), _seedTable(seed1), _valueTable(120) {}
 
-RandomGenerator::RandomGenerator() : _seed(Poseidon::Foundation::GlobalTickCount() + 3256), _seedTable(Poseidon::Foundation::GlobalTickCount()), _valueTable(120) {}
+bool RandomDeterministicWorld()
+{
+    const char* v = std::getenv("POSEIDON_DETERMINISTIC_WORLD");
+    return v && *v && !(v[0] == '0' && v[1] == 0);
+}
+
+// The tick count seeds the default (GRandGen) generator, or fixed seeds when a
+// capture session asks for a deterministic world (RandomDeterministicWorld).
+static int DefaultRandomSeed()
+{
+    return RandomDeterministicWorld() ? 1 : static_cast<int>(Poseidon::Foundation::GlobalTickCount());
+}
+
+RandomGenerator::RandomGenerator()
+    : _seed(DefaultRandomSeed() + 3256), _seedTable(DefaultRandomSeed()), _valueTable(120)
+{
+}
 
 float RandomGenerator::Gauss(float min, float mid, float max) const
 {

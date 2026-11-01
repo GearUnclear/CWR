@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -510,4 +511,167 @@ TEST_CASE("Temporal determinism: ground randomization and faces repeat across se
     const size_t lipHold = FindSq(sim, "if (still) { _wantedRandomLip = 0; _actualRandomLip = 0;");
     REQUIRE(lipHold != std::string::npos);
     CHECK(FindSq(sim, "NextRandomLip();") > lipHold);
+}
+
+TEST_CASE("Temporal determinism: the capture hold", "[remaster][TemporalDeterminism]")
+{
+    // DET-2: armed only in deterministic mode, released by the verbs, by
+    // turning the flag off, never re-armed by turning it on again.
+    FreshControl fresh;
+    CHECK_FALSE(CaptureHoldActive());
+    ArmCaptureHold(); // play: the flag is off
+    CHECK_FALSE(CaptureHoldActive());
+    CHECK_FALSE(TemporalControl().frameHold);
+    SetTemporalDeterministic(true);
+    CHECK_FALSE(CaptureHoldActive());
+    ArmCaptureHold();
+    CHECK(CaptureHoldActive());
+    ReleaseCaptureHold();
+    CHECK_FALSE(CaptureHoldActive());
+    ArmCaptureHold();
+    SetTemporalDeterministic(false);
+    CHECK_FALSE(CaptureHoldActive());
+    CHECK_FALSE(TemporalControl().frameHold);
+    SetTemporalDeterministic(true);
+    CHECK_FALSE(CaptureHoldActive());
+    CHECK(kCaptureHoldIdleLimitMs >= 5000);
+}
+
+TEST_CASE("Temporal determinism audit: the capture hold, the posed soldier's look and the seeds",
+          "[remaster][TemporalDeterminism][StateCacheAudit]")
+{
+    const std::filesystem::path commands = EngineDir() / "Poseidon" / "Game" / "Commands";
+
+    // A reset (both forms) and a sim-time pin arm the hold.
+    const std::string verbs = ReadTextFile(commands / "GameStateExtTestDeterminism.cpp");
+    REQUIRE_FALSE(verbs.empty());
+    const std::string reset = FunctionBody(verbs, "GameValue TriResetTemporal(");
+    REQUIRE_FALSE(reset.empty());
+    CHECK(CountOf(reset, "rm::ArmCaptureHold();") == 2);
+    CHECK(FindSq(verbs, "det=%d;reset=%u;applied=%u@%u;mist=%s;seed=%s;hold=%d") != std::string::npos);
+
+    const std::string test = ReadTextFile(commands / "GameStateExtTest.cpp");
+    const std::string simTime =
+        FunctionBody(test, "GameValue TriSetSimTime(const GameState* /*state*/, GameValuePar arg)\n{");
+    REQUIRE_FALSE(simTime.empty());
+    const size_t pin = FindSq(simTime, "Glob.time = Time(ms);");
+    const size_t arm = FindSq(simTime, "Poseidon::remaster::ArmCaptureHold();");
+    REQUIRE(pin != std::string::npos);
+    REQUIRE(arm != std::string::npos);
+    CHECK(pin < arm);
+
+    // The shot renders its own frame under a hold and ends it; a clip ends it.
+    const std::string render = ReadTextFile(commands / "GameStateExtTestRender.cpp");
+    const std::string shot =
+        FunctionBody(render, "GameValue TriScreenshot(const GameState* state, GameValuePar arg)\n{");
+    REQUIRE_FALSE(shot.empty());
+    const size_t frame = FindSq(shot, "else if (Poseidon::remaster::CaptureHoldActive()) Poseidon::AppIdle();");
+    const size_t release = FindSq(shot, "Poseidon::remaster::ReleaseCaptureHold();");
+    REQUIRE(frame != std::string::npos);
+    REQUIRE(release != std::string::npos);
+    CHECK(FindSq(shot, "if (!atPresent) GEngine->FlushPendingScreenshot();") < frame);
+    CHECK(frame < release);
+    const std::string record = ReadTextFile(commands / "GameStateExtTestRecord.cpp");
+    const std::string rec =
+        FunctionBody(record, "GameValue TriRecord(const GameState* /*state*/, GameValuePar arg)\n{");
+    REQUIRE_FALSE(rec.empty());
+    const std::string recSq = Squash(rec);
+    const size_t recOpen = recSq.find('{');
+    REQUIRE(recOpen != std::string::npos);
+    CHECK(recSq.compare(recOpen + 1, 41, "Poseidon::remaster::ReleaseCaptureHold();") == 0);
+
+    // Both main loops skip their own frame only while a hold is active, and
+    // every tri command restarts the idle limit.
+    const std::string app = ReadTextFile(EngineDir().parent_path() / "apps" / "cwr" / "Game" / "GameApplication.cpp");
+    REQUIRE_FALSE(app.empty());
+    CHECK(CountOf(app, "if (!CaptureHoldSkipsFrame(holdCommandTick))") == 2);
+    CHECK(CountOf(Squash(app), Squash("harnessServer->ProcessCommand(cmd); holdCommandTick = "
+                                      "Poseidon::Foundation::GlobalTickCount();")) == 2);
+    const std::string skip = FunctionBody(app, "static bool CaptureHoldSkipsFrame(DWORD& lastCommandTick)");
+    REQUIRE_FALSE(skip.empty());
+    const size_t inactive = FindSq(skip, "if (!rm::CaptureHoldActive()) { lastCommandTick = now; return false; }");
+    const size_t idle = FindSq(skip, "rm::ReleaseCaptureHold();");
+    REQUIRE(inactive != std::string::npos);
+    REQUIRE(idle != std::string::npos);
+    CHECK(inactive < idle);
+
+    // Only those verbs arm it: play never does.
+    int arms = 0;
+    for (const auto& root :
+         {EngineDir() / "Poseidon", EngineDir() / "PoseidonGL33", EngineDir().parent_path() / "apps"})
+    {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(root))
+        {
+            const auto ext = entry.path().extension();
+            if (!entry.is_regular_file() || (ext != ".cpp" && ext != ".hpp"))
+                continue;
+            const std::string name = entry.path().filename().string();
+            if (name == "TemporalDeterminism.cpp" || name == "TemporalDeterminism.hpp")
+                continue;
+            const int n = CountOf(ReadTextFile(entry.path()), "ArmCaptureHold(");
+            if (n != 0 && name != "GameStateExtTestDeterminism.cpp" && name != "GameStateExtTest.cpp")
+            {
+                INFO(entry.path().string());
+                CHECK(n == 0);
+            }
+            arms += n;
+        }
+    }
+    CHECK(arms == 3);
+
+    // A posed soldier looks forward in deterministic mode; play keeps the
+    // look-around timers.
+    const std::string ai =
+        ReadTextFile(EngineDir() / "Poseidon" / "World" / "Entities" / "Infantry" / "SoldierOldAI.cpp");
+    const std::string fire = FunctionBody(ai, "void Soldier::AIFire(float deltaT)");
+    REQUIRE_FALSE(fire.empty());
+    const size_t look = FindSq(fire, "if (remaster::TemporalDeterministic()) { _lookTargetTimeLeft = 0; "
+                                     "_lookForwardTimeLeft = 1.0f; } else if (_lookTargetTimeLeft > 0)");
+    REQUIRE(look != std::string::npos);
+    CHECK(FindSq(fire, "_lookTargetTimeLeft = 4 + GRandGen.RandomValue() * 8;") > look);
+
+    // GRandGen's seeds: the tick count in play, fixed seeds in a capture
+    // session that asks for a deterministic world.
+    const std::string gen = ReadTextFile(EngineDir() / "Random" / "randomGen.cpp");
+    REQUIRE_FALSE(gen.empty());
+    CHECK(FindSq(gen, "std::getenv(\"POSEIDON_DETERMINISTIC_WORLD\")") != std::string::npos);
+    CHECK(FindSq(gen, "return RandomDeterministicWorld() ? 1 : static_cast<int>(Poseidon::Foundation::"
+                      "GlobalTickCount());") != std::string::npos);
+    CHECK(FindSq(gen, "RandomGenerator::RandomGenerator() : _seed(DefaultRandomSeed() + 3256), "
+                      "_seedTable(DefaultRandomSeed()), _valueTable(120) {}") != std::string::npos);
+    const std::string init = ReadTextFile(EngineDir() / "Poseidon" / "World" / "WorldInit.cpp");
+    const size_t tickSeed = FindSq(init, "GRandGen.SetSeed(Poseidon::Foundation::GlobalTickCount() + time.wSecond);");
+    const size_t fixedSeed = FindSq(init, "if (RandomDeterministicWorld()) GRandGen.SetSeed(1);");
+    REQUIRE(tickSeed != std::string::npos);
+    REQUIRE(fixedSeed != std::string::npos);
+    CHECK(tickSeed < fixedSeed);
+}
+
+namespace
+{
+void SetDetWorldEnv(const char* value)
+{
+#ifdef _WIN32
+    _putenv_s("POSEIDON_DETERMINISTIC_WORLD", value ? value : "");
+#else
+    if (value)
+        setenv("POSEIDON_DETERMINISTIC_WORLD", value, 1);
+    else
+        unsetenv("POSEIDON_DETERMINISTIC_WORLD");
+#endif
+}
+} // namespace
+
+TEST_CASE("Temporal determinism: the deterministic-world switch", "[remaster][TemporalDeterminism]")
+{
+    const char* before = std::getenv("POSEIDON_DETERMINISTIC_WORLD");
+    const std::string saved = before ? before : "";
+    const bool hadValue = before != nullptr;
+    SetDetWorldEnv(nullptr);
+    CHECK_FALSE(RandomDeterministicWorld());
+    SetDetWorldEnv("0");
+    CHECK_FALSE(RandomDeterministicWorld());
+    SetDetWorldEnv("1");
+    CHECK(RandomDeterministicWorld());
+    SetDetWorldEnv(hadValue ? saved.c_str() : nullptr);
 }

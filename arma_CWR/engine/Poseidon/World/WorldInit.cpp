@@ -148,6 +148,8 @@ World::World(Engine* engine, bool editor)
 #else
     GRandGen.SetSeed(Poseidon::Foundation::GlobalTickCount() + (unsigned)time(nullptr));
 #endif
+    if (RandomDeterministicWorld())
+        GRandGen.SetSeed(1); // capture sessions (POSEIDON_DETERMINISTIC_WORLD): the same stream every run
     Glob.clock.SetTimeInYear(8 * OneHour + 130 * OneDay);
     mainLight->Recalculate(this);
     _timeToSkip = 0;

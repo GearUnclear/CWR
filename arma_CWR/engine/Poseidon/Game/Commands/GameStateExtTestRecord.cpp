@@ -29,6 +29,7 @@ using namespace Poseidon;
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Graphics/Shared/FrameRecorder.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/World/TriCamPath.hpp>
 
 #include <cstdio>
@@ -49,9 +50,12 @@ namespace
 /// relative path is taken under the tri output dir (TRI_OUTPUT_DIR), where
 /// the screenshots go; its folder is created. [path, 0, mode] while a
 /// recording runs asks it to write what it has. Returns "OK:armed <serial>
-/// <path>", "OK:stopping" or "FAIL:<why>".
+/// <path>", "OK:stopping" or "FAIL:<why>". It ends a capture hold
+/// (Graphics/Remaster/TemporalDeterminism.hpp): a clip records the main loop's
+/// own frames.
 GameValue TriRecord(const GameState* /*state*/, GameValuePar arg)
 {
+    Poseidon::remaster::ReleaseCaptureHold();
     if (arg.GetType() != GameArray)
         return GameValue("FAIL:expected [path, nFrames, mode]");
     const GameArrayType& a = arg;

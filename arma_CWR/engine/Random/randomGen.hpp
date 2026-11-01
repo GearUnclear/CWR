@@ -47,6 +47,12 @@ class RandomGenerator
     __forceinline int GetSeed(int x, int z, int y) const { return _seedTable.Seed(x, z, y); }
 };
 
+// POSEIDON_DETERMINISTIC_WORLD set (and not "0") in the environment: capture
+// sessions ask for the same world every run. GRandGen then starts from fixed
+// seeds instead of the tick count (its positional seed table is never reseeded
+// later, and RandomShape, ObjTrash and AI ids read it). Unset in play.
+bool RandomDeterministicWorld();
+
 // Asset-only rendering can construct visual proxies (e.g. flag cloth) through
 // normal model loading without drawing from the campaign's random stream.
 inline RandomGenerator*& RandomGeneratorOverride()

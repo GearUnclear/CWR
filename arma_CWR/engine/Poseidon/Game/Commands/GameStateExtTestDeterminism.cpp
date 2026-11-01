@@ -9,7 +9,12 @@
 //   triResetTemporal n            M2's scratch form (gen_golden.py calls it):
 //                                 [0, 0], then triSeedRandom n
 //   triSeedRandom n               seed GRandGen and the C rand() stream
-//   triTemporalState              "det=..;reset=..;applied=..@..;mist=..;seed=.."
+//   triTemporalState              "det=..;reset=..;applied=..@..;mist=..;seed=..;hold=.."
+//
+// Deterministic mode also holds the main loop's own frames from a reset (or a
+// triSetSimTime) to the next triScreenshot or triRecord (the capture hold,
+// Graphics/Remaster/TemporalDeterminism.hpp), so the frames between them are
+// exactly the ones the test's verbs run.
 //
 // The capture recipe (plan 3.3): pin the view and the sim clock, settle,
 // triSetFixedStep (1/60), triDeterministic true, triResetTemporal [x, z],
@@ -45,7 +50,7 @@ void SeedRandomStreams(int seed)
 GameValue TriDeterministic(const GameState* /*state*/, GameValuePar arg)
 {
     const bool on = static_cast<bool>(arg);
-    rm::SetTemporalDeterministic(on);
+    rm::SetTemporalDeterministic(on); // off also releases a capture hold
     LOG_INFO(Core, "[tri] triDeterministic {}", on ? 1 : 0);
     return GameValue(on ? "OK:1" : "OK:0");
 }
@@ -65,6 +70,7 @@ GameValue TriResetTemporal(const GameState* /*state*/, GameValuePar arg)
     {
         const int seed = toInt(static_cast<float>(arg));
         rm::RequestTemporalReset(true, 0.0f, 0.0f);
+        rm::ArmCaptureHold(); // deterministic mode only
         SeedRandomStreams(seed);
         char buf[96];
         snprintf(buf, sizeof(buf), "OK:reset %u mist held 0.00 0.00 seed %d", rm::TemporalControl().resetSerial, seed);
@@ -86,6 +92,7 @@ GameValue TriResetTemporal(const GameState* /*state*/, GameValuePar arg)
         z = static_cast<float>(static_cast<GameScalarType>(a[1]));
     }
     rm::RequestTemporalReset(hold, x, z);
+    rm::ArmCaptureHold(); // deterministic mode only
     char buf[96];
     if (hold)
         snprintf(buf, sizeof(buf), "OK:reset %u mist held %.2f %.2f", rm::TemporalControl().resetSerial, x, z);
@@ -109,8 +116,9 @@ GameValue TriSeedRandom(const GameState* /*state*/, GameValuePar arg)
 }
 
 /// triTemporalState: "det=<0|1>;reset=<serial>;applied=<serial>@<frame>;
-/// mist=held <x> <z>|free;seed=<n>|none" (applied: the last reset the
-/// backend has applied and the engine frame it applied at).
+/// mist=held <x> <z>|free;seed=<n>|none;hold=<0|1>" (applied: the last reset
+/// the backend has applied and the engine frame it applied at; hold: the
+/// capture hold).
 GameValue TriTemporalState(const GameState* /*state*/)
 {
     const rm::TemporalControlState& s = rm::TemporalControl();
@@ -125,8 +133,8 @@ GameValue TriTemporalState(const GameState* /*state*/)
     else
         snprintf(seed, sizeof(seed), "none");
     char buf[192];
-    snprintf(buf, sizeof(buf), "det=%d;reset=%u;applied=%u@%u;mist=%s;seed=%s", s.deterministic ? 1 : 0, s.resetSerial,
-             s.appliedSerial, s.appliedFrame, mist, seed);
+    snprintf(buf, sizeof(buf), "det=%d;reset=%u;applied=%u@%u;mist=%s;seed=%s;hold=%d", s.deterministic ? 1 : 0,
+             s.resetSerial, s.appliedSerial, s.appliedFrame, mist, seed, rm::CaptureHoldActive() ? 1 : 0);
     return GameValue(buf);
 }
 

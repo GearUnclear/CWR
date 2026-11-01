@@ -107,6 +107,7 @@ __attribute__((used)) static void (*_forceLinkGameStateExtTest)() = &InitModuleG
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Dev/Harness/HarnessBuiltins.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Harness/HarnessPlayerTracker.hpp>
 #include <Poseidon/Dev/Harness/HarnessMissionStateTracker.hpp>
@@ -480,6 +481,31 @@ static TimedTrigger ParseTriggerTime(const std::string& spec, size_t colonPos)
         return {-1, static_cast<int>(secs * 1000.0f), false};
     }
     return {std::stoi(timeStr), -1, false};
+}
+
+// The capture hold (deterministic captures, Graphics/Remaster/
+// TemporalDeterminism.hpp): true when this main-loop pass must not run a frame
+// of its own, so only the tri verbs' frames advance the world between a pin and
+// its shot. It still pumps window events and tri commands. A hold that sees no
+// tri command for kCaptureHoldIdleLimitMs is released with a warning, so a test
+// that never shoots cannot hang the game. Play never arms one.
+static bool CaptureHoldSkipsFrame(DWORD& lastCommandTick)
+{
+    namespace rm = Poseidon::remaster;
+    const DWORD now = Poseidon::Foundation::GlobalTickCount();
+    if (!rm::CaptureHoldActive())
+    {
+        lastCommandTick = now;
+        return false;
+    }
+    if (now - lastCommandTick > static_cast<DWORD>(rm::kCaptureHoldIdleLimitMs))
+    {
+        rm::ReleaseCaptureHold();
+        LOG_WARN(Core, "capture hold released: no tri command for {} ms", rm::kCaptureHoldIdleLimitMs);
+        return false;
+    }
+    SDL_Delay(1);
+    return true;
 }
 
 // Returns true once per trigger, when either frame or elapsed time matches.
@@ -1050,11 +1076,13 @@ void GameApplication::RunMainLoop()
     std::unique_ptr<HarnessServer> harnessServer = CreateGameHarness();
     HarnessPlayerTracker harnessPlayerTracker;
     HarnessMissionStateTracker harnessMissionStateTracker;
+    DWORD holdCommandTick = Poseidon::Foundation::GlobalTickCount();
 
     while (!m_closeRequest)
     {
         GDebugger.ProcessAlive(); // keep watchdog thread happy
-        Poseidon::AppIdle();      // simulate + render one frame
+        if (!CaptureHoldSkipsFrame(holdCommandTick))
+            Poseidon::AppIdle(); // simulate + render one frame
 
         PollStrictAbort(); // --strict: stop on any ERROR logged this frame
 
@@ -1199,7 +1227,10 @@ void GameApplication::RunMainLoop()
 
             HarnessCommand cmd;
             if (harnessServer->PopCommand(cmd))
+            {
                 harnessServer->ProcessCommand(cmd);
+                holdCommandTick = Poseidon::Foundation::GlobalTickCount();
+            }
         }
 
         mainFrameCounter++;
@@ -1245,6 +1276,7 @@ void GameApplication::RunMainLoop()
     std::unique_ptr<HarnessServer> harnessServer = CreateGameHarness();
     HarnessPlayerTracker harnessPlayerTracker;
     HarnessMissionStateTracker harnessMissionStateTracker;
+    DWORD holdCommandTick = Poseidon::Foundation::GlobalTickCount();
 
     while (!m_closeRequest)
     {
@@ -1290,7 +1322,8 @@ void GameApplication::RunMainLoop()
         }
 
         auto frameT0 = TerrainProfile::Now();
-        Poseidon::AppIdle();
+        if (!CaptureHoldSkipsFrame(holdCommandTick))
+            Poseidon::AppIdle();
         auto frameT1 = TerrainProfile::Now();
 
         // Benchmark FPS tracking (only in arcade/gameplay mode)
@@ -1396,7 +1429,10 @@ void GameApplication::RunMainLoop()
 
             HarnessCommand cmd;
             if (harnessServer->PopCommand(cmd))
+            {
                 harnessServer->ProcessCommand(cmd);
+                holdCommandTick = Poseidon::Foundation::GlobalTickCount();
+            }
         }
 
         mainFrameCounter++;

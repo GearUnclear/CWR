@@ -40,6 +40,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 #include <Poseidon/AI/EntityAI.hpp>
 namespace Poseidon
@@ -274,6 +275,10 @@ GameValue TriCaptureAtPresent(const GameState* /*state*/, GameValuePar arg)
 
 /// triScreenshot "label" — capture screenshot to output dir (PNG + BMP). Returns "OK".
 /// Uses no-extension path so ScreenshotWriter produces both formats.
+/// Under the capture hold (deterministic mode, Graphics/Remaster/
+/// TemporalDeterminism.hpp) the main loop runs no frame of its own, so a
+/// capture at present renders its one frame here, the frame right after the
+/// test's last triSimFrames frame; the hold ends with the shot.
 GameValue TriScreenshot(const GameState* state, GameValuePar arg)
 {
     GameStringType label = static_cast<GameStringType>(arg);
@@ -298,7 +303,10 @@ GameValue TriScreenshot(const GameState* state, GameValuePar arg)
         // captures cannot race for the single pending path.
         if (!atPresent)
             GEngine->FlushPendingScreenshot();
+        else if (Poseidon::remaster::CaptureHoldActive())
+            Poseidon::AppIdle(); // the capture frame (see above)
     }
+    Poseidon::remaster::ReleaseCaptureHold();
 
     return GameValue("OK");
 }

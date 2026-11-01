@@ -17,6 +17,7 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 #include <Random/randomGen.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 
 namespace Poseidon
 {
@@ -1456,7 +1457,16 @@ void Soldier::AIFire(float deltaT)
         return;
     }
 
-    if (_lookTargetTimeLeft > 0)
+    // Capture determinism (triDeterministic): the look-around timers were drawn
+    // from GRandGen before the capture's seed, so a posed soldier turned his head
+    // differently in every run. Deterministic mode keeps him looking forward
+    // (AimHeadAI then aims the head straight); play (flag off) is unchanged.
+    if (remaster::TemporalDeterministic())
+    {
+        _lookTargetTimeLeft = 0;
+        _lookForwardTimeLeft = 1.0f;
+    }
+    else if (_lookTargetTimeLeft > 0)
     {
         _lookTargetTimeLeft -= deltaT;
     }

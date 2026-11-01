@@ -27,6 +27,18 @@
 //   snap meters was stored at the same pre-exposure in every run; the
 //   reflections' probe frames count from the last reset; the rain streak
 //   overlay follows the simulation clock instead of a per-frame float sum.
+// - The capture hold (DET-2): the game's main loop runs one frame of its own
+//   between any two tri statements, and as many as pass while the runner sends
+//   the next one (1 to 8 measured, different every run), so the frames between a
+//   reset and its shot were not the 32 the test asked for: the fixed-step clock,
+//   the TAA jitter and history, the sea and the AI all moved by a varying number
+//   of frames. In deterministic mode triSetSimTime and triResetTemporal arm a
+//   hold; while it holds the main loop runs no frame of its own (it still pumps
+//   window events and tri commands), so only the verbs' own frames
+//   (triSimFrames, triSettleScene, the capture frame of triScreenshot) advance
+//   the world. triScreenshot (after its frame), triRecord and triDeterministic
+//   false release it, and the main loop does after kCaptureHoldIdleLimitMs
+//   without a tri command. Play never arms it.
 
 namespace Poseidon::remaster
 {
@@ -50,7 +62,13 @@ struct TemporalControlState
     // The last reset the backend applied and the engine frame it applied at.
     std::uint32_t appliedSerial = 0;
     std::uint32_t appliedFrame = 0;
+    // The capture hold (see above); only ever true in deterministic mode.
+    bool frameHold = false;
 };
+
+// The main loop releases a hold nobody released after this long without a tri
+// command (a test that never shoots after its pin must not hang the game).
+constexpr int kCaptureHoldIdleLimitMs = 15000;
 
 // Process-wide, main thread only.
 TemporalControlState& TemporalControl();
@@ -62,6 +80,11 @@ bool TemporalDeterministic();
 bool TemporalMistHeld(float& x, float& z);
 void NoteRandomSeed(int seed);
 void NoteTemporalResetApplied(std::uint32_t serial, std::uint32_t frame);
+// The capture hold: Arm does nothing unless deterministic mode is on; Active is
+// true only while armed and deterministic.
+void ArmCaptureHold();
+void ReleaseCaptureHold();
+bool CaptureHoldActive();
 
 // The backend's side of a reset request: true once for each new serial.
 struct TemporalResetLatch

@@ -24,7 +24,10 @@ void RequestTemporalReset(bool holdMist, float mistX, float mistZ)
 
 void SetTemporalDeterministic(bool on)
 {
-    TemporalControl().deterministic = on;
+    TemporalControlState& s = TemporalControl();
+    s.deterministic = on;
+    if (!on)
+        s.frameHold = false;
 }
 
 bool TemporalDeterministic()
@@ -54,6 +57,24 @@ void NoteTemporalResetApplied(std::uint32_t serial, std::uint32_t frame)
     TemporalControlState& s = TemporalControl();
     s.appliedSerial = serial;
     s.appliedFrame = frame;
+}
+
+void ArmCaptureHold()
+{
+    TemporalControlState& s = TemporalControl();
+    if (s.deterministic)
+        s.frameHold = true;
+}
+
+void ReleaseCaptureHold()
+{
+    TemporalControl().frameHold = false;
+}
+
+bool CaptureHoldActive()
+{
+    const TemporalControlState& s = TemporalControl();
+    return s.frameHold && s.deterministic;
 }
 
 float DeterministicAdaptStep(float fixedStep)
