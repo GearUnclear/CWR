@@ -246,7 +246,7 @@ A twelve-lane review and fix run on `graphics-remaster`, ahead of the merge into
 | Eden 250 m, view distance 5,000 | 25.9 / 25.2 / 20.7 | 12.4 / 9.6 / 2.0 |
 | noon_fields | 8.7 / 8.6 / 5.6 | 6.6 / 6.0 / 0.85 |
 
-With the uploads gone the long views become CPU-bound at about 12.4 ms, under the 15 ms CPU budget for 60 fps; the stand-in skips the land fit, so its CPU column is a little optimistic, and p95 is not yet measured. The full Remastered shader then costs 0.7 ms more than a trivial one at the valley (1.63 against 0.96 ms), so the earlier "the new programs cost 1.75x Classic" was the upload stall exposing each draw's shading latency. At the default view distance (900 m) every long view is far under budget already. The real fix (upload a dynamic buffer only when its vertices changed, plus a per-object fitted geometry cache) is perf item W1-9 and has not landed. Numbers: the perf squad's second measuring round, `tmp\perf-audit\measure2` in the `graphics-remaster` worktree.
+With the uploads gone the long views become CPU-bound at about 12.4 ms, under the 15 ms CPU budget for 60 fps; the stand-in skips the land fit, so its CPU column is a little optimistic, and p95 is not yet measured. The full Remastered shader then costs 0.7 ms more than a trivial one at the valley (1.63 against 0.96 ms), so the earlier "the new programs cost 1.75x Classic" was the upload stall exposing each draw's shading latency. At the default view distance (900 m) every long view is far under budget already. The real fix (upload a dynamic buffer only when its vertices changed, plus a per-object fitted geometry cache) is perf item W1-9; it landed on 2026-11-01 as fb043ec (wave 1, batch 1, below). Numbers: the perf squad's second measuring round, `tmp\perf-audit\measure2` in the `graphics-remaster` worktree.
 
 **Tooling, batch 1 (2026-10-31).** Nothing here changes what the player sees; every new verb and flag is off in play.
 
@@ -264,4 +264,37 @@ Gate: build clean (the 5 baseline Network warnings only), unit gate 475/475, 823
 
 **The GL debug context.** Debug context off: no measurable effect (within 0.1 to 0.3 ms on every row). Not landed; making it opt-in for Mesa's threaded GL stays a low-priority portability item.
 
-Still to do: W1-9 and the other cost items, a timing run at 1080p on an RTX 3060 class card, and p95 frame times per view.
+**Determinism for exact stills (2026-10-31).** Two boots of one build now give byte-identical dry stills on most views, so a perf fix can be checked at 0 differing pixels. Flag-gated (triDeterministic and `POSEIDON_DETERMINISTIC_WORLD`, both off in play).
+
+- 97ed523: posed soldiers keep a still face while triDeterministic is on; 4WVR worlds (every LoBo island) take their per-cell ground texture offsets from a world-name seed under `POSEIDON_DETERMINISTIC_WORLD` instead of the tick-seeded generator; the bench sets that variable for stills, counts and motion boots.
+- 7fcec91: capture hold (in deterministic mode the main loop draws no frames of its own between the reset and the shot), soldiers look forward, fixed random seeds under `POSEIDON_DETERMINISTIC_WORLD`.
+
+Two boots of the new tip's build: 18 of 21 dry T1 shots byte-identical; the residue is broken_high and sinai_desert_noon at 1 px over 2 levels (max 3) and sinai Classic at 1 level. The rain town and the night views still change between boots and are judged by eye only.
+
+**Wave 1, batch 1 (2026-11-01).** Five cost items and one bench fix:
+
+- 9f469ae: bench ring mode repaired (the rings were dumped after `triGpuTimes true` had emptied the GPU ring, so every window of the first ring-mode run was void).
+- 2ffa04e (W1-3): uniform uploads are deduplicated on every lighting row, not only while the DrawGrouping gate is on; the gain is on the Classic and all-off rows (sunrise all-off GPU frame 24.4 to 17.4 ms in the first measuring round).
+- 5950203, 185efb4 (W1-2): the frame observer reads its centre pixel through a fenced one-pixel readback instead of resolving the whole multisampled frame and stalling on it, which made 1 frame in 16 take about 100 ms on the long views.
+- c34936a (W1-4): the world program set links 36 programs instead of 144 (four slots shared one program each); the binary cache holds 36 entries (layout version 2), a full cache hit compiles no vertex shader, and the night eye switch no longer changes programs. This targets the link stall at boot (about 383 ms on a cache miss, 356 ms on a warm hit).
+- 6aff603 (W1-6): world matrix uploads skipped when unchanged, one vertex-constant flush per material, pass debug groups opt-in (RenderDoc attached or `POSEIDON_GL_DEBUG_GROUPS=1`), the texture-binding tripwire readback only under `--autotest`, memory-info extensions looked up once per context.
+- fb043ec (W1-9): a dynamic vertex buffer uploads only when its bytes changed, and land-following objects of the plain classes keep a fitted copy per object and LOD level, valid while level, world matrix, terrain height version and damage are unchanged. At the valley the dynamic uploads fall from about 3,099 (2.1 MB) to 21 (364 KB) per frame.
+
+Pictures: each item's own build against the tip, two fresh boots in deterministic mode over the 8 T1 views (W1-3 also in Classic and all-off): every dry view byte-identical or within the build's own 2-boot residue.
+
+Timing of the batch build against the tooling tip (ring mode, 4 ABBA pairs, 1080p, 4x MSAA, RTX 4060 Ti, fpsCap 0, vsync 0, observer at 1 in 16; frame p50 / p95, GPU frame, pass1, CPU work in ms):
+
+| View | Tip | Batch 1 |
+|---|---|---|
+| Valley 05:15, view distance 4,000 | 32.9 / 97.8, GPU 32.9, pass1 25.9, CPU 18.8 | 12.8 / 13.9, GPU 7.6, pass1 2.1, CPU 12.6 |
+| Eden 250 m, view distance 5,000 | 29.7 / 89.2, GPU 29.8, pass1 22.9, CPU 19.4 | 12.9 / 14.0, GPU 12.7, pass1 3.1, CPU 12.7 |
+| sunrise_ridge | 13.7 / 15.6, GPU 9.6, CPU 13.4 | 10.6 / 11.3, GPU 4.4, CPU 10.3 |
+| noon_fields | 10.8 / 31.9, GPU 10.8, pass1 6.6, CPU 8.0 | 6.4 / 6.9, GPU 5.4, pass1 1.2, CPU 6.2 |
+| bay_offshore | 12.1 / 35.5, GPU 12.2 | 6.5 / 6.7, GPU 6.4 |
+| sinai_desert_noon | 8.2 / 24.8, GPU 9.0 | 6.6 / 6.8, GPU 6.5 |
+| town_night_rain | 13.9 / 39.9, GPU 13.9 | 12.0 / 12.8, GPU 11.8 |
+| combat_fires | 7.5 / 21.9, GPU 7.5 | 6.5 / 7.0, GPU 6.4 |
+
+No regression on any of the 8 views (the wet town's frame is rain-noisy and its object count differs between the sides, so it is read on pass1 only). The tip's p95 sat on the probe frames (W1-2); the GPU and pass1 drop on the long views is W1-9's, as is most of the CPU drop. That build also carried W1-5 (b c d e f h g, exact shader gates), which is not landed yet; W1-5 is about 0.1 ms per long view. Every long view now meets 15 ms of CPU at p95 on this machine, and the valley meets 9 ms of GPU. Unit gate: 475/475, 823 of 827 (4 skipped), 3499 of 3509 (4 skipped, 6 that need game data the worktree has no junction for). Formatted with clang-format 22.1.8; 21.1.8 pending. Linux gate: not run.
+
+Still to do: W1-5, W1-1 and W1-7 (the last two wait for the owner's motion clip), the CPU items W3-1 and W3-11, Eden's GPU frame (12.7 ms, over 9), a timing run at 1080p on an RTX 3060 class card.
