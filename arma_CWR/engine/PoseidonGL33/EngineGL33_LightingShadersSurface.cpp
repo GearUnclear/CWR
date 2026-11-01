@@ -727,8 +727,26 @@ SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool te
     if (!paint) rough = clamp(rough + 0.15 * (1.0 - smoothstep(0.02, 0.2, lum)) * (1.0 - metal), 0.03, 1.0);
     vec3 f0 = mix(vec3(p.y), clamp(a * 2.2, 0.0, 1.0), metal);
     float nv = clamp(dot(n, v), 1e-4, 1.0);
-    vec2 ab = surfaceEnvBrdf(rough, nv);
-    vec3 fEnv = f0 * ab.x + ab.y;
+    // A rough dielectric's lobe takes in the dim ground and its own surface's
+    // relief as much as the sky, and the sky fill already carries its
+    // diffuse-looking part: none of the sky reflection from roughness 0.5 on
+    // (matt paint, rubber, cloth, soil, plaster) seen face on, so they keep
+    // their colour instead of a grey-blue veil (a dark window or a shaded
+    // facade lifted toward the sky's colour). Grazing views catch some at an
+    // edge (a hull's silhouette, a wall seen along its face), up to 0.3 (paint
+    // 0.2); the land none (the haze carries the far ground's sheen). The
+    // reflection loses what the receiver's occlusion hides: skyVis here, the
+    // post pass's horizon occlusion through the share it is part of.
+    float matt = smoothstep(0.25, 0.5, rough) * (1.0 - metal);
+    float roughSky = mix(1.0, 0.0, matt);
+    int cls = terrain ? 0 : int(surfClass.x + 0.5);
+    float edgeSky = terrain ? roughSky : mix(1.0, paint ? 0.2 : 0.3, matt);
+    roughSky = mix(roughSky, edgeSky, pow(1.0 - nv, 5.0));
+    // Rubber reflects no sky (a tyre's tread keeps its grooves); a blending
+    // texture that is not glass (a canvas window, a net, a sign) none either:
+    // its sheen made a see-through panel a flat pale card.
+    bool blendTex = !terrain && surfClass.z > 0.5;
+    if (cls == 4 || (blendTex && cls != 3 && cls != 12)) roughSky = 0.0;
     // The sun: GGX, Schlick-GGX visibility, Schlick Fresnel; times pi into
     // the rig's units (the rig's diffuse is albedo * irradiance).
     vec3 l = litSunDir.xyz;
@@ -754,42 +772,36 @@ SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool te
     }
     // The sky: a smooth surface mirrors the sky as the player sees it, a rough
     // one the sky light around its reflected direction (the irradiance there);
-    // both lose what the receiver's sky visibility hides.
-    vec3 r = reflect(-v, n);
-    vec3 rd = normalize(mix(r, n, rough * rough));
-    vec3 rough_l = surfaceSkyIrradiance(rd, false) * 1.6;
-    vec3 pref = rough_l;
-    // The sky as seen only where the lobe is narrow (glass, lenses, metal,
-    // wet film): the table lookup is the costly part, and most surfaces skip it.
-    float smoothW = 1.0 - smoothstep(0.08, 0.45, rough);
-    if (smoothW > 0.0) {
-        vec3 smooth_l = toLinear(skyReflection(normalize(vec3(r.x, max(r.y, 0.02), r.z)))) / max(litZenith.w, 1e-3);
-        smooth_l = mix(smooth_l, rough_l, 1.0 - smoothstep(-0.15, 0.0, r.y));
-        pref = mix(rough_l, smooth_l, smoothW);
+    // both lose what the receiver's sky visibility hides. Where none of it
+    // shows (roughSky exactly 0: the land, rubber, a blending texture that is
+    // not glass, a matt surface seen face on) the reflection and its
+    // environment term are skipped: o.sky stays 0 and the diffuse keeps
+    // 1 - metal, what the full sum gives there. Nothing in the skipped block
+    // takes a derivative (the table lookup samples unit 8 without mip levels),
+    // and its sky irradiance call's g_surfGroundShare is read by
+    // shadeRemastered before this function runs.
+    if (roughSky > 0.0) {
+        vec2 ab = surfaceEnvBrdf(rough, nv);
+        vec3 fEnv = f0 * ab.x + ab.y;
+        vec3 r = reflect(-v, n);
+        vec3 rd = normalize(mix(r, n, rough * rough));
+        vec3 rough_l = surfaceSkyIrradiance(rd, false) * 1.6;
+        vec3 pref = rough_l;
+        // The sky as seen only where the lobe is narrow (glass, lenses, metal,
+        // wet film): the table lookup is the costly part, and most surfaces
+        // skip it.
+        float smoothW = 1.0 - smoothstep(0.08, 0.45, rough);
+        if (smoothW > 0.0) {
+            vec3 smooth_l = toLinear(skyReflection(normalize(vec3(r.x, max(r.y, 0.02), r.z)))) / max(litZenith.w, 1e-3);
+            smooth_l = mix(smooth_l, rough_l, 1.0 - smoothstep(-0.15, 0.0, r.y));
+            pref = mix(rough_l, smooth_l, smoothW);
+        }
+        o.sky = pref * fEnv * (skyVis * roughSky);
+        // The diffuse gives up only the energy the reflection actually shows.
+        o.diffuse = (1.0 - dot(fEnv, kLuma) * roughSky) * (1.0 - metal);
+    } else {
+        o.diffuse = 1.0 - metal;
     }
-    // A rough dielectric's lobe takes in the dim ground and its own surface's
-    // relief as much as the sky, and the sky fill already carries its
-    // diffuse-looking part: none of the sky reflection from roughness 0.5 on
-    // (matt paint, rubber, cloth, soil, plaster) seen face on, so they keep
-    // their colour instead of a grey-blue veil (a dark window or a shaded
-    // facade lifted toward the sky's colour). Grazing views catch some at an
-    // edge (a hull's silhouette, a wall seen along its face), up to 0.3 (paint
-    // 0.2); the land none (the haze carries the far ground's sheen). The
-    // reflection loses what the receiver's occlusion hides: skyVis here, the
-    // post pass's horizon occlusion through the share it is part of.
-    float matt = smoothstep(0.25, 0.5, rough) * (1.0 - metal);
-    float roughSky = mix(1.0, 0.0, matt);
-    int cls = terrain ? 0 : int(surfClass.x + 0.5);
-    float edgeSky = terrain ? roughSky : mix(1.0, paint ? 0.2 : 0.3, matt);
-    roughSky = mix(roughSky, edgeSky, pow(1.0 - nv, 5.0));
-    // Rubber reflects no sky (a tyre's tread keeps its grooves); a blending
-    // texture that is not glass (a canvas window, a net, a sign) none either:
-    // its sheen made a see-through panel a flat pale card.
-    bool blendTex = !terrain && surfClass.z > 0.5;
-    if (cls == 4 || (blendTex && cls != 3 && cls != 12)) roughSky = 0.0;
-    o.sky = pref * fEnv * (skyVis * roughSky);
-    // The diffuse gives up only the energy the reflection actually shows.
-    o.diffuse = (1.0 - dot(fEnv, kLuma) * roughSky) * (1.0 - metal);
     float s = litSurface.y * litHorizon.w;
     o.sun *= s;
     o.sky *= s;
