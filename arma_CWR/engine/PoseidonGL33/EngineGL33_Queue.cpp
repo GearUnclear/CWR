@@ -8,6 +8,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
 #include <glad/gl.h>
@@ -131,12 +132,15 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
         ++Poseidon::gPerfDrawCalls;
 
-        // Record DrawItem
-        DrawItem item = {};
-        item.isTLDraw = false;
-        item.specFlags = Poseidon::render::SplitLegacy(triq._special);
-        item.passId = triq._passId;
-        _drawItems.push_back(item);
+        // Record DrawItem, only on frames the frame validator observes (S3-28)
+        if (Poseidon::render::frame::ObserverRecordsThisFrame())
+        {
+            DrawItem item = {};
+            item.isTLDraw = false;
+            item.specFlags = Poseidon::render::SplitLegacy(triq._special);
+            item.passId = triq._passId;
+            _drawItems.push_back(item);
+        }
 
         triq._triangleQueue.Clear();
     }

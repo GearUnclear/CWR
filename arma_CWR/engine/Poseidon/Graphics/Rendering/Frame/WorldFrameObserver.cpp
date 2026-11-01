@@ -18,8 +18,38 @@ namespace render::frame
 
 namespace
 {
-// Pass shape of the most recently observed frame — render thread only.
+// Render thread only, like everything in the observer.
+// Pass shape of the most recently observed frame.
 std::vector<ObservedPass> s_lastShape;
+// Observation cadence: frames left until the next observed one (play), and
+// whether every frame is observed (tri). Read by ObserverRecordsThisFrame
+// before the frame's draws; until the first observation latches the mode the
+// backend records, as it always did.
+int s_sampleCountdown = 0;
+bool s_everyFrame = true;
+// I-29: the near-black run across observed frames (W1-2).
+BlackFrameTracker s_blackFrames;
+
+void LogBlackFrames(const std::vector<BlackFrameTracker::Log>& logs)
+{
+    for (const auto& l : logs)
+        LOG_WARN(Graphics, "frame runtime {}: {} (consecutive frames: {})", l.violation.ruleId,
+                 l.violation.detail.c_str(), l.consecutive);
+}
+
+// The centre-pixel probes that have arrived (oldest first), into the tracker.
+void CollectWorldProbes(Engine& engine)
+{
+    Engine::WorldProbe results[8];
+    int n;
+    do
+    {
+        n = engine.PollWorldProbes(results, 8);
+        for (int i = 0; i < n; ++i)
+            s_blackFrames.Resolve(results[i].frame, results[i].rgb);
+    } while (n == 8);
+    LogBlackFrames(s_blackFrames.Advance(engine.GetFrameCounter()));
+}
 } // namespace
 
 const std::vector<ObservedPass>& LastObservedFrameShape()
@@ -27,8 +57,18 @@ const std::vector<ObservedPass>& LastObservedFrameShape()
     return s_lastShape;
 }
 
+bool ObserverRecordsThisFrame()
+{
+    // ObserveRenderedFrame observes when --s_sampleCountdown <= 0.
+    return s_everyFrame || s_sampleCountdown <= 1;
+}
+
 void ObserveRenderedFrame(Engine& engine, Scene& scene)
 {
+    // Probe results come in on every frame, observed or not, so a result is
+    // late by the GPU's latency only.
+    CollectWorldProbes(engine);
+
     // Diagnostics, not rendering: extraction walks every draw bucket
     // (O(draw calls) copies per frame) and the validators scan the result.
     // Sample every 16th frame in normal play — a real invariant violation
@@ -37,11 +77,11 @@ void ObserveRenderedFrame(Engine& engine, Scene& scene)
     // tests assert on observer output (pass shape, viewport, near-black)
     // at exact frames.
     {
-        static int s_sampleCountdown = 0;
         // POSEIDON_OBSERVER_SAMPLE=1 forces sampling under the harness so
         // the perf bench can measure normal-play behavior.
-        static const bool s_everyFrame =
+        static const bool everyFrame =
             Foundation::AppConfig::Instance().AutoTest() && getenv("POSEIDON_OBSERVER_SAMPLE") == nullptr;
+        s_everyFrame = everyFrame;
         if (!s_everyFrame)
         {
             if (--s_sampleCountdown > 0)
@@ -56,16 +96,6 @@ void ObserveRenderedFrame(Engine& engine, Scene& scene)
     static unsigned int s_lastGlErrorCount = 0;
     static int s_violationLogs = 0;
     static int s_statsCountdown = 0;
-    // Transient-frame tolerance: a loading screen, scene swap,
-    // pre-dawn cutscene (e.g. the demo intro at 5:35 AM with center
-    // pixel ~(6,6,8)), or any short fade can produce a string of
-    // legitimately near-black frames.  Only escalate to a logged
-    // violation after roughly half a second of solid near-black so
-    // we don't spam during transitions — a catastrophic clear-too-
-    // late or scene-matrix bug holds the black for far longer and
-    // still gets caught.
-    static int s_consecutiveBlackFrames = 0;
-    static int s_blackFrameLogs = 0;
     static int s_viewportMismatchLogs = 0;
     static int s_meshHandleLogs = 0;
 
@@ -153,40 +183,28 @@ void ObserveRenderedFrame(Engine& engine, Scene& scene)
     // can't see.  Counts opaque + transparent world buckets as the
     // "3D content was meant to be drawn" signal; HUD-only frames
     // (menus, options screen) are intentionally exempt.
+    //
+    // The centre pixel is read asynchronously (W1-2): a synchronous read
+    // here resolved the whole multisampled frame twice and stalled the CPU
+    // until the GPU had drawn it (a 100 ms stall per observed frame on long
+    // views). The probe resolves one pixel into a fenced readback; the
+    // tracker applies its result a few frames later, in frame order, with
+    // the same 30-frame threshold (a pre-dawn cutscene such as the demo
+    // intro at 5:35 AM reads about (6,6,8) for a while) and 5-log cap. A
+    // probe that cannot be queued without waiting is dropped and changes
+    // nothing, as a failed read did.
+    const std::uint32_t frame = engine.GetFrameCounter();
     const bool had3DContent = !si.worldOpaqueDraws.empty() || !si.worldTransparentDraws.empty();
     if (had3DContent)
     {
         const int cx = f.camera.viewport.x + f.camera.viewport.width / 2;
         const int cy = f.camera.viewport.y + f.camera.viewport.height / 2;
-        std::uint8_t rgb[3] = {255, 255, 255};
-        if (engine.SamplePixel(cx, cy, rgb))
-        {
-            const auto vio = DetectBlackFrame(true, rgb);
-            if (vio)
-            {
-                ++s_consecutiveBlackFrames;
-                // Threshold of 30 (~0.5s at 60 FPS) lets transient
-                // fades, dim pre-dawn cutscenes, and short scene
-                // swaps pass without a warning; a real stuck-black
-                // bug holds for far longer than half a second.
-                // 5-log cap keeps a still-misbehaving world from
-                // filling the log on every frame after that.
-                if (s_consecutiveBlackFrames >= 30 && s_blackFrameLogs < 5)
-                {
-                    LOG_WARN(Graphics, "frame runtime {}: {} (consecutive frames: {})", vio->ruleId,
-                             vio->detail.c_str(), s_consecutiveBlackFrames);
-                    ++s_blackFrameLogs;
-                }
-            }
-            else
-            {
-                s_consecutiveBlackFrames = 0;
-            }
-        }
+        if (engine.QueueWorldProbe(cx, cy))
+            s_blackFrames.ExpectSample(frame);
     }
     else
     {
-        s_consecutiveBlackFrames = 0;
+        s_blackFrames.NoContent(frame);
     }
 
     // Optional per-frame stats summary — gated by AppConfig flag

@@ -10,6 +10,7 @@
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <PoseidonGL33/GLVertexAttribLayouts.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/Frame.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 
@@ -260,18 +261,22 @@ void EngineGL33::DrawSectionTL(const Shape& sMesh, int beg, int end)
               _currentDrawItem.worldMatrix._41, _currentDrawItem.worldMatrix._42, _currentDrawItem.worldMatrix._43);
 
     // Record DrawItem for the frame validator (it walks these at
-    // end-of-frame; the actual GL draw happens inline below).
-    DrawItem item = _currentDrawItem;
-    item.isTLDraw = true;
-    item.sectionBegin = beg;
-    item.sectionEnd = end;
-    item.firstIndex = siBeg.beg;
-    item.indexCount = indexCount;
-    item.vertexBuffer = buf;
-    item.backendMeshHandle = buf->_vao;
-    item.backendTexture1Handle = _lastTexture1Handle;
-    item.passId = SpecToPassId(item.specFlags);
-    _drawItems.push_back(item);
+    // end-of-frame; the actual GL draw happens inline below), only on
+    // frames it observes (S3-28).
+    if (Poseidon::render::frame::ObserverRecordsThisFrame())
+    {
+        DrawItem item = _currentDrawItem;
+        item.isTLDraw = true;
+        item.sectionBegin = beg;
+        item.sectionEnd = end;
+        item.firstIndex = siBeg.beg;
+        item.indexCount = indexCount;
+        item.vertexBuffer = buf;
+        item.backendMeshHandle = buf->_vao;
+        item.backendTexture1Handle = _lastTexture1Handle;
+        item.passId = SpecToPassId(item.specFlags);
+        _drawItems.push_back(item);
+    }
 
     // Build the typed `Poseidon::render::frame::Draw` value from
     // current state and dispatch through `EmitDraw`.  State
@@ -280,11 +285,11 @@ void EngineGL33::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // `EmitDraw` just needs to bind the mesh-specific VAO + textures,
     // upload the per-draw world matrix, and issue the indexed draw.
     Poseidon::render::frame::Draw d;
-    d.world = item.worldMatrix;
+    d.world = _currentDrawItem.worldMatrix;
     d.mesh.vao = buf->_vao;
     d.indexBegin = siBeg.beg;
     d.indexCount = indexCount;
-    d.textures[0].id = item.backendTextureHandle;
+    d.textures[0].id = _currentDrawItem.backendTextureHandle;
     d.textures[1].id = _lastTexture1Handle;
     EmitDraw(d);
 }
@@ -703,3 +708,119 @@ bool EngineGL33::SamplePixel(int x, int y, uint8_t* outRGB)
     return true;
 }
 
+// W1-2: the frame observer's centre-pixel probe without a GPU wait. SamplePixel
+// above resolves and downsamples the whole frame into the window and reads it
+// at once, so the CPU waits for the GPU to finish the frame. Here one pixel of
+// the frame target is resolved into a 1x1 target and read into a pixel-pack
+// buffer behind a fence; PollWorldProbes copies it out once the fence has
+// passed (the exposure meter's pattern, EngineGL33_Camera.cpp). A slot still in
+// flight drops the sample: the caller polls before it queues, so a busy slot
+// means the GPU is more than three probes behind.
+bool EngineGL33::QueueWorldProbe(int x, int y)
+{
+    WorldProbeState& p = _worldProbe;
+    if (!_glContext || _portraitTargetSize || p.broken)
+        return false;
+    const int i = p.next;
+    if (p.fence[i])
+        return false;
+
+    // Window coords, top-left origin, the range SamplePixel accepts.
+    int winW = _w, winH = _h;
+    if (_sdlWindow)
+        SDL_GetWindowSizeInPixels(_sdlWindow, &winW, &winH);
+    if (winW <= 0 || winH <= 0 || x < 0 || y < 0 || x >= winW || y >= winH)
+        return false;
+
+    if (!p.fbo)
+    {
+        glGenRenderbuffers(1, &p.rb);
+        glBindRenderbuffer(GL_RENDERBUFFER, p.rb);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, 1, 1);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        glGenFramebuffers(1, &p.fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.fbo);
+        glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, p.rb);
+        const GLenum status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+        glGenBuffers(WorldProbeState::kRing, p.pbo);
+        for (GLuint pbo : p.pbo)
+        {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+            glBufferData(GL_PIXEL_PACK_BUFFER, 4, nullptr, GL_STREAM_READ);
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, SSAAActive() ? _ssaaFbo : 0);
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+        {
+            // Never retried: the near-black check then gets no samples, as on
+            // a backend without probes.
+            LOG_WARN(Graphics, "GL33: world probe target incomplete (0x{:x}); near-black check off", status);
+            p.broken = true;
+            return false;
+        }
+    }
+
+    const int glY = winH - 1 - y; // glReadPixels uses bottom-left origin
+    int readX = x, readY = glY;
+    if (SSAAActive())
+    {
+        // The frame-target pixel nearest to where the window downsample samples
+        // this window pixel's centre. At render scale 1 that is the pixel itself,
+        // so the value is the one the full resolve gave. One pixel in, one out:
+        // a legal multisample resolve.
+        const int tx = ((2 * x + 1) * _ssaaW) / (2 * winW);
+        const int ty = ((2 * glY + 1) * _ssaaH) / (2 * winH);
+        readX = tx < _ssaaW ? tx : _ssaaW - 1;
+        readY = ty < _ssaaH ? ty : _ssaaH - 1;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, _ssaaFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.fbo);
+        glBlitFramebuffer(readX, readY, readX + 1, readY + 1, 0, 0, 1, 1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, p.fbo);
+        readX = readY = 0;
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, p.pbo[i]);
+    glReadPixels(readX, readY, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    p.fence[i] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    p.frame[i] = GetFrameCounter();
+    p.next = (i + 1) % WorldProbeState::kRing;
+
+    // The frame target stays bound for the rest of the frame, as SamplePixel
+    // leaves it; the viewport is not touched.
+    if (SSAAActive())
+        glBindFramebuffer(GL_FRAMEBUFFER, _ssaaFbo);
+    return true;
+}
+
+int EngineGL33::PollWorldProbes(WorldProbe* out, int max)
+{
+    if (!_glContext || !out || max <= 0)
+        return 0;
+    WorldProbeState& p = _worldProbe;
+    // Fences pass in submission order: walk from the oldest slot and stop at
+    // the first one still in flight. Never waits (zero timeout).
+    int n = 0;
+    for (int k = 0; k < WorldProbeState::kRing && n < max; ++k)
+    {
+        const int i = (p.next + k) % WorldProbeState::kRing;
+        if (!p.fence[i])
+            continue;
+        GLsync sync = static_cast<GLsync>(p.fence[i]);
+        const GLenum st = glClientWaitSync(sync, 0, 0);
+        if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED)
+            break;
+        glDeleteSync(sync);
+        p.fence[i] = nullptr;
+        // The fence has passed: the copy out does not wait.
+        std::uint8_t px[4] = {0, 0, 0, 0};
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, p.pbo[i]);
+        glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, 4, px);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        out[n].frame = p.frame[i];
+        out[n].rgb[0] = px[0];
+        out[n].rgb[1] = px[1];
+        out[n].rgb[2] = px[2];
+        ++n;
+    }
+    return n;
+}

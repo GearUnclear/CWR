@@ -607,6 +607,29 @@ class EngineGL33 : public Engine
     int MinSatY() const override { return _minGuardY; }
     int MaxSatY() const override { return _maxGuardY; }
 
+    // --- W1-2: asynchronous world probe (the frame observer's near-black
+    // check). One pixel of the frame target resolved into a 1x1 target and
+    // read into a 4-slot fenced pixel-pack ring; a busy slot drops the sample
+    // instead of waiting. Made on first use; released with the GL context.
+    // Implemented in EngineGL33_VertexBuffer.cpp next to SamplePixel.
+    bool QueueWorldProbe(int x, int y) override;
+    int PollWorldProbes(WorldProbe* out, int max) override;
+
+  protected:
+    struct WorldProbeState
+    {
+        static constexpr int kRing = 4;
+        unsigned int fbo = 0;
+        unsigned int rb = 0;
+        unsigned int pbo[kRing] = {};
+        void* fence[kRing] = {};
+        std::uint32_t frame[kRing] = {};
+        int next = 0;
+        bool broken = false; // the 1x1 target was incomplete: no probes
+    };
+    WorldProbeState _worldProbe;
+    // --- end W1-2
+
   protected:
     void WorkToBack();
     void BackToFront();
