@@ -772,6 +772,25 @@ class Engine : public IGraphicsEngine
     /// or out of range. Used by the trident harness for visual regression checks.
     virtual bool SamplePixel(int /*x*/, int /*y*/, uint8_t* /*outRGB*/) { return false; }
 
+    /// One world probe result: the window pixel queued by QueueWorldProbe during
+    /// frame `frame` (GetFrameCounter at queue time), as 8-bit R, G, B.
+    struct WorldProbe
+    {
+        uint32_t frame = 0;
+        uint8_t rgb[3] = {0, 0, 0};
+    };
+
+    /// Queue an asynchronous read of the world pixel at window coords (top-left
+    /// origin, as SamplePixel) as the frame target holds it now, before the post
+    /// pass and the HUD. Never waits on the GPU: returns false when the sample
+    /// is dropped (no free slot, out of range, or not supported). The frame
+    /// observer's near-black check uses it; tri pixel verbs keep SamplePixel.
+    virtual bool QueueWorldProbe(int /*x*/, int /*y*/) { return false; }
+
+    /// Collect finished world probes, oldest first, into `out` (up to `max`)
+    /// without waiting. Returns how many were written.
+    virtual int PollWorldProbes(WorldProbe* /*out*/, int /*max*/) { return 0; }
+
     /// Render `vertCount` triangle vertices (3 floats each, GL_TRIANGLES) from the
     /// light into an offscreen depth FBO at `res`x`res`, given a column-major light
     /// view-projection (16 floats), and read the depth back into `outDepth`
