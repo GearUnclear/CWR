@@ -1,4 +1,5 @@
 #include <Evaluator/express.hpp>
+#include <Poseidon/Core/BuildProvenance.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
@@ -11,7 +12,7 @@
 using namespace Poseidon;
 
 // Measurement verbs for the perf bench (tests/rendering/captures/gate): the
-// per-frame rings. GLOBAL scope like the rest of the tri verb surface
+// per-frame rings and the build id. GLOBAL scope like the rest of the tri verb surface
 // (registered, with forward decls, in GameStateExtTestAudio.cpp). Each verb
 // only reads or resets bookkeeping; with none of them called, play is
 // unchanged.
@@ -130,4 +131,15 @@ GameValue TriGpuRing(const GameState* /*state*/, GameValuePar arg)
     char buf[32];
     std::snprintf(buf, sizeof(buf), "OK:%d", n);
     return GameValue(buf);
+}
+
+/// triBuildId: the build provenance of this binary (Core/BuildProvenance.hpp):
+/// "<git describe --always --dirty>" of the source it was built from, plus
+/// "+<12 hex>" when engine/ or apps/ held local changes. Logs "[tri]
+/// build_id=<id>" and returns the id.
+GameValue TriBuildId(const GameState* /*state*/)
+{
+    const char* id = BuildProvenance::BuildId();
+    LOG_INFO(Core, "[tri] build_id={}", id);
+    return GameValue(id);
 }

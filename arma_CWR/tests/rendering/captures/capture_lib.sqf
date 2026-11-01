@@ -214,6 +214,9 @@ capClear = {
 //     this mode only. triGpuTimes false -> true resets GpuTimings
 //     (EngineGL33::SetGpuTimingEnabled). The scene stats are read before the
 //     reset, which also clears the frame the draw count comes from.
+//  5. build= is triBuildId, the binary's build provenance (git describe of the
+//     source it was built from, "+<hash>" for local changes), on the mode and
+//     shot lines, so pictures and timings from two builds are never confused.
 capMode = {
     capModeName = _this;
     capPinRes = triPinObjectDetail capDetail;
@@ -223,7 +226,8 @@ capMode = {
     capGpuOff = triGpuTimes false;
     capGpuOn = triGpuTimes true;
     capPerfRes = triPerfReset 0;
-    format ["view=%1;event=mode;mode=%2;lit=%3;detail=%4;settle=%5;%6", capView, capModeName, capLit, capPinRes, capSettleRes, capModeStats] call capLog;
+    capBuild = triBuildId;
+    format ["view=%1;event=mode;mode=%2;lit=%3;detail=%4;settle=%5;%6;build=%7", capView, capModeName, capLit, capPinRes, capSettleRes, capModeStats, capBuild] call capLog;
 }
 
 // Read the timers after the settle frames. GPU results trail the frame by a
@@ -241,5 +245,5 @@ capReadTimers = {
 capRecord = {
     private ["_head"];
     _head = format ["view=%1;event=shot;label=%2;mode=%3;lit=%4;cam=%5;fps=%6;%7;feat=%8", capView, _this, capModeName, capLit, triCamView, triFps, triSceneStats, triFeatureState];
-    format ["%1;perf=%2;gpu=%3", _head, capPerf, capGpu] call capLog;
+    format ["%1;build=%2;perf=%3;gpu=%4", _head, capBuild, capPerf, capGpu] call capLog;
 }

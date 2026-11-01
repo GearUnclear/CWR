@@ -189,6 +189,7 @@ GameValue TriPerfDumpShapes(const GameState*, GameValuePar);
 GameValue TriPerfReset(const GameState*, GameValuePar);
 GameValue TriPerfRing(const GameState*, GameValuePar);
 GameValue TriGpuRing(const GameState*, GameValuePar);
+GameValue TriBuildId(const GameState*);
 GameValue TriPinObjectDetail(const GameState*, GameValuePar);
 GameValue TriSceneStats(const GameState*);
 GameValue TriSettleScene(const GameState*, GameValuePar);
@@ -3277,6 +3278,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triPerfReset", TriPerfReset, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPerfRing", TriPerfRing, GameScalar | GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triGpuRing", TriGpuRing, GameScalar | GameArray));
+    GGameState.NewNularOp(GameNular(GameString, "triBuildId", TriBuildId));
     GGameState.NewFunction(GameFunction(GameString, "triPinObjectDetail", TriPinObjectDetail, GameScalar));
     GGameState.NewNularOp(GameNular(GameString, "triSceneStats", TriSceneStats));
     GGameState.NewFunction(GameFunction(GameString, "triSettleScene", TriSettleScene, GameArray));

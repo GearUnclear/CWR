@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Evaluator/express.hpp>
+#include <Poseidon/Core/BuildProvenance.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
@@ -23,6 +24,7 @@ using namespace Poseidon;
 GameValue TriPerfRing(const GameState*, GameValuePar);
 GameValue TriGpuRing(const GameState*, GameValuePar);
 GameValue TriGpuTimes(const GameState*, GameValuePar);
+GameValue TriBuildId(const GameState*);
 
 namespace
 {
@@ -311,4 +313,32 @@ TEST_CASE("triGpuTimes true returns the window so far, then starts a new one", "
     CHECK(Text(TriGpuTimes(nullptr, GameValue(true))) == "gpu: timing off");
     CHECK(eng.windows == 4);
     CHECK(eng.calls == std::vector<bool>{true, true, true, false, true});
+}
+
+TEST_CASE("triBuildId answers the build provenance baked in at build time", "[tri][perf][triBuildId]")
+{
+    InitFixture fix;
+    const std::string id = Text(TriBuildId(nullptr));
+    CHECK(id == BuildProvenance::BuildId());
+    REQUIRE_FALSE(id.empty());
+    // It rides in UDCAP key=value lines: no separators or spaces inside.
+    CHECK(id.find_first_of("; |=\t\r\n") == std::string::npos);
+    // "+<12 hex>" marks local changes under engine/ or apps/.
+    const size_t plus = id.find('+');
+    if (plus != std::string::npos)
+    {
+        const std::string hash = id.substr(plus + 1);
+        CHECK(hash.size() == 12);
+        CHECK(hash.find_first_not_of("0123456789abcdef") == std::string::npos);
+    }
+}
+
+TEST_CASE("capture_lib logs build= on every mode and shot line", "[tri][perf][triBuildId]")
+{
+    const auto root = std::filesystem::path(TESTS_ROOT_DIR).parent_path();
+    const std::string lib = ReadFile((root / "tests" / "rendering" / "captures" / "capture_lib.sqf").string());
+    REQUIRE_FALSE(lib.empty());
+    CHECK(lib.find("capBuild = triBuildId;") != std::string::npos);
+    CHECK(lib.find("event=mode;mode=%2;lit=%3;detail=%4;settle=%5;%6;build=%7") != std::string::npos);
+    CHECK(lib.find("\"%1;build=%2;perf=%3;gpu=%4\", _head, capBuild, capPerf, capGpu") != std::string::npos);
 }
