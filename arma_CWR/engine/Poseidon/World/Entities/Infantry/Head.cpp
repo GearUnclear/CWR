@@ -2,6 +2,7 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -513,8 +514,19 @@ const float MimicPeriod = 5;
 
 void Head::Simulate(const HeadType& type, float deltaT, SimulationImportance prec, bool dead)
 {
+    // Capture determinism (triDeterministic): the face's random life (blinks, the
+    // random mimic, lip and brow and mouth twitches) draws from GRandGen over the whole
+    // session, so after triSeedRandom it still carries state drawn before the seed, and
+    // posed figures differed between boots at the face. Deterministic mode holds the face
+    // still and neutral instead; play (flag off) is unchanged.
+    const bool still = remaster::TemporalDeterministic();
     const float winkSpeed = 8.0;
-    if (Glob.time >= _nextWink)
+    if (still)
+    {
+        _winkPhase = 0;
+        _nextWink = Glob.time + 1.0f;
+    }
+    else if (Glob.time >= _nextWink)
     {
         _winkPhase += winkSpeed * deltaT;
         if (_winkPhase >= 1)
@@ -534,7 +546,7 @@ void Head::Simulate(const HeadType& type, float deltaT, SimulationImportance pre
         if (_forceMimic.GetLength() > 0)
         {
         }
-        else if (_mimicMode)
+        else if (_mimicMode && !still)
         {
             _nextMimicTime -= deltaT;
             if (_nextMimicTime < 0)
@@ -558,17 +570,26 @@ void Head::Simulate(const HeadType& type, float deltaT, SimulationImportance pre
         }
     }
 
-    float diff = _wantedRandomLip - _actualRandomLip;
-    saturate(diff, -_speedRandomLip * deltaT, _speedRandomLip * deltaT);
-    _actualRandomLip += diff;
-    if (Glob.time >= _nextChangeRandomLip)
+    if (still)
     {
-        NextRandomLip();
+        _wantedRandomLip = 0;
+        _actualRandomLip = 0;
+        _nextChangeRandomLip = Glob.time + 1.0f;
+    }
+    else
+    {
+        float diff = _wantedRandomLip - _actualRandomLip;
+        saturate(diff, -_speedRandomLip * deltaT, _speedRandomLip * deltaT);
+        _actualRandomLip += diff;
+        if (Glob.time >= _nextChangeRandomLip)
+        {
+            NextRandomLip();
+        }
     }
 
     if (prec <= SimulateVisibleNear)
     {
-        if (!dead)
+        if (!dead && !still)
         {
             _lBrowRandom.SimulateAndSetRandomTgt(deltaT, type._lBrowRandom);
             _mBrowRandom.SimulateAndSetRandomTgt(deltaT, type._mBrowRandom);

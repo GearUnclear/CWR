@@ -270,6 +270,10 @@ if ($common.ContainsKey('POSEIDON_OBSERVER_SAMPLE')) {
     $ov = $common['POSEIDON_OBSERVER_SAMPLE']; $common.Remove('POSEIDON_OBSERVER_SAMPLE')
     if ($null -eq $ov -or "$ov" -eq '') { $obsOn = $false } elseif ("$ov" -eq '0') { Write-GateLog $log 'refused: POSEIDON_OBSERVER_SAMPLE=0 still turns sampling on (presence is tested); use null to unset'; exit 2 }
 }
+# Capture sets whose every dist has triDeterministic also seed the world-load ground randomization of
+# 4WVR worlds by the world's name (POSEIDON_DETERMINISTIC_WORLD, read at world load; unset in play), so
+# LoBo islands repeat across boots. A job env entry for the key (a value or null) wins.
+$detWorld = [bool]$has.triDeterministic -and (@('stills', 'counts', 'motion') -contains [string]$o.set)
 function Side-Env([string]$side, [bool]$obs) {
     $e = @{}
     foreach ($k in $common.Keys) { $e[$k] = $common[$k] }
@@ -279,6 +283,9 @@ function Side-Env([string]$side, [bool]$obs) {
     foreach ($k in $other.Keys) { if (-not $mine.ContainsKey($k)) { $e[$k] = $null } }
     foreach ($k in $mine.Keys) { $e[$k] = $mine[$k] }
     $e['POSEIDON_OBSERVER_SAMPLE'] = if ($obs) { '1' } else { $null }   # unset, never 0
+    if ($script:detWorld -and -not $mine.ContainsKey('POSEIDON_DETERMINISTIC_WORLD') -and -not $common.ContainsKey('POSEIDON_DETERMINISTIC_WORLD')) {
+        $e['POSEIDON_DETERMINISTIC_WORLD'] = '1'
+    }
     return $e
 }
 

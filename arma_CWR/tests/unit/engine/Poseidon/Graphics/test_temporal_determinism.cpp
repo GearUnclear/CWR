@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
+#include <Random/randomGen.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -447,4 +448,66 @@ TEST_CASE("Temporal determinism audit: only the tri verbs set the controls",
         CHECK(guard < phase);
         CHECK(FindSq(rain, "float yOffset = -fastFmod(rainOffset, 1);") < guard);
     }
+}
+
+TEST_CASE("Temporal determinism: ground randomization and faces repeat across sessions",
+          "[remaster][TemporalDeterminism]")
+{
+    // A seeded generator repeats its stream, and a scoped override
+    // redirects GRandGen to it (Landscape::InitRandomization relies on both).
+    RandomGenerator a(12345, 678), b(12345, 678);
+    bool same = true;
+    for (int i = 0; i < 1000; ++i)
+        same = same && a.RandomValue() == b.RandomValue();
+    CHECK(same);
+    RandomGenerator ref(777, 4242), local(777, 4242);
+    {
+        ScopedRandomGenerator scope(local);
+        bool redirected = true;
+        for (int i = 0; i < 100; ++i)
+            redirected = redirected && GRandGen.RandomValue() == ref.RandomValue();
+        CHECK(redirected);
+    }
+    CHECK(RandomGeneratorOverride() == nullptr);
+
+    // A world without stored randomization (4WVR) draws its ground colours
+    // and texture offsets from a generator seeded by the world's name only
+    // when POSEIDON_DETERMINISTIC_WORLD asks for it (capture sessions). Unset,
+    // nothing is installed and every draw stays on GRandGen as before (play).
+    const std::string geo = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Terrain" / "Geography.cpp");
+    REQUIRE_FALSE(geo.empty());
+    CHECK(FindSq(geo, "std::getenv(\"POSEIDON_DETERMINISTIC_WORLD\")") != std::string::npos);
+    const std::string init = FunctionBody(geo, "void Landscape::InitRandomization()");
+    REQUIRE_FALSE(init.empty());
+    const size_t gate = FindSq(init, "if (DeterministicWorldRequested()) {");
+    const size_t seed = FindSq(init, "const std::uint32_t worldSeed = WorldRandomizationSeed(_name);");
+    const size_t scope = FindSq(init, "useWorldRandom.emplace(*worldRandom);");
+    const size_t firstDraw = FindSq(init, "GRandGen.RandomValue()");
+    REQUIRE(gate != std::string::npos);
+    REQUIRE(seed != std::string::npos);
+    REQUIRE(scope != std::string::npos);
+    REQUIRE(firstDraw != std::string::npos);
+    CHECK(gate < seed);
+    CHECK(seed < scope);
+    CHECK(scope < firstDraw);
+    // The override exists only inside the gate: the one emplace, no other
+    // ScopedRandomGenerator in the function.
+    CHECK(CountOf(init, "ScopedRandomGenerator") == 1); // the std::optional declaration
+    CHECK(CountOf(init, ".emplace(") == 1);
+
+    // In deterministic mode a face draws nothing and stays neutral; with the
+    // flag off it keeps its blinks, mimics and twitches.
+    const std::string head = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Entities" / "Infantry" / "Head.cpp");
+    REQUIRE_FALSE(head.empty());
+    const std::string sim = FunctionBody(head, "void Head::Simulate(");
+    REQUIRE_FALSE(sim.empty());
+    const size_t still = FindSq(sim, "const bool still = remaster::TemporalDeterministic();");
+    REQUIRE(still != std::string::npos);
+    CHECK(FindSq(sim, "if (still) { _winkPhase = 0;") > still);
+    CHECK(FindSq(sim, "else if (Glob.time >= _nextWink)") > still);
+    CHECK(FindSq(sim, "else if (_mimicMode && !still)") != std::string::npos);
+    CHECK(FindSq(sim, "if (!dead && !still)") != std::string::npos);
+    const size_t lipHold = FindSq(sim, "if (still) { _wantedRandomLip = 0; _actualRandomLip = 0;");
+    REQUIRE(lipHold != std::string::npos);
+    CHECK(FindSq(sim, "NextRandomLip();") > lipHold);
 }
