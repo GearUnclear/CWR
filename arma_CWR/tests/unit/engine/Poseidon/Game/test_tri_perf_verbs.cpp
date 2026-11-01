@@ -34,6 +34,10 @@ GameValue TriMinimize(const GameState*);
 GameValue TriRestore(const GameState*);
 GameValue TriGraphicsReset(const GameState*, GameValuePar);
 GameValue TriRetryMission(const GameState*);
+GameValue TriCpuStats(const GameState*, GameValuePar);
+GameValue TriSimStats(const GameState*);
+GameValue TriPipeStats(const GameState*, GameValuePar);
+GameValue TriSceneStats(const GameState*);
 
 namespace
 {
@@ -488,4 +492,160 @@ TEST_CASE("tri hands TRI_POSEIDON_CACHE_DIR to the game as its cache dir", "[tri
         CHECK(src.find("(\"POSEIDON_CACHE_DIR\", user_dir") == std::string::npos);
         CHECK(src.find(".env(\"POSEIDON_CACHE_DIR\", &user_dir)") == std::string::npos);
     }
+}
+
+TEST_CASE("PerfCounters: the P0-15 counters average over the window", "[tri][perf][PerfCounters]")
+{
+    perf::Counters c;
+    for (int f = 0; f < 2; ++f)
+    {
+        perf::FrameCounters& fc = c.Frame();
+        fc.landFitDraws = 100 + 100 * f; // 100, 200
+        fc.vbRewrites = 10;
+        fc.vbRewriteKB = 64.0f;
+        fc.vbDynUploads = 30;
+        fc.occTested = 500;
+        fc.occCulled = 50;
+        fc.cloudlets = 7;
+        fc.programBinds = 40;
+        fc.uboRangeBinds = 90;
+        fc.tris = 1000000;
+        perf::CountRunRefusal(fc, perf::RunRefusal::OwnVertices);
+        perf::CountRunRefusal(fc, perf::RunRefusal::FogBand);
+        perf::CountRunRefusal(fc, perf::RunRefusal::FogBand);
+        perf::CountLod(fc, 0);
+        perf::CountLod(fc, 3);
+        perf::CountLod(fc, 12); // coarser than 6: the last bucket
+        perf::CountLod(fc, -1); // no level: not counted
+        if (f == 1)
+        {
+            // Only this frame read pipeline statistics back.
+            fc.pipeGround = 1;
+            fc.groundPrims = 3000.0f;
+            fc.pipePass1 = 1;
+            fc.pass1Fs = 2.0e6f;
+        }
+        c.EndFrame();
+    }
+    const std::string s = c.Summary();
+    INFO(s);
+    CHECK(s.find(" | geo landfit=150 vbrw=10 vbKB=64.0 vbdyn=30 vbdynKB=0.0 occT=500 occC=50 cloudlets=7") !=
+          std::string::npos);
+    CHECK(s.find(" | binds prog=40 tex=0 smp=0 uboB=90") != std::string::npos);
+    CHECK(s.find(" | refuse=0/0/1/0/0/0/0/0/2") != std::string::npos);
+    CHECK(s.find(" | tris=1000000 lodsw=0 lodhist=1/0/0/1/0/0/0/1") != std::string::npos);
+    // Pipeline statistics average over the frames that read them, not the window.
+    CHECK(s.find(" | pipe=1/1 gprims=3000 ") != std::string::npos);
+    CHECK(s.find(" p1fs=2000000") != std::string::npos);
+    // The original fields stay first and unchanged.
+    CHECK(s.rfind("objs opaque=0 runs=0 ", 0) == 0);
+    // It rides in UDCAP lines after triPerfStats' own fields.
+    CHECK(s.find(';') == std::string::npos);
+    CHECK(s.find("fps=") == std::string::npos);
+    CHECK(s.find("frame=") == std::string::npos);
+    CHECK(s.find("calls=") == std::string::npos);
+}
+
+TEST_CASE("PerfCounters: the simulation counters for triSimStats", "[tri][perf][triSimStats]")
+{
+    perf::Counters c;
+    perf::FrameCounters& fc = c.Frame();
+    perf::CountFogSight(fc, perf::FogSightCaller::Target);
+    perf::CountFogSight(fc, perf::FogSightCaller::Target);
+    perf::CountFogSight(fc, perf::FogSightCaller::Script);
+    fc.fogMarches = 40;
+    fc.decalCalls = 12;
+    fc.decalMs = 0.25f;
+    fc.sensorUpdates = 1;
+    fc.sensorMs = 1.5f;
+    c.EndFrame();
+    c.EndFrame(); // an empty frame halves the averages
+    const std::string s = c.SimSummary();
+    INFO(s);
+    CHECK(s.rfind("fogsight target=1.0 script=0.5 other=0.0 marches=20.0 ", 0) == 0);
+    CHECK(s.find("| decals calls=6.0 cpu=0.125 |") != std::string::npos);
+    CHECK(s.find("| sensors updates=0.50 cpu=0.750 | n=2") != std::string::npos);
+}
+
+TEST_CASE("CpuScopes: ticks become per-frame ms, weighted samples scale up", "[tri][perf][triCpuStats]")
+{
+    perf::CpuScopes scopes;
+    scopes.FixTicksPerMs(1000.0);
+    scopes.SetEnabled(true);
+    CHECK(scopes.Summary() == "cpu: no frames measured yet");
+    scopes.Add(perf::CpuScope::DrawLoop, 2000);
+    scopes.Add(perf::CpuScope::DrawLoop, 1000);
+    scopes.Add(perf::CpuScope::ObjBuilding, 50, perf::CpuScopes::kObjectSampleEvery);
+    scopes.EndFrame();
+    CHECK(scopes.WindowMs(0, perf::CpuScope::DrawLoop) == 3.0f);
+    CHECK(scopes.WindowMs(0, perf::CpuScope::ObjBuilding) == 0.8f);
+    scopes.EndFrame(); // an empty frame
+    const std::string s = scopes.Summary();
+    INFO(s);
+    CHECK(s.find("drawloop=1.500/3.000/1.0") != std::string::npos); // avg / p95 / calls per frame
+    CHECK(s.find("obj.bld=0.400/0.800/0.5") != std::string::npos);
+    CHECK(s.find(" n=2") != std::string::npos);
+    CHECK(s.find(';') == std::string::npos);
+    scopes.SetEnabled(true); // a new window
+    CHECK(scopes.WindowFrames() == 0);
+    scopes.SetEnabled(false);
+    CHECK(scopes.Summary() == "cpu: scopes off");
+}
+
+TEST_CASE("CPU sub-scope timers record nothing while triCpuStats is off", "[tri][perf][triCpuStats]")
+{
+    perf::CpuScopes& g = perf::GCpuScopes();
+    g.SetEnabled(false);
+    CHECK_FALSE(perf::gCpuScopesOn);
+    {
+        perf::CpuScopeTimer t(perf::CpuScope::Grass);
+        float ms = 0.0f;
+        perf::CpuMsTimer m(ms);
+    }
+    for (int i = 0; i < 64; ++i)
+        CHECK_FALSE(perf::CpuObjectSample());
+    g.SetEnabled(true);
+    CHECK(perf::gCpuScopesOn);
+    int sampled = 0;
+    for (int i = 0; i < 64; ++i)
+        sampled += perf::CpuObjectSample() ? 1 : 0;
+    CHECK(sampled == 64 / perf::CpuScopes::kObjectSampleEvery);
+    {
+        perf::CpuScopeTimer t(perf::CpuScope::Grass);
+    }
+    g.EndFrame();
+    CHECK(g.WindowFrames() == 1);
+    CHECK(g.Summary().find("grass=") != std::string::npos);
+    g.SetEnabled(false);
+    CHECK_FALSE(perf::gCpuScopesOn);
+}
+
+TEST_CASE("triCpuStats, triSimStats and triPipeStats read and switch the counters", "[tri][perf][triCpuStats]")
+{
+    InitFixture fix;
+    perf::GCpuScopes().SetEnabled(true); // an empty window
+    perf::GCpuScopes().SetEnabled(false);
+    CHECK(Text(TriCpuStats(nullptr, GameValue(true))) == "cpu: scopes off");
+    CHECK(perf::gCpuScopesOn);
+    CHECK(Text(TriCpuStats(nullptr, GameValue(false))) == "cpu: no frames measured yet");
+    CHECK_FALSE(perf::gCpuScopesOn);
+
+    perf::Counters& pc = perf::GPerfCounters();
+    pc.ResetWindow();
+    pc.Frame().decalCalls = 3;
+    pc.Frame().tris = 4321;
+    pc.Frame().lodSwitches = 9;
+    perf::CountLod(pc.Frame(), 1);
+    pc.EndFrame();
+    CHECK(Text(TriSimStats(nullptr)).find("decals calls=3.0 ") != std::string::npos);
+    const std::string scene = Text(TriSceneStats(nullptr));
+    INFO(scene);
+    CHECK(scene.find(";horizon=") != std::string::npos);
+    CHECK(scene.find(";tris=4321;lodsw=9;lodhist=0/1/0/0/0/0/0/0") != std::string::npos);
+    pc.ResetWindow();
+
+    CHECK(Text(TriPipeStats(nullptr, GameValue(true))) == "OK:on");
+    CHECK(gpu::PipelineStatsWanted());
+    CHECK(Text(TriPipeStats(nullptr, GameValue(false))) == "OK:off");
+    CHECK_FALSE(gpu::PipelineStatsWanted());
 }

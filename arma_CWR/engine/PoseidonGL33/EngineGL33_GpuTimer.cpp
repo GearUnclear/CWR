@@ -2,8 +2,14 @@
 // points of the frame, read back kGpuFrames frames later. A result the GPU has
 // not produced yet is dropped instead of waited for, so measuring never stalls
 // the frame. The durations and their averages live in Poseidon::gpu::GpuTimings.
+// While timing is on and Poseidon::gpu::PipelineStatsWanted() (triPipeStats),
+// the same marks also bracket GL_ARB_pipeline_statistics_query sets around the
+// world pass's ground and opaque-object spans, read back the same way into the
+// frame-cost counters (PerfCounters.hpp).
 
 #include <PoseidonGL33/EngineGL33.hpp>
+
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
 
 #include <cstring>
 
@@ -15,6 +21,117 @@ namespace
 // Slots whose frame was being recorded when the window restarted: their stamps
 // straddle the restart, so the read-back drops them instead of submitting them.
 std::uint32_t s_gpuDropSlots = 0;
+
+// Pipeline statistics (triPipeStats): per frame slot, a query set per span
+// (0 = ground: WorldBegin to GroundEnd, 1 = opaque objects: GroundEnd to
+// Pass1End). Only one query per target may be active, and the two spans follow
+// each other, so one span is open at a time.
+constexpr int kPipeSlots = EngineGL33::kGpuFrames;
+constexpr int kPipeSpans = 2;
+constexpr int kPipeQueries = 5;
+constexpr GLenum kPipeTargets[kPipeQueries] = {GL_PRIMITIVES_SUBMITTED_ARB, GL_CLIPPING_INPUT_PRIMITIVES_ARB,
+                                               GL_CLIPPING_OUTPUT_PRIMITIVES_ARB, GL_VERTEX_SHADER_INVOCATIONS_ARB,
+                                               GL_FRAGMENT_SHADER_INVOCATIONS_ARB};
+GLuint s_pipeQ[kPipeSlots][kPipeSpans][kPipeQueries] = {};
+std::uint32_t s_pipeDone[kPipeSlots] = {}; // bit k: span k began and ended at its own marks
+bool s_pipeActive = false;                 // this frame samples them
+int s_pipeOpen = -1;                       // the span whose queries are active, or -1
+int s_pipeOpenSlot = 0;
+
+void PipeEnd(bool complete)
+{
+    if (s_pipeOpen < 0)
+        return;
+    for (GLenum target : kPipeTargets)
+        glEndQuery(target);
+    if (complete)
+        s_pipeDone[s_pipeOpenSlot] |= 1u << s_pipeOpen;
+    s_pipeOpen = -1;
+}
+
+void PipeBegin(int slot, int span)
+{
+    for (int k = 0; k < kPipeQueries; ++k)
+        glBeginQuery(kPipeTargets[k], s_pipeQ[slot][span][k]);
+    s_pipeOpen = span;
+    s_pipeOpenSlot = slot;
+}
+
+// At a timestamp mark of the frame in `slot`: open or close the spans.
+void PipeAtMark(int slot, Mark mark)
+{
+    switch (mark)
+    {
+        case Mark::WorldBegin:
+            PipeEnd(false);
+            PipeBegin(slot, 0);
+            break;
+        case Mark::GroundEnd:
+        {
+            const bool ground = s_pipeOpen == 0;
+            PipeEnd(ground);
+            if (ground)
+                PipeBegin(slot, 1);
+            break;
+        }
+        case Mark::Pass1End:
+            PipeEnd(s_pipeOpen == 1);
+            break;
+        case Mark::WorldEnd:
+        case Mark::FrameEnd:
+            PipeEnd(false);
+            break;
+        default:
+            break;
+    }
+}
+
+// Reads the slot's finished spans into the counters of the frame being drawn;
+// a span the GPU has not finished is dropped, never waited for.
+void PipeReadBack(int slot)
+{
+    if (!s_pipeDone[slot])
+        return;
+    Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Frame();
+    for (int span = 0; span < kPipeSpans; ++span)
+    {
+        if (!((s_pipeDone[slot] >> span) & 1u))
+            continue;
+        GLuint64 v[kPipeQueries] = {};
+        bool ready = true;
+        for (int k = 0; k < kPipeQueries && ready; ++k)
+        {
+            GLint available = 0;
+            glGetQueryObjectiv(s_pipeQ[slot][span][k], GL_QUERY_RESULT_AVAILABLE, &available);
+            ready = available != 0;
+            if (ready)
+                glGetQueryObjectui64v(s_pipeQ[slot][span][k], GL_QUERY_RESULT, &v[k]);
+        }
+        if (!ready)
+            continue;
+        float* const out[2][kPipeQueries] = {
+            {&c.groundPrims, &c.groundClipIn, &c.groundClipOut, &c.groundVs, &c.groundFs},
+            {&c.pass1Prims, &c.pass1ClipIn, &c.pass1ClipOut, &c.pass1Vs, &c.pass1Fs}};
+        for (int k = 0; k < kPipeQueries; ++k)
+            *out[span][k] += static_cast<float>(v[k]);
+        ++(span == 0 ? c.pipeGround : c.pipePass1);
+    }
+    s_pipeDone[slot] = 0;
+}
+
+void PipeDestroy(bool haveContext)
+{
+    if (s_pipeQ[0][0][0] && haveContext)
+    {
+        if (s_pipeOpen >= 0)
+            PipeEnd(false);
+        glDeleteQueries(kPipeSlots * kPipeSpans * kPipeQueries, &s_pipeQ[0][0][0]);
+    }
+    std::memset(s_pipeQ, 0, sizeof(s_pipeQ));
+    std::memset(s_pipeDone, 0, sizeof(s_pipeDone));
+    s_pipeOpen = -1;
+    s_pipeActive = false;
+}
 } // namespace
 
 void EngineGL33::SetGpuTimingEnabled(bool enabled)
@@ -32,6 +149,7 @@ void EngineGL33::SetGpuTimingEnabled(bool enabled)
             if (i != _gpuSlot)
                 _gpuRecorded[i] = 0;
         s_gpuDropSlots = _gpuRecorded[_gpuSlot] ? 1u << _gpuSlot : 0u;
+        std::memset(s_pipeDone, 0, sizeof(s_pipeDone));
         LOG_DEBUG(Graphics, "GL33: GPU timing window restarted");
         return;
     }
@@ -78,6 +196,7 @@ void EngineGL33::DestroyGpuQueries()
         glDeleteQueries(kGpuFrames * kMarkCount, &_gpuQueries[0][0]);
     std::memset(_gpuQueries, 0, sizeof(_gpuQueries));
     std::memset(_gpuRecorded, 0, sizeof(_gpuRecorded));
+    PipeDestroy(_glContext != nullptr);
 }
 
 void EngineGL33::GpuFrameBegin()
@@ -115,6 +234,17 @@ void EngineGL33::GpuFrameBegin()
         }
     }
     _gpuRecorded[_gpuSlot] = 0;
+    // Pipeline statistics: a span left open by a frame that never reached its
+    // closing mark is dropped; the slot's finished spans are read back; then
+    // this frame samples them only while they are wanted and supported.
+    PipeEnd(false);
+    PipeReadBack(_gpuSlot);
+    const bool wantPipe = Poseidon::gpu::PipelineStatsWanted() && GLAD_GL_ARB_pipeline_statistics_query;
+    if (wantPipe && !s_pipeQ[0][0][0])
+        glGenQueries(kPipeSlots * kPipeSpans * kPipeQueries, &s_pipeQ[0][0][0]);
+    else if (!wantPipe && s_pipeQ[0][0][0])
+        PipeDestroy(true);
+    s_pipeActive = wantPipe;
     GpuMark(Mark::FrameBegin);
 }
 
@@ -127,4 +257,6 @@ void EngineGL33::GpuMark(Mark mark)
         return; // the first occurrence in a frame counts
     glQueryCounter(_gpuQueries[_gpuSlot][m], GL_TIMESTAMP);
     _gpuRecorded[_gpuSlot] |= 1u << m;
+    if (s_pipeActive)
+        PipeAtMark(_gpuSlot, mark);
 }

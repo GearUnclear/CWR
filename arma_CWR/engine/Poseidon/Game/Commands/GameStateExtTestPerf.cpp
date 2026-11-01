@@ -4,6 +4,7 @@
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -14,10 +15,9 @@
 using namespace Poseidon;
 
 // Measurement verbs for the perf bench (tests/rendering/captures/gate): the
-// per-frame rings, the build id and the pinned configuration. GLOBAL scope like the rest of the tri verb surface
-// (registered, with forward decls, in GameStateExtTestAudio.cpp). Each verb
-// only reads or resets bookkeeping; with none of them called, play is
-// unchanged.
+// per-frame rings, the build id, the pinned configuration and the counters. GLOBAL scope like the rest of the tri verb
+// surface (registered, with forward decls, in GameStateExtTestAudio.cpp). Each verb only reads or resets bookkeeping;
+// with none of them called, play is unchanged.
 
 std::string GetTriOutputDir();
 
@@ -159,4 +159,56 @@ GameValue TriSetFpsCap(const GameState* /*state*/, GameValuePar arg)
     char buf[32];
     std::snprintf(buf, sizeof(buf), "OK:%d", cap);
     return GameValue(buf);
+}
+
+/// triCpuStats <on>: the CPU sub-scopes (Graphics/Core/PerfCounters.hpp
+/// CpuScopes: occlusion tests and occluder draws, run building, the opaque
+/// draw loop, grass, Pass2 sort and draw, shadow collection and GL, the
+/// census, and per object class one object in 16, scaled up). It returns the
+/// summary of the window so far, "<scope>=<avg ms>/<p95 ms>/<calls per frame>
+/// ... n=<frames>", then applies <on>: true starts a new window (turning the
+/// timers on when off), false stops timing. Off by default; while off each
+/// timer costs one load and a branch. A scope reads 0 until its site is
+/// instrumented. The millisecond fields of triSimStats are timed only while
+/// this is on.
+GameValue TriCpuStats(const GameState* /*state*/, GameValuePar arg)
+{
+    perf::CpuScopes& scopes = perf::GCpuScopes();
+    const std::string summary = scopes.Summary();
+    const bool on = static_cast<bool>(arg);
+    scopes.SetEnabled(on);
+    LOG_INFO(Core, "[tri] triCpuStats {} -> {}", summary, on ? "on" : "off");
+    return GameValue(summary.c_str());
+}
+
+/// triSimStats: the simulation counters averaged per frame over the frame
+/// profiler's window (triPerfReset restarts it): AI sight through the fog by
+/// caller, its marches, the marches with the landscape visibility already 0,
+/// sight checks out of the cone, combat-light records, DrawDecal calls,
+/// simulated cloudlets, spatial hash use and SensorList::SmartUpdateAll (which
+/// runs outside every profiled phase), with CPU ms where triCpuStats is on.
+/// "fogsight target=<n> script=<n> other=<n> marches=<n> landvis0=<n>
+/// outcone=<n> | combat records=<n> cpu=<ms> | decals calls=<n> cpu=<ms> |
+/// cloudlets=<n> hashes=<n> | sensors updates=<n> cpu=<ms> | n=<frames>".
+/// A counter reads 0 until its site is instrumented.
+GameValue TriSimStats(const GameState* /*state*/)
+{
+    const std::string s = perf::GPerfCounters().SimSummary();
+    LOG_INFO(Core, "[tri] triSimStats {}", s);
+    return GameValue(s.c_str());
+}
+
+/// triPipeStats <on>: GL_ARB_pipeline_statistics_query around the world
+/// pass's ground and opaque-object spans (primitives submitted, clipping in
+/// and out, vertex and fragment shader invocations), read back a few frames
+/// later without waiting into the counters triPerfStats prints ("pipe=..."
+/// onwards). Samples only while GPU timing is on (triGpuTimes true), from the
+/// next frame. Off by default: no query is issued. Returns "OK:on" or
+/// "OK:off".
+GameValue TriPipeStats(const GameState* /*state*/, GameValuePar arg)
+{
+    const bool on = static_cast<bool>(arg);
+    gpu::SetPipelineStatsWanted(on);
+    LOG_INFO(Core, "[tri] triPipeStats {}", on ? "on" : "off");
+    return GameValue(on ? "OK:on" : "OK:off");
 }

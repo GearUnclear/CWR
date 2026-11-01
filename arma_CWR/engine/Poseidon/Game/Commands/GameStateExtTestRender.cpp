@@ -541,14 +541,22 @@ static const char* HorizonMapState()
 /// compares across the hillCull switch too). With drawGrouping off, any light
 /// slot (a street lamp that has once been on keeps its slot) turns instancing
 /// off for the whole scene (Pass1), which multiplies the draw calls for the
-/// same objects.
+/// same objects. Then the last closed frame's geometry counters
+/// (Graphics/Core/PerfCounters.hpp): ";tris=<triangles>;lodsw=<objects that
+/// switched draw level>;lodhist=<draws at level 0>/.../<level 7 or coarser>"
+/// (0 until the scene counts them).
 GameValue TriSceneStats(const GameState* /*state*/)
 {
-    char buf[224];
-    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;culled=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
-             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->HillHiddenObjectCount() : -1,
-             GScene ? GScene->NLights() : -1, GScene ? GScene->GetLodInvWidth() : 0.0f,
-             GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+    const Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Last();
+    char buf[400];
+    snprintf(buf, sizeof(buf),
+             "draws=%d;objects=%d;culled=%d;lights=%d;lod=%g;pin=%g;horizon=%s;tris=%d;lodsw=%d;"
+             "lodhist=%d/%d/%d/%d/%d/%d/%d/%d",
+             LastFrameDrawCalls(), GScene ? GScene->DrawnObjectCount() : -1,
+             GScene ? GScene->HillHiddenObjectCount() : -1, GScene ? GScene->NLights() : -1,
+             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState(),
+             c.tris, c.lodSwitches, c.lodHist0, c.lodHist1, c.lodHist2, c.lodHist3, c.lodHist4, c.lodHist5, c.lodHist6,
+             c.lodHist7);
     return GameValue(buf);
 }
 
@@ -707,6 +715,8 @@ GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
     const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
     const bool volumetric = sight && sight->volumetric;
     const float ai = sight ? remaster::FogSightTransmittance(*sight, p[0], p[1]) : 1.0f;
+    if (sight)
+        Poseidon::perf::CountFogSight(Poseidon::perf::GPerfCounters().Frame(), Poseidon::perf::FogSightCaller::Script);
     const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
     remaster::FogMedium drawnMedium;
     const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
@@ -759,6 +769,8 @@ GameValue TriAiSight(const GameState* /*state*/, GameValuePar arg)
     const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
     const bool volumetric = sight && sight->volumetric;
     const float tAi = sight ? remaster::FogSightTransmittance(*sight, from, to) : 1.0f;
+    if (sight)
+        Poseidon::perf::CountFogSight(Poseidon::perf::GPerfCounters().Frame(), Poseidon::perf::FogSightCaller::Script);
     const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
     remaster::FogMedium drawnMedium;
     const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
