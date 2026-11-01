@@ -2139,3 +2139,35 @@ TEST_CASE("Remaster sky clouds: the shaders use SkyDensity.hpp's constants and d
         CHECK(engine.find(use) != std::string::npos);
     }
 }
+
+TEST_CASE("Remaster lighting: a keyless night reads the terrain's sky half as the full lookup does",
+          "[remaster][lighting][Shaders]")
+{
+    // shadeRemastered skips every sun lookup while the key light is exactly 0
+    // (every use of the sun's visibility is times litSun.rgb) and reads only
+    // terrainSkyVisibility, which must set the sky visibility, the ground tint
+    // and the ground height exactly as terrainSunVisibility does: its body is
+    // terrainSunVisibility's up to the horizon taps, the early returns without
+    // a value.
+    const std::string terrain = Piece(gl::FragmentPiece::TerrainClouds);
+    const auto body = [&](const std::string& head, const std::string& until)
+    {
+        const size_t at = terrain.find(head);
+        REQUIRE(at != std::string::npos);
+        const size_t open = terrain.find('{', at);
+        const size_t end = terrain.find(until, open);
+        REQUIRE(end != std::string::npos);
+        return terrain.substr(open, end - open);
+    };
+    std::string sun = body("float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {",
+                           "    float h0 = dot(texture(terrainHorizon,");
+    const std::string sky = body("void terrainSkyVisibility(vec3 posAbs, out float skyVisibility) {", "}\n");
+    for (size_t at = sun.find("return 1.0;"); at != std::string::npos; at = sun.find("return 1.0;", at))
+        sun.replace(at, 11, "return;");
+    CHECK(sun == sky);
+    // The gate: the key light exactly 0, and never in the sun-visibility debug view.
+    const std::string shade = Piece(gl::FragmentPiece::Shade);
+    CHECK(shade.find("bool keyLit = any(notEqual(litSun.rgb, vec3(0.0))) || (litFlags.z > 0.5 && litFlags.z < 1.5);") !=
+          std::string::npos);
+    CHECK(shade.find("terrainSkyVisibility(posAbs, skyVisibility);") != std::string::npos);
+}

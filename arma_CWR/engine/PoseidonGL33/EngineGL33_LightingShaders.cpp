@@ -732,6 +732,25 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
     return mix(1.0, mix(vis, 1.0, lift), litTerrainLift.z);
 }
 
+// terrainSunVisibility's sky half alone, for a fragment that takes no sun
+// (shadeRemastered at a keyless night): the same lookups up to its horizon
+// taps, which it skips, so the terrain sky visibility, g_groundTint and
+// g_groundHeight come out as terrainSunVisibility sets them. Keep the two in
+// step.
+void terrainSkyVisibility(vec3 posAbs, out float skyVisibility) {
+    skyVisibility = 1.0;
+    if (litTerrain.x < 0.5 || litFlags.y < 0.5) return;
+    vec2 g = posAbs.xz * litTerrain.y; // grid units
+    float last = 1.0 / litTerrain.z - 1.0;
+    if (g.x < 0.0 || g.y < 0.0 || g.x > last || g.y > last) return;
+    vec2 uv = (g + 0.5) * litTerrain.z;
+    vec4 hs = texture(terrainHeight, uv);
+    g_groundTint = vec3(hs.b, (1.0 - 0.2126 * hs.b - 0.0722 * hs.a) / 0.7152, hs.a);
+    g_groundHeight = hs.x;
+    float lift = smoothstep(litTerrainLift.x, litTerrainLift.y, posAbs.y - hs.x);
+    skyVisibility = mix(1.0, mix(hs.g, 1.0, lift), litTerrain.w);
+}
+
 // ---- The sky's own clouds (feature switches litClouds and skyCloudShadows;
 // Graphics/Remaster/SkyDensity.hpp holds the CPU mirrors and the constants) --
 // The cloud-density map on unit 9, built from the weather sky texture: r broken
@@ -940,11 +959,24 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     bool sunHidden = !foliage && all(equal(litMatForced.rgb, vec3(0.0))) && dot(n, l) <= 0.0 &&
                      !(relief && dot(g_surfBumpN, l) > 0.0) && litWeather.x <= 0.0 && litWeather.z <= 0.0 &&
                      !(litFlags.z > 0.5 && litFlags.z < 1.5);
-    float shadowVis = 1.0;
-    if (!sunHidden) shadowVis = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift);
-    float sunVisibility = shadowVis * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
-    // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
-    sunVisibility *= canopySunVisibility(posAbs);
+    // A keyless night (the key light exactly 0: the sun more than 1.5 degrees
+    // under the horizon and no moon key) takes no sun anywhere: every use of
+    // sunVisibility is times litSun.rgb, so the shadow map (perhaps a stale
+    // one: the depth pass stops at night), the hills' horizon, the cloud and
+    // the canopy lookups are skipped, and only the terrain's sky half (the
+    // valley sky visibility, the ground tint and height) is read. The debug
+    // view of the sun's visibility keeps them all. The test is uniform.
+    bool keyLit = any(notEqual(litSun.rgb, vec3(0.0))) || (litFlags.z > 0.5 && litFlags.z < 1.5);
+    float sunVisibility = 1.0;
+    if (keyLit) {
+        float shadowVis = 1.0;
+        if (!sunHidden) shadowVis = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift);
+        sunVisibility = shadowVis * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+        // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
+        sunVisibility *= canopySunVisibility(posAbs);
+    } else {
+        terrainSkyVisibility(posAbs, skyVisibility);
+    }
     g_sunVisibility = sunVisibility;
 
     vec3 kd = litMatDiffuse.rgb;
