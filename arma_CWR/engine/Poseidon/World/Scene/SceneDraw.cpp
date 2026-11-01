@@ -31,6 +31,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -375,6 +376,10 @@ void Scene::DrawRain()
         rainT += deltaRT;
         rainOffset += deltaRT;
         float yOffset = -fastFmod(rainOffset, 1);
+        // P0-6 deterministic mode (triDeterministic): the phase from the sim
+        // clock, not the float sum of every frame's step since the first rain.
+        if (remaster::TemporalDeterministic())
+            yOffset = -remaster::RainStreakPhase(Glob.time.toInt());
         float xOffset = atan2(dir.X(), dir.Z()) * 0.3f;
         float yDensity = 0.3f + fabs(dir.Y()) + speed;
         saturate(yDensity, 0.1f, 1);
