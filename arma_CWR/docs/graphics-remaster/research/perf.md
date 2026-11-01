@@ -73,3 +73,16 @@ Critic: "Real, verified and pixel-exact cost work." It adds nothing a player wou
 - Scratch worktree: `gfx-perf`, build `arma_CWR\dist\gfx-perf-rwdi`.
 - Best images (not committed): `tmp\research\perf\BEST_sunrise_ridge.png`, `BEST_noon_fields.png`, `run8_quiet\noon_treeline_zoom_m0_top_m0all_bottom.png` (the bush bug).
 - Integration: the bush fix is on `claude/youthful-lovelace-8imbdh` (d80f868). The light gate and terrain occlusion are candidates for the new branch `graphics-remaster` the owner asked for on 2026-10-17. That branch did not exist yet when this page was written.
+
+## Update 2026-10-31: the long views were the dynamic vertex upload
+
+Issue #216 read the long-view cost as CPU time per draw call. That came from the capture harness: under tri the frame observer read a pixel back every frame (a blocking `glReadPixels`), which drained the GPU queue and counted as CPU time (the per-frame readback this page already flagged above). Measured again with the readback at 1 frame in 16, as in play (`POSEIDON_OBSERVER_SAMPLE=1`), at 1080p with 4x MSAA on the RTX 4060 Ti:
+
+- The long views are GPU-bound, and the GPU time is pass1. The dawn valley at view distance 4,000 reads 29.6 ms CPU, 28.9 ms GPU frame, 23.7 ms pass1; Eden at view distance 5,000 reads 25.9 / 25.2 / 20.7.
+- Pass1 is per-draw work: about 3,100 dynamic vertex buffers are re-uploaded every frame (3,099 uploads, 2.1 MB, at the valley), so pass1 ignores the pixel count and falls with the number of draws. Rewrites of shared static buffers by land-following objects, the cause suspected earlier, measured 0.
+- A stand-in that uploads only the buffers whose vertices changed takes the valley to 12.3 / 9.2 / 1.6 ms and Eden to 12.4 / 9.6 / 2.0: CPU-bound, under the 15 ms CPU budget for 60 fps. It skips the land fit, so its CPU column is a little optimistic.
+- Without the upload stall the full Remastered shader costs 0.7 ms more than a trivial one at the valley (1.63 against 0.96 ms). The "1.75x Classic" ratio per drawn object was the stall exposing each draw's shading latency, not shading cost.
+
+The fix is perf item W1-9 (upload a dynamic buffer only when it changed, plus a per-object fitted geometry cache); it has not landed. Change log: `ITERATIONS.md` P1.
+
+**GL debug context.** Debug context off: no measurable effect (within 0.1 to 0.3 ms on every row). The patch that turned it off is not landed; an opt-in debug context for Mesa's threaded GL stays a low-priority portability item.

@@ -28,7 +28,7 @@ Earlier history: the first lighting attempt (Codex, branch `origin/graphics/ligh
 | F1 | 2026-10-23 | d91a08e | Dawn haze flicker: per-cell fog jitter | rejected: the fog moved like wind |
 | F2 | 2026-10-23 | 026f8b7 | The fog wind: fixed taps per fog cell, no jitter | accepted |
 | G1 | 2026-10-27 | 54e3a6d, c18ce49, 9a487c0, 4593b84, c1e483e, 5343929 and others | Readied for the fork's main: AI sight follows all the drawn fog, fog in cockpits and under night vision, the classic weather floor, renderer fixes, the shadow pass's own polygon offset, comment and docs cleanup | not yet judged |
-| P1 | open | none | Cost on long views (issue #216) | none |
+| P1 | open (tooling 2026-10-31) | f1a08ab to a313fb5 | Cost on long views (issue #216): cause corrected to the per-draw dynamic vertex upload; perf tooling batch 1 landed, no fix yet | none |
 
 Dates are as git records them: R1 to R5 were committed in UTC, everything after in local time (UTC-7). Owner quotes are verbatim except for one corrected typo ("marginally").
 
@@ -236,7 +236,32 @@ A twelve-lane review and fix run on `graphics-remaster`, ahead of the merge into
 - **Cleanup.** Comments and test names lost plan-step, process and owner-rule phrasing; the docs moved out of the engine tree to `arma_CWR/docs/graphics-remaster/` with a short `README.md` (b5a3ee2); the trailer and voice tooling moved to the `video-production` branch (fc927e4); the capture rig's defaults resolve inside the tree (6a9599e).
 - **Open.** Cost (issue #216, P1 below). The sky through a helicopter canopy reads a little lighter than the outside horizon band, to be judged in motion.
 
-## P1. Open
+## P1. Cost on long views (issue #216, open)
 
-- Cost: the long views (the dawn valley, the Eden long view) run at 27 to 34 ms per frame on an RTX 4060 Ti, against a target of 60 fps at 1080p on an RTX 3060 class card. Most of the extra cost is CPU time per draw call in the new draw path. Tracked in issue #216.
-- A clean timing run on an idle machine at 1080p, ideally on an RTX 3060.
+**The corrected picture (2026-10-31).** Issue #216 still says the long views spend their time as CPU time per draw call. That reading was a measurement artefact: under tri the frame observer read a pixel back every frame (a blocking `glReadPixels`), which drained the GPU queue and showed up as CPU time. With the readback down to 1 frame in 16, as in play (`POSEIDON_OBSERVER_SAMPLE=1`), the long views are GPU-bound, and the GPU time is pass1, the opaque world pass. Pass1 is flat with resolution and falls with the object count because it is per-draw work: the re-upload of about 3,100 dynamic vertex buffers every frame (3,099 uploads, 2.1 MB, at the valley), not shading and not CPU time per draw. Second measuring round (1080p, 4x MSAA, RTX 4060 Ti; CPU / GPU frame / pass1 in ms):
+
+| View | Today | Uploading only buffers that changed (stand-in) |
+|---|---|---|
+| Valley 05:15, view distance 4,000 | 29.6 / 28.9 / 23.7 | 12.3 / 9.2 / 1.6 |
+| Eden 250 m, view distance 5,000 | 25.9 / 25.2 / 20.7 | 12.4 / 9.6 / 2.0 |
+| noon_fields | 8.7 / 8.6 / 5.6 | 6.6 / 6.0 / 0.85 |
+
+With the uploads gone the long views become CPU-bound at about 12.4 ms, under the 15 ms CPU budget for 60 fps; the stand-in skips the land fit, so its CPU column is a little optimistic, and p95 is not yet measured. The full Remastered shader then costs 0.7 ms more than a trivial one at the valley (1.63 against 0.96 ms), so the earlier "the new programs cost 1.75x Classic" was the upload stall exposing each draw's shading latency. At the default view distance (900 m) every long view is far under budget already. The real fix (upload a dynamic buffer only when its vertices changed, plus a per-object fitted geometry cache) is perf item W1-9 and has not landed. Numbers: the perf squad's second measuring round, `tmp\perf-audit\measure2` in the `graphics-remaster` worktree.
+
+**Tooling, batch 1 (2026-10-31).** Nothing here changes what the player sees; every new verb and flag is off in play.
+
+- f1a08ab: `<fstream>` at the top of `test_contextControlsConfig.cpp` (the Linux CI build of #217 failed there).
+- 2a3923c: per-frame CPU and GPU rings (`triPerfRing`, `triGpuRing`), a GPU timer window that `triGpuTimes true` really restarts, frame counters over the last 256 frames.
+- f926b1d: build provenance (`build_id`, `triBuildId`, `build=` on every capture line).
+- 27fe358: `triSetFpsCap`.
+- f0ea74c: window, device and retry verbs for hitch work; tri honours `TRI_POSEIDON_CACHE_DIR`.
+- df5d05f: frame counters, CPU scopes, pipeline statistics, `triCpuStats`, `triSimStats`, `triPipeStats`.
+- 5fcee52, 067abae: temporal determinism (`triResetTemporal`, `triSeedRandom`, `triDeterministic`), and the rain streak phase from the sim clock in deterministic mode.
+- 6a8cd2d: real-time frame recorder and camera paths for motion clips (`triRecord`, `triRecordState`, `triCamPath`).
+- a313fb5: the perf bench, still and motion gates (`tests/rendering/captures/gate/`), the GPU sampler's per-process foreign columns and the Discord rule.
+
+Gate: build clean (the 5 baseline Network warnings only), unit gate 475/475, 823 of 827 (4 skipped), 3468 of 3478 (4 skipped, 6 that need game data the worktree has no junction for). The flags-off stills of the verbs against the tip were inconclusive against a floor known to be too tight, and their timing run showed no Remastered regression (CPU -0.22 to +0.06 ms, GPU -0.11 to +0.11 ms on the dry views); the post-landing check on the new tip is queued. Formatted with clang-format 22.1.8; 21.1.8 pending. Linux gate: not run.
+
+**The GL debug context.** Debug context off: no measurable effect (within 0.1 to 0.3 ms on every row). Not landed; making it opt-in for Mesa's threaded GL stays a low-priority portability item.
+
+Still to do: W1-9 and the other cost items, a timing run at 1080p on an RTX 3060 class card, and p95 frame times per view.

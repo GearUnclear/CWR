@@ -2235,10 +2235,11 @@ items:
   - id: remastered-lighting-cost
     title: "Remastered lighting: long views at 60 fps on an RTX 3060 class card"
     phase: phase-2
-    status: planned
+    status: in-progress
     priority: 1
     depends_on: [remastered-lighting]
     gh_issues: [216]
+    commits: [f1a08ab, 2a3923c, f926b1d, 27fe358, f0ea74c, df5d05f, 5fcee52, 067abae, 6a8cd2d, a313fb5]
     summary: >
       The dawn valley and the Eden long view run at 27 to 34 ms per frame on an
       RTX 4060 Ti (target 60 fps at 1080p on an RTX 3060 class card). Most of the
@@ -2249,6 +2250,7 @@ items:
       no cap.
     log:
       - "2026-10-27: filed as issue #216 (URGENT) from the 2026-10-27 review of graphics-remaster."
+      - "2026-10-31: perf squad, tooling batch 1 landed on graphics-remaster (f1a08ab..a313fb5): the Linux CI <fstream> fix, per-frame CPU and GPU rings with an honest GPU timer window, build provenance (triBuildId, build= on captures), triSetFpsCap, hitch verbs and TRI_POSEIDON_CACHE_DIR, frame counters and CPU scopes, temporal determinism verbs (triResetTemporal, triSeedRandom, triDeterministic) with a deterministic rain streak phase, a real-time frame recorder and camera paths, and the tracked perf bench and still and motion gates. No player-visible change. The cause is corrected: the long views are GPU-bound on pass1, which is the per-draw re-upload of about 3,100 dynamic vertex buffers per frame, not CPU time per draw (the old reading came from the observer pixel readback under tri); a dirty-only upload stand-in takes the valley to 12.3 ms CPU, 9.2 ms GPU. The fix is W1-9, not landed. Problems hit: two fresh sessions of one build differ by more than the reset floor in no-reset stills, so the single-pair floor was too tight and the stills gate stays inconclusive until the 3-boot control and the deterministic compare run; Discord windows proved harmless and count as foreign only at 40% SM; another session's builds contended the timed jobs. GL debug context off: no measurable effect (within 0.1 to 0.3 ms on every row). Linux gate: not run."
 
   - id: game-data-guard
     title: "Commit guard: no game data, LoBo data or secrets reach the public fork"
