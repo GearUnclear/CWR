@@ -48,8 +48,17 @@ TIME_RE = re.compile(r"(\d+):(\d+):(\d+)(?:\.(\d+))?")
 NOISE = {"valley_0515": {"cpu_work": 0.18, "cpu_avg": 0.18, "gpu_frame": 0.22, "gpu_pass1": 0.15},
          "sunrise_ridge": {"cpu_work": 0.24, "cpu_avg": 0.24}}
 NOISY_FRAME_VIEWS = {"town_night_rain"}  # gate on pass1 / ground (3.3)
+# Views whose particles keep the draw count moving, so triSettleScene may run out of frames: UNSETTLED is
+# counted there, not fatal. combat_fires added 2026-10-31 (BENCH-FIX): the fire and smoke cloudlets left 8
+# of its 10 BATCH1 boots UNSETTLED:300 (2 settled at 99 and 154 frames), so every abba/abba-scoped/full job
+# was contended on it; its frame numbers stay gated like any other view.
+SETTLE_EXEMPT_VIEWS = NOISY_FRAME_VIEWS | {"combat_fires"}
 CPU_BUDGET, GPU_BUDGET = 15.0, 9.0
 KEEP_DIRTY = False  # --keep-dirty: count windows with foreign samples (only to reproduce old tables)
+# --ring-cpu-only: a ring window without its GPU ring is valid (GPU columns stay empty). Only to re-analyse
+# jobs whose GPU rings were never written (BATCH1 abba-scoped 2026-10-31: triGpuRing read after capMeas's
+# triGpuTimes true had emptied the ring); a live job needs both rings.
+RING_CPU_ONLY = False
 # Per-process SM limits (name prefix, case-insensitive, .exe ignored): a gpu:<name>=<SM> reason below its
 # limit is tolerated. Same rule as the runner (squad-queue.config.json sm_threshold_by_process) and
 # gpu_sampler.ps1 / gate-lib.ps1 (-SmOverrides). --sm-override none restores the plain 15% rule.
@@ -166,7 +175,9 @@ def windows_of_boot(boot, read, runner_foreign=None):
                                 ring[f"gpu_{s}"] = g[f"gpu_{s}_p50"]
                         if "gpu_frame_p95" in g:
                             ring["gpu_frame_p95"] = g["gpu_frame_p95"]
-                    w["missing_ring"] = not (c and g)
+                    w["missing_ring"] = not c or (not g and not RING_CPU_ONLY)
+                    w["missing_cpu_ring"] = not c
+                    w["missing_gpu_ring"] = not g
                     v = ring
                 w["values"] = v
                 # dirty: a foreign sample inside the window (3 s margin before, 1 s after)
@@ -178,12 +189,12 @@ def windows_of_boot(boot, read, runner_foreign=None):
                 w["tolerated"] = sorted({t for (s, t) in tt if end is not None and end - dur - 3.0 <= s <= end + 1.0})
                 w["dirty_reasons"] = sorted({h.split(":")[0] for h in " ".join(hits).split()}) if hits else []
                 w["sampler"] = have_sampler
-                # UNSETTLED voids a window except on rain views, whose particles keep the draw count
-                # moving (M2 quick runs: the wet town ran out of settle frames in 3 of 6 quiet views);
-                # there it is counted in `unsettled` and the row says so.
+                # UNSETTLED voids a window except on rain and fire views, whose particles keep the draw
+                # count moving (M2 quick runs: the wet town ran out of settle frames in 3 of 6 quiet views;
+                # SETTLE_EXEMPT_VIEWS); there it is counted in `unsettled` and the row says so.
                 uns = w["settle"].startswith("UNSETTLED")
                 w["unsettled"] = uns
-                w["invalid"] = (w["lit"] not in ("OK", "")) or (uns and w["view"] not in NOISY_FRAME_VIEWS) or bool(
+                w["invalid"] = (w["lit"] not in ("OK", "")) or (uns and w["view"] not in SETTLE_EXEMPT_VIEWS) or bool(
                     w.get("missing_ring"))
                 if KEEP_DIRTY:
                     w["dirty"] = False
@@ -323,6 +334,10 @@ def analyse(plan):
     srcs = {w["source"] for w in all_ws}
     out = {"set": plan.get("set"), "read": read, "config": plan.get("config"), "sides": plan.get("sides", {}),
            "failed_boots": failed, "rows": [], "contended": False, "mixed": len(srcs) > 1}
+    if read == "ring":
+        out["ring_cpu_only"] = RING_CPU_ONLY
+        out["no_cpu_ring"] = sum(1 for w in all_ws if w.get("missing_cpu_ring"))
+        out["no_gpu_ring"] = sum(1 for w in all_ws if w.get("missing_gpu_ring"))
     metrics = METRICS_RING if read == "ring" else METRICS_EMA
     keys = []
     for w in all_ws:
@@ -330,6 +345,13 @@ def analyse(plan):
         if k not in keys:
             keys.append(k)
     rounds_windows = plan.get("expected_windows", {})
+    # expected_windows counts the main boots only (perf-bench.ps1); an abba-scoped row of the other standard
+    # views comes from the one A and one B `rest` boot, so its share is scaled to the boots of its own part
+    # (before 2026-10-31 BENCH-FIX every rest row asked for 8 of 12 windows from 3 and was always contended).
+    boot_part = {b.get("idx"): (b.get("part") or "main") for b in plan.get("boots", [])}
+
+    def part_boots(side, parts):
+        return sum(1 for b in plan.get("boots", []) if b.get("side") == side and (b.get("part") or "main") in parts)
     for view, variant in keys:
         row = {"view": view, "variant": variant, "sides": {}, "clean": {}, "dropped": {}, "invalid": {}}
         per_side = {}
@@ -346,6 +368,9 @@ def analyse(plan):
             row["sides"][s] = side_stats(clean, metrics)
             row.setdefault("budget", {})[s] = budget(row["sides"][s], read)
             exp = rounds_windows.get(s) or len(ws)
+            parts = {boot_part.get(w["boot"], "main") for w in ws}
+            if rounds_windows.get(s) and parts and "main" not in parts and part_boots(s, {"main"}):
+                exp = round(rounds_windows[s] * part_boots(s, parts) / part_boots(s, {"main"}))
             need = max(1, math.ceil(exp * 2 / 3))
             if len(clean) < need:
                 row.setdefault("short", []).append(f"{s}: {len(clean)} clean of {exp} (need {need})")
@@ -525,6 +550,12 @@ def markdown(rep):
         L.append("- CONTENDED: some rows have too few clean windows (see `short`); re-run the job")
     if rep["mixed"]:
         L.append("- REFUSED: EMA and ring numbers mixed in one job")
+    if rep.get("no_cpu_ring") or rep.get("no_gpu_ring"):
+        L.append(f"- ring dumps missing: {rep.get('no_gpu_ring', 0)} window(s) without a GPU ring, "
+                 f"{rep.get('no_cpu_ring', 0)} without a CPU ring (no perfring-/gpuring-<label>.csv and no "
+                 "[tri] ring log line under the window's label); "
+                 + ("GPU-less windows kept, GPU columns empty (--ring-cpu-only, re-analysis)" if rep.get("ring_cpu_only")
+                    else "those windows count as invalid"))
     L.append("")
     cols = ["cpu_avg", "cpu_p95", "cpu_work", "swap", "gpu_frame", "gmin_frame", "gpu_ground", "gpu_pass1", "gpu_rest",
             "gpu_post", "draws", "objects"] if read != "ring" else \
@@ -594,9 +625,12 @@ def main():
     ap.add_argument("--out", default="")
     ap.add_argument("--keep-dirty", action="store_true", help="keep windows with foreign load (reproductions only)")
     ap.add_argument("--sm-override", default="", help="per-process SM limits, e.g. Discord=40;Foo=20, or none")
+    ap.add_argument("--ring-cpu-only", action="store_true",
+                    help="ring mode: windows without a GPU ring stay valid, GPU columns empty (re-analysis only)")
     a = ap.parse_args()
-    global KEEP_DIRTY
+    global KEEP_DIRTY, RING_CPU_ONLY
     KEEP_DIRTY = a.keep_dirty
+    RING_CPU_ONLY = a.ring_cpu_only
     if a.sm_override:
         SM_OVERRIDES.clear()
         for kv in re.split(r"[;,]", a.sm_override):

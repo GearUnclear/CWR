@@ -12,8 +12,13 @@ triSetLighting <mode> with every knob at its shipped default, triSettleScene [30
 working reset on afdb4d60), <frames> frames, then
   read=meas (legacy reading, the only one on afdb4d60): one event=meas line (triPerfStats
             window mean/p95/max per phase + counters, triGpuTimes EMA weight 0.1);
-  read=ring (once INFRA-C1 lands triPerfRing/triGpuRing): the same meas line (for counters
-            only) plus an event=ring label line and the two ring verbs.
+  read=ring (02b67fb1 on: triPerfRing/triGpuRing): first an event=ring label line and the
+            two ring verbs in their labelled form [<frames>, "<label>"], which write
+            perfring-<label>.csv and gpuring-<label>.csv under TRI_OUTPUT_DIR and log the
+            rings; then the same meas line (for counters only). The rings must be read
+            BEFORE capMeas: its `triGpuTimes true` returns the EMA summary and then restarts
+            the GPU window, which empties the GPU ring (EngineGL33::SetGpuTimingEnabled),
+            so a triGpuRing after it answers FAIL:no_frames (BATCH1 abba-scoped, 2026-10-31).
 After the windows, one still `<view>__bench` (round 1 only) for vgate.
 
 Sets (views default; --views overrides):
@@ -60,10 +65,14 @@ capMeas = {
 capBurn = { if (not (isNull capFire)) then { capFire inflame true }; if (not (isNull capBurnV)) then { capBurnV inflame true } }
 '''
 
-# The ring dump after a window. INFRA-C1 owns the verbs' final signature (P0-4: CSV under
-# TRI_OUTPUT_DIR, 256 deep); change only this template when it is fixed.
+# The ring dump at the end of a window, emitted before capMeas (see the docstring: capMeas's
+# `triGpuTimes true` empties the GPU ring). Verbs as landed by INFRA-C1 (P0-4,
+# Game/Commands/GameStateExtTestPerf.cpp): `triPerfRing [n, "label"]` writes
+# <TRI_OUTPUT_DIR>/perfring-<label>.csv (i,total,<13 phases>,draws), `triGpuRing [n, "label"]`
+# writes gpuring-<label>.csv (i,frame,world,pass1,ground,rest,post); both return "OK:<n>" or
+# "FAIL:...". The labels here only hold letters, digits and '_', which the engine keeps as is.
 RING_CALL = ('call {{ format ["view=%1;event=ring;label={lab}", capView] call capLog; '
-             'capRing = triPerfRing {frames}; capGRing = triGpuRing {frames}; '
+             'capRing = triPerfRing [{frames}, "{lab}"]; capGRing = triGpuRing [{frames}, "{lab}"]; '
              'format ["view=%1;event=ringres;label={lab};cpu=%2;gpu=%3", capView, capRing, capGRing] call capLog }}')
 
 SETS = {
@@ -94,9 +103,9 @@ def meas_block(v, label, mode, windows, frames, read, pin=None):
         lab = f"{label}_w{k}" if windows > 1 else label
         out.append("[] call capTimerReset")
         out.append(f"triSimFrames {frames}")
-        out.append(f'"{lab}" call capMeas')
         if read == "ring":
-            out.append(RING_CALL.format(lab=lab, frames=frames))
+            out.append(RING_CALL.format(lab=lab, frames=frames))  # before capMeas, which empties the GPU ring
+        out.append(f'"{lab}" call capMeas')
     if pin is not None:
         out.append("call { capDetail = 1 }")
     return out

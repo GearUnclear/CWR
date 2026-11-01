@@ -158,6 +158,77 @@ def t_text():
         good = len(regs) == 1 and "cpu_work +1.00" in regs[0] and not rep["contended"]
         ok &= good
         print(f"{'PASS' if good else 'FAIL'} bench_report synthetic +1 ms CPU: {regs}")
+    ok &= t_ring(br)
+    return ok
+
+
+def t_ring(br):
+    """Ring mode (BENCH-FIX 2026-10-31): the generated window reads both rings in their labelled form
+    BEFORE capMeas (whose triGpuTimes true empties the GPU ring), and bench_report reads the engine's
+    perfring-/gpuring-<label>.csv (side A) and the [tri] ring log lines alone (side B)."""
+    import re
+    import subprocess
+    ok = True
+    with tempfile.TemporaryDirectory() as td:
+        p = subprocess.run([sys.executable, "-I", os.path.join(gl.HERE, "gen_perfgate.py"), "--set", "quick", "--views",
+                            "valley_0515", "--read", "ring", "--out", td], capture_output=True, text=True)
+        txt = ""
+        if p.returncode == 0:
+            txt = open(os.path.join(td, "pg_quick_abel.test.sqf"), encoding="utf-8").read()
+        order = re.findall(r'triSimFrames 256\ncall \{ format \["view=%1;event=ring;label=(\w+)"[^\n]*'
+                           r'triPerfRing \[256, "(\w+)"\]; capGRing = triGpuRing \[256, "(\w+)"\][^\n]*\n"(\w+)" call capMeas', txt)
+        good = len(order) == 2 and all(len(set(o)) == 1 for o in order)
+        ok &= good
+        print(f"{'PASS' if good else 'FAIL'} gen_perfgate ring: labelled ring verbs before capMeas in {len(order)} of 2 windows")
+    phases = ["setup", "drw:init", "drw:prep", "land:gnd", "land:obj", "drw:land", "drw:obj", "drw:post", "hud",
+              "ai+veh", "sound", "swap", "gm"]
+    with tempfile.TemporaryDirectory() as td:
+        for side, extra in (("A", 0.0), ("B", 1.0)):
+            d = os.path.join(td, side, "tri", "t")
+            os.makedirs(d)
+            log = ['[2026-10-31 10:00:00.000] "UDCAP;view=noon_fields_r1;event=mode;mode=remastered;lit=OK;detail=OK:1;settle=OK:30;draws=1"']
+            for w in (1, 2, 3):
+                lab = f"noon_fields_r1__remastered_w{w}"
+                ts = f"[2026-10-31 10:00:{10 * w - 1:02d}.000]"
+                cpu = [(9.0 + extra + 0.01 * (i % 7), 0.30) for i in range(256)]
+                gpu = [(11.0 + extra + 0.001 * (i % 5), 9.0, 6.8, 2.0, 0.4, 1.5) for i in range(253)]
+                if side == "A":  # CSV form only, as FrameProfiler::RingCsv / GpuFrameRing::CsvText write it
+                    with open(os.path.join(d, f"perfring-{lab}.csv"), "w", encoding="utf-8", newline="\n") as f:
+                        f.write("i,total," + ",".join(phases) + ",draws\n")
+                        for i, (t, sw) in enumerate(cpu):
+                            ph = ["0.00"] * len(phases)
+                            ph[phases.index("swap")] = f"{sw:.2f}"
+                            f.write(f"{i},{t:.2f}," + ",".join(ph) + ",1565\n")
+                    with open(os.path.join(d, f"gpuring-{lab}.csv"), "w", encoding="utf-8", newline="\n") as f:
+                        f.write("i,frame,world,pass1,ground,rest,post\n")
+                        for i, g in enumerate(gpu):
+                            f.write(f"{i}," + ",".join(f"{x:.3f}" for x in g) + "\n")
+                log.append(f'{ts} "UDCAP;view=noon_fields_r1;event=ring;label={lab}"')
+                if side == "B":  # log form only (no CSV): the [tri] lines the verbs print
+                    log.append(f"{ts} [CORE]    [tri] triPerfRing " + "".join(f"{t:.2f},0.00,{sw:.2f},0.00,0.00;" for t, sw in cpu))
+                    log.append(f"{ts} [CORE]    [tri] triPerfRing csv=x/perfring-{lab}.csv frames=256")
+                    log.append(f"{ts} [CORE]    [tri] triGpuRing " + "".join(",".join(f"{x:.3f}" for x in g) + ";" for g in gpu))
+                    log.append(f"{ts} [CORE]    [tri] triGpuRing csv=x/gpuring-{lab}.csv frames=253")
+                log.append(f'{ts} "UDCAP;view=noon_fields_r1;event=ringres;label={lab};cpu=OK:256;gpu=OK:253"')
+                log.append(f'[2026-10-31 10:00:{10 * w:02d}.000] "UDCAP;view=noon_fields_r1;event=meas;label={lab};'
+                           f'mode=remastered;lit=OK;fps=60;draws=1565;objects=4508;perf=fps=60 frame=9.00/12.00/13.00 '
+                           f'swap=0.30/0.40 calls=1 frames=256;gpu=frame 11.00 ms | min frame=10.20"')
+            with open(os.path.join(d, "game_stdout.log"), "w", encoding="utf-8") as f:
+                f.write("\n".join(log) + "\n")
+        plan = dict(set="quick", read="ring", config="fixed", sides={}, expected_windows={"A": 3, "B": 3},
+                    boots=[dict(idx=0, side="A", run_dir=os.path.join(td, "A", "tri"), foreign=None, exit=0),
+                           dict(idx=1, side="B", run_dir=os.path.join(td, "B", "tri"), foreign=None, exit=0)])
+        rep = br.analyse(plan)
+        row = rep["rows"][0] if rep["rows"] else {}
+        sa, sb = (row.get("sides") or {}).get("A", {}), (row.get("sides") or {}).get("B", {})
+        regs = row.get("compare", {}).get("regression", [])
+        vals = [sa.get("cpu_work"), sb.get("cpu_work"), sa.get("gpu_frame"), sb.get("gpu_frame")]
+        good = (row.get("invalid") == {"A": 0, "B": 0} and row.get("clean") == {"A": 3, "B": 3} and None not in vals
+                and abs(vals[1] - vals[0] - 1.0) < 0.02 and abs(vals[3] - vals[2] - 1.0) < 0.02
+                and any("cpu_work +1.0" in r for r in regs) and not rep["contended"])
+        ok &= good
+        print(f"{'PASS' if good else 'FAIL'} bench_report ring (A from CSV, B from log): cpu_work/gpu_frame "
+              f"{vals}, invalid {row.get('invalid')}, regressions {regs}")
     return ok
 
 

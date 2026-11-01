@@ -6,14 +6,21 @@ ring is present), spike count and spacing. Writes <out>.md, <out>.json and <out>
 Moved from tmp/perf-audit/reports/measure/parse_ring.py on 2026-10-31 and extended.
 Two input forms:
 
-1. Log form (the round-1 / M2 scratch verb): a UDCAP `event=ring;label=<L>` line followed by
-   a `[tri] triPerfRing a,b,c,d,e;a,b,c,d,e;...` line. Per frame: total, drw:obj, swap,
-   land:obj, drw:land (ms).
-2. CSV form (INFRA-C1's triPerfRing / triGpuRing, which write CSV under TRI_OUTPUT_DIR; the
-   exact file names and columns are INFRA-C1's to fix): any CSV matching --csv-glob with a
-   header row. The CPU frame column is the first of total, frame, cpu, cpu_frame; GPU
-   columns are any of frame, world, shadow, ground, pass1, rest, post (prefixed gpu_ when the
-   file name contains "gpu"). The label is a `label` column if present, else the file stem.
+1. Log form (the round-1 / M2 scratch verb, and INFRA-C1's verbs, which log the same way): a
+   UDCAP `event=ring;label=<L>` line, then a `[tri] triPerfRing a,b,c,d,e;...` line (per
+   frame: total, drw:obj, swap, land:obj, drw:land, ms) and, from 02b67fb1 on, a
+   `[tri] triGpuRing f,w,p,g,r,o;...` line (frame, world, pass1, ground, rest, post; an
+   empty field = not measured that frame). The label holds until the `event=ringres` line;
+   the `[tri] ... csv=<path> frames=<n>` lines are skipped.
+2. CSV form (INFRA-C1's triPerfRing / triGpuRing [n, "label"], Game/Commands/
+   GameStateExtTestPerf.cpp): perfring-<label>.csv (i,total,<13 phases>,draws) and
+   gpuring-<label>.csv (i,frame,world,pass1,ground,rest,post) under TRI_OUTPUT_DIR, i.e.
+   any CSV matching --csv-glob with a header row. The CPU frame column is the first of
+   total, frame, cpu, cpu_frame; GPU columns are any of frame, world, shadow, ground, pass1,
+   rest, post (prefixed gpu_ when the file name contains "gpu"). The label is a `label`
+   column if present, else the file stem without its `perfring-` / `gpuring-` prefix (an
+   unlabelled call's file is numbered, perfring-<k>.csv, and keeps its whole stem).
+   A label seen in both forms keeps the CSV row (same frames, written with the same digits).
 
 All rows carry source=ring (per-frame medians). Never compare them with parse_meas.py's
 source=ema rows (PERF-PLAN 3.1 P0-3).
@@ -52,6 +59,28 @@ def summarize(tot):
                 gap=st.median(gaps) if gaps else 0, normal_mean=st.mean(normal))
 
 
+def gpu_log_row(run, label, text):
+    """One `[tri] triGpuRing` log line (records frame,world,pass1,ground,rest,post; an empty
+    field = not measured) as a gpu row like from_csv's."""
+    cols = ("frame", "world", "pass1", "ground", "rest", "post")
+    series = {c: [] for c in cols}
+    for rec in text.strip().split(";"):
+        if not rec.strip():
+            continue
+        for c, x in zip(cols, rec.split(",")):
+            try:
+                series[c].append(float(x))
+            except ValueError:
+                pass
+    row = dict(run=run, label=label, kind="gpu", source="ring", file="log")
+    for c in cols:
+        if series[c]:
+            row[f"gpu_{c}_p50"] = st.median(series[c])
+            row[f"gpu_{c}_p95"] = pct(series[c], 95)
+            row["n"] = len(series[c])
+    return row
+
+
 def from_logs(rd):
     rows, frames = [], []
     for lp in Path(rd).rglob("game_stdout.log"):
@@ -61,8 +90,15 @@ def from_logs(rd):
             if m:
                 label = m.group(1)
                 continue
+            if "event=ringres" in line or "event=meas" in line:
+                label = None
+                continue
+            m = re.search(r"triGpuRing (.*)$", line)
+            if m and label and not m.group(1).startswith("csv="):
+                rows.append(gpu_log_row(Path(rd).name, label, m.group(1)))
+                continue
             m = re.search(r"triPerfRing (.*)$", line)
-            if m and label:
+            if m and label and not m.group(1).startswith("csv="):
                 fr = [tuple(float(x) for x in t.split(",")) for t in m.group(1).strip().split(";") if t.strip()]
                 tot = [f[0] for f in fr]
                 s = summarize(tot)
@@ -80,7 +116,6 @@ def from_logs(rd):
                 rows.append(row)
                 for i, f in enumerate(fr):
                     frames.append((Path(rd).name, label, i) + f)
-                label = None
     return rows, frames
 
 
@@ -95,10 +130,15 @@ def from_csv(rd, pattern):
         if not recs:
             continue
         cols = {c.strip().lower(): c for c in recs[0].keys() if c}
-        is_gpu = "gpu" in cp.name.lower()
+        low = cp.name.lower()
+        is_gpu = low.startswith("gpuring") or ("gpu" in low and not low.startswith("perfring"))
+        stem = cp.stem
+        for pre in ("perfring-", "gpuring-"):
+            if stem.lower().startswith(pre) and not stem[len(pre):].isdigit():
+                stem = stem[len(pre):]  # INFRA-C1's <stem>-<label>.csv: the label is the bench's window label
         labels = {}
         for r in recs:
-            labels.setdefault(r.get(cols.get("label", ""), "") or cp.stem, []).append(r)
+            labels.setdefault(r.get(cols.get("label", ""), "") or stem, []).append(r)
         for lab, rs in labels.items():
             def series(col):
                 out = []
