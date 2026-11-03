@@ -80,6 +80,8 @@ void EngineGL33::DestroyVB()
     _lastQueueSource = nullptr;
     // The decal texture arrays (W4-1) go with the buffers they draw from.
     DestroyDecalArrays();
+    // The impostor atlases and programs (XP-impostor) likewise.
+    DestroyImpostors();
 }
 
 void EngineGL33::CreateVBTL() {}

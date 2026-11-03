@@ -1805,6 +1805,14 @@ class EngineGL33 : public Engine
     bool EnsureDecalArray(int array, int capacity, int growFrom);
     void DestroyDecalArrays();
     void ResetDecalBatchPrograms() { _decalModeLoc.clear(); }
+
+    // XP-impostor (EngineGL33_Impostor.cpp; render/Impostor.hpp): far trees and
+    // bushes as baked billboards, POSEIDON_XP_IMPOSTOR=1.
+    bool ImpostorsAvailable() const override;
+    int ImpostorSlot(Poseidon::LODShape* shape, int& stateSection, int& level) override;
+    void DrawImpostors(const void* instances, int n) override;
+    void DestroyImpostors();
+    void RestoreAfterImpostor();
     int LitSkyMode() const; // litSkyFwd.w: the RemasterSky of the draws that follow, 0 = the world's
 
     void PrepareTriangle(const Poseidon::MipInfo& absMip, int specFlags) override;

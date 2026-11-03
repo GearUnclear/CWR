@@ -66,6 +66,8 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/World/Terrain/Occlusion.hpp>
 #include <Poseidon/World/Scene/OcclusionRange.hpp>
+#include <Poseidon/Graphics/Rendering/Impostor.hpp>
+#include <Poseidon/Graphics/Remaster/Canopy.hpp>
 
 using namespace Poseidon;
 
@@ -1467,6 +1469,224 @@ static InstancedRun::RunEntry InstancedRunEntry(const SortObject* so, const LODS
     return entry;
 }
 
+// XP-impostor (render/Impostor.hpp): the frame's far vegetation, grouped by
+// the render state each group draws with.
+namespace
+{
+struct ImpostorItem
+{
+    render::impostor::Instance inst;
+    // The state the group draws with: the baked level's state section (its
+    // texture, flags, material) and the object's own flags.
+    const ShapeSection* section;
+    int spec;
+    Object* object; // the group's first object lends its material and kind
+};
+struct ImpostorFrame
+{
+    std::vector<ImpostorItem> items;
+    std::vector<render::impostor::Instance> packed;
+    int frames = 0;
+    int drawn = 0;
+    int groups = 0;
+};
+ImpostorFrame& GImpostors()
+{
+    static ImpostorFrame s;
+    return s;
+}
+
+bool IsImpostorKind(int mapType)
+{
+    const remaster::CanopyKind kind = remaster::CanopyKindOfMapType(mapType);
+    return kind == remaster::CanopyKind::Tree || kind == remaster::CanopyKind::SmallTree ||
+           kind == remaster::CanopyKind::Bush;
+}
+} // namespace
+
+void Scene::GatherImpostors()
+{
+    ImpostorFrame& f = GImpostors();
+    f.items.clear();
+    const render::impostor::Settings& set = render::impostor::Get();
+    if (!set.on || !GEngine || !GEngine->ImpostorsAvailable() || !_camera)
+    {
+        return;
+    }
+    const float near2 = set.distance * set.distance;
+    const Object* cameraOn = GWorld ? GWorld->CameraOn() : nullptr;
+    // A static, upright tree, small tree or bush with a baked slot joins the
+    // frame's impostors (a felled tree keeps its mesh).
+    auto add = [&f, cameraOn](Object* obj) -> bool
+    {
+        if (!obj || !obj->Static() || obj == cameraOn)
+        {
+            return false;
+        }
+        LODShape* shape = obj->GetShape();
+        if (!shape || !IsImpostorKind(shape->GetMapType()))
+        {
+            return false;
+        }
+        const Matrix4& m = obj->Transform();
+        const Vector3 up = m.DirectionUp();
+        const float upLen2 = up.SquareSize();
+        if (!(upLen2 > 1e-8f) || up.Y() < 0.9f * std::sqrt(upLen2))
+        {
+            return false;
+        }
+        int stateSection = -1;
+        int level = -1;
+        const int slot = GEngine->ImpostorSlot(shape, stateSection, level);
+        if (slot < 0 || level < 0 || level >= shape->NLevels() || !shape->Level(level))
+        {
+            return false;
+        }
+        Shape* baked = shape->Level(level);
+        if (stateSection < 0 || stateSection >= baked->NSections())
+        {
+            return false;
+        }
+        ImpostorItem item;
+        const Vector3 pos = m.Position();
+        const Vector3 ax = m.DirectionAside();
+        const Vector3 az = m.Direction();
+        // World position: the engine makes it camera-relative with its own
+        // frame's camera position, as the instanced runs do.
+        item.inst.pos[0] = pos.X();
+        item.inst.pos[1] = pos.Y();
+        item.inst.pos[2] = pos.Z();
+        item.inst.slot = static_cast<float>(slot);
+        item.inst.ax[0] = ax.X(), item.inst.ax[1] = ax.Y(), item.inst.ax[2] = ax.Z(), item.inst.ax[3] = 0.0f;
+        item.inst.ay[0] = up.X(), item.inst.ay[1] = up.Y(), item.inst.ay[2] = up.Z(), item.inst.ay[3] = 0.0f;
+        item.inst.az[0] = az.X(), item.inst.az[1] = az.Y(), item.inst.az[2] = az.Z(), item.inst.az[3] = 0.0f;
+        item.section = &baked->GetSection(stateSection);
+        item.spec = baked->Special() | obj->GetObjSpecial();
+        item.object = obj;
+        f.items.push_back(item);
+        return true;
+    };
+    for (int i = 0; i < _drawMergers.Size(); i++)
+    {
+        SortObject* oi = _drawMergers[i];
+        if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden || oi->passNum > 1 || oi->distance2 < near2)
+        {
+            continue;
+        }
+        if (!add(oi->object))
+        {
+            continue;
+        }
+        // Out of the run loop and Pass2/Pass3, as a hill-hidden object is;
+        // its texture hints are kept for the shadow casters.
+        oi->hillHidden = true;
+        oi->object->PrepareDrawTextures(oi->drawLOD, *oi->object);
+    }
+    if (!set.far)
+    {
+        return;
+    }
+    // POSEIDON_XP_IMPOSTOR_FAR: the vegetation the object distance cut
+    // (LevelFromDistance2: objectsZ) left out, in the frustum (an object out of
+    // it is queued only for its shadow, forceDrawLOD LOD_INVISIBLE) and before
+    // the fog's end, larger than the tiny-object limit the near draws use.
+    const float objects2 = Square(ENGINE_CONFIG.objectsZ);
+    const float fogEnd2 = Square(GetFogMaxRange());
+    const float tiny = 0.125f * _camera->Left() * _lodInvWidth;
+    for (int i = 0; i < _drawObjects.Size(); i++)
+    {
+        SortObject* oi = _drawObjects[i];
+        if (oi->notUsed || oi->drawLOD != LOD_INVISIBLE || oi->forceDrawLOD == LOD_INVISIBLE ||
+            oi->distance2 <= objects2 || oi->distance2 >= fogEnd2 || !oi->object || !oi->shape)
+        {
+            continue;
+        }
+        const float diameter = oi->shape->BoundingSphere() * 2.0f * oi->object->Scale();
+        if (Square(diameter) < Square(tiny) * oi->distance2)
+        {
+            continue;
+        }
+        add(oi->object);
+    }
+}
+
+void Scene::DrawImpostors()
+{
+    ImpostorFrame& f = GImpostors();
+    if (f.items.empty())
+    {
+        return;
+    }
+    // Group by the state each draws with: the section (texture, flags,
+    // material) and the object's flags.
+    std::stable_sort(f.items.begin(), f.items.end(),
+                     [](const ImpostorItem& a, const ImpostorItem& b)
+                     {
+                         if (a.section != b.section)
+                         {
+                             const ShapeSectionInfo& sa = *a.section;
+                             const ShapeSectionInfo& sb = *b.section;
+                             if (sa != sb)
+                             {
+                                 if (sa.properties.GetTexture() != sb.properties.GetTexture())
+                                     return sa.properties.GetTexture() < sb.properties.GetTexture();
+                                 if (sa.properties.Special() != sb.properties.Special())
+                                     return sa.properties.Special() < sb.properties.Special();
+                                 if (sa.material != sb.material)
+                                     return sa.material < sb.material;
+                                 return sa.surfMat.GetRef() < sb.surfMat.GetRef();
+                             }
+                         }
+                         return a.spec < b.spec;
+                     });
+    Engine* engine = GEngine;
+    LightList noLights;
+    int groups = 0;
+    GSectionFilter = SectionClassFilter::OpaqueAndCutout;
+    for (size_t i = 0; i < f.items.size();)
+    {
+        const ImpostorItem& head = f.items[i];
+        size_t end = i + 1;
+        while (end < f.items.size() && f.items[end].spec == head.spec &&
+               static_cast<const ShapeSectionInfo&>(*f.items[end].section) ==
+                   static_cast<const ShapeSectionInfo&>(*head.section))
+        {
+            end++;
+        }
+        f.packed.resize(end - i);
+        for (size_t k = i; k < end; k++)
+        {
+            f.packed[k - i] = f.items[k].inst;
+        }
+        // The state a far draw of the head's baked level would take: its
+        // object kind, the identity frame (instances carry their own),
+        // per-vertex fog, no local light, the section's material and texture.
+        const render::DrawObjectKind kindBefore = engine->GetDrawObjectKind();
+        engine->SetDrawObjectKind(head.object->GetDrawObjectKind());
+        GScene->SetConstantFog(-1);
+        Matrix4 identity(MIdentity);
+        engine->PrepareMeshTL(noLights, identity, render::SplitLegacy(head.spec));
+        engine->SetBias(((head.spec & ZBiasMask) / ZBiasStep) * 5);
+        TLMaterial mat;
+        head.object->GetMaterial(mat, head.section->material);
+        head.section->PrepareTL(mat, noLights, head.spec);
+        engine->DrawImpostors(f.packed.data(), static_cast<int>(f.packed.size()));
+        engine->SetDrawObjectKind(kindBefore);
+        ++groups;
+        i = end;
+    }
+    GSectionFilter = SectionClassFilter::All;
+    f.drawn += static_cast<int>(f.items.size());
+    f.groups += groups;
+    if (++f.frames >= 300)
+    {
+        LOG_INFO(Graphics, "XP impostor: {:.0f} instances, {:.1f} groups per frame (last 300 frames)", f.drawn / 300.0,
+                 f.groups / 300.0);
+        f.frames = f.drawn = f.groups = 0;
+    }
+    f.items.clear();
+}
+
 void Scene::DrawObjectsAndShadowsPass1()
 {
     // select first objects - those with highest visual priority
@@ -1812,6 +2032,11 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
     }
 
+    // XP-impostor: far trees and bushes leave the run loop for the impostor
+    // draw below (flagged as the hill cull flags its objects, so the sorts,
+    // the shadow casters and the texture hints stay as they were).
+    GatherImpostors();
+
     SortByShape(_drawMergers.Data(), _drawMergers.Size());
     // first of all draw non-alpha objects
 
@@ -1944,6 +2169,7 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
     }
 #endif
+    DrawImpostors();
 }
 
 // A surface overlay (road / decal): OnSurface-routed geometry drawn as a

@@ -457,6 +457,16 @@ class Engine : public IGraphicsEngine
     virtual void BeginInstancedRunUpload() {}
     virtual bool EndInstancedRun() { return true; }
 
+    // XP-impostor (POSEIDON_XP_IMPOSTOR=1; render/Impostor.hpp): far trees and
+    // bushes as baked billboards. ImpostorSlot bakes the shape on first use
+    // and returns its slot (-1: none, the object draws as before), the baked
+    // level and the section of it whose render state the impostors draw with.
+    // DrawImpostors draws `n` instances (render::impostor::Instance, 64 bytes
+    // each) under the state the caller prepared with that section's PrepareTL.
+    virtual bool ImpostorsAvailable() const { return false; }
+    virtual int ImpostorSlot(LODShape* /*shape*/, int& /*stateSection*/, int& /*level*/) { return -1; }
+    virtual void DrawImpostors(const void* /*instances*/, int /*n*/) {}
+
     // Explicit pass-kind routing.  Producers (Man::DrawProxies for first-person,
     // vehicle cockpit draw, etc.) wrap a draw scope with `SetPassKindHint(Cockpit)`
     // / `ClearPassKindHint()` so the descriptor build picks the cockpit `PassKind`

@@ -360,6 +360,9 @@ class Scene
     void EndObjects(); // sort all objects
     void DrawReflections(const WaterLevel& water);
     void DrawObjectsAndShadowsPass1();
+    // XP-impostor (render/Impostor.hpp): far vegetation out of Pass1's run loop, then drawn as impostors.
+    void GatherImpostors();
+    void DrawImpostors();
     void DrawObjectsAndShadowsPass2();
     // Shadow-map depth pass (off by default): collect the visible casters and render
     // the cascade depth maps from the sun.  Lives in SceneShadowPass.cpp to keep
