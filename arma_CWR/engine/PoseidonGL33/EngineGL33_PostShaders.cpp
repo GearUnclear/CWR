@@ -259,6 +259,7 @@ uniform vec4 sunView;    // xyz toward the sun in view space, w this frame's tur
 uniform vec4 surfParams2; // x the occlusion power's multiple on static architecture (the target's alpha code 1),
                           // y 1 = fogVeilTex holds the surface's share of each pixel's light after the fog
 uniform sampler2D fogVeilTex; // r: the surface's share of the light after the fog (EngineGL33_PostFog.cpp, FogState::veilTex)
+uniform vec4 xpContact; // XP (POSEIDON_XP_CONTACT): x 1 = the longer march, y no march past (m), z fade start (m), w length cap (m)
 // The photoreal camera (photoLight; Graphics/Remaster/PhotoCamera.hpp):
 uniform vec4 camParams;  // x 1 = on, y exposure (linear), z curve (0 hue-keeping, 1 per channel, 2 ACES,
                          // 3 Neutral), w vignette
@@ -342,6 +343,40 @@ float contactShadow(vec2 uv, float z) {
         }
     }
     return 1.0 - shadow * (1.0 - smoothstep(30.0, 50.0, z));
+}
+
+// XP (POSEIDON_XP_CONTACT): the same march reaching farther. Its length is a
+// near-constant share of the screen (4.5% of the depth, up to xpContact.w
+// metres), so a wheel, a bush's foot or a soldier at 60 to 150 m, which the
+// far shadow cascades blur away, keeps a sun shadow; twelve steps, spaced
+// quadratically so most of them sit near the receiver, a hit's weight fading
+// with its distance along the march as the shipped one's does.
+float contactShadowXp(vec2 uv, float z) {
+    if (z > xpContact.y) return 1.0;
+    vec2 ndc = (uv - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+    vec3 p = vec3(ndc.x * z * projInfo.z, ndc.y * z * projInfo.w, z);
+    float len = clamp(0.045 * z, 0.12, xpContact.w);
+    float thick = 0.25 + 0.025 * z;
+    float noise = fract(fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) + sunView.w);
+    const int kSteps = 12;
+    float shadow = 0.0;
+    for (int i = 0; i < kSteps; ++i) {
+        float t = (float(i) + noise) / float(kSteps);
+        t = t * t; // denser near the receiver, where the contact is
+        vec3 q = p + sunView.xyz * (len * t);
+        if (q.z <= 0.05) break;
+        vec2 qn = vec2(q.x / (q.z * projInfo.z), q.y / (q.z * projInfo.w));
+        vec2 quv = worldRect.xy + (qn * 0.5 + 0.5) * worldRect.zw;
+        vec2 qr = (quv - worldRect.xy) / worldRect.zw;
+        if (qr.x <= 0.0 || qr.y <= 0.0 || qr.x >= 1.0 || qr.y >= 1.0) break;
+        float zs = compositeViewZ(quv);
+        float dz = q.z - zs;
+        float bias = 0.015 + 0.002 * q.z;
+        if (dz > bias && dz < thick) {
+            shadow = max(shadow, 1.0 - t);
+        }
+    }
+    return 1.0 - shadow * (1.0 - smoothstep(xpContact.z, xpContact.y, z));
 }
 
 // Jimenez et al. 2016: the light that bounces between the occluders before it
@@ -475,7 +510,9 @@ void main() {
         // (without it the underbody of a Jeep at a low sun went to 0).
         ao = max(ao, 0.35);
         // The sun's share loses what a contact shadow hides.
-        float contact = (surfParams.z > 0.0 && s.b > 0.02) ? contactShadow(vUV, zc) : 1.0;
+        float contact = (surfParams.z > 0.0 && s.b > 0.02)
+                            ? (xpContact.x > 0.5 ? contactShadowXp(vUV, zc) : contactShadow(vUV, zc))
+                            : 1.0;
         contact = mix(1.0, contact, clamp(surfParams.z, 0.0, 1.0));
         if (debugView.x > 0.5) { fragColor = vec4(vec3(ao * contact), 1.0); return; }
         keep = max(1.0 - clamp(s.r, 0.0, 1.0) * (1.0 - ao) - clamp(s.b, 0.0, 1.0) * (1.0 - contact), 0.0);

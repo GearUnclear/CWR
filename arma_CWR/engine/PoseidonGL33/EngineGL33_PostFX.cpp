@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 namespace
@@ -78,6 +79,76 @@ constexpr float kAoFadeStart = 120.0f; // metres: AO fades out with distance
 constexpr float kAoFadeEnd = 250.0f;
 constexpr float kBloomThreshold = 0.82f; // linear peak where bloom starts
 constexpr float kBloomKnee = 0.12f;
+
+// Experiment switches of the occlusion lane (graphics-experimental, xp-ambientocc), read once
+// from the environment, all off by default (the frame then is the tip's):
+//   POSEIDON_XP_AO_FAR=1   the horizon occlusion reaches past 300 m: it fades out from
+//                          farFadeStart to farFadeEnd, and its world radius grows with the
+//                          depth (farRadiusPerM), so a house's foot, a tree's base and a
+//                          hedge at 300 to 900 m keep their contact darkening;
+//   POSEIDON_XP_CONTACT=1  the contact shadows march farther (a near-constant length on screen,
+//                          up to contactLenCap metres) with more steps, out to
+//                          contactMaxZ, so small casters the far cascades miss (a wheel, a
+//                          bush, a fence post, a soldier at 60 to 150 m) keep a sun shadow;
+//   POSEIDON_XP_AO_VIEW=1  diagnostic: the composite shows the occlusion times the contact
+//                          shadow (the surfaces path's debug view 4) whatever the knob says.
+// The numbers below are the defaults; POSEIDON_XP_AO_FAR_FADE0, _FADE1, _RPM and
+// POSEIDON_XP_CONTACT_MAXZ, _FADE0, _CAP override them (metres; for tuning runs without a rebuild).
+struct XpAoSwitches
+{
+    bool aoFar = false;
+    bool contact = false;
+    bool aoView = false;
+    float farFadeStart = 450.0f;    // metres of view depth
+    float farFadeEnd = 900.0f;      // metres
+    float farRadiusPerM = 0.012f;   // world radius per metre of depth (4 m from 333 m on)
+    float contactMaxZ = 150.0f;     // metres: no contact march past this ...
+    float contactFadeStart = 90.0f; // ... faded out from here
+    float contactLenCap = 4.0f;     // metres: the march's longest reach
+};
+
+bool XpEnvOn(const char* name)
+{
+    const char* v = std::getenv(name);
+    return v && v[0] != '\0' && !(v[0] == '0' && v[1] == '\0');
+}
+
+void XpEnvFloat(const char* name, float& value, float lo, float hi)
+{
+    const char* v = std::getenv(name);
+    if (!v || !v[0])
+        return;
+    char* end = nullptr;
+    const float f = std::strtof(v, &end);
+    if (end != v && std::isfinite(f))
+        value = std::clamp(f, lo, hi);
+}
+
+const XpAoSwitches& XpAo()
+{
+    static const XpAoSwitches s = []
+    {
+        XpAoSwitches r;
+        r.aoFar = XpEnvOn("POSEIDON_XP_AO_FAR");
+        r.contact = XpEnvOn("POSEIDON_XP_CONTACT");
+        r.aoView = XpEnvOn("POSEIDON_XP_AO_VIEW");
+        XpEnvFloat("POSEIDON_XP_AO_FAR_FADE0", r.farFadeStart, 50.0f, 5000.0f);
+        XpEnvFloat("POSEIDON_XP_AO_FAR_FADE1", r.farFadeEnd, 60.0f, 6000.0f);
+        r.farFadeEnd = std::max(r.farFadeEnd, r.farFadeStart + 10.0f);
+        XpEnvFloat("POSEIDON_XP_AO_FAR_RPM", r.farRadiusPerM, 0.0f, 0.1f);
+        XpEnvFloat("POSEIDON_XP_CONTACT_MAXZ", r.contactMaxZ, 10.0f, 1000.0f);
+        XpEnvFloat("POSEIDON_XP_CONTACT_FADE0", r.contactFadeStart, 5.0f, 1000.0f);
+        r.contactFadeStart = std::min(r.contactFadeStart, r.contactMaxZ - 1.0f);
+        XpEnvFloat("POSEIDON_XP_CONTACT_CAP", r.contactLenCap, 0.12f, 20.0f);
+        LOG_INFO(Graphics,
+                 "GL33 post: xp occlusion switches ao_far={} ({}..{} m, {} m/m) contact={} ({}..{} m, cap {} m) "
+                 "ao_view={}",
+                 r.aoFar ? 1 : 0, r.farFadeStart, r.farFadeEnd, r.farRadiusPerM, r.contact ? 1 : 0, r.contactFadeStart,
+                 r.contactMaxZ, r.contactLenCap, r.aoView ? 1 : 0);
+        return r;
+    }();
+    return s;
+}
 
 GLuint CompilePostShader(GLenum type, const char* src, const char* name)
 {
@@ -771,8 +842,11 @@ void EngineGL33::PostAo(const PostFrame& f)
         Set4(prog, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
         // A vehicle interior: a crew compartment's reach, not the world's.
         const float radius = f.surfaceInterior ? rm::kGtaoInteriorRadius : std::max(_lighting.surfAoRadius, 0.1f);
-        Set4(prog, "aoParams", radius, f.surfaceInterior ? 1.0f : rm::kGtaoStaticRadiusScale, rm::kGtaoFadeStart,
-             rm::kGtaoFadeEnd);
+        // XP (POSEIDON_XP_AO_FAR): farther fade, radius growing with the depth.
+        const bool xpFar = XpAo().aoFar && !f.surfaceInterior;
+        Set4(prog, "aoParams", radius, f.surfaceInterior ? 1.0f : rm::kGtaoStaticRadiusScale,
+             xpFar ? XpAo().farFadeStart : rm::kGtaoFadeStart, xpFar ? XpAo().farFadeEnd : rm::kGtaoFadeEnd);
+        Set4(prog, "xpAo", xpFar ? XpAo().farRadiusPerM : 0.0f, 0.0f, 0.0f, 0.0f);
         SetInt(prog, "surfTex", 1);
         BindTex(1, p.surfTex);
         Set4(prog, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
@@ -951,7 +1025,10 @@ void EngineGL33::PostComposite(const PostFrame& f)
     const float scatterLength = Poseidon::remaster::ShaftScatterLength(GScene ? GScene->GetFogMaxRange() : 0.0f);
     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
-    Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    Set4(p.progComposite, "debugView", (_lighting.debugView == 4 || XpAo().aoView) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    // XP (POSEIDON_XP_CONTACT): the longer contact march (0 = the shipped one).
+    Set4(p.progComposite, "xpContact", XpAo().contact ? 1.0f : 0.0f, XpAo().contactMaxZ, XpAo().contactFadeStart,
+         XpAo().contactLenCap);
     // The combat lights' scattering in the air (none without them).
     SetCombatScatterUniforms(p.progComposite, f.combatScatter ? _combat.exposure : 0.0f);
     // Surface light: the resolved surface target on unit 6's 2D target

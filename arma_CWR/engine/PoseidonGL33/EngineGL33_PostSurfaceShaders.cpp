@@ -42,6 +42,7 @@ uniform vec4 worldRect;  // xy origin, zw size of the 3D viewport in uv
 uniform vec4 gtaoParams; // x max screen radius (share of the height), y min radius (pixels), z one-slice radius (half-res px), w frame turn
 uniform vec4 upView;     // xyz world up in view space, w the weight of an occluder below the receiver
 uniform vec4 gtaoSlices; // x slices a pixel this frame (kGtaoTemporalSlices under TAA, else kGtaoSlices)
+uniform vec4 xpAo;       // XP (POSEIDON_XP_AO_FAR): x the world radius per metre of depth (0 = off)
 out vec4 fragColor;
 )";
 
@@ -95,6 +96,9 @@ void main() {
     // Static architecture (the surface target's alpha code 1) searches
     // farther: eaves, door openings and the wall-ground seam are metres across.
     float radius = aoParams.x * mix(1.0, aoParams.y, smoothstep(0.5, 1.0, texture(surfTex, uvC).a));
+    // XP: far receivers search a radius that grows with the depth (a house's
+    // foot or a tree's base at 600 m is metres across, a few pixels on screen).
+    if (xpAo.x > 0.0) radius = max(radius, z * xpAo.x);
     vec2 uvPerM = vec2(0.5 / projInfo.z, 0.5 / projInfo.w) * worldRect.zw / z;
     vec2 rUV = radius * uvPerM;
     float cap = gtaoParams.x * worldRect.w;
