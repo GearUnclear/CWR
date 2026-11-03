@@ -404,6 +404,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Scene/Camera tests (batch-17)
     World/Scene/test_camera_enums.cpp
+    World/Scene/test_draw_list_sort.cpp
 
     # Game tests
     Game/test_game_state_ext.cpp

@@ -508,7 +508,9 @@ TEST_CASE("TAA backend: the opaque world is copied between the opaque and the tr
     const size_t hook = pass2.find("GEngine->BeginTranslucentObjects();");
     REQUIRE(hook != std::string::npos);
     CHECK(hook > pass2.find("RenderShadowMapDepthPass(nDraw);"));
-    CHECK(hook < pass2.find("QSort(_drawMergers.Data(), _drawMergers.Size(), CmpRevAlphaSortObj);"));
+    const size_t alphaSort = pass2.find("SortAlphaFarToNear(_drawMergers.Data(), _drawMergers.Size());");
+    REQUIRE(alphaSort != std::string::npos);
+    CHECK(hook < alphaSort);
     // The copy needs no new target mid-frame (that would reset a cropped
     // world's viewport) and keeps the world's viewport.
     const std::string temporal = ReadTextFile(Gl33Dir() / "EngineGL33_PostTemporal.cpp");
