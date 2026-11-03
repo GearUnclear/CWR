@@ -23,12 +23,14 @@ bool EnvSet(const char* name)
 
 unsigned ParseParts()
 {
+    // graphics-experimental: on by default (unset or empty = every part);
+    // 0 turns it off and runs the tip's serial code.
     const char* v = std::getenv("POSEIDON_XP_CPUTHREADS");
-    if (!v || !*v || std::strcmp(v, "0") == 0)
+    if (v && std::strcmp(v, "0") == 0)
     {
         return 0;
     }
-    if (std::strcmp(v, "1") == 0 || std::strcmp(v, "all") == 0)
+    if (!v || !*v || std::strcmp(v, "1") == 0 || std::strcmp(v, "all") == 0)
     {
         return kSort | kHill | kShadow | kLod | kPrep;
     }

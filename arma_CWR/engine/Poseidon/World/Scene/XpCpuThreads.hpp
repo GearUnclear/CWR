@@ -1,11 +1,12 @@
 #pragma once
 
-// XP-cputhreads (overnight experiment, default off): parts of the CPU render
+// XP-cputhreads (overnight experiment, default on in graphics-experimental): parts of the CPU render
 // preparation run on the process TaskPool's workers (Core/TaskPool.hpp) while
 // the frame stays exactly what the serial code draws.
 //
-//   POSEIDON_XP_CPUTHREADS         unset or 0: off (the tip's serial code).
-//                                  1 or all: every part. Otherwise a list of
+//   POSEIDON_XP_CPUTHREADS         0: off (the tip's serial code).
+//                                  unset, empty, 1 or all: every part (the
+//                                  default). Otherwise a list of
 //                                  part names: sort, hill, shadow, lod, prep.
 //   POSEIDON_XP_CPUTHREADS_VERIFY  1: also run the serial code beside each
 //                                  parallel part and count the differences
