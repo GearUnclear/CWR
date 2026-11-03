@@ -11,6 +11,8 @@
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
 #include <Poseidon/Graphics/Remaster/QualityScale.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+#include <Poseidon/World/Scene/XpCpuThreads.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -239,8 +241,70 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         walkShape(s, *obj, cacheSolid, cacheAlpha);
     };
     const float camX = camPos.X(), camY = camPos.Y(), camZ = camPos.Z();
+    // XP-cputhreads (shadow part): a cached static caster's copies are reserved
+    // in place (the buffers grow exactly as below) and recorded; they run on the
+    // pool once the walk is done, before the alpha buckets are flattened. Every
+    // float is the same subtraction of the same values, so the buffers end up
+    // byte for byte as the serial copies leave them.
+    struct DeferredCopy
+    {
+        const float* src;
+        std::vector<float>* dst;
+        size_t dstFloat; // first float in dst
+        int verts;
+        int stride; // 3 (xyz) or 5 (xyz then uv, copied)
+    };
+    static std::vector<DeferredCopy> s_deferred;
+    s_deferred.clear();
+    XpCpuThreads::StageTimer xpTimer(XpCpuThreads::Stage::ShadowCollect);
+    TaskPool* const xpPool = XpCpuThreads::Pool(XpCpuThreads::kShadow);
+    auto deferCachedEntry = [&](const StaticCasterCache& e)
+    {
+        if (!e.solidWorld.empty())
+        {
+            const size_t base = smVerts.size();
+            smVerts.resize(base + e.solidWorld.size());
+            s_deferred.push_back({e.solidWorld.data(), &smVerts, base, static_cast<int>(e.solidWorld.size() / 3), 3});
+        }
+        for (const StaticCasterCache::AlphaChunk& chunk : e.alphaChunks)
+        {
+            std::vector<float>& buf = s_alphaByTex[chunk.tex];
+            const size_t b2 = buf.size();
+            buf.resize(b2 + static_cast<size_t>(chunk.count) * 5);
+            s_deferred.push_back(
+                {e.alphaWorld.data() + static_cast<size_t>(chunk.first) * 5, &buf, b2, chunk.count, 5});
+        }
+    };
+    auto runDeferred = [&](const DeferredCopy& d, float* dst)
+    {
+        const float* src = d.src;
+        if (d.stride == 3)
+        {
+            const size_t nf = static_cast<size_t>(d.verts) * 3;
+            for (size_t i = 0; i < nf; i += 3)
+            {
+                dst[i] = src[i] - camX;
+                dst[i + 1] = src[i + 1] - camY;
+                dst[i + 2] = src[i + 2] - camZ;
+            }
+            return;
+        }
+        for (int i = 0; i < d.verts; i++, src += 5, dst += 5)
+        {
+            dst[0] = src[0] - camX;
+            dst[1] = src[1] - camY;
+            dst[2] = src[2] - camZ;
+            dst[3] = src[3];
+            dst[4] = src[4];
+        }
+    };
     auto emitCachedEntry = [&](const StaticCasterCache& e)
     {
+        if (xpPool)
+        {
+            deferCachedEntry(e);
+            return;
+        }
         const size_t base = smVerts.size();
         smVerts.resize(base + e.solidWorld.size());
         const float* src = e.solidWorld.data();
@@ -382,6 +446,43 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         g_lastShadowProxyVerts += static_cast<int>((smVerts.size() - solidBeforeProxy) / 3);
     }
     gSmDepthCachedCasters = censusCached;
+    if (xpPool && !s_deferred.empty())
+    {
+        size_t floats = 0;
+        for (const DeferredCopy& d : s_deferred)
+        {
+            floats += static_cast<size_t>(d.verts) * d.stride;
+        }
+        auto runRange = [&](uint32_t s, uint32_t e)
+        {
+            for (uint32_t i = s; i < e; ++i)
+            {
+                const DeferredCopy& d = s_deferred[i];
+                runDeferred(d, d.dst->data() + d.dstFloat);
+            }
+        };
+        if (floats >= 49152)
+        {
+            xpPool->ParallelFor(static_cast<uint32_t>(s_deferred.size()), runRange);
+        }
+        else
+        {
+            runRange(0, static_cast<uint32_t>(s_deferred.size()));
+        }
+        if (XpCpuThreads::VerifyOn())
+        {
+            static std::vector<float> s_check;
+            int bad = 0;
+            for (const DeferredCopy& d : s_deferred)
+            {
+                s_check.resize(static_cast<size_t>(d.verts) * d.stride);
+                runDeferred(d, s_check.data());
+                bad += std::memcmp(s_check.data(), d.dst->data() + d.dstFloat, s_check.size() * sizeof(float)) != 0 ? 1
+                                                                                                                    : 0;
+            }
+            XpCpuThreads::AddMismatches(XpCpuThreads::Stage::ShadowCollect, bad);
+        }
+    }
     // Flatten the per-texture alpha buckets into one buffer + batch ranges.
     for (auto& kv : s_alphaByTex)
     {
@@ -396,6 +497,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         smAlphaVerts.insert(smAlphaVerts.end(), kv.second.begin(), kv.second.end());
         smAlphaBatches.push_back(batch);
     }
+    xpTimer.Stop();
+    XpCpuThreads::StageTimer xpGlTimer(XpCpuThreads::Stage::ShadowRender);
     // Cascaded shadow maps fit in camera-relative space, snapped to a world grid
     // (ShadowMath::BuildShadowCascadesTiered, proven by [ShadowMath] unit tests), so
     // the shadow stays world-anchored (no crawl/jump) while the casters stay

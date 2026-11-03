@@ -45,6 +45,10 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
+#include <Poseidon/World/Scene/XpCpuThreads.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
+#include <cstring>
+#include <vector>
 #include <chrono>
 
 #include <Poseidon/Core/Progress.hpp>
@@ -1483,6 +1487,28 @@ void World::Simulate(float deltaT, bool& enableDraw)
                     const float vdCellRange = xp::GViewDistPolicy().earlyCull ? _scene.XpCellCullRange() : 0.0f;
                     const Vector3 vdCamPos = _scene.GetCamera()->Position();
                     int vdCells = 0;
+                    // XP-cputhreads (prep part): the walk below gathers the
+                    // ObjectForDrawing calls in order; their decisions run on
+                    // the pool and the list updates follow in that order
+                    // (Scene::DecideObjectForDrawing / ApplyObjectForDrawing).
+                    // Diagnostic draws interleave their own calls: serial then.
+                    struct XpPrepCall
+                    {
+                        Object* obj;
+                        int forceLOD;
+                        ClipFlags clip;
+                    };
+                    static std::vector<XpPrepCall> s_xpPrepCalls;
+                    static std::vector<Scene::DrawDecision> s_xpPrepDecisions;
+                    s_xpPrepCalls.clear();
+                    TaskPool* xpPrepPool = XpCpuThreads::Pool(XpCpuThreads::kPrep);
+#if _ENABLE_CHEATS
+                    if (DiagMode)
+                    {
+                        xpPrepPool = nullptr;
+                    }
+#endif
+                    XpCpuThreads::StageTimer xpPrepTimer(XpCpuThreads::Stage::Prep);
                     for (z = zMin; z <= zMax; z++)
                     {
                         for (x = xMin; x <= xMax; x++)
@@ -1539,7 +1565,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
                                     clip = ClipAll;
                                 }
 #endif
-                                if (obj == camInsideVehicle)
+                                if (xpPrepPool)
+                                {
+                                    s_xpPrepCalls.push_back(
+                                        {obj, obj == camInsideVehicle ? obj->InsideLOD(_camType) : -1, clip});
+                                }
+                                else if (obj == camInsideVehicle)
                                 {
                                     _scene.ObjectForDrawing(obj, obj->InsideLOD(_camType), clip);
 #if _ENABLE_CHEATS
@@ -1568,6 +1599,65 @@ void World::Simulate(float deltaT, bool& enableDraw)
                         vdCounters.xpVdEnumMs +=
                             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - vdT0).count();
                     }
+                    if (xpPrepPool && !s_xpPrepCalls.empty())
+                    {
+                        const int nCalls = static_cast<int>(s_xpPrepCalls.size());
+                        s_xpPrepDecisions.resize(s_xpPrepCalls.size());
+                        xpPrepPool->ParallelFor(static_cast<uint32_t>(nCalls),
+                                                [&](uint32_t b, uint32_t e)
+                                                {
+                                                    for (uint32_t k = b; k < e; ++k)
+                                                    {
+                                                        s_xpPrepDecisions[k] = _scene.DecideObjectForDrawing(
+                                                            s_xpPrepCalls[k].obj, s_xpPrepCalls[k].forceLOD);
+                                                    }
+                                                });
+                        for (int k = 0; k < nCalls; k++)
+                        {
+                            const XpPrepCall& c = s_xpPrepCalls[static_cast<size_t>(k)];
+                            _scene.ApplyObjectForDrawing(c.obj, c.forceLOD, c.clip,
+                                                         s_xpPrepDecisions[static_cast<size_t>(k)]);
+                        }
+                        if (XpCpuThreads::VerifyOn())
+                        {
+                            // The serial calls again: they must find every field
+                            // already as they would set it.
+                            int bad = 0;
+                            for (const XpPrepCall& c : s_xpPrepCalls)
+                            {
+                                SortObject* so = c.obj->GetInList();
+                                struct Fields
+                                {
+                                    int forceDrawLOD, drawLOD, shadowLOD, passNum;
+                                    float zCoord, distance2;
+                                    ClipFlags orClip;
+                                    bool notUsed;
+                                };
+                                auto read = [](const SortObject* o)
+                                {
+                                    return Fields{o->forceDrawLOD, o->drawLOD,   o->shadowLOD, o->passNum,
+                                                  o->zCoord,       o->distance2, o->orClip,    o->notUsed};
+                                };
+                                const bool had = so != nullptr;
+                                const Fields before = had ? read(so) : Fields{};
+                                _scene.ObjectForDrawing(c.obj, c.forceLOD, c.clip);
+                                const SortObject* after = c.obj->GetInList();
+                                bool same = had == (after != nullptr);
+                                if (same && had)
+                                {
+                                    const Fields a = read(after);
+                                    same = std::memcmp(&before.zCoord, &a.zCoord, sizeof(float)) == 0 &&
+                                           std::memcmp(&before.distance2, &a.distance2, sizeof(float)) == 0 &&
+                                           before.forceDrawLOD == a.forceDrawLOD && before.drawLOD == a.drawLOD &&
+                                           before.shadowLOD == a.shadowLOD && before.passNum == a.passNum &&
+                                           before.orClip == a.orClip && before.notUsed == a.notUsed;
+                                }
+                                bad += same ? 0 : 1;
+                            }
+                            XpCpuThreads::AddMismatches(XpCpuThreads::Stage::Prep, bad);
+                        }
+                    }
+                    xpPrepTimer.Stop();
                     for (int i = 0; i < NCloudlets(); i++)
                     {
                         _scene.CloudletForDrawing(GetCloudlet(i));

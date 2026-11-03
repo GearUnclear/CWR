@@ -364,6 +364,25 @@ class Scene
     void CloudletForDrawing(Object* obj);
     void ObjectForDrawing(Object* obj);
 
+    // XP-cputhreads (prep part): ObjectForDrawing(obj, forceLOD, clip) split in
+    // two. DecideObjectForDrawing reads only the object, the camera and the
+    // landscape (any thread); ApplyObjectForDrawing does the list update with
+    // that answer (main thread, in the order ObjectForDrawing was called).
+    struct DrawDecision
+    {
+        LODShapeWithShadow* shape = nullptr;
+        float radius = 0.0f;
+        float distance2 = 0.0f;
+        float zCoord = 0.0f;
+        bool keep = false;
+        bool invisible = false;
+        // xp-viewdist counters, added on the main thread by Apply.
+        bool xpVdEnum = false;
+        bool xpVdEarly = false;
+    };
+    DrawDecision DecideObjectForDrawing(Object* obj, int forceLOD = -1);
+    void ApplyObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip, const DrawDecision& d);
+
     void EndObjects(); // sort all objects
     void DrawReflections(const WaterLevel& water);
     void DrawObjectsAndShadowsPass1();

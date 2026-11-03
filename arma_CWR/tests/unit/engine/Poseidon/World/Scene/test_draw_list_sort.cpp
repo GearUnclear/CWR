@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/World/Scene/DrawListSort.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -357,6 +358,175 @@ TEST_CASE("DrawListSort: the shape key compares like CmpShapeObj on every pair",
             REQUIRE((oldR < 0) == (newR < 0));
             REQUIRE(OldRevDist(&x, &y) == dls::CompareRevDistance(x->distance2, y->distance2));
             REQUIRE(OldAlpha(&x, &y) == dls::CompareAlphaKeys(x->zCoord, y->zCoord));
+        }
+    }
+}
+
+// ---- XP-cputhreads: SortByKeysParallel (the same order on worker threads) ----
+
+namespace
+{
+// The four keyed sorts again, through SortByKeysParallel on a real pool, with the
+// serial check on as well (it must count no difference).
+struct ParallelSorts
+{
+    Poseidon::TaskPool& pool;
+    int minParallel;
+    int mismatches = 0;
+
+    void RevDist(Item* items, int n)
+    {
+        static dls::ParallelSortScratch<float, FakeEntry> scratch;
+        dls::SortByKeysParallel(
+            items, n, [](const FakeEntry* o) { return o->distance2; },
+            [](float a, float b) { return dls::CompareRevDistance(a, b); }, scratch, pool, minParallel, &mismatches);
+    }
+    void Alpha(Item* items, int n)
+    {
+        static dls::ParallelSortScratch<float, FakeEntry> scratch;
+        dls::SortByKeysParallel(
+            items, n, [](const FakeEntry* o) { return o->zCoord; },
+            [](float a, float b) { return dls::CompareAlphaKeys(a, b); }, scratch, pool, minParallel, &mismatches);
+    }
+    void Shape(Item* items, int n)
+    {
+        static dls::ParallelSortScratch<dls::ShapeKey, FakeEntry> scratch;
+        dls::SortByKeysParallel(
+            items, n, [](const FakeEntry* o)
+            { return dls::ShapeKey{{o->passNum, o->shape, o->drawLOD, o->distance2}, o->shape ? o->shape->faces : 0}; },
+            [](const dls::ShapeKey& a, const dls::ShapeKey& b) { return dls::CompareShapeKeys(a, b); }, scratch, pool,
+            minParallel, &mismatches);
+    }
+    void Surface(Item* items, int n)
+    {
+        static dls::ParallelSortScratch<Poseidon::SurfaceDraw::SurfaceDrawKey, FakeEntry> scratch;
+        dls::SortByKeysParallel(
+            items, n,
+            [](const FakeEntry* o)
+            {
+                return Poseidon::SurfaceDraw::SurfaceDrawKey{
+                    o->hasObject ? o->passOrder : 0, o->hasObject ? static_cast<const void*>(o->shape) : nullptr,
+                    o->distance2};
+            },
+            [](const Poseidon::SurfaceDraw::SurfaceDrawKey& a, const Poseidon::SurfaceDraw::SurfaceDrawKey& b)
+            { return dls::CompareSurfaceKeys(a, b); }, scratch, pool, minParallel, &mismatches);
+    }
+};
+
+template <class F>
+void CheckParallelSame(const std::vector<Item>& list, OldCmp oldCmp, F parallelSort)
+{
+    std::vector<Item> a = list;
+    std::vector<Item> b = list;
+    std::vector<int> counts;
+    for (const Item& it : list)
+    {
+        counts.push_back(it->RefCounter());
+    }
+    QSort(a.data(), static_cast<int>(a.size()), oldCmp);
+    parallelSort(b.data(), static_cast<int>(b.size()));
+    REQUIRE(SameSequence(a, b));
+    for (size_t i = 0; i < list.size(); i++)
+    {
+        REQUIRE(list[i]->RefCounter() == counts[i]);
+    }
+}
+} // namespace
+
+TEST_CASE("DrawListSort: the parallel sorts give QSort's order exactly, ties included", "[drawsort][xp-cputhreads]")
+{
+    Fixture w = MakeFixture();
+    Poseidon::TaskPool pool(4);
+    // minParallel 2 forces the parallel path on every list, small ones included.
+    for (int minParallel : {2, 1024})
+    {
+        ParallelSorts ps{pool, minParallel};
+        std::mt19937 rng(0x9a11u + static_cast<unsigned>(minParallel));
+        const int sizes[] = {0, 1, 2, 3, 8, 9, 17, 100, 257, 258, 1000, 1023, 1024, 4096, 9000};
+        for (int round = 0; round < 4; round++)
+        {
+            for (int n : sizes)
+            {
+                for (int mode = 0; mode < 2; mode++)
+                {
+                    const std::vector<Item> list = MakeList(w, rng, n, mode);
+                    CheckParallelSame(list, OldRevDist, [&](Item* it, int k) { ps.RevDist(it, k); });
+                    CheckParallelSame(list, OldAlpha, [&](Item* it, int k) { ps.Alpha(it, k); });
+                    CheckParallelSame(list, OldShape, [&](Item* it, int k) { ps.Shape(it, k); });
+                    CheckParallelSame(list, OldSurface, [&](Item* it, int k) { ps.Surface(it, k); });
+                }
+            }
+        }
+        CHECK(ps.mismatches == 0);
+    }
+}
+
+TEST_CASE("DrawListSort: the parallel sort of sorted, reversed and all-equal input", "[drawsort][xp-cputhreads]")
+{
+    Fixture w = MakeFixture();
+    Poseidon::TaskPool pool(8);
+    ParallelSorts ps{pool, 2};
+    std::mt19937 rng(5u);
+    for (int n : {300, 5000})
+    {
+        std::vector<Item> list = MakeList(w, rng, n, 1);
+        QSort(list.data(), n, OldShape);
+        CheckParallelSame(list, OldShape, [&](Item* it, int k) { ps.Shape(it, k); });
+        std::vector<Item> rev(list.rbegin(), list.rend());
+        CheckParallelSame(rev, OldShape, [&](Item* it, int k) { ps.Shape(it, k); });
+        CheckParallelSame(rev, OldAlpha, [&](Item* it, int k) { ps.Alpha(it, k); });
+        std::vector<Item> same;
+        for (int i = 0; i < n; i++)
+        {
+            FakeEntry* e = new FakeEntry;
+            e->shape = &w.shapes[0];
+            e->distance2 = 25.0f;
+            e->zCoord = 25.0f;
+            w.owners.emplace_back(e);
+            same.emplace_back(e);
+        }
+        CheckParallelSame(same, OldShape, [&](Item* it, int k) { ps.Shape(it, k); });
+        CheckParallelSame(same, OldRevDist, [&](Item* it, int k) { ps.RevDist(it, k); });
+    }
+    CHECK(ps.mismatches == 0);
+}
+
+TEST_CASE("DrawListSort: ParallelQSortWithContext matches QSortWithContext on ints", "[drawsort][xp-cputhreads]")
+{
+    // Equal values carry their original position, so any tie order change shows.
+    struct V
+    {
+        int key;
+        int pos;
+    };
+    Poseidon::TaskPool pool(6);
+    dls::ParallelScratch scratch;
+    std::mt19937 rng(1234u);
+    auto cmp = [](const V* a, const V* b, const int*) { return a->key < b->key ? -1 : (a->key > b->key ? 1 : 0); };
+    const int ctx = 0;
+    for (int n : {2, 9, 300, 2049, 20000})
+    {
+        for (int range : {3, 50, 1000000})
+        {
+            for (int levels : {1, 2, 4, 6})
+            {
+                std::uniform_int_distribution<int> pick(0, range);
+                std::vector<V> a(static_cast<size_t>(n));
+                for (int i = 0; i < n; i++)
+                {
+                    a[static_cast<size_t>(i)] = V{pick(rng), i};
+                }
+                std::vector<V> b = a;
+                Poseidon::Foundation::QSortWithContext(a.data(), n, &ctx, cmp);
+                dls::ParallelQSortWithContext(b.data(), n, &ctx, cmp, pool, scratch, levels, 16);
+                bool same = true;
+                for (int i = 0; i < n; i++)
+                {
+                    same = same && a[static_cast<size_t>(i)].key == b[static_cast<size_t>(i)].key &&
+                           a[static_cast<size_t>(i)].pos == b[static_cast<size_t>(i)].pos;
+                }
+                REQUIRE(same);
+            }
         }
     }
 }

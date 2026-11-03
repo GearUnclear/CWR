@@ -965,6 +965,153 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
     sObj->notUsed = false;
 }
 
+// XP-cputhreads (prep part): ObjectForDrawing above, statement for statement,
+// split at the list update. Everything before it reads the object, the camera,
+// the main light and the landscape only; nothing it reads is written by the
+// update, so deciding every object first (on the pool) and applying the answers
+// in call order leaves the list and every SortObject exactly as above.
+Scene::DrawDecision Scene::DecideObjectForDrawing(Object* obj, int forceLOD)
+{
+    DrawDecision d;
+    LODShapeWithShadow* shape = obj->GetShapeOnPos(obj->Position());
+
+    bool invisible = false;
+    Vector3Val pos = obj->Position();
+    if (!shape)
+    {
+        return d;
+    }
+    float radius = obj->GetRadius();
+    // xp-viewdist EARLYCULL, as in ObjectForDrawing (the counters are added
+    // by ApplyObjectForDrawing on the main thread).
+    d.xpVdEnum = true;
+    if (forceLOD < 0 && xp::GViewDistPolicy().earlyCull &&
+        XpBeyondDrawRange(shape, _camera->Position().Distance2Inline(pos), obj->Scale(), radius))
+    {
+        d.xpVdEarly = true;
+        return d;
+    }
+
+    if (obj != GWorld->CameraOn())
+    {
+        if (_camera->IsClipped(pos, radius, 1))
+        {
+            if (shape->Special() & NoShadow)
+            {
+                return d;
+            }
+            if (_camera->IsClipped(pos, radius + 50, 1))
+            {
+                return d;
+            }
+
+            Vector3 objTop = obj->Position() + Vector3(0, radius, 0);
+            Vector3 shadowPos = objTop;
+
+            if (!ShadowPos(objTop, shadowPos, _mainLight))
+            {
+                return d;
+            }
+            if (_camera->IsClipped(shadowPos, 0.5f, 1))
+            {
+                float distTopBot = shadowPos.Distance(pos) * 0.5f;
+                Vector3 shadowCenter = (shadowPos + pos) * 0.5f;
+                float shadowRadius = floatMax(distTopBot, radius);
+                if (_camera->IsClipped(shadowCenter, shadowRadius, 1))
+                {
+                    return d;
+                }
+            }
+            invisible = true;
+        }
+    }
+
+    float dist2 = _camera->Position().Distance2Inline(pos);
+
+#if DENSITY_LOD
+    if (dist2 > Square(ENGINE_CONFIG.objectsZ))
+        return d;
+
+    float areaK = _camera->InvLeft() * _camera->InvTop() * GEngine->Width() * GEngine->Height();
+    if (Square(radius * 2) * areaK < dist2)
+    {
+        return d;
+    }
+#endif
+
+    if ((shape->GetAndHints() & ClipFogMask) == ClipFogShadow && (shape->GetOrHints() & ClipFogMask) == ClipFogShadow)
+    {
+        if (dist2 >= Square(_shadowFogMaxRange + radius))
+        {
+            return d;
+        }
+    }
+
+    d.keep = true;
+    d.shape = shape;
+    d.radius = radius;
+    d.invisible = invisible;
+    d.zCoord = AlphaSort::AlphaObjectDepth((ScaledInvTransform() * pos).Z(), radius);
+    if (Square(radius) > dist2 * Square(0.25))
+    {
+        float dist = dist2 * InvSqrt(dist2);
+        float distNear = dist - radius;
+        saturateMax(distNear, 0);
+        dist2 = Square(distNear);
+    }
+    d.distance2 = dist2;
+    return d;
+}
+
+void Scene::ApplyObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip, const DrawDecision& d)
+{
+    if (d.xpVdEnum)
+    {
+        perf::FrameCounters& vdCounters = perf::GPerfCounters().Frame();
+        ++vdCounters.xpVdEnum;
+        vdCounters.xpVdEarly += d.xpVdEarly ? 1 : 0;
+    }
+    if (!d.keep)
+    {
+        return;
+    }
+    SortObject* sObj = obj->GetInList();
+    if (!sObj)
+    {
+        int index = _drawObjects.Add(new SortObject);
+        sObj = _drawObjects[index];
+
+        sObj->object = obj;
+        sObj->shape = d.shape;
+        sObj->radius = d.radius;
+        obj->SetInList(sObj); // this object is in list
+    }
+
+    if (d.invisible)
+    {
+        sObj->forceDrawLOD = LOD_INVISIBLE;
+    }
+    else
+    {
+        sObj->forceDrawLOD = forceLOD;
+    }
+    sObj->zCoord = d.zCoord;
+
+#if DENSITY_LOD
+    sObj->shadowLOD = -1;
+    sObj->drawLOD = -1;
+#else
+    sObj->shadowLOD = LOD_INVISIBLE;
+    sObj->drawLOD = LOD_INVISIBLE;
+#endif
+    sObj->hillHidden = false;
+    sObj->distance2 = d.distance2;
+    sObj->passNum = -1;
+
+    sObj->orClip = clip;
+    sObj->notUsed = false;
+}
+
 #define DRAW_OBJS 1
 
 void Scene::CloudletForDrawing(Object* obj)

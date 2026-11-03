@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/World/Scene/TerrainOcclusion.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 
 #include <algorithm>
 #include <array>
@@ -392,4 +393,64 @@ TEST_CASE("TerrainOcclusion: the governor idles on views the cull does not pay f
         sparse.Report(150, 150);
     }
     CHECK(sparse.Idle());
+}
+
+TEST_CASE("TerrainOcclusion: concurrent tests answer as the serial tests, wedge for wedge",
+          "[scene][occlusion][xp-cputhreads]")
+{
+    // XP-cputhreads: the hill cull's tests on the pool (TestConcurrent) against
+    // the serial Test on a twin table: the same answer per object, the same
+    // number of wedges built, and later serial tests on the concurrent table
+    // still agree (the wedges it built are the serial ones).
+    const Terrain t(512, 12.5f, Hills);
+    const HeightGrid p = t.Grid();
+    Poseidon::TaskPool pool(8);
+    std::mt19937 rng(97);
+    std::uniform_real_distribution<float> where(800.0f, 5600.0f), unit(0.0f, 1.0f);
+    for (int e = 0; e < 6; ++e)
+    {
+        const float ex = where(rng), ez = where(rng);
+        const float ey = t.SurfaceY(ex, ez) + (e % 2 == 0 ? 30.0f : 1.75f);
+        struct Obj
+        {
+            float x, y, z, r;
+        };
+        std::vector<Obj> objs;
+        for (int o = 0; o < 3000; ++o)
+        {
+            const float ang = unit(rng) * 2.0f * kPi;
+            const float dist = 20.0f + unit(rng) * 2400.0f;
+            const float px = ex + std::sin(ang) * dist, pz = ez + std::cos(ang) * dist;
+            const float radius = 0.5f + unit(rng) * 12.0f;
+            objs.push_back({px, t.SurfaceY(px, pz) + radius * (0.2f + unit(rng)), pz, radius});
+        }
+        HorizonTable serial, concurrent;
+        serial.Build(p, ex, ey, ez, 2500.0f, Params());
+        concurrent.Build(p, ex, ey, ez, 2500.0f, Params());
+        std::vector<Result> want(objs.size()), got(objs.size());
+        for (size_t i = 0; i < objs.size(); ++i)
+            want[i] = serial.Test(objs[i].x, objs[i].y, objs[i].z, objs[i].r);
+        // Two rounds: the first builds wedges concurrently, the second finds them built.
+        for (int round = 0; round < 2; ++round)
+        {
+            concurrent.BeginConcurrent();
+            pool.ParallelFor(static_cast<uint32_t>(objs.size()),
+                             [&](uint32_t s, uint32_t f)
+                             {
+                                 for (uint32_t i = s; i < f; ++i)
+                                     got[i] = concurrent.TestConcurrent(objs[i].x, objs[i].y, objs[i].z, objs[i].r);
+                             });
+            concurrent.EndConcurrent();
+            int differ = 0;
+            for (size_t i = 0; i < objs.size(); ++i)
+                differ += want[i] != got[i] ? 1 : 0;
+            CHECK(differ == 0);
+            CHECK(concurrent.WedgesBuilt() == serial.WedgesBuilt());
+        }
+        int differ = 0;
+        for (size_t i = 0; i < objs.size(); ++i)
+            differ += concurrent.Test(objs[i].x, objs[i].y, objs[i].z, objs[i].r) != want[i] ? 1 : 0;
+        CHECK(differ == 0);
+        CHECK(concurrent.WedgesBuilt() == serial.WedgesBuilt());
+    }
 }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <thread>
 
 namespace Poseidon::TerrainOcclusion
 {
@@ -151,6 +152,13 @@ bool HorizonTable::Matches(float eyeX, float eyeY, float eyeZ, float range) cons
 
 void HorizonTable::BuildWedge(int b)
 {
+    ComputeWedgeRow(b);
+    _gen[static_cast<size_t>(b)] = _buildGen;
+    ++_wedgesBuilt;
+}
+
+void HorizonTable::ComputeWedgeRow(int b)
+{
     const size_t k = _dist.size();
     float* row = &_slope[static_cast<size_t>(b) * k];
     const float s0 = _sin[static_cast<size_t>(b)], c0 = _cos[static_cast<size_t>(b)];
@@ -170,11 +178,70 @@ void HorizonTable::BuildWedge(int b)
         steepest = std::max(steepest, slope);
         row[j] = steepest;
     }
-    _gen[static_cast<size_t>(b)] = _buildGen;
-    ++_wedgesBuilt;
+}
+
+void HorizonTable::BeginConcurrent()
+{
+    if (!_valid)
+        return;
+    const int rays = static_cast<int>(_gen.size());
+    if (!_cc)
+        _cc = std::make_unique<Concurrent>();
+    if (_cc->size != rays)
+    {
+        _cc->claimed = std::make_unique<std::atomic<std::uint32_t>[]>(static_cast<size_t>(rays));
+        _cc->ready = std::make_unique<std::atomic<std::uint32_t>[]>(static_cast<size_t>(rays));
+        _cc->size = rays;
+    }
+    for (int b = 0; b < rays; ++b)
+    {
+        const std::uint32_t g = _gen[static_cast<size_t>(b)];
+        _cc->claimed[b].store(g, std::memory_order_relaxed);
+        _cc->ready[b].store(g, std::memory_order_relaxed);
+    }
+    _cc->built.store(0, std::memory_order_relaxed);
+}
+
+void HorizonTable::EnsureWedgeConcurrent(int b)
+{
+    const std::uint32_t gen = _buildGen;
+    std::atomic<std::uint32_t>& claimed = _cc->claimed[b];
+    std::uint32_t c = claimed.load(std::memory_order_acquire);
+    while (c != gen)
+    {
+        if (claimed.compare_exchange_weak(c, gen, std::memory_order_acq_rel, std::memory_order_acquire))
+        {
+            ComputeWedgeRow(b);
+            _gen[static_cast<size_t>(b)] = gen; // only this thread writes this element
+            _cc->built.fetch_add(1, std::memory_order_relaxed);
+            _cc->ready[b].store(gen, std::memory_order_release);
+            return;
+        }
+    }
+    // Another thread claimed it: wait for its row.
+    while (_cc->ready[b].load(std::memory_order_acquire) != gen)
+    {
+        std::this_thread::yield();
+    }
+}
+
+void HorizonTable::EndConcurrent()
+{
+    if (_valid && _cc)
+        _wedgesBuilt += _cc->built.exchange(0, std::memory_order_relaxed);
+}
+
+Result HorizonTable::TestConcurrent(float cx, float cy, float cz, float radius)
+{
+    return TestImpl(cx, cy, cz, radius, true);
 }
 
 Result HorizonTable::Test(float cx, float cy, float cz, float radius)
+{
+    return TestImpl(cx, cy, cz, radius, false);
+}
+
+Result HorizonTable::TestImpl(float cx, float cy, float cz, float radius, bool concurrent)
 {
     if (!_valid)
         return Result::NotTested;
@@ -207,7 +274,12 @@ Result HorizonTable::Test(float cx, float cy, float cz, float radius)
     for (int b = b0; b <= b1; ++b)
     {
         const int w = ((b % _p.rays) + _p.rays) % _p.rays;
-        if (_gen[static_cast<size_t>(w)] != _buildGen)
+        if (concurrent)
+        {
+            if (_cc->ready[w].load(std::memory_order_acquire) != _buildGen)
+                EnsureWedgeConcurrent(w);
+        }
+        else if (_gen[static_cast<size_t>(w)] != _buildGen)
             BuildWedge(w);
         if (!(_slope[static_cast<size_t>(w) * chords + k] > objSlope))
             return Result::Visible;

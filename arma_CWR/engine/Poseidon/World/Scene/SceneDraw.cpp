@@ -70,6 +70,8 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/OcclusionRange.hpp>
 #include <Poseidon/Graphics/Rendering/Impostor.hpp>
 #include <Poseidon/Graphics/Remaster/Canopy.hpp>
+#include <Poseidon/World/Scene/XpCpuThreads.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 
 using namespace Poseidon;
 
@@ -88,13 +90,35 @@ typedef Ref<SortObject> SortObjectItem;
 // per-entry comparators gave, ties included. The keys are the old comparators'
 // inputs; the key comparisons are the old comparisons.
 
+// XP-cputhreads: with the sort part on, a draw-list sort runs on the pool
+// (DrawListSort::SortByKeysParallel, the same final order); off, it is the tip's
+// SortByKeys. Each list keeps its own scratch buffers.
+template <class Key, class MakeKey, class Compare>
+static void SortDrawList(SortObjectItem* items, int n, MakeKey makeKey, Compare compare,
+                         DrawListSort::Scratch<Key, SortObject>& scratch,
+                         DrawListSort::ParallelSortScratch<Key, SortObject>& parallelScratch, XpCpuThreads::Stage stage)
+{
+    XpCpuThreads::StageTimer timer(stage);
+    if (TaskPool* pool = XpCpuThreads::Pool(XpCpuThreads::kSort))
+    {
+        int mismatches = 0;
+        DrawListSort::SortByKeysParallel(items, n, makeKey, compare, parallelScratch, *pool, 1024,
+                                         XpCpuThreads::VerifyOn() ? &mismatches : nullptr);
+        XpCpuThreads::AddMismatches(stage, mismatches);
+        return;
+    }
+    DrawListSort::SortByKeys(items, n, makeKey, compare, scratch);
+}
+
 // The occluder list: the first object is the nearest one (was CmpRevDistObj).
 static void SortNearestFirst(SortObjectItem* items, int n)
 {
     static DrawListSort::Scratch<float, SortObject> scratch;
-    DrawListSort::SortByKeys(
+    static DrawListSort::ParallelSortScratch<float, SortObject> parallelScratch;
+    SortDrawList(
         items, n, [](const SortObject* o) { return o->distance2; },
-        [](float a, float b) { return DrawListSort::CompareRevDistance(a, b); }, scratch);
+        [](float a, float b) { return DrawListSort::CompareRevDistance(a, b); }, scratch, parallelScratch,
+        XpCpuThreads::Stage::SortOccluders);
 }
 
 // Far-to-near by camera-space depth, for the alpha pass (see AlphaSortOrder.hpp;
@@ -102,9 +126,10 @@ static void SortNearestFirst(SortObjectItem* items, int n)
 static void SortAlphaFarToNear(SortObjectItem* items, int n)
 {
     static DrawListSort::Scratch<float, SortObject> scratch;
-    DrawListSort::SortByKeys(
-        items, n, [](const SortObject* o) { return o->zCoord; },
-        [](float a, float b) { return DrawListSort::CompareAlphaKeys(a, b); }, scratch);
+    static DrawListSort::ParallelSortScratch<float, SortObject> parallelScratch;
+    SortDrawList(
+        items, n, [](const SortObject* o) { return o->zCoord; }, [](float a, float b)
+        { return DrawListSort::CompareAlphaKeys(a, b); }, scratch, parallelScratch, XpCpuThreads::Stage::SortAlpha);
 }
 
 // Pass ascending; between shapes, simple shapes first then shape identity; within a
@@ -128,10 +153,11 @@ static int CmpShapeObj(const SortObjectItem* p1, const SortObjectItem* p2)
 static void SortByShape(SortObjectItem* items, int n)
 {
     static DrawListSort::Scratch<DrawListSort::ShapeKey, SortObject> scratch;
-    DrawListSort::SortByKeys(
+    static DrawListSort::ParallelSortScratch<DrawListSort::ShapeKey, SortObject> parallelScratch;
+    SortDrawList(
         items, n, [](const SortObject* o) { return MakeShapeKey(o); },
         [](const DrawListSort::ShapeKey& a, const DrawListSort::ShapeKey& b)
-        { return DrawListSort::CompareShapeKeys(a, b); }, scratch);
+        { return DrawListSort::CompareShapeKeys(a, b); }, scratch, parallelScratch, XpCpuThreads::Stage::SortShape);
 }
 
 void Scene::EndObjects()
@@ -1263,6 +1289,36 @@ void Scene::AdjustComplexity()
 // const float invShadowAreaCoef = 1/shadowAreaCoef;
 #endif
 
+    // XP-cputhreads (lod part): every object's covered area is computed once on
+    // the pool (the same pure function of the same inputs the loops below call
+    // up to four times per object) and, once the final density is known, every
+    // remaining draw and shadow LOD search too; the loops keep their order, so
+    // the sums, the density and every chosen LOD stay exactly the serial ones.
+    XpCpuThreads::StageTimer xpTimer(XpCpuThreads::Stage::Lod);
+    TaskPool* const lodPool = XpCpuThreads::Pool(XpCpuThreads::kLod);
+    const int nLodObjects = _drawObjects.Size();
+    const bool lodParallel = lodPool && nLodObjects >= 1024;
+    static std::vector<float> s_lodArea;
+    static std::vector<int> s_lodDraw, s_lodShadow;
+    if (lodParallel)
+    {
+        s_lodArea.resize(static_cast<size_t>(nLodObjects));
+        lodPool->ParallelFor(static_cast<uint32_t>(nLodObjects),
+                             [&](uint32_t b, uint32_t e)
+                             {
+                                 for (uint32_t k = b; k < e; ++k)
+                                 {
+                                     const SortObject* ok = _drawObjects[static_cast<int>(k)];
+                                     s_lodArea[k] = CoveredArea(ok->object, ok->distance2, ok->object->Scale());
+                                 }
+                             });
+    }
+    auto areaOf = [&](int i, const SortObject* oi)
+    {
+        return lodParallel ? s_lodArea[static_cast<size_t>(i)]
+                           : CoveredArea(oi->object, oi->distance2, oi->object->Scale());
+    };
+
     // calculate total covered area
     float totalArea = 0;
     // sum complexity of objects that are excluded from lod management
@@ -1281,7 +1337,7 @@ void Scene::AdjustComplexity()
         }
         else
         {
-            float area = CoveredArea(obj, oi->distance2, obj->Scale());
+            float area = areaOf(i, oi);
             totalArea += area;
         }
 
@@ -1289,7 +1345,7 @@ void Scene::AdjustComplexity()
         if (shape && !(shape->Special() & NoShadow) && oi->distance2 < Square(_shadowFogMaxRange) &&
             shadowFactorI >= 12 && obj->CastShadow())
         {
-            float area = CoveredArea(obj, oi->distance2, obj->Scale());
+            float area = areaOf(i, oi);
             totalArea += area * shadowAreaCoef;
         }
         else
@@ -1322,7 +1378,7 @@ void Scene::AdjustComplexity()
         if (oi->forceDrawLOD < 0)
         {
             LODShape* lShape = obj->GetShape();
-            float area = CoveredArea(obj, oi->distance2, obj->Scale());
+            float area = areaOf(i, oi);
             float oComplexity = area * density;
             int level = FindLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
             if (level == 0)
@@ -1354,7 +1410,7 @@ void Scene::AdjustComplexity()
         if (oi->shadowLOD < 0)
         {
             LODShape* lShape = obj->GetShape();
-            float area = CoveredArea(obj, oi->distance2, obj->Scale());
+            float area = areaOf(i, oi);
             float oComplexity = area * density * shadowAreaCoef;
             int level = FindShadowLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
             if (level == 0) // lShape->_minShadow should be used here instead
@@ -1376,6 +1432,34 @@ void Scene::AdjustComplexity()
     }
 
     // selects lods for all other objects
+    if (lodParallel)
+    {
+        // The searches below read only the shape, the area and the final
+        // density: run them all first, on the pool.
+        s_lodDraw.resize(static_cast<size_t>(nLodObjects));
+        s_lodShadow.resize(static_cast<size_t>(nLodObjects));
+        lodPool->ParallelFor(
+            static_cast<uint32_t>(nLodObjects),
+            [&](uint32_t b, uint32_t e)
+            {
+                for (uint32_t k = b; k < e; ++k)
+                {
+                    const SortObject* ok = _drawObjects[static_cast<int>(k)];
+                    LODShape* lShape = ok->object->GetShape();
+                    const float area = s_lodArea[k];
+                    if (ok->drawLOD < 0)
+                    {
+                        float oComplexity = area * density;
+                        s_lodDraw[k] = FindLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
+                    }
+                    if (ok->shadowLOD < 0)
+                    {
+                        float oComplexity = area * density * shadowAreaCoef;
+                        s_lodShadow[k] = FindShadowLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
+                    }
+                }
+            });
+    }
     for (int i = 0; i < _drawObjects.Size(); i++)
     {
         SortObject* oi = _drawObjects[i];
@@ -1383,9 +1467,10 @@ void Scene::AdjustComplexity()
         if (oi->drawLOD < 0)
         {
             LODShape* lShape = obj->GetShape();
-            float area = CoveredArea(obj, oi->distance2, obj->Scale());
+            float area = areaOf(i, oi);
             float oComplexity = area * density;
-            int level = FindLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
+            int level = lodParallel ? s_lodDraw[static_cast<size_t>(i)]
+                                    : FindLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
             if (level < 0)
             {
                 oi->drawLOD = LOD_INVISIBLE;
@@ -1408,9 +1493,10 @@ void Scene::AdjustComplexity()
         if (oi->shadowLOD < 0)
         {
             LODShape* lShape = obj->GetShape();
-            float area = CoveredArea(obj, oi->distance2, obj->Scale());
+            float area = areaOf(i, oi);
             float oComplexity = area * density * shadowAreaCoef;
-            int level = FindShadowLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
+            int level = lodParallel ? s_lodShadow[static_cast<size_t>(i)]
+                                    : FindShadowLevelWithComplexity(lShape, oComplexity, oComplexity * 1.5f + 200);
             if (level < 0)
             {
                 oi->shadowLOD = LOD_INVISIBLE;
@@ -1730,6 +1816,7 @@ void Scene::DrawImpostors()
 
 void Scene::DrawObjectsAndShadowsPass1()
 {
+    XpCpuThreads::FrameTick();
     // select first objects - those with highest visual priority
 
     int s = 0, t = 0;
@@ -2047,17 +2134,76 @@ void Scene::DrawObjectsAndShadowsPass1()
             }
             const int wedgesBefore = hc.table.WedgesBuilt();
             const Object* cameraOn = GWorld ? GWorld->CameraOn() : nullptr;
+            XpCpuThreads::StageTimer xpTimer(XpCpuThreads::Stage::Hill);
+            auto hillCandidate = [cameraOn](const SortObject* oi)
+            {
+                const Object* obj = oi->object;
+                return !(oi->drawLOD == LOD_INVISIBLE || !obj || !obj->Static() || obj == cameraOn || oi->passNum == 3);
+            };
+            // XP-cputhreads (hill part): every candidate's horizon test runs on
+            // the pool first (TestConcurrent: the same answer as Test; a wedge
+            // is still built once, by whichever test first needs it, with the
+            // same contents), then the loop below flags, prepares textures and
+            // counts in list order, exactly as with the serial tests.
+            static std::vector<std::uint8_t> s_hillResults;
+            TaskPool* hillPool = XpCpuThreads::Pool(XpCpuThreads::kHill);
+            const int nMergers = _drawMergers.Size();
+            if (hillPool && nMergers >= 512)
+            {
+                s_hillResults.assign(static_cast<size_t>(nMergers), 0);
+                hc.table.BeginConcurrent();
+                hillPool->ParallelFor(static_cast<uint32_t>(nMergers),
+                                      [&](uint32_t s, uint32_t e)
+                                      {
+                                          for (uint32_t k = s; k < e; ++k)
+                                          {
+                                              const SortObject* oi = _drawMergers[static_cast<int>(k)];
+                                              if (!hillCandidate(oi))
+                                              {
+                                                  continue;
+                                              }
+                                              const Vector3 pos = oi->object->Position();
+                                              s_hillResults[k] = static_cast<std::uint8_t>(hc.table.TestConcurrent(
+                                                  pos.X(), pos.Y(), pos.Z(), oi->object->GetRadius()));
+                                          }
+                                      });
+                hc.table.EndConcurrent();
+                if (XpCpuThreads::VerifyOn())
+                {
+                    int bad = 0;
+                    for (int k = 0; k < nMergers; k++)
+                    {
+                        const SortObject* oi = _drawMergers[k];
+                        if (!hillCandidate(oi))
+                        {
+                            continue;
+                        }
+                        const Vector3 pos = oi->object->Position();
+                        const TerrainOcclusion::Result rs =
+                            hc.table.Test(pos.X(), pos.Y(), pos.Z(), oi->object->GetRadius());
+                        bad += static_cast<std::uint8_t>(rs) != s_hillResults[static_cast<size_t>(k)] ? 1 : 0;
+                    }
+                    XpCpuThreads::AddMismatches(XpCpuThreads::Stage::Hill, bad);
+                }
+            }
+            else
+            {
+                s_hillResults.clear();
+            }
+            const bool hillPrecomputed = !s_hillResults.empty();
             int tested = 0;
             for (int i = 0; i < _drawMergers.Size(); i++)
             {
                 SortObject* oi = _drawMergers[i];
                 Object* obj = oi->object;
-                if (oi->drawLOD == LOD_INVISIBLE || !obj || !obj->Static() || obj == cameraOn || oi->passNum == 3)
+                if (!hillCandidate(oi))
                 {
                     continue;
                 }
                 const Vector3 pos = obj->Position();
-                const TerrainOcclusion::Result r = hc.table.Test(pos.X(), pos.Y(), pos.Z(), obj->GetRadius());
+                const TerrainOcclusion::Result r =
+                    hillPrecomputed ? static_cast<TerrainOcclusion::Result>(s_hillResults[static_cast<size_t>(i)])
+                                    : hc.table.Test(pos.X(), pos.Y(), pos.Z(), obj->GetRadius());
                 if (r == TerrainOcclusion::Result::NotTested)
                 {
                     continue;
@@ -2089,6 +2235,7 @@ void Scene::DrawObjectsAndShadowsPass1()
 
 #if DRAW_OBJS
     {
+        XpCpuThreads::StageTimer xpLoopTimer(XpCpuThreads::Stage::Pass1Loop);
         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
         // identical static shapes arrive contiguously. A batchable run draws
         // the head once inside Begin/EndInstancedRun, and every TL section then
@@ -2258,7 +2405,8 @@ static bool IsSurfaceBlendDraw(const SortObject* oi)
 static void SortBySurfaceOrder(SortObjectItem* items, int n)
 {
     static DrawListSort::Scratch<Poseidon::SurfaceDraw::SurfaceDrawKey, SortObject> scratch;
-    DrawListSort::SortByKeys(
+    static DrawListSort::ParallelSortScratch<Poseidon::SurfaceDraw::SurfaceDrawKey, SortObject> parallelScratch;
+    SortDrawList(
         items, n,
         [](const SortObject* o)
         {
@@ -2267,7 +2415,7 @@ static void SortBySurfaceOrder(SortObjectItem* items, int n)
                 o->object ? static_cast<const void*>(o->object->GetShape()) : nullptr, o->distance2};
         },
         [](const Poseidon::SurfaceDraw::SurfaceDrawKey& a, const Poseidon::SurfaceDraw::SurfaceDrawKey& b)
-        { return DrawListSort::CompareSurfaceKeys(a, b); }, scratch);
+        { return DrawListSort::CompareSurfaceKeys(a, b); }, scratch, parallelScratch, XpCpuThreads::Stage::SortSurface);
 }
 
 void Scene::DrawObjectsAndShadowsPass2()
@@ -2294,6 +2442,7 @@ void Scene::DrawObjectsAndShadowsPass2()
         // (SetAutoCenter(false)) and would tie the road tile under the vehicle,
         // letting the road repaint over it.  Re-sorted by distance below.
         SortBySurfaceOrder(_drawMergers.Data(), nDraw);
+        XpCpuThreads::StageTimer xpSurfTimer(XpCpuThreads::Stage::Pass2Surface);
         for (int i = 0; i < nDraw; i++)
         {
             SortObject* oi = _drawMergers[i];
@@ -2305,6 +2454,7 @@ void Scene::DrawObjectsAndShadowsPass2()
         }
         GEngine->FlushQueues();
         Poseidon::gpu::XpMark("x.roads");
+        xpSurfTimer.Stop();
         GEngine->EnableReorderQueues(true);
 
         // Shadow-map depth pass (durable shadow fix; off by default).  Render the
@@ -2371,6 +2521,7 @@ void Scene::DrawObjectsAndShadowsPass2()
     Poseidon::gpu::XpMark("x.opaquecopy");
     GEngine->EnableReorderQueues(false);
     SortAlphaFarToNear(_drawMergers.Data(), _drawMergers.Size());
+    XpCpuThreads::StageTimer xpAlphaTimer(XpCpuThreads::Stage::Pass2Alpha);
     // last draw alpha objects (not roads - they are already drawn)
     for (int i = 0; i < nDraw; i++)
     {

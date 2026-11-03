@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -128,13 +130,37 @@ class HorizonTable
     // margins of Params are added here) hidden by the terrain?
     Result Test(float cx, float cy, float cz, float radius);
 
+    // XP-cputhreads: Test from many threads at once. Between BeginConcurrent
+    // and EndConcurrent (both on one thread, with no Test in between) any
+    // number of threads may call TestConcurrent; each returns what Test
+    // returns. A wedge a test needs is built by the first thread to claim it
+    // (the others wait for it), with the same contents BuildWedge gives, so
+    // later answers and WedgesBuilt match the serial tests exactly.
+    void BeginConcurrent();
+    Result TestConcurrent(float cx, float cy, float cz, float radius);
+    void EndConcurrent();
+
     int Chords() const { return static_cast<int>(_dist.size()); }
     float ChordDistance(int k) const { return _dist[static_cast<size_t>(k)]; }
     int WedgesBuilt() const { return _wedgesBuilt; }
     const Params& GetParams() const { return _p; }
 
   private:
+    Result TestImpl(float cx, float cy, float cz, float radius, bool concurrent);
     void BuildWedge(int b);
+    void ComputeWedgeRow(int b); // the slope row of wedge b; no bookkeeping
+    void EnsureWedgeConcurrent(int b);
+
+    // XP-cputhreads: per wedge, the build generation it was claimed in and the
+    // one it is ready in (TestConcurrent).
+    struct Concurrent
+    {
+        std::unique_ptr<std::atomic<std::uint32_t>[]> claimed;
+        std::unique_ptr<std::atomic<std::uint32_t>[]> ready;
+        int size = 0;
+        std::atomic<int> built{0};
+    };
+    std::unique_ptr<Concurrent> _cc;
 
     const HeightGrid* _terrain = nullptr;
     Params _p;
