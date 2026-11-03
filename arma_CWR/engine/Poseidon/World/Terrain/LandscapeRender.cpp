@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -19,6 +20,9 @@
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 
 #include <mutex>
+#include <algorithm>
+#include <cstdlib>
+#include <vector>
 #include <float.h>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -1312,10 +1316,44 @@ const int NGrassModes = sizeof(GrassModes) / sizeof(*GrassModes);
 void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const GroundLayerInfo& layer)
 {
     auto t0 = TerrainProfile::Now();
-    for (int x = bigRect.xBeg; x < bigRect.xEnd; x += LandSegmentSize)
+    // xp-gpuprofile (POSEIDON_XP_TERRAIN_F2B=1, off by default): the same
+    // segments drawn nearest first, so the depth test rejects the terrain a
+    // nearer hill hides before it is shaded. Opaque terrain resolves by depth,
+    // so the order changes no pixel except where two segments tie in depth.
+    static const bool xpTerrainF2B = []
     {
-        for (int z = bigRect.zBeg; z < bigRect.zEnd; z += LandSegmentSize)
+        const char* v = std::getenv("POSEIDON_XP_TERRAIN_F2B");
+        return v && *v && *v != '0';
+    }();
+    struct XpSegKey
+    {
+        float d2;
+        int x, z;
+    };
+    std::vector<XpSegKey> xpOrder;
+    if (xpTerrainF2B)
+    {
+        const Vector3 cam = scene.GetCamera()->Position();
+        const float half = LandSegmentSize * 0.5f;
+        for (int x = bigRect.xBeg; x < bigRect.xEnd; x += LandSegmentSize)
+            for (int z = bigRect.zBeg; z < bigRect.zEnd; z += LandSegmentSize)
+            {
+                const float dx = (x + half) * _landGrid - cam.X();
+                const float dz = (z + half) * _landGrid - cam.Z();
+                xpOrder.push_back({dx * dx + dz * dz, x, z});
+            }
+        std::stable_sort(xpOrder.begin(), xpOrder.end(),
+                         [](const XpSegKey& a, const XpSegKey& b) { return a.d2 < b.d2; });
+    }
+    const int xpCount = static_cast<int>(xpOrder.size());
+    const int zSpan = (bigRect.zEnd - bigRect.zBeg + LandSegmentSize - 1) / LandSegmentSize;
+    const int xSpan = (bigRect.xEnd - bigRect.xBeg + LandSegmentSize - 1) / LandSegmentSize;
+    const int segTotal = xpTerrainF2B ? xpCount : (xSpan > 0 && zSpan > 0 ? xSpan * zSpan : 0);
+    for (int si = 0; si < segTotal; ++si)
+    {
         {
+            const int x = xpTerrainF2B ? xpOrder[si].x : bigRect.xBeg + (si / zSpan) * LandSegmentSize;
+            const int z = xpTerrainF2B ? xpOrder[si].z : bigRect.zBeg + (si % zSpan) * LandSegmentSize;
             LandBegEnd sRect;
             sRect.xBeg = x, sRect.zBeg = z;
             sRect.xEnd = x + LandSegmentSize, sRect.zEnd = z + LandSegmentSize;
@@ -1554,6 +1592,11 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 
         GroundLayerInfo opaqueLayer;
         DrawGround(bigRect, scene, opaqueLayer);
+        if (Poseidon::gpu::XpMarksActive())
+        {
+            GEngine->FlushQueues();
+            Poseidon::gpu::XpMark("x.terrain");
+        }
     }
 #endif
 
@@ -1572,6 +1615,11 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
         {
             GEngine->EnableReorderQueues(true);
             DrawWater(bigRect, scene);
+            if (Poseidon::gpu::XpMarksActive())
+            {
+                GEngine->FlushQueues();
+                Poseidon::gpu::XpMark("x.water");
+            }
 
             DrawHorizont(scene);
         }
@@ -1897,8 +1945,15 @@ void Landscape::Draw(Scene& scene)
         camera.SetClipRange(10, 4000);
 
         DrawSky(scene);
+        if (Poseidon::gpu::XpMarksActive())
+        {
+            // xp-gpuprofile: the sky's draws, then the cloud sprites.
+            GEngine->FlushQueues();
+            Poseidon::gpu::XpMark("x.sky");
+        }
         DrawClouds(scene);
         GEngine->FlushQueues();
+        Poseidon::gpu::XpMark("x.clouds");
 
         camera.SetClipRange(oldNear, oldFar);
     }

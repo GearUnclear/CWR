@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // Remastered lighting: the shader sources, the LitConstants uniform layout and
 // the texture units of the remastered inputs. See EngineGL33_LightingShaders.cpp
 // for the shading model and Poseidon/Graphics/Remaster/LightRig.hpp for the
@@ -51,6 +53,10 @@ std::string XpFoliageDefines(bool all);
 bool XpFoliageWindOn();
 // `src` with `defines` inserted after its first line (the #version line).
 std::string WithXpDefines(const char* src, const std::string& defines);
+
+// xp-gpuprofile (POSEIDON_XP_EARLYZ): a fragment source with the early depth
+// test layout after its "#version 330 core" line; empty if it has no such line.
+std::string XpEarlyZFragmentSource(const std::string& src);
 
 // The common prelude, split by concern:
 // RemasterFragmentCommon() is these pieces joined in this order. A feature

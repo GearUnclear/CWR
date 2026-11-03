@@ -405,6 +405,7 @@ void EngineGL33::EmitDraw(const Poseidon::render::frame::Draw& d)
     FlushPSConstants();
 
     const std::intptr_t offsetBytes = Poseidon::render::frame::ComputeIndexByteOffset(d.indexBegin, sizeof(VertexIndex));
+    XpEarlyZBeforeDraw();
     if (_instCount > 1)
     {
         // Instanced run: the WorldInstances UBO already holds the matrices;

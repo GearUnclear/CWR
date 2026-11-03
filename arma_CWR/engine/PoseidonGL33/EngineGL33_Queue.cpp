@@ -136,10 +136,12 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         const bool decalBatch = IsDecalBatchQueue(queue, index);
         if (decalBatch)
         {
+            XpEarlyZUseLogical(); // the batch sets the selected program's decalLayerMode
             DrawDecalBatch(triq, n, indexOffset);
         }
         else
         {
+            XpEarlyZBeforeDraw();
             glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
             ++Poseidon::gPerfDrawCalls;
         }

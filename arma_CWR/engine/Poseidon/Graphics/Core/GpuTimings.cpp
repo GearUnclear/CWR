@@ -284,4 +284,25 @@ bool PipelineStatsWanted()
     return s_pipelineStatsWanted;
 }
 
+namespace
+{
+XpMarkHook s_xpMarkHook = nullptr;
+}
+
+void SetXpMarkHook(XpMarkHook hook)
+{
+    s_xpMarkHook = hook;
+}
+
+bool XpMarksActive()
+{
+    return s_xpMarkHook != nullptr;
+}
+
+void XpMark(const char* name)
+{
+    if (s_xpMarkHook)
+        s_xpMarkHook(name);
+}
+
 } // namespace Poseidon::gpu

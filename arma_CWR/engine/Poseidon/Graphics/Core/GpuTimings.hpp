@@ -209,4 +209,15 @@ GpuFrameRing& GGpuFrameRing();
 void SetPipelineStatsWanted(bool on);
 bool PipelineStatsWanted();
 
+// Experimental fine GPU marks (xp-gpuprofile lane, POSEIDON_XP_GPUPROF=1, off
+// by default): call sites name finer points of the frame than the Marks above.
+// The backend installs the hook while the switch and GPU timing are on; with no
+// hook XpMark does nothing. `name` must be a string literal (kept as a pointer).
+using XpMarkHook = void (*)(const char* name);
+void SetXpMarkHook(XpMarkHook hook);
+// True while a hook is installed (the call sites may then flush their queues so
+// the mark follows their draws).
+bool XpMarksActive();
+void XpMark(const char* name);
+
 } // namespace Poseidon::gpu

@@ -11,7 +11,11 @@
 
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 
 using Poseidon::gpu::kMarkCount;
 using Poseidon::gpu::Mark;
@@ -119,6 +123,153 @@ void PipeReadBack(int slot)
     s_pipeDone[slot] = 0;
 }
 
+// xp-gpuprofile (POSEIDON_XP_GPUPROF=1, off by default): fine GPU marks.
+// Every Poseidon::gpu::XpMark and every main Mark of a frame drops a timestamp
+// into the frame slot's own query list, in call order; kGpuFrames frames later
+// the read-back turns each pair of neighbours into the time of the section
+// named by the later mark ("x.terrain" = from the mark before it to the end
+// of the terrain draws), sums a name's sections within the frame, and keeps
+// per name the average and minimum over the frames of the timing window.
+// GpuTimingSummary logs one "XPGPU;" line per window. With the switch on the
+// pipeline statistics (triPipeStats) are sampled too.
+constexpr int kXpMax = 64;
+struct XpFrame
+{
+    GLuint q[kXpMax] = {};
+    const char* name[kXpMax] = {};
+    int draws[kXpMax] = {}; // Poseidon::gPerfDrawCalls at the mark
+    int n = 0;
+};
+struct XpAcc
+{
+    const char* name = nullptr;
+    double sum = 0.0;
+    double min = 1e30;
+    int n = 0;
+    double frameSum = 0.0;
+    double drawSum = 0.0; // draws inside the name's sections, summed over frames
+    int frameDraws = 0;
+    bool inFrame = false;
+};
+XpFrame s_xp[EngineGL33::kGpuFrames];
+bool s_xpQueries = false;
+bool s_xpRecording = false;
+int s_xpSlot = 0;
+int s_xpFrames = 0;
+std::vector<XpAcc> s_xpAcc;
+
+bool XpProfileOn()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_XP_GPUPROF");
+        return v && *v && *v != '0';
+    }();
+    return on;
+}
+
+void XpRecord(const char* name)
+{
+    if (!s_xpRecording || !s_xpQueries)
+        return;
+    XpFrame& f = s_xp[s_xpSlot];
+    if (f.n >= kXpMax)
+        return;
+    glQueryCounter(f.q[f.n], GL_TIMESTAMP);
+    f.draws[f.n] = Poseidon::gPerfDrawCalls;
+    f.name[f.n++] = name;
+}
+
+void XpForgetFrames()
+{
+    for (XpFrame& f : s_xp)
+        f.n = 0;
+}
+
+void XpResetWindow()
+{
+    s_xpAcc.clear();
+    s_xpFrames = 0;
+    XpForgetFrames();
+    // The frame being recorded straddles the restart: record nothing more
+    // until the next frame begins.
+    s_xpRecording = false;
+}
+
+XpAcc& XpFind(const char* name)
+{
+    for (XpAcc& a : s_xpAcc)
+        if (a.name == name || std::strcmp(a.name, name) == 0)
+            return a;
+    s_xpAcc.push_back({});
+    s_xpAcc.back().name = name;
+    return s_xpAcc.back();
+}
+
+// The slot's frame, issued kGpuFrames ago: dropped unless every stamp is there.
+void XpReadBack(int slot)
+{
+    XpFrame& f = s_xp[slot];
+    const int n = f.n;
+    f.n = 0;
+    if (n < 2)
+        return;
+    GLuint64 stamp[kXpMax] = {};
+    for (int i = 0; i < n; ++i)
+    {
+        GLint available = 0;
+        glGetQueryObjectiv(f.q[i], GL_QUERY_RESULT_AVAILABLE, &available);
+        if (!available)
+            return;
+        glGetQueryObjectui64v(f.q[i], GL_QUERY_RESULT, &stamp[i]);
+    }
+    for (int i = 1; i < n; ++i)
+    {
+        XpAcc& a = XpFind(f.name[i]);
+        const double ms = stamp[i] >= stamp[i - 1] ? static_cast<double>(stamp[i] - stamp[i - 1]) * 1e-6 : 0.0;
+        a.frameSum += ms;
+        a.frameDraws += f.draws[i] >= f.draws[i - 1] ? f.draws[i] - f.draws[i - 1] : 0;
+        a.inFrame = true;
+    }
+    for (XpAcc& a : s_xpAcc)
+    {
+        if (!a.inFrame)
+            continue;
+        a.sum += a.frameSum;
+        a.min = a.frameSum < a.min ? a.frameSum : a.min;
+        a.drawSum += a.frameDraws;
+        ++a.n;
+        a.frameSum = 0.0;
+        a.frameDraws = 0;
+        a.inFrame = false;
+    }
+    ++s_xpFrames;
+}
+
+void XpDestroy(bool haveContext)
+{
+    if (s_xpQueries && haveContext)
+        for (XpFrame& f : s_xp)
+            glDeleteQueries(kXpMax, f.q);
+    s_xpQueries = false;
+    s_xpRecording = false;
+    Poseidon::gpu::SetXpMarkHook(nullptr);
+    XpResetWindow();
+}
+
+const char* XpMainMarkName(Mark m)
+{
+    static const char* const kNames[kMarkCount] = {
+        "m.framebegin",  "m.skybegin",   "m.skytable",   "m.skyend",   "m.canopybegin", "m.canopy",
+        "m.combatbegin", "m.combatmask", "m.worldbegin", "m.ground",   "m.pass1",       "m.shadowbegin",
+        "m.shadow",      "m.worldend",   "m.resolve",    "m.lindepth", "m.tags",        "m.ao",
+        "m.ssr",         "m.air",        "m.bloom",      "m.shafts",   "m.scatter",     "m.composite",
+        "m.taa",         "m.sharpen",    "m.debugview",  "m.postend",  "m.frameend"};
+    static_assert(sizeof(kNames) / sizeof(kNames[0]) == kMarkCount, "one name per mark");
+    const int i = static_cast<int>(m);
+    return i >= 0 && i < kMarkCount ? kNames[i] : "m.?";
+}
+
 void PipeDestroy(bool haveContext)
 {
     if (s_pipeQ[0][0][0] && haveContext)
@@ -150,11 +301,15 @@ void EngineGL33::SetGpuTimingEnabled(bool enabled)
                 _gpuRecorded[i] = 0;
         s_gpuDropSlots = _gpuRecorded[_gpuSlot] ? 1u << _gpuSlot : 0u;
         std::memset(s_pipeDone, 0, sizeof(s_pipeDone));
+        if (XpProfileOn())
+            XpResetWindow();
         LOG_DEBUG(Graphics, "GL33: GPU timing window restarted");
         return;
     }
     _gpuTiming = enabled;
     _gpuTimings.Reset();
+    if (XpProfileOn())
+        XpResetWindow();
     Poseidon::gpu::GGpuFrameRing().Reset();
     s_gpuDropSlots = 0;
     if (!enabled)
@@ -166,6 +321,21 @@ std::string EngineGL33::GpuTimingSummary() const
 {
     if (!_gpuTiming)
         return "gpu: timing off";
+    if (XpProfileOn())
+    {
+        // name=average ms/minimum ms/frames/average draws over the window, in
+        // first-seen order.
+        std::string line;
+        char buf[96];
+        for (const XpAcc& a : s_xpAcc)
+        {
+            if (a.n <= 0)
+                continue;
+            std::snprintf(buf, sizeof(buf), " %s=%.3f/%.3f/%d/%.0f", a.name, a.sum / a.n, a.min, a.n, a.drawSum / a.n);
+            line += buf;
+        }
+        LOG_INFO(Graphics, "XPGPU;frames={};{}", s_xpFrames, line);
+    }
     return _gpuTimings.Summary();
 }
 
@@ -197,6 +367,8 @@ void EngineGL33::DestroyGpuQueries()
     std::memset(_gpuQueries, 0, sizeof(_gpuQueries));
     std::memset(_gpuRecorded, 0, sizeof(_gpuRecorded));
     PipeDestroy(_glContext != nullptr);
+    if (XpProfileOn())
+        XpDestroy(_glContext != nullptr);
 }
 
 void EngineGL33::GpuFrameBegin()
@@ -245,6 +417,20 @@ void EngineGL33::GpuFrameBegin()
     else if (!wantPipe && s_pipeQ[0][0][0])
         PipeDestroy(true);
     s_pipeActive = wantPipe;
+    if (XpProfileOn())
+    {
+        Poseidon::gpu::SetPipelineStatsWanted(true);
+        if (!s_xpQueries)
+        {
+            for (XpFrame& f : s_xp)
+                glGenQueries(kXpMax, f.q);
+            s_xpQueries = true;
+            Poseidon::gpu::SetXpMarkHook(&XpRecord);
+        }
+        XpReadBack(_gpuSlot);
+        s_xpSlot = _gpuSlot;
+        s_xpRecording = true;
+    }
     GpuMark(Mark::FrameBegin);
 }
 
@@ -257,6 +443,8 @@ void EngineGL33::GpuMark(Mark mark)
         return; // the first occurrence in a frame counts
     glQueryCounter(_gpuQueries[_gpuSlot][m], GL_TIMESTAMP);
     _gpuRecorded[_gpuSlot] |= 1u << m;
+    if (s_xpRecording)
+        XpRecord(XpMainMarkName(mark));
     if (s_pipeActive)
         PipeAtMark(_gpuSlot, mark);
 }

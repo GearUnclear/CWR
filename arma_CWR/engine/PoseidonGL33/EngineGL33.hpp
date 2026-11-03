@@ -1929,6 +1929,13 @@ class EngineGL33 : public Engine
         DoSelectPixelShader(ps, _pixelShaderModeSel, _pixelShaderSpecularSel);
     }
     void DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, PixelShaderSpecular spec);
+    // xp-gpuprofile (POSEIDON_XP_EARLYZ=1): bind the early-depth twin of the
+    // selected program when the draw cannot discard (EngineGL33_Shaders.cpp).
+    void XpEarlyZBeforeDraw();
+    // Bind the selected program itself (a draw that sets its own uniforms).
+    void XpEarlyZUseLogical();
+    // The early-depth twin of a world program, 0 when none.
+    unsigned int XpEarlyTwin(unsigned int prog) const;
 
     void InitVertexShaders();
     void DeinitVertexShaders();

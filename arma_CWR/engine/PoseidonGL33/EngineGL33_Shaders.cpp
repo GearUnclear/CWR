@@ -1499,6 +1499,49 @@ static GLuint s_fsRemasterObjects[NPixelShaders] = {};
 // the previous program back, the shadow depth pass).
 static GLuint s_worldProgramBound = 0;
 
+// xp-gpuprofile (POSEIDON_XP_EARLYZ=1, off by default): an early-depth twin of
+// each remastered PSNormal and PSDetail program (the same sources with
+// layout(early_fragment_tests)), bound at draw time in place of the program
+// DoSelectPixelShader chose whenever the draw cannot discard (no alpha test,
+// no alpha to coverage). A fragment that is never discarded and writes no
+// depth gets the same depth and stencil result tested early or late, so the
+// frame is the same; hidden fragments are rejected before they are shaded.
+// s_xpLogicalProgram is the program DoSelectPixelShader chose (bound or not).
+static bool XpEarlyZOn()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_XP_EARLYZ");
+        return v && *v && *v != '0';
+    }();
+    return on;
+}
+struct XpEarlyPair
+{
+    GLuint normal = 0;
+    GLuint early = 0;
+};
+static std::vector<XpEarlyPair> s_xpEarly;
+static GLuint s_xpLogicalProgram = 0;
+
+static GLuint XpEarlyOf(GLuint prog)
+{
+    for (const XpEarlyPair& e : s_xpEarly)
+        if (e.normal == prog)
+            return e.early;
+    return 0;
+}
+
+// Deletes the twins (DeinitPixelShaders and a re-init).
+static void XpEarlyDestroyAll()
+{
+    for (XpEarlyPair& e : s_xpEarly)
+        if (e.early)
+            glDeleteProgram(e.early);
+    s_xpEarly.clear();
+    s_xpLogicalProgram = 0;
+}
+
 // Shader binary cache (ARB_get_program_binary).
 //
 // The world set is 2 sets x 3 vertex shaders x 6 pixel shaders = 36 distinct
@@ -1911,6 +1954,60 @@ void EngineGL33::InitPixelShaders()
                 else
                     gp::ShareAcrossSpecularAndMode(_shaderProgramRemaster, v, i, prog);
             }
+    if (XpEarlyZOn())
+    {
+        // The early-depth twins: never cached, linked here from the same
+        // pieces (overrides included) with the layout line after #version.
+        XpEarlyDestroyAll();
+        const int kEarlyPs[] = {PSNormal, PSDetail};
+        for (int i : kEarlyPs)
+        {
+            const char* body = Poseidon::gl33lighting::RemasterFragmentMain(i);
+            if (!body)
+                continue;
+            std::string common = Poseidon::gl33lighting::RemasterFragmentCommon();
+            std::string main = body;
+            std::string piece;
+            if (TryLoadShaderOverride("psRemasterCommon", piece))
+                common = piece;
+            const char* psName = i == PSNormal ? "psNormal" : "psDetail";
+            if (TryLoadShaderOverride((std::string(psName) + "RemasterMain").c_str(), piece))
+                main = piece;
+            const std::string src = Poseidon::gl33lighting::XpEarlyZFragmentSource(common + main);
+            if (src.empty())
+            {
+                LOG_ERROR(Graphics, "GL33: xp early-Z: {} does not start with #version 330 core", psName);
+                continue;
+            }
+            const GLuint fs =
+                CompileGLShader(GL_FRAGMENT_SHADER, src.c_str(), (std::string(psName) + "RemasterEarlyZ").c_str());
+            if (!fs)
+                continue;
+            EnsureWorldVsCompiled();
+            for (int v = 0; v < NVertexShaders; v++)
+            {
+                const GLuint normal = built[1][v][i];
+                if (!normal || !s_vsRemasterObj[v])
+                    continue;
+                char name[64];
+                snprintf(name, sizeof(name), "prog_set1_v%d_ps%d_earlyz", v, i);
+                const GLuint early = LinkGLProgram(s_vsRemasterObj[v], fs, name);
+                if (!early)
+                    continue;
+                bindProgramSamplersAndBlocks(early);
+                s_xpEarly.push_back({normal, early});
+            }
+            glDeleteShader(fs);
+        }
+        // The twins take the per-program surfClass uniform with their own
+        // program (ApplySurfaceClass), which needs glProgramUniform4f.
+        if (!glProgramUniform4f)
+        {
+            XpEarlyDestroyAll();
+            LOG_ERROR(Graphics, "GL33: xp early-Z off: glProgramUniform4f is not available");
+        }
+        LOG_INFO(Graphics, "GL33: xp early-Z twins: {}", s_xpEarly.size());
+    }
     s_worldProgramBound = 0; // bindProgramSamplersAndBlocks left program 0 bound
     LOG_INFO(
         Graphics, "GL33: world programs: {} restored, {} linked, {} ms", restored, pending.size(),
@@ -2077,6 +2174,7 @@ void EngineGL33::DeinitPixelShaders()
 {
     glUseProgram(0);
     s_worldProgramBound = 0;
+    XpEarlyDestroyAll();
     // The [specular][mode] slots share one program: delete each name once.
     std::vector<unsigned int> programs;
     Poseidon::gl33programs::CollectDistinctPrograms(
@@ -2123,7 +2221,12 @@ void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, Pix
     // grass and water constants below are uploaded on every call either way.
     auto bindWorldProgram = [this](GLuint prog)
     {
+        s_xpLogicalProgram = prog;
         if (prog == s_worldProgramBound && _pixelShaderSel != PSNone)
+            return;
+        // xp early-Z: its twin is bound (XpEarlyZBeforeDraw picks between them).
+        if (!s_xpEarly.empty() && s_worldProgramBound != 0 && XpEarlyOf(prog) == s_worldProgramBound &&
+            _pixelShaderSel != PSNone)
             return;
         glUseProgram(prog);
         s_worldProgramBound = prog;
@@ -2159,6 +2262,38 @@ void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, Pix
                    _shaderProgramRemaster[vs][spec][mode][ps] != 0;
     _surfBoundProgram = _surfProgram ? _shaderProgramRemaster[vs][spec][mode][ps] : 0;
     UpdateSurfaceMask();
+}
+
+void EngineGL33::XpEarlyZBeforeDraw()
+{
+    if (s_xpEarly.empty() || _pixelShaderSel == PSNone || !s_xpLogicalProgram)
+        return;
+    const GLuint early = XpEarlyOf(s_xpLogicalProgram);
+    if (!early)
+        return;
+    // The draw can discard (finishFragment): the alpha test (ref x enabled) or
+    // alpha to coverage. Those keep the program as chosen.
+    const float* ar = _psConstants.alphaRef;
+    const bool canDiscard = ar[2] > 0.5f || ar[0] * ar[1] > 0.0f;
+    const GLuint want = canDiscard ? s_xpLogicalProgram : early;
+    if (want == s_worldProgramBound)
+        return;
+    glUseProgram(want);
+    s_worldProgramBound = want;
+}
+
+void EngineGL33::XpEarlyZUseLogical()
+{
+    if (s_xpEarly.empty() || _pixelShaderSel == PSNone || !s_xpLogicalProgram ||
+        s_worldProgramBound == s_xpLogicalProgram)
+        return;
+    glUseProgram(s_xpLogicalProgram);
+    s_worldProgramBound = s_xpLogicalProgram;
+}
+
+unsigned int EngineGL33::XpEarlyTwin(unsigned int prog) const
+{
+    return s_xpEarly.empty() ? 0u : XpEarlyOf(prog);
 }
 
 void EngineGL33::EnableNightEye(float night)

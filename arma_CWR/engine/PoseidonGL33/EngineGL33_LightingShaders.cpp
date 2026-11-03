@@ -2102,6 +2102,17 @@ const char* LitConstantsBlock()
     return kLitConstantsBlockGLSL;
 }
 
+std::string XpEarlyZFragmentSource(const std::string& src)
+{
+    static const std::string kVersion = "#version 330 core\n";
+    if (src.compare(0, kVersion.size(), kVersion) != 0)
+        return {};
+    std::string out = src;
+    out.insert(kVersion.size(),
+               "#extension GL_ARB_shader_image_load_store : require\nlayout(early_fragment_tests) in;\n");
+    return out;
+}
+
 const char* RemasterFragmentMain(int ps)
 {
     switch (ps)

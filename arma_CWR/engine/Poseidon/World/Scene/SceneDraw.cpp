@@ -32,6 +32,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Remaster/QualityScale.hpp>
+#include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -388,8 +389,18 @@ void Scene::ObjectsDrawn()
 {
     // release all references
     DrawRain();
+    if (Poseidon::gpu::XpMarksActive())
+    {
+        GEngine->FlushQueues();
+        Poseidon::gpu::XpMark("x.rain");
+    }
 
     DrawObjectsAndShadowsPass3();
+    if (Poseidon::gpu::XpMarksActive())
+    {
+        GEngine->FlushQueues();
+        Poseidon::gpu::XpMark("x.pass3");
+    }
 
     // clear working list
     _drawMergers.Resize(0);
@@ -2257,6 +2268,7 @@ void Scene::DrawObjectsAndShadowsPass2()
             GSectionFilter = SectionClassFilter::All;
         }
         GEngine->FlushQueues();
+        Poseidon::gpu::XpMark("x.roads");
         GEngine->EnableReorderQueues(true);
 
         // Shadow-map depth pass (durable shadow fix; off by default).  Render the
@@ -2316,9 +2328,11 @@ void Scene::DrawObjectsAndShadowsPass2()
 #endif
     // draw alpha parts of roads
     GEngine->FlushQueues();
+    Poseidon::gpu::XpMark("x.shadowsproj");
     // The opaque world is complete: the remastered TAA keeps a copy for its
     // particle mask before the translucent objects go on top.
     GEngine->BeginTranslucentObjects();
+    Poseidon::gpu::XpMark("x.opaquecopy");
     GEngine->EnableReorderQueues(false);
     SortAlphaFarToNear(_drawMergers.Data(), _drawMergers.Size());
     // last draw alpha objects (not roads - they are already drawn)
@@ -2365,6 +2379,11 @@ void Scene::DrawObjectsAndShadowsPass2()
             Alpha.Count(shape->Name());
 #endif
         }
+    }
+    if (Poseidon::gpu::XpMarksActive())
+    {
+        GEngine->FlushQueues();
+        Poseidon::gpu::XpMark("x.alpha");
     }
     GEngine->EnableReorderQueues(true);
 }

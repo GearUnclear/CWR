@@ -1043,6 +1043,30 @@ std::vector<std::string> AssembledPrograms()
 }
 } // namespace
 
+TEST_CASE("xp early-Z twins of the object and terrain programs compile under glslang", "[Graphics][Shaders][remaster]")
+{
+    // xp-gpuprofile (POSEIDON_XP_EARLYZ): the same source with the early depth
+    // test layout, for the draws that cannot discard (PSNormal 0, PSDetail 1).
+    GlslangInit init;
+    const std::string common = gl::RemasterFragmentCommon();
+    for (int ps : {0, 1})
+    {
+        const char* main = gl::RemasterFragmentMain(ps);
+        REQUIRE(main);
+        const std::string src = gl::XpEarlyZFragmentSource(common + main);
+        REQUIRE_FALSE(src.empty());
+        CHECK(src.find("layout(early_fragment_tests) in;") != std::string::npos);
+        // The twin writes no depth itself (that would defeat the early test).
+        CHECK(src.find("gl_FragDepth") == std::string::npos);
+        CAPTURE(ps);
+        std::string log;
+        const bool ok = Compiles(src, EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+    }
+    CHECK(gl::XpEarlyZFragmentSource("void main() {}").empty());
+}
+
 TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[Graphics][Shaders][remaster]")
 {
     GlslangInit init;

@@ -204,5 +204,19 @@ void EngineGL33::ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::Ren
         return;
     for (int i = 0; i < 3; ++i)
         sp.v[i] = v[i];
+    // xp-gpuprofile (POSEIDON_XP_EARLYZ=1): the program and its early-depth
+    // twin, either of which may be bound, take the value by name.
+    if (const GLuint twin = XpEarlyTwin(_surfBoundProgram))
+    {
+        if (twin >= s_surfClassPrograms.size())
+            s_surfClassPrograms.resize(twin + 64);
+        SurfClassProgram& tp = s_surfClassPrograms[twin];
+        if (tp.loc == -2)
+            tp.loc = glGetUniformLocation(twin, "surfClass");
+        glProgramUniform4f(_surfBoundProgram, s_surfClassPrograms[_surfBoundProgram].loc, v[0], v[1], v[2], 0.0f);
+        if (tp.loc >= 0)
+            glProgramUniform4f(twin, tp.loc, v[0], v[1], v[2], 0.0f);
+        return;
+    }
     glUniform4f(sp.loc, v[0], v[1], v[2], 0.0f);
 }
