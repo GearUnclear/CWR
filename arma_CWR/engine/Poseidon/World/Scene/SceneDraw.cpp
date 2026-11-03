@@ -39,6 +39,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
+#include <Poseidon/World/Scene/ShapeDrawOrder.hpp>
 #include <Poseidon/World/Scene/InstancedRunRules.hpp>
 #include <Poseidon/World/Scene/TerrainOcclusion.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
@@ -99,55 +100,18 @@ static int CmpRevAlphaSortObj(const SortObjectItem* p1, const SortObjectItem* p0
     return AlphaSort::CompareAlphaDepth((*p1)->zCoord, (*p0)->zCoord);
 }
 
+// Pass ascending; between shapes, simple shapes first then shape identity; within a
+// shape, coarse LODs (large LOD numbers) first, then back to front (helps alpha
+// transparency). Shape identity compares addresses, never a truncated pointer
+// difference (W1-7): see Scene/ShapeDrawOrder.hpp.
 static int CmpShapeObj(const SortObjectItem* p1, const SortObjectItem* p2)
 {
     const SortObject* o1 = *p1;
     const SortObject* o2 = *p2;
-
-    // first sort by pass
-    int sDif = o1->passNum - o2->passNum;
-    if (sDif)
-    {
-        return sDif;
-    }
-
-    LODShape* s1 = o1->object->GetShape();
-    LODShape* s2 = o2->object->GetShape();
-    sDif = (intptr_t)s2 - (intptr_t)s1;
+    const ShapeDraw::ShapeDrawKey<LODShape> k1{o1->passNum, o1->object->GetShape(), o1->drawLOD, o1->distance2};
+    const ShapeDraw::ShapeDrawKey<LODShape> k2{o2->passNum, o2->object->GetShape(), o2->drawLOD, o2->distance2};
     // no invisible LODs here
-    if (sDif)
-    {
-        Shape* ss1 = s1->Level(0);
-        Shape* ss2 = s2->Level(0);
-        int complex1 = ss1->NFaces();
-        int complex2 = ss2->NFaces();
-        int cDiff = complex1 - complex2;
-        // sort by shape complexity
-        // first draw simple shapes
-        if (cDiff)
-        {
-            return cDiff;
-        }
-        return sDif;
-    }
-    // sort by LOD - fine LODs (small LOD numbers) last
-    sDif = o2->drawLOD - o1->drawLOD;
-    if (sDif)
-    {
-        return sDif;
-    }
-    // first draw
-    // same shape sort by distance, back first (helps to alpha transparency)
-    Coord fDif = o2->distance2 - o1->distance2;
-    if (fDif < 0)
-    {
-        return -1;
-    }
-    if (fDif > 0)
-    {
-        return +1;
-    }
-    return 0;
+    return ShapeDraw::CompareShapeDraw(k1, k2, [](LODShape* s) { return s->Level(0)->NFaces(); });
 }
 
 void Scene::EndObjects()

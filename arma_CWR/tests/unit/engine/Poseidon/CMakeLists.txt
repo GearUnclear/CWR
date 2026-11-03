@@ -496,6 +496,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_object.cpp
     World/Scene/test_scene.cpp
     World/Scene/test_scene_preloader.cpp
+    World/Scene/test_shape_draw_order.cpp
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
     World/Scene/test_instanced_run_rules.cpp
