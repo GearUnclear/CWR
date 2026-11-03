@@ -9,6 +9,7 @@
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/XpViewDist.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
@@ -1475,6 +1476,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
                         zMax = ObjRange - 1;
                     }
 #define RECT_CLIPPERS 1
+                    // xp-viewdist (World/Scene/XpViewDist.hpp): EARLYCULL skips whole
+                    // static cells beyond the object draw range; the loop is timed
+                    // for triPerfStats either way.
+                    const auto vdT0 = std::chrono::steady_clock::now();
+                    const float vdCellRange = xp::GViewDistPolicy().earlyCull ? _scene.XpCellCullRange() : 0.0f;
+                    const Vector3 vdCamPos = _scene.GetCamera()->Position();
+                    int vdCells = 0;
                     for (z = zMin; z <= zMax; z++)
                     {
                         for (x = xMin; x <= xMax; x++)
@@ -1487,6 +1495,17 @@ void World::Simulate(float deltaT, bool& enableDraw)
                             }
                             Vector3Val bCenter = list->GetBSphereCenter();
                             float bRadius = list->GetBSphereRadius();
+                            if (vdCellRange > 0.0f && list->GetNonStaticCount() <= 0)
+                            {
+                                // the cell sphere holds every static object's sphere, so each
+                                // object centre is at least dc away and its radius under dc / 4
+                                // (ObjectForDrawing's near-edge rule does not apply)
+                                if (xp::CellBeyond(vdCamPos.Distance(bCenter), bRadius, vdCellRange))
+                                {
+                                    ++vdCells;
+                                    continue;
+                                }
+                            }
                             // Point3 cPos(VFastTransform,GScene->ScaledInvTransform(),bCenter);
                             const Camera& cam = *GScene->GetCamera();
 #if RECT_CLIPPERS
@@ -1542,6 +1561,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
                                 }
                             }
                         }
+                    }
+                    {
+                        Poseidon::perf::FrameCounters& vdCounters = Poseidon::perf::GPerfCounters().Frame();
+                        vdCounters.xpVdCells += vdCells;
+                        vdCounters.xpVdEnumMs +=
+                            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - vdT0).count();
                     }
                     for (int i = 0; i < NCloudlets(); i++)
                     {

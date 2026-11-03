@@ -109,6 +109,16 @@ constexpr Field kFieldList[] = {
     {&FC::simHashes, nullptr},
     {&FC::sensorUpdates, nullptr},
     {nullptr, &FC::sensorMs},
+    // xp-viewdist
+    {&FC::xpVdEnum, nullptr},
+    {&FC::xpVdEarly, nullptr},
+    {&FC::xpVdCells, nullptr},
+    {&FC::xpVdList, nullptr},
+    {&FC::xpVdFar, nullptr},
+    {nullptr, &FC::xpVdEnumMs},
+    {&FC::xpGndSegs, nullptr},
+    {&FC::xpGndSections, nullptr},
+    {&FC::xpGndFarSections, nullptr},
 };
 // The list holds every member (all are 4 bytes), and the header sized the sums
 // for it.
@@ -288,6 +298,11 @@ std::string Counters::Summary() const
                   sum(&FC::groundClipOut) / ng, sum(&FC::groundVs) / ng, sum(&FC::groundFs) / ng,
                   sum(&FC::pass1Prims) / np, sum(&FC::pass1ClipIn) / np, sum(&FC::pass1ClipOut) / np,
                   sum(&FC::pass1Vs) / np, sum(&FC::pass1Fs) / np);
+    out += buf;
+    std::snprintf(buf, sizeof(buf),
+                  " | vd enum=%.0f early=%.0f cells=%.0f list=%.0f far=%.0f enumMs=%.3f gnd=%.0f/%.0f/%.0f",
+                  avg(&FC::xpVdEnum), avg(&FC::xpVdEarly), avg(&FC::xpVdCells), avg(&FC::xpVdList), avg(&FC::xpVdFar),
+                  avgf(&FC::xpVdEnumMs), avg(&FC::xpGndSegs), avg(&FC::xpGndSections), avg(&FC::xpGndFarSections));
     out += buf;
     return out;
 }

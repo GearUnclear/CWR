@@ -56,6 +56,8 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <time.h>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/World/Scene/XpViewDist.hpp>
 
 using namespace Poseidon;
 namespace Poseidon
@@ -834,6 +836,16 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
         return; // nothing to draw
     }
     float radius = obj->GetRadius();
+    perf::FrameCounters& vdCounters = perf::GPerfCounters().Frame();
+    ++vdCounters.xpVdEnum;
+    // xp-viewdist EARLYCULL: an object the LOD selection would hide by its
+    // distance alone gets no draw-list entry (XpBeyondDrawRange).
+    if (forceLOD < 0 && xp::GViewDistPolicy().earlyCull &&
+        XpBeyondDrawRange(shape, _camera->Position().Distance2Inline(pos), obj->Scale(), radius))
+    {
+        ++vdCounters.xpVdEarly;
+        return;
+    }
     // get object position in clipping coordinates
 
     if (obj != GWorld->CameraOn())

@@ -16,6 +16,7 @@
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/World/Terrain/Occlusion.hpp>
 #include <Poseidon/World/Terrain/TerrainProfile.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
 
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 
@@ -1422,6 +1423,16 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
 #if 1
                         shape->Draw(anim, lights, ClipAll, 0, trans, iTrans);
 #endif
+                        {
+                            // xp-viewdist: ground segments and texture sections drawn, by distance
+                            Poseidon::perf::FrameCounters& vdc = Poseidon::perf::GPerfCounters().Frame();
+                            ++vdc.xpGndSegs;
+                            vdc.xpGndSections += shape->NSections();
+                            if (z > 2000.0f)
+                            {
+                                vdc.xpGndFarSections += shape->NSections();
+                            }
+                        }
                         if (layer.isAlpha)
                         {
                             shape->AndSpecial(~alphaSpec);

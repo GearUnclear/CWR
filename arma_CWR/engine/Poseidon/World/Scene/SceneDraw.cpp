@@ -45,6 +45,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/InstancedRunRules.hpp>
 #include <Poseidon/World/Scene/TerrainOcclusion.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/World/Scene/XpViewDist.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
@@ -425,10 +426,18 @@ int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Ve
                             : ENGINE_CONFIG.objectsZ;
     if (distance2 > Square(drawZ))
     {
-        return LOD_INVISIBLE;
+        // xp-viewdist far ring (POSEIDON_XP_VD_FAR, off by default): beyond the
+        // object distance only objects of at least farPx pixels are drawn, out to
+        // the fog end (the camera's far plane clips the rest).
+        const float farCoef = xp::GViewDistPolicy().FarPixelCoef();
+        if (farCoef <= 0.0f || Square(diameter) < Square(farCoef * scale) * (distance2 * Square(_lodInvWidth)))
+        {
+            return LOD_INVISIBLE;
+        }
     }
 
-    float pixelLimit = 0.125;
+    // xp-viewdist SMALLPX (off by default: 0.125, the stock 1.25 px)
+    float pixelLimit = xp::GViewDistPolicy().SmallPixelCoef();
     float detail2 = distance2 * Square(_lodInvWidth);
     if (xpq && xpq->farLodK != 1.0f)
     {
@@ -450,6 +459,27 @@ int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Ve
     int level = shape->FindSqrtLevel(resol2, true);
 
     return level;
+}
+
+bool Scene::XpBeyondDrawRange(LODShape* shape, float centreDist2, float oScale, float radius) const
+{
+    // The size tests run at the finest width the frame can still pick: a
+    // coarser width only hides more, so nothing drawn later is dropped here.
+    // The shadow range: AdjustShadowComplexity and SceneShadowPass may still
+    // draw an object inside it whose draw LOD is hidden.
+    const float diameter = shape->BoundingSphere() * 2 * oScale;
+    return xp::BeyondDrawRange(centreDist2, radius, diameter, ENGINE_CONFIG.objectsZ, _shadowFogMaxRange,
+                               GetCamera()->Left(), floatMin(_lodInvWidth, _minLodInvWidth),
+                               xp::GViewDistPolicy().FarPixelCoef(), xp::GViewDistPolicy().SmallPixelCoef());
+}
+
+float Scene::XpCellCullRange() const
+{
+    if (xp::GViewDistPolicy().FarPixelCoef() > 0.0f)
+    {
+        return 0.0f;
+    }
+    return floatMax(ENGINE_CONFIG.objectsZ, _shadowFogMaxRange);
 }
 
 int Scene::LevelShadowFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
@@ -1762,6 +1792,7 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
         _drawMergers.Resize(0);
         _drawnObjects = 0;
+        const float vdObjZ2 = Square(ENGINE_CONFIG.objectsZ);
         for (int s = 0; s < _drawObjects.Size(); s++)
         {
             SortObject* sObj = _drawObjects[s];
@@ -1777,8 +1808,13 @@ void Scene::DrawObjectsAndShadowsPass1()
             if (sObj->drawLOD != LOD_INVISIBLE)
             {
                 ++_drawnObjects;
+                if (sObj->distance2 > vdObjZ2)
+                {
+                    ++counters.xpVdFar;
+                }
             }
         }
+        counters.xpVdList += _drawObjects.Size();
     }
     // One-shot shape census (perf campaign): triPerfDumpShapes arms this;
     // the next Pass1 logs the top repeated shapes — the instancing-candidate

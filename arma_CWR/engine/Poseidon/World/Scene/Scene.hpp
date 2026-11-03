@@ -346,6 +346,13 @@ class Scene
                            Vector3Par viewDirection);
     int LevelShadowFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
                                  Vector3Par viewDirection);
+    // xp-viewdist (XpViewDist.hpp): true only when LevelFromDistance2 returns
+    // LOD_INVISIBLE for this object at any detail width and no shadow path
+    // reaches it, given its camera centre distance squared and bounding radius.
+    bool XpBeyondDrawRange(LODShape* shape, float centreDist2, float oScale, float radius) const;
+    // xp-viewdist: the distance beyond which a whole static object cell can be
+    // skipped (0 = do not skip cells; the far ring needs every cell).
+    float XpCellCullRange() const;
 
     void AdjustComplexity();
 

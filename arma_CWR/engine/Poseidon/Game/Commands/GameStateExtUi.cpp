@@ -1887,6 +1887,7 @@ GameValue SkipDayTime(const GameState* state, GameValuePar oper1)
 
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/UI/Settings/ViewDistance.hpp>
+#include <cstdlib>
 
 void SetVisibility(float distance)
 {
@@ -1895,6 +1896,18 @@ void SetVisibility(float distance)
     // the master distance via setViewDistance — e.g. the demo ambush intro's
     // `setViewDistance 2000` renders objects out to ~1333 m so the distant scene
     // is visible through the binoculars.
+    // xp-viewdist measurement knob (test only, unset in play): POSEIDON_XP_VD_FORCE=<m>
+    // replaces every requested view distance, so one capture view can be counted
+    // at 900 m and at 4 km with the same camera.
+    static const float s_forceView = []
+    {
+        const char* v = std::getenv("POSEIDON_XP_VD_FORCE");
+        return v ? static_cast<float>(std::atof(v)) : 0.0f;
+    }();
+    if (s_forceView > 0.0f)
+    {
+        distance = s_forceView;
+    }
     const ViewDistances vd = ViewDistanceResolver::Derive(distance);
     LOG_DEBUG(Script, "Visibility set: view={} objects={} shadows={}", vd.view, vd.objects, vd.shadows);
     ENGINE_CONFIG.tacticalZ = vd.view;

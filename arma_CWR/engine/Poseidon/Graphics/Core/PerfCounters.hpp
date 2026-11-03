@@ -117,6 +117,16 @@ struct FrameCounters
     int simHashes = 0;          // spatial hash inserts and lookups of the simulation
     int sensorUpdates = 0;      // SensorList::SmartUpdateAll calls
     float sensorMs = 0.0f;      // CPU: SensorList::SmartUpdateAll, outside every profiled phase today
+    // --- xp-viewdist (World/Scene/XpViewDist.hpp) ---
+    int xpVdEnum = 0;         // objects the world enumeration handed to Scene::ObjectForDrawing
+    int xpVdEarly = 0;        // of those, dropped by EARLYCULL before a draw-list entry
+    int xpVdCells = 0;        // static object cells EARLYCULL skipped whole
+    int xpVdList = 0;         // draw-list entries at Pass1 (drawn or not)
+    int xpVdFar = 0;          // drawn objects beyond objectsZ (the far ring)
+    float xpVdEnumMs = 0.0f;  // CPU: the world's object enumeration loop (always timed)
+    int xpGndSegs = 0;        // ground segments drawn (Landscape::DrawGround, not clipped)
+    int xpGndSections = 0;    // their texture sections (about one draw each)
+    int xpGndFarSections = 0; // of those, in segments whose near edge is beyond 2 km
 };
 
 // The first rule an object failed to join or head an instanced run
@@ -176,8 +186,9 @@ class Counters
     //  | binds prog=<n> tex=<n> smp=<n> uboB=<n> | refuse=<scene>/<static>/<own>/<lit>/<shape>/<lod>/<pass>/
     //  <special>/<fog> | tris=<n> lodsw=<n> lodhist=<l0>/.../<l7+> | pipe=<ground frames>/<pass1 frames>
     //  gprims=<n> gclipin=<n> gclipout=<n> gvs=<n> gfs=<n> p1prims=<n> p1clipin=<n> p1clipout=<n> p1vs=<n>
-    //  p1fs=<n>" (the pipeline fields average over the frames that read a result back, the rest over every
-    //  frame of the window).
+    //  p1fs=<n> | vd enum=<n> early=<n> cells=<n> list=<n> far=<n> enumMs=<ms> gnd=<segments>/<sections>/<sections
+    //  beyond 2 km>" (the pipeline fields average over the frames that read a result back, the rest over every frame of
+    //  the window).
     std::string Summary() const;
     // Per-frame averages of the simulation counters, for triSimStats:
     // "fogsight target=<n> script=<n> other=<n> marches=<n> landvis0=<n> outcone=<n> | combat records=<n>
@@ -187,7 +198,7 @@ class Counters
 
     // One per FrameCounters member (PerfCounters.cpp lists them; a static_assert
     // there keeps the count).
-    static constexpr int kFields = 81;
+    static constexpr int kFields = 90;
 
   private:
     // Sums over the window, in double so a long window does not round.
