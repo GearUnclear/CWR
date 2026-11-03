@@ -33,6 +33,25 @@ const char* XpNormalMain(const char* shipped);
 // the unit tests compile it.
 std::string XpBuildNormalMain(const char* shipped, int flags);
 
+// Experimental foliage switches (lane xp-foliage, default off). Each set
+// POSEIDON_XP_* variable adds one `#define XP_<NAME> <value>` line after the
+// #version line of RemasterFragmentCommon(); with none set the prelude is the
+// plain join of its pieces. `all` returns every line at its default value (the
+// shader compile test). Variables: POSEIDON_XP_LEAF_TRANSMIT (backlit leaf
+// transmission on tree crowns; a value other than 1 is the strength, default
+// 0.15) and POSEIDON_XP_ALPHA_MIPCOV (alpha-tested cutouts keep their coverage
+// in the texture's smaller mips; a value other than 1 is the gain per mip
+// level, default 0.25) and POSEIDON_XP_FOLIAGE_WIND (crowns and bushes sway
+// and flutter in the landscape's wind in VSTransform; a value other than 1
+// scales the amplitude). The same lines go after the #version line of the
+// remastered VSTransform.
+std::string XpFoliageDefines(bool all);
+// POSEIDON_XP_FOLIAGE_WIND is set (read once): the VS constants then carry the
+// wind clock, the camera's world xz, the wind and the foliage flag.
+bool XpFoliageWindOn();
+// `src` with `defines` inserted after its first line (the #version line).
+std::string WithXpDefines(const char* src, const std::string& defines);
+
 // The common prelude, split by concern:
 // RemasterFragmentCommon() is these pieces joined in this order. A feature
 // edits the piece of its concern. Overrides still replace the joined prelude

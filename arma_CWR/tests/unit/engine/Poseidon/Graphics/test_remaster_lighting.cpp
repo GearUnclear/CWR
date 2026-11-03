@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -1102,6 +1103,57 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     // injection, integration, near field, apply, horizon ring and night glow,
     // and the experimental switches' three (CAS, bloom down and up)
     CHECK(post == 38);
+}
+
+TEST_CASE("xp-foliage: the experimental switches compile and leave the prelude alone while off",
+          "[Graphics][Shaders][remaster][xp-foliage]")
+{
+    GlslangInit init;
+    const std::string all = gl::XpFoliageDefines(true);
+    CHECK(all.find("#define XP_LEAF_TRANSMIT 0.15\n") != std::string::npos);
+    CHECK(all.find("#define XP_ALPHA_MIPCOV 0.25\n") != std::string::npos);
+    // Unset, the prelude is the plain join of its pieces (the tip's text).
+    if (!std::getenv("POSEIDON_XP_LEAF_TRANSMIT") && !std::getenv("POSEIDON_XP_ALPHA_MIPCOV") &&
+        !std::getenv("POSEIDON_XP_FOLIAGE_WIND"))
+    {
+        std::string joined;
+        for (int i = 0; i < static_cast<int>(gl::FragmentPiece::Count); ++i)
+            joined += Piece(static_cast<gl::FragmentPiece>(i));
+        CHECK(std::string(gl::RemasterFragmentCommon()) == joined);
+    }
+    CHECK(gl::WithXpDefines("#version 330 core\nvoid main() {}\n", "") == "#version 330 core\nvoid main() {}\n");
+    CHECK(gl::WithXpDefines("#version 330 core\nx\n", "#define A 1\n") == "#version 330 core\n#define A 1\nx\n");
+    // Every switch on: the prelude with each main still compiles.
+    const std::string common = gl::WithXpDefines(gl::RemasterFragmentCommon(), all);
+    int fragment = 0;
+    for (int ps = 0; ps < kShaderIds; ++ps)
+    {
+        const char* main = gl::RemasterFragmentMain(ps);
+        if (!main)
+            continue;
+        CAPTURE(ps);
+        std::string log;
+        const bool ok = Compiles(common + main, EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+        ++fragment;
+    }
+    CHECK(fragment == 4);
+    CHECK(all.find("#define XP_FOLIAGE_WIND 1.0\n") != std::string::npos);
+    int vertex = 0;
+    for (int vs = 0; vs < kShaderIds; ++vs)
+    {
+        const char* src = gl::RemasterVertexSource(vs);
+        if (!src)
+            continue;
+        CAPTURE(vs);
+        std::string log;
+        const bool ok = Compiles(gl::WithXpDefines(src, all), EShLangVertex, log);
+        CAPTURE(log);
+        CHECK(ok);
+        ++vertex;
+    }
+    CHECK(vertex == 3);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",

@@ -12,11 +12,13 @@
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1219,6 +1221,23 @@ void EngineGL33::UpdateShadowMapLitState()
     BindLightingTextures();
 }
 
+// (xp-foliage) POSEIDON_XP_FOLIAGE_WIND: the wind clock, the camera's world xz
+// (sunEn.yzw) and the landscape's wind for the material upload (specEn.zw),
+// read by the remastered VSTransform's XP_FOLIAGE_WIND. Nothing while unset.
+static float s_xpWind[2] = {0.0f, 0.0f};
+static void XpWindFrame(float sunEn[4], const FrameState& frame)
+{
+    if (!Poseidon::gl33lighting::XpFoliageWindOn())
+        return;
+    sunEn[1] = std::fmod(Glob.time.toFloat(), 628.31853f);
+    sunEn[2] = frame.cameraPos[0];
+    sunEn[3] = frame.cameraPos[2];
+    Landscape* land = GScene ? GScene->GetLandscape() : nullptr;
+    const Vector3 wind = land ? land->GetWind() : VZero;
+    s_xpWind[0] = wind.X();
+    s_xpWind[1] = wind.Z();
+}
+
 void EngineGL33::UploadVSViewConstants(const FrameState& frame)
 {
     memcpy(s_vsShadow + VSConst::SlotView * 4, &frame.view, 64);
@@ -1226,6 +1245,7 @@ void EngineGL33::UploadVSViewConstants(const FrameState& frame)
     memcpy(s_vsShadow + VSConst::SlotCamPos * 4, frame.cameraPos, 12);
     s_vsShadow[VSConst::SlotCamPos * 4 + 3] = 0;
     float sunEn[4] = {frame.sunEnabled ? 1.0f : 0.0f, 0, 0, 0};
+    XpWindFrame(sunEn, frame);
     memcpy(s_vsShadow + VSConst::SlotSunEn * 4, sunEn, 16);
     FlushVSConstants();
 }
@@ -1296,6 +1316,15 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
     Color specCol = sun->Diffuse() * mat.specular;
     float spec[4] = {specCol.R(), specCol.G(), specCol.B(), static_cast<float>(mat.specularPower)};
     float specEn[4] = {mat.specularPower > 0 ? 1.0f : 0.0f, 0, 0, 0};
+    if (Poseidon::gl33lighting::XpFoliageWindOn())
+    {
+        // (xp-foliage) the foliage flag (the lit shader's test of litMatForced) and the wind.
+        const float forced =
+            0.2126f * mat.forcedDiffuse.R() + 0.7152f * mat.forcedDiffuse.G() + 0.0722f * mat.forcedDiffuse.B();
+        specEn[1] = forced > 1e-4f ? 1.0f : 0.0f;
+        specEn[2] = s_xpWind[0];
+        specEn[3] = s_xpWind[1];
+    }
 
     memcpy(s_vsShadow + VSConst::SlotSpecular * 4, spec, 16);
     memcpy(s_vsShadow + VSConst::SlotSpecEn * 4, specEn, 16);
@@ -1428,6 +1457,7 @@ void EngineGL33::UploadFrameConstants(const FrameState& frame)
     memcpy(s_vsShadow + VSConst::SlotSunDir * 4, frame.sunDir, 16);
 
     float sunEn[4] = {frame.sunEnabled ? 1.0f : 0.0f, 0, 0, 0};
+    XpWindFrame(sunEn, frame);
     memcpy(s_vsShadow + VSConst::SlotSunEn * 4, sunEn, 16);
 
     memcpy(s_vsShadow + VSConst::SlotFogParam * 4, frame.fogParams, 16);

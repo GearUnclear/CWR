@@ -49,6 +49,8 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <string>
 
@@ -227,6 +229,34 @@ flat out float vLitMode;
 
 void main() {
     vec4 worldPos    = worldArr[gl_InstanceID] * vec4(pos, 1.0);
+#ifdef XP_FOLIAGE_WIND
+    // (xp-foliage) Foliage in the wind: a draw with a forced-diffuse (leaf)
+    // material (specEn.y) bends with the landscape's wind (specEn.zw, m/s)
+    // and flutters. The bend grows with the square of the height in the
+    // shape's box (CrownEllipsoid: the centre at 0.6 of the height) and with
+    // the shape's height; its phase follows the tree's world position
+    // (sunEn.zw is the camera's world xz) and the wind clock (sunEn.y, wrapped
+    // at 200 pi, so every frequency is a multiple of 0.01). A calm still
+    // breathes a little. The shadow map is not displaced.
+    if (specEn.y > 0.5 && crownCenter.w > 0.5) {
+        vec3 e = (pos - crownCenter.xyz) * crownScale.xyz;
+        float up = clamp(e.y * 0.5 + 0.6, 0.0, 1.0);
+        float height = 2.0 / max(crownScale.y, 1e-3);
+        vec2 absXZ = worldArr[gl_InstanceID][3].xz + sunEn.zw;
+        float t = sunEn.y;
+        vec2 wind = specEn.zw;
+        float speed = length(wind);
+        vec2 dir = speed > 0.05 ? wind / speed : vec2(0.8, 0.6);
+        float strength = (0.25 + 0.75 * clamp(speed / 6.0, 0.0, 1.5)) * float(XP_FOLIAGE_WIND);
+        float ph = dot(absXZ, vec2(0.131, 0.173));
+        float sway = 0.55 + 0.45 * sin(t * 0.37 + ph * 0.3); // gusts: a slow swell of the bend
+        sway *= sin(t * 1.13 + ph) * 0.7 + sin(t * 2.71 + ph * 1.9) * 0.3;
+        float bend = sway * strength * 0.008 * min(height, 25.0) * up * up;
+        float flutter = sin(t * 6.83 + dot(pos, vec3(2.9, 1.7, 3.3)) + ph) * 0.025 * strength * up;
+        worldPos.xz += dir * bend + vec2(flutter, -0.6 * flutter);
+        worldPos.y += 0.5 * flutter - 0.15 * abs(bend);
+    }
+#endif
     // Many tree crowns have leaf cards with zero mesh normals: keep them zero
     // (normalizing a zero vector gives NaN); the fragment shader gives them the
     // crown's normal.
@@ -896,6 +926,40 @@ float crownSunPath(vec3 cnDir, float r, vec3 l) {
     return max(-b + sqrt(max(b * b - c, 0.0)), 0.0);
 }
 
+#ifdef XP_LEAF_TRANSMIT
+// (xp-foliage) Backlit leaf transmission. The sun's visibility at a point given
+// relative to the depth pass's camera (rel = vWorldRel + litShadowDelta.xyz):
+// the first cascade that holds it, four hardware 2x2 comparisons around it, the
+// same far fade as shadowMapVisibility. Cheap on purpose: it only weights a
+// soft glow.
+float g_xpSunOther = 1.0; // the hills' and the cloud field's sun visibility
+float xpShadowPointVisibility(vec3 rel) {
+    if (shadowCtl.x < 0.5) return 1.0;
+    int nC = int(cascadeCtl.x);
+    int omniN = int(cascadeCtl.w);
+    float eyeDepth = dot(rel, camFwd.xyz);
+    float dist3D = length(rel);
+    for (int i = 0; i < 4; ++i) {
+        if (i >= nC) break;
+        float metric = (i < omniN) ? dist3D : eyeDepth;
+        if (metric > cascadeSplits[i]) continue;
+        vec4 cp = cascadeVP[i] * vec4(rel, 1.0);
+        vec3 sc = cp.xyz / cp.w;
+        vec2 suv = sc.xy * 0.5 + 0.5;
+        if (suv.x <= 0.0 || suv.x >= 1.0 || suv.y <= 0.0 || suv.y >= 1.0 || sc.z <= 0.0 || sc.z >= 1.0) return 1.0;
+        float z = sc.z - cascadeCtl.z * float(i + 1) * float(i + 1);
+        float ts = shadowCtl.w * 1.5;
+        float lit = texture(shadowMap, vec4(suv + vec2(ts, ts), float(i), z)) +
+                    texture(shadowMap, vec4(suv + vec2(-ts, ts), float(i), z)) +
+                    texture(shadowMap, vec4(suv + vec2(ts, -ts), float(i), z)) +
+                    texture(shadowMap, vec4(suv + vec2(-ts, -ts), float(i), z));
+        float fade = clamp((cascadeSplits[nC - 1] - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+        return 1.0 - (1.0 - lit * 0.25) * fade;
+    }
+    return 1.0;
+}
+#endif
+
 // Lights a fragment of a VSTransform draw. `albedo` is the display-space surface
 // colour (texture, tint and detail already applied); `terrain` marks surfaces
 // that never cast into the shadow map. Returns the tonemapped display-space
@@ -977,7 +1041,14 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     if (keyLit) {
         float shadowVis = 1.0;
         if (!sunHidden) shadowVis = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift);
+#ifdef XP_LEAF_TRANSMIT
+        float xpTerrainVis = terrainSunVisibility(posAbs, skyVisibility);
+        float xpCloudVis = cloudSunVisibility(posAbs);
+        sunVisibility = shadowVis * xpTerrainVis * xpCloudVis;
+        g_xpSunOther = xpTerrainVis * xpCloudVis;
+#else
         sunVisibility = shadowVis * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+#endif
         // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
         sunVisibility *= canopySunVisibility(posAbs);
     } else {
@@ -1001,6 +1072,29 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     if (relief)
         sunTerm = nl + clamp(dot(g_surfBumpDelta, l), -kSurfReliefSunLimit * nl, kSurfReliefSunLimit * nl);
     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
+#ifdef XP_LEAF_TRANSMIT
+    // (xp-foliage) Backlit leaf transmission: sunlight that passes through the
+    // leaves toward the eye. A forward lobe (Henyey-Greenstein, g 0.55, less
+    // its value side-on, so a crown seen across the sun or with it behind the
+    // eye takes nothing), the crown's optical depth on the way in (rims glow,
+    // the core stays dark) and the sun's visibility where its path enters the
+    // crown (a crown in another tree's or a hill's shadow does not glow). The
+    // leaf's own shadow lookup is not used: it sits in its crown's shadow.
+    if (crown && sunOn > 0.0 && keyLit) {
+        float fwdCos = dot(-v, l);
+        if (fwdCos > 0.0) {
+            const float g = 0.55;
+            float hgD = 1.0 + g * g - 2.0 * g * fwdCos;
+            float lobe = (1.0 - g * g) * (inversesqrt(hgD) / hgD - pow(1.0 + g * g, -1.5));
+            float path = crownSunPath(cn, vCrown.w, l);
+            float radius = vCrown.w * inversesqrt(max(dot(vCrown.xyz, vCrown.xyz), 1e-12));
+            float reach = min(path * radius, 12.0) + 0.75;
+            float entry = xpShadowPointVisibility(vWorldRel + litShadowDelta.xyz + l * reach);
+            float trans = float(XP_LEAF_TRANSMIT) * max(lobe, 0.0) * exp(-1.5 * path) * entry * g_xpSunOther;
+            direct += litSun.rgb * kd * (trans * sunOn);
+        }
+    }
+#endif
     float canopyVis = surf ? canopySkyVisibility(posAbs, nLight, foliage) : 1.0;
     vec3 skyIrr = surf ? surfaceSkyIrradiance(relief ? g_surfBumpN : nLight, foliage) : skyIrradiance(nLight);
     float groundShare = surf ? g_surfGroundShare : 0.0;
@@ -1191,6 +1285,19 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
         if (litSky.y > 0.5) r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
         nightEye = false;
     }
+#ifdef XP_ALPHA_MIPCOV
+    // (xp-foliage) Alpha-tested cutouts (leaves, fences, wires) keep their
+    // coverage as the texture minifies: averaged mips pull a card's alpha
+    // under the cut, so distant crowns thin out to sticks. The alpha grows
+    // by XP_ALPHA_MIPCOV per mip level of tex0 at vUV0 (lit draws only; the
+    // decal layers read another texture). Derivatives taken before any branch.
+    vec2 xpTexel = vec2(textureSize(tex0, 0));
+    vec2 xpDx = dFdx(vUV0 * xpTexel);
+    vec2 xpDy = dFdy(vUV0 * xpTexel);
+    float xpLod = 0.5 * log2(max(max(dot(xpDx, xpDx), dot(xpDy, xpDy)), 1e-8));
+    if ((alphaRef.z > 0.5 || alphaRef.y > 0.5) && decalLayerMode < 0.5 && !camSun && vLitMode > 0.5 && vLitMode < 1.5)
+        r0.a *= 1.0 + max(xpLod, 0.0) * float(XP_ALPHA_MIPCOV);
+#endif
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage cutouts write coverage, and alpha-to-one makes the
         // covered samples 1, which the post pass reads as "no sky light to
@@ -1908,7 +2015,12 @@ const char* RemasterVertexSource(int vs)
             return screen.c_str();
         }
         case VSTransform:
-            return s_vsTransformRemasterGLSL;
+        {
+            // The experimental switches (XpFoliageDefines) after #version;
+            // unset, the tip's text.
+            static const std::string transform = WithXpDefines(s_vsTransformRemasterGLSL, XpFoliageDefines(false));
+            return transform.c_str();
+        }
         case VSShadow:
             return s_vsShadowRemasterGLSL;
         default:
@@ -1916,15 +2028,65 @@ const char* RemasterVertexSource(int vs)
     }
 }
 
+std::string XpFoliageDefines(bool all)
+{
+    struct Switch
+    {
+        const char* env;
+        const char* define;
+        const char* fallback;
+    };
+    static const Switch kSwitches[] = {
+        {"POSEIDON_XP_LEAF_TRANSMIT", "XP_LEAF_TRANSMIT", "0.15"},
+        {"POSEIDON_XP_ALPHA_MIPCOV", "XP_ALPHA_MIPCOV", "0.25"},
+        {"POSEIDON_XP_FOLIAGE_WIND", "XP_FOLIAGE_WIND", "1.0"},
+    };
+    std::string out;
+    for (const Switch& s : kSwitches)
+    {
+        const char* v = all ? nullptr : std::getenv(s.env);
+        if (!all && (!v || !*v || std::strcmp(v, "0") == 0))
+            continue;
+        // "1" (or anything that is not a positive number) takes the default.
+        const double value = v ? std::atof(v) : 0.0;
+        std::string text = s.fallback;
+        if (v && std::strcmp(v, "1") != 0 && value > 0.0 && value < 100.0)
+            text = std::to_string(value);
+        out += std::string("#define ") + s.define + " " + text + "\n";
+    }
+    return out;
+}
+
+bool XpFoliageWindOn()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_XP_FOLIAGE_WIND");
+        return v && *v && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+
+std::string WithXpDefines(const char* src, const std::string& defines)
+{
+    std::string text = src ? src : "";
+    if (defines.empty())
+        return text;
+    const size_t eol = text.find('\n');
+    text.insert(eol == std::string::npos ? text.size() : eol + 1, defines);
+    return text;
+}
+
 const char* RemasterFragmentCommon()
 {
-    // Joined once, on first use (thread-safe static).
+    // Joined once, on first use (thread-safe static). The experimental
+    // switches (XpFoliageDefines) are read here, once per process.
     static const std::string common = []
     {
         std::string joined;
         for (const char* piece : kFragmentPieces)
             joined += piece;
-        return joined;
+        return WithXpDefines(joined.c_str(), XpFoliageDefines(false));
     }();
     return common.c_str();
 }
