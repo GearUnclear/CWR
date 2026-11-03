@@ -164,6 +164,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_shader_named_outputs.cpp
     Graphics/test_remaster_lighting.cpp
     Graphics/test_feature_switches.cpp
+    Graphics/test_quality_scale.cpp
     Graphics/test_gpu_timings.cpp
     Graphics/test_perf_counters.cpp
     Graphics/test_ubo_mirror.cpp

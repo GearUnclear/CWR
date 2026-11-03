@@ -31,6 +31,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/QualityScale.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -404,13 +405,22 @@ int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Ve
     float scale = GetCamera()->Left();
     float diameter = shape->BoundingSphere() * 2 * oScale;
 
-    if (distance2 > Square(ENGINE_CONFIG.objectsZ))
+    // XP-presets (QualityScale.hpp): a draw-only object distance and a far LOD
+    // ramp per quality level. Off and at High this is the plain objectsZ cull.
+    const remaster::QualityProfile* xpq = remaster::ActiveQualityChange();
+    const float drawZ = xpq ? remaster::RenderObjectDistance(*xpq, ENGINE_CONFIG.objectsZ, ENGINE_CONFIG.tacticalZ)
+                            : ENGINE_CONFIG.objectsZ;
+    if (distance2 > Square(drawZ))
     {
         return LOD_INVISIBLE;
     }
 
     float pixelLimit = 0.125;
     float detail2 = distance2 * Square(_lodInvWidth);
+    if (xpq && xpq->farLodK != 1.0f)
+    {
+        detail2 *= Square(remaster::FarLodFactor(*xpq, std::sqrt(distance2)));
+    }
 
     if (Square(diameter) < Square(pixelLimit * scale) * detail2)
     {
@@ -1654,7 +1664,10 @@ void Scene::DrawObjectsAndShadowsPass1()
         if (_camera)
         {
             const float occNear = _camera->ClipNear();
-            const float occShadowsZ = ENGINE_CONFIG.shadowsZ;
+            // XP-presets: the active quality level's sun-shadow reach (Ultra
+            // reaches past shadowsZ, so the range must follow it).
+            const float occShadowsZ =
+                remaster::ActiveShadowReach(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ, ENGINE_CONFIG.objectsZ);
             const float occCasterReach = occNear + GEngine->GetShadowMapTuning().distanceCoef * (occShadowsZ - occNear);
             occRange2 = OcclusionRange::TestRange2(s_occRange, std::max(occShadowsZ, occCasterReach));
             occInvLeft = _camera->InvLeft();

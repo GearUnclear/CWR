@@ -20,6 +20,7 @@
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Graphics/Remaster/NightLights.hpp>
+#include <Poseidon/Graphics/Remaster/QualityScale.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
@@ -488,7 +489,13 @@ void EngineGL33::DeinitLightingResources()
 void EngineGL33::SetLightingTuning(const rm::LightingTuning& tuning)
 {
     const bool wasActive = _lightingActive;
+    _lightingSet = tuning;
     _lighting = tuning;
+    // XP-presets (QualityScale.hpp): the active quality level's lighting caps
+    // (fog grid, AO, features a lower level drops), applied on every set so a
+    // triSetLighting reset keeps them. Nothing when off or at High.
+    if (const rm::QualityProfile* xpq = rm::ActiveQualityChange())
+        rm::ApplyQualityToTuning(*xpq, _lighting);
     // A lighting change: the camera's exposure snaps to the next meter.
     _camera.snap = true;
     _camera.snapFrame = GetFrameCounter();

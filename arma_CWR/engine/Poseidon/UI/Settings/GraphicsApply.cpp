@@ -2,8 +2,11 @@
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp> // pulls Engine + extern GEngine
+#include <Poseidon/Graphics/Remaster/QualityScale.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 
+#include <cstdlib>
 #include <optional>
 
 namespace Poseidon
@@ -105,6 +108,20 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
 {
     // Kept for a Scene built later: at boot this runs before the world exists.
     s_appliedConfig = cfg;
+    // XP-presets (Graphics/Remaster/QualityScale.hpp): with POSEIDON_XP_PRESETS=1
+    // the Quality Preset row picks the graded quality level (Custom reads as
+    // High, today's frame). POSEIDON_XP_PRESET=<level> forces a level and wins.
+    // Before the lighting set below, which applies the level's lighting caps.
+    if (const char* xp = std::getenv("POSEIDON_XP_PRESETS"); xp && *xp && *xp != '0')
+    {
+        remaster::QualityLevel level = remaster::QualityLevel::High;
+        if (cfg.qualityPreset >= GraphicsConfig::PresetLow && cfg.qualityPreset <= GraphicsConfig::PresetUltra)
+            level = static_cast<remaster::QualityLevel>(static_cast<int>(cfg.qualityPreset));
+        remaster::SetActiveQualityLevel(&level);
+    }
+    if (const remaster::QualityProfile* q = remaster::ActiveQuality())
+        LOG_INFO(Graphics, "XP-presets: quality level {}{}", remaster::QualityLevelName(q->level),
+                 remaster::QualityLevelForcedByEnv() ? " (POSEIDON_XP_PRESET)" : "");
     if (GScene)
         ApplyGraphicsConfigToScene(cfg, *GScene);
     if (GEngine)

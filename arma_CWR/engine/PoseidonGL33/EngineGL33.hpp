@@ -767,7 +767,9 @@ class EngineGL33 : public Engine
     // --- Remastered lighting (EngineGL33_Lighting.cpp, EngineGL33_LightingShaders.cpp,
     // EngineGL33_PostFX.cpp) ---
     void SetLightingTuning(const Poseidon::remaster::LightingTuning& tuning) override;
-    Poseidon::remaster::LightingTuning GetLightingTuning() const override { return _lighting; }
+    // The tuning as last set (before the XP-presets quality caps), so a get then
+    // set round trip never makes a cap stick after the level changes.
+    Poseidon::remaster::LightingTuning GetLightingTuning() const override { return _lightingSet; }
     bool LightingRemasterActive() const override { return _lightingActive; }
     void PinCloudDrift(bool pinned, float x, float z) override;
     bool GetCloudDrift(float& x, float& z) const override;
@@ -832,6 +834,7 @@ class EngineGL33 : public Engine
     std::string RemasterCanopyCheck(int texels) override;
 
     Poseidon::remaster::LightingTuning _lighting;
+    Poseidon::remaster::LightingTuning _lightingSet; // as set, before the XP-presets caps
     // Remastered programs built and the setting asks for them: DoSelectPixelShader
     // picks _shaderProgramRemaster.
     bool _lightingActive = false;

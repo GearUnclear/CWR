@@ -9,6 +9,7 @@
 #include <Poseidon/World/Simulation/FrameInv.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+#include <Poseidon/Graphics/Remaster/QualityScale.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 
 #include <algorithm>
@@ -111,7 +112,10 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     // object distance (no casters live past where objects draw).
     const Engine::ShadowMapTuning smCap = GEngine->GetShadowMapTuning();
     const float smCamNear = GetCamera()->ClipNear();
-    const float smShadowsZ = ENGINE_CONFIG.shadowsZ;
+    // XP-presets (QualityScale.hpp): the active quality level's sun-shadow
+    // reach; ENGINE_CONFIG.shadowsZ itself when the experiment is off or at High.
+    const float smShadowsZ =
+        remaster::ActiveShadowReach(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ, ENGINE_CONFIG.objectsZ);
     const float smShadowFar = smCamNear + smCap.distanceCoef * (smShadowsZ - smCamNear);
     const float smCasterMaxDist2 = Square(smShadowFar);
     // Remastered sun shadows (Graphics/Remaster/SunShadows.hpp): with the
@@ -397,7 +401,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     // the shadow stays world-anchored (no crawl/jump) while the casters stay
     // camera-relative.
     const Engine::ShadowMapTuning tune = GEngine->GetShadowMapTuning();
-    const int smRes = tune.resolution;
+    const remaster::QualityProfile* xpq = remaster::ActiveQualityChange();
+    const int smRes = (xpq && xpq->shadowResolution > 0) ? xpq->shadowResolution : tune.resolution;
     const Camera* cam = GetCamera();
     Vector3Val cF = cam->Direction();
     Vector3Val cR = cam->DirectionAside();
@@ -431,7 +436,7 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     // Pair the cascade reach with the shadow visibility distance (Game-menu Shadows
     // slider, clamped to the object distance), not the camera far-clip: the frustum
     // tiers cover exactly as far as shadows are meant to render.
-    bp.farD = ENGINE_CONFIG.shadowsZ;
+    bp.farD = smShadowsZ;
     bp.sunDir = {sd.X(), sd.Y(), sd.Z()};
     bp.count = tune.cascadeCount;
     bp.distanceCoef = tune.distanceCoef;
