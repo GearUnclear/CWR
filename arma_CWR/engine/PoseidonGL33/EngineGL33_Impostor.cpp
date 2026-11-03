@@ -1048,5 +1048,15 @@ void EngineGL33::DestroyImpostors()
     glDeleteTextures(2, arrays);
     const GLuint samplers[2] = {g.sampAtlas, g.sampSource};
     glDeleteSamplers(2, samplers);
+    // The slots can hold the last reference to a shape. Dropping it here, inside
+    // ShutdownGL, frees the shape's textures after their memory is gone (access
+    // violation in TextureGL33::ReleaseMemory, stills job stills-r1-d600). Keep
+    // those shapes alive instead; the reference is all that is kept.
+    static std::vector<Ref<Poseidon::LODShape>>* s_keptShapes = new std::vector<Ref<Poseidon::LODShape>>();
+    for (ImpostorSlotData& slot : g.slots)
+    {
+        if (slot.shape)
+            s_keptShapes->push_back(slot.shape);
+    }
     g = ImpostorGL{};
 }
