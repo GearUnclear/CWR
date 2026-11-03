@@ -898,6 +898,20 @@ class Engine : public IGraphicsEngine
     /// a camp fire's column glows brighter than its colour can say. The draw
     /// clears it. Without the camera (or on another backend) it is dropped.
     virtual void SetDecalGlow(PackedColor /*glow*/) {}
+    /// Experiment xp-particles (POSEIDON_XP_SOFT_PARTICLES, POSEIDON_XP_LIT_SMOKE;
+    /// both off by default): the next DrawDecal's puff radius (m, for the soft
+    /// fade against the opaque world), the direction toward its dominant light
+    /// in camera space (x right, y up, z forward) and the share of its light
+    /// that comes from that direction (the directional shading). The draw
+    /// clears it.
+    virtual void SetDecalXp(float /*radius*/, const float /*lightCam*/[3], float /*share*/) {}
+    /// Experiment xp-particles: true while the lit-smoke switch is on (the
+    /// particle then works out its directional light).
+    virtual bool XpLitSmoke() const { return false; }
+    /// Experiment xp-particles: the share of the rig's particle light
+    /// (ParticleRigLight) that is the key light's this frame, and the world
+    /// direction toward the key; 0 while the lit-smoke switch is off.
+    virtual float ParticleKeyLight(float /*toward*/[3]) const { return 0.0f; }
     /// Captures: hold the remastered cloud-shadow field at a drift offset in
     /// metres (pinned = false lets it drift with the wind again from where it
     /// is). The field integrates the wind every frame, so re-pinning the sim

@@ -274,6 +274,24 @@ class EngineGL33 : public Engine
     RString _pendingScreenshotPath;
     // The next decal's light past its colour (SetDecalGlow), cleared by it.
     PackedColor _decalGlow = PackedColor(0u);
+    // Experiment xp-particles (EngineGL33_XpParticles.cpp): the next decal's
+    // puff radius and dominant light (SetDecalXp), cleared by it; the frame
+    // whose opaque depth sits on kXpSceneDepthUnit (0xffffffff: none yet); the
+    // rig's key fraction and the world direction toward the key for lit
+    // particles, for the frame it names.
+    float _decalXpRadius = 0.0f;
+    float _decalXpLight[3] = {0.0f, 0.0f, 1.0f};
+    float _decalXpShare = 0.0f;
+    std::uint32_t _xpDepthFrame = 0xffffffffu;
+    float _particleKeyFraction = 0.0f;
+    float _particleKeyToward[3] = {0.0f, 1.0f, 0.0f};
+    std::uint32_t _particleKeyFrame = 0xffffffffu;
+    // Copies the opaque world's depth for the soft particles (from
+    // BeginTranslucentObjects), when that switch is on.
+    void XpCopySceneDepth();
+    // The decal's xp codes for its second texture coordinate: `u` is added to
+    // the layer (0 to 0.4: the soft radius), the return value is v (0: none).
+    float XpDecalCode(bool depthTested, float& u);
 
     void DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
                    const Poseidon::MipInfo& mip, int specFlags) override;
@@ -765,6 +783,15 @@ class EngineGL33 : public Engine
     bool ParticleRigLight(float linear[3]) const override;
     bool CombatLightsActive() const override { return _combat.active; }
     void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
+    void SetDecalXp(float radius, const float lightCam[3], float share) override
+    {
+        _decalXpRadius = radius;
+        for (int i = 0; i < 3; ++i)
+            _decalXpLight[i] = lightCam[i];
+        _decalXpShare = share;
+    }
+    bool XpLitSmoke() const override;
+    float ParticleKeyLight(float toward[3]) const override;
     void RequestShaderReload() override { _shaderReloadPending = true; }
     void MarkWorldOverlay() override
     {

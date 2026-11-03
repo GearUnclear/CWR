@@ -100,6 +100,9 @@ void EngineGL33::SetTaaJitterState(rm::TaaOffset ndc, float bias)
 
 void EngineGL33::BeginTranslucentObjects()
 {
+    // Experiment xp-particles: the opaque depth for the soft particles (a
+    // no-op unless POSEIDON_XP_SOFT_PARTICLES=1).
+    XpCopySceneDepth();
     // Once, in a TAA frame's world pass, and only into targets that already
     // exist at this size (creating them here would reset the viewport of a
     // cropped world pass; the post pass creates them at the end of the frame).

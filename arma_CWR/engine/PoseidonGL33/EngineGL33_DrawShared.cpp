@@ -26,6 +26,10 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
     // night a lamp's halo (PhotoCamera.hpp kCameraFlareNight).
     const DWORD glow = (_camera.frameOn && _camera.frame == GetFrameCounter()) ? static_cast<DWORD>(_decalGlow) : 0u;
     _decalGlow = PackedColor(0u);
+    // Experiment xp-particles: the puff's code for the object program (0, as
+    // before, unless a switch is on); clears SetDecalXp.
+    float xpU = 0.0f;
+    const float xpCode = XpDecalCode((specFlags & static_cast<int>(Poseidon::render::Backend::NoZBuf)) == 0, xpU);
     constexpr int kFlareBits =
         static_cast<int>(Poseidon::render::Backend::IsLight) | static_cast<int>(Poseidon::render::Backend::NoZBuf);
     if ((specFlags & kFlareBits) == kFlareBits && _camera.frameOn && _camera.frame == GetFrameCounter())
@@ -148,8 +152,8 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
     const DecalLayerSlot slot = PrepareDecalLayer(reinterpret_cast<TextureGL33*>(mip._texture));
     for (i = 0; i < 4; i++)
     {
-        v[i].t1.u = slot.Valid() ? static_cast<float>(slot.layer) : 0.0f;
-        v[i].t1.v = 0.0f;
+        v[i].t1.u = (slot.Valid() ? static_cast<float>(slot.layer) : 0.0f) + xpU;
+        v[i].t1.v = xpCode;
     }
 
     AddVertices(v, 4);

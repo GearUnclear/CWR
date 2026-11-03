@@ -1787,6 +1787,10 @@ void EngineGL33::InitPixelShaders()
             if (loc >= 0)
                 glUniform1i(loc, ls.unit);
         }
+        // Experiment xp-particles: declared only by an object program built
+        // with POSEIDON_XP_SOFT_PARTICLES=1.
+        if (const GLint xpLoc = glGetUniformLocation(prog, "xpSceneDepth"); xpLoc >= 0)
+            glUniform1i(xpLoc, Poseidon::gl33lighting::kXpSceneDepthUnit);
         glUseProgram(0);
     };
 

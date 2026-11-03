@@ -2177,3 +2177,29 @@ TEST_CASE("Remaster lighting: a keyless night reads the terrain's sky half as th
           std::string::npos);
     CHECK(shade.find("terrainSkyVisibility(posAbs, skyVisibility);") != std::string::npos);
 }
+TEST_CASE("xp-particles object mains compile and leave the shipped main alone", "[Graphics][Shaders][remaster][xp]")
+{
+    // Experiment xp-particles (EngineGL33_XpParticles.cpp): off (the default,
+    // and the tests' environment) the object main is the shipped one; each
+    // switch's main compiles under glslang.
+    GlslangInit init;
+    const std::string common = gl::RemasterFragmentCommon();
+    const char* shipped = gl::RemasterFragmentMain(0); // PSNormal
+    REQUIRE(shipped);
+    CHECK(gl::XpParticleFlags() == 0);
+    CHECK(std::string(shipped).find("xpParticle") == std::string::npos);
+    CHECK(gl::XpBuildNormalMain(shipped, 0).empty());
+    for (int flags : {gl::kXpSoftParticles, gl::kXpLitSmoke, gl::kXpSoftParticles | gl::kXpLitSmoke})
+    {
+        CAPTURE(flags);
+        const std::string xp = gl::XpBuildNormalMain(shipped, flags);
+        REQUIRE_FALSE(xp.empty());
+        CHECK(xp.find("xpParticle(r0);") != std::string::npos);
+        CHECK((xp.find("#define XP_SOFT 1") != std::string::npos) == ((flags & gl::kXpSoftParticles) != 0));
+        CHECK((xp.find("#define XP_LIT 1") != std::string::npos) == ((flags & gl::kXpLitSmoke) != 0));
+        std::string log;
+        const bool ok = Compiles(common + xp, EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+    }
+}

@@ -1400,7 +1400,11 @@ Color AddParticleRigLight(ColorVal display, const float rig[3], ColorVal accom)
 // burning wreck's black column glows at its base only. A puff inside a fire's
 // flames glows as part of them (CombatFlameEmission): that light, linear,
 // goes to `emit`, added after the particle's own colour.
-Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3], bool ownGlow = false)
+// Experiment xp-particles: `xpDir`, when given, gets the lights' directions
+// from the particle (unit vectors in world space) summed by the luminance of
+// their light on it (xyz), and that luminance's sum (w).
+Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3], bool ownGlow = false,
+                        float* xpDir = nullptr)
 {
     const lighting::CombatLightSet& set = lighting::GCombatLights();
     // A fire's light (kept in its hue) and every other combat light (white
@@ -1422,6 +1426,14 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[
             continue;
         const float d = std::sqrt(d2);
         irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);
+        if (xpDir && d > 1e-3f)
+        {
+            const float w = irr * (0.2126f * r.sample.rgb[0] + 0.7152f * r.sample.rgb[1] + 0.0722f * r.sample.rgb[2]);
+            xpDir[0] += w * dx / d;
+            xpDir[1] += w * dy / d;
+            xpDir[2] += w * dz / d;
+            xpDir[3] += w;
+        }
         // A detonation's light keeps its hue on its smoke as a
         // fire's does: its afterburn lit the dust round it khaki, not orange.
         float* acc = r.kind == lighting::CombatLightKind::Fire || r.detonation ? e : o;
@@ -1441,6 +1453,82 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[
     float lit[3];
     lighting::CombatParticleMix(base, e, o, set.Tuning().smoke, set.Tuning().smokeTint, lit);
     return Color(lit[0], lit[1], lit[2], color.A());
+}
+// Experiment xp-particles (lit smoke, POSEIDON_XP_LIT_SMOKE): the puff's
+// dominant light. `color` is its light before its own colour (display
+// space), `combatBefore` that light's linear luminance before the combat
+// lights joined, `fire` CombatLitParticle's direction sums. The key light
+// (the rig's key share of its light) and the combat lights (by how much of
+// the puff's light they gave and how much their directions agree) sum to one
+// vector: its direction goes to the backend in camera space, its length over
+// the puff's light is the share the shader shades by. The puff also takes a
+// forward-scattering phase per light (Henyey-Greenstein, its mean over all
+// directions kept at 1): bright with the light behind it, greyer with the
+// light behind the camera; the phase is constant over one small puff, so it
+// is folded into the colour here.
+float XpPuffLight(Color& color, Vector3Par at, bool rigLit, const float rigLight[3], ColorVal accom, float combatBefore,
+                  const float fire[4], float lightCam[3])
+{
+    constexpr float kG = 0.35f;    // the smoke's asymmetry
+    constexpr float kPhase = 0.5f; // how much of the phase shows (multiple scattering evens the rest)
+    auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
+    auto lum = [](float r, float g, float b) { return 0.2126f * r + 0.7152f * g + 0.0722f * b; };
+    auto hg = [](float c)
+    { return (1.0f - kG * kG) / std::pow(std::max(1.0f + kG * kG - 2.0f * kG * c, 1e-4f), 1.5f); };
+    lightCam[0] = lightCam[1] = 0.0f;
+    lightCam[2] = 1.0f;
+    const float total = lum(toLinear(color.R()), toLinear(color.G()), toLinear(color.B()));
+    if (!(total > 1e-6f))
+        return 0.0f;
+    const Camera& camera = *GScene->GetCamera();
+    Vector3 view = at - camera.Position();
+    const float viewLen = view.Size();
+    if (viewLen > 1e-3f)
+        view = view * (1.0f / viewLen);
+    float v[3] = {0.0f, 0.0f, 0.0f};
+    float directional = 0.0f, phase = 0.0f;
+    float toward[3];
+    const float keyFraction = rigLit ? GEngine->ParticleKeyLight(toward) : 0.0f;
+    if (keyFraction > 0.0f)
+    {
+        const float keyLum =
+            keyFraction * lum(rigLight[0] * accom.R(), rigLight[1] * accom.G(), rigLight[2] * accom.B());
+        for (int i = 0; i < 3; ++i)
+            v[i] += keyLum * toward[i];
+        directional += keyLum;
+        phase += keyLum * hg(view.X() * toward[0] + view.Y() * toward[1] + view.Z() * toward[2]);
+    }
+    if (fire[3] > 0.0f)
+    {
+        const float combatLum = std::max(total - combatBefore, 0.0f);
+        const float f[3] = {fire[0] / fire[3], fire[1] / fire[3], fire[2] / fire[3]};
+        const float agree = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+        if (agree > 1e-3f && combatLum > 0.0f)
+        {
+            for (int i = 0; i < 3; ++i)
+                v[i] += combatLum * f[i];
+            const float w = combatLum * agree;
+            directional += w;
+            phase += w * hg((view.X() * f[0] + view.Y() * f[1] + view.Z() * f[2]) / agree);
+        }
+    }
+    const float len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (!(directional > 0.0f) || !(len > 1e-9f))
+        return 0.0f;
+    // The phase, on the directional share of the light.
+    const float d = std::min(directional / total, 1.0f);
+    const float m = std::min(1.0f + d * kPhase * (phase / directional - 1.0f), 2.0f);
+    const float k = std::pow(std::max(m, 0.0f), 1.0f / 2.2f);
+    color = Color(color.R() * k, color.G() * k, color.B() * k, color.A());
+    // Camera space (InverseScaled: x right, y up, z forward; PostFrameSun).
+    Vector3 c = camera.InverseScaled().Rotate(Vector3(v[0] / len, v[1] / len, v[2] / len));
+    const float cl = c.Size();
+    if (!(cl > 1e-6f))
+        return 0.0f;
+    lightCam[0] = c.X() / cl;
+    lightCam[1] = c.Y() / cl;
+    lightCam[2] = c.Z() / cl;
+    return std::min(len / total, 1.0f);
 }
 } // namespace
 
@@ -1540,6 +1628,9 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             }
         }
         int mat = (hints & ClipUserMask) / ClipUserStep;
+        // Experiment xp-particles: the puff's dominant light (XpPuffLight).
+        float xpShare = 0.0f;
+        float xpLightCam[3] = {0.0f, 0.0f, 1.0f};
         if (mat != MSShining || fireball)
         {
             TLMaterial mat;
@@ -1598,6 +1689,17 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             colorI = colorI * accom;
             if (rigLit)
                 colorI = AddParticleRigLight(colorI, rigLight, accom);
+            // Experiment xp-particles (lit smoke): what the combat lights add, and
+            // from where.
+            const bool xpLit = !fireball && GEngine->XpLitSmoke();
+            float xpBefore = 0.0f;
+            float xpFire[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            if (xpLit)
+            {
+                auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
+                xpBefore =
+                    0.2126f * toLinear(colorI.R()) + 0.7152f * toLinear(colorI.G()) + 0.0722f * toLinear(colorI.B());
+            }
             if (combat)
             {
                 // The particle's own colour (multiplied in below) is its albedo.
@@ -1607,11 +1709,16 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
                     const Color own = fireball ? fireballOwn : (ColorVal)GetConstantColor();
                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
                 }
-                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);
+                if (xpLit)
+                    colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball, xpFire);
+                else
+                    colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);
                 for (int i = 0; i < 3; ++i)
                     flameEmit[i] += fireballEmit[i];
             }
             colorI.SetA(1);
+            if (xpLit)
+                xpShare = XpPuffLight(colorI, pos.Position(), rigLit, rigLight, accom, xpBefore, xpFire, xpLightCam);
         }
         else
         {
@@ -1663,6 +1770,9 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         {
             return;
         }
+        // Experiment xp-particles: the puff's radius (its soft fade) and its
+        // dominant light; dropped by a backend without them.
+        GEngine->SetDecalXp(size, xpLightCam, xpShare);
         GEngine->DrawDecal(posp, rhw, sizeX, sizeY, color, mip, special);
     }
     Deanimate(forceLOD);

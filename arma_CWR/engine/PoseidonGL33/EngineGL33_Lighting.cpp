@@ -948,6 +948,18 @@ void EngineGL33::UploadLitFrameConstants()
         _particleRigLight[1] = irr.g * k;
         _particleRigLight[2] = irr.b * k;
         _particleRigFrame = GetFrameCounter();
+        // Experiment xp-particles (lit smoke): the key light's share of that
+        // light (ParticleRigIrradiance without the sky's term over with it).
+        if (XpParticleFlags() & kXpLitSmoke)
+        {
+            const rm::Rgb direct = rm::ParticleRigIrradiance(rig, key, 0.0f);
+            auto lum = [](const rm::Rgb& c) { return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b; };
+            const float all = lum(irr);
+            _particleKeyFraction = all > 1e-9f ? std::min(std::max(lum(direct) / all, 0.0f), 1.0f) : 0.0f;
+            for (int i = 0; i < 3; ++i)
+                _particleKeyToward[i] = key.toward[i];
+            _particleKeyFrame = GetFrameCounter();
+        }
     }
     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, _combat.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);

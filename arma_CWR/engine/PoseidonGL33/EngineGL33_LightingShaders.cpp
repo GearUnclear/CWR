@@ -1945,7 +1945,7 @@ const char* RemasterFragmentMain(int ps)
     switch (ps)
     {
         case PSNormal:
-            return s_psNormalRemasterMain;
+            return XpNormalMain(s_psNormalRemasterMain); // the shipped main unless an xp-particles switch is on
         case PSDetail:
             return s_psDetailRemasterMain;
         case PSGrass:

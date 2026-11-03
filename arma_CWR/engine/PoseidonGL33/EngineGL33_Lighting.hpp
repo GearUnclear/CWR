@@ -5,6 +5,8 @@
 // for the shading model and Poseidon/Graphics/Remaster/LightRig.hpp for the
 // light rig.
 
+#include <string>
+
 namespace Poseidon::gl33lighting
 {
 
@@ -16,6 +18,20 @@ const char* RemasterVertexSource(int vs);
 // means the pixel shader reuses its classic source (PSFlat, PSShadow).
 const char* RemasterFragmentCommon();
 const char* RemasterFragmentMain(int ps);
+// Experiment xp-particles (EngineGL33_XpParticles.cpp): the switches read
+// once from the environment, kXpSoftParticles (POSEIDON_XP_SOFT_PARTICLES=1)
+// and kXpLitSmoke (POSEIDON_XP_LIT_SMOKE=1). Zero (the default) leaves every
+// source, upload and draw as before; RemasterFragmentMain(PSNormal) then
+// returns the shipped main unchanged.
+constexpr int kXpSoftParticles = 1;
+constexpr int kXpLitSmoke = 2;
+int XpParticleFlags();
+// The object main with the xp-particles code woven in when a switch is on;
+// `shipped` itself otherwise.
+const char* XpNormalMain(const char* shipped);
+// The same for given switches (empty when `flags` is 0 or the anchor moved);
+// the unit tests compile it.
+std::string XpBuildNormalMain(const char* shipped, int flags);
 
 // The common prelude, split by concern:
 // RemasterFragmentCommon() is these pieces joined in this order. A feature
@@ -231,6 +247,12 @@ constexpr int kGroundFieldUnit = 12;
 // everywhere, and the program's sampler count stays within the 16 a fragment
 // stage is guaranteed. Bound only around a batched draw.
 constexpr int kDecalLayerUnit = 16;
+// Experiment xp-particles: the opaque world's depth for the soft particles,
+// read by the object program only when POSEIDON_XP_SOFT_PARTICLES=1 built
+// it with the sampler (17 is within GL 3.3's 48 combined units; the program
+// then declares 17 samplers, beyond the 16 a fragment stage is guaranteed:
+// fine on the target cards, which have 32; an experiment, not a shipped path).
+constexpr int kXpSceneDepthUnit = 17;
 // The volumetric fog's floor map (the lowest ground nearby) shares
 // the ground field's unit: only the fog's injection pass samples it, binds it
 // itself (no world program declares it) and unbinds it at its end; the world
