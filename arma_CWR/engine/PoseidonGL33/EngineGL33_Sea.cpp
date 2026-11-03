@@ -21,9 +21,13 @@
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Core/Global.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/LandscapeShared.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 using namespace Poseidon::gl33lighting;
 namespace rm = Poseidon::remaster;
@@ -81,4 +85,57 @@ void EngineGL33::EndSea()
     GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
     glBindSampler(kSeaNextFrameUnit, 0);
     GL33Bind::ActiveUnit(0);
+}
+
+// ---- Experiment POSEIDON_XP_WATER: the shore ---------------------------------
+//
+// The sea program knows the ground under each water fragment (the terrain
+// height map on unit 4, read on the landscape's own triangles), so it knows the
+// water's depth there. With the switch on:
+//   1 shallow water: the sea floor (the ground field's colour, wet) shows
+//     through water a few metres deep, dimmed per channel by the water's
+//     absorption along the refracted path, and the waves calm at the waterline;
+//   2 surf: a broken foam fringe along the waterline (it follows the sea
+//     level's own 12.5 s wave) and foam lines rolling in over the shallows;
+//   4 wet sand: the land darkens below the swash line (the tide plus the
+//     highest wave), on the land program;
+//   8 wave masking: a wave facet whose mirror ray points below the horizon
+//     sees the next wave instead of the horizon sky (the open sea too).
+// POSEIDON_XP_WATER=1 turns on the shore (1, 2, 4), the look the lane
+// recommends; POSEIDON_XP_WATER_PARTS=<mask> picks parts (15 adds the wave
+// masking). Off, litWater2 stays zero and every fragment is as before.
+namespace
+{
+int XpWaterParts()
+{
+    static const int parts = []
+    {
+        const char* on = std::getenv("POSEIDON_XP_WATER");
+        if (!on || !*on || std::atoi(on) == 0)
+            return 0;
+        if (const char* m = std::getenv("POSEIDON_XP_WATER_PARTS"))
+            return std::atoi(m) & 15;
+        return 7;
+    }();
+    return parts;
+}
+} // namespace
+
+void EngineGL33::UploadLitSeaShore()
+{
+    const int parts = XpWaterParts();
+    Landscape* land = GScene ? GScene->GetLandscape() : nullptr;
+    const bool on = parts != 0 && land && _remasterPrograms && !_nightVision &&
+                    rm::FeatureOn(_lighting.features, rm::Feature::SeaWaves) && _featureGates.computed &&
+                    _featureGates[rm::Feature::SeaWaves].on;
+    if (!on)
+    {
+        SetLitSlot(LitConst::Water2, 0.0f, 0.0f, 0.0f, 0.0f);
+        return;
+    }
+    // The swash line: the tide's level plus the highest the sea level's wave
+    // reaches (Landscape::Simulate), and a little run-up above it.
+    const float swash = land->GetSeaLevelNoWave() + maxWave + 0.15f;
+    SetLitSlot(LitConst::Water2, static_cast<float>(parts), std::fmod(Glob.time.toFloat(), 4096.0f),
+               land->GetSeaLevel(), swash);
 }

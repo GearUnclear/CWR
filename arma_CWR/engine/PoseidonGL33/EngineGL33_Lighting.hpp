@@ -437,7 +437,13 @@ enum : int
     // intensity gain (kCameraLampGain), w how far a low sun turns the upper
     // sky toward the zenith's blue.
     CameraLook = 90,
-    Count = 91,
+    // Experiment (POSEIDON_XP_WATER, EngineGL33_Sea.cpp UploadLitSeaShore):
+    // x the shore parts on (a bit mask: 1 shallow water, 2 surf foam, 4 wet
+    // sand, 8 wave masking; 0 = off, which leaves every fragment as before),
+    // y time (s, wrapped), z the sea's surface (m, with the wave), w the swash
+    // line (m).
+    Water2 = 91,
+    Count = 92,
 };
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
@@ -463,7 +469,8 @@ static_assert(SurfaceCanopy == Surface + 1 && Surface2 == SurfaceCanopy + 1 && S
 static_assert(Surface3 == SurfaceSh + SurfaceShCount, "LitConst surface slots out of order");
 static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots");
 static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
-static_assert(Count == CameraLook + 1, "LitConst size out of sync");
+static_assert(Water2 == CameraLook + 1, "the experimental water slot follows the camera's look");
+static_assert(Count == Water2 + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to features not yet in the block, so no two features

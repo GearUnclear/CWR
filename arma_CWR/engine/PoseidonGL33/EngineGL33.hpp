@@ -964,6 +964,8 @@ class EngineGL33 : public Engine
     void EnsureSurfaceTable();
     // The Weather slot and the frame flags of the MatClass slot, from the gates.
     void UploadLitWeather();
+    // Experiment POSEIDON_XP_WATER (EngineGL33_Sea.cpp): the shore slot litWater2.
+    void UploadLitSeaShore();
     // The surface class of the draw ApplyPassState prepares (its texture and
     // object kind) into LitConst::MatClass xy, uploaded only when it changes.
     void SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);

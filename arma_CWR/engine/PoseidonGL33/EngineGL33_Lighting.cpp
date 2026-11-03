@@ -1080,6 +1080,9 @@ void EngineGL33::UploadLitFrameConstants()
     // Wet weather: the frame's wetness and its flags; zero while the gate
     // is off, which leaves every fragment as before.
     UploadLitWeather();
+    // Experiment POSEIDON_XP_WATER: the shore (shallow water, surf, wet
+    // sand); zero while it is off, which leaves every fragment as before.
+    UploadLitSeaShore();
     // Surfaces and ambient light (the surfaces switch): the sky light's
     // spherical harmonics, the canopy's sky occlusion and the specular; zero
     // while the switch or its gate is off.
