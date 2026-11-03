@@ -994,6 +994,138 @@ void main() {
 }
 )";
 
+// ---- Experimental post switches (EngineGL33_XpPost.hpp; off by default) ----
+// POSEIDON_XP_CAS: the TAA sharpen as a contrast-adaptive sharpen on
+// brightness only. The stock sharpen's unsharp mask, bounded the same way
+// (a quarter of the cross's range past it), but its strength follows the
+// neighbourhood the way AMD's CAS does: up to twice the stock strength on
+// low-contrast detail (far grass, terrain texture, roof tiles), none where
+// the 3x3 reaches black or white (a crown against the sky, a lamp), so fine
+// detail gains and hard edges do not ring or shimmer. Brightness only: the
+// colour noise of pale ground is not turned into speckle. POSEIDON_XP_CAS_FAR
+// (sharpen.w) multiplies the strength on the far land, where the textures are
+// at their smallest mips and the haze has taken the contrast.
+static const char s_psPostXpCasGLSL[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D srcTex;  // the resolved frame
+uniform vec4 sharpen;      // x the stock strength (taaSharpen), yz size (pixels), w the far gain
+out vec4 fragColor;
+float lumaAt(ivec2 ip, ivec2 o, ivec2 lim) {
+    return dot(texelFetch(srcTex, clamp(ip + o, ivec2(0), lim), 0).rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+void main() {
+    ivec2 ip = ivec2(gl_FragCoord.xy);
+    ivec2 lim = ivec2(sharpen.yz) - 1;
+    vec4 e4 = texelFetch(srcTex, ip, 0);
+    vec3 e = e4.rgb;
+    float le = dot(e, vec3(0.2126, 0.7152, 0.0722));
+    float la = lumaAt(ip, ivec2(-1, -1), lim);
+    float lb = lumaAt(ip, ivec2(0, -1), lim);
+    float lc = lumaAt(ip, ivec2(1, -1), lim);
+    float ld = lumaAt(ip, ivec2(-1, 0), lim);
+    float lf = lumaAt(ip, ivec2(1, 0), lim);
+    float lg = lumaAt(ip, ivec2(-1, 1), lim);
+    float lh = lumaAt(ip, ivec2(0, 1), lim);
+    float li = lumaAt(ip, ivec2(1, 1), lim);
+    // CAS's soft minimum and maximum (cross plus corners, 0..2) and its
+    // amplitude: 1 in mid-tone low-contrast detail, 0 where the
+    // neighbourhood reaches black or white.
+    float cmn = min(min(min(ld, le), min(lf, lb)), lh);
+    float cmx = max(max(max(ld, le), max(lf, lb)), lh);
+    float mn = cmn + min(cmn, min(min(la, lc), min(lg, li)));
+    float mx = cmx + max(cmx, max(max(la, lc), max(lg, li)));
+    float amp = sqrt(clamp(min(mn, 2.0 - mx) / max(mx, 1e-5), 0.0, 1.0));
+    // POSEIDON_XP_CAS_FAR: the far land (150 m to 1.5 km, the history's alpha
+    // holds the view depth) takes sharpen.w times the strength.
+    float k = 2.0 * sharpen.x * amp * mix(1.0, sharpen.w, smoothstep(150.0, 1500.0, e4.a));
+    float margin = 0.25 * (cmx - cmn);
+    float lo = clamp(le + k * (le - 0.25 * (lb + ld + lf + lh)), cmn - margin, cmx + margin);
+    vec3 o = e + (lo - le);
+    float a = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float b = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
+    o += (a + b - 1.0) / 255.0;
+    fragColor = vec4(clamp(o, 0.0, 1.0), 1.0);
+}
+)";
+
+// POSEIDON_XP_BLOOM: the bloom chain's downsample as a 13-tap filter (Jimenez
+// 2014: five overlapping 2x2 boxes, the centre one weighted half), every
+// level. On the first level each box takes the threshold on its own and the
+// five are mixed with Karis weights (1 / (1 + luma)), so one bright texel (a
+// glint on the sea, a muzzle flash's lone pixel) cannot flare the whole glow
+// and the glow does not flicker as such texels come and go.
+static const char s_psPostXpBloomDownMain[] = R"(
+vec3 bloomTap(vec2 uv) {
+    vec3 c = texture(srcTex, uv).rgb;
+    return (bloomParams.z > 0.5 && camParams.x > 0.5) ? min(camDecode(c) * camParams.y, vec3(8.0)) : c;
+}
+vec3 bloomKnee(vec3 c) {
+    if (camParams.x < 0.5) c = pow(max(c, vec3(0.0)), vec3(2.2));
+    float peak = max(c.r, max(c.g, c.b));
+    float knee = bloomParams.y;
+    float soft = clamp(peak - bloomParams.x + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee + 1e-4);
+    return c * (max(soft, peak - bloomParams.x) / max(peak, 1e-4));
+}
+float karis(vec3 c) { return 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722))); }
+void main() {
+    vec2 t = srcTexel;
+    vec3 a = bloomTap(vUV + t * vec2(-2.0, -2.0));
+    vec3 b = bloomTap(vUV + t * vec2(0.0, -2.0));
+    vec3 c = bloomTap(vUV + t * vec2(2.0, -2.0));
+    vec3 d = bloomTap(vUV + t * vec2(-1.0, -1.0));
+    vec3 e = bloomTap(vUV + t * vec2(1.0, -1.0));
+    vec3 f = bloomTap(vUV + t * vec2(-2.0, 0.0));
+    vec3 g = bloomTap(vUV);
+    vec3 h = bloomTap(vUV + t * vec2(2.0, 0.0));
+    vec3 i = bloomTap(vUV + t * vec2(-1.0, 1.0));
+    vec3 j = bloomTap(vUV + t * vec2(1.0, 1.0));
+    vec3 k = bloomTap(vUV + t * vec2(-2.0, 2.0));
+    vec3 l = bloomTap(vUV + t * vec2(0.0, 2.0));
+    vec3 m = bloomTap(vUV + t * vec2(2.0, 2.0));
+    vec3 g0 = (d + e + i + j) * 0.25;
+    vec3 g1 = (a + b + f + g) * 0.25;
+    vec3 g2 = (b + c + g + h) * 0.25;
+    vec3 g3 = (f + g + k + l) * 0.25;
+    vec3 g4 = (g + h + l + m) * 0.25;
+    vec3 o;
+    if (bloomParams.z > 0.5) {
+        g0 = bloomKnee(g0);
+        g1 = bloomKnee(g1);
+        g2 = bloomKnee(g2);
+        g3 = bloomKnee(g3);
+        g4 = bloomKnee(g4);
+        float w0 = 0.5 * karis(g0);
+        float w1 = 0.125 * karis(g1);
+        float w2 = 0.125 * karis(g2);
+        float w3 = 0.125 * karis(g3);
+        float w4 = 0.125 * karis(g4);
+        o = (g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3 + g4 * w4) / (w0 + w1 + w2 + w3 + w4);
+    } else {
+        o = g0 * 0.5 + (g1 + g2 + g3 + g4) * 0.125;
+    }
+    fragColor = vec4(o, 1.0);
+}
+)";
+
+// POSEIDON_XP_BLOOM: the upsample as psPostBloomUp, times a weight (the
+// glow's extra tail levels take the switch's value).
+static const char s_psPostXpBloomUpGLSL[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D srcTex;
+uniform vec4 upParams; // xy texel, z weight
+out vec4 fragColor;
+void main() {
+    vec2 t = upParams.xy;
+    vec3 c = texture(srcTex, vUV).rgb * 4.0;
+    c += (texture(srcTex, vUV + vec2(t.x, 0.0)).rgb + texture(srcTex, vUV - vec2(t.x, 0.0)).rgb +
+          texture(srcTex, vUV + vec2(0.0, t.y)).rgb + texture(srcTex, vUV - vec2(0.0, t.y)).rgb) * 2.0;
+    c += texture(srcTex, vUV + t).rgb + texture(srcTex, vUV - t).rgb +
+         texture(srcTex, vUV + vec2(t.x, -t.y)).rgb + texture(srcTex, vUV + vec2(-t.x, t.y)).rgb;
+    fragColor = vec4(c * (upParams.z / 16.0), 1.0);
+}
+)";
+
 // Every post shader, assembled from the raw strings above: these pieces in this
 // order, in PostShader order. The lighting lab's glsl_extract.py reads this
 // table to assemble the same sources.
@@ -1069,6 +1201,10 @@ const PostShaderDef kPostShaders[] = {
     {"psFogGlow",
      {Poseidon::gl33lighting::kPostFogGlowGLSL, Poseidon::gl33lighting::kCameraCodecGLSL,
       Poseidon::gl33lighting::kPostFogGlowMainGLSL}},
+    // The experimental switches (EngineGL33_XpPost.hpp).
+    {"psPostXpCas", {s_psPostXpCasGLSL}},
+    {"psPostXpBloomDown", {s_psPostBloomDownHead, Poseidon::gl33lighting::kCameraCodecGLSL, s_psPostXpBloomDownMain}},
+    {"psPostXpBloomUp", {s_psPostXpBloomUpGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

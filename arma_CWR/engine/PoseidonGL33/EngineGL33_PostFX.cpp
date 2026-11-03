@@ -56,6 +56,7 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/EngineGL33_PostPass.hpp>
+#include <PoseidonGL33/EngineGL33_XpPost.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Graphics/Core/GLBlendState.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
@@ -270,7 +271,7 @@ void EngineGL33::DestroyPostTargets()
     delFbo(p.meterFbo);
     delTex(p.meterTex);
     DestroyCamera();
-    for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+    for (int i = 0; i < PostTargets::kBloomMaxLevels; ++i)
     {
         delFbo(p.bloomFbo[i]);
         delTex(p.bloomTex[i]);
@@ -303,6 +304,13 @@ void EngineGL33::DestroyPostPrograms()
          {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
           &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen, &p.progAirMarch,
           &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progGtao, &p.progGtaoAccum, &p.progMeter})
+    {
+        if (*prog)
+            glDeleteProgram(*prog);
+        *prog = 0;
+    }
+    // The experimental switches' programs (EngineGL33_XpPost.hpp).
+    for (unsigned int* prog : {&p.progXpCas, &p.progXpBloomDown, &p.progXpBloomUp})
     {
         if (*prog)
             glDeleteProgram(*prog);
@@ -355,6 +363,19 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         p.progGtao = link(PostShader::Gtao);
         p.progGtaoAccum = link(PostShader::GtaoAccum);
         p.progMeter = link(PostShader::Meter);
+        // The experimental switches' programs, only when a switch asks for
+        // them (EngineGL33_XpPost.hpp); a failed one leaves its switch off.
+        const Poseidon::gl33xp::PostXp& xp = Poseidon::gl33xp::PostXpSwitches();
+        if (xp.cas)
+            p.progXpCas = link(PostShader::XpCas);
+        if (xp.bloomTail > 0.0f)
+        {
+            p.progXpBloomDown = link(PostShader::XpBloomDown);
+            p.progXpBloomUp = link(PostShader::XpBloomUp);
+        }
+        if (xp.cas || xp.bloomTail > 0.0f)
+            LOG_INFO(Graphics, "GL33 post: experimental switches cas {} (program {}), bloom tail {} (programs {} {})",
+                     xp.cas ? 1 : 0, p.progXpCas, xp.bloomTail, p.progXpBloomDown, p.progXpBloomUp);
         if (vs)
             glDeleteShader(vs);
         // The march and the apply read the rig (LitConstants, binding 3).
@@ -426,7 +447,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     _surfAoHist = SurfAoHistory{};
     p.meterTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, rm::kMeterWidth, rm::kMeterHeight, false);
     int bw = hw, bh = hh;
-    for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+    for (int i = 0; i < PostTargets::kBloomMaxLevels; ++i)
     {
         p.bloomW[i] = bw = bw > 1 ? bw : 1;
         p.bloomH[i] = bh = bh > 1 ? bh : 1;
@@ -490,7 +511,7 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     }
     p.meterFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.meterTex);
     check();
-    for (int i = 0; i < PostTargets::kBloomLevels; ++i)
+    for (int i = 0; i < PostTargets::kBloomMaxLevels; ++i)
     {
         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
         check();
@@ -947,6 +968,14 @@ void EngineGL33::PostSurfaceAccumulate(const PostFrame& f)
 void EngineGL33::PostBloom(const PostFrame& f)
 {
     const PostTargets& p = _post;
+    // The experimental bloom chain (EngineGL33_XpPost.hpp), when its switch
+    // is set.
+    const float xpTail = Poseidon::gl33xp::PostXpSwitches().bloomTail;
+    if (xpTail > 0.0f && p.progXpBloomDown && p.progXpBloomUp)
+    {
+        PostXpBloomChain(f, xpTail);
+        return;
+    }
     glUseProgram(p.progBloomDown);
     SetInt(p.progBloomDown, "srcTex", 0);
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
@@ -974,6 +1003,45 @@ void EngineGL33::PostBloom(const PostFrame& f)
     {
         BindTex(0, p.bloomTex[i]);
         Set2(p.progBloomUp, "srcTexel", 1.0f / p.bloomW[i], 1.0f / p.bloomH[i]);
+        DrawTo(p.bloomFbo[i - 1], p.bloomW[i - 1], p.bloomH[i - 1]);
+    }
+    Poseidon::render::blend::Opaque();
+}
+
+void EngineGL33::PostXpBloomChain(const PostFrame& f, float tail)
+{
+    // POSEIDON_XP_BLOOM: the 13-tap downsample at every level (Karis average
+    // on the first), and two more levels whose glow is added onto level 4 at
+    // the switch's weight.
+    const PostTargets& p = _post;
+    const int levels = PostTargets::kBloomMaxLevels;
+    glUseProgram(p.progXpBloomDown);
+    SetInt(p.progXpBloomDown, "srcTex", 0);
+    for (int i = 0; i < levels; ++i)
+    {
+        const bool first = i == 0;
+        const GLuint src = first ? PostSceneTex(f) : p.bloomTex[i - 1];
+        const int sw = first ? f.w : p.bloomW[i - 1];
+        const int sh = first ? f.h : p.bloomH[i - 1];
+        BindTex(0, src);
+        Set2(p.progXpBloomDown, "srcTexel", 1.0f / sw, 1.0f / sh);
+        if (f.camera)
+            Set4(p.progXpBloomDown, "bloomParams", rm::kCameraBloomThreshold, rm::kCameraBloomKnee, first ? 1.0f : 0.0f,
+                 0.0f);
+        else
+            Set4(p.progXpBloomDown, "bloomParams", kBloomThreshold, kBloomKnee, first ? 1.0f : 0.0f, 0.0f);
+        Set4(p.progXpBloomDown, "camParams", f.camera ? 1.0f : 0.0f, f.exposure, 0.0f, 0.0f);
+        DrawTo(p.bloomFbo[i], p.bloomW[i], p.bloomH[i]);
+    }
+    glUseProgram(p.progXpBloomUp);
+    SetInt(p.progXpBloomUp, "srcTex", 0);
+    Poseidon::render::blend::Additive(); // (SRC_ALPHA, ONE) with alpha 1 = add
+    for (int i = levels - 1; i > 0; --i)
+    {
+        // The tail (levels 5 and 6) reaches level 4 at the switch's weight.
+        const float weight = i == PostTargets::kBloomLevels ? tail : 1.0f;
+        BindTex(0, p.bloomTex[i]);
+        Set4(p.progXpBloomUp, "upParams", 1.0f / p.bloomW[i], 1.0f / p.bloomH[i], weight, 0.0f);
         DrawTo(p.bloomFbo[i - 1], p.bloomW[i - 1], p.bloomH[i - 1]);
     }
     Poseidon::render::blend::Opaque();

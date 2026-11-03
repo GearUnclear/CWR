@@ -1139,14 +1139,17 @@ class EngineGL33 : public Engine
     struct PostTargets
     {
         static constexpr int kBloomLevels = 5;
+        // POSEIDON_XP_BLOOM (EngineGL33_XpPost.hpp): two more levels for the
+        // glow's tail, allocated always, drawn only with the switch.
+        static constexpr int kBloomMaxLevels = 7;
         int w = 0, h = 0;
         unsigned int colorTex = 0, colorFbo = 0;
         unsigned int depthTex = 0, depthFbo = 0;
         unsigned int aoTex[2] = {}, aoFbo[2] = {};
         unsigned int shaftTex = 0, shaftFbo = 0;
         unsigned int linDepthTex = 0, linDepthFbo = 0; // R32F half res: view depth in metres
-        unsigned int bloomTex[kBloomLevels] = {}, bloomFbo[kBloomLevels] = {};
-        int bloomW[kBloomLevels] = {}, bloomH[kBloomLevels] = {};
+        unsigned int bloomTex[kBloomMaxLevels] = {}, bloomFbo[kBloomMaxLevels] = {};
+        int bloomW[kBloomMaxLevels] = {}, bloomH[kBloomMaxLevels] = {};
         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
         unsigned int vao = 0;
         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
@@ -1180,6 +1183,9 @@ class EngineGL33 : public Engine
         // The photoreal camera's meter (EngineGL33_Camera.cpp): kMeterWidth x
         // kMeterHeight RGBA16F, read back through _camera's ring.
         unsigned int meterTex = 0, meterFbo = 0, progMeter = 0;
+        // The experimental switches' programs (EngineGL33_XpPost.hpp); a
+        // switch whose program failed stays off.
+        unsigned int progXpCas = 0, progXpBloomDown = 0, progXpBloomUp = 0;
         bool programsTried = false;
         // The post pass is off: its programs failed (until the next reset) or
         // its targets came back incomplete at failedW x failedH (tried again
@@ -1370,6 +1376,8 @@ class EngineGL33 : public Engine
     void PostSurfaceAccumulate(const PostFrame& f); // the surfaces' occlusion over TAA frames
     void PostAir(const PostFrame& f);               // EngineGL33_PostAir.cpp
     void PostBloom(const PostFrame& f);
+    // POSEIDON_XP_BLOOM (EngineGL33_XpPost.hpp).
+    void PostXpBloomChain(const PostFrame& f, float tail);
     void PostShafts(const PostFrame& f);
     void PostComposite(const PostFrame& f);
     void PostTemporal(const PostFrame& f);

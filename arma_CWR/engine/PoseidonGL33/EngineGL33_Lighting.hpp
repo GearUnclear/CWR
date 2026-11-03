@@ -168,6 +168,11 @@ enum class PostShader : int
     FogApply,
     FogRing, // the horizon ring: the sky's colour above the land in every azimuth
     FogGlow, // the night glow: the frame's light blurred, laid into the fog at night
+    // Experimental switches (EngineGL33_XpPost.hpp), off by default: never
+    // run unless their environment variable is set.
+    XpCas,       // POSEIDON_XP_CAS: the TAA sharpen, contrast-adaptive, brightness only
+    XpBloomDown, // POSEIDON_XP_BLOOM: 13-tap downsample, Karis average on the first level
+    XpBloomUp,   // POSEIDON_XP_BLOOM: the upsample with a weight (the glow's extra tail)
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.

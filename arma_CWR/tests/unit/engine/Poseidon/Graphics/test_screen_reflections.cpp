@@ -986,7 +986,8 @@ TEST_CASE("Reflection backend: the tags ride on the depth state, off is the stat
     // The air pass or the volumetric fog applies over that frame, the
     // bloom and the composite read the Air stage's output when it ran and that
     // frame otherwise (PostSceneTex), and the shafts read that frame.
-    CHECK(CountOf(post, "PostSceneTex(f)") == 2);
+    // (the experimental POSEIDON_XP_BLOOM chain reads it as the stock bloom does)
+    CHECK(CountOf(post, "PostSceneTex(f)") == 3);
     CHECK(CountOf(post, "BindTex(2, f.frameColor);") == 1);
     CHECK(CountOf(ReadTextFile(Gl33Dir() / "EngineGL33_PostAir.cpp"), "BindTex(0, f.frameColor);") == 1);
     CHECK(CountOf(post, "in.ssrTags = _ssrTagFrame == GetFrameCounter()") == 1);

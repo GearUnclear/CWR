@@ -27,6 +27,7 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/EngineGL33_PostPass.hpp>
+#include <PoseidonGL33/EngineGL33_XpPost.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -179,6 +180,18 @@ void EngineGL33::PostSharpen(const PostFrame& f)
         BindTex(0, p.taaInTex);
         const float strength = std::clamp(_lighting.sharpenStrength, 0.0f, 1.0f);
         Set4(p.progLumaSharpen, "sharpen", strength, static_cast<float>(f.w), static_cast<float>(f.h), 0.0f);
+        DrawTo(_ssaaFbo, f.w, f.h);
+        return;
+    }
+    // POSEIDON_XP_CAS (EngineGL33_XpPost.hpp): the contrast-adaptive sharpen
+    // in place of the stock one, at the same knob.
+    if (p.progXpCas && Poseidon::gl33xp::PostXpSwitches().cas)
+    {
+        glUseProgram(p.progXpCas);
+        SetInt(p.progXpCas, "srcTex", 0);
+        BindTex(0, p.histTex[_taa.historyIdx]);
+        Set4(p.progXpCas, "sharpen", std::clamp(_lighting.taaSharpen, 0.0f, 1.5f), static_cast<float>(f.w),
+             static_cast<float>(f.h), Poseidon::gl33xp::PostXpSwitches().casFar);
         DrawTo(_ssaaFbo, f.w, f.h);
         return;
     }

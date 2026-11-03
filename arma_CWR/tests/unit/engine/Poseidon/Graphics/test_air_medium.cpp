@@ -530,7 +530,8 @@ TEST_CASE("Air pass: off leaves every draw and the post pass as they were", "[re
     // the stage instead). The air pass applies over that frame.
     const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
     REQUIRE_FALSE(post.empty());
-    CHECK(CountOf(post, "first ? PostSceneTex(f) : p.bloomTex[i - 1]") == 1);
+    // (twice: the stock chain and the experimental POSEIDON_XP_BLOOM chain)
+    CHECK(CountOf(post, "first ? PostSceneTex(f) : p.bloomTex[i - 1]") == 2);
     CHECK(CountOf(post, "BindTex(0, PostSceneTex(f));") == 1);
     CHECK(CountOf(air, "BindTex(0, f.frameColor);") == 1);
     const std::string scene =
