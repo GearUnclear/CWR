@@ -418,6 +418,25 @@ class EngineGL33 : public Engine
     void CreateSamplerStates();
     void DestroySamplerStates();
     void ApplySamplerState();
+    // W1-1 TAA pre-biased twin sampler set: _samplerBiased mirrors
+    // _samplerObjects (filter, wrap, anisotropy; ConfigureSampler for both) and
+    // carries the TAA texture LOD bias, so a TAA frame's world passes swap sets
+    // instead of re-biasing samplers the GPU may still be reading
+    // (EngineGL33_State.cpp, EngineGL33_PostTemporal.cpp).
+    unsigned int _samplerBiased[8] = {};
+    float _samplerBiasedValue = 0.0f; // the LOD bias the twin set holds
+    float _samplerAniso = 1.0f;       // both sets' anisotropy (16x at most)
+    bool _samplerBiasOn = false;      // material sampler binds take the twin set
+    int _samplerSlot0 = 0;            // material sampler index on unit 0
+    // Every material sampler bind goes through this: the set of the moment.
+    unsigned int MaterialSampler(int i) const { return _samplerBiasOn ? _samplerBiased[i] : _samplerObjects[i]; }
+    void ConfigureSampler(unsigned int sampler, int bits, float aniso, float bias);
+    // Unit 0 to material sampler i (the restores after passes that unbind it).
+    void BindMaterialSampler0(int i);
+    // Swaps the material binds between the sets; rebinds units 0, 1 and the sea's.
+    void SetMaterialSamplerBias(bool on);
+    // InitDraw: the taaMipBias knob into the twin set, only when it changes.
+    void UpdateTaaBiasedSamplers();
 
     TexLoc _texLoc;
 
@@ -1196,8 +1215,8 @@ class EngineGL33 : public Engine
     // pass, then hands the jitter to the vertex shaders and the texture LOD
     // bias to the material samplers (zero and none outside a TAA frame).
     void ApplyTaaJitter();
-    // Writes `ndc` into vpScale.zw (and flushes) and `bias` into the material
-    // samplers, each only when it changes.
+    // Writes `ndc` into vpScale.zw (and flushes) when it changes, and binds the
+    // material samplers of `bias`: the twin set when non-zero, else the plain set.
     void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
     void BeginTranslucentObjects() override;
     // The photoreal camera (feature switch photoLight;

@@ -735,6 +735,7 @@ void EngineGL33::BeginPostFullscreen()
     glBindVertexArray(_post.vao);
     for (int unit : Poseidon::gl33lighting::kPostUnits)
         glBindSampler(static_cast<GLuint>(unit), 0);
+    _samplerSlot0 = -1; // no material sampler on unit 0 until EndPostFullscreen
 }
 
 void EngineGL33::PostLinearDepth(const PostFrame& f)
@@ -1069,7 +1070,7 @@ void EngineGL33::EndPostFullscreen()
         glBindTexture(GL_TEXTURE_2D, 0);
     }
     glActiveTexture(GL_TEXTURE0);
-    glBindSampler(0, _samplerObjects[0]);
+    BindMaterialSampler0(0);
     glBindVertexArray(0);
     glUseProgram(0);
     BindFrameRenderTarget();

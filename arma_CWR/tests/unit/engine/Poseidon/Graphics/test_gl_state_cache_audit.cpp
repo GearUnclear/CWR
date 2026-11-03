@@ -65,7 +65,10 @@ constexpr AllowedCallsite kGlClearAllowed[] = {
 };
 
 constexpr AllowedCallsite kGlBindSamplerSlot1Allowed[] = {
-    {"EngineGL33_State.cpp", "CreateSamplerStates init binding (slot 1 = default)", 1},
+    // CreateSamplerStates' init binding (slot 1 = default) and the TAA twin
+    // set swap (SetMaterialSamplerBias: the default sampler of the set of the
+    // moment, W1-1).
+    {"EngineGL33_State.cpp", "CreateSamplerStates init binding (slot 1 = default) + SetMaterialSamplerBias", 2},
 };
 
 int CountOccurrences(const std::string& haystack, const std::string& needle)

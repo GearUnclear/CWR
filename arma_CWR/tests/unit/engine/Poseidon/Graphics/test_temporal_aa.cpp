@@ -418,14 +418,80 @@ TEST_CASE("TAA backend: the jitter and the texture LOD bias never reach the HUD"
     REQUIRE(jitter != std::string::npos);
     CHECK(gates < jitter);
 
-    // The LOD bias has one writer, which also takes it off.
+    // W1-1: the LOD bias lives on a twin sampler set. One writer,
+    // ConfigureSampler, which makes both sets alike (filter, wrap, anisotropy)
+    // and biases only when asked; nothing re-biases a sampler per pass.
     int biasWriters = 0;
     for (const auto& entry : std::filesystem::directory_iterator(Gl33Dir()))
         if (entry.path().extension() == ".cpp")
             biasWriters += CountOf(ReadTextFile(entry.path()), "GL_TEXTURE_LOD_BIAS");
     CHECK(biasWriters == 1);
-    CHECK(FunctionBody(temporal, "void EngineGL33::SetTaaJitterState(").find("GL_TEXTURE_LOD_BIAS") !=
-          std::string::npos);
+    const std::string state = ReadTextFile(Gl33Dir() / "EngineGL33_State.cpp");
+    REQUIRE_FALSE(state.empty());
+    const std::string configure = FunctionBody(state, "void EngineGL33::ConfigureSampler(");
+    REQUIRE_FALSE(configure.empty());
+    CHECK(configure.find("GL_TEXTURE_LOD_BIAS") != std::string::npos);
+    CHECK(configure.find("if (bias != 0.0f)") != std::string::npos);
+    const std::string setJitter = FunctionBody(temporal, "void EngineGL33::SetTaaJitterState(");
+    REQUIRE_FALSE(setJitter.empty());
+    CHECK(setJitter.find("glSamplerParameter") == std::string::npos);
+    CHECK(setJitter.find("SetMaterialSamplerBias(bias != 0.0f);") != std::string::npos);
+
+    // Both sets come from the same ConfigureSampler calls with the same
+    // anisotropy, unbiased at creation, and the Reset path binds the plain set.
+    const std::string create = FunctionBody(state, "void EngineGL33::CreateSamplerStates()");
+    REQUIRE_FALSE(create.empty());
+    CHECK(create.find("ConfigureSampler(_samplerObjects[i], i, _samplerAniso, 0.0f);") != std::string::npos);
+    CHECK(create.find("ConfigureSampler(_samplerBiased[i], i, _samplerAniso, 0.0f);") != std::string::npos);
+    CHECK(create.find("_samplerBiasOn = false;") != std::string::npos);
+    CHECK(create.find("glBindSampler(0, _samplerObjects[0]);") != std::string::npos);
+    CHECK(create.find("glBindSampler(1, _samplerObjects[0]);") != std::string::npos);
+
+    // The twin set takes the knob between frames only: in InitDraw, after the
+    // bias is off, and only when the knob moves to a new non-zero value.
+    const std::string init = FunctionBody(life, "void EngineGL33::InitDraw(");
+    const size_t off = init.find("SetTaaJitterState({}, 0.0f);");
+    const size_t update = init.find("UpdateTaaBiasedSamplers();");
+    REQUIRE(off != std::string::npos);
+    REQUIRE(update != std::string::npos);
+    CHECK(off < update);
+    int updateCallers = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(Gl33Dir()))
+        if (entry.path().extension() == ".cpp")
+            updateCallers += CountOf(ReadTextFile(entry.path()), "UpdateTaaBiasedSamplers();");
+    CHECK(updateCallers == 1);
+    const std::string biased = FunctionBody(state, "void EngineGL33::UpdateTaaBiasedSamplers()");
+    REQUIRE_FALSE(biased.empty());
+    CHECK(biased.find("bias == 0.0f || bias == _samplerBiasedValue") != std::string::npos);
+    CHECK(biased.find("ConfigureSampler(_samplerBiased[i], i, _samplerAniso, bias);") != std::string::npos);
+    CHECK(biased.find("_samplerObjects") == std::string::npos);
+
+    // Every material sampler bind goes through MaterialSampler: no file but
+    // EngineGL33_State.cpp names either set's samplers, and the restores after
+    // passes that unbind unit 0 (combat mask, post pass, gamma) and the sea's
+    // next-frame unit take the set of the moment.
+    for (const auto& entry : std::filesystem::directory_iterator(Gl33Dir()))
+    {
+        if (entry.path().extension() != ".cpp" || entry.path().filename() == "EngineGL33_State.cpp")
+            continue;
+        const std::string text = ReadTextFile(entry.path());
+        CAPTURE(entry.path().filename().string());
+        CHECK(text.find("_samplerObjects[") == std::string::npos);
+        CHECK(text.find("_samplerBiased[") == std::string::npos);
+    }
+    CHECK(CountOf(ReadTextFile(Gl33Dir() / "EngineGL33_Sea.cpp"), "MaterialSampler(0)") == 1);
+    CHECK(CountOf(ReadTextFile(Gl33Dir() / "EngineGL33_PostCombat.cpp"), "BindMaterialSampler0(0);") == 1);
+    CHECK(CountOf(post, "BindMaterialSampler0(0);") == 1);
+    CHECK(CountOf(shaders, "BindMaterialSampler0(0);") == 1);
+    const std::string apply = FunctionBody(state, "void EngineGL33::ApplySamplerState()");
+    CHECK(apply.find("Poseidon::render::sampler::BindSlot0(MaterialSampler(bits));") != std::string::npos);
+    // A set swap rebinds what holds a material sampler: unit 0 (its index),
+    // unit 1 and the open sea's unit.
+    const std::string swap = FunctionBody(state, "void EngineGL33::SetMaterialSamplerBias(bool on)");
+    REQUIRE_FALSE(swap.empty());
+    CHECK(swap.find("BindSlot0(MaterialSampler(_samplerSlot0));") != std::string::npos);
+    CHECK(swap.find("glBindSampler(1, MaterialSampler(0));") != std::string::npos);
+    CHECK(swap.find("if (_seaOpen)") != std::string::npos);
 }
 
 TEST_CASE("TAA backend: the opaque world is copied between the opaque and the translucent objects",

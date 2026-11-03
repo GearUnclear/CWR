@@ -574,6 +574,7 @@ void EngineGL33::UpdateCombatMask()
     // sampler belongs to the pipeline, restored below) and the mask's unit.
     glBindSampler(0, 0);
     glBindSampler(kCombatMaskUnit, 0);
+    _samplerSlot0 = -1;
 
     const fl::CombatMaskCamera& dc = c.depthCamera;
     // The trace into maskTex[0], from the linear depth on unit 0.
@@ -607,7 +608,7 @@ void EngineGL33::UpdateCombatMask()
     DrawTo(c.maskFbo[0], hw, hh);
 
     GL33Bind::Tex2D(0, 0);
-    glBindSampler(0, _samplerObjects[0]);
+    BindMaterialSampler0(0);
     glUseProgram(0);
     BindFrameRenderTarget();
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);

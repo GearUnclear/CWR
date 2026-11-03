@@ -55,7 +55,7 @@ void EngineGL33::BeginSea(Texture* otherFrame, float otherWeight)
     GL33Bind::Tex2D(kSeaNextFrameUnit, handle ? handle : _post.whiteTex);
     // The faces' frame samples through unit 0's sampler object (linear, wrap,
     // anisotropic, the TAA texture LOD bias): the other frame gets the same.
-    glBindSampler(kSeaNextFrameUnit, _samplerObjects[0]);
+    glBindSampler(kSeaNextFrameUnit, MaterialSampler(0));
     GL33Bind::ActiveUnit(0);
 
     LightSun* sun = GScene->MainLight();

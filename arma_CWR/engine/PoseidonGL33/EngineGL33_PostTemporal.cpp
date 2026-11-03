@@ -9,8 +9,9 @@
 //     first world pass and hands the offset to the remastered vertex shaders
 //     through vpScale.zw (UploadVSScreenConstants keeps it for the world's
 //     screen-space draws), with a negative texture LOD bias on the material
-//     samplers; EndWorldScene takes both away before the HUD, and so does the
-//     next frame's InitDraw;
+//     samplers (the twin sampler set, which InitDraw biases only when the
+//     taaMipBias knob changes); EndWorldScene takes both away before the HUD,
+//     and so does the next frame's InitDraw;
 //   - BeginTranslucentObjects, called by the scene between the opaque world
 //     and the translucent objects, copies the frame target for the particle
 //     mask;
@@ -88,14 +89,12 @@ void EngineGL33::SetTaaJitterState(rm::TaaOffset ndc, float bias)
         _taa.ndcApplied = ndc;
         UploadVSJitter(ndc.x, ndc.y);
     }
-    if (bias != _taa.mipBiasApplied && _samplerObjects[0])
-    {
-        // The material samplers (units 0 and 1), shared with the HUD: the
-        // bias is set for the world's passes and taken off after them.
-        for (unsigned int s : _samplerObjects)
-            glSamplerParameterf(s, GL_TEXTURE_LOD_BIAS, bias);
-        _taa.mipBiasApplied = bias;
-    }
+    // The material samplers (units 0 and 1), shared with the HUD: the world's
+    // passes take the twin set, which holds the bias (UpdateTaaBiasedSamplers,
+    // between frames), and hand the plain set back after them. No sampler is
+    // written here.
+    SetMaterialSamplerBias(bias != 0.0f);
+    _taa.mipBiasApplied = bias;
 }
 
 void EngineGL33::BeginTranslucentObjects()

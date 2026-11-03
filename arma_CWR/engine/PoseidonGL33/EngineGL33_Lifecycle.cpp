@@ -199,6 +199,7 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     // not hand them to the next frame's menus).
     _taa.frameOn = false;
     SetTaaJitterState({}, 0.0f);
+    UpdateTaaBiasedSamplers();
 
     TLMaterial invalidMat;
     invalidMat.diffuse = Color(-1, -1, -1, -1);

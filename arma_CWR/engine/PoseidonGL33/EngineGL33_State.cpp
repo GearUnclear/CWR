@@ -1,4 +1,5 @@
 #include <PoseidonGL33/EngineGL33.hpp>
+#include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Graphics/Core/GLBlendState.hpp>
@@ -12,37 +13,52 @@
 
 #include <glad/gl.h>
 
-void EngineGL33::CreateSamplerStates()
+void EngineGL33::ConfigureSampler(unsigned int sampler, int bits, float aniso, float bias)
 {
-    glGenSamplers(8, _samplerObjects);
     // Sampler objects override the per-texture filter state, so they must match
     // the trilinear + anisotropic setup from TextureGL33_Init — mip-nearest with
     // no anisotropy here made distant oblique textures (chain-link fences, fence
     // tops) shimmer with bright pixel highlights as mip selection flipped.
+    const bool point = (bits & 4) != 0;
+    const bool clampU = (bits & 1) != 0;
+    const bool clampV = (bits & 2) != 0;
+
+    GLenum minFilter = point ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
+    GLenum magFilter = point ? GL_NEAREST : GL_LINEAR;
+
+    glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, minFilter);
+    glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, magFilter);
+    glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, clampU ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, clampV ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    if (!point && aniso > 1.0f)
+    {
+        glSamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+    }
+    // The TAA texture LOD bias, only ever on the twin set (a new sampler's
+    // bias is 0): UpdateTaaBiasedSamplers between frames.
+    if (bias != 0.0f)
+        glSamplerParameterf(sampler, GL_TEXTURE_LOD_BIAS, bias);
+}
+
+void EngineGL33::CreateSamplerStates()
+{
+    glGenSamplers(8, _samplerObjects);
+    glGenSamplers(8, _samplerBiased);
     float maxAniso = 1.0f;
     glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
-    const float aniso = maxAniso < 16.0f ? maxAniso : 16.0f;
+    _samplerAniso = maxAniso < 16.0f ? maxAniso : 16.0f;
+    // The twin set starts unbiased; the next InitDraw gives it the knob's bias.
     for (int i = 0; i < 8; i++)
     {
-        bool point = (i & 4) != 0;
-        bool clampU = (i & 1) != 0;
-        bool clampV = (i & 2) != 0;
-
-        GLenum minFilter = point ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
-        GLenum magFilter = point ? GL_NEAREST : GL_LINEAR;
-
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_MIN_FILTER, minFilter);
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_MAG_FILTER, magFilter);
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_WRAP_S, clampU ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_WRAP_T, clampV ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-        if (!point && aniso > 1.0f)
-        {
-            glSamplerParameterf(_samplerObjects[i], GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
-        }
+        ConfigureSampler(_samplerObjects[i], i, _samplerAniso, 0.0f);
+        ConfigureSampler(_samplerBiased[i], i, _samplerAniso, 0.0f);
     }
+    _samplerBiasedValue = 0.0f;
+    _samplerBiasOn = false;
     // Bind default sampler (linear, wrap) to both texture units
     glBindSampler(0, _samplerObjects[0]);
     glBindSampler(1, _samplerObjects[0]);
+    _samplerSlot0 = 0;
     _taa.mipBiasApplied = 0.0f; // new samplers carry no TAA texture LOD bias
 }
 
@@ -50,6 +66,45 @@ void EngineGL33::DestroySamplerStates()
 {
     glDeleteSamplers(8, _samplerObjects);
     memset(_samplerObjects, 0, sizeof(_samplerObjects));
+    glDeleteSamplers(8, _samplerBiased);
+    memset(_samplerBiased, 0, sizeof(_samplerBiased));
+    _samplerBiasedValue = 0.0f;
+    _samplerBiasOn = false;
+}
+
+void EngineGL33::UpdateTaaBiasedSamplers()
+{
+    // Between frames only (InitDraw, after the bias is off): a sampler the GPU
+    // may still read is written only when the knob moves to a new non-zero
+    // value, never per frame or mid-frame. A knob of 0 binds the plain set.
+    const float bias = _lighting.taaMipBias;
+    if (!_samplerBiased[0] || bias == 0.0f || bias == _samplerBiasedValue)
+        return;
+    for (int i = 0; i < 8; i++)
+        ConfigureSampler(_samplerBiased[i], i, _samplerAniso, bias);
+    _samplerBiasedValue = bias;
+}
+
+void EngineGL33::SetMaterialSamplerBias(bool on)
+{
+    // The world's passes of a TAA frame draw through the twin set, everything
+    // else through the plain one. Swapping sets rebinds what holds a material
+    // sampler now: unit 0 (its sampler index kept), unit 1 (the default
+    // sampler) and the sea's next-frame unit while the sea is open.
+    if (on == _samplerBiasOn || !_samplerObjects[0])
+        return;
+    _samplerBiasOn = on;
+    if (_samplerSlot0 >= 0)
+        Poseidon::render::sampler::BindSlot0(MaterialSampler(_samplerSlot0));
+    glBindSampler(1, MaterialSampler(0));
+    if (_seaOpen)
+        glBindSampler(Poseidon::gl33lighting::kSeaNextFrameUnit, MaterialSampler(0));
+}
+
+void EngineGL33::BindMaterialSampler0(int i)
+{
+    _samplerSlot0 = i;
+    Poseidon::render::sampler::BindSlot0(MaterialSampler(i));
 }
 
 void EngineGL33::ApplySamplerState()
@@ -60,7 +115,8 @@ void EngineGL33::ApplySamplerState()
     // the default linear-wrap sampler set during
     // CreateSamplerStates().  B-022's "leftover slot-1 sampler"
     // class is unrepresentable here: there is no `BindSlot1` helper.
-    Poseidon::render::sampler::BindSlot0(_samplerObjects[bits]);
+    _samplerSlot0 = bits;
+    Poseidon::render::sampler::BindSlot0(MaterialSampler(bits));
 }
 
 void EngineGL33::ApplyBlendMode(BlendMode mode)

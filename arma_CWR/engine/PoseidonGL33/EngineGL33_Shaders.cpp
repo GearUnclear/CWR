@@ -2030,7 +2030,7 @@ void EngineGL33::ApplyGammaPass()
 
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindSampler(0, _samplerObjects[0]);
+    BindMaterialSampler0(0);
     glUseProgram(0);
     // The shader selector short-circuits on its cached selection, so it must be
     // told the bound program is gone or the next frame's sky draws through it.
