@@ -142,9 +142,22 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
     SwitchRenderMode(RMTris);
     BeginScreenPass();
 
+    // W4-1: the decal's layer in its texture array (EngineGL33_DecalBatch.cpp)
+    // rides in the second texture coordinate, which nothing else reads here;
+    // a decal without one keeps its own draw.
+    const DecalLayerSlot slot = PrepareDecalLayer(reinterpret_cast<TextureGL33*>(mip._texture));
+    for (i = 0; i < 4; i++)
+    {
+        v[i].t1.u = slot.Valid() ? static_cast<float>(slot.layer) : 0.0f;
+        v[i].t1.v = 0.0f;
+    }
+
     AddVertices(v, 4);
 
-    QueuePrepareTriangle(mip, specFlags);
+    if (slot.Valid())
+        QueuePrepareDecalBatch(mip, specFlags, slot);
+    else
+        QueuePrepareTriangle(mip, specFlags);
     static const VertexIndex indices[4] = {0, 1, 2, 3};
     QueueFan(indices, 4);
 }

@@ -1673,15 +1673,18 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
 TEST_CASE("Remaster texture units come from one table that binds every sampler", "[Graphics][Shaders][remaster]")
 {
     // The table's units are distinct, clear of the material units 0 and 1 and
-    // the upload unit 7, and within the 16 units GL 3.3 guarantees.
+    // the upload unit 7, and within the 16 units GL 3.3 guarantees, except the
+    // decal batch's array (W4-1) on unit 16: 0 to 15 are all taken, and GL 3.3
+    // guarantees 48 combined units (the sampler count per program stays 16).
     std::set<int> units;
     std::set<std::string> names;
+    CHECK(gl::kDecalLayerUnit == 16);
     for (const auto& s : gl::kLitSamplers)
     {
         CAPTURE(s.name, s.unit);
         CHECK(s.unit >= 2);
         CHECK(s.unit != 7);
-        CHECK(s.unit <= 15);
+        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers")));
         CHECK(units.insert(s.unit).second);
         CHECK(names.insert(s.name).second);
     }

@@ -180,6 +180,7 @@ void EngineGL33::ResetSurfaceClassPrograms()
 {
     s_surfClassPrograms.clear();
     _surfBoundProgram = 0;
+    ResetDecalBatchPrograms(); // the decal batch's uniform cache (W4-1), keyed the same way
 }
 
 void EngineGL33::ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d)

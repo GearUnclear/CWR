@@ -1126,9 +1126,12 @@ void EngineGL33::ShutdownGL()
 }
 
 // TextureDestroyed is mandated by the Engine interface (callers in the
-// texture-destruction path notify the engine).  GL33 has no per-texture
-// teardown work to do — the GL handle is released by TextureGL33 itself.
-void EngineGL33::TextureDestroyed(Texture*) {}
+// texture-destruction path notify the engine).  The GL handle is released by
+// TextureGL33 itself; the decal batch (W4-1) forgets the texture's layer.
+void EngineGL33::TextureDestroyed(Texture* tex)
+{
+    _decalLayers.Forget(reinterpret_cast<std::uintptr_t>(static_cast<TextureGL33*>(tex)));
+}
 
 namespace Poseidon
 {

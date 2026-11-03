@@ -219,6 +219,13 @@ constexpr int kCombatMaskUnit = 14;
 // data was allocated (the list keeps its lights in a uniform block,
 // kLightListBinding, which the fragments of a tile read faster).
 constexpr int kGroundFieldUnit = 12;
+// The decal batch's texture array (W4-1, EngineGL33_DecalBatch.cpp): every
+// decal texture of one surface shape, a layer each, read by the object
+// program while a batched decal draw sets decalLayerMode. Units 0 to 15 are
+// all taken; GL 3.3 guarantees 48 combined units, so 16 is a valid unit
+// everywhere, and the program's sampler count stays within the 16 a fragment
+// stage is guaranteed. Bound only around a batched draw.
+constexpr int kDecalLayerUnit = 16;
 // The volumetric fog's floor map (the lowest ground nearby) shares
 // the ground field's unit: only the fog's injection pass samples it, binds it
 // itself (no world program declares it) and unbinds it at its end; the world
@@ -312,6 +319,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"combatMask", kCombatMaskUnit},         // the combat shadow mask (combat light)
     {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surfaces)
     {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
+    {"decalLayers", kDecalLayerUnit},        // the decal batch's texture array (W4-1)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test

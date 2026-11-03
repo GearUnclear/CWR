@@ -85,6 +85,8 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         if (!_vaoScreen || !_vbo || !_ibo)
         {
             triq._triangleQueue.Clear();
+            if (IsDecalBatchQueue(queue, index))
+                _decalBatch.runs.Clear();
             return;
         }
 
@@ -129,8 +131,18 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         FlushVSConstants();
         FlushPSConstants();
 
-        glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
-        ++Poseidon::gPerfDrawCalls;
+        // A batch of decals (W4-1) is one draw over its texture array, or its
+        // runs of one texture where the program cannot read the array.
+        const bool decalBatch = IsDecalBatchQueue(queue, index);
+        if (decalBatch)
+        {
+            DrawDecalBatch(triq, n, indexOffset);
+        }
+        else
+        {
+            glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+            ++Poseidon::gPerfDrawCalls;
+        }
 
         // Record DrawItem, only on frames the frame validator observes (S3-28)
         if (Poseidon::render::frame::ObserverRecordsThisFrame())
@@ -143,6 +155,8 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         }
 
         triq._triangleQueue.Clear();
+        if (decalBatch)
+            _decalBatch.runs.Clear();
     }
 }
 
@@ -162,6 +176,9 @@ int EngineGL33::AllocateQueue(QueueGL33& queue, TextureGL33* tex, int level, int
         minI = MaxTriQueues - 1;
         maxI = MaxTriQueues;
         FlushAllQueues(queue, MaxTriQueues - 1);
+        // An open decal batch (W4-1) takes only batched decals.
+        if (IsDecalBatchQueue(queue, MaxTriQueues - 1))
+            FlushAndFreeQueue(queue, MaxTriQueues - 1);
     }
 
     int index = queue.Allocate(tex, level, spec, minI, maxI, queue._actTri);
@@ -193,6 +210,11 @@ int EngineGL33::AllocateQueue(QueueGL33& queue, TextureGL33* tex, int level, int
 void EngineGL33::FreeQueue(QueueGL33& queue, int index)
 {
     PoseidonAssert(!queue._tri[index]._triangleQueue.Size());
+    if (IsDecalBatchQueue(queue, index))
+    {
+        _decalBatch.active = false;
+        _decalBatch.runs.Clear();
+    }
     queue.Free(index);
 }
 

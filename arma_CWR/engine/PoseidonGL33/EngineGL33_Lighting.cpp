@@ -167,6 +167,11 @@ void EngineGL33::InitLightingResources()
     // as raw depth (the soft shadows' blocker search).
     GL33Bind::ActiveUnit(kShadowRawUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+    // And for the decal batch's unit 16 (W4-1), which the object program
+    // declares but reads only in a batched decal draw (that draw binds its
+    // array there and leaves it, complete, for the next).
+    GL33Bind::ActiveUnit(kDecalLayerUnit);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyHorizonTex);
     GL33Bind::ActiveUnit(0);
     // The sky table's unit 8, the clouds' unit 9 and the canopy's units 10 and
     // 15 get their stand-ins the same way.
@@ -1218,6 +1223,11 @@ void EngineGL33::SetLitSkyMode(int mode)
     // stays true.
     s_lit[LitConst::SkyFwd * 4 + 3] = static_cast<float>(mode);
     FlushLitConstants();
+}
+
+int EngineGL33::LitSkyMode() const
+{
+    return static_cast<int>(s_lit[LitConst::SkyFwd * 4 + 3]);
 }
 
 void EngineGL33::SetLitTerrainDraw(bool land)

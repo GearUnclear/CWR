@@ -439,6 +439,11 @@ uniform sampler2D skyDensity;              // unit 9: cloud density of the weath
 uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
 uniform sampler2D canopyHeight;            // unit 10: the canopy heightfield, r top, g density (Canopy.hpp)
 uniform sampler2D groundField;             // unit 12: the land's own colour per terrain vertex, a = built (wet weather)
+// The decal batch (W4-1, EngineGL33_DecalBatch.cpp): one draw of consecutive
+// decals reads each decal's own texture from its layer of this array (layer
+// in vUV1.x) while decalLayerMode is 1; every other draw leaves it 0.
+uniform sampler2DArray decalLayers;        // unit 16
+uniform float decalLayerMode;
 // The surfaces' per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
 // sets it on the bound program): x SurfaceClass, y DrawKind, z 1 = a blending
 // texture (glass, a canvas window, a sign).
@@ -1277,7 +1282,7 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
 
 static const char s_psNormalRemasterMain[] = R"(
 void main() {
-    vec4 t0 = texture(tex0, vUV0);
+    vec4 t0 = decalLayerMode > 0.5 ? texture(decalLayers, vec3(vUV0, vUV1.x)) : texture(tex0, vUV0);
     vec4 r0;
     float ambientShare = 0.0;
     if (vLitMode > 1.5) {

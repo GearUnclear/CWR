@@ -23,6 +23,7 @@ class TextBankGL33;
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/DecalBatchRules.hpp>
 #include <PoseidonGL33/SDLEventWindow.hpp>
 
 enum PixelShaderSpecular
@@ -1728,6 +1729,43 @@ class EngineGL33 : public Engine
     int _instPending = 0;
     GfxMatrix _instArray[256];
     void QueuePrepareTriangle(const Poseidon::MipInfo& absMip, int specFlags);
+
+    // W4-1 batched decals (EngineGL33_DecalBatch.cpp): consecutive decals of
+    // one spec draw as one draw, each reading its own texture from its layer
+    // of a texture array (the layer rides in the quad's second texture
+    // coordinate). POSEIDON_DECAL_BATCH=0 at start keeps one draw per texture.
+    struct DecalLayerSlot
+    {
+        int array = -1;
+        int layer = -1;
+        bool Valid() const { return array >= 0 && layer >= 0; }
+    };
+    struct DecalBatchState
+    {
+        bool active = false; // the alpha queue holds a batch
+        Poseidon::render::decalbatch::BatchKey key;
+        Poseidon::render::decalbatch::RunList runs;
+    };
+    DecalBatchState _decalBatch;
+    Poseidon::render::decalbatch::LayerTable _decalLayers;
+    std::vector<unsigned int> _decalArrayTex; // GL name per array of _decalLayers
+    std::vector<int> _decalArrayCap;          // its storage, in layers
+    std::vector<int> _decalModeLoc;           // per program GL name: decalLayerMode (-2 not looked up)
+    int _decalBatchGate = -1;                 // -1 not decided yet, 0 off, 1 on
+    bool DecalBatchOn();
+    DecalLayerSlot PrepareDecalLayer(TextureGL33* tex);
+    void QueuePrepareDecalBatch(const Poseidon::MipInfo& mip, int specFlags, const DecalLayerSlot& slot);
+    bool IsDecalBatchQueue(const QueueGL33& queue, int index) const
+    {
+        return _decalBatch.active && &queue == &_queueNo && index == MaxTriQueues - 1;
+    }
+    void DrawDecalBatch(const TriQueue& triq, int n, int indexOffset);
+    int DecalStateClass(TextureGL33* tex, int specFlags);
+    bool CopyDecalLayer(int array, int layer, const TextureGL33* tex);
+    bool EnsureDecalArray(int array, int capacity, int growFrom);
+    void DestroyDecalArrays();
+    void ResetDecalBatchPrograms() { _decalModeLoc.clear(); }
+    int LitSkyMode() const; // litSkyFwd.w: the RemasterSky of the draws that follow, 0 = the world's
 
     void PrepareTriangle(const Poseidon::MipInfo& absMip, int specFlags) override;
     void PrepareTriangleTL(const Poseidon::MipInfo& mip, const Poseidon::render::LegacySpec& spec) override;

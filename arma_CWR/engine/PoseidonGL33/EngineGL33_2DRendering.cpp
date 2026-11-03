@@ -78,6 +78,8 @@ void EngineGL33::DestroyVB()
         _vaoMesh = 0;
     }
     _lastQueueSource = nullptr;
+    // The decal texture arrays (W4-1) go with the buffers they draw from.
+    DestroyDecalArrays();
 }
 
 void EngineGL33::CreateVBTL() {}
