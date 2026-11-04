@@ -244,6 +244,8 @@ TEST_CASE("Surface classes: logged stock textures keep their recorded classes", 
         {"data\\blok_a_strecha.pac", K::Static, SurfaceClass::Roof},
         {"data\\dum_05_strecha_01.pac", K::Static, SurfaceClass::Roof},
         {"data\\kmen_borovice.pac", K::Static, SurfaceClass::Wood},
+        {"merged\\00011&str_fikovnik.paa", K::Static, SurfaceClass::Masonry}, // "kovn" in fikovnik
+        {"data\\kovnavez256256.pac", K::Static, SurfaceClass::Metal},
         {"data\\maskovaci_sit_new.paa", K::Static, SurfaceClass::Fabric},
         {"data\\stena_sklocihly.pac", K::Static, SurfaceClass::Glass},
         {"baracken\\glass.paa", K::Static, SurfaceClass::Glass},
