@@ -211,7 +211,9 @@ SurfaceTable DefaultSurfaceTable()
         // Static objects and draws without an object (roads, decals).
         Rule("road", SurfaceClass::Road, kStaticKinds, kRoad),
         Rule("roof", SurfaceClass::Roof, kStaticKinds, {"strech", "roof"}, {"plech"}),
-        Rule("staticMetal", SurfaceClass::Metal, kStaticKinds, kMetal),
+        // Not the fig tree (merged\00011&str_fikovnik: fi"kovn"ik), whose crown went
+        // to bare metal and mirrored the sky.
+        Rule("staticMetal", SurfaceClass::Metal, kStaticKinds, kMetal, {"fikovn"}),
         Rule("staticWood", SurfaceClass::Wood, kStaticKinds, kWood),
         Rule("staticFabric", SurfaceClass::Fabric, kStaticKinds, kFabric),
         Rule("staticLens", SurfaceClass::Lens, kStaticKinds, kLens),

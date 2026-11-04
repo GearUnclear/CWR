@@ -5,7 +5,8 @@ motion.plan.json. Both sides of a job run the same files.
 
     python -I gen_motion.py --out <dir> [--clips c1,c2] [--modes remastered,classic]
                             [--has-reset] [--has-seed] [--has-deterministic]
-                            [--fixed-settle N [--settle-wait-ms MS]] [--list]
+                            [--fixed-settle N [--settle-wait-ms MS]]
+                            [--timing-pass off|after|before] [--list]
 
 Recipe per clip and mode (3.3's determinism recipe, adapted to a moving camera): stage the
 view (capgen.begin: camera, date, weather, view distance, props, the sim clock pinned per clip,
@@ -23,6 +24,17 @@ sim clock (capPin re-pins it), as P0-6's det1/det2 shots do.
 too, so the capture hold covers every clip's staging and settle, and capMode settles for exactly
 N frames (gatelib.mode_lines) instead of until the draw count is steady: each clip starts at the
 same simulated frame in both builds whatever their draw counts.
+
+[--timing-pass after|before] (OVERLAY-1, needs triPerfRing, triGpuRing and triRecordState): after
+(or before) each recorded clip, the same clip once more WITHOUT recording, for the owner clip's
+frame-time graphs (the recorded pass's frame times are the recorder's): the same re-pin, refresh,
+det, reset and seed lines, then ONE statement that switches GPU timing off and on, starts the same
+triCamPath and runs the clip's frames plus TIMING_TAIL with triSimFrames in chunks of TIMING_CHUNK,
+each chunk ending with triRecordState (pathT) and triPerfRing / triGpuRing [n, "tim_<label>_<k>"]
+(event=timing lines; one statement, so no main-loop frame runs between chunks, held or not); then
+GPU timing off and a re-pin. frametime.py extract aligns the rings with the video frames by path
+step. off (the default) writes exactly the files it wrote before OVERLAY-1. "after" leaves every
+recording as it was without the pass (each clip still starts from its own pin).
 
 Labels: "remastered" is <clip>__today, any other mode <clip>__<mode> (classic: the
 "Classic lighting on today's engine" row of the owner's three-way clip; never call it
@@ -62,6 +74,10 @@ CLIPS = {
     "town_rain_smoke_pan": dict(view="town_night_rain", keys=[(0, 0, 0, 0, 0, 0, 0), (9.5, 2.0, 0, 0, 12, 0, 1)], hold=0.5),
 }
 DEFAULT_CLIPS = ["valley_foliage_pan"]
+# OVERLAY-1 timing pass: ring reads every TIMING_CHUNK frames (both rings hold 256), and TIMING_TAIL
+# frames past the clip so the GPU ring (read back kGpuFrames = 4 frames late) reaches its last frame
+TIMING_CHUNK = 240
+TIMING_TAIL = 8
 # the burning-vehicle refresh of golden_views.COMBAT (gen_golden.LIB): written into a world file only
 # when one of its clips' views calls it
 LIB_BURN = ("capBurn = { if (not (isNull capFire)) then { capFire inflame true }; "
@@ -90,24 +106,52 @@ def label_of(clip, mode):
     return f"{clip}__{'today' if mode == 'remastered' else mode.replace(',', '_').replace('=', '')}"
 
 
+def timing_lines(c, lab):
+    """The unrecorded timing pass of one clip (see the docstring): one statement."""
+    n = clip_frames(c)
+    total = n + TIMING_TAIL
+    body = ['capTimGpu = triGpuTimes false', 'capTimGpu = triGpuTimes true', f'capPathRes = triCamPath {path_expr(c)}',
+            f'format ["view=%1;event=timing_start;clip={lab};frames={n};tail={TIMING_TAIL};chunk={TIMING_CHUNK};'
+            f'gpuon=%2;pathres=%3", capView, capTimGpu, capPathRes] call capLog']
+    k, done = 0, 0
+    while done < total:
+        m = min(TIMING_CHUNK, total - done)
+        tag = f"tim_{lab}_{k}"
+        body += [f'triSimFrames {m}', 'capTimSt = triRecordState', f'capRing = triPerfRing [{m}, "{tag}"]',
+                 f'capGRing = triGpuRing [{m}, "{tag}"]',
+                 f'format ["view=%1;event=timing;clip={lab};chunk={k};n={m};pring=%2;gring=%3;state=%4", '
+                 'capView, capRing, capGRing, capTimSt] call capLog']
+        done += m
+        k += 1
+    body += ['capPathRes = triCamPath []', 'capTimGpu = triGpuTimes false',
+             f'format ["view=%1;event=timing_done;clip={lab};frames={n};run={total};chunks={k}", capView] call capLog']
+    return [f"// timing pass {lab}: {total} frames, not recorded", "call { " + "; ".join(body) + " }"]
+
+
 def clip_block(name, c, v, mode, o):
     lab = label_of(name, mode)
     n = clip_frames(c)
     out = [f"\n// ---- {lab}: {n} frames"] + gatelib.mode_lines(mode, o.fixed_settle, o.settle_wait_ms) + ["triSimFrames 60", "[] call capPin"]
+    prep = []
     if v.get("refresh"):
-        out.append(v["refresh"])
+        prep.append(v["refresh"])
     if o.has_deterministic:
-        out.append('call { capDetRes = triDeterministic true; format ["view=%1;event=det;det=%2", capView, capDetRes] call capLog }')
+        prep.append('call { capDetRes = triDeterministic true; format ["view=%1;event=det;det=%2", capView, capDetRes] call capLog }')
     if o.has_reset:
-        out.append('call { capRstRes = triResetTemporal [0, 0]; format ["view=%1;event=det;reset=%2", capView, capRstRes] call capLog }')
+        prep.append('call { capRstRes = triResetTemporal [0, 0]; format ["view=%1;event=det;reset=%2", capView, capRstRes] call capLog }')
     if o.has_seed:
-        out.append('call { capSdRes = triSeedRandom 1; format ["view=%1;event=det;seed=%2", capView, capSdRes] call capLog }')
+        prep.append('call { capSdRes = triSeedRandom 1; format ["view=%1;event=det;seed=%2", capView, capSdRes] call capLog }')
+    if o.timing_pass == "before":
+        out += prep + timing_lines(c, lab) + ["[] call capPin"]
+    out += prep
     out.append(f'call {{ capPathRes = triCamPath {path_expr(c)}; capRecRes = triRecord ["motion/{lab}.raw", {n}, 0]; '
                f'format ["view=%1;event=motion_start;clip={lab};frames={n};path=%2;rec=%3", capView, capPathRes, capRecRes] call capLog }}')
     out.append("triRecordState")
     out.append(f'call {{ capRecSt = triRecordState; capPathRes = triCamPath []; '
                f'format ["view=%1;event=motion_done;clip={lab};state=%2", capView, capRecSt] call capLog }}')
     out.append("[] call capPin")
+    if o.timing_pass == "after":
+        out += prep + timing_lines(c, lab) + ["[] call capPin"]
     return out
 
 
@@ -121,6 +165,8 @@ def main():
     ap.add_argument("--has-deterministic", action="store_true")
     ap.add_argument("--fixed-settle", type=int, default=0, help="GATE-2: exactly N settle frames per mode (0: draw-count settle)")
     ap.add_argument("--settle-wait-ms", type=int, default=1000, help="with --fixed-settle: runner-side pause before the last 30 frames")
+    ap.add_argument("--timing-pass", default="off", choices=["off", "after", "before"],
+                    help="OVERLAY-1: replay each clip unrecorded for its frame-time graph (default off)")
     ap.add_argument("--list", action="store_true")
     o = ap.parse_args()
     err = gatelib.fixed_settle_error(o.fixed_settle, o.settle_wait_ms, o.has_deterministic)
@@ -145,6 +191,8 @@ def main():
                 has_reset=o.has_reset, has_seed=o.has_seed, has_deterministic=o.has_deterministic, worlds=by_world)
     if o.fixed_settle:
         plan.update(fixed_settle=o.fixed_settle, settle_wait_ms=o.settle_wait_ms)
+    if o.timing_pass != "off":
+        plan.update(timing_pass=o.timing_pass, timing_chunk=TIMING_CHUNK, timing_tail=TIMING_TAIL)
     if o.list or not o.out:
         print(json.dumps(plan, indent=1))
         return 0

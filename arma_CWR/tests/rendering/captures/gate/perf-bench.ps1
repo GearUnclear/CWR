@@ -11,7 +11,7 @@
                    [-Cycles n] [-Env K=V,...] [-CandidateEnv K=V,...] [-BaselineEnv K=V,...]
                    [-Read auto|meas|ring] [-Junction <name> | -DataDir <path>] [-NoObserverSample]
                    [-QuietSec 30] [-MaxPauseMin 120] [-TimeoutSec 5400] [-DryRun]
-                   [-Settle auto|draws|<frames>] [-SettleWaitMs 1000]
+                   [-Settle auto|draws|<frames>] [-SettleWaitMs 1000] [-TimingPass auto|after|before|off]
     perf-bench.ps1 -Job <job.json>          (the runner's form; same fields, see interface.md)
     GNU-style spellings (--set quick --out D:\x) are accepted too.
 
@@ -43,6 +43,12 @@
     the sim stepped at 1/60. -Settle draws keeps the draw-count settle, -Settle <n> sets the frame
     count. Every other job (timed sets, a dist without triDeterministic) keeps the draw-count
     settle. Job fields: settle, settle_wait_ms.
+    Timing pass (OVERLAY-1, motion only): -TimingPass auto (the default) replays every clip once more
+    after its recording, unrecorded, and dumps the P0-4 rings per frame (gen_motion.py --timing-pass,
+    frametime.py) for the frame-time graphs under the owner's three-way clip, when every dist has
+    triPerfRing and triGpuRing; after or before force it (before: ahead of the recording), off (or
+    false) leaves the clips exactly as before. Job field: timing_pass (true, false, after, before,
+    off). Other sets ignore it.
     Reading: -Read auto picks ring when every dist has triPerfRing and triGpuRing (a byte scan
     of PoseidonGame.exe), else meas (event=meas lines + triGpuTimes, the only reading on
     afdb4d60). Both sides always use the same reading; EMA and ring numbers are never mixed.
@@ -64,7 +70,7 @@ $o = @{ set = ''; out = ''; candidate = ''; baseline = ''; views = ''; rounds = 
     quietsec = 30; maxpausemin = 120; timeoutsec = 5400; dryrun = $false; job = ''; candidatelabel = 'candidate';
     baselinelabel = 'baseline'; tri = ''; python = ''; expectdiffer = $null; jobfile = ''; outdir = ''; foreignlog = '';
     shaderoverride = ''; shaderoverridebaseline = ''; modes = ''; claim = 'pit'; scale2 = $false; strictcounts = $false;
-    noise = ''; tier = 'T1'; settle = 'auto'; settlewaitms = '' }
+    noise = ''; tier = 'T1'; settle = 'auto'; settlewaitms = ''; timingpass = 'auto' }
 $switches = @('noobserversample', 'dryrun', 'scale2', 'strictcounts')
 function Read-Args([object[]]$argv) {
     $i = 0
@@ -94,7 +100,7 @@ if ($o.job) {
     $j = Get-Content -Raw -LiteralPath $o.job | ConvertFrom-Json
     $map = @{ set = 'set'; views = 'views'; boots = 'boots'; cycles = 'cycles'; read = 'read'; data_dir = 'datadir';
         quiet_sec = 'quietsec'; max_pause_min = 'maxpausemin'; timeout_sec = 'timeoutsec'; dry_run = 'dryrun'; expect_differ = 'expectdiffer';
-        settle = 'settle'; settle_wait_ms = 'settlewaitms' }
+        settle = 'settle'; settle_wait_ms = 'settlewaitms'; timing_pass = 'timingpass' }
     foreach ($k in $map.Keys) { if ($j.PSObject.Properties[$k] -and $null -ne $j.$k -and "$($j.$k)" -ne '') { if (-not $o[$map[$k]] -or $o[$map[$k]] -eq 'auto' -or $o[$map[$k]] -eq 2 -or $o[$map[$k]] -eq 0) { $o[$map[$k]] = $j.$k } } }
     if (-not $o.out -and $j.PSObject.Properties['out'] -and $j.out) { $o.out = if ([IO.Path]::IsPathRooted($j.out)) { $j.out } else { Join-Path $script:SquadRoot $j.out } }
     if ($j.PSObject.Properties['junction'] -and $j.junction -and -not $o.datadir) {
@@ -269,6 +275,13 @@ switch ($mode) {
         if ($has.triSeedRandom) { $ga += '--has-seed' }
         if ($has.triDeterministic) { $ga += '--has-deterministic' }
         $ga += $settleArgs
+        # OVERLAY-1 timing pass (see .DESCRIPTION): auto/true = after, when every dist has both rings
+        $tp = ([string]$o.timingpass).ToLowerInvariant()
+        if ($tp -in 'auto', 'true', '1', 'on') { $tp = 'after' } elseif ($tp -in 'false', '0', 'no', '') { $tp = 'off' }
+        if ($tp -notin 'after', 'before', 'off') { Write-GateLog $log "bad timing_pass '$($o.timingpass)': true, false, after, before or off"; exit 2 }
+        if ($tp -ne 'off' -and -not ($has.triPerfRing -and $has.triGpuRing)) { Write-GateLog $log "timing pass $tp skipped: a dist lacks triPerfRing/triGpuRing"; $tp = 'off' }
+        if ($tp -ne 'off') { $ga += @('--timing-pass', $tp) }
+        Write-GateLog $log "motion timing pass: $tp"
         Invoke-Gen $ga
         $gp = Get-Content -Raw -LiteralPath (Join-Path $testsDir 'motion.plan.json') | ConvertFrom-Json
         $mainTests = @($gp.files)

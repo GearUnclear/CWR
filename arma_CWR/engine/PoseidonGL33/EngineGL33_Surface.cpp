@@ -228,7 +228,10 @@ void EngineGL33::ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::Ren
         return;
     // The materials step's classes (SurfaceMaterials.hpp: the texture's name
     // and the drawing object's kind, classified once per texture and kind and
-    // kept on it; TextureGL33::SurfaceClassFor) and its object kind.
+    // kept on it; TextureGL33::SurfaceClassFor) and its object kind. The table
+    // is built here too, not only by wet weather: before it exists every
+    // texture reads class 0, so a dry world had no glass, metal or paint.
+    EnsureSurfaceTable();
     const bool onSurface = d.surface == Poseidon::render::SurfaceMode::OnSurface;
     // (xp-nightlight, POSEIDON_XP_SURFTABLE) The class table is otherwise
     // built only once wet weather, a decal batch or a fog view asks for it,
