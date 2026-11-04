@@ -32,6 +32,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Remaster/QualityScale.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -2019,10 +2020,13 @@ void Scene::DrawObjectsAndShadowsPass1()
         {
             const float occNear = _camera->ClipNear();
             // XP-presets: the active quality level's sun-shadow reach (Ultra
-            // reaches past shadowsZ, so the range must follow it).
-            const float occShadowsZ =
-                remaster::ActiveShadowReach(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ, ENGINE_CONFIG.objectsZ);
-            const float occCasterReach = occNear + GEngine->GetShadowMapTuning().distanceCoef * (occShadowsZ - occNear);
+            // reaches past shadowsZ, so the range must follow it), widened by the
+            // XP-shadows reach exactly as SceneShadowPass.cpp computes smMapFar.
+            const Engine::ShadowMapTuning occSmTune = GEngine->GetShadowMapTuning();
+            const float occShadowsZ = Poseidon::shadow::xp::MapFar(
+                remaster::ActiveShadowReach(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ, ENGINE_CONFIG.objectsZ),
+                ENGINE_CONFIG.tacticalZ, ENGINE_CONFIG.objectsZ, occSmTune.reach);
+            const float occCasterReach = occNear + occSmTune.distanceCoef * (occShadowsZ - occNear);
             occRange2 = OcclusionRange::TestRange2(s_occRange, std::max(occShadowsZ, occCasterReach));
             occInvLeft = _camera->InvLeft();
         }

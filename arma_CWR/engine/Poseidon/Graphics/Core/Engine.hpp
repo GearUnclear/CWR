@@ -849,6 +849,19 @@ class Engine : public IGraphicsEngine
         // are: a depth-map texel covers decimetres, so the screen draw LOD is
         // wasted on shadows. 1.0 = cast the draw LOD.
         float casterLodBias = 3.0f;
+        // XP-shadows switches (Graphics/Shadow/ShadowXp.hpp), all off by default:
+        // `reach` > 0 lets the maps reach view * 5/18 up to that many metres (0 =
+        // the shadow distance, as today); `taaTaps` > 0 replaces the soft filter's
+        // taps per TAA frame; `casterCull` draws each caster only into the
+        // cascades its bounds overlap; `tightSphere` fits the frustum tiers with
+        // the minimal bounding sphere of their slice.
+        float reach = 0.0f;
+        int taaTaps = 0;
+        bool casterCull = false;
+        bool tightSphere = false;
+        // > 0: casters whose bounding sphere spans fewer than this many screen
+        // pixels (1080 rows) are left out of the maps (far bushes and rocks).
+        float casterMinPx = 0.0f;
     };
 
     /// Shadow-map (depth-buffer) shadows — durable replacement for the projected
@@ -1030,6 +1043,19 @@ class Engine : public IGraphicsEngine
         int alphaVertexCount = 0;
         const ShadowCasterBatch* alphaBatches = nullptr;
         int alphaBatchCount = 0;
+        // Optional per-cascade culling (XP-shadows casterCull; null = draw the
+        // whole set into every cascade). `casterSpheres`: 4 floats per caster,
+        // camera-relative centre and radius bounding all its vertices.
+        // `solidRuns`: (first vertex, count, caster) triples covering the solid
+        // vertices. `alphaRuns`: the same triples per alpha batch, first vertex
+        // relative to the batch; batch b owns runs [alphaRunStart[b],
+        // alphaRunStart[b + 1]).
+        const float* casterSpheres = nullptr;
+        int casterCount = 0;
+        const int* solidRuns = nullptr;
+        int solidRunCount = 0;
+        const int* alphaRuns = nullptr;
+        const int* alphaRunStart = nullptr;
     };
 
     /// Render the caster set from the light into the cascade depth array —

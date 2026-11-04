@@ -12,6 +12,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -62,6 +63,45 @@ struct ResolvedAlphaBatch
     int firstVertex;
     int vertexCount;
 };
+
+// XP-shadows casterCull input (Engine::ShadowCasterSet's cull fields).
+struct CasterCull
+{
+    const float* spheres = nullptr; // 4 per caster
+    int casterCount = 0;
+    const int* solidRuns = nullptr; // (first, count, caster)
+    int solidRunCount = 0;
+    const int* alphaRuns = nullptr;     // (first in batch, count, caster)
+    const int* alphaRunStart = nullptr; // batchCount + 1
+};
+
+// Scratch for the culled multi-draws.
+std::vector<unsigned char> s_cullVisible;
+std::vector<GLint> s_cullFirst;
+std::vector<GLsizei> s_cullCount;
+
+// Gather the visible runs of [runs, runs + 3 * n) (first offset by `base`),
+// merging runs that touch, into s_cullFirst / s_cullCount.
+void GatherRuns(const int* runs, int n, int base)
+{
+    s_cullFirst.clear();
+    s_cullCount.clear();
+    for (int r = 0; r < n; r++)
+    {
+        const int first = runs[r * 3] + base;
+        const int count = runs[r * 3 + 1];
+        const int caster = runs[r * 3 + 2];
+        if (count <= 0 || caster < 0 || caster >= static_cast<int>(s_cullVisible.size()) || !s_cullVisible[caster])
+            continue;
+        if (!s_cullFirst.empty() && s_cullFirst.back() + s_cullCount.back() == first)
+        {
+            s_cullCount.back() += count;
+            continue;
+        }
+        s_cullFirst.push_back(first);
+        s_cullCount.push_back(count);
+    }
+}
 
 const char* kVS = R"(#version 330 core
 layout(location = 0) in vec3 pos;
@@ -368,7 +408,8 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 // hundreds of metres long, from casters far outside a cascade's depth range.
 bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades, int res, const float* solidXYZ,
                         int solidVertCount, const float* alphaXYZUV, int alphaVertCount,
-                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp)
+                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp,
+                        const CasterCull* cull = nullptr)
 {
     const bool haveSolid = solidXYZ && solidVertCount >= 3;
     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
@@ -437,6 +478,54 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
     {
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s_arrTex, 0, i);
         Poseidon::render::clear::WithMask(GL_DEPTH_BUFFER_BIT);
+
+        if (cull)
+        {
+            // XP-shadows casterCull: only the casters whose bounds overlap this
+            // cascade's x/y range. A caster wholly outside it rasterises no
+            // fragment there, so the depth map is the same as the full draw.
+            s_cullVisible.assign(static_cast<size_t>(cull->casterCount), 0);
+            for (int c = 0; c < cull->casterCount; c++)
+                s_cullVisible[c] =
+                    Poseidon::shadow::xp::SphereInCascade(lightVPs + i * 16, cull->spheres + c * 4) ? 1 : 0;
+            if (haveSolid)
+            {
+                GatherRuns(cull->solidRuns, cull->solidRunCount, 0);
+                if (!s_cullFirst.empty())
+                {
+                    Poseidon::render::cull::Front();
+                    glUseProgram(s_prog);
+                    glUniformMatrix4fv(s_locVP, 1, GL_FALSE, lightVPs + i * 16);
+                    GL33Bind::Vao(s_vao);
+                    glMultiDrawArrays(GL_TRIANGLES, s_cullFirst.data(), s_cullCount.data(),
+                                      static_cast<GLsizei>(s_cullFirst.size()));
+                }
+            }
+            if (haveAlpha)
+            {
+                Poseidon::render::cull::None();
+                glUseProgram(s_alphaProg);
+                glUniformMatrix4fv(s_alphaLocVP, 1, GL_FALSE, lightVPs + i * 16);
+                glUniform1i(s_alphaLocTex, 0);
+                GL33Bind::ActiveUnit(0);
+                glBindSampler(0, s_alphaSampler);
+                GL33Bind::Vao(s_alphaVao);
+                for (int b = 0; b < batchCount; b++)
+                {
+                    if (batches[b].vertexCount < 3)
+                        continue;
+                    const int r0 = cull->alphaRunStart[b];
+                    const int r1 = cull->alphaRunStart[b + 1];
+                    GatherRuns(cull->alphaRuns + r0 * 3, r1 - r0, batches[b].firstVertex);
+                    if (s_cullFirst.empty())
+                        continue;
+                    GL33Bind::Tex2D(0, batches[b].handle);
+                    glMultiDrawArrays(GL_TRIANGLES, s_cullFirst.data(), s_cullCount.data(),
+                                      static_cast<GLsizei>(s_cullFirst.size()));
+                }
+            }
+            continue;
+        }
 
         if (haveSolid)
         {
@@ -517,11 +606,26 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
         resolved.push_back({handle, src.firstVertex, src.vertexCount});
     }
 
+    // XP-shadows casterCull: per-cascade culling when the scene supplied the
+    // caster bounds and runs (every alpha batch kept, so the run table lines up).
+    CasterCull cull;
+    const bool useCull = casters.alphaRunStart && (casters.casterCount == 0 || casters.casterSpheres) &&
+                         static_cast<int>(resolved.size()) == casters.alphaBatchCount;
+    if (useCull)
+    {
+        cull.spheres = casters.casterSpheres;
+        cull.casterCount = casters.casterCount;
+        cull.solidRuns = casters.solidRuns;
+        cull.solidRunCount = casters.solidRunCount;
+        cull.alphaRuns = casters.alphaRuns;
+        cull.alphaRunStart = casters.alphaRunStart;
+    }
     GpuMark(Poseidon::gpu::Mark::ShadowBegin);
-    const bool rendered = numCascades >= 1 &&
-                          RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ,
-                                             casters.solidVertexCount, casters.alphaXYZUV, casters.alphaVertexCount,
-                                             resolved.data(), static_cast<int>(resolved.size()), _lightingActive);
+    const bool rendered =
+        numCascades >= 1 &&
+        RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ, casters.solidVertexCount,
+                           casters.alphaXYZUV, casters.alphaVertexCount, resolved.data(),
+                           static_cast<int>(resolved.size()), _lightingActive, useCull ? &cull : nullptr);
     GpuMark(Poseidon::gpu::Mark::ShadowEnd);
     if (numCascades >= 1)
     {

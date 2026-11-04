@@ -240,7 +240,17 @@ struct CascadeBuildParams
     float zPad = 50.0f;
     int omniCount = 0;                            // leading omni (camera-sphere) tiers; 0 = pure frustum
     float omniCoef[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // omni radii as a fraction of the shadow range (ascending)
+    bool tightSphere = false; // frustum tiers: minimal slice sphere (MinimalSliceSphere) instead of the centroid one
 };
+
+// Minimal bounding sphere of the symmetric camera frustum slice [nearD, farD]
+// (camera at the origin): centred on the view axis, so as rotation invariant as
+// the centroid sphere, but smaller (the centroid one is centred too near).
+BoundingSphere MinimalSliceSphere(const Vec3& forward, float tanHalfX, float tanHalfY, float nearD, float farD);
+
+// CascadeLightVPStable's fit for a given camera-relative sphere.
+Mat4 SphereLightVPStable(const BoundingSphere& bs, const Vec3& sunDir, const Vec3& up, int resolution, float zPad,
+                         const Vec3& camPos);
 
 CascadeSet BuildShadowCascades(const CascadeBuildParams& p);
 

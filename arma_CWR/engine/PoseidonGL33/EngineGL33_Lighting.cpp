@@ -1055,8 +1055,11 @@ void EngineGL33::UploadLitFrameConstants()
             kShadowFilterTexels * _lighting.shadowSoftness);
     // Sun shadows: the soft filter with its per-frame turn under TAA, and
     // the leaves' lift toward the sun; zero while their gates are off.
-    const rm::SunShadowConstants sunShadows =
+    rm::SunShadowConstants sunShadows =
         rm::ComputeSunShadowConstants(_lighting, _featureGates, TaaWantedThisFrame(), _taa.sequence);
+    // XP-shadows: the soft filter's taps per TAA frame (0 = the stock 4).
+    if (_shadowTuning.taaTaps > 0 && sunShadows.taa[2] > 0.0f)
+        sunShadows.taa[2] = static_cast<float>(_shadowTuning.taaTaps);
     SetSlot(LitConst::Taa, sunShadows.taa[0], sunShadows.taa[1], sunShadows.taa[2], sunShadows.taa[3]);
     SetSlot(LitConst::Pcss, sunShadows.pcss[0], sunShadows.pcss[1], sunShadows.pcss[2], sunShadows.pcss[3]);
     // Debug views of the forward shaders: 1 to 3 and the albedo (7, drawn as 4)

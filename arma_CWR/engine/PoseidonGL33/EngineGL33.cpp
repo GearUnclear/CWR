@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Shared/WindowPlacement.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 
 #include <SDL3/SDL.h>
 #include <glad/gl.h>
@@ -226,6 +227,51 @@ EngineGL33::EngineGL33(int width, int height, bool windowed, int bpp)
     _gamma = 1.0f;
     _frameOpen = false;
     _nightEye = 0;
+
+    // XP-shadows: a quality tier and single switches from the environment
+    // (Graphics/Shadow/ShadowXp.hpp). Nothing set leaves the tuning untouched.
+    {
+        namespace sx = Poseidon::shadow::xp;
+        const sx::Overrides o = sx::ReadOverrides();
+        if (o.tier >= 0)
+        {
+            const sx::TierParams t = sx::Tier(o.tier);
+            _shadowTuning.resolution = t.resolution;
+            _shadowTuning.cascadeCount = t.cascades;
+            _shadowTuning.omniCount = t.omni;
+            _shadowTuning.reach = t.reach;
+            _shadowTuning.taaTaps = t.taaTaps;
+            _shadowTuning.casterCull = t.cull;
+            _shadowTuning.tightSphere = t.tight;
+        }
+        if (o.resolution > 0)
+            _shadowTuning.resolution = o.resolution;
+        if (o.cascades > 0)
+            _shadowTuning.cascadeCount = o.cascades;
+        if (o.omni >= 0)
+            _shadowTuning.omniCount = o.omni;
+        if (o.split >= 0.0f)
+            _shadowTuning.splitCoef = o.split;
+        if (o.reach > 0.0f)
+            _shadowTuning.reach = o.reach;
+        if (o.taaTaps > 0)
+            _shadowTuning.taaTaps = o.taaTaps;
+        if (o.cull >= 0)
+            _shadowTuning.casterCull = o.cull != 0;
+        if (o.tight >= 0)
+            _shadowTuning.tightSphere = o.tight != 0;
+        if (o.minPx >= 0.0f)
+            _shadowTuning.casterMinPx = o.minPx;
+        if (_shadowTuning.omniCount > _shadowTuning.cascadeCount)
+            _shadowTuning.omniCount = _shadowTuning.cascadeCount;
+        if (o.any)
+            LOG_INFO(Graphics,
+                     "XP shadows: tier {} res {} cascades {} omni {} split {:.2f} reach {:.0f} taps {} cull {} tight "
+                     "{} minpx {:.1f}",
+                     o.tier, _shadowTuning.resolution, _shadowTuning.cascadeCount, _shadowTuning.omniCount,
+                     _shadowTuning.splitCoef, _shadowTuning.reach, _shadowTuning.taaTaps,
+                     _shadowTuning.casterCull ? 1 : 0, _shadowTuning.tightSphere ? 1 : 0, _shadowTuning.casterMinPx);
+    }
 
     _grassParam[0] = 0;
     _grassParam[1] = 0;
