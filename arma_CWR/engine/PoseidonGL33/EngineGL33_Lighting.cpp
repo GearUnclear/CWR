@@ -374,12 +374,30 @@ void EngineGL33::UpdateLightTiles()
     // The combat lights lead the list, the classic ones follow ranked as
     // before.
     _combat.count = 0;
+    // Lamp shadows: up to XpNightState::kLampChannels of the mask's channels
+    // are kept for street lamps while the lamp shadows run and a lamp is near
+    // (the combat lights compete for the rest).
+    _xpNight.lampChannels = 0;
+    _xpNight.lampMask = false;
+    if (_xpNight.lampShadows && aimBeams && _lighting.postEffects)
+    {
+        int lamps = 0;
+        for (const fl::FrameLight& f : t.lights)
+        {
+            const float d2 = f.pos[0] * f.pos[0] + f.pos[1] * f.pos[1] + f.pos[2] * f.pos[2];
+            if (f.kind == fl::FrameLightKind::Lamp && d2 < XpNightState::kLampDistance * XpNightState::kLampDistance)
+                ++lamps;
+        }
+        _xpNight.lampChannels = std::min(lamps, XpNightState::kLampChannels);
+    }
     if (_combat.active)
     {
         std::vector<fl::FrameLight> combat;
         GatherCombatLights(view, combat);
         _combat.count = fl::MergeCombatFrameLights(t.lights, combat);
     }
+    if (_xpNight.lampChannels > 0)
+        XpAssignLampShadows(view);
 
     const int tilesX = (targetW + fl::kTileSize - 1) / fl::kTileSize;
     const int tilesY = (targetH + fl::kTileSize - 1) / fl::kTileSize;
@@ -396,6 +414,18 @@ void EngineGL33::UpdateLightTiles()
     }
     fl::BinLightsToTiles(t.lights, view, t.grid, aimBeams ? &physical : nullptr);
     fl::PackFrameLights(t.lights, t.texels);
+    // Lamp shadows: while the mask traces lamps, every street lamp
+    // carries its mask channel + 1 (0 = none) in its beam's x, which a point
+    // lamp does not use (physicalLight reads it while litXpNight.z is 1).
+    if (_xpNight.lampMask)
+    {
+        for (size_t i = 0; i < t.lights.size(); ++i)
+        {
+            const fl::FrameLight& f = t.lights[i];
+            if (f.kind == fl::FrameLightKind::Lamp && !f.hdr)
+                t.texels[i * fl::kTexelsPerLight * 4 + 12] = static_cast<float>(f.shadowSlot + 1);
+        }
+    }
 
     // Upload what changed since the last build (a still camera sends nothing).
     if (t.texels != t.uploadedTexels && !t.texels.empty())
@@ -898,6 +928,10 @@ void EngineGL33::UploadLitFrameConstants()
     // Combat light: the game's combat lights join the tiled list, so
     // only with it.
     _combat.active = _lightTilesActive && _featureGates[rm::Feature::CombatLights].on;
+    // (Lamp shadows) No street lamp traces the mask unless this frame's
+    // tiled list says so (UpdateLightTiles sets them again).
+    _xpNight.lampChannels = 0;
+    _xpNight.lampMask = false;
     if (_lightTilesActive)
     {
         UpdateLightTiles();
@@ -1036,8 +1070,11 @@ void EngineGL33::UploadLitFrameConstants()
             kShadowFilterTexels * _lighting.shadowSoftness);
     // Sun shadows: the soft filter with its per-frame turn under TAA, and
     // the leaves' lift toward the sun; zero while their gates are off.
-    const rm::SunShadowConstants sunShadows =
+    rm::SunShadowConstants sunShadows =
         rm::ComputeSunShadowConstants(_lighting, _featureGates, TaaWantedThisFrame(), _taa.sequence);
+    // XP-shadows: the soft filter's taps per TAA frame (0 = the stock 4).
+    if (_shadowTuning.taaTaps > 0 && sunShadows.taa[2] > 0.0f)
+        sunShadows.taa[2] = static_cast<float>(_shadowTuning.taaTaps);
     SetSlot(LitConst::Taa, sunShadows.taa[0], sunShadows.taa[1], sunShadows.taa[2], sunShadows.taa[3]);
     SetSlot(LitConst::Pcss, sunShadows.pcss[0], sunShadows.pcss[1], sunShadows.pcss[2], sunShadows.pcss[3]);
     // Debug views of the forward shaders: 1 to 3 and the albedo (7, drawn as 4)
@@ -1077,9 +1114,19 @@ void EngineGL33::UploadLitFrameConstants()
         rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
     SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
     _nightLightsActive = night.night[0] > 0.5f;
+    // Lamp shadows (litXpNight; zero while the option is off, which leaves
+    // every fragment as before): y the light bounce's gain; z 1 while this
+    // frame's mask traces street lamps.
+    {
+        const float lamps = _xpNight.lampMask && _nightLightsActive ? 1.0f : 0.0f;
+        SetSlot(LitConst::XpNight, 0.0f, _xpNight.bounceGain, lamps, 0.0f);
+    }
     // Wet weather: the frame's wetness and its flags; zero while the gate
     // is off, which leaves every fragment as before.
     UploadLitWeather();
+    // Shore water: the shore (shallow water, surf, wet sand); zero while it
+    // is off, which leaves every fragment as before.
+    UploadLitSeaShore();
     // Surfaces and ambient light (the surfaces switch): the sky light's
     // spherical harmonics, the canopy's sky occlusion and the specular; zero
     // while the switch or its gate is off.

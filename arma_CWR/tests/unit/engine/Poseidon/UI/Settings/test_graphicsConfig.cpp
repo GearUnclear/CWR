@@ -516,3 +516,78 @@ TEST_CASE("GraphicsConfig: Allowed FPS cap values pass through unchanged", "[Set
         CHECK(c.fpsCap == allowed);
     }
 }
+
+// The Remastered lighting's look options: shore water and lamp shadows on,
+// shadow detail Normal, saved and read back by their own keys.
+TEST_CASE("GraphicsConfig: the look options default to shore water and lamp shadows on, Normal shadows",
+          "[Settings][GraphicsConfig]")
+{
+    GraphicsConfig c;
+    c.LoadDefaults();
+    CHECK(c.shoreWater);
+    CHECK(c.lampShadows);
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    // The stored values are the shadow tiers (Graphics/Shadow/ShadowXp.hpp).
+    CHECK(static_cast<int>(GraphicsConfig::ShadowDetailNormal) == 2);
+    CHECK(static_cast<int>(GraphicsConfig::ShadowDetailHigh) == 3);
+}
+
+TEST_CASE("GraphicsConfig: the look options round-trip through graphics.cfg", "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("look.cfg");
+    std::filesystem::remove(path);
+
+    GraphicsConfig src;
+    src.shoreWater = false;
+    src.lampShadows = false;
+    src.shadowDetail = GraphicsConfig::ShadowDetailHigh;
+    REQUIRE(src.Save(path));
+
+    GraphicsConfig dst;
+    REQUIRE(dst.Load(path));
+    CHECK_FALSE(dst.shoreWater);
+    CHECK_FALSE(dst.lampShadows);
+    CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailHigh);
+
+    // And back on.
+    src.shoreWater = true;
+    src.lampShadows = true;
+    src.shadowDetail = GraphicsConfig::ShadowDetailNormal;
+    REQUIRE(src.Save(path));
+    REQUIRE(dst.Load(path));
+    CHECK(dst.shoreWater);
+    CHECK(dst.lampShadows);
+    CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+}
+
+TEST_CASE("GraphicsConfig: a file written before the look options reads them as their defaults",
+          "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("prelook.cfg");
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << "qualityPreset=3;\nterrainDetail=4;\nobjectLod=4;\nshadowQuality=3;\nparticlesQuality=3;\n"
+               "lighting=1;\nversion=3;\n";
+    }
+    GraphicsConfig c;
+    REQUIRE(c.Load(path));
+    CHECK(c.shoreWater);
+    CHECK(c.lampShadows);
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    // Nothing to migrate: the defaults are already the options' defaults.
+    CHECK_FALSE(c.Migrate(60));
+}
+
+TEST_CASE("GraphicsConfig: Normalize turns an unknown shadow detail into Normal", "[Settings][GraphicsConfig]")
+{
+    FakeEnvironment env;
+    GraphicsConfig c;
+    c.LoadDefaults();
+    c.shadowDetail = static_cast<GraphicsConfig::ShadowDetail>(7);
+    CHECK(c.Normalize(env));
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+
+    c.shadowDetail = GraphicsConfig::ShadowDetailHigh;
+    CHECK_FALSE(c.Normalize(env));
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailHigh);
+}

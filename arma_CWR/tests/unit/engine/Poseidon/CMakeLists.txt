@@ -136,6 +136,8 @@ set(POSEIDON_TEST_SOURCES
     # Graphics tests
     Graphics/test_alpha_classify.cpp
     Graphics/test_shadowmap_math.cpp
+    Graphics/test_shadow_xp.cpp
+    Graphics/test_look_options.cpp
     Graphics/test_paa_decode_fixtures.cpp
     Graphics/test_paa_decoder.cpp
     Graphics/test_shape_loader.cpp

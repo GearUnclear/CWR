@@ -816,6 +816,7 @@ class Landscape: public SerializeClass
     void RestartWeatherWalks() { _weather.RestartRandomWalks(); }
 	void Simulate( float deltaT );
 	float GetSeaLevel() const {return _seaLevelWave;}
+    float GetSeaLevelNoWave() const { return _seaLevel; } // the tide alone
 	void SetSeaWaveSpeed( float seaWaveSpeed ) {_seaWaveSpeed=seaWaveSpeed;}
 
 	Vector3 GetWind() const;

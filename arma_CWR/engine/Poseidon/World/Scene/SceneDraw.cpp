@@ -31,6 +31,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -1654,8 +1655,14 @@ void Scene::DrawObjectsAndShadowsPass1()
         if (_camera)
         {
             const float occNear = _camera->ClipNear();
-            const float occShadowsZ = ENGINE_CONFIG.shadowsZ;
-            const float occCasterReach = occNear + GEngine->GetShadowMapTuning().distanceCoef * (occShadowsZ - occNear);
+            // The shadow maps' far distance exactly as SceneShadowPass.cpp
+            // computes smMapFar: a High shadow tier reaches past shadowsZ, and
+            // an untested hidden object inside that reach would cast from the
+            // wrong LOD.
+            const Engine::ShadowMapTuning occSmTune = GEngine->GetShadowMapTuning();
+            const float occShadowsZ = Poseidon::shadow::xp::MapFar(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ,
+                                                                   ENGINE_CONFIG.objectsZ, occSmTune.reach);
+            const float occCasterReach = occNear + occSmTune.distanceCoef * (occShadowsZ - occNear);
             occRange2 = OcclusionRange::TestRange2(s_occRange, std::max(occShadowsZ, occCasterReach));
             occInvLeft = _camera->InvLeft();
         }

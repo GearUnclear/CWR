@@ -224,6 +224,11 @@ bool GraphicsConfig::Normalize(const Environment& /*env*/)
         lighting = LightingRemastered;
         changed = true;
     }
+    if (shadowDetail != ShadowDetailNormal && shadowDetail != ShadowDetailHigh)
+    {
+        shadowDetail = ShadowDetailNormal;
+        changed = true;
+    }
     clampFloat(brightness, 0.4f, 1.8f);
     clampFloat(gamma, 0.5f, 2.3f);
     clampFloat(renderScale, 1.0f, 2.0f);
@@ -270,6 +275,12 @@ bool GraphicsConfig::Load(const std::string& path)
         multitexturing = (int)*e != 0;
     if (auto* e = cfg.FindEntry("lighting"))
         lighting = static_cast<LightingMode>((int)*e);
+    if (auto* e = cfg.FindEntry("shoreWater"))
+        shoreWater = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("lampShadows"))
+        lampShadows = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("shadowDetail"))
+        shadowDetail = static_cast<ShadowDetail>((int)*e);
     if (auto* e = cfg.FindEntry("brightness"))
         brightness = (float)*e;
     if (auto* e = cfg.FindEntry("gamma"))
@@ -293,6 +304,9 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("msaaSamples", msaaSamples);
     cfg.Add("multitexturing", multitexturing ? 1 : 0);
     cfg.Add("lighting", static_cast<int>(lighting));
+    cfg.Add("shoreWater", shoreWater ? 1 : 0);
+    cfg.Add("lampShadows", lampShadows ? 1 : 0);
+    cfg.Add("shadowDetail", static_cast<int>(shadowDetail));
     cfg.Add("brightness", brightness);
     cfg.Add("gamma", gamma);
     cfg.Add("version", version);

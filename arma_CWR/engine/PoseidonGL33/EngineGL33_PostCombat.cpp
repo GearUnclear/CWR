@@ -32,12 +32,14 @@
 #include <Poseidon/Graphics/Core/GLBlendState.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
+#include <Poseidon/Graphics/Remaster/NightLights.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -396,8 +398,8 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
     }
     std::vector<int> channel(cands.size(), -1);
     if (shadows)
-        fl::UpdateShadowSelection(c.selection, sc.data(), static_cast<int>(sc.size()), dt, fl::kMaxShadowedCombatLights,
-                                  channel.data());
+        fl::UpdateShadowSelection(c.selection, sc.data(), static_cast<int>(sc.size()), dt,
+                                  fl::kMaxShadowedCombatLights - _xpNight.lampChannels, channel.data());
     else
         c.selection = fl::ShadowSelection{};
     c.shadowed = 0;
@@ -459,7 +461,7 @@ void EngineGL33::UploadCombatFrame()
         return;
     float data[16] = {};
     data[0] = c.active ? static_cast<float>(c.count) : 0.0f;
-    const bool mask = c.active && c.maskBuilt && c.maskFrame == GetFrameCounter();
+    const bool mask = (c.active || _xpNight.lampMask) && c.maskBuilt && c.maskFrame == GetFrameCounter();
     data[1] = mask ? 1.0f : 0.0f;
     if (mask)
     {
@@ -487,7 +489,11 @@ void EngineGL33::UpdateCombatMask()
         return;
     c.maskFrame = frame;
     c.maskBuilt = false;
-    if (!c.active || c.shadowed <= 0 || !_featureGates[rm::Feature::CombatShadows].on || c.unavailable)
+    // (Lamp shadows: street lamps alone, without a combat light, also build
+    // it.)
+    const bool lamps = _xpNight.lampMask;
+    if ((!c.active && !lamps) || c.shadowed <= 0 || (!_featureGates[rm::Feature::CombatShadows].on && !lamps) ||
+        c.unavailable)
         return;
     // The previous frame's linear depth, at most a frame older (a frame
     // without a post pass leaves none).
@@ -681,4 +687,97 @@ void EngineGL33::SetCombatScatterUniforms(unsigned int program, float exposure)
     const GLint med = glGetUniformLocation(program, "scatterMed");
     if (med >= 0)
         glUniform4fv(med, kMaxScatterLights, c.scatterMed);
+}
+
+// ---- Lamp shadows (the Graphics page's option, first xp-nightlight) --------
+
+namespace
+{
+// A lamp's id for the selection's hysteresis: its position, to 10 cm (lamps
+// do not move), never 0.
+std::uint32_t XpLampId(const float rel[3], const float* cam)
+{
+    std::uint32_t h = 2166136261u;
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto q = static_cast<std::int32_t>(std::floor((rel[i] + cam[i]) * 10.0f + 0.5f));
+        h = (h ^ static_cast<std::uint32_t>(q)) * 16777619u;
+    }
+    return h ? h : 1u;
+}
+
+// The lamp head's radius the mask's march takes (m): a lamp's shadow edge is
+// near hard.
+constexpr float kXpLampCore = 0.12f;
+// The march reaches at most this far toward a lamp (m).
+constexpr float kXpLampRange = 40.0f;
+} // namespace
+
+void EngineGL33::XpAssignLampShadows(const fl::TileView& view)
+{
+    CombatState& c = _combat;
+    LightTileState& t = _lightTiles;
+    const float* cam = _frameState.cameraPos;
+    // Without combat light GatherCombatLights did not run: the mask's slots
+    // still hold an older frame's.
+    if (!c.active)
+    {
+        c.shadowed = 0;
+        for (float& v : c.maskLight)
+            v = 0.0f;
+        for (float& v : c.maskRange)
+            v = 0.0f;
+    }
+    fl::PhysicalLightParams physical;
+    {
+        const rm::NightConstants night = rm::ComputeNightConstants(_lighting, _featureGates, true);
+        physical.lampPerStart = night.night[1];
+        physical.spotPeak = night.night[2];
+    }
+    // The candidates: street lamps near the camera whose reach shows on the
+    // screen, scored by their intensity (start distance) over the squared
+    // distance.
+    std::vector<int> index;
+    std::vector<fl::ShadowCandidate> sc;
+    const float maxD2 = XpNightState::kLampDistance * XpNightState::kLampDistance;
+    for (size_t i = 0; i < t.lights.size(); ++i)
+    {
+        const fl::FrameLight& f = t.lights[i];
+        if (f.kind != fl::FrameLightKind::Lamp || f.hdr)
+            continue;
+        const float d2 = f.pos[0] * f.pos[0] + f.pos[1] * f.pos[1] + f.pos[2] * f.pos[2];
+        if (d2 >= maxD2)
+            continue;
+        float rect[4];
+        if (!fl::LightScreenRect(f, view, rect, &physical))
+            continue;
+        index.push_back(static_cast<int>(i));
+        sc.push_back({XpLampId(f.pos, cam), f.start / std::max(d2, 25.0f)});
+    }
+    const int slots = _xpNight.lampChannels;
+    std::vector<int> channel(sc.size(), -1);
+    if (!sc.empty())
+        fl::UpdateShadowSelection(_xpNight.lampSelection, sc.data(), static_cast<int>(sc.size()), 1.0f / 60.0f, slots,
+                                  channel.data());
+    // The lamps' channels are the mask's last `slots` (the combat lights hold
+    // the first ones).
+    const fl::CombatMaskCamera& dc = c.depthCamera;
+    for (size_t k = 0; k < sc.size(); ++k)
+    {
+        if (channel[k] < 0)
+            continue;
+        const int ch = fl::kMaxShadowedCombatLights - slots + channel[k];
+        fl::FrameLight& f = t.lights[static_cast<size_t>(index[k])];
+        f.shadowSlot = ch;
+        const double rel[3] = {static_cast<double>(f.pos[0]) + cam[0] - dc.pos[0],
+                               static_cast<double>(f.pos[1]) + cam[1] - dc.pos[1],
+                               static_cast<double>(f.pos[2]) + cam[2] - dc.pos[2]};
+        for (int row = 0; row < 3; ++row)
+            c.maskLight[ch * 4 + row] =
+                static_cast<float>(dc.rot[row][0] * rel[0] + dc.rot[row][1] * rel[1] + dc.rot[row][2] * rel[2]);
+        c.maskLight[ch * 4 + 3] = kXpLampCore;
+        c.maskRange[ch] = std::min(fl::PhysicalReach(f, physical), kXpLampRange);
+        c.shadowed = std::max(c.shadowed, ch + 1);
+        _xpNight.lampMask = true;
+    }
 }

@@ -125,6 +125,14 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
         GEngine->SetLightingTuning(lighting);
         GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive() &&
                                       cfg.shadowQuality != GraphicsConfig::TierOff);
+
+        // The Remastered lighting's look options; the engine lets the
+        // POSEIDON_XP_* test switches win over each (LookOptions.hpp).
+        remaster::LookOptions look;
+        look.shoreWater = cfg.shoreWater;
+        look.lampShadows = cfg.lampShadows;
+        look.shadowTier = static_cast<int>(cfg.shadowDetail);
+        GEngine->SetLookOptions(look);
     }
     gUserFpsCap = cfg.fpsCap;
 }

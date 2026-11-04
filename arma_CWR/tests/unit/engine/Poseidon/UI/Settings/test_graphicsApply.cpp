@@ -12,6 +12,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Dummy/EngineDummy.hpp>
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -120,4 +121,63 @@ TEST_CASE("GraphicsApply: a profile switch keeps the Graphics options over the p
     world.scene->SaveConfig();
     world.scene->LoadConfig();
     CHECK(world.scene->GetObjectShadows());
+}
+
+namespace
+{
+// Keeps the look options the apply hands over, as the GL33 backend does.
+class LookEngine : public Poseidon::EngineDummy
+{
+  public:
+    Poseidon::remaster::LookOptions look;
+    int looks = 0;
+    void SetLookOptions(const Poseidon::remaster::LookOptions& o) override
+    {
+        look = o;
+        ++looks;
+    }
+};
+
+struct LookApply
+{
+    explicit LookApply(const GraphicsConfig& cfg)
+    {
+        Poseidon::GScene = nullptr;
+        Poseidon::GEngine = &engine;
+        Poseidon::ApplyGraphicsConfigToEngine(cfg);
+    }
+    ~LookApply()
+    {
+        Poseidon::GEngine = prevEngine;
+        Poseidon::GScene = prevScene;
+        Poseidon::gUserFpsCap = fpsCap;
+    }
+
+    Poseidon::Engine* prevEngine = Poseidon::GEngine;
+    Scene* prevScene = Poseidon::GScene;
+    int fpsCap = Poseidon::gUserFpsCap;
+    LookEngine engine;
+};
+} // namespace
+
+TEST_CASE("GraphicsApply: the look options reach the engine", "[Settings][GraphicsApply][graphics]")
+{
+    GraphicsConfig cfg;
+    cfg.LoadDefaults();
+    {
+        LookApply apply(cfg);
+        CHECK(apply.engine.looks == 1);
+        CHECK(apply.engine.look.shoreWater);
+        CHECK(apply.engine.look.lampShadows);
+        CHECK(apply.engine.look.shadowTier == Poseidon::remaster::kShadowTierNormal);
+    }
+    cfg.shoreWater = false;
+    cfg.lampShadows = false;
+    cfg.shadowDetail = GraphicsConfig::ShadowDetailHigh;
+    {
+        LookApply apply(cfg);
+        CHECK_FALSE(apply.engine.look.shoreWater);
+        CHECK_FALSE(apply.engine.look.lampShadows);
+        CHECK(apply.engine.look.shadowTier == Poseidon::remaster::kShadowTierHigh);
+    }
 }

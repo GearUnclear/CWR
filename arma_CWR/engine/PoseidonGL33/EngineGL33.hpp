@@ -965,6 +965,12 @@ class EngineGL33 : public Engine
     void EnsureSurfaceTable();
     // The Weather slot and the frame flags of the MatClass slot, from the gates.
     void UploadLitWeather();
+    // Shore water (the Graphics page's Shore water option, first the
+    // experiment POSEIDON_XP_WATER; EngineGL33_Sea.cpp): the shore slot
+    // litWater2. The shore's parts mask (UploadLitSeaShore), 0 = off; set
+    // by SetLookOptions.
+    void UploadLitSeaShore();
+    int _shoreWaterParts = 0;
     // The surface class of the draw ApplyPassState prepares (its texture and
     // object kind) into LitConst::MatClass xy, uploaded only when it changes.
     void SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);
@@ -1020,6 +1026,28 @@ class EngineGL33 : public Engine
         unsigned int progMask = 0, progBlur = 0, vao = 0;
         bool programsTried = false, unavailable = false;
     } _combat;
+    // Lamp shadows (the Graphics page's Lamp shadows option, first the
+    // experiment lane xp-nightlight; SetLookOptions, Graphics/Remaster/LookOptions.hpp
+    // for the POSEIDON_XP_NIGHTLIGHT, _LAMPSHADOWS and _LIGHTBOUNCE overrides).
+    // Light bounce: lamps, headlights and fires light what stands in their
+    // pool from below, off the lit ground. Lamp shadows: street lamps take the
+    // combat shadow mask's free channels. Both off leave LitConst::XpNight zero
+    // and every frame as it was before the option.
+    struct XpNightState
+    {
+        // Lamps take at most this many mask channels, those within this
+        // distance of the camera (m).
+        static constexpr int kLampChannels = 2;
+        static constexpr float kLampDistance = 60.0f;
+        float bounceGain = 0.0f;
+        bool lampShadows = false;
+        int lampChannels = 0;  // channels of the mask kept for lamps this frame
+        bool lampMask = false; // this frame's mask traces at least one lamp
+        Poseidon::lighting::ShadowSelection lampSelection;
+    } _xpNight;
+    // Picks the lamps that take a mask channel, fills the mask's slots and marks
+    // the lamps' channels (UpdateLightTiles, after the combat lights took theirs).
+    void XpAssignLampShadows(const Poseidon::lighting::TileView& view);
     void InitCombatResources();
     void DeinitCombatResources();
     // The combat lights of this frame for the tiled list (camera-relative,
@@ -1593,6 +1621,10 @@ class EngineGL33 : public Engine
     void DropTemporalHistories();
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
+    // The Graphics page's look options with the environment's overrides
+    // (Graphics/Remaster/LookOptions.hpp): the shore water, the lamp shadows
+    // and the sun shadows' tier (EngineGL33.cpp).
+    void SetLookOptions(const Poseidon::remaster::LookOptions& options) override;
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
     static constexpr int kShadowCascades = 4;
     void RenderShadowDepthScene(const float* lightVPs, const float* splitViewDist, const float* camFwd3,
@@ -1606,6 +1638,12 @@ class EngineGL33 : public Engine
     void UpdateShadowMapLitState();
 
     ShadowMapTuning _shadowTuning;                 // runtime knobs (FP parameter set)
+    // The shadow tier _shadowTuning carries (Graphics/Shadow/ShadowXp.hpp; -1
+    // before the first SetLookOptions) and the tuning as built, which the
+    // tier's fields go back to when it changes.
+    int _shadowTier = -1;
+    ShadowMapTuning _shadowTuningBuilt;
+    void ApplyShadowTier(int tier);
     float _shadowSunFactor = 1.0f;                 // day/night fade [0,1]; 0 at night (no sun shadow)
     bool _shadowMapActive = false;                 // a depth pass ran this frame
     unsigned int _shadowMapTex = 0;                // GL depth texture ARRAY to sample

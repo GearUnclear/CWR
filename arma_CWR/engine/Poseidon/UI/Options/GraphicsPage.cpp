@@ -58,6 +58,15 @@ const GraphicsRowText kRows[] = {
     {"STR_DISP_MAIN_OPT_GRAPHICS_LIGHTING", "STR_DISP_MAIN_OPT_GRAPHICS_LIGHTING_DESC", "Lighting",
      "Remastered lights every pixel in high dynamic range: real sun shadows, hills shading the valleys, drifting "
      "cloud shadows, sky light with ambient occlusion and a soft glow. Classic is the original lighting."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SHADOW_DETAIL", "STR_DISP_MAIN_OPT_GRAPHICS_SHADOW_DETAIL_DESC", "Shadow Detail",
+     "How far and how sharp the sun's shadows are under Remastered lighting. Normal reaches 500 m. High reaches up to "
+     "1000 m with sharper shadows, at some cost on long views."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SHORE_WATER", "STR_DISP_MAIN_OPT_GRAPHICS_SHORE_WATER_DESC", "Shore Water",
+     "Shallow water colour, a surf line with foam and wet sand where the sea meets the land. Remastered lighting "
+     "only."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS", "STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS_DESC", "Lamp Shadows",
+     "Street lamps cast shadows at night, and the light of lamps, headlights and fires bounces off the ground onto "
+     "what stands near them. Remastered lighting only."},
 };
 constexpr int kFpsCapValues[] = {0, 30, 60, 90, 120, 144, 240};
 constexpr int kMsaaValues[] = {0, 2, 4, 8};
@@ -230,6 +239,12 @@ OptionsScrollList::RowDef GraphicsPage::GraphicsProvider::RowFor(int row) const
             return {622, m_page->m_offOnCStrs.data(), 2};
         case kRowLighting:
             return {632, m_page->m_lightingCStrs.data(), 2};
+        case kRowShadowDetail:
+            return {642, m_page->m_shadowDetailCStrs.data(), 2};
+        case kRowShoreWater:
+            return {652, m_page->m_offOnCStrs.data(), 2};
+        case kRowLampShadows:
+            return {662, m_page->m_offOnCStrs.data(), 2};
     }
     return {-1, nullptr, 0};
 }
@@ -238,7 +253,7 @@ OptionsScrollList::Kind GraphicsPage::GraphicsProvider::RowKind(int row) const
 {
     if (row == kRowAdvanced)
         return OptionsScrollList::KindHeader;
-    if (row == kRowMultitexturing)
+    if (row == kRowMultitexturing || row == kRowShoreWater || row == kRowLampShadows)
         return OptionsScrollList::KindBoolean;
     return OptionsScrollList::Provider::RowKind(row);
 }
@@ -284,6 +299,13 @@ int GraphicsPage::GraphicsProvider::RowValue(int row) const
             return c.multitexturing ? 1 : 0;
         case kRowLighting:
             return c.lighting == GraphicsConfig::LightingRemastered ? 1 : 0;
+        case kRowShadowDetail:
+            // Normal (2) -> 0, High (3) -> 1.
+            return c.shadowDetail == GraphicsConfig::ShadowDetailHigh ? 1 : 0;
+        case kRowShoreWater:
+            return c.shoreWater ? 1 : 0;
+        case kRowLampShadows:
+            return c.lampShadows ? 1 : 0;
         case kRowVsync:
             return (int)c.vsync;
         case kRowFpsCap:
@@ -379,6 +401,15 @@ void GraphicsPage::GraphicsProvider::SetRowValue(int row, int v)
             break;
         case kRowLighting:
             c.lighting = v != 0 ? GraphicsConfig::LightingRemastered : GraphicsConfig::LightingClassic;
+            break;
+        case kRowShadowDetail:
+            c.shadowDetail = v != 0 ? GraphicsConfig::ShadowDetailHigh : GraphicsConfig::ShadowDetailNormal;
+            break;
+        case kRowShoreWater:
+            c.shoreWater = v != 0;
+            break;
+        case kRowLampShadows:
+            c.lampShadows = v != 0;
             break;
         case kRowVsync:
             if (v >= 0 && v <= 2)
@@ -508,6 +539,11 @@ void GraphicsPage::RefreshLocalizedChoices()
     m_lightingLabels[1] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_REMASTERED", "Remastered");
     for (size_t i = 0; i < m_lightingLabels.size(); ++i)
         m_lightingCStrs[i] = m_lightingLabels[i].c_str();
+
+    m_shadowDetailLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_NORMAL", "Normal");
+    m_shadowDetailLabels[1] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_HIGH");
+    for (size_t i = 0; i < m_shadowDetailLabels.size(); ++i)
+        m_shadowDetailCStrs[i] = m_shadowDetailLabels[i].c_str();
 }
 
 void GraphicsPage::Unmount(OptionsShell& shell)

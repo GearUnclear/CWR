@@ -13,7 +13,8 @@
 // stamps the four tier rows from that preset's bundle (write-through).
 // Touching any tier row re-derives the preset to "Custom" without
 // snapping back.  Per-user knobs (Anti-aliasing / Supersampling /
-// Multitexturing / VSync / FPS Cap / Brightness / Gamma) are NOT
+// Multitexturing / VSync / FPS Cap / Brightness / Gamma, and the
+// Remastered lighting's Shadow Detail / Shore Water / Lamp Shadows) are NOT
 // preset-driven; they keep their value across preset changes.
 
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
@@ -71,7 +72,10 @@ private:
 			kRowSupersampling  = 11,
 			kRowMultitexturing = 12,
 			kRowLighting       = 13,
-			kRowCount          = 14,
+			kRowShadowDetail   = 14,
+			kRowShoreWater     = 15,
+			kRowLampShadows    = 16,
+			kRowCount          = 17,
 		};
 
 		void SetPage(class GraphicsPage* page) { m_page = page; }
@@ -116,6 +120,8 @@ private:
 	std::array<const char*, 7>      m_fpsCapCStrs{};
     std::array<std::string, 2> m_lightingLabels;
     std::array<const char*, 2> m_lightingCStrs{};
+    std::array<std::string, 2> m_shadowDetailLabels;
+    std::array<const char*, 2> m_shadowDetailCStrs{};
 
 	void RefreshLocalizedChoices();
 

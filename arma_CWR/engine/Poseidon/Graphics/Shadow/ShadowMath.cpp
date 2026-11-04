@@ -606,6 +606,33 @@ Mat4 CascadeLightVPStable(const std::array<Vec3, 8>& corners, float t0, float t1
 {
     std::array<Vec3, 8> slice = SliceFrustum(corners, t0, t1);
     BoundingSphere bs = FrustumBoundingSphere(slice); // camera-relative centre (small)
+    return SphereLightVPStable(bs, sunDir, up, resolution, zPad, camPos);
+}
+
+BoundingSphere MinimalSliceSphere(const Vec3& forward, float tanHalfX, float tanHalfY, float nearD, float farD)
+{
+    // The slice's corners sit at depth n (lateral n*k) and f (lateral f*k), k
+    // the half-diagonal tangent. The sphere centred on the axis at depth c is
+    // equidistant to both rings at c = (n + f)(1 + k^2) / 2; past f the far
+    // ring alone sets it (c = f, r = f*k).
+    const float n = nearD < 0.0f ? 0.0f : nearD;
+    const float f = farD > n ? farD : n + 1e-3f;
+    const float k2 = tanHalfX * tanHalfX + tanHalfY * tanHalfY;
+    float c = 0.5f * (n + f) * (1.0f + k2);
+    if (c > f)
+    {
+        c = f;
+    }
+    const float rFar = std::sqrt((f - c) * (f - c) + f * f * k2);
+    const float rNear = std::sqrt((c - n) * (c - n) + n * n * k2);
+    const Vec3 fw = Normalize(forward);
+    // A thousandth of margin keeps every corner inside after rounding.
+    return {fw * c, std::max(rFar, rNear) * 1.001f};
+}
+
+Mat4 SphereLightVPStable(const BoundingSphere& bs, const Vec3& sunDir, const Vec3& up, int resolution, float zPad,
+                         const Vec3& camPos)
+{
     Mat4 lv = LightView(sunDir, up);
     Vec3 lc = TransformPoint(lv, bs.center); // camera-relative light-space centre
     float radius = bs.radius < 1e-4f ? 1e-4f : bs.radius;
@@ -799,7 +826,16 @@ CascadeSet BuildShadowCascadesTiered(const CascadeBuildParams& p)
             int gi = omniN + k;
             float t0 = (fsplits[k] - p.nearD) / span;
             float t1 = (fsplits[k + 1] - p.nearD) / span;
-            cs.camRelVP[gi] = CascadeLightVPStable(corners, t0, t1, sd, up, p.resolution, p.zPad, p.camPos);
+            if (p.tightSphere)
+            {
+                const BoundingSphere bs =
+                    MinimalSliceSphere(p.forward, p.tanHalfX, p.tanHalfY, fsplits[k], fsplits[k + 1]);
+                cs.camRelVP[gi] = SphereLightVPStable(bs, sd, up, p.resolution, p.zPad, p.camPos);
+            }
+            else
+            {
+                cs.camRelVP[gi] = CascadeLightVPStable(corners, t0, t1, sd, up, p.resolution, p.zPad, p.camPos);
+            }
             cs.splitViewDist[gi] = fsplits[k + 1];
             cs.omniRadius[gi] = 0.0f;
         }

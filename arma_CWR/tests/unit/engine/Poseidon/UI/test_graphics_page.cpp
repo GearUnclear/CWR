@@ -168,3 +168,58 @@ TEST_CASE("GraphicsPage advanced divider is an unfocusable header", "[UI][Graphi
     CHECK(p.RowKind(9) == OptionsScrollList::KindHeader);
     CHECK_FALSE(OptionsScrollList::CanRowReceiveFocus(p.RowKind(9)));
 }
+
+// The Remastered lighting's look rows: Shadow Detail (Normal / High), Shore
+// Water and Lamp Shadows (on / off toggles), after Lighting.
+TEST_CASE("GraphicsPage look rows follow the lighting row", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+
+    // Seventeen rows, then the Close action.
+    CHECK(p.RowCount() == 18);
+    CHECK(std::string(p.RowLabel(14)) == "Shadow Detail");
+    CHECK(std::string(p.RowLabel(15)) == "Shore Water");
+    CHECK(std::string(p.RowLabel(16)) == "Lamp Shadows");
+    for (int row = 14; row <= 16; ++row)
+    {
+        const std::string description = p.RowDescription(row);
+        CHECK_FALSE(description.empty());
+        // Player text carries no em dash.
+        CHECK(description.find("\xE2\x80\x94") == std::string::npos);
+    }
+}
+
+TEST_CASE("GraphicsPage shadow detail row offers Normal then High, Normal by default", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+
+    CHECK(p.RowKind(14) == OptionsScrollList::KindStepper);
+    CHECK(p.RowFor(14).count == 2);
+    CHECK(p.RowValue(14) == 0);
+
+    p.SetRowValue(14, 1);
+    CHECK(p.RowValue(14) == 1);
+    // A look row is no tier row: the preset stays.
+    CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
+    p.SetRowValue(14, 0);
+    CHECK(p.RowValue(14) == 0);
+}
+
+TEST_CASE("GraphicsPage shore water and lamp shadows rows are booleans defaulting to on", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+
+    for (int row : {15, 16})
+    {
+        CHECK(p.RowKind(row) == OptionsScrollList::KindBoolean);
+        CHECK(p.RowFor(row).count == 2);
+        CHECK(p.RowValue(row) == 1);
+        p.SetRowValue(row, 0);
+        CHECK(p.RowValue(row) == 0);
+        p.SetRowValue(row, 1);
+        CHECK(p.RowValue(row) == 1);
+    }
+}

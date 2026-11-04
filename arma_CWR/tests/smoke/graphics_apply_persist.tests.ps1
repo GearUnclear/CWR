@@ -64,6 +64,25 @@ Describe "graphics.cfg persistence through live UI flow" {
         }
     }
 
+    It "Shadow Detail, Shore Water and Lamp Shadows rows change via UI + Unmount into graphics.cfg" {
+        $eph = New-EphemeralGamePaths
+        try {
+            $cfgPath = Join-Path $eph.UserDir "graphics.cfg"
+            $sqf = Join-Path $script:repoRoot "tests/integration/ui/options/graphics/new_graphics_look_rows_persist.test.sqf"
+            & $script:triExe test $sqf --game-dir (Split-Path $script:gameExe -Parent) --data-dir $script:gameDir --retries 10 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 0 -Because "tri scenario must pass"
+
+            Test-Path $cfgPath | Should -BeTrue -Because "GraphicsPage::Unmount should write graphics.cfg"
+            $kv = Read-CfgFile $cfgPath
+            $kv['shadowDetail'] | Should -Be '3' -Because "tri moved Shadow Detail from Normal (2) to High (3)"
+            $kv['shoreWater']   | Should -Be '0' -Because "tri turned Shore Water off"
+            $kv['lampShadows']  | Should -Be '0' -Because "tri turned Lamp Shadows off"
+            $kv['qualityPreset'] | Should -Not -Be '4' -Because "the look rows are not preset tiers"
+        } finally {
+            Remove-EphemeralGamePaths $eph
+        }
+    }
+
     It "subsequent boot reads the persisted graphics.cfg back into the runtime" {
         # Same shape as audio + display equivalents - write a known cfg,
         # boot --check, confirm boot didn't stomp it.
@@ -80,6 +99,9 @@ vsync=2;
 fpsCap=120;
 brightness=1.300000;
 gamma=0.800000;
+shoreWater=0;
+lampShadows=0;
+shadowDetail=3;
 "@ | Set-Content -Path $cfgPath -Encoding ASCII -NoNewline
 
             $output = Invoke-GuiExe $script:gameExe -C $script:gameDir --window --check --log-format jsonl --render dummy
@@ -89,6 +111,9 @@ gamma=0.800000;
             $kv['qualityPreset'] | Should -Be '1'
             $kv['fpsCap']        | Should -Be '120'
             $kv['vsync']         | Should -Be '2'
+            $kv['shoreWater']    | Should -Be '0'
+            $kv['lampShadows']   | Should -Be '0'
+            $kv['shadowDetail']  | Should -Be '3'
         } finally {
             Remove-EphemeralGamePaths $eph
         }

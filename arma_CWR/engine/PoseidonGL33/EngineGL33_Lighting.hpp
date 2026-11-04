@@ -432,7 +432,19 @@ enum : int
     // intensity gain (kCameraLampGain), w how far a low sun turns the upper
     // sky toward the zenith's blue.
     CameraLook = 90,
-    Count = 91,
+    // Shore water (the Graphics page's option, first the experiment
+    // POSEIDON_XP_WATER; EngineGL33_Sea.cpp UploadLitSeaShore): x the shore
+    // parts on (a bit mask: 1 shallow water, 2 surf foam, 4 wet
+    // sand, 8 wave masking; 0 = off, which leaves every fragment as before),
+    // y time (s, wrapped), z the sea's surface (m, with the wave), w the swash
+    // line (m).
+    Water2 = 91,
+    // Lamp shadows (the Graphics page's option, first the experiment lane
+    // xp-nightlight; zero while it is off, which leaves every fragment as
+    // before): x 0 (the lane's window glow, not brought over), y the light
+    // bounce's gain, z 1 while the combat shadow mask traces street lamps, w 0.
+    XpNight = 92,
+    Count = 93,
 };
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
@@ -458,7 +470,9 @@ static_assert(SurfaceCanopy == Surface + 1 && Surface2 == SurfaceCanopy + 1 && S
 static_assert(Surface3 == SurfaceSh + SurfaceShCount, "LitConst surface slots out of order");
 static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots");
 static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
-static_assert(Count == CameraLook + 1, "LitConst size out of sync");
+static_assert(Water2 == CameraLook + 1, "the experimental water slot follows the camera's look");
+static_assert(XpNight == Water2 + 1, "the xp-nightlight slot follows the experimental water slot");
+static_assert(Count == XpNight + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to features not yet in the block, so no two features

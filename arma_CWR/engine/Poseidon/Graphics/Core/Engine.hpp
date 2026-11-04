@@ -23,6 +23,7 @@
 
 #include <Poseidon/Graphics/Core/RenderState.hpp>  // DrawItem (for GetRecordedDraws())
 #include <Poseidon/Graphics/Remaster/LightRig.hpp> // remaster::LightingTuning
+#include <Poseidon/Graphics/Remaster/LookOptions.hpp> // remaster::LookOptions
 
 namespace Poseidon::remaster
 {
@@ -839,6 +840,20 @@ class Engine : public IGraphicsEngine
         // are: a depth-map texel covers decimetres, so the screen draw LOD is
         // wasted on shadows. 1.0 = cast the draw LOD.
         float casterLodBias = 3.0f;
+        // Shadow tier fields (Graphics/Shadow/ShadowXp.hpp: the Graphics page's
+        // Shadow Detail and the POSEIDON_XP_SM_* switches), all off at Normal:
+        // `reach` > 0 lets the maps reach view * 5/18 up to that many metres (0 =
+        // the shadow distance, as before the tiers; High sets 1000); `taaTaps` > 0 replaces the soft filter's
+        // taps per TAA frame; `casterCull` draws each caster only into the
+        // cascades its bounds overlap; `tightSphere` fits the frustum tiers with
+        // the minimal bounding sphere of their slice.
+        float reach = 0.0f;
+        int taaTaps = 0;
+        bool casterCull = false;
+        bool tightSphere = false;
+        // > 0: casters whose bounding sphere spans fewer than this many screen
+        // pixels (1080 rows) are left out of the maps (far bushes and rocks).
+        float casterMinPx = 0.0f;
     };
 
     /// Shadow-map (depth-buffer) shadows — durable replacement for the projected
@@ -985,6 +1000,12 @@ class Engine : public IGraphicsEngine
     virtual ShadowMapTuning GetShadowMapTuning() const { return {}; }
     virtual void SetShadowMapTuning(const ShadowMapTuning& /*tuning*/) {}
 
+    /// The Graphics page's look options (shore water, lamp shadows, the sun
+    /// shadows' tier; GraphicsApply from graphics.cfg). The environment's
+    /// POSEIDON_XP_* switches override each one (Remaster/LookOptions.hpp).
+    /// Only the GL33 backend draws them.
+    virtual void SetLookOptions(const remaster::LookOptions& /*options*/) {}
+
     /// One alpha-tested shadow-caster batch: a contiguous run of the alpha vertex
     /// buffer sharing one caster texture, whose alpha cuts the cast shadow (so
     /// cutout foliage casts a leaf silhouette). Vertices are xyz+uv (5 floats).
@@ -1006,6 +1027,19 @@ class Engine : public IGraphicsEngine
         int alphaVertexCount = 0;
         const ShadowCasterBatch* alphaBatches = nullptr;
         int alphaBatchCount = 0;
+        // Optional per-cascade culling (XP-shadows casterCull; null = draw the
+        // whole set into every cascade). `casterSpheres`: 4 floats per caster,
+        // camera-relative centre and radius bounding all its vertices.
+        // `solidRuns`: (first vertex, count, caster) triples covering the solid
+        // vertices. `alphaRuns`: the same triples per alpha batch, first vertex
+        // relative to the batch; batch b owns runs [alphaRunStart[b],
+        // alphaRunStart[b + 1]).
+        const float* casterSpheres = nullptr;
+        int casterCount = 0;
+        const int* solidRuns = nullptr;
+        int solidRunCount = 0;
+        const int* alphaRuns = nullptr;
+        const int* alphaRunStart = nullptr;
     };
 
     /// Render the caster set from the light into the cascade depth array —

@@ -177,6 +177,45 @@ float lowBeamPattern(vec3 L, vec3 beam) {
     return vert * horiz * cut;
 }
 
+// ---- Lamp shadows (litXpNight, all 0 while the option is off) ---------------
+// The Graphics page's Lamp shadows option (first the experiment lane
+// xp-nightlight): litXpNight.y the light bounce's gain, z 1 while street lamps
+// take channels of the combat shadow mask (their channel + 1 in their beam's
+// x, 0 for none).
+const float kXpGroundAlbedo = 0.2;
+const float kXpCombatBounce = 0.25;
+float combatShadowVis(int channel);
+
+// The light a lamp, a headlight or a fire throws on the ground bounced onto
+// this fragment from below: the ground the surface faces (under it, pushed
+// out along its normal by about its height over the ground) takes the light's
+// irradiance there, kXpGroundAlbedo of it (in the ground's own tint) comes
+// back up, and a surface sees the ground with its lower hemisphere's share,
+// (1 - n.y) / 2: none on flat ground, half on a wall, all on an overhang.
+// No occlusion is known (not the light's toward that ground, nor the ground's
+// toward the fragment). xpBounceSetup finds that ground once per fragment.
+vec3 g_xpBounceFoot = vec3(0.0);
+float g_xpBounceView = -1.0;
+float g_xpBounceHeight = 0.0;
+bool xpBounceSetup(vec3 n) {
+    if (g_xpBounceView >= 0.0) return g_xpBounceView > 0.0;
+    g_xpBounceView = 0.0;
+    if (litXpNight.y <= 0.0 || g_groundHeight < -1e5) return false;
+    float view = 0.5 - 0.5 * n.y;
+    if (view <= 0.02) return false;
+    float hr = max(vWorldRel.y + litCamPos.y - g_groundHeight, 0.0);
+    vec2 side = n.xz * inversesqrt(max(dot(n.xz, n.xz), 1e-8));
+    float push = 0.5 + 0.5 * min(hr, 6.0);
+    g_xpBounceFoot = vec3(vWorldRel.x + side.x * push, g_groundHeight - litCamPos.y, vWorldRel.z + side.y * push);
+    g_xpBounceHeight = hr;
+    g_xpBounceView = view * kXpGroundAlbedo * litXpNight.y;
+    return true;
+}
+
+// A physical lamp's (or headlight's) bounce: intensity `I0` at the bulb
+// `lightRel`; a headlight's toward the ground point by its low beam.
+float xpLampBounce(vec3 lightRel, float I0, bool spot, vec3 beam);
+
 // One lamp or headlight at this fragment, added to g_physicalLocal and
 // g_physicalSpec. A rough diffuse (Oren-Nayar, sigma 0.5, Fujii's form,
 // normalised to 1 at normal incidence) lets gravel, asphalt and plaster scatter
@@ -196,6 +235,14 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
     if (d2 >= end2) return;
     float d = sqrt(max(d2, 1e-12));
     vec3 L = toLight / d;
+    // (Lamp shadows) The ground's bounce, whichever way the surface faces.
+    if (litXpNight.y > 0.0 && xpBounceSetup(g_lightLeaves ? g_lightLeafNormal : n)) {
+        float I0 = spot ? peak : peak * (litCamera.x > 0.5 ? litCameraLook.z : 1.0);
+        float eb = xpLampBounce(pos.xyz, I0, spot, frameLights[at + 3].xyz) * (1.0 - smoothstep(0.5 * end2, end2, d2));
+        vec3 cb = toLinear(color.rgb);
+        if (spot) cb = vec3(dot(cb, kLuma));
+        g_physicalLocal += cb * g_groundTint * eb * (g_lightLeaves ? kd + g_lightForced : kd);
+    }
     // A low beam on a surface that faces away adds nothing: everything below
     // is times nl for it (a headlight has no ambient line), so its pattern is
     // not worked out. Leaves wrap past the terminator and take it all.
@@ -209,6 +256,11 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
     // which the stronger lamp lit white from top to bottom).
     if (litCamera.x > 0.5 && !spot) I *= litCameraLook.z * smoothstep(1.5, 4.5, d);
     float E = I / (d2 + kNightSoftening);
+    // (Lamp shadows) A street lamp with a channel of the shadow mask.
+    if (!spot && litXpNight.z > 0.5) {
+        float ch = frameLights[at + 3].x;
+        if (ch > 0.5) E *= combatShadowVis(int(ch + 0.5));
+    }
     // A lamp's authored colour; a headlight white at its colour's luminance
     // (FrameLights.hpp PhysicalColour: the rosy beam turned khaki verges tan).
     vec3 col = toLinear(color.rgb);
@@ -237,6 +289,17 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
         float p = max(power, 1.0);
         g_physicalSpec += litMatSpecular.rgb * col * (pow(max(dot(n, h), 0.0), p) * (p + 8.0) / 28.0 * nl);
     }
+}
+
+float xpLampBounce(vec3 lightRel, float I0, bool spot, vec3 beam) {
+    vec3 toL = lightRel - g_xpBounceFoot;
+    if (toL.y <= 0.05) return 0.0;
+    float d2 = dot(toL, toL);
+    float d = sqrt(d2);
+    float I = spot ? I0 * lowBeamPattern(-toL / d, beam) : I0;
+    if (I <= 0.0) return 0.0;
+    float Eg = I * (toL.y / d) / (d2 + kNightSoftening + 0.5 * g_xpBounceHeight * g_xpBounceHeight);
+    return Eg * g_xpBounceView;
 }
 
 // The kinds the physical model shades: a lamp (1) or a headlight (2), while
@@ -404,6 +467,24 @@ vec3 combatLights(vec3 n, vec3 nLight, bool foliage, vec3 v) {
         vec3 l = toLight * invD;
         float nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0)
                            : combatBallCosine(dot(n, l), pos.w, d2 * invD);
+        // (Lamp shadows) The ground's bounce: the ball's light on the ground
+        // the surface faces, by the part of the ball above that ground.
+        if (litXpNight.y > 0.0 && xpBounceSetup(foliage ? nLight : n)) {
+            vec3 toG = pos.xyz - g_xpBounceFoot;
+            float g2 = dot(toG, toG);
+            if (g2 < r2) {
+                float xg = g2 / r2;
+                float wg = 1.0 - xg * xg;
+                float invG = inversesqrt(max(g2, 1e-6));
+                float eg = wg * wg / (1.0 + g2 / max(pos.w * pos.w, 1e-4)) *
+                           combatBallCosine(toG.y * invG, pos.w, g2 * invG);
+                // A quarter: the ground beside a burning object is partly in
+                // that object's shadow, which nothing here knows (at full
+                // strength a burning hull read pale, as if lit directly, and
+                // at half it still lost its shape).
+                sum += radiance * g_groundTint * (kXpCombatBounce * eg * g_xpBounceView);
+            }
+        }
         if (nl <= 0.0) continue;
         if (ext.y > 0.5) e *= combatShadowVis(int(ext.y + 0.5));
         sum += radiance * (e * nl);
