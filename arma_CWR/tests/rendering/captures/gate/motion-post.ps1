@@ -21,6 +21,10 @@
          labels the classic row "vanilla" in its own still products, which are for agents only.
       4. a three-way owner clip when A classic, A today and B today exist: owner\ (index.html,
          clips\<id>.mp4), original_label "Classic lighting on today's engine" (never "vanilla").
+    Timing pass (OVERLAY-1): after the encode, frametime.py extract reads each good boot's
+    event=timing lines and ring CSVs into timing\<side>\<label>.timing.json (frame by frame,
+    aligned with the clip by camera path step; a boot without a timing pass gives none), and the
+    owner clip gets a frame-time graph strip under each panel that has one (timing in the spec).
     Writes motion.summary.txt and appends its line to bench.summary.txt. Exit 0 done (verdicts
     inside), 1 something failed (see motion-post.log).
 #>
@@ -94,6 +98,21 @@ if ($ffmpeg) {
     $summary += 'no ffmpeg on this machine: dumps kept, not encoded, no screen and no owner clip'
 }
 
+# ---- 2b. the timing pass (OVERLAY-1): per-frame CPU work and GPU frame, aligned with the clips
+$ft = Join-Path $PSScriptRoot 'frametime.py'
+$timing = @{}
+foreach ($b in @($plan.boots)) {
+    if ($b.exit -ne 0) { continue }
+    $td = Join-Path $Out "timing\$($b.side)"
+    $r = Invoke-Py "timing $($b.side)" @($ft, 'extract', '--boot', $b.boot_dir, '--out', $td, '--pacing-dir', (Join-Path $Out "clips\$($b.side)"))
+    foreach ($tl in @($r.lines | Where-Object { $_ -match '^timing (\S+): ' })) {
+        $lab = ($tl -replace '^timing (\S+): .*$', '$1')
+        $tj = Join-Path $td "$lab.timing.json"
+        if (Test-Path -LiteralPath $tj) { $timing["$($b.side)|$lab"] = $tj }
+        $summary += "$($b.side) $($tl -replace ', cpu work', ': cpu work')"
+    }
+}
+
 # ---- 3. the motion screener, 4. the owner clip
 $mp = Join-Path $PSScriptRoot 'motion.py'
 $clips = @($labels | ForEach-Object { $_.clip } | Select-Object -Unique)
@@ -115,6 +134,9 @@ foreach ($c in $clips) {
                 question = 'Does the right-hand picture move the same way as the middle one? If not, what looks wrong?'
                 clip = [ordered]@{ original = $mkv["A|$classic"]; today = $mkv["A|$today"]; new = $mkv["B|$today"]; from = 0; frames = $n
                     original_label = "Classic lighting on today's engine" } }
+            if ($timing["A|$classic"] -or $timing["A|$today"] -or $timing["B|$today"]) {
+                $sheetItems[-1].clip['timing'] = [ordered]@{ original = $timing["A|$classic"]; today = $timing["A|$today"]; new = $timing["B|$today"] }
+            }
         }
     } else {
         $mine = @($mkv.Keys | Where-Object { $_ -like "B|$c*" } | ForEach-Object { $mkv[$_] })
