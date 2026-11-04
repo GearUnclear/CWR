@@ -275,10 +275,34 @@ uniform vec4 camRod;     // rgb the rods' cool grey, w the warmth from which war
 uniform vec4 camShade;   // rgb the shade's cool balance at a low sun (unit luminance), w its strength
 uniform vec4 camDark;    // x the dark tones' saturation (relative), y z the scene light it fades out over, w 1 = a
                          // vehicle interior (pre-lit: the camera's interior grade)
+// Experimental sun glare (POSEIDON_XP_SUNGLARE, EngineGL33_XpAtmosphere.cpp):
+uniform vec4 xpGlare;      // xy the sun's view ray at z = 1, z the strength (0 = off)
+uniform vec4 xpGlareShape; // x the core's width (rad), y its level, z the halo's half-width (rad), w its level
+uniform vec4 xpGlareColor; // rgb the sun's colour by its peak
+uniform sampler2D xpGlareVis; // r: the disc's visible share, smoothed (1x1)
 out vec4 fragColor;
 )";
 
 static const char s_psPostCompositeMain[] = R"(
+// Experimental sun glare: a Gaussian core and a Lorentzian halo round the
+// sun's screen point, times the disc's visible share; the core goes toward
+// white. Round on the screen like the disc (camSunDisc): the offset on the
+// image plane (z = 1) times the angle of an equal-area pixel at the sun
+// (cos^1.5 of its angle off the axis); the true angle drew an oval near the
+// frame's edges.
+vec3 xpSunGlare() {
+    vec2 ndc = (vUV - worldRect.xy) / max(worldRect.zw, vec2(1e-6)) * 2.0 - 1.0;
+    vec2 dp = vec2(ndc.x * projInfo.z, ndc.y * projInfo.w) - xpGlare.xy;
+    float th = length(dp) * pow(1.0 / (1.0 + dot(xpGlare.xy, xpGlare.xy)), 0.75);
+    float vis = texelFetch(xpGlareVis, ivec2(0, 0), 0).r;
+    float c = th / xpGlareShape.x;
+    float core = xpGlareShape.y * exp(-c * c);
+    float h = th / xpGlareShape.z;
+    float halo = xpGlareShape.w / (1.0 + h * h);
+    vec3 tint = xpGlareColor.rgb;
+    return (mix(tint, vec3(1.0), 0.5) * core + tint * halo) * (xpGlare.z * vis);
+}
+
 float compositeViewZ(vec2 uv) {
     float d = textureLod(depthTex, uv, 0.0).r;
     if (d >= 0.999999) return 1e6;
@@ -544,6 +568,7 @@ void main() {
         vec3 x = camDecode(c.rgb) * keep * camParams.y;
         x += texture(bloomTex, vUV).rgb * camGlow.x;
         x += shaft * shaftColor.rgb * (camGlow.y * camParams.y);
+        if (xpGlare.z > 0.0) x += xpSunGlare();
         // Combat light scattered in the air, as light at the exposure.
         x += combatScatter();
         x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));

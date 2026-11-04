@@ -1218,6 +1218,12 @@ class EngineGL33 : public Engine
         // The experimental switches' programs (EngineGL33_XpPost.hpp); a
         // switch whose program failed stays off.
         unsigned int progXpCas = 0, progXpBloomDown = 0, progXpBloomUp = 0;
+        // Experimental sun glare (POSEIDON_XP_SUNGLARE, EngineGL33_XpAtmosphere.cpp):
+        // the disc's visible share, 1x1 RGBA16F ping-pong, and its program
+        // (built on first use, only with the switch on).
+        unsigned int xpGlareTex[2] = {}, xpGlareFbo[2] = {}, progXpGlareVis = 0;
+        int xpGlareCur = 0;
+        bool xpGlareTried = false, xpGlareHistory = false;
         bool programsTried = false;
         // The post pass is off: its programs failed (until the next reset) or
         // its targets came back incomplete at failedW x failedH (tried again
@@ -1412,6 +1418,21 @@ class EngineGL33 : public Engine
     void PostXpBloomChain(const PostFrame& f, float tail);
     void PostShafts(const PostFrame& f);
     void PostComposite(const PostFrame& f);
+    // Experimental sun glare (EngineGL33_XpAtmosphere.cpp): the switch's
+    // strength (0 = off), the visibility pass the composite runs first, and
+    // what the composite's glare reads.
+    struct XpSunGlareFrame
+    {
+        bool on = false;
+        unsigned int tex = 0;           // the smoothed visible share (r)
+        float sunX = 0.0f, sunY = 0.0f; // the sun's view ray at z = 1
+        float gain = 0.0f;
+        float coreRad = 0.0f, coreLevel = 0.0f, haloRad = 0.0f, haloLevel = 0.0f;
+        float r = 1.0f, g = 1.0f, b = 1.0f; // the sun's colour by its peak
+    };
+    static float XpSunGlareGain();
+    XpSunGlareFrame PostXpSunGlare(const PostFrame& f);
+    void DestroyXpSunGlare();
     void PostTemporal(const PostFrame& f);
     void PostSharpen(const PostFrame& f);
     void PostDebugView(const PostFrame& f);
