@@ -177,6 +177,44 @@ float lowBeamPattern(vec3 L, vec3 beam) {
     return vert * horiz * cut;
 }
 
+// ---- Experiment xp-nightlight (litXpNight, all 0 while its switches are off) --
+// litXpNight.x the window glow's gain (times the night's fade), y the light
+// bounce's gain, z 1 while street lamps take channels of the combat shadow
+// mask (their channel + 1 in their beam's x, 0 for none).
+const float kXpGroundAlbedo = 0.2;
+const float kXpCombatBounce = 0.25;
+float combatShadowVis(int channel);
+
+// The light a lamp, a headlight or a fire throws on the ground bounced onto
+// this fragment from below: the ground the surface faces (under it, pushed
+// out along its normal by about its height over the ground) takes the light's
+// irradiance there, kXpGroundAlbedo of it (in the ground's own tint) comes
+// back up, and a surface sees the ground with its lower hemisphere's share,
+// (1 - n.y) / 2: none on flat ground, half on a wall, all on an overhang.
+// No occlusion is known (not the light's toward that ground, nor the ground's
+// toward the fragment). xpBounceSetup finds that ground once per fragment.
+vec3 g_xpBounceFoot = vec3(0.0);
+float g_xpBounceView = -1.0;
+float g_xpBounceHeight = 0.0;
+bool xpBounceSetup(vec3 n) {
+    if (g_xpBounceView >= 0.0) return g_xpBounceView > 0.0;
+    g_xpBounceView = 0.0;
+    if (litXpNight.y <= 0.0 || g_groundHeight < -1e5) return false;
+    float view = 0.5 - 0.5 * n.y;
+    if (view <= 0.02) return false;
+    float hr = max(vWorldRel.y + litCamPos.y - g_groundHeight, 0.0);
+    vec2 side = n.xz * inversesqrt(max(dot(n.xz, n.xz), 1e-8));
+    float push = 0.5 + 0.5 * min(hr, 6.0);
+    g_xpBounceFoot = vec3(vWorldRel.x + side.x * push, g_groundHeight - litCamPos.y, vWorldRel.z + side.y * push);
+    g_xpBounceHeight = hr;
+    g_xpBounceView = view * kXpGroundAlbedo * litXpNight.y;
+    return true;
+}
+
+// A physical lamp's (or headlight's) bounce: intensity `I0` at the bulb
+// `lightRel`; a headlight's toward the ground point by its low beam.
+float xpLampBounce(vec3 lightRel, float I0, bool spot, vec3 beam);
+
 // One lamp or headlight at this fragment, added to g_physicalLocal and
 // g_physicalSpec. A rough diffuse (Oren-Nayar, sigma 0.5, Fujii's form,
 // normalised to 1 at normal incidence) lets gravel, asphalt and plaster scatter
@@ -196,6 +234,14 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
     if (d2 >= end2) return;
     float d = sqrt(max(d2, 1e-12));
     vec3 L = toLight / d;
+    // (xp-nightlight) The ground's bounce, whichever way the surface faces.
+    if (litXpNight.y > 0.0 && xpBounceSetup(g_lightLeaves ? g_lightLeafNormal : n)) {
+        float I0 = spot ? peak : peak * (litCamera.x > 0.5 ? litCameraLook.z : 1.0);
+        float eb = xpLampBounce(pos.xyz, I0, spot, frameLights[at + 3].xyz) * (1.0 - smoothstep(0.5 * end2, end2, d2));
+        vec3 cb = toLinear(color.rgb);
+        if (spot) cb = vec3(dot(cb, kLuma));
+        g_physicalLocal += cb * g_groundTint * eb * (g_lightLeaves ? kd + g_lightForced : kd);
+    }
     // A low beam on a surface that faces away adds nothing: everything below
     // is times nl for it (a headlight has no ambient line), so its pattern is
     // not worked out. Leaves wrap past the terminator and take it all.
@@ -209,6 +255,11 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
     // which the stronger lamp lit white from top to bottom).
     if (litCamera.x > 0.5 && !spot) I *= litCameraLook.z * smoothstep(1.5, 4.5, d);
     float E = I / (d2 + kNightSoftening);
+    // (xp-nightlight) A street lamp with a channel of the shadow mask.
+    if (!spot && litXpNight.z > 0.5) {
+        float ch = frameLights[at + 3].x;
+        if (ch > 0.5) E *= combatShadowVis(int(ch + 0.5));
+    }
     // A lamp's authored colour; a headlight white at its colour's luminance
     // (FrameLights.hpp PhysicalColour: the rosy beam turned khaki verges tan).
     vec3 col = toLinear(color.rgb);
@@ -237,6 +288,17 @@ void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
         float p = max(power, 1.0);
         g_physicalSpec += litMatSpecular.rgb * col * (pow(max(dot(n, h), 0.0), p) * (p + 8.0) / 28.0 * nl);
     }
+}
+
+float xpLampBounce(vec3 lightRel, float I0, bool spot, vec3 beam) {
+    vec3 toL = lightRel - g_xpBounceFoot;
+    if (toL.y <= 0.05) return 0.0;
+    float d2 = dot(toL, toL);
+    float d = sqrt(d2);
+    float I = spot ? I0 * lowBeamPattern(-toL / d, beam) : I0;
+    if (I <= 0.0) return 0.0;
+    float Eg = I * (toL.y / d) / (d2 + kNightSoftening + 0.5 * g_xpBounceHeight * g_xpBounceHeight);
+    return Eg * g_xpBounceView;
 }
 
 // The kinds the physical model shades: a lamp (1) or a headlight (2), while
@@ -404,6 +466,24 @@ vec3 combatLights(vec3 n, vec3 nLight, bool foliage, vec3 v) {
         vec3 l = toLight * invD;
         float nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0)
                            : combatBallCosine(dot(n, l), pos.w, d2 * invD);
+        // (xp-nightlight) The ground's bounce: the ball's light on the ground
+        // the surface faces, by the part of the ball above that ground.
+        if (litXpNight.y > 0.0 && xpBounceSetup(foliage ? nLight : n)) {
+            vec3 toG = pos.xyz - g_xpBounceFoot;
+            float g2 = dot(toG, toG);
+            if (g2 < r2) {
+                float xg = g2 / r2;
+                float wg = 1.0 - xg * xg;
+                float invG = inversesqrt(max(g2, 1e-6));
+                float eg = wg * wg / (1.0 + g2 / max(pos.w * pos.w, 1e-4)) *
+                           combatBallCosine(toG.y * invG, pos.w, g2 * invG);
+                // A quarter: the ground beside a burning object is partly in
+                // that object's shadow, which nothing here knows (at full
+                // strength a burning hull read pale, as if lit directly, and
+                // at half it still lost its shape).
+                sum += radiance * g_groundTint * (kXpCombatBounce * eg * g_xpBounceView);
+            }
+        }
         if (nl <= 0.0) continue;
         if (ext.y > 0.5) e *= combatShadowVis(int(ext.y + 0.5));
         sum += radiance * (e * nl);
@@ -427,6 +507,120 @@ vec3 localLights(vec3 n, vec3 kd, vec3 ka) {
         sum += localLight(litLightPos[i], litLightColor[i], litLightAmb[i].rgb, litLightDir[i].xyz, n, kd, ka);
     }
     return sum;
+}
+
+// (xp-nightlight) The rooms of a house, lit at night, on a static object
+// (kind 3). Three kinds of surface take part:
+//   - glass (SurfaceMaterials glass and window rules, surfClass.x 3) on a
+//     wall glows where its texture is not light and not warm (the pane;
+//     white or wooden frames stay);
+//   - a texture whose name names a window or a window's black fill
+//     (surfClass.w 1: okna, okno_ram, okenice, black_sum, ...; the stock
+//     data paints most windows into the facade or fills them with a black
+//     texture) glows on a wall only where it is dark and cool, or pure
+//     black (xpFacadePane: the pane; plaster, beams and stone stay as they
+//     are);
+//   - an inside surface (surfClass.w 2: _in, stena_in, strop, podlaha, ...;
+//     the stock houses have rooms behind their window holes) is lit by the
+//     room's lamp: its own colour times that light, so the walls, ceiling
+//     and floor seen through a window read as a lit room.
+// A pane is lit by a hash of its building (its origin, hashed by the vertex
+// shader into vLitMode 1 to 1.4), the side it faces and its storey, a room
+// by its building and storey: about kXpWindowLitShare of them, most in warm lamp light,
+// some in a softer warm, a few in a television's cool colour, at a level from
+// the night's own ambient (the sky, moon and key light on an up-facing
+// surface), so the metered night keeps it in proportion. Returns linear scene
+// light before the exposure; `cover` is how far it makes a blending pane
+// opaque.
+const float kXpWindowLevel = 4.0;
+const float kXpRoomLevel = 12.0;
+const float kXpWindowLitShare = 0.4;
+float g_xpGlowShare = 0.0;
+
+uint xpHash(uint x) {
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+// A painted window pane on a facade: dark and cool (the stock facades
+// paint their panes a dark blue grey, a reflection of the sky, while dark
+// beams, stains and stone are neutral or warm), or a pure black fill.
+float xpFacadePane(vec3 albedo) {
+    float lum = dot(albedo, kLuma);
+    float mx = max(albedo.r, max(albedo.g, albedo.b));
+    float cool = (albedo.b - albedo.r) / max(mx, 1e-3);
+    float dark = 1.0 - smoothstep(0.10, 0.20, lum);
+    return max(dark * smoothstep(0.03, 0.12, cool), 1.0 - smoothstep(0.002, 0.006, lum));
+}
+
+vec3 xpWindowGlow(vec3 albedo, vec3 n, out float cover) {
+    cover = 0.0;
+    if (litXpNight.x <= 0.0) return vec3(0.0);
+    float nightRef = dot(litZenith.rgb + litMoon.rgb + litSun.rgb, kLuma);
+    int objectKind = int(surfClass.y + 0.5);
+    // A wall drawn without an object kind (a proxy's section, kind 0): the
+    // debug map paints it orange; window-any (surfClass.w 3) counts it.
+    if (objectKind == 0 && abs(n.y) < 0.6 && litXpNight.w > 0.5) return vec3(1.0, 0.45, 0.0) * (20.0 * nightRef);
+    if (objectKind != 3 && !(objectKind == 0 && surfClass.w > 2.5)) return vec3(0.0);
+    bool glass = int(surfClass.x + 0.5) == 3;
+    bool room = surfClass.w > 1.5 && surfClass.w < 2.5;
+    bool named = (surfClass.w > 0.5 && surfClass.w < 1.5) || surfClass.w > 2.5;
+    float building = clamp((vLitMode - 1.0) / 0.4, 0.0, 1.0);
+    uint side = room ? 7u : (abs(n.x) > abs(n.z) ? (n.x > 0.0 ? 0u : 1u) : (n.z > 0.0 ? 2u : 3u));
+    // The storey (3 m from the ground under the fragment) joins the hash, so
+    // the floors of one side are lit apart.
+    uint storey = g_groundHeight < -1e5 ? 0u
+                                        : uint(clamp(floor((vWorldRel.y + litCamPos.y - g_groundHeight + 0.3) / 3.0), 0.0, 15.0));
+    uint h = xpHash(uint(building * 1048575.0) * 8u + side + 1u + storey * 0x9e3779b9u);
+    float lit = float(h & 0xffffu) / 65535.0;
+    // POSEIDON_XP_NIGHTDEBUG (litXpNight.w): every candidate surface in a
+    // flat colour (rooms cyan, named windows magenta, glass yellow); every
+    // other static surface as red = its building's hash, green = its side
+    // is lit, blue = its albedo passes the facade pane test (xpFacadePane).
+    if (litXpNight.w > 0.5) {
+        if (room || named || glass)
+            return (room ? vec3(0.0, 1.0, 1.0) : (named ? vec3(1.0, 0.0, 1.0) : vec3(1.0, 1.0, 0.0))) * (20.0 * nightRef);
+        return vec3(building, lit < kXpWindowLitShare ? 1.0 : 0.0, xpFacadePane(albedo)) * (6.0 * nightRef);
+    }
+    if (!glass && !named && !room) return vec3(0.0);
+    if (!room && abs(n.y) > 0.6) return vec3(0.0);
+    if (lit >= kXpWindowLitShare) return vec3(0.0);
+    float kind = float(h >> 16) / 65535.0;
+    vec3 tint = kind < 0.7 ? vec3(1.0, 0.56, 0.26) : (kind < 0.92 ? vec3(1.0, 0.72, 0.46) : vec3(0.55, 0.7, 1.0));
+    tint /= dot(tint, kLuma);
+    float level = mix(0.55, 1.25, fract(kind * 13.37)) * (kind < 0.92 ? 1.0 : 0.45);
+    if (room) return albedo * tint * (kXpRoomLevel * level * nightRef * litXpNight.x);
+    float lum = dot(albedo, kLuma);
+    float mx = max(albedo.r, max(albedo.g, albedo.b));
+    float warm = (albedo.r - albedo.b) / max(mx, 1e-3);
+    float pane = glass ? (1.0 - smoothstep(0.3, 0.6, lum)) * (1.0 - smoothstep(0.12, 0.3, warm)) : xpFacadePane(albedo);
+    if (pane <= 0.0) return vec3(0.0);
+    cover = pane;
+    return tint * (kXpWindowLevel * level * pane * nightRef * litXpNight.x);
+}
+
+// (xp-nightlight) The same for a static object's pre-lit section (display
+// colour `c`, texture colour `tex`), which has no world position: under
+// window-any (surfClass.w 3) its dark, cool texels glow in a
+// warm room light, lit or dark by a hash of the texture coordinates (about
+// one window of a facade atlas per cell), in display terms. The debug map
+// paints every such section orange.
+vec3 xpPrelitWindow(vec3 c, vec3 tex) {
+    if (litXpNight.w > 0.5) return mix(c, vec3(1.0, 0.45, 0.0), 0.7);
+    if (surfClass.w < 2.5) return c;
+    float pane = xpFacadePane(toLinear(tex));
+    if (pane <= 0.0) return c;
+    uvec2 cell = uvec2(ivec2(floor(vUV0 * 6.0)) + ivec2(4096));
+    uint h = xpHash(cell.x * 0x9e3779b9u + cell.y + 17u);
+    if (float(h & 0xffffu) / 65535.0 >= kXpWindowLitShare) return c;
+    float kind = float(h >> 16) / 65535.0;
+    vec3 tint = kind < 0.7 ? vec3(1.0, 0.62, 0.32) : (kind < 0.92 ? vec3(1.0, 0.78, 0.55) : vec3(0.6, 0.75, 1.0));
+    float level = mix(0.18, 0.32, fract(kind * 13.37)) * (kind < 0.92 ? 1.0 : 0.6) * min(litXpNight.x, 2.0);
+    return mix(c, tint * level, pane);
 }
 
 // Debug view 6 (FrameLights.hpp kDebugViewLightTiles): how many lights the

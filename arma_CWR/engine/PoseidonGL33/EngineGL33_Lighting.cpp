@@ -375,12 +375,31 @@ void EngineGL33::UpdateLightTiles()
     // The combat lights lead the list, the classic ones follow ranked as
     // before.
     _combat.count = 0;
+    // Experiment xp-nightlight: up to XpNightState::kLampChannels of the mask's channels
+    // are kept for street lamps while the lamp shadows run and a lamp is near
+    // (the combat lights compete for the rest).
+    ReadXpNightEnv();
+    _xpNight.lampChannels = 0;
+    _xpNight.lampMask = false;
+    if (_xpNight.lampShadows && aimBeams && _lighting.postEffects)
+    {
+        int lamps = 0;
+        for (const fl::FrameLight& f : t.lights)
+        {
+            const float d2 = f.pos[0] * f.pos[0] + f.pos[1] * f.pos[1] + f.pos[2] * f.pos[2];
+            if (f.kind == fl::FrameLightKind::Lamp && d2 < XpNightState::kLampDistance * XpNightState::kLampDistance)
+                ++lamps;
+        }
+        _xpNight.lampChannels = std::min(lamps, XpNightState::kLampChannels);
+    }
     if (_combat.active)
     {
         std::vector<fl::FrameLight> combat;
         GatherCombatLights(view, combat);
         _combat.count = fl::MergeCombatFrameLights(t.lights, combat);
     }
+    if (_xpNight.lampChannels > 0)
+        XpAssignLampShadows(view);
 
     const int tilesX = (targetW + fl::kTileSize - 1) / fl::kTileSize;
     const int tilesY = (targetH + fl::kTileSize - 1) / fl::kTileSize;
@@ -397,6 +416,18 @@ void EngineGL33::UpdateLightTiles()
     }
     fl::BinLightsToTiles(t.lights, view, t.grid, aimBeams ? &physical : nullptr);
     fl::PackFrameLights(t.lights, t.texels);
+    // Experiment xp-nightlight: while the mask traces lamps, every street lamp
+    // carries its mask channel + 1 (0 = none) in its beam's x, which a point
+    // lamp does not use (physicalLight reads it while litXpNight.z is 1).
+    if (_xpNight.lampMask)
+    {
+        for (size_t i = 0; i < t.lights.size(); ++i)
+        {
+            const fl::FrameLight& f = t.lights[i];
+            if (f.kind == fl::FrameLightKind::Lamp && !f.hdr)
+                t.texels[i * fl::kTexelsPerLight * 4 + 12] = static_cast<float>(f.shadowSlot + 1);
+        }
+    }
 
     // Upload what changed since the last build (a still camera sends nothing).
     if (t.texels != t.uploadedTexels && !t.texels.empty())
@@ -905,6 +936,10 @@ void EngineGL33::UploadLitFrameConstants()
     // Combat light: the game's combat lights join the tiled list, so
     // only with it.
     _combat.active = _lightTilesActive && _featureGates[rm::Feature::CombatLights].on;
+    // (xp-nightlight) No street lamp traces the mask unless this frame's
+    // tiled list says so (UpdateLightTiles sets them again).
+    _xpNight.lampChannels = 0;
+    _xpNight.lampMask = false;
     if (_lightTilesActive)
     {
         UpdateLightTiles();
@@ -1099,6 +1134,19 @@ void EngineGL33::UploadLitFrameConstants()
         rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
     SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
     _nightLightsActive = night.night[0] > 0.5f;
+    // Experiment xp-nightlight (litXpNight; zero while its switches are off,
+    // which leaves every fragment as the tip draws it): x the window glow's
+    // gain, faded in as the sun sets from 1 degree to -6, only while the
+    // surfaces switch hands the draws their class; y the light bounce's gain;
+    // z 1 while this frame's mask traces street lamps.
+    {
+        ReadXpNightEnv();
+        const float dark = 1.0f - rm::SmoothStep(-6.0f, 1.0f, key.skySunElevationDeg);
+        const bool surfaces = gatesNow && _featureGates[rm::Feature::Surfaces].on;
+        const float window = surfaces ? _xpNight.windowGain * dark : 0.0f;
+        const float lamps = _xpNight.lampMask && _nightLightsActive ? 1.0f : 0.0f;
+        SetSlot(LitConst::XpNight, window, _xpNight.bounceGain, lamps, window > 0.0f && _xpNight.debug ? 1.0f : 0.0f);
+    }
     // Wet weather: the frame's wetness and its flags; zero while the gate
     // is off, which leaves every fragment as before.
     UploadLitWeather();

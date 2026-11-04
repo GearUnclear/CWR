@@ -1644,6 +1644,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litCamera", LC::Camera, 1},
         {"litCameraLook", LC::CameraLook, 1},
         {"litWater2", LC::Water2, 1},
+        {"litXpNight", LC::XpNight, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1739,7 +1740,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     // The photoreal camera follows the surface slots.
     CHECK(static_cast<int>(LC::Camera) == 89);
     CHECK(static_cast<int>(LC::Water2) == static_cast<int>(LC::CameraLook) + 1);
-    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::Water2) + 1);
+    // The experiment xp-nightlight's slot follows the experimental water slot.
+    CHECK(static_cast<int>(LC::XpNight) == static_cast<int>(LC::Water2) + 1);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::XpNight) + 1);
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;

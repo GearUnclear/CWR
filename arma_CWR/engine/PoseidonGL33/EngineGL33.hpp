@@ -1051,6 +1051,40 @@ class EngineGL33 : public Engine
         unsigned int progMask = 0, progBlur = 0, vao = 0;
         bool programsTried = false, unavailable = false;
     } _combat;
+    // Experiment lane xp-nightlight (POSEIDON_XP_WINDOWGLOW, POSEIDON_XP_LIGHTBOUNCE,
+    // POSEIDON_XP_LAMPSHADOWS, read once; POSEIDON_XP_NIGHTLIGHT=1 turns the
+    // bounce and the lamp shadows on, the window glow only by its own switch; a
+    // number above 0 is the gain). All off by default: LitConst::XpNight
+    // stays zero and every frame is the tip's. Window glow: windows and rooms
+    // of static objects glow at night (experimental: see xpWindowGlow). Light bounce: lamps, headlights and fires light
+    // what stands in their pool from below, off the lit ground. Lamp shadows:
+    // street lamps take the combat shadow mask's free channels.
+    struct XpNightState
+    {
+        // Lamps take at most this many mask channels, those within this
+        // distance of the camera (m).
+        static constexpr int kLampChannels = 2;
+        static constexpr float kLampDistance = 60.0f;
+        bool read = false;
+        float windowGain = 0.0f;
+        float bounceGain = 0.0f;
+        bool lampShadows = false;
+        // POSEIDON_XP_SURFTABLE: the surfaces' class table is built before
+        // the first draw asks, not only once wet weather does.
+        bool surfTable = false;
+        // POSEIDON_XP_NIGHTDEBUG: the window glow's candidate surfaces in
+        // flat colours. POSEIDON_XP_WINDOWANY: every static texture counts
+        // as a facade with painted windows (its near-black panes glow).
+        bool debug = false;
+        bool windowAny = false;
+        int lampChannels = 0;  // channels of the mask kept for lamps this frame
+        bool lampMask = false; // this frame's mask traces at least one lamp
+        Poseidon::lighting::ShadowSelection lampSelection;
+    } _xpNight;
+    void ReadXpNightEnv();
+    // Picks the lamps that take a mask channel, fills the mask's slots and marks
+    // the lamps' channels (UpdateLightTiles, after the combat lights took theirs).
+    void XpAssignLampShadows(const Poseidon::lighting::TileView& view);
     void InitCombatResources();
     void DeinitCombatResources();
     // The combat lights of this frame for the tiled list (camera-relative,

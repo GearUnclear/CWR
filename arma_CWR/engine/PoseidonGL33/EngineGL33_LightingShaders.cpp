@@ -187,7 +187,7 @@ void main() {
 }
 )";
 
-static const char s_vsTransformRemasterGLSL[] = R"(#version 330 core
+static const char s_vsTransformRemasterHead[] = R"(#version 330 core
 layout(std140) uniform VSConstants {
     mat4 proj;          // c0-c3
     mat4 view;          // c4-c7
@@ -212,7 +212,11 @@ layout(std140) uniform VSConstants {
 layout(std140) uniform WorldInstances {
     mat4 worldArr[256];
 };
+)";
 
+// The transform vertex shader's body, after the LitConstants block
+// (kTransformVertexPieces).
+static const char s_vsTransformRemasterMain[] = R"(
 layout(location = 0) in vec3 pos;
 layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 uv;
@@ -269,6 +273,18 @@ void main() {
     vWorldRel        = worldPos.xyz; // camera-relative world position
     vNormalW         = worldNormal;
     vLitMode         = 1.0;
+    // (xp-nightlight) While the window glow is on, the object's hash (its
+    // origin's world position to the metre) rides in vLitMode as 1 to 1.4,
+    // inside every lit test's (0.5, 1.5); exactly 1 while it is off.
+    if (litXpNight.x > 0.0) {
+        vec3 o = worldArr[gl_InstanceID][3].xyz + litCamPos.xyz;
+        uvec2 q = uvec2(ivec2(floor(o.xz + 0.5)) + ivec2(65536));
+        uint h = (q.x * 0x9e3779b1u) ^ ((q.y + 0x7f4a7c15u) * 0x85ebca6bu);
+        h ^= h >> 15;
+        h *= 0x2c1b3c6du;
+        h ^= h >> 12;
+        vLitMode = 1.0 + 0.4 * (float(h >> 12) / 1048576.0);
+    }
     // Crown frame for foliage: the position inside an ellipsoid fitted to the
     // shape (w = 1 on its surface) and the ellipsoid's outward normal, which
     // lights a tree crown as one volume instead of as scattered leaf cards.
@@ -447,6 +463,7 @@ layout(std140) uniform LitConstants {
     vec4 litCamera;       // 89: photo camera: x 1 = write scene light (camEncode), y additive pre-lit scale, z sky scale, w pre-exposure
     vec4 litCameraLook;   // 90: photo camera's look: x weather veil, y lamp ambient kept, z lamp gain, w low-sun sky blue
     vec4 litWater2;       // 91: XP shore: x parts mask (1 shallow, 2 foam, 4 wet sand, 8 wave masking; 0 off), y time (s), z sea surface (m), w swash line (m)
+    vec4 litXpNight;      // 92: xp-nightlight: x window glow gain, y light bounce gain, z lamps in the combat mask
 };
 )";
 
@@ -914,6 +931,8 @@ float g_sunVisibility = 1.0;
 // night-eye desaturation (finishFragment) is a model of dim moonlit vision; a
 // surface lit by a flash or a fire keeps its colour.
 float g_combatShare = 0.0;
+// (xp-nightlight) How far the window glow makes a blending pane opaque.
+float g_xpGlowCover = 0.0;
 
 // Tree crowns lit as a canopy (crownCanopy, litHorizonSun.w). The sun reaching a leaf crosses the crown in front of it:
 // the path, in crown radii, from the leaf to the crown's surface toward the
@@ -1210,6 +1229,18 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
                             exposure +
                         wetEnv;
     }
+    // (xp-nightlight) Lit rooms behind static glass at night: their light
+    // leaves the occlusion's and the sun's shares and the night eye alone.
+    g_xpGlowCover = 0.0;
+    if (litXpNight.x > 0.0 && !terrain) {
+        vec3 glow = xpWindowGlow(albedo, n, g_xpGlowCover) * exposure;
+        float before = max(dot(radiance, kLuma), 1e-5);
+        radiance += glow;
+        float keep = before / max(dot(radiance, kLuma), 1e-5);
+        g_surfShare *= keep;
+        g_surfSun *= keep;
+        g_xpGlowShare = 1.0 - keep;
+    }
     float total = dot(radiance, kLuma);
     ambientShare = clamp(dot(a * ambient * wetKeep * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0) * (1.0 - wetMirror);
     g_combatShare = clamp(dot((a * combat + combatGloss) * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
@@ -1319,6 +1350,8 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
         float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
         // A surface lit by combat light keeps its colour (0 without one).
         nightBlend = max(nightBlend, sqrt(g_combatShare));
+        // (xp-nightlight) And so does a lit window (0 without one).
+        nightBlend = max(nightBlend, sqrt(g_xpGlowShare));
         // Lit surfaces fade toward a slightly cool grey of the same luminance:
         // the dark-adapted eye sees moonlit ground pale and cool, not neutral.
         // Only blue is raised, so a half-faded warm surface does not turn
@@ -1428,6 +1461,8 @@ void main() {
         }
         r0.rgb = shadeRemastered(albedo, false, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
+        // (xp-nightlight) A lit room shows through a blending pane.
+        if (g_xpGlowCover > 0.0 && surfClass.z > 0.5) r0.a = max(r0.a, g_xpGlowCover * 0.9);
     } else {
         r0 = vColor * t0;
         r0 *= constColor;
@@ -1439,6 +1474,11 @@ void main() {
         // (a dimmed colour alone drew a dark disk over the sky).
         if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
             r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
+        // (xp-nightlight) A static object's pre-lit section (the classic
+        // T&L path, no world position): the debug map paints it orange;
+        // under window-any its dark, cool texels glow as panes.
+        if (litXpNight.x > 0.0 && abs(vLitMode) < 0.5 && int(surfClass.y + 0.5) == 3)
+            r0.rgb = xpPrelitWindow(r0.rgb, t0.rgb);
     }
     finishFragment(r0, ambientShare, true);
 }
@@ -1996,6 +2036,12 @@ const char* const kScreenVertexPieces[] = {
     kLitConstantsBlockGLSL,
     s_vsScreenRemasterMain,
 };
+// The transform vertex shader likewise (it reads litXpNight and litCamPos).
+const char* const kTransformVertexPieces[] = {
+    s_vsTransformRemasterHead,
+    kLitConstantsBlockGLSL,
+    s_vsTransformRemasterMain,
+};
 } // namespace
 
 const char* RemasterVertexSource(int vs)
@@ -2016,9 +2062,15 @@ const char* RemasterVertexSource(int vs)
         }
         case VSTransform:
         {
-            // The experimental switches (XpFoliageDefines) after #version;
-            // unset, the tip's text.
-            static const std::string transform = WithXpDefines(s_vsTransformRemasterGLSL, XpFoliageDefines(false));
+            // Joined once (kTransformVertexPieces), then the experimental
+            // switches (XpFoliageDefines) after #version; unset, the tip's text.
+            static const std::string transform = []
+            {
+                std::string joined;
+                for (const char* piece : kTransformVertexPieces)
+                    joined += piece;
+                return WithXpDefines(joined.c_str(), XpFoliageDefines(false));
+            }();
             return transform.c_str();
         }
         case VSShadow:

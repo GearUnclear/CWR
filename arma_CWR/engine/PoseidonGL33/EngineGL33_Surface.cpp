@@ -28,7 +28,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <initializer_list>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace Poseidon::gl33lighting;
@@ -44,9 +47,44 @@ namespace
 struct SurfClassProgram
 {
     int loc = -2;
-    float v[3] = {-1.0f, -1.0f, -1.0f};
+    float v[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
 };
 std::vector<SurfClassProgram> s_surfClassPrograms;
+
+// Experiment xp-nightlight (window glow): what a texture's name says of a
+// house's windows, kept per texture the first time a draw asks while the
+// window glow runs: 2 an inside surface (a room's wall, ceiling or floor),
+// 1 a window, its frame or its black fill (the stock data's Czech okno, okna,
+// okenice, or glass words, black_sum), 0 neither. With POSEIDON_XP_NIGHTLOG
+// set, each texture's first draw is logged (name, kind, class, hint, blend,
+// average colour; at most kXpLogLines lines) to find a scene's window
+// textures.
+std::unordered_map<const TextureGL33*, unsigned char> s_xpWindowHint;
+int s_xpLogLines = 0;
+constexpr int kXpLogLines = 1500;
+
+unsigned char XpWindowName(const char* name)
+{
+    if (!name)
+        return 0;
+    std::string s(name);
+    for (char& ch : s)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    auto any = [&s](std::initializer_list<const char*> tokens)
+    {
+        for (const char* token : tokens)
+            if (s.find(token) != std::string::npos)
+                return true;
+        return false;
+    };
+    if (any({"lamp", "svetl"}))
+        return 0;
+    if (any({"_in", "stenain", "strop", "podlaha", "vnitr", "lino"}))
+        return 2;
+    if (any({"okn", "okenic", "window", "sklo", "skla", "glass", "black_sum", "blck_sum"}))
+        return 1;
+    return 0;
+}
 } // namespace
 
 bool EngineGL33::SurfaceWanted() const
@@ -179,6 +217,7 @@ void EngineGL33::SurfaceEnterInterior()
 void EngineGL33::ResetSurfaceClassPrograms()
 {
     s_surfClassPrograms.clear();
+    s_xpWindowHint.clear();
     _surfBoundProgram = 0;
     ResetDecalBatchPrograms(); // the decal batch's uniform cache (W4-1), keyed the same way
 }
@@ -191,18 +230,51 @@ void EngineGL33::ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::Ren
     // and the drawing object's kind, classified once per texture and kind and
     // kept on it; TextureGL33::SurfaceClassFor) and its object kind.
     const bool onSurface = d.surface == Poseidon::render::SurfaceMode::OnSurface;
+    // (xp-nightlight, POSEIDON_XP_SURFTABLE) The class table is otherwise
+    // built only once wet weather, a decal batch or a fog view asks for it,
+    // so in dry weather every texture reads class 0 until then.
+    ReadXpNightEnv();
+    if (_xpNight.surfTable)
+        EnsureSurfaceTable();
     const rm::SurfaceClass cls = tex ? tex->SurfaceClassFor(_surfaceTable, _surfaceTableGen, d.objectKind, onSurface)
                                      : rm::KindDefaultClass(d.objectKind, onSurface);
     const bool blend = tex && tex->GetAlphaClass() == Poseidon::AlphaStats::Blend;
-    const float v[3] = {static_cast<float>(cls), static_cast<float>(d.objectKind), blend ? 1.0f : 0.0f};
+    // (xp-nightlight) w: 1 on a texture whose name names windows, 2 on a
+    // room's inside, 3 on any other texture under window-any, while the
+    // window glow runs; 0 otherwise, as before.
+    float hint = 0.0f;
+    if (tex && _xpNight.windowGain > 0.0f)
+    {
+        auto it = s_xpWindowHint.find(tex);
+        if (it == s_xpWindowHint.end())
+        {
+            const unsigned char named = XpWindowName(static_cast<const char*>(tex->GetName()));
+            it = s_xpWindowHint.emplace(tex, named).first;
+            static const bool log = std::getenv("POSEIDON_XP_NIGHTLOG") != nullptr;
+            if (log && s_xpLogLines < kXpLogLines)
+            {
+                ++s_xpLogLines;
+                const Color avg = tex->GetColor();
+                LOG_INFO(Graphics, "xp-nightlight tex '{}' kind {} class {} hint {} blend {} avg {:.3f} {:.3f} {:.3f}",
+                         static_cast<const char*>(tex->GetName()), static_cast<int>(d.objectKind),
+                         static_cast<int>(cls), static_cast<int>(named), blend ? 1 : 0, avg.R(), avg.G(), avg.B());
+            }
+        }
+        hint = static_cast<float>(it->second);
+        // Window-any: 3, a facade with painted windows (on a static object
+        // or one drawn without a kind).
+        if (hint == 0.0f && _xpNight.windowAny)
+            hint = 3.0f;
+    }
+    const float v[4] = {static_cast<float>(cls), static_cast<float>(d.objectKind), blend ? 1.0f : 0.0f, hint};
     if (_surfBoundProgram >= s_surfClassPrograms.size())
         s_surfClassPrograms.resize(_surfBoundProgram + 64);
     SurfClassProgram& sp = s_surfClassPrograms[_surfBoundProgram];
     if (sp.loc == -2)
         sp.loc = glGetUniformLocation(_surfBoundProgram, "surfClass");
-    if (sp.loc < 0 || (v[0] == sp.v[0] && v[1] == sp.v[1] && v[2] == sp.v[2]))
+    if (sp.loc < 0 || (v[0] == sp.v[0] && v[1] == sp.v[1] && v[2] == sp.v[2] && v[3] == sp.v[3]))
         return;
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         sp.v[i] = v[i];
     // xp-gpuprofile (POSEIDON_XP_EARLYZ=1): the program and its early-depth
     // twin, either of which may be bound, take the value by name.
@@ -213,10 +285,10 @@ void EngineGL33::ApplySurfaceClass(TextureGL33* tex, const Poseidon::render::Ren
         SurfClassProgram& tp = s_surfClassPrograms[twin];
         if (tp.loc == -2)
             tp.loc = glGetUniformLocation(twin, "surfClass");
-        glProgramUniform4f(_surfBoundProgram, s_surfClassPrograms[_surfBoundProgram].loc, v[0], v[1], v[2], 0.0f);
+        glProgramUniform4f(_surfBoundProgram, s_surfClassPrograms[_surfBoundProgram].loc, v[0], v[1], v[2], v[3]);
         if (tp.loc >= 0)
-            glProgramUniform4f(twin, tp.loc, v[0], v[1], v[2], 0.0f);
+            glProgramUniform4f(twin, tp.loc, v[0], v[1], v[2], v[3]);
         return;
     }
-    glUniform4f(sp.loc, v[0], v[1], v[2], 0.0f);
+    glUniform4f(sp.loc, v[0], v[1], v[2], v[3]);
 }

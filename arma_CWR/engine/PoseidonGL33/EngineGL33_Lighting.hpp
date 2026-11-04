@@ -490,7 +490,12 @@ enum : int
     // y time (s, wrapped), z the sea's surface (m, with the wave), w the swash
     // line (m).
     Water2 = 91,
-    Count = 92,
+    // Experiment xp-nightlight (zero while its switches are off, which leaves
+    // every fragment as before): x the window glow's gain (times the night's
+    // fade), y the light bounce's gain, z 1 while the combat shadow mask
+    // traces street lamps, w 1 for the glow's debug map (POSEIDON_XP_NIGHTDEBUG).
+    XpNight = 92,
+    Count = 93,
 };
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
@@ -517,7 +522,8 @@ static_assert(Surface3 == SurfaceSh + SurfaceShCount, "LitConst surface slots ou
 static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots");
 static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
 static_assert(Water2 == CameraLook + 1, "the experimental water slot follows the camera's look");
-static_assert(Count == Water2 + 1, "LitConst size out of sync");
+static_assert(XpNight == Water2 + 1, "the xp-nightlight slot follows the experimental water slot");
+static_assert(Count == XpNight + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to features not yet in the block, so no two features
