@@ -957,7 +957,8 @@ class EngineGL33 : public Engine
     Poseidon::remaster::WetnessFrame _wetFrame;
     bool _wetShading = false;
     // The surface rules: the stock table and the config's CfgSurfaceMaterials,
-    // built at the first wet frame. Each texture classifies itself once per
+    // built at the first lit draw that asks for a class (ApplySurfaceClass, the
+    // wet weather, a decal batch or a fog view). Each texture classifies itself once per
     // object kind against the table of its generation (TextureGL33).
     Poseidon::remaster::SurfaceTable _surfaceTable;
     int _surfaceTableGen = 0; // 0 = not built

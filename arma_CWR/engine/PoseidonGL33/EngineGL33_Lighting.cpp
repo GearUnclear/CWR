@@ -1131,7 +1131,7 @@ void EngineGL33::EnsureSurfaceTable()
     }
     rm::MergeSurfaceRules(_surfaceTable, rules);
     _surfaceTableGen = 1;
-    LOG_INFO(Graphics, "GL33 wet weather: {} surface rules, {} from CfgSurfaceMaterials", _surfaceTable.rules.size(),
+    LOG_INFO(Graphics, "GL33 surface table: {} surface rules, {} from CfgSurfaceMaterials", _surfaceTable.rules.size(),
              rules.size());
 }
 
