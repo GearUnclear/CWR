@@ -2,6 +2,7 @@
 
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Core/Visual.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
 
@@ -66,6 +67,13 @@ protected:
 	int Compare( const Light &with ) const;
 	bool operator < ( const Light &with ) const {return Compare(with)<0;}
 	bool operator > ( const Light &with ) const {return Compare(with)>0;}
+    // What the light is, for the frame's light list (FrameLights.hpp): set by
+    // the code that creates it. A spotlight is a Spot whatever this says.
+    lighting::FrameLightKind Kind() const { return _kind; }
+    void SetKind(lighting::FrameLightKind kind) { _kind = kind; }
+
+  protected:
+    lighting::FrameLightKind _kind = lighting::FrameLightKind::Classic;
 };
 
 // basic directional+ambient light

@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Game/OperMap.hpp>
@@ -317,8 +318,14 @@ __forceinline float Bilint(float y00, float y01, float y10, float y11, float xf,
 
 static Vector3 WaterNormal(0, -1, 0);
 
-// const int WaterFlags = IsWater|SpecularTexture;
-
+// The sea's faces carry the specular layer alone (data\specular_dx.paa, a
+// ripple pattern in its alpha), so they draw through the detail program like
+// the terrain. They never carry IsWater: that bit selects the engine's water
+// family, whose classic shader binds the detail texture as a bump map (the
+// waterBump texture of the remaster config does not exist). The remastered sea
+// is routed explicitly instead: DrawWater opens Engine::BeginSea around these
+// faces' draws, and the backend draws them with its water program while the
+// feature switch seaWaves is on.
 const int WaterFlags = SpecularTexture;
 
 #define SEAMS 1
@@ -1144,6 +1151,42 @@ static AnimatorDefault GAnimatorWater(Color(0.8, 0.8, 0.8));
 
 void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
 {
+    // The remastered sea (feature switch seaWaves, Graphics/Remaster/
+    // SeaWaves.hpp): the backend draws the faces below with its water program
+    // and cross-fades the animation frame they carry (AnimateTexture in the
+    // loop) into its neighbour, so the waves it derives from the texture do
+    // not pop at each frame switch. Classic and the switch off draw them as
+    // before.
+    {
+        float texPhase = fastFmod(Glob.time.toFloat(), 2);
+        if (texPhase > 1.0f)
+        {
+            texPhase = 2 - texPhase;
+        }
+        Texture* sea = _texture[0];
+        Texture* other = nullptr;
+        float otherWeight = 0.0f;
+        const int frames = sea ? sea->AnimationLength() : 1;
+        if (frames > 1)
+        {
+            PolyProperties faces;
+            faces.Init();
+            faces.SetTexture(sea);
+            faces.AnimateTexture(texPhase);
+            int bound = 0;
+            for (int i = 0; i < frames; i++)
+            {
+                if (sea->GetAnimation(i) == faces.GetTexture())
+                {
+                    bound = i;
+                }
+            }
+            const remaster::SeaFrameBlend blend = remaster::SeaAnimationBlend(texPhase, frames, bound);
+            other = sea->GetAnimation(blend.other);
+            otherWeight = blend.otherWeight;
+        }
+        GEngine->BeginSea(other, otherWeight);
+    }
     for (int x = bigRect.xBeg; x < bigRect.xEnd; x += LandSegmentSize)
     {
         for (int z = bigRect.zBeg; z < bigRect.zEnd; z += LandSegmentSize)
@@ -1214,6 +1257,7 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
             }
         }
     }
+    GEngine->EndSea();
 }
 
 struct GroundLayerInfo
@@ -1534,6 +1578,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 
     GEngine->FlushQueues();
+    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::GroundDrawn);
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
     GEngine->EnableReorderQueues(true);
     // draw non-alpha objects
@@ -1581,6 +1626,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 #endif
     GEngine->FlushQueues();
+    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::ObjectsDrawn);
 
     // draw alpha objects and shadows
     scene.DrawObjectsAndShadowsPass2();
@@ -1673,7 +1719,11 @@ void Landscape::DrawSky(Scene& scene)
     float clipLevel = skyPosition.Y();
     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
 
+    // The remastered sky table shades the dome, and the clouds switches light
+    // its clouds and turn it with the sky's drift (a no-op when they are off).
+    GEngine->BeginRemasterSky(RemasterSky::Dome);
     _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
+    GEngine->EndRemasterSky();
     float starsVisibility = (
         // see TLVertexMesh::DoStarLighting
         // overcast limitation
@@ -1686,7 +1736,11 @@ void Landscape::DrawSky(Scene& scene)
     }
     scene.GetCamera()->CancelUserClip();
 
+    // With the sky-matched cloud shadows the sun disk dims behind a dome cloud
+    // (a no-op when they are off).
+    GEngine->BeginRemasterSky(RemasterSky::Sun);
     _sunObject->Draw(0, ClipAll & ~ClipBack, *_sunObject);
+    GEngine->EndRemasterSky();
     _moonObject->Draw(0, ClipAll & ~ClipBack, *_moonObject);
 }
 
@@ -1728,6 +1782,10 @@ void Landscape::DrawClouds(Scene& scene)
         }
     }
     // scene.GetCamera()->SetUserClip(1);
+    // The remastered sky pass: with the sky table on, the clouds fade into its
+    // horizon colour with their fog; with lit clouds on, their sun-facing
+    // edges catch the sun (a no-op when both are off).
+    GEngine->BeginRemasterSky(RemasterSky::Clouds);
     AUTO_STATIC_ARRAY(CloudInfo, clouds0, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds1, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds2, 1024);
@@ -1825,6 +1883,7 @@ void Landscape::DrawClouds(Scene& scene)
             }
         }
     }
+    GEngine->EndRemasterSky();
 }
 
 void Landscape::Draw(Scene& scene)

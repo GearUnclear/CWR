@@ -5,6 +5,7 @@
 #include <Poseidon/AI/Path/AITypes.hpp>
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/Graphics/Remaster/Wetness.hpp>
 
 namespace Poseidon { class TaskPool; }
 namespace Poseidon
@@ -292,6 +293,7 @@ class Weather
 	float _overcastSetClouds;
 	float _fogSet;
 	float _cloudsPos;
+    bool _cloudsHeld; // captures: the sky clouds hold still (Landscape::HoldClouds)
 		
 	Ref<Texture> _sky;
 	float _cloudsAlpha;
@@ -300,6 +302,11 @@ class Weather
 	float _skyThrough;
 
 	float _rainDensity,_rainDensityWanted,_rainDensitySpeed;
+    // How wet the world is (the remastered wet weather, Wetness.hpp): stepped
+    // with the weather in MoveClouds; a rain change made at once (SetRain over
+    // under a second) snaps it to what that rain settles at on the next step.
+    Poseidon::remaster::WetnessState _wetness;
+    bool _wetnessSnap = true;
 
 	Poseidon::Foundation::Time _thunderBoltTime;
 	Vector3 _windSpeed;
@@ -319,9 +326,16 @@ class Weather
 	void SetOvercast( Landscape *land, float overcast );
 	void SetRain (float density, float time);
 	float GetOvercast() const;
+    // Deterministic-world captures (DET-3, triSetSimTime): the wind and gust
+    // walks and the thunder clock start again at the pinned time, as at a new
+    // weather, so a view no longer sees the wind everything simulated since
+    // boot left behind. Play never calls it.
+    void RestartRandomWalks();
 
 	void SetFog( Landscape *land, float fog );
 	float GetFog() const {return _fogSet;}
+
+    const Poseidon::remaster::WetnessState& GetWetness() const { return _wetness; }
 
 	Texture *SkyTexture() const {return _sky;}
 };
@@ -664,6 +678,8 @@ class Landscape: public SerializeClass
 	float ClippedData( int z, int x ) const;
 	Texture *ClippedTexture( int z, int x ) const;
 	int ClippedTextureIndex( int z, int x ) const;
+    // How many textures the land's cells index (an index at or past it has none).
+    int TextureCount() const { return _texture.Size(); }
 
 	int ClampFlags( int txt ) const
 	{
@@ -790,12 +806,17 @@ class Landscape: public SerializeClass
 
 	// control weather	
 	float GetRainDensity() const {return _weather._rainDensity;}
+    // The world's wetness (surfaces and puddles), for the remastered wet weather
+    const Poseidon::remaster::WetnessState& GetWetness() const { return _weather.GetWetness(); }
 	float GetOvercast() const {return _weather.GetOvercast();}
 	void SetOvercast( float overcast ) {_weather.SetOvercast(this,overcast);}
 	void SetFog( float fog ) {_weather.SetFog(this,fog);}
+    float GetFog() const { return _weather.GetFog(); }
 	void SetRain(float density, float time){_weather.SetRain(density,time);}
+    void RestartWeatherWalks() { _weather.RestartRandomWalks(); }
 	void Simulate( float deltaT );
 	float GetSeaLevel() const {return _seaLevelWave;}
+    float GetSeaLevelNoWave() const { return _seaLevel; } // the tide alone
 	void SetSeaWaveSpeed( float seaWaveSpeed ) {_seaWaveSpeed=seaWaveSpeed;}
 
 	Vector3 GetWind() const;
@@ -805,6 +826,14 @@ class Landscape: public SerializeClass
 	// query weather
 	Texture *SkyTexture();
 	float CloudsPosition() const {return _weather._cloudsPos;}
+    // Captures: hold the sky clouds at `pos` (they move with the simulation
+    // step otherwise, so re-pinning the sim clock does not put them back).
+    void HoldClouds(bool held, float pos)
+    {
+        _weather._cloudsHeld = held;
+        if (held)
+            _weather._cloudsPos = pos;
+    }
 	float SkyThrough() const {return _weather._skyThrough;}
 	float CloudsAlpha() const {return _weather._cloudsAlpha;}
 	float CloudsBrightness() const {return _weather._cloudsBrightness;}

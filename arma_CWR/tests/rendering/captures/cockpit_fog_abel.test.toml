@@ -1,0 +1,10 @@
+# Fog in vehicle cockpits (Remastered lighting) on Abel, no mods: the far
+# ground seen out of a heli canopy and a jeep (windscreen and open side) must
+# change between a clear day and weather fog, and the instrument panel must
+# not; fails when the interior views draw no fog.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_abel.Abel"
+tags = ["lighting_fog", "headful", "exclusive"]
+timeout = 300
+assert_timeout = 120
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "960", "--height", "640"]

@@ -136,6 +136,8 @@ set(POSEIDON_TEST_SOURCES
     # Graphics tests
     Graphics/test_alpha_classify.cpp
     Graphics/test_shadowmap_math.cpp
+    Graphics/test_shadow_xp.cpp
+    Graphics/test_look_options.cpp
     Graphics/test_paa_decode_fixtures.cpp
     Graphics/test_paa_decoder.cpp
     Graphics/test_shape_loader.cpp
@@ -162,10 +164,35 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_vertex_color_byte_order.cpp
     Graphics/test_ubo_restore_guards.cpp
     Graphics/test_shader_named_outputs.cpp
+    Graphics/test_remaster_lighting.cpp
+    Graphics/test_feature_switches.cpp
+    Graphics/test_gpu_timings.cpp
+    Graphics/test_perf_counters.cpp
+    Graphics/test_ubo_mirror.cpp
+    Graphics/test_post_stages.cpp
+    Graphics/test_temporal_aa.cpp
+    Graphics/test_temporal_determinism.cpp
+    Graphics/test_atmosphere.cpp
+    Graphics/test_terrain_detail.cpp
+    Graphics/test_sun_shadows.cpp
+    Graphics/test_frame_lights.cpp
+    Graphics/test_world_program_dedupe.cpp
+    Graphics/test_sea_waves.cpp
+    Graphics/test_sky_density.cpp
+    Graphics/test_canopy.cpp
+    Graphics/test_volumetric_fog.cpp
+    Graphics/test_air_medium.cpp
+    Graphics/test_night_lights.cpp
+    Graphics/test_screen_reflections.cpp
+    Graphics/test_wet_weather.cpp
+    Graphics/test_combat_lights.cpp
+    Graphics/test_surface_light.cpp
+    Graphics/test_photo_camera.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp
     Graphics/test_window_placement.cpp
+    Graphics/test_frame_recorder.cpp
 )
 
 if(WIN32)
@@ -246,6 +273,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Rendering tests (batch-06)
     Graphics/Rendering/test_shape.cpp
     Graphics/Rendering/test_shape_section_inheritance.cpp
+    Graphics/Rendering/test_shape_late_vertex_buffers.cpp
     Graphics/Rendering/test_render_flags.cpp
     Graphics/Rendering/test_render_pass_descriptor.cpp
     Graphics/Rendering/test_build_render_pass_descriptor.cpp
@@ -263,6 +291,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Rendering/test_render_frame_perf_budget.cpp
     Graphics/Rendering/test_render_frame_runtime_checks.cpp
     Graphics/Rendering/test_cloudlet_depth_contract.cpp
+    Graphics/Rendering/test_decal_batch_rules.cpp
 
     # Rendering tests (batch-07)
     Graphics/Rendering/test_colors_materials.cpp
@@ -270,6 +299,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # World tests (batch-08)
     World/test_terrain.cpp
     World/test_landscape_object_ids.cpp
+    World/test_fog_sight_link.cpp
     World/test_occlusion_contour.cpp
     World/test_occlusion_sphere_edge.cpp
     World/test_landscape_layout.cpp
@@ -331,6 +361,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/Settings/test_displayConfig.cpp
     UI/Settings/test_display_startup_overrides.cpp
     UI/Settings/test_graphicsConfig.cpp
+    UI/Settings/test_graphicsApply.cpp
     UI/Settings/test_gameSettingsConfig.cpp
     UI/Settings/test_viewDistance.cpp
     UI/Settings/test_contextControlsConfig.cpp
@@ -376,6 +407,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Scene/Camera tests (batch-17)
     World/Scene/test_camera_enums.cpp
+    World/Scene/test_draw_list_sort.cpp
 
     # Game tests
     Game/test_game_state_ext.cpp
@@ -417,6 +449,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/test_titeffects_split.cpp
     Game/test_tri_generic_asserts.cpp
     Game/test_tri_value_getters.cpp
+    Game/test_tri_capture_verbs.cpp
+    Game/test_tri_perf_verbs.cpp
     Dev/Debug/test_dev_mode_gates.cpp
 
     # Network tests
@@ -466,8 +500,14 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_object.cpp
     World/Scene/test_scene.cpp
     World/Scene/test_scene_preloader.cpp
+    World/Scene/test_shape_draw_order.cpp
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
+    World/Scene/test_instanced_run_rules.cpp
+    World/Scene/test_land_fit_cache.cpp
+    World/Scene/test_terrain_occlusion.cpp
+    World/Scene/test_streetlamp_casting.cpp
+    World/Scene/test_occlusion_range.cpp
 
     # Core subsystem tests
     UI/Locale/test_stringtable_system.cpp

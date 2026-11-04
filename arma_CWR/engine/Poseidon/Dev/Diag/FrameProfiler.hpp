@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <string>
 
 namespace Poseidon
 {
@@ -131,6 +132,15 @@ class FrameProfiler
         _head = 0;
         _count = 0;
     }
+
+    // The last n frames of the ring, oldest first (n <= 0 or more than the
+    // ring holds: every frame it holds), for triPerfRing.
+    // RingLog: "total,drw:obj,swap,land:obj,drw:land;" per frame, the round-1
+    // triPerfRing log format the measurement parsers read.
+    // RingCsv: a header line "i,total,<every phase name>,draws", then one line
+    // per frame (i = 0 for the oldest), times in ms with two decimals.
+    std::string RingLog(int n) const;
+    std::string RingCsv(int n) const;
 
   private:
     using Clock = std::chrono::steady_clock;

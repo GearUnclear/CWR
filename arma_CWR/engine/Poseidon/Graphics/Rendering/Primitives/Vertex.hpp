@@ -3,6 +3,7 @@
 
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
+#include <Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp>
 
 namespace Poseidon
 {
@@ -39,6 +40,9 @@ public:
 	virtual void GetMaterial(TLMaterial &mat, int index) const = 0;
 	// check if given shape is animated
 	virtual bool GetAnimated(const Shape &src) const = 0;
+    // what kind of object draws the shape (the remastered materials read it
+    // through the draw descriptor); Unknown when the animator is no object
+    virtual render::DrawObjectKind GetDrawObjectKind() const { return render::DrawObjectKind::Unknown; }
 };
 
 // hints: different handling of object/surface relations

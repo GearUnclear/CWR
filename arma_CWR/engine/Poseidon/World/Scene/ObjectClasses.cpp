@@ -205,6 +205,8 @@ void StreetLampType::DeinitShape()
     base::DeinitShape();
 }
 
+DEFINE_CASTING(StreetLamp)
+
 StreetLamp::StreetLamp(LODShapeWithShadow* shape, StreetLampType* type, int id)
     : base(shape, type, id), _pilotLight(true), _lightPos(shape->MemoryPoint("light"))
 {
@@ -248,6 +250,7 @@ void StreetLamp::CreateLight(Matrix4Par pos)
         {
             Ref<LODShapeWithShadow> shape = GLOB_SCENE->Preloaded(HalfLight);
             _light = new LightPointVisible(shape, Type()->_colorDiffuse, Type()->_colorAmbient);
+            _light->SetKind(lighting::FrameLightKind::Lamp);
             _light->SetPosition(pos.FastTransform(_lightPos));
             _light->SetBrightness(Type()->_brightness);
             //_light->SetDirection(Vector3(0,-1,0),Vector3(0,0,1));

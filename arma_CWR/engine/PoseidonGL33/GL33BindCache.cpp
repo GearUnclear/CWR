@@ -3,6 +3,8 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/RuntimeChecks.hpp>
 
+extern bool AutoTest; // Foundation/Platform/Shutdown.cpp
+
 namespace Poseidon
 {
 namespace GL33Bind
@@ -47,7 +49,8 @@ void Tex2D(int unit, unsigned int tex)
     if (unit >= 0 && unit < kUnits && g_tex[unit] == tex)
     {
         ActiveUnit(unit);
-        // B-007 tripwire (active in every build, incl. RWDI/test): the skip is
+        // B-007 tripwire (in every build, under --autotest: tri and the test
+        // missions; perf W1-6, S3-29d keeps the glGet out of play): the skip is
         // honest only if GL really holds `tex` on this unit. A mismatch is the
         // divergence class from a deleted/recycled handle or a bind outside the
         // cache without Invalidate. Non-fatal: the next non-skip bind
@@ -55,7 +58,7 @@ void Tex2D(int unit, unsigned int tex)
         // 1 of every 64 skips per unit — a divergence is persistent (a poisoned
         // binding stays wrong until rebound), so per-unit sampling still catches it
         // within a sub-frame while keeping glGetIntegerv off the per-skip path.
-        if ((g_texSkipCtr[unit]++ & 63u) == 0)
+        if (::AutoTest && (g_texSkipCtr[unit]++ & 63u) == 0)
         {
             GLint live = 0;
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &live);

@@ -17,6 +17,9 @@
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -28,6 +31,8 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -35,6 +40,11 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
+#include <Poseidon/World/Scene/ShapeDrawOrder.hpp>
+#include <Poseidon/World/Scene/InstancedRunRules.hpp>
+#include <Poseidon/World/Scene/TerrainOcclusion.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
@@ -50,10 +60,12 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/AI/AI.hpp> // remove dependency
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Foundation/Algorithms/Qsort.hpp>
+#include <Poseidon/World/Scene/DrawListSort.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <time.h>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/World/Terrain/Occlusion.hpp>
+#include <Poseidon/World/Scene/OcclusionRange.hpp>
 
 using namespace Poseidon;
 
@@ -67,78 +79,55 @@ SRef<Occlusion>& GetOcclusions();
 
 typedef Ref<SortObject> SortObjectItem;
 
-static int CmpRevDistObj(const SortObjectItem* p1, const SortObjectItem* p0)
+// W3-11: the draw-list sorts read each entry's key once into a contiguous array
+// and sort that (DrawListSort.hpp), into exactly the order QSort with the old
+// per-entry comparators gave, ties included. The keys are the old comparators'
+// inputs; the key comparisons are the old comparisons.
+
+// The occluder list: the first object is the nearest one (was CmpRevDistObj).
+static void SortNearestFirst(SortObjectItem* items, int n)
 {
-    // the first object is the nearest one
-    const SortObject* o0 = *p0;
-    const SortObject* o1 = *p1;
-    Coord dif = o0->distance2 - o1->distance2;
-    if (dif < 0)
-    {
-        return -1;
-    }
-    if (dif > 0)
-    {
-        return +1;
-    }
-    return 0;
+    static DrawListSort::Scratch<float, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n, [](const SortObject* o) { return o->distance2; },
+        [](float a, float b) { return DrawListSort::CompareRevDistance(a, b); }, scratch);
 }
 
-// far-to-near by camera-space depth, for the alpha pass (see AlphaSortOrder.hpp)
-static int CmpRevAlphaSortObj(const SortObjectItem* p1, const SortObjectItem* p0)
+// Far-to-near by camera-space depth, for the alpha pass (see AlphaSortOrder.hpp;
+// was CmpRevAlphaSortObj).
+static void SortAlphaFarToNear(SortObjectItem* items, int n)
 {
-    return AlphaSort::CompareAlphaDepth((*p1)->zCoord, (*p0)->zCoord);
+    static DrawListSort::Scratch<float, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n, [](const SortObject* o) { return o->zCoord; },
+        [](float a, float b) { return DrawListSort::CompareAlphaKeys(a, b); }, scratch);
+}
+
+// Pass ascending; between shapes, simple shapes first then shape identity; within a
+// shape, coarse LODs (large LOD numbers) first, then back to front (helps alpha
+// transparency). Shape identity compares addresses, never a truncated pointer
+// difference (W1-7): see Scene/ShapeDrawOrder.hpp. Simple = the LOD-0 face count,
+// read once per entry (a null LOD 0 counts 0; the old comparator dereferenced it).
+static DrawListSort::ShapeKey MakeShapeKey(const SortObject* o)
+{
+    const LODShape* shape = o->object->GetShape();
+    const Shape* level0 = shape->Level(0);
+    return DrawListSort::ShapeKey{{o->passNum, shape, o->drawLOD, o->distance2}, level0 ? level0->NFaces() : 0};
 }
 
 static int CmpShapeObj(const SortObjectItem* p1, const SortObjectItem* p2)
 {
-    const SortObject* o1 = *p1;
-    const SortObject* o2 = *p2;
-
-    // first sort by pass
-    int sDif = o1->passNum - o2->passNum;
-    if (sDif)
-    {
-        return sDif;
-    }
-
-    LODShape* s1 = o1->object->GetShape();
-    LODShape* s2 = o2->object->GetShape();
-    sDif = (intptr_t)s2 - (intptr_t)s1;
     // no invisible LODs here
-    if (sDif)
-    {
-        Shape* ss1 = s1->Level(0);
-        Shape* ss2 = s2->Level(0);
-        int complex1 = ss1->NFaces();
-        int complex2 = ss2->NFaces();
-        int cDiff = complex1 - complex2;
-        // sort by shape complexity
-        // first draw simple shapes
-        if (cDiff)
-        {
-            return cDiff;
-        }
-        return sDif;
-    }
-    // sort by LOD - fine LODs (small LOD numbers) last
-    sDif = o2->drawLOD - o1->drawLOD;
-    if (sDif)
-    {
-        return sDif;
-    }
-    // first draw
-    // same shape sort by distance, back first (helps to alpha transparency)
-    Coord fDif = o2->distance2 - o1->distance2;
-    if (fDif < 0)
-    {
-        return -1;
-    }
-    if (fDif > 0)
-    {
-        return +1;
-    }
-    return 0;
+    return DrawListSort::CompareShapeKeys(MakeShapeKey(*p1), MakeShapeKey(*p2));
+}
+
+static void SortByShape(SortObjectItem* items, int n)
+{
+    static DrawListSort::Scratch<DrawListSort::ShapeKey, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n, [](const SortObject* o) { return MakeShapeKey(o); },
+        [](const DrawListSort::ShapeKey& a, const DrawListSort::ShapeKey& b)
+        { return DrawListSort::CompareShapeKeys(a, b); }, scratch);
 }
 
 void Scene::EndObjects()
@@ -368,11 +357,26 @@ void Scene::DrawRain()
         rainT += deltaRT;
         rainOffset += deltaRT;
         float yOffset = -fastFmod(rainOffset, 1);
+        // P0-6 deterministic mode (triDeterministic): the phase from the sim
+        // clock, not the float sum of every frame's step since the first rain.
+        if (remaster::TemporalDeterministic())
+            yOffset = -remaster::RainStreakPhase(Glob.time.toInt());
         float xOffset = atan2(dir.X(), dir.Z()) * 0.3f;
         float yDensity = 0.3f + fabs(dir.Y()) + speed;
         saturate(yDensity, 0.1f, 1);
         // draw all levels
         density *= 0.2f;
+        // Under the photoreal camera (photoLight) the overlay's streaks are
+        // stretched by the exposure and the curve: at full strength they
+        // smeared the whole sky with vertical lines. (0.9, not 0.45: under the
+        // grey day's exposure and drawn after the opaque copy, at 0.45 no
+        // streak read.)
+        if (GEngine && GEngine->LightingRemasterActive())
+        {
+            const remaster::LightingTuning tuning = GEngine->GetLightingTuning();
+            if (tuning.features.photoLight > 0.5f)
+                density *= 0.9f;
+        }
         DrawRainLevel(density, yDensity, xOffset, yOffset, 8);
         DrawRainLevel(density, yDensity, xOffset, yOffset, 2);
     }
@@ -773,10 +777,154 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
     return false;
 }
 
+// W3-1(b): the view geometry an object renders into the occlusion buffer when it
+// is not hidden, or null when it renders nothing (not an occluder, no view
+// geometry, or too small on screen). Pure: the occlusion pass asks it before the
+// test for objects beyond the test range (OcclusionRange.hpp) and after it as
+// before for the rest.
+static Shape* OccluderViewGeometry(const SortObject* oi, float invLeft)
+{
+    LODShape* shape = oi->shape;
+    if (!shape->CanOcclude() || !oi->object->OcclusionView())
+    {
+        return nullptr;
+    }
+    Shape* view = shape->ViewGeometryLevel();
+    if (!view)
+    {
+        return nullptr;
+    }
+    // test if object is near enough to make a some occlusion
+    float areaNom = Square(oi->radius * invLeft);
+    float areaDenom = oi->distance2;
+    return areaNom > 0.001 * areaDenom ? view : nullptr;
+}
+
+namespace
+{
+// POSEIDON_OCC_STATS=1: one event=occ log line per 256 occlusion passes.
+struct OcclusionStatsWindow
+{
+    double sums[4] = {};
+    int passes = 0;
+};
+
+void ReportOcclusionStats(const OcclusionRange::Stats& s, float range2)
+{
+    static const bool s_log = std::getenv("POSEIDON_OCC_STATS") != nullptr;
+    if (!s_log)
+    {
+        return;
+    }
+    static OcclusionStatsWindow w;
+    w.sums[0] += s.tested;
+    w.sums[1] += s.culled;
+    w.sums[2] += s.skipped;
+    w.sums[3] += s.farTested;
+    if (++w.passes < 256)
+    {
+        return;
+    }
+    const double n = w.passes;
+    LOG_INFO(Graphics, "event=occ passes={} range={:.0f} tested={:.1f} culled={:.1f} skipped={:.1f} farTested={:.1f}",
+             w.passes, range2 > 0.0f ? std::sqrt(range2) : 0.0f, w.sums[0] / n, w.sums[1] / n, w.sums[2] / n,
+             w.sums[3] / n);
+    w = OcclusionStatsWindow{};
+}
+} // namespace
+
+// ---- Hill culling (TerrainOcclusion.hpp, the hillCull feature switch) ----
+
+namespace
+{
+struct HillCull
+{
+    TerrainOcclusion::HeightGrid terrain;
+    TerrainOcclusion::HorizonTable table;
+    TerrainOcclusion::CullGovernor governor;
+    // The landscape the terrain bounds were built from.
+    const Landscape* land = nullptr;
+    int range = 0;
+    float grid = 0.0f;
+    std::uint64_t sample = 0;
+};
+
+HillCull& GHillCull()
+{
+    static HillCull s_hillCull;
+    return s_hillCull;
+}
+
+// A strided sample of the heights: notices a new island or an editor
+// reshaping the ground without reading the whole grid every frame (the same
+// detector TerrainLighting uses for the horizon map).
+std::uint64_t SampleTerrain(const Landscape& land, int range, float grid)
+{
+    std::uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](std::uint32_t v)
+    {
+        h ^= v;
+        h *= 1099511628211ull;
+    };
+    mix(static_cast<std::uint32_t>(range));
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &grid, sizeof(bits));
+    mix(bits);
+    const int step = range > 64 ? range / 64 : 1;
+    for (int z = 0; z < range; z += step)
+    {
+        for (int x = (z / step) % step; x < range; x += step)
+        {
+            const float v = land.ClippedData(z, x);
+            std::memcpy(&bits, &v, sizeof(bits));
+            mix(bits);
+        }
+    }
+    return h;
+}
+
+// The terrain as drawn, copied from `land` when the landscape changed. It is
+// the full-detail grid: LandCache asks for segment LOD 0 (Landscape.cpp), so
+// every segment draws every grid vertex. If distant segments ever draw
+// coarser, their triangles no longer follow this grid and the hill cull must
+// take the lowest vertex of each coarse cell instead.
+bool EnsureHillTerrain(HillCull& hc, const Landscape& land)
+{
+    const int range = land.GetTerrainRange();
+    const float grid = land.GetTerrainGrid();
+    if (range < 2 || !(grid > 0.0f))
+        return false;
+    const std::uint64_t sample = SampleTerrain(land, range, grid);
+    if (hc.terrain.Valid() && hc.land == &land && hc.range == range && hc.grid == grid && hc.sample == sample)
+        return true;
+    const auto t0 = std::chrono::steady_clock::now();
+    hc.terrain.Build(range, grid, YOutsideMap, [&land](int x, int z) { return land.ClippedData(z, x); });
+    hc.table.Invalidate();
+    hc.governor.Reset();
+    hc.land = &land;
+    hc.range = range;
+    hc.grid = grid;
+    hc.sample = sample;
+    LOG_INFO(Graphics, "Hill cull: terrain grid {}x{} at {} m copied in {:.1f} ms", range, range, grid,
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    return hc.terrain.Valid();
+}
+} // namespace
+
 #if !DENSITY_LOD
 
 void Scene::AdjustComplexity()
 {
+    if (_lodPinFactor > 0.0f)
+    {
+        // Pinned (PinObjectDetail): the detail no longer follows the frame
+        // time, so A/B captures of one view draw the same objects.
+        _lodInvWidth = _minLodInvWidth * _lodPinFactor;
+        saturate(_lodInvWidth, _minLodInvWidth, _maxLodInvWidth);
+        AdjustComplexity(_drawObjects);
+        AdjustShadowComplexity(_drawObjects);
+        return;
+    }
     float oldLodInvWidth = _lodInvWidth;
 
     // adjust lodInvWidth so we are on the line given by points
@@ -1281,6 +1429,35 @@ static void DrawSortObject(SortObject* oi)
     GEngine->SetPassKindHint(savedHint);
 }
 
+// The instanced-run facts of one queued object (InstancedRunRules.hpp).
+// `headLevel` is the head's draw level: an object joins a run only with the
+// head's shape and LOD, so that level is its own whenever the answer matters.
+// IsAnimated and SelectLights index the object's shape by its draw LOD, which
+// for a later object may be LOD_INVISIBLE, so they are asked only for the
+// head's shape and LOD. `scene` is set when drawGrouping decides per object
+// (some light slot exists): the object's own light list, as its draw would
+// select it (Object::Draw), then sets localLit.
+static InstancedRun::RunEntry InstancedRunEntry(const SortObject* so, const LODShape* headShape, int headLOD,
+                                                const Shape* headLevel, Scene* scene)
+{
+    const Object* obj = so->object;
+    InstancedRun::RunEntry entry;
+    entry.shape = obj->GetShape();
+    entry.drawLOD = so->drawLOD;
+    entry.passNum = so->passNum;
+    entry.special = headLevel->Special() | obj->GetObjSpecial();
+    entry.distance2 = so->distance2;
+    entry.isStatic = obj->Static();
+    const bool headLevelToo = obj->GetShape() == headShape && so->drawLOD == headLOD;
+    entry.ownVertices = headLevelToo && obj->IsAnimated(so->drawLOD);
+    if (scene && headLevelToo)
+    {
+        LightList work;
+        entry.localLit = scene->SelectLights(obj->Transform(), obj, so->drawLOD, work).Size() > 0;
+    }
+    return entry;
+}
+
 void Scene::DrawObjectsAndShadowsPass1()
 {
     // select first objects - those with highest visual priority
@@ -1312,7 +1489,21 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     // remove all objects that should not be used
 
+    using Clock = std::chrono::steady_clock;
+    auto msSince = [](Clock::time_point t0)
+    { return std::chrono::duration<float, std::milli>(Clock::now() - t0).count(); };
+    perf::FrameCounters& counters = perf::GPerfCounters().Frame();
+    // The frame-cost switches, as this frame's gates hold them (computed at the
+    // world's first 3D pass; off with the classic lighting, so Classic draws as
+    // it always did).
+    remaster::FeatureGates gates;
+    const bool haveGates = GEngine && GEngine->GetFeatureGates(gates) && gates.computed;
+    const bool drawGrouping = haveGates && gates[remaster::Feature::DrawGrouping].on;
+    const bool hillCull = haveGates && gates[remaster::Feature::HillCull].on;
+
+    const Clock::time_point lodT0 = Clock::now();
     AdjustComplexity();
+    counters.lodMs += msSince(lodT0);
 
     // copy objects to working list (mergers)
     // do not copy objects that are not drawn
@@ -1330,6 +1521,7 @@ void Scene::DrawObjectsAndShadowsPass1()
             _drawMergers.Realloc(objNeed);
         }
         _drawMergers.Resize(0);
+        _drawnObjects = 0;
         for (int s = 0; s < _drawObjects.Size(); s++)
         {
             SortObject* sObj = _drawObjects[s];
@@ -1342,6 +1534,10 @@ void Scene::DrawObjectsAndShadowsPass1()
                 continue;
             }
             _drawMergers.Add(sObj);
+            if (sObj->drawLOD != LOD_INVISIBLE)
+            {
+                ++_drawnObjects;
+            }
         }
     }
     // One-shot shape census (perf campaign): triPerfDumpShapes arms this;
@@ -1383,6 +1579,7 @@ void Scene::DrawObjectsAndShadowsPass1()
     }
 #endif
 
+    const Clock::time_point occT0 = Clock::now();
     if (EnableObjOcc)
     {
         // sort only what needs to checked/drawn for occlusion
@@ -1414,7 +1611,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                 occSort.Add(_drawMergers[i]);
             }
         }
-        QSort(occSort.Data(), occSort.Size(), CmpRevDistObj);
+        SortNearestFirst(occSort.Data(), occSort.Size());
 // before drawing anything draw cockpit occlusion
 // check if we are in internal view
 #if 1
@@ -1448,6 +1645,29 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
 #endif
 
+        // W3-1(b): objects beyond the test range that are not occluders are not
+        // tested (OcclusionRange.hpp). The range never falls short of the shadow
+        // caster reach (SceneShadowPass.cpp: near + distanceCoef * (shadowsZ -
+        // near); the projected shadows reach shadowsZ).
+        static const float s_occRange = OcclusionRange::ParseRange(std::getenv("POSEIDON_OCC_RANGE"));
+        float occRange2 = 0.0f;
+        float occInvLeft = 0.0f;
+        if (_camera)
+        {
+            const float occNear = _camera->ClipNear();
+            // The shadow maps' far distance exactly as SceneShadowPass.cpp
+            // computes smMapFar: a High shadow tier reaches past shadowsZ, and
+            // an untested hidden object inside that reach would cast from the
+            // wrong LOD.
+            const Engine::ShadowMapTuning occSmTune = GEngine->GetShadowMapTuning();
+            const float occShadowsZ = Poseidon::shadow::xp::MapFar(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ,
+                                                                   ENGINE_CONFIG.objectsZ, occSmTune.reach);
+            const float occCasterReach = occNear + occSmTune.distanceCoef * (occShadowsZ - occNear);
+            occRange2 = OcclusionRange::TestRange2(s_occRange, std::max(occShadowsZ, occCasterReach));
+            occInvLeft = _camera->InvLeft();
+        }
+        OcclusionRange::Stats occStats;
+
         // draw occlusions front to back
         for (int i = occSort.Size(); --i >= 0;)
         {
@@ -1475,34 +1695,35 @@ void Scene::DrawObjectsAndShadowsPass1()
                 // the test would be very slow and is very like to fail
                 if (FarEnoughForOcclusion(oi))
                 {
-                    Vector3 minMax[2];
-                    obj->AnimatedMinMax(oi->drawLOD, minMax);
-                    // check if object is occluded by objects
-                    if (!GetOcclusions()->TestBBox(*oi->object, minMax, oi->orClip))
+                    const bool beyond = occRange2 > 0.0f && oi->distance2 >= occRange2;
+                    if (beyond && OcclusionRange::SkipTest(oi->distance2, occRange2,
+                                                           OccluderViewGeometry(oi, occInvLeft) != nullptr))
                     {
-                        occluded = true;
+                        ++occStats.skipped;
+                    }
+                    else
+                    {
+                        Vector3 minMax[2];
+                        obj->AnimatedMinMax(oi->drawLOD, minMax);
+                        ++occStats.tested;
+                        occStats.farTested += beyond ? 1 : 0;
+                        // check if object is occluded by objects
+                        if (!GetOcclusions()->TestBBox(*oi->object, minMax, oi->orClip))
+                        {
+                            occluded = true;
+                            ++occStats.culled;
+                        }
                     }
                 }
             }
             if (!occluded)
             {
-                if (shape->CanOcclude() && obj->OcclusionView())
+                if (Shape* view = OccluderViewGeometry(oi, occInvLeft))
                 {
-                    Shape* view = shape->ViewGeometryLevel();
-                    if (!view)
-                    {
-                        continue;
-                    }
-                    // test if object is near enough to make a some occlusion
-                    float areaNom = Square(oi->radius * _camera->InvLeft());
-                    float areaDenom = oi->distance2;
-                    if (areaNom > 0.001 * areaDenom)
-                    {
-                        obj->AnimateViewGeometry();
-                        // if object can occlude something, render its components
-                        GetOcclusions()->RenderShape(*oi->object, view, shape->GetViewComponents(), oi->orClip);
-                        obj->DeanimateViewGeometry();
-                    }
+                    obj->AnimateViewGeometry();
+                    // if object can occlude something, render its components
+                    GetOcclusions()->RenderShape(*oi->object, view, shape->GetViewComponents(), oi->orClip);
+                    obj->DeanimateViewGeometry();
                 }
             }
             else
@@ -1511,27 +1732,111 @@ void Scene::DrawObjectsAndShadowsPass1()
                 oi->drawLOD = LOD_INVISIBLE;
             }
         }
+        ReportOcclusionStats(occStats, occRange2);
+    }
+    counters.occlusionMs += msSince(occT0);
+
+    // Hill culling: objects the terrain hides from the camera are not drawn.
+    // After the object occlusion pass, so its buffer and its results are the
+    // same with the cull on or off. A hidden object is only flagged
+    // (hillHidden): it keeps its draw LOD, so the sorts below and in Pass2
+    // order the list exactly as with the cull off (the shadow-map pass emits
+    // its casters in that order, and overlapping leaf cards resolve equal
+    // depths by it), the shadow-map pass casts its shadow from its draw LOD as
+    // before (behind a ridge from the camera, its shadow can still reach
+    // ground in view), and the draw loops skip it. Its draw's texture mipmap
+    // hints are given without the draw (PrepareDrawTextures): the shadow pass
+    // loads the alpha-tested caster textures from them, and a texture it
+    // shares with an object in view keeps its mipmaps. Only static objects are
+    // tested: their draw is Object::Draw's, which PrepareDrawTextures mirrors
+    // (vehicles and men draw through their own overrides).
+    //
+    // Hiding any draw is safe for the shadow-map pass: it sets its own
+    // sampler and polygon offset, so the depth its casters store does not
+    // depend on which draw came last before it.
+    _hillHiddenObjects = 0;
+    if (hillCull && _camera && GetLandscape())
+    {
+        HillCull& hc = GHillCull();
+        if (!hc.governor.ShouldRun())
+        {
+            counters.hillIdle = 1;
+        }
+        else if (EnsureHillTerrain(hc, *GetLandscape()))
+        {
+            const Clock::time_point hillT0 = Clock::now();
+            const Vector3 eye = _camera->Position();
+            const float range = GetFogMaxRange();
+            if (!hc.table.Matches(eye.X(), eye.Y(), eye.Z(), range))
+            {
+                hc.table.Build(hc.terrain, eye.X(), eye.Y(), eye.Z(), range, TerrainOcclusion::Params());
+                ++counters.hillBuilds;
+            }
+            const int wedgesBefore = hc.table.WedgesBuilt();
+            const Object* cameraOn = GWorld ? GWorld->CameraOn() : nullptr;
+            int tested = 0;
+            for (int i = 0; i < _drawMergers.Size(); i++)
+            {
+                SortObject* oi = _drawMergers[i];
+                Object* obj = oi->object;
+                if (oi->drawLOD == LOD_INVISIBLE || !obj || !obj->Static() || obj == cameraOn || oi->passNum == 3)
+                {
+                    continue;
+                }
+                const Vector3 pos = obj->Position();
+                const TerrainOcclusion::Result r = hc.table.Test(pos.X(), pos.Y(), pos.Z(), obj->GetRadius());
+                if (r == TerrainOcclusion::Result::NotTested)
+                {
+                    continue;
+                }
+                ++tested;
+                if (r == TerrainOcclusion::Result::Hidden)
+                {
+                    oi->hillHidden = true;
+                    obj->PrepareDrawTextures(oi->drawLOD, *obj);
+                    ++_hillHiddenObjects;
+                }
+            }
+            hc.governor.Report(tested, _hillHiddenObjects);
+            counters.hillRan = 1;
+            counters.hillTested = tested;
+            counters.hillHidden = _hillHiddenObjects;
+            counters.hillWedges += hc.table.WedgesBuilt() - wedgesBefore;
+            counters.hillMs += msSince(hillT0);
+        }
     }
 
-    QSort(_drawMergers.Data(), _drawMergers.Size(), CmpShapeObj);
+    SortByShape(_drawMergers.Data(), _drawMergers.Size());
     // first of all draw non-alpha objects
 
 #if DRAW_OBJS
     {
         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
         // identical static shapes arrive contiguously. A batchable run draws
-        // the head once inside Begin/EndInstancedRun — every TL section then
+        // the head once inside Begin/EndInstancedRun, and every TL section then
         // renders all K instances from the WorldInstances matrix array. The
         // predicate keeps per-object state out of batches: static, proxy-free,
-        // not OnSurface/IsColored, equal obj-special, no local lights in the
-        // scene, and a tight distance band so the head's constant-fog value
-        // is representative for the whole batch.
+        // not OnSurface/IsColored, equal obj-special, no local light, a tight
+        // distance band so the head's constant-fog value is representative for
+        // the whole batch, and no object whose draw rewrites its own vertices
+        // (a land-following bush fitted to its own patch of slope, a damaged
+        // house): the run draws every member from the head's vertex buffer
+        // (InstancedRunRules.hpp). Local lights: with drawGrouping off, any
+        // light slot in the scene turns runs off for every object (Abel's
+        // street lamps hold slots by day too); with it on, an object is kept
+        // out only when its own light list is not empty, unless the frame's
+        // tiled light list lights every draw (lightTiles): then no draw's own
+        // list matters and lit objects join runs too.
         const bool noLocalLights = NLights() == 0;
+        const bool runsAllowed = noLocalLights || drawGrouping;
+        Scene* lightsPerObject = drawGrouping && !noLocalLights && !GEngine->LocalLightsFromTiles() ? this : nullptr;
+        counters.lightSlots = NLights();
+        counters.activeLights = _aLights.Size();
         for (int i = 0; i < _drawMergers.Size();)
         {
             SortObject* oi = _drawMergers[i];
             LODShape* shape = oi->object->GetShape();
-            if (oi->drawLOD == LOD_INVISIBLE)
+            if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden)
             {
                 i++;
                 continue;
@@ -1550,28 +1855,31 @@ void Scene::DrawObjectsAndShadowsPass1()
             }
 
             int runEnd = i + 1;
-            const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
-            const render::LegacySpec headSpec = render::SplitLegacy(headSpecial);
-            const bool headBatchable = noLocalLights && oi->object->Static() && sShape->NProxies() == 0 &&
+            const InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape, lightsPerObject);
+            const render::LegacySpec headSpec = render::SplitLegacy(head.special);
+            const bool headBatchable = runsAllowed && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
                                        !render::Has(headSpec.routing, render::Routing::OnSurface) &&
                                        !render::Has(headSpec.routing, render::Routing::IsColored) &&
                                        oi->object != GWorld->CameraOn();
+            if (head.localLit)
+            {
+                ++counters.litObjects;
+            }
             if (headBatchable)
             {
                 GEngine->InstancedRunReset();
                 if (GEngine->InstancedRunAdd(oi->object->Transform()))
                 {
-                    // Fog band: keep members within ~5% of the head's distance so
-                    // the head's per-object constant fog approximates all of them.
-                    const float d2lo = oi->distance2 * 0.90f;
-                    const float d2hi = oi->distance2 * 1.10f;
                     while (runEnd < _drawMergers.Size())
                     {
                         SortObject* oj = _drawMergers[runEnd];
-                        if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
-                            oj->passNum != oi->passNum || !oj->object->Static() ||
-                            (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial || oj->distance2 < d2lo ||
-                            oj->distance2 > d2hi)
+                        if (oj->hillHidden)
+                        {
+                            runEnd++; // in the run's span, never drawn
+                            continue;
+                        }
+                        if (!InstancedRun::CanJoin(head,
+                                                   InstancedRunEntry(oj, shape, oi->drawLOD, sShape, lightsPerObject)))
                         {
                             break;
                         }
@@ -1584,10 +1892,19 @@ void Scene::DrawObjectsAndShadowsPass1()
                 }
             }
 
-            const int runLen = runEnd - i;
+            // The run's span may hold hidden objects (hillHidden): they joined no
+            // instance list and are never drawn.
+            int runLen = 0;
+            for (int k = i; k < runEnd; k++)
+            {
+                runLen += _drawMergers[k]->hillHidden ? 0 : 1;
+            }
             GSectionFilter = SectionClassFilter::OpaqueAndCutout;
+            counters.opaqueObjects += runLen;
             if (headBatchable && runLen >= 4)
             {
+                ++counters.runs;
+                counters.runObjects += runLen;
                 GEngine->BeginInstancedRunUpload();
                 DrawSortObject(oi);
                 if (!GEngine->EndInstancedRun())
@@ -1596,7 +1913,10 @@ void Scene::DrawObjectsAndShadowsPass1()
                     // head; redraw the rest scalar (TL overdraw is z-equal opaque).
                     for (int k = i + 1; k < runEnd; k++)
                     {
-                        DrawSortObject(_drawMergers[k]);
+                        if (!_drawMergers[k]->hillHidden)
+                        {
+                            DrawSortObject(_drawMergers[k]);
+                        }
                     }
                 }
             }
@@ -1604,7 +1924,10 @@ void Scene::DrawObjectsAndShadowsPass1()
             {
                 for (int k = i; k < runEnd; k++)
                 {
-                    DrawSortObject(_drawMergers[k]);
+                    if (!_drawMergers[k]->hillHidden)
+                    {
+                        DrawSortObject(_drawMergers[k]);
+                    }
                 }
             }
             GSectionFilter = SectionClassFilter::All;
@@ -1634,19 +1957,38 @@ static bool IsSurfaceSortObject(const SortObject* oi)
     return render::IsOnSurfaceSpec(spec);
 }
 
-// On-surface ordering: PassOrder (roads before decals), then shape, then
-// back-to-front within a shape — see Scene/SurfaceDrawOrder.hpp.
-static int CmpSurfaceObj(const SortObjectItem* p1, const SortObjectItem* p2)
+// Does Pass2's pre-shadow loop draw this object's blend sections (a road or
+// decal surface)? It mirrors exactly the post-shadow blend branch that skips
+// these objects (passNum<=1 && HasBlendSections && surface). With grass
+// enabled a surface object is passNum==2 (whole-alpha) and is drawn by the
+// passNum==2 branch; drawing it in the pre-shadow loop too would double-draw
+// it and re-overwrite the shadow. The cheap passNum gate also avoids the
+// per-object Special() probe for non-surface objects.
+static bool IsSurfaceBlendDraw(const SortObject* oi)
 {
-    const SortObject* o1 = *p1;
-    const SortObject* o2 = *p2;
-    const Poseidon::SurfaceDraw::SurfaceDrawKey k1{
-        o1->object ? o1->object->PassOrder(o1->drawLOD) : 0,
-        o1->object ? static_cast<const void*>(o1->object->GetShape()) : nullptr, o1->distance2};
-    const Poseidon::SurfaceDraw::SurfaceDrawKey k2{
-        o2->object ? o2->object->PassOrder(o2->drawLOD) : 0,
-        o2->object ? static_cast<const void*>(o2->object->GetShape()) : nullptr, o2->distance2};
-    return Poseidon::SurfaceDraw::CompareSurfaceDraw(k1, k2);
+    if (oi->drawLOD == LOD_INVISIBLE || oi->passNum > 1 || !IsSurfaceSortObject(oi))
+        return false;
+    LODShape* shp = oi->object->GetShape();
+    Shape* lvl = shp ? shp->LevelOpaque(oi->drawLOD) : nullptr;
+    return lvl && lvl->HasBlendSections();
+}
+
+// On-surface ordering: PassOrder (roads before decals), then shape, then
+// back-to-front within a shape — see Scene/SurfaceDrawOrder.hpp. The key, with
+// its virtual PassOrder call, is read once per entry (W3-11; was CmpSurfaceObj).
+static void SortBySurfaceOrder(SortObjectItem* items, int n)
+{
+    static DrawListSort::Scratch<Poseidon::SurfaceDraw::SurfaceDrawKey, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n,
+        [](const SortObject* o)
+        {
+            return Poseidon::SurfaceDraw::SurfaceDrawKey{
+                o->object ? o->object->PassOrder(o->drawLOD) : 0,
+                o->object ? static_cast<const void*>(o->object->GetShape()) : nullptr, o->distance2};
+        },
+        [](const Poseidon::SurfaceDraw::SurfaceDrawKey& a, const Poseidon::SurfaceDraw::SurfaceDrawKey& b)
+        { return DrawListSort::CompareSurfaceKeys(a, b); }, scratch);
 }
 
 void Scene::DrawObjectsAndShadowsPass2()
@@ -1672,26 +2014,11 @@ void Scene::DrawObjectsAndShadowsPass2()
         // PassOrder, not distance: a fresh decal carries distance2~=0
         // (SetAutoCenter(false)) and would tie the road tile under the vehicle,
         // letting the road repaint over it.  Re-sorted by distance below.
-        QSort(_drawMergers.Data(), nDraw, CmpSurfaceObj);
+        SortBySurfaceOrder(_drawMergers.Data(), nDraw);
         for (int i = 0; i < nDraw; i++)
         {
             SortObject* oi = _drawMergers[i];
-            if (oi->drawLOD == LOD_INVISIBLE)
-                continue;
-            // Mirror exactly the post-shadow blend branch that skips these
-            // objects (passNum<=1 && HasBlendSections && surface).  With grass
-            // enabled a surface object is passNum==2 (whole-alpha) and is drawn
-            // by the passNum==2 branch below; drawing it here too would
-            // double-draw it and re-overwrite the shadow.  The cheap passNum
-            // gate also avoids the per-object Special() probe for non-surface
-            // objects.
-            if (oi->passNum > 1)
-                continue;
-            if (!IsSurfaceSortObject(oi))
-                continue;
-            LODShape* shp = oi->object->GetShape();
-            Shape* lvl = shp ? shp->LevelOpaque(oi->drawLOD) : nullptr;
-            if (!lvl || !lvl->HasBlendSections())
+            if (!IsSurfaceBlendDraw(oi) || oi->hillHidden)
                 continue;
             GSectionFilter = SectionClassFilter::BlendOnly;
             DrawSortObject(oi);
@@ -1716,7 +2043,13 @@ void Scene::DrawObjectsAndShadowsPass2()
             float sunFactor = 1.0f - _mainLight->NightEffect();
             sunFactor = floatMax(0.0f, floatMin(1.0f, sunFactor));
             GEngine->SetShadowMapSunFactor(sunFactor);
-            if (sunFactor > 0.01f)
+            // The remastered sun keeps lighting the scene until it is about 1.5
+            // degrees below the horizon: keep its shadows live that long (a
+            // skipped pass would leave a frozen map in view).
+            const bool remasterSunUp = GEngine->LightingRemasterActive() && _mainLight->SunDirection().Y() < 0.026f;
+            // At night the remastered moon key (moonShadows) casts the shadows:
+            // the pass renders from the moon (SceneShadowPass.cpp).
+            if (sunFactor > 0.01f || remasterSunUp || GEngine->RemasterMoonKey())
             {
                 RenderShadowMapDepthPass(nDraw);
             }
@@ -1751,14 +2084,17 @@ void Scene::DrawObjectsAndShadowsPass2()
 #endif
     // draw alpha parts of roads
     GEngine->FlushQueues();
+    // The opaque world is complete: the remastered TAA keeps a copy for its
+    // particle mask before the translucent objects go on top.
+    GEngine->BeginTranslucentObjects();
     GEngine->EnableReorderQueues(false);
-    QSort(_drawMergers.Data(), _drawMergers.Size(), CmpRevAlphaSortObj);
+    SortAlphaFarToNear(_drawMergers.Data(), _drawMergers.Size());
     // last draw alpha objects (not roads - they are already drawn)
     for (int i = 0; i < nDraw; i++)
     {
         SortObject* oi = _drawMergers[i];
         LODShape* shape = oi->object->GetShape();
-        if (oi->drawLOD == LOD_INVISIBLE)
+        if (oi->drawLOD == LOD_INVISIBLE || oi->hillHidden)
         {
             continue;
         }
@@ -1812,7 +2148,7 @@ void Scene::DrawObjectsAndShadowsPass3()
     {
         SortObject* oi = _drawMergers[i];
         LODShape* shape = oi->object->GetShape();
-        if (oi->drawLOD != LOD_INVISIBLE)
+        if (oi->drawLOD != LOD_INVISIBLE && !oi->hillHidden)
         {
             PoseidonAssert(oi->drawLOD >= 0);
             Shape* sShape = shape->LevelOpaque(oi->drawLOD);

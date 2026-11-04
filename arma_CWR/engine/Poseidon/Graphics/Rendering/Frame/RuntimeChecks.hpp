@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <string>
+#include <vector>
 
 // Runtime invariant helpers — pure, testable functions that operate
 // on values read back from the live engine after Execute.  Kept
@@ -40,6 +42,70 @@ std::optional<RuntimeViolation> DetectBlackFrame(
     bool had3DContent,
     const std::uint8_t centerPixelRGB[3],
     int threshold = 8);
+
+// I-29 over time (W1-2). A loading screen, scene swap, pre-dawn cutscene or
+// short fade can give a string of legitimately near-black frames, so the
+// observer escalates only after kThreshold consecutive black observed frames
+// (about half a second under tri, which observes every frame) and logs at
+// most kLogCap times. The centre pixel arrives asynchronously (a fenced
+// readback, a few frames late, or dropped when no readback slot is free), so
+// the tracker keeps the observer's per-frame events in frame order and
+// applies each one only when its outcome is known: the counts and log lines
+// are the ones the old synchronous readback gave, at most kMaxDelayFrames
+// later. A dropped sample changes nothing, as a failed SamplePixel did.
+class BlackFrameTracker
+{
+  public:
+    static constexpr int kThreshold = 30;
+    static constexpr int kLogCap = 5;
+    // A queued sample whose result is still missing this many frames after
+    // its frame is treated as dropped (its readback was lost).
+    static constexpr std::uint32_t kMaxDelayFrames = 8;
+
+    struct Log
+    {
+        RuntimeViolation violation;
+        int consecutive = 0; // the run length the log line reports
+    };
+
+    // An observed frame with 3D content whose centre-pixel probe was queued.
+    void ExpectSample(std::uint32_t frame);
+    // An observed frame without 3D content: ends the run, in frame order.
+    void NoContent(std::uint32_t frame);
+    // A probe result (results arrive oldest first). Earlier samples still
+    // waiting can no longer arrive and are dropped.
+    void Resolve(std::uint32_t frame, const std::uint8_t rgb[3]);
+    // Applies every leading event whose outcome is known and drops samples
+    // older than kMaxDelayFrames; returns the log lines to emit, in order.
+    std::vector<Log> Advance(std::uint32_t nowFrame);
+
+    int Consecutive() const { return _consecutive; }
+    int LogsEmitted() const { return _logs; }
+    size_t Pending() const { return _events.size(); }
+
+  private:
+    enum class Kind : std::uint8_t
+    {
+        Sample,
+        NoContent
+    };
+    enum class State : std::uint8_t
+    {
+        Waiting,
+        Resolved,
+        Dropped
+    };
+    struct Event
+    {
+        std::uint32_t frame = 0;
+        Kind kind = Kind::Sample;
+        State state = State::Waiting;
+        std::uint8_t rgb[3] = {0, 0, 0};
+    };
+    std::deque<Event> _events;
+    int _consecutive = 0;
+    int _logs = 0;
+};
 
 // The active GL viewport rect at observation time must match
 // the rect the SceneInputs carried.  Mismatch means a resize, fullscreen

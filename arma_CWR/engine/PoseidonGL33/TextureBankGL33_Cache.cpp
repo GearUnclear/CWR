@@ -241,15 +241,9 @@ void TextBankGL33::InitDetailTextures()
         _grass->SetMaxSize(1024);
         _grass->_isDetail = true;
     }
-
-    RStringB waterName = names >> "waterBump";
-    if (QIFStreamB::FileExist(waterName))
-    {
-        _waterBump = new TextureGL33;
-        _waterBump->Init(waterName);
-        _waterBump->SetMaxSize(1024);
-        _waterBump->_isDetail = true;
-    }
+    // CfgDetailTextures >> waterBump (misc\waveBumpMap.paa) is not read: the
+    // file is not in the Remaster data and nothing samples it. The remastered
+    // sea derives its waves from the sea texture (EngineGL33_Sea.cpp).
 }
 
 void TextBankGL33::FlushTextures()
@@ -365,8 +359,15 @@ int TextBankGL33::FreeTextureMemory()
         return static_cast<int>(available);
     };
 
+    if (!_memInfoExtKnown)
+    {
+        _hasNvxMemInfo = HasGlExtension("GL_NVX_gpu_memory_info");
+        _hasAtiMemInfo = HasGlExtension("GL_ATI_meminfo");
+        _memInfoExtKnown = true;
+    }
+
     // Try GL_NVX_gpu_memory_info (NVIDIA)
-    if (HasGlExtension("GL_NVX_gpu_memory_info"))
+    if (_hasNvxMemInfo)
     {
         GLint totalMemKB = 0;
         glGetIntegerv(0x9048, &totalMemKB); // GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX
@@ -379,7 +380,7 @@ int TextBankGL33::FreeTextureMemory()
     }
 
     // Try GL_ATI_meminfo (AMD)
-    if (HasGlExtension("GL_ATI_meminfo"))
+    if (_hasAtiMemInfo)
     {
         GLint atiInfo[4] = {};
         glGetIntegerv(0x87FC, atiInfo); // TEXTURE_FREE_MEMORY_ATI

@@ -8,6 +8,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
 #include <glad/gl.h>
@@ -84,6 +85,8 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         if (!_vaoScreen || !_vbo || !_ibo)
         {
             triq._triangleQueue.Clear();
+            if (IsDecalBatchQueue(queue, index))
+                _decalBatch.runs.Clear();
             return;
         }
 
@@ -128,17 +131,32 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         FlushVSConstants();
         FlushPSConstants();
 
-        glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
-        ++Poseidon::gPerfDrawCalls;
+        // A batch of decals (W4-1) is one draw over its texture array, or its
+        // runs of one texture where the program cannot read the array.
+        const bool decalBatch = IsDecalBatchQueue(queue, index);
+        if (decalBatch)
+        {
+            DrawDecalBatch(triq, n, indexOffset);
+        }
+        else
+        {
+            glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+            ++Poseidon::gPerfDrawCalls;
+        }
 
-        // Record DrawItem
-        DrawItem item = {};
-        item.isTLDraw = false;
-        item.specFlags = Poseidon::render::SplitLegacy(triq._special);
-        item.passId = triq._passId;
-        _drawItems.push_back(item);
+        // Record DrawItem, only on frames the frame validator observes (S3-28)
+        if (Poseidon::render::frame::ObserverRecordsThisFrame())
+        {
+            DrawItem item = {};
+            item.isTLDraw = false;
+            item.specFlags = Poseidon::render::SplitLegacy(triq._special);
+            item.passId = triq._passId;
+            _drawItems.push_back(item);
+        }
 
         triq._triangleQueue.Clear();
+        if (decalBatch)
+            _decalBatch.runs.Clear();
     }
 }
 
@@ -158,6 +176,9 @@ int EngineGL33::AllocateQueue(QueueGL33& queue, TextureGL33* tex, int level, int
         minI = MaxTriQueues - 1;
         maxI = MaxTriQueues;
         FlushAllQueues(queue, MaxTriQueues - 1);
+        // An open decal batch (W4-1) takes only batched decals.
+        if (IsDecalBatchQueue(queue, MaxTriQueues - 1))
+            FlushAndFreeQueue(queue, MaxTriQueues - 1);
     }
 
     int index = queue.Allocate(tex, level, spec, minI, maxI, queue._actTri);
@@ -189,6 +210,11 @@ int EngineGL33::AllocateQueue(QueueGL33& queue, TextureGL33* tex, int level, int
 void EngineGL33::FreeQueue(QueueGL33& queue, int index)
 {
     PoseidonAssert(!queue._tri[index]._triangleQueue.Size());
+    if (IsDecalBatchQueue(queue, index))
+    {
+        _decalBatch.active = false;
+        _decalBatch.runs.Clear();
+    }
     queue.Free(index);
 }
 
@@ -251,12 +277,30 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     ctx.isMultitexturing = IsMultitexturing();
     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
     ctx.passKindHint = GetPassKindHint();
+    ctx.remasteredSea = SeaRouted();
+    ctx.objectKind = GetDrawObjectKind();
 
     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
+    // The wet weather's surface class of this draw (nothing while dry).
+    SetLitSurface(tex, d);
+    // The screen-space reflections' surface tag of this draw (its stencil
+    // reference and masks; the state of before while the world writes no
+    // tags). The land and the sea's unrouted faces share the detail family:
+    // the land carries the detail texture.
+    _ssrStencil = Poseidon::remaster::SsrStencilForDraw(d, IsLandLayer(spec), SsrTagging());
+    // A vehicle interior over the world the fog saved: its glass and solid
+    // parts mark the stencil instead (no interior frame reads the
+    // reflections' tags).
+    if (FogInteriorOpen())
+        _ssrStencil = InteriorGlassStencil(tex, d);
     const PipelineVertexInput previousVertexInput = _pipelineVertexInput;
     _pipelineVertexInput = vertexInput;
     ApplyPipeline(d);
     _pipelineVertexInput = previousVertexInput;
+    // ApplyPipeline skips an unchanged descriptor; the tag can change without
+    // it (land and sea, a road after the terrain).
+    if (!_ssrStencilValid || _ssrStencilApplied != _ssrStencil)
+        ApplyDepthMode(_currentDepthMode);
 
     // IsTexBound is the sole gate: it reflects OnTexDeleted, so deleted handles
     // that the driver recycles for new textures are never silently skipped.
@@ -265,6 +309,20 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     {
         SetTexture(tex, spec);
     }
+
+    // PSDetail draws the land and, unless the sea is routed to the water
+    // program (seaWaves, EngineGL33_Sea.cpp), the sea: the terrain detail runs
+    // on the land only. Other draws leave the flag as it is, so it changes only
+    // between land and sea.
+    if (d.shader == Poseidon::render::ShaderFamily::Detail)
+        SelectTerrainDetailLayer(spec);
+    // Surface light: the section's surface class (its texture, the drawn
+    // object's kind) for the specular every lit surface gets, on the program
+    // ApplyPipeline bound. Only the object program reads it, and not for
+    // leaves (a forced diffuse): the land, grass, sea and crowns skip it.
+    if (vertexInput == PipelineVertexInput::Mesh && d.shader == Poseidon::render::ShaderFamily::Normal &&
+        _materialSet.forcedDiffuse.R() + _materialSet.forcedDiffuse.G() + _materialSet.forcedDiffuse.B() <= 0.0f)
+        ApplySurfaceClass(tex, d);
 }
 
 void EngineGL33::QueuePrepareTriangle(const MipInfo& absMip, int specFlags)
@@ -294,9 +352,11 @@ void EngineGL33::PrepareTriangleTL(const MipInfo& mip, const Poseidon::render::L
     TextureGL33* tex = reinterpret_cast<TextureGL33*>(mip._texture);
     int level = mip._level;
     PassId passId = SpecToPassId(spec);
-    LOG_DEBUG(Graphics, "GL33: PrepareTriangleTL spec=0x{:x} tex={} level={} passId={} vs={} in3D={}",
-              Poseidon::render::MergeLegacy(spec), tex ? tex->GetHandle() : 0, level, static_cast<int>(passId),
-              static_cast<int>(_vertexShaderSel), IsIn3DPass());
+    // Per draw: skip the argument work too unless debug logging is on (S3-29a).
+    if (LogDetail::Get(Poseidon::Foundation::LogCategory::Graphics)->should_log(spdlog::level::debug))
+        LOG_DEBUG(Graphics, "GL33: PrepareTriangleTL spec=0x{:x} tex={} level={} passId={} vs={} in3D={}",
+                  Poseidon::render::MergeLegacy(spec), tex ? tex->GetHandle() : 0, level, static_cast<int>(passId),
+                  static_cast<int>(_vertexShaderSel), IsIn3DPass());
     ApplyPassState(tex, level, spec, passId, PipelineVertexInput::Mesh);
 }
 
@@ -342,9 +402,33 @@ void EngineGL33::BeginPass(PassId passId)
         _currentDrawItem = DrawItem{};
 
         UploadFrameConstants(_frameState);
+        // Remastered lighting: the world's 3D passes (not a portrait capture, a
+        // 3D preview drawn in a dialog after the world, or the night-vision
+        // intensifier) draw through the remastered programs, get the terrain
+        // and cloud lookups and end in the post pass.
+        _worldEffectsOn = !_portraitTargetSize && !_worldSceneEnded && !_nightVision;
+        if (_worldEffectsOn && !_worldPassOpen)
+            GpuMark(Poseidon::gpu::Mark::WorldBegin);
+        if (_worldEffectsOn)
+        {
+            _worldPassOpen = true;
+            // The world's fog for the reflections' trace (PostSsr): from here on
+            // the frame state's fog flag follows each draw.
+            _ssrWorldFog[0] = _frameState.fogParams[0];
+            _ssrWorldFog[1] = _frameState.fogParams[1];
+        }
+        UpdateRemasterPrograms();
         // Bind the (previous frame's) shadow depth map + light-VP for the lit
         // shaders.  No-op until a depth pass has run with shadow maps enabled.
         UpdateShadowMapLitState();
+        UploadLitFrameConstants();
+        // The TAA jitter and texture LOD bias of this pass (the frame gates are
+        // known now); zero for any pass that is not a TAA frame's world pass.
+        ApplyTaaJitter();
+        // The surface target (the surfaces switch): bound from the world's first
+        // pass to EndWorldScene. SetColorMask above reset its write mask.
+        BeginSurfaceTarget();
+        UpdateSurfaceMask(true);
     }
 
     // Crop the 3D scene to the AspectSettings world rect (pillarbox /

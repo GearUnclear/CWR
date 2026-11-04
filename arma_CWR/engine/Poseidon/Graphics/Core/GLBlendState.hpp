@@ -41,6 +41,29 @@ inline void Shadow()
     glBlendFuncSeparate(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
 }
 
+// The same three blended modes with the destination alpha kept (alpha factors
+// ZERO, ONE). The remastered lighting stores each opaque pixel's ambient share
+// in the frame alpha for its ambient-occlusion pass; blended draws on top
+// (decals, smoke, glass) then leave it alone instead of overwriting it with
+// their own coverage. The colour factors are unchanged.
+inline void AlphaBlendKeepAlpha()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+}
+
+inline void AdditiveKeepAlpha()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ZERO, GL_ONE);
+}
+
+inline void ShadowKeepAlpha()
+{
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+}
+
 } // namespace render::blend
 
 } // namespace Poseidon

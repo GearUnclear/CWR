@@ -146,7 +146,7 @@ void TankOrCar::Simulate(float deltaT, SimulationImportance prec)
         SmokeSourceVehicle* smoke = dyn_cast<SmokeSourceVehicle>(GetSmoke());
         if (smoke)
         {
-            float explosionDelay = GRandGen.Gauss(0.2f, 0.5f, 1.5f);
+            float explosionDelay = GFxRandGen.Gauss(0.2f, 0.5f, 1.5f);
             Time explosionTime = Glob.time + explosionDelay;
             smoke->Explode(explosionTime);
         }

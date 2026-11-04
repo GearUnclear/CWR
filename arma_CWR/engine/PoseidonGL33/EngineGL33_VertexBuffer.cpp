@@ -5,12 +5,19 @@
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Core/GLBufferMap.hpp>
 #include <Poseidon/Graphics/Core/GLClear.hpp>
+#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Core/GLIndexBuffer.hpp>
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <PoseidonGL33/GLVertexAttribLayouts.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/Frame.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
+
+#include <algorithm>
+#include <cstring>
+#include <vector>
 
 using namespace Poseidon::Dev;
 
@@ -37,6 +44,12 @@ class VertexBufferGL33 : public VertexBuffer
     int _vertexCount = 0;
     int _indexCount = 0;
     AutoArray<VBSectionInfo> _sections;
+    // W1-9: a dynamic buffer keeps a CPU copy of what it last uploaded and
+    // uploads again only when the shape's vertices differ from it. The first
+    // Update always uploads (`_uploaded`): skipping it drew empty buffers in
+    // the measure2 stand-in (p1-dynonly-invalid).
+    bool _uploaded = false;
+    std::vector<SVertex> _shadow;
 
   public:
     VertexBufferGL33() = default;
@@ -47,6 +60,9 @@ class VertexBufferGL33 : public VertexBuffer
 
   private:
     void CopyVertices(const Shape& src);
+    bool UploadIfChanged(const Shape& src);
+    int UploadCount(const Shape& src) const { return std::min(src.NVertex(), _vertexCount); }
+    static void FillVertices(const Shape& src, SVertex* dst, int count);
     void SetupVertexAttribs();
 };
 
@@ -67,6 +83,64 @@ void VertexBufferGL33::SetupVertexAttribs()
     // Layout shared with the engine's `_vaoMesh` setup — see
     // `GLVertexAttribLayouts.hpp` for the single source of truth.
     Poseidon::render::vao::SetupSVertexLayout();
+}
+
+// The vertex stream of a shape as the buffer holds it.
+void VertexBufferGL33::FillVertices(const Shape& src, SVertex* sData, int count)
+{
+    const UVPair* uv = &src.UV(0);
+    const Vector3* pos = &src.Pos(0);
+    const Vector3* norm = &src.Norm(0);
+    for (int i = count; --i >= 0;)
+    {
+        sData->pos = Vector3P(pos->X(), pos->Y(), pos->Z());
+        // Normals are negated (matches D3D11 convention)
+        sData->norm = Vector3P(-norm->X(), -norm->Y(), -norm->Z());
+        pos++;
+        norm++;
+        sData->t0 = *uv;
+        uv++;
+        sData++;
+    }
+}
+
+// W1-9: a dynamic buffer (a shape that may animate) used to upload on every
+// draw, whether or not its vertices had changed: 3,100 uploads a frame at the
+// valley, each serialising the GPU behind it (measurements-2 1b). Its vertices
+// are compared with the copy last uploaded instead, and uploaded only when
+// they differ. Byte-equal vertices draw the same pixels, so this needs no
+// dirty mark to be right: shapes that move their vertices without one
+// (ForestPlain::Animate, flag cloth, AnimationUV) still upload when they change.
+bool VertexBufferGL33::UploadIfChanged(const Shape& src)
+{
+    const int count = UploadCount(src);
+    if (count <= 0)
+        return false;
+    static std::vector<SVertex> s_scratch;
+    s_scratch.resize(static_cast<size_t>(count));
+    FillVertices(src, s_scratch.data(), count);
+    const size_t bytes = static_cast<size_t>(count) * sizeof(SVertex);
+    if (_uploaded && _shadow.size() == static_cast<size_t>(count) &&
+        std::memcmp(_shadow.data(), s_scratch.data(), bytes) == 0)
+    {
+        Poseidon::LandFit::Stats().dynSkipped++;
+        return false;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+    void* mapped = Poseidon::render::buf::MapDynamicWriteInvalidate(GL_ARRAY_BUFFER, 0, _vertexCount * sizeof(SVertex));
+    if (!mapped)
+    {
+        LOG_ERROR(Graphics, "GL33: VBO map failed");
+        return false;
+    }
+    std::memcpy(mapped, s_scratch.data(), bytes);
+    glUnmapBuffer(GL_ARRAY_BUFFER);
+    _shadow.swap(s_scratch);
+    _uploaded = true;
+    Poseidon::LandFit::FrameStats& stats = Poseidon::LandFit::Stats();
+    stats.dynUploads++;
+    stats.dynUploadKB += static_cast<int>(bytes / 1024);
+    return true;
 }
 
 void VertexBufferGL33::CopyVertices(const Shape& src)
@@ -90,20 +164,8 @@ void VertexBufferGL33::CopyVertices(const Shape& src)
         return;
     }
 
-    const UVPair* uv = &src.UV(0);
-    const Vector3* pos = &src.Pos(0);
-    const Vector3* norm = &src.Norm(0);
-    for (int i = src.NVertex(); --i >= 0;)
-    {
-        sData->pos = Vector3P(pos->X(), pos->Y(), pos->Z());
-        // Normals are negated (matches D3D11 convention)
-        sData->norm = Vector3P(-norm->X(), -norm->Y(), -norm->Z());
-        pos++;
-        norm++;
-        sData->t0 = *uv;
-        uv++;
-        sData++;
-    }
+    // Never past the mapped range, should a level's vertex count change.
+    FillVertices(src, sData, UploadCount(src));
 
     glUnmapBuffer(GL_ARRAY_BUFFER);
 }
@@ -208,10 +270,19 @@ bool VertexBufferGL33::Init(const Shape& src, VBType type)
 
 void VertexBufferGL33::Update(const Shape& src, bool dynamic)
 {
-    if (_dynamic || dynamic || bufferDirty)
+    if (_dynamic)
+    {
+        // Compared, not trusted: a dirty mark or an animating material
+        // (`dynamic`) uploads only if the vertices really changed.
+        UploadIfChanged(src);
+        bufferDirty = false;
+        return;
+    }
+    if (dynamic || bufferDirty)
     {
         CopyVertices(src);
         bufferDirty = false;
+        Poseidon::LandFit::Stats().staticUploads++;
     }
 }
 
@@ -259,18 +330,22 @@ void EngineGL33::DrawSectionTL(const Shape& sMesh, int beg, int end)
               _currentDrawItem.worldMatrix._41, _currentDrawItem.worldMatrix._42, _currentDrawItem.worldMatrix._43);
 
     // Record DrawItem for the frame validator (it walks these at
-    // end-of-frame; the actual GL draw happens inline below).
-    DrawItem item = _currentDrawItem;
-    item.isTLDraw = true;
-    item.sectionBegin = beg;
-    item.sectionEnd = end;
-    item.firstIndex = siBeg.beg;
-    item.indexCount = indexCount;
-    item.vertexBuffer = buf;
-    item.backendMeshHandle = buf->_vao;
-    item.backendTexture1Handle = _lastTexture1Handle;
-    item.passId = SpecToPassId(item.specFlags);
-    _drawItems.push_back(item);
+    // end-of-frame; the actual GL draw happens inline below), only on
+    // frames it observes (S3-28).
+    if (Poseidon::render::frame::ObserverRecordsThisFrame())
+    {
+        DrawItem item = _currentDrawItem;
+        item.isTLDraw = true;
+        item.sectionBegin = beg;
+        item.sectionEnd = end;
+        item.firstIndex = siBeg.beg;
+        item.indexCount = indexCount;
+        item.vertexBuffer = buf;
+        item.backendMeshHandle = buf->_vao;
+        item.backendTexture1Handle = _lastTexture1Handle;
+        item.passId = SpecToPassId(item.specFlags);
+        _drawItems.push_back(item);
+    }
 
     // Build the typed `Poseidon::render::frame::Draw` value from
     // current state and dispatch through `EmitDraw`.  State
@@ -279,11 +354,11 @@ void EngineGL33::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // `EmitDraw` just needs to bind the mesh-specific VAO + textures,
     // upload the per-draw world matrix, and issue the indexed draw.
     Poseidon::render::frame::Draw d;
-    d.world = item.worldMatrix;
+    d.world = _currentDrawItem.worldMatrix;
     d.mesh.vao = buf->_vao;
     d.indexBegin = siBeg.beg;
     d.indexCount = indexCount;
-    d.textures[0].id = item.backendTextureHandle;
+    d.textures[0].id = _currentDrawItem.backendTextureHandle;
     d.textures[1].id = _lastTexture1Handle;
     EmitDraw(d);
 }
@@ -361,9 +436,30 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
     }
     if (clearZ)
     {
+        // A depth clear inside the world's passes is a vehicle interior
+        // (Transport::Draw). While the fog draws this frame, the world's depth
+        // and colour are saved first: the fog is applied to the world seen
+        // out of the cockpit as anywhere else, so no view shows less air than
+        // AI sight is cut by (EngineGL33_PostFog.cpp).
+        if (_worldPassOpen || NightVisionFogOpen())
+            SaveWorldBeforeInterior();
+        if (_worldPassOpen)
+        {
+            _worldDepthCleared = true; // the post pass's other stages have no world depth this frame
+            // A vehicle interior follows: no sky above it to take light from
+            // or reflect (the surfaces switch).
+            SurfaceEnterInterior();
+        }
         mask |= GL_DEPTH_BUFFER_BIT;
         if (_hasStencilBuffer)
+        {
             mask |= GL_STENCIL_BUFFER_BIT;
+            // A stencil clear honours the write mask, which a draw that keeps
+            // the reflections' surface tags narrows: clear every bit, and let
+            // the next draw set its own stencil state again.
+            Poseidon::render::depthstencil::StencilFullWriteMask();
+            _ssrStencilValid = false;
+        }
     }
     Poseidon::render::clear::WithMask(mask);
 }
@@ -425,6 +521,8 @@ void EngineGL33::DestroySSAATarget()
         glDeleteRenderbuffers(1, &_ssaaDepthRb);
     if (_ssaaResolveRb)
         glDeleteRenderbuffers(1, &_ssaaResolveRb);
+    // The surfaces switch's target was attachment 1 of the frame target.
+    DestroySurfaceTarget();
     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
     _ssaaW = _ssaaH = 0;
 }
@@ -439,7 +537,9 @@ void EngineGL33::ApplyPendingRenderScale()
     // is single-sampled (scaling blits into a multisampled target are
     // illegal), so the frame target carries whatever AA is configured: the
     // MSAA sample count and the SSAA scale are both live knobs (dev panel
-    // Render tab / GraphicsConfig).  Both default OFF.
+    // Render tab / GraphicsConfig).  The engine starts with both off until
+    // GraphicsConfig applies the user's values at boot (4x MSAA, scale 1 by
+    // default).
     const float want = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
     const int sw = static_cast<int>(winW * want + 0.5f);
     const int sh = static_cast<int>(winH * want + 0.5f);
@@ -573,6 +673,10 @@ void EngineGL33::CaptureScreenshotIfPending()
         BindFrameRenderTarget();
 }
 
+// P0-10 recorder (EngineGL33_Recorder.cpp): reads the presented frame into its
+// pixel-pack ring while a triRecord is armed; returns at once otherwise.
+void GL33RecordPresentedFrame(SDL_Window* window, int fallbackW, int fallbackH, bool screenshotFrame);
+
 void EngineGL33::BackToFront()
 {
     // SSAA: the game frame (3D + HUD) is complete on the scaled target —
@@ -598,7 +702,10 @@ void EngineGL33::BackToFront()
     // readback samples the same back buffer that's about to swap.
     // Readback after SwapWindow on a double-buffered context is
     // undefined, so the capture has to happen pre-swap.
+    const bool screenshotFrame = _pendingScreenshotPath.GetLength() > 0;
     CaptureScreenshotIfPending();
+    // The triRecord recorder reads the same pixels at the same point.
+    GL33RecordPresentedFrame(_sdlWindow, _w, _h, screenshotFrame);
 
     if (_glContext && _sdlWindow)
         SDL_GL_SwapWindow(_sdlWindow);
@@ -670,3 +777,119 @@ bool EngineGL33::SamplePixel(int x, int y, uint8_t* outRGB)
     return true;
 }
 
+// W1-2: the frame observer's centre-pixel probe without a GPU wait. SamplePixel
+// above resolves and downsamples the whole frame into the window and reads it
+// at once, so the CPU waits for the GPU to finish the frame. Here one pixel of
+// the frame target is resolved into a 1x1 target and read into a pixel-pack
+// buffer behind a fence; PollWorldProbes copies it out once the fence has
+// passed (the exposure meter's pattern, EngineGL33_Camera.cpp). A slot still in
+// flight drops the sample: the caller polls before it queues, so a busy slot
+// means the GPU is more than three probes behind.
+bool EngineGL33::QueueWorldProbe(int x, int y)
+{
+    WorldProbeState& p = _worldProbe;
+    if (!_glContext || _portraitTargetSize || p.broken)
+        return false;
+    const int i = p.next;
+    if (p.fence[i])
+        return false;
+
+    // Window coords, top-left origin, the range SamplePixel accepts.
+    int winW = _w, winH = _h;
+    if (_sdlWindow)
+        SDL_GetWindowSizeInPixels(_sdlWindow, &winW, &winH);
+    if (winW <= 0 || winH <= 0 || x < 0 || y < 0 || x >= winW || y >= winH)
+        return false;
+
+    if (!p.fbo)
+    {
+        glGenRenderbuffers(1, &p.rb);
+        glBindRenderbuffer(GL_RENDERBUFFER, p.rb);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, 1, 1);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        glGenFramebuffers(1, &p.fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.fbo);
+        glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, p.rb);
+        const GLenum status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+        glGenBuffers(WorldProbeState::kRing, p.pbo);
+        for (GLuint pbo : p.pbo)
+        {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+            glBufferData(GL_PIXEL_PACK_BUFFER, 4, nullptr, GL_STREAM_READ);
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, SSAAActive() ? _ssaaFbo : 0);
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+        {
+            // Never retried: the near-black check then gets no samples, as on
+            // a backend without probes.
+            LOG_WARN(Graphics, "GL33: world probe target incomplete (0x{:x}); near-black check off", status);
+            p.broken = true;
+            return false;
+        }
+    }
+
+    const int glY = winH - 1 - y; // glReadPixels uses bottom-left origin
+    int readX = x, readY = glY;
+    if (SSAAActive())
+    {
+        // The frame-target pixel nearest to where the window downsample samples
+        // this window pixel's centre. At render scale 1 that is the pixel itself,
+        // so the value is the one the full resolve gave. One pixel in, one out:
+        // a legal multisample resolve.
+        const int tx = ((2 * x + 1) * _ssaaW) / (2 * winW);
+        const int ty = ((2 * glY + 1) * _ssaaH) / (2 * winH);
+        readX = tx < _ssaaW ? tx : _ssaaW - 1;
+        readY = ty < _ssaaH ? ty : _ssaaH - 1;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, _ssaaFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, p.fbo);
+        glBlitFramebuffer(readX, readY, readX + 1, readY + 1, 0, 0, 1, 1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, p.fbo);
+        readX = readY = 0;
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, p.pbo[i]);
+    glReadPixels(readX, readY, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    p.fence[i] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    p.frame[i] = GetFrameCounter();
+    p.next = (i + 1) % WorldProbeState::kRing;
+
+    // The frame target stays bound for the rest of the frame, as SamplePixel
+    // leaves it; the viewport is not touched.
+    if (SSAAActive())
+        glBindFramebuffer(GL_FRAMEBUFFER, _ssaaFbo);
+    return true;
+}
+
+int EngineGL33::PollWorldProbes(WorldProbe* out, int max)
+{
+    if (!_glContext || !out || max <= 0)
+        return 0;
+    WorldProbeState& p = _worldProbe;
+    // Fences pass in submission order: walk from the oldest slot and stop at
+    // the first one still in flight. Never waits (zero timeout).
+    int n = 0;
+    for (int k = 0; k < WorldProbeState::kRing && n < max; ++k)
+    {
+        const int i = (p.next + k) % WorldProbeState::kRing;
+        if (!p.fence[i])
+            continue;
+        GLsync sync = static_cast<GLsync>(p.fence[i]);
+        const GLenum st = glClientWaitSync(sync, 0, 0);
+        if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED)
+            break;
+        glDeleteSync(sync);
+        p.fence[i] = nullptr;
+        // The fence has passed: the copy out does not wait.
+        std::uint8_t px[4] = {0, 0, 0, 0};
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, p.pbo[i]);
+        glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, 4, px);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        out[n].frame = p.frame[i];
+        out[n].rgb[0] = px[0];
+        out[n].rgb[1] = px[1];
+        out[n].rgb[2] = px[2];
+        ++n;
+    }
+    return n;
+}

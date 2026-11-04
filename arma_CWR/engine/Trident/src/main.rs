@@ -383,9 +383,10 @@ async fn main() -> anyhow::Result<()> {
             // Boot game with ephemeral config
             let tmp_dir = tempfile::tempdir()?;
             let user_dir = tmp_dir.path().to_string_lossy().to_string();
+            let cache_dir = scenarios::poseidon_cache_dir(&user_dir);
             let env_vars = [
                 ("POSEIDON_USER_DIR", user_dir.as_str()),
-                ("POSEIDON_CACHE_DIR", user_dir.as_str()),
+                ("POSEIDON_CACHE_DIR", cache_dir.as_str()),
             ];
 
             let mut game = client::GameInstance::spawn_with_env(

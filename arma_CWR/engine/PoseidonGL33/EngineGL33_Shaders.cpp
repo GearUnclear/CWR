@@ -1,5 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <PoseidonGL33/EngineGL33.hpp>
+#include <PoseidonGL33/EngineGL33_Lighting.hpp>
+#include <PoseidonGL33/EngineGL33_ProgramCache.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -7,10 +9,14 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -698,10 +704,14 @@ void main() {
 }
 )";
 
-// Optional override directory for hot-reload.  Set via --shader-override-dir.
-// When set, CompileGLShader looks for `<dir>/<name>.glsl` and prefers its
-// contents over the inline `source` argument.  Empty / not-set = use inline
-// source as the only path (release behaviour).
+// Optional override directory for shader iteration, set from the
+// CWR_SHADER_OVERRIDE_DIR environment variable (Init3DState). When set,
+// CompileGLShader looks for `<dir>/<name>.glsl` and prefers its contents over
+// the inline `source` argument; the remastered fragment shaders also take
+// `psRemasterCommon.glsl` and `<ps>RemasterMain.glsl` pieces, and the post
+// shaders their own names (`psPostAo`, ...). The dev overlay's Reload shaders
+// button rebuilds everything from it without a restart. Empty / not-set = use
+// inline source as the only path (release behaviour).
 static std::string s_shaderOverrideDir;
 
 void SetShaderOverrideDir(const std::string& dir)
@@ -709,6 +719,11 @@ void SetShaderOverrideDir(const std::string& dir)
     s_shaderOverrideDir = dir;
     if (!dir.empty())
         LOG_INFO(Graphics, "GL33: shader override dir = '{}'", dir);
+}
+
+const std::string& ShaderOverrideDir()
+{
+    return s_shaderOverrideDir;
 }
 
 // Returns true if an override file was loaded (out=its contents).
@@ -726,6 +741,11 @@ static bool TryLoadShaderOverride(const char* name, std::string& out)
     out = ss.str();
     LOG_INFO(Graphics, "GL33: shader override loaded — {} ({} bytes)", p.string(), out.size());
     return true;
+}
+
+bool LoadShaderOverride(const char* name, std::string& out)
+{
+    return TryLoadShaderOverride(name, out);
 }
 
 static GLuint CompileGLShader(GLenum type, const char* source, const char* name)
@@ -778,15 +798,49 @@ static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;
 static GLuint s_psUBO = 0;
+// What slot 0 of s_worldUBO holds (perf W1-6, S3-22): the world matrix goes
+// out once per object and again per section with the same bytes, so
+// UploadVSWorldMatrix skips an upload that would not change the buffer. Every
+// write to s_worldUBO records itself here; a new or deleted buffer is unknown.
+static float s_worldSlot0[16] = {};
+static bool s_worldSlot0Known = false;
+// What s_vsUBO holds: every write below records itself here (a new buffer
+// starts unknown, InitVertexShaders).
+static Poseidon::gpu::UboMirror s_vsMirror;
+static constexpr int kVsSlots = static_cast<int>(sizeof(s_vsShadow) / 16);
+
+// Writes slots [first, first + count) of s_vsShadow to the VS buffer and
+// records them in its mirror.
+static void UploadVSSlots(int first, int count)
+{
+    // glBindBufferBase is sticky: done once at UBO creation in
+    // InitVertexShaders.  Per-upload we only update buffer contents.
+    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, first * 16, count * 16, s_vsShadow + first * 4);
+    s_vsMirror.Store(s_vsShadow, first, count);
+    Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Frame();
+    ++c.vsUploads;
+    c.vsBytes += count * 16;
+}
 
 void EngineGL33::FlushVSConstants()
 {
     if (!s_vsUBO)
         return;
-    // glBindBufferBase is sticky — done once at UBO creation in
-    // InitVertexShaders.  Per-flush we only update buffer contents.
-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_vsShadow), s_vsShadow);
+    // Send only the slots that changed since the last upload. Always on,
+    // whatever the drawGrouping gate says: the mirror keeps the buffer equal
+    // to s_vsShadow, so the result is the same as sending the whole block
+    // (perf W1-3). With the WorldInstances buffer the VSConstants world slots
+    // are std140 padding no shader reads (every VS takes the world matrix from
+    // WorldInstances), so they never count as a change.
+    const bool dedupe = true;
+    int first = 0, count = 0;
+    if (!s_vsMirror.Plan(s_vsShadow, dedupe, first, count, s_worldUBO ? VSConst::SlotWorld : 0, s_worldUBO ? 4 : 0))
+    {
+        ++Poseidon::perf::GPerfCounters().Frame().vsSkips;
+        return;
+    }
+    UploadVSSlots(first, count);
 }
 
 void EngineGL33::FlushPSConstants()
@@ -821,19 +875,44 @@ void EngineGL33::UploadPSConstant(int reg, const float* data)
 static GLuint s_vsScreenObj = 0;
 static GLuint s_vsTransformObj = 0;
 static GLuint s_vsShadowObj = 0;
+// Remastered lighting set (EngineGL33_LightingShaders.cpp), indexed by VertexShaderID.
+static GLuint s_vsRemasterObj[NVertexShaders] = {};
+static bool s_vsCompiled = false;
 
-void EngineGL33::InitVertexShaders()
+// The six vertex shader objects are link inputs only: InitPixelShaders compiles
+// them when a program has to be linked, so a full binary-cache hit skips them.
+static void EnsureWorldVsCompiled()
 {
+    if (s_vsCompiled)
+        return;
+    s_vsCompiled = true;
     s_vsScreenObj = CompileGLShader(GL_VERTEX_SHADER, s_vsScreenGLSL, "vsScreen");
     s_vsTransformObj = CompileGLShader(GL_VERTEX_SHADER, s_vsTransformGLSL, "vsTransform");
     s_vsShadowObj = CompileGLShader(GL_VERTEX_SHADER, s_vsShadowGLSL, "vsShadow");
+    static const char* const kRemasterVsNames[NVertexShaders] = {"vsScreenRemaster", "vsTransformRemaster",
+                                                                 "vsShadowRemaster"};
+    for (int v = 0; v < NVertexShaders; ++v)
+    {
+        const char* src = Poseidon::gl33lighting::RemasterVertexSource(v);
+        s_vsRemasterObj[v] = src ? CompileGLShader(GL_VERTEX_SHADER, src, kRemasterVsNames[v]) : 0;
+    }
+}
+
+void EngineGL33::InitVertexShaders()
+{
+    // A soft reset re-runs Init3DState without the matching deinit: release
+    // what a previous init created instead of leaking it.
+    if (s_vsUBO)
+        DeinitVertexShaders();
+    // The vertex shader objects compile on demand (EnsureWorldVsCompiled).
 
     // Bind the VS UBO to base 0 once; subsequent FlushVSConstants only
     // update buffer contents.
     glGenBuffers(1, &s_vsUBO);
     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_vsShadow), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_vsShadow), s_vsShadow, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_vsUBO);
+    s_vsMirror.Reset(kVsSlots); // the next flush sends the whole block
 
     // WorldInstances array UBO (binding 2) — 256 mat4 = 16 KB, the GL 3.3
     // minimum guaranteed UBO size. Slot 0 = the classic per-draw world
@@ -842,6 +921,7 @@ void EngineGL33::InitVertexShaders()
     glBindBuffer(GL_UNIFORM_BUFFER, s_worldUBO);
     glBufferData(GL_UNIFORM_BUFFER, 256 * 64, nullptr, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 2, s_worldUBO);
+    s_worldSlot0Known = false; // created without contents
 
     _vertexShaderSel = VSNone;
 }
@@ -863,10 +943,59 @@ void EngineGL33::DeinitVertexShaders()
         glDeleteShader(s_vsShadowObj);
         s_vsShadowObj = 0;
     }
+    for (GLuint& obj : s_vsRemasterObj)
+    {
+        if (obj)
+            glDeleteShader(obj);
+        obj = 0;
+    }
+    s_vsCompiled = false;
     if (s_vsUBO)
     {
         glDeleteBuffers(1, &s_vsUBO);
         s_vsUBO = 0;
+    }
+    s_vsMirror.Reset(kVsSlots);
+    if (s_worldUBO)
+    {
+        glDeleteBuffers(1, &s_worldUBO);
+        s_worldUBO = 0;
+    }
+    s_worldSlot0Known = false;
+}
+
+void EngineGL33::ReloadShadersNow()
+{
+    _shaderReloadPending = false;
+    if (!_glContext)
+        return;
+    LOG_INFO(Graphics, "GL33: reloading shaders (override dir '{}')", s_shaderOverrideDir);
+    FlushAndFreeAllQueues(_queueNo);
+    // The same teardown and rebuild as a hard reset, minus the textures and
+    // vertex buffers: programs, shader objects, the constant buffers and the
+    // lighting resources (the post programs rebuild on first use, the terrain
+    // horizon map is re-uploaded from its CPU copy).
+    DeinitPixelShaders();
+    DeinitVertexShaders();
+    InitVertexShaders();
+    InitPixelShaders();
+    FlushVSConstants(); // the new VS buffer starts empty
+    const float nightEye = _nightEye;
+    _nightEye = -1.0f; // re-upload the night-eye coefficients InitPixelShaders reset
+    EnableNightEye(nightEye);
+    _pixelShaderSel = PSNone;
+    GL33Bind::Invalidate();
+    InvalidatePipelineCache();
+    // InitVertexShaders cleared the selection; nothing in the 2D path selects
+    // VSScreen again, so restore the current pass's vertex shader.
+    if (IsIn3DPass())
+    {
+        SelectVertexShader(VSTransform);
+    }
+    else
+    {
+        SelectVertexShader(VSScreen);
+        UploadVSScreenConstants();
     }
 }
 
@@ -884,8 +1013,17 @@ void EngineGL33::SelectVertexShader(VertexShaderID vs)
 
 void EngineGL33::UploadVSScreenConstants()
 {
-    float vpScale[4] = {2.0f / _w, 2.0f / _h, 0, 0};
+    // zw: the TAA jitter the world's passes hold (the world's own screen-space
+    // draws, smoke and rain, move with it); zero everywhere else.
+    float vpScale[4] = {2.0f / _w, 2.0f / _h, _taa.ndcApplied.x, _taa.ndcApplied.y};
     memcpy(s_vsShadow + VSConst::SlotVpScale * 4, vpScale, 16);
+    FlushVSConstants();
+}
+
+void EngineGL33::UploadVSJitter(float x, float y)
+{
+    s_vsShadow[VSConst::SlotVpScale * 4 + 2] = x;
+    s_vsShadow[VSConst::SlotVpScale * 4 + 3] = y;
     FlushVSConstants();
 }
 
@@ -1041,7 +1179,13 @@ void EngineGL33::UpdateShadowMapLitState()
     float splits[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float cascadeCtl[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float camFwd[4] = {0.0f, 0.0f, 1.0f, 0.0f};
-    if (_shadowTuning.enabled && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
+    // With the remastered lighting on, only the world pass shadows: the classic
+    // programs it hands the HUD, dialogs and 3D previews to would otherwise
+    // darken them by the shadow at the camera point. The night-vision world
+    // pass (classic programs) keeps its sun shadows through the classic test.
+    const bool nightVisionWorld = _nightVision && !_worldSceneEnded && !_portraitTargetSize;
+    const bool shadowPass = !_lightingActive || _remasterPrograms || nightVisionWorld;
+    if (shadowPass && ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
     {
         ctl[0] = 1.0f; // enable the per-fragment shadow test
         // Lit-colour multiplier where shadowed, faded toward 1.0 (no shadow) as the
@@ -1061,7 +1205,7 @@ void EngineGL33::UpdateShadowMapLitState()
         camFwd[1] = _shadowCamFwd[1];
         camFwd[2] = _shadowCamFwd[2];
         memcpy(s_psShadow + 8 * 4, _shadowMapVP, sizeof(float) * 16 * _shadowCascades);
-        GL33Bind::ActiveUnit(2);
+        GL33Bind::ActiveUnit(Poseidon::gl33lighting::kShadowMapUnit);
         glBindTexture(GL_TEXTURE_2D_ARRAY, _shadowMapTex);
         GL33Bind::ActiveUnit(0);
     }
@@ -1070,6 +1214,9 @@ void EngineGL33::UpdateShadowMapLitState()
     memcpy(s_psShadow + 25 * 4, cascadeCtl, 16);
     memcpy(s_psShadow + 26 * 4, camFwd, 16);
     FlushPSConstants();
+    // Remastered: comparison sampler on unit 2 and a complete depth array even
+    // without a shadow map, plus the terrain / cloud textures.
+    BindLightingTextures();
 }
 
 void EngineGL33::UploadVSViewConstants(const FrameState& frame)
@@ -1091,6 +1238,19 @@ void EngineGL33::UploadWorldInstances(const float* matrices, int count)
         count = 256;
     glBindBuffer(GL_UNIFORM_BUFFER, s_worldUBO);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, count * 64, matrices);
+    memcpy(s_worldSlot0, matrices, 64); // slot 0 is the first matrix
+    s_worldSlot0Known = true;
+}
+
+void EngineGL33::UploadVSCrown(const float center[3], const float invHalf[3])
+{
+    const float v[8] = {center[0], center[1], center[2], 1.0f, invHalf[0], invHalf[1], invHalf[2], 0.0f};
+    if (memcmp(s_vsShadow + VSConst::SlotCrown * 4, v, sizeof(v)) == 0)
+        return;
+    memcpy(s_vsShadow + VSConst::SlotCrown * 4, v, sizeof(v));
+    if (!s_vsUBO)
+        return;
+    UploadVSSlots(VSConst::SlotCrown, 2);
 }
 
 void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
@@ -1100,8 +1260,13 @@ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
     // the VSConstants world member stays as std140 padding.
     if (s_worldUBO)
     {
+        // Slot 0 already holds these bytes: the upload would change nothing.
+        if (s_worldSlot0Known && memcmp(s_worldSlot0, worldMatrix, 64) == 0)
+            return;
         glBindBuffer(GL_UNIFORM_BUFFER, s_worldUBO);
         glBufferSubData(GL_UNIFORM_BUFFER, 0, 64, worldMatrix);
+        memcpy(s_worldSlot0, worldMatrix, 64);
+        s_worldSlot0Known = true;
         return;
     }
     // Per-draw path: only the world matrix changed — upload its 64 bytes
@@ -1110,11 +1275,10 @@ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
     // writers (materials, lights, cascade VPs) still flush the full block.
     if (!s_vsUBO)
         return;
-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, VSConst::SlotWorld * 4 * sizeof(float), 64, s_vsShadow + VSConst::SlotWorld * 4);
+    UploadVSSlots(VSConst::SlotWorld, 4);
 }
 
-void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnabled)
+void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnabled, bool flush)
 {
     LightSun* sun = GScene->MainLight();
 
@@ -1135,7 +1299,9 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
 
     memcpy(s_vsShadow + VSConst::SlotSpecular * 4, spec, 16);
     memcpy(s_vsShadow + VSConst::SlotSpecEn * 4, specEn, 16);
-    FlushVSConstants();
+    if (flush)
+        FlushVSConstants();
+    UploadLitMaterial(mat);
 }
 
 // Upload the active local (point) lights for per-vertex night illumination.
@@ -1197,6 +1363,7 @@ void EngineGL33::UploadVSLights(const LightList& lights, const TLMaterial& mat, 
     }
     s_vsShadow[VSConst::SlotLightCount * 4] = static_cast<float>(n);
     FlushVSConstants();
+    UploadLitLights(lights, nightEffect);
 }
 
 void EngineGL33::UploadVSTexGenConstants(TexGenMode mode)
@@ -1294,22 +1461,32 @@ void EngineGL33::UploadObjectConstants(const DrawItem& item)
 
 // Compiled FS objects
 static GLuint s_fsObjects[NPixelShaders] = {};
+// Remastered FS objects; PSFlat / PSShadow reuse the classic objects.
+static GLuint s_fsRemasterObjects[NPixelShaders] = {};
+// The world program DoSelectPixelShader bound last (0: none, or unknown). It
+// is trusted only while _pixelShaderSel is a selection: every pass that binds
+// a program of its own resets _pixelShaderSel to PSNone afterwards (or puts
+// the previous program back, the shadow depth pass).
+static GLuint s_worldProgramBound = 0;
 
 // Shader binary cache (ARB_get_program_binary).
 //
-// glLinkProgram for the 2*2*2*5 = 40 pipeline-state programs costs ~100ms+
-// of cold start time on a typical desktop driver.  GL 4.1 / ARB_get_program
-// _binary lets us pull the linked program back as a driver-specific blob
-// and feed it into glProgramBinary on the next launch — saving the link
-// pass entirely when the GPU + driver match the cached blob.
+// The world set is 2 sets x 3 vertex shaders x 6 pixel shaders = 36 distinct
+// programs; each fills the 2 specular x 2 mode slots of its (set, vs, ps)
+// (EngineGL33_ProgramCache.hpp), so a cold start links 36 programs, not 144,
+// and a warm one restores 36 binaries. GL 4.1 /
+// ARB_get_program_binary lets us pull the linked program back as a
+// driver-specific blob and feed it into glProgramBinary on the next launch,
+// skipping the link (and the shader compiles) when the GPU and driver match
+// the cached blob.
 //
 // File format (little-endian, packed):
 //   u32 magic 'SHCH'
-//   u32 version
+//   u32 version (gl33programs::kShaderCacheVersion)
 //   u64 source_hash (FNV-1a over all GLSL source bodies)
 //   u32 n_programs
 //   per program:
-//     u32 key (v<<24 | s<<16 | m<<8 | i)
+//     u32 key (set<<28 | v<<24 | ps, gl33programs::WorldProgramKey)
 //     u32 binaryFormat
 //     u32 blobSize
 //     u8[blobSize] blob
@@ -1317,7 +1494,7 @@ static GLuint s_fsObjects[NPixelShaders] = {};
 // Mismatched source hash, magic, or version invalidates the whole file.
 // A driver/GPU change produces a wrong binary blob; glProgramBinary then
 // fails per-entry and we transparently fall back to compile-from-source
-// for that slot, then rewrite the cache.
+// for that program, then rewrite the cache.
 
 namespace
 {
@@ -1328,7 +1505,7 @@ struct ShaderCacheEntry
 };
 
 constexpr uint32_t kCacheMagic = 0x53484348; // 'SHCH'
-constexpr uint32_t kCacheVersion = 1;
+constexpr uint32_t kCacheVersion = Poseidon::gl33programs::kShaderCacheVersion;
 
 uint64_t HashShaderSources()
 {
@@ -1350,6 +1527,33 @@ uint64_t HashShaderSources()
     add(s_psWaterGLSL);
     add(s_psFlatGLSL);
     add(s_psShadowGLSL);
+    for (int v = 0; v < NVertexShaders; ++v)
+        if (const char* src = Poseidon::gl33lighting::RemasterVertexSource(v))
+            add(src);
+    add(Poseidon::gl33lighting::RemasterFragmentCommon());
+    for (int i = 0; i < NPixelShaders; ++i)
+        if (const char* src = Poseidon::gl33lighting::RemasterFragmentMain(i))
+            add(src);
+    // Override files replace the built-in sources at compile time, so they are
+    // part of what a cached binary was built from: without them in the key, an
+    // edited override would keep loading the binary of the previous edit.
+    if (!s_shaderOverrideDir.empty())
+    {
+        std::error_code ec;
+        std::vector<std::filesystem::path> files;
+        for (const auto& entry : std::filesystem::directory_iterator(s_shaderOverrideDir, ec))
+            if (entry.is_regular_file(ec) && entry.path().extension() == ".glsl")
+                files.push_back(entry.path());
+        std::sort(files.begin(), files.end());
+        for (const auto& file : files)
+        {
+            std::ifstream f(file, std::ios::binary);
+            std::stringstream ss;
+            ss << f.rdbuf();
+            add(file.filename().string().c_str());
+            add(ss.str().c_str());
+        }
+    }
     return h;
 }
 
@@ -1418,10 +1622,20 @@ void SaveShaderCacheFile(uint64_t hash, const std::map<uint32_t, ShaderCacheEntr
     }
 }
 
-GLuint TryRestoreProgramFromCache(const ShaderCacheEntry& e)
+// The restore and the link are split into an issue step and a status step:
+// every program is handed to the driver before the first GL_LINK_STATUS
+// query, so a driver that links in the background is not made to finish each
+// one before the next is even issued.
+GLuint BeginRestoreProgramFromCache(const ShaderCacheEntry& e)
 {
     GLuint prog = glCreateProgram();
     glProgramBinary(prog, e.binaryFormat, e.blob.data(), static_cast<GLsizei>(e.blob.size()));
+    return prog;
+}
+
+// The restored program, or 0 (deleted) when the driver refused the binary.
+GLuint FinishRestoreProgramFromCache(GLuint prog)
+{
     GLint linked = 0;
     glGetProgramiv(prog, GL_LINK_STATUS, &linked);
     if (!linked)
@@ -1453,7 +1667,7 @@ bool CaptureProgramBinary(GLuint prog, ShaderCacheEntry& out)
     return true;
 }
 
-GLuint LinkProgramRetrievable(GLuint vs, GLuint fs, const char* name)
+GLuint BeginLinkProgramRetrievable(GLuint vs, GLuint fs)
 {
     GLuint program = glCreateProgram();
     // Hint must be set before linking for the binary to be retrievable
@@ -1461,6 +1675,12 @@ GLuint LinkProgramRetrievable(GLuint vs, GLuint fs, const char* name)
     glAttachShader(program, vs);
     glAttachShader(program, fs);
     glLinkProgram(program);
+    return program;
+}
+
+// The linked program, or 0 (logged and deleted) when the link failed.
+GLuint FinishLinkProgramRetrievable(GLuint program, const char* name)
+{
     GLint status = 0;
     glGetProgramiv(program, GL_LINK_STATUS, &status);
     if (!status)
@@ -1478,6 +1698,9 @@ GLuint LinkProgramRetrievable(GLuint vs, GLuint fs, const char* name)
 
 void EngineGL33::InitPixelShaders()
 {
+    // As InitVertexShaders: a soft reset re-runs this without the deinit.
+    if (s_psUBO)
+        DeinitPixelShaders();
     struct PSCompileInfo
     {
         PixelShaderID id;
@@ -1490,8 +1713,9 @@ void EngineGL33::InitPixelShaders()
         {PSFlat, s_psFlatGLSL, "psFlat"},       {PSShadow, s_psShadowGLSL, "psShadow"},
     };
 
-    // Try the binary cache first.  Only compile FS objects on miss — we
-    // need them only as link inputs, and a fully-cached run skips compile.
+    // Try the binary cache first.  Only compile the VS and FS objects on a
+    // miss: they are link inputs only, and a fully-cached run skips compile.
+    const auto buildStart = std::chrono::steady_clock::now();
     const uint64_t srcHash = HashShaderSources();
     std::map<uint32_t, ShaderCacheEntry> cache;
     const bool cacheLoaded = LoadShaderCacheFile(srcHash, cache);
@@ -1510,6 +1734,24 @@ void EngineGL33::InitPixelShaders()
         fsCompiled = true;
         for (auto& info : psInfos)
             s_fsObjects[info.id] = CompileGLShader(GL_FRAGMENT_SHADER, info.source, info.name);
+        for (auto& info : psInfos)
+        {
+            const char* body = Poseidon::gl33lighting::RemasterFragmentMain(info.id);
+            if (!body)
+                continue;
+            // Override pieces: the shared lighting code and this shader's main
+            // can be edited separately (a whole `<ps>Remaster.glsl` still wins).
+            std::string common = Poseidon::gl33lighting::RemasterFragmentCommon();
+            std::string main = body;
+            std::string piece;
+            if (TryLoadShaderOverride("psRemasterCommon", piece))
+                common = piece;
+            if (TryLoadShaderOverride((std::string(info.name) + "RemasterMain").c_str(), piece))
+                main = piece;
+            const std::string src = common + main;
+            const std::string name = std::string(info.name) + "Remaster";
+            s_fsRemasterObjects[info.id] = CompileGLShader(GL_FRAGMENT_SHADER, src.c_str(), name.c_str());
+        }
     };
 
     auto bindProgramSamplersAndBlocks = [](GLuint prog)
@@ -1530,59 +1772,120 @@ void EngineGL33::InitPixelShaders()
             glUniform1i(loc0, 0);
         if (loc1 >= 0)
             glUniform1i(loc1, 1);
-        GLint locShadow = glGetUniformLocation(prog, "shadowMap");
-        if (locShadow >= 0)
-            glUniform1i(locShadow, 2); // shadow depth map on texture unit 2
+        // Remastered lighting inputs (absent from the classic programs).
+        GLuint litBlock = glGetUniformBlockIndex(prog, "LitConstants");
+        if (litBlock != GL_INVALID_INDEX)
+            glUniformBlockBinding(prog, litBlock, Poseidon::gl33lighting::kLitBinding);
+        GLuint lightBlock = glGetUniformBlockIndex(prog, "FrameLights");
+        if (lightBlock != GL_INVALID_INDEX)
+            glUniformBlockBinding(prog, lightBlock, Poseidon::gl33lighting::kLightListBinding);
+        // The lit samplers from the unit table, the shadow depth map of both
+        // sets (unit 2) among them.
+        for (const auto& ls : Poseidon::gl33lighting::kLitSamplers)
+        {
+            GLint loc = glGetUniformLocation(prog, ls.name);
+            if (loc >= 0)
+                glUniform1i(loc, ls.unit);
+        }
         glUseProgram(0);
     };
 
-    // Build combined programs: one per (vs x specular x mode x shader) = 2*2*2*5 = 40
-    GLuint vsObjs[NVertexShaders] = {s_vsScreenObj, s_vsTransformObj, s_vsShadowObj};
-    for (int v = 0; v < NVertexShaders; v++)
+    // Build combined programs: one per (set x vs x shader), shared by the
+    // specular x mode slots, which link the same two shader objects (their
+    // differences are uniform-block values: EngineGL33_ProgramCache.hpp).
+    // Set 0 is classic, set 1 the remastered lighting (key bit 28); the
+    // remastered PSFlat / PSShadow reuse the classic fragment objects.
+    // Every restore and link is issued before the first status query.
+    namespace gp = Poseidon::gl33programs;
+    constexpr int kSets = 2;
+    GLuint built[kSets][NVertexShaders][NPixelShaders] = {};
+    // A set-1 vertex shader without a source has no programs.
+    auto vsWanted = [](int set, int v) { return set == 0 || Poseidon::gl33lighting::RemasterVertexSource(v); };
+
+    // 1. Restore what the cache holds.
+    int restored = 0;
+    if (cacheLoaded)
     {
-        if (!vsObjs[v])
-            continue;
-        for (int s = 0; s < NPixelShaderSpecular; s++)
-        {
-            for (int m = 0; m < NPixelShaderModes; m++)
-            {
-                for (int i = 0; i < NPixelShaders; i++)
+        for (int set = 0; set < kSets; set++)
+            for (int v = 0; v < NVertexShaders; v++)
+                for (int i = 0; vsWanted(set, v) && i < NPixelShaders; i++)
                 {
-                    const uint32_t key = (static_cast<uint32_t>(v) << 24) | (static_cast<uint32_t>(s) << 16) |
-                                         (static_cast<uint32_t>(m) << 8) | static_cast<uint32_t>(i);
-                    GLuint prog = 0;
-
-                    if (cacheLoaded)
-                    {
-                        auto it = cache.find(key);
-                        if (it != cache.end())
-                            prog = TryRestoreProgramFromCache(it->second);
-                    }
-
-                    if (!prog)
-                    {
-                        ensureFsCompiled();
-                        if (!s_fsObjects[i])
-                            continue;
-                        char name[64];
-                        snprintf(name, sizeof(name), "prog_v%d_s%d_m%d_ps%d", v, s, m, i);
-                        prog = LinkProgramRetrievable(vsObjs[v], s_fsObjects[i], name);
-                        if (prog)
-                        {
-                            ShaderCacheEntry e;
-                            if (CaptureProgramBinary(prog, e))
-                                cache[key] = std::move(e);
-                            anyCompiledFresh = true;
-                        }
-                    }
-
-                    _shaderProgram[v][s][m][i] = prog;
-                    if (prog)
-                        bindProgramSamplersAndBlocks(prog);
+                    auto it = cache.find(gp::WorldProgramKey(set, v, i));
+                    if (it != cache.end())
+                        built[set][v][i] = BeginRestoreProgramFromCache(it->second);
                 }
-            }
-        }
+        for (auto& bySet : built)
+            for (auto& byVs : bySet)
+                for (GLuint& prog : byVs)
+                    if (prog)
+                    {
+                        prog = FinishRestoreProgramFromCache(prog);
+                        restored += prog ? 1 : 0;
+                    }
     }
+
+    // 2. Link the rest from source (a cold start, or a binary the driver refused).
+    struct PendingLink
+    {
+        int set, v, i;
+    };
+    std::vector<PendingLink> pending;
+    for (int set = 0; set < kSets; set++)
+        for (int v = 0; v < NVertexShaders; v++)
+            for (int i = 0; vsWanted(set, v) && i < NPixelShaders; i++)
+            {
+                if (built[set][v][i])
+                    continue;
+                EnsureWorldVsCompiled();
+                ensureFsCompiled();
+                const GLuint classicVs[NVertexShaders] = {s_vsScreenObj, s_vsTransformObj, s_vsShadowObj};
+                const GLuint vsObj = set == 0 ? classicVs[v] : s_vsRemasterObj[v];
+                const GLuint fsObj = (set == 1 && s_fsRemasterObjects[i]) ? s_fsRemasterObjects[i] : s_fsObjects[i];
+                if (!vsObj || !fsObj ||
+                    (set == 1 && Poseidon::gl33lighting::RemasterFragmentMain(i) && !s_fsRemasterObjects[i]))
+                    continue;
+                built[set][v][i] = BeginLinkProgramRetrievable(vsObj, fsObj);
+                pending.push_back({set, v, i});
+            }
+    for (const PendingLink& p : pending)
+    {
+        char name[64];
+        snprintf(name, sizeof(name), "prog_set%d_v%d_ps%d", p.set, p.v, p.i);
+        GLuint& prog = built[p.set][p.v][p.i];
+        prog = FinishLinkProgramRetrievable(prog, name);
+        if (!prog)
+            continue;
+        ShaderCacheEntry e;
+        if (CaptureProgramBinary(prog, e))
+            cache[gp::WorldProgramKey(p.set, p.v, p.i)] = std::move(e);
+        anyCompiledFresh = true;
+    }
+
+    // 3. Bind each program's samplers and blocks once, then fill its slots.
+    bool remasterComplete = true;
+    for (int set = 0; set < kSets; set++)
+        for (int v = 0; v < NVertexShaders; v++)
+            for (int i = 0; i < NPixelShaders; i++)
+            {
+                const GLuint prog = built[set][v][i];
+                if (prog)
+                    bindProgramSamplersAndBlocks(prog);
+                else if (set == 1)
+                    remasterComplete = false;
+                if (set == 0)
+                    gp::ShareAcrossSpecularAndMode(_shaderProgram, v, i, prog);
+                else
+                    gp::ShareAcrossSpecularAndMode(_shaderProgramRemaster, v, i, prog);
+            }
+    s_worldProgramBound = 0; // bindProgramSamplersAndBlocks left program 0 bound
+    LOG_INFO(
+        Graphics, "GL33: world programs: {} restored, {} linked, {} ms", restored, pending.size(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - buildStart).count());
+    // A partial remastered set would mix lighting models between draws: use it
+    // only when every program linked, else stay classic.
+    _lightingProgramsBuilt = remasterComplete;
+    if (!remasterComplete)
+        LOG_ERROR(Graphics, "GL33: remastered lighting shaders failed to build; using classic lighting");
 
     if (anyCompiledFresh && !cache.empty())
     {
@@ -1594,8 +1897,14 @@ void EngineGL33::InitPixelShaders()
     // update buffer contents.
     glGenBuffers(1, &s_psUBO);
     glBindBuffer(GL_UNIFORM_BUFFER, s_psUBO);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_psShadow), nullptr, GL_DYNAMIC_DRAW);
+    // Created holding the CPU copy: FlushPSConstants skips uploads by GL name,
+    // and a re-init (soft reset, shader reload) may get the deleted name back.
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_psShadow), s_psShadow, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, s_psUBO);
+
+    InitLightingResources();
+    _lightingActive = _lighting.remastered && _lightingProgramsBuilt;
+    _remasterPrograms = false; // the next world pass binds the new sampler and programs
 
     {
         _psConstants = PSConstants{};
@@ -1721,7 +2030,7 @@ void EngineGL33::ApplyGammaPass()
 
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindSampler(0, _samplerObjects[0]);
+    BindMaterialSampler0(0);
     glUseProgram(0);
     // The shader selector short-circuits on its cached selection, so it must be
     // told the bound program is gone or the next frame's sky draws through it.
@@ -1733,15 +2042,22 @@ void EngineGL33::ApplyGammaPass()
 void EngineGL33::DeinitPixelShaders()
 {
     glUseProgram(0);
-    for (int v = 0; v < NVertexShaders; v++)
-        for (int s = 0; s < NPixelShaderSpecular; s++)
-            for (int m = 0; m < NPixelShaderModes; m++)
-                for (int i = 0; i < NPixelShaders; i++)
-                    if (_shaderProgram[v][s][m][i])
-                    {
-                        glDeleteProgram(_shaderProgram[v][s][m][i]);
-                        _shaderProgram[v][s][m][i] = 0;
-                    }
+    s_worldProgramBound = 0;
+    // The [specular][mode] slots share one program: delete each name once.
+    std::vector<unsigned int> programs;
+    Poseidon::gl33programs::CollectDistinctPrograms(
+        &_shaderProgram[0][0][0][0], sizeof(_shaderProgram) / sizeof(_shaderProgram[0][0][0][0]), programs);
+    Poseidon::gl33programs::CollectDistinctPrograms(
+        &_shaderProgramRemaster[0][0][0][0],
+        sizeof(_shaderProgramRemaster) / sizeof(_shaderProgramRemaster[0][0][0][0]), programs);
+    for (unsigned int prog : programs)
+        glDeleteProgram(prog);
+    memset(_shaderProgram, 0, sizeof(_shaderProgram));
+    memset(_shaderProgramRemaster, 0, sizeof(_shaderProgramRemaster));
+    ResetSurfaceClassPrograms();
+    _lightingProgramsBuilt = false;
+    _lightingActive = false;
+    _remasterPrograms = false;
 
     for (int i = 0; i < NPixelShaders; i++)
         if (s_fsObjects[i])
@@ -1749,6 +2065,13 @@ void EngineGL33::DeinitPixelShaders()
             glDeleteShader(s_fsObjects[i]);
             s_fsObjects[i] = 0;
         }
+    for (GLuint& obj : s_fsRemasterObjects)
+    {
+        if (obj)
+            glDeleteShader(obj);
+        obj = 0;
+    }
+    DeinitLightingResources();
 
     if (s_psUBO)
     {
@@ -1760,9 +2083,20 @@ void EngineGL33::DeinitPixelShaders()
 void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, PixelShaderSpecular spec)
 {
     int vs = _vertexShaderSel < NVertexShaders ? _vertexShaderSel : VSTransform;
-    if (ps < PSNone && _shaderProgram[vs][spec][mode][ps])
+    // The [specular][mode] slots of a shader share one program (InitPixelShaders):
+    // a switch between them rebinds nothing. Their differences are uniform-block
+    // values set by their own callers (EnableNightEye's rgbEyeCoef), and the
+    // grass and water constants below are uploaded on every call either way.
+    auto bindWorldProgram = [this](GLuint prog)
     {
-        glUseProgram(_shaderProgram[vs][spec][mode][ps]);
+        if (prog == s_worldProgramBound && _pixelShaderSel != PSNone)
+            return;
+        glUseProgram(prog);
+        s_worldProgramBound = prog;
+    };
+    if (ps < PSNone && SelectProgram(vs, spec, mode, ps))
+    {
+        bindWorldProgram(SelectProgram(vs, spec, mode, ps));
         if (ps == PSGrass)
         {
             DoSetGrassParamsPS();
@@ -1779,12 +2113,18 @@ void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, Pix
     }
     else
     {
-        if (_shaderProgram[vs][spec][mode][PSFlat])
-            glUseProgram(_shaderProgram[vs][spec][mode][PSFlat]);
+        if (SelectProgram(vs, spec, mode, PSFlat))
+            bindWorldProgram(SelectProgram(vs, spec, mode, PSFlat));
     }
     _pixelShaderSel = ps;
     _pixelShaderModeSel = mode;
     _pixelShaderSpecularSel = spec;
+    // The surfaces switch: only the remastered lit programs declare the surface
+    // target's output (fragSurf); any other leaves attachment 1 alone.
+    _surfProgram = _remasterPrograms && (ps == PSNormal || ps == PSDetail || ps == PSGrass || ps == PSWater) &&
+                   _shaderProgramRemaster[vs][spec][mode][ps] != 0;
+    _surfBoundProgram = _surfProgram ? _shaderProgramRemaster[vs][spec][mode][ps] : 0;
+    UpdateSurfaceMask();
 }
 
 void EngineGL33::EnableNightEye(float night)

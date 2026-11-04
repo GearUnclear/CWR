@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/ValidateRenderPassDescriptor.hpp>
 #include <catch2/catch_message.hpp>
 #include <initializer_list>
 
@@ -399,5 +400,58 @@ TEST_CASE("BuildRenderPassDescriptor: special pass branches ignore PassKindHint"
     {
         const RenderPassDescriptor d = buildFromInt(IsAlphaFog, ctx);
         REQUIRE(d.pass == PassKind::WorldTransparent);
+    }
+}
+
+TEST_CASE("BuildRenderPassDescriptor: the landscape's sea routes to the water family only in the remastered sea scope",
+          "[build-descriptor][remaster][SeaWaves]")
+{
+    // Landscape::DrawWater's faces carry the specular layer alone (its
+    // WaterFlags) plus NoClamp. In Classic, and with seaWaves off, they draw
+    // through the detail family as they always did; between Engine::BeginSea
+    // and EndSea with the feature on (BuildContext::remasteredSea) they draw
+    // through the water family, keeping the detail texgen of their ripple layer.
+    constexpr int kSeaFace = SpecularTexture | NoClamp;
+    BuildContext ctx;
+    ctx.isMultitexturing = true;
+
+    const RenderPassDescriptor classic = buildFromInt(kSeaFace, ctx);
+    REQUIRE(classic.shader == ShaderFamily::Detail);
+    REQUIRE(classic.pass == PassKind::WorldOpaque);
+    REQUIRE(classic.texGen == TexGenMode::Detail);
+
+    BuildContext sea = ctx;
+    sea.remasteredSea = true;
+    const RenderPassDescriptor d = buildFromInt(kSeaFace, sea);
+    REQUIRE(d.shader == ShaderFamily::Water);
+    REQUIRE(d.pass == PassKind::WorldWater);
+    REQUIRE(d.texGen == TexGenMode::Detail);
+    // Everything else is the sea's state as before.
+    RenderPassDescriptor same = d;
+    same.shader = classic.shader;
+    same.pass = classic.pass;
+    REQUIRE(same == classic);
+    REQUIRE(ValidateRenderPassDescriptor(d) == nullptr);
+
+    SECTION("terrain, grass and blended faces in the scope keep their families")
+    {
+        REQUIRE(buildFromInt(DetailTexture, sea).shader == ShaderFamily::Detail);
+        REQUIRE(buildFromInt(GrassTexture, sea).shader == ShaderFamily::Grass);
+        REQUIRE(buildFromInt(DetailTexture | SpecularTexture, sea).shader == ShaderFamily::Detail);
+        REQUIRE(buildFromInt(kSeaFace | IsAlpha, sea).shader == ShaderFamily::Detail);
+        REQUIRE(buildFromInt(kSeaFace | IsTransparent, sea).shader == ShaderFamily::Detail);
+        REQUIRE(buildFromInt(kSeaFace | OnSurface, sea).shader == ShaderFamily::Detail);
+    }
+    SECTION("a sea face outside the world's 3D pass (pre-transformed) keeps the detail family")
+    {
+        BuildContext screen = sea;
+        screen.isIn3DPass = false;
+        REQUIRE(buildFromInt(kSeaFace, screen).shader == ShaderFamily::Detail);
+    }
+    SECTION("no multitexturing: the plain family, as before")
+    {
+        BuildContext single = sea;
+        single.isMultitexturing = false;
+        REQUIRE(buildFromInt(kSeaFace, single).shader == ShaderFamily::Normal);
     }
 }

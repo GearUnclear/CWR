@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Random/randomGen.hpp>
@@ -25,8 +26,10 @@ using Poseidon::Foundation::IsOutOfMemory;
 using Poseidon::Foundation::MStorage;
 using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
+#include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -223,6 +226,9 @@ Scene::~Scene()
         delete _camera, _camera = nullptr;
     }
     _skyTexture = nullptr;
+    // W1-9: the fitted land-following buffers go with the scene, while the
+    // render context is still alive
+    LandFit::ClearAll();
     _landscape.Free();
     GLandscape = nullptr;
 }
@@ -309,6 +315,10 @@ void Scene::AddLight(Light* light)
 void Scene::ResetLights()
 {
     _lights.Clear();
+    // Called from ~Scene only: the scene's teardown drops the combat light
+    // bursts with its lights (they would end on their own within 0.9 s of
+    // simulation); the owners of the others remove them (CombatLights.hpp).
+    lighting::GCombatLights().ClearBursts();
 }
 
 static int CmpALight(const ActiveLightPointer* l0, const ActiveLightPointer* l1, LightContext* context)
@@ -363,7 +373,8 @@ const LightList& Scene::SelectLights(Vector3Par pos, float radius, LightList& wo
         LightContext context;
         context.position = pos;
         QSort(work.Data(), work.Size(), &context, CmpALight);
-        const int maxLightsPerObject = 7;
+        // The remastered tiled light list keeps the same budget per fragment.
+        const int maxLightsPerObject = Poseidon::lighting::kClassicLightsPerSurface;
         if (work.Size() > maxLightsPerObject)
         {
             work.Resize(maxLightsPerObject);
@@ -572,6 +583,15 @@ void Scene::SetObjectLODBias(float bias)
     // LODSelect compares against the per-LOD pixel-size thresholds.
 }
 
+void Scene::PinObjectDetail(float factor)
+{
+    if (factor > 0.0f)
+        saturate(factor, 1.0f, 16.0f);
+    else
+        factor = 0.0f;
+    _lodPinFactor = factor;
+}
+
 void Scene::SetQualitySettings(float val)
 {
     _qualitySettings = val;
@@ -674,6 +694,16 @@ void Scene::LoadConfig()
         float value = cfg >> "terrainGrid";
         SetPreferredTerrainGrid(value);
     }
+    // The Graphics options (graphics.cfg) own the shadows and smoke; the
+    // profile keys above are their legacy copies. Boot applies the options
+    // before the world and this Scene exist, so take them on here: at
+    // construction (boot, mod re-mount) and on a profile switch. Only these
+    // draw-only tiers: the terrain grid subdivides the terrain heights that
+    // SurfaceY reads, so it keeps the profile key or the default above.
+    if (const GraphicsConfig* graphics = AppliedGraphicsConfig())
+    {
+        ApplyGraphicsShadowsToScene(*graphics, *this);
+    }
 
     SetPreferredViewDistance(GetSelectedPreferredViewDistance());
 }
@@ -726,6 +756,8 @@ void Scene::BeginObjects()
 
     _shadowCache.CleanUp(); // remove old shadows
     GetOcclusions()->Clear();
+    // W1-9: close the fitted-geometry counters, refresh the terrain version
+    LandFit::BeginFrame(_landscape);
 
 #if _ENABLE_CHEATS
 #if !DENSITY_LOD
@@ -913,6 +945,7 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
     sObj->shadowLOD = LOD_INVISIBLE; // override with autodetection
     sObj->drawLOD = LOD_INVISIBLE;   // override with autodetection
 #endif
+    sObj->hillHidden = false; // the hill cull sets it again in Pass1
     sObj->distance2 = dist2;
     sObj->passNum = -1; // noninit
 
@@ -976,6 +1009,7 @@ void Scene::CloudletForDrawing(Object* obj)
     sObj->drawLOD = 0;
     sObj->forceDrawLOD = 0;
     sObj->shadowLOD = LOD_INVISIBLE;
+    sObj->hillHidden = false;
     sObj->distance2 = dist2;
     sObj->zCoord = cPos.Z(); // alpha-pass sort key: centre camera-space depth (cPos computed above)
     sObj->radius = radius;

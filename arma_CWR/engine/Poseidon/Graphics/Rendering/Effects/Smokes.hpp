@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Evaluator/express.hpp>
@@ -103,6 +104,15 @@ class Cloudlet: public Smoke
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
 
+    // Its temperature (K) and its table's hottest (the last entry's maxT; 0
+    // without a table): a fireball's puff glows (CombatLights FireballPuff).
+    float Temperature() const { return _t; }
+    float HottestTemperature() const
+    {
+        return _cloudletTTable && _cloudletTTable->Size() > 0 ? _cloudletTTable->Get(_cloudletTTable->Size() - 1).maxT
+                                                              : 0.0f;
+    }
+
 	void SetGrowUp( float growUp, float size )
 	{
 		_size=size;
@@ -203,6 +213,12 @@ class CloudletSource: public SerializeClass
 	}
 	Color GetColor() const {return _cloudletColor;}
 	void SetColor(ColorVal color) {_cloudletColor = color;}
+    // The temperature a puff is born at and how fast it cools (K, K/s).
+    void SetTemperatureRange(float initT, float deltaT)
+    {
+        _cloudletInitT = initT;
+        _cloudletDeltaT = deltaT;
+    }
 
 	Cloudlet *Drop( Vector3Par pos, Vector3Par speed );
 	void Simulate
@@ -275,11 +291,19 @@ class WeaponCloudsSource: public DustSource
 
 	protected:
 	float _timeToLive;
+    // A puff's outward speed per metre of its offset from the source (m/s).
+    float _burstSpeed = 4.0f;
+    // A new puff is simulated once at its birth, so it is
+    // drawn in the frame it is born (a fireball's first frame) instead of one
+    // or two frames later, cooled and faded in.
+    bool _showAtBirth = false;
 
 	private:
 	void Init();
 
 	public:
+	void SetBurstSpeed(float perMetre) {_burstSpeed = perMetre;}
+	void SetShowAtBirth(bool show) {_showAtBirth = show;}
 	WeaponCloudsSource( float interval=0.05 ); // basic shape
 	WeaponCloudsSource( LODShapeWithShadow *shape, float interval );
 	void Simulate
@@ -320,6 +344,8 @@ class SmokeSource: public CloudletSource
 	{
 		_sourceSize = sourceSize;
 	}
+    // The vertical speed a puff leaves the source with (m/s).
+    void SetRise(float speed) { _speed[1] = speed; }
 	void SetSize(float size, float sourceSize)
 	{
 		_size = size;
@@ -388,6 +414,18 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
 
 	USE_FAST_ALLOCATOR
 	USE_CASTING(base)
+
+  protected:
+    // Combat light (CombatLights.hpp): the fuel explosion's burst, spawned once,
+    // and the embers glowing under a burning wreck's smoke.
+    bool _combatBurst = false;
+    lighting::CombatLightHandle _combatEmbers;
+    // The fuel's deflagration (CombatLights.hpp Detonation).
+    bool _deflagrating = false;
+    float _deflagrationAge = 0.0f;
+    lighting::Detonation _deflagration;
+    // A burning wreck's smoke (SmokeSourceOnVehicle): its embers glow.
+    virtual bool GlowsAsWreck() const { return false; }
 };
 
 class SmokeSourceOnVehicle: public SmokeSourceVehicle,public AttachedOnVehicle
@@ -408,6 +446,9 @@ class SmokeSourceOnVehicle: public SmokeSourceVehicle,public AttachedOnVehicle
 	LSError Serialize(ParamArchive &ar) override;
 
 	USE_FAST_ALLOCATOR;
+
+  protected:
+    bool GlowsAsWreck() const override { return true; }
 };
 
 class Explosion: public Vehicle
@@ -428,6 +469,9 @@ class Explosion: public Vehicle
 		Vehicle *owner=nullptr, float duration=1
 	);
 	~Explosion() override;
+    // The fireball, flash and light from the round's charge
+    // (CombatLights.hpp Detonation); before its first simulation step.
+    void SetDetonation(const lighting::Detonation& d);
 
 	void Simulate( float deltaT, SimulationImportance prec ) override;
 	void Sound( bool inside, float deltaT ) override;
@@ -444,6 +488,12 @@ class Explosion: public Vehicle
 	TMError TransferMsg(NetworkMessageContext &ctx) override;
 
 	USE_FAST_ALLOCATOR;
+
+  private:
+    bool _combatSpawned = false; // its combat light burst (CombatLights.hpp)
+    lighting::Detonation _det;   // its charge's physics (SetDetonation)
+    float _fireLift = 0.0f;      // the fireball's centre over the burst point (m)
+    float _age = 0.0f;           // seconds of simulation since the burst
 };
 
 class Crater: public Smoke
@@ -456,6 +506,7 @@ class Crater: public Smoke
 	DustSource _dust;
 	float _dustTimeToLive;
 	float _size;
+    float _throwSpeed = 0.0f; // the thrown earth's launch speed (m/s)
 	bool _isSmoke;
 	bool _isBlood;
 	bool _isWater;
@@ -467,6 +518,9 @@ public:
 		bool smoke = true, bool blood = false, bool water = false
 	);
 	void Simulate( float deltaT, SimulationImportance prec ) override;
+    // A blast's dust and smoke column from its charge
+    // (CombatLights.hpp Detonation): how high, how wide, how long it lingers.
+    void SetDetonation(const lighting::Detonation& d);
 
 	bool IsAnimated( int level ) const override {return false;} // appearence changed with Animate
 	bool IsAnimatedShadow( int level ) const override {return false;} // shadow changed with Animate
@@ -575,6 +629,15 @@ public:
 	bool Active() const;
 	void Simulate(Vector3Par pos, float deltaT);
 	virtual LSError Serialize(ParamArchive &ar);
+    // ammoHit: the fired ammo's hit (config), which sizes the combat light's
+    // flash (CombatLights.hpp); the three-argument Start passes -1 (no ammo).
+    void Start(float time, float intensity, bool mGun, float ammoHit);
+
+  protected:
+    // Combat light: one burst per shot, spawned at the next Simulate, with
+    // the strength of the fired ammo.
+    bool _combatPending = false;
+    float _combatStrength = 1.0f;
 };
 
 class WeaponFireSource: public WeaponCloudsSource, public WeaponLightSource
@@ -596,6 +659,7 @@ public:
 	);
 
 	LSError Serialize(ParamArchive &ar) override;
+    void Start(float time, float intensity, bool mGun, float ammoHit);
 };
 
 class ObjectDestructed: public Vehicle

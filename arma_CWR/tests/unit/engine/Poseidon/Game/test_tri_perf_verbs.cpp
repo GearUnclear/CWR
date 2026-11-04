@@ -1,0 +1,651 @@
+#include <catch2/catch_test_macros.hpp>
+#include <Evaluator/express.hpp>
+#include <Poseidon/Core/BuildProvenance.hpp>
+#include <Poseidon/Core/Game/GameLoop.hpp>
+#include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Graphics/Core/GpuTimings.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/Graphics/Dummy/EngineDummy.hpp>
+#include <Poseidon/Graphics/Shared/WindowMode.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+// The measurement verbs of the perf bench (tests/rendering/captures/gate) and
+// the bookkeeping behind them: the CPU and GPU per-frame rings and their CSV
+// files, the GPU timer's window restart, the counters' window.
+
+using namespace Poseidon;
+
+GameValue TriPerfRing(const GameState*, GameValuePar);
+GameValue TriGpuRing(const GameState*, GameValuePar);
+GameValue TriGpuTimes(const GameState*, GameValuePar);
+GameValue TriBuildId(const GameState*);
+GameValue TriSetFpsCap(const GameState*, GameValuePar);
+GameValue TriResizeWindow(const GameState*, GameValuePar);
+GameValue TriSetWindowMode(const GameState*, GameValuePar);
+GameValue TriMinimize(const GameState*);
+GameValue TriRestore(const GameState*);
+GameValue TriGraphicsReset(const GameState*, GameValuePar);
+GameValue TriRetryMission(const GameState*);
+GameValue TriCpuStats(const GameState*, GameValuePar);
+GameValue TriSimStats(const GameState*);
+GameValue TriPipeStats(const GameState*, GameValuePar);
+GameValue TriSceneStats(const GameState*);
+
+namespace
+{
+
+struct InitFixture
+{
+    InitFixture()
+    {
+        static bool done = false;
+        if (!done)
+        {
+            GGameState.Init();
+            done = true;
+        }
+    }
+};
+
+struct GEngineGuard
+{
+    Engine* prev;
+    explicit GEngineGuard(Engine* tmp) : prev(GEngine) { GEngine = tmp; }
+    ~GEngineGuard() { GEngine = prev; }
+};
+
+std::string Text(const GameValue& v)
+{
+    return std::string(((RString)(GameStringType)v).Data());
+}
+
+GameValue Pair(float n, const char* label)
+{
+    GameValue arr = GGameState.CreateGameValue(GameArray);
+    GameArrayType& a = arr;
+    a.Resize(2);
+    a[0] = GameValue(n);
+    a[1] = GameValue(RString(label));
+    return arr;
+}
+
+void SetEnv(const char* name, const std::string& value)
+{
+#ifdef _WIN32
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
+// Points TRI_OUTPUT_DIR at a fresh folder for one case and puts it back after.
+struct OutputDirGuard
+{
+    std::string dir;
+    std::string prev;
+    bool hadPrev = false;
+    explicit OutputDirGuard(const char* name)
+    {
+        if (const char* p = std::getenv("TRI_OUTPUT_DIR"))
+        {
+            prev = p;
+            hadPrev = true;
+        }
+        dir = (std::filesystem::temp_directory_path() / "ud-tri-perf-verbs" / name).string();
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        SetEnv("TRI_OUTPUT_DIR", dir);
+    }
+    ~OutputDirGuard()
+    {
+        SetEnv("TRI_OUTPUT_DIR", hadPrev ? prev : std::string());
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+};
+
+std::vector<std::string> Lines(const std::string& text)
+{
+    std::vector<std::string> out;
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line))
+        out.push_back(line);
+    return out;
+}
+
+std::string ReadFile(const std::string& path)
+{
+    std::ifstream f(path, std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+std::string LastField(const std::string& line)
+{
+    return line.substr(line.rfind(',') + 1);
+}
+
+// One frame of GPU stamps (ms from a common origin) for GpuTimings::Submit.
+struct GpuFrame
+{
+    std::uint64_t stamps[gpu::kMarkCount] = {};
+    std::uint32_t recorded = 0;
+    void Set(gpu::Mark m, double ms)
+    {
+        stamps[static_cast<int>(m)] = static_cast<std::uint64_t>(1e9 + ms * 1e6);
+        recorded |= 1u << static_cast<int>(m);
+    }
+};
+
+GpuFrame WorldFrame(double scale)
+{
+    GpuFrame f;
+    f.Set(gpu::Mark::FrameBegin, 0.0);
+    f.Set(gpu::Mark::WorldBegin, 0.5 * scale);
+    f.Set(gpu::Mark::GroundEnd, 1.5 * scale);
+    f.Set(gpu::Mark::Pass1End, 4.0 * scale);
+    f.Set(gpu::Mark::WorldEnd, 5.0 * scale);
+    f.Set(gpu::Mark::PostEnd, 6.0 * scale);
+    f.Set(gpu::Mark::FrameEnd, 7.0 * scale);
+    return f;
+}
+
+// Engine stand-in for the GPU timer: counts the calls the verb makes and
+// answers a summary that names how many windows were started.
+class TimingEngine : public EngineDummy
+{
+  public:
+    bool on = false;
+    int windows = 0;
+    std::vector<bool> calls;
+    void SetGpuTimingEnabled(bool enabled) override
+    {
+        calls.push_back(enabled);
+        if (enabled)
+            ++windows; // turning on and restarting both start a window
+        on = enabled;
+    }
+    bool GpuTimingEnabled() const override { return on; }
+    std::string GpuTimingSummary() const override
+    {
+        return on ? "window " + std::to_string(windows) : "gpu: timing off";
+    }
+};
+
+} // namespace
+
+TEST_CASE("FrameProfiler ring: log and CSV list the last frames oldest first", "[tri][perf][triPerfRing]")
+{
+    Dev::FrameProfiler p;
+    for (int draws : {10, 20, 30})
+    {
+        p.BeginFrame();
+        p.Mark(Dev::FrameProfiler::PhaseSetup);
+        p.EndFrame(draws);
+    }
+    const std::vector<std::string> all = Lines(p.RingCsv(0));
+    REQUIRE(all.size() == 4);
+    CHECK(all[0].rfind("i,total,setup,drw:init,", 0) == 0);
+    CHECK(LastField(all[0]) == "draws");
+    // i, total, one column per phase, draws.
+    CHECK(std::count(all[0].begin(), all[0].end(), ',') == Dev::FrameProfiler::PhaseCount + 2);
+    CHECK(all[1].rfind("0,", 0) == 0);
+    CHECK(LastField(all[1]) == "10");
+    CHECK(LastField(all[3]) == "30");
+
+    const std::vector<std::string> last2 = Lines(p.RingCsv(2));
+    REQUIRE(last2.size() == 3);
+    CHECK(LastField(last2[1]) == "20");
+    CHECK(LastField(last2[2]) == "30");
+
+    const std::string log = p.RingLog(2);
+    CHECK(std::count(log.begin(), log.end(), ';') == 2);
+    CHECK(std::count(log.begin(), log.end(), ',') == 8); // five fields per frame
+    CHECK(p.RingLog(99) == p.RingLog(0));
+}
+
+TEST_CASE("GpuFrameRing: one record per read-back frame, empty where unmeasured", "[tri][perf][triGpuRing]")
+{
+    gpu::GpuTimings t;
+    gpu::GpuFrameRing ring;
+    GpuFrame a = WorldFrame(1.0);
+    t.Submit(a.stamps, a.recorded);
+    ring.Push(t);
+    GpuFrame b = WorldFrame(2.0);
+    b.recorded &= ~(1u << static_cast<int>(gpu::Mark::PostEnd)); // no post pass this frame
+    t.Submit(b.stamps, b.recorded);
+    ring.Push(t);
+    REQUIRE(ring.Count() == 2);
+
+    const std::vector<std::string> csv = Lines(ring.CsvText(0));
+    REQUIRE(csv.size() == 3);
+    CHECK(csv[0] == "i,frame,world,pass1,ground,rest,post");
+    // frame, world, pass1, ground, rest, post: the raw last-frame times, not the averages.
+    CHECK(csv[1] == "0,7.000,4.500,2.500,1.000,1.000,1.000");
+    CHECK(csv[2] == "1,14.000,9.000,5.000,2.000,2.000,");
+    CHECK(ring.LogText(1) == "14.000,9.000,5.000,2.000,2.000,;");
+
+    for (int i = 0; i < gpu::GpuFrameRing::kSize + 10; ++i)
+        ring.Push(t);
+    CHECK(ring.Count() == gpu::GpuFrameRing::kSize);
+    ring.Reset();
+    CHECK(ring.Count() == 0);
+    CHECK(Lines(ring.CsvText(0)).size() == 1);
+}
+
+TEST_CASE("PerfCounters window: the last 256 frames, the profiler's ring", "[tri][perf][PerfCounters]")
+{
+    perf::Counters c;
+    for (int i = 0; i < 44; ++i)
+    {
+        c.Frame().runs = 1;
+        c.EndFrame();
+    }
+    for (int i = 0; i < perf::Counters::kWindow; ++i)
+    {
+        c.Frame().runs = 3;
+        c.EndFrame();
+    }
+    CHECK(c.WindowFrames() == Dev::FrameProfiler::kRingSize);
+    CHECK(c.WindowFrame(0).runs == 3);
+    CHECK(c.Summary().find("runs=3 ") != std::string::npos);
+    c.ResetWindow();
+    CHECK(c.WindowFrames() == 0);
+    c.Frame().runs = 5;
+    c.EndFrame();
+    CHECK(c.Summary().find("runs=5 ") != std::string::npos);
+}
+
+TEST_CASE("triPerfRing writes the CPU ring as CSV under TRI_OUTPUT_DIR", "[tri][perf][triPerfRing]")
+{
+    InitFixture fix;
+    OutputDirGuard out("perfring");
+    Dev::FrameProfiler& p = Dev::GFrameProfiler();
+    p.Reset();
+    CHECK(Text(TriPerfRing(nullptr, GameValue(0.0f))) == "FAIL:no_frames");
+    for (int draws : {7, 8, 9})
+    {
+        p.BeginFrame();
+        p.EndFrame(draws);
+    }
+    CHECK(Text(TriPerfRing(nullptr, Pair(2.0f, "noon fields"))) == "OK:2");
+    const std::vector<std::string> csv = Lines(ReadFile(out.dir + "/perfring-noon_fields.csv"));
+    REQUIRE(csv.size() == 3);
+    CHECK(LastField(csv[1]) == "8");
+    CHECK(LastField(csv[2]) == "9");
+    // More than the ring holds: all of it; unlabelled files are numbered.
+    CHECK(Text(TriPerfRing(nullptr, GameValue(500.0f))) == "OK:3");
+    p.Reset();
+}
+
+TEST_CASE("triGpuRing writes the GPU ring as CSV under TRI_OUTPUT_DIR", "[tri][perf][triGpuRing]")
+{
+    InitFixture fix;
+    OutputDirGuard out("gpuring");
+    gpu::GpuFrameRing& ring = gpu::GGpuFrameRing();
+    ring.Reset();
+    CHECK(Text(TriGpuRing(nullptr, GameValue(0.0f))) == "FAIL:no_frames");
+    gpu::GpuTimings t;
+    GpuFrame f = WorldFrame(1.0);
+    t.Submit(f.stamps, f.recorded);
+    ring.Push(t);
+    CHECK(Text(TriGpuRing(nullptr, Pair(0.0f, "a"))) == "OK:1");
+    const std::vector<std::string> csv = Lines(ReadFile(out.dir + "/gpuring-a.csv"));
+    REQUIRE(csv.size() == 2);
+    CHECK(csv[1] == "0,7.000,4.500,2.500,1.000,1.000,1.000");
+    ring.Reset();
+}
+
+TEST_CASE("triGpuTimes true returns the window so far, then starts a new one", "[tri][perf][triGpuTimes]")
+{
+    InitFixture fix;
+    TimingEngine eng;
+    GEngineGuard guard(&eng);
+    // Off: turning on starts the first window.
+    CHECK(Text(TriGpuTimes(nullptr, GameValue(true))) == "gpu: timing off");
+    CHECK(eng.on);
+    CHECK(eng.windows == 1);
+    // Already on: the summary is the window's, read before the restart, and
+    // the restart reaches the backend (it used to be skipped when already on).
+    CHECK(Text(TriGpuTimes(nullptr, GameValue(true))) == "window 1");
+    CHECK(eng.windows == 2);
+    CHECK(Text(TriGpuTimes(nullptr, GameValue(true))) == "window 2");
+    // The legacy reset still works: false then true.
+    CHECK(Text(TriGpuTimes(nullptr, GameValue(false))) == "window 3");
+    CHECK_FALSE(eng.on);
+    CHECK(Text(TriGpuTimes(nullptr, GameValue(true))) == "gpu: timing off");
+    CHECK(eng.windows == 4);
+    CHECK(eng.calls == std::vector<bool>{true, true, true, false, true});
+}
+
+TEST_CASE("triBuildId answers the build provenance baked in at build time", "[tri][perf][triBuildId]")
+{
+    InitFixture fix;
+    const std::string id = Text(TriBuildId(nullptr));
+    CHECK(id == BuildProvenance::BuildId());
+    REQUIRE_FALSE(id.empty());
+    // It rides in UDCAP key=value lines: no separators or spaces inside.
+    CHECK(id.find_first_of("; |=\t\r\n") == std::string::npos);
+    // "+<12 hex>" marks local changes under engine/ or apps/.
+    const size_t plus = id.find('+');
+    if (plus != std::string::npos)
+    {
+        const std::string hash = id.substr(plus + 1);
+        CHECK(hash.size() == 12);
+        CHECK(hash.find_first_not_of("0123456789abcdef") == std::string::npos);
+    }
+}
+
+TEST_CASE("capture_lib logs build= on every mode and shot line", "[tri][perf][triBuildId]")
+{
+    const auto root = std::filesystem::path(TESTS_ROOT_DIR).parent_path();
+    const std::string lib = ReadFile((root / "tests" / "rendering" / "captures" / "capture_lib.sqf").string());
+    REQUIRE_FALSE(lib.empty());
+    CHECK(lib.find("capBuild = triBuildId;") != std::string::npos);
+    CHECK(lib.find("event=mode;mode=%2;lit=%3;detail=%4;settle=%5;%6;build=%7") != std::string::npos);
+    CHECK(lib.find("\"%1;build=%2;perf=%3;gpu=%4\", _head, capBuild, capPerf, capGpu") != std::string::npos);
+}
+
+TEST_CASE("triSetFpsCap pins the frame cap RenderFrame paces to", "[tri][perf][triSetFpsCap]")
+{
+    InitFixture fix;
+    const int before = gUserFpsCap;
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(60.0f))) == "OK:60");
+    CHECK(gUserFpsCap == 60);
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(0.0f))) == "OK:0"); // unlimited
+    CHECK(gUserFpsCap == 0);
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(-5.0f))) == "OK:0");
+    CHECK(Text(TriSetFpsCap(nullptr, GameValue(5000.0f))) == "OK:1000");
+    gUserFpsCap = before;
+}
+
+namespace
+{
+// Engine stand-in for the window and lifecycle verbs: records what they ask.
+class WindowEngine : public EngineDummy
+{
+  public:
+    int w = 1280, h = 720, bpp = 0;
+    int switchCalls = 0;
+    bool refuseSwitch = false;
+    std::vector<WindowMode> modes;
+    int hardResets = 0, contentResets = 0;
+    bool SwitchRes(int nw, int nh, int nbpp) override
+    {
+        ++switchCalls;
+        if (refuseSwitch)
+            return false;
+        w = nw;
+        h = nh;
+        bpp = nbpp;
+        return true;
+    }
+    int Width() const override { return w; }
+    int Height() const override { return h; }
+    int PixelSize() const override { return 32; }
+    bool SetWindowMode(WindowMode mode) override
+    {
+        modes.push_back(mode);
+        return true;
+    }
+    bool ResetHard() override
+    {
+        ++hardResets;
+        return true;
+    }
+    void ResetForRemount() override { ++contentResets; }
+};
+
+GameValue Size(float w, float h)
+{
+    GameValue arr = GGameState.CreateGameValue(GameArray);
+    GameArrayType& a = arr;
+    a.Resize(2);
+    a[0] = GameValue(w);
+    a[1] = GameValue(h);
+    return arr;
+}
+
+bool StartsWith(const std::string& s, const char* prefix)
+{
+    return s.rfind(prefix, 0) == 0;
+}
+} // namespace
+
+TEST_CASE("triResizeWindow goes through SwitchRes at the current pixel size", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    WindowEngine eng;
+    GEngineGuard guard(&eng);
+    CHECK(StartsWith(Text(TriResizeWindow(nullptr, Size(1600.0f, 900.0f))), "OK:1600x900:"));
+    CHECK(eng.bpp == 32);
+    CHECK(eng.switchCalls == 1);
+    // Out of range or malformed: refused before the engine is asked.
+    CHECK(StartsWith(Text(TriResizeWindow(nullptr, Size(32.0f, 900.0f))), "FAIL:"));
+    CHECK(StartsWith(Text(TriResizeWindow(nullptr, GameValue(5.0f))), "FAIL:"));
+    CHECK(eng.switchCalls == 1);
+    eng.refuseSwitch = true;
+    CHECK(Text(TriResizeWindow(nullptr, Size(800.0f, 600.0f))) == "FAIL:SwitchRes refused");
+}
+
+TEST_CASE("triSetWindowMode maps its words onto the engine's window modes", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    WindowEngine eng;
+    GEngineGuard guard(&eng);
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("borderless")))), "OK:borderless:"));
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("fullscreen")))), "OK:fullscreen:"));
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("windowed")))), "OK:windowed:"));
+    CHECK(StartsWith(Text(TriSetWindowMode(nullptr, GameValue(RString("maximised")))), "FAIL:"));
+    CHECK(eng.modes == std::vector<WindowMode>{WindowMode::Borderless, WindowMode::Fullscreen, WindowMode::Windowed});
+}
+
+TEST_CASE("triGraphicsReset runs the hard or the content reset and times it", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    WindowEngine eng;
+    GEngineGuard guard(&eng);
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("")))), "OK:hard:"));
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("hard")))), "OK:hard:"));
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("content")))), "OK:content:"));
+    CHECK(StartsWith(Text(TriGraphicsReset(nullptr, GameValue(RString("soft")))), "FAIL:"));
+    CHECK(eng.hardResets == 2);
+    CHECK(eng.contentResets == 1);
+}
+
+TEST_CASE("Window and lifecycle verbs fail cleanly without a window or a mission", "[tri][perf][hitch]")
+{
+    InitFixture fix;
+    // No video subsystem in the unit tests: no SDL window to act on.
+    CHECK(Text(TriMinimize(nullptr)) == "FAIL:no window");
+    CHECK(Text(TriRestore(nullptr)) == "FAIL:no window");
+    // No world, so no mission display.
+    CHECK(StartsWith(Text(TriRetryMission(nullptr)), "FAIL:not on the mission display"));
+    GEngineGuard noEngine(nullptr);
+    CHECK(Text(TriResizeWindow(nullptr, Size(800.0f, 600.0f))) == "FAIL:no engine");
+    CHECK(Text(TriGraphicsReset(nullptr, GameValue(RString("hard")))) == "FAIL:no engine");
+}
+
+TEST_CASE("tri hands TRI_POSEIDON_CACHE_DIR to the game as its cache dir", "[tri][perf][hitch]")
+{
+    // Trident (Rust) cannot run here; check the launch sites read the shared
+    // helper, so no launch path keeps the per-launch cache dir by itself.
+    const auto root = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Trident" / "src";
+    const std::string mod = ReadFile((root / "scenarios" / "mod.rs").string());
+    CHECK(mod.find("std::env::var(\"TRI_POSEIDON_CACHE_DIR\")") != std::string::npos);
+    for (const char* rel : {"main.rs", "scenarios/integration.rs", "scenarios/multi.rs", "scenarios/stress.rs"})
+    {
+        INFO(rel);
+        const std::string src = ReadFile((root / rel).string());
+        REQUIRE_FALSE(src.empty());
+        CHECK(src.find("poseidon_cache_dir(") != std::string::npos);
+        CHECK(src.find("(\"POSEIDON_CACHE_DIR\", user_dir") == std::string::npos);
+        CHECK(src.find(".env(\"POSEIDON_CACHE_DIR\", &user_dir)") == std::string::npos);
+    }
+}
+
+TEST_CASE("PerfCounters: the P0-15 counters average over the window", "[tri][perf][PerfCounters]")
+{
+    perf::Counters c;
+    for (int f = 0; f < 2; ++f)
+    {
+        perf::FrameCounters& fc = c.Frame();
+        fc.landFitDraws = 100 + 100 * f; // 100, 200
+        fc.vbRewrites = 10;
+        fc.vbRewriteKB = 64.0f;
+        fc.vbDynUploads = 30;
+        fc.occTested = 500;
+        fc.occCulled = 50;
+        fc.cloudlets = 7;
+        fc.programBinds = 40;
+        fc.uboRangeBinds = 90;
+        fc.tris = 1000000;
+        perf::CountRunRefusal(fc, perf::RunRefusal::OwnVertices);
+        perf::CountRunRefusal(fc, perf::RunRefusal::FogBand);
+        perf::CountRunRefusal(fc, perf::RunRefusal::FogBand);
+        perf::CountLod(fc, 0);
+        perf::CountLod(fc, 3);
+        perf::CountLod(fc, 12); // coarser than 6: the last bucket
+        perf::CountLod(fc, -1); // no level: not counted
+        if (f == 1)
+        {
+            // Only this frame read pipeline statistics back.
+            fc.pipeGround = 1;
+            fc.groundPrims = 3000.0f;
+            fc.pipePass1 = 1;
+            fc.pass1Fs = 2.0e6f;
+        }
+        c.EndFrame();
+    }
+    const std::string s = c.Summary();
+    INFO(s);
+    CHECK(s.find(" | geo landfit=150 vbrw=10 vbKB=64.0 vbdyn=30 vbdynKB=0.0 occT=500 occC=50 cloudlets=7") !=
+          std::string::npos);
+    CHECK(s.find(" | binds prog=40 tex=0 smp=0 uboB=90") != std::string::npos);
+    CHECK(s.find(" | refuse=0/0/1/0/0/0/0/0/2") != std::string::npos);
+    CHECK(s.find(" | tris=1000000 lodsw=0 lodhist=1/0/0/1/0/0/0/1") != std::string::npos);
+    // Pipeline statistics average over the frames that read them, not the window.
+    CHECK(s.find(" | pipe=1/1 gprims=3000 ") != std::string::npos);
+    CHECK(s.find(" p1fs=2000000") != std::string::npos);
+    // The original fields stay first and unchanged.
+    CHECK(s.rfind("objs opaque=0 runs=0 ", 0) == 0);
+    // It rides in UDCAP lines after triPerfStats' own fields.
+    CHECK(s.find(';') == std::string::npos);
+    CHECK(s.find("fps=") == std::string::npos);
+    CHECK(s.find("frame=") == std::string::npos);
+    CHECK(s.find("calls=") == std::string::npos);
+}
+
+TEST_CASE("PerfCounters: the simulation counters for triSimStats", "[tri][perf][triSimStats]")
+{
+    perf::Counters c;
+    perf::FrameCounters& fc = c.Frame();
+    perf::CountFogSight(fc, perf::FogSightCaller::Target);
+    perf::CountFogSight(fc, perf::FogSightCaller::Target);
+    perf::CountFogSight(fc, perf::FogSightCaller::Script);
+    fc.fogMarches = 40;
+    fc.decalCalls = 12;
+    fc.decalMs = 0.25f;
+    fc.sensorUpdates = 1;
+    fc.sensorMs = 1.5f;
+    c.EndFrame();
+    c.EndFrame(); // an empty frame halves the averages
+    const std::string s = c.SimSummary();
+    INFO(s);
+    CHECK(s.rfind("fogsight target=1.0 script=0.5 other=0.0 marches=20.0 ", 0) == 0);
+    CHECK(s.find("| decals calls=6.0 cpu=0.125 |") != std::string::npos);
+    CHECK(s.find("| sensors updates=0.50 cpu=0.750 | n=2") != std::string::npos);
+}
+
+TEST_CASE("CpuScopes: ticks become per-frame ms, weighted samples scale up", "[tri][perf][triCpuStats]")
+{
+    perf::CpuScopes scopes;
+    scopes.FixTicksPerMs(1000.0);
+    scopes.SetEnabled(true);
+    CHECK(scopes.Summary() == "cpu: no frames measured yet");
+    scopes.Add(perf::CpuScope::DrawLoop, 2000);
+    scopes.Add(perf::CpuScope::DrawLoop, 1000);
+    scopes.Add(perf::CpuScope::ObjBuilding, 50, perf::CpuScopes::kObjectSampleEvery);
+    scopes.EndFrame();
+    CHECK(scopes.WindowMs(0, perf::CpuScope::DrawLoop) == 3.0f);
+    CHECK(scopes.WindowMs(0, perf::CpuScope::ObjBuilding) == 0.8f);
+    scopes.EndFrame(); // an empty frame
+    const std::string s = scopes.Summary();
+    INFO(s);
+    CHECK(s.find("drawloop=1.500/3.000/1.0") != std::string::npos); // avg / p95 / calls per frame
+    CHECK(s.find("obj.bld=0.400/0.800/0.5") != std::string::npos);
+    CHECK(s.find(" n=2") != std::string::npos);
+    CHECK(s.find(';') == std::string::npos);
+    scopes.SetEnabled(true); // a new window
+    CHECK(scopes.WindowFrames() == 0);
+    scopes.SetEnabled(false);
+    CHECK(scopes.Summary() == "cpu: scopes off");
+}
+
+TEST_CASE("CPU sub-scope timers record nothing while triCpuStats is off", "[tri][perf][triCpuStats]")
+{
+    perf::CpuScopes& g = perf::GCpuScopes();
+    g.SetEnabled(false);
+    CHECK_FALSE(perf::gCpuScopesOn);
+    {
+        perf::CpuScopeTimer t(perf::CpuScope::Grass);
+        float ms = 0.0f;
+        perf::CpuMsTimer m(ms);
+    }
+    for (int i = 0; i < 64; ++i)
+        CHECK_FALSE(perf::CpuObjectSample());
+    g.SetEnabled(true);
+    CHECK(perf::gCpuScopesOn);
+    int sampled = 0;
+    for (int i = 0; i < 64; ++i)
+        sampled += perf::CpuObjectSample() ? 1 : 0;
+    CHECK(sampled == 64 / perf::CpuScopes::kObjectSampleEvery);
+    {
+        perf::CpuScopeTimer t(perf::CpuScope::Grass);
+    }
+    g.EndFrame();
+    CHECK(g.WindowFrames() == 1);
+    CHECK(g.Summary().find("grass=") != std::string::npos);
+    g.SetEnabled(false);
+    CHECK_FALSE(perf::gCpuScopesOn);
+}
+
+TEST_CASE("triCpuStats, triSimStats and triPipeStats read and switch the counters", "[tri][perf][triCpuStats]")
+{
+    InitFixture fix;
+    perf::GCpuScopes().SetEnabled(true); // an empty window
+    perf::GCpuScopes().SetEnabled(false);
+    CHECK(Text(TriCpuStats(nullptr, GameValue(true))) == "cpu: scopes off");
+    CHECK(perf::gCpuScopesOn);
+    CHECK(Text(TriCpuStats(nullptr, GameValue(false))) == "cpu: no frames measured yet");
+    CHECK_FALSE(perf::gCpuScopesOn);
+
+    perf::Counters& pc = perf::GPerfCounters();
+    pc.ResetWindow();
+    pc.Frame().decalCalls = 3;
+    pc.Frame().tris = 4321;
+    pc.Frame().lodSwitches = 9;
+    perf::CountLod(pc.Frame(), 1);
+    pc.EndFrame();
+    CHECK(Text(TriSimStats(nullptr)).find("decals calls=3.0 ") != std::string::npos);
+    const std::string scene = Text(TriSceneStats(nullptr));
+    INFO(scene);
+    CHECK(scene.find(";horizon=") != std::string::npos);
+    CHECK(scene.find(";tris=4321;lodsw=9;lodhist=0/1/0/0/0/0/0/0") != std::string::npos);
+    pc.ResetWindow();
+
+    CHECK(Text(TriPipeStats(nullptr, GameValue(true))) == "OK:on");
+    CHECK(gpu::PipelineStatsWanted());
+    CHECK(Text(TriPipeStats(nullptr, GameValue(false))) == "OK:off");
+    CHECK_FALSE(gpu::PipelineStatsWanted());
+}

@@ -361,6 +361,28 @@ Poseidon::AlphaStats::Kind TextureGL33::GetAlphaClass()
     return kind;
 }
 
+Poseidon::remaster::SurfaceClass TextureGL33::SurfaceClassFor(const Poseidon::remaster::SurfaceTable& table, int gen,
+                                                              Poseidon::render::DrawObjectKind kind, bool onSurface)
+{
+    constexpr int kKinds = Poseidon::render::kDrawObjectKindCount;
+    if (_surfaceGen != gen)
+    {
+        const char* name = static_cast<const char*>(GetName());
+        const std::string_view path = name ? std::string_view(name) : std::string_view();
+        for (int k = 0; k < kKinds; ++k)
+        {
+            const auto kd = static_cast<Poseidon::render::DrawObjectKind>(k);
+            _surfaceClass[k] = static_cast<unsigned char>(Poseidon::remaster::ClassifySurface(table, path, kd, false));
+            _surfaceClass[kKinds + k] =
+                static_cast<unsigned char>(Poseidon::remaster::ClassifySurface(table, path, kd, true));
+        }
+        _surfaceGen = gen;
+    }
+    const int k = static_cast<int>(kind);
+    return static_cast<Poseidon::remaster::SurfaceClass>(
+        _surfaceClass[(onSurface ? kKinds : 0) + (k >= 0 && k < kKinds ? k : 0)]);
+}
+
 DEFINE_FAST_ALLOCATOR(TextureGL33);
 
 TextureGL33::TextureGL33()
