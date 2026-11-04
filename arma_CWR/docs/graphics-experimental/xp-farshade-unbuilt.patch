@@ -1,0 +1,579 @@
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+index 222b3225..0b3cd74b 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33.hpp
+@@ -1136,6 +1136,41 @@ class EngineGL33 : public Engine
+     void FlushLitConstants();
+     unsigned int SelectProgram(int vs, int spec, int mode, int ps) const;
+ 
++    // Experiment xp-farshade (POSEIDON_XP_FARSHADE, read at InitPixelShaders;
++    // EngineGL33_Shaders.cpp). Twins of the remastered VSTransform lit
++    // programs, linked with that vertex shader only: the lean twin (UD_LEAN:
++    // vLitMode a constant 1, the wet tables as selects) and the far twin
++    // (UD_LEAN + UD_FAR: no shadow-map lookup, no relief, cavity or terrain
++    // detail, all provably nothing on a draw wholly beyond the far reach).
++    // Level 1: far twin on far draws; 2: also the lean twin on the rest; 3: 2
++    // with UD_FAR_FOG in the far twin (the fog colour only where fog shows).
++    // 0 (unset): nothing is built and the frame is the tip's.
++    enum class XpTwin : unsigned char
++    {
++        Base = 0,
++        Lean = 1,
++        Far = 2
++    };
++    int _xpFarShade = 0;
++    XpTwin _xpMeshWant = XpTwin::Base;      // the current TL mesh's twin (BeginMeshTL .. EndMeshTL)
++    XpTwin _xpWant = XpTwin::Base;          // the twin of the draw ApplyPassState is applying
++    std::vector<unsigned int> _xpTwinOf[3]; // by base program GL name: [Lean], [Far] (index 0 unused)
++    std::vector<unsigned int> _xpBaseOf;    // by twin GL name: its base program
++    std::vector<unsigned int> _xpTwinPrograms;
++    std::uint64_t _xpDraws[3] = {}; // TL mesh draws by twin since the last log line
++    std::uint32_t _xpLogFrame = 0;
++    void XpBuildTwins(void (*bindSamplersAndBlocks)(unsigned int));
++    void XpDeleteTwins();
++    unsigned int XpTwinFor(unsigned int prog, XpTwin want) const;
++    // After ApplyPipeline: the bound world program swapped to the twin _xpWant asks for.
++    void XpSyncProgram();
++    // The twin of the TL mesh about to draw (BeginMeshTL; EngineGL33_Mesh.cpp).
++    void XpDecideMesh(const Shape& sMesh);
++    // The shadow lookup's reach this frame (EngineGL33_Shaders.cpp): false
++    // when the lit pass has no shadow map, else the largest tier distance and
++    // the shadow pass's camera forward.
++    bool XpShadowReach(float& reach, float fwd[3]) const;
++
+     struct PostTargets
+     {
+         static constexpr int kBloomLevels = 5;
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+index b6287886..45cc431d 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShaders.cpp
+@@ -457,7 +457,14 @@ in float vFogTC;
+ in vec3 vWorldRel;
+ in vec3 vNormalW;
+ in vec4 vCrown;
++// The far and lean twins (POSEIDON_XP_FARSHADE; EngineGL33_Shaders.cpp) link
++// with VSTransform only, which writes vLitMode 1 on every vertex: a constant
++// there, so the compiler drops the dome, pre-lit and sun-disc paths.
++#ifdef UD_LEAN
++const float vLitMode = 1.0;
++#else
+ flat in float vLitMode;
++#endif
+ 
+ layout(location = 0) out vec4 fragColor;
+ // The surface target (the surfaces switch, SurfaceLight.hpp): r the share
+@@ -633,6 +640,11 @@ float pcssVisibility(vec2 suv, int c, float zRef, float ts, float texelWorld, fl
+ // `leafLift` texels toward the sun: their two-sided cards are in the map, and
+ // no normal keeps a card at a grazing sun off its own depth.
+ float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
++#ifdef UD_FAR
++    // The far twin draws only what lies wholly beyond every tier (the CPU's
++    // XpFarDecision), where the lookup below returns exactly 1.
++    return 1.0;
++#else
+     if (shadowCtl.x < 0.5) return 1.0;
+     vec3 rel = vWorldRel + litShadowDelta.xyz;
+     int nC = int(cascadeCtl.x);
+@@ -693,6 +705,7 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
+     float lastSplit = cascadeSplits[nC - 1];
+     float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+     return 1.0 - (1.0 - lit) * fade;
++#endif
+ }
+ )";
+ 
+@@ -1227,8 +1240,17 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
+     // the mix below then ignores the fog colour).
+     vec3 fogC = fogColor.rgb;
+     if (vLitMode > 0.5 && vLitMode < 1.5) {
++#ifdef UD_FAR_FOG
++        // (The far twin's fog tier: the fog's colour only where the mix below
++        // takes any of it; elsewhere it changes the result by rounding only.)
++        if (vFogTC * (1.0 + litHaze.x) < 1.0) {
++            fogC = fogColorToward(vWorldRel);
++            if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);
++        }
++#else
+         fogC = fogColorToward(vWorldRel);
+         if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);
++#endif
+     } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
+         fogC = atmoFogColor(vWorldRel, fogC);
+     }
+@@ -1302,6 +1324,8 @@ void main() {
+         // glass and rubber take none.
+         float reliefK = surfaceClassRelief(surfClass.x) * litSurface2.x;
+         float cavityK = surfaceClassCavity(surfClass.x) * litSurface3.x;
++#ifndef UD_FAR
++        // (The far twin: beyond 60 m fadeR is 0 and nothing below changes.)
+         if (litSurface.x > 0.5 && (reliefK > 0.0 || cavityK > 0.0) && dot(litMatForced.rgb, kLuma) <= 1e-4) {
+             vec2 d0x = dFdx(vUV0);
+             vec2 d0y = dFdy(vUV0);
+@@ -1318,6 +1342,7 @@ void main() {
+                                    (dot(constColor.rgb, vec3(0.3333)) * cavityK * fadeR);
+             }
+         }
++#endif
+         r0.rgb = shadeRemastered(albedo, false, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+@@ -1433,6 +1458,8 @@ void main() {
+         // so the terrain keeps its authored micro-contrast.
+         float detail = t1.a * 2.0;
+         float selfMod = 1.0;
++#ifndef UD_FAR
++        // (The far twin: nothing below runs beyond kTdMaxDistance.)
+         if (litDetail.w > 0.5 && (litDetail.x > 0.0 || litDetail.y > 0.0 || litDetail.z > 0.0)) {
+             // Derivatives before the distance branch (non-uniform control flow).
+             vec2 d0x = dFdx(vUV0);
+@@ -1465,6 +1492,7 @@ void main() {
+                 detail = max(dMean + dev, 0.0);
+             }
+         }
++#endif
+         vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
+         // The land takes the rain (puddles, the grass share from the ground
+         // field); the sea on this program does not.
+@@ -1472,6 +1500,8 @@ void main() {
+         // Relief (the surfaces switch): the detail texture's grain as a height
+         // (its alpha, times the square's luminance, as the albedo takes it),
+         // read from the texture around the fragment, fading out by 80 m.
++#ifndef UD_FAR
++        // (The far twin: both fades below are 0 beyond 200 m.)
+         if (litSurface.x > 0.5 && (litSurface2.x > 0.0 || litSurface3.x > 0.0) && litDetail.w > 0.5) {
+             vec2 r1x = dFdx(vUV1);
+             vec2 r1y = dFdy(vUV1);
+@@ -1510,6 +1540,7 @@ void main() {
+                 g_surfCavity += clamp((bf - bm) * (kSurfBaseCavity * litSurface3.x * fadeB), -0.035, 0.03);
+             }
+         }
++#endif
+         r0.rgb = shadeRemastered(albedo, true, ambientShare);
+         r0.a = vColor.a * t0.a * constColor.a;
+     } else {
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+index 5dbc4c59..1a1921f3 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_LightingShadersSurface.cpp
+@@ -198,6 +198,16 @@ const float kWetSaturate = 0.3;     // objects: saturation gain at porosity 1 (n
+ // skin, leather, unknown); glass, metal, weapons and lenses keep their colour.
+ const float kWetMatte[14] = float[](0.35, 0.35, 0.0, 0.0, 0.35, 0.0, 0.35, 0.0, 0.0, 0.0, 0.35, 0.0, 0.0, 0.0);
+ const float kWetGrassPorosity = 0.23; // grass darkens a little (0.92 of its albedo soaked)
++#ifdef UD_LEAN
++// kWetPorosity[c] and kWetMatte[c] as selects (the twins, POSEIDON_XP_FARSHADE).
++// Indexed by a variable, the NV compiler keeps both tables in local memory and
++// stores all 28 entries at the top of every fragment, dry weather included.
++float wetPorosityOf(int c) {
++    return c == 0 ? 0.5 : c == 1 ? 0.05 : c == 4 ? 0.1 : c == 5 ? 0.85 : c == 6 ? 0.3 : c == 7 ? 0.35 :
++           c == 8 ? 0.6 : c == 9 ? 0.7 : c == 10 ? 0.4 : c == 13 ? 0.4 : 0.0;
++}
++float wetMatteOf(int c) { return (c == 0 || c == 1 || c == 4 || c == 6 || c == 10) ? 0.35 : 0.0; }
++#endif
+ const float kWetFoliageDark = 0.88; // leaves shed the water: soaked crowns keep this of their albedo
+ const float kWetPuddleDark = 0.55;  // the ground under a puddle's water
+ const float kWetDampDark = 0.9;     // the damp margin around a puddle
+@@ -628,7 +638,11 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
+         if (field.a > 0.5) groundC = field.rgb;
+     }
+     float veg = g_wetDraw == 2 ? 1.0 : (g_wetDraw == 1 ? wetVegetation(groundC) : 0.0);
++#ifdef UD_LEAN
++    float porosity = g_wetDraw == 0 ? wetPorosityOf(cls) : mix(wetGroundPorosity(groundC), kWetGrassPorosity, veg);
++#else
+     float porosity = g_wetDraw == 0 ? kWetPorosity[cls] : mix(wetGroundPorosity(groundC), kWetGrassPorosity, veg);
++#endif
+     float w = (ground ? mix(0.45, 1.0, skyVisibility) : wetCoverage(n, posAbs, skyVisibility, dist)) * wet;
+     // Standing water on the land and on roads. The land pools as bare ground
+     // or grass by its field, never by its square's texture name (the trace
+@@ -642,7 +656,11 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
+     if (w <= 0.0 && pud.x <= 0.0) return;
+     // Water fills the pores; on a matte sealed surface (paint, rubber) the film
+     // takes away the surface's own pale scatter: darker and deeper either way.
++#ifdef UD_LEAN
++    float soak = max(porosity, wetMatteOf(cls) * float(g_wetDraw == 0));
++#else
+     float soak = max(porosity, kWetMatte[cls] * float(g_wetDraw == 0));
++#endif
+     if (!ground) {
+         float l = dot(a, kLuma);
+         a = max(mix(vec3(l), a, 1.0 + kWetSaturate * w * soak), vec3(0.0));
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp
+index 94162810..c44d5063 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Mesh.cpp
+@@ -5,6 +5,8 @@
+ #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+ #include <Poseidon/World/Scene/Camera/Camera.hpp>
+ 
++#include <cmath>
++
+ void EngineGL33::PrepareMesh(const Poseidon::render::LegacySpec& /*spec*/)
+ {
+     BeginScreenPass();
+@@ -127,9 +129,85 @@ void EngineGL33::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
+         Poseidon::remaster::CrownEllipsoid(boxMin, boxMax, center, invHalf);
+         UploadVSCrown(center, invHalf);
+     }
++    if (_xpFarShade)
++        XpDecideMesh(sMesh);
+ }
+ 
+ void EngineGL33::EndMeshTL(const Shape& sMesh)
+ {
+     ClearLights();
++    _xpMeshWant = XpTwin::Base;
++}
++
++namespace
++{
++// The far twin's distance floor: every distance-faded term it drops is exactly
++// nothing past it (terrain detail kTdMaxDistance 300 m; the land's relief and
++// cavity 80 and 200 m; the objects' relief and cavity 60 m).
++constexpr float kXpFarDistance = 300.0f;
++// The shape's bounding box may not hold every drawn vertex (land-fitted
++// vertices, animated parts): its radius is taken this much larger, plus this
++// many metres.
++constexpr float kXpRadiusScale = 1.25f;
++constexpr float kXpRadiusPad = 20.0f;
++} // namespace
++
++void EngineGL33::XpDecideMesh(const Shape& sMesh)
++{
++    const XpTwin rest = _xpFarShade >= 2 ? XpTwin::Lean : XpTwin::Base;
++    _xpMeshWant = rest;
++    if (!_remasterPrograms || !_worldPassOpen)
++        return;
++    const Vector3 mn = sMesh.Min();
++    const Vector3 mx = sMesh.Max();
++    const float c[3] = {0.5f * (mn.X() + mx.X()), 0.5f * (mn.Y() + mx.Y()), 0.5f * (mn.Z() + mx.Z())};
++    const float hx = 0.5f * (mx.X() - mn.X()), hy = 0.5f * (mx.Y() - mn.Y()), hz = 0.5f * (mx.Z() - mn.Z());
++    const float half = std::sqrt(hx * hx + hy * hy + hz * hz);
++    float reach = 0.0f;
++    float fwd[3] = {0.0f, 0.0f, 1.0f};
++    const bool shadows = XpShadowReach(reach, fwd);
++    // The lit pass's shadow lookup point is the fragment plus the camera's
++    // move since the shadow pass (litShadowDelta).
++    const float delta[3] = {_frameState.cameraPos[0] - _shadowCamPos[0], _frameState.cameraPos[1] - _shadowCamPos[1],
++                            _frameState.cameraPos[2] - _shadowCamPos[2]};
++    // Every instance (or the one object) wholly past both thresholds.
++    auto farOf = [&](const GfxMatrix& m)
++    {
++        // Camera-relative centre (row vector times the row-major matrix) and a
++        // radius bound (the 3x3 part's Frobenius norm bounds its largest scale).
++        const float w[3] = {c[0] * m._11 + c[1] * m._21 + c[2] * m._31 + m._41,
++                            c[0] * m._12 + c[1] * m._22 + c[2] * m._32 + m._42,
++                            c[0] * m._13 + c[1] * m._23 + c[2] * m._33 + m._43};
++        const float s2 = m._11 * m._11 + m._12 * m._12 + m._13 * m._13 + m._21 * m._21 + m._22 * m._22 + m._23 * m._23 +
++                         m._31 * m._31 + m._32 * m._32 + m._33 * m._33;
++        const float r = half * std::sqrt(s2) * kXpRadiusScale + kXpRadiusPad;
++        const float dist = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
++        if (dist - r < kXpFarDistance)
++            return false;
++        if (!shadows)
++            return true;
++        const float eye = (w[0] + delta[0]) * fwd[0] + (w[1] + delta[1]) * fwd[1] + (w[2] + delta[2]) * fwd[2];
++        return eye - r > reach;
++    };
++    bool far = true;
++    if (_instCount > 1)
++    {
++        for (int i = 0; i < _instCount && far; ++i)
++            far = farOf(_instArray[i]);
++    }
++    else
++    {
++        far = farOf(_currentDrawItem.worldMatrix);
++    }
++    if (far)
++        _xpMeshWant = XpTwin::Far;
++    ++_xpDraws[static_cast<int>(_xpMeshWant)];
++    const std::uint32_t frame = GetFrameCounter();
++    if (frame - _xpLogFrame >= 600)
++    {
++        _xpLogFrame = frame;
++        LOG_INFO(Graphics, "GL33: xp-farshade level {}: meshes base {} lean {} far {} (600 frames), shadow reach {} m",
++                 _xpFarShade, _xpDraws[0], _xpDraws[1], _xpDraws[2], shadows ? reach : 0.0f);
++        _xpDraws[0] = _xpDraws[1] = _xpDraws[2] = 0;
++    }
+ }
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+index 07490b75..12c1db4e 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Queue.cpp
+@@ -297,6 +297,13 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
+     _pipelineVertexInput = vertexInput;
+     ApplyPipeline(d);
+     _pipelineVertexInput = previousVertexInput;
++    // Experiment xp-farshade: a TL mesh draw takes the twin its mesh asked for
++    // (XpDecideMesh), every other draw the base program.
++    if (_xpFarShade)
++    {
++        _xpWant = vertexInput == PipelineVertexInput::Mesh ? _xpMeshWant : XpTwin::Base;
++        XpSyncProgram();
++    }
+     // ApplyPipeline skips an unchanged descriptor; the tag can change without
+     // it (land and sea, a road after the terrain).
+     if (!_ssrStencilValid || _ssrStencilApplied != _ssrStencil)
+diff --git a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+index caa3c143..3a4d9263 100644
+--- a/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
++++ b/arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp
+@@ -17,6 +17,7 @@
+ 
+ #include <algorithm>
+ #include <chrono>
++#include <cstdlib>
+ #include <filesystem>
+ #include <fstream>
+ #include <sstream>
+@@ -1694,8 +1695,192 @@ GLuint FinishLinkProgramRetrievable(GLuint program, const char* name)
+     LOG_DEBUG(Graphics, "GL33: Shader program [{}] OK", name);
+     return program;
+ }
++
++// ---- Experiment xp-farshade (POSEIDON_XP_FARSHADE; EngineGL33.hpp XpTwin) ----
++
++// A twin's fragment source: the remastered source with its defines after the
++// #version line. Without them the preprocessed text is the base program's.
++std::string XpTwinSource(const std::string& src, bool far, bool fog)
++{
++    const size_t eol = src.find('\n');
++    if (eol == std::string::npos)
++        return {};
++    std::string out = src.substr(0, eol + 1);
++    out += "#define UD_LEAN 1\n";
++    if (far)
++        out += "#define UD_FAR 1\n";
++    if (far && fog)
++        out += "#define UD_FAR_FOG 1\n";
++    out += src.substr(eol + 1);
++    return out;
++}
++
++// POSEIDON_XP_FARSHADE_DUMP=<dir>: each linked program's driver binary (the NV
++// blob carries the driver's assembly text) for comparing the twins offline.
++void XpDumpProgram(GLuint prog, const char* dir, const std::string& name)
++{
++    if (!dir || !*dir || !prog)
++        return;
++    ShaderCacheEntry e;
++    if (!CaptureProgramBinary(prog, e))
++        return;
++    std::error_code ec;
++    std::filesystem::create_directories(dir, ec);
++    std::ofstream out(std::filesystem::path(dir) / ("xp-" + name + ".bin"), std::ios::binary);
++    out.write(reinterpret_cast<const char*>(e.blob.data()), static_cast<std::streamsize>(e.blob.size()));
++}
+ } // namespace
+ 
++bool EngineGL33::XpShadowReach(float& reach, float fwd[3]) const
++{
++    // What UploadShadowConstants handed the lit programs (ctl.x, the splits,
++    // the shadow pass's camera forward).
++    if (s_psShadow[2 * 4] < 0.5f)
++        return false;
++    const int n = std::clamp(static_cast<int>(s_psShadow[25 * 4] + 0.5f), 0, 4);
++    if (n <= 0)
++        return false;
++    reach = 0.0f;
++    for (int i = 0; i < n; ++i)
++        reach = std::max(reach, s_psShadow[24 * 4 + i]);
++    for (int i = 0; i < 3; ++i)
++        fwd[i] = s_psShadow[26 * 4 + i];
++    return true;
++}
++
++unsigned int EngineGL33::XpTwinFor(unsigned int prog, XpTwin want) const
++{
++    const int w = static_cast<int>(want);
++    if (w <= 0 || w > 2 || prog >= _xpTwinOf[w].size())
++        return 0;
++    return _xpTwinOf[w][prog];
++}
++
++void EngineGL33::XpSyncProgram()
++{
++    // s_worldProgramBound is trusted only while _pixelShaderSel is a selection.
++    if (!_xpFarShade || _pixelShaderSel == PSNone)
++        return;
++    const GLuint cur = s_worldProgramBound;
++    if (!cur)
++        return;
++    const GLuint base = (cur < _xpBaseOf.size() && _xpBaseOf[cur]) ? _xpBaseOf[cur] : cur;
++    GLuint want = base;
++    if (_xpWant != XpTwin::Base)
++    {
++        const GLuint twin = XpTwinFor(base, _xpWant);
++        if (twin)
++            want = twin;
++    }
++    if (want == cur)
++        return;
++    glUseProgram(want);
++    s_worldProgramBound = want;
++    // The per-program uniforms (surfClass, decalLayerMode) follow the bound one.
++    if (_surfBoundProgram)
++        _surfBoundProgram = want;
++}
++
++void EngineGL33::XpDeleteTwins()
++{
++    if (!_xpTwinPrograms.empty())
++    {
++        if (std::find(_xpTwinPrograms.begin(), _xpTwinPrograms.end(), s_worldProgramBound) != _xpTwinPrograms.end())
++        {
++            glUseProgram(0);
++            s_worldProgramBound = 0;
++        }
++        for (unsigned int prog : _xpTwinPrograms)
++            glDeleteProgram(prog);
++    }
++    _xpTwinPrograms.clear();
++    for (auto& v : _xpTwinOf)
++        v.clear();
++    _xpBaseOf.clear();
++    _xpMeshWant = XpTwin::Base;
++    _xpWant = XpTwin::Base;
++}
++
++void EngineGL33::XpBuildTwins(void (*bindSamplersAndBlocks)(unsigned int))
++{
++    XpDeleteTwins();
++    const char* env = std::getenv("POSEIDON_XP_FARSHADE");
++    _xpFarShade = env ? std::clamp(std::atoi(env), 0, 3) : 0;
++    if (_xpFarShade == 0)
++        return;
++    if (!_lightingProgramsBuilt)
++    {
++        LOG_INFO(Graphics, "GL33: xp-farshade {} asked, no remastered programs: off", _xpFarShade);
++        _xpFarShade = 0;
++        return;
++    }
++    const auto start = std::chrono::steady_clock::now();
++    EnsureWorldVsCompiled();
++    const GLuint vsObj = s_vsRemasterObj[VSTransform];
++    if (!vsObj)
++    {
++        _xpFarShade = 0;
++        return;
++    }
++    const char* dumpDir = std::getenv("POSEIDON_XP_FARSHADE_DUMP");
++    const std::string common = Poseidon::gl33lighting::RemasterFragmentCommon();
++    const struct
++    {
++        int ps;
++        const char* name;
++    } lit[] = {{PSNormal, "psNormal"}, {PSDetail, "psDetail"}, {PSGrass, "psGrass"}, {PSWater, "psWater"}};
++    int built = 0;
++    for (const auto& L : lit)
++    {
++        const GLuint base = _shaderProgramRemaster[VSTransform][0][0][L.ps];
++        const char* body = Poseidon::gl33lighting::RemasterFragmentMain(L.ps);
++        if (!base || !body)
++            continue;
++        const std::string src = common + body;
++        if (dumpDir && *dumpDir)
++        {
++            // The base program again, linked retrievable (a cache-restored one may not be).
++            const GLuint fs = CompileGLShader(GL_FRAGMENT_SHADER, src.c_str(), "xpBaseCopy");
++            if (fs)
++            {
++                const GLuint copy = FinishLinkProgramRetrievable(BeginLinkProgramRetrievable(vsObj, fs), "xpBaseCopy");
++                XpDumpProgram(copy, dumpDir, std::string(L.name) + "-base");
++                if (copy)
++                    glDeleteProgram(copy);
++                glDeleteShader(fs);
++            }
++        }
++        for (int t = 1; t <= 2; ++t)
++        {
++            const bool far = t == static_cast<int>(XpTwin::Far);
++            if (!far && _xpFarShade < 2)
++                continue;
++            const std::string twinSrc = XpTwinSource(src, far, _xpFarShade >= 3);
++            const std::string name = std::string(L.name) + (far ? "RemasterXpFar" : "RemasterXpLean");
++            const GLuint fs = CompileGLShader(GL_FRAGMENT_SHADER, twinSrc.c_str(), name.c_str());
++            if (!fs)
++                continue;
++            const GLuint prog = FinishLinkProgramRetrievable(BeginLinkProgramRetrievable(vsObj, fs), name.c_str());
++            glDeleteShader(fs);
++            if (!prog)
++                continue;
++            bindSamplersAndBlocks(prog);
++            XpDumpProgram(prog, dumpDir, std::string(L.name) + (far ? "-far" : "-lean"));
++            _xpTwinPrograms.push_back(prog);
++            if (_xpTwinOf[t].size() <= base)
++                _xpTwinOf[t].resize(base + 64, 0);
++            _xpTwinOf[t][base] = prog;
++            if (_xpBaseOf.size() <= prog)
++                _xpBaseOf.resize(prog + 64, 0);
++            _xpBaseOf[prog] = base;
++            ++built;
++        }
++    }
++    s_worldProgramBound = 0; // bindSamplersAndBlocks left program 0 bound
++    LOG_INFO(Graphics, "GL33: xp-farshade level {}: {} twin programs built in {} ms", _xpFarShade, built,
++             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
++}
++
+ void EngineGL33::InitPixelShaders()
+ {
+     // As InitVertexShaders: a soft reset re-runs this without the deinit.
+@@ -1886,6 +2071,8 @@ void EngineGL33::InitPixelShaders()
+     _lightingProgramsBuilt = remasterComplete;
+     if (!remasterComplete)
+         LOG_ERROR(Graphics, "GL33: remastered lighting shaders failed to build; using classic lighting");
++    // Experiment xp-farshade: its twins (nothing while POSEIDON_XP_FARSHADE is unset).
++    XpBuildTwins(+bindProgramSamplersAndBlocks);
+ 
+     if (anyCompiledFresh && !cache.empty())
+     {
+@@ -2041,6 +2228,7 @@ void EngineGL33::ApplyGammaPass()
+ 
+ void EngineGL33::DeinitPixelShaders()
+ {
++    XpDeleteTwins();
+     glUseProgram(0);
+     s_worldProgramBound = 0;
+     // The [specular][mode] slots share one program: delete each name once.
+diff --git a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+index 3a57f957..86140672 100644
+--- a/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
++++ b/arma_CWR/tests/unit/engine/Poseidon/Graphics/test_remaster_lighting.cpp
+@@ -1103,6 +1103,36 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
+     CHECK(post == 35);
+ }
+ 
++TEST_CASE("xp-farshade twins compile under glslang", "[Graphics][Shaders][remaster]")
++{
++    // Experiment xp-farshade (EngineGL33_Shaders.cpp XpTwinSource): each lit
++    // fragment shader with the lean, far and far-fog defines after #version.
++    GlslangInit init;
++    const std::string common = gl::RemasterFragmentCommon();
++    const char* const defines[] = {"#define UD_LEAN 1\n", "#define UD_LEAN 1\n#define UD_FAR 1\n",
++                                   "#define UD_LEAN 1\n#define UD_FAR 1\n#define UD_FAR_FOG 1\n"};
++    int compiled = 0;
++    for (int ps = 0; ps < kShaderIds; ++ps)
++    {
++        const char* main = gl::RemasterFragmentMain(ps);
++        if (!main)
++            continue;
++        const std::string src = common + main;
++        const size_t eol = src.find('\n');
++        REQUIRE(eol != std::string::npos);
++        for (const char* d : defines)
++        {
++            CAPTURE(ps, d);
++            std::string log;
++            const bool ok = Compiles(src.substr(0, eol + 1) + d + src.substr(eol + 1), EShLangFragment, log);
++            CAPTURE(log);
++            CHECK(ok);
++            ++compiled;
++        }
++    }
++    CHECK(compiled == 12);
++}
++
+ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
+           "[Graphics][Shaders][remaster]")
+ {
