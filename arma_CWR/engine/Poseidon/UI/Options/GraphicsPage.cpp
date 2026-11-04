@@ -67,6 +67,9 @@ const GraphicsRowText kRows[] = {
     {"STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS", "STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS_DESC", "Lamp Shadows",
      "Street lamps cast shadows at night, and the light of lamps, headlights and fires bounces off the ground onto "
      "what stands near them. Remastered lighting only."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SUN_GLARE", "STR_DISP_MAIN_OPT_GRAPHICS_SUN_GLARE_DESC", "Sun Glare",
+     "A soft glare round a low sun, as a camera sees it. It fades when trees, hills or clouds cover the sun. "
+     "Remastered lighting only."},
 };
 constexpr int kFpsCapValues[] = {0, 30, 60, 90, 120, 144, 240};
 constexpr int kMsaaValues[] = {0, 2, 4, 8};
@@ -245,6 +248,8 @@ OptionsScrollList::RowDef GraphicsPage::GraphicsProvider::RowFor(int row) const
             return {652, m_page->m_offOnCStrs.data(), 2};
         case kRowLampShadows:
             return {662, m_page->m_offOnCStrs.data(), 2};
+        case kRowSunGlare:
+            return {672, m_page->m_offOnCStrs.data(), 2};
     }
     return {-1, nullptr, 0};
 }
@@ -253,7 +258,7 @@ OptionsScrollList::Kind GraphicsPage::GraphicsProvider::RowKind(int row) const
 {
     if (row == kRowAdvanced)
         return OptionsScrollList::KindHeader;
-    if (row == kRowMultitexturing || row == kRowShoreWater || row == kRowLampShadows)
+    if (row == kRowMultitexturing || row == kRowShoreWater || row == kRowLampShadows || row == kRowSunGlare)
         return OptionsScrollList::KindBoolean;
     return OptionsScrollList::Provider::RowKind(row);
 }
@@ -306,6 +311,8 @@ int GraphicsPage::GraphicsProvider::RowValue(int row) const
             return c.shoreWater ? 1 : 0;
         case kRowLampShadows:
             return c.lampShadows ? 1 : 0;
+        case kRowSunGlare:
+            return c.sunGlare ? 1 : 0;
         case kRowVsync:
             return (int)c.vsync;
         case kRowFpsCap:
@@ -410,6 +417,9 @@ void GraphicsPage::GraphicsProvider::SetRowValue(int row, int v)
             break;
         case kRowLampShadows:
             c.lampShadows = v != 0;
+            break;
+        case kRowSunGlare:
+            c.sunGlare = v != 0;
             break;
         case kRowVsync:
             if (v >= 0 && v <= 2)

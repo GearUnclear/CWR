@@ -527,6 +527,8 @@ TEST_CASE("GraphicsConfig: the look options default to shore water and lamp shad
     CHECK(c.shoreWater);
     CHECK(c.lampShadows);
     CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    // The sun glare stays off until the owner has seen it in motion.
+    CHECK_FALSE(c.sunGlare);
     // The stored values are the shadow tiers (Graphics/Shadow/ShadowXp.hpp).
     CHECK(static_cast<int>(GraphicsConfig::ShadowDetailNormal) == 2);
     CHECK(static_cast<int>(GraphicsConfig::ShadowDetailHigh) == 3);
@@ -541,6 +543,7 @@ TEST_CASE("GraphicsConfig: the look options round-trip through graphics.cfg", "[
     src.shoreWater = false;
     src.lampShadows = false;
     src.shadowDetail = GraphicsConfig::ShadowDetailHigh;
+    src.sunGlare = true;
     REQUIRE(src.Save(path));
 
     GraphicsConfig dst;
@@ -548,16 +551,19 @@ TEST_CASE("GraphicsConfig: the look options round-trip through graphics.cfg", "[
     CHECK_FALSE(dst.shoreWater);
     CHECK_FALSE(dst.lampShadows);
     CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailHigh);
+    CHECK(dst.sunGlare);
 
-    // And back on.
+    // And back.
     src.shoreWater = true;
     src.lampShadows = true;
     src.shadowDetail = GraphicsConfig::ShadowDetailNormal;
+    src.sunGlare = false;
     REQUIRE(src.Save(path));
     REQUIRE(dst.Load(path));
     CHECK(dst.shoreWater);
     CHECK(dst.lampShadows);
     CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    CHECK_FALSE(dst.sunGlare);
 }
 
 TEST_CASE("GraphicsConfig: a file written before the look options reads them as their defaults",
@@ -574,6 +580,7 @@ TEST_CASE("GraphicsConfig: a file written before the look options reads them as 
     CHECK(c.shoreWater);
     CHECK(c.lampShadows);
     CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    CHECK_FALSE(c.sunGlare);
     // Nothing to migrate: the defaults are already the options' defaults.
     CHECK_FALSE(c.Migrate(60));
 }

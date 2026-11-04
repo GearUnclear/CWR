@@ -281,6 +281,8 @@ bool GraphicsConfig::Load(const std::string& path)
         lampShadows = (int)*e != 0;
     if (auto* e = cfg.FindEntry("shadowDetail"))
         shadowDetail = static_cast<ShadowDetail>((int)*e);
+    if (auto* e = cfg.FindEntry("sunGlare"))
+        sunGlare = (int)*e != 0;
     if (auto* e = cfg.FindEntry("brightness"))
         brightness = (float)*e;
     if (auto* e = cfg.FindEntry("gamma"))
@@ -307,6 +309,7 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("shoreWater", shoreWater ? 1 : 0);
     cfg.Add("lampShadows", lampShadows ? 1 : 0);
     cfg.Add("shadowDetail", static_cast<int>(shadowDetail));
+    cfg.Add("sunGlare", sunGlare ? 1 : 0);
     cfg.Add("brightness", brightness);
     cfg.Add("gamma", gamma);
     cfg.Add("version", version);

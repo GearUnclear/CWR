@@ -5,7 +5,7 @@
 #include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 
 // The Graphics page's look options (shore water, lamp shadows, the sun shadow
-// tier) and the environment's POSEIDON_XP_* overrides over them: an unset
+// tier, the low sun's glare) and the environment's POSEIDON_XP_* overrides over them: an unset
 // variable keeps the player's option, a set one wins, so the perf gate and the
 // stills jobs can still pin the look the build drew before the options.
 
@@ -19,6 +19,8 @@ TEST_CASE("LookOptions: the defaults turn the shore water and lamp shadows on at
     CHECK(o.shoreWater);
     CHECK(o.lampShadows);
     CHECK(o.shadowTier == kShadowTierNormal);
+    // The sun glare is off until the owner has seen it in motion.
+    CHECK_FALSE(o.sunGlare);
     CHECK(kShadowTierNormal == 2);
     CHECK(kShadowTierHigh == 3);
 }
@@ -143,4 +145,30 @@ TEST_CASE("LookOptions: High is the ultra tier without the caster cull", "[Graph
     CHECK(xp::Tier(kShadowTierNormal).reach == 0.0f);
     CHECK(xp::MapFar(500.0f, 4000.0f, 2667.0f, xp::Tier(kShadowTierNormal).reach) == 500.0f);
     CHECK(xp::MapFar(500.0f, 4000.0f, 2667.0f, high.reach) == Catch::Approx(1000.0f));
+}
+
+TEST_CASE("LookOptions: the sun glare follows the option at strength 1 without an override", "[Graphics][LookOptions]")
+{
+    const LookEnv none;
+    CHECK(SunGlareGain(false, none) == 0.0f);
+    CHECK(SunGlareGain(true, none) == 1.0f);
+}
+
+TEST_CASE("LookOptions: POSEIDON_XP_SUNGLARE wins over the sun glare option", "[Graphics][LookOptions]")
+{
+    LookEnv env;
+    env.sunGlare = "0";
+    CHECK(SunGlareGain(true, env) == 0.0f);
+    CHECK(SunGlareGain(false, env) == 0.0f);
+    env.sunGlare = "1";
+    CHECK(SunGlareGain(false, env) == 1.0f);
+    // A number is the strength, capped at 8; other text is 1.
+    env.sunGlare = "2.5";
+    CHECK(SunGlareGain(false, env) == Catch::Approx(2.5f));
+    env.sunGlare = "20";
+    CHECK(SunGlareGain(true, env) == 8.0f);
+    env.sunGlare = "-1";
+    CHECK(SunGlareGain(true, env) == 0.0f);
+    env.sunGlare = "yes";
+    CHECK(SunGlareGain(false, env) == 1.0f);
 }

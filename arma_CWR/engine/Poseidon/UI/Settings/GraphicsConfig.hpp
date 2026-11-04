@@ -22,7 +22,7 @@
 //                           msaaSamples, renderScale, alphaToCoverage,
 //                           multitexturing, lighting, vsync, fpsCap,
 //                           brightness, gamma, shoreWater, lampShadows,
-//                           shadowDetail
+//                           shadowDetail, sunGlare
 //
 // Autodetect on first boot: GraphicsConfig::PickPresetFromRam()
 // returns a tier from SDL_GetSystemRAM(); ApplyPresetToTiers fills the
@@ -110,6 +110,7 @@ public:
     bool shoreWater = true;                         // shallow water, surf, foam and wet sand at the shore
     bool lampShadows = true;                        // street lamps cast shadows, their light bounces off the ground
     ShadowDetail shadowDetail = ShadowDetailNormal; // the sun shadows' reach and sharpness
+    bool sunGlare = false;                          // a soft glare round a low sun (off until judged in motion)
 	float     brightness       = 1.6f;          // 0.4..1.8
 	float     gamma            = 1.2f;          // 0.5..2.3
 

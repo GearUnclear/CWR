@@ -4,7 +4,7 @@
 #include <cstring>
 
 // The look options of the Graphics page (GraphicsConfig shoreWater,
-// lampShadows and shadowDetail, persisted in graphics.cfg; GraphicsApply hands
+// lampShadows, shadowDetail and sunGlare, persisted in graphics.cfg; GraphicsApply hands
 // them to Engine::SetLookOptions) and the environment's overrides over them.
 // Pure: no engine state, no GL.
 //
@@ -23,9 +23,12 @@
 //   POSEIDON_XP_SHADOW_TIER   0..4: the sun shadows' tier (2 Normal, 3 High;
 //                             Graphics/Shadow/ShadowXp.hpp, which also reads the
 //                             single shadow knobs on top of the tier)
+//   POSEIDON_XP_SUNGLARE      the low sun's glare: 0 off, a number above 0
+//                             its strength (at most 8), other text 1
 //
 // So POSEIDON_XP_WATER=0 POSEIDON_XP_NIGHTLIGHT=0 POSEIDON_XP_SHADOW_TIER=2
-// draws the frame of the build before these options, whatever graphics.cfg says.
+// POSEIDON_XP_SUNGLARE=0 draws the frame of the build before these options,
+// whatever graphics.cfg says.
 
 namespace Poseidon::remaster
 {
@@ -43,6 +46,9 @@ struct LookOptions
     bool shoreWater = true;
     bool lampShadows = true;
     int shadowTier = kShadowTierNormal;
+    // Off by default: the glare is temporal (it follows what covers the sun)
+    // and has only been judged in stills.
+    bool sunGlare = false;
 };
 
 // The environment's look switches as read once (null = unset or empty).
@@ -53,6 +59,7 @@ struct LookEnv
     const char* nightLight = nullptr;
     const char* lampShadows = nullptr;
     const char* lightBounce = nullptr;
+    const char* sunGlare = nullptr;
 };
 
 inline const char* LookEnvValue(const char* name)
@@ -69,6 +76,7 @@ inline LookEnv ReadLookEnv()
     e.nightLight = LookEnvValue("POSEIDON_XP_NIGHTLIGHT");
     e.lampShadows = LookEnvValue("POSEIDON_XP_LAMPSHADOWS");
     e.lightBounce = LookEnvValue("POSEIDON_XP_LIGHTBOUNCE");
+    e.sunGlare = LookEnvValue("POSEIDON_XP_SUNGLARE");
     return e;
 }
 
@@ -125,6 +133,13 @@ inline NightLightLook NightLightFor(bool option, const LookEnv& env)
     n.bounceGain = LookGain(env.lightBounce, all);
     n.lampShadows = LookSwitch(env.lampShadows, all);
     return n;
+}
+
+// The low sun's glare strength (0 = off; EngineGL33_XpAtmosphere.cpp): the
+// Sun Glare option at strength 1, or POSEIDON_XP_SUNGLARE when it is set.
+inline float SunGlareGain(bool option, const LookEnv& env)
+{
+    return LookGain(env.sunGlare, option);
 }
 
 } // namespace Poseidon::remaster

@@ -248,6 +248,7 @@ void EngineGL33::DestroyPostPrograms()
     p.failedW = p.failedH = 0;
     p.airUnavailable = false;
     DestroySsrPrograms();
+    DestroyXpSunGlare();
 }
 
 bool EngineGL33::EnsurePostResources(int w, int h)
@@ -930,7 +931,28 @@ void EngineGL33::PostComposite(const PostFrame& f)
     // The camera meters this frame for the frames to come.
     if (f.camera)
         PostCameraMeter(f);
+    // Sun glare (the Sun Glare option): its visibility pass, then the
+    // composite's glare terms (a zero gain skips them).
+    const XpSunGlareFrame glare = PostXpSunGlare(f);
     glUseProgram(p.progComposite);
+    Set4(p.progComposite, "xpGlare", glare.sunX, glare.sunY, glare.on ? glare.gain : 0.0f, 0.0f);
+    Set4(p.progComposite, "xpGlareShape", glare.coreRad, glare.coreLevel, glare.haloRad, glare.haloLevel);
+    Set4(p.progComposite, "xpGlareColor", glare.r, glare.g, glare.b, 0.0f);
+    SetInt(p.progComposite, "xpGlareVis", Poseidon::gl33lighting::kCombatMaskUnit);
+    GLint glarePrevTex = 0, glarePrevSampler = 0;
+    if (glare.on)
+    {
+        // Unit 14 holds the combat mask (whose free channels the lamp
+        // shadows take). The mask is built at the start of the world and read
+        // only by the world's draws, all before the post pass; the composite
+        // does not read it. Borrowed for the draw and handed back as it was.
+        glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kCombatMaskUnit);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &glarePrevTex);
+        glGetIntegerv(GL_SAMPLER_BINDING, &glarePrevSampler);
+        glBindSampler(Poseidon::gl33lighting::kCombatMaskUnit, 0);
+        glBindTexture(GL_TEXTURE_2D, glare.tex);
+        glActiveTexture(GL_TEXTURE0);
+    }
     SetInt(p.progComposite, "colorTex", 0);
     SetInt(p.progComposite, "aoTex", 2);
     SetInt(p.progComposite, "bloomTex", 3);
@@ -1036,6 +1058,14 @@ void EngineGL33::PostComposite(const PostFrame& f)
         Set4(p.progComposite, "camParams", 0.0f, 1.0f, 0.0f, 0.0f);
     }
     DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
+    if (glare.on)
+    {
+        glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kCombatMaskUnit);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(glarePrevTex));
+        glBindSampler(Poseidon::gl33lighting::kCombatMaskUnit, static_cast<GLuint>(glarePrevSampler));
+        glActiveTexture(GL_TEXTURE0);
+        GL33Bind::Invalidate();
+    }
     if (surf)
     {
         glActiveTexture(GL_TEXTURE6);

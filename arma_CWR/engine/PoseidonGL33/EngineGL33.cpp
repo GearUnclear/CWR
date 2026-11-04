@@ -484,16 +484,19 @@ void EngineGL33::SetLookOptions(const Poseidon::remaster::LookOptions& options)
     const int parts = rm::ShoreWaterParts(options.shoreWater, env);
     const rm::NightLightLook night = rm::NightLightFor(options.lampShadows, env);
     const int tier = Poseidon::shadow::xp::ResolveTier(options.shadowTier, Poseidon::shadow::xp::ReadOverrides().tier);
+    const float glare = rm::SunGlareGain(options.sunGlare, env);
     const bool changed = parts != _shoreWaterParts || night.bounceGain != _xpNight.bounceGain ||
-                         night.lampShadows != _xpNight.lampShadows || tier != _shadowTier;
+                         night.lampShadows != _xpNight.lampShadows || tier != _shadowTier || glare != _sunGlareGain;
     _shoreWaterParts = parts;
     _xpNight.bounceGain = night.bounceGain;
     _xpNight.lampShadows = night.lampShadows;
+    _sunGlareGain = glare;
     if (tier != _shadowTier)
         ApplyShadowTier(tier);
     if (changed)
-        LOG_INFO(Graphics, "GL33 look: shore water parts {}, lamp shadows {}, light bounce {}, shadow tier {}", parts,
-                 night.lampShadows ? "on" : "off", night.bounceGain, tier);
+        LOG_INFO(Graphics,
+                 "GL33 look: shore water parts {}, lamp shadows {}, light bounce {}, shadow tier {}, sun glare {}",
+                 parts, night.lampShadows ? "on" : "off", night.bounceGain, tier, glare);
 }
 
 void EngineGL33::ApplyShadowTier(int tier)

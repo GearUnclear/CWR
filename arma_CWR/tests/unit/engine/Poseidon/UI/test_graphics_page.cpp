@@ -170,18 +170,19 @@ TEST_CASE("GraphicsPage advanced divider is an unfocusable header", "[UI][Graphi
 }
 
 // The Remastered lighting's look rows: Shadow Detail (Normal / High), Shore
-// Water and Lamp Shadows (on / off toggles), after Lighting.
+// Water, Lamp Shadows and Sun Glare (on / off toggles), after Lighting.
 TEST_CASE("GraphicsPage look rows follow the lighting row", "[UI][GraphicsPage]")
 {
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    // Seventeen rows, then the Close action.
-    CHECK(p.RowCount() == 18);
+    // Eighteen rows, then the Close action.
+    CHECK(p.RowCount() == 19);
     CHECK(std::string(p.RowLabel(14)) == "Shadow Detail");
     CHECK(std::string(p.RowLabel(15)) == "Shore Water");
     CHECK(std::string(p.RowLabel(16)) == "Lamp Shadows");
-    for (int row = 14; row <= 16; ++row)
+    CHECK(std::string(p.RowLabel(17)) == "Sun Glare");
+    for (int row = 14; row <= 17; ++row)
     {
         const std::string description = p.RowDescription(row);
         CHECK_FALSE(description.empty());
@@ -222,4 +223,20 @@ TEST_CASE("GraphicsPage shore water and lamp shadows rows are booleans defaultin
         p.SetRowValue(row, 1);
         CHECK(p.RowValue(row) == 1);
     }
+}
+
+TEST_CASE("GraphicsPage sun glare row is a boolean defaulting to off", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+
+    CHECK(p.RowKind(17) == OptionsScrollList::KindBoolean);
+    CHECK(p.RowFor(17).count == 2);
+    CHECK(p.RowValue(17) == 0);
+    p.SetRowValue(17, 1);
+    CHECK(p.RowValue(17) == 1);
+    // A look row is no tier row: the preset stays.
+    CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
+    p.SetRowValue(17, 0);
+    CHECK(p.RowValue(17) == 0);
 }

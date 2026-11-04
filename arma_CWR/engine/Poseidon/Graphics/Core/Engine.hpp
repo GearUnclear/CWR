@@ -1001,7 +1001,7 @@ class Engine : public IGraphicsEngine
     virtual void SetShadowMapTuning(const ShadowMapTuning& /*tuning*/) {}
 
     /// The Graphics page's look options (shore water, lamp shadows, the sun
-    /// shadows' tier; GraphicsApply from graphics.cfg). The environment's
+    /// shadows' tier, the low sun's glare; GraphicsApply from graphics.cfg). The environment's
     /// POSEIDON_XP_* switches override each one (Remaster/LookOptions.hpp).
     /// Only the GL33 backend draws them.
     virtual void SetLookOptions(const remaster::LookOptions& /*options*/) {}

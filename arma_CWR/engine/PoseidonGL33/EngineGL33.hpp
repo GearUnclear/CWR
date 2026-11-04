@@ -1209,6 +1209,13 @@ class EngineGL33 : public Engine
         // The photoreal camera's meter (EngineGL33_Camera.cpp): kMeterWidth x
         // kMeterHeight RGBA16F, read back through _camera's ring.
         unsigned int meterTex = 0, meterFbo = 0, progMeter = 0;
+        // Sun glare (the Graphics page's Sun Glare option, first the experiment
+        // POSEIDON_XP_SUNGLARE; EngineGL33_XpAtmosphere.cpp): the disc's visible
+        // share, 1x1 RGBA16F ping-pong, and its program (built on first use,
+        // only with the glare on).
+        unsigned int xpGlareTex[2] = {}, xpGlareFbo[2] = {}, progXpGlareVis = 0;
+        int xpGlareCur = 0;
+        bool xpGlareTried = false, xpGlareHistory = false;
         bool programsTried = false;
         // The post pass is off: its programs failed (until the next reset) or
         // its targets came back incomplete at failedW x failedH (tried again
@@ -1401,6 +1408,23 @@ class EngineGL33 : public Engine
     void PostBloom(const PostFrame& f);
     void PostShafts(const PostFrame& f);
     void PostComposite(const PostFrame& f);
+    // Sun glare (the Graphics page's Sun Glare option, first the experiment
+    // lane xp-atmosphere; EngineGL33_XpAtmosphere.cpp): the strength
+    // SetLookOptions set (0 = off: no pass runs and the composite skips the
+    // glare), the visibility pass the composite runs first, and what the
+    // composite's glare reads.
+    struct XpSunGlareFrame
+    {
+        bool on = false;
+        unsigned int tex = 0;           // the smoothed visible share (r)
+        float sunX = 0.0f, sunY = 0.0f; // the sun's view ray at z = 1
+        float gain = 0.0f;
+        float coreRad = 0.0f, coreLevel = 0.0f, haloRad = 0.0f, haloLevel = 0.0f;
+        float r = 1.0f, g = 1.0f, b = 1.0f; // the sun's colour by its peak
+    };
+    float _sunGlareGain = 0.0f;
+    XpSunGlareFrame PostXpSunGlare(const PostFrame& f);
+    void DestroyXpSunGlare();
     void PostTemporal(const PostFrame& f);
     void PostSharpen(const PostFrame& f);
     void PostDebugView(const PostFrame& f);
@@ -1622,8 +1646,8 @@ class EngineGL33 : public Engine
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
     // The Graphics page's look options with the environment's overrides
-    // (Graphics/Remaster/LookOptions.hpp): the shore water, the lamp shadows
-    // and the sun shadows' tier (EngineGL33.cpp).
+    // (Graphics/Remaster/LookOptions.hpp): the shore water, the lamp shadows,
+    // the sun shadows' tier and the low sun's glare (EngineGL33.cpp).
     void SetLookOptions(const Poseidon::remaster::LookOptions& options) override;
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
     static constexpr int kShadowCascades = 4;

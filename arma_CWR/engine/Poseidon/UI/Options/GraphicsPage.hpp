@@ -14,7 +14,8 @@
 // Touching any tier row re-derives the preset to "Custom" without
 // snapping back.  Per-user knobs (Anti-aliasing / Supersampling /
 // Multitexturing / VSync / FPS Cap / Brightness / Gamma, and the
-// Remastered lighting's Shadow Detail / Shore Water / Lamp Shadows) are NOT
+// Remastered lighting's Shadow Detail / Shore Water / Lamp Shadows / Sun
+// Glare) are NOT
 // preset-driven; they keep their value across preset changes.
 
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
@@ -75,7 +76,8 @@ private:
 			kRowShadowDetail   = 14,
 			kRowShoreWater     = 15,
 			kRowLampShadows    = 16,
-			kRowCount          = 17,
+			kRowSunGlare       = 17,
+			kRowCount          = 18,
 		};
 
 		void SetPage(class GraphicsPage* page) { m_page = page; }

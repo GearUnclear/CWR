@@ -64,7 +64,7 @@ Describe "graphics.cfg persistence through live UI flow" {
         }
     }
 
-    It "Shadow Detail, Shore Water and Lamp Shadows rows change via UI + Unmount into graphics.cfg" {
+    It "Shadow Detail, Shore Water, Lamp Shadows and Sun Glare rows change via UI + Unmount into graphics.cfg" {
         $eph = New-EphemeralGamePaths
         try {
             $cfgPath = Join-Path $eph.UserDir "graphics.cfg"
@@ -77,6 +77,7 @@ Describe "graphics.cfg persistence through live UI flow" {
             $kv['shadowDetail'] | Should -Be '3' -Because "tri moved Shadow Detail from Normal (2) to High (3)"
             $kv['shoreWater']   | Should -Be '0' -Because "tri turned Shore Water off"
             $kv['lampShadows']  | Should -Be '0' -Because "tri turned Lamp Shadows off"
+            $kv['sunGlare']     | Should -Be '1' -Because "tri turned Sun Glare on"
             $kv['qualityPreset'] | Should -Not -Be '4' -Because "the look rows are not preset tiers"
         } finally {
             Remove-EphemeralGamePaths $eph
@@ -102,6 +103,7 @@ gamma=0.800000;
 shoreWater=0;
 lampShadows=0;
 shadowDetail=3;
+sunGlare=1;
 "@ | Set-Content -Path $cfgPath -Encoding ASCII -NoNewline
 
             $output = Invoke-GuiExe $script:gameExe -C $script:gameDir --window --check --log-format jsonl --render dummy
@@ -114,6 +116,7 @@ shadowDetail=3;
             $kv['shoreWater']    | Should -Be '0'
             $kv['lampShadows']   | Should -Be '0'
             $kv['shadowDetail']  | Should -Be '3'
+            $kv['sunGlare']      | Should -Be '1'
         } finally {
             Remove-EphemeralGamePaths $eph
         }
