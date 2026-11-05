@@ -199,13 +199,14 @@ struct RenderPassDescriptor
     // Stencil exclusion (shadow path).  True for shadow draws that must
     // respect the stencil mask (EQUAL 0 / INCR per-poly within-caster).
     bool stencilExclusion = false;
+    bool terrainDetail = false; // normal-bearing base terrain with actual detail texture
 
     bool operator==(const RenderPassDescriptor& rhs) const
     {
         return pass == rhs.pass && depth == rhs.depth && blend == rhs.blend && fog == rhs.fog && cull == rhs.cull &&
                frontFace == rhs.frontFace && alpha == rhs.alpha && lighting == rhs.lighting && texGen == rhs.texGen &&
                surface == rhs.surface && sampler == rhs.sampler && shader == rhs.shader && alphaRef == rhs.alphaRef &&
-               stencilExclusion == rhs.stencilExclusion;
+               stencilExclusion == rhs.stencilExclusion && terrainDetail == rhs.terrainDetail;
     }
     bool operator!=(const RenderPassDescriptor& rhs) const { return !(*this == rhs); }
 };

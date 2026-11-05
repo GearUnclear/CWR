@@ -35,6 +35,44 @@ inline void StencilEqualZeroIncr()
 }
 } // namespace detail
 
+// Scoped background draw: neither test nor write depth/stencil, without
+// changing comparison functions or stencil operations. Restore actual captured
+// state exactly; callers still invalidate their pipeline cache after the scope.
+class ScopedBackground
+{
+    GLboolean _depthEnabled, _stencilEnabled, _depthWrite;
+    bool _active = true;
+
+  public:
+    ScopedBackground()
+    {
+        _depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+        _stencilEnabled = glIsEnabled(GL_STENCIL_TEST);
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &_depthWrite);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDepthMask(GL_FALSE);
+    }
+    ScopedBackground(const ScopedBackground&) = delete;
+    ScopedBackground& operator=(const ScopedBackground&) = delete;
+    ~ScopedBackground() { Restore(); }
+    void Restore()
+    {
+        if (!_active)
+            return;
+        if (_depthEnabled)
+            glEnable(GL_DEPTH_TEST);
+        else
+            glDisable(GL_DEPTH_TEST);
+        if (_stencilEnabled)
+            glEnable(GL_STENCIL_TEST);
+        else
+            glDisable(GL_STENCIL_TEST);
+        glDepthMask(_depthWrite);
+        _active = false;
+    }
+};
+
 // Standard depth test + write enabled.  Stencil ALWAYS + REPLACE 0
 // (clears stencil for any rendered pixel, enabling subsequent
 // shadow exclusion).

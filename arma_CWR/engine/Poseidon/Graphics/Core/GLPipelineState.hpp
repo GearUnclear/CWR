@@ -24,6 +24,31 @@ inline void SetColorMask(bool write)
     glColorMask(v, v, v, v);
 }
 
+// Background color replacement preserves destination alpha and restores
+// arbitrary caller channel masks, not merely an all-enabled assumption.
+class ScopedRgbOnly
+{
+    GLboolean _mask[4];
+    bool _active = true;
+
+  public:
+    ScopedRgbOnly()
+    {
+        glGetBooleanv(GL_COLOR_WRITEMASK, _mask);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    }
+    ScopedRgbOnly(const ScopedRgbOnly&) = delete;
+    ScopedRgbOnly& operator=(const ScopedRgbOnly&) = delete;
+    ~ScopedRgbOnly() { Restore(); }
+    void Restore()
+    {
+        if (!_active)
+            return;
+        glColorMask(_mask[0], _mask[1], _mask[2], _mask[3]);
+        _active = false;
+    }
+};
+
 // Polygon-offset for OnSurface decals (coplanar disambiguation).
 // When enabled, factor/units default to (-1, -1)
 // which matches the legacy "push fragment forward by 1 unit" decal

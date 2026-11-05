@@ -386,6 +386,8 @@ class EngineGL33 : public Engine
 
     // GL sampler objects: 8 combos of point(4) | clampU(1) | clampV(2)
     unsigned int _samplerObjects[8] = {};
+    unsigned int _shadowCompareSampler = 0;
+    bool _shadowComparePcf = false;
     void CreateSamplerStates();
     void DestroySamplerStates();
     void ApplySamplerState();
@@ -429,6 +431,12 @@ class EngineGL33 : public Engine
     unsigned int _ssaaResolveRb = 0;
     int _ssaaW = 0;
     int _ssaaH = 0;
+    // Last effective allocation request, including failures. Retry only when
+    // it changes or DestroySSAATarget explicitly invalidates the attempt.
+    int _ssaaAttemptW = 0;
+    int _ssaaAttemptH = 0;
+    float _ssaaAttemptScale = 1.0f;
+    int _ssaaAttemptSamples = -1;
 
     bool SSAAActive() const { return _ssaaFbo != 0; }
     // Pixel size of the current render target: the scaled offscreen target
@@ -446,6 +454,17 @@ class EngineGL33 : public Engine
 
     // Composite the gamma curve onto the finished frame.
     void ApplyGammaPass();
+    bool DrawExperimentalSky(float skyThrough) override;
+    bool CloudRegistrationEnabled() const override;
+    void PrepareCloudRegistration(const CloudRegistrationInput&) override;
+    void ApplyCloudRegistration(bool terrain);
+    void DestroyCloudRegistration();
+    unsigned _cloudMap = 0, _cloudFbo = 0, _cloudProgram = 0, _cloudVao = 0, _cloudVbo = 0;
+    unsigned _cloudSampler = 0, _cloudMapSampler = 0;
+    bool _cloudValid = false, _cloudFailed = false;
+    float _cloudLookup[4] = {}, _cloudProjection[4] = {};
+    unsigned _experimentalSkyProgram = 0, _experimentalSkyVao = 0;
+    bool _experimentalSkyFailed = false;
     void DestroyGammaTarget();
     unsigned int _gammaTex = 0;
     unsigned int _gammaVao = 0;

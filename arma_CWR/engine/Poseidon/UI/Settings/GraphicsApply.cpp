@@ -89,6 +89,9 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
     }
     if (GEngine)
     {
+        // Quality tiers never opt in to depth maps. Keep the preference while
+        // shadows are Off, but explicitly disable the backend until re-enabled.
+        GEngine->SetShadowMapsEnabled(cfg.depthMapShadows && cfg.shadowQuality != GraphicsConfig::TierOff);
         GEngine->SetSwapInterval(VsyncToInterval(cfg.vsync));
         GEngine->SetBrightness(cfg.brightness);
         GEngine->SetGamma(cfg.gamma);

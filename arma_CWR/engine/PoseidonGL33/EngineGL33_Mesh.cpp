@@ -78,6 +78,7 @@ void EngineGL33::PrepareMeshTLImpl(const FrameState& frame, const Matrix4& model
     worldMatrix._43 -= frame.cameraPos[2];
 
     _currentDrawItem = DrawItem{};
+    _currentDrawItem.terrainBaseOwner = GetTerrainBaseDraw();
     _currentDrawItem.worldMatrix = worldMatrix;
     _currentDrawItem.specFlags = spec;
     _currentDrawItem.bias = _bias;

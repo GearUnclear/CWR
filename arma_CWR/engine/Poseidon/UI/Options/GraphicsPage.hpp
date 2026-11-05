@@ -13,7 +13,7 @@
 // stamps the four tier rows from that preset's bundle (write-through).
 // Touching any tier row re-derives the preset to "Custom" without
 // snapping back.  Per-user knobs (Anti-aliasing / Supersampling /
-// Multitexturing / VSync / FPS Cap / Brightness / Gamma) are NOT
+// Multitexturing / Depth-map Shadows / VSync / FPS Cap / Brightness / Gamma) are NOT
 // preset-driven; they keep their value across preset changes.
 
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
@@ -70,7 +70,8 @@ private:
 			kRowAntiAliasing   = 10,
 			kRowSupersampling  = 11,
 			kRowMultitexturing = 12,
-			kRowCount          = 13,
+			kRowDepthMapShadows = 13,
+			kRowCount          = 14,
 		};
 
 		void SetPage(class GraphicsPage* page) { m_page = page; }

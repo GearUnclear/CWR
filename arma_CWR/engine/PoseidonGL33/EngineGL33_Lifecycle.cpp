@@ -221,6 +221,8 @@ void EngineGL33::FinishDraw()
 void EngineGL33::NextFrame()
 {
     BackToFront();
+    if (_cloudValid) InvalidatePipelineCache();
+    _cloudValid = false; // Never reuse a cloud map from a previous world frame.
     base::NextFrame();
 }
 

@@ -11,6 +11,8 @@
 #include <Poseidon/Graphics/Rendering/ValidateRenderPassDescriptor.hpp>
 
 #include <glad/gl.h>
+#include <cstdlib>
+#include <cstring>
 
 void EngineGL33::CreateSamplerStates()
 {
@@ -307,6 +309,39 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
     if (ps != PSNone)
         SelectPixelShader(ps);
     SetMultiTexturing(fmt);
+    // Immutable process diagnostic. Dedicated appended PS slot avoids the water
+    // light-direction alias and resets explicitly for every nonterrain descriptor.
+    static const int terrainDiagnostic = [] {
+        const char* value = std::getenv("CWR_TERRAIN_DIAGNOSTIC");
+        if (value && std::strcmp(value, "1") == 0) return 1;
+        if (value && std::strcmp(value, "2") == 0) return 2;
+        return 0;
+    }();
+    static const int terrainRelief = [] {
+        const char* value = std::getenv("CWR_TERRAIN_RELIEF");
+        if (value && std::strcmp(value, "1") == 0) return 1;
+        if (value && std::strcmp(value, "2") == 0) return 2; // stronger diagnostic, not normal beauty
+        return 0;
+    }();
+    const bool terrainEligible = d.terrainDetail && vertexInput == PipelineVertexInput::Mesh;
+    const float terrainControl[4] = {
+        terrainEligible ? float(terrainDiagnostic) : 0.0f,
+        terrainEligible && terrainRelief ? (terrainRelief == 1 ? .04f : .08f) : 0.0f,
+        terrainRelief == 2 ? .70f : .35f, 0.0f};
+    static bool reliefLogged = false;
+    if (terrainControl[1] > 0 && !reliefLogged) {
+        LOG_INFO(Graphics, "P3 terrain relief: mode={}, height={}m, slopeCap={}, footprintFade=0.06..0.35m, distanceFade=15..60m, geometricIncidenceFade=0.15..0.45, artisticSunElevationFade=0.15..0.45; Lambert only",
+                 terrainRelief, terrainControl[1], terrainControl[2]);
+        reliefLogged = true;
+    }
+    UploadPSConstant(27, terrainControl);
+    ApplyCloudRegistration(d.terrainDetail);
+    static bool terrainLogged = false;
+    if (terrainControl[0] > 0 && !terrainLogged) {
+        LOG_INFO(Graphics, "P terrain diagnostic active: mode={}, explicit base-terrain mesh, Detail shader, tex1={}",
+                 terrainDiagnostic, _lastTexture1Handle);
+        terrainLogged = true;
+    }
 
     // -- Surface attachment -> polygon offset (I-09 OnSurface decals) --
     // Ground-projected shadows are also OnSurface but need a stronger,

@@ -132,6 +132,7 @@ class LightSun
 	ColorVal GetColorFull() const {return _colorFull;}
 
 	ColorVal Diffuse() const {return _diffuse;}
+	Color ScaleLambertDiffuse(ColorVal diffuse) const;
 	ColorVal Ambient() const {return _ambient;}
 	Vector3Val Direction() const {return _direction;}
 

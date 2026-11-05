@@ -354,6 +354,16 @@ LightPositionedColored::LightPositionedColored(ColorVal diffuse, ColorVal ambien
 {
 }
 
+// Rendering-only daylight balance; raw sun, forced diffuse, sky and AI stay unchanged.
+// Applied only by normal-dependent CPU/GPU diffuse consumers, never FullResult.
+Color LightSun::ScaleLambertDiffuse(ColorVal diffuse) const
+{
+    const float daylight = 1.0f - _nightEffect;
+    Color result = diffuse * (1.0f - 0.20f * daylight);
+    result.SetA(diffuse.A());
+    return result;
+}
+
 void LightSun::SetMaterial(const TLMaterial& mat)
 {
     _ambientPrecalc = _ambient * mat.ambient + _diffuse * mat.forcedDiffuse;

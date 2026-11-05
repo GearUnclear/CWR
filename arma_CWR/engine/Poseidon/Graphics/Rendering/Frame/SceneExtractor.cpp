@@ -81,6 +81,9 @@ SceneDraw drawItemToSceneDraw(const DrawItem& item)
     ctx.passKindHint = render::PassKindHint::None;
 
     out.descriptor = render::BuildRenderPassDescriptor(item.specFlags, ctx);
+    // Section eligibility was resolved from the actual bound material/mesh path;
+    // object-level spec reconstruction cannot recover that provenance later.
+    out.descriptor.terrainDetail = item.isTLDraw && item.terrainDetail;
 
     // Mesh + index range — only TL draws carry buffer info; queue
     // draws set isTLDraw=false and don't reference a mesh.  The capture

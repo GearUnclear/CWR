@@ -489,7 +489,7 @@ void TLVertexTable::DoMaterialLightingP(const TLMaterial& mat, const Matrix4& wo
     Vector3 sunDirection = worldToModel.Rotate(sun->Direction());
     sunDirection.Normalize();
 
-    Color diffuse = sun->DiffusePrecalc();
+    Color diffuse = sun->ScaleLambertDiffuse(sun->DiffusePrecalc());
     Color ambient = sun->AmbientPrecalc() + mat.emmisive;
 
     int spec = mat.specFlags;
@@ -973,7 +973,7 @@ void TLVertexTable::DoLightingColorized(const LightList& lights,
         Vector3Val normal = mesh.Norm(i);
         Coord cosFi = sunDirection * normal;
         saturateMax(cosFi, 0);
-        Color colorI = (sun->DiffusePrecalc() * cosFi + sun->AmbientPrecalc());
+        Color colorI = (sun->ScaleLambertDiffuse(sun->DiffusePrecalc()) * cosFi + sun->AmbientPrecalc());
         if (someLights)
         {
             // note: Colorized lighting models are always in world space

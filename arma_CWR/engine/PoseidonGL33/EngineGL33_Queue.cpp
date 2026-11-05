@@ -251,6 +251,8 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     ctx.isMultitexturing = IsMultitexturing();
     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
     ctx.passKindHint = GetPassKindHint();
+    // Deferred CPU-prelit queues must never consult the live producer marker.
+    ctx.terrainBaseOwner = vertexInput == PipelineVertexInput::Mesh && _currentDrawItem.terrainBaseOwner;
 
     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
     const PipelineVertexInput previousVertexInput = _pipelineVertexInput;
