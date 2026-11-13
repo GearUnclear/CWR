@@ -133,6 +133,7 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
         look.lampShadows = cfg.lampShadows;
         look.shadowTier = static_cast<int>(cfg.shadowDetail);
         look.sunGlare = cfg.sunGlare;
+        look.groundCover = cfg.groundCover;
         GEngine->SetLookOptions(look);
     }
     gUserFpsCap = cfg.fpsCap;

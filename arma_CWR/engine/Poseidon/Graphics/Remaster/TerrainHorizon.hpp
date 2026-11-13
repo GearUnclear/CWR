@@ -61,6 +61,11 @@ struct TerrainHorizonMap
     // puddles).
     // Empty when no ground colours were given.
     std::vector<float> groundColor;
+    // How built-up the ground is (size * size, 0 open land .. 1 among
+    // buildings; MarkBuiltGround). The ground cover (the Graphics page's
+    // Ground Cover option) grows no blades there: a town square's ground can
+    // have the same colour class as a meadow. Drawn only; empty = all open.
+    std::vector<float> groundBuilt;
 
     bool Valid() const { return size > 1 && cellSize > 0.0f; }
     // Decoded horizon angle (degrees) of direction `dir` at texel (x, z).
@@ -99,6 +104,15 @@ float DecodeHorizonDeg(std::uint16_t value);
 // colour of the ground at each vertex: the landscape texture's average colour.
 bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
                             TerrainHorizonMap& out, const float* groundRgb = nullptr);
+
+// Built-up ground: every texel within kBuiltClear metres of a building's
+// footprint circle is fully built (1), fading to open land (0) over the next
+// kBuiltFade metres. `spots` holds `count` buildings as (x, z, radius) triples
+// in world metres (x east, z north). Fills map.groundBuilt (all 0 for no
+// buildings); leaves an invalid map alone.
+constexpr float kBuiltClear = 25.0f;
+constexpr float kBuiltFade = 20.0f;
+void MarkBuiltGround(TerrainHorizonMap& map, const float* spots, int count);
 
 // The luminance-neutral bounce tint (r, b) for a display-space ground colour:
 // the colour's linear chroma at unit luminance, softened toward white by

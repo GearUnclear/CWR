@@ -175,19 +175,21 @@ TEST_CASE("GraphicsPage advanced divider is an unfocusable header", "[UI][Graphi
 }
 
 // The Remastered lighting's look rows: Shadow Detail (Normal / High), Shore
-// Water, Lamp Shadows and Sun Glare (on / off toggles), after Lighting.
+// Water, Lamp Shadows, Sun Glare and Ground Cover (on / off toggles), after
+// Lighting.
 TEST_CASE("GraphicsPage look rows follow the lighting row", "[UI][GraphicsPage]")
 {
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    // Eighteen rows, then the Close action.
-    CHECK(p.RowCount() == 19);
+    // Nineteen rows, then the Close action.
+    CHECK(p.RowCount() == 20);
     CHECK(std::string(p.RowLabel(14)) == "Shadow Detail");
     CHECK(std::string(p.RowLabel(15)) == "Shore Water");
     CHECK(std::string(p.RowLabel(16)) == "Lamp Shadows");
     CHECK(std::string(p.RowLabel(17)) == "Sun Glare");
-    for (int row = 14; row <= 17; ++row)
+    CHECK(std::string(p.RowLabel(18)) == "Ground Cover");
+    for (int row = 14; row <= 18; ++row)
     {
         const std::string description = p.RowDescription(row);
         CHECK_FALSE(description.empty());
@@ -244,4 +246,24 @@ TEST_CASE("GraphicsPage sun glare row is a boolean defaulting to off", "[UI][Gra
     CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
     p.SetRowValue(17, 0);
     CHECK(p.RowValue(17) == 0);
+}
+
+TEST_CASE("GraphicsPage ground cover row is a boolean defaulting to off", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+
+    CHECK(p.RowKind(18) == OptionsScrollList::KindBoolean);
+    CHECK(OptionsScrollList::CanRowReceiveFocus(p.RowKind(18)));
+    CHECK(p.RowFor(18).count == 2);
+    CHECK(p.RowValue(18) == 0);
+    p.SetRowValue(18, 1);
+    CHECK(p.RowValue(18) == 1);
+    // A look row is no tier row: the preset stays, and so do the other look rows.
+    CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
+    CHECK(p.RowValue(17) == 0);
+    p.SetRowValue(18, 0);
+    CHECK(p.RowValue(18) == 0);
+    // The player is told it is visual only.
+    CHECK(std::string(p.RowDescription(18)).find("Visual only") != std::string::npos);
 }

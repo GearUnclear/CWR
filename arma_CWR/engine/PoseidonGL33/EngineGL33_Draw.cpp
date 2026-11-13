@@ -98,8 +98,11 @@ void EngineGL33::SetGrassParams(float a1, float a2, float a3, float a4)
 
 void EngineGL33::DoSetGrassParamsPS()
 {
-    _psConstants.grassCoef1[0] = 0;
-    _psConstants.grassCoef1[1] = 0;
+    // x, y: the ground cover (the Ground Cover option; a4 above 0.5: the
+    // remastered grass program draws procedural blades, a2 their height in
+    // metres, a3 the distance where they end); 0 for the classic grass layers.
+    _psConstants.grassCoef1[0] = _grassParam[3];
+    _psConstants.grassCoef1[1] = _grassParam[3] > 0.5f ? _grassParam[2] : 0.0f;
     _psConstants.grassCoef1[2] = 0;
     _psConstants.grassCoef1[3] = _grassParam[0];
     _psConstants.grassCoef2[0] = 0;

@@ -542,6 +542,8 @@ TEST_CASE("GraphicsConfig: the look options default to shore water and lamp shad
     CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
     // The sun glare stays off until the owner has seen it in motion.
     CHECK_FALSE(c.sunGlare);
+    // The ground cover is the player's choice: off unless turned on.
+    CHECK_FALSE(c.groundCover);
     // The stored values are the shadow tiers (Graphics/Shadow/ShadowXp.hpp).
     CHECK(static_cast<int>(GraphicsConfig::ShadowDetailNormal) == 2);
     CHECK(static_cast<int>(GraphicsConfig::ShadowDetailHigh) == 3);
@@ -557,6 +559,7 @@ TEST_CASE("GraphicsConfig: the look options round-trip through graphics.cfg", "[
     src.lampShadows = false;
     src.shadowDetail = GraphicsConfig::ShadowDetailHigh;
     src.sunGlare = true;
+    src.groundCover = true;
     REQUIRE(src.Save(path));
 
     GraphicsConfig dst;
@@ -565,18 +568,57 @@ TEST_CASE("GraphicsConfig: the look options round-trip through graphics.cfg", "[
     CHECK_FALSE(dst.lampShadows);
     CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailHigh);
     CHECK(dst.sunGlare);
+    CHECK(dst.groundCover);
 
     // And back.
     src.shoreWater = true;
     src.lampShadows = true;
     src.shadowDetail = GraphicsConfig::ShadowDetailNormal;
     src.sunGlare = false;
+    src.groundCover = false;
     REQUIRE(src.Save(path));
     REQUIRE(dst.Load(path));
     CHECK(dst.shoreWater);
     CHECK(dst.lampShadows);
     CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailNormal);
     CHECK_FALSE(dst.sunGlare);
+    CHECK_FALSE(dst.groundCover);
+}
+
+// Ground Cover alone: its own key in graphics.cfg, on and off, without moving
+// any other look option.
+TEST_CASE("GraphicsConfig: ground cover saves and loads by its own key", "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("groundcover.cfg");
+    std::filesystem::remove(path);
+
+    GraphicsConfig src;
+    src.LoadDefaults();
+    src.groundCover = true;
+    REQUIRE(src.Save(path));
+    {
+        std::ifstream in(path);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(text.find("groundCover=1;") != std::string::npos);
+    }
+    GraphicsConfig dst;
+    dst.LoadDefaults();
+    REQUIRE(dst.Load(path));
+    CHECK(dst.groundCover);
+    CHECK(dst.shoreWater);
+    CHECK(dst.lampShadows);
+    CHECK_FALSE(dst.sunGlare);
+    CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+
+    src.groundCover = false;
+    REQUIRE(src.Save(path));
+    {
+        std::ifstream in(path);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(text.find("groundCover=0;") != std::string::npos);
+    }
+    REQUIRE(dst.Load(path));
+    CHECK_FALSE(dst.groundCover);
 }
 
 TEST_CASE("GraphicsConfig: a file written before the look options reads them as their defaults",
@@ -594,6 +636,7 @@ TEST_CASE("GraphicsConfig: a file written before the look options reads them as 
     CHECK(c.lampShadows);
     CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
     CHECK_FALSE(c.sunGlare);
+    CHECK_FALSE(c.groundCover);
     // Nothing to migrate: the defaults are already the options' defaults.
     CHECK_FALSE(c.Migrate(60));
 }

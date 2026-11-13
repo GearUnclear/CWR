@@ -1,8 +1,8 @@
 // Pins that the Remastered lighting's look rows (Shadow Detail, Shore Water,
-// Lamp Shadows, Sun Glare) exist on the Graphics page, change from the keyboard
-// and reach graphics.cfg on unmount. The Pester wrapper (tests/smoke/
-// graphics_apply_persist.tests.ps1) asserts shadowDetail=3, shoreWater=0,
-// lampShadows=0 and sunGlare=1 in the file.
+// Lamp Shadows, Sun Glare, Ground Cover) exist on the Graphics page, change
+// from the keyboard and reach graphics.cfg on unmount. The Pester wrapper
+// (tests/smoke/graphics_apply_persist.tests.ps1) asserts shadowDetail=3,
+// shoreWater=0, lampShadows=0, sunGlare=1 and groundCover=1 in the file.
 // Scancodes: 81 Down, 79 Right, 40 Enter, 41 Esc.
 
 triSimFrames 5;
@@ -43,6 +43,12 @@ triSendKey 79;
 triSimFrames 2;
 
 // Sun Glare: off -> on.
+triSendKey 81;
+triSimFrames 1;
+triSendKey 79;
+triSimFrames 2;
+
+// Ground Cover: off -> on.
 triSendKey 81;
 triSimFrames 1;
 triSendKey 79;

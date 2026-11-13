@@ -58,38 +58,40 @@ private:
 	class GraphicsProvider : public OptionsScrollList::Provider
 	{
 	public:
-		enum : int {
-			kRowPreset         = 0,
-			kRowTerrain        = 1,
-			kRowObjectLod      = 2,
-			kRowShadow         = 3,
-			kRowParticles      = 4,
-			kRowVsync          = 5,
-			kRowFpsCap         = 6,
-			kRowBrightness     = 7,
-			kRowGamma          = 8,
-			kRowAdvanced       = 9,
-			kRowAntiAliasing   = 10,
-			kRowSupersampling  = 11,
-			kRowMultitexturing = 12,
-			kRowLighting       = 13,
-			kRowShadowDetail   = 14,
-			kRowShoreWater     = 15,
-			kRowLampShadows    = 16,
-			kRowSunGlare       = 17,
-			kRowCount          = 18,
-		};
+      enum : int
+      {
+          kRowPreset = 0,
+          kRowTerrain = 1,
+          kRowObjectLod = 2,
+          kRowShadow = 3,
+          kRowParticles = 4,
+          kRowVsync = 5,
+          kRowFpsCap = 6,
+          kRowBrightness = 7,
+          kRowGamma = 8,
+          kRowAdvanced = 9,
+          kRowAntiAliasing = 10,
+          kRowSupersampling = 11,
+          kRowMultitexturing = 12,
+          kRowLighting = 13,
+          kRowShadowDetail = 14,
+          kRowShoreWater = 15,
+          kRowLampShadows = 16,
+          kRowSunGlare = 17,
+          kRowGroundCover = 18,
+          kRowCount = 19,
+      };
 
-		void SetPage(class GraphicsPage* page) { m_page = page; }
+      void SetPage(class GraphicsPage* page) { m_page = page; }
 
-		int  RowCount() const override         { return kRowCount; }
-		const char* RowLabel(int row) const override;
-		const char* RowDescription(int row) const override;
-		OptionsScrollList::RowDef RowFor(int row) const override;
-		int  RowValue(int row) const override;
-		void SetRowValue(int row, int v) override;
-		const char* SliderValueText(int row) const override;
-		OptionsScrollList::Kind RowKind(int row) const override;
+      int RowCount() const override { return kRowCount; }
+      const char* RowLabel(int row) const override;
+      const char* RowDescription(int row) const override;
+      OptionsScrollList::RowDef RowFor(int row) const override;
+      int RowValue(int row) const override;
+      void SetRowValue(int row, int v) override;
+      const char* SliderValueText(int row) const override;
+      OptionsScrollList::Kind RowKind(int row) const override;
 
 	private:
 		GraphicsPage* m_page = nullptr;

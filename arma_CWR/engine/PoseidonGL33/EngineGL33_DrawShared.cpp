@@ -364,5 +364,11 @@ void EngineGL33::DrawPoints(int beg, int end)
 
 bool EngineGL33::CanGrass() const
 {
-    return false;
+    // Near ground cover (the Graphics page's Ground Cover option, off by
+    // default; SetLookOptions): the land near the camera drawn once more
+    // (Landscape::DrawRect) with procedural blades in the remastered grass
+    // program. Only that program draws them, so the classic programs (classic
+    // lighting, night vision) keep no grass. Draw order only: the callers are
+    // the landscape's draw and two PassNum pickers.
+    return _groundCover && _remasterPrograms;
 }

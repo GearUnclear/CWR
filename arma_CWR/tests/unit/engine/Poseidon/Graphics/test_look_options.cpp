@@ -21,6 +21,8 @@ TEST_CASE("LookOptions: the defaults turn the shore water and lamp shadows on at
     CHECK(o.shadowTier == kShadowTierNormal);
     // The sun glare is off until the owner has seen it in motion.
     CHECK_FALSE(o.sunGlare);
+    // The ground cover is off unless the player turns it on.
+    CHECK_FALSE(o.groundCover);
     CHECK(kShadowTierNormal == 2);
     CHECK(kShadowTierHigh == 3);
 }
@@ -152,6 +154,27 @@ TEST_CASE("LookOptions: the sun glare follows the option at strength 1 without a
     const LookEnv none;
     CHECK(SunGlareGain(false, none) == 0.0f);
     CHECK(SunGlareGain(true, none) == 1.0f);
+}
+
+TEST_CASE("LookOptions: the ground cover follows the option without an override", "[Graphics][LookOptions]")
+{
+    const LookEnv none;
+    CHECK_FALSE(GroundCoverOn(false, none));
+    CHECK(GroundCoverOn(true, none));
+}
+
+TEST_CASE("LookOptions: POSEIDON_XP_GRASS wins over the ground cover option", "[Graphics][LookOptions]")
+{
+    LookEnv env;
+    env.groundCover = "0";
+    CHECK_FALSE(GroundCoverOn(true, env));
+    CHECK_FALSE(GroundCoverOn(false, env));
+    env.groundCover = "1";
+    CHECK(GroundCoverOn(false, env));
+    CHECK(GroundCoverOn(true, env));
+    // Round 1's "2" (the marched blades, the only kind left) still turns it on.
+    env.groundCover = "2";
+    CHECK(GroundCoverOn(false, env));
 }
 
 TEST_CASE("LookOptions: POSEIDON_XP_SUNGLARE wins over the sun glare option", "[Graphics][LookOptions]")

@@ -1487,6 +1487,10 @@ class EngineGL33 : public Engine
         float r = 1.0f, g = 1.0f, b = 1.0f; // the sun's colour by its peak
     };
     float _sunGlareGain = 0.0f;
+    // Ground cover (the Graphics page's Ground Cover option, first the
+    // experiment POSEIDON_XP_GRASS; CanGrass, Landscape::DrawRect): set by
+    // SetLookOptions, read by the draw only.
+    bool _groundCover = false;
     XpSunGlareFrame PostXpSunGlare(const PostFrame& f);
     void DestroyXpSunGlare();
     // Rain you can see (POSEIDON_XP_RAIN=world, perf-squad lane EX4-RAIN;

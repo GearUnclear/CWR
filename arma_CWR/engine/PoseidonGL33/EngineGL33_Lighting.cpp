@@ -622,17 +622,21 @@ void EngineGL33::UploadTerrainHorizonMap()
     glBindTexture(GL_TEXTURE_2D, 0);
 
     // The ground field (the wet weather's land classes): the land's own colour
-    // per vertex, a = 1; 16 bits a channel, as the wet classes are steep in
-    // the colour. None without ground colours (the stand-in's a = 0).
+    // per vertex, 16 bits a channel, as the wet classes are steep in the
+    // colour. a = 1 on open land down to 0.75 among buildings (groundBuilt;
+    // only the ground cover's blades read the share, everything else tests
+    // a > 0.5: built). None without ground colours (the stand-in's a = 0).
     if (m.groundColor.size() == static_cast<size_t>(n) * n * 3)
     {
         std::vector<unsigned short> gc(static_cast<size_t>(n) * n * 4);
+        const bool built = m.groundBuilt.size() == static_cast<size_t>(n) * n;
         for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
         {
             for (int c = 0; c < 3; ++c)
                 gc[i * 4 + c] = static_cast<unsigned short>(
                     std::lround(std::clamp(m.groundColor[i * 3 + c], 0.0f, 1.0f) * 65535.0f));
-            gc[i * 4 + 3] = 65535;
+            const float share = built ? std::clamp(m.groundBuilt[i], 0.0f, 1.0f) : 0.0f;
+            gc[i * 4 + 3] = static_cast<unsigned short>(std::lround((1.0f - 0.25f * share) * 65535.0f));
         }
         glGenTextures(1, &_groundFieldTex);
         glBindTexture(GL_TEXTURE_2D, _groundFieldTex);

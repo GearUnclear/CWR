@@ -787,6 +787,50 @@ TEST_CASE("Remaster ground tint colours the bounce without changing its brightne
     CHECK(plain.groundTint.empty());
 }
 
+// The ground cover's town mask: built-up ground around buildings, open land
+// elsewhere (TerrainHorizonMap::groundBuilt).
+TEST_CASE("Remaster built ground is full near a building and open far from it", "[Graphics][remaster]")
+{
+    const int n = 32;
+    const float cell = 12.5f;
+    const std::vector<float> h(static_cast<size_t>(n) * n, 10.0f);
+    TerrainHorizonOptions opt;
+    opt.threads = 1;
+    TerrainHorizonMap map;
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, cell, opt, map));
+    REQUIRE(map.size == n);
+    CHECK(map.groundBuilt.empty());
+
+    // One house of 8 m radius at (200, 100): x east, z north.
+    const float spots[] = {200.0f, 100.0f, 8.0f};
+    MarkBuiltGround(map, spots, 1);
+    REQUIRE(map.groundBuilt.size() == static_cast<size_t>(n) * n);
+    auto at = [&map, n](int x, int z) { return map.groundBuilt[static_cast<size_t>(z) * n + x]; };
+    // The texel on the house, and one 25 m off (inside radius + kBuiltClear).
+    CHECK(at(16, 8) == 1.0f);
+    CHECK(at(18, 8) == 1.0f);
+    // 37.5 m off: 4.5 m into the 20 m fade.
+    CHECK(at(19, 8) == Catch::Approx(1.0f - 4.5f / kBuiltFade));
+    // 62.5 m off: beyond radius + clear + fade (53 m).
+    CHECK(at(21, 8) == 0.0f);
+    CHECK(at(16, 13) == 0.0f);
+    // x and z are not swapped.
+    CHECK(at(8, 16) == 0.0f);
+    for (float v : map.groundBuilt)
+    {
+        CHECK(v >= 0.0f);
+        CHECK(v <= 1.0f);
+    }
+
+    // No buildings: all open. An invalid map is left alone.
+    MarkBuiltGround(map, nullptr, 0);
+    REQUIRE(map.groundBuilt.size() == static_cast<size_t>(n) * n);
+    CHECK(at(16, 8) == 0.0f);
+    TerrainHorizonMap none;
+    MarkBuiltGround(none, spots, 1);
+    CHECK(none.groundBuilt.empty());
+}
+
 TEST_CASE("Remaster cloud noise is uniform, so a threshold sets the covered fraction exactly", "[Graphics][remaster]")
 {
     const int n = 128;

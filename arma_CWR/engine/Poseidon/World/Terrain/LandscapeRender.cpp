@@ -19,6 +19,7 @@
 
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 
+#include <algorithm>
 #include <mutex>
 #include <float.h>
 #include <cmath>
@@ -1304,8 +1305,12 @@ struct GroundLayerInfo
     Vector3 offset;
     float alpha1, alpha2, bright;
     bool isAlpha;
+    // The ground cover's layer (coverFar above 0): the blades' height (m) and
+    // the distance (m) where they end; segments wholly beyond coverFar are not
+    // drawn.
+    float coverHeight = 0, coverFar = 0;
 
-    GroundLayerInfo() : offset(VZero), alpha1(0), alpha2(1), isAlpha(false) {}
+    GroundLayerInfo() : offset(VZero), alpha1(0), alpha2(1), bright(1), isAlpha(false) {}
     GroundLayerInfo(float y, float a1, float b = 1, float a2 = 1)
         : offset(0, y, 0), bright(b), alpha1(a1 * 0.5 + 0.5), alpha2(a2 * 0.5), isAlpha(true)
     {
@@ -1347,6 +1352,13 @@ GrassMode GrassModes[] = {
 };
 
 const int NGrassModes = sizeof(GrassModes) / sizeof(*GrassModes);
+
+// The ground cover (the Graphics page's Ground Cover option): blades this
+// tall at most, gone by this distance. Fixed, not tunable: the cover is drawn
+// only (AI sight and the simulation never see it), so it must stay too short
+// and too near to hide a man from the player that the AI can see.
+constexpr float kGroundCoverHeight = 0.12f; // metres
+constexpr float kGroundCoverFar = 25.0f;    // metres
 
 void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const GroundLayerInfo& layer)
 {
@@ -1394,7 +1406,9 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
                     Vector3Val bCenter = shape->BSphereCenter() + seg->Offset();
                     float bRadius = shape->BSphereRadius();
 
-                    if (!scene.GetCamera()->IsClipped(bCenter, bRadius, 1))
+                    const bool beyondCover = layer.coverFar > 0 &&
+                                             scene.GetCamera()->Position().Distance(bCenter) - bRadius > layer.coverFar;
+                    if (!beyondCover && !scene.GetCamera()->IsClipped(bCenter, bRadius, 1))
                     {
                         // select only most important light
                         LightList work(true);
@@ -1413,7 +1427,14 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
                         const int alphaSpec = ::IsAlpha | ::NoZWrite | ::GrassTexture;
                         IAnimator* anim = &GAnimatorDefault;
                         AnimatorBrightness animLand;
-                        if (layer.isAlpha)
+                        if (layer.isAlpha && layer.coverFar > 0)
+                        {
+                            GEngine->SetGrassParams(1.0f, layer.coverHeight, layer.coverFar, 1.0f);
+                            shape->OrSpecial(alphaSpec);
+                            anim = &animLand;
+                            animLand.SetBrigth(layer.bright);
+                        }
+                        else if (layer.isAlpha)
                         {
                             GEngine->SetGrassParams(layer.alpha1, layer.alpha2,
                                                     scene.GetCamera()->GetAdditionalClippingFar());
@@ -1624,6 +1645,43 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
     // draw non-alpha objects
     scene.DrawObjectsAndShadowsPass1();
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandObjects);
+
+#if LANDDRAW
+    // Near ground cover (the Graphics page's Ground Cover option, off by
+    // default; first the experiment POSEIDON_XP_GRASS, PERF-PLAN R-22). No CWA
+    // data set ships the classic shell grass's texture (CfgDetailTextures >>
+    // grass, data\grass_dx.paa), so the remastered grass program draws
+    // procedural blades instead (s_psGrassRemasterMain): the land within the
+    // blades' reach is drawn once more, raised by their height, and each of
+    // its fragments marches its view ray down through the blades. It runs
+    // after the opaque objects (their bases stand in the grass) and before the
+    // alpha pass, which takes the roads while the cover is on
+    // (Object::PassNum), so roads cover it. Drawn only: nothing here feeds the
+    // simulation.
+    if (GEngine->CanGrass())
+    {
+        const float invGrid = GetInvLandGrid();
+        const float cx = camera.Position().X() * invGrid;
+        const float cz = camera.Position().Z() * invGrid;
+        const float reach = kGroundCoverFar * invGrid + 1;
+        // Segments keep bigRect's alignment (the segment cache's keys).
+        LandBegEnd nearRect;
+        nearRect.xBeg =
+            bigRect.xBeg + std::max(0, toIntFloor((cx - reach - bigRect.xBeg) * InvLandSegmentSize)) * LandSegmentSize;
+        nearRect.zBeg =
+            bigRect.zBeg + std::max(0, toIntFloor((cz - reach - bigRect.zBeg) * InvLandSegmentSize)) * LandSegmentSize;
+        nearRect.xEnd = std::min(bigRect.xEnd, toIntCeil(cx + reach));
+        nearRect.zEnd = std::min(bigRect.zEnd, toIntCeil(cz + reach));
+        GEngine->FlushQueues();
+        GEngine->EnableReorderQueues(false);
+        GroundLayerInfo cover(kGroundCoverHeight, 0.0f);
+        cover.coverHeight = kGroundCoverHeight;
+        cover.coverFar = kGroundCoverFar;
+        DrawGround(nearRect, scene, cover);
+        GEngine->FlushQueues();
+        GEngine->EnableReorderQueues(true);
+    }
+#endif
 
 #if LANDDRAW
 #if _ENABLE_CHEATS

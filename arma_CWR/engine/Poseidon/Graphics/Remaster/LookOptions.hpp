@@ -4,7 +4,7 @@
 #include <cstring>
 
 // The look options of the Graphics page (GraphicsConfig shoreWater,
-// lampShadows, shadowDetail and sunGlare, persisted in graphics.cfg; GraphicsApply hands
+// lampShadows, shadowDetail, sunGlare and groundCover, persisted in graphics.cfg; GraphicsApply hands
 // them to Engine::SetLookOptions) and the environment's overrides over them.
 // Pure: no engine state, no GL.
 //
@@ -25,9 +25,10 @@
 //                             single shadow knobs on top of the tier)
 //   POSEIDON_XP_SUNGLARE      the low sun's glare: 0 off, a number above 0
 //                             its strength (at most 8), other text 1
+//   POSEIDON_XP_GRASS         the near ground cover: 0 off, anything else on
 //
 // So POSEIDON_XP_WATER=0 POSEIDON_XP_NIGHTLIGHT=0 POSEIDON_XP_SHADOW_TIER=2
-// POSEIDON_XP_SUNGLARE=0 draws the frame of the build before these options,
+// POSEIDON_XP_SUNGLARE=0 POSEIDON_XP_GRASS=0 draws the frame of the build before these options,
 // whatever graphics.cfg says.
 
 namespace Poseidon::remaster
@@ -49,6 +50,10 @@ struct LookOptions
     // Off by default: the glare is temporal (it follows what covers the sun)
     // and has only been judged in stills.
     bool sunGlare = false;
+    // Off by default: short grass blades on the grassy ground near the camera.
+    // Drawn only: nothing in the simulation, AI sight, saves or the network
+    // reads it.
+    bool groundCover = false;
 };
 
 // The environment's look switches as read once (null = unset or empty).
@@ -60,6 +65,7 @@ struct LookEnv
     const char* lampShadows = nullptr;
     const char* lightBounce = nullptr;
     const char* sunGlare = nullptr;
+    const char* groundCover = nullptr;
 };
 
 inline const char* LookEnvValue(const char* name)
@@ -77,6 +83,7 @@ inline LookEnv ReadLookEnv()
     e.lampShadows = LookEnvValue("POSEIDON_XP_LAMPSHADOWS");
     e.lightBounce = LookEnvValue("POSEIDON_XP_LIGHTBOUNCE");
     e.sunGlare = LookEnvValue("POSEIDON_XP_SUNGLARE");
+    e.groundCover = LookEnvValue("POSEIDON_XP_GRASS");
     return e;
 }
 
@@ -140,6 +147,13 @@ inline NightLightLook NightLightFor(bool option, const LookEnv& env)
 inline float SunGlareGain(bool option, const LookEnv& env)
 {
     return LookGain(env.sunGlare, option);
+}
+
+// The near ground cover (Landscape::DrawRect, the remastered grass program):
+// the Ground Cover option, or POSEIDON_XP_GRASS when it is set.
+inline bool GroundCoverOn(bool option, const LookEnv& env)
+{
+    return LookSwitch(env.groundCover, option);
 }
 
 } // namespace Poseidon::remaster

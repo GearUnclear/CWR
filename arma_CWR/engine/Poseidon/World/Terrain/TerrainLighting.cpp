@@ -11,6 +11,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/MapTypes.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -215,6 +216,62 @@ std::vector<float> ExpandGroundColors(const GroundCells& cells, int range, float
     return rgb;
 }
 
+// The buildings of the landscape as (x, z, radius) triples, for the ground
+// field's built-up share (remaster::MarkBuiltGround): houses and the like by
+// their map type, the radius the half diagonal of the model's footprint. Small
+// things (under 2 m) are left out. Ruins count: the yard of a destroyed house
+// is still a yard.
+std::vector<float> GatherBuildings(const Landscape& land)
+{
+    std::vector<float> spots;
+    const int n = land.GetLandRange();
+    for (int z = 0; z < n; ++z)
+    {
+        for (int x = 0; x < n; ++x)
+        {
+            const ObjectList& list = land.GetObjects(z, x);
+            for (int i = 0; i < list.Size(); ++i)
+            {
+                Object* obj = list[i];
+                if (!obj || obj->GetType() != Primary)
+                    continue;
+                LODShapeWithShadow* shape = obj->GetShape();
+                if (!shape)
+                    continue;
+                switch (shape->GetMapType())
+                {
+                    case MapBuilding:
+                    case MapHouse:
+                    case MapChurch:
+                    case MapChapel:
+                    case MapFortress:
+                    case MapFountain:
+                    case MapFuelstation:
+                    case MapHospital:
+                    case MapBusStop:
+                    case MapQuay:
+                    case MapLighthouse:
+                        break;
+                    default:
+                        continue;
+                }
+                const Vector3 mn = shape->Min();
+                const Vector3 mx = shape->Max();
+                const float dx = mx.X() - mn.X();
+                const float dz = mx.Z() - mn.Z();
+                const float radius = 0.5f * std::sqrt(dx * dx + dz * dz);
+                if (radius < 2.0f)
+                    continue;
+                const Vector3 c = obj->PositionModelToWorld((mn + mx) * 0.5f);
+                spots.push_back(c.X());
+                spots.push_back(c.Z());
+                spots.push_back(radius);
+            }
+        }
+    }
+    return spots;
+}
+
 // The canopy (Graphics/Remaster/Canopy.hpp): one footprint per landscape
 // object that shades the ground at a distance, gathered on the main thread (the
 // object lists belong to it) and rasterised by the worker. Destroyed objects
@@ -412,6 +469,7 @@ void UpdateTerrainLighting(Landscape* land)
     const auto gather0 = std::chrono::steady_clock::now();
     int considered = 0;
     std::vector<remaster::CanopyItem> canopyItems = GatherCanopy(*land, considered);
+    std::vector<float> buildings = GatherBuildings(*land);
     LOG_INFO(Graphics, "Canopy: {} occluders of {} landscape objects gathered in {} ms", canopyItems.size(), considered,
              std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - gather0).count());
 
@@ -419,7 +477,8 @@ void UpdateTerrainLighting(Landscape* land)
     std::shared_ptr<std::atomic<bool>> cancel = build.cancel;
     build.result = std::async(std::launch::async,
                               [heights = std::move(heights), cells = std::move(cells),
-                               canopyItems = std::move(canopyItems), cancel, range, grid]() mutable
+                               canopyItems = std::move(canopyItems), buildings = std::move(buildings), cancel, range,
+                               grid]() mutable
                               {
                                   const auto t0 = std::chrono::steady_clock::now();
                                   const std::vector<float> ground = ExpandGroundColors(cells, range, grid);
@@ -429,7 +488,11 @@ void UpdateTerrainLighting(Landscape* land)
                                   BuildResult r;
                                   if (remaster::BuildTerrainHorizonMap(heights.data(), range, grid, options, *map,
                                                                        ground.empty() ? nullptr : ground.data()))
+                                  {
+                                      remaster::MarkBuiltGround(*map, buildings.data(),
+                                                                static_cast<int>(buildings.size() / 3));
                                       r.map = std::move(map);
+                                  }
                                   const auto t1 = std::chrono::steady_clock::now();
                                   r.ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
                                   if (r.map)

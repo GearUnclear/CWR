@@ -1565,9 +1565,155 @@ void main() {
 )";
 
 static const char s_psGrassRemasterMain[] = R"(
+// Near ground cover (the Graphics page's Ground Cover option;
+// Landscape::DrawRect). No CWA data set ships the grass texture, so the blades
+// are procedural: one candidate blade per cell of 1 / kGrassCells metres, its
+// height, lean and presence hashed from the cell (world-anchored, so the field
+// does not swim with the camera), a tapered disc in any horizontal cut.
+// While psC5.x is set, the land within psC5.y metres is drawn once more,
+// raised by the blades' height (psC6.a metres), and each fragment walks its
+// view ray down through the blade layer to the ground, front to back, so the
+// blades are continuous at any view angle and the land is shaded once per
+// pixel. They fade out from kGrassFadeFrom of that distance.
+// Where they grow: where the ground field reads as vegetation (the wet
+// weather's land class) and no building stands near (the field's alpha:
+// TerrainHorizonMap::groundBuilt), so a town's squares and yards stay bare
+// whatever their ground's colour. Roads are drawn after and cover the blades.
+// Where a cell is smaller than a pixel, the march takes the blades' mean cover
+// instead of the cut (no sparkle), and only kGrassVeil of it: unresolved
+// blades would only hide the land's own grain under a smear. Blades take the
+// land's own colour (its square's texture), darker at the root and lighter at
+// the tip, lit as the land.
+const float kGrassCells = 45.0;     // candidate blades per metre along x and z
+const float kGrassRadius = 0.16;    // blade half width at the root (cells)
+const float kGrassJitter = 0.30;    // root offset from the cell centre (cells)
+const float kGrassLean = 0.90;      // tip offset from the root (cells), growing with the height squared
+const float kGrassMinHeight = 0.30; // shortest blade (share of the full height)
+const float kGrassDensity = 0.90;   // share of cells with a blade on full grass
+const float kGrassRoot = 0.80;      // albedo scale at the root ...
+const float kGrassTip = 1.15;       // ... and at the tip
+const float kGrassFadeFrom = 0.40;  // share of the end distance where the fade starts
+const float kGrassVeil = 0.35;      // cover kept where the blades are under a pixel (the land's grain shows)
+const float kGrassTaper = 0.8;      // blade width falls as (1 - height share)^kGrassTaper
+const int kGrassMaxSteps = 40;      // march: samples per ray at most
+
+vec4 grassHash4(vec2 c) {
+    vec4 p4 = fract(vec4(c.xyxy) * vec4(0.1031, 0.1030, 0.0973, 0.1099));
+    p4 += dot(p4, p4.wzxy + 33.33);
+    return fract((p4.xxyz + p4.yzzw) * p4.zywx);
+}
+
+// The blades' cut at height share h through point p (cells), edges
+// antialiased over aa cells; `tip` the covering blade's height share of its
+// own length and `shade` its brightness (for the colour).
+float grassCut(vec2 p, float h, float aa, float veg, out float tip, out float shade) {
+    vec2 i0 = floor(p - 0.5);
+    float cover = 0.0;
+    tip = h;
+    shade = 1.0;
+    for (int k = 0; k < 4; ++k) {
+        vec2 cell = i0 + vec2(float(k & 1), float(k >> 1));
+        vec4 r = grassHash4(cell);
+        if (r.w > veg * kGrassDensity) continue;
+        float hb = mix(kGrassMinHeight, 1.0, r.z);
+        if (h >= hb) continue;
+        float s = h / hb;
+        float a = 6.2831853 * r.x;
+        vec2 root = cell + 0.5 + (r.xy - 0.5) * (2.0 * kGrassJitter);
+        vec2 c = root + vec2(cos(a), sin(a)) * (kGrassLean * s * s);
+        float rad = kGrassRadius * pow(1.0 - s, kGrassTaper);
+        float m = 1.0 - smoothstep(rad - aa, rad + aa, length(p - c));
+        if (m > cover) {
+            tip = s;
+            shade = 0.85 + 0.3 * r.y;
+        }
+        cover = 1.0 - (1.0 - cover) * (1.0 - m);
+    }
+    return cover;
+}
+
+// The blades at height share h on average (hb uniform above
+// kGrassMinHeight): x the blades per cell taller than h, y their mean radius
+// (cells), z their mean height share of their own length.
+vec3 grassMean(float h, float veg) {
+    float pTall = clamp((1.0 - h) / (1.0 - kGrassMinHeight), 0.0, 1.0);
+    float hbMean = 0.5 * (max(h, kGrassMinHeight) + 1.0);
+    float s = clamp(h / hbMean, 0.0, 1.0);
+    return vec3(veg * kGrassDensity * pTall, kGrassRadius * pow(1.0 - s, kGrassTaper), s);
+}
+
+float grassColour(float tip, float shade) { return mix(kGrassRoot, kGrassTip, tip) * shade; }
+
+// The march from the raised land's point posW (m) along the view ray
+// rd over the ground's normal n, blades H metres tall: x the albedo scale of
+// what the ray met, y its cover.
+vec2 grassMarch(vec3 posW, vec3 rd, vec3 n, float H, float foot, float veg) {
+    float dn = dot(rd, n);
+    if (dn > -1e-4 || n.y < 0.2) return vec2(1.0, 0.0);
+    // Height above the ground along the ray: H + t * dn / n.y.
+    float tEnd = H * n.y / -dn;
+    vec2 dxz = rd.xz * kGrassCells;
+    float lenCells = length(dxz) * tEnd;
+    float w = smoothstep(0.35, 1.0, foot);
+    int steps = int(clamp(ceil(lenCells / mix(0.35, 1.5, w)), 3.0, float(kGrassMaxSteps)));
+    float dt = tEnd / float(steps);
+    float dCells = lenCells / float(steps);
+    float aa = max(0.75 * foot, 0.02);
+    vec2 p0 = posW.xz * kGrassCells;
+    float T = 1.0;
+    float acc = 0.0;
+    for (int i = 0; i < kGrassMaxSteps; ++i) {
+        if (i >= steps || T < 0.02) break;
+        float t = (float(i) + 0.5) * dt;
+        float h = 1.0 + t * dn / (n.y * H);
+        float tip;
+        float shade;
+        float cut = grassCut(p0 + dxz * t, h, aa, veg, tip, shade);
+        vec3 mean = grassMean(h, veg);
+        // A ray crossing dCells meets mean.x * 2r * dCells blades on average.
+        float meanCover = 1.0 - exp(-mean.x * 2.0 * mean.y * dCells);
+        float m = mix(cut, meanCover, w);
+        acc += T * m * mix(grassColour(tip, shade), grassColour(mean.z, 1.0), w);
+        T *= 1.0 - m;
+    }
+    float cover = 1.0 - T;
+    return vec2(cover > 1e-4 ? acc / cover : 1.0, cover);
+}
+
 void main() {
     vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
+    if (psC5.x > 0.5) {
+        vec3 posW = vWorldRel + litCamPos.xyz;
+        vec2 p = posW.xz * kGrassCells;
+        // Derivatives before any discard (they need the whole quad).
+        vec2 fw = fwidth(p);
+        float foot = max(fw.x, fw.y);
+        vec3 baseC = textureLod(tex0, vUV0, 3.0).rgb;
+        if (vFogTC < 0.0) discard;
+        float dist = length(vWorldRel);
+        float fade = 1.0 - smoothstep(psC5.y * kGrassFadeFrom, psC5.y, dist);
+        if (fade <= 0.0 || !(vLitMode > 0.5 && vLitMode < 1.5)) discard;
+        vec4 field = groundFieldAt(posW.xz);
+        // The field's alpha: 1 on open land down to 0.75 where buildings
+        // stand near (0 without a field: no class, so no town to keep bare).
+        float open = field.a > 0.5 ? smoothstep(0.75, 1.0, field.a) : 1.0;
+        float veg =
+            (field.a > 0.5 ? wetVegetation(field.rgb) : 1.0) * mix(0.4, 1.0, wetVegetation(baseC)) * open;
+        if (veg <= 0.01) discard;
+        vec3 n = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
+        vec2 g = grassMarch(posW, vWorldRel / max(dist, 1e-4), n, psC6.a, foot, veg);
+        float alpha = g.y * fade * mix(1.0, kGrassVeil, smoothstep(0.35, 1.0, foot));
+        if (alpha < 0.004) discard;
+        g_wetDraw = 2; // grass clutter: wet blades, no puddles
+        vec3 albedo = t0.rgb * constColor.rgb * g.x;
+        float ambientShare = 0.0;
+        vec4 r0;
+        r0.rgb = shadeRemastered(clamp(albedo, 0.0, 1.0), true, ambientShare);
+        r0.a = alpha;
+        finishFragment(r0, ambientShare, true);
+        return;
+    }
     if (vFogTC < 0.0) discard;
     vec4 r0;
     float ambientShare = 0.0;

@@ -205,6 +205,39 @@ void DownsampleTerrainGrid(const float* src, int size, float cellSize, int maxSi
     Downsample(src, size, cellSize, std::max(2, maxSize), dst, dstSize, dstCell);
 }
 
+void MarkBuiltGround(TerrainHorizonMap& map, const float* spots, int count)
+{
+    if (!map.Valid())
+        return;
+    const int n = map.size;
+    const float cell = map.cellSize;
+    map.groundBuilt.assign(static_cast<size_t>(n) * n, 0.0f);
+    if (!spots)
+        return;
+    for (int i = 0; i < count; ++i)
+    {
+        const float sx = spots[i * 3 + 0];
+        const float sz = spots[i * 3 + 1];
+        const float reach = std::max(spots[i * 3 + 2], 0.0f) + kBuiltClear + kBuiltFade;
+        const int x0 = std::max(static_cast<int>(std::floor((sx - reach) / cell)), 0);
+        const int x1 = std::min(static_cast<int>(std::ceil((sx + reach) / cell)), n - 1);
+        const int z0 = std::max(static_cast<int>(std::floor((sz - reach) / cell)), 0);
+        const int z1 = std::min(static_cast<int>(std::ceil((sz + reach) / cell)), n - 1);
+        for (int z = z0; z <= z1; ++z)
+        {
+            for (int x = x0; x <= x1; ++x)
+            {
+                const float dx = static_cast<float>(x) * cell - sx;
+                const float dz = static_cast<float>(z) * cell - sz;
+                const float built = std::min((reach - std::sqrt(dx * dx + dz * dz)) / kBuiltFade, 1.0f);
+                float& o = map.groundBuilt[static_cast<size_t>(z) * n + x];
+                if (built > o)
+                    o = built;
+            }
+        }
+    }
+}
+
 bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
                             TerrainHorizonMap& out, const float* groundRgb)
 {
