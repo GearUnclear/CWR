@@ -18,6 +18,7 @@
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
+#include <Poseidon/Graphics/Remaster/Canopy.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Graphics/Remaster/NightLights.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
@@ -747,6 +748,7 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
     in.nightVision = _nightVision;
     in.skyTablesReady = SkyTablesReady();
     in.skyDensityReady = SkyDensityReady();
+    in.canopyAllSun = rm::CanopyAllSunHeights(); // experiment EX6-CANOPY
     // The reflections' screen shares, read back from a recent frame's tags
     // (EngineGL33_PostSsr.cpp); older than a few frames they count as not
     // measured.

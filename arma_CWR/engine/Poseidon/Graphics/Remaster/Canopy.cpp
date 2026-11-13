@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <utility>
 
 namespace Poseidon::remaster
@@ -575,12 +576,13 @@ void CanopySunOrigin(float camX, float camZ, float texel, float& originX, float&
     originZ = std::floor(camZ / texel) * texel - half;
 }
 
-bool CanopySunNeedsRebuild(const CanopySunKey& built, const CanopySunKey& want, float camX, float camZ)
+bool CanopySunNeedsRebuild(const CanopySunKey& built, const CanopySunKey& want, float camX, float camZ,
+                           float rebuildDeg)
 {
     if (!built.valid || built.canopyVersion != want.canopyVersion || built.texel != want.texel)
         return true;
     const float dot = built.sun[0] * want.sun[0] + built.sun[1] * want.sun[1] + built.sun[2] * want.sun[2];
-    if (dot < std::cos(kCanopySunRebuildDeg * kDegToRad))
+    if (dot < std::cos(rebuildDeg * kDegToRad))
         return true;
     const float extent = static_cast<float>(kCanopySunSize) * built.texel;
     const float cx = built.originX + 0.5f * extent, cz = built.originZ + 0.5f * extent;
@@ -598,15 +600,65 @@ float CanopyStrength(float sunElevationDeg, float skyThrough)
            Smoothstep(kGateCanopyMinSkyThrough, kCanopyFadeInToSkyThrough, skyThrough);
 }
 
+bool CanopyAllSunHeights()
+{
+    static const bool on = []
+    {
+        // On unless POSEIDON_XP_CANOPY_HIGHSUN=0 (today's 25 degree cut, for
+        // the identity gates). Owner verdict 2026-11-13: "on is good".
+        const char* v = std::getenv("POSEIDON_XP_CANOPY_HIGHSUN");
+        return !(v && v[0] == '0' && v[1] == '\0');
+    }();
+    return on;
+}
+
+float CanopyLengthFade(float sunElevationDeg, float fieldTexel)
+{
+    if (!(sunElevationDeg > 0.0f) || !(fieldTexel > 0.0f))
+        return 0.0f;
+    if (sunElevationDeg >= 90.0f)
+        return 0.0f;
+    // The shadow a kCanopyExpectedTop crown casts on level ground, in texels.
+    const float length = kCanopyExpectedTop / std::tan(sunElevationDeg * kDegToRad);
+    return Smoothstep(kCanopyLengthFadeFrom, kCanopyLengthFadeTo, length / fieldTexel);
+}
+
+float CanopyStrengthAllSun(float sunElevationDeg, float skyThrough, float fieldTexel)
+{
+    if (sunElevationDeg <= kGateCanopyMinSunDeg || skyThrough <= kGateCanopyMinSkyThrough)
+        return 0.0f;
+    return Smoothstep(kGateCanopyMinSunDeg, kCanopyFadeInToSunDeg, sunElevationDeg) *
+           CanopyLengthFade(sunElevationDeg, fieldTexel) *
+           Smoothstep(kGateCanopyMinSkyThrough, kCanopyFadeInToSkyThrough, skyThrough);
+}
+
+float CanopySunRebuildDegFor(float sunElevationDeg)
+{
+    // The tip of a shadow of height H moves by about H * dSun / sin^2(sun) on
+    // level ground (elevation and azimuth alike, to first order).
+    const float s = std::sin(std::clamp(sunElevationDeg, 0.0f, 90.0f) * kDegToRad);
+    const float deg = kCanopyRebuildTipMove * s * s / kCanopyReach / kDegToRad;
+    return std::clamp(deg, kCanopySunRebuildDeg, kCanopyRebuildMaxDeg);
+}
+
 CanopyFrameConstants ComputeCanopyFrameConstants(const LightingTuning& tuning, const FeatureGates& gates, bool mapReady,
                                                  float sunElevationDeg, float skyThrough, float originX, float originZ,
                                                  float texel)
 {
+    return ComputeCanopyFrameConstants(tuning, gates, mapReady, sunElevationDeg, skyThrough, originX, originZ, texel,
+                                       false, 0.0f);
+}
+
+CanopyFrameConstants ComputeCanopyFrameConstants(const LightingTuning& tuning, const FeatureGates& gates, bool mapReady,
+                                                 float sunElevationDeg, float skyThrough, float originX, float originZ,
+                                                 float texel, bool allSun, float fieldTexel)
+{
     CanopyFrameConstants out;
     if (!gates[Feature::CanopyShadows].on || !mapReady || !(texel > 0.0f))
         return out;
-    const float strength =
-        tuning.gates ? CanopyStrength(sunElevationDeg, skyThrough) : (sunElevationDeg > 0.0f ? 1.0f : 0.0f);
+    const float strength = tuning.gates ? (allSun ? CanopyStrengthAllSun(sunElevationDeg, skyThrough, fieldTexel)
+                                                  : CanopyStrength(sunElevationDeg, skyThrough))
+                                        : (sunElevationDeg > 0.0f ? 1.0f : 0.0f);
     if (!(strength > 0.0f))
         return out;
     out.canopy[0] = strength;

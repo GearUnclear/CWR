@@ -491,6 +491,110 @@ TEST_CASE("Canopy: the frame constants are zero while the switch, its gate or th
               .canopy[0] == 1.0f);
 }
 
+TEST_CASE("Canopy XP (EX6-CANOPY): every sun height, faded by the shadow's length against the texel",
+          "[remaster][Canopy][FeatureGates][CanopyHighSunXp]")
+{
+    // The switch is unset in the test run: the shipped look, every sun height.
+    CHECK(CanopyAllSunHeights());
+    const float texel = 6.25f;
+    // Below the old fade-out nothing changes.
+    for (float sun = -5.0f; sun <= 21.0f; sun += 0.25f)
+        for (float sky = 0.3f; sky <= 1.0f; sky += 0.05f)
+        {
+            CAPTURE(sun, sky);
+            CHECK(CanopyStrengthAllSun(sun, sky, texel) == Approx(CanopyStrength(sun, sky)).margin(1e-6));
+        }
+    // Full strength past the old cut while a 20 m crown's shadow is 0.75
+    // texels or longer (tan(sun) <= 20 / 4.6875, about 76.8 deg), none at 0.25
+    // texels or shorter (about 85.5 deg), smooth and falling between.
+    CHECK(CanopyStrengthAllSun(25.0f, 1.0f, texel) == Approx(1.0f));
+    CHECK(CanopyStrengthAllSun(55.0f, 1.0f, texel) == Approx(1.0f));
+    CHECK(CanopyStrengthAllSun(76.0f, 1.0f, texel) == Approx(1.0f));
+    CHECK(CanopyStrengthAllSun(86.0f, 1.0f, texel) == 0.0f);
+    CHECK(CanopyStrengthAllSun(90.0f, 1.0f, texel) == 0.0f);
+    float last = 1.0f;
+    for (float sun = 70.0f; sun <= 89.0f; sun += 0.25f)
+    {
+        const float s = CanopyLengthFade(sun, texel);
+        CAPTURE(sun);
+        CHECK(s <= last + 1e-6f);
+        CHECK(std::fabs(s - last) < 0.12f);
+        last = s;
+    }
+    // A coarser canopy fades out sooner.
+    CHECK(CanopyLengthFade(75.0f, 12.5f) < CanopyLengthFade(75.0f, 6.25f));
+    // Overcast still holds it off.
+    CHECK(CanopyStrengthAllSun(55.0f, 0.5f, texel) == 0.0f);
+    CHECK(CanopyStrengthAllSun(55.0f, 0.55f, texel) == Approx(0.5f));
+
+    // The gate with the experiment's input follows the strength at the nominal texel.
+    const LightingTuning t = Apply("remastered");
+    for (float sun = -5.0f; sun <= 90.0f; sun += 0.5f)
+        for (float sky = 0.3f; sky <= 1.0f; sky += 0.1f)
+        {
+            GateInputs in;
+            in.sunElevationDeg = sun;
+            in.skyThrough = sky;
+            in.canopyAllSun = true;
+            CAPTURE(sun, sky);
+            CHECK(ComputeFeatureGates(in, t)[Feature::CanopyShadows].on ==
+                  (CanopyStrengthAllSun(sun, sky, kCanopyTargetTexel) > 0.0f));
+            in.canopyAllSun = false;
+            CHECK(ComputeFeatureGates(in, t)[Feature::CanopyShadows].on == (CanopyStrength(sun, sky) > 0.0f));
+        }
+
+    // Noon frame constants: off without the experiment, on with it.
+    GateInputs noon;
+    noon.sunElevationDeg = 55.0f;
+    const FeatureGates gOff = ComputeFeatureGates(noon, t);
+    CHECK(ComputeCanopyFrameConstants(t, gOff, true, 55.0f, 1.0f, 0, 0, 2.0f, false, texel).canopy[0] == 0.0f);
+    noon.canopyAllSun = true;
+    const FeatureGates gOn = ComputeFeatureGates(noon, t);
+    CHECK(ComputeCanopyFrameConstants(t, gOn, true, 55.0f, 1.0f, 0, 0, 2.0f, true, texel).canopy[0] == Approx(1.0f));
+    // The shipped overload is the experiment off.
+    GateInputs low;
+    low.sunElevationDeg = 23.0f;
+    const FeatureGates gLow = ComputeFeatureGates(low, t);
+    CHECK(ComputeCanopyFrameConstants(t, gLow, true, 23.0f, 1.0f, 1, 2, 2.0f).canopy[0] ==
+          ComputeCanopyFrameConstants(t, gLow, true, 23.0f, 1.0f, 1, 2, 2.0f, false, texel).canopy[0]);
+
+    // Rebuilds: the shipped 0.05 deg at a low sun, rarer up the sky, at most 1 deg.
+    CHECK(CanopySunRebuildDegFor(5.0f) == Approx(kCanopySunRebuildDeg));
+    CHECK(CanopySunRebuildDegFor(15.0f) == Approx(kCanopySunRebuildDeg));
+    CHECK(CanopySunRebuildDegFor(40.0f) > 0.2f);
+    CHECK(CanopySunRebuildDegFor(70.0f) == Approx(0.5f * 0.883022f / 45.0f * 57.29578f).epsilon(0.01));
+    CHECK(CanopySunRebuildDegFor(90.0f) <= kCanopyRebuildMaxDeg);
+    float prev = 0.0f;
+    for (float sun = 0.0f; sun <= 90.0f; sun += 1.0f)
+    {
+        const float d = CanopySunRebuildDegFor(sun);
+        CHECK(d >= prev);
+        prev = d;
+        // The tip of the tallest shadow moves kCanopyRebuildTipMove between
+        // builds wherever neither limit holds.
+        if (d > kCanopySunRebuildDeg + 1e-4f && d < kCanopyRebuildMaxDeg - 1e-4f)
+        {
+            const float s = std::sin(sun * 0.017453292f);
+            CAPTURE(sun);
+            CHECK(kCanopyReach * d * 0.017453292f / (s * s) == Approx(kCanopyRebuildTipMove).epsilon(0.01));
+        }
+    }
+    CanopySunKey built;
+    built.valid = true;
+    built.texel = 2.0f;
+    CanopySunOrigin(1000.0f, 1000.0f, 2.0f, built.originX, built.originZ);
+    CanopySunKey want = built;
+    const float a = 0.3f * 0.017453292f;
+    want.sun[0] = std::sin(a);
+    want.sun[1] = std::cos(a);
+    want.sun[2] = 0.0f;
+    built.sun[0] = 0.0f;
+    built.sun[1] = 1.0f;
+    built.sun[2] = 0.0f;
+    CHECK(CanopySunNeedsRebuild(built, want, 1000.0f, 1000.0f));
+    CHECK_FALSE(CanopySunNeedsRebuild(built, want, 1000.0f, 1000.0f, 0.5f));
+}
+
 TEST_CASE("Canopy: the switch has landed with its own GPU section", "[remaster][Canopy][FeatureSwitches]")
 {
     const FeatureInfo& info = GetFeatureInfo(Feature::CanopyShadows);
