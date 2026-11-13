@@ -35,6 +35,13 @@
 ;  used for timing variety (rest, feed time) and path picks only.
 ; ============================================================================
 
+; The forest test uses gmGeoGrid, which only builds that have the occupier
+; forces work (PR #95) provide. A script cannot name a missing command, so
+; detect gmForcesEtaNotes, a nular registered beside it: format prints any
+; undefined value the same way, so on a build without it both sides match.
+; Without it every forest test passes and findForest keeps its plain point.
+cryGeo = (format ["%1", gmForcesEtaNotes]) != (format ["%1", cryNoSuchVariable_])
+
 ; ---- tunables (set any of them before the first exec to override) ----------
 ? isNil "CRY_NIGHT_FROM" : CRY_NIGHT_FROM = 20.0
 ? isNil "CRY_NIGHT_TO" : CRY_NIGHT_TO = 5.0
@@ -136,12 +143,16 @@ _u setSpeedMode "LIMITED"
 
 ; ---- the lair must be a forest cell: search outwards when it is not --------
 _fsC = _lair; _fsDir = random 360; _fsR = 50; _ret = "lairFound"
-? ((gmGeoGrid [_lair, 0]) select 0) == "F" : goto "lairFound"
+_cell = "F"
+? cryGeo : _cell = (gmGeoGrid [_lair, 0]) select 0
+? _cell == "F" : goto "lairFound"
 goto "findForest"
 #lairFound
-? ((gmGeoGrid [_lair, 0]) select 0) != "F" : _lair = _fsP
+_cell = "F"
+? cryGeo : _cell = (gmGeoGrid [_lair, 0]) select 0
+? _cell != "F" : _lair = _fsP
 _u setVariable ["cryLair", _lair]
-logInfo format ["CRYPTID %1 start at %2 lair %3 (%4)", _id, getPos _u, _lair, (gmGeoGrid [_lair, 0]) select 0]
+logInfo format ["CRYPTID %1 start at %2 lair %3 (%4, forest test %5)", _id, getPos _u, _lair, _cell, cryGeo]
 
 ; ============================================================================
 ;  MAIN LOOP
@@ -385,6 +396,7 @@ goto _ret
 #findForest
 _fsOk = false
 _fsP = [(_fsC select 0) + (_fsR * (sin _fsDir)), (_fsC select 1) + (_fsR * (cos _fsDir)), 0]
+? not cryGeo : goto _ret
 { if (not _fsOk) then { _b = _fsDir + (_x select 0); _r = _fsR * (_x select 1); _p = [(_fsC select 0) + (_r * (sin _b)), (_fsC select 1) + (_r * (cos _b)), 0]; if (((gmGeoGrid [_p, 0]) select 0) == "F") then { _fsOk = true; _fsP = _p } } } forEach [[0,1],[30,1],[-30,1],[0,0.6],[0,1.4],[60,1],[-60,1],[30,0.6],[-30,0.6],[90,1],[-90,1],[60,1.4],[-60,1.4],[120,1],[-120,1],[180,1],[0,2],[45,2],[-45,2]]
 goto _ret
 

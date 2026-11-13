@@ -34,9 +34,17 @@ vic setDir CRY_T_AWAY
 if (true) then { t0 = time; d0 = cr distance vic }
 [cr, vic] exec "cry_watch.sqs"
 logInfo format ["TEST start d0=%1 forest=%2 victim=%3", d0, getPos cr, getPos vic]
-// the site: the creature starts in a forest cell, the victim does not
-triAssertEq [(gmGeoGrid [getPos cr, 0]) select 0, "F"]
-triAssertNe [(gmGeoGrid [getPos vic, 0]) select 0, "F"]
+// the site: the creature starts in a forest cell, the victim does not. gmGeoGrid
+// only exists on builds with the occupier forces work (PR #95); detect it as
+// cryptid.sqs does and skip the site check without it.
+tCryGeo = (format ["%1", gmForcesEtaNotes]) != (format ["%1", tNoSuchVariable_])
+tCellCr = "F"
+tCellVic = "open"
+if (tCryGeo) then { tCellCr = (gmGeoGrid [getPos cr, 0]) select 0 }
+if (tCryGeo) then { tCellVic = (gmGeoGrid [getPos vic, 0]) select 0 }
+logInfo format ["TEST site cells cr=%1 vic=%2 (forest test %3)", tCellCr, tCellVic, tCryGeo]
+triAssertEq [tCellCr, "F"]
+triAssertNe [tCellVic, "F"]
 triAssertGe [d0, 55]
 triSimUntil { (cr getVariable ["cryState", ""]) == "STALK" }
 triAssertEq [cr getVariable "cryTarget", vic]
