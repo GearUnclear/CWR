@@ -1,0 +1,14 @@
+; Sets KJ_native (true when the engine has the kaiju commands) and
+; KJ_engineVersion (kjVersion, or 0 on the stock binary). Runs to the end in
+; one go, so right after
+;     [] exec "kj\engine\detect.sqs"
+;     @ not (isNil "KJ_native")
+; both are set. See features\engine\API.md.
+;
+; How it works: on the stock binary kjVersion is just an undefined variable,
+; and format prints every undefined value the same way. Nothing here names a
+; command the stock binary would have to parse.
+KJ_engineVersion = 0
+KJ_native = (format ["%1", kjVersion]) != (format ["%1", KJ_noSuchVariable_])
+? KJ_native : KJ_engineVersion = kjVersion
+exit

@@ -1,0 +1,74 @@
+; ============================================================================
+;  DedushkaDemo: armour firing on him, staged. NO WEAPON IS FIRED: each "shot"
+;  is a flash and smoke at the gun, a burst on his chest a moment later, and
+;  scripted damage on him. (The live-fire take, KJD_hostile, is the real thing.)
+;
+;      [] exec "kjd_fire.sqs"                              the "fire" beat
+;      [shooters, shots, gap, toTheDeath] exec "kjd_fire.sqs"
+;
+;  The damage carries its owner, whichever way it can:
+;    combat feature in the mission   a direct hit by a tank's HEAT round through
+;                                    its own entry point (KJCB_fnScriptHit): his
+;                                    health, his wounds and his death are its
+;    kaiju binary, no combat         the engine's own damage path (kjDamage),
+;                                    credited to the tank; the crush feature's
+;                                    hurt.sqs reads the engine's hit report
+;    stock binary, no combat         the damage is set and the shot is put in the
+;                                    crush feature's shot memory, as its own
+;                                    "Fired" handler would have
+;  Either way the brain answers the hit signal by itself: he shudders, stands,
+;  and turns to where it came from.
+;
+;  KJD_shooters   who "fires" in the fire beat, in order (the two tanks and the BMP)
+;  KJD_shots      how many shots (3), KJD_shotGap seconds apart (2.6)
+;  KJD_fireLog    [[time, shooter, his damage right after], ...]
+;  KJD_firing     true while a volley runs; set false to end it
+; ============================================================================
+? isNil "KJD_shooters" : KJD_shooters = [kjdTank, kjdTank2, kjdBmp]
+? isNil "KJD_shots" : KJD_shots = 3
+? isNil "KJD_shotGap" : KJD_shotGap = 2.6
+? isNil "KJD_fireLog" : KJD_fireLog = []
+_who = KJD_shooters
+_n = KJD_shots
+_gap = KJD_shotGap
+_death = false
+? (count _this) > 0 : _who = _this select 0
+? (count _this) > 1 : _n = _this select 1
+? (count _this) > 2 : _gap = _this select 2
+? (count _this) > 3 : _death = _this select 3
+KJD_firing = true
+_i = 0
+#shot
+? _i >= _n : goto "end"
+? not KJD_firing : goto "end"
+? _death and KJ_dead : goto "end"
+? not (alive kaiju) : goto "end"
+_s = _who select (_i mod (count _who))
+_i = _i + 1
+? isNull _s : goto "shot"
+? not (alive _s) : goto "next"
+_sp = getPos _s
+_d = _s distance kaiju
+; the gun: a flash and a roll of smoke (particles only)
+drop ["\kjbeam\kjbeam_glow", "", "Billboard", 1, 0.12, [_sp select 0, _sp select 1, 2.4], [0, 0, 0], 0, 1.275, 1, 0, [7, 2], [[1, 0.85, 0.5, 1], [1, 0.6, 0.2, 0]], [0], 1, 0, "", ""]
+{ drop ["cl_basic", "", "Billboard", 1, 3 + random 2, [_sp select 0, _sp select 1, 2.2], [3 - random 6, 3 - random 6, 1 + random 1.5], 0, 1.275, 1.02, 0.08, [2.5, 7], [[0.5, 0.5, 0.48, 0.5], [0.5, 0.5, 0.48, 0]], [0], 0.5, 0.4, "", ""] } forEach [1, 2, 3, 4]
+; the shell is in the air for a moment
+~(_d / 900)
+? not (alive kaiju) : goto "end"
+; the burst on his chest
+drop ["\kjbeam\kjbeam_glow", "", "Billboard", 1, 0.25, KJ_furnacePoint, [0, 0, 0], 0, 1.275, 1, 0, [14, 5], [[1, 0.9, 0.7, 1], [1, 0.5, 0.15, 0]], [0], 1, 0, "", "", kaiju]
+{ drop ["cl_basic", "", "Billboard", 1, 4 + random 2, KJ_furnacePoint, [4 - random 8, 4 - random 8, 2 - random 4], 0, 1.275, 1.02, 0.05, [5, 13], [[0.25, 0.24, 0.23, 0.7], [0.3, 0.3, 0.3, 0]], [0], 0.5, 0.4, "", "", kaiju] } forEach [1, 2, 3, 4, 5, 6]
+[getPos kaiju, 0.5, 0.8, 1.5 * KJ_heightM, 10 * KJ_heightM, 0] call KJ_fnShake
+; the damage, with its owner
+KJC_lastShot = [time, _s, "Heat125"]
+? KJ_hasCombat : [kaiju, "Heat125", [], _s] call KJCB_fnScriptHit
+? KJ_native and (not KJ_hasCombat) : kjDamage [kaiju, _s, 0, 5000, 12]
+? (not KJ_native) and (not KJ_hasCombat) : kaiju setDammage ((getDammage kaiju) + 0.03)
+? (count KJD_fireLog) < 60 : KJD_fireLog = KJD_fireLog + [[time, _s, getDammage kaiju]]
+? _i <= 6 : logInfo format ["KJD fire: shot %1 from %2 at %3 m, his damage now %4 (native %5, combat %6)", _i, _s, _d, getDammage kaiju, KJ_native, KJ_hasCombat]
+#next
+~_gap
+goto "shot"
+#end
+KJD_firing = false
+exit

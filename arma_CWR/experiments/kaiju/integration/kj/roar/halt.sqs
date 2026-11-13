@@ -1,0 +1,23 @@
+; ============================================================================
+;  kj\roar\halt.sqs  -  a driver hears the roar and stands on the brakes.
+;
+;      [kaiju, vehicle, metresFromHim] exec "kj\roar\halt.sqs"
+;
+;  Called by roar.sqs for ground vehicles with a living AI driver. The
+;  vehicle is held (stop true) for KJR_HALT_T seconds (plus up to 4), then let
+;  go; it carries on with whatever it was ordered to do.
+; ============================================================================
+_k = _this select 0
+_v = _this select 1
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? not alive _v : exit
+_t = KJR_HALT_T + random 4
+_v setVariable ["kjrHaltUntil", time + _t]
+_v stop true
+(driver _v) stop true
+~_t
+? not alive _v : exit
+? time < ((_v getVariable ["kjrHaltUntil", 0]) - 0.2) : exit
+_v stop false
+(driver _v) stop false
+exit

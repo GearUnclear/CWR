@@ -1,0 +1,50 @@
+; ============================================================================
+;  kj\roar\walk.sqs  -  footfalls for a Dedushka that walks with nothing else
+;  running. Runs for his lifetime.
+;
+;      [kaiju] exec "kj\roar\walk.sqs"
+;
+;  The stock engine has no footfall event that script can hear (the step
+;  sound edges of a move are played inside the engine,
+;  World/Entities/Infantry/SoldierOldMove.cpp:186-201), so a footfall is
+;  worked out from the ground he has covered: one foot every KJR_HALF_STRIDE
+;  heights. When the crush feature's loop is running it already does this and
+;  calls step.sqs itself; this script then stands down (it checks every few
+;  seconds, so either may be started first).
+;
+;  KJ_walkOn: set false to end this loop.
+; ============================================================================
+_k = _this select 0
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJR_sized" : [_k] call KJR_fnSize
+? isNil "KJR_HALF_STRIDE" : KJR_HALF_STRIDE = 0.22
+? _k getVariable ["kjrWalk", false] : exit
+_k setVariable ["kjrWalk", true]
+KJ_walkOn = true
+_last = getPos _k
+_acc = 0
+_tick = 0
+
+#tick
+? not KJ_walkOn : goto "end"
+? not alive _k : goto "end"
+~0.25
+_tick = _tick + 1
+_p = getPos _k
+_moved = sqrt (((_p select 0) - (_last select 0)) * ((_p select 0) - (_last select 0)) + ((_p select 1) - (_last select 1)) * ((_p select 1) - (_last select 1)))
+_last = _p
+; the crush loop is doing it
+? _k getVariable ["kjcLoop", false] : goto "tick"
+; a jump is a setPos, not a walk
+? _moved > (0.5 * KJR_H) : _moved = 0
+? _moved < 0.03 : goto "tick"
+_acc = _acc + _moved
+? _acc < (KJR_HALF_STRIDE * KJR_H) : goto "tick"
+_acc = _acc - KJR_HALF_STRIDE * KJR_H
+? _acc > (KJR_HALF_STRIDE * KJR_H) : _acc = 0
+[_k] exec "kj\roar\step.sqs"
+goto "tick"
+
+#end
+_k setVariable ["kjrWalk", false]
+exit

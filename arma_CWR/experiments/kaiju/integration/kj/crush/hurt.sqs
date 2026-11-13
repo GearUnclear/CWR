@@ -1,0 +1,87 @@
+; ============================================================================
+;  kj\crush\hurt.sqs  -  being shot: the damage clamp and the hit signal.
+;  Started by loop.sqs; runs for his lifetime.
+;
+;      [kaiju] exec "kj\crush\hurt.sqs"
+;
+;  What the stock engine allows (NOTES.md has the file and line for each):
+;    - allowDammage false makes him inert: no damage, no event, nothing to
+;      react to. So he stays damageable and this script heals him instead.
+;    - The "Hit" event only fires for a single hit worth 0.05 of total damage.
+;      At his size and armour only bombs and the heaviest missiles reach that.
+;      So the signal is also raised from the rise in getDammage between two
+;      reads, which sees every hit the engine counts at all (0.001 and up).
+;    - A rise in damage carries no direction. The direction comes from the
+;      "Hit" event when it fires, else from the last heavy shot heard nearby
+;      ("Fired" on tanks, aircraft, launchers and "IncomingMissile" on him).
+;    - Every read heals him to zero, hit zones included, so no run of ordinary
+;      hits can add up. One blow that kills outright (a bomb on the head) is
+;      undone on the next read: setDamage 0 on a dead man revives him.
+;
+;  The signal, for the brain and the animations:
+;    KJ_hurt       [time, bearing from north, bearing from his front, severity 0..1, who]
+;                  bearings are -1 when nobody is known to have fired
+;    KJ_hurtCount  rises by one per hit
+;    KJ_revived    how many killing blows were undone
+;  On a hard hit (severity 1) it plays DedFlinch, at most once per
+;  KJC_FLINCH_GAP seconds; set KJC_FLINCH_ANIM = false to leave that to the brain.
+; ============================================================================
+_k = _this select 0
+? isNil "KJC_ready" : call compile preprocessFile "kj\crush\init.sqf"
+? isNil "KJ_revived" : KJ_revived = 0
+? _k getVariable ["kjcHurt", false] : exit
+_k setVariable ["kjcHurt", true]
+_k addEventHandler ["Hit", { _this call KJC_ehHit }]
+_k addEventHandler ["IncomingMissile", { _this call KJC_ehMissile }]
+_watch = -100
+_d = 0
+_hits = []
+_h = []
+; [integration] kaiju binary: every hit comes from the engine's own hit report (the hitReport
+; trait): who fired, with what, how much it added. The damage ceiling trait already keeps any
+; one blow from killing him; he is still healed here so nothing adds up or cripples a zone.
+
+#tick
+? not KJ_crushOn : goto "end"
+? isNull _k : goto "end"
+? not KJ_unkillable : goto "end"
+? alive _k : goto "live"
+; killed by one blow: undo it
+_k setDamage 0
+KJ_revived = KJ_revived + 1
+[_k, 1, objNull] call KJC_fnHurt
+goto "sleep"
+
+#live
+? KJ_native : goto "report"
+_d = getDammage _k
+? _d < KJC_HURT_MIN : goto "watch"
+? (time - KJC_hitEvent) > 0.5 : [_k, _d, objNull] call KJC_fnHurt
+_k setDamage 0
+goto "watch"
+
+#report
+? KJ_native : _hits = kjHits _k
+? (count _hits) == 0 : goto "healed"
+; the heaviest hit of this read is the one he feels. A hit he gave himself (the blast of a
+; wreck he made is credited to him) is no hit.
+_h = [objNull, "", [0, 0, 0], 0, 0, [0, 0, 0]]
+{ if (((_x select 3) > (_h select 3)) and ((_x select 0) != _k)) then { _h = _x } } forEach _hits
+? (_h select 3) <= 0 : goto "healed"
+KJ_hurtReport = _h
+? (_h select 3) >= KJC_HURT_MIN : [_k, _h select 3, _h select 0] call KJC_fnHurt
+#healed
+? (getDammage _k) > 0 : _k setDamage 0
+
+#watch
+? (time - _watch) < KJC_WATCH_TICK : goto "sleep"
+_watch = time
+[_k] call KJC_fnWatch
+
+#sleep
+~KJC_HEAL_TICK
+goto "tick"
+
+#end
+_k setVariable ["kjcHurt", false]
+exit

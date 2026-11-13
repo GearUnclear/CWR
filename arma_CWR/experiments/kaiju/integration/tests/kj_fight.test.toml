@@ -1,0 +1,11 @@
+# Dedushka integration: THE FIGHT (weapons are fired; the owner allowed it on 2026-11-12). The
+# demo's kill beat fought for real: two tank platoons and the garrison's armour against him with
+# his brain on; he beams and stomps what is killing him and still dies. Experiment, kept out of
+# tests/integration. Needs the mount tmp/@kj_dedushka and the combat feature in the script set.
+#   run-kj.ps1 -Name kj_fight -Params short,kill
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/DedushkaDemo.Eden"
+timeout = 2400
+assert_timeout = 900
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_dedushka"]

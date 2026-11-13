@@ -1,0 +1,15 @@
+; kj\beam\after.sqs: what the beam leaves behind. Started by fire.sqs, one copy at
+; a time. Brings down the buildings and trees a beat after the beam has passed
+; (KJ_beamQueue), and puts out the fires and smoke columns when their time is up
+; (KJ_beamSites). Ends when the beam is out, nothing is left to fall and nothing burns.
+? KJ_beamAfterRunning : exit
+KJ_beamAfterRunning = true
+_next = 0
+#loop
+~0.2
+call KJ_beam_fnDue
+? time > _next : call KJ_beam_fnExpire; _next = time + 3
+? KJ_beamActive or ((count KJ_beamQueue) > 0) or ((count KJ_beamSites) > 0) : goto "loop"
+KJ_beamAfterRunning = false
+logInfo format ["KJBEAM after-fire over at %1", time]
+exit

@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "The model finishing agent's own creature table: the same two creatures as creatures.json, built from",
+    "the finishing round's model builds into the agent's own mount (tmp/@kj_models). Used with",
+    "build-kj-dedushka.ps1 -CreaturesFile. See models-tests/build-km.ps1."
+  ],
+  "creatures": [
+    {
+      "key": "a",
+      "class": "UDDedushka",
+      "displayName": "Dedushka",
+      "model": "dedushka",
+      "moves": "CfgMovesDedushka",
+      "build": "D:/Arma_CWA_worktrees/kaiju-notes/finishing/models/build/a",
+      "sounds": {
+        "KJ_Roar": "KJ_RoarBear1",
+        "KJ_RoarFar": "KJ_RoarBear1Far",
+        "KJ_Hurt": "KJ_RoarBear3",
+        "KJ_HurtFar": "KJ_RoarBear3Far"
+      },
+      "voicePbo": ""
+    },
+    {
+      "key": "d",
+      "class": "UDDedushkaHound",
+      "displayName": "Dedushka (the Hound)",
+      "model": "dedhound",
+      "moves": "CfgMovesDedHound",
+      "build": "D:/Arma_CWA_worktrees/kaiju-notes/finishing/models/build/d",
+      "sounds": {
+        "KJ_Roar": "KJ_RoarDog1",
+        "KJ_RoarFar": "KJ_RoarDog1Far",
+        "KJ_Hurt": "KJ_RoarDog2",
+        "KJ_HurtFar": "KJ_RoarDog2Far"
+      },
+      "voicePbo": ""
+    }
+  ]
+}

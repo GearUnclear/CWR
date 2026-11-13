@@ -1,0 +1,11 @@
+# Dedushka integration: LIVE FIRE. The demo mission's garrison (two T-80s, a BMP, two rifle
+# sections) against a hostile creature that decides for himself. WEAPONS ARE FIRED in this test.
+# The standing rule against that was lifted by the owner on 2026-11-12 ("shoot at it in tests"),
+# relayed by the coordinator; before that date tests like this one were written and not run.
+# Run:  integration/run-kj.ps1 -Name kj_livefire -Params hostile     (silent: --nosound, hidden desktop)
+tags = ["kaiju", "experiment", "integration", "livefire"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/DedushkaDemo.Eden"
+timeout = 900
+assert_timeout = 300
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_dedushka"]
