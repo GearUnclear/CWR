@@ -112,9 +112,9 @@ private:
 	std::array<const char*, 3>      m_particlesCStrs{};
 	std::array<std::string, 4>      m_msaaLabels;
 	std::array<const char*, 4>      m_msaaCStrs{};
-	std::array<std::string, 5>      m_renderScaleLabels;
-	std::array<const char*, 5>      m_renderScaleCStrs{};
-	std::array<std::string, 2>      m_offOnLabels;
+    std::array<std::string, 6> m_renderScaleLabels;
+    std::array<const char*, 6> m_renderScaleCStrs{};
+    std::array<std::string, 2>      m_offOnLabels;
 	std::array<const char*, 2>      m_offOnCStrs{};
 	std::array<std::string, 3>      m_vsyncLabels;
 	std::array<const char*, 3>      m_vsyncCStrs{};

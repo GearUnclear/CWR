@@ -455,6 +455,19 @@ TEST_CASE("GraphicsConfig: Normalize clamps out-of-range volumes / fps to allowe
     CHECK(c.fpsCap == 60); // 75 → nearest allowed = 60
 }
 
+TEST_CASE("GraphicsConfig: a render scale of 85% is kept, below half is clamped", "[Settings][GraphicsConfig]")
+{
+    FakeEnvironment env;
+    GraphicsConfig c;
+    c.LoadDefaults();
+    c.renderScale = 0.85f; // the Render Scale row's 85%: the world upsampled
+    CHECK_FALSE(c.Normalize(env));
+    CHECK(c.renderScale == 0.85f);
+    c.renderScale = 0.2f;
+    CHECK(c.Normalize(env));
+    CHECK(c.renderScale == 0.5f);
+}
+
 TEST_CASE("GraphicsConfig: Normalize resets unknown tier values to per-row defaults", "[Settings][GraphicsConfig]")
 {
     FakeEnvironment env;

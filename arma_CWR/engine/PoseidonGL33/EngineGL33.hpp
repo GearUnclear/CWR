@@ -482,6 +482,35 @@ class EngineGL33 : public Engine
     int _ssaaH = 0;
 
     bool SSAAActive() const { return _ssaaFbo != 0; }
+
+    // EX9-WEAK, plan item Q-4 (a Render Scale below 100%, or the test override
+    // POSEIDON_XP_RENDERSCALE=<0.5..0.99>): the world and its post stages draw
+    // at that share of the window; the TAA resolve reconstructs at the window's size into
+    // the history, and the sharpen writes a second, window-sized multisampled
+    // target (the display set below) where the HUD then draws as it does
+    // today. The display set takes the frame target's names for the rest of
+    // the frame (XpSwapFrameTargets), so the HUD, the resolve to the window
+    // and the screenshot all see a window-sized frame target; BackToFront
+    // hands the names back. Targets are made only when the window size or a
+    // knob changes, never per frame.
+    float _xpUpScale = 1.0f; // < 1: the world's share of the window (from the env, at target creation)
+    unsigned int _xpDispFbo = 0;
+    unsigned int _xpDispColorRb = 0;
+    unsigned int _xpDispDepthRb = 0;
+    unsigned int _xpDispResolveFbo = 0;
+    unsigned int _xpDispResolveRb = 0;
+    int _xpDispW = 0;
+    int _xpDispH = 0;
+    bool _xpOnDisplay = false; // the names are swapped: the frame target is the display set
+    int _xpDispFailW = 0;      // a display size whose target came back incomplete: not retried
+    int _xpDispFailH = 0;
+    // The world draws below the window and the TAA resolve upsamples (the
+    // display set exists; swapped or not, one of the two sets is in these
+    // names). _xpDispW/_xpDispH are the display's size only while not swapped
+    // (the world's passes and the post stages up to the sharpen).
+    bool XpUpscaleActive() const { return _xpDispFbo != 0; }
+    void XpSwapFrameTargets();
+    void XpDestroyDisplayTarget();
     // Pixel size of the current render target: the scaled offscreen target
     // when SSAA is active, else the window.  Every glViewport/glScissor that
     // addresses the frame target derives from this.
@@ -1219,6 +1248,11 @@ class EngineGL33 : public Engine
         unsigned int opaqueTex = 0, opaqueFbo = 0;
         unsigned int progTaa = 0, progTaaSharpen = 0;
         unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off
+        // EX9-WEAK (POSEIDON_XP_RENDERSCALE): the history's size (the display's
+        // when the world draws below it, else the frame target's) and the
+        // upsampling resolve.
+        int histW = 0, histH = 0;
+        unsigned int progTaaUp = 0;
         // The air pass (EngineGL33_PostAir.cpp), half resolution: the
         // march's two targets (RGBA16F: beams, headlights, haze sun
         // visibility, view depth; RG16F: valley mist top and density), the

@@ -274,9 +274,10 @@ in float vViewZ;
 uniform sampler2D depthTex; // unit 2: the world's depth (resolved)
 uniform vec4 projInfo;      // x = _33, y = _43 (viewZ = y / (ndcZ - x))
 uniform vec4 depthMap;      // ndcZ = depth * x + y
+uniform vec4 rnDepthScale;  // xy the world's depth texels per target pixel (1, or the render scale below 100%)
 out vec4 fragColor;
 void main() {
-    float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r;
+    float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy * rnDepthScale.xy), 0).r;
     float zs = d >= 0.999999 ? 1e6 : projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
     // Hidden behind whatever stands nearer (a soft edge a few centimetres deep).
     float occ = clamp((zs - vViewZ) / (0.05 + 0.01 * vViewZ), 0.0, 1.0);
@@ -482,11 +483,16 @@ void EngineGL33::PostXpRain(const PostFrame& f, bool nightLights)
     if (drops <= 0)
         return;
 
+    // The target: the frame target, or with a Render Scale below 100% the
+    // window-sized display set the sharpen just handed the frame target's
+    // names to (the world's depth stays at the world's size).
+    const int tw = _xpOnDisplay ? _ssaaW : f.w;
+    const int th = _xpOnDisplay ? _ssaaH : f.h;
     // The 3D viewport in pixels.
-    const int vx = static_cast<int>(f.rect[0] * f.w + 0.5f);
-    const int vy = static_cast<int>(f.rect[1] * f.h + 0.5f);
-    const int vw = std::max(1, static_cast<int>(f.rect[2] * f.w + 0.5f));
-    const int vh = std::max(1, static_cast<int>(f.rect[3] * f.h + 0.5f));
+    const int vx = static_cast<int>(f.rect[0] * tw + 0.5f);
+    const int vy = static_cast<int>(f.rect[1] * th + 0.5f);
+    const int vw = std::max(1, static_cast<int>(f.rect[2] * tw + 0.5f));
+    const int vh = std::max(1, static_cast<int>(f.rect[3] * th + 0.5f));
 
     glUseProgram(prog);
     Set4(prog, "rnBox", kBoxSize[0], kBoxSize[1], kBoxSize[2], 0.0f);
@@ -557,6 +563,8 @@ void EngineGL33::PostXpRain(const PostFrame& f, bool nightLights)
     SetInt(prog, "depthTex", 2);
     Set4(prog, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
     Set4(prog, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
+    Set4(prog, "rnDepthScale", static_cast<float>(f.w) / static_cast<float>(tw),
+         static_cast<float>(f.h) / static_cast<float>(th), 0.0f, 0.0f);
     BindTex(2, _post.depthTex);
     glActiveTexture(GL_TEXTURE0);
 
@@ -565,7 +573,7 @@ void EngineGL33::PostXpRain(const PostFrame& f, bool nightLights)
     Poseidon::render::blend::AlphaBlendKeepAlpha();
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, drops);
     Poseidon::render::blend::Opaque();
-    glViewport(0, 0, f.w, f.h);
+    glViewport(0, 0, tw, th);
 
     if (_xpRain.logged < 3)
     {

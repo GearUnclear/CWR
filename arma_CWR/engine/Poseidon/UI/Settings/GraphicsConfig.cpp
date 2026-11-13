@@ -231,7 +231,7 @@ bool GraphicsConfig::Normalize(const Environment& /*env*/)
     }
     clampFloat(brightness, 0.4f, 1.8f);
     clampFloat(gamma, 0.5f, 2.3f);
-    clampFloat(renderScale, 1.0f, 2.0f);
+    clampFloat(renderScale, 0.5f, 2.0f); // below 1: the world at that share of the window (upsampled)
     if (msaaSamples != 0 && msaaSamples != 2 && msaaSamples != 4 && msaaSamples != 8)
     {
         msaaSamples = msaaSamples >= 8 ? 8 : msaaSamples >= 4 ? 4 : msaaSamples >= 2 ? 2 : 0;

@@ -1704,7 +1704,7 @@ void DrawRenderTab()
     }
 
     float scale = GEngine->GetRenderScale();
-    if (ImGui::SliderFloat("Render scale (SSAA)", &scale, 1.0f, 2.0f, "%.2f"))
+    if (ImGui::SliderFloat("Render scale (<1 upsampled, >1 SSAA)", &scale, 0.5f, 2.0f, "%.2f"))
         GEngine->SetRenderScale(scale);
     ImGui::SameLine();
     if (ImGui::Button("1x"))

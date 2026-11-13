@@ -99,18 +99,20 @@ TEST_CASE("GraphicsPage MSAA index mapping falls back to off for unknown counts"
 
 TEST_CASE("GraphicsPage render-scale index mapping picks the nearest step", "[UI][GraphicsPage]")
 {
-    CHECK(GraphicsPage::RenderScaleToIndex(1.0f) == 0);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.25f) == 1);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.5f) == 2);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.75f) == 3);
-    CHECK(GraphicsPage::RenderScaleToIndex(2.0f) == 4);
+    CHECK(GraphicsPage::RenderScaleToIndex(0.85f) == 0);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.0f) == 1);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.25f) == 2);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.5f) == 3);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.75f) == 4);
+    CHECK(GraphicsPage::RenderScaleToIndex(2.0f) == 5);
 
-    CHECK(GraphicsPage::RenderScaleToIndex(1.6f) == 2);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.05f) == 0);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.6f) == 3);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.05f) == 1);
+    CHECK(GraphicsPage::RenderScaleToIndex(0.6f) == 0);
 
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 6; ++i)
         CHECK(GraphicsPage::RenderScaleToIndex(GraphicsPage::RenderScaleIndexToValue(i)) == i);
-    CHECK(GraphicsPage::RenderScaleIndexToValue(5) == Catch::Approx(1.0f));
+    CHECK(GraphicsPage::RenderScaleIndexToValue(6) == Catch::Approx(1.0f));
     CHECK(GraphicsPage::RenderScaleIndexToValue(-1) == Catch::Approx(1.0f));
 }
 
@@ -120,12 +122,15 @@ TEST_CASE("GraphicsPage anti-aliasing rows round-trip through the provider", "[U
     auto& p = page.Provider();
 
     CHECK(p.RowValue(10) == 2); // 4x MSAA by default
-    CHECK(p.RowValue(11) == 0);
+    CHECK(p.RowValue(11) == 1); // Render Scale 100% by default (85% is index 0)
+    CHECK(p.RowFor(11).count == 6);
 
     p.SetRowValue(10, 0);
     CHECK(p.RowValue(10) == 0);
     p.SetRowValue(11, 4);
     CHECK(p.RowValue(11) == 4);
+    p.SetRowValue(11, 0);
+    CHECK(p.RowValue(11) == 0);
 }
 
 TEST_CASE("GraphicsPage offers the manual terrain tier last", "[UI][GraphicsPage]")

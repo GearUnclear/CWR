@@ -197,6 +197,9 @@ enum class PostShader : int
     FogApply,
     FogRing, // the horizon ring: the sky's colour above the land in every azimuth
     FogGlow, // the night glow: the frame's light blurred, laid into the fog at night
+    // EX9-WEAK (Q-4, POSEIDON_XP_RENDERSCALE): the TAA resolve from a world
+    // drawn below the window into a window-sized history (the Temporal stage).
+    TaaUp,
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.

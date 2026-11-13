@@ -49,9 +49,12 @@ const GraphicsRowText kRows[] = {
     {"STR_DISP_MAIN_OPT_GRAPHICS_ADVANCED", "", "Advanced", ""},
     {"STR_DISP_MAIN_OPT_GRAPHICS_ANTIALIASING", "STR_DISP_MAIN_OPT_GRAPHICS_ANTIALIASING_DESC", "Anti-aliasing",
      "Multisample anti-aliasing on the frame target. Higher sample counts smooth polygon edges at a GPU cost."},
-    {"STR_DISP_MAIN_OPT_GRAPHICS_SUPERSAMPLING", "STR_DISP_MAIN_OPT_GRAPHICS_SUPERSAMPLING_DESC", "Supersampling",
-     "Renders the whole frame above window resolution and downsamples it. The strongest cure for sub-pixel shimmer "
-     "and the most expensive."},
+    // Its own key: the installed STRINGTABLE_MAINMENU still carries the old
+    // Supersampling text under STR_DISP_MAIN_OPT_GRAPHICS_SUPERSAMPLING.
+    {"STR_DISP_MAIN_OPT_GRAPHICS_RENDER_SCALE", "STR_DISP_MAIN_OPT_GRAPHICS_RENDER_SCALE_DESC", "Render Scale",
+     "The resolution the world is drawn at. 85% draws it smaller and rebuilds it to the window's size, which saves "
+     "GPU time on weaker cards. Above 100% it supersamples: the strongest cure for sub-pixel shimmer and the most "
+     "expensive."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_MULTITEXTURING", "STR_DISP_MAIN_OPT_GRAPHICS_MULTITEXTURING_DESC", "Multitexturing",
      "Detail and specular texture stages on terrain and objects. Off falls back to the base texture like the "
      "original compatibility switch."},
@@ -73,7 +76,7 @@ const GraphicsRowText kRows[] = {
 };
 constexpr int kFpsCapValues[] = {0, 30, 60, 90, 120, 144, 240};
 constexpr int kMsaaValues[] = {0, 2, 4, 8};
-constexpr float kRenderScaleValues[] = {1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
+constexpr float kRenderScaleValues[] = {0.85f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
 
 // Brightness 0.4 .. 1.8 → slider 0..100; Gamma 0.5 .. 2.3 → slider 0..100.
 int FloatToSlider(float v, float lo, float hi)
@@ -181,7 +184,7 @@ int GraphicsPage::RenderScaleToIndex(float scale)
 float GraphicsPage::RenderScaleIndexToValue(int index)
 {
     if (index < 0 || index >= (int)(sizeof(kRenderScaleValues) / sizeof(float)))
-        return 1.0f;
+        return 1.0f; // 100%
     return kRenderScaleValues[index];
 }
 
@@ -237,7 +240,7 @@ OptionsScrollList::RowDef GraphicsPage::GraphicsProvider::RowFor(int row) const
         case kRowAntiAliasing:
             return {602, m_page->m_msaaCStrs.data(), 4};
         case kRowSupersampling:
-            return {612, m_page->m_renderScaleCStrs.data(), 5};
+            return {612, m_page->m_renderScaleCStrs.data(), 6};
         case kRowMultitexturing:
             return {622, m_page->m_offOnCStrs.data(), 2};
         case kRowLighting:
@@ -516,11 +519,12 @@ void GraphicsPage::RefreshLocalizedChoices()
     for (size_t i = 0; i < m_msaaLabels.size(); ++i)
         m_msaaCStrs[i] = m_msaaLabels[i].c_str();
 
-    m_renderScaleLabels[0] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_OFF");
-    m_renderScaleLabels[1] = "125%";
-    m_renderScaleLabels[2] = "150%";
-    m_renderScaleLabels[3] = "175%";
-    m_renderScaleLabels[4] = "200%";
+    m_renderScaleLabels[0] = "85%";
+    m_renderScaleLabels[1] = "100%";
+    m_renderScaleLabels[2] = "125%";
+    m_renderScaleLabels[3] = "150%";
+    m_renderScaleLabels[4] = "175%";
+    m_renderScaleLabels[5] = "200%";
     for (size_t i = 0; i < m_renderScaleLabels.size(); ++i)
         m_renderScaleCStrs[i] = m_renderScaleLabels[i].c_str();
 

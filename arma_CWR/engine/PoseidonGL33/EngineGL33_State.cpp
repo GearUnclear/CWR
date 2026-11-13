@@ -13,6 +13,9 @@
 
 #include <glad/gl.h>
 
+#include <cmath>
+#include <cstdlib>
+
 void EngineGL33::ConfigureSampler(unsigned int sampler, int bits, float aniso, float bias)
 {
     // Sampler objects override the per-texture filter state, so they must match
@@ -77,7 +80,12 @@ void EngineGL33::UpdateTaaBiasedSamplers()
     // Between frames only (InitDraw, after the bias is off): a sampler the GPU
     // may still read is written only when the knob moves to a new non-zero
     // value, never per frame or mid-frame. A knob of 0 binds the plain set.
-    const float bias = _lighting.taaMipBias;
+    float bias = _lighting.taaMipBias;
+    // EX9-WEAK (Q-4): with the world below the window the textures are picked
+    // for the window's pixels, as the upsampling resolve rebuilds them there
+    // (log2 of the scale more detail).
+    if (bias != 0.0f && XpUpscaleActive() && _xpUpScale < 1.0f)
+        bias += std::log2(_xpUpScale);
     if (!_samplerBiased[0] || bias == 0.0f || bias == _samplerBiasedValue)
         return;
     for (int i = 0; i < 8; i++)

@@ -1110,8 +1110,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     // shares, trace, rough blur and composite, and the combat shadow mask and
     // its blur, the surfaces' horizon occlusion and its accumulation
     // over frames, the photoreal camera's meter, and the volumetric fog's
-    // injection, integration, near field, apply, horizon ring and night glow
-    CHECK(post == 35);
+    // injection, integration, near field, apply, horizon ring and night glow,
+    // and the EX9-WEAK upsampling TAA resolve (POSEIDON_XP_RENDERSCALE)
+    CHECK(post == 36);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",

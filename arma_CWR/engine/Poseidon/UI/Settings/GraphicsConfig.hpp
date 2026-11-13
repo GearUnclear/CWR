@@ -98,9 +98,9 @@ public:
 	bool      alphaToCoverage  = true;          // MSAA alpha-to-coverage on cutout draws (fence wire,
 	                                             // foliage) — grades sub-pixel features instead of the
 	                                             // hard alpha-test keeping/killing whole pixels
-	float     renderScale      = 1.0f;          // SSAA: render at scale x window and downsample.
-	                                             // 1.0 = off; up to 2.0.  The only general cure for
-	                                             // sub-pixel OPAQUE geometry sparkle (fence bars)
+    float renderScale = 1.0f;                   // 0.85: the world at 85% of the window, upsampled; 1.25 to 2: SSAA.
+                                                // 1.0 = off; up to 2.0.  The only general cure for
+                                                // sub-pixel OPAQUE geometry sparkle (fence bars)
     int msaaSamples = kDefaultMsaaSamples;      // MSAA on the frame target: 0 (off) / 2 / 4 / 8
 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
 	                                             // objects.  Off drops those draws to the base texture
