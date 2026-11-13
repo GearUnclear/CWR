@@ -1,0 +1,13 @@
+; cry_watch.sqs  -  debug helper for the tests: [a, b] exec "cry_watch.sqs"
+; keeps CRY_WATCH = [closest distance, latest distance, time of closest]
+; between a and b until either is null; samples every 0.1 s.
+_a = _this select 0
+_b = _this select 1
+CRY_WATCH = [_a distance _b, _a distance _b, time]
+#w
+~0.1
+? (isNull _a) or (isNull _b) : exit
+_dd = _a distance _b
+CRY_WATCH set [1, _dd]
+? _dd < (CRY_WATCH select 0) : CRY_WATCH set [0, _dd]; CRY_WATCH set [2, time]
+goto "w"

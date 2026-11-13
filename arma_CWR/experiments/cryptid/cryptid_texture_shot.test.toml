@@ -1,0 +1,11 @@
+# Chupacabra texture shoot (experiment, kept out of tests/integration so a
+# sweep never runs it). Needs the @udchupa mod built
+# (experiments/cryptid/addon/build-udchupa.ps1) beside a data dir in the same
+# tmp folder, exactly like tests/integration/scripting/cryptid_model_spawn.
+# Run from arma_CWR with --render gl33 and a real game dir. Quiet, no gunfire.
+tags = ["cryptid", "experiment", "visual"]
+binary = "PoseidonGame"
+mission = "experiments/cryptid/ChupaModel.Eden"
+timeout = 300
+assert_timeout = 90
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "1200", "--mods-dir", "..", "--mod", "@udchupa"]

@@ -44,6 +44,12 @@ arma_CWR/guerrilla-mode/config/lobo-factions.hpp                         # our L
 arma_CWR/guerrilla-mode/runtime/classic/bin/remaster.cpp                 # 2 KB Classic sky shim, written here (legacy)
 arma_CWR/guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_AIRCRAFT.utf8.csv # UD aircraft control labels (codex branch)
 arma_CWR/tools/screenshots/@udshowcase/bin/config.cpp                    # site screenshot support mod
+arma_CWR/experiments/cryptid/addon/udchupa/config.cpp                  # chupacabra creature addon, written here (2026-11)
+arma_CWR/experiments/kaiju/addon/uddedushka/config.cpp                  # kaiju creature addon, written here (2026-11)
+arma_CWR/experiments/kaiju/features/beam/addon/kjbeam/config.cpp        # kaiju beam models and effects, written here
+arma_CWR/experiments/kaiju/integration/addon/kjbeam/config.cpp          # copy of the beam config for the integrated mount
+arma_CWR/experiments/kaiju/features/roar/addon/kj_roar/config.cpp       # kaiju CfgSounds for sounds synthesised here
+arma_CWR/experiments/kaiju/features/sound-vst/addon/kj_roar/config.cpp  # kaiju CfgSounds, VST round 2, written here
 
 # ---------------------------------------------------------------------------
 # Fixtures inherited from Bohemia's GPL engine release. Each path exists in

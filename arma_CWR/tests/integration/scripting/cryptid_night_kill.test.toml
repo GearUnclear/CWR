@@ -1,0 +1,9 @@
+# Cryptid prototype (standalone experiment, not a Guerrilla template): boots
+# experiments/cryptid/Cryptid.Eden on whatever data dir is given (a Remaster
+# shadow; stock classes only, no mods). Sound off: these tests stay quiet.
+tags = ["cryptid", "experiment"]
+binary = "PoseidonGame"
+mission = "experiments/cryptid/Cryptid.Eden"
+timeout = 300
+assert_timeout = 200
+extra_args = ["--nosound"]

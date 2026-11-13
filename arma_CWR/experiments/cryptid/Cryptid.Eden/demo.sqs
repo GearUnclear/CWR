@@ -1,0 +1,27 @@
+; ============================================================================
+;  demo.sqs  -  hand-played look at the cryptid prototype.
+;  Run from the dev console after the mission starts:  [] exec "demo.sqs"
+;  Puts the player on the field north of the woods south of
+;  [3575, 5700] (Eden), starts one creature in the trees and a lone civilian
+;  pacing the field. The player is a valid victim too.
+; ============================================================================
+player setPos [3530, 5800, 0]
+player setDir 170
+_c1 = createCenter east
+_c2 = createCenter civilian
+_ge = createGroup east
+_gc = createGroup civilian
+"Civilian3" createUnit [[3575, 5645, 0], _ge, "CRY_DEMO_C = this", 0.5, "PRIVATE"]
+"Civilian2" createUnit [[3600, 5730, 0], _gc, "CRY_DEMO_V = this", 0.5, "PRIVATE"]
+[CRY_DEMO_C] exec "cryptid.sqs"
+hint "Something is in the trees."
+_a = [3600, 5730, 0]
+_b = [3650, 5740, 0]
+#pace
+? not (alive CRY_DEMO_V) : exit
+CRY_DEMO_V doMove _a
+~25
+? not (alive CRY_DEMO_V) : exit
+CRY_DEMO_V doMove _b
+~25
+goto "pace"

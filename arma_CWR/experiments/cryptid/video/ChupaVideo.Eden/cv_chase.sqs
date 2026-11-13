@@ -1,0 +1,137 @@
+; cv_chase.sqs: chupa_chase.sqs for the 9:16 video, run direction CHS_DX (+1 east,
+; -1 west); otherwise the same beats and cues. CHS_STAGE drives the cameras.
+; [creature, victim] exec "chupa_chase.sqs"
+; Gallop chase, pounce on cue, pin and feed hold, recoil (he shoves it off),
+; upright rush, lunge strike. The victim is a captive civilian with damage
+; off; nobody fires. Logs CHS lines (sim time) at every beat and sets
+; CHS_DONE at the end. Cues: CHS_POUNCE_AT (m; the leap covers 4 m and he
+; runs on for CHS_DROP_AFTER s), CHS_LUNGE_AT (m; lunge 1.5 m plus reach),
+; CHS_FEED_HOLD and CHS_RUSH_DELAY (s), CHS_RUSH_GAP (m he gets before it
+; comes again), CHS_CHASE_MAX (s, gives up).
+; The chase order goes to a point 60 m past him on his line and is renewed
+; only every CHS_REORDER s: each new doMove dips the gallop into a 1 s crawl
+; (seen with a 0.25 s renewal). It runs a line CHS_SIDE m to his right:
+; straight behind him the AI's collision avoidance slows it to his speed
+; (EntityAI::AvoidCollision, VehicleAIPilot.cpp:1759) and it never closes in.
+_c = _this select 0
+_v = _this select 1
+_g = group _c
+_gv = group _v
+CHS_DONE = false
+CHS_STAGE = "chase"
+_t0 = time
+logInfo format ["CHS %1 start dist %2 move %3", time, _c distance _v, getMove _c]
+_g setBehaviour "SAFE"
+_g setSpeedMode "FULL"
+_c setUnitPos "DOWN"
+_gv setBehaviour "CARELESS"
+_gv setSpeedMode "FULL"
+_vy = (getPos _v) select 1
+; He runs east along his own line; the order is re-issued so he never stops.
+_v doMove [((getPos _v) select 0) + 40 * CHS_DX, _vy, 0]
+_vnext = time + 1
+@ ((speed _v) > 12) or (time > _t0 + 6)
+logInfo format ["CHS %1 victim_running speed %2 dist %3", time, speed _v, _c distance _v]
+_next = 0
+_maxT = time + CHS_CHASE_MAX
+#chase
+_vp = getPos _v
+if (time > _vnext) then { _v doMove [(_vp select 0) + 40 * CHS_DX, _vy, 0]; _vnext = time + 1 }
+if (time > _next) then { _c doMove [(_vp select 0) + 60 * CHS_DX, _vy - CHS_SIDE, 0]; _next = time + CHS_REORDER }
+? time > _maxT : goto "giveup"
+? (_c distance _v) > CHS_POUNCE_AT : goto "chasewait"
+goto "pounce"
+#chasewait
+~0.01
+goto "chase"
+
+#giveup
+logInfo format ["CHS %1 giveup dist %2 move %3", time, _c distance _v, getMove _c]
+CHS_DONE = true
+exit
+
+#pounce
+; Aim at where he will be when the claws hook him (0.47 s into the leap).
+_vp = getPosASL _v
+_cp = getPosASL _c
+_vel = velocity _v
+_ax = (_vp select 0) + 0.45 * (_vel select 0)
+_ay = (_vp select 1) + 0.45 * (_vel select 1)
+_dir = (_ax - (_cp select 0)) atan2 (_ay - (_cp select 1))
+logInfo format ["CHS %1 pounce_call dist %2 move %3 dir %4 face %5 cpos %6 vpos %7 vvel %8", time, _c distance _v, getMove _c, _dir, getDir _c, _cp, _vp, _vel]
+CHS_STAGE = "pounce"
+_c setDir _dir
+_c playMove "ChupaPounce"
+_c playMove "ChupaFeed"
+_tp = time
+; He keeps running for a moment, then the claws hook his back and he goes down.
+~CHS_DROP_AFTER
+_v disableAI "MOVE"
+_v setUnitPos "DOWN"
+_v switchMove "CivilToCivilLying"
+logInfo format ["CHS %1 victim_down dist %2 move %3 vmove %4", time, _c distance _v, getMove _c, getMove _v]
+; Hold the feed: stop plus DOWN makes the feed the AI's own stop move.
+_c stop true
+@ (getMove _c == "chupafeed") or (time > _tp + 3)
+logInfo format ["CHS %1 feed_seen dist %2 move %3 since_pounce %4 cpos %5", time, _c distance _v, getMove _c, time - _tp, getPosASL _c]
+CHS_STAGE = "feed"
+_tf = time
+~CHS_FEED_HOLD
+logInfo format ["CHS %1 feed_end move %2 held %3", time, getMove _c, time - _tf]
+
+; He shoves it off.
+CHS_STAGE = "recoil"
+_c playMove "ChupaRecoil"
+_tr = time
+logInfo format ["CHS %1 recoil_call move %2", time, getMove _c]
+~0.3
+_v setUnitPos "UP"
+_v enableAI "MOVE"
+_v doMove [((getPos _v) select 0) + 40 * CHS_DX, _vy, 0]
+_vnext = time + 1
+~0.62
+logInfo format ["CHS %1 recoil_end move %2 since_call %3", time, getMove _c, time - _tr]
+; It crouches and watches him scramble up and run, then comes again once
+; he has a few metres (his order is renewed while he gets up).
+_tw = time + CHS_RUSH_DELAY
+#watchhim
+if (time > _vnext) then { _v doMove [((getPos _v) select 0) + 40 * CHS_DX, _vy, 0]; _vnext = time + 1 }
+~0.05
+? (time < _tw) or (((_c distance _v) < CHS_RUSH_GAP) and (time < _tw + 4)) : goto "watchhim"
+_c stop false
+_c setUnitPos "UP"
+_next = 0
+logInfo format ["CHS %1 rush_order move %2 dist %3", time, getMove _c, _c distance _v]
+CHS_STAGE = "rush"
+_maxT = time + CHS_CHASE_MAX
+#rush
+_vp = getPos _v
+if (time > _vnext) then { _v doMove [(_vp select 0) + 40 * CHS_DX, _vy, 0]; _vnext = time + 1 }
+if (time > _next) then { _c doMove [(_vp select 0) + 60 * CHS_DX, _vy - CHS_SIDE, 0]; _next = time + CHS_REORDER }
+? time > _maxT : goto "giveup"
+? (_c distance _v) > CHS_LUNGE_AT : goto "rushwait"
+goto "lunge"
+#rushwait
+~0.01
+goto "rush"
+
+#lunge
+_vp = getPosASL _v
+_cp = getPosASL _c
+_dir = ((_vp select 0) - (_cp select 0)) atan2 ((_vp select 1) - (_cp select 1))
+logInfo format ["CHS %1 lunge_call dist %2 move %3 dir %4 face %5", time, _c distance _v, getMove _c, _dir, getDir _c]
+CHS_STAGE = "lunge"
+_c setDir _dir
+_c playMove "ChupaLungeStrike"
+_tl = time
+; He turns at the last moment.
+_v disableAI "MOVE"
+_v doMove (getPos _v)
+_v setDir (_dir + 180)
+~0.7
+logInfo format ["CHS %1 lunge_hit dist %2 move %3 since_call %4", time, _c distance _v, getMove _c, time - _tl]
+~1.5
+logInfo format ["CHS %1 end move %2 dist %3", time, getMove _c, _c distance _v]
+CHS_STAGE = "end"
+CHS_DONE = true
+exit

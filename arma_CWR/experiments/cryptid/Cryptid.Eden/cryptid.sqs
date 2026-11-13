@@ -1,0 +1,396 @@
+; ============================================================================
+;  cryptid.sqs  -  night-stalking forest cryptid, script prototype
+; ----------------------------------------------------------------------------
+;  Usage:  [unit] exec "cryptid.sqs"
+;          [unit, lairPos] exec "cryptid.sqs"
+;  Any number of creatures may run at once; every creature keeps its own
+;  locals. The body is a stand-in (a stock civilian in its own EAST group).
+;
+;  States (design.md): HIDE, ROAM, STALK, FREEZE, ATTACK, FEED, FLEE, DEAD.
+;    HIDE    lies still in a forest cell (its lair). By day it only hides.
+;    ROAM    night only: short crawls between forest cells near the lair.
+;    STALK   the loneliest victim within sense range: walks while far, crawls
+;            prone inside CRY_CRAWL_AT, circles round to come from behind the
+;            victim's facing.
+;    FREEZE  the victim faces it inside CRY_FREEZE_AT: it lies still.
+;    ATTACK  inside CRY_RUSH_AT it stands and sprints. A strike needs the
+;            creature alive and upright and the victim alive within
+;            CRY_STRIKE_RANGE; each strike adds exactly CRY_STRIKE_DMG damage.
+;    FEED    stays at the body, then leaves for the lair.
+;    FLEE    own damage past CRY_FLEE_DMG, a shot fired within CRY_SHOT_R, a
+;            burning fire or a running vehicle within CRY_LIGHT_R, or dawn:
+;            runs to a forest cell away from the threat, then HIDE.
+;
+;  Debug (read by the tests):
+;    unit getVariable "cryState"     current state name
+;    unit getVariable "cryTarget"    current victim (objNull when none)
+;    unit getVariable "cryF_<STATE>" time the state was first entered
+;    unit getVariable "cryStrikes"   strikes landed so far
+;    unit getVariable "cryWhy"       last flee reason
+;    CRY_DBG select id               [unit, state, target] per creature
+;    CRY_KILLS                       [[body, creature id, time, pos], ...]
+;  Bodies are tagged: body getVariable "cryKill" = [creature id, time, pos].
+;
+;  Outcomes come from the live world only: no hit or miss rolls. Random is
+;  used for timing variety (rest, feed time) and path picks only.
+; ============================================================================
+
+; ---- tunables (set any of them before the first exec to override) ----------
+? isNil "CRY_NIGHT_FROM" : CRY_NIGHT_FROM = 20.0
+? isNil "CRY_NIGHT_TO" : CRY_NIGHT_TO = 5.0
+? isNil "CRY_TICK" : CRY_TICK = 0.4
+? isNil "CRY_SENSE" : CRY_SENSE = 160
+? isNil "CRY_CRAWL_AT" : CRY_CRAWL_AT = 45
+? isNil "CRY_RUSH_AT" : CRY_RUSH_AT = 12
+? isNil "CRY_STRIKE_RANGE" : CRY_STRIKE_RANGE = 2.2
+? isNil "CRY_STRIKE_DMG" : CRY_STRIKE_DMG = 0.4
+? isNil "CRY_STRIKE_GAP" : CRY_STRIKE_GAP = 1.0
+? isNil "CRY_USE_FIST" : CRY_USE_FIST = true
+? isNil "CRY_FREEZE_AT" : CRY_FREEZE_AT = 40
+? isNil "CRY_FACE_CONE" : CRY_FACE_CONE = 30
+? isNil "CRY_FREEZE_MAX" : CRY_FREEZE_MAX = 25
+? isNil "CRY_FLEE_DMG" : CRY_FLEE_DMG = 0.3
+? isNil "CRY_SHOT_R" : CRY_SHOT_R = 60
+? isNil "CRY_LIGHT_R" : CRY_LIGHT_R = 25
+? isNil "CRY_GROUP_R" : CRY_GROUP_R = 30
+? isNil "CRY_FLEE_DIST" : CRY_FLEE_DIST = 120
+? isNil "CRY_FEED_MIN" : CRY_FEED_MIN = 20
+? isNil "CRY_FEED_RAND" : CRY_FEED_RAND = 20
+? isNil "CRY_ROAM_R" : CRY_ROAM_R = 70
+; getMove names (lowercase) of the unarmed man lying down, from CfgMovesMC
+? isNil "CRY_PRONE_MOVES" : CRY_PRONE_MOVES = ["civillying", "civillyingcrawlf", "civillyingcrawlb", "civillyingcrawll", "civillyingcrawlr", "civillyingcrawllf", "civillyingcrawlrf", "civillyingcrawllb", "civillyingcrawlrb", "civillyingfastcrawlf", "civillyingnoaim", "civillyingstillv1", "civillyingtocivil", "civiltocivillying", "civillyingputdown", "lyingturnl", "lyingturnr"]
+? isNil "CRY_N" : CRY_N = 0
+? isNil "CRY_DBG" : CRY_DBG = []
+? isNil "CRY_KILLS" : CRY_KILLS = []
+
+; ---- identity --------------------------------------------------------------
+_u = _this select 0
+_lair = getPos _u
+? (count _this) > 1 : _lair = _this select 1
+_id = CRY_N; CRY_N = CRY_N + 1
+_u setVariable ["cryId", _id]
+_u setVariable ["cryStrikes", 0]
+_u setVariable ["cryWhy", ""]
+
+; ---- every local the code blocks below update is created here first --------
+_st = "HIDE"
+_prev = ""
+_since = time
+_tgt = objNull
+_pos = getPos _u
+_tp = [0,0,0]
+_d = 0
+_dmg = 0
+_dmgFled = 0
+_night = false
+_threat = ""
+_threatPos = []
+_pose = ""
+_poseT = 0
+_mvT = -100
+_mvP = [0,0,0]
+_goal = [0,0,0]
+_restUntil = 0
+_strikeT = -100
+_strikes = 0
+_freezeT = 0
+_lookAwayT = 0
+_noFreezeUntil = 0
+_fleeP = [0,0,0]
+_fleeT = 0
+_feedUntil = 0
+_feedAt = false
+_bv = 0
+_df = 0
+_off = 0
+_mv = ""
+_best = objNull
+_bestScore = 0
+_c = objNull
+_f = 0
+_arm = 0
+_k = 0
+_b = 0
+_r = 0
+_p = [0,0,0]
+_fsC = [0,0,0]
+_fsDir = 0
+_fsR = 0
+_fsP = [0,0,0]
+_fsOk = false
+_ret = ""
+_shot = false
+_lit = false
+_dmgBefore = 0
+_dmgAfter = 0
+_sideStep = 1
+_t0 = 0
+_tick = 0.4
+
+; ---- body setup: a silent, unflinching stalker ------------------------------
+(group _u) setBehaviour "CARELESS"
+(group _u) setCombatMode "BLUE"
+(group _u) allowFleeing 0
+_u setSkill 1
+_u setSpeedMode "LIMITED"
+
+; ---- the lair must be a forest cell: search outwards when it is not --------
+_fsC = _lair; _fsDir = random 360; _fsR = 50; _ret = "lairFound"
+? ((gmGeoGrid [_lair, 0]) select 0) == "F" : goto "lairFound"
+goto "findForest"
+#lairFound
+? ((gmGeoGrid [_lair, 0]) select 0) != "F" : _lair = _fsP
+_u setVariable ["cryLair", _lair]
+logInfo format ["CRYPTID %1 start at %2 lair %3 (%4)", _id, getPos _u, _lair, (gmGeoGrid [_lair, 0]) select 0]
+
+; ============================================================================
+;  MAIN LOOP
+; ============================================================================
+#loop
+~_tick
+_tick = CRY_TICK
+? not (alive _u) : goto "dead"
+_pos = getPos _u
+_dmg = damage _u
+_night = (dayTime >= CRY_NIGHT_FROM) or (dayTime < CRY_NIGHT_TO)
+_mv = getMove _u
+
+; ---- publish the state for tests and debugging ------------------------------
+? _st != _prev : logInfo format ["CRYPTID %1 %2 -> %3 t=%4 target=%5 dist=%6 dmg=%7 why=%8", _id, _prev, _st, time, _tgt, _d, _dmg, _threat]; _since = time; _prev = _st
+? (_u getVariable [("cryF_" + _st), -1]) < 0 : _u setVariable [("cryF_" + _st), time]
+_u setVariable ["cryState", _st]; _u setVariable ["cryTarget", _tgt]; _u setVariable ["cryStrikes", _strikes]
+CRY_DBG set [_id, [_u, _st, _tgt]]
+
+; ---- what scares it off (the live world, never a roll) ---------------------
+? _st == "FLEE" : goto "s_FLEE"
+_threat = ""
+_threatPos = []
+? (_dmg > CRY_FLEE_DMG) and (_dmg > _dmgFled + 0.01) : _threat = "hurt"; _dmgFled = _dmg
+; gunfire: a Fired handler on every armed thing within range stamps its last shot
+_shot = false
+{ if (((_x getVariable ["cryId", -1]) < 0) and (not (_x getVariable ["cryEH", false]))) then { _x addEventHandler ["Fired", {(_this select 0) setVariable ["cryShot", time]}]; _x setVariable ["cryEH", true] }; if ((_x getVariable ["cryShot", -100]) > time - 3) then { _shot = true; _threatPos = getPos _x } } forEach (nearestObjects [_pos, ["Man", "LandVehicle", "Air"], CRY_SHOT_R])
+? _shot and (_threat == "") : _threat = "gunfire"
+; light: a burning fire, or a vehicle running (its lights are on at night)
+_lit = false
+{ if (inflamed _x) then { _lit = true; _threatPos = getPos _x } } forEach (nearestObjects [_pos, ["Fire"], CRY_LIGHT_R])
+{ if ((isEngineOn _x) and (alive _x)) then { _lit = true; _threatPos = getPos _x } } forEach (nearestObjects [_pos, ["LandVehicle", "Air"], CRY_LIGHT_R])
+? _lit and (_threat == "") and (_st != "HIDE") : _threat = "light"
+? (not _night) and (_threat == "") and (_st != "HIDE") : _threat = "dawn"
+? _threat != "" : goto "startFlee"
+
+? _st == "HIDE" : goto "s_HIDE"
+? _st == "ROAM" : goto "s_ROAM"
+? _st == "STALK" : goto "s_STALK"
+? _st == "FREEZE" : goto "s_FREEZE"
+? _st == "ATTACK" : goto "s_ATTACK"
+? _st == "FEED" : goto "s_FEED"
+goto "loop"
+
+; ============================================================================
+;  HIDE: lie still in the lair. Night: hunt as soon as a victim is in range.
+; ============================================================================
+#s_HIDE
+? _pose != "DOWN" : _u setUnitPos "DOWN"; _pose = "DOWN"; _poseT = time
+; walk back to the lair when away from it
+? ((_pos distance _lair) > 6) and (time > _mvT + 4) : _u setSpeedMode "LIMITED"; _u doMove _lair; _mvT = time; _mvP = _lair
+? not _night : goto "loop"
+_ret = "hideSensed"
+goto "pickVictim"
+#hideSensed
+? not (isNull _best) : _tgt = _best; _st = "STALK"; _mvT = -100; goto "loop"
+? time > _restUntil : _st = "ROAM"; _mvT = -100
+goto "loop"
+
+; ============================================================================
+;  ROAM: short crawls between forest cells near the lair.
+; ============================================================================
+#s_ROAM
+_ret = "roamSensed"
+goto "pickVictim"
+#roamSensed
+? not (isNull _best) : _tgt = _best; _st = "STALK"; _mvT = -100; goto "loop"
+? _pose != "DOWN" : _u setUnitPos "DOWN"; _pose = "DOWN"; _poseT = time
+? (time < _mvT + 45) and ((_pos distance _mvP) > 5) : goto "loop"
+; arrived (or gave up): rest a little now and then, else pick the next cell
+? ((random 1) < 0.3) and (time > _since + 5) : _st = "HIDE"; _restUntil = time + 4 + (random 8); goto "loop"
+_fsC = _lair; _fsDir = random 360; _fsR = 20 + (random CRY_ROAM_R); _ret = "roamPicked"
+goto "findForest"
+#roamPicked
+_u doMove _fsP; _mvT = time; _mvP = _fsP
+goto "loop"
+
+; ============================================================================
+;  STALK: close in from behind the victim's facing.
+; ============================================================================
+#s_STALK
+? (isNull _tgt) or (not (alive _tgt)) or ((vehicle _tgt) != _tgt) : _tgt = objNull; _st = "ROAM"; goto "loop"
+_tp = getPos _tgt
+_d = _pos distance _tp
+? _d > (CRY_SENSE + 40) : _tgt = objNull; _st = "ROAM"; goto "loop"
+; bearing from the victim to the creature, and how far that is off the
+; victim's facing (0 = right in front of it) and off its back
+_bv = ((_pos select 0) - (_tp select 0) + 0.001) atan2 ((_pos select 1) - (_tp select 1))
+_df = abs (((((_bv - (getDir _tgt)) mod 360) + 540) mod 360) - 180)
+_off = ((((_bv - ((getDir _tgt) + 180)) mod 360) + 540) mod 360) - 180
+; close enough: the rush
+? _d <= CRY_RUSH_AT : _st = "ATTACK"; goto "loop"
+; stared at inside the freeze range: go still
+? (_d < CRY_FREEZE_AT) and (_df < CRY_FACE_CONE) and (time > _noFreezeUntil) : _st = "FREEZE"; _freezeT = time; _lookAwayT = 0; goto "loop"
+; posture: walk while far, crawl prone once close
+? (_d > CRY_CRAWL_AT) and (_pose != "UP") : _u setUnitPos "UP"; _u setSpeedMode "LIMITED"; _pose = "UP"; _poseT = time
+? (_d <= CRY_CRAWL_AT) and (_pose != "DOWN") : _u setUnitPos "DOWN"; _pose = "DOWN"; _poseT = time
+; behind the victim (within 60 degrees of its back): straight in to its back
+? (abs _off) <= 60 : _b = (getDir _tgt) + 180 + (_off * 0.5); _r = 1.0
+; otherwise circle round at a safe distance, on the side it already is
+? ((abs _off) > 60) and (_off > 0) : _sideStep = -1
+? ((abs _off) > 60) and (_off < 0) : _sideStep = 1
+? (abs _off) > 60 : _b = _bv + (_sideStep * 50); _r = _d
+? ((abs _off) > 60) and (_r < 25) : _r = 25
+? ((abs _off) > 60) and (_r > 40) : _r = 40
+_goal = [(_tp select 0) + (_r * (sin _b)), (_tp select 1) + (_r * (cos _b)), 0]
+? (time > _mvT + 3) or ((_goal distance _mvP) > 4) : _u doMove _goal; _mvT = time; _mvP = _goal
+goto "loop"
+
+; ============================================================================
+;  FREEZE: being looked at makes it lie still, not run.
+; ============================================================================
+#s_FREEZE
+? (isNull _tgt) or (not (alive _tgt)) : _tgt = objNull; _st = "ROAM"; goto "loop"
+? _pose != "DOWN" : _u setUnitPos "DOWN"; _pose = "DOWN"; _poseT = time
+? time > _mvT + 2 : _u doMove _pos; _mvT = time; _mvP = _pos
+_tp = getPos _tgt
+_d = _pos distance _tp
+_bv = ((_pos select 0) - (_tp select 0) + 0.001) atan2 ((_pos select 1) - (_tp select 1))
+_df = abs (((((_bv - (getDir _tgt)) mod 360) + 540) mod 360) - 180)
+; it walked right up to us: take it
+? _d <= CRY_RUSH_AT : _st = "ATTACK"; goto "loop"
+; looked away for a moment: crawl on
+? (_df >= CRY_FACE_CONE) and (_lookAwayT == 0) : _lookAwayT = time
+? _df < CRY_FACE_CONE : _lookAwayT = 0
+? (_lookAwayT > 0) and (time > _lookAwayT + 1.5) : _st = "STALK"; _mvT = -100; goto "loop"
+; stared at too long: rush when close, else slip round the side
+? (time > _freezeT + CRY_FREEZE_MAX) and (_d < 25) : _st = "ATTACK"; goto "loop"
+? time > _freezeT + CRY_FREEZE_MAX : _st = "STALK"; _noFreezeUntil = time + 15; _mvT = -100
+goto "loop"
+
+; ============================================================================
+;  ATTACK: stand, sprint, strike. Strikes only land for real: creature alive
+;  and upright, victim alive and within CRY_STRIKE_RANGE.
+; ============================================================================
+#s_ATTACK
+; the rush is fast: look again every 0.1 s
+_tick = 0.1
+? isNull _tgt : _st = "ROAM"; goto "loop"
+? not (alive _tgt) : goto "killed"
+? (vehicle _tgt) != _tgt : _tgt = objNull; _st = "ROAM"; goto "loop"
+? _pose != "UP" : _u setUnitPos "UP"; _u setSpeedMode "FULL"; _pose = "UP"; _poseT = time
+_tp = getPos _tgt
+_d = _pos distance _tp
+; it got away: back to stalking
+? _d > (CRY_RUSH_AT * 2.5) : _st = "STALK"; _mvT = -100; goto "loop"
+_bv = ((_tp select 0) - (_pos select 0) + 0.001) atan2 ((_tp select 1) - (_pos select 1))
+; run straight through it: the engine marks a move done once the unit is
+; within 5 m of the goal (DIST_NOT_SEARCH, AI/AIUnitImpl.cpp), so a goal at
+; the victim would halt the rush about 4.6 m short. Aim 4 m past it instead;
+; the strike animation stops the run when it lands.
+_goal = [(_tp select 0) + (4 * (sin _bv)), (_tp select 1) + (4 * (cos _bv)), 0]
+? (_d > CRY_STRIKE_RANGE) and ((time > _mvT + 1) or ((_goal distance _mvP) > 1.5)) : _u doMove _goal; _mvT = time; _mvP = _goal
+? _d > CRY_STRIKE_RANGE : goto "loop"
+; in reach: upright (a stand-up takes a moment), and the strike clock
+? _mv in CRY_PRONE_MOVES : goto "loop"
+? time < _poseT + 0.8 : goto "loop"
+? time < _strikeT + CRY_STRIKE_GAP : goto "loop"
+; plant the feet: a goal under 5 m away completes at once, so it stands
+_u doMove _pos; _mvT = time; _mvP = _pos
+_u setDir _bv
+_strikeT = time
+_dmgBefore = damage _tgt
+; the stock fist swing (animation only: the STROKEFIST action deals no damage
+; and `fire "StrokeFist"` neither swings nor hurts from script), then the
+; fixed scripted damage step when the swing lands, if the victim is still in reach
+? CRY_USE_FIST : _u action ["STROKEFIST", _u]
+~0.45
+? not (alive _u) : goto "dead"
+_dmgAfter = _dmgBefore + CRY_STRIKE_DMG
+? _dmgAfter > 1 : _dmgAfter = 1
+? (alive _tgt) and ((_u distance _tgt) <= (CRY_STRIKE_RANGE + 0.6)) : _tgt setDamage _dmgAfter; _strikes = _strikes + 1; logInfo format ["CRYPTID %1 strike %2 on %3 damage %4 -> %5 t=%6", _id, _strikes, _tgt, _dmgBefore, damage _tgt, time]
+? not (alive _tgt) : goto "killed"
+goto "loop"
+
+#killed
+_tgt setVariable ["cryKill", [_id, time, getPos _tgt]]
+CRY_KILLS set [count CRY_KILLS, [_tgt, _id, time, getPos _tgt]]
+logInfo format ["CRYPTID %1 killed %2 at %3 t=%4 strikes=%5", _id, _tgt, getPos _tgt, time, _strikes]
+_st = "FEED"; _feedUntil = time + CRY_FEED_MIN + (random CRY_FEED_RAND); _feedAt = false; _mvT = -100
+goto "loop"
+
+; ============================================================================
+;  FEED: crouch over the body (prone, the stand-in cannot crouch), then go.
+; ============================================================================
+#s_FEED
+? isNull _tgt : _st = "HIDE"; _restUntil = time + 10; goto "loop"
+_tp = getPos _tgt
+_d = _pos distance _tp
+? (not _feedAt) and (_d > 2.5) and (time > _mvT + 2) : _u doMove _tp; _mvT = time; _mvP = _tp
+? (not _feedAt) and (_d <= 2.5) : _feedAt = true; _u doMove _pos; _u setUnitPos "DOWN"; _pose = "DOWN"; _poseT = time
+? time > _feedUntil : _tgt = objNull; _st = "HIDE"; _restUntil = time + 20 + (random 20); _mvT = -100; _u setSpeedMode "LIMITED"
+goto "loop"
+
+; ============================================================================
+;  FLEE: run to a forest cell away from the threat, then HIDE.
+; ============================================================================
+#startFlee
+_u setVariable ["cryWhy", _threat]
+logInfo format ["CRYPTID %1 flees (%2) from %3 t=%4 dmg=%5", _id, _threat, _st, time, _dmg]
+; away from the threat; with no threat position, away from the victim
+? (count _threatPos) < 2 : _threatPos = _pos
+? ((count _threatPos) >= 2) and (not (isNull _tgt)) and ((_threatPos distance _pos) < 1) : _threatPos = getPos _tgt
+_fsDir = random 360
+? (_threatPos distance _pos) >= 1 : _fsDir = ((_pos select 0) - (_threatPos select 0) + 0.001) atan2 ((_pos select 1) - (_threatPos select 1))
+_fsC = _pos; _fsR = CRY_FLEE_DIST; _ret = "fleePicked"
+goto "findForest"
+#fleePicked
+_fleeP = _fsP; _fleeT = time
+_st = "FLEE"; _tgt = objNull
+_u setUnitPos "UP"; _u setSpeedMode "FULL"; _pose = "UP"; _poseT = time
+_u doMove _fleeP; _mvT = time; _mvP = _fleeP
+goto "loop"
+
+#s_FLEE
+? (time > _mvT + 5) and ((_pos distance _fleeP) > 6) : _u doMove _fleeP; _mvT = time
+? ((_pos distance _fleeP) > 6) and (time < _fleeT + 45) : goto "loop"
+; safe: this forest cell is the new lair. Hurt or chased by daylight, it
+; hides much longer
+_lair = _pos
+_u setVariable ["cryLair", _lair]
+_restUntil = time + 15 + (random 15)
+? _dmg > CRY_FLEE_DMG : _restUntil = time + 90 + (random 60)
+_st = "HIDE"; _u setSpeedMode "LIMITED"
+goto "loop"
+
+; ============================================================================
+;  pickVictim -> _best: the loneliest living man within sense range (fewest
+;  others within CRY_GROUP_R, then nearest); never one with two or more armed
+;  friends close by, never one in a vehicle, never another creature.
+; ============================================================================
+#pickVictim
+_best = objNull; _bestScore = 1000000000
+{ _c = _x; if ((alive _c) and (_c != _u) and ((_c getVariable ["cryId", -1]) < 0) and ((vehicle _c) == _c)) then { _f = 0; _arm = 0; { if ((alive _x) and (_x != _c) and ((_x getVariable ["cryId", -1]) < 0)) then { _f = _f + 1; if ((primaryWeapon _x) != "") then { _arm = _arm + 1 } } } forEach (nearestObjects [getPos _c, ["Man"], CRY_GROUP_R]); if ((_arm < 2) and (((_f * 1000) + (_c distance _u)) < _bestScore)) then { _best = _c; _bestScore = (_f * 1000) + (_c distance _u) } } } forEach (nearestObjects [_pos, ["Man"], CRY_SENSE])
+goto _ret
+
+; ============================================================================
+;  findForest -> _fsP: a forest cell about _fsR from _fsC, trying bearings
+;  fanned out from _fsDir; falls back to the plain point on _fsDir.
+; ============================================================================
+#findForest
+_fsOk = false
+_fsP = [(_fsC select 0) + (_fsR * (sin _fsDir)), (_fsC select 1) + (_fsR * (cos _fsDir)), 0]
+{ if (not _fsOk) then { _b = _fsDir + (_x select 0); _r = _fsR * (_x select 1); _p = [(_fsC select 0) + (_r * (sin _b)), (_fsC select 1) + (_r * (cos _b)), 0]; if (((gmGeoGrid [_p, 0]) select 0) == "F") then { _fsOk = true; _fsP = _p } } } forEach [[0,1],[30,1],[-30,1],[0,0.6],[0,1.4],[60,1],[-60,1],[30,0.6],[-30,0.6],[90,1],[-90,1],[60,1.4],[-60,1.4],[120,1],[-120,1],[180,1],[0,2],[45,2],[-45,2]]
+goto _ret
+
+#dead
+_st = "DEAD"
+_u setVariable ["cryState", _st]
+CRY_DBG set [_id, [_u, _st, objNull]]
+logInfo format ["CRYPTID %1 died t=%2", _id, time]
+exit

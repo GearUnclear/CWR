@@ -1,0 +1,3 @@
+// Cryptid prototype: standalone experiment mission (not a Guerrilla template).
+onLoadMission = "Cryptid prototype";
+respawn = 0;
