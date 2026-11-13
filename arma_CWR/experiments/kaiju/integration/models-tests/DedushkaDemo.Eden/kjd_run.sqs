@@ -1,0 +1,20 @@
+; DedushkaDemo timeline: plays the beats of KJD_plan in order, each when the
+; one before is over (kjd_beat.sqs). KJD_step names the beat now playing;
+; "done" when the plan is through. Stop it with KJD_running = false (the beat
+; in hand is played out).
+? KJD_running : exit
+KJD_running = true
+_i = 0
+#next
+? _i >= (count KJD_plan) : goto "done"
+? not KJD_running : goto "stopped"
+[KJD_plan select _i] exec "kjd_beat.sqs"
+~0.5
+@ not KJD_beatBusy
+_i = _i + 1
+goto "next"
+#done
+KJD_step = "done"
+#stopped
+KJD_running = false
+exit

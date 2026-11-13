@@ -1,0 +1,61 @@
+; ============================================================================
+;  kj\roar\birds.sqs  -  birds near the listener go up and fly from Dedushka.
+;
+;      [kaiju, delay] exec "kj\roar\birds.sqs"
+;
+;  Called by roar.sqs (when the roar arrives) and by presence.sqs (when he
+;  comes near). The engine's only animal is the seagull, a camera-class object
+;  with no brain (World/Entities/Vehicles/SeaGull.hpp); camCreate makes one
+;  and camSetPos with camCommit flies it. KJR_BIRD_N of them rise from the
+;  ground between the listener and him and fly over the listener's head, away
+;  from him. So the birds point back at where he is. Their sound (KJ_Birds) is
+;  played from where they rose. They are deleted after 40 s.
+;
+;  Read by tests: KJ_birds (the birds in the air), KJ_presenceLog gets
+;  ["BIRDS", time, count].
+; ============================================================================
+_k = _this select 0
+_delay = _this select 1
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJR_birdT" : KJR_birdT = -1000
+? time < KJR_birdT : exit
+KJR_birdT = time + _delay + 20
+? _delay > 0.02 : goto "wait"
+goto "go"
+#wait
+~_delay
+#go
+? not alive _k : exit
+_ear = call KJR_fnEar
+_ep = getPos _ear
+_kp = getPos _k
+; bearing from him to the listener: the way the birds flee
+_b = ((_ep select 0) - (_kp select 0)) atan2 ((_ep select 1) - (_kp select 1))
+_flock = []
+_i = 0
+_cx = (_ep select 0) - 45 * sin _b
+_cy = (_ep select 1) - 45 * cos _b
+#spawn
+? _i >= KJR_BIRD_N : goto "sound"
+_a = _b + 180 - 55 + random 110
+_r = 25 + random 50
+_g = "SeaGull" camCreate [(_ep select 0) + _r * sin _a, (_ep select 1) + _r * cos _a, 3 + random 9]
+_a = _b - 30 + random 60
+_r = 380 + random 260
+_g camSetPos [(_ep select 0) + _r * sin _a, (_ep select 1) + _r * cos _a, 45 + random 45]
+_g camCommit (16 + random 10)
+_flock = _flock + [_g]
+_i = _i + 1
+goto "spawn"
+#sound
+KJ_birds = KJ_birds + _flock
+_e = 5 call KJR_fnEmitter
+_e setPos [_cx, _cy, 6]
+_e say "KJ_Birds"
+? (count KJ_presenceLog) > 300 : KJ_presenceLog = []
+KJ_presenceLog = KJ_presenceLog + [["BIRDS", time, count _flock]]
+logInfo format ["KJROAR birds %1 up at %2, %3 m from the listener, fleeing on bearing %4 (he is %5 m off)", count _flock, time, 45, _b, _ear distance _k]
+~40
+{ camDestroy _x } forEach _flock
+KJ_birds = KJ_birds - _flock
+exit

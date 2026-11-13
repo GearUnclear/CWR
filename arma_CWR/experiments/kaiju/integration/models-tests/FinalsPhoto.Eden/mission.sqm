@@ -1,0 +1,63 @@
+// Dedushka photo test bed on Eden (Everon), daylight. One stock player only;
+// experiments/kaiju/features/finals/finals_<letter>.test.sqf creates the creature, the tank,
+// the house and the soldier from script. addOns[] names the creature's addon:
+// a runtime createUnit of a class whose owner addon is not activated is
+// refused ("type is abstract"), and no script command activates one.
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"uddedushka"
+	};
+	addOnsAuto[]=
+	{
+		"uddedushka"
+	};
+	randomSeed=4243;
+	class Intel
+	{
+		viewDistance=1200;
+		year=1985;
+		month=6;
+		day=10;
+		hour=11;
+		minute=0;
+		weather=0.100000;
+		weatherForecast=0.100000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4772.0,20.0,11000.0};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

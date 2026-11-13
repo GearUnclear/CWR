@@ -1,0 +1,9 @@
+# Dedushka video, the other creature by night (experiment, kept out of tests/integration so a sweep never runs it).
+# Needs the mount tmp/@kj_dedushka. Written by gen_shoot.py (edit that, not this file).
+# Run it through video/run-shoot.ps1 -Name kv_hound. One game, hidden desktop, --nosound.
+tags = ["kaiju", "experiment", "video"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/video/DedushkaShoot.Eden"
+timeout = 3600
+assert_timeout = 900
+extra_args = ["--nosound", "--no-strict", "--width", "1080", "--height", "1920", "--mods-dir", "..", "--mod", "@kj_dedushka"]

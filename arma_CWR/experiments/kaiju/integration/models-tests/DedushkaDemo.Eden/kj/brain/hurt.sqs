@@ -1,0 +1,27 @@
+; ============================================================================
+;  kj\brain\hurt.sqs  -  the hit signal when the crush feature is not in the
+;  mission (its kj\crush\hurt.sqs does this properly, with the direction of
+;  the shot). Started by start.sqs; runs while the brain runs.
+;
+;  Reads the rise in his damage twice a second, raises the same signal the
+;  crush feature raises, and heals him, so the brain can be tried alone:
+;    KJ_hurt       [time, -1, -1, severity 0..1, objNull]
+;    KJ_hurtCount  rises by one per rise seen
+;  A rise of 0.01 of total damage or more is severity 1 (a hard hit).
+; ============================================================================
+_k = _this select 0
+? isNil "KJ_hurtCount" : KJ_hurtCount = 0
+KJ_hurt = [0, -1, -1, 0, objNull]
+_d = 0
+_s = 0
+#tick
+~0.5
+? not KJ_brainOn : exit
+_d = getDammage _k
+? _d < 0.002 : goto "tick"
+_s = _d / 0.01
+? _s > 1 : _s = 1
+_k setDammage 0
+KJ_hurt = [time, -1, -1, _s, objNull]
+KJ_hurtCount = KJ_hurtCount + 1
+goto "tick"

@@ -1,0 +1,65 @@
+// Dedushka lab: a bare test bed for the integrated script set (one stock player,
+// nothing else; a test makes what it needs). Standalone experiment mission. The
+// script set kj is copied in by the run script before a run.
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"uddedushka",
+		"kjbeam",
+		"kj_roar"
+	};
+	addOnsAuto[]=
+	{
+		"uddedushka",
+		"kjbeam",
+		"kj_roar"
+	};
+	randomSeed=4243;
+	class Intel
+	{
+		viewDistance=1200;
+		year=1985;
+		month=6;
+		day=10;
+		hour=11;
+		minute=0;
+		weather=0.100000;
+		weatherForecast=0.100000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4772.0,20.0,11000.0};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

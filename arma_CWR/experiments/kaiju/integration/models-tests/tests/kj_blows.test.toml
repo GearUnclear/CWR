@@ -1,0 +1,10 @@
+# Dedushka integration: stomp, kick and swat driven from the brain, in step with the clips; the
+# brain choosing a stomp by itself; a killing blow undone while he is unkillable; and everything
+# stopping cleanly when he is dead (KJ_dead). Experiment, kept out of tests/integration. Needs the
+# mount tmp/@kj_models. Run: integration/run-kj.ps1 -Name kj_blows. Quiet: nobody fires.
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/models-tests/DedushkaLab.Eden"
+timeout = 900
+assert_timeout = 150
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_models"]

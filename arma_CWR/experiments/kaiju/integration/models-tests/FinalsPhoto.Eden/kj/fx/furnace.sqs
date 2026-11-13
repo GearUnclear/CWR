@@ -1,0 +1,208 @@
+; ============================================================================
+;  kj\fx\furnace.sqs  -  the furnace in his chest: its glow, its light and its
+;  embers, for his lifetime. Started by kj\start.sqs.
+;
+;      [kaiju] exec "kj\fx\furnace.sqs"
+;
+;  The furnace follows what he is doing: a low ember while he is dormant, a
+;  slow breathing glow while he is awake, brighter when he roars, climbing to
+;  white through the beam's charge, white while it burns, a dull red while he
+;  is spent.
+;
+;  [finishing] On a kaiju binary of version 2 the furnace painted on his body
+;  follows too (the engine's "glow" trait through KJ_fnGlow): a low ember
+;  dormant, breathing awake, full at the roar, white hot through the charge
+;  and the burn, sunk to almost nothing spent, lower with every wound stage,
+;  and guttering when the combat feature says so (KJ_gutterAt). Without it the
+;  ribs are lit like the rest of his hide, as they always were.
+;
+;  On the kaiju binary (KJ_native) the glow is a real point light bound to the
+;  furnace point of his model (kjLight: it lights the ground, the houses and
+;  the men round him, at night, and follows his pose), and the embers are an
+;  engine emitter (kjEmitter). On the stock binary there is no script light:
+;  the glow is a fullbright sprite dropped on the same point and the embers
+;  are dropped by this script; during the beam the beam feature's own
+;  Fire-class lights are used, as before.
+;
+;  Read by others:
+;    KJ_furnaceOn    set false to end this loop (the light and embers go out)
+;    KJ_furnaceNow   [brightness, [r, g, b], word] as applied this tick
+;    KJ_furnaceLog   [[time, word, brightness], ...] each change of word
+;  The words: dormant, awake, roar, charge, fire, spent.
+;  Tuning: the block below.
+; ============================================================================
+_k = _this select 0
+; ================================ TUNING ================================
+; Seconds between two passes.
+? isNil "KJF_TICK" : KJF_TICK = 0.1
+; Brightness of the light per word (1 lights at full strength out to 50 m and
+; is gone at 500 m; the reach scales with it), and its colour.
+? isNil "KJF_DORMANT" : KJF_DORMANT = [0.35, [0.9, 0.25, 0.05]]
+? isNil "KJF_AWAKE" : KJF_AWAKE = [1.1, [1, 0.42, 0.1]]
+? isNil "KJF_ROAR" : KJF_ROAR = [1.9, [1, 0.5, 0.14]]
+? isNil "KJF_CHARGE_TOP" : KJF_CHARGE_TOP = 4.5
+? isNil "KJF_FIRE" : KJF_FIRE = [5, [1, 0.97, 0.9]]
+? isNil "KJF_SPENT" : KJF_SPENT = [0.6, [0.75, 0.1, 0.03]]
+; The breath: the awake glow swells and sinks by this share, once in this many seconds.
+? isNil "KJF_BREATH" : KJF_BREATH = 0.18
+? isNil "KJF_BREATH_SECS" : KJF_BREATH_SECS = 6
+; How fast the glow follows a change (1 / seconds).
+? isNil "KJF_FOLLOW" : KJF_FOLLOW = 1.5
+; The sprite: metres across at brightness 1, seconds between two sprites, and
+; how far off the listener may be for sprites and embers to be made at all.
+? isNil "KJF_SPRITE" : KJF_SPRITE = 5
+? isNil "KJF_SPRITE_GAP" : KJF_SPRITE_GAP = 0.15
+? isNil "KJF_VIEW" : KJF_VIEW = 2500
+; Embers a second while he is awake (none while dormant; the beam makes its own).
+? isNil "KJF_EMBERS" : KJF_EMBERS = 1.5
+; [finishing] The furnace on the body, per word: 0 dark, 1 the painted colour, 2 white hot.
+? isNil "KJF_GLOW_DORMANT" : KJF_GLOW_DORMANT = 0.5
+? isNil "KJF_GLOW_AWAKE" : KJF_GLOW_AWAKE = 0.72
+? isNil "KJF_GLOW_ROAR" : KJF_GLOW_ROAR = 1.05
+? isNil "KJF_GLOW_TOP" : KJF_GLOW_TOP = 2
+? isNil "KJF_GLOW_SPENT" : KJF_GLOW_SPENT = 0.1
+; A gutter (the combat feature's KJ_gutterAt): a flare this long, then soot this long.
+? isNil "KJF_GUT_FLARE" : KJF_GUT_FLARE = 0.2
+? isNil "KJF_GUT_SOOT" : KJF_GUT_SOOT = 1.3
+; ============================= END OF TUNING ============================
+? isNil "KJ_coreReady" : call compile preprocessFile "kj\init.sqf"
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+; without the brain he is simply awake
+? isNil "KJ_state" : KJ_state = "idle"
+? isNil "KJ_brainPhase" : KJ_brainPhase = ""
+? _k getVariable ["kjfFurnace", false] : exit
+_k setVariable ["kjfFurnace", true]
+KJ_furnaceOn = true
+KJ_furnaceLog = []
+KJ_furnaceNow = [0, [0, 0, 0], ""]
+_b = 0
+_cr = 0.9
+_cg = 0.25
+_cb = 0.05
+_word = ""
+_was = ""
+_last = time
+_sprite = 0
+_ember = 0
+_rate = -1
+_wantRate = 0
+_tgt = KJF_DORMANT
+_gl = KJF_GLOW_DORMANT
+_gt = KJF_GLOW_DORMANT
+_gp = 0
+_gu = 0
+_p = 0
+_f = 0
+_d = 0
+_dt = 0
+_sz = 0
+; the light's point: the memory point when the model has it, else the offset
+_pt = KJ_furnaceOfs
+? KJ_native : if ((count (kjPoint [_k, KJ_furnacePoint])) == 3) then { _pt = KJ_furnacePoint }
+_spark = ["\kjbeam\kjbeam_glow", "", "Billboard", 1, 2.4, KJ_furnacePoint, [0, 0, 2.5], 0, 1.5, 1, 0.04, [0.8, 0.2], [[1, 0.8, 0.45, 1], [1, 0.4, 0.05, 0.8], [0.8, 0.15, 0.02, 0]], [0], 0.3, 1.5, "", "", _k]
+
+#tick
+~KJF_TICK
+? not KJ_furnaceOn : goto "end"
+? isNull _k : goto "end"
+? not (alive _k) : goto "end"
+? KJ_dead : goto "end"
+_dt = time - _last
+_last = time
+? _dt > 0.5 : _dt = 0.5
+
+; ---- which word -------------------------------------------------------------
+_word = "awake"
+_tgt = KJF_AWAKE
+? KJ_state == "dormant" : _word = "dormant"; _tgt = KJF_DORMANT
+? (KJ_state == "dormant") and (KJ_brainPhase == "rising") : _word = "awake"; _tgt = KJF_AWAKE
+? KJ_state == "roar" : _word = "roar"; _tgt = KJF_ROAR
+? not (isNil "KJ_roaring") : if (KJ_roaring) then { _word = "roar"; _tgt = KJF_ROAR }
+? KJ_state == "spent" : _word = "spent"; _tgt = KJF_SPENT
+? isNil "KJ_beamPhase" : goto "have"
+? KJ_beamPhase == "spent" : _word = "spent"; _tgt = KJF_SPENT
+? KJ_beamPhase == "charge" : goto "charge"
+? (KJ_beamPhase == "fire") or (KJ_beamPhase == "sky") : _word = "fire"; _tgt = KJF_FIRE
+goto "have"
+#charge
+_word = "charge"
+_p = 0
+? not (isNil "KJ_beamCharge") : _p = KJ_beamCharge
+_tgt = [(KJF_AWAKE select 0) + (KJF_CHARGE_TOP - (KJF_AWAKE select 0)) * _p * _p, [1, 0.42 + 0.53 * _p, 0.1 + 0.75 * _p]]
+#have
+; [finishing] the same word on the body
+_gt = KJF_GLOW_AWAKE
+? _word == "dormant" : _gt = KJF_GLOW_DORMANT
+? _word == "roar" : _gt = KJF_GLOW_ROAR
+? _word == "spent" : _gt = KJF_GLOW_SPENT
+? _word == "fire" : _gt = KJF_GLOW_TOP
+? _word == "charge" : _gt = KJF_GLOW_AWAKE + (KJF_GLOW_TOP - KJF_GLOW_AWAKE) * _p * _p
+? _word != _was : KJ_furnaceLog = KJ_furnaceLog + [[time, _word, _tgt select 0]]; logInfo format ["KJFX furnace %1 at %2 (brightness %3, native %4)", _word, time, _tgt select 0, KJ_native]
+_was = _word
+
+; ---- follow it ----------------------------------------------------------------
+_f = KJF_FOLLOW * _dt
+? (_word == "fire") or (_word == "charge") : _f = 1
+? _f > 1 : _f = 1
+_b = _b + ((_tgt select 0) - _b) * _f
+_cr = _cr + (((_tgt select 1) select 0) - _cr) * _f
+_cg = _cg + (((_tgt select 1) select 1) - _cg) * _f
+_cb = _cb + (((_tgt select 1) select 2) - _cb) * _f
+_p = _b
+? _word == "awake" : _p = _b * (1 + KJF_BREATH * sin (360 * time / KJF_BREATH_SECS))
+? _word == "fire" : _p = _b * (0.9 + random 0.2)
+; wounded, the furnace is dimmer (the combat feature's KJ_woundStage, a sixth less per stage, never under a third)
+_w = 1 - (call KJ_fnWound) / 6
+? _w < 0.34 : _w = 0.34
+_p = _p * _w
+KJ_furnaceNow = [_p, [_cr, _cg, _cb], _word]
+; [finishing] the furnace on the body: follows its word, breathes, burns, sinks, and gutters
+_gl = _gl + (_gt - _gl) * _f
+_gp = _gl
+? _word == "awake" : _gp = _gl * (1 + KJF_BREATH * sin (360 * time / KJF_BREATH_SECS))
+? _word == "dormant" : _gp = _gl * (1 + 0.5 * KJF_BREATH * sin (360 * time / (2 * KJF_BREATH_SECS)))
+? _word == "fire" : _gp = _gl * (0.85 + random 0.15)
+_gp = _gp * _w
+? isNil "KJ_gutterAt" : goto "glowset"
+_gu = time - KJ_gutterAt
+? _gu < 0 : goto "glowset"
+? _gu < KJF_GUT_FLARE : _gp = _gp * 1.6 + 0.3; goto "glowset"
+? _gu < (KJF_GUT_FLARE + KJF_GUT_SOOT) : _gp = _gp * (0.15 + 0.85 * (_gu - KJF_GUT_FLARE) / KJF_GUT_SOOT)
+#glowset
+[_k, _gp] call KJ_fnGlow
+
+; ---- the light (kaiju binary) -----------------------------------------------
+? KJ_native : kjLight [_k, "furnace", _pt, [_cr, _cg, _cb], _p]
+
+; ---- the sprite and the embers, only when somebody can see them ----------------
+_d = (call KJR_fnEar) distance _k
+? _d > KJF_VIEW : goto "tick"
+; the beam draws its own, bigger glow while it charges and burns
+? (_word == "charge") or (_word == "fire") : goto "embers"
+? time < _sprite : goto "embers"
+_sprite = time + KJF_SPRITE_GAP
+_sz = KJF_SPRITE * (0.6 + 0.4 * _p)
+drop ["\kjbeam\kjbeam_glow", "", "Billboard", 1, 2.5 * KJF_SPRITE_GAP, KJ_furnacePoint, [0, 0, 0], 0, 1.275, 1, 0, [_sz, _sz * 0.85], [[_cr, _cg, _cb, 0.55], [_cr, _cg, _cb, 0]], [0], 1, 0, "", "", _k]
+
+#embers
+_wantRate = KJF_EMBERS
+? (_word == "dormant") or (_word == "charge") or (_word == "fire") : _wantRate = 0
+? _word == "roar" : _wantRate = 3 * KJF_EMBERS
+? KJ_native : goto "emitter"
+? _wantRate <= 0 : goto "tick"
+? time < _ember : goto "tick"
+_ember = time + 1 / _wantRate
+drop _spark
+goto "tick"
+#emitter
+? _wantRate == _rate : goto "tick"
+_rate = _wantRate
+? KJ_native and (_rate > 0) : kjEmitter [_k, "embers", _spark, _rate]
+? KJ_native and (_rate <= 0) : kjEmitter [_k, "embers", [], 0]
+goto "tick"
+
+#end
+? KJ_native : if (not (isNull _k)) then { kjLight [_k, "furnace", _pt, [0, 0, 0], 0]; kjEmitter [_k, "embers", [], 0] }
+? not (isNull _k) : _k setVariable ["kjfFurnace", false]
+KJ_furnaceOn = false
+exit

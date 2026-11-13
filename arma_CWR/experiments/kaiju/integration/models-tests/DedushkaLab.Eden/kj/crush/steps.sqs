@@ -1,0 +1,57 @@
+; ============================================================================
+;  kj\crush\steps.sqs  -  [integration] his footfalls as the engine reports
+;  them. Kaiju binary only; started by loop.sqs. Runs for his lifetime.
+;
+;      [kaiju] exec "kj\crush\steps.sqs"
+;
+;  The engine counts a footfall each time the playing move crosses one of its
+;  two sound edges (kjSteps: count, which foot, where the foot is, from the
+;  model's foot memory points). The creature addon gives edges to the walk,
+;  the turns on the spot and the stomp, and to nothing else. So on this binary
+;  a footfall is the frame the foot lands, at the place it lands, on the walk
+;  AND on a turn on the spot (which the stride arithmetic of loop.sqs cannot
+;  see: a turn covers no ground).
+;
+;  Each footfall: KJ_footfall, the crush of what is under and beside the foot
+;  (KJC_fnFootfall), the roar feature's step (dust, thump, shake), and a flag
+;  for loop.sqs so its stride count starts again from the real foot.
+;  The stomp's impact is the stomp's own blow (stomp.sqs), not a step.
+; ============================================================================
+_k = _this select 0
+? not KJ_native : exit
+? _k getVariable ["kjcSteps", false] : exit
+_k setVariable ["kjcSteps", true]
+_st = [0, false, [0, 0, 0]]
+? KJ_native : _st = kjSteps _k
+_n = _st select 0
+_name = "R"
+_foot = [0, 0, 0]
+KJ_stepsNative = 0
+
+#tick
+~0.03
+? not KJ_crushOn : goto "end"
+? isNull _k : goto "end"
+? KJ_dead : goto "end"
+? not (alive _k) : goto "tick"
+? KJ_native : _st = kjSteps _k
+? (_st select 0) == _n : goto "tick"
+_n = _st select 0
+? KJ_stomping : goto "tick"
+_name = "R"
+? _st select 1 : _name = "L"
+_foot = [(_st select 2) select 0, (_st select 2) select 1, 0]
+KJ_stepsNative = KJ_stepsNative + 1
+KJ_footfall = [(KJ_footfall select 0) + 1, time, _foot, _name]
+[_k, _foot, KJC_FOOT_R * KJC_H, KJC_NEAR_R * KJC_H] call KJC_fnFootfall
+? KJC_stepFile and KJ_crushStepCall : [_k] exec "kj\roar\step.sqs"
+? not (KJC_stepFile and KJ_crushStepCall) : [[_foot select 0, _foot select 1], KJC_FOOT_R * KJC_H, 7, 3, 9, 5, 1.2, 3.5, [0.58, 0.54, 0.46], 0.5, 1] call KJC_fnDust
+; the foot that lands next is the other one
+KJC_stepNext = 1
+? _name == "R" : KJC_stepNext = -1
+KJC_stepFlag = true
+goto "tick"
+
+#end
+? not (isNull _k) : _k setVariable ["kjcSteps", false]
+exit

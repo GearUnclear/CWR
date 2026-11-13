@@ -1,6 +1,0 @@
-# Left out of git (2026-11-13): a stale copy of integration/ from an earlier model gate.
-integration/models-tests/
-# Written by video/gen_shoot.py (edit that, not these). Regenerate a take with: python gen_shoot.py <take>
-video/kv_*.test.sqf
-video/kv_*.test.toml
-video/kv_*.params.sqf

@@ -1,0 +1,4 @@
+; kj\combat: the combat feature's payload, copied from features\combat\kj\combat by
+; integration\tools\merge-combat.ps1 on 2026-11-12T07:12:12 (newest file of the feature: 2026-11-12T07:12:12),
+; with the one fix of tools\patch_combat_merge.py (the hit signal's bearing to himself).
+; Do not edit this copy: change the feature, then run merge-combat.ps1 again.

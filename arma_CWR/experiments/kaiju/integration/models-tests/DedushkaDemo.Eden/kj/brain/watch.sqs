@@ -1,0 +1,53 @@
+; kj\brain\watch.sqs: a recorder for tests and camera scripts (the brain does
+; not need it).   KJT_on = true; [kaiju] exec "kj\brain\watch.sqs"
+; Notes every state, phase and move he passes through, his highest speed over
+; any second, and every sudden jump of his position. Ends when KJT_on is set
+; false.
+;   KJT_states, KJT_phases, KJT_moves   in order, each change once
+;   KJT_maxSpeed                         m/s (set KJT_skip true round a setPos)
+;   KJT_jumps                            [[time, metres, seconds, from, to, men within
+;                                        15 m (he counts as one), vehicles within
+;                                        25 m], ...]: every tick in which he moved
+;                                        over 1.5 m. A tick is a tenth of a second
+;                                        and his walk covers 0.23 m in that, so
+;                                        unless the tick was long (a stalled frame)
+;                                        something pushed him.
+_k = _this select 0
+KJT_states = []
+KJT_phases = []
+KJT_moves = []
+KJT_maxSpeed = 0
+KJT_jumps = []
+KJT_skip = false
+_ls = ""
+_lp = ""
+_lm = ""
+_m = ""
+_p = getPos _k
+_p0 = getPos _k
+_q = getPos _k
+_q0 = getPos _k
+_t0 = time
+_tq = time
+_v = 0
+_j = 0
+#tick
+~0.1
+? KJ_state != _ls : _ls = KJ_state; KJT_states = KJT_states + [_ls]
+? KJ_brainPhase != _lp : _lp = KJ_brainPhase; KJT_phases = KJT_phases + [_lp]
+_m = getMove _k
+? _m != _lm : _lm = _m; KJT_moves = KJT_moves + [_m]
+_q = getPos _k
+_j = sqrt (((_q select 0) - (_q0 select 0)) ^ 2 + ((_q select 1) - (_q0 select 1)) ^ 2)
+? (_j > 1.5) and (not KJT_skip) and ((count KJT_jumps) < 30) : KJT_jumps = KJT_jumps + [[time, _j, time - _tq, _q0, _q, count (nearestObjects [_q, ["Man"], 15]), count (nearestObjects [_q, ["LandVehicle"], 25])]]
+_q0 = _q
+_tq = time
+? (time - _t0) < 1 : goto "next"
+_p = getPos _k
+_v = (sqrt (((_p select 0) - (_p0 select 0)) ^ 2 + ((_p select 1) - (_p0 select 1)) ^ 2)) / (time - _t0)
+? (_v > KJT_maxSpeed) and (not KJT_skip) : KJT_maxSpeed = _v
+_p0 = _p
+_t0 = time
+#next
+? KJT_on : goto "tick"
+exit
