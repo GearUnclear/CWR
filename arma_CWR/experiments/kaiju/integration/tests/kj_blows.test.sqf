@@ -82,12 +82,14 @@ triSetView ([((getPos kaiju) select 0) + 55, ((getPos kaiju) select 1) - 45, 22,
 triSimFrames 4
 triScreenshot "b01_stomp_the_foot_is_up"
 triSimUntil { (KJ_stompCount > kjbN) || (time > kjbT1 + 14) }
-logInfo format ["KJB stomp: landed %1 s after the clip started (clip says %2), result %3, where %4, tank was at %5, footfall %6", time - kjbT1, if (isNil "KJ_animStompTime") then { -1 } else { KJ_animStompTime }, KJ_stompResult, KJ_stompPos, kjbTp, KJ_footfall]
+// keep the landing time now: the check below runs after 20 frames and a screenshot
+if (true) then { kjbLand = time - kjbT1 }
+logInfo format ["KJB stomp: landed %1 s after the clip started (clip says %2), result %3, where %4, tank was at %5, footfall %6", kjbLand, if (isNil "KJ_animStompTime") then { -1 } else { KJ_animStompTime }, KJ_stompResult, KJ_stompPos, kjbTp, KJ_footfall]
 triSimFrames 20
 triScreenshot "b02_stomp_the_blow"
 [KJ_stompCount == (kjbN + 1), "stomp: the blow landed"] call kjChk
 [KJ_stompResult == "hit", "stomp: on the tank (the foot of the clip came down on it)"] call kjChk
-[(isNil "KJ_animStompTime") || ((abs ((time - kjbT1) - KJ_animStompTime)) < 1.2), "stomp: the blow came when the foot of the clip came down"] call kjChk
+[(isNil "KJ_animStompTime") || ((abs (kjbLand - KJ_animStompTime)) < 1.2), "stomp: the blow came when the foot of the clip came down"] call kjChk
 [(isNull kjbTank) || (!(alive kjbTank)), "stomp: the tank is flattened"] call kjChk
 [!(alive (kjbMen select 0)), "stomp: the man in the kill zone is dead"] call kjChk
 [(alive (kjbMen select 1)) && ((getDammage (kjbMen select 1)) > 0.05), "stomp: the man in the ring is hurt and alive"] call kjChk

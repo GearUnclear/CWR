@@ -22,8 +22,10 @@ own test missions.
 
 Until today all of this lived uncommitted in two detached worktrees
 (`D:\Arma_CWA_worktrees\cryptid` and `D:\Arma_CWA_worktrees\kaiju`). The owner
-asked for it to be pushed to this new branch with this note. The branch starts
-from main at `3df39c30` and has not been merged or opened as a PR.
+asked for it to be pushed to this new branch with this note. The branch started
+from main at `3df39c30`; on the owner's word ("we are merging all branches
+eventually") `occupier-forces` (PR #95, `5696d7d2`, which already contains
+main) was merged in on 2026-11-13, so it now sits on top of that line. No PR.
 
 ## What is on the branch
 
@@ -36,11 +38,10 @@ from main at `3df39c30` and has not been merged or opened as a PR.
 | kaiju integration | the merged `kj\` script set, the DedushkaDemo and DedushkaLab missions, the gate tests, and `play-demo.ps1` for hand play. |
 | kaiju video | the shoot mission, `gen_shoot.py` and the Python edit chain. |
 | this note | `handoff.md`. |
-
-Left out on purpose (see `arma_CWR/experiments/kaiju/.gitignore`):
-`integration/models-tests/` (a stale 225-file copy from an earlier model gate)
-and the `video/kv_*` takes, which `gen_shoot.py` writes (run
-`python gen_shoot.py <take>` to get them back).
+| model-gate tests, video takes | `integration/models-tests/` and the `video/kv_*` takes `gen_shoot.py` writes, added at the owner's word ("they are our work"). |
+| cryptid without gmGeoGrid | the chupacabra's forest test needs `gmGeoGrid`, which only occupier-forces registers; it now detects it and falls back, so it runs on main too. |
+| merge occupier-forces | the branch on top of PR #95. One conflict (the agent_guidelines index row). |
+| kj_blows timing | the stomp-timing check read the clock after 20 frames and a screenshot; it now keeps the landing time. |
 
 The game-data guard read seven hand-written creature configs as config dumps
 (the addon `config.cpp` files and `moves_dedushka.hpp`), so they are on
@@ -52,7 +53,9 @@ guard still ran, against this branch's allowlist.
 
 ## What is NOT in git, and where it is
 
-Binaries never go in this GPL repo. They live beside it:
+The binaries are not in git yet. The owner wants them in ("they are our
+work"); the repo is public, so three questions are open first (see the last
+section). Until then they live beside the repo:
 
 - `D:\Arma_CWA_worktrees\kaiju-notes\`: `MORNING.md` (the owner's open
   decisions), `REPORT.txt` (the full report), `BOARD.md`, the models and
@@ -83,9 +86,20 @@ follow-up.
 
 ## State
 
-Kaiju retest on the final models: 20 of 21 runs pass. The one failure
-(`combat_wounds`) is the test's fault: its head shots aim at the old proxy's
-head height. Unit suite 3050 of 3060 on the kaiju build.
+After the occupier-forces merge (engine rebuilt into `dist\kaiju-rwdi`, the
+main-based build kept in `kaiju-notes\chupa-retest\kaiju-rwdi-main-based-backup`),
+2026-11-13, one pass each, hidden and silent:
+
+- kaiju: `kj_blows`, `kj_kill` (staged), `kj_livefire`, `kj_livetank` pass on
+  both creatures (8 of 8; `kj_blows` after its timing fix); combat 4 of 5
+  (`combat_wounds` fails as before: its head shots aim at the old proxy's head
+  height); `kj_engine` passes.
+- chupacabra: all 12 pass (six behaviour tests, model spawn, two shots, four
+  animation tests); its forest test is on again on this engine.
+- unit suite: 3417 of 3427, the same six localisation and game-data failures
+  as before the merge.
+
+Logs: `kaiju-notes\chupa-retest\` and `kaiju-notesinishingetest\logserdicts.txt`.
 
 Known faults, not fixed:
 
@@ -116,7 +130,13 @@ From `kaiju-notes\MORNING.md`:
    committed or shared.
 5. The Arturia and AAS instrument licence terms, before any of those sounds
    ship.
-6. Whether this branch goes to main (through a PR) and when.
+6. The binaries (the repo is public): include the kaiju film despite its music;
+   include the Arturia/AAS sound set or only the one made from nothing; include
+   the models as they are (their Memory, HitPoints and LandContact LODs copy the
+   stock civilian's points) or re-place the points first. The raw frames (about
+   9 GB), logs, packed pbos and caches stay local either way, and GitHub
+   refuses files over 100 MB (both full-size films are 134 MB).
+7. Whether this branch goes to main (through a PR) and when.
 
 ## Rules that still apply
 
