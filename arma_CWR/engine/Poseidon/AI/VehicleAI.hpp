@@ -304,6 +304,9 @@ struct Target: public RemoveLLinks
 	// hostile; permanent per group unless undercoverForgetSeconds is set
 	bool ucCompromised;
 	Foundation::Time ucCompromisedTime; // when the compromise (re)latched
+	// when this group last rated the subject suspect or exposed because of a
+	// visible weapon (UndercoverSystem::WeaponSeenCount); transient, not saved
+	Foundation::Time ucWeaponSeenTime;
 
 	// functions
 

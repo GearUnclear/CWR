@@ -3,8 +3,12 @@
 //  Remaster with UD installed beside Bohemia's files (issue #67).
 //  Boots GUERRILLA -> Abel through the menu with the default (camp) start and
 //  checks the shipped Guerrilla.Abel zone table end to end:
-//    * four occupier military zones load with their authored garrisons, a
-//      ladder of 6 / 6 / 8 / 12 with the AIRFIELD strongest (contract C4);
+//    * four authored occupier military zones load with their authored
+//      garrisons, a ladder of 6 / 6 / 8 / 12 with the AIRFIELD strongest
+//      (contract C4); the template's generateBases = 1 adds the generated
+//      OUTPOSTs on top (OCCUPIER-FORCES.md 5.7, gmGeneratedBases), so the
+//      occupier holds 4 + count gmGeneratedBases military zones, which is
+//      exactly the old four with generateBases = 0;
 //      the three far hubs are still banked at full strength (D1);
 //    * the four garrisoned hub centres and their whole garrison spawn square
 //      (zoneArea / 3 = 50 m each way) are dry ground, with a road in reach
@@ -57,12 +61,17 @@ triAssertEq [((gmZoneSim onAir) select 7), 12]
 triAssertEq [((gmZone onCmp) select GM_Z_GAR), 6]
 triAssertEq [((gmZone onPort) select GM_Z_GAR), 8]
 triAssertEq [((gmZone onAir) select GM_Z_GAR), 12]
-// exactly four occupier military zones, and the AIRFIELD is the strongest
+// exactly the four authored occupier military zones plus the generated ones
+// (none with generateBases = 0: the old assertion of exactly four), and the
+// AIRFIELD is the strongest
+onGen = count gmGeneratedBases
 onMil = 0
 onTop = 0
 onI = 0
 while {onI < gmZoneCount} do {onZ = gmZone onI; if (((onZ select GM_Z_TYPE) in ["OUTPOST", "AIRFIELD", "SEAPORT"]) and ((onZ select GM_Z_OWNER) == gmOccupierSide)) then {onMil = onMil + 1; if (((gmZoneSim onI) select 7) > onTop) then {onTop = (gmZoneSim onI) select 7}}; onI = onI + 1}
-triAssertEq [onMil, 4]
+triAssertEq [onMil, 4 + onGen]
+// the shipped template generates two (the west and the south-west)
+triAssertEq [onGen, 2]
 triAssertEq [onTop, ((gmZoneSim onAir) select 7)]
 
 // -- C6: every garrisoned hub centre and its spawn square is dry ground -----

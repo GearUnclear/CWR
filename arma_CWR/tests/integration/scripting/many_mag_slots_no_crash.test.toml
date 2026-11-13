@@ -2,6 +2,6 @@
 # magazine slots) and loads a mission so the test can equip it during gameplay.
 binary = "PoseidonGame"
 mission = "tests/integration/missions/action_menu_weapon.Demo"
-extra_args = ["--mods-dir", "../../tests/fixtures/mods-manymags", "--mod", "@manymags"]
+extra_args = ["--mods-dir", "${repo_root}/tests/fixtures/mods-manymags", "--mod", "@manymags"]
 timeout = 60
 tags = ["headless"]

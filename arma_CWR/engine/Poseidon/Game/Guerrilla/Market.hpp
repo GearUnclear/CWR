@@ -158,6 +158,7 @@ class Market : public SerializeClass
     static constexpr float TickInterval = 3.0f;  // s between dealer passes
     static constexpr float RoadClearance = 6.0f; // m, GRoadNet::IsOnRoad probe size
     static constexpr float LotMinDist = 15.0f;   // m, lot spot away from the dealer
+    static constexpr float DealerPosSlack = 0.5f; // m, the record follows its body past this
 
     // test aid: run the pure assignment over an injected city list (no
     // world); rows come back unplaced/unspawned, _assigned/_seed set
@@ -178,6 +179,10 @@ class Market : public SerializeClass
     void Assign();              // world: CITY zones -> PlanDealers
     bool ComputeDealerSpot(DealerRecord& row) const;
     void SpawnDealer(DealerRecord& row);
+    // the record's spot follows its live body (createUnit's free-position
+    // nudge, a load): true when pos moved.  A weapon dealer's lotPos moves
+    // with it.
+    static bool SyncDealerPos(DealerRecord& row);
     AIGroup* DealerGroup(int kind);
     void ApplyPendingLoad();
 

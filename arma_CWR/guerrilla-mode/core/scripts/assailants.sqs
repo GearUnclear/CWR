@@ -18,6 +18,11 @@ GM_AS_READY = true
 GM_AS_TICKS = GM_AS_TICKS + 1
 gmAsDt = time - GM_AS_LAST
 GM_AS_LAST = time
+; A save whose player body was a class the loaded package lacks (a mod no
+; longer mounted) comes back with the body REBUILT, so the saved aP handle
+; is null until campaign.sqs's load handler rebinds it. Skip those ticks:
+; objNull distance [x,y,z] is a script error, not a large distance.
+? isNull aP : goto "loop"
 gmAsPool = [] call GM_AS_fnCandidates
 GM_AS_REMAINING = gmAssailantAdvance [GM_AS_REMAINING, gmAsDt, (count gmAsPool) > 0]
 ? (count gmAsPool) == 0 : goto "loop"

@@ -16,6 +16,10 @@
 ;      Towns pay on goodwill regardless of military owner.
 ;    * PANICKED towns (name in GM_PANIC_ZONES) pay HALVED Roubles and NO
 ;      manpower for the episode - a scattered town has no tap to pass the hat.
+;    * STRUCK towns (gmZoneStruck: an occupier air strike less than 1200 s
+;      ago, the native struckUntil stamp, OCCUPIER-FORCES.md 7.3) pay the
+;      same: halved Roubles, no manpower, until the stamp runs out (a panic
+;      episode is shorter than the 600 s tick, the stamp is not).
 ;    * gmManpower hard-capped (1 HR = 1 body; the faction-size ceiling).
 ;  NOTE: with seedCities=1 every named town on the island is a CITY zone, so
 ;  total town income scales with the world - a balance knob, not a bug.
@@ -49,7 +53,7 @@ gmEcoW = gmEcoW + 5
 ? gmEcoW < GM_ECON_TICK : goto "econwait"
 
 ; --- sum this tick's income across all zones (single atomic evaluated line) ---
-gmEcoR = 0; gmEcoHR = 0; gmEcoI = 0; while {gmEcoI < gmZoneCount} do {gmEcoZ = gmZone gmEcoI; if (((gmEcoZ select GM_Z_OWNER) == gmResistanceSide) and ((gmEcoZ select GM_Z_TYPE) in ["OUTPOST","AIRFIELD","SEAPORT"])) then {gmEcoR = gmEcoR + (gmEcoZ select GM_Z_INCOME)}; if ((gmEcoZ select GM_Z_TYPE) == "CITY") then {gmEcoP = 1; if ((gmEcoZ select GM_Z_NAME) in GM_PANIC_ZONES) then {gmEcoP = 0.5}; gmEcoR = gmEcoR + ((gmEcoZ select GM_Z_SUPPORT) * GM_ECON_R_PER_SUP * gmEcoP); if (((gmEcoZ select GM_Z_SUPPORT) >= GM_ECON_HR_SUP_MIN) and (gmEcoP >= 1)) then {gmEcoHR = gmEcoHR + GM_ECON_HR_PER_TOWN}}; gmEcoI = gmEcoI + 1}
+gmEcoR = 0; gmEcoHR = 0; gmEcoI = 0; while {gmEcoI < gmZoneCount} do {gmEcoZ = gmZone gmEcoI; if (((gmEcoZ select GM_Z_OWNER) == gmResistanceSide) and ((gmEcoZ select GM_Z_TYPE) in ["OUTPOST","AIRFIELD","SEAPORT"])) then {gmEcoR = gmEcoR + (gmEcoZ select GM_Z_INCOME)}; if ((gmEcoZ select GM_Z_TYPE) == "CITY") then {gmEcoP = 1; if ((gmEcoZ select GM_Z_NAME) in GM_PANIC_ZONES) then {gmEcoP = 0.5}; if (gmZoneStruck gmEcoI) then {gmEcoP = 0.5}; gmEcoR = gmEcoR + ((gmEcoZ select GM_Z_SUPPORT) * GM_ECON_R_PER_SUP * gmEcoP); if (((gmEcoZ select GM_Z_SUPPORT) >= GM_ECON_HR_SUP_MIN) and (gmEcoP >= 1)) then {gmEcoHR = gmEcoHR + GM_ECON_HR_PER_TOWN}}; gmEcoI = gmEcoI + 1}
 
 ; --- apply income (same atomic helper used by civilian interactions) ----------
 [gmEcoR] call GM_fnResourcesAdd

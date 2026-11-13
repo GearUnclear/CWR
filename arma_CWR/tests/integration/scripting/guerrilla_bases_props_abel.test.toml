@@ -1,0 +1,17 @@
+# Generated occupier bases, step 2 (OCCUPIER-FORCES.md 5.7, the outpost
+# layout): the shipped Guerrilla.Abel template sets generateBases = 1, so a
+# new game adds two OUTPOST zones, and the BaseProps service builds each one
+# its layout of stock statics (guerrilla-mode/config/guerrilla-hq.hpp, class
+# CfgGuerrillaBaseLayouts) behind the loading screen. Boots the SHIPPED
+# template (repo-root-relative) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow
+# of the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The
+# shadow must carry the current gmcore and BIN\guerrilla-hq.hpp
+# (guerrilla-mode/install-missions.ps1). The .sqf header states what it asserts.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "occupierforces", "bases", "basegenerate", "baseprops"]
+timeout = 300
+assert_timeout = 120
+extra_args = ["--dev"]

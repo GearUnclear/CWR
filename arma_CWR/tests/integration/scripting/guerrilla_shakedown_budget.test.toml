@@ -1,0 +1,16 @@
+# The shakedown pair held to the live-AI budget (shakedown.sqs gmSimAdmit,
+# OFFSCREEN-CONTRACT.md section 6). Boots the SHIPPED Guerrilla.Abel template
+# (repo-root-relative) on the full Remaster lane: data_dir "packages/RemasterUD"
+# is a gitignored junction to a setup-prepared shadow of the Steam Remastered
+# folder (tools/runtime/new-remaster-shadow.ps1, then setup-guerrilla.ps1 in
+# Remaster mode; see guerrilla-mode/FRESH-INSTALL.md). The shadow must carry
+# the current gmcore (guerrilla-mode/install-missions.ps1). Without the
+# junction the test reports spawn failed, which is not a regression.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "offscreen"]
+# a 16 s warm-up, a 50 s watch of game time, then up to 60 s for the launch
+timeout = 600
+assert_timeout = 240
+extra_args = ["--dev"]

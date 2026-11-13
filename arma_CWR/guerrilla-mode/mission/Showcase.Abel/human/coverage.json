@@ -90,6 +90,15 @@
       "assailant_rogue",
       "assailant_resist"
     ],
+    "../engine/Poseidon/Game/Guerrilla/BaseDetect.cpp": [
+      "zones"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/BaseGenerate.cpp": [
+      "zones"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/BaseProps.cpp": [
+      "zones"
+    ],
     "../engine/Poseidon/Game/Guerrilla/ZoneRegistry.cpp": [
       "zones",
       "town_support",
@@ -112,11 +121,48 @@
       "heat"
     ],
     "../engine/Poseidon/Game/Guerrilla/CounterAttack.cpp": [
+      "alert",
       "town_support",
       "garrison"
     ],
     "../engine/Poseidon/Game/Guerrilla/CounterAttackCommands.cpp": [
       "town_support"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/CounterAttackAir.cpp": [
+      "escalation",
+      "town_support"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/CounterAttackMarch.cpp": [
+      "town_support"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForces.cpp": [
+      "alert",
+      "garrison",
+      "escalation",
+      "persistence"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp": [
+      "garrison"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForcesLedger.cpp": [
+      "garrison",
+      "escalation",
+      "persistence"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForcesLevers.cpp": [
+      "garrison",
+      "escalation"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/ForcePackages.cpp": [
+      "garrison",
+      "escalation"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierAir.cpp": [
+      "escalation",
+      "town_support"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierAirCommands.cpp": [
+      "escalation"
     ],
     "../engine/Poseidon/Game/Guerrilla/GarrisonCache.cpp": [
       "garrison"
@@ -158,6 +204,10 @@
       "traffic_commandeer",
       "traffic_patrol",
       "traffic_convoy"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/RoadRoute.cpp": [
+      "town_support",
+      "garrison"
     ],
     "../engine/Poseidon/Game/Guerrilla/TrafficEncounter.cpp": [
       "traffic_commandeer"

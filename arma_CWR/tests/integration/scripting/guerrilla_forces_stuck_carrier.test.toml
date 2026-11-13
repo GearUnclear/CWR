@@ -1,0 +1,21 @@
+# Occupier forces, a CARRIER BORN NEAR A DEFENDED TOWN on a cross-country leg
+# dismounts its infantry and the infantry reaches the town (OCCUPIER-FORCES.md
+# 6.5 "At the town edge", "Arrival births"; native CounterAttack::March and
+# its stall rule). Video 6 of 2026-10-17: op 13, a Ural with nine men and a
+# T72 from the Outpost, was born at the arrival point 297 m from Sainte
+# Marie and sat there, seated, for 1617 s until the live timeout withdrew it.
+# Boots the SHIPPED Guerrilla.Abel template (repo-root-relative) on the full
+# Remaster lane: data_dir "packages/RemasterUD" is a gitignored junction to a
+# setup-prepared shadow of the Steam Remastered folder
+# (tools/runtime/new-remaster-shadow.ps1, then setup-guerrilla.ps1 in Remaster
+# mode; see guerrilla-mode/FRESH-INSTALL.md). The shadow must carry the
+# current gmcore (guerrilla-mode/install-missions.ps1). Without the junction
+# the test reports spawn failed, which is not a regression.
+# Not headless: the birth gate needs a real camera.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 1200
+assert_timeout = 600
+extra_args = ["--dev"]

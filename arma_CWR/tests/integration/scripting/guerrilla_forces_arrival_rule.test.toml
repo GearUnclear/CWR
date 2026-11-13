@@ -1,0 +1,15 @@
+# Occupier forces, the arrival rule: a town 1.4 to 2.2 km from its nearest base gets a truck, one past 2.7 km a helicopter insertion (OCCUPIER-FORCES.md 6.5, 16; owner 2026-10-15). Not headless: the forces are born under S (a real camera).
+# Boots the SHIPPED Guerrilla.Abel template (repo-root-relative; it opts in
+# with occupierForces = 1) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The
+# shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a
+# regression.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 720
+assert_timeout = 300
+extra_args = ["--dev"]

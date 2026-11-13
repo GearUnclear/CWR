@@ -7,7 +7,7 @@
 #      needed since issue #54 C4: Lebanon80.wrp lives inside
 #      @LoBo\addons\LoBo_Leb.pbo, and the world gate now reads pbo entry
 #      tables instead of only looking in <GameDir>\Worlds.
-#   2. The @LoBo mod next to the data dir (--mods-dir ".." resolves against the
+#   2. The @LoBo mod inside the data dir (--mods-dir "." resolves against the
 #      game CWD = data dir), with @lobofixup mounted AFTER it - it carries the
 #      @LoBo CfgGuerrillaFactions roster (Hizballah, IDF, ...), which since
 #      issue #54 A4 is no longer in the template's description.ext.
@@ -24,4 +24,4 @@ tags = ["ui", "guerrilla", "full_cwa", "lobo", "headless"]
 # budgets 420 for the load alone, and this adds the menu flow in front of it).
 timeout = 900
 assert_timeout = 360
-extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]
+extra_args = ["--dev", "--no-strict", "--mods-dir", ".", "--mod", "@LoBo;${repo_root}/tests/fixtures/mods-lobo/@lobofixup"]

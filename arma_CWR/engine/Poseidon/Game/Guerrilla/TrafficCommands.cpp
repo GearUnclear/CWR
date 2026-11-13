@@ -79,7 +79,10 @@ static GameValue GmTrafficEscort(const GameState* /*state*/, GameValuePar oper1)
 //    civRoute, patrolRoute, convoyRoute,        (0/1 scalars)
 //    lastFailKind, lastFailReason, lastFailDetail, (strings; "" when none)
 //    passes, spawned, failed, configWarnings,
-//    encounterRolls]                             (issue #66: surrender/escape rolls drawn)
+//    encounterRolls,                             (issue #66: surrender/escape rolls drawn)
+//    skippedBudget, skippedBodies, skippedGroups, budgetWarnings]
+// (slots 17..20, round 3 A: ambient spawns the live-AI budget refused, by
+// cause, and the rate-limited WARNs; lastFailReason reads "liveBudget")
 // Bools ride as 0/1 scalars (raw bools kill the tri harness asserts).
 static GameValue GmTrafficDiag(const GameState* state)
 {
@@ -87,7 +90,7 @@ static GameValue GmTrafficDiag(const GameState* state)
     GameArrayType& array = value;
     const Traffic& t = Traffic::Instance();
     const TrafficDiag& d = t.Diag();
-    array.Resize(17);
+    array.Resize(21);
     array[0] = (float)(t.Count(TKCiv) - t.CountParked());
     array[1] = (float)t.Count(TKPatrol);
     array[2] = (float)t.Count(TKConvoy);
@@ -105,6 +108,10 @@ static GameValue GmTrafficDiag(const GameState* state)
     array[14] = (float)d.failed;
     array[15] = (float)t.ConfigWarnings().Size();
     array[16] = (float)d.encounterRolls;
+    array[17] = (float)d.skippedBudget;
+    array[18] = (float)d.skippedBudgetBodies;
+    array[19] = (float)d.skippedBudgetGroups;
+    array[20] = (float)d.budgetWarnings;
     return value;
 }
 
@@ -182,6 +189,23 @@ static GameValue GmTrafficEncounter(const GameState* state, GameValuePar oper1)
 static GameValue GmTrafficSurrenderChance(const GameState* /*state*/, GameValuePar oper1)
 {
     return Traffic::Instance().SetCommandeerSurrenderChance((float)oper1);
+}
+
+// gmTrafficTune [key, value] -> true when the key is known.  Test aid
+// (round 3 A): overrides one scalar traffic tuning key (interval,
+// civChance, patrolChance, convoyChance, parkChance, maxCiv, maxPatrols,
+// maxConvoys, maxParked; clamped to the config ranges) until the next config
+// load - mission start and every save load restore it
+static GameValue GmTrafficTune(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 2) || !CheckType(state, array[0], GameString) ||
+        !CheckType(state, array[1], GameScalar))
+    {
+        return false;
+    }
+    GameStringType key = array[0];
+    return Traffic::Instance().SetTuneValue(key, (float)array[1]);
 }
 
 // gmTrafficDest <veh> -> the entry's current destination road point in getPos
@@ -422,6 +446,7 @@ INIT_MODULE(GuerrillaTraffic, 3)
     GGameState.NewNularOp(GameNular(GameArray, "gmTrafficDiag", GmTrafficDiag));
     GGameState.NewFunction(GameFunction(GameArray, "gmTrafficEncounter", GmTrafficEncounter, GameObject));
     GGameState.NewFunction(GameFunction(GameScalar, "gmTrafficSurrenderChance", GmTrafficSurrenderChance, GameScalar));
+    GGameState.NewFunction(GameFunction(GameBool, "gmTrafficTune", GmTrafficTune, GameArray));
 
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadNearest", GmRoadNearest, GameObjectOrArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadPath", GmRoadPath, GameArray));

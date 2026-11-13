@@ -48,6 +48,10 @@ class CfgGuerrillaZones
     // within 300 m of the explicit zones below).
     seedCities = 1;
     seedCitySupport = 20;
+    // Generated occupier bases (OCCUPIER-FORCES.md 5.7) stay off until the
+    // Sinai playRegion[] (#75) decides whether the north is in the theatre:
+    // inside the default box every town already has a base in reach.
+    generateBases = 0;
 
     class Zones
     {

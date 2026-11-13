@@ -1,0 +1,9 @@
+# Generated occupier bases across a save (OCCUPIER-FORCES.md 5.7): Guerrilla.Abel
+# generates its OUTPOSTs at new game, the game is saved, and a fresh process
+# (which generates again on its own boot, from a new seed) loads the save and
+# finds the STORED bases: the same names, types, positions and garrisonMax,
+# nothing generated twice and nothing re-derived (shared user dir across the
+# ordered phases 01_generate_save and 02_reload). Full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow
+# of the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md).
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "bases", "basegenerate", "save-load", "headless"]

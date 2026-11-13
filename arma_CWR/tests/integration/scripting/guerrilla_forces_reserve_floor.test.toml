@@ -1,0 +1,21 @@
+# Occupier forces round 6 (owner decision 2026-10-17, video 7 op 4): the
+# reserve floor. A director-bought ground operation may not take the pool
+# below forcesPoolFloor x poolStart by its own debit; the plan waits, whole,
+# and goes once the pool has refilled past its price plus the floor
+# (OCCUPIER-FORCES.md 6.3 THE RESERVE FLOOR). Boots the SHIPPED
+# Guerrilla.Abel template (repo-root-relative; it opts in with
+# occupierForces = 1) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow
+# of the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The
+# shadow must carry the current gmcore and faction library
+# (guerrilla-mode/install-missions.ps1): EAST's BMP and T72 make the video's
+# package. Without the junction the test reports spawn failed, which is not
+# a regression. The operation is asserted at its launch (gmOccupierOps),
+# before any birth.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "occupierforces", "counterattack"]
+timeout = 720
+assert_timeout = 300
+extra_args = ["--dev"]

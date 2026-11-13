@@ -1,0 +1,7 @@
+# Options shell pointer-click safety (owner crash 2026-10-14, freed scroll list
+# written from OptionsScrollList::PollPointerActionClick). Unpinned: runs on the
+# --data-dir given (the Remaster shadow) like the options/controls tests. Real
+# pointer hit-tests need a real window, so it is headful; run with --focus.
+tags = ["headful", "options", "controls"]
+timeout = 240
+extra_args = ["--focus"]

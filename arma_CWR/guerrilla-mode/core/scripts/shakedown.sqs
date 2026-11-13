@@ -10,7 +10,7 @@
 ;        the scene initiator pair (transient handles).
 ;  READS: gmZoneCount/gmZone, gmZoneAlert, gmWarLevel, gmOccupierSide +
 ;        faction descriptor (tier classes), GM_CIV_GROUPS/GM_CIV_GROUP_ZONE,
-;        GM_PANIC_ZONES, aP, time, dayTime.
+;        GM_PANIC_ZONES, aP, time, dayTime, gmSimAdmit (the live-AI budget).
 ;  Kill effects flow through ONE owner: this file only POSTS the synthetic
 ;  kill record; civilians.sqs's consumer applies support/resentment/panic.
 ;  The scene runs as a PHASED state machine advanced once per tick (no long
@@ -72,6 +72,8 @@ GM_SHK_AIM_T     = 4
 ;   gmShkBeat      beat counter within phase 2
 ;   gmShkOrganic   scene launched by the organic roll (forced scenes NEVER
 ;                  roll the kill - deterministic in both directions)
+;   gmShkSkipBudget launches the live-AI budget refused (gmSimAdmit, the
+;                  pair's 2 bodies in 1 new occupier group) since mission start
 GM_SHK_ACTIVE = false
 GM_SHK_GRP    = grpNull
 GM_SHK_VICTIM = objNull
@@ -83,6 +85,7 @@ gmShkPhase  = 0
 gmShkT0     = 0
 gmShkBeat   = 0
 gmShkOrganic = false
+gmShkSkipBudget = 0
 
 ; ---- force hooks (DEBUG/TEST; binding semantics) ---------------------------------
 ;   GM_SHK_FORCE = true     next tick SKIPS chance/cooldown/heat/WL/range
@@ -163,6 +166,14 @@ goto "launch"
 
 ; ---- launch: pick a victim, spawn the initiator pair --------------------------
 #launch
+; the live-AI budget (OFFSCREEN-CONTRACT.md section 6), as civilians.sqs and
+; ambient traffic: a pair that would breach budgetLiveBodies or the
+; occupier's group budget is not spawned and the scene waits for a later
+; tick (a forced scene keeps GM_SHK_FORCE set and retries, as at the
+; null-victim guard below)
+gmShkAdmit = gmSimAdmit [gmOccupierSide, 2, 1]
+? gmShkAdmit > 0 : gmShkSkipBudget = gmShkSkipBudget + 1
+? gmShkAdmit > 0 : goto "loopTail"
 GM_SHK_ZONE = gmShkZi
 ; victim: a random live unit from the zone's civ groups (reservoir-style pick)
 gmShkV = objNull; gmShkJ = 0; while {gmShkJ < (count GM_CIV_GROUPS)} do {if ((GM_CIV_GROUP_ZONE select gmShkJ) == ((gmZone gmShkZi) select GM_Z_NAME)) then {gmShkU = units (GM_CIV_GROUPS select gmShkJ); gmShkK = 0; while {gmShkK < (count gmShkU)} do {if ((alive (gmShkU select gmShkK)) and ((isNull gmShkV) or ((random 1) < 0.5))) then {gmShkV = gmShkU select gmShkK}; gmShkK = gmShkK + 1}}; gmShkJ = gmShkJ + 1}

@@ -9,3 +9,7 @@ Guidance for AI coding agents working in this repository. The full project guide
 ## Branches
 
 **Make no new branches unless the user grants permission.** Work on the current branch (normally `main`). Do not run `git branch`, `git checkout -b`, `git switch -c`, `git worktree add -b`, or push a new branch to any remote without the user's explicit OK in chat for that branch. Approval for one branch does not extend to the next. This applies to subagents too.
+
+## Game processes
+
+**Never kill `PoseidonGame` globally** (no `Get-Process PoseidonGame | Stop-Process`): other sessions run games on this machine at the same time. Stop only your own with `arma_CWR/tools/stop-owned-games.ps1`, scoped by `-Pid` or `-DataDir`; see [`agent_guidelines/scoped-game-cleanup.md`](agent_guidelines/scoped-game-cleanup.md).

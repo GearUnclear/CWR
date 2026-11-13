@@ -1,6 +1,8 @@
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // GetZoneState (modulation)
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the occupier-side war level (7.1)
+#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>      // Landmass: no leg across the sea
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>   // ClassifyWeaponShow
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
@@ -105,6 +107,7 @@ void Traffic::Clear()
     _subAccum = 0;
     _percept = Perception();
     _diag = TrafficDiag();
+    _budgetWarnAge = BudgetWarnInterval;
     for (int k = 0; k < NTrafficKinds; k++)
     {
         _lastLogged[k] = TSFNone;
@@ -433,6 +436,8 @@ const char* Traffic::SpawnFailureName(int failure)
             return "hullCreate";
         case TSFDriverSeat:
             return "driverSeat";
+        case TSFLiveBudget:
+            return "liveBudget";
         default:
             return "unknown";
     }
@@ -892,6 +897,12 @@ static int PickDest(int kind, const AutoArray<TrafficZoneCandidate>& zones, int 
     {
         const TrafficZoneCandidate& z = zones[i];
         if (z.index == originIndex || !DestEligible(kind, z))
+        {
+            continue;
+        }
+        // a car never drives across the sea (Malden's Southeast Compound is
+        // an island of its own: its patrols and convoys stalled at the shore)
+        if (origin->landmass >= 0 && z.landmass >= 0 && z.landmass != origin->landmass)
         {
             continue;
         }
@@ -1476,6 +1487,120 @@ TrafficCrewDisposal Traffic::CrewDisposal(bool personDead, bool seated)
 }
 
 // ---------------------------------------------------------------------------
+// the live-AI budget gate (round 3 A, OFFSCREEN-CONTRACT.md section 6)
+// ---------------------------------------------------------------------------
+
+int Traffic::SpawnBodiesMax(int kind)
+{
+    switch (kind)
+    {
+        case TKCiv:
+            return 1; // the driver
+        case TKPatrol:
+            return 3; // driver, gunner on a turret, one passenger on a cargo hull
+        case TKConvoy:
+            return 7; // the truck's three, the escort's driver, gunner and two riflemen
+        default:
+            return 0;
+    }
+}
+
+int Traffic::BudgetVerdict(bool forced, const LiveCensus& census, int bodies, int groups, const ZoneTuning& zoneTuning)
+{
+    if (forced)
+    {
+        return 0; // test levers place deliberately, as they bypass the chance roll
+    }
+    return SimBudgetAdmit(census, bodies, groups, zoneTuning);
+}
+
+bool Traffic::AdmitAmbientSpawn(int kind, const LiveCensus& census, const ZoneTuning& zoneTuning)
+{
+    const int bodies = SpawnBodiesMax(kind);
+    const int bits = BudgetVerdict(false, census, bodies, SpawnGroups, zoneTuning);
+    if (bits == 0)
+    {
+        return true;
+    }
+    _diag.skippedBudget++;
+    if (bits & SBLiveBodies)
+    {
+        _diag.skippedBudgetBodies++;
+    }
+    if (bits & SBSideGroups)
+    {
+        _diag.skippedBudgetGroups++;
+    }
+    // the coroner's line names the verdict (gmTrafficDiag), but it is not a
+    // failed attempt: the road is silent by design until there is room
+    _diag.lastFailKind = kind;
+    _diag.lastFail = TSFLiveBudget;
+    _diag.lastFailDetail = (bits & SBLiveBodies) ? "budgetLiveBodies" : "budgetSideGroups";
+    if (_budgetWarnAge >= BudgetWarnInterval)
+    {
+        _budgetWarnAge = 0;
+        _diag.budgetWarnings++;
+        LOG_WARN(Core,
+                 "Traffic: {} spawn skipped for the live-AI budget (live AI {}+{}/{}, side groups {}+{}/{}); {} "
+                 "ambient spawns skipped so far, next WARN in {:.0f}s at the earliest",
+                 KindName(kind), census.liveTotal, bodies, zoneTuning.budgetLiveBodies, census.sideGroups, SpawnGroups,
+                 zoneTuning.budgetSideGroups, _diag.skippedBudget, BudgetWarnInterval);
+    }
+    return false;
+}
+
+bool Traffic::SetTuneValue(const char* key, float value)
+{
+    if (!key)
+    {
+        return false;
+    }
+    auto prob = [](float v) { return v < 0 ? 0.0f : (v > 1 ? 1.0f : v); };
+    auto cap = [](float v) { return v < 0 ? 0 : toInt(v); };
+    if (stricmp(key, "interval") == 0)
+    {
+        _tuning.interval = value < 0.5f ? 0.5f : value; // the config floor
+    }
+    else if (stricmp(key, "civChance") == 0)
+    {
+        _tuning.civChance = prob(value);
+    }
+    else if (stricmp(key, "patrolChance") == 0)
+    {
+        _tuning.patrolChance = prob(value);
+    }
+    else if (stricmp(key, "convoyChance") == 0)
+    {
+        _tuning.convoyChance = prob(value);
+    }
+    else if (stricmp(key, "parkChance") == 0)
+    {
+        _tuning.parkChance = prob(value);
+    }
+    else if (stricmp(key, "maxCiv") == 0)
+    {
+        _tuning.maxCiv = cap(value);
+    }
+    else if (stricmp(key, "maxPatrols") == 0)
+    {
+        _tuning.maxPatrols = cap(value);
+    }
+    else if (stricmp(key, "maxConvoys") == 0)
+    {
+        _tuning.maxConvoys = cap(value);
+    }
+    else if (stricmp(key, "maxParked") == 0)
+    {
+        _tuning.maxParked = cap(value);
+    }
+    else
+    {
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // world-touching internals (engine path only)
 // ---------------------------------------------------------------------------
 
@@ -1497,6 +1622,7 @@ void Traffic::BuildZoneCandidates(AutoArray<TrafficZoneCandidate>& out) const
         c.z = z->pos.Z();
         c.isCity = stricmp(z->type, "CITY") == 0;
         c.occupierOwned = stricmp(z->owner, occ) == 0;
+        c.landmass = RoadRoute::Landmass(z->pos);
         out.Add(c);
     }
 }
@@ -1809,6 +1935,149 @@ void Traffic::IssueRoute(TrafficEntry& e, Vector3Par dest, int combatMode, int s
     e.dest = dest;
 }
 
+// Seated-man deletion (the CounterAttack EngineOps idiom, 37e24ba).
+// ::DeleteVehicle only flags a man sitting in a vehicle: he stays in the
+// world's out-vehicle list, which never purges deleted entries, so every
+// crewman, rider or corpse deleted in his seat lived on as an invisible
+// object (and was written into every save).  Every traffic deletion of a
+// person therefore moves him out of his seat first (no sound, where the hull
+// stands; the caller deletes him and the hull unseen), and every hull
+// deletion empties its seats first.
+
+// the seat test against one hull
+static bool SitsIn(const Person* person, const Transport* veh)
+{
+    if (!person || !veh)
+    {
+        return false;
+    }
+    if (veh->Driver() == person || veh->Gunner() == person || veh->Commander() == person)
+    {
+        return true;
+    }
+    const ManCargo& cargo = veh->GetManCargo();
+    for (int m = 0; m < cargo.Size(); m++)
+    {
+        if (cargo[m] == person)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// the hull a man sits in: his brain's vehicle, else (a corpse whose brain is
+// gone still sits in his seat) the first of the candidate hulls holding him
+static Transport* SeatHull(Person* person, Transport* const* hulls, int nHulls)
+{
+    AIUnit* unit = person ? person->Brain() : nullptr;
+    Transport* veh = unit ? unit->GetVehicleIn() : nullptr;
+    if (veh && SitsIn(person, veh))
+    {
+        return veh;
+    }
+    for (int h = 0; h < nHulls; h++)
+    {
+        if (SitsIn(person, hulls[h]))
+        {
+            return hulls[h];
+        }
+    }
+    return nullptr;
+}
+
+static void LeaveSeat(Person* person, Transport* veh)
+{
+    if (!person || !veh || !person->IsLocal())
+    {
+        return;
+    }
+    const Matrix4 at = veh->WorldTransform();
+    if (veh->Driver() == person)
+    {
+        veh->GetOutDriver(at, false);
+    }
+    else if (veh->Gunner() == person)
+    {
+        veh->GetOutGunner(at, false);
+    }
+    else if (veh->Commander() == person)
+    {
+        veh->GetOutCommander(at, false);
+    }
+    else
+    {
+        veh->GetOutCargo(person, at, false);
+    }
+}
+
+// delete one traffic person (living or dead), out of his seat first
+static void DeleteTrafficPerson(Person* person, Transport* const* hulls = nullptr, int nHulls = 0)
+{
+    if (!person)
+    {
+        return;
+    }
+    LeaveSeat(person, SeatHull(person, hulls, nHulls));
+    if (person->IsLocal())
+    {
+        ::DeleteVehicle(person);
+    }
+    else
+    {
+        GetNetworkManager().AskForDeleteVehicle(person);
+    }
+}
+
+// delete a traffic hull with its seats emptied first: the dead, the
+// brainless and members of the traffic group 'own' are deleted with it; any
+// other living man (somebody else who climbed in) only steps out, which is
+// what the engine's own hull deletion does for him
+static void DeleteTrafficHull(Transport* veh, AIGroup* own)
+{
+    if (!veh)
+    {
+        return;
+    }
+    AutoArray<Person*> seated;
+    Person* seats[3] = {veh->Driver(), veh->Gunner(), veh->Commander()};
+    for (int s = 0; s < 3; s++)
+    {
+        if (seats[s])
+        {
+            seated.Add(seats[s]);
+        }
+    }
+    const ManCargo& cargo = veh->GetManCargo();
+    for (int m = 0; m < cargo.Size(); m++)
+    {
+        if (cargo[m])
+        {
+            seated.Add(cargo[m]);
+        }
+    }
+    for (int i = 0; i < seated.Size(); i++)
+    {
+        Person* person = seated[i];
+        AIUnit* unit = person->Brain();
+        if (unit && unit->IsAnyPlayer())
+        {
+            LeaveSeat(person, veh);
+            continue;
+        }
+        bool ours = !unit || person->IsDammageDestroyed() || (own && unit->GetGroup() == own);
+        if (ours)
+        {
+            DeleteTrafficPerson(person, &veh, 1);
+        }
+        else
+        {
+            LeaveSeat(person, veh);
+        }
+    }
+    ::DeleteVehicle(veh);
+}
+
 // extra crew (gunner / cargo / escort seats): a refused seat leaves a body on
 // foot next to the hull that no route ever addresses - delete it instead
 static void SeatOrDelete(Person* person, Transport* veh)
@@ -1820,7 +2089,7 @@ static void SeatOrDelete(Person* person, Transport* veh)
     AIUnit* unit = person->Brain();
     if (!unit || unit->GetVehicleIn() != veh)
     {
-        ::DeleteVehicle(person);
+        DeleteTrafficPerson(person, &veh, 1);
     }
 }
 
@@ -1903,7 +2172,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
     RString escortType;
     RString crewType;
     const char* sideName = nullptr;
-    const float warLevel = ReadWarLevel();
+    const float warLevel = OccupierForces::Instance().OccupierWarLevel();
     RString occ = registry.OccupierSide();
     if (kind == TKCiv)
     {
@@ -1995,7 +2264,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
         // no driver = no traffic; tear the hull down again
         DeleteCrew(grp);
         grp->RemoveFromCenter();
-        ::DeleteVehicle(veh);
+        DeleteTrafficHull(veh, grp);
         why = TSFDriverSeat;
         LOG_WARN(Core, "Traffic: could not seat a '{}' driver into '{}'", (const char*)crewType, (const char*)hullType);
         return false;
@@ -2049,7 +2318,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
                 }
                 if (!escort->Driver())
                 {
-                    ::DeleteVehicle(escort);
+                    DeleteTrafficHull(escort, grp); // its seated gunner and riflemen go with it
                     escort = nullptr;
                 }
             }
@@ -2169,14 +2438,7 @@ void Traffic::DeleteCrew(AIGroup* grp) const
     }
     for (int b = 0; b < bodies.Size(); b++)
     {
-        if (bodies[b]->IsLocal())
-        {
-            ::DeleteVehicle(bodies[b]);
-        }
-        else
-        {
-            GetNetworkManager().AskForDeleteVehicle(bodies[b]);
-        }
+        DeleteTrafficPerson(bodies[b]); // a seated man (or corpse) leaves his seat first
     }
 }
 
@@ -2299,14 +2561,9 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
         {
             grp->RemoveFromCenter();
         }
-        if (veh)
-        {
-            ::DeleteVehicle(veh);
-        }
-        if (escort)
-        {
-            ::DeleteVehicle(escort);
-        }
+        // seats emptied first (a corpse no longer in the group still sits)
+        DeleteTrafficHull(veh, grp);
+        DeleteTrafficHull(escort, grp);
     }
 
     TrafficEventRecord ev;
@@ -3460,6 +3717,17 @@ static bool FreeSpentGroup(AIGroup* grp)
 
 void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
 {
+    // every roadside hull: a body filed under one row may sit in another
+    // row's hull (a convoy's dead in the escort), and a corpse whose brain is
+    // gone is found by its seat
+    AutoArray<Transport*> hulls;
+    for (int h = 0; h < _released.Size(); h++)
+    {
+        if (_released[h].vehicle)
+        {
+            hulls.Add(_released[h].vehicle);
+        }
+    }
     for (int i = _released.Size() - 1; i >= 0; i--)
     {
         ReleasedEntry& r = _released[i];
@@ -3478,7 +3746,7 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
             {
                 if (r.bodies[b].GetLink())
                 {
-                    ::DeleteVehicle(r.bodies[b]);
+                    DeleteTrafficPerson(r.bodies[b], hulls.Data(), hulls.Size());
                 }
             }
             AIGroup* grp = r.group;
@@ -3557,7 +3825,7 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
             {
                 if (r.bodies[b].GetLink())
                 {
-                    ::DeleteVehicle(r.bodies[b]);
+                    DeleteTrafficPerson(r.bodies[b], hulls.Data(), hulls.Size());
                 }
             }
             AIGroup* grp = r.group;
@@ -3565,7 +3833,15 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
             {
                 grp->RemoveFromCenter();
             }
-            ::DeleteVehicle(veh);
+            for (int h = 0; h < hulls.Size(); h++)
+            {
+                if (hulls[h] == veh)
+                {
+                    hulls.Delete(h);
+                    break;
+                }
+            }
+            DeleteTrafficHull(veh, grp); // any corpse left in a seat goes with it
             _released.Delete(i);
         }
     }
@@ -3621,7 +3897,7 @@ void Traffic::CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt)
                 continue;
             }
             AIGroup* grp = f.group;
-            ::DeleteVehicle(p);
+            DeleteTrafficPerson(p);
             if (grp && grp->NUnits() == 0)
             {
                 grp->RemoveFromCenter();
@@ -3957,6 +4233,7 @@ void Traffic::Simulate(float deltaT)
     // latch, wreck age, walker age) counts it, never the nominal interval
     AutoArray<TrafficEventRecord> fired;
     _diag.passes++;
+    AdvanceBudgetClock(tick);
     UpdateEntries(playerPos, playerValid, tick, fired);
     CleanupReleased(playerPos, playerValid, tick);
     CleanupFleeing(playerPos, playerValid, tick);
@@ -3984,7 +4261,7 @@ void Traffic::Simulate(float deltaT)
             PickRoute(TKPatrol, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d, -1, &_percept.band);
         in.hasConvoyRoute =
             PickRoute(TKConvoy, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d, -1, &_percept.band);
-        in.warLevel = ReadWarLevel();
+        in.warLevel = OccupierForces::Instance().OccupierWarLevel();
         _diag.hasCivRoute = in.hasCivRoute;
         _diag.hasPatrolRoute = in.hasPatrolRoute;
         _diag.hasConvoyRoute = in.hasConvoyRoute;
@@ -4039,6 +4316,20 @@ void Traffic::Simulate(float deltaT)
             decide.maxPatrols = ScaleCap(_tuning.maxPatrols, _percept.band.radius, _tuning.radius);
         }
         int kind = DecideSpawn(in, decide);
+        if (kind >= 0)
+        {
+            // the live-AI budget (OFFSCREEN-CONTRACT.md section 6): the same
+            // census CounterAttack's births read, fresh every pass, so a
+            // crowded map silences the road and an emptier one reopens it on
+            // the next pass.  The hard cap holds against the most bodies this
+            // kind can seat; forced spawns (ForceSpawn) never come here
+            LiveCensus census;
+            GatherLiveCensus(kind == TKCiv ? "CIV" : (const char*)ZoneRegistry::Instance().OccupierSide(), census);
+            if (!AdmitAmbientSpawn(kind, census, ZoneRegistry::Instance().Tuning()))
+            {
+                kind = -1;
+            }
+        }
         if (kind == TKCiv)
         {
             // reuse the modulated route: the spawn happens from the origin

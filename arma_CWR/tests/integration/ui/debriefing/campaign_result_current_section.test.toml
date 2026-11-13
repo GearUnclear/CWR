@@ -1,5 +1,5 @@
 binary = "PoseidonGame"
-extra_args = ["--mods-dir", "../../tests/fixtures/mods-campaigns", "--mod", "@tridebrief", "--no-strict", "--nosound"]
+extra_args = ["--mods-dir", "${repo_root}/tests/fixtures/mods-campaigns", "--mod", "@tridebrief", "--no-strict", "--nosound"]
 no_autotest = true
 no_menu = true
 tags = ["demo", "exclusive", "ui"]

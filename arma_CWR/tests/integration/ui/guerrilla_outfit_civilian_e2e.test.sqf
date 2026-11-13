@@ -93,11 +93,15 @@ triAssertEq [(gmFactionCivTier [gmResistanceSide, 1]), "SoldierGFakeC"]
 triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
 triAssertEq [(typeOf (GM_COMP_OBJ select 0)), "SoldierGFakeC"]
 
-// -- recruit a fighter through the real request queue. The player spawns AT
-//    the Camp anchor (mission.sqm player pos == the CAMP zone pos), so
-//    recruit.sqs mounts the addAction menu; the test enqueues the request
+// -- recruit a fighter through the real request queue. recruit.sqs anchors
+//    its addAction menu on the headquarters (gmHqPos), and the campaign
+//    opens with its HQ established at the Camp (OCCUPIER-FORCES.md 9.1),
+//    usually in a house off the zone centre where mission.sqm puts the
+//    player, so the test stands him at the HQ; the request is enqueued
 //    exactly as recruit_action.sqs does (gmReqId + gmReqPending) ---------------
 gmManpower = 5
+triSimUntil { gmHqEstablished }
+player setPos gmHqPos
 triSimUntil { gmRecruitActive }
 gmReqId = gmActRecruit
 gmReqPending = true

@@ -697,6 +697,17 @@ void CheckCommandFailed(AISubgroupContext *context);
 
 void CreateUnitsList(PackedBoolArray list, char *buffer);
 
+// The cargo seat-in contract (issue #78 family): a local, living unit that
+// sits in a hull's cargo seat and is assigned as that hull's cargo is in the
+// AI state InCargo, which AIUnit::DoGetOut's cargo branch expects and leaves.
+// AIUnit::AssignAsCargo applies it, so a path that only seats and assigns
+// (NativeMoveIn, the network seat update) still ends in InCargo.  True when
+// the unit must enter InCargo now.
+bool CargoSeatEntersInCargo(bool local, bool alive, bool seatedInCargo, AIUnit::State state);
+
+// Upper-case name of an AI unit state ("WAIT", "CARGO", ...), for diagnostics.
+const char* AIUnitStateName(AIUnit::State state);
+
 
 class IndicesUpdateAISubgroup : public IndicesNetworkObject
 {

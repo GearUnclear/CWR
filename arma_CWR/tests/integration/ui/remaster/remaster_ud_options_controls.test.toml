@@ -1,0 +1,15 @@
+# REMASTER LANE (issue #67 follow-up): the UD-only Options controls on the full
+# official Remaster. data_dir "packages/RemasterUD" is a gitignored junction to
+# a SHADOW of the Steam Remastered folder (never the Steam install itself),
+# prepared with setup-guerrilla.ps1 in Remaster mode; see
+# remaster_ud_menu.test.toml for the recipe and guerrilla-mode/FRESH-INSTALL.md.
+# Without the junction the test reports spawn failed, which is not a regression.
+# Bohemia's optionsShell.hpp stays byte-identical (six Controls rows, no Arma 3
+# preset); the row comes from bin/ud-options.hpp, included from the line setup
+# appends to Bohemia's resource-extra.cpp, as RscOptionsPageControlsUD. The
+# engine mounts that class when present (SelectControlsPageResourceClass).
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "remaster_ud", "headless", "options", "controls"]
+timeout = 120
+extra_args = ["--master-server", "https://master.example"]

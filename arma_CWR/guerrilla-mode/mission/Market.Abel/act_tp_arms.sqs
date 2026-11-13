@@ -5,6 +5,12 @@ MKT_i = gmDealerNearest ["WEAPON", getPos aP]
 ? MKT_i < 0 : exit
 MKT_rec = gmDealer MKT_i
 MKT_p = MKT_rec select 2
+; stand beside the dealer's BODY, not his planned spot: the spawn's free-position
+; search can shove him several metres off it (La Trinite's vehicle dealer stands
+; ~7 m away), and a +4/+4 hop from the planned spot then lands outside the
+; 12 m buy radius (market.sqs GM_MKT_DEALER_RADIUS)
+MKT_n = MKT_rec select 3
+? not (isNull MKT_n) : MKT_p = getPos MKT_n
 aP setPos [(MKT_p select 0) + 4, (MKT_p select 1) + 4, 0]
 hint format ["DEBUG: at the arms dealer in %1. Walk up to him for the BUY menu.", MKT_rec select 0]
 exit

@@ -23,9 +23,13 @@
 ;  OWNS: gmEvtAlert (consumer), GM_QRF_* state/tunables, the QRF group and
 ;        escort vehicle handles (transient).
 ;  READS: gmZoneAlert / gmZoneLastKnown / gmGarrisonSpawned / gmGarrisonGroups,
-;        gmZone tuples, gmWarLevel, gmOccupierSide + faction descriptors
+;        gmZone tuples, gmWarLevelOccupier (the occupier-side war level:
+;        the territory level plus landed reinforcement waves, OCCUPIER-FORCES.md
+;        7.1), the gmOccupierForces band (THIN / SPENT: garrisons stop
+;        chasing YELLOW contacts, 5.6), gmOccupierSide + faction descriptors
 ;        (squad via gmFactionSquad with gmFactionTierClass as the tier-less
-;        fallback, escort via gmFactionVehicle, officer via gmFactionValue).
+;        fallback, escort via gmFactionVehicle, officer via gmFactionValue),
+;        gmLegacyQrf (the QRF launch gate, D20).
 ;        NO classnames, NO side-string literals.
 ; ============================================================================
 @GM_LIB_READY
@@ -74,6 +78,10 @@ goto "aev"
 #aevdone
 
 ; ---------- 2) YELLOW zones: keep the garrison tracking the last-known pos ---
+;      a THIN (or SPENT) occupier pool keeps its garrisons home: no chasing
+;      YELLOW contacts (OCCUPIER-FORCES.md 5.6; band "OFF" with the layer off)
+GM_qBand = (gmOccupierForces) select 2
+? (GM_qBand == "THIN") or (GM_qBand == "SPENT") : goto "ydone"
 GM_qZ = 0
 #ywalk
 ? GM_qZ >= gmZoneCount : goto "ydone"
@@ -89,6 +97,11 @@ goto "ywalk"
 
 ; ---------- 3) QRF: one at a time --------------------------------------------
 ? GM_QRF_ACTIVE : goto "qrfManage"
+; D20 (OCCUPIER-FORCES.md 8.2, 11): with the occupier forces key on, a new
+; campaign's alarms are answered natively (CAKAlarm orders); this script QRF
+; launches only while gmLegacyQrf is true (the key off, or an old save). A
+; QRF already in the field is still managed and stood down above.
+? not gmLegacyQrf : goto "loopTail"
 
 ; -- look for a RED zone -------------------------------------------------------
 GM_qJ = 0
@@ -113,8 +126,8 @@ GM_QRF_RS = nearestObject [GM_QRF_OPOS, "RoadSegment"]
 ; from the faction's tier role arrays; role-less descriptors compose the old
 ; all-riflemen squad) + the faction officer. Monoculture fallback only when
 ; the faction has no tiers at all (gmFactionSquad -> []).
-GM_QRF_CLASSES = gmFactionSquad [gmOccupierSide, gmWarLevel, GM_QRF_SIZE]
-GM_QRF_TIER = gmFactionTierClass [gmOccupierSide, gmWarLevel]
+GM_QRF_CLASSES = gmFactionSquad [gmOccupierSide, gmWarLevelOccupier, GM_QRF_SIZE]
+GM_QRF_TIER = gmFactionTierClass [gmOccupierSide, gmWarLevelOccupier]
 ? (count GM_QRF_CLASSES) > 0 : GM_QRF_GROUP = [GM_QRF_SIDE, GM_QRF_CLASSES, GM_QRF_OPOS] call GM_fnSpawnSquad
 ? (count GM_QRF_CLASSES) == 0 : GM_QRF_GROUP = [GM_QRF_SIDE, GM_QRF_TIER, GM_QRF_SIZE, GM_QRF_OPOS] call GM_fnSpawnGroup
 (gmFactionValue [gmOccupierSide, "officer"]) createUnit [GM_QRF_OPOS, GM_QRF_GROUP, "", 0.6, "SERGEANT"]
@@ -123,7 +136,7 @@ GM_QRF_TIER = gmFactionTierClass [gmOccupierSide, gmWarLevel]
 ; the vehicle survey's headline qrf finding); moveInGunner on a gunnerless
 ; hull is a harmless no-op. Cargo mounting stays out on purpose: the stall
 ; fallback setPos-teleports the foot element and must keep working.
-GM_QRF_VC = gmFactionVehicle [gmOccupierSide, gmWarLevel]
+GM_QRF_VC = gmFactionVehicle [gmOccupierSide, gmWarLevelOccupier]
 ? GM_QRF_VC != "" : GM_QRF_VEH = GM_QRF_VC createVehicle GM_QRF_OPOS
 ? (not (isNull GM_QRF_VEH)) : ((units GM_QRF_GROUP) select 0) moveInDriver GM_QRF_VEH
 ? (not (isNull GM_QRF_VEH)) and ((count units GM_QRF_GROUP) > 1) : ((units GM_QRF_GROUP) select 1) moveInGunner GM_QRF_VEH

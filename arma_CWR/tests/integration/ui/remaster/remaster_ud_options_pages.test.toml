@@ -1,0 +1,13 @@
+# REMASTER LANE (issue #67): see remaster_ud_menu.test.toml for how
+# packages/RemasterUD is built. Without the junction the test reports spawn
+# failed, which is not a regression.
+# Regression for the 2026-10-14 main-menu Options crash (access violation in
+# OptionsScrollList::PollPointerActionClick): walks every Options page on the
+# full Remaster and leaves each scroll-list page through its pinned Close row
+# with the real pointer path (cursor move + InputSubsystem mouse down/up), the
+# one that pops the page from inside the list's own frame.
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "remaster_ud", "headless"]
+timeout = 180
+extra_args = ["--master-server", "https://master.example"]

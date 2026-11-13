@@ -300,6 +300,14 @@ public:
 
 	void InitSensors(bool initialize = false);
 	void AddGroup(AIGroup *grp, int id = 0);
+	// The id AddGroup hands a new group when the caller gives none: the
+	// lowest id in [1, maxGroups] that none of the usedIds holds, so a slot
+	// a released group gave back is reused and the id stays inside the
+	// letter and colour register AIGroup::Init names the group from.  Only
+	// when every slot is taken (or maxGroups <= 0) does it return one past
+	// the largest used id, and AIGroup::Init then reports the overflow.
+	// Non-positive entries in usedIds are ignored.
+	static int PickNewGroupId(const int *usedIds, int count, int maxGroups);
 	void GroupRemoved(AIGroup *grp);
 	void SelectLeader(AIGroup *grp);
 

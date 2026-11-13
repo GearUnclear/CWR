@@ -5,8 +5,12 @@
 //
 // Mount loads the shared slot bundle (RscOptionsPageScrollList) into
 // the shell's notebook and constructs an OptionsScrollList over the
-// shell + the page's Provider.  Unmount destroys the list and lets
-// the base OptionsPage::Unmount RemoveControl every slot IDC.
+// shell + the page's Provider.  Unmount detaches the list (List()
+// returns null from then on) and lets the base OptionsPage::Unmount
+// RemoveControl every slot IDC.  The detached list lives until the page
+// is destroyed: Unmount is usually reached from inside the list itself
+// (a Close row click runs list -> provider -> shell.PopPage -> here), so
+// freeing it here would pull the object out from under its own frame.
 //
 // Subclasses provide the Provider via ProviderRef() and override
 // `TitleText()` / `DefaultFocusIdc()` (typically idc 590 hint or the
@@ -53,6 +57,8 @@ protected:
 
 private:
 	std::unique_ptr<OptionsScrollList> m_list;
+	// The list Unmount detached; destroyed with the page (see top).
+	std::unique_ptr<OptionsScrollList> m_detachedList;
 };
 
 } // namespace Poseidon

@@ -3,9 +3,13 @@
 ; ----------------------------------------------------------------------------
 ;  SYSTEM ON DISPLAY: AlertMachine (native FSM: GREEN/YELLOW/RED per zone off
 ;  garrison knowsAbout - YELLOW at 0.5, RED at 1.5 or a 20 s YELLOW window
-;  expiring), undercover.sqs (cover), qrf.sqs (posture, investigate, QRF).
+;  expiring), undercover.sqs (cover), qrf.sqs (posture, investigate), and the
+;  answer to RED: with occupierForces = 1 the native director answers the
+;  alarm (OccupierForces::AnswerAlarms, an "ALARM" row in gmOccupierOps whose
+;  target is the zone); with the key off or an old save (gmLegacyQrf) the
+;  scripted qrf.sqs convoy (GM_QRF_ACTIVE). Either counts as the QRF here.
 ;  Seams: gmBreakUndercover, gmGarrisonForceDespawn (the stand-down lever:
-;  no perception sources -> the zone calms -> qrf.sqs deletes the QRF),
+;  no perception sources -> the zone calms -> the answer stands down),
 ;  allowDammage (the demo shield - the staged firefight must not end the
 ;  mission by killing the observer).
 ;  Chapter order note (README.md): runs BEFORE capture so the garrison lives.
@@ -16,7 +20,7 @@
 ? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : ["SKIP", "Outpost already liberated - no garrison left to alarm"] call SC_fnDone
 ? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : exit
 
-"Every zone runs a native alert machine on what the garrison actually PERCEIVES of you (knowsAbout): 0.5 turns it YELLOW, 1.5 - or 20 s of unresolved YELLOW - turns it RED. RED is the QRF trigger." call SC_fnSay
+"Every zone runs a native alert machine on what the garrison actually PERCEIVES of you (knowsAbout): 0.5 turns it YELLOW, 1.5 - or 20 s of unresolved YELLOW - turns it RED. RED is the alarm the occupier answers." call SC_fnSay
 ~SC_BEAT
 
 ; ---- arrive 150 m off the wire, SOLO (cover is personal - see lib.sqs), garrison up -
@@ -35,6 +39,10 @@ exit
 #staged
 SC_cRed = false
 SC_cQrf = false
+SC_cNat = false
+; true while a native alarm answer (gmOccupierOps row: 1 kind, 3 package,
+; 5 target zone name, 6 phase) is aimed at the Outpost; SC_tmpAOr keeps the row
+SC_fnAlarmOp = {SC_tmpAO = false; SC_tmpAOn = (gmZone SC_OUT) select GM_Z_NAME; {if (((_x select 1) == "ALARM") and ((_x select 5) == SC_tmpAOn)) then {SC_tmpAO = true; SC_tmpAOr = _x}} forEach gmOccupierOps; SC_tmpAO}
 true call SC_fnShield
 "You came ALONE (the squad waits at the Camp - the disguise covers you, not them). Demo shield up (allowDammage off): this firefight is staged and you are the observer, not the target of the lesson." call SC_fnSay
 ~SC_BEAT
@@ -90,19 +98,28 @@ goto "nofsm"
 
 #red
 SC_cRed = true
-"RED: the zone is in open alarm - garrison to COMBAT, heat spiked, and the QRF convoy is being fielded: an officer, a squad at the War-Level troop tier, and a war-level escort vehicle, staged a few hundred metres out and road-snapped." call SC_fnSay
+"RED: the zone is in open alarm - garrison to COMBAT, heat spiked. Another occupier zone now answers it: the forces director picks a package from its own pool (foot squad, truck, column or helicopter) and fields it out of your sight." call SC_fnSay
 SC_cW = 0
 #qwait
 SC_cQ = false; if (not (isNil "GM_QRF_ACTIVE")) then {SC_cQ = GM_QRF_ACTIVE}
 ? SC_cQ : goto "qrf"
+? [] call SC_fnAlarmOp : goto "native"
 ~1
 SC_cW = SC_cW + 1
-? SC_cW < 20 : goto "qwait"
+? SC_cW < 30 : goto "qwait"
+goto "epilogue"
+
+#native
+SC_cQrf = true
+SC_cNat = true
+format ["The alarm is answered: op %1, a %2 package out of %3, phase %4. It travels to the reported position (where they last saw you, not where you are), searches it, and joins the Outpost garrison once the zone stays quiet.", SC_tmpAOr select 0, SC_tmpAOr select 3, SC_tmpAOr select 4, SC_tmpAOr select 6] call SC_fnSay
+~SC_BEAT
+~SC_BEAT
 goto "epilogue"
 
 #qrf
 SC_cQrf = true
-"QRF is rolling - watch the road. It convoys on MOVE waypoints and finishes with SEARCH-AND-DESTROY on the last-known position; if pathing stalls for 120 s it inserts directly (the para-insertion fallback)." call SC_fnSay
+"QRF is rolling (the scripted convoy: this campaign runs without the forces director, or is an old save). It convoys on MOVE waypoints and finishes with SEARCH-AND-DESTROY on the last-known position; if pathing stalls for 120 s it inserts directly (the para-insertion fallback)." call SC_fnSay
 ~SC_BEAT
 ~SC_BEAT
 goto "epilogue"
@@ -114,7 +131,8 @@ goto "cleanup"
 
 ; ---- epilogue: the disengage loop, demonstrated -------------------------------------
 #epilogue
-"Now the other half of the machine: you MELT AWAY. Back to the Camp - with its perception sources gone the zone collapses to GREEN and qrf.sqs stands the convoy down and deletes it." call SC_fnSay
+? not SC_cNat : "Now the other half of the machine: you MELT AWAY. Back to the Camp - with its perception sources gone the zone collapses to GREEN and qrf.sqs stands the convoy down and deletes it." call SC_fnSay
+? SC_cNat : "Now the other half of the machine: you MELT AWAY. Back to the Camp - with its perception sources gone the zone collapses to GREEN. The answer still reaches the reported position, finds nobody, and after a quiet minute joins the garrison." call SC_fnSay
 #cleanup
 [(gmZone SC_CAMP) select GM_Z_POS, 15] call SC_fnTpSolo
 ? (gmGarrisonSpawned SC_OUT) : gmGarrisonForceDespawn SC_OUT
@@ -129,6 +147,7 @@ goto "verdict"
 
 #calm
 "GREEN again, QRF stood down. Alert, response and disengage - the full loop." call SC_fnSay
+? SC_cNat and ([] call SC_fnAlarmOp) : (format ["The alarm answer (op %1) is still out, phase %2: it settles into the garrison on its own once the zone has been quiet for a minute.", SC_tmpAOr select 0, SC_tmpAOr select 6]) call SC_fnSay
 
 #verdict
 false call SC_fnShield

@@ -16,7 +16,9 @@
 ;     "heatDecay" (-=, clamped), and this file uses only the decay verb.
 ;
 ;  OWNS: gmWarLevel, heat DECAY direction, gmEsc_* scratch.
-;  READS: gmZoneCount/gmZone owners, gmResistanceSide, gmZoneAlert, gmHeatDecay.
+;  READS: gmZoneCount/gmZone owners, gmResistanceSide, gmZoneAlert, gmHeatDecay,
+;         gmHeatDecayHeld (the slower decay of every resistance-held zone, towns
+;         and bases, so the occupier director remembers a flip: OCCUPIER-FORCES.md 6.3).
 ;  NOTE: the old gmUndercoverDetect scalar is GONE - undercover detection is
 ;  per-observer engine code now, and it reads gmWarLevel directly (the
 ;  panicked-town detection multiplier retired with the scalar).
@@ -42,7 +44,11 @@ gmEsc_prevWL    = gmWarLevel
 
 ; ---- FAST: per-zone Heat decay, gated on "lying low" (native GREEN) ----------
 gmEsc_i = 0
-while {gmEsc_i < gmZoneCount} do {if ((gmZoneAlert gmEsc_i) == 0) then {gmZoneSet [gmEsc_i, "heatDecay", gmHeatDecay]}; gmEsc_i = gmEsc_i + 1}
+; a resistance-held zone bleeds gmHeatDecayHeld (nil in a save made before the
+; knob: the ordinary rate), every other zone gmHeatDecay
+gmEsc_decayHeld = gmHeatDecay
+? not (isNil "gmHeatDecayHeld") : gmEsc_decayHeld = gmHeatDecayHeld
+while {gmEsc_i < gmZoneCount} do {if ((gmZoneAlert gmEsc_i) == 0) then {gmEsc_rate = gmHeatDecay; if (((gmZone gmEsc_i) select GM_Z_OWNER) == gmResistanceSide) then {gmEsc_rate = gmEsc_decayHeld}; gmZoneSet [gmEsc_i, "heatDecay", gmEsc_rate]}; gmEsc_i = gmEsc_i + 1}
 
 ; ---- SLOW: recompute War Level every gmEsc_slowEvery fast ticks --------------
 gmEsc_slow = gmEsc_slow + 1

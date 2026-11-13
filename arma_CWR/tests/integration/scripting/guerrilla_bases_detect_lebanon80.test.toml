@@ -1,0 +1,23 @@
+# Occupation-network detection (issue #76), Lebanon80: "no airfield or
+# seaport in theatre by design" (OFFSCREEN-CONTRACT.md section 5). The world
+# has an ILS (Ramat David, Israel, south of the theatre) and a quay at Tyre,
+# so this pins that the template keeps both out: no AIRFIELD, no SEAPORT,
+# nothing in gmSeededBases. Boots the real Guerrilla.Lebanon80 template
+# (repo-root-relative) on the @LoBo Lebanon (80's) world, mounted exactly
+# like guerrilla_lebanon80_boot: the FULL CWA install as the data dir (a
+# Remaster shadow) with the @LoBo mod folder INSIDE it; --mods-dir "."
+# resolves against the game CWD (the data dir), so "@LoBo" mounts
+# <data dir>\@LoBo.
+# PRECONDITIONS (one-time, rerun after an @LoBo reinstall), as for
+# guerrilla_lebanon80_boot: tools/lobo/install-lobo-factions.ps1,
+# PoseidonTools mod doctor <data dir>\@LoBo --fix,
+# guerrilla-mode/install-missions.ps1.
+mission = "guerrilla-mode/mission/Guerrilla.Lebanon80"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless", "occupierforces", "bases"]
+# @LoBo logs ERROR-level noise from legacy pbos (fatal under the default
+# --strict), so this test opts out like guerrilla_lebanon80_boot; generous
+# budgets for the first mount and the 25.6 km world load.
+timeout = 420
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", ".", "--mod", "@LoBo"]

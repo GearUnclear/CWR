@@ -11,11 +11,13 @@
 #include <Poseidon/IO/ParamFileExt.hpp>           // Pars (gmClassExists probe)
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
 #include <Poseidon/Foundation/Modules/Modules.hpp>
+#include <Poseidon/Core/Global.hpp> // Glob.time (gmZoneStruck)
 #include <Poseidon/World/World.hpp>                    // GWorld (gmPlayerPresence)
 #include <Poseidon/World/Entities/Infantry/Person.hpp> // real player
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <initializer_list>
+#include <math.h> // floorf (WholeBodies)
 
 using namespace Poseidon;
 using namespace Poseidon::Guerrilla;
@@ -44,7 +46,10 @@ static GameValue GmResistanceSide(const GameState* /*state*/)
     return GameStringType(ZoneRegistry::Instance().ResistanceSide());
 }
 
-// gmZone <index> -> 10-field tuple in GM_Z_* order; empty array out of range
+// gmZone <index> -> 11-field tuple in GM_Z_* order; empty array out of range.
+// Slot 10 is the seeded flag (bool): a CITY seeded from the world's Names or
+// an AIRFIELD / SEAPORT the base detector seeded (issue #76); false for an
+// authored zone.
 static GameValue GmZone(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -57,7 +62,7 @@ static GameValue GmZone(const GameState* state, GameValuePar oper1)
         return value;
     }
 
-    array.Resize(10);
+    array.Resize(11);
     array[0] = GameStringType(z->name);
     array[1] = GameStringType(z->type);
     array[2] = GameStringType(z->owner);
@@ -76,6 +81,117 @@ static GameValue GmZone(const GameState* state, GameValuePar oper1)
     pos[2] = z->pos.Y();
     array[8] = posValue;
     array[9] = z->capture;
+    array[10] = z->seeded;
+    return value;
+}
+
+// one gmSeededBases / gmDetectedBases row (issue #76):
+// [name, type, [easting, northing, height], confidence, [evidence lines]]
+// plus, when full, [..., status, coveredBy]
+static GameValue BaseRow(const GameState* state, const BaseCandidate& c, bool full)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& row = value;
+    row.Resize(full ? 7 : 5);
+    row[0] = GameStringType(c.name);
+    row[1] = GameStringType(c.type);
+    GameValue posValue = state->CreateGameValue(GameArray);
+    GameArrayType& pos = posValue;
+    pos.Resize(3);
+    pos[0] = c.x;
+    pos[1] = c.z;
+    pos[2] = c.y;
+    row[2] = posValue;
+    row[3] = c.confidence;
+    GameValue evidenceValue = state->CreateGameValue(GameArray);
+    GameArrayType& evidence = evidenceValue;
+    evidence.Resize((int)c.evidence.size());
+    for (int i = 0; i < (int)c.evidence.size(); i++)
+    {
+        evidence[i] = GameStringType(RString(c.evidence[i].c_str()));
+    }
+    row[4] = evidenceValue;
+    if (full)
+    {
+        row[5] = GameStringType(RString(BaseStatusName(c.status)));
+        row[6] = GameStringType(c.status == BaseStatus::Covered ? c.coveredBy : RString());
+    }
+    return value;
+}
+
+// gmSeededBases -> one row per zone the runtime base seed added
+// (CfgGuerrillaZones >> seedBases), in seeding order:
+// [name, type, [easting, northing, height], confidence, [evidence lines]].
+// [] when nothing was seeded (seedBases off, no candidate passed, or no
+// landscape).  Authored zones are never listed.
+static GameValue GmSeededBases(const GameState* state)
+{
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize(registry.NSeededBases());
+    for (int i = 0; i < registry.NSeededBases(); i++)
+    {
+        array[i] = BaseRow(state, *registry.SeededBase(i), false);
+    }
+    return value;
+}
+
+// gmDetectedBases -> every AIRFIELD and SEAPORT candidate the runtime
+// detector found, seeded or not, in detector order:
+// [name, type, [easting, northing, height], confidence, [evidence lines],
+//  status ("seed" | "covered" | "outside-region" | "low-confidence"),
+//  coveredBy ("" unless covered)].  [] when detection did not run (no
+// landscape, or no CfgGuerrillaZones).
+static GameValue GmDetectedBases(const GameState* state)
+{
+    const std::vector<BaseCandidate>& bases = ZoneRegistry::Instance().DetectedBases();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize((int)bases.size());
+    for (int i = 0; i < (int)bases.size(); i++)
+    {
+        array[i] = BaseRow(state, bases[i], true);
+    }
+    return value;
+}
+
+// gmGeneratedBases (OCCUPIER-FORCES.md 5.7) -> one row per generated base of
+// this campaign, in generation order (the new game's picks, or the rows the
+// save stored):
+// [name, type, [easting, northing, height], garrisonMax, countsForWin,
+//  detected (a BaseDetect outpost, not empty ground), track (on a track off
+//  the trunk road), heading (degrees, the centre towards its road)].
+// [] when generateBases is off, the save predates the feature, or no site
+// served an open need.
+static GameValue GmGeneratedBases(const GameState* state)
+{
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize(registry.NGeneratedBases());
+    for (int i = 0; i < registry.NGeneratedBases(); i++)
+    {
+        const GeneratedBaseRow& b = *registry.GeneratedBaseAt(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(8);
+        row[0] = GameStringType(b.name);
+        row[1] = GameStringType(b.type);
+        GameValue posValue = state->CreateGameValue(GameArray);
+        GameArrayType& pos = posValue;
+        pos.Resize(3);
+        pos[0] = b.x;
+        pos[1] = b.z;
+        pos[2] = b.y;
+        row[2] = posValue;
+        row[3] = (float)b.garrisonMax;
+        row[4] = b.countsForWin;
+        row[5] = b.detected;
+        row[6] = b.track;
+        row[7] = b.heading;
+        array[i] = rowValue;
+    }
     return value;
 }
 
@@ -85,7 +201,18 @@ static GameValue GmZoneIndex(const GameState* /*state*/, GameValuePar oper1)
     return (float)ZoneRegistry::Instance().FindZoneIndex(name);
 }
 
-// gmZoneSet [index, "field", value]; unknown field -> no-op
+// U3 (OCCUPIER-FORCES.md 5.5): a scripted garrison / garrisonMax is a count
+// of whole soldiers, floored, never below 0
+static float WholeBodies(float value)
+{
+    const float bodies = floorf(value);
+    return bodies > 0 ? bodies : 0.0f;
+}
+
+// gmZoneSet [index, "field", value]; unknown field -> no-op.  garrison and
+// garrisonMax are floored to whole bodies (at least 0); occCapture (the
+// occupier's base-recapture meter) and standing (occupier standing) are
+// clamped to 0..100.  An owner write resets both capture meters.
 static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
@@ -118,11 +245,12 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
         // without this a script-flipped zone keeps a stale meter forever
         // (frozen once ineligible) and hands it to a future re-occupier
         z->capture = 0;
+        z->occCapture = 0;
         z->contestedLastTick = false;
     }
     else if (stricmp(field, "garrison") == 0)
     {
-        z->garrison = (float)array[2];
+        z->garrison = WholeBodies((float)array[2]);
     }
     else if (stricmp(field, "support") == 0)
     {
@@ -151,11 +279,28 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
     }
     else if (stricmp(field, "garrisonMax") == 0)
     {
-        z->garrisonMax = (float)array[2];
+        z->garrisonMax = WholeBodies((float)array[2]);
     }
     else if (stricmp(field, "recoverClock") == 0)
     {
         z->recoverClock = (float)array[2];
+    }
+    else if (stricmp(field, "occCapture") == 0)
+    {
+        const float v = (float)array[2];
+        z->occCapture = v < 0 ? 0.0f : (v > 100 ? 100.0f : v);
+    }
+    else if (stricmp(field, "standing") == 0)
+    {
+        const float v = (float)array[2];
+        z->standing = v < 0 ? 0.0f : (v > 100 ? 100.0f : v);
+    }
+    else if (stricmp(field, "struckUntil") == 0)
+    {
+        // the town-strike stamp (mission time, OCCUPIER-FORCES.md 7.3): a test
+        // lever for economy.sqs's half income
+        const float v = (float)array[2];
+        z->struckUntil = v < 0 ? 0.0f : v;
     }
     else if (stricmp(field, "heatRaise") == 0)
     {
@@ -171,10 +316,19 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 // gmZoneSim <index> -> the zone's off-screen contract state (issue #71):
 // [inBubble, guer, occ, seenDay, seenMinute, contested, lastRemote,
 //  garrisonMax, recoverClock, garrisonLive, garrisonExempt, flipDay,
-//  flipMinute] as of the last zone tick; empty array out of range.  The last
-// four are the town-defender / retake fields (issue #79): the zone's own live
-// garrison bodies wherever they stand, the start-town exemption, and the
-// campaign day/minute of the last flip to the resistance (0 = never)
+//  flipMinute, pending] as of the last zone tick; empty array out of range.
+// Slots 9..12 are the town-defender / retake fields (issue #79): the zone's
+// own live garrison bodies wherever they stand, the start-town exemption, and
+// the campaign day/minute of the last flip to the resistance (0 = never).
+// guer (slot 1) is the resistance CAPTURE presence (the player per
+// PlayerCapturesPresence).  Slot 13 is the S5 pending deposit
+// (OCCUPIER-FORCES.md 3.3): whole bodies on their way into the reserve that
+// neither defend nor materialize yet (live, not as of the tick).
+// Occupier forces phase 4 (live values): slot 14 occCapture (the occupier's
+// base-recapture meter on a resistance-held military zone, OCCUPIER-FORCES.md
+// 7.2), 15 lostCount (times the resistance lost the zone back), 16 standing
+// (occupier standing, 7.3), 17 struckUntil (the town-strike stamp in mission
+// time, phase 6; 0 = never struck).
 static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -184,7 +338,7 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     {
         return value;
     }
-    array.Resize(13);
+    array.Resize(18);
     array[0] = z->lastInBubble;
     array[1] = (float)z->lastGuer;
     array[2] = (float)z->lastOcc;
@@ -198,17 +352,37 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     array[10] = z->garrisonExempt;
     array[11] = (float)z->flipDay;
     array[12] = (float)z->flipMinute;
+    array[13] = (float)z->pending;
+    array[14] = z->occCapture;
+    array[15] = (float)z->lostCount;
+    array[16] = z->standing;
+    array[17] = z->struckUntil;
     return value;
 }
 
-// gmPlayerPresence -> the D1 player-presence rule (issue #79) sampled now:
-// [counts, undercover, exposed, weaponInHands, warriorOutfit, liberatedTowns].
-// counts is PlayerCountsAsPresence; [false, false, ...] without a live player
+// gmZoneStruck <index> -> true while a CITY is inside its town-strike window
+// (mission time < struckUntil, OCCUPIER-FORCES.md 7.3): economy.sqs pays it
+// half income and no manpower.  False out of range.
+static GameValue GmZoneStruck(const GameState* /*state*/, GameValuePar oper1)
+{
+    const float now = Glob.time - Poseidon::Foundation::Time(0);
+    return ZoneRegistry::Instance().IsStruck(toInt((float)oper1), now);
+}
+
+// gmPlayerPresence -> the player-presence predicates (OCCUPIER-FORCES.md 8.1)
+// sampled now: [counts, undercover, exposed, weaponInHands, warriorOutfit,
+// liberatedTowns, holds, weaponSeen].  counts (slot 0) is CAPTURE
+// (PlayerCapturesPresence, issue #86: not undercover, exposed or a weapon in
+// hands); warriorOutfit (slot 4) is informational (it feeds HOLD only); holds
+// (slot 6) is HOLD (PlayerHoldsPresence: a uniform always holds, D23; a
+// disguised player only exposed, armed or with his weapon seen, D11);
+// weaponSeen (slot 7) is UndercoverSystem::WeaponSeenCount() > 0.  The
+// booleans read false without a live player.
 static GameValue GmPlayerPresence(const GameState* state)
 {
     GameValue value = state->CreateGameValue(GameArray);
     GameArrayType& array = value;
-    array.Resize(6);
+    array.Resize(8);
     PlayerPresenceInput in;
     Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr;
     bool alive = player && !player->IsDammageDestroyed();
@@ -216,12 +390,14 @@ static GameValue GmPlayerPresence(const GameState* state)
     {
         ZoneRegistry::Instance().SamplePlayerPresence(player, in);
     }
-    array[0] = alive && PlayerCountsAsPresence(in);
+    array[0] = alive && PlayerCapturesPresence(in);
     array[1] = in.undercover;
     array[2] = in.exposed;
     array[3] = in.weaponInHands;
     array[4] = in.warriorOutfit;
     array[5] = (float)ZoneRegistry::Instance().LiberatedTownCount();
+    array[6] = alive && PlayerHoldsPresence(in);
+    array[7] = in.weaponSeen;
     return value;
 }
 
@@ -242,16 +418,21 @@ static GameValue ScalarArray(const GameState* state, std::initializer_list<float
 // [zonesInBubble, zonesRemoteTicked, [liveOcc, liveRes, liveCiv, liveTotal],
 //  [grpOcc, grpRes, grpCiv, grpMaxSide], garrisonSpawnedZones,
 //  garrisonLiveBodies, [trafficCiv, parked, patrol, convoy],
-//  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], budgetBreachBits]
+//  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], budgetBreachBits,
+//  [farOcc, arrival, march, leftover, homeHull, air], [emptyGroups, released]]
 // (ms timings over the FrameProfiler's 256-frame ring; breach bits 1 = live
-// bodies, 2 = groups on one side)
+// bodies, 2 = groups on one side; element 3 counts only groups with a living
+// member; element 10 counts CounterAttack's live occupier groups beyond 850 m
+// of the player by cause, CounterAttackFarCensus; element 11 is the groups
+// with no living member on every side center, outside the budget, and the
+// idle empty groups the registry released since mission start)
 static GameValue GmSimDiag(const GameState* state)
 {
     SimDiag d;
     GatherSimDiag(d);
     GameValue value = state->CreateGameValue(GameArray);
     GameArrayType& array = value;
-    array.Resize(10);
+    array.Resize(12);
     array[0] = (float)d.zonesInBubble;
     array[1] = (float)d.zonesRemoteTicked;
     array[2] = ScalarArray(state, {(float)d.liveOcc, (float)d.liveRes, (float)d.liveCiv, (float)d.liveTotal});
@@ -263,7 +444,31 @@ static GameValue GmSimDiag(const GameState* state)
     array[7] = ScalarArray(state, {d.gmAvg, d.gmP95, d.gmMax});
     array[8] = ScalarArray(state, {d.frameAvg, d.frameP95, d.frameMax});
     array[9] = (float)SimBudgetBreaches(d, ZoneRegistry::Instance().Tuning());
+    array[10] = ScalarArray(state, {(float)d.farOcc, (float)d.farArrival, (float)d.farMarch, (float)d.farLeftover,
+                                    (float)d.farHomeHull, (float)d.farAir});
+    array[11] = ScalarArray(state, {(float)d.grpEmpty, (float)d.grpReleased});
     return value;
+}
+
+// gmSimAdmit [side, bodies, groups] -> the SimBudgetBreach bits a spawn of
+// bodies in groups new groups on that side would cause against the live
+// census (0 = it fits; 1 = budgetLiveBodies, 2 = budgetSideGroups, which
+// counts the side's groups with a living member).  The
+// admission Traffic applies before every ambient spawn (round 3 A), for the
+// script spawners (civilians.sqs) to apply the same hard cap
+static GameValue GmSimAdmit(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 3) || !CheckType(state, array[0], GameString) ||
+        !CheckType(state, array[1], GameScalar) || !CheckType(state, array[2], GameScalar))
+    {
+        return 0.0f;
+    }
+    GameStringType side = array[0];
+    LiveCensus census;
+    GatherLiveCensus(side, census);
+    return (float)SimBudgetAdmit(census, toInt((float)array[1]), toInt((float)array[2]),
+                                 ZoneRegistry::Instance().Tuning());
 }
 
 // gmSimDiagLog -> write one [gmsim] line now (plus budget WARNs); returns the
@@ -274,7 +479,15 @@ static GameValue GmSimDiagLog(const GameState* /*state*/)
 }
 
 // gmZoneOnEvent ["captured"|"supportThreshold"|"revealed"|"campaignLoaded"|
-//               "captureStarted"|"contested"|"captureLost"|"townLost", handler]
+//               "captureStarted"|"contested"|"captureLost"|"townLost"|
+//               "counterAttack"|"counterRepelled"|"baseLost"|"hqLost"|
+//               "townStruck", handler]
+// townStruck: an occupier air strike hit the town (OCCUPIER-FORCES.md 7.3;
+// civilians.sqs starts its panic).
+// baseLost: a resistance-held military zone went back to the occupier (its
+// occCapture meter reached 100, OCCUPIER-FORCES.md 7.2).  hqLost: the HQ was
+// destroyed (GuerrillaBase::Destroy through ZoneRegistry::QueueEvent); the
+// handler runs only when the HQ stood in a zone (zoneIndex >= 0).
 // handler may be a STRING or a CODE value (GameDataCode's GetString returns
 // the source, so the plain string coercion covers both)
 static GameValue GmZoneOnEvent(const GameState* state, GameValuePar oper1)
@@ -504,9 +717,16 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
 
     GGameState.NewFunction(GameFunction(GameArray, "gmZone", GmZone, GameScalar));
     GGameState.NewFunction(GameFunction(GameArray, "gmZoneSim", GmZoneSim, GameScalar));
+    GGameState.NewFunction(GameFunction(GameBool, "gmZoneStruck", GmZoneStruck, GameScalar));
     GGameState.NewNularOp(GameNular(GameArray, "gmPlayerPresence", GmPlayerPresence));
+    // issue #76: the AIRFIELD / SEAPORT seed
+    GGameState.NewNularOp(GameNular(GameArray, "gmSeededBases", GmSeededBases));
+    GGameState.NewNularOp(GameNular(GameArray, "gmDetectedBases", GmDetectedBases));
+    // OCCUPIER-FORCES.md 5.7: the generated bases
+    GGameState.NewNularOp(GameNular(GameArray, "gmGeneratedBases", GmGeneratedBases));
     GGameState.NewNularOp(GameNular(GameArray, "gmSimDiag", GmSimDiag));
     GGameState.NewNularOp(GameNular(GameScalar, "gmSimDiagLog", GmSimDiagLog));
+    GGameState.NewFunction(GameFunction(GameScalar, "gmSimAdmit", GmSimAdmit, GameArray));
     GGameState.NewFunction(GameFunction(GameScalar, "gmZoneIndex", GmZoneIndex, GameString));
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneSet", GmZoneSet, GameArray));
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneOnEvent", GmZoneOnEvent, GameArray));

@@ -1,0 +1,19 @@
+# Occupier forces, the hull flag (OCCUPIER-FORCES.md 5.5 "Stored spare hulls";
+# owner decision 9 of 2026-10-16): with forcesBankHulls 0 (the default) a hull
+# home over the ceiling is a stored spare hull at its base, not a garrison of
+# bodies, and it rejoins the pool once the pool has room. The companion of
+# guerrilla_forces_bank_garrison (which pins forcesBankHulls 1). Boots the
+# SHIPPED Guerrilla.Abel template (repo-root-relative; occupierForces = 1) on
+# the full Remaster lane: data_dir "packages/RemasterUD" is a gitignored
+# junction to a setup-prepared shadow of the Steam Remastered folder (see
+# guerrilla-mode/FRESH-INSTALL.md). The shadow must carry the current gmcore
+# and faction library (guerrilla-mode/install-missions.ps1): EAST's forcesJet
+# / forcesAttackHeli keys make the strike airframe. Without the junction the
+# test reports spawn failed, which is not a regression. Not headless.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 900
+assert_timeout = 420
+extra_args = ["--dev"]

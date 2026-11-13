@@ -1,0 +1,21 @@
+# Occupier forces, an air operation (OCCUPIER-FORCES.md 3.1, 3.2, 6.5, D3,
+# D20; phase 6A): a RETAKE bought as a helicopter insertion through
+# gmCounterAttackLaunchFunded. Boots the SHIPPED Guerrilla.Abel template
+# (repo-root-relative) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (tools/runtime/new-remaster-shadow.ps1, then
+# setup-guerrilla.ps1 in Remaster mode; see guerrilla-mode/FRESH-INSTALL.md).
+# The shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a regression.
+# Not headless: the birth and removal gates need a real camera.
+# Tag slow_air: a flight of several kilometres. Tri has no per-test default
+# exclusion, so a default run passes --skip-tag slow_air; run this lane with
+# --tag slow_air --retries 3 (retries are a CLI option, not a toml key).
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "slow_air"]
+# one Mi17 flies about 3.5 km in from the Airfield, lands, unloads and flies back out of sight
+timeout = 1500
+assert_timeout = 600
+extra_args = ["--dev"]
