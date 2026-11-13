@@ -5,6 +5,13 @@
 // for the shading model and Poseidon/Graphics/Remaster/LightRig.hpp for the
 // light rig.
 
+#include <string>
+
+namespace Poseidon::remaster
+{
+enum class SeaFlowField; // XP sea flow (Graphics/Remaster/SeaFlow.hpp)
+}
+
 namespace Poseidon::gl33lighting
 {
 
@@ -16,6 +23,28 @@ const char* RemasterVertexSource(int vs);
 // means the pixel shader reuses its classic source (PSFlat, PSShadow).
 const char* RemasterFragmentCommon();
 const char* RemasterFragmentMain(int ps);
+
+// XP sea mirror (Graphics/Remaster/SeaMirror.hpp, EngineGL33_XpSeaMirror.cpp):
+// the water program's main and the reflection trace's source with the
+// experiment's additions, built once from the stock text; null when an anchor
+// is missing (the experiment then stays off). RemasterFragmentMain and the
+// trace take these only while POSEIDON_XP_SEAMIRROR is on.
+const char* SeaMirrorWaterMainXp();
+const char* SeaMirrorTraceSourceXp();
+// XP sea flow (Graphics/Remaster/SeaFlow.hpp): the water program's main with
+// `field`'s travelling layers at `speed`, the dissolve's `rho` and whether it
+// runs (`morph`), with or without the mirror's slope output; empty when an
+// anchor is missing.
+std::string SeaFlowWaterMainXp(bool mirror, float speed, float rho, bool morph, Poseidon::remaster::SeaFlowField field);
+// The water program's main for this process's switches (POSEIDON_XP_SEAMIRROR,
+// POSEIDON_XP_SEAFLOW); null with both off or an anchor missing (the stock
+// main then draws).
+const char* SeaWaterMainXp();
+// The water program's stock main (RemasterFragmentMain(PSWater) with the
+// experiment off).
+const char* RemasterWaterMainStock();
+// The trace's unit for the sea's slope target (a multisampled texture).
+constexpr int kSeaMirrorWaveUnit = 6;
 
 // The common prelude, split by concern:
 // RemasterFragmentCommon() is these pieces joined in this order. A feature

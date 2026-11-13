@@ -1029,6 +1029,10 @@ std::vector<std::string> RemasterPrograms()
     for (int ps = 0; ps < kShaderIds; ++ps)
         if (const char* main = gl::RemasterFragmentMain(ps))
             out.push_back(std::string(gl::RemasterFragmentCommon()) + main);
+    // The stock water main, when the sea flow (on by default) has taken its
+    // place: it still draws with POSEIDON_XP_SEAFLOW=0.
+    if (std::string(gl::RemasterFragmentMain(3)) != gl::RemasterWaterMainStock())
+        out.push_back(std::string(gl::RemasterFragmentCommon()) + gl::RemasterWaterMainStock());
     return out;
 }
 
@@ -1077,6 +1081,13 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     }
     CHECK(vertex == 3);   // VSScreen, VSTransform, VSShadow
     CHECK(fragment == 4); // PSNormal, PSDetail, PSGrass, PSWater
+    {
+        // The stock water main (POSEIDON_XP_SEAFLOW=0) compiles too.
+        std::string log;
+        const bool ok = Compiles(common + gl::RemasterWaterMainStock(), EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+    }
 
     int post = 0;
     for (int i = 0; i < static_cast<int>(gl::PostShader::Count); ++i)
@@ -1855,7 +1866,9 @@ TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp
 TEST_CASE("Remaster sea: the water program is the variant C model on the shared pieces",
           "[Graphics][Shaders][remaster][SeaWaves]")
 {
-    const std::string water = gl::RemasterFragmentMain(3); // PSWater
+    // PSWater's stock main (the sea flow, on by default, builds on it; it draws
+    // alone with POSEIDON_XP_SEAFLOW=0).
+    const std::string water = gl::RemasterWaterMainStock();
     REQUIRE_FALSE(water.empty());
     // The next animation frame on its own unit, from the one unit table.
     bool row = false;

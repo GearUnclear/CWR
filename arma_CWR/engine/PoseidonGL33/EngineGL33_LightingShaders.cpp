@@ -1946,6 +1946,11 @@ const char* LitConstantsBlock()
     return kLitConstantsBlockGLSL;
 }
 
+const char* RemasterWaterMainStock()
+{
+    return s_psWaterRemasterMain;
+}
+
 const char* RemasterFragmentMain(int ps)
 {
     switch (ps)
@@ -1957,6 +1962,10 @@ const char* RemasterFragmentMain(int ps)
         case PSGrass:
             return s_psGrassRemasterMain;
         case PSWater:
+            // XP sea mirror, XP sea flow: the main that also writes the wave
+            // slope, the main whose layers travel, or both (null: neither).
+            if (const char* xp = SeaWaterMainXp())
+                return xp;
             return s_psWaterRemasterMain;
         default:
             return nullptr; // PSFlat / PSShadow reuse the classic sources

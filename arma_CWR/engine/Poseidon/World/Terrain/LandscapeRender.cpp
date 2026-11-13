@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/SeaFlow.hpp>
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -1157,11 +1158,41 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
     // loop) into its neighbour, so the waves it derives from the texture do
     // not pop at each frame switch. Classic and the switch off draw them as
     // before.
+    //
+    // XP sea flow (POSEIDON_XP_SEAFLOW, Graphics/Remaster/SeaFlow.hpp): the
+    // animation's 2 s ping-pong (the phase below runs 0 -> 1 -> 0) is what
+    // made the waves play forward and then backward. With the switch on and
+    // the water program drawing, the faces carry a frame the flow picks
+    // (flowPhase) and the program moves its layers over the world instead.
+    float flowPhase = -1.0f;
+    if (remaster::SeaFlowXpOn() && _texture[0] && _texture[0]->AnimationLength() > 1)
+    {
+        Texture* sea = _texture[0];
+        const int frames = sea->AnimationLength();
+        const remaster::SeaFlowFrames f =
+            remaster::SeaFlowFrameBlend(Glob.time.toFloat(), frames, remaster::SeaFlowXpMorph());
+        GEngine->BeginSea(sea->GetAnimation(f.other), f.otherWeight);
+        // Not routed (Classic, or the sea feature off): the backend opened
+        // nothing, and the animation plays as before.
+        if (GEngine->SeaRouted())
+        {
+            flowPhase = remaster::SeaFlowAnimationPhase(f.bound, frames);
+        }
+    }
+    // Probe (POSEIDON_XP_SEAFLOW_PROBE=freeze, never a look): the stock sea
+    // with its animation held on one frame, to tell the animation's share of
+    // the back-and-forth from the sea level's.
+    const bool freezeProbe = remaster::SeaFlowXpFreezeProbe();
+    if (flowPhase < 0.0f)
     {
         float texPhase = fastFmod(Glob.time.toFloat(), 2);
         if (texPhase > 1.0f)
         {
             texPhase = 2 - texPhase;
+        }
+        if (freezeProbe)
+        {
+            texPhase = 0.0f;
         }
         Texture* sea = _texture[0];
         Texture* other = nullptr;
@@ -1218,7 +1249,7 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
                     bool isClipped = scene.GetCamera()->IsClipped(bCenter, bRadius, 1);
                     if (!isClipped)
                     {
-                        Vector3 offset = seg->Offset() + Vector3(0, _seaLevelWave, 0);
+                        Vector3 offset = seg->Offset() + Vector3(0, GetSeaLevelDrawn(), 0);
                         Matrix4 trans(MTranslation, offset);
                         Matrix4 iTrans(MTranslation, -offset);
                         // calculate z2
@@ -1234,6 +1265,14 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
                         if (texPhase > 1.0f)
                         {
                             texPhase = 2 - texPhase;
+                        }
+                        if (flowPhase >= 0.0f)
+                        {
+                            texPhase = flowPhase; // XP sea flow: the flow's frame
+                        }
+                        else if (freezeProbe)
+                        {
+                            texPhase = 0.0f;
                         }
                         sec.properties.AnimateTexture(texPhase);
 
@@ -1328,16 +1367,17 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
             }
 
             {
-                if (seg->_someWater && seg->_seaLevel != _seaLevelWave)
+                const float seaDrawn = GetSeaLevelDrawn(); // XP sea flow: else _seaLevelWave
+                if (seg->_someWater && seg->_seaLevel != seaDrawn)
                 {
                     // change level of all water points
                     // for TL: adjust matrix
 
-                    seg->_seaLevel = _seaLevelWave;
+                    seg->_seaLevel = seaDrawn;
                     VertexTable& table = seg->_wTable;
                     for (int i = 0; i < table.NPos(); i++)
                     {
-                        table.SetPos(i)[1] = _seaLevelWave;
+                        table.SetPos(i)[1] = seaDrawn;
                     }
                 }
             }
@@ -1438,7 +1478,7 @@ void Landscape::DrawHorizont(Scene& scene)
 
     const Camera* camera = scene.GetCamera();
 
-    float cameraAbove = horPos.Y() - GetSeaLevel();
+    float cameraAbove = horPos.Y() - GetSeaLevelDrawn();
     float backZ = scene.GetCamera()->ClipFar() * 0.99f;
     float posX = backZ * scene.GetCamera()->Left() * 2.0f;
     float negX = -posX;
@@ -1504,7 +1544,7 @@ void Landscape::DrawHorizont(Scene& scene)
     // no LOD for horizont
 
     float horizBorder = backZ * 0.025f;
-    scene.GetCamera()->SetUserClipPars(VUp, -GetSeaLevel() + horizBorder);
+    scene.GetCamera()->SetUserClipPars(VUp, -GetSeaLevelDrawn() + horizBorder);
     //_horizontObject->Draw(0,ClipAll&~ClipBack|ClipUser0,*_horizontObject);
     _horizontObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_horizontObject);
     scene.GetCamera()->CancelUserClip();

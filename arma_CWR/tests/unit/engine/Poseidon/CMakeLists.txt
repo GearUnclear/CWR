@@ -185,6 +185,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_air_medium.cpp
     Graphics/test_night_lights.cpp
     Graphics/test_screen_reflections.cpp
+    Graphics/test_sea_mirror_xp.cpp
     Graphics/test_wet_weather.cpp
     Graphics/test_combat_lights.cpp
     Graphics/test_surface_light.cpp

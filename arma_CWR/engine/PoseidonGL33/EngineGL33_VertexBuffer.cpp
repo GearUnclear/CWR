@@ -523,6 +523,7 @@ void EngineGL33::DestroySSAATarget()
         glDeleteRenderbuffers(1, &_ssaaResolveRb);
     // The surfaces switch's target was attachment 1 of the frame target.
     DestroySurfaceTarget();
+    DestroySeaWaveTarget(); // XP sea mirror: attachment 2
     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
     _ssaaW = _ssaaH = 0;
 }

@@ -800,8 +800,21 @@ class EngineGL33 : public Engine
     void EndSea() override;
     // Between BeginSea and EndSea with the feature on: the landscape's sea
     // faces route to the water program (BuildContext::remasteredSea).
-    bool SeaRouted() const { return _seaOpen; }
+    bool SeaRouted() const override { return _seaOpen; }
     bool _seaOpen = false;
+    // XP sea mirror (EngineGL33_XpSeaMirror.cpp, POSEIDON_XP_SEAMIRROR): the
+    // sea's wave slope, a multisampled RG16F texture on attachment 2 of the
+    // frame target, in the draw buffers only between BeginSea and EndSea.
+    void SeaWaveBegin();
+    void SeaWaveEnd();
+    void DestroySeaWaveTarget();
+    bool SeaWaveThisFrame() const; // the sea wrote the slope this frame
+    unsigned int _seaWaveTex = 0;
+    int _seaWaveW = 0, _seaWaveH = 0, _seaWaveSamples = 0;
+    uint32_t _seaWaveFrame = 0;
+    bool _seaWaveFrameValid = false;
+    bool _seaWaveOpen = false;
+    bool _seaWaveFailed = false;
     // --- Long tree shadows: the canopy and its sun-visibility map (EngineGL33_Canopy.cpp) ---
     void SetTerrainCanopy(std::shared_ptr<const Poseidon::remaster::CanopyField> canopy) override;
     void TerrainCanopyChanged(const Poseidon::remaster::CanopyRect* rects, int count) override;

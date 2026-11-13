@@ -1004,6 +1004,10 @@ class Engine : public IGraphicsEngine
     /// detail program as before.
     virtual void BeginSea(Texture* /*otherFrame*/, float /*otherWeight*/) {}
     virtual void EndSea() {}
+    /// True between BeginSea and EndSea while the backend draws the sea's
+    /// faces with its remastered water program (XP sea flow asks, so the
+    /// frames it picks reach only that program).
+    virtual bool SeaRouted() const { return false; }
 
     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
     /// Default base returns an all-default set; only the GL33 backend stores it.

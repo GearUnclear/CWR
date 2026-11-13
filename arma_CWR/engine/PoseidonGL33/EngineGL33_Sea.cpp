@@ -19,6 +19,7 @@
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/SeaFlow.hpp>
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -47,7 +48,9 @@ void EngineGL33::BeginSea(Texture* otherFrame, float otherWeight)
     // The frame to cross-fade into, at its finest level (the faces' own frame
     // is loaded for the nearest sea; every frame comes round every 2 s). Until
     // it has a texture, the faces' frame shows alone.
-    TextureGL33* other = otherWeight > 0.0f ? static_cast<TextureGL33*>(otherFrame) : nullptr;
+    // XP sea flow: the other frame is a wave layer of its own, at any share.
+    const bool flow = rm::SeaFlowXpOn();
+    TextureGL33* other = (otherWeight > 0.0f || flow) ? static_cast<TextureGL33*>(otherFrame) : nullptr;
     unsigned int handle = 0;
     if (other && _textBank)
     {
@@ -72,6 +75,8 @@ void EngineGL33::BeginSea(Texture* otherFrame, float otherWeight)
     SetLitSlot(LitConst::Water1, sheen.r, sheen.g, sheen.b, c.sheenFlat);
     FlushLitConstants();
     _seaOpen = true;
+    // XP sea mirror: the sea's draws also write their wave slope (off: nothing).
+    SeaWaveBegin();
 }
 
 void EngineGL33::EndSea()
@@ -80,6 +85,7 @@ void EngineGL33::EndSea()
         return;
     // The sea's draws commit with the water program.
     FlushQueues();
+    SeaWaveEnd();
     _seaOpen = false;
     GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
     glBindSampler(kSeaNextFrameUnit, 0);
@@ -114,12 +120,17 @@ void EngineGL33::UploadLitSeaShore()
                     _featureGates[rm::Feature::SeaWaves].on;
     if (!on)
     {
-        SetLitSlot(LitConst::Water2, 0.0f, 0.0f, 0.0f, 0.0f);
+        // XP sea flow: the water program's clock runs without the shore too
+        // (y is read only by the shore's foam, which parts 0 leaves out).
+        const float clock = rm::SeaFlowXpOn() ? std::fmod(Glob.time.toFloat(), rm::kSeaFlowTimeWrap) : 0.0f;
+        SetLitSlot(LitConst::Water2, 0.0f, clock, 0.0f, 0.0f);
         return;
     }
-    // The swash line: the tide's level plus the highest the sea level's wave
-    // reaches (Landscape::Simulate), and a little run-up above it.
-    const float swash = land->GetSeaLevelNoWave() + maxWave + 0.15f;
+    static_assert(rm::kSeaFlowTimeWrap == 4096.0f, "the sea flow's rates are whole numbers of 1 / this clock's wrap");
+    // The swash line: the tide's level plus the highest the drawn sea level's
+    // wave reaches (Landscape::Simulate; XP sea flow draws a share of it), and
+    // a little run-up above it.
+    const float swash = land->GetSeaLevelNoWave() + maxWave * rm::SeaFlowXpHeave() + 0.15f;
     SetLitSlot(LitConst::Water2, static_cast<float>(parts), std::fmod(Glob.time.toFloat(), 4096.0f),
-               land->GetSeaLevel(), swash);
+               land->GetSeaLevelDrawn(), swash);
 }
