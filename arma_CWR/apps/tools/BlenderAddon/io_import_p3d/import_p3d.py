@@ -188,8 +188,10 @@ def import_lod(context, model, lod_idx, collection, options):
     uvs_raw = model.get_uvs(lod_idx) if nf > 0 else []
     normals_raw = model.get_normals(lod_idx) if nf > 0 else []
 
-    # RTM bone matrices expect vertices centered at the non-proxy mesh
-    # bounding box midpoint, matching the engine's CalculateBoundingSphere path.
+    # By default each LOD is re-centred on its non-proxy bounding box midpoint
+    # (stored as cwr_center_offset so the exporter can undo it). Skinning the stock
+    # civilian with a stock RTM tears joints least in model space instead (ODOL
+    # vertex + bounding center), see the keep_model_space option below.
     face_flags_raw = model.get_face_flags(lod_idx) if nf > 0 else None
     center_offset_cwr = (0.0, 0.0, 0.0)
     if face_flags_raw and verts_raw:
@@ -198,6 +200,12 @@ def import_lod(context, model, lod_idx, collection, options):
         for fi, face in enumerate(faces_raw):
             if fi < len(face_flags_raw) and not (face_flags_raw[fi] & FF_PROXY_MASK):
                 nonproxy_verts.update(face)
+        # MLOD face flags carry no proxy bits (the engine sets them after load),
+        # so also leave out the points of proxy:* selections. This keeps ODOL and
+        # MLOD imports of the same model in the same Blender space.
+        for si in range(model.selection_count(lod_idx)):
+            if model.selection_name(lod_idx, si).startswith("proxy:"):
+                nonproxy_verts.difference_update(model.get_selection_vertices(lod_idx, si)[0])
         if nonproxy_verts:
             valid = [i for i in nonproxy_verts if 0 <= i < len(verts_raw)]
             if valid:
@@ -210,12 +218,27 @@ def import_lod(context, model, lod_idx, collection, options):
                     (min(zs) + max(zs)) / 2.0,
                 )
 
+    model_space_shift = None
+    if options.get("keep_model_space"):
+        # Model space: what the engine uses for a unit with autocenter = 0, and the
+        # space the stock RTMs expect. ODOL vertices are stored re-centred on the
+        # bounding center, so add it back; MLOD coordinates are used as they are.
+        center_offset_cwr = (0.0, 0.0, 0.0)
+        bc = model.bounding_center()
+        if any(abs(c) > 1e-9 for c in bc):
+            model_space_shift = bc
+            verts_raw = [(x + bc[0], y + bc[1], z + bc[2]) for x, y, z in verts_raw]
     if center_offset_cwr != (0.0, 0.0, 0.0):
         verts_raw = [
             (x - center_offset_cwr[0], y - center_offset_cwr[1], z - center_offset_cwr[2]) for x, y, z in verts_raw
         ]
     verts = [_convert_coord(*v) for v in verts_raw]
     faces, face_map = _clean_faces(faces_raw)
+    # _convert_coord swaps two axes, a mirror, so the corner order has to be
+    # reversed as well or every face lands inside out in Blender (the stock
+    # civilian imported 248 of 261 head faces pointing inward). UVs and normals
+    # are per vertex, so they follow the vertices unchanged.
+    faces = [tuple(reversed(f)) for f in faces]
     mesh = bpy.data.meshes.new(lod_name)
     mesh.from_pydata(verts, [], faces)
     mesh.update()
@@ -308,6 +331,7 @@ def import_lod(context, model, lod_idx, collection, options):
 
     # Named selections → vertex groups (also collect proxy selection geometry)
     proxy_sel_data = []  # (sel_name, vertex_indices) for proxy:* selections
+    vert_sels = {}  # vertex index -> [(selection name, weight)] for non-proxy selections
     if options.get("import_selections", True):
         sel_count = model.selection_count(lod_idx)
         for si in range(sel_count):
@@ -322,6 +346,8 @@ def import_lod(context, model, lod_idx, collection, options):
                         vg.add([idx], wgt, "REPLACE")
                 # Store centroid before proxy stripping removes vertices
                 if not sel_name.startswith("proxy:"):
+                    for idx, wgt in zip(indices, weights):
+                        vert_sels.setdefault(idx, []).append((sel_name, wgt))
                     valid = [i for i in indices if 0 <= i < nv]
                     if valid:
                         cx = sum(verts[i][0] for i in valid) / len(valid)
@@ -363,6 +389,13 @@ def import_lod(context, model, lod_idx, collection, options):
                             prx_uv.data[li].uv = (u, v)
                     prx_mesh.update()
                     prx_obj = bpy.data.objects.new(prx_name, prx_mesh)
+                    # Keep the proxy's own selection name and the bone selections its
+                    # points belong to, so an export puts it back unchanged.
+                    prx_obj["cwr_proxy_selection"] = proxy_sel_data[pi][0]
+                    for li, vi in enumerate(v_indices):
+                        for sname, wgt in vert_sels.get(vi, ()):
+                            vg = prx_obj.vertex_groups.get(sname) or prx_obj.vertex_groups.new(name=sname)
+                            vg.add([li], wgt, "REPLACE")
                 else:
                     # Fallback: empty object if no matching selection
                     prx_obj = bpy.data.objects.new(prx_name, None)
@@ -403,6 +436,11 @@ def import_lod(context, model, lod_idx, collection, options):
     obj["cwr_lod_index"] = lod_idx
     obj["cwr_lod_resolution"] = res
     obj["cwr_format"] = model.format
+    # ODOL stores vertices re-centred on the bounding center; the source (MLOD)
+    # coordinates are vertex + bounding center. The exporter adds it back.
+    bc = model.bounding_center()
+    if model_space_shift is None and any(abs(c) > 1e-9 for c in bc):
+        obj["cwr_bounding_center"] = bc
 
     return obj
 
@@ -586,6 +624,13 @@ class ImportP3D(bpy.types.Operator, ImportHelper):
     import_selections: BoolProperty(name="Named Selections", default=True, description="Import as vertex groups")
     import_proxies: BoolProperty(name="Proxies", default=True, description="Import as empty objects")
     import_properties: BoolProperty(name="Properties", default=True, description="Import as custom properties")
+    keep_model_space: BoolProperty(
+        name="Model Space",
+        description="Keep the model's own coordinates (ODOL: plus its bounding center) instead of re-centring each "
+        "LOD. All LODs line up, and this is the space stock RTMs and a Man unit (autocenter = 0) use, so model "
+        "new units over a reference imported this way",
+        default=False,
+    )
     game_data_dir: StringProperty(
         name="Game Data Directory",
         description="CWR game data root (overrides scene setting for this import)",
@@ -605,6 +650,7 @@ class ImportP3D(bpy.types.Operator, ImportHelper):
             "import_selections": self.import_selections,
             "import_proxies": self.import_proxies,
             "import_properties": self.import_properties,
+            "keep_model_space": self.keep_model_space,
             "game_data_dir": game_dir,
         }
         return do_import(context, self.filepath, options)
@@ -622,5 +668,6 @@ class ImportP3D(bpy.types.Operator, ImportHelper):
         col.prop(self, "import_selections")
         col.prop(self, "import_proxies")
         col.prop(self, "import_properties")
+        layout.prop(self, "keep_model_space")
         layout.separator()
         layout.prop(self, "game_data_dir")

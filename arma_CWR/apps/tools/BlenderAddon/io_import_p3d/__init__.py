@@ -1,17 +1,18 @@
 bl_info = {
-    "name": "Poseidon P3D Model Importer",
+    "name": "Poseidon P3D Model Importer and Exporter",
     "author": "CWR Project",
     "version": (1, 0, 0),
     "blender": (3, 6, 0),
-    "location": "File > Import > Poseidon P3D (.p3d)",
-    "description": "Import Poseidon engine P3D models (MLOD & ODOL)",
+    "location": "File > Import/Export > Poseidon P3D / Poseidon RTM Animation; View3D > Sidebar > Poseidon",
+    "description": "Import Poseidon engine P3D models (MLOD & ODOL); export OFP-era MLOD (SP3X); RTM animation import/export",
     "category": "Import-Export",
 }
 
 import bpy
 from bpy.props import CollectionProperty, IntProperty, PointerProperty, StringProperty
 
-from . import p3d_lib
+from . import p3d_lib, rtm_blender
+from .export_p3d import ExportP3D
 from .import_p3d import ImportP3D
 from .operators import (
     POSEIDON_OT_activate_material,
@@ -85,6 +86,10 @@ def menu_func_import(self, context):
     self.layout.operator(ImportP3D.bl_idname, text="Poseidon P3D (.p3d)")
 
 
+def menu_func_export(self, context):
+    self.layout.operator(ExportP3D.bl_idname, text="Poseidon MLOD P3D (.p3d)")
+
+
 _classes = (
     POSEIDON_VfsP3DItem,
     POSEIDON_VfsRTMItem,
@@ -113,7 +118,8 @@ _classes = (
     POSEIDON_PT_textures,
     POSEIDON_PT_animations,
     ImportP3D,
-)
+    ExportP3D,
+) + rtm_blender.rtm_classes
 
 
 def register():
@@ -121,9 +127,15 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.poseidon = PointerProperty(type=PoseidonSceneProperties)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
+    bpy.types.TOPBAR_MT_file_import.append(rtm_blender.menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.append(rtm_blender.menu_func_export)
 
 
 def unregister():
+    bpy.types.TOPBAR_MT_file_export.remove(rtm_blender.menu_func_export)
+    bpy.types.TOPBAR_MT_file_import.remove(rtm_blender.menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)
