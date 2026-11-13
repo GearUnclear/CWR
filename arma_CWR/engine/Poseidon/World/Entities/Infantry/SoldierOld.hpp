@@ -168,6 +168,7 @@ class MoveInfo
 
 	bool _soundEnabled;
 	bool _interpolRestart;
+	bool _plantBlend; // Game/Kaiju: optional `plantBlend = 1` of the move, see Man::AdvanceMoveQueue
 
 	RStringB _soundOverride; // default - no override
 	float _soundEdge1,_soundEdge2; // in what relative positions sound should start
@@ -225,6 +226,7 @@ class MoveInfo
 
 	__forceinline float GetInterpolSpeed() const {return _interpolSpeed;}
 	__forceinline bool GetInterpolRestart() const {return _interpolRestart;}
+	__forceinline bool GetPlantBlend() const {return _plantBlend;}
 	__forceinline float GetLimitGunMovement() const {return _limitGunMovement;}
 
 	__forceinline float GetVisibleSize() const {return _visibleSize;}

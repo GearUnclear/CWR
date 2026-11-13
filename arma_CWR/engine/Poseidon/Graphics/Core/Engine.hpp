@@ -486,6 +486,11 @@ class Engine : public IGraphicsEngine
     virtual void UpdateFrameCamera() {
     } // re-upload frame UBO with current GScene camera (needed when camera changes mid-frame)
     virtual void UpdateProjection() {} // re-upload only viewProj matrix (for clip range changes without affecting fog)
+    // Far draw (Game/Kaiju/KaijuFarDraw.cpp). Both are no-ops unless a backend implements them.
+    // Lowest fog visibility (1 = unfogged) the following mesh draws may reach; 0 = stock fog.
+    virtual void SetFogFloor(float visibility) {}
+    // Window depth range of the following draws; (0, 1) is the stock range.
+    virtual void SetDepthRange(float zNear, float zFar) {}
     virtual void PrepareMeshTL(const LightList& lights, const Matrix4& modelToWorld, const render::LegacySpec& spec) {
     } // prepare internal variables
     virtual void BeginMeshTL(const Shape& sMesh, int spec, bool dynamic = false) {} // convert all mesh vertices

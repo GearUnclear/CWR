@@ -1,4 +1,5 @@
 
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -1365,7 +1366,7 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
     GTerrainProfile.drawGroundCycles += (TerrainProfile::Now() - t0);
 }
 
-void Landscape::DrawHorizont(Scene& scene)
+void Landscape::DrawHorizont(Scene& scene, float bandZ, float bandMidY, float bandTopY)
 {
     GEngine->EnableReorderQueues(false);
     GEngine->FlushQueues();
@@ -1396,10 +1397,16 @@ void Landscape::DrawHorizont(Scene& scene)
 
     float cameraAbove = horPos.Y() - GetSeaLevel();
     float backZ = scene.GetCamera()->ClipFar() * 0.99f;
-    float posX = backZ * scene.GetCamera()->Left() * 2.0f;
-    float negX = -posX;
     float topY = backZ * 0.06f;
     float midY = backZ * 0.03f;
+    if (bandZ > 0)
+    {
+        backZ = bandZ;
+        topY = bandTopY;
+        midY = bandMidY;
+    }
+    float posX = backZ * scene.GetCamera()->Left() * 2.0f;
+    float negX = -posX;
     float botY = -cameraAbove - extendDown * backZ;
 
     // float botSize2 = Square(negX)+Square(botY)+Square(backZ);
@@ -1534,6 +1541,8 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 
     GEngine->FlushQueues();
+    // far-drawn units (Game/Kaiju): over the sky and the horizon, behind everything else
+    Kaiju::FarDrawPass(scene);
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
     GEngine->EnableReorderQueues(true);
     // draw non-alpha objects
@@ -1829,6 +1838,8 @@ void Landscape::DrawClouds(Scene& scene)
 
 void Landscape::Draw(Scene& scene)
 {
+    // reserve the far depth slice when a far-drawn unit (Game/Kaiju) needs it
+    Kaiju::FarBeginScene(scene);
     {
         Camera& camera = *scene.GetCamera();
 

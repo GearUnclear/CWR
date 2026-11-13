@@ -122,6 +122,11 @@ public:
 	void HitBy( EntityAI *killer, float howMuch, RString ammo ) override;
 
 	LSError Serialize(ParamArchive &ar) override;
+
+	// Its own casting id: without it dyn_cast<StreetLamp> accepted every
+	// entity, so lightIsOn / switchLight on a soldier wrote lamp state into
+	// him and crashed the game a frame later.
+	USE_CASTING(base)
 };
 
 class RoadType: public RefCount

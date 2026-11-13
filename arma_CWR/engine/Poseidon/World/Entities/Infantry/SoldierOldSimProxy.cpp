@@ -1244,6 +1244,12 @@ MoveInfo::MoveInfo(MotionType* motion, const ParamEntry& entry)
     _variantAfterMax = (entry >> "variantAfter")[2];
     _interpolSpeed = entry >> "interpolationSpeed";
     _interpolRestart = entry >> "interpolationRestart";
+    // optional (Game/Kaiju); stock move classes do not have it
+    _plantBlend = false;
+    if (const ParamEntry* plant = entry.FindEntry("plantBlend"))
+    {
+        _plantBlend = (int)*plant != 0;
+    }
 
     _limitGunMovement = entry >> "limitGunMovement";
 

@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
@@ -1230,6 +1231,11 @@ SimulationImportance Entity::CalculateImportance(const Vector3* viewerPos, int n
         ret = SimulateInvisibleNear;
     }
     else if (dist2 > Square(100))
+    {
+        ret = SimulateVisibleFar;
+    }
+    // a far-drawn unit (Game/Kaiju) is on screen past objectsZ and keeps animating
+    if (ret > SimulateVisibleFar && Kaiju::GFarCount && Kaiju::FarKeepsSimulating(this, dist2))
     {
         ret = SimulateVisibleFar;
     }

@@ -38,6 +38,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/Game/TitEffects.hpp>
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
 #include <Poseidon/Dev/Debug/DebugTrap.hpp>
 
@@ -317,6 +318,9 @@ World::~World()
         ProgressStart(LocalizeString(IDS_SHUTDOWN));
     }
     DebugLog("World destruct");
+
+    // kaiju lights are attachments of this world: drop them while it exists
+    Kaiju::Shutdown();
 
     VehicleTypes.UnlockAllTypes();
 

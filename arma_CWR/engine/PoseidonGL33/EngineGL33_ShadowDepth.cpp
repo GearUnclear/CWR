@@ -281,6 +281,11 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
     glGetIntegerv(GL_VIEWPORT, prevVP);
     glBindFramebuffer(GL_FRAMEBUFFER, s_fbo);
     glViewport(0, 0, res, res);
+    // the main scene may have narrowed the window depth range (far draw); the
+    // shadow map always wants all of it
+    GLfloat prevDepthRange[2] = {0.0f, 1.0f};
+    glGetFloatv(GL_DEPTH_RANGE, prevDepthRange);
+    glDepthRange(0.0, 1.0);
     Poseidon::render::depthstencil::Normal(/*hasStencil*/ false); // test on, LEQUAL, write on
     Poseidon::render::cull::None();                               // single-map probe: capture both faces
     glClearDepth(1.0);
@@ -299,6 +304,7 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
     if (outDepthOrNull)
         glReadPixels(0, 0, res, res, GL_DEPTH_COMPONENT, GL_FLOAT, outDepthOrNull);
 
+    glDepthRange(prevDepthRange[0], prevDepthRange[1]);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
     glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
     glUseProgram(static_cast<GLuint>(prevProg));
@@ -335,6 +341,10 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
 
     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);
     glViewport(0, 0, res, res);
+    // see RenderDepthFBO: the shadow map takes the whole depth range
+    GLfloat prevDepthRange[2] = {0.0f, 1.0f};
+    glGetFloatv(GL_DEPTH_RANGE, prevDepthRange);
+    glDepthRange(0.0, 1.0);
     Poseidon::render::depthstencil::Normal(/*hasStencil*/ false);
     Poseidon::render::cull::None();
 
@@ -391,6 +401,7 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         }
     }
 
+    glDepthRange(prevDepthRange[0], prevDepthRange[1]);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
     glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
     glUseProgram(static_cast<GLuint>(prevProg));

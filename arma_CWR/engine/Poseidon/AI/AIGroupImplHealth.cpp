@@ -1604,6 +1604,19 @@ void AIGroup::Flee()
     ::Flee(&context);
 }
 
+void AIGroup::ForceFlee(float seconds)
+{
+    if (IsAnyPlayerGroup() || !Leader() || NWaypoints() <= 0)
+    {
+        return;
+    }
+    _fearUntil = Glob.time + seconds;
+    if (!_flee)
+    {
+        Flee();
+    }
+}
+
 void AIGroup::Unflee()
 {
     _flee = false;

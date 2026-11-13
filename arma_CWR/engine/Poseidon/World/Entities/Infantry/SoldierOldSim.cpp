@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -60,6 +61,23 @@ bool Man::SimulateAnimations(float& turn, float& moveX, float& moveZ, float delt
                 adjustTimeCoef = maxRunTired / speedZ;
                 saturate(adjustTimeCoef, minSpd, maxSpd);
             }
+        }
+    }
+
+    if (Kaiju::GTraitCount)
+    {
+        // Game/Kaiju: a steered unit plays its gait's clip at the rate the
+        // order gave (1 = the clip's own speed), not at the pilot's speed
+        // over the clip's; and a unit's pace scales every move that travels.
+        float rate = 1;
+        if (Kaiju::GSteerCount && Kaiju::GetSteerRate(this, rate))
+        {
+            adjustTimeCoef = rate;
+            saturate(adjustTimeCoef, minSpd, maxSpd);
+        }
+        if (const Kaiju::Traits* kj = Kaiju::TraitsOf(this); kj && kj->pace != 1.0f && fabs(speedZ) > 1e-6)
+        {
+            adjustTimeCoef *= kj->pace;
         }
     }
 
@@ -811,6 +829,12 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                     _hideBody += delta;
 
                     float under = underBias - _hideBody;
+                    // body sink (Game/Kaiju): a dead body whose fall clip leaves it
+                    // hanging above the ground is set into it by this much
+                    if (const Kaiju::Traits* kj = Kaiju::TraitsOf(this); kj && kj->bodySink > 0)
+                    {
+                        under -= kj->bodySink;
+                    }
 
                     _waterDepth = 0;
                     GroundCollisionBuffer retVal;
@@ -840,6 +864,11 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             if (_landContact && Glob.time > _disableDammageUntil)
             {
                 float maxCrashSpeed = 10;
+                // speed guard (Game/Kaiju): a long stride is not a crash
+                if (const Kaiju::Traits* kj = Kaiju::TraitsOf(this); kj && kj->noSpeedDamage)
+                {
+                    maxCrashSpeed = 1e6f;
+                }
                 if (_speed.SquareSize() >= Square(maxCrashSpeed))
                 {
                     float dammage = (_speed.Size() - maxCrashSpeed) * 0.1f;
@@ -1128,6 +1157,11 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             if (IsDown())
             {
                 maxSafeDepth = 0.6f;
+            }
+            // wading (Game/Kaiju): a per-unit safe depth for a creature that walks out of the sea
+            if (const Kaiju::Traits* kj = Kaiju::TraitsOf(this); kj && kj->wadeDepth > 0)
+            {
+                maxSafeDepth = kj->wadeDepth;
             }
             if (_waterDepth > maxSafeDepth)
             {
