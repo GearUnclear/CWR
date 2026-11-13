@@ -99,7 +99,8 @@ main-based build kept in `kaiju-notes\chupa-retest\kaiju-rwdi-main-based-backup`
 - unit suite: 3417 of 3427, the same six localisation and game-data failures
   as before the merge.
 
-Logs: `kaiju-notes\chupa-retest\` and `kaiju-notesinishingetest\logserdicts.txt`.
+Logs: `kaiju-notes\chupa-retest\` and `kaiju-notes\finishing\retest\logs\verdicts.txt`.
+etest\logserdicts.txt`.
 
 Known faults, not fixed:
 
