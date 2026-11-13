@@ -31,6 +31,7 @@ struct TerrainHorizonMap;
 struct FeatureGates;
 struct CanopyField;
 struct CanopyRect;
+struct RainXpFrame;
 } // namespace Poseidon::remaster
 
 // Forward-decl for `EmitDraw` — the frame layer's `Draw` value (full param-pack
@@ -904,6 +905,12 @@ class Engine : public IGraphicsEngine
     /// camera writes this frame's scene light: the particle then takes it in
     /// place of the classic sun and ambient. False otherwise (classic light).
     virtual bool ParticleRigLight(float /*linear*/[3]) const { return false; }
+    /// Rain you can see (POSEIDON_XP_RAIN=world, Graphics/Remaster/RainXp.hpp):
+    /// true when the backend draws this frame's rain as world-space streaks
+    /// after the TAA resolve (the scene then leaves its screen overlay out),
+    /// and the scene's rain for it. Off by default: false, and nothing drawn.
+    virtual bool RainXpWorldReady() const { return false; }
+    virtual void SetRainXpFrame(const Poseidon::remaster::RainXpFrame& /*rain*/) {}
     /// True while the frame's combat lights (the combatLights feature,
     /// Graphics/Rendering/Lighting/CombatLights.hpp) light the world: the
     /// classic light of a muzzle flash, an explosion, a wreck, a fire, a flare

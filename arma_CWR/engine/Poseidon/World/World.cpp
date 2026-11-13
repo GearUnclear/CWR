@@ -1586,6 +1586,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 // effects (cinema borders, cutscene overlays) draw over it
                 // untouched. The call below is then a no-op.
                 GEngine->EndWorldScene();
+                // POSEIDON_XP_RAIN=late: the rain overlay over the finished
+                // frame, after the TAA resolve (nothing otherwise).
+                _scene.DrawRainLate();
                 if (_cameraEffect)
                 {
                     _cameraEffect->Draw();

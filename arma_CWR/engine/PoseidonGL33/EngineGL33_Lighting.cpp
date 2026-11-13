@@ -984,6 +984,27 @@ void EngineGL33::UploadLitFrameConstants()
         _particleRigLight[1] = irr.g * k;
         _particleRigLight[2] = irr.b * k;
         _particleRigFrame = GetFrameCounter();
+        // POSEIDON_XP_RAIN=world (EngineGL33_XpRain.cpp): the same rig split
+        // into the sky (all round a drop) and the key (scattered forward).
+        if (rm::RainXpModeFromEnv() == rm::RainXpMode::World)
+        {
+            const float field = 1.0f - std::min(std::max(rig.cloudCover, 0.0f), 1.0f) *
+                                           (1.0f - std::min(std::max(rig.cloudTransmit, 0.0f), 1.0f));
+            const rm::Rgb sky =
+                (rig.skyZenith + rig.skyHorizon + rig.skyHorizonSun + rig.skyGround) * (0.25f * std::max(shade, 0.0f));
+            const rm::Rgb direct = key.radiance * (key.IsMoon() ? 1.0f : field) + rig.moon;
+            _xpRain.sky[0] = sky.r;
+            _xpRain.sky[1] = sky.g;
+            _xpRain.sky[2] = sky.b;
+            _xpRain.key[0] = direct.r;
+            _xpRain.key[1] = direct.g;
+            _xpRain.key[2] = direct.b;
+            for (int i = 0; i < 3; ++i)
+                _xpRain.toward[i] = key.toward[i];
+            _xpRain.rigExposure = _combat.exposure;
+            _xpRain.localScale = _lighting.localLights * localGain;
+            _xpRain.lightFrame = GetFrameCounter();
+        }
     }
     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, _combat.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);

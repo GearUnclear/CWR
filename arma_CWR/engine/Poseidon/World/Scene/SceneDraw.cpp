@@ -35,6 +35,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
+#include <Poseidon/Graphics/Remaster/RainXp.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -344,6 +345,7 @@ void Scene::DrawRainLevel(float alpha, float yDensity, float xOffset, float yOff
 void Scene::DrawRain()
 {
     // start with single level rain
+    _rainLate.pending = false;
     if (!GetLandscape())
     {
         return;
@@ -380,9 +382,86 @@ void Scene::DrawRain()
             if (tuning.features.photoLight > 0.5f)
                 density *= 0.9f;
         }
+        // Rain you can see (POSEIDON_XP_RAIN, world by default): world-space
+        // streaks in place of the overlay, or (=late) the overlay held back
+        // until after the TAA resolve. A cockpit draws over the world after
+        // the rain, so a frame with one keeps the overlay here, under it.
+        const remaster::RainXpMode xpRain = remaster::RainXpModeFromEnv();
+        if (xpRain != remaster::RainXpMode::Off && GEngine && !CockpitThisFrame())
+        {
+            if (xpRain == remaster::RainXpMode::Late)
+            {
+                _rainLate.pending = true;
+                _rainLate.alpha = density;
+                _rainLate.yDensity = yDensity;
+                _rainLate.xOffset = xOffset;
+                _rainLate.yOffset = yOffset;
+                return;
+            }
+            // The drops' travel is summed from frame to frame (RainDriftStep:
+            // velocity times the clock made the rain stand or rise whenever
+            // the density or the wind changed). A capture's temporal reset
+            // starts it again, so a pinned shot repeats.
+            static remaster::RainXpDrift drift;
+            static std::uint32_t driftReset = 0;
+            if (const std::uint32_t serial = remaster::TemporalControl().resetSerial; serial != driftReset)
+            {
+                driftReset = serial;
+                drift = remaster::RainXpDrift();
+            }
+            remaster::RainXpFrame rain;
+            rain.frame = GEngine->GetFrameCounter();
+            const Vector3 windV = GetLandscape()->GetWind();
+            const float wind[3] = {windV.X(), windV.Y(), windV.Z()};
+            Vector3Val pos = GetCamera()->Position();
+            const double camPos[3] = {pos.X(), pos.Y(), pos.Z()};
+            const double now = 1e-3 * static_cast<double>(Glob.time.toInt());
+            const float rainDensity = GetLandscape()->GetRainDensity();
+            remaster::RainDriftStep(drift, now, rainDensity, wind, camPos, rain);
+            if (remaster::RainXpProbeFromEnv())
+            {
+                LOG_INFO(Graphics,
+                         "xp rain probe: frame {} t {:.3f} density {:.5f} fall {:.3f} wind {:.2f},{:.2f} cam {:.2f},"
+                         "{:.2f},{:.2f} | round1 drops move {:.2f},{:.2f},{:.2f} m/s | fixed drops move {:.2f},{:.2f},"
+                         "{:.2f} m/s (rel to camera {:.2f},{:.2f},{:.2f})",
+                         rain.frame, now, rainDensity, remaster::RainFallSpeed(rainDensity), wind[0], wind[2],
+                         drift.camVel[0], drift.camVel[1], drift.camVel[2], drift.r1Speed[0], drift.r1Speed[1],
+                         drift.r1Speed[2], rain.relVel[1][0] + drift.camVel[0], rain.relVel[1][1] + drift.camVel[1],
+                         rain.relVel[1][2] + drift.camVel[2], rain.relVel[1][0], rain.relVel[1][1], rain.relVel[1][2]);
+            }
+            if (remaster::RainXpRound1FromEnv())
+                remaster::RainDriftAsRound1(drift, rain);
+            // Handed over only when the streaks will draw: a frame that is not
+            // ready keeps the overlay alone, never both.
+            if (GEngine->RainXpWorldReady())
+            {
+                GEngine->SetRainXpFrame(rain);
+                return;
+            }
+        }
         DrawRainLevel(density, yDensity, xOffset, yOffset, 8);
         DrawRainLevel(density, yDensity, xOffset, yOffset, 2);
     }
+}
+
+void Scene::DrawRainLate()
+{
+    if (!_rainLate.pending)
+        return;
+    _rainLate.pending = false;
+    DrawRainLevel(_rainLate.alpha, _rainLate.yDensity, _rainLate.xOffset, _rainLate.yOffset, 8);
+    DrawRainLevel(_rainLate.alpha, _rainLate.yDensity, _rainLate.xOffset, _rainLate.yOffset, 2);
+}
+
+bool Scene::CockpitThisFrame() const
+{
+    for (int i = 0; i < _drawMergers.Size(); i++)
+    {
+        const SortObject* oi = _drawMergers[i];
+        if (oi->passNum == 3 && oi->drawLOD != LOD_INVISIBLE && !oi->hillHidden)
+            return true;
+    }
+    return false;
 }
 
 void Scene::ObjectsDrawn()

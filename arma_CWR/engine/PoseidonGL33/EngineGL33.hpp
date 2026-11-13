@@ -44,6 +44,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+#include <Poseidon/Graphics/Remaster/RainXp.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
@@ -763,6 +764,8 @@ class EngineGL33 : public Engine
     bool RemasterMoonKey() const override;
     bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
     bool ParticleRigLight(float linear[3]) const override;
+    bool RainXpWorldReady() const override;
+    void SetRainXpFrame(const Poseidon::remaster::RainXpFrame& rain) override;
     bool CombatLightsActive() const override { return _combat.active; }
     void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
     void RequestShaderReload() override { _shaderReloadPending = true; }
@@ -1425,6 +1428,39 @@ class EngineGL33 : public Engine
     float _sunGlareGain = 0.0f;
     XpSunGlareFrame PostXpSunGlare(const PostFrame& f);
     void DestroyXpSunGlare();
+    // Rain you can see (POSEIDON_XP_RAIN=world, perf-squad lane EX4-RAIN;
+    // EngineGL33_XpRain.cpp, Graphics/Remaster/RainXp.hpp): camera-anchored
+    // world-space streaks drawn over the finished frame after the TAA resolve,
+    // in the scene's rain (SetRainXpFrame), lit by the frame's rig (captured
+    // with it in UploadLitFrameConstants) and its lamps and headlights.
+    struct XpRainState
+    {
+        Poseidon::remaster::RainXpFrame scene; // the scene's rain this frame
+        // The rig's light on a drop (linear, before any exposure): the sky's
+        // mean radiance (times the shade) and the key's radiance (the sun's
+        // through the cloud field, or the moon's), toward the key, and the
+        // rig's exposure; for frame lightFrame.
+        float sky[3] = {0.0f, 0.0f, 0.0f};
+        float key[3] = {0.0f, 0.0f, 0.0f};
+        float toward[3] = {0.0f, 1.0f, 0.0f};
+        float rigExposure = 1.0f;
+        float localScale = 1.0f; // the local lights' knob and night gain (litGround.w)
+        std::uint32_t lightFrame = 0xffffffffu;
+        unsigned int prog = 0;
+        bool tried = false;
+        std::uint32_t logged = 0; // frames logged (the first few, for the job logs)
+        // The smoke in front of the rain: the frame's smoke and fire puffs on
+        // a coarse screen grid (NoteRainCover, from DrawDecal), for coverFrame.
+        Poseidon::remaster::RainCoverGrid cover;
+        std::uint32_t coverFrame = 0xffffffffu;
+        unsigned int coverTex = 0;
+    } _xpRain;
+    void PostXpRain(const PostFrame& f, bool nightLights);
+    void DestroyXpRain();
+    // A decal (a smoke or fire puff) of this frame, for the rain behind it:
+    // its centre and half size on screen (px), opacity and depth (m). Does
+    // nothing unless the world-space rain is drawing.
+    void NoteRainCover(float x, float y, float sx, float sy, float opacity, float depthM);
     void PostTemporal(const PostFrame& f);
     void PostSharpen(const PostFrame& f);
     void PostDebugView(const PostFrame& f);

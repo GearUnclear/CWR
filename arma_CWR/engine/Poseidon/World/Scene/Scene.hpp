@@ -216,6 +216,14 @@ class Scene
 
     Ref<Object> _collisionStar;
 
+    // Rain you can see (POSEIDON_XP_RAIN, Graphics/Remaster/RainXp.hpp): the
+    // overlay DrawRain held back for DrawRainLate (mode late).
+    struct RainLate
+    {
+        bool pending = false;
+        float alpha = 0.0f, yDensity = 0.0f, xOffset = 0.0f, yOffset = 0.0f;
+    } _rainLate;
+
     // fog functions for different types of objects
     FogFunction _fog, _skyFog, _shadowFog, _tacticalFog;
     float _tacticalVisibility;                    // AI sensors
@@ -435,6 +443,11 @@ class Scene
 
     void DrawRainLevel(float alpha, float yDensity, float xOffset, float yOffset, float z);
     void DrawRain();
+    // POSEIDON_XP_RAIN=late: the overlay DrawRain held back, drawn after the
+    // post pass (World::Draw, right after EndWorldScene); nothing otherwise.
+    void DrawRainLate();
+    // A cockpit (pass 3) draws over the world this frame.
+    bool CockpitThisFrame() const;
 
     void DrawDiagModel(Vector3Par pos, LODShapeWithShadow* shape, float size = 0.1, PackedColor color = PackedWhite);
     void DrawCollisionStar(Vector3Par pos, float size = 0.1, PackedColor color = PackedWhite);

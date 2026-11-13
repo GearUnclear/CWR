@@ -249,6 +249,7 @@ void EngineGL33::DestroyPostPrograms()
     p.airUnavailable = false;
     DestroySsrPrograms();
     DestroyXpSunGlare();
+    DestroyXpRain();
 }
 
 bool EngineGL33::EnsurePostResources(int w, int h)
@@ -518,6 +519,9 @@ void EngineGL33::EndWorldScene()
     // own list, by the classic model, combat sources with their classic
     // lights. The composite still scatters this frame's combat lights
     // (combatWasActive).
+    // (POSEIDON_XP_RAIN=world: the drops take the physical lamps and low beams
+    // that lit this world pass.)
+    const bool rainNightLights = _nightLightsActive && _lightTiles.frame == GetFrameCounter();
     _lightTilesActive = false;
     _nightLightsActive = false;
     const bool combatWasActive = _combat.active;
@@ -646,6 +650,9 @@ void EngineGL33::EndWorldScene()
         if (stage == rm::PostStage::Resolve)
             BeginPostFullscreen();
     }
+    // POSEIDON_XP_RAIN=world: the rain's streaks over the finished frame.
+    if (_xpRain.scene.frame == GetFrameCounter())
+        PostXpRain(f, rainNightLights);
     GpuMark(Poseidon::gpu::Mark::PostEnd);
     EndPostFullscreen();
     // The linear depth the next frame's combat shadow mask traces through,
