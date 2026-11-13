@@ -1,0 +1,44 @@
+; ============================================================================
+;  kj\crush\flatten.sqs  -  a vehicle under his foot.
+;
+;      [vehicle, [x, y] of the foot] exec "kj\crush\flatten.sqs"
+;
+;  The crew die with it. The engine cannot squash a model, a tracked hull
+;  cannot be pressed into the ground (the engine puts it back on the surface
+;  at once) and any hull, wreck or not, is a wall to his legs. So the vehicle
+;  is taken away and one of the stock wreck models (KJC_WRECKS: a jeep, a
+;  truck or an APC hulk, all plain static objects) is put in its place, turned
+;  the same way, pressed into the ground and set smoking. If the data has no
+;  such class the hull is destroyed, pressed in as far as the engine allows
+;  and left.
+; ============================================================================
+_v = _this select 0
+? isNull _v : exit
+_p = getPos _v
+_d = getDir _v
+_kind = _v call KJC_fnKind
+_i = 0
+? (getMass _v) >= KJC_TRUCK_MASS : _i = 1
+? _kind == "tank" : _i = 2
+_cls = (KJC_WRECKS select _i) select 0
+_sink = (KJC_WRECKS select _i) select 1
+_model = format ["%1", _cls GetVehicleParam "model"]
+{ _x setDamage 1 } forEach (crew _v)
+[[_p select 0, _p select 1], 3, 6, 2, 8, 5, 1.5, 3, [0.3, 0.29, 0.27], 0.6, 1] call KJC_fnDust
+? _model == "<null>" : goto "nowreck"
+; the dust is there a moment before the hull goes
+~0.15
+? isNull _v : exit
+deleteVehicle _v
+_w = _cls createVehicle [_p select 0, _p select 1, 0]
+_w setVariable ["kjcFlat", true]
+_w setDir _d
+_w setPos [_p select 0, _p select 1, 0 - _sink]
+_w setDamage 1
+exit
+
+#nowreck
+_v setDamage 1
+_v setVelocity [0, 0, 0]
+_v setPos [_p select 0, _p select 1, 0 - KJC_SINK]
+exit

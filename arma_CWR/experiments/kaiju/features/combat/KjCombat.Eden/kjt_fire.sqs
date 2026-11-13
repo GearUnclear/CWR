@@ -1,0 +1,27 @@
+; kjt_fire.sqs  -  test helper: every unit of the list is made to fire its first
+; weapon again and again for a while, whatever its AI thinks of the target
+; (the engine's forced shot). A forced shot goes where the weapon points, and
+; a unit whose weapon the AI rates useless against a target does not even turn
+; to it, so each unit is stood up, turned to the point given and told to watch
+; it, and to target the object when one is given. Measured on the giant: a man
+; then holds his rifle about 30 degrees up, so from 35 to 45 m his rounds land
+; on the belly and chest, from 150 m they pass far over the head, and from
+; 12 m as well.
+;
+;     [units, [x, y, 0] to face, seconds, seconds between two rounds, object to target (optional)] exec "kjt_fire.sqs"
+;
+; kjtForcedOn is true while it runs.
+_us = _this select 0
+_at = _this select 1
+_end = time + (_this select 2)
+_gap = _this select 3
+kjtForcedOn = true
+{ _x setUnitPos "UP"; _x setDir (((_at select 0) - ((getPos _x) select 0)) atan2 ((_at select 1) - ((getPos _x) select 1))); _x doWatch _at } forEach _us
+? (count _this) > 4 : { _x doTarget (_this select 4) } forEach _us
+~6
+#loop
+{ if (alive _x) then { _x fire ((weapons _x) select 0) } } forEach _us
+~_gap
+? time < _end : goto "loop"
+kjtForcedOn = false
+exit

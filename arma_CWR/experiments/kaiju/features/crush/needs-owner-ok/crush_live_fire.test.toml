@@ -1,0 +1,7 @@
+# NEEDS-OWNER-OK: fires weapons. Written, never run. See the .sqf header.
+tags = ["kaiju", "experiment", "crush", "needs_owner_ok"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/crush/KjCrush.Eden"
+timeout = 300
+assert_timeout = 180
+extra_args = ["--nosound", "--no-strict", "--width", "1280", "--height", "720", "--mods-dir", "..", "--mod", "@kj_crush"]

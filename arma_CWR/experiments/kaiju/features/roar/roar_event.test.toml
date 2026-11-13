@@ -1,0 +1,11 @@
+# Dedushka ROAR: the roar as an event (experiment, kept out of tests/integration
+# so a sweep never runs it). Needs both mounts beside the data dir: @uddedushka
+# (the creature) and @kj_roar (his sounds, addon/build-kj-roar.ps1). Run it
+# through run-roar.ps1: one game, hidden desktop. Quiet: everyone in the
+# mission is EAST or civilian, nobody fires, --nosound.
+tags = ["kaiju", "experiment", "roar"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/roar/KaijuRoar.Eden"
+timeout = 420
+assert_timeout = 150
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@uddedushka;@kj_roar"]

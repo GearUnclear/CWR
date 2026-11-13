@@ -1,0 +1,12 @@
+# Dedushka COMBAT, diagnostic live-fire survey (experiment, kept out of
+# tests/integration and out of the combat gate). WEAPONS ARE FIRED (owner,
+# 2026-11-12), silently. Needs the combat variant of the creature addon,
+# <git root>/tmp/@kj_combat (addon/build-kjcombat.ps1), mounted in place of
+# @uddedushka, and the kaiju engine build. Run it through
+#   run-combat.ps1 -Probe -Name combat_probe
+tags = ["kaiju", "experiment", "combat", "livefire", "probe"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/combat/KjCombat.Eden"
+timeout = 900
+assert_timeout = 300
+extra_args = ["--nosound", "--no-strict", "--width", "1280", "--height", "720", "--mods-dir", "..", "--mod", "@kj_combat"]

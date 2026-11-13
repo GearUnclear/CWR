@@ -1,0 +1,11 @@
+# Dedushka CRUSH: the stomp, the kick, the swat and being shot (experiment, kept out of
+# tests/integration so a sweep never runs it). Needs the crush variant of the
+# creature addon, <git root>/tmp/@kj_crush, built by ../addon/build-kjcrush.ps1
+# (run-crush.ps1 does it), mounted in place of @uddedushka. Run it through
+# ../run-crush.ps1: one game, hidden desktop, --render gl33. Quiet, no gunfire.
+tags = ["kaiju", "experiment", "crush"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/crush/KjCrush.Eden"
+timeout = 300
+assert_timeout = 90
+extra_args = ["--nosound", "--no-strict", "--width", "1280", "--height", "720", "--mods-dir", "..", "--mod", "@kj_crush"]

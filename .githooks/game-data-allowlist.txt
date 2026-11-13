@@ -50,6 +50,7 @@ arma_CWR/experiments/kaiju/features/beam/addon/kjbeam/config.cpp        # kaiju 
 arma_CWR/experiments/kaiju/integration/addon/kjbeam/config.cpp          # copy of the beam config for the integrated mount
 arma_CWR/experiments/kaiju/features/roar/addon/kj_roar/config.cpp       # kaiju CfgSounds for sounds synthesised here
 arma_CWR/experiments/kaiju/features/sound-vst/addon/kj_roar/config.cpp  # kaiju CfgSounds, VST round 2, written here
+arma_CWR/experiments/kaiju/features/anim/moves_dedushka.hpp           # CfgMovesDedushka for the kaiju RTMs made here
 
 # ---------------------------------------------------------------------------
 # Fixtures inherited from Bohemia's GPL engine release. Each path exists in

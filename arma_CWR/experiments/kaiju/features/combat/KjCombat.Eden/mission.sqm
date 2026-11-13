@@ -1,0 +1,151 @@
+// Dedushka combat test bed on Eden (Everon), the airfield, daylight. Written by
+// hand from nothing. One stock player (West) and two parked, unarmed, captive
+// anchor soldiers (East and Resistance): a side that has a unit in the mission
+// has its centre and its friend table set up by the engine, which a centre made
+// by script does not. Resistance is hostile to both sides here (resistanceWest
+// and resistanceEast are 0), so a creature in a Resistance group is everyone's
+// enemy. The tests make the creature and every shooter from script. One East
+// rifle section (kjcF1..3) is placed here, 135 m west of where he stands: only a
+// group loaded from a mission has its flee strength computed, and the death test
+// needs a group the engine can make run. The other tests delete it.
+// addOns[] names the creature's addon: a runtime createUnit of a class whose
+// owner addon is not activated is refused, and no script command activates one.
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"uddedushka"
+	};
+	addOnsAuto[]=
+	{
+		"uddedushka"
+	};
+	randomSeed=4243;
+	class Intel
+	{
+		resistanceWest=0;
+		resistanceEast=0;
+		viewDistance=1500;
+		year=1985;
+		month=6;
+		day=10;
+		hour=11;
+		minute=0;
+		weather=0.150000;
+		weatherForecast=0.150000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=4;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4690.0,20.0,11420.0};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+		class Item1
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4670.0,20.0,11440.0};
+					azimut=0.000000;
+					id=1;
+					side="EAST";
+					vehicle="SoldierEB";
+					init="this setCaptive true; removeAllWeapons this; this allowDammage false; this disableAI ""MOVE""";
+					leader=1;
+					skill=0.600000;
+					text="kjcAnchorE";
+				};
+			};
+		};
+		class Item2
+		{
+			side="GUER";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4660.0,20.0,11440.0};
+					azimut=0.000000;
+					id=2;
+					side="GUER";
+					vehicle="SoldierGB";
+					init="this setCaptive true; removeAllWeapons this; this allowDammage false; this disableAI ""MOVE""";
+					leader=1;
+					skill=0.600000;
+					text="kjcAnchorG";
+				};
+			};
+		};
+		class Item3
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=3;
+				class Item0
+				{
+					position[]={4668.0,20.0,11190.0};
+					azimut=90.000000;
+					id=3;
+					side="EAST";
+					vehicle="SoldierEB";
+					leader=1;
+					skill=0.500000;
+					text="kjcF1";
+				};
+				class Item1
+				{
+					position[]={4664.0,20.0,11186.0};
+					azimut=90.000000;
+					id=4;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.500000;
+					text="kjcF2";
+				};
+				class Item2
+				{
+					position[]={4664.0,20.0,11194.0};
+					azimut=90.000000;
+					id=5;
+					side="EAST";
+					vehicle="SoldierEMG";
+					skill=0.500000;
+					text="kjcF3";
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

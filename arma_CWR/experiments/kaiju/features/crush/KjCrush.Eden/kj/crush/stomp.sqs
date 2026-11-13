@@ -1,0 +1,73 @@
+; ============================================================================
+;  kj\crush\stomp.sqs  -  Dedushka CRUSH: the stomp, a deliberate blow on a
+;  point (a tank, a strongpoint).
+;
+;      [kaiju, pos] exec "kj\crush\stomp.sqs"
+;
+;  Tuning: the one marked block at the top of kj\crush\init.sqf.
+;
+;  The foot hangs for KJC_STOMP_WIND seconds (move DedStomp when the animation
+;  feature has it), then comes down on the point:
+;    under the foot    everything is destroyed: tanks flattened, men dead
+;    the kill zone     men die and are thrown, light vehicles are wrecked and
+;                      thrown, armour is crippled and shoved, buildings fall
+;    the shock ring    travels outwards at KJC_STOMP_SPEED: light vehicles are
+;                      wrecked, men are thrown down and hurt, trees and fences
+;                      near the inner edge go over, armour is shaken
+;  He can only plant the foot within KJC_STOMP_REACH x height of his origin. A
+;  point further away gets the blow at the end of his reach, on the line to it
+;  (the brain should walk him closer first).
+;
+;  Read by others:
+;    KJ_stomping     true from the wind-up to the end of the ring
+;    KJ_stompResult  "wind", then "hit" (on the point) or "short" (clamped)
+;    KJ_stompCount   rises by one per blow that landed
+;    KJ_stompPos     where the last blow landed
+; ============================================================================
+_k = _this select 0
+_pos = _this select 1
+? isNil "KJC_ready" : call compile preprocessFile "kj\crush\init.sqf"
+? isNil "KJC_sized" : [_k] call KJC_fnSize
+? not alive _k : exit
+_kp = getPos _k
+_dx = (_pos select 0) - (_kp select 0)
+_dy = (_pos select 1) - (_kp select 1)
+_d = sqrt (_dx * _dx + _dy * _dy)
+_reach = KJC_STOMP_REACH * KJC_H
+_res = "hit"
+? _d > _reach : _res = "short"
+? _d > _reach : _pos = [(_kp select 0) + _dx * _reach / _d, (_kp select 1) + _dy * _reach / _d, 0]
+_c = [_pos select 0, _pos select 1]
+_foot = KJC_STOMP_FOOT * KJC_H
+_kill = KJC_STOMP_KILL * KJC_H
+_ring = KJC_STOMP_RING * KJC_H
+KJ_stomping = true
+KJ_stompResult = "wind"
+_k playMove "DedStomp"
+; the ground under the raised foot gives a little dust away
+[_c, _foot, 4, 2, 5, 3, 0.8, 0.8, [0.6, 0.56, 0.48], 0.3, 0.5] call KJC_fnDust
+~KJC_STOMP_WIND
+? not alive _k : goto "abort"
+
+; ---- the blow ------------------------------------------------------------------
+KJ_stompPos = [_pos select 0, _pos select 1, 0]
+KJ_footfall = [(KJ_footfall select 0) + 1, time, KJ_stompPos, "S"]
+[_k, _c, _foot, _kill, _ring, 0, _kill] call KJC_fnShock
+[_c, _foot, 12, 5, 16, 9, 6, 5, [0.55, 0.51, 0.44], 0.7, 2] call KJC_fnDust
+[_c, _foot, 30, 0.7 * KJC_STOMP_SPEED, 5, 1.6 * (_ring - _foot) / KJC_STOMP_SPEED] call KJC_fnRing
+? KJC_stepFile : [_k] exec "kj\roar\step.sqs"
+~(0.5 * (_ring - _kill) / KJC_STOMP_SPEED)
+
+; ---- the ring arrives ------------------------------------------------------------
+[_k, _c, _foot, _kill, _ring, _kill, _ring] call KJC_fnShock
+[_c, 0.6 * _ring, 10, 6, 15, 9, 1.5, 3, [0.58, 0.54, 0.47], 0.4, 1] call KJC_fnDust
+KJ_stompCount = KJ_stompCount + 1
+KJ_stompResult = _res
+~1
+KJ_stomping = false
+exit
+
+#abort
+KJ_stompResult = "abort"
+KJ_stomping = false
+exit

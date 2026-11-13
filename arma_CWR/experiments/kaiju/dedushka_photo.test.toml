@@ -1,0 +1,13 @@
+# Dedushka photo test (experiment, kept out of tests/integration so a sweep
+# never runs it). It mounts its OWN copy of the addon, <git root>/tmp/@uddedushka_photo,
+# beside the kaiju Remaster shadow: make-stills.ps1 builds it there
+# (build-uddedushka.ps1 -ModDir <git root>	mp\@uddedushka_photo). The shared
+# mount @uddedushka is left alone, because other sessions run games on it and a
+# pbo in use cannot be replaced. Run it through experiments/kaiju/make-stills.ps1
+# or run-tri.ps1: one game, hidden desktop, --render gl33. Quiet, no gunfire.
+tags = ["kaiju", "experiment", "visual"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/DedushkaPhoto.Eden"
+timeout = 480
+assert_timeout = 90
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "1200", "--mods-dir", "..", "--mod", "@uddedushka_photo"]

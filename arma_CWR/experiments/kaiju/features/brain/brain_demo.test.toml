@@ -1,0 +1,11 @@
+# Dedushka BRAIN: the demo mission played through on its timeline, the brain
+# alone (experiment, kept out of tests/integration so a sweep never runs it).
+# Needs the mount tmp/@kj_brain (features/brain/build-kj-brain.ps1). Run it
+# through features/brain/run-brain.ps1 -Name brain_demo -Mission DedDemo.Eden:
+# one game, hidden desktop, --nosound. Quiet: nobody fires.
+tags = ["kaiju", "experiment", "brain"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/brain/DedDemo.Eden"
+timeout = 720
+assert_timeout = 260
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_brain"]

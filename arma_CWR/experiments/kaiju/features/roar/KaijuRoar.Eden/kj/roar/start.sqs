@@ -1,0 +1,15 @@
+; ============================================================================
+;  kj\roar\start.sqs  -  everything of the ROAR feature that runs for his
+;  lifetime, in one call: presence (lights, birds, radio, furnace drone) and
+;  footfalls when he walks.
+;
+;      [kaiju] exec "kj\roar\start.sqs"
+;
+;  The roar itself is an event: [kaiju] exec "kj\roar\roar.sqs".
+; ============================================================================
+_k = _this select 0
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJR_sized" : [_k] call KJR_fnSize
+[_k] exec "kj\roar\presence.sqs"
+[_k] exec "kj\roar\walk.sqs"
+exit

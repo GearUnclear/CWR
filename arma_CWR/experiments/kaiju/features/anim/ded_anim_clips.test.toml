@@ -1,0 +1,12 @@
+# Dedushka clips test (experiment, kept out of tests/integration so a
+# sweep never runs it). Needs the @kj_anim mod built beside the data dir
+# (experiments/kaiju/features/anim/build-kj-anim.ps1). It is mounted IN PLACE OF
+# @uddedushka: both carry the addon uddedushka. Run it through
+# features/anim/run-anim-tests.ps1: one game, hidden desktop, --render gl33.
+# Written by gen_ded_anim_tests.py. Quiet, no gunfire.
+tags = ["kaiju", "experiment", "visual"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/anim/DedAnim.Eden"
+timeout = 600
+assert_timeout = 120
+extra_args = ["--nosound", "--no-strict", "--width", "1280", "--height", "960", "--mods-dir", "..", "--mod", "@kj_anim"]

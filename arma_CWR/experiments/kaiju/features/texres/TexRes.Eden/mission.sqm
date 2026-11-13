@@ -1,0 +1,65 @@
+// Texture-resolution test bed on Eden (Everon), daylight: the pipeline's photo
+// mission with a second addon. One stock player only; the tests create the
+// creature, the panels and the scale props from script. addOns[] names both
+// addons of @kj_texres: a runtime create of a class whose owner addon is not
+// activated is refused.
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"uddedushka",
+		"kjtexres"
+	};
+	addOnsAuto[]=
+	{
+		"uddedushka",
+		"kjtexres"
+	};
+	randomSeed=4243;
+	class Intel
+	{
+		viewDistance=1200;
+		year=1985;
+		month=6;
+		day=10;
+		hour=11;
+		minute=0;
+		weather=0.100000;
+		weatherForecast=0.100000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4772.0,20.0,11000.0};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};
