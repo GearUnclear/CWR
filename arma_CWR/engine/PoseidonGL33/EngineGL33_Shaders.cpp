@@ -12,6 +12,7 @@
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 
 #include <SDL3/SDL.h>
 
@@ -296,7 +297,9 @@ void main() {
             if (wSum > 0.0) {
                 float lit = litSum / wSum;
                 float lastSplit = cascadeSplits[nC - 1];
-                float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+                float fadeAt = camFwd.w > 0.5 ? dist3D : eyeDepth; // POSEIDON_XP_SHADOWBAND: distance from the eye
+                float fade = clamp((lastSplit - fadeAt) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+                if (camFwd.w > 0.5) fade = fade * fade * (3.0 - 2.0 * fade);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
                 r0.rgb *= mix(1.0, shadowCtl.z, strength);
             }
@@ -413,7 +416,9 @@ void main() {
             if (wSum > 0.0) {
                 float lit = litSum / wSum;
                 float lastSplit = cascadeSplits[nC - 1];
-                float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+                float fadeAt = camFwd.w > 0.5 ? dist3D : eyeDepth; // POSEIDON_XP_SHADOWBAND: distance from the eye
+                float fade = clamp((lastSplit - fadeAt) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+                if (camFwd.w > 0.5) fade = fade * fade * (3.0 - 2.0 * fade);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
                 r0.rgb *= mix(1.0, shadowCtl.z, strength);
             }
@@ -532,7 +537,9 @@ void main() {
             if (wSum > 0.0) {
                 float lit = litSum / wSum;
                 float lastSplit = cascadeSplits[nC - 1];
-                float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+                float fadeAt = camFwd.w > 0.5 ? dist3D : eyeDepth; // POSEIDON_XP_SHADOWBAND: distance from the eye
+                float fade = clamp((lastSplit - fadeAt) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+                if (camFwd.w > 0.5) fade = fade * fade * (3.0 - 2.0 * fade);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
                 r0.rgb *= mix(1.0, shadowCtl.z, strength);
             }
@@ -1194,7 +1201,10 @@ void EngineGL33::UpdateShadowMapLitState()
         ctl[2] = 1.0f - _shadowSunFactor * (1.0f - _shadowTuning.darkness);
         ctl[3] = (_shadowMapRes > 0) ? (1.0f / static_cast<float>(_shadowMapRes)) : 0.0f; // PCF texel size
         cascadeCtl[0] = static_cast<float>(_shadowCascades);
-        cascadeCtl[1] = _shadowTuning.fadeRange;
+        // POSEIDON_XP_SHADOWBAND: the band in metres, and camFwd.w 1 selects the
+        // fade by distance from the eye (ShadowXp.hpp).
+        const float radialBand = Poseidon::shadow::xp::RadialFadeBand();
+        cascadeCtl[1] = radialBand > 0.0f ? radialBand : _shadowTuning.fadeRange;
         cascadeCtl[2] = _shadowTuning.biasBase;
         cascadeCtl[3] = static_cast<float>(_shadowOmniCount); // leading omni (distance-selected) tiers
         for (int i = 0; i < _shadowCascades && i < 4; i++)
@@ -1204,6 +1214,7 @@ void EngineGL33::UpdateShadowMapLitState()
         camFwd[0] = _shadowCamFwd[0];
         camFwd[1] = _shadowCamFwd[1];
         camFwd[2] = _shadowCamFwd[2];
+        camFwd[3] = radialBand > 0.0f ? 1.0f : 0.0f;
         memcpy(s_psShadow + 8 * 4, _shadowMapVP, sizeof(float) * 16 * _shadowCascades);
         GL33Bind::ActiveUnit(Poseidon::gl33lighting::kShadowMapUnit);
         glBindTexture(GL_TEXTURE_2D_ARRAY, _shadowMapTex);

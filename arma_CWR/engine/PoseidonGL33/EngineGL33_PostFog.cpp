@@ -52,6 +52,7 @@
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/TerrainLighting.hpp>
@@ -788,9 +789,12 @@ void EngineGL33::PostFog(const PostFrame& f)
             if (loc >= 0)
                 glUniformMatrix4fv(loc, std::min(_shadowCascades, kShadowCascades), GL_FALSE, _shadowMapVP);
             Set4(prog, "cascadeSplits", _shadowSplits[0], _shadowSplits[1], _shadowSplits[2], _shadowSplits[3]);
-            Set4(prog, "cascadeCtl", static_cast<float>(_shadowCascades), _shadowTuning.fadeRange,
-                 _shadowTuning.biasBase, static_cast<float>(_shadowOmniCount));
-            Set4(prog, "camFwd", _shadowCamFwd[0], _shadowCamFwd[1], _shadowCamFwd[2], 0.0f);
+            // POSEIDON_XP_SHADOWBAND: the same fade as the shading (camFwd.w 1).
+            const float radialBand = Poseidon::shadow::xp::RadialFadeBand();
+            Set4(prog, "cascadeCtl", static_cast<float>(_shadowCascades),
+                 radialBand > 0.0f ? radialBand : _shadowTuning.fadeRange, _shadowTuning.biasBase,
+                 static_cast<float>(_shadowOmniCount));
+            Set4(prog, "camFwd", _shadowCamFwd[0], _shadowCamFwd[1], _shadowCamFwd[2], radialBand > 0.0f ? 1.0f : 0.0f);
         }
         Set4(prog, "shadowCtl", shadowMap ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
         Set4(prog, "shadowDelta", cam[0] - _shadowCamPos[0], cam[1] - _shadowCamPos[1], cam[2] - _shadowCamPos[2],

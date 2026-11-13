@@ -249,7 +249,8 @@ float fogShadowMap(vec3 rel) {
             if (suv.x <= 0.0 || suv.x >= 1.0 || suv.y <= 0.0 || suv.y >= 1.0 || sc.z <= 0.0 || sc.z >= 1.0) return 1.0;
             float bias = cascadeCtl.z * float(i + 1) * float(i + 1);
             float lit = texture(shadowMap, vec4(suv, float(i), sc.z - bias));
-            float fade = clamp((cascadeSplits[nC - 1] - ed) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+            float fade = clamp((cascadeSplits[nC - 1] - (camFwd.w > 0.5 ? d3 : ed)) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+            if (camFwd.w > 0.5) fade = fade * fade * (3.0 - 2.0 * fade); // POSEIDON_XP_SHADOWBAND
             return 1.0 - (1.0 - lit) * fade;
         }
     }

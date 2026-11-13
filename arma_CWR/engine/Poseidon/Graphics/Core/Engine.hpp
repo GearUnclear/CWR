@@ -428,6 +428,9 @@ class Engine : public IGraphicsEngine
     // sub-pixel cutout features (fence wire, foliage) across the MSAA
     // samples instead of the hard per-fragment alpha test keeping or
     // killing whole pixels.  No-op on backends without MSAA.
+    // Draw on these MSAA samples only (0: all of them), for the LOD cross-fade
+    // (World/Scene/LodPop.hpp). Flushes what is queued. No-op without MSAA.
+    virtual void SetDrawSampleMask(unsigned /*mask*/) {}
     virtual void SetAlphaToCoverage(bool /*enable*/) {}
     virtual bool GetAlphaToCoverage() const { return false; }
 
@@ -1040,6 +1043,16 @@ class Engine : public IGraphicsEngine
         int solidRunCount = 0;
         const int* alphaRuns = nullptr;
         const int* alphaRunStart = nullptr;
+        // POSEIDON_XP_LODBAND (EX2-POP round 3): casters in the distance band of
+        // a level switch, both levels, dissolved per fragment in the depth pass.
+        // 9 floats/vertex: xyz (camera-relative), uv, a world-anchored hash
+        // position (world xyz modulo kDissolveWrap), and the key (0..1: keep where
+        // the hash is under it; 2..3: keep where the hash is at or over key - 2).
+        // A batch with no texture is solid (no alpha test, back faces stored).
+        const float* dissolveVerts = nullptr;
+        int dissolveVertexCount = 0;
+        const ShadowCasterBatch* dissolveBatches = nullptr;
+        int dissolveBatchCount = 0;
     };
 
     /// Render the caster set from the light into the cascade depth array —

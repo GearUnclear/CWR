@@ -556,7 +556,12 @@ TEST_CASE("Canopy: the GPU pass and the world read follow the C++ mirror", "[rem
     CHECK(read.find("float reach = maps ? cascadeSplits[nC - 1] :") != std::string::npos);
     CHECK(read.find("float w = clamp((depth - (reach - fade)) / fade, 0.0, 1.0);") != std::string::npos);
     const std::string shadows = gl::RemasterFragmentPiece(gl::FragmentPiece::Shadows);
-    CHECK(shadows.find("float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);") !=
+    // (EX2-POP round 3: by eye depth, or with POSEIDON_XP_SHADOWBAND by the
+    // distance from the eye, the canopy's mirror following it.)
+    CHECK(shadows.find("float fadeAt = camFwd.w > 0.5 ? dist3D : eyeDepth;") != std::string::npos);
+    CHECK(shadows.find("float fade = clamp((lastSplit - fadeAt) / max(cascadeCtl.y, 0.001), 0.0, 1.0);") !=
+          std::string::npos);
+    CHECK(read.find("float depth = maps ? (radial ? length(rel) : dot(rel, camFwd.xyz)) : length(vWorldRel);") !=
           std::string::npos);
     CHECK(read.find("smoothstep(" + Fixed(kCanopyGroundTo, 1) + ", " + Fixed(kCanopyRaisedFrom, 1) + ", hr)") !=
           std::string::npos);

@@ -227,4 +227,20 @@ inline bool SphereInCascade(const float* vp, const float* sphere)
     return (x - sx) <= m && (x + sx) >= -m && (y - sy) <= m && (y + sy) >= -m;
 }
 
+// POSEIDON_XP_SHADOWBAND=<metres> (EX2-POP round 3, World/Scene/LodPop.hpp):
+// the maps reach <metres> past the shadow distance and the shadows fade out
+// over that band by distance from the eye (a smoothstep) instead of by eye
+// depth over the last fadeRange. Unset: 150 m (shipped, owner 2026-11-13);
+// 0: off (today's eye-depth fade). Read once.
+inline float RadialFadeBand()
+{
+    static const float s_band = []
+    {
+        const char* v = std::getenv("POSEIDON_XP_SHADOWBAND");
+        const float m = (v && *v) ? static_cast<float>(std::atof(v)) : 150.0f;
+        return m > 0.0f ? m : 0.0f;
+    }();
+    return s_band;
+}
+
 } // namespace Poseidon::shadow::xp

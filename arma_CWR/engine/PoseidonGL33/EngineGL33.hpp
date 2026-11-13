@@ -1838,6 +1838,7 @@ class EngineGL33 : public Engine
 
     // MSAA alpha-to-coverage (config knob; effective only when the default
     // framebuffer actually got MSAA samples — see _msaaActive).
+    void SetDrawSampleMask(unsigned mask) override;
     void SetAlphaToCoverage(bool enable) override { _alphaToCoverageCfg = enable; }
     bool GetAlphaToCoverage() const override { return _alphaToCoverageCfg && _msaaActive; }
 

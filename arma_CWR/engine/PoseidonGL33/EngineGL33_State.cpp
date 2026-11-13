@@ -195,6 +195,20 @@ void EngineGL33::ApplyDepthMode(DepthMode mode)
     _ssrStencilValid = true;
 }
 
+void EngineGL33::SetDrawSampleMask(unsigned mask)
+{
+    FlushQueues();
+    if (mask != 0)
+    {
+        glEnable(GL_SAMPLE_MASK);
+        glSampleMaski(0, mask);
+    }
+    else
+    {
+        glDisable(GL_SAMPLE_MASK);
+    }
+}
+
 void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
 {
     _psConstants.alphaRef[0] = static_cast<float>(ref) / 255.0f;

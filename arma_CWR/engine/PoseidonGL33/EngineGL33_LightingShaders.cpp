@@ -693,7 +693,10 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
     if (wSum <= 0.0) return 1.0;
     float lit = litSum / wSum;
     float lastSplit = cascadeSplits[nC - 1];
-    float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+    // POSEIDON_XP_SHADOWBAND (camFwd.w 1): by distance from the eye, along a smoothstep.
+    float fadeAt = camFwd.w > 0.5 ? dist3D : eyeDepth;
+    float fade = clamp((lastSplit - fadeAt) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+    if (camFwd.w > 0.5) fade = fade * fade * (3.0 - 2.0 * fade);
     return 1.0 - (1.0 - lit) * fade;
 }
 )";
@@ -852,10 +855,12 @@ float canopySunVisibility(vec3 posAbs) {
     int nC = int(cascadeCtl.x);
     bool maps = shadowCtl.x > 0.5 && nC > 0;
     vec3 rel = vWorldRel + litShadowDelta.xyz;
-    float depth = maps ? dot(rel, camFwd.xyz) : length(vWorldRel);
+    bool radial = maps && camFwd.w > 0.5; // POSEIDON_XP_SHADOWBAND: the maps' own fade, mirrored
+    float depth = maps ? (radial ? length(rel) : dot(rel, camFwd.xyz)) : length(vWorldRel);
     float reach = maps ? cascadeSplits[nC - 1] : 150.0;
     float fade = maps ? max(cascadeCtl.y, 1.0) : 50.0;
     float w = clamp((depth - (reach - fade)) / fade, 0.0, 1.0);
+    if (radial) w = 1.0 - (1.0 - w) * (1.0 - w) * (1.0 + 2.0 * w);
     vec2 uv = (posAbs.xz - litCanopy.yz) * litCanopy.w;
     vec2 e = abs(uv - 0.5);
     w *= litCanopy.x * (1.0 - smoothstep(0.42, 0.48, max(e.x, e.y)));
