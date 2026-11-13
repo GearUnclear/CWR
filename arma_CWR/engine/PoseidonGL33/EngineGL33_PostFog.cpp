@@ -783,6 +783,7 @@ void EngineGL33::PostFog(const PostFrame& f)
         SetInt(prog, "fogFloor", kFogFloorUnit);
         SetInt(prog, "canopySun", kCanopyVisUnit);
         SetInt(prog, "fogRing", kFogRingUnit);
+        SetInt(prog, "xpClouds", kXpCloudsUnit); // POSEIDON_XP_CLOUDS: the clouds' shadow map then
         if (shadowMap)
         {
             const GLint loc = glGetUniformLocation(prog, "cascadeVP");

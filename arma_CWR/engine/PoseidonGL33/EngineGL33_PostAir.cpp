@@ -245,6 +245,7 @@ void EngineGL33::PostAir(const PostFrame& f)
         SetInt(prog, "cloudNoise", kCloudNoiseUnit);
         SetInt(prog, "skyDensity", kSkyDensityUnit);
         SetInt(prog, "canopySun", kCanopyVisUnit);
+        SetInt(prog, "xpClouds", kXpCloudsUnit); // POSEIDON_XP_CLOUDS: the clouds' shadow map then
         BindTex(0, p.linDepthTex);
         // Unit 2: the cascade array (or the depth stand-in) under the
         // comparison sampler, as the world's passes read it.

@@ -1320,6 +1320,26 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
     CHECK(CountOf(screen, gl::LitConstantsBlock()) == 1);
 }
 
+TEST_CASE("Volumetric clouds experiment shaders compile under glslang", "[Graphics][Shaders][remaster]")
+{
+    // POSEIDON_XP_CLOUDS (EngineGL33_XpClouds.cpp): the march (with the
+    // LitConstants block) and the resolve, as the engine assembles them.
+    GlslangInit init;
+    int n = 0;
+    for (int i = 0; gl::XpCloudsShaderSource(i); ++i)
+    {
+        CAPTURE(i);
+        std::string log;
+        const bool ok = Compiles(gl::XpCloudsShaderSource(i), EShLangFragment, log);
+        CAPTURE(log);
+        CHECK(ok);
+        ++n;
+    }
+    CHECK(n == 3);
+    CHECK(CountOf(gl::XpCloudsShaderSource(0), gl::LitConstantsBlock()) == 1);
+    CHECK(CountOf(gl::XpCloudsShaderSource(2), gl::LitConstantsBlock()) == 1);
+}
+
 TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][remaster]")
 {
     // The same contract for the post pass: kPostShaders in
@@ -1579,6 +1599,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litCameraLook", LC::CameraLook, 1},
         {"litWater2", LC::Water2, 1},
         {"litXpNight", LC::XpNight, 1},
+        {"litXpClouds", LC::XpClouds, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1676,7 +1697,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::Water2) == static_cast<int>(LC::CameraLook) + 1);
     // The experiment xp-nightlight's slot follows the experimental water slot.
     CHECK(static_cast<int>(LC::XpNight) == static_cast<int>(LC::Water2) + 1);
-    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::XpNight) + 1);
+    // The experiment xp-clouds' slot follows it.
+    CHECK(static_cast<int>(LC::XpClouds) == static_cast<int>(LC::XpNight) + 1);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::XpClouds) + 1);
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;
@@ -1700,7 +1723,8 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
         CAPTURE(s.name, s.unit);
         CHECK(s.unit >= 2);
         CHECK(s.unit != 7);
-        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers")));
+        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers") ||
+               (s.unit == gl::kXpCloudsUnit && std::string(s.name) == "xpClouds")));
         CHECK(units.insert(s.unit).second);
         CHECK(names.insert(s.name).second);
     }

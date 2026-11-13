@@ -794,6 +794,7 @@ class EngineGL33 : public Engine
     void BeginRemasterSky(Poseidon::RemasterSky mode) override;
     void EndRemasterSky() override;
     bool RemasterSkyPending() const override;
+    bool VolumetricCloudsDrawn() const override;
     std::string RemasterSkyCheck(int texels) override;
     // --- The remastered sea (EngineGL33_Sea.cpp) ---
     void BeginSea(Texture* otherFrame, float otherWeight) override;
@@ -1114,6 +1115,19 @@ class EngineGL33 : public Engine
     void PinSkyShadowAnchor(bool pinned);
     // The Sky and SkyShadow slots; `cloudField` = the rig casts cloud shadows.
     void UploadLitClouds(float skyThrough, bool cloudField);
+    // The experiment POSEIDON_XP_CLOUDS (EngineGL33_XpClouds.cpp): volumetric
+    // clouds from the weather sky's density map, marched at half the 3D
+    // viewport's width and height before the dome draws, blended with the last
+    // frame's reprojected result; the dome and the sun disk read them on unit
+    // 11 (litXpClouds). RunXpClouds runs the march when the sky pass opens the
+    // dome with the sky table on by day (`domeTable`); BindXpClouds binds the
+    // result (or the white stand-in) and sets the slot for the sky pass's mode.
+    void RunXpClouds(bool domeTable);
+    void BindXpClouds(bool on);
+    void DeinitXpClouds();
+    // The extra clouds position the time-lapse adds (POSEIDON_XP_CLOUDS_TIMELAPSE:
+    // that many units per second of simulation time; 0 when unset).
+    float XpCloudsTimelapse() const;
     // The canopy (EngineGL33_Canopy.cpp): the stand-ins on units 10 and 15, the
     // canopy texture (uploaded whole, or the rectangles that changed), the GPU
     // build of the sun-visibility map when the sun or the camera moved, the

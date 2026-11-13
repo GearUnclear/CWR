@@ -992,6 +992,10 @@ class Engine : public IGraphicsEngine
     /// Work the remastered sky has in flight (the atmosphere tables' and the
     /// cloud-density map's worker builds); triSettleScene waits for it.
     virtual bool RemasterSkyPending() const { return false; }
+    /// The experiment POSEIDON_XP_CLOUDS: this frame's sky pass drew the
+    /// volumetric clouds in the dome, so the painted sky-cloud sheets
+    /// (Landscape::DrawClouds) stay out of it.
+    virtual bool VolumetricCloudsDrawn() const { return false; }
     /// triSkyTableCheck: the GPU sky-view table read back against its CPU
     /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
     virtual std::string RemasterSkyCheck(int /*texels*/) { return "FAIL:no sky table in this backend"; }

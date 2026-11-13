@@ -202,6 +202,9 @@ enum class PostShader : int
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
 const char* PostShaderName(PostShader shader);
 const char* PostShaderSource(PostShader shader);
+// The volumetric clouds' fragment sources (the experiment POSEIDON_XP_CLOUDS,
+// EngineGL33_XpClouds.cpp): 0 the march, 1 the resolve; null past the end.
+const char* XpCloudsShaderSource(int which);
 
 // Uniform-buffer binding point of LitConstants (VS = 0, PS = 1, WorldInstances = 2).
 constexpr unsigned int kLitBinding = 3;
@@ -255,6 +258,13 @@ constexpr int kGroundFieldUnit = 12;
 // everywhere, and the program's sampler count stays within the 16 a fragment
 // stage is guaranteed. Bound only around a batched draw.
 constexpr int kDecalLayerUnit = 16;
+// The volumetric clouds (the experiment POSEIDON_XP_CLOUDS,
+// EngineGL33_XpClouds.cpp), one sampler (xpClouds) for two textures: during the
+// sky pass's dome and sun draws the march's resolve (litXpClouds.x 1), after
+// them the clouds' shadow map (litXpClouds.y set), which domeCloudCover reads
+// in the world, air and fog passes. Like unit 16, a valid unit everywhere, and
+// a world program's sampler count stays within 16.
+constexpr int kXpCloudsUnit = 17;
 // The volumetric fog's floor map (the lowest ground nearby) shares
 // the ground field's unit: only the fog's injection pass samples it, binds it
 // itself (no world program declares it) and unbinds it at its end; the world
@@ -349,6 +359,9 @@ constexpr LitSampler kLitSamplers[] = {
     {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surfaces)
     {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
     {"decalLayers", kDecalLayerUnit},        // the decal batch's texture array (W4-1)
+    // The volumetric clouds (POSEIDON_XP_CLOUDS): the march's resolve during
+    // the sky pass's dome and sun draws, the clouds' shadow map after them.
+    {"xpClouds", kXpCloudsUnit},
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -473,7 +486,16 @@ enum : int
     // before): x 0 (the lane's window glow, not brought over), y the light
     // bounce's gain, z 1 while the combat shadow mask traces street lamps, w 0.
     XpNight = 92,
-    Count = 93,
+    // Volumetric clouds (the experiment POSEIDON_XP_CLOUDS, EngineGL33_XpClouds.cpp;
+    // zero while it is off, which leaves every fragment as before): x 1 while
+    // the dome and the sun disk take the volumetric clouds from xpClouds
+    // (unit 17 during the sky pass) in place of the painted thick cloud, y and z
+    // the density map's range where the painted cloud gives way, w the layer's
+    // height over the camera per haze distance. Outside those draws x is 0, y
+    // 1 / the shadow map's size while the clouds' shadow map is drawn (0 keeps
+    // today's shadows), z the cloud base it lies on (m), w 0.
+    XpClouds = 93,
+    Count = 94,
 };
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
@@ -501,7 +523,8 @@ static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots
 static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
 static_assert(Water2 == CameraLook + 1, "the experimental water slot follows the camera's look");
 static_assert(XpNight == Water2 + 1, "the xp-nightlight slot follows the experimental water slot");
-static_assert(Count == XpNight + 1, "LitConst size out of sync");
+static_assert(XpClouds == XpNight + 1, "the xp-clouds slot follows the xp-nightlight slot");
+static_assert(Count == XpClouds + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to features not yet in the block, so no two features

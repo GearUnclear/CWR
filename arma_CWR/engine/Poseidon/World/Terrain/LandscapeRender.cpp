@@ -1798,6 +1798,12 @@ struct CloudInfo
 
 void Landscape::DrawClouds(Scene& scene)
 {
+    // The volumetric clouds (POSEIDON_XP_CLOUDS) take the painted sheets'
+    // place in this frame's sky.
+    if (GEngine->VolumetricCloudsDrawn())
+    {
+        return;
+    }
     const Camera& camera = *scene.GetCamera();
 
     // Matrix4Val invView=camera.Transform();

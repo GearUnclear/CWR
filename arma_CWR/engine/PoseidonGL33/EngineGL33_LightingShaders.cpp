@@ -418,6 +418,7 @@ layout(std140) uniform LitConstants {
     vec4 litCameraLook;   // 90: photo camera's look: x weather veil, y lamp ambient kept, z lamp gain, w low-sun sky blue
     vec4 litWater2;       // 91: shore water: x parts mask (1 shallow, 2 foam, 4 wet sand, 8 wave masking; 0 off), y time (s), z sea surface (m), w swash line (m)
     vec4 litXpNight;      // 92: lamp shadows: x 0, y light bounce gain, z lamps in the combat mask, w 0
+    vec4 litXpClouds;     // 93: volumetric clouds (POSEIDON_XP_CLOUDS): x 1 = the dome and sun disk read xpClouds, yz painted give-way range, w layer height / haze; x 0: y 1 / shadow map size (0 off), z cloud base (m)
 };
 )";
 
@@ -809,9 +810,15 @@ float skyShadowCoverFrom(vec3 q, vec2 anchor) {
     vec3 w = q - vec3(anchor.x, 0.0, anchor.y);
     return w.y > 1.0 ? skyShadowCoverToward(w) : 0.0;
 }
-float domeCloudCover(vec3 rel) {
-    vec3 l = litSunDir.xyz;
-    float up = max(l.y, 0.06);
+// The volumetric clouds' shadow map (POSEIDON_XP_CLOUDS, while litXpClouds.y
+// is set outside the sky pass): r the sun's share through the march's own
+// clouds from a point on their base (litXpClouds.z), in world xz, wrapping
+// every 1 / litXpClouds.y metres around the camera's base point along the sun.
+#ifndef XP_CLOUDS_SAMPLER
+#define XP_CLOUDS_SAMPLER
+uniform sampler2D xpClouds; // unit 17 (kXpCloudsUnit)
+#endif
+float domeCloudCoverToday(vec3 rel, vec3 l, float up) {
     vec3 q = rel + l * (max(kSkyShadowDeck - (rel.y + litCamPos.y), 0.0) / up);
     float c = skyShadowCoverFrom(q, litSkyShadow.xy);
     if (litSkyShadow.w > 0.0) {
@@ -819,6 +826,22 @@ float domeCloudCover(vec3 rel) {
         c = mix(c, skyShadowCoverFrom(q, prev), litSkyShadow.w);
     }
     return c;
+}
+float domeCloudCover(vec3 rel) {
+    vec3 l = litSunDir.xyz;
+    float up = max(l.y, 0.06);
+    if (litXpClouds.x < 0.5 && litXpClouds.y > 0.0) {
+        // The clouds the march draws over this point, along the sun; today's
+        // cover again toward the map's edge.
+        float hb = litXpClouds.z;
+        vec2 at = rel.xz + litCamPos.xz + l.xz * (max(hb - (rel.y + litCamPos.y), 0.0) / up);
+        vec2 centre = litCamPos.xz + l.xz * (max(hb - litCamPos.y, 0.0) / up);
+        vec2 e = abs(at - centre) * (2.0 * litXpClouds.y);
+        float w = 1.0 - smoothstep(0.8, 0.95, max(e.x, e.y));
+        float xc = 1.0 - textureLod(xpClouds, at * litXpClouds.y, 0.0).r;
+        return w >= 1.0 ? xc : mix(domeCloudCoverToday(rel, l, up), xc, w);
+    }
+    return domeCloudCoverToday(rel, l, up);
 }
 
 // Broken-cloud shadows: the ground point is projected along the sun ray up to
@@ -1194,7 +1217,9 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     bool camSun = litCamera.x > 0.5 && litSkyFwd.w > 2.5 && litSkyFwd.w < 3.5 && vLitMode < 0.5 && vLitMode > -0.5;
     if (camSun) {
         r0 = camSunDisc();
-        if (litSky.y > 0.5) r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
+        // Behind the volumetric clouds the disk keeps what they let through.
+        if (litXpClouds.x > 0.5) r0 *= xpCloudsToward(skySunDir()).a;
+        else if (litSky.y > 0.5) r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
         nightEye = false;
     }
     if (alphaRef.z > 0.5) {
@@ -1336,7 +1361,9 @@ void main() {
         // The sun disk behind a dome cloud (skyCloudShadows): its colour and
         // its coverage both, so it fades into the cloud whatever its blending
         // (a dimmed colour alone drew a dark disk over the sky).
-        if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
+        if (litSkyFwd.w > 2.5 && litXpClouds.x > 0.5)
+            r0 *= xpCloudsToward(skySunDir()).a;
+        else if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
             r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
     }
     finishFragment(r0, ambientShare, true);
