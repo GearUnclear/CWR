@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -398,14 +399,14 @@ void Scene::ObjectsDrawn()
 }
 
 int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
-                              Vector3Par viewDirection)
+                              Vector3Par viewDirection, bool ignoreObjectsZ)
 {
     // if pixel size is lower than 2, object can be considered invisible
     // size in pixels is
     float scale = GetCamera()->Left();
     float diameter = shape->BoundingSphere() * 2 * oScale;
 
-    if (distance2 > Square(ENGINE_CONFIG.objectsZ))
+    if (!ignoreObjectsZ && distance2 > Square(ENGINE_CONFIG.objectsZ))
     {
         return LOD_INVISIBLE;
     }
@@ -427,6 +428,16 @@ int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Ve
     // disable decal LODs
     int level = shape->FindSqrtLevel(resol2, true);
 
+    return level;
+}
+
+int Scene::LevelFromDistance2Pinned(LODShape* shape, float distance2, float oScale, Vector3Par direction,
+                                    Vector3Par viewDirection, bool ignoreObjectsZ)
+{
+    const float current = _lodInvWidth;
+    _lodInvWidth = _minLodInvWidth;
+    const int level = LevelFromDistance2(shape, distance2, oScale, direction, viewDirection, ignoreObjectsZ);
+    _lodInvWidth = current;
     return level;
 }
 
@@ -577,8 +588,20 @@ int Scene::AdjustComplexity(SortObjectList& objs)
         }
         else
         {
-            int drawLevel =
-                LevelFromDistance2(shape, oi->distance2, obj->Scale(), obj->Direction(), _camera->Direction());
+            const bool kjExempt = Kaiju::GFarCount && Kaiju::FarExemptFromObjectsZ(obj);
+            const Kaiju::Traits* kjTraits = Kaiju::TraitsOf(obj);
+            // lodPin (Game/Kaiju): his LOD follows distance alone. The scene's LOD
+            // scale grows with the frame load, which put a giant on his coarsest
+            // LOD a few hundred metres off in a busy town fight.
+            int drawLevel = kjTraits && kjTraits->lodPin
+                                ? LevelFromDistance2Pinned(shape, oi->distance2, obj->Scale(), obj->Direction(),
+                                                           _camera->Direction(), kjExempt)
+                                : LevelFromDistance2(shape, oi->distance2, obj->Scale(), obj->Direction(),
+                                                     _camera->Direction(), kjExempt);
+            if (kjTraits)
+            {
+                Kaiju::NoteDrawLevel(obj, drawLevel);
+            }
             if (drawLevel != LOD_INVISIBLE)
             {
 #if _ENABLE_CHEATS
@@ -1420,6 +1443,17 @@ static void DrawSortObject(SortObject* oi)
         GWorld && oi->drawLOD != LOD_INVISIBLE && oi->drawLOD == obj->InsideLOD(GWorld->GetCameraType());
     if (!cockpit)
     {
+        // a far-drawn unit (Game/Kaiju) inside the far plane keeps a fog floor
+        const float fogFloor = Kaiju::GFarCount ? Kaiju::FarFogFloorFor(obj) : 0.0f;
+        if (fogFloor > 0.0f)
+        {
+            GEngine->SetFogFloor(fogFloor);
+            GScene->SetFogFloor(fogFloor);
+            obj->Draw(oi->drawLOD, oi->orClip, *obj);
+            GScene->SetFogFloor(0.0f);
+            GEngine->SetFogFloor(0.0f);
+            return;
+        }
         obj->Draw(oi->drawLOD, oi->orClip, *obj);
         return;
     }

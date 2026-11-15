@@ -1,0 +1,136 @@
+; ============================================================================
+;  kj\crush\loop.sqs  -  Dedushka CRUSH: what his body does to the world as he
+;  walks and stands. Runs for his lifetime.
+;
+;      [kaiju] exec "kj\crush\loop.sqs"
+;
+;  Tuning: the one marked block at the top of kj\crush\init.sqf.
+;
+;  What it does:
+;    - Buildings, walls, trees, lamp posts and fences in the strip his legs are
+;      about to pass through go down before the leg gets there: dust at the
+;      foot of the walls first, the collapse a beat later (fell.sqs).
+;    - A vehicle in a foot lane ahead is flattened (flatten.sqs) or kicked
+;      aside before his leg reaches it; one between his legs is left alone.
+;    - Each footfall kills the men under the foot and throws down and hurts the
+;      men just beside it.
+;    - While he stands, anything still standing inside his feet goes down.
+;    - It starts hurt.sqs (damage clamp and the "he was hit" signal).
+;
+;  The stock engine has no footfall event and no script can read a bone or the
+;  phase of a clip, so a footfall is worked out from the ground he has covered
+;  since the walk clip started: one foot lands every KJC_HALF_STRIDE x height,
+;  KJC_FOOT_AHEAD x height ahead of his origin and KJC_STANCE x height to the
+;  side, the KJC_FIRST_FOOT one first. The start of the clip is taken from his
+;  setting off, or from the AnimChanged event when he changes clip on the move.
+;  That is in step with the legs only if the walk state has
+;  interpolationRestart = 1 (see NOTES.md, "Footfalls"); the crush variant of
+;  the addon (addon\build-kjcrush.ps1) sets it.
+;
+;  Read by others:
+;    KJ_footfall    [count, time, pos, "L" or "R"] of the last footfall
+;    KJ_crushStats  [buildings, small things, vehicles, men dead, men thrown]
+;    KJ_crushLog    [[object, time marked, time felled, forward m when marked], ...]
+;    KJ_crushOn     set false to end this loop (and hurt.sqs)
+;  If kj\roar\step.sqs exists it is called once per footfall for the thump,
+;  the dust and the shake; set KJ_crushStepCall = false if the brain or the
+;  animation calls it instead. Without it this script drops its own dust.
+; ============================================================================
+_k = _this select 0
+? isNil "KJC_ready" : call compile preprocessFile "kj\crush\init.sqf"
+? isNil "KJC_sized" : [_k] call KJC_fnSize
+? isNil "KJ_crushStepCall" : KJ_crushStepCall = true
+? _k getVariable ["kjcLoop", false] : exit
+_k setVariable ["kjcLoop", true]
+_k addEventHandler ["AnimChanged", { if ((_this select 1) != KJC_animMove) then { KJC_animT = time; KJC_animMove = _this select 1 } }]
+[_k] exec "kj\crush\hurt.sqs"
+
+_half = KJC_HALF_STRIDE * KJC_H
+_last = getPos _k
+_tLast = time
+_acc = 0
+_side = KJC_FIRST_FOOT
+_still = 100
+_anim = KJC_animT
+_p = _last
+_moved = 0
+_fwd = 0
+_dir = 0
+_dt = 1
+_spd = 0
+_foot = _last
+_name = "R"
+_tk = 0
+
+#tick
+? not KJ_crushOn : goto "end"
+? isNull _k : goto "end"
+? not alive _k : goto "wait"
+_p = getPos _k
+_dir = getDir _k
+_moved = sqrt (((_p select 0) - (_last select 0)) ^ 2 + ((_p select 1) - (_last select 1)) ^ 2)
+; the ground covered along his heading: a shove backwards is not a stride
+_fwd = ((_p select 0) - (_last select 0)) * sin _dir + ((_p select 1) - (_last select 1)) * cos _dir
+_dt = time - _tLast
+? _dt < 0.01 : _dt = 0.01
+_last = _p
+_tLast = time
+; a jump (setPos) is not a stride
+? _moved > 0.5 * KJC_H : goto "jump"
+? _moved < 0.03 : goto "stand"
+
+; ---- he is walking ----------------------------------------------------------
+_spd = _moved / _dt
+; a new clip (he set off, or changed gait): the stride count starts again
+? (_still < 4) and (KJC_animT <= _anim) : goto "going"
+? _still >= 4 : _acc = KJC_START_LAG * KJC_H
+? _still < 4 : _acc = _spd * (time - KJC_animT) - _fwd
+_side = KJC_FIRST_FOOT
+#going
+_anim = KJC_animT
+_still = 0
+; only ground gained counts: when a hull shoves him back the clip plays on
+? _fwd > 0 : _acc = _acc + _fwd
+; the strip ahead is looked at on every second pass: it reaches far enough ahead
+_tk = _tk + 1
+? (_tk mod 2) == 1 : [_k, true, _spd, _acc, _side] call KJC_fnWalkPass
+? _acc < _half : goto "sleep"
+_acc = _acc - _half
+? _acc > _half : _acc = 0
+_foot = [_k, KJC_FOOT_AHEAD * KJC_H, _side * KJC_STANCE * KJC_H] call KJC_fnWorld
+_name = "R"
+? _side < 0 : _name = "L"
+KJ_footfall = [(KJ_footfall select 0) + 1, time, _foot, _name]
+[_k, _foot, KJC_FOOT_R * KJC_H, KJC_NEAR_R * KJC_H] call KJC_fnFootfall
+? KJC_stepFile and KJ_crushStepCall : [_k] exec "kj\roar\step.sqs"
+? not (KJC_stepFile and KJ_crushStepCall) : [[_foot select 0, _foot select 1], KJC_FOOT_R * KJC_H, 7, 3, 9, 5, 1.2, 3.5, [0.58, 0.54, 0.46], 0.5, 1] call KJC_fnDust
+_side = 0 - _side
+#sleep
+~KJC_TICK
+goto "tick"
+
+; ---- he stands ----------------------------------------------------------------
+#stand
+_still = _still + 1
+? (_still mod 4) == 1 : [_k, false, 0, 0, _side] call KJC_fnWalkPass
+? _still > 8 : goto "idle"
+~KJC_TICK
+goto "tick"
+#idle
+~KJC_IDLE_TICK
+goto "tick"
+
+#jump
+_still = 100
+_acc = 0
+~KJC_TICK
+goto "tick"
+
+; dead: hurt.sqs brings him back if it can; this loop only waits
+#wait
+~1
+goto "tick"
+
+#end
+_k setVariable ["kjcLoop", false]
+exit

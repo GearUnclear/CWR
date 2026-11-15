@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
@@ -361,6 +362,11 @@ void Object::DoDammage(EntityAI* owner, Vector3Par pos, float val, float valRang
 #if DAMMAGE_DIAGS
     LOG_DEBUG(Physics, "  Total {:.4f}", GetRawTotalDammage());
 #endif
+    // Game/Kaiju: full hit reporting and the damage ceiling of a flagged unit
+    if (Kaiju::GTraitCount)
+    {
+        Kaiju::OnLocalDammage(this, owner, ammo, pos, GetRawTotalDammage() - oldDammage);
+    }
     HitBy(owner, GetRawTotalDammage() - oldDammage, ammo);
     if (!oldDestroyed && IsDammageDestroyed())
     {

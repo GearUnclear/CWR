@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -1076,6 +1077,11 @@ static const float ForestPenalty[4] = {1.5f, 1.2f, 0.7f, 0.5f};
 
 float Soldier::GetFieldCost(const GeographyInfo& info) const
 {
+    // obstacle-blind unit (Game/Kaiju): every field costs like open ground
+    if (const Kaiju::Traits* kj = Kaiju::TraitsOf(this); kj && kj->obstacleBlind)
+    {
+        return 1;
+    }
     AIUnit* unit = Brain();
     int modeIndex = 0;
     if (unit)
@@ -1107,9 +1113,17 @@ float Soldier::GetFieldCost(const GeographyInfo& info) const
 
 float Soldier::GetCost(const GeographyInfo& geogr) const
 {
+    // Game/Kaiju: an obstacle-blind unit crosses fully built or wooded cells,
+    // a wader crosses water. The geography grid only knows three depth
+    // classes: 2 is "mixed, down to 2.5 m", 3 is "deeper than 2.5 m" with no
+    // upper bound, so class 3 is opened only to a unit that wades 10 m or more.
+    const Kaiju::Traits* kj = Kaiju::TraitsOf(this);
+    const bool blind = kj && kj->obstacleBlind;
+    const float wade = kj ? kj->wadeDepth : 0.0f;
     if (!(geogr.u.road || geogr.u.track))
     {
-        if (geogr.u.waterDepth >= 2 || geogr.u.full && !geogr.u.forestOuter)
+        const bool tooDeep = geogr.u.waterDepth >= 3 ? wade < 10.0f : (geogr.u.waterDepth == 2 && wade < 2.5f);
+        if (tooDeep || (!blind && geogr.u.full && !geogr.u.forestOuter))
         {
             return 1e30f;
         }
@@ -1117,7 +1131,10 @@ float Soldier::GetCost(const GeographyInfo& geogr) const
     float cost = InvFastRunSpeed;
     PoseidonAssert(geogr.u.howManyObjects <= 3);
     cost *= GradientPenalty(geogr.u.gradient);
-    cost += (float)(int)geogr.u.waterDepth * 1.0f; // 1 m/s in water
+    if (wade <= 0)
+    {
+        cost += (float)(int)geogr.u.waterDepth * 1.0f; // 1 m/s in water
+    }
     return cost;
 }
 
@@ -1138,6 +1155,22 @@ float Soldier::GetCostTurn(int difDir) const
 
 float Soldier::GetTypeCost(OperItemType type) const
 {
+    // Game/Kaiju: houses, trees and bushes are open ground to an
+    // obstacle-blind unit, water is to a wader
+    if (const Kaiju::Traits* kj = Kaiju::TraitsOf(this))
+    {
+        if (type == OITWater)
+        {
+            if (kj->wadeDepth > 0)
+            {
+                return 1;
+            }
+        }
+        else if (kj->obstacleBlind)
+        {
+            return 1;
+        }
+    }
     switch (type)
     {
         case OITNormal:
@@ -1791,7 +1824,20 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
         }
     }
 
-    AvoidCollision(deltaT, speedWanted, headChange);
+    // direct steer (Game/Kaiju): a script walks the unit in a straight line,
+    // past the planner, the formation and the collision avoidance
+    Kaiju::SteerOrder kjOrder;
+    const bool kjSteer = Kaiju::GSteerCount && Kaiju::GetSteer(this, kjOrder);
+    if (kjSteer)
+    {
+        speedWanted = kjOrder.speed;
+        headChange = kjOrder.headChange;
+        turnPredict = 0;
+    }
+    else
+    {
+        AvoidCollision(deltaT, speedWanted, headChange);
+    }
 
     {
         float maxSpeed = Type()->GetMaxSpeedMs();
@@ -1819,7 +1865,11 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
         delay = 3;
     }
 
-    if (sg && sg->GetMode() == AISubgroup::DirectGo)
+    if (kjSteer)
+    {
+        minPos = ManPosCombat; // a steered unit stays on its feet
+    }
+    else if (sg && sg->GetMode() == AISubgroup::DirectGo)
     {
         minPos = ManPosCombat; // disable lying - force run
     }
@@ -2216,7 +2266,17 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
             selAction = ManActFastB;
         }
 
-        if (unit->GetCombatMode() == CMAware)
+        if (kjSteer)
+        {
+            // the gait is the script's choice, not a speed threshold
+            if (speedWanted > 0.1f)
+            {
+                selAction = kjOrder.gait == Kaiju::GaitFast   ? ManActFastF
+                            : kjOrder.gait == Kaiju::GaitSlow ? ManActSlowF
+                                                              : ManActWalkF;
+            }
+        }
+        else if (unit->GetCombatMode() == CMAware)
         {
             // when in aware, do not use walking - looks to much combat'ish
             if (selAction == ManActWalkF)

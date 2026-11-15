@@ -1,0 +1,58 @@
+; ============================================================================
+;  kj\combat\settle.sqs  -  the body is set down on the ground as it falls.
+;  Started by death.sqs with the fall. Kaiju binary of version 2 only (the
+;  engine trait "bodySink"); elsewhere it does nothing.
+;
+;      [kaiju] exec "kj\combat\settle.sqs"
+;
+;  Why: the fall clip of a creature turns its whole rest pose forward about
+;  the feet and lifts it by the model's furthest reach forward, so a model
+;  whose snout and claws reach far ahead of its chest ends with the trunk
+;  hanging many metres above the ground (model A: 11 m; see the finishing
+;  notes, FOR-MODELS.md). Nothing in a script can move a dead body down, so
+;  the engine sets it into the ground by a number this script works out from
+;  the pose itself, a tick at a time: the furnace point of the body is brought
+;  from where it stood to KJCB_BODY_REST of his height above the ground, in
+;  step with the fall. A fall clip that already lays the trunk on the ground
+;  leaves nothing to take off, and this does nothing.
+; ============================================================================
+_k = _this select 0
+? isNull _k : exit
+? not KJCB_native : exit
+? (kjVersion < 2) : exit
+_f = kjPoint [_k, KJCB_furnacePoint]
+? (count _f) != 3 : exit
+; the ground under his feet when he fell (the sea bed, when he stands in water)
+_bed = (getPosASL _k) select 2
+_h0 = (_f select 2) - _bed
+_rest = KJCB_BODY_REST * KJCB_H
+? _h0 <= _rest : exit
+_t0 = time
+_sink = 0
+_q = 0
+_h = 0
+_g = 0
+_over = 0
+_app = 0
+#tick
+~0.05
+? isNull _k : exit
+_q = (time - _t0) / KJCB_D_FALL
+? _q > 1 : _q = 1
+_f = kjPoint [_k, KJCB_furnacePoint]
+? (count _f) != 3 : exit
+; the ground under the chest of the falling body: the terrain itself, the sea bed where it is under water (kjGround)
+_g = (kjGround [_f select 0, _f select 1]) select 0
+_h = (_f select 2) - _g
+; where the furnace point should be by now (the fall clip eases in as the square of its time)
+_over = _h - (_h0 + (_rest - _h0) * _q * _q)
+; what the engine has taken off so far is read from where the body is (it follows a little late)
+_app = _bed - ((getPosASL _k) select 2)
+? _app < 0 : _app = 0
+? (abs _over) > 0.05 : _sink = _app + _over
+? _sink < 0 : _sink = 0
+kjSet [_k, "bodySink", _sink]
+? (time - _t0) < (KJCB_D_FALL + 3.5) : goto "tick"
+KJ_bodySink = _sink
+logInfo format ["KJCOMBAT body: set %1 m into the ground; its furnace point lies %2 m above the ground (it stood %3 m up)", _sink, _h, _h0]
+exit

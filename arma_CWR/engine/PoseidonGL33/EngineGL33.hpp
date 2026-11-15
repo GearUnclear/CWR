@@ -1886,6 +1886,9 @@ class EngineGL33 : public Engine
     void ClearLights();
 
     void UpdateProjection() override;
+    void SetFogFloor(float visibility) override;
+    float _fogFloor = 0.0f; // SetFogFloor: lowest fog visibility of mesh draws, 0 = stock
+    void SetDepthRange(float zNear, float zFar) override;
 
     // World-viewport crop (aspect pillarbox / manual noodle).  The 3D
     // scene renders into the AspectSettings world rect; the periphery is

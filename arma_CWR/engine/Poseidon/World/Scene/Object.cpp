@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
@@ -1249,6 +1250,17 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         GScene->SetConstantFog(constFog);
 
         float z2 = render::Has(specT.routing, render::Routing::NoDropdown) ? 0 : dist2;
+        // A giant (Game/Kaiju nearMip): the texture mip levels are asked for
+        // by the distance to the nearest point of its bounding sphere, as the
+        // landscape does for its own shapes. Measured from the origin, which
+        // is between his feet, a camera at his chest is 35 m "away".
+        if (z2 > 0)
+        {
+            if (const Kaiju::Traits* kj = Kaiju::TraitsOf(this); kj && kj->nearMip)
+            {
+                z2 = Square(floatMax(dist2 * InvSqrt(dist2) - GetRadius(), 0));
+            }
+        }
 
         const LightList& lights = GScene->SelectLights(pos, this, forceLOD, work);
         Matrix4Val invTransform = pos.GetInvTransform();
@@ -2156,6 +2168,23 @@ void Object::DoLight(TLVertexTable& dst, const Shape& src, const Matrix4& worldT
 #endif
     {
         dst.DoMaterialLightingP(mat, worldToModel, lights, src, from, to);
+    }
+
+    // glow above 1 (Game/Kaiju): the shining faces go white hot. The vertex
+    // colour cannot pass the texture's own, so the heat is added on top of it
+    // through the specular colour, whose alpha (the fog) is kept.
+    if (Kaiju::GTraitCount && Kaiju::IsShiningMaterial(material))
+    {
+        float scale = 1, heat = 0;
+        if (Kaiju::GetGlow(this, scale, heat) && heat > 0)
+        {
+            const int r = toInt(190.0f * heat), g = toInt(150.0f * heat), b = toInt(95.0f * heat);
+            TLVertex* v = dst.VertexData();
+            for (int i = from; i < to; i++)
+            {
+                v[i].specular = PackedColor(r, g, b, v[i].specular.A8());
+            }
+        }
     }
 }
 

@@ -1,0 +1,4 @@
+// Dedushka lab: bare test bed for the integrated script set (standalone
+// experiment mission, not a Guerrilla template). Needs tmp\@kj_dedushka.
+onLoadMission = "Dedushka lab";
+respawn = 0;

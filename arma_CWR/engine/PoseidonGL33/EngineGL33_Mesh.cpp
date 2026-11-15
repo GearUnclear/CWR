@@ -47,6 +47,30 @@ void EngineGL33::UpdateProjection()
     }
 }
 
+void EngineGL33::SetFogFloor(float visibility)
+{
+    if (_fogFloor == visibility)
+        return;
+    // fogParam.w is the visibility floor of VSTransform; mesh draws are
+    // emitted inline, so the next draw sees it. BuildFrameState carries it
+    // into a frame state rebuilt on the way into the 3D pass.
+    _fogFloor = visibility;
+    if (!_glContext)
+        return;
+    _frameState.fogParams[3] = visibility;
+    SetShaderFogEnabled(_frameState.fogParams[2] > 0.5f);
+}
+
+void EngineGL33::SetDepthRange(float zNear, float zFar)
+{
+    if (!_glContext)
+        return;
+    // queued draws (water and the horizon wait in the reorder queues) must
+    // commit under the old range, whichever pass is active
+    FlushAndFreeAllQueues(_queueNo, true);
+    glDepthRange(zNear, zFar);
+}
+
 bool EngineGL33::InstancedRunAdd(const Matrix4& modelToWorld)
 {
     if (_instPending >= 256)

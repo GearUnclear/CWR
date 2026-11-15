@@ -86,7 +86,7 @@ layout(std140) uniform VSConstants {
     vec4 ambient;       // c13
     vec4 diffuse;       // c14
     vec4 emissive;      // c15
-    vec4 fogParam;      // c16: {start, invRange, enabled, 0}
+    vec4 fogParam;      // c16: {start, invRange, enabled, visibility floor (0 = none)}
     vec4 camPos;        // c17
     vec4 specular;      // c18: rgb + power(w)
     vec4 specEn;        // c19: {enabled, 0, 0, 0}
@@ -195,7 +195,7 @@ void main() {
 
     float dist = length(worldPos.xyz - camPos.xyz);
     float fogFactor = clamp(1.0 - (dist - fogParam.x) * fogParam.y, 0.0, 1.0);
-    vFogTC = (fogParam.z > 0.5) ? fogFactor : 1.0;
+    vFogTC = (fogParam.z > 0.5) ? max(fogFactor, fogParam.w) : 1.0;
 
     vUV0 = (texCtrl.x > 0.5) ? (texMat0 * vec4(uv, 0, 1)).xy : uv;
     vUV1 = (texCtrl.y > 0.5) ? (texMat1 * vec4(uv, 0, 1)).xy : uv;
@@ -1063,7 +1063,8 @@ FrameState EngineGL33::BuildFrameState(Camera* camera, LightSun* sun, int bias, 
     frame.fogParams[0] = wFogStart;
     frame.fogParams[1] = fogInvRange;
     frame.fogParams[2] = 1.0f; // enabled
-    frame.fogParams[3] = 0;
+    // visibility floor, 0 unless SetFogFloor asked for one
+    frame.fogParams[3] = _fogFloor;
 
     frame.fogColor[0] = fogColor.R();
     frame.fogColor[1] = fogColor.G();

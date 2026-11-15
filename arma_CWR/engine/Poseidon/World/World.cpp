@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <SDL3/SDL_scancode.h>
 
@@ -1270,6 +1271,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             transform = s_triViewTransform;
         }
+        // tremor sources (Game/Kaiju): no-op unless a script started one
+        Kaiju::ApplyCameraShake(transform);
         camera.SetTransform(transform);
 
         if (cameraVehicle)
@@ -1433,6 +1436,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
             if (!_showMap && IsDisplayEnabled())
             {
                 {
+                    // decide how each far-drawn unit (Game/Kaiju) is drawn this frame
+                    Kaiju::FarBeginFrame(_scene);
                     LandBegEnd objBegEnd;
                     Landscape::CalculBoundingRect(objBegEnd, *_scene.GetCamera(), _scene.GetFogMaxRange(), ObjGrid);
 
@@ -1567,6 +1572,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
                 _scene.ObjectsDrawn();
                 GEngine->FlushQueues();
+                // give back the depth slice the far draw reserved, if any
+                Kaiju::FarEndScene();
 
                 // Frame validation — ExtractSceneInputs → BuildFrame →
                 // ValidateFrame + runtime checks, after the world's
@@ -1761,6 +1768,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // 0.5 s encounter sub-tick while civ traffic exists.
         Guerrilla::Traffic::Instance().Simulate(deltaT);
         Guerrilla::AssailantSystem::Instance().Simulate(deltaT);
+        // Giant-creature support (Game/Kaiju): lights, emitters, damage
+        // ceilings and tremor expiry; returns at once when nothing uses it.
+        Kaiju::Simulate(deltaT);
         // Guerrilla arms stashes - prunes dead holders; active in ANY mission
         // once something registers; throttles itself to
         // StashRegistry::TickInterval.

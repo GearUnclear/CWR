@@ -1,0 +1,10 @@
+# Dedushka BRAIN: the state machine and the walk, alone (experiment, kept out
+# of tests/integration so a sweep never runs it). Needs the mount tmp/@kj_brain
+# (features/brain/build-kj-brain.ps1). Run it through features/brain/run-brain.ps1:
+# one game, hidden desktop, --nosound. Quiet: nobody fires, the one hit is scripted.
+tags = ["kaiju", "experiment", "brain"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/brain/DedBrain.Eden"
+timeout = 720
+assert_timeout = 180
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_brain"]

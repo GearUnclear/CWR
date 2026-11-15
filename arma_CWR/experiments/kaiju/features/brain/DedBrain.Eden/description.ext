@@ -1,0 +1,7 @@
+// Dedushka brain test bed: standalone experiment mission (not a Guerrilla
+// template). Needs the uddedushka addon mounted (tmp\@kj_brain, built by
+// ..\build-kj-brain.ps1, or any other mount of the creature). The script
+// payload kj\brain is copied in by ..\run-brain.ps1 before a run; it is not
+// kept here.
+onLoadMission = "Dedushka brain test";
+respawn = 0;

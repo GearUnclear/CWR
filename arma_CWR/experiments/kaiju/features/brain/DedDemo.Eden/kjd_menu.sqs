@@ -1,0 +1,7 @@
+; DedDemo staging menu: every beat on the player's action menu, for a hand-run
+; shoot. The actions are added in this order, so an action's id is its index
+; in KJD_orders (kjd_act.sqs looks it up). ["run"] starts the whole timeline.
+KJD_orders = [["run"], ["wake"], ["drawn", KJD_exit], ["drawn", KJD_start], ["roar"], ["hit", kjdTank], ["beam", kjdTank], ["stomp", kjdBmp], ["wander"], ["idle"], ["dormant"], ["auto", true], ["auto", false]]
+_titles = ["Dedushka: play the whole demo", "Dedushka: wake", "Dedushka: walk through the town", "Dedushka: walk back to the start", "Dedushka: roar", "Dedushka: hit from the tank", "Dedushka: beam the armour", "Dedushka: stomp the BMP", "Dedushka: wander one leg", "Dedushka: stop and stand", "Dedushka: go dormant", "Dedushka: decide for himself", "Dedushka: only on command"]
+{ player addAction [_x, "kjd_act.sqs"] } forEach _titles
+exit

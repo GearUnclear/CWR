@@ -1,0 +1,13 @@
+# Engine support for the giant creature (Game/Kaiju): one pass over every
+# script command and trait, asserting on state. Experiment, kept out of
+# tests/integration. Needs the kaiju engine build (dist/kaiju-rwdi) and the
+# @uddedushka mod beside the data dir. Run it through the pipeline runner:
+#   run-tri.ps1 -Test experiments/kaiju/features/engine/kj_engine.test.sqf -Tag kjengine
+#       -GameDir D:\Arma_CWA_worktrees\kaiju\arma_CWR\dist\kaiju-rwdi
+# Quiet: nobody is armed, nobody fires, --nosound.
+tags = ["kaiju", "experiment", "engine"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/DedushkaPhoto.Eden"
+timeout = 420
+assert_timeout = 90
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "1200", "--mods-dir", "..", "--mod", "@uddedushka"]

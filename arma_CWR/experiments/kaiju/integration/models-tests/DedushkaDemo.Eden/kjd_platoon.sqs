@@ -1,0 +1,43 @@
+; DedushkaDemo: makes a platoon of T-80s with their crews (East), for the fight.
+;     [[[x, y], [x, y], ...], heading] exec "kjd_platoon.sqs"
+; Each place is checked first: a place under water or on the beach's edge is
+; moved north 25 m at a time until it is dry land (up to 12 times).
+; KJD_platoonOut   the vehicles made;   KJD_platoonDone   true when it is over
+KJD_platoonDone = false
+KJD_platoonOut = []
+_at = _this select 0
+_dir = _this select 1
+_g = createGroup east
+_probe = "HeliHEmpty" createVehicle [0, 0, 0]
+_i = 0
+#spawn
+? _i >= (count _at) : goto "spawned"
+_px = (_at select _i) select 0
+_py = (_at select _i) select 1
+_n = 0
+#dry
+_probe setPos [_px, _py, 0]
+? (((getPosASL _probe) select 2) > 2) or (_n >= 12) : goto "place"
+_py = _py + 25
+_n = _n + 1
+goto "dry"
+#place
+_v = "T80" createVehicle [_px, _py, 0]
+_v setDir _dir
+kjdNew = objNull
+"SoldierECrew" createUnit [[_px - 6, _py, 0], _g, "kjdNew = this", 0.6, "PRIVATE"]
+? not (isNull kjdNew) : kjdNew moveInDriver _v
+kjdNew = objNull
+"SoldierECrew" createUnit [[_px - 6, _py + 2, 0], _g, "kjdNew = this", 0.6, "PRIVATE"]
+? not (isNull kjdNew) : kjdNew moveInGunner _v
+kjdNew = objNull
+"SoldierECrew" createUnit [[_px - 6, _py - 2, 0], _g, "kjdNew = this", 0.6, "PRIVATE"]
+? not (isNull kjdNew) : kjdNew moveInCommander _v
+KJD_platoonOut = KJD_platoonOut + [_v]
+_i = _i + 1
+~0.1
+goto "spawn"
+#spawned
+deleteVehicle _probe
+KJD_platoonDone = true
+exit

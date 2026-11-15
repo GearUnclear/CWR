@@ -1,0 +1,5 @@
+; DedDemo staging menu, one action picked: [unit, caller, action id]
+_o = KJD_orders select (_this select 2)
+? (_o select 0) == "run" : [] exec "kjd_run.sqs"; exit
+KJ_brainOrder = _o
+exit

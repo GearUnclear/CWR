@@ -1,0 +1,6 @@
+// Chupacabra model spawn test bed: standalone experiment mission (not a
+// Guerrilla template). Needs the udchupa addon mounted (@udchupa, built by
+// experiments/cryptid/addon/build-udchupa.ps1); without it the boot fails on
+// the addOns[] entry, by design.
+onLoadMission = "Chupacabra model test";
+respawn = 0;

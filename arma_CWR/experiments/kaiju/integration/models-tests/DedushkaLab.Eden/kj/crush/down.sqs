@@ -1,0 +1,12 @@
+; ============================================================================
+;  kj\crush\down.sqs  -  holds a thrown man on the ground for a while.
+;
+;      [man, seconds] exec "kj\crush\down.sqs"
+; ============================================================================
+_m = _this select 0
+~0.7
+? not alive _m : exit
+_m setUnitPos "DOWN"
+~(_this select 1)
+? alive _m : _m setUnitPos "AUTO"
+exit

@@ -1,0 +1,339 @@
+// Dedushka, the integrated demo: he rises from dormancy west of Morton (Everon),
+// is seen first as a furnace glow from far out on the bay, walks in through the
+// houses, roars, takes the garrison's fire (scripted: no weapon is fired),
+// straightens and cuts the town with the beam, stands spent among the fires and
+// walks out into the sea. Standalone experiment mission (not a Guerrilla
+// template). The garrison and the townspeople are placed here, not made by
+// script, because only a group loaded from a mission has its flee strength
+// computed (the roar feature's notes). Everyone is EAST or civilian and the
+// creature is held captive, so nobody has anyone to shoot at. The unit
+// placement is the brain feature's DedDemo.Eden, plus a reserve platoon of four
+// T-80s on the road east of the town (kjdR1..4: the heavy force of the "kill"
+// beat and of the live-fire take); init.sqs makes the creature.
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"uddedushka",
+		"kjbeam",
+		"kj_roar"
+	};
+	addOnsAuto[]=
+	{
+		"uddedushka",
+		"kjbeam",
+		"kj_roar"
+	};
+	randomSeed=4243;
+	class Intel
+	{
+		viewDistance=2000;
+		year=1985;
+		month=6;
+		day=10;
+		hour=19;
+		minute=10;
+		weather=0.250000;
+		weatherForecast=0.250000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=8;
+		class Item0
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={5150.0,20.0,3915.0};
+					azimut=300.000000;
+					id=0;
+					side="EAST";
+					vehicle="SoldierEB";
+					player="PLAYER COMMANDER";
+					init="this setCaptive true; removeAllWeapons this";
+					leader=1;
+					skill=0.600000;
+					text="kjdPlayer";
+				};
+			};
+		};
+		class Item1
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=6;
+				class Item0
+				{
+					position[]={5040.0,20.0,3984.0};
+					azimut=270.000000;
+					id=1;
+					side="EAST";
+					vehicle="OfficerE";
+					leader=1;
+					skill=0.600000;
+					text="kjdA1";
+				};
+				class Item1
+				{
+					position[]={5034.0,20.0,3980.0};
+					azimut=270.000000;
+					id=2;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdA2";
+				};
+				class Item2
+				{
+					position[]={5039.0,20.0,3983.0};
+					azimut=270.000000;
+					id=3;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdA3";
+				};
+				class Item3
+				{
+					position[]={5044.0,20.0,3980.0};
+					azimut=270.000000;
+					id=4;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdA4";
+				};
+				class Item4
+				{
+					position[]={5049.0,20.0,3983.0};
+					azimut=270.000000;
+					id=5;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdA5";
+				};
+				class Item5
+				{
+					position[]={5054.0,20.0,3980.0};
+					azimut=270.000000;
+					id=6;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdA6";
+				};
+			};
+		};
+		class Item2
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=4;
+				class Item0
+				{
+					position[]={4950.0,20.0,3986.0};
+					azimut=270.000000;
+					id=7;
+					side="EAST";
+					vehicle="SoldierEB";
+					leader=1;
+					skill=0.600000;
+					text="kjdB1";
+				};
+				class Item1
+				{
+					position[]={4946.0,20.0,3982.0};
+					azimut=270.000000;
+					id=8;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdB2";
+				};
+				class Item2
+				{
+					position[]={4950.0,20.0,3982.0};
+					azimut=270.000000;
+					id=9;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdB3";
+				};
+				class Item3
+				{
+					position[]={4954.0,20.0,3982.0};
+					azimut=270.000000;
+					id=10;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.600000;
+					text="kjdB4";
+				};
+			};
+		};
+		class Item3
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={5108.0,20.0,3974.0};
+					azimut=270.000000;
+					id=11;
+					side="EAST";
+					vehicle="T80";
+					leader=1;
+					skill=0.600000;
+					text="kjdTank";
+				};
+			};
+		};
+		class Item4
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={5124.0,20.0,3962.0};
+					azimut=270.000000;
+					id=12;
+					side="EAST";
+					vehicle="T80";
+					leader=1;
+					skill=0.600000;
+					text="kjdTank2";
+				};
+			};
+		};
+		class Item5
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={5092.0,20.0,3966.0};
+					azimut=270.000000;
+					id=13;
+					side="EAST";
+					vehicle="BMP";
+					leader=1;
+					skill=0.600000;
+					text="kjdBmp";
+				};
+			};
+		};
+		class Item6
+		{
+			side="CIV";
+			class Vehicles
+			{
+				items=3;
+				class Item0
+				{
+					position[]={5070.0,20.0,4024.0};
+					azimut=180.000000;
+					id=14;
+					side="CIV";
+					vehicle="Civilian";
+					leader=1;
+					skill=0.600000;
+					text="kjdC1";
+				};
+				class Item1
+				{
+					position[]={5075.0,20.0,4027.0};
+					azimut=180.000000;
+					id=15;
+					side="CIV";
+					vehicle="Civilian2";
+					skill=0.600000;
+					text="kjdC2";
+				};
+				class Item2
+				{
+					position[]={5064.0,20.0,4026.0};
+					azimut=180.000000;
+					id=16;
+					side="CIV";
+					vehicle="Civilian3";
+					skill=0.600000;
+					text="kjdC3";
+				};
+			};
+		};
+		class Item7
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=4;
+				class Item0
+				{
+					position[]={5300.0,20.0,4000.0};
+					azimut=270.000000;
+					id=40;
+					side="EAST";
+					vehicle="T80";
+					leader=1;
+					skill=0.600000;
+					text="kjdR1";
+				};
+				class Item1
+				{
+					position[]={5318.0,20.0,4012.0};
+					azimut=270.000000;
+					id=41;
+					side="EAST";
+					vehicle="T80";
+					skill=0.600000;
+					text="kjdR2";
+				};
+				class Item2
+				{
+					position[]={5336.0,20.0,3996.0};
+					azimut=270.000000;
+					id=42;
+					side="EAST";
+					vehicle="T80";
+					skill=0.600000;
+					text="kjdR3";
+				};
+				class Item3
+				{
+					position[]={5354.0,20.0,4010.0};
+					azimut=270.000000;
+					id=43;
+					side="EAST";
+					vehicle="T80";
+					skill=0.600000;
+					text="kjdR4";
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

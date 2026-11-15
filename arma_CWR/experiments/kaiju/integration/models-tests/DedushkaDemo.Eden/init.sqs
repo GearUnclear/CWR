@@ -1,0 +1,98 @@
+; ============================================================================
+;  DedushkaDemo.Eden  -  the integrated demo, and the mission the video is to
+;  be shot in. Fixed start, fixed line, every beat on command.
+;
+;  The story, one beat after another (kjd_beat.sqs):
+;    glow     he stands dormant west of Morton; from far out on the bay only the
+;             furnace shows (the engine's far draw)
+;    wake     he rises out of dormancy
+;    through  he walks in along the main row, through the houses at its west end
+;    roar     he stops among the houses and roars; the garrison breaks
+;    fire     the armour "fires" on him (scripted damage, credited to the tank;
+;             no weapon is fired): he shudders, stands, and turns to it
+;    beam     he straightens and cuts the town with the beam
+;    spent    he stands spent among the fires
+;    sea      he turns south and walks out into the bay, wading
+;    dormant  he stands still in the water, the furnace low
+;  and one other ending, in place of sea and dormant (the take "kill"):
+;    kill     a heavy force kills him (needs the combat feature, kj\combat):
+;             a real fight by default (kjd_fight.sqs, WEAPONS ARE FIRED: he is
+;             made the garrison's enemy, fights back, and dies); with
+;             KJD_killLive = false the staged ending, no weapon fired. The
+;             body stays
+;
+;  Set any of these on the FIRST lines of this file, or from a test or camera
+;  script before the beat that reads it:
+;    KJD_class        the creature: "UDDedushka" (default) or any other creature
+;                     class of the addon. Everything else follows from the unit.
+;    KJD_hour         time of day, hours (default: the mission's own 19:10, dusk).
+;                     12 is the day take, 23.5 the night take.
+;    KJD_manual       true: no timeline; he stays dormant until told (the action
+;                     menu, kjd_beat.sqs, or KJ_brainOrder)
+;    KJD_plan         the beats the timeline plays, in order; drop any
+;    KJD_start        where he stands dormant        KJD_town   where he stops in the row
+;    KJD_beamAt       what the beam is aimed at      KJD_sea    where he wades out to
+;    KJD_hold         seconds he is left dormant before the timeline starts
+;    KJD_spentHold    seconds of the spent beat before he turns to the sea (-1: until he is over it)
+;  One beat by hand:   ["roar"] exec "kjd_beat.sqs"      A camera:  ["street"] exec "kjd_cam.sqs"
+;  Read by cameras and tests: kaiju, KJD_step (the beat now playing), KJD_done
+;  (beats played), KJ_state, KJ_brainPhase. The garrison is kjdA1..6, kjdB1..4,
+;  kjdTank, kjdTank2, kjdBmp; the townspeople kjdC1..3.
+;
+;  Quiet by design: he is captive and everyone is EAST or civilian.
+;    KJD_hostile      true: THE LIVE-FIRE TAKE (weapons are fired; the owner allowed
+;                     it on 2026-11-12). He is a Resistance unit, not captive, and
+;                     decides for himself; there is no timeline. The garrison
+;                     engages him with whatever the engine lets it.
+; ============================================================================
+; kjd_params.sqf: the place to set any of the above for a take (a test run writes its own here)
+call compile preprocessFile "kjd_params.sqf"
+? isNil "KJD_class" : KJD_class = "UDDedushka"
+? isNil "KJD_manual" : KJD_manual = false
+? isNil "KJD_hostile" : KJD_hostile = false
+? isNil "KJD_plan" : KJD_plan = ["glow", "wake", "through", "roar", "fire", "beam", "spent", "sea", "dormant"]
+? isNil "KJD_start" : KJD_start = [4790, 4004, 0]
+? isNil "KJD_town" : KJD_town = [5003, 4004, 0]
+? isNil "KJD_sea" : KJD_sea = [5000, 3690, 0]
+? isNil "KJD_hold" : KJD_hold = 10
+? isNil "KJD_spentHold" : KJD_spentHold = -1
+KJD_step = "setup"
+KJD_done = []
+KJD_beatBusy = false
+KJD_running = false
+? not (isNil "KJD_hour") : skipTime (KJD_hour - daytime)
+setViewDistance 2000
+
+; ---- the creature, in a group of his own
+; He is a Resistance unit (his config side) in every take. Quiet takes: Resistance
+; and East are friends and he is captive. The hostile take makes them enemies
+; here; the fight (kjd_fight.sqs) makes them enemies when it starts. (Joining
+; him to another side's group in mid mission does not change his side: tried.)
+; A centre made by script has an empty friend table until told.
+kjdCtr = createCenter resistance
+? KJD_hostile : resistance setFriend [east, 0]; east setFriend [resistance, 0]
+? not KJD_hostile : resistance setFriend [east, 1]; east setFriend [resistance, 1]
+kjdG = createGroup resistance
+kaiju = objNull
+KJD_class createUnit [KJD_start, kjdG, "kaiju = this", 0.5, "PRIVATE"]
+~0.3
+? isNull kaiju : hint format ["DedushkaDemo: the creature %1 could not be made (is tmp\@kj_dedushka mounted?)", KJD_class]; exit
+kaiju setDir 90
+kaiju setPos KJD_start
+? not KJD_hostile : kaiju setCaptive true
+? isNil "KJD_beamAt" : KJD_beamAt = kjdTank
+
+; ---- the garrison stands where it is until something moves it
+? not KJD_hostile : { _x setBehaviour "SAFE" } forEach [kjdA1, kjdB1, kjdTank, kjdTank2, kjdBmp]
+
+; ---- the script set: he does what the timeline (or the menu) says. He rises
+; ---- without a roar here: in this story the roar comes among the houses.
+KJ_brainAuto = KJD_hostile
+? not KJD_hostile : KJB_WAKE_ROAR = false
+KJ_ready = false
+[kaiju] exec "kj\start.sqs"
+@ KJ_ready
+[] exec "kjd_menu.sqs"
+? KJD_hostile : KJD_step = "hostile"; exit
+? not KJD_manual : [] exec "kjd_run.sqs"
+exit

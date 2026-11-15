@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -823,6 +824,11 @@ DEFINE_FAST_ALLOCATOR(SortObject)
 
 void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
 {
+    // a far-drawn unit past the camera far plane belongs to the far pass
+    if (Kaiju::GFarCount && Kaiju::FarOwnsDraw(obj))
+    {
+        return;
+    }
     LODShapeWithShadow* shape = obj->GetShapeOnPos(obj->Position());
 
     // some objects may be trivially clipped

@@ -1,3 +1,5 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
+#include <Poseidon/Game/Kaiju/KaijuMath.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -179,6 +181,33 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
             }
 
             float moveFactor = priPhaseChng * _primaryFactor;
+            // planted blend (Game/Kaiju): while a walk that starts at its
+            // first frame blends in from a stand, the body takes the share
+            // of the step that keeps the standing foot where it is (the stock
+            // share lets the pose blend drag that foot back). Only for a unit
+            // with the plantBlend trait or a move with plantBlend = 1.
+            if (_primaryFactor < 0.99f && Kaiju::GTraitCount && prim->GetInterpolRestart())
+            {
+                const Kaiju::Traits* kj = Kaiju::TraitsOf(this);
+                if (kj && (kj->plantBlend || prim->GetPlantBlend()))
+                {
+                    const MoveInfo* from = Type()->GetMoveInfo(_secondaryMove.id);
+                    const AnimationRT* fromA = nullptr;
+                    if (from)
+                    {
+                        fromA = *from;
+                    }
+                    const bool standing =
+                        !fromA || (fabs(fromA->GetStepLength()) < 1e-3f && fabs(fromA->GetStepLengthX()) < 1e-3f);
+                    if (standing)
+                    {
+                        float f1 = _primaryFactor + deltaT * GetInterpolSpeed();
+                        saturateMin(f1, 1);
+                        moveFactor =
+                            Kaiju::PlantedBlendShare(oldPrimTime, oldPrimTime + priPhaseChng, _primaryFactor, f1);
+                    }
+                }
+            }
 
             moveZ -= moveFactor * primA->GetStepLength();
             moveX -= moveFactor * primA->GetStepLengthX();
@@ -224,6 +253,22 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                             }
                         }
                     }
+                }
+            }
+            // footfall event (Game/Kaiju): the two sound edges of the move,
+            // also when the move plays no step sound; counted for kjSteps,
+            // and a tremor if the unit asks for one
+            if (Kaiju::GTraitCount)
+            {
+                const float edge1Time = prim->GetSoundEdge1();
+                const float edge2Time = prim->GetSoundEdge2();
+                if (oldPrimTime < edge1Time && oldPrimTime + priPhaseChng >= edge1Time)
+                {
+                    Kaiju::OnFootfall(this, true);
+                }
+                else if (oldPrimTime < edge2Time && oldPrimTime + priPhaseChng >= edge2Time)
+                {
+                    Kaiju::OnFootfall(this, false);
                 }
             }
         }

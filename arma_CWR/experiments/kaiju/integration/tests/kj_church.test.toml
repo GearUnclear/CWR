@@ -1,0 +1,11 @@
+# Dedushka integration: a destroyed church shows its collapse (engine request 4).
+# test of the demo: it measures the things the integration is built on, on the kaiju binary
+# (config traits, the start of a walk, memory points in the pose, the direct steer's pace, the sea
+# bed on the demo's line, a thrown man) and takes the lighting frames the demo's hour was chosen
+# from. Run: integration\run-kj.ps1 -Name kj_probe. Quiet: nobody fires.
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/DedushkaLab.Eden"
+timeout = 900
+assert_timeout = 120
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_dedushka"]

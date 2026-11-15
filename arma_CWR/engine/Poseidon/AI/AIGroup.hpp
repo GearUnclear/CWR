@@ -424,6 +424,8 @@ protected:
 	float _forceCourage;
 	float _courage;
 	bool _flee;
+	//! Forced fear (Game/Kaiju roar): the group flees until this time whatever its strength
+	Foundation::Time _fearUntil;
 
 	// threshold for randomization
 	float _threshold;
@@ -688,6 +690,8 @@ public:
 	float EstimateTime(Vector3Val pos) const; // in minutes
 	bool GetFlee() const {return _flee;}
 	void AllowFleeing(float allow = 1.0f) {_courage = _forceCourage = 1.0f - allow;}
+	//! Break and run now and stay afraid for some seconds, whatever the strength (Game/Kaiju roar)
+	void ForceFlee(float seconds);
 
 	void CalculateMaximalStrength();
 

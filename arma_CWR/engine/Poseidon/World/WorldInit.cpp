@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -684,6 +685,7 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // optional CfgGuerrillaZones traffic* keys.
     Guerrilla::Traffic::Instance().InitMission();
     Guerrilla::AssailantSystem::Instance().InitMission();
+    Kaiju::InitMission();
     // Stash registry likewise resets per mission (no config of its own).
     Guerrilla::StashRegistry::Instance().InitMission();
     // Field journal (diary / objectives / status lines behind the map's

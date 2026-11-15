@@ -1,0 +1,141 @@
+; ============================================================================
+;  DedushkaDemo: one beat of the story.      ["roar"] exec "kjd_beat.sqs"
+;
+;  Every beat is an order to the brain (KJ_brainOrder), or, for the fire, the
+;  scripted hits of kjd_fire.sqs; nothing here moves him directly. The beat is
+;  over when he has done it: KJD_done gets its name and KJD_beatBusy goes false.
+;  The timeline (kjd_run.sqs) plays the beats of KJD_plan through this file;
+;  the action menu and a camera script call it one beat at a time.
+;
+;    glow     he stands dormant (nothing is ordered); KJD_hold seconds
+;    wake     he rises out of dormancy and stands
+;    through  he walks in along the row to KJD_town, through the houses
+;    roar     he roars where he stands
+;    fire     the armour's fire (kjd_fire.sqs): he shudders, stands, turns to it
+;    beam     he straightens and cuts the town at KJD_beamAt, then is spent
+;    spent    he stands spent (KJD_spentHold seconds, or until he is over it)
+;    sea      he turns and walks out to KJD_sea, wading
+;    dormant  he goes dormant where he stands
+;    kill     a heavy force kills him (needs the combat feature); an ending in
+;             place of "sea" and "dormant". By default it is fought for real
+;             (kjd_fight.sqs: WEAPONS ARE FIRED, his brain is on, he fights
+;             back and still dies); KJD_killLive = false gives the staged
+;             ending (no weapon fired: the reserve platoon's scripted volleys)
+;    stomp    he stomps the BMP (walk him next to it first)
+;    back     he walks back to KJD_start
+; ============================================================================
+_b = _this select 0
+? not (_b in ["glow", "wake", "through", "roar", "fire", "beam", "spent", "sea", "dormant", "kill", "stomp", "back"]) :hint format ["DedushkaDemo: no beat called %1", _b]; exit
+KJD_beatBusy = true
+KJD_step = _b
+_t = time
+logInfo format ["KJD beat %1 starts at %2 (state %3, phase %4)", _b, time, KJ_state, KJ_brainPhase]
+goto _b
+
+#glow
+@ ((KJ_state == "dormant") and (KJ_brainPhase == "still")) or (time > _t + 40)
+~KJD_hold
+goto "end"
+
+#wake
+KJ_brainOrder = ["wake"]
+~1
+@ (KJ_state == "idle") or (time > _t + 90)
+~2
+goto "end"
+
+#through
+KJ_brainOrder = ["drawn", KJD_town]
+~1.5
+@ (KJ_state == "idle") or (time > _t + 400)
+~1.5
+goto "end"
+
+#back
+KJ_brainOrder = ["drawn", KJD_start]
+~1.5
+@ (KJ_state == "idle") or (time > _t + 400)
+goto "end"
+
+#roar
+KJ_brainOrder = ["roar"]
+~1.5
+@ (KJ_state == "idle") or (time > _t + 60)
+goto "end"
+
+#fire
+; after the hit he turns to where it came from and stands (a director drives him)
+KJ_brainAfterHit = []
+[] exec "kjd_fire.sqs"
+@ (KJ_state == "flinch") or (time > _t + 15)
+@ (KJ_state != "flinch") or (time > _t + 120)
+goto "end"
+
+#beam
+KJ_brainOrder = ["beam", KJD_beamAt]
+~2
+@ (KJ_state == "spent") or (time > _t + 240)
+goto "end"
+
+#spent
+? KJD_spentHold >= 0 : goto "spentHold"
+@ (KJ_state != "spent") or (time > _t + 400)
+goto "end"
+#spentHold
+~KJD_spentHold
+goto "end"
+
+#sea
+KJ_brainOrder = ["drawn", KJD_sea]
+~2
+@ (KJ_state == "idle") or (time > _t + 500)
+goto "end"
+
+#dormant
+KJ_brainOrder = ["dormant"]
+~1.5
+@ (KJ_brainPhase == "still") or (time > _t + 60)
+goto "end"
+
+#kill
+; A heavy force kills him. Needs the combat feature (kj\combat): without it he
+; is unkillable and the beat is skipped. His health is the combat feature's.
+;   KJD_killLive true (the default): the fight, for real (kjd_fight.sqs). Weapons
+;     are fired; he is the garrison's enemy with his brain on; he beams and stomps
+;     what is killing him, and still dies.
+;   KJD_killLive false: staged (no weapon fired). The reserve platoon on the east
+;     road "fires" volley after volley (kjd_fire.sqs) where he stands spent. He is
+;     first brought down to an eighth of his health (a director's shortcut).
+; Either way the death then plays out: stagger, flare, vent, dark, fall, and the
+; body stays.
+? not KJ_hasCombat : logInfo "KJD beat kill skipped: the combat feature is not in the mission (he is unkillable)"; goto "end"
+? isNil "KJD_killLive" : KJD_killLive = true
+? not KJD_killLive : goto "killStaged"
+[] exec "kjd_fight.sqs"
+~2
+@ (not KJD_fightOn) or (time > _t + 900)
+@ (KJ_deathPhase == "body") or (time > _t + 960)
+~3
+goto "end"
+#killStaged
+? isNil "KJD_killers" : KJD_killers = [kjdR1, kjdR2, kjdR3, kjdR4]
+? isNil "KJD_killFrom" : KJD_killFrom = 0.12
+? KJ_woundHealth > KJD_killFrom : [kaiju, (KJ_woundHealth - KJD_killFrom) * KJCB_POOL, KJD_killers select 0] call KJCB_fnWound
+[KJD_killers, 400, 0.7, true] exec "kjd_fire.sqs"
+@ KJ_dead or (time > _t + 150)
+KJD_firing = false
+@ (KJ_deathPhase == "body") or (time > _t + 200)
+~3
+goto "end"
+
+#stomp
+KJ_brainOrder = ["stomp", kjdBmp]
+~1.5
+@ (KJ_state == "idle") or (time > _t + 90)
+goto "end"
+
+#end
+KJD_done = KJD_done + [_b]
+logInfo format ["KJD beat %1 over after %2 s (state %3, phase %4, pos %5)", _b, time - _t, KJ_state, KJ_brainPhase, getPos kaiju]
+KJD_beatBusy = false
+exit

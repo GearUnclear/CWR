@@ -1,0 +1,8 @@
+; ============================================================================
+;  Cryptid prototype mission init (standalone experiment, Eden at 23:00).
+;  Nothing starts here: the Trident tests spawn the creature and its victims
+;  themselves. For a hand-played look, run [] exec "demo.sqs" from the dev
+;  console after the mission starts.
+;  Start a creature on any man:  [unit] exec "cryptid.sqs"
+; ============================================================================
+CRY_MISSION = true

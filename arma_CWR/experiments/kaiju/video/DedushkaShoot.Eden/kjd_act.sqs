@@ -1,0 +1,8 @@
+; DedushkaDemo staging menu, one action picked: [unit, caller, action id]
+_o = KJD_menu select (_this select 2)
+_w = _o select 0
+? _w == "run" : [] exec "kjd_run.sqs"; exit
+? _w == "beat" : [_o select 1] exec "kjd_beat.sqs"; exit
+? _w == "cam" : [_o select 1] exec "kjd_cam.sqs"; exit
+? _w == "order" : KJ_brainOrder = _o select 1
+exit

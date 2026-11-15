@@ -1,0 +1,6 @@
+// Dedushka crush test bed: standalone experiment mission (not a Guerrilla
+// template). Needs the uddedushka addon mounted (@uddedushka). The script
+// payload kj\crush\ is copied in from ..\kj\crush\ by run-crush.ps1 before
+// every run; edit it there, not here.
+onLoadMission = "Dedushka crush test";
+respawn = 0;

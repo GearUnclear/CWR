@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -50,7 +51,9 @@ using Poseidon::Foundation::MStorage;
 
 void ObjRadiusRectangle(int& xMin, int& xMax, int& zMin, int& zMax, Vector3Par oPos, Vector3Par nPos, float radius)
 {
-    const float maxObjRadius = 25;
+    // objects are filed in the grid cell of their origin; a unit wider than
+    // 25 m (Game/Kaiju gridRadius) widens every query while it exists
+    const float maxObjRadius = floatMax(25.0f, Kaiju::GGridRadius);
     radius += maxObjRadius;
     float xMinF = floatMin(nPos.X(), oPos.X()) - radius;
     float xMaxF = floatMax(nPos.X(), oPos.X()) + radius;

@@ -1,0 +1,35 @@
+; Dedushka lab: follows one foot of the creature for a while (kaiju binary).
+;     [kaiju, "stopaL", seconds, tag] exec "lab_foot.sqs"
+; Every frame it reads the foot's memory point in his current pose (kjPoint)
+; and notes how far the foot is from where it was when this started, along his
+; heading (minus is backward). While that foot is planted this is its slide.
+;   KJL_foot = [tag, most backward (m), most forward (m), where it is at the end (m),
+;               metres his body went, samples]      set when it is over
+;   KJL_footBusy   true while it runs
+_k = _this select 0
+_pt = _this select 1
+_secs = _this select 2
+KJL_footBusy = true
+_f0 = [0, 0, 0]
+_f = [0, 0, 0]
+? KJ_native : _f0 = kjPoint [_k, _pt]
+_b0 = getPos _k
+_d0 = getDir _k
+_min = 0
+_max = 0
+_a = 0
+_n = 0
+_t0 = time
+#tick
+~0.005
+? KJ_native : _f = kjPoint [_k, _pt]
+_a = ((_f select 0) - (_f0 select 0)) * sin _d0 + ((_f select 1) - (_f0 select 1)) * cos _d0
+? _a < _min : _min = _a
+? _a > _max : _max = _a
+_n = _n + 1
+? time < _t0 + _secs : goto "tick"
+_b = getPos _k
+KJL_foot = [_this select 3, _min, _max, _a, sqrt (((_b select 0) - (_b0 select 0)) ^ 2 + ((_b select 1) - (_b0 select 1)) ^ 2), _n]
+logInfo format ["KJL foot %1 (%2) over %3 s: most backward %4 m, most forward %5 m, at the end %6 m, body went %7 m, %8 samples", _this select 3, _pt, _secs, _min, _max, _a, KJL_foot select 4, _n]
+KJL_footBusy = false
+exit

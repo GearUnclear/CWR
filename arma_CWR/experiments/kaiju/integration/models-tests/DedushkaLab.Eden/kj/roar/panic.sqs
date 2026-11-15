@@ -1,0 +1,118 @@
+; ============================================================================
+;  kj\roar\panic.sqs  -  one group breaks and runs from Dedushka.
+;
+;      [kaiju, unitOfTheGroup, 0] exec "kj\roar\panic.sqs"     soldiers
+;      [kaiju, unitOfTheGroup, 1] exec "kj\roar\panic.sqs"     civilians
+;
+;  Called by roar.sqs. For soldiers it uses the engine's own morale where it
+;  can be had.
+;
+;  How the engine flees (AI/AIGroup.cpp:1259-1276): a group whose leader is
+;  alive flees when its strength falls under (1 - courage) x its full
+;  strength, and stops when it is back above. Strength is the sum over its men
+;  of sqrt(armour x (1 - damage)) (AI/AIGroupImplHealth.cpp:1500-1537). A
+;  fleeing group drops its orders, holds fire, goes to full speed and runs to
+;  its flee point (AI/AIArcadeActions.inc:1936-1976), which is its waypoint 0
+;  unless a friendly support vehicle is a better bet (:1815-1934). There is no
+;  fear of size anywhere in it.
+;
+;  So the scare is given to the engine in its own terms:
+;    1. waypoint 0 is moved to a dry point away from him (setWPPos), so that
+;       is where the engine's flee runs to;
+;    2. courage is set to nothing (allowFleeing 1);
+;    3. one unhurt man is given KJR_SHOCK damage (3 percent: no wound shows,
+;       nothing is slowed). That is the only handle script has on strength.
+;       It tips the group under the line and the engine's Flee() does the
+;       rest. When the panic is over the 3 percent is taken back, strength is
+;       whole again and the engine's own Unflee() ends it.
+;  The men are also sent running at once by script (hold fire, full speed,
+;  move to the same point), so nobody stands waiting for the engine's next
+;  group think. When the engine's flee starts it drops those orders and takes
+;  over. Up to KJR_FLEE_CHECK seconds later the script asks the engine
+;  (fleeing) and writes down which of the two is moving the group.
+;
+;  Where the engine's flee cannot be had (measured, see NOTES.md):
+;    - A group made by createGroup and createUnit: its full strength is never
+;      computed (AI/AIGroup.cpp:74; only AI/AICenterImpl.cpp:2058 and
+;      AI/AIArcade.cpp:1900 do it), so the engine never flees it.
+;    - A group with no unhurt man is not shocked (setDamage would overwrite
+;      his wounds).
+;    Those run by script only.
+;
+;  Civilians are moved by script only. Under the engine's flee an unarmed
+;  civilian group walked (6 km/h, move civilwalkf) where a plain move at full
+;  speed ran (12 to 16 km/h, civilrunf). Each civilian gets his own place to
+;  run to (KJR_fnShelter): a room in the nearest house when one is close and
+;  not toward him, else a dry point away from him. When the hiding time is
+;  over they are left where they are.
+;
+;  Read by tests: KJ_panicLog gets [leader, "SOLDIER" | "CIV", "native" |
+;  "script", time, flee point]; every unit carries kjrFleeTo (its own point).
+; ============================================================================
+_k = _this select 0
+_u = _this select 1
+_mode = _this select 2
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+_g = group _u
+_ldr = leader _g
+? isNull _ldr : exit
+_units = units _g
+_victim = objNull
+_path = "script"
+_p = [0, 0, 0]
+_j = 0
+_t = 0
+{ _x stop false } forEach _units
+? _mode == 1 : goto "civ"
+
+; ---- soldiers -------------------------------------------------------------------------
+_kind = "SOLDIER"
+_hold = KJR_PANIC_T
+_flee = [_k, getPos _ldr, KJR_FLEE_DIST * KJR_H] call KJR_fnAway
+{ _x setVariable ["kjrFleeTo", _flee] } forEach _units
+; the engine's flee: its flee point, no courage, the shock
+[_g, 0] setWPPos _flee
+_g allowFleeing 1
+{ if ((isNull _victim) and (alive _x) and ((getDammage _x) == 0)) then { _victim = _x } } forEach _units
+? not (isNull _victim) : _victim setDammage KJR_SHOCK
+; and at once, by script
+_g setCombatMode "BLUE"
+_g setSpeedMode "FULL"
+{ if (alive _x) then { _x doMove _flee } } forEach _units
+#ask
+? fleeing _ldr : _path = "native"
+? _path == "native" : goto "logged"
+? _t >= KJR_FLEE_CHECK : goto "logged"
+~0.5
+_t = _t + 0.5
+goto "ask"
+
+; ---- civilians ------------------------------------------------------------------------
+#civ
+_kind = "CIV"
+_hold = KJR_CIV_PANIC_T
+_flee = [_k, _ldr, 0] call KJR_fnShelter
+_g setBehaviour "AWARE"
+_g setSpeedMode "FULL"
+{ if (alive _x) then { _p = [_k, _x, _j] call KJR_fnShelter; _x setVariable ["kjrFleeTo", _p]; _x doMove _p; _j = _j + 1 } } forEach _units
+
+#logged
+? (count KJ_panicLog) > 200 : KJ_panicLog = []
+KJ_panicLog = KJ_panicLog + [[_ldr, _kind, _path, time, _flee]]
+logInfo format ["KJROAR panic %1 group of %2 (%3 men) %4 m from him runs by %5 to %6", _kind, _ldr, count _units, _ldr distance _k, _path, _flee]
+~_hold
+
+; ---- it passes ------------------------------------------------------------------------
+? _mode == 1 : goto "civCalm"
+? isNull _victim : goto "calm"
+? (alive _victim) and ((getDammage _victim) <= (KJR_SHOCK + 0.001)) : _victim setDammage 0
+#calm
+_ldr = leader _g
+? isNull _ldr : exit
+_g allowFleeing (1 - (skill _ldr))
+_g setCombatMode "YELLOW"
+_g setSpeedMode "NORMAL"
+exit
+#civCalm
+_g setSpeedMode "NORMAL"
+exit

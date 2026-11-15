@@ -1,0 +1,10 @@
+# Dedushka integration: the ending in which a heavy force kills him (experiment, kept out of
+# tests/integration). Needs the mount tmp/@kj_dedushka and the combat feature in the script set.
+#   run-kj.ps1 -Name kj_kill -Params short,kill,staged      (the real fight: kj_fight)
+# The fire is staged (no weapon fired); his health and his death are the combat feature's.
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/DedushkaDemo.Eden"
+timeout = 1500
+assert_timeout = 480
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_dedushka"]

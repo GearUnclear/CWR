@@ -707,7 +707,10 @@ class Landscape: public SerializeClass
 
 	void DrawRect( Scene &scene, const LandBegEnd &rect );
 	void DrawSky(Scene &scene);
-	void DrawHorizont(Scene &scene);
+	// With no band given: the horizon band at the far plane. The far draw
+	// (Game/Kaiju) draws the same band again in front of a far unit, lower
+	// and nearer, as the ground haze its feet stand in.
+	void DrawHorizont(Scene &scene, float bandZ = -1, float bandMidY = 0, float bandTopY = 0);
 	void DrawClouds(Scene &scene);
 	void Draw( Scene &scene );
 

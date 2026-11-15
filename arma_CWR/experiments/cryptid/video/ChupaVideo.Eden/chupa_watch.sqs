@@ -1,0 +1,12 @@
+; chupa_watch.sqs: test helper, [unit, seconds] exec "chupa_watch.sqs"
+; While CHW_ON is true, logs one CHW line per sample: time, move, ASL
+; position, speed (km/h), heading. Stops when CHW_QUIT is true or the unit
+; is null. Samples use sim time, so setAccTime slows them with the game.
+_u = _this select 0
+_dt = _this select 1
+#w
+? CHW_QUIT : exit
+? isNull _u : exit
+? CHW_ON : logInfo format ["CHW %1 %2 %3 %4 %5", time, getMove _u, getPosASL _u, speed _u, getDir _u]
+~_dt
+goto "w"

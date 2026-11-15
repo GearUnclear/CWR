@@ -1,0 +1,37 @@
+; ============================================================================
+;  kj\crush\fell.sqs  -  stages the fall of one building, wall, tree, fence or
+;  pole. Started by KJC_fnMark only (it keeps the "marked once" list).
+;
+;      [object, big, forward m when marked] exec "kj\crush\fell.sqs"
+;
+;  A building: dust at the foot of the walls, the collapse a beat later, then
+;  the rolling cloud as it comes down. A small thing goes over at once.
+; ============================================================================
+_o = _this select 0
+_big = _this select 1
+_p = getPos _o
+_c = [_p select 0, _p select 1]
+_t0 = time
+_r = KJC_BIG_R * KJC_H
+? not _big : goto "small"
+
+[_c, 0.8 * _r, 9, 2.5, 8, 5, 2.2, 1.6, [0.62, 0.58, 0.5], 0.5, 2] call KJC_fnDust
+~KJC_DUST_BEAT
+; [integration] through the engine's damage path on the kaiju binary: credited to him, and no error line per felled map object
+[_o, KJ_unit] call KJ_fnKill
+? (count KJ_crushLog) < 200 : KJ_crushLog = KJ_crushLog + [[_o, _t0, time, _this select 2]]
+KJ_crushStats set [0, (KJ_crushStats select 0) + 1]
+~0.6
+[_c, _r, 11, 5, 17, 10, 3, 3.2, [0.5, 0.47, 0.42], 0.65, 5] call KJC_fnDust
+~1.3
+[_c, 1.3 * _r, 6, 8, 22, 14, 0.8, 2.2, [0.5, 0.47, 0.42], 0.45, 2] call KJC_fnDust
+goto "done"
+
+#small
+[_o, KJ_unit] call KJ_fnKill
+KJ_crushStats set [1, (KJ_crushStats select 1) + 1]
+[_c, 1.5, 2, 1.5, 5, 4, 1.4, 1.2, [0.5, 0.48, 0.4], 0.4, 1] call KJC_fnDust
+
+#done
+KJC_pending = KJC_pending - [_o]
+exit

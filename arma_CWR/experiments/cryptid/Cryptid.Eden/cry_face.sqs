@@ -1,0 +1,14 @@
+; cry_face.sqs  -  debug helper for the tests: [a, b] exec "cry_face.sqs"
+; keeps a turned to face b (a wary victim staring at the trees) every 0.3 s
+; while CRY_FACE is true.
+_a = _this select 0
+_b = _this select 1
+CRY_FACE = true
+#f
+? not CRY_FACE : exit
+? (isNull _a) or (isNull _b) : exit
+_pa = getPos _a
+_pb = getPos _b
+_a setDir (((_pb select 0) - (_pa select 0) + 0.001) atan2 ((_pb select 1) - (_pa select 1)))
+~0.3
+goto "f"

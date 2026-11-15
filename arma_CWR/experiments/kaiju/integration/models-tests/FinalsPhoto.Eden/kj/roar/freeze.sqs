@@ -1,0 +1,56 @@
+; ============================================================================
+;  kj\roar\freeze.sqs  -  one soldier is rooted to the spot by the roar.
+;
+;      [kaiju, unit, metresFromHim] exec "kj\roar\freeze.sqs"
+;
+;  Called by roar.sqs. He stops where he is (stop true holds an AI man
+;  through danger-mode shuffling too), turns to stare at Dedushka, and learns
+;  where he is (reveal). Inside KJR_COWER_R heights he also throws himself
+;  down. After KJR_FREEZE_T seconds (plus up to 4) he comes to.
+;
+;  The turn is done here: a stopped man does not turn his body for doWatch
+;  (measured: 180 degrees off after eight seconds), so the script swings him
+;  round at about 250 degrees a second and doWatch keeps his head and weapon
+;  on the target after that.
+;
+;  A later roar that freezes him again keeps him frozen: the release only
+;  happens when no newer freeze is running (kjrFreezeUntil on the unit).
+; ============================================================================
+_k = _this select 0
+_u = _this select 1
+_d = _this select 2
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? not alive _u : exit
+_t = KJR_FREEZE_T + random 4
+_u setVariable ["kjrFreezeUntil", time + _t]
+_u stop true
+_u doWatch _k
+(group _u) reveal _k
+? _d < (KJR_COWER_R * KJR_H) : _u setUnitPos "DOWN"
+
+; ---- swing round to face him ----------------------------------------------------
+_n = 0
+#turn
+? not alive _u : exit
+_b = (((getPos _k) select 0) - ((getPos _u) select 0)) atan2 (((getPos _k) select 1) - ((getPos _u) select 1))
+_diff = _b - (getDir _u)
+? _diff > 180 : _diff = _diff - 360
+? _diff < -180 : _diff = _diff + 360
+? (abs _diff) < 3 : goto "hold"
+_s = 7
+? _diff < 0 : _s = -7
+? (abs _diff) < 7 : _s = _diff
+_u setDir ((getDir _u) + _s)
+_n = _n + 1
+? _n > 60 : goto "hold"
+~0.02
+goto "turn"
+
+#hold
+~_t
+? not alive _u : exit
+? time < ((_u getVariable ["kjrFreezeUntil", 0]) - 0.2) : exit
+_u stop false
+_u setUnitPos "AUTO"
+_u doWatch objNull
+exit

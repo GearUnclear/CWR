@@ -1,0 +1,50 @@
+; ============================================================================
+;  kj\roar\snd.sqs  -  one of Dedushka's sounds, arriving late by distance.
+;
+;      [kaiju, "KJ_Roar", "KJ_RoarFar", channel, heightFraction] exec "kj\roar\snd.sqs"
+;      [kaiju, "KJ_Step", "KJ_StepFar", channel, 0, [x, y]] exec "kj\roar\snd.sqs"
+;
+;  near class, far class ("" for none), channel (see KJR_fnEmitter in init.sqf),
+;  the height of the source as a fraction of his height, and optionally where
+;  on the ground it comes from (default: where he stands).
+;
+;  Script `say` plays at once whatever the distance: the engine models the
+;  speed of sound only for shots, explosions and collapses
+;  (Audio/SoundScene.cpp:368-382). So the wait is done here: distance to the
+;  listener over KJR_SOUND_V. Past KJR_FAR_SWITCH heights the far class is used.
+;
+;  Other features may call this for their own sounds, for example
+;      [kaiju, "KJ_BeamCharge", "", 4, 0.6] exec "kj\roar\snd.sqs"
+;  Classes in the kj_roar addon: KJ_Roar, KJ_RoarFar, KJ_Step, KJ_StepFar,
+;  KJ_Furnace, KJ_BeamCharge, KJ_Beam, KJ_BeamLoop, KJ_Exhale, KJ_Birds
+;  (3D), KJ_Static, KJ_StaticFaint (2D, use playSound).
+;
+;  Read by tests: KJ_sndLog gets [class, time sent, time heard, metres].
+; ============================================================================
+_k = _this select 0
+_near = _this select 1
+_far = _this select 2
+_ch = _this select 3
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJR_sized" : [_k] call KJR_fnSize
+_p = getPos _k
+? (count _this) > 5 : _p = _this select 5
+_src = [_p select 0, _p select 1, (_this select 4) * KJR_H]
+_e = _ch call KJR_fnEmitter
+_e setPos _src
+_ear = call KJR_fnEar
+_d = _ear distance _e
+_cls = _near
+? (_far != "") and (_d > (KJR_FAR_SWITCH * KJR_H)) : _cls = _far
+_wait = _d / KJR_SOUND_V
+? (count KJ_sndLog) > 200 : KJ_sndLog = []
+KJ_sndLog = KJ_sndLog + [[_cls, time, time + _wait, _d]]
+logInfo format ["KJROAR snd %1 sent %2 from %3: %4 m to the listener, heard %5 s later", _cls, time, _src, _d, _wait]
+? _wait < 0.02 : goto "play"
+~_wait
+#play
+; the sound still comes from where it was made, wherever he has walked since
+_e setPos _src
+_e say _cls
+logInfo format ["KJROAR say %1 at %2 (length %3 s as the audio system reads it)", _cls, time, soundLength _cls]
+exit

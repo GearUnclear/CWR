@@ -1,0 +1,140 @@
+; ============================================================================
+;  kj\roar\shake.sqs  -  the view shakes. A script stand-in: the stock engine
+;  has no camera shake at all (nothing in World/Scene/Camera, the Man code or
+;  the effects code; see ENGINE-WISHES.md for what should replace this).
+;
+;      [strength, seconds, delay] exec "kj\roar\shake.sqs"
+;      [strength, seconds, delay, [pos, peak, fullRadius, zeroRadius]] exec "kj\roar\shake.sqs"
+;
+;  strength 0..1 as felt by the listener (more is allowed for a stomp at his
+;  feet), how long, and how long to wait first. The fourth element says where
+;  the tremor is and how it falls off; only the engine's own tremor uses it.
+;
+;  The engine's tremor: the kaiju engine work adds kjShake [pos, strength,
+;  fullRadius, zeroRadius, seconds], a real camera offset. It is not in the
+;  stock binary and a script cannot ask whether a command exists, so it is
+;  used only when the mission has set KJ_native = true (and the fourth
+;  element was given). Otherwise the stand-in below runs.
+;
+;  What it can do without an engine change:
+;    - Player on foot: the body is nudged a few centimetres sideways and up
+;      and a fraction of a degree in heading, every frame, on decaying sines.
+;      First person follows the body, so the view shakes. Each frame moves the
+;      player by the difference to the last offset only, so his own walking is
+;      kept and the offsets add up to nothing at the end.
+;    - Player in a ground vehicle: one upward kick to the vehicle; its own
+;      suspension does the rest. Aircraft and boats are left alone.
+;    - A cutscene camera named in KJ_shakeCam: the camera object is moved the
+;      same way (bigger, since it has no body).
+;  What it cannot do: roll or pitch the view, shake it in third person or in
+;  optics the way a real camera offset would, or shake while the game is
+;  paused in the map.
+;
+;  Read by tests: KJ_shakeLog gets [time started, strength, seconds, kind];
+;  KJ_shakeNow is the strength being applied this frame (0 when still).
+; ============================================================================
+_s = _this select 0
+_dur = _this select 1
+_delay = _this select 2
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJ_shakeNow" : KJ_shakeNow = 0
+? _s <= 0 : exit
+_native = false
+? not (isNil "KJ_native") : _native = KJ_native
+? (count _this) < 4 : _native = false
+? _delay > 0.02 : goto "wait"
+goto "go"
+#wait
+~_delay
+#go
+_t0 = time
+? (count KJ_shakeLog) > 200 : KJ_shakeLog = []
+? _native : goto "native"
+_ox = 0
+_oy = 0
+_oz = 0
+_od = 0
+_cam = objNull
+? not (isNil "KJ_shakeCam") : _cam = KJ_shakeCam
+? not (isNull _cam) : goto "camera"
+_veh = vehicle player
+? _veh != player : goto "vehicle"
+goto "onfoot"
+
+; ---- the engine's tremor (KJ_native only). The command is compiled from a
+; ---- string so this file still loads on a binary that has never heard of it.
+#native
+_a4 = _this select 3
+KJ_shakeLog = KJ_shakeLog + [[_t0, _s, _dur, "NATIVE"]]
+call compile format ["kjShake [%1, %2, %3, %4, %5]", _a4 select 0, _a4 select 1, _a4 select 2, _a4 select 3, _dur]
+exit
+
+; ---- on foot ------------------------------------------------------------------
+#onfoot
+KJ_shakeLog = KJ_shakeLog + [[_t0, _s, _dur, "FOOT"]]
+#foot
+_u = (time - _t0) / _dur
+? _u >= 1 : goto "footEnd"
+? (vehicle player) != player : goto "footEnd"
+? not alive player : goto "footEnd"
+_a = _s * (1 - _u) * (1 - _u)
+KJ_shakeNow = _a
+_nx = KJR_SHAKE_POS * _a * sin (time * 360 * 11.3)
+_ny = KJR_SHAKE_POS * _a * sin (time * 360 * 8.7 + 70)
+_nz = KJR_SHAKE_UP * _a * abs (sin (time * 360 * 6.1))
+_nd = KJR_SHAKE_YAW * _a * sin (time * 360 * 9.4 + 30)
+_p = getPosASL player
+player setPosASL [(_p select 0) + _nx - _ox, (_p select 1) + _ny - _oy, (_p select 2) + _nz - _oz]
+player setDir ((getDir player) + _nd - _od)
+_ox = _nx
+_oy = _ny
+_oz = _nz
+_od = _nd
+~0.01
+goto "foot"
+#footEnd
+KJ_shakeNow = 0
+? (vehicle player) != player : exit
+? not alive player : exit
+_p = getPosASL player
+player setPosASL [(_p select 0) - _ox, (_p select 1) - _oy, (_p select 2) - _oz]
+player setDir ((getDir player) - _od)
+exit
+
+; ---- in a vehicle ---------------------------------------------------------------
+#vehicle
+? ("Air" countType [_veh]) > 0 : exit
+? ("Ship" countType [_veh]) > 0 : exit
+KJ_shakeLog = KJ_shakeLog + [[_t0, _s, _dur, "VEHICLE"]]
+KJ_shakeNow = _s
+_v = velocity _veh
+_veh setVelocity [_v select 0, _v select 1, (_v select 2) + KJR_SHAKE_JOLT * _s]
+~_dur
+KJ_shakeNow = 0
+exit
+
+; ---- a cutscene camera -------------------------------------------------------------
+#camera
+KJ_shakeLog = KJ_shakeLog + [[_t0, _s, _dur, "CAMERA"]]
+#cam
+_u = (time - _t0) / _dur
+? _u >= 1 : goto "camEnd"
+? isNull _cam : goto "camEnd"
+_a = _s * (1 - _u) * (1 - _u)
+KJ_shakeNow = _a
+_nx = 4 * KJR_SHAKE_POS * _a * sin (time * 360 * 11.3)
+_ny = 4 * KJR_SHAKE_POS * _a * sin (time * 360 * 8.7 + 70)
+_nz = 4 * KJR_SHAKE_UP * _a * sin (time * 360 * 6.1)
+_p = getPos _cam
+_cam setPos [(_p select 0) + _nx - _ox, (_p select 1) + _ny - _oy, (_p select 2) + _nz - _oz]
+_ox = _nx
+_oy = _ny
+_oz = _nz
+~0.01
+goto "cam"
+#camEnd
+KJ_shakeNow = 0
+? isNull _cam : exit
+_p = getPos _cam
+_cam setPos [(_p select 0) - _ox, (_p select 1) - _oy, (_p select 2) - _oz]
+exit

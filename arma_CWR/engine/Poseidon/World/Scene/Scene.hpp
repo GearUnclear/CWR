@@ -176,6 +176,9 @@ class Scene
     Color _constantColor;
     Color _skyColor;
     float _constantFog;
+    // Far draw (Game/Kaiju): most fog (0..255) the software T&L path may put
+    // on a vertex while a fog floor is set; 255 = no floor.
+    int _fogCap8 = 255;
 
     Ref<Texture> _skyTexture;
 
@@ -282,7 +285,16 @@ class Scene
     ColorVal GetConstantColor() const { return _constantColor; }
 
     void SetConstantFog(float fog) { _constantFog = fog; }
-    float GetConstantFog() const { return _constantFog; }
+    float GetConstantFog() const
+    {
+        return (_fogCap8 < 255 && _constantFog * 255 > _fogCap8) ? _fogCap8 * (1.0f / 255) : _constantFog;
+    }
+    // Lowest fog visibility (1 = unfogged) of the object being drawn on the
+    // software T&L path; 0 = stock fog. The hardware path has Engine::SetFogFloor.
+    void SetFogFloor(float visibility)
+    {
+        _fogCap8 = visibility > 0 ? toInt(255 * (1 - (visibility < 1 ? visibility : 1))) : 255;
+    }
 
     const Matrix4& ScaledInvTransform() const;
     const Matrix3& CamNormalTrans() const;
@@ -314,6 +326,10 @@ class Scene
     float GetTacticalVisibility() const { return _tacticalVisibility; }
 
     float GetLodInvWidth() const { return _lodInvWidth; }
+    // LevelFromDistance2 at the finest LOD scale the scene allows, whatever the
+    // frame load has done to the current one (Game/Kaiju, trait lodPin).
+    int LevelFromDistance2Pinned(LODShape* shape, float distance2, float oScale, Vector3Par direction,
+                                 Vector3Par viewDirection, bool ignoreObjectsZ);
     float GetSmokeGeneralization() const;
 
     float GetFrameRateSettings() const { return _frameRateSettings; }
@@ -333,7 +349,11 @@ class Scene
     float GetShadowFogMinRange() const { return _shadowFogMinRange; }
 
     int TacticalFog8(float distSquare) const { return _tacticalFog(distSquare); }
-    int Fog8(float distSquare) const { return _fog(distSquare); }
+    int Fog8(float distSquare) const
+    {
+        const int fog = _fog(distSquare);
+        return fog > _fogCap8 ? _fogCap8 : fog;
+    }
     int ShadowFog8(float distSquare) const { return _shadowFog(distSquare); }
     int SkyFog8(float distSquare) const { return _skyFog(distSquare); }
 
@@ -342,8 +362,9 @@ class Scene
     Landscape* GetLandscape() const { return _landscape; }
     ShadowCache& GetShadowCache() const { return _shadowCache; }
 
+    // ignoreObjectsZ: far-drawn units (Game/Kaiju) are not cut at the object distance
     int LevelFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
-                           Vector3Par viewDirection);
+                           Vector3Par viewDirection, bool ignoreObjectsZ = false);
     int LevelShadowFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
                                  Vector3Par viewDirection);
 

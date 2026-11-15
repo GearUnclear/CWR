@@ -1,0 +1,99 @@
+; kj\anim\footfalls.sqs: footfall events from script.
+;   [kaiju] exec "kj\anim\footfalls.sqs"      (once; it runs for his lifetime)
+;
+; The engine tells a script nothing about the animation, so this works the
+; footfalls out from what a script can see. While he walks, the engine moves
+; him by (metres per cycle) x (phase), so the distance walked IS the phase.
+; In a turn on the spot and in the stomp the clip runs at a fixed rate, so
+; the time since the move began is the phase. The numbers come from the
+; generated table kj\anim\ded_anim_timing.sqf.
+;
+; On each footfall:
+;   KJ_footfall = [kaiju, "L" or "R", [x, y, 0] where the sole lands, time, "walk" / "turnl" / "turnr" / "stomp"]
+;   KJ_footfallCount = KJ_footfallCount + 1
+; and if KJ_footfallExec is a script path (set it AFTER starting this script),
+; [kaiju, foot, pos] exec KJ_footfallExec. Poll KJ_footfallCount to follow it.
+;
+; Limits: it follows getMove, which names the move he is heading for, so a
+; footfall during the blend out of the walk is not reported; a playMove of a
+; loop runs at the slowest rate, which the distance rule still tracks.
+_k = _this select 0
+call preprocessFile "kj\anim\ded_anim_timing.sqf"
+KJ_footfallCount = 0
+KJ_footfall = []
+KJ_footfallExec = ""
+_was = ""
+_kind = "none"
+_d = 0
+_cyc = 0
+_i = 0
+_last = getPos _k
+_t0 = time
+_stomped = true
+_falls = KJ_animWalkFalls
+#loop
+~0.05
+? isNull _k : exit
+? not alive _k : exit
+_m = getMove _k
+_p = getPos _k
+_step = sqrt (((_p select 0) - (_last select 0)) ^ 2 + ((_p select 1) - (_last select 1)) ^ 2)
+_last = _p
+_kind = "none"
+? (_m == "dedwalk") or (_m == "dedwalklow") or (_m == "dedwalkcrouch") : _kind = "walk"
+? (_m == "dedturnl") or (_m == "dedturnllow") or (_m == "dedturnlcrouch") : _kind = "turnl"
+? (_m == "dedturnr") or (_m == "dedturnrlow") or (_m == "dedturnrcrouch") : _kind = "turnr"
+? _m == "dedstomp" : _kind = "stomp"
+? _m != _was : goto "start"
+#run
+? _kind == "walk" : goto "walk"
+? _kind == "turnl" : goto "turn"
+? _kind == "turnr" : goto "turn"
+? _kind == "stomp" : goto "stomp"
+goto "loop"
+#start
+_was = _m
+_t0 = time
+_d = 0
+_cyc = 0
+_i = 0
+_stomped = false
+_falls = KJ_animWalkFalls
+? _kind == "turnl" : _falls = KJ_animTurnFallsL
+? _kind == "turnr" : _falls = KJ_animTurnFallsR
+goto "run"
+#walk
+; While the walk blends in, the engine moves him by only the blended share of
+; the step, so the phase runs ahead of the distance by 1 / share.
+_w = (time - _t0) / KJ_animWalkBlend
+? _w > 1 : _w = 1
+? _w < 0.1 : _w = 0.1
+_d = _d + _step / _w
+_ph = _d / KJ_animWalkStep
+goto "check"
+#turn
+_ph = (time - _t0) / KJ_animTurnSecs
+#check
+_f = _falls select _i
+? _ph < _cyc + (_f select 0) : goto "loop"
+_foot = _f select 1
+_o = _f select 2
+goto "fire"
+#stomp
+? _stomped : goto "loop"
+? time < _t0 + KJ_animStompTime : goto "loop"
+_stomped = true
+_foot = KJ_animStompFoot
+_o = KJ_animStompPos
+_i = _i - 1
+#fire
+_dir = getDir _k
+_pos = [(_p select 0) + (_o select 0) * cos _dir + (_o select 1) * sin _dir, (_p select 1) - (_o select 0) * sin _dir + (_o select 1) * cos _dir, 0]
+KJ_footfall = [_k, _foot, _pos, time, _kind]
+KJ_footfallCount = KJ_footfallCount + 1
+? KJ_footfallExec != "" : [_k, _foot, _pos] exec KJ_footfallExec
+_i = _i + 1
+? _i < count _falls : goto "loop"
+_i = 0
+_cyc = _cyc + 1
+goto "loop"

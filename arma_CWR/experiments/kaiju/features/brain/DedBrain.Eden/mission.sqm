@@ -1,0 +1,66 @@
+// Dedushka brain test bed on Eden (Everon), the Morton shelf the pipeline's
+// photo test measured. One stock EAST player only; the tests create the
+// creature and everything else from script. Everyone is EAST or civilian, so
+// nobody has anyone to shoot at and the runs stay quiet. addOns[] names the
+// creature's addon: a runtime createUnit of a class whose owner addon is not
+// activated is refused.
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"uddedushka"
+	};
+	addOnsAuto[]=
+	{
+		"uddedushka"
+	};
+	randomSeed=4243;
+	class Intel
+	{
+		viewDistance=2000;
+		year=1985;
+		month=6;
+		day=10;
+		hour=11;
+		minute=0;
+		weather=0.100000;
+		weatherForecast=0.100000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={5060.0,20.0,4500.0};
+					azimut=180.000000;
+					id=0;
+					side="EAST";
+					vehicle="SoldierEB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+					text="kjbPlayer";
+					init="this setCaptive true; removeAllWeapons this";
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};
