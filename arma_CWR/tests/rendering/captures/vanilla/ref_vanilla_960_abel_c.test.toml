@@ -1,0 +1,19 @@
+# Remastered lighting capture run, Abel (Malden). A photo generator, not a
+# regression test: it lives under tests/rendering/ so a `tri test
+# tests/integration` sweep never picks it up. Run it with run-captures.ps1
+# (README.md beside this file), which also collects the PNGs and timings.
+#
+# No data_dir pin: run-captures.ps1 passes --data-dir (a per-run junction to the
+# Remaster shadow), so parallel runs can each clean up only their own games.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_abel.Abel"
+tags = ["lighting_capture", "headful", "exclusive"]
+# Eleven views (22 shots), each with settle blocks of 90-240 frames at 4x MSAA and 150%
+# render scale. `timeout` is also the per-command budget of one triSimFrames.
+timeout = 900
+# Also the budget for each screenshot file to appear and for triSimUntil.
+assert_timeout = 180
+# --no-strict: a capture run should survive an engine ERROR line (a missing
+# texture, a content warning) instead of shutting down on it.
+# 960x640 windowed; MSAA and render scale are set by the test itself.
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "960", "--height", "640"]

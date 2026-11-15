@@ -48,6 +48,9 @@ TEST_CASE("GraphicsConfig: factory defaults match spec", "[Settings][GraphicsCon
     CHECK(c.particlesQuality == GraphicsConfig::TierHigh);
     CHECK(c.vsync == GraphicsConfig::VsyncOn);
     CHECK(c.fpsCap == 0); // Unlimited
+    CHECK(c.msaaSamples == 4);
+    CHECK(c.alphaToCoverage);
+    CHECK(c.renderScale == 1.0f);
     CHECK(c.brightness == 1.6f);
     CHECK(c.gamma == 1.2f);
     CHECK(c.version == GraphicsConfig::kVersion);
@@ -160,6 +163,109 @@ TEST_CASE("GraphicsConfig: Unlimited survives once the file is current", "[Setti
 
     CHECK_FALSE(c.Migrate(144));
     CHECK(c.fpsCap == 0);
+}
+
+// v2 already made a cap of 0 the user's Unlimited; a later bump must keep it.
+TEST_CASE("GraphicsConfig: a v2 Unlimited cap survives the v3 migration", "[Settings][GraphicsConfig]")
+{
+    GraphicsConfig c;
+    c.version = 2;
+    c.fpsCap = 0;
+
+    REQUIRE(c.Migrate(144));
+    CHECK(c.fpsCap == 0);
+    CHECK(c.version == GraphicsConfig::kVersion);
+}
+
+// Below v3 MSAA defaulted to off and every save wrote that 0.
+TEST_CASE("GraphicsConfig: Migrate turns an untouched MSAA Off into 4x", "[Settings][GraphicsConfig]")
+{
+    for (int version : {0, 1, 2})
+    {
+        INFO("from version " << version);
+        GraphicsConfig c;
+        c.version = version;
+        c.msaaSamples = 0;
+        c.renderScale = 1.0f;
+
+        REQUIRE(c.Migrate(60));
+        CHECK(c.msaaSamples == 4);
+        CHECK(c.version == GraphicsConfig::kVersion);
+    }
+}
+
+// Supersampling is already anti-aliasing, so the one-time lift leaves it alone.
+TEST_CASE("GraphicsConfig: Migrate keeps MSAA Off on a supersampled profile", "[Settings][GraphicsConfig]")
+{
+    for (float scale : {1.5f, 2.0f})
+    {
+        INFO("render scale " << scale);
+        GraphicsConfig c;
+        c.version = 2;
+        c.msaaSamples = 0;
+        c.renderScale = scale;
+
+        REQUIRE(c.Migrate(60));
+        CHECK(c.version == GraphicsConfig::kVersion);
+        CHECK(c.msaaSamples == 0);
+        CHECK(c.renderScale == scale);
+    }
+}
+
+TEST_CASE("GraphicsConfig: Migrate keeps an MSAA count the user chose", "[Settings][GraphicsConfig]")
+{
+    for (int chosen : {2, 4, 8})
+    {
+        INFO("samples " << chosen);
+        GraphicsConfig c;
+        c.version = 2;
+        c.msaaSamples = chosen;
+
+        REQUIRE(c.Migrate(60));
+        CHECK(c.msaaSamples == chosen);
+    }
+}
+
+TEST_CASE("GraphicsConfig: MSAA Off survives once the file is current", "[Settings][GraphicsConfig]")
+{
+    GraphicsConfig c;
+    c.version = GraphicsConfig::kVersion;
+    c.msaaSamples = 0;
+
+    CHECK_FALSE(c.Migrate(60));
+    CHECK(c.msaaSamples == 0);
+}
+
+// The boot path end to end: a v2 file from before the default changed gets 4x
+// once, and an Off picked after that comes back as Off on every later boot.
+TEST_CASE("GraphicsConfig: an old file gets 4x MSAA once, a later Off sticks", "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("graphics.cfg");
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << "qualityPreset=3;\nmsaaSamples=0;\nfpsCap=60;\nversion=2;\n";
+    }
+
+    GraphicsConfig first;
+    REQUIRE(first.Load(path));
+    REQUIRE(first.version == 2);
+    REQUIRE(first.Migrate(60));
+    CHECK(first.msaaSamples == 4);
+    REQUIRE(first.Save(path));
+
+    GraphicsConfig second;
+    REQUIRE(second.Load(path));
+    CHECK(second.version == GraphicsConfig::kVersion);
+    CHECK_FALSE(second.Migrate(60));
+    CHECK(second.msaaSamples == 4);
+
+    second.msaaSamples = 0; // the user picks Off in Options
+    REQUIRE(second.Save(path));
+
+    GraphicsConfig third;
+    REQUIRE(third.Load(path));
+    CHECK_FALSE(third.Migrate(60));
+    CHECK(third.msaaSamples == 0);
 }
 
 TEST_CASE("GraphicsConfig: a file without a version reloads as version 0", "[Settings][GraphicsConfig]")
@@ -409,4 +515,86 @@ TEST_CASE("GraphicsConfig: Allowed FPS cap values pass through unchanged", "[Set
         c.Normalize(env);
         CHECK(c.fpsCap == allowed);
     }
+}
+
+// The Remastered lighting's look options: shore water and lamp shadows on,
+// shadow detail Normal, saved and read back by their own keys.
+TEST_CASE("GraphicsConfig: the look options default to shore water and lamp shadows on, Normal shadows",
+          "[Settings][GraphicsConfig]")
+{
+    GraphicsConfig c;
+    c.LoadDefaults();
+    CHECK(c.shoreWater);
+    CHECK(c.lampShadows);
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    // The sun glare stays off until the owner has seen it in motion.
+    CHECK_FALSE(c.sunGlare);
+    // The stored values are the shadow tiers (Graphics/Shadow/ShadowXp.hpp).
+    CHECK(static_cast<int>(GraphicsConfig::ShadowDetailNormal) == 2);
+    CHECK(static_cast<int>(GraphicsConfig::ShadowDetailHigh) == 3);
+}
+
+TEST_CASE("GraphicsConfig: the look options round-trip through graphics.cfg", "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("look.cfg");
+    std::filesystem::remove(path);
+
+    GraphicsConfig src;
+    src.shoreWater = false;
+    src.lampShadows = false;
+    src.shadowDetail = GraphicsConfig::ShadowDetailHigh;
+    src.sunGlare = true;
+    REQUIRE(src.Save(path));
+
+    GraphicsConfig dst;
+    REQUIRE(dst.Load(path));
+    CHECK_FALSE(dst.shoreWater);
+    CHECK_FALSE(dst.lampShadows);
+    CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailHigh);
+    CHECK(dst.sunGlare);
+
+    // And back.
+    src.shoreWater = true;
+    src.lampShadows = true;
+    src.shadowDetail = GraphicsConfig::ShadowDetailNormal;
+    src.sunGlare = false;
+    REQUIRE(src.Save(path));
+    REQUIRE(dst.Load(path));
+    CHECK(dst.shoreWater);
+    CHECK(dst.lampShadows);
+    CHECK(dst.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    CHECK_FALSE(dst.sunGlare);
+}
+
+TEST_CASE("GraphicsConfig: a file written before the look options reads them as their defaults",
+          "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("prelook.cfg");
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << "qualityPreset=3;\nterrainDetail=4;\nobjectLod=4;\nshadowQuality=3;\nparticlesQuality=3;\n"
+               "lighting=1;\nversion=3;\n";
+    }
+    GraphicsConfig c;
+    REQUIRE(c.Load(path));
+    CHECK(c.shoreWater);
+    CHECK(c.lampShadows);
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+    CHECK_FALSE(c.sunGlare);
+    // Nothing to migrate: the defaults are already the options' defaults.
+    CHECK_FALSE(c.Migrate(60));
+}
+
+TEST_CASE("GraphicsConfig: Normalize turns an unknown shadow detail into Normal", "[Settings][GraphicsConfig]")
+{
+    FakeEnvironment env;
+    GraphicsConfig c;
+    c.LoadDefaults();
+    c.shadowDetail = static_cast<GraphicsConfig::ShadowDetail>(7);
+    CHECK(c.Normalize(env));
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
+
+    c.shadowDetail = GraphicsConfig::ShadowDetailHigh;
+    CHECK_FALSE(c.Normalize(env));
+    CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailHigh);
 }

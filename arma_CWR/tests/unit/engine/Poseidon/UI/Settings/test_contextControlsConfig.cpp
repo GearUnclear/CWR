@@ -326,7 +326,6 @@ TEST_CASE("ContextControlsConfig: a full version-1 config parses and migrates", 
 }
 
 #include <Poseidon/Input/InputDeviceConstants.hpp>
-#include <fstream>
 #include <sstream>
 
 namespace

@@ -1,0 +1,19 @@
+{
+ "source": "tmp/perf-audit/reports/measurements.md section 2 (round 1, run full-sample, 2026-10-30, afdb4d60, POSEIDON_OBSERVER_SAMPLE=1, fpsCap 60 + vsync on as autodetected, detail pin 1, one 256-frame window per mode, mean of 2 rounds)",
+ "tolerance": {"cpu_avg": 0.3, "gpu_frame": 0.7, "gpu_pass1": 0.7},
+ "note": "town_night_rain: its GPU frame and rest swing 9.5-11.5 / 2.9-4.9 ms between quiet runs (M2 4), so the reconciliation reads its pass1 and ground instead of the frame.",
+ "rows": [
+  {"view": "valley_0515", "variant": "remastered", "draws": 5241, "cpu_avg": 34.2, "cpu_p95": 99.6, "land:obj": 11.9, "swap": 10.1, "gpu_frame": 33.6, "gmin_frame": 31.2, "gpu_ground": 3.0, "gpu_pass1": 26.4, "gpu_rest": 2.1, "gpu_post": 1.7},
+  {"view": "valley_0515", "variant": "classic", "draws": 11553, "cpu_avg": 21.5, "cpu_p95": 24.9, "land:obj": 14.6, "swap": 0.36, "gpu_frame": 19.1, "gmin_frame": 15.6, "gpu_ground": 2.7, "gpu_pass1": 14.9, "gpu_rest": 1.3},
+  {"view": "broken_high", "variant": "remastered", "draws": 5479, "cpu_avg": 30.9, "cpu_p95": 90.4, "land:obj": 11.9, "swap": 7.0, "gpu_frame": 30.4, "gmin_frame": 28.2, "gpu_ground": 3.8, "gpu_pass1": 23.3, "gpu_rest": 1.3, "gpu_post": 1.8},
+  {"view": "broken_high", "variant": "classic", "draws": 6521, "cpu_avg": 18.9, "cpu_p95": 21.5, "land:obj": 12.2, "swap": 0.33, "gpu_frame": 18.2, "gmin_frame": 15.2, "gpu_ground": 5.9, "gpu_pass1": 11.3, "gpu_rest": 0.9},
+  {"view": "sunrise_ridge", "variant": "remastered", "draws": 1902, "cpu_avg": 13.9, "cpu_p95": 15.7, "land:obj": 8.1, "swap": 0.27, "gpu_frame": 10.5, "gmin_frame": 6.1, "gpu_ground": 5.9, "gpu_pass1": 2.4, "gpu_rest": 0.16, "gpu_post": 1.5},
+  {"view": "sunrise_ridge", "variant": "classic", "draws": 13076, "cpu_avg": 24.0, "cpu_p95": 25.7, "land:obj": 17.5, "swap": 0.4, "gpu_frame": 16.2, "gmin_frame": 15.0, "gpu_ground": 0.13, "gpu_pass1": 14.9, "gpu_rest": 1.0},
+  {"view": "town_night_rain", "variant": "remastered", "draws": 1023, "cpu_avg": 5.2, "cpu_p95": 14.4, "land:obj": 1.4, "swap": 0.3, "gpu_frame": 13.9, "gmin_frame": 12.1, "gpu_ground": 1.9, "gpu_pass1": 4.9, "gpu_rest": 4.6, "gpu_post": 2.0, "noisy_gpu_frame": true},
+  {"view": "town_night_rain", "variant": "classic", "draws": 1091, "cpu_avg": 3.5, "cpu_p95": 6.3, "land:obj": 1.3, "swap": 0.3, "gpu_frame": 5.2, "gmin_frame": 3.6, "gpu_ground": 0.1, "gpu_pass1": 0.9, "gpu_rest": 3.8, "noisy_gpu_frame": true},
+  {"view": "combat_fires", "variant": "remastered", "draws": 803, "cpu_avg": 4.0, "cpu_p95": 8.1, "land:obj": 0.6, "swap": 0.27, "gpu_frame": 7.3, "gmin_frame": 6.7, "gpu_ground": 0.8, "gpu_pass1": 1.4, "gpu_rest": 3.4, "gpu_post": 1.3},
+  {"view": "combat_fires", "variant": "classic", "draws": 813, "cpu_avg": 3.0, "cpu_p95": 7.4, "land:obj": 0.5, "swap": 0.3, "gpu_frame": 5.6, "gmin_frame": 4.8, "gpu_ground": 0.14, "gpu_pass1": 0.4, "gpu_rest": 4.8},
+  {"view": "noon_fields", "variant": "remastered", "draws": 1565, "cpu_avg": 9.1, "cpu_p95": 15.4, "land:obj": 4.9, "swap": 0.29, "gpu_frame": 11.0, "gmin_frame": 10.2, "gpu_ground": 2.0, "gpu_pass1": 6.8, "gpu_rest": 0.4, "gpu_post": 1.5},
+  {"view": "noon_fields", "variant": "classic", "draws": 6767, "cpu_avg": 12.1, "cpu_p95": 12.9, "land:obj": 7.8, "swap": 0.37, "gpu_frame": 7.3, "gmin_frame": 6.7, "gpu_ground": 0.1, "gpu_pass1": 6.2, "gpu_rest": 0.9}
+ ]
+}

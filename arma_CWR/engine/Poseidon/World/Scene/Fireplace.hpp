@@ -52,6 +52,11 @@ public:
 	float CalculateError(NetworkMessageContext &ctx) override;
 	
 	USE_CASTING(base)
+
+  protected:
+    // The fire's combat light (CombatLights.hpp): a smooth flicker in linear HDR
+    // instead of the classic light's random brightness every frame.
+    lighting::CombatLightHandle _combatFire;
 };
 
 }  // namespace Poseidon

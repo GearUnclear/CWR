@@ -1,0 +1,102 @@
+// Minimal Sinai mission for the lighting capture run
+// (sinai_lobo_lighting.test.sqf), @LoBo mounted. One captive vanilla player
+// SE of (behind) the camera at the Guerrilla.Sinai camp ground [8350, 2950].
+//
+// addOns[] is load-bearing: a script-spawned @LoBo class builds only when its
+// owner addon is active (VehicleTypes.cpp NewVehicle refuses an abstract type,
+// World::CheckAddon), and the engine's own closure walk covers only what the
+// mission PLACES. Every name below is a CfgPatches class read from the
+// shadow's @LoBo pbos: sinai (lost.pbo, the world), LoBoIs (LoBoGolaniWB),
+// LoBoHMWV (LoBoHMWV_Mag_Patrol), LoBo_Zelda, Lobo_Fighting_pos
+// (LoBofightpos.pbo: LoBo_camnet), and the weapon / ammo pbos the Golani
+// rifleman and the vehicles reach (LoBoWeapons, LoBoWeapNad, LoBoWeapAT,
+// LoBoammo, JAM_Magazines, JAM_Vehicles).
+// SQM position order is [easting, ELEVATION, northing].
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"sinai",
+		"LoBoIs",
+		"LoBoHMWV",
+		"LoBo_Zelda",
+		"Lobo_Fighting_pos",
+		"LoBoWeapons",
+		"LoBoWeapNad",
+		"LoBoWeapAT",
+		"LoBoammo",
+		"JAM_Magazines",
+		"JAM_Vehicles"
+	};
+	addOnsAuto[]=
+	{
+		"sinai",
+		"LoBoIs",
+		"LoBoHMWV",
+		"LoBo_Zelda",
+		"Lobo_Fighting_pos",
+		"LoBoWeapons",
+		"LoBoWeapNad",
+		"LoBoWeapAT",
+		"LoBoammo",
+		"JAM_Magazines",
+		"JAM_Vehicles"
+	};
+	randomSeed=26101721;
+	class Intel
+	{
+		year=2005;
+		month=7;
+		day=21;
+		hour=16;
+		minute=10;
+		startWeather=0.000000;
+		forecastWeather=0.000000;
+		viewDistance=2000;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={8380.000000,0.000000,2900.000000};
+					azimut=338.800000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=26101722;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=26101723;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=26101724;
+	class Intel
+	{
+	};
+};

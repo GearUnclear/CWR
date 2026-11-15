@@ -1,0 +1,64 @@
+// Minimal Eden mission for the lighting capture run (eden_lighting.test.sqf).
+// One captive player on the south-east Everon highland, ESE of (behind) the
+// camera at [9200, 3700]. The test sets date, weather and the camera per view.
+// SQM position order is [easting, ELEVATION, northing].
+version=11;
+class Mission
+{
+	randomSeed=26101711;
+	class Intel
+	{
+		year=1985;
+		month=7;
+		day=5;
+		hour=14;
+		minute=30;
+		startWeather=0.000000;
+		forecastWeather=0.000000;
+		viewDistance=3500;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={9235.000000,0.000000,3680.000000};
+					azimut=300.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=26101712;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=26101713;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=26101714;
+	class Intel
+	{
+	};
+};

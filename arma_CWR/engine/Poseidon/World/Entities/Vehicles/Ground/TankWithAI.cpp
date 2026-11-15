@@ -150,7 +150,7 @@ void Tank::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* tar
             case AmmoShotShell:
             {
                 _gunClouds.Start(1.5f);
-                _gunFire.Start(0.1f, 1, false);
+                _gunFire.Start(0.1f, 1, false, mode->_ammo->hit);
                 const float time = 1;
                 _fireDustTimeLeft = time;
                 _invFireDustTimeTotal = 1 / time;
@@ -165,7 +165,7 @@ void Tank::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* tar
                 else
                 {
                     _mGunClouds.Start(0.1f);
-                    _mGunFire.Start(0.1f, 0.4f, true);
+                    _mGunFire.Start(0.1f, 0.4f, true, mode->_ammo->hit);
                     _mGunFireFrames = 1;
                     _mGunFireTime = Glob.uiTime;
                     int newPhase;

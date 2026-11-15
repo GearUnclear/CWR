@@ -6,6 +6,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
@@ -364,7 +365,7 @@ void ThunderBolt::Simulate(float deltaT, SimulationImportance prec)
     {
         _soundDone = true;
         // sound of explosion
-        float rndFreq = GRandGen.RandomValue() * 0.1 + 0.95;
+        float rndFreq = GFxRandGen.RandomValue() * 0.1 + 0.95;
         IWave* sound =
             GSoundScene->OpenAndPlayOnce(_soundPars.name, Position(), VZero, _soundPars.vol, _soundPars.freq * rndFreq);
         if (sound)
@@ -438,6 +439,7 @@ void Weather::Init()
     _overcastSetClouds = -1.0;
     _fogSet = 0.0f;
     _cloudsPos = 0;
+    _cloudsHeld = false;
     _cloudsAlpha = 0.0f;
     _cloudsBrightness = 1.0f;
     _cloudsSpeed = 0.2f;
@@ -445,6 +447,9 @@ void Weather::Init()
     _rainDensity = 0;
     _rainDensityWanted = 0;
     _rainDensitySpeed = 1;
+    // A new weather starts at what its rain settles at (the first step snaps).
+    _wetness = Poseidon::remaster::WetnessState{};
+    _wetnessSnap = true;
     _windSpeed = VZero;
     _lastWindSpeedChange = Glob.time;
     _gust = VZero;
@@ -456,9 +461,25 @@ Weather::Weather()
     Init();
 }
 
+void Weather::RestartRandomWalks()
+{
+    _thunderBoltTime = Glob.time - 1;
+    _windSpeed = VZero;
+    _lastWindSpeedChange = Glob.time;
+    _gust = VZero;
+    _gustUntil = Glob.time;
+}
+
 void Weather::SetRain(float density, float time)
 {
     saturate(density, 0, 1);
+    // A change made at once (a mission's or a capture's `0 setRain x`) means
+    // "this is the weather now": the world takes the wetness that rain
+    // settles at instead of wetting or drying over minutes.
+    if (Poseidon::remaster::WetnessSnaps(_rainDensity, density, time))
+    {
+        _wetnessSnap = true;
+    }
     saturateMax(time, 0.001);
     _rainDensityWanted = density;
     _rainDensitySpeed = fabs(_rainDensityWanted - _rainDensity) / time;
@@ -557,7 +578,8 @@ void Weather::SetFog(Landscape* land, float fog)
 
 void Weather::MoveClouds(float deltaT)
 {
-    _cloudsPos += _cloudsSpeed * deltaT;
+    if (!_cloudsHeld)
+        _cloudsPos += _cloudsSpeed * deltaT;
 
     // simulate rain
     float maxRain = _overcastSetClouds * 1.5 - 1;
@@ -566,9 +588,9 @@ void Weather::MoveClouds(float deltaT)
         if (fabs(_rainDensityWanted - _rainDensity) < 1e-6)
         {
             saturate(maxRain, 0, 1);
-            _rainDensityWanted = _rainDensity + (GRandGen.RandomValue() - 0.5) * 0.5 * maxRain;
+            _rainDensityWanted = _rainDensity + (GFxRandGen.RandomValue() - 0.5) * 0.5 * maxRain;
             saturate(_rainDensityWanted, 0, maxRain);
-            _rainDensitySpeed = (GRandGen.RandomValue() + 0.1) * 0.01;
+            _rainDensitySpeed = (GFxRandGen.RandomValue() + 0.1) * 0.01;
         }
         float delta = _rainDensityWanted - _rainDensity;
         Limit(delta, -_rainDensitySpeed * deltaT, +_rainDensitySpeed * deltaT);
@@ -583,7 +605,7 @@ void Weather::MoveClouds(float deltaT)
             {
                 // do thunderbolt effect
                 const ParamEntry* cfg = nullptr;
-                if (GRandGen.RandomValue() < thunderBoltDensity)
+                if (GFxRandGen.RandomValue() < thunderBoltDensity)
                 {
                     cfg = &(Pars >> "CfgEffects" >> "ThunderboltHeavy");
                 }
@@ -608,8 +630,8 @@ void Weather::MoveClouds(float deltaT)
                 {
                     Vector3 pos;
                     pos.Init();
-                    pos[0] = (GRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.X();
-                    pos[2] = (GRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.Z();
+                    pos[0] = (GFxRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.X();
+                    pos[2] = (GFxRandGen.RandomValue() - 0.5) * (60 * LandGrid) + cPos.Z();
                     pos[1] = GLandscape->SurfaceY(pos[0], pos[2]);
                     if (pos[1] > best[1])
                     {
@@ -640,7 +662,7 @@ void Weather::MoveClouds(float deltaT)
                 bolt->SetScale(size);
                 bolt->SetPosition(best + shape->BoundingCenter() * size);
                 GWorld->AddCloudlet(bolt);
-                _thunderBoltTime = Glob.time + GRandGen.RandomValue() * 5 / (thunderBoltDensity + 0.001);
+                _thunderBoltTime = Glob.time + GFxRandGen.RandomValue() * 5 / (thunderBoltDensity + 0.001);
             }
         }
     }
@@ -649,6 +671,32 @@ void Weather::MoveClouds(float deltaT)
         _rainDensityWanted = 0;
         _rainDensity = 0;
         _rainDensitySpeed = 0.01;
+    }
+
+    // The world's wetness follows the rain: wets in it, dries after it, faster
+    // in sun and wind (the remastered wet weather; Wetness.hpp).
+    if (_wetnessSnap)
+    {
+        // Taken on the first step that moves the clock: a change made while
+        // the simulation is paused settles at the rain it asked for.
+        if (deltaT > 0)
+        {
+            _wetness = Poseidon::remaster::SettledWetness(_rainDensity);
+            _wetnessSnap = false;
+        }
+    }
+    else
+    {
+        Poseidon::remaster::WetnessInputs wet;
+        wet.rain = _rainDensity;
+        wet.skyThrough = _skyThrough;
+        wet.windSpeed = _windSpeed.Size();
+        if (const LightSun* light = GLOB_SCENE ? GLOB_SCENE->MainLight() : nullptr)
+        {
+            const float up = -light->Direction().Y();
+            wet.sunElevationDeg = std::asin(up < -1.0f ? -1.0f : (up > 1.0f ? 1.0f : up)) * 57.29578f;
+        }
+        Poseidon::remaster::StepWetness(_wetness, wet, deltaT);
     }
 
     {
@@ -685,17 +733,18 @@ void Weather::MoveClouds(float deltaT)
     if (Glob.time > _lastWindSpeedChange + 5)
     {
         _lastWindSpeedChange = Glob.time;
-        _windSpeed[0] += GRandGen.PlusMinus(0, 1);
-        _windSpeed[2] += GRandGen.PlusMinus(0, 1);
+        _windSpeed[0] += GFxRandGen.PlusMinus(0, 1);
+        _windSpeed[2] += GFxRandGen.PlusMinus(0, 1);
         float maxWind = _overcastSetClouds * 4 + 1;
         saturate(_windSpeed[0], -maxWind, +maxWind);
         saturate(_windSpeed[2], -maxWind, +maxWind);
 
         // simulate wind gusts
-        float gustTime = GRandGen.PlusMinus(0, 8 * _overcastSetClouds + 2);
+        float gustTime = GFxRandGen.PlusMinus(0, 8 * _overcastSetClouds + 2);
         _gustUntil = Glob.time + gustTime;
-        _gust = Vector3(GRandGen.PlusMinus(0, 4 * _overcastSetClouds), GRandGen.PlusMinus(0, 1 * _overcastSetClouds),
-                        GRandGen.PlusMinus(0, 4 * _overcastSetClouds));
+        _gust =
+            Vector3(GFxRandGen.PlusMinus(0, 4 * _overcastSetClouds), GFxRandGen.PlusMinus(0, 1 * _overcastSetClouds),
+                    GFxRandGen.PlusMinus(0, 4 * _overcastSetClouds));
     }
 }
 
@@ -907,6 +956,8 @@ void Landscape::HeightChange(int x, int z, float y)
 {
     PoseidonAssert(this_TerrainInRange(x, z));
     SetData(x, z, y);
+    // W1-9: objects fitted to the old ground refit
+    LandFit::NoteTerrainEdit();
     // FlushCache();
 }
 

@@ -1,4 +1,5 @@
 #include <PoseidonGL33/EngineGL33.hpp>
+#include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Graphics/Core/GLBlendState.hpp>
@@ -12,43 +13,98 @@
 
 #include <glad/gl.h>
 
-void EngineGL33::CreateSamplerStates()
+void EngineGL33::ConfigureSampler(unsigned int sampler, int bits, float aniso, float bias)
 {
-    glGenSamplers(8, _samplerObjects);
     // Sampler objects override the per-texture filter state, so they must match
     // the trilinear + anisotropic setup from TextureGL33_Init — mip-nearest with
     // no anisotropy here made distant oblique textures (chain-link fences, fence
     // tops) shimmer with bright pixel highlights as mip selection flipped.
+    const bool point = (bits & 4) != 0;
+    const bool clampU = (bits & 1) != 0;
+    const bool clampV = (bits & 2) != 0;
+
+    GLenum minFilter = point ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
+    GLenum magFilter = point ? GL_NEAREST : GL_LINEAR;
+
+    glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, minFilter);
+    glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, magFilter);
+    glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, clampU ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, clampV ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    if (!point && aniso > 1.0f)
+    {
+        glSamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+    }
+    // The TAA texture LOD bias, only ever on the twin set (a new sampler's
+    // bias is 0): UpdateTaaBiasedSamplers between frames.
+    if (bias != 0.0f)
+        glSamplerParameterf(sampler, GL_TEXTURE_LOD_BIAS, bias);
+}
+
+void EngineGL33::CreateSamplerStates()
+{
+    glGenSamplers(8, _samplerObjects);
+    glGenSamplers(8, _samplerBiased);
     float maxAniso = 1.0f;
     glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
-    const float aniso = maxAniso < 16.0f ? maxAniso : 16.0f;
+    _samplerAniso = maxAniso < 16.0f ? maxAniso : 16.0f;
+    // The twin set starts unbiased; the next InitDraw gives it the knob's bias.
     for (int i = 0; i < 8; i++)
     {
-        bool point = (i & 4) != 0;
-        bool clampU = (i & 1) != 0;
-        bool clampV = (i & 2) != 0;
-
-        GLenum minFilter = point ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
-        GLenum magFilter = point ? GL_NEAREST : GL_LINEAR;
-
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_MIN_FILTER, minFilter);
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_MAG_FILTER, magFilter);
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_WRAP_S, clampU ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-        glSamplerParameteri(_samplerObjects[i], GL_TEXTURE_WRAP_T, clampV ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-        if (!point && aniso > 1.0f)
-        {
-            glSamplerParameterf(_samplerObjects[i], GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
-        }
+        ConfigureSampler(_samplerObjects[i], i, _samplerAniso, 0.0f);
+        ConfigureSampler(_samplerBiased[i], i, _samplerAniso, 0.0f);
     }
+    _samplerBiasedValue = 0.0f;
+    _samplerBiasOn = false;
     // Bind default sampler (linear, wrap) to both texture units
     glBindSampler(0, _samplerObjects[0]);
     glBindSampler(1, _samplerObjects[0]);
+    _samplerSlot0 = 0;
+    _taa.mipBiasApplied = 0.0f; // new samplers carry no TAA texture LOD bias
 }
 
 void EngineGL33::DestroySamplerStates()
 {
     glDeleteSamplers(8, _samplerObjects);
     memset(_samplerObjects, 0, sizeof(_samplerObjects));
+    glDeleteSamplers(8, _samplerBiased);
+    memset(_samplerBiased, 0, sizeof(_samplerBiased));
+    _samplerBiasedValue = 0.0f;
+    _samplerBiasOn = false;
+}
+
+void EngineGL33::UpdateTaaBiasedSamplers()
+{
+    // Between frames only (InitDraw, after the bias is off): a sampler the GPU
+    // may still read is written only when the knob moves to a new non-zero
+    // value, never per frame or mid-frame. A knob of 0 binds the plain set.
+    const float bias = _lighting.taaMipBias;
+    if (!_samplerBiased[0] || bias == 0.0f || bias == _samplerBiasedValue)
+        return;
+    for (int i = 0; i < 8; i++)
+        ConfigureSampler(_samplerBiased[i], i, _samplerAniso, bias);
+    _samplerBiasedValue = bias;
+}
+
+void EngineGL33::SetMaterialSamplerBias(bool on)
+{
+    // The world's passes of a TAA frame draw through the twin set, everything
+    // else through the plain one. Swapping sets rebinds what holds a material
+    // sampler now: unit 0 (its sampler index kept), unit 1 (the default
+    // sampler) and the sea's next-frame unit while the sea is open.
+    if (on == _samplerBiasOn || !_samplerObjects[0])
+        return;
+    _samplerBiasOn = on;
+    if (_samplerSlot0 >= 0)
+        Poseidon::render::sampler::BindSlot0(MaterialSampler(_samplerSlot0));
+    glBindSampler(1, MaterialSampler(0));
+    if (_seaOpen)
+        glBindSampler(Poseidon::gl33lighting::kSeaNextFrameUnit, MaterialSampler(0));
+}
+
+void EngineGL33::BindMaterialSampler0(int i)
+{
+    _samplerSlot0 = i;
+    Poseidon::render::sampler::BindSlot0(MaterialSampler(i));
 }
 
 void EngineGL33::ApplySamplerState()
@@ -59,7 +115,8 @@ void EngineGL33::ApplySamplerState()
     // the default linear-wrap sampler set during
     // CreateSamplerStates().  B-022's "leftover slot-1 sampler"
     // class is unrepresentable here: there is no `BindSlot1` helper.
-    Poseidon::render::sampler::BindSlot0(_samplerObjects[bits]);
+    _samplerSlot0 = bits;
+    Poseidon::render::sampler::BindSlot0(MaterialSampler(bits));
 }
 
 void EngineGL33::ApplyBlendMode(BlendMode mode)
@@ -67,6 +124,10 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
     if (!_glContext)
         return;
     _currentBlendMode = mode;
+    // Remastered lighting: opaque draws write their ambient share into the
+    // frame alpha and blended draws keep it (see EngineGL33_PostFX.cpp).
+    const bool keepAlpha = _lightingActive;
+    SetLitOpaque(mode == BlendMode::Opaque, mode == BlendMode::Additive);
     // Each Poseidon::render::blend helper sets enable + func atomically; partial
     // state ("blend enabled but func not set") is unrepresentable.
     switch (mode)
@@ -75,15 +136,27 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
             Poseidon::render::blend::Opaque();
             break;
         case BlendMode::AlphaBlend:
-            Poseidon::render::blend::AlphaBlend();
+            if (keepAlpha)
+                Poseidon::render::blend::AlphaBlendKeepAlpha();
+            else
+                Poseidon::render::blend::AlphaBlend();
             break;
         case BlendMode::Additive:
-            Poseidon::render::blend::Additive();
+            if (keepAlpha)
+                Poseidon::render::blend::AdditiveKeepAlpha();
+            else
+                Poseidon::render::blend::Additive();
             break;
         case BlendMode::Shadow:
-            Poseidon::render::blend::Shadow();
+            if (keepAlpha)
+                Poseidon::render::blend::ShadowKeepAlpha();
+            else
+                Poseidon::render::blend::Shadow();
             break;
     }
+    // Surface light: opaque and alpha-blended lit draws write the surface
+    // target (blended by their own alpha), additive glows and shadow quads not.
+    UpdateSurfaceMask();
 }
 
 void EngineGL33::ApplyDepthMode(DepthMode mode)
@@ -99,21 +172,27 @@ void EngineGL33::ApplyDepthMode(DepthMode mode)
     // the stencil leg.  Matches D3D11's `D3D11_DEPTH_STENCIL_DESC`
     // which bundles depth + stencil at the API level.
     namespace ds = Poseidon::render::depthstencil;
+    // The stencil leg carries the draw's surface tag for the screen-space
+    // reflections (ApplyPassState sets _ssrStencil; the default is REPLACE 0
+    // into every bit, the state of before the tags).
+    const ds::StencilTag tag{_ssrStencil.ref, _ssrStencil.writeMask, _ssrStencil.shadowCompareMask};
     switch (mode)
     {
         case DepthMode::Normal:
-            ds::Normal(_hasStencilBuffer);
+            ds::Normal(_hasStencilBuffer, tag);
             break;
         case DepthMode::ReadOnly:
-            ds::ReadOnly(_hasStencilBuffer);
+            ds::ReadOnly(_hasStencilBuffer, tag);
             break;
         case DepthMode::Disabled:
-            ds::Disabled(_hasStencilBuffer);
+            ds::Disabled(_hasStencilBuffer, tag);
             break;
         case DepthMode::Shadow:
-            ds::Shadow(_hasStencilBuffer);
+            ds::Shadow(_hasStencilBuffer, tag);
             break;
     }
+    _ssrStencilApplied = _ssrStencil;
+    _ssrStencilValid = true;
 }
 
 void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
@@ -134,6 +213,18 @@ void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
         else
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         _a2cBound = alphaToCoverage;
+    }
+    // Remastered: the covered samples store alpha 1 (no sky-light share), so a
+    // cutout's resolved edge does not read as extra share in the post pass's
+    // occlusion. Classic never enables it.
+    const bool alphaToOne = alphaToCoverage && _remasterPrograms;
+    if (alphaToOne != _a2oneBound)
+    {
+        if (alphaToOne)
+            glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+        else
+            glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+        _a2oneBound = alphaToOne;
     }
 }
 
@@ -273,7 +364,10 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
         case Poseidon::render::ShaderFamily::Water:
             vs = meshVertexInput ? VSTransform : VSNone;
             ps = PSWater;
-            fmt = DetailTex;
+            // The landscape's sea (routed here in Remastered, BuildContext::
+            // remasteredSea) keeps the detail texgen and its specular layer:
+            // data\specular_dx.paa, whose alpha is the ripple pattern.
+            fmt = d.texGen == Poseidon::render::TexGenMode::Detail ? SpecularTex : DetailTex;
             break;
         case Poseidon::render::ShaderFamily::Detail:
             vs = meshVertexInput ? VSTransform : VSNone;
@@ -359,8 +453,17 @@ void EngineGL33::EndDebugGroup()
     }
 }
 
+// The pass groups only serve a capture tool, and with the synchronous debug
+// callback every push and pop is a callback round trip, several per frame. So
+// they are emitted only with RenderDoc attached or POSEIDON_GL_DEBUG_GROUPS set
+// (Nsight, apitrace); Init3DState decides (perf W1-6, S3-29a). No GL state a
+// draw reads depends on them.
+static bool s_passDebugGroups = false;
+
 void EngineGL33::SwitchPassDebugGroup(const char* name)
 {
+    if (!s_passDebugGroups)
+        return;
     if (_passDebugGroupOpen)
     {
         EndDebugGroup();
@@ -531,6 +634,7 @@ void EngineGL33::Init3DState()
     // its DLL preloaded).  No-op otherwise — capture entry points
     // become silent no-ops and the trigger CLI flag becomes inert.
     RdcCapture::Init();
+    s_passDebugGroups = RdcCapture::Available() || std::getenv("POSEIDON_GL_DEBUG_GROUPS") != nullptr;
 
     DoEnableDetailTexGen(IsIn3DPass() ? TGNone : TGFixed, false);
 
@@ -673,6 +777,20 @@ void EngineGL33::SetTexture(const TextureGL33* tex, const Poseidon::render::Lega
         }
     }
     SetMultiTexturing(format);
+}
+
+bool EngineGL33::IsLandLayer(const Poseidon::render::LegacySpec& spec)
+{
+    // The multitexture stage of a PSDetail draw tells the land from the sea:
+    // the land's faces carry DetailTexture (the detail texture on slot 1), the
+    // sea's SpecularTexture (Landscape WaterFlags).
+    return Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture);
+}
+
+void EngineGL33::SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec)
+{
+    // The terrain detail runs on the land only.
+    SetLitTerrainDraw(IsLandLayer(spec));
 }
 
 void EngineGL33::SetMultiTexturing(VFormatSet format)

@@ -34,6 +34,20 @@ struct BuildContext
     // soldier first-person proxies).  `Routing::NoDropdown` is not used for
     // pass routing; it remains input metadata for fog and the LOD/PassNum logic.
     PassKindHint passKindHint = PassKindHint::None;
+
+    // The landscape's sea in Remastered with the `seaWaves` switch on: set by
+    // the backend between Engine::BeginSea and EndSea, which the landscape
+    // calls around its sea draws (Landscape::DrawWater). A sea face (the
+    // specular layer alone: the landscape's water flags) in the world's 3D
+    // pass then routes to ShaderFamily::Water, the remastered water program.
+    // Classic and the switch off leave it false, so the sea stays on the
+    // detail program (PSDetail) exactly as before.
+    bool remasteredSea = false;
+
+    // The kind of object the draw belongs to (Engine::GetDrawObjectKind, set
+    // by Shape::Draw around a shape's sections), copied to the descriptor for
+    // the remastered materials. It changes no GL state.
+    DrawObjectKind objectKind = DrawObjectKind::Unknown;
 };
 
 // Pure, header-implemented to keep the seam visible.  Inline so callers
@@ -178,6 +192,16 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
             d.shader = grass ? ShaderFamily::Grass : ShaderFamily::Detail;
             if (ctx.isIn3DPass)
                 d.texGen = grass ? TexGenMode::Grass : TexGenMode::Detail;
+            // The remastered sea: an opaque world face of the landscape's sea
+            // (the specular layer alone) keeps the detail texgen (the ripple
+            // layer at 32 repeats per sea texture) and draws with the water
+            // program.
+            if (ctx.remasteredSea && ctx.isIn3DPass && (backend & mtMask) == Backend::SpecularTexture &&
+                d.pass == PassKind::WorldOpaque && d.surface == SurfaceMode::Default)
+            {
+                d.shader = ShaderFamily::Water;
+                d.pass = PassKind::WorldWater;
+            }
         }
         else
         {
@@ -192,6 +216,7 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
         d.pass = PassKind::SurfaceOverlay;
     }
 
+    d.objectKind = ctx.objectKind;
     return d;
 }
 

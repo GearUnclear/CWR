@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Shared/WindowPlacement.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 
 #include <SDL3/SDL.h>
 #include <glad/gl.h>
@@ -227,6 +228,11 @@ EngineGL33::EngineGL33(int width, int height, bool windowed, int bpp)
     _frameOpen = false;
     _nightEye = 0;
 
+    // The look options at their defaults until the boot applies graphics.cfg
+    // (GraphicsApply), with the environment's overrides (LookOptions.hpp).
+    _shadowTuningBuilt = _shadowTuning;
+    SetLookOptions(Poseidon::remaster::LookOptions{});
+
     _grassParam[0] = 0;
     _grassParam[1] = 0;
     _grassParam[2] = 0;
@@ -292,9 +298,9 @@ EngineGL33::EngineGL33(int width, int height, bool windowed, int bpp)
 
     // The default framebuffer is single-sampled on purpose: every frame
     // renders into the offscreen frame target (BindFrameRenderTarget), which
-    // carries the MSAA samples — 8x at render scale 1, 4x at SSAA scales —
-    // and resolves into the window with a blit.  A multisampled window
-    // framebuffer would make the scaled-resolve blit illegal
+    // carries the configured MSAA samples (GraphicsConfig, 4x by default) at
+    // the configured render scale, and resolves into the window with a blit.
+    // A multisampled window framebuffer would make the scaled-resolve blit illegal
     // (GL_INVALID_OPERATION: scaling blits need single-sampled targets) and
     // glReadPixels on it is out-of-spec anyway.
 
@@ -467,6 +473,89 @@ EngineGL33::ShutdownGuard::~ShutdownGuard()
     // dangling-Ref<Texture> path of B-019 cannot fire.
     if (engine)
         engine->ClearFontCache();
+}
+
+void EngineGL33::SetLookOptions(const Poseidon::remaster::LookOptions& options)
+{
+    namespace rm = Poseidon::remaster;
+    // The environment wins over each option it sets (LookOptions.hpp), so the
+    // perf gate and the stills jobs keep their pinned look.
+    const rm::LookEnv env = rm::ReadLookEnv();
+    const int parts = rm::ShoreWaterParts(options.shoreWater, env);
+    const rm::NightLightLook night = rm::NightLightFor(options.lampShadows, env);
+    const int tier = Poseidon::shadow::xp::ResolveTier(options.shadowTier, Poseidon::shadow::xp::ReadOverrides().tier);
+    const float glare = rm::SunGlareGain(options.sunGlare, env);
+    const bool changed = parts != _shoreWaterParts || night.bounceGain != _xpNight.bounceGain ||
+                         night.lampShadows != _xpNight.lampShadows || tier != _shadowTier || glare != _sunGlareGain;
+    _shoreWaterParts = parts;
+    _xpNight.bounceGain = night.bounceGain;
+    _xpNight.lampShadows = night.lampShadows;
+    _sunGlareGain = glare;
+    if (tier != _shadowTier)
+        ApplyShadowTier(tier);
+    if (changed)
+        LOG_INFO(Graphics,
+                 "GL33 look: shore water parts {}, lamp shadows {}, light bounce {}, shadow tier {}, sun glare {}",
+                 parts, night.lampShadows ? "on" : "off", night.bounceGain, tier, glare);
+}
+
+void EngineGL33::ApplyShadowTier(int tier)
+{
+    // The tier's fields go back to the tuning as built, so High then Normal
+    // draws exactly what Normal drew before; the single knobs of the
+    // environment then apply on top (Graphics/Shadow/ShadowXp.hpp). Fields the
+    // tiers do not own (a debug overlay's or a test command's) are kept.
+    namespace sx = Poseidon::shadow::xp;
+    _shadowTier = tier;
+    const ShadowMapTuning& b = _shadowTuningBuilt;
+    _shadowTuning.resolution = b.resolution;
+    _shadowTuning.cascadeCount = b.cascadeCount;
+    _shadowTuning.omniCount = b.omniCount;
+    _shadowTuning.splitCoef = b.splitCoef;
+    _shadowTuning.reach = b.reach;
+    _shadowTuning.taaTaps = b.taaTaps;
+    _shadowTuning.casterCull = b.casterCull;
+    _shadowTuning.tightSphere = b.tightSphere;
+    _shadowTuning.casterMinPx = b.casterMinPx;
+    if (tier != Poseidon::remaster::kShadowTierNormal)
+    {
+        const sx::TierParams t = sx::Tier(tier);
+        _shadowTuning.resolution = t.resolution;
+        _shadowTuning.cascadeCount = t.cascades;
+        _shadowTuning.omniCount = t.omni;
+        _shadowTuning.reach = t.reach;
+        _shadowTuning.taaTaps = t.taaTaps;
+        _shadowTuning.casterCull = t.cull;
+        _shadowTuning.tightSphere = t.tight;
+    }
+    const sx::Overrides o = sx::ReadOverrides();
+    if (o.resolution > 0)
+        _shadowTuning.resolution = o.resolution;
+    if (o.cascades > 0)
+        _shadowTuning.cascadeCount = o.cascades;
+    if (o.omni >= 0)
+        _shadowTuning.omniCount = o.omni;
+    if (o.split >= 0.0f)
+        _shadowTuning.splitCoef = o.split;
+    if (o.reach > 0.0f)
+        _shadowTuning.reach = o.reach;
+    if (o.taaTaps > 0)
+        _shadowTuning.taaTaps = o.taaTaps;
+    if (o.cull >= 0)
+        _shadowTuning.casterCull = o.cull != 0;
+    if (o.tight >= 0)
+        _shadowTuning.tightSphere = o.tight != 0;
+    if (o.minPx >= 0.0f)
+        _shadowTuning.casterMinPx = o.minPx;
+    if (_shadowTuning.omniCount > _shadowTuning.cascadeCount)
+        _shadowTuning.omniCount = _shadowTuning.cascadeCount;
+    if (o.any || tier != Poseidon::remaster::kShadowTierNormal)
+        LOG_INFO(Graphics,
+                 "GL33 shadows: tier {} res {} cascades {} omni {} split {:.2f} reach {:.0f} taps {} cull {} tight {} "
+                 "minpx {:.1f}",
+                 tier, _shadowTuning.resolution, _shadowTuning.cascadeCount, _shadowTuning.omniCount,
+                 _shadowTuning.splitCoef, _shadowTuning.reach, _shadowTuning.taaTaps, _shadowTuning.casterCull ? 1 : 0,
+                 _shadowTuning.tightSphere ? 1 : 0, _shadowTuning.casterMinPx);
 }
 
 EngineGL33::~EngineGL33()
