@@ -87,6 +87,8 @@ void EngineGL33::EndSea()
     FlushQueues();
     SeaWaveEnd();
     _seaOpen = false;
+    // The shore ribbons lie on the sea and the sand just drawn.
+    DrawShoreRibbons();
     GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
     glBindSampler(kSeaNextFrameUnit, 0);
     GL33Bind::ActiveUnit(0);
@@ -101,12 +103,16 @@ void EngineGL33::EndSea()
 //   1 shallow water: the sea floor (the ground field's colour, wet) shows
 //     through water a few metres deep, dimmed per channel by the water's
 //     absorption along the refracted path, and the waves calm at the waterline;
-//   2 surf: a broken foam fringe along the waterline (it follows the sea
-//     level's own 12.5 s wave) and foam lines rolling in over the shallows;
+//   2 surf: a broken foam fringe along the waterline (it follows the drawn
+//     sea level's wave) and the waves: painted by the sea and land
+//     programs (waves rolling in, their run-up on the sand), or with the
+//     Surf option at Ribbons drawn by the shore ribbons;
 //   4 wet sand: the land darkens below the swash line (the tide plus the
 //     highest wave), on the land program;
 //   8 wave masking: a wave facet whose mirror ray points below the horizon
 //     sees the next wave instead of the horizon sky (the open sea too).
+//  16 (set here, not an option part) the shore ribbons draw this frame: the
+//     sea and land programs leave the waves to them (the fringe stays).
 // The option runs 1, 2 and 4. POSEIDON_XP_WATER (0 off, else on) overrides the
 // option and POSEIDON_XP_WATER_PARTS=<mask> picks parts (15 adds the wave
 // masking; Graphics/Remaster/LookOptions.hpp). Off, litWater2 stays zero and
@@ -131,6 +137,9 @@ void EngineGL33::UploadLitSeaShore()
     // wave reaches (Landscape::Simulate; XP sea flow draws a share of it), and
     // a little run-up above it.
     const float swash = land->GetSeaLevelNoWave() + maxWave * rm::SeaFlowXpHeave() + 0.15f;
-    SetLitSlot(LitConst::Water2, static_cast<float>(parts), std::fmod(Glob.time.toFloat(), 4096.0f),
+    // 16: the shore ribbons draw the waves (EngineGL33_ShoreRibbons.cpp), so
+    // the sea and land programs leave out their own painted surf.
+    const int drawn = parts | (ShoreRibbonsActive() ? 16 : 0);
+    SetLitSlot(LitConst::Water2, static_cast<float>(drawn), std::fmod(Glob.time.toFloat(), 4096.0f),
                land->GetSeaLevelDrawn(), swash);
 }

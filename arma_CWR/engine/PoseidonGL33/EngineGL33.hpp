@@ -845,6 +845,14 @@ class EngineGL33 : public Engine
     bool _seaWaveFrameValid = false;
     bool _seaWaveOpen = false;
     bool _seaWaveFailed = false;
+    // Shore ribbons (EngineGL33_ShoreRibbons.cpp, under Shore Water's surf):
+    // breaking-wave ribbons along the coastline, drawn by EndSea after the
+    // sea's own draws. Active: the surf runs and the Surf option (or
+    // POSEIDON_XP_SURF) picks Ribbons (UploadLitSeaShore then flags litWater2.x
+    // with 16).
+    void DrawShoreRibbons();
+    bool ShoreRibbonsActive();
+    void DeinitShoreRibbons();
     // --- Long tree shadows: the canopy and its sun-visibility map (EngineGL33_Canopy.cpp) ---
     void SetTerrainCanopy(std::shared_ptr<const Poseidon::remaster::CanopyField> canopy) override;
     void TerrainCanopyChanged(const Poseidon::remaster::CanopyRect* rects, int count) override;
@@ -1017,6 +1025,11 @@ class EngineGL33 : public Engine
     // by SetLookOptions.
     void UploadLitSeaShore();
     int _shoreWaterParts = 0;
+    // The surf's style (the Surf option, LookOptions::surfStyle; set by
+    // SetLookOptions): true draws the shore ribbons, false (Painted, the
+    // default) the sea and land programs' painted surf. Read only while the
+    // shore's surf part runs.
+    bool _surfRibbons = false;
     // The surface class of the draw ApplyPassState prepares (its texture and
     // object kind) into LitConst::MatClass xy, uploaded only when it changes.
     void SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);

@@ -1555,8 +1555,9 @@ void main() {
         }
         // The surf's run-up (surfSwash): each wave's sheet of water runs up
         // the sand and slides back, foaming at its edge and leaving lace, the
-        // sand it wetted drying over a few seconds.
-        if (litWater2.x > 0.5 && (int(litWater2.x + 0.5) & 2) != 0) {
+        // sand it wetted drying over a few seconds. Not while the shore
+        // ribbons draw the waves (litWater2.x 16, the Surf option at Ribbons).
+        if (litWater2.x > 0.5 && (int(litWater2.x + 0.5) & 18) == 2) {
             vec3 posW = vWorldRel + litCamPos.xyz;
             float e = posW.y - litWater2.z;
             if (e > -0.3 && e < 0.9) {
@@ -2046,10 +2047,11 @@ void main() {
         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
                    (sunVis * sunOn * litHorizon.w);
         vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
-        // XP surf: waves that break, roll in as foam lines and reach the
-        // waterline (surfTime; the land program draws their run-up), a broken
-        // fringe of foam at the waterline (it rides the sea level's wave) that
-        // swells as each wave arrives, and the foam each wave leaves behind.
+        // XP surf: a broken fringe of foam at the waterline (it rides the drawn
+        // sea level's wave) and, painted here unless the shore ribbons draw
+        // them, waves that break, roll in as foam lines and reach the
+        // waterline (surfTime; the land program draws their run-up), the
+        // fringe swelling as each wave arrives, and the foam each wave leaves.
         // The whole surf fades with distance, the finer breakup below the
         // pixel's footprint.
         if ((xpParts & 2) != 0 && xpSurf < 1.5) {
@@ -2058,36 +2060,43 @@ void main() {
             float nA = puddleNoise(p * 0.42 + vec2(0.0, t * 0.05));
             float nB = mix(0.5, puddleNoise(p * 1.6 - vec2(t * 0.09, 0.0) + 31.0), clamp(0.6 / (3.0 * foot), 0.0, 1.0));
             float brk = nA * 0.6 + nB * 0.4;
-            // The waves (surfTime): this spot's time in its wave's cycle, and
-            // the horizontal distance (m) out from the waterline.
-            float reach, prevReach;
-            float dx = xpSlope > 0.0 ? xpDep / max(xpSlope, 0.004) : 1.0e4;
-            float dxW = xpSlope > 0.0 ? xpDepW / max(xpSlope, 0.004) : 1.0e4;
-            vec2 shore = p + xpGrad / max(xpSlope, 0.004) * min(dx, 40.0); // the waterline point inshore
-            float tau = surfTime(shore, t, reach, prevReach);
-            float ta = surfArrive(reach);
-            float since = tau - ta;                                     // s since this wave arrived (< 0: not yet)
-            float sinceP = tau + kSurfPeriod - surfArrive(prevReach);   // s since the wave before it arrived
-            // The waterline's fringe: fullest as a wave arrives, thinning as it
-            // drains away (never below the first cut's steady band's 0.6).
-            float swell = max(since < 0.0 ? smoothstep(-0.6, 0.0, since) : exp(-since / 2.5), exp(-sinceP / 2.5));
+            // The waterline's fringe (round 1's band).
             float edgeW = max(0.06 + 0.16 * brk, kXpFringePx * xpSurfW);
-            float fringe = (1.0 - smoothstep(0.0, edgeW, xpSurf)) * smoothstep(0.2, 0.75, brk) * (0.6 + 0.4 * swell);
-            // The bore: the breaking wave's foam line rolling in to the
-            // waterline, a dense crest with its foam trailing offshore, building
-            // up as it breaks.
-            float off = dx - (kSurfZone * reach - kSurfSpeed * tau); // > 0 offshore of the line
-            float wF = max(0.8, kXpFringePx * dxW);
-            float bore = off < 0.0 ? 1.0 - smoothstep(0.0, wF, -off) : exp(-off / 3.0);
-            bore *= (1.0 - smoothstep(-0.2, 0.8, since)) * smoothstep(0.0, 1.0, tau) * smoothstep(0.65, 1.05, reach) *
-                    smoothstep(0.3, 0.6, brk + 0.3 * exp(-max(off, 0.0) / 1.5));
-            // The foam the waves left over the inner surf, bursting.
-            float rest = max(since > 0.0 ? smoothstep(0.0, 0.4, since) * exp(-since / 2.5) *
-                                               (1.0 - smoothstep(0.0, 0.35 * kSurfZone * reach, dx)) : 0.0,
-                             exp(-sinceP / 2.5) * (1.0 - smoothstep(0.0, 0.35 * kSurfZone * prevReach, dx))) *
-                         smoothstep(0.45, 0.75, brk);
-            float foam = clamp(max(max(fringe, bore), 0.5 * rest), 0.0, 1.0) * kXpFoamMax *
-                         (1.0 - smoothstep(kXpFoamFadeStart, kXpFoamFadeEnd, dist));
+            float fringe = (1.0 - smoothstep(0.0, edgeW, xpSurf)) * smoothstep(0.2, 0.75, brk);
+            float foam = fringe;
+            // The painted waves (the Surf option at Painted). At Ribbons
+            // (litWater2.x 16) the shore ribbons draw them and the fringe stays
+            // as it is.
+            if ((xpParts & 16) == 0) {
+                // The waves (surfTime): this spot's time in its wave's cycle,
+                // and the horizontal distance (m) out from the waterline.
+                float reach, prevReach;
+                float dx = xpSlope > 0.0 ? xpDep / max(xpSlope, 0.004) : 1.0e4;
+                float dxW = xpSlope > 0.0 ? xpDepW / max(xpSlope, 0.004) : 1.0e4;
+                vec2 shore = p + xpGrad / max(xpSlope, 0.004) * min(dx, 40.0); // the waterline point inshore
+                float tau = surfTime(shore, t, reach, prevReach);
+                float ta = surfArrive(reach);
+                float since = tau - ta;                                   // s since this wave arrived (< 0: not yet)
+                float sinceP = tau + kSurfPeriod - surfArrive(prevReach); // s since the wave before it arrived
+                // The fringe is fullest as a wave arrives and thins as it
+                // drains away (never below the first cut's steady band's 0.6).
+                float swell = max(since < 0.0 ? smoothstep(-0.6, 0.0, since) : exp(-since / 2.5), exp(-sinceP / 2.5));
+                // The bore: the breaking wave's foam line rolling in to the
+                // waterline, a dense crest with its foam trailing offshore,
+                // building up as it breaks.
+                float off = dx - (kSurfZone * reach - kSurfSpeed * tau); // > 0 offshore of the line
+                float wF = max(0.8, kXpFringePx * dxW);
+                float bore = off < 0.0 ? 1.0 - smoothstep(0.0, wF, -off) : exp(-off / 3.0);
+                bore *= (1.0 - smoothstep(-0.2, 0.8, since)) * smoothstep(0.0, 1.0, tau) * smoothstep(0.65, 1.05, reach) *
+                        smoothstep(0.3, 0.6, brk + 0.3 * exp(-max(off, 0.0) / 1.5));
+                // The foam the waves left over the inner surf, bursting.
+                float rest = max(since > 0.0 ? smoothstep(0.0, 0.4, since) * exp(-since / 2.5) *
+                                                   (1.0 - smoothstep(0.0, 0.35 * kSurfZone * reach, dx)) : 0.0,
+                                 exp(-sinceP / 2.5) * (1.0 - smoothstep(0.0, 0.35 * kSurfZone * prevReach, dx))) *
+                             smoothstep(0.45, 0.75, brk);
+                foam = max(max(fringe * (0.6 + 0.4 * swell), bore), 0.5 * rest);
+            }
+            foam = clamp(foam, 0.0, 1.0) * kXpFoamMax * (1.0 - smoothstep(kXpFoamFadeStart, kXpFoamFadeEnd, dist));
             // The foam's light: the flat sea's, plus the sun the wrap adds.
             float ly = max(l.y, 0.0);
             float wrap = (ly + kXpFoamWrap) / (1.0 + kXpFoamWrap) * smoothstep(0.0, 0.04, l.y);

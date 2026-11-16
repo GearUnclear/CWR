@@ -493,6 +493,7 @@ void EngineGL33::DeinitLightingResources()
     DeinitLightTiles();
     DeinitSkyClouds();
     DeinitCanopy();
+    DeinitShoreRibbons();
     DeinitCombatResources();
     DestroyFogResources();
     _post.unavailable = false;

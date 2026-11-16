@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // Remastered lighting: the shader sources, the LitConstants uniform layout and
 // the texture units of the remastered inputs. See EngineGL33_LightingShaders.cpp
 // for the shading model and Poseidon/Graphics/Remaster/LightRig.hpp for the
@@ -138,6 +140,10 @@ extern const char kPostFogGlowMainGLSL[];
 // layout below. Every shader that reads the rig pastes this string instead of
 // a copy of its own (today the fragment prelude).
 const char* LitConstantsBlock();
+// The shore ribbons' program (EngineGL33_ShoreRibbons.cpp): its own vertex
+// shader (the LitConstants block pasted) and the fragment prelude with its main.
+std::string ShoreRibbonVertexSource();
+std::string ShoreRibbonFragmentSource();
 
 // The post-pass shaders (EngineGL33_PostShaders.cpp; EngineGL33_PostFX.cpp
 // runs the passes), each assembled from its pieces.

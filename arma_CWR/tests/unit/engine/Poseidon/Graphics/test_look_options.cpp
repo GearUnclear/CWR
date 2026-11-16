@@ -195,3 +195,37 @@ TEST_CASE("LookOptions: POSEIDON_XP_SUNGLARE wins over the sun glare option", "[
     env.sunGlare = "yes";
     CHECK(SunGlareGain(false, env) == 1.0f);
 }
+
+TEST_CASE("LookOptions: the surf is painted unless the option picks ribbons", "[Graphics][LookOptions]")
+{
+    const LookOptions o;
+    CHECK(o.surfStyle == kSurfPainted);
+    const LookEnv none;
+    CHECK(SurfStyleFor(kSurfPainted, none) == kSurfPainted);
+    CHECK(SurfStyleFor(kSurfRibbons, none) == kSurfRibbons);
+    // An unknown value from a hand-edited graphics.cfg is Painted.
+    CHECK(SurfStyleFor(7, none) == kSurfPainted);
+    CHECK(SurfStyleFor(-1, none) == kSurfPainted);
+}
+
+TEST_CASE("LookOptions: POSEIDON_XP_SURF wins over the surf option", "[Graphics][LookOptions]")
+{
+    LookEnv env;
+    for (const char* v : {"0", "painted", "Painted", "PAINTED"})
+    {
+        env.surfStyle = v;
+        CHECK(SurfStyleFor(kSurfRibbons, env) == kSurfPainted);
+    }
+    for (const char* v : {"1", "ribbons", "Ribbons"})
+    {
+        env.surfStyle = v;
+        CHECK(SurfStyleFor(kSurfPainted, env) == kSurfRibbons);
+    }
+    // Other text keeps the option.
+    for (const char* v : {"2", "ribbon", "paintedx", "yes"})
+    {
+        env.surfStyle = v;
+        CHECK(SurfStyleFor(kSurfPainted, env) == kSurfPainted);
+        CHECK(SurfStyleFor(kSurfRibbons, env) == kSurfRibbons);
+    }
+}

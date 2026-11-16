@@ -486,10 +486,12 @@ void EngineGL33::SetLookOptions(const Poseidon::remaster::LookOptions& options)
     const int tier = Poseidon::shadow::xp::ResolveTier(options.shadowTier, Poseidon::shadow::xp::ReadOverrides().tier);
     const float glare = rm::SunGlareGain(options.sunGlare, env);
     const bool cover = rm::GroundCoverOn(options.groundCover, env);
+    const bool ribbons = rm::SurfStyleFor(options.surfStyle, env) == rm::kSurfRibbons;
     const bool changed = parts != _shoreWaterParts || night.bounceGain != _xpNight.bounceGain ||
                          night.lampShadows != _xpNight.lampShadows || tier != _shadowTier || glare != _sunGlareGain ||
-                         cover != _groundCover;
+                         cover != _groundCover || ribbons != _surfRibbons;
     _shoreWaterParts = parts;
+    _surfRibbons = ribbons;
     _xpNight.bounceGain = night.bounceGain;
     _xpNight.lampShadows = night.lampShadows;
     _sunGlareGain = glare;
@@ -499,8 +501,9 @@ void EngineGL33::SetLookOptions(const Poseidon::remaster::LookOptions& options)
     if (changed)
         LOG_INFO(Graphics,
                  "GL33 look: shore water parts {}, lamp shadows {}, light bounce {}, shadow tier {}, sun glare {}, "
-                 "ground cover {}",
-                 parts, night.lampShadows ? "on" : "off", night.bounceGain, tier, glare, cover ? "on" : "off");
+                 "ground cover {}, surf {}",
+                 parts, night.lampShadows ? "on" : "off", night.bounceGain, tier, glare, cover ? "on" : "off",
+                 ribbons ? "ribbons" : "painted");
 }
 
 void EngineGL33::ApplyShadowTier(int tier)

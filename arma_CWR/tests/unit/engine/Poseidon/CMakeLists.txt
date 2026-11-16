@@ -179,6 +179,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_frame_lights.cpp
     Graphics/test_world_program_dedupe.cpp
     Graphics/test_sea_waves.cpp
+    Graphics/test_shore_ribbons.cpp
     Graphics/test_sky_density.cpp
     Graphics/test_canopy.cpp
     Graphics/test_volumetric_fog.cpp

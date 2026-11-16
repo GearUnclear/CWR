@@ -26,6 +26,9 @@
 //   POSEIDON_XP_SUNGLARE      the low sun's glare: 0 off, a number above 0
 //                             its strength (at most 8), other text 1
 //   POSEIDON_XP_GRASS         the near ground cover: 0 off, anything else on
+//   POSEIDON_XP_SURF          the surf's style while the shore water's surf
+//                             runs: 0 or painted Painted, 1 or ribbons
+//                             Ribbons (other text keeps the option)
 //
 // So POSEIDON_XP_WATER=0 POSEIDON_XP_NIGHTLIGHT=0 POSEIDON_XP_SHADOW_TIER=2
 // POSEIDON_XP_SUNGLARE=0 POSEIDON_XP_GRASS=0 draws the frame of the build before these options,
@@ -42,6 +45,13 @@ constexpr int kShadowTierHigh = 3;   // 4096 maps reaching up to 1000 m
 // unset: shallow water, surf and wet sand (1 | 2 | 4).
 constexpr int kShoreWaterDefaultParts = 7;
 
+// The surf styles of the Surf row. Painted: the sea and land programs paint
+// the waves (EngineGL33_LightingShaders.cpp, no CPU work). Ribbons: breaking
+// waves drawn as ribbons along a coastline traced the first time they draw on
+// an island (EngineGL33_ShoreRibbons.cpp), within about 320 m of the camera.
+constexpr int kSurfPainted = 0;
+constexpr int kSurfRibbons = 1;
+
 struct LookOptions
 {
     bool shoreWater = true;
@@ -54,6 +64,9 @@ struct LookOptions
     // Drawn only: nothing in the simulation, AI sight, saves or the network
     // reads it.
     bool groundCover = false;
+    // The surf's style under Shore Water (kSurfPainted or kSurfRibbons).
+    // Painted by default: it reaches the whole visible shore and costs least.
+    int surfStyle = kSurfPainted;
 };
 
 // The environment's look switches as read once (null = unset or empty).
@@ -66,6 +79,7 @@ struct LookEnv
     const char* lightBounce = nullptr;
     const char* sunGlare = nullptr;
     const char* groundCover = nullptr;
+    const char* surfStyle = nullptr;
 };
 
 inline const char* LookEnvValue(const char* name)
@@ -84,6 +98,7 @@ inline LookEnv ReadLookEnv()
     e.lightBounce = LookEnvValue("POSEIDON_XP_LIGHTBOUNCE");
     e.sunGlare = LookEnvValue("POSEIDON_XP_SUNGLARE");
     e.groundCover = LookEnvValue("POSEIDON_XP_GRASS");
+    e.surfStyle = LookEnvValue("POSEIDON_XP_SURF");
     return e;
 }
 
@@ -154,6 +169,29 @@ inline float SunGlareGain(bool option, const LookEnv& env)
 inline bool GroundCoverOn(bool option, const LookEnv& env)
 {
     return LookSwitch(env.groundCover, option);
+}
+
+// The surf's style: the Surf option (an unknown value is Painted), or
+// POSEIDON_XP_SURF when it names one ("0" or "painted", "1" or "ribbons", any
+// case; other text keeps the option).
+inline int SurfStyleFor(int option, const LookEnv& env)
+{
+    int style = option == kSurfRibbons ? kSurfRibbons : kSurfPainted;
+    if (!env.surfStyle)
+        return style;
+    auto is = [&](const char* word)
+    {
+        const char* v = env.surfStyle;
+        for (; *word; ++word, ++v)
+            if (*v == '\0' || (*v | 0x20) != *word)
+                return false;
+        return *v == '\0';
+    };
+    if (std::strcmp(env.surfStyle, "0") == 0 || is("painted"))
+        return kSurfPainted;
+    if (std::strcmp(env.surfStyle, "1") == 0 || is("ribbons"))
+        return kSurfRibbons;
+    return style;
 }
 
 } // namespace Poseidon::remaster
