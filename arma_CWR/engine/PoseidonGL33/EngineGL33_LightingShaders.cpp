@@ -1856,8 +1856,23 @@ const float kXpFoamMax = 0.85;
 const float kXpSwashK = 1.8;         // foam lines per metre of depth
 const float kXpSwashSpeed = 0.045;   // m of depth per second the lines move inshore
 const float kXpBandDepth = 0.9;      // m: no foam lines deeper
-const float kXpFoamFadeStart = 250.0; // m
-const float kXpFoamFadeEnd = 1100.0;
+// The surf at a low sun and from afar (SHORE-FOAM, 2026-11-13). The first cut
+// lost its surf at sunset and dawn: a low sun means a low tide (up to 5 m,
+// Landscape::Simulate), so the waterline sits lower on the beach, where it is
+// steeper, and a surf measured in depth alone shrank to a thread; the foam
+// was lit like the flat sea (the sun's cosine on a level surface), so it took
+// less light than the sloping sand beside it; and it faded out from 250 m.
+// Now the waterline's fringe is measured in a depth that never grows faster
+// than a beach of kXpSurfSlope would make it (beaches gentler than that are
+// as before; the foam lines keep the true depth), foam is a heap of bubbles
+// that takes the low sun by a cosine wrapped past the level surface's, and the
+// surf stays to 2.5 km as a line at least kXpFringePx wide. A high sun on a
+// gentle beach is as before.
+const float kXpSurfSlope = 0.04;     // the fringe's depth grows at most this many metres per metre inshore of it
+const float kXpFoamWrap = 1.0;       // the foam's sun: (cos + wrap) / (1 + wrap) instead of cos
+const float kXpFringePx = 1.5;       // pixels: the waterline fringe's least width, in the depth it spans
+const float kXpFoamFadeStart = 600.0; // m
+const float kXpFoamFadeEnd = 2500.0;
 const float kXpMaskFloor = 0.6;      // sky weight kept by a facet whose mirror ray is well below the horizon
 const float kXpMaskSpan = 0.08;      // the ray's height below the horizon over which the sky goes
 
@@ -1877,6 +1892,30 @@ float xpFloorHeight(vec2 xz) {
     return h11 + (1.0 - f.x) * (h01 - h11) + (1.0 - f.y) * (h10 - h11);
 }
 
+// The ground's slope (metres per metre) under world xz, smooth across the
+// triangles: the central-difference slopes of the cell's four corners, mixed
+// bilinearly (a surf measured by the triangles' own slopes would step at
+// their edges).
+float xpFloorSlope(vec2 xz) {
+    vec2 g = xz * litTerrain.y;
+    int last = int(1.0 / litTerrain.z + 0.5) - 1;
+    vec2 i = floor(g);
+    vec2 f = g - i;
+    ivec2 p = ivec2(i);
+    float s[4];
+    for (int k = 0; k < 4; ++k) {
+        ivec2 c = p + ivec2(k & 1, k >> 1);
+        ivec2 xm = clamp(c - ivec2(1, 0), ivec2(0), ivec2(last));
+        ivec2 xp = clamp(c + ivec2(1, 0), ivec2(0), ivec2(last));
+        ivec2 zm = clamp(c - ivec2(0, 1), ivec2(0), ivec2(last));
+        ivec2 zp = clamp(c + ivec2(0, 1), ivec2(0), ivec2(last));
+        vec2 d = vec2(texelFetch(terrainHeight, xp, 0).r - texelFetch(terrainHeight, xm, 0).r,
+                      texelFetch(terrainHeight, zp, 0).r - texelFetch(terrainHeight, zm, 0).r);
+        s[k] = length(d) * 0.5 * litTerrain.y;
+    }
+    return mix(mix(s[0], s[1], f.x), mix(s[2], s[3], f.x), f.y);
+}
+
 // The cosine of a ray at cosine c above the water after refraction into it.
 float xpRefractCos(float c) {
     return sqrt(max(1.0 - (1.0 - c * c) / 1.769, 0.0));
@@ -1889,14 +1928,25 @@ void main() {
     // Derivatives first, in uniform control flow.
     vec2 gU, gV;
     seaUvGradients(vUV0, gU, gV);
-    // XP shore: the water's depth and its change across the pixel.
+    // XP shore: the water's depth and its change across the pixel, and the
+    // fringe's depth (on a beach steeper than kXpSurfSlope, the depth that
+    // beach would have at this distance from the waterline) and its change.
     int xpParts = int(litWater2.x + 0.5);
     float xpDep = 1.0e4;
     float xpDepW = 0.0;
+    float xpSurf = 1.0e4;
+    float xpSurfW = 0.0;
     if (xpParts != 0 && litTerrain.x > 0.5) {
         vec3 posW = vWorldRel + litCamPos.xyz;
         xpDep = max(posW.y - xpFloorHeight(posW.xz), 0.0);
         xpDepW = fwidth(xpDep);
+        xpSurf = xpDep;
+        xpSurfW = xpDepW;
+        if (xpDep < 4.0) {
+            float k = min(kXpSurfSlope / max(xpFloorSlope(posW.xz), 1e-4), 1.0);
+            xpSurf *= k;
+            xpSurfW *= k;
+        }
     }
     float e0 = seaUvStep(vUV0, 1.0 / 512.0);
     float e1 = seaUvStep(vUV1, 1.0 / 256.0);
@@ -1998,21 +2048,25 @@ void main() {
         // level's wave) and foam lines rolling in over the shallows. The lines
         // fade where a pixel spans much of their spacing, the whole surf with
         // distance, and the finer breakup below the pixel's footprint.
-        if ((xpParts & 2) != 0 && xpDep < 1.5) {
+        if ((xpParts & 2) != 0 && xpSurf < 1.5) {
             float t = litWater2.y;
             vec2 p = vWorldRel.xz + litCamPos.xz;
             float nA = puddleNoise(p * 0.42 + vec2(0.0, t * 0.05));
             float nB = mix(0.5, puddleNoise(p * 1.6 - vec2(t * 0.09, 0.0) + 31.0), clamp(0.6 / (3.0 * foot), 0.0, 1.0));
             float brk = nA * 0.6 + nB * 0.4;
-            float edgeW = max(0.06 + 0.16 * brk, xpDepW);
-            float fringe = (1.0 - smoothstep(0.0, edgeW, xpDep)) * smoothstep(0.2, 0.75, brk);
+            float edgeW = max(0.06 + 0.16 * brk, kXpFringePx * xpSurfW);
+            float fringe = (1.0 - smoothstep(0.0, edgeW, xpSurf)) * smoothstep(0.2, 0.75, brk);
             float s = fract((xpDep + t * kXpSwashSpeed) * kXpSwashK + 0.45 * nA);
             float band = smoothstep(0.0, 0.07, s) * (1.0 - smoothstep(0.07, 0.42, s));
             band *= (1.0 - smoothstep(0.35, kXpBandDepth, xpDep)) * smoothstep(0.35, 0.62, brk);
             band *= 1.0 - smoothstep(0.15, 0.45, xpDepW * kXpSwashK);
             float foam = clamp(fringe + 0.75 * band, 0.0, 1.0) * kXpFoamMax *
                          (1.0 - smoothstep(kXpFoamFadeStart, kXpFoamFadeEnd, dist));
-            radiance = mix(radiance, xpLight * kXpFoamAlbedo, foam);
+            // The foam's light: the flat sea's, plus the sun the wrap adds.
+            float ly = max(l.y, 0.0);
+            float wrap = (ly + kXpFoamWrap) / (1.0 + kXpFoamWrap) * smoothstep(0.0, 0.04, l.y);
+            vec3 foamLight = xpLight + litSun.rgb * litMatDiffuse.rgb * (max(wrap - ly, 0.0) * sunVis * sunOn * exposure);
+            radiance = mix(radiance, foamLight * kXpFoamAlbedo, foam);
         }
         // The surface target: the body's sky light, as the stock share has it.
         g_surfShare = ambientShare * (1.0 - wSky);
