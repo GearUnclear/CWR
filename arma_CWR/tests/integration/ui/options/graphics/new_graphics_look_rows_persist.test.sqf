@@ -36,6 +36,10 @@ triSimFrames 1;
 triSendKey 79;
 triSimFrames 2;
 
+// Surf: left as it is (new_graphics_surf_row pins it).
+triSendKey 81;
+triSimFrames 1;
+
 // Lamp Shadows: on -> off.
 triSendKey 81;
 triSimFrames 1;

@@ -14,8 +14,8 @@
 // Touching any tier row re-derives the preset to "Custom" without
 // snapping back.  Per-user knobs (Anti-aliasing / Supersampling /
 // Multitexturing / VSync / FPS Cap / Brightness / Gamma, and the
-// Remastered lighting's Shadow Detail / Shore Water / Lamp Shadows / Sun
-// Glare) are NOT
+// Remastered lighting's Shadow Detail / Shore Water / Surf / Lamp Shadows /
+// Sun Glare / Ground Cover) are NOT
 // preset-driven; they keep their value across preset changes.
 
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
@@ -76,10 +76,11 @@ private:
           kRowLighting = 13,
           kRowShadowDetail = 14,
           kRowShoreWater = 15,
-          kRowLampShadows = 16,
-          kRowSunGlare = 17,
-          kRowGroundCover = 18,
-          kRowCount = 19,
+          kRowSurfStyle = 16,
+          kRowLampShadows = 17,
+          kRowSunGlare = 18,
+          kRowGroundCover = 19,
+          kRowCount = 20,
       };
 
       void SetPage(class GraphicsPage* page) { m_page = page; }
@@ -126,10 +127,12 @@ private:
     std::array<const char*, 2> m_lightingCStrs{};
     std::array<std::string, 2> m_shadowDetailLabels;
     std::array<const char*, 2> m_shadowDetailCStrs{};
+    std::array<std::string, 2> m_surfStyleLabels;
+    std::array<const char*, 2> m_surfStyleCStrs{};
 
-	void RefreshLocalizedChoices();
+    void RefreshLocalizedChoices();
 
-	friend class GraphicsProvider;
+    friend class GraphicsProvider;
 };
 
 } // namespace Poseidon

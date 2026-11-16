@@ -67,6 +67,11 @@ const GraphicsRowText kRows[] = {
     {"STR_DISP_MAIN_OPT_GRAPHICS_SHORE_WATER", "STR_DISP_MAIN_OPT_GRAPHICS_SHORE_WATER_DESC", "Shore Water",
      "Shallow water colour, a surf line with foam and wet sand where the sea meets the land. Remastered lighting "
      "only."},
+    // Its own key, so no installed stringtable can rename it.
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SURF_STYLE", "STR_DISP_MAIN_OPT_GRAPHICS_SURF_STYLE_DESC", "Surf",
+     "How the waves at the shore are drawn while Shore Water is on. Painted reaches the whole shore you can see "
+     "and costs least. Ribbons draws each breaking wave as its own line near you (within about 300 m) and traces "
+     "the coastline once when an island loads."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS", "STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS_DESC", "Lamp Shadows",
      "Street lamps cast shadows at night, and the light of lamps, headlights and fires bounces off the ground onto "
      "what stands near them. Remastered lighting only."},
@@ -252,6 +257,8 @@ OptionsScrollList::RowDef GraphicsPage::GraphicsProvider::RowFor(int row) const
             return {642, m_page->m_shadowDetailCStrs.data(), 2};
         case kRowShoreWater:
             return {652, m_page->m_offOnCStrs.data(), 2};
+        case kRowSurfStyle:
+            return {692, m_page->m_surfStyleCStrs.data(), 2};
         case kRowLampShadows:
             return {662, m_page->m_offOnCStrs.data(), 2};
         case kRowSunGlare:
@@ -318,6 +325,8 @@ int GraphicsPage::GraphicsProvider::RowValue(int row) const
             return c.shadowDetail == GraphicsConfig::ShadowDetailHigh ? 1 : 0;
         case kRowShoreWater:
             return c.shoreWater ? 1 : 0;
+        case kRowSurfStyle:
+            return c.surfStyle == GraphicsConfig::SurfRibbons ? 1 : 0;
         case kRowLampShadows:
             return c.lampShadows ? 1 : 0;
         case kRowSunGlare:
@@ -425,6 +434,9 @@ void GraphicsPage::GraphicsProvider::SetRowValue(int row, int v)
             break;
         case kRowShoreWater:
             c.shoreWater = v != 0;
+            break;
+        case kRowSurfStyle:
+            c.surfStyle = v != 0 ? GraphicsConfig::SurfRibbons : GraphicsConfig::SurfPainted;
             break;
         case kRowLampShadows:
             c.lampShadows = v != 0;
@@ -569,6 +581,11 @@ void GraphicsPage::RefreshLocalizedChoices()
     m_shadowDetailLabels[1] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_HIGH");
     for (size_t i = 0; i < m_shadowDetailLabels.size(); ++i)
         m_shadowDetailCStrs[i] = m_shadowDetailLabels[i].c_str();
+
+    m_surfStyleLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_SURF_PAINTED", "Painted");
+    m_surfStyleLabels[1] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_SURF_RIBBONS", "Ribbons");
+    for (size_t i = 0; i < m_surfStyleLabels.size(); ++i)
+        m_surfStyleCStrs[i] = m_surfStyleLabels[i].c_str();
 }
 
 void GraphicsPage::Unmount(OptionsShell& shell)

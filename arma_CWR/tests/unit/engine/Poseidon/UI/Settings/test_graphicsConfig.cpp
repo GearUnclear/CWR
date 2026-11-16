@@ -544,6 +544,8 @@ TEST_CASE("GraphicsConfig: the look options default to shore water and lamp shad
     CHECK_FALSE(c.sunGlare);
     // The ground cover is the player's choice: off unless turned on.
     CHECK_FALSE(c.groundCover);
+    // The surf is painted unless the player picks the ribbons.
+    CHECK(c.surfStyle == GraphicsConfig::SurfPainted);
     // The stored values are the shadow tiers (Graphics/Shadow/ShadowXp.hpp).
     CHECK(static_cast<int>(GraphicsConfig::ShadowDetailNormal) == 2);
     CHECK(static_cast<int>(GraphicsConfig::ShadowDetailHigh) == 3);
@@ -621,6 +623,55 @@ TEST_CASE("GraphicsConfig: ground cover saves and loads by its own key", "[Setti
     CHECK_FALSE(dst.groundCover);
 }
 
+// Surf alone: its own key in graphics.cfg (0 Painted, 1 Ribbons), without
+// moving any other look option. The values are the engine's surf styles.
+TEST_CASE("GraphicsConfig: the surf style saves and loads by its own key", "[Settings][GraphicsConfig]")
+{
+    CHECK(static_cast<int>(GraphicsConfig::SurfPainted) == 0);
+    CHECK(static_cast<int>(GraphicsConfig::SurfRibbons) == 1);
+    const std::string path = TmpPath("surfstyle.cfg");
+    std::filesystem::remove(path);
+
+    GraphicsConfig src;
+    src.LoadDefaults();
+    src.surfStyle = GraphicsConfig::SurfRibbons;
+    REQUIRE(src.Save(path));
+    {
+        std::ifstream in(path);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(text.find("surfStyle=1;") != std::string::npos);
+    }
+    GraphicsConfig dst;
+    dst.LoadDefaults();
+    REQUIRE(dst.Load(path));
+    CHECK(dst.surfStyle == GraphicsConfig::SurfRibbons);
+    CHECK(dst.shoreWater);
+    CHECK_FALSE(dst.groundCover);
+
+    src.surfStyle = GraphicsConfig::SurfPainted;
+    REQUIRE(src.Save(path));
+    {
+        std::ifstream in(path);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(text.find("surfStyle=0;") != std::string::npos);
+    }
+    REQUIRE(dst.Load(path));
+    CHECK(dst.surfStyle == GraphicsConfig::SurfPainted);
+}
+
+TEST_CASE("GraphicsConfig: an unknown surf style normalizes to Painted", "[Settings][GraphicsConfig]")
+{
+    FakeEnvironment env;
+    GraphicsConfig c;
+    c.LoadDefaults();
+    c.surfStyle = static_cast<GraphicsConfig::SurfStyle>(5);
+    CHECK(c.Normalize(env));
+    CHECK(c.surfStyle == GraphicsConfig::SurfPainted);
+    c.surfStyle = GraphicsConfig::SurfRibbons;
+    c.Normalize(env);
+    CHECK(c.surfStyle == GraphicsConfig::SurfRibbons);
+}
+
 TEST_CASE("GraphicsConfig: a file written before the look options reads them as their defaults",
           "[Settings][GraphicsConfig]")
 {
@@ -637,6 +688,7 @@ TEST_CASE("GraphicsConfig: a file written before the look options reads them as 
     CHECK(c.shadowDetail == GraphicsConfig::ShadowDetailNormal);
     CHECK_FALSE(c.sunGlare);
     CHECK_FALSE(c.groundCover);
+    CHECK(c.surfStyle == GraphicsConfig::SurfPainted);
     // Nothing to migrate: the defaults are already the options' defaults.
     CHECK_FALSE(c.Migrate(60));
 }

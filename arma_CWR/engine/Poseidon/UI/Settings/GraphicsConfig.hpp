@@ -22,7 +22,7 @@
 //                           msaaSamples, renderScale, alphaToCoverage,
 //                           multitexturing, lighting, vsync, fpsCap,
 //                           brightness, gamma, shoreWater, lampShadows,
-//                           shadowDetail, sunGlare, groundCover
+//                           shadowDetail, sunGlare, groundCover, surfStyle
 //
 // Autodetect on first boot: GraphicsConfig::PickPresetFromRam()
 // returns a tier from SDL_GetSystemRAM(); ApplyPresetToTiers fills the
@@ -83,6 +83,17 @@ public:
         ShadowDetailHigh = 3,
     };
 
+    // The surf's style under Shore Water (the Surf row). The values are
+    // remaster::kSurfPainted and kSurfRibbons (Graphics/Remaster/LookOptions.hpp).
+    // Painted: the sea and land programs paint the waves over the whole
+    // visible shore. Ribbons: breaking-wave ribbons along a traced coastline,
+    // within about 320 m.
+    enum SurfStyle
+    {
+        SurfPainted = 0,
+        SurfRibbons = 1,
+    };
+
     // Anti-aliasing out of the box: 4x MSAA, with alpha-to-coverage on cutouts.
     static constexpr int kDefaultMsaaSamples = 4;
 
@@ -112,6 +123,7 @@ public:
     ShadowDetail shadowDetail = ShadowDetailNormal; // the sun shadows' reach and sharpness
     bool sunGlare = false;                          // a soft glare round a low sun (off until judged in motion)
     bool groundCover = false;                       // short grass blades near the camera (drawn only, off by default)
+    SurfStyle surfStyle = SurfPainted;              // the surf's style while Shore Water is on
     float     brightness       = 1.6f;          // 0.4..1.8
 	float     gamma            = 1.2f;          // 0.5..2.3
 

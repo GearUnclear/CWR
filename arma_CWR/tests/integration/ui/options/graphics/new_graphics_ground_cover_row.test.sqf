@@ -19,9 +19,9 @@ triSimFrames 1;
 triSendKey 40;
 triSimFrames 5;
 
-// Page focus starts on Quality Preset; Ground Cover is seventeen focus steps
+// Page focus starts on Quality Preset; Ground Cover is eighteen focus steps
 // down (the Advanced header is skipped rather than focused).
-for "_i" from 1 to 17 do {
+for "_i" from 1 to 18 do {
     triSendKey 81;
     triSimFrames 1;
 };
