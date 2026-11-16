@@ -1546,12 +1546,37 @@ void main() {
         }
         // Shore water's wet sand (litWater2): the land darkens below
         // the swash line, with a ragged edge.
+        float shoreDark = 1.0;
         if (litWater2.x > 0.5 && litDetail.w > 0.5 && (int(litWater2.x + 0.5) & 4) != 0) {
             vec3 posW = vWorldRel + litCamPos.xyz;
             float ragged = 0.35 * (puddleNoise(posW.xz * 0.35) - 0.5);
             float wet = 1.0 - smoothstep(0.0, 0.45, posW.y - litWater2.w + ragged);
-            albedo *= mix(1.0, 0.7, wet);
+            shoreDark = mix(1.0, 0.7, wet);
         }
+        // The surf's run-up (surfSwash): each wave's sheet of water runs up
+        // the sand and slides back, foaming at its edge and leaving lace, the
+        // sand it wetted drying over a few seconds.
+        if (litWater2.x > 0.5 && (int(litWater2.x + 0.5) & 2) != 0) {
+            vec3 posW = vWorldRel + litCamPos.xyz;
+            float e = posW.y - litWater2.z;
+            if (e > -0.3 && e < 0.9) {
+                vec2 grad = surfFloorGrad(posW.xz);
+                float slope = max(length(grad), 0.004);
+                float x = e / slope;
+                if (x < kSwashMax * 1.45) {
+                    float reach, prevReach;
+                    vec2 shore = posW.xz - grad * (x / slope); // the waterline point below
+                    float tau = surfTime(shore, litWater2.y, reach, prevReach);
+                    float fine = 1.0 - smoothstep(40.0, 120.0, length(vWorldRel));
+                    float lace = puddleNoise(posW.xz * 1.3 + 17.0) * 0.6 + mix(0.5, puddleNoise(posW.xz * 4.1), fine) * 0.4;
+                    vec3 sw = surfSwash(x, tau, reach, prevReach, slope, lace);
+                    shoreDark = min(shoreDark, mix(1.0, 0.62, max(sw.x, sw.z)));
+                    albedo = mix(albedo * shoreDark, vec3(kSurfFoamAlbedo), sw.y * 0.85);
+                    shoreDark = 1.0;
+                }
+            }
+        }
+        albedo *= shoreDark;
         r0.rgb = shadeRemastered(albedo, true, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
@@ -1853,9 +1878,6 @@ const float kXpCalm = 0.35;          // wave relief kept at the waterline
 const float kXpCalmDepth = 1.2;      // m: full waves from here
 const float kXpFoamAlbedo = 0.82;
 const float kXpFoamMax = 0.85;
-const float kXpSwashK = 1.8;         // foam lines per metre of depth
-const float kXpSwashSpeed = 0.045;   // m of depth per second the lines move inshore
-const float kXpBandDepth = 0.9;      // m: no foam lines deeper
 // The surf at a low sun and from afar (SHORE-FOAM, 2026-11-13). The first cut
 // lost its surf at sunset and dawn: a low sun means a low tide (up to 5 m,
 // Landscape::Simulate), so the waterline sits lower on the beach, where it is
@@ -1892,30 +1914,6 @@ float xpFloorHeight(vec2 xz) {
     return h11 + (1.0 - f.x) * (h01 - h11) + (1.0 - f.y) * (h10 - h11);
 }
 
-// The ground's slope (metres per metre) under world xz, smooth across the
-// triangles: the central-difference slopes of the cell's four corners, mixed
-// bilinearly (a surf measured by the triangles' own slopes would step at
-// their edges).
-float xpFloorSlope(vec2 xz) {
-    vec2 g = xz * litTerrain.y;
-    int last = int(1.0 / litTerrain.z + 0.5) - 1;
-    vec2 i = floor(g);
-    vec2 f = g - i;
-    ivec2 p = ivec2(i);
-    float s[4];
-    for (int k = 0; k < 4; ++k) {
-        ivec2 c = p + ivec2(k & 1, k >> 1);
-        ivec2 xm = clamp(c - ivec2(1, 0), ivec2(0), ivec2(last));
-        ivec2 xp = clamp(c + ivec2(1, 0), ivec2(0), ivec2(last));
-        ivec2 zm = clamp(c - ivec2(0, 1), ivec2(0), ivec2(last));
-        ivec2 zp = clamp(c + ivec2(0, 1), ivec2(0), ivec2(last));
-        vec2 d = vec2(texelFetch(terrainHeight, xp, 0).r - texelFetch(terrainHeight, xm, 0).r,
-                      texelFetch(terrainHeight, zp, 0).r - texelFetch(terrainHeight, zm, 0).r);
-        s[k] = length(d) * 0.5 * litTerrain.y;
-    }
-    return mix(mix(s[0], s[1], f.x), mix(s[2], s[3], f.x), f.y);
-}
-
 // The cosine of a ray at cosine c above the water after refraction into it.
 float xpRefractCos(float c) {
     return sqrt(max(1.0 - (1.0 - c * c) / 1.769, 0.0));
@@ -1936,6 +1934,8 @@ void main() {
     float xpDepW = 0.0;
     float xpSurf = 1.0e4;
     float xpSurfW = 0.0;
+    float xpSlope = 0.0;      // the floor's slope (m per m); 0 where the water is 4 m deep or more
+    vec2 xpGrad = vec2(0.0);  // its gradient (uphill)
     if (xpParts != 0 && litTerrain.x > 0.5) {
         vec3 posW = vWorldRel + litCamPos.xyz;
         xpDep = max(posW.y - xpFloorHeight(posW.xz), 0.0);
@@ -1943,7 +1943,9 @@ void main() {
         xpSurf = xpDep;
         xpSurfW = xpDepW;
         if (xpDep < 4.0) {
-            float k = min(kXpSurfSlope / max(xpFloorSlope(posW.xz), 1e-4), 1.0);
+            xpGrad = surfFloorGrad(posW.xz);
+            xpSlope = length(xpGrad);
+            float k = min(kXpSurfSlope / max(xpSlope, 1e-4), 1.0);
             xpSurf *= k;
             xpSurfW *= k;
         }
@@ -2044,23 +2046,47 @@ void main() {
         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
                    (sunVis * sunOn * litHorizon.w);
         vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
-        // XP surf: a broken fringe of foam at the waterline (it rides the sea
-        // level's wave) and foam lines rolling in over the shallows. The lines
-        // fade where a pixel spans much of their spacing, the whole surf with
-        // distance, and the finer breakup below the pixel's footprint.
+        // XP surf: waves that break, roll in as foam lines and reach the
+        // waterline (surfTime; the land program draws their run-up), a broken
+        // fringe of foam at the waterline (it rides the sea level's wave) that
+        // swells as each wave arrives, and the foam each wave leaves behind.
+        // The whole surf fades with distance, the finer breakup below the
+        // pixel's footprint.
         if ((xpParts & 2) != 0 && xpSurf < 1.5) {
             float t = litWater2.y;
             vec2 p = vWorldRel.xz + litCamPos.xz;
             float nA = puddleNoise(p * 0.42 + vec2(0.0, t * 0.05));
             float nB = mix(0.5, puddleNoise(p * 1.6 - vec2(t * 0.09, 0.0) + 31.0), clamp(0.6 / (3.0 * foot), 0.0, 1.0));
             float brk = nA * 0.6 + nB * 0.4;
+            // The waves (surfTime): this spot's time in its wave's cycle, and
+            // the horizontal distance (m) out from the waterline.
+            float reach, prevReach;
+            float dx = xpSlope > 0.0 ? xpDep / max(xpSlope, 0.004) : 1.0e4;
+            float dxW = xpSlope > 0.0 ? xpDepW / max(xpSlope, 0.004) : 1.0e4;
+            vec2 shore = p + xpGrad / max(xpSlope, 0.004) * min(dx, 40.0); // the waterline point inshore
+            float tau = surfTime(shore, t, reach, prevReach);
+            float ta = surfArrive(reach);
+            float since = tau - ta;                                     // s since this wave arrived (< 0: not yet)
+            float sinceP = tau + kSurfPeriod - surfArrive(prevReach);   // s since the wave before it arrived
+            // The waterline's fringe: fullest as a wave arrives, thinning as it
+            // drains away (never below the first cut's steady band's 0.6).
+            float swell = max(since < 0.0 ? smoothstep(-0.6, 0.0, since) : exp(-since / 2.5), exp(-sinceP / 2.5));
             float edgeW = max(0.06 + 0.16 * brk, kXpFringePx * xpSurfW);
-            float fringe = (1.0 - smoothstep(0.0, edgeW, xpSurf)) * smoothstep(0.2, 0.75, brk);
-            float s = fract((xpDep + t * kXpSwashSpeed) * kXpSwashK + 0.45 * nA);
-            float band = smoothstep(0.0, 0.07, s) * (1.0 - smoothstep(0.07, 0.42, s));
-            band *= (1.0 - smoothstep(0.35, kXpBandDepth, xpDep)) * smoothstep(0.35, 0.62, brk);
-            band *= 1.0 - smoothstep(0.15, 0.45, xpDepW * kXpSwashK);
-            float foam = clamp(fringe + 0.75 * band, 0.0, 1.0) * kXpFoamMax *
+            float fringe = (1.0 - smoothstep(0.0, edgeW, xpSurf)) * smoothstep(0.2, 0.75, brk) * (0.6 + 0.4 * swell);
+            // The bore: the breaking wave's foam line rolling in to the
+            // waterline, a dense crest with its foam trailing offshore, building
+            // up as it breaks.
+            float off = dx - (kSurfZone * reach - kSurfSpeed * tau); // > 0 offshore of the line
+            float wF = max(0.8, kXpFringePx * dxW);
+            float bore = off < 0.0 ? 1.0 - smoothstep(0.0, wF, -off) : exp(-off / 3.0);
+            bore *= (1.0 - smoothstep(-0.2, 0.8, since)) * smoothstep(0.0, 1.0, tau) * smoothstep(0.65, 1.05, reach) *
+                    smoothstep(0.3, 0.6, brk + 0.3 * exp(-max(off, 0.0) / 1.5));
+            // The foam the waves left over the inner surf, bursting.
+            float rest = max(since > 0.0 ? smoothstep(0.0, 0.4, since) * exp(-since / 2.5) *
+                                               (1.0 - smoothstep(0.0, 0.35 * kSurfZone * reach, dx)) : 0.0,
+                             exp(-sinceP / 2.5) * (1.0 - smoothstep(0.0, 0.35 * kSurfZone * prevReach, dx))) *
+                         smoothstep(0.45, 0.75, brk);
+            float foam = clamp(max(max(fringe, bore), 0.5 * rest), 0.0, 1.0) * kXpFoamMax *
                          (1.0 - smoothstep(kXpFoamFadeStart, kXpFoamFadeEnd, dist));
             // The foam's light: the flat sea's, plus the sun the wrap adds.
             float ly = max(l.y, 0.0);
