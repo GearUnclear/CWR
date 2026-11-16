@@ -38,6 +38,8 @@ file(GLOB_RECURSE POSEIDON_ALL_SOURCES CONFIGURE_DEPENDS
 
 set(ALL_SOURCES ${POSEIDON_ALL_SOURCES})
 set(POSEIDON_BUILD_INFO_HEADER "${CMAKE_BINARY_DIR}/generated/Poseidon/Core/BuildInfo.hpp")
+# Build provenance (BuildId), regenerated on every build: Core/BuildProvenance.cpp alone reads it.
+set(POSEIDON_BUILD_ID_HEADER "${CMAKE_BINARY_DIR}/generated/Poseidon/Core/BuildId.hpp")
 
 # ============================================================
 # Platform Exclusions (apply to ALL sources before split)
@@ -152,13 +154,17 @@ add_custom_target(PoseidonBuildInfo
     COMMAND ${CMAKE_COMMAND}
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -DOUTPUT_FILE=${POSEIDON_BUILD_INFO_HEADER}
+        -DOUTPUT_ID_FILE=${POSEIDON_BUILD_ID_HEADER}
         -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
         -P ${CMAKE_SOURCE_DIR}/cmake/GenerateBuildInfo.cmake
     DEPENDS ${CMAKE_SOURCE_DIR}/cmake/GenerateBuildInfo.cmake
-    BYPRODUCTS "${POSEIDON_BUILD_INFO_HEADER}"
+    BYPRODUCTS "${POSEIDON_BUILD_INFO_HEADER}" "${POSEIDON_BUILD_ID_HEADER}"
     VERBATIM
 )
 add_dependencies(Poseidon PoseidonBuildInfo)
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/Core/BuildProvenance.cpp" PROPERTIES
+    OBJECT_DEPENDS "${POSEIDON_BUILD_ID_HEADER}"
+)
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/Core/Version.cpp" PROPERTIES
     OBJECT_DEPENDS "${POSEIDON_BUILD_INFO_HEADER}"
 )

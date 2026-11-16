@@ -1238,7 +1238,7 @@ async fn run_mission_test(
         cmd.arg("-C").arg(&work_dir);
     }
     cmd.env("POSEIDON_USER_DIR", &user_dir)
-        .env("POSEIDON_CACHE_DIR", &user_dir)
+        .env("POSEIDON_CACHE_DIR", super::poseidon_cache_dir(&user_dir))
         .env("POSEIDON_TEMP_DIR", &user_dir)
         .env("TRI_OUTPUT_DIR", output_dir.as_os_str())
         .env("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0")
@@ -1461,9 +1461,10 @@ async fn run_sqf_test(
         (Some(tmp), p)
     };
     let output_str = output_dir.to_string_lossy().to_string();
+    let cache_dir = super::poseidon_cache_dir(&user_dir);
     let env_vars = [
         ("POSEIDON_USER_DIR", user_dir.as_str()),
-        ("POSEIDON_CACHE_DIR", user_dir.as_str()),
+        ("POSEIDON_CACHE_DIR", cache_dir.as_str()),
         ("POSEIDON_TEMP_DIR", user_dir.as_str()),
         ("TRI_OUTPUT_DIR", output_str.as_str()),
         ("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0"),

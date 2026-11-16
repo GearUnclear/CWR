@@ -20,8 +20,9 @@
 //   Per-user knobs      — independent of preset, keep value across
 //                         preset changes:
 //                           msaaSamples, renderScale, alphaToCoverage,
-//                           multitexturing, vsync, fpsCap, brightness,
-//                           gamma
+//                           multitexturing, lighting, vsync, fpsCap,
+//                           brightness, gamma, shoreWater, lampShadows,
+//                           shadowDetail, sunGlare, groundCover, surfStyle
 //
 // Autodetect on first boot: GraphicsConfig::PickPresetFromRam()
 // returns a tier from SDL_GetSystemRAM(); ApplyPresetToTiers fills the
@@ -62,6 +63,39 @@ public:
 		VsyncOn       = 1,
 		VsyncAdaptive = 2,
 	};
+    // Lighting model.  Classic is the original per-vertex lighting, bit for
+    // bit; Remastered is per-pixel HDR lighting with shadow maps, terrain and
+    // cloud shadows, ambient occlusion and bloom (Graphics/Remaster).
+    enum LightingMode
+    {
+        LightingClassic = 0,
+        LightingRemastered = 1,
+    };
+
+    // Sun shadow detail under the Remastered lighting.  The values are the
+    // shadow tiers of Graphics/Shadow/ShadowXp.hpp (remaster::kShadowTier*),
+    // so a lower or a higher step can join later without renumbering a saved
+    // file.  Normal is the shadows as they were before the row (2048 maps to
+    // the 500 m shadow distance); High reaches up to 1000 m with 4096 maps.
+    enum ShadowDetail
+    {
+        ShadowDetailNormal = 2,
+        ShadowDetailHigh = 3,
+    };
+
+    // The surf's style under Shore Water (the Surf row). The values are
+    // remaster::kSurfPainted and kSurfRibbons (Graphics/Remaster/LookOptions.hpp).
+    // Painted: the sea and land programs paint the waves over the whole
+    // visible shore. Ribbons: breaking-wave ribbons along a traced coastline,
+    // within about 320 m.
+    enum SurfStyle
+    {
+        SurfPainted = 0,
+        SurfRibbons = 1,
+    };
+
+    // Anti-aliasing out of the box: 4x MSAA, with alpha-to-coverage on cutouts.
+    static constexpr int kDefaultMsaaSamples = 4;
 
 	// Persistable fields.
 	Preset    qualityPreset    = PresetUltra;
@@ -75,18 +109,27 @@ public:
 	bool      alphaToCoverage  = true;          // MSAA alpha-to-coverage on cutout draws (fence wire,
 	                                             // foliage) — grades sub-pixel features instead of the
 	                                             // hard alpha-test keeping/killing whole pixels
-	float     renderScale      = 1.0f;          // SSAA: render at scale x window and downsample.
-	                                             // 1.0 = off; up to 2.0.  The only general cure for
-	                                             // sub-pixel OPAQUE geometry sparkle (fence bars)
-	int       msaaSamples      = 0;             // MSAA on the frame target: 0 (off) / 2 / 4 / 8
+    float renderScale = 1.0f;                   // 0.85: the world at 85% of the window, upsampled; 1.25 to 2: SSAA.
+                                                // 1.0 = off; up to 2.0.  The only general cure for
+                                                // sub-pixel OPAQUE geometry sparkle (fence bars)
+    int msaaSamples = kDefaultMsaaSamples;      // MSAA on the frame target: 0 (off) / 2 / 4 / 8
 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
 	                                             // objects.  Off drops those draws to the base texture
-	float     brightness       = 1.6f;          // 0.4..1.8
+    LightingMode lighting = LightingRemastered; // Classic = the original lighting, unchanged
+    // Look options of the Remastered lighting (Engine::SetLookOptions; the
+    // POSEIDON_XP_* test switches override them, Graphics/Remaster/LookOptions.hpp).
+    bool shoreWater = true;                         // shallow water, surf, foam and wet sand at the shore
+    bool lampShadows = true;                        // street lamps cast shadows, their light bounces off the ground
+    ShadowDetail shadowDetail = ShadowDetailNormal; // the sun shadows' reach and sharpness
+    bool sunGlare = false;                          // a soft glare round a low sun (off until judged in motion)
+    bool groundCover = false;                       // short grass blades near the camera (drawn only, off by default)
+    SurfStyle surfStyle = SurfPainted;              // the surf's style while Shore Water is on
+    float     brightness       = 1.6f;          // 0.4..1.8
 	float     gamma            = 1.2f;          // 0.5..2.3
 
 	// Schema version of the persisted file.  Load resets this to 0 first, so a
 	// file written before versioning reads back as 0 and Migrate can act on it.
-	static constexpr int kVersion = 2;
+    static constexpr int kVersion = 3;
 	int       version          = kVersion;
 
 	// Bring a loaded config up to kVersion.  Returns true when the caller needs

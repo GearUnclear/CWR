@@ -110,8 +110,15 @@ bool GraphicsConfig::Migrate(int refreshHz)
 
     // A cap of 0 below v2 is indistinguishable from the old default, so it is
     // taken as never set.  From v2 on it is the user's Unlimited and survives.
-    if (fpsCap == 0)
+    if (version < 2 && fpsCap == 0)
         fpsCap = FpsCapForRefreshRate(refreshHz);
+
+    // MSAA was off by default below v3 and every save wrote that 0, so a 0
+    // there is taken as never chosen.  2x and 8x were chosen and stay; from v3
+    // on 0 is the user's Off and survives.  A profile with supersampling on
+    // already has anti-aliasing, so its Off is kept too.
+    if (version < 3 && msaaSamples == 0 && renderScale < 1.001f)
+        msaaSamples = kDefaultMsaaSamples;
 
     version = kVersion;
     return true;
@@ -212,9 +219,24 @@ bool GraphicsConfig::Normalize(const Environment& /*env*/)
             changed = true;
         }
     };
+    if (lighting != LightingClassic && lighting != LightingRemastered)
+    {
+        lighting = LightingRemastered;
+        changed = true;
+    }
+    if (shadowDetail != ShadowDetailNormal && shadowDetail != ShadowDetailHigh)
+    {
+        shadowDetail = ShadowDetailNormal;
+        changed = true;
+    }
+    if (surfStyle != SurfPainted && surfStyle != SurfRibbons)
+    {
+        surfStyle = SurfPainted;
+        changed = true;
+    }
     clampFloat(brightness, 0.4f, 1.8f);
     clampFloat(gamma, 0.5f, 2.3f);
-    clampFloat(renderScale, 1.0f, 2.0f);
+    clampFloat(renderScale, 0.5f, 2.0f); // below 1: the world at that share of the window (upsampled)
     if (msaaSamples != 0 && msaaSamples != 2 && msaaSamples != 4 && msaaSamples != 8)
     {
         msaaSamples = msaaSamples >= 8 ? 8 : msaaSamples >= 4 ? 4 : msaaSamples >= 2 ? 2 : 0;
@@ -256,6 +278,20 @@ bool GraphicsConfig::Load(const std::string& path)
         msaaSamples = (int)*e;
     if (auto* e = cfg.FindEntry("multitexturing"))
         multitexturing = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("lighting"))
+        lighting = static_cast<LightingMode>((int)*e);
+    if (auto* e = cfg.FindEntry("shoreWater"))
+        shoreWater = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("lampShadows"))
+        lampShadows = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("shadowDetail"))
+        shadowDetail = static_cast<ShadowDetail>((int)*e);
+    if (auto* e = cfg.FindEntry("sunGlare"))
+        sunGlare = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("groundCover"))
+        groundCover = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("surfStyle"))
+        surfStyle = static_cast<SurfStyle>((int)*e);
     if (auto* e = cfg.FindEntry("brightness"))
         brightness = (float)*e;
     if (auto* e = cfg.FindEntry("gamma"))
@@ -278,6 +314,13 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("renderScale", renderScale);
     cfg.Add("msaaSamples", msaaSamples);
     cfg.Add("multitexturing", multitexturing ? 1 : 0);
+    cfg.Add("lighting", static_cast<int>(lighting));
+    cfg.Add("shoreWater", shoreWater ? 1 : 0);
+    cfg.Add("lampShadows", lampShadows ? 1 : 0);
+    cfg.Add("shadowDetail", static_cast<int>(shadowDetail));
+    cfg.Add("sunGlare", sunGlare ? 1 : 0);
+    cfg.Add("groundCover", groundCover ? 1 : 0);
+    cfg.Add("surfStyle", static_cast<int>(surfStyle));
     cfg.Add("brightness", brightness);
     cfg.Add("gamma", gamma);
     cfg.Add("version", version);

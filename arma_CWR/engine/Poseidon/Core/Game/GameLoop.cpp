@@ -46,6 +46,28 @@ namespace Poseidon
 // bottom of RenderFrame.
 int gUserFpsCap = 0;
 
+namespace
+{
+float gFixedSimStep = 0.0f;
+}
+
+void SetFixedSimStep(float seconds)
+{
+    gFixedSimStep = seconds > 0.0f ? seconds : 0.0f;
+}
+
+float FixedSimStep()
+{
+    return gFixedSimStep;
+}
+
+float SimulationDelta(float realSeconds)
+{
+    if (gFixedSimStep > 0.0f)
+        return gFixedSimStep;
+    return realSeconds < kMaxSimStep ? realSeconds : kMaxSimStep;
+}
+
 // Idle heartbeat used by blocking waits (progress screen, debug window,
 // triWaitFrames). Tickles the watchdog and pumps OS events so the window
 // stays responsive; does not run a full AppIdle — callers that want that
@@ -213,7 +235,6 @@ bool AppIdle()
         }
     }
 
-    float deltaT = deltaTMs * 0.001;
     lastTime = actTime;
 
     static DWORD lastSysTime;
@@ -221,7 +242,8 @@ bool AppIdle()
     DWORD timeDelta = sysTime - lastSysTime;
     lastSysTime = sysTime;
 
-    saturateMin(deltaT, 0.3);
+    // Real time capped at 0.3 s, or the fixed step a capture script set.
+    float deltaT = SimulationDelta(deltaTMs * 0.001f);
 
     auto& input = InputSubsystem::Instance();
 

@@ -1,0 +1,11 @@
+# Remastered lighting capture run, Eden (Everon): broken and heavy overcast.
+# A photo generator, not a regression test; run it with run-captures.ps1
+# (README.md beside this file). data_dir is the gitignored junction to the
+# setup-prepared full-Remaster shadow; without it the test reports
+# `spawn failed`.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_eden.Eden"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 600
+assert_timeout = 180
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "960", "--height", "640"]

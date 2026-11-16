@@ -2343,9 +2343,10 @@ pub async fn run_multi_test(
             .iter()
             .map(|e| (e.name.clone(), expand_placeholders(&e.value, &replacements)))
             .collect();
+        let cache_dir = super::poseidon_cache_dir(&user_dir_str);
         let mut env_vars: Vec<(&str, &str)> = vec![
             ("POSEIDON_USER_DIR", user_dir_str.as_str()),
-            ("POSEIDON_CACHE_DIR", user_dir_str.as_str()),
+            ("POSEIDON_CACHE_DIR", cache_dir.as_str()),
             ("POSEIDON_TEMP_DIR", user_dir_str.as_str()),
             ("POSEIDON_TEST_MACHINE_ID", machine_id.as_str()),
             ("TRI_OUTPUT_DIR", output_str.as_str()),

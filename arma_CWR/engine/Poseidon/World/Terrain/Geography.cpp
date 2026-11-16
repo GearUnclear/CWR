@@ -10,6 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <memory>
+#include <optional>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
@@ -689,9 +693,59 @@ inline int AvoidSteepChange(int val, int x, bool& someChange)
     return x + dif;
 }
 
+// The seed of a world's ground randomization: FNV-1a over the terrain file's base name
+// (no folder, no extension, lower case), so it does not depend on where the file lives.
+static std::uint32_t WorldRandomizationSeed(const char* terrainFile)
+{
+    const char* base = terrainFile ? terrainFile : "";
+    for (const char* c = base; *c; ++c)
+    {
+        if (*c == '\\' || *c == '/' || *c == ':')
+        {
+            base = c + 1;
+        }
+    }
+    std::uint32_t h = 2166136261u;
+    for (const char* c = base; *c && *c != '.'; ++c)
+    {
+        unsigned char ch = static_cast<unsigned char>(*c);
+        if (ch >= 'A' && ch <= 'Z')
+        {
+            ch = static_cast<unsigned char>(ch - 'A' + 'a');
+        }
+        h = (h ^ ch) * 16777619u;
+    }
+    return h;
+}
+
+// POSEIDON_DETERMINISTIC_WORLD set (and not "0") at world load: capture sessions ask for the
+// same ground randomization every session. Unset in play.
+static bool DeterministicWorldRequested()
+{
+    const char* v = std::getenv("POSEIDON_DETERMINISTIC_WORLD");
+    return v && *v && !(v[0] == '0' && v[1] == 0);
+}
+
 void Landscape::InitRandomization()
 {
     I_AM_ALIVE();
+    // The per-cell ground colour and texture offsets of a world without stored randomization
+    // (4WVR files: every LoBo island) come from GRandGen, which WorldInit seeds from the tick
+    // count, so the same island shows a different ground pattern in every session and no
+    // capture of it can repeat (sinai_desert_noon differed by about 800,000 pixels between two
+    // boots of one build). With POSEIDON_DETERMINISTIC_WORLD set, a generator seeded by the
+    // world's name draws them instead: the same kind of randomization, the same every
+    // session. Unset (play) keeps the GRandGen path. OPRW worlds load theirs from the file
+    // and never get here.
+    std::unique_ptr<RandomGenerator> worldRandom;
+    std::optional<ScopedRandomGenerator> useWorldRandom;
+    if (DeterministicWorldRequested())
+    {
+        const std::uint32_t worldSeed = WorldRandomizationSeed(_name);
+        worldRandom = std::make_unique<RandomGenerator>(static_cast<int>(worldSeed & 0x7fffffffu),
+                                                        static_cast<int>((worldSeed >> 8) & 0x7fffffu));
+        useWorldRandom.emplace(*worldRandom);
+    }
     int i, x, z;
     _colorizePalette[0] = PackedColor(0x80, 0x80, 0x80, 0x80);
     for (i = 1; i < 256; i++)

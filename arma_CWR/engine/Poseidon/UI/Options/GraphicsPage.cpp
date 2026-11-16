@@ -49,16 +49,42 @@ const GraphicsRowText kRows[] = {
     {"STR_DISP_MAIN_OPT_GRAPHICS_ADVANCED", "", "Advanced", ""},
     {"STR_DISP_MAIN_OPT_GRAPHICS_ANTIALIASING", "STR_DISP_MAIN_OPT_GRAPHICS_ANTIALIASING_DESC", "Anti-aliasing",
      "Multisample anti-aliasing on the frame target. Higher sample counts smooth polygon edges at a GPU cost."},
-    {"STR_DISP_MAIN_OPT_GRAPHICS_SUPERSAMPLING", "STR_DISP_MAIN_OPT_GRAPHICS_SUPERSAMPLING_DESC", "Supersampling",
-     "Renders the whole frame above window resolution and downsamples it. The strongest cure for sub-pixel shimmer "
-     "and the most expensive."},
+    // Its own key: the installed STRINGTABLE_MAINMENU still carries the old
+    // Supersampling text under STR_DISP_MAIN_OPT_GRAPHICS_SUPERSAMPLING.
+    {"STR_DISP_MAIN_OPT_GRAPHICS_RENDER_SCALE", "STR_DISP_MAIN_OPT_GRAPHICS_RENDER_SCALE_DESC", "Render Scale",
+     "The resolution the world is drawn at. 85% draws it smaller and rebuilds it to the window's size, which saves "
+     "GPU time on weaker cards. Above 100% it supersamples: the strongest cure for sub-pixel shimmer and the most "
+     "expensive."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_MULTITEXTURING", "STR_DISP_MAIN_OPT_GRAPHICS_MULTITEXTURING_DESC", "Multitexturing",
      "Detail and specular texture stages on terrain and objects. Off falls back to the base texture like the "
      "original compatibility switch."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_LIGHTING", "STR_DISP_MAIN_OPT_GRAPHICS_LIGHTING_DESC", "Lighting",
+     "Remastered lights every pixel in high dynamic range: real sun shadows, hills shading the valleys, drifting "
+     "cloud shadows, sky light with ambient occlusion and a soft glow. Classic is the original lighting."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SHADOW_DETAIL", "STR_DISP_MAIN_OPT_GRAPHICS_SHADOW_DETAIL_DESC", "Shadow Detail",
+     "How far and how sharp the sun's shadows are under Remastered lighting. Normal reaches 500 m. High reaches up to "
+     "1000 m with sharper shadows, at some cost on long views."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SHORE_WATER", "STR_DISP_MAIN_OPT_GRAPHICS_SHORE_WATER_DESC", "Shore Water",
+     "Shallow water colour, a surf line with foam and wet sand where the sea meets the land. Remastered lighting "
+     "only."},
+    // Its own key, so no installed stringtable can rename it.
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SURF_STYLE", "STR_DISP_MAIN_OPT_GRAPHICS_SURF_STYLE_DESC", "Surf",
+     "How the waves at the shore are drawn while Shore Water is on. Painted reaches the whole shore you can see "
+     "and costs least. Ribbons draws each breaking wave as its own line near you (within about 300 m) and traces "
+     "the coastline once when an island loads."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS", "STR_DISP_MAIN_OPT_GRAPHICS_LAMP_SHADOWS_DESC", "Lamp Shadows",
+     "Street lamps cast shadows at night, and the light of lamps, headlights and fires bounces off the ground onto "
+     "what stands near them. Remastered lighting only."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SUN_GLARE", "STR_DISP_MAIN_OPT_GRAPHICS_SUN_GLARE_DESC", "Sun Glare",
+     "A soft glare round a low sun, as a camera sees it. It fades when trees, hills or clouds cover the sun. "
+     "Remastered lighting only."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_GROUND_COVER", "STR_DISP_MAIN_OPT_GRAPHICS_GROUND_COVER_DESC", "Ground Cover",
+     "Short grass blades on grassy ground close to you. Visual only: it hides nobody and the AI does not see it. "
+     "Costs some GPU time in woods and meadows. Remastered lighting only."},
 };
 constexpr int kFpsCapValues[] = {0, 30, 60, 90, 120, 144, 240};
 constexpr int kMsaaValues[] = {0, 2, 4, 8};
-constexpr float kRenderScaleValues[] = {1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
+constexpr float kRenderScaleValues[] = {0.85f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
 
 // Brightness 0.4 .. 1.8 → slider 0..100; Gamma 0.5 .. 2.3 → slider 0..100.
 int FloatToSlider(float v, float lo, float hi)
@@ -166,7 +192,7 @@ int GraphicsPage::RenderScaleToIndex(float scale)
 float GraphicsPage::RenderScaleIndexToValue(int index)
 {
     if (index < 0 || index >= (int)(sizeof(kRenderScaleValues) / sizeof(float)))
-        return 1.0f;
+        return 1.0f; // 100%
     return kRenderScaleValues[index];
 }
 
@@ -222,9 +248,23 @@ OptionsScrollList::RowDef GraphicsPage::GraphicsProvider::RowFor(int row) const
         case kRowAntiAliasing:
             return {602, m_page->m_msaaCStrs.data(), 4};
         case kRowSupersampling:
-            return {612, m_page->m_renderScaleCStrs.data(), 5};
+            return {612, m_page->m_renderScaleCStrs.data(), 6};
         case kRowMultitexturing:
             return {622, m_page->m_offOnCStrs.data(), 2};
+        case kRowLighting:
+            return {632, m_page->m_lightingCStrs.data(), 2};
+        case kRowShadowDetail:
+            return {642, m_page->m_shadowDetailCStrs.data(), 2};
+        case kRowShoreWater:
+            return {652, m_page->m_offOnCStrs.data(), 2};
+        case kRowSurfStyle:
+            return {692, m_page->m_surfStyleCStrs.data(), 2};
+        case kRowLampShadows:
+            return {662, m_page->m_offOnCStrs.data(), 2};
+        case kRowSunGlare:
+            return {672, m_page->m_offOnCStrs.data(), 2};
+        case kRowGroundCover:
+            return {682, m_page->m_offOnCStrs.data(), 2};
     }
     return {-1, nullptr, 0};
 }
@@ -233,7 +273,8 @@ OptionsScrollList::Kind GraphicsPage::GraphicsProvider::RowKind(int row) const
 {
     if (row == kRowAdvanced)
         return OptionsScrollList::KindHeader;
-    if (row == kRowMultitexturing)
+    if (row == kRowMultitexturing || row == kRowShoreWater || row == kRowLampShadows || row == kRowSunGlare ||
+        row == kRowGroundCover)
         return OptionsScrollList::KindBoolean;
     return OptionsScrollList::Provider::RowKind(row);
 }
@@ -277,6 +318,21 @@ int GraphicsPage::GraphicsProvider::RowValue(int row) const
             return GraphicsPage::RenderScaleToIndex(c.renderScale);
         case kRowMultitexturing:
             return c.multitexturing ? 1 : 0;
+        case kRowLighting:
+            return c.lighting == GraphicsConfig::LightingRemastered ? 1 : 0;
+        case kRowShadowDetail:
+            // Normal (2) -> 0, High (3) -> 1.
+            return c.shadowDetail == GraphicsConfig::ShadowDetailHigh ? 1 : 0;
+        case kRowShoreWater:
+            return c.shoreWater ? 1 : 0;
+        case kRowSurfStyle:
+            return c.surfStyle == GraphicsConfig::SurfRibbons ? 1 : 0;
+        case kRowLampShadows:
+            return c.lampShadows ? 1 : 0;
+        case kRowSunGlare:
+            return c.sunGlare ? 1 : 0;
+        case kRowGroundCover:
+            return c.groundCover ? 1 : 0;
         case kRowVsync:
             return (int)c.vsync;
         case kRowFpsCap:
@@ -369,6 +425,27 @@ void GraphicsPage::GraphicsProvider::SetRowValue(int row, int v)
             break;
         case kRowMultitexturing:
             c.multitexturing = v != 0;
+            break;
+        case kRowLighting:
+            c.lighting = v != 0 ? GraphicsConfig::LightingRemastered : GraphicsConfig::LightingClassic;
+            break;
+        case kRowShadowDetail:
+            c.shadowDetail = v != 0 ? GraphicsConfig::ShadowDetailHigh : GraphicsConfig::ShadowDetailNormal;
+            break;
+        case kRowShoreWater:
+            c.shoreWater = v != 0;
+            break;
+        case kRowSurfStyle:
+            c.surfStyle = v != 0 ? GraphicsConfig::SurfRibbons : GraphicsConfig::SurfPainted;
+            break;
+        case kRowLampShadows:
+            c.lampShadows = v != 0;
+            break;
+        case kRowSunGlare:
+            c.sunGlare = v != 0;
+            break;
+        case kRowGroundCover:
+            c.groundCover = v != 0;
             break;
         case kRowVsync:
             if (v >= 0 && v <= 2)
@@ -465,11 +542,12 @@ void GraphicsPage::RefreshLocalizedChoices()
     for (size_t i = 0; i < m_msaaLabels.size(); ++i)
         m_msaaCStrs[i] = m_msaaLabels[i].c_str();
 
-    m_renderScaleLabels[0] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_OFF");
-    m_renderScaleLabels[1] = "125%";
-    m_renderScaleLabels[2] = "150%";
-    m_renderScaleLabels[3] = "175%";
-    m_renderScaleLabels[4] = "200%";
+    m_renderScaleLabels[0] = "85%";
+    m_renderScaleLabels[1] = "100%";
+    m_renderScaleLabels[2] = "125%";
+    m_renderScaleLabels[3] = "150%";
+    m_renderScaleLabels[4] = "175%";
+    m_renderScaleLabels[5] = "200%";
     for (size_t i = 0; i < m_renderScaleLabels.size(); ++i)
         m_renderScaleCStrs[i] = m_renderScaleLabels[i].c_str();
 
@@ -493,6 +571,21 @@ void GraphicsPage::RefreshLocalizedChoices()
     m_fpsCapLabels[6] = "240";
     for (size_t i = 0; i < m_fpsCapLabels.size(); ++i)
         m_fpsCapCStrs[i] = m_fpsCapLabels[i].c_str();
+
+    m_lightingLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_CLASSIC", "Classic");
+    m_lightingLabels[1] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_REMASTERED", "Remastered");
+    for (size_t i = 0; i < m_lightingLabels.size(); ++i)
+        m_lightingCStrs[i] = m_lightingLabels[i].c_str();
+
+    m_shadowDetailLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_NORMAL", "Normal");
+    m_shadowDetailLabels[1] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_HIGH");
+    for (size_t i = 0; i < m_shadowDetailLabels.size(); ++i)
+        m_shadowDetailCStrs[i] = m_shadowDetailLabels[i].c_str();
+
+    m_surfStyleLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_SURF_PAINTED", "Painted");
+    m_surfStyleLabels[1] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_SURF_RIBBONS", "Ribbons");
+    for (size_t i = 0; i < m_surfStyleLabels.size(); ++i)
+        m_surfStyleCStrs[i] = m_surfStyleLabels[i].c_str();
 }
 
 void GraphicsPage::Unmount(OptionsShell& shell)

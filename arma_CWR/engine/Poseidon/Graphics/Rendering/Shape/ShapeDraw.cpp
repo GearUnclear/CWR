@@ -14,6 +14,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/World/Simulation/Animation/Animation.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
 
 #include <Poseidon/Graphics/Rendering/Primitives/Edges.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -75,21 +76,92 @@ bool Shape::HasBlendSections() const
 
 SectionClassFilter GSectionFilter = SectionClassFilter::All;
 
+// W1-9: an object's fitted copy of a land-following level (LandFitCache.hpp)
+// that the next Shape::Draw draws from instead of the level's shared buffer.
+static VertexBuffer* GDrawBufferOverride = nullptr;
+
+namespace LandFit
+{
+// The test Shape::Draw uses to pick the hardware T&L path, which draws from
+// the vertex buffer. The software path below transforms the CPU vertices.
+static bool DrawsFromVertexBufferImpl(bool hasBuffer, ClipFlags clip, int spec)
+{
+    // if engine has T&L interface, use it
+    // cannot use T&L on some surface types (OnSurface?)
+    Engine* engine = GEngine;
+    bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+    return engine->GetTL() && EnableHWTLState && tlAble && hasBuffer;
+}
+
+bool DrawsFromVertexBuffer(const Shape& shape, unsigned int clip, int spec)
+{
+    return DrawsFromVertexBufferImpl(shape.GetVertexBuffer() != nullptr, clip, spec);
+}
+
+ScopedDrawBuffer::ScopedDrawBuffer(VertexBuffer* buffer) : _previous(GDrawBufferOverride)
+{
+    GDrawBufferOverride = buffer;
+}
+
+ScopedDrawBuffer::~ScopedDrawBuffer()
+{
+    GDrawBufferOverride = _previous;
+}
+} // namespace LandFit
+
 void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags clip, int spec,
                  const Matrix4& transform, const Matrix4& invTransform)
 {
 #ifndef ACCESS_ONLY
-    // if engine has T&L interface, use it
-    // cannot use T&L on some surface types (OnSurface?)
+    // W1-9: draw from the object's fitted copy for this draw only. Taken here
+    // (not left armed) so nothing this draw calls can pick it up again; the
+    // level's own buffer is back when the draw returns.
+    struct BufferSwap
+    {
+        Shape& shape;
+        Ref<VertexBuffer> saved;
+        bool active = false;
+        explicit BufferSwap(Shape& s) : shape(s)
+        {
+            if (VertexBuffer* fitted = GDrawBufferOverride)
+            {
+                GDrawBufferOverride = nullptr;
+                saved = shape._buffer;
+                shape._buffer = fitted;
+                active = true;
+            }
+        }
+        ~BufferSwap()
+        {
+            if (active)
+            {
+                shape._buffer = saved;
+            }
+        }
+        BufferSwap(const BufferSwap&) = delete;
+        BufferSwap& operator=(const BufferSwap&) = delete;
+    } bufferSwap(*this);
 
     Engine* engine = GEngine;
 
-    bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
-
-    if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
+    if (LandFit::DrawsFromVertexBufferImpl(_buffer.NotNull(), clip, spec))
     {
         if (BeginFaces() < EndFaces() && NSections() > 0)
         {
+            // The object kind every section's descriptor carries (the
+            // remastered materials); the previous one is back after the shape.
+            struct KindScope
+            {
+                Engine* engine;
+                render::DrawObjectKind previous;
+                KindScope(Engine* e, render::DrawObjectKind kind) : engine(e), previous(e->GetDrawObjectKind())
+                {
+                    e->SetDrawObjectKind(kind);
+                }
+                ~KindScope() { engine->SetDrawObjectKind(previous); }
+                KindScope(const KindScope&) = delete;
+                KindScope& operator=(const KindScope&) = delete;
+            } kindScope(engine, matSource ? matSource->GetDrawObjectKind() : render::DrawObjectKind::Unknown);
             GEngine->PrepareMeshTL(lights, transform, render::SplitLegacy(spec));
             if (spec & (OnSurface | IsOnSurface))
             {
@@ -266,6 +338,17 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
         shape->OrSpecial(NoShadow);
     }
     _cache.Insert(cacheKey, Link<LODShapeWithShadow>(shape));
+    // A shape first loaded after the mission's OptimizeAll (a class a script
+    // creates at run time) would otherwise never get a vertex buffer and would
+    // draw through the CPU T&L path, missing the remastered per-pixel light and
+    // the shadow maps. Queue it for OptimizeLate, which runs before the next
+    // frame draws it. It is not optimised here because the caller is still
+    // setting the shape up (special flags, light hints, animation), and
+    // OptimizeRendering decides from those.
+    if (_optimizedAll && (ENGINE_CONFIG.enableHWTL || ENGINE_CONFIG.enablePIII))
+    {
+        _late.Add(shape);
+    }
 
     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
     if (_perfShapeLoadMs >= 1.0)
@@ -314,7 +397,7 @@ void ShapeBank::ReleaseAllVBuffers()
         });
 }
 
-void LODShape::OptimizeRendering()
+void LODShape::OptimizeRendering(bool keepInsideViews)
 {
     LODShape* shape = this;
     bool reload = false;
@@ -326,6 +409,11 @@ void LODShape::OptimizeRendering()
         if (ENGINE_CONFIG.enableHWTL)
         {
             optimizeHW = level->NVertex() > 0 && level->NFaces() > 0;
+        }
+        if (keepInsideViews && (shape->IsSpecLevel(l, VIEW_GUNNER) || shape->IsSpecLevel(l, VIEW_PILOT) ||
+                                shape->IsSpecLevel(l, VIEW_CARGO) || shape->IsSpecLevel(l, VIEW_COMMANDER)))
+        {
+            optimizeHW = false;
         }
         if (ENGINE_CONFIG.enablePIII)
         {
@@ -419,11 +507,57 @@ void ShapeBank::OptimizeAll()
         LOG_DEBUG(Graphics, "ShapeBank::OptimizeAll");
     }
     ForEach([](LODShapeWithShadow& shape) { shape.OptimizeRendering(); });
+    // Every cached shape, queued ones included, has just been optimised.
+    _late.Clear();
+    _optimizedAll = true;
+}
+
+void ShapeBank::OptimizeLate()
+{
+    if (_late.Size() == 0)
+    {
+        return;
+    }
+    const auto start = ::Poseidon::Dev::Perf::Now();
+    int optimized = 0;
+    for (int i = 0; i < _late.Size(); i++)
+    {
+        LODShapeWithShadow* shape = _late[i];
+        if (!shape)
+        {
+            continue; // released before it was ever drawn
+        }
+        bool hasBuffer = false;
+        for (int l = 0; l < shape->NLevels() && !hasBuffer; l++)
+        {
+            hasBuffer = shape->Level(l) && shape->Level(l)->GetVertexBuffer();
+        }
+        if (hasBuffer)
+        {
+            continue; // already optimised elsewhere
+        }
+        // The same levels, buffer types and exclusions (sky, stars, clouds,
+        // lights, surface decals, geometry levels) OptimizeAll gives a shape the
+        // mission loaded, except the crew views (VIEW_GUNNER / PILOT / CARGO /
+        // COMMANDER levels, a soldier's first-person level among them): they
+        // keep the CPU path they have always had for these shapes. Inside a
+        // hull the remastered light has no interior light and the hull shadows
+        // the sun, so on the per-pixel path a tank's gunner view only gets darker.
+        shape->OptimizeRendering(true);
+        optimized++;
+    }
+    _late.Clear();
+    const double ms = ::Poseidon::Dev::Perf::ElapsedMs(start);
+    if (ms >= 1.0)
+    {
+        LOG_DEBUG(Graphics, "PERF: ShapeBank::OptimizeLate {} shapes took {:.2f}ms", optimized, ms);
+    }
 }
 
 void ShapeBank::Clear()
 {
     _cache.Clear();
+    _late.Clear();
 }
 
 ShapeBank Shapes;

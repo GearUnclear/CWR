@@ -3,8 +3,11 @@
 // Without the fix, GetSoundName/GetPictureName below produce "sound\sound/..." /
 // "data\pic.paa" -> "data\data\pic.paa". Tolerances are exact-string equality.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <initializer_list>
 #include <string.h>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
@@ -87,4 +90,38 @@ TEST_CASE("SelectMenuInitWorld falls back to demo world when configured init ter
         RString r = SelectMenuInitWorld("Intro", "", false, false, false);
         REQUIRE(strcmp((const char*)r, "Intro") == 0);
     }
+}
+
+TEST_CASE("GetColor reads three-entry colours with alpha 1", "[io][paramFileExt][remaster]")
+{
+    // CfgNonAIVehicles >> StreetLamp: colorDiffuse[]={0.9,0.8,0.6}; colorAmbient[]={0.1,0.1,0.1};
+    // Read as white, every street lamp lit at ten times its authored ambient
+    // (a grey wash out to 500 m around a town at night) and lost its warm colour.
+    ParamFile pf;
+    auto array = [&](const char* name, std::initializer_list<float> values) -> const ParamEntry&
+    {
+        ParamEntry* entry = pf.AddArray(name);
+        for (float v : values)
+            entry->AddValue(v);
+        return *entry;
+    };
+
+    const Color diffuse = GetColor(array("colorDiffuse", {0.9f, 0.8f, 0.6f}));
+    CHECK(diffuse.R() == Catch::Approx(0.9f));
+    CHECK(diffuse.G() == Catch::Approx(0.8f));
+    CHECK(diffuse.B() == Catch::Approx(0.6f));
+    CHECK(diffuse.A() == Catch::Approx(1.0f));
+
+    const Color ambient = GetColor(array("colorAmbient", {0.1f, 0.1f, 0.1f}));
+    CHECK(ambient.R() == Catch::Approx(0.1f));
+    CHECK(ambient.B() == Catch::Approx(0.1f));
+
+    const Color rgba = GetColor(array("color", {0.9f, 0.8f, 0.8f, 0.5f}));
+    CHECK(rgba.G() == Catch::Approx(0.8f));
+    CHECK(rgba.A() == Catch::Approx(0.5f));
+
+    // Anything else still reads as white.
+    const Color bad = GetColor(array("bad", {0.2f, 0.3f}));
+    CHECK(bad.R() == Catch::Approx(1.0f));
+    CHECK(bad.B() == Catch::Approx(1.0f));
 }

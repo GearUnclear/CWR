@@ -7,6 +7,8 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/SeaFlow.hpp>
+#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Game/OperMap.hpp>
@@ -17,6 +19,7 @@
 
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 
+#include <algorithm>
 #include <mutex>
 #include <float.h>
 #include <cmath>
@@ -317,8 +320,14 @@ __forceinline float Bilint(float y00, float y01, float y10, float y11, float xf,
 
 static Vector3 WaterNormal(0, -1, 0);
 
-// const int WaterFlags = IsWater|SpecularTexture;
-
+// The sea's faces carry the specular layer alone (data\specular_dx.paa, a
+// ripple pattern in its alpha), so they draw through the detail program like
+// the terrain. They never carry IsWater: that bit selects the engine's water
+// family, whose classic shader binds the detail texture as a bump map (the
+// waterBump texture of the remaster config does not exist). The remastered sea
+// is routed explicitly instead: DrawWater opens Engine::BeginSea around these
+// faces' draws, and the backend draws them with its water program while the
+// feature switch seaWaves is on.
 const int WaterFlags = SpecularTexture;
 
 #define SEAMS 1
@@ -1144,6 +1153,72 @@ static AnimatorDefault GAnimatorWater(Color(0.8, 0.8, 0.8));
 
 void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
 {
+    // The remastered sea (feature switch seaWaves, Graphics/Remaster/
+    // SeaWaves.hpp): the backend draws the faces below with its water program
+    // and cross-fades the animation frame they carry (AnimateTexture in the
+    // loop) into its neighbour, so the waves it derives from the texture do
+    // not pop at each frame switch. Classic and the switch off draw them as
+    // before.
+    //
+    // XP sea flow (POSEIDON_XP_SEAFLOW, Graphics/Remaster/SeaFlow.hpp): the
+    // animation's 2 s ping-pong (the phase below runs 0 -> 1 -> 0) is what
+    // made the waves play forward and then backward. With the switch on and
+    // the water program drawing, the faces carry a frame the flow picks
+    // (flowPhase) and the program moves its layers over the world instead.
+    float flowPhase = -1.0f;
+    if (remaster::SeaFlowXpOn() && _texture[0] && _texture[0]->AnimationLength() > 1)
+    {
+        Texture* sea = _texture[0];
+        const int frames = sea->AnimationLength();
+        const remaster::SeaFlowFrames f =
+            remaster::SeaFlowFrameBlend(Glob.time.toFloat(), frames, remaster::SeaFlowXpMorph());
+        GEngine->BeginSea(sea->GetAnimation(f.other), f.otherWeight);
+        // Not routed (Classic, or the sea feature off): the backend opened
+        // nothing, and the animation plays as before.
+        if (GEngine->SeaRouted())
+        {
+            flowPhase = remaster::SeaFlowAnimationPhase(f.bound, frames);
+        }
+    }
+    // Probe (POSEIDON_XP_SEAFLOW_PROBE=freeze, never a look): the stock sea
+    // with its animation held on one frame, to tell the animation's share of
+    // the back-and-forth from the sea level's.
+    const bool freezeProbe = remaster::SeaFlowXpFreezeProbe();
+    if (flowPhase < 0.0f)
+    {
+        float texPhase = fastFmod(Glob.time.toFloat(), 2);
+        if (texPhase > 1.0f)
+        {
+            texPhase = 2 - texPhase;
+        }
+        if (freezeProbe)
+        {
+            texPhase = 0.0f;
+        }
+        Texture* sea = _texture[0];
+        Texture* other = nullptr;
+        float otherWeight = 0.0f;
+        const int frames = sea ? sea->AnimationLength() : 1;
+        if (frames > 1)
+        {
+            PolyProperties faces;
+            faces.Init();
+            faces.SetTexture(sea);
+            faces.AnimateTexture(texPhase);
+            int bound = 0;
+            for (int i = 0; i < frames; i++)
+            {
+                if (sea->GetAnimation(i) == faces.GetTexture())
+                {
+                    bound = i;
+                }
+            }
+            const remaster::SeaFrameBlend blend = remaster::SeaAnimationBlend(texPhase, frames, bound);
+            other = sea->GetAnimation(blend.other);
+            otherWeight = blend.otherWeight;
+        }
+        GEngine->BeginSea(other, otherWeight);
+    }
     for (int x = bigRect.xBeg; x < bigRect.xEnd; x += LandSegmentSize)
     {
         for (int z = bigRect.zBeg; z < bigRect.zEnd; z += LandSegmentSize)
@@ -1175,7 +1250,7 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
                     bool isClipped = scene.GetCamera()->IsClipped(bCenter, bRadius, 1);
                     if (!isClipped)
                     {
-                        Vector3 offset = seg->Offset() + Vector3(0, _seaLevelWave, 0);
+                        Vector3 offset = seg->Offset() + Vector3(0, GetSeaLevelDrawn(), 0);
                         Matrix4 trans(MTranslation, offset);
                         Matrix4 iTrans(MTranslation, -offset);
                         // calculate z2
@@ -1191,6 +1266,14 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
                         if (texPhase > 1.0f)
                         {
                             texPhase = 2 - texPhase;
+                        }
+                        if (flowPhase >= 0.0f)
+                        {
+                            texPhase = flowPhase; // XP sea flow: the flow's frame
+                        }
+                        else if (freezeProbe)
+                        {
+                            texPhase = 0.0f;
                         }
                         sec.properties.AnimateTexture(texPhase);
 
@@ -1214,6 +1297,7 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
             }
         }
     }
+    GEngine->EndSea();
 }
 
 struct GroundLayerInfo
@@ -1221,8 +1305,12 @@ struct GroundLayerInfo
     Vector3 offset;
     float alpha1, alpha2, bright;
     bool isAlpha;
+    // The ground cover's layer (coverFar above 0): the blades' height (m) and
+    // the distance (m) where they end; segments wholly beyond coverFar are not
+    // drawn.
+    float coverHeight = 0, coverFar = 0;
 
-    GroundLayerInfo() : offset(VZero), alpha1(0), alpha2(1), isAlpha(false) {}
+    GroundLayerInfo() : offset(VZero), alpha1(0), alpha2(1), bright(1), isAlpha(false) {}
     GroundLayerInfo(float y, float a1, float b = 1, float a2 = 1)
         : offset(0, y, 0), bright(b), alpha1(a1 * 0.5 + 0.5), alpha2(a2 * 0.5), isAlpha(true)
     {
@@ -1265,6 +1353,13 @@ GrassMode GrassModes[] = {
 
 const int NGrassModes = sizeof(GrassModes) / sizeof(*GrassModes);
 
+// The ground cover (the Graphics page's Ground Cover option): blades this
+// tall at most, gone by this distance. Fixed, not tunable: the cover is drawn
+// only (AI sight and the simulation never see it), so it must stay too short
+// and too near to hide a man from the player that the AI can see.
+constexpr float kGroundCoverHeight = 0.12f; // metres
+constexpr float kGroundCoverFar = 25.0f;    // metres
+
 void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const GroundLayerInfo& layer)
 {
     auto t0 = TerrainProfile::Now();
@@ -1284,16 +1379,17 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
             }
 
             {
-                if (seg->_someWater && seg->_seaLevel != _seaLevelWave)
+                const float seaDrawn = GetSeaLevelDrawn(); // XP sea flow: else _seaLevelWave
+                if (seg->_someWater && seg->_seaLevel != seaDrawn)
                 {
                     // change level of all water points
                     // for TL: adjust matrix
 
-                    seg->_seaLevel = _seaLevelWave;
+                    seg->_seaLevel = seaDrawn;
                     VertexTable& table = seg->_wTable;
                     for (int i = 0; i < table.NPos(); i++)
                     {
-                        table.SetPos(i)[1] = _seaLevelWave;
+                        table.SetPos(i)[1] = seaDrawn;
                     }
                 }
             }
@@ -1310,7 +1406,9 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
                     Vector3Val bCenter = shape->BSphereCenter() + seg->Offset();
                     float bRadius = shape->BSphereRadius();
 
-                    if (!scene.GetCamera()->IsClipped(bCenter, bRadius, 1))
+                    const bool beyondCover = layer.coverFar > 0 &&
+                                             scene.GetCamera()->Position().Distance(bCenter) - bRadius > layer.coverFar;
+                    if (!beyondCover && !scene.GetCamera()->IsClipped(bCenter, bRadius, 1))
                     {
                         // select only most important light
                         LightList work(true);
@@ -1329,7 +1427,14 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
                         const int alphaSpec = ::IsAlpha | ::NoZWrite | ::GrassTexture;
                         IAnimator* anim = &GAnimatorDefault;
                         AnimatorBrightness animLand;
-                        if (layer.isAlpha)
+                        if (layer.isAlpha && layer.coverFar > 0)
+                        {
+                            GEngine->SetGrassParams(1.0f, layer.coverHeight, layer.coverFar, 1.0f);
+                            shape->OrSpecial(alphaSpec);
+                            anim = &animLand;
+                            animLand.SetBrigth(layer.bright);
+                        }
+                        else if (layer.isAlpha)
                         {
                             GEngine->SetGrassParams(layer.alpha1, layer.alpha2,
                                                     scene.GetCamera()->GetAdditionalClippingFar());
@@ -1394,7 +1499,7 @@ void Landscape::DrawHorizont(Scene& scene)
 
     const Camera* camera = scene.GetCamera();
 
-    float cameraAbove = horPos.Y() - GetSeaLevel();
+    float cameraAbove = horPos.Y() - GetSeaLevelDrawn();
     float backZ = scene.GetCamera()->ClipFar() * 0.99f;
     float posX = backZ * scene.GetCamera()->Left() * 2.0f;
     float negX = -posX;
@@ -1460,7 +1565,7 @@ void Landscape::DrawHorizont(Scene& scene)
     // no LOD for horizont
 
     float horizBorder = backZ * 0.025f;
-    scene.GetCamera()->SetUserClipPars(VUp, -GetSeaLevel() + horizBorder);
+    scene.GetCamera()->SetUserClipPars(VUp, -GetSeaLevelDrawn() + horizBorder);
     //_horizontObject->Draw(0,ClipAll&~ClipBack|ClipUser0,*_horizontObject);
     _horizontObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_horizontObject);
     scene.GetCamera()->CancelUserClip();
@@ -1534,11 +1639,49 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 
     GEngine->FlushQueues();
+    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::GroundDrawn);
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
     GEngine->EnableReorderQueues(true);
     // draw non-alpha objects
     scene.DrawObjectsAndShadowsPass1();
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandObjects);
+
+#if LANDDRAW
+    // Near ground cover (the Graphics page's Ground Cover option, off by
+    // default; first the experiment POSEIDON_XP_GRASS, PERF-PLAN R-22). No CWA
+    // data set ships the classic shell grass's texture (CfgDetailTextures >>
+    // grass, data\grass_dx.paa), so the remastered grass program draws
+    // procedural blades instead (s_psGrassRemasterMain): the land within the
+    // blades' reach is drawn once more, raised by their height, and each of
+    // its fragments marches its view ray down through the blades. It runs
+    // after the opaque objects (their bases stand in the grass) and before the
+    // alpha pass, which takes the roads while the cover is on
+    // (Object::PassNum), so roads cover it. Drawn only: nothing here feeds the
+    // simulation.
+    if (GEngine->CanGrass())
+    {
+        const float invGrid = GetInvLandGrid();
+        const float cx = camera.Position().X() * invGrid;
+        const float cz = camera.Position().Z() * invGrid;
+        const float reach = kGroundCoverFar * invGrid + 1;
+        // Segments keep bigRect's alignment (the segment cache's keys).
+        LandBegEnd nearRect;
+        nearRect.xBeg =
+            bigRect.xBeg + std::max(0, toIntFloor((cx - reach - bigRect.xBeg) * InvLandSegmentSize)) * LandSegmentSize;
+        nearRect.zBeg =
+            bigRect.zBeg + std::max(0, toIntFloor((cz - reach - bigRect.zBeg) * InvLandSegmentSize)) * LandSegmentSize;
+        nearRect.xEnd = std::min(bigRect.xEnd, toIntCeil(cx + reach));
+        nearRect.zEnd = std::min(bigRect.zEnd, toIntCeil(cz + reach));
+        GEngine->FlushQueues();
+        GEngine->EnableReorderQueues(false);
+        GroundLayerInfo cover(kGroundCoverHeight, 0.0f);
+        cover.coverHeight = kGroundCoverHeight;
+        cover.coverFar = kGroundCoverFar;
+        DrawGround(nearRect, scene, cover);
+        GEngine->FlushQueues();
+        GEngine->EnableReorderQueues(true);
+    }
+#endif
 
 #if LANDDRAW
 #if _ENABLE_CHEATS
@@ -1581,6 +1724,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 #endif
     GEngine->FlushQueues();
+    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::ObjectsDrawn);
 
     // draw alpha objects and shadows
     scene.DrawObjectsAndShadowsPass2();
@@ -1673,7 +1817,11 @@ void Landscape::DrawSky(Scene& scene)
     float clipLevel = skyPosition.Y();
     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
 
+    // The remastered sky table shades the dome, and the clouds switches light
+    // its clouds and turn it with the sky's drift (a no-op when they are off).
+    GEngine->BeginRemasterSky(RemasterSky::Dome);
     _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
+    GEngine->EndRemasterSky();
     float starsVisibility = (
         // see TLVertexMesh::DoStarLighting
         // overcast limitation
@@ -1686,7 +1834,11 @@ void Landscape::DrawSky(Scene& scene)
     }
     scene.GetCamera()->CancelUserClip();
 
+    // With the sky-matched cloud shadows the sun disk dims behind a dome cloud
+    // (a no-op when they are off).
+    GEngine->BeginRemasterSky(RemasterSky::Sun);
     _sunObject->Draw(0, ClipAll & ~ClipBack, *_sunObject);
+    GEngine->EndRemasterSky();
     _moonObject->Draw(0, ClipAll & ~ClipBack, *_moonObject);
 }
 
@@ -1704,6 +1856,12 @@ struct CloudInfo
 
 void Landscape::DrawClouds(Scene& scene)
 {
+    // The volumetric clouds (POSEIDON_XP_CLOUDS) take the painted sheets'
+    // place in this frame's sky.
+    if (GEngine->VolumetricCloudsDrawn())
+    {
+        return;
+    }
     const Camera& camera = *scene.GetCamera();
 
     // Matrix4Val invView=camera.Transform();
@@ -1728,6 +1886,10 @@ void Landscape::DrawClouds(Scene& scene)
         }
     }
     // scene.GetCamera()->SetUserClip(1);
+    // The remastered sky pass: with the sky table on, the clouds fade into its
+    // horizon colour with their fog; with lit clouds on, their sun-facing
+    // edges catch the sun (a no-op when both are off).
+    GEngine->BeginRemasterSky(RemasterSky::Clouds);
     AUTO_STATIC_ARRAY(CloudInfo, clouds0, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds1, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds2, 1024);
@@ -1825,6 +1987,7 @@ void Landscape::DrawClouds(Scene& scene)
             }
         }
     }
+    GEngine->EndRemasterSky();
 }
 
 void Landscape::Draw(Scene& scene)

@@ -1,16 +1,24 @@
 #include <PoseidonGL33/EngineGL33.hpp>
+#include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 
 #include <glad/gl.h>
 
 #include <Poseidon/Graphics/Core/GLClear.hpp>
 #include <Poseidon/Graphics/Core/GLCullState.hpp>
+#include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
 
 #include <cstdint>
 #include <vector>
+
+using Poseidon::gl33lighting::kShadowMapUnit;
+using Poseidon::gl33lighting::kShadowRawUnit;
 
 // Self-contained offscreen depth render used to validate the GL shadow-depth
 // path against the CPU oracle. Renders
@@ -42,6 +50,12 @@ GLint s_alphaLocVP = -1;
 GLint s_alphaLocTex = -1;
 GLuint s_alphaVao = 0;
 GLuint s_alphaVbo = 0;
+// The caster textures' own sampler: trilinear, repeat, anisotropic as the
+// material sampler, and no LOD bias. Without it the pass inherited unit 0's
+// sampler from the last world draw (its filter, wrap and, in a TAA frame,
+// the -0.5 texture LOD bias), so each leaf card's shadow cutout followed the
+// draw order.
+GLuint s_alphaSampler = 0;
 
 struct ResolvedAlphaBatch
 {
@@ -49,6 +63,45 @@ struct ResolvedAlphaBatch
     int firstVertex;
     int vertexCount;
 };
+
+// XP-shadows casterCull input (Engine::ShadowCasterSet's cull fields).
+struct CasterCull
+{
+    const float* spheres = nullptr; // 4 per caster
+    int casterCount = 0;
+    const int* solidRuns = nullptr; // (first, count, caster)
+    int solidRunCount = 0;
+    const int* alphaRuns = nullptr;     // (first in batch, count, caster)
+    const int* alphaRunStart = nullptr; // batchCount + 1
+};
+
+// Scratch for the culled multi-draws.
+std::vector<unsigned char> s_cullVisible;
+std::vector<GLint> s_cullFirst;
+std::vector<GLsizei> s_cullCount;
+
+// Gather the visible runs of [runs, runs + 3 * n) (first offset by `base`),
+// merging runs that touch, into s_cullFirst / s_cullCount.
+void GatherRuns(const int* runs, int n, int base)
+{
+    s_cullFirst.clear();
+    s_cullCount.clear();
+    for (int r = 0; r < n; r++)
+    {
+        const int first = runs[r * 3] + base;
+        const int count = runs[r * 3 + 1];
+        const int caster = runs[r * 3 + 2];
+        if (count <= 0 || caster < 0 || caster >= static_cast<int>(s_cullVisible.size()) || !s_cullVisible[caster])
+            continue;
+        if (!s_cullFirst.empty() && s_cullFirst.back() + s_cullCount.back() == first)
+        {
+            s_cullCount.back() += count;
+            continue;
+        }
+        s_cullFirst.push_back(first);
+        s_cullCount.push_back(count);
+    }
+}
 
 const char* kVS = R"(#version 330 core
 layout(location = 0) in vec3 pos;
@@ -160,6 +213,10 @@ bool EnsureArrayTarget(int res, int layers)
         s_arrFbo = 0;
     }
 
+    // The lit programs sample the map on unit 2, and deleting the old array
+    // above left texture 0 there if it was bound. Create the new one on unit 2,
+    // so the unit holds a complete depth array again even if the FBO fails.
+    GL33Bind::ActiveUnit(kShadowMapUnit);
     glGenTextures(1, &s_arrTex);
     glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, res, res, layers, 0, GL_DEPTH_COMPONENT, GL_FLOAT,
@@ -168,6 +225,10 @@ bool EnsureArrayTarget(int res, int layers)
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // Unit 6 reads the same array as raw depth (the remastered soft shadows)
+    // and held the deleted one too: give it the new array as well.
+    GL33Bind::ActiveUnit(kShadowRawUnit);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);
 
     glGenFramebuffers(1, &s_arrFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);
@@ -256,6 +317,137 @@ bool EnsureAlphaMesh()
     GL33Bind::Vao(0);
     return true;
 }
+
+// POSEIDON_XP_LODBAND (EX2-POP round 3): the casters in the distance band of
+// a level switch go in with both levels, each fragment kept or dropped by a
+// hash of where it is in the world (a 6.25 cm cell), so one level hands over to
+// the other a few texels at a time as the distance changes, instead of whole
+// faces (a coarse forest block's face is tens of metres of shadow). The shadow
+// map's texel grid is anchored to the world (ShadowMath), so a texel samples
+// the same caster point every frame and the pattern holds still in motion.
+GLuint s_dissolveProg = 0;
+GLint s_dissolveLocVP = -1;
+GLint s_dissolveLocTex = -1;
+GLint s_dissolveLocAlpha = -1;
+GLuint s_dissolveVao = 0;
+GLuint s_dissolveVbo = 0;
+
+const char* kDissolveVS = R"(#version 330 core
+layout(location = 0) in vec3 pos;
+layout(location = 1) in vec2 uv;
+layout(location = 2) in vec3 hashPos;
+layout(location = 3) in float key;
+uniform mat4 uLightVP;
+out vec2 vUV;
+out vec3 vHash;
+flat out float vKey;
+void main() { vUV = uv; vHash = hashPos; vKey = key; gl_Position = uLightVP * vec4(pos, 1.0); }
+)";
+
+const char* kDissolveFS = R"(#version 330 core
+in vec2 vUV;
+in vec3 vHash;
+flat in float vKey;
+uniform sampler2D uTex;
+uniform int uAlphaTest;
+float CellHash(vec3 p)
+{
+    uvec3 c = uvec3(floor(max(p, vec3(0.0)) * 16.0));
+    uint h = (c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u);
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    h ^= h >> 15;
+    return float(h & 0xFFFFFFu) * (1.0 / 16777216.0);
+}
+void main()
+{
+    if (uAlphaTest != 0 && texture(uTex, vUV).a < 0.5)
+        discard;
+    float h = CellHash(vHash);
+    bool keep = vKey < 1.5 ? h < vKey : h >= vKey - 2.0;
+    if (!keep)
+        discard;
+}
+)";
+
+bool EnsureDissolveProgram()
+{
+    if (s_dissolveProg)
+        return true;
+    GLuint vs = CompileOne(GL_VERTEX_SHADER, kDissolveVS);
+    GLuint fs = CompileOne(GL_FRAGMENT_SHADER, kDissolveFS);
+    if (!vs || !fs)
+        return false;
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    GLint ok = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    if (!ok)
+    {
+        glDeleteProgram(prog);
+        return false;
+    }
+    s_dissolveProg = prog;
+    s_dissolveLocVP = glGetUniformLocation(prog, "uLightVP");
+    s_dissolveLocTex = glGetUniformLocation(prog, "uTex");
+    s_dissolveLocAlpha = glGetUniformLocation(prog, "uAlphaTest");
+    return true;
+}
+
+bool EnsureDissolveMesh()
+{
+    if (s_dissolveVao)
+        return true;
+    glGenVertexArrays(1, &s_dissolveVao);
+    glGenBuffers(1, &s_dissolveVbo);
+    GL33Bind::Vao(s_dissolveVao);
+    glBindBuffer(GL_ARRAY_BUFFER, s_dissolveVbo);
+    const GLsizei stride = 9 * sizeof(float);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, nullptr);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(5 * sizeof(float)));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(8 * sizeof(float)));
+    GL33Bind::Vao(0);
+    return true;
+}
+
+// One dissolve batch resolved for the GL pass: solid (no alpha test, back
+// faces stored like the solid casters) or alpha-tested on `handle`.
+struct ResolvedDissolveBatch
+{
+    GLuint handle;
+    bool solid;
+    int firstVertex;
+    int vertexCount;
+};
+
+bool EnsureAlphaSampler()
+{
+    if (s_alphaSampler)
+        return true;
+    glGenSamplers(1, &s_alphaSampler);
+    if (!s_alphaSampler)
+        return false;
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glSamplerParameteri(s_alphaSampler, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    // A new sampler's LOD bias is 0, and only SetTaaJitterState writes the
+    // material samplers' bias, never this one.
+    float maxAniso = 1.0f;
+    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
+    if (maxAniso > 1.0f)
+        glSamplerParameterf(s_alphaSampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAniso < 16.0f ? maxAniso : 16.0f);
+    return true;
+}
 } // namespace
 
 namespace
@@ -269,9 +461,10 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 {
     if (!glContext || !lightVP16 || !triXYZ || vertCount < 3 || res <= 0)
         return false;
-    if (!EnsureProgram() || !EnsureTarget(res) || !EnsureMesh())
-        return false;
-
+    // Capture the bindings to restore before the Ensure* calls: creating a
+    // target or mesh binds (and leaves bound) framebuffer 0 and the new VAO, so
+    // capturing after them sent the rest of the frame after a first enable or a
+    // resolution change to the window instead of the frame target.
     GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
     GLint prevVP[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
@@ -279,6 +472,12 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
     glGetIntegerv(GL_VIEWPORT, prevVP);
+    if (!EnsureProgram() || !EnsureTarget(res) || !EnsureMesh())
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
+        GL33Bind::Vao(static_cast<GLuint>(prevVAO));
+        return false;
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, s_fbo);
     glViewport(0, 0, res, res);
     Poseidon::render::depthstencil::Normal(/*hasStencil*/ false); // test on, LEQUAL, write on
@@ -312,19 +511,28 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 // the alpha-cutout batches with the texture-alpha-discard program (one bind per
 // caster texture). Depth/clear go through the Core bundles so the GL-state audits
 // stay green; ApplyPipeline re-owns depth/cull/texture on the next draw.
+// The pass sets its own polygon offset (SetPolygonOffsetForShadowDepth), so the
+// stored caster depth is the same whatever the last world draw left, and hands
+// the previous offset back afterwards.
+// `depthClamp` (remastered lighting): casters beyond the light's near plane are
+// flattened onto it instead of clipped. A sun a few degrees up throws shadows
+// hundreds of metres long, from casters far outside a cascade's depth range.
 bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades, int res, const float* solidXYZ,
                         int solidVertCount, const float* alphaXYZUV, int alphaVertCount,
-                        const ResolvedAlphaBatch* batches, int batchCount)
+                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp,
+                        const CasterCull* cull = nullptr, const float* dissolveVerts = nullptr,
+                        int dissolveVertCount = 0, const ResolvedDissolveBatch* dissolveBatches = nullptr,
+                        int dissolveBatchCount = 0)
 {
     const bool haveSolid = solidXYZ && solidVertCount >= 3;
     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
-    if (!glContext || !lightVPs || res <= 0 || numCascades < 1 || (!haveSolid && !haveAlpha))
+    const bool haveDissolve = dissolveVerts && dissolveVertCount >= 3 && dissolveBatches && dissolveBatchCount > 0;
+    if (!glContext || !lightVPs || res <= 0 || numCascades < 1 || (!haveSolid && !haveAlpha && !haveDissolve))
         return false;
-    if (!EnsureProgram() || !EnsureArrayTarget(res, numCascades) || !EnsureMesh())
-        return false;
-    if (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh()))
-        return false;
-
+    // Capture the bindings to restore before the Ensure* calls: creating a
+    // target or mesh binds (and leaves bound) framebuffer 0 and the new VAO, so
+    // capturing after them sent the rest of the frame after a first enable or a
+    // resolution change to the window instead of the frame target.
     GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
     GLint prevVP[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
@@ -332,11 +540,37 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
     glGetIntegerv(GL_VIEWPORT, prevVP);
+    auto restore = [&]()
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
+        glUseProgram(static_cast<GLuint>(prevProg));
+        glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArrayBuf));
+        GL33Bind::Vao(static_cast<GLuint>(prevVAO));
+    };
+    if (!EnsureProgram() || !EnsureArrayTarget(res, numCascades) || !EnsureMesh() ||
+        (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh() || !EnsureAlphaSampler())) ||
+        (haveDissolve && (!EnsureDissolveProgram() || !EnsureDissolveMesh() || !EnsureAlphaSampler())))
+    {
+        restore();
+        return false;
+    }
+    // Unit 0's sampler, handed back after the alpha batches.
+    GLint prevSampler0 = 0;
+    if (haveAlpha || haveDissolve)
+    {
+        GL33Bind::ActiveUnit(0);
+        glGetIntegerv(GL_SAMPLER_BINDING, &prevSampler0);
+    }
+    const Poseidon::render::pipeline::PolygonOffsetState prevOffset =
+        Poseidon::render::pipeline::CapturePolygonOffset();
+    Poseidon::render::pipeline::SetPolygonOffsetForShadowDepth();
 
     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);
     glViewport(0, 0, res, res);
     Poseidon::render::depthstencil::Normal(/*hasStencil*/ false);
     Poseidon::render::cull::None();
+    if (depthClamp)
+        Poseidon::render::pipeline::EnableDepthClamp();
 
     // Upload the (cascade-invariant) geometry once; only the light-VP changes per layer.
     if (haveSolid)
@@ -353,12 +587,93 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(alphaVertCount) * 5 * sizeof(float), alphaXYZUV,
                      GL_DYNAMIC_DRAW);
     }
+    if (haveDissolve)
+    {
+        GL33Bind::Vao(s_dissolveVao);
+        glBindBuffer(GL_ARRAY_BUFFER, s_dissolveVbo);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(dissolveVertCount) * 9 * sizeof(float), dissolveVerts,
+                     GL_DYNAMIC_DRAW);
+    }
+    // The band casters, into the current layer (few casters: no per-cascade cull).
+    auto drawDissolve = [&](int layer)
+    {
+        if (!haveDissolve)
+            return;
+        glUseProgram(s_dissolveProg);
+        glUniformMatrix4fv(s_dissolveLocVP, 1, GL_FALSE, lightVPs + layer * 16);
+        glUniform1i(s_dissolveLocTex, 0);
+        GL33Bind::ActiveUnit(0);
+        glBindSampler(0, s_alphaSampler);
+        GL33Bind::Vao(s_dissolveVao);
+        for (int b = 0; b < dissolveBatchCount; b++)
+        {
+            const ResolvedDissolveBatch& db = dissolveBatches[b];
+            if (db.vertexCount < 3)
+                continue;
+            if (db.solid)
+                Poseidon::render::cull::Front();
+            else
+                Poseidon::render::cull::None();
+            glUniform1i(s_dissolveLocAlpha, db.solid ? 0 : 1);
+            GL33Bind::Tex2D(0, db.handle);
+            glDrawArrays(GL_TRIANGLES, db.firstVertex, db.vertexCount);
+        }
+    };
 
     glClearDepth(1.0);
     for (int i = 0; i < numCascades; i++)
     {
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, s_arrTex, 0, i);
         Poseidon::render::clear::WithMask(GL_DEPTH_BUFFER_BIT);
+        drawDissolve(i);
+
+        if (cull)
+        {
+            // XP-shadows casterCull: only the casters whose bounds overlap this
+            // cascade's x/y range. A caster wholly outside it rasterises no
+            // fragment there, so the depth map is the same as the full draw.
+            s_cullVisible.assign(static_cast<size_t>(cull->casterCount), 0);
+            for (int c = 0; c < cull->casterCount; c++)
+                s_cullVisible[c] =
+                    Poseidon::shadow::xp::SphereInCascade(lightVPs + i * 16, cull->spheres + c * 4) ? 1 : 0;
+            if (haveSolid)
+            {
+                GatherRuns(cull->solidRuns, cull->solidRunCount, 0);
+                if (!s_cullFirst.empty())
+                {
+                    Poseidon::render::cull::Front();
+                    glUseProgram(s_prog);
+                    glUniformMatrix4fv(s_locVP, 1, GL_FALSE, lightVPs + i * 16);
+                    GL33Bind::Vao(s_vao);
+                    glMultiDrawArrays(GL_TRIANGLES, s_cullFirst.data(), s_cullCount.data(),
+                                      static_cast<GLsizei>(s_cullFirst.size()));
+                }
+            }
+            if (haveAlpha)
+            {
+                Poseidon::render::cull::None();
+                glUseProgram(s_alphaProg);
+                glUniformMatrix4fv(s_alphaLocVP, 1, GL_FALSE, lightVPs + i * 16);
+                glUniform1i(s_alphaLocTex, 0);
+                GL33Bind::ActiveUnit(0);
+                glBindSampler(0, s_alphaSampler);
+                GL33Bind::Vao(s_alphaVao);
+                for (int b = 0; b < batchCount; b++)
+                {
+                    if (batches[b].vertexCount < 3)
+                        continue;
+                    const int r0 = cull->alphaRunStart[b];
+                    const int r1 = cull->alphaRunStart[b + 1];
+                    GatherRuns(cull->alphaRuns + r0 * 3, r1 - r0, batches[b].firstVertex);
+                    if (s_cullFirst.empty())
+                        continue;
+                    GL33Bind::Tex2D(0, batches[b].handle);
+                    glMultiDrawArrays(GL_TRIANGLES, s_cullFirst.data(), s_cullCount.data(),
+                                      static_cast<GLsizei>(s_cullFirst.size()));
+                }
+            }
+            continue;
+        }
 
         if (haveSolid)
         {
@@ -380,6 +695,7 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
             glUniformMatrix4fv(s_alphaLocVP, 1, GL_FALSE, lightVPs + i * 16);
             glUniform1i(s_alphaLocTex, 0);
             GL33Bind::ActiveUnit(0);
+            glBindSampler(0, s_alphaSampler);
             GL33Bind::Vao(s_alphaVao);
             for (int b = 0; b < batchCount; b++)
             {
@@ -391,6 +707,11 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         }
     }
 
+    if (depthClamp)
+        Poseidon::render::pipeline::DisableDepthClamp(); // the 3D pass runs without it
+    Poseidon::render::pipeline::RestorePolygonOffset(prevOffset);
+    if (haveAlpha || haveDissolve)
+        glBindSampler(0, static_cast<GLuint>(prevSampler0));
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
     glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
     glUseProgram(static_cast<GLuint>(prevProg));
@@ -433,10 +754,43 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
         resolved.push_back({handle, src.firstVertex, src.vertexCount});
     }
 
-    const bool rendered = numCascades >= 1 &&
-                          RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ,
-                                             casters.solidVertexCount, casters.alphaXYZUV, casters.alphaVertexCount,
-                                             resolved.data(), static_cast<int>(resolved.size()));
+    // XP-shadows casterCull: per-cascade culling when the scene supplied the
+    // caster bounds and runs (every alpha batch kept, so the run table lines up).
+    CasterCull cull;
+    const bool useCull = casters.alphaRunStart && (casters.casterCount == 0 || casters.casterSpheres) &&
+                         static_cast<int>(resolved.size()) == casters.alphaBatchCount;
+    if (useCull)
+    {
+        cull.spheres = casters.casterSpheres;
+        cull.casterCount = casters.casterCount;
+        cull.solidRuns = casters.solidRuns;
+        cull.solidRunCount = casters.solidRunCount;
+        cull.alphaRuns = casters.alphaRuns;
+        cull.alphaRunStart = casters.alphaRunStart;
+    }
+    // POSEIDON_XP_LODBAND: the band casters' batches (no texture: solid).
+    std::vector<ResolvedDissolveBatch> dissolve;
+    dissolve.reserve(static_cast<size_t>(casters.dissolveBatchCount));
+    for (int b = 0; b < casters.dissolveBatchCount; b++)
+    {
+        const ShadowCasterBatch& src = casters.dissolveBatches[b];
+        TextureGL33* t33 = static_cast<TextureGL33*>(src.texture);
+        if (_textBank && t33)
+            _textBank->UseMipmap(t33, 0, 0);
+        GLuint handle = t33 ? t33->GetHandle() : _fallbackWhiteTex;
+        if (handle == 0)
+            handle = _fallbackWhiteTex;
+        dissolve.push_back({handle, t33 == nullptr, src.firstVertex, src.vertexCount});
+    }
+    GpuMark(Poseidon::gpu::Mark::ShadowBegin);
+    const bool rendered =
+        numCascades >= 1 &&
+        RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ, casters.solidVertexCount,
+                           casters.alphaXYZUV, casters.alphaVertexCount, resolved.data(),
+                           static_cast<int>(resolved.size()), _lightingActive, useCull ? &cull : nullptr,
+                           casters.dissolveVerts, casters.dissolveVertexCount, dissolve.data(),
+                           static_cast<int>(dissolve.size()));
+    GpuMark(Poseidon::gpu::Mark::ShadowEnd);
     if (numCascades >= 1)
     {
         // The cascade loop writes cull::Front/None directly and RenderCascadeArray
@@ -467,6 +821,22 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
     _shadowCamFwd[1] = camFwd3[1];
     _shadowCamFwd[2] = camFwd3[2];
     _shadowMapActive = true;
+    // The light view-projections are relative to this frame's camera; the lit
+    // pass samples them next frame from wherever the camera is then.
+    if (GScene && GScene->GetCamera())
+    {
+        const Vector3 cam = GScene->GetCamera()->Position();
+        _shadowCamPos[0] = cam.X();
+        _shadowCamPos[1] = cam.Y();
+        _shadowCamPos[2] = cam.Z();
+    }
+    if (_lightingActive)
+    {
+        // Draws later in this frame (blended objects, cockpits) sample the new
+        // map: hand them its matrices and a zero camera delta now.
+        UpdateShadowMapLitState();
+        UploadLitShadowDelta();
+    }
 }
 
 bool EngineGL33::DumpShadowMap(const char* path)

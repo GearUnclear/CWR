@@ -9,8 +9,13 @@
 #include <Poseidon/World/Simulation/FrameInv.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
+#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+#include <Poseidon/World/Scene/LodPop.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -60,6 +65,11 @@ struct StaticCasterCache
     };
     std::vector<AlphaChunk> alphaChunks;
     std::vector<float> alphaWorld; // xyzuv world
+    // XP-shadows casterCull: world AABB of every vertex above (only filled
+    // while the cull is on).
+    bool hasBounds = false;
+    float bmin[3] = {0.0f, 0.0f, 0.0f};
+    float bmax[3] = {0.0f, 0.0f, 0.0f};
 };
 std::unordered_map<Object*, StaticCasterCache> s_staticCasterCache;
 // Bound the cache footprint: typical shadow range holds a few hundred statics;
@@ -67,6 +77,139 @@ std::unordered_map<Object*, StaticCasterCache> s_staticCasterCache;
 // next frame rebuild what it actually uses.
 constexpr size_t kStaticCasterCacheCap = 1024;
 } // namespace
+
+// The sun ray the shadow maps are rendered along.
+// Classic keeps the shadow direction at least 11.5 degrees above the
+// horizon (LightSun::Recalculate). The remastered lighting shades with the
+// true sun, so its shadows follow it down to 4 degrees: full-length evening
+// shadows that line up with the lit and shaded sides of every object. At
+// night the remastered moon key (moonShadows) casts them from the moon.
+Vector3 Scene::SunShadowMapDirection() const
+{
+    Vector3 sd = _mainLight->ShadowDirection();
+    if (GEngine->LightingRemasterActive())
+    {
+        constexpr float kMinShadowSinElevation = 0.0698f; // sin(4 deg)
+        sd = GEngine->RemasterMoonKey() ? _mainLight->MoonDirection() : _mainLight->SunDirection();
+        if (sd.Y() > -kMinShadowSinElevation)
+        {
+            const float horiz = std::sqrt(std::max(sd.X() * sd.X() + sd.Z() * sd.Z(), 1e-8f));
+            const float cosE = std::sqrt(1.0f - kMinShadowSinElevation * kMinShadowSinElevation);
+            sd = Vector3(sd.X() / horiz * cosE, -kMinShadowSinElevation, sd.Z() / horiz * cosE);
+        }
+    }
+    return sd;
+}
+
+float Scene::ShadowMapCasterFar() const
+{
+    const Engine::ShadowMapTuning tune = GEngine->GetShadowMapTuning();
+    // POSEIDON_XP_SHADOWBAND: the maps reach the band further, so shadows keep
+    // full strength out to the shadow distance and fade out past it.
+    const float mapFar = Poseidon::shadow::xp::MapFar(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ,
+                                                      ENGINE_CONFIG.objectsZ, tune.reach) +
+                         Poseidon::shadow::xp::RadialFadeBand();
+    const float nearD = _camera ? _camera->ClipNear() : 0.0f;
+    return nearD + tune.distanceCoef * (mapFar - nearD);
+}
+
+// POSEIDON_XP_SHADOWKEEP (LodPop.hpp).
+void Scene::UpdateShadowKeep()
+{
+    static const bool s_env = LodPop::EnvFlagDefaultOn("POSEIDON_XP_SHADOWKEEP");
+    ShadowKeep& k = _shadowKeep;
+    k.on = false;
+    static const bool s_log = s_env || std::getenv("POSEIDON_XP_LODLOG");
+    if (!s_log || !_camera || !_mainLight || !GEngine)
+    {
+        return;
+    }
+    const Vector3 sun = SunShadowMapDirection();
+    const float size2 = sun.SquareSize();
+    if (size2 < 1e-6f || sun.Y() >= 0.0f)
+    {
+        k.sun = Vector3(0.0f, -1.0f, 0.0f);
+        return;
+    }
+    k.sun = sun * (1.0f / std::sqrt(size2));
+    k.eye = _camera->Position();
+    k.forward = _camera->Direction();
+    k.sunForward = k.sun.DotProduct(k.forward);
+    k.mapFar = ShadowMapCasterFar();
+    k.corner = std::sqrt(1.0f + Square(_camera->Left()) + Square(_camera->Top()));
+    k.cellLen = LodPop::ShadowLength(LodPop::kKeepCellHeight, -k.sun.Y());
+    k.on = s_env && GEngine->ShadowMapsEnabled();
+}
+
+bool Scene::ShadowKeepInReach(Vector3Par pos, float radius) const
+{
+    const ShadowKeep& k = _shadowKeep;
+    const float len = LodPop::ShadowLength(radius * 2.0f, -k.sun.Y());
+    if (Poseidon::shadow::xp::RadialFadeBand() > 0.0f)
+    {
+        // POSEIDON_XP_SHADOWBAND: the receivers fade by distance from the eye,
+        // so the cut is the nearest distance the shadow can reach.
+        const Vector3 rel = pos - k.eye;
+        return LodPop::MinShadowRadialDistance(rel.X(), rel.Y(), rel.Z(), k.sun.X(), k.sun.Y(), k.sun.Z(), len,
+                                               radius) <= k.mapFar;
+    }
+    const float depth = (pos - k.eye).DotProduct(k.forward);
+    return LodPop::MinShadowEyeDepth(depth, len, k.sunForward, radius) <= k.mapFar;
+}
+
+// An object outside the screen: does its shadow, followed along the sun ray,
+// come into view on ground the maps shade? Spheres along the ray, each tested
+// against the view frustum; they overlap, so nothing slips between them.
+bool Scene::ShadowKeepObject(Vector3Par pos, float radius) const
+{
+    const ShadowKeep& k = _shadowKeep;
+    const float len = LodPop::ShadowLength(radius * 2.0f, -k.sun.Y());
+    const float depth = (pos - k.eye).DotProduct(k.forward);
+    if (LodPop::MinShadowEyeDepth(depth, len, k.sunForward, radius) > k.mapFar)
+    {
+        return false;
+    }
+    if (_camera->IsClipped(pos + k.sun * (len * 0.5f), radius + len * 0.5f, 1))
+    {
+        return false;
+    }
+    const float r = radius > 1.0f ? radius : 1.0f;
+    int n = static_cast<int>(len / r) + 1;
+    n = n > 8 ? 8 : n;
+    const float step = len / static_cast<float>(n);
+    const float sphere = r > step * 0.6f ? r : step * 0.6f;
+    for (int i = 1; i <= n; i++)
+    {
+        if (!_camera->IsClipped(pos + k.sun * (step * static_cast<float>(i)), sphere, 1))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A grid cell of objects outside the screen: can anything in it cast into view?
+bool Scene::ShadowKeepCell(Vector3Par center, float radius) const
+{
+    const ShadowKeep& k = _shadowKeep;
+    const float reach = k.mapFar * k.corner + k.cellLen + radius;
+    if ((center - k.eye).SquareSize() > Square(reach))
+    {
+        return false;
+    }
+    const float depth = (center - k.eye).DotProduct(k.forward);
+    if (LodPop::MinShadowEyeDepth(depth, k.cellLen, k.sunForward, radius) > k.mapFar)
+    {
+        return false;
+    }
+    return !_camera->IsClipped(center + k.sun * (k.cellLen * 0.5f), radius + k.cellLen * 0.5f, 1);
+}
+
+int Scene::ShadowKeepBorder(float grid) const
+{
+    const int cells = static_cast<int>(_shadowKeep.cellLen / grid) + 2;
+    return cells > 8 ? 8 : cells;
+}
 
 // Shadow-map depth pass — extracted from Scene::DrawObjectsAndShadowsPass2 so
 // Scene.cpp stays under the file-size limit.  Collects the visible casters
@@ -86,18 +229,96 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     static std::vector<float> smAlphaVerts;                               // alpha: 5 floats/vert (xyz+uv)
     static std::vector<Engine::ShadowCasterBatch> smAlphaBatches;         // per-texture ranges
     static std::unordered_map<Texture*, std::vector<float>> s_alphaByTex; // scratch, reused
+    // XP-shadows casterCull: per caster a camera-relative bounding sphere, the
+    // solid runs and, per alpha bucket, its runs (first vertex in the bucket,
+    // count, caster) for RenderShadowDepthScene to cull per cascade.
+    static std::vector<float> smSpheres;
+    static std::vector<int> smSolidRuns;
+    static std::vector<int> smAlphaRuns;
+    static std::vector<int> smAlphaRunStart;
+    static std::unordered_map<Texture*, std::vector<int>> s_alphaRunsByTex;
     smVerts.clear();
     smAlphaVerts.clear();
     smAlphaBatches.clear();
+    smSpheres.clear();
+    smSolidRuns.clear();
+    smAlphaRuns.clear();
+    smAlphaRunStart.clear();
     g_lastShadowProxyVerts = 0;
     for (auto& kv : s_alphaByTex)
     {
         kv.second.clear();
     }
-    if (s_staticCasterCache.size() > kStaticCasterCacheCap)
+    for (auto& kv : s_alphaRunsByTex)
+    {
+        kv.second.clear();
+    }
+    const Engine::ShadowMapTuning xpTune = GEngine->GetShadowMapTuning();
+    const bool xpCull = xpTune.casterCull;
+    // Shadow-map far distance: the shadow distance as today, or (XP reach) the
+    // view distance's OFP share up to the reach cap and the object distance.
+    // (+ POSEIDON_XP_SHADOWBAND: full strength to the shadow distance, the fade past it.)
+    const float smMapFar = Poseidon::shadow::xp::MapFar(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ,
+                                                        ENGINE_CONFIG.objectsZ, xpTune.reach) +
+                           Poseidon::shadow::xp::RadialFadeBand();
+    // POSEIDON_XP_SHADOWFADE (LodPop.hpp): the dissolve's length, this frame's
+    // step of it, and a frame counter that tells "cast last frame" apart.
+    static const float smFadeSeconds = LodPop::EnvMilliseconds("POSEIDON_XP_SHADOWFADE");
+    static unsigned smFrameNumber = 0;
+    static Foundation::Time s_smLastTime = Glob.time;
+    float smFadeDt = Glob.time - s_smLastTime;
+    s_smLastTime = Glob.time;
+    saturate(smFadeDt, 0.0f, 0.1f);
+    ++smFrameNumber;
+    int smDissolving = 0;
+    // POSEIDON_XP_LODBAND (round 3): casters switch level over a distance band.
+    static const float s_casterBand = LodPop::LodDistBand();
+    const bool casterBand = s_casterBand > 0.0f && _shadowKeep.on;
+    // POSEIDON_XP_SHADOWKEEP adds the casters outside the screen: room for them.
+    const bool keepOn = _shadowKeep.on;
+    const size_t smCacheCap = keepOn ? std::max<size_t>(Poseidon::shadow::xp::CasterCacheCap(smMapFar), 6144)
+                              : xpTune.reach > 0.0f ? Poseidon::shadow::xp::CasterCacheCap(smMapFar)
+                                                    : kStaticCasterCacheCap;
+    if (s_staticCasterCache.size() > smCacheCap)
     {
         s_staticCasterCache.clear();
     }
+    static const int s_xpLogEvery = Poseidon::shadow::xp::ReadOverrides().logEvery;
+    static int s_xpLogFrame = 0;
+    if (s_xpLogEvery > 0 && ++s_xpLogFrame >= s_xpLogEvery)
+    {
+        s_xpLogFrame = 0;
+        gPerfDumpShadowsOnce = true;
+    }
+    // The current caster's index and its camera-relative AABB (cull only).
+    int xpCaster = 0;
+    float xpMin[3] = {0.0f, 0.0f, 0.0f};
+    float xpMax[3] = {0.0f, 0.0f, 0.0f};
+    auto xpGrow = [&](float x, float y, float z)
+    {
+        xpMin[0] = std::min(xpMin[0], x);
+        xpMin[1] = std::min(xpMin[1], y);
+        xpMin[2] = std::min(xpMin[2], z);
+        xpMax[0] = std::max(xpMax[0], x);
+        xpMax[1] = std::max(xpMax[1], y);
+        xpMax[2] = std::max(xpMax[2], z);
+    };
+    // Extend (or open) the current caster's run in an alpha bucket.
+    auto xpAlphaRun = [&](Texture* tex, int firstInBucket, int count)
+    {
+        std::vector<int>& runs = s_alphaRunsByTex[tex];
+        const size_t n = runs.size();
+        if (n >= 3 && runs[n - 1] == xpCaster && runs[n - 3] + runs[n - 2] == firstInBucket)
+        {
+            runs[n - 2] += count;
+        }
+        else
+        {
+            runs.push_back(firstInBucket);
+            runs.push_back(count);
+            runs.push_back(xpCaster);
+        }
+    };
     const int kSkipMask = NoShadow | ShadowDisabled | IsHidden | IsHiddenProxy;
     const int kAlphaMask = IsAlpha | IsTransparent;
     const Vector3 camPos = GetCamera()->Position(); // camera-relative render (PrepareMeshTLImpl)
@@ -108,18 +329,39 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     // object distance (no casters live past where objects draw).
     const Engine::ShadowMapTuning smCap = GEngine->GetShadowMapTuning();
     const float smCamNear = GetCamera()->ClipNear();
-    const float smShadowsZ = ENGINE_CONFIG.shadowsZ;
+    const float smShadowsZ = smMapFar;
     const float smShadowFar = smCamNear + smCap.distanceCoef * (smShadowsZ - smCamNear);
     const float smCasterMaxDist2 = Square(smShadowFar);
+    // XP-shadows casterMinPx: a caster of radius r at distance d spans
+    // r / (d * Top) * 540 pixels (half of 1080 rows); below the threshold it
+    // is left out. kMinPx2 = (minPx * Top / 540)^2 compared with r^2 / d^2.
+    const float xpMinPxK = xpTune.casterMinPx > 0.0f ? xpTune.casterMinPx * GetCamera()->Top() / 540.0f : 0.0f;
+    const float xpMinPxK2 = xpMinPxK * xpMinPxK;
+    int xpSmallSkipped = 0;
+    // Remastered sun shadows (Graphics/Remaster/SunShadows.hpp): with the
+    // treeShadows gate on, every static object casts whatever the legacy
+    // object-shadow toggle says.
+    remaster::FeatureGates smGates;
+    const bool smTreeShadows = GEngine->LightingRemasterActive() && GEngine->GetFeatureGates(smGates) &&
+                               smGates[remaster::Feature::TreeShadows].on;
 
     // Walk one shape's faces in WORLD space, dispatching triangles to the emit
     // callbacks. Used for live (camera-relative stream) and cache (world-space
     // store) collection so both share the classification + triangulation.
+    // dissolveT < 0: every face (as always). Otherwise POSEIDON_XP_SHADOWFADE:
+    // only the faces LodPop::FaceInDissolve keeps at that point of a dissolve.
+    float dissolveT = -1.0f;
+    bool dissolveIn = true;
     auto walkShape = [&](Shape* s, const FrameBase& frame, auto&& emitSolid, auto&& emitAlpha)
     {
+        int faceNumber = 0;
         for (Offset o = s->BeginFaces(); o < s->EndFaces(); s->NextFace(o))
         {
             const Poly& f = s->Face(o);
+            if (dissolveT >= 0.0f && !LodPop::FaceInDissolve(faceNumber++, dissolveT, dissolveIn))
+            {
+                continue;
+            }
             sm::CasterMode mode = sm::ClassifyShadowCaster(f.Special(), kSkipMask, kAlphaMask);
             if (mode == sm::CasterMode::Skip)
             {
@@ -157,6 +399,10 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             smVerts.push_back(w.X() - camPos.X());
             smVerts.push_back(w.Y() - camPos.Y());
             smVerts.push_back(w.Z() - camPos.Z());
+            if (xpCull)
+            {
+                xpGrow(w.X() - camPos.X(), w.Y() - camPos.Y(), w.Z() - camPos.Z());
+            }
         };
         push(w0);
         push(wa);
@@ -166,6 +412,10 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         [&](Texture* tex, Shape* s, const Vector3& w0, int i0, const Vector3& wa, int ia, const Vector3& wb, int ib)
     {
         std::vector<float>& buf = s_alphaByTex[tex];
+        if (xpCull)
+        {
+            xpAlphaRun(tex, static_cast<int>(buf.size() / 5), 3);
+        }
         auto push = [&](const Vector3& w, int vi)
         {
             buf.push_back(w.X() - camPos.X());
@@ -173,12 +423,59 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             buf.push_back(w.Z() - camPos.Z());
             buf.push_back(tex->UToLogical(s->U(vi)));
             buf.push_back(tex->VToLogical(s->V(vi)));
+            if (xpCull)
+            {
+                xpGrow(w.X() - camPos.X(), w.Y() - camPos.Y(), w.Z() - camPos.Z());
+            }
         };
         push(w0, i0);
         push(wa, ia);
         push(wb, ib);
     };
     auto collectShape = [&](Shape* s, const FrameBase& frame) { walkShape(s, frame, liveSolid, liveAlpha); };
+
+    // POSEIDON_XP_LODBAND with SHADOWKEEP: a caster in the band of a level
+    // switch goes into the dissolve stream with both levels whole; the depth
+    // pass keeps each fragment by a hash of its world cell against the key
+    // (Engine::ShadowCasterSet::dissolveVerts), so the levels hand over a few
+    // texels at a time. Bucketed per texture; nullptr holds the solid faces.
+    static std::unordered_map<Texture*, std::vector<float>> s_dissolveByTex;
+    static std::vector<float> smDissolveVerts;
+    static std::vector<Engine::ShadowCasterBatch> smDissolveBatches;
+    smDissolveVerts.clear();
+    smDissolveBatches.clear();
+    for (auto& kv : s_dissolveByTex)
+    {
+        kv.second.clear();
+    }
+    float dissolveKey = 0.0f;
+    auto pushDissolve = [&](std::vector<float>& buf, const Vector3& w, float u, float v)
+    {
+        buf.push_back(w.X() - camPos.X());
+        buf.push_back(w.Y() - camPos.Y());
+        buf.push_back(w.Z() - camPos.Z());
+        buf.push_back(u);
+        buf.push_back(v);
+        buf.push_back(LodPop::DissolveHashCoord(w.X()));
+        buf.push_back(LodPop::DissolveHashCoord(w.Y()));
+        buf.push_back(LodPop::DissolveHashCoord(w.Z()));
+        buf.push_back(dissolveKey);
+    };
+    auto dissolveSolid = [&](const Vector3& w0, const Vector3& wa, const Vector3& wb)
+    {
+        std::vector<float>& buf = s_dissolveByTex[nullptr];
+        pushDissolve(buf, w0, 0.0f, 0.0f);
+        pushDissolve(buf, wa, 0.0f, 0.0f);
+        pushDissolve(buf, wb, 0.0f, 0.0f);
+    };
+    auto dissolveAlpha =
+        [&](Texture* tex, Shape* s, const Vector3& w0, int i0, const Vector3& wa, int ia, const Vector3& wb, int ib)
+    {
+        std::vector<float>& buf = s_dissolveByTex[tex];
+        pushDissolve(buf, w0, tex->UToLogical(s->U(i0)), tex->VToLogical(s->V(i0)));
+        pushDissolve(buf, wa, tex->UToLogical(s->U(ia)), tex->VToLogical(s->V(ia)));
+        pushDissolve(buf, wb, tex->UToLogical(s->U(ib)), tex->VToLogical(s->V(ib)));
+    };
 
     // Cached static collection: build the entry's world-space buffers once,
     // emit per frame with a bulk camera-relative subtract.
@@ -224,6 +521,29 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             e.alphaChunks.back().count += 3;
         };
         walkShape(s, *obj, cacheSolid, cacheAlpha);
+        e.hasBounds = false;
+        if (xpCull)
+        {
+            bool first = true;
+            auto grow = [&](const float* q)
+            {
+                for (int a = 0; a < 3; a++)
+                {
+                    e.bmin[a] = first ? q[a] : std::min(e.bmin[a], q[a]);
+                    e.bmax[a] = first ? q[a] : std::max(e.bmax[a], q[a]);
+                }
+                first = false;
+            };
+            for (size_t i = 0; i + 2 < e.solidWorld.size(); i += 3)
+            {
+                grow(e.solidWorld.data() + i);
+            }
+            for (size_t i = 0; i + 4 < e.alphaWorld.size(); i += 5)
+            {
+                grow(e.alphaWorld.data() + i);
+            }
+            e.hasBounds = !first;
+        }
     };
     const float camX = camPos.X(), camY = camPos.Y(), camZ = camPos.Z();
     auto emitCachedEntry = [&](const StaticCasterCache& e)
@@ -238,10 +558,19 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             dst[i + 1] = src[i + 1] - camY;
             dst[i + 2] = src[i + 2] - camZ;
         }
+        if (xpCull && e.hasBounds)
+        {
+            xpGrow(e.bmin[0] - camX, e.bmin[1] - camY, e.bmin[2] - camZ);
+            xpGrow(e.bmax[0] - camX, e.bmax[1] - camY, e.bmax[2] - camZ);
+        }
         for (const StaticCasterCache::AlphaChunk& chunk : e.alphaChunks)
         {
             std::vector<float>& buf = s_alphaByTex[chunk.tex];
             const size_t b2 = buf.size();
+            if (xpCull)
+            {
+                xpAlphaRun(chunk.tex, static_cast<int>(b2 / 5), chunk.count);
+            }
             buf.resize(b2 + static_cast<size_t>(chunk.count) * 5);
             const float* asrc = e.alphaWorld.data() + static_cast<size_t>(chunk.first) * 5;
             float* adst = buf.data() + b2;
@@ -264,9 +593,22 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             continue;
         }
         // Beyond the shadow range nothing samples this caster's depth.
-        if (oi->distance2 > smCasterMaxDist2)
+        // (SHADOWKEEP: the receivers fade by eye depth, so the caster is cut by
+        // the eye depth its shadow can reach, not by its own distance: in a
+        // screen corner an object is past the range while the ground under it
+        // is still fully shaded.)
+        if (keepOn ? !ShadowKeepInReach(oi->object->Position(), oi->radius) : oi->distance2 > smCasterMaxDist2)
         {
             continue;
+        }
+        if (xpMinPxK2 > 0.0f)
+        {
+            const float r = oi->shape->BoundingSphere() * oi->object->Scale();
+            if (r * r < xpMinPxK2 * oi->distance2)
+            {
+                xpSmallSkipped++;
+                continue;
+            }
         }
         // Cast gate INDEPENDENT of the engine's shadow DISTANCE cull. The engine sets
         // shadowLOD = INVISIBLE beyond _shadowFogMaxRange (a near range tuned for the
@@ -274,7 +616,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         // casters. Shadow maps want every real caster the camera can see, so gate
         // only on "this never casts" (model NoShadow flag / CastShadow opt-out);
         // per-face NoShadow / alpha is still handled by ClassifyShadowCaster below.
-        if ((oi->shape->Special() & NoShadow) || !oi->object->CastShadow())
+        if ((oi->shape->Special() & NoShadow) ||
+            !remaster::CastsIntoSunShadowMap(oi->object->CastShadow(), oi->object->Static(), smTreeShadows))
         {
             continue;
         }
@@ -292,7 +635,21 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         // 250 battle soldiers at the 744-vert LOD dominated the collection (4 ms
         // CPU/frame). Never select finer than the draw LOD, and keep the screen
         // LOD untouched near the camera where the silhouette is texel-resolved.
-        if (smCap.casterLodBias > 1.0f)
+        // POSEIDON_XP_LODBAND with SHADOWKEEP: the caster level comes from the
+        // biased distance alone (never from the screen draw, which may be in
+        // its own cross-fade, nor from the pixel cull at the biased distance,
+        // which used to drop the caster back to the finer draw level), and in
+        // the band around a switch both levels go in, a share of faces each.
+        LodPop::LevelBlend casterBlend{geomLOD, geomLOD, 0.0f};
+        if (casterBand)
+        {
+            const float biased2 = oi->distance2 * Square(floatMax(smCap.casterLodBias, 1.0f));
+            LODShape* shape = oi->shape;
+            casterBlend = LodPop::BandBlend(LodResolution2(biased2), s_casterBand,
+                                            [shape](float r2) { return shape->FindSqrtLevel(r2, true); });
+            geomLOD = casterBlend.t >= 0.5f ? casterBlend.coarse : casterBlend.fine;
+        }
+        else if (smCap.casterLodBias > 1.0f)
         {
             const float biased2 = oi->distance2 * Square(smCap.casterLodBias);
             int coarse = LevelFromDistance2(oi->shape, biased2, oi->object->Scale(), oi->object->Direction(),
@@ -309,7 +666,80 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             continue;
         }
         censusCasters++;
-        if (oi->object->Static())
+        oi->smCast = static_cast<signed char>(geomLOD); // read by the pop log
+        const size_t xpSolidStart = smVerts.size();
+        if (xpCull)
+        {
+            xpMin[0] = xpMin[1] = xpMin[2] = 3.0e38f;
+            xpMax[0] = xpMax[1] = xpMax[2] = -3.0e38f;
+        }
+        // POSEIDON_XP_SHADOWFADE: a static caster that changes level dissolves
+        // from the old shape to the new one. Only between two levels of an
+        // object that cast in the frame before: a caster that is new to the
+        // maps arrives at their far edge, where the receivers have faded out.
+        bool dissolving = false;
+        if (casterBand)
+        {
+            if (casterBlend.fine != casterBlend.coarse && casterBlend.t > 0.0f && casterBlend.t < 1.0f &&
+                oi->object->Static())
+            {
+                Shape* fine = oi->shape->LevelOpaque(casterBlend.fine);
+                Shape* coarse = oi->shape->LevelOpaque(casterBlend.coarse);
+                if (fine && coarse && fine->NPos() > 0 && coarse->NPos() > 0)
+                {
+                    // Per fragment: the coarser level where the hash is under
+                    // its share t, the finer one everywhere else.
+                    dissolving = true;
+                    dissolveKey = LodPop::DissolveKey(casterBlend.t, true);
+                    walkShape(coarse, fb, dissolveSolid, dissolveAlpha);
+                    dissolveKey = LodPop::DissolveKey(casterBlend.t, false);
+                    walkShape(fine, fb, dissolveSolid, dissolveAlpha);
+                    smDissolving++;
+                }
+            }
+        }
+        else if (smFadeSeconds > 0.0f && oi->object->Static())
+        {
+            const bool castLastFrame = oi->smFrame + 1 == smFrameNumber && oi->smHeld >= 0;
+            if (!castLastFrame)
+            {
+                oi->smFadeFrom = LodPop::kNoLevel;
+            }
+            else if (oi->smHeld != geomLOD)
+            {
+                // Turning back in mid-dissolve: the same dissolve, run the other way.
+                const bool back = oi->smFadeFrom == geomLOD;
+                oi->smFadeT = back ? 1.0f - oi->smFadeT : 0.0f;
+                oi->smFadeFrom = oi->smHeld;
+            }
+            oi->smHeld = static_cast<signed char>(geomLOD);
+            oi->smFrame = smFrameNumber;
+            if (oi->smFadeFrom != LodPop::kNoLevel)
+            {
+                oi->smFadeT += smFadeDt / smFadeSeconds;
+                Shape* from = oi->smFadeT < 1.0f ? oi->shape->LevelOpaque(oi->smFadeFrom) : nullptr;
+                if (!from || from->NPos() <= 0)
+                {
+                    oi->smFadeFrom = LodPop::kNoLevel;
+                }
+                else
+                {
+                    dissolving = true;
+                    dissolveT = oi->smFadeT;
+                    dissolveIn = true;
+                    collectShape(s, fb);
+                    dissolveIn = false;
+                    collectShape(from, fb);
+                    dissolveT = -1.0f;
+                    smDissolving++;
+                }
+            }
+        }
+        if (dissolving)
+        {
+            // both shapes went in live, above
+        }
+        else if (oi->object->Static())
         {
             StaticCasterCache& e = s_staticCasterCache[oi->object];
             if (e.obj != oi->object || e.geomLOD != geomLOD || (e.pos - oi->object->Position()).SquareSize() != 0 ||
@@ -366,6 +796,34 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             collectShape(ps, pframe);
         }
         g_lastShadowProxyVerts += static_cast<int>((smVerts.size() - solidBeforeProxy) / 3);
+        if (xpCull)
+        {
+            // One sphere per caster (radius 0 at the origin when it emitted
+            // nothing), then its solid run.
+            if (xpMax[0] >= xpMin[0])
+            {
+                const float hx = 0.5f * (xpMax[0] - xpMin[0]);
+                const float hy = 0.5f * (xpMax[1] - xpMin[1]);
+                const float hz = 0.5f * (xpMax[2] - xpMin[2]);
+                smSpheres.push_back(xpMin[0] + hx);
+                smSpheres.push_back(xpMin[1] + hy);
+                smSpheres.push_back(xpMin[2] + hz);
+                smSpheres.push_back(std::sqrt(hx * hx + hy * hy + hz * hz) * 1.001f + 0.01f);
+            }
+            else
+            {
+                smSpheres.insert(smSpheres.end(), {0.0f, 0.0f, 0.0f, 0.0f});
+            }
+            const int solidFirst = static_cast<int>(xpSolidStart / 3);
+            const int solidCount = static_cast<int>((smVerts.size() - xpSolidStart) / 3);
+            if (solidCount > 0)
+            {
+                smSolidRuns.push_back(solidFirst);
+                smSolidRuns.push_back(solidCount);
+                smSolidRuns.push_back(xpCaster);
+            }
+            xpCaster++;
+        }
     }
     gSmDepthCachedCasters = censusCached;
     // Flatten the per-texture alpha buckets into one buffer + batch ranges.
@@ -381,6 +839,29 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         batch.vertexCount = static_cast<int>(kv.second.size() / 5);
         smAlphaVerts.insert(smAlphaVerts.end(), kv.second.begin(), kv.second.end());
         smAlphaBatches.push_back(batch);
+        if (xpCull)
+        {
+            smAlphaRunStart.push_back(static_cast<int>(smAlphaRuns.size() / 3));
+            const std::vector<int>& runs = s_alphaRunsByTex[kv.first];
+            smAlphaRuns.insert(smAlphaRuns.end(), runs.begin(), runs.end());
+        }
+    }
+    if (xpCull)
+    {
+        smAlphaRunStart.push_back(static_cast<int>(smAlphaRuns.size() / 3));
+    }
+    for (auto& kv : s_dissolveByTex)
+    {
+        if (kv.second.empty())
+        {
+            continue;
+        }
+        Engine::ShadowCasterBatch batch;
+        batch.texture = kv.first;
+        batch.firstVertex = static_cast<int>(smDissolveVerts.size() / 9);
+        batch.vertexCount = static_cast<int>(kv.second.size() / 9);
+        smDissolveVerts.insert(smDissolveVerts.end(), kv.second.begin(), kv.second.end());
+        smDissolveBatches.push_back(batch);
     }
     // Cascaded shadow maps fit in camera-relative space, snapped to a world grid
     // (ShadowMath::BuildShadowCascadesTiered, proven by [ShadowMath] unit tests), so
@@ -392,7 +873,7 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     Vector3Val cF = cam->Direction();
     Vector3Val cR = cam->DirectionAside();
     Vector3Val cU = cam->DirectionUp();
-    Vector3Val sd = _mainLight->ShadowDirection();
+    const Vector3 sd = SunShadowMapDirection();
 
     sm::CascadeBuildParams bp;
     bp.camPos = {camPos.X(), camPos.Y(), camPos.Z()};
@@ -405,7 +886,7 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     // Pair the cascade reach with the shadow visibility distance (Game-menu Shadows
     // slider, clamped to the object distance), not the camera far-clip: the frustum
     // tiers cover exactly as far as shadows are meant to render.
-    bp.farD = ENGINE_CONFIG.shadowsZ;
+    bp.farD = smMapFar;
     bp.sunDir = {sd.X(), sd.Y(), sd.Z()};
     bp.count = tune.cascadeCount;
     bp.distanceCoef = tune.distanceCoef;
@@ -415,16 +896,20 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     bp.omniCount = tune.omniCount;
     bp.omniCoef[0] = tune.omniCoef0;
     bp.omniCoef[1] = tune.omniCoef1;
+    bp.tightSphere = tune.tightSphere;
     const sm::CascadeSet cs = sm::BuildShadowCascadesTiered(bp);
     if (gPerfDumpShadowsOnce)
     {
         const double collectMs =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - depthT0).count();
-        LOG_INFO(Graphics,
-                 "PERF smdepth: {} casters ({} cached, {} rebuilt), {} solid + {} alpha verts collected in {:.2f} "
-                 "ms CPU",
-                 censusCasters, censusCached, censusRebuilds, (int)(smVerts.size() / 3), (int)(smAlphaVerts.size() / 5),
-                 collectMs);
+        LOG_INFO(
+            Graphics,
+            "PERF smdepth: {} casters ({} cached, {} rebuilt), {} solid + {} alpha verts collected in {:.2f} "
+            "ms CPU; map far {:.0f} m, res {}, cascades {} (omni {}), cache {} entries, cull {}, small skipped {}, "
+            "dissolving {}",
+            censusCasters, censusCached, censusRebuilds, (int)(smVerts.size() / 3), (int)(smAlphaVerts.size() / 5),
+            collectMs, smMapFar, smRes, cs.count, cs.omniCount, s_staticCasterCache.size(), xpCull ? 1 : 0,
+            xpSmallSkipped, smDissolving);
         gPerfDumpShadowsOnce = false;
     }
 
@@ -441,6 +926,19 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     casterSet.alphaVertexCount = static_cast<int>(smAlphaVerts.size() / 5);
     casterSet.alphaBatches = smAlphaBatches.data();
     casterSet.alphaBatchCount = static_cast<int>(smAlphaBatches.size());
+    casterSet.dissolveVerts = smDissolveVerts.data();
+    casterSet.dissolveVertexCount = static_cast<int>(smDissolveVerts.size() / 9);
+    casterSet.dissolveBatches = smDissolveBatches.data();
+    casterSet.dissolveBatchCount = static_cast<int>(smDissolveBatches.size());
+    if (xpCull)
+    {
+        casterSet.casterSpheres = smSpheres.data();
+        casterSet.casterCount = static_cast<int>(smSpheres.size() / 4);
+        casterSet.solidRuns = smSolidRuns.data();
+        casterSet.solidRunCount = static_cast<int>(smSolidRuns.size() / 3);
+        casterSet.alphaRuns = smAlphaRuns.data();
+        casterSet.alphaRunStart = smAlphaRunStart.data();
+    }
     GEngine->RenderShadowDepthScene(vps, cs.splitViewDist, camFwd, cs.count, cs.omniCount, smRes, casterSet);
 }
 

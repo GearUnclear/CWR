@@ -82,7 +82,6 @@ TextBankGL33::~TextBankGL33()
     PoseidonAssert(_texture.Size() == 0);
     _texture.Clear();
     _detail.Free();
-    _waterBump.Free();
     _specular.Free();
     _grass.Free();
 

@@ -657,9 +657,10 @@ async fn spawn_game_instance(
     let user_dir_str = user_dir.to_string_lossy().to_string();
     let output_str = inst_output.to_string_lossy().to_string();
     let machine_id = format!("trident:stress:{}", inst.name);
+    let cache_dir = super::poseidon_cache_dir(&user_dir_str);
     let env_vars = [
         ("POSEIDON_USER_DIR", user_dir_str.as_str()),
-        ("POSEIDON_CACHE_DIR", user_dir_str.as_str()),
+        ("POSEIDON_CACHE_DIR", cache_dir.as_str()),
         ("POSEIDON_TEMP_DIR", user_dir_str.as_str()),
         ("POSEIDON_TEST_MACHINE_ID", machine_id.as_str()),
         ("TRI_OUTPUT_DIR", output_str.as_str()),
