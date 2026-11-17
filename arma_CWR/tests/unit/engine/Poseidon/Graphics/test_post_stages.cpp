@@ -735,3 +735,68 @@ TEST_CASE("Post stages: the backend runs every landed stage and marks it from th
         CHECK(CountOf(post, label) == (s.landed ? 1 : 0));
     }
 }
+
+TEST_CASE("Post stages: the far slice's depth is put back to the world's projection",
+          "[Graphics][remaster][PostStages][Kaiju]")
+{
+    // While a far-drawn unit (Game/Kaiju) is on screen the world is drawn into
+    // the window depths [0, split] and the unit into [split, 1). The post
+    // stages read [0, 1] under the world's projection: the put-back must give
+    // the world its own depths back, keep the sky, and hand the unit a stand-in
+    // inside the world that no stage takes for the sky.
+    const float split = 0.95f; // Kaiju::kFarDepthSplit
+    const float standIn = 0.9999f;
+    for (float x = 0.0f; x < 1.0f; x += 1.0f / 512.0f)
+    {
+        CAPTURE(x);
+        CHECK(std::fabs(FarSliceDepth(x * split, split, standIn) - x) < 1e-6f);
+    }
+    CHECK(FarSliceDepth(1.0f, split, standIn) == 1.0f);
+    for (float d = split; d < 1.0f; d += 1.0f / 4096.0f)
+        CHECK(FarSliceDepth(d, split, standIn) == standIn);
+    CHECK(FarSliceDepth(std::nextafter(1.0f, 0.0f), split, standIn) == standIn);
+
+    // The stand-in: 0.9 of the far plane under both depth conventions (clip
+    // control, depth = ndcZ; without it, depth = (ndcZ + 1) / 2), never as deep
+    // as the post stages' sky test.
+    struct Proj
+    {
+        float p33, p43, scale, bias;
+    };
+    for (float n : {0.07f, 0.2f})
+        for (float f : {500.0f, 900.0f, 2000.0f, 5000.0f})
+        {
+            CAPTURE(n, f);
+            const Proj d3d{f / (f - n), -n * f / (f - n), 1.0f, 0.0f};
+            const Proj gl{(f + n) / (f - n), -2.0f * f * n / (f - n), 2.0f, -1.0f};
+            for (const Proj& p : {d3d, gl})
+            {
+                CHECK(std::fabs(ViewZAtWindowDepth(1.0f, p.p33, p.p43, p.scale, p.bias) - f) < 1e-2f * f); // float, near 1
+                for (float z : {1.0f, 50.0f, 0.5f * f})
+                    CHECK(std::fabs(ViewZAtWindowDepth(WindowDepthAtViewZ(z, p.p33, p.p43, p.scale, p.bias), p.p33,
+                                                       p.p43, p.scale, p.bias) -
+                                    z) < 1e-2f * z);
+                const float s = FarSliceStandInDepth(p.p33, p.p43, p.scale, p.bias);
+                CHECK(s < 0.999999f);
+                CHECK(s > 0.99f);
+                const float zs = ViewZAtWindowDepth(s, p.p33, p.p43, p.scale, p.bias);
+                // 0.9 of the far plane, or nearer where the sky margin clamps it
+                // (a long view with a short near plane).
+                CHECK(zs <= kFarSliceStandIn * f * 1.02f);
+                CHECK(zs > 0.5f * f);
+                CHECK(zs < 0.95f * f); // short of the fog's horizon plates
+            }
+        }
+    // A degenerate projection leaves the unit at the sky margin, not the sky.
+    CHECK(FarSliceStandInDepth(1.0f, 0.0f, 1.0f, 0.0f) == kFarSliceSkyMargin);
+
+    // The shader computes the same function, and the fog's and the air's apply
+    // keep the far draw's floor only where the mark is set this frame.
+    const std::string shaders = ReadTextFile(Gl33Dir() / "EngineGL33_PostShaders.cpp");
+    CHECK(CountOf(shaders, "o = d / farSlice.x;") == 1);
+    CHECK(CountOf(shaders, "{\"psPostFarDepth\", {s_psPostFarDepthGLSL}}") == 1);
+    const std::string fog = ReadTextFile(Gl33Dir() / "EngineGL33_PostFogShaders.cpp");
+    CHECK(CountOf(fog, "farKeep.x > 0.5 && texelFetch(farMask") == 1);
+    const std::string air = ReadTextFile(Gl33Dir() / "EngineGL33_PostAirShaders.cpp");
+    CHECK(CountOf(air, "farKeep.x > 0.5 && texelFetch(farMask") == 1);
+}

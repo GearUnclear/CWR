@@ -194,7 +194,7 @@ layout(std140) uniform VSConstants {
     vec4 ambient;       // c13
     vec4 diffuse;       // c14
     vec4 emissive;      // c15
-    vec4 fogParam;      // c16: {start, invRange, enabled, 0}
+    vec4 fogParam;      // c16: {start, invRange, enabled, visibility floor (0 = none)}
     vec4 camPos;        // c17
     vec4 specular;      // c18: rgb + power(w)
     vec4 specEn;        // c19
@@ -261,7 +261,10 @@ void main() {
 
     float dist = length(worldPos.xyz - camPos.xyz);
     float fogFactor = clamp(1.0 - (dist - fogParam.x) * fogParam.y, 0.0, 1.0);
-    vFogTC = (fogParam.z > 0.5) ? fogFactor : 1.0;
+    // fogParam.w: the visibility floor of SetFogFloor (a far-drawn kaiju), as in
+    // the classic VSTransform. It is 0 otherwise, and max() with 0 leaves the
+    // clamped factor exactly as it was.
+    vFogTC = (fogParam.z > 0.5) ? max(fogFactor, fogParam.w) : 1.0;
 
     vUV0 = (texCtrl.x > 0.5) ? (texMat0 * vec4(uv, 0, 1)).xy : uv;
     vUV1 = (texCtrl.y > 0.5) ? (texMat1 * vec4(uv, 0, 1)).xy : uv;

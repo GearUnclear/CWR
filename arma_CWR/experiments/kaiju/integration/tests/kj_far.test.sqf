@@ -44,8 +44,12 @@ kjrPt = (KJD_class GetVehicleParam "kjFurnacePoint")
 kjrLimit = kjGet [kaiju, "farDraw"]
 // the view from so many metres south of him, 30 m above the sea, at his furnace point
 kjrView = { private ["_f"]; _f = kjPoint [kaiju, kjrPt]; if ((count _f) != 3) then { _f = [(getPosASL kaiju) select 0, (getPosASL kaiju) select 1, ((getPosASL kaiju) select 2) + 27] }; [_f select 0, 30, (_f select 1) - _this, 0, (_f select 2) - 30, _this] }
-// the brightest and the mean of a grid of pixels round the middle of the frame
-kjrMeasure = { private ["_m", "_s", "_n", "_v", "_u"]; _m = 0; _s = 0; _n = 0; { _u = _x; { _v = triGetPixelMaxChannel [0.5 + 0.02 * _u, 0.5 + 0.035 * _x]; if (_v > _m) then { _m = _v }; _s = _s + _v; _n = _n + 1 } forEach [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1] } forEach [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1]; [_m, _s / _n] }
+// the brightest and the mean of a dense grid of pixels round the middle of the frame:
+// 33 x 33 points over the middle 4% x 7% (every second pixel at 1600 x 900). Far off
+// the furnace is a few pixels across behind grille bars, so a sparse grid can miss it
+// whole (a 9 x 9 grid read 56 on a 5 km Hound frame whose furnace peaks at 209).
+kjrIdx = [-16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+kjrMeasure = { private ["_m", "_s", "_n", "_v", "_u"]; _m = 0; _s = 0; _n = 0; { _u = _x; { _v = triGetPixelMaxChannel [0.5 + 0.00125 * _u, 0.5 + 0.0021875 * _x]; if (_v > _m) then { _m = _v }; _s = _s + _v; _n = _n + 1 } forEach kjrIdx } forEach kjrIdx; [_m, _s / _n] }
 logInfo format ["KJR creature %1, far limit %2 m, view distance %3", KJD_class, kjrLimit, triGetViewDistance]
 triSetView (2300 call kjrView)
 triSimFrames 20
@@ -53,7 +57,7 @@ triScreenshot "00_warmup_discard"
 kjrLog = []
 // [metres, name of the frame] call kjrShot
 kjrShot = { triSetView ((_this select 0) call kjrView) }
-kjrNote = { kjrLog = kjrLog + [[_this select 0, kjFarState kaiju, call kjrMeasure]]; logInfo format ["KJR %1 at %2 m: far state %3 (mode, metres, fog floor, frames normal, frames far), middle of the frame [brightest, mean] %4", _this select 1, _this select 0, kjFarState kaiju, call kjrMeasure] }
+kjrNote = { private ["_r"]; _r = call kjrMeasure; kjrLog = kjrLog + [[_this select 0, kjFarState kaiju, _r]]; logInfo format ["KJR %1 at %2 m: far state %3 (mode, metres, fog floor, frames normal, frames far), middle of the frame [brightest, mean] %4", _this select 1, _this select 0, kjFarState kaiju, _r] }
 
 // ---- by day -------------------------------------------------------------------------
 [2300, "day"] call kjrShot

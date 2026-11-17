@@ -168,6 +168,9 @@ enum class PostShader : int
     FogApply,
     FogRing, // the horizon ring: the sky's colour above the land in every azimuth
     FogGlow, // the night glow: the frame's light blurred, laid into the fog at night
+    // The far slice's depth put back after the resolve, and the far unit's
+    // mark (EngineGL33::FarSliceDepth, a frame with a far-drawn unit only).
+    FarDepth,
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -245,6 +248,11 @@ constexpr int kFogRingUnit = kLightTileUnit;
 // reads no ring). It has no sampler object, so the glow keeps its own
 // clamped filtering; the apply unbinds it at its end.
 constexpr int kFogGlowUnit = kLightTileUnit;
+// The far unit's mark (EngineGL33::FarSliceDepth: 1 where a unit of the far
+// slice was drawn), read by the fog's and the air's apply on the decal batch's
+// unit, which only a batched decal draw binds (with its own sampler); the
+// apply binds it with no sampler object and unbinds it at its end.
+constexpr int kFarMaskUnit = kDecalLayerUnit;
 
 namespace detail
 {

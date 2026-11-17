@@ -1191,8 +1191,12 @@ void EngineGL33::PostFog(const PostFrame& f)
          m.classicFloor ? 1.0f : 0.0f);
     Set4(apply, "fogClassicC", m.classicClear.start, m.classicClear.end, m.classicClear.tactical, 0.0f);
     SetMat3(apply, "viewToWorld", viewToWorld);
+    // A far-drawn unit's mark (of the depth the fog reads, saved or resolved).
+    int farSaved[2];
+    BindFarMask(apply, farSaved, /*onWorldSave*/ true);
     // Under night vision straight into the frame target (no composite follows).
     DrawTo(nvg ? _ssaaFbo : _fog.outFbo, f.w, f.h);
+    UnbindFarMask(farSaved);
 
     // Hand the units back: no glow, 3D volume or floor left bound.
     glActiveTexture(GL_TEXTURE0 + kFogGlowUnit);

@@ -742,6 +742,33 @@ void main() {
 }
 )";
 
+// The far slice put back (EngineGL33::FarSliceDepth, after the resolve, only on
+// a frame that drew a unit past the far plane into the depth range's far slice;
+// Graphics/Remaster/PostStages.hpp FarSliceDepth is the same function). From a
+// copy of the resolved depth into that depth: the world's d < split becomes
+// d / split, the cleared depth stays 1, and the far unit's depths take the
+// stand-in and the mark (farMask 1) the fog's apply reads.
+static const char s_psPostFarDepthGLSL[] = R"(#version 330 core
+uniform sampler2D depthTex; // the resolved depth (a copy: the target is the depth itself)
+uniform vec4 farSlice;      // x the split, y the far unit's stand-in depth
+layout(location = 0) out vec4 farMask;
+void main() {
+    float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r;
+    float o = d;
+    float m = 0.0;
+    if (d >= 1.0) {
+        o = 1.0;
+    } else if (d < farSlice.x) {
+        o = d / farSlice.x;
+    } else {
+        o = farSlice.y;
+        m = 1.0;
+    }
+    gl_FragDepth = o;
+    farMask = vec4(m, 0.0, 0.0, 1.0);
+}
+)";
+
 // TAA resolve (the Temporal stage; Graphics/Remaster/TemporalAA.hpp).
 // This frame was drawn with a sub-pixel jitter; the history is the resolved
 // frame before it, with each pixel's view depth in alpha. Per pixel:
@@ -1057,6 +1084,7 @@ const PostShaderDef kPostShaders[] = {
     {"psFogGlow",
      {Poseidon::gl33lighting::kPostFogGlowGLSL, Poseidon::gl33lighting::kCameraCodecGLSL,
       Poseidon::gl33lighting::kPostFogGlowMainGLSL}},
+    {"psPostFarDepth", {s_psPostFarDepthGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

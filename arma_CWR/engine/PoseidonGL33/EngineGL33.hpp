@@ -1224,6 +1224,27 @@ class EngineGL33 : public Engine
         bool programsFailed = false;
         int failedW = 0, failedH = 0;
     } _post;
+    // The far slice of the depth range (Game/Kaiju/KaijuFarDraw.cpp through
+    // SetDepthRange): the frame that reserved it, its split, the highest fog
+    // floor drawn into it (SetFogFloor while the slice is the live range), and
+    // the targets that put the depth back after the resolve (FarSliceDepth,
+    // EngineGL33_PostFogViews.cpp). Built on the first frame that needs them.
+    // The fog's and the air's apply read the mark on the frame maskFrame.
+    struct FarSliceState
+    {
+        std::uint32_t frame = 0xffffffffu;
+        float split = 1.0f;
+        float floor = 0.0f;
+        bool inSlice = false; // the live range is the far slice [split, 1]
+        std::uint32_t maskFrame = 0xffffffffu;
+        bool maskOnSave = false; // the mark is of a vehicle interior's saved world depth
+        int w = 0, h = 0;
+        unsigned int copyTex = 0, copyFbo = 0; // D24S8: the depth to put back, read by psPostFarDepth
+        unsigned int maskTex = 0;              // R8: 1 where the far unit was drawn
+        unsigned int fbo = 0;                  // maskTex and the depth being put back
+        unsigned int prog = 0;  // psPostFarDepth, linked with the post programs
+        bool failed = false;    // the targets came back incomplete at w x h
+    } _farSlice;
     // TAA frame state (EngineGL33_PostTemporal.cpp, Graphics/Remaster/TemporalAA.hpp).
     struct TaaState
     {
@@ -1534,6 +1555,19 @@ class EngineGL33 : public Engine
     // its glass is the nearest surface get the far depth, so the fog's apply
     // fogs the world seen through the glass and keeps the cockpit as drawn.
     void FarInteriorGlass(const PostFrame& f);
+    // After the resolve of a frame that reserved the far slice (_farSlice): the
+    // resolved depth, and a vehicle interior's saved world depth, put back to
+    // the world's projection over [0, 1], and the far unit's mark. A frame
+    // without the slice does nothing here.
+    void FarSliceDepth(const PostFrame& f);
+    void DestroyFarSlice();
+    // The mark for an apply program: on a frame with it, bound on kFarMaskUnit
+    // (the unit's texture and sampler saved in `saved`) and farKeep = (1, the
+    // floor); else farKeep = 0 and nothing bound. A mark taken from a vehicle
+    // interior's saved world depth serves only an apply that reads that depth
+    // (onWorldSave).
+    void BindFarMask(unsigned int prog, int saved[2], bool onWorldSave);
+    void UnbindFarMask(const int saved[2]);
     // The depth the fog stages read: the world's (saved before a vehicle
     // interior cleared it), else the resolved frame's.
     unsigned int PostFogDepthTex() const;

@@ -360,6 +360,10 @@ void EngineGL33::PostAir(const PostFrame& f)
         Set4(prog, "airSpotTint", tint[0] / tintLum, tint[1] / tintLum, tint[2] / tintLum, 0.0f);
     else
         Set4(prog, "airSpotTint", 1.0f, 1.0f, 1.0f, 0.0f);
+    // A far-drawn unit's mark (it reads the resolved depth, not a saved one).
+    int farSaved[2];
+    BindFarMask(prog, farSaved, /*onWorldSave*/ false);
     DrawTo(p.airOutFbo, f.w, f.h);
+    UnbindFarMask(farSaved);
     glActiveTexture(GL_TEXTURE0);
 }

@@ -5,6 +5,9 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
+#include <algorithm>
+#include <cstdint>
+
 void EngineGL33::PrepareMesh(const Poseidon::render::LegacySpec& /*spec*/)
 {
     BeginScreenPass();
@@ -49,6 +52,10 @@ void EngineGL33::UpdateProjection()
 
 void EngineGL33::SetFogFloor(float visibility)
 {
+    // A floor set while the far slice is the live range is a far-drawn unit's:
+    // the fog's apply gives his pixels the highest of the frame (FarSliceDepth).
+    if (_farSlice.inSlice && _farSlice.frame == GetFrameCounter())
+        _farSlice.floor = std::max(_farSlice.floor, visibility);
     if (_fogFloor == visibility)
         return;
     // fogParam.w is the visibility floor of VSTransform; mesh draws are
@@ -69,6 +76,20 @@ void EngineGL33::SetDepthRange(float zNear, float zFar)
     // commit under the old range, whichever pass is active
     FlushAndFreeAllQueues(_queueNo, true);
     glDepthRange(zNear, zFar);
+    // Any range but [0, 1] is the far slice (Game/Kaiju): the world in
+    // [0, split], a far unit in [split, 1]. The post pass puts the depth back
+    // on this frame (FarSliceDepth); FarEndScene restores [0, 1] before it.
+    const std::uint32_t frame = GetFrameCounter();
+    if (zNear > 0.0f || zFar < 1.0f)
+    {
+        if (_farSlice.frame != frame)
+        {
+            _farSlice.frame = frame;
+            _farSlice.floor = 0.0f;
+        }
+        _farSlice.split = zNear > 0.0f ? zNear : zFar;
+    }
+    _farSlice.inSlice = zNear > 0.0f && _farSlice.frame == frame;
 }
 
 bool EngineGL33::InstancedRunAdd(const Matrix4& modelToWorld)
