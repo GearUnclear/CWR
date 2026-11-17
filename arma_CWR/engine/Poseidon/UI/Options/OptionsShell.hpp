@@ -53,8 +53,19 @@ public:
 	// Pages.  Push transfers ownership; the page is Mounted immediately
 	// and its DefaultFocusIdc is focused.  Pop tears down the top page
 	// and re-shows the page beneath (if any).
+	//
+	// Pop unmounts at once but does NOT destroy the page: the caller is
+	// very often the page itself (Close row, Esc, a modal's Resolve, the
+	// pointer poll inside OnSimulate), and its code keeps running on that
+	// object after PopPage returns.  The popped page is parked in
+	// m_retired and destroyed by ReleaseRetiredPages at the start of the
+	// next OnSimulate, when no page frame is on the stack.
 	void PushPage(std::unique_ptr<OptionsPage> page);
 	void PopPage();
+	// Destroy every page Pop (or teardown) parked.  Only safe to call when
+	// no page method is on the call stack.
+	void ReleaseRetiredPages();
+	size_t RetiredPageCount() const { return m_retired.size(); }
 
 	// The notebook every page mounts into when the shell resources are
 	// loaded.  Unit tests can also drive a debug fallback focus path.
@@ -103,6 +114,8 @@ private:
 	void BeginCloseAnim(int exitIdc);
 
 	std::vector<std::unique_ptr<OptionsPage>> m_stack;
+	// Unmounted pages awaiting destruction (see PopPage).
+	std::vector<std::unique_ptr<OptionsPage>> m_retired;
 	std::vector<int> m_debugNotebookIdcs;
 	int _debugFocusedNotebookIdc = -1;
 	bool _credits;

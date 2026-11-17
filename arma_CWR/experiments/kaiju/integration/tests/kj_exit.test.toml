@@ -1,0 +1,8 @@
+# Dedushka integration: the game exits cleanly with a kjLight still on him (the engine's
+# Kaiju::Shutdown from World::~World). Kaiju binary only. Run: integration/run-kj.ps1 -Name kj_exit
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/DedushkaLab.Eden"
+timeout = 600
+assert_timeout = 120
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_dedushka"]

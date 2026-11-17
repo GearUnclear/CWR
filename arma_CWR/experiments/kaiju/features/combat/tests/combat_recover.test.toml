@@ -1,0 +1,13 @@
+# Dedushka COMBAT: left alone he mends, slowly, and never all the way. Nothing fires.
+# Experiment, kept out of tests/integration so a sweep never runs it. Weapons
+# fire in the kaiju tests is allowed by the owner (2026-11-12); the run stays
+# silent (--nosound). Needs the combat variant of the creature addon,
+# <git root>/tmp/@kj_combat (../addon/build-kjcombat.ps1), mounted in place of
+# @uddedushka. Run it through ../run-combat.ps1: one game, hidden desktop,
+# --render gl33, the kaiju engine build by default (-Stock for the stock one).
+tags = ["kaiju", "experiment", "combat", "quiet"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/combat/KjCombat.Eden"
+timeout = 480
+assert_timeout = 300
+extra_args = ["--nosound", "--no-strict", "--width", "1280", "--height", "720", "--mods-dir", "..", "--mod", "@kj_combat"]

@@ -1,0 +1,11 @@
+; Test helper: keeps an empty aircraft hanging at a point for as long as it lives,
+; so a beam test has something in the sky without anyone flying or firing.
+;   [aircraft, [x, y, height]] exec "hold.sqs"
+_h = _this select 0
+_p = _this select 1
+#l
+_h setPos _p
+_h setVelocity [0, 0, 0]
+~0.01
+? alive _h : goto "l"
+exit

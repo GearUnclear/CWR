@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Application.hpp>
 
@@ -1013,6 +1014,16 @@ bool Church::IsAnimatedShadow(int level) const
 
 void Church::Animate(int level)
 {
+    // A destroyed church never showed its collapse: the clock hands are
+    // turned here and the base, which morphs a destroyed object to its
+    // collapsed shape, was never called. With a giant in the world (Game/Kaiju)
+    // a destroyed church takes the base path and leaves its hands alone; with
+    // none the stock behaviour is kept as it was.
+    if (Kaiju::GTraitCount && _isDestroyed)
+    {
+        base::Animate(level);
+        return;
+    }
     float timeOfDay = Glob.clock.GetTimeOfDay();
     if (timeOfDay >= 1.0)
     {
@@ -1038,6 +1049,11 @@ void Church::Animate(int level)
 
 void Church::Deanimate(int level)
 {
+    if (Kaiju::GTraitCount && _isDestroyed)
+    {
+        base::Deanimate(level);
+        return;
+    }
     const ChurchType* type = Type();
     type->_hour1.Restore(_shape, level);
     type->_hour2.Restore(_shape, level);

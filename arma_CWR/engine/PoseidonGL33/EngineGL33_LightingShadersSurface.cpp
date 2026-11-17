@@ -134,6 +134,10 @@ float puddleHeight(vec2 xz) {
 // veg the grass share (0..1), level the puddle level (litWeather.z).
 vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
     if (level <= 0.0) return vec2(0.0);
+    // The far fade first: where it is 0 (from kPuddleFadeEnd on) the result is
+    // 0 whatever the noise and the height map say, so they are not read.
+    float fade = 1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz));
+    if (fade <= 0.0) return vec2(0.0);
     float o2 = mix(0.5, puddleNoise(posW.xz / 1.3 + 17.0), clamp(1.3 / (3.0 * footT), 0.0, 1.0));
     float o3 = mix(0.5, puddleNoise(posW.xz / 0.45 + 41.0), clamp(0.45 / (3.0 * footT), 0.0, 1.0));
     float field = puddleNoise(posW.xz / 3.5) * 0.55 + o2 * 0.3 + o3 * 0.15;
@@ -154,7 +158,7 @@ vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
     // toward bare ground's (veg squared), so a mixed square holds about the
     // puddles its bare and grassy parts would hold apart.
     float th = mix(mix(kPuddleGround, kPuddleRoad, road) - kPuddleMore, kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);
-    float keep = flatness * min(level * 4.0, 1.0) * (1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz)));
+    float keep = flatness * min(level * 4.0, 1.0) * fade;
     return vec2(smoothstep(th, th + kPuddleEdge, field), smoothstep(th - kPuddleDamp, th, field)) * keep;
 }
 )";
@@ -491,14 +495,25 @@ vec2 surfaceEnvBrdf(float rough, float nv) {
 // before the exposure): the lights of the tiled list (the physical lamps and
 // low beams at their physical intensity, the other kinds at their classic
 // value; the combat lights at the head of the list at their own linear
-// light, which no night factor scales), or the draw's own list.
-vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
-    vec3 sum = vec3(0.0);
-    vec3 combat = vec3(0.0);
+// light, which no night factor scales), or the draw's own list. Two lobes in
+// one walk of the lights: `streakA` at roughness `roughA` (the film's) when
+// `wantA`, `streakB` at `roughB` (the puddle's) when `wantB`; each light's
+// term is worked out once and each lobe sums into its own total in the order
+// one walk per lobe summed them. A light behind the surface (n.L <= 0, where
+// wetLobe is 0 for every roughness) adds nothing and is passed over before
+// its term. The tiled list is the one localLightsTiled read for this fragment
+// (g_tileCount; read again if it did not run).
+void wetLampStreaks(vec3 n, vec3 v, float roughA, bool wantA, float roughB, bool wantB, out vec3 streakA,
+                    out vec3 streakB) {
+    vec3 sumA = vec3(0.0);
+    vec3 sumB = vec3(0.0);
+    vec3 combatA = vec3(0.0);
+    vec3 combatB = vec3(0.0);
     float nv = clamp(dot(n, v), 1e-3, 1.0);
-    float a = max(rough * rough, 0.002);
+    float aA = max(roughA * roughA, 0.002);
+    float aB = max(roughB * roughB, 0.002);
     if (litLightCount.y > 0.5) {
-        int count = loadTileList();
+        int count = g_tileCount >= 0 ? g_tileCount : loadTileList();
         for (int k = 0; k < kMaxTileLights; ++k) {
             if (k >= count) break;
             int id = tileEntry(k);
@@ -509,14 +524,16 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
             float d2 = dot(toLight, toLight);
             float d = sqrt(max(d2, 1e-12));
             vec3 L = toLight / d;
+            if (dot(n, L) <= 0.0) continue;
             if (color.w > 1.5) {
                 // A combat light (combatLights' model, without its shadow).
                 float r2 = frameLights[at + 2].x * frameLights[at + 2].x;
                 if (d2 >= r2) continue;
                 float x = d2 / r2;
                 float win = (1.0 - x * x) * (1.0 - x * x);
-                combat += color.rgb * (win / (1.0 + d2 / max(pos.w * pos.w, 1e-4))) *
-                          wetLobe(L, d, n, v, nv, a, kWetSpecCap);
+                vec3 combat = color.rgb * (win / (1.0 + d2 / max(pos.w * pos.w, 1e-4)));
+                if (wantA) combatA += combat * wetLobe(L, d, n, v, nv, aA, kWetSpecCap);
+                if (wantB) combatB += combat * wetLobe(L, d, n, v, nv, aB, kWetSpecCap);
                 continue;
             }
             bool spot = color.w > 0.5;
@@ -543,9 +560,12 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
                 float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
                 light = toLinear(min(color.rgb * (atten * litGround.w), vec3(1.5)));
             }
-            sum += light * wetLobe(L, d, n, v, nv, a, kWetSpecCap);
+            if (wantA) sumA += light * wetLobe(L, d, n, v, nv, aA, kWetSpecCap);
+            if (wantB) sumB += light * wetLobe(L, d, n, v, nv, aB, kWetSpecCap);
         }
-        return sum * litLightCount.z + combat;
+        streakA = sumA * litLightCount.z + combatA;
+        streakB = sumB * litLightCount.z + combatB;
+        return;
     }
     int count = int(litLightCount.x);
     for (int i = 0; i < 8; ++i) {
@@ -562,11 +582,16 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
             if (inside <= 0.0) continue;
             cone = smoothstep(0.9415, 0.9806, inside * inside / max(d2, 1e-6));
         }
-        float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
         float d = sqrt(max(d2, 1e-12));
-        sum += toLinear(min(litLightColor[i].rgb * (atten * litGround.w), vec3(1.5))) * wetLobe(toLight / d, d, n, v, nv, a, kWetSpecCap);
+        vec3 L = toLight / d;
+        if (dot(n, L) <= 0.0) continue;
+        float atten = (d2 > start2 ? start2 / d2 : 1.0) * (1.0 - smoothstep(0.5 * end2, end2, d2)) * cone;
+        vec3 light = toLinear(min(litLightColor[i].rgb * (atten * litGround.w), vec3(1.5)));
+        if (wantA) sumA += light * wetLobe(L, d, n, v, nv, aA, kWetSpecCap);
+        if (wantB) sumB += light * wetLobe(L, d, n, v, nv, aB, kWetSpecCap);
     }
-    return sum;
+    streakA = sumA;
+    streakB = sumB;
 }
 
 // The wet response of one lit fragment, called by shadeRemastered while
@@ -670,10 +695,11 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
     // a streak: the ground around it takes the broad, dim glint of its grit
     // (kWetSunGroundRough, kWetSunGroundFilm), as for the sun.
     if (litMatClass.z > 0.5) {
-        if (pud.x < 1.0)
-            lit += wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough) *
-                   (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));
-        if (pud.x > 0.0) lit += wetLampStreaks(nf, v, kWetPuddleRough) * pud.x;
+        vec3 streakFilm, streakPuddle;
+        wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough, pud.x < 1.0, kWetPuddleRough, pud.x > 0.0,
+                       streakFilm, streakPuddle);
+        if (pud.x < 1.0) lit += streakFilm * (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));
+        if (pud.x > 0.0) lit += streakPuddle * pud.x;
     }
     // The sky in the film: objects always (weaker: rain beads on them); the
     // ground only while the reflections' pass does not reflect it (it then
@@ -727,8 +753,26 @@ SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool te
     if (!paint) rough = clamp(rough + 0.15 * (1.0 - smoothstep(0.02, 0.2, lum)) * (1.0 - metal), 0.03, 1.0);
     vec3 f0 = mix(vec3(p.y), clamp(a * 2.2, 0.0, 1.0), metal);
     float nv = clamp(dot(n, v), 1e-4, 1.0);
-    vec2 ab = surfaceEnvBrdf(rough, nv);
-    vec3 fEnv = f0 * ab.x + ab.y;
+    // A rough dielectric's lobe takes in the dim ground and its own surface's
+    // relief as much as the sky, and the sky fill already carries its
+    // diffuse-looking part: none of the sky reflection from roughness 0.5 on
+    // (matt paint, rubber, cloth, soil, plaster) seen face on, so they keep
+    // their colour instead of a grey-blue veil (a dark window or a shaded
+    // facade lifted toward the sky's colour). Grazing views catch some at an
+    // edge (a hull's silhouette, a wall seen along its face), up to 0.3 (paint
+    // 0.2); the land none (the haze carries the far ground's sheen). The
+    // reflection loses what the receiver's occlusion hides: skyVis here, the
+    // post pass's horizon occlusion through the share it is part of.
+    float matt = smoothstep(0.25, 0.5, rough) * (1.0 - metal);
+    float roughSky = mix(1.0, 0.0, matt);
+    int cls = terrain ? 0 : int(surfClass.x + 0.5);
+    float edgeSky = terrain ? roughSky : mix(1.0, paint ? 0.2 : 0.3, matt);
+    roughSky = mix(roughSky, edgeSky, pow(1.0 - nv, 5.0));
+    // Rubber reflects no sky (a tyre's tread keeps its grooves); a blending
+    // texture that is not glass (a canvas window, a net, a sign) none either:
+    // its sheen made a see-through panel a flat pale card.
+    bool blendTex = !terrain && surfClass.z > 0.5;
+    if (cls == 4 || (blendTex && cls != 3 && cls != 12)) roughSky = 0.0;
     // The sun: GGX, Schlick-GGX visibility, Schlick Fresnel; times pi into
     // the rig's units (the rig's diffuse is albedo * irradiance).
     vec3 l = litSunDir.xyz;
@@ -754,42 +798,36 @@ SurfaceSpec surfaceSpecular(vec3 n, vec3 v, vec3 a, float sunVisibility, bool te
     }
     // The sky: a smooth surface mirrors the sky as the player sees it, a rough
     // one the sky light around its reflected direction (the irradiance there);
-    // both lose what the receiver's sky visibility hides.
-    vec3 r = reflect(-v, n);
-    vec3 rd = normalize(mix(r, n, rough * rough));
-    vec3 rough_l = surfaceSkyIrradiance(rd, false) * 1.6;
-    vec3 pref = rough_l;
-    // The sky as seen only where the lobe is narrow (glass, lenses, metal,
-    // wet film): the table lookup is the costly part, and most surfaces skip it.
-    float smoothW = 1.0 - smoothstep(0.08, 0.45, rough);
-    if (smoothW > 0.0) {
-        vec3 smooth_l = toLinear(skyReflection(normalize(vec3(r.x, max(r.y, 0.02), r.z)))) / max(litZenith.w, 1e-3);
-        smooth_l = mix(smooth_l, rough_l, 1.0 - smoothstep(-0.15, 0.0, r.y));
-        pref = mix(rough_l, smooth_l, smoothW);
+    // both lose what the receiver's sky visibility hides. Where none of it
+    // shows (roughSky exactly 0: the land, rubber, a blending texture that is
+    // not glass, a matt surface seen face on) the reflection and its
+    // environment term are skipped: o.sky stays 0 and the diffuse keeps
+    // 1 - metal, what the full sum gives there. Nothing in the skipped block
+    // takes a derivative (the table lookup samples unit 8 without mip levels),
+    // and its sky irradiance call's g_surfGroundShare is read by
+    // shadeRemastered before this function runs.
+    if (roughSky > 0.0) {
+        vec2 ab = surfaceEnvBrdf(rough, nv);
+        vec3 fEnv = f0 * ab.x + ab.y;
+        vec3 r = reflect(-v, n);
+        vec3 rd = normalize(mix(r, n, rough * rough));
+        vec3 rough_l = surfaceSkyIrradiance(rd, false) * 1.6;
+        vec3 pref = rough_l;
+        // The sky as seen only where the lobe is narrow (glass, lenses, metal,
+        // wet film): the table lookup is the costly part, and most surfaces
+        // skip it.
+        float smoothW = 1.0 - smoothstep(0.08, 0.45, rough);
+        if (smoothW > 0.0) {
+            vec3 smooth_l = toLinear(skyReflection(normalize(vec3(r.x, max(r.y, 0.02), r.z)))) / max(litZenith.w, 1e-3);
+            smooth_l = mix(smooth_l, rough_l, 1.0 - smoothstep(-0.15, 0.0, r.y));
+            pref = mix(rough_l, smooth_l, smoothW);
+        }
+        o.sky = pref * fEnv * (skyVis * roughSky);
+        // The diffuse gives up only the energy the reflection actually shows.
+        o.diffuse = (1.0 - dot(fEnv, kLuma) * roughSky) * (1.0 - metal);
+    } else {
+        o.diffuse = 1.0 - metal;
     }
-    // A rough dielectric's lobe takes in the dim ground and its own surface's
-    // relief as much as the sky, and the sky fill already carries its
-    // diffuse-looking part: none of the sky reflection from roughness 0.5 on
-    // (matt paint, rubber, cloth, soil, plaster) seen face on, so they keep
-    // their colour instead of a grey-blue veil (a dark window or a shaded
-    // facade lifted toward the sky's colour). Grazing views catch some at an
-    // edge (a hull's silhouette, a wall seen along its face), up to 0.3 (paint
-    // 0.2); the land none (the haze carries the far ground's sheen). The
-    // reflection loses what the receiver's occlusion hides: skyVis here, the
-    // post pass's horizon occlusion through the share it is part of.
-    float matt = smoothstep(0.25, 0.5, rough) * (1.0 - metal);
-    float roughSky = mix(1.0, 0.0, matt);
-    int cls = terrain ? 0 : int(surfClass.x + 0.5);
-    float edgeSky = terrain ? roughSky : mix(1.0, paint ? 0.2 : 0.3, matt);
-    roughSky = mix(roughSky, edgeSky, pow(1.0 - nv, 5.0));
-    // Rubber reflects no sky (a tyre's tread keeps its grooves); a blending
-    // texture that is not glass (a canvas window, a net, a sign) none either:
-    // its sheen made a see-through panel a flat pale card.
-    bool blendTex = !terrain && surfClass.z > 0.5;
-    if (cls == 4 || (blendTex && cls != 3 && cls != 12)) roughSky = 0.0;
-    o.sky = pref * fEnv * (skyVis * roughSky);
-    // The diffuse gives up only the energy the reflection actually shows.
-    o.diffuse = (1.0 - dot(fEnv, kLuma) * roughSky) * (1.0 - metal);
     float s = litSurface.y * litHorizon.w;
     o.sun *= s;
     o.sky *= s;

@@ -1,0 +1,10 @@
+# Chupacabra video probe 2 (experiment, kept out of tests/integration). Needs
+# ../addon/build-udchupa.ps1 -CustomMoves (UDChupacabraAnim) and a data dir
+# in the same tmp folder as @udchupa. Written by gen_chupa_video.py. Run with
+# --render gl33, quiet, no gunfire.
+tags = ["cryptid", "experiment", "visual"]
+binary = "PoseidonGame"
+mission = "experiments/cryptid/video/ChupaVideo.Eden"
+timeout = 400
+assert_timeout = 90
+extra_args = ["--nosound", "--no-strict", "--width", "1080", "--height", "1920", "--mods-dir", "..", "--mod", "@udchupa"]

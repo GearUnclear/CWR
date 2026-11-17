@@ -1,7 +1,9 @@
 #include "GuerrillaLintCommand.hpp"
 
 #include "../PackageMount.hpp"
+#include "GuerrillaScaffoldCommand.hpp"
 
+#include <Poseidon/Game/Guerrilla/BaseDetect.hpp>
 #include <Poseidon/Game/Guerrilla/DescriptorLint.hpp>
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp>
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>
@@ -13,6 +15,7 @@
 #include <CLI/App.hpp>
 #include <CLI/Option.hpp>
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -155,8 +158,101 @@ void LintTable(const std::string& label, const FactionSources& sources, LintTota
     }
 }
 
+// The world a template plays on: --world when given, else the folder's
+// extension (Guerrilla.Abel -> Abel, the install convention).
+std::string TemplateWorld(const std::string& island, const std::string& worldOverride)
+{
+    if (!worldOverride.empty())
+    {
+        return worldOverride;
+    }
+    std::string folder = fs::path(island).filename().string();
+    size_t dot = folder.rfind('.');
+    return dot == std::string::npos ? std::string() : folder.substr(dot + 1);
+}
+
+struct BaseTotals
+{
+    int covered = 0;
+    int missing = 0;
+    int seeded = 0;
+    int skipped = 0;
+};
+
+// issue #76: the detector's candidates for the template's world, judged
+// against the zones the template authors. Returns false on a world that
+// cannot be read (reported, counted as an error by the caller).
+bool LintTemplateBasesFor(const std::string& label, const std::string& world, const std::string& dataDir,
+                          const ParamEntry* zonesCfg, BaseTotals& totals)
+{
+    std::cout << "== BASES " << label << " world=" << world << " ==\n";
+    std::string error;
+    ScaffoldWorld scan;
+    if (world.empty() || !scan.Load(world, dataDir, error))
+    {
+        std::cout << "BASES " << label << " ERROR " << (world.empty() ? "no world (pass --world)" : error) << "\n";
+        return false;
+    }
+
+    std::vector<DetectAuthoredZone> authored;
+    ReadTemplateZones(zonesCfg, authored);
+    SeedBasesSetting seed = ResolveSeedBases(zonesCfg, authored);
+
+    BaseDetectInputs in;
+    scan.FillBaseInputs(in);
+    in.authored = authored;
+    // the runtime's theatre: the authored playRegion[], else the authored
+    // zones' bounding box padded by 5 km
+    bool regionIsDefault = false;
+    in.hasRegion = ResolvePlayRegion(zonesCfg, authored, in.regionMinX, in.regionMinZ, in.regionMaxX, in.regionMaxZ,
+                                     &regionIsDefault);
+    BaseDetectOptions opt;
+    BaseDetectResult result;
+    DetectBases(in, opt, result);
+
+    std::cout << FormatSeedBasesRow(label.c_str(), seed) << " authored=" << authored.size()
+              << " candidates=" << result.candidates.size();
+    if (in.hasRegion)
+    {
+        fflush(stdout);
+        std::cout.flush();
+        printf(" playRegion={%.0f, %.0f, %.0f, %.0f} (%s)", in.regionMinX, in.regionMinZ, in.regionMaxX, in.regionMaxZ,
+               regionIsDefault ? "default: authored zones + 5 km" : "authored");
+        fflush(stdout);
+    }
+    std::cout << "\n";
+    for (const std::string& note : result.notes)
+    {
+        std::cout << "BASENOTE " << label << " " << note << "\n";
+    }
+    std::vector<BaseLintRow> rows = LintTemplateBases(result, authored, seed);
+    for (size_t i = 0; i < rows.size(); i++)
+    {
+        const BaseLintRow& r = rows[i];
+        std::cout << "BASE " << label << " " << r.line << "\n";
+        for (const std::string& e : result.candidates[i].evidence)
+        {
+            std::cout << "  evidence: " << e << "\n";
+        }
+        if (r.verdict == "COVERED")
+        {
+            totals.covered++;
+        }
+        else if (r.verdict == "SKIPPED")
+        {
+            totals.skipped++;
+        }
+        else
+        {
+            totals.missing++;
+            totals.seeded += r.seeded ? 1 : 0;
+        }
+    }
+    return true;
+}
+
 int RunLint(const std::string& dataDir, const std::vector<std::string>& modDirs,
-            const std::vector<std::string>& islandDirs)
+            const std::vector<std::string>& islandDirs, bool bases, const std::string& worldOverride)
 {
     // Absolute before the mount: PackageMount chdirs into the data dir, and an
     // island template path is read after that.
@@ -181,7 +277,15 @@ int RunLint(const std::string& dataDir, const std::vector<std::string>& modDirs,
         return 2;
     }
 
+    if (bases && islands.empty())
+    {
+        std::cerr << "Error: --bases needs at least one --island template\n";
+        return 2;
+    }
+
     LintTotals totals;
+    BaseTotals baseTotals;
+    int baseErrors = 0;
     const ParamEntry* globalCfg = Pars.FindEntry("CfgGuerrillaFactions");
 
     if (islands.empty())
@@ -205,11 +309,28 @@ int RunLint(const std::string& dataDir, const std::vector<std::string>& modDirs,
             FactionSources sources;
             sources.Build(globalCfg, islandCfg.FindEntry("CfgGuerrillaFactions"));
             LintTable(fs::path(island).filename().string(), sources, totals);
+            if (bases &&
+                !LintTemplateBasesFor(fs::path(island).filename().string(), TemplateWorld(island, worldOverride),
+                                      mount.DataDir(), islandCfg.FindEntry("CfgGuerrillaZones"), baseTotals))
+            {
+                baseErrors++;
+            }
         }
     }
 
     std::cout << "SUMMARY factions=" << totals.factions << " substituted=" << totals.substituted
               << " dropped=" << totals.dropped << " unresolvable=" << totals.unresolvable << "\n";
+    if (bases)
+    {
+        // advisory: a missing base is the author's call, never a failure
+        std::cout << "SUMMARY bases covered=" << baseTotals.covered << " missing=" << baseTotals.missing
+                  << " (seeded at runtime " << baseTotals.seeded << ") skipped=" << baseTotals.skipped
+                  << " errors=" << baseErrors << "\n";
+    }
+    if (baseErrors > 0)
+    {
+        return 2;
+    }
     return totals.unresolvable > 0 ? 1 : 0;
 }
 
@@ -224,14 +345,27 @@ void GuerrillaLintCommand::Setup(CLI::App& parent)
     static std::string dataDir;
     static std::vector<std::string> modDirs;
     static std::vector<std::string> islandDirs;
+    static bool bases = false;
+    static std::string world;
 
     lint->add_option("--data-dir", dataDir, "Game data package to mount")->required();
     lint->add_option("--mod", modDirs, "Mod folder to mount, repeatable, in -mod order");
     lint->add_option("--island", islandDirs,
                      "Guerrilla.<island> template directory whose description.ext block joins the table, "
                      "repeatable; with none, only the global table is linted");
+    lint->add_flag("--bases", bases,
+                   "Also audit each --island template's occupation network (issue #76): run the base detector "
+                   "on the template's world (.wrp objects and the CfgWorlds ILS table) against the template's "
+                   "authored zones, and print one BASE row per candidate: COVERED (the authored zone that "
+                   "already models it, and how far), MISSING (not authored; for an AIRFIELD / SEAPORT whether "
+                   "the runtime seed adds it under the template's seedBases, an OUTPOST is never seeded) or "
+                   "SKIPPED (outside playRegion[] or low confidence). Advisory: missing bases never fail the run; "
+                   "a world that cannot be read exits 2");
+    lint->add_option("--world", world,
+                     "With --bases: the CfgWorlds class every --island plays on; default is the template folder's "
+                     "extension (Guerrilla.Abel -> Abel)");
 
-    lint->callback([]() { std::exit(RunLint(dataDir, modDirs, islandDirs)); });
+    lint->callback([]() { std::exit(RunLint(dataDir, modDirs, islandDirs, bases, world)); });
 }
 
 } // namespace PoseidonTools

@@ -146,6 +146,30 @@ bdD = gmSimDiag
 if ((bdK < count bdStops) and (((bdD select 2) select 3) > bdMaxLive)) then {bdMaxLive = (bdD select 2) select 3}
 if ((bdK < count bdStops) and (((bdD select 3) select 3) > bdMaxGroups)) then {bdMaxGroups = (bdD select 3) select 3}
 
+// eleventh and twelfth stops: generateBases = 1 (OCCUPIER-FORCES.md 5.7) adds
+// two generated OUTPOSTs, so the tour is the start + 7 + 4 towns = 12 stops
+bdK = bdK + 1
+if (bdK < count bdStops) then {player setPos (bdStops select bdK)}
+triSimFrames 400
+triPerfReset 0
+triSimFrames 256
+bdPerf = triPerfStats 0
+bdLog = gmSimDiagLog
+bdD = gmSimDiag
+if ((bdK < count bdStops) and (((bdD select 2) select 3) > bdMaxLive)) then {bdMaxLive = (bdD select 2) select 3}
+if ((bdK < count bdStops) and (((bdD select 3) select 3) > bdMaxGroups)) then {bdMaxGroups = (bdD select 3) select 3}
+
+bdK = bdK + 1
+if (bdK < count bdStops) then {player setPos (bdStops select bdK)}
+triSimFrames 400
+triPerfReset 0
+triSimFrames 256
+bdPerf = triPerfStats 0
+bdLog = gmSimDiagLog
+bdD = gmSimDiag
+if ((bdK < count bdStops) and (((bdD select 2) select 3) > bdMaxLive)) then {bdMaxLive = (bdD select 2) select 3}
+if ((bdK < count bdStops) and (((bdD select 3) select 3) > bdMaxGroups)) then {bdMaxGroups = (bdD select 3) select 3}
+
 triAssertGe [bdK + 1, count bdStops]
 triAssertGe [130, bdMaxLive]
 triAssertGe [40, bdMaxGroups]

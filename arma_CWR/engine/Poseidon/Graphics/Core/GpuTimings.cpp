@@ -189,4 +189,99 @@ std::string GpuTimings::Summary() const
     return out.empty() ? "gpu: no sections measured yet" : out;
 }
 
+void GpuFrameRing::Push(const GpuTimings& t)
+{
+    Record& r = _ring[_head];
+    for (int c = 0; c < kSections; ++c)
+        r.ms[c] = t.LastMs(kColumns[c]);
+    _head = (_head + 1) % kSize;
+    if (_count < kSize)
+        ++_count;
+}
+
+void GpuFrameRing::Reset()
+{
+    _head = 0;
+    _count = 0;
+}
+
+namespace
+{
+void AppendRecord(std::string& out, const GpuFrameRing::Record& r)
+{
+    char buf[24];
+    for (int c = 0; c < GpuFrameRing::kSections; ++c)
+    {
+        if (c > 0)
+            out += ',';
+        if (r.ms[c] >= 0.0f)
+        {
+            std::snprintf(buf, sizeof(buf), "%.3f", r.ms[c]);
+            out += buf;
+        }
+    }
+}
+
+int ClampCount(int n, int count)
+{
+    return n <= 0 || n > count ? count : n;
+}
+} // namespace
+
+std::string GpuFrameRing::LogText(int n) const
+{
+    n = ClampCount(n, _count);
+    std::string out;
+    out.reserve(static_cast<size_t>(n) * 40);
+    for (int i = n - 1; i >= 0; --i)
+    {
+        AppendRecord(out, Frame(i));
+        out += ';';
+    }
+    return out;
+}
+
+std::string GpuFrameRing::CsvText(int n) const
+{
+    n = ClampCount(n, _count);
+    std::string out = "i";
+    for (Section s : kColumns)
+    {
+        out += ',';
+        out += SectionName(s);
+    }
+    out += '\n';
+    out.reserve(out.size() + static_cast<size_t>(n) * 44);
+    char buf[16];
+    for (int i = n - 1; i >= 0; --i)
+    {
+        std::snprintf(buf, sizeof(buf), "%d,", n - 1 - i);
+        out += buf;
+        AppendRecord(out, Frame(i));
+        out += '\n';
+    }
+    return out;
+}
+
+GpuFrameRing& GGpuFrameRing()
+{
+    static GpuFrameRing s_ring;
+    return s_ring;
+}
+
+namespace
+{
+bool s_pipelineStatsWanted = false;
+} // namespace
+
+void SetPipelineStatsWanted(bool on)
+{
+    s_pipelineStatsWanted = on;
+}
+
+bool PipelineStatsWanted()
+{
+    return s_pipelineStatsWanted;
+}
+
 } // namespace Poseidon::gpu

@@ -1,0 +1,7 @@
+// Beam test bed: standalone experiment mission (not a Guerrilla template).
+// Needs the uddedushka addon (the creature) and the kjbeam addon (the beam's
+// models, lights and fires; features\beam\addon\build-kjbeam.ps1) mounted;
+// without them the boot fails on the addOns[] entries, by design.
+// The kj\ folder here is a copy of features\beam\kj made by run-beam.ps1.
+onLoadMission = "Dedushka beam test";
+respawn = 0;

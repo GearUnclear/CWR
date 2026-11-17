@@ -993,6 +993,12 @@ uniform vec4 fogInterior;    // x 1 = interiorDepth holds a vehicle interior, y 
                              // classic programs' intensified one), z 1 = worldTex holds the world before an overlay
                              // under night vision
 uniform vec4 fogNvgColor;    // rgb the forward fog's colour under night vision (display space, the intensifier's)
+// A unit drawn in the depth range's far slice this frame (Game/Kaiju far draw,
+// EngineGL33::FarSliceDepth): farMask 1 on its pixels, which the put-back gave
+// a stand-in depth inside the world; farKeep x 1 = the mark is this frame's,
+// y the far draw's visibility floor.
+uniform sampler2D farMask;   // unit 16 (kFarMaskUnit)
+uniform vec4 farKeep;
 layout(location = 0) out vec4 fragColor;
 // The surface's share of the pixel's light after the fog (FogState::veilTex):
 // the composite's occlusion and contact shadows darken the surface's own
@@ -1155,6 +1161,9 @@ void main() {
         fogKeep(cOver);
         return;
     }
+    // A unit of the far slice (farMask): past the far plane, drawn with its
+    // own floor in the forward fog; through the air it keeps that floor too.
+    bool farUnit = farKeep.x > 0.5 && texelFetch(farMask, ivec2(gl_FragCoord.xy), 0).r > 0.5;
     // Night vision: the frame is the intensifier's, drawn by the classic
     // programs whose forward fog keeps only its edge (its range rescaled as
     // litHaze.x scales the remastered programs'). The whole medium's
@@ -1172,6 +1181,8 @@ void main() {
         }
         vec2 cuvN = (vUV - worldRect.xy) / worldRect.zw;
         float tn = min(fogAt(cuvN, zn).a, fogClassicFloor(fogRadial(cuvN, zn)));
+        if (farUnit)
+            tn = farKeep.y;
         vec3 o = mix(fogNvgColor.rgb, w.rgb, tn);
         if (snapN)
             o = o * clamp((cOver.rgb + 1e-3) / (w.rgb + 1e-3), 0.0, 1.0) + max(cOver.rgb - w.rgb, vec3(0.0));
@@ -1332,6 +1343,19 @@ void main() {
         float sW = normalize(viewToWorld * vec3(ndcW.x * projInfo.z, ndcW.y * projInfo.w, 1.0)).y;
         float hb = exp(-max(sW - kApplyFillTop, 0.0) / 0.09);
         base = mix(base, airAt, hb * greyFill);
+    }
+    // The far slice's unit sits at its stand-in depth (0.9 of the far plane,
+    // FarSliceStandInDepth): the air in front of him is this column's, in its
+    // own colour, thinned or thickened so that the far draw's floor is what
+    // he keeps (the volume alone would leave the land's last few percent).
+    // He keeps his own colour: in fog the volume's far end comes nearer than
+    // the far plane, and the far plates above would take his place.
+    if (farUnit) {
+        base = lin0;
+        if (1.0 - T > 1e-3) {
+            S *= (1.0 - farKeep.y) / (1.0 - T);
+            T = farKeep.y;
+        }
     }
     if (fogApply.w > 0.5) S += fogNear(sky ? 1e6 : z);
     // The night glow: the blurred light of the frame, laid into the fog in

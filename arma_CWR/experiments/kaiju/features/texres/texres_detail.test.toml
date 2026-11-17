@@ -1,0 +1,11 @@
+# Detail layer demo frames (experiment, kept out of tests/integration so a sweep never
+# runs it). Needs @kj_texres (features/texres/build_texres.py) beside the data
+# dir; it holds its own uddedushka.pbo and is mounted IN PLACE OF the shared
+# @uddedushka. Run it through features/texres/run-texres.ps1: one game, hidden
+# desktop, --render gl33. Quiet: nobody fires.
+tags = ["kaiju", "experiment", "texres"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/texres/TexRes.Eden"
+timeout = 300
+assert_timeout = 120
+extra_args = ["--nosound", "--no-strict", "--width", "1920", "--height", "1080", "--mods-dir", "..", "--mod", "@kj_texres"]

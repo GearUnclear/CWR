@@ -11,9 +11,11 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <filesystem>
+#include <algorithm>
 #include <string.h>
 #include <string>
 #include <vector>
+#include <utility>
 
 using namespace Poseidon;
 using namespace Poseidon::Guerrilla;
@@ -77,6 +79,19 @@ DealerCity City(const char* name, float x, float z)
     c.name = name;
     c.pos = Vector3(x, 0, z);
     return c;
+}
+
+// Compare the complete multiset: duplicates must not hide a missing town or kind.
+std::vector<std::pair<std::string, int>> DealerIdentities(const AutoArray<DealerRecord>& rows)
+{
+    std::vector<std::pair<std::string, int>> identities;
+    for (int i = 0; i < rows.Size(); ++i)
+    {
+        const DealerRecord& row = rows[i];
+        identities.emplace_back(Str(row.zoneName), row.kind);
+    }
+    std::sort(identities.begin(), identities.end());
+    return identities;
 }
 
 const char* kStockConfig = "class CfgGuerrillaMarket\n"
@@ -216,7 +231,53 @@ TEST_CASE("Market - dealer plan: quota per kind, overlap allowed, authored towns
         AutoArray<RString> none;
         AutoArray<DealerRecord> rows;
         Market::PlanDealers(cities, 1, 1.0f, none, none, rows);
-        CHECK(rows.Size() == 12);
+        const std::vector<std::pair<std::string, int>> expected{
+            {"Arudy", DKWeapon},   {"Arudy", DKVehicle},   {"Dourdan", DKWeapon},      {"Dourdan", DKVehicle},
+            {"Houdan", DKWeapon},  {"Houdan", DKVehicle},  {"Larche", DKWeapon},       {"Larche", DKVehicle},
+            {"Le Port", DKWeapon}, {"Le Port", DKVehicle}, {"Sainte Marie", DKWeapon}, {"Sainte Marie", DKVehicle}};
+        CHECK(DealerIdentities(rows) == expected);
+    }
+
+    SECTION("replanning replaces old rows with the authored identities and positions")
+    {
+        AutoArray<RString> none;
+        AutoArray<DealerRecord> rows;
+        Market::PlanDealers(cities, 1, 1.0f, none, none, rows);
+        REQUIRE(rows.Size() == 12);
+
+        AutoArray<RString> weapons, vehicles;
+        weapons.Add(RString("larche"));
+        weapons.Add(RString("Nowhere"));
+        weapons.Add(RString("LARCHE"));
+        vehicles.Add(RString("LE PORT"));
+        vehicles.Add(RString("Houdan"));
+        Market::PlanDealers(cities, 5, 1.0f, weapons, vehicles, rows);
+        REQUIRE(DealerIdentities(rows) == std::vector<std::pair<std::string, int>>{
+                                              {"Houdan", DKVehicle}, {"Larche", DKWeapon}, {"Le Port", DKVehicle}});
+        for (int i = 0; i < rows.Size(); ++i)
+        {
+            const DealerRecord& row = rows[i];
+            CAPTURE(row.zoneName, row.kind);
+            const Vector3 expected = Str(row.zoneName) == "Larche"    ? Vector3(5900, 0, 8600)
+                                     : Str(row.zoneName) == "Le Port" ? Vector3(8100, 0, 2900)
+                                                                      : Vector3(7100, 0, 6000);
+            CHECK(row.pos == expected);
+            CHECK(row.lotPos == expected);
+            CHECK_FALSE(row.placed);
+            CHECK_FALSE(row.spawned);
+        }
+    }
+
+    SECTION("unknown-only authored towns suppress the draw only for that kind")
+    {
+        AutoArray<RString> unknown, known;
+        unknown.Add(RString("Nowhere"));
+        known.Add(RString("Larche"));
+        AutoArray<DealerRecord> rows;
+        Market::PlanDealers(cities, 5, 1.0f, unknown, known, rows);
+        CHECK(DealerIdentities(rows) == std::vector<std::pair<std::string, int>>{{"Larche", DKVehicle}});
+        Market::PlanDealers(cities, 5, 1.0f, known, unknown, rows);
+        CHECK(DealerIdentities(rows) == std::vector<std::pair<std::string, int>>{{"Larche", DKWeapon}});
     }
 
     SECTION("authored lists override the draw for their kind; unknown towns are skipped")
@@ -252,6 +313,8 @@ TEST_CASE("Market - dealer plan: quota per kind, overlap allowed, authored towns
         AutoArray<DealerCity> empty;
         AutoArray<RString> none;
         AutoArray<DealerRecord> rows;
+        Market::PlanDealers(cities, 9, 0.34f, none, none, rows);
+        REQUIRE(rows.Size() == 4);
         Market::PlanDealers(empty, 9, 0.34f, none, none, rows);
         CHECK(rows.Size() == 0);
     }

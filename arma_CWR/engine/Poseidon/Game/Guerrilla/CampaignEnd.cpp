@@ -1,11 +1,12 @@
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 
 #include <Poseidon/Game/Guerrilla/Journal.hpp> // victory line, JournalClockNow, IslandDisplayName
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp> // HasHq / HqEver (the lose rule)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
-#include <Poseidon/AI/AICenter.hpp> // EndMode (EMContinue / EMEnd1)
+#include <Poseidon/AI/AICenter.hpp> // EndMode (EMContinue / EMEnd1 / EMLoser)
 #include <Poseidon/World/World.hpp> // GWorld end mode
 
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -46,6 +47,10 @@ void CampaignEnd::Clear()
     _wonDay = 0;
     _wonMinute = 0;
     _lastTaken = RString();
+    _lost = false;
+    _lostDay = 0;
+    _lostMinute = 0;
+    _onceHeld.Clear();
     _endIssued = false;
     _endClock = 0;
     _accum = 0;
@@ -98,6 +103,12 @@ bool CampaignEnd::IsMilitaryType(const char* type)
 
 bool CampaignEnd::IsAuthoredOccupier(const ZoneRecord& zone, const ZoneRegistry& registry)
 {
+    // a generated base is not authored (OCCUPIER-FORCES.md 5.7): the pool
+    // gives it no share of R through this predicate
+    if (zone.generated)
+    {
+        return false;
+    }
     // the AUTHORED owner, not the live one: a campaign derived from a save
     // written before this service existed still knows which bases were the
     // enemy's, even if some have fallen since
@@ -107,6 +118,35 @@ bool CampaignEnd::IsAuthoredOccupier(const ZoneRecord& zone, const ZoneRegistry&
     }
     const RString occupier = registry.OccupierSide();
     return occupier.GetLength() > 0 && stricmp(zone.ownerConfig, occupier) == 0;
+}
+
+bool CampaignEnd::IsGeneratedOccupier(const ZoneRecord& zone, const ZoneRegistry& registry)
+{
+    if (!zone.generated)
+    {
+        return false;
+    }
+    if (stricmp(zone.ownerConfig, "OCCUPIER") == 0)
+    {
+        return true;
+    }
+    const RString occupier = registry.OccupierSide();
+    return occupier.GetLength() > 0 && stricmp(zone.ownerConfig, occupier) == 0;
+}
+
+bool CampaignEnd::IsMinorPostType(const char* type)
+{
+    if (!type || !*type)
+    {
+        return false;
+    }
+    return stricmp(type, "CHECKPOINT") == 0 || stricmp(type, "COASTAL") == 0 || stricmp(type, "HELIPAD") == 0 ||
+           stricmp(type, "RADAR") == 0;
+}
+
+bool CampaignEnd::CountsForWin(const ZoneRecord& zone)
+{
+    return zone.countsForWin && !IsMinorPostType(zone.type);
 }
 
 void CampaignEnd::TakeRoster(const ZoneRegistry& registry)
@@ -119,7 +159,8 @@ void CampaignEnd::TakeRoster(const ZoneRegistry& registry)
     for (int i = 0; i < registry.NZones(); i++)
     {
         const ZoneRecord* z = registry.GetZone(i);
-        if (!z || !IsMilitaryType(z->type) || !IsAuthoredOccupier(*z, registry))
+        if (!z || !IsMilitaryType(z->type) ||
+            !(IsAuthoredOccupier(*z, registry) || IsGeneratedOccupier(*z, registry)) || !CountsForWin(*z))
         {
             continue;
         }
@@ -202,6 +243,100 @@ bool CampaignEnd::AllHeld(const ZoneRegistry& registry) const
     return present > 0;
 }
 
+bool CampaignEnd::HoldsAnything(const ZoneRegistry& registry)
+{
+    const RString resistance = registry.ResistanceSide();
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (z && stricmp(z->owner, resistance) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void CampaignEnd::NoteHeld(const ZoneRegistry& registry)
+{
+    const RString resistance = registry.ResistanceSide();
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (!z || stricmp(z->owner, resistance) != 0)
+        {
+            continue;
+        }
+        bool known = false;
+        for (int k = 0; k < _onceHeld.Size() && !known; k++)
+        {
+            known = stricmp(_onceHeld[k].name, z->name) == 0;
+        }
+        if (!known)
+        {
+            RosterRow row;
+            row.name = z->name;
+            _onceHeld.Add(row);
+        }
+    }
+}
+
+int CampaignEnd::CountOnceHeld(const ZoneRegistry& registry, bool towns) const
+{
+    int count = 0;
+    for (int i = 0; i < _onceHeld.Size(); i++)
+    {
+        const int index = registry.FindZoneIndex(_onceHeld[i].name);
+        const ZoneRecord* z = index >= 0 ? registry.GetZone(index) : nullptr;
+        if (!z)
+        {
+            continue;
+        }
+        const bool town = stricmp(z->type, "CITY") == 0;
+        if (towns ? town : CampaignEnd::IsMilitaryType(z->type))
+        {
+            count++;
+        }
+    }
+    return count;
+}
+
+int CampaignEnd::BasesOnceHeld(const ZoneRegistry& registry) const
+{
+    return CountOnceHeld(registry, false);
+}
+
+int CampaignEnd::TownsOnceHeld(const ZoneRegistry& registry) const
+{
+    return CountOnceHeld(registry, true);
+}
+
+bool CampaignEnd::EvaluateLost(const ZoneRegistry& registry, bool hasHq, bool hadHq, int dayNow, int minuteNow)
+{
+    if (!_tuning.enabled || !registry.IsActive() || _won || _lost)
+    {
+        return false;
+    }
+    TakeRoster(registry);
+    NoteHeld(registry);
+    if (hasHq || HoldsAnything(registry))
+    {
+        return false;
+    }
+    // nothing to lose yet: no HQ ever and no zone ever held (a mission whose
+    // opening holds nothing is not a defeat on its first second)
+    if (!hadHq && _onceHeld.Size() == 0)
+    {
+        return false;
+    }
+    _lost = true;
+    _lostDay = dayNow;
+    _lostMinute = minuteNow;
+    _endIssued = false;
+    _endClock = _tuning.endDelay;
+    return true;
+}
+
 bool CampaignEnd::Evaluate(const ZoneRegistry& registry, int dayNow, int minuteNow)
 {
     if (!_tuning.enabled || !registry.IsActive())
@@ -209,10 +344,11 @@ bool CampaignEnd::Evaluate(const ZoneRegistry& registry, int dayNow, int minuteN
         return false;
     }
     TakeRoster(registry);
-    if (_won)
+    if (_won || _lost)
     {
         return false;
     }
+    NoteHeld(registry);
     // which roster zone turned held since the previous check: the first in
     // roster order names the line, and only when a previous check this
     // session saw the set (a fresh roster or a load knows no "before")
@@ -329,16 +465,58 @@ static RString IslandPhrase(const ZoneRegistry& registry)
     return RString("on ") + island;
 }
 
+RString CampaignEnd::LoseTitle(const char* island)
+{
+    char line[256];
+    snprintf(line, sizeof(line), "%s is lost.", island && *island ? island : "The island");
+    return RString(line);
+}
+
+RString CampaignEnd::LoseBody(const char* islandPhrase, int day, int bases, int towns)
+{
+    const char* where = islandPhrase && *islandPhrase ? islandPhrase : "on the island";
+    char held[160];
+    if (bases <= 0 && towns <= 0)
+    {
+        snprintf(held, sizeof(held), "It never took a base or a town from them.");
+    }
+    else
+    {
+        snprintf(held, sizeof(held), "Before the end it had taken %d %s and %d %s.", bases,
+                 bases == 1 ? "base" : "bases", towns, towns == 1 ? "town" : "towns");
+    }
+    char line[448];
+    if (day > 0)
+    {
+        snprintf(line, sizeof(line),
+                 "The headquarters is gone and the resistance holds no base and no town %s. It held out until "
+                 "Day %d. %s",
+                 where, day, held);
+    }
+    else
+    {
+        snprintf(line, sizeof(line), "The headquarters is gone and the resistance holds no base and no town %s. %s",
+                 where, held);
+    }
+    return RString(line);
+}
+
 bool CampaignEnd::DebriefingText(RString& title, RString& body) const
 {
-    if (!_won)
-    {
-        return false;
-    }
     const ZoneRegistry& registry = ZoneRegistry::Instance();
-    title = DebriefingTitle(IslandDisplayName());
-    body = DebriefingBody(IslandPhrase(registry), RosterHeld(registry), _wonDay);
-    return true;
+    if (_won)
+    {
+        title = DebriefingTitle(IslandDisplayName());
+        body = DebriefingBody(IslandPhrase(registry), RosterHeld(registry), _wonDay);
+        return true;
+    }
+    if (_lost)
+    {
+        title = LoseTitle(IslandDisplayName());
+        body = LoseBody(IslandPhrase(registry), _lostDay, BasesOnceHeld(registry), TownsOnceHeld(registry));
+        return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +533,15 @@ void CampaignEnd::OnWon()
              _wonDay, RosterHeld(registry), _roster.Size(), (const char*)_lastTaken, _endClock);
 }
 
+void CampaignEnd::OnLost()
+{
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    LOG_INFO(Core,
+             "CampaignEnd: campaign LOST on day {} (no headquarters, no base, no town; {} base(s) and {} town(s) once "
+             "held); end in {:.1f}s",
+             _lostDay, BasesOnceHeld(registry), TownsOnceHeld(registry), _endClock);
+}
+
 void CampaignEnd::RequestEnd()
 {
     if (!GWorld)
@@ -368,8 +555,10 @@ void CampaignEnd::RequestEnd()
         LOG_INFO(Core, "CampaignEnd: end request skipped, the mission is already ending");
         return;
     }
-    GWorld->SetEndMode(EMEnd1);
-    LOG_INFO(Core, "CampaignEnd: mission end requested (END1)");
+    // a lost campaign ends as EMLoser, never EMEnd2 (that would play
+    // OutroWin and count as a completion)
+    GWorld->SetEndMode(_won ? EMEnd1 : EMLoser);
+    LOG_INFO(Core, "CampaignEnd: mission end requested ({})", _won ? "END1" : "LOSER");
 }
 
 void CampaignEnd::Simulate(float deltaT)
@@ -379,7 +568,7 @@ void CampaignEnd::Simulate(float deltaT)
     {
         return;
     }
-    if (!_won)
+    if (!_won && !_lost)
     {
         _accum += deltaT;
         if (_accum < TickInterval)
@@ -393,6 +582,14 @@ void CampaignEnd::Simulate(float deltaT)
         if (Evaluate(registry, day, minute))
         {
             OnWon();
+        }
+        else
+        {
+            const GuerrillaBase& base = GuerrillaBase::Instance();
+            if (EvaluateLost(registry, base.HasHq(), base.HqEver(), day, minute))
+            {
+                OnLost();
+            }
         }
     }
     if (AdvanceEnd(deltaT))
@@ -433,6 +630,12 @@ LSError CampaignEnd::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("lastTaken", _lastTaken, 1, RString()))
     PARAM_CHECK(ar.Serialize("endIssued", _endIssued, 1, false))
     PARAM_CHECK(ar.Serialize("endClock", _endClock, 1, 0.0f))
+    // the lose latch (OCCUPIER-FORCES.md 9.2, 11): absent in older saves =
+    // not lost, nothing once held (refilled from the live owners next tick)
+    PARAM_CHECK(ar.Serialize("lost", _lost, 1, false))
+    PARAM_CHECK(ar.Serialize("lostDay", _lostDay, 1, 0))
+    PARAM_CHECK(ar.Serialize("lostMinute", _lostMinute, 1, 0))
+    PARAM_CHECK(ar.Serialize("OnceHeld", _onceHeld, 1))
     if (ar.IsLoading())
     {
         // the previous-check memory is session state: a loaded campaign

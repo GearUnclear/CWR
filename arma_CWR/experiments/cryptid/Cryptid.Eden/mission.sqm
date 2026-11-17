@@ -1,0 +1,55 @@
+// Cryptid prototype test bed on Eden (Everon). Standalone experiment, not part
+// of any Uslu dur game mode. One stock player only; the tests spawn the
+// creature and its victims from script after the boot, and move the player
+// far away, invulnerable and captive. Night (23:00) by default; the day test
+// changes the clock with setDate.
+version=11;
+class Mission
+{
+	randomSeed=4242;
+	class Intel
+	{
+		viewDistance=1200;
+		year=1985;
+		month=5;
+		day=10;
+		hour=23;
+		minute=0;
+		weather=0.200000;
+		weatherForecast=0.200000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4772.0,20.0,11000.0};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

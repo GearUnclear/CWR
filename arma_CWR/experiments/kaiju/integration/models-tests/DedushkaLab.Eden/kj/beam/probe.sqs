@@ -1,0 +1,4 @@
+; kj\beam\probe.sqs: called by the engine when the measuring particle of fire.sqs
+; dies. _this is where it was: [x, y, height above the ground or the sea].
+KJ_beamProbeHit = _this
+exit

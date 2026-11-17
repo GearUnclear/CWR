@@ -1,0 +1,46 @@
+; ============================================================================
+;  DedushkaDemo: cameras for stills and for the video.
+;
+;      ["street"] exec "kjd_cam.sqs"      a named spot, aimed at him, following him
+;      ["off"] exec "kjd_cam.sqs"         the player's own view again
+;
+;  KJD_cams: [name, [x, y], eye height above the ground or the sea there,
+;  aim height above his feet, lens (fov; 0.7 is the player's)]. Add your own.
+;  The camera object is KJD_cam; it is also given to the roar feature as the
+;  listener (KJ_listener: sound delays and the near or far take are worked out
+;  from the camera) and, on the stock binary, as the camera to shake.
+; ============================================================================
+? isNil "KJD_cams" : call compile preprocessFile "kjd_cams.sqf"
+? isNil "KJD_cam" : KJD_cam = objNull
+_name = _this select 0
+KJD_camName = _name
+? _name == "off" : goto "off"
+_spot = []
+{ if ((_x select 0) == _name) then { _spot = _x } } forEach KJD_cams
+? (count _spot) == 0 : hint format ["DedushkaDemo: no camera spot called %1", _name]; exit
+_xy = _spot select 1
+? isNull KJD_cam : KJD_cam = "camera" camCreate [_xy select 0, _xy select 1, _spot select 2]
+KJD_cam cameraEffect ["internal", "back"]
+showCinemaBorder false
+KJD_cam camSetPos [_xy select 0, _xy select 1, _spot select 2]
+KJD_cam camSetFov (_spot select 4)
+KJD_cam camCommit 0
+KJ_listener = KJD_cam
+KJ_shakeCam = KJD_cam
+#follow
+? KJD_camName != _name : exit
+? isNull KJD_cam : exit
+_p = getPos kaiju
+KJD_cam camSetTarget [_p select 0, _p select 1, (_p select 2) + (_spot select 3)]
+KJD_cam camCommit 0.2
+~0.1
+goto "follow"
+
+#off
+? isNull KJD_cam : exit
+KJD_cam cameraEffect ["terminate", "back"]
+camDestroy KJD_cam
+KJD_cam = objNull
+KJ_listener = objNull
+KJ_shakeCam = objNull
+exit

@@ -1,0 +1,96 @@
+; ============================================================================
+;  kj\combat\start.sqs  -  Dedushka COMBAT: his health, his wounds, his death.
+;  The entry point. Runs for his lifetime. It replaces the crush feature's
+;  heal loop (kj\crush\hurt.sqs): with this running he can be killed.
+;
+;      [kaiju] exec "kj\combat\start.sqs"
+;
+;  Tuning: the marked block at the top of kj\combat\init.sqf.
+;
+;  What it does, ten times a second:
+;    - reads every hit he took (kaiju binary: the engine's hit report, with
+;      the round, the place on his body and the shooter; stock binary: the
+;      rise of his damage value) and wipes the engine's damage value, which
+;      is only the messenger;
+;    - weighs each hit: rifles and machine guns are nothing; cannon shells and
+;      grenades sting; tank guns, rockets, missiles and bombs open a wound,
+;      more in the furnace chest, less in the legs;
+;    - opens the wound slowly, mends it when he is left alone, and keeps the
+;      wound stage;
+;    - raises the hit signal, plays the flinch and the roar of pain when no
+;      brain runs (with the brain: the brain flinches, and is asked to roar and
+;      is drawn to the sea when he is badly hurt);
+;    - when nothing is left, starts kj\combat\death.sqs.
+;  kj\combat\fx.sqs (started here) is the smoke, the sparks and the guttering
+;  of the furnace by wound stage.
+;
+;  Read by others (all in kj\combat\init.sqf, "public state"):
+;    KJ_woundStage   0 unhurt, 1 stung, 2 wounded, 3 badly hurt, 4 dying on
+;                    his feet, 5 dead
+;    KJ_woundHealth  1..0     KJ_woundScar   the share that never mends
+;    KJ_woundPace    1..0.45  how fast he should move now
+;    KJ_woundSide    -1 / 0 / 1: the side that has taken more (he favours it)
+;    KJ_woundMending, KJ_woundRetreat, KJ_woundRetreatPos, KJ_woundLog
+;    KJ_hurt         [time, bearing from north, bearing from his front,
+;                     severity 0..1, who]   (the crush feature's signal)
+;    KJ_hurtCount    rises by one for every tick in which a real hit landed;
+;                    stings raise it at most once in 2.5 s; rifles never
+;    KJ_dying, KJ_deathPhase, KJ_dead, KJ_deathLog, KJ_deathStats
+;    KJ_combatStats, KJ_combatLast, KJ_combatByZone, KJ_combatByAmmo
+;  Set by others:
+;    KJ_combatOn = false     ends this loop (he is then neither hurt nor healed)
+;    [kaiju, "ammo class", [right, forward, up] or [], who] call KJCB_fnScriptHit
+;    [kaiju, points, who] call KJCB_fnWound        (10000 kills him)
+; ============================================================================
+_k = _this select 0
+? isNull _k : exit
+? isNil "KJCB_ready" : call compile preprocessFile "kj\combat\init.sqf"
+? _k getVariable ["kjcbOn", false] : exit
+_k setVariable ["kjcbOn", true]
+; the one switch of the integrated set: the crush feature's heal loop must not run beside this
+KJ_unkillable = false
+KJ_combatOn = true
+_k call KJCB_fnSetup
+[_k] exec "kj\combat\fx.sqs"
+_last = time
+_dt = 0
+_live = true
+_watch = -100
+
+#tick
+~KJCB_TICK
+? not KJ_combatOn : goto "end"
+? isNull _k : goto "end"
+? KJ_dying : goto "end"
+; somebody else has declared him dead (a mission, the integrated set): no sequence is forced on it
+? KJ_dead : goto "end"
+KJCB_hasBrain = false
+? not (isNil "KJ_brainOn") : KJCB_hasBrain = KJ_brainOn
+_dt = time - _last
+_last = time
+? _dt > 0.5 : _dt = 0.5
+; kaiju binary: killed outright by a script (setDammage 1 goes past the ceiling). He is already falling.
+? KJCB_native and (not (alive _k)) : goto "fallen"
+_live = [_k, _dt] call KJCB_fnTick
+? not _live : goto "killed"
+; stock binary, with the crush feature in the mission: its list of heavy shooters gives a hit its direction
+? KJCB_native : goto "tick"
+? isNil "KJC_fnWatch" : goto "tick"
+? (time - _watch) < 8 : goto "tick"
+_watch = time
+[_k] call KJC_fnWatch
+goto "tick"
+
+#killed
+logInfo format ["KJCOMBAT the killing blow at %1: stats %2, by zone %3, by ammo %4", time, KJ_combatStats, KJ_combatByZone, KJ_combatByAmmo]
+[_k] exec "kj\combat\death.sqs"
+goto "end"
+
+#fallen
+logInfo format ["KJCOMBAT killed outright by a script at %1", time]
+[_k, true] exec "kj\combat\death.sqs"
+
+#end
+? not (isNull _k) : _k setVariable ["kjcbOn", false]
+KJ_combatOn = false
+exit

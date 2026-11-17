@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -717,6 +718,9 @@ Man::Man(VehicleType* name, bool fullCreate, Creation creation)
     {
         _mGunClouds.Load((*Type()->_par) >> "MGunClouds");
         _gunClouds.Load((*Type()->_par) >> "GunClouds");
+        // optional `class Kaiju` block of the type (Game/Kaiju): far draw,
+        // wading and the other giant-creature switches, off when absent
+        Kaiju::ApplyTypeConfig(this, *Type()->_par);
     }
     _mGunFireFrames = 0;
     _mGunFireTime = UITIME_MIN;

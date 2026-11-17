@@ -1,0 +1,142 @@
+; ============================================================================
+;  kj\brain\start.sqs  -  Dedushka BRAIN: how he moves and what he decides.
+;  Runs for his lifetime.
+;
+;      [kaiju] exec "kj\brain\start.sqs"                 starts dormant
+;      [kaiju, "idle"] exec "kj\brain\start.sqs"         starts awake, standing
+;
+;  Tuning: the one marked block at the top of kj\brain\init.sqf.
+;  The rules in plain words: kaiju-notes\features\brain\NOTES.md.
+;
+;  States (KJ_state):
+;    dormant  stands still for a long time, slumped, the furnace low
+;    idle     awake and standing: the heavy pause between two walks
+;    wander   walks a few strides to nowhere in particular (toward KJ_station
+;             when the mission names one)
+;    drawn    walks to the place that draws him most (KJ_brainDraw)
+;    roar     stops and roars
+;    beam     stops, turns to the target, roars, stands tall and fires
+;    spent    after a beam: stands, takes nothing in, until it has passed
+;    flinch   a hard hit: he finishes his stride, shudders, stands, turns to
+;             where it came from, and is then drawn there
+;    stomp, swat   the crush feature's blows on what is in reach
+;    dead
+;  KJ_brainPhase says what he is doing inside the state (stopping, turning,
+;  walking, rising, roaring, firing, ...).
+;
+;  He decides by himself while KJ_brainAuto is true (the default). A mission
+;  or a camera script can drive him instead:
+;      KJ_brainAuto = false
+;      [kaiju, "drawn", posOrObject] exec "kj\brain\order.sqs"
+;      [kaiju, "roar"] exec "kj\brain\order.sqs"            (see order.sqs)
+;  and can name points of interest without taking him over:
+;      [posOrObject, weight] call KJB_fnDraw                 (1 is weak, 50 is strong)
+;      KJ_station = [x, y, 0]                                where he was made
+;
+;  Read by others:
+;    KJ_state, KJ_brainPhase, KJ_brainOn
+;    KJ_brainDraw    [x, y] he is walking to, [] when none
+;    KJ_interest     [[x, y, interest, anger, last time, object], ...]
+;    KJ_brainLog     [[time, state, why], ...]
+;    KJ_brainTrack   [strides walked, turns on the spot, metres walked, times stopped by water]
+;
+;  The other features are driven through their entry points when their files
+;  are in the mission (kj\roar\roar.sqs, kj\beam\fire.sqs, kj\crush\stomp.sqs
+;  and swat.sqs); without them he plays the move, if the addon has one, and
+;  holds for the same time. With KJ_brainStartOthers (default true) the crush
+;  and roar lifetime loops are started here too.
+; ============================================================================
+_k = _this select 0
+_first = "dormant"
+? (count _this) > 1 : _first = _this select 1
+? isNil "KJ_brainOn" : KJ_brainOn = false
+? KJ_brainOn : logInfo "KJBRAIN start refused: already running"; exit
+? isNull _k : exit
+? not (alive _k) : exit
+; every start begins from a clean slate (tuning a mission has set is kept)
+call compile preprocessFile "kj\brain\init.sqf"
+KJ_brainOn = true
+KJB_k = _k
+
+; ---- how tall he is: the mission's KJ_height, else the addon's kjHeight, else
+; ---- the animation feature's measure, else the proxy's 40 m
+_h = (typeOf _k) GetVehicleParam "kjHeight"
+? not (isNil "KJ_animHeight") : KJB_H = KJ_animHeight
+? not (isNil "_h") : KJB_H = call compile format ["%1", _h]
+? not (isNil "KJ_height") : KJB_H = KJ_height
+
+; ---- the body: the AI never moves him, never aims him, never lies him down
+(group _k) setBehaviour "CARELESS"
+(group _k) setCombatMode "BLUE"
+(group _k) allowFleeing 0
+_k disableAI "MOVE"
+_k disableAI "TARGET"
+_k disableAI "AUTOTARGET"
+_k setUnitPos "UP"
+
+; ---- which moves the mounted addon has. There is no script reader for a moves
+; ---- class, and a switchMove on HIM would leave every tested move queued
+; ---- behind the next one (SoldierOldMove.cpp, Man::SwitchMove puts the move it
+; ---- interrupts back on the queue). So a second body is made far away for a
+; ---- moment, asked, and deleted.
+KJB_clone = objNull
+(typeOf _k) createUnit [[60, 60, 0], group _k, "KJB_clone = this", 0.5, "PRIVATE"]
+~0.2
+? isNull KJB_clone : logInfo "KJBRAIN could not make the move probe, assuming the proxy's two moves"; goto "moved"
+KJB_clone allowDammage false
+KJB_has = { KJB_clone switchMove _this; (getMove KJB_clone) == _this }
+? "DedIdle" call KJB_has : KJB_mIdle = "DedIdle"
+? "DedStride" call KJB_has : KJB_mWalk = "DedStride"
+? "DedTurnL" call KJB_has : KJB_mTurnL = "DedTurnL"
+? "DedTurnR" call KJB_has : KJB_mTurnR = "DedTurnR"
+? "DedRoar" call KJB_has : KJB_mRoar = "DedRoar"
+? "DedFlinch" call KJB_has : KJB_mFlinch = "DedFlinch"
+? "DedDormant" call KJB_has : KJB_mDormant = "DedDormant"
+? "DedBeamRise" call KJB_has : KJB_mRise = "DedBeamRise"
+? "DedBeamLower" call KJB_has : KJB_mLower = "DedBeamLower"
+deleteVehicle KJB_clone
+#moved
+? KJB_mTurnR == "" : KJB_mTurnL = ""
+
+; ---- the walk's measure: the animation feature's table when it is in the
+; ---- mission, else the numbers of the two addons known today. A wrong stride
+; ---- corrects itself after the first leg (KJB_fnEndWalk).
+; ---- (first: which other features' files are in this mission, see have.sqf)
+? isNil "KJ_brainHas" : KJ_brainHas = []
+? (count KJ_brainHas) == 0 : call compile preprocessFile "kj\brain\have.sqf"
+? (count KJ_brainHas) == 0 : KJ_brainHas = [(loadFile "kj\roar\roar.sqs") != "", (loadFile "kj\beam\fire.sqs") != "", (loadFile "kj\crush\loop.sqs") != "", (loadFile "kj\anim\ded_anim_timing.sqf") != ""]
+? KJ_brainHas select 3 : call compile preprocessFile "kj\anim\ded_anim_timing.sqf"
+? KJB_mIdle == "DedIdle" : KJB_stride = 16.15; KJB_strideSecs = 7
+? not (isNil "KJ_animWalkStep") : KJB_stride = KJ_animWalkStep; KJB_strideSecs = KJ_animWalkSecs
+? not (isNil "KJ_animTurnSecs") : KJB_turnSecs = KJ_animTurnSecs; KJB_turnDeg = KJ_animTurnRate * KJ_animTurnSecs * 57.2958
+? KJB_mWalk == "DedWalk" : KJB_strideSecs = KJB_strideSecs / 0.55
+
+; ---- the ground probe (dry land or sea)
+KJB_probe = "HeliHEmpty" createVehicle [60, 60, 0]
+
+; ---- the other features
+KJB_hasRoar = KJ_brainHas select 0
+KJB_hasBeam = KJ_brainHas select 1
+KJB_hasCrush = KJ_brainHas select 2
+; the brain plays the shudder itself, at the end of the stride
+KJC_FLINCH_ANIM = false
+? KJ_brainStartOthers and KJB_hasCrush : [_k] exec "kj\crush\loop.sqs"
+? KJ_brainStartOthers and KJB_hasRoar : [_k] exec "kj\roar\start.sqs"
+? not KJB_hasCrush : [_k] exec "kj\brain\hurt.sqs"
+
+KJB_mvLast = time
+KJB_tDecay = time
+KJB_lastDrawn = time
+["start", format ["height %1 m, moves idle %2 walk %3 turn %4 roar %5 flinch %6 dormant %7 rise %8, stride %9 m", KJB_H, KJB_mIdle, KJB_mWalk, KJB_mTurnL, KJB_mRoar, KJB_mFlinch, KJB_mDormant, KJB_mRise, KJB_stride]] call KJB_fnLog
+["start", format ["features roar %1 beam %2 crush %3, auto %4, first state %5", KJB_hasRoar, KJB_hasBeam, KJB_hasCrush, KJ_brainAuto, _first]] call KJB_fnLog
+_first call KJB_fnEnter
+
+#loop
+~KJB_TICK
+call KJB_fnTick
+? KJ_brainOn and (KJ_state != "dead") : goto "loop"
+
+? KJ_state == "dead" : ["dead", "the brain ends"] call KJB_fnLog
+KJ_brainOn = false
+? not (isNull KJB_probe) : deleteVehicle KJB_probe
+exit

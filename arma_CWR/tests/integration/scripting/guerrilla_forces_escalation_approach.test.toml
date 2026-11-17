@@ -1,0 +1,20 @@
+# Occupier forces phase 1 A (2026-10-16, video 5): the repel ladder. A held
+# town that repels the director twice gets a different approach and an
+# escalation strike on the third operation (OCCUPIER-FORCES.md 6.3 THE REPEL
+# LADDER, 7.3). Boots the SHIPPED Guerrilla.Abel template (repo-root-relative;
+# it opts in with occupierForces = 1) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The shadow
+# must carry the current gmcore and faction library
+# (guerrilla-mode/install-missions.ps1): EAST's forcesJet / forcesAttackHeli
+# keys make the strike airframe available. Without the junction the test
+# reports spawn failed, which is not a regression. Not headless: the
+# operations are born under S and fought live (a real camera,
+# gmTrafficPercept).
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 1800
+assert_timeout = 900
+extra_args = ["--dev"]

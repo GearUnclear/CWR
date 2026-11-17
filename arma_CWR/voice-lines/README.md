@@ -45,6 +45,20 @@ The script prints the transcript of what was actually spoken. **Check it matches
 
 The delivery lands surprisingly close to the vanilla 2001 voice acting (flat, single-take radio reads), so new lines blend in with the stock voice banks.
 
+### Model comparison (2026-10-12, whisper -> shout)
+
+Same character, same text (`"Oh crap, is that them up there? Hey you! Are you looking for us?!"`), in `samples/compare_20261012/`:
+
+| File | Model | How |
+|---|---|---|
+| `01_mini_single.wav` | `openai/gpt-audio-mini` | single request, direction: whispered hushed -> shouting challenging |
+| `02_full_single.wav` | `openai/gpt-audio` | single request, same direction (drop-in upgrade) |
+| `03_eleven-turbo_single_tagged.mp3` | `elevenlabs/eleven-v4-turbo` (voice `brian`) | single request with inline tags: `[whisper] ... [shout] ...` |
+| `04_eleven-turbo_concat.mp3` | same Eleven voice | two plain requests concatenated (`04a_` + `04b_`) |
+| `05_voxtral_concat.mp3` | `mistralai/voxtral-mini-tts-2603` | two requests, same speaker different presets: `en_paul_neutral` + `en_paul_angry` (`05a_` + `05b_`) |
+
+Finding: Eleven Turbo single-tagged is the best overall delivery (cleanest whisper-to-shout shift in one take), but `gpt-audio-mini` best matches the vanilla voices: its flatter delivery blends with the 2001 stock banks, while Eleven sounds noticeably more modern/acted.
+
 ## 2. What the engine can play
 
 Format dispatch is by file extension in `SoundLoadFile` (`engine/Poseidon/Audio/Streaming/WaveStream.cpp:146`):

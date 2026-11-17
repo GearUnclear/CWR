@@ -1,0 +1,60 @@
+{
+  "_comment": [
+    "The creatures of the integrated addon. A creature is a data entry: add one here, point `build` at its",
+    "model build, and run build-kj-dedushka.ps1. Nothing in the kj script set names a creature.",
+    "  key          short name: its clips live under uddedushka/anim_<key>, -Creatures picks by it",
+    "  class        the CfgVehicles class a mission makes",
+    "  model        file stem of its P3D in the pbo (also its CfgModels class)",
+    "  moves        its own moves class (generated from the shared moves_dedushka.hpp)",
+    "  build        a finished model build: dedushka.p3d, dedushka_rest.json (the joint file),",
+    "               dedushka_export.json and stage/uddedushka/*.paa",
+    "  sounds       its own voice: shared sound class -> the class this creature uses instead. A class the mounted",
+    "               sound set does not have falls back to the shared one (KJ_Hurt, the cry at a hard hit, to silence)",
+    "  voicePbo     optional: a pbo with more sound classes for it, copied into the mount when the file exists"
+  ],
+  "creatures": [
+    {
+      "key": "a",
+      "class": "UDDedushka",
+      "displayName": "Dedushka",
+      "model": "dedushka",
+      "moves": "CfgMovesDedushka",
+      "build": "D:/Arma_CWA_worktrees/kaiju-notes/finishing/models/build/a",
+      "sounds": {
+        "KJ_Roar": "KJ_RoarBear1",
+        "KJ_RoarFar": "KJ_RoarBear1Far",
+        "KJ_Hurt": "KJ_RoarBear3",
+        "KJ_HurtFar": "KJ_RoarBear3Far"
+      },
+      "voicePbo": ""
+    },
+    {
+      "key": "d",
+      "class": "UDDedushkaHound",
+      "displayName": "Dedushka (the Hound)",
+      "model": "dedhound",
+      "moves": "CfgMovesDedHound",
+      "build": "D:/Arma_CWA_worktrees/kaiju-notes/finishing/models/build/d",
+      "sounds": {
+        "KJ_Roar": "KJ_RoarDog1",
+        "KJ_RoarFar": "KJ_RoarDog1Far",
+        "KJ_Hurt": "KJ_RoarDog2",
+        "KJ_HurtFar": "KJ_RoarDog2Far"
+      },
+      "voicePbo": ""
+    },
+    {
+      "key": "proxy",
+      "class": "UDDedushkaProxy",
+      "displayName": "Dedushka (stand-in)",
+      "model": "dedproxy",
+      "moves": "CfgMovesDedProxy",
+      "build": "D:/Arma_CWA_worktrees/kaiju-notes/pipeline/build",
+      "sounds": {
+        "KJ_Hurt": "KJ_RoarBear3",
+        "KJ_HurtFar": "KJ_RoarBear3Far"
+      },
+      "voicePbo": ""
+    }
+  ]
+}

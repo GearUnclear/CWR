@@ -1,0 +1,9 @@
+# Dedushka integration: one tank fires on him (WEAPONS ARE FIRED; the owner allowed it on
+# 2026-11-12). The crush feature's unrun live-fire test brought up to date in the integrated set.
+# Experiment, kept out of tests/integration. Run: integration/run-kj.ps1 -Name kj_livetank
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/models-tests/DedushkaLab.Eden"
+timeout = 900
+assert_timeout = 200
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_models"]

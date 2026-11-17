@@ -39,7 +39,7 @@ void Fireplace::Simulate(float deltaT, SimulationImportance prec)
     if (_burning)
     {
         Vector3 position = Position();
-        float fade = GRandGen.PlusMinus(0.8, 0.2);
+        float fade = GFxRandGen.PlusMinus(0.8, 0.2);
         if (_light)
         {
             _light->Switch(true);

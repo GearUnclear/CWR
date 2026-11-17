@@ -136,6 +136,8 @@ set(POSEIDON_TEST_SOURCES
     # Graphics tests
     Graphics/test_alpha_classify.cpp
     Graphics/test_shadowmap_math.cpp
+    Graphics/test_shadow_xp.cpp
+    Graphics/test_look_options.cpp
     Graphics/test_paa_decode_fixtures.cpp
     Graphics/test_paa_decoder.cpp
     Graphics/test_shape_loader.cpp
@@ -169,10 +171,12 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_ubo_mirror.cpp
     Graphics/test_post_stages.cpp
     Graphics/test_temporal_aa.cpp
+    Graphics/test_temporal_determinism.cpp
     Graphics/test_atmosphere.cpp
     Graphics/test_terrain_detail.cpp
     Graphics/test_sun_shadows.cpp
     Graphics/test_frame_lights.cpp
+    Graphics/test_world_program_dedupe.cpp
     Graphics/test_sea_waves.cpp
     Graphics/test_sky_density.cpp
     Graphics/test_canopy.cpp
@@ -188,6 +192,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp
     Graphics/test_window_placement.cpp
+    Graphics/test_frame_recorder.cpp
 )
 
 if(WIN32)
@@ -286,6 +291,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Rendering/test_render_frame_perf_budget.cpp
     Graphics/Rendering/test_render_frame_runtime_checks.cpp
     Graphics/Rendering/test_cloudlet_depth_contract.cpp
+    Graphics/Rendering/test_decal_batch_rules.cpp
 
     # Rendering tests (batch-07)
     Graphics/Rendering/test_colors_materials.cpp
@@ -401,15 +407,26 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Scene/Camera tests (batch-17)
     World/Scene/test_camera_enums.cpp
+    World/Scene/test_draw_list_sort.cpp
 
     # Game tests
     Game/test_game_state_ext.cpp
     Game/Guerrilla/test_zone_registry.cpp
+    Game/Guerrilla/test_base_generate.cpp
+    Game/Guerrilla/test_base_props.cpp
     Game/Guerrilla/test_campaign_end.cpp
     Game/Guerrilla/test_counter_attack.cpp
+    Game/Guerrilla/test_town_capture_batch.cpp
+    Game/Guerrilla/test_town_presence_order.cpp
+    Game/Guerrilla/test_occupier_forces.cpp
+    Game/Guerrilla/test_occupier_forces_band.cpp
+    Game/Guerrilla/test_occupier_forces_reserve.cpp
+    Game/Guerrilla/test_force_packages.cpp
+    Game/Guerrilla/test_occupier_air.cpp
     Game/Guerrilla/test_garrison_cache.cpp
     Game/Guerrilla/test_alert_machine.cpp
     Game/Guerrilla/test_assailants.cpp
+    Game/Kaiju/test_kaiju_math.cpp
     Game/Guerrilla/test_undercover.cpp
     Game/Guerrilla/test_town_flags.cpp
     Game/Guerrilla/test_traffic.cpp
@@ -430,6 +447,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_legend_names.cpp
     Game/Guerrilla/test_legend_placement.cpp
     Game/Guerrilla/test_island_scaffold.cpp
+    Game/Guerrilla/test_island_scaffold_bases.cpp
     Game/Guerrilla/test_faction_history.cpp
     Game/Guerrilla/test_descriptor_lint.cpp
     Game/Guerrilla/test_roster_probe.cpp
@@ -443,6 +461,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/test_tri_generic_asserts.cpp
     Game/test_tri_value_getters.cpp
     Game/test_tri_capture_verbs.cpp
+    Game/test_tri_perf_verbs.cpp
     Dev/Debug/test_dev_mode_gates.cpp
 
     # Network tests
@@ -492,11 +511,14 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_object.cpp
     World/Scene/test_scene.cpp
     World/Scene/test_scene_preloader.cpp
+    World/Scene/test_shape_draw_order.cpp
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
     World/Scene/test_instanced_run_rules.cpp
+    World/Scene/test_land_fit_cache.cpp
     World/Scene/test_terrain_occlusion.cpp
     World/Scene/test_streetlamp_casting.cpp
+    World/Scene/test_occlusion_range.cpp
 
     # Core subsystem tests
     UI/Locale/test_stringtable_system.cpp
@@ -535,6 +557,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_displayUI.cpp
     UI/test_audio_page.cpp
     UI/test_flat_menu_page.cpp
+    UI/test_controls_page_resource.cpp
     UI/test_game_page.cpp
     UI/test_font_renderer.cpp
     UI/test_gamepad_page.cpp

@@ -1,6 +1,9 @@
 #include <Poseidon/UI/Options/OptionsScrollList.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/UI/Options/OptionsShell.hpp>
+#include <Poseidon/UI/Options/FlatMenuPage.hpp>
+#include <Poseidon/UI/Options/ScrollListPage.hpp>
+#include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/UI/OptionsUI.hpp>
 #include <Poseidon/UI/Controls/UIControlsBase.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>
@@ -252,4 +255,117 @@ TEST_CASE("User missions use profile save directories", "[optionsUI][savegame]")
     SetBaseSubdirectory(baseSubdirectory);
     Glob.header.filenameReal = filenameReal;
     std::snprintf(Glob.header.worldname, sizeof(Glob.header.worldname), "%s", worldName.c_str());
+}
+
+// A page popped from inside its own handler must outlive that handler. The
+// owner's crash (2026-10-14, OptionsScrollList::PollPointerActionClick writing
+// into an unmapped `this`) is the class this pins: Close row, Esc and modal
+// Resolve all reach OptionsShell::PopPage from code running on the page (or its
+// scroll list), and that code keeps touching members after PopPage returns
+// (the pointer poll's m_pointerLeftWasDown store, AudioPage's preview tick,
+// FlatMenuPage's m_lastNavIdc). PopPage used to free the page on the spot.
+namespace
+{
+struct PageLifetime
+{
+    bool destroyed = false;
+    bool aliveAfterAction = false;
+};
+
+class OneRowProvider : public OptionsScrollList::Provider
+{
+  public:
+    int RowCount() const override { return 1; }
+    const char* RowLabel(int) const override { return "Row"; }
+    OptionsScrollList::RowDef RowFor(int) const override { return {-1, nullptr, 2}; }
+    int RowValue(int) const override { return 0; }
+    void SetRowValue(int, int) override {}
+};
+
+class ClosingScrollPage : public ScrollListPage
+{
+  public:
+    explicit ClosingScrollPage(PageLifetime& life) : m_life(life) {}
+    ~ClosingScrollPage() override { m_life.destroyed = true; }
+
+    const char* TitleText() const override { return ""; }
+    int DefaultFocusIdc() const override { return -1; }
+    const char* ResourceClassName() const override { return ""; }
+
+    using ScrollListPage::List;
+
+  protected:
+    OptionsScrollList::Provider& ProviderRef() override { return m_provider; }
+
+  private:
+    PageLifetime& m_life;
+    OneRowProvider m_rows;
+    OptionsScrollList::WithCloseRow m_provider{m_rows, "Close", ""};
+};
+
+// Mirrors IndexPage's Credits/Close nav row: OnNav pops the page itself and
+// FlatMenuPage::OnButtonClicked then records m_lastNavIdc on it.
+class SelfClosingFlatPage : public FlatMenuPage
+{
+  public:
+    explicit SelfClosingFlatPage(PageLifetime& life) : FlatMenuPage(kCycle, kCycleSize), m_life(life) {}
+    ~SelfClosingFlatPage() override { m_life.destroyed = true; }
+
+    const char* TitleText() const override { return ""; }
+    int DefaultFocusIdc() const override { return -1; }
+    const char* ResourceClassName() const override { return ""; }
+
+  protected:
+    bool OnNav(OptionsShell& shell, int) override
+    {
+        shell.PopPage();
+        m_life.aliveAfterAction = !m_life.destroyed;
+        return true;
+    }
+
+  private:
+    PageLifetime& m_life;
+    static constexpr int kCycle[] = {1105, 1106};
+    static constexpr int kCycleSize = 2;
+};
+} // namespace
+
+TEST_CASE("OptionsShell keeps a scroll-list page alive after its own Close row pops it", "[optionsUI][UI][options]")
+{
+    PageLifetime life;
+    {
+        TestableOptionsShell shell(true, false);
+        auto page = std::make_unique<ClosingScrollPage>(life);
+        ClosingScrollPage* raw = page.get();
+        shell.PushPage(std::move(page));
+        REQUIRE(raw->List() != nullptr);
+
+        // The pinned footer (slot 8) is the Close row; 583 is its hover overlay,
+        // the control a pointer click on the row lands on.
+        const int closeHover = OptionsScrollList::SlotIdcHover(OptionsScrollList::kVisibleSlots - 1);
+        CHECK(raw->OnButtonClicked(shell, closeHover));
+
+        // Popped and unmounted (the list is detached) but not freed: the code
+        // that dispatched the click is still running on this object.
+        CHECK_FALSE(life.destroyed);
+        CHECK(raw->List() == nullptr);
+    }
+    // Retired pages die with the shell at the latest.
+    CHECK(life.destroyed);
+}
+
+TEST_CASE("OptionsShell keeps a flat menu page alive after its own nav row pops it", "[optionsUI][UI][options]")
+{
+    PageLifetime life;
+    {
+        TestableOptionsShell shell(true, false);
+        auto page = std::make_unique<SelfClosingFlatPage>(life);
+        SelfClosingFlatPage* raw = page.get();
+        shell.PushPage(std::move(page));
+
+        CHECK(raw->OnButtonClicked(shell, 1105));
+        CHECK(life.aliveAfterAction);
+        CHECK_FALSE(life.destroyed);
+    }
+    CHECK(life.destroyed);
 }

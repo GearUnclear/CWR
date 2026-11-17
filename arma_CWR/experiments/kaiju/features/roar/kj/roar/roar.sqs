@@ -1,0 +1,141 @@
+; ============================================================================
+;  kj\roar\roar.sqs  -  Dedushka roars, and everyone who hears it reacts.
+;
+;      [kaiju] exec "kj\roar\roar.sqs"
+;
+;  Tuning: the marked block at the top of kj\roar\init.sqf.
+;
+;  What happens:
+;    - The roar is played (snd.sqs). It reaches the listener late, by
+;      distance; past KJR_FAR_SWITCH heights the listener gets the far
+;      version. Near him the view shakes for as long as the roar is loud.
+;    - Fear spreads at the speed of sound. Everyone within KJR_ALERT_R heights
+;      is taken nearest first and reacts at the moment the roar reaches him:
+;        soldiers inside KJR_BREAK_R    break and run (panic.sqs: the engine's
+;                                       own group flee where it can be had)
+;        soldiers inside KJR_FREEZE_R   stop dead and stare at him; the nearer
+;                                       ones throw themselves down (freeze.sqs)
+;        civilians inside KJR_CIV_R     run from him, indoors when a house is
+;                                       close (panic.sqs)
+;        ground vehicles inside KJR_VEH_R  stop (halt.sqs)
+;        everyone else in range         turns to face the sound (turn.sqs)
+;    - Birds near the listener go up when it arrives (birds.sqs).
+;  The player, his group, aircraft, boats and Dedushka himself are left alone.
+;  Nothing here is rolled: who does what follows from side, distance and
+;  what the engine's group flee decides.
+;
+;  Read by others:
+;    KJ_roaring      true from the first sound until the last unit has heard it
+;    KJ_roarCount    roars so far
+;    KJ_roarTime     when the last one started
+;    KJ_roarLog      [[unit, "BREAK" | "FREEZE" | "ALERT" | "CIV" | "VEH",
+;                      metres from him, seconds after the roar], ...]
+;    KJ_panicLog     see panic.sqs
+;  A second roar asked for within KJR_ROAR_LEN seconds of the last is dropped.
+; ============================================================================
+_k = _this select 0
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJR_sized" : [_k] call KJR_fnSize
+? not alive _k : exit
+? time < KJ_roarBusyUntil : exit
+_t0 = time
+KJ_roarBusyUntil = _t0 + KJR_ROAR_LEN
+KJ_roarCount = KJ_roarCount + 1
+KJ_roarTime = _t0
+KJ_roaring = true
+_n = KJ_roarCount
+? (count KJ_roarLog) > 400 : KJ_roarLog = []
+? KJR_PLAY_ANIM : _k playMove "DedRoar"
+
+; ---- the sound, and what it does to the listener -----------------------------------
+[_k, "KJ_Roar", "KJ_RoarFar", 0, KJR_MOUTH_H] exec "kj\roar\snd.sqs"
+_ear = call KJR_fnEar
+_d = _ear distance _k
+_far = KJR_ROAR_SHAKE_R * KJR_H
+_s = 0
+? _d < _far : _s = KJR_ROAR_SHAKE * (_far - _d) / _far
+? _s > 0.01 : [_s, KJR_ROAR_SHAKE_T, _d / KJR_SOUND_V + 0.6, [getPos _k, KJR_ROAR_SHAKE, 0, _far]] exec "kj\roar\shake.sqs"
+? _d < (KJR_ALERT_R * KJR_H) : [_k, _d / KJR_SOUND_V + 1] exec "kj\roar\birds.sqs"
+
+; ---- everyone in earshot, nearest first ----------------------------------------------
+_list = nearestObjects [getPos _k, ["AllVehicles"], KJR_ALERT_R * KJR_H]
+_cnt = count _list
+_alerted = []
+_mine = units (group player)
+_i = 0
+logInfo format ["KJROAR roar %1 at %2 from %3: %4 things within %5 m, listener at %6 m", _n, _t0, getPos _k, _cnt, KJR_ALERT_R * KJR_H, _d]
+
+#next
+? _i >= _cnt : goto "done"
+_u = _list select _i
+_i = _i + 1
+? isNull _u : goto "next"
+? _u == _k : goto "next"
+? not alive _u : goto "next"
+_d = _u distance _k
+_due = _t0 + _d / KJR_SOUND_V
+? time >= _due : goto "now"
+~(_due - time)
+#now
+? isNull _u : goto "next"
+? not alive _u : goto "next"
+? not alive _k : goto "done"
+? ("Man" countType [_u]) == 0 : goto "veh"
+? (typeOf _u) == (typeOf _k) : goto "next"
+? _u in _mine : goto "next"
+? (_u getVariable ["kjrPanic", 0]) == _n : goto "next"
+? (side _u) == civilian : goto "civ"
+? _d < (KJR_BREAK_R * KJR_H) : goto "break"
+? _d < (KJR_FREEZE_R * KJR_H) : goto "freeze"
+goto "alert"
+
+; ---- a section at his feet: it breaks. The whole group goes, as the engine flees by group
+#break
+{ _x setVariable ["kjrPanic", _n] } forEach (units (group _u))
+{ KJ_roarLog = KJ_roarLog + [[_x, "BREAK", _x distance _k, time - _t0]] } forEach (units (group _u))
+[_k, _u, 0] exec "kj\roar\panic.sqs"
+goto "next"
+
+; ---- townspeople: run, indoors if they can
+#civ
+? _d > (KJR_CIV_R * KJR_H) : goto "alert"
+{ _x setVariable ["kjrPanic", _n] } forEach (units (group _u))
+{ KJ_roarLog = KJ_roarLog + [[_x, "CIV", _x distance _k, time - _t0]] } forEach (units (group _u))
+[_k, _u, 1] exec "kj\roar\panic.sqs"
+goto "next"
+
+; ---- further out: rooted to the spot
+#freeze
+KJ_roarLog = KJ_roarLog + [[_u, "FREEZE", _d, time - _t0]]
+[_k, _u, _d] exec "kj\roar\freeze.sqs"
+goto "next"
+
+; ---- far out: heads turn
+#alert
+KJ_roarLog = KJ_roarLog + [[_u, "ALERT", _d, time - _t0]]
+_u doWatch _k
+(group _u) reveal _k
+[_k, _u] exec "kj\roar\turn.sqs"
+_alerted = _alerted + [_u]
+goto "next"
+
+; ---- a vehicle: the driver stands on the brakes
+#veh
+? ("Air" countType [_u]) > 0 : goto "next"
+? ("Ship" countType [_u]) > 0 : goto "next"
+? _d > (KJR_VEH_R * KJR_H) : goto "next"
+_drv = driver _u
+? isNull _drv : goto "next"
+? not alive _drv : goto "next"
+? _drv in _mine : goto "next"
+KJ_roarLog = KJ_roarLog + [[_u, "VEH", _d, time - _t0]]
+[_k, _u, _d] exec "kj\roar\halt.sqs"
+goto "next"
+
+#done
+KJ_roaring = false
+logInfo format ["KJROAR roar %1 spread done at +%2 s: %3 reactions logged in all", _n, time - _t0, count KJ_roarLog]
+? (count _alerted) == 0 : exit
+~KJR_ALERT_T
+{ if (alive _x) then { _x doWatch objNull } } forEach _alerted
+exit

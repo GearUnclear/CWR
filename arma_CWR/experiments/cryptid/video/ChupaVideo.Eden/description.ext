@@ -1,0 +1,4 @@
+// Chupacabra video mission (9:16 broadcast, experiment only, not a Guerrilla
+// template). Needs @udchupa built with -CustomMoves; boots like ChupaModel.Eden.
+onLoadMission = "Office of Civil Order";
+respawn = 0;

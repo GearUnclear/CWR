@@ -109,6 +109,7 @@ void Target::Init()
     subjectiveCost = 0;
     ucCompromised = false;
     ucCompromisedTime = TIME_MIN;
+    ucWeaponSeenTime = TIME_MIN;
 }
 
 bool Target::IsKnownBy(AIUnit* unit) const

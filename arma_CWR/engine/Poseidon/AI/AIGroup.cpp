@@ -75,6 +75,7 @@ AIGroup::AIGroup() : _radio(CCGroup, this, RNRadio)
     _forceCourage = -1;
     _courage = 1.0;
     _flee = false;
+    _fearUntil = Glob.time - 1;
 
     _threshold = 0;
     _thresholdValid = Glob.time - 1.0;
@@ -1260,7 +1261,8 @@ bool AIGroup::Think()
         if (leaderAlive)
         {
             float strength = ActualStrength();
-            if (strength < (1.0 - _courage) * _maxStrength)
+            // a forced fear (Game/Kaiju roar) holds the group in flight until it runs out
+            if (strength < (1.0 - _courage) * _maxStrength || Glob.time < _fearUntil)
             {
                 if (!_flee)
                 {
@@ -1576,7 +1578,10 @@ void AIGroup::SendCommand(Command& cmd, PackedBoolArray list, bool channelCenter
                 {
                     AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
                     RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
-                    AI_ERROR(msgCmd->GetFrom() == this);
+                    if (!RadioCommandIsFrom(msgCmd, this, channelCenter))
+                    {
+                        continue; // another group's command on the shared center channel
+                    }
                     if (msgCmd->GetCmdMessage() == Command::GetIn && msgCmd->IsTo(unit))
                     {
                         msgCmd->DeleteTo(unit);

@@ -1,8 +1,14 @@
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 
+#include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // zone alert states (alarm answers, 8.2)
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // IsMilitaryType
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp> // RoadFactor / GroundLeg: the one road factor
+#include <Poseidon/Game/Guerrilla/OccupierAir.hpp> // phase 6A: insertions and sorties
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
-#include <Poseidon/Game/Guerrilla/Traffic.hpp> // the shared perception gate (issue #53)
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>  // HqZone: the HQ's town is never a target (N4a)
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool seams (5.5), pass-through while inactive
+#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>      // the road route search (BuildRoute)
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>        // the shared perception gate (issue #53)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
@@ -12,9 +18,12 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp> // ENGINE_CONFIG.objectsZ / horizontZ (perception gate)
 
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>                  // GScene (sun darkness: the hull gate, M8)
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp> // LightSun::NightEffect
 #include <Poseidon/World/Terrain/Landscape.hpp> // surface Y, dry-land test
 #include <Poseidon/World/Terrain/Roads.hpp>     // GRoadNet road snap
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Vehicles/Transport.hpp> // ground hulls (3.2)
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICore.hpp>
 #include <Poseidon/AI/VehicleAI.hpp> // Rank
@@ -25,11 +34,14 @@
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toIntFloor / toIntCeil (road survey)
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
+#include <algorithm>
 #include <functional>
 #include <queue>
 #include <unordered_map>
@@ -42,6 +54,8 @@
 void CreateUnit(AIGroup* group, RString type, Vector3Par position, RString init, float skill, Rank rank);
 void DeleteVehicle(Entity* veh);
 void ProcessJoinGroups(OLinkArray<AIUnit>& units, AIGroup* group);
+// the moveIn* body (GameStateExtUi.cpp): seat a soldier, no script parsing
+bool NativeMoveIn(Poseidon::Person* soldier, Poseidon::Transport* veh, GetInPosition position);
 
 namespace Poseidon::Guerrilla
 {
@@ -81,6 +95,11 @@ static float Dist2D(Vector3Par a, Vector3Par b)
     return Dist2D(a.X(), a.Z(), b.X(), b.Z());
 }
 
+static bool IsZeroPos(Vector3Par p)
+{
+    return p.X() == 0 && p.Z() == 0;
+}
+
 static float Clamp01(float v)
 {
     return v < 0 ? 0 : (v > 1 ? 1 : v);
@@ -115,6 +134,10 @@ void CounterAttack::Clear()
 {
     _tuning = CounterAttackTuning();
     _records.Clear();
+    _homeHulls.Clear();
+    _leftovers.Clear();
+    _ends.Clear();
+    _endLine = RString();
     _accum = 0;
     _townsTaken = 0;
 }
@@ -160,7 +183,6 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     CounterAttackTuning& t = _tuning;
     t.enabled = c.ReadValue("counterAttack", 1.0f) != 0.0f;
     t.size = ReadRanged(c, "counterAttackSize", t.size, 0.0f, 4.0f);
-    t.firstTownChance = ReadRanged(c, "counterAttackFirstTownChance", t.firstTownChance, 0.0f, 1.0f);
     t.chance = ReadRanged(c, "counterAttackChance", t.chance, 0.0f, 1.0f);
     t.warLevelStep = ReadRanged(c, "counterAttackWarLevelStep", t.warLevelStep, 0.0f, 2.0f);
     t.delayMin = ReadRanged(c, "counterAttackDelayMin", t.delayMin, 0.0f, 86400.0f);
@@ -173,13 +195,40 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     }
     t.sourceKeep = ReadRanged(c, "counterAttackSourceKeep", t.sourceKeep, 0.0f, 1.0f);
     t.speed = ReadRanged(c, "counterAttackSpeed", t.speed, 0.5f, 100.0f);
-    t.roadFactor = ReadRanged(c, "counterAttackRoadFactor", t.roadFactor, 1.0f, 5.0f);
+    // counterAttackRoadFactor is retired (the break-off round, 2026-10-16):
+    // every leg with no road route uses the theatre's forcesRoadFactor
+    // (ForcePackages::RoadFactor), the quote's factor
+    if (c.FindEntry("counterAttackRoadFactor"))
+    {
+        LOG_WARN(Core,
+                 "CounterAttack: counterAttackRoadFactor is a retired key and is ignored; forcesRoadFactor ({}) "
+                 "times every leg with no road route",
+                 (double)ForcePackages::RoadFactor());
+    }
     t.defenderWeight = ReadRanged(c, "counterAttackDefenderWeight", t.defenderWeight, 0.0f, 100.0f);
     t.repelLoss = ReadRanged(c, "counterAttackRepelLoss", t.repelLoss, 0.0f, 1.0f);
     t.liveTimeout = ReadRanged(c, "counterAttackLiveTimeout", t.liveTimeout, 60.0f, 86400.0f);
-    t.maxLive = (int)ReadRanged(c, "counterAttackMaxLive", (float)t.maxLive, 0.0f, 8.0f);
     t.birthMinToTarget = ReadRanged(c, "counterAttackBirthMinToTarget", t.birthMinToTarget, 0.0f, 2000.0f);
     t.birthGiveUp = ReadRanged(c, "counterAttackBirthGiveUp", t.birthGiveUp, 30.0f, 86400.0f);
+    // occupier forces (OCCUPIER-FORCES.md 16): the layer key is read here
+    // too, so the movement rules know the key without the pool service
+    t.forcesOn = c.ReadValue("occupierForces", OccupierForcesTuning::KeyDefault) != 0.0f;
+    // the levers (OccupierForcesLevers.hpp): forcesConcurrency derives maxLive
+    // and forcesLiveHullsMax, forcesAggression firstTownChance; those keys and
+    // forcesSortieTime read as expert overrides.  forcesOpsMax is OccupierForces'
+    LoadCounterAttackLevers(t, c);
+    // the parent nation's map edge (N / S / E / W; absent or anything else = nearest)
+    t.offMapEdge = -1;
+    if (const ParamEntry* edge = c.FindEntry("forcesOffMapEdge"))
+    {
+        const RString e = (RStringB)*edge;
+        const char ch = e.GetLength() > 0 ? ((const char*)e)[0] : 0;
+        t.offMapEdge = ch == 'N' || ch == 'n'   ? CAEdgeNorth
+                       : ch == 'S' || ch == 's' ? CAEdgeSouth
+                       : ch == 'E' || ch == 'e' ? CAEdgeEast
+                       : ch == 'W' || ch == 'w' ? CAEdgeWest
+                                                : -1;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -243,9 +292,89 @@ float CounterAttack::TravelTime(const CounterAttackTuning& t, float straightDist
 {
     // the whole road leg from the base to the town: a live squad appears on
     // that road (unseen) and walks the rest, so nothing is cut off the end
-    const float leg = straightDistance > 0 ? straightDistance : 0;
-    const float seconds = leg * t.roadFactor / (t.speed > 0 ? t.speed : 1.0f);
+    const float leg = ForcePackages::GroundLeg(straightDistance > 0 ? straightDistance : 0, 0.0f, QuoteRoadFactor());
+    const float seconds = leg / (t.speed > 0 ? t.speed : 1.0f);
     return seconds < MinTravel ? MinTravel : seconds;
+}
+
+float CounterAttack::RealSpeed(int package, float maxSpeedKmh)
+{
+    if (package == FPFoot || maxSpeedKmh <= 0)
+    {
+        return FootSpeed;
+    }
+    const bool air = package == FPTransportHeli || package == FPAttackHeli || package == FPJet;
+    return (air ? AirCruise : GroundCruise) * maxSpeedKmh / 3.6f;
+}
+
+float CounterAttack::QuoteRoadFactor()
+{
+    // one road factor for a leg with no road route (the levers audit: the
+    // quote used forcesRoadFactor 1.5 while the march used
+    // counterAttackRoadFactor 1.3): the theatre's, the one the director
+    // sets from forcesRoadFactor and prices every quote with
+    const float f = ForcePackages::RoadFactor();
+    return f > 1.0f ? f : 1.0f;
+}
+
+bool CounterAttack::BreaksOff(int bornStrength, int alive)
+{
+    return alive > 0 && bornStrength > 0 && alive * BreakOffDivisor < bornStrength;
+}
+
+const char* CounterAttack::HullReleaseName(int released)
+{
+    switch (released)
+    {
+        case HRWaiting:
+            return "waiting";
+        case HRCleared:
+            return "cleared";
+        case HRWaitOver:
+            return "wait over";
+        case HRNoInfantry:
+            return "no infantry";
+        default:
+            return "";
+    }
+}
+
+float CounterAttack::ClearRadius(const ZoneRegistry& registry) const
+{
+    const float edge = registry.Tuning().zoneArea + TownEdgeMargin;
+    return _tuning.birthMinToTarget > edge ? _tuning.birthMinToTarget : edge;
+}
+
+float CounterAttack::TravelTimeFor(const CounterAttackTuning& t, const Record& r, float straightDistance,
+                                   float roadLength, float lineFactor)
+{
+    // the test lever, and the legacy pacing with the key off (3.2: the real
+    // speeds apply only with occupierForces on)
+    if (t.speedLever || (!t.forcesOn && r.abstractSpeed <= 0))
+    {
+        return TravelTime(t, straightDistance);
+    }
+    const float speed = r.abstractSpeed > 0 ? r.abstractSpeed : FootSpeed;
+    // a real road route already is the road: no factor on top of it; with
+    // only the straight distance known the quote's road factor stands in
+    const float factor = lineFactor > 1.0f ? lineFactor : 1.0f;
+    const float leg = ForcePackages::GroundLeg(straightDistance > 0 ? straightDistance : 0, roadLength, factor);
+    const float seconds = leg / speed;
+    return seconds < MinTravel ? MinTravel : seconds;
+}
+
+float CounterAttack::HoldOddsLethal(const CounterAttackTuning& t, int defenders, float attackLethal)
+{
+    if (attackLethal <= 0)
+    {
+        return 1.0f;
+    }
+    if (defenders <= 0)
+    {
+        return 0.0f;
+    }
+    const float d = (float)defenders * t.defenderWeight;
+    return d / (attackLethal + d);
 }
 
 float CounterAttack::RouteLength(const AutoArray<Vector3>& route)
@@ -442,6 +571,51 @@ float CounterAttack::RouteFractionNear(const AutoArray<Vector3>& route, Vector3P
     return Clamp01(bestArc / len);
 }
 
+bool CounterAttack::RouteAheadWithin(const AutoArray<Vector3>& route, float fraction, float px, float pz,
+                                     float radius)
+{
+    const int n = route.Size();
+    if (n == 0)
+    {
+        return false;
+    }
+    const Vector3 p(px, 0, pz);
+    if (n == 1)
+    {
+        return Dist2D(route[0], p) <= radius;
+    }
+    const float from = Clamp01(fraction) * RouteLength(route);
+    float arc = 0;
+    for (int i = 1; i < n; i++)
+    {
+        const Vector3 a = route[i - 1];
+        const Vector3 b = route[i];
+        const float seg = Dist2D(a, b);
+        if (arc + seg < from)
+        {
+            arc += seg;
+            continue;
+        }
+        // the part of this segment at or beyond the fraction
+        const float k0 = seg > 0 && from > arc ? (from - arc) / seg : 0.0f;
+        const Vector3 s0 = a + (b - a) * k0;
+        const float len = Dist2D(s0, b);
+        float k = 0;
+        if (len > 0)
+        {
+            k = ((px - s0.X()) * (b.X() - s0.X()) + (pz - s0.Z()) * (b.Z() - s0.Z())) / (len * len);
+            k = Clamp01(k);
+        }
+        const Vector3 q = s0 + (b - s0) * k;
+        if (Dist2D(q, p) <= radius)
+        {
+            return true;
+        }
+        arc += seg;
+    }
+    return false;
+}
+
 void CounterAttack::ReturnToRoad(Record& r, float fraction, int alive, float wholeTravel)
 {
     if (r.travel <= 0)
@@ -461,6 +635,13 @@ void CounterAttack::ReturnToRoad(Record& r, float fraction, int alive, float who
     r.deferLogged = false;
     r.wholeRoad = false;
     r.unseenFor = 0;
+    r.arrivalLive = false;
+    r.dismounted = false;
+    r.stopping = -1;
+    r.escortWait = false;
+    r.stallMark = -1;
+    r.stallFor = 0;
+    r.stallVerdict = StallNone;
 }
 
 bool CounterAttack::RoadIsReasonable(float roadLength, float straightDistance)
@@ -482,20 +663,25 @@ float CounterAttack::MarchAllowance(const AutoArray<Vector3>& route, float fract
     return RouteLength(route) * (1.0f - Clamp01(fraction)) / MarchSpeed + MarchSlack;
 }
 
-int CounterAttack::GroupTarget(const ZoneRegistry& registry, const AIGroup* grp) const
+// the player's 2D distance from at, -1 without a player
+static float PlayerDistance(const CounterAttackView& view, Vector3Par at)
 {
-    if (!grp)
-    {
-        return -1;
-    }
-    for (int i = 0; i < _records.Size(); i++)
-    {
-        if (_records[i].phase == CALive && _records[i].group.GetLink() == grp)
-        {
-            return registry.FindZoneIndex(_records[i].target);
-        }
-    }
-    return -1;
+    return view.playerValid ? Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) : -1.0f;
+}
+
+void CounterAttack::TraceArrived(const CounterAttackView& view, const Record& r, const char* mode, const char* how,
+                                 Vector3Par at)
+{
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] arrived {} at {} ({}), {:.0f} m from the player", r.opId, mode,
+                     r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, how, PlayerDistance(view, at));
+}
+
+void CounterAttack::TraceBorn(const CounterAttackView& view, const Record& r, const char* reason, Vector3Par at)
+{
+    GM_DIRECTOR_INFO(Core,
+                     "CounterAttack: [op {}] born for {} (spawnReason {}) at [{:.0f}, {:.0f}], {:.0f} m from the player",
+                     r.opId, r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, reason, at.X(), at.Z(),
+                     PlayerDistance(view, at));
 }
 
 const char* CounterAttack::SpawnReasonName(int reason)
@@ -581,7 +767,9 @@ int CounterAttack::FindByTarget(const char* town) const
 {
     for (int i = 0; i < _records.Size(); i++)
     {
-        if (stricmp(_records[i].target, town) == 0)
+        // an HQ_ASSAULT is about the HQ, not the zone it stands in: it never
+        // occupies the zone's one-record slot (FindHqAssault finds it)
+        if (_records[i].kind != CAKHqAssault && _records[i].kind != CAKStrike && stricmp(_records[i].target, town) == 0)
         {
             return i;
         }
@@ -589,7 +777,376 @@ int CounterAttack::FindByTarget(const char* town) const
     return -1;
 }
 
-int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex) const
+int CounterAttack::FindHqAssault() const
+{
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        if (_records[i].kind == CAKHqAssault)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int CounterAttack::WaveRecords() const
+{
+    int n = 0;
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        n += _records[i].origin == CAOWave ? 1 : 0;
+    }
+    return n;
+}
+
+Vector3 CounterAttack::DestOf(const ZoneRegistry& registry, const Record& r)
+{
+    if (r.destPos.X() != 0 || r.destPos.Z() != 0)
+    {
+        return r.destPos;
+    }
+    const ZoneRecord* z = registry.GetZone(registry.FindZoneIndex(r.target));
+    return z ? z->pos : VZero;
+}
+
+int CounterAttack::HqAssaultPresence(Vector3Par hqPos, float radius, CounterAttackOps* ops) const
+{
+    int bodies = 0;
+    const float rSq = radius * radius;
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        const Record& r = _records[i];
+        if (r.kind != CAKHqAssault)
+        {
+            continue; // D14: passers-by, columns and every other kind never count
+        }
+        if (r.phase == CALive)
+        {
+            AIGroup* grp = r.group;
+            bodies += ops && grp ? ops->AliveWithin(grp, hqPos, radius) : 0;
+        }
+        else if (r.phase == CAHolding && !r.suspended)
+        {
+            const float dx = r.destPos.X() - hqPos.X();
+            const float dz = r.destPos.Z() - hqPos.Z();
+            bodies += dx * dx + dz * dz <= rSq ? r.strength : 0;
+        }
+    }
+    return bodies;
+}
+
+int CounterAttack::FindByOpId(int opId) const
+{
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        if (_records[i].opId == opId)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int CounterAttack::LiveHullOf(const Record& r)
+{
+    return r.hull.GetLink() != nullptr ? 1 : 0;
+}
+
+int CounterAttack::LiveEscortOf(const Record& r)
+{
+    return r.escort.GetLink() != nullptr ? 1 : 0;
+}
+
+int CounterAttack::BornOps(bool includeWave) const
+{
+    int n = 0;
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        const Record& r = _records[i];
+        if (!includeWave && r.origin == CAOWave)
+        {
+            continue;
+        }
+        n += r.funded && (r.phase == CALive || LiveHullOf(r) + LiveEscortOf(r) > 0) ? 1 : 0;
+    }
+    return n;
+}
+
+int CounterAttack::OpsCap() const
+{
+    // the one forcesOpsMax: OccupierForces' while it is active (its band
+    // cap: forcesOpsMaxStrong while STRONG); the local default when this
+    // service runs on its own (the key off, unit tests)
+    const OccupierForces& of = OccupierForces::Instance();
+    const int opsMax = of.Active() ? of.OpsMax() : _tuning.forcesOpsMax;
+    return opsMax + WaveRecords();
+}
+
+int CounterAttack::LiveHulls() const
+{
+    int n = 0;
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        n += LiveHullOf(_records[i]) + LiveEscortOf(_records[i]);
+    }
+    for (int i = 0; i < _homeHulls.Size(); i++)
+    {
+        n += _homeHulls[i].hull.GetLink() != nullptr ? 1 : 0;
+    }
+    return n + _airHomes.Size(); // phase 6A: airframes flying home
+}
+
+void CounterAttack::FarCensus(const ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops,
+                              CounterAttackFarCensus& out) const
+{
+    out = CounterAttackFarCensus();
+    if (!ops || !view.playerValid)
+    {
+        return;
+    }
+    const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+    // a group can sit on two lists for a moment (a record's link and the
+    // Leftover it was just handed to): the first cause counts it
+    AutoArray<AIGroup*> seen;
+    auto far = [&](AIGroup* grp) {
+        if (!grp)
+        {
+            return false;
+        }
+        for (int i = 0; i < seen.Size(); i++)
+        {
+            if (seen[i] == grp)
+            {
+                return false;
+            }
+        }
+        seen.Add(grp);
+        Vector3 leader = VZero;
+        return ops->Alive(grp, leader) > 0 &&
+               Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
+    };
+    auto farAir = [&](int airId) {
+        CounterAttackAirStatus st;
+        return airId > 0 && ops->AirStatus(airId, st) && !st.gone && !st.crewRemoved && st.hasPos &&
+               Dist2D(st.pos.X(), st.pos.Z(), view.playerX, view.playerZ) > edge;
+    };
+    for (int i = 0; i < _leftovers.Size(); i++)
+    {
+        out.leftover += far(_leftovers[i].group) ? 1 : 0;
+    }
+    for (int i = 0; i < _homeHulls.Size(); i++)
+    {
+        out.homeHull += far(_homeHulls[i].crewGroup) ? 1 : 0;
+        out.homeHull += far(_homeHulls[i].cargo) ? 1 : 0; // a withdrawing infantry riding home in its carrier
+    }
+    for (int i = 0; i < _airHomes.Size(); i++)
+    {
+        out.air += farAir(_airHomes[i].airId) ? 1 : 0;
+    }
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        const Record& r = _records[i];
+        int& cause = r.arrivalLive ? out.arrival : out.march;
+        if (r.airId > 0)
+        {
+            // the airframe counts by its own position (its crew group may
+            // be OccupierAir's, not ours to census)
+            seen.Add(r.crewGroup.GetLink());
+            out.air += farAir(r.airId) ? 1 : 0;
+        }
+        else
+        {
+            cause += far(r.crewGroup) ? 1 : 0;
+        }
+        cause += far(r.group) ? 1 : 0;
+        cause += far(r.escortCrewGroup) ? 1 : 0;
+    }
+}
+
+int CounterAttack::SettlePresence(const ZoneRegistry& registry, int zoneIndex) const
+{
+    const ZoneRecord* z = registry.GetZone(zoneIndex);
+    if (!z || !_tuning.forcesOn)
+    {
+        return 0;
+    }
+    int bodies = 0;
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        // a holding force (suspended in the player's bubble or not) is the
+        // town's (or base's) new garrison when it reverts (5.4); its bodies
+        // are not lost.  An HQ_ASSAULT holds the HQ, not the zone: it never
+        // settles there.
+        if (_records[i].phase == CAHolding && _records[i].kind != CAKHqAssault &&
+            stricmp(_records[i].target, z->name) == 0)
+        {
+            bodies += _records[i].strength;
+        }
+    }
+    return bodies;
+}
+
+// ---------------------------------------------------------------------------
+// the director's ear
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// constant-initialized (no global constructor): the listener and the queue
+// guard; the queue itself lives in a function-local static
+CounterAttackListener* GListener = nullptr;
+bool GDispatching = false;
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wexit-time-destructors"
+AutoArray<CounterAttackOpEvent>& EventQueue()
+{
+    static AutoArray<CounterAttackOpEvent> queue;
+    return queue;
+}
+#pragma clang diagnostic pop
+
+// the events queued while a listener call ran, in order
+void DrainEvents()
+{
+    if (GDispatching || !GListener)
+    {
+        return;
+    }
+    GDispatching = true;
+    for (int i = 0; i < EventQueue().Size(); i++)
+    {
+        const CounterAttackOpEvent next = EventQueue()[i];
+        if (GListener)
+        {
+            GListener->OnCounterAttackOp(next);
+        }
+    }
+    EventQueue().Clear();
+    GDispatching = false;
+}
+} // namespace
+
+void CounterAttack::SetListener(CounterAttackListener* listener)
+{
+    GListener = listener;
+}
+
+CounterAttackListener* CounterAttack::Listener()
+{
+    return GListener;
+}
+
+void CounterAttack::Dispatch(const CounterAttackOpEvent& ev)
+{
+    if (!GListener)
+    {
+        return;
+    }
+    if (GDispatching)
+    {
+        // never re-enter the listener: an event raised from inside a
+        // listener call waits for the outer call to return
+        EventQueue().Add(ev);
+        return;
+    }
+    GDispatching = true;
+    GListener->OnCounterAttackOp(ev);
+    GDispatching = false;
+    DrainEvents();
+}
+
+void CounterAttack::Emit(const ZoneRegistry& registry, const Record& r, int type, int bodies, int units,
+                         const char* note, int reason)
+{
+    if (type == CAOpRepelled || type == CAOpSettled || type == CAOpCancelledUnseen || type == CAOpAborted)
+    {
+        // the script surface's record of how operations ended
+        // (gmCounterAttackEnds), the listener or not
+        EndNote e;
+        e.opId = r.opId;
+        e.target = r.target;
+        e.type = type;
+        e.reason = reason;
+        e.bodies = bodies;
+        e.units = units;
+        e.born = r.bornStrength;
+        e.note = note ? note : "";
+        e.line = _endLine;
+        _endLine = RString();
+        if (_ends.Size() >= EndsKept)
+        {
+            _ends.Delete(0);
+        }
+        _ends.Add(e);
+    }
+    if (!GListener)
+    {
+        return;
+    }
+    CounterAttackOpEvent ev;
+    ev.reason = reason;
+    ev.opId = r.opId;
+    ev.type = type;
+    ev.kind = r.kind;
+    ev.origin = r.origin;
+    ev.target = registry.FindZoneIndex(r.target);
+    ev.source = r.source.GetLength() > 0 ? registry.FindZoneIndex(r.source) : -1;
+    ev.bodies = bodies;
+    ev.units = units;
+    ev.note = note ? note : "";
+    Dispatch(ev);
+}
+
+void CounterAttack::SettleCrew(const ZoneRegistry& registry, const Record& r, int crew, const char* note)
+{
+    // a re-plan no ledger row took (airReplanned) put nothing on a row
+    if (crew <= 0 || r.airReplanned)
+    {
+        return;
+    }
+    Emit(registry, r, CAOpCrewSettled, crew, crew, note);
+}
+
+int CounterAttack::OwedOnOp(int opId, int* crew) const
+{
+    int owed = 0;
+    int crewOwed = 0;
+    for (int i = 0; i < _records.Size() && opId != 0; i++)
+    {
+        const Record& r = _records[i];
+        if (r.opId != opId || r.airReplanned)
+        {
+            continue;
+        }
+        owed += r.OwedUnits();
+        crewOwed += (r.HasHullPackage() && !r.hullDone ? r.crew : 0) + (r.HasEscort() && !r.escortDone ? r.escortCrew : 0);
+    }
+    for (int i = 0; i < _homeHulls.Size() && opId != 0; i++)
+    {
+        if (_homeHulls[i].opId == opId)
+        {
+            owed += _homeHulls[i].units + _homeHulls[i].crew;
+            crewOwed += _homeHulls[i].crew;
+        }
+    }
+    for (int i = 0; i < _airHomes.Size() && opId != 0; i++)
+    {
+        if (_airHomes[i].opId == opId && !_airHomes[i].direct)
+        {
+            owed += _airHomes[i].units + _airHomes[i].crew;
+            crewOwed += _airHomes[i].crew;
+        }
+    }
+    if (crew)
+    {
+        *crew = crewOwed;
+    }
+    return owed;
+}
+
+int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex,
+                                   const CounterAttackView* currentView) const
 {
     const ZoneRecord* z = registry.GetZone(zoneIndex);
     if (!z)
@@ -600,10 +1157,15 @@ int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex)
     for (int i = 0; i < _records.Size(); i++)
     {
         // a suspended force (its town in the player's bubble) does nothing
-        // to the town until the player leaves
-        if (_records[i].phase == CAHolding && !_records[i].suspended && stricmp(_records[i].target, z->name) == 0)
+        // to the town until the player leaves.  Every kind counts: a BASE
+        // force holding a base works its occCapture, and an HQ_ASSAULT
+        // holding at the HQ is occupier presence in the zone the HQ stands
+        // in (OCCUPIER-FORCES.md 7.2, 8.1)
+        const Record& r = _records[i];
+        if (r.phase == CAHolding && stricmp(r.target, z->name) == 0 &&
+            !(currentView ? InBubbleAt(registry, *currentView, DestOf(registry, r)) : r.suspended))
         {
-            bodies += _records[i].strength;
+            bodies += r.strength;
         }
     }
     return bodies;
@@ -645,11 +1207,12 @@ int CounterAttack::HeldTowns(const ZoneRegistry& registry)
     return n;
 }
 
-bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel)
+bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel,
+                                  int hqZone, int laterTownFlips)
 {
-    if (!_tuning.enabled)
+    if (!_tuning.enabled || CampaignEnd::Instance().Won())
     {
-        return false;
+        return false; // off, or the campaign is won (7.4: nothing launches)
     }
     const ZoneRecord* z = registry.GetZone(zoneIndex);
     if (!z || stricmp(z->type, "CITY") != 0 || stricmp(z->owner, registry.ResistanceSide()) != 0)
@@ -663,14 +1226,40 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
         return false;
     }
     // k: the towns taken before this one, the most of the saved count and the
-    // towns held now (this town already counts as held at the event)
-    int held = HeldTowns(registry) - 1;
+    // towns held before this event.  EvaluateTick applies the whole batch
+    // before dispatch, so later captures must not enter the history early.
+    int held = HeldTowns(registry) - 1 - laterTownFlips;
     if (held < 0)
     {
         held = 0;
     }
     const int before = _townsTaken > held ? _townsTaken : held;
     _townsTaken = before + 1;
+    // the AWAKE hook (OCCUPIER-FORCES.md 6.2, 14 item 4): the director hears
+    // the flip first; when it takes it, the flip is counted but no legacy
+    // answer is scheduled.  Not re-entrant: a flip raised from inside a
+    // listener call (never expected) gets the legacy answer.
+    if (GListener && !GDispatching)
+    {
+        GDispatching = true;
+        const bool taken = GListener->OnTownFlipped(zoneIndex, before);
+        GDispatching = false;
+        DrainEvents();
+        if (taken)
+        {
+            GM_DIRECTOR_INFO(Core, "CounterAttack: {} rose; the occupier director takes it ({} town(s) taken before)",
+                     (const char*)z->name, before);
+            return false;
+        }
+    }
+    if (zoneIndex == hqZone && hqZone >= 0)
+    {
+        // the town the player's HQ stands in (N4a): never the object of a
+        // flip answer before the director exists.  The flip still counts as
+        // a town taken (only the target is skipped).
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} rose; it holds the player's headquarters, no answer", (const char*)z->name);
+        return false;
+    }
     if (FindByTarget(z->name) >= 0)
     {
         return false; // one record per town
@@ -686,7 +1275,7 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
     const CounterAttackDecision d = Decide(_tuning, z->name, before, ctx);
     if (!d.go)
     {
-        LOG_INFO(Core, "CounterAttack: {} rose; the occupier does not answer (chance {:.2f}, {} town(s) taken before)",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} rose; the occupier does not answer (chance {:.2f}, {} town(s) taken before)",
                  (const char*)z->name, d.chance, before);
         return false;
     }
@@ -694,7 +1283,7 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
     r.phase = CAScheduled;
     r.clock = _tuning.delayMin + (_tuning.delayMax - _tuning.delayMin) * Roll01(r.seed, 1);
     _records.Add(r);
-    LOG_INFO(
+    GM_DIRECTOR_INFO(
         Core,
         "CounterAttack: {} rose; a force of {} will move on it in {:.0f}s (chance {:.2f}, {} town(s) taken before, "
         "war level {:.0f})",
@@ -707,32 +1296,291 @@ bool CounterAttack::LaunchFrom(ZoneRegistry& registry, const CounterAttackView& 
 {
     const ZoneRecord* town = registry.GetZone(target);
     const ZoneRecord* src = registry.GetZone(source);
-    if (!_tuning.enabled || !town || !src || size < 1 || stricmp(town->type, "CITY") != 0 ||
-        stricmp(town->owner, registry.ResistanceSide()) != 0 || town->garrisonExempt ||
+    if (!_tuning.enabled || view.won || !town || !src || size < 1 || stricmp(town->type, "CITY") != 0 ||
+        stricmp(town->owner, registry.ResistanceSide()) != 0 || town->garrisonExempt || target == view.hqZone ||
         stricmp(src->owner, registry.OccupierSide()) != 0 || FindByTarget(town->name) >= 0)
     {
         return false;
     }
-    const int liveBodies = source < view.garrisonLive.Size() ? view.garrisonLive[source] : 0;
-    const bool live = ops != nullptr && liveBodies > 0 && InBubble(registry, view, target) && RoomLive(registry, view);
-    const int spare = Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, live);
-    const int n = MinInt(size, spare);
-    if (n < 1)
-    {
-        return false;
-    }
+    // a legacy order (CAKRetake, CAOLegacy, foot, opId 0, unfunded)
     Record r;
     r.target = town->name;
     r.townsBefore = _townsTaken;
     r.seed = MakeSeed(town->name, town->flipDay, town->flipMinute, _townsTaken) ^ 0x5A17C0DEu;
     r.size = size;
+    return LaunchCore(registry, view, target, source, size, r, ops, fired);
+}
+
+bool CounterAttack::LaunchFunded(ZoneRegistry& registry, const CounterAttackView& view, const CounterAttackOrder& order,
+                                 CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired)
+{
+    const ZoneRecord* town = registry.GetZone(order.target);
+    const ZoneRecord* src = registry.GetZone(order.source);
+    const bool hq = order.kind == CAKHqAssault;
+    const Vector3 hqDest = order.destPos.X() != 0 || order.destPos.Z() != 0 ? order.destPos : view.hqPos;
+    // wave operations come on top of the director's slots (7.1)
+    const int opsCap = OpsCap() + (order.origin == CAOWave ? 1 : 0);
+    const char* why = nullptr;
+    if (view.won || view.lost)
+    {
+        why = view.won ? "the campaign is won" : "the campaign is lost";
+    }
+    else if (order.kind == CAKRetake)
+    {
+        if (!town || stricmp(town->type, "CITY") != 0 || stricmp(town->owner, registry.ResistanceSide()) != 0 ||
+            town->garrisonExempt)
+        {
+            why = "the target is not a held town";
+        }
+        else if (order.target == view.hqZone)
+        {
+            why = "the target holds the player's headquarters";
+        }
+    }
+    else if (order.kind == CAKBase)
+    {
+        if (!town || !CampaignEnd::IsMilitaryType(town->type) || stricmp(town->owner, registry.ResistanceSide()) != 0)
+        {
+            why = "the target is not a held base";
+        }
+    }
+    else if (hq)
+    {
+        if (!view.hqEstablished || (hqDest.X() == 0 && hqDest.Z() == 0))
+        {
+            why = "there is no HQ to assault";
+        }
+        else if (FindHqAssault() >= 0)
+        {
+            why = "an HQ assault is already under way";
+        }
+        else if (order.target >= 0 && !town)
+        {
+            why = "the HQ zone is unknown";
+        }
+    }
+    else if (order.kind == CAKReinforce)
+    {
+        if (!town || town->garrisonExempt || !GarrisonCache::OccupierHolds(registry, *town) ||
+            order.target == order.source)
+        {
+            why = "the target is not an occupier-held post to top up";
+        }
+    }
+    else if (order.kind == CAKAlarm)
+    {
+        // 8.2: the answered zone is occupier-held and is never the source;
+        // one alarm answer at a time
+        const ZoneRecord* alarm = registry.GetZone(order.alarmZone >= 0 ? order.alarmZone : order.target);
+        if (!alarm || !GarrisonCache::OccupierHolds(registry, *alarm))
+        {
+            why = "the alarm zone is not occupier-held";
+        }
+        else if ((order.alarmZone >= 0 ? order.alarmZone : order.target) == order.source)
+        {
+            why = "the zone under attack never answers its own alarm";
+        }
+        else if (FindAlarm() >= 0)
+        {
+            why = "an alarm answer is already under way";
+        }
+        else
+        {
+            town = alarm;
+        }
+    }
+    else if (order.kind == CAKStrike)
+    {
+        why = StrikeRefusal(registry, order);
+    }
+    else
+    {
+        why = "unknown operation kind";
+    }
+    if (!why && order.IsAirPackage() && order.airOrigin >= 0)
+    {
+        const ZoneRecord* field = registry.GetZone(order.airOrigin);
+        if (!field || stricmp(field->type, "AIRFIELD") != 0 || stricmp(field->owner, registry.OccupierSide()) != 0)
+        {
+            why = "the air origin is not an occupier-held airfield";
+        }
+    }
+    if (!why && order.IsAirPackage() && order.hullClass.GetLength() == 0)
+    {
+        why = "an air package names no airframe";
+    }
+    if (!why && order.kind == CAKStrike)
+    {
+        if (BornOps() >= opsCap)
+        {
+            why = "forcesOpsMax born operations are in flight";
+        }
+        else if (FindStrikeOn(order) >= 0)
+        {
+            why = "a strike on that target is already under way";
+        }
+    }
+    if (!why && order.kind == CAKStrike)
+    {
+        return LaunchStrike(registry, view, order);
+    }
+    if (why)
+    {
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] refused: {}", order.opId, why);
+        return false;
+    }
+    if (!hq && FindByTarget(town->name) >= 0)
+    {
+        why = "the target already has an operation";
+    }
+    else if (!why && (!src || stricmp(src->owner, registry.OccupierSide()) != 0))
+    {
+        why = "the source is not occupier-held";
+    }
+    else if (!why && order.bodies < 1)
+    {
+        why = "no bodies ordered";
+    }
+    else if (!why && BornOps() >= opsCap)
+    {
+        why = "forcesOpsMax born operations are in flight";
+    }
+    if (why)
+    {
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] refused: {}", order.opId, why);
+        return false;
+    }
+    Record r;
+    r.target = town ? town->name : RString();
+    r.townsBefore = _townsTaken;
+    r.seed = MakeSeed(town ? (const char*)town->name : "HQ", town ? town->flipDay : 0, town ? town->flipMinute : 0,
+                      _townsTaken) ^
+             (0x0F0F1E5Du + (unsigned)order.opId);
+    r.destPos = hq ? hqDest : order.destPos;
+    r.size = order.bodies;
+    r.opId = order.opId;
+    r.kind = order.kind;
+    r.origin = order.origin;
+    r.package = order.package;
+    r.priceUnits = order.priceUnits > 0 ? order.priceUnits : 0;
+    r.hullClass = order.package != FPFoot ? order.hullClass : RString();
+    r.crew = r.hullClass.GetLength() > 0 ? (order.crew > 0 ? order.crew : 1) : 0;
+    // a column's escort (6.5, phase 5): its share comes off the carrier's
+    // price, so each hull refunds its own
+    r.escortClass = r.hullClass.GetLength() > 0 ? order.escortClass : RString();
+    r.escortCrew = r.escortClass.GetLength() > 0 ? (order.escortCrew > 0 ? order.escortCrew : 1) : 0;
+    r.escortPriceUnits =
+        r.escortClass.GetLength() > 0 ? MinInt(order.escortPriceUnits > 0 ? order.escortPriceUnits : 0, r.priceUnits) : 0;
+    r.priceUnits -= r.escortPriceUnits;
+    r.urgent = order.urgent;
+    r.funded = order.funded;
+    r.abstractSpeed = order.abstractSpeed > 0 ? order.abstractSpeed : 0;
+    r.lethality = order.lethality > 0 ? order.lethality : 1.0f;
+    // phase 6A: the air origin, the alarm's zone and reported position
+    r.airOrigin = r.IsAir() ? order.airOrigin : -1;
+    if (r.IsAir())
+    {
+        // the straight flight line starts at the airfield or the off-map edge
+        const ZoneRecord* t0 = registry.GetZone(order.kind == CAKAlarm && order.alarmZone >= 0 ? order.alarmZone
+                                                                                               : order.target);
+        const Vector3 dest0 = !IsZeroPos(r.destPos) ? r.destPos : (t0 ? t0->pos : VZero);
+        r.airFrom = AirOriginPos(registry, view, r, dest0);
+    }
+    const int targetIdx =
+        order.kind == CAKAlarm ? (order.alarmZone >= 0 ? order.alarmZone : order.target) : order.target;
+    if (order.kind == CAKAlarm)
+    {
+        r.alarmZone = targetIdx;
+        r.alarmPos = order.alarmPos;
+        // 8.2: it travels to the reported position and resolves there
+        if (order.alarmPos.X() != 0 || order.alarmPos.Z() != 0)
+        {
+            r.destPos = order.alarmPos;
+        }
+    }
+    return LaunchCore(registry, view, targetIdx, order.source, order.bodies, r, ops, fired);
+}
+
+bool CounterAttack::LaunchCore(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size,
+                               Record& r, CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired)
+{
+    const ZoneRecord* src = registry.GetZone(source);
+    if (!src)
+    {
+        return false;
+    }
+    const int liveBodies = source < view.garrisonLive.Size() ? view.garrisonLive[source] : 0;
+    // a foot force with its town in the bubble marches the live garrison
+    // out; a hull package always leaves from the stored reserve (its hull is
+    // born unseen on the road, never in a watched motor pool)
+    const int opsCap = OpsCap() + (r.origin == CAOWave ? 1 : 0);
+    // phase 5 (6.5): a hull package whose stored reserve cannot pay its
+    // bodies goes on foot when the source can march them out live
+    // (ForcePackages::MustDowngrade); the pool price goes back once the
+    // record exists
+    const bool liveFoot = ops != nullptr && liveBodies > 0 && InBubbleAt(registry, view, DestOf(registry, r)) &&
+                          RoomLive(registry, view) && (!r.funded || BornOps() < opsCap);
+    const int stored = Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, false);
+    const int marched = liveFoot ? Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, true) : 0;
+    int hullRefund = 0;
+    if (r.HasHullPackage() && ForcePackages::MustDowngrade(r.package, size, stored, liveFoot ? marched : stored))
+    {
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} can spare {} stored of the {} bodies for the {}: on foot", r.opId,
+                 (const char*)src->name, stored, size, (const char*)r.hullClass);
+        hullRefund = r.priceUnits + r.escortPriceUnits; // the whole column: carrier and escort
+        r.package = FPFoot;
+        r.hullClass = RString();
+        r.crew = 0;
+        r.priceUnits = 0;
+        r.escortClass = RString();
+        r.escortCrew = 0;
+        r.escortPriceUnits = 0;
+        r.abstractSpeed = r.abstractSpeed > 0 ? FootSpeed : 0;
+    }
+    // M1: a funded order is granted from the STORED reserve, exactly what
+    // the director quoted (FundedSpare); its live garrison marches out only
+    // when the stored reserve cannot pay the order whole and the march can
+    // (a downgraded hull package, a test lever).  A legacy order marches
+    // the live garrison whenever its town is in the bubble, as before.
+    const bool live = !r.HasHullPackage() && liveFoot && (!r.funded || (stored < size && marched >= size));
+    const int spare = live ? marched : stored;
+    const int n = MinInt(size, spare);
+    if (n < 1 || (r.funded && n < size))
+    {
+        if (r.opId != 0)
+        {
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] refused: {} can spare {} of the {} ordered ({} stored, {} live)",
+                     r.opId, (const char*)src->name, n, size, src->garrison, liveBodies);
+        }
+        return false;
+    }
     if (!Launch(registry, target, source, n, live, ops, r, fired))
     {
         return false;
     }
-    r.wholeRoad = r.phase == CATravel && InBubble(registry, view, target);
+    r.wholeRoad = r.phase == CATravel && InBubbleAt(registry, view, DestOf(registry, r));
     _records.Add(r);
+    const Record& added = _records[_records.Size() - 1];
+    Emit(registry, added, CAOpLaunched, added.strength, added.priceUnits, live ? "live" : "abstract");
+    if (hullRefund > 0)
+    {
+        Emit(registry, added, CAOpHullRefund, 0, hullRefund, "no stored spare: on foot");
+    }
+    if (added.phase == CALive)
+    {
+        Emit(registry, added, CAOpBorn, added.strength, 0, SpawnReasonName(added.spawnReason));
+        TraceBorn(view, added, SpawnReasonName(added.spawnReason), added.spawnPos);
+    }
     return true;
+}
+
+bool CounterAttack::InBubbleAt(const ZoneRegistry& registry, const CounterAttackView& view, Vector3Par pos)
+{
+    if (!view.playerValid || (pos.X() == 0 && pos.Z() == 0))
+    {
+        return false;
+    }
+    return Dist2D(pos.X(), pos.Z(), view.playerX, view.playerZ) <= registry.Tuning().cacheRadius;
 }
 
 bool CounterAttack::InBubble(const ZoneRegistry& registry, const CounterAttackView& view, int zone) const
@@ -764,6 +1612,12 @@ int CounterAttack::PickSource(const ZoneRegistry& registry, const CounterAttackV
         {
             continue;
         }
+        // a ground force walks or drives: a base on another landmass (Malden's
+        // Southeast Compound, an island of its own) never sources one
+        if (!RoadRoute::SameLandmass(z->pos, town->pos))
+        {
+            continue;
+        }
         const int liveBodies = i < view.garrisonLive.Size() ? view.garrisonLive[i] : 0;
         const bool useLive = allowLive && liveBodies > 0;
         const int s = Spare(_tuning, z->garrison, liveBodies, z->garrisonMax, useLive);
@@ -789,32 +1643,46 @@ const AutoArray<Vector3>& CounterAttack::RouteOf(const ZoneRegistry& registry, R
     {
         return r.route;
     }
+    const Vector3 dest = DestOf(registry, r);
+    const Vector3 airStart = !IsZeroPos(r.airLz) ? r.airLz : (!r.hullDone ? r.airFrom : VZero);
+    if (r.IsAir() && (dest.X() != 0 || dest.Z() != 0) && !IsZeroPos(airStart))
+    {
+        // phase 6A: air flies the straight line from its origin (3.2, set
+        // at launch: airFrom); an inserted squad walks the straight line
+        // from its LZ
+        AutoArray<Vector3> line;
+        line.Add(airStart);
+        line.Add(dest);
+        r.routeIsRoad = false;
+        ResampleRoute(line, RouteStep, r.route);
+        return r.route;
+    }
     const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
-    const ZoneRecord* town = registry.GetZone(registry.FindZoneIndex(r.target));
-    if (!src || !town)
+    if (!src || (dest.X() == 0 && dest.Z() == 0))
     {
         return r.route;
     }
     AutoArray<Vector3> raw;
     if (ops)
     {
-        ops->BuildRoute(src->pos, town->pos, raw);
+        ops->BuildRoute(src->pos, dest, raw);
     }
-    const float straight = Dist2D(src->pos, town->pos);
+    const float straight = Dist2D(src->pos, dest);
     if (raw.Size() >= 2 && !RoadIsReasonable(RouteLength(raw), straight))
     {
         // men on foot do not walk a road that winds this far round: the
         // straight line instead
-        LOG_INFO(Core, "CounterAttack: the road from {} to {} is {:.0f} m for {:.0f} m straight; cross-country",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: the road from {} to {} is {:.0f} m for {:.0f} m straight; cross-country",
                  (const char*)r.source, (const char*)r.target, RouteLength(raw), straight);
         raw.Clear();
     }
+    r.routeIsRoad = raw.Size() >= 2;
     if (raw.Size() < 2)
     {
         // no road net (or no connection): the straight line, base to town
         raw.Clear();
         raw.Add(src->pos);
-        raw.Add(town->pos);
+        raw.Add(dest);
     }
     ResampleRoute(raw, RouteStep, r.route);
     return r.route;
@@ -827,83 +1695,14 @@ bool CounterAttack::MustGoLive(const ZoneRegistry& registry, const CounterAttack
     {
         return false;
     }
-    if (InBubble(registry, view, target))
+    (void)target;
+    if (InBubbleAt(registry, view, DestOf(registry, r)))
     {
         return true;
     }
     // the player stands on the road ahead of (or at) the force
     const Vector3 at = RoutePoint(RouteOf(registry, r, ops), Progress(r));
     return Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) <= registry.Tuning().cacheRadius;
-}
-
-void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
-                          float elapsed)
-{
-    const ZoneRecord* town = registry.GetZone(target);
-    if (!town || !ops)
-    {
-        return;
-    }
-    const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
-    const int n = route.Size();
-    const float edge = registry.Tuning().zoneArea + TownEdgeMargin;
-    if (n == 0 || Dist2D(leader, town->pos) <= edge)
-    {
-        // the town edge: deploy and move in; the live timeout starts now
-        r.leg = LegTown;
-        if (r.clock < 0)
-        {
-            r.clock = 0;
-        }
-        r.resend = ResendInterval;
-        ops->Assault(r.group, town->pos);
-        LOG_INFO(Core, "CounterAttack: the force on {} reached the town edge ({:.0f} m out); it moves in",
-                 (const char*)r.target, Dist2D(leader, town->pos));
-        return;
-    }
-    // the route point nearest the leader, searched around the current leg
-    // (the whole road after a reload)
-    const bool known = r.leg == LegRoad;
-    const int lo = known ? MaxInt(0, r.wp - 2 * WaypointStride) : 0;
-    const int hi = known ? MinInt(n - 1, r.wp + 2 * WaypointStride) : n - 1;
-    int at = lo;
-    float atD = -1;
-    for (int i = lo; i <= hi; i++)
-    {
-        const float d = Dist2D(leader, route[i]);
-        if (atD < 0 || d < atD)
-        {
-            atD = d;
-            at = i;
-        }
-    }
-    bool issue = false;
-    if (!known)
-    {
-        r.leg = LegRoad;
-        r.wp = MinInt(at + WaypointStride, n - 1);
-        issue = true;
-    }
-    else if (r.wp >= 0 && r.wp < n && (at >= r.wp - 1 || Dist2D(leader, route[r.wp]) < WaypointReach))
-    {
-        // this leg is done: the next one ends WaypointStride points on
-        const int next = MinInt(at + WaypointStride, n - 1);
-        if (next != r.wp)
-        {
-            r.wp = next;
-            issue = true;
-        }
-    }
-    r.resend -= elapsed;
-    if (r.resend <= 0)
-    {
-        issue = true; // a stalled leg is re-sent
-    }
-    if (issue && r.wp >= 0 && r.wp < n)
-    {
-        r.resend = ResendInterval;
-        ops->MoveOn(r.group, route[r.wp]);
-    }
 }
 
 void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies)
@@ -916,20 +1715,36 @@ void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackVi
     ZoneRecord* s = registry.GetZoneMutable(src);
     if (!s || stricmp(s->owner, registry.OccupierSide()) != 0)
     {
-        LOG_INFO(Core, "CounterAttack: {} survivor(s) of the force on {} have no base to return to ('{}' is gone)",
+        // no base to go home to: the pool (5.5; inactive, they are gone as before)
+        OccupierForces::Instance().Refund(bodies, "no base");
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} survivor(s) of the force on {} have no base to return to ('{}' is gone)",
                  bodies, (const char*)r.target, (const char*)r.source);
+        Emit(registry, r, CAOpReturned, 0, bodies, "no base");
         return;
     }
     const int live = src < view.garrisonLive.Size() ? view.garrisonLive[src] : 0;
-    float room = s->garrisonMax - (float)live - s->garrison;
-    if (room < 0)
+    // whole bodies (U3): the room is floored, the pending deposit counts
+    // against it (S5 bodies are on their way into this reserve)
+    const float room = s->garrisonMax - (float)live - floorf(s->garrison) - (float)s->pending;
+    const int back = MinInt(bodies, room > 0 ? (int)floorf(room) : 0);
+    // inside the player's deposit bubble the survivors are a pending deposit
+    // (S5): they join the reserve unseen or once he leaves
+    const bool pending =
+        GarrisonCache::AddReserve(registry, src, back, src, view.playerValid, view.playerX, view.playerZ);
+    // the surplus over the base's room: the pool (5.5), which may bank or
+    // drop what it cannot take over its ceiling (its own ledger line)
+    const int surplus = bodies - back;
+    const int pooled = surplus > 0 ? OccupierForces::Instance().Refund(surplus, "surplus") : 0;
+    char rest[96] = "";
+    if (surplus > 0)
     {
-        room = 0;
+        snprintf(rest, sizeof(rest), "; %d over its room to the pool (%d taken, %d banked or dropped)", surplus, pooled,
+                 surplus - pooled);
     }
-    const float back = (float)bodies < room ? (float)bodies : room;
-    s->garrison += back;
-    LOG_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {} (reserve {} of {})", back, bodies,
-             (const char*)s->name, s->garrison, s->garrisonMax);
+    GM_DIRECTOR_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {}{} (reserve {}, pending {}, of {}){}", back,
+                     bodies, (const char*)s->name, pending ? " as a pending deposit" : "", s->garrison, s->pending,
+                     s->garrisonMax, rest);
+    Emit(registry, r, CAOpReturned, back, bodies - back, pending ? "home, pending" : "home");
 }
 
 static void AddEvent(AutoArray<ZoneEventRecord>& fired, ZoneEventType type, int zone)
@@ -943,9 +1758,14 @@ static void AddEvent(AutoArray<ZoneEventRecord>& fired, ZoneEventType type, int 
 bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
                           AutoArray<ZoneEventRecord>& fired)
 {
+    // the legacy abstract fight (key off; OCCUPIER-FORCES.md 6.5): the odds
+    // weigh the attackers' lethality (A_lethal = bodies x lethality), the
+    // losses count bodies (A_bodies).  A won fight on a base reverts it
+    // through the base recapture's seam (never reached with the key on).
     const ZoneRecord* town = registry.GetZone(target);
     const int defenders = town ? town->lastGuer : 0;
-    const float hold = HoldOdds(_tuning, defenders, r.strength);
+    const float lethal = (float)r.strength * (r.lethality > 0 ? r.lethality : 1.0f);
+    const float hold = HoldOddsLethal(_tuning, defenders, lethal);
     const float roll = Roll01(r.seed, r.salt++);
     if (roll < hold)
     {
@@ -954,47 +1774,121 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
         {
             lost = r.strength;
         }
-        LOG_INFO(Core, "CounterAttack: {} fighter(s) in {} beat off {} attacker(s) (odds {:.2f}, roll {:.2f}); {} lost",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} fighter(s) in {} beat off {} attacker(s) (odds {:.2f}, roll {:.2f}); {} lost",
                  defenders, (const char*)r.target, r.strength, hold, roll, lost);
+        OccupierForces::Instance().NoteLoss(lost, "repelled");
         ReturnToSource(registry, view, r, r.strength - lost);
         AddEvent(fired, ZECounterRepelled, target);
+        Emit(registry, r, CAOpRepelled, r.strength - lost, lost, "abstract fight", CAERDefeated);
         return true;
     }
-    LOG_INFO(Core, "CounterAttack: {} attacker(s) retake {} from {} fighter(s) (odds {:.2f}, roll {:.2f})", r.strength,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: {} attacker(s) retake {} from {} fighter(s) (odds {:.2f}, roll {:.2f})", r.strength,
              (const char*)r.target, defenders, hold, roll);
-    registry.RevertTown(target, fired);
+    if (town && stricmp(town->type, "CITY") != 0)
+    {
+        registry.RevertBase(target, fired, r.strength);
+    }
+    else
+    {
+        registry.RevertTown(target, fired);
+    }
+    Emit(registry, r, CAOpSettled, r.strength, 0, "abstract fight");
     return true;
 }
+
+namespace
+{
+// the living crewmen of a hull's group, seated or not (L4): at least the
+// seated count HullState saw, at most the crew the record pays for
+int LivingCrew(CounterAttackOps* ops, AIGroup* group, int seated, int cap)
+{
+    Vector3 at = VZero;
+    const int any = ops && group ? ops->Alive(group, at) : 0;
+    const int living = any > seated ? any : seated;
+    return living < cap ? living : cap;
+}
+
+// M8: the gate rates points for a ground hull (its headlights at night)
+// while this scope lives, for men on foot again after it
+struct HullGateScope
+{
+    CounterAttackOps* ops;
+    HullGateScope(CounterAttackOps* o, bool on) : ops(o)
+    {
+        if (ops)
+        {
+            ops->SetHullGate(on);
+        }
+    }
+    ~HullGateScope()
+    {
+        if (ops)
+        {
+            ops->SetHullGate(false);
+        }
+    }
+    HullGateScope(const HullGateScope&) = delete;
+    HullGateScope& operator=(const HullGateScope&) = delete;
+};
+} // namespace
 
 int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
                           CounterAttackOps* ops, float fraction, AutoArray<ZoneEventRecord>& fired)
 {
-    const ZoneRecord* town = registry.GetZone(target);
-    if (!ops || !town)
+    const Vector3 dest = DestOf(registry, r);
+    if (!ops || (dest.X() == 0 && dest.Z() == 0))
     {
         return BirthWait;
     }
     const ZoneTuning& zt = registry.Tuning();
+    // a hull package is born mounted (its hull re-created after a return to
+    // abstract travel), at a route point and at an arrival birth alike (6.5:
+    // the director paid for the hull at the town edge), until the hull is
+    // lost or settled.  Over the hull gate the birth waits like any
+    // over-budget birth; it never goes on foot to fit.  An insertion that
+    // arrived abstract is the exception: its infantry is already on the
+    // ground (inserted at its LZ), so it is born on foot at the edge and the
+    // airframe goes home abstract (FinishHull)
+    const bool mounted = r.HasHullPackage() && !r.hullDone && !(r.arrivalLive && r.IsAir());
+    // a column's escort is born with it (6.5, phase 5), even after the
+    // carrier was lost; at the town edge it drives up and supports
+    const bool escorted = r.HasEscort() && !r.escortDone;
+    const int groups = (mounted ? 2 : 1) + (escorted ? 1 : 0);
+    const int bodies = r.strength + (mounted ? r.crew : 0) + (escorted ? r.escortCrew : 0);
     const bool overLive = LiveSquads() >= _tuning.maxLive;
-    const bool overBodies = zt.budgetLiveBodies > 0 && view.liveBodies + r.strength > zt.budgetLiveBodies;
-    const bool overGroups = zt.budgetSideGroups > 0 && view.occGroups + 1 > zt.budgetSideGroups;
-    if (overLive || overBodies || overGroups)
+    const bool overBodies = zt.budgetLiveBodies > 0 && view.liveBodies + bodies > zt.budgetLiveBodies;
+    const bool overGroups = zt.budgetSideGroups > 0 && view.occGroups + groups > zt.budgetSideGroups;
+    // forcesOpsMax counts born operations; an unborn one waits for a slot
+    // (OpsCap: wave operations raise it by their own count)
+    const bool overOps = r.funded && BornOps() >= OpsCap();
+    const int newHulls = (mounted ? 1 : 0) + (escorted ? 1 : 0);
+    const bool overHulls = newHulls > 0 && LiveHulls() + newHulls > _tuning.forcesLiveHullsMax;
+    if (overLive || overBodies || overGroups || overOps || overHulls)
     {
         if (!r.deferLogged)
         {
-            LOG_WARN(Core,
-                     "CounterAttack: force on {} deferred (live squads {}/{}, live AI {}+{}/{}, occupier groups {}/{});"
-                     " retrying every {:.0f}s",
-                     (const char*)r.target, LiveSquads(), _tuning.maxLive, view.liveBodies, r.strength,
-                     zt.budgetLiveBodies, view.occGroups, zt.budgetSideGroups, RetryInterval);
+            LOG_WARN(
+                Core,
+                "CounterAttack: force on {} deferred (live squads {}/{}, live AI {}+{}/{}, occupier groups {}+{}/{},"
+                " born ops {}/{}, live hulls {}/{}); retrying every {:.0f}s",
+                (const char*)r.target, LiveSquads(), _tuning.maxLive, view.liveBodies, bodies, zt.budgetLiveBodies,
+                view.occGroups, groups, zt.budgetSideGroups, BornOps(), OpsCap(), LiveHulls(),
+                _tuning.forcesLiveHullsMax, RetryInterval);
             r.deferLogged = true;
         }
         return BirthWait;
+    }
+    if (mounted && r.IsAir())
+    {
+        // phase 6A: a helicopter insertion, born airborne (3.1, 3.2)
+        return AirGoLive(registry, view, target, r, ops, fraction);
     }
     // the user's rule: a force is only ever born where the player cannot
     // perceive it, on its road between the base and the town, and walks
     // the rest
     const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+    // a mounted birth (carrier or escort) is gated as a vehicle (M8)
+    const HullGateScope hullGate(ops, mounted || escorted);
     const CounterAttackSpawnPick pick = PickSpawnPoint(route, fraction, r.wholeRoad, _tuning.birthMinToTarget, *ops);
     if (pick.reason == CASpawnHold)
     {
@@ -1006,22 +1900,125 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
         {
             LOG_WARN(Core,
                      "CounterAttack: force on {} from {} deferred: no point of its road ({}) is out of the player's"
-                     " perception; retrying every {:.0f}s, its clock stopped, turning back after {:.0f}s",
+                     " perception; retrying every {:.0f}s, its clock stopped, {} after {:.0f}s",
                      (const char*)r.target, (const char*)r.source,
-                     r.wholeRoad ? "from the base" : "behind its progress point", RetryInterval, _tuning.birthGiveUp);
+                     r.wholeRoad ? "from the base" : "behind its progress point", RetryInterval,
+                     r.funded || _tuning.forcesOn ? "the next base back or cancelled unseen" : "turning back",
+                     _tuning.birthGiveUp);
             r.hiddenLogged = true;
         }
         return BirthNoPoint;
     }
     const int n = route.Size();
-    const int legEnd = MinInt(RouteIndexAt(route, pick.fraction) + WaypointStride, n - 1);
-    AIGroup* grp = ops->SpawnSquad(r.strength, pick.pos, route[legEnd]);
+    const int pickIndex = RouteIndexAt(route, pick.fraction);
+    const int legEnd = MinInt(pickIndex + WaypointStride, n - 1);
+    AIGroup* grp = nullptr;
+    Entity* hull = nullptr;
+    AIGroup* crewGroup = nullptr;
+    if (mounted)
+    {
+        // facing the next route point (3.2: road-snapped, along the road)
+        const Vector3 ahead = route[MinInt(pickIndex + 1, n - 1)];
+        Vector3 dir = ahead - pick.pos;
+        dir[1] = 0;
+        grp = ops->SpawnMounted(r.hullClass, r.crew, r.strength, pick.pos, dir, hull, crewGroup);
+        if (!grp)
+        {
+            // the hull (or its driver) could not be created: the infantry
+            // goes on foot, the whole price back to the director
+            LOG_WARN(Core, "CounterAttack: [op {}] hull '{}' could not be created; the force on {} goes on foot",
+                     r.opId, (const char*)r.hullClass, (const char*)r.target);
+            Emit(registry, r, CAOpHullRefund, 0, r.priceUnits, "hull not created: on foot");
+            r.hullDone = true;
+            r.abstractSpeed = r.abstractSpeed > 0 ? FootSpeed : 0;
+            r.travel = 0; // L5: a later return to the road re-times the leg at foot pace
+            grp = ops->SpawnSquad(r.strength, pick.pos, route[legEnd]);
+        }
+    }
+    else
+    {
+        grp = ops->SpawnSquad(r.strength, pick.pos, route[legEnd]);
+    }
     if (!grp)
     {
         return BirthWait;
     }
+    if (hull)
+    {
+        // crew the hull has no seat for stay home: back to the pool
+        int crewAlive = 0;
+        ops->HullState(hull, crewGroup, crewAlive);
+        if (crewAlive < r.crew)
+        {
+            // L3: the price drops with the crew, so HullPrice (the hull's
+            // share) stays what it was
+            OccupierForces::Instance().Refund(r.crew - crewAlive, "partial spawn");
+            SettleCrew(registry, r, r.crew - crewAlive, "partial spawn: refunded");
+            r.priceUnits -= r.crew - crewAlive;
+            r.crew = crewAlive;
+        }
+    }
+    // a partial spawn (classes that refused to materialize): the missing
+    // bodies go back to the pool (5.5)
+    Vector3 leader = VZero;
+    const int spawned = ops->Alive(grp, leader);
+    if (spawned > 0 && spawned < r.strength)
+    {
+        LOG_WARN(Core, "CounterAttack: force on {} materialized {} of {}; the rest to the pool", (const char*)r.target,
+                 spawned, r.strength);
+        OccupierForces::Instance().Refund(r.strength - spawned, "partial spawn");
+        r.strength = spawned;
+    }
+    // the column's escort (6.5, phase 5): on the road EscortGap behind the
+    // birth point, under the same unseen rule (hidden, or no worse than the
+    // birth point itself), its own crew group, driven like the carrier
+    Entity* escortHull = nullptr;
+    AIGroup* escortGroup = nullptr;
+    if (escorted)
+    {
+        const Vector3 ahead = route[MinInt(pickIndex + 1, n - 1)];
+        Vector3 heading = ahead - pick.pos;
+        heading[1] = 0;
+        heading = heading.SquareSize() > 1e-4f ? heading.Normalized() : VForward;
+        const Vector3 at = pick.pos - heading * EscortGap;
+        const int exposure = ops->Exposure(at);
+        if (exposure == CAExposeHidden || exposure == ops->Exposure(pick.pos))
+        {
+            escortHull = ops->SpawnEscort(r.escortClass, r.escortCrew, at, heading, escortGroup);
+        }
+        if (!escortHull)
+        {
+            // not created, or its spot is watched: the column goes without
+            // it, its whole price back to the director
+            LOG_WARN(Core, "CounterAttack: [op {}] escort '{}' could not be born; the force on {} goes without it",
+                     r.opId, (const char*)r.escortClass, (const char*)r.target);
+            Emit(registry, r, CAOpHullRefund, 0, r.escortPriceUnits, "escort not created");
+            r.escortDone = true;
+        }
+        else
+        {
+            // crew the escort has no seat for stay home: back to the pool
+            int escortAlive = 0;
+            ops->HullState(escortHull, escortGroup, escortAlive);
+            if (escortAlive < r.escortCrew)
+            {
+                OccupierForces::Instance().Refund(r.escortCrew - escortAlive, "partial spawn");
+                SettleCrew(registry, r, r.escortCrew - escortAlive, "escort partial spawn: refunded");
+                r.escortPriceUnits -= r.escortCrew - escortAlive;
+                r.escortCrew = escortAlive;
+            }
+        }
+    }
     const bool afterDeferral = r.deferLogged || r.hiddenLogged;
     r.group = grp;
+    r.hull = hull;
+    r.crewGroup = crewGroup;
+    r.escort = escortHull;
+    r.escortCrewGroup = escortGroup;
+    r.dismounted = false;
+    r.stallMark = -1; // the stall rule measures from the birth point
+    r.stallFor = 0;
+    r.stallVerdict = StallNone;
     r.phase = CALive;
     r.clock = -MarchAllowance(route, pick.fraction);
     r.resend = ResendInterval;
@@ -1034,13 +2031,15 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
     r.deferLogged = false;
     r.hiddenLogged = false;
     const float toPlayer = view.playerValid ? Dist2D(pick.pos.X(), pick.pos.Z(), view.playerX, view.playerZ) : -1.0f;
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "CounterAttack: {} soldier(s) from {} appear at [{:.0f}, {:.0f}], {:.0f} m from the player (reason: {}{}, "
-             "{:.0f}% along {:.0f} m of road); they march on {}",
+             "{:.0f}% along {:.0f} m of road){}; they march on {}",
              r.strength, (const char*)r.source, pick.pos.X(), pick.pos.Z(), toPlayer,
              pick.reason == CASpawnBase ? "base" : "route point", afterDeferral ? ", after a deferral" : "",
-             pick.fraction * 100.0f, RouteLength(route), (const char*)r.target);
+             pick.fraction * 100.0f, RouteLength(route), hull ? " in a hull" : "", (const char*)r.target);
     AddEvent(fired, ZECounterAttack, target);
+    Emit(registry, r, CAOpBorn, r.strength, 0, SpawnReasonName(pick.reason));
+    TraceBorn(view, r, SpawnReasonName(pick.reason), pick.pos);
     return BirthDone;
 }
 
@@ -1050,12 +2049,31 @@ bool CounterAttack::RoomLive(const ZoneRegistry& registry, const CounterAttackVi
     return LiveSquads() < _tuning.maxLive && (zt.budgetSideGroups <= 0 || view.occGroups + 1 <= zt.budgetSideGroups);
 }
 
+float CounterAttack::LegTime(const ZoneRegistry& registry, Record& r, CounterAttackOps* ops) const
+{
+    const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
+    const Vector3 dest = DestOf(registry, r);
+    if (!src || (dest.X() == 0 && dest.Z() == 0))
+    {
+        return MinTravel;
+    }
+    const float straight = Dist2D(src->pos.X(), src->pos.Z(), dest.X(), dest.Z());
+    float road = 0;
+    if (!_tuning.speedLever && (_tuning.forcesOn || r.abstractSpeed > 0))
+    {
+        // real speeds run over the real road when the road net gives one
+        const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+        road = r.routeIsRoad ? RouteLength(route) : 0.0f;
+    }
+    return TravelTimeFor(_tuning, r, straight, road, QuoteRoadFactor());
+}
+
 bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, bool live, CounterAttackOps* ops,
                            Record& r, AutoArray<ZoneEventRecord>& fired)
 {
     const ZoneRecord* town = registry.GetZone(target);
     ZoneRecord* s = registry.GetZoneMutable(src);
-    if (!town || !s || n < 1)
+    if ((!town && r.kind != CAKHqAssault) || !s || n < 1) // an HQ assault may target no zone
     {
         return false;
     }
@@ -1081,7 +2099,7 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
         r.wp = legEnd;
         r.spawnReason = CASpawnGarrison;
         r.spawnPos = s->pos;
-        LOG_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {} ({:.0f} m of road)", taken,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {} ({:.0f} m of road)", taken,
                  (const char*)s->name, (const char*)r.target, RouteLength(route));
         AddEvent(fired, ZECounterAttack, target);
         return true;
@@ -1093,10 +2111,10 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
     }
     r.strength = n;
     r.phase = CATravel;
-    r.clock = TravelTime(_tuning, Dist2D(s->pos.X(), s->pos.Z(), town->pos.X(), town->pos.Z()));
+    r.clock = LegTime(registry, r, ops);
     r.travel = r.clock;
     r.retry = 0;
-    LOG_INFO(Core, "CounterAttack: {} of the {} reserve leave for {}; on the road {:.0f}s (reserve now {})", n,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: {} of the {} reserve leave for {}; on the road {:.0f}s (reserve now {})", n,
              (const char*)s->name, (const char*)r.target, r.clock, s->garrison);
     return true;
 }
@@ -1104,31 +2122,98 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
 bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops,
                             Record& r, AutoArray<ZoneEventRecord>& fired)
 {
+    if (r.kind == CAKStrike)
+    {
+        return AdvanceStrike(registry, view, elapsed, ops, r);
+    }
     const int target = registry.FindZoneIndex(r.target);
     ZoneRecord* town = registry.GetZoneMutable(target);
-    if (!town)
+    // an HQ_ASSAULT marches on HqPos (9.1): its target zone may be -1 (an HQ
+    // outside every zone), and it is valid while that HQ stands where it
+    // was sent
+    const bool hq = r.kind == CAKHqAssault;
+    if (!town && !hq)
     {
         if (r.phase == CALive && ops && r.group)
         {
             ops->Remove(r.group);
         }
+        Emit(registry, r, CAOpAborted, r.strength, 0, "target gone");
         return true;
     }
-    const bool held = stricmp(town->owner, registry.ResistanceSide()) == 0;
+    const Vector3 dest = DestOf(registry, r);
+    bool held = false;
+    bool valid = false;
+    // an alarm answer (8.2) goes to an occupier-held zone like a top-up
+    // column and ends in its garrison (the surplus to the pool)
+    const bool alarm = r.kind == CAKAlarm;
+    const bool reinforce = r.kind == CAKReinforce || alarm;
+    if (hq)
+    {
+        if (!view.hqEstablished && !r.hqDone)
+        {
+            // the HQ fell (destroyed: only Destroy un-establishes it): the
+            // assault succeeded.  An abstract force settles now, its bodies
+            // to the pool (there is no garrison to join); a live one leaves
+            // the world once nobody sees it (below)
+            if (r.phase != CALive)
+            {
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
+                         r.opId, r.strength);
+                OccupierForces::Instance().Refund(r.strength, "HQ assault done");
+                Emit(registry, r, CAOpSettled, r.strength, r.strength, "the HQ fell");
+                return true;
+            }
+            r.hqDone = true;
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it", r.opId);
+        }
+        const bool moved =
+            view.hqEstablished && Dist2D(view.hqPos.X(), view.hqPos.Z(), dest.X(), dest.Z()) > registry.Tuning().zoneArea;
+        held = view.hqEstablished && !moved;
+        valid = held;
+        if (moved && r.phase == CALive && !r.hqDone && r.clock < _tuning.liveTimeout)
+        {
+            // the HQ it was sent at moved away: the squad withdraws (the
+            // live timeout path: home once out of the player's sight)
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ moved; the assault squad withdraws", r.opId);
+            r.clock = _tuning.liveTimeout;
+        }
+    }
+    else
+    {
+        held = stricmp(town->owner, registry.ResistanceSide()) == 0;
+        // a top-up column (5.4) goes to a town the occupier holds; everything
+        // else goes to a town the resistance holds
+        valid = reinforce ? GarrisonCache::OccupierHolds(registry, *town) : held;
+    }
+    // defenders present at the target (6.5): the town's or base's HOLD
+    // presence, or the HQ's (view.hqDefenders)
+    const bool defendersHere =
+        hq ? view.hqDefenders > 0 : (town->lastGuer > 0 || (_tuning.forcesOn && town->lastGuerHold > 0));
 
     switch (r.phase)
     {
         case CAScheduled:
         {
-            if (!held)
+            if (!held || hq)
             {
-                LOG_INFO(Core, "CounterAttack: {} fell before the force left; cancelled", (const char*)r.target);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} fell before the force left; cancelled", (const char*)r.target);
+                Emit(registry, r, CAOpAborted, 0, 0, "the town fell before the force left");
                 return true;
             }
             r.clock -= elapsed;
             if (r.clock > 0)
             {
                 return false;
+            }
+            if (target == view.hqZone)
+            {
+                // the player set up his headquarters in the town meanwhile
+                // (N4a): the HQ's town is never a target
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} now holds the player's headquarters; the force is cancelled",
+                         (const char*)r.target);
+                Emit(registry, r, CAOpAborted, 0, 0, "the town holds the player's headquarters");
+                return true;
             }
             const bool inBubble = InBubble(registry, view, target);
             int spare = 0;
@@ -1140,13 +2225,23 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 PickSource(registry, view, target, inBubble && ops != nullptr && RoomLive(registry, view), spare, live);
             if (src < 0)
             {
-                LOG_INFO(Core, "CounterAttack: no occupier base can spare a man for {}; no counter-attack",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: no occupier base can spare a man for {}; no counter-attack",
                          (const char*)r.target);
+                Emit(registry, r, CAOpAborted, 0, 0, "no base can spare a man");
                 return true;
             }
             if (!Launch(registry, target, src, MinInt(r.size, spare), live, ops, r, fired))
             {
                 r.clock = RetryInterval;
+            }
+            else
+            {
+                Emit(registry, r, CAOpLaunched, r.strength, 0, live ? "live" : "abstract");
+                if (r.phase == CALive)
+                {
+                    Emit(registry, r, CAOpBorn, r.strength, 0, SpawnReasonName(r.spawnReason));
+                    TraceBorn(view, r, SpawnReasonName(r.spawnReason), r.spawnPos);
+                }
             }
             // launched with the town already in the bubble: born anywhere on
             // its road (from the base), not only behind its progress point
@@ -1155,11 +2250,25 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
         }
         case CATravel:
         {
-            if (!held)
+            if (!valid)
             {
-                LOG_INFO(Core, "CounterAttack: {} fell while the force was on the road; it turns back",
+                if (reinforce || hq)
+                {
+                    GM_DIRECTOR_INFO(Core, "CounterAttack: {} is no longer a valid target; the force goes home",
+                             hq ? "the HQ" : (const char*)r.target);
+                    ReturnToSource(registry, view, r, r.strength);
+                    Emit(registry, r, CAOpAborted, r.strength, 0,
+                         hq ? "the HQ moved" : "the top-up target was lost");
+                    return true;
+                }
+                if (_tuning.forcesOn)
+                {
+                    return RevertedUnder(registry, view, target, r);
+                }
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} fell while the force was on the road; it turns back",
                          (const char*)r.target);
                 ReturnToSource(registry, view, r, r.strength);
+                Emit(registry, r, CAOpAborted, r.strength, 0, "the town fell while the force was on the road");
                 return true;
             }
             if (MustGoLive(registry, view, target, r, ops))
@@ -1168,15 +2277,50 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 // on its road where the player cannot see it, or waits; its
                 // arrival clock does not run meanwhile and it does nothing to
                 // the town
-                if (r.hiddenLogged)
+                // the birth chain (3.1, D6) runs for funded records and, with
+                // the key on, for legacy (director DORMANT) records too: no
+                // turn-back as normal behaviour.  Key off: the legacy turn-back
+                const bool chain = r.funded || _tuning.forcesOn;
+                // M2: a force held at the town edge (BirthHold: the player
+                // in its town) counts toward the give-up too; then it is born
+                // at the town edge out of his sight, or cancelled unseen
+                if (r.hiddenLogged || (chain && r.edgeHold))
                 {
                     r.deferTime += elapsed;
+                    if (r.deferTime >= _tuning.birthGiveUp && chain && r.edgeHold)
+                    {
+                        r.deferTime = 0;
+                        const int born = ArriveLive(registry, view, target, r, ops, fired);
+                        if (born == BirthDone || born == BirthWait)
+                        {
+                            return false; // live, or over budget: it waits at the edge (6.5)
+                        }
+                        CancelUnseen(registry, view, r);
+                        return true;
+                    }
                     if (r.deferTime >= _tuning.birthGiveUp)
                     {
-                        LOG_INFO(Core,
+                        if (chain)
+                        {
+                            // the birth chain (3.1, D6): the next base back,
+                            // then cancel unseen; never a visible turn-back
+                            if (Resource(registry, view, target, r, ops))
+                            {
+                                return false;
+                            }
+                            // 3.1 step 4 (phase 6A): the air re-plan
+                            if (AirReplan(registry, view, r, OccupierForces::Instance().Catalogue()))
+                            {
+                                return false;
+                            }
+                            CancelUnseen(registry, view, r);
+                            return true;
+                        }
+                        GM_DIRECTOR_INFO(Core,
                                  "CounterAttack: the force on {} found no unseen road for {:.0f}s; it turns back to {}",
                                  (const char*)r.target, r.deferTime, (const char*)r.source);
                         ReturnToSource(registry, view, r, r.strength);
+                        Emit(registry, r, CAOpAborted, r.strength, 0, "no unseen road: turned back");
                         return true;
                     }
                 }
@@ -1186,97 +2330,502 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                     return false;
                 }
                 const int birth = GoLive(registry, view, target, r, ops, Progress(r), fired);
-                if (birth == BirthHold)
+                if (birth == BirthHold && !r.edgeHold && chain)
                 {
-                    // already at the town edge: it stays there, abstract and
-                    // idle, until the player leaves or it can be born
-                    r.retry = RetryInterval;
+                    GM_DIRECTOR_INFO(Core,
+                             "CounterAttack: [op {}] the force on {} holds at the town edge (the player is in the"
+                             " town); born there unseen or cancelled after {:.0f}s",
+                             r.opId, (const char*)r.target, _tuning.birthGiveUp);
                 }
-                else if (birth != BirthDone)
+                r.edgeHold = birth == BirthHold;
+                if (birth == BirthNoPoint && chain && Resource(registry, view, target, r, ops))
                 {
+                    // 3.1 step 3 at once: the next base back whose road the
+                    // gate passes; born from there on the next step.  Only
+                    // when no base passes does the force wait (BirthGiveUp)
+                    return false;
+                }
+                if (birth == BirthNoPoint && chain && !GroundSourceShares(registry, r) &&
+                    AirReplan(registry, view, r, OccupierForces::Instance().Catalogue()))
+                {
+                    // 3.1 step 4 at once (phase 6A): no other base shares
+                    // the target's landmass, so waiting cannot help a ground
+                    // force; the helicopter goes now
+                    return false;
+                }
+                if (birth != BirthDone)
+                {
+                    // BirthHold: already at the town edge, it stays there,
+                    // abstract and idle, until the player leaves or it can
+                    // be born
                     r.retry = RetryInterval;
                 }
                 return false;
             }
-            r.retry = 0;
             r.deferTime = 0;
             r.hiddenLogged = false;
-            r.clock -= elapsed;
-            if (r.clock > 0)
+            r.edgeHold = false;
+            const bool onRoad = r.clock > 0;
+            if (onRoad)
             {
+                r.retry = 0;
+                r.clock -= elapsed;
+                if (r.clock > 0)
+                {
+                    return false;
+                }
+            }
+            r.clock = 0;
+            if (onRoad)
+            {
+                // off-screen arrival
+                AddEvent(fired, ZECounterAttack, target);
+                Emit(registry, r, CAOpArrived, r.strength, 0, "abstract");
+                // what follows decides the cost: a hold of an empty target
+                // stays abstract, defenders present make it a live fight
+                const char* how = "holds the empty target";
+                if (reinforce)
+                {
+                    how = alarm ? "answers the alarm" : "tops up the garrison";
+                }
+                char census[256];
+                if (!reinforce && defendersHere)
+                {
+                    // name what the census counted (OCCUPIER-FORCES.md 7.2,
+                    // contract row 2c): the target's resistance presence
+                    // within zoneArea of its centre (a captured base's live
+                    // hold squad counts), or the HQ's (view.hqDefenders),
+                    // and whether the player stands inside that radius
+                    const float radius = registry.Tuning().zoneArea;
+                    const Vector3 at = hq ? view.hqPos : town->pos;
+                    const int counted =
+                        hq ? view.hqDefenders
+                           : (_tuning.forcesOn ? MaxInt(town->lastGuer, town->lastGuerHold) : town->lastGuer);
+                    const bool playerInside =
+                        view.playerValid && Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) < radius;
+                    snprintf(census, sizeof(census),
+                             "defenders present: %s; counted %d resistance unit(s) within %.0f m of %s, %s",
+                             _tuning.forcesOn || hq ? "goes live at the edge" : "odds roll", counted, (double)radius,
+                             hq ? "the HQ" : "its centre",
+                             playerInside ? "the player inside that radius" : "the player not among them");
+                    how = census;
+                }
+                TraceArrived(view, r, "abstract", how, DestOf(registry, r));
+            }
+            if (alarm && !r.answered)
+            {
+                r.answered = true;
+                EmitAt(registry, r, CAOpAlarmAnswered, target, IsZeroPos(r.alarmPos) ? town->pos : r.alarmPos,
+                       r.strength, 0, "abstract");
+            }
+            if (reinforce)
+            {
+                // the top-up column joins the town's garrison, up to its room
+                const int live = target < view.garrisonLive.Size() ? view.garrisonLive[target] : 0;
+                const float room = town->garrisonMax - (float)live - floorf(town->garrison) - (float)town->pending;
+                const int in = MinInt(r.strength, room > 0 ? (int)floorf(room) : 0);
+                GarrisonCache::AddReserve(registry, target, in, registry.FindZoneIndex(r.source), view.playerValid,
+                                          view.playerX, view.playerZ);
+                // the line says where every body goes: the garrison, home
+                // to the source (ReturnToSource writes what it took), or the
+                // pool for an alarm answer
+                char rest[96] = "";
+                if (r.strength > in)
+                {
+                    snprintf(rest, sizeof(rest), "; %d over its room go %s%s", r.strength - in,
+                             alarm ? "to the pool" : "home to ", alarm ? "" : (const char*)r.source);
+                }
+                GM_DIRECTOR_INFO(
+                    Core, "CounterAttack: [op {}] {} of {} soldier(s) top up {} (reserve {}, pending {}, of {}){}",
+                    r.opId, in, r.strength, (const char*)r.target, town->garrison, town->pending, town->garrisonMax,
+                    rest);
+                if (alarm)
+                {
+                    if (r.strength > in)
+                    {
+                        OccupierForces::Instance().Refund(r.strength - in, "alarm answer surplus"); // 8.2
+                    }
+                }
+                else
+                {
+                    ReturnToSource(registry, view, r, r.strength - in);
+                }
+                Emit(registry, r, CAOpSettled, in, 0, "topped up");
+                return true;
+            }
+            if (defendersHere)
+            {
+                if (!_tuning.forcesOn && !hq)
+                {
+                    return Fight(registry, view, target, r, fired);
+                }
+                // 6.5: a real fight against present defenders, born at the
+                // town edge under S; over budget it waits there doing nothing
+                if (r.retry > 0)
+                {
+                    r.retry -= elapsed;
+                    return false;
+                }
+                ArriveLive(registry, view, target, r, ops, fired);
                 return false;
             }
-            // off-screen arrival
-            AddEvent(fired, ZECounterAttack, target);
-            if (town->lastGuer > 0)
-            {
-                return Fight(registry, view, target, r, fired);
-            }
             r.phase = CAHolding;
-            LOG_INFO(Core, "CounterAttack: {} attacker(s) walk into empty {} (support {})", r.strength,
-                     (const char*)r.target, town->support);
+            r.retry = 0;
+            if (hq)
+            {
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} attacker(s) stand at the undefended HQ", r.opId, r.strength);
+            }
+            else
+            {
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} attacker(s) walk into empty {} (support {}, occCapture {})",
+                         r.strength, (const char*)r.target, town->support, town->occCapture);
+            }
             return false;
         }
         case CAHolding:
         {
-            if (!held)
+            if (!valid && hq)
             {
-                LOG_INFO(Core, "CounterAttack: {} retaken by the holding force", (const char*)r.target);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ moved; the holding force goes home", r.opId);
+                ReturnToSource(registry, view, r, r.strength);
+                Emit(registry, r, CAOpAborted, r.strength, 0, "the HQ moved");
+                return true;
+            }
+            if (!valid)
+            {
+                // the drain reverted the town (or someone else did): with the
+                // key on the holding bodies are its new garrison (settled by
+                // RevertTown through ZoneTickInputs::settleOcc)
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} retaken by the holding force", (const char*)r.target);
+                Emit(registry, r, CAOpSettled, r.strength, 0, _tuning.forcesOn ? "holding force settled" : "held");
                 return true;
             }
             // the town in the player's bubble: the force is never born at the
             // town centre; it is suspended (no drain, no odds roll) until he
             // leaves
-            r.suspended = InBubble(registry, view, target);
+            r.suspended = InBubbleAt(registry, view, dest);
             if (r.suspended)
             {
+                // M2: with the key on (or a funded record) the suspension
+                // counts toward the give-up: then the force is born at the
+                // town edge out of the player's sight and walks in, or it is
+                // cancelled unseen; never immune for good
+                if (_tuning.forcesOn || r.funded)
+                {
+                    r.deferTime += elapsed;
+                    if (r.deferTime >= _tuning.birthGiveUp)
+                    {
+                        r.deferTime = 0;
+                        r.phase = CATravel;
+                        r.clock = 0;
+                        r.retry = 0;
+                        r.suspended = false;
+                        const int born = ArriveLive(registry, view, target, r, ops, fired);
+                        if (born == BirthDone || born == BirthWait)
+                        {
+                            return false;
+                        }
+                        CancelUnseen(registry, view, r);
+                        return true;
+                    }
+                }
                 return false;
             }
-            if (town->lastGuer > 0)
+            r.deferTime = 0;
+            if (!_tuning.forcesOn && !hq)
             {
-                return Fight(registry, view, target, r, fired);
+                if (town->lastGuer > 0)
+                {
+                    return Fight(registry, view, target, r, fired);
+                }
+                return false;
+            }
+            if (hq ? view.hqDefenders > 0 : (town->lastGuer > 0 || town->lastGuerHold > 0))
+            {
+                // 6.5: defenders came back; the holding force fights them
+                // live, born at the town edge (it waits there over budget)
+                r.phase = CATravel;
+                r.clock = 0;
+                r.retry = 0;
+                ArriveLive(registry, view, target, r, ops, fired);
             }
             return false;
         }
         case CALive:
         {
+            if (r.bornStrength <= 0)
+            {
+                // the break-off's yardstick: the infantry the operation was
+                // first born with (a re-birth after a return to the road
+                // keeps it)
+                r.bornStrength = r.strength;
+            }
+            if (r.airId > 0 && !r.dismounted)
+            {
+                // phase 6A: an insertion in the air, landing or unloading
+                return AdvanceAirLive(registry, view, ops, r);
+            }
             Vector3 leader = VZero;
             const int alive = ops && r.group ? ops->Alive(r.group, leader) : 0;
-            if (!held)
+            if (LiveHullOf(r) > 0 && ops)
             {
+                CheckHull(registry, r, ops);
+            }
+            if (LiveEscortOf(r) > 0 && ops)
+            {
+                CheckEscort(registry, r, ops);
+            }
+            if (hq && r.hqDone)
+            {
+                // the HQ fell under the squad: it leaves the world where
+                // nobody sees it (never a visible vanish), its bodies to the
+                // pool (no garrison to join)
+                if (alive == 0)
+                {
+                    AddLeftover(r.source, nullptr, r.group, 0); // L7: its dead group, unseen
+                    Emit(registry, r, CAOpSettled, 0, 0, "the HQ fell; nobody left standing");
+                    return true;
+                }
+                const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+                const bool away =
+                    !view.playerValid || Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
+                const bool hullUnseen =
+                    (LiveHullOf(r) == 0 || (ops && ops->HullUnseen(r.hull, r.crewGroup))) &&
+                    (LiveEscortOf(r) == 0 || (ops && ops->HullUnseen(r.escort, r.escortCrewGroup)));
+                if (ops && away && ops->BodiesUnseen(r.group) && hullUnseen)
+                {
+                    ops->Remove(r.group);
+                    OccupierForces::Instance().Refund(alive, "HQ assault done");
+                    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ assault squad ({}) leaves unseen; back to the pool",
+                             r.opId, alive);
+                    Emit(registry, r, CAOpSettled, alive, alive, "the HQ fell");
+                    return true;
+                }
+                return false;
+            }
+            if (reinforce && valid && r.withdrawing)
+            {
+                r.withdrawing = false; // the town is the occupier's again: the top-up goes on
+                r.leg = LegUnknown;
+            }
+            if (!valid && !hq)
+            {
+                if (reinforce)
+                {
+                    // M5: the top-up squad's town was lost.  It walks home and
+                    // leaves the world only where nobody sees it (the squad
+                    // rule), never in the player's view
+                    if (alive == 0)
+                    {
+                        OccupierForces::Instance().NoteLoss(r.strength, "top-up squad lost");
+                        AddLeftover(r.source, nullptr, r.group, 0); // L7: its dead group, unseen
+                        Emit(registry, r, CAOpAborted, 0, r.strength, "the top-up target was lost; the squad is gone");
+                        return true;
+                    }
+                    const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(r.source));
+                    if (!r.withdrawing)
+                    {
+                        r.withdrawing = true;
+                        r.resend = 0;
+                        r.withdrawClock = 0;
+                        GM_DIRECTOR_INFO(Core,
+                                         "CounterAttack: [op {}] {} is no longer the occupier's; the top-up squad goes"
+                                         " home (born {}, alive {}; rule: the top-up target was lost), {:.0f} m from"
+                                         " the player",
+                                         r.opId, (const char*)r.target, r.bornStrength, alive,
+                                         PlayerDistance(view, leader));
+                    }
+                    r.withdrawClock += elapsed;
+                    if (ops && r.dismounted && (LiveHullOf(r) > 0 || LiveEscortOf(r) > 0))
+                    {
+                        // item 2: the hulls wait for the infantry on foot to
+                        // clear the town's edge, at most WithdrawHullWait,
+                        // then drive home ahead of it (the record still
+                        // waits for the squad to leave unseen)
+                        const bool cleared = ops->AliveWithin(r.group, town->pos, ClearRadius(registry)) == 0;
+                        if (cleared || r.withdrawClock >= WithdrawHullWait)
+                        {
+                            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the hulls of the top-up squad leave {} ({})",
+                                             r.opId, (const char*)r.target,
+                                             cleared ? "the infantry cleared the edge" : "the wait is over");
+                            FinishHull(registry, view, r, ops);
+                        }
+                    }
+                    r.resend -= elapsed;
+                    if (r.resend <= 0 && ops && home)
+                    {
+                        r.resend = ResendInterval;
+                        if (LiveHullOf(r) > 0 && !r.dismounted)
+                        {
+                            ops->DriveOn(r.crewGroup, home->pos);
+                        }
+                        else
+                        {
+                            ops->MoveOn(r.group, home->pos);
+                        }
+                    }
+                    const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+                    const bool away =
+                        !view.playerValid || Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
+                    if (ops && away && ops->BodiesUnseen(r.group))
+                    {
+                        ops->Remove(r.group);
+                        if (alive < r.strength)
+                        {
+                            OccupierForces::Instance().NoteLoss(r.strength - alive, "top-up squad"); // L4
+                        }
+                        GM_DIRECTOR_INFO(Core, "CounterAttack: the top-up squad for {} ({}) leaves unseen for {}",
+                                 (const char*)r.target, alive, (const char*)r.source);
+                        ReturnToSource(registry, view, r, alive);
+                        Emit(registry, r, CAOpAborted, alive, 0, "the top-up target was lost");
+                        return true;
+                    }
+                    return false;
+                }
                 if (alive > 0 && ops)
                 {
                     AdoptLive(registry, target, r, ops, alive);
+                }
+                else
+                {
+                    OccupierForces::Instance().NoteLoss(r.strength, "dead before the revert");
+                    AddLeftover(r.source, nullptr, r.group, 0); // L7: its dead group, unseen
+                    Emit(registry, r, CAOpAborted, 0, r.strength, "the town reverted; the squad is gone");
                 }
                 return true;
             }
             if (alive == 0)
             {
-                LOG_INFO(Core, "CounterAttack: the force on {} is gone; the town held", (const char*)r.target);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: the force on {} is gone; the town held", (const char*)r.target);
                 AddEvent(fired, ZECounterRepelled, target);
+                OccupierForces::Instance().NoteLoss(r.strength, "repelled");
+                AddLeftover(r.source, nullptr, r.group, 0); // L7: its dead group leaves unseen
+                Emit(registry, r, CAOpRepelled, 0, r.strength, "wiped out", CAERDefeated);
                 return true;
             }
-            if (r.leg == LegRoad)
+            if (!reinforce && valid && (_tuning.forcesOn || r.funded) && BreaksOff(r.bornStrength, alive))
+            {
+                // decision 4, item 7: a failed assault breaks off while the
+                // target is still held (valid here), on the road or at the
+                // edge; the lone survivor is the same rule
+                return Withdraw(registry, view, target, r, ops, alive, leader, CAERBrokenOff,
+                                "living infantry below a third of the strength born, the target still held", fired);
+            }
+            if (alarm && r.leg == LegTown && !r.answered)
+            {
+                r.answered = true;
+                EmitAt(registry, r, CAOpAlarmAnswered, target, IsZeroPos(r.alarmPos) ? town->pos : r.alarmPos, alive,
+                       0, "live");
+            }
+            if (alarm && r.leg == LegTown)
+            {
+                // 8.2: it searches the last-known position and ends when the
+                // zone is below RED and it found no contact
+                const bool red = target < view.alertState.Size() && view.alertState[target] >= ASRed;
+                const bool contact = town->lastGuer > 0;
+                r.alarmQuiet = !red && !contact ? r.alarmQuiet + elapsed : 0.0f;
+                if (r.alarmQuiet < AlarmQuietHold && r.clock < _tuning.liveTimeout)
+                {
+                    return false;
+                }
+            }
+            if (reinforce && r.leg == LegTown)
+            {
+                // the top-up squad reached the town: part of its garrison now
+                if (alive < r.strength)
+                {
+                    OccupierForces::Instance().NoteLoss(r.strength - alive, "top-up squad"); // L4
+                }
+                if (LiveHullOf(r) > 0 && !r.dismounted)
+                {
+                    ops->Dismount(r.group, r.hull);
+                    r.dismounted = true;
+                }
+                // up to the town's room; the rest walks home (5.5)
+                const int joined = AdoptTopUp(registry, view, target, r, ops, alive);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} soldier(s) join the {} garrison", joined, (const char*)r.target);
+                Emit(registry, r, CAOpSettled, joined, 0, "topped up");
+                return true;
+            }
+            if (r.leg == LegRoad && !r.arrivalLive)
             {
                 // a marching squad nobody can perceive, away from the
                 // player's bubble, returns to the abstract road (Traffic's
                 // despawn rule): its slot and budget are freed, its
-                // survivors and its progress carried over
+                // survivors and its progress carried over.  A squad born to
+                // fight present defenders never does (it would be re-born at
+                // once).
                 const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
                 const bool away = Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge &&
-                                  Dist2D(town->pos.X(), town->pos.Z(), view.playerX, view.playerZ) > edge;
-                r.unseenFor = away && ops->SquadUnseen(r.group) ? r.unseenFor + elapsed : 0.0f;
+                                  Dist2D(dest.X(), dest.Z(), view.playerX, view.playerZ) > edge;
+                const bool hullUnseen = (LiveHullOf(r) == 0 || ops->HullUnseen(r.hull, r.crewGroup)) &&
+                                        (LiveEscortOf(r) == 0 || ops->HullUnseen(r.escort, r.escortCrewGroup));
+                // every member, the dead included: a corpse in view never vanishes (reader defect 3)
+                bool vanish = away && ops->BodiesUnseen(r.group) && hullUnseen;
+                if (vanish && view.playerValid)
+                {
+                    // L13: never while the road still ahead passes the
+                    // player's bubble: abstract again, it would be re-born
+                    // behind him as soon as it got there (a return-to-road
+                    // livelock that re-created its hull each round)
+                    const AutoArray<Vector3>& ahead = RouteOf(registry, r, ops);
+                    vanish = !RouteAheadWithin(ahead, RouteFractionNear(ahead, leader), view.playerX, view.playerZ,
+                                               edge);
+                }
+                r.unseenFor = vanish ? r.unseenFor + elapsed : 0.0f;
                 if (r.unseenFor >= VanishHold)
                 {
                     const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
                     const float fraction = RouteFractionNear(route, leader);
-                    const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
-                    const float whole =
-                        src ? TravelTime(_tuning, Dist2D(src->pos.X(), src->pos.Z(), town->pos.X(), town->pos.Z()))
-                            : MinTravel;
-                    ops->Remove(r.group);
+                    const float whole = LegTime(registry, r, ops);
+                    ops->Remove(r.group); // the cargo first, then the crew and the hull
+                    // L4: the infantry who died on the march are lost
+                    if (alive < r.strength)
+                    {
+                        OccupierForces::Instance().NoteLoss(r.strength - alive, "killed on the march");
+                    }
+                    if (LiveHullOf(r) > 0)
+                    {
+                        // every living crewman (seated or not: HullUnseen
+                        // waited for them all) is re-created with the hull;
+                        // the dead are lost and come off the price (L3)
+                        int seated = 0;
+                        ops->HullState(r.hull, r.crewGroup, seated);
+                        const int living = LivingCrew(ops, r.crewGroup, seated, r.crew);
+                        if (living < r.crew)
+                        {
+                            OccupierForces::Instance().NoteLoss(r.crew - living, "crew");
+                            SettleCrew(registry, r, r.crew - living, "crew lost on the march");
+                            r.priceUnits -= r.crew - living;
+                            r.crew = living;
+                        }
+                        ops->RemoveHull(r.hull, r.crewGroup);
+                        r.hull = nullptr;
+                        r.crewGroup = nullptr;
+                        // no refund: the record keeps hullClass and its price
+                        // and re-creates the hull at the next birth (3.2)
+                        Emit(registry, r, CAOpHullLost, 0, 0, "abstract travel: re-created at the next birth");
+                    }
+                    if (LiveEscortOf(r) > 0)
+                    {
+                        int seated = 0;
+                        ops->HullState(r.escort, r.escortCrewGroup, seated);
+                        const int escortAlive = LivingCrew(ops, r.escortCrewGroup, seated, r.escortCrew);
+                        if (escortAlive < r.escortCrew)
+                        {
+                            OccupierForces::Instance().NoteLoss(r.escortCrew - escortAlive, "escort crew");
+                            SettleCrew(registry, r, r.escortCrew - escortAlive, "escort crew lost on the march");
+                            r.escortPriceUnits -= r.escortCrew - escortAlive;
+                            r.escortCrew = escortAlive;
+                        }
+                        ops->RemoveHull(r.escort, r.escortCrewGroup); // the crew first, then the hull
+                        r.escort = nullptr;
+                        r.escortCrewGroup = nullptr;
+                        // no refund: re-created with the carrier at the next birth
+                        Emit(registry, r, CAOpHullLost, 0, 0, "abstract travel: escort re-created at the next birth");
+                    }
                     ReturnToRoad(r, fraction, alive, whole);
-                    LOG_INFO(Core,
+                    GM_DIRECTOR_INFO(Core,
                              "CounterAttack: the force on {} ({} soldier(s)) leaves the player's world {:.0f}% along"
                              " its road; abstract again, {:.0f}s from the town",
                              (const char*)r.target, alive, fraction * 100.0f, r.clock);
@@ -1287,7 +2836,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             if (r.leg != LegTown)
             {
                 // on the road: leg by leg to the town edge
-                March(registry, target, r, ops, leader, elapsed);
+                March(registry, view, target, r, ops, leader, elapsed);
             }
             else
             {
@@ -1295,32 +2844,925 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 if (r.resend <= 0)
                 {
                     r.resend = ResendInterval;
-                    if (Dist2D(leader.X(), leader.Z(), town->pos.X(), town->pos.Z()) >
-                        registry.Tuning().zoneArea * 0.5f)
+                    if (Dist2D(leader.X(), leader.Z(), dest.X(), dest.Z()) > registry.Tuning().zoneArea * 0.5f)
                     {
-                        ops->MoveOn(r.group, town->pos);
+                        ops->MoveOn(r.group, dest);
                     }
                 }
             }
             if (r.clock >= _tuning.liveTimeout)
             {
-                const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
-                const bool unseen =
-                    !view.playerValid || Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
-                if (unseen)
+                // it gives up and withdraws in the open (walking back, its
+                // hulls waiting for it), never a vanish in the player's view
+                char rule[96];
+                if (hq && view.hqEstablished && !held)
                 {
-                    LOG_INFO(Core, "CounterAttack: the force on {} gives up after {:.0f}s; {} go home",
-                             (const char*)r.target, r.clock, alive);
-                    ReturnToSource(registry, view, r, alive);
-                    ops->Remove(r.group);
-                    AddEvent(fired, ZECounterRepelled, target);
-                    return true;
+                    snprintf(rule, sizeof(rule), "the HQ it was sent at moved");
                 }
+                else
+                {
+                    // the clock starts at the town edge, or once the road
+                    // march's allowance ran out short of it (video 6)
+                    snprintf(rule, sizeof(rule), "counterAttackLiveTimeout %.0f s %s", (double)_tuning.liveTimeout,
+                             r.leg == LegTown ? "at the target" : "short of the town edge, the march allowance spent");
+                }
+                return Withdraw(registry, view, target, r, ops, alive, leader, CAERWithdrew, rule, fired);
             }
             return false;
         }
         default:
             return true;
+    }
+}
+
+bool CounterAttack::Withdraw(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                             CounterAttackOps* ops, int alive, Vector3Par leader, int reason, const char* rule,
+                             AutoArray<ZoneEventRecord>& fired)
+{
+    const int lost = r.strength > alive ? r.strength - alive : 0;
+    const int born = r.bornStrength > 0 ? r.bornStrength : r.strength;
+    const char* where = r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target;
+    const bool mounted = LiveHullOf(r) > 0 && !r.dismounted;
+    const int hulls = LiveHullOf(r) + LiveEscortOf(r);
+    // where the survivors walk: their source, or the nearest occupier base
+    // when it fell (never into the resistance's base), else back where the
+    // route started (an insertion's LZ)
+    RString homeName = r.source;
+    const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(r.source));
+    if (!home || stricmp(home->owner, registry.OccupierSide()) != 0)
+    {
+        const int alt = NearestOccupierBase(registry, leader);
+        home = alt >= 0 ? registry.GetZone(alt) : nullptr;
+        if (home)
+        {
+            homeName = home->name;
+        }
+    }
+    Vector3 homePos = home ? home->pos : VZero;
+    if (!home)
+    {
+        const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+        homePos = route.Size() > 0 ? route[0] : r.spawnPos;
+    }
+    char line[192];
+    if (reason == CAERBrokenOff)
+    {
+        snprintf(line, sizeof(line), "Broken off at %s: %d lost, %d going home", where, lost, alive);
+    }
+    else
+    {
+        snprintf(line, sizeof(line), "Withdrew from %s: %d lost, %d going home", where, lost, alive);
+    }
+    char after[160];
+    if (mounted)
+    {
+        snprintf(after, sizeof(after), "the infantry rides home in its carrier");
+    }
+    else if (hulls > 0)
+    {
+        snprintf(after, sizeof(after), "on foot toward %s; the hulls wait for it to clear %.0f m (at most %.0f s)",
+                 (const char*)homeName, (double)ClearRadius(registry), (double)WithdrawHullWait);
+    }
+    else
+    {
+        snprintf(after, sizeof(after), "on foot toward %s",
+                 homeName.GetLength() > 0 ? (const char*)homeName : "its LZ");
+    }
+    // item 4: the withdrawal's own line, with the strength born, the
+    // strength alive and the rule
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} (born {}, alive {}; rule: {}); {}, {:.0f} m from the player",
+                     r.opId, line, born, alive, rule ? rule : "", after, PlayerDistance(view, leader));
+    AddEvent(fired, ZECounterRepelled, target);
+    OccupierForces::Instance().NoteLoss(lost, "repelled");
+    if (ops && r.group && alive > 0 && !mounted)
+    {
+        // the survivors fall back on foot: a withdrawing Leftover, removed
+        // only away from the player and unseen, home as bodies there
+        ops->MoveOn(r.group, homePos);
+        AddLeftover(homeName, nullptr, r.group, alive, homePos);
+    }
+    // the hulls (FinishHull, after this returns) wait for the infantry on
+    // foot or carry it home seated
+    r.withdrawReason = reason;
+    _endLine = line;
+    Emit(registry, r, CAOpRepelled, alive, lost, reason == CAERBrokenOff ? "broken off" : "withdrew", reason);
+    return true;
+}
+
+bool CounterAttack::RevertedUnder(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r)
+{
+    // 5.4: a travelling force whose town reverted under it (a passer-by)
+    // does not turn back: it tops the town up when its garrison is short,
+    // else it goes home
+    const ZoneRecord* town = registry.GetZone(target);
+    const int live = target < view.garrisonLive.Size() ? view.garrisonLive[target] : 0;
+    const float have = town ? floorf(town->garrison) + (float)town->pending + (float)live : 0.0f;
+    if (town && !town->garrisonExempt && GarrisonCache::OccupierHolds(registry, *town) &&
+        have < floorf(town->garrisonMax))
+    {
+        r.kind = CAKReinforce;
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} reverted under the force; it goes on as a top-up column ({} of {})",
+                 r.opId, (const char*)r.target, have, town->garrisonMax);
+        return false;
+    }
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} reverted under the force; its garrison is whole, the force goes home",
+             r.opId, (const char*)r.target);
+    ReturnToSource(registry, view, r, r.strength);
+    Emit(registry, r, CAOpAborted, r.strength, 0, "the town reverted under it");
+    return true;
+}
+
+int CounterAttack::ArriveLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                              CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired)
+{
+    // the birth search starts at the last route point at least the bound
+    // from the town and runs back toward the base (the gate passes trivially
+    // far from the player, so off-screen it is that point)
+    const Vector3 dest = DestOf(registry, r);
+    const bool haveDest = dest.X() != 0 || dest.Z() != 0;
+    const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+    const float len = RouteLength(route);
+    float fraction = 0;
+    if (haveDest && len > 0)
+    {
+        float arc = len;
+        for (int i = route.Size() - 1; i > 0; i--)
+        {
+            if (Dist2D(route[i], dest) >= _tuning.birthMinToTarget + 1.0f)
+            {
+                fraction = Clamp01(arc / len);
+                break;
+            }
+            arc -= Dist2D(route[i - 1], route[i]);
+        }
+    }
+    const bool whole = r.wholeRoad;
+    r.wholeRoad = false;
+    r.arrivalLive = true;
+    const int birth = GoLive(registry, view, target, r, ops, fraction, fired);
+    r.wholeRoad = whole;
+    if (birth != BirthDone)
+    {
+        r.arrivalLive = false;
+        r.retry = RetryInterval;
+        if (!r.deferLogged && !r.hiddenLogged)
+        {
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the force at {} waits at the town edge (defenders present)", r.opId,
+                     (const char*)r.target);
+            r.deferLogged = true;
+        }
+    }
+    return birth;
+}
+
+// is name one of the ';'-joined names in list (case-insensitive)?
+static bool NameListed(const char* list, const char* name)
+{
+    const size_t len = strlen(name);
+    const char* p = list;
+    while (p && *p)
+    {
+        const char* end = strchr(p, ';');
+        const size_t seg = end ? (size_t)(end - p) : strlen(p);
+        if (seg == len && strnicmp(p, name, len) == 0)
+        {
+            return true;
+        }
+        p = end ? end + 1 : nullptr;
+    }
+    return false;
+}
+
+bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                             CounterAttackOps* ops)
+{
+    if (r.IsAir())
+    {
+        return false; // phase 6A: air has no road to re-source; its birth search already ran off-map
+    }
+    (void)target;
+    const Vector3 dest = DestOf(registry, r);
+    const int a = registry.FindZoneIndex(r.source);
+    if (dest.X() == 0 && dest.Z() == 0)
+    {
+        return false;
+    }
+    // the bases already used (D6: then each further base)
+    const RString tried = r.tried.GetLength() > 0 ? r.tried + RString(";") + r.source : r.source;
+    // the other occupier bases whose stored reserve can spare the whole force
+    // (a base that cannot is passed over for the next), nearest the target
+    // first by straight distance
+    AutoArray<int> cands;
+    AutoArray<float> dists;
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (!z || i == a || !CampaignEnd::IsMilitaryType(z->type) || stricmp(z->owner, registry.OccupierSide()) != 0 ||
+            NameListed(tried, z->name))
+        {
+            continue;
+        }
+        if (Spare(_tuning, z->garrison, 0, z->garrisonMax, false) < r.strength)
+        {
+            continue;
+        }
+        if (!RoadRoute::SameLandmass(z->pos, dest))
+        {
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: it stands on another landmass", r.opId,
+                     (const char*)z->name, (const char*)r.target);
+            continue;
+        }
+        const float d = Dist2D(z->pos, dest);
+        cands.Add(i);
+        dists.Add(d);
+        for (int at = cands.Size() - 1; at > 0 && dists[at - 1] > dists[at]; at--)
+        {
+            const int ci = cands[at];
+            cands[at] = cands[at - 1];
+            cands[at - 1] = ci;
+            const float di = dists[at];
+            dists[at] = dists[at - 1];
+            dists[at - 1] = di;
+        }
+    }
+    // 3.1 step 3: the first of them whose route to the target has a point the
+    // gate passes (the same search the birth will run: from the base when the
+    // target is in the bubble, else the base point).  The route is the road
+    // net's (ops->BuildRoute, the road A*), else the straight line
+    // cross-country, so every base's route reaches the target; the gate is
+    // what decides.  No ops (no world, no gate): the nearest, as before.
+    const bool wholeRoad = InBubbleAt(registry, view, dest);
+    int best = -1;
+    AutoArray<Vector3> bestRoute;
+    bool bestIsRoad = false;
+    for (int c = 0; c < cands.Size() && best < 0; c++)
+    {
+        if (!ops)
+        {
+            best = cands[c];
+            break;
+        }
+        Record probe;
+        probe.target = r.target;
+        probe.source = registry.GetZone(cands[c])->name;
+        probe.kind = r.kind;
+        probe.destPos = r.destPos;
+        const AutoArray<Vector3>& route = RouteOf(registry, probe, ops);
+        const HullGateScope hullGate(ops, (r.HasHullPackage() && !r.hullDone) || (r.HasEscort() && !r.escortDone));
+        const CounterAttackSpawnPick pick = PickSpawnPoint(route, 0.0f, wholeRoad, _tuning.birthMinToTarget, *ops);
+        if (pick.reason == CASpawnDeferred)
+        {
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: its road is watched too", r.opId,
+                     (const char*)probe.source, (const char*)r.target);
+            continue;
+        }
+        best = cands[c];
+        bestRoute = probe.route;
+        bestIsRoad = probe.routeIsRoad;
+    }
+    if (best < 0)
+    {
+        return false;
+    }
+    // A is refunded, B pays
+    // (room-capped, the surplus to the pool, L2)
+    ReturnBodies(registry, view, a, r.strength);
+    ZoneRecord* b = registry.GetZoneMutable(best);
+    b->garrison = floorf(b->garrison) - (float)r.strength;
+    if (b->garrison < 0)
+    {
+        b->garrison = 0;
+    }
+    GM_DIRECTOR_INFO(Core,
+             "CounterAttack: [op {}] every road from {} to {} is watched; re-sourced to {} ({} soldier(s); reserve "
+             "{} there)",
+             r.opId, (const char*)r.source, (const char*)r.target, (const char*)b->name, r.strength, b->garrison);
+    r.tried = tried;
+    r.source = b->name;
+    r.route = bestRoute; // empty without ops: RouteOf rebuilds it
+    r.routeIsRoad = bestIsRoad;
+    r.travel = 0;
+    r.clock = LegTime(registry, r, ops);
+    r.travel = r.clock;
+    r.deferTime = 0;
+    r.retry = 0;
+    r.hiddenLogged = false;
+    r.deferLogged = false;
+    r.wholeRoad = wholeRoad;
+    Emit(registry, r, CAOpResourced, r.strength, 0, "next base back");
+    return true;
+}
+
+void CounterAttack::CancelUnseen(ZoneRegistry& registry, const CounterAttackView& view, Record& r)
+{
+    // nothing could be born anywhere: the operation is called off while it
+    // is still abstract (an unborn force vanishing off-map is no visible
+    // turn-back, D6).  Its bodies go back to their current source, or the
+    // pool when that base is gone; the director refunds the hull price and
+    // starts the town's cooldown on the event.
+    // (room-capped, the surplus to the pool, L2)
+    ReturnBodies(registry, view, registry.FindZoneIndex(r.source), r.strength);
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] cancelled unborn: every route to {} watched ({} soldier(s) back to {})",
+             r.opId, (const char*)r.target, r.strength, (const char*)r.source);
+    // the unsettled hull prices go back through the event: exactly what is
+    // still owed (L3: crew already booked lost or refunded are not in it)
+    int owed = r.OwedUnits();
+    if (r.airReplanned && owed > 0)
+    {
+        OccupierForces::Instance().Refund(owed, "air re-plan cancelled"); // spent directly, refunded directly
+        owed = 0;
+    }
+    r.hullDone = true;
+    r.escortDone = true;
+    Emit(registry, r, CAOpCancelledUnseen, r.strength, owed, "every route watched");
+}
+
+int CounterAttack::ReturnBodies(ZoneRegistry& registry, const CounterAttackView& view, int zone, int bodies)
+{
+    if (bodies <= 0)
+    {
+        return 0;
+    }
+    ZoneRecord* s = registry.GetZoneMutable(zone);
+    if (!s || stricmp(s->owner, registry.OccupierSide()) != 0)
+    {
+        OccupierForces::Instance().Refund(bodies, "no base");
+        return 0;
+    }
+    const int live = zone < view.garrisonLive.Size() ? view.garrisonLive[zone] : 0;
+    const float room = s->garrisonMax - (float)live - floorf(s->garrison) - (float)s->pending;
+    const int back = MinInt(bodies, room > 0 ? (int)floorf(room) : 0);
+    GarrisonCache::AddReserve(registry, zone, back, zone, view.playerValid, view.playerX, view.playerZ);
+    if (bodies > back)
+    {
+        OccupierForces::Instance().Refund(bodies - back, "surplus");
+    }
+    return back;
+}
+
+void CounterAttack::AddLeftover(const RString& source, Entity* hull, AIGroup* group, int living, Vector3Par home)
+{
+    if (!hull && !group)
+    {
+        return;
+    }
+    Leftover l;
+    l.source = source;
+    l.living = living > 0 ? living : 0;
+    l.hull = hull;
+    l.group = group;
+    l.home = home;
+    _leftovers.Add(l);
+}
+
+void CounterAttack::StepLeftovers(ZoneRegistry& registry, const CounterAttackView& view, float elapsed,
+                                  CounterAttackOps* ops)
+{
+    if (!ops)
+    {
+        return;
+    }
+    const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+    for (int i = 0; i < _leftovers.Size();)
+    {
+        Leftover& l = _leftovers[i];
+        l.retry -= elapsed;
+        if (l.retry > 0)
+        {
+            i++;
+            continue;
+        }
+        l.retry = RetryInterval;
+        Entity* hull = l.hull;
+        if (hull)
+        {
+            // an abandoned intact hull leaves where nobody sees it and
+            // nobody sits in it (the player may have taken it); a wreck stays
+            int seated = 0;
+            if (ops->HullState(hull, nullptr, seated) != CounterAttackOps::HullIntact)
+            {
+                l.hull = nullptr;
+            }
+            else if (!ops->HullOccupied(hull) && ops->HullUnseen(hull, nullptr))
+            {
+                ops->RemoveHull(hull, nullptr);
+                l.hull = nullptr;
+            }
+        }
+        AIGroup* grp = l.group;
+        if (grp)
+        {
+            // dead units stay group members, so such a group holds a slot of
+            // the side's group budget: it goes with its corpses once they are
+            // all unseen; living stragglers only away from the player too,
+            // home as bodies, the dead among them lost
+            Vector3 leader = VZero;
+            const int alive = ops->Alive(grp, leader);
+            const bool away = alive == 0 || !view.playerValid ||
+                              Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
+            if (away && ops->BodiesUnseen(grp))
+            {
+                ops->Remove(grp);
+                const int home = MinInt(alive, l.living);
+                if (l.living > home)
+                {
+                    OccupierForces::Instance().NoteLoss(l.living - home, "left behind");
+                }
+                CrewHome(registry, view, l.source, home);
+                if (!IsZeroPos(l.home))
+                {
+                    GM_DIRECTOR_INFO(
+                        Core, "CounterAttack: {} withdrawing soldier(s) home unseen at {} ({} lost on the way)", home,
+                        l.source.GetLength() > 0 ? (const char*)l.source : "the pool", l.living - home);
+                }
+                l.living = 0;
+                l.group = nullptr;
+            }
+            else if (alive > 0 && !IsZeroPos(l.home))
+            {
+                // a withdrawal keeps walking home (a stalled leg re-sent)
+                ops->MoveOn(grp, l.home);
+            }
+        }
+        else if (l.living > 0)
+        {
+            // the group was deleted elsewhere: its stragglers never came home
+            OccupierForces::Instance().NoteLoss(l.living, "left behind");
+            l.living = 0;
+        }
+        if (!l.hull.GetLink() && !l.group.GetLink())
+        {
+            _leftovers.Delete(i);
+            continue;
+        }
+        i++;
+    }
+}
+
+void CounterAttack::CrewHome(ZoneRegistry& registry, const CounterAttackView& view, const char* source, int crew)
+{
+    if (crew <= 0)
+    {
+        return;
+    }
+    const int src = registry.FindZoneIndex(source);
+    ZoneRecord* s = registry.GetZoneMutable(src);
+    if (!s || stricmp(s->owner, registry.OccupierSide()) != 0)
+    {
+        OccupierForces::Instance().Refund(crew, "no base");
+        return;
+    }
+    const int live = src < view.garrisonLive.Size() ? view.garrisonLive[src] : 0;
+    const float room = s->garrisonMax - (float)live - floorf(s->garrison) - (float)s->pending;
+    const int back = MinInt(crew, room > 0 ? (int)floorf(room) : 0);
+    GarrisonCache::AddReserve(registry, src, back, src, view.playerValid, view.playerX, view.playerZ);
+    if (crew > back)
+    {
+        OccupierForces::Instance().Refund(crew - back, "surplus");
+    }
+}
+
+bool CounterAttack::CheckHull(ZoneRegistry& registry, Record& r, CounterAttackOps* ops)
+{
+    int crewAlive = 0;
+    const int state = ops->HullState(r.hull, r.crewGroup, crewAlive);
+    if (state == CounterAttackOps::HullIntact && crewAlive > 0)
+    {
+        return false;
+    }
+    // destroyed, deleted, or nobody left to drive it (abandoned where it
+    // stands): lost.  The dead crew count lost to the pool (L4: only the
+    // dead); the crew group and an abandoned intact hull go to the unseen
+    // cleanup, living stragglers home as bodies from there (M3)
+    const int price = r.HullPrice();
+    const int living = LivingCrew(ops, r.crewGroup, crewAlive, r.crew);
+    OccupierForces::Instance().NoteLoss(r.crew - living, "crew");
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} of the force on {} is lost ({}; {} of {} crew alive)", r.opId,
+             (const char*)r.hullClass, (const char*)r.target,
+             state == CounterAttackOps::HullDestroyed ? "destroyed"
+                                                      : (state == CounterAttackOps::HullGone ? "gone" : "abandoned"),
+             living, r.crew);
+    if (!r.dismounted && r.group)
+    {
+        ops->Dismount(r.group, r.hull);
+        r.dismounted = true;
+    }
+    AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.hull.GetLink() : nullptr, r.crewGroup, living);
+    // the dead booked lost, the living handed to the Leftover list (home as
+    // bodies from there): the whole crew leaves the operation's price
+    SettleCrew(registry, r, r.crew, "crew lost or left behind");
+    r.hull = nullptr;
+    r.crewGroup = nullptr;
+    r.hullDone = true;
+    r.crew = 0;
+    r.priceUnits = 0; // settled: nothing more owed on the carrier
+    if (r.abstractSpeed > 0)
+    {
+        r.abstractSpeed = FootSpeed; // on foot from here
+        r.travel = 0;                // L5: a later return to the road re-times the leg at foot pace
+    }
+    Emit(registry, r, CAOpHullLost, 0, price, state == CounterAttackOps::HullDestroyed ? "destroyed" : "abandoned");
+    return true;
+}
+
+bool CounterAttack::CheckEscort(ZoneRegistry& registry, Record& r, CounterAttackOps* ops)
+{
+    int crewAlive = 0;
+    const int state = ops->HullState(r.escort, r.escortCrewGroup, crewAlive);
+    if (state == CounterAttackOps::HullIntact && crewAlive > 0)
+    {
+        return false;
+    }
+    // destroyed, deleted or crewless: lost, its dead crew to the losses,
+    // the group and an abandoned intact hull to the unseen cleanup (M3).
+    // The column carries on without it (the infantry rides the carrier).
+    const int price = r.EscortHullPrice();
+    const int living = LivingCrew(ops, r.escortCrewGroup, crewAlive, r.escortCrew);
+    OccupierForces::Instance().NoteLoss(r.escortCrew - living, "escort crew");
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the escort {} of the force on {} is lost ({}; {} of {} crew alive)",
+             r.opId, (const char*)r.escortClass, (const char*)r.target,
+             state == CounterAttackOps::HullDestroyed ? "destroyed"
+                                                      : (state == CounterAttackOps::HullGone ? "gone" : "abandoned"),
+             living, r.escortCrew);
+    AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.escort.GetLink() : nullptr, r.escortCrewGroup,
+                living);
+    SettleCrew(registry, r, r.escortCrew, "escort crew lost or left behind");
+    r.escort = nullptr;
+    r.escortCrewGroup = nullptr;
+    r.escortDone = true;
+    r.escortCrew = 0;
+    r.escortPriceUnits = 0;
+    Emit(registry, r, CAOpHullLost, 0, price,
+         state == CounterAttackOps::HullDestroyed ? "escort destroyed" : "escort abandoned");
+    return true;
+}
+
+void CounterAttack::FinishEscort(ZoneRegistry& registry, const CounterAttackView& view, Record& r,
+                                 CounterAttackOps* ops)
+{
+    if (!r.HasEscort() || r.escortDone)
+    {
+        return;
+    }
+    r.escortDone = true;
+    if (LiveEscortOf(r) > 0)
+    {
+        int crewAlive = 0;
+        const int state = ops ? ops->HullState(r.escort, r.escortCrewGroup, crewAlive) : (int)CounterAttackOps::HullGone;
+        const int living = LivingCrew(ops, r.escortCrewGroup, crewAlive, r.escortCrew);
+        OccupierForces::Instance().NoteLoss(r.escortCrew - living, "escort crew");
+        if (state == CounterAttackOps::HullIntact && crewAlive > 0)
+        {
+            // it drives home and is deleted only where nobody sees it; both
+            // prices come back apart (each hull its own HomeHull).  Its whole
+            // living crew goes with it (the home deletion waits for them all)
+            // (the living stay on the row until it is home; the dead leave it now)
+            SettleCrew(registry, r, r.escortCrew - living, "escort crew lost");
+            SendHullHome(r, r.escort, r.escortCrewGroup, living, ops, registry, r.EscortHullPrice(), r.escortClass);
+        }
+        else
+        {
+            // lost: the group and an abandoned intact hull to the cleanup (M3)
+            AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.escort.GetLink() : nullptr,
+                        r.escortCrewGroup, living);
+            SettleCrew(registry, r, r.escortCrew, "escort crew lost or left behind");
+            Emit(registry, r, CAOpHullLost, 0, r.EscortHullPrice(), "escort lost at the end of the operation");
+        }
+        r.escort = nullptr;
+        r.escortCrewGroup = nullptr;
+        return;
+    }
+    // an abstract escort (never born, or back on the abstract road): home
+    // unseen at once, its price back, its crew home as bodies
+    CrewHome(registry, view, r.source, r.escortCrew);
+    SettleCrew(registry, r, r.escortCrew, "escort crew home");
+    Emit(registry, r, CAOpHullRefund, r.escortCrew, r.EscortHullPrice(), "escort abstract: home");
+}
+
+void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& view, Record& r, CounterAttackOps* ops)
+{
+    FinishEscort(registry, view, r, ops);
+    if (r.airId > 0)
+    {
+        SendAirHome(r); // phase 6A: OccupierAir flies it home and removes it unseen
+    }
+    if (!r.HasHullPackage() || r.hullDone)
+    {
+        return;
+    }
+    r.hullDone = true;
+    if (LiveHullOf(r) > 0)
+    {
+        int crewAlive = 0;
+        const int state = ops ? ops->HullState(r.hull, r.crewGroup, crewAlive) : (int)CounterAttackOps::HullGone;
+        const int living = LivingCrew(ops, r.crewGroup, crewAlive, r.crew);
+        OccupierForces::Instance().NoteLoss(r.crew - living, "crew");
+        if (state == CounterAttackOps::HullIntact && crewAlive > 0)
+        {
+            // it drives home and is deleted only where nobody sees it (its
+            // whole living crew with it: the home deletion waits for them all)
+            // (the living stay on the row until it is home; the dead leave it now)
+            SettleCrew(registry, r, r.crew - living, "crew lost");
+            SendHullHome(r, r.hull, r.crewGroup, living, ops, registry);
+        }
+        else
+        {
+            // lost: the group and an abandoned intact hull to the cleanup (M3)
+            AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.hull.GetLink() : nullptr, r.crewGroup,
+                        living);
+            if (r.withdrawReason != CAERNone && !r.dismounted && r.group && ops)
+            {
+                // a withdrawing infantry still seated in it gets out and
+                // walks home (never left in a dead hull, never untracked)
+                Vector3 at = VZero;
+                const int aboard = ops->Alive(r.group, at);
+                if (aboard > 0)
+                {
+                    ops->Dismount(r.group, r.hull);
+                    const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(r.source));
+                    const Vector3 homePos = home ? home->pos : at;
+                    ops->MoveOn(r.group, homePos);
+                    AddLeftover(r.source, nullptr, r.group, aboard, homePos);
+                }
+            }
+            SettleCrew(registry, r, r.crew, "crew lost or left behind");
+            Emit(registry, r, CAOpHullLost, 0, r.HullPrice(), "lost at the end of the operation");
+        }
+        r.hull = nullptr;
+        r.crewGroup = nullptr;
+        return;
+    }
+    // an abstract hull (never born, or back on the abstract road) drives
+    // home unseen at once: its price back, its crew home as bodies
+    CrewHome(registry, view, r.source, r.crew);
+    SettleCrew(registry, r, r.crew, "crew home"); // nothing for a re-plan no row took
+    if (r.airReplanned)
+    {
+        // a hull home goes through RefundHull (the stored spare, the ceiling)
+        OccupierForces::Instance().RefundHull(registry, r.HullPrice(), r.package, nullptr,
+                                              r.airOrigin >= 0 ? r.airOrigin : registry.FindZoneIndex(r.source));
+        Emit(registry, r, CAOpHullRefund, r.crew, 0, "abstract: home");
+        return;
+    }
+    Emit(registry, r, CAOpHullRefund, r.crew, r.HullPrice(), "abstract: home");
+}
+
+int CounterAttack::NearestOccupierBase(const ZoneRegistry& registry, Vector3Par at)
+{
+    int best = -1;
+    float bestDist = 0;
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (!z || !CampaignEnd::IsMilitaryType(z->type) || stricmp(z->owner, registry.OccupierSide()) != 0 ||
+            !RoadRoute::SameLandmass(z->pos, at))
+        {
+            continue;
+        }
+        const float d = Dist2D(z->pos.X(), z->pos.Z(), at.X(), at.Z());
+        if (best < 0 || d < bestDist)
+        {
+            best = i;
+            bestDist = d;
+        }
+    }
+    return best;
+}
+
+void CounterAttack::SendHullHome(const Record& r, Entity* hull, AIGroup* crewGroup, int crewAlive,
+                                 CounterAttackOps* ops, const ZoneRegistry& registry, int units, const char* hullClass)
+{
+    HomeHull h;
+    h.opId = r.opId;
+    h.kind = r.kind;
+    h.origin = r.origin;
+    h.target = r.target;
+    h.source = r.source;
+    h.units = units >= 0 ? units : r.HullPrice();
+    h.crew = crewAlive;
+    h.retry = 0;
+    h.hull = hull;
+    h.crewGroup = crewGroup;
+    // item 2: a withdrawing force's hulls never leave before its infantry.
+    // Seated in the carrier, it rides home with it; on foot, every hull
+    // holds where it stands until the infantry clears the edge, at most
+    // WithdrawHullWait
+    int aboard = 0;
+    if (r.withdrawReason != CAERNone && r.group && ops)
+    {
+        Vector3 at = VZero;
+        const int infantry = ops->Alive(r.group, at);
+        if (infantry > 0 && !r.dismounted && hull == r.hull.GetLink())
+        {
+            h.cargo = r.group;
+            h.cargoLiving = infantry;
+            aboard = infantry;
+        }
+        else if (infantry > 0 && r.dismounted)
+        {
+            h.wait = WithdrawHullWait;
+            h.waited = 0;
+            h.waitGroup = r.group;
+            h.waitAt = DestOf(registry, r);
+            h.waitRadius = ClearRadius(registry);
+            h.released = HRWaiting;
+        }
+    }
+    _homeHulls.Add(h);
+    const char* cls = hullClass ? hullClass : (const char*)r.hullClass;
+    if (h.wait > 0)
+    {
+        GM_DIRECTOR_INFO(Core,
+                         "CounterAttack: [op {}] the {} holds for the infantry until it clears {:.0f} m of {} (at"
+                         " most {:.0f} s), then drives home to {} ({} crew)",
+                         r.opId, cls, (double)h.waitRadius, r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target,
+                         (double)WithdrawHullWait, (const char*)r.source, crewAlive);
+        return;
+    }
+    const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
+    if (ops && src)
+    {
+        ops->DriveOn(crewGroup, src->pos);
+    }
+    if (aboard > 0)
+    {
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew, {} infantry aboard)", r.opId,
+                         cls, (const char*)r.source, crewAlive, aboard);
+        return;
+    }
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew)", r.opId, cls,
+                     (const char*)r.source, crewAlive);
+}
+
+void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackView& view, float elapsed,
+                                  CounterAttackOps* ops)
+{
+    if (!ops)
+    {
+        return;
+    }
+    for (int i = 0; i < _homeHulls.Size();)
+    {
+        HomeHull& h = _homeHulls[i];
+        Record ref;
+        ref.opId = h.opId;
+        ref.kind = h.kind;
+        ref.origin = h.origin;
+        ref.target = h.target;
+        ref.source = h.source;
+        int crewAlive = 0;
+        const int state = ops->HullState(h.hull, h.crewGroup, crewAlive);
+        const int living = LivingCrew(ops, h.crewGroup, crewAlive, h.crew);
+        if (state != CounterAttackOps::HullIntact || crewAlive == 0)
+        {
+            // the dead crew lost; the group and an abandoned intact hull to
+            // the unseen cleanup (M3)
+            OccupierForces::Instance().NoteLoss(h.crew - living, "crew");
+            AddLeftover(h.source, state == CounterAttackOps::HullIntact ? h.hull.GetLink() : nullptr, h.crewGroup,
+                        living);
+            if (h.cargo)
+            {
+                // the withdrawing infantry it carried: the dead lost, the
+                // living out and walking home (a Leftover)
+                Vector3 at = VZero;
+                const int aboard = ops->Alive(h.cargo, at);
+                if (h.cargoLiving > aboard)
+                {
+                    OccupierForces::Instance().NoteLoss(h.cargoLiving - aboard, "killed in the carrier");
+                }
+                if (aboard > 0)
+                {
+                    ops->Dismount(h.cargo, h.hull);
+                    const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(h.source));
+                    const Vector3 homePos = home ? home->pos : at;
+                    ops->MoveOn(h.cargo, homePos);
+                    AddLeftover(h.source, nullptr, h.cargo, aboard, homePos);
+                }
+                else
+                {
+                    AddLeftover(h.source, nullptr, h.cargo, 0); // L7: the dead, unseen
+                }
+                h.cargo = nullptr;
+                h.cargoLiving = 0;
+            }
+            SettleCrew(registry, ref, h.crew, "crew lost or left behind on the way home");
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the hull driving home to {} is lost", h.opId, (const char*)h.source);
+            Emit(registry, ref, CAOpHullLost, 0, h.units, "lost on the way home");
+            _homeHulls.Delete(i);
+            continue;
+        }
+        if (h.wait > 0)
+        {
+            // item 2: it holds (no drive, no deletion) while a living
+            // survivor of its infantry stands within waitRadius of the
+            // target, at most `wait` seconds; then it leaves
+            Vector3 at = VZero;
+            const int infantry = h.waitGroup ? ops->Alive(h.waitGroup, at) : 0;
+            const int near = infantry > 0 ? ops->AliveWithin(h.waitGroup, h.waitAt, h.waitRadius) : 0;
+            h.waited += elapsed;
+            int why = HRNone;
+            if (infantry <= 0)
+            {
+                why = HRNoInfantry;
+            }
+            else if (near <= 0)
+            {
+                why = HRCleared;
+            }
+            else if (h.waited >= h.wait)
+            {
+                why = HRWaitOver;
+            }
+            if (why == HRNone)
+            {
+                i++;
+                continue;
+            }
+            h.released = why;
+            h.wait = 0;
+            h.waitGroup = nullptr;
+            h.retry = 0;
+            GM_DIRECTOR_INFO(Core,
+                             "CounterAttack: [op {}] the hull at {} leaves after its infantry ({}, held {:.0f} s; {} of"
+                             " it within {:.0f} m); it drives home to {}",
+                             h.opId, (const char*)h.target, HullReleaseName(why), (double)h.waited, near,
+                             (double)h.waitRadius, (const char*)h.source);
+        }
+        h.retry -= elapsed;
+        if (h.retry > 0)
+        {
+            i++;
+            continue;
+        }
+        h.retry = RetryInterval;
+        if (ops->HullUnseen(h.hull, h.crewGroup) && (!h.cargo || ops->BodiesUnseen(h.cargo)))
+        {
+            if (h.cargo)
+            {
+                // the infantry riding in it leaves first (a deleted
+                // transport would eject it): the living home as bodies, the
+                // dead lost
+                Vector3 at = VZero;
+                const int aboard = ops->Alive(h.cargo, at);
+                ops->Remove(h.cargo);
+                if (h.cargoLiving > aboard)
+                {
+                    OccupierForces::Instance().NoteLoss(h.cargoLiving - aboard, "killed on the way home");
+                }
+                CrewHome(registry, view, h.source, aboard);
+                GM_DIRECTOR_INFO(Core,
+                                 "CounterAttack: [op {}] {} withdrawing soldier(s) home unseen at {} in their carrier",
+                                 h.opId, aboard, (const char*)h.source);
+                h.cargo = nullptr;
+                h.cargoLiving = 0;
+            }
+            // every crewman is deleted with it (HullUnseen waited for them
+            // all): the living home, the dead lost
+            if (living < h.crew)
+            {
+                OccupierForces::Instance().NoteLoss(h.crew - living, "crew");
+            }
+            ops->RemoveHull(h.hull, h.crewGroup);
+            CrewHome(registry, view, h.source, living);
+            SettleCrew(registry, ref, h.crew, "crew home");
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the hull is home unseen ({} crew back at {})", h.opId, living,
+                     (const char*)h.source);
+            Emit(registry, ref, CAOpHullRefund, living, h.units, "home");
+            _homeHulls.Delete(i);
+            continue;
+        }
+        const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(h.source));
+        if (src && stricmp(src->owner, registry.OccupierSide()) != 0)
+        {
+            // L13: its base fell behind it.  It never drives into the
+            // resistance's base: the nearest occupier base on its landmass
+            // instead, else it stops where it is and waits to leave unseen
+            // (its crew then go to the pool, CrewHome's "no base")
+            Vector3 at = src->pos;
+            ops->Alive(h.crewGroup, at);
+            const int alt = NearestOccupierBase(registry, at);
+            const RString lost = h.source;
+            if (alt >= 0)
+            {
+                src = registry.GetZone(alt);
+                h.source = src->name;
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} fell; the hull drives home to {} instead", h.opId,
+                         (const char*)lost, (const char*)h.source);
+            }
+            else
+            {
+                src = nullptr;
+                h.source = RString();
+                ops->DriveOn(h.crewGroup, at);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} fell and no base is left; the hull stops and waits", h.opId,
+                         (const char*)lost);
+            }
+        }
+        if (src)
+        {
+            ops->DriveOn(h.crewGroup, src->pos);
+        }
+        i++;
     }
 }
 
@@ -1331,25 +3773,164 @@ void CounterAttack::AdoptLive(ZoneRegistry& registry, int target, Record& r, Cou
     {
         return;
     }
+    if (LiveHullOf(r) > 0 && !r.dismounted)
+    {
+        ops->Dismount(r.group, r.hull);
+        r.dismounted = true;
+    }
+    if (alive < r.strength)
+    {
+        OccupierForces::Instance().NoteLoss(r.strength - alive, "killed in the retake"); // L4
+    }
     ops->Adopt(target, r.group);
-    // the squad IS the new garrison; the stored reserve only tops it up
-    float top = town->garrisonExempt ? 0.0f : town->garrisonMax - (float)alive;
-    town->garrison = top > 0 ? top : 0.0f;
-    LOG_INFO(Core, "CounterAttack: {} soldier(s) stay in {} as its garrison (reserve {})", alive, (const char*)r.target,
-             town->garrison);
+    // the squad IS (part of) the new garrison: it comes off the refill (U2),
+    // never assigned over the reserve; the refill bodies it replaces were
+    // pool-funded and go back to the pool (5.5, settled once)
+    const int cut = SubtractAdopted(*town, alive);
+    OccupierForces::Instance().Refund(cut, "adopted squad");
+    GM_DIRECTOR_INFO(Core,
+             "CounterAttack: {} soldier(s) stay in {} as its garrison ({} taken off the refill; reserve {}, "
+             "pending {})",
+             alive, (const char*)r.target, cut, town->garrison, town->pending);
+    Emit(registry, r, CAOpSettled, alive, cut, "adopted");
+}
+
+int CounterAttack::AdoptTopUp(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                              CounterAttackOps* ops, int alive)
+{
+    ZoneRecord* town = registry.GetZoneMutable(target);
+    if (!town || !r.group || alive <= 0)
+    {
+        return 0;
+    }
+    const int live = target < view.garrisonLive.Size() ? view.garrisonLive[target] : 0;
+    const int reserve = (int)floorf(town->garrison > 0 ? town->garrison : 0);
+    const float room = floorf(town->garrisonMax) - (float)live - (float)reserve - (float)town->pending;
+    int surplus = alive - (room > 0 ? (int)room : 0);
+    int traded = 0;
+    if (surplus > 0)
+    {
+        // the stored reserve gives way first, then the pending deposit:
+        // abstract bodies, nobody sees them go; back to the pool (5.5)
+        const int fromReserve = MinInt(surplus, reserve);
+        town->garrison = (float)(reserve - fromReserve);
+        surplus -= fromReserve;
+        const int fromPending = MinInt(surplus, town->pending);
+        town->pending -= fromPending;
+        if (town->pending <= 0)
+        {
+            town->pending = 0;
+            town->pendingOrigin = -1;
+        }
+        surplus -= fromPending;
+        traded = fromReserve + fromPending;
+        OccupierForces::Instance().Refund(traded, "top-up over the room: stored bodies give way");
+    }
+    int joined = alive;
+    if (surplus > 0)
+    {
+        const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(r.source));
+        const Vector3 homePos = home ? home->pos : town->pos;
+        if (surplus >= alive)
+        {
+            // nothing fits: the whole squad walks home
+            ops->MoveOn(r.group, homePos);
+            AddLeftover(r.source, nullptr, r.group, alive);
+            r.group = nullptr;
+            joined = 0;
+        }
+        else
+        {
+            int taken = 0;
+            AIGroup* rest = ops->SplitOff(r.group, surplus, homePos, taken);
+            if (rest && taken > 0)
+            {
+                AddLeftover(r.source, nullptr, rest, taken);
+                joined = alive - taken;
+            }
+            if (taken < surplus)
+            {
+                LOG_WARN(Core,
+                         "CounterAttack: [op {}] {} of {} surplus soldier(s) could not split off at {}; they join "
+                         "over its garrisonMax",
+                         r.opId, surplus - taken, surplus, (const char*)r.target);
+            }
+        }
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} is full: {} soldier(s) walk home to {}", r.opId,
+                 (const char*)r.target, alive - joined, (const char*)r.source);
+    }
+    if (joined > 0)
+    {
+        ops->Adopt(target, r.group);
+    }
+    if (traded > 0)
+    {
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} stored body(ies) of {} give way to the live top-up (pool)", r.opId,
+                 traded, (const char*)r.target);
+    }
+    return joined;
+}
+
+int CounterAttack::SubtractAdopted(ZoneRecord& town, int alive)
+{
+    // from the pending deposit first (where an in-bubble refill went), then
+    // from the reserve; only as much as the refill added
+    int cut = MinInt(alive > 0 ? alive : 0, town.revertRefill > 0 ? town.revertRefill : 0);
+    const int fromPending = MinInt(cut, town.pending);
+    town.pending -= fromPending;
+    if (town.pending <= 0)
+    {
+        town.pending = 0;
+        town.pendingOrigin = -1;
+    }
+    cut -= fromPending;
+    const int fromReserve = MinInt(cut, (int)floorf(town.garrison > 0 ? town.garrison : 0));
+    town.garrison = floorf(town.garrison > 0 ? town.garrison : 0) - (float)fromReserve;
+    town.revertRefill = 0;
+    return fromPending + fromReserve;
 }
 
 void CounterAttack::Step(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops,
                          AutoArray<ZoneEventRecord>& fired)
 {
+    if (view.mapSize > 0)
+    {
+        _mapSize = view.mapSize; // phase 6A: the off-map edge (RouteOf reads it)
+    }
     if (!view.playerValid)
     {
         return; // a dead player freezes every campaign clock
     }
+    if (view.won || view.lost)
+    {
+        return; // 7.4, 9.2: once the win (or lose) latches nothing in flight steps
+    }
+    // BuildView's census predates every birth in this tick. Charge each
+    // successful birth before admitting the next record; failed/partial
+    // spawns consume only what appeared. Do not release departures here:
+    // home-going hulls and adopted groups can still be in the world, and
+    // the next engine census will account for their actual removal.
+    CounterAttackView tickView = view;
     for (int i = 0; i < _records.Size();)
     {
-        if (Advance(registry, view, elapsed, ops, _records[i], fired))
+        Record& r = _records[i];
+        const bool wasLive = r.phase == CALive;
+        const bool ended = Advance(registry, tickView, elapsed, ops, r, fired);
+        if (!wasLive && r.phase == CALive)
         {
+            tickView.occGroups += (r.group ? 1 : 0) + (r.crewGroup ? 1 : 0) + (r.escortCrewGroup ? 1 : 0);
+            // A garrison detachment creates a group from already-counted
+            // bodies. All other births add infantry and any actual crews.
+            if (r.group && r.spawnReason != CASpawnGarrison)
+            {
+                tickView.liveBodies += r.strength;
+            }
+            tickView.liveBodies += (r.crewGroup ? r.crew : 0) + (r.escortCrewGroup ? r.escortCrew : 0);
+        }
+        if (ended)
+        {
+            // the operation ended: its hull drives home (or is refunded)
+            FinishHull(registry, view, _records[i], ops);
             _records.Delete(i);
         }
         else
@@ -1357,6 +3938,9 @@ void CounterAttack::Step(ZoneRegistry& registry, const CounterAttackView& view, 
             i++;
         }
     }
+    StepHomeHulls(registry, view, elapsed, ops);
+    StepAirHomes(registry, view, ops);
+    StepLeftovers(registry, view, elapsed, ops);
 }
 
 // ---------------------------------------------------------------------------
@@ -1378,10 +3962,10 @@ Vector3 Grounded(float x, float z, float y)
 
 // m from a zone centre a road link may be to anchor the route there
 constexpr float RouteSnapRadius = 300.0f;
-// road-graph search budget (links expanded); an island's whole net fits
-constexpr int MaxRouteNodes = 60000;
 // m above the ground the terrain ray aims (a standing man)
 constexpr float InfantryLosHeight = 1.8f;
+// ... and for a ground hull (a car roof, Traffic::LosTargetHeight)
+constexpr float VehicleLosHeight = 2.5f;
 
 float Dist2DSq(Vector3Par a, Vector3Par b)
 {
@@ -1442,11 +4026,23 @@ class EngineOps final : public CounterAttackOps
         _audible = tt.minSpawnDist;
         // infantry shows no headlights: the object cull alone bounds what is drawn
         _band = Traffic::EffectiveBand(tt, ENGINE_CONFIG.objectsZ, false, ENGINE_CONFIG.horizontZ);
+        // a ground hull's AI crew lights up at night (M8): Traffic's
+        // conservative lights bound, past the darkest headlight threshold
+        bool night = false;
+        if (GScene && GScene->MainLight())
+        {
+            night = GScene->MainLight()->NightEffect() > Traffic::HeadlightNightEffect;
+        }
+        _hullBand = Traffic::EffectiveBand(tt, ENGINE_CONFIG.objectsZ, night, ENGINE_CONFIG.horizontZ);
+        _hullGate = false;
         _playerValid = view.playerValid;
         _player = Vector3(view.playerX, 0, view.playerZ);
     }
 
-    // Traffic's spawn gate (issue #53) for a squad on foot: the config
+    void SetHullGate(bool on) override { _hullGate = on; }
+
+    // Traffic's spawn gate (issue #53) for a squad on foot (a ground hull
+    // while SetHullGate is on: the headlight band, a roof-high ray): the config
     // minSpawnDist is the hard audible floor (from the player), then the
     // exposure legs from the camera, tiered: past the cull + margin or
     // terrain-hidden = hidden (survives a turn-around), outside the view cone
@@ -1466,116 +4062,73 @@ class EngineOps final : public CounterAttackOps
             return CAExposeSeen; // audible even unseen
         }
         const float camD2 = Dist2DSq(pos, _cam.hasCamera ? _cam.camPos : _player);
-        if (camD2 >= _band.minSpawn * _band.minSpawn)
+        const TrafficEffectiveBand& band = _hullGate ? _hullBand : _band;
+        if (camD2 >= band.minSpawn * band.minSpawn)
         {
-            return CAExposeHidden; // past the draw distance
+            return CAExposeHidden; // past the draw distance (a hull's headlights at night)
         }
         // inside the draw distance: the terrain ray decides "hidden" whichever
         // way the camera looks (no camera: nothing hides anything)
-        if (_cam.LosBlocked(pos, InfantryLosHeight))
+        if (_cam.LosBlocked(pos, _hullGate ? VehicleLosHeight : InfantryLosHeight))
         {
             return CAExposeHidden;
         }
         return _cam.InFrustum(pos, Traffic::FrustumCosHalfAngle) ? CAExposeSeen : CAExposeConeOnly;
     }
 
-    // A* over the road links (RoadNet::SearchPath gives up after 100 nodes,
-    // too short for a base-to-town road): link centres from the link nearest
-    // the base to the link nearest the town, then the town centre
+    // the road route (RoadRoute.hpp): link centres from a link near the base
+    // to a link near the town, then the town centre.  A base whose nearest
+    // roads are a pocket of their own starts from the first link outside it;
+    // a base whose roads the island never joined to the town's network
+    // leaves along its own road, crosses country to the town network's best
+    // link within RoadRouteServiceJoinRadius on its own landmass, and
+    // follows the road from there, instead of a straight line through its
+    // walls.  A base on another landmass (Malden's Southeast Compound, an
+    // island of its own) has no route and is never a ground source
+    // (PickSource, Resource, OccupierForces::BuildSources).
     void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
     {
         route.Clear();
-        const RoadLink* start = NearestRoadLink(from, RouteSnapRadius);
-        const RoadLink* goal = NearestRoadLink(to, RouteSnapRadius);
-        if (!start || !goal)
+        RoadRouteParams params;
+        params.snapRadius = RouteSnapRadius;
+        params.joinRadius = RoadRouteServiceJoinRadius;
+        AutoArray<Vector3> centres;
+        RoadRouteStats st;
+        if (!RoadRoute::Search(from, to, params, centres, &st))
         {
-            LOG_INFO(Core,
-                     "CounterAttack: no road within {:.0f} m of [{:.0f}, {:.0f}] or [{:.0f}, {:.0f}]; straight line",
-                     RouteSnapRadius, from.X(), from.Z(), to.X(), to.Z());
+            if (st.goalCandidates == 0)
+            {
+                GM_DIRECTOR_INFO(Core, "CounterAttack: no road within {:.0f} m of [{:.0f}, {:.0f}]; straight line",
+                         RouteSnapRadius, to.X(), to.Z());
+            }
+            else
+            {
+                GM_DIRECTOR_INFO(Core,
+                         "CounterAttack: no road route from [{:.0f}, {:.0f}] to [{:.0f}, {:.0f}] ({} links searched); "
+                         "straight line",
+                         from.X(), from.Z(), to.X(), to.Z(), st.linksSearched);
+            }
             return;
         }
-        struct Node
+        for (int i = 0; i < centres.Size(); i++)
         {
-            const RoadLink* link;
-            int parent;
-            float g;
-            bool closed;
-        };
-        std::vector<Node> nodes;
-        std::unordered_map<const RoadLink*, int> index;
-        typedef std::pair<float, int> Entry;
-        std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> open;
-        const Vector3 goalC = goal->GetCenter();
-        nodes.push_back(Node{start, -1, 0.0f, false});
-        index[start] = 0;
-        open.push(Entry(Dist2D(start->GetCenter(), goalC), 0));
-        int found = -1;
-        int expanded = 0;
-        while (!open.empty() && expanded < MaxRouteNodes)
-        {
-            const int cur = open.top().second;
-            open.pop();
-            if (nodes[cur].closed)
-            {
-                continue;
-            }
-            nodes[cur].closed = true;
-            expanded++;
-            const RoadLink* link = nodes[cur].link;
-            if (link == goal)
-            {
-                found = cur;
-                break;
-            }
-            const Vector3 c = link->GetCenter();
-            for (int k = 0; k < link->NConnections(); k++)
-            {
-                const RoadLink* next = link->Connections()[k];
-                if (!next)
-                {
-                    continue;
-                }
-                const Vector3 nc = next->GetCenter();
-                const float g = nodes[cur].g + Dist2D(c, nc);
-                int ni;
-                auto it = index.find(next);
-                if (it == index.end())
-                {
-                    ni = (int)nodes.size();
-                    nodes.push_back(Node{next, cur, g, false});
-                    index[next] = ni;
-                }
-                else
-                {
-                    ni = it->second;
-                    if (nodes[ni].closed || g >= nodes[ni].g)
-                    {
-                        continue;
-                    }
-                    nodes[ni].g = g;
-                    nodes[ni].parent = cur;
-                }
-                open.push(Entry(g + Dist2D(nc, goalC), ni));
-            }
-        }
-        if (found < 0)
-        {
-            LOG_INFO(Core,
-                     "CounterAttack: no road route from [{:.0f}, {:.0f}] to [{:.0f}, {:.0f}] ({} links searched); "
-                     "straight line",
-                     from.X(), from.Z(), to.X(), to.Z(), expanded);
-            return;
-        }
-        AutoArray<Vector3> back;
-        for (int i = found; i >= 0; i = nodes[i].parent)
-        {
-            back.Add(nodes[i].link->GetCenter());
-        }
-        for (int i = back.Size() - 1; i >= 0; i--)
-        {
-            route.Add(Grounded(back[i].X(), back[i].Z(), back[i].Y()));
+            route.Add(Grounded(centres[i].X(), centres[i].Z(), centres[i].Y()));
         }
         route.Add(Grounded(to.X(), to.Z(), to.Y()));
+        if (st.joined)
+        {
+            GM_DIRECTOR_INFO(Core,
+                     "CounterAttack: the roads at [{:.0f}, {:.0f}] are not joined to the town's; the route leaves "
+                     "them at [{:.0f}, {:.0f}] and crosses {:.0f} m of country to the road at [{:.0f}, {:.0f}]",
+                     from.X(), from.Z(), st.joinFrom.X(), st.joinFrom.Z(), st.joinGap, st.joinTo.X(), st.joinTo.Z());
+        }
+        else if (st.startIndex > 0)
+        {
+            GM_DIRECTOR_INFO(Core,
+                     "CounterAttack: the road nearest [{:.0f}, {:.0f}] is not joined to the town's; the route "
+                     "starts {:.0f} m from it",
+                     from.X(), from.Z(), st.startOffset);
+        }
     }
 
     // on the road: SAFE keeps the unit planner on the road net
@@ -1604,6 +4157,18 @@ class EngineOps final : public CounterAttackOps
             }
         }
         grp->SendSemaphore(AI::SemaphoreRed, all);
+    }
+
+    // an armed hull at the town edge: AWARE and firing, driven up to edgePos
+    void Support(AIGroup* crewGroup, Vector3Par edgePos) override
+    {
+        if (!crewGroup)
+        {
+            return;
+        }
+        Posture(crewGroup);
+        DriveOn(crewGroup, edgePos);
+        GetNetworkManager().UpdateObject(crewGroup);
     }
 
     void Assault(AIGroup* grp, Vector3Par town) override
@@ -1654,7 +4219,7 @@ class EngineOps final : public CounterAttackOps
     {
         ZoneRegistry& registry = ZoneRegistry::Instance();
         const RString side = registry.OccupierSide();
-        const float warLevel = ReadWarLevel();
+        const float warLevel = OccupierForces::Instance().OccupierWarLevel();
         const RString tier = registry.FactionTierClass(side, warLevel);
         if (tier.GetLength() == 0)
         {
@@ -1741,6 +4306,25 @@ class EngineOps final : public CounterAttackOps
         return grp;
     }
 
+    int AliveWithin(AIGroup* grp, Vector3Par centre, float radius) override
+    {
+        if (!grp)
+        {
+            return 0;
+        }
+        int n = 0;
+        const float rSq = radius * radius;
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (unit && unit->GetLifeState() == AIUnit::LSAlive && Dist2DSq(unit->Position(), centre) <= rSq)
+            {
+                n++;
+            }
+        }
+        return n;
+    }
+
     int Alive(AIGroup* grp, Vector3& leaderPos) override
     {
         if (!grp)
@@ -1787,14 +4371,7 @@ class EngineOps final : public CounterAttackOps
         }
         for (int b = 0; b < bodies.Size(); b++)
         {
-            if (bodies[b]->IsLocal())
-            {
-                ::DeleteVehicle(bodies[b]);
-            }
-            else
-            {
-                GetNetworkManager().AskForDeleteVehicle(bodies[b]);
-            }
+            DeletePerson(bodies[b]); // a seated man leaves his seat first
         }
         if (grp->NUnits() == 0)
         {
@@ -1803,6 +4380,49 @@ class EngineOps final : public CounterAttackOps
     }
 
     void Adopt(int townZone, AIGroup* grp) override { GarrisonCache::Instance().AdoptGroup(townZone, grp); }
+
+    AIGroup* SplitOff(AIGroup* grp, int n, Vector3Par firstLeg, int& taken) override
+    {
+        taken = 0;
+        if (!grp || n <= 0)
+        {
+            return nullptr;
+        }
+        // living non-leaders, last first, on foot only (a seated man stays
+        // with the group that brought him)
+        OLinkArray<AIUnit> units;
+        for (int u = MAX_UNITS_PER_GROUP - 1; u >= 0 && units.Size() < n; u--)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive || unit == grp->Leader() || unit->GetVehicleIn())
+            {
+                continue;
+            }
+            units.Add(unit);
+        }
+        if (units.Size() == 0)
+        {
+            return nullptr;
+        }
+        AICenter* center = EnsureSideCenter(ZoneRegistry::Instance().OccupierSide());
+        AIGroup* rest = center ? CreateSideGroup(center) : nullptr;
+        if (!rest)
+        {
+            return nullptr;
+        }
+        ::ProcessJoinGroups(units, rest);
+        taken = rest->NUnits();
+        if (taken == 0)
+        {
+            rest->RemoveFromCenter();
+            return nullptr;
+        }
+        MarchPosture(rest);
+        MoveOn(rest, firstLeg);
+        GetNetworkManager().UpdateObject(rest);
+        GetNetworkManager().UpdateObject(grp);
+        return rest;
+    }
 
     // Traffic's despawn rule for every living body: outside the view cone
     // and (past the draw distance or terrain-hidden), never inside the
@@ -1820,24 +4440,7 @@ class EngineOps final : public CounterAttackOps
             {
                 continue;
             }
-            const Vector3 pos = unit->Position();
-            if (!_cam.hasCamera)
-            {
-                if (Dist2DSq(pos, _player) <= _band.despawnEdge * _band.despawnEdge)
-                {
-                    return false;
-                }
-                continue;
-            }
-            const float camD2 = Dist2DSq(pos, _cam.camPos);
-            if (Dist2DSq(pos, _player) < _band.closeHold * _band.closeHold)
-            {
-                return false;
-            }
-            const bool inFrustum = _cam.InFrustum(pos, Traffic::FrustumCosHalfAngle);
-            const bool losBlocked =
-                !inFrustum && camD2 < _band.minSpawn * _band.minSpawn && _cam.LosBlocked(pos, InfantryLosHeight);
-            if (!Traffic::CanExposeDespawn(camD2, losBlocked, inFrustum, _band))
+            if (!PointUnseen(unit->Position()))
             {
                 return false;
             }
@@ -1845,9 +4448,664 @@ class EngineOps final : public CounterAttackOps
         return true;
     }
 
+    // anyone aboard (crew or cargo, the player included)
+    bool HullOccupied(Entity* hull) const override
+    {
+        const Transport* veh = dyn_cast<Transport>(hull);
+        return veh && (veh->Driver() || veh->Gunner() || veh->Commander() || veh->GetManCargoSize() > 0);
+    }
+
+    // every member, living or dead (the leftover cleanup deletes corpses)
+    bool BodiesUnseen(AIGroup* grp) const override
+    {
+        if (!grp || !_playerValid)
+        {
+            return false;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            Person* body = unit ? unit->GetPerson() : nullptr;
+            if (body && !PointUnseen(body->Position()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // the despawn rule for one point (SquadUnseen, HullUnseen); hull: a
+    // ground hull's point (the headlight band at night, a roof-high ray, M8)
+    bool PointUnseen(Vector3Par pos, bool hull = false) const
+    {
+        if (!_playerValid)
+        {
+            return false;
+        }
+        const TrafficEffectiveBand& band = hull ? _hullBand : _band;
+        if (!_cam.hasCamera)
+        {
+            return Dist2DSq(pos, _player) > band.despawnEdge * band.despawnEdge;
+        }
+        const float camD2 = Dist2DSq(pos, _cam.camPos);
+        if (Dist2DSq(pos, _player) < band.closeHold * band.closeHold)
+        {
+            return false;
+        }
+        const bool inFrustum = _cam.InFrustum(pos, Traffic::FrustumCosHalfAngle);
+        const bool losBlocked = !inFrustum && camD2 < band.minSpawn * band.minSpawn &&
+                                _cam.LosBlocked(pos, hull ? VehicleLosHeight : InfantryLosHeight);
+        return Traffic::CanExposeDespawn(camD2, losBlocked, inFrustum, band);
+    }
+
+    // ground hulls (OCCUPIER-FORCES.md 3.2) ----------------------------------
+
+    // mirrors Traffic::CreateTrafficVehicle (VehCreate minus the script
+    // parsing): the hull oriented along dir and dropped on the road surface
+    static Transport* CreateHull(const RString& type, Vector3Par where, Vector3Par dir)
+    {
+        if (!GWorld || !GLandscape || type.GetLength() == 0)
+        {
+            return nullptr;
+        }
+        Ref<Entity> veh = NewNonAIVehicle(type, nullptr);
+        if (!veh)
+        {
+            return nullptr;
+        }
+        Transport* transport = dyn_cast<Transport>(veh.GetRef());
+        if (!transport || veh->GetNonAIType()->IsKindOf(GWorld->Preloaded(VTypeStatic)))
+        {
+            LOG_WARN(Core, "CounterAttack: class '{}' is not a vehicle hull", (const char*)type);
+            return nullptr;
+        }
+        Vector3 pos = where;
+        Vector3 normal = VUp;
+        if (AIUnit::FindFreePosition(pos, normal, false, transport))
+        {
+            float dx, dz;
+            pos[1] = GLOB_LAND->RoadSurfaceYAboveWater(pos[0], pos[2]);
+            GLOB_LAND->SurfaceYAboveWater(pos[0], pos[2], &dx, &dz);
+            normal = Vector3(-dx, 1, -dz);
+        }
+        Vector3 heading = dir;
+        heading[1] = 0;
+        if (heading.SquareSize() < 1e-4f)
+        {
+            heading = VForward;
+        }
+        Matrix3 orient;
+        Matrix4 transform;
+        transform.SetPosition(pos);
+        orient.SetUpAndDirection(normal, heading.Normalized());
+        transform.SetOrientation(orient);
+        veh->PlaceOnSurface(transform);
+        veh->SetTransform(transform);
+        veh->Init(transform);
+        GWorld->AddVehicle(veh);
+        if (GWorld->GetMode() == GModeNetware)
+        {
+            GetNetworkManager().CreateVehicle(veh, VLTVehicle, "", -1);
+        }
+        return transport;
+    }
+
+    // one soldier of type in grp near the hull, seated at position (the
+    // Traffic::CreateCrewman idiom); null when the class refused to
+    // materialize.  seated reports whether the seat took him.
+    static Person* CreateSeated(AIGroup* grp, const RString& type, Vector3Par near, Transport* veh, int position,
+                                bool& seated, float skill, Rank rank)
+    {
+        seated = false;
+        if (!grp || type.GetLength() == 0)
+        {
+            return nullptr;
+        }
+        AIUnit* before[MAX_UNITS_PER_GROUP];
+        for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
+        {
+            before[i] = grp->UnitWithID(i + 1);
+        }
+        ::CreateUnit(grp, type, near, RString(), skill, rank);
+        AIUnit* unit = nullptr;
+        for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
+        {
+            AIUnit* u = grp->UnitWithID(i + 1);
+            if (u && u != before[i])
+            {
+                unit = u;
+                break;
+            }
+        }
+        Person* person = unit ? unit->GetPerson() : nullptr;
+        if (person && veh)
+        {
+            seated = ::NativeMoveIn(person, veh, (GetInPosition)position);
+        }
+        return person;
+    }
+
+    // a seated man is moved out of his vehicle (no sound, where the vehicle
+    // stands: the caller deletes him and the vehicle unseen) before he is
+    // deleted.  ::DeleteVehicle only flags a seated man: he stays in the
+    // world's out-vehicle list, which never purges deleted entries, so every
+    // crewman and rider deleted in his seat lived on as an invisible object
+    // (and was written into every save).
+    static void LeaveVehicle(Person* person)
+    {
+        AIUnit* unit = person ? person->Brain() : nullptr;
+        Transport* veh = unit ? unit->GetVehicleIn() : nullptr;
+        if (!veh || !person->IsLocal())
+        {
+            return;
+        }
+        const Matrix4 at = veh->WorldTransform();
+        if (veh->Driver() == person)
+        {
+            veh->GetOutDriver(at, false);
+        }
+        else if (veh->Gunner() == person)
+        {
+            veh->GetOutGunner(at, false);
+        }
+        else if (veh->Commander() == person)
+        {
+            veh->GetOutCommander(at, false);
+        }
+        else
+        {
+            veh->GetOutCargo(person, at, false);
+        }
+    }
+
+    static void DeletePerson(Person* person)
+    {
+        if (!person)
+        {
+            return;
+        }
+        LeaveVehicle(person);
+        if (person->IsLocal())
+        {
+            ::DeleteVehicle(person);
+        }
+        else
+        {
+            GetNetworkManager().AskForDeleteVehicle(person);
+        }
+    }
+
+    AIGroup* SpawnMounted(const RString& hullClass, int crew, int n, Vector3Par from, Vector3Par dir, Entity*& hullOut,
+                          AIGroup*& crewOut) override
+    {
+        hullOut = nullptr;
+        crewOut = nullptr;
+        ZoneRegistry& registry = ZoneRegistry::Instance();
+        const RString side = registry.OccupierSide();
+        const float warLevel = OccupierForces::Instance().OccupierWarLevel();
+        const RString crewType = registry.FactionTierClass(side, warLevel);
+        AICenter* center = crewType.GetLength() > 0 ? EnsureSideCenter(side) : nullptr;
+        if (!center)
+        {
+            return nullptr;
+        }
+        Transport* veh = CreateHull(hullClass, from, dir);
+        if (!veh)
+        {
+            return nullptr;
+        }
+        AIGroup* crewGrp = CreateSideGroup(center);
+        if (!crewGrp)
+        {
+            ::DeleteVehicle(veh);
+            return nullptr;
+        }
+        Vector3 heading = dir;
+        heading[1] = 0;
+        heading = heading.SquareSize() > 1e-4f ? heading.Normalized() : VForward;
+        const Vector3 foot = veh->Position() + heading * 4.0f;
+        // the crew: a driver (no driver = no hull), then a gunner where the
+        // hull has a turret; crew beyond the seats stay home
+        bool seated = false;
+        Person* driver = CreateSeated(crewGrp, crewType, foot, veh, GIPDriver, seated, 0.5f, RankCorporal);
+        if (!driver || !seated || veh->Driver() != driver)
+        {
+            LOG_WARN(Core, "CounterAttack: could not seat a '{}' driver into '{}'", (const char*)crewType,
+                     (const char*)hullClass);
+            RemoveHull(veh, crewGrp);
+            return nullptr;
+        }
+        // then a commander where the hull has a cupola (a tank, a BMP):
+        // the crew count is hasDriver + hasGunner + hasCommander (6.5)
+        int left = crew - 1;
+        if (left > 0 && veh->Type()->HasGunner())
+        {
+            Person* gunner = CreateSeated(crewGrp, crewType, foot, veh, GIPGunner, seated, 0.5f, RankPrivate);
+            if (gunner && !seated)
+            {
+                DeletePerson(gunner);
+            }
+            left -= gunner && seated ? 1 : 0;
+        }
+        if (left > 0 && veh->Type()->HasCommander())
+        {
+            Person* commander = CreateSeated(crewGrp, crewType, foot, veh, GIPCommander, seated, 0.5f, RankPrivate);
+            if (commander && !seated)
+            {
+                DeletePerson(commander);
+            }
+        }
+        // the infantry: a group of its own, boarded as cargo (TR UNLOAD and
+        // the dismount address a foreign group's cargo)
+        AIGroup* inf = CreateSideGroup(center);
+        if (!inf)
+        {
+            RemoveHull(veh, crewGrp);
+            return nullptr;
+        }
+        AutoArray<RString> classes;
+        registry.FactionSquad(side, warLevel, n, classes);
+        for (int u = 0; u < n; u++)
+        {
+            const RString cls = u < classes.Size() ? classes[u] : crewType;
+            Person* man = CreateSeated(inf, cls, foot, veh, GIPCargo, seated, u == 0 ? 0.6f : 0.5f,
+                                       u == 0 ? RankSergeant : RankPrivate);
+            if (man && !seated)
+            {
+                DeletePerson(man); // no seat: he stays home (a partial spawn, refunded by the caller)
+            }
+            else if (man && man->Brain())
+            {
+                // seated as cargo the way the mission loader seats it
+                // (AICenterImpl): the unit's state is InCargo, which the
+                // dismount's DoGetOut requires (moveInCargo leaves it unset)
+                man->Brain()->SetState(AIUnit::InCargo);
+            }
+        }
+        if (inf->NUnits() == 0)
+        {
+            inf->RemoveFromCenter();
+            RemoveHull(veh, crewGrp);
+            return nullptr;
+        }
+        crewGrp->SetCombatModeMajor(CMSafe);
+        SemaphoreAll(crewGrp);
+        MarchPosture(inf);
+        GetNetworkManager().UpdateObject(crewGrp);
+        GetNetworkManager().UpdateObject(inf);
+        hullOut = veh;
+        crewOut = crewGrp;
+        return inf;
+    }
+
+    // a column's escort (6.5, phase 5): the hull and its crew, no cargo; the
+    // crew seated as SpawnMounted seats it (a driver, then a gunner and a
+    // commander where the hull has them)
+    Entity* SpawnEscort(const RString& hullClass, int crew, Vector3Par from, Vector3Par dir,
+                        AIGroup*& crewOut) override
+    {
+        crewOut = nullptr;
+        ZoneRegistry& registry = ZoneRegistry::Instance();
+        const RString side = registry.OccupierSide();
+        const float warLevel = OccupierForces::Instance().OccupierWarLevel();
+        const RString crewType = registry.FactionTierClass(side, warLevel);
+        AICenter* center = crewType.GetLength() > 0 ? EnsureSideCenter(side) : nullptr;
+        if (!center)
+        {
+            return nullptr;
+        }
+        Transport* veh = CreateHull(hullClass, from, dir);
+        if (!veh)
+        {
+            return nullptr;
+        }
+        AIGroup* crewGrp = CreateSideGroup(center);
+        if (!crewGrp)
+        {
+            ::DeleteVehicle(veh);
+            return nullptr;
+        }
+        Vector3 heading = dir;
+        heading[1] = 0;
+        heading = heading.SquareSize() > 1e-4f ? heading.Normalized() : VForward;
+        const Vector3 foot = veh->Position() + heading * 4.0f;
+        bool seated = false;
+        Person* driver = CreateSeated(crewGrp, crewType, foot, veh, GIPDriver, seated, 0.5f, RankCorporal);
+        if (!driver || !seated || veh->Driver() != driver)
+        {
+            LOG_WARN(Core, "CounterAttack: could not seat a '{}' driver into the escort '{}'", (const char*)crewType,
+                     (const char*)hullClass);
+            RemoveHull(veh, crewGrp);
+            return nullptr;
+        }
+        int left = crew - 1;
+        if (left > 0 && veh->Type()->HasGunner())
+        {
+            Person* gunner = CreateSeated(crewGrp, crewType, foot, veh, GIPGunner, seated, 0.5f, RankPrivate);
+            if (gunner && !seated)
+            {
+                DeletePerson(gunner);
+            }
+            left -= gunner && seated ? 1 : 0;
+        }
+        if (left > 0 && veh->Type()->HasCommander())
+        {
+            Person* commander = CreateSeated(crewGrp, crewType, foot, veh, GIPCommander, seated, 0.5f, RankPrivate);
+            if (commander && !seated)
+            {
+                DeletePerson(commander);
+            }
+        }
+        crewGrp->SetCombatModeMajor(CMSafe);
+        SemaphoreAll(crewGrp);
+        GetNetworkManager().UpdateObject(crewGrp);
+        crewOut = crewGrp;
+        return veh;
+    }
+
+    // the Traffic::IssueRoute idiom: one Command::Move to the DRIVER through
+    // IssueCommand (arcade waypoints never moved a seated crew in the
+    // Traffic probes); SAFE keeps the planner on the road net
+    void DriveOn(AIGroup* crewGroup, Vector3Par target) override
+    {
+        if (!crewGroup)
+        {
+            return;
+        }
+        Command cmd;
+        cmd._message = Command::Move;
+        cmd._destination = Grounded(target.X(), target.Z(), target.Y());
+        cmd._discretion = Command::Undefined;
+        cmd._context = Command::CtxMission;
+        cmd._id = crewGroup->GetNextCmdId();
+        PackedBoolArray drivers;
+        bool any = false;
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = crewGroup->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
+            {
+                continue;
+            }
+            Transport* in = unit->GetVehicleIn();
+            if (in && in->DriverBrain() == unit)
+            {
+                drivers.Set(u, true);
+                any = true;
+            }
+        }
+        if (any)
+        {
+            crewGroup->IssueCommand(cmd, drivers);
+        }
+    }
+
+    // the cargo gets out (the Traffic park dismount without UnassignVehicle,
+    // which would clear every seat of the hull, the crew's included)
+    void Dismount(AIGroup* grp, Entity* hull) override
+    {
+        if (!grp)
+        {
+            return;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
+            {
+                continue;
+            }
+            Transport* seat = unit->GetVehicleIn();
+            unit->OrderGetIn(false);
+            unit->AllowGetIn(false); // the squad fights on foot from here
+            if (seat && (!hull || seat == hull))
+            {
+                unit->DoGetOut(seat, false);
+            }
+        }
+        GetNetworkManager().UpdateObject(grp);
+    }
+
+    int HullState(Entity* hull, AIGroup* crewGroup, int& crewAlive) const override
+    {
+        crewAlive = 0;
+        if (!hull)
+        {
+            return HullGone;
+        }
+        if (crewGroup)
+        {
+            for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+            {
+                AIUnit* unit = crewGroup->UnitWithID(u + 1);
+                if (unit && unit->GetLifeState() == AIUnit::LSAlive && unit->GetVehicleIn() == hull)
+                {
+                    crewAlive++;
+                }
+            }
+        }
+        return hull->IsDammageDestroyed() ? HullDestroyed : HullIntact;
+    }
+
+    float HullSpeed(Entity* hull) const override { return hull ? hull->Speed().Size() : 0.0f; }
+
+    // the hull (vehicle band, M8) and every crewman outside it, living or
+    // dead (M4: a gunner who bailed out next to the player is deleted with
+    // the crew, so the crew waits until he too is unseen)
+    bool HullUnseen(Entity* hull, AIGroup* crewGroup) const override
+    {
+        if (!hull || !PointUnseen(hull->Position(), true))
+        {
+            return false;
+        }
+        for (int u = 0; crewGroup && u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = crewGroup->UnitWithID(u + 1);
+            Person* body = unit ? unit->GetPerson() : nullptr;
+            if (!body || (unit->GetLifeState() == AIUnit::LSAlive && unit->GetVehicleIn() == hull))
+            {
+                continue; // seated: the hull's point covers him
+            }
+            if (!PointUnseen(body->Position()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void RemoveHull(Entity* hull, AIGroup* crewGroup) override
+    {
+        // the crew FIRST: deleting a transport ejects its crew (3.2)
+        if (crewGroup)
+        {
+            AutoArray<Person*> bodies;
+            for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+            {
+                AIUnit* unit = crewGroup->UnitWithID(u + 1);
+                if (unit && unit->GetPerson())
+                {
+                    bodies.Add(unit->GetPerson());
+                }
+            }
+            for (int b = 0; b < bodies.Size(); b++)
+            {
+                DeletePerson(bodies[b]);
+            }
+            if (crewGroup->NUnits() == 0)
+            {
+                crewGroup->RemoveFromCenter();
+            }
+        }
+        if (hull)
+        {
+            if (hull->IsLocal())
+            {
+                ::DeleteVehicle(hull);
+            }
+            else
+            {
+                GetNetworkManager().AskForDeleteVehicle(hull);
+            }
+        }
+    }
+
+    // phase 6A air: OccupierAir's engine half ------------------------------
+    int AirExposure(Vector3Par posAsl) const override
+    {
+        return OccupierAir::ExposureAt(OccupierAir::EngineViewer(), posAsl);
+    }
+
+    float GroundY(float x, float z) const override
+    {
+        return GLandscape ? GLOB_LAND->SurfaceYAboveWater(x, z) : 0.0f;
+    }
+
+    bool AirPickLz(Vector3Par target, const Vector3* awayFrom, Vector3& lz) override
+    {
+        RString why;
+        return OccupierAir::Instance().PickLz(target, awayFrom, 0.0f, 0.0f, lz, why);
+    }
+
+    int AirInsert(const RString& hullClass, int n, Vector3Par birth, float altAgl, Vector3Par lz, Vector3Par target,
+                  AIGroup*& cargo, Entity*& hull, AIGroup*& crewGroup) override
+    {
+        cargo = nullptr;
+        hull = nullptr;
+        crewGroup = nullptr;
+        AirInsertionPlan plan;
+        plan.heliClass = hullClass;
+        plan.cargo = n;
+        plan.birthPos = birth;
+        plan.birthAlt = altAgl;
+        plan.lz = lz;
+        plan.target = target;
+        plan.side = ZoneRegistry::Instance().OccupierSide();
+        int id = -1;
+        RString why;
+        if (!OccupierAir::Instance().SpawnInsertion(plan, id, why) || id <= 0)
+        {
+            return 0;
+        }
+        const AirInsertion* rec = OccupierAir::Instance().FindInsertion(id);
+        if (!rec || !rec->cargo)
+        {
+            OccupierAir::Instance().Abort(id, false); // no cargo: nothing to insert
+            return 0;
+        }
+        cargo = rec->cargo;
+        hull = rec->hull;
+        crewGroup = rec->crew;
+        return id;
+    }
+
+    int AirSortie(const RString& hullClass, Vector3Par birth, float altAgl, Vector3Par target, float sortieTime,
+                  Entity*& hull, AIGroup*& crewGroup) override
+    {
+        hull = nullptr;
+        crewGroup = nullptr;
+        int id = -1;
+        RString why;
+        if (!OccupierAir::Instance().SpawnSortie(hullClass, birth, altAgl, target, sortieTime,
+                                                 ZoneRegistry::Instance().OccupierSide(), id, why) ||
+            id <= 0)
+        {
+            return 0;
+        }
+        const struct AirSortie* rec = OccupierAir::Instance().FindSortie(id);
+        if (rec)
+        {
+            hull = rec->hull;
+            crewGroup = rec->crew;
+        }
+        return id;
+    }
+
+    bool AirStatus(int airId, CounterAttackAirStatus& out) const override
+    {
+        out = CounterAttackAirStatus();
+        const OccupierAir& air = OccupierAir::Instance();
+        if (const AirInsertion* r = air.FindInsertion(airId))
+        {
+            out.state = r->core.state;
+            out.landed = r->core.landed;
+            out.landedOffset = r->core.landedOffset;
+            out.landedAt = r->core.landedAt;
+            out.failReason = r->core.failReason;
+            out.crewRemoved = r->core.crewRemoved;
+            out.gone = r->core.hullRemoved;
+            out.hullLost = r->core.failReason == AFRHullLost;
+            out.cargoBorn = r->cargoBorn;
+            if (Entity* hull = r->hull.GetLink())
+            {
+                out.hasPos = true;
+                out.pos = hull->Position();
+            }
+            Transport* veh = dyn_cast<Transport>(r->hull.GetLink());
+            for (int u = 0; r->cargo && u < MAX_UNITS_PER_GROUP; u++)
+            {
+                AIUnit* unit = r->cargo->UnitWithID(u + 1);
+                if (unit && unit->GetLifeState() == AIUnit::LSAlive && veh && unit->GetVehicleIn() == veh)
+                {
+                    out.cargoSeated++;
+                }
+            }
+            return true;
+        }
+        if (const struct AirSortie* r = air.FindSortie(airId))
+        {
+            out.sortie = true;
+            out.state = r->core.state;
+            out.failReason = r->core.failReason;
+            out.loiter = r->core.state == ASSLoiter || (r->core.state >= ASSHome && r->core.failReason == AFRNone);
+            out.crewRemoved = r->core.crewRemoved;
+            out.gone = r->core.hullRemoved;
+            out.hullLost = r->core.failReason == AFRHullLost;
+            if (Entity* hull = r->hull.GetLink())
+            {
+                out.hasPos = true;
+                out.pos = hull->Position();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // the limited reveal: resistance soldiers (never the player) within
+    // RevealRadius of a fresh reported position, at an accuracy below 1
+    int AirRevealNear(int airId, Vector3Par pos, float ageSeconds) override
+    {
+        const ZoneRegistry& registry = ZoneRegistry::Instance();
+        AICenter* center = FindSideCenter(registry.ResistanceSide());
+        Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr;
+        int n = 0;
+        for (int g = 0; center && g < center->NGroups() && n < RevealMax; g++)
+        {
+            AIGroup* grp = center->GetGroup(g);
+            for (int u = 0; grp && u < MAX_UNITS_PER_GROUP && n < RevealMax; u++)
+            {
+                AIUnit* unit = grp->UnitWithID(u + 1);
+                Person* man = unit ? unit->GetPerson() : nullptr;
+                if (!man || man == player || unit->GetLifeState() != AIUnit::LSAlive ||
+                    Dist2DSq(unit->Position(), pos) > RevealRadius * RevealRadius)
+                {
+                    continue;
+                }
+                n += OccupierAir::Instance().Reveal(airId, man, ageSeconds, RevealAccuracy) ? 1 : 0;
+            }
+        }
+        return n;
+    }
+
+    static constexpr float RevealRadius = 100.0f;
+    static constexpr float RevealAccuracy = 0.5f;
+    static constexpr int RevealMax = 4;
+
   private:
     PerceptionCamera _cam;
     TrafficEffectiveBand _band;
+    TrafficEffectiveBand _hullBand; // the night light band when AI headlights may be on (M8)
+    bool _hullGate = false;         // Exposure rates points for a ground hull (SetHullGate)
     float _audible = 300.0f;
     bool _playerValid = false;
     Vector3 _player = VZero;
@@ -1862,65 +5120,173 @@ EngineOps& Ops()
 }
 #pragma clang diagnostic pop
 
+// the resistance HOLD presence within radius of pos (the HQ's defenders,
+// CounterAttackView::hqDefenders): every living resistance unit but the
+// real player, plus the player while PlayerHoldsPresence holds (8.1)
+int HoldPresenceAt(const ZoneRegistry& registry, Vector3Par pos, float radius)
+{
+    World* world = GWorld;
+    if (!world)
+    {
+        return 0;
+    }
+    Person* player = world->GetRealPlayer();
+    const bool playerAlive = player && !player->IsDammageDestroyed();
+    const float rSq = radius * radius;
+    int n = 0;
+    AICenter* center = FindSideCenter(registry.ResistanceSide());
+    for (int g = 0; center && g < center->NGroups(); g++)
+    {
+        AIGroup* grp = center->GetGroup(g);
+        if (!grp)
+        {
+            continue;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive || (playerAlive && unit->GetPerson() == player))
+            {
+                continue;
+            }
+            n += Dist2DSq(unit->Position(), pos) <= rSq ? 1 : 0;
+        }
+    }
+    if (playerAlive && Dist2DSq(player->Position(), pos) <= rSq)
+    {
+        PlayerPresenceInput presence;
+        registry.SamplePlayerPresence(player, presence);
+        n += PlayerHoldsPresence(presence) ? 1 : 0;
+    }
+    return n;
+}
+
 } // namespace
+
+int CounterAttack::HqAssaultPresence(Vector3Par hqPos, float radius) const
+{
+    return HqAssaultPresence(hqPos, radius, &Ops());
+}
+
+int CounterAttack::MountedOf(const Record& r)
+{
+    AIGroup* grp = r.group;
+    Entity* hull = r.hull;
+    int n = 0;
+    for (int u = 0; grp && hull && u < MAX_UNITS_PER_GROUP; u++)
+    {
+        AIUnit* unit = grp->UnitWithID(u + 1);
+        n += unit && unit->GetLifeState() == AIUnit::LSAlive && unit->GetVehicleIn() == hull ? 1 : 0;
+    }
+    return n;
+}
+
+int CounterAttack::AliveOf(const Record& r)
+{
+    Vector3 leader = VZero;
+    return r.phase == CALive ? Ops().Alive(r.group, leader) : 0;
+}
+
+Entity* CounterAttack::LeaderOf(const Record& r)
+{
+    AIGroup* grp = r.group;
+    AIUnit* leader = grp ? grp->Leader() : nullptr;
+    return leader ? leader->GetPerson() : nullptr;
+}
+
+const CounterAttackGate& CounterAttack::EngineGate(bool playerValid, float px, float pz)
+{
+    CounterAttackView view;
+    view.playerValid = playerValid;
+    view.playerX = px;
+    view.playerZ = pz;
+    Ops().Refresh(view);
+    return Ops();
+}
 
 void CounterAttack::OnZoneEvents(const AutoArray<ZoneEventRecord>& fired)
 {
     ZoneRegistry& registry = ZoneRegistry::Instance();
+    const auto countedTownFlip = [&](const ZoneEventRecord& ev)
+    {
+        const ZoneRecord* z = registry.GetZone(ev.zoneIndex);
+        return ev.type == ZECaptured && z && !z->garrisonExempt && stricmp(z->type, "CITY") == 0 &&
+               stricmp(z->owner, registry.ResistanceSide()) == 0;
+    };
+    int laterTownFlips = 0;
+    for (int i = 0; i < fired.Size(); i++)
+    {
+        laterTownFlips += countedTownFlip(fired[i]) ? 1 : 0;
+    }
     for (int i = 0; i < fired.Size(); i++)
     {
         const ZoneEventRecord& ev = fired[i];
         if (ev.type == ZECaptured)
         {
-            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize, ReadWarLevel());
+            laterTownFlips -= countedTownFlip(ev) ? 1 : 0;
+            // the force size reads the occupier-side war level (7.1)
+            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize,
+                          OccupierForces::Instance().OccupierWarLevel(), GuerrillaBase::Instance().HqZone(),
+                          laterTownFlips);
         }
-        else if (ev.type == ZETownLost)
+        else if (ev.type == ZEHqLost)
         {
-            // a live squad standing in the town it just retook becomes its
-            // garrison before GarrisonCache materializes the refill
+            // the HQ fell to an assault (GuerrillaBase::Destroy): every
+            // HQ_ASSAULT record succeeded
+            CounterAttackView view;
+            BuildView(view);
+            SettleHqAssaults(registry, view, &Ops());
+        }
+        else if (ev.type == ZETownLost || ev.type == ZEBaseLost)
+        {
+            // a live squad standing in the town (or base) it just retook
+            // becomes its garrison before GarrisonCache materializes the
+            // refill
             const ZoneRecord* z = registry.GetZone(ev.zoneIndex);
             const int r = z ? FindByTarget(z->name) : -1;
-            if (r < 0)
+            if (r < 0 || _records[r].kind == CAKReinforce || _records[r].kind == CAKAlarm ||
+                _records[r].kind == CAKStrike)
             {
                 continue;
             }
             if (_records[r].phase == CALive)
             {
+                Record& rec = _records[r];
                 Vector3 leader = VZero;
-                const int alive = Ops().Alive(_records[r].group, leader);
+                const int alive = Ops().Alive(rec.group, leader);
                 if (alive > 0)
                 {
-                    AdoptLive(registry, ev.zoneIndex, _records[r], &Ops(), alive);
+                    AdoptLive(registry, ev.zoneIndex, rec, &Ops(), alive);
                 }
+                else
+                {
+                    OccupierForces::Instance().NoteLoss(rec.strength, "dead before the revert");
+                    AddLeftover(rec.source, nullptr, rec.group, 0); // L7: its dead group leaves unseen
+                    Emit(registry, rec, CAOpAborted, 0, rec.strength, "the town reverted; the squad is gone");
+                }
+                CounterAttackView view;
+                BuildView(view);
+                FinishHull(registry, view, rec, &Ops());
                 _records.Delete(r);
             }
         }
     }
+    // the director hears the tick's events after this service handled them
+    if (GListener && !GDispatching)
+    {
+        GDispatching = true;
+        GListener->OnZoneEvents(fired);
+        GDispatching = false;
+        DrainEvents();
+    }
 }
 
-void CounterAttack::Simulate(float deltaT)
+void CounterAttack::BuildView(CounterAttackView& view) const
 {
+    view = CounterAttackView();
     ZoneRegistry& registry = ZoneRegistry::Instance();
-    if (!registry.IsActive() || _records.Size() == 0)
-    {
-        _accum = 0;
-        return;
-    }
-    _accum += deltaT;
-    if (_accum < TickInterval)
-    {
-        return;
-    }
-    const float elapsed = _accum;
-    _accum = 0;
     World* world = GWorld;
-    if (!world)
-    {
-        return;
-    }
-
-    CounterAttackView view;
-    Person* player = world->GetRealPlayer();
+    Person* player = world ? world->GetRealPlayer() : nullptr;
     if (player && !player->IsDammageDestroyed())
     {
         view.playerValid = true;
@@ -1933,13 +5299,107 @@ void CounterAttack::Simulate(float deltaT)
     {
         view.garrisonLive[i] = cache.LiveCount(i);
     }
-    SimDiag diag;
-    GatherSimDiag(diag);
-    view.liveBodies = diag.liveTotal;
-    view.occGroups = diag.grpOcc;
-
-    AutoArray<ZoneEventRecord> fired;
+    if (world)
+    {
+        SimDiag diag;
+        GatherSimDiag(diag);
+        view.liveBodies = diag.liveTotal;
+        view.occGroups = diag.grpOcc;
+    }
+    view.hqZone = GuerrillaBase::Instance().HqZone();
+    view.won = CampaignEnd::Instance().Won();
+    view.lost = CampaignEnd::Instance().Lost();
+    const GuerrillaBase& base = GuerrillaBase::Instance();
+    view.hqEstablished = base.IsEstablished();
+    view.hqPos = view.hqEstablished ? base.HqPos() : VZero;
+    view.hqDefenders = view.hqEstablished ? HoldPresenceAt(registry, view.hqPos, registry.Tuning().zoneArea) : 0;
+    // phase 6A: alert states (alarm answers, 8.2) and the map size (the off-map edge)
+    view.alertState.Resize(registry.NZones());
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        view.alertState[i] = AlertMachine::Instance().GetZoneState(i);
+    }
+    view.mapSize = GLandscape ? (float)GLandscape->GetLandRange() * GLandscape->GetLandGrid() : 0.0f;
     Ops().Refresh(view);
+}
+
+void CounterAttack::GatherFarCensus(CounterAttackFarCensus& out) const
+{
+    out = CounterAttackFarCensus();
+    World* world = GWorld;
+    Person* player = world ? world->GetRealPlayer() : nullptr;
+    if (!player || player->IsDammageDestroyed())
+    {
+        return;
+    }
+    CounterAttackView view;
+    view.playerValid = true;
+    view.playerX = player->Position().X();
+    view.playerZ = player->Position().Z();
+    FarCensus(ZoneRegistry::Instance(), view, &Ops(), out);
+}
+
+int CounterAttack::SettleHqAssaults(ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops)
+{
+    int settled = 0;
+    for (int i = 0; i < _records.Size();)
+    {
+        Record& r = _records[i];
+        if (r.kind != CAKHqAssault)
+        {
+            i++;
+            continue;
+        }
+        if (r.phase == CALive)
+        {
+            // a live squad leaves the world once nobody sees it (Advance)
+            if (!r.hqDone)
+            {
+                r.hqDone = true;
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it",
+                         r.opId);
+            }
+            i++;
+            continue;
+        }
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
+                 r.opId, r.strength);
+        OccupierForces::Instance().Refund(r.strength, "HQ assault done");
+        Emit(registry, r, CAOpSettled, r.strength, r.strength, "the HQ fell");
+        FinishHull(registry, view, r, ops);
+        _records.Delete(i);
+        settled++;
+    }
+    return settled;
+}
+
+CounterAttackOps* CounterAttack::EngineOps()
+{
+    return &Ops();
+}
+
+void CounterAttack::Simulate(float deltaT)
+{
+    ZoneRegistry& registry = ZoneRegistry::Instance();
+    if (!registry.IsActive() || (_records.Size() == 0 && _homeHulls.Size() == 0 && _leftovers.Size() == 0))
+    {
+        _accum = 0;
+        return;
+    }
+    _accum += deltaT;
+    if (_accum < TickInterval)
+    {
+        return;
+    }
+    const float elapsed = _accum;
+    _accum = 0;
+    if (!GWorld)
+    {
+        return;
+    }
+    CounterAttackView view;
+    BuildView(view);
+    AutoArray<ZoneEventRecord> fired;
     Step(registry, view, elapsed, &Ops(), fired);
     registry.FireEvents(fired);
 }
@@ -1968,6 +5428,126 @@ LSError CounterAttack::Record::Serialize(ParamArchive& ar)
     // a live squad's group resolves on the second load pass, after the
     // world's vehicle serializer recreated its bodies (GarrisonCache idiom)
     PARAM_CHECK(ar.SerializeRef("group", group, 1))
+    // occupier forces (absent in older saves: a legacy foot retake, opId 0)
+    PARAM_CHECK(ar.Serialize("opId", opId, 1, 0))
+    PARAM_CHECK(ar.Serialize("kind", kind, 1, (int)CAKRetake))
+    PARAM_CHECK(ar.Serialize("origin", origin, 1, (int)CAOLegacy))
+    PARAM_CHECK(ar.Serialize("package", package, 1, (int)FPFoot))
+    PARAM_CHECK(ar.Serialize("priceUnits", priceUnits, 1, 0))
+    PARAM_CHECK(ar.Serialize("hullClass", hullClass, 1, RString()))
+    PARAM_CHECK(ar.Serialize("crew", crew, 1, 0))
+    PARAM_CHECK(ar.Serialize("urgent", urgent, 1, false))
+    PARAM_CHECK(ar.Serialize("funded", funded, 1, false))
+    PARAM_CHECK(ar.Serialize("abstractSpeed", abstractSpeed, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("lethality", lethality, 1, 1.0f))
+    PARAM_CHECK(ar.Serialize("arrivalLive", arrivalLive, 1, false))
+    PARAM_CHECK(ar.Serialize("hullDone", hullDone, 1, false))
+    PARAM_CHECK(ar.Serialize("tried", tried, 1, RString()))
+    PARAM_CHECK(ar.Serialize("dismounted", dismounted, 1, false))
+    // the hull and its crew ride the world's vehicle serializer; the refs
+    // resolve on the second pass like the group
+    PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
+    PARAM_CHECK(ar.SerializeRef("crewGroup", crewGroup, 1))
+    // phase 4 (absent in older saves: the target zone's centre, not done)
+    float destX = destPos.X();
+    float destY = destPos.Y();
+    float destZ = destPos.Z();
+    PARAM_CHECK(ar.Serialize("destX", destX, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("destY", destY, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("destZ", destZ, 1, 0.0f))
+    destPos = Vector3(destX, destY, destZ);
+    PARAM_CHECK(ar.Serialize("hqDone", hqDone, 1, false))
+    // phase 5 (absent in older saves: no escort); the escort hull and its
+    // crew ride the vehicle serializer, the refs resolve on the second pass
+    PARAM_CHECK(ar.Serialize("escortClass", escortClass, 1, RString()))
+    PARAM_CHECK(ar.Serialize("escortCrew", escortCrew, 1, 0))
+    PARAM_CHECK(ar.Serialize("escortPriceUnits", escortPriceUnits, 1, 0))
+    PARAM_CHECK(ar.Serialize("escortDone", escortDone, 1, false))
+    PARAM_CHECK(ar.SerializeRef("escort", escort, 1))
+    PARAM_CHECK(ar.SerializeRef("escortCrewGroup", escortCrewGroup, 1))
+    PARAM_CHECK(ar.Serialize("withdrawing", withdrawing, 1, false))
+    // phase 6A (absent in older saves: no air, no strike, no alarm)
+    PARAM_CHECK(ar.Serialize("airOrigin", airOrigin, 1, -1))
+    PARAM_CHECK(ar.Serialize("strikeZone", strikeZone, 1, -1))
+    float sx = strikePos.X();
+    float sy = strikePos.Y();
+    float sz = strikePos.Z();
+    PARAM_CHECK(ar.Serialize("strikeX", sx, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("strikeY", sy, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("strikeZ", sz, 1, 0.0f))
+    strikePos = Vector3(sx, sy, sz);
+    PARAM_CHECK(ar.Serialize("alarmZone", alarmZone, 1, -1))
+    float ax = alarmPos.X();
+    float ay = alarmPos.Y();
+    float az = alarmPos.Z();
+    PARAM_CHECK(ar.Serialize("alarmX", ax, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("alarmY", ay, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("alarmZ", az, 1, 0.0f))
+    alarmPos = Vector3(ax, ay, az);
+    PARAM_CHECK(ar.Serialize("struck", struck, 1, false))
+    PARAM_CHECK(ar.Serialize("airId", airId, 1, 0))
+    float fx = airFrom.X();
+    float fz = airFrom.Z();
+    PARAM_CHECK(ar.Serialize("airFromX", fx, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("airFromZ", fz, 1, 0.0f))
+    airFrom = Vector3(fx, 0, fz);
+    float lx = airLz.X();
+    float ly = airLz.Y();
+    float lz = airLz.Z();
+    PARAM_CHECK(ar.Serialize("airLzX", lx, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("airLzY", ly, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("airLzZ", lz, 1, 0.0f))
+    airLz = Vector3(lx, ly, lz);
+    PARAM_CHECK(ar.Serialize("airReplans", airReplans, 1, 0))
+    PARAM_CHECK(ar.Serialize("airLanded", airLanded, 1, false))
+    PARAM_CHECK(ar.Serialize("airReplanned", airReplanned, 1, false))
+    PARAM_CHECK(ar.Serialize("alarmQuiet", alarmQuiet, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("answered", answered, 1, false))
+    // the break-off (absent in older saves: 0, set at the next live step)
+    PARAM_CHECK(ar.Serialize("bornStrength", bornStrength, 1, 0))
+    PARAM_CHECK(ar.Serialize("withdrawClock", withdrawClock, 1, 0.0f))
+    return LSOK;
+}
+
+LSError CounterAttack::HomeHull::Serialize(ParamArchive& ar)
+{
+    PARAM_CHECK(ar.Serialize("opId", opId, 1, 0))
+    PARAM_CHECK(ar.Serialize("kind", kind, 1, (int)CAKRetake))
+    PARAM_CHECK(ar.Serialize("origin", origin, 1, (int)CAOLegacy))
+    PARAM_CHECK(ar.Serialize("target", target, 1, RString()))
+    PARAM_CHECK(ar.Serialize("source", source, 1, RString()))
+    PARAM_CHECK(ar.Serialize("units", units, 1, 0))
+    PARAM_CHECK(ar.Serialize("crew", crew, 1, 0))
+    PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
+    PARAM_CHECK(ar.SerializeRef("crewGroup", crewGroup, 1))
+    // a withdrawal (absent in older saves: no wait, no cargo)
+    PARAM_CHECK(ar.Serialize("wait", wait, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("waited", waited, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("waitRadius", waitRadius, 1, 0.0f))
+    float wx = waitAt.X();
+    float wz = waitAt.Z();
+    PARAM_CHECK(ar.Serialize("waitX", wx, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("waitZ", wz, 1, 0.0f))
+    waitAt = Vector3(wx, 0, wz);
+    PARAM_CHECK(ar.SerializeRef("waitGroup", waitGroup, 1))
+    PARAM_CHECK(ar.Serialize("released", released, 1, (int)HRNone))
+    PARAM_CHECK(ar.SerializeRef("cargo", cargo, 1))
+    PARAM_CHECK(ar.Serialize("cargoLiving", cargoLiving, 1, 0))
+    return LSOK;
+}
+
+LSError CounterAttack::Leftover::Serialize(ParamArchive& ar)
+{
+    PARAM_CHECK(ar.Serialize("source", source, 1, RString()))
+    PARAM_CHECK(ar.Serialize("living", living, 1, 0))
+    PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
+    PARAM_CHECK(ar.SerializeRef("group", group, 1))
+    // a withdrawal's walk home (absent in older saves: none)
+    float hx = home.X();
+    float hz = home.Z();
+    PARAM_CHECK(ar.Serialize("homeX", hx, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("homeZ", hz, 1, 0.0f))
+    home = Vector3(hx, 0, hz);
     return LSOK;
 }
 
@@ -1978,6 +5558,20 @@ LSError CounterAttack::Serialize(ParamArchive& ar)
     // towns taken so far (k of the next flip); absent in older saves: 0, and
     // the towns held at the next flip stand in for it
     PARAM_CHECK(ar.Serialize("townsTaken", _townsTaken, 1, 0))
+    // intact hulls driving home after their operation (absent: none)
+    PARAM_CHECK(ar.Serialize("HomeHulls", _homeHulls, 1))
+    // lost hulls and dead or straggling groups awaiting an unseen deletion
+    // (absent: none)
+    PARAM_CHECK(ar.Serialize("Leftovers", _leftovers, 1))
+    // phase 6A (absent: none): airframes flying home, and OccupierAir's
+    // live records (a mid-flight save resumes: the hulls ride the vehicle
+    // serializer, the refs resolve on the second pass)
+    PARAM_CHECK(ar.Serialize("AirHomes", _airHomes, 1))
+    PARAM_CHECK(OccupierAir::Instance().SerializeRecords(ar))
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        OccupierAir::Instance().AfterLoad();
+    }
     if (ar.IsLoading())
     {
         for (int i = 0; i < _records.Size(); i++)

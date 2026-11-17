@@ -1,6 +1,8 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Random/randomGen.hpp>
@@ -225,6 +227,9 @@ Scene::~Scene()
         delete _camera, _camera = nullptr;
     }
     _skyTexture = nullptr;
+    // W1-9: the fitted land-following buffers go with the scene, while the
+    // render context is still alive
+    LandFit::ClearAll();
     _landscape.Free();
     GLandscape = nullptr;
 }
@@ -752,6 +757,8 @@ void Scene::BeginObjects()
 
     _shadowCache.CleanUp(); // remove old shadows
     GetOcclusions()->Clear();
+    // W1-9: close the fitted-geometry counters, refresh the terrain version
+    LandFit::BeginFrame(_landscape);
 
 #if _ENABLE_CHEATS
 #if !DENSITY_LOD
@@ -817,6 +824,11 @@ DEFINE_FAST_ALLOCATOR(SortObject)
 
 void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
 {
+    // a far-drawn unit past the camera far plane belongs to the far pass
+    if (Kaiju::GFarCount && Kaiju::FarOwnsDraw(obj))
+    {
+        return;
+    }
     LODShapeWithShadow* shape = obj->GetShapeOnPos(obj->Position());
 
     // some objects may be trivially clipped

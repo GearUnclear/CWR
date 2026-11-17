@@ -50,9 +50,14 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Base seeding (#76) pinned off: this mission authors every zone it wants.
+    seedBases = 0;
     // Not a campaign: a tester who clears this fixture's only base must not be
     // sent to the win debriefing (campaign win rule, issue #79 B3).
     campaignEnd = 0;
+    // A reference slice, not a campaign: no occupier forces director
+    // (OCCUPIER-FORCES.md) changes its pace.
+    occupierForces = 0;
     // Engine tuning stays at stock defaults (alertInterval=5;
     // alertYellowKnows=0.5; alertRedKnows=1.5; alertWindowSeconds=20;
     // zoneArea=150; cacheRadius=800; revealRadius=1500). Direct-launch

@@ -1,0 +1,193 @@
+; ============================================================================
+;  DedushkaDemo: THE FIGHT. A heavy force kills him, for real: WEAPONS ARE
+;  FIRED (the owner allowed it on 2026-11-12), his brain is on, and he fights
+;  back by his own choice: the beam on what hurts him from far off, the foot on
+;  a tank that comes under it. He still dies. Needs the combat feature in the
+;  script set (kj\combat); the kill beat (kjd_beat.sqs) checks that.
+;
+;      [] exec "kjd_fight.sqs"          (the kill beat does, when KJD_killLive)
+;
+;  What it does, in order:
+;   1. makes him the garrison's enemy (Resistance and East fall out, he is no
+;      longer captive) and gives the brain its head (auto)
+;   2. the director's one shortcut: he is brought down to KJD_killFrom of his
+;      health first (0.75; from whole the combat feature needs at least three and
+;      a third minutes of unbroken fire). Set KJD_killFrom = 1 for the whole fight.
+;      Down to 0.35 he fights where he stands; from there (wound stage 3) he
+;      turns for the sea (the brain's retreat).
+;   3. the force: the reserve platoon on the east road (kjdR1..4), a second
+;      platoon made here on the road west of the town (KJD_force2At), and what
+;      is left of the garrison's armour. They are told where he is and fire by
+;      their own choice. One tank of the reserve at a time (KJD_closers, in
+;      turn) is ordered to drive up to him while he stands, to a point 12 m in
+;      front of his feet: what he does to it is his decision.
+;   4. when he turns for the sea, or when the force is down to three vehicles,
+;      a third platoon is made on the shore east of his way to the water
+;      (KJD_force3At): the cut-off group. [finishing] After it the army keeps
+;      coming: a fresh platoon whenever the force is down to fewer than six
+;      vehicles (KJD_waveMax times at most), because at bay in the surf he uses
+;      the beam again. He does not stand to use the beam on a retreat, so the
+;      cut-off group is the fire he walks into.
+;   5. waits until he is dead. If the force has not killed him after
+;      KJD_fightMax seconds the director ends it with staged volleys and says
+;      so (KJD_fightByDirector): a test fails on that.
+;
+;  KJD_fightOn          true while it runs
+;  KJD_force            every vehicle of the force
+;  KJD_fightShots       real rounds fired by the force (its "Fired" handlers)
+;  KJD_fightAmmo        the first 40: [time, shooter type, weapon, ammo]
+;  KJD_fightLog         [[seconds in, health, wound stage, his state, force alive, rounds fired], ...] every 10 s
+;  KJD_fightBeams       beams he fired in the fight;  KJD_fightStomps  blows he struck in it
+;  KJD_fightCutOff      seconds into the fight at which the third platoon came (-1: never)
+;  KJD_fightByDirector  true when the director had to end it
+; ============================================================================
+? isNil "KJD_killFrom" : KJD_killFrom = 0.75
+? isNil "KJD_fightMax" : KJD_fightMax = 780
+? isNil "KJD_force2At" : KJD_force2At = [[4690, 4030], [4672, 4012], [4654, 4034], [4636, 4014]]
+? isNil "KJD_force3At" : KJD_force3At = [[5120, 3850], [5140, 3864], [5160, 3850], [5180, 3864]]
+? isNil "KJD_closers" : KJD_closers = [kjdR4, kjdR3, kjdR2]
+; [finishing] the army keeps coming: once the cut-off group is in, a fresh platoon whenever the force is
+; down to fewer than KJD_waveUnder vehicles, at most KJD_waveMax times, KJD_waveGap seconds apart, turn
+; about on the shore and on the west road (each one 28 m further north than the last, clear of the wrecks)
+? isNil "KJD_waveMax" : KJD_waveMax = 4
+? isNil "KJD_waveUnder" : KJD_waveUnder = 6
+? isNil "KJD_waveGap" : KJD_waveGap = 45
+KJD_fightWaves = 0
+KJD_closer = objNull
+_ci = 0
+KJD_fightOn = true
+KJD_fightByDirector = false
+KJD_fightShots = 0
+KJD_fightAmmo = []
+KJD_fightLog = []
+KJD_fightBeams = 0
+KJD_fightStomps = 0
+KJD_fightCutOff = -1
+KJD_force2 = []
+KJD_force3 = []
+KJD_fnJoinFight = { { _x addEventHandler ["Fired", { KJD_fightShots = KJD_fightShots + 1; if ((count KJD_fightAmmo) < 40) then { KJD_fightAmmo = KJD_fightAmmo + [[time, typeOf (_this select 0), _this select 1, _this select 4]] } }]; (group _x) setBehaviour "COMBAT"; (group _x) setCombatMode "RED"; (group _x) reveal kaiju; _x reveal kaiju } forEach _this }
+_t = time
+_beams0 = 0
+? not (isNil "KJ_beamShots") : _beams0 = KJ_beamShots
+
+; ---- 1. his side, and the brain's head
+; (he is a Resistance unit from the start, init.sqs; in the quiet takes East is his friend until now)
+resistance setFriend [east, 0]
+east setFriend [resistance, 0]
+kaiju setCaptive false
+KJ_brainAfterHit = []
+KJ_brainOrder = ["auto", true]
+
+; ---- 2. the director's shortcut
+? KJ_woundHealth > KJD_killFrom : [kaiju, (KJ_woundHealth - KJD_killFrom) * KJCB_POOL, kjdR1] call KJCB_fnWound
+
+; ---- 3. the second platoon, made here: four T-80s with their crews
+[KJD_force2At, 90] exec "kjd_platoon.sqs"
+~0.2
+@ KJD_platoonDone
+KJD_force2 = KJD_platoonOut
+KJD_force = []
+{ if (alive _x) then { KJD_force = KJD_force + [_x] } } forEach ([kjdR1, kjdR2, kjdR3, kjdR4] + KJD_force2 + [kjdBmp, kjdTank, kjdTank2])
+KJD_force call KJD_fnJoinFight
+logInfo format ["KJD fight: starts at %1; he is %2 (side %3, hostile take %4), health %5, stage %6, state %7; the force %8 vehicles (%9 made here, crews %10)", time, typeOf kaiju, side kaiju, KJD_hostile, KJ_woundHealth, KJ_woundStage, KJ_state, count KJD_force, count KJD_force2, { (count (crew _x)) >= 3 } count KJD_force2]
+
+; ---- the fight
+_tick = 0
+_drive = 0
+_states = []
+_ls = ""
+_waveAt = 0
+_wave = []
+_at = []
+_src = []
+; [finishing] how far from his feet the closer is sent: to where the stomping foot of this creature
+; comes down; it is told to stop once it is within 4 m of that (a tank halts some metres short of where
+; it is sent: sent 3.5 m further out it stood 17 to 19 m off, out of the stomp's reach, run g4-fight-d-r2)
+_close = 12
+? not (isNil "KJ_animStompPos") : _close = sqrt (((KJ_animStompPos select 0) ^ 2) + ((KJ_animStompPos select 1) ^ 2))
+? _close < 8 : _close = 8
+_cb = 0
+_cd = 0
+#fight
+~0.5
+? KJ_dead : goto "dead"
+? (time - _t) > KJD_fightMax : goto "director"
+; his own blows and beams in the fight
+? (KJ_state != _ls) and (KJ_state in ["stomp", "swat"]) : KJD_fightStomps = KJD_fightStomps + 1
+? KJ_state != _ls : _ls = KJ_state; _states = _states + [_ls]
+? not (isNil "KJ_beamShots") : KJD_fightBeams = KJ_beamShots - _beams0
+; ---- 4. the cut-off group, once: when he turns for the sea, or when the force is nearly spent
+? KJD_fightCutOff >= 0 : goto "noCutOff"
+? (not KJ_woundRetreat) and (({ alive _x } count KJD_force) > 3) : goto "noCutOff"
+KJD_fightCutOff = time - _t
+[KJD_force3At, 270] exec "kjd_platoon.sqs"
+~0.2
+@ KJD_platoonDone
+KJD_force3 = KJD_platoonOut
+KJD_force3 call KJD_fnJoinFight
+KJD_force = KJD_force + KJD_force3
+KJD_closers = KJD_closers + [KJD_force3 select 0]
+logInfo format ["KJD fight: the cut-off group comes at %1 s (retreat %2, health %3, the rest of the force alive %4): %5 tanks at %6, crews %7", KJD_fightCutOff, KJ_woundRetreat, KJ_woundHealth, ({ alive _x } count KJD_force) - (count KJD_force3), count KJD_force3, getPos (KJD_force3 select 0), { (count (crew _x)) >= 3 } count KJD_force3]
+#noCutOff
+; ---- 5. [finishing] the army keeps coming
+? KJD_fightCutOff < 0 : goto "noWave"
+? ({ alive _x } count KJD_force) >= KJD_waveUnder : goto "noWave"
+? KJD_fightWaves >= KJD_waveMax : goto "noWave"
+? time < _waveAt : goto "noWave"
+KJD_fightWaves = KJD_fightWaves + 1
+_waveAt = time + KJD_waveGap
+_at = []
+_src = KJD_force3At
+? (KJD_fightWaves mod 2) == 0 : _src = KJD_force2At
+{ _at = _at + [[_x select 0, (_x select 1) + 28 * KJD_fightWaves]] } forEach _src
+[_at, 90] exec "kjd_platoon.sqs"
+~0.2
+@ KJD_platoonDone
+_wave = KJD_platoonOut
+_wave call KJD_fnJoinFight
+KJD_force = KJD_force + _wave
+KJD_force3 = KJD_force3 + _wave
+KJD_closers = KJD_closers + [_wave select 0]
+logInfo format ["KJD fight: wave %1 comes at %2 s (health %3, stage %4, the rest of the force alive %5): %6 tanks at %7", KJD_fightWaves, time - _t, KJ_woundHealth, KJ_woundStage, ({ alive _x } count KJD_force) - (count _wave), count _wave, getPos (_wave select 0)]
+#noWave
+; one tank at a time drives up to him, to as far from his feet as the stomping foot of his own clip
+; comes down (11 m on A, 9 m on the Hound; 12 m when the clip does not say), and stops within 4 m of that, told again
+; every 4 s while he stands; while he walks, and while he strikes, it holds where it is (a
+; tank that drives into a walking giant is only trodden on). When it is gone the next one is sent.
+? time < _drive : goto "noDrive"
+_drive = time + 4
+? (isNull KJD_closer) and (_ci < (count KJD_closers)) : KJD_closer = KJD_closers select _ci; _ci = _ci + 1
+? isNull KJD_closer : goto "noDrive"
+? (not (alive KJD_closer)) or (not (canMove KJD_closer)) : KJD_closer = objNull; goto "noDrive"
+_kp = getPos kaiju
+_kd = getDir kaiju
+? KJ_state in ["drawn", "wander", "stomp", "swat"] : doStop KJD_closer
+; it comes straight in along its own bearing from him and stands off _close metres from his feet: it
+; never circles him (a point "in front of him" moves as he turns, and the tank that chased it drove
+; in between his feet and was trodden on by his turn: run g3-fight-d-r1)
+_cb = (((getPos KJD_closer) select 0) - (_kp select 0)) atan2 (((getPos KJD_closer) select 1) - (_kp select 1))
+_cd = KJD_closer distance kaiju
+? (not (KJ_state in ["drawn", "wander", "stomp", "swat"])) and (_cd > (_close + 4)) : KJD_closer doMove [(_kp select 0) + _close * (sin _cb), (_kp select 1) + _close * (cos _cb), 0]
+? (not (KJ_state in ["drawn", "wander", "stomp", "swat"])) and (_cd <= (_close + 4)) : doStop KJD_closer
+#noDrive
+? (time - _t) < _tick : goto "fight"
+_tick = _tick + 10
+KJD_fightLog = KJD_fightLog + [[time - _t, KJ_woundHealth, KJ_woundStage, KJ_state, { alive _x } count KJD_force, KJD_fightShots]]
+logInfo format ["KJD fight t %1: health %2 stage %3 state %4 phase %5, force alive %6 of %7, rounds fired %8, beams %9, stomps %10, the closer %11 (%12 m), retreat %13, he is at %14", time - _t, KJ_woundHealth, KJ_woundStage, KJ_state, KJ_brainPhase, { alive _x } count KJD_force, count KJD_force, KJD_fightShots, KJD_fightBeams, KJD_fightStomps, KJD_closer, if (isNull KJD_closer) then { -1 } else { KJD_closer distance kaiju }, KJ_woundRetreat, getPos kaiju]
+goto "fight"
+
+#director
+KJD_fightByDirector = true
+logInfo format ["KJD fight: the force has not killed him in %1 s (health %2, force alive %3): the director ends it with staged volleys", KJD_fightMax, KJ_woundHealth, { alive _x } count KJD_force]
+[[kjdR1, kjdR2, kjdR3, kjdR4] + KJD_force2 + KJD_force3, 600, 0.5, true] exec "kjd_fire.sqs"
+@ KJ_dead or (time > _t + KJD_fightMax + 240)
+KJD_firing = false
+
+#dead
+? not (isNil "KJ_beamShots") : KJD_fightBeams = KJ_beamShots - _beams0
+logInfo format ["KJD fight: over after %1 s: dead %2, by the director %3, rounds fired %4, beams %5, stomps %6, force alive %7 of %8, the cut-off group at %9 s, his states %10, log %11", time - _t, KJ_dead, KJD_fightByDirector, KJD_fightShots, KJD_fightBeams, KJD_fightStomps, { alive _x } count KJD_force, count KJD_force, KJD_fightCutOff, _states, KJD_fightLog]
+logInfo format ["KJD fight: first rounds (time, shooter, weapon, ammo) %1", KJD_fightAmmo]
+; the guns fall silent over the body
+{ if (alive _x) then { (group _x) setCombatMode "BLUE" } } forEach KJD_force
+KJD_fightOn = false
+exit

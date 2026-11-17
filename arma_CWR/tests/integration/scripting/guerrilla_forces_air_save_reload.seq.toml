@@ -1,0 +1,10 @@
+# Occupier air across a save (OCCUPIER-FORCES.md 11, 12.2; phase 6A): a
+# helicopter insertion saved mid-flight resumes in a fresh process (shared
+# user dir across the ordered phases 01_inflight and 02_resume): the record's
+# air fields and the OccupierAir hull, crew, cargo and pad refs. The director
+# side of the save is guerrilla_forces_save_reload.seq. Full Remaster lane:
+# data_dir "packages/RemasterUD" is a gitignored junction to a setup-prepared
+# shadow of the Steam Remastered folder (see guerrilla-mode/FULL-SCALE-SESSION.md).
+# Not headless: the air gates need a real camera. Tag slow_air: run it with
+# --tag slow_air --retries 3.
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "save-load", "slow_air"]

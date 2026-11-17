@@ -1,0 +1,13 @@
+# Dedushka integration: the whole demo, every beat checked (experiment, kept out of
+# tests/integration so a sweep never runs it). Needs the mount tmp/@kj_models
+# (integration/addon/build-kj-dedushka.ps1). Run it through integration/run-kj.ps1:
+#   run-kj.ps1 -Name kj_demo                     the kaiju binary, dusk
+#   run-kj.ps1 -Name kj_demo -Params day         the same by day (night: -Params night)
+#   run-kj.ps1 -Name kj_demo -Stock -Params short    the stock binary, the short plan
+# One game, hidden desktop, --nosound. The armour's fire is scripted damage: no weapon is fired.
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/models-tests/DedushkaDemo.Eden"
+timeout = 1800
+assert_timeout = 420
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_models"]

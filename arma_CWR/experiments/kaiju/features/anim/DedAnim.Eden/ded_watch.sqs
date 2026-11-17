@@ -1,0 +1,12 @@
+; ded_watch.sqs: test helper, [unit, seconds] exec "ded_watch.sqs"
+; While DEDW_ON is true, logs one DEDW line per sample: time, move, ASL
+; position, speed (km/h), heading. Stops when DEDW_QUIT is true or the unit
+; is null.
+_u = _this select 0
+_dt = _this select 1
+#w
+? DEDW_QUIT : exit
+? isNull _u : exit
+? DEDW_ON : logInfo format ["DEDW %1 %2 %3 %4 %5", time, getMove _u, getPosASL _u, speed _u, getDir _u]
+~_dt
+goto "w"

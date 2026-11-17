@@ -1,8 +1,8 @@
 # Boots the real Guerrilla.Sinai template (repo-root-relative) on the @LoBo
 # mod's Sinai world. Requires the FULL CWA install (OFPR_DATA_DIR) plus the
-# @LoBo mod folder next to it: --mods-dir ".." resolves relative to the game
-# CWD (the data dir, D:\Arma_CWA\ARMA Cold War Assault [Classic]), so "@LoBo" mounts
-# D:\Arma_CWA\@LoBo.
+# @LoBo mod folder INSIDE the data dir (a Remaster shadow): --mods-dir "."
+# resolves against the game CWD (the data dir), so "@LoBo" mounts
+# <data dir>\@LoBo.
 #
 # SINCE ISSUE #56 TASK 2 the lane mounts @LoBo ALONE: no @lobofixup fixture.
 # The three jobs the fixture used to do are all covered at source now:
@@ -19,7 +19,7 @@
 #
 # PRECONDITIONS (one-time, rerun after an @LoBo reinstall):
 #   tools/lobo/install-lobo-factions.ps1
-#   PoseidonTools mod doctor D:\Arma_CWA\@LoBo --fix
+#   PoseidonTools mod doctor <data dir>\@LoBo --fix
 #   guerrilla-mode/install-missions.ps1
 mission = "guerrilla-mode/mission/Guerrilla.Sinai"
 binary = "PoseidonGame"
@@ -31,4 +31,4 @@ tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
 # generous budgets on purpose.
 timeout = 420
 assert_timeout = 240
-extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo"]
+extra_args = ["--dev", "--no-strict", "--mods-dir", ".", "--mod", "@LoBo"]

@@ -194,7 +194,7 @@ layout(std140) uniform VSConstants {
     vec4 ambient;       // c13
     vec4 diffuse;       // c14
     vec4 emissive;      // c15
-    vec4 fogParam;      // c16: {start, invRange, enabled, 0}
+    vec4 fogParam;      // c16: {start, invRange, enabled, visibility floor (0 = none)}
     vec4 camPos;        // c17
     vec4 specular;      // c18: rgb + power(w)
     vec4 specEn;        // c19
@@ -261,7 +261,10 @@ void main() {
 
     float dist = length(worldPos.xyz - camPos.xyz);
     float fogFactor = clamp(1.0 - (dist - fogParam.x) * fogParam.y, 0.0, 1.0);
-    vFogTC = (fogParam.z > 0.5) ? fogFactor : 1.0;
+    // fogParam.w: the visibility floor of SetFogFloor (a far-drawn kaiju), as in
+    // the classic VSTransform. It is 0 otherwise, and max() with 0 leaves the
+    // clamped factor exactly as it was.
+    vFogTC = (fogParam.z > 0.5) ? max(fogFactor, fogParam.w) : 1.0;
 
     vUV0 = (texCtrl.x > 0.5) ? (texMat0 * vec4(uv, 0, 1)).xy : uv;
     vUV1 = (texCtrl.y > 0.5) ? (texMat1 * vec4(uv, 0, 1)).xy : uv;
@@ -416,6 +419,8 @@ layout(std140) uniform LitConstants {
     vec4 litSurface3;     // 88: surfaces: x cavity strength, y 1 = a vehicle interior (pre-lit fragments' share)
     vec4 litCamera;       // 89: photo camera: x 1 = write scene light (camEncode), y additive pre-lit scale, z sky scale, w pre-exposure
     vec4 litCameraLook;   // 90: photo camera's look: x weather veil, y lamp ambient kept, z lamp gain, w low-sun sky blue
+    vec4 litWater2;       // 91: shore water: x parts mask (1 shallow, 2 foam, 4 wet sand, 8 wave masking; 0 off), y time (s), z sea surface (m), w swash line (m)
+    vec4 litXpNight;      // 92: lamp shadows: x 0, y light bounce gain, z lamps in the combat mask, w 0
 };
 )";
 
@@ -439,6 +444,11 @@ uniform sampler2D skyDensity;              // unit 9: cloud density of the weath
 uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
 uniform sampler2D canopyHeight;            // unit 10: the canopy heightfield, r top, g density (Canopy.hpp)
 uniform sampler2D groundField;             // unit 12: the land's own colour per terrain vertex, a = built (wet weather)
+// The decal batch (W4-1, EngineGL33_DecalBatch.cpp): one draw of consecutive
+// decals reads each decal's own texture from its layer of this array (layer
+// in vUV1.x) while decalLayerMode is 1; every other draw leaves it 0.
+uniform sampler2DArray decalLayers;        // unit 16
+uniform float decalLayerMode;
 // The surfaces' per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
 // sets it on the bound program): x SurfaceClass, y DrawKind, z 1 = a blending
 // texture (glass, a canvas window, a sign).
@@ -732,6 +742,25 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
     return mix(1.0, mix(vis, 1.0, lift), litTerrainLift.z);
 }
 
+// terrainSunVisibility's sky half alone, for a fragment that takes no sun
+// (shadeRemastered at a keyless night): the same lookups up to its horizon
+// taps, which it skips, so the terrain sky visibility, g_groundTint and
+// g_groundHeight come out as terrainSunVisibility sets them. Keep the two in
+// step.
+void terrainSkyVisibility(vec3 posAbs, out float skyVisibility) {
+    skyVisibility = 1.0;
+    if (litTerrain.x < 0.5 || litFlags.y < 0.5) return;
+    vec2 g = posAbs.xz * litTerrain.y; // grid units
+    float last = 1.0 / litTerrain.z - 1.0;
+    if (g.x < 0.0 || g.y < 0.0 || g.x > last || g.y > last) return;
+    vec2 uv = (g + 0.5) * litTerrain.z;
+    vec4 hs = texture(terrainHeight, uv);
+    g_groundTint = vec3(hs.b, (1.0 - 0.2126 * hs.b - 0.0722 * hs.a) / 0.7152, hs.a);
+    g_groundHeight = hs.x;
+    float lift = smoothstep(litTerrainLift.x, litTerrainLift.y, posAbs.y - hs.x);
+    skyVisibility = mix(1.0, mix(hs.g, 1.0, lift), litTerrain.w);
+}
+
 // ---- The sky's own clouds (feature switches litClouds and skyCloudShadows;
 // Graphics/Remaster/SkyDensity.hpp holds the CPU mirrors and the constants) --
 // The cloud-density map on unit 9, built from the weather sky texture: r broken
@@ -929,10 +958,35 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     // Leaves (not grass, which shades as terrain) lift their lookup toward the
     // sun: treeShadows' cure for the stripes a two-sided card casts on itself.
     float leafLift = (foliage && !terrain) ? litPcss.w : 0.0;
-    float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift) *
-                          terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
-    // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
-    sunVisibility *= canopySunVisibility(posAbs);
+    bool surf = litSurface.x > 0.5;
+    bool relief = surf && !foliage && dot(g_surfBumpN, g_surfBumpN) > 0.5;
+    // A receiver that faces away from the sun takes none of it on a dry frame
+    // (not a leaf, no forced diffuse, no relief normal turned toward the sun,
+    // not the sun-visibility debug view): every use of sunVisibility below is
+    // then times a term that is exactly 0 (sunTerm, the GGX and gloss lobes'
+    // n.l), so the shadow map's taps are skipped. Wet frames keep them (a
+    // puddle's level normal can face the sun on ground that does not).
+    bool sunHidden = !foliage && all(equal(litMatForced.rgb, vec3(0.0))) && dot(n, l) <= 0.0 &&
+                     !(relief && dot(g_surfBumpN, l) > 0.0) && litWeather.x <= 0.0 && litWeather.z <= 0.0 &&
+                     !(litFlags.z > 0.5 && litFlags.z < 1.5);
+    // A keyless night (the key light exactly 0: the sun more than 1.5 degrees
+    // under the horizon and no moon key) takes no sun anywhere: every use of
+    // sunVisibility is times litSun.rgb, so the shadow map (perhaps a stale
+    // one: the depth pass stops at night), the hills' horizon, the cloud and
+    // the canopy lookups are skipped, and only the terrain's sky half (the
+    // valley sky visibility, the ground tint and height) is read. The debug
+    // view of the sun's visibility keeps them all. The test is uniform.
+    bool keyLit = any(notEqual(litSun.rgb, vec3(0.0))) || (litFlags.z > 0.5 && litFlags.z < 1.5);
+    float sunVisibility = 1.0;
+    if (keyLit) {
+        float shadowVis = 1.0;
+        if (!sunHidden) shadowVis = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift);
+        sunVisibility = shadowVis * terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+        // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
+        sunVisibility *= canopySunVisibility(posAbs);
+    } else {
+        terrainSkyVisibility(posAbs, skyVisibility);
+    }
     g_sunVisibility = sunVisibility;
 
     vec3 kd = litMatDiffuse.rgb;
@@ -948,8 +1002,6 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     // kSurfReliefSunLimit of it, faces turned from the sun stay unlit), the
     // sky light from the sky table's spherical harmonics and the sky the
     // canopy hides.
-    bool surf = litSurface.x > 0.5;
-    bool relief = surf && !foliage && dot(g_surfBumpN, g_surfBumpN) > 0.5;
     if (relief)
         sunTerm = nl + clamp(dot(g_surfBumpDelta, l), -kSurfReliefSunLimit * nl, kSurfReliefSunLimit * nl);
     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
@@ -1235,7 +1287,7 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
 
 static const char s_psNormalRemasterMain[] = R"(
 void main() {
-    vec4 t0 = texture(tex0, vUV0);
+    vec4 t0 = decalLayerMode > 0.5 ? texture(decalLayers, vec3(vUV0, vUV1.x)) : texture(tex0, vUV0);
     vec4 r0;
     float ambientShare = 0.0;
     if (vLitMode > 1.5) {
@@ -1463,6 +1515,14 @@ void main() {
                 g_surfCavity += clamp((bf - bm) * (kSurfBaseCavity * litSurface3.x * fadeB), -0.035, 0.03);
             }
         }
+        // Shore water's wet sand (litWater2): the land darkens below
+        // the swash line, with a ragged edge.
+        if (litWater2.x > 0.5 && litDetail.w > 0.5 && (int(litWater2.x + 0.5) & 4) != 0) {
+            vec3 posW = vWorldRel + litCamPos.xyz;
+            float ragged = 0.35 * (puddleNoise(posW.xz * 0.35) - 0.5);
+            float wet = 1.0 - smoothstep(0.0, 0.45, posW.y - litWater2.w + ragged);
+            albedo *= mix(1.0, 0.7, wet);
+        }
         r0.rgb = shadeRemastered(albedo, true, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
@@ -1605,6 +1665,48 @@ vec3 seaBody(vec3 albedo, out float ambientShare, out float sunVis) {
     return radiance;
 }
 
+// ---- Shore water (litWater2, EngineGL33_Sea.cpp; first POSEIDON_XP_WATER): the shore.
+// The water's depth comes from the terrain height map read on the landscape's
+// own triangles (each grid square split along its (x+1, z)-(x, z+1) diagonal,
+// LandscapeRender.cpp), so it is 0 exactly where the drawn ground meets the
+// drawn sea and the shore effects hug the visible waterline.
+const vec3 kXpSigma = vec3(0.75, 0.30, 0.24); // turbid coastal water's absorption (1/m), red first
+const float kXpShallowMax = 8.0;     // m: deeper, the floor is gone (under 3% of it is left)
+const float kXpBedWet = 0.62;        // the floor's colour, wet and under water
+const vec3 kXpSand = vec3(0.62, 0.55, 0.42); // the floor without a ground field (display)
+const float kXpCalm = 0.35;          // wave relief kept at the waterline
+const float kXpCalmDepth = 1.2;      // m: full waves from here
+const float kXpFoamAlbedo = 0.82;
+const float kXpFoamMax = 0.85;
+const float kXpSwashK = 1.8;         // foam lines per metre of depth
+const float kXpSwashSpeed = 0.045;   // m of depth per second the lines move inshore
+const float kXpBandDepth = 0.9;      // m: no foam lines deeper
+const float kXpFoamFadeStart = 250.0; // m
+const float kXpFoamFadeEnd = 1100.0;
+const float kXpMaskFloor = 0.6;      // sky weight kept by a facet whose mirror ray is well below the horizon
+const float kXpMaskSpan = 0.08;      // the ray's height below the horizon over which the sky goes
+
+// The ground's height under world xz on the landscape's triangles; -1e4 off the map.
+float xpFloorHeight(vec2 xz) {
+    vec2 g = xz * litTerrain.y;
+    float last = 1.0 / litTerrain.z - 1.0;
+    if (g.x < 0.0 || g.y < 0.0 || g.x >= last || g.y >= last) return -1.0e4;
+    vec2 i = floor(g);
+    vec2 f = g - i;
+    ivec2 p = ivec2(i);
+    float h00 = texelFetch(terrainHeight, p, 0).r;
+    float h10 = texelFetch(terrainHeight, p + ivec2(1, 0), 0).r;
+    float h01 = texelFetch(terrainHeight, p + ivec2(0, 1), 0).r;
+    if (f.x + f.y <= 1.0) return h00 + f.x * (h10 - h00) + f.y * (h01 - h00);
+    float h11 = texelFetch(terrainHeight, p + ivec2(1, 1), 0).r;
+    return h11 + (1.0 - f.x) * (h01 - h11) + (1.0 - f.y) * (h10 - h11);
+}
+
+// The cosine of a ray at cosine c above the water after refraction into it.
+float xpRefractCos(float c) {
+    return sqrt(max(1.0 - (1.0 - c * c) / 1.769, 0.0));
+}
+
 void main() {
     vec4 t1 = texture(tex1, vUV1);
     vec4 r0;
@@ -1612,6 +1714,15 @@ void main() {
     // Derivatives first, in uniform control flow.
     vec2 gU, gV;
     seaUvGradients(vUV0, gU, gV);
+    // XP shore: the water's depth and its change across the pixel.
+    int xpParts = int(litWater2.x + 0.5);
+    float xpDep = 1.0e4;
+    float xpDepW = 0.0;
+    if (xpParts != 0 && litTerrain.x > 0.5) {
+        vec3 posW = vWorldRel + litCamPos.xyz;
+        xpDep = max(posW.y - xpFloorHeight(posW.xz), 0.0);
+        xpDepW = fwidth(xpDep);
+    }
     float e0 = seaUvStep(vUV0, 1.0 / 512.0);
     float e1 = seaUvStep(vUV1, 1.0 / 256.0);
     float foot = length(fwidth(vWorldRel.xz));
@@ -1642,6 +1753,8 @@ void main() {
         float w = litWater0.y;
         float spread = (1.0 - w) * (1.0 - w) + w * w + 2.0 * w * (1.0 - w) * kSeaFrameRho;
         grad *= litWater0.x * inversesqrt(max(spread, 1e-6));
+        // XP shore: the waves calm over the last metre to the waterline.
+        if ((xpParts & 1) != 0) grad *= mix(kXpCalm, 1.0, smoothstep(0.0, kXpCalmDepth, xpDep));
         vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
         vec3 v = -vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
         vec3 l = litSunDir.xyz;
@@ -1649,6 +1762,22 @@ void main() {
         float exposure = litZenith.w;
         float sunVis;
         vec3 body = seaBody(albedo, ambientShare, sunVis);
+        // XP shore: the light a flat surface takes here (the body over its
+        // albedo; the lamps' gleam aside), for the floor and the foam.
+        vec3 xpLight = vec3(0.0);
+        if (xpParts != 0 && xpDep < kXpShallowMax) {
+            xpLight = body / max(toLinear(albedo), vec3(1e-3));
+            if ((xpParts & 1) != 0) {
+                // The floor through the water: absorbed per channel along the
+                // refracted path down from the sun and up to the eye; the
+                // water's own colour (the body) fills in what it loses.
+                vec4 field = groundFieldAt(vWorldRel.xz + litCamPos.xz);
+                vec3 bed = toLinear(field.a > 0.5 ? field.rgb : kXpSand) * kXpBedWet;
+                float path = 1.0 / max(xpRefractCos(max(v.y, 0.0)), 0.3) + 1.0 / max(xpRefractCos(max(l.y, 0.0)), 0.3);
+                vec3 T = exp(-kXpSigma * (xpDep * path));
+                body = bed * xpLight * T + body * (1.0 - T);
+            }
+        }
         // ---- The sky in the reflected direction, by Fresnel on the wave
         // normal: the mean share low (litWater0.z, less at a high sun and
         // beyond 1 km), the waves' share at full weight. At a high sun the
@@ -1657,12 +1786,18 @@ void main() {
         float F = 0.02 + 0.98 * pow(clamp(1.0 - nv, 0.0, 1.0), 5.0);
         float Ff = 0.02 + 0.98 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
         vec3 r = reflect(-v, n);
+        float xpRawY = r.y;
         r.y = max(r.y, 0.01);
         r = normalize(r);
         vec3 skyDisp = mix(skyReflection(r), fogColor.rgb, litWater0.w);
         vec3 sky = toLinear(skyDisp) * mix(1.0, 0.82, smoothstep(0.15, 0.9, r.y));
         float skyMean = litWater0.z * mix(kSeaFarSkyFloor, 1.0, 1.0 - smoothstep(kSeaFarSkyStart, kSeaFarSkyEnd, dist));
         float wSky = clamp(skyMean * Ff + kSeaSkyVar * (F - Ff), 0.0, 0.95);
+        // XP wave masking: a facet whose mirror ray points below the horizon
+        // sees the next wave, not the sky (the sky's clamp to the horizon made
+        // those facets the brightest, a white crinkle on near water): most of
+        // its sky weight goes back to the water's own colour.
+        if ((xpParts & 8) != 0) wSky *= mix(kXpMaskFloor, 1.0, smoothstep(-kXpMaskSpan, 0.0, xpRawY));
         // ---- The sun: a broad path and a tight sparkle on the wave normal
         // (normalised Blinn-Phong, Schlick on v.h; the sparkle widens with the
         // footprint), and the original's sheen, the material's broad lobe in the
@@ -1684,6 +1819,26 @@ void main() {
         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
                    (sunVis * sunOn * litHorizon.w);
         vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
+        // XP surf: a broken fringe of foam at the waterline (it rides the sea
+        // level's wave) and foam lines rolling in over the shallows. The lines
+        // fade where a pixel spans much of their spacing, the whole surf with
+        // distance, and the finer breakup below the pixel's footprint.
+        if ((xpParts & 2) != 0 && xpDep < 1.5) {
+            float t = litWater2.y;
+            vec2 p = vWorldRel.xz + litCamPos.xz;
+            float nA = puddleNoise(p * 0.42 + vec2(0.0, t * 0.05));
+            float nB = mix(0.5, puddleNoise(p * 1.6 - vec2(t * 0.09, 0.0) + 31.0), clamp(0.6 / (3.0 * foot), 0.0, 1.0));
+            float brk = nA * 0.6 + nB * 0.4;
+            float edgeW = max(0.06 + 0.16 * brk, xpDepW);
+            float fringe = (1.0 - smoothstep(0.0, edgeW, xpDep)) * smoothstep(0.2, 0.75, brk);
+            float s = fract((xpDep + t * kXpSwashSpeed) * kXpSwashK + 0.45 * nA);
+            float band = smoothstep(0.0, 0.07, s) * (1.0 - smoothstep(0.07, 0.42, s));
+            band *= (1.0 - smoothstep(0.35, kXpBandDepth, xpDep)) * smoothstep(0.35, 0.62, brk);
+            band *= 1.0 - smoothstep(0.15, 0.45, xpDepW * kXpSwashK);
+            float foam = clamp(fringe + 0.75 * band, 0.0, 1.0) * kXpFoamMax *
+                         (1.0 - smoothstep(kXpFoamFadeStart, kXpFoamFadeEnd, dist));
+            radiance = mix(radiance, xpLight * kXpFoamAlbedo, foam);
+        }
         // The surface target: the body's sky light, as the stock share has it.
         g_surfShare = ambientShare * (1.0 - wSky);
         g_surfAlbedo = sqrt(clamp(dot(toLinear(albedo), kLuma), 0.0, 1.0));

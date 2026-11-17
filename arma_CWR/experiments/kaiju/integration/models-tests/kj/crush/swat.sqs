@@ -1,0 +1,114 @@
+; ============================================================================
+;  kj\crush\swat.sqs  -  Dedushka CRUSH: the swat. A helicopter or low aircraft
+;  within reach of his arms is struck out of the air; a tank within reach of
+;  his feet is kicked aside.
+;
+;      [kaiju, target] exec "kj\crush\swat.sqs"
+;
+;  Tuning: the one marked block at the top of kj\crush\init.sqf.
+;
+;  "Within reach" (KJC_fnReach, all from his height):
+;    arm   the target is within KJC_ARM x height of the nearer shoulder
+;          (shoulders KJC_SHOULDER_H up, KJC_SHOULDER_X to each side). On the
+;          40 m proxy: 22 m from a shoulder 33 m up, so from about 11 m to
+;          55 m above his feet and out to 34 m from his centre line.
+;    kick  the target is on the ground (lower than 0.12 x height above his
+;          feet) and within KJC_KICK x height of his origin (17 m).
+;  The blow lands KJC_SWAT_WIND seconds after the swing starts, and only if
+;  the target is then still within reach (x KJC_SWAT_GRACE). No rolls: a
+;  helicopter that gets out in time is missed.
+;
+;  Read by others:
+;    KJ_swatting    true during the swing
+;    KJ_swatResult  "out" (not in reach, nothing done), "swing", then "hit" or "miss"
+;    KJ_swatHow     "arm" or "kick" for the last swing
+;    KJ_swatCount   rises by one per blow that landed
+; ============================================================================
+_k = _this select 0
+_t = _this select 1
+? isNil "KJC_ready" : call compile preprocessFile "kj\crush\init.sqf"
+? isNil "KJC_sized" : [_k] call KJC_fnSize
+? isNil "KJ_swatCount" : KJ_swatCount = 0
+? (isNull _t) or (not alive _k) : exit
+_r = [_k, _t, 1] call KJC_fnReach
+? (_r select 0) != "out" : goto "swing"
+KJ_swatResult = "out"
+exit
+
+#swing
+KJ_swatting = true
+KJ_swatResult = "swing"
+KJ_swatHow = _r select 0
+_wind = KJC_SWAT_WIND
+_move = "DedSwat"
+; [integration] with the animation's timing table the blow lands when the clip gets there: for
+; the arm, when the hand of DedSwat is nearest to the target on its sweep (KJ_animSwatPath); for
+; a kick, when the foot of DedStomp comes down (there is no kick clip).
+? isNil "KJ_animSwatPath" : goto "wound"
+? (_r select 0) == "kick" : _move = "DedStomp"; _wind = KJ_animStompTime; goto "wound"
+_l = [_k, getPosASL _t] call KJ_fnToLocal
+_best = 1000000
+{ _d2 = (((_x select 1) select 0) - (_l select 0)) ^ 2 + (((_x select 1) select 1) - (_l select 1)) ^ 2 + (((_x select 1) select 2) - (_l select 2)) ^ 2; if (_d2 < _best) then { _best = _d2; _wind = _x select 0 } } forEach KJ_animSwatPath
+#wound
+KJ_swatWind = _wind
+_k playMove _move
+~_wind
+? (isNull _t) or (not alive _k) : goto "miss"
+_r = [_k, _t, KJC_SWAT_GRACE] call KJC_fnReach
+? (_r select 0) == "out" : goto "miss"
+
+; ---- the blow -----------------------------------------------------------------
+_kp = getPos _k
+_tp = getPos _t
+_c = [_kp select 0, _kp select 1]
+_kind = _t call KJC_fnKind
+? _kind == "air" : goto "air"
+? _kind == "tank" : goto "tank"
+? _kind == "car" : goto "car"
+? _kind == "man" : goto "man"
+[_t, _kind == "big", 0] call KJC_fnMark
+goto "hit"
+
+#air
+; struck sideways and down: it leaves burning and falls
+[_t, _c, KJC_SWAT_AIR_V, 0 - 0.45 * KJC_SWAT_AIR_V] call KJC_fnShove
+[_t, _k] call KJ_fnKill
+[[_tp select 0, _tp select 1], 4, 6, 3, 9, 4, 2, 6, [0.2, 0.2, 0.2], 0.7, _tp select 2] call KJC_fnPuff
+KJ_crushStats set [2, (KJ_crushStats select 2) + 1]
+goto "hit"
+
+#tank
+; kicked aside: thrown, crippled, not always dead
+_dmg = getDammage _t
+? _dmg < KJC_KICK_DAMAGE : _t setDamage KJC_KICK_DAMAGE
+_t setPos [_tp select 0, _tp select 1, 0.8]
+[_t, _c, KJC_KICK_V, 0.5 * KJC_KICK_V] call KJC_fnShove
+[[_tp select 0, _tp select 1], 4, 6, 3, 8, 5, 2, 4, [0.55, 0.51, 0.44], 0.6, 1] call KJC_fnDust
+KJ_crushStats set [2, (KJ_crushStats select 2) + 1]
+goto "hit"
+
+#car
+{ [_x, _k] call KJ_fnKill } forEach (crew _t)
+[_t, _k] call KJ_fnKill
+_t setPos [_tp select 0, _tp select 1, 0.8]
+[_t, _c, 1.5 * KJC_KICK_V, 0.8 * KJC_KICK_V] call KJC_fnShove
+[[_tp select 0, _tp select 1], 3, 5, 3, 8, 5, 2, 4, [0.55, 0.51, 0.44], 0.6, 1] call KJC_fnDust
+KJ_crushStats set [2, (KJ_crushStats select 2) + 1]
+goto "hit"
+
+#man
+[_t, _c, 1, true] call KJC_fnThrowMan
+KJ_crushStats set [3, (KJ_crushStats select 3) + 1]
+
+#hit
+KJ_swatCount = KJ_swatCount + 1
+KJ_swatResult = "hit"
+~0.8
+KJ_swatting = false
+exit
+
+#miss
+KJ_swatResult = "miss"
+~0.5
+KJ_swatting = false
+exit

@@ -1,0 +1,9 @@
+# NEEDS-OWNER-OK. WRITTEN, NEVER RUN: live weapons fire at the creature.
+# Kept in this folder so that no sweep and no run script picks it up. See the
+# header of brain_livefire.test.sqf.
+tags = ["kaiju", "experiment", "brain", "needs_owner_ok", "livefire"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/brain/DedDemo.Eden"
+timeout = 600
+assert_timeout = 240
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_brain"]

@@ -6,7 +6,8 @@
 # Generated OpenGL bindings (~22k lines across 2 files)
 arma_CWR/thirdparty/glad/
 
-# Third-party mod test data (2.2G, binary PBOs/textures) — read-only reference
+# Third-party mod test data (2.2G, binary PBOs/textures): ours to modify since
+# 2026-08-08, gitignored game data
 /@LoBo/
 
 # Build output

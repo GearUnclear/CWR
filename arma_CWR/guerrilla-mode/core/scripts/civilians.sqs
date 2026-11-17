@@ -5,6 +5,7 @@
 ;        GM_CIV_* tunables/state below, gmCivTicks, the spawned civ groups +
 ;        their killed-EHs (transient handles, pruned).
 ;  READS: gmZoneCount/gmZone (CITY zones), gmFactionValue ["CIV", ...],
+;        the native townStruck zone event (GM_CV_STRUCK queue, owned here),
 ;        gmOccupierSide/gmResistanceSide, GM_PSEUDO_GROUPS (#2 writes it),
 ;        GM_PLAYER_GROUPS, aP, time.
 ;  Persistence: panic ledger = zone names + expiry times (serialize free).
@@ -27,6 +28,13 @@
 GM_cvNC = 0; gmCvI = 0; while {gmCvI < gmZoneCount} do {if (((gmZone gmCvI) select GM_Z_TYPE) == "CITY") then {GM_cvNC = GM_cvNC + 1}; gmCvI = gmCvI + 1}
 ? GM_cvNC < 1 : exit
 GM_CIV_READY = true
+
+; ---- town strikes (OCCUPIER-FORCES.md 7.3): the native townStruck zone event
+;      queues the struck zone here; the main loop starts its panic through
+;      the same GM_fnPanicStart path a civilian killing uses. The handler slot
+;      is serialized by the registry; the queue is a plain global.
+GM_CV_STRUCK = []
+gmZoneOnEvent ["townStruck", {GM_CV_STRUCK = GM_CV_STRUCK + [_this select 0]}]
 
 ; ===========================================================================
 ;  TUNABLES  (names binding per the issue-#8 contract; values are tuning)
@@ -206,6 +214,10 @@ gmCvKI = gmCvKI + 1
 goto "kills"
 #killsdone
 
+; ---------- 3b) town strikes: the struck town panics (OCCUPIER-FORCES.md 7.3) --
+GM_cvStruck = GM_CV_STRUCK + []; GM_CV_STRUCK = []
+{[_x] call GM_fnPanicStart} forEach GM_cvStruck
+
 ; ---------- 4) panic FSM walk ---------------------------------------------------
 ; Per panicked zone: phase 1 (scatter) = radial run-points re-issued each tick
 ; so groups visibly keep running (native per-group flee fires organically on
@@ -251,6 +263,9 @@ GM_cvD = (getPos aP) distance (GM_cvZ select GM_Z_POS)
 ? GM_cvD > GM_CIV_RADIUS : goto "cachenext"
 ? (GM_cvZ select GM_Z_NAME) in GM_PANIC_ZONES : goto "cachenext"
 ? (count GM_CIV_GROUPS) >= GM_CIV_MAX_GROUPS : goto "cachenext"
+; the live-AI budget (OFFSCREEN-CONTRACT.md section 6): a group that would
+; breach budgetLiveBodies or the side's group budget waits for a later tick
+? (gmSimAdmit [format ["%1", GM_CIV_SIDE], GM_CIV_GROUP_SIZE, 1]) > 0 : goto "cachenext"
 gmCvN = 0; gmCvJ = 0; while {gmCvJ < (count GM_CIV_GROUP_ZONE)} do {if ((GM_CIV_GROUP_ZONE select gmCvJ) == (GM_cvZ select GM_Z_NAME)) then {gmCvN = gmCvN + 1}; gmCvJ = gmCvJ + 1}
 ? gmCvN >= GM_CIV_PER_TOWN : goto "cachenext"
 GM_cvG = [gmCvI] call GM_fnCivSpawnTown

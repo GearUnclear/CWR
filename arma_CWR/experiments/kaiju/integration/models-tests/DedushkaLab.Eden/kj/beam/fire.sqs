@@ -1,0 +1,507 @@
+; kj\beam\fire.sqs: Dedushka's breath. A thin searing beam out of the furnace chest.
+;
+;   [kaiju, targetObjectOrPos] exec "kj\beam\fire.sqs"
+;   [kaiju, targetObjectOrPos, endObjectOrPos] exec "kj\beam\fire.sqs"
+;
+; With one target the beam cuts an arc across the ground through it. With two it
+; cuts from the first to the second. If aircraft are up when the ground cut ends,
+; the beam tilts into the sky and hunts them for a while.
+;
+; What other features read:
+;   KJ_beamActive      true from the moment he stops until the beam goes out
+;   KJ_beamPhase       "idle", "still", "charge", "fire", "sky", "spent"
+;   KJ_beamSpentUntil  mission time until which he is spent (a call before then is refused)
+;   KJ_beamAbort       set it true to cut the sequence short
+;   KJ_beamKills, KJ_beamWrecks, KJ_beamAirKills, KJ_beamRazed, KJ_beamFires   running counts
+;   KJ_beamIgnitions   the line of fire the last beam left: [x, y, strength, time] per point
+; Needs the kjbeam addon (in tmp\@kj_dedushka) named in the mission's addOns[].
+; Nothing here fires a weapon: every death is scripted damage.
+;
+; INTEGRATED set (changes marked [integration]): the beam now has its sounds (the
+; roar feature's KJ_BeamCharge, KJ_Beam, KJ_BeamLoop, KJ_Exhale through snd.sqs), its
+; tremor (KJ_fnShake: the engine's camera shake on the kaiju binary), its animations
+; (the brain plays DedBeamRise and DedBeamLower; this script does when the brain is not
+; running), the furnace light of kj\fx\furnace.sqs on the kaiju binary (KJ_beamCharge
+; drives it; the Fire-class lights below are the stock fallback), the chest point in
+; his current pose (kjPoint) and kills credited to him (KJ_fnKill). And his feet stay
+; planted while the beam cuts: the line swings from the chest, the body does not turn
+; with it (KJ_beamT_bodyTurn).
+
+; ================================ TUNING ================================
+; Seconds he stands dead still, already facing the cut, before anything glows.
+KJ_beamT_still = 3
+; Degrees a second he turns to face the start of the cut.
+KJ_beamT_turnRate = 14
+; Seconds of charge: furnace orange to white, sparks, haze, the light growing.
+KJ_beamT_charge = 7.5
+; Seconds the beam rests on its first point before it starts to move.
+KJ_beamT_hold = 1.2
+; The cut: degrees of arc, the longest ground path in metres, degrees a second, shortest time.
+KJ_beamT_arc = 56
+KJ_beamT_pathMax = 330
+KJ_beamT_sweepRate = 3.4
+KJ_beamT_sweepMin = 7
+; Nearest and farthest the beam lands from his feet, metres.
+KJ_beamT_rangeMin = 70
+KJ_beamT_rangeMax = 650
+; Beam pieces (50 m each): the longest beam is this many times 50 m.
+KJ_beamT_segs = 16
+; Seconds between effect and damage passes while it burns.
+KJ_beamT_fxTick = 0.1
+; How high above the ground the beam still takes buildings and trees, vehicles, men.
+KJ_beamT_reachUp = 16
+KJ_beamT_reachVeh = 7
+KJ_beamT_reachMan = 5
+; The damage walk back along the line: step, number of steps, radius about each step,
+; and how close to the line a man has to be.
+KJ_beamT_burnStep = 9
+KJ_beamT_burnSteps = 16
+KJ_beamT_burnRadius = 10
+KJ_beamT_manRadius = 5
+; A building or tree stands this long after the beam has passed, plus up to the spread.
+KJ_beamT_fallDelay = 0.9
+KJ_beamT_fallSpread = 1.1
+; Aircraft: how near the line kills, how far he hunts, the least height that counts as
+; flying, the longest hunt, degrees a second the beam swings in the sky.
+KJ_beamT_airRadius = 13
+KJ_beamT_skyRange = 900
+KJ_beamT_skyMinAlt = 12
+KJ_beamT_skyMax = 10
+KJ_beamT_slew = 11
+; What stays behind: most fires at once, least gap between them, seconds they burn,
+; seconds the smoke columns stand.
+KJ_beamT_fireMax = 18
+KJ_beamT_fireGap = 16
+; Least distance the beam's point of impact travels between two ignition points on its trail.
+KJ_beamT_igniteGap = 8
+KJ_beamT_fireTime = 170
+KJ_beamT_smokeTime = 300
+; Afterwards: seconds he is spent, seconds the smoke pours from the chest.
+KJ_beamT_spent = 90
+KJ_beamT_spentSmoke = 50
+; Furnace glow sprite, metres: start of charge, end of charge, while firing.
+KJ_beamT_glowMin = 5
+KJ_beamT_glowMax = 15
+KJ_beamT_glowFire = 17
+; Only used when the model has no "zamerny" point to measure: furnace ahead of and above the feet.
+KJ_beamT_chestFwd = 5
+KJ_beamT_chestUp = 31
+; [integration] false: his feet stay where they are and the line swings from the chest across
+; the arc (he must already face the middle of the cut; the brain turns him there with its turn
+; clips). true: the body is turned with the line, as the beam feature did alone (the feet slide).
+KJ_beamT_bodyTurn = false
+; The line may leave his facing by at most this many degrees before the body is turned after
+; all (the sky phase can swing anywhere).
+KJ_beamT_offMax = 62
+; Which end the cut starts from: 1 his left to his right, -1 the other way, 0 the end nearer his facing.
+KJ_beamT_side = 0
+; Seconds the charge sound lasts: it starts that long before the beam, so it ends on the crack.
+KJ_beamT_chargeSnd = 4.2
+; Seconds of KJ_Beam before the loop takes over, and the loop's length.
+KJ_beamT_beamSnd = 4.4
+KJ_beamT_loopSnd = 2.95
+; The tremor: strength while it charges (start, end), at the ignition, and while it burns.
+KJ_beamT_shake = [0.2, 0.8, 1.7, 0.65]
+; A caller may change any of the above for one run: KJ_beamOverride = { KJ_beamT_still = 1 }.
+? not (isNil "KJ_beamOverride") : call KJ_beamOverride
+; [integration] wounded, the furnace is slower to come up (a quarter longer per wound stage)
+? not (isNil "KJ_fnWound") : KJ_beamT_charge = KJ_beamT_charge * (1 + 0.25 * (call KJ_fnWound))
+; ============================= END OF TUNING ============================
+
+_k = _this select 0
+_tgt = _this select 1
+_has2 = (count _this) > 2
+? isNil "KJ_beamActive" : KJ_beamActive = false
+? isNil "KJ_beamSpentUntil" : KJ_beamSpentUntil = -1
+? isNil "KJ_beamIgnoreSpent" : KJ_beamIgnoreSpent = false
+? isNil "KJ_beamPhase" : KJ_beamPhase = "idle"
+? KJ_beamActive : logInfo "KJBEAM refused: already running"; exit
+? (time < KJ_beamSpentUntil) and (not KJ_beamIgnoreSpent) : logInfo "KJBEAM refused: spent"; exit
+? isNull _k : exit
+? not (alive _k) : exit
+KJ_beamActive = true
+KJ_beamPhase = "still"
+KJ_beamAbort = false
+KJ_beamOwner = _k
+KJ_beamSegLen = 50
+KJ_beamDrawn = 0
+KJ_beamDir = [0, 1, 0]
+KJ_beamLen = 0
+KJ_beamLightLevel = 0
+KJ_beamLastAirKill = -1
+KJ_beamBurnt = []
+KJ_beamAir = []
+KJ_beamSegs = []
+KJ_beamLights = []
+KJ_beamOwnTypes = ["KJBeamSeg", "KJBeamProbe", "KJBeamGlowA", "KJBeamGlowB", "KJBeamGlowC", "KJBeamGlowD", "KJBeamGlowHit", "KJBeamGlowRed", "KJBeamFlame", "KJBeamFlameBig", "KJBeamSmoke"]
+? isNil "KJ_beamQueue" : KJ_beamQueue = []
+? isNil "KJ_beamSites" : KJ_beamSites = []
+? isNil "KJ_beamKills" : KJ_beamKills = 0
+? isNil "KJ_beamWrecks" : KJ_beamWrecks = 0
+? isNil "KJ_beamAirKills" : KJ_beamAirKills = 0
+? isNil "KJ_beamRazed" : KJ_beamRazed = 0
+? isNil "KJ_beamFires" : KJ_beamFires = 0
+? isNil "KJ_beamShots" : KJ_beamShots = 0
+? isNil "KJ_beamAfterRunning" : KJ_beamAfterRunning = false
+; True only in a mission whose engine has the native fire-spread commands (see fns.sqf, KJ_beam_fnIgnite).
+? isNil "KJ_fireSpreadNative" : KJ_fireSpreadNative = false
+; Every ignition point of this beam: [x, y, strength, time].
+KJ_beamIgnitions = []
+KJ_beamLastIgn = [-100000, -100000]
+? isNil "KJ_beamFnsLoaded" : call compile preprocessFile "kj\beam\fns.sqf"
+; [integration] the shared core and the roar feature's sound and shake
+? isNil "KJ_coreReady" : call compile preprocessFile "kj\init.sqf"
+? isNull KJ_unit : _k call KJ_fnSetup
+KJ_beamT_chestFwd = KJ_furnaceOfs select 1
+KJ_beamT_chestUp = KJ_furnaceOfs select 2
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJR_sized" : [_k] call KJR_fnSize
+? isNil "KJ_brainOn" : KJ_brainOn = false
+? isNil "KJ_furnaceOn" : KJ_furnaceOn = false
+KJ_beamCharge = 0
+KJ_beamSnd = []
+_hgt = KJ_heightM
+_useFire = not (KJ_native and KJ_furnaceOn)
+_sndAt = 0
+_loopAt = 0
+_shakeAt = 0
+_off = 0
+_hit = objNull
+_red = objNull
+_lights = []
+_segs = []
+
+; ---- the ground probe, and the furnace measured off his own model ----
+_kp = getPosASL _k
+_kx = _kp select 0
+_ky = _kp select 1
+? isNil "KJ_beamProbeObj" : KJ_beamProbeObj = objNull
+? isNull KJ_beamProbeObj : KJ_beamProbeObj = "KJBeamProbe" createVehicle [_kx, _ky, 0]
+KJ_beamProbeOfs = 0
+KJ_beamProbeObj setPos [_kx, _ky, 0]
+KJ_beamProbeOfs = ((getPosASL KJ_beamProbeObj) select 2) - (_kp select 2)
+; A particle dropped on the creature's furnace point (KJ_furnacePoint, from its
+; class: "ded_furnace" on the final models, "zamerny" on the stand-in) reports
+; where it died: the only way a script can read a model point on the stock engine.
+KJ_beamProbeHit = []
+drop ["\kjbeam\kjbeam_glow", "", "Billboard", 1, 0.05, KJ_furnacePoint, [0, 0, 0], 0, 1.275, 1, 0, [0.01], [[0, 0, 0, 0]], [0], 1, 0, "", "kj\beam\probe.sqs", _k]
+_t0 = time
+#waitprobe
+~0.02
+? ((count KJ_beamProbeHit) == 0) and (time < _t0 + 1.5) : goto "waitprobe"
+_kp = getPosASL _k
+KJ_beamChestFwd = KJ_beamT_chestFwd
+KJ_beamChestUp = KJ_beamT_chestUp
+_mUp = 0
+_mFwd = 0
+? (count KJ_beamProbeHit) == 3 : _mUp = (KJ_beamProbeHit select 2) + ([KJ_beamProbeHit select 0, KJ_beamProbeHit select 1] call KJ_beam_fnGround) - (_kp select 2)
+? (count KJ_beamProbeHit) == 3 : _mFwd = sqrt (((KJ_beamProbeHit select 0) - (_kp select 0)) ^ 2 + ((KJ_beamProbeHit select 1) - (_kp select 1)) ^ 2)
+? _mUp > 3 : KJ_beamChestUp = _mUp; KJ_beamChestFwd = _mFwd
+; Does `drop` take the height of an array position above the sea or above the
+; ground? Measured once, where the ground is high enough to tell: a particle
+; dropped at height 100 reports how far above the ground it was.
+? isNil "KJ_beamDropKnown" : KJ_beamDropKnown = false; KJ_beamDropAGL = true
+_g = [_kx, _ky] call KJ_beam_fnGround
+? KJ_beamDropKnown or (_g < 3) : goto "dropKnown"
+_memHit = KJ_beamProbeHit
+KJ_beamProbeHit = []
+drop ["\kjbeam\kjbeam_glow", "", "Billboard", 1, 0.05, [_kx, _ky, 100], [0, 0, 0], 0, 1.275, 1, 0, [0.01], [[0, 0, 0, 0]], [0], 1, 0, "", "kj\beam\probe.sqs"]
+_t0 = time
+#waitdrop
+~0.02
+? ((count KJ_beamProbeHit) == 0) and (time < _t0 + 1.5) : goto "waitdrop"
+? (count KJ_beamProbeHit) == 3 : KJ_beamDropAGL = (abs ((KJ_beamProbeHit select 2) - 100)) < (abs ((KJ_beamProbeHit select 2) - (100 - _g))); KJ_beamDropKnown = true
+logInfo format ["KJBEAM drop height probe: ground %1 reported %2 so drop takes height above ground %3", _g, KJ_beamProbeHit, KJ_beamDropAGL]
+KJ_beamProbeHit = _memHit
+#dropKnown
+logInfo format ["KJBEAM start: kaiju %1 dir %2 probe %3 chest fwd %4 up %5 probeOfs %6", _kp, getDir _k, KJ_beamProbeHit, KJ_beamChestFwd, KJ_beamChestUp, KJ_beamProbeOfs]
+
+; ---- where the cut runs ----
+_isArr = (substr [format ["%1", _tgt], 0, 1]) == "["
+_tp = [0, 0, 0]
+_tAir = false
+? _isArr : _tp = _tgt
+? not _isArr : _tp = getPos _tgt
+? not _isArr : if (("Air" countType [_tgt]) > 0) then { _tAir = true }
+_dx = (_tp select 0) - _kx
+_dy = (_tp select 1) - _ky
+_b0 = _dx atan2 _dy
+_r0 = sqrt (_dx * _dx + _dy * _dy)
+if (_r0 < KJ_beamT_rangeMin) then { _r0 = KJ_beamT_rangeMin }
+if (_r0 > KJ_beamT_rangeMax) then { _r0 = KJ_beamT_rangeMax }
+_arc = KJ_beamT_arc
+_maxArc = (KJ_beamT_pathMax / _r0) * 57.2958
+if (_arc > _maxArc) then { _arc = _maxArc }
+if (_tAir) then { _arc = _arc * 0.5 }
+; start from the side nearer to where he already faces
+_side = 1
+if (([getDir _k, _b0] call KJ_beam_fnTurn) < 0) then { _side = -1 }
+? KJ_beamT_side != 0 : _side = KJ_beamT_side
+_azS = _b0 - _side * _arc / 2
+_sweep = _side * _arc
+_rS = _r0 * 0.93
+_rE = _r0 * 1.07
+? not _has2 : goto "planned"
+_t2 = _this select 2
+_isArr2 = (substr [format ["%1", _t2], 0, 1]) == "["
+_tp2 = [0, 0, 0]
+? _isArr2 : _tp2 = _t2
+? not _isArr2 : _tp2 = getPos _t2
+_dx = (_tp2 select 0) - _kx
+_dy = (_tp2 select 1) - _ky
+_r1 = sqrt (_dx * _dx + _dy * _dy)
+if (_r1 < KJ_beamT_rangeMin) then { _r1 = KJ_beamT_rangeMin }
+if (_r1 > KJ_beamT_rangeMax) then { _r1 = KJ_beamT_rangeMax }
+_azS = _b0
+_sweep = [_b0, _dx atan2 _dy] call KJ_beam_fnTurn
+_rS = _r0
+_rE = _r1
+#planned
+_dur = (abs _sweep) / KJ_beamT_sweepRate
+if (_dur < KJ_beamT_sweepMin) then { _dur = KJ_beamT_sweepMin }
+_path = (abs _sweep) * 0.01745 * (_rS + _rE) / 2
+KJ_beamSiteGap = _path / (KJ_beamT_fireMax * 0.6)
+if (KJ_beamSiteGap < KJ_beamT_fireGap) then { KJ_beamSiteGap = KJ_beamT_fireGap }
+logInfo format ["KJBEAM plan: target %1 air %2 az %3 sweep %4 range %5 to %6 duration %7 path %8", _tp, _tAir, _azS, _sweep, _rS, _rE, _dur, _path]
+
+; ---- 1. he stops. He turns to the cut, and then nothing moves ----
+_k stop true
+_last = time
+_faced = -1
+; [integration] where he must face: the start of the cut when the body turns with the line;
+; else wherever he faces now, as long as both ends of the cut are inside KJ_beamT_offMax of it
+; (the brain has turned him to the target), else the middle of the cut
+_face = _azS
+? KJ_beamT_bodyTurn : goto "still"
+_face = getDir _k
+? ((abs ([_face, _azS] call KJ_beam_fnTurn)) > KJ_beamT_offMax) or ((abs ([_face, _azS + _sweep] call KJ_beam_fnTurn)) > KJ_beamT_offMax) : _face = _azS + _sweep / 2
+#still
+~0.01
+_dt = time - _last
+_last = time
+? (not (alive _k)) or KJ_beamAbort : goto "abort"
+_turn = [getDir _k, _face] call KJ_beam_fnTurn
+_stepMax = KJ_beamT_turnRate * _dt
+if (_turn > _stepMax) then { _turn = _stepMax }
+if (_turn < (0 - _stepMax)) then { _turn = 0 - _stepMax }
+? (abs _turn) > 0.001 : _k setDir ((getDir _k) + _turn)
+? ((abs ([getDir _k, _face] call KJ_beam_fnTurn)) < 1.5) and (_faced < 0) : _faced = time
+? (_faced < 0) or (time < _faced + KJ_beamT_still) : goto "still"
+
+; ---- 2. charge ----
+KJ_beamPhase = "charge"
+logInfo format ["KJBEAM charge at %1", time]
+_c = _k call KJ_beam_fnChest
+; [integration] on the kaiju binary the furnace light is kj\fx\furnace.sqs (one smooth light on
+; the furnace point); these four Fire-class lights are the stock binary's steps
+? _useFire : { _lights = _lights + [_x createVehicle [_kx, _ky, 0]] } forEach ["KJBeamGlowA", "KJBeamGlowB", "KJBeamGlowC", "KJBeamGlowD"]
+KJ_beamLights = _lights
+? not KJ_brainOn : _k playMove "DedBeamRise"
+_red = "KJBeamGlowRed" createVehicle [_kx, _ky, 0]
+_red setPosASL _c
+_red inflame false
+_i = 0
+#mkseg
+_s = "KJBeamSeg" createVehicle [_kx, _ky, 0]
+_s setPosASL [_kx, _ky, -400]
+_segs = _segs + [_s]
+_i = _i + 1
+? _i < KJ_beamT_segs : goto "mkseg"
+KJ_beamSegs = _segs
+_t0 = time
+_tick = 0
+_n = 0
+_sndAt = _t0 + KJ_beamT_charge - KJ_beamT_chargeSnd
+_shakeAt = _t0
+#charge
+~0.01
+? (not (alive _k)) or KJ_beamAbort : goto "abort"
+_p = (time - _t0) / KJ_beamT_charge
+if (_p > 1) then { _p = 1 }
+KJ_beamCharge = _p
+; [integration] the whine of the charge, timed to end on the crack; the ground trembling harder as it builds
+? (_sndAt >= 0) and (time >= _sndAt) : _sndAt = -1; KJ_beamSnd = KJ_beamSnd + [["KJ_BeamCharge", time]]; [_k, "KJ_BeamCharge", "", 4, 0.6] exec "kj\roar\snd.sqs"
+? time >= _shakeAt : _shakeAt = time + 0.8; [getPos _k, (KJ_beamT_shake select 0) + ((KJ_beamT_shake select 1) - (KJ_beamT_shake select 0)) * _p, 1.2, 1.5 * _hgt, 12 * _hgt, 0] call KJ_fnShake
+? time < _tick : goto "chargeNext"
+_tick = time + KJ_beamT_fxTick
+_n = _n + 1
+_c = _k call KJ_beam_fnChest
+_g = (KJ_beamT_glowMin + (KJ_beamT_glowMax - KJ_beamT_glowMin) * _p * _p) * (0.85 + random 0.3)
+[_c, _g, _g * 0.8, 0.24, [1, 0.42 + 0.53 * _p, 0.08 + 0.77 * _p], 0.55 + 0.45 * _p] call KJ_beam_fnGlow
+[_c, 1 + 3 * _p, 3.5, 5 + 7 * _p, 2 + 2 * _p] call KJ_beam_fnSparks
+? (_n mod 2) == 0 : [[_c select 0, _c select 1, (_c select 2) + 4], 6, 17, 3.2, 0.78, 0.09 + 0.09 * _p, 4 + 3 * _p] call KJ_beam_fnPuff
+_lv = 1
+if (_p > 0.3) then { _lv = 2 }
+if (_p > 0.6) then { _lv = 3 }
+if (_p > 0.88) then { _lv = 4 }
+? _lv != KJ_beamLightLevel : [_c, _lv] call KJ_beam_fnLight
+#chargeNext
+? _p < 1 : goto "charge"
+
+; ---- 3. fire: the line, held, then drawn slowly across the ground ----
+KJ_beamPhase = "fire"
+KJ_beamShots = KJ_beamShots + 1
+KJ_beamCharge = 1
+logInfo format ["KJBEAM fire at %1", time]
+; [integration] the crack and the beam's voice, then its loop for as long as it burns; one hard jolt
+KJ_beamSnd = KJ_beamSnd + [["KJ_Beam", time]]
+[_k, "KJ_Beam", "", 4, 0.6] exec "kj\roar\snd.sqs"
+_loopAt = time + KJ_beamT_beamSnd
+[getPos _k, KJ_beamT_shake select 2, 1.6, 2.5 * _hgt, 18 * _hgt, 0] call KJ_fnShake
+_shakeAt = time + 1
+_c = _k call KJ_beam_fnChest
+[_c, 48, 22, 0.5, [1, 0.97, 0.9], 1] call KJ_beam_fnGlow
+[_c, 4] call KJ_beam_fnLight
+_hit = "KJBeamGlowHit" createVehicle [_kx, _ky, 0]
+_hit inflame true
+KJ_beamAir = nearestObjects [[_kx, _ky, 0], ["Air"], KJ_beamT_skyRange]
+? not KJ_beamAfterRunning : [] exec "kj\beam\after.sqs"
+_t0 = time + KJ_beamT_hold
+_tick = 0
+_az = _azS
+#fire
+~0.01
+? (not (alive _k)) or KJ_beamAbort : goto "abort"
+_p = (time - _t0) / _dur
+if (_p < 0) then { _p = 0 }
+if (_p > 1) then { _p = 1 }
+_e = _p * _p * (3 - 2 * _p)
+_az = _azS + _sweep * _e
+_r = _rS + (_rE - _rS) * _e
+; [integration] his feet stay planted: the line swings, the body does not (unless it must)
+_off = [getDir _k, _az] call KJ_beam_fnTurn
+? KJ_beamT_bodyTurn : _k setDir _az
+? (not KJ_beamT_bodyTurn) and (_off > KJ_beamT_offMax) : _k setDir (_az - KJ_beamT_offMax)
+? (not KJ_beamT_bodyTurn) and (_off < (0 - KJ_beamT_offMax)) : _k setDir (_az + KJ_beamT_offMax)
+? time >= _loopAt : _loopAt = time + KJ_beamT_loopSnd; KJ_beamSnd = KJ_beamSnd + [["KJ_BeamLoop", time]]; [_k, "KJ_BeamLoop", "", 7, 0.6] exec "kj\roar\snd.sqs"
+? time >= _shakeAt : _shakeAt = time + 0.9; [getPos _k, KJ_beamT_shake select 3, 1.1, 1.5 * _hgt, 14 * _hgt, 0] call KJ_fnShake
+_kp = getPosASL _k
+_ax = (_kp select 0) + _r * sin _az
+_ay = (_kp select 1) + _r * cos _az
+_a = [_ax, _ay, [_ax, _ay] call KJ_beam_fnGround]
+_c = _k call KJ_beam_fnChest
+[_c, _a, 0] call KJ_beam_fnDraw
+? time < _tick : goto "fireNext"
+_tick = time + KJ_beamT_fxTick
+[_c, KJ_beamDir, KJ_beamLen, true] call KJ_beam_fnBurn
+_g = KJ_beamT_glowFire * (0.85 + random 0.3)
+[_c, _g, _g * 0.7, 0.22, [1, 0.97, 0.9], 1] call KJ_beam_fnGlow
+[_c, 2, 3, 9, 4] call KJ_beam_fnSparks
+_ip = [_ax, _ay, (_a select 2) + 1.5]
+[_ip, 9 + random 5, 5, 0.25, [1, 0.86, 0.56], 1] call KJ_beam_fnGlow
+[_ip, 5, 1.5, 9, 7] call KJ_beam_fnSparks
+[_ip, 3, 12, 4, 0.15, 0.5, 5] call KJ_beam_fnPuff
+_hit setPosASL [_ax, _ay, (_a select 2) + 4]
+[[_ax, _ay], 0.4, "trail"] call KJ_beam_fnIgnite
+[_c, 4] call KJ_beam_fnLight
+#fireNext
+? _p < 1 : goto "fire"
+
+; ---- 4. the sky: tilt up and hunt whatever flies ----
+KJ_beamAir = nearestObjects [[_kx, _ky, 0], ["Air"], KJ_beamT_skyRange]
+_prey = objNull
+{ if (isNull _prey) then { if (alive _x) then { if (((getPos _x) select 2) > KJ_beamT_skyMinAlt) then { _prey = _x } } } } forEach KJ_beamAir
+? isNull _prey : goto "beamoff"
+KJ_beamPhase = "sky"
+logInfo format ["KJBEAM sky at %1: %2 aircraft in range, first prey %3", time, count KJ_beamAir, typeOf _prey]
+_hit inflame false
+_el = (KJ_beamDir select 2) atan2 (sqrt (((KJ_beamDir select 0) ^ 2) + ((KJ_beamDir select 1) ^ 2)))
+_tEnd = time + KJ_beamT_skyMax
+_last = time
+_tick = 0
+#sky
+~0.01
+_dt = time - _last
+_last = time
+? (not (alive _k)) or KJ_beamAbort : goto "abort"
+? not (alive _prey) : _prey = objNull
+{ if (isNull _prey) then { if (alive _x) then { if (((getPos _x) select 2) > KJ_beamT_skyMinAlt) then { _prey = _x } } } } forEach KJ_beamAir
+? isNull _prey : goto "beamoff"
+_c = _k call KJ_beam_fnChest
+_pp = getPosASL _prey
+_dx = (_pp select 0) - (_c select 0)
+_dy = (_pp select 1) - (_c select 1)
+_dz = (_pp select 2) - (_c select 2)
+_stepMax = KJ_beamT_slew * _dt
+_turn = [_az, _dx atan2 _dy] call KJ_beam_fnTurn
+if (_turn > _stepMax) then { _turn = _stepMax }
+if (_turn < (0 - _stepMax)) then { _turn = 0 - _stepMax }
+_az = _az + _turn
+_turn = (_dz atan2 (sqrt (_dx * _dx + _dy * _dy))) - _el
+if (_turn > _stepMax) then { _turn = _stepMax }
+if (_turn < (0 - _stepMax)) then { _turn = 0 - _stepMax }
+_el = _el + _turn
+_off = [getDir _k, _az] call KJ_beam_fnTurn
+? KJ_beamT_bodyTurn : _k setDir _az
+? (not KJ_beamT_bodyTurn) and (_off > KJ_beamT_offMax) : _k setDir (_az - KJ_beamT_offMax)
+? (not KJ_beamT_bodyTurn) and (_off < (0 - KJ_beamT_offMax)) : _k setDir (_az + KJ_beamT_offMax)
+? time >= _loopAt : _loopAt = time + KJ_beamT_loopSnd; KJ_beamSnd = KJ_beamSnd + [["KJ_BeamLoop", time]]; [_k, "KJ_BeamLoop", "", 7, 0.6] exec "kj\roar\snd.sqs"
+? time >= _shakeAt : _shakeAt = time + 0.9; [getPos _k, KJ_beamT_shake select 3, 1.1, 1.5 * _hgt, 14 * _hgt, 0] call KJ_fnShake
+_c = _k call KJ_beam_fnChest
+_a = [(_c select 0) + 1000 * (cos _el) * (sin _az), (_c select 1) + 1000 * (cos _el) * (cos _az), (_c select 2) + 1000 * (sin _el)]
+[_c, _a, KJ_beamT_segs * KJ_beamSegLen] call KJ_beam_fnDraw
+? time < _tick : goto "skyNext"
+_tick = time + KJ_beamT_fxTick
+[_c, KJ_beamDir, KJ_beamLen, false] call KJ_beam_fnBurn
+_g = KJ_beamT_glowFire * (0.85 + random 0.3)
+[_c, _g, _g * 0.7, 0.22, [1, 0.97, 0.9], 1] call KJ_beam_fnGlow
+[_c, 2, 3, 9, 4] call KJ_beam_fnSparks
+[_c, 4] call KJ_beam_fnLight
+#skyNext
+? time < _tEnd : goto "sky"
+
+; ---- 5. out. The furnace sinks to a dull red, smoke pours from it, he is spent ----
+#beamoff
+logInfo format ["KJBEAM out at %1: kills %2 wrecks %3 air %4 razed %5 queued %6 fires %7", time, KJ_beamKills, KJ_beamWrecks, KJ_beamAirKills, KJ_beamRazed, count KJ_beamQueue, KJ_beamFires]
+{ deleteVehicle _x } forEach _segs
+? not (isNull _hit) : deleteVehicle _hit
+KJ_beamSegs = []
+KJ_beamDrawn = 0
+_c = _k call KJ_beam_fnChest
+[_c, 0] call KJ_beam_fnLight
+{ deleteVehicle _x } forEach _lights
+KJ_beamLights = []
+_red setPosASL _c
+? _useFire : _red inflame true
+KJ_beamPhase = "spent"
+KJ_beamSpentUntil = time + KJ_beamT_spent
+KJ_beamActive = false
+KJ_beamCharge = 0
+; [integration] the spent breath; he lowers himself (the brain plays it when it runs)
+KJ_beamSnd = KJ_beamSnd + [["KJ_Exhale", time]]
+[_k, "KJ_Exhale", "", 8, 0.6] exec "kj\roar\snd.sqs"
+? not KJ_brainOn : _k playMove "DedBeamLower"
+_k stop false
+_t0 = time
+#spent
+~0.25
+? not (alive _k) : goto "spentEnd"
+? KJ_beamActive : goto "spentEnd"
+_c = _k call KJ_beam_fnChest
+_red setPosASL _c
+_q = 1 - (time - _t0) / KJ_beamT_spentSmoke
+? _q > 0 : [[_c select 0, _c select 1, (_c select 2) + 1], 4, 15, 5 + random 2, 0.1, 0.12 + 0.5 * _q, 3 + 2 * _q] call KJ_beam_fnPuff
+? _q > 0.4 : [[_c select 0, _c select 1, (_c select 2) - 2], 3, 12, 4 + random 2, 0.14, 0.5 * _q, 4] call KJ_beam_fnPuff
+[_c, 5.5, 4.5, 0.5, [0.75, 0.1, 0.03], 0.45] call KJ_beam_fnGlow
+? time < KJ_beamSpentUntil : goto "spent"
+#spentEnd
+? not (isNull _red) : deleteVehicle _red
+? not KJ_beamActive : KJ_beamPhase = "idle"
+logInfo format ["KJBEAM spent over at %1", time]
+exit
+
+#abort
+logInfo format ["KJBEAM aborted at %1 in phase %2", time, KJ_beamPhase]
+{ deleteVehicle _x } forEach _segs
+{ deleteVehicle _x } forEach _lights
+? not (isNull _hit) : deleteVehicle _hit
+? not (isNull _red) : deleteVehicle _red
+KJ_beamSegs = []
+KJ_beamLights = []
+KJ_beamDrawn = 0
+KJ_beamPhase = "idle"
+KJ_beamActive = false
+KJ_beamCharge = 0
+? (alive _k) and (not KJ_brainOn) : _k playMove "DedBeamLower"
+? alive _k : _k stop false
+exit

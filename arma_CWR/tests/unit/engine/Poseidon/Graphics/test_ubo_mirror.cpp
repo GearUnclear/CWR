@@ -1,9 +1,14 @@
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <random>
+#include <sstream>
+#include <string>
 #include <vector>
 
 // The GL33 backend's constant blocks (LitConstants, VSConstants) are written
@@ -197,4 +202,57 @@ TEST_CASE("UboMirror: a partial upload is recorded, so setting the slot back is 
     Flush(m, gpu, cpu.data(), true);
     CHECK(gpu.data[kFlags * 4] == 1.0f);
     CHECK(SameOutside(gpu, cpu, 0, 0));
+}
+
+// Perf W1-3: both flushes dedupe always. The mirror makes a deduped flush
+// leave the buffer exactly as a whole-block flush would (the cases above), so
+// the choice must not depend on a feature gate: with the drawGrouping gate off
+// (the Classic lighting row, the all-off baseline) the old code sent the whole
+// block on every draw. Plan keeps its dedupe parameter so the cases above
+// still cover both modes.
+namespace
+{
+std::string ReadGl33Source(const char* file)
+{
+    // TESTS_ROOT_DIR points at <repo>/tests (tests/unit/engine/Poseidon/CMakeLists.txt).
+    const std::filesystem::path p =
+        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33" / file;
+    std::ifstream f(p);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+std::string FlushBody(const std::string& source, const std::string& signature)
+{
+    const size_t start = source.find(signature);
+    if (start == std::string::npos)
+        return {};
+    const size_t end = source.find("\n}\n", start);
+    return source.substr(start, end == std::string::npos ? std::string::npos : end - start);
+}
+} // namespace
+
+TEST_CASE("UboMirror: the lit and VS flushes dedupe whatever the feature gates say", "[gpu][UboMirror][W1-3]")
+{
+    const struct
+    {
+        const char* file;
+        const char* signature;
+    } flushes[] = {
+        {"EngineGL33_Lighting.cpp", "void EngineGL33::FlushLitConstants()"},
+        {"EngineGL33_Shaders.cpp", "void EngineGL33::FlushVSConstants()"},
+    };
+    for (const auto& fl : flushes)
+    {
+        const std::string source = ReadGl33Source(fl.file);
+        REQUIRE_FALSE(source.empty());
+        const std::string body = FlushBody(source, fl.signature);
+        CAPTURE(fl.file, body);
+        REQUIRE_FALSE(body.empty());
+        CHECK(body.find("DrawGrouping") == std::string::npos);
+        CHECK(body.find("_featureGates") == std::string::npos);
+        CHECK(body.find("const bool dedupe = true;") != std::string::npos);
+        CHECK(body.find("Mirror.Plan(") != std::string::npos);
+    }
 }

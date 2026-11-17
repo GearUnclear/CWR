@@ -1,0 +1,11 @@
+; DedushkaDemo staging menu: every beat on the player's action menu, for a
+; hand-run shoot. The actions are added in this order, so an action's id is
+; its index in KJD_menu (kjd_act.sqs looks it up).
+;   ["run"]          the whole timeline (KJD_plan)
+;   ["beat", name]   one beat (kjd_beat.sqs)
+;   ["cam", name]    a camera spot (kjd_cam.sqs); "off" gives the view back
+;   ["order", [..]]  a plain order to the brain
+KJD_menu = [["run"], ["beat", "wake"], ["beat", "through"], ["beat", "roar"], ["beat", "fire"], ["beat", "beam"], ["beat", "sea"], ["beat", "dormant"], ["beat", "kill"], ["beat", "back"], ["beat", "stomp"], ["order", ["idle"]], ["order", ["auto", true]], ["order", ["auto", false]], ["cam", "far"], ["cam", "street"], ["cam", "square"], ["cam", "armour"], ["cam", "high"], ["cam", "shore"], ["cam", "off"]]
+_titles = ["Dedushka: play the whole demo", "Dedushka: wake", "Dedushka: walk in through the houses", "Dedushka: roar", "Dedushka: the armour fires", "Dedushka: beam the town", "Dedushka: walk out to sea", "Dedushka: go dormant", "Dedushka: a heavy force kills him (WEAPONS FIRE)", "Dedushka: walk back to the start", "Dedushka: stomp the BMP", "Dedushka: stop and stand", "Dedushka: decide for himself", "Dedushka: only on command", "Camera: far out on the bay", "Camera: the street", "Camera: the square", "Camera: behind the armour", "Camera: high over the town", "Camera: the shore", "Camera: off"]
+{ player addAction [_x, "kjd_act.sqs"] } forEach _titles
+exit

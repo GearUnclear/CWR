@@ -1,0 +1,11 @@
+# Chupacabra joints in motion (experiment, kept out of tests/integration). Needs
+# ../addon/build-udchupa.ps1 -CustomMoves (UDChupacabraAnim, CfgMovesChupa)
+# and a data dir in the same tmp folder as @udchupa, like
+# tests/integration/scripting/cryptid_model_spawn. Written by
+# gen_chupa_anim_tests.py. Run with --render gl33, quiet, no gunfire.
+tags = ["cryptid", "experiment", "visual"]
+binary = "PoseidonGame"
+mission = "experiments/cryptid/ChupaModel.Eden"
+timeout = 349
+assert_timeout = 90
+extra_args = ["--nosound", "--no-strict", "--width", "1280", "--height", "720", "--mods-dir", "..", "--mod", "@udchupa"]

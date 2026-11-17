@@ -1,0 +1,79 @@
+; ============================================================================
+;  kj\start.sqs  -  the integrated creature script set: the ONE entry point.
+;
+;      [kaiju] exec "kj\start.sqs"               he starts dormant
+;      [kaiju, "idle"] exec "kj\start.sqs"       he starts awake, standing
+;
+;  Copy the whole kj\ folder into a mission, mount tmp\@kj_dedushka, name the
+;  addons uddedushka, kjbeam and kj_roar in the mission's addOns[], make a
+;  creature (UDDedushka, or any other creature class of the addon) and exec
+;  this on it. The creature is a data entry: its sizes, its points, its clips'
+;  timing and its voice are read off the unit (kj\init.sqf, KJ_fnSetup), so
+;  the same scripts drive every creature class.
+;
+;  It starts everything that runs for his lifetime:
+;    kj\brain   what he decides and how he moves (states, orders, the walk)
+;    kj\crush   what his body does to the world (footfalls, houses, vehicles,
+;               men, stomp, swat; being shot, while KJ_unkillable)
+;    kj\roar    his sounds, the fear, the footfall's dust, thump and shake,
+;               presence (lamps, birds, radio, furnace drone)
+;    kj\beam    his breath (started by the brain, or kj\beam\fire.sqs)
+;    kj\fx      the furnace: its glow, its light and its embers
+;    kj\combat  his health, wounds and death, when that feature is in the
+;               mission (kj\combat\start.sqs); else he is unkillable
+;  and it works out which engine it runs on (KJ_native). On the kaiju binary
+;  the native commands are used; on the stock binary every one of them has a
+;  script fallback. KJ_forceStock = true (before this) keeps the fallbacks on
+;  the kaiju binary too.
+;
+;  Driving him: kj\brain\order.sqs, or KJ_brainOrder = [word, argument].
+;  KJ_brainAuto = false (before this) makes him do only what he is told.
+;  KJ_ready is true when everything is up. KJ_dead (kj\init.sqf) ends it all.
+;  One creature runs the set at a time (its state is in globals); a second
+;  creature can stand on the map, but not think.
+; ============================================================================
+_k = _this select 0
+? isNull _k : exit
+? isNil "KJ_ready" : KJ_ready = false
+? KJ_ready : logInfo "KJ start refused: already running"; exit
+call compile preprocessFile "kj\init.sqf"
+; ---- his health: the combat feature when it is in the mission, else unkillable
+? isNil "KJ_combatFile" : KJ_combatFile = (loadFile "kj\combat\start.sqs") != ""
+? KJ_combatFile : KJ_unkillable = false; KJ_hasCombat = true
+_k call KJ_fnSetup
+; killable: the engine's damage ceiling must not hold him at 0.6 for ever
+? KJ_native and (not KJ_unkillable) : kjSet [_k, "damageCeiling", -1]
+; every feature is in this set: the brain does not have to look for files
+KJ_brainHas = [true, true, true, true]
+? (count _this) > 1 : goto "first"
+[_k] exec "kj\brain\start.sqs"
+goto "wait"
+#first
+[_k, _this select 1] exec "kj\brain\start.sqs"
+#wait
+@ not (isNil "KJB_ready")
+@ KJ_brainOn
+[_k] exec "kj\fx\furnace.sqs"
+? KJ_hasCombat : [_k] exec "kj\combat\start.sqs"
+KJ_ready = true
+logInfo format ["KJ ready at %1: creature %2, native %3, state %4, unkillable %5, combat feature %6", time, typeOf _k, KJ_native, KJ_state, KJ_unkillable, KJ_hasCombat]
+
+; ---- dead is dead: everything stops, cleanly, once
+#watch
+~0.25
+? isNull _k : goto "dead"
+? KJ_dead : goto "dead"
+? (not KJ_unkillable) and (not (alive _k)) : goto "dead"
+goto "watch"
+#dead
+; [finishing] a body with no death sequence of its own (no combat feature in the set) goes dark here
+? (not (isNull _k)) and (not KJ_hasCombat) : [_k, 0] call KJ_fnGlow
+KJ_dead = true
+KJ_beamAbort = true
+KJ_furnaceOn = false
+KJ_presenceOn = false
+KJ_walkOn = false
+KJ_crushOn = false
+KJ_ready = false
+logInfo format ["KJ dead at %1: the set has stopped (state %2)", time, KJ_state]
+exit

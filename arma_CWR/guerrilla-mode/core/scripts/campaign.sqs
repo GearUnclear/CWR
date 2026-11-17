@@ -17,6 +17,9 @@
 ;  truth says it is unnecessary.)
 ;
 ;  What still needs reconciling after a load (this file's loop):
+;    (0) the player body: when the engine rebuilt it (its class came from a
+;        mod no longer mounted), rebind aP / gmPlayer to the live player and
+;        clear the market / recruit action mounts recorded on the old body;
 ;    (a) companions: keep a live restored body (world serializer brought it
 ;        back and the GM_COMP_OBJ link deserialized valid) and just re-apply
 ;        skill; null a dead/dangling handle so companions.sqs's own
@@ -76,6 +79,17 @@ GM_pVer = (GM_pBatch select 0) select 0
 ; new capture events load as empty handler slots and fire into nothing -
 ; consolidation mechanics apply, the extra narration does not.)
 
+; (0) the player body. A save whose body class the loaded package lacks (a
+; mod no longer mounted) comes back with the body REBUILT by the engine, so
+; every saved handle to the old body (aP, gmPlayer) is null. Rebind them to
+; the live player, and drop every action mount the managers recorded on the
+; old body: those ids died with it, and removing them from the new body
+; could strip an unrelated action. Each manager re-mounts on its next poll.
+GM_pNewBody = (isNull aP) or (aP != player) or (isNull gmPlayer) or (gmPlayer != player)
+? isNull player : GM_pNewBody = false
+? GM_pNewBody : goto "rebody"
+#rebodyDone
+
 ; (a) companion handles: trust-but-verify the deserialized links
 GM_pI = 0
 #cchk
@@ -94,13 +108,37 @@ goto "cchk"
 ; (b) player-faction group bookkeeping
 GM_PLAYER_GROUPS = [group aP]
 
-; (c) exactly one Save action
-aP removeAction GM_pSaveAct
+; (c) exactly one Save action (a rebuilt body carries none: GM_pSaveAct is -1)
+? GM_pSaveAct >= 0 : aP removeAction GM_pSaveAct
 GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
 
 hint "Guerrilla campaign restored."
 gmJournalNote ["Record restored. The campaign resumes where it stood.", "", "plain"]
 goto "loop"
+
+;  #rebody - (0) above: the saved player body did not come back
+#rebody
+aP = player
+gmPlayer = player
+GM_pSaveAct = -1
+; market.sqs mounts (HQ, cache, garage, dealer); the next poll re-mounts
+gmMktHqAct = -1
+gmMktHqActive = false
+gmMktCacheActs = []
+gmMktCacheActive = false
+gmMktGarAct = -1
+gmMktGarActive = false
+gmMktGarVeh = objNull
+gmMktBuyActs = []
+gmMktDelivAct = -1
+gmMktBuyActive = false
+gmMktDealer = -1
+; recruit.sqs mount (the HQ recruit menu)
+gmActRecruit = -1
+gmActSpec = -1
+gmActTrain = -1
+gmRecruitActive = false
+goto "rebodyDone"
 
 ;  #won - the win latch fired: say so once while the end clock runs. The
 ;  victory line is already in the diary (native, written on the latch).

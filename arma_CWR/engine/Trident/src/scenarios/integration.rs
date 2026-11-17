@@ -15,6 +15,16 @@
 //!   `no_menu` = true                      — don't require main menu IDD 0
 //!   `no_player` = true                    — mission has no player; skip player-ready wait
 //!   `extra_args` = \["--flag", "value"\]  — additional CLI args
+//!
+//! `extra_args` values may use `${repo_root}`, expanded to the engine checkout
+//! root (`arma_CWR`, the root a relative `data_dir` or `mission` resolves
+//! against). Use it for repo fixtures, e.g.
+//! `"--mod", "@LoBo;${repo_root}/tests/fixtures/mods-lobo/@lobofixup"`: a
+//! path relative to the game CWD (the data dir) only lands in the repo when
+//! the data dir happens to sit at a fixed depth inside it. A mod that lives
+//! inside the data dir itself (`@LoBo` on a Remaster shadow) uses
+//! `"--mods-dir", "."`. Multi-instance `test.toml` files get the same token
+//! next to `${output}` and `${env.NAME}`.
 
 use crate::client::GameInstance;
 use crate::scenarios::ScenarioResult;
@@ -1136,6 +1146,19 @@ fn insert_effective_data_dir(
     }
 }
 
+/// The data dir a test will actually boot, for the engine-slot ledger.
+fn ledger_data_dir(test: &IntegrationTest, default_dir: Option<&str>) -> Option<String> {
+    let pinned = match &test.kind {
+        TestKind::Sqf(path) | TestKind::Mission(path) => load_test_meta(path).data_dir,
+        TestKind::Multi(path) => super::multi::configured_data_dir(path).ok().flatten(),
+        TestKind::Seq(_) => None,
+    };
+    pinned
+        .as_deref()
+        .or(default_dir)
+        .map(|d| super::multi::resolve_data_dir_path(d).display().to_string())
+}
+
 fn effective_data_dirs(
     tests: &[IntegrationTest],
     default_dir: Option<&str>,
@@ -1232,13 +1255,13 @@ async fn run_mission_test(
     // Automated tests run strict (the rwdi build players run defaults to --no-strict).
     // Injected before extra_args so a per-test `--no-strict` in the sidecar toml wins.
     cmd.args(["--strict"]);
-    cmd.args(&meta.extra_args);
+    cmd.args(super::multi::expand_single_test_args(&meta.extra_args));
     cmd.args(cli_game_args);
     if effective_data_dir.is_some() {
         cmd.arg("-C").arg(&work_dir);
     }
     cmd.env("POSEIDON_USER_DIR", &user_dir)
-        .env("POSEIDON_CACHE_DIR", &user_dir)
+        .env("POSEIDON_CACHE_DIR", super::poseidon_cache_dir(&user_dir))
         .env("POSEIDON_TEMP_DIR", &user_dir)
         .env("TRI_OUTPUT_DIR", output_dir.as_os_str())
         .env("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0")
@@ -1461,9 +1484,10 @@ async fn run_sqf_test(
         (Some(tmp), p)
     };
     let output_str = output_dir.to_string_lossy().to_string();
+    let cache_dir = super::poseidon_cache_dir(&user_dir);
     let env_vars = [
         ("POSEIDON_USER_DIR", user_dir.as_str()),
-        ("POSEIDON_CACHE_DIR", user_dir.as_str()),
+        ("POSEIDON_CACHE_DIR", cache_dir.as_str()),
         ("POSEIDON_TEMP_DIR", user_dir.as_str()),
         ("TRI_OUTPUT_DIR", output_str.as_str()),
         ("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0"),
@@ -1520,7 +1544,7 @@ async fn run_sqf_test(
     // Automated tests run strict (the rwdi build players run defaults to --no-strict).
     // Pushed before the sidecar toml's extra_args so a per-test `--no-strict` wins.
     extra_args.push("--strict".into());
-    extra_args.extend(meta.extra_args.iter().cloned());
+    extra_args.extend(super::multi::expand_single_test_args(&meta.extra_args));
     extra_args.extend(cli_game_args.iter().cloned());
     tracing::debug!("[{name}] game extra_args: {:?}", extra_args);
     let extra_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
@@ -1958,6 +1982,7 @@ pub async fn run_all(
         let kind = test.kind.clone();
         let tags = test.tags.clone();
         let slots = test.parallel_slots(max_slots);
+        let ledger_dir = ledger_data_dir(test, data_dir);
         let game_dir = game_dir.to_string();
         let data_dir = data_dir.map(String::from);
         let render = render.map(String::from);
@@ -1969,6 +1994,10 @@ pub async fn run_all(
 
         handles.spawn(async move {
             let _permit = sem.acquire_many(slots).await.expect("semaphore closed");
+            let _global = match crate::slots::acquire(slots, &name, ledger_dir.as_deref()).await {
+                Ok(permit) => permit,
+                Err(e) => return (name, Err(e)),
+            };
 
             // Track this test as running after it has acquired runner slots.
             {
@@ -2063,6 +2092,7 @@ pub async fn run_all(
             let tkind = test.kind.clone();
             let ttags = test.tags.clone();
             let slots = test.parallel_slots(max_slots);
+            let ledger_dir = ledger_data_dir(test, data_dir);
             let gdir = game_dir.to_string();
             let ddir = data_dir.map(String::from);
             let render = render.map(String::from);
@@ -2075,6 +2105,11 @@ pub async fn run_all(
 
             retry_handles.spawn(async move {
                 let _permit = sem.acquire_many(slots).await.expect("semaphore closed");
+                let _global =
+                    match crate::slots::acquire(slots, &tname, ledger_dir.as_deref()).await {
+                        Ok(permit) => permit,
+                        Err(e) => return (ridx, tname, Err(e)),
+                    };
 
                 {
                     let mut names = rn.lock().unwrap();
@@ -2148,6 +2183,12 @@ async fn run_all_sequential(
 
     for test in tests {
         running_pb.set_message(test.name.clone());
+        let _global = crate::slots::acquire(
+            test.instance_count(),
+            &test.name,
+            ledger_data_dir(test, data_dir).as_deref(),
+        )
+        .await?;
         let result = run_test(
             test,
             game_dir,
@@ -2213,6 +2254,12 @@ async fn run_all_sequential(
         for idx in failed {
             let test = &tests[idx];
             running_pb.set_message(test.name.clone());
+            let _global = crate::slots::acquire(
+                test.instance_count(),
+                &test.name,
+                ledger_data_dir(test, data_dir).as_deref(),
+            )
+            .await?;
             let result = run_test(
                 test,
                 game_dir,

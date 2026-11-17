@@ -1,0 +1,6 @@
+// Finals photo test bed (a copy of DedushkaPhoto.Eden): standalone experiment mission (not a Guerrilla
+// template). Needs the uddedushka addon mounted (@uddedushka, built by
+// experiments/kaiju/addon/build-uddedushka.ps1); without it the boot fails on
+// the addOns[] entry, by design.
+onLoadMission = "Dedushka finals photo test";
+respawn = 0;

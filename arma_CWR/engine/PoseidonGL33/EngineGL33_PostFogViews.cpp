@@ -145,6 +145,148 @@ void EngineGL33::FarInteriorGlass(const PostFrame& f)
     InvalidatePipelineCache();
 }
 
+void EngineGL33::DestroyFarSlice()
+{
+    FarSliceState& s = _farSlice;
+    for (unsigned int* fbo : {&s.copyFbo, &s.fbo})
+    {
+        if (*fbo)
+            glDeleteFramebuffers(1, fbo);
+        *fbo = 0;
+    }
+    for (unsigned int* tex : {&s.copyTex, &s.maskTex})
+    {
+        if (*tex)
+        {
+            GL33Bind::OnTexDeleted(*tex);
+            glDeleteTextures(1, tex);
+        }
+        *tex = 0;
+    }
+    s.w = s.h = 0;
+    s.failed = false;
+    s.maskFrame = 0xffffffffu;
+}
+
+void EngineGL33::FarSliceDepth(const PostFrame& f)
+{
+    // Only a frame that reserved the far slice (KaijuFarDraw.cpp, through
+    // SetDepthRange): every other frame leaves here.
+    FarSliceState& s = _farSlice;
+    const std::uint32_t frame = GetFrameCounter();
+    if (s.frame != frame || !(s.split > 0.0f && s.split < 1.0f) || !s.prog || !_post.depthTex || f.w <= 0 ||
+        f.h <= 0)
+        return;
+    if (s.w != f.w || s.h != f.h)
+    {
+        DestroyFarSlice();
+        s.w = f.w;
+        s.h = f.h;
+        GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
+        // As the resolved depth (a depth blit needs the same format).
+        s.copyTex = MakeSaveTex(GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, f.w, f.h, GL_NEAREST);
+        s.maskTex = MakeSaveTex(GL_R8, GL_RED, GL_UNSIGNED_BYTE, f.w, f.h, GL_NEAREST);
+        GL33Bind::Invalidate();
+        bool complete = MakeSaveFbo(GL_DEPTH_STENCIL_ATTACHMENT, s.copyTex, s.copyFbo);
+        glGenFramebuffers(1, &s.fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, s.fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s.maskTex, 0);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, _post.depthTex, 0);
+        complete = complete && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        s.failed = !complete;
+        if (!complete)
+            LOG_ERROR(Graphics,
+                      "GL33 post: the far slice's put-back {}x{} is incomplete; a far-drawn unit's frames keep the "
+                      "squeezed depth",
+                      f.w, f.h);
+    }
+    if (s.failed)
+        return;
+
+    // The world's projection of the resolved depth (the night-vision path
+    // hands in the fog's frame, which may hold a vehicle interior's).
+    PostFrame g;
+    PostFrameGeometry(g);
+    const bool save = _fog.intFrame == frame && _fog.intDepthTex != 0 && _fog.intDepthFbo != 0 &&
+                      _fog.intW == f.w && _fog.intH == f.h;
+
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_CULL_FACE);
+    glDepthRange(0.0, 1.0);
+    Poseidon::render::blend::Opaque();
+    Poseidon::render::depthstencil::AlwaysWrite();
+    glDisable(GL_STENCIL_TEST);
+    glBindVertexArray(_post.vao);
+    glUseProgram(s.prog);
+    Poseidon::gl33post::SetInt(s.prog, "depthTex", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindSampler(0, 0);
+    _samplerSlot0 = -1; // the post pass binds unit 0's material sampler again at its end
+    // One depth: copied as resolved, then written back through the shader,
+    // the mark into maskTex when `mark`.
+    auto putBack = [&](unsigned int srcFbo, unsigned int depthTex, const float* projInfo, bool mark)
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s.copyFbo);
+        glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, s.fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depthTex, 0);
+        glViewport(0, 0, f.w, f.h);
+        const float standIn = rm::FarSliceStandInDepth(projInfo[0], projInfo[1], g.depthScale, g.depthBias);
+        Poseidon::gl33post::Set4(s.prog, "farSlice", s.split, standIn, 0.0f, 0.0f);
+        glBindTexture(GL_TEXTURE_2D, s.copyTex);
+        Poseidon::render::pipeline::SetColorMask(mark);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    };
+    // The resolved depth: the world's, or a vehicle interior's own (drawn in
+    // the squeezed range too, with nothing of the far unit in it).
+    putBack(_post.depthFbo, _post.depthTex, g.projInfo, !save);
+    // The world's depth the interior saved, which the fog reads.
+    if (save)
+        putBack(_fog.intDepthFbo, _fog.intDepthTex, _fog.intProjInfo, true);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    // The target keeps the resolved depth attached between frames.
+    glBindFramebuffer(GL_FRAMEBUFFER, s.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, _post.depthTex, 0);
+    Poseidon::render::depthstencil::Disabled(/*hasStencil*/ false);
+    Poseidon::render::pipeline::SetColorMask(true);
+    glBindFramebuffer(GL_FRAMEBUFFER, _post.depthFbo);
+    GL33Bind::Invalidate();
+    InvalidatePipelineCache();
+    s.maskFrame = frame;
+    s.maskOnSave = save;
+}
+
+void EngineGL33::BindFarMask(unsigned int prog, int saved[2], bool onWorldSave)
+{
+    saved[0] = saved[1] = -1;
+    const FarSliceState& s = _farSlice;
+    const bool on = s.maskFrame == GetFrameCounter() && s.maskTex != 0 && (onWorldSave || !s.maskOnSave);
+    Poseidon::gl33post::SetInt(prog, "farMask", Poseidon::gl33lighting::kFarMaskUnit);
+    Poseidon::gl33post::Set4(prog, "farKeep", on ? 1.0f : 0.0f, std::clamp(s.floor, 0.0f, 1.0f), 0.0f, 0.0f);
+    if (!on)
+        return;
+    // The decal batch's unit, borrowed for the draw and handed back as it was.
+    glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kFarMaskUnit);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &saved[0]);
+    glGetIntegerv(GL_SAMPLER_BINDING, &saved[1]);
+    glBindSampler(Poseidon::gl33lighting::kFarMaskUnit, 0);
+    glBindTexture(GL_TEXTURE_2D, s.maskTex);
+    glActiveTexture(GL_TEXTURE0);
+    GL33Bind::Invalidate();
+}
+
+void EngineGL33::UnbindFarMask(const int saved[2])
+{
+    if (saved[0] < 0)
+        return;
+    glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kFarMaskUnit);
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(saved[0]));
+    glBindSampler(Poseidon::gl33lighting::kFarMaskUnit, static_cast<GLuint>(saved[1]));
+    glActiveTexture(GL_TEXTURE0);
+    GL33Bind::Invalidate();
+}
+
 unsigned int EngineGL33::PostFogDepthTex() const
 {
     const bool saved = _fog.intFrame == GetFrameCounter() && _fog.intDepthTex != 0;

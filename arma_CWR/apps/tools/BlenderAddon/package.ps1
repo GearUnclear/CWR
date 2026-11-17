@@ -68,7 +68,7 @@ $staging = Join-Path $tempRoot "blender_addon_$(Get-Random)"
 $addonDir = Join-Path $staging "io_import_p3d"
 New-Item -ItemType Directory -Path $addonDir -Force | Out-Null
 
-$pyFiles = @("__init__.py", "p3d_lib.py", "import_p3d.py", "helpers.py", "operators.py", "panels.py", "blender_manifest.toml")
+$pyFiles = @("__init__.py", "p3d_lib.py", "import_p3d.py", "helpers.py", "operators.py", "panels.py", "export_p3d.py", "mlod_writer.py", "rtm_io.py", "rtm_engine.py", "rtm_rig.py", "rtm_blender.py", "blender_manifest.toml")
 foreach ($f in $pyFiles) {
     Copy-Item "apps\tools\BlenderAddon\io_import_p3d\$f" $addonDir
     Write-Host "  + $f"

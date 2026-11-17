@@ -1,0 +1,7 @@
+// Dedushka combat test bed: standalone experiment mission (not a Guerrilla
+// template). Needs the combat variant of the creature addon mounted in place
+// of @uddedushka (@kj_combat, built by ..\addon\build-kjcombat.ps1). The script
+// payload kj\combat\ is copied in from ..\kj\combat\ by run-combat.ps1 before
+// every run; edit it there, not here.
+onLoadMission = "Dedushka combat test";
+respawn = 0;

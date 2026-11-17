@@ -4,4 +4,4 @@ binary = "PoseidonGame"
 # -> character screen -> LoBoGolaniWB -> island switch to Abel -> launch.
 timeout = 600
 assert_timeout = 300
-extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]
+extra_args = ["--dev", "--no-strict", "--mods-dir", ".", "--mod", "@LoBo;${repo_root}/tests/fixtures/mods-lobo/@lobofixup"]

@@ -411,3 +411,229 @@ TEST_CASE("CampaignEnd - the victory and debriefing text", "[game][guerrilla][ca
         CHECK(s.find(" -- ") == std::string::npos);
     }
 }
+
+// ---------------------------------------------------------------------------
+// the lose latch (OCCUPIER-FORCES.md 9.2, D10, D13)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// strip the resistance of everything kWarConfig authors for it
+void StripResistance(Fixture& f)
+{
+    f.SetOwner("Camp", "EAST");
+    f.SetOwner("Ours", "EAST");
+}
+
+} // namespace
+
+TEST_CASE("CampaignEnd - lost: no HQ, no base and no town gives EMLoser once", "[game][guerrilla][campaignend]")
+{
+    Fixture f;
+    f.Load(kWarConfig);
+    // the opening: the Camp and the outpost are ours, the HQ stands
+    CHECK_FALSE(f.end.EvaluateLost(f.registry, true, true));
+    // the HQ falls while the Camp still stands: a setback, not the end
+    CHECK_FALSE(f.end.EvaluateLost(f.registry, false, true));
+    CHECK_FALSE(f.end.Lost());
+    // then the last bases go
+    StripResistance(f);
+    CHECK(f.end.EvaluateLost(f.registry, false, true, 7, 600));
+    CHECK(f.end.Lost());
+    CHECK_FALSE(f.end.Won());
+    CHECK(f.end.LostDay() == 7);
+    CHECK(f.end.LostMinute() == 600);
+    // the latch fires once
+    CHECK_FALSE(f.end.EvaluateLost(f.registry, false, true));
+    // the same end clock as the win, once
+    CHECK(f.end.EndPending());
+    CHECK(f.end.EndClock() == Approx(30.0f));
+    CHECK_FALSE(f.end.AdvanceEnd(29.0f));
+    CHECK(f.end.AdvanceEnd(1.0f));
+    CHECK(f.end.EndIssued());
+    CHECK_FALSE(f.end.AdvanceEnd(10.0f));
+    // a base retaken afterwards does not undo the loss, and no win follows
+    f.SetOwner("Outpost", "GUER");
+    f.SetOwner("Field", "GUER");
+    CHECK_FALSE(f.end.Evaluate(f.registry));
+    CHECK_FALSE(f.end.Won());
+    CHECK(f.end.Lost());
+}
+
+TEST_CASE("CampaignEnd - the HQ destroyed while holding nothing loses, while holding something does not",
+          "[game][guerrilla][campaignend]")
+{
+    SECTION("holding nothing: the fall of the HQ is the end")
+    {
+        Fixture f;
+        f.Load(kWarConfig);
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, true, true)); // primes the once-held set
+        StripResistance(f);
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, true, true)); // the HQ still stands
+        CHECK(f.end.EvaluateLost(f.registry, false, true));      // destroyed
+    }
+    SECTION("holding a town: not lost")
+    {
+        Fixture f;
+        f.Load(kWarConfig);
+        StripResistance(f);
+        f.SetOwner("Town", "GUER");
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, false, true));
+        CHECK_FALSE(f.end.Lost());
+    }
+    SECTION("holding a base (not the Camp): not lost")
+    {
+        Fixture f;
+        f.Load(kWarConfig);
+        f.SetOwner("Camp", "EAST");
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, false, true));
+    }
+    SECTION("holding only the Camp: not lost")
+    {
+        Fixture f;
+        f.Load(kWarConfig);
+        f.SetOwner("Ours", "EAST");
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, false, true));
+    }
+    SECTION("an HQ re-established with nothing held: not lost")
+    {
+        Fixture f;
+        f.Load(kWarConfig);
+        StripResistance(f);
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, true, true));
+        CHECK_FALSE(f.end.Lost());
+    }
+}
+
+TEST_CASE("CampaignEnd - never lost after a win, nor with the rule off", "[game][guerrilla][campaignend]")
+{
+    SECTION("won first")
+    {
+        Fixture f;
+        f.Load(kWarConfig);
+        f.SetOwner("Outpost", "GUER");
+        f.SetOwner("Field", "GUER");
+        REQUIRE(f.end.Evaluate(f.registry));
+        // everything lost afterwards, the HQ too
+        f.SetOwner("Outpost", "EAST");
+        f.SetOwner("Field", "EAST");
+        StripResistance(f);
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, false, true));
+        CHECK_FALSE(f.end.Lost());
+        CHECK(f.end.Won());
+    }
+    SECTION("campaignEnd = 0")
+    {
+        std::string config = kWarConfig;
+        const std::string key = "    campaignEndDelay = 30;\n";
+        const size_t at = config.find(key);
+        REQUIRE(at != std::string::npos);
+        config.insert(at, "    campaignEnd = 0;\n");
+        Fixture f;
+        f.Load(config.c_str());
+        StripResistance(f);
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, false, true));
+        CHECK_FALSE(f.end.Lost());
+        CHECK_FALSE(f.end.EndPending());
+    }
+    SECTION("a campaign that never had anything is not lost on its first second")
+    {
+        Fixture f;
+        f.Load(kWarConfig);
+        StripResistance(f); // before any check saw them held
+        CHECK_FALSE(f.end.EvaluateLost(f.registry, false, false));
+        CHECK_FALSE(f.end.Lost());
+        // it had an HQ once: now it is
+        CHECK(f.end.EvaluateLost(f.registry, false, true));
+    }
+}
+
+TEST_CASE("CampaignEnd - the once-held counters and the lose text", "[game][guerrilla][campaignend]")
+{
+    Fixture f;
+    f.Load(kWarConfig);
+    CHECK_FALSE(f.end.EvaluateLost(f.registry, true, true));
+    // the Camp is not a base it took; the resistance outpost it started with is
+    CHECK(f.end.BasesOnceHeld(f.registry) == 1);
+    CHECK(f.end.TownsOnceHeld(f.registry) == 0);
+    f.SetOwner("Outpost", "GUER");
+    f.SetOwner("Town", "GUER");
+    CHECK_FALSE(f.end.Evaluate(f.registry));
+    CHECK(f.end.BasesOnceHeld(f.registry) == 2);
+    CHECK(f.end.TownsOnceHeld(f.registry) == 1);
+    CHECK(f.end.ZonesOnceHeld() == 4); // Camp, Ours, Outpost, Town
+    // losing them again keeps the count
+    f.SetOwner("Outpost", "EAST");
+    f.SetOwner("Town", "NEUTRAL");
+    StripResistance(f);
+    REQUIRE(f.end.EvaluateLost(f.registry, false, true, 12, 0));
+    CHECK(f.end.BasesOnceHeld(f.registry) == 2);
+    CHECK(f.end.TownsOnceHeld(f.registry) == 1);
+
+    CHECK(Str(CampaignEnd::LoseTitle("Malden")) == "Malden is lost.");
+    CHECK(Str(CampaignEnd::LoseTitle(nullptr)) == "The island is lost.");
+    const std::string body = Str(CampaignEnd::LoseBody("on Malden", 12, 2, 1));
+    CHECK(body == "The headquarters is gone and the resistance holds no base and no town on Malden. It held out until "
+                  "Day 12. Before the end it had taken 2 bases and 1 town.");
+    CHECK(Str(CampaignEnd::LoseBody("in the Sinai", 0, 0, 0)) ==
+          "The headquarters is gone and the resistance holds no base and no town in the Sinai. It never took a base "
+          "or a town from them.");
+    CHECK(Str(CampaignEnd::LoseBody(nullptr, 3, 1, 2)) ==
+          "The headquarters is gone and the resistance holds no base and no town on the island. It held out until Day "
+          "3. Before the end it had taken 1 base and 2 towns.");
+    for (const std::string& s : {body, Str(CampaignEnd::LoseTitle("Malden"))})
+    {
+        CHECK(s.find("\xE2\x80\x94") == std::string::npos);
+        CHECK(s.find(" -- ") == std::string::npos);
+    }
+}
+
+TEST_CASE("CampaignEnd - the lose latch and the once-held set survive save/load",
+          "[game][guerrilla][campaignend][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path lostPath = dir / "campaign-end-lost.bin";
+    {
+        QIStream in(kWarConfig, strlen(kWarConfig));
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(kWarConfig);
+    f.SetOwner("Town", "GUER");
+    CHECK_FALSE(f.end.EvaluateLost(f.registry, true, true));
+    f.SetOwner("Town", "EAST");
+    StripResistance(f);
+    REQUIRE(f.end.EvaluateLost(f.registry, false, true, 4, 300));
+    CHECK_FALSE(f.end.AdvanceEnd(20.0f));
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.end.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(lostPath.string().c_str()));
+    }
+    CampaignEnd loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(lostPath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.Lost());
+    CHECK_FALSE(loaded.Won());
+    CHECK(loaded.LostDay() == 4);
+    CHECK(loaded.LostMinute() == 300);
+    CHECK(loaded.EndPending());
+    CHECK(loaded.EndClock() == Approx(10.0f));
+    CHECK(loaded.ZonesOnceHeld() == 3); // Camp, Ours, Town
+    CHECK(loaded.TownsOnceHeld(f.registry) == 1);
+    // a save taken while doomed reloads into the same loss
+    CHECK_FALSE(loaded.EvaluateLost(f.registry, false, true));
+    CHECK_FALSE(loaded.AdvanceEnd(9.0f));
+    CHECK(loaded.AdvanceEnd(1.0f));
+
+    ExtParsMission.Clear();
+    std::filesystem::remove(lostPath);
+}

@@ -21,11 +21,24 @@
 ;
 ;  OWNS: gmEvtCaptured / gmEvtSupport / gmEvtRevealed / gmEvtCapStart /
 ;        gmEvtContested / gmEvtCapLost / gmEvtTownLost / gmEvtCounter /
-;        gmEvtRepelled (consumer side), GM_HOLD_* and
-;        GM_TT_* tunables. Spawned hold groups are fire-and-forget (the old
-;        GM_HOLD_GROUPS array was never read by anything; dropped).
-;  READS: gmZone tuples, gmResistanceSide, faction keys holdClass/holdCount,
-;        aP (spawn side = side aP: the player IS the resistance).
+;        gmEvtRepelled (consumer side), gmEvtBaseLost (registered and
+;        consumed here: the occupier retook a base, OCCUPIER-FORCES.md 7.2),
+;        GM_HOLD_* and GM_TT_* tunables, and the per-zone hold groups
+;        GM_HOLD_ZONES / GM_HOLD_GRPS (parallel arrays: zone name -> its
+;        hold squad).  A base can change hands again (the occupier's base
+;        recapture), so a re-captured zone gets a new hold squad only when
+;        none of its old one is alive.  A row whose squad has nobody alive
+;        (wiped, or deleted, or its base lost with it) is dropped every tick
+;        by GM_fnHoldPrune and its group parked in GM_HOLD_SPENT until its
+;        last unit is gone (dead bodies stay members for a while), then
+;        deleteGroup'd, never while a member lives; GM_cOld, GM_cGrp and
+;        GM_tmpG let go of it too, so no script handle keeps a spent hold
+;        group on the engine's 63-id register (decision 8, video 5 finding).
+;  READS: gmZone tuples, gmZoneSim slot 15 (lostCount: the zone was lost
+;        back before, so its capture reads "Retaken" and the starter
+;        objectives do not re-complete), gmResistanceSide, faction keys
+;        holdClass/holdCount, aP (spawn side = side aP: the player IS the
+;        resistance).
 ;
 ;  gmEvtRevealed is drained without a reaction: reveal handling (marker
 ;  repaint) is fully native. gmEvtSupport now has its UX: the town crossed
@@ -50,6 +63,23 @@ GM_CAP_TICK   = 2
 GM_TT_RANGE   = 150
 GM_TT_EVERY   = 12
 GM_cNextTT    = 0
+; per-zone hold squads (zone name -> group), so a re-captured base gets a new
+; squad only when none of its old one lives
+GM_HOLD_ZONES = []
+GM_HOLD_GRPS  = []
+; spent hold groups (nobody alive) waiting for their dead to leave them
+GM_HOLD_SPENT = []
+; --- GM_fnHoldPrune -------------------------------------------------------------
+;   1) GM_HOLD_SPENT: a group with no unit left is deleteGroup'd and dropped;
+;      one that still holds dead bodies waits (deleteGroup is empty-only).
+;   2) Rebuild GM_HOLD_ZONES / GM_HOLD_GRPS keeping the rows whose squad has
+;      a living member; every other row's group is deleteGroup'd at once when
+;      it has no unit left, else parked in GM_HOLD_SPENT, and GM_cGrp lets go
+;      of it.  A post-load null handle has no unit at all and drops.
+GM_fnHoldPrune = {gmHpS = []; {if ((count (units _x)) > 0) then {gmHpS = gmHpS + [_x]} else {deleteGroup _x}} forEach GM_HOLD_SPENT; GM_HOLD_SPENT = gmHpS; gmHpZ = []; gmHpG = []; gmHpI = 0; while {gmHpI < (count GM_HOLD_GRPS)} do {gmHpGr = GM_HOLD_GRPS select gmHpI; gmHpU = units gmHpGr; gmHpN = 0; gmHpK = 0; while {gmHpK < (count gmHpU)} do {if (alive (gmHpU select gmHpK)) then {gmHpN = gmHpN + 1}; gmHpK = gmHpK + 1}; if (gmHpN > 0) then {gmHpZ = gmHpZ + [GM_HOLD_ZONES select gmHpI]; gmHpG = gmHpG + [gmHpGr]} else {if (gmHpGr == GM_cGrp) then {GM_cGrp = grpNull}; if ((count gmHpU) > 0) then {GM_HOLD_SPENT = GM_HOLD_SPENT + [gmHpGr]} else {deleteGroup gmHpGr}}; gmHpI = gmHpI + 1}; GM_HOLD_ZONES = gmHpZ; GM_HOLD_GRPS = gmHpG; gmHpGr = grpNull; gmHpU = []; gmHpG = []; gmHpS = []}
+; the occupier's base recapture (native baseLost, OCCUPIER-FORCES.md 7.2)
+gmEvtBaseLost = []
+gmZoneOnEvent ["baseLost", {gmEvtBaseLost = gmEvtBaseLost + [_this]}]
 
 ; ---- journal (native Journal behind the map's Notes/Plan pages) ---------------
 ; Two starter objectives on the Plan page; this manager flips them DONE on
@@ -72,6 +102,11 @@ GM_cLost  = gmEvtCapLost + []; gmEvtCapLost = []
 GM_cTown  = gmEvtTownLost + []; gmEvtTownLost = []
 GM_cCtr   = gmEvtCounter + []; gmEvtCounter = []
 GM_cRep   = gmEvtRepelled + []; gmEvtRepelled = []
+GM_cBase  = gmEvtBaseLost + []; gmEvtBaseLost = []
+
+; ---- spent hold squads: release the rows with nobody alive (a wiped squad,
+;      a lost base's dead holders) before this tick's captures look them up
+[] call GM_fnHoldPrune
 
 ; ---- capture-started: the meter left 0 --------------------------------------
 GM_cI = 0
@@ -113,6 +148,20 @@ GM_cI = GM_cI + 1
 goto "tlev"
 #tlfin
 
+; ---- base lost: the occupier retook a held base (native base recapture,
+;      OCCUPIER-FORCES.md 7.2): its men stood in it with nobody of ours
+;      holding it until the occupier's meter filled.  Its hold squad's row
+;      went with the prune at the top of this tick when nobody of it lives;
+;      a survivor elsewhere keeps the row (and the squad) until it dies ------
+GM_cI = 0
+#blev
+? GM_cI >= (count GM_cBase) : goto "blfin"
+hint format ["%1 is back in occupier hands", (GM_cBase select GM_cI) select 1]
+gmJournalNote ["They came back through the wire with nobody left to stop them. The base is theirs again.", (GM_cBase select GM_cI) select 1, "danger"]
+GM_cI = GM_cI + 1
+goto "blev"
+#blfin
+
 ; ---- counter-attack: the occupier sent a force back for a held town (native
 ;      CounterAttack service, issue #79), whether or not anyone is there -----
 GM_cI = 0
@@ -151,27 +200,60 @@ GM_cI = 0
 GM_cEv  = GM_cBatch select GM_cI
 GM_cIdx = GM_cEv select 0
 GM_cRec = gmZone GM_cIdx
+; held before and lost back to the occupier (gmZoneSim slot 15, lostCount)
+GM_cAgain = ((gmZoneSim GM_cIdx) select 15) > 0
 
 ; military zones get a live holding garrison; cities hold themselves (support).
 ; The hold squad is role-mixed when the resistance descriptor authors tier
 ; role arrays (native gmFactionSquad, plan 15); a tier-less descriptor keeps
 ; the classic holdClass x holdCount monoculture.
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : goto "cnotify"
+; one hold squad per zone: a re-captured base whose old squad still lives
+; keeps it (no duplicate squad)
+GM_cName = GM_cEv select 1
+GM_cAt = GM_HOLD_ZONES find GM_cName
+GM_cAlive = 0
+GM_cOld = grpNull
+? GM_cAt >= 0 : GM_cOld = GM_HOLD_GRPS select GM_cAt
+? GM_cAt >= 0 : GM_cAlive = {alive _x} count (units GM_cOld)
+? GM_cAlive > 0 : GM_cOld = grpNull
+? GM_cAlive > 0 : goto "cnotify"
+; nobody of the old squad lives: release its group before the new one is
+; created (deleteGroup is empty-only and null-safe; one still holding dead
+; bodies waits in GM_HOLD_SPENT, see GM_fnHoldPrune)
+? (count (units GM_cOld)) > 0 : GM_HOLD_SPENT = GM_HOLD_SPENT + [GM_cOld]
+deleteGroup GM_cOld
+GM_cOld = grpNull
+GM_cGrp = grpNull
 ; civilian outfit: monoculture through the tier-less path, skipping the
 ; role-mixed native composer (see the GM_HOLD_CIV tunable note above)
 ? GM_HOLD_CIV != "" : GM_cGrp = [side aP, GM_HOLD_CIV, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
-? GM_HOLD_CIV != "" : goto "cnotify"
+? GM_HOLD_CIV != "" : goto "chold"
 GM_cSquad = gmFactionSquad [gmResistanceSide, gmWarLevel, GM_HOLD_COUNT]
 ? (count GM_cSquad) > 0 : GM_cGrp = [side aP, GM_cSquad, GM_cRec select GM_Z_POS] call GM_fnSpawnSquad
 ? ((count GM_cSquad) == 0) and (GM_HOLD_CLASS != "") : GM_cGrp = [side aP, GM_HOLD_CLASS, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
+#chold
+? GM_cAt >= 0 : GM_HOLD_GRPS set [GM_cAt, GM_cGrp]
+? GM_cAt < 0 : GM_HOLD_ZONES = GM_HOLD_ZONES + [GM_cName]
+? GM_cAt < 0 : GM_HOLD_GRPS = GM_HOLD_GRPS + [GM_cGrp]
+; the spawn helper's scratch handle would pin the group past its row
+GM_tmpG = grpNull
 
 #cnotify
+? GM_cAgain : goto "cagain"
 hint format ["%1 liberated", GM_cEv select 1]
 ; journal: diary line + the matching starter objective flips DONE
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalNote ["Risen. The town is ours.", GM_cEv select 1, "good"]
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalObjective ["firstTown", "", "DONE"]
 ? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalNote ["Liberated. Garrison gone; holding squad in place.", GM_cEv select 1, "good"]
 ? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalObjective ["firstZone", "", "DONE"]
+goto "cnext"
+#cagain
+; a zone we held before: "Retaken", and the starter objectives stay as they were
+hint format ["%1 retaken", GM_cEv select 1]
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalNote ["Retaken. The town stood up again.", GM_cEv select 1, "good"]
+? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalNote ["Retaken. We threw them out a second time; holding squad in place.", GM_cEv select 1, "good"]
+#cnext
 GM_cI = GM_cI + 1
 goto "cev"
 #cdone

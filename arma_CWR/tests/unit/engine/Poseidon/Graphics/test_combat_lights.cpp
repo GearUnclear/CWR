@@ -1128,7 +1128,8 @@ TEST_CASE("Combat lights: the shaders read the combat entries, the mask and the 
     const size_t streakCombat = surface.find("if (color.w > 1.5) {");
     REQUIRE(streakCombat != std::string::npos);
     CHECK(streakCombat < surface.find("bool spot = color.w > 0.5;"));
-    CHECK(surface.find("return sum * litLightCount.z + combat;") != std::string::npos);
+    CHECK(surface.find("streakA = sumA * litLightCount.z + combatA;") != std::string::npos);
+    CHECK(surface.find("streakB = sumB * litLightCount.z + combatB;") != std::string::npos);
     const std::string finish = gl::RemasterFragmentPiece(gl::FragmentPiece::Finish);
     CHECK(finish.find("nightBlend = max(nightBlend, sqrt(g_combatShare));") != std::string::npos);
     // The mask pass: the receiver at the centre of its texel's 2x2 block, the

@@ -28,6 +28,13 @@ asTarget disableAI "MOVE"
 asTarget stop true
 (group asTarget) setCombatMode "BLUE"
 asTarget allowDammage false
+// A registered ROGUE joins a private COMBAT-behaviour group and takes a low
+// stance. From the shooter's weapon point the terrain between them then hides
+// part of the body: visibility settles at 0.6297, just under the engine's
+// MinVisibleFire (0.63), so the group never assigns the target and no shot
+// comes. This test covers rogue-on-rogue hostility, not terrain cover, so
+// keep the target standing.
+asTarget setUnitPos "UP"
 triAssert [gmAssailantRegister [asShooter,"ROGUE",player,"Village"]]
 triSimUntil { asShots > 0 }
 triAssert [captive player]

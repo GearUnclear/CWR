@@ -8,6 +8,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
 #include <glad/gl.h>
@@ -84,6 +85,8 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         if (!_vaoScreen || !_vbo || !_ibo)
         {
             triq._triangleQueue.Clear();
+            if (IsDecalBatchQueue(queue, index))
+                _decalBatch.runs.Clear();
             return;
         }
 
@@ -128,17 +131,32 @@ void EngineGL33::FlushQueue(QueueGL33& queue, int index)
         FlushVSConstants();
         FlushPSConstants();
 
-        glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
-        ++Poseidon::gPerfDrawCalls;
+        // A batch of decals (W4-1) is one draw over its texture array, or its
+        // runs of one texture where the program cannot read the array.
+        const bool decalBatch = IsDecalBatchQueue(queue, index);
+        if (decalBatch)
+        {
+            DrawDecalBatch(triq, n, indexOffset);
+        }
+        else
+        {
+            glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, (void*)(intptr_t)(indexOffset * sizeof(WORD)));
+            ++Poseidon::gPerfDrawCalls;
+        }
 
-        // Record DrawItem
-        DrawItem item = {};
-        item.isTLDraw = false;
-        item.specFlags = Poseidon::render::SplitLegacy(triq._special);
-        item.passId = triq._passId;
-        _drawItems.push_back(item);
+        // Record DrawItem, only on frames the frame validator observes (S3-28)
+        if (Poseidon::render::frame::ObserverRecordsThisFrame())
+        {
+            DrawItem item = {};
+            item.isTLDraw = false;
+            item.specFlags = Poseidon::render::SplitLegacy(triq._special);
+            item.passId = triq._passId;
+            _drawItems.push_back(item);
+        }
 
         triq._triangleQueue.Clear();
+        if (decalBatch)
+            _decalBatch.runs.Clear();
     }
 }
 
@@ -158,6 +176,9 @@ int EngineGL33::AllocateQueue(QueueGL33& queue, TextureGL33* tex, int level, int
         minI = MaxTriQueues - 1;
         maxI = MaxTriQueues;
         FlushAllQueues(queue, MaxTriQueues - 1);
+        // An open decal batch (W4-1) takes only batched decals.
+        if (IsDecalBatchQueue(queue, MaxTriQueues - 1))
+            FlushAndFreeQueue(queue, MaxTriQueues - 1);
     }
 
     int index = queue.Allocate(tex, level, spec, minI, maxI, queue._actTri);
@@ -189,6 +210,11 @@ int EngineGL33::AllocateQueue(QueueGL33& queue, TextureGL33* tex, int level, int
 void EngineGL33::FreeQueue(QueueGL33& queue, int index)
 {
     PoseidonAssert(!queue._tri[index]._triangleQueue.Size());
+    if (IsDecalBatchQueue(queue, index))
+    {
+        _decalBatch.active = false;
+        _decalBatch.runs.Clear();
+    }
     queue.Free(index);
 }
 
@@ -326,9 +352,11 @@ void EngineGL33::PrepareTriangleTL(const MipInfo& mip, const Poseidon::render::L
     TextureGL33* tex = reinterpret_cast<TextureGL33*>(mip._texture);
     int level = mip._level;
     PassId passId = SpecToPassId(spec);
-    LOG_DEBUG(Graphics, "GL33: PrepareTriangleTL spec=0x{:x} tex={} level={} passId={} vs={} in3D={}",
-              Poseidon::render::MergeLegacy(spec), tex ? tex->GetHandle() : 0, level, static_cast<int>(passId),
-              static_cast<int>(_vertexShaderSel), IsIn3DPass());
+    // Per draw: skip the argument work too unless debug logging is on (S3-29a).
+    if (LogDetail::Get(Poseidon::Foundation::LogCategory::Graphics)->should_log(spdlog::level::debug))
+        LOG_DEBUG(Graphics, "GL33: PrepareTriangleTL spec=0x{:x} tex={} level={} passId={} vs={} in3D={}",
+                  Poseidon::render::MergeLegacy(spec), tex ? tex->GetHandle() : 0, level, static_cast<int>(passId),
+                  static_cast<int>(_vertexShaderSel), IsIn3DPass());
     ApplyPassState(tex, level, spec, passId, PipelineVertexInput::Mesh);
 }
 

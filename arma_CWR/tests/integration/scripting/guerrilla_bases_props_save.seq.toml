@@ -1,0 +1,10 @@
+# Generated-base props across a save (OCCUPIER-FORCES.md 5.7, step 2: the
+# outpost layout): Guerrilla.Abel builds its outposts' layouts at new game, a
+# deleted prop is re-created once, the game is saved, and a fresh process
+# (which generates and builds again on its own boot, from a new seed) loads
+# the save and finds the SAVED props re-bound: the same count and spots,
+# nothing created twice (shared user dir across the ordered phases
+# 01_props_save and 02_reload). Full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow
+# of the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md).
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "bases", "basegenerate", "baseprops", "save-load", "headless"]

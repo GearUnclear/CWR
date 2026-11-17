@@ -200,20 +200,57 @@ void AICenter::SelectLeader(AIGroup* grp)
 namespace Poseidon
 {
 
+int AICenter::PickNewGroupId(const int* usedIds, int count, int maxGroups)
+{
+    for (int candidate = 1; candidate <= maxGroups; candidate++)
+    {
+        bool taken = false;
+        for (int i = 0; i < count; i++)
+        {
+            if (usedIds[i] == candidate)
+            {
+                taken = true;
+                break;
+            }
+        }
+        if (!taken)
+        {
+            return candidate;
+        }
+    }
+    // register full: the upstream "one past the largest" rule, which puts the
+    // id past MaxGroups so AIGroup::Init's check names the overflow
+    int id = 1;
+    for (int i = 0; i < count; i++)
+    {
+        saturateMax(id, usedIds[i] + 1);
+    }
+    return id;
+}
+
 void AICenter::AddGroup(AIGroup* grp, int id)
 {
     if (id == 0)
     { // attach new id
-        id = 1;
+        // Upstream took one past the largest live id.  With groups created
+        // and released at runtime (createGroup / deleteGroup, Guerrilla
+        // traffic, squads and dealers) that id only ever climbs while the
+        // newest group outlives the one before it, so a long session ran it
+        // past MaxGroups with only a handful of groups alive (the director
+        // scenario of 2026-10-15: 3 civilian groups, id 64 of 63).  Reuse the
+        // lowest free slot instead.
+        AutoArray<int> used;
+        used.Realloc(_groups.Size());
         for (int i = 0; i < _groups.Size(); i++)
         {
-            AIGroup* grp = _groups[i];
-            if (!grp)
+            AIGroup* other = _groups[i];
+            if (!other)
             {
                 continue;
             }
-            saturateMax(id, grp->_id + 1);
+            used.Add(other->_id);
         }
+        id = PickNewGroupId(used.Data(), used.Size(), MaxGroups);
     }
     _groups.Add(grp);
     grp->_center = this;

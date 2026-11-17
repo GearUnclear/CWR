@@ -168,6 +168,9 @@ enum class PostShader : int
     FogApply,
     FogRing, // the horizon ring: the sky's colour above the land in every azimuth
     FogGlow, // the night glow: the frame's light blurred, laid into the fog at night
+    // The far slice's depth put back after the resolve, and the far unit's
+    // mark (EngineGL33::FarSliceDepth, a frame with a far-drawn unit only).
+    FarDepth,
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -219,6 +222,13 @@ constexpr int kCombatMaskUnit = 14;
 // data was allocated (the list keeps its lights in a uniform block,
 // kLightListBinding, which the fragments of a tile read faster).
 constexpr int kGroundFieldUnit = 12;
+// The decal batch's texture array (W4-1, EngineGL33_DecalBatch.cpp): every
+// decal texture of one surface shape, a layer each, read by the object
+// program while a batched decal draw sets decalLayerMode. Units 0 to 15 are
+// all taken; GL 3.3 guarantees 48 combined units, so 16 is a valid unit
+// everywhere, and the program's sampler count stays within the 16 a fragment
+// stage is guaranteed. Bound only around a batched draw.
+constexpr int kDecalLayerUnit = 16;
 // The volumetric fog's floor map (the lowest ground nearby) shares
 // the ground field's unit: only the fog's injection pass samples it, binds it
 // itself (no world program declares it) and unbinds it at its end; the world
@@ -238,6 +248,11 @@ constexpr int kFogRingUnit = kLightTileUnit;
 // reads no ring). It has no sampler object, so the glow keeps its own
 // clamped filtering; the apply unbinds it at its end.
 constexpr int kFogGlowUnit = kLightTileUnit;
+// The far unit's mark (EngineGL33::FarSliceDepth: 1 where a unit of the far
+// slice was drawn), read by the fog's and the air's apply on the decal batch's
+// unit, which only a batched decal draw binds (with its own sampler); the
+// apply binds it with no sampler object and unbinds it at its end.
+constexpr int kFarMaskUnit = kDecalLayerUnit;
 
 namespace detail
 {
@@ -312,6 +327,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"combatMask", kCombatMaskUnit},         // the combat shadow mask (combat light)
     {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surfaces)
     {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
+    {"decalLayers", kDecalLayerUnit},        // the decal batch's texture array (W4-1)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -424,7 +440,19 @@ enum : int
     // intensity gain (kCameraLampGain), w how far a low sun turns the upper
     // sky toward the zenith's blue.
     CameraLook = 90,
-    Count = 91,
+    // Shore water (the Graphics page's option, first the experiment
+    // POSEIDON_XP_WATER; EngineGL33_Sea.cpp UploadLitSeaShore): x the shore
+    // parts on (a bit mask: 1 shallow water, 2 surf foam, 4 wet
+    // sand, 8 wave masking; 0 = off, which leaves every fragment as before),
+    // y time (s, wrapped), z the sea's surface (m, with the wave), w the swash
+    // line (m).
+    Water2 = 91,
+    // Lamp shadows (the Graphics page's option, first the experiment lane
+    // xp-nightlight; zero while it is off, which leaves every fragment as
+    // before): x 0 (the lane's window glow, not brought over), y the light
+    // bounce's gain, z 1 while the combat shadow mask traces street lamps, w 0.
+    XpNight = 92,
+    Count = 93,
 };
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
@@ -450,7 +478,9 @@ static_assert(SurfaceCanopy == Surface + 1 && Surface2 == SurfaceCanopy + 1 && S
 static_assert(Surface3 == SurfaceSh + SurfaceShCount, "LitConst surface slots out of order");
 static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots");
 static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
-static_assert(Count == CameraLook + 1, "LitConst size out of sync");
+static_assert(Water2 == CameraLook + 1, "the experimental water slot follows the camera's look");
+static_assert(XpNight == Water2 + 1, "the xp-nightlight slot follows the experimental water slot");
+static_assert(Count == XpNight + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to features not yet in the block, so no two features

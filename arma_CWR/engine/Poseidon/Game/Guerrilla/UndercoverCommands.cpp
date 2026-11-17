@@ -34,6 +34,16 @@ static GameValue GmUndercoverWitnesses(const GameState* /*state*/)
     return (float)UndercoverSystem::Instance().WitnessCount();
 }
 
+// gmUndercoverWeaponSeen -> count of occupier groups with a living member
+// whose record of the subject was rated suspect or exposed because of a
+// visible weapon (slung or in hands) within the last
+// UndercoverSystem::WeaponSeenWindow seconds: the weapon-seen clause of the
+// HOLD presence predicate (gmPlayerPresence slot 7)
+static GameValue GmUndercoverWeaponSeen(const GameState* /*state*/)
+{
+    return (float)UndercoverSystem::Instance().WeaponSeenCount();
+}
+
 // gmUndercoverForget - clears every compromised record plus the campaign
 // first-compromise latch (test aid + future disguise-swap hook)
 static GameValue GmUndercoverForget(const GameState* /*state*/)
@@ -46,5 +56,6 @@ INIT_MODULE(GuerrillaUndercover, 3)
 {
     GGameState.NewNularOp(GameNular(GameScalar, "gmUndercoverStatus", GmUndercoverStatus));
     GGameState.NewNularOp(GameNular(GameScalar, "gmUndercoverWitnesses", GmUndercoverWitnesses));
+    GGameState.NewNularOp(GameNular(GameScalar, "gmUndercoverWeaponSeen", GmUndercoverWeaponSeen));
     GGameState.NewNularOp(GameNular(GameNothing, "gmUndercoverForget", GmUndercoverForget));
 }

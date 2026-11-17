@@ -1,0 +1,71 @@
+; ============================================================================
+;  DedDemo timeline: plays the beats in KJD_plan, each when the one before is
+;  over. Every beat is an order to the brain (kj\brain\order.sqs); nothing here
+;  moves him directly. KJD_step names the beat now playing.
+;
+;    wake      he rises out of dormancy, roars, stands
+;    through   he walks east along the main row of houses toward KJD_exit
+;    hit       at KJD_hitX the tank "hits" him (the reaction is ordered, no shot
+;              is fired): he finishes his stride, shudders, stands, turns to it
+;    beam      he roars, stands tall and burns the armour, and is spent
+;    out       he turns back to his line and walks out the east side
+;    dormant   he stands still again on the far side
+; ============================================================================
+? isNil "KJD_running" : KJD_running = false
+? KJD_running : exit
+KJD_running = true
+KJD_step = "dormant"
+@ (KJ_state == "dormant") and (KJ_brainPhase == "still")
+~KJD_hold
+
+? not ("wake" in KJD_plan) : goto "through"
+KJD_step = "wake"
+KJ_brainOrder = ["wake"]
+~1
+@ KJ_state == "idle"
+~3
+
+#through
+? not ("through" in KJD_plan) : goto "hit"
+KJD_step = "through"
+KJ_brainOrder = ["drawn", KJD_exit]
+~1
+
+#hit
+? not ("hit" in KJD_plan) : goto "beam"
+@ (((getPos kaiju) select 0) > KJD_hitX) or (KJ_state != "drawn")
+KJD_step = "hit"
+? "beam" in KJD_plan : KJ_brainAfterHit = ["beam", kjdTank]
+KJ_brainOrder = ["hit", kjdTank]
+~1
+@ KJ_state != "flinch"
+
+#beam
+? not ("beam" in KJD_plan) : goto "out"
+KJD_step = "beam"
+? not ("hit" in KJD_plan) : KJ_brainOrder = ["beam", kjdTank]
+~2
+@ KJ_state == "spent"
+KJD_step = "spent"
+@ KJ_state == "idle"
+~4
+
+#out
+? not ("out" in KJD_plan) : goto "dormant"
+KJD_step = "out"
+KJ_brainOrder = ["drawn", KJD_exit]
+~2
+@ KJ_state == "idle"
+~6
+
+#dormant
+? not ("dormant" in KJD_plan) : goto "done"
+KJD_step = "dormant2"
+KJ_brainOrder = ["dormant"]
+~1
+@ KJ_brainPhase == "still"
+
+#done
+KJD_step = "done"
+KJD_running = false
+exit

@@ -118,7 +118,11 @@ void AudioPage::Mount(OptionsShell& shell)
 void AudioPage::OnSimulate(OptionsShell& shell)
 {
     ScrollListPage::OnSimulate(shell);
-    m_audio.TickPreviewLoop();
+    // A pointer click on Close pops (and unmounts) this page inside the
+    // list's OnSimulate; Unmount already stopped the preview, so do not
+    // start a new one on the way out.
+    if (List())
+        m_audio.TickPreviewLoop();
 }
 
 void AudioPage::Unmount(OptionsShell& shell)

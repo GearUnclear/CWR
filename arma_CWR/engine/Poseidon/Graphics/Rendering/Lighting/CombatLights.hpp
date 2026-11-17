@@ -481,6 +481,11 @@ class CombatLightSet
     // ~Scene only).
     void ClearBursts();
     void Clear();
+    // Deterministic-world captures (DET-3, triSetSimTime): the flicker seed of
+    // the next light added, instead of the one every light added since boot
+    // led to. Lights already in the set keep theirs. Play never calls it.
+    void SeedForCapture(std::uint32_t seed) { _seed = seed; }
+    std::uint32_t NextSeed() const { return _seed; }
     // Seconds of simulation ticked so far (the hysteresis clock).
     double SimTime() const { return _simTime; }
     const std::vector<CombatLightRecord>& Records() const { return _records; }

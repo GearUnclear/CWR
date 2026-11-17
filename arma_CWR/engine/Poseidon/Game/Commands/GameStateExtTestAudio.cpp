@@ -187,6 +187,19 @@ GameValue TriSetVsync(const GameState*, GameValuePar);
 GameValue TriTextInputActive(const GameState*);
 GameValue TriPerfDumpShapes(const GameState*, GameValuePar);
 GameValue TriPerfReset(const GameState*, GameValuePar);
+GameValue TriPerfRing(const GameState*, GameValuePar);
+GameValue TriGpuRing(const GameState*, GameValuePar);
+GameValue TriBuildId(const GameState*);
+GameValue TriSetFpsCap(const GameState*, GameValuePar);
+GameValue TriResizeWindow(const GameState*, GameValuePar);
+GameValue TriSetWindowMode(const GameState*, GameValuePar);
+GameValue TriMinimize(const GameState*);
+GameValue TriRestore(const GameState*);
+GameValue TriGraphicsReset(const GameState*, GameValuePar);
+GameValue TriRetryMission(const GameState*);
+GameValue TriCpuStats(const GameState*, GameValuePar);
+GameValue TriSimStats(const GameState*);
+GameValue TriPipeStats(const GameState*, GameValuePar);
 GameValue TriPinObjectDetail(const GameState*, GameValuePar);
 GameValue TriSceneStats(const GameState*);
 GameValue TriSettleScene(const GameState*, GameValuePar);
@@ -326,6 +339,8 @@ GameValue TriAssertPixelDarkerThan(const GameState*, GameValuePar);
 // TriAssert*/TriGet* families directly.  Their own INIT_MODULEs register the verbs.
 void EnsureGameStateExtTestGenericLinked();
 void EnsureGameStateExtTestGettersLinked();
+void EnsureGameStateExtTestDeterminismLinked(); // P0-6: triResetTemporal, triSeedRandom, triDeterministic
+void EnsureGameStateExtTestRecordLinked();      // P0-10: triRecord, triRecordState, triCamPath
 
 // Audio test surface — direct GSoundsys read/write so tests can verify
 // AudioPage's UI plumbing without scraping rendered text.
@@ -3273,6 +3288,19 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triSetVsync", TriSetVsync, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPerfDumpShapes", TriPerfDumpShapes, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPerfReset", TriPerfReset, GameScalar));
+    GGameState.NewFunction(GameFunction(GameString, "triPerfRing", TriPerfRing, GameScalar | GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "triGpuRing", TriGpuRing, GameScalar | GameArray));
+    GGameState.NewNularOp(GameNular(GameString, "triBuildId", TriBuildId));
+    GGameState.NewFunction(GameFunction(GameString, "triSetFpsCap", TriSetFpsCap, GameScalar));
+    GGameState.NewFunction(GameFunction(GameString, "triResizeWindow", TriResizeWindow, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "triSetWindowMode", TriSetWindowMode, GameString));
+    GGameState.NewNularOp(GameNular(GameString, "triMinimize", TriMinimize));
+    GGameState.NewNularOp(GameNular(GameString, "triRestore", TriRestore));
+    GGameState.NewFunction(GameFunction(GameString, "triGraphicsReset", TriGraphicsReset, GameString));
+    GGameState.NewNularOp(GameNular(GameString, "triRetryMission", TriRetryMission));
+    GGameState.NewFunction(GameFunction(GameString, "triCpuStats", TriCpuStats, GameBool));
+    GGameState.NewNularOp(GameNular(GameString, "triSimStats", TriSimStats));
+    GGameState.NewFunction(GameFunction(GameString, "triPipeStats", TriPipeStats, GameBool));
     GGameState.NewFunction(GameFunction(GameString, "triPinObjectDetail", TriPinObjectDetail, GameScalar));
     GGameState.NewNularOp(GameNular(GameString, "triSceneStats", TriSceneStats));
     GGameState.NewFunction(GameFunction(GameString, "triSettleScene", TriSettleScene, GameArray));
@@ -3465,4 +3493,6 @@ INIT_MODULE(GameStateExtTest, 3)
     // link graph; their own INIT_MODULEs register the actual verbs.
     EnsureGameStateExtTestGenericLinked();
     EnsureGameStateExtTestGettersLinked();
+    EnsureGameStateExtTestDeterminismLinked();
+    EnsureGameStateExtTestRecordLinked();
 };

@@ -2,6 +2,8 @@
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // start-town garrison exemption (issue #79)
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>   // the campaign switch (default Camp HQ)
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // HqAssaultPresence, EngineGate (HQ meter, ruins)
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -18,6 +20,7 @@
 #include <Poseidon/World/Entities/Vehicles/Ground/Motorcycle.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp> // MuzzleType (the horn muzzle)
 #include <Poseidon/AI/AI.hpp>                          // AIUnit::FindFreePosition
+#include <Poseidon/AI/AICenter.hpp>                    // AIGroup units (HOLD presence at the HQ)
 #include <Poseidon/AI/EntityAIType.hpp>                // MagazineSlot
 #include <Poseidon/AI/VehicleAI.hpp>                   // VehicleSupply (keep-when-empty)
 #include <Poseidon/Audio/IAudioSystem.hpp>             // IWave
@@ -26,10 +29,12 @@
 
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO (the HQ-destroyed director line)
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 using namespace Poseidon;
@@ -88,6 +93,12 @@ void GuerrillaBase::Clear()
     _rows.Clear();
     _moveCount = 0;
     _autoTried = false;
+    _campTried = false;
+    _hqDestroyed = false;
+    _hqEpoch = 0;
+    _hqCapture = 0;
+    _hqAccum = 0;
+    _ruins.Clear();
     _cacheWarned = false;
     _accum = 0;
     _beep = BeepState();
@@ -159,7 +170,26 @@ EntityAI* GuerrillaBase::Prop() const
 
 int GuerrillaBase::ZoneAt(Vector3Par pos) const
 {
-    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    return ZoneAt(ZoneRegistry::Instance(), pos);
+}
+
+int GuerrillaBase::HqZone() const
+{
+    return HqZone(ZoneRegistry::Instance());
+}
+
+int GuerrillaBase::HqZone(const ZoneRegistry& registry) const
+{
+    if (!_established)
+    {
+        return -1;
+    }
+    const int at = ZoneAt(registry, _hqPos);
+    return at >= 0 ? at : registry.FindZoneIndex(_zone);
+}
+
+int GuerrillaBase::ZoneAt(const ZoneRegistry& registry, Vector3Par pos)
+{
     float area = registry.Tuning().zoneArea;
     int best = -1;
     float bestDist = 0;
@@ -260,12 +290,43 @@ bool GuerrillaBase::InRange2D(Vector3Par a, Vector3Par b, float radius)
 void GuerrillaBase::MarkEstablishedForTest(const char* zone, Vector3Par hqPos, Vector3Par garagePos,
                                            Vector3Par cachePos, bool indoors)
 {
+    if (CommitEstablished(zone ? RString(zone) : RString(), hqPos, garagePos, cachePos, indoors))
+    {
+        _moveCount++;
+    }
+}
+
+bool GuerrillaBase::CommitEstablished(const RString& zone, Vector3Par hqPos, Vector3Par garagePos,
+                                      Vector3Par cachePos, bool indoors)
+{
+    // a move only while an HQ stands: after a destruction this is a first
+    // establishment (free, D24), and the epoch stays where Destroy left it
+    const bool moving = _established;
     _established = true;
+    _hqDestroyed = false;
+    if (!moving)
+    {
+        _hqCapture = 0;
+    }
     _indoors = indoors;
-    _zone = zone ? RString(zone) : RString();
+    _zone = zone;
     _hqPos = hqPos;
     _garagePos = garagePos;
     _cachePos = cachePos;
+    return moving;
+}
+
+int GuerrillaBase::FirstCampZone(const ZoneRegistry& registry)
+{
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (z && stricmp(z->type, "CAMP") == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
 }
 
 void GuerrillaBase::AddGarageRowForTest()
@@ -774,19 +835,15 @@ bool GuerrillaBase::Establish(Vector3Par pos)
         cachePos[1] = GLOB_LAND->SurfaceYAboveWater(cachePos.X(), cachePos.Z());
     }
 
-    bool moving = _established;
+    // after a destruction the cache link is already cleared, so a
+    // re-established HQ gets a fresh, empty holder from SyncVisuals
     EntityAI* cache = _cache.GetLink();
     if (cache)
     {
         MoveCache(cache, cachePos, indoors);
     }
 
-    _established = true;
-    _indoors = indoors;
-    _zone = z->name;
-    _hqPos = hqPos;
-    _garagePos = garagePos;
-    _cachePos = cachePos;
+    const bool moving = CommitEstablished(z->name, hqPos, garagePos, cachePos, indoors);
     _building = building;
     _cache = cache;
     if (_prop.GetLink())
@@ -1083,30 +1140,68 @@ void GuerrillaBase::RelocatePlayer() const
 
 void GuerrillaBase::TryAutoElection()
 {
-    if (_autoTried || _established || !GWorld)
+    if (_established || _hqDestroyed || !GWorld)
     {
         return;
-    }
-    _autoTried = true; // one shot per campaign, whatever the outcome
-    RString town = ReadStartTownSelection();
-    if (town.GetLength() == 0)
-    {
-        return; // no pick (direct launch / "(camp)"): the authored start stands
     }
     const ZoneRegistry& registry = ZoneRegistry::Instance();
-    int zoneIndex = registry.FindZoneIndex(town);
-    if (zoneIndex < 0)
+    if (!_autoTried)
     {
-        LOG_WARN(Core, "GuerrillaBase: start town '{}' is not a zone of this island - authored start kept",
-                 (const char*)town);
+        _autoTried = true; // one shot per campaign, whatever the outcome
+        RString town = ReadStartTownSelection();
+        if (town.GetLength() > 0)
+        {
+            int zoneIndex = registry.FindZoneIndex(town);
+            const ZoneRecord* z = zoneIndex >= 0 ? registry.GetZone(zoneIndex) : nullptr;
+            if (zoneIndex < 0)
+            {
+                LOG_WARN(Core, "GuerrillaBase: start town '{}' is not a zone of this island - authored start kept",
+                         (const char*)town);
+            }
+            else if (!z || !Establish(z->pos))
+            {
+                LOG_WARN(Core, "GuerrillaBase: could not establish the start-town headquarters in '{}'",
+                         (const char*)town);
+            }
+            else
+            {
+                OnStartTownEstablished(zoneIndex, town);
+                return;
+            }
+        }
+    }
+    // no pick (direct launch / "(camp)"), a pick that failed, or an old save
+    // with no HQ: the campaign's HQ is the Camp (OCCUPIER-FORCES.md 9.1).
+    // Tried once per session; the player stays where the mission put him and
+    // the Camp keeps its ordinary rules (no garrison exemption: a CAMP zone
+    // is never a CITY).  campaignEnd = 0 fixtures and reference slices keep
+    // the old "no HQ until the player elects one" behaviour.
+    if (_campTried)
+    {
         return;
     }
-    const ZoneRecord* z = registry.GetZone(zoneIndex);
-    if (!z || !Establish(z->pos))
+    _campTried = true;
+    if (!WantsDefaultHq(CampaignEnd::Instance().Tuning().enabled))
     {
-        LOG_WARN(Core, "GuerrillaBase: could not establish the start-town headquarters in '{}'", (const char*)town);
         return;
     }
+    const int camp = FirstCampZone(registry);
+    const ZoneRecord* cz = camp >= 0 ? registry.GetZone(camp) : nullptr;
+    if (!cz)
+    {
+        return;
+    }
+    if (!Establish(cz->pos))
+    {
+        LOG_WARN(Core, "GuerrillaBase: could not establish the default headquarters at the Camp '{}'",
+                 (const char*)cz->name);
+        return;
+    }
+    LOG_INFO(Core, "GuerrillaBase: campaign opens with its headquarters at the Camp '{}'", (const char*)cz->name);
+}
+
+void GuerrillaBase::OnStartTownEstablished(int zoneIndex, const RString& town)
+{
     RelocatePlayer();
     // town defenders (issue #79 B2): the start town hosts the player's own
     // headquarters, so it is exempted from its occupier garrison - never an
@@ -1116,6 +1211,250 @@ void GuerrillaBase::TryAutoElection()
     GarrisonCache::Instance().ForceDespawn(zoneIndex);
     ZoneRegistry::Instance().ExemptTownGarrison(zoneIndex);
     LOG_INFO(Core, "GuerrillaBase: campaign opens at the start town '{}'", (const char*)town);
+}
+
+// ---------------------------------------------------------------------------
+// HQ meter and destruction (OCCUPIER-FORCES.md 9.1, D13, D14, D22, D24)
+// ---------------------------------------------------------------------------
+
+float GuerrillaBase::NextHqCapture(float meter, int assault, int hold, const ZoneTuning& tuning)
+{
+    if (assault > 0 && hold <= 0)
+    {
+        const float crew = fminf((float)assault, tuning.captureCrewCap > 0 ? tuning.captureCrewCap : 1.0f);
+        meter += tuning.captureRate * crew;
+    }
+    else if (assault <= 0)
+    {
+        meter -= tuning.captureDecayAbandoned;
+    }
+    // both present: frozen
+    if (meter < 0)
+    {
+        meter = 0;
+    }
+    if (meter > 100)
+    {
+        meter = 100;
+    }
+    return meter;
+}
+
+// the engine's HQ_ASSAULT count: CounterAttack owns the records (D14: only
+// a force the director deliberately sent against the HQ)
+static int EngineHqAssault(Vector3Par pos, float radius)
+{
+    return CounterAttack::Instance().HqAssaultPresence(pos, radius);
+}
+
+// the resistance HOLD presence at the HQ (8.1): the real player while
+// PlayerHoldsPresence holds, plus every living unit of the resistance side
+// center (recruits, companions, hold squads), counted the way the zone tick
+// counts a zone's guer, with the HQ position instead of a zone centre
+static int EngineHqHold(Vector3Par pos, float radius)
+{
+    if (!GWorld)
+    {
+        return 0;
+    }
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    Person* player = GWorld->GetRealPlayer();
+    const bool playerAlive = player && !player->IsDammageDestroyed();
+    int count = 0;
+    if (playerAlive && Dist2D(player->Position(), pos) < radius)
+    {
+        PlayerPresenceInput presence;
+        registry.SamplePlayerPresence(player, presence);
+        count += PlayerHoldsPresence(presence) ? 1 : 0;
+    }
+    AICenter* center = FindSideCenter(registry.ResistanceSide());
+    if (!center)
+    {
+        return count;
+    }
+    for (int g = 0; g < center->NGroups(); g++)
+    {
+        AIGroup* grp = center->GetGroup(g);
+        if (!grp)
+        {
+            continue;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
+            {
+                continue;
+            }
+            if (playerAlive && unit->GetPerson() == player)
+            {
+                continue; // decided by the HOLD predicate above
+            }
+            if (Dist2D(unit->Position(), pos) < radius)
+            {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+static GuerrillaBase::HqPresenceFn s_hqAssaultSource = nullptr;
+static GuerrillaBase::HqPresenceFn s_hqHoldSource = nullptr;
+
+void GuerrillaBase::SetHqPresenceSources(HqPresenceFn assault, HqPresenceFn hold)
+{
+    s_hqAssaultSource = assault;
+    s_hqHoldSource = hold;
+}
+
+void GuerrillaBase::TickHqMeter(const ZoneTuning& tuning)
+{
+    if (!HasHq())
+    {
+        _hqCapture = 0;
+        return;
+    }
+    HqPresenceFn assaultFn = s_hqAssaultSource ? s_hqAssaultSource : &EngineHqAssault;
+    HqPresenceFn holdFn = s_hqHoldSource ? s_hqHoldSource : &EngineHqHold;
+    const int assault = assaultFn(_hqPos, HqRadius);
+    // the hold count only matters while someone assaults
+    const int hold = assault > 0 ? holdFn(_hqPos, HqRadius) : 0;
+    _hqCapture = NextHqCapture(_hqCapture, assault, hold, tuning);
+    if (_hqCapture >= 100.0f)
+    {
+        Destroy();
+    }
+}
+
+void GuerrillaBase::ForceHqCapture(float value)
+{
+    _hqCapture = value < 0 ? 0 : (value > 100 ? 100 : value);
+    if (!HasHq())
+    {
+        _hqCapture = 0;
+        return;
+    }
+    if (_hqCapture >= 100.0f)
+    {
+        Destroy();
+    }
+}
+
+int GuerrillaBase::Destroy()
+{
+    if (!HasHq())
+    {
+        return -1;
+    }
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    const int zone = HqZone(registry);
+    char where[160];
+    const ZoneRecord* z = zone >= 0 ? registry.GetZone(zone) : nullptr;
+    if (z)
+    {
+        snprintf(where, sizeof(where), "%s", (const char*)z->name);
+    }
+    else
+    {
+        snprintf(where, sizeof(where), "[%.0f,%.0f]", _hqPos.X(), _hqPos.Z());
+    }
+
+    // the weapon cache: emptied at once (no looting the ruins); the holder
+    // and the HQ prop go once the player cannot see them (SweepRuins)
+    if (VehicleSupply* holder = dyn_cast<VehicleSupply>(_cache.GetLink()))
+    {
+        holder->SetKeepCargoWhenEmpty(true);
+        holder->ClearWeaponCargo();
+        holder->ClearMagazineCargo();
+    }
+    if (_cache.GetLink())
+    {
+        RuinRow row;
+        row.obj = _cache.GetLink();
+        _ruins.Add(row);
+    }
+    if (_prop.GetLink())
+    {
+        RuinRow row;
+        row.obj = _prop.GetLink();
+        _ruins.Add(row);
+    }
+
+    // the garage (D22): every locked vehicle is wrecked where it stands and
+    // the ring goes with the HQ
+    const int taken = _rows.Size();
+    int wrecked = 0;
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        EntityAI* v = _rows[i].veh.GetLink();
+        if (!v || v->ToDelete())
+        {
+            continue;
+        }
+        if (Transport* t = dyn_cast<Transport>(v))
+        {
+            t->SetLock(LSUnlocked);
+        }
+        v->SetAllowDammage(true); // the garage's invulnerability ends with it
+        v->SetDammageNetAware(1.0f);
+        wrecked++;
+    }
+    _rows.Clear();
+    if (_beep.wave)
+    {
+        _beep.wave->Stop();
+    }
+    _beep = BeepState();
+
+    _established = false;
+    _hqDestroyed = true;
+    _hqEpoch++;
+    _hqCapture = 0;
+    _building = nullptr;
+    _cache = nullptr;
+    _prop = nullptr;
+    GM_DIRECTOR_INFO(Core, "OccupierForces: HQ at {} destroyed (epoch {}); cache emptied, {} garaged vehicle(s) wrecked",
+             where, _hqEpoch, wrecked);
+    // the hqLost zone event (serialized handler slot onHqLost); the registry
+    // dispatches it on its next tick, natively and to the script handler
+    ZoneRegistry::Instance().QueueEvent(ZEHqLost, zone);
+    return taken;
+}
+
+void GuerrillaBase::SweepRuins()
+{
+    if (_ruins.Size() == 0 || !GWorld)
+    {
+        return;
+    }
+    Person* player = GWorld->GetRealPlayer();
+    const bool playerValid = player && !player->IsDammageDestroyed();
+    const float px = playerValid ? player->Position().X() : 0.0f;
+    const float pz = playerValid ? player->Position().Z() : 0.0f;
+    const CounterAttackGate& gate = CounterAttack::EngineGate(playerValid, px, pz);
+    for (int i = _ruins.Size() - 1; i >= 0; i--)
+    {
+        EntityAI* obj = _ruins[i].obj.GetLink();
+        if (!obj || obj->ToDelete())
+        {
+            _ruins.Delete(i);
+            continue;
+        }
+        if (gate.Exposure(obj->Position()) != CAExposeHidden)
+        {
+            continue; // seen (or inside the audible floor): retried next pass
+        }
+        if (VehicleSupply* holder = dyn_cast<VehicleSupply>(obj))
+        {
+            holder->ClearWeaponCargo();
+            holder->ClearMagazineCargo();
+            StashRegistry::Instance().Unregister(holder);
+        }
+        obj->SetDelete();
+        _ruins.Delete(i);
+        LOG_INFO(Core, "GuerrillaBase: a ruin of the fallen headquarters removed unseen ({} left)", _ruins.Size());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1135,9 +1474,17 @@ void GuerrillaBase::Simulate(float deltaT)
         LoadFromConfig();
     }
     SimulateBeep(deltaT);
-    if (!_autoTried)
+    if (!_established && !_hqDestroyed && (!_autoTried || !_campTried))
     {
         TryAutoElection();
+    }
+    // the HQ meter at the zone tick cadence (D24)
+    const ZoneTuning& zoneTuning = ZoneRegistry::Instance().Tuning();
+    _hqAccum += deltaT;
+    if (_hqAccum >= zoneTuning.tickInterval)
+    {
+        _hqAccum = 0;
+        TickHqMeter(zoneTuning);
     }
     _accum += deltaT;
     if (_accum < TickInterval)
@@ -1145,7 +1492,12 @@ void GuerrillaBase::Simulate(float deltaT)
         return;
     }
     _accum = 0;
-    if (!GWorld || !_established)
+    if (!GWorld)
+    {
+        return;
+    }
+    SweepRuins();
+    if (!_established)
     {
         return;
     }
@@ -1177,6 +1529,12 @@ void GuerrillaBase::Simulate(float deltaT)
 // ---------------------------------------------------------------------------
 // serialization
 // ---------------------------------------------------------------------------
+
+LSError GuerrillaBase::RuinRow::Serialize(ParamArchive& ar)
+{
+    PARAM_CHECK(ar.SerializeRef("obj", obj, 1))
+    return LSOK;
+}
 
 LSError GuerrillaBase::GarageRow::Serialize(ParamArchive& ar)
 {
@@ -1210,6 +1568,12 @@ LSError GuerrillaBase::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("propPos", _propPos, 1, VZero))
     PARAM_CHECK(ar.Serialize("layoutPlaced", _layoutPlaced, 1, false))
     PARAM_CHECK(ar.Serialize("Garage", _rows, 1))
+    // HQ loss (OCCUPIER-FORCES.md 11): absent in older saves = not
+    // destroyed, epoch 0, meter 0, no ruins
+    PARAM_CHECK(ar.Serialize("hqDestroyed", _hqDestroyed, 1, false))
+    PARAM_CHECK(ar.Serialize("hqEpoch", _hqEpoch, 1, 0))
+    PARAM_CHECK(ar.Serialize("hqCapture", _hqCapture, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("Ruins", _ruins, 1))
 
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
     {
@@ -1225,8 +1589,19 @@ LSError GuerrillaBase::Serialize(ParamArchive& ar)
             }
             AssertRow(_rows[i]);
         }
+        for (int i = _ruins.Size() - 1; i >= 0; i--)
+        {
+            if (!_ruins[i].obj.GetLink())
+            {
+                _ruins.Delete(i);
+            }
+        }
         _cacheWarned = false;
         _accum = 0;
+        _hqAccum = 0;
+        // a loaded campaign with no HQ (and none destroyed) gets the default
+        // Camp HQ on its next tick (9.1, old saves)
+        _campTried = false;
         _beep = BeepState();
     }
     return LSOK;

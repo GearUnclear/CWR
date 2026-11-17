@@ -274,10 +274,34 @@ uniform vec4 camRod;     // rgb the rods' cool grey, w the warmth from which war
 uniform vec4 camShade;   // rgb the shade's cool balance at a low sun (unit luminance), w its strength
 uniform vec4 camDark;    // x the dark tones' saturation (relative), y z the scene light it fades out over, w 1 = a
                          // vehicle interior (pre-lit: the camera's interior grade)
+// Sun glare (the Sun Glare option, EngineGL33_XpAtmosphere.cpp):
+uniform vec4 xpGlare;      // xy the sun's view ray at z = 1, z the strength (0 = off)
+uniform vec4 xpGlareShape; // x the core's width (rad), y its level, z the halo's half-width (rad), w its level
+uniform vec4 xpGlareColor; // rgb the sun's colour by its peak
+uniform sampler2D xpGlareVis; // r: the disc's visible share, smoothed (1x1)
 out vec4 fragColor;
 )";
 
 static const char s_psPostCompositeMain[] = R"(
+// Sun glare: a Gaussian core and a Lorentzian halo round the
+// sun's screen point, times the disc's visible share; the core goes toward
+// white. Round on the screen like the disc (camSunDisc): the offset on the
+// image plane (z = 1) times the angle of an equal-area pixel at the sun
+// (cos^1.5 of its angle off the axis); the true angle drew an oval near the
+// frame's edges.
+vec3 xpSunGlare() {
+    vec2 ndc = (vUV - worldRect.xy) / max(worldRect.zw, vec2(1e-6)) * 2.0 - 1.0;
+    vec2 dp = vec2(ndc.x * projInfo.z, ndc.y * projInfo.w) - xpGlare.xy;
+    float th = length(dp) * pow(1.0 / (1.0 + dot(xpGlare.xy, xpGlare.xy)), 0.75);
+    float vis = texelFetch(xpGlareVis, ivec2(0, 0), 0).r;
+    float c = th / xpGlareShape.x;
+    float core = xpGlareShape.y * exp(-c * c);
+    float h = th / xpGlareShape.z;
+    float halo = xpGlareShape.w / (1.0 + h * h);
+    vec3 tint = xpGlareColor.rgb;
+    return (mix(tint, vec3(1.0), 0.5) * core + tint * halo) * (xpGlare.z * vis);
+}
+
 float compositeViewZ(vec2 uv) {
     float d = textureLod(depthTex, uv, 0.0).r;
     if (d >= 0.999999) return 1e6;
@@ -507,6 +531,7 @@ void main() {
         vec3 x = camDecode(c.rgb) * keep * camParams.y;
         x += texture(bloomTex, vUV).rgb * camGlow.x;
         x += shaft * shaftColor.rgb * (camGlow.y * camParams.y);
+        if (xpGlare.z > 0.0) x += xpSunGlare();
         // Combat light scattered in the air, as light at the exposure.
         x += combatScatter();
         x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
@@ -714,6 +739,33 @@ void main() {
     if (z >= 1e5) { fragColor = vec4(0.25, 0.45, 0.85, 1.0); return; }
     float g = 1.0 - clamp(log2(max(z, 1.0)) / 13.0, 0.0, 1.0);
     fragColor = vec4(vec3(g), 1.0);
+}
+)";
+
+// The far slice put back (EngineGL33::FarSliceDepth, after the resolve, only on
+// a frame that drew a unit past the far plane into the depth range's far slice;
+// Graphics/Remaster/PostStages.hpp FarSliceDepth is the same function). From a
+// copy of the resolved depth into that depth: the world's d < split becomes
+// d / split, the cleared depth stays 1, and the far unit's depths take the
+// stand-in and the mark (farMask 1) the fog's apply reads.
+static const char s_psPostFarDepthGLSL[] = R"(#version 330 core
+uniform sampler2D depthTex; // the resolved depth (a copy: the target is the depth itself)
+uniform vec4 farSlice;      // x the split, y the far unit's stand-in depth
+layout(location = 0) out vec4 farMask;
+void main() {
+    float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r;
+    float o = d;
+    float m = 0.0;
+    if (d >= 1.0) {
+        o = 1.0;
+    } else if (d < farSlice.x) {
+        o = d / farSlice.x;
+    } else {
+        o = farSlice.y;
+        m = 1.0;
+    }
+    gl_FragDepth = o;
+    farMask = vec4(m, 0.0, 0.0, 1.0);
 }
 )";
 
@@ -1032,6 +1084,7 @@ const PostShaderDef kPostShaders[] = {
     {"psFogGlow",
      {Poseidon::gl33lighting::kPostFogGlowGLSL, Poseidon::gl33lighting::kCameraCodecGLSL,
       Poseidon::gl33lighting::kPostFogGlowMainGLSL}},
+    {"psPostFarDepth", {s_psPostFarDepthGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

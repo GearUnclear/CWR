@@ -1,0 +1,18 @@
+# Occupier forces, the HQ model and its fall (OCCUPIER-FORCES.md 9.1, D13,
+# D14, D22, D24; phase 4 part B). Boots the SHIPPED Guerrilla.Abel template
+# (repo-root-relative) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (tools/runtime/new-remaster-shadow.ps1, then
+# setup-guerrilla.ps1 in Remaster mode; see guerrilla-mode/FRESH-INSTALL.md).
+# The shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a regression.
+# Not headless: the ruins of the fallen HQ are deleted through the perception gate.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces"]
+# zone tick 3 s, market / recruit polls 1 s, two HQ sitings (each walks the
+# building table of Abel once)
+timeout = 420
+assert_timeout = 120
+extra_args = ["--dev"]

@@ -202,4 +202,26 @@ constexpr unsigned kInteriorGlassStencil = 0x80u;
 constexpr unsigned kInteriorSolidStencil = 0x40u;
 bool InteriorGlassDraw(bool blended, bool glassClass);
 
+// The far slice of the depth range (Game/Kaiju/KaijuFarDraw.cpp). While a unit
+// past the far plane is on screen the world is drawn into the window depths
+// [0, split] and that unit, under its own projection, into [split, 1). Every
+// post stage reads the depth as the world's projection over [0, 1], so after
+// the resolve the depth is put back (psPostFarDepth in
+// EngineGL33_PostShaders.cpp computes the same): the world's depth d < split
+// becomes d / split, the cleared depth (1, the sky) stays, and the far unit's
+// pixels take a stand-in depth inside the world (FarSliceStandInDepth) and a
+// mark, by which the fog gives them the far draw's own visibility floor. A
+// frame that reserved no slice runs none of this.
+float FarSliceDepth(float depth, float split, float standIn);
+// The window depth of a view depth under the post stages' reconstruction
+// (viewZ = p43 / (depth * depthScale + depthBias - p33)) and back.
+float WindowDepthAtViewZ(float viewZ, float p33, float p43, float depthScale, float depthBias);
+float ViewZAtWindowDepth(float depth, float p33, float p43, float depthScale, float depthBias);
+// The far unit's stand-in depth: kFarSliceStandIn of the far plane (where the
+// farthest land takes its air, short of the horizon plates the fog draws from
+// 0.95 of it), and never as deep as the post stages' sky test (0.999999).
+constexpr float kFarSliceStandIn = 0.9f;
+constexpr float kFarSliceSkyMargin = 0.999998f;
+float FarSliceStandInDepth(float p33, float p43, float depthScale, float depthBias);
+
 } // namespace Poseidon::remaster

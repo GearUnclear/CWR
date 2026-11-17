@@ -1,0 +1,9 @@
+# P0-10 recorder check (triRecord frames against triScreenshot; needs the P0-10 verbs).
+# Generated, do not edit. A photo and timing generator, not a regression test:
+# run it with run-captures.ps1.
+binary = "PoseidonGame"
+mission = "tests/rendering/captures/missions/udcap_abel.Abel"
+tags = ["lighting_capture", "headful", "exclusive"]
+timeout = 1800
+assert_timeout = 240
+extra_args = ["--no-strict", "--display-mode", "windowed", "--width", "1920", "--height", "1080"]

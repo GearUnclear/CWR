@@ -1,0 +1,10 @@
+# Dedushka ROAR: the footfall (dust, shake, late thump) and presence without
+# sight (lamps, drone, radio, birds). Experiment, kept out of tests/integration.
+# Needs @uddedushka and @kj_roar mounted beside the data dir. Run it through
+# run-roar.ps1: one game, hidden desktop, --nosound, nobody fires.
+tags = ["kaiju", "experiment", "roar"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/roar/KaijuRoar.Eden"
+timeout = 420
+assert_timeout = 150
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@uddedushka;@kj_roar"]

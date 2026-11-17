@@ -1,0 +1,6 @@
+// Dedushka, the integrated demo: standalone experiment mission (not a Guerrilla
+// template). Needs the mod folder tmp\@kj_dedushka (addons uddedushka, kjbeam,
+// kj_roar). The script set kj\ is copied in by ..\run-kj.ps1 before a run; it
+// is not kept here. To play it by hand: copy integration\kj here as kj\.
+onLoadMission = "Dedushka: Morton";
+respawn = 0;

@@ -745,6 +745,17 @@ void AIUnit::DoGetOut(Transport* veh, bool parachute)
         // the only place where reset InCargo flag
         if (IsLocal())
         {
+            if (_state != InCargo)
+            {
+                // name the man, the hull and the state before the check below
+                // fires: a cargo seat-in that neither set InCargo nor assigned
+                // him as the hull's cargo (see CargoSeatEntersInCargo)
+                Transport* assigned = VehicleAssigned();
+                LOG_WARN(AI, "DoGetOut: cargo {} leaves {} in state {}, not CARGO (assigned to {}, alive {})",
+                         (const char*)GetDebugName(), (const char*)veh->GetDebugName(), AIUnitStateName(_state),
+                         assigned ? (const char*)assigned->GetDebugName() : "nothing",
+                         person->IsDammageDestroyed() ? "no" : "yes");
+            }
             AI_ERROR(_state == InCargo);
             _state = Wait;
             ClearOperativePlan();
@@ -2709,6 +2720,69 @@ bool AIUnit::AssignAsCommander(Transport* veh)
     return true;
 }
 
+bool Poseidon::CargoSeatEntersInCargo(bool local, bool alive, bool seatedInCargo, AIUnit::State state)
+{
+    return local && alive && seatedInCargo && state != AIUnit::InCargo;
+}
+
+const char* Poseidon::AIUnitStateName(AIUnit::State state)
+{
+    switch (state)
+    {
+        case AIUnit::Wait:
+            return "WAIT";
+        case AIUnit::Init:
+            return "INIT";
+        case AIUnit::Busy:
+            return "BUSY";
+        case AIUnit::Completed:
+            return "OK";
+        case AIUnit::Delay:
+            return "DELAY";
+        case AIUnit::InCargo:
+            return "CARGO";
+        case AIUnit::Stopping:
+            return "STOPPING";
+        case AIUnit::Replan:
+            return "REPLAN";
+        case AIUnit::Stopped:
+            return "STOPPED";
+        case AIUnit::Sending:
+            return "SENDING";
+    }
+    return "UNKNOWN";
+}
+
+// The cargo seat-in completes when the man is both seated in the hull's
+// cargo and assigned as its cargo, in either order.  The script and mission
+// paths (moveInCargo, AICenter's loader, DoGetIn) set InCargo themselves;
+// the paths that only seat and assign (NativeMoveIn for Guerrilla traffic and
+// occupier crews, the network seat update in TransportRadio) relied on a
+// state nobody set, and DoGetOut's cargo branch then failed its InCargo
+// check on the first get-out (issue #78 family).
+static void CompleteCargoSeatIn(AIUnit* unit, Transport* veh)
+{
+    Person* person = unit ? unit->GetPerson() : nullptr;
+    if (!person || !veh)
+    {
+        return;
+    }
+    bool seated = false;
+    const ManCargo& cargo = veh->GetManCargo();
+    for (int i = 0; i < cargo.Size(); i++)
+    {
+        if (cargo[i] == person)
+        {
+            seated = true;
+            break;
+        }
+    }
+    if (CargoSeatEntersInCargo(unit->IsLocal(), !person->IsDammageDestroyed(), seated, unit->GetState()))
+    {
+        unit->SetState(AIUnit::InCargo);
+    }
+}
+
 bool AIUnit::AssignAsCargo(Transport* veh)
 {
     if (veh && veh == _vehicleAssigned && veh->GetCommanderAssigned() != this && veh->GetDriverAssigned() != this &&
@@ -2724,6 +2798,7 @@ bool AIUnit::AssignAsCargo(Transport* veh)
             }
         }
         AI_ERROR(found);
+        CompleteCargoSeatIn(this, veh);
         return true; // already assigned as cargo
     }
 
@@ -2760,6 +2835,7 @@ bool AIUnit::AssignAsCargo(Transport* veh)
         }
         veh->AssignCargo(this);
         _vehicleAssigned = veh;
+        CompleteCargoSeatIn(this, veh);
     }
     return true;
 }

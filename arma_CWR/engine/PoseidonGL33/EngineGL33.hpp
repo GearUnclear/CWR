@@ -23,6 +23,7 @@ class TextBankGL33;
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/DecalBatchRules.hpp>
 #include <PoseidonGL33/SDLEventWindow.hpp>
 
 enum PixelShaderSpecular
@@ -47,6 +48,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <Poseidon/Graphics/Remaster/Wetness.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
@@ -417,6 +419,25 @@ class EngineGL33 : public Engine
     void CreateSamplerStates();
     void DestroySamplerStates();
     void ApplySamplerState();
+    // W1-1 TAA pre-biased twin sampler set: _samplerBiased mirrors
+    // _samplerObjects (filter, wrap, anisotropy; ConfigureSampler for both) and
+    // carries the TAA texture LOD bias, so a TAA frame's world passes swap sets
+    // instead of re-biasing samplers the GPU may still be reading
+    // (EngineGL33_State.cpp, EngineGL33_PostTemporal.cpp).
+    unsigned int _samplerBiased[8] = {};
+    float _samplerBiasedValue = 0.0f; // the LOD bias the twin set holds
+    float _samplerAniso = 1.0f;       // both sets' anisotropy (16x at most)
+    bool _samplerBiasOn = false;      // material sampler binds take the twin set
+    int _samplerSlot0 = 0;            // material sampler index on unit 0
+    // Every material sampler bind goes through this: the set of the moment.
+    unsigned int MaterialSampler(int i) const { return _samplerBiasOn ? _samplerBiased[i] : _samplerObjects[i]; }
+    void ConfigureSampler(unsigned int sampler, int bits, float aniso, float bias);
+    // Unit 0 to material sampler i (the restores after passes that unbind it).
+    void BindMaterialSampler0(int i);
+    // Swaps the material binds between the sets; rebinds units 0, 1 and the sea's.
+    void SetMaterialSamplerBias(bool on);
+    // InitDraw: the taaMipBias knob into the twin set, only when it changes.
+    void UpdateTaaBiasedSamplers();
 
     TexLoc _texLoc;
 
@@ -605,6 +626,29 @@ class EngineGL33 : public Engine
     int MaxSatX() const override { return _maxGuardX; }
     int MinSatY() const override { return _minGuardY; }
     int MaxSatY() const override { return _maxGuardY; }
+
+    // --- W1-2: asynchronous world probe (the frame observer's near-black
+    // check). One pixel of the frame target resolved into a 1x1 target and
+    // read into a 4-slot fenced pixel-pack ring; a busy slot drops the sample
+    // instead of waiting. Made on first use; released with the GL context.
+    // Implemented in EngineGL33_VertexBuffer.cpp next to SamplePixel.
+    bool QueueWorldProbe(int x, int y) override;
+    int PollWorldProbes(WorldProbe* out, int max) override;
+
+  protected:
+    struct WorldProbeState
+    {
+        static constexpr int kRing = 4;
+        unsigned int fbo = 0;
+        unsigned int rb = 0;
+        unsigned int pbo[kRing] = {};
+        void* fence[kRing] = {};
+        std::uint32_t frame[kRing] = {};
+        int next = 0;
+        bool broken = false; // the 1x1 target was incomplete: no probes
+    };
+    WorldProbeState _worldProbe;
+    // --- end W1-2
 
   protected:
     void WorkToBack();
@@ -913,13 +957,20 @@ class EngineGL33 : public Engine
     Poseidon::remaster::WetnessFrame _wetFrame;
     bool _wetShading = false;
     // The surface rules: the stock table and the config's CfgSurfaceMaterials,
-    // built at the first wet frame. Each texture classifies itself once per
+    // built at the first lit draw that asks for a class (ApplySurfaceClass, the
+    // wet weather, a decal batch or a fog view). Each texture classifies itself once per
     // object kind against the table of its generation (TextureGL33).
     Poseidon::remaster::SurfaceTable _surfaceTable;
     int _surfaceTableGen = 0; // 0 = not built
     void EnsureSurfaceTable();
     // The Weather slot and the frame flags of the MatClass slot, from the gates.
     void UploadLitWeather();
+    // Shore water (the Graphics page's Shore water option, first the
+    // experiment POSEIDON_XP_WATER; EngineGL33_Sea.cpp): the shore slot
+    // litWater2. The shore's parts mask (UploadLitSeaShore), 0 = off; set
+    // by SetLookOptions.
+    void UploadLitSeaShore();
+    int _shoreWaterParts = 0;
     // The surface class of the draw ApplyPassState prepares (its texture and
     // object kind) into LitConst::MatClass xy, uploaded only when it changes.
     void SetLitSurface(TextureGL33* tex, const Poseidon::render::RenderPassDescriptor& d);
@@ -975,6 +1026,28 @@ class EngineGL33 : public Engine
         unsigned int progMask = 0, progBlur = 0, vao = 0;
         bool programsTried = false, unavailable = false;
     } _combat;
+    // Lamp shadows (the Graphics page's Lamp shadows option, first the
+    // experiment lane xp-nightlight; SetLookOptions, Graphics/Remaster/LookOptions.hpp
+    // for the POSEIDON_XP_NIGHTLIGHT, _LAMPSHADOWS and _LIGHTBOUNCE overrides).
+    // Light bounce: lamps, headlights and fires light what stands in their
+    // pool from below, off the lit ground. Lamp shadows: street lamps take the
+    // combat shadow mask's free channels. Both off leave LitConst::XpNight zero
+    // and every frame as it was before the option.
+    struct XpNightState
+    {
+        // Lamps take at most this many mask channels, those within this
+        // distance of the camera (m).
+        static constexpr int kLampChannels = 2;
+        static constexpr float kLampDistance = 60.0f;
+        float bounceGain = 0.0f;
+        bool lampShadows = false;
+        int lampChannels = 0;  // channels of the mask kept for lamps this frame
+        bool lampMask = false; // this frame's mask traces at least one lamp
+        Poseidon::lighting::ShadowSelection lampSelection;
+    } _xpNight;
+    // Picks the lamps that take a mask channel, fills the mask's slots and marks
+    // the lamps' channels (UpdateLightTiles, after the combat lights took theirs).
+    void XpAssignLampShadows(const Poseidon::lighting::TileView& view);
     void InitCombatResources();
     void DeinitCombatResources();
     // The combat lights of this frame for the tiled list (camera-relative,
@@ -1136,6 +1209,13 @@ class EngineGL33 : public Engine
         // The photoreal camera's meter (EngineGL33_Camera.cpp): kMeterWidth x
         // kMeterHeight RGBA16F, read back through _camera's ring.
         unsigned int meterTex = 0, meterFbo = 0, progMeter = 0;
+        // Sun glare (the Graphics page's Sun Glare option, first the experiment
+        // POSEIDON_XP_SUNGLARE; EngineGL33_XpAtmosphere.cpp): the disc's visible
+        // share, 1x1 RGBA16F ping-pong, and its program (built on first use,
+        // only with the glare on).
+        unsigned int xpGlareTex[2] = {}, xpGlareFbo[2] = {}, progXpGlareVis = 0;
+        int xpGlareCur = 0;
+        bool xpGlareTried = false, xpGlareHistory = false;
         bool programsTried = false;
         // The post pass is off: its programs failed (until the next reset) or
         // its targets came back incomplete at failedW x failedH (tried again
@@ -1144,6 +1224,27 @@ class EngineGL33 : public Engine
         bool programsFailed = false;
         int failedW = 0, failedH = 0;
     } _post;
+    // The far slice of the depth range (Game/Kaiju/KaijuFarDraw.cpp through
+    // SetDepthRange): the frame that reserved it, its split, the highest fog
+    // floor drawn into it (SetFogFloor while the slice is the live range), and
+    // the targets that put the depth back after the resolve (FarSliceDepth,
+    // EngineGL33_PostFogViews.cpp). Built on the first frame that needs them.
+    // The fog's and the air's apply read the mark on the frame maskFrame.
+    struct FarSliceState
+    {
+        std::uint32_t frame = 0xffffffffu;
+        float split = 1.0f;
+        float floor = 0.0f;
+        bool inSlice = false; // the live range is the far slice [split, 1]
+        std::uint32_t maskFrame = 0xffffffffu;
+        bool maskOnSave = false; // the mark is of a vehicle interior's saved world depth
+        int w = 0, h = 0;
+        unsigned int copyTex = 0, copyFbo = 0; // D24S8: the depth to put back, read by psPostFarDepth
+        unsigned int maskTex = 0;              // R8: 1 where the far unit was drawn
+        unsigned int fbo = 0;                  // maskTex and the depth being put back
+        unsigned int prog = 0;  // psPostFarDepth, linked with the post programs
+        bool failed = false;    // the targets came back incomplete at w x h
+    } _farSlice;
     // TAA frame state (EngineGL33_PostTemporal.cpp, Graphics/Remaster/TemporalAA.hpp).
     struct TaaState
     {
@@ -1172,8 +1273,8 @@ class EngineGL33 : public Engine
     // pass, then hands the jitter to the vertex shaders and the texture LOD
     // bias to the material samplers (zero and none outside a TAA frame).
     void ApplyTaaJitter();
-    // Writes `ndc` into vpScale.zw (and flushes) and `bias` into the material
-    // samplers, each only when it changes.
+    // Writes `ndc` into vpScale.zw (and flushes) when it changes, and binds the
+    // material samplers of `bias`: the twin set when non-zero, else the plain set.
     void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
     void BeginTranslucentObjects() override;
     // The photoreal camera (feature switch photoLight;
@@ -1328,6 +1429,23 @@ class EngineGL33 : public Engine
     void PostBloom(const PostFrame& f);
     void PostShafts(const PostFrame& f);
     void PostComposite(const PostFrame& f);
+    // Sun glare (the Graphics page's Sun Glare option, first the experiment
+    // lane xp-atmosphere; EngineGL33_XpAtmosphere.cpp): the strength
+    // SetLookOptions set (0 = off: no pass runs and the composite skips the
+    // glare), the visibility pass the composite runs first, and what the
+    // composite's glare reads.
+    struct XpSunGlareFrame
+    {
+        bool on = false;
+        unsigned int tex = 0;           // the smoothed visible share (r)
+        float sunX = 0.0f, sunY = 0.0f; // the sun's view ray at z = 1
+        float gain = 0.0f;
+        float coreRad = 0.0f, coreLevel = 0.0f, haloRad = 0.0f, haloLevel = 0.0f;
+        float r = 1.0f, g = 1.0f, b = 1.0f; // the sun's colour by its peak
+    };
+    float _sunGlareGain = 0.0f;
+    XpSunGlareFrame PostXpSunGlare(const PostFrame& f);
+    void DestroyXpSunGlare();
     void PostTemporal(const PostFrame& f);
     void PostSharpen(const PostFrame& f);
     void PostDebugView(const PostFrame& f);
@@ -1437,6 +1555,19 @@ class EngineGL33 : public Engine
     // its glass is the nearest surface get the far depth, so the fog's apply
     // fogs the world seen through the glass and keeps the cockpit as drawn.
     void FarInteriorGlass(const PostFrame& f);
+    // After the resolve of a frame that reserved the far slice (_farSlice): the
+    // resolved depth, and a vehicle interior's saved world depth, put back to
+    // the world's projection over [0, 1], and the far unit's mark. A frame
+    // without the slice does nothing here.
+    void FarSliceDepth(const PostFrame& f);
+    void DestroyFarSlice();
+    // The mark for an apply program: on a frame with it, bound on kFarMaskUnit
+    // (the unit's texture and sampler saved in `saved`) and farKeep = (1, the
+    // floor); else farKeep = 0 and nothing bound. A mark taken from a vehicle
+    // interior's saved world depth serves only an apply that reads that depth
+    // (onWorldSave).
+    void BindFarMask(unsigned int prog, int saved[2], bool onWorldSave);
+    void UnbindFarMask(const int saved[2]);
     // The depth the fog stages read: the world's (saved before a vehicle
     // interior cleared it), else the resolved frame's.
     unsigned int PostFogDepthTex() const;
@@ -1528,8 +1659,30 @@ class EngineGL33 : public Engine
         float drift[2] = {0.0f, 0.0f};
         float driftTime = -1.0f;
     } _fog;
+    // P0-6 temporal determinism (Graphics/Remaster/TemporalDeterminism.hpp,
+    // the tri verbs triResetTemporal and triDeterministic;
+    // EngineGL33_PostTemporal.cpp): the last reset request applied, the frame
+    // it applied at (the reflections' probe frames count from it in
+    // deterministic mode), and whether the histories are dropped once more
+    // when the camera's snap lands.
+    struct TemporalDetState
+    {
+        Poseidon::remaster::TemporalResetLatch latch;
+        std::uint32_t frameBase = 0;
+        bool redropOnSnap = false;
+    } _temporalDet;
+    // Applies a new reset request once, at the first of the frame's passes
+    // that reads temporal state (ApplyTaaJitter, UpdateCameraFrame,
+    // EndWorldScene); a no-op otherwise.
+    void ApplyTemporalReset();
+    // Drops the TAA, fog and surface-occlusion histories.
+    void DropTemporalHistories();
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
+    // The Graphics page's look options with the environment's overrides
+    // (Graphics/Remaster/LookOptions.hpp): the shore water, the lamp shadows,
+    // the sun shadows' tier and the low sun's glare (EngineGL33.cpp).
+    void SetLookOptions(const Poseidon::remaster::LookOptions& options) override;
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
     static constexpr int kShadowCascades = 4;
     void RenderShadowDepthScene(const float* lightVPs, const float* splitViewDist, const float* camFwd3,
@@ -1543,6 +1696,12 @@ class EngineGL33 : public Engine
     void UpdateShadowMapLitState();
 
     ShadowMapTuning _shadowTuning;                 // runtime knobs (FP parameter set)
+    // The shadow tier _shadowTuning carries (Graphics/Shadow/ShadowXp.hpp; -1
+    // before the first SetLookOptions) and the tuning as built, which the
+    // tier's fields go back to when it changes.
+    int _shadowTier = -1;
+    ShadowMapTuning _shadowTuningBuilt;
+    void ApplyShadowTier(int tier);
     float _shadowSunFactor = 1.0f;                 // day/night fade [0,1]; 0 at night (no sun shadow)
     bool _shadowMapActive = false;                 // a depth pass ran this frame
     unsigned int _shadowMapTex = 0;                // GL depth texture ARRAY to sample
@@ -1668,6 +1827,43 @@ class EngineGL33 : public Engine
     GfxMatrix _instArray[256];
     void QueuePrepareTriangle(const Poseidon::MipInfo& absMip, int specFlags);
 
+    // W4-1 batched decals (EngineGL33_DecalBatch.cpp): consecutive decals of
+    // one spec draw as one draw, each reading its own texture from its layer
+    // of a texture array (the layer rides in the quad's second texture
+    // coordinate). POSEIDON_DECAL_BATCH=0 at start keeps one draw per texture.
+    struct DecalLayerSlot
+    {
+        int array = -1;
+        int layer = -1;
+        bool Valid() const { return array >= 0 && layer >= 0; }
+    };
+    struct DecalBatchState
+    {
+        bool active = false; // the alpha queue holds a batch
+        Poseidon::render::decalbatch::BatchKey key;
+        Poseidon::render::decalbatch::RunList runs;
+    };
+    DecalBatchState _decalBatch;
+    Poseidon::render::decalbatch::LayerTable _decalLayers;
+    std::vector<unsigned int> _decalArrayTex; // GL name per array of _decalLayers
+    std::vector<int> _decalArrayCap;          // its storage, in layers
+    std::vector<int> _decalModeLoc;           // per program GL name: decalLayerMode (-2 not looked up)
+    int _decalBatchGate = -1;                 // -1 not decided yet, 0 off, 1 on
+    bool DecalBatchOn();
+    DecalLayerSlot PrepareDecalLayer(TextureGL33* tex);
+    void QueuePrepareDecalBatch(const Poseidon::MipInfo& mip, int specFlags, const DecalLayerSlot& slot);
+    bool IsDecalBatchQueue(const QueueGL33& queue, int index) const
+    {
+        return _decalBatch.active && &queue == &_queueNo && index == MaxTriQueues - 1;
+    }
+    void DrawDecalBatch(const TriQueue& triq, int n, int indexOffset);
+    int DecalStateClass(TextureGL33* tex, int specFlags);
+    bool CopyDecalLayer(int array, int layer, const TextureGL33* tex);
+    bool EnsureDecalArray(int array, int capacity, int growFrom);
+    void DestroyDecalArrays();
+    void ResetDecalBatchPrograms() { _decalModeLoc.clear(); }
+    int LitSkyMode() const; // litSkyFwd.w: the RemasterSky of the draws that follow, 0 = the world's
+
     void PrepareTriangle(const Poseidon::MipInfo& absMip, int specFlags) override;
     void PrepareTriangleTL(const Poseidon::MipInfo& mip, const Poseidon::render::LegacySpec& spec) override;
 
@@ -1724,6 +1920,9 @@ class EngineGL33 : public Engine
     void ClearLights();
 
     void UpdateProjection() override;
+    void SetFogFloor(float visibility) override;
+    float _fogFloor = 0.0f; // SetFogFloor: lowest fog visibility of mesh draws, 0 = stock
+    void SetDepthRange(float zNear, float zFar) override;
 
     // World-viewport crop (aspect pillarbox / manual noodle).  The 3D
     // scene renders into the AspectSettings world rect; the periphery is
@@ -1797,7 +1996,9 @@ class EngineGL33 : public Engine
     // Remastered foliage: crown ellipsoid of the shape about to draw. Writes VS
     // slots 22-23 only when the value changes.
     void UploadVSCrown(const float center[3], const float invHalf[3]);
-    void UploadVSMaterialConstants(const Poseidon::TLMaterial& mat, bool sunEnabled);
+    // flush false: the caller flushes the VS block itself before the next draw
+    // (DoSetMaterial, whose UploadVSLights always does; perf W1-6, S3-23).
+    void UploadVSMaterialConstants(const Poseidon::TLMaterial& mat, bool sunEnabled, bool flush = true);
     void UploadVSLights(const LightList& lights, const Poseidon::TLMaterial& mat, float nightEffect);
     void UploadVSTexGenConstants(TexGenMode mode);
     void SetShaderFogEnabled(bool enabled);

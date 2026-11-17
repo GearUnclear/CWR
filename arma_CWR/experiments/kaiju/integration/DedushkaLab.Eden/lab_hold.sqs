@@ -1,0 +1,16 @@
+; Dedushka lab: hangs an empty aircraft in the air until it is struck.
+;     [aircraft, [x, y, height above the ground]] exec "lab_hold.sqs"
+; Ends when KJL_hold goes false, when the swat lands (KJ_swatResult "hit") or
+; when the aircraft is destroyed.
+_o = _this select 0
+_p = _this select 1
+KJL_hold = true
+#tick
+? isNull _o : exit
+? not KJL_hold : exit
+? not (alive _o) : exit
+? not (isNil "KJ_swatResult") : if (KJ_swatResult == "hit") then { KJL_hold = false }
+_o setPos _p
+_o setVelocity [0, 0, 0]
+~0.01
+goto "tick"

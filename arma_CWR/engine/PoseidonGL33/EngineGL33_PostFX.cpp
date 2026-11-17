@@ -222,6 +222,7 @@ void EngineGL33::DestroyPostTargets()
     p.w = p.h = 0;
     _taa.history.exists = false; // the TAA history went with its targets
     DestroySsrTargets();
+    DestroyFarSlice(); // its put-back target holds the resolved depth
 }
 
 void EngineGL33::DestroyPostPrograms()
@@ -231,7 +232,8 @@ void EngineGL33::DestroyPostPrograms()
     for (unsigned int* prog :
          {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
           &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen, &p.progAirMarch,
-          &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progGtao, &p.progGtaoAccum, &p.progMeter})
+          &p.progAirBlur, &p.progAirMean, &p.progAirApply, &p.progGtao, &p.progGtaoAccum, &p.progMeter,
+          &_farSlice.prog})
     {
         if (*prog)
             glDeleteProgram(*prog);
@@ -248,6 +250,7 @@ void EngineGL33::DestroyPostPrograms()
     p.failedW = p.failedH = 0;
     p.airUnavailable = false;
     DestroySsrPrograms();
+    DestroyXpSunGlare();
 }
 
 bool EngineGL33::EnsurePostResources(int w, int h)
@@ -284,6 +287,11 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         p.progGtao = link(PostShader::Gtao);
         p.progGtaoAccum = link(PostShader::GtaoAccum);
         p.progMeter = link(PostShader::Meter);
+        // The far slice's put-back (FarSliceDepth): without it a far-drawn
+        // unit's frames keep the squeezed depth, as before it existed.
+        _farSlice.prog = link(PostShader::FarDepth);
+        if (!_farSlice.prog)
+            LOG_ERROR(Graphics, "GL33 post: the far slice's depth put-back failed to build; it is off");
         if (vs)
             glDeleteShader(vs);
         // The march and the apply read the rig (LitConstants, binding 3).
@@ -494,6 +502,7 @@ void EngineGL33::PostFrameSun(PostFrame& f) const
 
 void EngineGL33::EndWorldScene()
 {
+    ApplyTemporalReset(); // P0-6: a triResetTemporal request, once (no-op in play)
     // Only the frame that actually drew the world through the remastered
     // shaders has a sky light share in its alpha and a world depth buffer.
     const bool worldDrawn = _worldPassOpen;
@@ -585,9 +594,10 @@ void EngineGL33::EndWorldScene()
     in.ssrTags = _ssrTagFrame == GetFrameCounter() && rm::FeatureOn(_lighting.features, rm::Feature::Ssr);
     in.ssr = in.ssrTags && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
              _featureGates[rm::Feature::Ssr].on;
-    in.ssrTags =
-        in.ssrTags && (in.ssr || GetFrameCounter() % static_cast<std::uint32_t>(rm::kSsrShareProbeFrames) == 0 ||
-                       in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
+    in.ssrTags = in.ssrTags && (in.ssr ||
+                                rm::SsrShareProbeDue(GetFrameCounter(), _temporalDet.frameBase,
+                                                     rm::kSsrShareProbeFrames, rm::TemporalDeterministic()) ||
+                                in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
     // The combat shadow mask of the next frame traces through this frame's
     // linear depth.
     in.combatMask = combatWasActive && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
@@ -718,6 +728,9 @@ void EngineGL33::PostResolve(const PostFrame& f)
         glBlitFramebuffer(0, 0, f.w, f.h, 0, 0, f.w, f.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
     }
+    // A unit drawn past the far plane into the depth range's far slice: the
+    // depth back to the world's projection over [0, 1] (no-op otherwise).
+    FarSliceDepth(f);
     // A vehicle interior's glass: the world seen through it is fogged.
     FarInteriorGlass(f);
 }
@@ -733,6 +746,7 @@ void EngineGL33::BeginPostFullscreen()
     glBindVertexArray(_post.vao);
     for (int unit : Poseidon::gl33lighting::kPostUnits)
         glBindSampler(static_cast<GLuint>(unit), 0);
+    _samplerSlot0 = -1; // no material sampler on unit 0 until EndPostFullscreen
 }
 
 void EngineGL33::PostLinearDepth(const PostFrame& f)
@@ -927,7 +941,28 @@ void EngineGL33::PostComposite(const PostFrame& f)
     // The camera meters this frame for the frames to come.
     if (f.camera)
         PostCameraMeter(f);
+    // Sun glare (the Sun Glare option): its visibility pass, then the
+    // composite's glare terms (a zero gain skips them).
+    const XpSunGlareFrame glare = PostXpSunGlare(f);
     glUseProgram(p.progComposite);
+    Set4(p.progComposite, "xpGlare", glare.sunX, glare.sunY, glare.on ? glare.gain : 0.0f, 0.0f);
+    Set4(p.progComposite, "xpGlareShape", glare.coreRad, glare.coreLevel, glare.haloRad, glare.haloLevel);
+    Set4(p.progComposite, "xpGlareColor", glare.r, glare.g, glare.b, 0.0f);
+    SetInt(p.progComposite, "xpGlareVis", Poseidon::gl33lighting::kCombatMaskUnit);
+    GLint glarePrevTex = 0, glarePrevSampler = 0;
+    if (glare.on)
+    {
+        // Unit 14 holds the combat mask (whose free channels the lamp
+        // shadows take). The mask is built at the start of the world and read
+        // only by the world's draws, all before the post pass; the composite
+        // does not read it. Borrowed for the draw and handed back as it was.
+        glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kCombatMaskUnit);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &glarePrevTex);
+        glGetIntegerv(GL_SAMPLER_BINDING, &glarePrevSampler);
+        glBindSampler(Poseidon::gl33lighting::kCombatMaskUnit, 0);
+        glBindTexture(GL_TEXTURE_2D, glare.tex);
+        glActiveTexture(GL_TEXTURE0);
+    }
     SetInt(p.progComposite, "colorTex", 0);
     SetInt(p.progComposite, "aoTex", 2);
     SetInt(p.progComposite, "bloomTex", 3);
@@ -1033,6 +1068,14 @@ void EngineGL33::PostComposite(const PostFrame& f)
         Set4(p.progComposite, "camParams", 0.0f, 1.0f, 0.0f, 0.0f);
     }
     DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
+    if (glare.on)
+    {
+        glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kCombatMaskUnit);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(glarePrevTex));
+        glBindSampler(Poseidon::gl33lighting::kCombatMaskUnit, static_cast<GLuint>(glarePrevSampler));
+        glActiveTexture(GL_TEXTURE0);
+        GL33Bind::Invalidate();
+    }
     if (surf)
     {
         glActiveTexture(GL_TEXTURE6);
@@ -1067,7 +1110,7 @@ void EngineGL33::EndPostFullscreen()
         glBindTexture(GL_TEXTURE_2D, 0);
     }
     glActiveTexture(GL_TEXTURE0);
-    glBindSampler(0, _samplerObjects[0]);
+    BindMaterialSampler0(0);
     glBindVertexArray(0);
     glUseProgram(0);
     BindFrameRenderTarget();

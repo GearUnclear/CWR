@@ -14,6 +14,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/World/Simulation/Animation/Animation.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
+#include <Poseidon/World/Scene/LandFitCache.hpp>
 
 #include <Poseidon/Graphics/Rendering/Primitives/Edges.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -75,18 +76,75 @@ bool Shape::HasBlendSections() const
 
 SectionClassFilter GSectionFilter = SectionClassFilter::All;
 
+// W1-9: an object's fitted copy of a land-following level (LandFitCache.hpp)
+// that the next Shape::Draw draws from instead of the level's shared buffer.
+static VertexBuffer* GDrawBufferOverride = nullptr;
+
+namespace LandFit
+{
+// The test Shape::Draw uses to pick the hardware T&L path, which draws from
+// the vertex buffer. The software path below transforms the CPU vertices.
+static bool DrawsFromVertexBufferImpl(bool hasBuffer, ClipFlags clip, int spec)
+{
+    // if engine has T&L interface, use it
+    // cannot use T&L on some surface types (OnSurface?)
+    Engine* engine = GEngine;
+    bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
+    return engine->GetTL() && EnableHWTLState && tlAble && hasBuffer;
+}
+
+bool DrawsFromVertexBuffer(const Shape& shape, unsigned int clip, int spec)
+{
+    return DrawsFromVertexBufferImpl(shape.GetVertexBuffer() != nullptr, clip, spec);
+}
+
+ScopedDrawBuffer::ScopedDrawBuffer(VertexBuffer* buffer) : _previous(GDrawBufferOverride)
+{
+    GDrawBufferOverride = buffer;
+}
+
+ScopedDrawBuffer::~ScopedDrawBuffer()
+{
+    GDrawBufferOverride = _previous;
+}
+} // namespace LandFit
+
 void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags clip, int spec,
                  const Matrix4& transform, const Matrix4& invTransform)
 {
 #ifndef ACCESS_ONLY
-    // if engine has T&L interface, use it
-    // cannot use T&L on some surface types (OnSurface?)
+    // W1-9: draw from the object's fitted copy for this draw only. Taken here
+    // (not left armed) so nothing this draw calls can pick it up again; the
+    // level's own buffer is back when the draw returns.
+    struct BufferSwap
+    {
+        Shape& shape;
+        Ref<VertexBuffer> saved;
+        bool active = false;
+        explicit BufferSwap(Shape& s) : shape(s)
+        {
+            if (VertexBuffer* fitted = GDrawBufferOverride)
+            {
+                GDrawBufferOverride = nullptr;
+                saved = shape._buffer;
+                shape._buffer = fitted;
+                active = true;
+            }
+        }
+        ~BufferSwap()
+        {
+            if (active)
+            {
+                shape._buffer = saved;
+            }
+        }
+        BufferSwap(const BufferSwap&) = delete;
+        BufferSwap& operator=(const BufferSwap&) = delete;
+    } bufferSwap(*this);
 
     Engine* engine = GEngine;
 
-    bool tlAble = ((spec & OnSurface) == 0 || engine->GetTLOnSurface()) && (clip & ClipUser0) == 0;
-
-    if (engine->GetTL() && EnableHWTLState && tlAble && _buffer)
+    if (LandFit::DrawsFromVertexBufferImpl(_buffer.NotNull(), clip, spec))
     {
         if (BeginFaces() < EndFaces() && NSections() > 0)
         {

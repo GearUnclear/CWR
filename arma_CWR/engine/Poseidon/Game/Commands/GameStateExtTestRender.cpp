@@ -29,6 +29,7 @@ using namespace Poseidon;
 #include <Poseidon/IO/ParamFileExt.hpp> // global Pars for triAssertConfigClass
 #include <sstream>
 #include <Poseidon/Network/MasterServerServiceClient.hpp> // catalog entry for triSeedWorkshopMods
+#include <Random/randomGen.hpp>                           // RandomDeterministicWorld for the capture hold
 #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
@@ -40,6 +41,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 #include <Poseidon/AI/EntityAI.hpp>
 namespace Poseidon
@@ -274,6 +276,14 @@ GameValue TriCaptureAtPresent(const GameState* /*state*/, GameValuePar arg)
 
 /// triScreenshot "label" — capture screenshot to output dir (PNG + BMP). Returns "OK".
 /// Uses no-extension path so ScreenshotWriter produces both formats.
+/// Under the capture hold (deterministic mode, Graphics/Remaster/
+/// TemporalDeterminism.hpp) the main loop runs no frame of its own, so a
+/// capture at present renders its one frame here, the frame right after the
+/// test's last triSimFrames frame; the hold ends with the shot, except with
+/// POSEIDON_DETERMINISTIC_WORLD set (DET-3): there it lasts until the next
+/// pin, triRecord, triDeterministic false or the idle limit, so no free loop
+/// frame simulates fires, smoke or vehicles on between a shot and the next
+/// mode or view.
 GameValue TriScreenshot(const GameState* state, GameValuePar arg)
 {
     GameStringType label = static_cast<GameStringType>(arg);
@@ -298,7 +308,11 @@ GameValue TriScreenshot(const GameState* state, GameValuePar arg)
         // captures cannot race for the single pending path.
         if (!atPresent)
             GEngine->FlushPendingScreenshot();
+        else if (Poseidon::remaster::CaptureHoldActive())
+            Poseidon::AppIdle(); // the capture frame (see above)
     }
+    if (!RandomDeterministicWorld())
+        Poseidon::remaster::ReleaseCaptureHold();
 
     return GameValue("OK");
 }
@@ -541,14 +555,22 @@ static const char* HorizonMapState()
 /// compares across the hillCull switch too). With drawGrouping off, any light
 /// slot (a street lamp that has once been on keeps its slot) turns instancing
 /// off for the whole scene (Pass1), which multiplies the draw calls for the
-/// same objects.
+/// same objects. Then the last closed frame's geometry counters
+/// (Graphics/Core/PerfCounters.hpp): ";tris=<triangles>;lodsw=<objects that
+/// switched draw level>;lodhist=<draws at level 0>/.../<level 7 or coarser>"
+/// (0 until the scene counts them).
 GameValue TriSceneStats(const GameState* /*state*/)
 {
-    char buf[224];
-    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;culled=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
-             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->HillHiddenObjectCount() : -1,
-             GScene ? GScene->NLights() : -1, GScene ? GScene->GetLodInvWidth() : 0.0f,
-             GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+    const Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Last();
+    char buf[400];
+    snprintf(buf, sizeof(buf),
+             "draws=%d;objects=%d;culled=%d;lights=%d;lod=%g;pin=%g;horizon=%s;tris=%d;lodsw=%d;"
+             "lodhist=%d/%d/%d/%d/%d/%d/%d/%d",
+             LastFrameDrawCalls(), GScene ? GScene->DrawnObjectCount() : -1,
+             GScene ? GScene->HillHiddenObjectCount() : -1, GScene ? GScene->NLights() : -1,
+             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState(),
+             c.tris, c.lodSwitches, c.lodHist0, c.lodHist1, c.lodHist2, c.lodHist3, c.lodHist4, c.lodHist5, c.lodHist6,
+             c.lodHist7);
     return GameValue(buf);
 }
 
@@ -707,6 +729,8 @@ GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
     const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
     const bool volumetric = sight && sight->volumetric;
     const float ai = sight ? remaster::FogSightTransmittance(*sight, p[0], p[1]) : 1.0f;
+    if (sight)
+        Poseidon::perf::CountFogSight(Poseidon::perf::GPerfCounters().Frame(), Poseidon::perf::FogSightCaller::Script);
     const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
     remaster::FogMedium drawnMedium;
     const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
@@ -759,6 +783,8 @@ GameValue TriAiSight(const GameState* /*state*/, GameValuePar arg)
     const std::shared_ptr<const remaster::FogSightSnapshot> sight = remaster::FogSightNow();
     const bool volumetric = sight && sight->volumetric;
     const float tAi = sight ? remaster::FogSightTransmittance(*sight, from, to) : 1.0f;
+    if (sight)
+        Poseidon::perf::CountFogSight(Poseidon::perf::GPerfCounters().Frame(), Poseidon::perf::FogSightCaller::Script);
     const std::shared_ptr<const remaster::FogSightMap> map = sight ? sight->map : nullptr;
     remaster::FogMedium drawnMedium;
     const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
@@ -855,19 +881,23 @@ GameValue TriPinCloudDrift(const GameState* /*state*/, GameValuePar arg)
     return GameValue(buf);
 }
 
-/// triGpuTimes <on>: GPU timestamp timing for cost checks. true turns it on
-/// (and resets the averages), false turns it off; either way it returns the
-/// current summary, e.g. "frame 6.12 ms | world 4.80 (shadow 0.62) | post
-/// 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15". Results trail the
-/// frame by a few frames: enable, wait a second, then read.
+/// triGpuTimes <on>: GPU timestamp timing for cost checks. It returns the
+/// summary of the window so far, e.g. "frame 6.12 ms | world 4.80 (shadow
+/// 0.62) | post 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15", then
+/// applies <on>: true turns timing on, or, when it is already on, starts a new
+/// window (the averages, the minimum and the triGpuRing records restart, and
+/// the frames still in flight are dropped); false turns it off. So one call
+/// both reads a window and starts the next, and "false then true" still
+/// restarts it as before. Results trail the frame by a few frames: enable,
+/// wait a second, then read (read triGpuRing before this call).
 GameValue TriGpuTimes(const GameState* /*state*/, GameValuePar arg)
 {
     if (!GEngine)
         return GameValue("FAIL:no engine");
     const bool on = static_cast<bool>(arg);
-    if (on != GEngine->GpuTimingEnabled())
-        GEngine->SetGpuTimingEnabled(on);
-    return GameValue(GEngine->GpuTimingSummary().c_str());
+    const std::string summary = GEngine->GpuTimingSummary();
+    GEngine->SetGpuTimingEnabled(on);
+    return GameValue(summary.c_str());
 }
 
 /// triEnableShadowMaps — turn on the durable shadow-map (depth-buffer) path. Off

@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <SDL3/SDL_scancode.h>
 
@@ -65,10 +66,13 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierAir.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -86,6 +90,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 
 #include <Poseidon/World/WorldShared.hpp>
+#include <Poseidon/World/TriCamPath.hpp>
 AbstractOptionsUI* CreateChannelUI();
 
 namespace Poseidon
@@ -1255,10 +1260,19 @@ void World::Simulate(float deltaT, bool& enableDraw)
             }
             transform.SetPosition(camPos);
         }
+        // P0-10 motion clips: a triCamPath camera path, stepped by the
+        // simulation step, drives the render-view override.
+        if (Poseidon::tricam::CamPose pathPose; Poseidon::tricam::StepCamPath(deltaT, pathPose))
+        {
+            const Vector3 dir(pathPose.dir[0], pathPose.dir[1], pathPose.dir[2]);
+            World_SetTriViewOverride(Vector3(pathPose.pos[0], pathPose.pos[1], pathPose.pos[2]), dir.Normalized(), VUp);
+        }
         if (s_triViewActive)
         {
             transform = s_triViewTransform;
         }
+        // tremor sources (Game/Kaiju): no-op unless a script started one
+        Kaiju::ApplyCameraShake(transform);
         camera.SetTransform(transform);
 
         if (cameraVehicle)
@@ -1422,6 +1436,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
             if (!_showMap && IsDisplayEnabled())
             {
                 {
+                    // decide how each far-drawn unit (Game/Kaiju) is drawn this frame
+                    Kaiju::FarBeginFrame(_scene);
                     LandBegEnd objBegEnd;
                     Landscape::CalculBoundingRect(objBegEnd, *_scene.GetCamera(), _scene.GetFogMaxRange(), ObjGrid);
 
@@ -1556,6 +1572,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
                 _scene.ObjectsDrawn();
                 GEngine->FlushQueues();
+                // give back the depth slice the far draw reserved, if any
+                Kaiju::FarEndScene();
 
                 // Frame validation — ExtractSceneInputs → BuildFrame →
                 // ValidateFrame + runtime checks, after the world's
@@ -1735,6 +1753,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla Mode zone tick - no-op unless the mission config
         // defines CfgGuerrillaZones; throttles itself to tickInterval.
         Guerrilla::ZoneRegistry::Instance().Simulate(deltaT);
+        // Generated-base props - inactive without generated bases;
+        // re-creates a deleted prop at BaseProps::TickInterval.  Before the
+        // garrison cache so an old save's first layout precedes its spawns.
+        Guerrilla::BaseProps::Instance().Simulate(deltaT);
         // Guerrilla garrison distance-cache - inactive with the registry;
         // throttles itself to cacheInterval.
         Guerrilla::GarrisonCache::Instance().Simulate(deltaT);
@@ -1746,6 +1768,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // 0.5 s encounter sub-tick while civ traffic exists.
         Guerrilla::Traffic::Instance().Simulate(deltaT);
         Guerrilla::AssailantSystem::Instance().Simulate(deltaT);
+        // Giant-creature support (Game/Kaiju): lights, emitters, damage
+        // ceilings and tremor expiry; returns at once when nothing uses it.
+        Kaiju::Simulate(deltaT);
         // Guerrilla arms stashes - prunes dead holders; active in ANY mission
         // once something registers; throttles itself to
         // StashRegistry::TickInterval.
@@ -1765,9 +1790,16 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // registry; checks the win rule at CampaignEnd::TickInterval, then
         // runs the end clock and asks for END1 once.
         Guerrilla::CampaignEnd::Instance().Simulate(deltaT);
+        // Guerrilla occupier forces pool (OCCUPIER-FORCES.md phase 2) -
+        // inert unless occupierForces = 1; sizes the pool on the first
+        // active frame, then ticks at forcesDirectorInterval.
+        Guerrilla::OccupierForces::Instance().Simulate(deltaT);
         // Guerrilla occupier counter-attacks (issue #79) - idle until a town
         // flips; steps its records at CounterAttack::TickInterval.
         Guerrilla::CounterAttack::Instance().Simulate(deltaT);
+        // Guerrilla occupier air (OCCUPIER-FORCES.md phase 6, the air spike) -
+        // idle until an insertion or sortie exists; steps at OccupierAir::TickInterval.
+        Guerrilla::OccupierAir::Instance().Simulate(deltaT);
         perf.Mark(Dev::FrameProfiler::PhaseGuerrilla);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }

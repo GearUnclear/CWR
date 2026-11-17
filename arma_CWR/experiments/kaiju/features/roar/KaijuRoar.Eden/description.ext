@@ -1,0 +1,7 @@
+// Dedushka roar test bed: standalone experiment mission (not a Guerrilla
+// template). Needs two addons mounted: uddedushka (the creature, built by
+// experiments/kaiju/addon/build-uddedushka.ps1) and kj_roar (his sounds,
+// built by ../addon/build-kj-roar.ps1). The script payload kj\roar is copied
+// in by ../run-roar.ps1 before a run; it is not kept here.
+onLoadMission = "Dedushka roar test";
+respawn = 0;

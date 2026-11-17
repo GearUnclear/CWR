@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/World.hpp>
@@ -739,6 +740,20 @@ void EntityAI::GetMaterial(TLMaterial& mat, int index) const
 {
     // IAnimator interface implementation
     // check special materials
+
+    // glow (Game/Kaiju): a unit with the glow trait scales its shining faces,
+    // so a furnace painted on the model can dim, gutter and go dark
+    if (Kaiju::GTraitCount && Kaiju::IsShiningMaterial(index))
+    {
+        float scale = 1, heat = 0;
+        if (Kaiju::GetGlow(this, scale, heat))
+        {
+            Color color = GetConstantColor();
+            color = color * GEngine->GetAccomodateEye();
+            CreateMaterialShining(mat, color * Color(scale, scale, scale, 1));
+            return;
+        }
+    }
 
     if (index > 0 && index < 200)
     {

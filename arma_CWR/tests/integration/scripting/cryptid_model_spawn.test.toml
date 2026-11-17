@@ -1,0 +1,18 @@
+# Chupacabra model spawn (experiment, not a Guerrilla test). Boots the
+# daylight test bed experiments/cryptid/ChupaModel.Eden, whose addOns[] names
+# udchupa, so the @udchupa mod must be built first:
+#   powershell -NoProfile -File experiments/cryptid/addon/build-udchupa.ps1
+# It lands in <git root>/tmp/@udchupa (gitignored), BESIDE the Remaster
+# shadows, and is mounted relative to the game CWD (the data dir): run with a
+# data dir that sits in that same tmp folder (e.g. tmp/remaster-shadow-cryptid).
+# Not ${repo_root}: tri bakes that token in at compile time (CARGO_MANIFEST_DIR),
+# so a tri.exe built in another checkout points it at the wrong tree. Without
+# the mod the mission boot-fails on the missing addon. Stock Eden and stock
+# Civilian otherwise. Takes screenshots, so it wants a real renderer
+# (tri test --render gl33). Sound off, no gunfire.
+tags = ["cryptid", "experiment", "visual"]
+binary = "PoseidonGame"
+mission = "experiments/cryptid/ChupaModel.Eden"
+timeout = 240
+assert_timeout = 30
+extra_args = ["--nosound", "--mods-dir", "..", "--mod", "@udchupa"]

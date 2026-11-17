@@ -1,0 +1,7 @@
+// Dedushka demo: standalone experiment mission (not a Guerrilla template).
+// Needs the uddedushka addon mounted (tmp\@kj_brain or any other mount of the
+// creature). The script payload kj\brain (and, for the full show, the other
+// features' kj\<name> folders) is copied in by ..\run-brain.ps1 before a run;
+// it is not kept here. To play it by hand, copy kj\brain here yourself.
+onLoadMission = "Dedushka: Morton";
+respawn = 0;

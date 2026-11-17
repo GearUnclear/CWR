@@ -1,0 +1,80 @@
+; ============================================================================
+;  kj\roar\step.sqs  -  one footfall of Dedushka: the dust ring at the foot,
+;  the view shaking with distance, and the thump, in that order.
+;
+;      [kaiju] exec "kj\roar\step.sqs"
+;      [kaiju, [x, y]] exec "kj\roar\step.sqs"            the foot came down here
+;      [kaiju, [x, y], 1.6] exec "kj\roar\step.sqs"       and this hard (1 = a walking step)
+;
+;  Where the foot is: the caller's position when given; else KJ_footfall when
+;  the crush feature set it within the last half second ([count, time, pos,
+;  "L" | "R" | "S"], "S" being a stomp, which lands harder); else worked out
+;  from his position and facing, right and left in turn.
+;
+;  Order of arrival, which is the point: the dust is seen at once, the ground
+;  carries the shake at KJR_GROUND_V (3 km/s, so almost at once), and the
+;  sound comes at KJR_SOUND_V (343 m/s). At 500 m the view jumps a second and
+;  a third before the thump is heard. He is felt before he is heard.
+;
+;  Tuning: the marked block at the top of kj\roar\init.sqf.
+;  Read by tests: KJ_stepCount, KJ_stepLog ([count, time, foot pos, metres to
+;  the listener, shake strength, dust puffs made]).
+; ============================================================================
+_k = _this select 0
+? isNil "KJR_ready" : call compile preprocessFile "kj\roar\init.sqf"
+? isNil "KJR_sized" : [_k] call KJR_fnSize
+? not alive _k : exit
+_scale = 1
+_name = "R"
+_kp = getPos _k
+_dir = getDir _k
+? (count _this) > 1 : goto "given"
+? isNil "KJ_footfall" : goto "own"
+? (time - (KJ_footfall select 1)) > 0.5 : goto "own"
+_foot = [(KJ_footfall select 2) select 0, (KJ_footfall select 2) select 1]
+_name = KJ_footfall select 3
+? _name == "S" : _scale = KJR_STOMP_SCALE
+goto "have"
+
+#own
+? KJR_side < 0 : _name = "L"
+_foot = [(_kp select 0) + KJR_FOOT_AHEAD * KJR_H * sin _dir + KJR_side * KJR_STANCE * KJR_H * cos _dir, (_kp select 1) + KJR_FOOT_AHEAD * KJR_H * cos _dir - KJR_side * KJR_STANCE * KJR_H * sin _dir]
+KJR_side = 0 - KJR_side
+goto "have"
+
+#given
+_foot = [(_this select 1) select 0, (_this select 1) select 1]
+? (count _this) > 2 : _scale = _this select 2
+; which foot, for the sound channel: the side of his centre line it is on
+_side = ((_foot select 0) - (_kp select 0)) * cos _dir - ((_foot select 1) - (_kp select 1)) * sin _dir
+? _side < 0 : _name = "L"
+
+#have
+KJ_stepCount = KJ_stepCount + 1
+_ch = 1
+? _name == "L" : _ch = 2
+_ear = call KJR_fnEar
+_e = _ch call KJR_fnEmitter
+_e setPos [_foot select 0, _foot select 1, 0]
+_d = _ear distance _e
+
+; ---- dust: seen at once ----------------------------------------------------------
+_puffs = 0
+? _d < (KJR_DUST_VIEW * KJR_H) : _puffs = [_foot, KJR_FOOT_R * KJR_H, _scale] call KJR_fnDustRing
+
+; ---- the ground: the view shakes, strongest at his feet, nothing past KJR_SHAKE_R
+_full = KJR_SHAKE_FULL * KJR_H
+_far = KJR_SHAKE_R * KJR_H
+_s = 0
+? _d < _far : _s = (_far - _d) / (_far - _full)
+? _s > 1 : _s = 1
+_s = _s * _s * _scale
+? _s > 0.01 : [_s, KJR_SHAKE_T * (0.7 + 0.3 * _scale), _d / KJR_GROUND_V, [[_foot select 0, _foot select 1, 0], _scale, _full, _far]] exec "kj\roar\shake.sqs"
+
+; ---- the air: the thump, late ----------------------------------------------------
+[_k, "KJ_Step", "KJ_StepFar", _ch, 0, _foot] exec "kj\roar\snd.sqs"
+
+? (count KJ_stepLog) > 80 : KJ_stepLog = []
+KJ_stepLog = KJ_stepLog + [[KJ_stepCount, time, _foot, _d, _s, _puffs]]
+logInfo format ["KJROAR step %1 %2 at %3: listener %4 m, shake %5 after %6 s, sound after %7 s, %8 puffs", KJ_stepCount, _name, _foot, _d, _s, _d / KJR_GROUND_V, _d / KJR_SOUND_V, _puffs]
+exit

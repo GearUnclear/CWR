@@ -1,0 +1,9 @@
+# Dedushka model finishing: hit regions (WEAPONS FIRE: one tank, dropped shells) and men and a tank
+# passing under him. Experiment, kept out of tests/integration. Needs the model round's own mount
+# tmp/@kj_models (models-tests/build-km.ps1). Run: models-tests/run-km.ps1 -Name km_hits [-Params hound].
+tags = ["kaiju", "experiment", "integration"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/integration/models-tests/DedushkaLab.Eden"
+timeout = 900
+assert_timeout = 150
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_models"]

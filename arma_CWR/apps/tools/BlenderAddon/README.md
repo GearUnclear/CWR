@@ -59,6 +59,7 @@ copy dist\x64-win-rwdi\PoseidonFormats.dll apps\tools\BlenderAddon\io_import_p3d
 | Proxies | On | Import as empty objects |
 | Properties | On | Import as custom object properties |
 | Texture Directory | (empty) | Extra folder to search for PAA/PAC textures |
+| Model Space | Off | Keep the model's own coordinates (ODOL: plus its bounding center) instead of re-centring each LOD; use this for a reference you model new units over |
 
 ## What Gets Imported
 
@@ -68,6 +69,53 @@ copy dist\x64-win-rwdi\PoseidonFormats.dll apps\tools\BlenderAddon\io_import_p3d
 - **Empties**: From proxy attachment points with correct transforms
 - **Custom Properties**: `ofp_lod_index`, `ofp_lod_resolution`, `ofp_format`, model properties
 - **Collections**: Each LOD in its own sub-collection (when importing multiple LODs)
+
+## Export (MLOD)
+
+**File > Export > Poseidon MLOD P3D (.p3d)** writes the OFP-era MLOD format
+(`MLOD` header, `SP3X` LODs, version 1.01) that the engine loads at runtime. The
+headless entry point is `io_import_p3d.export_p3d.export_p3d(filepath, collection)`;
+the byte layout is in `mlod_writer.py`, which needs no Blender
+(tests: `tests/ci/test_p3d_mlod_writer.py`).
+
+- One collection per LOD. Resolution from the collection property
+  `p3d_resolution`, the importer's `cwr_lod_resolution`, or the collection name
+  (`0.15`, `1.0`, `Geometry`, `Memory`, `LandContact`, `HitPoints`,
+  `FireGeometry`, `ViewGeometry`, `ViewPilot`, ...). There is no shadow-volume LOD
+  in this engine.
+- Vertex groups become named selections; material `p3d_texture` (or the
+  importer's `cwr_texture`, or the image file name plus the Texture Prefix) is the
+  face texture, 31 characters at most.
+- `p3d_prop_<name>` custom properties on a LOD collection or object become
+  `#Property#` tags; `p3d_mass` (collection, object, or a float point attribute)
+  becomes `#Mass#` on the Geometry LOD.
+- Proxies: objects with `p3d_proxy` (or the importer's `cwr_proxy_path`), or
+  named `proxy:...`.
+- An imported model exports back to its source coordinates: the importer's
+  re-centring (`cwr_center_offset`) and an ODOL's bounding center
+  (`cwr_bounding_center`) are added back.
+
+## RTM animation
+
+**File > Import / Export > Poseidon RTM Animation (.rtm)** and the sidebar panel
+**Poseidon > RTM Animation** (Build Stock Man Rig, Bind Selected Meshes to Rig,
+Import RTM, Export RTM). Headless entry points live in `rtm_blender.py`:
+`build_rig(rest_json)`, `bind_mesh(rig, meshes)`, `import_rtm(rig, path)`,
+`export_rtm(path, rig, action=None, step=None)`.
+
+- `rtm_io.py` reads and writes RTM exactly as `Asset/Formats/RTM/RTMReader.hpp`
+  and `AnimationRT::Load` do (no bpy); `read_rtm(..., strict=True)` also
+  rejects what the engine would misplay (no phases, duplicate bones, unsorted
+  times, mirrored matrices).
+- `rtm_engine.py` reimplements the engine's playback (`Find`,
+  `PrepareMatrices`, `RemoveLoopFrame`, weight quantization, skinning, the
+  `reversed` load) for checks; `rtm_rig.py` holds the stock man hierarchy and
+  derives the joint pivots from stock RTMs (`derive_rest_joints_from_dir`,
+  written to a local JSON because it is Bohemia-derived data).
+- Matrices are absolute and act on the model's file space; Blender (x, y, z)
+  is game (x, z, y), so every matrix is conjugated by that swap, never copied.
+- Tests: `python -m unittest discover -s arma_CWR/tests/ci -p "test_rtm_*.py"`
+  (synthetic data; set `UD_RTM_STOCK_DIR` to also round-trip local stock RTMs).
 
 ## Texture Resolution
 
@@ -96,6 +144,12 @@ PoseidonFormats.dll    C++ engine (P3D/PAA/PBO readers)
    p3d_lib.py          Python wrapper (P3DModel, PAAImage classes)
        |
    import_p3d.py       Blender import operator
+   export_p3d.py       Blender MLOD export operator
+   mlod_writer.py      MLOD (SP3X) writer and strict reader, no bpy
+   rtm_blender.py      RTM rig, import/export operators and panel
+   rtm_io.py           RTM reader/writer and strict checks, no bpy
+   rtm_engine.py       engine RTM playback math for checks, no bpy
+   rtm_rig.py          stock man hierarchy and pivot derivation, no bpy
        |
    __init__.py          Addon registration
 ```

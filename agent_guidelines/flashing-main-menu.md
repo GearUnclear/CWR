@@ -4,7 +4,9 @@ Verified 2026-10-12 against engine commit `a5daeb2` (the engine is unchanged at
 `0dbe248`), the Steam Remaster data dir (read-only) and the installed
 `D:\Arma_CWA\@LoBo`. Paths are relative to the repo root, except the
 `Repair4.Abel` probe files, which at the time lived only in the detached
-worktree `.claude/worktrees/lobo-repair-4`.
+worktree `.claude/worktrees/lobo-repair-4`. Line citations re-checked with
+`grep -n` and refreshed on 2026-10-18 at commit `bd831e7` (branch
+`occupier-forces`); the behaviour was not re-run.
 
 ## Symptom
 
@@ -24,16 +26,16 @@ exist.
 
 1. When the boot fails, `World::StartIntro` logs `StartAutoTest could not boot
    '<staged path>/mission.sqm'` and returns, leaving the main menu up
-   (`arma_CWR/engine/Poseidon/World/WorldImpl.cpp:2750-2761`). Only a
+   (`arma_CWR/engine/Poseidon/World/WorldImpl.cpp:2920`). Only a
    `--check-init` smoke check exits at this point.
 2. Trident then polls `triMissionPlayerReady` until `assert_timeout`
-   (`arma_CWR/engine/Trident/src/scenarios/integration.rs:1516-1539`, loop in
-   `wait_for_condition` at 857-913). On the menu it returns
+   (`arma_CWR/engine/Trident/src/scenarios/integration.rs:1641-1650`, loop in
+   `wait_for_condition` at 951-1033). On the menu it returns
    `FAIL:display=<idd>,expected=46_or_47`
-   (`arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTest.cpp:1692-1720`).
+   (`arma_CWR/engine/Poseidon/Game/Commands/GameStateExtTest.cpp:1731`).
 3. Between polls Trident evals `triWaitFrames 5`, with no sleep. That command
    clears the screen to black and presents five frames without drawing any UI
-   (`GameStateExtTest.cpp:2151-2180`). The normal main loop draws the menu in
+   (`GameStateExtTest.cpp:2161-2193`). The normal main loop draws the menu in
    between, so the window alternates black and menu about ten times a second.
 
 Signature in the game stdout: a `could not boot` line followed by hundreds of
@@ -44,24 +46,24 @@ Signature in the game stdout: a `could not boot` line followed by hundreds of
 - **The path does not resolve to a `mission.sqm`.** No flicker in the current
   build: the game exits at startup with code 44 and logs `Test mission path
   '...' does not resolve to a mission.sqm file`
-  (`arma_CWR/apps/cwr/Game/GameApplication.cpp:1733-1740`).
+  (`arma_CWR/apps/cwr/Game/GameApplication.cpp:1734-1740`).
 - **Neither the mission nor its intro has any group.** A mission with zero
   groups falls back to its intro; when that is empty too, `StartAutoTest`
-  returns false (`arma_CWR/engine/Poseidon/UI/DisplayUIMenus.cpp:2021-2029`)
+  returns false (`arma_CWR/engine/Poseidon/UI/DisplayUIMenus.cpp:2044-2049`)
   and the menu flickers.
 - **The world suffix is not a world in the data dir.** The startup check only
   needs the folder and its `mission.sqm`, so this passes it and fails later
   inside the boot. Not reproduced; expect the flicker or worse.
 - **The boot is rejected by the error latch.** This is the silent one.
   `World::InitVehicles` ends with `return GetMaxError() < EMError`
-  (`arma_CWR/engine/Poseidon/World/WorldInit.cpp:833`). The latch is cleared by
-  `CleanUpInit` (`WorldInit.cpp:1140`) when `StartAutoTest` calls
-  `SwitchLandscape` (`DisplayUIMenus.cpp:2037`), before `ActivateAddons` and
+  (`arma_CWR/engine/Poseidon/World/WorldInit.cpp:855`). The latch is cleared by
+  `CleanUpInit` (`WorldInit.cpp:1149`) when `StartAutoTest` calls
+  `SwitchLandscape` (`DisplayUIMenus.cpp:2060`), before `ActivateAddons` and
   `InitVehicles`. Any `WarningMessage()` or `ErrorMessage(EMWarning/EMError)`
   after that point (world load, the mission's init, the ZoneRegistry, portraits,
   unit creation) sets it: `WarningMessageLevel` stores `level + 1`, so a plain
   warning already counts as `EMError`, and its text is kept in `WarningText`
-  (`arma_CWR/engine/Poseidon/World/Simulation/Animation/FrameFunctions.cpp:55-84`).
+  (`arma_CWR/engine/Poseidon/World/Simulation/Animation/FrameFunctions.cpp:80-113`).
   Before `c39e49e` that text was never logged and the log showed `could not
   boot` with no reason; now the `could not boot` line ends with it. `LOG_ERROR` lines such as
   `Animation ... not found or empty` do not set the latch.
@@ -71,7 +73,7 @@ The usual trigger of the last case is addon access. `CheckAccess`
 raises that warning when a class that a placed unit needs (the unit's class, a
 weapon in its `weapons[]`, a magazine in its `magazines[]`) belongs to an addon
 missing from the mission's `addOns[]`. It is the one latch source that leaves a
-trace, the WARN from `World::CheckAddon` (`WorldImpl.cpp:1178-1199`):
+trace, the WARN from `World::CheckAddon` (`WorldImpl.cpp:1182-1203`):
 
 ```
 [WARN] [WORLD]   Access denied: <entry> - owner addon '<name>' is not activated (missing from the mission's addOns[]?)
@@ -86,7 +88,7 @@ suspect those. Newer builds log each one as a `Warning Message:` WARN.
 
 Guerrilla templates are mostly protected: when the mission's `description.ext`
 defines `CfgGuerrillaZones`, `Guerrilla::ActivateTemplateAddons`
-(`WorldInit.cpp:566-575`, `arma_CWR/engine/Poseidon/Game/Guerrilla/AddonActivation.cpp`)
+(`WorldInit.cpp:579`, `arma_CWR/engine/Poseidon/Game/Guerrilla/AddonActivation.cpp`)
 activates the owners of the placed units' `weapons[]` and `magazines[]` before
 the units are created. Plain probe and test missions get no such help. The
 ZoneRegistry's own additive activation ("activated N addon(s) the faction

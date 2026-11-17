@@ -1,0 +1,5 @@
+// Texture-resolution test bed: standalone experiment mission (not a Guerrilla
+// template). Needs @kj_texres (features/texres/build_texres.py) mounted in
+// place of @uddedushka; without it the boot fails on the addOns[] entries.
+onLoadMission = "Dedushka texture resolution test";
+respawn = 0;

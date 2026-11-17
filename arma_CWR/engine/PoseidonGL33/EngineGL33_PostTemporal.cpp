@@ -9,8 +9,9 @@
 //     first world pass and hands the offset to the remastered vertex shaders
 //     through vpScale.zw (UploadVSScreenConstants keeps it for the world's
 //     screen-space draws), with a negative texture LOD bias on the material
-//     samplers; EndWorldScene takes both away before the HUD, and so does the
-//     next frame's InitDraw;
+//     samplers (the twin sampler set, which InitDraw biases only when the
+//     taaMipBias knob changes); EndWorldScene takes both away before the HUD,
+//     and so does the next frame's InitDraw;
 //   - BeginTranslucentObjects, called by the scene between the opaque world
 //     and the translucent objects, copies the frame target for the particle
 //     mask;
@@ -47,6 +48,7 @@ bool EngineGL33::TaaWantedThisFrame() const
 
 void EngineGL33::ApplyTaaJitter()
 {
+    ApplyTemporalReset(); // P0-6: a triResetTemporal request, once (no-op in play)
     const std::uint32_t frame = GetFrameCounter();
     if (!(_taa.frameOn && _taa.frame == frame) && TaaWantedThisFrame())
     {
@@ -87,14 +89,12 @@ void EngineGL33::SetTaaJitterState(rm::TaaOffset ndc, float bias)
         _taa.ndcApplied = ndc;
         UploadVSJitter(ndc.x, ndc.y);
     }
-    if (bias != _taa.mipBiasApplied && _samplerObjects[0])
-    {
-        // The material samplers (units 0 and 1), shared with the HUD: the
-        // bias is set for the world's passes and taken off after them.
-        for (unsigned int s : _samplerObjects)
-            glSamplerParameterf(s, GL_TEXTURE_LOD_BIAS, bias);
-        _taa.mipBiasApplied = bias;
-    }
+    // The material samplers (units 0 and 1), shared with the HUD: the world's
+    // passes take the twin set, which holds the bias (UpdateTaaBiasedSamplers,
+    // between frames), and hand the plain set back after them. No sampler is
+    // written here.
+    SetMaterialSamplerBias(bias != 0.0f);
+    _taa.mipBiasApplied = bias;
 }
 
 void EngineGL33::BeginTranslucentObjects()
@@ -189,4 +189,39 @@ void EngineGL33::PostSharpen(const PostFrame& f)
     BindTex(0, p.histTex[_taa.historyIdx]);
     Set4(p.progTaaSharpen, "sharpen", _lighting.taaSharpen, static_cast<float>(f.w), static_cast<float>(f.h), 0.0f);
     DrawTo(_ssaaFbo, f.w, f.h);
+}
+
+// ---- P0-6 temporal determinism (Graphics/Remaster/TemporalDeterminism.hpp) ----
+// A triResetTemporal request, applied once at the first pass of the next
+// frame that reads temporal state. Play never requests one: the latch then
+// has nothing to take and this returns at once.
+void EngineGL33::ApplyTemporalReset()
+{
+    const rm::TemporalControlState& tc = rm::TemporalControl();
+    if (!_temporalDet.latch.Take(tc.resetSerial))
+        return;
+    const std::uint32_t frame = GetFrameCounter();
+    _taa.sequence = 0;
+    _fog.sequence = 0;
+    DropTemporalHistories();
+    // The photoreal camera takes the first meter of this frame at once (as at
+    // a cut). Deterministic, the exposure in use until then is rounded to a
+    // whole stop, so this frame's pre-exposure, and with it the meter the
+    // snap reads, is the same whatever the exposure had adapted to.
+    _camera.snap = true;
+    _camera.snapFrame = frame;
+    if (tc.deterministic)
+        _camera.exposureLog2 = rm::ResetExposureLog2(_camera.exposureLog2);
+    _temporalDet.redropOnSnap = true;
+    _temporalDet.frameBase = frame;
+    rm::NoteTemporalResetApplied(tc.resetSerial, frame);
+    LOG_INFO(Graphics, "GL33: temporal reset {} at frame {} (deterministic {}, mist {})", tc.resetSerial, frame,
+             tc.deterministic ? 1 : 0, tc.mistHeld ? "held" : "free");
+}
+
+void EngineGL33::DropTemporalHistories()
+{
+    _taa.history.exists = false;
+    _fog.historyValid = false;
+    _surfAoHist.exists = false;
 }

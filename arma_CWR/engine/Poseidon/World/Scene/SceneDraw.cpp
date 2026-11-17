@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Kaiju/Kaiju.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -31,6 +32,8 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowXp.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalDeterminism.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -38,6 +41,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
+#include <Poseidon/World/Scene/ShapeDrawOrder.hpp>
 #include <Poseidon/World/Scene/InstancedRunRules.hpp>
 #include <Poseidon/World/Scene/TerrainOcclusion.hpp>
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
@@ -57,10 +61,12 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/AI/AI.hpp> // remove dependency
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Foundation/Algorithms/Qsort.hpp>
+#include <Poseidon/World/Scene/DrawListSort.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <time.h>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/World/Terrain/Occlusion.hpp>
+#include <Poseidon/World/Scene/OcclusionRange.hpp>
 
 using namespace Poseidon;
 
@@ -74,78 +80,55 @@ SRef<Occlusion>& GetOcclusions();
 
 typedef Ref<SortObject> SortObjectItem;
 
-static int CmpRevDistObj(const SortObjectItem* p1, const SortObjectItem* p0)
+// W3-11: the draw-list sorts read each entry's key once into a contiguous array
+// and sort that (DrawListSort.hpp), into exactly the order QSort with the old
+// per-entry comparators gave, ties included. The keys are the old comparators'
+// inputs; the key comparisons are the old comparisons.
+
+// The occluder list: the first object is the nearest one (was CmpRevDistObj).
+static void SortNearestFirst(SortObjectItem* items, int n)
 {
-    // the first object is the nearest one
-    const SortObject* o0 = *p0;
-    const SortObject* o1 = *p1;
-    Coord dif = o0->distance2 - o1->distance2;
-    if (dif < 0)
-    {
-        return -1;
-    }
-    if (dif > 0)
-    {
-        return +1;
-    }
-    return 0;
+    static DrawListSort::Scratch<float, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n, [](const SortObject* o) { return o->distance2; },
+        [](float a, float b) { return DrawListSort::CompareRevDistance(a, b); }, scratch);
 }
 
-// far-to-near by camera-space depth, for the alpha pass (see AlphaSortOrder.hpp)
-static int CmpRevAlphaSortObj(const SortObjectItem* p1, const SortObjectItem* p0)
+// Far-to-near by camera-space depth, for the alpha pass (see AlphaSortOrder.hpp;
+// was CmpRevAlphaSortObj).
+static void SortAlphaFarToNear(SortObjectItem* items, int n)
 {
-    return AlphaSort::CompareAlphaDepth((*p1)->zCoord, (*p0)->zCoord);
+    static DrawListSort::Scratch<float, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n, [](const SortObject* o) { return o->zCoord; },
+        [](float a, float b) { return DrawListSort::CompareAlphaKeys(a, b); }, scratch);
+}
+
+// Pass ascending; between shapes, simple shapes first then shape identity; within a
+// shape, coarse LODs (large LOD numbers) first, then back to front (helps alpha
+// transparency). Shape identity compares addresses, never a truncated pointer
+// difference (W1-7): see Scene/ShapeDrawOrder.hpp. Simple = the LOD-0 face count,
+// read once per entry (a null LOD 0 counts 0; the old comparator dereferenced it).
+static DrawListSort::ShapeKey MakeShapeKey(const SortObject* o)
+{
+    const LODShape* shape = o->object->GetShape();
+    const Shape* level0 = shape->Level(0);
+    return DrawListSort::ShapeKey{{o->passNum, shape, o->drawLOD, o->distance2}, level0 ? level0->NFaces() : 0};
 }
 
 static int CmpShapeObj(const SortObjectItem* p1, const SortObjectItem* p2)
 {
-    const SortObject* o1 = *p1;
-    const SortObject* o2 = *p2;
-
-    // first sort by pass
-    int sDif = o1->passNum - o2->passNum;
-    if (sDif)
-    {
-        return sDif;
-    }
-
-    LODShape* s1 = o1->object->GetShape();
-    LODShape* s2 = o2->object->GetShape();
-    sDif = (intptr_t)s2 - (intptr_t)s1;
     // no invisible LODs here
-    if (sDif)
-    {
-        Shape* ss1 = s1->Level(0);
-        Shape* ss2 = s2->Level(0);
-        int complex1 = ss1->NFaces();
-        int complex2 = ss2->NFaces();
-        int cDiff = complex1 - complex2;
-        // sort by shape complexity
-        // first draw simple shapes
-        if (cDiff)
-        {
-            return cDiff;
-        }
-        return sDif;
-    }
-    // sort by LOD - fine LODs (small LOD numbers) last
-    sDif = o2->drawLOD - o1->drawLOD;
-    if (sDif)
-    {
-        return sDif;
-    }
-    // first draw
-    // same shape sort by distance, back first (helps to alpha transparency)
-    Coord fDif = o2->distance2 - o1->distance2;
-    if (fDif < 0)
-    {
-        return -1;
-    }
-    if (fDif > 0)
-    {
-        return +1;
-    }
-    return 0;
+    return DrawListSort::CompareShapeKeys(MakeShapeKey(*p1), MakeShapeKey(*p2));
+}
+
+static void SortByShape(SortObjectItem* items, int n)
+{
+    static DrawListSort::Scratch<DrawListSort::ShapeKey, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n, [](const SortObject* o) { return MakeShapeKey(o); },
+        [](const DrawListSort::ShapeKey& a, const DrawListSort::ShapeKey& b)
+        { return DrawListSort::CompareShapeKeys(a, b); }, scratch);
 }
 
 void Scene::EndObjects()
@@ -375,6 +358,10 @@ void Scene::DrawRain()
         rainT += deltaRT;
         rainOffset += deltaRT;
         float yOffset = -fastFmod(rainOffset, 1);
+        // P0-6 deterministic mode (triDeterministic): the phase from the sim
+        // clock, not the float sum of every frame's step since the first rain.
+        if (remaster::TemporalDeterministic())
+            yOffset = -remaster::RainStreakPhase(Glob.time.toInt());
         float xOffset = atan2(dir.X(), dir.Z()) * 0.3f;
         float yDensity = 0.3f + fabs(dir.Y()) + speed;
         saturate(yDensity, 0.1f, 1);
@@ -412,14 +399,14 @@ void Scene::ObjectsDrawn()
 }
 
 int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
-                              Vector3Par viewDirection)
+                              Vector3Par viewDirection, bool ignoreObjectsZ)
 {
     // if pixel size is lower than 2, object can be considered invisible
     // size in pixels is
     float scale = GetCamera()->Left();
     float diameter = shape->BoundingSphere() * 2 * oScale;
 
-    if (distance2 > Square(ENGINE_CONFIG.objectsZ))
+    if (!ignoreObjectsZ && distance2 > Square(ENGINE_CONFIG.objectsZ))
     {
         return LOD_INVISIBLE;
     }
@@ -441,6 +428,16 @@ int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Ve
     // disable decal LODs
     int level = shape->FindSqrtLevel(resol2, true);
 
+    return level;
+}
+
+int Scene::LevelFromDistance2Pinned(LODShape* shape, float distance2, float oScale, Vector3Par direction,
+                                    Vector3Par viewDirection, bool ignoreObjectsZ)
+{
+    const float current = _lodInvWidth;
+    _lodInvWidth = _minLodInvWidth;
+    const int level = LevelFromDistance2(shape, distance2, oScale, direction, viewDirection, ignoreObjectsZ);
+    _lodInvWidth = current;
     return level;
 }
 
@@ -591,8 +588,20 @@ int Scene::AdjustComplexity(SortObjectList& objs)
         }
         else
         {
-            int drawLevel =
-                LevelFromDistance2(shape, oi->distance2, obj->Scale(), obj->Direction(), _camera->Direction());
+            const bool kjExempt = Kaiju::GFarCount && Kaiju::FarExemptFromObjectsZ(obj);
+            const Kaiju::Traits* kjTraits = Kaiju::TraitsOf(obj);
+            // lodPin (Game/Kaiju): his LOD follows distance alone. The scene's LOD
+            // scale grows with the frame load, which put a giant on his coarsest
+            // LOD a few hundred metres off in a busy town fight.
+            int drawLevel = kjTraits && kjTraits->lodPin
+                                ? LevelFromDistance2Pinned(shape, oi->distance2, obj->Scale(), obj->Direction(),
+                                                           _camera->Direction(), kjExempt)
+                                : LevelFromDistance2(shape, oi->distance2, obj->Scale(), obj->Direction(),
+                                                     _camera->Direction(), kjExempt);
+            if (kjTraits)
+            {
+                Kaiju::NoteDrawLevel(obj, drawLevel);
+            }
             if (drawLevel != LOD_INVISIBLE)
             {
 #if _ENABLE_CHEATS
@@ -790,6 +799,62 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
     }
     return false;
 }
+
+// W3-1(b): the view geometry an object renders into the occlusion buffer when it
+// is not hidden, or null when it renders nothing (not an occluder, no view
+// geometry, or too small on screen). Pure: the occlusion pass asks it before the
+// test for objects beyond the test range (OcclusionRange.hpp) and after it as
+// before for the rest.
+static Shape* OccluderViewGeometry(const SortObject* oi, float invLeft)
+{
+    LODShape* shape = oi->shape;
+    if (!shape->CanOcclude() || !oi->object->OcclusionView())
+    {
+        return nullptr;
+    }
+    Shape* view = shape->ViewGeometryLevel();
+    if (!view)
+    {
+        return nullptr;
+    }
+    // test if object is near enough to make a some occlusion
+    float areaNom = Square(oi->radius * invLeft);
+    float areaDenom = oi->distance2;
+    return areaNom > 0.001 * areaDenom ? view : nullptr;
+}
+
+namespace
+{
+// POSEIDON_OCC_STATS=1: one event=occ log line per 256 occlusion passes.
+struct OcclusionStatsWindow
+{
+    double sums[4] = {};
+    int passes = 0;
+};
+
+void ReportOcclusionStats(const OcclusionRange::Stats& s, float range2)
+{
+    static const bool s_log = std::getenv("POSEIDON_OCC_STATS") != nullptr;
+    if (!s_log)
+    {
+        return;
+    }
+    static OcclusionStatsWindow w;
+    w.sums[0] += s.tested;
+    w.sums[1] += s.culled;
+    w.sums[2] += s.skipped;
+    w.sums[3] += s.farTested;
+    if (++w.passes < 256)
+    {
+        return;
+    }
+    const double n = w.passes;
+    LOG_INFO(Graphics, "event=occ passes={} range={:.0f} tested={:.1f} culled={:.1f} skipped={:.1f} farTested={:.1f}",
+             w.passes, range2 > 0.0f ? std::sqrt(range2) : 0.0f, w.sums[0] / n, w.sums[1] / n, w.sums[2] / n,
+             w.sums[3] / n);
+    w = OcclusionStatsWindow{};
+}
+} // namespace
 
 // ---- Hill culling (TerrainOcclusion.hpp, the hillCull feature switch) ----
 
@@ -1378,6 +1443,17 @@ static void DrawSortObject(SortObject* oi)
         GWorld && oi->drawLOD != LOD_INVISIBLE && oi->drawLOD == obj->InsideLOD(GWorld->GetCameraType());
     if (!cockpit)
     {
+        // a far-drawn unit (Game/Kaiju) inside the far plane keeps a fog floor
+        const float fogFloor = Kaiju::GFarCount ? Kaiju::FarFogFloorFor(obj) : 0.0f;
+        if (fogFloor > 0.0f)
+        {
+            GEngine->SetFogFloor(fogFloor);
+            GScene->SetFogFloor(fogFloor);
+            obj->Draw(oi->drawLOD, oi->orClip, *obj);
+            GScene->SetFogFloor(0.0f);
+            GEngine->SetFogFloor(0.0f);
+            return;
+        }
         obj->Draw(oi->drawLOD, oi->orClip, *obj);
         return;
     }
@@ -1569,7 +1645,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                 occSort.Add(_drawMergers[i]);
             }
         }
-        QSort(occSort.Data(), occSort.Size(), CmpRevDistObj);
+        SortNearestFirst(occSort.Data(), occSort.Size());
 // before drawing anything draw cockpit occlusion
 // check if we are in internal view
 #if 1
@@ -1603,6 +1679,29 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
 #endif
 
+        // W3-1(b): objects beyond the test range that are not occluders are not
+        // tested (OcclusionRange.hpp). The range never falls short of the shadow
+        // caster reach (SceneShadowPass.cpp: near + distanceCoef * (shadowsZ -
+        // near); the projected shadows reach shadowsZ).
+        static const float s_occRange = OcclusionRange::ParseRange(std::getenv("POSEIDON_OCC_RANGE"));
+        float occRange2 = 0.0f;
+        float occInvLeft = 0.0f;
+        if (_camera)
+        {
+            const float occNear = _camera->ClipNear();
+            // The shadow maps' far distance exactly as SceneShadowPass.cpp
+            // computes smMapFar: a High shadow tier reaches past shadowsZ, and
+            // an untested hidden object inside that reach would cast from the
+            // wrong LOD.
+            const Engine::ShadowMapTuning occSmTune = GEngine->GetShadowMapTuning();
+            const float occShadowsZ = Poseidon::shadow::xp::MapFar(ENGINE_CONFIG.shadowsZ, ENGINE_CONFIG.tacticalZ,
+                                                                   ENGINE_CONFIG.objectsZ, occSmTune.reach);
+            const float occCasterReach = occNear + occSmTune.distanceCoef * (occShadowsZ - occNear);
+            occRange2 = OcclusionRange::TestRange2(s_occRange, std::max(occShadowsZ, occCasterReach));
+            occInvLeft = _camera->InvLeft();
+        }
+        OcclusionRange::Stats occStats;
+
         // draw occlusions front to back
         for (int i = occSort.Size(); --i >= 0;)
         {
@@ -1630,34 +1729,35 @@ void Scene::DrawObjectsAndShadowsPass1()
                 // the test would be very slow and is very like to fail
                 if (FarEnoughForOcclusion(oi))
                 {
-                    Vector3 minMax[2];
-                    obj->AnimatedMinMax(oi->drawLOD, minMax);
-                    // check if object is occluded by objects
-                    if (!GetOcclusions()->TestBBox(*oi->object, minMax, oi->orClip))
+                    const bool beyond = occRange2 > 0.0f && oi->distance2 >= occRange2;
+                    if (beyond && OcclusionRange::SkipTest(oi->distance2, occRange2,
+                                                           OccluderViewGeometry(oi, occInvLeft) != nullptr))
                     {
-                        occluded = true;
+                        ++occStats.skipped;
+                    }
+                    else
+                    {
+                        Vector3 minMax[2];
+                        obj->AnimatedMinMax(oi->drawLOD, minMax);
+                        ++occStats.tested;
+                        occStats.farTested += beyond ? 1 : 0;
+                        // check if object is occluded by objects
+                        if (!GetOcclusions()->TestBBox(*oi->object, minMax, oi->orClip))
+                        {
+                            occluded = true;
+                            ++occStats.culled;
+                        }
                     }
                 }
             }
             if (!occluded)
             {
-                if (shape->CanOcclude() && obj->OcclusionView())
+                if (Shape* view = OccluderViewGeometry(oi, occInvLeft))
                 {
-                    Shape* view = shape->ViewGeometryLevel();
-                    if (!view)
-                    {
-                        continue;
-                    }
-                    // test if object is near enough to make a some occlusion
-                    float areaNom = Square(oi->radius * _camera->InvLeft());
-                    float areaDenom = oi->distance2;
-                    if (areaNom > 0.001 * areaDenom)
-                    {
-                        obj->AnimateViewGeometry();
-                        // if object can occlude something, render its components
-                        GetOcclusions()->RenderShape(*oi->object, view, shape->GetViewComponents(), oi->orClip);
-                        obj->DeanimateViewGeometry();
-                    }
+                    obj->AnimateViewGeometry();
+                    // if object can occlude something, render its components
+                    GetOcclusions()->RenderShape(*oi->object, view, shape->GetViewComponents(), oi->orClip);
+                    obj->DeanimateViewGeometry();
                 }
             }
             else
@@ -1666,6 +1766,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                 oi->drawLOD = LOD_INVISIBLE;
             }
         }
+        ReportOcclusionStats(occStats, occRange2);
     }
     counters.occlusionMs += msSince(occT0);
 
@@ -1739,7 +1840,7 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
     }
 
-    QSort(_drawMergers.Data(), _drawMergers.Size(), CmpShapeObj);
+    SortByShape(_drawMergers.Data(), _drawMergers.Size());
     // first of all draw non-alpha objects
 
 #if DRAW_OBJS
@@ -1907,18 +2008,21 @@ static bool IsSurfaceBlendDraw(const SortObject* oi)
 }
 
 // On-surface ordering: PassOrder (roads before decals), then shape, then
-// back-to-front within a shape — see Scene/SurfaceDrawOrder.hpp.
-static int CmpSurfaceObj(const SortObjectItem* p1, const SortObjectItem* p2)
+// back-to-front within a shape — see Scene/SurfaceDrawOrder.hpp. The key, with
+// its virtual PassOrder call, is read once per entry (W3-11; was CmpSurfaceObj).
+static void SortBySurfaceOrder(SortObjectItem* items, int n)
 {
-    const SortObject* o1 = *p1;
-    const SortObject* o2 = *p2;
-    const Poseidon::SurfaceDraw::SurfaceDrawKey k1{
-        o1->object ? o1->object->PassOrder(o1->drawLOD) : 0,
-        o1->object ? static_cast<const void*>(o1->object->GetShape()) : nullptr, o1->distance2};
-    const Poseidon::SurfaceDraw::SurfaceDrawKey k2{
-        o2->object ? o2->object->PassOrder(o2->drawLOD) : 0,
-        o2->object ? static_cast<const void*>(o2->object->GetShape()) : nullptr, o2->distance2};
-    return Poseidon::SurfaceDraw::CompareSurfaceDraw(k1, k2);
+    static DrawListSort::Scratch<Poseidon::SurfaceDraw::SurfaceDrawKey, SortObject> scratch;
+    DrawListSort::SortByKeys(
+        items, n,
+        [](const SortObject* o)
+        {
+            return Poseidon::SurfaceDraw::SurfaceDrawKey{
+                o->object ? o->object->PassOrder(o->drawLOD) : 0,
+                o->object ? static_cast<const void*>(o->object->GetShape()) : nullptr, o->distance2};
+        },
+        [](const Poseidon::SurfaceDraw::SurfaceDrawKey& a, const Poseidon::SurfaceDraw::SurfaceDrawKey& b)
+        { return DrawListSort::CompareSurfaceKeys(a, b); }, scratch);
 }
 
 void Scene::DrawObjectsAndShadowsPass2()
@@ -1944,7 +2048,7 @@ void Scene::DrawObjectsAndShadowsPass2()
         // PassOrder, not distance: a fresh decal carries distance2~=0
         // (SetAutoCenter(false)) and would tie the road tile under the vehicle,
         // letting the road repaint over it.  Re-sorted by distance below.
-        QSort(_drawMergers.Data(), nDraw, CmpSurfaceObj);
+        SortBySurfaceOrder(_drawMergers.Data(), nDraw);
         for (int i = 0; i < nDraw; i++)
         {
             SortObject* oi = _drawMergers[i];
@@ -2018,7 +2122,7 @@ void Scene::DrawObjectsAndShadowsPass2()
     // particle mask before the translucent objects go on top.
     GEngine->BeginTranslucentObjects();
     GEngine->EnableReorderQueues(false);
-    QSort(_drawMergers.Data(), _drawMergers.Size(), CmpRevAlphaSortObj);
+    SortAlphaFarToNear(_drawMergers.Data(), _drawMergers.Size());
     // last draw alpha objects (not roads - they are already drawn)
     for (int i = 0; i < nDraw; i++)
     {

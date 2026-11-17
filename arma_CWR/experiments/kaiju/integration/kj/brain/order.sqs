@@ -1,0 +1,28 @@
+; ============================================================================
+;  kj\brain\order.sqs  -  tell Dedushka what to do next (staging, tests, the
+;  video). The brain takes the order on its next tick, whatever it was doing.
+;
+;      [kaiju, word] exec "kj\brain\order.sqs"
+;      [kaiju, word, argument] exec "kj\brain\order.sqs"
+;  or, the same thing without a script:  KJ_brainOrder = [word, argument]
+;
+;    "dormant"                 stop, then slump into dormancy
+;    "wake"                    rise out of dormancy, roar, stand
+;    "idle"                    stop and stand
+;    "wander"                  one wander leg
+;    "drawn", posOrObject      walk there
+;    "roar"                    stop and roar
+;    "beam", posOrObject       stop, turn to it, roar, fire, then spent
+;    "spent", seconds          stand spent for that long
+;    "hit", posOrObject        react as to a hard hit from there
+;    "stomp", posOrObject      the crush feature's stomp on it
+;    "swat", object            the crush feature's swat at it
+;    "auto", true or false     let him decide by himself, or not
+;
+;  With KJ_brainAuto false he does only what he is told and stands in between.
+;  He can only stop at the end of a stride, so an order given while he walks
+;  takes up to one stride to show.
+; ============================================================================
+? (count _this) > 2 : KJ_brainOrder = [_this select 1, _this select 2]
+? (count _this) == 2 : KJ_brainOrder = [_this select 1]
+exit

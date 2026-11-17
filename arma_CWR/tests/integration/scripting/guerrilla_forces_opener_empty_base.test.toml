@@ -1,0 +1,18 @@
+# Occupier forces round 3 C (2026-10-16): no strike opener on an empty base,
+# and the ledger ceiling (OCCUPIER-FORCES.md 7.3 openers, 5.5 the ceiling).
+# Boots the SHIPPED Guerrilla.Abel template (repo-root-relative; it opts in
+# with occupierForces = 1) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow
+# of the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The
+# shadow must carry the current gmcore and faction library
+# (guerrilla-mode/install-missions.ps1): EAST's forcesJet / forcesAttackHeli
+# keys are what make a strike airframe available. Without the junction the
+# test reports spawn failed, which is not a regression. Not headless: the
+# BASE force is born under S (a real camera, gmTrafficPercept).
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 900
+assert_timeout = 420
+extra_args = ["--dev"]

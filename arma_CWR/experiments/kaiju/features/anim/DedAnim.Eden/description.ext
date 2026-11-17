@@ -1,0 +1,5 @@
+// Dedushka animation test bed: standalone experiment mission (not a Guerrilla
+// template). Needs the uddedushka addon with the anim moves class mounted
+// (@kj_anim, built by features/anim/build-kj-anim.ps1).
+onLoadMission = "Dedushka animation test";
+respawn = 0;

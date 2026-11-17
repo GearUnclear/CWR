@@ -3,6 +3,7 @@
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace Poseidon::remaster
 {
@@ -175,6 +176,34 @@ ForwardFogRange ScaleForwardFogRange(float start, float invRange, float scale)
 bool InteriorGlassDraw(bool blended, bool glassClass)
 {
     return blended && glassClass;
+}
+
+float FarSliceDepth(float depth, float split, float standIn)
+{
+    if (depth >= 1.0f)
+        return 1.0f; // cleared: the sky
+    if (depth < split)
+        return depth / split;
+    return standIn; // the far unit
+}
+
+float WindowDepthAtViewZ(float viewZ, float p33, float p43, float depthScale, float depthBias)
+{
+    return ((p33 + p43 / viewZ) - depthBias) / depthScale;
+}
+
+float ViewZAtWindowDepth(float depth, float p33, float p43, float depthScale, float depthBias)
+{
+    return p43 / ((depth * depthScale + depthBias) - p33);
+}
+
+float FarSliceStandInDepth(float p33, float p43, float depthScale, float depthBias)
+{
+    const float zFar = ViewZAtWindowDepth(1.0f, p33, p43, depthScale, depthBias);
+    if (!(zFar > 0.0f) || !std::isfinite(zFar))
+        return kFarSliceSkyMargin;
+    const float d = WindowDepthAtViewZ(kFarSliceStandIn * zFar, p33, p43, depthScale, depthBias);
+    return std::clamp(d, 0.0f, kFarSliceSkyMargin);
 }
 
 } // namespace Poseidon::remaster

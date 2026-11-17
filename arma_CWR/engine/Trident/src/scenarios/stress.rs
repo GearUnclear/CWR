@@ -214,6 +214,7 @@ pub async fn run_stress_scenario(
         .with_context(|| format!("failed to parse {}", stress_toml.display()))?;
 
     validate_config(&config)?;
+    let global_slots = u32::try_from(config.instances.len()).unwrap_or(u32::MAX);
 
     let scenario_name = stress_name(
         scenario_dir
@@ -221,6 +222,7 @@ pub async fn run_stress_scenario(
             .unwrap_or(scenario_dir),
     );
     let scenario_output = output_dir.join(scenario_name.replace('/', "_"));
+    let _global = crate::slots::acquire(global_slots, &scenario_name, data_dir).await?;
     std::fs::create_dir_all(&scenario_output)
         .with_context(|| format!("failed to create {}", scenario_output.display()))?;
 
@@ -657,9 +659,10 @@ async fn spawn_game_instance(
     let user_dir_str = user_dir.to_string_lossy().to_string();
     let output_str = inst_output.to_string_lossy().to_string();
     let machine_id = format!("trident:stress:{}", inst.name);
+    let cache_dir = super::poseidon_cache_dir(&user_dir_str);
     let env_vars = [
         ("POSEIDON_USER_DIR", user_dir_str.as_str()),
-        ("POSEIDON_CACHE_DIR", user_dir_str.as_str()),
+        ("POSEIDON_CACHE_DIR", cache_dir.as_str()),
         ("POSEIDON_TEMP_DIR", user_dir_str.as_str()),
         ("POSEIDON_TEST_MACHINE_ID", machine_id.as_str()),
         ("TRI_OUTPUT_DIR", output_str.as_str()),

@@ -1,0 +1,20 @@
+# Occupier forces, a FAILED COLUMN ASSAULT BREAKS OFF and its hulls leave
+# AFTER the survivors (decision 4, the feel assessment's item 7;
+# OCCUPIER-FORCES.md 6.5 "At the town edge", contract row 2c and section
+# 9.6; native CounterAttack::Withdraw and the HomeHull wait). Video 5 of
+# 2026-10-16 showed hulls driving home while their riflemen died. Boots the
+# SHIPPED Guerrilla.Abel template (repo-root-relative) on the full Remaster
+# lane: data_dir "packages/RemasterUD" is a gitignored junction to a
+# setup-prepared shadow of the Steam Remastered folder
+# (tools/runtime/new-remaster-shadow.ps1, then setup-guerrilla.ps1 in
+# Remaster mode; see guerrilla-mode/FRESH-INSTALL.md). The shadow must carry
+# the current gmcore (guerrilla-mode/install-missions.ps1). Without the
+# junction the test reports spawn failed, which is not a regression.
+# Not headless: the birth gate needs a real camera.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 1200
+assert_timeout = 600
+extra_args = ["--dev"]

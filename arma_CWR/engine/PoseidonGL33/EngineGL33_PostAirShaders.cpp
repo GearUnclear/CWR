@@ -387,6 +387,12 @@ uniform vec4 airFog;          // x the classic fog's start as the world drew it 
 // the sun's side azimuth times this, under 500 m), z the sky beams' share by the
 // sun, w the distance (m) from which surfaces take the beams in full.
 uniform vec4 airCamera;
+// A unit drawn in the depth range's far slice this frame (Game/Kaiju far draw,
+// EngineGL33::FarSliceDepth): farMask 1 on its pixels, at a stand-in depth
+// inside the world; farKeep x 1 = the mark is this frame's, y the far draw's
+// visibility floor.
+uniform sampler2D farMask;    // unit 16 (kFarMaskUnit)
+uniform vec4 farKeep;
 uniform sampler2D tex0;       // the dome shading's names (unused here)
 uniform sampler2D skyDensity;
 vec3 vWorldRel = vec3(0.0);
@@ -538,6 +544,13 @@ void main() {
         // this is C T + S.
         float fEdge = airFog.z > 0.5 ? clamp(1.0 - (dist - airFog.x) * airFog.y, 0.0, 1.0) : 1.0;
         scat = mix(skyLim * (1.0 - T), scat, fEdge);
+        // The far slice's unit (at its stand-in depth): the air in front of
+        // him in this column's colour, so that he keeps the far draw's floor.
+        if (farKeep.x > 0.5 && texelFetch(farMask, ip, 0).r > 0.5 && all(greaterThan(1.0 - T, vec3(1e-3)))) {
+            vec3 keep = vec3(farKeep.y);
+            scat *= (1.0 - keep) / (1.0 - T);
+            T = keep;
+        }
         added += scat;
         lin = lin * T + scat;
     }

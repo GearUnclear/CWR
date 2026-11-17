@@ -7,10 +7,15 @@
 // garrison as an integer reserve on the ZoneRegistry record while the player
 // is far away;
 // crossing cacheRadius converts the reserve into live AIGroups, and leaving
-// converts the survivors back.  QRF policy stays in script - this service
-// only fires events.  Inactive whenever the ZoneRegistry is inactive.
+// ADDS the survivors back to whatever reserve is still stored (U1,
+// OCCUPIER-FORCES.md 5.5: a group-budget remainder, D2 regrowth or a top-up
+// written while the garrison was live is kept).  Reserve writes near the
+// player go through the S5 pending deposit (Deposit / AddReserve below).
+// QRF policy stays in script - this service only fires events.  Inactive
+// whenever the ZoneRegistry is inactive.
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
+#include <Poseidon/Foundation/Math/Math3D.hpp> // Vector3Par
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp> // LLink == OLink (NetworkObject.hpp)
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
@@ -24,6 +29,9 @@ class ParamEntry;
 
 namespace Guerrilla
 {
+class ZoneRegistry;
+struct ZoneRecord;
+class CounterAttackGate;
 
 // optional keys inside class CfgGuerrillaZones
 struct GarrisonTuning
@@ -55,6 +63,15 @@ enum GarrisonAction
     GActNone,
     GActSpawn,
     GActDespawn
+};
+
+// What FlushPending did with a zone's S5 pending deposit
+enum PendingFlush
+{
+    PFNone,           // nothing pending, or it waits (the zone is in the bubble and a spawn point is seen)
+    PFReleasedBubble, // moved into the reserve: the player is beyond the despawn edge
+    PFReleasedHidden, // moved into the reserve: every sampled spawn point is CAExposeHidden
+    PFRefunded        // the occupier lost the zone: refunded to the pool (occupierForces on), else to the origin or discarded
 };
 
 // Per-zone observations for the D2 recovery step (StepRecover).
@@ -102,6 +119,9 @@ class GarrisonCache : public SerializeClass
     const GarrisonTuning& Tuning() const { return _tuning; }
     bool IsSpawned(int zoneIndex) const;
     int LiveCount(int zoneIndex) const; // alive bodies; 0 when despawned
+    // alive bodies of the zone's cache garrison within radius (2D) of pos;
+    // 0 when despawned (U4: the military capture's defenders)
+    int LiveCountWithin(int zoneIndex, Vector3Par pos, float radius) const;
     int NGroups(int zoneIndex) const;
     AIGroup* GetGroup(int zoneIndex, int i) const; // may be null (dead link)
 
@@ -127,6 +147,82 @@ class GarrisonCache : public SerializeClass
     // interval <= 0 disables recovery.
     static int StepRecover(const GarrisonRecoverInput& in, float elapsed, float interval, float cacheRadius,
                            float despawnHysteresis, float& clock);
+    // apply StepRecover's gained bodies through the occupier pool
+    // (OCCUPIER-FORCES.md 5.3): granted = OccupierForces::Draw(gained) joins
+    // the reserve; when the pool grants less the recovery clock is clamped
+    // to interval (due again at once, nothing banked).  Inactive pool: all
+    // granted (the legacy D2).  Returns granted.
+    static int ApplyRecover(ZoneRecord& z, int gained, float interval);
+    // a despawn's write-back (U1: added to the reserve).  With the occupier
+    // pool active a zone the occupier no longer holds (a flipped base or
+    // town) refunds its survivors to the pool instead of writing them onto
+    // the new owner's record (5.5); dead bodies are NoteLoss diagnostics.
+    static void WriteBackSurvivors(ZoneRegistry& registry, int zone, int survivors, int dead);
+
+    // S5 pending deposits (OCCUPIER-FORCES.md 3.3, no pop-in) ----------------
+    // A body may enter a zone near the player only by walking in or by a
+    // materialization whose every spawn point is hidden.  Every other write
+    // toward a reserve inside the deposit bubble (cacheRadius +
+    // DespawnHysteresis of the player, the edge Decide despawns at) is a
+    // PENDING deposit on ZoneRecord::pending: it does not defend, does not
+    // materialize, is saved on the zone row, and moves into the reserve when
+    // the zone leaves the bubble or every sampled spawn point passes the
+    // gate's turn-proof tier (CAExposeHidden).  Callers: the revert refill
+    // (ZoneRegistry::RevertTown), the return of a counter-attack force to its
+    // base (CounterAttack::ReturnToSource) and the reserve left waiting
+    // beside a wiped garrison (Simulate, and the save reconciliation).
+    //
+    // Add bodies (whole, >= 1) to the zone's pending deposit.  origin is the
+    // zone they came from (-1 none); a deposit from a different origin than
+    // the one already pending marks the deposit mixed (-1).
+    static void Deposit(ZoneRegistry& registry, int zone, int bodies, int originZone);
+    // the same on the engine-wide ZoneRegistry
+    void Deposit(int zone, int bodies, int originZone);
+    // the zone is inside the deposit bubble: within cacheRadius +
+    // DespawnHysteresis (2D) of a valid player
+    static bool InDepositBubble(const ZoneRecord& z, bool playerValid, float px, float pz, float cacheRadius);
+    // the routing every S5 writer uses: inside the deposit bubble the bodies
+    // are Deposited, else added to the reserve directly (as before S5).
+    // Returns true when they went to the pending deposit.
+    static bool AddReserve(ZoneRegistry& registry, int zone, int bodies, int originZone, bool playerValid, float px,
+                           float pz);
+    // the k-th body's spawn point in a zone's +-spread placement square:
+    // hashed from the zone name and k (no engine RNG), so SpawnGarrison
+    // places the body exactly where the release test looked (L11).  XZ only;
+    // Y is the centre's (SpawnGarrison puts it on the surface).
+    static Vector3 SpawnPoint(const char* zoneName, Vector3Par centre, float spread, int k);
+    // the turn-proof test for a release: the 3 x 3 grid of the placement
+    // square (the centre, the four edge midpoints and the four corners) AND
+    // the spawn points of the first `bodies` bodies (SpawnPoint 0 ..
+    // bodies - 1, the ones the next SpawnGarrison uses) all rate
+    // CAExposeHidden.  A single cone-only or seen sample keeps the deposit
+    // pending.
+    static bool PendingSpawnHidden(const char* zoneName, Vector3Par centre, float spread, int bodies,
+                                   const CounterAttackGate& gate);
+    // one zone's pending check (run every cache pass before Decide and before
+    // StepRecover): refund when the occupier no longer holds the zone, else
+    // release into the reserve when the zone is out of the deposit bubble,
+    // or when gate is non-null and PendingSpawnHidden passes.  A dead
+    // player freezes the deposit (no release).  Returns a PendingFlush.
+    static int FlushPending(ZoneRegistry& registry, int zone, bool playerValid, float px, float pz,
+                            const CounterAttackGate* gate);
+    // the occupier lost a zone with a pending deposit: the refund hook gets
+    // it first (phase 2: the strategic pool); without a hook (or when it
+    // declines) the bodies go back to the origin zone's reserve, routed by
+    // AddReserve and capped at its garrisonMax, if the occupier still holds
+    // it and it is not the zone itself; otherwise they are discarded.  One
+    // INFO line either way.
+    static void RefundPending(ZoneRegistry& registry, int zone, bool playerValid, float px, float pz);
+    // the phase-2 seam for the refund (OccupierForces routes it to the pool
+    // when its key is on): return true when the hook took the bodies.  Null
+    // (the default) keeps the key-off rule above.
+    using PendingRefundHook = bool (*)(ZoneRegistry& registry, int zone, int originZone, int bodies);
+    static void SetPendingRefundHook(PendingRefundHook hook);
+    static PendingRefundHook GetPendingRefundHook();
+    // the occupier holds the zone: an occupier-owned non-CITY zone, or an
+    // administered town not exempt from its garrison (IsGarrisonable without
+    // the faction-tier check)
+    static bool OccupierHolds(const ZoneRegistry& registry, const ZoneRecord& z);
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; internally throttled to cacheInterval

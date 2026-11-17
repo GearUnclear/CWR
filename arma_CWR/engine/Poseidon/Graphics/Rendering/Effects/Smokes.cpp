@@ -1,6 +1,7 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/ParticleDrop.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -103,13 +104,13 @@ bool SmokeSource::Simulate(Vector3Par pos, Vector3Par speed, float deltaT, Simul
             _nextTime += _interval * _generalize * _generalize;
             float size05 = 0.5 * _sourceSize;
             Vector3Val windSpeed = GLandscape->GetWind() * 0.5;
-            Vector3 speed(GRandGen.RandomValue() * (1 + _sourceSize) - (0.5 + size05) + _speed[0],
-                          GRandGen.RandomValue() - 0.5 + _speed[1],
-                          GRandGen.RandomValue() * (1 + _sourceSize) - (0.5 + size05) + _speed[2]);
-            Vector3 offset((GRandGen.RandomValue() * 2 - 1) * _sourceSize,
-                           (GRandGen.RandomValue() * 2 - 1) * _sourceSize,
-                           (GRandGen.RandomValue() * 2 - 1) * _sourceSize);
-            CloudletSource::SetSize((GRandGen.RandomValue() + 2) * _size * 2);
+            Vector3 speed(GFxRandGen.RandomValue() * (1 + _sourceSize) - (0.5 + size05) + _speed[0],
+                          GFxRandGen.RandomValue() - 0.5 + _speed[1],
+                          GFxRandGen.RandomValue() * (1 + _sourceSize) - (0.5 + size05) + _speed[2]);
+            Vector3 offset((GFxRandGen.RandomValue() * 2 - 1) * _sourceSize,
+                           (GFxRandGen.RandomValue() * 2 - 1) * _sourceSize,
+                           (GFxRandGen.RandomValue() * 2 - 1) * _sourceSize);
+            CloudletSource::SetSize((GFxRandGen.RandomValue() + 2) * _size * 2);
             CloudletSource::SetAlpha(_inOutDensity * _density * 0.7);
             //  simulate cloudlet source
             Cloudlet* cloudlet = Drop(pos + offset, speed);
@@ -261,7 +262,7 @@ void SmokeSourceVehicle::SimulateExplosion()
         AmmoType type = *aType;
         if (GetObject())
         {
-            float gauss = GRandGen.RandomValue() + GRandGen.RandomValue();
+            float gauss = GFxRandGen.RandomValue() + GFxRandGen.RandomValue();
             float randomFactor = gauss * (_maxExplosionFactor - _minExplosionFactor) + _minExplosionFactor;
 
             float hit = GetObject()->GetExplosives() * randomFactor;
@@ -299,7 +300,7 @@ void SmokeSourceVehicle::SimulateExplosion()
             _darkFire.SetClimbRate(0.8f, 0.6f, 2.0f);
             _darkFire.Start(1.5f * d.burnTime);
             // The wreck burns and smokes on (as the damaging blast's does).
-            const float burnOn = GRandGen.RandomValue() * 0.4f + 0.8f;
+            const float burnOn = GFxRandGen.RandomValue() * 0.4f + 0.8f;
             SetSourceTimes(0, 40 * burnOn, 40 * burnOn);
         }
         if (type.hit > 50)
@@ -316,13 +317,13 @@ void SmokeSourceVehicle::SimulateExplosion()
                 _fire.Start(fireTime);
                 _darkFire.Start(fireTime);
             }
-            float rndTime = GRandGen.RandomValue() * 0.4 + 0.8;
+            float rndTime = GFxRandGen.RandomValue() * 0.4 + 0.8;
             SetSourceTimes(0, 40 * rndTime, 40 * rndTime);
             // sound of explosion
             const ParamEntry& par = Pars >> "CfgDestroy" >> "EngineHit";
             SoundPars soundPars;
             GetValue(soundPars, par >> "sound");
-            float rndFreq = GRandGen.RandomValue() * 0.1 + 0.95;
+            float rndFreq = GFxRandGen.RandomValue() * 0.1 + 0.95;
             IWave* sound = GSoundScene->OpenAndPlayOnce(soundPars.name, Position(), VZero, soundPars.vol,
                                                         soundPars.freq * rndFreq);
             if (sound)
@@ -941,7 +942,7 @@ Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed)
     Color colorA0 = _cloudletColor;
     colorA0.SetA(0);
     cloudlet->SetColor(PackedColor(colorA0));
-    float delta = _cloudletDeltaT * (0.7 + 0.6 * GRandGen.RandomValue());
+    float delta = _cloudletDeltaT * (0.7 + 0.6 * GFxRandGen.RandomValue());
     cloudlet->SetTemperature(_cloudletInitT, delta, _cloudletTTable);
     cloudlet->SetPosition(pos);
     return cloudlet;
@@ -1153,13 +1154,14 @@ void DustSource::Simulate(Vector3Par pos, Vector3Par speed, float density, float
         const float size2 = 2 * _size;
         const float size05 = 0.5 * _size;
         Vector3Val windSpeed = GLandscape->GetWind() * _windCoef;
-        Vector3 cSpeed((GRandGen.RandomValue() * (1 + _size) - (0.5 + size05)) * 2,
-                       GRandGen.RandomValue() * 1 + size2 * 1,
-                       (GRandGen.RandomValue() * (1 + _size) - (0.5 + size05)) * 2);
-        Vector3 offset((GRandGen.RandomValue() * 2 - 1) * _sourceSize, (GRandGen.RandomValue() * 2 - 1) * _sourceSize,
-                       (GRandGen.RandomValue() * 2 - 1) * _sourceSize);
+        Vector3 cSpeed((GFxRandGen.RandomValue() * (1 + _size) - (0.5 + size05)) * 2,
+                       GFxRandGen.RandomValue() * 1 + size2 * 1,
+                       (GFxRandGen.RandomValue() * (1 + _size) - (0.5 + size05)) * 2);
+        Vector3 offset((GFxRandGen.RandomValue() * 2 - 1) * _sourceSize,
+                       (GFxRandGen.RandomValue() * 2 - 1) * _sourceSize,
+                       (GFxRandGen.RandomValue() * 2 - 1) * _sourceSize);
         float cSize = floatMax(_size, _size * 3 * density);
-        CloudletSource::SetSize((GRandGen.RandomValue() + 2) * cSize);
+        CloudletSource::SetSize((GFxRandGen.RandomValue() + 2) * cSize);
         // simulate cloudlet source
         Cloudlet* cloudlet = Drop(pos + offset, cSpeed * density * 0.5 + windSpeed + speed);
         cloudlet->SetClimbRate(_cloudletAccY, _cloudletMinYSpeed, _cloudletMaxYSpeed);
@@ -1220,18 +1222,18 @@ void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float densit
         const float size = GetSize();
         const float size2 = 2 * size;
         const float size05 = 0.5 * size;
-        Vector3 cSpeed((GRandGen.RandomValue() * (1 + size) - (0.5 + size05)) * 2,
-                       GRandGen.RandomValue() * 1 + size2 * 1,
-                       (GRandGen.RandomValue() * (1 + size) - (0.5 + size05)) * 2);
+        Vector3 cSpeed((GFxRandGen.RandomValue() * (1 + size) - (0.5 + size05)) * 2,
+                       GFxRandGen.RandomValue() * 1 + size2 * 1,
+                       (GFxRandGen.RandomValue() * (1 + size) - (0.5 + size05)) * 2);
         const float sourceSize = GetSourceSize();
-        Vector3 offset((GRandGen.RandomValue() * 2 - 1) * sourceSize, (GRandGen.RandomValue() * 2 - 1) * sourceSize,
-                       (GRandGen.RandomValue() * 2 - 1) * sourceSize);
+        Vector3 offset((GFxRandGen.RandomValue() * 2 - 1) * sourceSize, (GFxRandGen.RandomValue() * 2 - 1) * sourceSize,
+                       (GFxRandGen.RandomValue() * 2 - 1) * sourceSize);
         float cSize = floatMax(size, size * 3 * density);
-        CloudletSource::SetSize((GRandGen.RandomValue() + 2) * cSize);
+        CloudletSource::SetSize((GFxRandGen.RandomValue() + 2) * cSize);
         // simulate cloudlet source
         Cloudlet* cloudlet = Drop(pos + offset, speed);
 
-        float newSize = GetSize() * _generalize * (0.5 + 1.0 * GRandGen.RandomValue());
+        float newSize = GetSize() * _generalize * (0.5 + 1.0 * GFxRandGen.RandomValue());
         cloudlet->SetGrowUp(_cloudletGrowUp, newSize);
         Vector3 dir = cloudlet->Position() - pos;
         saturateMax(dir[1], 0);
@@ -1323,7 +1325,7 @@ void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
                 float intensity = _lightIntensity;
                 if (_lightMGun)
                 {
-                    intensity *= GRandGen.PlusMinus(0.8, 0.2);
+                    intensity *= GFxRandGen.PlusMinus(0.8, 0.2);
                 }
                 else
                 {
@@ -1422,7 +1424,7 @@ void Crater::Init(float timeToLive, float size, bool smoke, bool blood, bool wat
         _dustTimeToLive = 0.1;
         _dust.Load(Pars >> "CfgCloudlets" >> "CraterBlood");
 
-        float angle = 2.0 * H_PI * GRandGen.RandomValue();
+        float angle = 2.0 * H_PI * GFxRandGen.RandomValue();
         Vector3 dir(sin(angle), 0, cos(angle));
 
         _dust.SetSpeed(-VUp * 0.5 + dir * 0.5);
@@ -1450,13 +1452,13 @@ void Crater::Init(float timeToLive, float size, bool smoke, bool blood, bool wat
         saturate(cloudletSize, 0.5, 1.2);
         _smoke1.Load(Pars >> "CfgCloudlets" >> "CraterSmoke1");
         _smoke1.SetSize(2.0 * cloudletSize, 1.5 * size);
-        _smoke1.SetColor(_smoke1.GetColor() * GRandGen.RandomValue());
+        _smoke1.SetColor(_smoke1.GetColor() * GFxRandGen.RandomValue());
         _smoke2.Load(Pars >> "CfgCloudlets" >> "CraterSmoke2");
         _smoke2.SetSize(2.0 * cloudletSize, 1.5 * size);
-        _smoke2.SetColor(_smoke2.GetColor() * (0.6 + 0.4 * GRandGen.RandomValue()));
+        _smoke2.SetColor(_smoke2.GetColor() * (0.6 + 0.4 * GFxRandGen.RandomValue()));
         _smoke3.Load(Pars >> "CfgCloudlets" >> "CraterSmoke3");
         _smoke3.SetSize(1.0 * cloudletSize, 1.5 * size);
-        _smoke3.SetColor(_smoke3.GetColor() * (0.6 + 0.4 * GRandGen.RandomValue()));
+        _smoke3.SetColor(_smoke3.GetColor() * (0.6 + 0.4 * GFxRandGen.RandomValue()));
     }
     else
     {
@@ -1496,7 +1498,7 @@ void Crater::SetDetonation(const lighting::Detonation& d)
     // table holds 0.5 grey at its 500 K, so its colour is twice this.
     static const Color kColumnEarth(0.30f, 0.27f, 0.22f);
     static const Color kSkirtDust(0.44f, 0.40f, 0.32f);
-    const float shade = 0.8f + 0.2f * GRandGen.RandomValue();
+    const float shade = 0.8f + 0.2f * GFxRandGen.RandomValue();
     _smoke1.SetSize(0.15f * h, 0.15f * h);
     _smoke1.SetInterval(0.1f);
     _smoke1.SetSourceTimes(0.0f, 0.12f * life, 0.15f * life);
@@ -1545,8 +1547,8 @@ void Crater::Simulate(float deltaT, SimulationImportance prec)
     if (_dustTimeToLive > 0)
     {
         const float scale = 0.8;
-        Vector3 up((GRandGen.RandomValue() * 6 * scale - 3 * scale) * _size, 10 * scale * _size,
-                   (GRandGen.RandomValue() * 6 * scale - 3 * scale) * _size);
+        Vector3 up((GFxRandGen.RandomValue() * 6 * scale - 3 * scale) * _size, 10 * scale * _size,
+                   (GFxRandGen.RandomValue() * 6 * scale - 3 * scale) * _size);
         float density = floatMax(_size, 0.02);
         _dustTimeToLive -= deltaT;
         if (!_isSmoke)
@@ -1557,7 +1559,7 @@ void Crater::Simulate(float deltaT, SimulationImportance prec)
         {
             // The blast's thrown earth.
             const float v = _throwSpeed;
-            Vector3 th((GRandGen.RandomValue() - 0.5f) * 0.8f * v, v, (GRandGen.RandomValue() - 0.5f) * 0.8f * v);
+            Vector3 th((GFxRandGen.RandomValue() - 0.5f) * 0.8f * v, v, (GFxRandGen.RandomValue() - 0.5f) * 0.8f * v);
             _dust.Simulate(Position(), Speed() + th, 0.34f, deltaT);
         }
     }
@@ -2524,17 +2526,67 @@ bool IsParticleDropArgumentCountSupported(int count)
     return count == 18 || count == 19;
 }
 
-GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
+bool GetParticleDropWorldPosition(Vector3& ret, GameValuePar oper, ParticleDropSurfaceY surfaceY)
 {
-    // GetPos is the global ::GetPos (declared at file scope above).
+    // The array form of the script position commands (::GetRelPos then ::GetPos):
+    // [x, y] or [x, y, z], z the height above the land or sea surface (0 when
+    // left out). The inverse of the position the OnTimer script receives.
+    const GameArrayType& Array = oper;
+    if (Array.Size() < 2 || Array.Size() > 3)
+    {
+        return false;
+    }
+    for (int i = 0; i < Array.Size(); i++)
+    {
+        if (Array[i].GetType() != GameScalar)
+        {
+            return false;
+        }
+    }
+    const float x = Array[0];
+    const float z = Array[1];
+    const float aboveSurface = Array.Size() == 3 ? static_cast<float>(Array[2]) : 0.0f;
+    ret = Vector3(x, aboveSurface + surfaceY(x, z), z);
+    return true;
+}
 
-    const GameArrayType& Array = oper1;
+namespace
+{
+// ParseParticleDrop reports through the script state when it has one; the
+// unit tests parse without one.
+void DropTypeError(const GameState* state, GameType expected, GameType was)
+{
+    if (state)
+    {
+        state->TypeError(expected, was);
+    }
+}
 
+void DropGenericError(const GameState* state)
+{
+    if (state)
+    {
+        state->SetError(EvalGen);
+    }
+}
+
+float LandscapeSurfaceYAboveWater(float x, float z)
+{
+    return GLandscape->SurfaceYAboveWater(x, z);
+}
+} // namespace
+
+ParticleDropParse ParseParticleDrop(const GameState* state, const GameArrayType& Array, ParticleDropRequest& out,
+                                    ParticleDropSurfaceY surfaceY)
+{
     // In case number of parameters doesn't match required number.
     if (!IsParticleDropArgumentCountSupported(Array.Size()))
     {
-        state->SetError(EvalDim, Array.Size(), 19);
-        return GameValue();
+        if (state)
+        {
+            state->SetError(EvalDim, Array.Size(), 19);
+        }
+        return ParticleDropParse::Rejected;
     }
 
     // Match the required types of parameters and get its values
@@ -2542,200 +2594,170 @@ GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
     // ShapeName
     if (Array[0].GetType() != GameString)
     {
-        state->TypeError(GameString, Array[0].GetType());
-        return GameValue();
+        DropTypeError(state, GameString, Array[0].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // AnimationName
     if (Array[1].GetType() != GameString)
     {
-        state->TypeError(GameString, Array[1].GetType());
-        return GameValue();
+        DropTypeError(state, GameString, Array[1].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // _Type
     if (Array[2].GetType() != GameString)
     {
-        state->TypeError(GameString, Array[2].GetType());
-        return GameValue();
+        DropTypeError(state, GameString, Array[2].GetType());
+        return ParticleDropParse::Rejected;
     }
-    EParticleType ParticleType;
     RString STRPT = Array[2];
     if (STRPT == RString("Billboard"))
     {
-        ParticleType = PT_Billboard;
+        out.type = PT_Billboard;
     }
     else if (STRPT == RString("SpaceObject"))
     {
-        ParticleType = PT_SpaceObject;
+        out.type = PT_SpaceObject;
     }
     else
     {
-        state->SetError(EvalGen);
-        return GameValue();
+        DropGenericError(state);
+        return ParticleDropParse::Rejected;
     }
 
     // _TimerPeriod
     if (Array[3].GetType() != GameScalar)
     {
-        state->TypeError(GameScalar, Array[3].GetType());
-        return GameValue();
+        DropTypeError(state, GameScalar, Array[3].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // _LifeTime
     if (Array[4].GetType() != GameScalar)
     {
-        state->TypeError(GameScalar, Array[4].GetType());
-        return GameValue();
+        DropTypeError(state, GameScalar, Array[4].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // _MoveVelocity
     if (Array[6].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[6].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[6].GetType());
+        return ParticleDropParse::Rejected;
     }
-    Vector3 MoveVelocity;
-    if (!GetVector3(MoveVelocity, Array[6]))
+    if (!GetVector3(out.moveVelocity, Array[6]))
     {
-        state->SetError(EvalGen);
-        return GameValue();
-    }
-
-    // _RotationVelocity
-    if (Array[7].GetType() != GameScalar)
-    {
-        state->TypeError(GameScalar, Array[7].GetType());
-        return GameValue();
+        DropGenericError(state);
+        return ParticleDropParse::Rejected;
     }
 
-    // _Weight
-    if (Array[8].GetType() != GameScalar)
+    // _RotationVelocity, _Weight, _Volume, _Rubbing
+    for (int i = 7; i <= 10; i++)
     {
-        state->TypeError(GameScalar, Array[8].GetType());
-        return GameValue();
-    }
-
-    // _Volume
-    if (Array[9].GetType() != GameScalar)
-    {
-        state->TypeError(GameScalar, Array[9].GetType());
-        return GameValue();
-    }
-
-    // _Rubbing
-    if (Array[10].GetType() != GameScalar)
-    {
-        state->TypeError(GameScalar, Array[10].GetType());
-        return GameValue();
+        if (Array[i].GetType() != GameScalar)
+        {
+            DropTypeError(state, GameScalar, Array[i].GetType());
+            return ParticleDropParse::Rejected;
+        }
     }
 
     // _Size
     if (Array[11].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[11].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[11].GetType());
+        return ParticleDropParse::Rejected;
     }
     const GameArrayType& ArraySize = Array[11];
-    AutoArray<float> Size(ArraySize.Size());
-    Size.Resize(ArraySize.Size());
+    out.size.Resize(ArraySize.Size());
     for (int i = 0; i < ArraySize.Size(); i++)
     {
         if (ArraySize[i].GetType() != GameScalar)
         {
-            state->TypeError(GameScalar, ArraySize[i].GetType());
-            return GameValue();
+            DropTypeError(state, GameScalar, ArraySize[i].GetType());
+            return ParticleDropParse::Rejected;
         }
-        Size[i] = ArraySize[i];
+        out.size[i] = ArraySize[i];
     }
 
     // _Color
     if (Array[12].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[12].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[12].GetType());
+        return ParticleDropParse::Rejected;
     }
     const GameArrayType& ArrayColor = Array[12];
-    AutoArray<Color> PColor(ArrayColor.Size());
-    PColor.Resize(ArrayColor.Size());
+    out.color.Resize(ArrayColor.Size());
     for (int i = 0; i < ArrayColor.Size(); i++)
     {
         if (ArrayColor[i].GetType() != GameArray)
         {
-            state->TypeError(GameArray, ArrayColor[i].GetType());
-            return GameValue();
+            DropTypeError(state, GameArray, ArrayColor[i].GetType());
+            return ParticleDropParse::Rejected;
         }
         Color AuxColor;
         if (!GetColor(AuxColor, ArrayColor[i]))
         {
-            state->SetError(EvalGen);
-            return GameValue();
+            DropGenericError(state);
+            return ParticleDropParse::Rejected;
         }
-        PColor[i] = AuxColor;
+        out.color[i] = AuxColor;
     }
 
     // _AnimationPhase
     if (Array[13].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[13].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[13].GetType());
+        return ParticleDropParse::Rejected;
     }
     const GameArrayType& ArrayAnimationPhase = Array[13];
-    AutoArray<float> AnimationPhase(ArrayAnimationPhase.Size());
-    AnimationPhase.Resize(ArrayAnimationPhase.Size());
+    out.animationPhase.Resize(ArrayAnimationPhase.Size());
     for (int i = 0; i < ArrayAnimationPhase.Size(); i++)
     {
         if (ArrayAnimationPhase[i].GetType() != GameScalar)
         {
-            state->TypeError(GameScalar, ArrayAnimationPhase[i].GetType());
-            return GameValue();
+            DropTypeError(state, GameScalar, ArrayAnimationPhase[i].GetType());
+            return ParticleDropParse::Rejected;
         }
-        AnimationPhase[i] = ArrayAnimationPhase[i];
+        out.animationPhase[i] = ArrayAnimationPhase[i];
     }
 
-    // _RandomDirectionPeriod
-    if (Array[14].GetType() != GameScalar)
+    // _RandomDirectionPeriod, _RandomDirectionIntensity
+    for (int i = 14; i <= 15; i++)
     {
-        state->TypeError(GameScalar, Array[14].GetType());
-        return GameValue();
+        if (Array[i].GetType() != GameScalar)
+        {
+            DropTypeError(state, GameScalar, Array[i].GetType());
+            return ParticleDropParse::Rejected;
+        }
     }
 
-    // _RandomDirectionIntensity
-    if (Array[15].GetType() != GameScalar)
+    // OnTimer, BeforeDestroy
+    for (int i = 16; i <= 17; i++)
     {
-        state->TypeError(GameScalar, Array[15].GetType());
-        return GameValue();
-    }
-
-    // OnTimer
-    if (Array[16].GetType() != GameString)
-    {
-        state->TypeError(GameString, Array[16].GetType());
-        return GameValue();
-    }
-
-    // BeforeDestroy
-    if (Array[17].GetType() != GameString)
-    {
-        state->TypeError(GameString, Array[17].GetType());
-        return GameValue();
+        if (Array[i].GetType() != GameString)
+        {
+            DropTypeError(state, GameString, Array[i].GetType());
+            return ParticleDropParse::Rejected;
+        }
     }
 
     // Object
-    Vector3 Position;
     if (Array.Size() == 19 && Array[18].GetType() == GameObject)
     {
         const Object* pObject = static_cast<GameDataObject*>(Array[18].GetData())->GetObject();
         if (pObject == nullptr)
         {
-            return GameValue();
+            return ParticleDropParse::NoTarget;
         }
+        Vector3 Position;
         if (Array[5].GetType() == GameArray)
         {
+            // Model space, exactly [x, y, z].
             if (!GetVector3(Position, Array[5]))
             {
-                state->SetError(EvalGen);
-                return GameValue();
+                DropGenericError(state);
+                return ParticleDropParse::Rejected;
             }
         }
         else if (Array[5].GetType() == GameString)
@@ -2746,36 +2768,46 @@ GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
         }
         else
         {
-            state->TypeError(GameArray, Array[5].GetType());
-            return GameValue();
+            DropTypeError(state, GameArray, Array[5].GetType());
+            return ParticleDropParse::Rejected;
         }
-        Position = pObject->PositionModelToWorld(Position);
-        MoveVelocity = pObject->DirectionModelToWorld(MoveVelocity);
+        out.position = pObject->PositionModelToWorld(Position);
+        out.moveVelocity = pObject->DirectionModelToWorld(out.moveVelocity);
+        return ParticleDropParse::Ready;
     }
-    else
+
+    // No object (an 18-element array, or a 19th element that is not an object,
+    // such as "" or a string naming a variable): a world position, read the way
+    // the position commands read one.
+    if (Array[5].GetType() != GameArray)
     {
-        // In case there is no object assigned and position reference is not an array...
-        if (Array[5].GetType() != GameArray)
-        {
-            state->TypeError(GameArray, Array[5].GetType());
-            return GameValue();
-        }
-        else
-        {
-            if (!GetVector3(Position, Array[5]))
-            {
-                state->SetError(EvalGen);
-                return GameValue();
-            }
-        }
+        DropTypeError(state, GameArray, Array[5].GetType());
+        return ParticleDropParse::Rejected;
+    }
+    if (!GetParticleDropWorldPosition(out.position, Array[5], surfaceY))
+    {
+        DropGenericError(state);
+        return ParticleDropParse::Rejected;
+    }
+    return ParticleDropParse::Ready;
+}
+
+GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& Array = oper1;
+    ParticleDropRequest request;
+    if (ParseParticleDrop(state, Array, request, &LandscapeSurfaceYAboveWater) != ParticleDropParse::Ready)
+    {
+        return GameValue();
     }
 
     LODShapeWithShadow* shape = Shapes.New(GetShapeName(Array[0]), false, false);
     if (shape)
     {
-        CParticle* Particle = new CParticle(shape, Array[1], ParticleType, Array[3], Array[4], Position, MoveVelocity,
-                                            Array[7], Array[8], Array[9], Array[10], Size, PColor, AnimationPhase,
-                                            Array[14], Array[15], Array[16], Array[17]);
+        CParticle* Particle =
+            new CParticle(shape, Array[1], request.type, Array[3], Array[4], request.position, request.moveVelocity,
+                          Array[7], Array[8], Array[9], Array[10], request.size, request.color, request.animationPhase,
+                          Array[14], Array[15], Array[16], Array[17]);
         GLOB_WORLD->AddCloudlet(Particle);
     }
 

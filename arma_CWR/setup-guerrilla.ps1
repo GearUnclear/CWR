@@ -11,13 +11,14 @@
               bin/splashLogo.hpp). Bohemia's files are kept: remaster.cpp,
               resource-extra.cpp, the options*.hpp chain, the STRINGTABLE
               shards and the fonts they already ship. Setup adds only UD's
-              own files beside them (bin/ud-mainmenu.hpp, font credits,
-              a STRINGTABLE_UD.utf8.csv shard holding just the keys Bohemia's
-              shards lack, missions, gmcore, faction library). The ONLY
-              change to a Bohemia file is appended #include lines: one in
-              bin/resource-extra.cpp (by this script) and two in
-              bin/config-extra.cpp (by install-missions.ps1). Each is
-              appended once; reruns add nothing. Setup snapshots every
+              own files beside them (bin/ud-mainmenu.hpp, bin/ud-options.hpp,
+              font credits, a STRINGTABLE_UD.utf8.csv shard holding just the
+              keys Bohemia's shards lack, missions, gmcore, faction library).
+              The ONLY change to a Bohemia file is appended #include lines:
+              two in bin/resource-extra.cpp (by this script: the UD menu and
+              the UD Options additions) and two in bin/config-extra.cpp (by
+              install-missions.ps1). Each is appended once; reruns add
+              nothing. Setup snapshots every
               pre-existing package file first and fails if anything else
               changed. The Remaster Demo package is refused.
     Classic   (legacy) No marker: copies the versioned Classic shims,
@@ -296,16 +297,27 @@ if ($mode -eq 'Remaster') {
         [IO.File]::Delete($udStrings)
         Write-Output "Removed (now covered by Bohemia's shards): $udStrings"
     }
-    # The one edit to a Bohemia file: append the UD menu include, once.
-    $menuText = [IO.File]::ReadAllText($resourceExtra)
-    if ($menuText -match '(?m)^\s*#include\s*"ud-mainmenu\.hpp"') {
-        Write-Output "Up to date: $resourceExtra includes ud-mainmenu.hpp"
-    } else {
-        Save-Existing $resourceExtra $GameDir
-        $append = "`n// Uslu dur! main menu; appended by arma_CWR/setup-guerrilla.ps1 (Remaster mode).`n" +
-                  "#include `"ud-mainmenu.hpp`"`n"
+    # The one edit to a Bohemia file: append the UD includes, each once. The
+    # menu (RscDisplayMainUD) and the Options additions (RscOptionsPageControlsUD,
+    # the Arma 3 controls row) each carry their own class name so they parse
+    # beside Bohemia's classes in that one file; the engine prefers them when
+    # present. An install from before ud-options.hpp existed gets only the
+    # missing line.
+    $udIncludes = @(
+        @{ Name = 'ud-mainmenu.hpp'; Comment = 'main menu' },
+        @{ Name = 'ud-options.hpp'; Comment = 'Options additions (Arma 3 controls row)' })
+    $backedUp = $false
+    foreach ($include in $udIncludes) {
+        $resourceText = [IO.File]::ReadAllText($resourceExtra)
+        if ($resourceText -match ('(?m)^\s*#include\s*"' + [regex]::Escape($include.Name) + '"')) {
+            Write-Output "Up to date: $resourceExtra includes $($include.Name)"
+            continue
+        }
+        if (-not $backedUp) { Save-Existing $resourceExtra $GameDir; $backedUp = $true }
+        $append = "`n// Uslu dur! $($include.Comment); appended by arma_CWR/setup-guerrilla.ps1 (Remaster mode).`n" +
+                  "#include `"$($include.Name)`"`n"
         [IO.File]::AppendAllText($resourceExtra, $append)
-        Write-Output "Appended: ud-mainmenu.hpp include -> $resourceExtra"
+        Write-Output "Appended: $($include.Name) include -> $resourceExtra"
     }
     # install-missions appends its two includes to Bohemia's config-extra.cpp;
     # back it up only when that append is still to come.

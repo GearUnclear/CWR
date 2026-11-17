@@ -1,0 +1,65 @@
+// Chupacabra model spawn test bed on Eden (Everon), daylight (10:00). One stock
+// player only; tests/integration/scripting/cryptid_model_spawn spawns the
+// UDChupacabra unit from script. addOns[] names the creature's addon: a
+// runtime createUnit of a class whose owner addon is not activated is refused
+// ("type is abstract"), and there is no script command to activate one.
+version=11;
+class Mission
+{
+	addOns[]=
+	{
+		"udchupa",
+		"BIS_Resistance"
+	};
+	addOnsAuto[]=
+	{
+		"udchupa",
+		"BIS_Resistance"
+	};
+	randomSeed=4243;
+	class Intel
+	{
+		viewDistance=1200;
+		year=1985;
+		month=5;
+		day=10;
+		hour=13;
+		minute=0;
+		weather=0.100000;
+		weatherForecast=0.100000;
+		fog=0.000000;
+		fogForecast=0.000000;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={4800.0,20.0,10000.0};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

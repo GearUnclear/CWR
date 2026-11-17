@@ -1,0 +1,58 @@
+; ============================================================================
+;  DedDemo.Eden  -  Dedushka rises from dormancy west of Morton, walks through
+;  the main row of houses and out the east side. The mission the video is to
+;  be shot in: fixed start, fixed line, every beat on command.
+;
+;  He is made at once, at KJD_start. A camera script or a test may change any
+;  other KJD_* afterwards: each is read when its beat starts.
+;
+;    KJD_manual = true     no timeline: he stays dormant until told (the action
+;                          menu, or KJ_brainOrder / kj\brain\order.sqs)
+;    KJD_plan              the beats the timeline plays, in order; drop any:
+;                          ["wake", "through", "hit", "beam", "out", "dormant"]
+;    KJD_start, KJD_exit   where he stands dormant, and where he walks out to
+;    KJD_hitX              the x at which the tank's hit comes (the timeline
+;                          orders the reaction; no shot is fired)
+;    KJD_hold              seconds he is left dormant before the timeline starts
+;  Read by cameras and tests: kaiju, KJD_step (the beat now playing), KJ_state,
+;  KJ_brainPhase. The garrison is named kjdA1..6, kjdB1..4, kjdTank, kjdTank2,
+;  kjdBmp; the townspeople kjdC1..3.
+;
+;  Quiet by design: the creature is captive and everyone is EAST or civilian.
+;  For the live-fire shoot (NEEDS-OWNER-OK) set KJD_hostile = true: he is then
+;  put in a Resistance group and left targetable. See the brain NOTES.md.
+; ============================================================================
+? isNil "KJD_manual" : KJD_manual = false
+? isNil "KJD_hostile" : KJD_hostile = false
+? isNil "KJD_plan" : KJD_plan = ["wake", "through", "hit", "beam", "out", "dormant"]
+? isNil "KJD_start" : KJD_start = [4790, 4004, 0]
+? isNil "KJD_exit" : KJD_exit = [5290, 4008, 0]
+? isNil "KJD_hitX" : KJD_hitX = 4990
+? isNil "KJD_hold" : KJD_hold = 10
+KJD_step = "setup"
+setViewDistance 2000
+
+; ---- the creature, in a group of his own
+_side = east
+? KJD_hostile : _side = resistance
+? KJD_hostile : kjdCtr = createCenter resistance
+; a centre made by script has an empty friend table (AI survey, section 5). This branch was never run.
+? KJD_hostile : resistance setFriend [east, 0]; east setFriend [resistance, 0]
+kjdG = createGroup _side
+kaiju = objNull
+"UDDedushka" createUnit [KJD_start, kjdG, "kaiju = this", 0.5, "PRIVATE"]
+~0.3
+? isNull kaiju : hint "DedDemo: the creature could not be made (is the uddedushka addon mounted?)"; exit
+kaiju setDir 90
+kaiju setPos KJD_start
+? not KJD_hostile : kaiju setCaptive true
+
+; ---- the garrison stands where it is until something moves it
+{ _x setBehaviour "SAFE" } forEach [kjdA1, kjdB1, kjdTank, kjdTank2, kjdBmp]
+
+; ---- the brain: he does what the timeline (or the menu) says
+KJ_brainAuto = false
+[kaiju] exec "kj\brain\start.sqs"
+[] exec "kjd_menu.sqs"
+? not KJD_manual : [] exec "kjd_run.sqs"
+exit

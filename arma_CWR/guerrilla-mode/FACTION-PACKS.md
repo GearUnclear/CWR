@@ -175,6 +175,64 @@ misspelled known key is silently inert.
 | `vehicleThreshold` | numeric | Legacy single-gate 2-step ladder. Prefer `vehicleThresholds[]`. |
 | `civClassCount`, `civClass1..N` | int / CfgVehicles | **CIV only.** Numbered keys, not an array, because `gmFactionValue` skips array entries. |
 
+### Occupier forces keys
+
+Seven optional plain values name the hulls the occupier forces layer buys
+its packages with (`OCCUPIER-FORCES.md` 6.5; `ForcePackages`). They are read
+only from the descriptor of the faction playing the **occupier**, through
+`ZoneRegistry::FactionValue`, when `OccupierForces` builds its package
+catalogue; a resistance roster may carry them for the day it is picked as
+the occupier.
+
+| Key | Bank | Meaning |
+|-----|------|---------|
+| `forcesTruck` | CfgVehicles | The truck package's hull. |
+| `forcesArmedCar` | CfgVehicles | The armed-car package's hull. |
+| `forcesApc` | CfgVehicles | The APC package's hull. |
+| `forcesTank` | CfgVehicles | The tank package's hull. |
+| `forcesTransportHeli` | CfgVehicles | The helicopter that inserts troops (price 10, x1.5 off map; carries `min(12, transportSoldier)`). |
+| `forcesAttackHeli` | CfgVehicles | The attack helicopter used for strikes (price 18; carries nobody). |
+| `forcesJet` | CfgVehicles | The jet used for strikes (price 22; carries nobody). |
+
+**Ground keys are optional overrides.** Without them the four ground
+packages are classified off your `vehicles[]` ladder, first match wins:
+APC (armour with `transportSoldier >= 4` and a crew weapon), then tank,
+then armed car (a wheeled vehicle with a crew weapon), then truck (a ground
+vehicle with `transportSoldier >= 6` and no crew weapon); the lowest rung of
+a package is its hull, and a package with no hull is not offered. A
+`forcesTruck` / `forcesArmedCar` / `forcesApc` / `forcesTank` value
+replaces that classification for its package, whatever the class's own
+shape. An override that names no vehicle class logs `OccupierForces:
+<key> = "<class>" names no vehicle class, ignored` and the ladder's hull
+stays. None of the shipped descriptors author a ground override.
+
+**Air must be authored.** Aircraft are never classified from the ladder:
+a faction with no `forcesTransportHeli`, `forcesAttackHeli` or `forcesJet`
+(or one whose class does not resolve) is simply never offered that
+package, and its operations go by road. The shipped descriptors author air
+for these rosters:
+
+| Roster (file) | `forcesTransportHeli` | `forcesAttackHeli` | `forcesJet` |
+|---|---|---|---|
+| EAST (`guerrilla-factions.hpp`) | `Mi17` | `Mi24` | `Su25` |
+| WEST (`guerrilla-factions.hpp`) | `UH60` | `Cobra` | `A10` |
+| IDF (`lobo-factions.hpp`) | `LoBoB212` | `LoBo_AH1` | `LoBo_A4` |
+| EgyptFrontier and EgyptArmy (`lobo-factions.hpp`) | `LoBo_Mi8_egy` | `LoBo_Gazelle_Guns` | `LoBo_E_mig21bis_CAS1` |
+| Syria (`lobo-factions.hpp`) | `Mi17` | `Mi24` | `LoBo_MiG23BN_Syria_GA` |
+| Jordan (`lobo-factions.hpp`) | `LoBo_UH1H_jor` | `LoBo_AH1S_Jor` | `LoBo_F5_mir_Jor` |
+
+GUER (the FIA; 1.99 ships no GUER aircraft), Hizballah, PLO and PLO_East
+author none: an irregular roster flies nothing, so as an occupier it
+answers by road only.
+
+The resolution pass of section 5 probes these keys like the hull keys
+(`IsForceHullKey`): a class that does not exist in the loaded data is
+WARNed through the substitution line as `<none>` and cleared, so the
+package falls back to the `vehicles[]` ladder and an air package is simply
+not offered; `guerrilla lint` reports it as DROPPED. A typo therefore
+shows in the lint, and at mission start as a package missing from the
+`OccupierForces: package catalogue` INFO line.
+
 **OFP magazine convention:** a simple weapon **is** its own magazine class
 (`CfgWeapons AK47` has `scopeMagazine=2`), so `baseMagazine` and the `loot*Mag`
 keys legitimately reuse the weapon classname. There is no `AK47Mag` in the 1.99

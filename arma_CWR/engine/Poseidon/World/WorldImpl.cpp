@@ -15,9 +15,11 @@
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -1814,6 +1816,78 @@ static Person* RebuildPlayerBodyAfterLoad(World* world, AIUnit* unit, Vector3Par
     return person;
 }
 
+// The script globals that hold the player body (their names, ';'-joined),
+// written into the save beside playerOnUnit: a load that rebuilds the body
+// (RebuildPlayerBodyAfterLoad) repoints exactly these to the new one.
+static RString PlayerHandleVarNames(Object* body)
+{
+    RString names;
+    if (!body)
+    {
+        return names;
+    }
+    const GameValue probe = GameValueExt(body);
+    GGameState.GetVariables().ForEachF([&](const GameVariable& var, const VarBankType*) {
+        const GameData* data = var._value.GetData();
+        if (var._name.GetLength() > 0 && data && data->GetType() == GameObject && data->IsEqualTo(probe.GetData()))
+        {
+            names = names.GetLength() > 0 ? names + ";" + var._name : var._name;
+        }
+        return false;
+    });
+    return names;
+}
+
+// After a rebuild, the script globals that held the old body read objNull
+// (its ref did not resolve). Saved scripts resume their saved text, so a
+// campaign.sqs older than its own rebind (5c7a771) would keep the dead handle:
+// the engine repoints them here. The names come from the save (savedNames);
+// a save older than that key falls back to the campaign's two handles, aP and
+// gmPlayer. Only a global that still reads objNull is touched.
+static void RepointPlayerHandlesAfterLoad(const RString& savedNames, Person* body)
+{
+    AutoArray<RString> names;
+    const char* fromSave = savedNames;
+    while (fromSave && *fromSave)
+    {
+        const char* end = strchr(fromSave, ';');
+        const int len = end ? (int)(end - fromSave) : (int)strlen(fromSave);
+        if (len > 0)
+        {
+            names.Add(RString(fromSave, len));
+        }
+        fromSave = end ? end + 1 : nullptr;
+    }
+    if (names.Size() == 0)
+    {
+        names.Add("aP");
+        names.Add("gmPlayer");
+    }
+    const GameValue nullProbe = GameValueExt((Object*)nullptr);
+    const GameValue bodyValue = GameValueExt((Object*)body);
+    RString done;
+    for (int i = 0; i < names.Size(); i++)
+    {
+        GameVariable& var = GGameState.GetVariables().Set(names[i]);
+        if (VarBankType::IsNull(var) || var._readOnly)
+        {
+            continue;
+        }
+        const GameData* data = var._value.GetData();
+        if (!data || data->GetType() != GameObject || !data->IsEqualTo(nullProbe.GetData()))
+        {
+            continue;
+        }
+        var._value = bodyValue;
+        done = done.GetLength() > 0 ? done + ", " + names[i] : names[i];
+    }
+    if (done.GetLength() > 0)
+    {
+        LOG_INFO(World, "Savegame: script handle(s) {} repointed from the dropped player body to the rebuilt one{}",
+                 (const char*)done, savedNames.GetLength() > 0 ? "" : " (a save older than playerOnVars: aP, gmPlayer)");
+    }
+}
+
 // After the second load pass, once every ref has resolved: the AI side's
 // leftovers of vehicles VehicleList::Serialize dropped (their class is unknown
 // to the loaded package) are repaired so the first AI think never dereferences
@@ -1826,7 +1900,7 @@ static Person* RebuildPlayerBodyAfterLoad(World* world, AIUnit* unit, Vector3Par
 // leader-selection UnitRemoved triggers only ever walks units that still have
 // a body: plain members first, subgroup leaders next, the group leader last.
 static void RepairUnitsWithoutBodyAfterLoad(World* world, AIUnit* playerUnit, Vector3Par playerPos,
-                                            const RString& playerType)
+                                            const RString& playerType, const RString& playerVars)
 {
     if (!world->PlayerOn() && playerUnit && !playerUnit->GetPerson())
     {
@@ -1837,6 +1911,7 @@ static void RepairUnitsWithoutBodyAfterLoad(World* world, AIUnit* playerUnit, Ve
             world->SetPlayerManual(true);
             world->SwitchPlayerTo(person);
             world->SetRealPlayer(person);
+            RepointPlayerHandlesAfterLoad(playerVars, person);
         }
     }
 
@@ -2049,6 +2124,19 @@ LSError World::Serialize(ParamArchive& ar, int message)
         PARAM_CHECK(ar.Serialize("GuerrillaFlags", Guerrilla::TownFlags::Instance(), 14))
     }
 
+    // Generated-base props (OCCUPIER-FORCES.md 5.7 step 2): the planned
+    // layout rows and their prop refs.  Same missing-subclass tolerance; the
+    // props themselves ride the world's building serializer, so a load
+    // re-binds them and never creates a second set.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::BaseProps::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::BaseProps::Instance().IsActive() : ar.IsSubclass("GuerrillaBaseProps"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaBaseProps", Guerrilla::BaseProps::Instance(), 14))
+    }
+
     // Guerrilla ambient road traffic: live rows (hull/group refs + zone
     // names), released hulls, fleeing drivers, handlers.  Same
     // missing-subclass tolerance as above; the hulls and crews ride the
@@ -2183,6 +2271,27 @@ LSError World::Serialize(ParamArchive& ar, int message)
         Guerrilla::CounterAttack::Instance().InitMission();
     }
 
+    // Guerrilla occupier forces pool (OCCUPIER-FORCES.md section 11): the
+    // pool, its sizing (roster, K towns, R, G), the band, control, wave
+    // state and the director's saved clocks.  Save-gated on HasState() (the
+    // service was sized, or a block was loaded).  A save without the block
+    // loaded with occupierForces = 1 is a campaign started before the
+    // service (D20): the pool is derived from the zone state, which the
+    // GuerrillaZones block above restored on this same second pass.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::OccupierForces::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::OccupierForces::Instance().HasState() : ar.IsSubclass("GuerrillaOccupierForces"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaOccupierForces", Guerrilla::OccupierForces::Instance(), 14))
+    }
+    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        Guerrilla::OccupierForces::Instance().InitMission();
+        Guerrilla::OccupierForces::Instance().DeriveFromExistingSave(Guerrilla::ZoneRegistry::Instance());
+    }
+
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))
     PARAM_CHECK(ar.Serialize("wantedOvercast", _wantedOvercast, 1))
     PARAM_CHECK(ar.Serialize("actualFog", _actualFog, 1))
@@ -2205,18 +2314,23 @@ LSError World::Serialize(ParamArchive& ar, int message)
     // pass then rebuilds a body the loaded package can field on that unit
     // (RepairUnitsWithoutBodyAfterLoad). Saves that predate these keys load
     // them as null/zero/empty and get the old behaviour.
+    // playerOnVars: the script globals holding the body (';'-joined), so a
+    // rebuild can repoint them (RepointPlayerHandlesAfterLoad)
     OLink<AIUnit> playerOnUnit;
     Vector3 playerOnPos = VZero;
     RString playerOnType;
+    RString playerOnVars;
     if (ar.IsSaving() && _playerOn)
     {
         playerOnUnit = _playerOn->Brain();
         playerOnPos = _playerOn->Position();
         playerOnType = _playerOn->GetType()->GetName();
+        playerOnVars = PlayerHandleVarNames(_playerOn);
     }
     PARAM_CHECK(ar.SerializeRef("playerOnUnit", playerOnUnit, 1))
     PARAM_CHECK(ar.Serialize("playerOnPos", playerOnPos, 1, VZero))
     PARAM_CHECK(ar.Serialize("playerOnType", playerOnType, 1, RString()))
+    PARAM_CHECK(ar.Serialize("playerOnVars", playerOnVars, 1, RString()))
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
     {
         // plain values are read on the first pass only and the locals die
@@ -2227,6 +2341,7 @@ LSError World::Serialize(ParamArchive& ar, int message)
         ar.FirstPass();
         PARAM_CHECK(ar.Serialize("playerOnPos", playerOnPos, 1, VZero))
         PARAM_CHECK(ar.Serialize("playerOnType", playerOnType, 1, RString()))
+        PARAM_CHECK(ar.Serialize("playerOnVars", playerOnVars, 1, RString()))
         ar.SecondPass();
     }
     PARAM_CHECK(ar.SerializeRef("cameraOn", _cameraOn, 1))
@@ -2364,7 +2479,7 @@ LSError World::Serialize(ParamArchive& ar, int message)
         _scene.MainLight()->Recalculate(this);
         _scene.MainLightChanged();
 
-        RepairUnitsWithoutBodyAfterLoad(this, playerOnUnit, playerOnPos, playerOnType);
+        RepairUnitsWithoutBodyAfterLoad(this, playerOnUnit, playerOnPos, playerOnType, playerOnVars);
         Guerrilla::AssailantSystem::Instance().AfterLoad();
 
         AIUnit* player = _playerOn ? _playerOn->Brain() : nullptr;

@@ -1099,8 +1099,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     // shares, trace, rough blur and composite, and the combat shadow mask and
     // its blur, the surfaces' horizon occlusion and its accumulation
     // over frames, the photoreal camera's meter, and the volumetric fog's
-    // injection, integration, near field, apply, horizon ring and night glow
-    CHECK(post == 35);
+    // injection, integration, near field, apply, horizon ring and night glow,
+    // and the far slice's depth put-back (a far-drawn unit's frames)
+    CHECK(post == 36);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1566,6 +1567,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litSurface3", LC::Surface3, 1},
         {"litCamera", LC::Camera, 1},
         {"litCameraLook", LC::CameraLook, 1},
+        {"litWater2", LC::Water2, 1},
+        {"litXpNight", LC::XpNight, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1660,7 +1663,10 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::Surface3) == 88);
     // The photoreal camera follows the surface slots.
     CHECK(static_cast<int>(LC::Camera) == 89);
-    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::CameraLook) + 1);
+    CHECK(static_cast<int>(LC::Water2) == static_cast<int>(LC::CameraLook) + 1);
+    // The experiment xp-nightlight's slot follows the experimental water slot.
+    CHECK(static_cast<int>(LC::XpNight) == static_cast<int>(LC::Water2) + 1);
+    CHECK(static_cast<int>(LC::Count) == static_cast<int>(LC::XpNight) + 1);
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;
@@ -1673,15 +1679,18 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
 TEST_CASE("Remaster texture units come from one table that binds every sampler", "[Graphics][Shaders][remaster]")
 {
     // The table's units are distinct, clear of the material units 0 and 1 and
-    // the upload unit 7, and within the 16 units GL 3.3 guarantees.
+    // the upload unit 7, and within the 16 units GL 3.3 guarantees, except the
+    // decal batch's array (W4-1) on unit 16: 0 to 15 are all taken, and GL 3.3
+    // guarantees 48 combined units (the sampler count per program stays 16).
     std::set<int> units;
     std::set<std::string> names;
+    CHECK(gl::kDecalLayerUnit == 16);
     for (const auto& s : gl::kLitSamplers)
     {
         CAPTURE(s.name, s.unit);
         CHECK(s.unit >= 2);
         CHECK(s.unit != 7);
-        CHECK(s.unit <= 15);
+        CHECK((s.unit <= 15 || (s.unit == gl::kDecalLayerUnit && std::string(s.name) == "decalLayers")));
         CHECK(units.insert(s.unit).second);
         CHECK(names.insert(s.name).second);
     }
@@ -2138,4 +2147,36 @@ TEST_CASE("Remaster sky clouds: the shaders use SkyDensity.hpp's constants and d
         CAPTURE(use);
         CHECK(engine.find(use) != std::string::npos);
     }
+}
+
+TEST_CASE("Remaster lighting: a keyless night reads the terrain's sky half as the full lookup does",
+          "[remaster][lighting][Shaders]")
+{
+    // shadeRemastered skips every sun lookup while the key light is exactly 0
+    // (every use of the sun's visibility is times litSun.rgb) and reads only
+    // terrainSkyVisibility, which must set the sky visibility, the ground tint
+    // and the ground height exactly as terrainSunVisibility does: its body is
+    // terrainSunVisibility's up to the horizon taps, the early returns without
+    // a value.
+    const std::string terrain = Piece(gl::FragmentPiece::TerrainClouds);
+    const auto body = [&](const std::string& head, const std::string& until)
+    {
+        const size_t at = terrain.find(head);
+        REQUIRE(at != std::string::npos);
+        const size_t open = terrain.find('{', at);
+        const size_t end = terrain.find(until, open);
+        REQUIRE(end != std::string::npos);
+        return terrain.substr(open, end - open);
+    };
+    std::string sun = body("float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {",
+                           "    float h0 = dot(texture(terrainHorizon,");
+    const std::string sky = body("void terrainSkyVisibility(vec3 posAbs, out float skyVisibility) {", "}\n");
+    for (size_t at = sun.find("return 1.0;"); at != std::string::npos; at = sun.find("return 1.0;", at))
+        sun.replace(at, 11, "return;");
+    CHECK(sun == sky);
+    // The gate: the key light exactly 0, and never in the sun-visibility debug view.
+    const std::string shade = Piece(gl::FragmentPiece::Shade);
+    CHECK(shade.find("bool keyLit = any(notEqual(litSun.rgb, vec3(0.0))) || (litFlags.z > 0.5 && litFlags.z < 1.5);") !=
+          std::string::npos);
+    CHECK(shade.find("terrainSkyVisibility(posAbs, skyVisibility);") != std::string::npos);
 }

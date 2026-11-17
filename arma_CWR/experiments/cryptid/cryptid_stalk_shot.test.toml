@@ -1,0 +1,7 @@
+# Cryptid prototype screenshots (not a regression test; run it explicitly).
+mission = "experiments/cryptid/Cryptid.Eden"
+binary = "PoseidonGame"
+tags = ["cryptid", "experiment", "showcase"]
+timeout = 300
+assert_timeout = 200
+extra_args = ["--nosound", "--width", "1600", "--height", "900"]

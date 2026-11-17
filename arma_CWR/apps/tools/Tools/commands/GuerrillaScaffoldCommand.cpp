@@ -2,7 +2,10 @@
 
 #include "../PackageMount.hpp"
 
+#include <Poseidon/Game/Guerrilla/BaseDetect.hpp>
+#include <Poseidon/Game/Guerrilla/DescriptorLint.hpp>
 #include <Poseidon/Game/Guerrilla/IslandScaffold.hpp>
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -18,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -270,10 +274,32 @@ struct ScaffoldArgs
     std::string outDir;
     int outposts = 3;
     bool keepZones = false;
+    std::vector<float> playRegion; // empty or {minX, minZ, maxX, maxZ}
 };
+
+int CountAirSea(const std::vector<DetectAuthoredZone>& zones)
+{
+    int n = 0;
+    for (const DetectAuthoredZone& z : zones)
+    {
+        if (stricmp((const char*)z.type, "AIRFIELD") == 0 || stricmp((const char*)z.type, "SEAPORT") == 0)
+        {
+            n++;
+        }
+    }
+    return n;
+}
 
 int RunScaffold(const ScaffoldArgs& args)
 {
+    if (!args.playRegion.empty() && (args.playRegion.size() != 4 || args.playRegion[0] >= args.playRegion[2] ||
+                                     args.playRegion[1] >= args.playRegion[3]))
+    {
+        std::cerr << "Error: --play-region takes minX minZ maxX maxZ with min < max\n";
+        return 2;
+    }
+    const bool hasRegion = !args.playRegion.empty();
+
     // Resolve every path BEFORE mounting: PackageMount chdirs into the data
     // directory, so a relative --out would land inside the game install.
     std::error_code ec;
@@ -311,122 +337,202 @@ int RunScaffold(const ScaffoldArgs& args)
         return 2;
     }
 
-    const ParamEntry* worlds = Pars.FindEntry("CfgWorlds");
-    const ParamEntry* worldEntry = worlds ? worlds->FindEntry(args.world.c_str()) : nullptr;
-    if (!worldEntry)
+    // The kept block's zones are what the template authors, so they are what
+    // the detector's covered rule must see (parsed with the preprocessor, the
+    // way the engine reads description.ext).
+    std::vector<DetectAuthoredZone> keptAuthored;
+    if (!keptZones.empty())
     {
-        std::cerr << "Error: CfgWorlds >> " << args.world << " not found in this package.\n";
-        if (worlds)
-        {
-            std::cerr << "Worlds this package declares:";
-            for (int i = 0; i < worlds->GetEntryCount(); i++)
-            {
-                const ParamEntry& e = worlds->GetEntry(i);
-                if (e.IsClass() && e.FindEntry("worldName"))
-                {
-                    std::cerr << " " << (const char*)e.GetName();
-                }
-            }
-            std::cerr << "\n";
-        }
+        ParamFile existingCfg;
+        existingCfg.Parse((outDir / "description.ext").string().c_str());
+        ReadTemplateZones(existingCfg.FindEntry("CfgGuerrillaZones"), keptAuthored);
+    }
+
+    ScaffoldWorld world;
+    if (!world.Load(args.world, mount.DataDir(), error))
+    {
+        std::cerr << "Error: " << error << "\n";
         return 2;
     }
-    const ParamEntry* names = worldEntry->FindEntry("Names");
+    const ParamEntry& worldEntry = world.Entry();
+    const ParamEntry* names = worldEntry.FindEntry("Names");
     if (!names)
     {
         std::cerr << "Error: CfgWorlds >> " << args.world
                   << " has no Names block, so it names no towns and cannot be scaffolded.\n";
         return 2;
     }
-
-    RString worldClass = worldEntry->GetName();
-    RString worldDisplay = worldEntry->ReadValue("description", worldClass);
-    RString worldName = worldEntry->ReadValue("worldName", RString());
-    float landGrid = worldEntry->ReadValue("landGrid", 50.0f);
-    if (worldName.GetLength() == 0)
-    {
-        std::cerr << "Error: CfgWorlds >> " << args.world << " has no worldName, so its .wrp cannot be located\n";
-        return 2;
-    }
-
-    // Bank path first (a mod world lives inside a pbo), then the loose
-    // <DataDir>/Worlds/<name>.wrp a stock install ships.
-    RString wrpName = GetDefaultName(worldName, "worlds\\", ".wrp");
-    WrpReader reader;
-    std::string wrpShown;
-    {
-        QIFStreamB f;
-        f.AutoOpen(wrpName);
-        if (!f.fail() && reader.Load(f))
-        {
-            wrpShown = (const char*)wrpName;
-        }
-    }
-    if (wrpShown.empty())
-    {
-        fs::path loose = fs::path(mount.DataDir()) / "Worlds" / (std::string((const char*)worldClass) + ".wrp");
-        if (reader.Load(loose.string().c_str()))
-        {
-            wrpShown = loose.string();
-        }
-    }
-    if (wrpShown.empty())
-    {
-        std::cerr << "Error: cannot read the world's terrain (tried the mounted banks for " << (const char*)wrpName
-                  << " and <data-dir>/Worlds/" << (const char*)worldClass << ".wrp)\n";
-        return 2;
-    }
-
-    WrpHeightField height(reader, landGrid);
-    std::cout << "WORLD " << (const char*)worldClass << " \"" << (const char*)worldDisplay << "\" " << wrpShown << " ("
-              << reader.GetFormatName() << ", " << reader.GetGridX() << "x" << reader.GetGridZ() << " at "
-              << height.TerrainGrid() << " m, " << reader.GetObjectCount() << " objects)\n";
+    RString worldClass = world.WorldClass();
+    RString worldDisplay = world.WorldDisplay();
+    std::cout << "WORLD " << (const char*)worldClass << " \"" << (const char*)worldDisplay << "\" " << world.WrpShown()
+              << " (" << world.Summary() << ")\n";
 
     ScaffoldInputs in;
     in.worldClass = worldClass;
     in.worldDisplay = worldDisplay;
     in.names = names;
-    in.height = &height;
-    in.worldSize = height.WorldSize();
-    for (int i = 0; i < reader.GetObjectCount(); i++)
+    in.height = &world.Height();
+    in.worldSize = world.WorldSize();
+    if (hasRegion)
     {
-        const WrpObjectInfo& obj = reader.GetObject(i);
+        in.hasRegion = true;
+        in.regionMinX = args.playRegion[0];
+        in.regionMinZ = args.playRegion[1];
+        in.regionMaxX = args.playRegion[2];
+        in.regionMaxZ = args.playRegion[3];
+    }
+    for (int i = 0; i < world.ObjectCount(); i++)
+    {
         ScaffoldPoint p;
-        p.x = obj.position.X();
-        p.z = obj.position.Z();
-        if (ModelIsRoad(obj.name))
+        p.x = world.ObjectX(i);
+        p.z = world.ObjectZ(i);
+        const char* model = world.ObjectModel(i);
+        if (ModelIsRoad(model))
         {
             in.roads.push_back(p);
         }
-        else if (ModelIsBuilding(obj.name))
+        else if (ModelIsBuilding(model))
         {
             in.buildings.push_back(p);
         }
     }
     std::cout << "CLASSIFIED roads=" << in.roads.size() << " buildings=" << in.buildings.size() << "\n";
 
+    // Pass 1: the camp and the towns alone. The camp does not depend on the
+    // outposts, so these are the zones the second pass places again.
     ScaffoldOptions opt;
-    opt.outposts = args.outposts;
+    opt.outposts = 0;
+    ScaffoldResult firstPass;
+    if (!BuildZones(in, opt, firstPass))
+    {
+        std::cerr << "Error: " << firstPass.error << "\n";
+        return 2;
+    }
+
+    // Base detection (issue #76) against what the template will author: the
+    // kept block, else the generated CAMP and CITY zones.
+    BaseDetectInputs detectIn;
+    world.FillBaseInputs(detectIn);
+    if (hasRegion)
+    {
+        detectIn.hasRegion = true;
+        detectIn.regionMinX = args.playRegion[0];
+        detectIn.regionMinZ = args.playRegion[1];
+        detectIn.regionMaxX = args.playRegion[2];
+        detectIn.regionMaxZ = args.playRegion[3];
+    }
+    // An AIRFIELD that adopted a Names label ("Egyptian Airbase") makes that
+    // label a base, not a town: the runtime CITY seed drops it by name, so
+    // the generated CITY set drops it too. Probe with the camp alone, so the
+    // town that is about to be dropped cannot cover the airfield.
+    if (keptZones.empty())
+    {
+        BaseDetectInputs probeIn = detectIn;
+        for (const ScaffoldZone& z : firstPass.zones)
+        {
+            if (stricmp((const char*)z.type, "CAMP") == 0)
+            {
+                probeIn.authored.push_back(DetectAuthoredZone{z.name, z.type, z.x, z.z});
+            }
+        }
+        BaseDetectResult probe;
+        DetectBases(probeIn, BaseDetectOptions(), probe);
+        for (const BaseCandidate& c : probe.candidates)
+        {
+            if (stricmp((const char*)c.type, "AIRFIELD") != 0)
+            {
+                continue;
+            }
+            for (const ScaffoldZone& z : firstPass.zones)
+            {
+                if (stricmp((const char*)z.type, "CITY") == 0 && stricmp((const char*)z.name, (const char*)c.name) == 0)
+                {
+                    in.skipTownNames.push_back(z.name);
+                }
+            }
+        }
+        if (!in.skipTownNames.empty())
+        {
+            firstPass = ScaffoldResult();
+            if (!BuildZones(in, opt, firstPass))
+            {
+                std::cerr << "Error: " << firstPass.error << "\n";
+                return 2;
+            }
+        }
+    }
+    if (!keptZones.empty())
+    {
+        detectIn.authored = keptAuthored;
+    }
+    else
+    {
+        for (const ScaffoldZone& z : firstPass.zones)
+        {
+            DetectAuthoredZone a;
+            a.name = z.name;
+            a.type = z.type;
+            a.x = z.x;
+            a.z = z.z;
+            detectIn.authored.push_back(a);
+        }
+    }
+    BaseDetectOptions detectOpt;
+    BaseDetectResult bases;
+    DetectBases(detectIn, detectOpt, bases);
+
+    // --outposts N is the OUTPOST total: detected outposts first, the
+    // heuristic spread fills the rest and keeps clear of every detected base.
+    const int detectedOutposts = DetectedOutpostsToEmit(bases, args.outposts);
+    int offlineSeen = 0;
+    for (const BaseCandidate& c : bases.candidates)
+    {
+        const bool hub = stricmp((const char*)c.type, "AIRFIELD") == 0 || stricmp((const char*)c.type, "SEAPORT") == 0;
+        bool reserve = c.status == BaseStatus::Seed && hub;
+        if (c.status == BaseStatus::Offline && stricmp((const char*)c.type, "OUTPOST") == 0)
+        {
+            reserve = offlineSeen < detectedOutposts;
+            offlineSeen++;
+        }
+        if (reserve)
+        {
+            ScaffoldPoint p;
+            p.x = c.x;
+            p.z = c.z;
+            in.reserved.push_back(p);
+        }
+    }
+    opt.outposts = args.outposts - detectedOutposts;
     ScaffoldResult zones;
     if (!BuildZones(in, opt, zones))
     {
         std::cerr << "Error: " << zones.error << "\n";
         return 2;
     }
+    MergeBaseCandidates(bases, args.outposts, zones);
 
     TemplateInfo info;
     info.worldClass = worldClass;
     info.worldDisplay = worldDisplay;
     info.date = RString(TodayIso().c_str());
-    info.wrpPath = RString(wrpShown.c_str());
+    info.wrpPath = RString(world.WrpShown());
     info.randomSeed = SeedForWorld((const char*)worldClass);
     info.outposts = args.outposts;
     info.roadPoints = (int)in.roads.size();
     info.buildingPoints = (int)in.buildings.size();
+    info.keptBaseZones = CountAirSea(keptAuthored);
+    if (hasRegion)
+    {
+        info.hasRegion = true;
+        info.regionMinX = args.playRegion[0];
+        info.regionMinZ = args.playRegion[1];
+        info.regionMaxX = args.playRegion[2];
+        info.regionMaxZ = args.playRegion[3];
+    }
 
     std::vector<std::string> notes;
     info.playerClass = PickPlayerClass(notes);
-    AddUnique(info.addOns, WorldAddonName(*worldEntry, (const char*)worldClass));
+    AddUnique(info.addOns, WorldAddonName(worldEntry, (const char*)worldClass));
     AddUnique(info.addOns, ClassOwner("CfgVehicles", (const char*)info.playerClass));
 
     // The CIV descriptor is package-probed, not assumed: Civilian2..Civilian15
@@ -485,6 +591,24 @@ int RunScaffold(const ScaffoldArgs& args)
     {
         std::cout << "WARN " << warning << "\n";
     }
+    for (const std::string& note : bases.notes)
+    {
+        std::cout << "BASENOTE " << note << "\n";
+    }
+    for (const BaseCandidate& c : bases.candidates)
+    {
+        printf("BASE %s %s %s %.0f %.0f conf=%.2f\n", BaseStatusName(c.status), (const char*)c.type,
+               (const char*)c.name, c.x, c.z, c.confidence);
+        if (c.status == BaseStatus::Covered)
+        {
+            printf("  covered-by: %s\n", (const char*)c.coveredBy);
+        }
+        for (const std::string& e : c.evidence)
+        {
+            printf("  evidence: %s\n", e.c_str());
+        }
+    }
+    fflush(stdout);
     std::cout << "PLAYER " << (const char*)info.playerClass << " side=" << (const char*)info.playerSide << " at "
               << (int)zones.playerX << "," << (int)zones.playerZ << "\n";
     std::cout << "ADDONS";
@@ -502,13 +626,16 @@ int RunScaffold(const ScaffoldArgs& args)
         std::cout << "NOTE --keep-zones: the zones listed below were computed but NOT written; the existing class "
                      "Zones block was kept\n";
     }
+    std::cout.flush();
     for (const ScaffoldZone& z : zones.zones)
     {
         printf("ZONE %-9s %-10s %-24s %6.0f %6.0f %7.1f\n", (const char*)z.type, (const char*)z.owner,
                (const char*)z.name, z.x, z.z, z.y);
     }
+    fflush(stdout);
     std::cout << "SUMMARY zones=" << zones.zones.size() << " cities=" << zones.cityCount
-              << " outposts=" << zones.outpostCount << " warnings=" << zones.warnings.size() << "\n";
+              << " outposts=" << zones.outpostCount << " (detected " << detectedOutposts << ")"
+              << " bases=" << zones.baseCount << " warnings=" << zones.warnings.size() << "\n";
     std::cout << "WROTE " << outDir.string() << " (description.ext, "
               << (writeSqm ? "mission.sqm, " : "mission.sqm left as it was, ") << "init.sqs)\n";
     return 0;
@@ -516,14 +643,202 @@ int RunScaffold(const ScaffoldArgs& args)
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+// ScaffoldWorld
+// ---------------------------------------------------------------------------
+
+struct ScaffoldWorld::Impl
+{
+    const ParamEntry* entry = nullptr;
+    RString worldClass;
+    RString worldDisplay;
+    std::string wrpShown;
+    WrpReader reader;
+    std::unique_ptr<WrpHeightField> height;
+};
+
+ScaffoldWorld::ScaffoldWorld() : _impl(std::make_unique<Impl>()) {}
+ScaffoldWorld::~ScaffoldWorld() = default;
+
+bool ScaffoldWorld::Load(const std::string& world, const std::string& dataDir, std::string& error)
+{
+    const ParamEntry* worlds = Pars.FindEntry("CfgWorlds");
+    const ParamEntry* worldEntry = worlds ? worlds->FindEntry(world.c_str()) : nullptr;
+    if (!worldEntry)
+    {
+        error = "CfgWorlds >> " + world + " not found in this package.";
+        if (worlds)
+        {
+            error += "\nWorlds this package declares:";
+            for (int i = 0; i < worlds->GetEntryCount(); i++)
+            {
+                const ParamEntry& e = worlds->GetEntry(i);
+                if (e.IsClass() && e.FindEntry("worldName"))
+                {
+                    error += " ";
+                    error += (const char*)e.GetName();
+                }
+            }
+        }
+        return false;
+    }
+
+    Impl& d = *_impl;
+    d.entry = worldEntry;
+    d.worldClass = worldEntry->GetName();
+    d.worldDisplay = worldEntry->ReadValue("description", d.worldClass);
+    RString worldName = worldEntry->ReadValue("worldName", RString());
+    float landGrid = worldEntry->ReadValue("landGrid", 50.0f);
+    if (worldName.GetLength() == 0)
+    {
+        error = "CfgWorlds >> " + world + " has no worldName, so its .wrp cannot be located";
+        return false;
+    }
+
+    // Bank path first (a mod world lives inside a pbo), then the loose
+    // <DataDir>/Worlds/<name>.wrp a stock install ships.
+    RString wrpName = GetDefaultName(worldName, "worlds\\", ".wrp");
+    {
+        QIFStreamB f;
+        f.AutoOpen(wrpName);
+        if (!f.fail() && d.reader.Load(f))
+        {
+            d.wrpShown = (const char*)wrpName;
+        }
+    }
+    if (d.wrpShown.empty())
+    {
+        fs::path loose = fs::path(dataDir) / "Worlds" / (std::string((const char*)d.worldClass) + ".wrp");
+        if (d.reader.Load(loose.string().c_str()))
+        {
+            d.wrpShown = loose.string();
+        }
+    }
+    if (d.wrpShown.empty())
+    {
+        error = std::string("cannot read the world's terrain (tried the mounted banks for ") + (const char*)wrpName +
+                " and <data-dir>/Worlds/" + (const char*)d.worldClass + ".wrp)";
+        return false;
+    }
+    d.height = std::make_unique<WrpHeightField>(d.reader, landGrid);
+    return true;
+}
+
+const ParamEntry& ScaffoldWorld::Entry() const
+{
+    return *_impl->entry;
+}
+
+const char* ScaffoldWorld::WorldClass() const
+{
+    return _impl->worldClass;
+}
+
+const char* ScaffoldWorld::WorldDisplay() const
+{
+    return _impl->worldDisplay;
+}
+
+const char* ScaffoldWorld::WrpShown() const
+{
+    return _impl->wrpShown.c_str();
+}
+
+const HeightField& ScaffoldWorld::Height() const
+{
+    return *_impl->height;
+}
+
+float ScaffoldWorld::WorldSize() const
+{
+    return _impl->height->WorldSize();
+}
+
+std::string ScaffoldWorld::Summary() const
+{
+    std::ostringstream ss;
+    ss << _impl->reader.GetFormatName() << ", " << _impl->reader.GetGridX() << "x" << _impl->reader.GetGridZ() << " at "
+       << _impl->height->TerrainGrid() << " m, " << _impl->reader.GetObjectCount() << " objects";
+    return ss.str();
+}
+
+int ScaffoldWorld::ObjectCount() const
+{
+    return _impl->reader.GetObjectCount();
+}
+
+const char* ScaffoldWorld::ObjectModel(int i) const
+{
+    return _impl->reader.GetObject(i).name;
+}
+
+float ScaffoldWorld::ObjectX(int i) const
+{
+    return _impl->reader.GetObject(i).position.X();
+}
+
+float ScaffoldWorld::ObjectZ(int i) const
+{
+    return _impl->reader.GetObject(i).position.Z();
+}
+
+void ScaffoldWorld::FillBaseInputs(BaseDetectInputs& in) const
+{
+    const Impl& d = *_impl;
+    in.worldClass = d.worldClass;
+    in.worldDisplay = d.worldDisplay;
+    in.ils.clear();
+    ReadIlsEntries(*d.entry, in.ils);
+    in.height = d.height.get();
+    in.worldSize = d.height->WorldSize();
+
+    in.objects.clear();
+    for (int i = 0; i < d.reader.GetObjectCount(); i++)
+    {
+        const WrpObjectInfo& obj = d.reader.GetObject(i);
+        BaseModelClass cls = ClassifyBaseModel(obj.name);
+        if (cls.harbour <= 0.0f && cls.military <= 0.0f && cls.aviation <= 0.0f && !ModelIsBuilding(obj.name))
+        {
+            continue;
+        }
+        DetectObject o;
+        o.x = obj.position.X();
+        o.z = obj.position.Z();
+        o.model = RString(obj.name);
+        o.radius = 0.0f; // unknown offline: the detector assumes 8 m
+        in.objects.push_back(o);
+    }
+
+    in.towns.clear();
+    const ParamEntry* names = d.entry->FindEntry("Names");
+    if (names)
+    {
+        for (int i = 0; i < names->GetEntryCount(); i++)
+        {
+            RString name;
+            Vector3 pos;
+            if (!ZoneRegistry::NamesEntryIsTown(names->GetEntry(i), name, pos))
+            {
+                continue;
+            }
+            DetectPlace p;
+            p.name = name;
+            p.x = pos.X();
+            p.z = pos.Z();
+            in.towns.push_back(p);
+        }
+    }
+}
+
 void GuerrillaScaffoldCommand::Setup(CLI::App& parent)
 {
     auto* scaffold = parent.add_subcommand(
         "scaffold",
         "Generate a Guerrilla Mode island template (description.ext + mission.sqm + init.sqs) for one CfgWorlds "
-        "world: CITY zones from the world's own Names entries that sit on dry land with houses around them, plus a "
-        "resistance CAMP and N occupier OUTPOSTs placed off-road on flat dry ground, every elevation sampled from "
-        "the world's .wrp");
+        "world: CITY zones from the world's own Names entries that sit on dry land with houses around them, the "
+        "AIRFIELD / SEAPORT / OUTPOST bases the detector finds (ILS table, harbour and military object clusters; "
+        "printed as BASE lines with their evidence), plus a resistance CAMP and occupier OUTPOSTs placed off-road "
+        "on flat dry ground, every elevation sampled from the world's .wrp");
 
     static ScaffoldArgs args;
 
@@ -535,12 +850,23 @@ void GuerrillaScaffoldCommand::Setup(CLI::App& parent)
                          "Mod folder to mount, repeatable and in -mod order (first listed = lowest priority)");
     scaffold->add_option("--out", args.outDir, "Output mission directory; the convention is <...>/Guerrilla.<world>")
         ->required();
-    scaffold->add_option("--outposts", args.outposts, "OUTPOST zones to place (default 3)")
+    scaffold
+        ->add_option("--outposts", args.outposts,
+                     "OUTPOST zones in total (default 3): detected outposts (military object clusters) first, in "
+                     "the detector's order, then heuristically placed ones fill the rest; detected outposts beyond "
+                     "N are written as commented-out notes")
         ->check(CLI::Range(0, 32))
         ->default_val(3);
     scaffold->add_flag("--keep-zones", args.keepZones,
                        "Keep the class Zones block of an existing <out>/description.ext verbatim instead of "
-                       "generating a new one, so hand edits survive a re-run");
+                       "generating a new one, so hand edits survive a re-run; the detector then judges its "
+                       "candidates against the kept zones");
+    scaffold
+        ->add_option("--play-region", args.playRegion,
+                     "The theatre, minX minZ maxX maxZ in metres (engine x = easting, z = northing): written as "
+                     "playRegion[]; towns, the camp and the outposts are placed inside it and detected bases "
+                     "outside it are reported as outside-region")
+        ->expected(4);
 
     scaffold->callback([]() { std::exit(RunScaffold(args)); });
 }

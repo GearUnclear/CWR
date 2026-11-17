@@ -1,0 +1,11 @@
+# Dedushka BRAIN left to himself in the demo mission: the parked armour wakes
+# him, draws him and earns the beam (experiment, kept out of tests/integration).
+# Needs the mount tmp/@kj_brain. Run it through features/brain/run-brain.ps1
+# -Name brain_auto -Mission DedDemo.Eden: one game, hidden desktop, --nosound.
+# Quiet: nobody fires and nobody orders him.
+tags = ["kaiju", "experiment", "brain"]
+binary = "PoseidonGame"
+mission = "experiments/kaiju/features/brain/DedDemo.Eden"
+timeout = 720
+assert_timeout = 280
+extra_args = ["--nosound", "--no-strict", "--width", "1600", "--height", "900", "--mods-dir", "..", "--mod", "@kj_brain"]
