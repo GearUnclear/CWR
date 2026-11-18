@@ -1,0 +1,10 @@
+; Lebanon80 promo shoot: after DZ_DELAY seconds the dolly-zoom fighter DZ_F turns and sprints to DZ_TO.
+~DZ_DELAY
+DZ_F enableAI "MOVE"
+DZ_F stop false
+DZ_F setUnitPos "UP"
+(group DZ_F) setSpeedMode "FULL"
+(group DZ_F) setBehaviour "CARELESS"
+DZ_F doMove DZ_TO
+logInfo format ["PROMO dz fighter runs at %1", time]
+exit

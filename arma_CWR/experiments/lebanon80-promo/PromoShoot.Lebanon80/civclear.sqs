@@ -1,0 +1,9 @@
+; Lebanon80 promo shoot: keeps the frame clear of the campaign's town civilians (they spawn around Ghajar and
+; Tyre, panic and lie down near soldiers): every second, civilians on foot within CC_R metres of the camera
+; are deleted. Civilians in vehicles (the checkpoint van's driver) are left alone. [] exec "civclear.sqs"
+? isNil "CC_R" : CC_R = 450
+#loop
+? PC_QUIT : exit
+{ if ((side _x) == civilian) then { if ((vehicle _x) == _x) then { deleteVehicle _x } } } forEach (nearestObjects [getPos PC_CAM, ["Man"], CC_R])
+~1
+goto "loop"

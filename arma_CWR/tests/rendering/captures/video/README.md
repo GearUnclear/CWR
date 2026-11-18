@@ -13,6 +13,7 @@ here, the vanilla rig in `../vanilla/`), the fog metrics in `../fogcheck/` and t
 `graphics-remaster`; the branch only adds:
 
 - `*.py`, `run_v2_lane.ps1`, `udpaths.py`, `owner_take1/`, `thumbnail_bay/` in this folder
+- `arma_CWR/experiments/lebanon80-promo/` (the promo shoot and edit tools, see "Promo shoots" below)
 - `../fogcheck/gen_probe_fog1.py`, `../fogcheck/gen_rt_probe.py` (probes cut from the trailer's dawn shot)
 - `arma_CWR/docs/graphics-remaster/research/HANDOFF-2026-10-19.md` and `HANDOFF-2026-10-23.md`
   (the production handoffs; they used to sit in the engine tree)
@@ -45,6 +46,7 @@ folder below.
 | `UD_ENV_FILE` | `.env` with `OPENROUTER_API_KEY` | the main checkout's `.env` |
 | `FFMPEG`, `FFPROBE` | ffmpeg tools | found on PATH |
 | `UD_MUSIC_DIR` | the CC BY 4.0 album (only `owner_take1/run_all.sh`) | none, required |
+| `UD_PROMO_DIR` | a promo production folder (the Lebanon80 promo tools below) | `<repo>/tmp/video/lebanon80-promo` |
 
 `run_v2_lane.ps1` takes `-V2` and `-VanillaRoot` (same defaults). The OpenRouter key stays in the
 `.env`, which is never committed; `tts_openrouter.py` reads it and never prints it.
@@ -62,6 +64,13 @@ folder below.
 
 Older v1 tools (`gen_video_tests.py`, `make_video.py`, `make_video_v2.py`, `vo_v2.py`) are kept
 because the v2 tools import them.
+
+## Promo shoots
+
+The Lebanon80 promo's shoot, check and edit tools, and the shoot checklist every future shoot follows
+(branch check, detail pin and settle, tremor guard, pop scan and judder check, the thirds gate, the lens
+model, true night, 1440p, one game at a time), are in
+[`arma_CWR/experiments/lebanon80-promo/README.md`](../../../../experiments/lebanon80-promo/README.md).
 
 ## Cleanup warning
 

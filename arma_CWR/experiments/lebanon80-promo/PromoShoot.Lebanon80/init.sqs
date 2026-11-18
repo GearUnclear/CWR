@@ -1,0 +1,2 @@
+; Guerrilla Mode bootstrap: the shared script core lives at <GameDir>\gmcore, installed from guerrilla-mode/core by guerrilla-mode/install-missions.ps1 (the leading backslash resolves against the game data root, not this mission folder).
+[] exec "\gmcore\init.sqs"

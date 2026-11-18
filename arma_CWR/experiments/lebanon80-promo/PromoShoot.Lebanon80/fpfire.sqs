@@ -1,0 +1,9 @@
+; Lebanon80 promo shoot: the player fires short bursts for FP_SECS seconds (first-person clip).
+_t0 = time
+#loop
+? time > _t0 + FP_SECS : exit
+player fire (primaryWeapon player)
+_d = 0.11
+? (((time - _t0) mod 1.6) > 1.1) : _d = 0.5
+~_d
+goto "loop"

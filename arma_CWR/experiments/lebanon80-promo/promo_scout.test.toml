@@ -1,0 +1,7 @@
+# Lebanon80 promo shoot: scout (road and house positions, AI movement check). Run through run-promo.ps1. --nosound.
+tags = ["experiment", "video", "lebanon80"]
+binary = "PoseidonGame"
+mission = "experiments/lebanon80-promo/PromoShoot.Lebanon80"
+timeout = 1500
+assert_timeout = 600
+extra_args = ["--nosound", "--no-strict", "--width", "1920", "--height", "1080", "--mods-dir", ".", "--mod", "@LoBo"]

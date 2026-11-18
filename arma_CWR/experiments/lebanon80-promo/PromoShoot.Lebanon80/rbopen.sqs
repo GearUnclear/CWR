@@ -1,0 +1,10 @@
+; Lebanon80 promo shoot: the IDF open the roadblock for Dedushka. After RB_DELAY seconds the bar swings open
+; round its post (rbswing.sqs) and the two soldiers at the bar walk off to the shoulders (RB_STEP1, RB_STEP2).
+; [] exec "rbopen.sqs"
+~RB_DELAY
+logInfo format ["PROMO roadblock opens at %1 clip %2 frame %3", time, PC_CLIP, PC_FN]
+[rBar, rbP, RB_ARM, rbH, rbH + 80, 3] exec "rbswing.sqs"
+{ _x enableAI "MOVE"; _x stop false } forEach [rU select 0, rU select 1]
+kjSteer [rU select 0, RB_STEP1, "walk", 1, PS_WALKRATE]
+kjSteer [rU select 1, RB_STEP2, "walk", 1, PS_WALKRATE]
+exit

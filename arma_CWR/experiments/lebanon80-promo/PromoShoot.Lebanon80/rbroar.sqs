@@ -1,0 +1,15 @@
+; Lebanon80 promo shoot: Dedushka walks up to the open roadblock (kjSteer, the engine's direct walk) and stops
+; RB_STOPX short of the bar; then he is told to roar. Logs both moments with the clip's frame count.
+; [] exec "rbroar.sqs"
+_t0 = time
+kjSteer [kaiju, [RB_STOPX, 8307.2, 0], "walk", 4, 1]
+#wait
+~0.1
+? (((getPos kaiju) select 0) < RB_STOPX - 5) && (time < _t0 + 14) : goto "wait"
+kjSteerStop kaiju
+logInfo format ["PROMO kaiju stops at %1 x %2 clip %3 frame %4", time, (getPos kaiju) select 0, PC_CLIP, PC_FN]
+~0.4
+KJ_brainOrder = ["roar"]
+~0.5
+logInfo format ["PROMO kaiju roar ordered, state %1 at %2 clip %3 frame %4", KJ_state, time, PC_CLIP, PC_FN]
+exit

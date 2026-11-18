@@ -1,0 +1,23 @@
+; Lebanon80 promo shoot: opens a staged ambush. The ambush group holds fire (combat mode BLUE) until the
+; convoy's lead vehicle AM_LEAD comes within AM_R metres of AM_PT, then fires at will on the revealed convoy
+; (AM_VEHS); the RPG gunners (AM_RPGS) are pointed at AM_TRUCK. If the truck still stands AM_BLOW seconds
+; later it is destroyed (setDammage 1) so the take always has its explosion on cue. Combat between armed
+; sides only. Started by the shoot test: [] exec "ambush.sqs".
+AM_OPEN = false
+#wait
+~0.1
+? ([getPos AM_LEAD, AM_PT] call psDist2) > AM_R : goto "wait"
+AM_OPEN = true
+AM_T = time
+AM_GRP setCombatMode "RED"
+AM_GRP setBehaviour "COMBAT"
+{_u = _x; {_u reveal _x} forEach AM_VEHS} forEach (units AM_GRP)
+{_x doTarget AM_TRUCK; _x doFire AM_TRUCK} forEach AM_RPGS
+logInfo format ["PROMO ambush open at %1", time]
+~AM_BLOW
+logInfo format ["PROMO ambush truck alive %1 at %2", alive AM_TRUCK, time]
+? alive AM_TRUCK : AM_TRUCK setDammage 1
+~2.5
+logInfo format ["PROMO ambush lead alive %1 at %2", alive AM_LEAD, time]
+? (alive AM_LEAD) && AM_LEADTOO : AM_LEAD setDammage 1
+exit

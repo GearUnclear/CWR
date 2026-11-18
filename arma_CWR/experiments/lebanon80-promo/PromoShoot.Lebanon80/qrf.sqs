@@ -1,0 +1,21 @@
+; Lebanon80 promo shoot: an IDF quick reaction force arrives. When truck QR_T comes within 12 m of QR_STOP
+; (or after QR_MAX seconds) its cargo jumps out and runs to fan out QR_FAN metres ahead of the truck,
+; heading QR_HD. Started by the shoot test: [] exec "qrf.sqs".
+_t0 = time
+#wait
+~0.2
+? (([getPos QR_T, QR_STOP] call psDist2) > 12) && (time < _t0 + QR_MAX) : goto "wait"
+_c = crew QR_T - [driver QR_T]
+{unassignVehicle _x; _x action ["GETOUT", QR_T]} forEach _c
+logInfo format ["PROMO qrf dismount %1 men at %2", count _c, time]
+~1.5
+_i = 0
+#fan
+? _i >= count _c : goto "done"
+_u = _c select _i
+_u setUnitPos "MIDDLE"
+_u doMove ([getPos QR_T, QR_HD, QR_FAN, (_i - (count _c) / 2) * 4] call psOff)
+_i = _i + 1
+goto "fan"
+#done
+exit

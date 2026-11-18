@@ -1,0 +1,12 @@
+; Lebanon80 promo shoot: logs when a vehicle comes to a stop (speed under 1 km/h after it has moved), with the
+; clip's frame count. [vehicle] exec "vanstop.sqs"
+_v = _this select 0
+_moved = false
+#loop
+? (speed _v) > 5 : _moved = true
+? _moved && ((abs (speed _v)) < 1) : goto "stopped"
+~0.1
+goto "loop"
+#stopped
+logInfo format ["PROMO van stops at %1 pos %2 clip %3 frame %4", time, getPos _v, PC_CLIP, PC_FN]
+exit

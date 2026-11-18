@@ -1,0 +1,52 @@
+; Lebanon80 promo shoot: a staged ambush on an IDF convoy (armed sides only). The ambush group holds fire
+; (combat mode BLUE, its men lying in the grass) until the lead vehicle AM_LEAD comes within AM_R metres of
+; AM_PT. Then the men in AM_RISE come up to a kneel, every man fires at will on the revealed convoy
+; (AM_VEHS), the RPG gunners (AM_RPGS) are pointed at AM_TRUCK, and the troop truck AM_QRF (objNull for none)
+; halts: its cargo jumps out, kneels on the road side and returns fire on the ambush. If the truck still
+; stands AM_BLOW seconds after the opening it is destroyed by script, so the take always has its hit on cue;
+; AM_LEADTOO blows the lead vehicle 2.5 s later. Started by the shoot test: [] exec "ambush2.sqs".
+AM_OPEN = false
+AM_T = -1
+#wait
+~0.05
+? ([getPos AM_LEAD, AM_PT] call psDist2) > AM_R : goto "wait"
+AM_OPEN = true
+AM_T = time
+{_x setUnitPos "MIDDLE"} forEach AM_RISE
+AM_GRP setCombatMode "RED"
+AM_GRP setBehaviour "COMBAT"
+{_u = _x; {_u reveal _x} forEach AM_VEHS} forEach (units AM_GRP)
+{_x doTarget AM_TRUCK; _x doFire AM_TRUCK} forEach AM_RPGS
+logInfo format ["PROMO ambush open at %1 clip %2 frame %3", time, PC_CLIP, PC_FN]
+? isNull AM_QRF : goto "blow"
+_d = driver AM_QRF
+_d doMove (getPos AM_QRF)
+_d stop true
+~1.2
+_c = (crew AM_QRF) - [driver AM_QRF, gunner AM_QRF, commander AM_QRF]
+{unassignVehicle _x; _x action ["GETOUT", AM_QRF]} forEach _c
+logInfo format ["PROMO ambush dismount %1 men at %2 clip %3 frame %4", count _c, time, PC_CLIP, PC_FN]
+~1.4
+_i = 0
+#fan
+? _i >= count _c : goto "fanned"
+_u = _c select _i
+_u setUnitPos "MIDDLE"
+_u doMove [(getPos AM_QRF select 0) - 6 + 3 * _i, (getPos AM_QRF select 1) - 4 - (_i mod 2), 0]
+(group _u) setCombatMode "RED"
+(group _u) setBehaviour "COMBAT"
+{_u reveal _x} forEach (units AM_GRP)
+_i = _i + 1
+goto "fan"
+#fanned
+AM_DISMOUNT = _c
+#blow
+_w = AM_T + AM_BLOW
+#bw
+~0.05
+? time < _w : goto "bw"
+logInfo format ["PROMO ambush truck alive %1 at %2 clip %3 frame %4", alive AM_TRUCK, time, PC_CLIP, PC_FN]
+? alive AM_TRUCK : AM_TRUCK setDammage 1
+~2.5
+? (alive AM_LEAD) && AM_LEADTOO : AM_LEAD setDammage 1
+exit

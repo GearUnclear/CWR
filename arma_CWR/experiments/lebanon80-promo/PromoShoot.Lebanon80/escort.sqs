@@ -1,0 +1,11 @@
+; Lebanon80 promo shoot: IDF units and vehicles keep station on the kaiju while ES_ON. ES_LIST holds
+; [object, metres behind him, metres to his right, is a vehicle]; a vehicle's driver (or a man) is ordered to that point
+; every 1.5 s. Started by the shoot test: [] exec "escort.sqs".
+#loop
+? not ES_ON : exit
+_k = kaiju
+_p = getPos _k
+_h = getDir _k
+{_o = _x select 0; _q = [_p, _h, -(_x select 1), _x select 2] call psOff; _d = _o; if (_x select 3) then {_d = driver _o}; if (not (isNull _d)) then {if (alive _d) then {_d doMove _q}}} forEach ES_LIST
+~1.5
+goto "loop"

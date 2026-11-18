@@ -1,0 +1,25 @@
+; Lebanon80 promo shoot: the roadblock bar swings open round its post. [bar, post [x, y], arm metres, dir closed,
+; dir open, seconds] exec "rbswing.sqs". The bar model's long axis is its local x (east at setDir 0; overhead
+; probe still), the post at its +x end; each frame the bar is turned and placed so the post stays put. Logs the
+; start and end with the clip's frame count.
+_b = _this select 0
+_p = _this select 1
+_r = _this select 2
+_d0 = _this select 3
+_d1 = _this select 4
+_s = _this select 5
+_t0 = time
+logInfo format ["PROMO bar swing starts at %1 clip %2 frame %3", time, PC_CLIP, PC_FN]
+#loop
+_k = (time - _t0) / _s
+? _k > 1 : _k = 1
+_k = _k * _k * (3 - 2 * _k)
+_d = _d0 + (_d1 - _d0) * _k
+_b setDir _d
+_b setPos [(_p select 0) - _r * (cos _d), (_p select 1) + _r * (sin _d), 0]
+? _k >= 1 : goto "done"
+~0.001
+goto "loop"
+#done
+logInfo format ["PROMO bar open at %1 clip %2 frame %3", time, PC_CLIP, PC_FN]
+exit

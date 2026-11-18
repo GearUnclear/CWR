@@ -1,0 +1,8 @@
+; Lebanon80 promo shoot: steps the scripted helicopters (hfStep) and then, when PC_EXT, the camera, in that
+; order every simulated frame, so a camera tied to a helicopter never lags it. [] exec "helifly.sqs"
+#loop
+? HF_QUIT : exit
+? HF_ON : [] call hfStep
+? PC_RUN && PC_EXT : [] call pcTick
+~0.001
+goto "loop"

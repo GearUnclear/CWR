@@ -1,0 +1,7 @@
+; Lebanon80 promo shoot: steps the shoot camera every simulated frame while PC_RUN (see pcStep in
+; promo_lib.sqf). Started once by the shoot test: [] exec "promo_cam.sqs". Ends when PC_QUIT.
+#loop
+? PC_QUIT : exit
+? PC_RUN && (not PC_EXT) : [] call pcTick
+~0.001
+goto "loop"

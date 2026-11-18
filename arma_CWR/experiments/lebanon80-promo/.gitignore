@@ -1,0 +1,29 @@
+# Takes written by gen_promo.py: edit the generator, never these.
+promo_*.test.sqf
+promo_*.test.toml
+promo_*.shots.json
+# The hand-written probes are tracked.
+!promo_probe.test.sqf
+!promo_probe.test.toml
+!promo_scout.test.sqf
+!promo_scout.test.toml
+!promo_scout2.test.sqf
+!promo_scout2.test.toml
+
+# Built by sync-kaiju-mission.sh from PromoShoot.Lebanon80 and experiments/kaiju/integration/kj.
+PromoKaiju.Lebanon80/
+
+# Outputs belong in the production folder (UD_PROMO_DIR), never here.
+__pycache__/
+*.raw
+*.raw.txt
+*.mp4
+*.mkv
+*.wav
+*.mp3
+*.png
+*.jpg
+*.npy
+*.log
+seg/
+cards/

@@ -1,0 +1,9 @@
+; Lebanon80 promo shoot: turns the field journal's pages while the map screen is open (JN_PAGES, JN_SECS each).
+_i = 0
+#page
+? _i >= count JN_PAGES : exit
+_r = triBriefingSwitch (JN_PAGES select _i)
+logInfo format ["PROMO journal page %1 -> %2 at %3", JN_PAGES select _i, _r, time]
+~JN_SECS
+_i = _i + 1
+goto "page"

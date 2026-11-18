@@ -1,0 +1,8 @@
+# Lebanon80 promo shoot: probe (experiment, kept out of tests/integration so a sweep never runs it).
+# Boots the Guerrilla.Lebanon80 template on @LoBo. Run through run-promo.ps1. --nosound.
+tags = ["experiment", "video", "lebanon80"]
+binary = "PoseidonGame"
+mission = "experiments/lebanon80-promo/PromoShoot.Lebanon80"
+timeout = 1500
+assert_timeout = 600
+extra_args = ["--nosound", "--no-strict", "--width", "1920", "--height", "1080", "--mods-dir", ".", "--mod", "@LoBo"]

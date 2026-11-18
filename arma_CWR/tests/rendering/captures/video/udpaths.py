@@ -13,6 +13,8 @@ layout, so no tool names one machine's folders.
     UD_WHISPER_PYTHON  a Python with faster-whisper; default: the Python running the tool
     UD_TTS_OUT         the WAVs of a TTS take; default: <UD_VIDEO_WORK>/tts
     UD_ENV_FILE        the .env holding OPENROUTER_API_KEY; default: the main checkout's .env
+    UD_PROMO_DIR       a promo production folder (clips, work, the edit's music and outputs), used by
+                       arma_CWR/experiments/lebanon80-promo; default: <repo>/tmp/video/lebanon80-promo
     FFMPEG, FFPROBE    the ffmpeg tools; default: found on PATH
 """
 import os
@@ -54,6 +56,7 @@ VANILLA_LOBO = _env_path("UD_VANILLA_LOBO", VANILLA_ROOT / "tmp" / "lobo-mods")
 FONT_DIR = _env_path("UD_FONT_DIR", ENGINE_ROOT / "thirdparty" / "guerrilla-fonts")
 WHISPER_PY = _env_path("UD_WHISPER_PYTHON", sys.executable)
 TTS_OUT = _env_path("UD_TTS_OUT", WORK / "tts")
+PROMO_DIR = _env_path("UD_PROMO_DIR", REPO_ROOT / "tmp" / "video" / "lebanon80-promo")
 FFMPEG = _tool("FFMPEG", "ffmpeg")
 FFPROBE = _tool("FFPROBE", "ffprobe")
 

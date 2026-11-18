@@ -1,0 +1,12 @@
+; Lebanon80 promo shoot: logs every change of the kaiju beam phase (KJ_beamPhase) with the game time and the
+; camera's frame count of the clip recording (PC_FN, head frames included), so the shot list can give the
+; fire and impact times. [] exec "phaselog.sqs"; stops when PC_QUIT.
+_last = ""
+#loop
+? PC_QUIT : exit
+? isNil "KJ_beamPhase" : goto "next"
+? KJ_beamPhase != _last : logInfo format ["PROMO beam phase %1 at %2 clip %3 frame %4", KJ_beamPhase, time, PC_CLIP, PC_FN]
+_last = KJ_beamPhase
+#next
+~0.001
+goto "loop"
