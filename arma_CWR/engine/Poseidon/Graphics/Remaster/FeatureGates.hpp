@@ -92,6 +92,9 @@ struct GateInputs
     // The cloud-density map of the current weather sky is built (a worker
     // thread builds it when the weather sky changes; SkyDensity.hpp).
     bool skyDensityReady = true;
+    // Experiment EX6-CANOPY (POSEIDON_XP_CANOPY_HIGHSUN, Canopy.hpp
+    // CanopyAllSunHeights): the canopy shadows' gate has no 25 deg cut.
+    bool canopyAllSun = false;
 };
 
 struct Gate

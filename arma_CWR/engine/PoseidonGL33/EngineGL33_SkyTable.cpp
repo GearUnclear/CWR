@@ -253,6 +253,7 @@ void EngineGL33::InitSkyTable()
 
 void EngineGL33::DeinitSkyTable()
 {
+    DeinitXpClouds();
     // GL objects only: the atmosphere tables are CPU data and survive a
     // context loss (the next build re-uploads them).
     DeleteTexture(s_sky.standIn);
@@ -563,6 +564,14 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
     s_sky.mode = static_cast<int>(mode);
     Landscape* land = GScene->GetLandscape();
     UploadLitSky(-sun->Direction(), land ? land->SkyThrough() : 1.0f);
+    // The volumetric clouds (POSEIDON_XP_CLOUDS): marched before the dome
+    // draws, from the frame's constants; the dome and the sun disk read them.
+    if (dome)
+    {
+        FlushLitConstants();
+        RunXpClouds(atmosphere && s_sky.built && rm::SkyDayFade(sunElevRad * kDeg) > 0.0f);
+    }
+    BindXpClouds(dome || sunDisk);
     FlushLitConstants();
     BindSkyTable();
     BindSkyDensity();
@@ -575,6 +584,7 @@ void EngineGL33::EndRemasterSky()
         return;
     // The sky's draws commit with its programs and sky mode.
     FlushQueues();
+    BindXpClouds(false);
     const bool dome = s_sky.mode == static_cast<int>(Poseidon::RemasterSky::Dome);
     s_sky.open = false;
     s_sky.mode = 0;

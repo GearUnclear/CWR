@@ -171,16 +171,22 @@ TEST_CASE("GraphicsApply: the look options reach the engine", "[Settings][Graphi
         CHECK(apply.engine.look.lampShadows);
         CHECK(apply.engine.look.shadowTier == Poseidon::remaster::kShadowTierNormal);
         CHECK_FALSE(apply.engine.look.sunGlare);
+        CHECK_FALSE(apply.engine.look.groundCover);
+        CHECK(apply.engine.look.surfStyle == Poseidon::remaster::kSurfPainted);
     }
     cfg.shoreWater = false;
     cfg.lampShadows = false;
     cfg.shadowDetail = GraphicsConfig::ShadowDetailHigh;
     cfg.sunGlare = true;
+    cfg.groundCover = true;
+    cfg.surfStyle = GraphicsConfig::SurfRibbons;
     {
         LookApply apply(cfg);
         CHECK_FALSE(apply.engine.look.shoreWater);
         CHECK_FALSE(apply.engine.look.lampShadows);
         CHECK(apply.engine.look.shadowTier == Poseidon::remaster::kShadowTierHigh);
         CHECK(apply.engine.look.sunGlare);
+        CHECK(apply.engine.look.groundCover);
+        CHECK(apply.engine.look.surfStyle == Poseidon::remaster::kSurfRibbons);
     }
 }

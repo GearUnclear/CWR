@@ -421,6 +421,7 @@ layout(std140) uniform LitConstants {
     vec4 litCameraLook;   // 90: photo camera's look: x weather veil, y lamp ambient kept, z lamp gain, w low-sun sky blue
     vec4 litWater2;       // 91: shore water: x parts mask (1 shallow, 2 foam, 4 wet sand, 8 wave masking; 0 off), y time (s), z sea surface (m), w swash line (m)
     vec4 litXpNight;      // 92: lamp shadows: x 0, y light bounce gain, z lamps in the combat mask, w 0
+    vec4 litXpClouds;     // 93: volumetric clouds (POSEIDON_XP_CLOUDS): x 1 = the dome and sun disk read xpClouds, yz painted give-way range, w layer height / haze; x 0: y 1 / shadow map size (0 off), z cloud base (m)
 };
 )";
 
@@ -696,7 +697,10 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
     if (wSum <= 0.0) return 1.0;
     float lit = litSum / wSum;
     float lastSplit = cascadeSplits[nC - 1];
-    float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+    // POSEIDON_XP_SHADOWBAND (camFwd.w 1): by distance from the eye, along a smoothstep.
+    float fadeAt = camFwd.w > 0.5 ? dist3D : eyeDepth;
+    float fade = clamp((lastSplit - fadeAt) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
+    if (camFwd.w > 0.5) fade = fade * fade * (3.0 - 2.0 * fade);
     return 1.0 - (1.0 - lit) * fade;
 }
 )";
@@ -809,9 +813,15 @@ float skyShadowCoverFrom(vec3 q, vec2 anchor) {
     vec3 w = q - vec3(anchor.x, 0.0, anchor.y);
     return w.y > 1.0 ? skyShadowCoverToward(w) : 0.0;
 }
-float domeCloudCover(vec3 rel) {
-    vec3 l = litSunDir.xyz;
-    float up = max(l.y, 0.06);
+// The volumetric clouds' shadow map (POSEIDON_XP_CLOUDS, while litXpClouds.y
+// is set outside the sky pass): r the sun's share through the march's own
+// clouds from a point on their base (litXpClouds.z), in world xz, wrapping
+// every 1 / litXpClouds.y metres around the camera's base point along the sun.
+#ifndef XP_CLOUDS_SAMPLER
+#define XP_CLOUDS_SAMPLER
+uniform sampler2D xpClouds; // unit 17 (kXpCloudsUnit)
+#endif
+float domeCloudCoverToday(vec3 rel, vec3 l, float up) {
     vec3 q = rel + l * (max(kSkyShadowDeck - (rel.y + litCamPos.y), 0.0) / up);
     float c = skyShadowCoverFrom(q, litSkyShadow.xy);
     if (litSkyShadow.w > 0.0) {
@@ -819,6 +829,22 @@ float domeCloudCover(vec3 rel) {
         c = mix(c, skyShadowCoverFrom(q, prev), litSkyShadow.w);
     }
     return c;
+}
+float domeCloudCover(vec3 rel) {
+    vec3 l = litSunDir.xyz;
+    float up = max(l.y, 0.06);
+    if (litXpClouds.x < 0.5 && litXpClouds.y > 0.0) {
+        // The clouds the march draws over this point, along the sun; today's
+        // cover again toward the map's edge.
+        float hb = litXpClouds.z;
+        vec2 at = rel.xz + litCamPos.xz + l.xz * (max(hb - (rel.y + litCamPos.y), 0.0) / up);
+        vec2 centre = litCamPos.xz + l.xz * (max(hb - litCamPos.y, 0.0) / up);
+        vec2 e = abs(at - centre) * (2.0 * litXpClouds.y);
+        float w = 1.0 - smoothstep(0.8, 0.95, max(e.x, e.y));
+        float xc = 1.0 - textureLod(xpClouds, at * litXpClouds.y, 0.0).r;
+        return w >= 1.0 ? xc : mix(domeCloudCoverToday(rel, l, up), xc, w);
+    }
+    return domeCloudCoverToday(rel, l, up);
 }
 
 // Broken-cloud shadows: the ground point is projected along the sun ray up to
@@ -855,10 +881,12 @@ float canopySunVisibility(vec3 posAbs) {
     int nC = int(cascadeCtl.x);
     bool maps = shadowCtl.x > 0.5 && nC > 0;
     vec3 rel = vWorldRel + litShadowDelta.xyz;
-    float depth = maps ? dot(rel, camFwd.xyz) : length(vWorldRel);
+    bool radial = maps && camFwd.w > 0.5; // POSEIDON_XP_SHADOWBAND: the maps' own fade, mirrored
+    float depth = maps ? (radial ? length(rel) : dot(rel, camFwd.xyz)) : length(vWorldRel);
     float reach = maps ? cascadeSplits[nC - 1] : 150.0;
     float fade = maps ? max(cascadeCtl.y, 1.0) : 50.0;
     float w = clamp((depth - (reach - fade)) / fade, 0.0, 1.0);
+    if (radial) w = 1.0 - (1.0 - w) * (1.0 - w) * (1.0 + 2.0 * w);
     vec2 uv = (posAbs.xz - litCanopy.yz) * litCanopy.w;
     vec2 e = abs(uv - 0.5);
     w *= litCanopy.x * (1.0 - smoothstep(0.42, 0.48, max(e.x, e.y)));
@@ -1192,7 +1220,9 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     bool camSun = litCamera.x > 0.5 && litSkyFwd.w > 2.5 && litSkyFwd.w < 3.5 && vLitMode < 0.5 && vLitMode > -0.5;
     if (camSun) {
         r0 = camSunDisc();
-        if (litSky.y > 0.5) r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
+        // Behind the volumetric clouds the disk keeps what they let through.
+        if (litXpClouds.x > 0.5) r0 *= xpCloudsToward(skySunDir()).a;
+        else if (litSky.y > 0.5) r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
         nightEye = false;
     }
     if (alphaRef.z > 0.5) {
@@ -1334,7 +1364,9 @@ void main() {
         // The sun disk behind a dome cloud (skyCloudShadows): its colour and
         // its coverage both, so it fades into the cloud whatever its blending
         // (a dimmed colour alone drew a dark disk over the sky).
-        if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
+        if (litSkyFwd.w > 2.5 && litXpClouds.x > 0.5)
+            r0 *= xpCloudsToward(skySunDir()).a;
+        else if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
             r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
     }
     finishFragment(r0, ambientShare, true);
@@ -1517,12 +1549,38 @@ void main() {
         }
         // Shore water's wet sand (litWater2): the land darkens below
         // the swash line, with a ragged edge.
+        float shoreDark = 1.0;
         if (litWater2.x > 0.5 && litDetail.w > 0.5 && (int(litWater2.x + 0.5) & 4) != 0) {
             vec3 posW = vWorldRel + litCamPos.xyz;
             float ragged = 0.35 * (puddleNoise(posW.xz * 0.35) - 0.5);
             float wet = 1.0 - smoothstep(0.0, 0.45, posW.y - litWater2.w + ragged);
-            albedo *= mix(1.0, 0.7, wet);
+            shoreDark = mix(1.0, 0.7, wet);
         }
+        // The surf's run-up (surfSwash): each wave's sheet of water runs up
+        // the sand and slides back, foaming at its edge and leaving lace, the
+        // sand it wetted drying over a few seconds. Not while the shore
+        // ribbons draw the waves (litWater2.x 16, the Surf option at Ribbons).
+        if (litWater2.x > 0.5 && (int(litWater2.x + 0.5) & 18) == 2) {
+            vec3 posW = vWorldRel + litCamPos.xyz;
+            float e = posW.y - litWater2.z;
+            if (e > -0.3 && e < 0.9) {
+                vec2 grad = surfFloorGrad(posW.xz);
+                float slope = max(length(grad), 0.004);
+                float x = e / slope;
+                if (x < kSwashMax * 1.45) {
+                    float reach, prevReach;
+                    vec2 shore = posW.xz - grad * (x / slope); // the waterline point below
+                    float tau = surfTime(shore, litWater2.y, reach, prevReach);
+                    float fine = 1.0 - smoothstep(40.0, 120.0, length(vWorldRel));
+                    float lace = puddleNoise(posW.xz * 1.3 + 17.0) * 0.6 + mix(0.5, puddleNoise(posW.xz * 4.1), fine) * 0.4;
+                    vec3 sw = surfSwash(x, tau, reach, prevReach, slope, lace);
+                    shoreDark = min(shoreDark, mix(1.0, 0.62, max(sw.x, sw.z)));
+                    albedo = mix(albedo * shoreDark, vec3(kSurfFoamAlbedo), sw.y * 0.85);
+                    shoreDark = 1.0;
+                }
+            }
+        }
+        albedo *= shoreDark;
         r0.rgb = shadeRemastered(albedo, true, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
@@ -1536,9 +1594,155 @@ void main() {
 )";
 
 static const char s_psGrassRemasterMain[] = R"(
+// Near ground cover (the Graphics page's Ground Cover option;
+// Landscape::DrawRect). No CWA data set ships the grass texture, so the blades
+// are procedural: one candidate blade per cell of 1 / kGrassCells metres, its
+// height, lean and presence hashed from the cell (world-anchored, so the field
+// does not swim with the camera), a tapered disc in any horizontal cut.
+// While psC5.x is set, the land within psC5.y metres is drawn once more,
+// raised by the blades' height (psC6.a metres), and each fragment walks its
+// view ray down through the blade layer to the ground, front to back, so the
+// blades are continuous at any view angle and the land is shaded once per
+// pixel. They fade out from kGrassFadeFrom of that distance.
+// Where they grow: where the ground field reads as vegetation (the wet
+// weather's land class) and no building stands near (the field's alpha:
+// TerrainHorizonMap::groundBuilt), so a town's squares and yards stay bare
+// whatever their ground's colour. Roads are drawn after and cover the blades.
+// Where a cell is smaller than a pixel, the march takes the blades' mean cover
+// instead of the cut (no sparkle), and only kGrassVeil of it: unresolved
+// blades would only hide the land's own grain under a smear. Blades take the
+// land's own colour (its square's texture), darker at the root and lighter at
+// the tip, lit as the land.
+const float kGrassCells = 45.0;     // candidate blades per metre along x and z
+const float kGrassRadius = 0.16;    // blade half width at the root (cells)
+const float kGrassJitter = 0.30;    // root offset from the cell centre (cells)
+const float kGrassLean = 0.90;      // tip offset from the root (cells), growing with the height squared
+const float kGrassMinHeight = 0.30; // shortest blade (share of the full height)
+const float kGrassDensity = 0.90;   // share of cells with a blade on full grass
+const float kGrassRoot = 0.80;      // albedo scale at the root ...
+const float kGrassTip = 1.15;       // ... and at the tip
+const float kGrassFadeFrom = 0.40;  // share of the end distance where the fade starts
+const float kGrassVeil = 0.35;      // cover kept where the blades are under a pixel (the land's grain shows)
+const float kGrassTaper = 0.8;      // blade width falls as (1 - height share)^kGrassTaper
+const int kGrassMaxSteps = 40;      // march: samples per ray at most
+
+vec4 grassHash4(vec2 c) {
+    vec4 p4 = fract(vec4(c.xyxy) * vec4(0.1031, 0.1030, 0.0973, 0.1099));
+    p4 += dot(p4, p4.wzxy + 33.33);
+    return fract((p4.xxyz + p4.yzzw) * p4.zywx);
+}
+
+// The blades' cut at height share h through point p (cells), edges
+// antialiased over aa cells; `tip` the covering blade's height share of its
+// own length and `shade` its brightness (for the colour).
+float grassCut(vec2 p, float h, float aa, float veg, out float tip, out float shade) {
+    vec2 i0 = floor(p - 0.5);
+    float cover = 0.0;
+    tip = h;
+    shade = 1.0;
+    for (int k = 0; k < 4; ++k) {
+        vec2 cell = i0 + vec2(float(k & 1), float(k >> 1));
+        vec4 r = grassHash4(cell);
+        if (r.w > veg * kGrassDensity) continue;
+        float hb = mix(kGrassMinHeight, 1.0, r.z);
+        if (h >= hb) continue;
+        float s = h / hb;
+        float a = 6.2831853 * r.x;
+        vec2 root = cell + 0.5 + (r.xy - 0.5) * (2.0 * kGrassJitter);
+        vec2 c = root + vec2(cos(a), sin(a)) * (kGrassLean * s * s);
+        float rad = kGrassRadius * pow(1.0 - s, kGrassTaper);
+        float m = 1.0 - smoothstep(rad - aa, rad + aa, length(p - c));
+        if (m > cover) {
+            tip = s;
+            shade = 0.85 + 0.3 * r.y;
+        }
+        cover = 1.0 - (1.0 - cover) * (1.0 - m);
+    }
+    return cover;
+}
+
+// The blades at height share h on average (hb uniform above
+// kGrassMinHeight): x the blades per cell taller than h, y their mean radius
+// (cells), z their mean height share of their own length.
+vec3 grassMean(float h, float veg) {
+    float pTall = clamp((1.0 - h) / (1.0 - kGrassMinHeight), 0.0, 1.0);
+    float hbMean = 0.5 * (max(h, kGrassMinHeight) + 1.0);
+    float s = clamp(h / hbMean, 0.0, 1.0);
+    return vec3(veg * kGrassDensity * pTall, kGrassRadius * pow(1.0 - s, kGrassTaper), s);
+}
+
+float grassColour(float tip, float shade) { return mix(kGrassRoot, kGrassTip, tip) * shade; }
+
+// The march from the raised land's point posW (m) along the view ray
+// rd over the ground's normal n, blades H metres tall: x the albedo scale of
+// what the ray met, y its cover.
+vec2 grassMarch(vec3 posW, vec3 rd, vec3 n, float H, float foot, float veg) {
+    float dn = dot(rd, n);
+    if (dn > -1e-4 || n.y < 0.2) return vec2(1.0, 0.0);
+    // Height above the ground along the ray: H + t * dn / n.y.
+    float tEnd = H * n.y / -dn;
+    vec2 dxz = rd.xz * kGrassCells;
+    float lenCells = length(dxz) * tEnd;
+    float w = smoothstep(0.35, 1.0, foot);
+    int steps = int(clamp(ceil(lenCells / mix(0.35, 1.5, w)), 3.0, float(kGrassMaxSteps)));
+    float dt = tEnd / float(steps);
+    float dCells = lenCells / float(steps);
+    float aa = max(0.75 * foot, 0.02);
+    vec2 p0 = posW.xz * kGrassCells;
+    float T = 1.0;
+    float acc = 0.0;
+    for (int i = 0; i < kGrassMaxSteps; ++i) {
+        if (i >= steps || T < 0.02) break;
+        float t = (float(i) + 0.5) * dt;
+        float h = 1.0 + t * dn / (n.y * H);
+        float tip;
+        float shade;
+        float cut = grassCut(p0 + dxz * t, h, aa, veg, tip, shade);
+        vec3 mean = grassMean(h, veg);
+        // A ray crossing dCells meets mean.x * 2r * dCells blades on average.
+        float meanCover = 1.0 - exp(-mean.x * 2.0 * mean.y * dCells);
+        float m = mix(cut, meanCover, w);
+        acc += T * m * mix(grassColour(tip, shade), grassColour(mean.z, 1.0), w);
+        T *= 1.0 - m;
+    }
+    float cover = 1.0 - T;
+    return vec2(cover > 1e-4 ? acc / cover : 1.0, cover);
+}
+
 void main() {
     vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
+    if (psC5.x > 0.5) {
+        vec3 posW = vWorldRel + litCamPos.xyz;
+        vec2 p = posW.xz * kGrassCells;
+        // Derivatives before any discard (they need the whole quad).
+        vec2 fw = fwidth(p);
+        float foot = max(fw.x, fw.y);
+        vec3 baseC = textureLod(tex0, vUV0, 3.0).rgb;
+        if (vFogTC < 0.0) discard;
+        float dist = length(vWorldRel);
+        float fade = 1.0 - smoothstep(psC5.y * kGrassFadeFrom, psC5.y, dist);
+        if (fade <= 0.0 || !(vLitMode > 0.5 && vLitMode < 1.5)) discard;
+        vec4 field = groundFieldAt(posW.xz);
+        // The field's alpha: 1 on open land down to 0.75 where buildings
+        // stand near (0 without a field: no class, so no town to keep bare).
+        float open = field.a > 0.5 ? smoothstep(0.75, 1.0, field.a) : 1.0;
+        float veg =
+            (field.a > 0.5 ? wetVegetation(field.rgb) : 1.0) * mix(0.4, 1.0, wetVegetation(baseC)) * open;
+        if (veg <= 0.01) discard;
+        vec3 n = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
+        vec2 g = grassMarch(posW, vWorldRel / max(dist, 1e-4), n, psC6.a, foot, veg);
+        float alpha = g.y * fade * mix(1.0, kGrassVeil, smoothstep(0.35, 1.0, foot));
+        if (alpha < 0.004) discard;
+        g_wetDraw = 2; // grass clutter: wet blades, no puddles
+        vec3 albedo = t0.rgb * constColor.rgb * g.x;
+        float ambientShare = 0.0;
+        vec4 r0;
+        r0.rgb = shadeRemastered(clamp(albedo, 0.0, 1.0), true, ambientShare);
+        r0.a = alpha;
+        finishFragment(r0, ambientShare, true);
+        return;
+    }
     if (vFogTC < 0.0) discard;
     vec4 r0;
     float ambientShare = 0.0;
@@ -1678,11 +1882,23 @@ const float kXpCalm = 0.35;          // wave relief kept at the waterline
 const float kXpCalmDepth = 1.2;      // m: full waves from here
 const float kXpFoamAlbedo = 0.82;
 const float kXpFoamMax = 0.85;
-const float kXpSwashK = 1.8;         // foam lines per metre of depth
-const float kXpSwashSpeed = 0.045;   // m of depth per second the lines move inshore
-const float kXpBandDepth = 0.9;      // m: no foam lines deeper
-const float kXpFoamFadeStart = 250.0; // m
-const float kXpFoamFadeEnd = 1100.0;
+// The surf at a low sun and from afar (SHORE-FOAM, 2026-11-13). The first cut
+// lost its surf at sunset and dawn: a low sun means a low tide (up to 5 m,
+// Landscape::Simulate), so the waterline sits lower on the beach, where it is
+// steeper, and a surf measured in depth alone shrank to a thread; the foam
+// was lit like the flat sea (the sun's cosine on a level surface), so it took
+// less light than the sloping sand beside it; and it faded out from 250 m.
+// Now the waterline's fringe is measured in a depth that never grows faster
+// than a beach of kXpSurfSlope would make it (beaches gentler than that are
+// as before; the foam lines keep the true depth), foam is a heap of bubbles
+// that takes the low sun by a cosine wrapped past the level surface's, and the
+// surf stays to 2.5 km as a line at least kXpFringePx wide. A high sun on a
+// gentle beach is as before.
+const float kXpSurfSlope = 0.04;     // the fringe's depth grows at most this many metres per metre inshore of it
+const float kXpFoamWrap = 1.0;       // the foam's sun: (cos + wrap) / (1 + wrap) instead of cos
+const float kXpFringePx = 1.5;       // pixels: the waterline fringe's least width, in the depth it spans
+const float kXpFoamFadeStart = 600.0; // m
+const float kXpFoamFadeEnd = 2500.0;
 const float kXpMaskFloor = 0.6;      // sky weight kept by a facet whose mirror ray is well below the horizon
 const float kXpMaskSpan = 0.08;      // the ray's height below the horizon over which the sky goes
 
@@ -1714,14 +1930,29 @@ void main() {
     // Derivatives first, in uniform control flow.
     vec2 gU, gV;
     seaUvGradients(vUV0, gU, gV);
-    // XP shore: the water's depth and its change across the pixel.
+    // XP shore: the water's depth and its change across the pixel, and the
+    // fringe's depth (on a beach steeper than kXpSurfSlope, the depth that
+    // beach would have at this distance from the waterline) and its change.
     int xpParts = int(litWater2.x + 0.5);
     float xpDep = 1.0e4;
     float xpDepW = 0.0;
+    float xpSurf = 1.0e4;
+    float xpSurfW = 0.0;
+    float xpSlope = 0.0;      // the floor's slope (m per m); 0 where the water is 4 m deep or more
+    vec2 xpGrad = vec2(0.0);  // its gradient (uphill)
     if (xpParts != 0 && litTerrain.x > 0.5) {
         vec3 posW = vWorldRel + litCamPos.xyz;
         xpDep = max(posW.y - xpFloorHeight(posW.xz), 0.0);
         xpDepW = fwidth(xpDep);
+        xpSurf = xpDep;
+        xpSurfW = xpDepW;
+        if (xpDep < 4.0) {
+            xpGrad = surfFloorGrad(posW.xz);
+            xpSlope = length(xpGrad);
+            float k = min(kXpSurfSlope / max(xpSlope, 1e-4), 1.0);
+            xpSurf *= k;
+            xpSurfW *= k;
+        }
     }
     float e0 = seaUvStep(vUV0, 1.0 / 512.0);
     float e1 = seaUvStep(vUV1, 1.0 / 256.0);
@@ -1819,25 +2050,61 @@ void main() {
         vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
                    (sunVis * sunOn * litHorizon.w);
         vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
-        // XP surf: a broken fringe of foam at the waterline (it rides the sea
-        // level's wave) and foam lines rolling in over the shallows. The lines
-        // fade where a pixel spans much of their spacing, the whole surf with
-        // distance, and the finer breakup below the pixel's footprint.
-        if ((xpParts & 2) != 0 && xpDep < 1.5) {
+        // XP surf: a broken fringe of foam at the waterline (it rides the drawn
+        // sea level's wave) and, painted here unless the shore ribbons draw
+        // them, waves that break, roll in as foam lines and reach the
+        // waterline (surfTime; the land program draws their run-up), the
+        // fringe swelling as each wave arrives, and the foam each wave leaves.
+        // The whole surf fades with distance, the finer breakup below the
+        // pixel's footprint.
+        if ((xpParts & 2) != 0 && xpSurf < 1.5) {
             float t = litWater2.y;
             vec2 p = vWorldRel.xz + litCamPos.xz;
             float nA = puddleNoise(p * 0.42 + vec2(0.0, t * 0.05));
             float nB = mix(0.5, puddleNoise(p * 1.6 - vec2(t * 0.09, 0.0) + 31.0), clamp(0.6 / (3.0 * foot), 0.0, 1.0));
             float brk = nA * 0.6 + nB * 0.4;
-            float edgeW = max(0.06 + 0.16 * brk, xpDepW);
-            float fringe = (1.0 - smoothstep(0.0, edgeW, xpDep)) * smoothstep(0.2, 0.75, brk);
-            float s = fract((xpDep + t * kXpSwashSpeed) * kXpSwashK + 0.45 * nA);
-            float band = smoothstep(0.0, 0.07, s) * (1.0 - smoothstep(0.07, 0.42, s));
-            band *= (1.0 - smoothstep(0.35, kXpBandDepth, xpDep)) * smoothstep(0.35, 0.62, brk);
-            band *= 1.0 - smoothstep(0.15, 0.45, xpDepW * kXpSwashK);
-            float foam = clamp(fringe + 0.75 * band, 0.0, 1.0) * kXpFoamMax *
-                         (1.0 - smoothstep(kXpFoamFadeStart, kXpFoamFadeEnd, dist));
-            radiance = mix(radiance, xpLight * kXpFoamAlbedo, foam);
+            // The waterline's fringe (round 1's band).
+            float edgeW = max(0.06 + 0.16 * brk, kXpFringePx * xpSurfW);
+            float fringe = (1.0 - smoothstep(0.0, edgeW, xpSurf)) * smoothstep(0.2, 0.75, brk);
+            float foam = fringe;
+            // The painted waves (the Surf option at Painted). At Ribbons
+            // (litWater2.x 16) the shore ribbons draw them and the fringe stays
+            // as it is.
+            if ((xpParts & 16) == 0) {
+                // The waves (surfTime): this spot's time in its wave's cycle,
+                // and the horizontal distance (m) out from the waterline.
+                float reach, prevReach;
+                float dx = xpSlope > 0.0 ? xpDep / max(xpSlope, 0.004) : 1.0e4;
+                float dxW = xpSlope > 0.0 ? xpDepW / max(xpSlope, 0.004) : 1.0e4;
+                vec2 shore = p + xpGrad / max(xpSlope, 0.004) * min(dx, 40.0); // the waterline point inshore
+                float tau = surfTime(shore, t, reach, prevReach);
+                float ta = surfArrive(reach);
+                float since = tau - ta;                                   // s since this wave arrived (< 0: not yet)
+                float sinceP = tau + kSurfPeriod - surfArrive(prevReach); // s since the wave before it arrived
+                // The fringe is fullest as a wave arrives and thins as it
+                // drains away (never below the first cut's steady band's 0.6).
+                float swell = max(since < 0.0 ? smoothstep(-0.6, 0.0, since) : exp(-since / 2.5), exp(-sinceP / 2.5));
+                // The bore: the breaking wave's foam line rolling in to the
+                // waterline, a dense crest with its foam trailing offshore,
+                // building up as it breaks.
+                float off = dx - (kSurfZone * reach - kSurfSpeed * tau); // > 0 offshore of the line
+                float wF = max(0.8, kXpFringePx * dxW);
+                float bore = off < 0.0 ? 1.0 - smoothstep(0.0, wF, -off) : exp(-off / 3.0);
+                bore *= (1.0 - smoothstep(-0.2, 0.8, since)) * smoothstep(0.0, 1.0, tau) * smoothstep(0.65, 1.05, reach) *
+                        smoothstep(0.3, 0.6, brk + 0.3 * exp(-max(off, 0.0) / 1.5));
+                // The foam the waves left over the inner surf, bursting.
+                float rest = max(since > 0.0 ? smoothstep(0.0, 0.4, since) * exp(-since / 2.5) *
+                                                   (1.0 - smoothstep(0.0, 0.35 * kSurfZone * reach, dx)) : 0.0,
+                                 exp(-sinceP / 2.5) * (1.0 - smoothstep(0.0, 0.35 * kSurfZone * prevReach, dx))) *
+                             smoothstep(0.45, 0.75, brk);
+                foam = max(max(fringe * (0.6 + 0.4 * swell), bore), 0.5 * rest);
+            }
+            foam = clamp(foam, 0.0, 1.0) * kXpFoamMax * (1.0 - smoothstep(kXpFoamFadeStart, kXpFoamFadeEnd, dist));
+            // The foam's light: the flat sea's, plus the sun the wrap adds.
+            float ly = max(l.y, 0.0);
+            float wrap = (ly + kXpFoamWrap) / (1.0 + kXpFoamWrap) * smoothstep(0.0, 0.04, l.y);
+            vec3 foamLight = xpLight + litSun.rgb * litMatDiffuse.rgb * (max(wrap - ly, 0.0) * sunVis * sunOn * exposure);
+            radiance = mix(radiance, foamLight * kXpFoamAlbedo, foam);
         }
         // The surface target: the body's sky light, as the stock share has it.
         g_surfShare = ambientShare * (1.0 - wSky);
@@ -1944,6 +2211,11 @@ const char* LitConstantsBlock()
     return kLitConstantsBlockGLSL;
 }
 
+const char* RemasterWaterMainStock()
+{
+    return s_psWaterRemasterMain;
+}
+
 const char* RemasterFragmentMain(int ps)
 {
     switch (ps)
@@ -1955,6 +2227,10 @@ const char* RemasterFragmentMain(int ps)
         case PSGrass:
             return s_psGrassRemasterMain;
         case PSWater:
+            // XP sea mirror, XP sea flow: the main that also writes the wave
+            // slope, the main whose layers travel, or both (null: neither).
+            if (const char* xp = SeaWaterMainXp())
+                return xp;
             return s_psWaterRemasterMain;
         default:
             return nullptr; // PSFlat / PSShadow reuse the classic sources

@@ -282,13 +282,42 @@ struct CanopySunKey
 };
 // True when `want` (for a camera at camX, camZ) needs a new map: none yet, a new
 // canopy or texel, the sun moved kCanopySunRebuildDeg, or the camera is more than
-// kCanopySunRecentre of the map from its middle.
-bool CanopySunNeedsRebuild(const CanopySunKey& built, const CanopySunKey& want, float camX, float camZ);
+// kCanopySunRecentre of the map from its middle. `rebuildDeg` replaces
+// kCanopySunRebuildDeg (CanopySunRebuildDegFor, experiment EX6-CANOPY).
+bool CanopySunNeedsRebuild(const CanopySunKey& built, const CanopySunKey& want, float camX, float camZ,
+                           float rebuildDeg = kCanopySunRebuildDeg);
 
 // The shadows' strength at a sun height and sky-through: 0 outside the gate,
 // fading in from 2 to 4 deg and out from 21 to 25 deg of sun, and in from a
 // sky-through of 0.5 to 0.6.
 float CanopyStrength(float sunElevationDeg, float skyThrough);
+
+// ---- Experiment EX6-CANOPY (PERF-PLAN R-5): canopy shadows at every sun height ----
+// Switch POSEIDON_XP_CANOPY_HIGHSUN (on unless "0"; "0" keeps the old 2 to 25
+// deg band). On, the 25 deg cut goes: the shadows keep their full strength up the
+// sky and fade only where the shadow a typical crown casts gets shorter than the
+// canopy's own texel (then the shadow is mostly the texel's blur under the
+// crown, not a shadow beside it). The low-sun fade-in and the sky-through fade
+// stay as they are, so below 21 deg nothing changes.
+constexpr float kCanopyExpectedTop = 20.0f;    // the crown top the fade expects (m above the ground)
+constexpr float kCanopyLengthFadeFrom = 0.25f; // shadow length in canopy texels: no shadow at or below
+constexpr float kCanopyLengthFadeTo = 0.75f;   // full shadow from here
+// At a high sun a shadow tip barely moves when the sun does, so the map is
+// rebuilt when the tip of a kCanopyReach-tall occluder's shadow would move this
+// far (never sooner than kCanopySunRebuildDeg, never later than the cap).
+constexpr float kCanopyRebuildTipMove = 0.5f; // metres
+constexpr float kCanopyRebuildMaxDeg = 1.0f;
+
+// The switch: on unless POSEIDON_XP_CANOPY_HIGHSUN=0 (read once).
+bool CanopyAllSunHeights();
+// The length fade alone: 1 at a low sun, 0 for a sun under the horizon or so
+// high that kCanopyExpectedTop casts less than kCanopyLengthFadeFrom texels.
+float CanopyLengthFade(float sunElevationDeg, float fieldTexel);
+// CanopyStrength with the 25 deg cut replaced by the length fade.
+float CanopyStrengthAllSun(float sunElevationDeg, float skyThrough, float fieldTexel);
+// The sun's angle (deg) that moves the tip of the tallest shadow by
+// kCanopyRebuildTipMove at this sun height; kCanopySunRebuildDeg at a low sun.
+float CanopySunRebuildDegFor(float sunElevationDeg);
 
 // LitConstants slot Canopy (76): x strength (0 = off: the switch, its gate, no
 // canopy or no map), yz the map's origin (m), w 1 / its extent (1/m). With the
@@ -301,5 +330,10 @@ struct CanopyFrameConstants
 CanopyFrameConstants ComputeCanopyFrameConstants(const LightingTuning& tuning, const FeatureGates& gates, bool mapReady,
                                                  float sunElevationDeg, float skyThrough, float originX, float originZ,
                                                  float texel);
+// The same with the experiment's choice: `allSun` takes CanopyStrengthAllSun
+// with the canopy's texel `fieldTexel` in place of CanopyStrength.
+CanopyFrameConstants ComputeCanopyFrameConstants(const LightingTuning& tuning, const FeatureGates& gates, bool mapReady,
+                                                 float sunElevationDeg, float skyThrough, float originX, float originZ,
+                                                 float texel, bool allSun, float fieldTexel);
 
 } // namespace Poseidon::remaster

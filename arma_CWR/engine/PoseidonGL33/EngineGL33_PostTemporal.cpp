@@ -27,11 +27,14 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/EngineGL33_PostPass.hpp>
+#include <Poseidon/Graphics/Core/GLClear.hpp>
+#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace rm = Poseidon::remaster;
 using namespace Poseidon::gl33post;
@@ -127,42 +130,58 @@ void EngineGL33::PostTemporal(const PostFrame& f)
 {
     const PostTargets& p = _post;
     const std::uint32_t frame = GetFrameCounter();
+    // EX9-WEAK (Q-4): with the world below the window, the history is the
+    // window's size and the upsampling resolve writes it.
+    const bool up = XpUpscaleActive() && p.progTaaUp && p.histW == _xpDispW && p.histH == _xpDispH;
+    const int hw = up ? _xpDispW : f.w;
+    const int hh = up ? _xpDispH : f.h;
     const rm::TaaReprojection reproj = rm::BuildTaaReprojection(_taa.prevCamera, _taa.camera);
-    const bool usable = rm::TaaHistoryUsable(_taa.history, frame, f.w, f.h, reproj.valid);
+    const bool usable = rm::TaaHistoryUsable(_taa.history, frame, hw, hh, reproj.valid);
     const int src = _taa.historyIdx;
     const int dst = 1 - src;
 
-    glUseProgram(p.progTaa);
-    SetInt(p.progTaa, "curTex", 0);
-    SetInt(p.progTaa, "depthTex", 2);
-    SetInt(p.progTaa, "histTex", 3);
-    SetInt(p.progTaa, "worldTex", 4);
-    SetInt(p.progTaa, "opaqueTex", 5);
+    const GLuint prog = up ? p.progTaaUp : p.progTaa;
+    glUseProgram(prog);
+    SetInt(prog, "curTex", 0);
+    SetInt(prog, "depthTex", 2);
+    SetInt(prog, "histTex", 3);
+    SetInt(prog, "worldTex", 4);
+    SetInt(prog, "opaqueTex", 5);
     BindTex(0, p.taaInTex);
     BindTex(2, p.depthTex);
     BindTex(3, p.histTex[src]);
     BindTex(4, p.colorTex);
     BindTex(5, p.opaqueTex);
-    Set4(p.progTaa, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
-    Set4(p.progTaa, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
-    Set4(p.progTaa, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
-    Set4(p.progTaa, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
+    Set4(prog, "projInfo", f.projInfo[0], f.projInfo[1], f.projInfo[2], f.projInfo[3]);
+    Set4(prog, "depthMap", f.depthScale, f.depthBias, 0.0f, 0.0f);
+    Set4(prog, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+    Set4(prog, "screen", static_cast<float>(hw), static_cast<float>(hh), 1.0f / hw, 1.0f / hh);
+    if (up)
+    {
+        // The Gaussian's coefficient over window pixels (lower is wider and
+        // calmer) and the least share of this frame where its nearest sample
+        // lies off the centre (EX9-WEAK's tuned values).
+        constexpr float upKernel = 4.0f;
+        constexpr float upFloor = 0.3f;
+        Set4(prog, "srcSize", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
+        Set4(prog, "upParams", upKernel, upFloor, 0.0f, 0.0f);
+    }
     const float alpha = _lighting.taaAlpha < 0.01f ? 0.01f : (_lighting.taaAlpha > 1.0f ? 1.0f : _lighting.taaAlpha);
-    Set4(p.progTaa, "jitter", _taa.jitterPx.x, _taa.jitterPx.y, usable ? 1.0f : 0.0f, alpha);
+    Set4(prog, "jitter", _taa.jitterPx.x, _taa.jitterPx.y, usable ? 1.0f : 0.0f, alpha);
     const char* rows[3] = {"reproj0", "reproj1", "reproj2"};
     for (int r = 0; r < 3; ++r)
-        Set4(p.progTaa, rows[r], reproj.rows[r][0], reproj.rows[r][1], reproj.rows[r][2], reproj.rows[r][3]);
-    Set4(p.progTaa, "prevProj", reproj.prevP11, reproj.prevP22, 0.0f, 0.0f);
-    Set4(p.progTaa, "reactive", rm::kTaaReactiveLow, rm::kTaaReactiveHigh, rm::kTaaReactiveMaxAlpha,
+        Set4(prog, rows[r], reproj.rows[r][0], reproj.rows[r][1], reproj.rows[r][2], reproj.rows[r][3]);
+    Set4(prog, "prevProj", reproj.prevP11, reproj.prevP22, 0.0f, 0.0f);
+    Set4(prog, "reactive", rm::kTaaReactiveLow, rm::kTaaReactiveHigh, rm::kTaaReactiveMaxAlpha,
          _taa.opaqueCopied ? 1.0f : 0.0f);
-    DrawTo(p.histFbo[dst], f.w, f.h);
+    DrawTo(p.histFbo[dst], hw, hh);
 
     // This frame is the next one's history.
     _taa.historyIdx = dst;
     _taa.history.exists = true;
     _taa.history.frame = frame;
-    _taa.history.w = f.w;
-    _taa.history.h = f.h;
+    _taa.history.w = hw;
+    _taa.history.h = hh;
     _taa.prevCamera = _taa.camera;
     ++_taa.sequence;
 }
@@ -182,13 +201,34 @@ void EngineGL33::PostSharpen(const PostFrame& f)
         DrawTo(_ssaaFbo, f.w, f.h);
         return;
     }
+    // EX9-WEAK (Q-4): the history is the window's size: the sharpen writes the
+    // display set, which then takes the frame target's names for the HUD and
+    // the rest of the frame (BackToFront hands them back). Its depth and
+    // stencil start clear each frame, as nothing of the world's depth is
+    // carried up to the window's size.
+    const bool up = XpUpscaleActive() && _taa.history.w == _xpDispW && _taa.history.h == _xpDispH;
+    const int sw = up ? _xpDispW : f.w;
+    const int sh = up ? _xpDispH : f.h;
+    if (up)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, _xpDispFbo);
+        Poseidon::render::depthstencil::StencilFullWriteMask();
+        Poseidon::render::clear::WithMask(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        Poseidon::render::depthstencil::Disabled(/*hasStencil*/ false); // the fullscreen stages' state again
+    }
+    const float strength = _lighting.taaSharpen;
     // The resolved frame (the history the resolve just wrote) into every
     // sample of the frame target.
     glUseProgram(p.progTaaSharpen);
     SetInt(p.progTaaSharpen, "srcTex", 0);
     BindTex(0, p.histTex[_taa.historyIdx]);
-    Set4(p.progTaaSharpen, "sharpen", _lighting.taaSharpen, static_cast<float>(f.w), static_cast<float>(f.h), 0.0f);
-    DrawTo(_ssaaFbo, f.w, f.h);
+    Set4(p.progTaaSharpen, "sharpen", strength, static_cast<float>(sw), static_cast<float>(sh), 0.0f);
+    DrawTo(up ? _xpDispFbo : _ssaaFbo, sw, sh);
+    if (up)
+    {
+        XpSwapFrameTargets();
+        _ssrStencilValid = false; // the stencil the reflections' tags left is not this target's
+    }
 }
 
 // ---- P0-6 temporal determinism (Graphics/Remaster/TemporalDeterminism.hpp) ----

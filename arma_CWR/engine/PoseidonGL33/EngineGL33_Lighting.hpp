@@ -1,9 +1,18 @@
 #pragma once
 
+#include <string>
+
 // Remastered lighting: the shader sources, the LitConstants uniform layout and
 // the texture units of the remastered inputs. See EngineGL33_LightingShaders.cpp
 // for the shading model and Poseidon/Graphics/Remaster/LightRig.hpp for the
 // light rig.
+
+#include <string>
+
+namespace Poseidon::remaster
+{
+enum class SeaFlowField; // XP sea flow (Graphics/Remaster/SeaFlow.hpp)
+}
 
 namespace Poseidon::gl33lighting
 {
@@ -16,6 +25,28 @@ const char* RemasterVertexSource(int vs);
 // means the pixel shader reuses its classic source (PSFlat, PSShadow).
 const char* RemasterFragmentCommon();
 const char* RemasterFragmentMain(int ps);
+
+// XP sea mirror (Graphics/Remaster/SeaMirror.hpp, EngineGL33_XpSeaMirror.cpp):
+// the water program's main and the reflection trace's source with the
+// experiment's additions, built once from the stock text; null when an anchor
+// is missing (the experiment then stays off). RemasterFragmentMain and the
+// trace take these only while POSEIDON_XP_SEAMIRROR is on.
+const char* SeaMirrorWaterMainXp();
+const char* SeaMirrorTraceSourceXp();
+// XP sea flow (Graphics/Remaster/SeaFlow.hpp): the water program's main with
+// `field`'s travelling layers at `speed`, the dissolve's `rho` and whether it
+// runs (`morph`), with or without the mirror's slope output; empty when an
+// anchor is missing.
+std::string SeaFlowWaterMainXp(bool mirror, float speed, float rho, bool morph, Poseidon::remaster::SeaFlowField field);
+// The water program's main for this process's switches (POSEIDON_XP_SEAMIRROR,
+// POSEIDON_XP_SEAFLOW); null with both off or an anchor missing (the stock
+// main then draws).
+const char* SeaWaterMainXp();
+// The water program's stock main (RemasterFragmentMain(PSWater) with the
+// experiment off).
+const char* RemasterWaterMainStock();
+// The trace's unit for the sea's slope target (a multisampled texture).
+constexpr int kSeaMirrorWaveUnit = 6;
 
 // The common prelude, split by concern:
 // RemasterFragmentCommon() is these pieces joined in this order. A feature
@@ -109,6 +140,10 @@ extern const char kPostFogGlowMainGLSL[];
 // layout below. Every shader that reads the rig pastes this string instead of
 // a copy of its own (today the fragment prelude).
 const char* LitConstantsBlock();
+// The shore ribbons' program (EngineGL33_ShoreRibbons.cpp): its own vertex
+// shader (the LitConstants block pasted) and the fragment prelude with its main.
+std::string ShoreRibbonVertexSource();
+std::string ShoreRibbonFragmentSource();
 
 // The post-pass shaders (EngineGL33_PostShaders.cpp; EngineGL33_PostFX.cpp
 // runs the passes), each assembled from its pieces.
@@ -171,11 +206,17 @@ enum class PostShader : int
     // The far slice's depth put back after the resolve, and the far unit's
     // mark (EngineGL33::FarSliceDepth, a frame with a far-drawn unit only).
     FarDepth,
+    // EX9-WEAK (Q-4, POSEIDON_XP_RENDERSCALE): the TAA resolve from a world
+    // drawn below the window into a window-sized history (the Temporal stage).
+    TaaUp,
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
 const char* PostShaderName(PostShader shader);
 const char* PostShaderSource(PostShader shader);
+// The volumetric clouds' fragment sources (the experiment POSEIDON_XP_CLOUDS,
+// EngineGL33_XpClouds.cpp): 0 the march, 1 the resolve; null past the end.
+const char* XpCloudsShaderSource(int which);
 
 // Uniform-buffer binding point of LitConstants (VS = 0, PS = 1, WorldInstances = 2).
 constexpr unsigned int kLitBinding = 3;
@@ -229,6 +270,13 @@ constexpr int kGroundFieldUnit = 12;
 // everywhere, and the program's sampler count stays within the 16 a fragment
 // stage is guaranteed. Bound only around a batched draw.
 constexpr int kDecalLayerUnit = 16;
+// The volumetric clouds (the experiment POSEIDON_XP_CLOUDS,
+// EngineGL33_XpClouds.cpp), one sampler (xpClouds) for two textures: during the
+// sky pass's dome and sun draws the march's resolve (litXpClouds.x 1), after
+// them the clouds' shadow map (litXpClouds.y set), which domeCloudCover reads
+// in the world, air and fog passes. Like unit 16, a valid unit everywhere, and
+// a world program's sampler count stays within 16.
+constexpr int kXpCloudsUnit = 17;
 // The volumetric fog's floor map (the lowest ground nearby) shares
 // the ground field's unit: only the fog's injection pass samples it, binds it
 // itself (no world program declares it) and unbinds it at its end; the world
@@ -328,6 +376,9 @@ constexpr LitSampler kLitSamplers[] = {
     {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surfaces)
     {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
     {"decalLayers", kDecalLayerUnit},        // the decal batch's texture array (W4-1)
+    // The volumetric clouds (POSEIDON_XP_CLOUDS): the march's resolve during
+    // the sky pass's dome and sun draws, the clouds' shadow map after them.
+    {"xpClouds", kXpCloudsUnit},
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -452,7 +503,16 @@ enum : int
     // before): x 0 (the lane's window glow, not brought over), y the light
     // bounce's gain, z 1 while the combat shadow mask traces street lamps, w 0.
     XpNight = 92,
-    Count = 93,
+    // Volumetric clouds (the experiment POSEIDON_XP_CLOUDS, EngineGL33_XpClouds.cpp;
+    // zero while it is off, which leaves every fragment as before): x 1 while
+    // the dome and the sun disk take the volumetric clouds from xpClouds
+    // (unit 17 during the sky pass) in place of the painted thick cloud, y and z
+    // the density map's range where the painted cloud gives way, w the layer's
+    // height over the camera per haze distance. Outside those draws x is 0, y
+    // 1 / the shadow map's size while the clouds' shadow map is drawn (0 keeps
+    // today's shadows), z the cloud base it lies on (m), w 0.
+    XpClouds = 93,
+    Count = 94,
 };
 constexpr int MaxLights = 8;
 constexpr int PlannedCount = Weather - Planned;
@@ -480,7 +540,8 @@ static_assert(Camera == Surface3 + 1, "the camera slot follows the surface slots
 static_assert(CameraLook == Camera + 1, "the camera's look follows the camera slot");
 static_assert(Water2 == CameraLook + 1, "the experimental water slot follows the camera's look");
 static_assert(XpNight == Water2 + 1, "the xp-nightlight slot follows the experimental water slot");
-static_assert(Count == XpNight + 1, "LitConst size out of sync");
+static_assert(XpClouds == XpNight + 1, "the xp-clouds slot follows the xp-nightlight slot");
+static_assert(Count == XpClouds + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to features not yet in the block, so no two features

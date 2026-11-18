@@ -52,6 +52,33 @@ class SortObject : public RefCount
     // casts its shadow from that LOD; only the draws skip it.
     bool hillHidden = false;
 
+    // EX2-POP (LodPop.hpp): the level AdjustComplexity chose last frame, before
+    // the occlusion tests hid anything, and the pop counters' memory.
+    signed char heldLOD = -2;
+    signed char popShown = -2; // what was on screen last frame
+    signed char popPrev = -2;  // what was on screen before the last change
+    unsigned char popWhy = 0;  // why it was hidden: 1 cull, 2 occlusion, 3 hill
+    unsigned short popAge = 0; // frames since the last change
+    // The fade in progress: the level going away (LOD_INVISIBLE: the object is
+    // fading in from nothing; -2: no fade), how far it has gone, and whether the
+    // object itself is going away, in which case drawLOD is the level fading out.
+    signed char fadeFrom = -2;
+    bool fadeOut = false;
+    float fadeT = 0.0f;
+    // Round 2: the level this object cast into the sun shadow maps this frame
+    // and last (LOD_INVISIBLE: none; -2: not seen yet), and why it cast nothing
+    // (1 past the reach, 2 off screen, 3 too small, 4 hidden by an object, 5 no
+    // level). Written only while POSEIDON_XP_LODLOG is set.
+    signed char smCast = -2;
+    signed char smCastPrev = -2;
+    unsigned char smWhy = 0;
+    // POSEIDON_XP_SHADOWFADE: the level this object cast last, the frame it
+    // cast it in, and the dissolve in progress (the level going away, -2: none).
+    signed char smHeld = -2;
+    signed char smFadeFrom = -2;
+    unsigned smFrame = 0;
+    float smFadeT = 0.0f;
+
     unsigned char orClip; // or clip flags only - andClip would always be 0
 
     bool notUsed; // not used when list was created - delete it
@@ -192,6 +219,14 @@ class Scene
 
     Ref<Object> _collisionStar;
 
+    // Rain you can see (POSEIDON_XP_RAIN, Graphics/Remaster/RainXp.hpp): the
+    // overlay DrawRain held back for DrawRainLate (mode late).
+    struct RainLate
+    {
+        bool pending = false;
+        float alpha = 0.0f, yDensity = 0.0f, xOffset = 0.0f, yOffset = 0.0f;
+    } _rainLate;
+
     // fog functions for different types of objects
     FogFunction _fog, _skyFog, _shadowFog, _tacticalFog;
     float _tacticalVisibility;                    // AI sensors
@@ -230,6 +265,21 @@ class Scene
     float _lodPinFactor = 0.0f; // PinObjectDetail: 0 = adaptive
     int _drawnObjects = 0;      // DrawnObjectCount
     int _hillHiddenObjects = 0; // HillHiddenObjectCount
+
+    // POSEIDON_XP_SHADOWKEEP (LodPop.hpp), refreshed in BeginObjects: the sun
+    // ray the shadow maps use, their far distance, and the camera this frame.
+    struct ShadowKeep
+    {
+        bool on = false;
+        Vector3 sun = VZero;     // unit, the way the light travels
+        Vector3 eye = VZero;     // camera position
+        Vector3 forward = VZero; // camera forward
+        float sunForward = 0.0f; // sun . forward
+        float mapFar = 0.0f;     // receivers past this eye depth get no shadow
+        float corner = 1.0f;     // distance of the frustum corner per metre of eye depth
+        float cellLen = 0.0f;    // shadow length of a grid cell's tallest object
+    };
+    ShadowKeep _shadowKeep;
     float _preferredTerrainGrid;
     float _preferredViewDistance;
 
@@ -276,6 +326,22 @@ class Scene
     // Of those, the objects the hill cull hid behind the terrain in the same
     // Pass1 (they still count in DrawnObjectCount, so capture tables compare).
     int HillHiddenObjectCount() const { return _hillHiddenObjects; }
+
+    // POSEIDON_XP_SHADOWKEEP: can the shadow of an object (of a grid cell of
+    // objects) outside the screen reach ground the shadow maps shade; is a
+    // caster inside the maps' reach; how many grid cells past the camera's
+    // rectangle may still hold such casters.
+    void UpdateShadowKeep();
+    bool ShadowKeepOn() const { return _shadowKeep.on; }
+    Vector3 ShadowKeepSun() const { return _shadowKeep.sun; }
+    bool ShadowKeepObject(Vector3Par pos, float radius) const;
+    bool ShadowKeepCell(Vector3Par center, float radius) const;
+    bool ShadowKeepInReach(Vector3Par pos, float radius) const;
+    int ShadowKeepBorder(float grid) const;
+    // The sun (or moon) ray the shadow maps are rendered along this frame.
+    Vector3 SunShadowMapDirection() const;
+    // The far distance of the shadow maps' casters and receivers this frame.
+    float ShadowMapCasterFar() const;
 
     Camera* GetCamera() { return _camera; }
     const Camera* GetCamera() const { return _camera; }
@@ -365,6 +431,9 @@ class Scene
     // ignoreObjectsZ: far-drawn units (Game/Kaiju) are not cut at the object distance
     int LevelFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
                            Vector3Par viewDirection, bool ignoreObjectsZ = false);
+    int LevelHeldFromDistance2(LODShape* shape, float distance2, float oScale, int held, float band);
+    // The resol2 LevelFromDistance2 hands FindSqrtLevel (POSEIDON_XP_LODBAND).
+    float LodResolution2(float distance2) const;
     int LevelShadowFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
                                  Vector3Par viewDirection);
 
@@ -395,6 +464,11 @@ class Scene
 
     void DrawRainLevel(float alpha, float yDensity, float xOffset, float yOffset, float z);
     void DrawRain();
+    // POSEIDON_XP_RAIN=late: the overlay DrawRain held back, drawn after the
+    // post pass (World::Draw, right after EndWorldScene); nothing otherwise.
+    void DrawRainLate();
+    // A cockpit (pass 3) draws over the world this frame.
+    bool CockpitThisFrame() const;
 
     void DrawDiagModel(Vector3Par pos, LODShapeWithShadow* shape, float size = 0.1, PackedColor color = PackedWhite);
     void DrawCollisionStar(Vector3Par pos, float size = 0.1, PackedColor color = PackedWhite);

@@ -43,6 +43,16 @@ void EngineGL33::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
 
     float oow = rhw;
 
+    // POSEIDON_XP_RAIN=world: a smoke or fire puff hides the rain behind it
+    // (EngineGL33_XpRain.cpp; a light's flare does not). The vertex alpha is
+    // the puff's opacity under IsAlphaFog, else one minus it (Object::DrawDecal).
+    if (_xpRain.scene.frame != 0xffffffffu && !(specFlags & static_cast<int>(Poseidon::render::Backend::IsLight)) &&
+        rhw > 1e-6f)
+    {
+        const float a8 = static_cast<float>(color.A8()) * (1.0f / 255.0f);
+        NoteRainCover(vx, vy, sizeX, sizeY, (specFlags & IsAlphaFog) ? a8 : 1.0f - a8, 1.0f / rhw);
+    }
+
     // perform simple clipping
     float xBeg = vx - sizeX;
     float xEnd = vx + sizeX;
@@ -354,5 +364,11 @@ void EngineGL33::DrawPoints(int beg, int end)
 
 bool EngineGL33::CanGrass() const
 {
-    return false;
+    // Near ground cover (the Graphics page's Ground Cover option, off by
+    // default; SetLookOptions): the land near the camera drawn once more
+    // (Landscape::DrawRect) with procedural blades in the remastered grass
+    // program. Only that program draws them, so the classic programs (classic
+    // lighting, night vision) keep no grass. Draw order only: the callers are
+    // the landscape's draw and two PassNum pickers.
+    return _groundCover && _remasterPrograms;
 }

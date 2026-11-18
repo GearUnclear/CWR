@@ -229,9 +229,14 @@ bool GraphicsConfig::Normalize(const Environment& /*env*/)
         shadowDetail = ShadowDetailNormal;
         changed = true;
     }
+    if (surfStyle != SurfPainted && surfStyle != SurfRibbons)
+    {
+        surfStyle = SurfPainted;
+        changed = true;
+    }
     clampFloat(brightness, 0.4f, 1.8f);
     clampFloat(gamma, 0.5f, 2.3f);
-    clampFloat(renderScale, 1.0f, 2.0f);
+    clampFloat(renderScale, 0.5f, 2.0f); // below 1: the world at that share of the window (upsampled)
     if (msaaSamples != 0 && msaaSamples != 2 && msaaSamples != 4 && msaaSamples != 8)
     {
         msaaSamples = msaaSamples >= 8 ? 8 : msaaSamples >= 4 ? 4 : msaaSamples >= 2 ? 2 : 0;
@@ -283,6 +288,10 @@ bool GraphicsConfig::Load(const std::string& path)
         shadowDetail = static_cast<ShadowDetail>((int)*e);
     if (auto* e = cfg.FindEntry("sunGlare"))
         sunGlare = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("groundCover"))
+        groundCover = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("surfStyle"))
+        surfStyle = static_cast<SurfStyle>((int)*e);
     if (auto* e = cfg.FindEntry("brightness"))
         brightness = (float)*e;
     if (auto* e = cfg.FindEntry("gamma"))
@@ -310,6 +319,8 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("lampShadows", lampShadows ? 1 : 0);
     cfg.Add("shadowDetail", static_cast<int>(shadowDetail));
     cfg.Add("sunGlare", sunGlare ? 1 : 0);
+    cfg.Add("groundCover", groundCover ? 1 : 0);
+    cfg.Add("surfStyle", static_cast<int>(surfStyle));
     cfg.Add("brightness", brightness);
     cfg.Add("gamma", gamma);
     cfg.Add("version", version);

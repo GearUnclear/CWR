@@ -24,6 +24,26 @@ vec3 skySunDir() { return litSkySun.xyz; }
 float skySunElevation() { return litSkySun.w; }
 vec3 skySunRadiance() { return litNight.w > 0.0 ? vec3(0.0) : litSun.rgb; }
 
+// ---- Volumetric clouds (the experiment POSEIDON_XP_CLOUDS; EngineGL33_XpClouds.cpp) --
+// While litXpClouds.x is 1 (the sky pass's dome and sun draws) the dome's
+// clouds are the volumetric march's, on unit 17 at half the frame's width and
+// height: rgb the light the clouds send toward the eye (linear, the dome's
+// units), a the share of the clear sky behind them that still shows. Looked up
+// by the view direction through the camera basis (unjittered), so the dome's
+// TAA jitter does not move them.
+#ifndef XP_CLOUDS_SAMPLER
+#define XP_CLOUDS_SAMPLER
+uniform sampler2D xpClouds; // unit 17 (kXpCloudsUnit)
+#endif
+vec4 xpCloudsToward(vec3 d) {
+    vec3 R = litSkyRight.xyz;
+    vec3 U = litSkyUp.xyz;
+    float fz = dot(d, litSkyFwd.xyz);
+    if (fz <= 1e-4) return vec4(0.0, 0.0, 0.0, 1.0);
+    vec2 n = vec2(dot(d, R) / max(dot(R, R), 1e-12), dot(d, U) / max(dot(U, U), 1e-12)) / fz;
+    return texture(xpClouds, clamp(n * 0.5 + 0.5, vec2(0.0), vec2(1.0)));
+}
+
 // Irradiance from the sky hemisphere (and the ground below it) onto a surface
 // with normal n. The horizon band is brighter, and takes the sky's colour,
 // toward the sun; opposite the sun it keeps the cool zenith colour, so a low
@@ -470,7 +490,23 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
         }
     }
     float local = clamp((lumT - bg - litAtmo.w) / max(kSkyCloudWhite - bg, 0.08), 0.0, 1.0);
+    // The volumetric clouds take the painted thick broken cloud's place (where
+    // the density map's broken cloud, the deck left out, reaches litXpClouds.y
+    // to .z, as the march's cover does, squared: thin cover gives the march
+    // only small puffs), as far as the march's clouds do not fade into the
+    // haze at that elevation (litXpClouds.w: the layer's height over the
+    // camera per haze distance), so the far painted cloud stays toward the
+    // horizon; the painted thin cloud, the cirrus and an overcast deck stay.
+    // The march's clouds go over it below.
+    bool xpVol = litXpClouds.x > 0.5;
     float cloud = max(local, litAtmo.y);
+    if (xpVol) {
+        vec4 xm = textureLod(skyDensity, vUV0, 0.0);
+        float cb = xm.r * (0.75 + 0.25 * xm.b) * (1.0 - xm.g * (1.0 - smoothstep(0.35, 0.75, litSky.w)));
+        float sw = smoothstep(litXpClouds.y, litXpClouds.z, cb);
+        float near = exp(-litXpClouds.w / max(d.y, 0.01));
+        cloud = max(local * (1.0 - sw * sw * near), litAtmo.y);
+    }
     vec3 a = skyClear(d, bgC * litAtmoDome.rgb, bgC * litAtmoGlow.rgb, bgC);
     float c = dot(d, skySunDir());
     const float g = 0.6; // forward scattering of a thin cloud deck
@@ -531,6 +567,12 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
             float rainDeck = 1.0 - kCamDeckRainDark * clamp(litWeather.y, 0.0, 1.0);
             cloudLin *= pow(rel, kCamDeckRelief * deck) * mix(1.0, kCamDeckDark * rainDeck, deck);
         }
+    }
+    // The volumetric clouds over the clear sky, in linear light.
+    if (xpVol) {
+        vec4 v = xpCloudsToward(d);
+        a = a * v.a + v.rgb;
+        cloudLin = cloudLin * v.a + v.rgb;
     }
     // Cover over clear sky in display space, where the mask measured it: a
     // faint cloud keeps about the texture's own contrast (mixed in linear light

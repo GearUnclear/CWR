@@ -37,7 +37,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -387,10 +389,15 @@ void EngineGL33::UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, fl
         UploadCanopyField();
     const rm::CanopyField* f = s_canopy.field.get();
     Camera* camera = GScene ? GScene->GetCamera() : nullptr;
-    const bool live = _featureGates.computed && _featureGates[rm::Feature::CanopyShadows].on && _worldEffectsOn &&
-                      !_portraitTargetSize && !_worldSceneEnded && camera && f && s_canopy.fieldTex &&
-                      _terrainHeightTex && _terrainMap && _terrainMap->Valid();
+    bool live = _featureGates.computed && _featureGates[rm::Feature::CanopyShadows].on && _worldEffectsOn &&
+                !_portraitTargetSize && !_worldSceneEnded && camera && f && s_canopy.fieldTex && _terrainHeightTex &&
+                _terrainMap && _terrainMap->Valid();
+    // Experiment EX6-CANOPY: every sun height, faded by the shadow's length
+    // against the canopy's texel; the map is not built while that fades it out.
+    const bool allSun = _featureGates.inputs.canopyAllSun;
     bool ready = false;
+    if (live && allSun && !(rm::CanopyLengthFade(sunElevationDeg, f->texel) > 0.0f))
+        live = false;
     if (live)
     {
         rm::CanopySunKey want;
@@ -407,7 +414,8 @@ void EngineGL33::UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, fl
         ready = s_canopy.built.valid;
         // Only in the world's own passes (`live`): a portrait or a 3D preview
         // after the world never rebuilds the world's map.
-        if (rm::CanopySunNeedsRebuild(s_canopy.built, want, cam.X(), cam.Z()))
+        const float rebuildDeg = allSun ? rm::CanopySunRebuildDegFor(sunElevationDeg) : rm::kCanopySunRebuildDeg;
+        if (rm::CanopySunNeedsRebuild(s_canopy.built, want, cam.X(), cam.Z(), rebuildDeg))
         {
             GpuMark(Poseidon::gpu::Mark::CanopyBegin);
             if (BuildCanopySunGpu(toSun, want.originX, want.originZ, want.texel))
@@ -419,8 +427,9 @@ void EngineGL33::UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, fl
         }
     }
     const rm::CanopySunKey& b = s_canopy.built;
-    const rm::CanopyFrameConstants c = rm::ComputeCanopyFrameConstants(
-        _lighting, _featureGates, live && ready, sunElevationDeg, skyThrough, b.originX, b.originZ, b.texel);
+    const rm::CanopyFrameConstants c =
+        rm::ComputeCanopyFrameConstants(_lighting, _featureGates, live && ready, sunElevationDeg, skyThrough, b.originX,
+                                        b.originZ, b.texel, allSun, f ? f->texel : 0.0f);
     SetLitSlot(LitConst::Canopy, c.canopy[0], c.canopy[1], c.canopy[2], c.canopy[3]);
 }
 

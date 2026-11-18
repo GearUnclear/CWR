@@ -22,7 +22,7 @@
 //                           msaaSamples, renderScale, alphaToCoverage,
 //                           multitexturing, lighting, vsync, fpsCap,
 //                           brightness, gamma, shoreWater, lampShadows,
-//                           shadowDetail, sunGlare
+//                           shadowDetail, sunGlare, groundCover, surfStyle
 //
 // Autodetect on first boot: GraphicsConfig::PickPresetFromRam()
 // returns a tier from SDL_GetSystemRAM(); ApplyPresetToTiers fills the
@@ -83,6 +83,17 @@ public:
         ShadowDetailHigh = 3,
     };
 
+    // The surf's style under Shore Water (the Surf row). The values are
+    // remaster::kSurfPainted and kSurfRibbons (Graphics/Remaster/LookOptions.hpp).
+    // Painted: the sea and land programs paint the waves over the whole
+    // visible shore. Ribbons: breaking-wave ribbons along a traced coastline,
+    // within about 320 m.
+    enum SurfStyle
+    {
+        SurfPainted = 0,
+        SurfRibbons = 1,
+    };
+
     // Anti-aliasing out of the box: 4x MSAA, with alpha-to-coverage on cutouts.
     static constexpr int kDefaultMsaaSamples = 4;
 
@@ -98,9 +109,9 @@ public:
 	bool      alphaToCoverage  = true;          // MSAA alpha-to-coverage on cutout draws (fence wire,
 	                                             // foliage) — grades sub-pixel features instead of the
 	                                             // hard alpha-test keeping/killing whole pixels
-	float     renderScale      = 1.0f;          // SSAA: render at scale x window and downsample.
-	                                             // 1.0 = off; up to 2.0.  The only general cure for
-	                                             // sub-pixel OPAQUE geometry sparkle (fence bars)
+    float renderScale = 1.0f;                   // 0.85: the world at 85% of the window, upsampled; 1.25 to 2: SSAA.
+                                                // 1.0 = off; up to 2.0.  The only general cure for
+                                                // sub-pixel OPAQUE geometry sparkle (fence bars)
     int msaaSamples = kDefaultMsaaSamples;      // MSAA on the frame target: 0 (off) / 2 / 4 / 8
 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
 	                                             // objects.  Off drops those draws to the base texture
@@ -111,7 +122,9 @@ public:
     bool lampShadows = true;                        // street lamps cast shadows, their light bounces off the ground
     ShadowDetail shadowDetail = ShadowDetailNormal; // the sun shadows' reach and sharpness
     bool sunGlare = false;                          // a soft glare round a low sun (off until judged in motion)
-	float     brightness       = 1.6f;          // 0.4..1.8
+    bool groundCover = false;                       // short grass blades near the camera (drawn only, off by default)
+    SurfStyle surfStyle = SurfPainted;              // the surf's style while Shore Water is on
+    float     brightness       = 1.6f;          // 0.4..1.8
 	float     gamma            = 1.2f;          // 0.5..2.3
 
 	// Schema version of the persisted file.  Load resets this to 0 first, so a

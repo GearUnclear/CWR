@@ -99,18 +99,20 @@ TEST_CASE("GraphicsPage MSAA index mapping falls back to off for unknown counts"
 
 TEST_CASE("GraphicsPage render-scale index mapping picks the nearest step", "[UI][GraphicsPage]")
 {
-    CHECK(GraphicsPage::RenderScaleToIndex(1.0f) == 0);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.25f) == 1);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.5f) == 2);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.75f) == 3);
-    CHECK(GraphicsPage::RenderScaleToIndex(2.0f) == 4);
+    CHECK(GraphicsPage::RenderScaleToIndex(0.85f) == 0);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.0f) == 1);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.25f) == 2);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.5f) == 3);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.75f) == 4);
+    CHECK(GraphicsPage::RenderScaleToIndex(2.0f) == 5);
 
-    CHECK(GraphicsPage::RenderScaleToIndex(1.6f) == 2);
-    CHECK(GraphicsPage::RenderScaleToIndex(1.05f) == 0);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.6f) == 3);
+    CHECK(GraphicsPage::RenderScaleToIndex(1.05f) == 1);
+    CHECK(GraphicsPage::RenderScaleToIndex(0.6f) == 0);
 
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 6; ++i)
         CHECK(GraphicsPage::RenderScaleToIndex(GraphicsPage::RenderScaleIndexToValue(i)) == i);
-    CHECK(GraphicsPage::RenderScaleIndexToValue(5) == Catch::Approx(1.0f));
+    CHECK(GraphicsPage::RenderScaleIndexToValue(6) == Catch::Approx(1.0f));
     CHECK(GraphicsPage::RenderScaleIndexToValue(-1) == Catch::Approx(1.0f));
 }
 
@@ -120,12 +122,15 @@ TEST_CASE("GraphicsPage anti-aliasing rows round-trip through the provider", "[U
     auto& p = page.Provider();
 
     CHECK(p.RowValue(10) == 2); // 4x MSAA by default
-    CHECK(p.RowValue(11) == 0);
+    CHECK(p.RowValue(11) == 1); // Render Scale 100% by default (85% is index 0)
+    CHECK(p.RowFor(11).count == 6);
 
     p.SetRowValue(10, 0);
     CHECK(p.RowValue(10) == 0);
     p.SetRowValue(11, 4);
     CHECK(p.RowValue(11) == 4);
+    p.SetRowValue(11, 0);
+    CHECK(p.RowValue(11) == 0);
 }
 
 TEST_CASE("GraphicsPage offers the manual terrain tier last", "[UI][GraphicsPage]")
@@ -170,19 +175,22 @@ TEST_CASE("GraphicsPage advanced divider is an unfocusable header", "[UI][Graphi
 }
 
 // The Remastered lighting's look rows: Shadow Detail (Normal / High), Shore
-// Water, Lamp Shadows and Sun Glare (on / off toggles), after Lighting.
+// Water, Surf (Painted / Ribbons), Lamp Shadows, Sun Glare and Ground Cover
+// (on / off toggles), after Lighting.
 TEST_CASE("GraphicsPage look rows follow the lighting row", "[UI][GraphicsPage]")
 {
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    // Eighteen rows, then the Close action.
-    CHECK(p.RowCount() == 19);
+    // Twenty rows, then the Close action.
+    CHECK(p.RowCount() == 21);
     CHECK(std::string(p.RowLabel(14)) == "Shadow Detail");
     CHECK(std::string(p.RowLabel(15)) == "Shore Water");
-    CHECK(std::string(p.RowLabel(16)) == "Lamp Shadows");
-    CHECK(std::string(p.RowLabel(17)) == "Sun Glare");
-    for (int row = 14; row <= 17; ++row)
+    CHECK(std::string(p.RowLabel(16)) == "Surf");
+    CHECK(std::string(p.RowLabel(17)) == "Lamp Shadows");
+    CHECK(std::string(p.RowLabel(18)) == "Sun Glare");
+    CHECK(std::string(p.RowLabel(19)) == "Ground Cover");
+    for (int row = 14; row <= 19; ++row)
     {
         const std::string description = p.RowDescription(row);
         CHECK_FALSE(description.empty());
@@ -213,7 +221,7 @@ TEST_CASE("GraphicsPage shore water and lamp shadows rows are booleans defaultin
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    for (int row : {15, 16})
+    for (int row : {15, 17})
     {
         CHECK(p.RowKind(row) == OptionsScrollList::KindBoolean);
         CHECK(p.RowFor(row).count == 2);
@@ -230,13 +238,53 @@ TEST_CASE("GraphicsPage sun glare row is a boolean defaulting to off", "[UI][Gra
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    CHECK(p.RowKind(17) == OptionsScrollList::KindBoolean);
-    CHECK(p.RowFor(17).count == 2);
-    CHECK(p.RowValue(17) == 0);
-    p.SetRowValue(17, 1);
-    CHECK(p.RowValue(17) == 1);
+    CHECK(p.RowKind(18) == OptionsScrollList::KindBoolean);
+    CHECK(p.RowFor(18).count == 2);
+    CHECK(p.RowValue(18) == 0);
+    p.SetRowValue(18, 1);
+    CHECK(p.RowValue(18) == 1);
     // A look row is no tier row: the preset stays.
     CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
-    p.SetRowValue(17, 0);
-    CHECK(p.RowValue(17) == 0);
+    p.SetRowValue(18, 0);
+    CHECK(p.RowValue(18) == 0);
+}
+
+TEST_CASE("GraphicsPage ground cover row is a boolean defaulting to off", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+
+    CHECK(p.RowKind(19) == OptionsScrollList::KindBoolean);
+    CHECK(OptionsScrollList::CanRowReceiveFocus(p.RowKind(19)));
+    CHECK(p.RowFor(19).count == 2);
+    CHECK(p.RowValue(19) == 0);
+    p.SetRowValue(19, 1);
+    CHECK(p.RowValue(19) == 1);
+    // A look row is no tier row: the preset stays, and so do the other look rows.
+    CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
+    CHECK(p.RowValue(18) == 0);
+    p.SetRowValue(19, 0);
+    CHECK(p.RowValue(19) == 0);
+    // The player is told it is visual only.
+    CHECK(std::string(p.RowDescription(19)).find("Visual only") != std::string::npos);
+}
+
+TEST_CASE("GraphicsPage surf row offers Painted then Ribbons, Painted by default", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+
+    CHECK(p.RowKind(16) == OptionsScrollList::KindStepper);
+    CHECK(OptionsScrollList::CanRowReceiveFocus(p.RowKind(16)));
+    CHECK(p.RowFor(16).count == 2);
+    CHECK(p.RowValue(16) == 0);
+    p.SetRowValue(16, 1);
+    CHECK(p.RowValue(16) == 1);
+    // A look row is no tier row: the preset stays, and so does Shore Water.
+    CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
+    CHECK(p.RowValue(15) == 1);
+    p.SetRowValue(16, 0);
+    CHECK(p.RowValue(16) == 0);
+    // The player is told it works under Shore Water.
+    CHECK(std::string(p.RowDescription(16)).find("Shore Water") != std::string::npos);
 }

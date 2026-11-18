@@ -31,6 +31,7 @@ struct TerrainHorizonMap;
 struct FeatureGates;
 struct CanopyField;
 struct CanopyRect;
+struct RainXpFrame;
 } // namespace Poseidon::remaster
 
 // Forward-decl for `EmitDraw` — the frame layer's `Draw` value (full param-pack
@@ -428,6 +429,9 @@ class Engine : public IGraphicsEngine
     // sub-pixel cutout features (fence wire, foliage) across the MSAA
     // samples instead of the hard per-fragment alpha test keeping or
     // killing whole pixels.  No-op on backends without MSAA.
+    // Draw on these MSAA samples only (0: all of them), for the LOD cross-fade
+    // (World/Scene/LodPop.hpp). Flushes what is queued. No-op without MSAA.
+    virtual void SetDrawSampleMask(unsigned /*mask*/) {}
     virtual void SetAlphaToCoverage(bool /*enable*/) {}
     virtual bool GetAlphaToCoverage() const { return false; }
 
@@ -906,6 +910,12 @@ class Engine : public IGraphicsEngine
     /// camera writes this frame's scene light: the particle then takes it in
     /// place of the classic sun and ambient. False otherwise (classic light).
     virtual bool ParticleRigLight(float /*linear*/[3]) const { return false; }
+    /// Rain you can see (POSEIDON_XP_RAIN=world, Graphics/Remaster/RainXp.hpp):
+    /// true when the backend draws this frame's rain as world-space streaks
+    /// after the TAA resolve (the scene then leaves its screen overlay out),
+    /// and the scene's rain for it. Off by default: false, and nothing drawn.
+    virtual bool RainXpWorldReady() const { return false; }
+    virtual void SetRainXpFrame(const Poseidon::remaster::RainXpFrame& /*rain*/) {}
     /// True while the frame's combat lights (the combatLights feature,
     /// Graphics/Rendering/Lighting/CombatLights.hpp) light the world: the
     /// classic light of a muzzle flash, an explosion, a wreck, a fire, a flare
@@ -987,6 +997,10 @@ class Engine : public IGraphicsEngine
     /// Work the remastered sky has in flight (the atmosphere tables' and the
     /// cloud-density map's worker builds); triSettleScene waits for it.
     virtual bool RemasterSkyPending() const { return false; }
+    /// The experiment POSEIDON_XP_CLOUDS: this frame's sky pass drew the
+    /// volumetric clouds in the dome, so the painted sky-cloud sheets
+    /// (Landscape::DrawClouds) stay out of it.
+    virtual bool VolumetricCloudsDrawn() const { return false; }
     /// triSkyTableCheck: the GPU sky-view table read back against its CPU
     /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
     virtual std::string RemasterSkyCheck(int /*texels*/) { return "FAIL:no sky table in this backend"; }
@@ -999,6 +1013,10 @@ class Engine : public IGraphicsEngine
     /// detail program as before.
     virtual void BeginSea(Texture* /*otherFrame*/, float /*otherWeight*/) {}
     virtual void EndSea() {}
+    /// True between BeginSea and EndSea while the backend draws the sea's
+    /// faces with its remastered water program (XP sea flow asks, so the
+    /// frames it picks reach only that program).
+    virtual bool SeaRouted() const { return false; }
 
     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
     /// Default base returns an all-default set; only the GL33 backend stores it.
@@ -1045,6 +1063,16 @@ class Engine : public IGraphicsEngine
         int solidRunCount = 0;
         const int* alphaRuns = nullptr;
         const int* alphaRunStart = nullptr;
+        // POSEIDON_XP_LODBAND (EX2-POP round 3): casters in the distance band of
+        // a level switch, both levels, dissolved per fragment in the depth pass.
+        // 9 floats/vertex: xyz (camera-relative), uv, a world-anchored hash
+        // position (world xyz modulo kDissolveWrap), and the key (0..1: keep where
+        // the hash is under it; 2..3: keep where the hash is at or over key - 2).
+        // A batch with no texture is solid (no alpha test, back faces stored).
+        const float* dissolveVerts = nullptr;
+        int dissolveVertexCount = 0;
+        const ShadowCasterBatch* dissolveBatches = nullptr;
+        int dissolveBatchCount = 0;
     };
 
     /// Render the caster set from the light into the cascade depth array —

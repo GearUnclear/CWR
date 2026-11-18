@@ -138,6 +138,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_shadowmap_math.cpp
     Graphics/test_shadow_xp.cpp
     Graphics/test_look_options.cpp
+    Graphics/test_rain_xp.cpp
     Graphics/test_paa_decode_fixtures.cpp
     Graphics/test_paa_decoder.cpp
     Graphics/test_shape_loader.cpp
@@ -178,12 +179,14 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_frame_lights.cpp
     Graphics/test_world_program_dedupe.cpp
     Graphics/test_sea_waves.cpp
+    Graphics/test_shore_ribbons.cpp
     Graphics/test_sky_density.cpp
     Graphics/test_canopy.cpp
     Graphics/test_volumetric_fog.cpp
     Graphics/test_air_medium.cpp
     Graphics/test_night_lights.cpp
     Graphics/test_screen_reflections.cpp
+    Graphics/test_sea_mirror_xp.cpp
     Graphics/test_wet_weather.cpp
     Graphics/test_combat_lights.cpp
     Graphics/test_surface_light.cpp
@@ -515,6 +518,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
     World/Scene/test_instanced_run_rules.cpp
+    World/Scene/test_lod_pop.cpp
     World/Scene/test_land_fit_cache.cpp
     World/Scene/test_terrain_occlusion.cpp
     World/Scene/test_streetlamp_casting.cpp

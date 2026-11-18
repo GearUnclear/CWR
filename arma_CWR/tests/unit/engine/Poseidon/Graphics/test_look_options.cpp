@@ -21,6 +21,8 @@ TEST_CASE("LookOptions: the defaults turn the shore water and lamp shadows on at
     CHECK(o.shadowTier == kShadowTierNormal);
     // The sun glare is off until the owner has seen it in motion.
     CHECK_FALSE(o.sunGlare);
+    // The ground cover is off unless the player turns it on.
+    CHECK_FALSE(o.groundCover);
     CHECK(kShadowTierNormal == 2);
     CHECK(kShadowTierHigh == 3);
 }
@@ -154,6 +156,27 @@ TEST_CASE("LookOptions: the sun glare follows the option at strength 1 without a
     CHECK(SunGlareGain(true, none) == 1.0f);
 }
 
+TEST_CASE("LookOptions: the ground cover follows the option without an override", "[Graphics][LookOptions]")
+{
+    const LookEnv none;
+    CHECK_FALSE(GroundCoverOn(false, none));
+    CHECK(GroundCoverOn(true, none));
+}
+
+TEST_CASE("LookOptions: POSEIDON_XP_GRASS wins over the ground cover option", "[Graphics][LookOptions]")
+{
+    LookEnv env;
+    env.groundCover = "0";
+    CHECK_FALSE(GroundCoverOn(true, env));
+    CHECK_FALSE(GroundCoverOn(false, env));
+    env.groundCover = "1";
+    CHECK(GroundCoverOn(false, env));
+    CHECK(GroundCoverOn(true, env));
+    // Round 1's "2" (the marched blades, the only kind left) still turns it on.
+    env.groundCover = "2";
+    CHECK(GroundCoverOn(false, env));
+}
+
 TEST_CASE("LookOptions: POSEIDON_XP_SUNGLARE wins over the sun glare option", "[Graphics][LookOptions]")
 {
     LookEnv env;
@@ -171,4 +194,38 @@ TEST_CASE("LookOptions: POSEIDON_XP_SUNGLARE wins over the sun glare option", "[
     CHECK(SunGlareGain(true, env) == 0.0f);
     env.sunGlare = "yes";
     CHECK(SunGlareGain(false, env) == 1.0f);
+}
+
+TEST_CASE("LookOptions: the surf is painted unless the option picks ribbons", "[Graphics][LookOptions]")
+{
+    const LookOptions o;
+    CHECK(o.surfStyle == kSurfPainted);
+    const LookEnv none;
+    CHECK(SurfStyleFor(kSurfPainted, none) == kSurfPainted);
+    CHECK(SurfStyleFor(kSurfRibbons, none) == kSurfRibbons);
+    // An unknown value from a hand-edited graphics.cfg is Painted.
+    CHECK(SurfStyleFor(7, none) == kSurfPainted);
+    CHECK(SurfStyleFor(-1, none) == kSurfPainted);
+}
+
+TEST_CASE("LookOptions: POSEIDON_XP_SURF wins over the surf option", "[Graphics][LookOptions]")
+{
+    LookEnv env;
+    for (const char* v : {"0", "painted", "Painted", "PAINTED"})
+    {
+        env.surfStyle = v;
+        CHECK(SurfStyleFor(kSurfRibbons, env) == kSurfPainted);
+    }
+    for (const char* v : {"1", "ribbons", "Ribbons"})
+    {
+        env.surfStyle = v;
+        CHECK(SurfStyleFor(kSurfPainted, env) == kSurfRibbons);
+    }
+    // Other text keeps the option.
+    for (const char* v : {"2", "ribbon", "paintedx", "yes"})
+    {
+        env.surfStyle = v;
+        CHECK(SurfStyleFor(kSurfPainted, env) == kSurfPainted);
+        CHECK(SurfStyleFor(kSurfRibbons, env) == kSurfRibbons);
+    }
 }
